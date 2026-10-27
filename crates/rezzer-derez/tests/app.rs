@@ -14,6 +14,7 @@ fn grid_rounds() -> Rounds {
         name: String::new(),
         plans: vec![builtin()],
         note: None,
+        short_note: None,
     }
 }
 
@@ -134,6 +135,7 @@ fn next_round_cycles_plans() {
         name: "notes.md".to_string(),
         plans: vec![labelled("part 1"), labelled("part 2"), labelled("part 3")],
         note: None,
+        short_note: None,
     };
     let mut app = App::new(rounds, 4, 80, 30);
     let mut seen = Vec::new();
@@ -398,14 +400,20 @@ fn crowded_plan_uses_the_grid_with_a_note() {
         name: "drawing.pdf".to_string(),
         plans: vec![labelled("page 1"), crowded],
         note: None,
+        short_note: None,
     };
     let mut app = App::new(rounds, 11, 80, 30);
     assert_eq!(app.note(), None);
+    assert_eq!(app.ready_note(), None);
     derez_round(&mut app);
     app.on_key(Key::Restart);
     assert_eq!(app.label(), "page 2");
     assert_eq!(
         app.note(),
+        Some("This part is too crowded. Using the Grid.")
+    );
+    assert_eq!(
+        app.ready_note(),
         Some("This part is too crowded. Using the Grid.")
     );
     let f = fit(&builtin(), 40, 28).unwrap();
@@ -420,14 +428,19 @@ fn file_note_shows_in_the_first_round_only() {
         name: "x.bin".to_string(),
         plans: vec![builtin()],
         note: Some("x.bin gives no grid: no reader. Using the Grid.".to_string()),
+        short_note: Some("No grid from this file: no reader.".to_string()),
     };
     let mut app = App::new(rounds, 12, 80, 30);
     assert_eq!(
         app.note(),
         Some("x.bin gives no grid: no reader. Using the Grid.")
     );
+    assert_eq!(app.ready_note(), Some("No grid from this file: no reader."));
     derez_round(&mut app);
     assert!(app.note().is_some());
+    // Only while the round waits for the first key.
+    assert_eq!(app.ready_note(), None);
     app.on_key(Key::Restart);
     assert_eq!(app.note(), None);
+    assert_eq!(app.ready_note(), None);
 }

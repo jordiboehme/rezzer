@@ -1081,6 +1081,10 @@ fn derez_is_hidden() {
         let text = stdout_of(&out);
         assert!(!text.contains("derez"), "{args:?}: {text}");
     }
+    let help_dere = env.cmd().args(["help", "dere"]).output().unwrap();
+    assert_eq!(help_dere.status.code(), Some(1));
+    assert!(!String::from_utf8_lossy(&help_dere.stdout).contains("derez"));
+    assert!(!String::from_utf8_lossy(&help_dere.stderr).contains("derez"));
     let dere = env.cmd().arg("dere").output().unwrap();
     assert_eq!(dere.status.code(), Some(1));
     let dere_err = String::from_utf8(dere.stderr).unwrap();

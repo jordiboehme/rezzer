@@ -5,6 +5,7 @@
 //! `rezzer derez [<PATH>]`.
 
 use std::io::IsTerminal;
+use std::path::Path;
 use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -36,18 +37,12 @@ pub(crate) fn run(
                     .message
                     .unwrap_or_else(|| "the file could not be read".to_string()));
             };
-            let why_not = if pipeline.registry().for_format(doc.source.format).is_none() {
-                Some("Rezzer has no reader for this format".to_string())
-            } else if result.completeness == Completeness::Failed {
-                result.message.clone()
-            } else {
-                None
-            };
-            let name = path
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            rezzer_derez::rounds(&name, Some(doc), why_not.as_deref())
+            let why_not = why_not(
+                pipeline.registry().for_format(doc.source.format).is_some(),
+                result.completeness,
+                result.message.as_deref(),
+            );
+            rezzer_derez::rounds(&name_of(path), Some(doc), why_not.as_deref())
         }
     };
     let seed = args.seed.unwrap_or_else(clock_seed);
@@ -55,9 +50,58 @@ pub(crate) fn run(
     Ok(ExitCode::SUCCESS)
 }
 
+/// Why a read document gives no grid: no reader for its format, else the message of a failed
+/// read; `None` when the plans of the document are to be used.
+fn why_not(has_reader: bool, completeness: Completeness, message: Option<&str>) -> Option<String> {
+    if !has_reader {
+        Some("Rezzer has no reader for this format".to_string())
+    } else if completeness == Completeness::Failed {
+        message.map(str::to_string)
+    } else {
+        None
+    }
+}
+
+/// The name for the status line: the last component of `path`, else (a path ending in `..`
+/// or a root) the whole path, lossy UTF-8. Never empty for a non-empty path.
+fn name_of(path: &Path) -> String {
+    path.file_name()
+        .unwrap_or(path.as_os_str())
+        .to_string_lossy()
+        .into_owned()
+}
+
 /// The low 64 bits of the nanoseconds since the Unix epoch; 0 for a clock before it.
 fn clock_seed() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_nanos() as u64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn why_not_names_a_missing_reader_then_a_failed_read() {
+        assert_eq!(
+            why_not(false, Completeness::Partial, Some("unknown format")).as_deref(),
+            Some("Rezzer has no reader for this format")
+        );
+        assert_eq!(
+            why_not(true, Completeness::Failed, Some("the table is broken")).as_deref(),
+            Some("the table is broken")
+        );
+        assert_eq!(why_not(true, Completeness::Failed, None), None);
+        assert_eq!(why_not(true, Completeness::Complete, Some("a note")), None);
+        assert_eq!(why_not(true, Completeness::Partial, Some("a note")), None);
+    }
+
+    #[test]
+    fn name_is_the_last_component_or_the_whole_path() {
+        assert_eq!(name_of(Path::new("data/stock.csv")), "stock.csv");
+        assert_eq!(name_of(Path::new("data/..")), "data/..");
+        assert_eq!(name_of(Path::new("..")), "..");
+        assert_eq!(name_of(Path::new("/")), "/");
+    }
 }

@@ -625,6 +625,10 @@ fn empty_document_gives_the_grid_with_a_note() {
         r.note.as_deref(),
         Some("empty.txt gives no grid: nothing to build a grid from. Using the Grid.")
     );
+    assert_eq!(
+        r.short_note.as_deref(),
+        Some("No grid from this file: nothing to build a grid from.")
+    );
 }
 
 #[test]
@@ -635,6 +639,20 @@ fn unreadable_gives_the_grid_with_the_reason() {
     assert_eq!(
         r.note.as_deref(),
         Some("x.bin gives no grid: no reader for this format. Using the Grid.")
+    );
+    assert_eq!(
+        r.short_note.as_deref(),
+        Some("No grid from this file: no reader for this format.")
+    );
+    // A reason that ends with a full stop gets no second one.
+    let r = rounds("z.bin", None, Some("the file is broken."));
+    assert_eq!(
+        r.note.as_deref(),
+        Some("z.bin gives no grid: the file is broken. Using the Grid.")
+    );
+    assert_eq!(
+        r.short_note.as_deref(),
+        Some("No grid from this file: the file is broken.")
     );
     let r = rounds("y.bin", None, None);
     assert_eq!(
@@ -650,6 +668,7 @@ fn no_file_gives_the_grid_without_a_note() {
     assert_eq!(r.plans.len(), 1);
     assert_eq!(r.plans[0].label, "the Grid");
     assert_eq!(r.note, None);
+    assert_eq!(r.short_note, None);
 }
 
 #[test]

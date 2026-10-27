@@ -43,13 +43,15 @@ const REFERENCE: (u16, u16) = (80, 40);
 const LEFT: f32 = 0.05;
 const RIGHT: f32 = 0.95;
 
-/// The plans of a run: the file name for the status line, the plans in round order and a note
-/// when the file gives no grid.
+/// The plans of a run: the file name for the status line, the plans in round order and, when
+/// the file gives no grid, a note for the status line and the same note without the file name
+/// for the message of the first round.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Rounds {
     pub name: String,
     pub plans: Vec<Plan>,
     pub note: Option<String>,
+    pub short_note: Option<String>,
 }
 
 /// The plans of `doc`, at most [`MAX_PLANS`]; empty when it has no content.
@@ -154,10 +156,14 @@ pub fn rounds(name: &str, doc: Option<&Document>, why_not: Option<&str>) -> Roun
         (false, None, Some(doc)) => plans(doc),
         _ => Vec::new(),
     };
-    let note = (!name.is_empty() && found.is_empty()).then(|| {
-        let why = why_not.unwrap_or("nothing to build a grid from");
-        format!("{name} gives no grid: {why}. Using the Grid.")
+    // A reason that ends with a full stop gets no second one.
+    let why = (!name.is_empty() && found.is_empty()).then(|| {
+        why_not
+            .unwrap_or("nothing to build a grid from")
+            .trim_end_matches('.')
     });
+    let note = why.map(|why| format!("{name} gives no grid: {why}. Using the Grid."));
+    let short_note = why.map(|why| format!("No grid from this file: {why}."));
     Rounds {
         name: name.to_string(),
         plans: if found.is_empty() {
@@ -166,6 +172,7 @@ pub fn rounds(name: &str, doc: Option<&Document>, why_not: Option<&str>) -> Roun
             found
         },
         note,
+        short_note,
     }
 }
 

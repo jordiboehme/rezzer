@@ -254,6 +254,22 @@ impl App {
         }
     }
 
+    /// A note for the second line of the message while the round waits for the first key: the
+    /// current plan is too crowded, or (in the first round only) the file gives no grid, without
+    /// the file name, which the status line shows.
+    pub fn ready_note(&self) -> Option<&str> {
+        if self.round.as_ref()?.status() != Status::Ready {
+            return None;
+        }
+        if self.crowded {
+            Some(CROWDED)
+        } else if self.tally.round == 1 {
+            self.rounds.short_note.as_deref()
+        } else {
+            None
+        }
+    }
+
     /// The ids derezzed in the last tick.
     pub fn just_derezzed(&self) -> &[u8] {
         &self.just_derezzed

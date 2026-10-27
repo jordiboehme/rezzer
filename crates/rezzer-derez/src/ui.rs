@@ -60,7 +60,7 @@ pub fn draw(app: &App, area: Rect, buf: &mut Buffer) {
         );
     }
     if let Some(message) = app.message() {
-        draw_message(app, message, area, buf);
+        draw_message(app, message, app.ready_note(), area, buf);
     }
 }
 
@@ -213,14 +213,21 @@ fn draw_grid(app: &App, round: &Round, grid_area: Rect, clip: Rect, buf: &mut Bu
     }
 }
 
-/// The message: on the top lane of the grid, so the starts stay in view, or in the middle of
-/// the terminal while it is too small, one sentence per row when it does not fit on one.
-fn draw_message(app: &App, message: &str, area: Rect, buf: &mut Buffer) {
+/// The message: on the top lane of the grid, so the starts stay in view, with `note` (cleaned
+/// and shortened to the grid width) on the row below it; or in the middle of the terminal while
+/// it is too small, one sentence per row when it does not fit on one.
+fn draw_message(app: &App, message: &str, note: Option<&str>, area: Rect, buf: &mut Buffer) {
     let style = Style::new().fg(CYAN).add_modifier(Modifier::BOLD);
     let (region, lines, top) = match app.grid_area() {
         Some(g) => {
             let region = g.intersection(area);
-            (region, vec![message.to_string()], g.y + 1)
+            let mut lines = vec![message.to_string()];
+            if let Some(note) = note {
+                // Room for the space on each side of the line.
+                let room = usize::from(region.width).saturating_sub(2);
+                lines.push(shorten(&clean(note), room));
+            }
+            (region, lines, g.y + 1)
         }
         None => {
             let lines: Vec<String> = if text_width(message) <= usize::from(area.width) {

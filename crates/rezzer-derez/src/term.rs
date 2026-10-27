@@ -13,15 +13,18 @@
 //! handling quits on it. A process that is killed (for example `kill -9`) runs none of this and
 //! can leave the terminal in raw mode; that is accepted, and `reset` fixes it.
 //!
-//! The flag the hook checks is process-wide, so a panic on any thread restores the terminal,
-//! also one that is caught (`catch_unwind`, a thread whose join result is ignored). derez must
-//! therefore not catch panics while the guard is active, and this hook must stay the last
-//! panic hook installed.
+//! The hook restores the terminal only for a panic on the thread that entered it, the one that
+//! runs the rounds. A panic on another thread (for example a worker of a reader that catches
+//! its own panic) does not stop the rounds, so restoring then would break a running session;
+//! the terminal stays entered and the guard leaves it as usual. A panic on the entering thread
+//! restores it also when it is caught, so derez must not catch panics on that thread while the
+//! guard is active, and this hook must stay the last panic hook installed.
 
 use std::io;
 use std::panic;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, Once};
+use std::thread::ThreadId;
 
 use crossterm::cursor::{Hide, Show};
 use crossterm::execute;
@@ -48,6 +51,7 @@ impl Screen for Crossterm {
             || execute!(io::stdout(), Show, LeaveAlternateScreen),
             terminal::disable_raw_mode,
         )?;
+        *OWNER.lock().unwrap_or_else(|e| e.into_inner()) = Some(std::thread::current().id());
         ACTIVE.store(true, Ordering::SeqCst);
         Ok(())
     }
@@ -74,6 +78,14 @@ fn leave_terminal() -> io::Result<()> {
 
 /// Set while the real terminal is entered, so the panic hook knows it must restore it.
 static ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// The thread that entered the real terminal; the panic hook restores only for its panics.
+static OWNER: Mutex<Option<ThreadId>> = Mutex::new(None);
+
+/// Whether the current thread entered the real terminal.
+fn on_owner_thread() -> bool {
+    *OWNER.lock().unwrap_or_else(|e| e.into_inner()) == Some(std::thread::current().id())
+}
 
 /// What the panic hook calls to restore the terminal. Unit tests swap it for a recording one.
 /// A `Mutex` because a plain swappable static would need `static mut`.
@@ -118,13 +130,14 @@ impl<S: Screen> Drop for Guard<S> {
 }
 
 /// Wraps the current panic hook, once per process: while the real terminal is entered, a panic
-/// first restores it and then calls the previous hook.
+/// on the thread that entered it first restores it and then calls the previous hook. Panics on
+/// other threads go to the previous hook only.
 pub fn install_restore_hook() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
         let previous = panic::take_hook();
         panic::set_hook(Box::new(move |info| {
-            if ACTIVE.swap(false, Ordering::SeqCst) {
+            if on_owner_thread() && ACTIVE.swap(false, Ordering::SeqCst) {
                 let restore = *RESTORE.lock().unwrap_or_else(|e| e.into_inner());
                 restore();
             }
@@ -178,24 +191,22 @@ mod tests {
         *TEST_THREAD.lock().unwrap_or_else(|e| e.into_inner()) == Some(thread::current().id())
     }
 
+    /// Records from every thread, so a restore for another thread's panic shows up.
     fn record_restore() {
-        if on_test_thread() {
-            RECORD
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .push("restore");
-        }
+        RECORD
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push("restore");
     }
 
     fn take_record() -> Vec<&'static str> {
         std::mem::take(&mut *RECORD.lock().unwrap_or_else(|e| e.into_inner()))
     }
 
-    /// All hook checks live in this one test: the panic hook, `ACTIVE` and `RESTORE` are
-    /// process-wide, so a second test would race with this one under `cargo test`. Panics from
-    /// other threads are passed on to the original hook and not recorded. A panic on another
-    /// thread while `ACTIVE` is set still clears it and can make this test fail; that is
-    /// accepted because nextest runs each test in its own process, so no other test runs then.
+    /// All hook checks live in this one test: the panic hook, `ACTIVE`, `OWNER` and `RESTORE`
+    /// are process-wide, so a second test would race with this one under `cargo test`. Panics
+    /// from other threads are passed on to the original hook; only a restore is recorded for
+    /// them, and none may happen.
     #[test]
     fn restore_hook_runs_before_the_previous_hook() {
         *TEST_THREAD.lock().unwrap_or_else(|e| e.into_inner()) = Some(thread::current().id());
@@ -218,6 +229,17 @@ mod tests {
         install_restore_hook();
 
         ACTIVE.store(true, Ordering::SeqCst);
+        *OWNER.lock().unwrap_or_else(|e| e.into_inner()) = Some(thread::current().id());
+        // A panic on another thread, caught there, leaves the terminal entered.
+        let other = thread::spawn(|| {
+            panic::catch_unwind(|| panic!("a deliberate panic on another thread")).is_err()
+        })
+        .join()
+        .unwrap();
+        assert!(other);
+        let active_after_other = ACTIVE.load(Ordering::SeqCst);
+        let after_other = take_record();
+
         let result = panic::catch_unwind(|| panic!("a deliberate panic with the screen entered"));
         assert!(result.is_err());
         let active_after = ACTIVE.load(Ordering::SeqCst);
@@ -230,10 +252,13 @@ mod tests {
         // Put the process back as it was before the asserts can fail: the real restore and a
         // hook chain that ends in the original hook. `ACTIVE` is clear, so ours does nothing.
         ACTIVE.store(false, Ordering::SeqCst);
+        *OWNER.lock().unwrap_or_else(|e| e.into_inner()) = None;
         *RESTORE.lock().unwrap_or_else(|e| e.into_inner()) = restore_terminal;
         let _ = panic::take_hook();
         panic::set_hook(Box::new(move |info| original(info)));
 
+        assert!(active_after_other);
+        assert!(after_other.is_empty(), "{after_other:?}");
         assert_eq!(with_screen, ["restore", "previous"]);
         assert!(!active_after);
         assert_eq!(without_screen, ["previous"]);

@@ -11,7 +11,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier};
 use rezzer_derez::app::{App, Key};
 use rezzer_derez::grid::{Dir, Pos, Tile};
-use rezzer_derez::plan::{Plan, Rounds, builtin};
+use rezzer_derez::plan::{Plan, Rounds, Shape, ShapeKind, builtin};
 use rezzer_derez::round::Status;
 use rezzer_derez::ui::draw;
 
@@ -23,6 +23,7 @@ fn rounds(name: &str, label: &str) -> Rounds {
             ..builtin()
         }],
         note: None,
+        short_note: None,
     }
 }
 
@@ -403,6 +404,57 @@ fn greeting_and_end_messages() {
         buf.contains("All derezzed.  r: next round  q: quit"),
         "{buf}"
     );
+}
+
+#[test]
+fn notes_show_under_the_greeting_at_the_minimum_size() {
+    let mut r = rounds("x.bin", "the Grid");
+    r.short_note = Some("No grid from this file: no reader.".to_string());
+    let app = App::new(r, 1, 60, 20);
+    let buf = text(&render(&app, 60, 20));
+    assert!(buf.contains("Greetings, program. Steer to start."), "{buf}");
+    assert!(buf.contains("No grid from this file: no reader."), "{buf}");
+
+    // Too long for the 60 columns: shortened with `...`.
+    let mut r = rounds("x.bin", "the Grid");
+    r.short_note =
+        Some("No grid from this file: Rezzer has no reader for this format.".to_string());
+    let app = App::new(r, 1, 60, 20);
+    let buf = render(&app, 60, 20);
+    let all = text(&buf);
+    let line = all
+        .lines()
+        .find(|l| l.contains("No grid from this file"))
+        .unwrap_or_else(|| panic!("{all}"));
+    assert!(line.trim().ends_with("..."), "{line}");
+    assert!(
+        line.contains("No grid from this file: Rezzer has no"),
+        "{line}"
+    );
+
+    let crowded = Plan {
+        label: "page 1".to_string(),
+        shapes: vec![Shape {
+            kind: ShapeKind::Tower,
+            rect: [0.0, 0.0, 1.0, 1.0],
+        }],
+    };
+    let r = Rounds {
+        name: "drawing.pdf".to_string(),
+        plans: vec![crowded],
+        note: None,
+        short_note: None,
+    };
+    let mut app = App::new(r, 1, 60, 20);
+    let buf = text(&render(&app, 60, 20));
+    assert!(buf.contains("Greetings, program. Steer to start."), "{buf}");
+    assert!(
+        buf.contains("This part is too crowded. Using the Grid."),
+        "{buf}"
+    );
+    app.on_key(Key::Steer(Dir::Right));
+    let buf = text(&render(&app, 60, 20));
+    assert!(!buf.contains("too crowded"), "{buf}");
 }
 
 #[test]
