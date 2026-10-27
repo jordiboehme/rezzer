@@ -192,6 +192,7 @@ impl<'a> AnchorSet<'a> {
         let mut found: Vec<&'a Anchor> = Vec::new();
         let mut sections: Vec<&'a Anchor> = Vec::new();
         collect(body, &mut found, &mut sections);
+        crate::work::add((found.len() + sections.len()) as u64);
         self.all.extend(found.into_iter().map(|a| a.0.as_str()));
         self.sections
             .extend(sections.into_iter().map(|a| a.0.as_str()));
@@ -199,6 +200,7 @@ impl<'a> AnchorSet<'a> {
 
     /// True when `anchor` is an anchor of the document, or a range on a sheet that is.
     pub(crate) fn resolves(&self, anchor: &str) -> bool {
+        crate::work::add(1);
         if self.all.contains(anchor) || anchor.starts_with("ext:") {
             return true;
         }

@@ -400,9 +400,27 @@ fn big_document_is_fast() {
     d.facets.formulas = (0..1000)
         .map(|i| formula(&format!("p{i}"), &["p5", "nope"]))
         .collect();
+    let before = rezzer_enrich::work_steps();
     let start = Instant::now();
     enrich(&mut d, &only(&[]));
-    assert!(start.elapsed().as_secs() < 10, "{:?}", start.elapsed());
+    let took = start.elapsed();
+    let steps = before.zip(rezzer_enrich::work_steps()).map(|(b, a)| a - b);
+    // The steps of the passes ([`rezzer_enrich::work_steps`], debug builds), measured once
+    // (2026-10-27, debug build, `--no-capture`) with half again as margin: 607,764, a few
+    // for each block and inline and one for each anchor. A pass that walked the body again for each
+    // of the 2,000 references would take 200 million and more. The wall time is only a
+    // safety stop.
+    const STEPS: u64 = 607_764;
+    eprintln!("big document: {steps:?} steps in {took:?}");
+    if cfg!(debug_assertions) {
+        assert!(
+            steps.is_some_and(|n| n <= STEPS + STEPS / 2),
+            "{steps:?} steps, measured {STEPS}"
+        );
+    } else {
+        assert_eq!(steps, None);
+    }
+    assert!(took.as_secs() < 60, "{took:?}");
     assert_eq!(d.losses.len(), 101);
 }
 
