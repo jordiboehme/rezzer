@@ -459,8 +459,9 @@ const WRAP_ALIGN: f32 = 0.1;
 
 /// How many of the lines under a region (`lines`, the region's first, its `pieces` the
 /// region's own) go on in its last row, and whether the first that does not may (a loss says
-/// so). A marked line (see [`Tail`]) does. A line of one piece does when it stands over one
-/// column of the region (it crosses no gutter), starts flush
+/// so). A marked line (see [`Tail`]) does when each of its pieces stands over one column of
+/// the region (it crosses no gutter). A line of one piece does when it stands over one column
+/// as well, starts flush
 /// with the text over it in its column (see [`WRAP_ALIGN`]), ends within the column, stands
 /// no farther under the line over it than the lines of the region stand apart, and its
 /// column does not hold numbers (a word under a column of numbers is no wrap: it may be,
@@ -488,6 +489,11 @@ fn joined_tail(
     for (t, line) in lines.iter().enumerate().skip(core) {
         let own = pieces_of(flow, line);
         if marked {
+            // A line that crosses a gutter is no text of the frame's cells: it stays out,
+            // and the frame's loss says so.
+            if !own.iter().all(|p| over(p).len() == 1) {
+                return (joined, false);
+            }
             joined += 1;
             continue;
         }
