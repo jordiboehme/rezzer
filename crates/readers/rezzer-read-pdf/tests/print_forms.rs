@@ -63,6 +63,24 @@ fn assert_no_loss(out: &ReadOutcome) {
     assert!(out.document.losses.is_empty(), "{:?}", out.document.losses);
 }
 
+/// The read is complete and names no loss but the one for the date in the head that nothing
+/// marks as the document date (the `Eintritt` field of the boxed fields).
+fn assert_no_loss_but_the_head_date(out: &ReadOutcome) {
+    assert_eq!(
+        out.completeness,
+        Completeness::Complete,
+        "{:?}",
+        out.document.losses
+    );
+    let what: Vec<&str> = out
+        .document
+        .losses
+        .iter()
+        .map(|l| l.what.as_str())
+        .collect();
+    assert_eq!(what, [ONE_DATE], "{:?}", out.document.losses);
+}
+
 #[test]
 fn cm_placed_identical_lines_are_kept() {
     let page = FormPage {
@@ -3688,7 +3706,7 @@ fn boxed_fields_become_pairs() {
         _ => false,
     });
     assert!(empty, "{:#?}", page_blocks(&out));
-    assert_no_loss(&out);
+    assert_no_loss_but_the_head_date(&out);
 }
 
 /// A box of three styles beside boxed fields is not paired: its text stays as it is, and a
@@ -4008,12 +4026,14 @@ fn values_over_several_fields_pair_with_their_own_fields() {
     );
     let text = all_text(&out);
     assert!(text.contains("123456789012"), "{text}");
+    // The `Eintritt` date in the head gives its own loss.
     let losses: Vec<&str> = out
         .document
         .losses
         .iter()
         .filter(|l| l.why == LossReason::Uncertain && l.severity == Severity::Info)
         .map(|l| l.what.as_str())
+        .filter(|w| *w != ONE_DATE)
         .collect();
     assert_eq!(losses.len(), 1, "{:?}", out.document.losses);
     assert!(
@@ -4056,7 +4076,7 @@ fn bold_box_title_is_no_empty_field() {
         "{:#?}",
         page_blocks(&out)
     );
-    assert_no_loss(&out);
+    assert_no_loss_but_the_head_date(&out);
 }
 
 /// A framed box of a pay slip with a bold title of 6.66 points at its top left and two lines
@@ -4216,6 +4236,12 @@ fn front(out: &ReadOutcome, key: &str) -> Option<String> {
         .find_map(|l| l.strip_prefix(key)?.strip_prefix(": "))
         .map(str::to_string)
 }
+
+/// The loss of a head with one date that nothing marks as the document date.
+const ONE_DATE: &str = "1 date stands in the head of page 1; it is not marked as the document date";
+
+/// The loss of a head with two dates.
+const TWO_DATES: &str = "2 dates stand in the head of page 1; none is marked as the document date";
 
 /// The words of the losses of `out` that are `Uncertain`.
 fn unsure(out: &ReadOutcome) -> Vec<&str> {
@@ -4401,28 +4427,26 @@ fn labelled_dates_of_every_form() {
 }
 
 #[test]
-fn only_date_in_the_head_is_document_date() {
-    let head = common::show("FL", 9.0, 400.0, 760.0, "Musterstadt, 01.02.2026");
-    let out = read(&headed(&head, 9.0, 1.0, ""));
-    let found = out
-        .document
-        .properties
-        .document_date
-        .as_ref()
-        .expect("date");
-    assert_eq!(found.date, "2026-02-01");
-    assert_eq!(found.from, "only date in the top third of page 1");
-    // The same date twice is still one date.
-    let head = head + &common::show("FL", 9.0, 40.0, 700.0, "Stand 01.02.2026");
-    let out = read(&headed(&head, 9.0, 1.0, ""));
-    assert_eq!(
-        out.document
-            .properties
-            .document_date
-            .as_ref()
-            .map(|d| d.date.as_str()),
-        Some("2026-02-01")
-    );
+fn one_unlabelled_date_in_the_head_is_not_guessed() {
+    // A date in the top third that nothing marks as the document date is not chosen; the
+    // loss says that it stands there.
+    for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
+        for font in ["FL", "FB"] {
+            let head = common::show(font, size, 400.0, 760.0, "Musterstadt, 01.02.2026");
+            let out = read(&headed(&head, size, scale, ""));
+            let case = format!("{size} pt {font}");
+            assert_eq!(out.document.properties.document_date, None, "{case}");
+            assert_eq!(front(&out, "document_date"), None, "{case}");
+            assert_eq!(front(&out, "source_date"), None, "{case}");
+            assert_eq!(unsure(&out), [ONE_DATE], "{case}");
+            assert_eq!(out.completeness, Completeness::Complete, "{case}");
+            // The same date twice is still one date.
+            let head = head + &common::show(font, size, 40.0, 700.0, "Stand 01.02.2026");
+            let out = read(&headed(&head, size, scale, ""));
+            assert_eq!(out.document.properties.document_date, None, "{case}");
+            assert_eq!(unsure(&out), [ONE_DATE], "{case}");
+        }
+    }
 }
 
 #[test]
@@ -4476,26 +4500,20 @@ fn compound_date_label_is_not_the_document_date() {
 
 #[test]
 fn compound_english_date_label_is_no_label() {
-    // `Due date` is no date label: the only date in the head is the document date.
+    // `Due date` is no date label: its date is not chosen, and the plain date in the head is
+    // not chosen either; the loss names the head date.
     for label in ["Due date", "Delivery date", "Start Date:"] {
         let head = common::show("FL", 9.0, 400.0, 760.0, "Musterstadt, 01.02.2026")
             + &common::show("FL", 9.0, 40.0, 200.0, &format!("{label} 15.03.2026"));
         let out = read(&headed(&head, 9.0, 1.0, ""));
-        assert_eq!(
-            out.document
-                .properties
-                .document_date
-                .as_ref()
-                .map(|d| d.date.as_str()),
-            Some("2026-02-01"),
-            "{label}"
-        );
+        assert_eq!(out.document.properties.document_date, None, "{label}");
+        assert_eq!(unsure(&out), [ONE_DATE], "{label}");
     }
 }
 
 #[test]
 fn other_named_dates_are_no_document_date() {
-    // A date with a label of its own that names another date: never the document date, also
+    // A date with a label of its own that is no date label: never the document date, also
     // when it is the only date in the head.
     for line in [
         "Due date 15.03.2026",
@@ -4515,6 +4533,7 @@ fn other_named_dates_are_no_document_date() {
                     "{line} in {size} pt {font}"
                 );
                 assert_eq!(front(&out, "source_date"), None, "{line}");
+                assert_eq!(unsure(&out), [ONE_DATE], "{line} in {size} pt {font}");
             }
         }
     }
@@ -4640,10 +4659,10 @@ fn contents_heading_is_no_title() {
 }
 
 #[test]
-fn equal_value_of_another_date_keeps_the_head_date() {
-    // The delivery date below the head has the value of a head date: only its own date is
-    // another date, so the head still holds two dates and none is taken.
-    let want = ["2 dates stand in the head of page 1; none is marked as the document date"];
+fn equal_value_of_a_lower_date_changes_nothing() {
+    // The delivery date below the head has the value of a head date: the head still holds two
+    // dates and none is taken.
+    let want = [TWO_DATES];
     for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
         for font in ["FL", "FB"] {
             let head = common::show("FB", size * 1.6, 40.0, 790.0, "Musterbescheid")
@@ -4698,8 +4717,8 @@ fn one_row_item_grid_with_small_titles_gives_no_date() {
 #[test]
 fn other_date_label_across_a_column_gap_stays_its_own() {
     // An other date's label over its value in one column, a head date on the label's baseline
-    // in another column: the label belongs to its column, so the head holds two dates.
-    let want = ["2 dates stand in the head of page 1; none is marked as the document date"];
+    // in another column: nothing marks either, so the head holds two dates.
+    let want = [TWO_DATES];
     for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
         for font in ["FL", "FB"] {
             for other in ["Geburtsdatum", "Lieferdatum"] {
@@ -4719,9 +4738,9 @@ fn other_date_label_across_a_column_gap_stays_its_own() {
 }
 
 #[test]
-fn other_label_over_an_offset_value_names_it() {
+fn other_label_over_an_offset_value_gives_no_date() {
     // A label that names another date over its value, the value indented, right aligned or
-    // centred under it: the label stands over the value, so the value is no plain head date.
+    // centred under it: no date label marks the value, so it is not chosen.
     for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
         for font in ["FL", "FB"] {
             for label in ["Geburtsdatum", "Kunde seit", "Lieferdatum"] {
@@ -4740,7 +4759,7 @@ fn other_label_over_an_offset_value_names_it() {
                     let case = format!("{label} over the value {how} in {size} pt {font}");
                     assert_eq!(out.document.properties.document_date, None, "{case}");
                     assert_eq!(front(&out, "source_date"), None, "{case}");
-                    assert!(unsure(&out).is_empty(), "{case}: {:?}", unsure(&out));
+                    assert_eq!(unsure(&out), [ONE_DATE], "{case}");
                 }
             }
         }
@@ -4748,68 +4767,74 @@ fn other_label_over_an_offset_value_names_it() {
 }
 
 #[test]
-fn place_and_comma_before_the_head_date_is_no_label() {
+fn place_and_comma_before_the_head_date_is_no_marker() {
+    // `Musterstadt, 01.02.2026` without `den`: a name with a comma looks the same, so the date
+    // is not chosen.
     for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
         for font in ["FL", "FB"] {
             let head = common::show("FB", size * 1.6, 40.0, 790.0, "Musterbescheid")
                 + &common::show(font, size, 400.0, 760.0, "Musterstadt, 01.02.2026");
             let out = read(&headed(&head, size, scale, ""));
             let case = format!("{size} pt {font}");
-            let found = out.document.properties.document_date.as_ref();
-            assert_eq!(found.map(|d| d.date.as_str()), Some("2026-02-01"), "{case}");
-            assert_eq!(
-                found.map(|d| d.from.as_str()),
-                Some("only date in the top third of page 1"),
-                "{case}"
-            );
-            assert!(unsure(&out).is_empty(), "{case}: {:?}", unsure(&out));
+            assert_eq!(out.document.properties.document_date, None, "{case}");
+            assert_eq!(front(&out, "source_date"), None, "{case}");
+            assert_eq!(unsure(&out), [ONE_DATE], "{case}");
         }
     }
 }
 
 #[test]
-fn heading_over_a_plain_date_is_a_label_only_where_it_overlaps() {
+fn plain_date_under_or_beside_a_heading_is_not_guessed() {
     for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
         for font in ["FL", "FB"] {
             let heading =
                 |x: f32| common::show("FB", size * 1.6, x, 760.0 + size * 1.3, "Rechnung");
             let case = format!("{size} pt {font}");
-            // The heading at the left margin, the date in the right column: chosen.
-            let head = heading(40.0) + &common::show(font, size, 400.0, 760.0, "01.02.2026");
-            let out = read(&headed(&head, size, scale, ""));
-            let found = out.document.properties.document_date.as_ref();
-            assert_eq!(found.map(|d| d.date.as_str()), Some("2026-02-01"), "{case}");
-            assert_eq!(
-                found.map(|d| d.from.as_str()),
-                Some("only date in the top third of page 1"),
-                "{case}"
-            );
-            // The heading right over the date: a label over it, so the date is not chosen.
-            let head = heading(400.0) + &common::show(font, size, 400.0, 760.0, "01.02.2026");
-            let out = read(&headed(&head, size, scale, ""));
-            assert_eq!(out.document.properties.document_date, None, "{case}");
-            assert!(unsure(&out).is_empty(), "{case}: {:?}", unsure(&out));
+            // The heading at the left margin, the date in the right column, and the heading
+            // right over the date: nothing marks the date.
+            for x in [40.0, 400.0] {
+                let head = heading(x) + &common::show(font, size, 400.0, 760.0, "01.02.2026");
+                let out = read(&headed(&head, size, scale, ""));
+                assert_eq!(out.document.properties.document_date, None, "{case}");
+                assert_eq!(unsure(&out), [ONE_DATE], "{case}");
+            }
         }
     }
 }
 
-/// What the head rule gives for a layout: a date (by the head rule or a label), no date and no
-/// loss, or the loss that several head dates give.
+/// What a layout of the head gives: a date with what `document_date_from` says, or no date
+/// with a loss.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum HeadWant {
     Date(&'static str, &'static str),
-    Nothing,
-    TwoDates,
+    Lost(&'static str),
+}
+
+/// Asserts that `out` gives `want`, naming `case` when it does not.
+fn assert_head(out: &ReadOutcome, want: HeadWant, case: &str) {
+    let found = out.document.properties.document_date.as_ref();
+    match want {
+        HeadWant::Date(date, from) => {
+            assert_eq!(found.map(|d| d.date.as_str()), Some(date), "{case}");
+            assert_eq!(found.map(|d| d.from.as_str()), Some(from), "{case}");
+            assert!(unsure(out).is_empty(), "{case}: {:?}", unsure(out));
+        }
+        HeadWant::Lost(loss) => {
+            assert_eq!(found, None, "{case}");
+            assert_eq!(unsure(out), [loss], "{case}");
+        }
+    }
 }
 
 #[test]
 fn head_layouts_with_one_other_date() {
-    // Layouts of the head with one date that has a label of its own which is no document-date
-    // label, and one plain date or none. The rule: a head date is chosen only when it has no
-    // label beside it or over it; a labelled date counts but is never chosen. Never a wrong
-    // date: a loss or no date is fine.
+    // Layouts of the head with one date that has a label of its own which is no date label,
+    // and one plain date or none. The rule: a date is chosen only when a date label, a pair
+    // of a field table or `<place>, den` marks it; the dates of the head give a loss. Never a
+    // wrong date: a loss or no date is fine.
     use HeadWant::*;
-    let two = "2 dates stand in the head of page 1; none is marked as the document date";
+    let one = Lost(ONE_DATE);
+    let two = Lost(TWO_DATES);
     for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
         for font in ["FL", "FB"] {
             let s = |x: f32, y: f32, t: &str| common::show(font, size, x, y, t);
@@ -4824,12 +4849,12 @@ fn head_layouts_with_one_other_date() {
                     title.clone()
                         + &s(40.0, 760.0, "Geburtsdatum:")
                         + &s(40.0 + size * 8.0, 760.0, "01.01.1970"),
-                    Nothing,
+                    one,
                 ),
                 (
                     "B: other label far left of its value on one baseline",
                     title.clone() + &s(40.0, 760.0, "Kunde seit") + &s(300.0, 760.0, "01.01.2020"),
-                    Nothing,
+                    one,
                 ),
                 (
                     "C: two rows of a label column and a value column",
@@ -4838,7 +4863,7 @@ fn head_layouts_with_one_other_date() {
                         + &s(200.0, 760.0, "Erika Mustermann")
                         + &s(40.0, below(1.0), "Geburtsdatum")
                         + &s(200.0, below(1.0), "01.01.1970"),
-                    Nothing,
+                    one,
                 ),
                 (
                     "D: letter with the place and date on the baseline of the first address line",
@@ -4848,7 +4873,7 @@ fn head_layouts_with_one_other_date() {
                         + &s(40.0, below(1.0), "Musterweg 1")
                         + &s(40.0, below(2.0), "12345 Musterstadt")
                         + &low,
-                    Nothing,
+                    one,
                 ),
                 (
                     "E: letter with the place and date alone on its line below the address",
@@ -4858,7 +4883,7 @@ fn head_layouts_with_one_other_date() {
                         + &s(40.0, below(2.0), "12345 Musterstadt")
                         + &s(400.0, 700.0, "Musterstadt, 01.02.2026")
                         + &low,
-                    Date("2026-02-01", "only date in the top third of page 1"),
+                    one,
                 ),
                 (
                     "F: other label over a centred value, a labelled document date beside",
@@ -4878,38 +4903,41 @@ fn head_layouts_with_one_other_date() {
                         + &s(400.0, 760.0, "Musterstadt,")
                         + &s(400.0, below(1.0), "01.02.2026")
                         + &low,
-                    Nothing,
+                    one,
                 ),
                 (
                     "H: place, comma and the article before the date",
                     title.clone() + &s(400.0, 760.0, "Musterstadt, den 01.02.2026") + &low,
-                    Date("2026-02-01", "only date in the top third of page 1"),
+                    Date(
+                        "2026-02-01",
+                        "date after the place \"Musterstadt, den\" on page 1",
+                    ),
                 ),
                 (
                     "I: a heading right over the date",
                     common::show("FB", size * 1.6, 40.0, 760.0 + size * 1.3, "Rechnung")
                         + &s(40.0, 760.0, "01.02.2026")
                         + &low,
-                    Nothing,
+                    one,
                 ),
                 (
                     "J: a heading over the line of the date, in another column",
                     common::show("FB", size * 1.6, 40.0, 760.0 + size * 1.3, "Rechnung")
                         + &s(400.0, 760.0, "01.02.2026")
                         + &low,
-                    Date("2026-02-01", "only date in the top third of page 1"),
+                    one,
                 ),
                 (
                     "K: the other label after its value",
                     title.clone() + &s(40.0, 760.0, "01.01.1970 (Geburtsdatum)"),
-                    Nothing,
+                    one,
                 ),
                 (
                     "L: a name with its birth date, the plain date alone lower in the head",
                     title.clone()
                         + &s(40.0, 760.0, "Erika Mustermann, geb. 01.01.1970")
                         + &s(400.0, 700.0, "Musterstadt, 01.02.2026"),
-                    TwoDates,
+                    two,
                 ),
                 (
                     "M: other label over its value, the plain date alone lower in the head",
@@ -4917,7 +4945,7 @@ fn head_layouts_with_one_other_date() {
                         + &s(40.0, 760.0, "Geburtsdatum")
                         + &s(40.0, below(1.0), "01.01.1970")
                         + &s(400.0, 700.0, "Musterstadt, 01.02.2026"),
-                    TwoDates,
+                    two,
                 ),
                 (
                     "N: validity label over a right aligned value",
@@ -4929,17 +4957,17 @@ fn head_layouts_with_one_other_date() {
                             "31.12.2026",
                         )
                         + &low,
-                    Nothing,
+                    one,
                 ),
                 (
                     "O: company name far left of the date on one baseline",
                     s(40.0, 800.0, "Muster GmbH") + &s(450.0, 800.0, "01.02.2026") + &low,
-                    Nothing,
+                    one,
                 ),
                 (
                     "P: a period of two dates, the second after a word",
                     title.clone() + &s(40.0, 760.0, "Zeitraum 01.01.2026 bis 31.01.2026") + &low,
-                    TwoDates,
+                    two,
                 ),
                 (
                     "Q: other label over the value in the right column, plain date left on the value's baseline",
@@ -4951,45 +4979,30 @@ fn head_layouts_with_one_other_date() {
                             "01.01.1970",
                         )
                         + &s(40.0, below(1.0), "Musterstadt, 01.02.2026"),
-                    TwoDates,
+                    two,
                 ),
                 (
                     "R: a date and the other date two lines below it, same column",
                     title.clone()
                         + &s(400.0, 760.0, "Musterstadt, 01.02.2026")
                         + &s(400.0, below(2.0), "Kunde seit 01.01.2020"),
-                    TwoDates,
+                    two,
                 ),
             ];
             for (name, head, want) in cases {
                 let out = read(&headed(&head, size, scale, ""));
-                let found = out.document.properties.document_date.as_ref();
-                let case = format!("{name} in {size} pt {font}");
-                match want {
-                    Date(date, from) => {
-                        assert_eq!(found.map(|d| d.date.as_str()), Some(date), "{case}");
-                        assert_eq!(found.map(|d| d.from.as_str()), Some(from), "{case}");
-                        assert!(unsure(&out).is_empty(), "{case}: {:?}", unsure(&out));
-                    }
-                    Nothing => {
-                        assert_eq!(found, None, "{case}");
-                        assert!(unsure(&out).is_empty(), "{case}: {:?}", unsure(&out));
-                    }
-                    TwoDates => {
-                        assert_eq!(found, None, "{case}");
-                        assert_eq!(unsure(&out), [two], "{case}");
-                    }
-                }
+                assert_head(&out, want, &format!("{name} in {size} pt {font}"));
             }
         }
     }
 }
 
 #[test]
-fn rereview_probes_keep_their_results() {
-    // The probes of the round 3 re-review, each with the result it had then, now as a test.
+fn rereview_probes_give_no_wrong_date() {
+    // The probes of the round 3 re-review as a test: the labelled date, or a loss.
     use HeadWant::*;
-    let two = "2 dates stand in the head of page 1; none is marked as the document date";
+    let one = Lost(ONE_DATE);
+    let two = Lost(TWO_DATES);
     let by_label = Date("2026-02-01", "date label \"Datum\" on page 1");
     for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
         for font in ["FL", "FB"] {
@@ -5004,7 +5017,7 @@ fn rereview_probes_keep_their_results() {
                         + &s(40.0, below, "01.01.1970")
                         + &s(300.0, 760.0, "Datum")
                         + &s(300.0, below, "01.02.2026"),
-                    by_label,
+                    two,
                 ),
                 (
                     "P2: labels over values, the other date right",
@@ -5013,7 +5026,7 @@ fn rereview_probes_keep_their_results() {
                         + &s(300.0, below, "01.01.1970")
                         + &s(40.0, 760.0, "Datum")
                         + &s(40.0, below, "01.02.2026"),
-                    by_label,
+                    two,
                 ),
                 (
                     "P3: labels beside their values in two columns",
@@ -5034,21 +5047,21 @@ fn rereview_probes_keep_their_results() {
                     title.clone()
                         + &s(40.0, 760.0, "Geburtsdatum 01.01.1970")
                         + &s(300.0, 760.0, "Musterstadt, 01.02.2026"),
-                    TwoDates,
+                    two,
                 ),
                 (
                     "P5: label piece, the value beside it as its own run",
                     title.clone()
                         + &s(40.0, 760.0, "Lieferdatum:")
                         + &s(40.0 + size * 8.0, 760.0, "15.02.2026"),
-                    Nothing,
+                    one,
                 ),
                 (
                     "P6: label over the value indented 1.5 sizes",
                     title.clone()
                         + &s(40.0, 760.0, "Geburtsdatum")
                         + &s(40.0 + size * 1.5, below, "01.01.1970"),
-                    Nothing,
+                    one,
                 ),
                 (
                     "P7: labels over values in close columns",
@@ -5057,7 +5070,7 @@ fn rereview_probes_keep_their_results() {
                         + &s(40.0, below, "01.01.1970")
                         + &s(40.0 + size * 10.0, 760.0, "Datum")
                         + &s(40.0 + size * 10.0, below, "01.02.2026"),
-                    TwoDates,
+                    two,
                 ),
                 (
                     "P8: Datum alone far left of an other label over its value",
@@ -5065,38 +5078,23 @@ fn rereview_probes_keep_their_results() {
                         + &s(40.0, 760.0, "Datum")
                         + &s(300.0, 760.0, "Lieferdatum")
                         + &s(300.0, below, "15.02.2026"),
-                    Nothing,
+                    one,
                 ),
             ];
             for (name, head, want) in cases {
                 let out = read(&headed(&head, size, scale, ""));
-                let found = out.document.properties.document_date.as_ref();
-                let case = format!("{name} in {size} pt {font}");
-                match want {
-                    Date(date, from) => {
-                        assert_eq!(found.map(|d| d.date.as_str()), Some(date), "{case}");
-                        assert_eq!(found.map(|d| d.from.as_str()), Some(from), "{case}");
-                        assert!(unsure(&out).is_empty(), "{case}: {:?}", unsure(&out));
-                    }
-                    Nothing => {
-                        assert_eq!(found, None, "{case}");
-                        assert!(unsure(&out).is_empty(), "{case}: {:?}", unsure(&out));
-                    }
-                    TwoDates => {
-                        assert_eq!(found, None, "{case}");
-                        assert_eq!(unsure(&out), [two], "{case}");
-                    }
-                }
+                assert_head(&out, want, &format!("{name} in {size} pt {font}"));
             }
         }
     }
 }
 
 #[test]
-fn date_label_in_a_far_cell_is_the_document_date() {
-    // A field table row `Datum: | 26.10.2026`: the label and its value in two cells with a wide
-    // gap between them, in the top third. The label is a whole date label, so the date is the
-    // document date, at any distance; with the cells drawn and without.
+fn date_label_in_a_far_cell_is_lost() {
+    // A row `Datum: | 26.10.2026`: the label and its value in two cells with a wide gap between
+    // them, in the top third, drawn as two boxes or plain. The two boxes are no pair table, and
+    // the label stands too far from the date to mark it: the date is lost, with the loss. (Close
+    // to its value the label marks it, see `labelled_dates_of_every_form`.)
     for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
         for font in ["FL", "FB"] {
             let text = common::show(font, size, 44.0, 760.0, "Datum:")
@@ -5106,30 +5104,19 @@ fn date_label_in_a_far_cell_is_the_document_date() {
             for (how, head) in [("plain", text.clone()), ("boxed", cells + &text)] {
                 let title = common::show("FB", size * 1.6, 40.0, 800.0, "Musterbescheid");
                 let out = read(&headed(&format!("{title}{head}"), size, scale, ""));
-                let found = out.document.properties.document_date.as_ref();
                 let case = format!("{how} cells in {size} pt {font}");
-                assert_eq!(found.map(|d| d.date.as_str()), Some("2026-10-26"), "{case}");
-                assert_eq!(
-                    found.map(|d| d.from.as_str()),
-                    Some("date label \"Datum\" on page 1"),
-                    "{case}"
-                );
-                assert_eq!(
-                    front(&out, "source_date").as_deref(),
-                    Some("2026-10-26"),
-                    "{case}"
-                );
-                assert!(unsure(&out).is_empty(), "{case}: {:?}", unsure(&out));
+                assert_head(&out, HeadWant::Lost(ONE_DATE), &case);
+                assert_eq!(front(&out, "source_date"), None, "{case}");
             }
         }
     }
 }
 
 #[test]
-fn text_after_the_head_date_that_names_no_other_date_is_no_label() {
+fn head_date_with_text_after_it_is_not_guessed() {
     // A head line `22.10.2026 1` with the next field's label on the same line, a time after
-    // the date, or a number alone: the only date in the top third is the document date. Only
-    // an other date's name or a parenthesis right after the date labels it.
+    // the date, a number alone, or an other date's name: nothing marks the date, so it is not
+    // chosen and the loss names it.
     for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
         for font in ["FL", "FB"] {
             let s = |x: f32, t: &str| common::show(font, size, x, 760.0, t);
@@ -5143,56 +5130,139 @@ fn text_after_the_head_date_that_names_no_other_date_is_no_label() {
                 ),
                 ("time", s(40.0, "22.10.2026 10:30")),
                 ("number", s(40.0, "22.10.2026 1")),
+                ("in parentheses", s(40.0, "01.01.1970 (Geburtsdatum)")),
+                ("born", s(40.0, "01.01.1970 geboren")),
+                ("due", s(40.0, "15.02.2026 (f\u{e4}llig)")),
             ];
             for (how, head) in heads {
                 let out = read(&headed(&format!("{title}{head}"), size, scale, ""));
-                let found = out.document.properties.document_date.as_ref();
                 let case = format!("{how} in {size} pt {font}");
-                assert_eq!(found.map(|d| d.date.as_str()), Some("2026-10-22"), "{case}");
-                assert_eq!(
-                    found.map(|d| d.from.as_str()),
-                    Some("only date in the top third of page 1"),
-                    "{case}"
-                );
-                assert!(unsure(&out).is_empty(), "{case}: {:?}", unsure(&out));
-            }
-            // The other date's name after its value, in parentheses or not: no document date.
-            for line in [
-                "01.01.1970 (Geburtsdatum)",
-                "01.01.1970 geboren",
-                "15.02.2026 (f\u{e4}llig)",
-            ] {
-                let out = read(&headed(
-                    &format!("{title}{}", s(40.0, line)),
-                    size,
-                    scale,
-                    "",
-                ));
-                let case = format!("{line} in {size} pt {font}");
-                assert_eq!(out.document.properties.document_date, None, "{case}");
-                assert!(unsure(&out).is_empty(), "{case}: {:?}", unsure(&out));
+                assert_head(&out, HeadWant::Lost(ONE_DATE), &case);
+                assert_eq!(front(&out, "source_date"), None, "{case}");
             }
         }
     }
 }
 
 #[test]
-fn place_comma_and_article_before_the_head_date_is_no_label() {
+fn place_and_den_before_the_date_mark_it() {
+    // `Musterstadt, den 01.02.2026`: the place, a comma and `den` (in any case) mark the date
+    // as a German letter writes it. Lower on the page too.
     for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
         for font in ["FL", "FB"] {
-            for line in ["Musterstadt, den 01.02.2026", "MUSTERSTADT, DEN 01.02.2026"] {
-                let head = common::show("FB", size * 1.6, 40.0, 800.0, "Musterbescheid")
-                    + &common::show(font, size, 400.0, 760.0, line);
+            for (line, place) in [
+                ("Musterstadt, den 01.02.2026", "Musterstadt, den"),
+                ("MUSTERSTADT, DEN 01.02.2026", "MUSTERSTADT, DEN"),
+                (
+                    "Frankfurt am Main, den 01.02.2026",
+                    "Frankfurt am Main, den",
+                ),
+            ] {
+                for y in [760.0, 300.0] {
+                    let head = common::show("FB", size * 1.6, 40.0, 800.0, "Musterbescheid")
+                        + &common::show(font, size, 400.0, y, line);
+                    let out = read(&headed(&head, size, scale, ""));
+                    let from = format!("date after the place \"{place}\" on page 1");
+                    let case = format!("{line} at y {y} in {size} pt {font}");
+                    let found = out.document.properties.document_date.as_ref();
+                    assert_eq!(found.map(|d| d.date.as_str()), Some("2026-02-01"), "{case}");
+                    assert_eq!(
+                        found.map(|d| d.from.as_str()),
+                        Some(from.as_str()),
+                        "{case}"
+                    );
+                    assert!(unsure(&out).is_empty(), "{case}: {:?}", unsure(&out));
+                    assert_eq!(
+                        front(&out, "source_date").as_deref(),
+                        Some("2026-02-01"),
+                        "{case}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn rereview_r4_probes_give_no_wrong_date() {
+    // The probes W1 to W5 of the round 4 re-review: each gave a wrong date once. Now nothing
+    // marks their dates, so each gives the loss for the dates of the head.
+    use HeadWant::*;
+    let three = "3 dates stand in the head of page 1; none is marked as the document date";
+    for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
+        for font in ["FL", "FB"] {
+            let s = |x: f32, y: f32, t: &str| common::show(font, size, x, y, t);
+            let pitch = size * 1.2;
+            let title = common::show("FB", size * 1.6, 40.0, 800.0, "Musterbescheid");
+            let low = s(40.0, 200.0, "Lieferdatum 15.02.2026");
+            let mut cases: Vec<(String, String, HeadWant)> = Vec::new();
+            // W4: an item table in the head with a `Datum` column, ruled or plain, 1 or 3 rows.
+            for ruled in [true, false] {
+                for rows in [1usize, 3] {
+                    let mut head = title.clone();
+                    let y0 = 740.0;
+                    if ruled {
+                        let bottom = y0 - pitch * (rows as f32 + 1.0) - 4.0;
+                        for x in [40.0f32, 120.0, 260.0, 380.0] {
+                            head += &format!("0.5 w {x} {bottom} m {x} {} l S\n", y0 + pitch);
+                        }
+                        head += &common::hrule(40.0, 380.0, y0 + pitch);
+                        head += &common::hrule(40.0, 380.0, y0 - 3.0);
+                        head += &common::hrule(40.0, 380.0, bottom);
+                    }
+                    for (x, t) in [(45.0f32, "Pos"), (125.0, "Datum"), (265.0, "Betrag")] {
+                        head += &s(x, y0, t);
+                    }
+                    for r in 0..rows {
+                        let y = y0 - pitch * (r as f32 + 1.0);
+                        head += &s(45.0, y, &format!("{}", r + 1));
+                        head += &s(125.0, y, &format!("1{}.01.2026", r + 5));
+                        head += &s(265.0, y, "9,99");
+                    }
+                    let how = if ruled { "ruled" } else { "plain" };
+                    let want = if rows == 1 {
+                        Lost(ONE_DATE)
+                    } else {
+                        Lost(three)
+                    };
+                    cases.push((
+                        format!("W4: {how} item table with {rows} row(s)"),
+                        head,
+                        want,
+                    ));
+                }
+            }
+            cases.push((
+                "W1: the label under its value".to_string(),
+                title.clone()
+                    + &s(40.0, 760.0, "01.01.1970")
+                    + &s(40.0, 760.0 - pitch, "Geburtsdatum")
+                    + &low,
+                Lost(ONE_DATE),
+            ));
+            cases.push((
+                "W2: the label far right of its value".to_string(),
+                title.clone()
+                    + &s(40.0, 760.0, "01.01.1970")
+                    + &s(300.0, 760.0, "Geburtsdatum")
+                    + &low,
+                Lost(ONE_DATE),
+            ));
+            cases.push((
+                "W3: a due word after the date".to_string(),
+                title.clone() + &s(40.0, 760.0, "15.03.2026 Zahlungsziel") + &low,
+                Lost(ONE_DATE),
+            ));
+            cases.push((
+                "W5: a name with a comma before the date".to_string(),
+                title.clone() + &s(40.0, 760.0, "Erika Mustermann, 01.01.1970") + &low,
+                Lost(ONE_DATE),
+            ));
+            for (name, head, want) in cases {
                 let out = read(&headed(&head, size, scale, ""));
-                let found = out.document.properties.document_date.as_ref();
-                let case = format!("{line} in {size} pt {font}");
-                assert_eq!(found.map(|d| d.date.as_str()), Some("2026-02-01"), "{case}");
-                assert_eq!(
-                    found.map(|d| d.from.as_str()),
-                    Some("only date in the top third of page 1"),
-                    "{case}"
-                );
-                assert!(unsure(&out).is_empty(), "{case}: {:?}", unsure(&out));
+                let case = format!("{name} in {size} pt {font}");
+                assert_head(&out, want, &case);
+                assert_eq!(front(&out, "source_date"), None, "{case}");
             }
         }
     }

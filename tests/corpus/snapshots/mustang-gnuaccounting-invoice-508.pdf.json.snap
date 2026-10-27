@@ -154,6 +154,12 @@ source: crates/rezzer/tests/corpus.rs
   "facets": {},
   "losses": [
     {
+      "location": "p1",
+      "severity": "info",
+      "what": "1 date stands in the head of page 1; it is not marked as the document date",
+      "why": "uncertain"
+    },
+    {
       "location": "structure tree",
       "severity": "warning",
       "what": "the role map has a loop at Figure",
@@ -236,10 +242,6 @@ source: crates/rezzer/tests/corpus.rs
         "type": "text",
         "value": "LibreOffice 7.0"
       }
-    },
-    "document_date": {
-      "date": "2020-11-21",
-      "from": "only date in the top third of page 1"
     },
     "facts": {
       "encrypted": false,

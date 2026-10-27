@@ -6991,7 +6991,7 @@ fn file_date_wins_over_the_found_date() {
     let mut d = doc();
     d.properties.document_date = Some(rezzer_model::FoundDate {
         date: "2026-02-01".into(),
-        from: "only date in the top third of page 1".into(),
+        from: "date label \"Datum\" on page 1".into(),
     });
     d.properties.modified = Some(Value::DateTime {
         value: "2020-09-23T10:00:00Z".into(),
@@ -7007,7 +7007,7 @@ fn file_date_wins_over_the_found_date() {
     let mut d = doc();
     d.properties.document_date = Some(rezzer_model::FoundDate {
         date: "2026-02-30".into(),
-        from: "only date in the top third of page 1".into(),
+        from: "date label \"Datum\" on page 1".into(),
     });
     let md = render(&d, Completeness::Complete, &opts());
     assert!(
