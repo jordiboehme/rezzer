@@ -1798,6 +1798,271 @@ fn a_wrapped_date_range_stays_in_its_cell() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// Pay slip lines without rules, a header and three rows, then a blank row a little over one
+/// line high (2 to 2.2 pitches), then two or four rows more in the same columns, at sizes 6 to
+/// 14 in both fonts: one table with every row, as the rows after the gap stand in the table's
+/// own columns. All values are invented.
+#[test]
+fn a_blank_row_keeps_one_table() {
+    let rows = [
+        ("1000", "Gehalt", "3.000,00"),
+        ("1010", "Zulage", "150,00"),
+        ("1020", "Fahrgeld", "45,67"),
+        ("2000", "Abzug", "12,34"),
+        ("2010", "Kantine", "8,90"),
+        ("2020", "Miete", "1,11"),
+        ("2030", "Strom", "2,22"),
+    ];
+    let mut wrong = Vec::new();
+    for n in [2usize, 4] {
+        for blank in [2.0f32, 2.1, 2.2] {
+            for size in [6.0f32, 7.5, 9.0, 11.0, 14.0] {
+                for fonts in FONTS {
+                    let pitch = 1.25 * size;
+                    let fr = |x: f32, y: f32, t: &str| {
+                        show(
+                            fonts.0,
+                            size,
+                            x - common::font_width(fonts.0, t, size),
+                            y,
+                            t,
+                        )
+                    };
+                    let mut y = 700.0;
+                    let mut t = show(fonts.1, size, 40.0, y, "Lohnart")
+                        + &show(fonts.1, size, 40.0 + 8.0 * size, y, "Bezeichnung")
+                        + &fr(40.0 + 40.0 * size, y, "Betrag");
+                    for (i, (a, b, c)) in rows[..3 + n].iter().enumerate() {
+                        y -= if i == 3 { blank * pitch } else { pitch };
+                        t += &show(fonts.0, size, 40.0, y, a);
+                        t += &show(fonts.0, size, 40.0 + 8.0 * size, y, b);
+                        t += &fr(40.0 + 40.0 * size, y, c);
+                    }
+                    let out = common::read(&page_in(&t, Look::Plain));
+                    let mut want = vec![vec![
+                        "Lohnart".to_string(),
+                        "Bezeichnung".into(),
+                        "Betrag".into(),
+                    ]];
+                    want.extend(
+                        rows[..3 + n]
+                            .iter()
+                            .map(|r| vec![r.0.to_string(), r.1.into(), r.2.into()]),
+                    );
+                    let found = tables(&out);
+                    if found.len() != 1 || found[0].1 != want {
+                        wrong.push(format!(
+                            "{n} rows, blank {blank}, {size}, {fonts:?}: {found:?}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Line items without rules with a line of amounts under the amounts of the first item, and an
+/// amount alone flush right under the last item at the row pitch, at sizes 6 to 14 in both
+/// fonts: the line of amounts is a row of its own, and the lone amount (a total, or one more
+/// amount: the layout does not tell) stays out of the table (the K2 case).
+#[test]
+fn a_total_under_stacked_amounts_stays_out() {
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+        for fonts in FONTS {
+            let k = size / 8.0;
+            let fr = |x: f32, y: f32, t: &str| {
+                show(
+                    fonts.0,
+                    size,
+                    x - common::font_width(fonts.0, t, size),
+                    y,
+                    t,
+                )
+            };
+            let mut y = 700.0;
+            let mut t = show(fonts.1, size, 40.0, y, "Pos")
+                + &show(fonts.1, size, 40.0 + 40.0 * k, y, "Artikel")
+                + &fr(40.0 + 300.0 * k, y, "Preis")
+                + &fr(40.0 + 420.0 * k, y, "Betrag");
+            let rows: [(&str, &str, &str, &str); 3] = [
+                ("1", "Beratung", "500,00", "1.000,00"),
+                ("", "", "50,00", "100,00"),
+                ("2", "Material", "200,00", "200,00"),
+            ];
+            for (a, b, c, d) in rows {
+                y -= 10.0 * k;
+                if !a.is_empty() {
+                    t += &show(fonts.0, size, 40.0, y, a);
+                    t += &show(fonts.0, size, 40.0 + 40.0 * k, y, b);
+                }
+                t += &fr(40.0 + 300.0 * k, y, c);
+                t += &fr(40.0 + 420.0 * k, y, d);
+            }
+            y -= 10.0 * k;
+            t += &fr(40.0 + 420.0 * k, y, "1.300,00");
+            let out = common::read(&page_in(&t, Look::Plain));
+            let found = tables(&out);
+            let want: Vec<Vec<String>> = [
+                ["Pos", "Artikel", "Preis", "Betrag"],
+                ["1", "Beratung", "500,00", "1.000,00"],
+                ["", "", "50,00", "100,00"],
+                ["2", "Material", "200,00", "200,00"],
+            ]
+            .iter()
+            .map(|r| r.iter().map(|c| c.to_string()).collect())
+            .collect();
+            if found.len() != 1
+                || found[0].1 != want
+                || !common::all_text(&out).contains("1.300,00")
+            {
+                wrong.push(format!("{size}, {fonts:?}: {found:?}"));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Line items without rules where a cell holds two whole numbers (two article numbers in one
+/// cell) or a percent over a percent, at sizes 6 to 14 in both fonts: the second line goes on
+/// in its cell. Only an amount under an amount is a row of its own.
+#[test]
+fn whole_numbers_and_percents_stay_in_their_cell() {
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+        for fonts in FONTS {
+            let k = size / 8.0;
+            let fr = |x: f32, y: f32, t: &str| {
+                show(
+                    fonts.0,
+                    size,
+                    x - common::font_width(fonts.0, t, size),
+                    y,
+                    t,
+                )
+            };
+            let mut y = 700.0;
+            let mut t = show(fonts.1, size, 40.0, y, "Artikel")
+                + &fr(40.0 + 200.0 * k, y, "Nummer")
+                + &fr(40.0 + 300.0 * k, y, "Satz")
+                + &fr(40.0 + 420.0 * k, y, "Betrag");
+            // The second line of a cell: in the column of numbers, or of rates.
+            let rows = [
+                (
+                    "Beratung",
+                    "4711",
+                    "19 %",
+                    "1.000,00",
+                    Some((200.0, "4712")),
+                ),
+                ("Material", "4720", "19 %", "200,00", Some((300.0, "7 %"))),
+                ("Versand", "4730", "7 %", "34,56", None),
+            ];
+            for (a, n, r, d, second) in rows {
+                y -= 10.0 * k;
+                t += &show(fonts.0, size, 40.0, y, a);
+                t += &fr(40.0 + 200.0 * k, y, n);
+                t += &fr(40.0 + 300.0 * k, y, r);
+                t += &fr(40.0 + 420.0 * k, y, d);
+                if let Some((x, text)) = second {
+                    y -= 10.0 * k;
+                    t += &fr(40.0 + x * k, y, text);
+                }
+            }
+            let out = common::read(&page_in(&t, Look::Plain));
+            let found = tables(&out);
+            let want: Vec<Vec<String>> = [
+                ["Artikel", "Nummer", "Satz", "Betrag"],
+                ["Beratung", "4711 4712", "19 %", "1.000,00"],
+                ["Material", "4720", "19 % 7 %", "200,00"],
+                ["Versand", "4730", "7 %", "34,56"],
+            ]
+            .iter()
+            .map(|r| r.iter().map(|c| c.to_string()).collect())
+            .collect();
+            if found.len() != 1 || found[0].1 != want {
+                wrong.push(format!("{size}, {fonts:?}: {found:?}"));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// A table without rules beside a margin column of notes, at sizes 6 to 14 in both fonts:
+/// the notes run on over and under the table's rows (one note on each row's baseline and one
+/// line over and under them), or stand beside some rows only. The column is no column of the
+/// table read apart: no loss says so.
+#[test]
+fn a_margin_column_beside_a_table_is_no_column_read_apart() {
+    let rows = [
+        ("1000", "Gehalt", "3.000,00"),
+        ("1010", "Zulage", "150,00"),
+        ("1020", "Fahrgeld", "45,67"),
+        ("2000", "Abzug", "12,34"),
+    ];
+    let notes = [
+        "Hinweise zur",
+        "Abrechnung",
+        "siehe Anlage",
+        "und Merkblatt",
+        "der Kasse",
+        "im Anhang",
+    ];
+    let mut wrong = Vec::new();
+    for every in [true, false] {
+        for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+            for fonts in FONTS {
+                let pitch = 1.25 * size;
+                let fr = |x: f32, y: f32, t: &str| {
+                    show(
+                        fonts.0,
+                        size,
+                        x - common::font_width(fonts.0, t, size),
+                        y,
+                        t,
+                    )
+                };
+                let top = 700.0;
+                let mut t = show(fonts.1, size, 40.0, top, "Lohnart")
+                    + &show(fonts.1, size, 40.0 + 8.0 * size, top, "Bezeichnung")
+                    + &fr(40.0 + 30.0 * size, top, "Betrag");
+                for (i, (a, b, c)) in rows.iter().enumerate() {
+                    let y = top - pitch * (i as f32 + 1.0);
+                    t += &show(fonts.0, size, 40.0, y, a);
+                    t += &show(fonts.0, size, 40.0 + 8.0 * size, y, b);
+                    t += &fr(40.0 + 30.0 * size, y, c);
+                }
+                // The notes from the header's baseline down, a line under the last row too; or
+                // beside the first two rows only.
+                let x = 40.0 + 36.0 * size;
+                for (k, n) in notes.iter().enumerate() {
+                    if !every && !(1..=2).contains(&k) {
+                        continue;
+                    }
+                    t += &show(fonts.0, 0.8 * size, x, top - pitch * k as f32, n);
+                }
+                let out = common::read(&page_in(&t, Look::Plain));
+                if out
+                    .document
+                    .losses
+                    .iter()
+                    .any(|l| l.what.contains("may go on in a column beside it"))
+                {
+                    wrong.push(format!(
+                        "every {every}, {size}, {fonts:?}: {:?}",
+                        out.document.losses
+                    ));
+                }
+                if !common::all_text(&out).contains("siehe Anlage") {
+                    wrong.push(format!("every {every}, {size}, {fonts:?}: a note is lost"));
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// How a line under the items of [`lines_under_items_without_rules_are_named_or_stay_paragraphs`]
 /// is set: in the items' font and size, at 0.75 times their size, or in the other family.
 #[derive(Debug, Clone, Copy, PartialEq)]

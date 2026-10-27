@@ -113,7 +113,9 @@ pub(super) fn borderless(
                 break;
             }
             // A gap of more than twice the steps of the lines on both sides of it parts two
-            // blocks (a table under a field list or under totals, with no rule between).
+            // blocks (a table under a field list or under totals, with no rule between) when
+            // the line after it stands in other columns; a group of rows of the same table after
+            // a blank row stands in its columns.
             let next = lines
                 .get(end + 1)
                 .filter(|_| !off[end + 1])
@@ -122,6 +124,7 @@ pub(super) fn borderless(
             if let Some(next) = next
                 && pitch > 0.0
                 && gap > REGION_STEPS * pitch.max(next)
+                && !in_columns(flow, &lines[i..end], cur)
             {
                 break;
             }
@@ -276,7 +279,7 @@ pub(super) fn borderless(
             }
         }
         // The lines under the region that go on in its last row join it.
-        let (joined, doubt) = joined_tail(flow, &lines[a..tail.end], &pieces, tail.marked);
+        let (joined, doubt, guessed) = joined_tail(flow, &lines[a..tail.end], &pieces, tail.marked);
         pieces.extend(lines[z..z + joined].iter().map(|l| pieces_of(flow, l)));
         z += joined;
         // Two blocks side by side are judged each alone.
@@ -417,6 +420,12 @@ pub(super) fn borderless(
                     }
                 }
             }
+        }
+        if taken && guessed {
+            found.uncertain.push(format!(
+                "an amount alone under a table on page {page} is read as one more row of it, as \
+                 the amounts alone over it are: it may be a total under the table"
+            ));
         }
         if taken && doubt {
             found.uncertain.push(format!(
@@ -638,8 +647,46 @@ fn goes_on_beside(
 }
 
 /// Two lines of a region without rules stand at most this many times the widest step of the
-/// region so far, or of the next two lines, apart: a wider gap parts two blocks.
+/// region so far, or of the next two lines, apart: a wider gap parts two blocks, unless the
+/// line after it stands in the region's columns (see [`in_columns`]).
 const REGION_STEPS: f32 = 2.0;
+
+/// A piece stands in a column of a region when it starts or ends within this many sizes of
+/// where a piece of the region starts or ends.
+const COLUMN_ALIGN: f32 = 0.25;
+
+/// Whether every piece of `line` starts or ends where a piece of `region` starts or ends (see
+/// [`COLUMN_ALIGN`]): its text stands in the region's columns, set flush left or flush right
+/// as theirs.
+fn in_columns(flow: &Flow, region: &[FlowLine], line: &FlowLine) -> bool {
+    let tol = COLUMN_ALIGN * line.size;
+    let edges: Vec<(f32, f32)> = region
+        .iter()
+        .flat_map(|l| pieces_of(flow, l))
+        .map(|p| (p.x0, p.x1))
+        .collect();
+    let own = pieces_of(flow, line);
+    !own.is_empty()
+        && own.iter().all(|p| {
+            edges
+                .iter()
+                .any(|e| (p.x0 - e.0).abs() <= tol || (p.x1 - e.1).abs() <= tol)
+        })
+}
+
+/// Whether `text` is an amount: a number (see [`Shape::Number`]) with a decimal part of two
+/// digits (`20,00`, `1.000,00`, `12,50 EUR`). Whole numbers, rates and dates are none.
+fn amount(text: &str) -> bool {
+    if Shape::of(text) != Some(Shape::Number) {
+        return false;
+    }
+    let mut t = text.trim();
+    for c in CURRENCIES {
+        t = t.trim_start_matches(c).trim_end_matches(c).trim();
+    }
+    t.rfind(['.', ','])
+        .is_some_and(|at| t.len() - at == 3 && t[at + 1..].bytes().all(|c| c.is_ascii_digit()))
+}
 
 /// A line of one piece under a table may go on in its last row when it starts within this
 /// many sizes of the start of its column; its font size may differ from the column's by this
@@ -647,8 +694,8 @@ const REGION_STEPS: f32 = 2.0;
 const WRAP_ALIGN: f32 = 0.1;
 
 /// How many of the lines under a region (`lines`, the region's first, its `pieces` the
-/// region's own) go on in its last row, and whether the first that does not may (a loss says
-/// so).
+/// region's own) go on in its last row, whether the first that does not may (a loss says
+/// so), and whether a line that joins as a row of its own may be a total (a loss says so).
 /// - A marked line (see [`Tail`]) does when each of its pieces stands over one column of the
 ///   region (it crosses no gutter): the frame holds it.
 /// - A line of one piece never does: a wrap of the last row and a note under the table look
@@ -664,10 +711,10 @@ fn joined_tail(
     lines: &[FlowLine],
     pieces: &[Vec<Piece>],
     marked: bool,
-) -> (usize, bool) {
+) -> (usize, bool, bool) {
     let core = pieces.len();
     if lines.len() <= core || core < 2 {
-        return (0, false);
+        return (0, false, false);
     }
     let columns = columns_of(pieces);
     let over = |p: &Piece| -> Vec<usize> {
@@ -679,10 +726,10 @@ fn joined_tail(
         let line = &lines[core];
         let own = pieces_of(flow, line);
         let [p] = own.as_slice() else {
-            return (0, false);
+            return (0, false, false);
         };
         let [c] = over(p)[..] else {
-            return (0, false);
+            return (0, false, false);
         };
         let pitch = (1..core)
             .map(|k| lines[k - 1].y - lines[k].y)
@@ -726,26 +773,26 @@ fn joined_tail(
         });
         let wrap =
             close && within && same_face && !numbers && !numeric(&text) && !page_number(&text);
-        // An amount at the pitch of the rows, in the column of numbers it stands in (flush with
-        // its start or its end), under an amount of the last line, is one more row of its own
-        // (see [`grid_of`]) when the region has such rows already: a line of amounts only, each
-        // under an amount of the line above. Else it may be a total under the items, and it
-        // stays out.
-        let amount = |q: &Piece| Shape::of(&text_of(flow, q.start, q.end)) == Some(Shape::Number);
-        let numbers_only = |line: &[Piece]| !line.is_empty() && line.iter().all(amount);
-        let under_numbers = |k: usize, line: &[Piece]| {
-            line.iter().all(|q| {
-                let cols = over(q);
-                pieces[k - 1].iter().any(|a| over(a) == cols && amount(a))
-            })
+        // An amount alone at the pitch of the rows, in the column of numbers it stands in (flush
+        // with its start or its end), under an amount of the last line, is one more row of its
+        // own (see [`grid_of`]) when the region has such rows already: amounts alone in the same
+        // column, each under an amount (the body of a header band). It may still be a total
+        // under the table, so a loss says so. Any other amount alone under a table may be a
+        // total, and it stays out.
+        let amount_in = |q: &Piece| amount(&text_of(flow, q.start, q.end));
+        let lone_under = |k: usize, line: &[Piece]| {
+            let [q] = line else { return false };
+            over(q) == [c]
+                && amount_in(q)
+                && pieces[k - 1].iter().any(|a| over(a) == [c] && amount_in(a))
         };
-        let stacked = (2..core).any(|k| numbers_only(&pieces[k]) && under_numbers(k, &pieces[k]));
+        let stacked = (2..core).any(|k| lone_under(k, &pieces[k]));
         let flush =
             within || ((p.x1 - columns[c].1).abs() <= WRAP_ALIGN * size && p.x0 >= columns[c].0);
-        if stacked && close && flush && same_face && amount(p) && under_numbers(core, &own) {
-            return (1, false);
+        if stacked && close && flush && same_face && lone_under(core, &own) {
+            return (1, false, true);
         }
-        return (0, wrap);
+        return (0, wrap, false);
     }
     let mut joined = 0;
     for line in &lines[core..] {
@@ -756,7 +803,7 @@ fn joined_tail(
         }
         joined += 1;
     }
-    (joined, false)
+    (joined, false, false)
 }
 
 /// A rule that ends a region without rules is at most its median text size divided by this
@@ -1201,17 +1248,16 @@ fn grid_of(
         c.dedup();
         c.len()
     };
-    // A line of amounts only (see [`Shape::Number`]), each under an amount of the row above in
-    // its column, is a row of its own too: two amounts in one cell are never one cell's (the
-    // rule of a header band's body, see `banded::row_starts`). A date or a range under a date
-    // goes on in its cell.
+    // A line of amounts only (see [`amount`]), each under an amount of the row above in its
+    // column, is a row of its own too: two amounts in one cell are never one cell's (the rule of
+    // a header band's body, see `banded::row_starts`). A date or a range under a date, a whole
+    // number under a whole number (two article numbers) and a rate under a rate go on in their
+    // cell.
     let mut anchors: Vec<usize> = Vec::new();
     // The columns of the row being built that hold an amount.
     let mut above: Vec<usize> = Vec::new();
     for (k, row) in placed.iter().enumerate() {
-        let number = |&(_, span, (s, e)): &Placement| {
-            span == 1 && Shape::of(&text_of(flow, s, e)) == Some(Shape::Number)
-        };
+        let number = |&(_, span, (s, e)): &Placement| span == 1 && amount(&text_of(flow, s, e));
         let stacked = !anchors.is_empty()
             && !row.is_empty()
             && row.iter().all(|x| number(x) && above.contains(&x.0));
