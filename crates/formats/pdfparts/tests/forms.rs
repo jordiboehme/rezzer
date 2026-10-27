@@ -707,6 +707,8 @@ fn named_with_budget(raw: Vec<u8>, name_bytes: u64) -> Pdf {
         dictionary! { "Fields" => vec![f.into()] }
     };
     let opened = with_form(build);
+    // What open charges depends on the file only, not on `max_object_bytes` (which only caps
+    // it), so the first open sizes the budget of the second.
     let bytes = opened.original().to_vec();
     let tight = Limits {
         max_object_bytes: opened.object_bytes() + name_bytes * 3 / 2,
@@ -741,9 +743,17 @@ fn form_limit(pdf: &Pdf) -> bool {
 #[test]
 fn the_first_unclosed_name_is_charged() {
     // The field copy and the copy kept for the unclosed-escape issue together do not fit.
+    // The name for the issue is charged first and fits, so the issue stays; the field copy
+    // after it stops the walk.
     let pdf = named_with_budget(long_escaped_name(None), 64 * 1024);
     assert!(form_limit(&pdf), "{:?}", pdf.issues());
     assert!(pdf.form().unwrap().fields.is_empty());
+    let escapes = pdf
+        .issues()
+        .iter()
+        .filter(|i| i.kind == IssueKind::Damaged && i.what.contains("language escape"))
+        .count();
+    assert_eq!(escapes, 1, "{:?}", pdf.issues());
 }
 
 #[test]
