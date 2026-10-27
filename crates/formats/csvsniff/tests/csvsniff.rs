@@ -615,6 +615,50 @@ fn analyze_until_stops_inside_one_long_record() {
 }
 
 #[test]
+fn every_pass_over_a_long_record_asks_the_stop() {
+    // 20 rows of three numbers that sum (so the derived-column pass runs) and one text cell
+    // of 1 MiB in the first rows: the column, derived and quote passes all read it.
+    let mut text = String::from("A,B,C,Total,Note\n");
+    for j in 1..=20 {
+        let (a, b, c) = (
+            j * 371 % 900 + 100,
+            j * 533 % 700 + 200,
+            j * 179 % 600 + 3150,
+        );
+        let note = if j == 3 {
+            "x".repeat(1024 * 1024)
+        } else {
+            "n".into()
+        };
+        text.push_str(&format!("{a},{b},{c},{},{note}\n", a + b + c));
+    }
+    let d = sniff(&text).unwrap();
+    let whole = analyze(&text, &d, 1000);
+    assert!(!whole.truncated && !whole.derived.is_empty(), "{whole:?}");
+    let calls = std::cell::Cell::new(0usize);
+    let counted = csvsniff::analyze_until(&text, &d, 1000, &|| {
+        calls.set(calls.get() + 1);
+        false
+    });
+    assert_eq!(counted.derived, whole.derived);
+    // About 16 asks a pass over 1 MiB: two record passes, the derived and the quote pass.
+    let per_pass = text.len() / (64 * 1024);
+    let all = calls.get();
+    assert!(all >= 4 * per_pass, "{all} asks, {per_pass} a pass");
+    // A stop in the derived pass and one in the quote pass (the last ask) both cut it.
+    for at in [all - per_pass - 2, all] {
+        let calls = std::cell::Cell::new(0usize);
+        let a = csvsniff::analyze_until(&text, &d, 1000, &|| {
+            calls.set(calls.get() + 1);
+            calls.get() >= at
+        });
+        assert!(a.truncated, "stop at ask {at}");
+        assert!(a.derived.is_empty() && a.quote_problems.is_empty(), "{a:?}");
+        assert_eq!(calls.get(), at);
+    }
+}
+
+#[test]
 fn sniff_looks_only_at_the_first_mebibyte() {
     // A normal start, then a record of 64 MiB: sniffing must not scan it.
     let mut text = String::from("a,b,c\n1,2,3\n4,5,6\n7,8,9\n");

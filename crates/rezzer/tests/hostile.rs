@@ -199,6 +199,38 @@ fn huge_csv_row_respects_time_limit() {
 }
 
 #[test]
+fn huge_text_line_respects_time_limit() {
+    // One line of 100 MiB without a break, read by the text reader. It looks for the end of
+    // the line with a time check every 64 KiB, so the limit cuts the line. READS: measured
+    // once with this step, printed below (2026-10-27, macOS, debug); the whole read takes
+    // 1,601.
+    const STEP: Duration = Duration::from_micros(800);
+    const READS: u64 = 1_251;
+    let limit = Duration::from_secs(1);
+    let clock = Clock::steps(STEP);
+    let p = pipeline_with_clock(limit, clock.clone());
+    let mut bytes = vec![b'x'; 100 * 1024 * 1024];
+    bytes.push(b'\n');
+    let start = Instant::now();
+    let result = p.run_bytes("huge.txt", bytes, None, &request());
+    let took = start.elapsed();
+    eprintln!(
+        "huge_text_line: {:?}, {} clock readings in {took:?}: {:?} {:?}",
+        result.completeness,
+        clock.reads(),
+        result.document.as_ref().map(|d| d.source.format),
+        losses(&result)
+    );
+    assert!(took < SAFETY, "took {took:?}");
+    assert_reads(&clock, READS);
+    assert_eq!(result.completeness, Completeness::Partial, "{result:?}");
+    assert_eq!(
+        losses(&result),
+        ["Limit paragraph 1 rest of the text not read"]
+    );
+}
+
+#[test]
 fn many_csv_rows_stop_at_the_time_limit() {
     use std::io::Write;
     // Short limit and a file that needs far more than that to analyze, so the test also

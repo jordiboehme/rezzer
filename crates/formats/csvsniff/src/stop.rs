@@ -9,7 +9,7 @@ use std::cell::Cell;
 use std::io::{self, Read};
 
 /// Bytes of the text between two calls of the stop callback, also inside one record.
-const STOP_CHECK_BYTES: usize = 64 * 1024;
+pub(crate) const STOP_CHECK_BYTES: usize = 64 * 1024;
 
 /// Hands out the text and asks `stop` after each [`STOP_CHECK_BYTES`]. Once `stop` says yes,
 /// it fails every read: the CSV reader then drops the record it was reading, and

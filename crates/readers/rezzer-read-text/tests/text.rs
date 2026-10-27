@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use rezzer_limits::{Budget, Limits};
+use rezzer_limits::{Budget, CancelToken, Clock, Limits};
 use rezzer_model::{
     Block, Bytes, Completeness, Confidence, Detection, FormatId, Inline, LossReason, ReadOptions,
     Reader, SectionKind, Severity, Source,
@@ -140,6 +140,36 @@ fn one_huge_paragraph_is_time_checked() {
     let got = paragraphs(&out);
     assert_eq!(got.len(), 1);
     assert!(got[0].len() < text.len());
+}
+
+#[test]
+fn one_huge_line_is_time_checked_inside() {
+    // One line of 1 MiB after a short paragraph. The time is checked every 64 KiB of the
+    // line: the third check is past the limit, so three blocks of 64 KiB are kept.
+    let mut text = String::from("Muster GmbH\n\n");
+    text.push_str(&"é".repeat(512 * 1024));
+    let clock = Clock::steps(std::time::Duration::from_millis(10));
+    let budget = Budget::with_clock(
+        Limits {
+            max_time: std::time::Duration::from_millis(25),
+            ..Limits::default()
+        },
+        CancelToken::default(),
+        clock.clone(),
+    );
+    let out = TextReader.read(&source(text.as_bytes()), &ReadOptions::default(), &budget);
+    assert_eq!(out.completeness, Completeness::Partial);
+    assert_eq!(clock.reads(), 3);
+    let loss = out.document.losses.last().unwrap();
+    assert_eq!(loss.why, LossReason::Limit);
+    assert_eq!(loss.location, "paragraph 2");
+    assert_eq!(loss.what, "rest of the text not read");
+    let got = paragraphs(&out);
+    assert_eq!(got.len(), 2);
+    assert_eq!(got[0], "Muster GmbH");
+    // The cut is where the third check came, on a character boundary.
+    assert_eq!(got[1].len(), 3 * 64 * 1024);
+    assert!(got[1].chars().all(|c| c == 'é'));
 }
 
 #[test]

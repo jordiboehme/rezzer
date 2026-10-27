@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use crate::derived::{self, MAX_NUMERIC_COLUMNS, NumCol};
-use crate::stop::StopRead;
+use crate::stop::{STOP_CHECK_BYTES, StopRead};
 use crate::types::{Analysis, Column, ColumnKind, Dialect, QuoteProblem, RaggedRow};
 
 const CANDIDATES: &[u8; 4] = b",;\t|";
@@ -776,12 +776,24 @@ fn identifier_values(acc: &Acc, c: &Column, rows: usize) -> bool {
 /// quote and whether it is still open at the end of `text`. A field that runs over a line break
 /// and then ends in a quote that is not followed by a delimiter or a line break (the csv crate
 /// reads on without an error) counts as well, with `at_end` false.
-fn find_quote_problems(text: &str, delimiter: u8, quote: u8) -> Vec<QuoteProblem> {
+fn find_quote_problems(
+    text: &str,
+    delimiter: u8,
+    quote: u8,
+    stop: &dyn Fn() -> bool,
+) -> Option<Vec<QuoteProblem>> {
     let b = text.as_bytes();
     let (mut i, mut start, mut open) = (0, true, false);
     let (mut opened_at, mut multiline) = (0, false);
     let mut problems: Vec<QuoteProblem> = Vec::new();
+    let mut next_check = STOP_CHECK_BYTES;
     while i < b.len() {
+        if i >= next_check {
+            next_check = i + STOP_CHECK_BYTES;
+            if stop() {
+                return None;
+            }
+        }
         let c = b[i];
         if open {
             if c == b'\n' {
@@ -820,7 +832,7 @@ fn find_quote_problems(text: &str, delimiter: u8, quote: u8) -> Vec<QuoteProblem
             at_end: true,
         });
     }
-    problems
+    Some(problems)
 }
 
 /// Analyzes the whole text with a known dialect.
@@ -845,9 +857,9 @@ pub fn analyze(text: &str, dialect: &Dialect, max_rows: usize) -> Analysis {
 /// Records between two calls of the stop callback.
 const STOP_CHECK_EVERY: usize = 4096;
 
-/// Like [`analyze`], but asks `stop` every few thousand records and every 64 KiB of text
-/// (also inside one long record) and ends the analysis early
-/// when it returns true (a time limit, a cancel). The result then has `truncated` set: the
+/// Like [`analyze`], but asks `stop` every few thousand records and every 64 KiB of text in
+/// each pass over it (also inside one long record) and ends the analysis early when it
+/// returns true (a time limit, a cancel). The result then has `truncated` set: the
 /// row count and column facts cover only the records read so far, and the derived-column and
 /// quote checks are skipped.
 pub fn analyze_until(
@@ -956,7 +968,7 @@ pub fn analyze_until(
 
     // Pass 3: numeric values of the first `max_rows` rows, for the derived check.
     let checked_rows = rows.min(max_rows);
-    let derived = if checked_rows >= 10 && !truncated {
+    let mut derived = if checked_rows >= 10 && !truncated {
         let eligible: Vec<(usize, u8)> = columns
             .iter()
             .enumerate()
@@ -971,7 +983,8 @@ pub fn analyze_until(
         if eligible.len() >= 3 {
             let mut values: Vec<Vec<Option<f64>>> =
                 vec![Vec::with_capacity(checked_rows); eligible.len()];
-            let mut rdr = reader(text.as_bytes(), delimiter, quote);
+            let stopped = Cell::new(false);
+            let mut rdr = reader(StopRead::new(text, stop, &stopped), delimiter, quote);
             let skip = lead + usize::from(dialect.has_header);
             for rec in rdr
                 .records()
@@ -992,6 +1005,7 @@ pub fn analyze_until(
                     values,
                 })
                 .collect();
+            truncated = stopped.get();
             derived::find(&nums, checked_rows)
         } else {
             Vec::new()
@@ -999,11 +1013,14 @@ pub fn analyze_until(
     } else {
         Vec::new()
     };
-    let quote_problems = if truncated {
-        Vec::new()
-    } else {
-        find_quote_problems(text, delimiter, quote)
-    };
+    let found = (!truncated)
+        .then(|| find_quote_problems(text, delimiter, quote, stop))
+        .flatten();
+    truncated |= found.is_none();
+    if truncated {
+        derived.clear();
+    }
+    let quote_problems = found.unwrap_or_default();
     Analysis {
         truncated,
         columns,

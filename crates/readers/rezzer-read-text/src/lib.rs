@@ -19,6 +19,9 @@ const CHECK_EVERY: usize = 1000;
 /// How many bytes of text are read between two time checks, so one huge paragraph is covered.
 const CHECK_BYTES: usize = 1024 * 1024;
 
+/// Bytes searched for the end of one line between two time checks, so one huge line is cut.
+const LINE_CHECK_BYTES: usize = 64 * 1024;
+
 /// Model elements one line adds to its paragraph: the block (first line) or a line break
 /// (further lines), and the text.
 const LINE_ELEMENTS: u64 = 2;
@@ -74,7 +77,33 @@ impl Reader for TextReader {
         let mut current_bytes = 0usize;
         let mut since_check = 0usize;
         let mut stopped_at: Option<(usize, &str)> = None;
-        for line in text.split('\n') {
+        let mut rest = Some(&*text);
+        while let Some(left) = rest {
+            let (line, timed_out) = next_line(left, budget);
+            rest = if timed_out {
+                None
+            } else {
+                left.get(line.len() + 1..)
+            };
+            if timed_out {
+                // Keep what is read of the line and its paragraph.
+                let separator = usize::from(!current.is_empty());
+                if !line.trim().is_empty()
+                    && budget.add_elements(LINE_ELEMENTS).is_ok()
+                    && budget
+                        .charge_text(current_bytes + separator + line.len())
+                        .is_ok()
+                {
+                    current.push(line);
+                }
+                let kept = !current.is_empty();
+                if kept {
+                    blocks.push(paragraph(&current));
+                    current.clear();
+                }
+                stopped_at = Some((blocks.len() + usize::from(!kept), TIME_STOP));
+                break;
+            }
             if line.trim().is_empty() {
                 if !current.is_empty() {
                     blocks.push(paragraph(&current));
@@ -163,6 +192,31 @@ impl Reader for TextReader {
             blobs: Vec::new(),
             document: doc,
             completeness,
+        }
+    }
+}
+
+/// The next line of `rest`, up to a line break or the end, searched with a time check every
+/// [`LINE_CHECK_BYTES`]. When the time runs out first, the line is cut there (on a character
+/// boundary) and the second value is true.
+fn next_line<'a>(rest: &'a str, budget: &Budget) -> (&'a str, bool) {
+    let bytes = rest.as_bytes();
+    let mut from = 0;
+    loop {
+        let to = (from + LINE_CHECK_BYTES).min(bytes.len());
+        if let Some(i) = bytes[from..to].iter().position(|&b| b == b'\n') {
+            return (&rest[..from + i], false);
+        }
+        if to == bytes.len() {
+            return (rest, false);
+        }
+        from = to;
+        if budget.check_time().is_err() {
+            let mut cut = from;
+            while !rest.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            return (&rest[..cut], true);
         }
     }
 }
