@@ -19,18 +19,18 @@ Only the latest release gets security fixes. Please check that the problem still
 Every release has these files next to the archives:
 
 - `SHA256SUMS`: the SHA-256 checksums of the archives and the SBOMs
-- `SHA256SUMS.sigstore.json`: a cosign signature of `SHA256SUMS`, made without a key in GitHub Actions
+- `SHA256SUMS.sigstore.json`: a cosign signature of `SHA256SUMS`, made in GitHub Actions, with no key to keep
 - `rezzer-v<version>-<platform>.cdx.json`: a CycloneDX SBOM for each platform, with the crates in that binary
 
 GitHub also keeps a build provenance attestation for every file of the release and an SBOM attestation for each archive.
 
-Check the checksum of your archive (on macOS use `shasum -a 256` instead of `sha256sum`):
+Check the checksum of your archive. On macOS use `shasum -a 256` instead of `sha256sum`. On Windows run `(Get-FileHash <file>).Hash.ToLower()` in PowerShell and compare the hash with the line in `SHA256SUMS`.
 
 ```sh
 sha256sum -c SHA256SUMS --ignore-missing
 ```
 
-Check the signature of the checksum file:
+Check the signature of the checksum file (cosign 3 or newer):
 
 ```sh
 cosign verify-blob --bundle SHA256SUMS.sigstore.json \

@@ -49,7 +49,7 @@ Or download the archive for your system from the [latest release](https://github
 - macOS: `rezzer-v<version>-macos-arm64.tar.gz` (Apple silicon) or `rezzer-v<version>-macos-intel.tar.gz`. The binary is signed and notarized.
 - Windows: `rezzer-v<version>-windows-amd64.zip` or `rezzer-v<version>-windows-arm64.zip`. The binary is not signed yet, so SmartScreen may ask once before it runs.
 
-Each archive has a folder with the binary (`rezzer`, or `rezzer.exe` on Windows), the license, this README and `THIRD-PARTY-NOTICES.txt` with the licenses of the third-party code inside. Put the binary somewhere on your `PATH`.
+Each archive has one folder with the binary (`rezzer`, or `rezzer.exe` on Windows), the license and this README. `THIRD-PARTY-NOTICES.txt` in the same folder lists the licenses of the third-party code inside. Put the binary somewhere on your `PATH`.
 
 ### Build from source
 
@@ -70,7 +70,13 @@ sha256sum -c SHA256SUMS --ignore-missing          # Linux
 shasum -a 256 -c SHA256SUMS --ignore-missing      # macOS
 ```
 
-The checksum file is signed with [cosign](https://github.com/sigstore/cosign) in GitHub Actions. There is no key: the signature says which workflow made it. Check it:
+On Windows, run this in PowerShell and compare the hash with the line for your archive in `SHA256SUMS`:
+
+```powershell
+(Get-FileHash rezzer-v<version>-windows-amd64.zip).Hash.ToLower()
+```
+
+The checksum file is signed with [cosign](https://github.com/sigstore/cosign) in GitHub Actions. No key is needed: the signature says which workflow made it. Check it with cosign 3 or newer:
 
 ```sh
 cosign verify-blob --bundle SHA256SUMS.sigstore.json \
@@ -79,7 +85,7 @@ cosign verify-blob --bundle SHA256SUMS.sigstore.json \
   SHA256SUMS
 ```
 
-Or check where a file was built with the [GitHub CLI](https://cli.github.com):
+You can also check where a file was built with the [GitHub CLI](https://cli.github.com):
 
 ```sh
 gh attestation verify rezzer-v<version>-linux-amd64.tar.gz --repo jordiboehme/rezzer
