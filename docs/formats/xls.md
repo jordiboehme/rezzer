@@ -6,10 +6,10 @@ Status: 🗓️ planned for 0.2.0. Nothing is implemented yet.
 
 File types: `.xls`. Rezzer detects the format by content, not by extension.
 
-Built on (versions as tested on 2026-10-19):
+Built on (versions as used in the development version):
 
 - [calamine](https://crates.io/crates/calamine) 0.37.0 for values, formulas and cached results. It was the only tested crate that gives formulas for binary Excel files
-- [formualizer-parse](https://crates.io/crates/formualizer-parse) 3.2.0 to find the cells and ranges each formula reads
+- [formualizer-parse](https://crates.io/crates/formualizer-parse) 4.1.0 to find the cells and ranges each formula reads
 - [cfb](https://crates.io/crates/cfb) for document properties
 - Rezzer's own checks for names and 3D references (see below)
 

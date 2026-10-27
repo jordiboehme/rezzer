@@ -2259,6 +2259,7 @@ fn many_outline_items_are_bounded() {
         _ => 0,
     };
     assert!(kept > 1_000 && kept < n, "{kept}");
+    assert_eq!(out.document.facets.outline.len(), kept);
     assert_objects_cut(&out, start, "outline", "outline items");
 }
 
@@ -2682,6 +2683,8 @@ fn a_title_shared_by_many_outline_items_is_read_once() {
         _ => 0,
     };
     assert!(kept > 1_000 && kept < 30_000, "{kept}");
+    // A cut item is in neither the section nor the outline facet.
+    assert_eq!(out.document.facets.outline.len(), kept);
     limit_at(
         &out,
         "outline",

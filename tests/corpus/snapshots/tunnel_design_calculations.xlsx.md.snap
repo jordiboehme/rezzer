@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "tunnel_design_calculations.xlsx"
+description: "XLSX, 4 sheets, 2026-08-24. 4 tables, 86 formulas."
 resource: "<corpus>/office/tunnel_design_calculations.xlsx"
+tags: ["rezzer", "xlsx"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: high
+temporal_confidence: explicit
+status: stable
 source_sha256: "efab83e86b0294f631b0ed072adcbfe953def83a9fb7652a2618408715080cdc"
 source_size: 20090
+file_modified: <modified>
 format: xlsx
 detected_by: "zip with [Content_Types].xml main part spreadsheetml"
 reader: "sheet/0.1.0"

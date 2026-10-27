@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "scan-truman-letter-nara.pdf"
+description: "PDF, 1 page, 2010-03-10. 1 picture that needs vision."
 resource: "<corpus>/pdf/scan-truman-letter-nara.pdf"
+tags: ["rezzer", "pdf"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: high
+temporal_confidence: explicit
+status: stable
 source_sha256: "a775d592b0780a097bd41a3738b9ce369a98cc2eabf4831a17251beb9f0cb7fd"
 source_size: 266833
+file_modified: <modified>
 format: pdf
 detected_by: "pdf header %PDF-"
 reader: "pdf/0.1.0"

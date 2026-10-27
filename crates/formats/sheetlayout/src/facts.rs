@@ -74,6 +74,7 @@ pub(crate) fn resolve(
     let mut overlaps = 0usize;
     let mut stopped = false;
     for (n, i) in order.into_iter().enumerate() {
+        crate::work::add(1);
         if n % STOP_EVERY == STOP_EVERY - 1 && stop() {
             stopped = true;
             break;
@@ -175,6 +176,7 @@ pub(crate) fn assign(prep: &Prep, kept: &[Kept], stop: &dyn Fn() -> bool) -> Hel
     let mut taken = vec![false; prep.items()];
     let mut merges = Vec::new();
     for k in kept {
+        crate::work::add(1);
         if stop() {
             return Held {
                 merges,
@@ -197,6 +199,7 @@ pub(crate) fn assign(prep: &Prep, kept: &[Kept], stop: &dyn Fn() -> bool) -> Hel
         };
     }
     for (j, m) in prep.merges.iter().enumerate() {
+        crate::work::add(1);
         if j % 4096 == 4095 && stop() {
             return Held {
                 merges,
@@ -317,6 +320,7 @@ pub(crate) fn join_names(
     let mut hit = vec![false; works.len()];
     let mut hits: Vec<usize> = Vec::new();
     for (n, name) in input.names.iter().enumerate() {
+        crate::work::add(1);
         if n % NAMES_STOP_EVERY == 0 && stop() {
             let left = input.names.len() - n;
             let words = format!("{left} defined names were not used to join regions");

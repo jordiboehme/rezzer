@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "text-latin1-gutenberg-verwandlung.txt"
+description: "Text, 172 paragraphs."
 resource: "<corpus>/web-text/text-latin1-gutenberg-verwandlung.txt"
+tags: ["rezzer", "text"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: medium
+temporal_confidence: inferred
+status: stable
 source_sha256: "fe91c871104780ce5a8fe3e12e79b757f6fb5ffa28ed83d6186e618fb3bf344a"
 source_size: 143353
+file_modified: <modified>
 format: text
 detected_by: "text (windows-1252)"
 encoding: "windows-1252"

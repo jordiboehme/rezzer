@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "mustang-gnuaccounting-invoice-508.pdf"
+description: "PDF, 1 page, 2020-11-21. 3 tables, 6 parts not read."
 resource: "<corpus>/pdf/mustang-gnuaccounting-invoice-508.pdf"
+tags: ["rezzer", "pdf"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: high
+temporal_confidence: explicit
+status: stable
 source_sha256: "6fd91b9e3b47193c4a7d6ea4bc30b80d1fd3f9e2cf74f3300f66f16303157dc1"
 source_size: 90271
+file_modified: <modified>
 format: pdf
 detected_by: "pdf header %PDF-"
 reader: "pdf/0.1.0"

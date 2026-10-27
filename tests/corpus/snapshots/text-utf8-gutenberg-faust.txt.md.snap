@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "text-utf8-gutenberg-faust.txt"
+description: "Text, 1144 paragraphs."
 resource: "<corpus>/web-text/text-utf8-gutenberg-faust.txt"
+tags: ["rezzer", "text"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: medium
+temporal_confidence: inferred
+status: stable
 source_sha256: "fed2a58edd6910ee96d27ada614d34bcc41f03750d86541c41246bb74c564ff7"
 source_size: 218440
+file_modified: <modified>
 format: text
 detected_by: "text (UTF-8)"
 encoding: "UTF-8"

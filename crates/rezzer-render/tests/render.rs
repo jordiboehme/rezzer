@@ -6,8 +6,8 @@ use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use rezzer_model::{
     Align, Anchor, Annotation, Asset, Block, CalloutKind, Cell, Completeness, Confidence,
     Detection, Document, Edge, Embedded, Event as TimelineEvent, FormatId, Formula, FormulaKind,
-    Graph, Inline, Loss, LossReason, Node, Overview, OverviewPart, Parameter, ReaderInfo, Role,
-    Rule, SectionKind, Severity, SourceInfo, StatusColor, TaskState, Value,
+    Graph, Inline, Loss, LossReason, Node, OutlineEntry, Overview, OverviewPart, Parameter,
+    ReaderInfo, Role, Rule, SectionKind, Severity, SourceInfo, StatusColor, TaskState, Value,
 };
 use rezzer_render::{OutputSection, RenderOptions, paginate, render, render_overview};
 
@@ -23,6 +23,9 @@ fn source() -> SourceInfo {
             evidence: "extension .md and text".into(),
         },
         modified: Some("2026-01-05T10:00:00Z".into()),
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
         encoding: Some("utf-8".into()),
         reader: Some(ReaderInfo {
             id: "markdown".into(),
@@ -129,6 +132,9 @@ fn edge(from: &str, to: &str, kind: &str) -> Edge {
 #[test]
 fn frontmatter_key_order() {
     let mut d = doc();
+    d.source.created = Some("2025-11-29T07:00:00Z".into());
+    d.source.downloaded_from = Some("https://example.org/report.md".into());
+    d.source.file_tags = vec!["Red".into(), "Work Items".into()];
     d.properties.title = Some("Report".into());
     d.properties.description = Some("A test".into());
     d.properties.keywords = vec!["alpha".into(), "beta".into()];
@@ -140,6 +146,7 @@ fn frontmatter_key_order() {
     d.properties.modified = Some(Value::Date {
         value: "2025-12-01".into(),
     });
+    d.properties.facts.pages = Some(3);
     d.losses.push(loss(
         "page 1",
         "a picture",
@@ -148,25 +155,35 @@ fn frontmatter_key_order() {
     ));
     let mut o = opts();
     o.archive_ref = Some("rezzer://sha256/abc123/report.md".into());
+    o.table_style = rezzer_render::TableStyle::Records;
+    o.parts = Some(4);
     let md = render(&d, Completeness::Partial, &o);
     let expected = "---\n\
-type: document\n\
+type: source\n\
 title: \"Report\"\n\
 description: \"A test\"\n\
 resource: \"/data/report.md\"\n\
-tags: [\"alpha\", \"beta\"]\n\
+tags: [\"rezzer\", \"markdown\", \"alpha\", \"beta\", \"red\", \"work-items\"]\n\
 generated: { by: rezzer/0.1.0, at: 2026-10-20T12:00:00Z }\n\
 source_date: 2025-12-01\n\
-temporal_confidence: high\n\
+temporal_confidence: explicit\n\
 sources: [\"rezzer://sha256/abc123/report.md\"]\n\
+status: stable\n\
 source_sha256: \"abc123\"\n\
 source_size: 42\n\
+file_created: 2025-11-29T07:00:00Z\n\
+file_modified: 2026-01-05T10:00:00Z\n\
+downloaded_from: \"https://example.org/report.md\"\n\
+file_tags: [\"Red\", \"Work Items\"]\n\
 format: markdown\n\
 detected_by: \"extension .md and text\"\n\
 encoding: \"utf-8\"\n\
 reader: \"markdown/0.1.0\"\n\
 completeness: partial\n\
 losses: 1\n\
+parts: 4\n\
+pages: 3\n\
+table_style: \"records\"\n\
 authors: [\"Ann \\\"A\\\"\", \"Bob\"]\n\
 language: \"de\"\n\
 keywords: [\"alpha\", \"beta\"]\n\
@@ -184,24 +201,33 @@ fn frontmatter_minimal_uses_file_name_and_file_date() {
     s.path = None;
     s.encoding = None;
     s.reader = None;
-    let d = Document::new(s);
+    let mut d = Document::new(s);
+    d.body = vec![para("one"), para("two")];
     let md = render(&d, Completeness::Complete, &opts());
     let expected = "---\n\
-type: document\n\
+type: source\n\
 title: \"report.md\"\n\
+description: \"Markdown, 42 bytes.\"\n\
 resource: \"report.md\"\n\
+tags: [\"rezzer\", \"markdown\"]\n\
 generated: { by: rezzer/0.1.0, at: 2026-10-20T12:00:00Z }\n\
 source_date: 2026-01-05\n\
-temporal_confidence: medium\n\
+temporal_confidence: inferred\n\
+status: stable\n\
 source_sha256: \"abc123\"\n\
 source_size: 42\n\
+file_modified: 2026-01-05T10:00:00Z\n\
 format: markdown\n\
 detected_by: \"extension .md and text\"\n\
 completeness: complete\n\
 losses: 0\n\
 ---\n\
 \n\
-# report.md\n";
+# report.md\n\
+\n\
+one\n\
+\n\
+two\n";
     assert_eq!(md, expected);
 }
 
@@ -223,9 +249,19 @@ fn frontmatter_round_trips_hostile_values_through_yaml() {
     let hostile = "a\\b \"q\"\n\t\u{1}\u{7f}\u{85}\u{2028}\u{feff}---\n# x: y";
     let mut d = doc();
     d.properties.title = Some(hostile.into());
+    d.properties.description = Some(hostile.into());
     d.properties.keywords = vec![hostile.into()];
     d.source.detection.evidence = hostile.into();
-    let md = render(&d, Completeness::Complete, &opts());
+    d.source.downloaded_from = Some(hostile.into());
+    d.source.file_tags = vec![hostile.into()];
+    let mut o = opts();
+    o.part = Some(rezzer_render::PartMeta {
+        index: 1,
+        count: 2,
+        location: hostile.into(),
+        title: hostile.into(),
+    });
+    let md = render(&d, Completeness::Complete, &o);
     let fm = frontmatter_of(&md);
     let mut scalars = Vec::new();
     for item in saphyr_parser::Parser::new_from_str(fm) {
@@ -234,18 +270,26 @@ fn frontmatter_round_trips_hostile_values_through_yaml() {
             scalars.push(value.into_owned());
         }
     }
-    let pos = scalars
-        .iter()
-        .position(|s| s == "title")
-        .expect("title key");
-    assert_eq!(scalars[pos + 1], hostile);
-    let pos = scalars.iter().position(|s| s == "tags").expect("tags key");
-    assert_eq!(scalars[pos + 1], hostile);
-    let pos = scalars
-        .iter()
-        .position(|s| s == "detected_by")
-        .expect("detected_by key");
-    assert_eq!(scalars[pos + 1], hostile);
+    let value = |key: &str| {
+        let pos = scalars.iter().position(|s| s == key).expect(key);
+        scalars[pos + 1].clone()
+    };
+    for key in [
+        "title",
+        "keywords",
+        "detected_by",
+        "downloaded_from",
+        "file_tags",
+        "location",
+    ] {
+        assert_eq!(value(key), hostile, "{key}");
+    }
+    assert_eq!(
+        value("description"),
+        format!("Part 1 of 2 of \"{hostile}\": {hostile}.")
+    );
+    // A hostile keyword does not fold into a tag.
+    assert_eq!(value("tags"), "rezzer");
 }
 
 #[test]
@@ -1280,8 +1324,10 @@ fn emphasis_flanks_in_common_cases() {
             role: None,
             anchor: None,
         }]);
-        after_frontmatter(&md)
-            .trim_start_matches("\n# report.md\n\n")
+        let body = after_frontmatter(&md).trim_start_matches("\n# report.md\n\n");
+        // A one-line body gets the description under the title (Q001).
+        body.strip_prefix("Markdown, 42 bytes.\n\n")
+            .unwrap_or(body)
             .to_string()
     };
     assert_eq!(p(vec![styled("word", true, false), txt(".")]), "*word*.\n");
@@ -1506,15 +1552,17 @@ fn dialect_line_is_escaped() {
 }
 
 #[test]
-fn impossible_dates_are_quoted() {
+fn impossible_dates_fall_back_or_are_left_out() {
     let date = |v: &str| {
         let mut d = doc();
         d.properties.modified = Some(Value::Date { value: v.into() });
         render(&d, Completeness::Complete, &opts())
     };
-    assert!(date("2024-02-29").contains("\nsource_date: 2024-02-29\ntemporal_confidence: high\n"));
+    assert!(
+        date("2024-02-29").contains("\nsource_date: 2024-02-29\ntemporal_confidence: explicit\n")
+    );
     // An impossible document date falls back to the file date.
-    let file_date = "\nsource_date: 2026-01-05\ntemporal_confidence: medium\n";
+    let file_date = "\nsource_date: 2026-01-05\ntemporal_confidence: inferred\n";
     for bad in ["2026-02-30", "2025-13-01", "2026-04-31", "2100-02-29"] {
         assert!(date(bad).contains(file_date), "{bad}");
     }
@@ -1528,14 +1576,9 @@ fn impossible_dates_are_quoted() {
     });
     let md = render(&d, Completeness::Complete, &opts());
     assert!(
-        md.contains("\nsource_date: 2025-03-04\ntemporal_confidence: high\n"),
+        md.contains("\nsource_date: 2025-03-04\ntemporal_confidence: explicit\n"),
         "{md}"
     );
-    // An impossible file date is quoted.
-    let mut d = doc();
-    d.source.modified = Some("2026-02-30T00:00:00Z".into());
-    let md = render(&d, Completeness::Complete, &opts());
-    assert!(md.contains("\nsource_date: \"2026-02-30\"\n"), "{md}");
 }
 
 #[test]
@@ -1881,26 +1924,68 @@ fn render_inline(inline: Inline) -> String {
     body.trim().replace("# ", "").to_string()
 }
 
+/// Ruling P5-AD: a wikilink of the source is written as escaped text, never as a live
+/// wikilink (its target's output name is unknown, so it would be broken on every import).
+/// Crystalline reads `[[` also after a backslash, so every bracket is escaped.
 #[test]
-fn wikilinks_are_written_as_wikilinks() {
-    assert!(render_inline(wiki_link("graph-view", "graph-view")).ends_with("[[graph-view]]"));
-    assert!(render_inline(wiki_link("a#sec", "label")).ends_with("[[a#sec|label]]"));
+fn wikilinks_are_written_as_escaped_text() {
+    let out = render_inline(wiki_link("graph-view", "graph-view"));
+    assert!(out.ends_with(r"\[\[graph-view\]\]"), "{out}");
+    let out = render_inline(wiki_link("a#sec", "label"));
+    assert!(out.ends_with(r"\[\[a#sec\|label\]\]"), "{out}");
+    assert_wikilink_text(&out, "[[a#sec|label]]");
+}
+
+/// Parses `md` back: no live link, no `[[` Crystalline would read as a wikilink, and the
+/// text reads `shown`.
+fn assert_wikilink_text(md: &str, shown: &str) {
+    assert!(!md.contains("[["), "{md}");
+    let mut text = String::new();
+    for event in Parser::new_ext(md, Options::all()) {
+        match event {
+            Event::Start(Tag::Link { dest_url, .. }) => panic!("live link {dest_url} in {md}"),
+            Event::Text(t) => text.push_str(&t),
+            _ => {}
+        }
+    }
+    assert!(text.contains(shown), "{shown} not in {text:?} from {md}");
+}
+
+/// A `$` in a wikilink is escaped like the text around it when the block has a pair.
+#[test]
+fn a_dollar_in_a_wikilink_is_escaped_like_text() {
+    let mut d = Document::new(source());
+    d.body.push(Block::Paragraph {
+        inlines: vec![txt("costs $5 in "), wiki_link("cost$", "cost$")],
+        role: None,
+        anchor: None,
+    });
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(md.contains(r"\[\[cost\$\]\]"), "{md}");
+    assert!(md.contains(r"costs \$5 in"), "{md}");
 }
 
 #[test]
-fn unsafe_wikilinks_fall_back_to_a_normal_link() {
-    for (target, text) in [
-        ("a]]b", "a]]b"),
-        ("a|b", "a|b"),
-        ("a\nb", "x"),
-        ("ok", "x|y"),
-        ("ok", "x]]y"),
+fn every_wikilink_is_text_whatever_its_target() {
+    for (target, text, shown) in [
+        ("project_plan", "project_plan", "[[project_plan]]"),
+        (
+            "notes/my_plan.md",
+            "notes/my_plan.md",
+            "[[notes/my_plan.md]]",
+        ),
+        ("a", "b", "[[a|b]]"),
+        ("a]]b", "a]]b", "[[a]]b]]"),
+        ("a|b", "a|b", "[[a|b]]"),
+        ("a\nb", "x", "[[a b|x]]"),
+        ("ok", "x|y", "[[ok|x|y]]"),
+        ("ok", "x]]y", "[[ok|x]]y]]"),
+        ("other:Note", "other:Note", "[[other:Note]]"),
     ] {
         let out = render_inline(wiki_link(target, text));
-        assert!(!out.contains("[["), "{out}");
+        assert_wikilink_text(&out, shown);
     }
 }
-
 /// Parses the rendered Markdown back: no live javascript link and no raw HTML.
 fn assert_inert(md: &str) {
     for event in Parser::new_ext(md, Options::all()) {
@@ -1932,13 +2017,13 @@ fn hostile_wikilinks_stay_inert() {
     ];
     for (target, text) in cases {
         let out = render_inline(wiki_link(target, text));
-        assert!(!out.contains("[["), "{out}");
+        assert_wikilink_text(&out, "[[");
         assert_inert(&out);
     }
 }
 
 #[test]
-fn wikilinks_with_formatting_in_the_text_fall_back() {
+fn wikilinks_with_formatting_in_the_text_are_text() {
     let mut link = wiki_link("x", "label");
     if let Inline::Link { inlines, .. } = &mut link {
         *inlines = vec![Inline::Text {
@@ -1948,23 +2033,26 @@ fn wikilinks_with_formatting_in_the_text_fall_back() {
             strike: false,
         }];
     }
-    assert!(!render_inline(link).contains("[["));
+    assert_wikilink_text(&render_inline(link), "[[x|label]]");
     let mut link = wiki_link("x", "label");
     if let Inline::Link { inlines, .. } = &mut link {
         *inlines = vec![Inline::Code {
             text: "label".into(),
         }];
     }
-    assert!(!render_inline(link).contains("[["));
+    assert_wikilink_text(&render_inline(link), "[[x|label]]");
 }
 
 #[test]
 fn plain_wikilinks_in_any_script_are_written() {
     assert!(
         render_inline(wiki_link("Straße/日本語 note-1x.md#Sec, it's", "Straße"))
-            .ends_with("[[Straße/日本語 note-1x.md#Sec, it's|Straße]]")
+            .ends_with(r"\[\[Straße/日本語 note-1x.md#Sec, it's\|Straße\]\]")
     );
-    assert!(!render_inline(wiki_link("http://x", "http://x")).contains("[["));
+    assert_wikilink_text(
+        &render_inline(wiki_link("http://x", "http://x")),
+        "[[http://x]]",
+    );
 }
 
 fn plain_link(target: &str, text: &str) -> Inline {
@@ -1999,15 +2087,15 @@ fn headings_keep_their_links() {
 }
 
 #[test]
-fn underscores_keep_a_wikilink_from_being_written() {
+fn wikilinks_with_underscores_are_text() {
     for name in ["_b_", "__init__", "a_b"] {
         let out = render_inline(wiki_link(name, name));
-        assert!(!out.contains("[["), "{out}");
+        assert_wikilink_text(&out, &format!("[[{name}]]"));
     }
 }
 
 #[test]
-fn wikilinks_with_a_different_text_are_not_written_in_table_cells() {
+fn wikilinks_in_table_cells_keep_the_cell() {
     let mut d = doc();
     d.body = vec![Block::Table {
         caption: None,
@@ -2022,10 +2110,11 @@ fn wikilinks_with_a_different_text_are_not_written_in_table_cells() {
         layout: None,
     }];
     let md = render(&d, Completeness::Complete, &opts());
-    assert!(!md.contains("[[x|y]]"), "{md}");
     let row = md.lines().find(|l| l.contains("same")).expect("row");
     assert_eq!(row.matches(" | ").count(), 1, "{row}");
-    assert!(row.contains("[[same]]"), "{row}");
+    assert!(row.contains(r"\[\[x\|y\]\]"), "{row}");
+    assert!(row.contains(r"\[\[same\]\]"), "{row}");
+    assert!(!md.contains("[["), "{md}");
 }
 
 #[test]
@@ -6172,4 +6261,651 @@ fn trailing_spaces_stay_out_of_the_address() {
         "S!A63",
     )]);
     assert_eq!(md, "Source: survey (CBDRB-FY24-0085). (A63)");
+}
+
+// ---------------------------------------------------------------------------------------
+// Frontmatter for import into Crystalline
+
+/// The top-level keys of the frontmatter, in order.
+fn frontmatter_keys(md: &str) -> Vec<String> {
+    let mut keys = Vec::new();
+    let mut depth = 0usize;
+    let mut want_key = false;
+    for item in saphyr_parser::Parser::new_from_str(frontmatter_of(md)) {
+        let (event, _) = item.expect("valid yaml");
+        match event {
+            saphyr_parser::Event::MappingStart(..) => {
+                depth += 1;
+                want_key = depth == 1;
+            }
+            saphyr_parser::Event::SequenceStart(..) => depth += 1,
+            saphyr_parser::Event::MappingEnd | saphyr_parser::Event::SequenceEnd => {
+                depth -= 1;
+                want_key = depth == 1;
+            }
+            saphyr_parser::Event::Scalar(value, ..) if depth == 1 => {
+                if want_key {
+                    keys.push(value.into_owned());
+                }
+                want_key = !want_key;
+            }
+            _ => {}
+        }
+    }
+    keys
+}
+
+/// The value line of `key` in the frontmatter, without the key.
+fn fm_line<'a>(md: &'a str, key: &str) -> Option<&'a str> {
+    frontmatter_of(md)
+        .lines()
+        .find_map(|l| l.strip_prefix(key)?.strip_prefix(": "))
+}
+
+/// Crystalline's Q001 count: non-blank body lines outside fenced code, the fence lines
+/// themselves counted as inside.
+fn content_lines(md: &str) -> usize {
+    let mut open: Option<(char, usize)> = None;
+    let mut n = 0;
+    for line in after_frontmatter(md).split('\n') {
+        let trimmed = line.trim_start_matches(' ');
+        let marker = (line.len() - trimmed.len() <= 3)
+            .then(|| trimmed.chars().next())
+            .flatten()
+            .filter(|c| *c == '`' || *c == '~')
+            .map(|c| (c, trimmed.chars().take_while(|x| *x == c).count()))
+            .filter(|(_, run)| *run >= 3);
+        match open {
+            None => {
+                if let Some(m) = marker {
+                    open = Some(m);
+                } else if !line.trim().is_empty() {
+                    n += 1;
+                }
+            }
+            Some((c, run)) => {
+                if let Some((mc, mr)) = marker
+                    && mc == c
+                    && mr >= run
+                    && trimmed[mr..].trim().is_empty()
+                {
+                    open = None;
+                }
+            }
+        }
+    }
+    n
+}
+
+fn vision_asset(id: &str) -> Asset {
+    Asset {
+        id: id.into(),
+        path: None,
+        sha256: "00".into(),
+        mime: "image/png".into(),
+        caption: None,
+        alt: None,
+        needs_vision: true,
+        codes: Vec::new(),
+        code_unread: false,
+    }
+}
+
+fn plain_table() -> Block {
+    Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows: vec![
+            vec![Cell::new(vec![txt("a")])],
+            vec![Cell::new(vec![txt("1")])],
+        ],
+        alignments: Vec::new(),
+        anchor: None,
+        layout: None,
+    }
+}
+
+#[test]
+fn type_source_and_status_stable() {
+    let mut o = opts();
+    o.archive_ref = Some("rezzer://sha256/abc123/report.md".into());
+    let md = render(&doc(), Completeness::Complete, &o);
+    assert!(md.starts_with("---\ntype: source\n"), "{md}");
+    let keys = frontmatter_keys(&md);
+    let at = |k: &str| keys.iter().position(|x| x == k).expect(k);
+    assert_eq!(at("status"), at("sources") + 1, "{keys:?}");
+    assert_eq!(at("source_sha256"), at("status") + 1, "{keys:?}");
+    assert_eq!(fm_line(&md, "status"), Some("stable"));
+    // Without the archive it follows the date.
+    let md = render(&doc(), Completeness::Complete, &opts());
+    assert!(
+        md.contains("\ntemporal_confidence: inferred\nstatus: stable\nsource_sha256: "),
+        "{md}"
+    );
+}
+
+#[test]
+fn tags_closed_set_and_folded_keywords() {
+    let mut d = doc();
+    d.source.format = FormatId::ThreeMf;
+    d.properties.keywords = vec![
+        "Security Controls".into(),
+        "NIST_800".into(),
+        "Größe".into(),
+        "nist-800".into(),
+    ];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert_eq!(
+        fm_line(&md, "tags"),
+        Some("[\"rezzer\", \"three-mf\", \"security-controls\", \"nist-800\"]")
+    );
+    assert_eq!(
+        fm_line(&md, "keywords"),
+        Some("[\"Security Controls\", \"NIST_800\", \"Größe\", \"nist-800\"]")
+    );
+}
+
+#[test]
+fn tags_without_keywords_are_the_closed_set() {
+    let md = render(&doc(), Completeness::Complete, &opts());
+    assert_eq!(fm_line(&md, "tags"), Some("[\"rezzer\", \"markdown\"]"));
+    assert_eq!(fm_line(&md, "keywords"), None);
+    // File system tags fold in after the keywords; their raw form stays in file_tags.
+    let mut d = doc();
+    d.properties.keywords = vec!["Plan".into()];
+    d.source.file_tags = vec!["Work  Items".into(), "plan".into(), "日本".into()];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert_eq!(
+        fm_line(&md, "tags"),
+        Some("[\"rezzer\", \"markdown\", \"plan\", \"work-items\"]")
+    );
+    assert_eq!(
+        fm_line(&md, "file_tags"),
+        Some("[\"Work  Items\", \"plan\", \"日本\"]")
+    );
+}
+
+#[test]
+fn form_and_signed_kind_words() {
+    let mut d = doc();
+    d.source.format = FormatId::Pdf;
+    d.facets.fields = vec![form_field("Name", Role::Input, None, &[])];
+    d.facets.signatures = vec![Signature {
+        anchor: None,
+        kind: "field".into(),
+        signer: None,
+        date: None,
+        reason: None,
+        location: None,
+        sub_filter: None,
+        covers_whole_file: true,
+        later_revisions: 0,
+    }];
+    d.properties.facts.signed = Some(true);
+    d.properties.keywords = vec!["Form".into()];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert_eq!(
+        fm_line(&md, "tags"),
+        Some("[\"rezzer\", \"pdf\", \"form\", \"signed\"]")
+    );
+    // A usage rights signature alone does not sign the file.
+    d.facets.signatures[0].kind = "usage-rights".into();
+    d.properties.facts.signed = Some(false);
+    let md = render(&d, Completeness::Complete, &opts());
+    assert_eq!(
+        fm_line(&md, "tags"),
+        Some("[\"rezzer\", \"pdf\", \"form\"]")
+    );
+    // Nor when the reader could not say whether the file is signed.
+    d.properties.facts.signed = None;
+    let md = render(&d, Completeness::Complete, &opts());
+    assert_eq!(
+        fm_line(&md, "tags"),
+        Some("[\"rezzer\", \"pdf\", \"form\"]")
+    );
+    // A signing signature in the list then signs it.
+    d.facets.signatures[0].kind = "field".into();
+    let md = render(&d, Completeness::Complete, &opts());
+    assert_eq!(
+        fm_line(&md, "tags"),
+        Some("[\"rezzer\", \"pdf\", \"form\", \"signed\"]")
+    );
+}
+
+#[test]
+fn confidence_explicit_for_document_date() {
+    let mut d = doc();
+    d.properties.created = Some(Value::DateTime {
+        value: "2020-09-23T10:00:00Z".into(),
+    });
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        md.contains("\nsource_date: 2020-09-23\ntemporal_confidence: explicit\n"),
+        "{md}"
+    );
+}
+
+#[test]
+fn confidence_inferred_for_file_date() {
+    let md = render(&doc(), Completeness::Complete, &opts());
+    assert!(
+        md.contains("\nsource_date: 2026-01-05\ntemporal_confidence: inferred\n"),
+        "{md}"
+    );
+    // The birth time serves when there is no modification time.
+    let mut d = doc();
+    d.source.modified = None;
+    d.source.created = Some("2025-07-08T09:00:00Z".into());
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        md.contains("\nsource_date: 2025-07-08\ntemporal_confidence: inferred\n"),
+        "{md}"
+    );
+}
+
+#[test]
+fn no_date_no_confidence() {
+    let mut d = doc();
+    d.source.modified = None;
+    let md = render(&d, Completeness::Complete, &opts());
+    assert_eq!(fm_line(&md, "source_date"), None, "{md}");
+    assert_eq!(fm_line(&md, "temporal_confidence"), None, "{md}");
+    assert_eq!(fm_line(&md, "file_modified"), None, "{md}");
+}
+
+#[test]
+fn unreal_source_date_is_left_out() {
+    let mut d = doc();
+    d.source.modified = Some("2026-02-30T00:00:00Z".into());
+    let md = render(&d, Completeness::Complete, &opts());
+    assert_eq!(fm_line(&md, "source_date"), None, "{md}");
+    assert_eq!(fm_line(&md, "temporal_confidence"), None, "{md}");
+    // The file date itself is still written as the file system gave it.
+    assert_eq!(fm_line(&md, "file_modified"), Some("2026-02-30T00:00:00Z"));
+}
+
+#[test]
+fn file_keys_in_order_and_left_out_when_empty() {
+    let mut d = doc();
+    d.source.created = Some("2025-11-29T07:00:00Z".into());
+    d.source.downloaded_from = Some("https://example.org/a b.md".into());
+    d.source.file_tags = vec!["Red".into()];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        md.contains(
+            "\nsource_size: 42\n\
+             file_created: 2025-11-29T07:00:00Z\n\
+             file_modified: 2026-01-05T10:00:00Z\n\
+             downloaded_from: \"https://example.org/a b.md\"\n\
+             file_tags: [\"Red\"]\n\
+             format: markdown\n"
+        ),
+        "{md}"
+    );
+    let mut d = doc();
+    d.source.modified = None;
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(md.contains("\nsource_size: 42\nformat: markdown\n"), "{md}");
+    for key in [
+        "file_created",
+        "file_modified",
+        "downloaded_from",
+        "file_tags",
+    ] {
+        assert_eq!(fm_line(&md, key), None, "{key}");
+    }
+}
+
+#[test]
+fn part_keys_in_order() {
+    let mut d = doc();
+    d.properties.title = Some("Big Report".into());
+    d.properties.facts.pages = Some(9);
+    let mut o = opts();
+    o.parts = Some(5);
+    o.part = Some(rezzer_render::PartMeta {
+        index: 3,
+        count: 5,
+        location: "pages 12 to 20".into(),
+        title: "Big Report: Results".into(),
+    });
+    let md = render(&d, Completeness::Complete, &o);
+    assert!(
+        md.contains("\nlosses: 0\nparts: 5\npart: 3\nlocation: \"pages 12 to 20\"\npages: 9\n"),
+        "{md}"
+    );
+    assert_eq!(fm_line(&md, "title"), Some("\"Big Report: Results\""));
+    assert_eq!(
+        fm_line(&md, "description"),
+        Some("\"Part 3 of 5 of \\\"Big Report\\\": pages 12 to 20.\"")
+    );
+    assert!(
+        after_frontmatter(&md).starts_with("\n# Big Report: Results\n"),
+        "{md}"
+    );
+    // The main document has only the part count.
+    let mut o = opts();
+    o.parts = Some(5);
+    let md = render(&d, Completeness::Complete, &o);
+    assert!(md.contains("\nlosses: 0\nparts: 5\npages: 9\n"), "{md}");
+    let keys = frontmatter_keys(&md);
+    assert!(
+        !keys.iter().any(|k| k == "part" || k == "location"),
+        "{keys:?}"
+    );
+}
+
+#[test]
+fn never_permalink_recorded_at_or_verified() {
+    let mut d = rich_document();
+    d.source.created = Some("2025-11-29T07:00:00Z".into());
+    d.source.downloaded_from = Some("https://example.org/x".into());
+    d.source.file_tags = vec!["Red".into()];
+    d.properties.title = Some("T".into());
+    d.properties.description = Some("D".into());
+    d.properties.authors = vec!["Ann".into()];
+    d.properties.language = Some("en".into());
+    d.properties.keywords = vec!["k".into()];
+    d.properties.created = Some(Value::Date {
+        value: "2025-01-01".into(),
+    });
+    d.properties.modified = Some(Value::Date {
+        value: "2025-01-02".into(),
+    });
+    d.properties.facts = FileFacts {
+        pages: Some(1),
+        tagged: Some(true),
+        encrypted: Some(false),
+        signed: Some(true),
+        signatures: Some(1),
+        revisions: Some(1),
+        form_fields: Some(1),
+        has_javascript: Some(false),
+        layers: Some(1),
+    };
+    let mut o = opts();
+    o.archive_ref = Some("rezzer://sha256/abc123/report.md".into());
+    o.table_style = rezzer_render::TableStyle::Records;
+    o.parts = Some(2);
+    o.part = Some(rezzer_render::PartMeta {
+        index: 1,
+        count: 2,
+        location: "page 1".into(),
+        title: "T: one".into(),
+    });
+    let md = render(&d, Completeness::Complete, &o);
+    let keys = frontmatter_keys(&md);
+    assert!(keys.len() > 30, "{keys:?}");
+    for banned in ["permalink", "recorded_at", "verified"] {
+        assert!(!keys.iter().any(|k| k == banned), "{banned} in {keys:?}");
+    }
+}
+
+#[test]
+fn own_description_wins() {
+    let mut d = doc();
+    d.properties.description = Some("  The yearly report.  ".into());
+    let md = render(&d, Completeness::Complete, &opts());
+    assert_eq!(fm_line(&md, "description"), Some("\"The yearly report.\""));
+    // A blank one gives way to the template.
+    d.properties.description = Some(" \n ".into());
+    let md = render(&d, Completeness::Complete, &opts());
+    assert_eq!(fm_line(&md, "description"), Some("\"Markdown, 42 bytes.\""));
+}
+
+#[test]
+fn description_template_pdf() {
+    let mut d = doc();
+    d.source.format = FormatId::Pdf;
+    d.source.size = 1_234_567;
+    d.properties.title = Some("SP 800-53 Rev. 5".into());
+    d.properties.modified = Some(Value::DateTime {
+        value: "2020-09-23T12:00:00Z".into(),
+    });
+    d.properties.facts.pages = Some(48);
+    d.body = (0..26).map(|_| plain_table()).collect();
+    d.body.push(Block::Section {
+        kind: SectionKind::Other,
+        title: Some("Outline".into()),
+        anchor: None,
+        blocks: vec![para("Intro, page 1"), para("Scope, page 2")],
+    });
+    // The outline counts once, however many entries it has.
+    d.facets.outline = ["Intro", "Scope"]
+        .into_iter()
+        .zip(1..)
+        .map(|(title, page)| OutlineEntry {
+            level: 1,
+            title: title.into(),
+            page: Some(page),
+        })
+        .collect();
+    d.assets = (0..12).map(|i| vision_asset(&format!("img{i}"))).collect();
+    let md = render(&d, Completeness::Complete, &opts());
+    assert_eq!(
+        fm_line(&md, "description"),
+        Some(
+            "\"PDF, 48 pages, \\\"SP 800-53 Rev. 5\\\", 2020-09-23. 26 tables, 1 outline, 12 pictures that need vision.\""
+        )
+    );
+}
+
+#[test]
+fn description_template_counts_in_order_and_singular() {
+    let mut d = doc();
+    d.source.format = FormatId::Pdf;
+    d.properties.facts.pages = Some(1);
+    d.body = vec![plain_table()];
+    d.facets.formulas = vec![formula("A1", "=1", &[], None)];
+    d.facets.fields = vec![form_field("Name", Role::Input, None, &[])];
+    d.facets.signatures = vec![Signature {
+        anchor: None,
+        kind: "field".into(),
+        signer: None,
+        date: None,
+        reason: None,
+        location: None,
+        sub_filter: None,
+        covers_whole_file: true,
+        later_revisions: 0,
+    }];
+    d.facets.annotations = vec![Annotation {
+        kind: "note".into(),
+        author: None,
+        date: None,
+        anchor: Some(Anchor("p1".into())),
+        quoted: None,
+        body: vec![txt("x")],
+        replies: Vec::new(),
+        resolved: None,
+    }];
+    d.assets = vec![vision_asset("a")];
+    d.losses = vec![
+        loss("p1", "a font", LossReason::Unsupported, Severity::Info),
+        loss("p1", "a region", LossReason::Uncertain, Severity::Info),
+    ];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert_eq!(
+        fm_line(&md, "description"),
+        Some(
+            "\"PDF, 1 page. 1 table, 1 formula, 1 form field, 1 signature, 1 annotation, 1 picture that needs vision, 1 part not read.\""
+        )
+    );
+}
+
+#[test]
+fn description_template_workbook_and_text() {
+    let sheet = |name: &str| Block::Section {
+        kind: SectionKind::Sheet,
+        title: Some(name.into()),
+        anchor: Some(Anchor(name.into())),
+        blocks: vec![plain_table()],
+    };
+    let mut d = doc();
+    d.source.format = FormatId::Xlsx;
+    d.properties.title = Some("Budget".into());
+    d.body = vec![sheet("Costs"), sheet("Income")];
+    let mut name = formula("name:Rate", "=0.2", &[], None);
+    name.kind = Some(FormulaKind::Name);
+    d.facets.formulas = vec![
+        formula("Costs!B2", "=1", &[], None),
+        formula("Costs!B3", "=2", &[], None),
+        name,
+    ];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert_eq!(
+        fm_line(&md, "description"),
+        Some("\"XLSX, 2 sheets, \\\"Budget\\\". 2 tables, 2 formulas.\"")
+    );
+    // A CSV file: the size of its one part.
+    let mut d = doc();
+    d.source.format = FormatId::Csv;
+    d.body = vec![sheet("data")];
+    d.overview = Some(Overview {
+        parts: vec![part("data", "12 rows x 4 columns", None, &[])],
+        facts: Vec::new(),
+    });
+    let md = render(&d, Completeness::Complete, &opts());
+    assert_eq!(
+        fm_line(&md, "description"),
+        Some("\"CSV, 12 rows x 4 columns. 1 table.\"")
+    );
+    // Plain text: the byte count. The file date never goes into the template.
+    let mut d = doc();
+    d.source.format = FormatId::Text;
+    d.source.size = 1;
+    let md = render(&d, Completeness::Complete, &opts());
+    assert_eq!(fm_line(&md, "description"), Some("\"Text, 1 byte.\""));
+    // Any other format: its name in upper case.
+    d.source.format = FormatId::Docx;
+    d.source.size = 900;
+    let md = render(&d, Completeness::Complete, &opts());
+    assert_eq!(fm_line(&md, "description"), Some("\"DOCX, 900 bytes.\""));
+}
+
+#[test]
+fn empty_file_gets_three_lines() {
+    let mut s = source();
+    s.format = FormatId::Empty;
+    s.size = 0;
+    s.name = "empty.txt".into();
+    let mut d = Document::new(s);
+    d.body = vec![para("The file is empty.")];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert_eq!(
+        after_frontmatter(&md),
+        "\n# empty.txt\n\nEmpty file, 0 bytes.\n\nThe file is empty.\n"
+    );
+    assert_eq!(content_lines(&md), 3);
+}
+
+#[test]
+fn short_body_gets_description() {
+    let mut d = doc();
+    d.properties.description = Some("# Not a heading\n- part_of [x](y.md)".into());
+    d.body = vec![para("Only line.")];
+    let md = render(&d, Completeness::Complete, &opts());
+    let body = after_frontmatter(&md);
+    assert_eq!(
+        body,
+        "\n# report.md\n\n\\# Not a heading\n\\- part\\_of \\[x\\](y.md)\n\nOnly line.\n"
+    );
+    assert_eq!(content_lines(&md), 4);
+    // Lines inside a fence do not count.
+    let mut d = doc();
+    d.body = vec![
+        para("Before."),
+        Block::Code {
+            lang: None,
+            text: "a\nb\nc".into(),
+            anchor: None,
+        },
+    ];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        after_frontmatter(&md).starts_with("\n# report.md\n\nMarkdown, 42 bytes.\n\nBefore.\n"),
+        "{md}"
+    );
+    assert_eq!(content_lines(&md), 3);
+}
+
+#[test]
+fn long_body_unchanged() {
+    let mut d = doc();
+    d.body = vec![para("One."), para("Two.")];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert_eq!(after_frontmatter(&md), "\n# report.md\n\nOne.\n\nTwo.\n");
+    assert_eq!(content_lines(&md), 3);
+}
+
+#[test]
+fn part_heading_equal_to_its_title_is_written_once() {
+    let mut d = doc();
+    d.properties.title = Some("Big Report".into());
+    d.body = vec![
+        Block::Heading {
+            level: 1,
+            inlines: vec![txt("Big Report: Results")],
+            anchor: None,
+        },
+        para("One."),
+        para("Two."),
+    ];
+    let mut o = opts();
+    o.part = Some(rezzer_render::PartMeta {
+        index: 2,
+        count: 3,
+        location: "Results".into(),
+        title: "Big Report: Results".into(),
+    });
+    let md = render(&d, Completeness::Complete, &o);
+    assert_eq!(md.matches("Big Report: Results\n").count(), 1, "{md}");
+    assert!(
+        after_frontmatter(&md).starts_with("\n# Big Report: Results\n\nOne.\n"),
+        "{md}"
+    );
+    // A part that opens with the document's own heading keeps it, one level down.
+    d.body[0] = Block::Heading {
+        level: 1,
+        inlines: vec![txt("Big Report")],
+        anchor: None,
+    };
+    let md = render(&d, Completeness::Complete, &o);
+    assert!(
+        after_frontmatter(&md).starts_with("\n# Big Report: Results\n\n## Big Report\n"),
+        "{md}"
+    );
+}
+
+#[test]
+fn chosen_sections_without_content_say_so() {
+    let mut d = doc();
+    d.body = vec![para("One."), para("Two.")];
+    let mut o = opts();
+    o.sections = Some(vec![OutputSection::Logic]);
+    let md = render(&d, Completeness::Complete, &o);
+    assert_eq!(
+        after_frontmatter(&md),
+        "\n# report.md\n\nMarkdown, 42 bytes.\n\nThe chosen sections have no content.\n"
+    );
+    assert_eq!(content_lines(&md), 3);
+}
+
+#[test]
+fn long_own_description_stays_one_scalar() {
+    let long = format!("{}\n{}", "word ".repeat(600), "x\"y".repeat(200));
+    let mut d = doc();
+    d.properties.description = Some(long.clone());
+    let md = render(&d, Completeness::Complete, &opts());
+    let line = fm_line(&md, "description").expect("description");
+    assert!(line.starts_with('"') && line.ends_with('"'), "{line}");
+    let mut scalars = Vec::new();
+    for item in saphyr_parser::Parser::new_from_str(frontmatter_of(&md)) {
+        if let (saphyr_parser::Event::Scalar(v, ..), _) = item.expect("valid yaml") {
+            scalars.push(v.into_owned());
+        }
+    }
+    let at = scalars.iter().position(|s| s == "description").unwrap();
+    assert_eq!(scalars[at + 1], long.trim());
 }

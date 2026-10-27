@@ -8,7 +8,9 @@ mod common;
 
 use std::cell::Cell;
 
-use common::{Sheet, every_cell_once, list_object, no_overlap, pos, ranges, rect, thread_cpu};
+use common::{
+    Sheet, assert_work, counted, every_cell_once, list_object, no_overlap, pos, ranges, rect,
+};
 use sheetlayout::{
     Certainty, Evidence, FactKind, IssueKind, Kind, Limits, NameIn, Pos, Rect, segment,
 };
@@ -576,24 +578,21 @@ fn checkerboard(n: u32) -> Sheet {
     sheet
 }
 
-/// Segments with no stop and gives the layout and the thread CPU time it took.
-fn timed(input: &sheetlayout::Input) -> (sheetlayout::Layout, std::time::Duration) {
-    let start = thread_cpu();
-    let layout = segment(input, &Limits::default(), &never);
-    (layout, thread_cpu() - start)
+/// Segments with no stop and gives the layout, the steps of work it did (the work bound, see
+/// [`common::counted`]) and the thread CPU time it took.
+fn timed(input: &sheetlayout::Input) -> (sheetlayout::Layout, Option<u64>, std::time::Duration) {
+    counted(|stop| segment(input, &Limits::default(), stop))
 }
-
-const BOUND: std::time::Duration = std::time::Duration::from_secs(2);
 
 #[test]
 fn checkerboard_hits_region_limit() {
     let input = checkerboard(300).input();
-    let (layout, used) = timed(&input);
+    let (layout, steps, used) = timed(&input);
     eprintln!(
         "checkerboard 300: {} regions, {used:?} CPU",
         layout.regions.len()
     );
-    assert!(used < BOUND, "{used:?}");
+    assert_work("checkerboard_hits_region_limit", steps, 560_000, used);
     assert!(layout.regions.len() <= 10_000);
     let limits: Vec<_> = layout
         .issues
@@ -614,12 +613,17 @@ fn checkerboard_hits_region_limit() {
 fn large_checkerboards_are_bounded() {
     for n in [600, 1000] {
         let input = checkerboard(n).input();
-        let (layout, used) = timed(&input);
+        let (layout, steps, used) = timed(&input);
         eprintln!(
             "checkerboard {n}: {} regions, {used:?} CPU",
             layout.regions.len()
         );
-        assert!(used < BOUND, "{n}: {used:?}");
+        assert_work(
+            &format!("large_checkerboards_are_bounded {n}"),
+            steps,
+            6 * u64::from(n) * u64::from(n),
+            used,
+        );
         assert_eq!(layout.regions.iter().filter(|r| r.rest).count(), 1);
     }
 }
@@ -631,9 +635,9 @@ fn diagonal_staircase_is_bounded() {
         sheet.put(Pos { row: k, col: k }, "x");
     }
     let input = sheet.input();
-    let (layout, used) = timed(&input);
+    let (layout, steps, used) = timed(&input);
     eprintln!("staircase: {} regions, {used:?} CPU", layout.regions.len());
-    assert!(used < BOUND, "{used:?}");
+    assert_work("diagonal_staircase_is_bounded", steps, 170_000, used);
     assert_eq!(layout.regions.len(), 10_000);
     assert_eq!(layout.regions.iter().filter(|r| r.rest).count(), 1);
     every_cell_once(&input, &layout);
@@ -1023,9 +1027,14 @@ fn names_sheet(names: usize) -> Sheet {
 #[test]
 fn many_names_over_many_regions_are_bounded() {
     let input = names_sheet(3_000).input();
-    let (layout, used) = timed(&input);
+    let (layout, steps, used) = timed(&input);
     eprintln!("names: {} regions, {used:?} CPU", layout.regions.len());
-    assert!(used < BOUND, "{used:?}");
+    assert_work(
+        "many_names_over_many_regions_are_bounded",
+        steps,
+        70_000,
+        used,
+    );
     assert!(layout.regions.len() > 9_000);
     every_cell_once(&input, &layout);
 }

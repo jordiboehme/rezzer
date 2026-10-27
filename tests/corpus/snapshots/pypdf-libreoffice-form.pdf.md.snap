@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "pypdf-libreoffice-form.pdf"
+description: "PDF, 1 page, 2022-06-26. 8 form fields."
 resource: "<corpus>/pdf/pypdf-libreoffice-form.pdf"
+tags: ["rezzer", "pdf", "form"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: high
+temporal_confidence: explicit
+status: stable
 source_sha256: "9105eeef8c8cafdb141b7edd768a5e08adffe320d1d4f89e1a7112a2b37d1c57"
 source_size: 34186
+file_modified: <modified>
 format: pdf
 detected_by: "pdf header %PDF-"
 reader: "pdf/0.1.0"

@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "pypdf-multicolumn.pdf"
+description: "PDF, 3 pages, 2024-01-03. 1 table."
 resource: "<corpus>/pdf/pypdf-multicolumn.pdf"
+tags: ["rezzer", "pdf"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: high
+temporal_confidence: explicit
+status: stable
 source_sha256: "bdb495e95b3e1afae95013099dc59b0cea047f1fa70f677ee9cb33f10faa1c6c"
 source_size: 78657
+file_modified: <modified>
 format: pdf
 detected_by: "pdf header %PDF-"
 reader: "pdf/0.1.0"

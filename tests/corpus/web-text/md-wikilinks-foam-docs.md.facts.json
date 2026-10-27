@@ -28,9 +28,9 @@
     "equals": "graph-view"
   },
   {
-    "contains": "Example: [[graph-view]]"
+    "contains": "Example: \\[\\[graph-view\\]\\]"
   },
   {
-    "contains": "See [[block-anchors]] for full details."
+    "contains": "See \\[\\[block-anchors\\]\\] for full details."
   }
 ]

@@ -340,6 +340,41 @@ pub fn no_overlap(layout: &Layout) {
     }
 }
 
+/// The longest a work bound test may take in thread CPU time. It only catches a runaway:
+/// the bound itself is [`assert_work`] on a count of work steps, which does not depend on how
+/// fast the runner is (a CI runner took 2.4 s for work that takes 1.3 s on a laptop, against a
+/// time bound of 2 s).
+pub const CPU_SAFETY: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Runs `f` with a stop callback that never stops, and gives the result, the steps of layout
+/// work it did ([`sheetlayout::work_steps`], `None` in a release build) and the thread CPU
+/// time it took.
+///
+/// The steps are the work bound of these tests: the layout code counts the cells it sorts,
+/// the items of every piece the cut looks at, the visits the corner split stops on and the
+/// steps of the other walks. The count is the same on every machine for the same input, so a
+/// slow runner cannot fail the test and a change that makes the work grow cannot pass it.
+pub fn counted<T>(f: impl FnOnce(&dyn Fn() -> bool) -> T) -> (T, Option<u64>, std::time::Duration) {
+    let before = sheetlayout::work_steps();
+    let start = thread_cpu();
+    let out = f(&|| false);
+    let used = thread_cpu() - start;
+    let steps = sheetlayout::work_steps().zip(before).map(|(a, b)| a - b);
+    (out, steps, used)
+}
+
+/// Checks a work bound: at most `max` steps of work (checked in debug builds, which count
+/// them), and thread CPU time under the safety stop. Each test's bound is the count measured
+/// when the bound was set (2026-10-27), with half of it again as margin; a growth past that
+/// is a change in the work, not a slow machine.
+pub fn assert_work(what: &str, steps: Option<u64>, max: u64, used: std::time::Duration) {
+    eprintln!("{what}: {steps:?} steps (bound {max}), {used:?} CPU");
+    if let Some(steps) = steps {
+        assert!(steps <= max, "{what}: {steps} steps of work, bound {max}");
+    }
+    assert!(used < CPU_SAFETY, "{what}: {used:?} CPU");
+}
+
 /// The CPU time the calling thread has used: work bounds do not depend on a busy machine.
 #[cfg(unix)]
 pub fn thread_cpu() -> std::time::Duration {

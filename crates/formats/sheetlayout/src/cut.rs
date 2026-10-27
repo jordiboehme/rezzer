@@ -179,6 +179,7 @@ pub(crate) fn cut(
         Some((why, ids, loose))
     };
     while let Some(mut p) = stack.pop() {
+        crate::work::add(p.ids.len() as u64);
         if stop() {
             return Cut {
                 leaves,
@@ -429,6 +430,7 @@ fn connect(
         };
         met.clear();
         met.extend(map.range(start..=hi).map(|(&key, s)| (key, *s)));
+        crate::work::add(met.len() as u64 + 1);
         *visits = visits
             .checked_sub(met.len() as u64 + 1)
             .ok_or(Halt::Budget)?;

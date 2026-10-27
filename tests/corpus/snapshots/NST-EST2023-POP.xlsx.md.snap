@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "NST-EST2023-POP.xlsx"
+description: "XLSX, 1 sheet, 2023-12-12. 1 table."
 resource: "<corpus>/office/NST-EST2023-POP.xlsx"
+tags: ["rezzer", "xlsx"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: high
+temporal_confidence: explicit
+status: stable
 source_sha256: "aec49456a006a06bdaba1ec90f032e0412617da40cdda26709074fbc6bb528e6"
 source_size: 14964
+file_modified: <modified>
 format: xlsx
 detected_by: "zip with [Content_Types].xml main part spreadsheetml"
 reader: "sheet/0.1.0"

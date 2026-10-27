@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "testEXCEL_various.xlsb"
+description: "XLSB, 1 sheet, 2017-03-10. 1 table, 3 formulas, 2 parts not read."
 resource: "<corpus>/office/testEXCEL_various.xlsb"
+tags: ["rezzer", "xlsb"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: high
+temporal_confidence: explicit
+status: stable
 source_sha256: "8c600e97d719b0266dcfb49c1872feb8d10c6ed12bc768ff16ace7dae555ebfc"
 source_size: 22715
+file_modified: <modified>
 format: xlsb
 detected_by: "zip with [Content_Types].xml main part binary spreadsheet"
 reader: "sheet/0.1.0"

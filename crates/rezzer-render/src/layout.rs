@@ -750,8 +750,8 @@ fn header_path(layout: &TableLayout, c: usize) -> Option<&str> {
 /// page may end between them.
 const RECORDS_PER_BLOCK: usize = 50;
 
-/// Text on one line: every line break becomes a space.
-fn one_line(text: &str) -> String {
+/// Text on one line: every run of line breaks becomes a space.
+fn lines_joined(text: &str) -> String {
     text.split(['\n', '\r'])
         .filter(|part| !part.is_empty())
         .collect::<Vec<_>>()
@@ -760,7 +760,7 @@ fn one_line(text: &str) -> String {
 
 /// The plain text of a cell on one line, trimmed.
 fn cell_words(cell: &Cell) -> String {
-    one_line(plain_text(&cell.inlines).trim())
+    lines_joined(plain_text(&cell.inlines).trim())
 }
 
 /// A `table` region as records (spec 9.2): the layout line, then one list item per data row,
@@ -844,7 +844,7 @@ fn records(
                 continue;
             }
             let path = header_path(layout, c)
-                .map(one_line)
+                .map(lines_joined)
                 .unwrap_or_else(|| unnamed_column(left, c, ctx.column_numbers));
             let mut content = vec![Inline::plain(format!("{path}: "))];
             content.extend_from_slice(trimmed(&source.inlines));

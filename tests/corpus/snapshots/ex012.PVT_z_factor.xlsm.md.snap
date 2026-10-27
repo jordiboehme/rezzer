@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "ex012.PVT_z_factor.xlsm"
+description: "XLSM, 1 sheet, 2025-02-28. 5 tables, 2133 formulas."
 resource: "<corpus>/office/ex012.PVT_z_factor.xlsm"
+tags: ["rezzer", "xlsm"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: high
+temporal_confidence: explicit
+status: stable
 source_sha256: "7bd2d64555c861c2c611bfe09c4471716b99cd36c77cde040a0c8bd3b719226b"
 source_size: 129660
+file_modified: <modified>
 format: xlsm
 detected_by: "zip with [Content_Types].xml main part spreadsheetml macro-enabled"
 reader: "sheet/0.1.0"

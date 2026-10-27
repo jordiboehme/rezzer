@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "Wikilinks"
+description: "Markdown, 4804 bytes, \"Wikilinks\". 1 table."
 resource: "<corpus>/web-text/md-wikilinks-foam-docs.md"
+tags: ["rezzer", "markdown"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: medium
+temporal_confidence: inferred
+status: stable
 source_sha256: "d36b6cbab90d8a9ca7c581f3fdda417d8386310d0f0b22f401669e185be07088"
 source_size: 4804
+file_modified: <modified>
 format: markdown
 detected_by: "markdown syntax: atx headings, list markers, pipe table"
 encoding: "UTF-8"
@@ -35,7 +39,7 @@ Wikilinks are internal links that connect files in your knowledge base using `[[
 3. **Navigate** with `Ctrl+Click` (`Cmd+Click` on Mac) or `F12`
 4. **Create new notes** by clicking on non-existent wikilinks
 
-Example: [[graph-view]]
+Example: \[\[graph-view\]\]
 
 ## Placeholders
 
@@ -56,15 +60,15 @@ Examples:
 
 Link to a specific paragraph, list item, heading, or blockquote using `[[note-name#^blockid]]` syntax. Add a `^your-id` anchor at the end of any block element, then reference it from other notes.
 
-See [[block-anchors]] for full details.
+See \[\[block-anchors\]\] for full details.
 
 ## Directory Links
 
 Linking to a folder name navigates to that folder's index file — either `index.md` or `README.md`. This works for both wikilinks and regular markdown links:
 
-- `[[projects]]` → opens `projects/index.md` (or `projects/README.md`)
-- `[Projects](projects)` → same
-- `[Projects](projects/)` → trailing slash is ignored
+* `[[projects]]` → opens `projects/index.md` (or `projects/README.md`)
+* `[Projects](projects)` → same
+* `[Projects](projects/)` → trailing slash is ignored
 
 If a file named `projects.md` exists alongside the `projects/` folder, it takes priority.
 
@@ -93,7 +97,7 @@ When the same filename exists in multiple locations, `[[todo]]` is ambiguous. Fo
 
 ## Markdown Compatibility
 
-Foam can automatically generate [[link-reference-definitions]] at the bottom of files to make wikilinks compatible with standard Markdown processors.
+Foam can automatically generate \[\[link-reference-definitions\]\] at the bottom of files to make wikilinks compatible with standard Markdown processors.
 
 ## Compatibility with Other Apps
 
@@ -110,9 +114,9 @@ Foam can automatically generate [[link-reference-definitions]] at the bottom of 
 
 ## Related
 
-- [[footnotes]] - Adding references and side notes
-- [[block-anchors]] - Linking to specific blocks within a note
-- [[templates]] - Creating new notes
+- \[\[footnotes\]\] - Adding references and side notes
+- \[\[block-anchors\]\] - Linking to specific blocks within a note
+- \[\[templates\]\] - Creating new notes
 
 ## Logic
 

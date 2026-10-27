@@ -97,7 +97,15 @@ pub struct Source {
     pub size: u64,
     pub format: FormatId,
     pub detection: Detection,
+    /// Modification time from the file system, RFC 3339 in UTC with whole seconds.
     pub modified: Option<String>,
+    /// Birth time from the file system, in the format of `modified`.
+    pub created: Option<String>,
+    /// The address the file was downloaded from (`http`, `https` or `ftp`, no user or
+    /// password).
+    pub downloaded_from: Option<String>,
+    /// File system tags as written, without empty names, at most 64.
+    pub file_tags: Vec<String>,
 }
 
 impl Source {
@@ -107,7 +115,8 @@ impl Source {
 }
 
 /// Builds the [`SourceInfo`] of a [`Source`]: name, path, hash, size, format, detection and
-/// modification time are copied. `encoding` and `reader` stay empty for the reader to fill.
+/// the file system facts (modification and birth time, download address, tags) are copied.
+/// `encoding` and `reader` stay empty for the reader to fill.
 pub fn source_info(src: &Source) -> SourceInfo {
     SourceInfo {
         path: src.path.as_ref().map(|p| p.to_string_lossy().into_owned()),
@@ -117,6 +126,9 @@ pub fn source_info(src: &Source) -> SourceInfo {
         format: src.format,
         detection: src.detection.clone(),
         modified: src.modified.clone(),
+        created: src.created.clone(),
+        downloaded_from: src.downloaded_from.clone(),
+        file_tags: src.file_tags.clone(),
         encoding: None,
         reader: None,
     }

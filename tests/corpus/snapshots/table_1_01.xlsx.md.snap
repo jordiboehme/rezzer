@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "table_1_01.xlsx"
+description: "XLSX, 1 sheet, 2026-09-21. 1 table."
 resource: "<corpus>/office/table_1_01.xlsx"
+tags: ["rezzer", "xlsx"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: high
+temporal_confidence: explicit
+status: stable
 source_sha256: "1ad53bb04a8ac5144b55efa97dec3678035826ce9f04a3833fe061bf322b840d"
 source_size: 20505
+file_modified: <modified>
 format: xlsx
 detected_by: "zip with [Content_Types].xml main part spreadsheetml"
 reader: "sheet/0.1.0"

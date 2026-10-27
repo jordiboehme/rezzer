@@ -14,8 +14,8 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 use rezzer_model::{
-    Block, Document, FormatId, FormulaKind, Inline, LayoutKind, LossReason, Overview as Model,
-    OverviewPart, Role, SectionKind, Value,
+    Block, Document, FormatId, Inline, LayoutKind, Overview as Model, OverviewPart, Role,
+    SectionKind, Value,
 };
 
 use crate::anchors::{collect, sheet_prefixes};
@@ -357,10 +357,7 @@ fn workbook_facts(doc: &Document, out: &mut Vec<(String, String)>) {
         };
         out.push(("Sheets".into(), value));
     }
-    let is_name = |f: &&rezzer_model::Formula| {
-        matches!(f.kind, Some(FormulaKind::Name | FormulaKind::Lambda))
-            || f.anchor.0.starts_with("name:")
-    };
+    let is_name = |f: &&rezzer_model::Formula| f.is_name();
     let formulas = &doc.facets.formulas;
     let patterns: HashSet<&str> = formulas
         .iter()
@@ -459,10 +456,7 @@ fn facts(doc: &Document) -> Vec<(String, String)> {
     // losses, but its content was read.
     count(
         "Not read",
-        doc.losses
-            .iter()
-            .filter(|l| l.why != LossReason::Uncertain)
-            .count(),
+        doc.losses.iter().filter(|l| l.is_not_read()).count(),
     );
     // The codes stand right after the pictures they were read from.
     let mut codes: Vec<(String, String)> = Vec::new();

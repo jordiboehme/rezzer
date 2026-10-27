@@ -66,6 +66,16 @@ pub struct SourceInfo {
     pub detection: Detection,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub modified: Option<String>,
+    /// The file's birth time from the file system, in the format of `modified`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created: Option<String>,
+    /// The address the file was downloaded from, as the file system recorded it. Only
+    /// `http`, `https` and `ftp`, without user and password.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub downloaded_from: Option<String>,
+    /// Tags the file system keeps for the file (Finder tags, `user.xdg.tags`), as written.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub file_tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub encoding: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

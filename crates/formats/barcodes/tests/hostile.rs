@@ -15,6 +15,7 @@ use barcodes::{Limits, Picture, Pixels, Stop, Worker};
 static ALLOCATOR: rezzer_limits::Allocator = rezzer_limits::Allocator;
 
 /// Maximum resident set size of the process.
+#[cfg(unix)]
 fn max_rss_bytes() -> u64 {
     // SAFETY: getrusage fills the struct we pass.
     let mut ru: libc::rusage = unsafe { std::mem::zeroed() };
@@ -25,6 +26,13 @@ fn max_rss_bytes() -> u64 {
     } else {
         v * 1024
     }
+}
+
+/// No `getrusage` here: the figure is 0, so the time bounds are still checked and only the
+/// memory bound is not.
+#[cfg(not(unix))]
+fn max_rss_bytes() -> u64 {
+    0
 }
 
 /// Square blocks of noise, `block` pixels a side.

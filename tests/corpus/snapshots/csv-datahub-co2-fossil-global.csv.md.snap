@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "csv-datahub-co2-fossil-global.csv"
+description: "CSV, 275 rows x 8 columns. 1 table, 1 formula."
 resource: "<corpus>/web-text/csv-datahub-co2-fossil-global.csv"
+tags: ["rezzer", "csv"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: medium
+temporal_confidence: inferred
+status: stable
 source_sha256: "289acefc1c96f74e23b852c1b591c6444b9c85d5663b3cffd912222f4999b546"
 source_size: 7137
+file_modified: <modified>
 format: csv
 detected_by: "delimited text (UTF-8), delimiter ',', 100% of rows with the same field count"
 encoding: "UTF-8"

@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "tsv-noheader-geonames-admin1.txt"
+description: "TSV, 3865 rows x 4 columns. 1 table."
 resource: "<corpus>/web-text/tsv-noheader-geonames-admin1.txt"
+tags: ["rezzer", "tsv"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: medium
+temporal_confidence: inferred
+status: stable
 source_sha256: "b577baa3476bbe94f0454545e517e1835401d79c5b1105c8e02cf1d4a505e8ec"
 source_size: 151583
+file_modified: <modified>
 format: tsv
 detected_by: "delimited text (UTF-8), delimiter tab, 100% of rows with the same field count"
 encoding: "UTF-8"

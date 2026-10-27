@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "text-shiftjis-aozora-botchan.txt"
+description: "Text, 32 paragraphs."
 resource: "<corpus>/web-text/text-shiftjis-aozora-botchan.txt"
+tags: ["rezzer", "text"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: medium
+temporal_confidence: inferred
+status: stable
 source_sha256: "8b1087162da44dbf54705c15f5ba62c7c07db86bb6f38caacd4f5beb62e4618b"
 source_size: 209990
+file_modified: <modified>
 format: text
 detected_by: "text (Shift_JIS)"
 encoding: "Shift_JIS"

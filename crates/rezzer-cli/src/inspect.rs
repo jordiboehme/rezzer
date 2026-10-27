@@ -37,7 +37,5 @@ pub(crate) fn run(config: Config, registry: Registry, path: &Path) -> Result<Exi
 
 /// Control characters from file names or evidence never reach the terminal.
 fn one_line(s: &str) -> String {
-    s.chars()
-        .map(|c| if c.is_control() { ' ' } else { c })
-        .collect()
+    rezzer_model::text::controls_to_spaces(s)
 }

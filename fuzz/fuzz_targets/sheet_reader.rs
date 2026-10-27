@@ -45,6 +45,9 @@ fuzz_target!(|data: &[u8]| {
             evidence: "fuzz".to_string(),
         },
         modified: None,
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
     };
     let budget = Budget::new(limits);
     let mut out = rezzer_read_sheet::SheetReader.read(&src, &ReadOptions::default(), &budget);

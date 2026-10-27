@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "table-multiple.xlsx"
+description: "XLSX, 3 sheets, 2025-07-08. 4 tables."
 resource: "<corpus>/office/table-multiple.xlsx"
+tags: ["rezzer", "xlsx"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: high
+temporal_confidence: explicit
+status: stable
 source_sha256: "8d39e98b17bcd2937171dacbae296c2f3cd975bbf41809738c05c7ffdccc977f"
 source_size: 11520
+file_modified: <modified>
 format: xlsx
 detected_by: "zip with [Content_Types].xml main part spreadsheetml"
 reader: "sheet/0.1.0"

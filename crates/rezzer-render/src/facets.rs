@@ -8,7 +8,8 @@
 use std::collections::HashMap;
 
 use rezzer_model::{
-    Annotation, Block, Document, Formula, Inline, LossReason, Role, Severity, StatusColor, Value,
+    Annotation, Block, Document, Formula, Inline, Loss, LossReason, Role, Severity, StatusColor,
+    Value,
 };
 
 use crate::Selection;
@@ -352,18 +353,17 @@ pub(crate) fn passage_note(a: &Annotation) -> Block {
     }
 }
 
-/// `## Annotations`: comments, notes and highlights with author, date and passage; the ones
+/// `## Annotations`: the document's annotations (`list`, in the order `notes` counts them),
+/// comments, notes and highlights with author, date and passage; the ones
 /// the content showed at their passage (`notes`) are left out, and so are those on sheets
 /// that are not selected.
 pub(crate) fn annotations(
-    doc: &Document,
+    list: &[Annotation],
     ctx: &Ctx,
     notes: &Notes,
     selection: Option<&Selection>,
 ) -> Option<String> {
-    let items: Vec<Vec<Block>> = doc
-        .facets
-        .annotations
+    let items: Vec<Vec<Block>> = list
         .iter()
         .enumerate()
         .filter(|(i, _)| !notes.shown(*i))
@@ -425,8 +425,8 @@ pub(crate) fn changes(doc: &Document) -> Option<String> {
 
 /// `## Embedded`: scripts, macros, objects and references (never run or followed) with the
 /// texts of the scripts ([`form::scripts`]), then the pictures the calling agent should look
-/// at.
-pub(crate) fn embedded(doc: &Document) -> Option<String> {
+/// at. `link_base` goes before every asset path in a link (see `Ctx::link_base`).
+pub(crate) fn embedded(doc: &Document, link_base: &str) -> Option<String> {
     let vision: Vec<_> = doc.assets.iter().filter(|a| a.needs_vision).collect();
     if doc.facets.embedded.is_empty() && vision.is_empty() {
         return None;
@@ -457,7 +457,7 @@ pub(crate) fn embedded(doc: &Document) -> Option<String> {
                         if !target.is_empty() {
                             target.push(' ');
                         }
-                        target.push_str(&blocks::asset_link(path, Mode::Cell));
+                        target.push_str(&blocks::asset_link(path, link_base, Mode::Cell));
                     }
                 }
                 vec![
@@ -481,7 +481,7 @@ pub(crate) fn embedded(doc: &Document) -> Option<String> {
             .iter()
             .map(|a| {
                 let file = match &a.path {
-                    Some(p) => blocks::asset_link(p, Mode::Cell),
+                    Some(p) => blocks::asset_link(p, link_base, Mode::Cell),
                     None => "not extracted".to_string(),
                 };
                 vec![
@@ -524,11 +524,12 @@ fn severity(s: Severity) -> &'static str {
 
 /// `## Not read`: every loss with where, what, why and how bad.
 pub(crate) fn not_read(doc: &Document) -> Option<String> {
-    if doc.losses.is_empty() {
-        return None;
-    }
-    let rows: Vec<Vec<String>> = doc
-        .losses
+    (!doc.losses.is_empty()).then(|| not_read_list(&doc.losses))
+}
+
+/// `## Not read` with the losses in `list`, as a table.
+pub(crate) fn not_read_list(list: &[Loss]) -> String {
+    let rows: Vec<Vec<String>> = list
         .iter()
         .map(|l| {
             vec![
@@ -539,8 +540,8 @@ pub(crate) fn not_read(doc: &Document) -> Option<String> {
             ]
         })
         .collect();
-    Some(format!(
+    format!(
         "## Not read\n\n{}",
         pipe_table(&header(&["Where", "What", "Why", "Severity"]), &[], &rows)
-    ))
+    )
 }

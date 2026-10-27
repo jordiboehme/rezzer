@@ -38,14 +38,19 @@ Real output of `rezzer read` for `text-cp1252-derived-gutenberg-alice.txt` from 
 
 ```markdown
 ---
-type: document
+type: source
 title: "text-cp1252-derived-gutenberg-alice.txt"
+description: "Text, 877 paragraphs."
 resource: "/path/to/tests/corpus/web-text/text-cp1252-derived-gutenberg-alice.txt"
-generated: { by: rezzer/0.1.0, at: 2026-10-21T00:00:00Z }
-source_date: 2026-10-20
-temporal_confidence: medium
+tags: ["rezzer", "text"]
+generated: { by: rezzer/0.1.0, at: 2026-10-26T08:17:44Z }
+source_date: 2026-10-22
+temporal_confidence: inferred
+status: stable
 source_sha256: "233b828e6dd75253e67925d33bb427209250ba40eedce0d3b25262b89ff74047"
 source_size: 167712
+file_created: 2026-10-22T14:15:20Z
+file_modified: 2026-10-22T14:15:20Z
 format: text
 detected_by: "text (windows-1252)"
 encoding: "windows-1252"

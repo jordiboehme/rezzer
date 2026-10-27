@@ -9,7 +9,7 @@ File types: `.xlsx`, `.xlsm`, `.xlsb`. Rezzer detects the format by content, not
 Built on (versions as used in the development version):
 
 - [calamine](https://crates.io/crates/calamine) 0.37.0 for values, cached results, formula texts, merged cells and VBA module names
-- [formualizer-parse](https://crates.io/crates/formualizer-parse) 4.0.0, behind Rezzer's own formulakit crate, to find the cells, ranges, names and tables each formula reads
+- [formualizer-parse](https://crates.io/crates/formualizer-parse) 4.1.0, behind Rezzer's own formulakit crate, to find the cells, ranges, names and tables each formula reads
 - Rezzer's own readers on [zip](https://crates.io/crates/zip) and [quick-xml](https://crates.io/crates/quick-xml) for the parts no crate exposes well (XLSX and XLSM): sheetparts for the workbook parts, zipguard to check the package before anything is unpacked
 
 ## What Rezzer reads
@@ -127,6 +127,8 @@ Records repeat the header, so they cost about four times as much as a table line
 ## How it shows up in the output
 
 Each sheet becomes its tables and blocks as above. Then a Logic section follows with one part per sheet: parameters, formulas grouped by pattern, results, rules. After that come the defined names, a Mermaid dependency graph and the hidden logic (user functions, add-ins, other workbooks, data tables, spill ranges, VBA modules, calculation settings). Formulas can also be shown as LaTeX math (`--no-math` turns that off). In the graph a copied formula is one box, not one box per cell.
+
+A large workbook written with `-o` becomes `<file name>.md` plus parts in `<file name>.parts/`. A part holds one or more sheets, or the Logic of one or more sheets. A table that is too big for one part is cut at row borders, and each piece repeats the title and header rows. Its file name has the table and the sheet rows, like `table-1-1-net-generation-by-energy-source-total-rows-5-56.md`.
 
 ## Example
 

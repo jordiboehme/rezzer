@@ -7,11 +7,14 @@
 //!
 //! Every call that runs answers with one text block (the page, the JSON or the message) and
 //! a structured object. Bad input is a result with status `failed` and `isError` set, never
-//! a protocol error. The pipeline is synchronous and runs on tokio's blocking pool. A cancel
-//! from the client, or the end of the connection, stops a running read at its next budget
-//! check. Nothing but the protocol goes to stdout.
+//! a protocol error. Only a message longer than the transport reads (see
+//! [`transport::max_message_bytes`]) gets a JSON-RPC error, since it is not read. The
+//! pipeline is synchronous and runs on tokio's blocking pool. A cancel from the client, or
+//! the end of the connection, stops a running read at its next budget check. Nothing but the
+//! protocol goes to stdout.
 
 pub mod tools;
+pub mod transport;
 
 use std::sync::Arc;
 
@@ -51,9 +54,9 @@ pub struct RezzerServer {
 impl RezzerServer {
     pub fn new(pipeline: Arc<Pipeline>) -> Self {
         let mut tool_router = Self::tool_router();
-        let max_file_bytes = pipeline.config().limits.max_file_bytes;
+        let max_inline_bytes = pipeline.config().limits.inline_bytes();
         if let Some(route) = tool_router.map.get_mut("rez") {
-            route.attr.input_schema = Arc::new(rez_input_schema(max_file_bytes));
+            route.attr.input_schema = Arc::new(rez_input_schema(max_inline_bytes));
         }
         if let Some(route) = tool_router.map.get_mut("inspect") {
             route.attr.input_schema = schema_for_type::<InspectParams>();
@@ -98,11 +101,11 @@ impl RezzerServer {
 
 /// The input schema of `rez`: [`RezParams`] with the `file` property marked for the MCP
 /// file extension draft (`x-mcp-file`), so a client that supports it can attach a file.
-fn rez_input_schema(max_file_bytes: u64) -> JsonObject {
+fn rez_input_schema(max_inline_bytes: u64) -> JsonObject {
     let mut schema = schema_for_type::<RezParams>().as_ref().clone();
     if let Some(Value::Object(file)) = schema.get_mut("properties").and_then(|p| p.get_mut("file"))
     {
-        file.insert("x-mcp-file".into(), json!({ "maxSize": max_file_bytes }));
+        file.insert("x-mcp-file".into(), json!({ "maxSize": max_inline_bytes }));
     }
     schema
 }
@@ -174,7 +177,20 @@ impl ServerHandler for RezzerServer {
 
 /// Serves the tools on stdin and stdout until the client closes the connection.
 pub async fn serve_stdio(pipeline: Arc<Pipeline>) -> anyhow::Result<()> {
-    serve(pipeline, rmcp::transport::stdio()).await
+    let (read, write) = rmcp::transport::stdio();
+    serve_io(pipeline, read, write).await
+}
+
+/// Serves the tools on one JSON-RPC message per line from `read`, answers to `write`. A
+/// message may be as long as a `file` of the advertised `maxSize` needs; a longer one gets
+/// an error answer.
+pub async fn serve_io<R, W>(pipeline: Arc<Pipeline>, read: R, write: W) -> anyhow::Result<()>
+where
+    R: tokio::io::AsyncRead + Send + Unpin + 'static,
+    W: tokio::io::AsyncWrite + Send + Unpin + 'static,
+{
+    let max = transport::max_message_bytes(pipeline.config().limits.inline_bytes());
+    serve(pipeline, transport::LineTransport::new(read, write, max)).await
 }
 
 /// Serves the tools on `transport` until the client closes the connection. A client that

@@ -86,12 +86,14 @@ jobs:
       # outside the workspace, and `cargo +nightly` overrides the stable pin
       # in rust-toolchain.toml.
       - name: Install nightly
-        run: rustup toolchain install nightly --profile minimal
+        run: |
+          "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 5 rustup toolchain install nightly --profile minimal
 
       # cargo-fuzz is not in install-action's manifests. --locked builds it
       # from its own Cargo.lock.
       - name: Install cargo-fuzz
-        run: cargo +nightly install cargo-fuzz --version 0.13.2 --locked
+        run: |
+          "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 5 cargo +nightly install cargo-fuzz --version 0.13.2 --locked
 
       - name: Run the target
         run: |

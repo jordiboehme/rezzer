@@ -23,6 +23,9 @@ const GIB: u64 = 1024 * MIB;
 #[serde(default, deny_unknown_fields)]
 pub struct Limits {
     pub max_file_bytes: u64,
+    /// The largest file sent inline (a `data:` URI over MCP), at most `max_file_bytes`. A
+    /// file by path is bound by `max_file_bytes` only. See [`check_inline_bytes`].
+    pub max_inline_bytes: u64,
     pub max_unpacked_bytes: u64,
     pub max_ratio: u32,
     pub max_depth: u32,
@@ -35,6 +38,9 @@ pub struct Limits {
     /// document they build through [`Limits::max_elements`].
     pub max_memory_bytes: u64,
     pub page_tokens: usize,
+    /// The largest part in tokens when Rezzer writes files: a larger document is written as
+    /// a main document plus parts. 0 writes one file. See [`check_part_size`].
+    pub part_size: usize,
     /// Model elements (blocks, inlines, table cells) one read may build. This is how readers
     /// bound the memory of the document model; on a hit the reader stops with a `Limit` loss.
     pub max_elements: u64,
@@ -48,15 +54,58 @@ impl Default for Limits {
     fn default() -> Self {
         Limits {
             max_file_bytes: 2 * GIB,
+            max_inline_bytes: DEFAULT_INLINE_BYTES,
             max_unpacked_bytes: 4 * GIB,
             max_ratio: 100,
             max_depth: 256,
             max_time: Duration::from_secs(120),
             max_memory_bytes: 2 * GIB,
             page_tokens: 20_000,
+            part_size: DEFAULT_PART_SIZE,
             max_elements: 2_000_000,
             max_text_bytes: 256 * MIB,
         }
+    }
+}
+
+impl Limits {
+    /// The largest inline file that is read: `max_inline_bytes`, but never more than
+    /// `max_file_bytes`.
+    pub fn inline_bytes(&self) -> u64 {
+        self.max_inline_bytes.min(self.max_file_bytes)
+    }
+}
+
+/// The default [`Limits::max_inline_bytes`]: 32 MiB.
+pub const DEFAULT_INLINE_BYTES: u64 = 32 * MIB;
+
+/// The largest [`Limits::max_inline_bytes`]. One inline message may take six times as many
+/// bytes as its file, and the server holds the whole message.
+pub const MAX_INLINE_BYTES: u64 = GIB;
+
+/// Checks an inline file size limit: at least 1 byte and at most [`MAX_INLINE_BYTES`].
+pub fn check_inline_bytes(n: u64) -> Result<(), String> {
+    if (1..=MAX_INLINE_BYTES).contains(&n) {
+        Ok(())
+    } else {
+        Err(format!(
+            "max_inline_bytes must be between 1 and {MAX_INLINE_BYTES}"
+        ))
+    }
+}
+
+/// The default [`Limits::part_size`]: Crystalline's budget for a source engram.
+pub const DEFAULT_PART_SIZE: usize = 10_000;
+
+/// The smallest [`Limits::part_size`] other than 0.
+pub const MIN_PART_SIZE: usize = 2_500;
+
+/// Checks a part size: 0 (one file) or at least [`MIN_PART_SIZE`].
+pub fn check_part_size(n: usize) -> Result<(), String> {
+    if n == 0 || n >= MIN_PART_SIZE {
+        Ok(())
+    } else {
+        Err(format!("part_size must be 0 or at least {MIN_PART_SIZE}"))
     }
 }
 

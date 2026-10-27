@@ -1226,6 +1226,7 @@ fn stale_callout(doc: &Document) -> Option<String> {
     let ctx = Ctx {
         codes_shown: Default::default(),
         assets: &doc.assets,
+        link_base: "",
         heading_offset: 0,
         notes: None,
         in_sheet: Default::default(),

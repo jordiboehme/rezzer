@@ -56,6 +56,9 @@ fn forty_megabytes_of_inline_markup_stay_well_under_two_gigabytes() {
             evidence: "md".into(),
         },
         modified: None,
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
     };
     let budget = Budget::new(Limits::default());
     let base = CURRENT.load(Ordering::Relaxed);

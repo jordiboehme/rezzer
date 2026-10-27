@@ -221,7 +221,8 @@ impl Check<'_> {
                 self.problems.push((
                     IssueKind::Damaged,
                     format!(
-                        "page tree kid {} {} is missing or not a dictionary",
+                        "page tree kid {} {} is missing or not a dictionary; it counts as an \
+                         empty page",
                         id.0, id.1
                     ),
                 ));
@@ -261,10 +262,20 @@ impl Check<'_> {
                         return false;
                     }
                 }
-                _ => self.problems.push((
+                // lopdf counts a node without a /Type name as a page, as hayro does, and
+                // skips a node of another type, which hayro counts.
+                None => self.problems.push((
                     IssueKind::Damaged,
                     format!(
-                        "page tree node {} {} has no /Type Page or Pages and is skipped",
+                        "page tree node {} {} has no /Type and counts as a page",
+                        id.0, id.1
+                    ),
+                )),
+                Some(_) => self.problems.push((
+                    IssueKind::Damaged,
+                    format!(
+                        "page tree node {} {} has a /Type other than Page or Pages and is \
+                         skipped",
                         id.0, id.1
                     ),
                 )),

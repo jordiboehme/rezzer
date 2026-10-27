@@ -57,6 +57,85 @@ fn cfb_with(streams: &[&str]) -> Vec<u8> {
 }
 
 #[test]
+fn confirmed_media_types_come_from_the_bytes_only() {
+    let docx = zip_of(&[
+        (
+            "[Content_Types].xml",
+            &content_types(
+                r#"<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>"#,
+            ),
+        ),
+        ("word/document.xml", b"<w:document/>"),
+    ]);
+    let xlsm = zip_of(&[
+        (
+            "[Content_Types].xml",
+            &content_types(
+                r#"<Override PartName="/xl/workbook.xml" ContentType="application/vnd.ms-excel.sheet.macroEnabled.main+xml"/>"#,
+            ),
+        ),
+        ("xl/workbook.xml", b"<w/>"),
+    ]);
+    let cases: Vec<(&str, Vec<u8>, Option<&str>)> = vec![
+        (
+            "png",
+            b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec(),
+            Some("image/png"),
+        ),
+        (
+            "jpeg",
+            vec![0xFF, 0xD8, 0xFF, 0xE0, 0, 0x10],
+            Some("image/jpeg"),
+        ),
+        ("gif", b"GIF89a\x01\0\x01\0".to_vec(), Some("image/gif")),
+        (
+            "webp",
+            b"RIFF\x10\0\0\0WEBPVP8 ".to_vec(),
+            Some("image/webp"),
+        ),
+        ("pdf", b"%PDF-1.7\n".to_vec(), Some("application/pdf")),
+        (
+            "docx",
+            docx,
+            Some("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        ),
+        (
+            "odt",
+            odf("application/vnd.oasis.opendocument.text"),
+            Some("application/vnd.oasis.opendocument.text"),
+        ),
+        // Text: a JSON object or array is JSON, other UTF-8 without NUL plain text.
+        (
+            "json",
+            b" {\"a\": [1, 2]}\n".to_vec(),
+            Some("application/json"),
+        ),
+        ("json array", b"[1, 2]".to_vec(), Some("application/json")),
+        ("broken json", b"{\"a\": ".to_vec(), Some("text/plain")),
+        ("a json number is text", b"42".to_vec(), Some("text/plain")),
+        (
+            "text",
+            "just text named x.png, \u{e4}\n".as_bytes().to_vec(),
+            Some("text/plain"),
+        ),
+        ("csv", b"a,b\n1,2\n".to_vec(), Some("text/plain")),
+        ("empty", Vec::new(), Some("text/plain")),
+        // A macro workbook, binary bytes and a name alone confirm nothing.
+        ("xlsm", xlsm, None),
+        ("text with nul", b"text\0more".to_vec(), None),
+        ("latin-1", b"caf\xe9".to_vec(), None),
+        (
+            "riff without webp",
+            b"RIFF\x10\0\0\0WAVEfmt ".to_vec(),
+            None,
+        ),
+    ];
+    for (what, bytes, want) in cases {
+        assert_eq!(rezzer_detect::confirmed_media_type(&bytes), want, "{what}");
+    }
+}
+
+#[test]
 fn empty_file_detects_as_empty() {
     let (f, d) = detect("x.txt", b"");
     assert_eq!(f, FormatId::Empty);
@@ -556,8 +635,7 @@ fn open_reads_a_file() {
     assert_eq!(src.bytes(), b"%PDF-1.4\n");
     assert_eq!(src.format, FormatId::Pdf);
     let modified = src.modified.expect("modified time");
-    assert_eq!(modified.len(), 20, "{modified}");
-    assert!(modified.ends_with('Z'), "{modified}");
+    assert!(is_rfc3339_utc(&modified), "{modified}");
 }
 
 #[test]
@@ -1800,4 +1878,301 @@ fn encrypted_package_named_csv_is_not_taken_for_a_workbook() {
     let bytes = cfb_with(&["EncryptionInfo", "EncryptedPackage"]);
     assert_eq!(detect("secret.csv", &bytes).0, FormatId::Ole);
     assert_eq!(detect("secret.xlsx", &bytes).0, FormatId::Xlsx);
+}
+
+// ---------------------------------------------------------------------------------------
+// File system facts: birth time, download source, file tags
+
+/// RFC 3339 in UTC with whole seconds: `YYYY-MM-DDTHH:MM:SSZ`.
+fn is_rfc3339_utc(text: &str) -> bool {
+    let b = text.as_bytes();
+    b.len() == 20
+        && b.iter().enumerate().all(|(i, c)| match i {
+            4 | 7 => *c == b'-',
+            10 => *c == b'T',
+            13 | 16 => *c == b':',
+            19 => *c == b'Z',
+            _ => c.is_ascii_digit(),
+        })
+}
+
+#[test]
+fn created_time_when_the_system_has_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("x.txt");
+    std::fs::write(&path, b"hello\n").unwrap();
+    let src = open(&path, &Limits::default()).unwrap();
+    #[cfg(target_os = "macos")]
+    {
+        let fs = fs_type(dir.path());
+        if fs != "apfs" {
+            eprintln!("skipped: the temporary folder is on {fs}, not APFS");
+            return;
+        }
+        let created = src.created.as_deref().expect("APFS keeps a birth time");
+        assert!(is_rfc3339_utc(created), "{created}");
+    }
+    #[cfg(not(target_os = "macos"))]
+    if let Some(created) = src.created.as_deref() {
+        assert!(is_rfc3339_utc(created), "{created}");
+    }
+}
+
+/// The file system type of the volume that holds `path`, for example `apfs`.
+#[cfg(target_os = "macos")]
+fn fs_type(path: &std::path::Path) -> String {
+    use std::os::unix::ffi::OsStrExt;
+    let path = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+    // SAFETY: statfs only writes into the zeroed struct it is given; the path is a
+    // NUL-terminated string.
+    let mut stat: libc::statfs = unsafe { std::mem::zeroed() };
+    // SAFETY: as above.
+    let rc = unsafe { libc::statfs(path.as_ptr(), &raw mut stat) };
+    assert_eq!(rc, 0, "{}", std::io::Error::last_os_error());
+    // SAFETY: the kernel fills f_fstypename with a NUL-terminated name.
+    unsafe { std::ffi::CStr::from_ptr(stat.f_fstypename.as_ptr()) }
+        .to_string_lossy()
+        .into_owned()
+}
+
+#[test]
+fn missing_attributes_leave_keys_out() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("plain.txt");
+    std::fs::write(&path, b"hello\n").unwrap();
+    let src = open(&path, &Limits::default()).unwrap();
+    assert_eq!(src.downloaded_from, None);
+    assert!(src.file_tags.is_empty(), "{:?}", src.file_tags);
+    let json = serde_json::to_value(rezzer_model::source_info(&src)).unwrap();
+    assert!(json.get("downloaded_from").is_none(), "{json}");
+    assert!(json.get("file_tags").is_none(), "{json}");
+}
+
+#[test]
+fn bytes_have_no_file_facts() {
+    let src = from_bytes("x.txt", b"hello\n".to_vec(), &Limits::default()).unwrap();
+    assert_eq!(src.modified, None);
+    assert_eq!(src.created, None);
+    assert_eq!(src.downloaded_from, None);
+    assert!(src.file_tags.is_empty());
+}
+
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod xattrs {
+    use std::path::{Path, PathBuf};
+
+    use fileattrs::test_support::set_xattr_at as set;
+    use rezzer_detect::open;
+    use rezzer_limits::Limits;
+
+    #[cfg(target_os = "macos")]
+    const WHERE_FROMS: &[u8] =
+        include_bytes!("../../formats/fileattrs/tests/data/where_froms_plutil.bplist");
+    #[cfg(target_os = "macos")]
+    const TAGS: &[u8] = include_bytes!("../../formats/fileattrs/tests/data/tags_plutil.bplist");
+
+    /// A binary plist holding an empty array: header, the array object (0xA0), a one-byte
+    /// offset table and the 32-byte trailer (one object, top 0, offset table at 9).
+    #[cfg(target_os = "macos")]
+    const EMPTY_ARRAY: &[u8] = &[
+        b'b', b'p', b'l', b'i', b's', b't', b'0', b'0', 0xA0, 8, //
+        0, 0, 0, 0, 0, 0, 1, 1, //
+        0, 0, 0, 0, 0, 0, 0, 1, //
+        0, 0, 0, 0, 0, 0, 0, 0, //
+        0, 0, 0, 0, 0, 0, 0, 9,
+    ];
+
+    /// A binary plist holding the array `["javascript:alert(1)"]`: the array (0xA1, ref 1)
+    /// at offset 8, the ASCII string (0x5F, length 19 as a one-byte integer) at offset 10,
+    /// the offset table at 32 and the trailer (two objects, top 0).
+    #[cfg(target_os = "macos")]
+    fn javascript_where_froms() -> Vec<u8> {
+        let mut bytes = b"bplist00".to_vec();
+        bytes.extend_from_slice(&[0xA1, 1, 0x5F, 0x10, 19]);
+        bytes.extend_from_slice(b"javascript:alert(1)");
+        bytes.extend_from_slice(&[8, 10]);
+        bytes.extend_from_slice(&[0, 0, 0, 0, 0, 0, 1, 1]);
+        bytes.extend_from_slice(&2u64.to_be_bytes());
+        bytes.extend_from_slice(&0u64.to_be_bytes());
+        bytes.extend_from_slice(&32u64.to_be_bytes());
+        bytes
+    }
+
+    /// A new file in its own temporary folder.
+    fn file(dir: &tempfile::TempDir) -> PathBuf {
+        let path = dir.path().join("x.pdf");
+        std::fs::write(&path, b"%PDF-1.4\n").unwrap();
+        path
+    }
+
+    /// Sets the attribute, or says why the test is skipped and returns false.
+    fn try_set(path: &Path, name: &str, value: &[u8]) -> bool {
+        match set(path, name, value) {
+            Ok(()) => true,
+            Err(error) => {
+                eprintln!("skipped: this file system refuses {name} ({error})");
+                false
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn where_froms_from_xattr() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = file(&dir);
+        set(&path, "com.apple.metadata:kMDItemWhereFroms", WHERE_FROMS).unwrap();
+        let src = open(&path, &Limits::default()).unwrap();
+        assert_eq!(
+            src.downloaded_from.as_deref(),
+            Some("https://example.com/files/report.pdf")
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn finder_tags_without_colors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = file(&dir);
+        set(&path, "com.apple.metadata:_kMDItemUserTags", TAGS).unwrap();
+        let src = open(&path, &Limits::default()).unwrap();
+        assert_eq!(src.file_tags, ["Größe", "Red", "日本"]);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn broken_where_froms_leave_the_key_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = file(&dir);
+        set(
+            &path,
+            "com.apple.metadata:kMDItemWhereFroms",
+            &WHERE_FROMS[..20],
+        )
+        .unwrap();
+        set(&path, "com.apple.metadata:_kMDItemUserTags", b"not a plist").unwrap();
+        let src = open(&path, &Limits::default()).unwrap();
+        assert_eq!(src.downloaded_from, None);
+        assert!(src.file_tags.is_empty(), "{:?}", src.file_tags);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn plists_built_here_read_as_meant() {
+        assert!(fileattrs::string_array(EMPTY_ARRAY).unwrap().is_empty());
+        assert_eq!(
+            fileattrs::string_array(&javascript_where_froms()).unwrap(),
+            ["javascript:alert(1)"]
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn broken_or_empty_where_froms_fall_back_to_the_origin_url() {
+        for where_froms in [&WHERE_FROMS[..20], EMPTY_ARRAY, b"not a plist"] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = file(&dir);
+            set(&path, "com.apple.metadata:kMDItemWhereFroms", where_froms).unwrap();
+            set(&path, "user.xdg.origin.url", b"https://example.org/a.pdf").unwrap();
+            let src = open(&path, &Limits::default()).unwrap();
+            assert_eq!(
+                src.downloaded_from.as_deref(),
+                Some("https://example.org/a.pdf"),
+                "{where_froms:?}"
+            );
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn an_unsafe_first_where_from_is_not_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = file(&dir);
+        set(
+            &path,
+            "com.apple.metadata:kMDItemWhereFroms",
+            &javascript_where_froms(),
+        )
+        .unwrap();
+        set(&path, "user.xdg.origin.url", b"https://example.org/a.pdf").unwrap();
+        let src = open(&path, &Limits::default()).unwrap();
+        assert_eq!(src.downloaded_from, None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn broken_or_empty_finder_tags_fall_back_to_xdg_tags() {
+        for finder in [&TAGS[..20], EMPTY_ARRAY, b"not a plist"] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = file(&dir);
+            set(&path, "com.apple.metadata:_kMDItemUserTags", finder).unwrap();
+            set(&path, "user.xdg.tags", b"Rot,Projekt").unwrap();
+            let src = open(&path, &Limits::default()).unwrap();
+            assert_eq!(src.file_tags, ["Rot", "Projekt"], "{finder:?}");
+        }
+        // Readable Finder tags win over the freedesktop ones.
+        let dir = tempfile::tempdir().unwrap();
+        let path = file(&dir);
+        set(&path, "com.apple.metadata:_kMDItemUserTags", TAGS).unwrap();
+        set(&path, "user.xdg.tags", b"Rot,Projekt").unwrap();
+        let src = open(&path, &Limits::default()).unwrap();
+        assert_eq!(src.file_tags, ["Größe", "Red", "日本"]);
+    }
+
+    #[test]
+    fn xdg_origin_url_from_xattr() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = file(&dir);
+        if !try_set(&path, "user.xdg.origin.url", b"https://example.org/a.pdf") {
+            return;
+        }
+        let src = open(&path, &Limits::default()).unwrap();
+        assert_eq!(
+            src.downloaded_from.as_deref(),
+            Some("https://example.org/a.pdf")
+        );
+    }
+
+    #[test]
+    fn unsafe_origin_urls_are_dropped() {
+        for (value, expected) in [
+            (&b"javascript:alert(1)"[..], None),
+            (
+                b"https://user:pw@example.org/a.pdf",
+                Some("https://example.org/a.pdf"),
+            ),
+            (b"\xff\xfe", None),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = file(&dir);
+            if !try_set(&path, "user.xdg.origin.url", value) {
+                return;
+            }
+            let src = open(&path, &Limits::default()).unwrap();
+            assert_eq!(src.downloaded_from.as_deref(), expected, "{value:?}");
+        }
+    }
+
+    #[test]
+    fn xdg_tags_from_xattr() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = file(&dir);
+        if !try_set(&path, "user.xdg.tags", b"Rot, Projekt,,") {
+            return;
+        }
+        let src = open(&path, &Limits::default()).unwrap();
+        assert_eq!(src.file_tags, ["Rot", "Projekt"]);
+    }
+
+    #[test]
+    fn file_tags_are_capped_at_64() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = file(&dir);
+        let many: Vec<String> = (0..100).map(|i| format!("t{i}")).collect();
+        if !try_set(&path, "user.xdg.tags", many.join(",").as_bytes()) {
+            return;
+        }
+        let src = open(&path, &Limits::default()).unwrap();
+        assert_eq!(src.file_tags, many[..64]);
+    }
 }

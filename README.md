@@ -27,13 +27,31 @@ Rezzer is a knowledge extraction pipeline for AI agents. It reads your files and
 
 It's not a converter that dumps plain text. A spreadsheet is more than its values. A contract is more than its words. Rezzer keeps the formulas, the comments, the tracked changes and everything else that tells what a file means.
 
-One Rust binary. It runs locally as an MCP server and a CLI on macOS and Linux (Windows maybe later). Your files never leave your machine. And yes, Rezzer is an MCP. The friendly kind. It reads your files and gives the knowledge back to you.
+One Rust binary. It runs locally as an MCP server and a CLI on macOS, Linux and Windows. Your files never leave your machine. And yes, Rezzer is an MCP. The friendly kind. It reads your files and gives the knowledge back to you.
 
 ## Status
 
-Early. The foundation is in: the pipeline, the document model, the renderer, the CLI and the MCP server. Rezzer reads plain text in any encoding, Markdown, CSV, spreadsheets (XLSX, XLSM, XLSB and ODS) and PDF today. For spreadsheets you get the values and the logic behind them: formulas, inputs, results, names and dependencies. Rezzer finds the tables, headers and titles inside a sheet, can write each row as a record and can read only the sheets you pick. For PDF you get the text in reading order with its tables, the outline, annotations at their passage, form fields with their calculations, scripts, signatures and revisions. These formats make up 0.1.0, the first release. Release 0.2.0 brings HTML, the office formats and EPUB. Until the first release is out, you build Rezzer from source. Star the repo if you want to see it rez.
+Early. The foundation is in: the pipeline, the document model, the renderer, the CLI and the MCP server. Rezzer reads plain text in any encoding, Markdown, CSV, spreadsheets (XLSX, XLSM, XLSB and ODS) and PDF today. For spreadsheets you get the values and the logic behind them: formulas, inputs, results, names and dependencies. Rezzer finds the tables, headers and titles inside a sheet, can write each row as a record and can read only the sheets you pick. For PDF you get the text in reading order with its tables, the outline, annotations at their passage, form fields with their calculations, scripts, signatures and revisions. These formats make up 0.1.0, the first release. Release 0.2.0 brings HTML, the office formats, EPUB and Atlassian Document Format. Star the repo if you want to see it rez.
 
 ## Try it
+
+### Install
+
+With Homebrew on macOS and Linux:
+
+```sh
+brew install jordiboehme/tap/rezzer
+```
+
+Or download the archive for your system from the [latest release](https://github.com/jordiboehme/rezzer/releases/latest):
+
+- Linux: `rezzer-v<version>-linux-amd64.tar.gz` or `rezzer-v<version>-linux-arm64.tar.gz`. The binary is static and runs on any distribution.
+- macOS: `rezzer-v<version>-macos-arm64.tar.gz` (Apple silicon) or `rezzer-v<version>-macos-intel.tar.gz`. The binary is signed and notarized.
+- Windows: `rezzer-v<version>-windows-amd64.zip` or `rezzer-v<version>-windows-arm64.zip`. The binary is not signed yet, so SmartScreen may ask once before it runs.
+
+Each archive has one folder with the binary (`rezzer`, or `rezzer.exe` on Windows), the license and this README. `THIRD-PARTY-NOTICES.txt` in the same folder lists the licenses of the third-party code inside. Put the binary somewhere on your `PATH`.
+
+### Build from source
 
 You need Rust (rustup picks the right version from `rust-toolchain.toml`).
 
@@ -42,6 +60,40 @@ git clone https://github.com/jordiboehme/rezzer
 cd rezzer
 cargo install --path crates/rezzer
 ```
+
+### Check a download
+
+Download `SHA256SUMS` and `SHA256SUMS.sigstore.json` from the same release. Then check your archive against the checksums:
+
+```sh
+sha256sum -c SHA256SUMS --ignore-missing          # Linux
+shasum -a 256 -c SHA256SUMS --ignore-missing      # macOS
+```
+
+On Windows, run this in PowerShell and compare the hash with the line for your archive in `SHA256SUMS`:
+
+```powershell
+(Get-FileHash rezzer-v<version>-windows-amd64.zip).Hash.ToLower()
+```
+
+The checksum file is signed with [cosign](https://github.com/sigstore/cosign) in GitHub Actions. No key is needed: the signature says which workflow made it. Check it with cosign 3 or newer:
+
+```sh
+cosign verify-blob --bundle SHA256SUMS.sigstore.json \
+  --certificate-identity-regexp '^https://github\.com/jordiboehme/rezzer/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  SHA256SUMS
+```
+
+You can also check where a file was built with the [GitHub CLI](https://cli.github.com):
+
+```sh
+gh attestation verify rezzer-v<version>-linux-amd64.tar.gz --repo jordiboehme/rezzer
+```
+
+Each release also has an SBOM per platform. [SECURITY.md](SECURITY.md) lists the files.
+
+### Use it
 
 Read a file:
 
@@ -53,10 +105,13 @@ rezzer read calc.xlsx --sections logic   # only the formulas and what they read
 rezzer read report.xlsx --table-style records   # each table row as one list item with its headers
 rezzer read book.xlsx --sheet Summary --sheet '#3'   # only these sheets, by name or position
 rezzer read scan.pdf -o out/      # also writes pages that need vision to out/scan.pdf.assets/
+rezzer read big.pdf -o out/       # a large file becomes out/big.pdf.md plus parts in out/big.pdf.parts/
 rezzer read locked.pdf --password-stdin < password.txt   # the password comes from stdin, never from the command line
 rezzer inspect mystery.bin        # what is it, how sure, which reader
 rezzer formats                    # what this build can read
 ```
+
+With `-o`, `--part-size` sets the largest part in tokens. The default is 10000. With a larger value, parts can fail Crystalline's size check. Rezzer only replaces or removes files it wrote for the same source. A file of yours in the way stops the run with a message. The output of another file with the same name and other content stops it too. So does a name that differs only in letter case (`Notes.pdf` and `notes.pdf`) on a file system that ignores case, like the macOS default. Write such files to different folders.
 
 Use it from an agent (Claude Code shown, any MCP client works):
 
@@ -64,9 +119,11 @@ Use it from an agent (Claude Code shown, any MCP client works):
 claude mcp add rezzer -- rezzer mcp
 ```
 
-The agent then has three tools: `rez` reads a file (by path, or sent along as a `data:` URI), `inspect` takes a quick look and `formats` lists what Rezzer can read. Long results come in pages. `rez` also takes a `password` for a protected PDF, an `output_dir` for the pages that need vision, `table_style` for records and `sheets` to pick sheets.
+The agent then has three tools: `rez` reads a file (by path, or sent along as a `data:` URI), `inspect` takes a quick look and `formats` lists what Rezzer can read. A file sent along may be up to 32 MiB (`max_inline_bytes` in the `[limits]` of the config file). Give a larger file by path. Long results come in pages. `rez` also takes a `password` for a protected PDF, an `output_dir` to write the Markdown and its pictures to a folder, `part_size` for the largest part, `table_style` for records and `sheets` to pick sheets. With `output_dir` a large document is written as a main document plus parts, and `rez` returns the main document.
 
 Exit codes: 0 when everything was read, 2 when parts could not be read (the output says which), 1 when the read failed.
+
+The config file is `~/.config/rezzer/config.toml`. When `XDG_CONFIG_HOME` is set to a full path, it is `$XDG_CONFIG_HOME/rezzer/config.toml`. On Windows it is `%USERPROFILE%\.config\rezzer\config.toml`.
 
 ## Why
 
@@ -99,6 +156,7 @@ A new format means one new reader. The rest of the pipeline stays the same.
 
 - **Structure:** headings, sections, lists, footnotes and cross references stay what they are. Tables become real Markdown tables, merged cells included.
 - **Metadata:** title, authors, dates, revisions, keywords and custom properties go into the frontmatter. Values keep their type: a date stays a date, 9 % stays a percentage.
+- **Frontmatter ready to import:** besides a `rezzer` tag, the tags come from the file: its format, the kind of document, its own keywords and its file system tags (Finder tags on a Mac). Each date says how sure it is: from the document itself or only from the file system. A downloaded file says where it came from. The description is the document's own, or plain facts about it.
 - **The logic behind the content:** every format has a layer that tells how it works. Rezzer reads it and shows it as tables and graphs:
   - Spreadsheets: the tables, header rows, titles and totals inside each sheet, formulas with the cells they read, inputs with label and unit, results, named ranges, number formats, validation rules, data tables
   - PDF forms: which field is calculated from which, in what order, with what format
@@ -113,74 +171,94 @@ A new format means one new reader. The rest of the pipeline stays the same.
 - **Provenance:** every result says where it came from: original path, checksum, source date and which reader was used.
 - **Source archive (optional):** point Rezzer at an archive folder and it keeps a read-only copy of every source. The same content is stored once and a changed file becomes a new version.
 - **Evidence on demand:** the frontmatter cites the archived source as `rezzer://sha256/<hash>/<name>`. Ask Rezzer for that reference and it hands out the original. Every piece of knowledge links back to its evidence.
-- **Big documents:** the MCP tool returns the Markdown in pages. It can also write an OKF bundle (Markdown plus images) to a folder. Output is always UTF-8.
+- **Big documents:** a large document becomes a main document with linked parts. Each part is small enough for one tool answer. A PDF is cut at its chapters, a workbook at its sheets and a long table at row borders. Without an output folder the MCP tool returns long results in pages. Output is always UTF-8.
 
 ## Example
 
-A small budget workbook comes out like this (shortened, and the format may still change):
+A workbook with tunnel design calculations from the test corpus comes out like this. The command was `rezzer read tunnel_design_calculations.xlsx --no-math`. The output is shortened and the format may still change:
 
 ````markdown
 ---
-type: document
-title: "Budget 2026"
-resource: "finance/budget-2026.xlsx"
-generated: { by: rezzer/0.1.0, at: 2026-11-02T10:15:00Z }
-source_date: 2026-10-28
+type: source
+title: "tunnel_design_calculations.xlsx"
+description: "XLSX, 4 sheets, 2026-08-24. 4 tables, 86 formulas."
+resource: "/home/me/projects/tunnel/tunnel_design_calculations.xlsx"
+tags: ["rezzer", "xlsx"]
+generated: { by: rezzer/0.1.0, at: 2026-10-26T14:04:36Z }
+source_date: 2026-08-24
+temporal_confidence: explicit
+status: stable
+source_sha256: "efab83e86b0294f631b0ed072adcbfe953def83a9fb7652a2618408715080cdc"
+source_size: 20090
+file_created: 2026-10-22T14:15:20Z
+file_modified: 2026-10-22T14:15:20Z
 format: xlsx
+detected_by: "zip with [Content_Types].xml main part spreadsheetml"
 reader: "sheet/0.1.0"
 completeness: complete
 losses: 0
+authors: ["openpyxl"]
+language: "en"
+created: "2026-08-24T17:20:00Z"
+modified: "2026-08-24T17:24:13Z"
 ---
 
-# Budget 2026
+# tunnel\_design\_calculations.xlsx
 
 ## Overview
 
 | Part | Kind | Size | Role | Reads from |
 | --- | --- | --- | --- | --- |
-| Costs | sheet | 40 rows x 4 columns |  |  |
-| Income | sheet | 25 rows x 3 columns |  |  |
-| Summary | sheet | 4 rows x 4 columns | result | Costs, Income |
+| Design\_Basis | sheet | 5 regions |  |  |
+| Structural\_Lining | sheet | 24 rows x 2 columns, 7 regions | result |  |
+| Ventilation | sheet | 6 regions | result |  |
+| Drainage | sheet | 10 rows x 2 columns, 7 regions | result |  |
 
-- Sheets: 3
-- Formulas: 6
+- Sheets: 4
+- Formulas: 86
 - Patterns: 1
-- Parameters: 66
-- Results: 4
-- Comments: 2
-- Last changed: 2026-10-28T09:12:00Z
+- Parameters: 65
+- Results: 9
+- Last changed: 2026-08-24T17:24:13Z
 
-```mermaid
-flowchart LR
-    p0["Costs"]
-    p1["Income"]
-    p2["Summary"]
-    p0 --> p2
-    p1 --> p2
-```
+## Ventilation
 
-## Summary
+### LONGITUDINAL VENTILATION DESIGN CHECK
 
-Table A1:D4 (data A2:D4), header row 1, row labels in A, found by rules: no gaps, header by type change.
+Method: traffic-based CO dilution (IRC:SP:91) + Kennedy's critical velocity for smoke control (A2)
 
-| Item | 2025 | 2026 | Change |
-| --- | --- | --- | --- |
-| Costs | 41,200 | 44,900 | 9.0 % |
-| Income | 52,000 | 55,300 | 6.3 % |
-| Result | 10,800 | 10,400 | -3.7 % |
+### INPUTS
+
+Label and value pairs A5:C17:
+
+- Tunnel length, L: 800 m (B5)
+- Tunnel diameter, D: 10 m (B6)
+- Design-hour traffic volume: 1200 veh/hr (B7)
+- Heavy diesel vehicle share: 0.1 fraction (B8)
 
 ## Logic
 
-### Summary
+### Ventilation
 
 #### Formulas
 
 | Cells | Count | Formula | Reads | Role | Value |
 | --- | --- | --- | --- | --- | --- |
-| C2 | 1 | `=SUM(Costs!C2:C40)` | Costs!C2:C40 | intermediate | 44900 |
-| C3 | 1 | `=SUM(Income!C2:C25)` | Income!C2:C25 | intermediate | 55300 |
-| C4 | 1 | `=C3-C2` | C3, C2 | result | 10400 |
-| D2:D4 | 3 | `=C2/B2-1` | C2, B2 | result | 9.0 % |
+| B24 | 1 | `=B7*B8` | B7, B8 | intermediate | 120 |
+| B25 | 1 | `=B7*(1-B8)` | B7, B8 | intermediate | 1080 |
+| B26 | 1 | `=((B25*B9)+(B24*B10))*(B5/1000)/3600` | B25, B9, B24, B10, B5 | intermediate | 2.24 |
+| B27 | 1 | `=(B11*(28/24.45))/1000` | B11 | intermediate | 0.114519427 |
+| B28 | 1 | `=B26/B27` | B26, B27 | intermediate | 19.56 |
+| B32 | 1 | `=(9.81*B12*1000/(B13*B14*B15*B20))^(1/3)` | B12, B13, B14, B15, B20 | intermediate | 2.184635247 |
+| B33 | 1 | `=MAX(B29,B32)` | B29, B32 | intermediate | 2.184635247 |
+| B34 | 1 | `=IF(AND(B33>=1,B33<=10),"OK","CHECK RANGE")` | B33 | result | OK |
+
+#### Results
+
+| Cell | Formula | Value |
+| --- | --- | --- |
+| B34 | `=IF(AND(B33>=1,B33<=10),"OK","CHECK RANGE")` | OK |
+| B39 | `=ROUNDUP(B38/B17,0)` | 1 |
 ````
 
 ## Formats
@@ -208,6 +286,7 @@ Each format has its own page with what Rezzer extracts and the known limitations
 | [PPT](docs/formats/ppt.md) | 🗓️ | Slides, notes and comments from PowerPoint 97-2003 | own reader, [cfb](https://crates.io/crates/cfb) |
 | [RTF](docs/formats/rtf.md) | 🗓️ | Text and structure | [anydoc](https://crates.io/crates/anydoc) |
 | [EPUB](docs/formats/epub.md) | 🗓️ | Chapters, table of contents, footnotes, authors with roles, series | [rbook](https://crates.io/crates/rbook) |
+| [ADF](docs/formats/adf.md) | 🗓️ | Jira and Confluence rich text: structure, tables, code, panels, mentions, links, attachments by id | own reader |
 | [CAD and engineering](docs/formats/cad.md) | 🔭 | FreeCAD, STEP, IGES, IFC, DXF, 3MF, STL, OBJ, glTF, G-code, KiCad, Gerber, OpenSCAD: units, layers, parts lists, assembly and feature trees, parameters and what drives them, PMI, nets, print settings | own readers, [stepq](https://crates.io/crates/stepq) |
 | [PostScript, EPS](docs/formats/postscript.md) | 🔭 | Document facts from the header, text after that | own reader |
 
@@ -223,7 +302,8 @@ Planned after that:
 | Lotus Notes | 🔭 | NSF mail databases |
 | Photos and scans | 🔭 | JPEG, PNG, TIFF, HEIC: metadata, pages and barcodes. Text comes with OCR |
 | Archives | 🔭 | ZIP, 7z, TAR: each file inside is read as its own document |
-| Diagrams | 🔭 | draw.io, Visio, Lucidchart |
+| Diagrams | 🔭 | draw.io, Visio, Lucidchart, Excalidraw |
+| Design | 🔭 | Figma: frames, components, text and comments |
 | [Calculation sheets](docs/formats/mathcad.md) | 🔭 | Mathcad Prime, Mathcad 12-15, SMath |
 | Automation | 🔭 | PLCopen XML, Rockwell L5X, TIA Portal and TwinCAT exports |
 | Plant and product data | 🔭 | P&ID (DEXPI), Asset Administration Shell, AutomationML, ReqIF, QIF |
@@ -288,7 +368,7 @@ flowchart LR
     A --> K[Knowledge base]
 ```
 
-It works with any MCP client (Claude Code and others). Its output follows the frontmatter and Markdown conventions of [Crystalline](https://github.com/jordiboehme/crystalline), so the two fit together without any glue.
+It works with any MCP client (Claude Code and others). Its output follows the frontmatter and Markdown conventions of [Crystalline](https://github.com/jordiboehme/crystalline), so the two fit together without any glue. The output folder imports into Crystalline as it is: import the folder itself, with the main documents, their parts and pictures. An attachment keeps its type in the file name, such as `.png`, `.pdf`, `.txt` or `.json`, when Rezzer can tell the type from its content. Only attachments of an unknown binary type are written as `.bin`. Crystalline does not copy those on import, and it also leaves out files over 10 MiB.
 
 ## What Rezzer is not
 

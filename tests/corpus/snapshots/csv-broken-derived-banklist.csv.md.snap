@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "csv-broken-derived-banklist.csv"
+description: "CSV, 9 rows x 9 columns. 1 table, 4 parts not read."
 resource: "<corpus>/web-text/csv-broken-derived-banklist.csv"
+tags: ["rezzer", "csv"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: medium
+temporal_confidence: inferred
+status: stable
 source_sha256: "aa22bb95031ea5ff6165378d0e74c4387b5746722c63571dcb6d3d95816ec2a6"
 source_size: 996
+file_modified: <modified>
 format: csv
 detected_by: "delimited text (UTF-8), delimiter ',', 70% of rows with the same field count"
 encoding: "UTF-8"

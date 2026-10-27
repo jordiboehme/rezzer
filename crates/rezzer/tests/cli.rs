@@ -79,7 +79,7 @@ fn read_markdown_prints_frontmatter() {
         .arg(&md)
         .assert()
         .code(0)
-        .stdout(predicate::str::starts_with("---\ntype: document\n"))
+        .stdout(predicate::str::starts_with("---\ntype: source\n"))
         .stdout(predicate::str::contains(AT))
         .stdout(predicate::str::contains("Some text with"));
     assert_eq!(env.cache_entries(), 1, "the cache lives in the temp dir");
@@ -272,7 +272,7 @@ fn output_dir_writes_markdown_and_json() {
         .stdout("");
     // Named after the whole file name, so notes.md and notes.csv never overwrite each other.
     let written = std::fs::read_to_string(dir.join("notes.md.md")).unwrap();
-    assert!(written.starts_with("---\ntype: document\n"));
+    assert!(written.starts_with("---\ntype: source\n"));
     let json = std::fs::read(dir.join("notes.md.json")).unwrap();
     serde_json::from_slice::<Document>(&json).unwrap();
 
@@ -291,12 +291,134 @@ fn output_dir_writes_markdown_and_json() {
     );
 }
 
+/// Markdown far over 10,000 tokens, in chapters.
+fn long_markdown() -> String {
+    let mut text = String::from("# Book\n\n");
+    for c in 1..=30 {
+        text.push_str(&format!("## Chapter {c}\n\n"));
+        for _ in 0..8 {
+            text.push_str(&"Words of a chapter that fill its pages. ".repeat(12));
+            text.push_str("\n\n");
+        }
+    }
+    text
+}
+
+#[test]
+fn part_size_flag_needs_output_dir() {
+    let env = Env::new();
+    let md = env.file("notes.md", MARKDOWN);
+    env.cmd()
+        .arg("read")
+        .arg(&md)
+        .args(["--part-size", "5000"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("--output-dir"));
+}
+
+#[test]
+fn part_size_below_minimum_fails() {
+    let env = Env::new();
+    let md = env.file("notes.md", MARKDOWN);
+    let dir = env.root.path().join("out");
+    for bad in ["100", "2499", "-1", "many"] {
+        let out = env
+            .cmd()
+            .arg("read")
+            .arg(&md)
+            .arg("-o")
+            .arg(&dir)
+            .arg(format!("--part-size={bad}"))
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{bad}");
+        let stderr = String::from_utf8(out.stderr).unwrap();
+        assert!(stderr.contains("--part-size"), "{bad}: {stderr}");
+    }
+    env.cmd()
+        .arg("read")
+        .arg(&md)
+        .arg("-o")
+        .arg(&dir)
+        .args(["--part-size", "100"])
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains(
+            "part_size must be 0 or at least 2500",
+        ));
+    assert!(!dir.exists());
+}
+
+#[test]
+fn output_dir_writes_main_and_parts() {
+    let env = Env::new();
+    let book = env.file("book.markdown", long_markdown().as_bytes());
+    let dir = env.root.path().join("out");
+    env.cmd()
+        .arg("read")
+        .arg(&book)
+        .arg("-o")
+        .arg(&dir)
+        .assert()
+        .code(0)
+        .stdout("");
+    let main = std::fs::read_to_string(dir.join("book.markdown.md")).unwrap();
+    assert!(main.starts_with("---\ntype: source\n"), "{main}");
+    let parts: Vec<String> = std::fs::read_dir(dir.join("book.markdown.parts"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    assert!(parts.len() >= 3, "{parts:?}");
+    for part in &parts {
+        assert!(
+            main.contains(&format!("](book.markdown.parts/{part})")),
+            "{part}"
+        );
+    }
+    // A larger part size, then 0: one file, and the parts folder is gone.
+    for (size, many) in [("50000", false), ("0", false), ("2500", true)] {
+        env.cmd()
+            .arg("read")
+            .arg(&book)
+            .arg("-o")
+            .arg(&dir)
+            .args(["--part-size", size])
+            .assert()
+            .code(0);
+        assert_eq!(dir.join("book.markdown.parts").exists(), many, "{size}");
+    }
+}
+
+#[test]
+fn output_dir_can_be_the_source_folder() {
+    // The parts and pictures folders never take the source's own name (ruling P5-AA).
+    let env = Env::new();
+    let book = env.file("book.markdown", long_markdown().as_bytes());
+    for _ in 0..2 {
+        env.cmd()
+            .arg("read")
+            .arg(&book)
+            .arg("-o")
+            .arg(env.root.path())
+            .assert()
+            .code(0)
+            .stdout("");
+    }
+    assert_eq!(std::fs::read_to_string(&book).unwrap(), long_markdown());
+    assert!(env.root.path().join("book.markdown.md").is_file());
+    assert!(env.root.path().join("book.markdown.parts").is_dir());
+}
+
 #[test]
 fn resource_is_the_canonical_absolute_path() {
     let env = Env::new();
     env.file("notes.md", MARKDOWN);
-    let root = std::fs::canonicalize(env.root.path()).unwrap();
-    let expected = format!("resource: \"{}\"", root.join("notes.md").display());
+    // Without the Windows verbatim prefix, and quoted as the frontmatter quotes it (a
+    // backslash doubled).
+    let root = rezzer_pipeline::strip_verbatim(std::fs::canonicalize(env.root.path()).unwrap());
+    let shown = root.join("notes.md").display().to_string();
+    let expected = format!("resource: \"{}\"", shown.replace('\\', "\\\\"));
     env.cmd()
         .args(["read", "./notes.md"])
         .assert()
@@ -320,7 +442,13 @@ fn no_cache_leaves_the_cache_empty() {
 #[test]
 fn bad_config_is_one_line_error() {
     let env = Env::new();
-    let config = env.root.path().join("config/rezzer/config.toml");
+    // Built one name at a time, as Rezzer builds it, so the error shows the same separators.
+    let config = env
+        .root
+        .path()
+        .join("config")
+        .join("rezzer")
+        .join("config.toml");
     std::fs::write(&config, "colour = \"red\"\n").unwrap();
     let md = env.file("notes.md", MARKDOWN);
     env.cmd()
@@ -404,6 +532,23 @@ fn version_and_help_exit_0() {
             .stdout(predicate::eq(expected.clone()));
     }
     env.cmd().arg("--help").assert().code(0);
+}
+
+/// `rezzer read --help` names `--part-size` and says where the parts of a large document go.
+/// clap wraps by terminal width, so both sides are compared with their whitespace joined.
+#[test]
+fn help_mentions_part_size() {
+    let env = Env::new();
+    let out = env.cmd().args(["read", "--help"]).output().expect("help");
+    assert!(out.status.success());
+    let join = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let help = join(&String::from_utf8_lossy(&out.stdout));
+    assert!(help.contains("--part-size"), "{help}");
+    let sentence = join(
+        "A document over the part size is written as <file name>.md plus parts in a folder
+         next to it, <file name>.parts.",
+    );
+    assert!(help.contains(&sentence), "{help}");
 }
 
 #[test]
@@ -580,13 +725,16 @@ fn scrubbed(text: &str, env: &Env) -> String {
     let canonical: Vec<std::path::PathBuf> = paths
         .iter()
         .filter_map(|p| std::fs::canonicalize(p).ok())
+        .flat_map(|p| [p.clone(), rezzer_pipeline::strip_verbatim(p)])
         .collect();
     paths.extend(canonical);
-    // The longest first, so a path inside another goes as a whole.
+    // Each path also as a quoted value shows it, with a backslash doubled (Windows).
     let mut paths: Vec<String> = paths
         .iter()
         .map(|p| p.to_string_lossy().into_owned())
+        .flat_map(|p| [p.replace('\\', "\\\\"), p])
         .collect();
+    // The longest first, so a path inside another goes as a whole.
     paths.sort_by_key(|p| std::cmp::Reverse(p.len()));
     let mut text = text.to_string();
     for p in paths {

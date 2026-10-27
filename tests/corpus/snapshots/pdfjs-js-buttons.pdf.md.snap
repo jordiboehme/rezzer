@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "pdfjs-js-buttons.pdf"
+description: "PDF, 1 page, 2021-01-08. 1 outline, 10 form fields."
 resource: "<corpus>/pdf/pdfjs-js-buttons.pdf"
+tags: ["rezzer", "pdf", "form"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: high
+temporal_confidence: explicit
+status: stable
 source_sha256: "4679ee03ee84b48d8b67ba39975e946de49216ba744a729fa30ef8f32c3ea9ba"
 source_size: 29410
+file_modified: <modified>
 format: pdf
 detected_by: "pdf header %PDF-"
 reader: "pdf/0.1.0"

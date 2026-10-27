@@ -6,7 +6,7 @@
 //! and decrypts single objects; it never sees the file. The encryption dictionary is never
 //! inside an object stream, and members of an object stream are not encrypted on their own.
 
-use lopdf::encryption::{DecryptionError, decrypt_object};
+use lopdf::encryption::{DecryptionError, PasswordAlgorithm, decrypt_object};
 use lopdf::{Dictionary, Document, EncryptionState, Object, ObjectId};
 
 use super::store::Store;
@@ -158,7 +158,12 @@ pub(crate) fn setup(
             Some(_) => return Err(OpenError::WrongPassword),
         }
     };
-    let state = EncryptionState::decode(&doc, pw).map_err(|e| lopdf_error(e, password))?;
+    // lopdf checks the password in PDFDocEncoding (revisions 2 to 4) or after SASLprep (5 and
+    // 6), but derives the key from the bytes it is given: they must be the same.
+    let key_pw = PasswordAlgorithm::try_from(&doc)
+        .and_then(|a| a.sanitize_password(pw).map_err(Into::into))
+        .map_err(|e| lopdf_error(e, password))?;
+    let state = EncryptionState::decode(&doc, key_pw).map_err(|e| lopdf_error(e, password))?;
     let encryption = Encryption {
         method: method(&state),
         empty_user_password: empty,

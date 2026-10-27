@@ -38,6 +38,9 @@ pub(crate) enum Mode {
 /// What the block renderer needs besides the blocks.
 pub(crate) struct Ctx<'a> {
     pub assets: &'a [Asset],
+    /// Put before every asset path in a link: `../` in a part file one folder down, else
+    /// empty.
+    pub link_base: &'a str,
     /// Added to every body heading level, so body headings stay below the title.
     pub heading_offset: u8,
     /// Annotations to show at their passage; only the content has them.
@@ -64,6 +67,8 @@ pub(crate) struct Notes<'a> {
     list: &'a [Annotation],
     at: HashMap<&'a str, Vec<usize>>,
     shown: RefCell<Vec<bool>>,
+    /// The annotations shown, in the order they were shown, so a trial render can be undone.
+    taken: RefCell<Vec<usize>>,
 }
 
 impl<'a> Notes<'a> {
@@ -78,6 +83,22 @@ impl<'a> Notes<'a> {
             list,
             at,
             shown: RefCell::new(vec![false; list.len()]),
+            taken: RefCell::new(Vec::new()),
+        }
+    }
+
+    /// A mark to go back to with [`Notes::rollback`].
+    pub(crate) fn checkpoint(&self) -> usize {
+        self.taken.borrow().len()
+    }
+
+    /// Forgets every annotation shown since `mark`: the splitter renders a part to measure
+    /// it, then renders it again for real. Costs only what was shown since.
+    pub(crate) fn rollback(&self, mark: usize) {
+        let mut taken = self.taken.borrow_mut();
+        let mut shown = self.shown.borrow_mut();
+        for i in taken.drain(mark..) {
+            shown[i] = false;
         }
     }
 
@@ -92,9 +113,13 @@ impl<'a> Notes<'a> {
             return Vec::new();
         };
         let mut shown = self.shown.borrow_mut();
+        let mut taken = self.taken.borrow_mut();
         list.iter()
             .filter(|&&i| !std::mem::replace(&mut shown[i], true))
-            .map(|&i| &self.list[i])
+            .map(|&i| {
+                taken.push(i);
+                &self.list[i]
+            })
             .collect()
     }
 }
@@ -422,8 +447,8 @@ fn inline_into(inline: &Inline, mode: Mode, link_depth: usize, dollars: bool, ou
                 }
                 return;
             }
-            if *wiki && let Some(written) = wikilink(target, content, mode) {
-                out.push_str(&written);
+            if *wiki {
+                out.push_str(&wikilink(target, content, mode, dollars));
                 return;
             }
             if !safe_target(target) {
@@ -824,11 +849,12 @@ pub(crate) fn asset_target(path: &str) -> String {
     out
 }
 
-/// A link to an extracted file, its path as the text.
-pub(crate) fn asset_link(path: &str, mode: Mode) -> String {
+/// A link to an extracted file, its path as the text; `base` goes before the path in the
+/// target (see [`Ctx::link_base`]).
+pub(crate) fn asset_link(path: &str, base: &str, mode: Mode) -> String {
     inlines(
         &[Inline::Link {
-            target: asset_target(path),
+            target: format!("{base}{}", asset_target(path)),
             title: None,
             internal: false,
             wiki: false,
@@ -922,7 +948,8 @@ pub(crate) fn finish_lines(text: &str) -> String {
     out
 }
 
-fn escape_line_start(line: &str, out: &mut String) {
+/// Writes `line`, a block marker at its start escaped (`#`, `>`, `-`, `+`, `=`, `1.`).
+pub(crate) fn escape_line_start(line: &str, out: &mut String) {
     match line.chars().next() {
         Some('#' | '>' | '-' | '+' | '=') => {
             out.push('\\');
@@ -1079,32 +1106,20 @@ fn block(b: &Block, ctx: &Ctx, depth: usize, level: u8) -> String {
             blocks: inner,
         } => {
             let label = anchor.as_ref().and_then(|a| a.0.strip_prefix("fn:"));
+            let title = title.as_deref().filter(|t| !t.trim().is_empty());
+            if let (None, Some(label)) = (title, label) {
+                return footnote(label, inner, ctx, depth);
+            }
             let sheet = *kind == SectionKind::Sheet;
-            if sheet {
-                ctx.in_sheet.set(ctx.in_sheet.get() + 1);
-            }
-            let text = match (title.as_deref().filter(|t| !t.trim().is_empty()), label) {
-                (None, Some(label)) => footnote(label, inner, ctx, depth),
-                (Some(title), _) => {
-                    let head = heading_line(level.min(6), &line_text(title.trim()));
-                    let body = if sheet {
-                        crate::layout::sheet_blocks(inner, ctx, depth + 1, level.saturating_add(1))
-                    } else {
-                        blocks(inner, ctx, depth + 1, level.saturating_add(1), false)
-                    };
-                    join2(head, body)
-                }
-                (None, None) if sheet => crate::layout::sheet_blocks(inner, ctx, depth + 1, level),
-                (None, None) => blocks(inner, ctx, depth + 1, level, false),
-            };
-            if sheet {
-                ctx.in_sheet.set(ctx.in_sheet.get() - 1);
-            }
-            // The annotations of a page that stand at no block close its section.
-            let page = (*kind == SectionKind::Page)
-                .then(|| anchor.as_ref().map(|a| a.0.as_str()))
-                .flatten();
-            with_notes(text, page, ctx, depth, level)
+            section(
+                *kind,
+                title,
+                anchor.as_ref().map(|a| a.0.as_str()),
+                ctx,
+                depth,
+                level,
+                &|d, l| section_body(inner, sheet, ctx, d, l),
+            )
         }
         Block::Heading {
             level: l,
@@ -1167,6 +1182,53 @@ fn block(b: &Block, ctx: &Ctx, depth: usize, level: u8) -> String {
         }
         Block::Rule { .. } => "---".into(),
         Block::Task { state, inlines, .. } => task(*state, inlines, false),
+    }
+}
+
+/// A section with `title` (none or blank: no heading) around the text `body` makes at the
+/// depth and heading level it is given. A sheet's blocks take no inline notes; a page's
+/// annotations that stand at no block (at `anchor`) close it. The splitter renders a part of a
+/// section's blocks this way, so the part keeps the section's heading and context.
+pub(crate) fn section(
+    kind: SectionKind,
+    title: Option<&str>,
+    anchor: Option<&str>,
+    ctx: &Ctx,
+    depth: usize,
+    level: u8,
+    body: &dyn Fn(usize, u8) -> String,
+) -> String {
+    let sheet = kind == SectionKind::Sheet;
+    if sheet {
+        ctx.in_sheet.set(ctx.in_sheet.get() + 1);
+    }
+    let text = match title.filter(|t| !t.trim().is_empty()) {
+        Some(title) => {
+            let head = heading_line(level.min(6), &line_text(title.trim()));
+            join2(head, body(depth + 1, level.saturating_add(1)))
+        }
+        None => body(depth + 1, level),
+    };
+    if sheet {
+        ctx.in_sheet.set(ctx.in_sheet.get() - 1);
+    }
+    // The annotations of a page that stand at no block close its section.
+    let page = (kind == SectionKind::Page).then_some(anchor).flatten();
+    with_notes(text, page, ctx, depth, level)
+}
+
+/// The blocks of a section: a sheet's through the sheet layout, others as a block sequence.
+pub(crate) fn section_body(
+    list: &[Block],
+    sheet: bool,
+    ctx: &Ctx,
+    depth: usize,
+    level: u8,
+) -> String {
+    if sheet {
+        crate::layout::sheet_blocks(list, ctx, depth, level)
+    } else {
+        blocks(list, ctx, depth, level, false)
     }
 }
 
@@ -1329,14 +1391,19 @@ fn footnote(label: &str, inner: &[Block], ctx: &Ctx, depth: usize) -> String {
     )
 }
 
+/// The longest info string a fence writes.
+const MAX_INFO: usize = 64;
+
 /// A fenced block with a fence longer than any backtick run inside.
 pub(crate) fn fence(lang: Option<&str>, text: &str) -> String {
     let fence = "`".repeat(longest_run(text, '`').max(2) + 1);
+    // The info string is a language name: its first word, at most 64 characters.
     let info: String = lang
         .unwrap_or("")
         .chars()
         .take_while(|c| !c.is_whitespace())
         .filter(|c| *c != '`')
+        .take(MAX_INFO)
         .collect();
     let body = text.strip_suffix('\n').unwrap_or(text);
     if body.is_empty() {
@@ -1409,7 +1476,7 @@ fn media(id: &str, place: Option<&str>, ctx: &Ctx) -> String {
             let alt = place.or(asset.alt.as_deref());
             match &asset.path {
                 Some(path) => parts.push(Inline::Image {
-                    target: asset_target(path),
+                    target: format!("{}{}", ctx.link_base, asset_target(path)),
                     alt: alt
                         .map(str::to_string)
                         .or_else(|| asset.caption.clone())
@@ -1988,41 +2055,24 @@ fn model_table(
     out
 }
 
-/// Characters allowed in a wikilink written as `[[...]]`: letters and digits of any script,
-/// space and `- . / # ' ,` (no `_`: it can mean emphasis). Nothing here has a Markdown or HTML meaning inside `[[ ]]`.
-fn wiki_plain(text: &str) -> bool {
-    text.chars()
-        .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '.' | '/' | '#' | '\'' | ','))
-}
-
-/// `[[target]]` or `[[target|text]]`, for a link that came from a wikilink. None unless the
-/// target (without a `:`) and the text are plain (see [`wiki_plain`]) and the text has no
-/// formatting, image or code; the link is then written as a normal, escaped link.
-fn wikilink(target: &str, content: &[Inline], mode: Mode) -> Option<String> {
-    let mut text = String::new();
-    for inline in content {
-        match inline {
-            Inline::Text {
-                text: t,
-                emphasis: false,
-                strong: false,
-                strike: false,
-            } => text.push_str(t),
-            Inline::AnchorMark { .. } => {}
-            _ => return None,
-        }
-    }
-    if target.is_empty() || !wiki_plain(target) || !wiki_plain(&text) {
-        return None;
-    }
-    if text.is_empty() || text == target {
-        Some(format!("[[{target}]]"))
-    } else if mode == Mode::Cell {
-        // The `|` of `[[target|text]]` would split the table cell.
-        None
+/// The text `[[target]]` or `[[target|text]]` for a link that came from a wikilink, with
+/// every bracket, `|` and other Markdown character escaped and line breaks as spaces (ruling
+/// P5-AD): Rezzer cannot know the name the target is written under,
+/// so a live link to it would be broken on every import. This holds for every wikilink, also
+/// one with `_`, `:`, a path or formatting. Crystalline reads a wikilink wherever `[[`
+/// stands, also after a backslash, so each bracket is escaped. The link itself stays in the
+/// link facts and the graph.
+fn wikilink(target: &str, content: &[Inline], mode: Mode, dollars: bool) -> String {
+    let text = plain_text(content);
+    let spelled = if text.trim().is_empty() || text == target {
+        format!("[[{target}]]")
     } else {
-        Some(format!("[[{target}|{text}]]"))
-    }
+        format!("[[{target}|{text}]]")
+    };
+    let mut out = String::new();
+    // With `dollars` every `$` is escaped, as in the text around it.
+    escape_with(&spelled, line_mode(mode), dollars, &mut out);
+    out
 }
 
 #[cfg(test)]

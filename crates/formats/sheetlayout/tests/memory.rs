@@ -10,7 +10,7 @@ mod common;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
-use common::{Sheet, every_cell_once, ranges, thread_cpu};
+use common::{Sheet, assert_work, counted, every_cell_once, ranges};
 use sheetlayout::{Limits, Pos, Rect, detect, segment};
 
 thread_local! {
@@ -99,11 +99,10 @@ fn huge_merge_is_counted_by_intervals() {
         });
     }
     let input = sheet.input();
-    let start = thread_cpu();
-    let (layout, peak) = peak_heap(|| segment(&input, &Limits::default(), &never));
-    let used = thread_cpu() - start;
+    let ((layout, peak), steps, used) =
+        counted(|stop| peak_heap(|| segment(&input, &Limits::default(), stop)));
     eprintln!("huge merge: peak heap {peak} bytes, {used:?} CPU");
-    assert!(used < std::time::Duration::from_secs(2), "{used:?}");
+    assert_work("huge_merge_is_counted_by_intervals", steps, 380_000, used);
     assert!(peak < 64 * MB, "peak heap {peak}");
     assert_eq!(ranges(&layout), ["A1:XFD1048576"]);
     every_cell_once(&input, &layout);
@@ -129,14 +128,13 @@ fn overlapping_facts_give_few_issues() {
         });
     }
     let input = sheet.input();
-    let start = thread_cpu();
-    let (layout, peak) = peak_heap(|| segment(&input, &Limits::default(), &never));
-    let used = thread_cpu() - start;
+    let ((layout, peak), steps, used) =
+        counted(|stop| peak_heap(|| segment(&input, &Limits::default(), stop)));
     eprintln!(
         "overlapping facts: {} issues, peak heap {peak} bytes, {used:?} CPU",
         layout.issues.len()
     );
-    assert!(used < std::time::Duration::from_secs(2), "{used:?}");
+    assert_work("overlapping_facts_give_few_issues", steps, 12_000, used);
     assert!(peak < 16 * MB, "peak heap {peak}");
     assert!(layout.issues.len() <= 102, "{} issues", layout.issues.len());
     assert!(
@@ -157,9 +155,8 @@ fn dense_block_heap_follows_the_cells() {
         }
     }
     let input = sheet.input();
-    let start = thread_cpu();
-    let (layout, peak) = peak_heap(|| segment(&input, &Limits::default(), &never));
-    let used = thread_cpu() - start;
+    let ((layout, peak), _, used) =
+        counted(|stop| peak_heap(|| segment(&input, &Limits::default(), stop)));
     let per_cell = peak / 1_000_000;
     eprintln!("dense block: peak heap {peak} bytes ({per_cell} per cell), {used:?} CPU");
     assert!(per_cell <= 64, "{per_cell} bytes per cell");
@@ -182,11 +179,15 @@ fn wide_merged_header_with_long_text_is_bounded() {
         right: 16_382,
     });
     let input = sheet.input();
-    let start = thread_cpu();
-    let (layout, peak) = peak_heap(|| detect(&input, &Limits::default(), &never));
-    let used = thread_cpu() - start;
+    let ((layout, peak), steps, used) =
+        counted(|stop| peak_heap(|| detect(&input, &Limits::default(), stop)));
     eprintln!("wide merged header: peak heap {peak} bytes, {used:?} CPU");
-    assert!(used < std::time::Duration::from_secs(2), "{used:?}");
+    assert_work(
+        "wide_merged_header_with_long_text_is_bounded",
+        steps,
+        25_000,
+        used,
+    );
     assert!(peak < 16 * MB, "peak heap {peak}");
     every_cell_once(&input, &layout);
     assert_eq!(layout.regions.len(), 1);
@@ -204,11 +205,15 @@ fn wide_merged_header_with_long_text_is_bounded() {
         right: 16_382,
     });
     let input = sheet.input();
-    let start = thread_cpu();
-    let (layout, peak) = peak_heap(|| detect(&input, &Limits::default(), &never));
-    let used = thread_cpu() - start;
+    let ((layout, peak), steps, used) =
+        counted(|stop| peak_heap(|| detect(&input, &Limits::default(), stop)));
     eprintln!("wide short header: peak heap {peak} bytes, {used:?} CPU");
-    assert!(used < std::time::Duration::from_secs(2), "{used:?}");
+    assert_work(
+        "wide_merged_header_with_long_text_is_bounded",
+        steps,
+        50_000,
+        used,
+    );
     assert!(peak < 16 * MB, "peak heap {peak}");
     let r = &layout.regions[0];
     assert_eq!(r.header_paths.len(), 16_384);
@@ -235,11 +240,15 @@ fn many_merged_single_text_rows_are_bounded() {
     sheet.put(Pos { row: n + 1, col: 0 }, "1");
     sheet.put(Pos { row: n + 1, col: 1 }, "2");
     let input = sheet.input();
-    let start = thread_cpu();
-    let (layout, peak) = peak_heap(|| detect(&input, &Limits::default(), &never));
-    let used = thread_cpu() - start;
+    let ((layout, peak), steps, used) =
+        counted(|stop| peak_heap(|| detect(&input, &Limits::default(), stop)));
     eprintln!("many single-text rows: peak heap {peak} bytes, {used:?} CPU");
-    assert!(used < std::time::Duration::from_secs(2), "{used:?}");
+    assert_work(
+        "many_merged_single_text_rows_are_bounded",
+        steps,
+        5_400_000,
+        used,
+    );
     assert!(peak < 64 * MB, "peak heap {peak}");
     let r = &layout.regions[0];
     assert_eq!(r.header_rows, [0]);
@@ -259,13 +268,17 @@ fn dense_block_detect_heap_follows_the_cells() {
         }
     }
     let input = sheet.input();
-    let start = thread_cpu();
-    let (layout, peak) = peak_heap(|| detect(&input, &Limits::default(), &never));
-    let used = thread_cpu() - start;
+    let ((layout, peak), steps, used) =
+        counted(|stop| peak_heap(|| detect(&input, &Limits::default(), stop)));
     let per_cell = peak / 1_000_000;
     eprintln!("dense block detect: peak heap {peak} bytes ({per_cell} per cell), {used:?} CPU");
     assert!(per_cell <= 64, "{per_cell} bytes per cell");
-    assert!(used < std::time::Duration::from_secs(4), "{used:?}");
+    assert_work(
+        "dense_block_detect_heap_follows_the_cells",
+        steps,
+        12_000_000,
+        used,
+    );
     assert_eq!(layout.regions[0].header_rows, [0]);
     assert_eq!(layout.regions[0].header_paths.len(), 1000);
 }
@@ -313,28 +326,26 @@ fn many_sections_are_bounded() {
     };
     let sheet = build(3_000);
     let input = sheet.input();
-    let start = thread_cpu();
-    let (layout, peak) = peak_heap(|| detect(&input, &Limits::default(), &never));
-    let used = thread_cpu() - start;
+    let ((layout, peak), steps, used) =
+        counted(|stop| peak_heap(|| detect(&input, &Limits::default(), stop)));
     eprintln!("3,000 sections: peak heap {peak} bytes, {used:?} CPU");
     every_cell_once(&input, &layout);
     assert_eq!(layout.regions.len(), 3_000);
     // The first heading is the region's caption row; the others cut it.
     assert_eq!(layout.regions[0].captions, [0]);
     assert!(layout.regions[1..].iter().all(|r| r.heading.is_some()));
-    assert!(used < std::time::Duration::from_secs(2), "{used:?}");
+    assert_work("many_sections_are_bounded", steps, 230_000, used);
     assert!(peak < 64 * MB, "peak heap {peak}");
     // 20,000 sections pass the region limit: the region is not split, and an issue says so.
     let sheet = build(20_000);
     let input = sheet.input();
-    let start = thread_cpu();
-    let (layout, peak) = peak_heap(|| detect(&input, &Limits::default(), &never));
-    let used = thread_cpu() - start;
+    let ((layout, peak), steps, used) =
+        counted(|stop| peak_heap(|| detect(&input, &Limits::default(), stop)));
     eprintln!("20,000 sections: peak heap {peak} bytes, {used:?} CPU");
     every_cell_once(&input, &layout);
     assert_eq!(layout.regions.len(), 1);
     assert!(layout.issues.iter().any(|i| i.what.contains("not split")));
-    assert!(used < std::time::Duration::from_secs(2), "{used:?}");
+    assert_work("many_sections_are_bounded", steps, 1_850_000, used);
     assert!(peak < 64 * MB, "peak heap {peak}");
 }
 
@@ -359,9 +370,8 @@ fn long_continuation_chain_is_bounded() {
         }
     }
     let input = sheet.input();
-    let start = thread_cpu();
-    let (layout, peak) = peak_heap(|| detect(&input, &Limits::default(), &never));
-    let used = thread_cpu() - start;
+    let ((layout, peak), steps, used) =
+        counted(|stop| peak_heap(|| detect(&input, &Limits::default(), stop)));
     eprintln!("continuation chain: peak heap {peak} bytes, {used:?} CPU");
     every_cell_once(&input, &layout);
     assert_eq!(layout.regions.len(), 1);
@@ -371,7 +381,7 @@ fn long_continuation_chain_is_bounded() {
         .filter(|n| n.kind == sheetlayout::RowKind::Blank)
         .count();
     assert_eq!(blanks, 9_000);
-    assert!(used < std::time::Duration::from_secs(2), "{used:?}");
+    assert_work("long_continuation_chain_is_bounded", steps, 2_200_000, used);
     assert!(peak < 64 * MB, "peak heap {peak}");
 }
 
@@ -406,9 +416,8 @@ fn many_small_tables_with_continuations_and_notes_are_bounded() {
         }
     }
     let input = sheet.input();
-    let start = thread_cpu();
-    let (layout, peak) = peak_heap(|| detect(&input, &Limits::default(), &never));
-    let used = thread_cpu() - start;
+    let ((layout, peak), steps, used) =
+        counted(|stop| peak_heap(|| detect(&input, &Limits::default(), stop)));
     eprintln!("3,000 small tables: peak heap {peak} bytes, {used:?} CPU");
     every_cell_once(&input, &layout);
     assert_eq!(layout.regions.len(), 3_000);
@@ -418,7 +427,12 @@ fn many_small_tables_with_continuations_and_notes_are_bounded() {
             .iter()
             .all(|r| r.notes.len() == 1 && r.rows.len() == 1)
     );
-    assert!(used < std::time::Duration::from_secs(2), "{used:?}");
+    assert_work(
+        "many_small_tables_with_continuations_and_notes_are_bounded",
+        steps,
+        1_300_000,
+        used,
+    );
     assert!(peak < 64 * MB, "peak heap {peak}");
 }
 
@@ -435,13 +449,12 @@ fn hostile_outline_is_bounded() {
         sheet.outline.push((k * 3, k * 3 + 1, (k % 7 + 2) as u8));
     }
     let input = sheet.input();
-    let start = thread_cpu();
-    let (layout, peak) = peak_heap(|| detect(&input, &Limits::default(), &never));
-    let used = thread_cpu() - start;
+    let ((layout, peak), steps, used) =
+        counted(|stop| peak_heap(|| detect(&input, &Limits::default(), stop)));
     eprintln!("hostile outline: peak heap {peak} bytes, {used:?} CPU");
     every_cell_once(&input, &layout);
     assert_eq!(layout.regions.len(), 1);
-    assert!(used < std::time::Duration::from_secs(2), "{used:?}");
+    assert_work("hostile_outline_is_bounded", steps, 640_000, used);
     assert!(peak < 64 * MB, "peak heap {peak}");
 }
 
@@ -482,12 +495,16 @@ fn sections_with_many_merges_are_bounded() {
         }
     }
     let input = sheet.input();
-    let start = thread_cpu();
-    let (layout, peak) = peak_heap(|| detect(&input, &Limits::default(), &never));
-    let used = thread_cpu() - start;
+    let ((layout, peak), steps, used) =
+        counted(|stop| peak_heap(|| detect(&input, &Limits::default(), stop)));
     eprintln!("sections with many merges: peak heap {peak} bytes, {used:?} CPU");
     every_cell_once(&input, &layout);
     assert!(layout.regions.len() >= 7_999);
-    assert!(used < std::time::Duration::from_secs(1), "{used:?}");
+    assert_work(
+        "sections_with_many_merges_are_bounded",
+        steps,
+        4_400_000,
+        used,
+    );
     assert!(peak < 64 * MB, "peak heap {peak}");
 }

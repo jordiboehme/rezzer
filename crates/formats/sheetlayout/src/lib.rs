@@ -58,6 +58,7 @@ mod occupancy;
 mod paths;
 mod report;
 mod rows;
+mod work;
 
 pub use input::{
     CellIn, Class, Fact, FactKind, FormulaIn, Input, Limits, NameIn, Pos, Rect, Style,
@@ -66,6 +67,7 @@ pub use input::{
 
 pub use detect::detect;
 pub use locate::locate;
+pub use work::work_steps;
 
 use cut::Trip;
 use occupancy::{Prep, bounds};

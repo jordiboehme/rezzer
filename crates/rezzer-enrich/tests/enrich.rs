@@ -23,6 +23,9 @@ fn doc() -> Document {
             evidence: "test".into(),
         },
         modified: None,
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
         encoding: None,
         reader: None,
     })
@@ -566,6 +569,9 @@ fn read_csv(bytes: &[u8]) -> Document {
             evidence: "csv".into(),
         },
         modified: None,
+        created: None,
+        downloaded_from: None,
+        file_tags: Vec::new(),
     };
     rezzer_read_csv::CsvReader
         .read(

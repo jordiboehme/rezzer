@@ -34,6 +34,23 @@ pub struct Facets {
     /// Digital signatures and signature-like marks.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub signatures: Vec<Signature>,
+    /// The document's outline (bookmarks), in document order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outline: Vec<OutlineEntry>,
+}
+
+/// One item of a document's outline.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct OutlineEntry {
+    /// How deep the item stands: 1 for the top level, one more per nested level.
+    pub level: u8,
+    /// The title on one line, as the document's outline shows it.
+    pub title: String,
+    /// The page the item points at: the 1-based page of the file, as the page anchor `p<n>`
+    /// names it, not its label. `None` when it points at no page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -69,6 +86,15 @@ pub struct Formula {
     /// shown as `=B4`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub original: Option<String>,
+}
+
+impl Formula {
+    /// True for a defined name or a lambda (kind `Name` or `Lambda`, or an anchor
+    /// `name:<name>`): a named value or function, not a formula in a cell.
+    pub fn is_name(&self) -> bool {
+        matches!(self.kind, Some(FormulaKind::Name | FormulaKind::Lambda))
+            || self.anchor.0.starts_with("name:")
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -273,7 +299,7 @@ pub struct FieldAction {
 pub struct Signature {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anchor: Option<Anchor>,
-    /// `field`, `usage-rights` or `doc-mdp`.
+    /// `field`, [`Signature::USAGE_RIGHTS`] or `doc-mdp`.
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signer: Option<String>,
@@ -289,6 +315,12 @@ pub struct Signature {
     /// How many revisions were saved after this signature.
     #[serde(default)]
     pub later_revisions: u32,
+}
+
+impl Signature {
+    /// The kind of a usage rights signature: it unlocks features of a viewer and does not
+    /// sign the content.
+    pub const USAGE_RIGHTS: &'static str = "usage-rights";
 }
 
 /// Facts about the file as a whole. A closed set of keys: only these can reach the frontmatter.

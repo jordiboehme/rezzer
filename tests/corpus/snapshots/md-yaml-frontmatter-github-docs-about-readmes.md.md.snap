@@ -2,14 +2,18 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 ---
-type: document
+type: source
 title: "About the repository README file"
+description: "Markdown, 3532 bytes, \"About the repository README file\"."
 resource: "<corpus>/web-text/md-yaml-frontmatter-github-docs-about-readmes.md"
+tags: ["rezzer", "markdown"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
 source_date: <modified>
-temporal_confidence: medium
+temporal_confidence: inferred
+status: stable
 source_sha256: "5a3dfd2042720a4cc1f0ff77660cf21714eb98b127932d7a44976663f9509d3b"
 source_size: 3532
+file_modified: <modified>
 format: markdown
 detected_by: "yaml frontmatter"
 encoding: "UTF-8"

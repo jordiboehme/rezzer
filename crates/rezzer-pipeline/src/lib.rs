@@ -13,10 +13,10 @@
 
 mod cache;
 mod config;
+mod files;
 mod panics;
 
 use std::cell::RefCell;
-use std::collections::HashSet;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -30,7 +30,8 @@ use rezzer_model::{
 use rezzer_render::RenderOptions;
 
 pub use config::{Config, ConfigError, DEFAULT_CACHE_MAX_BYTES, ReadDefaults, config_path_from};
-pub use rezzer_limits::CancelToken;
+pub use files::{bundle_name, folder_stem, main_name, parts_folder};
+pub use rezzer_limits::{CancelToken, check_part_size};
 pub use rezzer_render::{OutputSection, TableStyle};
 
 use crate::cache::Cache;
@@ -75,10 +76,16 @@ pub struct Request {
     /// Used for encrypted files. A run with a password is never cached, so no decrypted
     /// content lands in the cache.
     pub password: Option<String>,
-    /// Where extracted assets (rendered pages, pictures) are written, in the bundle
-    /// `<bundle_name>.assets/`. When set, readers are asked to extract assets and the read
-    /// neither looks up nor stores the cache (blobs are never cached).
+    /// Where the run writes its files (decision 8): `<main name>.md`, the parts of a large
+    /// document in `<stem>.parts/`, `<main name>.json` for [`OutputKind::Json`] and the extracted
+    /// assets (rendered pages, pictures) in `<stem>.assets/`; see [`main_name`] and
+    /// [`folder_stem`]. When set, readers are asked to extract assets and the read neither
+    /// looks up nor stores the cache (blobs are never cached).
     pub output_dir: Option<PathBuf>,
+    /// The largest part in tokens when writing to `output_dir`; `None` takes the config's
+    /// `[limits] part_size`. 0 writes one file. Without `output_dir` nothing is split. Only
+    /// changes rendering, so it is not part of the cache key.
+    pub part_size: Option<usize>,
     /// RFC 3339 time for `generated.at`. When None: [`GENERATED_AT_ENV`], else now.
     pub generated_at: Option<String>,
     /// Cancelling it stops the reader at its next budget check; the result is then partial
@@ -100,6 +107,7 @@ impl Default for Request {
             math: true,
             password: None,
             output_dir: None,
+            part_size: None,
             generated_at: None,
             cancel: CancelToken::default(),
             table_style: None,
@@ -116,6 +124,7 @@ impl fmt::Debug for Request {
             .field("math", &self.math)
             .field("password", &self.password.as_ref().map(|_| "<redacted>"))
             .field("output_dir", &self.output_dir)
+            .field("part_size", &self.part_size)
             .field("generated_at", &self.generated_at)
             .field("cancelled", &self.cancel.is_cancelled())
             .field("table_style", &self.table_style)
@@ -130,13 +139,29 @@ pub struct RunResult {
     pub completeness: Completeness,
     /// None only when the file could not be opened at all; `message` says why.
     pub document: Option<Document>,
-    /// The rendered Markdown in pages; joined they are the whole output. Empty when there is
-    /// no document.
+    /// The rendered Markdown in pages; joined they are the whole output. With an output
+    /// directory it is the main document. Empty when there is no document.
     pub markdown_pages: Vec<String>,
     /// The model JSON, for [`OutputKind::Json`].
     pub json: Option<String>,
     /// Why a run failed, in one line.
     pub message: Option<String>,
+    /// The parts written next to the main document, in order; empty when the document fits
+    /// in one file or nothing was written.
+    pub parts: Vec<PartInfo>,
+    /// The main document written to the output directory.
+    pub main_file: Option<PathBuf>,
+}
+
+/// One part file a run wrote.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct PartInfo {
+    /// Relative to the output directory: `<stem>.parts/<file>.md`.
+    pub path: String,
+    /// `<document title>: <unit title or location>`.
+    pub title: String,
+    /// Where it lies in the document, for example `pages 12 to 20`.
+    pub location: String,
 }
 
 impl RunResult {
@@ -147,6 +172,8 @@ impl RunResult {
             markdown_pages: Vec::new(),
             json: None,
             message: Some(message),
+            parts: Vec::new(),
+            main_file: None,
         }
     }
 }
@@ -285,7 +312,14 @@ impl Pipeline {
     }
 
     fn run_source(&self, src: &Source, detect_panic: Option<String>, req: &Request) -> RunResult {
-        let (document, completeness, message) = match detect_panic {
+        // The request's or the config's: a config built in code is checked here too.
+        let part_size = req.part_size.unwrap_or(self.config.limits.part_size);
+        if req.output_dir.is_some()
+            && let Err(message) = rezzer_limits::check_part_size(part_size)
+        {
+            return RunResult::failed(message);
+        }
+        let (mut document, mut completeness, message, planned) = match detect_panic {
             Some(message) => {
                 let mut document = Document::new(source_info(src));
                 document.losses.push(Loss {
@@ -294,7 +328,7 @@ impl Pipeline {
                     why: LossReason::Internal,
                     severity: Severity::Error,
                 });
-                (document, Completeness::Failed, Some(message))
+                (document, Completeness::Failed, Some(message), Vec::new())
             }
             None => self.document(src, req),
         };
@@ -317,44 +351,172 @@ impl Pipeline {
             math: req.math,
             table_style: req.table_style.unwrap_or(self.config.read.table_style),
             sheets,
+            part: None,
+            parts: None,
         };
         let page_tokens = self.config.limits.page_tokens;
-        let rendered = panics::contained(|| {
-            let markdown = rezzer_render::render(&document, completeness, &opts);
-            rezzer_render::paginate(&markdown, page_tokens)
-        });
-        let markdown_pages = match rendered {
-            Ok(pages) => pages,
-            Err(panic) => {
+        let stem = folder_stem(&src.name);
+        let names = req
+            .output_dir
+            .as_ref()
+            .map(|_| (main_name(&src.name), parts_folder(&stem)));
+        let render = |document: &Document, completeness: Completeness| {
+            panics::contained(|| match &names {
+                Some((main, folder)) => {
+                    let main_file = format!("{main}.md");
+                    let output = rezzer_render::render_output(
+                        document,
+                        completeness,
+                        &opts,
+                        part_size,
+                        &main_file,
+                        folder,
+                    );
+                    let pages = rezzer_render::paginate(&output.main, page_tokens);
+                    (pages, output.parts, output.main)
+                }
+                None => {
+                    let markdown = rezzer_render::render(document, completeness, &opts);
+                    (
+                        rezzer_render::paginate(&markdown, page_tokens),
+                        Vec::new(),
+                        String::new(),
+                    )
+                }
+            })
+            .map_err(|panic| {
+                format!(
+                    "rendering stopped with an internal error: {}",
+                    one_line(&panic)
+                )
+            })
+        };
+        let json_of = |document: &Document| match req.output {
+            OutputKind::Json => {
+                Some(serde_json::to_string_pretty(document).expect("the model serializes"))
+            }
+            OutputKind::Markdown => None,
+        };
+        let mut rendered = render(&document, completeness);
+        let mut main_file = None;
+        if let (Some(dir), Some((main, folder)), Ok(first)) = (&req.output_dir, &names, &rendered) {
+            // The source as the frontmatter's `resource` names it.
+            let source = document
+                .source
+                .path
+                .clone()
+                .unwrap_or_else(|| document.source.name.clone());
+            let sha256 = document.source.sha256.clone();
+            // Writes the rendered files; the paths are checked first.
+            let write = |(_, parts, main_markdown): &Rendered, json: Option<&str>| {
+                let files = files::Files {
+                    source: &source,
+                    sha256: &sha256,
+                    main,
+                    folder,
+                    main_markdown,
+                    parts: parts
+                        .iter()
+                        .map(|p| (p.path.as_str(), p.markdown.as_str()))
+                        .collect(),
+                    json,
+                };
+                files::write_files(dir, &files)
+            };
+            // A path held by anything but Rezzer's output for this source fails the run
+            // before a picture is written (rulings P5-AB and P5-AG).
+            let check = files::Files {
+                source: &source,
+                sha256: &sha256,
+                main,
+                folder,
+                main_markdown: "",
+                parts: first.1.iter().map(|p| (p.path.as_str(), "")).collect(),
+                json: (req.output == OutputKind::Json).then_some(""),
+            };
+            let mut outcome = files::check_paths(dir, &check);
+            if outcome.is_ok() {
+                let (written, lost) = files::write_assets(&mut document, planned, dir, &stem);
+                if lost {
+                    // A picture without a file: the Markdown says so.
+                    completeness = at_most_partial(completeness);
+                    rendered = render(&document, completeness);
+                }
+                outcome = match &rendered {
+                    Ok(r) => write(r, json_of(&document).as_deref()),
+                    Err(e) => Err(e.clone()),
+                };
+                // A failed read keeps the old pictures.
+                if outcome.is_ok()
+                    && completeness != Completeness::Failed
+                    && let Err(what) = files::clean_assets(dir, &stem, &written)
+                {
+                    document.losses.push(Loss {
+                        location: "assets".into(),
+                        what,
+                        why: LossReason::Internal,
+                        severity: Severity::Warning,
+                    });
+                    completeness = at_most_partial(completeness);
+                    rendered = render(&document, completeness);
+                    outcome = match &rendered {
+                        Ok(r) => write(r, json_of(&document).as_deref()),
+                        Err(e) => Err(e.clone()),
+                    };
+                }
+            }
+            if let Err(message) = outcome {
+                // The read worked: its document (losses, pictures) stays in the result.
                 return RunResult {
                     completeness: Completeness::Failed,
                     document: Some(document),
                     markdown_pages: Vec::new(),
                     json: None,
-                    message: Some(format!(
-                        "rendering stopped with an internal error: {}",
-                        one_line(&panic)
-                    )),
+                    message: Some(message),
+                    parts: Vec::new(),
+                    main_file: None,
+                };
+            }
+            main_file = Some(dir.join(format!("{main}.md")));
+        }
+        let (markdown_pages, part_files, _) = match rendered {
+            Ok(rendered) => rendered,
+            Err(message) => {
+                return RunResult {
+                    completeness: Completeness::Failed,
+                    document: Some(document),
+                    markdown_pages: Vec::new(),
+                    json: None,
+                    message: Some(message),
+                    parts: Vec::new(),
+                    main_file: None,
                 };
             }
         };
-        let json = match req.output {
-            OutputKind::Json => {
-                Some(serde_json::to_string_pretty(&document).expect("the model serializes"))
-            }
-            OutputKind::Markdown => None,
-        };
+        let json = json_of(&document);
+        let parts = part_files
+            .into_iter()
+            .map(|p| PartInfo {
+                path: p.path,
+                title: p.title,
+                location: p.location,
+            })
+            .collect();
         RunResult {
             completeness,
             document: Some(document),
             markdown_pages,
             json,
             message,
+            parts,
+            main_file,
         }
     }
 
     /// The enriched document, from the cache or freshly read.
-    fn document(&self, src: &Source, req: &Request) -> (Document, Completeness, Option<String>) {
+    /// With an output directory the pictures are planned, not written yet (see
+    /// [`files::plan_assets`]).
+    fn document(&self, src: &Source, req: &Request) -> DocumentResult {
         let reader = self
             .registry
             .for_format(src.format)
@@ -371,8 +533,11 @@ impl Pipeline {
             let fresh = source_info(src);
             document.source.path = fresh.path;
             document.source.modified = fresh.modified;
+            document.source.created = fresh.created;
+            document.source.downloaded_from = fresh.downloaded_from;
+            document.source.file_tags = fresh.file_tags;
             document.source.detection = fresh.detection;
-            return (document, completeness, None);
+            return (document, completeness, None, Vec::new());
         }
         let (mut document, mut completeness, message, cacheable, blobs) = self.read(src, req);
         let enriched =
@@ -394,14 +559,15 @@ impl Pipeline {
         } else if cacheable && let (Some(cache), Some(key)) = (cache, &key) {
             cache.put(key, &document, completeness);
         }
-        if let Some(dir) = &req.output_dir {
+        let mut planned = Vec::new();
+        if req.output_dir.is_some() {
             let before = document.losses.len();
-            write_bundle(&mut document, blobs, dir, &bundle_name(&src.name));
-            if document.losses.len() > before && completeness == Completeness::Complete {
-                completeness = Completeness::Partial;
+            planned = files::plan_assets(&mut document, blobs, &folder_stem(&src.name));
+            if document.losses.len() > before {
+                completeness = at_most_partial(completeness);
             }
         }
-        (document, completeness, message)
+        (document, completeness, message, planned)
     }
 
     /// Reads `src`. The last value says whether the result may be cached: not when a time
@@ -469,175 +635,25 @@ impl Pipeline {
 /// may be cached and the asset blobs.
 type ReadResult = (Document, Completeness, Option<String>, bool, Vec<Blob>);
 
-/// The longest bundle name, in bytes.
-const BUNDLE_NAME_MAX: usize = 120;
+/// The enriched document, its completeness, a failure message and the pictures to write.
+type DocumentResult = (Document, Completeness, Option<String>, Vec<files::Planned>);
 
-/// The directory name stem for the assets of `source_name`: the last path component (split at
-/// `/` and a backslash), every char outside `[A-Za-z0-9._-]` replaced by `_`, a leading `.` replaced
-/// by `_`, `file` when empty, at most 120 bytes. It never holds a separator, so the bundle
-/// stays inside the output directory.
-pub fn bundle_name(source_name: &str) -> String {
-    let last = source_name.rsplit(['/', '\\']).next().unwrap_or_default();
-    let mut name: String = last
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
-                c
-            } else {
-                '_'
-            }
-        })
-        .take(BUNDLE_NAME_MAX)
-        .collect();
-    if name.starts_with('.') {
-        name.replace_range(..1, "_");
-    }
-    if name.is_empty() {
-        name.push_str("file");
-    }
-    name
-}
-
-/// Whether `id` is safe as a file name stem: `^[a-z0-9-]{1,64}$`.
-fn safe_asset_id(id: &str) -> bool {
-    (1..=64).contains(&id.len())
-        && id
-            .bytes()
-            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
-}
-
-fn asset_extension(mime: &str) -> &'static str {
-    match mime {
-        "image/png" => "png",
-        "image/jpeg" => "jpg",
-        "application/pdf" => "pdf",
-        _ => "bin",
+/// A complete result becomes partial; partial and failed stay.
+fn at_most_partial(completeness: Completeness) -> Completeness {
+    match completeness {
+        Completeness::Complete => Completeness::Partial,
+        other => other,
     }
 }
 
-/// Writes each blob to `<dir>/<bundle>.assets/<asset id>.<ext>` and sets the asset's path
-/// (relative to `dir`). A bad asset id or a write error is a loss, never a failed read; an
-/// asset without a written blob keeps no path. A blob without an asset is dropped. Files an
-/// earlier run left in the folder that this run does not write are removed (see
-/// [`remove_stale`]), so the folder holds what the Markdown names.
-fn write_bundle(document: &mut Document, blobs: Vec<Blob>, dir: &Path, bundle: &str) {
-    let folder = format!("{bundle}.assets");
-    let mut losses = Vec::new();
-    let mut written_names: HashSet<std::ffi::OsString> = HashSet::new();
-    let folder_ready = if blobs.is_empty() {
-        Ok(())
-    } else {
-        prepare_folder(dir, &folder)
-    };
-    for blob in blobs {
-        let Some(asset) = document.assets.iter_mut().find(|a| a.id == blob.asset) else {
-            continue;
-        };
-        let location = format!("asset {}", one_line(&asset.id));
-        if !safe_asset_id(&asset.id) {
-            losses.push(Loss {
-                location,
-                what: "the picture was not written: its id is not a safe file name".into(),
-                why: LossReason::Internal,
-                severity: Severity::Warning,
-            });
-            continue;
-        }
-        let relative = format!("{folder}/{}.{}", asset.id, asset_extension(&asset.mime));
-        let target = dir.join(&relative);
-        let written = match &folder_ready {
-            Ok(()) => write_new(&target, &blob.bytes),
-            Err(e) => Err(std::io::Error::new(e.kind(), e.to_string())),
-        };
-        let name = target.file_name().map(std::ffi::OsStr::to_os_string);
-        match written {
-            Ok(()) => {
-                asset.path = Some(relative);
-                written_names.extend(name);
-            }
-            Err(e) => losses.push(Loss {
-                location,
-                what: format!("the picture was not written: {}", one_line(&e.to_string())),
-                why: LossReason::Internal,
-                severity: Severity::Warning,
-            }),
-        }
-    }
-    if folder_ready.is_ok()
-        && let Err(e) = remove_stale(&dir.join(&folder), &written_names)
-    {
-        losses.push(Loss {
-            location: "assets".into(),
-            what: format!(
-                "files of an earlier run in {} were not all removed: {}",
-                one_line(&folder),
-                one_line(&e.to_string())
-            ),
-            why: LossReason::Internal,
-            severity: Severity::Warning,
-        });
-    }
-    document.losses.extend(losses);
-}
-
-/// Removes the regular files in `folder` whose names are not in `keep`: what an earlier run
-/// wrote there and this one does not. Symlinks and folders inside are left alone and never
-/// followed. A folder that is missing, or not a plain directory, is left as it is.
-fn remove_stale(folder: &Path, keep: &HashSet<std::ffi::OsString>) -> std::io::Result<()> {
-    match std::fs::symlink_metadata(folder) {
-        Ok(meta) if meta.is_dir() => {}
-        Ok(_) => return Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(e),
-    }
-    for entry in std::fs::read_dir(folder)? {
-        let entry = entry?;
-        // The entry's own type: a symlink is a symlink here, never what it points at.
-        if entry.file_type()?.is_file() && !keep.contains(&entry.file_name()) {
-            std::fs::remove_file(entry.path())?;
-        }
-    }
-    Ok(())
-}
-
-/// Makes `<dir>/<folder>`, a real directory: an existing symlink or file there is refused, so
-/// nothing lands outside `dir`.
-fn prepare_folder(dir: &Path, folder: &str) -> std::io::Result<()> {
-    std::fs::create_dir_all(dir)?;
-    let path = dir.join(folder);
-    match std::fs::symlink_metadata(&path) {
-        Ok(meta) if meta.is_dir() => Ok(()),
-        Ok(_) => Err(std::io::Error::other(
-            "the assets folder exists and is not a plain directory",
-        )),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => std::fs::create_dir(&path),
-        Err(e) => Err(e),
-    }
-}
-
-/// Writes a new file at `path`. An existing entry (also a symlink) is removed without being
-/// followed, and the file is created exclusively, so a symlink is never written through.
-fn write_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
-    match std::fs::symlink_metadata(path) {
-        Ok(meta) if meta.is_dir() => {
-            return Err(std::io::Error::other("a directory is in the way"));
-        }
-        Ok(_) => std::fs::remove_file(path)?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e),
-    }
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)?;
-    file.write_all(bytes)
-}
+/// The rendered pages, the part files and the whole main document.
+type Rendered = (Vec<String>, Vec<rezzer_render::PartFile>, String);
 
 /// The canonical absolute form of `path`, so the same file read from two working directories
 /// has one `resource`. The directory is canonicalized and the file name kept: a symlink keeps
-/// its own name (the name is a detection hint and shown as the title). On any error the path
-/// is returned as given.
+/// its own name (the name is a detection hint and shown as the title). On Windows the
+/// verbatim prefix is removed where that is safe (see [`strip_verbatim`]). On any error the
+/// path is returned as given.
 pub fn canonical_path(path: &Path) -> PathBuf {
     let canonical = match (path.parent(), path.file_name()) {
         (Some(parent), Some(name)) => {
@@ -650,7 +666,91 @@ pub fn canonical_path(path: &Path) -> PathBuf {
         }
         _ => std::fs::canonicalize(path),
     };
-    canonical.unwrap_or_else(|_| path.to_path_buf())
+    canonical.map_or_else(|_| path.to_path_buf(), strip_verbatim)
+}
+
+/// `path` without the verbatim prefix that `fs::canonicalize` puts in front on Windows:
+/// `\\?\C:\x` gives `C:\x` and `\\?\UNC\server\share\x` gives `\\server\share\x`, so a
+/// `resource` reads as the user wrote it. Anything else is returned unchanged.
+///
+/// The prefix is removed only when the plain form names the same file: shorter than 260
+/// UTF-16 units (Windows' `MAX_PATH` with its closing NUL, counted on the result), every
+/// component non-empty (but for a trailing separator) and without `/`, none a device name
+/// (`CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, `COM0` to `COM9`, `LPT0` to `LPT9`, also
+/// with the superscript digits ¹ ² ³, in any case, with or without an extension or a `:`
+/// suffix) and none ending in
+/// `.` or a space (which also covers `.` and `..`). Otherwise the verbatim form is kept,
+/// which stays a valid path. A path that is not valid Unicode (a lone UTF-16 surrogate on
+/// Windows, bytes that are not UTF-8 on Unix) is returned unchanged.
+///
+/// The work is on the string only, so it gives the same answer on every OS; on Unix such a
+/// path never comes from `fs::canonicalize`.
+pub fn strip_verbatim(path: PathBuf) -> PathBuf {
+    let Some(text) = path.to_str() else {
+        return path;
+    };
+    let plain = if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        let mut parts = rest.split('\\');
+        let server = parts.next().unwrap_or("");
+        let share = parts.next().unwrap_or("");
+        if server.is_empty() || share.is_empty() || !plain_components(rest) {
+            return path;
+        }
+        format!(r"\\{rest}")
+    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+        let b = rest.as_bytes();
+        if b.len() < 3 || !b[0].is_ascii_alphabetic() || b[1] != b':' || b[2] != b'\\' {
+            return path;
+        }
+        if !plain_components(&rest[3..]) {
+            return path;
+        }
+        rest.to_string()
+    } else {
+        return path;
+    };
+    if plain.encode_utf16().count() >= 260 {
+        return path;
+    }
+    PathBuf::from(plain)
+}
+
+/// Whether the `\`-separated components keep their meaning without the verbatim prefix.
+fn plain_components(rest: &str) -> bool {
+    if rest.contains('/') {
+        return false;
+    }
+    let rest = rest.strip_suffix('\\').unwrap_or(rest);
+    if rest.is_empty() {
+        return true;
+    }
+    rest.split('\\')
+        .all(|c| !c.is_empty() && !c.ends_with('.') && !c.ends_with(' ') && !is_device_name(c))
+}
+
+/// Whether a path component names a Windows device: the part before the first `.` or `:`,
+/// without trailing spaces, in any case.
+fn is_device_name(component: &str) -> bool {
+    let stem = component
+        .split(['.', ':'])
+        .next()
+        .unwrap_or("")
+        .trim_end_matches(' ');
+    let upper = stem.to_ascii_uppercase();
+    let number = upper
+        .strip_prefix("COM")
+        .or_else(|| upper.strip_prefix("LPT"))
+        .map(|d| {
+            let mut c = d.chars();
+            (c.next(), c.next())
+        });
+    matches!(
+        upper.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || matches!(
+        number,
+        Some((Some('0'..='9' | '\u{b9}' | '\u{b2}' | '\u{b3}'), None))
+    )
 }
 
 /// A document for a format without a reader or an unknown format: the source facts, one
@@ -690,4 +790,112 @@ fn generated_at(req: &Request) -> String {
         })
         .or_else(|| rezzer_detect::rfc3339(SystemTime::now()))
         .unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn strip(path: &str) -> PathBuf {
+        strip_verbatim(PathBuf::from(path))
+    }
+
+    #[test]
+    fn verbatim_prefix_is_removed() {
+        assert_eq!(strip(r"\\?\C:\x"), PathBuf::from(r"C:\x"));
+        assert_eq!(strip(r"\\?\c:\a\b.txt"), PathBuf::from(r"c:\a\b.txt"));
+        assert_eq!(strip(r"\\?\C:\"), PathBuf::from(r"C:\"));
+        assert_eq!(
+            strip(r"\\?\UNC\server\share\x"),
+            PathBuf::from(r"\\server\share\x")
+        );
+        // Not verbatim: unchanged.
+        assert_eq!(strip(r"C:\x"), PathBuf::from(r"C:\x"));
+        assert_eq!(strip("/tmp/x"), PathBuf::from("/tmp/x"));
+        assert_eq!(
+            strip(r"\\server\share\x"),
+            PathBuf::from(r"\\server\share\x")
+        );
+        // Kept with the prefix: the plain form would name another file or none.
+        let long = format!(r"\\?\C:\{}", "a".repeat(300));
+        assert_eq!(strip(&long), PathBuf::from(&long));
+        for kept in [
+            r"\\?\C:\a\nul.txt",
+            r"\\?\C:\a\NUL",
+            r"\\?\C:\a\com1",
+            r"\\?\C:\a\Lpt9.log",
+            r"\\?\C:\a\x.",
+            r"\\?\C:\a\x ",
+            r"\\?\C:\a\..\b",
+            r"\\?\C:\a\\b",
+            r"\\?\C:\a/b",
+            r"\\?\UNC\server",
+            r"\\?\UNC\\share\x",
+            r"\\?\Volume{0b1c}\x",
+            r"\\?\C:",
+        ] {
+            assert_eq!(strip(kept), PathBuf::from(kept), "{kept}");
+        }
+        let superscript = "\\\\?\\C:\\a\\com\u{b9}.txt";
+        assert_eq!(strip(superscript), PathBuf::from(superscript));
+        for kept in [
+            r"\\?\C:\a\com0",
+            r"\\?\C:\a\LPT0.txt",
+            r"\\?\C:\a\conin$",
+            r"\\?\C:\a\CONOUT$.log",
+            r"\\?\C:\a\nul:x",
+            r"\\?\C:\a\con:",
+            r"\\?\C:\a\aux :x",
+        ] {
+            assert_eq!(strip(kept), PathBuf::from(kept), "{kept}");
+        }
+        // Not device names.
+        assert_eq!(strip(r"\\?\C:\a\com10"), PathBuf::from(r"C:\a\com10"));
+        assert_eq!(strip(r"\\?\C:\a\conin"), PathBuf::from(r"C:\a\conin"));
+        assert_eq!(strip(r"\\?\C:\a\x:nul"), PathBuf::from(r"C:\a\x:nul"));
+        assert_eq!(strip(r"\\?\C:\a\nullx"), PathBuf::from(r"C:\a\nullx"));
+        assert_eq!(strip(r"\\?\C:\a\con1.txt"), PathBuf::from(r"C:\a\con1.txt"));
+    }
+
+    #[test]
+    fn verbatim_limit_counts_utf16_units_of_the_result() {
+        // `C:\` and 256 more units: 259 units, one under the limit.
+        let fits = format!(r"\\?\C:\{}", "a".repeat(256));
+        assert_eq!(strip(&fits), PathBuf::from(&fits[4..]));
+        let over = format!(r"\\?\C:\{}", "a".repeat(257));
+        assert_eq!(strip(&over), PathBuf::from(&over));
+        // U+1F600 is 2 UTF-16 units (4 UTF-8 bytes): 3 + 2 * 128 = 259 units.
+        let wide = format!(r"\\?\C:\{}", "\u{1F600}".repeat(128));
+        assert_eq!(strip(&wide), PathBuf::from(&wide[4..]));
+        let wide_over = format!(r"\\?\C:\{}a", "\u{1F600}".repeat(128));
+        assert_eq!(strip(&wide_over), PathBuf::from(&wide_over));
+        // U+00E9 is 1 UTF-16 unit (2 UTF-8 bytes): 3 + 256 = 259 units.
+        let accents = format!(r"\\?\C:\{}", "\u{e9}".repeat(256));
+        assert_eq!(strip(&accents), PathBuf::from(&accents[4..]));
+    }
+
+    #[test]
+    fn a_verbatim_path_that_is_not_unicode_is_kept() {
+        let path = not_unicode();
+        assert!(path.to_str().is_none());
+        assert_eq!(strip_verbatim(path.clone()), path);
+    }
+
+    /// `\\?\C:\a` followed by bytes that are not UTF-8.
+    #[cfg(unix)]
+    fn not_unicode() -> PathBuf {
+        use std::os::unix::ffi::OsStringExt;
+        let mut bytes = br"\\?\C:\a".to_vec();
+        bytes.push(0xff);
+        PathBuf::from(std::ffi::OsString::from_vec(bytes))
+    }
+
+    /// `\\?\C:\a` followed by a lone UTF-16 surrogate.
+    #[cfg(windows)]
+    fn not_unicode() -> PathBuf {
+        use std::os::windows::ffi::OsStringExt;
+        let mut wide: Vec<u16> = r"\\?\C:\a".encode_utf16().collect();
+        wide.push(0xd800);
+        PathBuf::from(std::ffi::OsString::from_wide(&wide))
+    }
 }

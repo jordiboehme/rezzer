@@ -9,7 +9,7 @@ File types: `.ods`. Rezzer detects the format by content, not by extension.
 Built on (versions as used in the development version):
 
 - [calamine](https://crates.io/crates/calamine) 0.37.0 for values and formulas (as OpenFormula text)
-- [formualizer-parse](https://crates.io/crates/formualizer-parse) 4.0.0, behind Rezzer's own formulakit crate, to find the cells and ranges each formula reads. formulakit turns OpenFormula into the familiar A1 form first
+- [formualizer-parse](https://crates.io/crates/formualizer-parse) 4.1.0, behind Rezzer's own formulakit crate, to find the cells and ranges each formula reads. formulakit turns OpenFormula into the familiar A1 form first
 - Rezzer's own reader sheetparts on [zip](https://crates.io/crates/zip) and [quick-xml](https://crates.io/crates/quick-xml) for named ranges, annotations, hidden sheets, rows and columns, validation, number formats, merged cells, database ranges, data pilots, cell styles and document properties
 - Rezzer's own sheetlayout crate to find the tables, titles and notes inside a sheet
 
