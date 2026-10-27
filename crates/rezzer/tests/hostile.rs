@@ -1127,14 +1127,19 @@ fn max_rss_bytes() -> u64 {
     }
 }
 
+/// No `getrusage` here: the figure is 0, so the hostile PDF tests still run and check their
+/// result and time, and only the memory bound is not checked.
+#[cfg(not(unix))]
+fn max_rss_bytes() -> u64 {
+    0
+}
+
 /// The bound every hostile PDF test holds.
-#[cfg(unix)]
 const RSS_BOUND: u64 = 512 * MB as u64;
 
 /// Whether the test runs under nextest, which runs every test in its own process. Only then
 /// is the process's maximum RSS the figure of one test; under `cargo test` the RSS checks are
 /// skipped (and say so) rather than fail on the tests that ran before.
-#[cfg(unix)]
 fn own_process(test: &str) -> bool {
     let own = std::env::var_os("NEXTEST").is_some();
     if !own {
@@ -1143,7 +1148,6 @@ fn own_process(test: &str) -> bool {
     own
 }
 
-#[cfg(unix)]
 fn assert_rss_bounded(test: &str) {
     if !own_process(test) {
         return;
@@ -1211,7 +1215,6 @@ impl PdfFile {
 /// A one-page A4 file: Helvetica as `/F1`, `content` as the page's content stream (already
 /// packed when `dict` names a filter), `catalog_extra` in the catalog and `build` adding
 /// objects and returning more entries for the page's resources.
-#[cfg(unix)]
 fn pdf_page(
     content: &[u8],
     dict: &str,
@@ -1239,11 +1242,9 @@ fn pdf_page(
     b.finish(catalog)
 }
 
-#[cfg(unix)]
 const HELLO: &[u8] = b"BT /F1 12 Tf 72 720 Td (Before the bomb.) Tj ET";
 
 /// `n` bytes of `fill`, packed with zlib in chunks, so building the file never holds them.
-#[cfg(unix)]
 fn packed_fill(fill: u8, n: usize) -> Vec<u8> {
     use std::io::Write;
     let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::best());
@@ -1259,7 +1260,6 @@ fn packed_fill(fill: u8, n: usize) -> Vec<u8> {
 
 /// Runs a PDF through the pipeline (default limits unless `max_time`) and returns the result
 /// and its time.
-#[cfg(unix)]
 fn read_pdf(
     bytes: Vec<u8>,
     max_time: Option<Duration>,
@@ -1271,7 +1271,6 @@ fn read_pdf(
     (result, start.elapsed())
 }
 
-#[cfg(unix)]
 #[test]
 fn objstm_bomb_is_bounded() {
     // An object stream of about 1 MB that inflates to 1 GiB. Object 6 lives in it and the
@@ -1354,7 +1353,6 @@ fn objstm_bomb_is_bounded() {
     assert_rss_bounded("objstm_bomb_is_bounded");
 }
 
-#[cfg(unix)]
 #[test]
 fn content_stream_bomb_is_bounded() {
     // A page whose content stream of about 1 MB inflates to 1 GiB of spaces; a second page is
@@ -1402,7 +1400,6 @@ fn content_stream_bomb_is_bounded() {
     assert_rss_bounded("content_stream_bomb_is_bounded");
 }
 
-#[cfg(unix)]
 #[test]
 fn page_tree_cycle_is_partial() {
     // The page tree lists itself as its own kid.
@@ -1501,7 +1498,6 @@ fn many_pages(path: &std::path::Path, pages: usize, own: bool) {
 }
 
 /// A pipeline with the PDF reader only, under `memory` bytes of memory and `time`.
-#[cfg(unix)]
 fn pdf_pipeline(memory: u64, time: Duration) -> Pipeline {
     let mut config = Config {
         cache: false,
@@ -1515,7 +1511,6 @@ fn pdf_pipeline(memory: u64, time: Duration) -> Pipeline {
 }
 
 /// The peak RSS of the test stays under the memory limit the read was given.
-#[cfg(unix)]
 fn assert_rss_under(test: &str, limit: u64) {
     if !own_process(test) {
         return;
@@ -1530,7 +1525,6 @@ fn assert_rss_under(test: &str, limit: u64) {
 }
 
 /// The pages of a page section with text besides its marker.
-#[cfg(unix)]
 fn pages_with_text(result: &RunResult) -> usize {
     result.document.as_ref().map_or(0, |d| {
         d.body
@@ -1542,7 +1536,6 @@ fn pages_with_text(result: &RunResult) -> usize {
     })
 }
 
-#[cfg(unix)]
 #[test]
 fn hundred_thousand_pages_stop_in_time() {
     // 100,000 pages that share one content stream of 40 lines, far more than 2 s of work, at
@@ -1631,7 +1624,6 @@ fn a_text_cut_near_the_time_limit_is_not_cached() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn pages_with_their_own_resources_are_read_under_the_memory_limit() {
     // 15,000 pages, each with its own resources, media box and content stream, at a memory
@@ -1658,7 +1650,6 @@ fn pages_with_their_own_resources_are_read_under_the_memory_limit() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn hundred_thousand_pages_stay_under_the_memory_limit() {
     // 100,000 pages with their own content streams at a memory limit of 512 MiB. The objects
@@ -1721,7 +1712,6 @@ fn hundred_thousand_pages_stay_under_the_memory_limit() {
     assert_rss_under("hundred_thousand_pages_stay_under_the_memory_limit", limit);
 }
 
-#[cfg(unix)]
 #[test]
 fn image_pixel_bomb_skips_render() {
     // A page covered by a picture of 40,000 by 40,000 one-bit pixels from one row of packed
@@ -1772,7 +1762,6 @@ fn image_pixel_bomb_skips_render() {
     assert_rss_bounded("image_pixel_bomb_skips_render");
 }
 
-#[cfg(unix)]
 #[test]
 fn deep_array_nesting_stops_at_depth() {
     // 100,000 nested arrays in an object the catalog points to.
@@ -1807,7 +1796,6 @@ fn deep_array_nesting_stops_at_depth() {
     assert_rss_bounded("deep_array_nesting_stops_at_depth");
 }
 
-#[cfg(unix)]
 #[test]
 fn huge_script_is_bounded() {
     // A document script of 64 MiB in the JavaScript name tree. Its text varies enough that it

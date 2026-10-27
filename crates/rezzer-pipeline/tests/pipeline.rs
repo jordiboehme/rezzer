@@ -205,7 +205,8 @@ fn cache_hit_takes_the_path_from_the_current_source() {
     let out = pipeline.run_path(&b, &request());
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     let doc = out.document.unwrap();
-    let b = std::fs::canonicalize(&b).unwrap();
+    // The source path is canonical, without the Windows verbatim prefix.
+    let b = rezzer_pipeline::strip_verbatim(std::fs::canonicalize(&b).unwrap());
     assert_eq!(doc.source.path.as_deref(), Some(b.to_str().unwrap()));
 }
 
@@ -548,7 +549,7 @@ fn other_partial_results_are_cached() {
 #[test]
 fn source_path_is_canonical_and_keeps_the_given_name() {
     let dir = tempfile::tempdir().unwrap();
-    let real = std::fs::canonicalize(dir.path()).unwrap();
+    let real = rezzer_pipeline::strip_verbatim(std::fs::canonicalize(dir.path()).unwrap());
     std::fs::create_dir_all(dir.path().join("sub")).unwrap();
     std::fs::write(dir.path().join("x.txt"), "hello\n").unwrap();
     let (registry, _) = counting(false);
@@ -1079,6 +1080,7 @@ fn bad_asset_id_is_not_written() {
     assert!(doc.losses.iter().any(|l| l.why == LossReason::Internal));
 }
 
+// Unix only: the test plants a symlink, which needs extra rights on Windows.
 #[cfg(unix)]
 #[test]
 fn symlinked_assets_folder_is_refused() {
@@ -1102,6 +1104,7 @@ fn symlinked_assets_folder_is_refused() {
     assert_eq!(std::fs::read_dir(&elsewhere).unwrap().count(), 0);
 }
 
+// Unix only: the test plants a symlink, which needs extra rights on Windows.
 #[cfg(unix)]
 #[test]
 fn symlinked_target_file_is_not_followed() {
@@ -1207,6 +1210,7 @@ fn attachments_get_the_extension_their_bytes_confirm() {
     );
 }
 
+// Unix only: the test plants a symlink, which needs extra rights on Windows.
 #[cfg(unix)]
 #[test]
 fn old_files_are_removed_but_links_and_folders_are_not_followed() {
@@ -1813,6 +1817,7 @@ fn similar_names_keep_their_own_bundles() {
 const PART_LIKE: &str =
     "---\ngenerated: { by: rezzer/0.1.0, at: 2026-10-19T08:30:00Z }\npart: 1\n---\n\nkeep\n";
 
+// Unix only: the test plants a symlink, which needs extra rights on Windows.
 #[cfg(unix)]
 #[test]
 fn rerun_removes_stale_parts() {
@@ -2179,6 +2184,7 @@ fn a_source_writes_into_its_own_folder() {
     }
 }
 
+// Unix only: the test plants a symlink, which needs extra rights on Windows.
 #[cfg(unix)]
 #[test]
 fn a_file_at_a_part_path_that_is_not_ours_fails_the_run() {
@@ -2252,6 +2258,7 @@ fn dot_names_are_not_hidden() {
     }
 }
 
+// Unix only: the test plants a symlink, which needs extra rights on Windows.
 #[cfg(unix)]
 #[test]
 fn a_symlinked_parts_folder_is_never_followed() {
@@ -2290,6 +2297,7 @@ fn a_symlinked_parts_folder_is_never_followed() {
     assert!(elsewhere.is_dir());
 }
 
+// Unix only: the test plants a symlink, which needs extra rights on Windows.
 #[cfg(unix)]
 #[test]
 fn the_main_document_never_replaces_a_file_rezzer_did_not_write() {
@@ -2428,6 +2436,7 @@ fn relative_to_cwd(path: &Path) -> PathBuf {
     rel.join(path.strip_prefix("/").unwrap())
 }
 
+// Unix only: the test plants a symlink, which needs extra rights on Windows.
 #[cfg(unix)]
 #[test]
 fn one_file_by_any_path_or_a_copy_is_the_same_source() {
