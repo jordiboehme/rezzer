@@ -728,6 +728,40 @@ fn labels_under_values_split_by_a_double_rule_give_a_loss() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// Labels under the rule their values stand on, every row full, under a section rule one row
+/// pitch over the top rule, with upright lines boxing that frame into two cells whose divider
+/// is not in line with the grid's (the reviewer's probe P5), with and without a rule one pitch
+/// under the last labels. The box's table holds the first row's values; they still count
+/// toward a loss: the grid never pairs shifted, and a loss names its fields.
+#[test]
+fn labels_under_values_under_a_boxed_section_never_pair_shifted() {
+    let s = Rows {
+        under: true,
+        ..ROWS
+    };
+    let all = ["Name", "Ort", "Strasse", "Hausnr", "PLZ", "Land"];
+    let mut reads = Vec::new();
+    for (look, g) in std::iter::once(("real", REAL)).chain(looks()) {
+        for (mid, own) in [(20usize, true), (20, false), (45, true), (45, false)] {
+            let mut b = rows_page(&g, &s, &THREE_ROWS, &all);
+            let (h, top) = (2.4 * g.data, 760.0 + g.dy);
+            let (x0, x1) = (g.col(0) - 0.12, g.col(50));
+            b.page.template += &g.hrule(x0, x1, top + h);
+            for x in [x0, g.col(mid), x1] {
+                b.page.template += &g.vrule(x, top, top + h);
+            }
+            if own {
+                b.page.template += &g.hrule(x0, x1, top - 3.0 * h);
+            }
+            let out = read_pages(&[&b]);
+            let name = format!("box at {mid}, {}, {look}", if own { "own" } else { "free" });
+            reads.push((name, check_fields(&out, &b)));
+        }
+    }
+    let wrong = unexpected(reads, &[]);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// A row between two rules, parted by a divider, whose every cell holds text in three styles
 /// (a caption, a line of text and a note, as on a page of prose between rules): it never
 /// looked like a row of fields, so it gives no loss.

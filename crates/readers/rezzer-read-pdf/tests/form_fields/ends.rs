@@ -413,22 +413,20 @@ fn every_cell_of_the_ends_reads_as_the_table_says() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// Every labels-under layout of the matrix split by a double rule: a second rule a third of
-/// the data size under its second rule, farther than the rules of one line are apart, so the
-/// grid falls into two groups whose ends lie in each other. The runs one group holds are
-/// evidence for the other one only toward a loss: in every look no field pairs wrongly, every
-/// value stands once, and each field with a value pairs right or a loss names it.
-#[test]
-fn a_labels_under_grid_split_by_a_double_rule_never_pairs_shifted() {
+/// Reads `layouts` of the matrix with `extra` drawn on each page (in geometry `g`, from its
+/// top rule), in every look: no field pairs wrongly, every value stands once, and each field
+/// with a value pairs right or a loss names it. An empty field left as text loses no value:
+/// it need not be named.
+fn labels_under_with(
+    what: &str,
+    layouts: Vec<Layout>,
+    extra: fn(&Geo, f32) -> String,
+) -> Vec<String> {
     let mut reads = Vec::new();
-    let split: Vec<Layout> = candidates().into_iter().filter(|l| l.under).collect();
-    assert_eq!(split.len(), 42);
-    for l in split {
+    for l in layouts {
         for (look, g) in std::iter::once(("real", REAL)).chain(looks()) {
             let mut b = l.page(&g, Outcome::Under);
-            let top = 760.0 + g.dy;
-            let rule = top - 2.4 * g.data - g.data / 3.0;
-            b.page.template += &g.hrule(g.col(0) - 0.12, g.col(50), rule);
+            b.page.template += &extra(&g, 760.0 + g.dy);
             let out = read_pages(&[&b]);
             // As `check_fields` looks for a name in a loss.
             let named = |n: &str| {
@@ -437,7 +435,6 @@ fn a_labels_under_grid_split_by_a_double_rule_never_pairs_shifted() {
                     .iter()
                     .any(|l| l.what.contains(&format!(" {n}")))
             };
-            // An empty field left as text loses no value: it need not be named.
             let empty = |n: &str| b.fields.iter().any(|f| f.0 == n && f.1 == Ok(None));
             let broken: Vec<Broken> = check_fields(&out, &b)
                 .into_iter()
@@ -446,10 +443,55 @@ fn a_labels_under_grid_split_by_a_double_rule_never_pairs_shifted() {
                     !(x.0 == Inv::ClearPairs && field.is_some_and(|n| named(n) || empty(n)))
                 })
                 .collect();
-            reads.push((format!("{}, split, {look}", l.name()), broken));
+            reads.push((format!("{}, {what}, {look}", l.name()), broken));
         }
     }
-    let wrong = unexpected(reads, &[]);
+    unexpected(reads, &[])
+}
+
+/// Every labels-under layout of the matrix split by a double rule: a second rule a third of
+/// the data size under its second rule, farther than the rules of one line are apart, so the
+/// grid falls into two groups whose ends lie in each other. The runs one group holds are
+/// evidence for the other one only toward a loss.
+#[test]
+fn a_labels_under_grid_split_by_a_double_rule_never_pairs_shifted() {
+    let layouts: Vec<Layout> = candidates().into_iter().filter(|l| l.under).collect();
+    assert_eq!(layouts.len(), 42);
+    let wrong = labels_under_with("split", layouts, |g, top| {
+        g.hrule(
+            g.col(0) - 0.12,
+            g.col(50),
+            top - 2.4 * g.data - g.data / 3.0,
+        )
+    });
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// The labels-under layouts the matrix holds under a section rule one row pitch over their
+/// top rule, that frame boxed into two cells by upright lines whose divider is not in line with
+/// the grid's: the box's grid takes the top rule, so the grid's first row is text between two
+/// rules, and what the box holds is a table's. Runs a table holds, and a row between two
+/// rules, count toward a loss only. A left-out layout is the page of a grid of the other way,
+/// and the box adds nothing to it. Left out too are those with an empty last row: there the
+/// grid's last row is labels only and its first row no row of fields, so no group is read at
+/// all and the text is left to the table pass without rules (reported, not part of this
+/// check).
+#[test]
+fn a_labels_under_grid_under_a_boxed_section_never_pairs_shifted() {
+    let layouts: Vec<Layout> = layouts()
+        .into_iter()
+        .map(|l| l.0)
+        .filter(|l| l.under && !l.last_empty)
+        .collect();
+    assert_eq!(layouts.len(), 23);
+    let wrong = labels_under_with("boxed", layouts, |g, top| {
+        let (h, x0, x1) = (2.4 * g.data, g.col(0) - 0.12, g.col(50));
+        let mut c = g.hrule(x0, x1, top + h);
+        for x in [x0, g.col(20), x1] {
+            c += &g.vrule(x, top, top + h);
+        }
+        c
+    });
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 

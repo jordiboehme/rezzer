@@ -672,6 +672,7 @@ pub(super) fn ruled(
         flow,
         &by_y,
         &frames,
+        &hs,
         &busy,
         &mut claimed,
         &mut held,
@@ -845,14 +846,16 @@ fn totals_tables(
     sides
 }
 
-/// The rows of fields between rules in `frames`, among the runs `busy` does not name, planned
-/// in `tables` with their runs in `claimed`; the runs of rows left as text go to `held`.
+/// The rows of fields between rules in `frames` (of the page's horizontal rules `hs`), among
+/// the runs `busy` does not name, planned in `tables` with their runs in `claimed`; the runs of
+/// rows left as text go to `held`.
 #[allow(clippy::too_many_arguments)]
 fn strip_tables(
     page: u32,
     flow: &Flow,
     by_y: &ByY,
     frames: &[Frame],
+    hs: &[Seg],
     busy: &[bool],
     claimed: &mut [Claim],
     held: &mut [bool],
@@ -866,6 +869,7 @@ fn strip_tables(
         flow,
         by_y,
         frames,
+        hs,
         &|i| busy[i],
         &text_sizes,
         &mut strip_claims,

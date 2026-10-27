@@ -362,6 +362,7 @@ pub(in crate::tables) fn field_strips(
     flow: &Flow,
     by_y: &ByY,
     frames: &[Frame],
+    hs: &[Seg],
     busy: &dyn Fn(usize) -> bool,
     text_sizes: &[f32],
     claimed: &mut [Option<(usize, usize, usize)>],
@@ -532,18 +533,24 @@ pub(in crate::tables) fn field_strips(
         // end complete: a loss, or labels under values with both ends complete. Text left out
         // can drop a complete end to none and read the group labels over values shifted.
         let free = |i: usize| !busy(i) && !held.contains(&i) && !outside.contains(&i);
-        // The runs other groups hold count toward a loss only: a double rule parts one grid
-        // into two groups whose ends lie in each other. The ends are found without them and
+        // The runs other groups or tables hold count toward a loss only: a double rule parts
+        // one grid into two groups whose ends lie in each other, and a boxed frame over a grid
+        // is a table that holds the first row's values. The ends are found without them and
         // with them; when the two ways differ the group is not clear, and when they agree it
-        // is read the way found without them, so a run is never taken by two groups.
+        // is read the way found without them, so a run is never taken twice. The second way
+        // leaves out only the group's own runs and the runs a group read labels under values
+        // took, and it rules runs out (a label over a value) only by the runs the first way
+        // counts and not by a row between two drawn rules: every other run it counts can only
+        // add evidence, which under the table of ends gives a loss or the reading both ways
+        // agree on.
         let own: HashSet<usize> = runs.iter().copied().collect();
-        let with_held = |i: usize| !busy(i) && !own.contains(&i) && !outside.contains(&i);
+        let with_held = |i: usize| !own.contains(&i) && !outside.contains(&i);
         // One field alone between its rules reads like a caption over a line: it is not
         // paired, and that is said, with the labels under its rule that may be of its value.
         if list.len() < 2 {
             let mut names: Vec<String> = list.iter().map(|f| words(flow, &f.label)).collect();
             if let Ends::Under(_, below) | Ends::Unclear(below) =
-                ends(flow, by_y, &with_held, frames, &strips, &g)
+                ends(flow, by_y, &with_held, &free, Some(hs), frames, &strips, &g)
             {
                 for line in lines_of(flow, &below) {
                     for l in labels_in_line(flow, &line) {
@@ -560,8 +567,8 @@ pub(in crate::tables) fn field_strips(
             }
             continue;
         }
-        let without = ends(flow, by_y, &free, frames, &strips, &g);
-        let with = ends(flow, by_y, &with_held, frames, &strips, &g);
+        let without = ends(flow, by_y, &free, &free, None, frames, &strips, &g);
+        let with = ends(flow, by_y, &with_held, &free, Some(hs), frames, &strips, &g);
         let found = match (without, with) {
             (Ends::Over, Ends::Over) => Ends::Over,
             (Ends::Under(above, below), Ends::Under(..)) => Ends::Under(above, below),
@@ -836,10 +843,13 @@ fn in_role(set: &[(Style, u32)], r: &Run) -> bool {
 ///   every field has one.
 ///
 /// The ends give the way the group reads by the table of [`way_of`].
+#[allow(clippy::too_many_arguments)]
 fn ends(
     flow: &Flow,
     by_y: &ByY,
     free: &dyn Fn(usize) -> bool,
+    veto: &dyn Fn(usize) -> bool,
+    open: Option<&[Seg]>,
     frames: &[Frame],
     strips: &[Strip],
     g: &[usize],
@@ -905,6 +915,35 @@ fn ends(
         let r = &flow.runs[i];
         free(i) && inked(r) && !r.off_axis
     };
+    // The runs that can rule a run out as evidence (a label over a value, a value under a
+    // label): those `veto` allows; with `open` (the page's horizontal rules), none that stands
+    // between two of them a row or two apart, as a row of fields does whose rules a grid took
+    // (its reading is what is open).
+    let pitch_max = rows
+        .iter()
+        .map(|(s, _)| s.top - s.bottom)
+        .fold(0.0f32, f32::max);
+    let enclosed = |r: &Run| {
+        let Some(hs) = open else {
+            return false;
+        };
+        let over = |h: &&Seg| h.from < r.x + r.w && r.x < h.to;
+        let up = hs
+            .iter()
+            .filter(over)
+            .filter(|h| h.at > r.y)
+            .fold(f32::MAX, |m, h| m.min(h.at));
+        let down = hs
+            .iter()
+            .filter(over)
+            .filter(|h| h.at < r.y)
+            .fold(f32::MIN, |m, h| m.max(h.at));
+        up - down <= 2.0 * pitch_max
+    };
+    let vetoes = |i: usize| {
+        let r = &flow.runs[i];
+        veto(i) && inked(r) && !r.off_axis && !enclosed(r)
+    };
     let side_by_side = |p: &Run, q: &Run| p.x < q.x + q.w && q.x < p.x + p.w;
     // How far beyond the rule `at` of a strip of row pitch `pitch` text over (or under) the
     // run `r` is looked at: one row pitch, up to the next rule of a frame over it. A rule
@@ -957,7 +996,7 @@ fn ends(
                             .into_iter()
                             .any(|j| {
                                 let o = &flow.runs[j];
-                                usable(j) && o.y < r.y && in_role(&vs, o) && side_by_side(o, r)
+                                vetoes(j) && o.y < r.y && in_role(&vs, o) && side_by_side(o, r)
                             })
                 })
                 .collect()
@@ -1008,6 +1047,7 @@ fn ends(
     bottom &= !below.is_empty();
     // Over the top rule: values over every strip with none over it, field for field.
     let mut above = Vec::new();
+    let mut over_labels: Vec<usize> = Vec::new();
     let mut clear = true;
     for (s, (labels, _)) in &rows {
         if rows
@@ -1032,7 +1072,7 @@ fn ends(
                         .into_iter()
                         .any(|j| {
                             let o = &flow.runs[j];
-                            usable(j) && o.y > r.y && in_role(&ls, o) && side_by_side(o, r)
+                            vetoes(j) && o.y > r.y && in_role(&ls, o) && side_by_side(o, r)
                         })
             })
             .collect();
@@ -1067,6 +1107,23 @@ fn ends(
             }
         }
         clear &= taken.iter().all(|t| *t);
+        // Labels between two drawn rules over these values, which rule nothing out here: a
+        // row of fields whose rules a grid took, to name in a loss.
+        for &i in &found {
+            let r = &flow.runs[i];
+            for j in by_y.runs_between(r.y, reach(r, s.top, pitch, true).max(r.y)) {
+                let o = &flow.runs[j];
+                if veto(j)
+                    && o.y > r.y
+                    && in_role(&ls, o)
+                    && side_by_side(o, r)
+                    && enclosed(o)
+                    && !over_labels.contains(&j)
+                {
+                    over_labels.push(j);
+                }
+            }
+        }
         above.extend(found);
     }
     let top = match (above.is_empty(), clear) {
@@ -1088,19 +1145,41 @@ fn ends(
     });
     let way = match way_of(single, top, bottom) {
         // A strip of another shape: labels over values only without evidence at either end.
+        // With the runs other groups and tables hold (`open`) only a complete end counts: the
+        // row of a table over a block of labels beside their values is that table's text.
         Way::Under if !shaped => Way::Unclear,
-        Way::Over if !shaped && (top != TopEnd::None || bottom != BottomEnd::None) => Way::Unclear,
+        Way::Over
+            if !shaped
+                && if open.is_some() {
+                    top == TopEnd::Complete || matches!(bottom, BottomEnd::Free | BottomEnd::Own)
+                } else {
+                    top != TopEnd::None || bottom != BottomEnd::None
+                } =>
+        {
+            Way::Unclear
+        }
         way => way,
     };
     match way {
-        Way::Under => Ends::Under(above, below),
+        // The labels of a row between two rules over its top rule go with them, to be named
+        // when the other way differs (`open` only; without it there are none).
+        Way::Under => {
+            let mut below = below;
+            below.extend(over_labels);
+            Ends::Under(above, below)
+        }
         Way::Over => Ends::Over,
         // The labels beyond the group are named; values over it are not those of a field.
-        Way::Unclear => match bottom {
-            BottomEnd::Free => Ends::Unclear(below),
-            BottomEnd::Own => Ends::Unclear(further),
-            _ => Ends::Unclear(Vec::new()),
-        },
+        // So are the labels of a row between two rules over its top rule.
+        Way::Unclear => {
+            let mut named = match bottom {
+                BottomEnd::Free => below,
+                BottomEnd::Own => further,
+                _ => Vec::new(),
+            };
+            named.extend(over_labels);
+            Ends::Unclear(named)
+        }
     }
 }
 
