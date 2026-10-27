@@ -3800,3 +3800,58 @@ fn labels_beside_bold_values_with_empty_values_stay_pairs() {
         wrong.join("\n")
     );
 }
+
+/// The columns of an invoice footer whose contact lines start with a web and a mail address in
+/// small letters, as real footers set them.
+fn contact_columns() -> Vec<Vec<&'static str>> {
+    vec![
+        FOOTER[0][..3].to_vec(),
+        FOOTER[1].to_vec(),
+        FOOTER[2].to_vec(),
+        vec![
+            "Muster Shop",
+            "Tel. 0000 000000",
+            "info@muster.example",
+            "www.muster.example",
+        ],
+    ]
+}
+
+/// Fix round 2, item 1: the columns of a footer of two pages, a running footer on both, keep a
+/// line break between each two of their lines, also where lines start with a web or mail
+/// address in small letters, in every size and font: a column of a footer is lines, not prose.
+#[test]
+fn footer_columns_keep_a_line_break_between_their_lines() {
+    let mut wrong = Vec::new();
+    let columns = contact_columns();
+    for k in [0.75, 1.0, 1.5] {
+        for fonts in FONTS {
+            for wide in [false, true] {
+                let t = footer(fonts, &columns, Some((3, 0)), Stack::Top);
+                let out = common::read(&footed_pages(&t, 2, k, wide));
+                for b in blocks(&out) {
+                    let Block::Paragraph { inlines, role, .. } = b else {
+                        continue;
+                    };
+                    let text = plain_text(inlines);
+                    let Some(c) = columns.iter().find(|c| text.starts_with(c[0])) else {
+                        continue;
+                    };
+                    if role.as_deref() != Some("page-footer") || line_breaks(inlines) != c.len() - 1
+                    {
+                        wrong.push(format!(
+                            "{k}x, {fonts:?}, wide {wide}: {role:?} {} breaks in {text:?}",
+                            line_breaks(inlines)
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}

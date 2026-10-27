@@ -1075,7 +1075,9 @@ pub(crate) fn page_blocks_at(
         .collect();
     footnotes::unlink(&mut built.blocks, &legend, &unwritten);
     // The lines of a footer that go on one another at one left edge are one block: a column
-    // of a footer in columns (an address, a bank, a register entry).
+    // of a footer in columns (an address, a bank, a register entry). Each of its lines is a
+    // line of its own: a footer lists facts (`USt-IdNr. DE000000000`, `www.muster.example`),
+    // it is no prose to join.
     let footer_lines = lines(&footers);
     let mut i = 0;
     while i < footer_lines.len() {
@@ -1088,7 +1090,12 @@ pub(crate) fn page_blocks_at(
         }
         let block = &footer_lines[i..j];
         let runs: Vec<&Run> = block.iter().flat_map(|l| l.runs.iter()).collect();
-        built.broken_paragraph(runs, &line_breaks(block), Some("page-footer"), cx);
+        let mut breaks: Vec<(u32, u32)> = block[1..]
+            .iter()
+            .map(|l| (l.runs[0].page, l.runs[0].line))
+            .collect();
+        breaks.sort_unstable();
+        built.broken_paragraph(runs, &breaks, Some("page-footer"), cx);
         i = j;
     }
     if built.tables_as_text > 0 {
