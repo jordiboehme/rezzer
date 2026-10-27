@@ -150,6 +150,39 @@ fn slugs_and_names() {
 }
 
 #[test]
+fn no_part_takes_a_windows_device_name() {
+    // A slug is lowercase ASCII letters, digits and `-`, with no dot, no space and no `-` at
+    // either end, so the Windows device names are the only names Windows cannot write. They
+    // are reserved on every OS, so a parts folder is legal wherever it was made.
+    for (title, slugged) in [
+        ("Con", "con"),
+        ("com1", "com1"),
+        ("LPT9", "lpt9"),
+        ("Aux", "aux"),
+        ("NUL", "nul"),
+        ("Prn", "prn"),
+        ("COM9", "com9"),
+        ("lpt1", "lpt1"),
+    ] {
+        assert_eq!(slug(title), slugged);
+        assert_eq!(
+            Names::new().take(title, "", 1),
+            format!("{slugged}-2"),
+            "{title}"
+        );
+    }
+    // `LPT9.x` slugs to `lpt9-x`, which no device has.
+    assert_eq!(Names::new().take("LPT9.x", "", 1), "lpt9-x");
+    for title in ["Console", "COM10", "LPT0", "com", "Auxiliary", "Null"] {
+        assert_eq!(Names::new().take(title, "", 1), slug(title), "{title}");
+    }
+    for title in ["con. ", " aux ", "Nul.", "x."] {
+        let name = slug(title);
+        assert!(!name.ends_with(['.', ' ', '-']), "{title}: {name}");
+    }
+}
+
+#[test]
 fn capped_cuts_at_a_space() {
     assert_eq!(capped("short", 10), "short");
     assert_eq!(capped("one two three four", 12), "one two...");
