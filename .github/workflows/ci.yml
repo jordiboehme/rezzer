@@ -359,6 +359,24 @@ jobs:
           advanced-security: false
           annotations: true
 
+      # The scripts the workflows run, and their tests. No network, no
+      # build: seconds. shellcheck and ruby (for the formula's `ruby -c`)
+      # come with the ubuntu-latest image. Every test script runs, and the
+      # step fails at the end when one of them failed.
+      - name: shellcheck and the script tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          shellcheck --version
+          ruby --version
+          shellcheck scripts/*.sh scripts/ci/*.sh
+          failed=0
+          for t in scripts/test-*.sh scripts/ci/test-*.sh; do
+            echo "== $t"
+            bash "$t" || { echo "::error file=$t::$t failed"; failed=1; }
+          done
+          exit "$failed"
+
   # The one check a branch protection rule requires. It always runs and
   # passes when every job above passed or was skipped (a documentation-only
   # change, or a tree without Cargo.toml). Any failure or cancellation fails
