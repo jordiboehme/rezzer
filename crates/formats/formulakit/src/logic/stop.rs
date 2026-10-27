@@ -2,7 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! The stop callback, asked every few thousand steps inside long loops.
+//! The stop callback, asked every few thousand steps inside long loops, and the count of
+//! those steps.
 
 /// How often the stop callback is asked inside long loops.
 const STOP_EVERY: u32 = 4096;
@@ -14,8 +15,9 @@ pub(super) struct Stopper<'a> {
 }
 
 impl Stopper<'_> {
-    /// Asks the callback now.
+    /// Asks the callback now. Each ask is a step of counted work ([`super::work_steps`]).
     pub(super) fn check(&mut self) -> bool {
+        super::work::add(1);
         if !self.stopped && (self.stop)() {
             self.stopped = true;
         }
@@ -24,6 +26,7 @@ impl Stopper<'_> {
 
     /// Asks the callback every [`STOP_EVERY`] calls.
     pub(super) fn tick(&mut self) -> bool {
+        super::work::add(1);
         self.ticks += 1;
         if self.ticks >= STOP_EVERY {
             self.ticks = 0;

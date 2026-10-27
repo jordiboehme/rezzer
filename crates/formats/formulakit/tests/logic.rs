@@ -58,6 +58,40 @@ fn peak_heap<T>(f: impl FnOnce() -> T) -> (T, usize) {
     (out, usize::try_from(peak - base).unwrap_or(0))
 }
 
+/// The wall-clock stop of the work-bound tests: far above any machine, so only a hang fails
+/// it. The work itself is bounded by counted steps.
+const SAFETY: Duration = Duration::from_secs(60);
+
+/// Runs `f` and gives its result, the steps of workbook logic it did
+/// ([`formulakit::logic::work_steps`], `None` in a release build) and its wall time.
+fn counted<T>(f: impl FnOnce() -> T) -> (T, Option<u64>, Duration) {
+    let before = formulakit::logic::work_steps();
+    let start = Instant::now();
+    let out = f();
+    let took = start.elapsed();
+    let steps = before
+        .zip(formulakit::logic::work_steps())
+        .map(|(b, a)| a - b);
+    (out, steps, took)
+}
+
+/// Checks a work bound: at most `max` steps (in a debug build, which counts them) and the
+/// wall time under [`SAFETY`]. Each bound is the count measured when it was set (2026-10-27,
+/// debug build, `--no-capture`), with half of it again as margin: a growth past that is a
+/// change in the work, not a slow machine.
+fn assert_work(what: &str, steps: Option<u64>, max: u64, took: Duration) {
+    eprintln!("{what}: {steps:?} steps (bound {max}) in {took:?}");
+    if cfg!(debug_assertions) {
+        assert!(
+            steps.is_some_and(|n| n <= max),
+            "{what}: {steps:?} steps of work, bound {max}"
+        );
+    } else {
+        assert_eq!(steps, None);
+    }
+    assert!(took < SAFETY, "{what}: took {took:?}");
+}
+
 /// `A1` style position, 0-based.
 fn at(cell: &str) -> CellPos {
     let letters: String = cell.chars().take_while(char::is_ascii_alphabetic).collect();
@@ -152,19 +186,26 @@ fn read_by_counts_formulas_not_refs() {
 
 #[test]
 fn whole_column_does_not_expand() {
-    let start = Instant::now();
-    let (logic, peak) = peak_heap(|| {
-        let mut wb = Workbook::new();
-        for row in 0..10_000 {
-            wb.add_constant("S", CellPos { row, col: 0 });
-        }
-        formula(&mut wb, "S", "B1", "=SUM(A:A)");
-        formula(&mut wb, "T", "A1", "=SUM(S!1:1048576)");
-        wb.finish(&never)
+    let ((logic, peak), steps, took) = counted(|| {
+        peak_heap(|| {
+            let mut wb = Workbook::new();
+            for row in 0..10_000 {
+                wb.add_constant("S", CellPos { row, col: 0 });
+            }
+            formula(&mut wb, "S", "B1", "=SUM(A:A)");
+            formula(&mut wb, "T", "A1", "=SUM(S!1:1048576)");
+            wb.finish(&never)
+        })
     });
-    let took = start.elapsed();
-    eprintln!("whole_column_does_not_expand: {took:?}, peak heap {peak} bytes");
-    assert!(took < Duration::from_secs(1), "took {took:?}");
+    eprintln!("whole_column_does_not_expand: peak heap {peak} bytes");
+    // Measured once (2026-10-27): 30,017 steps, about three a constant cell.
+    const STEPS: u64 = 30_017;
+    assert_work(
+        "whole_column_does_not_expand",
+        steps,
+        STEPS + STEPS / 2,
+        took,
+    );
     assert!(peak < 50 * 1024 * 1024, "peak heap {peak} bytes");
     assert_eq!(logic.parameters.len(), 10_000);
     assert!(logic.parameters.iter().all(|p| p.read_by == 2));
@@ -173,24 +214,30 @@ fn whole_column_does_not_expand() {
 #[test]
 fn percent_of_total_stays_fast() {
     // Every row reads the whole column through an absolute range: 20,000 x 20,000 reads.
-    let start = Instant::now();
-    let mut wb = Workbook::new();
-    for row in 1..=20_000u32 {
-        wb.add_constant("S", CellPos { row, col: 1 });
-    }
-    for row in 1..=20_000u32 {
-        let r = row + 1;
-        formula(
-            &mut wb,
-            "S",
-            &format!("C{r}"),
-            &format!("=B{r}/SUM($B$2:$B$20001)"),
-        );
-    }
-    let logic = wb.finish(&never);
-    let took = start.elapsed();
-    eprintln!("percent_of_total_stays_fast: {took:?}");
-    assert!(took < Duration::from_secs(10), "took {took:?}");
+    let (logic, steps, took) = counted(|| {
+        let mut wb = Workbook::new();
+        for row in 1..=20_000u32 {
+            wb.add_constant("S", CellPos { row, col: 1 });
+        }
+        for row in 1..=20_000u32 {
+            let r = row + 1;
+            formula(
+                &mut wb,
+                "S",
+                &format!("C{r}"),
+                &format!("=B{r}/SUM($B$2:$B$20001)"),
+            );
+        }
+        wb.finish(&never)
+    });
+    // Measured once (2026-10-27): 80,022 steps, four a formula.
+    const STEPS: u64 = 80_022;
+    assert_work(
+        "percent_of_total_stays_fast",
+        steps,
+        STEPS + STEPS / 2,
+        took,
+    );
     assert_eq!(logic.groups.len(), 1);
     assert_eq!(logic.parameters.len(), 20_000);
     assert!(logic.parameters.iter().all(|p| p.read_by == 20_000));
@@ -344,28 +391,29 @@ fn stop_callback_ends_early() {
 
 #[test]
 fn many_names_resolve_fast() {
-    let start = Instant::now();
-    let mut wb = Workbook::new();
-    for i in 0..5_000u32 {
-        wb.add_constant("In", CellPos { row: i, col: 0 });
-        let a = analyze(
-            &format!("=In!$A${}", i + 1),
-            Dialect::Excel,
-            CellPos::default(),
-        )
-        .expect("name parses");
-        wb.add_name(&format!("Größe{i}"), None, Some(&a));
-    }
-    for row in 0..20_000u32 {
-        let at = CellPos { row, col: 1 };
-        let a = analyze(&format!("=GRÖSSE{}*2", row % 5_000), Dialect::Excel, at)
-            .expect("formula parses");
-        wb.add_formula("Calc", at, &a);
-    }
-    let logic = wb.finish(&never);
-    let took = start.elapsed();
-    eprintln!("many_names_resolve_fast: {took:?}");
-    assert!(took < Duration::from_secs(10), "took {took:?}");
+    let (logic, steps, took) = counted(|| {
+        let mut wb = Workbook::new();
+        for i in 0..5_000u32 {
+            wb.add_constant("In", CellPos { row: i, col: 0 });
+            let a = analyze(
+                &format!("=In!$A${}", i + 1),
+                Dialect::Excel,
+                CellPos::default(),
+            )
+            .expect("name parses");
+            wb.add_name(&format!("Größe{i}"), None, Some(&a));
+        }
+        for row in 0..20_000u32 {
+            let at = CellPos { row, col: 1 };
+            let a = analyze(&format!("=GRÖSSE{}*2", row % 5_000), Dialect::Excel, at)
+                .expect("formula parses");
+            wb.add_formula("Calc", at, &a);
+        }
+        wb.finish(&never)
+    });
+    // Measured once (2026-10-27): 90,023 steps, about four a formula.
+    const STEPS: u64 = 90_023;
+    assert_work("many_names_resolve_fast", steps, STEPS + STEPS / 2, took);
     // Names match in any letter case, also beyond ASCII.
     assert_eq!(logic.parameters.len(), 5_000);
     assert!(logic.parameters.iter().all(|p| p.read_by == 4));
@@ -407,12 +455,18 @@ fn stop_in_the_middle_keeps_only_certain_roles() {
 
 #[test]
 fn running_totals_stay_near_linear() {
-    let start = Instant::now();
-    let (wb, ids) = running_totals(100_000);
-    let logic = wb.finish(&never);
-    let took = start.elapsed();
-    eprintln!("running_totals_stay_near_linear: {took:?}");
-    assert!(took < Duration::from_secs(2), "took {took:?}");
+    let ((logic, ids), steps, took) = counted(|| {
+        let (wb, ids) = running_totals(100_000);
+        (wb.finish(&never), ids)
+    });
+    // Measured once (2026-10-27): 600,148 steps, six a formula.
+    const STEPS: u64 = 600_148;
+    assert_work(
+        "running_totals_stay_near_linear",
+        steps,
+        STEPS + STEPS / 2,
+        took,
+    );
     assert!(!logic.stopped);
     assert_eq!(logic.groups.len(), 1);
     assert_eq!(logic.parameters.len(), 100_000);

@@ -31,6 +31,7 @@
 mod geometry;
 mod graph;
 mod stop;
+mod work;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::rc::Rc;
@@ -43,6 +44,7 @@ use geometry::{
 };
 use graph::{Closures, Ctx, Kind, Node, Reads, Sym, SymNodes};
 use stop::Stopper;
+pub use work::work_steps;
 
 /// A formula added to a [`Workbook`], numbered from 0 in the order of adding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
