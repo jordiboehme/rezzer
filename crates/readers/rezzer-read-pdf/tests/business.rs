@@ -3240,15 +3240,19 @@ const BLANK_COLUMNS: [(f32, [&str; 3]); 3] = [
 /// columns one after the other.
 #[test]
 fn blank_strings_do_not_block_columns() {
-    let mut t = String::new();
-    for (k, y) in [60.0, 52.0, 44.0].into_iter().enumerate() {
-        t += &show("FL", 6.0, 40.0, y, &" ".repeat(150));
-        for (x, lines) in BLANK_COLUMNS {
-            t += &show("FL", 6.0, x, y, lines[k]);
+    for font in ["FL", "FT"] {
+        let mut t = String::new();
+        for (k, y) in [60.0, 52.0, 44.0].into_iter().enumerate() {
+            t += &show(font, 6.0, 40.0, y, &" ".repeat(150));
+            for (x, lines) in BLANK_COLUMNS {
+                t += &show(font, 6.0, x, y, lines[k]);
+            }
         }
-    }
-    for wide in [false, true] {
-        blank_columns_read(&footed_pages(&t, 1, 1.0, wide));
+        for k in [0.75, 1.0, 1.5] {
+            for wide in [false, true] {
+                blank_columns_read(&footed_pages(&t, 1, k, wide));
+            }
+        }
     }
 }
 
@@ -3373,6 +3377,17 @@ fn footer(
     bold: Option<(usize, usize)>,
     stack: Stack,
 ) -> String {
+    columns_at(fonts, columns, bold, stack, 70.0)
+}
+
+/// The columns of [`footer`] with the first baseline at `top`.
+fn columns_at(
+    fonts: (&str, &str),
+    columns: &[Vec<&str>],
+    bold: Option<(usize, usize)>,
+    stack: Stack,
+    top: f32,
+) -> String {
     let size = 7.0;
     let rows = columns.iter().map(Vec::len).max().unwrap_or(0);
     let mut t = String::new();
@@ -3389,7 +3404,7 @@ fn footer(
             } else {
                 fonts.0
             };
-            t += &show(font, size, x, 70.0 - 8.4 * (k as f32 + off), line);
+            t += &show(font, size, x, top - 8.4 * (k as f32 + off), line);
             widest = widest.max(common::font_width(font, line, size));
         }
         x += widest + 3.0 * size;
@@ -3661,12 +3676,68 @@ fn a_wide_address_line_keeps_its_line_breaks() {
         "Musterweg 1",
         "12345 Musterstadt",
     ];
-    let mut t = String::new();
-    for (k, line) in lines.iter().enumerate() {
-        t += &show("FL", 8.0, 40.0, 700.0 - 10.0 * k as f32, line);
+    for font in ["FL", "FT"] {
+        let mut t = String::new();
+        for (k, line) in lines.iter().enumerate() {
+            t += &show(font, 8.0, 40.0, 700.0 - 10.0 * k as f32, line);
+        }
+        for k in [0.75, 1.0, 1.5] {
+            let out = common::read(&footed_pages(&t, 1, k, false));
+            let found = paragraph(&out, "Muster GmbH Vertretungs")
+                .unwrap_or_else(|| panic!("{font}, {k}x: no address paragraph"));
+            assert_eq!(plain_text(found), lines.join(" "), "{font}, {k}x");
+            assert_eq!(line_breaks(found), 3, "{font}, {k}x: {found:?}");
+        }
     }
-    let out = common::read(&pages(&[t]));
-    let found = paragraph(&out, "Muster GmbH Vertretungs").expect("the address paragraph");
-    assert_eq!(plain_text(found), lines.join(" "));
-    assert_eq!(line_breaks(found), 3, "{found:?}");
+}
+
+/// Guards of finding B5 under ruling P6-Y: the footer columns of
+/// [`footer_columns_read_apart_in_every_size_and_font`] on pages 1 and 2 of a file of three
+/// pages, and the same columns at the top of both pages of a file of two, are content: each
+/// column one block in column order and no running footer or header, in every size, font and
+/// column set.
+#[test]
+fn footer_columns_on_too_few_pages_or_at_the_top_stay_content() {
+    let mut wrong = Vec::new();
+    let mut reads = 0;
+    for (set, columns) in footer_sets() {
+        for k in [0.75, 1.0, 1.5] {
+            for fonts in FONTS {
+                for stack in [Stack::Top, Stack::Centred] {
+                    for wide in [false, true] {
+                        let name = format!("{set}, {k}x, {fonts:?}, {stack:?}, wide {wide}");
+                        let page = |extra: String| FormPage {
+                            template: format!("{}{extra}", body_of(7.0, 500.0, wide)),
+                            scale: k,
+                            ..FormPage::default()
+                        };
+                        let foot = footer(fonts, &columns, None, stack);
+                        let two_of_three = [page(foot.clone()), page(foot), page(String::new())];
+                        let out = common::read(&print_form(&two_of_three, "", ""));
+                        reads += 1;
+                        for n in 1..=2 {
+                            for w in footer_broken(&out, n, &columns, None) {
+                                wrong.push(format!("{name}, on 2 of 3 pages: {w}"));
+                            }
+                        }
+                        let head = columns_at(fonts, &columns, None, stack, 790.0);
+                        let out =
+                            common::read(&print_form(&[page(head.clone()), page(head)], "", ""));
+                        reads += 1;
+                        for n in 1..=2 {
+                            for w in footer_broken(&out, n, &columns, None) {
+                                wrong.push(format!("{name}, at the top: {w}"));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong in {reads} reads:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
 }
