@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use super::*;
-use crate::layout::{Gaps, address_block};
+use crate::layout::{BAND, Gaps, address_block};
 use crate::regions::{Part, offset_baselines};
 
 /// A run of text of one line, apart from its neighbours by a gap: one cell's text.
@@ -201,7 +201,13 @@ pub(super) fn borderless(
         }
         let mut pieces: Vec<Vec<Piece>> = lines[a..z].iter().map(|l| pieces_of(flow, l)).collect();
         // A block of labels and values is a table of two columns.
-        match key_values(flow, &lines, a, z, &pieces, &off) {
+        // Ruling P6-X4: address columns are parted only in the page bands, where letterheads
+        // and footers stand.
+        let banded = lines[a..z].iter().all(|l| {
+            let middle = l.y + l.size / 2.0;
+            middle <= BAND * area.height || middle >= (1.0 - BAND) * area.height
+        });
+        match key_values(flow, &lines, a, z, &pieces, &off, banded) {
             KeyValues::No => {}
             KeyValues::TooMany(n) => {
                 found.skipped.push(format!(
@@ -315,17 +321,24 @@ pub(super) fn borderless(
                 captions_near(flow, &lines, &by_y, b, &line_sizes, &in_region);
             let table_caption = caption_line.is_some();
             let rows_needed = if table_caption { 2 } else { 3 };
-            let verdict =
-                grid_of(flow, &lines[a..z], pieces, rows_needed, table_caption).and_then(|grid| {
-                    if figure_caption {
-                        return Err("a figure caption stands next to it");
-                    }
-                    let sizes: Vec<f32> = runs.iter().map(|&i| flow.runs[i].size).collect();
-                    match area.refuses(b, &sizes) {
-                        Some(why) => Err(why),
-                        None => Ok(grid),
-                    }
-                });
+            let verdict = grid_of(
+                flow,
+                &lines[a..z],
+                pieces,
+                rows_needed,
+                table_caption,
+                banded,
+            )
+            .and_then(|grid| {
+                if figure_caption {
+                    return Err("a figure caption stands next to it");
+                }
+                let sizes: Vec<f32> = runs.iter().map(|&i| flow.runs[i].size).collect();
+                match area.refuses(b, &sizes) {
+                    Some(why) => Err(why),
+                    None => Ok(grid),
+                }
+            });
             match verdict {
                 Ok(grid) => {
                     taken = true;
@@ -738,6 +751,7 @@ fn key_values(
     z: usize,
     pieces: &[Vec<Piece>],
     off: &[bool],
+    banded: bool,
 ) -> KeyValues {
     if pieces.iter().any(|p| p.len() != 2) || z - a < 2 {
         return KeyValues::No;
@@ -748,11 +762,12 @@ fn key_values(
     let label = |p: &Piece| text_of(flow, p.start, p.end);
     let labels: Vec<String> = pieces.iter().map(|p| label(&p[0])).collect();
     let colons = labels.iter().all(|l| l.ends_with(':'));
-    // Without colons, two columns in the shape of addresses are two blocks side by side.
+    // Without colons, two columns in the shape of addresses in a page band are two blocks
+    // side by side (ruling P6-X4).
     let values: Vec<String> = pieces.iter().map(|p| label(&p[1])).collect();
     let left: Vec<&str> = labels.iter().map(String::as_str).collect();
     let right: Vec<&str> = values.iter().map(String::as_str).collect();
-    if !colons && address_columns(&left, &right) {
+    if banded && !colons && address_columns(&left, &right) {
         return KeyValues::No;
     }
     // Lines after the region whose one run starts with a short label and a colon.
@@ -1049,6 +1064,7 @@ fn grid_of(
     pieces: &[Vec<Piece>],
     rows_needed: usize,
     table_caption: bool,
+    banded: bool,
 ) -> Result<Grid, &'static str> {
     let columns = columns_of(pieces);
     let cols = columns.len();
@@ -1260,8 +1276,9 @@ fn grid_of(
     if texts.len() > 1 && texts.iter().all(|r| *r == texts[0]) {
         return Err("all its rows read the same");
     }
-    // Two columns in the shape of addresses are two blocks side by side, no table.
-    if cols == 2 {
+    // Two columns in the shape of addresses in a page band are two blocks side by side, no
+    // table (ruling P6-X4).
+    if banded && cols == 2 {
         let column = |c: usize| -> Vec<&str> {
             texts
                 .iter()
@@ -1627,11 +1644,11 @@ mod tests {
         let pieces: Vec<Vec<Piece>> = lines.iter().map(|l| pieces_of(&flow, l)).collect();
         let off = vec![false; lines.len()];
         assert!(matches!(
-            key_values(&flow, &lines, 0, lines.len(), &pieces, &off),
+            key_values(&flow, &lines, 0, lines.len(), &pieces, &off, true),
             KeyValues::No
         ));
         assert_eq!(
-            grid_of(&flow, &lines, &pieces, 3, false).err(),
+            grid_of(&flow, &lines, &pieces, 3, false, true).err(),
             Some("its two columns read as addresses")
         );
         // Labels beside values still pair.
@@ -1642,9 +1659,14 @@ mod tests {
         let lines = flow_lines(&flow);
         let pieces: Vec<Vec<Piece>> = lines.iter().map(|l| pieces_of(&flow, l)).collect();
         assert!(matches!(
-            key_values(&flow, &lines, 0, lines.len(), &pieces, &off),
+            key_values(&flow, &lines, 0, lines.len(), &pieces, &off, true),
             KeyValues::Rows(_)
         ));
+        // Ruling P6-X4: out of the page bands, two address columns are a table's.
+        let flow = two_columns(&BANK, &REGISTER);
+        let lines = flow_lines(&flow);
+        let pieces: Vec<Vec<Piece>> = lines.iter().map(|l| pieces_of(&flow, l)).collect();
+        assert!(grid_of(&flow, &lines, &pieces, 3, false, false).is_ok());
     }
 
     #[test]

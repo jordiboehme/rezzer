@@ -4203,3 +4203,134 @@ fn measured_invoice_broken(k: f32, times: bool) -> Vec<String> {
     }
     wrong
 }
+
+/// The two-column tables of the Task 13 review (finding I-1), each a header and its rows.
+const BODY_TABLES: [[[&str; 2]; 4]; 3] = [
+    [
+        ["Artikel", "Menge"],
+        ["Schraube M4", "200 Stk"],
+        ["Mutter M5", "150 Stk"],
+        ["Scheibe M6", "300 Stk"],
+    ],
+    [
+        ["Strasse", "Ort"],
+        ["Musterweg 1", "12345 Musterstadt"],
+        ["Musterweg 2", "23456 Musterdorf"],
+        ["Musterweg 3", "34567 Musterhausen"],
+    ],
+    [
+        ["Leistung", "Tarif"],
+        ["Wartung Q1", "Tarif A2"],
+        ["Pflege Q2", "Tarif B3"],
+        ["Reinigung Q3", "Tarif C4"],
+    ],
+];
+
+/// The looks of the review's probes: page scales and fonts (ruling P6-Y).
+fn probe_looks() -> Vec<(f32, (&'static str, &'static str))> {
+    [0.75, 1.0, 1.5]
+        .into_iter()
+        .flat_map(|k| FONTS.map(|f| (k, f)))
+        .collect()
+}
+
+/// Ruling P6-X4 (review finding I-1): a two-column table in the body with a header row and
+/// cells of text and numbers stays a table, its values set flush left at x 200 or flush right
+/// at x 260, in every size and font. Address-shaped columns are a matter of the page bands
+/// only.
+#[test]
+fn two_column_body_tables_with_a_header_stay_tables() {
+    let mut wrong = Vec::new();
+    for (k, fonts) in probe_looks() {
+        for table in BODY_TABLES {
+            for flush_right in [false, true] {
+                let mut t = String::new();
+                for (r, [a, b]) in table.iter().enumerate() {
+                    let y = 700.0 - 10.0 * r as f32;
+                    let font = if r == 0 { fonts.1 } else { fonts.0 };
+                    t += &show(font, 8.0, 40.0, y, a);
+                    let x = if flush_right {
+                        260.0 - common::font_width(font, b, 8.0)
+                    } else {
+                        200.0
+                    };
+                    t += &show(font, 8.0, x, y, b);
+                }
+                let out = common::read(&page_in(&t, Look::Scaled(k)));
+                let want: Vec<Vec<String>> = table
+                    .iter()
+                    .map(|r| r.iter().map(|c| (*c).to_string()).collect())
+                    .collect();
+                if !tables(&out).iter().any(|t| t.1 == want) {
+                    wrong.push(format!(
+                        "{k}x, {fonts:?}, {}, flush right {flush_right}: {:?} {:?}",
+                        table[0][0],
+                        tables(&out),
+                        texts_of(&out)
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// The headerless notice block of the Task 13 review: plain labels, some with a digit, beside
+/// values with letters, one value empty.
+const NOTICE_PAIRS: [(&str, &str); 6] = [
+    ("Name", "Erika Mustermann"),
+    ("Zimmer 2", "Raum 101"),
+    ("Aktenzeichen", "Az 000 B"),
+    ("Steuerjahr 2025", "Einzelveranlagung"),
+    ("Veranlagung", ""),
+    ("Bearbeitung", "Max Mustermann"),
+];
+
+/// Ruling P6-X4 (review finding I-1): the notice block in the body, the labels plain at x 40
+/// and the values bold flush right at x 300 or plain at x 160, on shared baselines: each
+/// value is read with its label, before the next label, in every size and font.
+#[test]
+fn a_headerless_notice_block_in_the_body_keeps_its_pairs() {
+    let mut wrong = Vec::new();
+    for (k, fonts) in probe_looks() {
+        for bold_right in [true, false] {
+            let mut t = String::new();
+            for (r, (label, value)) in NOTICE_PAIRS.iter().enumerate() {
+                let y = 700.0 - 10.0 * r as f32;
+                t += &show(fonts.0, 8.0, 40.0, y, label);
+                if value.is_empty() {
+                    continue;
+                }
+                if bold_right {
+                    let x = 300.0 - common::font_width(fonts.1, value, 8.0);
+                    t += &show(fonts.1, 8.0, x, y, value);
+                } else {
+                    t += &show(fonts.0, 8.0, 160.0, y, value);
+                }
+            }
+            let out = common::read(&page_in(&t, Look::Scaled(k)));
+            let all = texts_of(&out).join("\n");
+            for (r, (label, value)) in NOTICE_PAIRS.iter().enumerate() {
+                if value.is_empty() {
+                    continue;
+                }
+                let next = NOTICE_PAIRS.get(r + 1).map(|p| p.0);
+                let order: Vec<&str> = [*label, *value].into_iter().chain(next).collect();
+                if let Err(e) = common::in_order(&all, &order) {
+                    wrong.push(format!("{k}x, {fonts:?}, bold right {bold_right}: {e}"));
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}

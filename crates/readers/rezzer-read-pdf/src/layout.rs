@@ -188,7 +188,7 @@ impl UriTarget {
 
 /// Share of the page height at the top and the bottom where running headers and footers sit.
 /// pdflatex sets page numbers about 11 % above the bottom edge of an A4 page.
-const BAND: f32 = 0.18;
+pub(crate) const BAND: f32 = 0.18;
 
 /// Pages a header or footer line must repeat on. In a file of two pages, a footer line repeats
 /// on both (see [`Style::learn`]).
