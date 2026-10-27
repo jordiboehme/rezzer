@@ -2200,38 +2200,17 @@ fn pay_slip_with_filled_marks_reads_the_same() {
 }
 
 /// The pay slip printed smaller or larger as a whole (ruling P6-Y: no bound of this task is a
-/// number of points measured on one form). At 0.7 it reads the same. At 1.5 the header field
-/// grid, the column of totals beside E (its amounts joined, its totals paired) and the bank
-/// row read the same; the drawn marks are then 3.24 points long, longer than a mark may be
-/// (`MARK_LONG`, 3 points, older than this task), so they are read as rules and the left block
-/// and the sections T and S are not read as at 1.0 (reported, not tuned away).
+/// number of points measured on one form) reads the same. At 1.5 the drawn marks are 3.24
+/// points long: a mark is measured by the size of the digits it stands between, so they are
+/// still marks.
 #[test]
 fn pay_slip_printed_smaller_or_larger_reads_the_same() {
-    let scaled = |scale: f32| {
+    for scale in [0.7, 1.5] {
         let page = FormPage {
             scale,
             ..pay_slip(true)
         };
-        read(&print_form(&[page], "", ""))
-    };
-    assert_pay_slip(&scaled(0.7));
-    let base = read_tables(&read(&print_form(&[pay_slip(true)], "", "")));
-    let large = read_tables(&scaled(1.5));
-    assert_eq!(large.first(), base.first(), "the header field grid");
-    let e = |t: &[Vec<Vec<String>>]| {
-        t.iter()
-            .find(|t| t[0][0] == "Ea")
-            .map(|t| t.iter().map(|r| r[r.len() - 1].clone()).collect::<Vec<_>>())
-    };
-    assert_eq!(e(&large), e(&base), "the column of totals beside E");
-    let rows: Vec<String> = large.iter().flatten().map(|r| r.join(": ")).collect();
-    for want in [
-        "Ek: 1.302,90",
-        "Ln: 8.765,43",
-        "Lh: Musterbank",
-        "Li: DE00 0000 0000 0000 0000 00",
-    ] {
-        assert!(rows.iter().any(|r| r == want), "{want} in {large:#?}");
+        assert_pay_slip(&read(&print_form(&[page], "", "")));
     }
 }
 

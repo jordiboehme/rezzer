@@ -279,26 +279,6 @@ pub(crate) const KNOWN: &[Known] = &[
         why: "P6-X, values lost but named by a loss (allowed by the ruling): on a turned page the rate run is not cut at the divider between `Satz %` and `Gr C`: the run `1234567` is kept whole with a loss that names both fields and one that says its drawn mark is not read; upright the same run is cut and pairs",
     },
     Known {
-        shape: "F1 to F3",
-        variants: &["scale 1.5, larger text", "scale 1.5, larger text, courier"],
-        broken: &[
-            Inv::RightPair,
-            Inv::ValueOnce,
-            Inv::ClearPairs,
-            Inv::SameReading,
-            Inv::NoLoss,
-        ],
-        cause: Cause::Threshold,
-        why: "P6-X, a lost separator in a pair: the drawn marks of 0.2 data sizes are 3.15 points high at scale 1.5 with 10.5 point data, over `MARK_LONG` (3 points), so they are no marks: `Eintritt` pairs with `010120` and the rate overflow is unclear (named in the brief)",
-    },
-    Known {
-        shape: "F1 to F3",
-        variants: &["scale 1.5, larger text, proportional"],
-        broken: &[Inv::RightPair, Inv::ValueOnce, Inv::SameReading],
-        cause: Cause::Threshold,
-        why: "P6-X, a lost separator in a pair: the drawn marks of 0.2 data sizes are 3.15 points high at scale 1.5 with 10.5 point data, over `MARK_LONG` (3 points), so they are no marks: `Eintritt` pairs with `010120` and the rate overflow is unclear (named in the brief)",
-    },
-    Known {
         shape: "grids side by side",
         variants: &[
             "scale 0.7, larger text, courier, times labels, dashed, turned 90, two pages",
@@ -468,17 +448,6 @@ pub(crate) const KNOWN: &[Known] = &[
         broken: &[Inv::Role, Inv::Paragraph],
         cause: Cause::Carry,
         why: "carry from Task 8 round 3: the address test works on whole layout lines, so a date line on the baseline of the recipient's name keeps the name out of the address paragraph",
-    },
-    Known {
-        shape: "separator marks",
-        variants: &[
-            "scale 1.5, larger text",
-            "scale 1.5, larger text, courier",
-            "scale 1.5, larger text, proportional",
-        ],
-        broken: &[Inv::ValueOnce, Inv::SameReading],
-        cause: Cause::Threshold,
-        why: "P6-X, a silent lost separator: the boxed digits' marks are 3.15 points high at scale 1.5 with 10.5 point data, over `MARK_LONG` (3 points): no separator is read, and `123456` and `01022026` stand as printed, with no loss",
     },
     Known {
         shape: "separator marks",

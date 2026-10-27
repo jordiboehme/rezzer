@@ -13,11 +13,13 @@ use crate::scan;
 use crate::tables::{Rule, RuleKind};
 use crate::text::{Gl, PageItems};
 
-/// The short side of a mark is at most this many points.
-pub(crate) const MARK_THIN: f32 = 0.5;
-/// The long side of a mark is at most this many points.
-pub(crate) const MARK_LONG: f32 = 3.0;
-/// The long side of a mark is at least this many times its short side.
+/// The long side of a mark is at most this many sizes of its text (3 points at 9.5 point
+/// data): a separator is much shorter than the digits it stands between. Relative, so that a
+/// form printed larger or smaller has the same marks.
+pub(crate) const MARK_LONG: f32 = 0.32;
+/// The long side of a mark is at least this many times its short side. This bounds its
+/// thickness too (at most about a tenth of the text size): a thickness of its own in points
+/// would not hold for the dashes of a rule, which keep their pen width at every scale.
 pub(crate) const MARK_RATIO: f32 = 3.0;
 /// Marks one page keeps.
 pub(crate) const MAX_MARKS: usize = 100_000;
@@ -41,12 +43,45 @@ pub(crate) fn is_placeholder(c: char) -> bool {
     ('\u{FDD0}'..='\u{FDEF}').contains(&c)
 }
 
-/// Whether a filled axis-aligned box (x0, y0, x1, y1) is a mark: thin, short and long for
-/// its width.
-pub(crate) fn is_mark(b: [f32; 4]) -> bool {
+/// Whether an axis-aligned box (x0, y0, x1, y1) has the shape of a mark: long for its width.
+/// Whether it is small enough to be one depends on the text it stands with (see
+/// [`is_mark`]), which the content walk does not know yet when the box is drawn.
+pub(crate) fn mark_shaped(b: [f32; 4]) -> bool {
     let (w, h) = (b[2] - b[0], b[3] - b[1]);
     let (short, long) = (w.min(h), w.max(h));
-    short > 0.0 && short <= MARK_THIN && long <= MARK_LONG && long >= MARK_RATIO * short
+    short > 0.0 && long >= MARK_RATIO * short
+}
+
+/// Whether a box is a mark with text of `size`: of [`mark_shaped`] shape and short for that
+/// size.
+pub(crate) fn is_mark(b: [f32; 4], size: f32) -> bool {
+    let long = (b[2] - b[0]).max(b[3] - b[1]);
+    mark_shaped(b) && long <= MARK_LONG * size
+}
+
+/// The text size a page's marks are measured by when they stand by no digits (dashes of a
+/// rule, the marks of an empty field): the median size of its visible digits, which are the
+/// values a form prints, or of all its visible glyphs when it has no digits. `None` on a page
+/// without visible text: there no box is a mark.
+pub(crate) fn page_size(glyphs: &[Gl], text: &str) -> Option<f32> {
+    let bytes = text.as_bytes();
+    let visible = |g: &&Gl| !g.invisible && g.layer.is_none() && g.size > 0.0;
+    let digit = |g: &&Gl| g.len == 1 && bytes.get(g.start as usize).is_some_and(u8::is_ascii_digit);
+    let mut sizes: Vec<f32> = glyphs
+        .iter()
+        .filter(visible)
+        .filter(digit)
+        .map(|g| g.size)
+        .collect();
+    if sizes.is_empty() {
+        sizes = glyphs.iter().filter(visible).map(|g| g.size).collect();
+    }
+    if sizes.is_empty() {
+        return None;
+    }
+    let mid = sizes.len() / 2;
+    let (_, m, _) = sizes.select_nth_unstable_by(mid, f32::total_cmp);
+    Some(*m)
 }
 
 /// The separator characters the file's own text shows, each set only by clear evidence.
@@ -517,14 +552,16 @@ fn cell_of(m: &[f32; 4]) -> (i32, i32) {
 /// advance) along the baseline, its bottom within 0.3 font sizes of the baseline and its
 /// height at most half the font size, measured across it. Digits that read in `turn`, the
 /// direction the page is read in, get [`SEP`]; other digits get [`SEP_TURNED`], whose number
-/// is listed as not read. `marks` are in the frame of the glyphs and come back sorted by
-/// their grid cell. False when the marks near the digits were too many to test them all
-/// ([`MARK_WORK`]).
+/// is listed as not read. A mark must also be one for the digits' size ([`is_mark`]).
+/// `marks` are in the frame of the glyphs and come back sorted by their grid cell; the marks
+/// that put a placeholder go into `used`. False when the marks near the digits were too many
+/// to test them all ([`MARK_WORK`]).
 pub(crate) fn insert(
     glyphs: &mut Vec<Gl>,
     text: &mut String,
     marks: &mut [[f32; 4]],
     turn: Turn,
+    used: &mut Vec<[f32; 4]>,
 ) -> bool {
     if marks.is_empty() || glyphs.len() < 2 {
         return true;
@@ -581,13 +618,8 @@ pub(crate) fn insert(
                 continue;
             }
             // Where a mark's middle may be: between the digit middles, from 0.3 sizes under
-            // the baseline to the top of the highest mark that may stand on it.
-            (
-                from,
-                to,
-                -0.3 * size,
-                0.3 * size + 0.25 * size.min(2.0 * MARK_LONG),
-            )
+            // the baseline to the top of the longest mark that may stand on it.
+            (from, to, -0.3 * size, (0.3 + MARK_LONG) * size)
         };
         let corners = [(from, t0), (from, t1), (to, t0), (to, t1)]
             .map(|(s, t)| (a.x + s * d.0 + t * up.0, a.y + s * d.1 + t * up.1));
@@ -622,7 +654,7 @@ pub(crate) fn insert(
                 } else {
                     bottom.abs() <= 0.3 * size && top - bottom <= 0.5 * size
                 };
-                if s > from && s < to && fits {
+                if s > from && s < to && fits && is_mark(*m, size) {
                     // The placeholder stands just after the first digit, on its way to the
                     // second one, so it stays between them in reading order.
                     let ahead = if a.vertical {
@@ -632,6 +664,7 @@ pub(crate) fn insert(
                     };
                     let at = (a.x + ahead * d.0, a.y + ahead * d.1);
                     after.push((i, if readable { SEP } else { SEP_TURNED }, at));
+                    used.push(*m);
                     continue 'pairs;
                 }
             }
@@ -1262,7 +1295,13 @@ mod tests {
             .map(|k| digit(k, 100.0, 700.0 - 9.5 * k as f32, true))
             .collect();
         let mut marks = vec![[99.88, 665.0, 100.12, 667.0]];
-        assert!(insert(&mut glyphs, &mut text, &mut marks, Turn::None));
+        assert!(insert(
+            &mut glyphs,
+            &mut text,
+            &mut marks,
+            Turn::None,
+            &mut Vec::new()
+        ));
         assert_eq!(glyphs.len(), 7);
         let placed = &glyphs[4];
         assert_eq!(&text[placed.start as usize..][..3], SEP_TURNED.to_string());
@@ -1285,13 +1324,94 @@ mod tests {
     }
 
     #[test]
-    fn marks_by_shape() {
-        assert!(is_mark([10.0, 10.0, 10.24, 12.0]));
-        assert!(is_mark([10.0, 10.0, 12.0, 10.24]));
+    fn marks_by_shape_and_size() {
+        // With text of 9.5 points: at most 3.04 points long, and a third of that thick.
+        assert!(is_mark([10.0, 10.0, 10.24, 12.0], 9.5));
+        assert!(is_mark([10.0, 10.0, 12.0, 10.24], 9.5));
+        // A dash of a rule, its pen half a point wide.
+        assert!(is_mark([10.0, 10.0, 11.6, 10.5], 8.0));
         // Too thick, too long, too square, nothing.
-        assert!(!is_mark([10.0, 10.0, 10.6, 12.0]));
-        assert!(!is_mark([10.0, 10.0, 10.24, 13.5]));
-        assert!(!is_mark([10.0, 10.0, 10.4, 11.0]));
-        assert!(!is_mark([10.0, 10.0, 10.0, 12.0]));
+        assert!(!is_mark([10.0, 10.0, 10.8, 12.0], 9.5));
+        assert!(!is_mark([10.0, 10.0, 10.24, 13.5], 9.5));
+        assert!(!is_mark([10.0, 10.0, 10.4, 11.0], 9.5));
+        assert!(!is_mark([10.0, 10.0, 10.0, 12.0], 9.5));
+        assert!(!mark_shaped([10.0, 10.0, 10.0, 12.0]));
+        // The same marks printed at 1.5 with larger text (15.75 points): 3.15 points long is a
+        // mark there, and a mark of 0.75 points thin too.
+        assert!(is_mark([10.0, 10.0, 10.24, 13.15], 15.75));
+        assert!(is_mark([10.0, 10.0, 10.75, 13.15], 15.75));
+        assert!(!is_mark([10.0, 10.0, 10.24, 13.15], 9.5));
+        // Printed small (6 points), a bar of 2.5 points is no mark.
+        assert!(!is_mark([10.0, 10.0, 10.2, 12.5], 6.0));
+        assert!(mark_shaped([10.0, 10.0, 10.2, 12.5]));
+    }
+
+    /// Two digits of `size` points on the baseline 700, the second right after the first.
+    fn two_digits(size: f32) -> (Vec<Gl>, String) {
+        let glyph = |k: u32, x: f32| Gl {
+            size,
+            adv: Some(0.6 * size),
+            ..digit(k, x, 700.0, false)
+        };
+        (
+            vec![glyph(0, 100.0), glyph(1, 100.0 + 0.6 * size)],
+            "12".into(),
+        )
+    }
+
+    #[test]
+    fn a_long_mark_is_a_separator_by_large_digits_only() {
+        // A mark 3.15 points high between two digits of 15.75 points (a form printed at 1.5
+        // with larger text) is a separator; between digits of 9.5 points the same bar is too
+        // long for one, and stays what it is.
+        let mark = |size: f32| {
+            let x = 100.0 + 0.6 * size;
+            [
+                x - 0.12,
+                700.0 - 0.087 * size,
+                x + 0.12,
+                700.0 - 0.087 * size + 3.15,
+            ]
+        };
+        let (mut glyphs, mut text) = two_digits(15.75);
+        let (mut marks, mut used) = (vec![mark(15.75)], Vec::new());
+        assert!(insert(
+            &mut glyphs,
+            &mut text,
+            &mut marks,
+            Turn::None,
+            &mut used
+        ));
+        assert_eq!(glyphs.len(), 3);
+        assert_eq!(used, [mark(15.75)]);
+        let (mut glyphs, mut text) = two_digits(9.5);
+        let (mut marks, mut used) = (vec![mark(9.5)], Vec::new());
+        assert!(insert(
+            &mut glyphs,
+            &mut text,
+            &mut marks,
+            Turn::None,
+            &mut used
+        ));
+        assert_eq!((glyphs.len(), used.len()), (2, 0));
+    }
+
+    #[test]
+    fn the_page_size_is_the_median_digit() {
+        let (mut glyphs, _) = two_digits(9.5);
+        glyphs.push(Gl {
+            start: 2,
+            ..two_digits(15.0).0[0]
+        });
+        glyphs.push(Gl {
+            start: 3,
+            ..two_digits(9.0).0[0]
+        });
+        // Only the digits count: 9.5 and 9.5, or 15 and 9 (the upper median).
+        assert_eq!(page_size(&glyphs, "12ab"), Some(9.5));
+        assert_eq!(page_size(&glyphs, "ab12"), Some(15.0));
+        // No digits: every glyph.
+        assert_eq!(page_size(&glyphs[..2], "ab"), Some(9.5));
+        assert_eq!(page_size(&[], ""), None);
     }
 }

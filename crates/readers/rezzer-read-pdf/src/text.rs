@@ -94,9 +94,9 @@ pub(crate) struct PageItems {
     /// Straight lines and rectangles the page draws, in the frame of the runs, for finding
     /// ruled tables.
     pub rules: Vec<Rule>,
-    /// Tiny filled bars the page draws (see [`crate::marks::is_mark`]), in the frame of the
-    /// runs: separators of boxed number fields, never rules. At most
-    /// [`crate::marks::MAX_MARKS`].
+    /// Filled bars the page draws in the shape of a mark (see [`crate::marks::mark_shaped`]),
+    /// in the frame of the runs, without the dashes of dashed rules: the separators of boxed
+    /// number fields are among them. At most [`crate::marks::MAX_MARKS`].
     pub marks: Vec<[f32; 4]>,
     /// The lower left corner of the visible page box in user space: what moves boxes of the
     /// object layer (links, form fields) into the frame of the runs.
@@ -834,6 +834,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
             pictures: &mut self.pictures,
             page: n,
             rules: Vec::new(),
+            mark_rules: Vec::new(),
             rules_cut: false,
             open: Vec::new(),
             marks: if use_marks { &marks } else { &[] },
@@ -926,16 +927,17 @@ impl<'p, 'a> PageReader<'p, 'a> {
                  object limit allows; their glyphs count as unmapped"
             )));
         }
+        // Which boxes of a mark's shape are marks depends on the size of the text: a mark
+        // that stands by no digit (a dash, the mark of an empty field) is measured by the page's
+        // text, one between two digits by theirs.
+        let kept_marks = dev.drawn_marks.len();
+        let size = crate::marks::page_size(&dev.glyphs, &dev.text);
+        let small = |m: &[f32; 4]| size.is_some_and(|s| crate::marks::is_mark(*m, s));
+        let (mut marks, larger): (Vec<_>, Vec<_>) = dev.drawn_marks.drain(..).partition(small);
         // Dashed rules drawn as rows of marks are rules all the same, and their
         // marks are no separators.
-        let kept_marks = dev.drawn_marks.len();
-        for r in crate::marks::dashed_rules(&mut dev.drawn_marks) {
-            if dev.rules.len() < dev.cap {
-                dev.rules.push(r);
-            } else {
-                dev.rules_cut = true;
-            }
-        }
+        let dashed = crate::marks::dashed_rules(&mut marks);
+        marks.extend(larger);
         // A separator drawn as a mark between two digits puts a placeholder between them, read
         // once the whole file is (`marks::resolve`). The quotes below are taken with it.
         let turn = page_turn(
@@ -943,12 +945,25 @@ impl<'p, 'a> PageReader<'p, 'a> {
                 .iter()
                 .filter(|g| g.layer.is_none() && !g.invisible),
         );
-        if !crate::marks::insert(&mut dev.glyphs, &mut dev.text, &mut dev.drawn_marks, turn) {
+        let mut used: Vec<[f32; 4]> = Vec::new();
+        if !crate::marks::insert(&mut dev.glyphs, &mut dev.text, &mut marks, turn, &mut used) {
             notes.push(Note::Limit(format!(
                 "separators drawn as marks on page {n} are looked for only in part: the page has \
                  too many marks near its digits"
             )));
         }
+        // The boxes that are no marks are rules as drawn, in their place; the dashed rules
+        // follow them.
+        used.sort_by(|a, b| a[0].total_cmp(&b[0]));
+        restore_mark_rules(&mut dev.rules, std::mem::take(&mut dev.mark_rules), |b| {
+            small(b) || is_used(&used, b)
+        });
+        dev.rules.extend(dashed);
+        if dev.rules.len() > dev.cap {
+            dev.rules.truncate(dev.cap);
+            dev.rules_cut = true;
+        }
+        dev.drawn_marks = marks;
         // A value that touches the next field's value, its separator drawn, is parted at the
         // field's divider when the digits before it read as a number.
         crate::marks::cut_at_dividers(&mut dev.glyphs, &mut dev.text, &dev.rules);
@@ -2647,8 +2662,8 @@ struct TextDevice<'d> {
     cells_cut: bool,
     /// What the cells hold of the object pool.
     cells_held: u64,
-    /// Marks the page draws (see [`crate::marks::is_mark`]), at most
-    /// [`crate::marks::MAX_MARKS`].
+    /// Filled bars the page draws in the shape of a mark (see
+    /// [`crate::marks::mark_shaped`]), at most [`crate::marks::MAX_MARKS`].
     drawn_marks: Vec<[f32; 4]>,
     /// More marks were drawn than are kept.
     drawn_marks_cut: bool,
@@ -2662,6 +2677,10 @@ struct TextDevice<'d> {
     pictures: &'d mut Pictures,
     page: u32,
     rules: Vec<Rule>,
+    /// The rules of boxes shaped like marks ([`crate::marks::mark_shaped`]), held back until
+    /// the page's text tells which of them are marks: each with the place in `rules` it was
+    /// drawn at and its box. The others go back into `rules` there.
+    mark_rules: Vec<(usize, [f32; 4], Rule)>,
     /// Lines were drawn past the cap and are not kept.
     rules_cut: bool,
     open: Vec<Open>,
@@ -2779,6 +2798,40 @@ impl TextDevice<'_> {
     }
 }
 
+/// Puts the rules of boxes shaped like marks (`held`, each with the place in `rules` it was
+/// drawn at) back into `rules` at their places, but not those of the boxes `mark` takes for
+/// marks.
+fn restore_mark_rules(
+    rules: &mut Vec<Rule>,
+    held: Vec<(usize, [f32; 4], Rule)>,
+    mark: impl Fn(&[f32; 4]) -> bool,
+) {
+    let mut back = held.into_iter().filter(|(_, b, _)| !mark(b)).peekable();
+    if back.peek().is_none() {
+        return;
+    }
+    let drawn = std::mem::take(rules);
+    rules.reserve(drawn.len());
+    for (k, r) in drawn.into_iter().enumerate() {
+        while let Some((_, _, h)) = back.next_if(|(at, ..)| *at <= k) {
+            rules.push(h);
+        }
+        rules.push(r);
+    }
+    rules.extend(back.map(|(_, _, h)| h));
+}
+
+/// Whether `b` is one of the marks `used` (sorted by their left side), within float noise:
+/// the box of a mark's rule and of its fill are computed from the same points.
+fn is_used(used: &[[f32; 4]], b: &[f32; 4]) -> bool {
+    const NOISE: f32 = 0.01;
+    let first = used.partition_point(|u| u[0] < b[0] - NOISE);
+    used[first..]
+        .iter()
+        .take_while(|u| u[0] <= b[0] + NOISE)
+        .any(|u| (0..4).all(|k| (u[k] - b[k]).abs() <= NOISE))
+}
+
 /// A filled rectangle at most this many points thick is a rule, not a shaded area.
 const THIN: f32 = 2.0;
 
@@ -2872,37 +2925,45 @@ impl Subpath {
     }
 
     /// Hands on what the subpath draws once it ends.
-    fn end(self, stroke: bool, keep: &mut dyn FnMut(Rule)) {
+    fn end(self, stroke: bool, keep: &mut dyn FnMut(Rule, Option<[f32; 4]>)) {
         if let Some(r) = self.rounded_box(stroke) {
-            keep(r);
+            keep(r, None);
             return;
         }
         let corners = &self.corners[..self.count.min(self.corners.len())];
         let four = !self.curved && (4..=5).contains(&self.count);
         // A mark is a separator of a boxed number field, never a rule: neither its fill nor
-        // the sides of its stroke (a print run fills and strokes it with a hairline).
-        if four && axis_box(corners).is_some_and(crate::marks::is_mark) {
-            return;
-        }
+        // the sides of its stroke (a print run fills and strokes it with a hairline). Whether
+        // a box of its shape is one is known once the page's text is: its rules go with it.
+        let mark = four
+            .then(|| axis_box(corners))
+            .flatten()
+            .filter(|b| crate::marks::mark_shaped(*b));
         for r in self.held.into_iter().flatten() {
-            keep(r);
+            keep(r, mark);
         }
         if !stroke
             && four
             && let Some(r) = rectangle(corners)
         {
-            keep(r);
+            keep(r, mark);
         }
     }
 }
 
 /// The rules a path draws once `transform` maps it into the page box: each straight
 /// horizontal or vertical segment of a stroked path is a line, a filled axis-aligned
-/// rectangle is a line when thin and a rectangle otherwise, and none when it is a mark
-/// ([`crate::marks::is_mark`]). A closed subpath of sides along the axes and small corner
-/// curves, stroked or filled, is the rectangle of its bounds (a box with rounded corners).
-/// Other curves and slanted segments are not rules.
-fn rules_of(path: &BezPath, transform: Affine, stroke: bool, keep: &mut dyn FnMut(Rule)) {
+/// rectangle is a line when thin and a rectangle otherwise. The rules of a box shaped like a
+/// mark ([`crate::marks::mark_shaped`]) come with that box, as they are none when it is a
+/// mark. A closed subpath of sides along the axes and small corner curves, stroked or
+/// filled, is the rectangle of its bounds (a box with rounded corners). Other curves and
+/// slanted segments are not rules.
+fn rules_of(
+    path: &BezPath,
+    transform: Affine,
+    stroke: bool,
+    keep: &mut dyn FnMut(Rule, Option<[f32; 4]>),
+) {
     use kurbo::PathEl;
     let segment = |a: Point, b: Point| -> Option<Rule> {
         let (dx, dy) = ((b.x - a.x).abs() as f32, (b.y - a.y).abs() as f32);
@@ -2924,7 +2985,7 @@ fn rules_of(path: &BezPath, transform: Affine, stroke: bool, keep: &mut dyn FnMu
         }
     };
     // A straight piece from the subpath's last point to `p`.
-    let straight = |sub: &mut Subpath, p: Point, keep: &mut dyn FnMut(Rule)| {
+    let straight = |sub: &mut Subpath, p: Point, keep: &mut dyn FnMut(Rule, Option<[f32; 4]>)| {
         let a = sub.last;
         if (p.x - a.x).abs() > 0.5 && (p.y - a.y).abs() > 0.5 {
             sub.square = false;
@@ -2935,11 +2996,11 @@ fn rules_of(path: &BezPath, transform: Affine, stroke: bool, keep: &mut dyn FnMu
                 Some(_) => {
                     // Too long to be a box: what was held goes out, and the rest as it comes.
                     for h in sub.held.take().into_iter().flatten() {
-                        keep(h);
+                        keep(h, None);
                     }
-                    keep(r);
+                    keep(r, None);
                 }
-                None => keep(r),
+                None => keep(r, None),
             }
         }
     };
@@ -3197,18 +3258,20 @@ impl<'a> Device<'a> for TextDevice<'_> {
                 if !*cut {
                     keep(cells, cut, held, crate::codes::MAX_CELLS);
                 }
-                if !*marks_cut && crate::marks::is_mark(c) {
+                if !*marks_cut && crate::marks::mark_shaped(c) {
                     keep(marks, marks_cut, marks_held, crate::marks::MAX_MARKS);
                 }
             });
         }
-        let (rules, cap) = (&mut self.rules, self.cap);
+        let (rules, mark_rules, cap) = (&mut self.rules, &mut self.mark_rules, self.cap);
         let mut cut = false;
-        rules_of(path, props.transform, stroke, &mut |r| {
-            if rules.len() < cap {
-                rules.push(r);
-            } else {
+        rules_of(path, props.transform, stroke, &mut |r, mark| {
+            if rules.len() + mark_rules.len() >= cap {
                 cut = true;
+            } else if let Some(b) = mark {
+                mark_rules.push((rules.len(), b, r));
+            } else {
+                rules.push(r);
             }
         });
         self.rules_cut |= cut;
@@ -3938,18 +4001,28 @@ mod tests {
         );
     }
 
-    /// A separator drawn as a mark (0.24 by 2 points, or a little taller) is no rule.
+    /// A separator drawn as a mark (0.24 by 2 points, or a little taller) is no rule; its
+    /// rules come with its box, as whether it is a mark is known with the page's text.
     #[test]
-    fn mark_is_not_a_rule() {
+    fn mark_rules_come_with_their_box() {
         use kurbo::Shape;
+        let drawn = |path: &kurbo::BezPath, stroke: bool| {
+            let mut rules = Vec::new();
+            rules_of(path, Affine::IDENTITY, stroke, &mut |r, b| {
+                rules.push((r, b))
+            });
+            rules
+        };
         for h in [2.0, 2.05] {
             let path = kurbo::Rect::new(100.0, 700.0, 100.24, 700.0 + h).to_path(0.1);
-            let mut rules = Vec::new();
-            rules_of(&path, Affine::IDENTITY, false, &mut |r| rules.push(r));
-            assert!(rules.is_empty(), "{h}: {rules:?}");
+            let rules = drawn(&path, false);
+            assert!(
+                !rules.is_empty() && rules.iter().all(|(_, b)| b.is_some()),
+                "{h}: {rules:?}"
+            );
         }
         // A mark drawn as four lines and a close, filled and then stroked with a hairline
-        // (`B*`): neither pass gives a rule.
+        // (`B*`): both passes give the same box.
         let mut path = kurbo::BezPath::new();
         path.move_to((100.24, 702.16));
         path.line_to((100.0, 702.16));
@@ -3957,15 +4030,34 @@ mod tests {
         path.line_to((100.24, 700.0));
         path.close_path();
         for stroke in [false, true] {
-            let mut rules = Vec::new();
-            rules_of(&path, Affine::IDENTITY, stroke, &mut |r| rules.push(r));
-            assert!(rules.is_empty(), "{stroke}: {rules:?}");
+            let rules = drawn(&path, stroke);
+            assert!(
+                rules
+                    .iter()
+                    .all(|(_, b)| *b == Some([100.0, 700.0, 100.24, 702.16])),
+                "{stroke}: {rules:?}"
+            );
         }
-        // A thin rule of the same width is one.
-        let path = kurbo::Rect::new(100.0, 700.0, 100.24, 720.0).to_path(0.1);
-        let mut rules = Vec::new();
-        rules_of(&path, Affine::IDENTITY, false, &mut |r| rules.push(r));
-        assert_eq!(rules.len(), 1);
+        // A box of another shape gives its rules on their own.
+        let path = kurbo::Rect::new(100.0, 700.0, 101.0, 701.5).to_path(0.1);
+        assert!(drawn(&path, false).iter().all(|(_, b)| b.is_none()));
+    }
+
+    /// On a page of 9.5 point digits a mark of 2 points is no rule, and a bar of the same
+    /// width 20 points long is one; with digits of 4 points, a bar of 2 points is a rule too.
+    #[test]
+    fn marks_are_measured_by_the_page_text() {
+        let digits = |size: f32| format!("BT /F1 {size} Tf 300 500 Td (123456) Tj ET\n");
+        let bars = "0 0 0 rg 0 w 100 700 0.24 2 re B 200 700 0.24 20 re f\n";
+        let items = rules_of_page(&(digits(9.5) + bars), "", CAPS);
+        assert_eq!(items.rules.len(), 1, "{:?}", items.rules);
+        assert!((items.rules[0].y1 - items.rules[0].y0 - 20.0).abs() < 0.01);
+        let items = rules_of_page(&(digits(4.0) + bars), "", CAPS);
+        assert!(
+            items.rules.iter().any(|r| (r.y1 - r.y0 - 2.0).abs() < 0.01),
+            "{:?}",
+            items.rules
+        );
     }
 
     #[test]
