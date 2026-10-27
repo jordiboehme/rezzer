@@ -10,10 +10,11 @@
 //! [`write_corpus`] reads every corpus file into one output folder, plus copies of three
 //! corpus files under names that break paths or permalinks (spaces, parentheses, `#`, `%`,
 //! only non-ASCII, two names that sanitize alike, a data: URI name with `../`), an empty file,
-//! an invented source with an NFD name and one whose list items look like Crystalline syntax. [`frontmatter_rules`] and [`bundle_rules`] check
-//! what was written; `crystalline_imports_without_errors` runs the `crystalline` binary on it
-//! when it is on `PATH`, with its config, state, data and index inside a temp folder, so no
-//! real domain or index is ever touched. Rezzer itself never runs an external program; only
+//! an invented source with an NFD name and one whose list items look like Crystalline syntax.
+//! [`frontmatter_rules`] and [`bundle_rules`] check what was written;
+//! `crystalline_imports_without_errors` runs the `crystalline` binary on it when it is on
+//! `PATH`, with its config, state, data and index inside a temp folder, so no real domain or
+//! index is ever touched. Rezzer itself never runs an external program; only
 //! this test does. Corpus files are untrusted data and are only read by Rezzer, never run.
 #![cfg(all(
     feature = "fmt-text",
@@ -1091,9 +1092,9 @@ fn require_min_version(cr: &Isolated) -> String {
 }
 
 /// Writes `files` (path, text, a path may name a subfolder) into a fresh folder, imports it
-/// into a fresh domain, syncs,
-/// and returns `crystalline read <permalink> --json` of each file by its path. A file the
-/// import derives no permalink for cannot be read by one and is left out.
+/// into a fresh domain, syncs, and returns `crystalline read <permalink> --json` of each file
+/// by its path. A file the import derives no permalink for cannot be read by one and is left
+/// out.
 fn import_probe(cr: &Isolated, files: &[(&str, &str)]) -> BTreeMap<String, Value> {
     let src = cr.root.join("probe-src");
     let dom = cr.root.join("probe-dom");
@@ -1272,19 +1273,20 @@ fn crystalline_imports_without_errors() {
 
     // A part of each document with a hard name: its relations resolve after a sync.
     cr.run(&["sync", "--domain", "rezzertest"]);
-    let mut read = 0;
+    let hard_names: Vec<&str> = NAMED_COPIES
+        .iter()
+        .map(|(_, n)| *n)
+        .chain([DATA_URI_COPY.1, NFD_NAME])
+        .collect();
+    let mut read: BTreeMap<&str, usize> = hard_names.iter().map(|n| (*n, 0)).collect();
     for path in &written {
-        let hard = NAMED_COPIES
-            .iter()
-            .map(|(_, n)| *n)
-            .chain([DATA_URI_COPY.1, NFD_NAME])
-            .any(|name| {
-                let stem = rezzer_pipeline::parts_folder(&rezzer_pipeline::folder_stem(name));
-                path.contains(&format!("/{stem}/"))
-            });
-        if !hard {
+        let Some(name) = hard_names.iter().copied().find(|name| {
+            let stem = rezzer_pipeline::parts_folder(&rezzer_pipeline::folder_stem(name));
+            path.contains(&format!("/{stem}/"))
+        }) else {
             continue;
-        }
+        };
+        // A part without a permalink is already a problem above.
         let Some(Some(permalink)) = permalinks.get(path) else {
             continue;
         };
@@ -1312,9 +1314,14 @@ fn crystalline_imports_without_errors() {
                 problems.push(format!("{path}: unresolved relation {r}"));
             }
         }
-        read += 1;
+        *read.get_mut(name).unwrap() += 1;
     }
-    assert!(read >= 6, "only {read} parts with hard names were read");
+    // Every hard name has parts, and at least one of them was read.
+    let unread: Vec<_> = read.iter().filter(|(_, n)| **n == 0).collect();
+    assert!(
+        unread.is_empty(),
+        "hard names with no part read: {unread:?}"
+    );
     assert!(
         problems.is_empty(),
         "{} problems:\n{}",
@@ -1335,13 +1342,14 @@ fn crystalline_reads_the_shapes_rezzer_relies_on() {
     let cr = Isolated::new(bin, &tmp.path().join("crystalline"));
     require_min_version(&cr);
 
-    const SHAPES: [(&str, &str); 14] = [
+    const SHAPES: [(&str, &str); 15] = [
         ("prose-link.md", "- See [Three](three.md)"),
         ("lower-link.md", "- see [Three](three.md)"),
         ("umlaut-link.md", "- \u{fc}ber [Three](three.md)"),
         ("footnote.md", "- [^1] a note"),
         ("category.md", "- [c] text"),
         ("wikilink.md", "- Tok [[Three]]"),
+        ("dest-wikilink.md", "- Tok[x](a[[b]]c.png)"),
         (
             "ideographic.md",
             "- part_of [D](Bericht\u{3000}\u{65e5}\u{672c}.md)",
@@ -1480,6 +1488,15 @@ fn crystalline_reads_the_shapes_rezzer_relies_on() {
     ] {
         check(path, "no observation", categories(path).is_empty());
     }
+
+    // A `[[` inside a link destination is part of the path: no relation, no wikilink.
+    check(
+        "dest-wikilink.md",
+        "no relation, no observation, no link",
+        relations_of("dest-wikilink.md").is_empty()
+            && categories("dest-wikilink.md").is_empty()
+            && links("dest-wikilink.md").is_empty(),
+    );
 
     // Observation shapes: the observation and no relation.
     check(
