@@ -387,7 +387,7 @@ fn disabled_pass_is_skipped() {
 }
 
 #[test]
-fn big_document_is_fast() {
+fn big_document_takes_linear_work() {
     let mut d = doc();
     d.body = (0..100_000)
         .map(|i| {
