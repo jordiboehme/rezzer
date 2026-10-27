@@ -1780,6 +1780,7 @@ fn similar_names_keep_their_own_bundles() {
 }
 
 /// A file that Rezzer's cleanup would take for one of its parts.
+#[cfg(unix)]
 const PART_LIKE: &str =
     "---\ngenerated: { by: rezzer/0.1.0, at: 2026-10-19T08:30:00Z }\npart: 1\n---\n\nkeep\n";
 
@@ -2388,6 +2389,7 @@ fn output_of_another_source_stops_the_run() {
 }
 
 /// `path` as a path relative to the working directory, built with `..` up to the root.
+#[cfg(unix)]
 fn relative_to_cwd(path: &Path) -> PathBuf {
     let cwd = std::env::current_dir().unwrap();
     let mut rel = PathBuf::new();
@@ -2687,4 +2689,34 @@ fn a_failed_read_keeps_the_old_pictures() {
     let res = pipeline.run_bytes("notes.txt", SMALL.to_vec(), None, &written(out.path()));
     assert_eq!(res.completeness, Completeness::Failed);
     assert_eq!(names_in(&assets), pictures);
+}
+
+#[test]
+fn a_failed_check_creates_no_folder() {
+    // A run that cannot use its output folder makes none (ruling P5-AB): here the folder is
+    // missing and its parent is a file of the user's, so it is not taken for a missing folder.
+    let root = tempfile::tempdir().unwrap();
+    let user_file = root.path().join("notes");
+    std::fs::write(&user_file, "mine").unwrap();
+    let out = user_file.join("out");
+    let pipeline = chapters_pipeline(config(None));
+    let res = pipeline.run_bytes("notes.txt", LARGE.to_vec(), None, &written(&out));
+    assert_eq!(res.completeness, Completeness::Failed);
+    let message = res.message.unwrap();
+    assert!(
+        message.starts_with(&format!("cannot write {}: ", out.display())),
+        "{message}"
+    );
+    assert_eq!(std::fs::read(&user_file).unwrap(), b"mine");
+    // A part path held by a file of the user's fails the check, and a missing folder below
+    // the output folder is not made either.
+    let out = root.path().join("out");
+    std::fs::create_dir(&out).unwrap();
+    let first = pipeline.run_bytes("notes.txt", LARGE.to_vec(), None, &written(&out));
+    assert_eq!(first.completeness, Completeness::Complete);
+    std::fs::remove_dir_all(out.join("notes.txt.assets")).unwrap();
+    std::fs::write(out.join(&first.parts[0].path), "# My own start\n").unwrap();
+    let res = pipeline.run_bytes("notes.txt", LARGE.to_vec(), None, &written(&out));
+    assert_eq!(res.completeness, Completeness::Failed);
+    assert!(!out.join("notes.txt.assets").exists());
 }

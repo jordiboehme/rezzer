@@ -23,6 +23,10 @@ unicode-normalization.workspace = true
 # Atomic cache writes: a temporary file in the cache directory, then a rename.
 tempfile.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+# Folder handles: every write, read and removal under the output folder.
+rustix.workspace = true
+
 [dev-dependencies]
 fileattrs = { path = "../formats/fileattrs", features = ["test-support"] }
 rezzer-read-text = { path = "../readers/rezzer-read-text" }

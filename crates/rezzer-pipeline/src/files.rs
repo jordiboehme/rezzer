@@ -42,17 +42,16 @@
 //! was free is created exclusively without removing anything: a file that appears after the
 //! check (a parallel run, a file of the user's) fails the write and stays.
 //!
-//! Known gap (planned for the known-issues plan): every path is opened by name below the
-//! output folder, so its folders are followed at the moment of each call. Someone who can
-//! write to the output folder and swaps the parts or assets folder for a symlink between
-//! the folder check and the writes redirects them into the folder the link points at. There
-//! new parts are only created (never over a file), and only Rezzer's own parts of
-//! the same source are replaced or removed. Pictures are replaced by name, and stale
-//! picture names are removed, so a file named like a Rezzer picture (`page-3.png`) in that
-//! folder can be overwritten or removed. Closing it needs writes relative to an open folder
-//! handle (`openat` with `O_NOFOLLOW`), which the standard library does not offer.
+//! On Unix every write, read and removal under the output folder goes through a handle of
+//! the folder opened once, without following a symlink ([`Folder`]): the output folder is
+//! opened once per run, and the parts and assets folders once each below it. Someone who can
+//! write to the output folder and swaps the parts or assets folder for a symlink or another
+//! folder after it was opened redirects nothing: the run writes into the folder it opened,
+//! and the cleanup removes only there. The output folder itself may be a symlink the user
+//! chose. Known Windows limit: on other systems each call still opens its path by name, so
+//! such a swap between the check and a call can redirect it there.
 //!
-//! Known gap, same plan: the assets folder is found by its name only, not by its source.
+//! Known gap: the assets folder is found by its name only, not by its source.
 //! A source whose plain name equals another source's hashed stem (`a_b.pdf-<hash>` next to
 //! `a b.pdf`) shares that folder, and its run removes the other one's pictures as stale.
 //! Such a name has to copy the hash on purpose.
@@ -68,7 +67,7 @@
 //! pictures already written: only pictures of the same name were replaced, nothing is lost.
 
 use std::collections::HashSet;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::io::Read;
 use std::path::Path;
 
@@ -78,6 +77,7 @@ use sha2::{Digest, Sha256};
 use unicode_normalization::UnicodeNormalization;
 
 use crate::config::one_line;
+use crate::folder::{EntryKind, Folder};
 
 /// The longest bundle name, in bytes.
 const BUNDLE_NAME_MAX: usize = 120;
@@ -340,28 +340,26 @@ pub(crate) fn plan_assets(document: &mut Document, blobs: Vec<Blob>, stem: &str)
     planned
 }
 
-/// Writes the planned pictures to `<dir>/<stem>.assets/`. A picture that cannot be written
-/// loses its path and is a loss, never a failed read. Returns the names written, for
-/// [`clean_assets`], and whether a loss was added (the Markdown must then be rendered
-/// again).
+/// Writes the planned pictures to `<dir>/<stem>.assets/`, made when missing (a symlink or a
+/// file there is refused). A picture that cannot be written loses its path and is a loss,
+/// never a failed read. Returns the names written and the assets folder it opened, for
+/// [`clean_assets`], and whether a loss was added (the Markdown must then be rendered again).
 pub(crate) fn write_assets(
     document: &mut Document,
     planned: Vec<Planned>,
-    dir: &Path,
+    dir: &Folder,
     stem: &str,
-) -> (HashSet<OsString>, bool) {
-    let folder = format!("{stem}.assets");
+) -> (HashSet<OsString>, bool, Option<Folder>) {
     let mut written = HashSet::new();
     let mut lost = false;
-    let ready = if planned.is_empty() {
-        Ok(())
-    } else {
-        prepare_folder(dir, &folder)
-    };
+    if planned.is_empty() {
+        return (written, lost, None);
+    }
+    let assets = dir.sub(&format!("{stem}.assets"), true);
     for p in planned {
-        let result = match &ready {
+        let result = match &assets {
             // Pictures are replaced by name (ruling P5-AC).
-            Ok(()) => write_new(&dir.join(&folder).join(&p.file), &p.bytes, true),
+            Ok(assets) => write_new(assets, &p.file, &p.bytes, true),
             Err(e) => Err(std::io::Error::new(e.kind(), e.to_string())),
         };
         match result {
@@ -382,25 +380,50 @@ pub(crate) fn write_assets(
             }
         }
     }
-    (written, lost)
+    (written, lost, assets.ok())
 }
 
 /// Removes the pictures an earlier run left in `<dir>/<stem>.assets/` that this run did not
-/// write ([`remove_stale`]). Runs last, after every file of the run is written, so a run
+/// write ([`remove_stale`]), through `assets`, the folder [`write_assets`] opened. When the
+/// run wrote no picture the folder is opened here; a missing one, or one that is not a plain
+/// directory, is left as it is. Runs last, after every file of the run is written, so a run
 /// that fails earlier leaves the old output whole.
 pub(crate) fn clean_assets(
-    dir: &Path,
+    dir: &Folder,
+    assets: Option<&Folder>,
     stem: &str,
     written: &HashSet<OsString>,
 ) -> Result<(), String> {
     let folder = format!("{stem}.assets");
-    remove_stale(&dir.join(&folder), written, Stale::Assets).map_err(|e| {
+    let shown = |e: std::io::Error| {
         format!(
             "files of an earlier run in {} were not all removed: {}",
             one_line(&folder),
             one_line(&e.to_string())
         )
-    })
+    };
+    let opened;
+    let assets = match assets {
+        Some(assets) => assets,
+        None => match dir.sub(&folder, false) {
+            Ok(found) => {
+                opened = found;
+                &opened
+            }
+            Err(e) if is_absent(&e) => return Ok(()),
+            Err(e) => return Err(shown(e)),
+        },
+    };
+    remove_stale(assets, written, Stale::Assets).map_err(shown)
+}
+
+/// Whether `e`, from [`Folder::sub`] without `create`, says there is no plain folder to clean:
+/// it is missing, or a symlink or a file is there.
+fn is_absent(e: &std::io::Error) -> bool {
+    matches!(
+        e.kind(),
+        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+    )
 }
 
 /// What the files of one run are: the main document, its parts and the JSON.
@@ -415,16 +438,31 @@ pub(crate) struct Files<'a> {
     /// The parts folder ([`parts_folder`]).
     pub folder: &'a str,
     pub main_markdown: &'a str,
-    /// `(<folder>/<file>.md, markdown)` in order.
+    /// `(<folder>/<file>.md, markdown)` in order ([`part_file`] cuts the file name).
     pub parts: Vec<(&'a str, &'a str)>,
     pub json: Option<&'a str>,
 }
 
-/// Writes the files of one run into `dir` (made when missing): the parts into `<folder>/`,
-/// then the main document and the JSON. Parts of an earlier run that this one does not
-/// write are removed, and the parts folder too when it is empty then. A symlink is never
-/// written through. Before anything is written, every path is checked ([`check_paths`]).
-pub(crate) fn write_files(dir: &Path, files: &Files<'_>) -> Result<(), String> {
+/// The file name of the part path `path` (`<folder>/<file>.md`): the one component the parts
+/// folder handle takes.
+fn part_file<'a>(files: &Files<'_>, path: &'a str) -> Result<&'a str, String> {
+    path.strip_prefix(files.folder)
+        .and_then(|rest| rest.strip_prefix('/'))
+        .ok_or_else(|| {
+            format!(
+                "cannot write the parts: {} is not in {}",
+                one_line(path),
+                one_line(files.folder)
+            )
+        })
+}
+
+/// Writes the files of one run into `dir`: the parts into `<folder>/` (made when missing,
+/// opened once), then the main document and the JSON. Parts of an earlier run that this one
+/// does not write are removed, and the parts folder too when it is empty then. A symlink is
+/// never written through. Before anything is written, every path is checked
+/// ([`check_paths`]).
+pub(crate) fn write_files(dir: &Folder, files: &Files<'_>) -> Result<(), String> {
     let shown = |path: &Path, e: std::io::Error| {
         format!(
             "cannot write {}: {}",
@@ -432,45 +470,59 @@ pub(crate) fn write_files(dir: &Path, files: &Files<'_>) -> Result<(), String> {
             one_line(&e.to_string())
         )
     };
-    let folder = dir.join(files.folder);
-    check_paths(dir, files)?;
+    let folder = dir.path().join(files.folder);
+    check_paths(Some(dir), files)?;
     let source = SourceId::of(files);
-    std::fs::create_dir_all(dir).map_err(|e| shown(dir, e))?;
-    let mut keep: HashSet<OsString> = HashSet::new();
-    if !files.parts.is_empty() {
-        prepare_folder(dir, files.folder).map_err(|e| shown(&folder, e))?;
-    }
+    let parts = if files.parts.is_empty() {
+        // Nothing to write: only an existing plain folder is cleaned.
+        match dir.sub(files.folder, false) {
+            Ok(parts) => Some(parts),
+            Err(e) if is_absent(&e) => None,
+            Err(e) => return Err(shown(&folder, e)),
+        }
+    } else {
+        Some(dir.sub(files.folder, true).map_err(|e| shown(&folder, e))?)
+    };
     // Each path is looked at again right before its write: only Rezzer's own output for
     // this source is replaced. A file that appeared since the check (another run at the same
     // time, a file of the user's) makes the exclusive create fail instead of being replaced.
-    let put = |target: &Path, bytes: &[u8], what: Target| -> Result<(), String> {
-        let replace = decide(target, &source, what)?;
-        write_new(target, bytes, replace).map_err(|e| shown(target, e))
+    let put = |at: &Folder, name: &str, bytes: &[u8], what: Target| -> Result<(), String> {
+        let replace = decide(at, OsStr::new(name), &source, what)?;
+        write_new(at, name, bytes, replace).map_err(|e| shown(&at.path().join(name), e))
     };
-    for (path, markdown) in &files.parts {
-        let target = dir.join(path);
-        put(&target, markdown.as_bytes(), Target::Part)?;
-        keep.extend(target.file_name().map(std::ffi::OsStr::to_os_string));
+    let mut keep: HashSet<OsString> = HashSet::new();
+    if let Some(parts) = &parts {
+        for (path, markdown) in &files.parts {
+            let name = part_file(files, path)?;
+            put(parts, name, markdown.as_bytes(), Target::Part)?;
+            keep.insert(OsString::from(name));
+        }
     }
-    let main = dir.join(format!("{}.md", files.main));
-    put(&main, files.main_markdown.as_bytes(), Target::Main)?;
+    let main = format!("{}.md", files.main);
+    put(dir, &main, files.main_markdown.as_bytes(), Target::Main)?;
     if let Some(json) = files.json {
-        let target = dir.join(format!("{}.json", files.main));
         let mut text = json.to_string();
         if !text.ends_with('\n') {
             text.push('\n');
         }
-        put(&target, text.as_bytes(), Target::Json)?;
+        put(
+            dir,
+            &format!("{}.json", files.main),
+            text.as_bytes(),
+            Target::Json,
+        )?;
     }
-    remove_stale(&folder, &keep, Stale::Parts(&source)).map_err(|e| {
-        format!(
-            "cannot remove the parts of an earlier run in {}: {}",
-            folder.display(),
-            one_line(&e.to_string())
-        )
-    })?;
+    if let Some(parts) = &parts {
+        remove_stale(parts, &keep, Stale::Parts(&source)).map_err(|e| {
+            format!(
+                "cannot remove the parts of an earlier run in {}: {}",
+                folder.display(),
+                one_line(&e.to_string())
+            )
+        })?;
+    }
     if keep.is_empty() {
-        remove_if_empty(&folder);
+        remove_if_empty(dir, files.folder);
     }
     Ok(())
 }
@@ -478,28 +530,35 @@ pub(crate) fn write_files(dir: &Path, files: &Files<'_>) -> Result<(), String> {
 /// Checks every path of a run before anything is written (rulings P5-AB and P5-AG): the
 /// main document, the JSON when the run writes one, the parts folder (missing or a plain
 /// directory) and each part path. Each must be missing or a file Rezzer wrote for this
-/// source.
-pub(crate) fn check_paths(dir: &Path, files: &Files<'_>) -> Result<(), String> {
+/// source. `dir` is `None` when the output folder is missing: then every path is free.
+pub(crate) fn check_paths(dir: Option<&Folder>, files: &Files<'_>) -> Result<(), String> {
+    let Some(dir) = dir else {
+        return Ok(());
+    };
     let source = SourceId::of(files);
-    let main = dir.join(format!("{}.md", files.main));
-    decide(&main, &source, Target::Main)?;
+    decide(
+        dir,
+        OsStr::new(&format!("{}.md", files.main)),
+        &source,
+        Target::Main,
+    )?;
     if files.json.is_some() {
-        let json = dir.join(format!("{}.json", files.main));
-        decide(&json, &source, Target::Json)?;
+        let json = format!("{}.json", files.main);
+        decide(dir, OsStr::new(&json), &source, Target::Json)?;
     }
     if files.parts.is_empty() {
         return Ok(());
     }
-    let folder = dir.join(files.folder);
-    match std::fs::symlink_metadata(&folder) {
-        Ok(meta) if meta.is_dir() => {}
-        Ok(_) => {
+    let folder = dir.path().join(files.folder);
+    let parts = match dir.sub(files.folder, false) {
+        Ok(parts) => parts,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotADirectory => {
             return Err(format!(
                 "cannot write the parts: {} exists and is not a plain directory",
                 folder.display()
             ));
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(e) => {
             return Err(format!(
                 "cannot write the parts: {}: {}",
@@ -507,9 +566,10 @@ pub(crate) fn check_paths(dir: &Path, files: &Files<'_>) -> Result<(), String> {
                 one_line(&e.to_string())
             ));
         }
-    }
+    };
     for (path, _) in &files.parts {
-        decide(&dir.join(path), &source, Target::Part)?;
+        let name = part_file(files, path)?;
+        decide(&parts, OsStr::new(name), &source, Target::Part)?;
     }
     Ok(())
 }
@@ -522,15 +582,16 @@ enum Target {
     Part,
 }
 
-/// Whether Rezzer may write `target` for `source` now: `Ok(false)` when nothing is there,
-/// `Ok(true)` when it holds Rezzer's own output for this source (so it is replaced), else
-/// the message that stops the run.
-fn decide(target: &Path, source: &SourceId, what: Target) -> Result<bool, String> {
+/// Whether Rezzer may write `name` in `folder` for `source` now: `Ok(false)` when nothing is
+/// there, `Ok(true)` when it holds Rezzer's own output for this source (so it is replaced),
+/// else the message that stops the run.
+fn decide(folder: &Folder, name: &OsStr, source: &SourceId, what: Target) -> Result<bool, String> {
     let found = match what {
-        Target::Main => holder(target, source, Kind::Main),
-        Target::Part => holder(target, source, Kind::Part),
-        Target::Json => json_holder(target, source),
+        Target::Main => holder(folder, name, source, Kind::Main),
+        Target::Part => holder(folder, name, source, Kind::Part),
+        Target::Json => json_holder(folder, name, source),
     };
+    let target = folder.path().join(name);
     match found {
         Holder::Free => Ok(false),
         Holder::Same => Ok(true),
@@ -552,15 +613,11 @@ fn decide(target: &Path, source: &SourceId, what: Target) -> Result<bool, String
     }
 }
 
-/// Removes `folder` when it is a plain directory and empty. Anything else stays.
-fn remove_if_empty(folder: &Path) {
-    let plain = std::fs::symlink_metadata(folder).is_ok_and(|m| m.is_dir());
-    let empty =
-        plain && std::fs::read_dir(folder).is_ok_and(|mut entries| entries.next().is_none());
-    if empty {
-        // A file that lands in it right now makes this fail, which is right.
-        let _ = std::fs::remove_dir(folder);
-    }
+/// Removes the folder `name` in `dir` when it is a plain directory and empty. Anything else
+/// stays: removing a folder fails for a symlink or a folder with entries, also one that a
+/// file lands in right now, which is right.
+fn remove_if_empty(dir: &Folder, name: &str) {
+    let _ = dir.remove_dir(name);
 }
 
 /// Which files [`remove_stale`] may remove.
@@ -650,19 +707,28 @@ enum Kind {
     Part,
 }
 
-/// Who holds the Markdown path `path`, for `source`. The frontmatter is read line by line
-/// up to the closing `---`, without following a symlink: a symlink, a folder or a file
-/// without Rezzer's `generated` line is [`Holder::Foreign`].
-fn holder(path: &Path, source: &SourceId, kind: Kind) -> Holder {
-    use std::io::BufRead;
-    match std::fs::symlink_metadata(path) {
-        Ok(meta) if meta.is_file() => {}
-        Ok(_) => return Holder::Foreign,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Holder::Free,
-        Err(_) => return Holder::Foreign,
+/// The regular file `name` in `folder`, opened without following a symlink, else who holds
+/// the path: [`Holder::Free`] when nothing is there, [`Holder::Foreign`] for anything else.
+fn regular(folder: &Folder, name: &OsStr) -> Result<std::fs::File, Holder> {
+    match folder.kind(name) {
+        Ok(None) => return Err(Holder::Free),
+        Ok(Some(EntryKind::File)) => {}
+        Ok(Some(_)) | Err(_) => return Err(Holder::Foreign),
     }
-    let Ok(file) = std::fs::File::open(path) else {
-        return Holder::Foreign;
+    match folder.open_file(name) {
+        Ok(Some(file)) => Ok(file),
+        Ok(None) | Err(_) => Err(Holder::Foreign),
+    }
+}
+
+/// Who holds the Markdown file `name` in `folder`, for `source`. The frontmatter is read line
+/// by line up to the closing `---`, without following a symlink: a symlink, a folder or a
+/// file without Rezzer's `generated` line is [`Holder::Foreign`].
+fn holder(folder: &Folder, name: &OsStr, source: &SourceId, kind: Kind) -> Holder {
+    use std::io::BufRead;
+    let file = match regular(folder, name) {
+        Ok(file) => file,
+        Err(found) => return found,
     };
     let mut lines = std::io::BufReader::new(file.take(HEAD_MAX)).split(b'\n');
     if !matches!(lines.next(), Some(Ok(first)) if first == b"---") {
@@ -706,19 +772,14 @@ fn holder(path: &Path, source: &SourceId, kind: Kind) -> Holder {
     }
 }
 
-/// Who holds the JSON path `path`, for `source`. Rezzer's JSON is pretty-printed and starts
-/// with `"model_version"`, then the `"source"` object with its `"path"` (when there is one),
-/// `"name"` and `"sha256"`; only that shape counts as Rezzer's.
-fn json_holder(path: &Path, source: &SourceId) -> Holder {
+/// Who holds the JSON file `name` in `folder`, for `source`. Rezzer's JSON is pretty-printed
+/// and starts with `"model_version"`, then the `"source"` object with its `"path"` (when
+/// there is one), `"name"` and `"sha256"`; only that shape counts as Rezzer's.
+fn json_holder(folder: &Folder, name: &OsStr, source: &SourceId) -> Holder {
     use std::io::BufRead;
-    match std::fs::symlink_metadata(path) {
-        Ok(meta) if meta.is_file() => {}
-        Ok(_) => return Holder::Foreign,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Holder::Free,
-        Err(_) => return Holder::Foreign,
-    }
-    let Ok(file) = std::fs::File::open(path) else {
-        return Holder::Foreign;
+    let file = match regular(folder, name) {
+        Ok(file) => file,
+        Err(found) => return found,
     };
     let mut lines = std::io::BufReader::new(file.take(HEAD_MAX)).lines();
     let mut next = || lines.next().and_then(Result::ok);
@@ -757,84 +818,47 @@ fn json_holder(path: &Path, source: &SourceId) -> Holder {
 
 /// Removes the regular files in `folder` whose names are not in `keep` and that `which`
 /// allows: what an earlier run wrote there and this one does not. Symlinks and folders
-/// inside are left alone and never followed. A folder that is missing, or not a plain
-/// directory, is left as it is.
-fn remove_stale(folder: &Path, keep: &HashSet<OsString>, which: Stale) -> std::io::Result<()> {
-    match std::fs::symlink_metadata(folder) {
-        Ok(meta) if meta.is_dir() => {}
-        Ok(_) => return Ok(()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(e),
-    }
-    for entry in std::fs::read_dir(folder)? {
-        let entry = entry?;
-        // The entry's own type: a symlink is a symlink here, never what it points at.
-        if !entry.file_type()?.is_file() || keep.contains(&entry.file_name()) {
+/// inside are left alone and never followed.
+fn remove_stale(folder: &Folder, keep: &HashSet<OsString>, which: Stale) -> std::io::Result<()> {
+    for (name, kind) in folder.entries()? {
+        // The entry's own kind: a symlink is a symlink here, never what it points at.
+        if kind != EntryKind::File || keep.contains(&name) {
             continue;
         }
-        let name = entry.file_name();
         let remove = match which {
             Stale::Assets => name.to_str().is_some_and(is_asset_name),
             Stale::Parts(source) => {
                 let markdown = Path::new(&name)
                     .extension()
                     .is_some_and(|e| e.eq_ignore_ascii_case("md"));
-                markdown && holder(&entry.path(), source, Kind::Part) == Holder::Same
+                markdown && holder(folder, &name, source, Kind::Part) == Holder::Same
             }
         };
         if remove {
-            std::fs::remove_file(entry.path())?;
+            folder.remove_file(&name)?;
         }
     }
     Ok(())
 }
 
-/// Makes `<dir>/<folder>`, a real directory: an existing symlink or file there is refused, so
-/// nothing lands outside `dir`.
-fn prepare_folder(dir: &Path, folder: &str) -> std::io::Result<()> {
-    std::fs::create_dir_all(dir)?;
-    let path = dir.join(folder);
-    match std::fs::symlink_metadata(&path) {
-        Ok(meta) if meta.is_dir() => Ok(()),
-        Ok(_) => Err(std::io::Error::other(format!(
-            "{folder} exists and is not a plain directory"
-        ))),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => std::fs::create_dir(&path),
-        Err(e) => Err(e),
-    }
-}
-
-/// Writes a new file at `path`, created exclusively, so a symlink is never written through.
-/// With `replace` an existing entry (also a symlink) is removed first without being
-/// followed; without it nothing is removed, and an entry that is there makes the write
-/// fail ("it appeared while Rezzer was writing").
-fn write_new(path: &Path, bytes: &[u8], replace: bool) -> std::io::Result<()> {
-    use std::io::Write;
-    match std::fs::symlink_metadata(path) {
-        Ok(meta) if meta.is_dir() => {
+/// Writes a new file `name` in `folder`, created exclusively, so a symlink is never written
+/// through. With `replace` an existing entry (also a symlink) is removed first without being
+/// followed; without it nothing is removed, and an entry that is there makes the write fail
+/// ("it appeared while Rezzer was writing").
+fn write_new(folder: &Folder, name: &str, bytes: &[u8], replace: bool) -> std::io::Result<()> {
+    match folder.kind(OsStr::new(name))? {
+        Some(EntryKind::Dir) => {
             return Err(std::io::Error::other("a directory is in the way"));
         }
-        Ok(_) if replace => std::fs::remove_file(path)?,
-        Ok(_) => {
+        Some(_) if replace => folder.remove_file(OsStr::new(name))?,
+        Some(_) => {
             return Err(std::io::Error::other(
                 "it appeared while Rezzer was writing and is not replaced",
             ));
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e),
+        None => {}
     }
-    let mut file = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::AlreadyExists {
-                std::io::Error::other("it appeared while Rezzer was writing and is not replaced")
-            } else {
-                e
-            }
-        })?;
-    file.write_all(bytes)
+    folder.create_new(name, bytes)
 }
 
 #[cfg(test)]
