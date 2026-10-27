@@ -28,14 +28,45 @@ jobs:
   # whole build matrix would run and fail only at the end, in `publish`.
   # A dispatched run on a branch has no tag and nothing to check, so the job
   # stays green and the rehearsal builds end to end without a notes file.
+  # The tag check against the crate version lives here too, so the build
+  # legs (Windows among them) need neither jq nor a second copy of it.
   notes:
-    name: verify the release notes file
-    timeout-minutes: 5
+    name: verify the release notes file and the version
+    # A toolchain install with its retries can take a few minutes.
+    timeout-minutes: 10
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      # Runs on a dispatch too, so the dry run proves the cargo metadata path.
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 5 rustup toolchain install
+          rustup show active-toolchain
+
+      # A tag that disagrees with the crate version would ship a binary whose
+      # --version lies about itself. The version comes from
+      # [workspace.package], so cargo metadata reads it, not a grep. A
+      # dispatched run has no tag: it prints the version and compares nothing.
+      - name: Tag matches the crate version
+        shell: bash
+        run: |
+          set -euo pipefail
+          crate="$(cargo metadata --no-deps --format-version 1 --locked \
+            | jq -r '.packages[] | select(.name == "rezzer") | .version')"
+          [ -n "$crate" ] || { echo "::error::cargo metadata names no rezzer package"; exit 1; }
+          echo "rezzer crate version: v$crate"
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            echo "not a tag, nothing to compare"
+            exit 0
+          fi
+          if [ "v$crate" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match the rezzer crate version v$crate"
+            exit 1
+          fi
 
       - name: The release notes file exists and opens with a motto heading
         shell: bash
@@ -70,29 +101,65 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # exe is the binary's file name, archive_ext the package format.
+        # rustflags reaches the build through `env:`, never pasted into a
+        # script. pe_machine is the COFF machine field the Windows binary must
+        # carry (8664 for x64, aa64 for ARM64).
         include:
           - target: aarch64-apple-darwin
             platform: macos-arm64
             os: macos-latest
+            archive_ext: tar.gz
+            exe: rezzer
           - target: x86_64-apple-darwin
             platform: macos-intel
             # The last Intel image GitHub ships; it retires in August 2027.
             # Before then, cross-compile this leg on macos-latest instead.
             os: macos-15-intel
+            archive_ext: tar.gz
+            exe: rezzer
           # Static musl binaries, built natively on each architecture so the
           # smoke test runs the binary that ships. The workspace has no C
           # dependencies, so musl-tools is all the linker needs.
           - target: x86_64-unknown-linux-musl
             platform: linux-amd64
             os: ubuntu-latest
+            archive_ext: tar.gz
+            exe: rezzer
             musl: true
           - target: aarch64-unknown-linux-musl
             platform: linux-arm64
             os: ubuntu-24.04-arm
+            archive_ext: tar.gz
+            exe: rezzer
             musl: true
+          # Native builds on each architecture, so the smoke test runs the
+          # binary that ships. +crt-static links the C runtime into the
+          # binary, so it runs without the Visual C++ redistributable.
+          - target: x86_64-pc-windows-msvc
+            platform: windows-amd64
+            os: windows-latest
+            archive_ext: zip
+            exe: rezzer.exe
+            rustflags: "-C target-feature=+crt-static"
+            pe_machine: "8664"
+          - target: aarch64-pc-windows-msvc
+            platform: windows-arm64
+            os: windows-11-arm
+            archive_ext: zip
+            exe: rezzer.exe
+            rustflags: "-C target-feature=+crt-static"
+            pe_machine: "aa64"
     env:
       TARGET: ${{ matrix.target }}
       PLATFORM: ${{ matrix.platform }}
+      EXE: ${{ matrix.exe }}
+    # Every step runs in bash, also on Windows (Git Bash), where the default
+    # is PowerShell: the steps call scripts/ci/retry.sh and use bash quoting.
+    # Only the Windows binary check and the zip steps say `shell: pwsh`.
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -123,21 +190,6 @@ jobs:
             echo "version=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
           else
             echo "version=v0.0.0-dev" >> "$GITHUB_OUTPUT"
-          fi
-
-      # A tag that disagrees with the crate version would ship a binary whose
-      # --version lies about itself. The version comes from
-      # [workspace.package], so cargo metadata reads it, not a grep.
-      - name: Tag matches the crate version
-        if: ${{ github.ref_type == 'tag' }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          crate="$(cargo metadata --no-deps --format-version 1 --locked \
-            | jq -r '.packages[] | select(.name == "rezzer") | .version')"
-          if [ "v$crate" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match the rezzer crate version v$crate"
-            exit 1
           fi
 
       # cargo-auditable embeds the resolved dependency list in a section of
@@ -176,6 +228,8 @@ jobs:
       # --frozen: Cargo.lock is the build's input and the crates are already
       # fetched, so the build neither re-resolves nor touches the network.
       - name: Build
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags }}
         run: cargo auditable build --release --frozen --target "$TARGET" -p rezzer
 
       - name: Smoke test
@@ -184,21 +238,57 @@ jobs:
           MUSL: ${{ matrix.musl }}
         run: |
           set -euo pipefail
-          bin="target/$TARGET/release/rezzer"
+          bin="target/$TARGET/release/$EXE"
           [ -f "$bin" ] || { echo "::error::$bin is missing"; exit 1; }
-          file "$bin"
+          # The Windows images have no `file`; the next step reads the PE
+          # header there instead.
+          if [ "$MUSL" = "true" ] || [ "$RUNNER_OS" = "macOS" ]; then
+            file "$bin"
+          fi
           if [ "$MUSL" = "true" ]; then
             file "$bin" | grep -Eq 'statically linked|static-pie linked' \
               || { echo "::error::$bin is not statically linked"; exit 1; }
           fi
           "$bin" --version
+          # pkgid ends in #<version> or #rezzer@<version>.
+          pkgid="$(cargo pkgid --frozen -p rezzer)"
+          crate="${pkgid##*[#@]}"
+          said="$("$bin" --version | head -n1 | tr -d '\r')"
+          if [ "$said" != "rezzer $crate" ]; then
+            echo "::error::$bin --version says '$said', expected 'rezzer $crate'"
+            exit 1
+          fi
+
+      # The machine field in the PE header proves the binary is built for this
+      # leg's architecture. With +crt-static the binary must not import the
+      # Visual C++ runtime DLL.
+      - name: Check the Windows binary
+        if: ${{ runner.os == 'Windows' }}
+        shell: pwsh
+        env:
+          PE_MACHINE: ${{ matrix.pe_machine }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bin = "target/$env:TARGET/release/$env:EXE"
+          $bytes = [System.IO.File]::ReadAllBytes($bin)
+          if ($bytes[0] -ne 0x4D -or $bytes[1] -ne 0x5A) { throw "$bin has no MZ header" }
+          $pe = [BitConverter]::ToInt32($bytes, 0x3C)
+          if ([BitConverter]::ToUInt32($bytes, $pe) -ne 0x00004550) { throw "$bin has no PE signature" }
+          $machine = '{0:x4}' -f [BitConverter]::ToUInt16($bytes, $pe + 4)
+          Write-Output "PE machine: $machine (expected $env:PE_MACHINE)"
+          if ($machine -ne $env:PE_MACHINE) { throw "$bin is built for machine $machine, not $env:PE_MACHINE" }
+          $text = [System.Text.Encoding]::Latin1.GetString($bytes)
+          if ($text.IndexOf('vcruntime140', [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            throw "$bin names vcruntime140, so the C runtime is not linked in (+crt-static missing)"
+          }
 
       # Sign the bare Mach-O with a Developer ID Application certificate
       # under the hardened runtime, then notarize it with notarytool. A bare
       # binary cannot carry a stapled ticket, so Gatekeeper checks online on
-      # first run. Signing is optional: with none of the six secrets set the
-      # release ships unsigned macOS binaries and says so. A partial set is
-      # always a mistake and fails the build.
+      # first run. A tag must ship signed binaries, so a tag without the six
+      # secrets fails. A dispatched dry run without them builds unsigned
+      # macOS binaries and says so. A partial set is always a mistake and
+      # fails the build.
       - name: Decide whether to sign and notarize
         id: signing
         if: ${{ runner.os == 'macOS' }}
@@ -220,6 +310,10 @@ jobs:
           if [ "${#missing[@]}" -eq 0 ]; then
             echo "sign=true" >> "$GITHUB_OUTPUT"
           elif [ "${#missing[@]}" -eq 6 ]; then
+            if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+              echo "::error::Apple signing secrets are not configured; a tag must ship signed and notarized macOS binaries"
+              exit 1
+            fi
             echo "::notice::Apple signing secrets are not configured; this build produces UNSIGNED macOS binaries"
             echo "sign=false" >> "$GITHUB_OUTPUT"
           else
@@ -310,7 +404,7 @@ jobs:
 
       - name: Smoke test the signed binary
         if: ${{ steps.signing.outputs.sign == 'true' }}
-        run: target/"$TARGET"/release/rezzer --version
+        run: target/"$TARGET"/release/"$EXE" --version
 
       - name: Delete signing keychain
         if: ${{ always() && runner.os == 'macOS' }}
@@ -322,9 +416,11 @@ jobs:
           fi
           rm -f "$RUNNER_TEMP/certificate.p12" "$RUNNER_TEMP/asc-key.p8" "$RUNNER_TEMP"/notarize-*
 
-      - name: Stage and package
+      # The archive name is built here and only here. STAGE goes through
+      # GITHUB_ENV so the bash and the pwsh steps below read the same value:
+      # the folder name inside dist/, which is also the archive's top folder.
+      - name: Stage
         id: stage
-        shell: bash
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}
         run: |
@@ -332,16 +428,43 @@ jobs:
           name="rezzer-${RELEASE_VERSION}-${PLATFORM}"
           stage="dist/$name"
           mkdir -p "$stage"
-          cp "target/$TARGET/release/rezzer" "$stage/"
+          cp "target/$TARGET/release/$EXE" "$stage/"
           cp LICENSE README.md "$stage/"
-          tar -C dist -czf "dist/$name.tar.gz" "$name"
           echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "STAGE=$name" >> "$GITHUB_ENV"
+
+      - name: Package (tar.gz)
+        if: ${{ matrix.archive_ext == 'tar.gz' }}
+        working-directory: dist
+        run: tar -czf "$STAGE.tar.gz" "$STAGE"
+
+      - name: Package (zip)
+        if: ${{ matrix.archive_ext == 'zip' }}
+        shell: pwsh
+        working-directory: dist
+        run: Compress-Archive -Path $env:STAGE -DestinationPath "$env:STAGE.zip"
+
+      # The zip must keep the top folder and use forward slashes, as the
+      # tar.gz archives do.
+      - name: Check the zip contents
+        if: ${{ matrix.archive_ext == 'zip' }}
+        shell: pwsh
+        working-directory: dist
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead((Join-Path (Get-Location) "$env:STAGE.zip"))
+          try { $entries = @($zip.Entries | ForEach-Object { $_.FullName }) } finally { $zip.Dispose() }
+          $entries | ForEach-Object { Write-Output $_ }
+          $missing = @("$env:STAGE/$env:EXE", "$env:STAGE/LICENSE", "$env:STAGE/README.md" |
+            Where-Object { $entries -cnotcontains $_ })
+          if ($missing.Count -gt 0) { throw "$env:STAGE.zip lacks: $($missing -join ', ')" }
 
       - name: Upload artifact
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: rezzer-${{ matrix.platform }}
-          path: dist/${{ steps.stage.outputs.name }}.tar.gz
+          path: dist/${{ steps.stage.outputs.name }}.${{ matrix.archive_ext }}
           if-no-files-found: error
 
   publish:
@@ -373,9 +496,9 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release
-          find downloads -type f -name '*.tar.gz' -exec cp {} release/ \;
+          find downloads -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec cp {} release/ \;
           cd release
-          sha256sum -- *.tar.gz > SHA256SUMS
+          sha256sum -- *.tar.gz *.zip > SHA256SUMS
           cat SHA256SUMS
 
       # The attest action fails only when a whole subject list matches
@@ -390,7 +513,9 @@ jobs:
             "rezzer-${GITHUB_REF_NAME}-macos-arm64.tar.gz" \
             "rezzer-${GITHUB_REF_NAME}-macos-intel.tar.gz" \
             "rezzer-${GITHUB_REF_NAME}-linux-amd64.tar.gz" \
-            "rezzer-${GITHUB_REF_NAME}-linux-arm64.tar.gz"; do
+            "rezzer-${GITHUB_REF_NAME}-linux-arm64.tar.gz" \
+            "rezzer-${GITHUB_REF_NAME}-windows-amd64.zip" \
+            "rezzer-${GITHUB_REF_NAME}-windows-arm64.zip"; do
             [ -f "release/$f" ] || { echo "::error::missing release asset release/$f"; missing=1; }
           done
           exit "$missing"
