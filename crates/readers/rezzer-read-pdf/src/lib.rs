@@ -1063,7 +1063,7 @@ impl Pictures {
             let words = render::place_alt(p);
             // Page furniture is an asset of its own for each of its places, apart from places
             // of the same picture in the text.
-            let key = (p.id, p.furniture);
+            let key = (p.id, p.furniture.map(|f| f.spot));
             let furniture = p.furniture.is_some();
             let known = self.known.get(&key).copied();
             let checked = if k % PICTURES_PER_CHECK == PICTURES_PER_CHECK - 1 {

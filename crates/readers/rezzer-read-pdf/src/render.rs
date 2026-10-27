@@ -129,6 +129,43 @@ fn same_spot(a: &[f32; 4], b: &[f32; 4]) -> bool {
 pub(crate) struct Spots {
     buckets: HashMap<(i32, i32), Vec<usize>>,
     boxes: Vec<([f32; 4], u64)>,
+    /// The pages each spot is on, for the spots of [`SpotPages::only`].
+    pages: Vec<PageRun>,
+}
+
+/// The pages something is on, added in any order, each once: the first, the last and how
+/// many.
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
+pub(crate) struct PageRun {
+    first: u32,
+    last: u32,
+    count: usize,
+}
+
+impl PageRun {
+    /// Adds page `n`, which was not added before.
+    fn add(&mut self, n: u32) {
+        if self.count == 0 {
+            (self.first, self.last) = (n, n);
+        } else {
+            self.first = self.first.min(n);
+            self.last = self.last.max(n);
+        }
+        self.count += 1;
+    }
+
+    /// As words: `page 3`, `pages 1 and 2`, `pages 1 to 12` or, with gaps, `9 of the pages 1
+    /// to 12`.
+    fn words(&self) -> String {
+        let (first, last) = (self.first, self.last);
+        let running = (last - first) as usize + 1 == self.count;
+        match self.count {
+            0 | 1 => format!("page {first}"),
+            2 if running => format!("pages {first} and {last}"),
+            _ if running => format!("pages {first} to {last}"),
+            n => format!("{n} of the pages {first} to {last}"),
+        }
+    }
 }
 
 impl Spots {
@@ -170,14 +207,23 @@ impl Spots {
     pub(crate) fn holds(&self, b: &[f32; 4], id: u64) -> bool {
         self.find(b, id).is_some()
     }
+
+    /// The spot of picture `id` at `b`, with the pages it is on, if one is known.
+    fn spot(&self, b: &[f32; 4], id: u64) -> Option<Furniture> {
+        let spot = self.find(b, id)?;
+        Some(Furniture {
+            spot,
+            pages: self.pages.get(spot).copied().unwrap_or_default(),
+        })
+    }
 }
 
 /// The spots of the pictures of the pages read so far, each with the pages it is on.
 #[derive(Default)]
 struct SpotPages {
     all: Spots,
-    /// For each spot: the pages it is on and the last page it was counted for.
-    seen: Vec<(usize, usize)>,
+    /// For each spot: the last read it was counted for, and the pages it is on.
+    seen: Vec<(usize, PageRun)>,
     read: usize,
 }
 
@@ -189,22 +235,24 @@ impl SpotPages {
                 .all
                 .add(b, items.images_id.get(i).copied().unwrap_or(0));
             if k == self.seen.len() {
-                self.seen.push((0, 0));
+                self.seen.push((0, PageRun::default()));
             }
-            if self.seen[k].1 != self.read {
-                self.seen[k] = (self.seen[k].0 + 1, self.read);
+            if self.seen[k].0 != self.read {
+                self.seen[k].0 = self.read;
+                self.seen[k].1.add(items.page);
             }
         }
     }
 
-    /// The spots on `keep(pages it is on, pages read)` pages.
+    /// The spots on `keep(pages it is on, pages read)` pages, with their pages.
     fn only(&self, keep: impl Fn(usize, usize) -> bool) -> Spots {
         let mut out = Spots::default();
-        for (k, &(n, _)) in self.seen.iter().enumerate() {
-            if keep(n, self.read) {
+        for (k, &(_, pages)) in self.seen.iter().enumerate() {
+            if keep(pages.count, self.read) {
                 let (b, id) = self.all.boxes[k];
                 let i = out.boxes.len();
                 out.boxes.push((b, id));
+                out.pages.push(pages);
                 out.buckets.entry(Spots::cell(&b)).or_default().push(i);
             }
         }
@@ -270,6 +318,14 @@ pub(crate) fn on_every_page<'a>(
     }
 }
 
+/// A picture of the page furniture: its place in the furniture's [`Spots`], and every page
+/// it is on, also those rendered whole.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Furniture {
+    pub spot: usize,
+    pub pages: PageRun,
+}
+
 /// What a page shows that an agent may need to look at.
 pub(crate) enum Seen {
     /// The whole page needs vision.
@@ -299,10 +355,9 @@ pub(crate) struct Small {
     pub hint: bool,
     /// It is not a picture but a region of paths that may be a code.
     pub vector: bool,
-    /// It is page furniture (a picture at one place on many pages): the index of its place
-    /// in the furniture's [`Spots`]. Its asset is named once, at its first place, with its
-    /// pages.
-    pub furniture: Option<usize>,
+    /// It is page furniture (a picture at one place on many pages): its asset is named once,
+    /// at its first place, with its pages.
+    pub furniture: Option<Furniture>,
 }
 
 /// The top or bottom band of a page, as a share of its height, where a small picture is a
@@ -354,7 +409,8 @@ fn visible_in(b: &[f32; 4], width: f32, height: f32) -> f32 {
 /// a page that needs vision. A logo of the template does not look like a code and either lies
 /// in a logo place, alone covers less than [`PICTURE_SHARE`] of the page and is no part of a
 /// figure (pictures within [`FIGURE_GAP`], 1 % of the page, of each other) that reaches out
-/// of the logo places, which is looked for on pages of at most [`FIGURE_PICTURES`] (256);
+/// of the logo places or covers [`PICTURE_SHARE`] together, which is looked for on pages of
+/// at most [`FIGURE_PICTURES`] (256);
 /// or it stands at one place on every page (`everywhere`) and covers less than
 /// [`FURNITURE_SHARE`]. A picture on every page somewhere is a logo too.
 fn logos(
@@ -417,6 +473,33 @@ fn logos(
         });
         if left.is_empty() {
             break;
+        }
+    }
+    // The placed pictures that are left, joined into figures by the same gap: a figure that
+    // covers [`PICTURE_SHARE`] of the page together is content drawn as tiles or strips (a
+    // photo, a chart, a banner), not logos.
+    while let Some(start) = left.pop() {
+        let mut figure = vec![start];
+        let mut at = 0;
+        while at < figure.len() {
+            let i = figure[at];
+            left.retain(|&j| {
+                let joined = near(&framed[i], &framed[j]);
+                if joined {
+                    figure.push(j);
+                }
+                !joined
+            });
+            at += 1;
+        }
+        let covers: f32 = figure
+            .iter()
+            .map(|&i| visible_in(&items.images[shown[i]], width, height))
+            .sum();
+        if covers >= PICTURE_SHARE * area {
+            for i in figure {
+                placed[i] = false;
+            }
         }
     }
     (0..shown.len())
@@ -606,7 +689,7 @@ pub(crate) fn vision(
             how: items.images_px.get(k).map(|&(pw, ph)| How::Picture(pw, ph)),
             hint: looks_like_code(items, k),
             vector: false,
-            furniture: skip.find(&b, id),
+            furniture: skip.spot(&b, id),
         }
     }));
     if list.is_empty() {
@@ -722,8 +805,11 @@ pub(crate) struct Places {
     count: usize,
     /// The last page a place was added on: places come in page order.
     last: u32,
-    /// Its pages follow each other without a gap.
-    running: bool,
+    /// The pages of its places.
+    run: PageRun,
+    /// For page furniture: every page it is on, also the pages rendered whole, where it is
+    /// not listed.
+    stands: Option<PageRun>,
     /// Every place is a logo: the asset needs no vision.
     pub logo: bool,
     /// It is a region of paths, not a picture.
@@ -743,7 +829,7 @@ impl Places {
             logo: true,
             vector: s.vector,
             furniture: true,
-            running: true,
+            stands: s.furniture.map(|f| f.pages),
             ..Places::default()
         };
         p.add(n, s);
@@ -757,9 +843,7 @@ impl Places {
             self.listed.push((n, s.framed));
         }
         if n != self.last {
-            if self.last != 0 && n != self.last + 1 {
-                self.running = false;
-            }
+            self.run.add(n);
             if self.pages.len() < SMALL_LISTED {
                 self.pages.push(n);
             } else {
@@ -773,20 +857,12 @@ impl Places {
         self.furniture &= s.furniture.is_some();
     }
 
-    /// How many pages it is on.
-    fn page_count(&self) -> usize {
-        self.pages.len() + self.more_pages
-    }
-
-    /// The pages it is on, as words: `page 3`, `pages 1 and 2`, `pages 1 to 12` or, with
-    /// gaps, `9 of the pages 1 to 12`.
-    fn pages_words(&self) -> String {
-        let (first, last) = (self.first_page(), self.last);
-        match self.page_count() {
-            0 | 1 => format!("page {first}"),
-            2 if self.running => format!("pages {first} and {last}"),
-            _ if self.running => format!("pages {first} to {last}"),
-            n => format!("{n} of the pages {first} to {last}"),
+    /// The pages it is on: for page furniture every page it stands on, else the pages of its
+    /// places.
+    fn on_pages(&self) -> PageRun {
+        match self.stands {
+            Some(stands) if self.furniture => stands,
+            _ => self.run,
         }
     }
 
@@ -815,12 +891,13 @@ impl Places {
             .first()
             .map(|(_, b)| box_words(b))
             .unwrap_or_default();
+        // Page furniture stands at one place: it is named there, with its pages.
+        let on = self.on_pages();
+        if self.furniture && on.count > 1 {
+            return format!("{name}, {first}{code}, on {}", on.words());
+        }
         if self.count == 1 {
             return format!("{name}, {first}{code}");
-        }
-        // Page furniture stands at one place: it is named there, with its pages.
-        if self.furniture {
-            return format!("{name}, {first}{code}, on {}", self.pages_words());
         }
         let mut pages: Vec<String> = self.pages.iter().map(u32::to_string).collect();
         if self.more_pages > 0 {
@@ -2387,7 +2464,8 @@ pub(crate) fn apply_codes(scans: Option<Scans>, places: Vec<(usize, Places)>, ou
         } else {
             None
         };
-        let pages = (p.furniture && p.page_count() > 1).then(|| p.pages_words());
+        let on = p.on_pages();
+        let pages = (p.furniture && on.count > 1).then(|| on.words());
         if read.is_some() || pages.is_some() {
             places_of.insert(
                 a.id.clone(),

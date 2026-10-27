@@ -4763,3 +4763,117 @@ fn a_figure_of_small_pictures_across_the_band_edge_needs_vision() {
         }
     }
 }
+
+/// Content drawn as tiles or strips in a logo place, as (x, y, width, height) shares of an A4
+/// page: a photo of 14 strips in the top band (11 % of the page), a chart of 2 by 2 tiles in
+/// the bottom band (7.2 %), 2 by 2 tiles in the top left corner (3.5 %) and 30 tiles each
+/// under 1 cm2 in the bottom band (3.7 %). Each tile alone covers less than 2 %.
+fn tiled_contents() -> Vec<(&'static str, Vec<[f32; 4]>)> {
+    let (w, h) = (595.0, 842.0);
+    let share = |x: f32, y: f32, dx: f32, dy: f32| [x / w, y / h, dx / w, dy / h];
+    let strips = (0..14).map(|i| share(97.0, 700.0 + i as f32 * 10.0, 400.0, 10.0));
+    let chart = (0..4).map(|i| {
+        share(
+            147.0 + (i % 2) as f32 * 150.0,
+            30.0 + (i / 2) as f32 * 60.0,
+            150.0,
+            60.0,
+        )
+    });
+    let corner = (0..4).map(|i| {
+        share(
+            8.0 + (i % 2) as f32 * 55.0,
+            674.0 + (i / 2) as f32 * 80.0,
+            55.0,
+            80.0,
+        )
+    });
+    let tiny = (0..30).map(|i| {
+        share(
+            110.0 + (i % 15) as f32 * 25.0,
+            40.0 + (i / 15) as f32 * 25.0,
+            25.0,
+            25.0,
+        )
+    });
+    vec![
+        ("strips in the top band", strips.collect()),
+        ("tiles in the bottom band", chart.collect()),
+        ("tiles in the top left corner", corner.collect()),
+        ("tiny tiles in the bottom band", tiny.collect()),
+    ]
+}
+
+#[test]
+fn content_drawn_as_tiles_in_a_logo_place_needs_vision() {
+    // On A4 and Letter, printed at 0.75, 1 and 1.5 times the size, alone on its page or on
+    // the first of two pages.
+    let mut wrong = Vec::new();
+    for (paper, (w, h)) in [("A4", (595.0f32, 842.0f32)), ("Letter", (612.0, 792.0))] {
+        for (name, tiles) in tiled_contents() {
+            let drawn: String = tiles
+                .iter()
+                .map(|[x, y, dx, dy]| logo(x * w, y * h, dx * w, dy * h))
+                .collect();
+            let text = show("FL", 7.0, 40.0, 500.0, BODY_LINE);
+            for scale in [0.75f32, 1.0, 1.5] {
+                for count in 1..=2 {
+                    let file: Vec<FormPage> = (0..count)
+                        .map(|n| FormPage {
+                            template: if n == 0 {
+                                format!("{drawn}{text}")
+                            } else {
+                                text.clone()
+                            },
+                            scale,
+                            paper: (w, h),
+                            ..FormPage::default()
+                        })
+                        .collect();
+                    let out = common::read(&print_form(&file, "", ""));
+                    if needing(&out) != ["page-1"] {
+                        wrong.push(format!(
+                            "{paper} {scale}x, {count} pages, {name}: {:?}",
+                            needing(&out)
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+#[test]
+fn furniture_on_a_page_rendered_whole_is_named_with_every_page() {
+    // A logo at one place on three pages; the first page also has a large photo, so it is
+    // rendered whole. The logo is listed on page 2, named with all three pages.
+    let file: Vec<FormPage> = (0..3)
+        .map(|n| FormPage {
+            template: format!(
+                "{}{}",
+                logo(40.0, 30.0, 60.0, 30.0),
+                show("FL", 7.0, 40.0, 500.0, BODY_LINE)
+            ),
+            photo: (n == 0).then_some([150.0, 200.0, 300.0, 200.0]),
+            ..FormPage::default()
+        })
+        .collect();
+    let out = common::read(&print_form(&file, "", ""));
+    assert_eq!(needing(&out), ["page-1"], "{:#?}", out.document.assets);
+    let alt = "logo or small picture, box 40, 30 to 100, 60, on pages 1 to 3";
+    let a = out
+        .document
+        .assets
+        .iter()
+        .find(|a| a.id == "page-2-pic-1")
+        .unwrap_or_else(|| panic!("{:#?}", out.document.assets));
+    assert_eq!(a.alt.as_deref(), Some(alt));
+    assert_eq!(media_alts(&out, 2), [alt]);
+    assert!(media_alts(&out, 3).is_empty());
+}
