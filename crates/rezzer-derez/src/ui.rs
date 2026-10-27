@@ -8,7 +8,8 @@
 //! Every tile has its own glyph as well as its own colour, so the grid still reads without
 //! colour (`NO_COLOR`, a 16-colour console). Colours are 256-colour indexes, not RGB, so
 //! terminals without true colour show them too. Text from the file (its name, labels, notes)
-//! has every control character replaced by `?`, so no escape sequence reaches the terminal.
+//! has every control character and bidi formatting character replaced by `?`, so no escape
+//! sequence reaches the terminal and nothing reorders the line.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -31,6 +32,8 @@ const DOT_EVERY: u16 = 4;
 
 const KEYS: &str = "arrows/WASD steer  p pause  r restart  q quit";
 const ELLIPSIS: &str = "...";
+/// The columns a long name keeps before the label is shortened too.
+const NAME_MIN: usize = 12;
 
 /// Draws `app` into `area` of `buf`. Everything is clipped to `area` and to the buffer, so a
 /// frame drawn before a resize arrives cannot panic.
@@ -61,26 +64,36 @@ pub fn draw(app: &App, area: Rect, buf: &mut Buffer) {
     }
 }
 
-/// The status line after `DEREZ`: the name (cleaned and shortened so the line fits `width`),
-/// the label and the tally, then the note when the whole line has room for it.
+/// The status line after `DEREZ`: the name, the label and the tally, then the note when the
+/// whole line has room for it. Name and label are cleaned; when the line is too wide, the name
+/// is shortened first (down to [`NAME_MIN`] columns), then the label, both with `...`, so the
+/// round and the tally stay in view. The note never takes room from them.
 fn status_rest(app: &App, width: u16) -> String {
     let width = usize::from(width);
     let t = app.tally();
-    let tail = format!(
-        "  {}  round {}  cleared {}  derezzed {}",
-        clean(app.label()),
-        t.round,
-        t.cleared,
-        t.derezzed
+    let tally = format!(
+        "  round {}  cleared {}  derezzed {}",
+        t.round, t.cleared, t.derezzed
     );
-    let mut rest = String::new();
     let name = clean(app.name());
+    let label = clean(app.label());
+    // Room for the name and the label, with the two spaces before each.
+    let room = width.saturating_sub(text_width("DEREZ") + text_width(&tally));
+    let name_part = if name.is_empty() {
+        0
+    } else {
+        2 + text_width(&name).min(NAME_MIN)
+    };
+    let label = shorten(&label, room.saturating_sub(name_part + 2));
+    let mut rest = String::new();
     if !name.is_empty() {
-        let room = width.saturating_sub(text_width("DEREZ  ") + text_width(&tail));
+        let name_room = room.saturating_sub(2 + text_width(&label) + 2);
         rest.push_str("  ");
-        rest.push_str(&shorten(&name, room));
+        rest.push_str(&shorten(&name, name_room));
     }
-    rest.push_str(&tail);
+    rest.push_str("  ");
+    rest.push_str(&label);
+    rest.push_str(&tally);
     if let Some(note) = app.note() {
         let note = clean(note);
         if text_width("DEREZ") + text_width(&rest) + 2 + text_width(&note) <= width {
@@ -91,11 +104,17 @@ fn status_rest(app: &App, width: u16) -> String {
     rest
 }
 
-/// `text` with every control character replaced by `?`.
+/// `text` with every control character, and every bidi mark, embedding, override and isolate,
+/// replaced by `?`, so a file name can neither send escapes nor reorder the status line.
 fn clean(text: &str) -> String {
     text.chars()
-        .map(|c| if c.is_control() { '?' } else { c })
+        .map(|c| if c.is_control() || is_bidi(c) { '?' } else { c })
         .collect()
+}
+
+/// The bidi formatting characters: marks, embeddings and overrides, and isolates.
+fn is_bidi(c: char) -> bool {
+    matches!(c, '\u{200E}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')
 }
 
 /// `text` when it fits `room` columns, else as much of it as fits with `...` at the end.

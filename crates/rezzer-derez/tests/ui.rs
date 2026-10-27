@@ -167,6 +167,42 @@ fn status_line_cleans_and_shortens_the_name() {
 }
 
 #[test]
+fn long_label_is_shortened_so_the_tally_stays() {
+    // 30 wide characters are 60 columns: the whole line cannot hold the label at 60 columns.
+    let label = "\u{8868}".repeat(30);
+    let app = App::new(rounds("report.xlsx", &label), 1, 60, 20);
+    let buf = render(&app, 60, 20);
+    let line = row(&buf, 0);
+    let line = line.trim_end();
+    assert!(line.starts_with("DEREZ  report.xlsx  \u{8868}"), "{line}");
+    assert!(
+        line.ends_with("...  round 1  cleared 0  derezzed 0"),
+        "{line}"
+    );
+
+    // Without a file name the label gets all the room.
+    let app = App::new(rounds("", &label), 1, 60, 20);
+    let buf = render(&app, 60, 20);
+    let line = row(&buf, 0);
+    assert!(
+        line.trim_end()
+            .ends_with("...  round 1  cleared 0  derezzed 0"),
+        "{line}"
+    );
+}
+
+#[test]
+fn bidi_controls_are_cleaned() {
+    let name = "a\u{202E}b\u{200E}c\u{200F}d\u{202A}e\u{2066}f\u{2069}g";
+    let app = App::new(rounds(name, "page\u{202D} 1"), 1, 80, 30);
+    let buf = render(&app, 80, 30);
+    assert_eq!(
+        row(&buf, 0).trim_end(),
+        "DEREZ  a?b?c?d?e?f?g  page? 1  round 1  cleared 0  derezzed 0"
+    );
+}
+
+#[test]
 fn wide_characters_count_twice() {
     // 40 wide characters are 80 columns, so the name must be shortened at 80 columns.
     let wide = "\u{8868}".repeat(40);
@@ -275,6 +311,40 @@ fn derezzed_heads_show_a_cross_for_one_tick() {
 
     // A restart clears it.
     app.on_key(Key::Restart);
+    let buf = render(&app, 80, 30);
+    assert!(!text(&buf).contains('✕'));
+}
+
+#[test]
+fn a_cross_stays_for_one_tick_only() {
+    // After one cleared round two other programs run; program 1 turns back into its trail
+    // while program 2 goes straight on, so the round goes on.
+    let mut app = App::new(rounds("", "the Grid"), 1, 80, 30);
+    clear_round(&mut app);
+    app.on_key(Key::Restart);
+    assert_eq!(app.round().unwrap().programs().len(), 3);
+    app.on_key(Key::Steer(Dir::Right));
+    let mut ticks = 0;
+    while !app.round().unwrap().programs()[1].derezzed {
+        app.on_tick_with(|r, i| {
+            let dir = r.programs()[i].dir;
+            if i == 1 { dir.opposite() } else { dir }
+        });
+        ticks += 1;
+        assert!(
+            ticks <= 2,
+            "program 1 should be derezzed by the second tick"
+        );
+    }
+    let round = app.round().unwrap();
+    assert_eq!(round.status(), Status::Running);
+    assert!(!round.programs()[2].derezzed);
+    let gone = round.programs()[1].pos;
+    let buf = render(&app, 80, 30);
+    assert_eq!(cell(&app, &buf, gone), ("✕".to_string(), " ".to_string()));
+
+    app.on_tick_with(|r, i| r.programs()[i].dir);
+    assert_eq!(app.round().unwrap().status(), Status::Running);
     let buf = render(&app, 80, 30);
     assert!(!text(&buf).contains('✕'));
 }
