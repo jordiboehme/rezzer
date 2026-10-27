@@ -428,7 +428,14 @@ impl Style {
             two_page,
             ..Style::default()
         };
-        let mut chars: HashMap<i32, usize> = HashMap::new();
+        // Ink characters by size (half points), and the sum of their exact sizes.
+        let mut chars: HashMap<i32, (usize, f64)> = HashMap::new();
+        let count = |chars: &mut HashMap<i32, (usize, f64)>, r: &Run| {
+            let n = ink(&r.text);
+            let e = chars.entry(size_key(r.size)).or_default();
+            e.0 += n;
+            e.1 += n as f64 * f64::from(r.size);
+        };
         for p in pages {
             let all = lines(p.runs);
             let bands = style.furniture(&all, p.height, &[]);
@@ -437,7 +444,7 @@ impl Style {
                     && furniture_key_of(l, p.height).is_some_and(|k| style.two_page.contains(&k));
                 if counted {
                     for r in l.runs {
-                        *chars.entry(size_key(r.size)).or_default() += ink(&r.text);
+                        count(&mut chars, r);
                     }
                 }
             }
@@ -469,7 +476,7 @@ impl Style {
             for (l, first) in body.iter().zip(&starts) {
                 for (k, r) in l.runs.iter().enumerate() {
                     if !in_legend.contains(&(first + k)) {
-                        *chars.entry(size_key(r.size)).or_default() += ink(&r.text);
+                        count(&mut chars, r);
                     }
                 }
             }
@@ -478,11 +485,16 @@ impl Style {
             }
         }
         // The most ink characters wins; on a tie the smaller size. Padding is no text: a data
-        // line padded into its place would count its spaces.
+        // line padded into its place would count its spaces. The body size is the mean exact
+        // size of the winning half point, not the half point: the ratios to it then hold for a
+        // page printed at any scale.
         style.body_size = chars
             .iter()
-            .max_by_key(|(size, n)| (**n, -**size))
-            .map(|(size, _)| *size as f32 / 2.0)
+            .max_by_key(|(size, (n, _))| (*n, -**size))
+            .map(|(size, (n, sum))| match *n {
+                0 => *size as f32 / 2.0,
+                n => (sum / n as f64) as f32,
+            })
             .unwrap_or(0.0);
         let mut sizes: Vec<i32> = Vec::new();
         for p in pages {
@@ -3954,6 +3966,36 @@ mod tests {
         let tagged = Style::learn(&pages, true);
         assert_eq!(tagged.body_size, 6.0);
         assert!(tagged.legends.is_empty());
+    }
+
+    /// The body size is the exact size of the body text, not its half point: a letter printed
+    /// at 0.675 sets its body of 7 points at 4.725, which a half point would make 4.5, and a
+    /// name of 6.75 points (10 at full size, under 1.5 times the body there) would then be
+    /// 1.5 times the body.
+    #[test]
+    fn the_body_size_is_exact() {
+        let runs: Vec<Run> = (0..4)
+            .map(|k| {
+                run(
+                    "die Firma liefert die bestellte Ware",
+                    k,
+                    700.0 - 6.0 * k as f32,
+                    4.725,
+                )
+            })
+            .collect();
+        let pages = [PageText {
+            page: 1,
+            height: Some(842.0),
+            runs: &runs,
+        }];
+        let style = Style::learn(&pages, false);
+        assert!(
+            (style.body_size - 4.725).abs() < 1e-4,
+            "{}",
+            style.body_size
+        );
+        assert!(6.75 < HEADING_PLAIN_RATIO * style.body_size);
     }
 
     /// A stop inside the legend: the references to the footnotes it cut are text again, so
