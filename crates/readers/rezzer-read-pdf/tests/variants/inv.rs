@@ -9,7 +9,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use rezzer_model::{Block, ReadOutcome, plain_text};
 
-use crate::axes::{Page, Shape, Sheet, page_of, variants};
+use crate::axes::{Page, Shape, Sheet, Variant, page_of, variants};
 use crate::check::{self, page_blocks};
 use crate::common::{needing, print_form, text};
 use crate::known::{KNOWN, Known};
@@ -41,6 +41,8 @@ pub(crate) enum Inv {
     Paragraph,
     /// Texts that belong to different blocks are not read into one block.
     Apart,
+    /// The page's text holds the expected texts in their reading order.
+    Order,
     /// The document title is found.
     DocTitle,
     /// The document date is found.
@@ -144,6 +146,19 @@ pub(crate) fn check_read(out: &ReadOutcome, page: &Page) -> Vec<Broken> {
             broken.push(Broken(inv, format!("page {}: {}", n + 1, b.1)));
         }
         check_want(out, n, sheet, &mut broken);
+    }
+    // A code of the file that no page draws is a wrong value, shown on a page or not.
+    let drawn: Vec<&(String, String)> = page.sheets.iter().flat_map(|s| &s.want.codes).collect();
+    for a in &out.document.assets {
+        for c in &a.codes {
+            let c = (c.symbology.clone(), c.text.clone().unwrap_or_default());
+            if !drawn.contains(&&c) {
+                broken.push(Broken(
+                    Inv::WrongValue,
+                    format!("a code {c:?} of {} not drawn on any page", a.id),
+                ));
+            }
+        }
     }
     broken
 }
@@ -264,6 +279,16 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
             ));
         }
     }
+    if !want.order.is_empty() {
+        let page_text = collapse(&text(page_blocks(out, n)));
+        let order: Vec<&str> = want.order.iter().map(String::as_str).collect();
+        if let Err(e) = crate::common::in_order(&page_text, &order) {
+            broken.push(Broken(
+                Inv::Order,
+                format!("page {p}: {e:?} is not in its place: {page_text:?}"),
+            ));
+        }
+    }
     for (a, b) in &want.apart {
         if let Some(bl) = blocks
             .iter()
@@ -309,32 +334,6 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
             )),
             (None, None) => {}
         }
-        {
-            let found: Vec<(String, String)> = out
-                .document
-                .assets
-                .iter()
-                .flat_map(|a| a.codes.iter())
-                .map(|c| (c.symbology.clone(), c.text.clone().unwrap_or_default()))
-                .collect();
-            for c in &want.codes {
-                let k = found.iter().filter(|f| *f == c).count();
-                if k != 1 {
-                    broken.push(Broken(
-                        Inv::Code,
-                        format!("{c:?} found {k} times: {found:?}"),
-                    ));
-                }
-            }
-            for f in &found {
-                if !want.codes.contains(f) {
-                    broken.push(Broken(
-                        Inv::WrongValue,
-                        format!("a code {f:?} not on the page"),
-                    ));
-                }
-            }
-        }
         if let Some(v) = want.vision {
             let need = needing(out);
             if need.is_empty() == v {
@@ -343,6 +342,40 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
                     format!("needs vision {need:?}, want {v}"),
                 ));
             }
+        }
+    }
+    // The codes of this page: those of the assets its picture blocks show (a code drawn the
+    // same on every page is one asset, shown on each page).
+    let shown: Vec<&str> = blocks
+        .iter()
+        .filter_map(|b| match b {
+            Block::Media { asset, .. } => Some(asset.as_str()),
+            _ => None,
+        })
+        .collect();
+    let found: Vec<(String, String)> = out
+        .document
+        .assets
+        .iter()
+        .filter(|a| shown.contains(&a.id.as_str()))
+        .flat_map(|a| a.codes.iter())
+        .map(|c| (c.symbology.clone(), c.text.clone().unwrap_or_default()))
+        .collect();
+    for c in &want.codes {
+        let k = found.iter().filter(|f| *f == c).count();
+        if k != 1 {
+            broken.push(Broken(
+                Inv::Code,
+                format!("page {p}: {c:?} found {k} times: {found:?}"),
+            ));
+        }
+    }
+    for f in &found {
+        if !want.codes.contains(f) {
+            broken.push(Broken(
+                Inv::WrongValue,
+                format!("page {p}: a code {f:?} not on the page"),
+            ));
         }
     }
     let loc = format!("p{p}");
@@ -431,69 +464,155 @@ fn out_text(out: &ReadOutcome) -> Vec<Vec<String>> {
         .collect()
 }
 
+/// A reference read: the read, what its variant is held to, and whether it breaks nothing
+/// or, when it breaks something, only invariants of ruling P6-X.
+struct Reference {
+    out: ReadOutcome,
+    print: String,
+    holds: bool,
+    wrong_only: bool,
+}
+
+/// Reads the variant `v` of `shape` as a reference (from the sample when it is in it).
+fn reference(shape: &Shape, sample: &[Page], v: Variant) -> Reference {
+    let owned;
+    let rp = match sample.iter().find(|p| p.variant == v) {
+        Some(p) => p,
+        None => {
+            owned = page_of(shape, v);
+            &owned
+        }
+    };
+    let out = read(rp);
+    let broken = check_read(&out, rp);
+    Reference {
+        print: fingerprint(rp),
+        holds: broken.is_empty(),
+        wrong_only: !broken.is_empty() && broken.iter().all(|b| b.0.wrong()),
+        out,
+    }
+}
+
+/// The key of the reference read of `v` in `done`, read now when it is not there yet.
+fn taken(
+    done: &mut HashMap<String, Reference>,
+    shape: &Shape,
+    sample: &[Page],
+    v: Variant,
+) -> String {
+    let key = v.name();
+    if !done.contains_key(&key) {
+        done.insert(key.clone(), reference(shape, sample, v));
+    }
+    key
+}
+
+/// What the reads of a shape gave: each variant with what it broke, and how many variants
+/// were not compared with a reference because it (and its fallback) breaks.
+pub(crate) struct Reads {
+    pub reads: Vec<(String, Vec<Broken>)>,
+    pub uncompared: usize,
+    /// Variants held to other things than their reference (a font that makes a field
+    /// unclear), so not compared.
+    pub other: usize,
+}
+
 /// The variants of `shape` read and held to the invariants, each with what it broke: the
 /// invariants of its own page, and against the read of its reference (the same variant at
 /// scale 1 in the real sizes and fonts), when both are held to the same things and the
-/// reference holds its own invariants, the same reading, and no loss when the reference has
-/// none.
-pub(crate) fn reads(shape: &Shape) -> Vec<(String, Vec<Broken>)> {
-    let mut done: HashMap<String, (ReadOutcome, String, bool)> = HashMap::new();
+/// reference holds its own invariants, the same reading (blocks and losses), and no loss when
+/// the reference has none. When the reference breaks only invariants of ruling P6-X (pinned),
+/// the variant is compared with the fallback reference instead: the reference in the real look
+/// and not turned, which must read the same (ruling P6-Y), when that one holds. Else the
+/// variant is not compared, and counted.
+pub(crate) fn reads(shape: &Shape) -> Reads {
+    let mut done: HashMap<String, Reference> = HashMap::new();
     let mut out = Vec::new();
+    let (mut uncompared, mut other) = (0, 0);
     let sample: Vec<Page> = variants(shape).collect();
     for page in &sample {
         let read_out = read(page);
         // `VARIANT_DUMP="shape|variant"` prints that read, to look at a break.
         if std::env::var("VARIANT_DUMP").ok() == Some(format!("{}|{}", shape.name, page.name)) {
             eprintln!(
-                "{:#?}\n{:#?}\n{:#?}",
+                "{:#?}\n{:#?}\n{:#?}\n{:#?}",
                 out_text(&read_out),
                 read_out.document.losses,
-                read_out.document.properties
+                read_out.document.properties,
+                read_out
+                    .document
+                    .assets
+                    .iter()
+                    .map(|a| (&a.id, &a.codes))
+                    .collect::<Vec<_>>()
             );
         }
         let mut broken = check_read(&read_out, page);
         let r = page.variant.reference();
         if r != page.variant {
-            let key = r.name();
-            if !done.contains_key(&key) {
-                let owned;
-                let rp = match sample.iter().find(|p| p.variant == r) {
-                    Some(p) => p,
-                    None => {
-                        owned = page_of(shape, r);
-                        &owned
-                    }
+            let mut key = taken(&mut done, shape, &sample, r);
+            if !done[&key].holds && done[&key].wrong_only {
+                let fallback = Variant {
+                    look: crate::axes::Look::Real,
+                    turn: crate::axes::Turn::None,
+                    ..r
                 };
-                let ref_out = read(rp);
-                let holds = check_read(&ref_out, rp).is_empty();
-                done.insert(key.clone(), (ref_out, fingerprint(rp), holds));
-            }
-            let (ref_out, ref_print, holds) = &done[&key];
-            // A reference that breaks its own invariants is no reading to hold others to:
-            // its own break is pinned.
-            let pages = if *holds { page.sheets.len() } else { 0 };
-            for n in 0..pages {
-                let (mine, theirs) = (reading(&read_out, n), reading(ref_out, n));
-                if *ref_print == fingerprint(page) && mine.0 != theirs.0 {
-                    let only = |a: &[String], b: &[String]| -> Vec<String> {
-                        a.iter().filter(|x| !b.contains(x)).cloned().collect()
-                    };
-                    let (here, there) = (only(&mine.0, &theirs.0), only(&theirs.0, &mine.0));
-                    let says = if here.is_empty() && there.is_empty() {
-                        format!("in another order: {:?}; at scale 1 {:?}", mine.0, theirs.0)
-                    } else {
-                        format!("here {here:?}; at scale 1 {there:?}")
-                    };
-                    broken.push(Broken(Inv::SameReading, format!("page {}: {says}", n + 1)));
+                if fallback != page.variant && shape.axes.look.contains(&fallback.look) {
+                    key = taken(&mut done, shape, &sample, fallback);
                 }
-                if *ref_print == fingerprint(page) && theirs.1.is_empty() && !mine.1.is_empty() {
-                    broken.push(Broken(Inv::NoLoss, format!("page {}: {:?}", n + 1, mine.1)));
+            }
+            let rf = &done[&key];
+            let mine_print = fingerprint(page);
+            if !rf.holds {
+                uncompared += 1;
+            } else if rf.print != mine_print {
+                other += 1;
+            } else {
+                for n in 0..page.sheets.len() {
+                    compare(&read_out, &rf.out, n, &mut broken);
                 }
             }
         }
         out.push((page.name.clone(), broken));
     }
-    out
+    Reads {
+        reads: out,
+        uncompared,
+        other,
+    }
+}
+
+/// Holds page `n` of `mine` to the reading of `theirs`: the same blocks, the same losses (by
+/// kind and the fields they name, numbers masked), and no loss where `theirs` has none.
+fn compare(mine: &ReadOutcome, theirs: &ReadOutcome, n: usize, broken: &mut Vec<Broken>) {
+    let (mine, theirs) = (reading(mine, n), reading(theirs, n));
+    let only = |a: &[String], b: &[String]| -> Vec<String> {
+        a.iter().filter(|x| !b.contains(x)).cloned().collect()
+    };
+    if mine.0 != theirs.0 {
+        let (here, there) = (only(&mine.0, &theirs.0), only(&theirs.0, &mine.0));
+        let says = if here.is_empty() && there.is_empty() {
+            format!("in another order: {:?}; at scale 1 {:?}", mine.0, theirs.0)
+        } else {
+            format!("here {here:?}; at scale 1 {there:?}")
+        };
+        broken.push(Broken(Inv::SameReading, format!("page {}: {says}", n + 1)));
+    }
+    if theirs.1.is_empty() {
+        if !mine.1.is_empty() {
+            broken.push(Broken(Inv::NoLoss, format!("page {}: {:?}", n + 1, mine.1)));
+        }
+    } else if mine.1 != theirs.1 {
+        broken.push(Broken(
+            Inv::SameReading,
+            format!(
+                "page {}: losses {:?}; at scale 1 {:?}",
+                n + 1,
+                only(&mine.1, &theirs.1),
+                only(&theirs.1, &mine.1)
+            ),
+        ));
+    }
 }
 
 /// The variants of `shape` that do not hold as [`KNOWN`] pins them: a variant that is not
@@ -550,11 +669,21 @@ pub(crate) fn unexpected_in(
 
 /// Reads every variant of `shape` and asserts that each holds as pinned.
 pub(crate) fn hold(shape: &Shape) {
-    let reads = reads(shape);
+    let Reads {
+        reads,
+        uncompared,
+        other,
+    } = reads(shape);
     let wrong = unexpected(shape, &reads);
-    if std::env::var("VARIANT_COUNT").is_ok() {
-        eprintln!("VARIANTS {} {}", reads.len(), shape.name);
-    }
+    // Shown with the test's output: the variants that could not be held to a reading.
+    eprintln!(
+        "VARIANTS {} of {}: {} not compared as their reference breaks, {} as they are held \
+         to other things",
+        reads.len(),
+        shape.name,
+        uncompared,
+        other
+    );
     assert!(
         wrong.is_empty(),
         "{} of {} variants of {} do not hold as pinned:\n{}",

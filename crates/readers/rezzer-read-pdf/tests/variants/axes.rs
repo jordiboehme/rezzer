@@ -389,6 +389,8 @@ pub(crate) struct Want {
     pub roles: Vec<(String, String)>,
     /// Paragraphs to find, by their text (line breaks as spaces).
     pub paragraphs: Vec<String>,
+    /// Texts the page's text holds in this order.
+    pub order: Vec<String>,
     /// Texts no block may hold together: each pair stands in different blocks.
     pub apart: Vec<(String, String)>,
     /// The document title the read must find (on the first page only).
@@ -555,4 +557,63 @@ fn neighbour(v: &Variant, sheet: &mut Sheet, e: Extent) {
             b.page.template += &g.hrule(x0, x1, e.top - 3.0 * h);
         }
     }
+}
+
+/// The words of a text, cut at white space.
+fn words_of(s: &str) -> Vec<&str> {
+    s.split_whitespace().collect()
+}
+
+/// Adds to the values of `b` each text of `texts` whose words stand once among all of them
+/// (a text drawn twice, or inside another one, can not be found once): every value drawn on
+/// the page is then to be found once in its read.
+pub(crate) fn register_once(b: &mut Built, texts: &[String]) {
+    // The page's own marker and the address under a form shape (see `Built::address`) are
+    // text of the page too.
+    let context = [
+        "Page 1",
+        "Page 2",
+        "Muster GmbH",
+        "Musterweg 2",
+        "54321 Musterdorf",
+    ];
+    let all: Vec<Vec<&str>> = texts
+        .iter()
+        .map(|t| words_of(t))
+        .chain(context.iter().map(|t| words_of(t)))
+        .collect();
+    for t in texts {
+        let want = words_of(t);
+        if want.is_empty() || b.values.contains(t) {
+            continue;
+        }
+        let n: usize = all
+            .iter()
+            .map(|w| {
+                w.windows(want.len())
+                    .filter(|x| *x == want.as_slice())
+                    .count()
+            })
+            .sum();
+        if n == 1 {
+            b.values.push(t.clone());
+        }
+    }
+}
+
+/// The texts `template` shows with `Tj` (as [`crate::common::show`] writes them), in order.
+pub(crate) fn shown(template: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = template;
+    while let Some(i) = rest.find(" Td (") {
+        rest = &rest[i + 5..];
+        match rest.find(") Tj") {
+            Some(j) => {
+                out.push(rest[..j].to_string());
+                rest = &rest[j..];
+            }
+            None => break,
+        }
+    }
+    out
 }

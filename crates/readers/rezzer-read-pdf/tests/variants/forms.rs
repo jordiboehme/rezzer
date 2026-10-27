@@ -205,6 +205,12 @@ fn sections(v: &Variant) -> (Sheet, Option<Extent>) {
     let mid = section(&g, &mut b, t, &[0, 15, 30, 45, 60], &SECTION_A);
     let bottom = section(&g, &mut b, mid, &[0, 10, 20, 30, 40, 50, 60], &SECTION_B);
     b.address(&g);
+    let cells: Vec<String> = SECTION_A
+        .iter()
+        .chain(SECTION_B.iter())
+        .flat_map(|r| r.iter().map(|c| c.to_string()))
+        .collect();
+    crate::axes::register_once(&mut b, &cells);
     let mut s = Sheet::new(b);
     s.want.tables = vec![owned(&SECTION_A), owned(&SECTION_B)];
     let e = Extent {
