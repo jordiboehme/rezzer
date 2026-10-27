@@ -6,11 +6,13 @@
 
 mod builtin;
 mod fit;
+mod source;
 
 pub use builtin::builtin;
 pub use fit::{
     DOOR, Fitted, MARGIN, MAX_GRID, MAX_SHAPES, MAX_WALL_SHARE, MIN_GRID, Refused, START_RUN, fit,
 };
+pub use source::{MAX_PLANS, Rounds, plans, rounds};
 
 /// A resolution-free grid plan.
 #[derive(Debug, Clone, PartialEq)]

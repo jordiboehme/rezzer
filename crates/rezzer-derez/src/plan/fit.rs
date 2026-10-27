@@ -53,8 +53,9 @@ pub enum Refused {
 /// lane of [`MARGIN`] cells. Long lines and outline sides get doors of [`DOOR`] cells. Every
 /// free cell not connected to the lane becomes wall, so no area is sealed off. When walls and
 /// towers cover more than [`MAX_WALL_SHARE`] of that area, before or after this sealing,
-/// blocks are drawn as outlines; when they still do, the plan is [`Refused::Crowded`]. The four starts are free, have [`START_RUN`] free
-/// cells ahead, lie on no other start's run and are at least 4 cells apart (Manhattan).
+/// blocks are drawn as outlines; when they still do, the plan is [`Refused::Crowded`]. The
+/// four starts are free, have [`START_RUN`] free cells ahead, lie on no other start's run and
+/// are at least 4 cells apart (Manhattan).
 pub fn fit(plan: &Plan, w: u16, h: u16) -> Result<Fitted, Refused> {
     if w < MIN_GRID.0 || h < MIN_GRID.1 {
         return Err(Refused::TooSmall);

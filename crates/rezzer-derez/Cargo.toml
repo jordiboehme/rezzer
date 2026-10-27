@@ -9,3 +9,4 @@ publish = false
 [dependencies]
 ratatui.workspace = true
 crossterm.workspace = true
+rezzer-model = { path = "../rezzer-model" }
