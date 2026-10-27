@@ -2407,7 +2407,10 @@ fn a_file_at_a_part_path_that_is_not_ours_fails_the_run() {
         let res = pipeline.run_bytes("notes.txt", LARGE.to_vec(), None, &written(&out));
         assert_eq!(res.completeness, Completeness::Failed, "{what}");
         let message = res.message.unwrap();
-        assert!(message.contains(&first), "{what}: {message}");
+        // The message names the file as a path of this system: `first` is the result's
+        // relative path with `/`, the message has `\` between the folders on Windows.
+        let native = first.replace('/', std::path::MAIN_SEPARATOR_STR);
+        assert!(message.contains(&native), "{what}: {message}");
         assert!(
             message.contains("is not a part Rezzer wrote"),
             "{what}: {message}"
