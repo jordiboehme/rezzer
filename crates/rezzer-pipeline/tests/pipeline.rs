@@ -210,6 +210,7 @@ fn cache_hit_takes_the_path_from_the_current_source() {
     assert_eq!(doc.source.path.as_deref(), Some(b.to_str().unwrap()));
 }
 
+// macOS and Linux only: the test plants extended attributes, which Windows does not have.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 #[test]
 fn cache_hit_takes_fresh_file_facts() {
@@ -1210,8 +1211,6 @@ fn attachments_get_the_extension_their_bytes_confirm() {
     );
 }
 
-// Unix only: the test plants a symlink, which needs extra rights on Windows.
-#[cfg(unix)]
 #[test]
 fn old_files_are_removed_but_links_and_folders_are_not_followed() {
     let root = tempfile::tempdir().unwrap();
@@ -1222,6 +1221,9 @@ fn old_files_are_removed_but_links_and_folders_are_not_followed() {
     std::fs::write(assets.join("page-9.png"), b"old").unwrap();
     let victim = root.path().join("victim");
     std::fs::write(&victim, b"keep").unwrap();
+    // Unix only: a symlink needs extra rights on Windows. The stale picture and the folder are
+    // checked on every OS.
+    #[cfg(unix)]
     std::os::unix::fs::symlink(&victim, assets.join("page-8.png")).unwrap();
     let req = Request {
         output_dir: Some(out.clone()),
@@ -1229,7 +1231,12 @@ fn old_files_are_removed_but_links_and_folders_are_not_followed() {
     };
     let (registry, _) = pictures(&["page-1"]);
     Pipeline::new(config(None), registry).run_bytes("scan.txt", b"x".to_vec(), None, &req);
-    assert_eq!(names_in(&assets), ["page-1.png", "page-8.png", "sub"]);
+    let expected: &[&str] = if cfg!(unix) {
+        &["page-1.png", "page-8.png", "sub"]
+    } else {
+        &["page-1.png", "sub"]
+    };
+    assert_eq!(names_in(&assets), expected);
     assert_eq!(std::fs::read(&victim).unwrap(), b"keep");
     assert_eq!(std::fs::read(assets.join("sub/keep.png")).unwrap(), b"keep");
 }
@@ -1813,12 +1820,9 @@ fn similar_names_keep_their_own_bundles() {
 }
 
 /// A file that Rezzer's cleanup would take for one of its parts.
-#[cfg(unix)]
 const PART_LIKE: &str =
     "---\ngenerated: { by: rezzer/0.1.0, at: 2026-10-19T08:30:00Z }\npart: 1\n---\n\nkeep\n";
 
-// Unix only: the test plants a symlink, which needs extra rights on Windows.
-#[cfg(unix)]
 #[test]
 fn rerun_removes_stale_parts() {
     let root = tempfile::tempdir().unwrap();
@@ -1846,10 +1850,17 @@ fn rerun_removes_stale_parts() {
     // Grown over the limit.
     let large = run(b"30 4000");
     assert_eq!(names_in(&parts_folder), part_names(&large));
-    // A symlink to a file that looks like a part, and a note of the user's own.
+    // A symlink to a file that looks like a part, and a note of the user's own. The symlink
+    // is Unix only: it needs extra rights on Windows.
     let victim = root.path().join("victim.md");
     std::fs::write(&victim, PART_LIKE).unwrap();
+    #[cfg(unix)]
     std::os::unix::fs::symlink(&victim, parts_folder.join("chapter-99.md")).unwrap();
+    let kept: &[&str] = if cfg!(unix) {
+        &["chapter-99.md", "mine.md", "notes-3.md"]
+    } else {
+        &["mine.md", "notes-3.md"]
+    };
     std::fs::write(parts_folder.join("mine.md"), "# My own note\n").unwrap();
     // A note of the user's own with a `part:` key, as book notes have.
     std::fs::write(
@@ -1869,10 +1880,11 @@ fn rerun_removes_stale_parts() {
     let fewer = run(b"12 4000");
     assert!(fewer.parts.len() < large.parts.len());
     let mut expected = part_names(&fewer);
-    expected.extend(["chapter-99.md", "mine.md", "notes-3.md"].map(String::from));
+    expected.extend(kept.iter().map(|k| k.to_string()));
     expected.sort();
     assert_eq!(names_in(&parts_folder), expected);
     assert_eq!(std::fs::read_to_string(&victim).unwrap(), PART_LIKE);
+    #[cfg(unix)]
     assert!(
         std::fs::symlink_metadata(parts_folder.join("chapter-99.md"))
             .unwrap()
@@ -1880,14 +1892,11 @@ fn rerun_removes_stale_parts() {
     );
     // Shrunk under the limit: the parts go, the folder stays for what is not Rezzer's.
     assert!(run(SMALL).parts.is_empty());
-    assert_eq!(
-        names_in(&parts_folder),
-        ["chapter-99.md", "mine.md", "notes-3.md"]
-    );
+    assert_eq!(names_in(&parts_folder), kept);
     // Without them the empty folder goes too.
-    std::fs::remove_file(parts_folder.join("chapter-99.md")).unwrap();
-    std::fs::remove_file(parts_folder.join("mine.md")).unwrap();
-    std::fs::remove_file(parts_folder.join("notes-3.md")).unwrap();
+    for name in kept {
+        std::fs::remove_file(parts_folder.join(name)).unwrap();
+    }
     run(LARGE);
     assert!(parts_folder.is_dir());
     run(SMALL);
@@ -2184,8 +2193,6 @@ fn a_source_writes_into_its_own_folder() {
     }
 }
 
-// Unix only: the test plants a symlink, which needs extra rights on Windows.
-#[cfg(unix)]
 #[test]
 fn a_file_at_a_part_path_that_is_not_ours_fails_the_run() {
     // Ruling P5-AB: never overwrite a file Rezzer did not write.
@@ -2198,11 +2205,18 @@ fn a_file_at_a_part_path_that_is_not_ours_fails_the_run() {
     let root = tempfile::tempdir().unwrap();
     let victim = root.path().join("victim.md");
     std::fs::write(&victim, PART_LIKE).unwrap();
-    for (what, plant) in [("a note", false), ("a symlink", true)] {
+    // The symlink case is Unix only: a symlink needs extra rights on Windows.
+    let cases: &[(&str, bool)] = if cfg!(unix) {
+        &[("a note", false), ("a symlink", true)]
+    } else {
+        &[("a note", false)]
+    };
+    for &(what, plant) in cases {
         let out = root.path().join(format!("out-{plant}"));
         let target = out.join(&first);
         std::fs::create_dir_all(target.parent().unwrap()).unwrap();
         if plant {
+            #[cfg(unix)]
             std::os::unix::fs::symlink(&victim, &target).unwrap();
         } else {
             std::fs::write(&target, "# My own introduction\n").unwrap();
@@ -2297,8 +2311,6 @@ fn a_symlinked_parts_folder_is_never_followed() {
     assert!(elsewhere.is_dir());
 }
 
-// Unix only: the test plants a symlink, which needs extra rights on Windows.
-#[cfg(unix)]
 #[test]
 fn the_main_document_never_replaces_a_file_rezzer_did_not_write() {
     // Ruling P5-AG: a hand-written file, a symlink or a folder at the main document's path
@@ -2310,10 +2322,18 @@ fn the_main_document_never_replaces_a_file_rezzer_did_not_write() {
     for (what, input) in [("small", SMALL), ("large", LARGE)] {
         let out = root.path().join(format!("out-{what}"));
         std::fs::create_dir_all(&out).unwrap();
+        // The symlink is Unix only: it needs extra rights on Windows. The note and the folder
+        // are checked on every OS.
+        #[cfg(unix)]
         std::os::unix::fs::symlink(&victim, out.join("link.txt.md")).unwrap();
         std::fs::write(out.join("x.txt.md"), "# My own notes\n").unwrap();
         std::fs::create_dir(out.join("dir.txt.md")).unwrap();
-        for name in ["link.txt", "x.txt", "dir.txt"] {
+        let names: &[&str] = if cfg!(unix) {
+            &["link.txt", "x.txt", "dir.txt"]
+        } else {
+            &["x.txt", "dir.txt"]
+        };
+        for &name in names {
             let res = pipeline.run_bytes(name, input.to_vec(), None, &written(&out));
             assert_eq!(res.completeness, Completeness::Failed, "{what} {name}");
             let message = res.message.unwrap();
@@ -2324,15 +2344,17 @@ fn the_main_document_never_replaces_a_file_rezzer_did_not_write() {
             );
             assert!(res.document.is_some(), "{what} {name}");
         }
-        assert_eq!(
-            names_in(&out),
-            ["dir.txt.md", "link.txt.md", "x.txt.md"],
-            "{what}"
-        );
+        let expected: &[&str] = if cfg!(unix) {
+            &["dir.txt.md", "link.txt.md", "x.txt.md"]
+        } else {
+            &["dir.txt.md", "x.txt.md"]
+        };
+        assert_eq!(names_in(&out), expected, "{what}");
         assert_eq!(
             std::fs::read_to_string(out.join("x.txt.md")).unwrap(),
             "# My own notes\n"
         );
+        #[cfg(unix)]
         assert!(
             std::fs::symlink_metadata(out.join("link.txt.md"))
                 .unwrap()
@@ -2436,26 +2458,29 @@ fn relative_to_cwd(path: &Path) -> PathBuf {
     rel.join(path.strip_prefix("/").unwrap())
 }
 
-// Unix only: the test plants a symlink, which needs extra rights on Windows.
-#[cfg(unix)]
 #[test]
 fn one_file_by_any_path_or_a_copy_is_the_same_source() {
     // Ruling P5-AG refined: the same canonical path or the same content is the same source.
     let root = tempfile::tempdir().unwrap();
-    let real = std::fs::canonicalize(root.path()).unwrap();
+    // The form Rezzer writes: canonical, without the Windows verbatim prefix.
+    let real = rezzer_pipeline::strip_verbatim(std::fs::canonicalize(root.path()).unwrap());
     let src = real.join("src");
     std::fs::create_dir_all(src.join("sub")).unwrap();
     let file = src.join("report.txt");
     std::fs::write(&file, LARGE).unwrap();
-    std::os::unix::fs::symlink(&file, src.join("link.txt")).unwrap();
     let out = real.join("out");
     std::fs::create_dir_all(&out).unwrap();
     let pipeline = chapters_pipeline(config(None));
-    for (what, path) in [
+    #[cfg_attr(not(unix), allow(unused_mut))]
+    let mut paths = vec![
         ("absolute", file.clone()),
-        ("relative", relative_to_cwd(&file)),
         ("dot-dot", src.join("sub/../report.txt")),
-    ] {
+    ];
+    // Unix only: on Windows the temp folder and the working directory can be on different
+    // drives, so there is no relative path between them.
+    #[cfg(unix)]
+    paths.insert(1, ("relative", relative_to_cwd(&file)));
+    for (what, path) in paths {
         let res = pipeline.run_path(&path, &written(&out));
         assert_eq!(
             res.completeness,
@@ -2466,25 +2491,29 @@ fn one_file_by_any_path_or_a_copy_is_the_same_source() {
     }
     // A symlink keeps its own name, so its `resource` differs. Its output names hold the
     // output of the file itself, and the file was edited since: only the canonical path
-    // tells that it is the same source.
-    let link_out = real.join("link-out");
-    std::fs::create_dir_all(&link_out).unwrap();
-    for name in names_in(&out) {
-        let from = out.join(&name);
-        if from.is_file() {
-            let to = link_out.join(name.replacen("report.txt", "link.txt", 1));
-            std::fs::copy(&from, &to).unwrap();
+    // tells that it is the same source. Unix only: a symlink needs extra rights on Windows.
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&file, src.join("link.txt")).unwrap();
+        let link_out = real.join("link-out");
+        std::fs::create_dir_all(&link_out).unwrap();
+        for name in names_in(&out) {
+            let from = out.join(&name);
+            if from.is_file() {
+                let to = link_out.join(name.replacen("report.txt", "link.txt", 1));
+                std::fs::copy(&from, &to).unwrap();
+            }
         }
+        std::fs::write(&file, OTHER_LARGE).unwrap();
+        let res = pipeline.run_path(&src.join("link.txt"), &written(&link_out));
+        assert_eq!(
+            res.completeness,
+            Completeness::Complete,
+            "{:?}",
+            res.message
+        );
+        std::fs::write(&file, LARGE).unwrap();
     }
-    std::fs::write(&file, OTHER_LARGE).unwrap();
-    let res = pipeline.run_path(&src.join("link.txt"), &written(&link_out));
-    assert_eq!(
-        res.completeness,
-        Completeness::Complete,
-        "{:?}",
-        res.message
-    );
-    std::fs::write(&file, LARGE).unwrap();
     // A copy with the same content at another path, and the original moved away.
     let copy = real.join("elsewhere");
     std::fs::create_dir_all(&copy).unwrap();
@@ -2505,8 +2534,10 @@ fn one_file_by_any_path_or_a_copy_is_the_same_source() {
     let res = pipeline.run_path(&b.join("report.txt"), &written(&out));
     assert_eq!(res.completeness, Completeness::Failed);
     let message = res.message.unwrap();
-    let first = format!("\"{}\"", copy.join("report.txt").display());
-    let second = format!("\"{}\"", b.join("report.txt").display());
+    // Quoted as the frontmatter quotes it, a backslash doubled (Windows).
+    let quoted = |p: PathBuf| format!("\"{}\"", p.display().to_string().replace('\\', "\\\\"));
+    let first = quoted(copy.join("report.txt"));
+    let second = quoted(b.join("report.txt"));
     assert!(message.contains(&first), "{message}");
     assert!(message.contains(&second), "{message}");
     assert_eq!(snapshot_files(&out), before);
@@ -2560,7 +2591,7 @@ fn hostile_names_are_written_end_to_end() {
     ];
     // Known issue, fixed before the release: the main document keeps the characters Windows
     // reserves (`:` makes an NTFS alternate data stream, `* ? " < > |` and device names such
-    // as CON cannot be written), so on Windows these inputs are left out until the naming fix.
+    // as CON cannot be written), so on Windows a:b.txt is left out until the naming fix.
     #[cfg(not(windows))]
     names.push("a:b.txt");
     for name in names {

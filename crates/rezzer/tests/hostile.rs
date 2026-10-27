@@ -1007,7 +1007,6 @@ fn many_merges_without_values_is_bounded() {
     assert!(used < LAYOUT_BOUND, "took {used:?} CPU");
     assert!(peak < 512 * MB, "peak heap {peak} bytes");
     assert!(result.markdown_pages.join("").contains("## Sheet1"));
-    #[cfg(unix)]
     assert_rss_bounded("many_merges_without_values_is_bounded");
 }
 
@@ -1127,8 +1126,9 @@ fn max_rss_bytes() -> u64 {
     }
 }
 
-/// No `getrusage` here: the figure is 0, so the hostile PDF tests still run and check their
-/// result and time, and only the memory bound is not checked.
+/// No `getrusage` here. Never reached: [`own_process`] stops every RSS check first, so the
+/// hostile PDF tests still run and check their result and time, and only the memory bound is
+/// not checked.
 #[cfg(not(unix))]
 fn max_rss_bytes() -> u64 {
     0
@@ -1139,8 +1139,13 @@ const RSS_BOUND: u64 = 512 * MB as u64;
 
 /// Whether the test runs under nextest, which runs every test in its own process. Only then
 /// is the process's maximum RSS the figure of one test; under `cargo test` the RSS checks are
-/// skipped (and say so) rather than fail on the tests that ran before.
+/// skipped (and say so) rather than fail on the tests that ran before. Without `getrusage`
+/// (Windows) the RSS is not measured, and the checks say that instead.
 fn own_process(test: &str) -> bool {
+    if cfg!(not(unix)) {
+        eprintln!("{test}: RSS not measured on this OS");
+        return false;
+    }
     let own = std::env::var_os("NEXTEST").is_some();
     if !own {
         eprintln!("{test}: RSS not checked, the test needs nextest (one process per test)");

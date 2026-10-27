@@ -1809,6 +1809,7 @@ fn remote_pdf(name: &str) -> PathBuf {
     path
 }
 
+// Unix only: the test reports the maximum RSS, which needs getrusage.
 #[cfg(unix)]
 #[test]
 #[ignore = "needs scripts/fetch-corpus.sh"]
@@ -1850,6 +1851,7 @@ fn nist_reads_under_limits() {
     );
 }
 
+// Unix only: the test reports the maximum RSS, which needs getrusage.
 #[cfg(unix)]
 #[test]
 #[ignore = "needs scripts/fetch-corpus.sh"]
