@@ -464,7 +464,9 @@ pub(super) fn borderless(
 
 /// Whether the first row of `grid` is the line of titles of one frame of column titles over
 /// items (see [`Found::body_labels`]): all its runs are the frame's, and its text is the
-/// frame's titles.
+/// frame's titles. Titles that wrap into a second line are no such row: the table keeps the
+/// header that [`header_of`] finds, and where the second line has text in the columns of two
+/// close titles, they stay one merged cell (see [`grid_of`]).
 fn frame_titles(
     flow: &Flow,
     grid: &Grid,
@@ -819,6 +821,8 @@ fn split_title(row: &mut [PlannedCell], cell: usize, run: usize, byte: usize) {
         return;
     }
     let rest = cut_run(r, byte);
+    // The cut cell spans one column, so the next column has a cell of its own.
+    debug_assert!(row.len() > cell + 1, "a cut title has no next cell");
     if let Some(next) = row.get_mut(cell + 1) {
         next.runs.insert(0, rest);
     }
