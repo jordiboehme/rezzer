@@ -659,20 +659,29 @@ fn gutter(p: &[Piece], ids: &[usize]) -> Option<(f32, f32, Split)> {
     let mut sizes: Vec<f32> = inked.iter().map(|&i| p[i].size).collect();
     sizes.sort_by(f32::total_cmp);
     let size = sizes[sizes.len() / 2];
-    let (g0, g1) = best_band(p, &inked, allowed, GUTTER * size)?;
+    let (g0, g1) = best_band(p, &inked, allowed, size)?;
     split_at(p, ids, (g0, g1), allowed, size).map(|s| (g0, g1, s))
 }
 
-/// The best band of white space between the pieces `inked` at least `min_gap` wide with text
-/// on both sides: of those covered by the fewest pieces (a ragged line end next to the gutter
-/// must not widen it), up to `allowed` pieces, the widest.
-fn best_band(p: &[Piece], inked: &[usize], allowed: i32, min_gap: f32) -> Option<(f32, f32)> {
+/// The pieces' places are measured in steps of this share of their median text size (a point
+/// at 8 points): steps of the text, so that a page printed larger or smaller has the same
+/// bands.
+const BAND_STEP: f32 = 1.0 / 8.0;
+
+/// The best band of white space between the pieces `inked` (of median text size `size`) at
+/// least [`GUTTER`] sizes wide with text on both sides: of those covered by the fewest pieces
+/// (a ragged line end next to the gutter must not widen it), up to `allowed` pieces, the
+/// widest. Places are measured in steps of [`BAND_STEP`] sizes; a piece covers the steps it
+/// starts and ends in, so pieces that touch close a band.
+fn best_band(p: &[Piece], inked: &[usize], allowed: i32, size: f32) -> Option<(f32, f32)> {
+    let min_gap = GUTTER * size;
+    let step = BAND_STEP * size;
     let lo = inked.iter().map(|&i| p[i].x0).fold(f32::MAX, f32::min);
     let hi = inked.iter().map(|&i| p[i].x1).fold(f32::MIN, f32::max);
-    if !(hi - lo).is_finite() || hi - lo < 2.0 {
+    if !(hi - lo).is_finite() || step.is_nan() || step <= 0.0 || hi - lo < 2.0 * step {
         return None;
     }
-    let width = ((hi - lo).ceil() as usize).min(20_000) + 2;
+    let width = (((hi - lo) / step).ceil() as usize).min(20_000) + 2;
     let scale = (hi - lo) / (width - 2) as f32;
     let bin = |x: f32| (((x - lo) / scale) as usize).min(width - 1);
     let mut diff = vec![0i32; width + 1];
@@ -1543,6 +1552,67 @@ fn compose(a: Turn, b: Turn) -> Turn {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A piece of ink from `x0` to `x1` in row `row`, of 6 points.
+    fn ink_piece(x0: f32, x1: f32, row: usize) -> Piece {
+        Piece {
+            row,
+            x0,
+            x1,
+            free: x1,
+            padded: false,
+            y0: 700.0 - 10.0 * row as f32,
+            y1: 706.0 - 10.0 * row as f32,
+            y: 701.5 - 10.0 * row as f32,
+            size: 6.0,
+            chars: 4,
+            frags: Vec::new(),
+            stand: None,
+            rows: 1,
+            inked: true,
+            bold: false,
+        }
+    }
+
+    /// The band of white space is measured in steps of the text size, so a page printed at
+    /// 0.7 gives the band of the page at 1 times 0.7; and two pieces of one line that touch
+    /// close the band before them, also when their ends differ in their last bits.
+    #[test]
+    fn bands_hold_at_every_scale() {
+        let at = |k: f32, noise: f32| {
+            // A line across all, a line that ends in two touching pieces, and a line with a
+            // narrow gap: the widest band of the fewest pieces runs up to where the two pieces
+            // touch.
+            let ps = vec![
+                ink_piece(0.0, 500.0 * k, 0),
+                ink_piece(0.0, 100.0 * k, 1),
+                ink_piece(140.0 * k, 450.0 * k, 1),
+                ink_piece(450.0 * k + noise, 500.0 * k, 1),
+                ink_piece(0.0, 125.0 * k, 2),
+                ink_piece(130.0 * k, 400.0 * k, 2),
+            ];
+            let ids: Vec<usize> = (0..ps.len()).collect();
+            best_band(&ps, &ids, 8, 12.5 * k)
+        };
+        let (a, b) = at(1.0, 0.0).expect("a band");
+        assert!(
+            (400.0..402.0).contains(&a) && b > 448.0 && b <= 450.0,
+            "{a} {b}"
+        );
+        for (k, noise) in [
+            (0.7, 0.0),
+            (0.7, 3e-5),
+            (0.75, 0.0),
+            (1.5, 0.0),
+            (1.0, 3e-5),
+        ] {
+            let (c, d) = at(k, noise).expect("a band");
+            assert!(
+                (c - a * k).abs() < 1e-3 && (d - b * k).abs() < 1e-3,
+                "{k} {noise}: {c} {d} against {a} {b}"
+            );
+        }
+    }
 
     #[test]
     fn right_to_left_line_keeps_ligature_glyphs_whole() {

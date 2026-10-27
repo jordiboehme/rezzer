@@ -37,6 +37,13 @@ pub(crate) struct Known {
 /// Every pinned break.
 pub(crate) const KNOWN: &[Known] = &[
     Known {
+        shape: "separator marks",
+        variants: &["scale 0.7, larger text, courier, times labels, turned 270, beside"],
+        broken: &[Inv::SameReading],
+        cause: Cause::New,
+        why: "no threshold (part 2b): the middle of the run `1234` `56` of the boxed amount lies exactly on the edge two digit boxes share; at this scale float rounding puts it inside one box, the run is read as that box's text, and the label line and the values each become two paragraphs; at scale 1 the middle falls outside both",
+    },
+    Known {
         shape: "barcode, module 1.2, height 20",
         variants: &[
             "base",
@@ -279,16 +286,6 @@ pub(crate) const KNOWN: &[Known] = &[
         why: "P6-X, values lost but named by a loss (allowed by the ruling): on a turned page the rate run is not cut at the divider between `Satz %` and `Gr C`: the run `1234567` is kept whole with a loss that names both fields and one that says its drawn mark is not read; upright the same run is cut and pairs",
     },
     Known {
-        shape: "grids side by side",
-        variants: &[
-            "scale 0.7, larger text, courier, times labels, dashed, turned 90, two pages",
-            "scale 1.5, dashed, turned 270",
-        ],
-        broken: &[Inv::SameReading],
-        cause: Cause::Threshold,
-        why: "as in `header grid`: the order of the `Datum` pair against the left part changes with the scale and dashed rules",
-    },
-    Known {
         shape: "label block and bank row",
         variants: &[
             "row under",
@@ -325,17 +322,6 @@ pub(crate) const KNOWN: &[Known] = &[
         broken: &[Inv::Role],
         cause: Cause::New,
         why: "a footnote legend at the foot of both pages of a file of two pages is taken as a running footer (Task 13 furniture), so the star's footnote is not read as one; the legend's text stays, as furniture",
-    },
-    Known {
-        shape: "header grid",
-        variants: &[
-            "scale 0.7, larger text, courier, times labels, dashed, turned 90, title over, two pages",
-            "scale 1.5, dashed, turned 270, title over",
-            "scale 1.5, dashed, line over",
-        ],
-        broken: &[Inv::SameReading],
-        cause: Cause::Threshold,
-        why: "the pairs of the right part of the grid (`Datum`) are read before the left part at scale 1 and after it at other scales with dashed rules: where the two parts meet depends on an absolute tolerance of the dashes or the gap",
     },
     Known {
         shape: "letter head with a larger name",
@@ -436,37 +422,11 @@ pub(crate) const KNOWN: &[Known] = &[
         why: "carry from Task 8 round 3: the address test works on whole layout lines, so a date line on the baseline of the recipient's name keeps the name out of the address paragraph",
     },
     Known {
-        shape: "separator marks",
-        variants: &["scale 0.7, larger text, courier, times labels, turned 270, beside"],
-        broken: &[Inv::SameReading],
-        cause: Cause::Threshold,
-        why: "printed at 0.7 with larger text and turned, the label line `Betrag Datum` and the boxed values are each read as two paragraphs, not one line: a join of pieces of one baseline by an absolute gap",
-    },
-    Known {
-        shape: "rows of fields",
-        variants: &["scale 0.75, smaller text, proportional, dashed, turned 90, beside"],
-        broken: &[Inv::SameReading],
-        cause: Cause::New,
-        why: "the block beside is read into the same table, and its pairs stand at another place in the order than at scale 1 in the real fonts",
-    },
-    Known {
         shape: "line items with an end rule",
         variants: &["scale 0.75, smaller text, dashed, turned 270, two pages"],
         broken: &[Inv::Table, Inv::SameReading, Inv::NoLoss],
         cause: Cause::New,
         why: "small and dashed on a turned page of two pages, the items and totals are refused as a block of columns (some of its text stands between its columns): cause not narrowed yet (the dashed rules, the size or the turn); seen in this one variant of the sample",
-    },
-    Known {
-        shape: "title block over a header grid",
-        variants: &[
-            "scale 0.7",
-            "scale 0.7, courier",
-            "scale 0.7, larger text, courier, times labels, dashed, turned 90, two pages",
-            "scale 1.5, dashed, turned 270",
-        ],
-        broken: &[Inv::SameReading],
-        cause: Cause::Threshold,
-        why: "at another scale the title block's line is cut before `12.34.56`, or the right part of the grid is read before the left part: a join of pieces by an absolute gap",
     },
     Known {
         shape: "title block over a header grid",

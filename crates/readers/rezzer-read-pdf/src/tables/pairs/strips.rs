@@ -591,7 +591,7 @@ pub(in crate::tables) fn field_strips(
             left_out: !left_out.is_empty(),
         });
     }
-    strips.sort_by(|a, b| b.top.total_cmp(&a.top).then(a.x0.total_cmp(&b.x0)));
+    rows_in_order(&mut strips);
     let groups = connected(&strips);
     for g in &groups {
         overflow_back(flow, &mut strips, g);
@@ -920,6 +920,24 @@ fn field_sized(flow: &Flow, part: &[usize]) -> bool {
         && text.iter().any(|t| {
             t.chars().count() <= LABEL_CHARS && t.split_whitespace().count() <= LABEL_WORDS
         })
+}
+
+/// Sorts `strips` top first and each row left to right: strips whose tops lie within
+/// [`SNAP`] of the row's first one stand in one row, as [`connected`] joins them. A rule drawn
+/// in dashes lies at the mean of its dashes, so two parts of one row differ in their tops by
+/// float noise, which must not decide their order.
+fn rows_in_order(strips: &mut [Strip]) {
+    strips.sort_by(|a, b| b.top.total_cmp(&a.top).then(a.x0.total_cmp(&b.x0)));
+    let mut i = 0;
+    while i < strips.len() {
+        let top = strips[i].top;
+        let n = strips[i..]
+            .iter()
+            .take_while(|s| s.top >= top - SNAP)
+            .count();
+        strips[i..i + n].sort_by(|a, b| a.x0.total_cmp(&b.x0));
+        i += n;
+    }
 }
 
 /// The groups of `strips` (sorted top first, then left to right) that make one table each, in
@@ -1796,6 +1814,34 @@ fn label_starts(flow: &Flow, cell: &[usize]) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Two parts of one row of fields whose top rules, each the mean of its dashes, differ
+    /// by float noise read left to right, as the row under them; a row a rule pitch lower
+    /// comes after.
+    #[test]
+    fn strips_of_one_row_read_left_to_right() {
+        let strip = |top: f32, x0: f32| Strip {
+            top,
+            bottom: top - 22.8,
+            x0,
+            x1: x0 + 90.0,
+            dividers: Vec::new(),
+            fields: Vec::new(),
+            rows: None,
+            left_out: false,
+        };
+        let mut strips = vec![
+            strip(737.08, 42.4),
+            strip(759.879_76, 42.4),
+            strip(759.880_25, 293.2),
+        ];
+        rows_in_order(&mut strips);
+        let got: Vec<(f32, f32)> = strips.iter().map(|s| (s.top, s.x0)).collect();
+        assert_eq!(
+            got,
+            [(759.879_76, 42.4), (759.880_25, 293.2), (737.08, 42.4)]
+        );
+    }
 
     /// A run of `text` at `x` on the baseline `y` in `size`, 0.6 of the size a character,
     /// with a gap at each space.
