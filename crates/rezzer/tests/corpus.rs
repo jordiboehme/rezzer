@@ -1797,11 +1797,9 @@ fn arabic_not_reversed() {
     assert!(!out.markdown.contains("ibibah"));
 }
 
-/// The reads of the large remote files run under the default limits; their time and maximum
-/// resident set size are printed for the report (`--no-capture`).
-#[cfg(unix)]
 /// Checks that no time limit cut the read: no loss names one. The read ends itself at its
 /// own limit (`max_time`), so the wall time is only a safety stop against a hang past it.
+#[cfg(unix)]
 fn assert_not_cut_by_time(doc: &Value, took: std::time::Duration) {
     let timed: Vec<&Value> = list(doc, "/losses")
         .iter()
@@ -1812,6 +1810,9 @@ fn assert_not_cut_by_time(doc: &Value, took: std::time::Duration) {
     assert!(took < stop, "{took:?}");
 }
 
+/// The reads of the large remote files run under the default limits; their time and maximum
+/// resident set size are printed for the report (`--no-capture`).
+#[cfg(unix)]
 fn remote_pdf(name: &str) -> PathBuf {
     let path = corpus_dir().join("pdf").join(name);
     assert!(
