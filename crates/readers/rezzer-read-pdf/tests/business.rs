@@ -2586,6 +2586,8 @@ enum Over {
     Bold,
     /// Plain, one and a half times the size of the items.
     Larger,
+    /// Plain, in the size of the column titles (`6 k`).
+    Small,
 }
 
 /// What breaks the reading of a line of two pieces over the top rule of a frame of `n` line
@@ -2604,6 +2606,7 @@ fn line_over_frame(
         Over::Plain => (fonts.0, 8.0 * k),
         Over::Bold => (fonts.1, 8.0 * k),
         Over::Larger => (fonts.0, 12.0 * k),
+        Over::Small => (fonts.0, 6.0 * k),
     };
     // The top rule of the frame is at 600 + 8 k.
     let y = 600.0 + 16.0 * k;
@@ -2646,7 +2649,7 @@ fn a_line_over_the_top_rule_of_a_frame_of_items_is_no_header() {
             for fonts in FONTS {
                 for bold in [false, true] {
                     for n in 2..=5 {
-                        for over in [Over::Plain, Over::Bold, Over::Larger] {
+                        for over in [Over::Plain, Over::Bold, Over::Larger, Over::Small] {
                             for upright in [false, true] {
                                 let items = (k, look, fonts, bold);
                                 reads += 1;
@@ -2667,7 +2670,72 @@ fn a_line_over_the_top_rule_of_a_frame_of_items_is_no_header() {
             }
         }
     }
-    assert_eq!(reads, 1728);
+    assert_eq!(reads, 2304);
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// The finding M1 of the Task 12 review: column titles of two lines over line items between
+/// rules (see [`framed_items`]) whose first lines in the titles' size and font stand `3 k` over
+/// the top rule, `Anzahl` flush left at x 300 over `Menge` and `Einzel` flush right at x 420
+/// over `Preis`: their words join their titles, `Anzahl Menge` and `Einzel Preis`, and every
+/// title heads the column of its values; in every size, look, font and weight, with 2 to 5
+/// rows. Also the reviewer's layout: `Einzel` at x 380, at 1x in Helvetica.
+#[test]
+fn the_first_line_of_two_line_titles_over_the_top_rule_joins_its_titles() {
+    let mut wrong = Vec::new();
+    let mut reads = 0;
+    for k in [0.75, 1.0, 1.5] {
+        for look in LOOKS {
+            for fonts in FONTS {
+                for bold in [false, true] {
+                    for n in 2..=5 {
+                        let (mut t, mut columns) = framed_items(k, look, fonts, bold, n, None);
+                        let (font, size) = (if bold { fonts.1 } else { fonts.0 }, 6.0 * k);
+                        // The top rule of the frame is at 600 + 8 k.
+                        t += &show(font, size, 300.0, 600.0 + 11.0 * k, "Anzahl");
+                        let w = common::font_width(font, "Einzel", size);
+                        t += &show(font, size, 420.0 - w, 600.0 + 11.0 * k, "Einzel");
+                        columns[2].0 = "Anzahl Menge".to_string();
+                        columns[3].0 = "Einzel Preis".to_string();
+                        let out = common::read(&page_in(&t, look));
+                        reads += 1;
+                        let mut b = columns_broken(&out, &columns);
+                        let head = header_cells(&out);
+                        for title in ["Anzahl Menge", "Einzel Preis"] {
+                            if !head.iter().any(|c| c.0 == title) {
+                                b.push(format!("no header cell {title:?}: {head:?}"));
+                            }
+                        }
+                        wrong.extend(b.into_iter().map(|b| {
+                            format!("{k}x, {look:?}, {fonts:?}, bold {bold}, {n} rows: {b}")
+                        }));
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(reads, 288);
+    for look in [Look::Plain, Look::Bar] {
+        for bold in [false, true] {
+            let (mut t, mut columns) = framed_items(1.0, look, FONTS[0], bold, 3, None);
+            let font = if bold { "FB" } else { "FL" };
+            t += &show(font, 6.0, 300.0, 611.0, "Anzahl");
+            t += &show(font, 6.0, 380.0, 611.0, "Einzel");
+            columns[2].0 = "Anzahl Menge".to_string();
+            columns[3].0 = "Einzel Preis".to_string();
+            let out = common::read(&page_in(&t, look));
+            let b = columns_broken(&out, &columns);
+            wrong.extend(
+                b.into_iter()
+                    .map(|b| format!("x 380, {look:?}, bold {bold}: {b}")),
+            );
+        }
+    }
     assert!(
         wrong.is_empty(),
         "{} wrong:\n{}",
