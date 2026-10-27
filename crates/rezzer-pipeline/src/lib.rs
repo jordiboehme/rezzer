@@ -651,8 +651,9 @@ type Rendered = (Vec<String>, Vec<rezzer_render::PartFile>, String);
 
 /// The canonical absolute form of `path`, so the same file read from two working directories
 /// has one `resource`. The directory is canonicalized and the file name kept: a symlink keeps
-/// its own name (the name is a detection hint and shown as the title). On any error the path
-/// is returned as given.
+/// its own name (the name is a detection hint and shown as the title). On Windows the
+/// verbatim prefix is removed where that is safe (see [`strip_verbatim`]). On any error the
+/// path is returned as given.
 pub fn canonical_path(path: &Path) -> PathBuf {
     let canonical = match (path.parent(), path.file_name()) {
         (Some(parent), Some(name)) => {
@@ -665,7 +666,91 @@ pub fn canonical_path(path: &Path) -> PathBuf {
         }
         _ => std::fs::canonicalize(path),
     };
-    canonical.unwrap_or_else(|_| path.to_path_buf())
+    canonical.map_or_else(|_| path.to_path_buf(), strip_verbatim)
+}
+
+/// `path` without the verbatim prefix that `fs::canonicalize` puts in front on Windows:
+/// `\\?\C:\x` gives `C:\x` and `\\?\UNC\server\share\x` gives `\\server\share\x`, so a
+/// `resource` reads as the user wrote it. Anything else is returned unchanged.
+///
+/// The prefix is removed only when the plain form names the same file: shorter than 260
+/// UTF-16 units (Windows' `MAX_PATH` with its closing NUL, counted on the result), every
+/// component non-empty (but for a trailing separator) and without `/`, none a device name
+/// (`CON`, `PRN`, `AUX`, `NUL`, `CONIN$`, `CONOUT$`, `COM0` to `COM9`, `LPT0` to `LPT9`, also
+/// with the superscript digits ¹ ² ³, in any case, with or without an extension or a `:`
+/// suffix) and none ending in
+/// `.` or a space (which also covers `.` and `..`). Otherwise the verbatim form is kept,
+/// which stays a valid path. A path that is not valid Unicode (a lone UTF-16 surrogate on
+/// Windows, bytes that are not UTF-8 on Unix) is returned unchanged.
+///
+/// The work is on the string only, so it gives the same answer on every OS; on Unix such a
+/// path never comes from `fs::canonicalize`.
+pub fn strip_verbatim(path: PathBuf) -> PathBuf {
+    let Some(text) = path.to_str() else {
+        return path;
+    };
+    let plain = if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        let mut parts = rest.split('\\');
+        let server = parts.next().unwrap_or("");
+        let share = parts.next().unwrap_or("");
+        if server.is_empty() || share.is_empty() || !plain_components(rest) {
+            return path;
+        }
+        format!(r"\\{rest}")
+    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+        let b = rest.as_bytes();
+        if b.len() < 3 || !b[0].is_ascii_alphabetic() || b[1] != b':' || b[2] != b'\\' {
+            return path;
+        }
+        if !plain_components(&rest[3..]) {
+            return path;
+        }
+        rest.to_string()
+    } else {
+        return path;
+    };
+    if plain.encode_utf16().count() >= 260 {
+        return path;
+    }
+    PathBuf::from(plain)
+}
+
+/// Whether the `\`-separated components keep their meaning without the verbatim prefix.
+fn plain_components(rest: &str) -> bool {
+    if rest.contains('/') {
+        return false;
+    }
+    let rest = rest.strip_suffix('\\').unwrap_or(rest);
+    if rest.is_empty() {
+        return true;
+    }
+    rest.split('\\')
+        .all(|c| !c.is_empty() && !c.ends_with('.') && !c.ends_with(' ') && !is_device_name(c))
+}
+
+/// Whether a path component names a Windows device: the part before the first `.` or `:`,
+/// without trailing spaces, in any case.
+fn is_device_name(component: &str) -> bool {
+    let stem = component
+        .split(['.', ':'])
+        .next()
+        .unwrap_or("")
+        .trim_end_matches(' ');
+    let upper = stem.to_ascii_uppercase();
+    let number = upper
+        .strip_prefix("COM")
+        .or_else(|| upper.strip_prefix("LPT"))
+        .map(|d| {
+            let mut c = d.chars();
+            (c.next(), c.next())
+        });
+    matches!(
+        upper.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) || matches!(
+        number,
+        Some((Some('0'..='9' | '\u{b9}' | '\u{b2}' | '\u{b3}'), None))
+    )
 }
 
 /// A document for a format without a reader or an unknown format: the source facts, one
@@ -705,4 +790,112 @@ fn generated_at(req: &Request) -> String {
         })
         .or_else(|| rezzer_detect::rfc3339(SystemTime::now()))
         .unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn strip(path: &str) -> PathBuf {
+        strip_verbatim(PathBuf::from(path))
+    }
+
+    #[test]
+    fn verbatim_prefix_is_removed() {
+        assert_eq!(strip(r"\\?\C:\x"), PathBuf::from(r"C:\x"));
+        assert_eq!(strip(r"\\?\c:\a\b.txt"), PathBuf::from(r"c:\a\b.txt"));
+        assert_eq!(strip(r"\\?\C:\"), PathBuf::from(r"C:\"));
+        assert_eq!(
+            strip(r"\\?\UNC\server\share\x"),
+            PathBuf::from(r"\\server\share\x")
+        );
+        // Not verbatim: unchanged.
+        assert_eq!(strip(r"C:\x"), PathBuf::from(r"C:\x"));
+        assert_eq!(strip("/tmp/x"), PathBuf::from("/tmp/x"));
+        assert_eq!(
+            strip(r"\\server\share\x"),
+            PathBuf::from(r"\\server\share\x")
+        );
+        // Kept with the prefix: the plain form would name another file or none.
+        let long = format!(r"\\?\C:\{}", "a".repeat(300));
+        assert_eq!(strip(&long), PathBuf::from(&long));
+        for kept in [
+            r"\\?\C:\a\nul.txt",
+            r"\\?\C:\a\NUL",
+            r"\\?\C:\a\com1",
+            r"\\?\C:\a\Lpt9.log",
+            r"\\?\C:\a\x.",
+            r"\\?\C:\a\x ",
+            r"\\?\C:\a\..\b",
+            r"\\?\C:\a\\b",
+            r"\\?\C:\a/b",
+            r"\\?\UNC\server",
+            r"\\?\UNC\\share\x",
+            r"\\?\Volume{0b1c}\x",
+            r"\\?\C:",
+        ] {
+            assert_eq!(strip(kept), PathBuf::from(kept), "{kept}");
+        }
+        let superscript = "\\\\?\\C:\\a\\com\u{b9}.txt";
+        assert_eq!(strip(superscript), PathBuf::from(superscript));
+        for kept in [
+            r"\\?\C:\a\com0",
+            r"\\?\C:\a\LPT0.txt",
+            r"\\?\C:\a\conin$",
+            r"\\?\C:\a\CONOUT$.log",
+            r"\\?\C:\a\nul:x",
+            r"\\?\C:\a\con:",
+            r"\\?\C:\a\aux :x",
+        ] {
+            assert_eq!(strip(kept), PathBuf::from(kept), "{kept}");
+        }
+        // Not device names.
+        assert_eq!(strip(r"\\?\C:\a\com10"), PathBuf::from(r"C:\a\com10"));
+        assert_eq!(strip(r"\\?\C:\a\conin"), PathBuf::from(r"C:\a\conin"));
+        assert_eq!(strip(r"\\?\C:\a\x:nul"), PathBuf::from(r"C:\a\x:nul"));
+        assert_eq!(strip(r"\\?\C:\a\nullx"), PathBuf::from(r"C:\a\nullx"));
+        assert_eq!(strip(r"\\?\C:\a\con1.txt"), PathBuf::from(r"C:\a\con1.txt"));
+    }
+
+    #[test]
+    fn verbatim_limit_counts_utf16_units_of_the_result() {
+        // `C:\` and 256 more units: 259 units, one under the limit.
+        let fits = format!(r"\\?\C:\{}", "a".repeat(256));
+        assert_eq!(strip(&fits), PathBuf::from(&fits[4..]));
+        let over = format!(r"\\?\C:\{}", "a".repeat(257));
+        assert_eq!(strip(&over), PathBuf::from(&over));
+        // U+1F600 is 2 UTF-16 units (4 UTF-8 bytes): 3 + 2 * 128 = 259 units.
+        let wide = format!(r"\\?\C:\{}", "\u{1F600}".repeat(128));
+        assert_eq!(strip(&wide), PathBuf::from(&wide[4..]));
+        let wide_over = format!(r"\\?\C:\{}a", "\u{1F600}".repeat(128));
+        assert_eq!(strip(&wide_over), PathBuf::from(&wide_over));
+        // U+00E9 is 1 UTF-16 unit (2 UTF-8 bytes): 3 + 256 = 259 units.
+        let accents = format!(r"\\?\C:\{}", "\u{e9}".repeat(256));
+        assert_eq!(strip(&accents), PathBuf::from(&accents[4..]));
+    }
+
+    #[test]
+    fn a_verbatim_path_that_is_not_unicode_is_kept() {
+        let path = not_unicode();
+        assert!(path.to_str().is_none());
+        assert_eq!(strip_verbatim(path.clone()), path);
+    }
+
+    /// `\\?\C:\a` followed by bytes that are not UTF-8.
+    #[cfg(unix)]
+    fn not_unicode() -> PathBuf {
+        use std::os::unix::ffi::OsStringExt;
+        let mut bytes = br"\\?\C:\a".to_vec();
+        bytes.push(0xff);
+        PathBuf::from(std::ffi::OsString::from_vec(bytes))
+    }
+
+    /// `\\?\C:\a` followed by a lone UTF-16 surrogate.
+    #[cfg(windows)]
+    fn not_unicode() -> PathBuf {
+        use std::os::windows::ffi::OsStringExt;
+        let mut wide: Vec<u16> = r"\\?\C:\a".encode_utf16().collect();
+        wide.push(0xd800);
+        PathBuf::from(std::ffi::OsString::from_wide(&wide))
+    }
 }

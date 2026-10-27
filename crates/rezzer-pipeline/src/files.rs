@@ -610,13 +610,14 @@ impl SourceId {
 }
 
 /// `fs::canonicalize` of an absolute path; `None` for a relative name, which must not be
-/// resolved against the working directory, or when it fails (a file that is gone).
+/// resolved against the working directory, or when it fails (a file that is gone). Like
+/// [`crate::canonical_path`], without the Windows verbatim prefix where that is safe.
 fn canonical(resource: &str) -> Option<std::path::PathBuf> {
     let path = Path::new(resource);
     if !path.is_absolute() {
         return None;
     }
-    std::fs::canonicalize(path).ok()
+    std::fs::canonicalize(path).ok().map(crate::strip_verbatim)
 }
 
 /// A frontmatter value as Rezzer quotes it, unquoted again; `None` for any other shape.

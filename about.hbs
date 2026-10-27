@@ -1,0 +1,34 @@
+{{!--
+  Plain text template for cargo-about (scripts/third-party-notices.sh).
+  Triple braces: cargo-about does not turn off HTML escaping, so double braces
+  would write &quot; into the license texts.
+  The @@rezzer lines are markers for the script. It drops a block without any
+  crate line (a license used only by Rezzer's own path crates, which have no
+  registry source) and turns "@@rezzer-crate" into a list item.
+--}}
+Third-party notices for Rezzer
+==============================
+
+Rezzer is licensed under the Mozilla Public License 2.0, see LICENSE.
+
+The rezzer binary is built from the Rust crates listed below. For each
+license, this file names the crates that use it and gives the license text.
+Data that some of these crates bundle under other licenses follows at the end.
+
+{{#each licenses}}
+@@rezzer-block
+========================================================================
+{{{name}}} ({{{id}}})
+========================================================================
+
+Used by:
+{{#each used_by}}
+{{#if crate.source}}
+@@rezzer-crate {{{crate.name}}} {{{crate.version}}}
+{{/if}}
+{{/each}}
+
+{{{text}}}
+
+@@rezzer-end
+{{/each}}

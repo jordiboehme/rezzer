@@ -1,0 +1,43 @@
+# cargo-about configuration for THIRD-PARTY-NOTICES.txt in the release archives.
+# scripts/third-party-notices.sh runs it on crates/rezzer/Cargo.toml, so the graph is
+# the rezzer binary and what it links, and appends licenses/bundled-data.txt.
+
+# The allow list of deny.toml, in the same order. cargo-about picks the first entry that
+# satisfies a crate's license expression, so "MIT OR Apache-2.0" lists the MIT text.
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "Zlib",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "0BSD",
+]
+
+# The six release targets (release.yml build matrix). Crates gated by cfg() for other
+# targets are left out; windows-sys stays in through the Windows targets.
+targets = [
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-musl",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "aarch64-pc-windows-msvc",
+]
+
+# Build dependencies and dev dependencies do not ship in the binary.
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+
+# Rezzer's own crates with publish = false are MPL-2.0 like the whole project (LICENSE
+# ships next to the binary), so they are not listed. The format crates under
+# crates/formats have no publish = false; the template leaves them out by their missing
+# registry source.
+private = { ignore = true }
+
+# Built-in clarifications for crates in the tree whose license files confuse the scan:
+# chrono (two license texts in one file), cocoa (core-foundation-sys on macOS) and
+# rustix (rustix and linux-raw-sys ship a COPYRIGHT file).
+workarounds = ["chrono", "cocoa", "rustix"]

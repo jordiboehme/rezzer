@@ -23,6 +23,9 @@ rxing.workspace = true
 # Rezzer crate.
 rezzer-limits = { path = "../../rezzer-limits" }
 rxing = { workspace = true, features = ["encoders"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+# Only for getrusage in the memory tests.
 libc.workspace = true
 
 [[test]]
