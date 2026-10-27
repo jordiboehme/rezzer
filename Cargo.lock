@@ -1049,12 +1049,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
-name = "hex"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
-
-[[package]]
 name = "hybrid-array"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1724,7 +1718,6 @@ dependencies = [
  "assert_cmd",
  "barcodes",
  "flate2",
- "hex",
  "insta",
  "libc",
  "percent-encoding",
@@ -1767,7 +1760,6 @@ dependencies = [
  "csvsniff",
  "fileattrs",
  "flate2",
- "hex",
  "libc",
  "memmap2",
  "rezzer-limits",
@@ -1850,7 +1842,6 @@ name = "rezzer-pipeline"
 version = "0.1.0"
 dependencies = [
  "fileattrs",
- "hex",
  "libc",
  "percent-encoding",
  "rezzer-detect",

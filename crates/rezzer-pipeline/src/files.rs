@@ -101,7 +101,7 @@ fn last_component(source_name: &str) -> String {
 
 /// The first 8 hex of the SHA-256 of `name`.
 fn name_hash(name: &str) -> String {
-    hex::encode(&Sha256::digest(name.as_bytes())[..4])
+    rezzer_model::text::hex(&Sha256::digest(name.as_bytes())[..4])
 }
 
 /// The directory name stem for the assets of `source_name`: the last path component (split at

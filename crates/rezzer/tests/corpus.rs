@@ -300,7 +300,7 @@ fn manifest_rows() -> std::collections::BTreeMap<String, String> {
 
 fn sha256_of(file: &Path) -> String {
     use sha2::{Digest, Sha256};
-    hex::encode(Sha256::digest(std::fs::read(file).unwrap()))
+    rezzer_model::text::hex(&Sha256::digest(std::fs::read(file).unwrap()))
 }
 
 /// Every pipeline corpus file is listed in MANIFEST.md with its SHA-256, and every row right

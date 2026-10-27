@@ -185,7 +185,7 @@ pub(crate) fn key(src: &Source, reader: Option<(&str, &str)>, config: &Config) -
         "enrich_disabled": disabled,
     });
     // serde_json keeps object keys sorted, so the text is canonical.
-    hex::encode(Sha256::digest(material.to_string().as_bytes()))
+    rezzer_model::text::hex(&Sha256::digest(material.to_string().as_bytes()))
 }
 
 #[cfg(test)]

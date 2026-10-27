@@ -284,7 +284,7 @@ fn build(
     detector: &Detector<'_>,
 ) -> Source {
     let slice = bytes.as_slice();
-    let sha256 = hex::encode(Sha256::digest(slice));
+    let sha256 = rezzer_model::text::hex(&Sha256::digest(slice));
     let size = slice.len() as u64;
     let (format, detection) = detector(&name, mime, slice);
     Source {
