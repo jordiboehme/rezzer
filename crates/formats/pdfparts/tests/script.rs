@@ -232,11 +232,26 @@ fn long_scripts_are_scanned_once() {
     let unclosed = "getField(\"".repeat(100_000);
     let nested = format!("AFSimple_Calculate(\"SUM\", {})", "[".repeat(1 << 20));
     let calls = "getField(\"a\");".repeat(100_000);
+    let before = pdfparts::work_steps();
     let start = Instant::now();
     assert!(field_refs(&unclosed).dynamic);
     assert!(field_refs(&nested).dynamic);
     assert_eq!(describe(&nested), None);
     assert_eq!(field_refs(&calls).names, ["a"]);
     let took = start.elapsed();
-    assert!(took < Duration::from_secs(1), "{took:?}");
+    let steps = before.zip(pdfparts::work_steps()).map(|(b, a)| a - b);
+    eprintln!("long scripts: {steps:?} steps in {took:?}");
+    // The steps of the scans ([`pdfparts::work_steps`]), measured once (2026-10-27, debug
+    // build) with half again as margin: about one for each byte scanned. The count
+    // is the same on every machine; the wall time is only a safety stop.
+    const STEPS: u64 = 3_698_637;
+    if cfg!(debug_assertions) {
+        assert!(
+            steps.is_some_and(|n| n <= STEPS + STEPS / 2),
+            "{steps:?} steps, measured {STEPS}"
+        );
+    } else {
+        assert_eq!(steps, None);
+    }
+    assert!(took < Duration::from_secs(60), "{took:?}");
 }

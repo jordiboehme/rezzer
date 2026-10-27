@@ -125,6 +125,7 @@ impl Shared<'_> {
     }
 
     fn poll(&self, moved: usize) -> io::Result<()> {
+        crate::work::add(moved as u64);
         let m = self.moved.get().saturating_add(moved as u64);
         self.moved.set(m);
         if m >= self.next_check.get() {

@@ -225,10 +225,10 @@ fn huge_count_is_bounded() {
             .unwrap()
             .set("Count", i64::from(i32::MAX));
     });
-    let start = std::time::Instant::now();
-    let pdf = open(&bytes, None).unwrap();
-    assert_eq!(pdf.pages(&never).len(), 1);
-    assert!(start.elapsed().as_secs() < 5);
+    let (pages, steps, took) = common::counted(|| open(&bytes, None).unwrap().pages(&never));
+    assert_eq!(pages.len(), 1);
+    // Measured once (2026-10-27).
+    common::assert_work("huge count", steps, 1_171, took);
 }
 
 #[test]

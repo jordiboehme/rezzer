@@ -88,6 +88,40 @@ pub fn cpu_time<T>(f: impl FnOnce() -> T) -> (T, std::time::Duration) {
     (out, start.elapsed())
 }
 
+/// The wall-clock stop of the work-bound tests: far above any machine, so only a hang fails
+/// it. The work itself is bounded by counted steps.
+pub const SAFETY: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Runs `f` and gives its result, the steps of work it did ([`pdfparts::work_steps`], `None`
+/// in a release build, which does not count them) and its wall time.
+pub fn counted<T>(f: impl FnOnce() -> T) -> (T, Option<u64>, std::time::Duration) {
+    let before = pdfparts::work_steps();
+    let start = std::time::Instant::now();
+    let out = f();
+    let took = start.elapsed();
+    let steps = before.zip(pdfparts::work_steps()).map(|(b, a)| a - b);
+    (out, steps, took)
+}
+
+/// Checks a work bound: at most the `measured` steps with half of them again as margin (in a
+/// debug build, which counts them), and the wall time under [`SAFETY`]. Each `measured` is
+/// the count of the input when the bound was set (2026-10-27, debug build, `--no-capture`):
+/// the count is the same on every machine, so a slow runner cannot fail the test, and a
+/// growth past the margin is a change in the work, not a slow machine.
+pub fn assert_work(what: &str, steps: Option<u64>, measured: u64, took: std::time::Duration) {
+    let max = measured + measured / 2;
+    eprintln!("{what}: {steps:?} steps (bound {max}) in {took:?}");
+    if cfg!(debug_assertions) {
+        assert!(
+            steps.is_some_and(|n| n <= max),
+            "{what}: {steps:?} steps of work, bound {max}"
+        );
+    } else {
+        assert_eq!(steps, None);
+    }
+    assert!(took < SAFETY, "{what}: took {took:?}");
+}
+
 /// The bound every memory test checks.
 pub const RSS_BOUND: u64 = 512 * 1024 * 1024;
 
