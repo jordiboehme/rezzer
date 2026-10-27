@@ -374,8 +374,7 @@ fn the_worker_stops_waiting_at_the_time_limit() {
     let took = start.elapsed();
     assert!(matches!(got, Err(Stop::Time(_))), "{got:?} after {took:?}");
     assert!(took < Duration::from_secs(2), "{took:?}");
-    // The next scan waits behind the abandoned call at most until its own limit, and a small
-    // code is still read once the worker is free.
+    // The abandoned call holds its own thread only: a new thread reads the next small code.
     let m = modules(Symbology::QrCode, URL, None);
     let (gray, w, h) = m.gray(4, 4, 0);
     let mut read = None;
@@ -672,5 +671,29 @@ fn small_codes_of_one_pixel_a_module_are_read() {
             vec![(s, text.to_string())],
             "{s:?}"
         );
+    }
+}
+
+#[test]
+fn work_steps_count_decoder_calls() {
+    let m = modules(Symbology::QrCode, URL, None);
+    let (gray, w, h) = m.gray(4, 4, 0);
+    let picture = Picture {
+        pixels: Pixels::Gray(&gray),
+        width: w,
+        height: h,
+    };
+    let steps = || {
+        let before = barcodes::work_steps();
+        decode(&picture, &Limits::default()).expect("scan");
+        let after = barcodes::work_steps();
+        before.zip(after).map(|(b, a)| a - b)
+    };
+    let (first, second) = (steps(), steps());
+    if cfg!(debug_assertions) {
+        assert!(first.is_some_and(|n| n > 0), "{first:?}");
+        assert_eq!(first, second);
+    } else {
+        assert_eq!((first, second), (None, None));
     }
 }

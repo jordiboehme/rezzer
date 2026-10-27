@@ -7,7 +7,7 @@ Reads barcodes and QR codes in untrusted pictures, with bounds.
 - MaxiCode, EAN-8 and UPC-E are not read.
 - A large picture is read at its own resolution in overlapping tiles.
 - Each picture has a time limit, a pixel cap, a code cap and a payload cap.
-- `Worker` runs the decoder on one shared thread and stops waiting at the time limit.
+- `Worker` runs the decoder on worker threads with one shared queue and stops waiting at the time limit. A call past its time is left to end on its own, and a new thread takes the next call. At most two such calls run at once. Past that, calls wait for them.
 
 The decoder is [rxing](https://github.com/rxing-core/rxing) (Apache-2.0).
 
