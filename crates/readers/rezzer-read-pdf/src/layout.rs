@@ -1081,7 +1081,19 @@ pub(crate) fn page_blocks_at(
                             .iter()
                             .map(|row| {
                                 row.iter()
-                                    .map(|c| c.runs.iter().map(|r| r.text.as_str()).collect())
+                                    .map(|c| head::Cell {
+                                        text: c.runs.iter().map(|r| r.text.as_str()).collect(),
+                                        spot: c.runs.first().map(|first| head::Spot {
+                                            y: first.y,
+                                            x0: c.runs.iter().map(|r| r.x).fold(first.x, f32::min),
+                                            x1: c
+                                                .runs
+                                                .iter()
+                                                .map(|r| r.x + r.w)
+                                                .fold(first.x, f32::max),
+                                            size: first.size,
+                                        }),
+                                    })
                                     .collect()
                             })
                             .collect(),

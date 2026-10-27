@@ -4,10 +4,10 @@
 
 //! What the head of page 1 says about the document: its title and its date. Both are found
 //! by general rules. A date is chosen only when a whole date label marks it as the document
-//! date: before it on its line, over it, or in the cell left of it in a table, and the label
-//! governs that one date (a label over a list of dates marks none). A date nothing marks is
-//! never chosen, also when it is the only date of the head: the loss says that it stands
-//! there.
+//! date: before it on its line, over it, or in the cell left of it in a table, and the date is
+//! the only one in its column on the page (a label over or before a list of dates marks
+//! none). A date nothing marks is never chosen, also when it is the only date of the head: the
+//! loss says that it stands there.
 
 use rezzer_model::FoundDate;
 
@@ -227,7 +227,7 @@ pub(crate) enum PageDate {
 /// A date as written: its separator and its parts.
 type Written = (char, [u32; 3]);
 
-/// A table the layout made on page 1, its rows as the text of their cells.
+/// A table the layout made on page 1, its rows as cells.
 #[derive(Debug, Clone)]
 pub(crate) struct Table {
     /// The field reader made it from drawn boxes or rows of fields: a label and its value in
@@ -235,7 +235,37 @@ pub(crate) struct Table {
     pub pairs: bool,
     /// The top of the table, in the frame of the runs.
     pub top: f32,
-    pub rows: Vec<Vec<String>>,
+    pub rows: Vec<Vec<Cell>>,
+}
+
+/// A cell of a [`Table`]: its text and where its ink stands, when it has any.
+#[derive(Debug, Clone)]
+pub(crate) struct Cell {
+    pub text: String,
+    pub spot: Option<Spot>,
+}
+
+/// Where a date (or a cell) stands on page 1: its baseline, its x span and its size.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Spot {
+    pub y: f32,
+    pub x0: f32,
+    pub x1: f32,
+    pub size: f32,
+}
+
+impl Spot {
+    /// Whether `other` is the same place on the page, within half a size.
+    fn same(&self, other: &Spot) -> bool {
+        (self.y - other.y).abs() <= self.size / 2.0 && (self.x0 - other.x0).abs() <= self.size / 2.0
+    }
+
+    /// Whether `other` stands in this spot's column: its x span, widened by [`BESIDE_SIZES`]
+    /// of its sizes on each side (an indented entry of a list), overlaps this one's.
+    fn in_column_of(&self, other: &Spot) -> bool {
+        let slack = BESIDE_SIZES * other.size;
+        other.x0 - slack <= self.x1 && other.x1 + slack >= self.x0
+    }
 }
 
 /// A date of page 1 that a date label marks as the document date.
@@ -246,6 +276,8 @@ struct Marked {
     text: String,
     /// The label as written, white space collapsed.
     label: String,
+    /// Where the date stands.
+    spot: Spot,
 }
 
 /// What page 1 holds of dates, gathered from its lines before the layout and from its laid
@@ -256,6 +288,8 @@ pub(crate) struct Dates {
     marked: Vec<Marked>,
     /// Every full date in the top third of the page, marked or not.
     head: Vec<Written>,
+    /// Where every full date of the page stands, marked or not (see [`page_dates`]).
+    spots: Vec<Spot>,
 }
 
 impl Dates {
@@ -263,6 +297,7 @@ impl Dates {
     pub(crate) fn merge(&mut self, more: Dates) {
         self.marked.extend(more.marked);
         self.head.extend(more.head);
+        self.spots.extend(more.spots);
     }
 }
 
@@ -288,42 +323,51 @@ fn pieces(runs: &[Run]) -> Vec<Line<'_>> {
 
 /// The dates of the lines of page 1 (its runs as read, tables and furniture still in), read
 /// piece by piece (see [`pieces`]), with `height` the height of the page. Only full dates
-/// count, with a year of four digits. A date is marked when the text of its piece before it
-/// is a whole [`DATE_LABELS`] entry and nothing else (see [`whole_label`]: `Datum 01.02.2026`,
-/// `DATE: 2026-02-01`; not `Eintritt: Datum 01.01.2020` or `Kundennr. 4711 Datum 01.02.2026`),
-/// at most [`BESIDE_SIZES`] sizes away, the piece holds no other date (`Datum 01.01.2026 bis
-/// 31.01.2026` marks nothing), and no date stands under the date in the next [`VALUE_LINES`]
-/// pieces (see [`date_under`]: `Datum 15.01.2026` over `16.01.2026` heads a list). Every date
-/// in the top third of the page is a date of the head, marked or not.
+/// count, with a year of four digits; where each stands is kept (see [`Dates::spots`]). A
+/// date is marked when the text of its piece before it is a whole [`DATE_LABELS`] entry and
+/// nothing else (see [`whole_label`]: `Datum 01.02.2026`, `DATE: 2026-02-01`; not `Eintritt:
+/// Datum 01.01.2020` or `Kundennr. 4711 Datum 01.02.2026`), at most [`BESIDE_SIZES`] sizes
+/// away, and the piece holds no other date (`Datum 01.01.2026 bis 31.01.2026` marks nothing).
+/// Every date in the top third of the page is a date of the head, marked or not.
 pub(crate) fn page_dates(runs: &[Run], height: Option<f32>) -> Dates {
     let mut out = Dates::default();
     let in_head = |l: &Line<'_>| height.is_some_and(|h| h > 0.0 && l.y + l.h >= h * HEAD_SHARE);
-    let all = pieces(runs);
-    for (k, l) in all.iter().enumerate() {
+    for l in &pieces(runs) {
         let found = scan::dates(&l.text, 4..=4);
         for d in &found {
             let written = (d.sep, d.parts);
             if in_head(l) {
                 out.head.push(written);
             }
+            let spot = spot_of(l, d.start, d.end);
+            out.spots.push(spot);
             let before = &l.text[..d.start];
             let label = whole_label(before).filter(|_| {
                 let label_end = before.trim_end().len();
-                let (x0, x1) = span_of(l, d.start, d.end);
-                found.len() == 1
-                    && ink_gap(l, label_end, d.start) <= BESIDE_SIZES * l.size
-                    && !date_under(all.iter().skip(k + 1).take(VALUE_LINES), l, x0, x1)
+                found.len() == 1 && ink_gap(l, label_end, d.start) <= BESIDE_SIZES * l.size
             });
             if let Some(label) = label {
                 out.marked.push(Marked {
                     written,
                     text: l.text[d.start..d.end].to_string(),
                     label,
+                    spot,
                 });
             }
         }
     }
     out
+}
+
+/// Where the bytes `start..end` of the text of `l` stand (see [`span_of`]).
+fn spot_of(l: &Line<'_>, start: usize, end: usize) -> Spot {
+    let (x0, x1) = span_of(l, start, end);
+    Spot {
+        y: l.y,
+        x0,
+        x1,
+        size: l.size,
+    }
 }
 
 /// The x span of the bytes `start..end` of the text of `l`: from the runs that hold them, a
@@ -366,26 +410,6 @@ fn starts_with_date(l: &Line<'_>) -> bool {
         .is_some_and(|d| d.start == 0)
 }
 
-/// Whether one of `pieces`, below `over` on the page, starts with a date and stands in the
-/// column `x0..x1`: its x span, widened by [`BESIDE_SIZES`] sizes on each side (an indented
-/// entry of a list), overlaps the column. Such a date makes the date in that column above it
-/// one entry of a list.
-fn date_under<'a>(
-    pieces: impl Iterator<Item = &'a Line<'a>>,
-    over: &Line<'_>,
-    x0: f32,
-    x1: f32,
-) -> bool {
-    pieces.into_iter().any(|w| {
-        let slack = BESIDE_SIZES * w.size;
-        w.y < over.y
-            && !std::ptr::eq(w, over)
-            && w.x - slack <= x1
-            && right_of(w) + slack >= x0
-            && starts_with_date(w)
-    })
-}
-
 /// The white space in points between the ink that ends at byte `end` of the text of `l` and
 /// the ink that starts at byte `start`: the gap between their runs, 0 within one run.
 fn ink_gap(l: &Line<'_>, end: usize, start: usize) -> f32 {
@@ -412,18 +436,19 @@ fn ink_gap(l: &Line<'_>, end: usize, start: usize) -> f32 {
 /// (see [`value_of`]). In a table of exactly two columns (labels and values) whose top lies in
 /// the top half of the page, a cell that is a whole entry marks the cell right of it when that
 /// cell is a full date and nothing else (`Datum: | 26.10.2026`), it is the only such label
-/// cell with a date in the table, and no row has a date under an empty label cell (a list
-/// goes on in the value column). A table of more columns marks nothing: a row of items may
-/// end in `Datum | 15.01.2026` or list dates after a title (`Datum | 15.01.2026 |
-/// 16.01.2026`, `Datum | 15.01.2026 | Stunden | 8`), and a column title `Datum` has another
-/// title beside it. A table of label and value pairs
-/// that the field reader made counts only when its top lies in the top third of the page,
-/// where the header fields of a form stand: lower down it may be one row of items under small
-/// column titles, each title read as the label of the value below it.
+/// cell with a date in the table, and no row has a date under a label cell without letters (a
+/// list goes on in the value column, under an empty cell or a dash). A table of more columns
+/// marks nothing: a row of items may end in `Datum | 15.01.2026` or list dates after a title
+/// (`Datum | 15.01.2026 | 16.01.2026`, `Datum | 15.01.2026 | Stunden | 8`), and a column title
+/// `Datum` has another title beside it. A table of label and value pairs that the field
+/// reader made counts only when its top lies in the top third of the page, where the header
+/// fields of a form stand: lower down it may be one row of items under small column titles,
+/// each title read as the label of the value below it. Whether a marked date is the only date
+/// of its column is decided once for every mark, in [`document_date`].
 pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: Option<f32>) -> Dates {
     let mut out = Dates::default();
     let lines = pieces(runs);
-    let add = |label: String, value: &str, out: &mut Dates| {
+    let add = |label: String, value: &str, spot: Spot, out: &mut Dates| {
         let Some(d) = scan::dates(value, 4..=4)
             .into_iter()
             .next()
@@ -435,42 +460,45 @@ pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: Option<f32>) ->
             written: (d.sep, d.parts),
             text: value[d.start..d.end].to_string(),
             label,
+            spot,
         });
     };
     for (k, l) in lines.iter().enumerate() {
         if let Some(label) = whole_label(&l.text)
-            && let Some(v) = value_of(&lines, k, height)
+            && let Some(v) = value_of(&lines, k)
         {
-            add(label, &v.text, &mut out);
+            let end = scan::dates(&v.text, 4..=4).first().map_or(0, |d| d.end);
+            add(label, &v.text, spot_of(v, 0, end), &mut out);
         }
     }
     let above = |top: f32, share: f32| height.is_some_and(|h| h > 0.0 && top >= h * share);
-    let is_date = |cell: &str| {
-        let cell = cell.trim();
-        scan::dates(cell, 4..=4)
+    let is_date = |cell: &Cell| {
+        let text = cell.text.trim();
+        scan::dates(text, 4..=4)
             .first()
-            .is_some_and(|d| d.start == 0 && d.end == cell.len())
+            .is_some_and(|d| d.start == 0 && d.end == text.len())
     };
     for t in tables
         .iter()
         .filter(|t| above(t.top, if t.pairs { HEAD_SHARE } else { HALF }))
         .filter(|t| t.rows.iter().all(|row| row.len() == 2))
     {
-        // A date under an empty label cell continues a list in the value column.
+        // A date under a label cell without letters continues a list in the value column.
         let continued = t
             .rows
             .iter()
-            .any(|row| row[0].trim().is_empty() && is_date(&row[1]));
+            .any(|row| !row[0].text.chars().any(char::is_alphabetic) && is_date(&row[1]));
         let mut labelled = t
             .rows
             .iter()
             .filter(|row| is_date(&row[1]))
-            .filter_map(|row| whole_label(&row[0]).map(|label| (label, &row[1])));
+            .filter_map(|row| whole_label(&row[0].text).map(|label| (label, &row[1])));
         if let Some((label, value)) = labelled.next()
             && labelled.next().is_none()
             && !continued
+            && let Some(spot) = value.spot
         {
-            add(label, value.trim(), &mut out);
+            add(label, value.text.trim(), spot, &mut out);
         }
     }
     out
@@ -479,15 +507,27 @@ pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: Option<f32>) ->
 /// A table whose top lies in the upper half of the page may hold the document date.
 const HALF: f32 = 0.5;
 
-/// The document date of page 1 from what `dates` holds: a date that a date label marks.
+/// The document date of page 1 from what `dates` holds: a date that a date label marks and
+/// that is the only date in its column on page 1 (every date whose x span, widened by
+/// [`BESIDE_SIZES`] sizes on each side, overlaps the marked date's x span, above or below it,
+/// from the top of the page to its end: a list of dates under or over a label marks none).
 /// Marked dates that differ give no date, and a marked date that cannot be read for sure
 /// gives none either; both say so. A date nothing marks is never chosen: when the
 /// top third of the page holds dates, the loss says how many stand there. A dotted date
 /// reads day first, a dashed one year first, a slashed one only when one part is over 12;
 /// only a day the calendar has.
 pub(crate) fn document_date(dates: &Dates) -> PageDate {
-    if let Some(first) = dates.marked.first() {
-        let kinds = distinct(dates.marked.iter().map(|s| s.written));
+    // A label governs one date: a marked date with another date in its column, above or below
+    // it anywhere on the page, heads or belongs to a list and is no mark.
+    let alone = |m: &&Marked| {
+        !dates
+            .spots
+            .iter()
+            .any(|s| !s.same(&m.spot) && m.spot.in_column_of(s))
+    };
+    let marked: Vec<&Marked> = dates.marked.iter().filter(alone).collect();
+    if let Some(first) = marked.first() {
+        let kinds = distinct(marked.iter().map(|s| s.written));
         if kinds > 1 {
             return PageDate::Unsure(format!(
                 "{kinds} different dates stand after a date label on page 1; none is taken as \
@@ -540,21 +580,17 @@ fn whole_label(text: &str) -> Option<String> {
 /// A label's value stands beside it at most this many label sizes after its end.
 const BESIDE_SIZES: f32 = 6.0;
 
-/// The value of the label piece `all[k]`, with `height` the height of the page: among the
-/// next [`VALUE_LINES`] pieces, the nearest that starts with a date and stands beside it on its
-/// baseline (to its right, at most [`BESIDE_SIZES`] label sizes after its end), else the one
-/// right below it at its left edge (within the label's size) that is a date alone on its line
-/// (see [`date_alone`]). The label governs one date only: no other date may stand under the
-/// value in the next [`VALUE_LINES`] pieces (a value beside the label), or anywhere below the
-/// label in the label's or the value's column (see [`date_under`]) down to the middle of the
-/// page or the next [`VALUE_LINES`] pieces, whichever reaches lower (a value below the label).
-/// A row of items under column titles has more cells on the line, and a column of dates under
-/// a title is a list, however spaced or indented: neither is the value of one label.
-fn value_of<'a, 'r>(all: &'a [Line<'r>], k: usize, height: Option<f32>) -> Option<&'a Line<'r>> {
+/// The value of the label piece `all[k]`: among the next [`VALUE_LINES`] pieces, the nearest
+/// that starts with a date and stands beside it on its baseline (to its right, at most
+/// [`BESIDE_SIZES`] label sizes after its end), else the one right below it at its left edge
+/// (within the label's size) that is a date alone on its line (see [`date_alone`]): a row of
+/// items under column titles has more cells on the line and is no value of one label. Whether
+/// the label governs that one date (no other date in its column) is checked in
+/// [`document_date`].
+fn value_of<'a, 'r>(all: &'a [Line<'r>], k: usize) -> Option<&'a Line<'r>> {
     let label = &all[k];
     let end = right_of(label);
     let after = || all.iter().skip(k + 1).take(VALUE_LINES);
-    let at = |v: &Line<'_>| all.iter().position(|p| std::ptr::eq(p, v)).unwrap_or(k);
     let beside = after()
         .filter(|v| {
             (v.y - label.y).abs() <= label.size / 2.0
@@ -562,23 +598,12 @@ fn value_of<'a, 'r>(all: &'a [Line<'r>], k: usize, height: Option<f32>) -> Optio
                 && v.x - end <= BESIDE_SIZES * label.size
         })
         .filter(|v| starts_with_date(v))
-        .min_by(|a, b| a.x.total_cmp(&b.x))
-        .filter(|v| {
-            let under = all.iter().skip(at(v) + 1).take(VALUE_LINES);
-            !date_under(under, v, v.x, right_of(v))
-        });
+        .min_by(|a, b| a.x.total_cmp(&b.x));
     beside.or_else(|| {
-        let half = height.map_or(0.0, |h| h * HALF);
         after()
             .filter(|v| right_below(label, v) && (v.x - label.x).abs() <= label.size)
             .filter(|v| date_alone(all, v))
             .max_by(|a, b| a.y.total_cmp(&b.y))
-            .filter(|v| {
-                let reach = after().next_back().map_or(label.y, |l| l.y).min(half);
-                let region = all.iter().filter(|w| w.y >= reach && !std::ptr::eq(*w, *v));
-                let (x0, x1) = (label.x.min(v.x), end.max(right_of(v)));
-                !date_under(region, label, x0, x1)
-            })
     })
 }
 

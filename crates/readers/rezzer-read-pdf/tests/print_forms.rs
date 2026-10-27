@@ -5565,9 +5565,10 @@ fn rereview_r6_probes_give_no_wrong_date() {
                     one,
                 ),
                 (
+                    // Two dates in the value column: the Datum date is lost.
                     "T9: key and value table with Datum and Lieferdatum",
                     title.clone() + &ruled(key_value, &two_cols, 750.0),
-                    Date("2026-01-15", "date label \"Datum\" on page 1"),
+                    two,
                 ),
                 (
                     "D1: weekday and den in the body",
@@ -5913,6 +5914,138 @@ fn rereview_r9_probes_give_no_wrong_date() {
                     _ => None,
                 };
                 assert_eq!(front(&out, "source_date").as_deref(), date, "{case}");
+            }
+        }
+    }
+}
+
+#[test]
+fn rereview_r10_probes_give_no_wrong_date() {
+    // The probes of the round 10 re-review (G1 to G5, U1 to U10) as a test, and the shape of a
+    // header field table over an item table whose date column lies under the header's value
+    // column. A marked date must be the only date in its column on page 1, above or below it.
+    // Never a wrong date. Body cases stand at y 250, under the `headed` prose.
+    use HeadWant::*;
+    let one = Lost(ONE_DATE);
+    let two = Lost(TWO_DATES);
+    let three = Lost("3 dates stand in the head of page 1; none is marked as the document date");
+    for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
+        for font in ["FL", "FB"] {
+            let s = |x: f32, y: f32, t: &str| common::show(font, size, x, y, t);
+            let ruled =
+                |rows: &[&[&str]], xs: &[f32], top: f32| ruled_rows(rows, xs, top, size, font);
+            let pitch = size * 1.2;
+            let title = common::show("FB", size * 1.6, 40.0, 800.0, "Musterbescheid");
+            let two_cols = [40.0f32, 160.0];
+            let dashes: &[&[&str]] = &[
+                &["Datum", "15.01.2026"],
+                &["-", "16.01.2026"],
+                &["-", "17.01.2026"],
+            ];
+            let one_row: &[&[&str]] = &[&["Datum", "15.01.2026"]];
+            let twice: &[&[&str]] = &[
+                &["Datum", "15.01.2026"],
+                &["Text", "Muster"],
+                &["Datum", "15.01.2026"],
+            ];
+            let period: &[&[&str]] = &[&["Datum", "15.01.2026"], &["Bis", "16.01.2026"]];
+            let items: &[&[&str]] = &[
+                &["Pos", "Datum", "Betrag"],
+                &["1", "15.01.2026", "9,99"],
+                &["2", "16.01.2026", "19,99"],
+            ];
+            // A long list entry: the label (over or beside its date), ten text lines, the next
+            // date, from `top` down.
+            let long_entry = |top: f32, beside: bool| {
+                let mut h = title.clone();
+                let mut y = top;
+                if beside {
+                    h += &s(40.0, y, "Datum 15.01.2026");
+                } else {
+                    h += &s(40.0, y, "Datum");
+                    y -= pitch;
+                    h += &s(40.0, y, "15.01.2026");
+                }
+                for _ in 0..10 {
+                    y -= pitch;
+                    h += &s(40.0, y, "Muster Text der Zeile");
+                }
+                h + &s(40.0, y - pitch, "16.01.2026")
+            };
+            let cases: Vec<(&str, String, HeadWant)> = vec![
+                (
+                    "U1: continuation rows with a dash as their label",
+                    title.clone() + &ruled(dashes, &two_cols, 750.0),
+                    three,
+                ),
+                (
+                    "U2: a one-row table, lone dates under its value column",
+                    title.clone()
+                        + &ruled(one_row, &two_cols, 750.0)
+                        + &s(164.0, 700.0, "16.01.2026")
+                        + &s(164.0, 700.0 - pitch, "17.01.2026"),
+                    three,
+                ),
+                (
+                    "U3: the same Datum row twice",
+                    title.clone() + &ruled(twice, &two_cols, 750.0),
+                    one,
+                ),
+                (
+                    "U4: label over its date, a long entry, the next date, in the body",
+                    long_entry(250.0, false),
+                    Nothing,
+                ),
+                (
+                    "U5: label beside its date, a long entry, the next date, in the head",
+                    long_entry(760.0, true),
+                    two,
+                ),
+                (
+                    "U6: label beside its date, a long entry, the next date, in the body",
+                    long_entry(250.0, true),
+                    Nothing,
+                ),
+                (
+                    "U7: a date on the line over Datum 15.01.2026",
+                    title.clone()
+                        + &s(40.0, 760.0, "16.01.2026")
+                        + &s(40.0, 760.0 - pitch, "Datum 15.01.2026"),
+                    two,
+                ),
+                (
+                    "U8: a date right aligned under the date beside its label",
+                    title.clone()
+                        + &s(40.0, 760.0, "Datum 15.01.2026")
+                        + &s(40.0 + size * 14.0, 760.0 - pitch, "16.01.2026"),
+                    two,
+                ),
+                (
+                    "U9: a date in the next column one line under the lone date",
+                    title.clone()
+                        + &s(40.0, 760.0, "Datum")
+                        + &s(40.0, 760.0 - pitch, "15.01.2026")
+                        + &s(40.0 + size * 9.0, 760.0 - 2.0 * pitch, "16.01.2026"),
+                    two,
+                ),
+                (
+                    "U10: a Datum row over a Bis row",
+                    title.clone() + &ruled(period, &two_cols, 750.0),
+                    two,
+                ),
+                (
+                    "H1: a header field table over an item table with a date column under its values",
+                    title.clone()
+                        + &label_value_rows(font, size, true)
+                        + &ruled(items, &[40.0, 200.0, 320.0], 500.0),
+                    one,
+                ),
+            ];
+            for (name, head, want) in cases {
+                let out = read(&headed(&head, size, scale, ""));
+                let case = format!("{name} in {size} pt {font}");
+                assert_head(&out, want, &case);
+                assert_eq!(front(&out, "source_date"), None, "{case}");
             }
         }
     }
