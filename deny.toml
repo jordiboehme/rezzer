@@ -5,10 +5,15 @@
 # notice"):
 # - the predefined CMaps, through hayro-cmap 0.1.0 (assets/LICENSE.txt):
 #   "Copyright 1990-2023 Adobe. All rights reserved." BSD-3-Clause
-# - the standard 14 font substitutes from PDFium (assets/LICENSE_FOXIT):
-#   "Copyright 2014 PDFium Authors. All rights reserved." and "Original code copyright 2014
-#   Foxit Software Inc." BSD-3-Clause
-# - a CMYK ICC profile from Compact-ICC-Profiles, CC0-1.0
+# - the standard 14 font substitutes from PDFium: "Copyright 2014 PDFium Authors. All
+#   rights reserved." BSD-3-Clause (assets/LICENSE_FOXIT) and "Original code copyright 2014
+#   Foxit Software Inc." (assets/README.md)
+# - a CMYK ICC profile from Compact-ICC-Profiles, CC0-1.0 (assets/CGATS_LICENSE.txt;
+#   the sources are named in assets/README.md)
+# These texts are copied unchanged into licenses/bundled-data.txt, which
+# scripts/third-party-notices.sh appends to THIRD-PARTY-NOTICES.txt in every release
+# archive. On a bump of hayro-interpret or hayro-cmap, check the files again and update it.
+# about.toml `accepted` repeats the allow list below in the same order; change both.
 # Only licenses the tree uses are listed; add one (MIT-like or MPL) when a new crate needs it.
 allow = ["MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-3-Clause", "Zlib", "MPL-2.0", "Unicode-3.0", "Unlicense", "0BSD"]
 

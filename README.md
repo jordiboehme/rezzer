@@ -27,13 +27,31 @@ Rezzer is a knowledge extraction pipeline for AI agents. It reads your files and
 
 It's not a converter that dumps plain text. A spreadsheet is more than its values. A contract is more than its words. Rezzer keeps the formulas, the comments, the tracked changes and everything else that tells what a file means.
 
-One Rust binary. It runs locally as an MCP server and a CLI on macOS and Linux (Windows maybe later). Your files never leave your machine. And yes, Rezzer is an MCP. The friendly kind. It reads your files and gives the knowledge back to you.
+One Rust binary. It runs locally as an MCP server and a CLI on macOS, Linux and Windows. Your files never leave your machine. And yes, Rezzer is an MCP. The friendly kind. It reads your files and gives the knowledge back to you.
 
 ## Status
 
-Early. The foundation is in: the pipeline, the document model, the renderer, the CLI and the MCP server. Rezzer reads plain text in any encoding, Markdown, CSV, spreadsheets (XLSX, XLSM, XLSB and ODS) and PDF today. For spreadsheets you get the values and the logic behind them: formulas, inputs, results, names and dependencies. Rezzer finds the tables, headers and titles inside a sheet, can write each row as a record and can read only the sheets you pick. For PDF you get the text in reading order with its tables, the outline, annotations at their passage, form fields with their calculations, scripts, signatures and revisions. These formats make up 0.1.0, the first release. Release 0.2.0 brings HTML, the office formats, EPUB and Atlassian Document Format. Until the first release is out, you build Rezzer from source. Star the repo if you want to see it rez.
+Early. The foundation is in: the pipeline, the document model, the renderer, the CLI and the MCP server. Rezzer reads plain text in any encoding, Markdown, CSV, spreadsheets (XLSX, XLSM, XLSB and ODS) and PDF today. For spreadsheets you get the values and the logic behind them: formulas, inputs, results, names and dependencies. Rezzer finds the tables, headers and titles inside a sheet, can write each row as a record and can read only the sheets you pick. For PDF you get the text in reading order with its tables, the outline, annotations at their passage, form fields with their calculations, scripts, signatures and revisions. These formats make up 0.1.0, the first release. Release 0.2.0 brings HTML, the office formats, EPUB and Atlassian Document Format. Star the repo if you want to see it rez.
 
 ## Try it
+
+### Install
+
+With Homebrew on macOS and Linux:
+
+```sh
+brew install jordiboehme/tap/rezzer
+```
+
+Or download the archive for your system from the [latest release](https://github.com/jordiboehme/rezzer/releases/latest):
+
+- Linux: `rezzer-v<version>-linux-amd64.tar.gz` or `rezzer-v<version>-linux-arm64.tar.gz`. The binary is static and runs on any distribution.
+- macOS: `rezzer-v<version>-macos-arm64.tar.gz` (Apple silicon) or `rezzer-v<version>-macos-intel.tar.gz`. The binary is signed and notarized.
+- Windows: `rezzer-v<version>-windows-amd64.zip` or `rezzer-v<version>-windows-arm64.zip`. The binary is not signed yet, so SmartScreen may ask once before it runs.
+
+Each archive has one folder with the binary (`rezzer`, or `rezzer.exe` on Windows), the license and this README. `THIRD-PARTY-NOTICES.txt` in the same folder lists the licenses of the third-party code inside. Put the binary somewhere on your `PATH`.
+
+### Build from source
 
 You need Rust (rustup picks the right version from `rust-toolchain.toml`).
 
@@ -42,6 +60,40 @@ git clone https://github.com/jordiboehme/rezzer
 cd rezzer
 cargo install --path crates/rezzer
 ```
+
+### Check a download
+
+Download `SHA256SUMS` and `SHA256SUMS.sigstore.json` from the same release. Then check your archive against the checksums:
+
+```sh
+sha256sum -c SHA256SUMS --ignore-missing          # Linux
+shasum -a 256 -c SHA256SUMS --ignore-missing      # macOS
+```
+
+On Windows, run this in PowerShell and compare the hash with the line for your archive in `SHA256SUMS`:
+
+```powershell
+(Get-FileHash rezzer-v<version>-windows-amd64.zip).Hash.ToLower()
+```
+
+The checksum file is signed with [cosign](https://github.com/sigstore/cosign) in GitHub Actions. No key is needed: the signature says which workflow made it. Check it with cosign 3 or newer:
+
+```sh
+cosign verify-blob --bundle SHA256SUMS.sigstore.json \
+  --certificate-identity-regexp '^https://github\.com/jordiboehme/rezzer/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  SHA256SUMS
+```
+
+You can also check where a file was built with the [GitHub CLI](https://cli.github.com):
+
+```sh
+gh attestation verify rezzer-v<version>-linux-amd64.tar.gz --repo jordiboehme/rezzer
+```
+
+Each release also has an SBOM per platform. [SECURITY.md](SECURITY.md) lists the files.
+
+### Use it
 
 Read a file:
 
@@ -70,6 +122,8 @@ claude mcp add rezzer -- rezzer mcp
 The agent then has three tools: `rez` reads a file (by path, or sent along as a `data:` URI), `inspect` takes a quick look and `formats` lists what Rezzer can read. A file sent along may be up to 32 MiB (`max_inline_bytes` in the `[limits]` of the config file). Give a larger file by path. Long results come in pages. `rez` also takes a `password` for a protected PDF, an `output_dir` to write the Markdown and its pictures to a folder, `part_size` for the largest part, `table_style` for records and `sheets` to pick sheets. With `output_dir` a large document is written as a main document plus parts, and `rez` returns the main document.
 
 Exit codes: 0 when everything was read, 2 when parts could not be read (the output says which), 1 when the read failed.
+
+The config file is `~/.config/rezzer/config.toml`. When `XDG_CONFIG_HOME` is set to a full path, it is `$XDG_CONFIG_HOME/rezzer/config.toml`. On Windows it is `%USERPROFILE%\.config\rezzer\config.toml`.
 
 ## Why
 

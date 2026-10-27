@@ -31,7 +31,9 @@ use common::{
     GENERATED_AT, PIPELINE_FOLDERS, corpus_dir, corpus_files, pipeline, relative, remote_rows,
 };
 use rezzer_model::{Block, Document, plain_text};
-use rezzer_pipeline::{Config, OutputKind, Pipeline, Request};
+#[cfg(unix)]
+use rezzer_pipeline::Config;
+use rezzer_pipeline::{OutputKind, Pipeline, Request};
 use serde_json::Value;
 
 /// The allocator of the Rezzer binary: the memory these tests measure is the memory it
@@ -192,7 +194,11 @@ const MACHINE_KEYS: [&str; 3] = ["file_created: ", "downloaded_from: ", "file_ta
 /// Makes a snapshot independent of the checkout location and of the file's file system
 /// facts: modification times are replaced, birth time, download address and tags left out.
 fn redact(text: &str, corpus: &str) -> String {
-    let text = text.replace(corpus, "<corpus>");
+    let text = if cfg!(windows) {
+        redact_windows_corpus(text, corpus)
+    } else {
+        text.replace(corpus, "<corpus>")
+    };
     let lines: Vec<String> = text
         .lines()
         .filter(|line| !MACHINE_KEYS.iter().any(|key| line.starts_with(key)))
@@ -209,6 +215,22 @@ fn redact(text: &str, corpus: &str) -> String {
     let mut out = lines.join("\n");
     if text.ends_with('\n') {
         out.push('\n');
+    }
+    out
+}
+
+/// The corpus path of [`redact`] on Windows, so a snapshot reads as on Unix. There a quoted
+/// value (JSON and frontmatter) holds the path with each backslash doubled; the path is
+/// replaced, and the rest of it up to the closing quote gets `/` as its separator.
+fn redact_windows_corpus(text: &str, corpus: &str) -> String {
+    let quoted = corpus.replace('\\', r"\\");
+    let mut pieces = text.split(quoted.as_str());
+    let mut out = pieces.next().unwrap_or_default().to_string();
+    for piece in pieces {
+        let end = piece.find(['"', '\n']).unwrap_or(piece.len());
+        out.push_str("<corpus>");
+        out.push_str(&piece[..end].replace(r"\\", "/"));
+        out.push_str(&piece[end..]);
     }
     out
 }
@@ -250,7 +272,8 @@ fn snapshot_json(out: &Output, corpus: &str) -> String {
 #[test]
 fn corpus_golden() {
     let pipeline = pipeline();
-    let corpus = std::fs::canonicalize(corpus_dir()).unwrap();
+    // The form Rezzer writes: canonical, without the Windows verbatim prefix.
+    let corpus = rezzer_pipeline::strip_verbatim(std::fs::canonicalize(corpus_dir()).unwrap());
     let corpus = corpus.to_string_lossy().to_string();
     let mut settings = insta::Settings::clone_current();
     settings.set_snapshot_path(corpus_dir().join("snapshots"));
@@ -1776,6 +1799,7 @@ fn arabic_not_reversed() {
 
 /// The reads of the large remote files run under the default limits; their time and maximum
 /// resident set size are printed for the report (`--no-capture`).
+#[cfg(unix)]
 fn remote_pdf(name: &str) -> PathBuf {
     let path = corpus_dir().join("pdf").join(name);
     assert!(
@@ -1785,6 +1809,7 @@ fn remote_pdf(name: &str) -> PathBuf {
     path
 }
 
+// Unix only: the test reports the maximum RSS, which needs getrusage.
 #[cfg(unix)]
 #[test]
 #[ignore = "needs scripts/fetch-corpus.sh"]
@@ -1826,6 +1851,7 @@ fn nist_reads_under_limits() {
     );
 }
 
+// Unix only: the test reports the maximum RSS, which needs getrusage.
 #[cfg(unix)]
 #[test]
 #[ignore = "needs scripts/fetch-corpus.sh"]

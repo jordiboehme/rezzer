@@ -122,6 +122,12 @@ fn part_size(text: &str) -> Result<usize, String> {
 
 /// Runs the command line with the readers of this build.
 pub fn main(registry: Registry) -> ExitCode {
+    main_with(registry, |_| {})
+}
+
+/// Like [`main`], and `after_read` gets the path of a file once `rezzer read` has finished
+/// with it, as the last thing the command does.
+pub fn main_with(registry: Registry, after_read: fn(&std::path::Path)) -> ExitCode {
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(e) => {
@@ -135,21 +141,25 @@ pub fn main(registry: Registry) -> ExitCode {
     };
     // A panic outside the pipeline's contained stages goes through the normal panic hook,
     // then ends as one `rezzer: internal error` line and exit 1.
-    match rezzer_limits::contain(std::panic::AssertUnwindSafe(|| run(cli, registry))) {
+    match rezzer_limits::contain(std::panic::AssertUnwindSafe(|| {
+        run(cli, registry, after_read)
+    })) {
         Ok(Ok(code)) => code,
         Ok(Err(message)) => fail(&message),
         Err(panic) => fail(&format!("internal error: {panic}")),
     }
 }
 
-fn run(cli: Cli, registry: Registry) -> Result<ExitCode, String> {
+fn run(cli: Cli, registry: Registry, after_read: fn(&std::path::Path)) -> Result<ExitCode, String> {
     match cli.command {
         Command::Read(args) => {
             let mut config = load_config()?;
             if args.no_cache {
                 config.cache = false;
             }
-            read::run(config, registry, &args)
+            let code = read::run(config, registry, &args)?;
+            after_read(&args.path);
+            Ok(code)
         }
         Command::Inspect { path } => inspect::run(load_config()?, registry, &path),
         Command::Formats => formats::run(&registry),

@@ -3,7 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! The user's config file: `$XDG_CONFIG_HOME/rezzer/config.toml`, else
-//! `~/.config/rezzer/config.toml` (on macOS too, as the spec says). A missing file means the
+//! `~/.config/rezzer/config.toml` (on macOS too, as the spec says). The home is `HOME`, or
+//! `USERPROFILE` when `HOME` is empty or unset, so on Windows the file is
+//! `%USERPROFILE%\.config\rezzer\config.toml`. A home that is not an absolute path gives no
+//! config file, so none is read from the working directory. A missing file means the
 //! defaults; an unknown key is an error that names the file and the key.
 //!
 //! ```toml
@@ -114,7 +117,8 @@ impl Config {
     pub fn load() -> Result<Config, ConfigError> {
         let xdg = std::env::var_os("XDG_CONFIG_HOME");
         let home = std::env::var_os("HOME");
-        match config_path_from(xdg.as_deref(), home.as_deref()) {
+        let user_profile = std::env::var_os("USERPROFILE");
+        match config_path_from(xdg.as_deref(), home.as_deref(), user_profile.as_deref()) {
             Some(path) => Config::load_from(&path),
             None => Ok(Config::default()),
         }
@@ -192,19 +196,24 @@ impl Config {
     }
 }
 
-/// The config file path from the values of `XDG_CONFIG_HOME` and `HOME`. An empty or
-/// relative `XDG_CONFIG_HOME` is ignored, as the XDG base directory spec says. Without an
-/// absolute `HOME` either there is no path, so a config file is never read from the working
-/// directory. Absoluteness follows the rules of the system this runs on.
-pub fn config_path_from(xdg_config_home: Option<&OsStr>, home: Option<&OsStr>) -> Option<PathBuf> {
+/// The config file path from the values of `XDG_CONFIG_HOME`, `HOME` and `USERPROFILE`. An
+/// empty or relative `XDG_CONFIG_HOME` is ignored, as the XDG base directory spec says. The
+/// home is found by [`home_dir`]: `HOME`, or `USERPROFILE` (which Windows sets) when `HOME`
+/// is empty or unset. Without an absolute home there is no path, so a config file is never
+/// read from the working directory. Absoluteness follows the rules of the system this runs on.
+pub fn config_path_from(
+    xdg_config_home: Option<&OsStr>,
+    home: Option<&OsStr>,
+    user_profile: Option<&OsStr>,
+) -> Option<PathBuf> {
     let base = match xdg_config_home.filter(|v| host_absolute(v)) {
         Some(dir) => PathBuf::from(dir),
-        None => PathBuf::from(home.filter(|v| host_absolute(v))?).join(".config"),
+        None => home_dir(CacheOs::current(), home, user_profile)?.join(".config"),
     };
     Some(base.join("rezzer").join("config.toml"))
 }
 
-/// The system whose rules [`cache_dir_from`] follows.
+/// The system whose rules [`cache_dir_from`] follows; the config path uses the current one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CacheOs {
     /// Linux and every other Unix but macOS.
@@ -249,14 +258,14 @@ pub fn cache_dir_from(
             Some(PathBuf::from(base).join("rezzer").join("cache"))
         }
         CacheOs::MacOs => {
-            let home = home.filter(|v| unix_absolute(v))?;
-            Some(PathBuf::from(home).join("Library/Caches").join("rezzer"))
+            let home = home_dir(os, home, None)?;
+            Some(home.join("Library/Caches").join("rezzer"))
         }
         CacheOs::Unix => {
-            let home = home.filter(|v| unix_absolute(v))?;
+            let home = home_dir(os, home, None)?;
             let base = match xdg_cache_home.filter(|v| unix_absolute(v)) {
                 Some(xdg) => PathBuf::from(xdg),
-                None => PathBuf::from(home).join(".cache"),
+                None => home.join(".cache"),
             };
             Some(base.join("rezzer"))
         }
@@ -279,11 +288,27 @@ pub(crate) fn default_cache_dir() -> Option<PathBuf> {
 /// Whether `path` is absolute on the system this runs on: the Windows rules on Windows, the
 /// Unix rules everywhere else.
 fn host_absolute(path: &OsStr) -> bool {
-    if cfg!(windows) {
-        windows_absolute(path)
-    } else {
-        unix_absolute(path)
+    absolute_on(CacheOs::current(), path)
+}
+
+/// Whether `path` is absolute by the rules of `os`.
+fn absolute_on(os: CacheOs, path: &OsStr) -> bool {
+    match os {
+        CacheOs::Windows => windows_absolute(path),
+        CacheOs::Unix | CacheOs::MacOs => unix_absolute(path),
     }
+}
+
+/// The home folder, the one place that finds it: `home` unless it is empty or unset, else
+/// `user_profile` unless that is empty or unset. The value found must be absolute by the
+/// rules of `os`, else there is no home (a relative home would put files in the working
+/// directory). The cache passes no `user_profile`: on Unix and macOS it uses `HOME` only, as
+/// the `directories` crate did, and on Windows it uses `LOCALAPPDATA`.
+fn home_dir(os: CacheOs, home: Option<&OsStr>, user_profile: Option<&OsStr>) -> Option<PathBuf> {
+    let dir = home
+        .filter(|v| !v.is_empty())
+        .or_else(|| user_profile.filter(|v| !v.is_empty()))?;
+    absolute_on(os, dir).then(|| PathBuf::from(dir))
 }
 
 /// A Unix path is absolute when it starts with `/`.

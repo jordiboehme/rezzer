@@ -414,8 +414,11 @@ fn output_dir_can_be_the_source_folder() {
 fn resource_is_the_canonical_absolute_path() {
     let env = Env::new();
     env.file("notes.md", MARKDOWN);
-    let root = std::fs::canonicalize(env.root.path()).unwrap();
-    let expected = format!("resource: \"{}\"", root.join("notes.md").display());
+    // Without the Windows verbatim prefix, and quoted as the frontmatter quotes it (a
+    // backslash doubled).
+    let root = rezzer_pipeline::strip_verbatim(std::fs::canonicalize(env.root.path()).unwrap());
+    let shown = root.join("notes.md").display().to_string();
+    let expected = format!("resource: \"{}\"", shown.replace('\\', "\\\\"));
     env.cmd()
         .args(["read", "./notes.md"])
         .assert()
@@ -439,7 +442,13 @@ fn no_cache_leaves_the_cache_empty() {
 #[test]
 fn bad_config_is_one_line_error() {
     let env = Env::new();
-    let config = env.root.path().join("config/rezzer/config.toml");
+    // Built one name at a time, as Rezzer builds it, so the error shows the same separators.
+    let config = env
+        .root
+        .path()
+        .join("config")
+        .join("rezzer")
+        .join("config.toml");
     std::fs::write(&config, "colour = \"red\"\n").unwrap();
     let md = env.file("notes.md", MARKDOWN);
     env.cmd()
@@ -716,13 +725,16 @@ fn scrubbed(text: &str, env: &Env) -> String {
     let canonical: Vec<std::path::PathBuf> = paths
         .iter()
         .filter_map(|p| std::fs::canonicalize(p).ok())
+        .flat_map(|p| [p.clone(), rezzer_pipeline::strip_verbatim(p)])
         .collect();
     paths.extend(canonical);
-    // The longest first, so a path inside another goes as a whole.
+    // Each path also as a quoted value shows it, with a backslash doubled (Windows).
     let mut paths: Vec<String> = paths
         .iter()
         .map(|p| p.to_string_lossy().into_owned())
+        .flat_map(|p| [p.replace('\\', "\\\\"), p])
         .collect();
+    // The longest first, so a path inside another goes as a whole.
     paths.sort_by_key(|p| std::cmp::Reverse(p.len()));
     let mut text = text.to_string();
     for p in paths {
