@@ -67,20 +67,6 @@ impl<'b> Builder<'b> {
         }
     }
 
-    /// Charges one model element. False when the element budget ran out with this one: the
-    /// element is dropped and reading stops. Once stopped, the frames still open are closed
-    /// without charge (their number is bounded by the depth limit).
-    pub(super) fn charge(&mut self) -> bool {
-        if self.elements_stopped {
-            return true;
-        }
-        if self.budget.add_elements(1).is_err() {
-            self.elements_stopped = true;
-            return false;
-        }
-        true
-    }
-
     /// Pushes a formula. An empty one has nothing to show and is not kept, but it is said:
     /// the source had math delimiters with nothing inside.
     pub(super) fn math_or_loss(&mut self, latex: String) {

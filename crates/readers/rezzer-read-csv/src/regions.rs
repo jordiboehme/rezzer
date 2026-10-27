@@ -4,7 +4,13 @@
 
 //! The records of a region, the facts per column and the rows that fill a table.
 
-use super::*;
+use csvsniff::{ColumnKind, Dialect};
+use rezzer_model::{
+    Anchor, Block, Cell, Document, Formula, Inline, Loss, LossReason, Role, Severity, column_letter,
+};
+use sheetlayout::{Kind, Layout, RowKind};
+
+use super::{MAX_FACT_ROWS, MAX_TABLE_COLUMNS, MAX_TABLE_ROWS};
 
 /// The records a CSV reader read, for the column facts of its table regions.
 pub(super) struct Records<'a> {

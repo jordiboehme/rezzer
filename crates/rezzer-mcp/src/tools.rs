@@ -62,6 +62,7 @@ pub struct RezParams {
     #[serde(default)]
     #[schemars(schema_with = "format_schema", extend("default" = "markdown"))]
     pub format: Option<String>,
+    #[allow(rustdoc::invalid_html_tags)]
     /// Absolute path of an existing directory. The Markdown is written there too, as
     /// <file name>.md. Some names get a short hash added. A document over part_size is
     /// written as <file name>.md plus parts in a folder next to it, <file name>.parts.

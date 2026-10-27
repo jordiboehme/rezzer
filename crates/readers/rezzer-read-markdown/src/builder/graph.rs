@@ -2,10 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! The link graph: nodes and edges for links and images, and the finished document.
+//! The link graph: nodes and edges for links and images.
 
 use rezzer_model::text::{heading_slug, percent_decode};
-use rezzer_model::{Anchor, Block, Document, Edge, Embedded, Graph, Node, SectionKind};
+use rezzer_model::{Anchor, Document, Edge, Embedded, Graph, Node};
 
 use super::Builder;
 
@@ -104,31 +104,6 @@ impl<'b> Builder<'b> {
             detail: None,
             target: Some(target.to_string()),
         });
-    }
-
-    /// Moves the collected properties, losses and body into the document.
-    pub(crate) fn finish_into(&mut self, doc: &mut Document) {
-        doc.properties = std::mem::take(&mut self.properties);
-        doc.losses.append(&mut self.losses);
-        doc.body = std::mem::take(&mut self.body);
-        doc.facets.embedded = std::mem::take(&mut self.embedded);
-        if !self.footnotes.is_empty() {
-            let blocks = std::mem::take(&mut self.footnotes)
-                .into_iter()
-                .map(|(label, blocks)| Block::Section {
-                    kind: SectionKind::Other,
-                    title: None,
-                    anchor: Some(Anchor(format!("fn:{label}"))),
-                    blocks,
-                })
-                .collect();
-            doc.body.push(Block::Section {
-                kind: SectionKind::Other,
-                title: Some("Footnotes".into()),
-                anchor: None,
-                blocks,
-            });
-        }
     }
 
     pub(crate) fn add_graph(&mut self, doc: &mut Document, name: &str) {

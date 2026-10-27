@@ -6,7 +6,7 @@
 
 use std::cell::Cell as Count;
 
-use sheetlayout::{Certainty, Rect, Region};
+use sheetlayout::{Certainty, Kind, Layout, Rect, Region};
 
 use super::*;
 

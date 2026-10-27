@@ -62,7 +62,7 @@ pub struct Unit {
     /// bytes, unique in the document, never `index`, `log`, `overview`, `not-read` or
     /// `contents`.
     pub file: String,
-    /// The unit's own title (at most [`TITLE_CAP`] characters and `, part <n>`), else its
+    /// The unit's own title (at most `TITLE_CAP` characters and `, part <n>`), else its
     /// location.
     pub title: String,
     /// Where the unit lies in the document (decision 10): `pages 12 to 20`, `Data!A1:F400`,
@@ -113,7 +113,7 @@ pub fn split(
 
 /// The longest a main document's name without `.md` may be, in bytes (decision 8). The
 /// writer cuts a longer name and adds the name hash, so the file name with `.md` or `.json`
-/// stays under the 255 bytes of common file systems and [`part_budget`] never falls to its
+/// stays under the 255 bytes of common file systems and `part_budget` never falls to its
 /// floor.
 pub const MAIN_NAME_MAX: usize = 200;
 

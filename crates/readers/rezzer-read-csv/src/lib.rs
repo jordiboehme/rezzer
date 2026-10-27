@@ -11,15 +11,15 @@ mod regions;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use csvsniff::{CellClass, ColumnKind, Dialect};
+use csvsniff::{CellClass, Dialect};
 use rezzer_layout::{Caps, CellText, ColumnNames};
 use rezzer_limits::Budget;
 use rezzer_model::{
-    Anchor, Block, Cell, Completeness, Document, FormatId, Formula, Inline, LayoutKind, Loss,
-    LossReason, ReadOptions, ReadOutcome, Reader, ReaderInfo, Role, SectionKind, Severity, Source,
-    Value, column_letter, source_info,
+    Anchor, Block, Completeness, Document, FormatId, Inline, LayoutKind, Loss, LossReason,
+    ReadOptions, ReadOutcome, Reader, ReaderInfo, SectionKind, Severity, Source, Value,
+    source_info,
 };
-use sheetlayout::{CellIn, Class, Input, Kind, Layout, Pos, RowKind, Style};
+use sheetlayout::{CellIn, Class, Input, Pos, Style};
 
 use regions::{
     Records, RegionFacts, columns_block, derived_formula, fact_row, in_table_row, place_ragged,

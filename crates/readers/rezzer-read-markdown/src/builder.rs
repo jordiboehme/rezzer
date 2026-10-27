@@ -13,7 +13,8 @@ use pulldown_cmark::{
 };
 use rezzer_limits::{Budget, DepthGuard};
 use rezzer_model::{
-    Align, Block, Cell, Edge, Embedded, Inline, Loss, LossReason, Node, Severity, TaskState,
+    Align, Anchor, Block, Cell, Document, Edge, Embedded, Inline, Loss, LossReason, Node,
+    SectionKind, Severity, TaskState,
 };
 
 use crate::frontmatter;
@@ -568,6 +569,45 @@ impl<'b> Builder<'b> {
             | TagEnd::DefinitionList
             | TagEnd::DefinitionListTitle
             | TagEnd::DefinitionListDefinition => {}
+        }
+    }
+
+    /// Charges one model element. False when the element budget ran out with this one: the
+    /// element is dropped and reading stops. Once stopped, the frames still open are closed
+    /// without charge (their number is bounded by the depth limit).
+    pub(super) fn charge(&mut self) -> bool {
+        if self.elements_stopped {
+            return true;
+        }
+        if self.budget.add_elements(1).is_err() {
+            self.elements_stopped = true;
+            return false;
+        }
+        true
+    }
+
+    /// Moves the collected properties, losses and body into the document.
+    pub(super) fn finish_into(&mut self, doc: &mut Document) {
+        doc.properties = std::mem::take(&mut self.properties);
+        doc.losses.append(&mut self.losses);
+        doc.body = std::mem::take(&mut self.body);
+        doc.facets.embedded = std::mem::take(&mut self.embedded);
+        if !self.footnotes.is_empty() {
+            let blocks = std::mem::take(&mut self.footnotes)
+                .into_iter()
+                .map(|(label, blocks)| Block::Section {
+                    kind: SectionKind::Other,
+                    title: None,
+                    anchor: Some(Anchor(format!("fn:{label}"))),
+                    blocks,
+                })
+                .collect();
+            doc.body.push(Block::Section {
+                kind: SectionKind::Other,
+                title: Some("Footnotes".into()),
+                anchor: None,
+                blocks,
+            });
         }
     }
 

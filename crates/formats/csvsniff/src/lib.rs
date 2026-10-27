@@ -4,7 +4,7 @@
 
 //! Standalone CSV sniffing: dialect, header, column types, keys and derived columns.
 //!
-//! Input is already-decoded text. Use [`sniff`] to find the dialect, then
+//! Input is already-decoded text. Use [`sniff`](fn@sniff) to find the dialect, then
 //! [`analyze`] to get column facts and observed relations.
 //!
 //! ```
