@@ -112,13 +112,13 @@ rust-py3langid is not among options A to D. It was probed because the brief list
 | rust-py3langid | 30 | 2 | 0 | 25 |
 
 Counting the raw top answer instead (no abstaining) gives the same number right for every
-probe except the two distance 0.5 rows, so that column is left out. In those two rows the
-`None` of `detect_language_of` is the abstention: their one extra right answer is the `None`
-on qpdf-aes128, where the raw top answer is `lt` (raw: 27 and 25 right). For whatlang the two differ only in which samples are
-right: the raw answer is right on `form:en-application` (`en`, not reliable) and wrong on the
-place names (`it`, not reliable); abstaining turns the first into a missed answer and the
-second into a right "no answer". For py3langid the three answers below 0.5 are on samples
-where both `en` and "no answer" count as right.
+probe except the two distance 0.5 rows, so that column is left out. In those two rows the `None` of
+`detect_language_of` is the abstention: their one extra right answer is the `None` on qpdf-aes128,
+where the raw top answer is `lt` (raw: 27 and 25 right). For whatlang the two differ only in which
+samples are right: the raw answer is right on `form:en-application` (`en`, not reliable) and wrong
+on the place names (`it`, not reliable); abstaining turns the first into a missed answer and the
+second into a right "no answer". For py3langid the three answers below 0.5 are on samples where both
+`en` and "no answer" count as right.
 
 lingua with the settings (57 languages, the same 249.4 MB binary for all four):
 
@@ -263,3 +263,11 @@ Questions:
 1. Do you allow whatlang, outdated by AGENTS.md's test, as an exception for 0.1.0 with the
    trigger above (0.2.0 or 2027-04-30, then D)? Or D now, before 0.1.0?
 2. For D: is CC BY 2.0 FR training data with an attribution notice fine, or CC0 only?
+
+### Decision (Jordi, 2026-10-27)
+
+1. whatlang =0.18.0 stays as a time-boxed exception for 0.1.0, with the hashbrown@0.15.5 skip.
+   Trigger: at the start of 0.2.0 or on 2027-04-30, whichever comes first, start an own
+   clean-room crate (option D), unless a whatlang release by then removes the skip.
+2. For D, all of Tatoeba is allowed, CC BY 2.0 FR included, with an attribution notice in
+   THIRD-PARTY-NOTICES.

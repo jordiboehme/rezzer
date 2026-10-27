@@ -18,6 +18,8 @@ multiple-versions = "warn"
 # crates that pull them in.
 skip = [
     # whatlang 0.18.0 (rezzer-enrich) uses hashbrown 0.15; indexmap 2.14 (rmcp, zip) uses 0.17.
+    # Kept for whatlang 0.18.0 until the start of 0.2.0 or 2027-04-30, whichever comes first;
+    # then an own crate replaces whatlang (see docs/research/2026-10-27-language-detection.md).
     { crate = "hashbrown@0.15.5", reason = "whatlang 0.18.0 pins hashbrown 0.15" },
     # tracing-attributes (via rmcp's tracing) and windows-implement / windows-interface (via
     # chrono's iana-time-zone, used by rmcp and schemars) still use syn 2; the rest uses syn 3.
