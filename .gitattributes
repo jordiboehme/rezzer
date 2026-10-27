@@ -1,0 +1,2 @@
+# Git keeps every file byte for byte on every OS: no line ending conversion.
+* -text
