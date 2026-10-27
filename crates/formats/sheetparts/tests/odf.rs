@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::io::{Cursor, Write};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use sheetparts::odf::{self, DataPilot, DatabaseRange, OdsParts, OdsSheet};
 use sheetparts::ooxml::Frozen;
@@ -11,6 +11,10 @@ use sheetparts::{CellPos, IssueKind, Limits, Look, PropValue, RowSpan};
 use zip::CompressionMethod;
 use zip::write::{SimpleFileOptions, ZipWriter};
 use zipguard::Archive;
+
+/// The wall-clock stop of the tests that time a read: far above any machine, so only a hang
+/// fails it.
+const SAFETY: Duration = Duration::from_secs(60);
 
 fn corpus(path: &str) -> Vec<u8> {
     let full = format!(
@@ -347,6 +351,10 @@ fn named_ranges_global_and_local() {
 
 #[test]
 fn huge_repeat_counts_do_not_expand() {
+    // The repeat counts ask for 17 billion cells: expanded, the read would not end in hours,
+    // so its end and the clean issues are the proof. Each read takes some milliseconds, also
+    // under load (19 ms for the whole test on 2026-10-27, load average 37); the wall time is
+    // only a safety stop.
     let start = Instant::now();
     let xml = content(
         "",
@@ -354,13 +362,14 @@ fn huge_repeat_counts_do_not_expand() {
          <table:table-cell table:number-columns-repeated=\"16384\"/></table:table-row></table:table>",
     );
     let parts = read_bytes(&package(&[("content.xml", &xml)]), &Limits::default());
-    assert!(start.elapsed().as_secs_f64() < 1.0);
+    assert!(start.elapsed() < SAFETY, "{:?}", start.elapsed());
     assert!(parts.issues.is_empty(), "{:?}", parts.issues);
 
-    // Content in a repeated row counts its cells against the item limit.
+    // Content in a repeated row counts its cells against the item limit: the Limit issue
+    // below is the proof.
     let start = Instant::now();
     let parts = read_file("malformed/issue_594_dos.ods");
-    assert!(start.elapsed().as_secs_f64() < 1.0);
+    assert!(start.elapsed() < SAFETY, "{:?}", start.elapsed());
     assert_eq!(parts.sheets.len(), 1);
     assert!(parts.sheets[0].cell_formats.is_empty());
     assert!(parts.issues.iter().any(|i| i.kind == IssueKind::Limit));
