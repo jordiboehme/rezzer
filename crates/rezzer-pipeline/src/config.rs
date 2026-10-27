@@ -213,7 +213,8 @@ pub fn config_path_from(
     Some(base.join("rezzer").join("config.toml"))
 }
 
-/// The system whose rules [`cache_dir_from`] follows; the config path uses the current one.
+/// The system whose rules [`cache_dir_from`] follows; the config path and the output names
+/// use the current one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CacheOs {
     /// Linux and every other Unix but macOS.

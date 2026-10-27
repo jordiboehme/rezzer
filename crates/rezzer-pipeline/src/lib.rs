@@ -15,6 +15,7 @@ mod cache;
 mod config;
 mod files;
 mod folder;
+mod names;
 mod panics;
 
 use std::cell::RefCell;

@@ -20,6 +20,13 @@
 //! an edited file keeps its addresses. No name starts with `.` (ruling P5-Z): Crystalline
 //! skips hidden files.
 //!
+//! On Windows the main name and the folder stem are made legal there ([`legal_name`], Jordi,
+//! 2026-10-27): each of `: < > " | ? *` and the control characters, each trailing dot or
+//! space, and a device name before the first `.` (`CON`, `PRN`, `AUX`, `NUL`, `COM1` to
+//! `COM9`, `LPT1` to `LPT9`, any case) become `_`, and a changed name gets the name hash of
+//! the original name, so `a:b.txt` and `a?b.txt` never share a file. On Unix and macOS the
+//! names stay as they are. The frontmatter's `resource` keeps the original name either way.
+//!
 //! Rezzer replaces a Markdown file or JSON only when it wrote it for the same source (ruling
 //! P5-AG): its frontmatter has `generated: { by: rezzer/` (a part also its `part:` key), or
 //! the JSON starts with `model_version`; and it names the same source. The same source is the
@@ -70,6 +77,7 @@
 //! the new render name a part path that the check then refuses, the run fails with the
 //! pictures already written: only pictures of the same name were replaced, nothing is lost.
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::ffi::{OsStr, OsString};
 use std::io::Read;
@@ -80,8 +88,9 @@ use rezzer_render::MAIN_NAME_MAX;
 use sha2::{Digest, Sha256};
 use unicode_normalization::UnicodeNormalization;
 
-use crate::config::one_line;
+use crate::config::{CacheOs, one_line};
 use crate::folder::{EntryKind, Folder};
+use crate::names::legal_name;
 
 /// The longest bundle name, in bytes.
 const BUNDLE_NAME_MAX: usize = 120;
@@ -152,13 +161,20 @@ fn looks_hashed(name: &str) -> bool {
 /// `source_name` (decision 8): [`bundle_name`] of the NFC name, plus `-<name hash>` when
 /// `bundle_name` changed the name (also a leading `.`), when the name ends in `.md`,
 /// `.json`, `.assets` or `.parts` (any case), or when it looks like a hashed stem (ends in
-/// `-` and 8 hex digits, any case). So `a b.pdf` and `a_b.pdf` never share a folder, nor
-/// `a b.pdf` and a source named after its stem `a_b.pdf-<hash>`, and the folders of one
-/// source never land on a file or folder of another (`x` and `x.assets`, `x` and `x.parts`,
-/// `a` with its JSON and `a.json`).
+/// `-` and 8 hex digits, any case), or, on Windows, when the stem had to be made legal there
+/// (a trailing dot or a device name such as `con` became `_`). So `a b.pdf` and `a_b.pdf`
+/// never share a folder, nor `a b.pdf` and a source named after its stem `a_b.pdf-<hash>`,
+/// and the folders of one source never land on a file or folder of another (`x` and
+/// `x.assets`, `x` and `x.parts`, `a` with its JSON and `a.json`).
 pub fn folder_stem(source_name: &str) -> String {
+    folder_stem_on(source_name, CacheOs::current())
+}
+
+/// [`folder_stem`] as written on `os`: on Windows the stem is made legal there first
+/// ([`legal_name`]), and a stem that changed gets the name hash too.
+pub(crate) fn folder_stem_on(source_name: &str, os: CacheOs) -> String {
     let name = last_component(source_name);
-    let stem = bundle_name(&name);
+    let stem = legal_name(&bundle_name(&name), os).into_owned();
     let clash = [".md", ".json", ".assets", ".parts"]
         .iter()
         .any(|suffix| ends_with_ignore_case(&name, suffix));
@@ -185,13 +201,20 @@ fn reserved(name: &str) -> bool {
 /// `source_name` in NFC, so `budget.xlsx` gives `budget.xlsx.md`. `.`, `..` or an empty name
 /// become `file`. `-<name hash>` is added once when the name holds no ASCII letter or digit,
 /// when it is `index` or `log` before the first `.` (any case), when a control character or
-/// a leading `.` was replaced by `_` (so Crystalline does not skip it as hidden), or when the
-/// name was cut.
+/// a leading `.` was replaced by `_` (so Crystalline does not skip it as hidden), when the
+/// name was cut, or, on Windows, when it had to be made legal there (a character Windows
+/// refuses, a trailing dot or space, or a device name such as `CON` became `_`).
 ///
 /// A name is cut to [`MAIN_NAME_MAX`] bytes with the hash, and to the char count of the
 /// source's last component (at least 4), so it never holds more than that count plus 9
 /// chars: the bound the splitter counts with.
 pub fn main_name(source_name: &str) -> String {
+    main_name_on(source_name, CacheOs::current())
+}
+
+/// [`main_name`] as written on `os`: on Windows the name is made legal there
+/// ([`legal_name`]), and a name that changed gets the name hash.
+pub(crate) fn main_name_on(source_name: &str, os: CacheOs) -> String {
     let given = source_name.rsplit(['/', '\\']).next().unwrap_or_default();
     let nfc = last_component(source_name);
     let mut hashed = false;
@@ -211,6 +234,10 @@ pub fn main_name(source_name: &str) -> String {
     }
     if name.starts_with('.') {
         name.replace_range(..1, "_");
+        hashed = true;
+    }
+    if let Cow::Owned(legal) = legal_name(&name, os) {
+        name = legal;
         hashed = true;
     }
     if !name.bytes().any(|b| b.is_ascii_alphanumeric()) || reserved(&name) {

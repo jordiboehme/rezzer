@@ -3,9 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use super::{
-    ASSET_TYPES, Files, OTHER_EXTENSION, asset_extension, check_paths, is_asset_name, write_files,
-    write_new,
+    ASSET_TYPES, Files, OTHER_EXTENSION, asset_extension, check_paths, folder_stem_on,
+    is_asset_name, main_name_on, write_files, write_new,
 };
+use crate::config::CacheOs;
 use crate::folder::Folder;
 
 #[test]
@@ -252,4 +253,188 @@ fn a_name_like_a_hashed_stem_gets_its_own_hash() {
     let own = folder_stem("x-DEADBEEF");
     assert!(own.starts_with("x-DEADBEEF-"), "{own}");
     assert!(hashed_tail(&own), "{own}");
+}
+
+/// Every value of [`CacheOs`]: the names Rezzer writes follow the rules of one of them.
+const EVERY_OS: [CacheOs; 3] = [CacheOs::Unix, CacheOs::MacOs, CacheOs::Windows];
+
+/// Whether `got` is `base` plus `-` and the name hash of `original`.
+fn hashed_from(got: &str, base: &str, original: &str) -> bool {
+    got == format!("{base}-{}", super::name_hash(original))
+}
+
+#[test]
+fn windows_forbids_these_characters() {
+    for c in [
+        ':', '<', '>', '"', '|', '?', '*', '\u{0}', '\u{1}', '\u{1f}',
+    ] {
+        let source = format!("a{c}b.txt");
+        let main = main_name_on(&source, CacheOs::Windows);
+        assert!(hashed_from(&main, "a_b.txt", &source), "{source:?}: {main}");
+        let stem = folder_stem_on(&source, CacheOs::Windows);
+        assert!(hashed_from(&stem, "a_b.txt", &source), "{source:?}: {stem}");
+        for os in [CacheOs::Unix, CacheOs::MacOs] {
+            // As today: a control character is replaced and hashed, the others stay.
+            let main = main_name_on(&source, os);
+            if c.is_control() {
+                assert!(hashed_from(&main, "a_b.txt", &source), "{source:?}: {main}");
+            } else {
+                assert_eq!(main, source);
+            }
+            assert_eq!(folder_stem_on(&source, os), stem, "{source:?}");
+        }
+    }
+}
+
+#[test]
+fn windows_takes_no_trailing_dot_or_space() {
+    for (source, base) in [
+        ("a.", "a_"),
+        ("a ", "a_"),
+        ("a. .", "a___"),
+        ("report.pdf.", "report.pdf_"),
+        // The leading dot became `_` already; the trailing dots follow on Windows only.
+        ("...", "___"),
+    ] {
+        let main = main_name_on(source, CacheOs::Windows);
+        assert!(hashed_from(&main, base, source), "{source:?}: {main}");
+        for os in [CacheOs::Unix, CacheOs::MacOs] {
+            let main = main_name_on(source, os);
+            if source == "..." {
+                assert!(hashed_from(&main, "_..", source), "{main}");
+            } else {
+                assert_eq!(main, source);
+            }
+        }
+    }
+    // The folder stem has no space (it became `_` already); a trailing dot is new on Windows.
+    let stem = folder_stem_on("a.", CacheOs::Windows);
+    assert!(hashed_from(&stem, "a_", "a."), "{stem}");
+    assert_eq!(folder_stem_on("a.", CacheOs::Unix), "a.");
+    for os in EVERY_OS {
+        let main = main_name_on("a. .", os);
+        assert!(
+            !main.ends_with(['.', ' ']) || os != CacheOs::Windows,
+            "{main}"
+        );
+    }
+}
+
+#[test]
+fn windows_device_names_are_replaced() {
+    for (source, base) in [
+        ("CON", "_"),
+        ("con.txt", "_.txt"),
+        ("Lpt9.md", "_.md"),
+        ("COM1.pdf", "_.pdf"),
+        ("nul.tar.gz", "_.tar.gz"),
+        ("Prn", "_"),
+        ("aUx.docx", "_.docx"),
+        ("con .txt", "_ .txt"),
+        ("com\u{b9}.txt", "_.txt"),
+        ("LPT\u{b3}", "_"),
+    ] {
+        let main = main_name_on(source, CacheOs::Windows);
+        assert!(hashed_from(&main, base, source), "{source:?}: {main}");
+        for os in [CacheOs::Unix, CacheOs::MacOs] {
+            assert_eq!(main_name_on(source, os), source);
+        }
+    }
+    // The parts and assets folders are `<stem>.parts` and `<stem>.assets`, so a stem that
+    // starts with a device name is replaced too, with one hash, also when it is hashed for
+    // another reason (`con.md` ends in `.md`).
+    for (source, base) in [
+        ("con.txt", "_.txt"),
+        ("CON", "_"),
+        ("con.md", "_.md"),
+        ("nul.tar.gz", "_.tar.gz"),
+    ] {
+        let stem = folder_stem_on(source, CacheOs::Windows);
+        assert!(hashed_from(&stem, base, source), "{source:?}: {stem}");
+    }
+    assert_eq!(folder_stem_on("con.txt", CacheOs::Unix), "con.txt");
+    assert_eq!(folder_stem_on("CON", CacheOs::MacOs), "CON");
+    // `con .txt` has its space replaced in the folder stem, so `con_.txt` is no device name.
+    assert_eq!(
+        folder_stem_on("con .txt", CacheOs::Windows),
+        folder_stem_on("con .txt", CacheOs::Unix)
+    );
+}
+
+#[test]
+fn names_that_only_look_like_a_device_stay() {
+    for source in [
+        "CONSOLE.txt",
+        "COM10.pdf",
+        "LPT0.txt",
+        "a.con",
+        "COM.txt",
+        "xcon.txt",
+        "report.pdf",
+        "Q3 report (final) #2.pdf",
+    ] {
+        for os in EVERY_OS {
+            assert_eq!(main_name_on(source, os), source, "{os:?}");
+            assert_eq!(
+                folder_stem_on(source, os),
+                folder_stem_on(source, CacheOs::Unix),
+                "{os:?}"
+            );
+        }
+    }
+    assert_eq!(folder_stem_on("COM10.pdf", CacheOs::Windows), "COM10.pdf");
+}
+
+#[test]
+fn the_windows_hash_is_from_the_original_name() {
+    let colon = main_name_on("a:b.txt", CacheOs::Windows);
+    let question = main_name_on("a?b.txt", CacheOs::Windows);
+    assert_ne!(colon, question);
+    assert_ne!(
+        main_name_on("con.txt", CacheOs::Windows),
+        main_name_on("nul.txt", CacheOs::Windows)
+    );
+    assert_ne!(
+        folder_stem_on("con.txt", CacheOs::Windows),
+        folder_stem_on("nul.txt", CacheOs::Windows)
+    );
+    // A name that is legal already is not changed.
+    assert_eq!(main_name_on("a_b.txt", CacheOs::Windows), "a_b.txt");
+}
+
+#[test]
+fn a_changed_windows_name_cannot_be_copied_by_another_source() {
+    // `con.txt` gets the folder stem `_.txt-<hash>`. A source named after that stem looks
+    // hashed, so it gets a hash of its own, also in upper case: the two never share an
+    // assets folder, so neither run removes the other one's pictures as stale.
+    for source in ["con.txt", "a:b.txt", "a."] {
+        let stem = folder_stem_on(source, CacheOs::Windows);
+        let copy = folder_stem_on(&stem, CacheOs::Windows);
+        assert_ne!(copy, stem, "{source}");
+        let upper = folder_stem_on(&stem.to_uppercase(), CacheOs::Windows);
+        assert!(!upper.eq_ignore_ascii_case(&stem), "{upper} and {stem}");
+    }
+}
+
+#[test]
+fn windows_names_keep_the_length_bounds() {
+    for name in [
+        format!("{}:.txt", "a".repeat(500)),
+        format!("con.{}", "日".repeat(100)),
+        format!("{}.", "b".repeat(300)),
+        "a:".to_string(),
+        "NUL".to_string(),
+    ] {
+        for os in EVERY_OS {
+            let got = main_name_on(&name, os);
+            assert!(got.len() <= rezzer_render::MAIN_NAME_MAX, "{got}");
+            assert!(
+                got.chars().count() <= name.chars().count().max(4) + 9,
+                "{got}"
+            );
+            if os == CacheOs::Windows {
+                assert!(!got.contains(':') && !got.ends_with(['.', ' ']), "{got}");
+            }
+        }
+    }
 }

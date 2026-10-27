@@ -2260,7 +2260,8 @@ fn main_name_and_folder_stem_follow_decision_8() {
     );
     assert_eq!(main_name("indexes.pdf"), "indexes.pdf");
     hashed("日本", "日本");
-    hashed("...", "_..");
+    // On Windows the trailing dots of `_..` cannot be written and become `_` too.
+    hashed("...", if cfg!(windows) { "___" } else { "_.." });
     hashed(".env", "_env");
     hashed(".env.md", "_env.md");
     hashed("index", "index");
@@ -2763,19 +2764,17 @@ fn a_part_of_another_source_stops_the_run_and_is_never_removed() {
 fn hostile_names_are_written_end_to_end() {
     let long = format!("{}.txt", "a".repeat(500));
     let wide = "日".repeat(100);
-    #[cfg_attr(windows, allow(unused_mut))]
-    let mut names = vec![
+    // On Windows `a:b.txt` and `con.txt` are written under legal names with a hash (`:`
+    // would make an NTFS alternate data stream, CON is a device); `resource` keeps the name.
+    let names = [
         "/abs/dir/report.txt",
         "a\0b.txt",
         long.as_str(),
         wide.as_str(),
         "C:\\dir\\x.txt",
+        "a:b.txt",
+        "con.txt",
     ];
-    // Known issue, fixed before the release: the main document keeps the characters Windows
-    // reserves (`:` makes an NTFS alternate data stream, `* ? " < > |` and device names such
-    // as CON cannot be written), so on Windows a:b.txt is left out until the naming fix.
-    #[cfg(not(windows))]
-    names.push("a:b.txt");
     for name in names {
         let root = tempfile::tempdir().unwrap();
         let out = root.path().join("out");
@@ -2798,6 +2797,18 @@ fn hostile_names_are_written_end_to_end() {
             assert_links_resolve(&out) >= 2 * res.parts.len(),
             "{name:?}"
         );
+        let main = res.main_file.as_deref().unwrap();
+        let file = main.file_name().unwrap().to_string_lossy().into_owned();
+        assert_eq!(file, format!("{}.md", rezzer_pipeline::main_name(name)));
+        if cfg!(windows) && matches!(name, "a:b.txt" | "con.txt") {
+            assert!(!file.starts_with(name), "{name:?}: {file}");
+            assert!(all_names(&out).iter().all(|n| !n.contains(':')), "{name:?}");
+        }
+        if !name.contains(['/', '\\']) {
+            let text = std::fs::read_to_string(main).unwrap();
+            let resource = format!("\nresource: {}\n", rezzer_render::frontmatter_value(name));
+            assert!(text.contains(&resource), "{name:?}: {text}");
+        }
     }
 }
 
