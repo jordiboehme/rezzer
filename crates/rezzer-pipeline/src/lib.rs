@@ -35,7 +35,7 @@ pub use config::{
     config_path_from,
 };
 pub use files::{bundle_name, folder_stem, main_name, parts_folder};
-pub use rezzer_limits::{CancelToken, check_part_size};
+pub use rezzer_limits::{CancelToken, Clock, check_part_size};
 pub use rezzer_render::{OutputSection, TableStyle};
 
 use crate::cache::Cache;
@@ -203,6 +203,7 @@ pub struct Pipeline {
     registry: Registry,
     cache: Option<Cache>,
     detector: DetectFn,
+    clock: Clock,
 }
 
 /// A format detector as a plain function, see [`Pipeline::set_detector`].
@@ -221,7 +222,15 @@ impl Pipeline {
             registry,
             cache,
             detector: rezzer_detect::detect_with_hints,
+            clock: Clock::Real,
         }
+    }
+
+    /// The pipeline with every read's time limit measured by `clock` in place of the wall
+    /// clock. Tests use a [`Clock::steps`] clock, so a time limit depends on the work done,
+    /// not on the machine's load.
+    pub fn with_clock(self, clock: Clock) -> Pipeline {
+        Pipeline { clock, ..self }
     }
 
     pub fn config(&self) -> &Config {
@@ -613,7 +622,11 @@ impl Pipeline {
                 Vec::new(),
             );
         };
-        let budget = Budget::with_cancel(self.config.limits.clone(), req.cancel.clone());
+        let budget = Budget::with_clock(
+            self.config.limits.clone(),
+            req.cancel.clone(),
+            self.clock.clone(),
+        );
         let opts = ReadOptions {
             extract_assets: req.output_dir.is_some(),
             password: req.password.clone(),

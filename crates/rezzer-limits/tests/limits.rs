@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use rezzer_limits::{Budget, CancelToken, Limits, contain};
+use rezzer_limits::{Budget, CancelToken, Clock, Limits, contain};
 
 const GIB: u64 = 1024 * 1024 * 1024;
 
@@ -47,6 +47,39 @@ fn depth_guard_decrements_on_drop() {
     let _g = b.enter();
     assert!(b.enter().is_err());
     assert!(b.enter().is_err());
+}
+
+#[test]
+fn a_step_clock_moves_by_its_step() {
+    let clock = Clock::steps(Duration::from_millis(10));
+    let b = Budget::with_clock(
+        Limits {
+            max_time: Duration::from_millis(25),
+            ..Limits::default()
+        },
+        CancelToken::default(),
+        clock.clone(),
+    );
+    assert!(b.check_time().is_ok());
+    assert!(b.check_time().is_ok());
+    let err = b.check_time().unwrap_err();
+    assert_eq!(err.limit, "time");
+    assert_eq!((err.value, err.max), (30, 25));
+    assert!(b.time_stopped());
+    assert_eq!(clock.reads(), 3);
+    // `elapsed` is a reading too.
+    assert_eq!(b.elapsed(), Duration::from_millis(40));
+    assert_eq!(clock.reads(), 4);
+}
+
+#[test]
+fn the_real_clock_is_the_default() {
+    assert!(matches!(Clock::default(), Clock::Real));
+    let clock = Clock::default();
+    let b = Budget::with_clock(Limits::default(), CancelToken::default(), clock.clone());
+    assert!(b.check_time().is_ok());
+    assert!(b.elapsed() < Duration::from_secs(60));
+    assert_eq!(clock.reads(), 0);
 }
 
 #[test]

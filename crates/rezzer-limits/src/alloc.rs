@@ -28,6 +28,8 @@
 //! ships, not a variant of it.
 
 use std::alloc::{GlobalAlloc, Layout, System};
+#[cfg(debug_assertions)]
+use std::cell::Cell;
 
 /// New sizes from which a block is moved by allocate, copy and free.
 const MOVE_FROM: usize = 1 << 20;
@@ -39,6 +41,32 @@ fn moved_by_hand(old: usize, new: usize) -> bool {
         && old
             .checked_add(old / 2)
             .is_some_and(|half_more| new >= half_more)
+}
+
+#[cfg(debug_assertions)]
+thread_local! {
+    /// The bytes the move copied on this thread. Const-initialized and without a destructor,
+    /// so the allocator can use it: it never allocates and never registers a destructor.
+    static MOVED: Cell<u64> = const { Cell::new(0) };
+}
+
+/// The bytes the move by hand copied on this thread so far, so a test can check which growth
+/// is copied. Debug builds only: release builds do not count and give `None`.
+pub fn moved_bytes() -> Option<u64> {
+    #[cfg(debug_assertions)]
+    {
+        MOVED.try_with(Cell::get).ok()
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        None
+    }
+}
+
+/// Adds `n` copied bytes to [`MOVED`]. A thread whose locals are gone counts nothing.
+#[cfg(debug_assertions)]
+fn count_moved(n: usize) {
+    let _ = MOVED.try_with(|m| m.set(m.get().saturating_add(n as u64)));
 }
 
 /// The system allocator, with large blocks moved by hand when they grow by half or more.
@@ -74,12 +102,15 @@ unsafe impl GlobalAlloc for Allocator {
         // SAFETY: a valid layout of non-zero size.
         let moved = unsafe { System.alloc(new) };
         if !moved.is_null() {
+            let kept = layout.size().min(new_size);
             // SAFETY: both blocks are valid for the smaller of the two sizes and do not
             // overlap; the old block is freed with the layout it was allocated with.
             unsafe {
-                std::ptr::copy_nonoverlapping(ptr, moved, layout.size().min(new_size));
+                std::ptr::copy_nonoverlapping(ptr, moved, kept);
                 System.dealloc(ptr, layout);
             }
+            #[cfg(debug_assertions)]
+            count_moved(kept);
         }
         moved
     }
@@ -198,28 +229,58 @@ mod tests {
         }
     }
 
+    /// The bytes [`moved_bytes`] counted on this thread while `f` ran: `None` in release
+    /// builds, which do not count.
+    fn moved_by(f: impl FnOnce()) -> Option<u64> {
+        let before = moved_bytes();
+        f();
+        Some(moved_bytes()? - before?)
+    }
+
+    #[test]
+    fn a_move_counts_the_bytes_it_copies() {
+        let a = Allocator;
+        let old = Layout::from_size_align(3 * MIB, 8).unwrap();
+        let moved = moved_by(|| {
+            // SAFETY: valid layouts; each block is freed once with its own layout.
+            unsafe {
+                let p = a.alloc(old);
+                assert!(!p.is_null());
+                let q = a.realloc(p, old, 5 * MIB);
+                assert!(!q.is_null());
+                a.dealloc(q, Layout::from_size_align(5 * MIB, 8).unwrap());
+            }
+        });
+        let expected = cfg!(debug_assertions).then_some(3 * MIB as u64);
+        assert_eq!(moved, expected);
+    }
+
     #[test]
     fn growth_in_small_exact_steps_stays_fast() {
-        // 2,000 steps of 64 KiB, from 1 MiB to about 126 MiB: copied whole at every step
-        // this takes seconds; in place it takes milliseconds.
+        // 2,000 steps of 64 KiB, from 1 MiB to about 126 MiB. None of them grows by half, so
+        // the move copies nothing: copied whole at every step this would be quadratic. The
+        // count of copied bytes is the check; the time is only a stop for a hang.
         let a = Allocator;
         let step = 64 * 1024;
         let start = Instant::now();
-        // SAFETY: each realloc gets the layout of the block it was given; the last block is
-        // freed with its own layout.
-        unsafe {
-            let mut layout = Layout::from_size_align(MIB, 8).unwrap();
-            let mut p = a.alloc(layout);
-            assert!(!p.is_null());
-            for _ in 0..2_000 {
-                let new = layout.size() + step;
-                p = a.realloc(p, layout, new);
+        let moved = moved_by(|| {
+            // SAFETY: each realloc gets the layout of the block it was given; the last block
+            // is freed with its own layout.
+            unsafe {
+                let mut layout = Layout::from_size_align(MIB, 8).unwrap();
+                let mut p = a.alloc(layout);
                 assert!(!p.is_null());
-                layout = Layout::from_size_align(new, 8).unwrap();
+                for _ in 0..2_000 {
+                    let new = layout.size() + step;
+                    p = a.realloc(p, layout, new);
+                    assert!(!p.is_null());
+                    layout = Layout::from_size_align(new, 8).unwrap();
+                }
+                a.dealloc(p, layout);
             }
-            a.dealloc(p, layout);
-        }
+        });
+        assert_eq!(moved, cfg!(debug_assertions).then_some(0));
         let took = start.elapsed();
-        assert!(took < Duration::from_secs(2), "{took:?}");
+        assert!(took < Duration::from_secs(30), "{took:?}");
     }
 }
