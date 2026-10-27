@@ -7,6 +7,9 @@
 //! Exit codes: 0 complete, 2 partial, 1 failed or any error (usage errors too, so 2 always
 //! means a partial read). Errors go to stderr as one line `rezzer: <message>`.
 
+#![forbid(unsafe_code)]
+
+mod derez;
 mod formats;
 mod inspect;
 mod read;
@@ -15,7 +18,8 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::{Args, Parser, Subcommand};
+use clap::error::{ContextKind, ContextValue, ErrorKind};
+use clap::{Args, CommandFactory, Parser, Subcommand};
 use rezzer_model::Registry;
 use rezzer_pipeline::{Config, OutputSection, TableStyle};
 
@@ -57,6 +61,17 @@ enum Command {
     /// Run the MCP server on stdio. A file sent inline as a data: URI may be up to
     /// limits.max_inline_bytes (32 MiB by default); give a larger file by path.
     Mcp,
+    // A hidden command that runs programs on the grid of a read file.
+    // Hidden on purpose (Jordi, 2026-10-27): it stays out of help, docs and release notes.
+    #[command(hide = true)]
+    Derez(DerezArgs),
+}
+
+#[derive(Debug, Args)]
+struct DerezArgs {
+    path: Option<PathBuf>,
+    #[arg(long, hide = true)]
+    seed: Option<u64>,
 }
 
 #[derive(Debug, Args)]
@@ -131,6 +146,7 @@ pub fn main_with(registry: Registry, after_read: fn(&std::path::Path)) -> ExitCo
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(e) => {
+            let e = hide_suggestion(e);
             let _ = e.print();
             return if e.use_stderr() {
                 ExitCode::FAILURE
@@ -150,6 +166,45 @@ pub fn main_with(registry: Registry, after_read: fn(&std::path::Path)) -> ExitCo
     }
 }
 
+/// `e` without `derez` among its suggested subcommands, since clap suggests hidden
+/// subcommands too. With other suggestions left, they stay; with none, the error reads as
+/// clap's own for a subcommand that resembles nothing. Any other error is returned unchanged.
+fn hide_suggestion(e: clap::Error) -> clap::Error {
+    if e.kind() != ErrorKind::InvalidSubcommand {
+        return e;
+    }
+    let Some(ContextValue::Strings(suggested)) = e.get(ContextKind::SuggestedSubcommand) else {
+        return e;
+    };
+    if !suggested.iter().any(|s| s == "derez") {
+        return e;
+    }
+    let others: Vec<String> = suggested
+        .iter()
+        .filter(|s| *s != "derez")
+        .cloned()
+        .collect();
+    let mut out = clap::Error::new(ErrorKind::InvalidSubcommand).with_cmd(&Cli::command());
+    if others.is_empty() {
+        // As clap builds it when nothing is similar: the subcommand and the usage only.
+        for kind in [ContextKind::InvalidSubcommand, ContextKind::Usage] {
+            if let Some(value) = e.get(kind) {
+                out.insert(kind, value.clone());
+            }
+        }
+    } else {
+        for (kind, value) in e.context() {
+            let value = if kind == ContextKind::SuggestedSubcommand {
+                ContextValue::Strings(others.clone())
+            } else {
+                value.clone()
+            };
+            out.insert(kind, value);
+        }
+    }
+    out
+}
+
 fn run(cli: Cli, registry: Registry, after_read: fn(&std::path::Path)) -> Result<ExitCode, String> {
     match cli.command {
         Command::Read(args) => {
@@ -164,6 +219,10 @@ fn run(cli: Cli, registry: Registry, after_read: fn(&std::path::Path)) -> Result
         Command::Inspect { path } => inspect::run(load_config()?, registry, &path),
         Command::Formats => formats::run(&registry),
         Command::Mcp => mcp(load_config()?, registry),
+        Command::Derez(args) => {
+            derez::check(&args)?;
+            derez::run(load_config()?, registry, &args)
+        }
     }
 }
 
@@ -203,5 +262,48 @@ fn print(text: &str) -> Result<(), String> {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
         Err(e) => Err(format!("cannot write to stdout: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn suggested(e: &clap::Error) -> Vec<String> {
+        match e.get(ContextKind::SuggestedSubcommand) {
+            Some(ContextValue::Strings(s)) => s.clone(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// clap itself suggests `derez`; only `hide_suggestion` takes it out.
+    #[test]
+    fn clap_suggests_derez_and_hide_suggestion_drops_it() {
+        let e = Cli::try_parse_from(["rezzer", "eread"]).unwrap_err();
+        let before = suggested(&e);
+        assert!(before.contains(&"derez".to_string()), "{before:?}");
+        assert!(before.contains(&"read".to_string()), "{before:?}");
+        assert_eq!(suggested(&hide_suggestion(e)), ["read"]);
+
+        let e = Cli::try_parse_from(["rezzer", "dere"]).unwrap_err();
+        assert_eq!(suggested(&e), ["derez"]);
+        let e = hide_suggestion(e);
+        assert_eq!(e.kind(), ErrorKind::InvalidSubcommand);
+        assert!(suggested(&e).is_empty());
+        let zzzz = Cli::try_parse_from(["rezzer", "zzzz"]).unwrap_err();
+        assert_eq!(
+            e.render().to_string().replace("dere", "zzzz"),
+            zzzz.render().to_string()
+        );
+    }
+
+    #[test]
+    fn other_errors_pass_unchanged() {
+        let e = Cli::try_parse_from(["rezzer", "rea"]).unwrap_err();
+        let text = e.render().to_string();
+        assert_eq!(hide_suggestion(e).render().to_string(), text);
+        let e = Cli::try_parse_from(["rezzer", "read"]).unwrap_err();
+        let text = e.render().to_string();
+        assert_eq!(hide_suggestion(e).render().to_string(), text);
     }
 }
