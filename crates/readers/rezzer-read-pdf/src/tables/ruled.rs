@@ -106,6 +106,7 @@ pub(super) fn ruled(
         hs: &hs,
         vs: &vs,
         frames: &frames,
+        taken: &taken,
         per_line: texted_per_line(flow),
         stop,
     };
@@ -158,6 +159,8 @@ struct Sheet<'a> {
     hs: &'a [Seg],
     vs: &'a [Seg],
     frames: &'a [Frame],
+    /// The horizontal lines a grid takes.
+    taken: &'a [bool],
     per_line: HashMap<u32, u32>,
     stop: &'a dyn Fn() -> bool,
 }
@@ -1040,12 +1043,19 @@ fn bands_and_strips(sh: &Sheet<'_>, take: &mut Taking, found: &mut Found) -> usi
         .map(|i| take.claimed[i].is_some() || take.held[i] || take.titles[i])
         .collect();
     let tabled: Vec<bool> = take.claimed.iter().map(Option::is_some).collect();
+    let table_rules: Vec<Seg> = sh
+        .hs
+        .iter()
+        .zip(sh.taken)
+        .filter(|(_, t)| **t)
+        .map(|(s, _)| *s)
+        .collect();
     strip_tables(
         sh.page,
         sh.flow,
         sh.by_y,
         sh.frames,
-        sh.hs,
+        (sh.hs, &table_rules),
         &busy,
         &tabled,
         &mut take.claimed,
@@ -1267,7 +1277,7 @@ fn strip_tables(
     flow: &Flow,
     by_y: &ByY,
     frames: &[Frame],
-    hs: &[Seg],
+    (hs, table_rules): (&[Seg], &[Seg]),
     busy: &[bool],
     tabled: &[bool],
     claimed: &mut [Claim],
@@ -1283,6 +1293,7 @@ fn strip_tables(
         by_y,
         frames,
         hs,
+        table_rules,
         &|i| busy[i],
         &|i| tabled[i],
         &text_sizes,

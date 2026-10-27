@@ -1165,10 +1165,11 @@ fn labels_under_values_beside_a_label_and_value_between_tables_never_pair_shifte
 }
 
 /// How full the end of a grid of labels under values is that lies in a ruled table: a value (or
-/// a label) for each of its fields, or for none.
+/// a label) for each of its fields, for some, or for none.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Fill {
     Complete,
+    Partial,
     Empty,
 }
 
@@ -1192,6 +1193,7 @@ fn between_tables(g: &Geo, top_fill: Fill, bottom_fill: Fill, twin: bool) -> Bui
     };
     let pick = |f: Fill, a: &'static str, b: &'static str| match f {
         Fill::Complete => (a, b),
+        Fill::Partial => (a, ""),
         Fill::Empty => ("", ""),
     };
     let (name, ort) = pick(top_fill, "Erika Mustermann", "Musterstadt");
@@ -1259,6 +1261,48 @@ fn read_between_tables(b: &Built) -> (Vec<Broken>, bool) {
     (broken, paired)
 }
 
+/// The pairs of ends in ruled tables left out of [`every_pair_of_ends_in_tables_holds_the_invariants`]:
+/// their ends are none and own, none and partial, or partial and own, so the table of ends reads
+/// them labels over values, and each page is the page of a grid of labels over values (see
+/// [`between_tables`]; `the_left_out_pairs_of_ends_in_tables_read_as_their_twins`).
+const TABLE_ENDS_LEFT_OUT: [(Fill, Fill); 3] = [
+    (Fill::Empty, Fill::Empty),
+    (Fill::Empty, Fill::Partial),
+    (Fill::Partial, Fill::Empty),
+];
+
+/// Each left-out pair of ends in ruled tables reads as its twin, a grid of labels over values
+/// (same text, same losses), in the real look and the looks with hanging dividers: the two
+/// pages are one, and the table of ends reads it one way. (Dividers that rise from the lower
+/// rule rise from the other rule of a row in the two drawings, so that look is left out.)
+#[test]
+fn the_left_out_pairs_of_ends_in_tables_read_as_their_twins() {
+    let mut differ = Vec::new();
+    for (top, bottom) in TABLE_ENDS_LEFT_OUT {
+        for (look, g) in
+            std::iter::once(("real", REAL)).chain(looks().into_iter().filter(|l| !l.1.rising))
+        {
+            let (a, b) = (
+                read_pages(&[&between_tables(&g, top, bottom, false)]),
+                read_pages(&[&between_tables(&g, top, bottom, true)]),
+            );
+            let read = |o: &rezzer_model::ReadOutcome| {
+                let losses: Vec<String> =
+                    o.document.losses.iter().map(|l| l.what.clone()).collect();
+                (common::text(blocks(o)), losses)
+            };
+            if read(&a) != read(&b) {
+                differ.push(format!(
+                    "{top:?}, {bottom:?}, {look}:\n{:#?}\n{:#?}",
+                    read(&a),
+                    read(&b)
+                ));
+            }
+        }
+    }
+    assert!(differ.is_empty(), "{}", differ.join("\n"));
+}
+
 /// A grid of labels under values between two ruled tables, its last row empty, its dividers
 /// rising from the rule under each row: the divider of the last row rises over the grid's
 /// last rule, the table under it's top rule, into the row over it, where no text stands. That
@@ -1274,6 +1318,61 @@ fn an_empty_row_over_a_table_made_by_a_rising_divider_is_no_row_of_it() {
     let (broken, _) = read_between_tables(&b);
     let wrong = unexpected(vec![("rising".to_string(), broken)], &[]);
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// The reviewer's probe R1: labels under values, no value of two lines, both ends in ruled
+/// tables, the first row's or the last row's second value empty. The evidence at both ends lies
+/// in the cells of tables whose rules are the grid's own: in part at both ends, that is not
+/// clear (ruling P6-Z4). No field pairs with the value of another row.
+#[test]
+fn labels_under_values_with_partial_ends_in_tables_never_pair_shifted() {
+    let mut reads = Vec::new();
+    for (look, g) in std::iter::once(("real", REAL)).chain(looks()) {
+        for (top, bottom) in [
+            (Fill::Partial, Fill::Partial),
+            (Fill::Partial, Fill::Complete),
+            (Fill::Complete, Fill::Partial),
+        ] {
+            let b = grid_between_tables(&g, top, bottom);
+            let (broken, _) = read_between_tables(&b);
+            reads.push((format!("top {top:?}, bottom {bottom:?}, {look}"), broken));
+        }
+    }
+    let wrong = unexpected(reads, &[]);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Every pair of ends in ruled tables (complete, partial or empty at the top and at the
+/// bottom), in the real look and each of [`looks`], but those of [`TABLE_ENDS_LEFT_OUT`]: no
+/// wrong pair, every value once, and each field pairs or a loss names it. Pinned: 9 pairs of
+/// ends, 6 held (36 reads), 3 left out, and no field of a held one pairs.
+#[test]
+fn every_pair_of_ends_in_tables_holds_the_invariants() {
+    let fills = [Fill::Complete, Fill::Partial, Fill::Empty];
+    let mut reads = Vec::new();
+    let mut paired: Vec<String> = Vec::new();
+    for top in fills {
+        for bottom in fills {
+            if TABLE_ENDS_LEFT_OUT.contains(&(top, bottom)) {
+                continue;
+            }
+            for (look, g) in std::iter::once(("real", REAL)).chain(looks()) {
+                let b = grid_between_tables(&g, top, bottom);
+                let (broken, pairs) = read_between_tables(&b);
+                let name = format!("top {top:?}, bottom {bottom:?}, {look}");
+                if pairs {
+                    paired.push(name.clone());
+                }
+                reads.push((name, broken));
+            }
+        }
+    }
+    assert_eq!(reads.len(), 36);
+    let wrong = unexpected(reads, &[]);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    // The runs of the tables are no evidence the first way and evidence the second way, so the
+    // two ways differ and every held pair of ends gives a loss, both complete included.
+    assert!(paired.is_empty(), "{paired:#?}");
 }
 
 /// A row between two rules, parted by a divider, whose every cell holds text in three styles

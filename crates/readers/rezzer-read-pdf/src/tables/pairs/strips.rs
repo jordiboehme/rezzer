@@ -442,6 +442,7 @@ pub(in crate::tables) fn field_strips(
     by_y: &ByY,
     frames: &[Frame],
     hs: &[Seg],
+    table_rules: &[Seg],
     busy: &dyn Fn(usize) -> bool,
     tabled: &dyn Fn(usize) -> bool,
     text_sizes: &[f32],
@@ -649,22 +650,37 @@ pub(in crate::tables) fn field_strips(
         let with_held = |i: usize| {
             !own.contains(&i) && !outside.contains(&i) && (shaped || !beside || !tabled(i))
         };
-        // A run of a strip of another group joined to this one by its rules: over or under a
-        // strip of the group, across a stretch both share, its rule within one row pitch of
-        // the group's (the two rules of a double rule).
+        // A run joined to the group by its rules: one of a strip of another group over or
+        // under a strip of the group, across a stretch both share, its rule within one row
+        // pitch of the group's (the two rules of a double rule); or one of a ruled table over
+        // the group's top rule or under its bottom rule whose grid has that rule as its own
+        // (`table_rules`).
+        let (top, bottom) = g.iter().fold((f32::MIN, f32::MAX), |(t, b), &k| {
+            (t.max(strips[k].top), b.min(strips[k].bottom))
+        });
+        let at_rule = |y: f32, r: &Run| {
+            table_rules
+                .iter()
+                .any(|s| (s.at - y).abs() <= SNAP && s.from < r.x + r.w && r.x < s.to)
+        };
+        let in_table = |i: usize| {
+            let r = &flow.runs[i];
+            tabled(i) && ((r.y > top && at_rule(top, r)) || (r.y < bottom && at_rule(bottom, r)))
+        };
         let neighbour = |i: usize| {
-            holder.get(&i).is_some_and(|&k| {
-                let t = &strips[k];
-                !g.contains(&k)
-                    && g.iter().any(|&o| {
-                        let s = &strips[o];
-                        let pitch = s.top - s.bottom;
-                        s.x0 < t.x1
-                            && t.x0 < s.x1
-                            && ((t.bottom - s.top).abs() <= pitch
-                                || (s.bottom - t.top).abs() <= pitch)
-                    })
-            })
+            in_table(i)
+                || holder.get(&i).is_some_and(|&k| {
+                    let t = &strips[k];
+                    !g.contains(&k)
+                        && g.iter().any(|&o| {
+                            let s = &strips[o];
+                            let pitch = s.top - s.bottom;
+                            s.x0 < t.x1
+                                && t.x0 < s.x1
+                                && ((t.bottom - s.top).abs() <= pitch
+                                    || (s.bottom - t.top).abs() <= pitch)
+                        })
+                })
         };
         // One field alone between its rules reads like a caption over a line: it is not
         // paired, and that is said, with the labels under its rule that may be of its value.
@@ -1306,11 +1322,12 @@ fn ends(
         // A strip of another shape: labels over values only without evidence at either end.
         Way::Under if !shaped => Way::Unclear,
         Way::Over if !shaped && (top != TopEnd::None || bottom != BottomEnd::None) => Way::Unclear,
-        // With the runs other groups hold (`open`), evidence in part at both ends that runs of
-        // a field group joined to this one by its rules (`neighbour`) make at each end is a
-        // grid parted by double rules, with fields left empty at its inner ends: not clear.
-        // Evidence in part from other text (a loose line, column titles, a table's runs) keeps
-        // labels over values.
+        // With the runs other groups hold (`open`), evidence in part at both ends that runs
+        // joined to the group by its rules (`neighbour`) make at each end is not clear: a grid
+        // parted by double rules with fields left empty at its inner ends, or a grid whose
+        // ends lie in the cells of ruled tables that share its top and bottom rule (rulings
+        // P6-Z3, P6-Z4). Evidence in part from other text (a loose line, column titles under
+        // a rule of their own) keeps labels over values.
         Way::Over
             if open.is_some()
                 && top == TopEnd::Partial
@@ -1335,9 +1352,9 @@ fn ends(
         // So are the labels of a row between two rules over its top rule.
         Way::Unclear => {
             let mut named = match bottom {
-                BottomEnd::Free => below,
+                BottomEnd::Free | BottomEnd::Partial => below,
                 BottomEnd::Own => further,
-                _ => Vec::new(),
+                BottomEnd::None => Vec::new(),
             };
             named.extend(over_labels);
             Ends::Unclear(named)
@@ -1395,9 +1412,10 @@ enum Way {
 /// column titles of a next table, a line of data over it), so it is not clear. An own row of
 /// labels is the group's own empty last row as much as labels over a rule under the last
 /// labels: no end. One field a row is too little evidence for labels under values. Found with
-/// the runs other groups hold, evidence in part at both ends is not clear either when runs of
-/// a field group joined to this one by its rules make it at each end (a grid parted by double
-/// rules); from other text it keeps labels over values (see [`ends`]).
+/// the runs other groups hold, evidence in part at both ends is not clear either when runs
+/// joined to the group by its rules make it at each end: of a field group (a grid parted by
+/// double rules) or of a ruled table that shares the group's end rule; from other text it
+/// keeps labels over values (see [`ends`]).
 fn way_of(single: bool, top: TopEnd, bottom: BottomEnd) -> Way {
     match (single, top, bottom) {
         (true, TopEnd::Complete, _) | (true, _, BottomEnd::Free) => Way::Unclear,
