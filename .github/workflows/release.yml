@@ -506,7 +506,9 @@ jobs:
           fi
           path="target/$TARGET/release/rezzer"
           identifier="io.github.jordiboehme.rezzer"
-          codesign --force --timestamp --options runtime \
+          # --force lets a retry re-sign a binary that a failed try already signed.
+          "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 3 \
+            codesign --force --timestamp --options runtime \
             --identifier "$identifier" \
             --keychain "$keychain" \
             --sign "$identity" \
@@ -533,9 +535,15 @@ jobs:
           result="$RUNNER_TEMP/notarize-rezzer.json"
           ditto -c -k --keepParent "target/$TARGET/release/rezzer" "$zip"
           set +e
-          xcrun notarytool submit "$zip" \
-            --key "$key" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" \
-            --wait --timeout 30m --output-format json > "$result"
+          # The redirect sits inside bash -c so the ::warning:: lines of retry.sh
+          # stay out of the JSON; each try overwrites it. The status check below
+          # still decides: a submit that ends Invalid fails the step.
+          # shellcheck disable=SC2016  # the $1..$3 are for the inner bash
+          "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 3 bash -c '
+            xcrun notarytool submit "$1" \
+              --key "$2" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" \
+              --wait --timeout 30m --output-format json > "$3"
+          ' _ "$zip" "$key" "$result"
           submit_rc=$?
           set -e
           cat "$result"
@@ -598,6 +606,9 @@ jobs:
       - name: Package (tar.gz)
         if: ${{ matrix.archive_ext == 'tar.gz' }}
         working-directory: dist
+        env:
+          # macOS bsdtar would pack extended attributes as ._* AppleDouble entries.
+          COPYFILE_DISABLE: "1"
         run: tar -czf "$STAGE.tar.gz" "$STAGE"
 
       - name: Package (zip)
