@@ -203,7 +203,8 @@ jobs:
 
   test:
     name: test (${{ matrix.os }}${{ matrix.libc == 'musl' && ', musl' || '' }})
-    timeout-minutes: 45
+    # 60, not 45: a cold Windows build (a pull request restores the cache but never saves it).
+    timeout-minutes: 60
     needs: changes
     if: ${{ needs.changes.outputs.rust == 'true' }}
     runs-on: ${{ matrix.os }}
@@ -296,8 +297,9 @@ jobs:
       # checkout, so the profile overrides apply. The binaries hold paths fixed
       # at build time (CARGO_MANIFEST_DIR, snapshot paths, cargo_bin), so the
       # run has to happen in the same job at the same path as the build.
+      # --no-fail-fast: one red run shows every failing test, at no cost when all pass.
       - name: run tests
-        run: cargo nextest run --archive-file "$RUNNER_TEMP/$TESTS_ARCHIVE" --workspace-remap "$GITHUB_WORKSPACE" --no-tests=warn
+        run: cargo nextest run --archive-file "$RUNNER_TEMP/$TESTS_ARCHIVE" --workspace-remap "$GITHUB_WORKSPACE" --no-tests=warn --no-fail-fast
 
       # nextest does not run doctests. The musl leg leaves them out: they run on the
       # host target, which the ubuntu-latest leg covers.
