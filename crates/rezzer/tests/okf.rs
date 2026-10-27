@@ -2,8 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Every file Rezzer writes for the corpus, checked against the OKF rules Crystalline 0.29.0
-//! enforces, then imported into a throwaway Crystalline domain.
+//! Every file Rezzer writes for the corpus, checked against the OKF rules Crystalline 0.29.1
+//! enforces, then imported into a throwaway Crystalline domain. The import tests need
+//! Crystalline 0.29.1 or later: they skip when `crystalline` is not on `PATH` and fail with
+//! the version found when it is older.
 //!
 //! [`write_corpus`] reads every corpus file into one output folder, plus copies of three
 //! corpus files under names that break paths or permalinks (spaces, parentheses, `#`, `%`,
@@ -461,7 +463,7 @@ fn body_rules(root: &Path, file: &Path, part_size: usize) -> Vec<String> {
 }
 
 /// Q002's count: body characters divided by 4, each asset link counted at the longer of its
-/// written length and the one Crystalline 0.29.0 rewrites it to on import
+/// written length and the one Crystalline 0.29.1 rewrites it to on import
 /// (`assets/<note path without .md>/<file name>`). The note path is taken below `root`, so
 /// the count holds when `root` is the import root. The Crystalline test imports the folder
 /// above (`out/size-<n>/`), so its rewritten links are longer by `size-<n>/`; there the
@@ -1022,6 +1024,93 @@ impl Isolated {
     }
 }
 
+/// The version on the first line of `crystalline --version` (`crystalline X.Y.Z`); a
+/// `-suffix` after the patch number is ignored.
+fn crystalline_version(text: &str) -> Option<(u32, u32, u32)> {
+    let version = text.lines().next()?.strip_prefix("crystalline ")?.trim();
+    let version = version.split_once('-').map_or(version, |(v, _)| v);
+    let mut numbers = version.split('.').map(|n| n.parse::<u32>().ok());
+    let found = (numbers.next()??, numbers.next()??, numbers.next()??);
+    numbers.next().is_none().then_some(found)
+}
+
+/// The oldest Crystalline whose reading of Rezzer's output the tests rely on.
+const MIN_CRYSTALLINE: (u32, u32, u32) = (0, 29, 1);
+
+/// Fails the test when the `crystalline` of `cr` is older than [`MIN_CRYSTALLINE`].
+fn require_min_version(cr: &Isolated) {
+    let (_, text, _) = cr.call(&["--version"], false);
+    let version = crystalline_version(&text);
+    let found = match version {
+        Some((major, minor, patch)) => format!("{major}.{minor}.{patch}"),
+        None => format!("{:?}", text.lines().next().unwrap_or("")),
+    };
+    assert!(
+        version.is_some_and(|v| v >= MIN_CRYSTALLINE),
+        "crystalline on PATH is {found}; Rezzer's output needs 0.29.1 or later: update it or \
+         take it off PATH"
+    );
+}
+
+/// Writes `files` (path, text) into a fresh folder, imports it into a fresh domain, syncs,
+/// and returns `crystalline read <permalink> --json` of each file by its path.
+fn import_probe(cr: &Isolated, files: &[(&str, &str)]) -> BTreeMap<String, Value> {
+    let src = cr.root.join("probe-src");
+    let dom = cr.root.join("probe-dom");
+    std::fs::create_dir(&src).unwrap();
+    for (path, text) in files {
+        std::fs::write(src.join(path), text).unwrap();
+    }
+    let dom_arg = dom.to_str().unwrap();
+    cr.run(&["domain", "init", dom_arg, "--name", "probe"]);
+    cr.run(&["domain", "add", "probe", dom_arg]);
+    let import: Value = serde_json::from_str(&cr.run(&[
+        "import",
+        "--domain",
+        "probe",
+        "--json",
+        src.to_str().unwrap(),
+    ]))
+    .unwrap();
+    cr.run(&["sync", "--domain", "probe"]);
+    let mut read = BTreeMap::new();
+    for file in import["files"].as_array().unwrap() {
+        let path = file["path"].as_str().unwrap().to_string();
+        let permalink = file["changes"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .find_map(|c| c.strip_prefix("permalink: missing -> `")?.strip_suffix('`'))
+            .or_else(|| {
+                // A name the import derives no permalink from carries its own.
+                let (_, text) = files.iter().find(|(p, _)| *p == path)?;
+                let line = text.lines().find_map(|l| l.strip_prefix("permalink: "))?;
+                Some(line.trim_matches('"'))
+            })
+            .unwrap_or_else(|| panic!("{path}: no permalink in {file}"));
+        let engram =
+            serde_json::from_str(&cr.run(&["read", permalink, "--domain", "probe", "--json"]))
+                .unwrap();
+        read.insert(path, engram);
+    }
+    read
+}
+
+#[test]
+fn crystalline_version_reads_the_first_line() {
+    assert_eq!(
+        crystalline_version("crystalline 0.29.1\nCopyright"),
+        Some((0, 29, 1))
+    );
+    assert_eq!(
+        crystalline_version("crystalline 0.30.0-dev"),
+        Some((0, 30, 0))
+    );
+    assert_eq!(crystalline_version("other 1.0"), None);
+    assert_eq!(crystalline_version(""), None);
+}
+
 #[test]
 fn crystalline_imports_without_errors() {
     let Some(bin) = crystalline_on_path() else {
@@ -1032,6 +1121,7 @@ fn crystalline_imports_without_errors() {
     let cr = Isolated::new(bin, &tmp.path().join("crystalline"));
     let (_, version, _) = cr.call(&["--version"], false);
     println!("found {}", version.trim());
+    require_min_version(&cr);
 
     // Both part sizes, each in its own folder of the one import.
     let out = tmp.path().join("out");
@@ -1178,6 +1268,177 @@ fn crystalline_imports_without_errors() {
         read += 1;
     }
     assert!(read >= 6, "only {read} parts with hard names were read");
+    assert!(
+        problems.is_empty(),
+        "{} problems:\n{}",
+        problems.len(),
+        problems.join("\n")
+    );
+}
+
+/// One engram for each list item shape Rezzer writes or guards against, each read back from
+/// the real `crystalline`: what it takes as a relation, an observation or a link.
+#[test]
+fn crystalline_reads_the_shapes_rezzer_relies_on() {
+    let Some(bin) = crystalline_on_path() else {
+        println!("skipped: crystalline is not on PATH");
+        return;
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let cr = Isolated::new(bin, &tmp.path().join("crystalline"));
+    require_min_version(&cr);
+
+    const SHAPES: [(&str, &str); 13] = [
+        ("prose-link.md", "- See [Three](three.md)"),
+        ("lower-link.md", "- see [Three](three.md)"),
+        ("umlaut-link.md", "- \u{fc}ber [Three](three.md)"),
+        ("footnote.md", "- [^1] a note"),
+        ("category.md", "- [c] text"),
+        ("wikilink.md", "- Tok [[Three]]"),
+        (
+            "ideographic.md",
+            "- part_of [D](\u{65e5}\u{672c}\u{3000}\u{5831}\u{544a}.md)",
+        ),
+        ("no-break.md", "- part_of [D](a\u{a0}b.md)"),
+        ("brackets.md", "- part_of [D]([[x]].md)"),
+        ("escaped-category.md", "- [A\\] b](three.md): t"),
+        ("escaped-text.md", "- part_of [a\\](b) c](three.md)"),
+        ("escaped-note.md", "- part_of [a\\](b.md) c](three.md)"),
+        ("three.md", "Line three of Three."),
+    ];
+    let targets = [
+        "\u{65e5}\u{672c}\u{3000}\u{5831}\u{544a}.md",
+        "a\u{a0}b.md",
+        "[[x]].md",
+        "b.md",
+    ];
+    let files: Vec<(String, String)> = SHAPES
+        .iter()
+        .map(|(name, line)| (name.to_string(), line.to_string()))
+        .chain(
+            targets
+                .iter()
+                .map(|name| (name.to_string(), "Line three.".into())),
+        )
+        .map(|(name, line)| {
+            let title = name.trim_end_matches(".md");
+            let title = if name == "three.md" { "Three" } else { title };
+            // The import derives no permalink from a name without ASCII letters.
+            let permalink = if name == targets[0] {
+                "permalink: \"nihon-houkoku\"\n"
+            } else {
+                ""
+            };
+            let text = format!(
+                "---\ntype: engram\ntitle: \"{title}\"\n{permalink}---\n\
+                 Line one of {title}.\n\nLine two.\n\n{line}\n"
+            );
+            (name, text)
+        })
+        .collect();
+    let refs: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(n, t)| (n.as_str(), t.as_str()))
+        .collect();
+    let read = import_probe(&cr, &refs);
+
+    let get = |path: &str, key: &str| -> Vec<Value> {
+        let engram = read
+            .get(path)
+            .unwrap_or_else(|| panic!("{path} was not imported: {:?}", read.keys()));
+        engram[key].as_array().cloned().unwrap_or_default()
+    };
+    let target = |item: &Value| item["target"]["target"].as_str().unwrap_or("").to_string();
+    let relations_of = |path: &str| -> Vec<(String, String, bool)> {
+        get(path, "relations")
+            .iter()
+            .map(|r| {
+                let rel = r["rel_type"].as_str().unwrap_or("").to_string();
+                (rel, target(r), r["resolved"] == true)
+            })
+            .collect()
+    };
+    let categories = |path: &str| -> Vec<String> {
+        get(path, "observations")
+            .iter()
+            .map(|o| o["category"].as_str().unwrap_or("").to_string())
+            .collect()
+    };
+    let links = |path: &str| -> Vec<String> { get(path, "links").iter().map(target).collect() };
+
+    let mut problems = Vec::new();
+    let mut check = |path: &str, what: &str, ok: bool| {
+        if !ok {
+            problems.push(format!("{path}: {what}: {}", read[path]));
+        }
+    };
+
+    check(
+        "prose-link.md",
+        "no relation, one link to three.md",
+        relations_of("prose-link.md").is_empty() && links("prose-link.md") == ["three.md"],
+    );
+    for (path, rel) in [("lower-link.md", "see"), ("umlaut-link.md", "\u{fc}ber")] {
+        check(
+            path,
+            &format!("relation {rel} to three.md"),
+            relations_of(path) == [(rel.to_string(), "three.md".to_string(), true)],
+        );
+    }
+    check(
+        "footnote.md",
+        "no observation",
+        categories("footnote.md").is_empty(),
+    );
+    check(
+        "category.md",
+        "observation c",
+        categories("category.md") == ["c"],
+    );
+    check(
+        "wikilink.md",
+        "relation Tok to Three",
+        relations_of("wikilink.md") == [("Tok".to_string(), "Three".to_string(), true)],
+    );
+    for (path, to) in [
+        ("ideographic.md", targets[0]),
+        ("no-break.md", targets[1]),
+        ("brackets.md", targets[2]),
+    ] {
+        check(
+            path,
+            &format!("one resolved part_of to {to}"),
+            relations_of(path) == [("part_of".to_string(), to.to_string(), true)],
+        );
+    }
+    check(
+        "brackets.md",
+        "no wikilink to x",
+        !relations_of("brackets.md")
+            .iter()
+            .any(|(_, to, _)| to == "x")
+            && !links("brackets.md").iter().any(|to| to == "x"),
+    );
+    check(
+        "escaped-category.md",
+        "an observation",
+        categories("escaped-category.md").len() == 1,
+    );
+    // `(b)` is no link to a note, so the scan goes on to the next `](`, and the link text
+    // reaches back past the escaped `]` to the first `[`: a relation to three.md.
+    check(
+        "escaped-text.md",
+        "one resolved part_of to three.md",
+        relations_of("escaped-text.md") == [("part_of".to_string(), "three.md".to_string(), true)],
+    );
+    // A link to a note ends its text at the first `](`, escaped or not: the relation goes
+    // to b.md, and three.md is a prose link.
+    check(
+        "escaped-note.md",
+        "one resolved part_of to b.md, a link to three.md",
+        relations_of("escaped-note.md") == [("part_of".to_string(), "b.md".to_string(), true)]
+            && links("escaped-note.md") == ["three.md"],
+    );
     assert!(
         problems.is_empty(),
         "{} problems:\n{}",
