@@ -1696,40 +1696,76 @@ fn a_wrapped_item_line_without_rules_joins_its_cell_or_is_named() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// Guard: lines right under line items without rules that are no wrap of their last row do
-/// not join it and give no loss, in every size, font and weight and with 2 to 5 rows: a note
-/// across the gutter between `Pos` and `Artikel`, a line under `Artikel` wider than its
-/// column, a word under `Pos` wider than its numbers, a word that starts half a size into
-/// `Artikel`, a total and a page number flush right under `Betrag` (the review's finding K2),
-/// and `Seite 1`, `Danke`, `Summe` and a signature under the text columns. Each stays text out
-/// of the table.
+/// How a line under the items of [`lines_under_items_without_rules_are_named_or_stay_paragraphs`]
+/// is set: in the items' font and size, at 0.75 times their size, or in the other family.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Set {
+    Same,
+    Smaller,
+    OtherFamily,
+}
+
+/// Lines right under line items without rules, at row pitch, in every size, font and weight
+/// and with 2 to 5 rows (the review's finding K2 and its ruling): none joins the table, and
+/// each stays text out of it.
+/// - A line that starts at a text column's start, in the column's font family and size, may go
+///   on in the last row, whatever its first letter: a capitalized wrap `Frei Haus`, a small
+///   one `frei Haus`, `Danke` and a signature. A loss says so.
+/// - No loss for the others: a page number by its shape (`Seite 1`, `Seite 1 von 2`,
+///   `Page 2 of 3` under `Artikel`, `Seite 1/2` flush right), a total or an amount flush right
+///   under `Betrag`, `Danke` in a smaller size or in the other family, a note across the
+///   gutter between `Pos` and `Artikel`, a line under `Artikel` that runs on into `Menge`, a
+///   word under the numbers of `Pos` or `Menge`, and a word that starts half a size into
+///   `Artikel`.
 #[test]
-fn lines_under_items_without_rules_that_are_no_wrap_stay_paragraphs() {
+fn lines_under_items_without_rules_are_named_or_stay_paragraphs() {
     let mut wrong = Vec::new();
     let mut reads = 0;
     for k in [0.75, 1.0, 1.5] {
         for fonts in FONTS {
             for bold in [false, true] {
-                for (text, x) in [
-                    ("Alle Preise in EUR", Some(40.0)),
-                    ("Zahlbar bis zum 01.03.2026 ohne Abzug", Some(80.0)),
-                    ("Hinweis", Some(40.0)),
-                    ("inkl.", Some(80.0 + 4.0 * k)),
-                    ("1.469,13", None),
-                    ("Gesamt 1.469,13", None),
-                    ("Seite 1/2", None),
-                    ("Seite 1", Some(80.0)),
-                    ("Danke", Some(80.0)),
-                    ("Summe", Some(300.0)),
-                    ("i.A. Erika Mustermann", Some(80.0)),
+                for (text, x, set, loss) in [
+                    ("Frei Haus", Some(80.0), Set::Same, true),
+                    ("frei Haus", Some(80.0), Set::Same, true),
+                    ("Danke", Some(80.0), Set::Same, true),
+                    ("Seite 1", Some(80.0), Set::Same, false),
+                    ("Seite 1 von 2", Some(80.0), Set::Same, false),
+                    ("Page 2 of 3", Some(80.0), Set::Same, false),
+                    ("Seite 1/2", None, Set::Same, false),
+                    ("1.469,13", None, Set::Same, false),
+                    ("Gesamt 1.469,13", None, Set::Same, false),
+                    ("Danke", Some(80.0), Set::Smaller, false),
+                    ("Danke", Some(80.0), Set::OtherFamily, false),
+                    ("Alle Preise in EUR", Some(40.0), Set::Same, false),
+                    (
+                        "Zahlbar bis zum 01.03.2026 ohne Abzug, 2 % Skonto bei Zahlung in 10 Tagen",
+                        Some(80.0),
+                        Set::Same,
+                        false,
+                    ),
+                    ("Hinweis", Some(40.0), Set::Same, false),
+                    ("Summe", Some(300.0), Set::Same, false),
+                    ("inkl.", Some(80.0 + 4.0 * k), Set::Same, false),
+                    ("i.A. Erika Mustermann", Some(80.0), Set::Same, true),
                 ] {
+                    let size = match set {
+                        Set::Smaller => 6.0 * k,
+                        _ => 8.0 * k,
+                    };
+                    let font = match (set, fonts.0) {
+                        (Set::OtherFamily, "FL") => "FT",
+                        (Set::OtherFamily, _) => "FL",
+                        _ => fonts.0,
+                    };
                     // Flush right at x 540 when no x is given.
-                    let x = x.unwrap_or_else(|| 540.0 - common::font_width(fonts.0, text, 8.0 * k));
+                    let x = x.unwrap_or_else(|| 540.0 - common::font_width(font, text, size));
                     for n in 2..=5 {
-                        let (t, columns) = unruled_items(k, fonts, bold, n, None, Some((text, x)));
+                        let (mut t, columns) = unruled_items(k, fonts, bold, n, None, None);
+                        t += &show(font, size, x, 600.0 - 10.0 * k * (n as f32 + 1.0), text);
                         let out = common::read(&page_in(&t, Look::Plain));
                         reads += 1;
-                        let name = format!("{k}x, {fonts:?}, bold {bold}, {n} rows, {text:?}");
+                        let name =
+                            format!("{k}x, {fonts:?}, bold {bold}, {n} rows, {text:?}, {set:?}");
                         let mut b = columns_broken(&out, &columns);
                         if tables(&out).len() != 1 {
                             b.push(format!("tables {:?}", tables(&out)));
@@ -1746,7 +1782,8 @@ fn lines_under_items_without_rules_that_are_no_wrap_stay_paragraphs() {
                             .iter()
                             .map(|l| l.what.as_str())
                             .collect();
-                        if !losses.is_empty() {
+                        let want: &[&str] = if loss { &[WRAP_LOSS] } else { &[] };
+                        if losses != want {
                             b.push(format!("losses {losses:?}"));
                         }
                         wrong.extend(b.into_iter().map(|b| format!("{name}: {b}")));
@@ -1755,7 +1792,7 @@ fn lines_under_items_without_rules_that_are_no_wrap_stay_paragraphs() {
             }
         }
     }
-    assert_eq!(reads, 528);
+    assert_eq!(reads, 816);
     assert!(
         wrong.is_empty(),
         "{} wrong:\n{}",

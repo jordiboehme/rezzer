@@ -507,8 +507,31 @@ struct Tail {
     marked: bool,
 }
 
+/// A page number has at most this many words.
+const PAGE_WORDS: usize = 4;
+
+/// Whether `text` has the shape of a page number (`Seite 1`, `Seite 1 von 2`, `Page 2 of 3`,
+/// `Seite 1/2`): a few words that start with a word of letters, each a word of letters or a
+/// number (two numbers parted by a slash too), at least one a number.
+fn page_number(text: &str) -> bool {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let letters = |w: &str| {
+        let w = w.trim_end_matches(['.', ':']);
+        !w.is_empty() && w.chars().all(char::is_alphabetic)
+    };
+    let number = |w: &str| {
+        w.split('/')
+            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+    };
+    (2..=PAGE_WORDS).contains(&words.len())
+        && letters(words[0])
+        && words.iter().all(|w| letters(w) || number(w))
+        && words.iter().any(|w| number(w))
+}
+
 /// A line of one piece under a table may go on in its last row when it starts within this
-/// many sizes of the start of its column and ends within as many of its end.
+/// many sizes of the start of its column; its font size may differ from the column's by this
+/// share.
 const WRAP_ALIGN: f32 = 0.1;
 
 /// How many of the lines under a region (`lines`, the region's first, its `pieces` the
@@ -517,11 +540,13 @@ const WRAP_ALIGN: f32 = 0.1;
 /// - A marked line (see [`Tail`]) does when each of its pieces stands over one column of the
 ///   region (it crosses no gutter): the frame holds it.
 /// - A line of one piece never does: a wrap of the last row and a note under the table look
-///   the same. It may, when it goes on the text of a cell as a wrap does: it stands over one
-///   column (it crosses no gutter), starts at the column's start and ends within it (see
-///   [`WRAP_ALIGN`]), starts with a small letter (a new line of text, a total or a page number
-///   starts otherwise), the column holds no numbers mostly, and it stands no farther under the
-///   line over it than the lines of the region stand apart.
+///   the same. It may, whatever its first letter, when it is set as a wrap of a cell's text:
+///   it stands over one column (it crosses no gutter), starts at the column's start (see
+///   [`WRAP_ALIGN`]) and ends before the middle of the gutter after it, is set in the font
+///   family and size of the column's text,
+///   and stands no farther under the line over it than the lines of the region stand apart.
+///   A column of numbers mostly holds no wrap, and a line of a number or an amount only, or
+///   a page number by its shape (see [`page_number`]), is none.
 fn joined_tail(
     flow: &Flow,
     lines: &[FlowLine],
@@ -552,21 +577,44 @@ fn joined_tail(
             .fold(0.0f32, f32::max);
         let size = line.size.max(1.0);
         let close = lines[core - 1].y - line.y <= pitch + WRAP_ALIGN * size;
+        // It starts at its column's start and ends before the middle of the gutter after it,
+        // as a line of a cell between rows must (see [`grid_of`]).
         let within = (p.x0 - columns[c].0).abs() <= WRAP_ALIGN * size
-            && p.x1 <= columns[c].1 + WRAP_ALIGN * size;
-        let small = text_of(flow, p.start, p.end)
-            .chars()
-            .next()
-            .is_some_and(char::is_lowercase);
-        // The text of the column under its title.
-        let texts: Vec<String> = pieces[1..core]
+            && columns
+                .get(c + 1)
+                .is_none_or(|n| p.x1 <= (columns[c].1 + n.0) / 2.0);
+        let text = text_of(flow, p.start, p.end);
+        // The pieces of the column under its title, and their text.
+        let cells: Vec<&Piece> = pieces[1..core]
             .iter()
             .flatten()
             .filter(|q| over(q) == [c])
+            .collect();
+        let texts: Vec<String> = cells
+            .iter()
             .map(|q| text_of(flow, q.start, q.end))
             .collect();
         let numbers = 2 * texts.iter().filter(|t| numeric(t)).count() > texts.len();
-        return (0, close && within && small && !numbers);
+        // Set as the column's text: each inked run of the line in a family and a size of it.
+        let inked = |q: &Piece| {
+            flow.runs[q.start..q.end]
+                .iter()
+                .filter(|r| !r.text.trim().is_empty())
+                .collect::<Vec<_>>()
+        };
+        let faces: Vec<(u32, f32)> = cells
+            .iter()
+            .flat_map(|q| inked(q))
+            .map(|r| (r.family, r.size))
+            .collect();
+        let same_face = inked(p).iter().all(|r| {
+            faces
+                .iter()
+                .any(|f| f.0 == r.family && (f.1 - r.size).abs() <= WRAP_ALIGN * f.1)
+        });
+        let wrap =
+            close && within && same_face && !numbers && !numeric(&text) && !page_number(&text);
+        return (0, wrap);
     }
     let mut joined = 0;
     for line in &lines[core..] {
@@ -1386,6 +1434,29 @@ mod tests {
         let texts: Vec<&str> = row.iter().map(|c| c.runs[0].text.as_str()).collect();
         assert_eq!(texts, ["Menge", "Einheit"]);
         assert_eq!((row[1].runs[0].x, row[1].runs[0].w), (330.0, 35.0));
+    }
+
+    #[test]
+    fn page_numbers_are_told_by_their_shape() {
+        for page in [
+            "Seite 1",
+            "Seite 1 von 2",
+            "Page 2 of 3",
+            "Seite 1/2",
+            "S. 3",
+        ] {
+            assert!(page_number(page), "{page}");
+        }
+        for other in [
+            "Danke",
+            "Frei Haus",
+            "1.469,13",
+            "Gesamt 1.469,13",
+            "1 2",
+            "Seite",
+        ] {
+            assert!(!page_number(other), "{other}");
+        }
     }
 
     #[test]
