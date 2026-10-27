@@ -835,9 +835,9 @@ fn code_lines(c: &Barcode) -> String {
     paragraph(&parts)
 }
 
-/// Whether the payload `t` is an address with one of `LINK_SCHEMES` (in the links module) (the rule for links
-/// from a document), with something after the scheme and no spaces, control or format
-/// characters: only those become links.
+/// Whether the payload `t` is an address with one of [`LINK_SCHEMES`] (the rule for links from a
+/// document), with something after the scheme and no spaces, control or format characters: only
+/// those become links.
 fn web_address(t: &str) -> bool {
     let Some((scheme, rest)) = t.split_once(':') else {
         return false;

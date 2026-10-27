@@ -27,7 +27,7 @@ pub(super) fn inline_math(latex: &str, mode: Mode, out: &mut String) {
 
 /// The schemes a link from a document may have: addresses come from the file and are not
 /// trusted, so `file:`, `ftp:`, `data:` and script schemes stay text.
-const LINK_SCHEMES: [&str; 3] = ["http", "https", "mailto"];
+pub(super) const LINK_SCHEMES: [&str; 3] = ["http", "https", "mailto"];
 
 /// Whether `scheme` is one of [`LINK_SCHEMES`], in any case.
 pub(super) fn link_scheme(scheme: &str) -> bool {
