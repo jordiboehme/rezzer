@@ -14,3 +14,7 @@ pub mod plan;
 pub mod rng;
 pub mod round;
 pub mod steer;
+mod term;
+
+#[doc(hidden)]
+pub use term::{Crossterm, Guard, Screen, install_restore_hook};
