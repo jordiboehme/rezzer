@@ -8,6 +8,7 @@
 //! A sheet with tables refines its region: the cells of its tables become a cell grid and its
 //! formula cells towers.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use rezzer_model::{
@@ -61,7 +62,8 @@ pub fn plans(doc: &Document) -> Vec<Plan> {
     let body = &doc.body;
     let mut i = 0;
     // The sections of each kind so far, for labels such as `slide 2`.
-    let mut seen = [0usize; 8];
+    // A list keyed by kind, so a new kind needs no change here.
+    let mut seen: Vec<(SectionKind, usize)> = Vec::new();
     let mut formulas = None;
     while i < body.len() && out.len() < MAX_PLANS {
         let Block::Section {
@@ -80,8 +82,16 @@ pub fn plans(doc: &Document) -> Vec<Plan> {
             continue;
         };
         i += 1;
-        seen[*kind as usize] += 1;
-        let k = seen[*kind as usize];
+        let k = match seen.iter_mut().find(|(s, _)| s == kind) {
+            Some((_, k)) => {
+                *k += 1;
+                *k
+            }
+            None => {
+                seen.push((*kind, 1));
+                1
+            }
+        };
         let title = title.as_deref().map(str::trim).filter(|t| !t.is_empty());
         let base = format!(
             "{} {}",
@@ -93,11 +103,11 @@ pub fn plans(doc: &Document) -> Vec<Plan> {
             // Formula anchors name the sheet as its anchor does; the title is the fallback.
             let named = anchor.as_ref().map(|a| sheet_name(&a.0));
             let mut cells: Vec<(u32, u32)> = Vec::new();
-            for name in [named, title.filter(|&t| named != Some(t))]
-                .into_iter()
-                .flatten()
-            {
-                cells.extend(by_sheet.get(name).into_iter().flatten());
+            if let Some(name) = &named {
+                cells.extend(by_sheet.get(name.as_ref()).into_iter().flatten());
+            }
+            if let Some(t) = title.filter(|&t| named.as_deref() != Some(t)) {
+                cells.extend(by_sheet.get(t).into_iter().flatten());
             }
             if let Some(plan) = sheet_plan(&base, blocks, &cells) {
                 out.push(plan);
@@ -112,8 +122,8 @@ pub fn plans(doc: &Document) -> Vec<Plan> {
 
 /// The cells `(row, col)` of the formulas in cells, grouped by sheet name without quotes, in
 /// one pass over all formulas.
-fn formula_cells(formulas: &[Formula]) -> HashMap<&str, Vec<(u32, u32)>> {
-    let mut by_sheet: HashMap<&str, Vec<(u32, u32)>> = HashMap::new();
+fn formula_cells(formulas: &[Formula]) -> HashMap<Cow<'_, str>, Vec<(u32, u32)>> {
+    let mut by_sheet: HashMap<Cow<'_, str>, Vec<(u32, u32)>> = HashMap::new();
     for cell in formulas
         .iter()
         .filter(|f| !f.is_name())
@@ -127,13 +137,13 @@ fn formula_cells(formulas: &[Formula]) -> HashMap<&str, Vec<(u32, u32)>> {
     by_sheet
 }
 
-/// A sheet name as an anchor writes it, without its quotes: `'My Costs'` is `My Costs`.
-/// Names with a doubled quote inside (`'it''s'`) stay quoted, as they cannot be borrowed
-/// unquoted; a section matches them by its anchor.
-fn sheet_name(sheet: &str) -> &str {
+/// A sheet name as an anchor writes it, without its quotes: `'My Costs'` is `My Costs` and
+/// `'Q1 ''24'` is `Q1 '24`. Borrowed unless a doubled quote must be undone.
+fn sheet_name(sheet: &str) -> Cow<'_, str> {
     match sheet.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')) {
-        Some(inner) if !inner.contains('\'') => inner,
-        _ => sheet,
+        Some(inner) if inner.contains("''") => Cow::Owned(inner.replace("''", "'")),
+        Some(inner) => Cow::Borrowed(inner),
+        None => Cow::Borrowed(sheet),
     }
 }
 

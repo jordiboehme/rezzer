@@ -751,3 +751,18 @@ fn a_large_table_among_other_items_is_capped() {
         .collect();
     assert_eq!(distinct(inside), 4);
 }
+
+#[test]
+fn a_title_with_a_quote_matches_its_quoted_formulas() {
+    // No anchor: the title is the only name, and the formula doubles the quote inside.
+    let mut d = doc(vec![Block::Section {
+        kind: SectionKind::Sheet,
+        title: Some("Q1 '24".into()),
+        anchor: None,
+        blocks: vec![table(5, 4, Some("A1:D5"))],
+    }]);
+    d.facets.formulas = vec![formula("'Q1 ''24'!A1"), formula("'Q1 ''24'!D5")];
+    let p = plans(&d);
+    assert_eq!(p[0].label, "sheet Q1 '24");
+    assert_eq!(count(&p[0], ShapeKind::Tower), 2);
+}
