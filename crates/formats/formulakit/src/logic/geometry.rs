@@ -308,7 +308,7 @@ impl Bounds {
     }
 }
 
-pub(super) fn add_bounds(slot: &mut Option<Bounds>, b: Bounds) {
+fn add_bounds(slot: &mut Option<Bounds>, b: Bounds) {
     match slot {
         Some(x) => x.add(b),
         None => *slot = Some(b),

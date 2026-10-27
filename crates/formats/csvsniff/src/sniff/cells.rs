@@ -34,7 +34,7 @@ pub enum CellClass {
     Bool,
 }
 
-/// The class of one cell value, judged on its trimmed text. The header rule of [`sniff`]
+/// The class of one cell value, judged on its trimmed text. The header rule of [`sniff`](super::sniff)
 /// uses the same classes and counts a bool cell as text.
 pub fn cell_class(cell: &str) -> CellClass {
     let t = cell.trim();

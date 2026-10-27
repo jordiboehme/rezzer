@@ -17,7 +17,6 @@ use crate::xml::{Elem, Ev};
 use crate::{CellPos, DefinedName, Issue, IssueKind, Look, RowSpan};
 
 const MAX_ROWS: u64 = 1_048_576;
-
 const MAX_COLS: u64 = 16_384;
 
 pub(super) struct Content {

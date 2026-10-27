@@ -14,9 +14,9 @@ use crate::CellPos;
 /// Something a reader reads that is not a cell: a name, a table or another workbook.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(super) enum Sym {
-    /// A defined name added with [`Workbook::add_name`].
+    /// A defined name added with [`add_name`](super::Workbook::add_name).
     Name(usize),
-    /// A name no [`Workbook::add_name`] defined, by its anchor.
+    /// A name no [`add_name`](super::Workbook::add_name) defined, by its anchor.
     Unknown(String),
     /// A table reference that could not be resolved to cells (unknown table or column).
     Table(String),

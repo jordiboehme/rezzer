@@ -221,7 +221,7 @@ pub(super) fn render(
     }
 }
 
-pub(super) fn unit_of(toks: &[Tok]) -> (Option<String>, bool) {
+fn unit_of(toks: &[Tok]) -> (Option<String>, bool) {
     let first = toks.iter().position(|t| matches!(t, Tok::Digit(_)));
     let last = toks.iter().rposition(|t| matches!(t, Tok::Digit(_)));
     let (prefix, suffix): (&[Tok], &[Tok]) = match (first, last) {
@@ -444,7 +444,7 @@ fn render_scientific(section: &Section, abs: f64, sign: &str) -> Formatted {
     }
 }
 
-pub(super) fn place(slots: &[char], digits: &str, left: bool) -> String {
+fn place(slots: &[char], digits: &str, left: bool) -> String {
     let chars: Vec<char> = digits.chars().collect();
     let n = slots.len();
     let mut out: Vec<String> = vec![String::new(); n];
