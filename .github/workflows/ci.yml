@@ -202,7 +202,7 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   test:
-    name: test (${{ matrix.os }})
+    name: test (${{ matrix.os }}${{ matrix.libc == 'musl' && ', musl' || '' }})
     timeout-minutes: 45
     needs: changes
     if: ${{ needs.changes.outputs.rust == 'true' }}
@@ -212,6 +212,16 @@ jobs:
       matrix:
         # macos-latest is Apple silicon.
         os: [ubuntu-latest, macos-latest, windows-latest]
+        # The C library of the build: the host's own. The musl entry below sets another
+        # value, so it is a leg of its own and leaves the ubuntu-latest leg as it is.
+        libc: [host]
+        include:
+          # The Linux release binaries are static musl builds, and the allocator decision
+          # needs numbers from musl. Only rezzer-limits and rezzer are built and tested, to
+          # keep the CI compile time down.
+          - os: ubuntu-latest
+            libc: musl
+            target: x86_64-unknown-linux-musl
     # Every step runs in bash, also on Windows (Git Bash), where the default is PowerShell:
     # the steps call scripts/ci/retry.sh and use bash quoting.
     defaults:
@@ -229,6 +239,17 @@ jobs:
         run: |
           "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 5 rustup toolchain install
           rustup show active-toolchain
+
+      # musl-tools gives the linker for the musl target. The workspace has no C
+      # dependencies, so nothing else is needed.
+      - name: Add the musl target
+        if: ${{ matrix.libc == 'musl' }}
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 5 rustup target add "$TARGET"
+          "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 5 sudo apt-get update
+          "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 5 sudo apt-get install -y musl-tools
 
       # The install-action download can fail on a bad network day. The second
       # step is the same install and runs only after the first one failed.
@@ -251,7 +272,8 @@ jobs:
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          shared-key: test
+          # The musl leg has its own cache, so it does not replace the glibc one.
+          shared-key: ${{ matrix.libc == 'musl' && 'test-musl' || 'test' }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # The test binaries are built once and run from an archive, so the build
@@ -259,7 +281,15 @@ jobs:
       # RUNNER_TEMP, outside target, so the cache does not store it.
       # --locked: the build fails instead of re-resolving Cargo.lock.
       - name: build tests
+        if: ${{ matrix.libc != 'musl' }}
         run: cargo nextest archive --workspace --locked --archive-file "$RUNNER_TEMP/$TESTS_ARCHIVE"
+
+      # The archive records the target, so the run step below is the same for every leg.
+      - name: build tests (musl)
+        if: ${{ matrix.libc == 'musl' }}
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo nextest archive -p rezzer-limits -p rezzer --locked --target "$TARGET" --archive-file "$RUNNER_TEMP/$TESTS_ARCHIVE"
 
       # --no-tests=warn: a workspace whose crates have no tests yet is not an
       # error. --workspace-remap: the run reads .config/nextest.toml from the
@@ -269,8 +299,10 @@ jobs:
       - name: run tests
         run: cargo nextest run --archive-file "$RUNNER_TEMP/$TESTS_ARCHIVE" --workspace-remap "$GITHUB_WORKSPACE" --no-tests=warn
 
-      # nextest does not run doctests.
+      # nextest does not run doctests. The musl leg leaves them out: they run on the
+      # host target, which the ubuntu-latest leg covers.
       - name: doctests
+        if: ${{ matrix.libc != 'musl' }}
         run: cargo test --workspace --doc --locked
 
   # Dependency audit: advisories (RustSec), licenses (the allowlist in
