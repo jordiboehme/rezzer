@@ -78,6 +78,8 @@ struct DerezArgs {
 struct ReadArgs {
     /// The file to read.
     path: PathBuf,
+    // The angle brackets are help text for clap, not HTML.
+    #[allow(rustdoc::invalid_html_tags)]
     /// Write <DIR>/<file name>.md (and <file name>.json with --json) instead of printing,
     /// for example budget.xlsx.md. Some names get a short hash added. A document over the
     /// part size is written as <file name>.md plus parts in a folder next to it,

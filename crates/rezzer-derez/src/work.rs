@@ -8,8 +8,8 @@
 //!
 //! The count goes up by one in [`crate::plan::plans`] for each body block looked at and each
 //! item block taken, for each page of the geometry looked at, each box of a page mapped, each
-//! table a cell is tried against and each border shape pushed, and in [`crate::plan::fit()`] for
-//! each shape drawn.
+//! table a cell is tried against and each border shape pushed, and in
+//! [`crate::plan::fit()`] for each shape drawn.
 
 #[cfg(debug_assertions)]
 thread_local! {
