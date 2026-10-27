@@ -1307,7 +1307,9 @@ enum Way {
 /// complete end is also what a grid of the other way shows (an empty first or last row, the
 /// column titles of a next table, a line of data over it), so it is not clear. An own row of
 /// labels is the group's own empty last row as much as labels over a rule under the last
-/// labels: no end. One field a row is too little evidence for labels under values.
+/// labels: no end. One field a row is too little evidence for labels under values. Found with
+/// the runs other groups hold, evidence in part at both ends is not clear either (see
+/// [`ends`]).
 fn way_of(single: bool, top: TopEnd, bottom: BottomEnd) -> Way {
     match (single, top, bottom) {
         (true, TopEnd::Complete, _) | (true, _, BottomEnd::Free) => Way::Unclear,

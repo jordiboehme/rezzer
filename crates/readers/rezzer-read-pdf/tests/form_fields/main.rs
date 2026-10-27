@@ -916,7 +916,7 @@ fn labels_under_values_in_three_groups_never_pair_shifted() {
 /// Where the end of a grid of labels under values lies in [`labels_under_values_with_a_value_of_two_lines_between_tables_give_a_loss`]:
 /// free, in a box of drawn rules over (or under) it whose divider is at the data column
 /// `mid`, in a ruled table of two rows (its lower row over the grid, its upper row under
-/// it), or (under it) the title over a ruled table one row pitch under its last rule.
+/// it), or (under it) the line right over a ruled grid under its last labels.
 #[derive(Debug, Clone, Copy)]
 enum EndIn {
     Free,
@@ -928,7 +928,8 @@ enum EndIn {
 /// The reviewer's probe for the ruled `tabled` exclusion: labels under the rule their values
 /// stand on, every row full, the second row's first value of two lines (`Hinterhof` over
 /// `Musterweg 1`), its ends in boxes of drawn rules (their divider in line with the grid's, or
-/// not), one end free, or the last labels the title over a ruled table under the grid. A grid
+/// not), in ruled tables of two rows, one end free, or the last labels right over a ruled grid
+/// under the grid. A grid
 /// with a strip of another shape never reads labels under values: no field pairs with the
 /// value of another row, and each field with a value pairs right or a loss names it.
 #[test]
@@ -994,25 +995,42 @@ fn labels_under_values_with_a_value_of_two_lines_between_tables_give_a_loss() {
                 EndIn::Box(mid) => boxed(&mut b, mid, last - h, last),
                 EndIn::Table => table(&mut b, last, last - 2.0 * h, ["1000", "1.111,11"]),
                 EndIn::Caption => {
-                    // A ruled table of two rows and three columns one row pitch under the
-                    // last rule, the last labels over it.
-                    let (t0, xs) = (last - h, [x0, g.col(15), g.col(35), x1]);
-                    for k in 0..3 {
+                    // A ruled grid right under the last labels, cut in two sections of other
+                    // columns by a rule across, as a section titled by the line over it is.
+                    // (The last labels stand between the grid's last rule and this grid's top:
+                    // the grid search takes them as a band of their own, not as a title.)
+                    let t0 = last - 0.86 * d - 0.25 * d;
+                    // Each section: its top, its column edges and its two rows of cells.
+                    type Section<'a> = (f32, &'a [f32], [[&'a str; 3]; 2]);
+                    let sections: [Section; 2] = [
+                        (
+                            t0,
+                            &[x0, g.col(15), g.col(35), x1],
+                            [
+                                ["Lohnart", "Bezeichnung", "Betrag"],
+                                ["1000", "Gehalt", "1.111,11"],
+                            ],
+                        ),
+                        (
+                            t0 - 2.0 * h,
+                            &[x0, g.col(25), x1],
+                            [["Summe", "2.222,22", ""], ["Netto", "1.000,00", ""]],
+                        ),
+                    ];
+                    for k in 0..5 {
                         b.page.template += &g.hrule(x0, x1, t0 - h * k as f32);
                     }
-                    for x in xs {
-                        b.page.template += &g.vrule(x, t0 - 2.0 * h, t0);
-                    }
-                    let cells = [
-                        ["Lohnart", "Bezeichnung", "Betrag"],
-                        ["1000", "Gehalt", "1.111,11"],
-                    ];
-                    for (k, row) in cells.iter().enumerate() {
-                        for (c, text) in row.iter().enumerate() {
-                            let x = xs[c] + 0.3 * g.pitch();
-                            let y = t0 - h * (k as f32 + 1.0) + 0.6 * d;
-                            b.page.template += &draw::courier(x, y, d, text);
-                            b.values.push(text.to_string());
+                    for (hi, xs, cells) in sections {
+                        for &x in xs {
+                            b.page.template += &g.vrule(x, hi - 2.0 * h, hi);
+                        }
+                        for (k, row) in cells.iter().enumerate() {
+                            for (c, text) in row.iter().enumerate().filter(|t| !t.1.is_empty()) {
+                                let x = xs[c] + 0.3 * g.pitch();
+                                let y = hi - h * (k as f32 + 1.0) + 0.6 * d;
+                                b.page.template += &draw::courier(x, y, d, text);
+                                b.values.push(text.to_string());
+                            }
                         }
                     }
                 }
