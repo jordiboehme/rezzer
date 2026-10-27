@@ -1226,6 +1226,10 @@ enum Close {
     Apart,
     /// As `FlushRight` with the rate title `MwSt.` over rates set without a space (`19%`).
     Rate,
+    /// The geometry of a real invoice (finding L1): `Menge` and `MwSt.` 0.45 sizes apart, the
+    /// quantities and the rates (`19%`) flush right 0.35 sizes inside the end of their title,
+    /// so each title starts well before its values and ends a little after them.
+    Inside,
 }
 
 /// Rows of line items: position, article, quantity, unit, tax rate and amount.
@@ -1257,7 +1261,7 @@ fn close_titles(
         .iter()
         .map(|r| {
             r.map(|c| match close {
-                Close::Rate => c.replace(" %", "%"),
+                Close::Rate | Close::Inside => c.replace(" %", "%"),
                 _ => c.to_string(),
             })
         })
@@ -1265,12 +1269,18 @@ fn close_titles(
     let (second, a, b) = match close {
         Close::OneShow => ("Einheit", 2, 3),
         Close::FlushRight | Close::Apart => ("USt-Satz", 2, 4),
-        Close::Rate => ("MwSt.", 2, 4),
+        Close::Rate | Close::Inside => ("MwSt.", 2, 4),
     };
-    let apart = if matches!(close, Close::Apart) {
-        0.9
+    let apart = match close {
+        Close::Apart => 0.9,
+        Close::Inside => 0.45,
+        _ => 0.4,
+    };
+    // How far inside the end of its title a value ends.
+    let inside = if matches!(close, Close::Inside) {
+        0.35 * size
     } else {
-        0.4
+        0.0
     };
     let mut t = show(tf, size, 40.0, 600.0, "Pos") + &show(tf, size, 80.0, 600.0, "Artikel");
     // Where the second title starts, and where the values of each title stand.
@@ -1279,7 +1289,7 @@ fn close_titles(
             t += &show(tf, size, 300.0, 600.0, "Menge Einheit");
             300.0 + common::font_width(tf, "Menge ", size)
         }
-        Close::FlushRight | Close::Apart | Close::Rate => {
+        Close::FlushRight | Close::Apart | Close::Rate | Close::Inside => {
             let x2 = 300.0 + common::font_width(tf, "Menge", size) + apart * size;
             t += &show(tf, size, 300.0, 600.0, "Menge");
             t += &show(tf, size, x2, 600.0, second);
@@ -1296,10 +1306,11 @@ fn close_titles(
                 t += &show(vf, size, 300.0, y, &row[a]);
                 t += &show(vf, size, x2, y, &row[b]);
             }
-            Close::FlushRight | Close::Apart | Close::Rate => {
-                let end = 300.0 + common::font_width(tf, "Menge", size);
+            Close::FlushRight | Close::Apart | Close::Rate | Close::Inside => {
+                let end = 300.0 + common::font_width(tf, "Menge", size) - inside;
                 t += &flush_right(vf, end, y, &row[a]);
-                t += &flush_right(vf, x2 + common::font_width(tf, second, size), y, &row[b]);
+                let end = x2 + common::font_width(tf, second, size) - inside;
+                t += &flush_right(vf, end, y, &row[b]);
             }
         }
         t += &flush_right(vf, 540.0, y, &row[5]);
@@ -1374,7 +1385,13 @@ fn close_column_titles_are_cut() {
 fn close_column_titles_head_their_columns_in_every_size_and_font() {
     let mut wrong = Vec::new();
     let mut reads = 0;
-    for close in [Close::OneShow, Close::FlushRight, Close::Apart, Close::Rate] {
+    for close in [
+        Close::OneShow,
+        Close::FlushRight,
+        Close::Apart,
+        Close::Rate,
+        Close::Inside,
+    ] {
         for k in [0.75, 1.0, 1.5] {
             for fonts in FONTS {
                 for bold in [false, true] {
@@ -1397,7 +1414,7 @@ fn close_column_titles_head_their_columns_in_every_size_and_font() {
             }
         }
     }
-    assert_eq!(reads, 192);
+    assert_eq!(reads, 240);
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
@@ -1533,7 +1550,23 @@ fn titles_of_many_words_over_two_columns_stay_spanned() {
             }
         }
     }
-    assert_eq!(reads, 480);
+    // A title of two capitalized words, centered over two columns of dates each wider than its
+    // words: neither word lines up with or covers its column.
+    for k in [0.75, 1.0, 1.5] {
+        for face in faces() {
+            for n in 2..=5 {
+                let (t, columns) = spanned_title(k, face, n, "Service Period", true);
+                let out = common::read(&page_in(&t, Look::Plain));
+                reads += 1;
+                for b in spanned_broken(&out, &columns) {
+                    wrong.push(format!(
+                        "Service Period, centered, {k}x, {face:?}, {n} rows: {b}"
+                    ));
+                }
+            }
+        }
+    }
+    assert_eq!(reads, 528);
     assert!(
         wrong.is_empty(),
         "{} wrong:\n{}",
@@ -1965,7 +1998,13 @@ fn the_labels_over_a_row_of_fields_read_as_a_table_are_its_header() {
 fn close_column_titles_in_a_frame_head_their_columns() {
     let mut wrong = Vec::new();
     let mut reads = 0;
-    for close in [Close::OneShow, Close::FlushRight, Close::Apart, Close::Rate] {
+    for close in [
+        Close::OneShow,
+        Close::FlushRight,
+        Close::Apart,
+        Close::Rate,
+        Close::Inside,
+    ] {
         for k in [0.75, 1.0, 1.5] {
             for look in LOOKS {
                 for fonts in FONTS {
@@ -1997,7 +2036,7 @@ fn close_column_titles_in_a_frame_head_their_columns() {
             }
         }
     }
-    assert_eq!(reads, 1152);
+    assert_eq!(reads, 1440);
     assert!(
         wrong.is_empty(),
         "{} wrong:\n{}",

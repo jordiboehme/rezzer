@@ -1281,8 +1281,10 @@ const TITLE_ALIGN: f32 = 0.25;
 /// shared out by its characters puts it.
 ///
 /// One title over both columns has word spaces over the gutter too, so a cut also needs:
-/// - each part lines up with its own column, at its start or at its end (see
-///   [`TITLE_ALIGN`]); a title centered over both columns does not;
+/// - each part lines up with its own column, at its start or at its end, or covers the
+///   column's whole width (see [`TITLE_ALIGN`]; values set inside a wider title, as a digit
+///   under `Menge`); a title centered over two columns wider than its words does neither
+///   (the words before the space never reach into the other column, see above);
 /// - the words on both sides of the space do not start with a small letter: a title starts
 ///   with a capital, a digit or a sign, and a word in small letters goes on the words before
 ///   it (`Gueltig von bis`, `Zeitraum der Leistung`).
@@ -1305,6 +1307,10 @@ fn title_cut(
         .map(|r| r.size)
         .fold(1.0f32, f32::max);
     let near = |a: f32, b: f32| (a - b).abs() <= TITLE_ALIGN * size;
+    // A part from `x0` to `x1` over the whole width of `column`.
+    let covers = |x0: f32, x1: f32, column: (f32, f32)| {
+        x0 <= column.0 + TITLE_ALIGN * size && x1 >= column.1 - TITLE_ALIGN * size
+    };
     // A space from `from` to `to` that lets both parts stand over their own column, each lined
     // up with it, between two words that start with no small letter.
     let fits = |from: f32, to: f32, before: &str, after: &str| {
@@ -1314,8 +1320,8 @@ fn title_cut(
             && from <= right.0
             && to >= left.1
             && to < right.1
-            && (near(p.x0, left.0) || near(from, left.1))
-            && (near(to, right.0) || near(p.x1, right.1))
+            && (near(p.x0, left.0) || near(from, left.1) || covers(p.x0, from, left))
+            && (near(to, right.0) || near(p.x1, right.1) || covers(to, p.x1, right))
             && !small(last)
             && !small(after.trim_start())
     };
