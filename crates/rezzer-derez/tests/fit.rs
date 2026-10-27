@@ -3,10 +3,12 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::collections::VecDeque;
+use std::time::Instant;
 
 use rezzer_derez::grid::{Dir, Grid, Pos, Tile};
 use rezzer_derez::plan::{
-    Fitted, MARGIN, MAX_GRID, MIN_GRID, Plan, Refused, START_RUN, Shape, ShapeKind, builtin, fit,
+    Fitted, MARGIN, MAX_GRID, MAX_SHAPES, MAX_WALL_SHARE, MIN_GRID, Plan, Refused, START_RUN,
+    Shape, ShapeKind, builtin, fit,
 };
 use rezzer_derez::rng::Rng;
 
@@ -125,6 +127,18 @@ fn assert_one_area(f: &Fitted) {
     }
 }
 
+/// Walls and towers, sealed pockets included, cover at most `MAX_WALL_SHARE` of the inner
+/// area.
+fn assert_share(g: &Grid) {
+    let m = 1 + MARGIN;
+    let area = usize::from(g.width() - 2 * m) * usize::from(g.height() - 2 * m);
+    let taken = walls_in_inner_area(g);
+    assert!(
+        taken as f32 <= MAX_WALL_SHARE * area as f32,
+        "{taken} of {area} cells taken"
+    );
+}
+
 fn walls_in_inner_area(g: &Grid) -> usize {
     let (w, h) = (g.width(), g.height());
     let m = 1 + MARGIN;
@@ -229,6 +243,7 @@ fn no_sealed_start_area() {
                     assert!(border_is_wall(&f.grid));
                     assert_starts(&f);
                     assert_one_area(&f);
+                    assert_share(&f.grid);
                 }
                 Err(e) => {
                     crowded += 1;
@@ -237,8 +252,7 @@ fn no_sealed_start_area() {
             }
         }
     }
-    // Most invented plans fit (1139 of 1500 on 2026-10-27); the check means nothing if all
-    // are refused.
+    // Most invented plans fit; the check means nothing if all are refused.
     assert!(ok > crowded * 2, "{ok} fitted, {crowded} crowded");
 }
 
@@ -271,6 +285,12 @@ fn crowded_plan_is_refused() {
     for (w, h) in [(30, 18), (80, 40)] {
         assert_eq!(fit(&p, w, h), Err(Refused::Crowded), "{w}x{h}");
     }
+    // At 120x60 each block maps to about 10 by 5 cells; drawn as outlines with doors (sealed
+    // insides counted) they stay under the share, so the lattice fits with one free area.
+    let f = fit(&p, 120, 60).expect("the hollow lattice fits at 120x60");
+    assert_starts(&f);
+    assert_one_area(&f);
+    assert_share(&f.grid);
 }
 
 #[test]
@@ -354,5 +374,76 @@ fn blocked_start_is_carved_free() {
     );
     assert_eq!(f.grid.get(pos(20, 31)), Tile::Wall, "the block stays");
     assert_starts(&f);
+    assert_one_area(&f);
+}
+
+#[test]
+fn shapes_past_the_cap_are_skipped() {
+    let empty = fit(&plan(Vec::new()), 80, 40).unwrap();
+    let mut shapes = vec![shape(ShapeKind::Line, [f32::NAN; 4]); MAX_SHAPES];
+    shapes.push(shape(ShapeKind::Block, [0.2, 0.2, 0.4, 0.4]));
+    assert_eq!(fit(&plan(shapes), 80, 40), Ok(empty));
+
+    // 100,000 shapes, lines and blocks over the whole square, stay fast.
+    let mut r = Rng::new(3);
+    let shapes: Vec<Shape> = (0..100_000)
+        .map(|i| {
+            if i % 2 == 0 {
+                shape(ShapeKind::Block, [0.0, 0.0, 1.0, 1.0])
+            } else {
+                shape(ShapeKind::Line, random_rect(&mut r))
+            }
+        })
+        .collect();
+    let p = plan(shapes);
+    let started = Instant::now();
+    let fitted = fit(&p, 120, 60);
+    let took = started.elapsed();
+    match fitted {
+        Ok(f) => {
+            assert_starts(&f);
+            assert_one_area(&f);
+            assert_share(&f.grid);
+        }
+        Err(e) => assert_eq!(e, Refused::Crowded),
+    }
+    eprintln!("100,000 shapes at 120x60: {took:?}");
+    assert!(took.as_secs() < 5, "{took:?}");
+}
+
+#[test]
+fn shapes_off_the_square_are_skipped() {
+    let empty = fit(&plan(Vec::new()), 80, 40).unwrap();
+    let off = plan(vec![
+        shape(ShapeKind::Line, [1.2, 0.2, 1.5, 0.4]),
+        shape(ShapeKind::Line, [-0.5, 0.3, -0.1, 0.3]),
+        shape(ShapeKind::Line, [0.2, 1.1, 0.8, 1.1]),
+        shape(ShapeKind::Block, [0.2, 1.1, 0.4, 1.3]),
+        shape(ShapeKind::Outline, [-0.4, -0.4, -0.2, -0.2]),
+        shape(ShapeKind::Tower, [1.01, 0.2, 1.3, 0.6]),
+    ]);
+    assert_eq!(fit(&off, 80, 40), Ok(empty));
+    // A flat line on the edge of the square still overlaps it.
+    let edge = plan(vec![shape(ShapeKind::Line, [0.2, 1.0, 0.8, 1.0])]);
+    let f = fit(&edge, 80, 40).unwrap();
+    assert!(walls_in_inner_area(&f.grid) > 0);
+}
+
+#[test]
+fn sealed_pockets_count_toward_the_share() {
+    // 8 by 5 small outlines without doors: their sides cover about a third of the inner area,
+    // with the sealed insides well over 40 %.
+    let mut shapes = Vec::new();
+    for i in 0..8 {
+        for j in 0..5 {
+            let (x, y) = (i as f32 * 0.125 + 0.02, j as f32 * 0.2 + 0.02);
+            shapes.push(shape(ShapeKind::Outline, [x, y, x + 0.07, y + 0.15]));
+        }
+    }
+    assert_eq!(fit(&plan(shapes.clone()), 80, 40), Err(Refused::Crowded));
+    // A few of them fit, with the sealed insides counted.
+    shapes.truncate(6);
+    let f = fit(&plan(shapes), 80, 40).unwrap();
+    assert_share(&f.grid);
     assert_one_area(&f);
 }

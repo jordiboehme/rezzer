@@ -8,7 +8,9 @@ mod builtin;
 mod fit;
 
 pub use builtin::builtin;
-pub use fit::{DOOR, Fitted, MARGIN, MAX_GRID, MAX_WALL_SHARE, MIN_GRID, Refused, START_RUN, fit};
+pub use fit::{
+    DOOR, Fitted, MARGIN, MAX_GRID, MAX_SHAPES, MAX_WALL_SHARE, MIN_GRID, Refused, START_RUN, fit,
+};
 
 /// A resolution-free grid plan.
 #[derive(Debug, Clone, PartialEq)]

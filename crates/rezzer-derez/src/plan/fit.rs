@@ -22,6 +22,8 @@ pub const MAX_WALL_SHARE: f32 = 0.40;
 pub const MIN_GRID: (u16, u16) = (30, 18);
 /// The largest grid, in cells; a larger size is clamped to it.
 pub const MAX_GRID: (u16, u16) = (120, 60);
+/// The most shapes of one plan that are drawn; the rest are skipped.
+pub const MAX_SHAPES: usize = 4096;
 
 /// How far from its target a start is looked for before a run is carved free.
 const START_SEARCH: u16 = 10;
@@ -47,25 +49,35 @@ pub enum Refused {
 
 /// Maps `plan` to a grid of `w` by `h` cells (clamped to [`MAX_GRID`]).
 ///
-/// The border is wall, and the shapes map into the area inside a free lane of [`MARGIN`]
-/// cells. Long lines and outline sides get doors of [`DOOR`] cells. When walls and towers
-/// cover more than [`MAX_WALL_SHARE`] of that area, blocks are drawn as outlines; when they
-/// still do, the plan is [`Refused::Crowded`]. Every free cell not connected to the lane
-/// becomes wall, so no area is sealed off. The four starts are free, have [`START_RUN`] free
+/// The border is wall, and the first [`MAX_SHAPES`] shapes map into the area inside a free
+/// lane of [`MARGIN`] cells. Long lines and outline sides get doors of [`DOOR`] cells. Every
+/// free cell not connected to the lane becomes wall, so no area is sealed off. When walls and
+/// towers cover more than [`MAX_WALL_SHARE`] of that area, before or after this sealing,
+/// blocks are drawn as outlines; when they still do, the plan is [`Refused::Crowded`]. The four starts are free, have [`START_RUN`] free
 /// cells ahead, lie on no other start's run and are at least 4 cells apart (Manhattan).
 pub fn fit(plan: &Plan, w: u16, h: u16) -> Result<Fitted, Refused> {
     if w < MIN_GRID.0 || h < MIN_GRID.1 {
         return Err(Refused::TooSmall);
     }
     let (w, h) = (w.min(MAX_GRID.0), h.min(MAX_GRID.1));
-    let mut grid = draw(plan, w, h, false);
-    if crowded(&grid) {
-        grid = draw(plan, w, h, true);
-        if crowded(&grid) {
-            return Err(Refused::Crowded);
-        }
-    }
-    seal(&mut grid);
+    let shapes = &plan.shapes[..plan.shapes.len().min(MAX_SHAPES)];
+    // Without blocks, a hollow redraw is the same grid.
+    let hollow = if shapes.iter().any(|s| s.kind == ShapeKind::Block) {
+        &[false, true][..]
+    } else {
+        &[false][..]
+    };
+    let mut grid = hollow
+        .iter()
+        .find_map(|&hollow| {
+            let mut grid = draw(shapes, w, h, hollow);
+            if crowded(&grid) {
+                return None;
+            }
+            seal(&mut grid);
+            (!crowded(&grid)).then_some(grid)
+        })
+        .ok_or(Refused::Crowded)?;
 
     let targets = [
         (Pos { x: w / 4, y: h / 2 }, Dir::Right),
@@ -104,9 +116,9 @@ pub fn fit(plan: &Plan, w: u16, h: u16) -> Result<Fitted, Refused> {
     })
 }
 
-/// The grid of `plan` before sealing: border wall and every shape drawn, blocks as outlines
+/// The grid of `shapes` before sealing: border wall and every shape drawn, blocks as outlines
 /// when `hollow`.
-fn draw(plan: &Plan, w: u16, h: u16, hollow: bool) -> Grid {
+fn draw(shapes: &[Shape], w: u16, h: u16, hollow: bool) -> Grid {
     let mut grid = Grid::new(w, h);
     for x in 0..w {
         grid.set(Pos { x, y: 0 }, Tile::Wall);
@@ -118,7 +130,7 @@ fn draw(plan: &Plan, w: u16, h: u16, hollow: bool) -> Grid {
     }
     let m = 1 + MARGIN;
     let (iw, ih) = (w - 2 * m, h - 2 * m);
-    for shape in &plan.shapes {
+    for shape in shapes {
         let Some(c) = cells(shape, iw, ih) else {
             continue;
         };
@@ -183,10 +195,15 @@ fn shape_rect(shape: &Shape) -> [f32; 4] {
 }
 
 /// The inclusive cell bounds `x0, y0, x1, y1` of `shape` in an inner area of `iw` by `ih`
-/// cells, or `None` when the rect is not finite or has no extent after clipping. A line may
-/// have zero height or width, not both.
+/// cells, or `None` when the rect is not finite, does not overlap `0..=1` in x or in y, or
+/// has no extent after clipping. A line may have zero height or width, not both.
 fn cells(shape: &Shape, iw: u16, ih: u16) -> Option<[u16; 4]> {
+    let [a, b, c, d] = shape.rect;
     if !shape.rect.iter().all(|v| v.is_finite()) {
+        return None;
+    }
+    let overlaps = |p: f32, q: f32| p.max(q) >= 0.0 && p.min(q) <= 1.0;
+    if !overlaps(a, c) || !overlaps(b, d) {
         return None;
     }
     let [x0, y0, x1, y1] = shape_rect(shape);
