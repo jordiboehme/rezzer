@@ -2357,8 +2357,9 @@ fn close_titles_over_two_columns_of_one_shape_stay_merged() {
 /// re-review's sets of round 4, ruling of fix round 5): a tie of numbers, whole numbers with
 /// thousands marks, amounts with the euro sign after and before, negative amounts, whole
 /// and decimal numbers, percentages with and without a space, dates, large numbers with
-/// thousands marks, empty cells, and a mix of text and numbers.
-const SHAPE_SETS: [(&str, [&str; 4], [&str; 4]); 10] = [
+/// thousands marks, empty cells, a mix of text and numbers, and (round 5) amounts and numbers
+/// in forms the shapes do not know, against plain amounts or numbers.
+const SHAPE_SETS: [(&str, [&str; 4], [&str; 4]); 16] = [
     (
         "tie",
         ["12", "3,50", "12", "3,50"],
@@ -2414,6 +2415,36 @@ const SHAPE_SETS: [(&str, [&str; 4], [&str; 4]); 10] = [
         "mixed",
         ["12", "Std", "3,50", "x"],
         ["Stk", "4", "1,20", "y"],
+    ),
+    (
+        "dash",
+        ["12,-", "5,-", "7,50", "9,-"],
+        ["3,50", "4,00", "1,20", "2,00"],
+    ),
+    (
+        "trailing minus",
+        ["6,98-", "1,20-", "3,00-", "0,50-"],
+        ["6,98", "1,20", "3,00", "0,50"],
+    ),
+    (
+        "parentheses",
+        ["(6,98)", "(1,20)", "(3,00)", "(0,50)"],
+        ["6,98", "1,20", "3,00", "0,50"],
+    ),
+    (
+        "version",
+        ["1.2.24", "2.0.25", "1.10.24", "3.1.25"],
+        ["12", "3", "5", "1"],
+    ),
+    (
+        "cents",
+        ["50 ct", "20 ct", "10 ct", "5 ct"],
+        ["0,50", "0,20", "0,10", "0,05"],
+    ),
+    (
+        "hours",
+        ["8:00", "7:30", "6:15", "8:00"],
+        ["8,00", "7,50", "6,25", "8,00"],
     ),
 ];
 
@@ -2537,7 +2568,7 @@ fn titles_over_two_columns_of_one_kind_of_values_stay_spanned() {
             }
         }
     }
-    assert_eq!(reads, 21600);
+    assert_eq!(reads, 34560);
     assert!(
         wrong.is_empty(),
         "{} wrong:\n{}",

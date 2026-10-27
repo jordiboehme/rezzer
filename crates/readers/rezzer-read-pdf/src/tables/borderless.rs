@@ -1107,7 +1107,7 @@ fn grid_of(
         let cut = if span == 2 && !shared && alone(c) && alone(c + 1) {
             // The shape of most values of a column, from its own text in the lines below.
             let shape_of = |col: usize| {
-                let shapes: Vec<Shape> = (1..lines.len())
+                let shapes: Vec<Option<Shape>> = (1..lines.len())
                     .flat_map(|j| placed[j].iter().filter(move |x| x.0 == col && x.1 == 1))
                     .map(|x| Shape::of(&text_of(flow, x.2.0, x.2.1)))
                     .collect();
@@ -1298,8 +1298,9 @@ enum Shape {
     /// A number with a percent sign (`19%`, `19 %`).
     Percent,
     /// A day, a month and a year in range, parted by dots, slashes or hyphens (`01.01.2026`,
-    /// `2026-01-01`, `1/31/2026`).
+    /// `2026-01-01`, `1/31/2026`, `31.01.26`).
     Date,
+    /// Letters and no digits (`Std`, `Stk`).
     Text,
 }
 
@@ -1307,15 +1308,18 @@ enum Shape {
 const CURRENCIES: [&str; 7] = ["\u{20ac}", "$", "\u{a3}", "EUR", "USD", "GBP", "CHF"];
 
 impl Shape {
-    fn of(text: &str) -> Shape {
+    /// The shape of `text`; none for a value with digits in a form none of the shapes knows
+    /// (`12,-`, `6,98-`, `(6,98)`, `8:00`, `50 ct`, `1.2.24`) and for one with neither digits
+    /// nor letters.
+    fn of(text: &str) -> Option<Shape> {
         let t = text.trim();
         if let Some(n) = t.strip_suffix('%')
             && number(n.trim_end())
         {
-            return Shape::Percent;
+            return Some(Shape::Percent);
         }
         if date(t) {
-            return Shape::Date;
+            return Some(Shape::Date);
         }
         let mut n = t;
         for c in CURRENCIES {
@@ -1323,39 +1327,58 @@ impl Shape {
             n = n.strip_suffix(c).unwrap_or(n).trim();
         }
         if number(n) {
-            return Shape::Number;
+            return Some(Shape::Number);
         }
-        Shape::Text
+        let letters = t.chars().any(char::is_alphabetic);
+        let digits = t.chars().any(|c| c.is_ascii_digit());
+        (letters && !digits).then_some(Shape::Text)
     }
 
-    /// The shape more than half of `shapes` have; none on a tie, without a majority or
-    /// without values.
-    fn most(shapes: &[Shape]) -> Option<Shape> {
+    /// The shape more than half of `shapes` have; none on a tie, without a majority, when
+    /// most values have no shape, or without values.
+    fn most(shapes: &[Option<Shape>]) -> Option<Shape> {
         shapes
             .iter()
-            .find(|s| 2 * shapes.iter().filter(|x| x == s).count() > shapes.len())
+            .find(|s| s.is_some() && 2 * shapes.iter().filter(|x| x == s).count() > shapes.len())
             .copied()
+            .flatten()
     }
 }
 
-/// Whether `text` is a number: digits, with a sign before them and thousands or decimal marks
-/// (dots, commas, spaces) between them, never two marks in a row.
+/// Whether `text` is a number: a sign before it, digits, or groups of three digits after
+/// the first one to three parted by one thousands mark (a dot, a comma or a space), and a
+/// decimal part after the other mark (`1.234,56`, `1,200`, `1 200`, `-6,98`, `3.50`).
 fn number(text: &str) -> bool {
     let t = text.strip_prefix(['-', '+']).unwrap_or(text);
-    let b = t.as_bytes();
-    !b.is_empty()
-        && b[0].is_ascii_digit()
-        && b[b.len() - 1].is_ascii_digit()
-        && b.iter()
-            .all(|c| c.is_ascii_digit() || matches!(c, b'.' | b',' | b' '))
-        && !b
-            .windows(2)
-            .any(|w| !w[0].is_ascii_digit() && !w[1].is_ascii_digit())
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|c| c.is_ascii_digit());
+    // The decimal part: after the last dot or comma, unless that mark is the one between
+    // groups of three (then the number has none).
+    let whole = |s: &str, mark: Option<char>| -> bool {
+        let Some(mark) = mark else { return digits(s) };
+        let groups: Vec<&str> = s.split(mark).collect();
+        (1..=3).contains(&groups[0].len())
+            && groups.iter().all(|g| digits(g))
+            && groups[1..].iter().all(|g| g.len() == 3)
+    };
+    let marks = |s: &str| s.chars().find(|c| matches!(c, '.' | ',' | ' '));
+    if whole(t, marks(t)) || digits(t) {
+        return true;
+    }
+    // A decimal part after the last dot or comma, the whole part before it with the other
+    // mark (or a space) between groups of three, if any.
+    let Some(at) = t.rfind(['.', ',']) else {
+        return false;
+    };
+    let (int, dec) = (&t[..at], &t[at + 1..]);
+    let decimal = t[at..].chars().next();
+    let thousands = marks(int);
+    digits(dec) && thousands != decimal && whole(int, thousands)
 }
 
 /// Whether `text` is a date: three groups of digits parted by one kind of mark, a year of
-/// four digits first (`2026-01-01`) or a year of two or four digits last, and a day and a
-/// month in range (day first, or month first with slashes: `1/31/2026`).
+/// four digits first (`2026-01-01`) or last, or of two digits last after a day and a month of
+/// two digits each (`31.01.26`), and a day and a month in range (day first, or month first
+/// with slashes: `1/31/2026`).
 fn date(text: &str) -> bool {
     let Some(mark) = text.chars().find(|c| matches!(c, '.' | '/' | '-')) else {
         return false;
@@ -1374,7 +1397,8 @@ fn date(text: &str) -> bool {
     if a.len() == 4 {
         return month(b) && day(c);
     }
-    let year = matches!(c.len(), 2 | 4);
+    // A year of two digits only after a day and a month of two digits each.
+    let year = c.len() == 4 || (c.len() == 2 && a.len() == 2 && b.len() == 2);
     year && ((day(a) && month(b)) || (mark == '/' && month(a) && day(b)))
 }
 
@@ -1573,46 +1597,59 @@ mod tests {
 
     #[test]
     fn values_have_shapes() {
+        use Shape::{Date, Number, Percent, Text};
         for (text, shape) in [
             // Numbers: whole, decimal, amounts, thousands marks, signs and currencies.
-            ("2", Shape::Number),
-            ("-12", Shape::Number),
-            ("+5", Shape::Number),
-            ("-6,98", Shape::Number),
-            ("1.234,56", Shape::Number),
-            ("1.200", Shape::Number),
-            ("1,200", Shape::Number),
-            ("1 200", Shape::Number),
-            ("1.234.567", Shape::Number),
-            ("12,50 EUR", Shape::Number),
-            ("12,50 \u{20ac}", Shape::Number),
-            ("\u{20ac} 12,50", Shape::Number),
-            ("EUR 12,50", Shape::Number),
-            ("$3.50", Shape::Number),
+            ("2", Some(Number)),
+            ("-12", Some(Number)),
+            ("+5", Some(Number)),
+            ("-6,98", Some(Number)),
+            ("3.50", Some(Number)),
+            ("1.234,56", Some(Number)),
+            ("1,234.56", Some(Number)),
+            ("1.200", Some(Number)),
+            ("1,200", Some(Number)),
+            ("1 200", Some(Number)),
+            ("1.234.567", Some(Number)),
+            ("12,50 EUR", Some(Number)),
+            ("12,50 \u{20ac}", Some(Number)),
+            ("\u{20ac} 12,50", Some(Number)),
+            ("EUR 12,50", Some(Number)),
+            ("$3.50", Some(Number)),
             // Percentages.
-            ("19%", Shape::Percent),
-            ("19 %", Shape::Percent),
-            // Dates with day and month in range.
-            ("01.01.2026", Shape::Date),
-            ("31.01.26", Shape::Date),
-            ("2026-01-01", Shape::Date),
-            ("1/31/2026", Shape::Date),
-            ("31/12/2026", Shape::Date),
-            // No date out of range: digits with dots only.
-            ("32.01.2026", Shape::Number),
-            ("01.13.2026", Shape::Number),
-            // Text.
-            ("Stk", Shape::Text),
-            ("Jan 26", Shape::Text),
-            ("1..2", Shape::Text),
-            ("", Shape::Text),
+            ("19%", Some(Percent)),
+            ("19 %", Some(Percent)),
+            // Dates: a year of four digits, or of two after a day and a month of two.
+            ("01.01.2026", Some(Date)),
+            ("31.01.26", Some(Date)),
+            ("2026-01-01", Some(Date)),
+            ("1/31/2026", Some(Date)),
+            ("31/12/2026", Some(Date)),
+            // Text: letters and no digits.
+            ("Stk", Some(Text)),
+            ("Std", Some(Text)),
+            // No shape: digits in a form no shape knows, or neither digits nor letters.
+            ("12,-", None),
+            ("6,98-", None),
+            ("(6,98)", None),
+            ("8:00", None),
+            ("50 ct", None),
+            ("1.2.24", None),
+            ("32.01.2026", None),
+            ("01.13.2026", None),
+            ("1..2", None),
+            ("12.34.56", None),
+            ("Jan 26", None),
+            ("-", None),
+            ("", None),
         ] {
             assert_eq!(Shape::of(text), shape, "{text:?}");
         }
-        use Shape::{Number, Percent, Text};
-        assert_eq!(Shape::most(&[Number, Text, Number]), Some(Number));
-        assert_eq!(Shape::most(&[Number, Text, Number, Text]), None, "a tie");
-        assert_eq!(Shape::most(&[Number, Text, Percent]), None, "no majority");
+        let (n, t) = (Some(Number), Some(Text));
+        assert_eq!(Shape::most(&[n, t, n]), Some(Number));
+        assert_eq!(Shape::most(&[n, t, n, t]), None, "a tie");
+        assert_eq!(Shape::most(&[n, t, Some(Percent)]), None, "no majority");
+        assert_eq!(Shape::most(&[None, None, n]), None, "most have no shape");
         assert_eq!(Shape::most(&[]), None);
     }
 
