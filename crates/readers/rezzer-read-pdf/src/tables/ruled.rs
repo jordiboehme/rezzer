@@ -145,6 +145,18 @@ pub(super) fn ruled(
             break;
         }
         let (mut xs, mut ys) = edges(&h, &v);
+        // Column rules that hang below the grid's lowest rule into a frame of fields under it
+        // part the fields, not rows of the grid: the grid ends at that rule.
+        if let (Some(low), Some(&l), Some(&r)) = (
+            h.iter().map(|s| s.at).reduce(f32::min),
+            xs.first(),
+            xs.last(),
+        ) && frames
+            .iter()
+            .any(|f| (f.top - low).abs() <= SNAP && f.x0 < r && l < f.x1)
+        {
+            ys.retain(|y| *y >= low - SNAP);
+        }
         // A section below a cut reaches only as far left as its own top rule: where another
         // block draws the rule at that height over its left part (fields beside it), the
         // text under that part is the other block's.

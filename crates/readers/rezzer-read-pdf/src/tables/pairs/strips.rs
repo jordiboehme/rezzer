@@ -162,14 +162,21 @@ pub(in crate::tables) fn frames(hs: &[Seg], tops: &[bool], vs: &[Seg]) -> Option
             if v.at >= x1 - SNAP {
                 break;
             }
-            let reaches = (v.to - top).abs() <= SNAP || (v.from - bottom).abs() <= SNAP;
+            // A column rule of a grid over the frame that runs on through its top rule (the
+            // grid's lowest, see [`frame_tops`]) and ends in the frame hangs from its top.
+            let to = if v.from < top - SNAP && v.to > top + SNAP {
+                top
+            } else {
+                v.to
+            };
+            let reaches = (to - top).abs() <= SNAP || (v.from - bottom).abs() <= SNAP;
             if reaches
-                && v.to - v.from >= DIVIDER * (top - bottom)
+                && to - v.from >= DIVIDER * (top - bottom)
                 && v.from >= bottom - SNAP
-                && v.to <= top + SNAP
+                && to <= top + SNAP
             {
                 dividers.push(v.at);
-                spans.push((v.from, v.to));
+                spans.push((v.from, to));
             }
         }
         out.push(Frame {

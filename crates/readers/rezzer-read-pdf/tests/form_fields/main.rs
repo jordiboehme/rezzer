@@ -764,6 +764,42 @@ fn labels_under_values_under_a_boxed_section_never_pair_shifted() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// The reviewer's probe P4: as [`labels_under_values_under_a_boxed_section_never_pair_shifted`],
+/// with the box's divider in line with the grid's, so that the box and the grid's first row
+/// make one grid of drawn rules, its cells holding the first row's values over its labels.
+/// The box's grid ends at its lowest rule: the grid's first row is a row of fields under it,
+/// and the box's divider hangs into it. With a rule one pitch under the last labels (an own
+/// bottom) no field pairs and a loss names them all; without it the fields pair labels under
+/// values. No table sets a value over the wrong label.
+#[test]
+fn labels_under_values_under_a_box_in_line_with_their_divider_never_pair_shifted() {
+    let s = Rows {
+        under: true,
+        ..ROWS
+    };
+    let all = ["Name", "Ort", "Strasse", "Hausnr", "PLZ", "Land"];
+    let mut reads = Vec::new();
+    for (look, g) in std::iter::once(("real", REAL)).chain(looks()) {
+        for own in [true, false] {
+            let mut b = rows_page(&g, &s, &THREE_ROWS, if own { &all } else { &[] });
+            let (h, top) = (2.4 * g.data, 760.0 + g.dy);
+            let (x0, x1) = (g.col(0) - 0.12, g.col(50));
+            b.page.template += &g.hrule(x0, x1, top + h);
+            for x in [x0, g.col(30) - 0.06, x1] {
+                b.page.template += &g.vrule(x, top, top + h);
+            }
+            if own {
+                b.page.template += &g.hrule(x0, x1, top - 3.0 * h);
+            }
+            let out = read_pages(&[&b]);
+            let name = format!("{}, {look}", if own { "own" } else { "free" });
+            reads.push((name, check_fields(&out, &b)));
+        }
+    }
+    let wrong = unexpected(reads, &[]);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// Labels under the rule their values stand on, four rows of two fields, parted into three
 /// groups by two double rules (a second rule 3 points under the second and the third rule),
 /// the middle group holding a value of two lines (`Hinterhof` over `12345`), with some values
