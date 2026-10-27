@@ -1722,6 +1722,7 @@ dependencies = [
  "rezzer-read-pdf",
  "rezzer-read-sheet",
  "rezzer-read-text",
+ "rezzer-render",
  "serde_json",
  "sha2",
  "tempfile",

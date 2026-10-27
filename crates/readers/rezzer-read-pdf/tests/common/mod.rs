@@ -302,6 +302,11 @@ pub struct FormPage {
     /// The whole page drawn turned a quarter turn counterclockwise on a landscape page box, as
     /// a form scanned or printed across.
     pub turn: bool,
+    /// The page box before `scale`, in points: A4 (595 by 842) unless set.
+    pub paper: (f32, f32),
+    /// A picture of the page's own (`/Photo`, different on every page) drawn in this box
+    /// (x, y, width, height), in the frame of the template, as the content of a page.
+    pub photo: Option<[f32; 4]>,
 }
 
 impl Default for FormPage {
@@ -315,16 +320,18 @@ impl Default for FormPage {
             bold_data: false,
             scale: 1.0,
             turn: false,
+            paper: (595.0, 842.0),
+            photo: None,
         }
     }
 }
 
-/// A file of A4 print-run form pages. The page and the template have the fonts `/FL`
-/// (Helvetica, for labels), `/FD` (Courier, for data lines), `/FB` (Helvetica-Bold) and
-/// `/FDB` (Courier-Bold, for data lines with `bold_data`), `/FT` (Times-Roman) and `/FTB`
-/// (Times-Bold), all
-/// in WinAnsi: the template and the data lines are written in that encoding, so labels may
-/// hold umlauts, `\u{df}` and the euro sign.
+/// A file of print-run form pages, A4 unless `paper` says otherwise. The page and the
+/// template have the fonts `/FL` (Helvetica, for labels), `/FD` (Courier, for data lines),
+/// `/FB` (Helvetica-Bold) and `/FDB` (Courier-Bold, for data lines with `bold_data`), `/FT`
+/// (Times-Roman) and `/FTB` (Times-Bold), all in WinAnsi: the template and the data lines are
+/// written in that encoding, so labels may hold umlauts, `\u{df}` and the euro sign. The page
+/// and the template share one picture, `/Logo` (4 by 4 gray pixels), which [`logo`] draws.
 /// `info` holds the entries of the Info dictionary (for example `/Title (Lohn)`); with `""`
 /// the file has none. `catalog_extra` goes into the catalog dictionary, where `{annots}`
 /// stands for the references of every annotation of every page, in page order (for example
@@ -342,28 +349,51 @@ pub fn print_form(pages: &[FormPage], info: &str, catalog_extra: &str) -> Vec<u8
     let bold_data = b.add(font("Courier-Bold"));
     let times = b.add(font("Times-Roman"));
     let times_bold = b.add(font("Times-Bold"));
+    let logo = b.stream(
+        "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray \
+         /BitsPerComponent 8",
+        &(0..16u8).map(|i| 30 + i * 9).collect::<Vec<u8>>(),
+    );
     let fonts = format!(
         "/Font << /FL {label} 0 R /FD {data} 0 R /FB {bold} 0 R /FDB {bold_data} 0 R \
          /FT {times} 0 R /FTB {times_bold} 0 R >>"
     );
     let mut kids = Vec::new();
     let mut all_annots = Vec::new();
-    for page in pages {
+    for (n, page) in pages.iter().enumerate() {
+        let (pw, ph) = page.paper;
         let tpl = b.stream(
-            &format!("/Type /XObject /Subtype /Form /BBox [0 0 595 842] /Resources << {fonts} >>"),
+            &format!(
+                "/Type /XObject /Subtype /Form /BBox [0 0 {pw} {ph}] \
+                 /Resources << {fonts} /XObject << /Logo {logo} 0 R >> >>"
+            ),
             &win_ansi(&page.template),
         );
         let s = page.scale;
         let (w, h) = if page.turn {
-            (842.0 * s, 595.0 * s)
+            (ph * s, pw * s)
         } else {
-            (595.0 * s, 842.0 * s)
+            (pw * s, ph * s)
         };
         let mut content = if page.turn {
             format!("q 0 {s} {} 0 {w} 0 cm q /Tpl Do Q\n", -s)
         } else {
             format!("q {s} 0 0 {s} 0 0 cm q /Tpl Do Q\n")
         };
+        let mut xobjects = format!("/Tpl {tpl} 0 R /Logo {logo} 0 R");
+        if let Some([x, y, dx, dy]) = page.photo {
+            // Pixels of the page's own, so no two pages share the picture.
+            let pixels: Vec<u8> = (0..16u8)
+                .map(|i| (n as u8).wrapping_mul(17) ^ (i * 13))
+                .collect();
+            let photo = b.stream(
+                "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray \
+                 /BitsPerComponent 8",
+                &pixels,
+            );
+            xobjects.push_str(&format!(" /Photo {photo} 0 R"));
+            content.push_str(&format!("q {dx} 0 0 {dy} {x} {y} cm /Photo Do Q\n"));
+        }
         for line in &page.lines {
             let line = data_line(page.left, line.y, page.size, &line.text);
             if page.bold_data {
@@ -381,7 +411,7 @@ pub fn print_form(pages: &[FormPage], info: &str, catalog_extra: &str) -> Vec<u8
             .collect();
         let kid = b.add(format!(
             "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 {} {}] \
-             /Resources << {fonts} /XObject << /Tpl {tpl} 0 R >> >> \
+             /Resources << {fonts} /XObject << {xobjects} >> >> \
              /Contents {content} 0 R /Annots [{}] >>",
             w,
             h,
@@ -491,6 +521,31 @@ pub fn label(x: f32, y: f32, size: f32, text: &str) -> String {
         "BT /FL {size} Tf 90 Tz {x} {y} Td [{} -20 {}] TJ ET\n",
         literal(first),
         literal(second)
+    )
+}
+
+/// The picture `/Logo` of [`print_form`] drawn `w` by `h` points with its lower left corner
+/// at `(x, y)`, as a template draws its logos.
+pub fn logo(x: f32, y: f32, w: f32, h: f32) -> String {
+    format!("q {w} 0 0 {h} {x} {y} cm /Logo Do Q\n")
+}
+
+/// The ids of the assets that need vision.
+pub fn needing(out: &ReadOutcome) -> Vec<&str> {
+    out.document
+        .assets
+        .iter()
+        .filter(|a| a.needs_vision)
+        .map(|a| a.id.as_str())
+        .collect()
+}
+
+/// The Markdown of a read.
+pub fn markdown(out: &ReadOutcome) -> String {
+    rezzer_render::render(
+        &out.document,
+        out.completeness,
+        &rezzer_render::RenderOptions::default(),
     )
 }
 

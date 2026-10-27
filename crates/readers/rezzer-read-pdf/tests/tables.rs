@@ -9,7 +9,7 @@ mod common;
 
 use std::path::PathBuf;
 
-use common::{Builder, Page, helvetica_width, pdf, show, sized_page};
+use common::{Builder, Page, helvetica_width, markdown, pdf, show, sized_page};
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
     Anchor, Block, Cell, Completeness, LossReason, ReadOptions, ReadOutcome, SectionKind, Severity,
@@ -553,14 +553,6 @@ fn a_row_split_by_a_page_break_is_one_row() {
     );
     assert!(tables(page(&out, 2)).is_empty());
     assert_eq!(out.completeness, Completeness::Complete);
-}
-
-fn markdown(out: &ReadOutcome) -> String {
-    rezzer_render::render(
-        &out.document,
-        out.completeness,
-        &rezzer_render::RenderOptions::default(),
-    )
 }
 
 #[test]

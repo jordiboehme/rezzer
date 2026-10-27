@@ -10,7 +10,7 @@ mod common;
 use std::io::Write;
 use std::path::PathBuf;
 
-use common::Builder;
+use common::{Builder, markdown, needing};
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
     Anchor, Asset, Block, Completeness, LossReason, ReadOptions, ReadOutcome, SectionKind,
@@ -1011,25 +1011,6 @@ fn small_square_picture_on_a_turned_page_stays_in_place() {
     );
 }
 
-/// The ids of the assets that need vision.
-fn needing(out: &ReadOutcome) -> Vec<&str> {
-    out.document
-        .assets
-        .iter()
-        .filter(|a| a.needs_vision)
-        .map(|a| a.id.as_str())
-        .collect()
-}
-
-/// The Markdown of a read.
-fn markdown(out: &ReadOutcome) -> String {
-    rezzer_render::render(
-        &out.document,
-        out.completeness,
-        &rezzer_render::RenderOptions::default(),
-    )
-}
-
 /// The bytes written for asset `id`.
 fn blob<'a>(out: &'a ReadOutcome, id: &str) -> &'a [u8] {
     &out.blobs
@@ -1183,6 +1164,35 @@ fn same_picture_on_every_page_is_a_logo() {
     ];
     let out = read(&picture_pages(&draws, &[gray(10), gray(100)]));
     assert_eq!(needing(&out), ["page-1-pic-1", "page-2-pic-1"]);
+}
+
+#[test]
+fn same_picture_on_both_pages_is_not_counted() {
+    // One picture of 120 by 90 points (2.2 % of the page) in the middle of both pages of a
+    // file of two: a picture of the template, listed as a logo on both pages.
+    let draws = vec![
+        vec![(237.0, 376.0, 120.0, 90.0, 0)],
+        vec![(237.0, 376.0, 120.0, 90.0, 0)],
+    ];
+    let out = read(&picture_pages(&draws, &[gray(10)]));
+    assert!(needing(&out).is_empty(), "{:#?}", out.document.assets);
+    let md = markdown(&out);
+    assert_eq!(
+        md.matches("logo or small picture, box 237, 376 to 357, 466")
+            .count(),
+        2,
+        "{md}"
+    );
+}
+
+#[test]
+fn large_picture_in_the_top_band_needs_vision() {
+    // 300 by 140 points (8.4 % of the page) wholly in the top band: content, not a logo.
+    let out = read(&picture_pages(
+        &[vec![(150.0, 700.0, 300.0, 140.0, 0)]],
+        &[gray(10)],
+    ));
+    assert_eq!(needing(&out), ["page-1"], "{:#?}", out.document.assets);
 }
 
 #[test]
@@ -1386,7 +1396,7 @@ fn two_pictures_at_one_block_are_numbered_from_the_top() {
 #[test]
 fn side_strips_and_the_band_edge_are_not_logo_places() {
     // At the left edge but in the middle of the height; and in the middle of the width, between
-    // the bottom band (15 %) and the corner height (20 %).
+    // the bottom band (18 %) and the corner height (20 %).
     for (x, y, w, h) in [(10.0, 400.0, 30.0, 40.0), (250.0, 130.0, 60.0, 30.0)] {
         let out = read(&picture_pages(&[vec![(x, y, w, h, 0)]], &[gray(10)]));
         assert_eq!(needing(&out), ["page-1-pic-1"], "{x}, {y}");

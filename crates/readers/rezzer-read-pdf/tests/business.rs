@@ -8,7 +8,7 @@
 
 mod common;
 
-use common::{FormPage, print_form, show};
+use common::{FormPage, logo, markdown, needing, print_form, show};
 use rezzer_model::{Block, Completeness, Inline, LossReason, ReadOutcome, Severity, plain_text};
 
 /// The allocator of the Rezzer binary, so the reads run as they run in it.
@@ -4502,4 +4502,245 @@ fn a_centred_page_number_does_not_bridge_footer_columns() {
         wrong.len(),
         wrong.join("\n")
     );
+}
+
+/// The logos of an invoice template: 100 by 50 points top left, 100 by 40 at the right just
+/// below the top 15 % of the page, 60 by 30 bottom left. Each covers less than 2 % of the
+/// page, together more.
+fn invoice_logos() -> String {
+    [
+        logo(40.0, 770.0, 100.0, 50.0),
+        logo(455.0, 692.0, 100.0, 40.0),
+        logo(40.0, 30.0, 60.0, 30.0),
+    ]
+    .concat()
+}
+
+/// The alt texts of the pictures on page `n`, in the order the page holds them.
+fn media_alts(out: &ReadOutcome, n: u32) -> Vec<String> {
+    fn walk(blocks: &[Block], found: &mut Vec<String>) {
+        for b in blocks {
+            match b {
+                Block::Section { blocks, .. } => walk(blocks, found),
+                Block::Media { alt, .. } => found.push(alt.clone().unwrap_or_default()),
+                _ => {}
+            }
+        }
+    }
+    let want = rezzer_model::Anchor(format!("p{n}"));
+    let page = out
+        .document
+        .body
+        .iter()
+        .find_map(|b| match b {
+            Block::Section {
+                kind: rezzer_model::SectionKind::Page,
+                anchor: Some(a),
+                blocks,
+                ..
+            } if *a == want => Some(blocks.as_slice()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no page {n}"));
+    let mut found = Vec::new();
+    walk(page, &mut found);
+    found
+}
+
+#[test]
+fn template_logos_need_no_vision() {
+    let out = pages_logos(2);
+    assert!(needing(&out).is_empty(), "{:#?}", out.document.assets);
+    let md = markdown(&out);
+    assert!(!md.contains("Needs vision"), "{md}");
+    for n in 1..=2 {
+        let alts = media_alts(&out, n);
+        assert_eq!(alts.len(), 3, "page {n}: {alts:?}");
+        assert!(
+            alts.iter()
+                .any(|a| a.starts_with("logo or small picture") && a.contains("box 455, 692")),
+            "page {n}: {alts:?}"
+        );
+    }
+}
+
+#[test]
+fn logos_on_one_page_need_no_vision() {
+    let out = pages_logos(1);
+    assert!(needing(&out).is_empty(), "{:#?}", out.document.assets);
+    let alts = media_alts(&out, 1);
+    assert_eq!(alts.len(), 3, "{alts:?}");
+    assert!(
+        alts.iter().all(|a| a.starts_with("logo or small picture")),
+        "{alts:?}"
+    );
+}
+
+/// `count` pages of the invoice template with its logos and the body.
+fn pages_logos(count: usize) -> ReadOutcome {
+    common::read(&pages(&vec![invoice_logos(); count]))
+}
+
+/// The places of template logos, as shares of the page width and height (x0, y0, x1, y1):
+/// the four corners, in the corner but outside the top and bottom 18 % of the page, and the
+/// middle of the top and the bottom band. Each logo covers less than 2 % of the page.
+const LOGO_PLACES: [(&str, [f32; 4]); 6] = [
+    ("top left", [0.04, 0.805, 0.16, 0.848]),
+    ("top right", [0.84, 0.805, 0.96, 0.848]),
+    ("bottom left", [0.04, 0.152, 0.16, 0.195]),
+    ("bottom right", [0.84, 0.152, 0.96, 0.195]),
+    ("top band", [0.4, 0.88, 0.6, 0.93]),
+    ("bottom band", [0.4, 0.03, 0.6, 0.08]),
+];
+
+/// A paper by its name and its size in points.
+type Paper = (&'static str, (f32, f32));
+
+/// What is wrong with the read of `count` pages of `paper` printed at `scale`, with logos
+/// at `places` and, with `content`, a large content picture of each page's own.
+fn template_logo_variant(
+    paper: Paper,
+    scale: f32,
+    places: &[&(&str, [f32; 4])],
+    count: usize,
+    content: bool,
+) -> Vec<String> {
+    let (paper, (w, h)) = paper;
+    let template: String = places
+        .iter()
+        .map(|(_, [x0, y0, x1, y1])| logo(x0 * w, y0 * h, (x1 - x0) * w, (y1 - y0) * h))
+        .collect();
+    let file: Vec<FormPage> = (0..count)
+        .map(|_| FormPage {
+            template: format!("{template}{}", show("FL", 7.0, 40.0, 500.0, BODY_LINE)),
+            scale,
+            paper: (w, h),
+            photo: content.then_some([0.25 * w, 0.22 * h, 0.5 * w, 0.17 * h]),
+            ..FormPage::default()
+        })
+        .collect();
+    let out = common::read(&print_form(&file, "", ""));
+    let names: Vec<&str> = places.iter().map(|(n, _)| *n).collect();
+    let name = format!("{paper} {scale}x, {count} pages, logos {names:?}, content {content}");
+    let mut wrong = Vec::new();
+    let needing = needing(&out);
+    for n in 1..=count {
+        // A large content picture always needs vision: its page is rendered whole, logos and
+        // all.
+        let page = format!("page-{n}");
+        if content != needing.contains(&page.as_str()) {
+            wrong.push(format!("{name}: page {n} needing {needing:?}"));
+        }
+        // Every logo of a page that is not rendered whole is listed as a logo. From three
+        // pages on, logos at one place are page furniture, which is not listed unless it
+        // holds a code.
+        let alts = media_alts(&out, n as u32);
+        let listed = alts
+            .iter()
+            .filter(|a| a.starts_with("logo or small picture"))
+            .count();
+        let want = if content || count >= 3 {
+            0
+        } else {
+            places.len()
+        };
+        if listed != want || (!content && alts.len() != want) {
+            wrong.push(format!("{name}: page {n} lists {alts:?}"));
+        }
+    }
+    // Template logos never need vision.
+    if needing.iter().any(|id| id.contains("-pic-")) {
+        wrong.push(format!("{name}: needing {needing:?}"));
+    }
+    wrong
+}
+
+#[test]
+fn template_logos_never_need_vision_and_content_always_does() {
+    // A4 and Letter, printed at 0.75, 1 and 1.5 times their size; one to four logos at the
+    // places of `LOGO_PLACES` (each run of places in turn); files of one, two and three
+    // pages; without and, for two runs of places, with a large content picture (8.5 % of the
+    // page, its own on every page) under a line of text. Each paper and scale is read on a
+    // thread of its own.
+    let setups: Vec<(Paper, f32)> = [("A4", (595.0, 842.0)), ("Letter", (612.0, 792.0))]
+        .into_iter()
+        .flat_map(|paper| [0.75, 1.0, 1.5].map(|scale| (paper, scale)))
+        .collect();
+    let runs: Vec<(usize, Vec<String>)> = std::thread::scope(|scope| {
+        let threads: Vec<_> = setups
+            .iter()
+            .map(|&(paper, scale)| {
+                scope.spawn(move || {
+                    let mut reads = 0;
+                    let mut wrong = Vec::new();
+                    for logos in 1..=4 {
+                        for first in 0..LOGO_PLACES.len() {
+                            let places: Vec<&(&str, [f32; 4])> = (0..logos)
+                                .map(|i| &LOGO_PLACES[(first + i) % LOGO_PLACES.len()])
+                                .collect();
+                            for count in 1..=3 {
+                                // A page that needs vision is rendered to be read for codes,
+                                // which is slow: the content picture is tried with two runs
+                                // of places only.
+                                let contents: &[bool] = if first % 3 == 0 {
+                                    &[false, true]
+                                } else {
+                                    &[false]
+                                };
+                                for &content in contents {
+                                    reads += 1;
+                                    wrong.extend(template_logo_variant(
+                                        paper, scale, &places, count, content,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    (reads, wrong)
+                })
+            })
+            .collect();
+        threads.into_iter().map(|t| t.join().unwrap()).collect()
+    });
+    let reads: usize = runs.iter().map(|(n, _)| n).sum();
+    let wrong: Vec<String> = runs.into_iter().flat_map(|(_, w)| w).collect();
+    assert_eq!(reads, 6 * 4 * (6 + 2) * 3);
+    assert!(
+        wrong.is_empty(),
+        "{} of {reads} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+#[test]
+fn a_figure_of_small_pictures_across_the_band_edge_needs_vision() {
+    // Four columns of three small pictures (40 by 40 points, 3 points apart), the top two
+    // rows in the top band, the lowest row under it: one figure, together over 2 % of the
+    // page. A4 and Letter, printed at 0.75, 1 and 1.5 times their size.
+    for (w, h) in [(595.0f32, 842.0f32), (612.0, 792.0)] {
+        let mut template = show("FL", 7.0, 40.0, 500.0, BODY_LINE);
+        for column in 0..4 {
+            for row in 0..3 {
+                let x = 0.28 * w + column as f32 * 70.0;
+                let y = 0.88 * h - row as f32 * 43.0;
+                template.push_str(&logo(x, y, 40.0, 40.0));
+            }
+        }
+        for scale in [0.75, 1.0, 1.5] {
+            let page = FormPage {
+                template: template.clone(),
+                scale,
+                paper: (w, h),
+                ..FormPage::default()
+            };
+            let out = common::read(&print_form(&[page], "", ""));
+            assert_eq!(
+                needing(&out),
+                ["page-1"],
+                "{w} by {h} at {scale}x: {:#?}",
+                out.document.assets
+            );
+        }
+    }
 }

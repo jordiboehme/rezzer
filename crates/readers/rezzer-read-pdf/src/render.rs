@@ -172,36 +172,97 @@ impl Spots {
     }
 }
 
-/// The same picture drawn at the same place (within [`SAME_SPOT`]) on at least three pages
-/// and on at least half of the pages read. When they are small, they are page furniture (a logo in the
-/// margin, a strip along the edge), like a running header, and do not make a page need vision.
-pub(crate) fn furniture<'a>(pages: impl Iterator<Item = &'a PageItems>) -> Spots {
-    let mut all = Spots::default();
-    // For each spot: the pages it is on and the last page it was counted for.
-    let mut seen: Vec<(usize, usize)> = Vec::new();
-    let mut read = 0usize;
-    for items in pages {
-        read += 1;
+/// The spots of the pictures of the pages read so far, each with the pages it is on.
+#[derive(Default)]
+struct SpotPages {
+    all: Spots,
+    /// For each spot: the pages it is on and the last page it was counted for.
+    seen: Vec<(usize, usize)>,
+    read: usize,
+}
+
+impl SpotPages {
+    fn add(&mut self, items: &PageItems) {
+        self.read += 1;
         for (i, b) in items.images.iter().enumerate() {
-            let k = all.add(b, items.images_id.get(i).copied().unwrap_or(0));
-            if k == seen.len() {
-                seen.push((0, 0));
+            let k = self
+                .all
+                .add(b, items.images_id.get(i).copied().unwrap_or(0));
+            if k == self.seen.len() {
+                self.seen.push((0, 0));
             }
-            if seen[k].1 != read {
-                seen[k] = (seen[k].0 + 1, read);
+            if self.seen[k].1 != self.read {
+                self.seen[k] = (self.seen[k].0 + 1, self.read);
             }
         }
     }
-    let mut out = Spots::default();
-    for (k, &(n, _)) in seen.iter().enumerate() {
-        if n >= 3 && n * 2 >= read {
-            let (b, id) = all.boxes[k];
-            let i = out.boxes.len();
-            out.boxes.push((b, id));
-            out.buckets.entry(Spots::cell(&b)).or_default().push(i);
+
+    /// The spots on `keep(pages it is on, pages read)` pages.
+    fn only(&self, keep: impl Fn(usize, usize) -> bool) -> Spots {
+        let mut out = Spots::default();
+        for (k, &(n, _)) in self.seen.iter().enumerate() {
+            if keep(n, self.read) {
+                let (b, id) = self.all.boxes[k];
+                let i = out.boxes.len();
+                out.boxes.push((b, id));
+                out.buckets.entry(Spots::cell(&b)).or_default().push(i);
+            }
         }
+        out
     }
-    out
+}
+
+/// The same picture drawn at the same place (within [`SAME_SPOT`]) on at least three pages
+/// and on at least half of the pages read. When they are small, they are page furniture (a
+/// logo in the margin, a strip along the edge), like a running header, and do not make a page
+/// need vision.
+pub(crate) fn furniture<'a>(pages: impl Iterator<Item = &'a PageItems>) -> Spots {
+    let mut spots = SpotPages::default();
+    for items in pages {
+        spots.add(items);
+    }
+    spots.only(|n, read| n >= 3 && n * 2 >= read)
+}
+
+/// The pictures drawn on every page of a file of two pages or more. In a file of two pages
+/// they are the pictures of its template, as a footer line on both pages is furniture (see
+/// `layout::Style::learn`); from three pages on, those at one place are [`furniture`].
+#[derive(Default)]
+pub(crate) struct Everywhere {
+    /// By `PageItems::images_id`, anywhere on the page: such a picture is a logo.
+    pub ids: HashSet<u64>,
+    /// At one place (within [`SAME_SPOT`]) on every page: such a picture does not count
+    /// toward the share of a page that needs vision.
+    pub spots: Spots,
+}
+
+/// The pictures on every page of a document of two pages or more. `count` is the
+/// document's page count; when fewer pages were read, no picture is known to be on every
+/// page.
+pub(crate) fn on_every_page<'a>(
+    pages: impl Iterator<Item = &'a PageItems>,
+    count: usize,
+) -> Everywhere {
+    let mut spots = SpotPages::default();
+    let mut found: Option<HashSet<u64>> = None;
+    for items in pages {
+        spots.add(items);
+        let here: HashSet<u64> = items.images_id.iter().copied().collect();
+        found = Some(match found {
+            None => here,
+            Some(mut all) => {
+                all.retain(|id| here.contains(id));
+                all
+            }
+        });
+    }
+    match found {
+        Some(ids) if count >= 2 && spots.read == count => Everywhere {
+            ids,
+            spots: spots.only(|n, read| n == read),
+        },
+        _ => Everywhere::default(),
+    }
 }
 
 /// What a page shows that an agent may need to look at.
@@ -239,8 +300,8 @@ pub(crate) struct Small {
 }
 
 /// The top or bottom band of a page, as a share of its height, where a small picture is a
-/// logo.
-const LOGO_BAND: f32 = 0.15;
+/// logo: the band of running headers and footers (`layout::BAND`).
+const LOGO_BAND: f32 = 0.18;
 
 /// The corner regions of a page, as a share of its width and height, where a small picture
 /// is a logo.
@@ -266,53 +327,116 @@ fn looks_like_code(items: &PageItems, k: usize) -> bool {
     square && items.images_code.get(k).copied().unwrap_or(false)
 }
 
-/// The pictures (by `PageItems::images_id`) drawn on every page of a document of two pages
-/// or more, anywhere on the page. `count` is the document's page count; when fewer pages
-/// were read, no picture is known to be on every page.
-pub(crate) fn on_every_page<'a>(
-    pages: impl Iterator<Item = &'a PageItems>,
-    count: usize,
-) -> HashSet<u64> {
-    let mut read = 0usize;
-    let mut found: Option<HashSet<u64>> = None;
-    for items in pages {
-        read += 1;
-        let here: HashSet<u64> = items.images_id.iter().copied().collect();
-        found = Some(match found {
-            None => here,
-            Some(mut all) => {
-                all.retain(|id| here.contains(id));
-                all
+/// Pictures closer than this share of the page width and height are one figure: a picture
+/// in a logo place that is part of a figure reaching out of it is no logo.
+const FIGURE_GAP: f32 = 0.01;
+
+/// Pictures of one page past which none is a logo by its place: finding the figures would
+/// take too long, and the pictures count toward the share as they are.
+const FIGURE_PICTURES: usize = 256;
+
+/// The visible part of box `b` on a page `width` by `height` points, in square points.
+fn visible_in(b: &[f32; 4], width: f32, height: f32) -> f32 {
+    let w = (b[2].min(width) - b[0].max(0.0)).max(0.0);
+    let h = (b[3].min(height) - b[1].max(0.0)).max(0.0);
+    w * h
+}
+
+/// For each of the pictures `shown` of page `info` (not page furniture): whether it is a
+/// logo, and whether it is a logo of the template, which does not count toward the share of
+/// a page that needs vision. A logo of the template does not look like a code and either lies
+/// in a logo place, alone covers less than [`PICTURE_SHARE`] of the page and is no part of a
+/// figure (pictures within [`FIGURE_GAP`] of each other) that reaches out of the logo places;
+/// or it stands at one place on every page (`everywhere`) and covers less than
+/// [`FURNITURE_SHARE`]. A picture on every page somewhere is a logo too.
+fn logos(
+    info: &PageInfo,
+    items: &PageItems,
+    shown: &[usize],
+    everywhere: &Everywhere,
+) -> Vec<(bool, bool)> {
+    let (width, height) = (info.width, info.height);
+    let area = (width * height).max(1.0);
+    let (fw, fh) = items.turn.size(width, height);
+    let framed: Vec<[f32; 4]> = shown
+        .iter()
+        .map(|&k| items.turn.place_box(items.images[k], width, height))
+        .collect();
+    let code: Vec<bool> = shown.iter().map(|&k| looks_like_code(items, k)).collect();
+    let repeated: Vec<bool> = shown
+        .iter()
+        .map(|&k| {
+            let b = &items.images[k];
+            let id = items.images_id.get(k).copied().unwrap_or(0);
+            everywhere.spots.holds(b, id) && visible_in(b, width, height) < FURNITURE_SHARE * area
+        })
+        .collect();
+    let mut placed: Vec<bool> = (0..shown.len())
+        .map(|i| {
+            shown.len() <= FIGURE_PICTURES
+                && !code[i]
+                && in_logo_place(&framed[i], fw, fh)
+                && visible_in(&items.images[shown[i]], width, height) < PICTURE_SHARE * area
+        })
+        .collect();
+    // A picture of content (not a code, not a logo by its place or its repeats) makes every
+    // picture of its figure content.
+    let (gx, gy) = (FIGURE_GAP * fw, FIGURE_GAP * fh);
+    let near = |a: &[f32; 4], b: &[f32; 4]| {
+        a[0] - gx <= b[2] && b[0] <= a[2] + gx && a[1] - gy <= b[3] && b[1] <= a[3] + gy
+    };
+    // At most [`FIGURE_PICTURES`] pictures are placed, so this takes at most that many steps
+    // for each picture.
+    let mut left: Vec<usize> = (0..shown.len()).filter(|&i| placed[i]).collect();
+    let mut reach: Vec<usize> = if left.is_empty() {
+        Vec::new()
+    } else {
+        (0..shown.len())
+            .filter(|&i| !code[i] && !placed[i] && !repeated[i])
+            .collect()
+    };
+    while let Some(i) = reach.pop() {
+        left.retain(|&j| {
+            let joined = near(&framed[i], &framed[j]);
+            if joined {
+                placed[j] = false;
+                reach.push(j);
             }
+            !joined
         });
+        if left.is_empty() {
+            break;
+        }
     }
-    match found {
-        Some(all) if count >= 2 && read == count => all,
-        _ => HashSet::new(),
-    }
+    (0..shown.len())
+        .map(|i| {
+            let template = !code[i] && (placed[i] || repeated[i]);
+            let id = items.images_id.get(shown[i]).copied().unwrap_or(0);
+            (
+                template || (!code[i] && everywhere.ids.contains(&id)),
+                template,
+            )
+        })
+        .collect()
 }
 
 /// What on page `info` with the items read from it needs a look. The whole page needs
 /// vision when it has no text layer over a picture (a scan), its glyphs have no Unicode
 /// mapping, or it is only an invisible text layer over a picture (an OCR layer); or when its
-/// pictures, without the page furniture `skip`, cover at least 2 % of it. Otherwise each of
-/// its pictures of at least 1 cm2 is a small picture of its own; one that does not look like
-/// a code and lies in the top or bottom band or a corner, or is in `everywhere`, is a logo.
-/// At most `cap` small pictures are kept, the first the page draws.
+/// pictures, without the page furniture `skip` and the logos of the template (see
+/// [`logos`]), cover at least 2 % of it. Otherwise each of its pictures of at least 1 cm2 is
+/// a small picture of its own, marked as a logo when it is one. At most `cap` small pictures
+/// are kept, the first the page draws.
 pub(crate) fn vision(
     info: &PageInfo,
     items: &PageItems,
     skip: &Spots,
-    everywhere: &HashSet<u64>,
+    everywhere: &Everywhere,
     cap: usize,
 ) -> Option<Seen> {
     let (width, height) = (info.width, info.height);
     let area = (width * height).max(1.0);
-    let visible = |b: &[f32; 4]| {
-        let w = (b[2].min(width) - b[0].max(0.0)).max(0.0);
-        let h = (b[3].min(height) - b[1].max(0.0)).max(0.0);
-        w * h
-    };
+    let visible = |b: &[f32; 4]| visible_in(b, width, height);
     let drawn: Vec<usize> = (0..items.images.len())
         .filter(|&k| visible(&items.images[k]) > 0.0)
         .collect();
@@ -328,8 +452,15 @@ pub(crate) fn vision(
         let id = items.images_id.get(k).copied().unwrap_or(0);
         !(skip.holds(b, id) && visible(b) < FURNITURE_SHARE * area)
     });
-    let shown: Vec<&[f32; 4]> = shown_at.iter().map(|&k| &items.images[k]).collect();
-    let pictured = (shown.iter().map(|b| visible(b)).sum::<f32>() / area).min(1.0);
+    let logo = logos(info, items, &shown_at, everywhere);
+    let pictured = (shown_at
+        .iter()
+        .zip(&logo)
+        .filter(|(_, (_, template))| !template)
+        .map(|(&k, _)| visible(&items.images[k]))
+        .sum::<f32>()
+        / area)
+        .min(1.0);
     let visible_text = items.mapped > 0;
     let invisible_text = !items.hidden_layer.is_empty() || !items.invisible.is_empty();
     let mut words: Vec<String> = Vec::new();
@@ -342,10 +473,11 @@ pub(crate) fn vision(
     if !visible_text && invisible_text && covered > SCAN_SHARE {
         words.push("only an invisible text layer".into());
     }
-    let mut first = shown.first().map(|b| **b);
-    let large = !shown.is_empty() && pictured >= PICTURE_SHARE;
+    let mut first = shown_at.first().map(|&k| items.images[k]);
+    let large = pictured >= PICTURE_SHARE;
     if large {
-        let k = shown.len();
+        // Logos are counted too: they are on the page rendered.
+        let k = shown_at.len();
         words.push(format!(
             "{k} {}",
             if k == 1 { "picture" } else { "pictures" }
@@ -353,13 +485,14 @@ pub(crate) fn vision(
     }
     // Pictures too small to make the page need vision are still not dropped: each one of at
     // least 1 cm2 is named with its box.
-    let small: Vec<usize> = if large {
+    let small: Vec<(usize, bool)> = if large {
         Vec::new()
     } else {
         shown_at
             .iter()
             .copied()
-            .filter(|&k| visible(&items.images[k]) >= SMALL_PICTURE)
+            .zip(logo.into_iter().map(|(logo, _)| logo))
+            .filter(|&(k, _)| visible(&items.images[k]) >= SMALL_PICTURE)
             .collect()
     };
     let vectors: Vec<&crate::codes::VectorCode> =
@@ -367,8 +500,9 @@ pub(crate) fn vision(
     if !words.is_empty() {
         // The page is rendered whole: its small pictures are named in its alt text and not
         // cut out again.
-        if let Some(&k) = small.first() {
+        if let Some(&(k, _)) = small.first() {
             first = Some(items.images[k]);
+            let small: Vec<usize> = small.iter().map(|&(k, _)| k).collect();
             words.push(small_pictures(items, &small));
         }
         // The page render is read cheaply; the likely codes are looked at again finer: codes
@@ -412,15 +546,13 @@ pub(crate) fn vision(
     let more = (small.len() + vectors.len() + furniture.len()).saturating_sub(cap);
     let mut small = small;
     small.truncate(cap);
-    let (fw, fh) = items.turn.size(width, height);
     let mut list: Vec<Small> = small
         .into_iter()
-        .map(|k| {
+        .map(|(k, logo)| {
             let b = items.images[k];
             let framed = items.turn.place_box(b, width, height);
             let id = items.images_id.get(k).copied().unwrap_or(0);
             let code = looks_like_code(items, k);
-            let logo = !code && (in_logo_place(&framed, fw, fh) || everywhere.contains(&id));
             // Rendered again at its own resolution when its crop gives no code, if that is
             // finer than the page's render.
             let how = items.images_px.get(k).map(|&(pw, ph)| How::Picture(pw, ph));
@@ -2344,11 +2476,30 @@ mod tests {
             ..PageItems::default()
         };
         let read = [page(1), page(2)];
-        assert_eq!(on_every_page(read.iter(), 2), HashSet::from([7]));
+        let all = on_every_page(read.iter(), 2);
+        assert_eq!(all.ids, HashSet::from([7]));
+        assert!(all.spots.holds(&[0.0, 0.0, 30.0, 30.0], 7));
         // Two pages read of three: the third may not have it.
-        assert!(on_every_page(read.iter(), 3).is_empty());
+        let all = on_every_page(read.iter(), 3);
+        assert!(all.ids.is_empty() && all.spots.boxes.is_empty());
         // One page is not every page.
-        assert!(on_every_page(read[..1].iter(), 1).is_empty());
+        let all = on_every_page(read[..1].iter(), 1);
+        assert!(all.ids.is_empty() && all.spots.boxes.is_empty());
+    }
+
+    #[test]
+    fn a_picture_on_every_page_at_other_places_is_at_no_spot_on_every_page() {
+        let page = |n: u32, x: f32| PageItems {
+            page: n,
+            images: vec![[x, 0.0, x + 30.0, 30.0]],
+            images_id: vec![7],
+            ..PageItems::default()
+        };
+        let read = [page(1, 0.0), page(2, 200.0)];
+        let all = on_every_page(read.iter(), 2);
+        assert_eq!(all.ids, HashSet::from([7]));
+        assert!(!all.spots.holds(&[0.0, 0.0, 30.0, 30.0], 7));
+        assert!(!all.spots.holds(&[200.0, 0.0, 230.0, 30.0], 7));
     }
 
     #[test]
