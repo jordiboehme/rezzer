@@ -60,6 +60,7 @@ pub fn locate_cells(areas: &[CellArea], points: &[(u32, u32)]) -> Vec<Option<usi
     order.sort_unstable_by_key(|&i| points[i]);
     let mut next = 0;
     for i in order {
+        crate::work::add(1);
         let (row, col) = points[i];
         while let Some(&k) = by_top.get(next)
             && areas[k].top <= row
@@ -107,6 +108,7 @@ impl Tree {
         to: usize,
         item: Reverse<Key>,
     ) {
+        crate::work::add(1);
         if to < lo || hi <= from {
             return;
         }
@@ -125,11 +127,13 @@ impl Tree {
         let (mut node, mut lo, mut hi) = (1, 0, self.leaves);
         let mut best: Option<Key> = None;
         loop {
+            crate::work::add(1);
             let heap = &mut self.heaps[node];
             while let Some(&Reverse((_, _, _, k))) = heap.peek() {
                 if live(k) {
                     break;
                 }
+                crate::work::add(1);
                 heap.pop();
             }
             if let Some(&Reverse(top)) = heap.peek()

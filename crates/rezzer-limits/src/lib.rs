@@ -5,7 +5,7 @@
 //! Size, depth, element and time limits that every reader enforces, plus panic containment.
 
 mod alloc;
-pub use alloc::Allocator;
+pub use alloc::{Allocator, moved_bytes};
 
 use std::fmt;
 use std::panic::{AssertUnwindSafe, UnwindSafe, catch_unwind};
@@ -163,10 +163,66 @@ impl CancelToken {
     }
 }
 
+/// The clock a [`Budget`] measures its time with. Clones share the clock.
+#[derive(Debug, Clone, Default)]
+pub enum Clock {
+    /// The wall clock.
+    #[default]
+    Real,
+    /// A counted clock for tests: see [`Clock::steps`].
+    Steps(Arc<StepClock>),
+}
+
+/// A clock that moves by one step at each reading, so a time limit depends on the work done,
+/// not on the machine's load.
+#[derive(Debug)]
+pub struct StepClock {
+    step: Duration,
+    reads: AtomicU64,
+}
+
+impl Clock {
+    /// A clock that moves by `step` at each reading: each [`Budget::elapsed`] and
+    /// [`Budget::check_time`] is one reading and gives `step` times the readings so far.
+    /// Any `elapsed` call is a reading too, also one a reader makes for its own use (a share
+    /// of the time limit): a reader that adds such calls changes the counts tests measured.
+    /// Readings are counted per clock, not per budget, so one such clock is meant for one
+    /// read.
+    pub fn steps(step: Duration) -> Clock {
+        Clock::Steps(Arc::new(StepClock {
+            step,
+            reads: AtomicU64::new(0),
+        }))
+    }
+
+    /// The readings of a step clock so far; 0 for the wall clock, which does not count.
+    pub fn reads(&self) -> u64 {
+        match self {
+            Clock::Real => 0,
+            Clock::Steps(s) => s.reads.load(Ordering::Relaxed),
+        }
+    }
+
+    /// The time since `start`: on the wall clock, or one reading of a step clock.
+    fn since(&self, start: Instant) -> Duration {
+        match self {
+            Clock::Real => start.elapsed(),
+            Clock::Steps(s) => {
+                let reads = s.reads.fetch_add(1, Ordering::Relaxed).saturating_add(1);
+                u32::try_from(reads)
+                    .ok()
+                    .and_then(|n| s.step.checked_mul(n))
+                    .unwrap_or(Duration::MAX)
+            }
+        }
+    }
+}
+
 /// Running counters for one conversion. Shareable between threads.
 #[derive(Debug)]
 pub struct Budget {
     limits: Limits,
+    clock: Clock,
     start: Instant,
     unpacked: AtomicU64,
     depth: AtomicU32,
@@ -184,8 +240,14 @@ impl Budget {
     /// A budget that is cancelled when `cancel` is: [`Budget::check_time`] then fails with
     /// the limit `cancelled`, so the reader stops at its next check.
     pub fn with_cancel(limits: Limits, cancel: CancelToken) -> Budget {
+        Budget::with_clock(limits, cancel, Clock::Real)
+    }
+
+    /// A budget like [`Budget::with_cancel`] that measures its time with `clock`.
+    pub fn with_clock(limits: Limits, cancel: CancelToken, clock: Clock) -> Budget {
         Budget {
             limits,
+            clock,
             start: Instant::now(),
             unpacked: AtomicU64::new(0),
             depth: AtomicU32::new(0),
@@ -199,15 +261,15 @@ impl Budget {
         &self.limits
     }
 
-    /// The time since the budget was made.
+    /// The time since the budget was made, on its [`Clock`].
     pub fn elapsed(&self) -> Duration {
-        self.start.elapsed()
+        self.clock.since(self.start)
     }
 
     /// Fails when the time limit is over or the budget was cancelled. A failure counts as a
     /// time stop (see [`Budget::time_stopped`]). Values in the error are milliseconds.
     pub fn check_time(&self) -> Result<(), LimitHit> {
-        let elapsed = self.start.elapsed();
+        let elapsed = self.elapsed();
         let limit = if self.is_cancelled() {
             "cancelled"
         } else if elapsed > self.limits.max_time {

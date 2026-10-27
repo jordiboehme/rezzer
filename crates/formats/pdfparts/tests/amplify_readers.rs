@@ -10,7 +10,7 @@ mod common;
 
 use std::time::{Duration, Instant};
 
-use common::{Classic, assert_rss_bounded};
+use common::{Classic, assert_rss_bounded, assert_work, counted};
 use pdfparts::{IssueKind, Limits, Pdf};
 
 /// The allocator of the Rezzer binary: the memory these tests measure is the memory it
@@ -215,15 +215,15 @@ fn attachments_are_listed_once() {
     }
     let bytes = c.finish("");
     let pdf = Pdf::open(&bytes, None, &limits(), &never).unwrap();
-    let start = Instant::now();
-    let files = pdf.embedded_files();
-    assert_eq!(files.len(), n);
-    for i in 0..n {
-        assert_eq!(pdf.embedded_file_bytes(i).unwrap(), b"x");
-    }
-    let took = start.elapsed();
-    eprintln!("{n} attachments extracted in {took:?}");
-    assert!(took < Duration::from_secs(1), "{took:?}");
+    let ((), steps, took) = counted(|| {
+        let files = pdf.embedded_files();
+        assert_eq!(files.len(), n);
+        for i in 0..n {
+            assert_eq!(pdf.embedded_file_bytes(i).unwrap(), b"x");
+        }
+    });
+    // Measured once (2026-10-27).
+    assert_work(&format!("{n} attachments"), steps, 93_895, took);
 }
 
 /// `pages` pages that share one /Annots array of `refs` references to one annotation.
@@ -256,22 +256,19 @@ fn shared_annots_array(pages: usize, refs: usize, subtype: &str) -> Vec<u8> {
 fn shared_annots_array_is_walked_once() {
     let bytes = shared_annots_array(10_000, 20_000, "Text");
     let pdf = Pdf::open(&bytes, None, &limits(), &never).unwrap();
-    let start = Instant::now();
-    let annots = pdf.annotations();
-    let took = start.elapsed();
-    eprintln!("annotations() {took:?}");
+    let (annots, steps, took) = counted(|| pdf.annotations());
     assert_eq!(annots.len(), 1);
     assert_eq!(annots[0].page, 1);
-    assert!(took < Duration::from_secs(1), "{took:?}");
+    // Measured once (2026-10-27).
+    assert_work("annotations()", steps, 30_008, took);
 
     let bytes = shared_annots_array(10_000, 20_000, "Link");
     let pdf = Pdf::open(&bytes, None, &limits(), &never).unwrap();
-    let start = Instant::now();
-    let links = pdf.links();
-    let took = start.elapsed();
-    eprintln!("links() {took:?}, {} links", links.len());
+    let (links, steps, took) = counted(|| pdf.links());
+    eprintln!("{} links", links.len());
     assert!(links.iter().all(|l| l.page == 1));
-    assert!(took < Duration::from_secs(1), "{took:?}");
+    // Measured once (2026-10-27).
+    assert_work("links()", steps, 30_011, took);
     assert_rss_bounded();
 }
 
@@ -514,21 +511,23 @@ fn form_file(fields: &str, objects: Vec<(u32, Vec<u8>)>) -> Vec<u8> {
     c.finish("")
 }
 
-/// Runs the form, scripts and signatures readers and returns how long each took.
-fn time_form_readers(pdf: &Pdf) -> [Duration; 3] {
-    let start = Instant::now();
-    let fields = pdf.form().map_or(0, |f| f.fields.len());
-    let form = start.elapsed();
-    let start = Instant::now();
-    let scripts = pdf.scripts().len();
-    let script_time = start.elapsed();
-    let start = Instant::now();
-    let sigs = pdf.signatures().len();
-    let sig_time = start.elapsed();
-    eprintln!(
-        "form {form:?} ({fields} fields), scripts {script_time:?} ({scripts}), signatures {sig_time:?} ({sigs})"
-    );
-    [form, script_time, sig_time]
+/// Runs the form, scripts and signatures readers and gives the steps of work each did, with
+/// its wall time.
+fn count_form_readers(pdf: &Pdf) -> [(Option<u64>, Duration); 3] {
+    let (fields, form, form_time) = counted(|| pdf.form().map_or(0, |f| f.fields.len()));
+    let (scripts, script, script_time) = counted(|| pdf.scripts().len());
+    let (sigs, sig, sig_time) = counted(|| pdf.signatures().len());
+    eprintln!("{fields} fields, {scripts} scripts, {sigs} signatures");
+    [(form, form_time), (script, script_time), (sig, sig_time)]
+}
+
+/// Checks the work bounds of the form, scripts and signatures readers: `measured` holds the
+/// steps of each (see [`assert_work`]).
+fn assert_form_readers(pdf: &Pdf, measured: [u64; 3]) {
+    let names = ["form", "scripts", "signatures"];
+    for ((name, (steps, took)), m) in names.iter().zip(count_form_readers(pdf)).zip(measured) {
+        assert_work(name, steps, m, took);
+    }
 }
 
 #[test]
@@ -549,9 +548,8 @@ fn shared_kids_array_is_walked_once() {
     }
     let bytes = form_file(&fields, objects);
     let pdf = Pdf::open(&bytes, None, &limits(), &never).unwrap();
-    for took in time_form_readers(&pdf) {
-        assert!(took < Duration::from_secs(1), "{took:?}");
-    }
+    // Measured once (2026-10-27).
+    assert_form_readers(&pdf, [208_894, 3, 1]);
     // The array and its widget belong to the first field only; the others are not listed.
     let form = pdf.form().unwrap();
     assert_eq!(form.fields.len(), 1);
@@ -585,9 +583,8 @@ fn shared_next_chain_is_read_once() {
     }
     let bytes = form_file(&fields, objects);
     let pdf = Pdf::open(&bytes, None, &limits(), &never).unwrap();
-    for took in time_form_readers(&pdf) {
-        assert!(took < Duration::from_secs(1), "{took:?}");
-    }
+    // Measured once (2026-10-27).
+    assert_form_readers(&pdf, [100_902, 3, 1]);
     let form = pdf.form().unwrap();
     assert_eq!(form.fields.len(), n);
     assert_eq!(form.fields[n - 1].actions.len(), 2);
@@ -617,9 +614,8 @@ fn shared_value_option_and_attribute_arrays_are_bounded() {
     }
     let bytes = form_file(&fields, objects);
     let pdf = Pdf::open(&bytes, None, &limits(), &never).unwrap();
-    for took in time_form_readers(&pdf) {
-        assert!(took < Duration::from_millis(250), "{took:?}");
-    }
+    // Measured once (2026-10-27): the form stops at the item bound.
+    assert_form_readers(&pdf, [4_701_074, 3, 1]);
     assert!(has_limit(&pdf, "form"), "{:?}", pdf.issues());
     drop(pdf);
 
@@ -644,41 +640,33 @@ fn shared_value_option_and_attribute_arrays_are_bounded() {
     }
     let bytes = c.finish("");
     let pdf = Pdf::open(&bytes, None, &limits(), &never).unwrap();
-    let start = Instant::now();
-    pdf.struct_tree();
-    let took = start.elapsed();
-    eprintln!("struct_tree {took:?}");
-    assert!(took < Duration::from_millis(250), "{took:?}");
+    let (_, steps, took) = counted(|| pdf.struct_tree());
+    // Measured once (2026-10-27): the walk stops at the item bound.
+    assert_work("struct_tree", steps, 2_000_066, took);
     assert!(has_limit(&pdf, "structure tree"), "{:?}", pdf.issues());
     assert_rss_bounded();
 }
 
 #[test]
 fn shared_byte_range_is_bounded() {
-    // 10,000 signature fields name one /ByteRange array of `m` numbers. With the shared bound
-    // the array is walked a bounded number of times, so 100,000 numbers cost about what two
-    // cost; without it each field would walk the array again. CPU time against that twin,
-    // not a wall-clock bound, so a busy machine does not fail the test.
-    let file = |m: usize| {
-        let n = 10_000;
-        let fields: String = (0..n).map(|i| format!("{} 0 R ", 100 + i)).collect();
-        let big: String = (0..m).map(|_| "1 ").collect();
-        let mut objects = vec![(9, format!("[{big}]").into_bytes())];
-        for i in 0..n {
-            objects.push((
-                100 + i as u32,
-                format!("<< /T (f{i}) /FT /Sig /V << /Type /Sig /ByteRange 9 0 R >> >>")
-                    .into_bytes(),
-            ));
-        }
-        Pdf::open(&form_file(&fields, objects), None, &limits(), &never).unwrap()
-    };
-    let (small, big) = (file(2), file(100_000));
-    let (_, twin) = common::cpu_time(|| time_form_readers(&small));
-    let (_, cpu) = common::cpu_time(|| time_form_readers(&big));
-    eprintln!("2 numbers {twin:?} CPU, 100,000 numbers {cpu:?} CPU");
-    assert!(cpu < twin * 2 + Duration::from_millis(20), "{cpu:?}");
-    assert!(has_limit(&big, "signatures"), "{:?}", big.issues());
+    // 10,000 signature fields name one /ByteRange array of 100,000 numbers. With the shared
+    // bound the array is walked until the 2,000,000 visits of the signatures reader are spent
+    // (20 fields); without it each field would walk the array again, 10,000 times. The
+    // counted steps show the bound, so a busy machine does not fail the test.
+    let (n, m) = (10_000, 100_000);
+    let fields: String = (0..n).map(|i| format!("{} 0 R ", 100 + i)).collect();
+    let big: String = (0..m).map(|_| "1 ").collect();
+    let mut objects = vec![(9, format!("[{big}]").into_bytes())];
+    for i in 0..n {
+        objects.push((
+            100 + i as u32,
+            format!("<< /T (f{i}) /FT /Sig /V << /Type /Sig /ByteRange 9 0 R >> >>").into_bytes(),
+        ));
+    }
+    let pdf = Pdf::open(&form_file(&fields, objects), None, &limits(), &never).unwrap();
+    // Measured once (2026-10-27): a visit and a reference followed for each number walked.
+    assert_form_readers(&pdf, [98_894, 3, 4_020_022]);
+    assert!(has_limit(&pdf, "signatures"), "{:?}", pdf.issues());
 }
 
 #[test]

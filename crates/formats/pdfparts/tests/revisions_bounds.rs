@@ -105,14 +105,13 @@ fn eighty_thousand_sections_in_time() {
         let date = format!("2026{:02}{:02}{:06}Z", 1 + k % 12, 1 + k % 28, k % 240_000);
         update(&mut file, &[(5, info(&date))], 6);
     }
-    let started = Instant::now();
-    let pdf = Pdf::open(&file, None, &Limits::default(), &never).unwrap();
-    let opened = started.elapsed();
-    let r = pdf.revisions(&never);
-    let took = started.elapsed() - opened;
-    eprintln!("{} bytes, open {opened:?}, revisions {took:?}", file.len());
-    assert!(opened.as_secs_f64() < 2.0, "{opened:?}");
-    assert!(took.as_secs_f64() < 2.0, "{took:?}");
+    let (pdf, steps, took) =
+        common::counted(|| Pdf::open(&file, None, &Limits::default(), &never).unwrap());
+    eprintln!("{} bytes", file.len());
+    // Both measured once (2026-10-27).
+    common::assert_work("open 80,000 sections", steps, 11_538_030, took);
+    let (r, steps, took) = common::counted(|| pdf.revisions(&never));
+    common::assert_work("80,000 revisions", steps, 11_708_819, took);
     assert_eq!(r.skipped, 80_000 - 64);
     assert_eq!(pdf.page_count(), 1);
 }

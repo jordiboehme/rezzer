@@ -12,6 +12,7 @@ use rezzer_model::{Block, Inline};
 pub(crate) fn blocks<'a>(body: &'a [Block], mut visit: impl FnMut(&'a Block) -> bool) {
     let mut stack: Vec<&'a Block> = body.iter().rev().collect();
     while let Some(block) = stack.pop() {
+        crate::work::add(1);
         if !visit(block) {
             return;
         }
@@ -47,6 +48,7 @@ pub(crate) fn block_inlines<'a>(block: &'a Block, mut f: impl FnMut(&'a [Inline]
 pub(crate) fn inlines<'a>(list: &'a [Inline], mut visit: impl FnMut(&'a Inline)) {
     let mut stack: Vec<&'a Inline> = list.iter().rev().collect();
     while let Some(inline) = stack.pop() {
+        crate::work::add(1);
         visit(inline);
         if let Inline::Link { inlines, .. } = inline {
             stack.extend(inlines.iter().rev());

@@ -387,7 +387,7 @@ fn disabled_pass_is_skipped() {
 }
 
 #[test]
-fn big_document_is_fast() {
+fn big_document_takes_linear_work() {
     let mut d = doc();
     d.body = (0..100_000)
         .map(|i| {
@@ -400,9 +400,27 @@ fn big_document_is_fast() {
     d.facets.formulas = (0..1000)
         .map(|i| formula(&format!("p{i}"), &["p5", "nope"]))
         .collect();
+    let before = rezzer_enrich::work_steps();
     let start = Instant::now();
     enrich(&mut d, &only(&[]));
-    assert!(start.elapsed().as_secs() < 10, "{:?}", start.elapsed());
+    let took = start.elapsed();
+    let steps = before.zip(rezzer_enrich::work_steps()).map(|(b, a)| a - b);
+    // The steps of the passes ([`rezzer_enrich::work_steps`], debug builds), measured once
+    // (2026-10-27, debug build, `--no-capture`) with half again as margin: 607,764, a few
+    // for each block and inline and one for each anchor. A pass that walked the body again for each
+    // of the 2,000 references would take 200 million and more. The wall time is only a
+    // safety stop.
+    const STEPS: u64 = 607_764;
+    eprintln!("big document: {steps:?} steps in {took:?}");
+    if cfg!(debug_assertions) {
+        assert!(
+            steps.is_some_and(|n| (STEPS / 2..=STEPS + STEPS / 2).contains(&n)),
+            "{steps:?} steps, measured {STEPS}"
+        );
+    } else {
+        assert_eq!(steps, None);
+    }
+    assert!(took.as_secs() < 60, "{took:?}");
     assert_eq!(d.losses.len(), 101);
 }
 
@@ -1035,9 +1053,14 @@ fn deep_dotted_field_names_resolve_quickly() {
     let mut f = formula(&format!("field:{name}"), &refs);
     f.dialect = "pdf-js".into();
     d.facets.formulas = vec![f];
+    // Every parent is found by a search in the sorted field names. Taking each of the 500,000
+    // parents of the name as an anchor of its own would copy about 250 GB, which does not
+    // end in any time, so the end of the call is the proof; the empty losses show every
+    // reference resolved. The wall time is only a safety stop (the whole test took 143 ms on
+    // 2026-10-27, load average 37).
     let start = Instant::now();
     enrich(&mut d, &only(&[]));
-    assert!(start.elapsed().as_secs() < 5, "{:?}", start.elapsed());
+    assert!(start.elapsed().as_secs() < 60, "{:?}", start.elapsed());
     assert!(d.losses.is_empty(), "{:?}", d.losses.len());
 }
 

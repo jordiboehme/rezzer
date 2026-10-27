@@ -24,6 +24,7 @@ members = [
     "crates/readers/rezzer-read-csv",
     "crates/readers/rezzer-read-sheet",
     "crates/readers/rezzer-read-pdf",
+    "crates/rezzer-derez",
     "crates/rezzer",
 ]
 # The fuzz targets are their own cargo-fuzz project (nightly only).
@@ -53,8 +54,6 @@ tokio = "=1.54.1"
 schemars = "=1.2.3"
 toml = "=1.1.8"
 saphyr-parser = "=0.3.2"
-directories = "=6.0.0"
-hex = "=0.4.3"
 anyhow = "=1.0.104"
 insta = "=1.49.0"
 tempfile = "=3.27.0"
@@ -63,6 +62,8 @@ predicates = "=3.1.4"
 zip = { version = "=9.1.2", default-features = false }
 cfb = "=0.15.0"
 libc = "=0.2.191"
+# Writes and removals relative to an open folder, without following a symlink (Unix only).
+rustix = { version = "=1.1.6", default-features = false, features = ["fs", "std"] }
 flate2 = { version = "=1.1.10", default-features = false }
 base64 = "=0.23.1"
 percent-encoding = "=2.3.2"
@@ -92,6 +93,10 @@ unicode-bidi = "=0.3.18"
 # Barcode and QR code reading. Its default features pull in the image crate and the encoders;
 # Rezzer hands it Luma8 pixels. MaxiCode stays off through the formats each pass asks for.
 rxing = { version = "=0.9.3", default-features = false, features = ["decoders", "multi_barcode_readers", "full_barcode_format_support", "encoding_rs"] }
+# Terminal drawing.
+ratatui = { version = "=0.30.2", default-features = false, features = ["crossterm"] }
+# Terminal input and raw mode.
+crossterm = { version = "=0.29.0", default-features = false, features = ["events", "windows"] }
 
 # The time-limit tests push tens of megabytes through the pipeline. Unoptimized code would
 # measure the build profile, not the limit, so debug and test builds are lightly optimized.

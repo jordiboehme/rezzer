@@ -193,14 +193,11 @@ fn indirect_lengths_are_looked_up_once() {
         let (s, l) = (2 * i + 1, 2 * i + 2);
         out.extend(format!("{s} 0 obj\n<< /Length {l} 0 R >>\nstream\nab\nendstream\nendobj\n{l} 0 obj 2 endobj\n").as_bytes());
     }
-    let start = std::time::Instant::now();
-    let raw = RawStreams::measure(&out, &limits(), &never).unwrap();
+    let (raw, steps, took) = common::counted(|| RawStreams::measure(&out, &limits(), &never));
+    let raw = raw.unwrap();
     assert_eq!(raw.size(1, 0), Some(2));
-    assert!(
-        start.elapsed() < std::time::Duration::from_secs(2),
-        "{:?}",
-        start.elapsed()
-    );
+    // Measured once (2026-10-27).
+    common::assert_work("80,000 indirect lengths", steps, 22_355_599, took);
 }
 
 #[test]

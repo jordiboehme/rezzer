@@ -431,8 +431,12 @@ impl<'a> Build<'a> {
             None => parent.to_string(),
         };
         if open {
+            // The first name is copied for the issue, so it costs like any other copy.
+            if self.first_unclosed.is_none() {
+                self.charge(full_name.len())?;
+                self.first_unclosed = Some(full_name.clone());
+            }
             self.unclosed += 1;
-            self.first_unclosed.get_or_insert_with(|| full_name.clone());
         }
         self.charge(full_name.len())?;
         if let Some(id) = id

@@ -1045,8 +1045,14 @@ fn zip_with_too_many_entries_is_not_listed() {
     let (f, d) = detect("many.zip", &bytes);
     assert_eq!(f, FormatId::Zip, "{}", d.evidence);
     assert_eq!(d.confidence, Confidence::Likely);
+    // The evidence proves the cap: the directory is not listed. The wall time is only a
+    // safety stop (the whole test took 104 ms on 2026-10-27, load average 37).
     assert!(d.evidence.contains("too large to list"), "{}", d.evidence);
-    assert!(start.elapsed().as_millis() < 500, "{:?}", start.elapsed());
+    assert!(
+        start.elapsed() < std::time::Duration::from_secs(60),
+        "{:?}",
+        start.elapsed()
+    );
     // Without the ZIP64 records the saturated 16-bit count is replaced by an estimate from
     // the directory size.
     let (f, d) = detect("many.zip", &raw_zip(200_000, false));

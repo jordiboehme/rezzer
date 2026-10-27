@@ -90,12 +90,15 @@ fn calls(script: &str) -> impl Iterator<Item = (usize, &'static str)> + '_ {
     std::iter::from_fn(move || {
         while i < bytes.len() {
             let at = i;
+            // One step for the byte here; a comment or string skipped counts its bytes.
+            crate::work::add(1);
             match bytes[at] {
                 b'/' if bytes.get(at + 1) == Some(&b'/') => {
                     i = bytes[at..]
                         .iter()
                         .position(|b| *b == b'\n')
                         .map_or(bytes.len(), |k| at + k + 1);
+                    crate::work::add((i - at) as u64);
                     continue;
                 }
                 b'/' if bytes.get(at + 1) == Some(&b'*') => {
@@ -103,10 +106,12 @@ fn calls(script: &str) -> impl Iterator<Item = (usize, &'static str)> + '_ {
                         .windows(2)
                         .position(|w| w == b"*/")
                         .map_or(bytes.len(), |k| at + 2 + k + 2);
+                    crate::work::add((i - at) as u64);
                     continue;
                 }
                 quote @ (b'"' | b'\'' | b'`') => {
                     i = string_end(bytes, at + 1, quote);
+                    crate::work::add((i - at) as u64);
                     continue;
                 }
                 _ => {}
@@ -375,6 +380,7 @@ impl<'a> Parser<'a> {
     }
 
     fn peek(&self) -> Option<char> {
+        crate::work::add(1);
         self.rest().chars().next()
     }
 
@@ -422,6 +428,7 @@ impl<'a> Parser<'a> {
         let mut chars = self.rest().char_indices();
         let start = self.i;
         while let Some((k, c)) = chars.next() {
+            crate::work::add(1);
             if c == quote {
                 self.i = start + k + 1;
                 return Some(out);

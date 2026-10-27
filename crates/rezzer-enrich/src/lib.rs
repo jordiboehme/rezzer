@@ -14,8 +14,11 @@ mod anchors;
 mod language;
 mod overview;
 mod walk;
+mod work;
 
 use rezzer_model::Document;
+
+pub use work::work_steps;
 
 /// One step of enrichment.
 pub trait Pass {

@@ -20,6 +20,17 @@ fn modules(s: Symbology, text: &str, ec: Option<&str>) -> Modules {
     .expect("encode")
 }
 
+/// The default limits with 60 s a picture, a safety stop with room for any machine (the
+/// slowest scan here took 8.25 s under load): what a scan finds must not depend on the
+/// machine's speed or load (the default 10 s ran out under load). Work bounds are checked by
+/// counted decoder calls ([`barcodes::work_steps`]), not by time.
+fn unhurried() -> Limits {
+    Limits {
+        time: Duration::from_secs(60),
+        ..Limits::default()
+    }
+}
+
 fn scan_gray(gray: &[u8], w: u32, h: u32) -> Scan {
     decode(
         &Picture {
@@ -27,7 +38,7 @@ fn scan_gray(gray: &[u8], w: u32, h: u32) -> Scan {
             width: w,
             height: h,
         },
-        &Limits::default(),
+        &unhurried(),
     )
     .expect("scan")
 }
@@ -39,10 +50,35 @@ fn scan_rgba(rgba: &[u8], w: u32, h: u32) -> Scan {
             width: w,
             height: h,
         },
-        &Limits::default(),
+        &unhurried(),
     )
     .expect("scan")
 }
+
+/// Runs `f` and gives its result with the decoder calls it made ([`barcodes::work_steps`],
+/// `None` in a release build, which does not count them).
+fn counted<T>(f: impl FnOnce() -> T) -> (T, Option<u64>) {
+    let before = barcodes::work_steps();
+    let out = f();
+    (out, before.zip(barcodes::work_steps()).map(|(b, a)| a - b))
+}
+
+/// Checks that the decoder calls lie in `range` (in a debug build, which counts them).
+fn assert_steps(what: &str, steps: Option<u64>, range: std::ops::RangeInclusive<u64>) {
+    eprintln!("{what}: {steps:?} decoder calls");
+    if cfg!(debug_assertions) {
+        assert!(
+            steps.is_some_and(|n| range.contains(&n)),
+            "{what}: {steps:?} decoder calls, expected {range:?}"
+        );
+    } else {
+        assert_eq!(steps, None);
+    }
+}
+
+/// The wall-clock stop of the tests that time a call: far above any machine, so only a hang
+/// fails it. The work itself is bounded by counted decoder calls.
+const SAFETY: Duration = Duration::from_secs(60);
 
 fn texts(scan: &Scan) -> Vec<(Symbology, String)> {
     let mut out: Vec<(Symbology, String)> = scan
@@ -273,14 +309,16 @@ fn maxicode_trap() -> Vec<u8> {
 #[test]
 fn maxicode_is_off_so_the_trap_returns_at_once() {
     let gray = maxicode_trap();
-    let start = Instant::now();
-    let scan = scan_gray(&gray, 11, 28);
+    // The trap loops inside one decoder call, so no count can see it: the proof is that the
+    // scan ends at all. Asked for MaxiCode, rxing loops for minutes on this picture, the 60 s
+    // safety stop of `scan_gray` ends the scan with a time stop and its `expect` fails; the
+    // scan without MaxiCode takes milliseconds, under load too (17 ms on 2026-10-27, load
+    // average 37). STEPS was measured once (2026-10-27, debug build): one call for each of the
+    // four attempts a gray picture has. Exactly STEPS: the scan made its usual calls, no more.
+    const STEPS: u64 = 4;
+    let (scan, steps) = counted(|| scan_gray(&gray, 11, 28));
     assert!(scan.codes.is_empty());
-    assert!(
-        start.elapsed() < Duration::from_secs(2),
-        "{:?}",
-        start.elapsed()
-    );
+    assert_steps("maxicode trap", steps, STEPS..=STEPS);
 }
 
 #[test]
@@ -316,15 +354,16 @@ fn four_codes_on_one_page_are_all_found() {
 
 #[test]
 fn a_picture_over_the_pixel_cap_is_refused_before_any_decode() {
-    let start = Instant::now();
-    let got = decode(
-        &Picture {
-            pixels: Pixels::Gray(&[]),
-            width: 20_000,
-            height: 20_000,
-        },
-        &Limits::default(),
-    );
+    let (got, steps) = counted(|| {
+        decode(
+            &Picture {
+                pixels: Pixels::Gray(&[]),
+                width: 20_000,
+                height: 20_000,
+            },
+            &Limits::default(),
+        )
+    });
     assert_eq!(
         got,
         Err(Stop::TooLarge {
@@ -332,7 +371,8 @@ fn a_picture_over_the_pixel_cap_is_refused_before_any_decode() {
             max: 100_000_000
         })
     );
-    assert!(start.elapsed() < Duration::from_millis(100));
+    // Before any decode: not one decoder call.
+    assert_steps("over the pixel cap", steps, 0..=0);
 }
 
 /// Many finder-like squares: rxing tries each triple, which takes seconds.
@@ -363,19 +403,29 @@ fn the_worker_stops_waiting_at_the_time_limit() {
         ..Limits::default()
     };
     let start = Instant::now();
-    let got = Worker::global().decode(
-        &Picture {
-            pixels: Pixels::Gray(&gray),
-            width: w,
-            height: h,
-        },
-        &limits,
-    );
+    let (got, steps) = counted(|| {
+        Worker::global().decode(
+            &Picture {
+                pixels: Pixels::Gray(&gray),
+                width: w,
+                height: h,
+            },
+            &limits,
+        )
+    });
     let took = start.elapsed();
     assert!(matches!(got, Err(Stop::Time(_))), "{got:?} after {took:?}");
-    assert!(took < Duration::from_secs(2), "{took:?}");
-    // The next scan waits behind the abandoned call at most until its own limit, and a small
-    // code is still read once the worker is free.
+    // The time limit is wall clock by design (`Limits::time`), so how many calls start
+    // before it depends on the machine (one here: a call takes about 2 s). FULL was measured
+    // once (2026-10-27, debug build, 60 s limit): the whole scan of this picture makes 3
+    // decoder calls. The time stop is the `Stop::Time` above; the count shows the scan made
+    // no more calls than its own. That the wait for a call that still runs ends at the
+    // deadline is shown by the worker's own tests, with calls that block until they are
+    // released, so the wall time here is only a safety stop.
+    const FULL: u64 = 3;
+    assert_steps("worker at the time limit", steps, 1..=FULL);
+    assert!(took < SAFETY, "{took:?}");
+    // The abandoned call holds its own thread only: a new thread reads the next small code.
     let m = modules(Symbology::QrCode, URL, None);
     let (gray, w, h) = m.gray(4, 4, 0);
     let mut read = None;
@@ -485,13 +535,24 @@ fn a_code_in_a_large_picture_is_found_in_its_tile() {
         page[to..to + gw as usize]
             .copy_from_slice(&g[(row * gw) as usize..((row + 1) * gw) as usize]);
     }
-    let scan = scan_gray(&page, w, h);
+    // The work is bounded by the decoder calls, not by the machine: the default 10 s per
+    // picture ran out under load (`Time(Scan { codes: [QrCode ..] })`, the code found but the
+    // other tiles not done), so the scan has the 60 s safety stop.
+    // STEPS was measured once (2026-10-27): the decoder calls of all tiles and attempts. At
+    // least STEPS: every tile was read, not only the one with the code.
+    const STEPS: u64 = 33;
+    let (scan, steps) = counted(|| scan_gray(&page, w, h));
     assert_eq!(texts(&scan), vec![(Symbology::QrCode, URL.to_string())]);
     // Its box lies at the code.
     let b = scan.codes[0].bounds;
     assert!(
         b[0] + 20 >= x && b[2] <= x + gw + 20 && b[1] + 20 >= y && b[3] <= y + gh + 20,
         "{b:?}"
+    );
+    assert_steps(
+        "a code in a large picture",
+        steps,
+        STEPS..=STEPS + STEPS / 2,
     );
 }
 
@@ -672,5 +733,29 @@ fn small_codes_of_one_pixel_a_module_are_read() {
             vec![(s, text.to_string())],
             "{s:?}"
         );
+    }
+}
+
+#[test]
+fn work_steps_count_decoder_calls() {
+    let m = modules(Symbology::QrCode, URL, None);
+    let (gray, w, h) = m.gray(4, 4, 0);
+    let picture = Picture {
+        pixels: Pixels::Gray(&gray),
+        width: w,
+        height: h,
+    };
+    let steps = || {
+        let before = barcodes::work_steps();
+        decode(&picture, &Limits::default()).expect("scan");
+        let after = barcodes::work_steps();
+        before.zip(after).map(|(b, a)| a - b)
+    };
+    let (first, second) = (steps(), steps());
+    if cfg!(debug_assertions) {
+        assert!(first.is_some_and(|n| n > 0), "{first:?}");
+        assert_eq!(first, second);
+    } else {
+        assert_eq!((first, second), (None, None));
     }
 }

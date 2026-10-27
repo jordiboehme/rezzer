@@ -11,6 +11,7 @@ mod block;
 mod document;
 mod facet;
 mod format;
+mod geometry;
 mod inline;
 mod layout;
 mod loss;
@@ -19,6 +20,7 @@ mod registry;
 mod sheet;
 pub mod text;
 mod value;
+mod work;
 
 pub use block::{Align, Block, CalloutKind, Cell, SectionKind, TaskState, column_letter};
 pub use document::{
@@ -30,6 +32,7 @@ pub use facet::{
     FormulaKind, Graph, Node, OutlineEntry, Parameter, Role, Rule, Signature,
 };
 pub use format::{Completeness, FormatId};
+pub use geometry::{BoxKind, Geometry, MAX_BOXES, MAX_BOXES_PER_PAGE, PageGeometry, PlacedBox};
 pub use inline::{Anchor, Inline, StatusColor, link_target_written_len, plain_text};
 pub use layout::{
     Certainty, Evidence, LayoutKind, RowKind, RowNote, RowRange, SheetCell, TableLayout,
@@ -40,3 +43,4 @@ pub use reader::{Blob, Bytes, ReadOptions, ReadOutcome, Reader, Source, source_i
 pub use registry::Registry;
 pub use sheet::{CellArea, locate_cells, table_headings};
 pub use value::Value;
+pub use work::work_steps;

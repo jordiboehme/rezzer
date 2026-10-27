@@ -272,8 +272,23 @@ fn a_code_scan_cut_by_its_time_is_not_cached() {
     // The code scan stops at its own quarter of the time limit, before the budget's own time
     // is over. That cut depends on the machine's load, so the result is not cached. The read
     // stays complete (R14e-C), and the loss names the bound that stopped the scan.
+    //
+    // No machine decides the outcome. The limit is zero and the step clock never moves: the
+    // budget's own time is never over (0 is not past 0), and the text never nears it. The
+    // scan's own window is a quarter of the limit on the wall clock, so it is over before the
+    // first page. The wall clock only moves forward, so this holds on every machine, and load
+    // only makes it more so. A wall-clock limit of 1 s broke under load: the text passed three
+    // quarters of it (`text of pages 13 to 30 not read`, Partial) or all of it before the scan
+    // began (no scan loss at all).
+    //
+    // READS was measured once (2026-10-27): listing the 30 pages takes 426 readings, their
+    // text 59, and starting the scan 1, so the scan stops at reading 486 and nothing after it
+    // reads the clock. Measure again when the PDF reader changes (plan 6).
     use rezzer_model::{Completeness, LossReason, Registry, Severity};
-    use rezzer_pipeline::{Config, OutputKind, Pipeline, Request};
+    use rezzer_pipeline::{Clock, Config, OutputKind, Pipeline, Request};
+    use std::time::{Duration, Instant};
+    const READS: u64 = 486;
+    const SAFETY: Duration = Duration::from_secs(60);
     let dir = tempfile::tempdir().expect("temp dir");
     let file = dir.path().join("scans.pdf");
     std::fs::write(&file, scans(30)).expect("write");
@@ -283,16 +298,27 @@ fn a_code_scan_cut_by_its_time_is_not_cached() {
         cache_dir: Some(cache.clone()),
         ..Config::default()
     };
-    config.limits.max_time = std::time::Duration::from_secs(1);
+    config.limits.max_time = Duration::ZERO;
     let mut registry = Registry::new();
     registry.register(Box::new(rezzer_read_pdf::PdfReader));
-    let p = Pipeline::new(config, registry);
+    let clock = Clock::steps(Duration::ZERO);
+    let p = Pipeline::new(config, registry).with_clock(clock.clone());
     let request = Request {
         output: OutputKind::Markdown,
         generated_at: Some("2026-01-01T00:00:00Z".to_string()),
         ..Request::default()
     };
+    let start = Instant::now();
     let result = p.run_path(&file, &request);
+    let took = start.elapsed();
+    let reads = clock.reads();
+    eprintln!("code scan cut by its time: {reads} clock readings, {took:?}");
+    assert!(took < SAFETY, "took {took:?}");
+    // At least READS: the scan starts after the text of every page was read.
+    assert!(
+        (READS..=READS + READS / 2).contains(&reads),
+        "{reads} clock readings, measured {READS}"
+    );
     let doc = result.document.as_ref().expect("document");
     let stop = doc
         .losses
@@ -300,8 +326,13 @@ fn a_code_scan_cut_by_its_time_is_not_cached() {
         .find(|l| l.what.starts_with("barcode scan stopped: time limit"))
         .unwrap_or_else(|| panic!("{:#?}", doc.losses));
     assert_eq!(
-        (stop.why, stop.severity),
-        (LossReason::Limit, Severity::Info)
+        (stop.why, stop.severity, stop.what.as_str()),
+        (
+            LossReason::Limit,
+            Severity::Info,
+            "barcode scan stopped: time limit: codes are not read on pages 1, 2, 3, 4, 5, 6, 7, \
+             8, 9, 10, 20 more; their pictures keep their need of vision"
+        )
     );
     assert_eq!(
         result.completeness,

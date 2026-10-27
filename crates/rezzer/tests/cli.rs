@@ -1071,3 +1071,88 @@ fn default_output_has_no_new_keys() {
         assert!(!md.contains("not selected"), "{args:?}: {md}");
     }
 }
+
+#[test]
+fn derez_is_hidden() {
+    let env = Env::new();
+    for args in [vec!["--help"], vec!["help"]] {
+        let out = env.cmd().args(&args).output().unwrap();
+        assert!(out.status.success(), "{args:?}");
+        let text = stdout_of(&out);
+        assert!(!text.contains("derez"), "{args:?}: {text}");
+    }
+    let help_dere = env.cmd().args(["help", "dere"]).output().unwrap();
+    assert_eq!(help_dere.status.code(), Some(1));
+    assert!(!String::from_utf8_lossy(&help_dere.stdout).contains("derez"));
+    assert!(!String::from_utf8_lossy(&help_dere.stderr).contains("derez"));
+    let dere = env.cmd().arg("dere").output().unwrap();
+    assert_eq!(dere.status.code(), Some(1));
+    let dere_err = String::from_utf8(dere.stderr).unwrap();
+    assert!(!dere_err.contains("derez"), "{dere_err}");
+    let zzzz = env.cmd().arg("zzzz").output().unwrap();
+    assert_eq!(
+        dere_err.replace("dere", "zzzz"),
+        String::from_utf8(zzzz.stderr).unwrap()
+    );
+    // Without the stripping clap suggests `derez` with `read` for `eread` and with `rez` for
+    // `reez`; the other suggestion stays.
+    for (input, other) in [("eread", "'read'"), ("reez", "'rez'")] {
+        let out = env.cmd().arg(input).output().unwrap();
+        assert_eq!(out.status.code(), Some(1));
+        let err = String::from_utf8(out.stderr).unwrap();
+        assert!(err.contains(other), "{input}: {err}");
+        assert!(!err.contains("derez"), "{input}: {err}");
+    }
+}
+
+#[test]
+fn derez_needs_a_terminal() {
+    let env = Env::new();
+    let notes = env.file("notes.txt", b"Some invented notes.\n");
+    let runs: [Vec<std::ffi::OsString>; 3] = [
+        vec!["derez".into()],
+        vec!["derez".into(), notes.into()],
+        vec!["derez".into(), "missing.pdf".into()],
+    ];
+    for args in runs {
+        env.cmd()
+            .args(&args)
+            .assert()
+            .code(1)
+            .stdout("")
+            .stderr("rezzer: derez needs a terminal\n");
+    }
+}
+
+#[test]
+fn derez_checks_the_terminal_before_the_config() {
+    let env = Env::new();
+    let config = env.root.path().join("config/rezzer/config.toml");
+    std::fs::write(&config, "colour = \"red\"\n").unwrap();
+    for args in [vec!["derez"], vec!["derez", "missing.pdf"]] {
+        env.cmd()
+            .args(&args)
+            .assert()
+            .code(1)
+            .stdout("")
+            .stderr("rezzer: derez needs a terminal\n");
+    }
+    // Stdin is refused before the terminal is checked, and before the config too.
+    env.cmd()
+        .args(["derez", "-"])
+        .assert()
+        .code(1)
+        .stdout("")
+        .stderr("rezzer: derez needs a file path, not stdin\n");
+}
+
+#[test]
+fn derez_refuses_stdin() {
+    let env = Env::new();
+    env.cmd()
+        .args(["derez", "-"])
+        .assert()
+        .code(1)
+        .stdout("")
+        .stderr("rezzer: derez needs a file path, not stdin\n");
+}

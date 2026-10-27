@@ -14,6 +14,8 @@
 mod cache;
 mod config;
 mod files;
+mod folder;
+mod names;
 mod panics;
 
 use std::cell::RefCell;
@@ -29,13 +31,17 @@ use rezzer_model::{
 };
 use rezzer_render::RenderOptions;
 
-pub use config::{Config, ConfigError, DEFAULT_CACHE_MAX_BYTES, ReadDefaults, config_path_from};
+pub use config::{
+    CacheOs, Config, ConfigError, DEFAULT_CACHE_MAX_BYTES, ReadDefaults, cache_dir_from,
+    config_path_from,
+};
 pub use files::{bundle_name, folder_stem, main_name, parts_folder};
-pub use rezzer_limits::{CancelToken, check_part_size};
+pub use rezzer_limits::{CancelToken, Clock, check_part_size};
 pub use rezzer_render::{OutputSection, TableStyle};
 
 use crate::cache::Cache;
 use crate::config::one_line;
+use crate::folder::Folder;
 
 /// The Rezzer version written into the output and the cache key.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -97,6 +103,9 @@ pub struct Request {
     /// The sheets to write, by name or `#n` (1-based position); empty writes all. Only
     /// changes rendering, so it is not part of the cache key.
     pub sheets: Vec<String>,
+    /// Ask the reader for page geometry. Such a run neither looks up nor stores the cache,
+    /// because the cache keeps the serialized model, which has no geometry.
+    pub geometry: bool,
 }
 
 impl Default for Request {
@@ -112,6 +121,7 @@ impl Default for Request {
             cancel: CancelToken::default(),
             table_style: None,
             sheets: Vec::new(),
+            geometry: false,
         }
     }
 }
@@ -129,6 +139,7 @@ impl fmt::Debug for Request {
             .field("cancelled", &self.cancel.is_cancelled())
             .field("table_style", &self.table_style)
             .field("sheets", &self.sheets)
+            .field("geometry", &self.geometry)
             .finish()
     }
 }
@@ -198,6 +209,7 @@ pub struct Pipeline {
     registry: Registry,
     cache: Option<Cache>,
     detector: DetectFn,
+    clock: Clock,
 }
 
 /// A format detector as a plain function, see [`Pipeline::set_detector`].
@@ -206,12 +218,25 @@ pub type DetectFn = fn(&str, Option<&str>, &[u8]) -> (FormatId, Detection);
 impl Pipeline {
     pub fn new(config: Config, registry: Registry) -> Pipeline {
         let cache = Cache::of(&config);
+        Pipeline::with_cache(config, registry, cache)
+    }
+
+    /// A pipeline with `cache` in place of the one `config` names.
+    pub(crate) fn with_cache(config: Config, registry: Registry, cache: Option<Cache>) -> Pipeline {
         Pipeline {
             config,
             registry,
             cache,
             detector: rezzer_detect::detect_with_hints,
+            clock: Clock::Real,
         }
+    }
+
+    /// The pipeline with every read's time limit measured by `clock` in place of the wall
+    /// clock. Tests use a [`Clock::steps`] clock, so a time limit depends on the work done,
+    /// not on the machine's load.
+    pub fn with_clock(self, clock: Clock) -> Pipeline {
+        Pipeline { clock, ..self }
     }
 
     pub fn config(&self) -> &Config {
@@ -408,21 +433,22 @@ impl Pipeline {
                 .unwrap_or_else(|| document.source.name.clone());
             let sha256 = document.source.sha256.clone();
             // Writes the rendered files; the paths are checked first.
-            let write = |(_, parts, main_markdown): &Rendered, json: Option<&str>| {
-                let files = files::Files {
-                    source: &source,
-                    sha256: &sha256,
-                    main,
-                    folder,
-                    main_markdown,
-                    parts: parts
-                        .iter()
-                        .map(|p| (p.path.as_str(), p.markdown.as_str()))
-                        .collect(),
-                    json,
+            let write =
+                |output: &Folder, (_, parts, main_markdown): &Rendered, json: Option<&str>| {
+                    let files = files::Files {
+                        source: &source,
+                        sha256: &sha256,
+                        main,
+                        folder,
+                        main_markdown,
+                        parts: parts
+                            .iter()
+                            .map(|p| (p.path.as_str(), p.markdown.as_str()))
+                            .collect(),
+                        json,
+                    };
+                    files::write_files(output, &files)
                 };
-                files::write_files(dir, &files)
-            };
             // A path held by anything but Rezzer's output for this source fails the run
             // before a picture is written (rulings P5-AB and P5-AG).
             let check = files::Files {
@@ -434,22 +460,36 @@ impl Pipeline {
                 parts: first.1.iter().map(|p| (p.path.as_str(), "")).collect(),
                 json: (req.output == OutputKind::Json).then_some(""),
             };
-            let mut outcome = files::check_paths(dir, &check);
-            if outcome.is_ok() {
-                let (written, lost) = files::write_assets(&mut document, planned, dir, &stem);
+            // One handle of the output folder for the whole run: opened before the check and
+            // made after it when missing, so a failed check makes no folder (ruling P5-AB).
+            let cannot = |e: std::io::Error| {
+                format!(
+                    "cannot write {}: {}",
+                    dir.display(),
+                    one_line(&e.to_string())
+                )
+            };
+            let output = Folder::open(dir).map_err(cannot).and_then(|found| {
+                files::check_paths(found.as_ref(), &check)?;
+                found.map_or_else(|| Folder::create(dir).map_err(cannot), Ok)
+            });
+            let mut outcome = output.as_ref().map(drop).map_err(String::clone);
+            if let Ok(output) = &output {
+                let (written, lost, assets) =
+                    files::write_assets(&mut document, planned, output, &stem);
                 if lost {
                     // A picture without a file: the Markdown says so.
                     completeness = at_most_partial(completeness);
                     rendered = render(&document, completeness);
                 }
                 outcome = match &rendered {
-                    Ok(r) => write(r, json_of(&document).as_deref()),
+                    Ok(r) => write(output, r, json_of(&document).as_deref()),
                     Err(e) => Err(e.clone()),
                 };
                 // A failed read keeps the old pictures.
                 if outcome.is_ok()
                     && completeness != Completeness::Failed
-                    && let Err(what) = files::clean_assets(dir, &stem, &written)
+                    && let Err(what) = files::clean_assets(output, assets.as_ref(), &stem, &written)
                 {
                     document.losses.push(Loss {
                         location: "assets".into(),
@@ -460,7 +500,7 @@ impl Pipeline {
                     completeness = at_most_partial(completeness);
                     rendered = render(&document, completeness);
                     outcome = match &rendered {
-                        Ok(r) => write(r, json_of(&document).as_deref()),
+                        Ok(r) => write(output, r, json_of(&document).as_deref()),
                         Err(e) => Err(e.clone()),
                     };
                 }
@@ -524,7 +564,7 @@ impl Pipeline {
         let cache = self
             .cache
             .as_ref()
-            .filter(|_| req.password.is_none() && req.output_dir.is_none());
+            .filter(|_| req.password.is_none() && req.output_dir.is_none() && !req.geometry);
         let key = cache.map(|_| cache::key(src, reader, &self.config));
         if let (Some(cache), Some(key)) = (cache, &key)
             && let Some((mut document, completeness)) = cache.get(key, src)
@@ -588,10 +628,15 @@ impl Pipeline {
                 Vec::new(),
             );
         };
-        let budget = Budget::with_cancel(self.config.limits.clone(), req.cancel.clone());
+        let budget = Budget::with_clock(
+            self.config.limits.clone(),
+            req.cancel.clone(),
+            self.clock.clone(),
+        );
         let opts = ReadOptions {
             extract_assets: req.output_dir.is_some(),
             password: req.password.clone(),
+            geometry: req.geometry,
         };
         match panics::contained(|| reader.read(src, &opts, &budget)) {
             Ok(outcome) => (

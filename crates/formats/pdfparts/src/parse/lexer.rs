@@ -50,6 +50,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn peek(&self) -> Option<u8> {
+        crate::work::add(1);
         self.b.get(self.i).copied()
     }
 
@@ -447,15 +448,22 @@ pub(crate) fn find(hay: &[u8], needle: &[u8], from: usize) -> Option<usize> {
     if from >= hay.len() {
         return None;
     }
-    hay[from..]
+    let at = hay[from..]
         .windows(needle.len())
         .position(|w| w == needle)
-        .map(|p| p + from)
+        .map(|p| p + from);
+    crate::work::add(
+        at.map_or(hay.len(), |p| p + needle.len())
+            .saturating_sub(from) as u64,
+    );
+    at
 }
 
 /// Finds the last `needle` in `hay`.
 pub(crate) fn rfind(hay: &[u8], needle: &[u8]) -> Option<usize> {
-    hay.windows(needle.len()).rposition(|w| w == needle)
+    let at = hay.windows(needle.len()).rposition(|w| w == needle);
+    crate::work::add(hay.len().saturating_sub(at.unwrap_or(0)) as u64);
+    at
 }
 
 #[cfg(test)]

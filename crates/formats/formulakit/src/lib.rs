@@ -11,7 +11,7 @@
 //! patterns. [`anchor_of`] gives a stable text anchor for each reference.
 //!
 //! [`logic::Workbook`] puts the formulas of a workbook together: roles, pattern groups,
-//! parameter cells and a dependency graph on group level. [`latex`] writes a formula as
+//! parameter cells and a dependency graph on group level. [`latex()`] writes a formula as
 //! KaTeX-ready math, and [`worth_math`] tells whether that is worth showing.
 //!
 //! ```

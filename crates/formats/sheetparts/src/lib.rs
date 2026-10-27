@@ -24,7 +24,10 @@ pub mod numfmt;
 pub use a1::quote_sheet;
 pub mod odf;
 pub mod ooxml;
+mod work;
 pub(crate) mod xml;
+
+pub use work::work_steps;
 
 /// Bounds for reading one part.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

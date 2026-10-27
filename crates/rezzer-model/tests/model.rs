@@ -14,6 +14,7 @@ use rezzer_model::{
     ReaderInfo, Role, RowKind, RowNote, Rule, SectionKind, Severity, Signature, Source, SourceInfo,
     StatusColor, TableLayout, TaskState, Value,
 };
+use rezzer_model::{BoxKind, Geometry, MAX_BOXES_PER_PAGE, PlacedBox};
 
 fn src() -> SourceInfo {
     SourceInfo {
@@ -723,11 +724,13 @@ fn read_options_debug_hides_password() {
     let opts = ReadOptions {
         password: Some("secret".into()),
         extract_assets: true,
+        geometry: true,
     };
     let debug = format!("{opts:?}");
     assert!(!debug.contains("secret"));
     assert!(debug.contains("redacted"));
     assert!(debug.contains("extract_assets: true"));
+    assert!(debug.contains("geometry: true"));
 }
 
 #[test]
@@ -1163,4 +1166,143 @@ fn found_title_and_date_roundtrip() {
     let written = serde_json::to_value(&old).unwrap();
     assert!(written.get("title_from").is_none() && written.get("document_date").is_none());
     assert_eq!(MODEL_VERSION, 1);
+}
+
+#[test]
+fn hex_is_lowercase_two_digits_a_byte() {
+    assert_eq!(rezzer_model::text::hex(&[]), "");
+    assert_eq!(
+        rezzer_model::text::hex(&[0x00, 0x0f, 0xa0, 0xff]),
+        "000fa0ff"
+    );
+    // The SHA-256 of "abc".
+    let digest: [u8; 32] = [
+        0xba, 0x78, 0x16, 0xbf, 0x8f, 0x01, 0xcf, 0xea, 0x41, 0x41, 0x40, 0xde, 0x5d, 0xae, 0x22,
+        0x23, 0xb0, 0x03, 0x61, 0xa3, 0x96, 0x17, 0x7a, 0x9c, 0xb4, 0x10, 0xff, 0x61, 0xf2, 0x00,
+        0x15, 0xad,
+    ];
+    assert_eq!(
+        rezzer_model::text::hex(&digest),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+}
+
+fn placed(kind: BoxKind, bounds: [f32; 4], anchor: Option<&str>) -> PlacedBox {
+    PlacedBox {
+        kind,
+        bounds,
+        anchor: anchor.map(|a| Anchor(a.into())),
+    }
+}
+
+#[test]
+fn geometry_is_not_serialized() {
+    let plain = Document::new(src());
+    let mut doc = plain.clone();
+    let mut geometry = Geometry::default();
+    assert!(geometry.add_page(1, [612.0, 792.0]));
+    assert!(geometry.push(1, placed(BoxKind::Text, [10.0, 10.0, 100.0, 40.0], None)));
+    doc.geometry = Some(Box::new(geometry));
+    let json = serde_json::to_string(&doc).unwrap();
+    assert!(!json.contains("geometry"), "{json}");
+    assert_eq!(json, serde_json::to_string(&plain).unwrap());
+    let back: Document = serde_json::from_str(&json).unwrap();
+    assert!(back.geometry.is_none());
+    assert_eq!(back, plain);
+}
+
+#[test]
+fn schema_has_no_geometry() {
+    let schema = schemars::schema_for!(Document);
+    let value = serde_json::to_value(&schema).unwrap();
+    assert!(value["properties"].get("geometry").is_none(), "{value}");
+    assert!(!value.to_string().contains("geometry"), "{value}");
+}
+
+#[test]
+fn push_caps_and_rejects_bad_bounds() {
+    let mut g = Geometry::default();
+    assert!(g.is_empty());
+    assert!(!g.add_page(1, [0.0, 792.0]));
+    assert!(!g.add_page(1, [f32::NAN, 792.0]));
+    assert!(!g.add_page(1, [612.0, f32::INFINITY]));
+    assert!(!g.add_page(1, [-1.0, 10.0]));
+    assert!(g.add_page(1, [612.0, 792.0]));
+    assert!(!g.add_page(1, [612.0, 792.0]), "a page already added");
+    let ok = [0.0, 0.0, 10.0, 10.0];
+    assert!(!g.push(2, placed(BoxKind::Rule, ok, None)), "unknown page");
+    assert!(!g.push(1, placed(BoxKind::Rule, [f32::NAN, 0.0, 1.0, 1.0], None)));
+    assert!(!g.push(
+        1,
+        placed(BoxKind::Rule, [0.0, 0.0, f32::INFINITY, 1.0], None)
+    ));
+    assert!(!g.push(1, placed(BoxKind::Rule, [5.0, 0.0, 1.0, 1.0], None)));
+    assert!(!g.push(1, placed(BoxKind::Rule, [0.0, 5.0, 1.0, 1.0], None)));
+    assert_eq!(g.len(), 0);
+    // A zero-width box is a valid rule.
+    assert!(g.push(1, placed(BoxKind::Rule, [3.0, 0.0, 3.0, 9.0], None)));
+    for _ in 1..MAX_BOXES_PER_PAGE {
+        assert!(g.push(1, placed(BoxKind::Text, ok, None)));
+    }
+    assert_eq!(g.len(), MAX_BOXES_PER_PAGE);
+    assert!(!g.push(1, placed(BoxKind::Text, ok, None)));
+    assert_eq!(g.len(), MAX_BOXES_PER_PAGE);
+    // Another page has its own cap.
+    assert!(g.add_page(2, [100.0, 100.0]));
+    assert!(g.push(2, placed(BoxKind::Heading(2), ok, None)));
+    assert_eq!(g.len(), MAX_BOXES_PER_PAGE + 1);
+}
+
+#[test]
+fn box_of_finds_anchor() {
+    let mut g = Geometry::default();
+    g.add_page(1, [612.0, 792.0]);
+    g.add_page(2, [612.0, 792.0]);
+    g.push(1, placed(BoxKind::Text, [0.0, 0.0, 1.0, 1.0], None));
+    g.push(1, placed(BoxKind::Table, [0.0, 0.0, 5.0, 5.0], Some("t1")));
+    g.push(
+        2,
+        placed(BoxKind::Picture, [1.0, 1.0, 9.0, 9.0], Some("p1")),
+    );
+    let t = g.box_of(&Anchor("t1".into())).unwrap();
+    assert_eq!(t.kind, BoxKind::Table);
+    assert_eq!(
+        g.box_of(&Anchor("p1".into())).unwrap().kind,
+        BoxKind::Picture
+    );
+    assert!(g.box_of(&Anchor("nope".into())).is_none());
+}
+
+#[test]
+fn many_pages_fill_fast() {
+    // The work is counted (`work_steps`, debug builds only); time is only a safety stop for a
+    // hang, far above any machine.
+    let start = std::time::Instant::now();
+    let before = rezzer_model::work_steps();
+    let mut g = Geometry::default();
+    for page in 1..=50_000u32 {
+        assert!(g.add_page(page, [100.0, 100.0]));
+        for i in 0..3 {
+            let x = i as f32;
+            assert!(g.push(page, placed(BoxKind::Text, [x, 0.0, x + 1.0, 1.0], None)));
+        }
+    }
+    let filled = rezzer_model::work_steps();
+    assert_eq!(g.len(), 150_000);
+    assert!(
+        !g.add_page(7, [100.0, 100.0]),
+        "an earlier page is still known"
+    );
+    let after = rezzer_model::work_steps();
+    let steps = |a: Option<u64>, b: Option<u64>| a.zip(b).map(|(a, b)| b - a);
+    if cfg!(debug_assertions) {
+        // One step per page added (its check of the last page) and one per box pushed (the
+        // last page is its page). A scan of the pages from the front would take billions.
+        assert_eq!(steps(before, filled), Some(50_000 + 150_000));
+        // An earlier page: the check of the last page, then the scan up to page 7.
+        assert_eq!(steps(filled, after), Some(1 + 7));
+    } else {
+        assert_eq!(after, None);
+    }
+    assert!(start.elapsed() < std::time::Duration::from_secs(60));
 }

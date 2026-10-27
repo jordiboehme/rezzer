@@ -222,13 +222,14 @@ fn many_revisions_stop_at_cap() {
         let date = format!("2026{:02}{:02}{:06}Z", 1 + k % 12, 1 + k % 28, k % 240_000);
         update(&mut file, &[(5, info(&date))], 6);
     }
-    let started = Instant::now();
     let limits = Limits::default();
-    let pdf = Pdf::open(&file, None, &limits, &never).unwrap();
-    let r = pdf.revisions(&never);
-    let took = started.elapsed();
-    eprintln!("{} bytes, open and revisions in {took:?}", file.len());
-    assert!(took.as_secs_f64() < 5.0, "{took:?}");
+    let (r, steps, took) = common::counted(|| {
+        let pdf = Pdf::open(&file, None, &limits, &never).unwrap();
+        pdf.revisions(&never).into_owned()
+    });
+    eprintln!("{} bytes", file.len());
+    // Measured once (2026-10-27).
+    common::assert_work("open and 10,000 revisions", steps, 2_899_981, took);
     assert_eq!(r.skipped, 10_000 - limits.max_revisions);
     assert_eq!(r.list.len(), limits.max_revisions);
     assert_eq!(r.list.last().unwrap().number, 10_000);
@@ -521,11 +522,10 @@ fn page_walks_are_bounded_by_visits() {
         ..Limits::default()
     };
     let pdf = Pdf::open(&file, None, &limits, &never).unwrap();
-    let started = Instant::now();
-    let r = pdf.revisions(&never);
-    let took = started.elapsed();
-    eprintln!("{} bytes, revisions in {took:?}", file.len());
-    assert!(took.as_secs_f64() < 2.0, "{took:?}");
+    let (r, steps, took) = common::counted(|| pdf.revisions(&never));
+    eprintln!("{} bytes", file.len());
+    // Measured once (2026-10-27): the walks stop at the item bound.
+    common::assert_work("page walks", steps, 7_130_383, took);
     assert!(
         r.issues
             .iter()
@@ -596,11 +596,10 @@ fn added_annotations_find_their_page_by_lookup() {
     }
     update(&mut file, &objects, first + old + new);
     let pdf = Pdf::open(&file, None, &Limits::default(), &never).unwrap();
-    let started = Instant::now();
-    let r = pdf.revisions(&never);
-    let took = started.elapsed();
-    eprintln!("{} bytes, revisions in {took:?}", file.len());
-    assert!(took.as_secs_f64() < 2.0, "{took:?}");
+    let (r, steps, took) = common::counted(|| pdf.revisions(&never));
+    eprintln!("{} bytes", file.len());
+    // Measured once (2026-10-27).
+    common::assert_work("added annotations", steps, 18_756_824, took);
     let last = r.list.last().unwrap();
     assert_eq!(last.changes.len(), new as usize);
     assert!(

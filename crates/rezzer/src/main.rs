@@ -6,8 +6,9 @@ mod greetings;
 
 use rezzer_model::Registry;
 
-/// The system allocator with large blocks moved by hand (see `rezzer_limits::Allocator`):
-/// on macOS the system's realloc of large blocks leaves memory resident that nothing holds.
+/// The system allocator with large blocks moved by hand outside Linux, and on glibc every
+/// block from 1 MiB on in its own mapping (see `rezzer_limits::Allocator`): on macOS the
+/// system's realloc of large blocks leaves memory resident that nothing holds.
 #[global_allocator]
 static ALLOCATOR: rezzer_limits::Allocator = rezzer_limits::Allocator;
 

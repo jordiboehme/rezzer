@@ -4,11 +4,11 @@
 
 //! Memory and work bounds of the row-range split, in their own test binary: it installs a
 //! counting allocator. The counters are per thread, so tests that run side by side do not
-//! see each other's allocations; work is measured as thread CPU time.
+//! see each other's allocations; work is counted in steps ([`rezzer_model::work_steps`]).
 
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell as StdCell;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rezzer_model::{
     Anchor, Block, Cell, Certainty, Inline, LayoutKind, RowKind, RowNote, TableLayout,
@@ -57,22 +57,40 @@ fn peak_heap<T>(f: impl FnOnce() -> T) -> (T, usize) {
     (out, (peak - base).max(0) as usize)
 }
 
-/// The CPU time the calling thread has used: work bounds do not depend on a busy machine.
-#[cfg(unix)]
-fn thread_cpu() -> Duration {
-    let mut t = libc::timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    // SAFETY: clock_gettime fills the timespec we pass.
-    let r = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut t) };
-    assert_eq!(r, 0, "clock_gettime");
-    Duration::new(t.tv_sec as u64, t.tv_nsec as u32)
+/// The wall-clock stop of the work-bound tests: far above any machine, so only a hang fails
+/// it. The work itself is bounded by counted steps.
+const SAFETY: Duration = Duration::from_secs(60);
+
+/// Runs `f` and gives its result, the steps of work it did ([`rezzer_model::work_steps`],
+/// `None` in a release build) and its wall time.
+fn counted<T>(f: impl FnOnce() -> T) -> (T, Option<u64>, Duration) {
+    let before = rezzer_model::work_steps();
+    let start = Instant::now();
+    let out = f();
+    let took = start.elapsed();
+    let steps = before.zip(rezzer_model::work_steps()).map(|(b, a)| a - b);
+    (out, steps, took)
 }
 
-#[cfg(not(unix))]
-fn thread_cpu() -> Duration {
-    Duration::ZERO
+/// Checks a work bound: at most the `measured` steps with half of them again as margin (in
+/// a debug build, which counts them), and the wall time under [`SAFETY`]. Each `measured`
+/// was taken once (2026-10-27, debug build, `--no-capture`): the count is the same on every
+/// machine, and a growth past the margin is a change in the work, not a slow machine.
+fn assert_work(what: &str, steps: Option<u64>, measured: u64, took: Duration) {
+    let max = measured + measured / 2;
+    eprintln!("{what}: {steps:?} steps (bound {max}) in {took:?}");
+    if cfg!(debug_assertions) {
+        // At least half the measured count too: a count of 0 would mean the work ran where
+        // it is not counted (another thread), not that it got cheaper.
+        assert!(
+            steps.is_some_and(|n| (measured / 2..=max).contains(&n)),
+            "{what}: {steps:?} steps of work, expected {}..={max}",
+            measured / 2
+        );
+    } else {
+        assert_eq!(steps, None);
+    }
+    assert!(took < SAFETY, "{what}: took {took:?}");
 }
 
 const MB: usize = 1024 * 1024;
@@ -218,14 +236,14 @@ fn many_group_rows_are_linear() {
         anchor: None,
         layout: Some(Box::new(layout(vec![1], vec!["Name".into()], notes))),
     };
-    let start = thread_cpu();
-    let ranges = split_rows(&[], &t, &[], 2_500);
-    let used = thread_cpu() - start;
-    eprintln!("{n} group rows: {} ranges in {used:?}", ranges.len());
+    let (ranges, steps, took) = counted(|| split_rows(&[], &t, &[], 2_500));
+    eprintln!("{n} group rows: {} ranges", ranges.len());
     // All group rows chain into one unit, which is one range of its own.
     assert_eq!(ranges.len(), 1);
     assert_eq!((ranges[0].first, ranges[0].last), (2, n + 1));
-    assert!(used < Duration::from_secs(2), "{used:?}");
+    // Measured once (2026-10-27): 200,000, one step for each row. The quadratic scan
+    // it replaced would take about 2 x 10^10 steps here.
+    assert_work("group rows", steps, 200_000, took);
 }
 
 #[test]
@@ -252,12 +270,11 @@ fn locate_cells_is_bounded_with_many_overlapping_areas() {
     });
     let mut points: Vec<(u32, u32)> = (0..rows).map(|row| (row, 20_000)).collect();
     points.extend([(5, 0), (5, 1), (500, 7_000)]);
-    let start = thread_cpu();
-    let (found, peak) = peak_heap(|| locate_cells(&areas, &points));
-    let used = thread_cpu() - start;
-    eprintln!("locate_cells: {used:?} CPU, peak heap {} MB", peak >> 20);
-    #[cfg(unix)]
-    assert!(used < Duration::from_secs(2), "took {used:?} CPU");
+    let ((found, peak), steps, took) = counted(|| peak_heap(|| locate_cells(&areas, &points)));
+    eprintln!("locate_cells: peak heap {} MB", peak >> 20);
+    // Measured once (2026-10-27): 1,277,303, about one step for each point and a few for
+    // each area; the 10 billion steps of a search through the open ranges would blow it.
+    assert_work("locate_cells", steps, 1_277_303, took);
     assert!(peak < 256 << 20, "peak heap {peak} bytes");
     let n = rows as usize;
     assert!(found[..n].iter().all(Option::is_none));

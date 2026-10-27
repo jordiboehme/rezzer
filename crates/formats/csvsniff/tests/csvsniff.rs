@@ -580,22 +580,129 @@ fn analyze_until_stops_early_and_says_so() {
 }
 
 #[test]
+fn analyze_until_stops_inside_one_long_record() {
+    // One record of 4 MiB: the stop is asked while it is read, not only after it.
+    let mut text = "x".repeat(4 * 1024 * 1024);
+    text.push('\n');
+    let d = csvsniff::Dialect {
+        delimiter: b',',
+        quote: b'"',
+        lead_records: 0,
+        has_header: false,
+        consistent_rows: 1.0,
+    };
+    let calls = std::cell::Cell::new(0usize);
+    let stop = || {
+        calls.set(calls.get() + 1);
+        calls.get() >= 3
+    };
+    let a = csvsniff::analyze_until(&text, &d, 1000, &stop);
+    assert!(a.truncated);
+    assert_eq!(a.rows, 0);
+    // Two asks without a stop, the third stops pass 1; pass 2 asks once more and stops.
+    assert_eq!(calls.get(), 4);
+    // Without a stop the record is read whole, and short texts never ask.
+    let whole = csvsniff::analyze_until(&text, &d, 1000, &|| false);
+    assert!(!whole.truncated);
+    assert_eq!(whole.rows, 1);
+    let asked = std::cell::Cell::new(false);
+    let short = csvsniff::analyze_until("a,b\n1,2\n", &d, 1000, &|| {
+        asked.set(true);
+        false
+    });
+    assert_eq!(short.rows, 2);
+    assert!(!asked.get());
+}
+
+/// 20 rows of three numbers and their sum (so the derived-column pass runs), with one text
+/// cell of 1 MiB in row `long`: the column, derived and quote passes all read it.
+fn table_with_a_long_note(long: usize) -> String {
+    let mut text = String::from("A,B,C,Total,Note\n");
+    for j in 1..=20 {
+        let (a, b, c) = (
+            j * 371 % 900 + 100,
+            j * 533 % 700 + 200,
+            j * 179 % 600 + 3150,
+        );
+        let note = if j == long {
+            "x".repeat(1024 * 1024)
+        } else {
+            "n".into()
+        };
+        text.push_str(&format!("{a},{b},{c},{},{note}\n", a + b + c));
+    }
+    text
+}
+
+/// Checks that a stop at the derived pass and one at the very last ask (the quote pass) each
+/// cut the analysis of `text`, which has one long record.
+fn assert_every_pass_asks_the_stop(text: &str) {
+    let d = sniff(text).unwrap();
+    let whole = analyze(text, &d, 1000);
+    assert!(!whole.truncated && !whole.derived.is_empty(), "{whole:?}");
+    let calls = std::cell::Cell::new(0usize);
+    let counted = csvsniff::analyze_until(text, &d, 1000, &|| {
+        calls.set(calls.get() + 1);
+        false
+    });
+    assert_eq!(counted.derived, whole.derived);
+    // About 16 asks a pass over 1 MiB: two record passes, the derived and the quote pass.
+    let per_pass = text.len() / (64 * 1024);
+    let all = calls.get();
+    assert!(all >= 4 * per_pass, "{all} asks, {per_pass} a pass");
+    for at in [all - per_pass - 2, all] {
+        let calls = std::cell::Cell::new(0usize);
+        let a = csvsniff::analyze_until(text, &d, 1000, &|| {
+            calls.set(calls.get() + 1);
+            calls.get() >= at
+        });
+        assert!(a.truncated, "stop at ask {at}");
+        assert!(a.derived.is_empty() && a.quote_problems.is_empty(), "{a:?}");
+        assert_eq!(calls.get(), at);
+    }
+}
+
+#[test]
+fn every_pass_over_a_long_record_asks_the_stop() {
+    assert_every_pass_asks_the_stop(&table_with_a_long_note(3));
+}
+
+#[test]
+fn a_stop_late_in_the_derived_pass_is_clean() {
+    // The long record is row 15, so the derived pass has read 14 rows, more than the 10 it
+    // needs, when the stop comes inside it.
+    assert_every_pass_asks_the_stop(&table_with_a_long_note(15));
+}
+
+#[test]
 fn sniff_looks_only_at_the_first_mebibyte() {
     // A normal start, then a record of 64 MiB: sniffing must not scan it.
     let mut text = String::from("a,b,c\n1,2,3\n4,5,6\n7,8,9\n");
     text.push_str(&"x".repeat(64 * 1024 * 1024));
     text.push('\n');
-    let start = std::time::Instant::now();
+    let before = csvsniff::work_steps();
     let d = sniff(&text).expect("dialect from the start of the text");
+    let steps = before.zip(csvsniff::work_steps()).map(|(b, a)| a - b);
     assert_eq!(d.delimiter, b',');
-    assert!(
-        start.elapsed() < std::time::Duration::from_millis(150),
-        "{:?}",
-        start.elapsed()
-    );
-    // Multi-byte text cut at the cap must not panic.
+    // The bytes in reach of the five passes (the format check and four delimiters), counted
+    // in debug builds: the sample ends after the last line break in the first MiB, which here
+    // is the 24 bytes of the first four records. Measured once (2026-10-27): 5 x 24.
+    if cfg!(debug_assertions) {
+        assert_eq!(steps, Some(5 * 24));
+    } else {
+        assert_eq!(steps, None);
+    }
+    // Multi-byte text cut at the cap must not panic. Its lines are 6 bytes, so the sample is
+    // the 174,762 whole lines in the first MiB.
     let wide = "é,ö\n".repeat(400_000);
+    let before = csvsniff::work_steps();
     assert!(sniff(&wide).is_some());
+    let steps = before.zip(csvsniff::work_steps()).map(|(b, a)| a - b);
+    if cfg!(debug_assertions) {
+        assert_eq!(steps, Some(5 * 174_762 * 6));
+    } else {
+        assert_eq!(steps, None);
+    }
 }
 
 #[test]

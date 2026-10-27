@@ -154,6 +154,7 @@ impl StyleBook {
         let mut tail = 0;
         let mut cut = false;
         while let Some(n) = name.take() {
+            crate::work::add(1);
             // A kept result is used only when the whole chain fits under the cap, so what a
             // style inherits never depends on which style was asked for first.
             if let Some((hit, len)) = self.props_cache.get(&n)
@@ -175,6 +176,7 @@ impl StyleBook {
             path.push(n);
         }
         for (i, n) in path.iter().enumerate().rev() {
+            crate::work::add(1);
             if let Some(c) = self.cells.get(n) {
                 base = Props {
                     bold: c.bold.or(base.bold),

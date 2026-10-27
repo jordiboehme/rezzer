@@ -107,7 +107,7 @@ The corpus has 12 public files: 11 CSV files (one of them a semicolon file named
 
 Extreme cases the test suite holds, at the default limits unless a limit is named (the figures are the bounds the tests check):
 
-- One row of 50 MB without a line break, with a time limit of 1 second: the read ends within the limit plus 2 seconds
+- A few short rows and then one row with a field of 50 MB, with a time limit of 1 second: the analysis checks the time inside the long row too, stops at the limit and says so. The test counts the time checks, so a slow or busy machine does not change the result
 - 100 MB of short rows with a time limit of 50 ms: the read stops in time and says so
 - 3,000 columns by 200 rows: the table shows 1,000 columns and 200,000 cells, the Columns table 500 columns. The output says what is not shown
 

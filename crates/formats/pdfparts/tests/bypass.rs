@@ -151,13 +151,13 @@ fn length_in_object_stream(pages: u32, mib: usize) -> Vec<u8> {
     raw.finish(1, "")
 }
 
-fn check_length_in_object_stream(pages: u32, mib: usize) {
+/// Opens the file of [`length_in_object_stream`] and checks it, with the work bound of
+/// `measured` steps (see [`common::assert_work`]).
+fn check_length_in_object_stream(pages: u32, mib: usize, measured: u64) {
     let bytes = length_in_object_stream(pages, mib);
     eprintln!("file {} KB", bytes.len() / 1024);
-    let start = Instant::now();
-    let pdf = open(&bytes).unwrap();
-    let took = start.elapsed();
-    eprintln!("open took {took:?}, unpacked {}", pdf.unpacked());
+    let (pdf, steps, took) = common::counted(|| open(&bytes).unwrap());
+    eprintln!("unpacked {}", pdf.unpacked());
     assert_eq!(pdf.page_count(), pages);
     assert!(pdf.refused_pages().is_empty(), "{:?}", pdf.issues());
     // The object stream is unpacked once, not once per page.
@@ -166,18 +166,20 @@ fn check_length_in_object_stream(pages: u32, mib: usize) {
         "{}",
         pdf.unpacked()
     );
-    assert!(took.as_secs() < 5, "{took:?}");
+    common::assert_work(&format!("{pages} pages, {mib} MiB"), steps, measured, took);
     assert_rss_bounded();
 }
 
 #[test]
 fn length_points_into_object_stream() {
-    check_length_in_object_stream(20, 4);
+    // The steps were measured once (2026-10-27).
+    check_length_in_object_stream(20, 4, 8_572_668);
 }
 
 #[test]
 fn length_points_into_large_object_stream() {
-    check_length_in_object_stream(2000, 15);
+    // The steps were measured once (2026-10-27).
+    check_length_in_object_stream(2000, 15, 32_645_866);
 }
 
 #[test]
@@ -407,13 +409,12 @@ fn label_prefix_decode_time() {
         .as_bytes(),
     );
     let pdf = open(&out).unwrap();
-    let start = Instant::now();
-    let labels = pdf.pages(&never);
-    let took = start.elapsed();
-    eprintln!("pages() took {took:?}");
+    let (labels, steps, took) = common::counted(|| pdf.pages(&never));
     assert_eq!(labels.len(), pages);
     assert_eq!(labels[0].label.as_ref().map(|l| l.len()), Some(257));
-    assert!(took.as_millis() < 1000, "{took:?}");
+    // Measured once (2026-10-27): the prefix is cut before it is decoded, so the 16 MiB are
+    // not decoded once per page, nor once at all.
+    common::assert_work("page labels", steps, 1_034, took);
 }
 
 /// A classic file whose catalog uses object `n` as `/Big`, and `extra` objects (number, body).
@@ -450,11 +451,11 @@ fn classic_with(n: u64, extra: &[(u64, String)]) -> Vec<u8> {
 
 #[test]
 fn huge_object_numbers_are_bounded() {
-    for n in [4_294_967_295u64, 4_000_000_000] {
+    // The last figure is the steps of each case, measured once (2026-10-27).
+    for (n, measured) in [(4_294_967_295u64, 872), (4_000_000_000, 875)] {
         let bytes = classic_with(n, &[(n, "<< /A 1 >>".to_string())]);
-        let start = Instant::now();
-        let pdf = open(&bytes).unwrap();
-        assert!(start.elapsed().as_secs() < 5, "{:?}", start.elapsed());
+        let (pdf, steps, took) = common::counted(|| open(&bytes).unwrap());
+        common::assert_work(&format!("object number {n}"), steps, measured, took);
         let doc = Document::load_mem(pdf.canonical()).unwrap();
         assert_eq!(doc.get_pages().len(), 1);
     }

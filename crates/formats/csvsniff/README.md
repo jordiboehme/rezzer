@@ -17,7 +17,7 @@ let analysis = csvsniff::analyze(text, &dialect, 100_000);
 assert_eq!(analysis.columns[2].unit.as_deref(), Some("kg"));
 ```
 
-`analyze_until` takes a stop function, so a caller can end a long analysis early. The result then says it is cut.
+`analyze_until` takes a stop function, so a caller can end a long analysis early. It asks the function every 64 KiB of text, also inside one long record. The result then says it is cut.
 
 The header row and the types are a guess from the data. Read them as hints, not as facts.
 

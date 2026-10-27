@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::block::Block;
 use crate::facet::{Facets, FileFacts, Role};
 use crate::format::FormatId;
+use crate::geometry::Geometry;
 use crate::loss::Loss;
 use crate::value::Value;
 
@@ -35,6 +36,11 @@ pub struct Document {
     /// The structured overview, filled by the enrich pass `overview`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub overview: Option<Overview>,
+    /// Where a paged source puts its blocks, rules and pictures, when the read asked for it.
+    /// Never serialized: not in the model JSON, the JSON schema or the cache.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub geometry: Option<Box<Geometry>>,
 }
 
 impl Document {
@@ -49,6 +55,7 @@ impl Document {
             assets: Vec::new(),
             losses: Vec::new(),
             overview: None,
+            geometry: None,
         }
     }
 }

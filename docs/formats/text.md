@@ -87,6 +87,7 @@ The corpus has 4 public text files from Project Gutenberg and Aozora Bunko (UTF-
 Extreme cases the test suite holds, at the default limits unless a limit is named (the figures are the bounds the tests check):
 
 - 100 MB without a line break: one paragraph, peak heap under 4 times the file size
+- 100 MB without a line break, with a time limit of 1 second: the reader checks the time inside the line too, stops at the limit and keeps the text read so far. The test counts the time checks, so a slow or busy machine does not change the result
 - 1.1 million short paragraphs: the read stops at 2 million elements and says so
 - A file of 3 GB: refused by its size before it is read
 

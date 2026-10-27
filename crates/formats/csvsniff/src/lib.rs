@@ -4,7 +4,7 @@
 
 //! Standalone CSV sniffing: dialect, header, column types, keys and derived columns.
 //!
-//! Input is already-decoded text. Use [`sniff`] to find the dialect, then
+//! Input is already-decoded text. Use [`sniff`](fn@sniff) to find the dialect, then
 //! [`analyze`] to get column facts and observed relations.
 //!
 //! ```
@@ -16,9 +16,12 @@
 
 mod derived;
 mod sniff;
+mod stop;
 mod types;
+mod work;
 
 pub use sniff::{CellClass, analyze, analyze_until, cell_class, sniff};
 pub use types::{
     Analysis, Column, ColumnKind, Derived, DerivedOp, Dialect, QuoteProblem, RaggedRow,
 };
+pub use work::work_steps;

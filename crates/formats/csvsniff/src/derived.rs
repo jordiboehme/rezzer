@@ -64,9 +64,12 @@ struct Candidate {
 /// part must have a smaller mean than the target. Subsets are ranked by
 /// holds/checked, then holds; when a second subset comes within 0.05 of the
 /// best ratio (and is not a subset or superset of the best) the result is
-/// ambiguous and nothing is reported for that target.
+/// ambiguous and nothing is reported for that target. At most the shortest column's number of
+/// values is checked.
 pub(crate) fn find(cols: &[NumCol], rows: usize) -> Vec<Derived> {
     let cols = &cols[..cols.len().min(MAX_NUMERIC_COLUMNS)];
+    // A column with fewer values (a read that ended early) bounds the rows checked.
+    let rows = cols.iter().map(|c| c.values.len()).fold(rows, usize::min);
     let mut out = Vec::new();
     if rows < MIN_CHECKED {
         return out;
@@ -202,5 +205,34 @@ fn for_each_subset(items: &[usize], size: usize, f: &mut impl FnMut(&[usize])) {
         for j in k + 1..size {
             idx[j] = idx[j - 1] + 1;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_columns_bound_the_rows() {
+        // Columns of 14 values that sum, checked for 20 rows: only 14 are checked.
+        let col = |index: usize, f: fn(f64) -> f64| NumCol {
+            index,
+            places: 0,
+            values: (1..=14).map(|j| Some(f(f64::from(j)))).collect(),
+        };
+        let cols = [
+            col(0, |j| (j * 371.0) % 900.0 + 100.0),
+            col(1, |j| (j * 533.0) % 700.0 + 200.0),
+            col(2, |j| {
+                (j * 371.0) % 900.0 + 100.0 + (j * 533.0) % 700.0 + 200.0
+            }),
+        ];
+        let found = find(&cols, 20);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!((found[0].target, found[0].checked), (2, 14));
+        // One column of 5 values leaves too few rows to check.
+        let mut cols = cols;
+        cols[1].values.truncate(5);
+        assert!(find(&cols, 20).is_empty());
     }
 }

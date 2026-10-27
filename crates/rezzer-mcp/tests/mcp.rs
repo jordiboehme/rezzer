@@ -1105,6 +1105,13 @@ async fn rez_part_size_must_be_integer() {
         "{output_dir}"
     );
     assert!(output_dir.contains("a folder next to it"), "{output_dir}");
+    assert!(
+        output_dir.contains(
+            "and so does a device name like CON. The dots and spaces at the end of a name \
+             become '_' too."
+        ),
+        "{output_dir}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

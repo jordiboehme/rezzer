@@ -38,6 +38,7 @@ mod revisions;
 pub mod script;
 mod signatures;
 mod structure;
+mod work;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -55,6 +56,7 @@ pub use nav::{ImageInfo, Link, LinkTarget, OutlineItem, PageInfo};
 pub use revisions::{Revision, Revisions};
 pub use signatures::{Sig, SigKind};
 pub use structure::{StructElem, StructTree};
+pub use work::work_steps;
 
 /// Bounds for reading one file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

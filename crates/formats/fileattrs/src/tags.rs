@@ -49,6 +49,7 @@ fn unique(names: impl Iterator<Item = String>) -> Vec<String> {
         if out.len() == MAX_TAGS {
             break;
         }
+        crate::work::add(1);
         if !name.is_empty() && seen.insert(name.clone()) {
             out.push(name);
         }

@@ -50,6 +50,7 @@ pub fn text_string(bytes: &[u8]) -> String {
 /// the closing U+001B comes after 1 or 2 code units. When it does not, the opening U+001B is
 /// dropped and the units after it are kept as text.
 pub fn text_string_checked(bytes: &[u8]) -> (String, bool) {
+    crate::work::add(bytes.len() as u64);
     if let Some(rest) = bytes.strip_prefix(&[0xFE, 0xFF]) {
         return utf16(rest, u16::from_be_bytes);
     }
@@ -68,6 +69,7 @@ pub fn text_string_checked(bytes: &[u8]) -> (String, bool) {
 /// [`text_string`] of bytes the caller gives up: plain ASCII text (tabs and line ends allowed)
 /// becomes the string without a copy. The flag says whether the text is a second copy.
 pub fn text_string_owned(bytes: Vec<u8>) -> (String, bool) {
+    crate::work::add(bytes.len() as u64);
     let plain = bytes
         .iter()
         .all(|&b| matches!(b, 0x20..=0x7E | b'\t' | b'\n' | b'\r'));
@@ -475,6 +477,7 @@ pub(crate) fn final_id(doc: &Document, obj: &Object) -> Option<ObjectId> {
 /// Follows references to the object they name. A missing object gives `None`. lopdf bounds
 /// chains of references, so `5 0 obj 5 0 R` ends.
 pub(crate) fn resolve<'a>(doc: &'a Document, obj: &'a Object) -> Option<&'a Object> {
+    crate::work::add(1);
     doc.dereference(obj).ok().map(|(_, o)| o)
 }
 
@@ -829,6 +832,8 @@ impl Work {
             self.left = 0;
             return false;
         }
+        // Only visits that fit are made, so only they are counted work.
+        crate::work::add(n as u64);
         self.left -= n;
         true
     }

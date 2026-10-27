@@ -1985,9 +1985,10 @@ fn part_frontmatter_and_relations() {
     assert_eq!(key(&out.main, "location"), None);
 }
 
-// A reader of relation lines that follows what Crystalline 0.29.0 reads (`parse.rs`:
-// `scan_body`, `bullet_end`, `split_category`, `parse_relation`; `reflection/links.rs`:
-// `read_destination`, `code_spans`). Written from those facts, no code taken.
+// A reader of relation lines that follows what Crystalline reads since 0.29.1 (`parse.rs`:
+// `scan_body`, `bullet_end`, `split_category`, `parse_relation`, `relative_relation_type`,
+// `mask_for_wikilinks`; `reflection/links.rs`: `read_destination`, `ends_destination`,
+// `code_spans`). Written from those facts, no code taken.
 
 #[derive(Debug, PartialEq)]
 enum Read {
@@ -2134,7 +2135,10 @@ fn read_destination(line: &str, open: usize) -> Option<(String, usize)> {
     } else {
         let close = closing_paren(line, open)?;
         let inside = &line[open..close];
-        let end = inside.find(char::is_whitespace).unwrap_or(inside.len());
+        // Only an ASCII space or a control character ends a bare destination.
+        let end = inside
+            .find(|c: char| c == ' ' || c.is_ascii_control())
+            .unwrap_or(inside.len());
         (&inside[..end], close)
     };
     let path = target.split('#').next().unwrap_or("");
@@ -2181,6 +2185,44 @@ fn relation_type(before: &str) -> Option<String> {
     }
 }
 
+/// The type of a relative-link relation: a quoted phrase, or a token that opens with a
+/// lowercase letter and holds only lowercase letters, ASCII digits, `_` and `-`.
+fn relative_relation_type(before: &str) -> Option<String> {
+    let before = before.trim();
+    if before.len() >= 2 && before.starts_with('"') && before.ends_with('"') {
+        return Some(before[1..before.len() - 1].to_string());
+    }
+    let mut chars = before.chars();
+    let first = chars.next()?;
+    let rest = chars.all(|c| c.is_lowercase() || c.is_ascii_digit() || c == '_' || c == '-');
+    (first.is_lowercase() && rest).then(|| before.to_string())
+}
+
+/// `line` with inline code and then every link destination (between a `](` that closes a
+/// link text and its `)`) blanked byte for byte: where a `[[` is no wikilink.
+fn mask_for_wikilinks(line: &str) -> String {
+    let mut masked = line.as_bytes().to_vec();
+    for (a, b) in code_spans(line) {
+        masked[a..b].fill(b' ');
+    }
+    let code = String::from_utf8(masked).expect("whole spans blanked");
+    let mut masked = code.as_bytes().to_vec();
+    let mut cursor = 0;
+    while let Some(found) = code[cursor..].find("](") {
+        let close_text = cursor + found;
+        cursor = close_text + 2;
+        if link_text_start(&code, close_text).is_none() {
+            continue;
+        }
+        let Some((_, close)) = read_destination(&code, close_text + 2) else {
+            continue;
+        };
+        masked[close_text + 2..close].fill(b' ');
+        cursor = close;
+    }
+    String::from_utf8(masked).expect("whole destinations blanked")
+}
+
 fn reserved(path: &str) -> bool {
     matches!(path.rsplit('/').next(), Some("index.md" | "log.md"))
 }
@@ -2201,14 +2243,17 @@ fn read_bullet(content: &str) -> Option<Read> {
         let after = &rest[close + 1..];
         if !category.is_empty()
             && !category.contains('[')
+            && !category.starts_with('^')
             && !matches!(category, " " | "x" | "X" | "~")
             && !after.starts_with(['(', '['])
         {
             return Some(Read::Observation(category.to_string()));
         }
     }
-    // The wikilink form.
+    // The wikilink form, at the first `[[`: with a link in the text, none when that `[[` is
+    // in inline code or a link destination.
     if let Some(open) = content.find("[[")
+        && (!content.contains("](") || mask_for_wikilinks(content).as_bytes()[open] == b'[')
         && let Some(close) = content[open + 2..].find("]]")
         && let Some(kind) = relation_type(&content[..open])
     {
@@ -2237,7 +2282,7 @@ fn read_bullet(content: &str) -> Option<Read> {
         let in_code = spans.iter().any(|(s, e)| (*s..*e).contains(&close_text));
         // Every note link counts; the one that starts at the first `[` is the target.
         if !image && note && relative(&path) && !in_code && !reserved(&path) && start == open {
-            return relation_type(&content[..open]).map(|k| Read::Relation(k, path));
+            return relative_relation_type(&content[..open]).map(|k| Read::Relation(k, path));
         }
     }
     None
@@ -2279,12 +2324,8 @@ fn crystalline_reads(body: &str) -> Vec<Read> {
         if !open_category {
             let mut end = i;
             for (j, next) in lines.iter().enumerate().skip(i + 1) {
-                // The last `[[` outside inline code has no `]]` after it.
-                let mut masked = lines[end].as_bytes().to_vec();
-                for (a, b) in code_spans(lines[end]) {
-                    masked[a..b].fill(b' ');
-                }
-                let masked = String::from_utf8_lossy(&masked).into_owned();
+                // The last `[[` outside inline code and link destinations has no `]]` after it.
+                let masked = mask_for_wikilinks(lines[end]);
                 let inside_link = masked
                     .rfind("[[")
                     .is_some_and(|o| !masked[o + 2..].contains("]]"));
@@ -2323,6 +2364,39 @@ fn the_test_reader_reads_what_crystalline_reads() {
         [rel("two words", "y.md")]
     );
     assert_eq!(reads("- tok [[x]]"), [rel("tok", "x")]);
+    // The shapes `crystalline_reads_the_shapes_rezzer_relies_on` (rezzer/tests/okf.rs) reads
+    // from the real `crystalline`, with the same expectations.
+    let obs = |c: &str| Read::Observation(c.into());
+    assert_eq!(reads("- See [Three](three.md)"), []);
+    assert_eq!(reads("- see [Three](three.md)"), [rel("see", "three.md")]);
+    assert_eq!(
+        reads("- \u{fc}ber [Three](three.md)"),
+        [rel("\u{fc}ber", "three.md")]
+    );
+    assert_eq!(reads("- [^1] a note"), []);
+    assert_eq!(reads("- [c] text"), [obs("c")]);
+    assert_eq!(reads("- Tok [[Three]]"), [rel("Tok", "Three")]);
+    for name in [
+        "Bericht\u{3000}\u{65e5}\u{672c}.md",
+        "\u{65e5}\u{672c}\u{3000}\u{5831}\u{544a}.md",
+        "a\u{a0}b.md",
+        "[[x]].md",
+    ] {
+        assert_eq!(
+            reads(&format!("- part_of [D]({name})")),
+            [rel("part_of", name)],
+            "{name}"
+        );
+    }
+    assert_eq!(reads("- [A\\] b](three.md): t"), [obs("A\\")]);
+    assert_eq!(
+        reads("- part_of [a\\](b) c](three.md)"),
+        [rel("part_of", "three.md")]
+    );
+    assert_eq!(
+        reads("- part_of [a\\](b.md) c](three.md)"),
+        [rel("part_of", "b.md")]
+    );
     assert_eq!(
         reads("- part_of [A](<../a b (c) %232.md>)"),
         [rel("part_of", "../a b (c) #2.md")]
@@ -2331,7 +2405,8 @@ fn the_test_reader_reads_what_crystalline_reads() {
     assert_eq!(reads("- follows\n[A](a.md)"), [rel("follows", "a.md")]);
     assert_eq!(reads("- [cat] text"), [Read::Observation("cat".into())]);
     // Not relations: a bullet that opens with a link, an indented bullet, a fenced line,
-    // two words, an image, a web page, a reserved name, a link in code.
+    // two words, an image, a web page, a reserved name, a link in code, an escaped link, a
+    // type with a capital letter, a `[[` inside a link destination.
     for text in [
         "- [A](a.md): x",
         "  - part_of [A](a.md)",
@@ -2342,6 +2417,10 @@ fn the_test_reader_reads_what_crystalline_reads() {
         "- part_of [A](index.md)",
         "- part_of `[A](a.md)`",
         "- x \\[A\\](a.md)",
+        "- Part_of [A](a.md)",
+        "- partOf [A](a.md)",
+        "- Tok[x](a[[b]]c.png)",
+        "- Tok`[x](a[[b]]c.png)`",
     ] {
         assert_eq!(reads(text), [], "{text}");
     }
@@ -2417,19 +2496,19 @@ fn relation_lines_parse_like_crystalline() {
         assert_eq!(reads.len(), want.len(), "{}: {reads:?}", p.path);
         previous = Some(file);
     }
-    // List items from the file that Crystalline would read (P5-S): a link to a heading in
-    // another part becomes a link to that part's file, and a footnote at the start of an item
-    // looks like an observation category.
+    // List items from the file that look like Crystalline's syntax but that it reads as
+    // text (P5-S): a link to a heading in another part becomes a link to that part's file
+    // after a capitalized word, and a footnote opens an item. They keep the `- ` bullet.
     let out = output(&list_items_doc(), 2_500, "r.md", "r");
     let first = &out.parts[0].markdown;
     assert!(
-        first.contains("\n* See [Three](chapter-3.md#chapter-3)\n"),
+        first.contains("\n- See [Three](chapter-3.md#chapter-3)\n"),
         "{first}"
     );
-    assert!(first.contains("\n* [^1] noted\n"), "{first}");
-    assert!(first.contains("\n* plain item\n"), "{first}");
+    assert!(first.contains("\n- [^1] noted\n"), "{first}");
+    assert!(first.contains("\n- plain item\n"), "{first}");
     assert!(
-        first.contains("\n* Wrapped\\\n  [Two](chapter-2.md#chapter-2)\n"),
+        first.contains("\n- Wrapped\\\n  [Two](chapter-2.md#chapter-2)\n"),
         "{first}"
     );
     for p in &out.parts {
@@ -2445,8 +2524,8 @@ fn relation_lines_parse_like_crystalline() {
     }
 }
 
-/// Three chapters; the first holds list items that Crystalline would read as a relation or
-/// an observation once the document is split.
+/// Three chapters; the first holds list items that look like a relation or an observation
+/// once the document is split.
 fn list_items_doc() -> Document {
     let mut d = chapters_doc(3, 6_000);
     let link = |text: &str, target: &str| Inline::Link {
@@ -2494,7 +2573,7 @@ fn list_items_crystalline_would_read_get_a_star_in_one_file_too() {
         items: vec![
             vec![Block::Paragraph {
                 inlines: vec![
-                    Inline::plain("See "),
+                    Inline::plain("see "),
                     Inline::Link {
                         target: "other.md".into(),
                         title: None,
@@ -2511,7 +2590,7 @@ fn list_items_crystalline_would_read_get_a_star_in_one_file_too() {
         anchor: None,
     });
     let md = render(&d, Completeness::Complete, &opts());
-    assert!(md.contains("\n* See [other](other.md)\n* plain\n"), "{md}");
+    assert!(md.contains("\n* see [other](other.md)\n* plain\n"), "{md}");
     assert_eq!(crystalline_reads(body(&md)), []);
 }
 
@@ -2548,25 +2627,23 @@ fn relation_targets_with_spaces_and_hash() {
     let out = output(&plain, 2_500, "a.md", "a");
     assert!(out.main.contains("- [A&#93; b: Chapter 1](a/chapter-1.md)"));
     assert_eq!(crystalline_reads(body(&out.main)), []);
-    // Any whitespace puts the destination in angle brackets: Crystalline cuts a bare one at
-    // the first whitespace character.
-    for odd in [
-        "日本\u{3000}報告.pdf.md",
-        "Rechnung\u{a0}12.pdf.md",
-        "[[x]].md",
+    // Only an ASCII space puts the destination in angle brackets: Crystalline ends a bare
+    // one at a space or a control character, so U+3000 and U+00A0 stay in a bare path.
+    for (odd, written) in [
+        ("日本\u{3000}報告.pdf.md", "(../日本\u{3000}報告.pdf.md)"),
+        ("Rechnung\u{a0}12.pdf.md", "(../Rechnung\u{a0}12.pdf.md)"),
+        ("Rechnung 12.pdf.md", "(<../Rechnung 12.pdf.md>)"),
+        ("[[x]].md", "(../%5B%5Bx%5D%5D.md)"),
     ] {
         let out = output(&d, 2_500, odd, "x");
+        let first = &out.parts[0].markdown;
+        assert!(first.contains(written), "{odd}: {first}");
         assert_eq!(
-            relations(&out.parts[0].markdown),
+            relations(first),
             [("part_of".to_string(), format!("../{odd}"))],
             "{odd}"
         );
     }
-    assert!(
-        output(&d, 2_500, "[[x]].md", "x").parts[0]
-            .markdown
-            .contains("(../%5B%5Bx%5D%5D.md)")
-    );
     // `%`, `>` and a backslash are encoded too, so the name reads back as written.
     let odd = "a%b>c\\d`e.md";
     let out = output(&d, 2_500, odd, "x");
@@ -2832,8 +2909,14 @@ fn a_list_with_one_item_crystalline_would_read_stays_one_list() {
         items: vec![
             item(vec![Inline::plain("first item")]),
             item(vec![
-                Inline::FootnoteRef { id: "1".into() },
-                Inline::plain(" noted"),
+                Inline::plain("see "),
+                Inline::Link {
+                    target: "other.md".into(),
+                    title: None,
+                    internal: false,
+                    wiki: false,
+                    inlines: vec![Inline::plain("other")],
+                },
             ]),
             item(vec![Inline::plain("last item")]),
         ],
@@ -2841,7 +2924,7 @@ fn a_list_with_one_item_crystalline_would_read_stays_one_list() {
     });
     let md = render(&d, Completeness::Complete, &opts());
     assert!(
-        md.contains("\n* first item\n* [^1] noted\n* last item\n"),
+        md.contains("\n* first item\n* see [other](other.md)\n* last item\n"),
         "{md}"
     );
     // CommonMark reads one list with three items.

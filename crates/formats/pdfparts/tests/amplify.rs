@@ -12,7 +12,7 @@ mod common;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use common::{Classic, assert_rss_bounded, zlib_fill};
+use common::{Classic, assert_rss_bounded, assert_work, counted, zlib_fill};
 use pdfparts::{IssueKind, Limits, OpenError, Pdf};
 
 /// The allocator of the Rezzer binary: the memory these tests measure is the memory it
@@ -206,12 +206,16 @@ fn entries_pointing_at_one_wrong_object_are_cheap() {
         out.extend(format!("{wrong:010} 00000 n \n").as_bytes());
     }
     out.extend(format!("trailer\n<< /Size {n} /Root 1 0 R >>\nstartxref\n{x}\n%%EOF\n").as_bytes());
-    let start = Instant::now();
-    let result = Pdf::open(&out, None, &limits(), &deadline(Duration::from_secs(10)));
-    let took = start.elapsed();
-    eprintln!("open took {took:?}");
+    let (result, steps, took) =
+        counted(|| Pdf::open(&out, None, &limits(), &deadline(Duration::from_secs(10))));
     let pdf = result.unwrap();
-    assert!(took < Duration::from_secs(5), "{took:?}");
+    // Measured once (2026-10-27).
+    assert_work(
+        "entries pointing at one wrong object",
+        steps,
+        1_078_296,
+        took,
+    );
     assert_eq!(pdf.page_count(), 0);
 }
 
@@ -354,16 +358,13 @@ fn shared_form_images_are_bounded() {
     let bytes = c.finish("");
     eprintln!("file {} KB", bytes.len() / 1024);
     let pdf = Pdf::open(&bytes, None, &limits(), &never).unwrap();
-    // No time stop, so only the work bound can end the walk; its CPU time, not the wall
-    // clock, shows the bound, so a busy machine does not fail the test.
-    let start = Instant::now();
-    let (pages, cpu) = common::cpu_time(|| pdf.pages(&never));
-    let took = start.elapsed();
-    eprintln!("pages() took {cpu:?} CPU, {took:?} wall");
+    // No time stop, so only the work bound can end the walk; its counted steps show the
+    // bound, so neither a busy nor a slow machine fails the test.
+    let (pages, steps, took) = counted(|| pdf.pages(&never));
     assert_eq!(pages.len(), 2000);
     assert_eq!(pages[0].images.len(), 50_000);
-    assert!(cpu < Duration::from_secs(2), "{cpu:?}");
-    assert!(took < Duration::from_secs(30), "{took:?}");
+    // Measured once (2026-10-27): the visits stop at the item bound.
+    assert_work("shared form images", steps, 8_008_001, took);
     assert!(
         pdf.issues()
             .iter()
@@ -436,18 +437,22 @@ fn nested_strings(k: u32, shape: &str, close: bool) -> Vec<u8> {
 
 #[test]
 fn catalog_look_ahead_is_linear() {
-    for shape in ["object", "dict", "trailer"] {
-        for close in [false, true] {
+    // The steps of each case, measured once (2026-10-27).
+    for (shape, steps_open, steps_closed) in [
+        ("object", 1_129_468, 1_129_468),
+        ("dict", 14_585_773, 15_126_810),
+        ("trailer", 9_378_718, 9_859_794),
+    ] {
+        for (close, measured) in [(false, steps_open), (true, steps_closed)] {
             let bytes = nested_strings(60_000, shape, close);
-            let start = Instant::now();
-            let result = Pdf::open(&bytes, None, &limits(), &deadline(Duration::from_secs(10)));
-            let took = start.elapsed();
+            let (result, steps, took) =
+                counted(|| Pdf::open(&bytes, None, &limits(), &deadline(Duration::from_secs(10))));
             eprintln!(
-                "{shape}, close {close}: {} KB, {took:?}, {:?}",
+                "{shape}, close {close}: {} KB, {:?}",
                 bytes.len() / 1024,
                 result.as_ref().map(|p| p.page_count())
             );
-            assert!(took < Duration::from_secs(2), "{took:?}");
+            assert_work(&format!("{shape}, close {close}"), steps, measured, took);
             match result {
                 Ok(pdf) => assert_eq!(pdf.page_count(), 0),
                 Err(OpenError::Limit(why)) => assert!(why.contains("catalog"), "{why}"),
@@ -560,17 +565,12 @@ fn object_stream_members_share_one_work_bound() {
     let members: Vec<(u32, u32, u32)> = (0..n).map(|i| (1000 + i, 10, i)).collect();
     let bytes = common::append_update(&bytes, &[], &members, 1, "");
     eprintln!("file {} KB", bytes.len() / 1024);
-    // No time stop, so only the shared work bound can end the open; its CPU time, not the
-    // wall clock, shows the bound, so a busy machine does not fail the test.
-    let start = Instant::now();
-    let (result, cpu) = common::cpu_time(|| Pdf::open(&bytes, None, &limits(), &never));
-    let took = start.elapsed();
-    eprintln!(
-        "open took {cpu:?} CPU, {took:?} wall: {:?}",
-        result.as_ref().map(|p| p.page_count())
-    );
-    assert!(cpu < Duration::from_secs(2), "{cpu:?}");
-    assert!(took < Duration::from_secs(30), "{took:?}");
+    // No time stop, so only the shared work bound can end the open; its counted steps show
+    // the bound, so neither a busy nor a slow machine fails the test.
+    let (result, steps, took) = counted(|| Pdf::open(&bytes, None, &limits(), &never));
+    eprintln!("open: {:?}", result.as_ref().map(|p| p.page_count()));
+    // Measured once (2026-10-27): the shared work bound ends the open.
+    assert_work("object stream members", steps, 641_237_233, took);
     match result {
         Ok(pdf) => assert_eq!(pdf.page_count(), 0),
         Err(OpenError::Limit(why)) => assert!(why.contains("white space"), "{why}"),
@@ -618,18 +618,23 @@ fn unclosed_notes(k: u32, endobj: bool) -> Vec<u8> {
 
 #[test]
 fn broken_values_do_not_end_the_open() {
-    let cases = [(16, true), (32, true), (64, true), (2000, false)];
-    for (k, endobj) in cases {
+    // The last figure of each case is its steps, measured once (2026-10-27).
+    let cases = [
+        (16, true, 4_057_299),
+        (32, true, 5_113_507),
+        (64, true, 7_225_923),
+        (2000, false, 14_739_146),
+    ];
+    for (k, endobj, measured) in cases {
         let bytes = unclosed_notes(k, endobj);
-        let start = Instant::now();
-        let result = Pdf::open(&bytes, None, &limits(), &deadline(Duration::from_secs(10)));
-        let took = start.elapsed();
+        let (result, steps, took) =
+            counted(|| Pdf::open(&bytes, None, &limits(), &deadline(Duration::from_secs(10))));
         eprintln!(
-            "k {k}, endobj {endobj}: {} KB, {took:?}, {:?}",
+            "k {k}, endobj {endobj}: {} KB, {:?}",
             bytes.len() / 1024,
             result.as_ref().map(|p| p.page_count())
         );
-        assert!(took < Duration::from_secs(1), "{took:?}");
+        assert_work(&format!("k {k}, endobj {endobj}"), steps, measured, took);
         let pdf = result.unwrap();
         assert_eq!(pdf.page_count(), 1);
         let issues = pdf.issues();
