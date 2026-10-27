@@ -192,6 +192,19 @@ fn a_value_drawn_twice_is_expected_twice() {
     );
 }
 
+/// A value drawn in two parts (each word its own text) is to be found once, joined as the
+/// read joins it; it is not left out.
+#[test]
+fn a_value_drawn_in_parts_is_expected_joined() {
+    let mut sheet = axes::Sheet::new(shapes::Built::new(&axes::BASE.geo()));
+    sheet.built.page.template = common::show("FL", 9.0, 40.0, 700.0, "Erika")
+        + &common::show("FL", 9.0, 70.0, 700.0, "Mustermann");
+    sheet.once = vec!["Erika Mustermann".into(), "Erika".into()];
+    axes::expect_drawn(&mut sheet, 1);
+    let times = |t: &str| sheet.built.values.iter().filter(|v| *v == t).count();
+    assert_eq!((times("Erika Mustermann"), times("Erika")), (1, 1));
+}
+
 /// Two reads that differ only in their losses do not read the same: a loss where the
 /// reference has none is `NoLoss`, another loss where it has one is `SameReading`.
 #[test]

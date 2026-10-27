@@ -608,12 +608,14 @@ fn literals(ops: &str) -> String {
 /// Holds every value of `sheet`, page `number` of its file, to be found as many times as it
 /// is drawn: each value of the page and each text of `once` (the texts a shape shows) is
 /// listed in the values once for every place its words stand, one after the other, in a drawn
-/// text or in the page's marker (`Page 1`, which the read writes as a paragraph). A text of
+/// text (or, for a text no drawn text holds whole, across drawn texts in the order they are
+/// drawn) or in the page's marker (`Page 1`, which the read writes as a paragraph). A text of
 /// `once` that is drawn nowhere as it stands (a run cut by the read) is left out.
 pub(crate) fn expect_drawn(sheet: &mut Sheet, number: usize) {
     let mut drawn = drawn(&sheet.built.page);
     drawn.push(format!("Page {number}"));
     let all: Vec<Vec<&str>> = drawn.iter().map(|t| words_of(t)).collect();
+    let joined: Vec<&str> = all.iter().flatten().copied().collect();
     let b = &mut sheet.built;
     let mut texts: Vec<String> = Vec::new();
     for t in b.values.iter().chain(sheet.once.iter()) {
@@ -634,6 +636,17 @@ pub(crate) fn expect_drawn(sheet: &mut Sheet, number: usize) {
                     .count()
             })
             .sum();
+        // A text of several words that no drawn text holds whole may stand across two drawn
+        // texts one after the other (a value drawn in parts): it is counted as the read joins
+        // them, in the order they are drawn.
+        let n = if n == 0 && want.len() > 1 {
+            joined
+                .windows(want.len())
+                .filter(|x| *x == want.as_slice())
+                .count()
+        } else {
+            n
+        };
         let have = b.values.iter().filter(|x| **x == t).count();
         for _ in have..n {
             b.values.push(t.clone());
