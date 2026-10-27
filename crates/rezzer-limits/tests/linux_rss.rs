@@ -5,17 +5,20 @@
 //! A probe of the resident memory that Rezzer's allocator leaves on Linux, under glibc and
 //! under musl. It decides nothing by itself: each shape prints one line
 //!
-//! `linux_rss <shape>: peak <MiB> MiB, resident after free <MiB> MiB`
+//! `linux_rss <shape>: peak <MiB> MiB, resident after free <MiB> MiB, start <MiB> MiB`
 //!
-//! (some shapes add fields after these two), and the numbers of a glibc and a musl run are
-//! compared by hand before the Linux `realloc` policy of `src/alloc.rs` changes. The only
-//! checks are a 512 MiB safety bound on the peak and, for `small_exact_growth`, a 60 s stop.
+//! (some shapes add fields), and the numbers of a glibc and a musl run are compared by hand
+//! before the Linux `realloc` policy of `src/alloc.rs` changes. `start` is the resident set
+//! when the shape begins: a static musl binary and a glibc one start from different levels,
+//! so the figures are compared above it. The only checks are a 512 MiB safety bound on the
+//! peak and, for `small_exact_growth`, a 60 s limit on its wall time. That limit is checked
+//! afterwards; a run that hangs is ended by nextest after 2 minutes (`.config/nextest.toml`).
 //!
 //! Each shape is its own test, so nextest runs it in its own process and the process figures
 //! are the figures of that shape. Under `cargo test` the shapes share one process: the lines
 //! say so and the bound is not checked.
 //!
-//! Both figures come from `/proc/self/status` with std only: `VmHWM` (the peak resident set,
+//! All figures come from `/proc/self/status` with std only: `VmHWM` (the peak resident set,
 //! the figure `getrusage` gives as `ru_maxrss`) and `VmRSS` (the resident set now), both in
 //! kB. That file is the kernel's, so the probe reads the same figures under glibc and musl and
 //! calls nothing of either C library.
@@ -61,34 +64,65 @@ fn status_bytes(key: &str) -> u64 {
     kb * 1024
 }
 
+/// The resident set now, in bytes.
+fn resident() -> u64 {
+    status_bytes("VmRSS")
+}
+
 fn mib(bytes: u64) -> f64 {
     bytes as f64 / MIB as f64
 }
 
-/// Prints the line of `shape` (with `extra` fields after the two figures) and checks the
-/// bound when the shape has its own process.
-fn report(shape: &str, extra: &str) {
-    let peak = status_bytes("VmHWM");
-    let resident = status_bytes("VmRSS");
-    let own = std::env::var_os("NEXTEST").is_some();
-    let shared = if own {
-        ""
-    } else {
-        " (shared process, not this shape alone: run under nextest)"
-    };
-    eprintln!(
-        "linux_rss {shape}: peak {:.1} MiB, resident after free {:.1} MiB{extra}{shared}",
-        mib(peak),
-        mib(resident),
-    );
-    if own {
-        assert!(peak < BOUND, "{shape}: peak {:.1} MiB", mib(peak));
+/// The printed line of one shape.
+struct Line<'a> {
+    shape: &'a str,
+    /// The resident set when the shape began.
+    start: u64,
+    /// Text after the resident figure, such as what is still live.
+    after: String,
+    /// Text at the end of the line.
+    extra: String,
+}
+
+impl<'a> Line<'a> {
+    fn new(shape: &'a str, start: u64) -> Self {
+        Line {
+            shape,
+            start,
+            after: String::new(),
+            extra: String::new(),
+        }
+    }
+
+    /// Prints the line and checks the bound when the shape has its own process.
+    fn report(self) {
+        let peak = status_bytes("VmHWM");
+        let now = resident();
+        let own = std::env::var_os("NEXTEST").is_some();
+        let shared = if own {
+            ""
+        } else {
+            " (shared process, not this shape alone: run under nextest)"
+        };
+        eprintln!(
+            "linux_rss {}: peak {:.1} MiB, resident after free {:.1} MiB{}, start {:.1} MiB{}{shared}",
+            self.shape,
+            mib(peak),
+            mib(now),
+            self.after,
+            mib(self.start),
+            self.extra,
+        );
+        if own {
+            assert!(peak < BOUND, "{}: peak {:.1} MiB", self.shape, mib(peak));
+        }
     }
 }
 
 /// A `Vec<u8>` grown by doubling to 64 MiB, then dropped.
 #[test]
 fn doubling_to_64_mib() {
+    let start = resident();
     let chunk = vec![FILL; 64 * KIB];
     let mut v = Vec::new();
     while v.len() < 64 * MIB {
@@ -96,14 +130,15 @@ fn doubling_to_64_mib() {
     }
     black_box(&v);
     drop(v);
-    report("doubling_to_64_mib", "");
+    Line::new("doubling_to_64_mib", start).report();
 }
 
 /// 60 rounds of a page picture: a buffer grown from 4 to 8 to 16 MiB, then cut to its first
 /// 256 KiB, which are kept; the rest is freed. The 60 kept pieces (15 MiB) are still live
-/// when the resident memory is read.
+/// when the resident memory is read, and the line says so next to that figure.
 #[test]
 fn page_pictures_grow_and_go() {
+    let start = resident();
     let mut kept = Vec::with_capacity(60);
     for _ in 0..60 {
         let mut buf = Vec::with_capacity(4 * MIB);
@@ -118,16 +153,16 @@ fn page_pictures_grow_and_go() {
     }
     black_box(&kept);
     let live: usize = kept.iter().map(Vec::capacity).sum();
-    report(
-        "page_pictures_grow_and_go",
-        &format!(", live {:.1} MiB", mib(live as u64)),
-    );
+    let mut line = Line::new("page_pictures_grow_and_go", start);
+    line.after = format!(" (with {:.1} MiB live)", mib(live as u64));
+    line.report();
     drop(kept);
 }
 
 /// A 20 MB buffer made at its size, then grown by a half to 30 MB, then dropped.
 #[test]
 fn a_known_size_buffer() {
+    let start = resident();
     let mut v = Vec::with_capacity(20_000_000);
     v.resize(20_000_000, FILL);
     black_box(&v);
@@ -135,7 +170,7 @@ fn a_known_size_buffer() {
     v.resize(30_000_000, FILL);
     black_box(&v);
     drop(v);
-    report("a_known_size_buffer", "");
+    Line::new("a_known_size_buffer", start).report();
 }
 
 /// 8 threads with 12,500 blocks of 1 to 4 KiB each (100,000 blocks, about 244 MiB, in all),
@@ -143,6 +178,7 @@ fn a_known_size_buffer() {
 /// resident memory is read, so it shows what the per-thread arenas keep.
 #[test]
 fn many_threads_small_blocks() {
+    let start = resident();
     let threads: Vec<_> = (0..8)
         .map(|t| {
             thread::spawn(move || {
@@ -157,18 +193,20 @@ fn many_threads_small_blocks() {
     for t in threads {
         t.join().expect("a probe thread panicked");
     }
-    report("many_threads_small_blocks", "");
+    Line::new("many_threads_small_blocks", start).report();
 }
 
 /// A `Vec<u8>` of 1 MiB grown in 2,000 exact steps of 64 KiB (to about 126 MiB), then
 /// dropped: the shape of `small_exact_growth_is_never_moved_by_hand` in `src/alloc.rs`. Rezzer
 /// leaves these steps to the system's realloc; a realloc that copies at every step shows up
-/// here as a long wall time and a higher peak.
+/// here as a long wall time and a higher peak. The 60 s limit is checked afterwards; nextest
+/// ends a run that hangs after 2 minutes.
 #[test]
 fn small_exact_growth() {
+    let start = resident();
     let step = 64 * KIB;
     let chunk = vec![FILL; step];
-    let start = Instant::now();
+    let began = Instant::now();
     let mut v = Vec::with_capacity(MIB);
     v.resize(MIB, FILL);
     for _ in 0..2_000 {
@@ -177,11 +215,10 @@ fn small_exact_growth() {
     }
     black_box(&v);
     drop(v);
-    let took = start.elapsed();
-    report(
-        "small_exact_growth",
-        &format!(", wall {} ms", took.as_millis()),
-    );
+    let took = began.elapsed();
+    let mut line = Line::new("small_exact_growth", start);
+    line.extra = format!(", wall {} ms", took.as_millis());
+    line.report();
     assert!(
         took < Duration::from_secs(60),
         "small_exact_growth: {took:?}"
