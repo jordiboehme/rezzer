@@ -102,7 +102,7 @@ fn assert_steps(steps: Option<u64>, max: u64) {
 }
 
 #[test]
-fn noise_of_64_mp_is_read_in_tiles_and_stops_at_its_time() {
+fn noise_of_64_mp_is_read_in_tiles_with_bounded_memory_and_calls() {
     let twin = block_noise(1000, 1000, 3);
     let (_, twin_time, _) = scan(&twin, 1000, 1000, Duration::from_secs(3));
     let noise = block_noise(8000, 8000, 3);
