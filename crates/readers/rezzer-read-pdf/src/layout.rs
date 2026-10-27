@@ -1116,7 +1116,7 @@ pub(crate) fn page_blocks_at(
     // The lines of a footer that go on one another at one left edge are one block: a column
     // of a footer in columns (an address, a bank, a register entry). Each of its lines is a
     // line of its own: a footer lists facts (`USt-IdNr. DE000000000`, `www.muster.example`),
-    // it is no prose to join.
+    // it is no prose to join; only a sentence that wraps goes on (see [`footer_wrap`]).
     let footer_lines = lines(&footers);
     let mut i = 0;
     while i < footer_lines.len() {
@@ -1129,9 +1129,10 @@ pub(crate) fn page_blocks_at(
         }
         let block = &footer_lines[i..j];
         let runs: Vec<&Run> = block.iter().flat_map(|l| l.runs.iter()).collect();
-        let mut breaks: Vec<(u32, u32)> = block[1..]
-            .iter()
-            .map(|l| (l.runs[0].page, l.runs[0].line))
+        let mut breaks: Vec<(u32, u32)> = block
+            .windows(2)
+            .filter(|w| !footer_wrap(&w[0], &w[1]))
+            .map(|w| (w[1].runs[0].page, w[1].runs[0].line))
             .collect();
         breaks.sort_unstable();
         built.broken_paragraph(runs, &breaks, Some("page-footer"), cx);
@@ -1999,6 +2000,19 @@ fn continues(prev: &Line<'_>, cur: &Line<'_>) -> bool {
     let gap = prev.y - cur.y;
     let height = prev.h.max(cur.h).max(1.0);
     gap > 0.0 && gap <= GAP_RATIO * height && (prev.size - cur.size).abs() <= SIZE_SLACK
+}
+
+/// Whether the footer line `next` goes on the sentence of `line` above it at its edge: `line`
+/// ends with no sentence end, comma or colon, and `next` starts with a word in small letters
+/// that is no web or mail address (`www.muster.example`, `info@muster.example` are items of
+/// their own).
+fn footer_wrap(line: &Line<'_>, next: &Line<'_>) -> bool {
+    let open = !line.text.ends_with(['.', '!', '?', ',', ':', ';']);
+    let first = next.text.split_whitespace().next().unwrap_or("");
+    let address = first.contains('@')
+        || first.contains('/')
+        || first.trim_end_matches(['.', ',']).contains('.');
+    open && first.chars().next().is_some_and(char::is_lowercase) && !address
 }
 
 /// A bold line under plain lines stands this many times farther from them than their pitch

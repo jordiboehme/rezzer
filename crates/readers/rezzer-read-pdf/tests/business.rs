@@ -4333,3 +4333,67 @@ fn a_headerless_notice_block_in_the_body_keeps_its_pairs() {
         wrong.join("\n")
     );
 }
+
+/// Review finding M-1: a sentence of a footer that wraps at one edge reads as one line, and a
+/// line that starts a new item keeps its line break. The two lines of `lines` at x 40, 8 points
+/// apart, as the footer of both pages of a file of two, in every size and font; the result is
+/// the number of line breaks in their `page-footer` paragraph.
+fn footer_wrap_breaks(lines: [&str; 2], k: f32, fonts: (&str, &str)) -> Option<usize> {
+    let t = show(fonts.0, 7.0, 40.0, 50.0, lines[0]) + &show(fonts.0, 7.0, 40.0, 42.0, lines[1]);
+    let out = common::read(&footed_pages(&t, 2, k, false));
+    let mut found = None;
+    for b in blocks(&out) {
+        if let Block::Paragraph { inlines, role, .. } = b
+            && role.as_deref() == Some("page-footer")
+            && plain_text(inlines) == lines.join(" ")
+        {
+            found = Some(line_breaks(inlines));
+        }
+    }
+    found
+}
+
+#[test]
+fn a_wrapped_footer_sentence_joins_and_footer_items_keep_their_breaks() {
+    let cases: [([&str; 2], usize); 4] = [
+        (
+            [
+                "Es gelten unsere Allgemeinen Gesch\u{e4}ftsbedingungen in der jeweils",
+                "aktuellen Fassung, die wir Ihnen auf Wunsch gern zusenden.",
+            ],
+            0,
+        ),
+        (
+            [
+                "Es gelten unsere Allgemeinen Gesch\u{e4}ftsbedingungen.",
+                "die Muster GmbH sendet sie Ihnen auf Wunsch gern zu.",
+            ],
+            1,
+        ),
+        (
+            [
+                "Es gelten unsere Allgemeinen Gesch\u{e4}ftsbedingungen in der jeweils",
+                "Fassung vom Tag der Bestellung, die wir Ihnen gern zusenden.",
+            ],
+            1,
+        ),
+        (["Tel. 0000 000000", "info@muster.example"], 1),
+    ];
+    let mut wrong = Vec::new();
+    for (k, fonts) in probe_looks() {
+        for (lines, want) in cases {
+            let got = footer_wrap_breaks(lines, k, fonts);
+            if got != Some(want) {
+                wrong.push(format!(
+                    "{k}x, {fonts:?}, {lines:?}: {got:?} breaks, want {want}"
+                ));
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
