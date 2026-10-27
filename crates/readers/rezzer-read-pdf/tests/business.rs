@@ -1751,3 +1751,51 @@ fn the_labels_over_a_row_of_fields_read_as_a_table_are_its_header() {
     assert!(tabled >= 200, "{tabled}");
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
+
+/// Close column titles as in [`close_column_titles_head_their_columns_in_every_size_and_font`]
+/// between a rule over the titles and one under the items, drawn in every look: the frame of
+/// titles over items goes to the table pass, and each title heads the column of its values.
+#[test]
+fn close_column_titles_in_a_frame_head_their_columns() {
+    let mut wrong = Vec::new();
+    let mut reads = 0;
+    for close in [Close::OneShow, Close::FlushRight] {
+        for k in [0.75, 1.0, 1.5] {
+            for look in LOOKS {
+                for fonts in FONTS {
+                    for bold in [false, true] {
+                        for n in 2..=5 {
+                            let size = 8.0 * k;
+                            let (t, columns) = close_titles(k, fonts, bold, n, close);
+                            let bottom = 600.0 - 10.0 * k * n as f32 - 6.0 * k;
+                            let t = rule(look, 40.0, 540.0, 600.0 + 8.0 * k, size)
+                                + &t
+                                + &rule(look, 40.0, 540.0, bottom, size);
+                            let out = common::read(&page_in(&t, look));
+                            reads += 1;
+                            let name = format!(
+                                "{close:?}, {k}x, {look:?}, {fonts:?}, bold {bold}, {n} rows"
+                            );
+                            for b in columns_broken(&out, &columns) {
+                                wrong.push(format!("{name}: {b}"));
+                            }
+                            let titles: Vec<String> = columns.iter().map(|c| c.0.clone()).collect();
+                            let head: Vec<String> =
+                                header_cells(&out).into_iter().map(|c| c.0).collect();
+                            if head != titles {
+                                wrong.push(format!("{name}: header {head:?}"));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(reads, 576);
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
