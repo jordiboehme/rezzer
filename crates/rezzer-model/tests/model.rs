@@ -7,12 +7,12 @@ use std::io::Write;
 use std::sync::Arc;
 
 use rezzer_model::{
-    Align, Anchor, Annotation, Asset, Block, Bytes, CalloutKind, Cell, Certainty, Completeness,
-    Confidence, Detection, Document, Edge, Embedded, Event, Evidence, FieldAction, FileFacts,
-    FormField, FormatId, Formula, FormulaKind, Graph, Inline, LayoutKind, Loss, LossReason,
-    MODEL_VERSION, Node, OutlineEntry, Parameter, Properties, ReadOptions, ReaderInfo, Role,
-    RowKind, RowNote, Rule, SectionKind, Severity, Signature, Source, SourceInfo, StatusColor,
-    TableLayout, TaskState, Value,
+    Align, Anchor, Annotation, Asset, Barcode, Block, Bytes, CalloutKind, Cell, Certainty,
+    Completeness, Confidence, Detection, Document, Edge, Embedded, Event, Evidence, FieldAction,
+    FileFacts, FormField, FormatId, Formula, FormulaKind, Graph, Inline, LayoutKind, Loss,
+    LossReason, MODEL_VERSION, Node, OutlineEntry, Parameter, Properties, ReadOptions, ReaderInfo,
+    Role, RowKind, RowNote, Rule, SectionKind, Severity, Signature, Source, SourceInfo,
+    StatusColor, TableLayout, TaskState, Value,
 };
 
 fn src() -> SourceInfo {
@@ -1108,5 +1108,28 @@ fn old_json_without_file_facts_reads() {
             "{key} leaked into {back}"
         );
     }
+    assert_eq!(MODEL_VERSION, 1);
+}
+
+#[test]
+fn barcode_place_roundtrips() {
+    let code = Barcode {
+        symbology: "Code 128".into(),
+        text: Some("0000000001".into()),
+        base64: None,
+        bytes: 10,
+        bounds: Some([40.0, 760.0, 200.0, 780.0]),
+        place: Some("top left of the page".into()),
+    };
+    let json = serde_json::to_value(&code).unwrap();
+    assert_eq!(json["place"], "top left of the page");
+    assert_eq!(json["box"], serde_json::json!([40.0, 760.0, 200.0, 780.0]));
+    let back: Barcode = serde_json::from_value(json).unwrap();
+    assert_eq!(back, code);
+    // A code without a place writes no key and reads back without one.
+    let old = serde_json::json!({"symbology": "QR Code", "text": "x", "bytes": 1});
+    let back: Barcode = serde_json::from_value(old).unwrap();
+    assert_eq!(back.place, None);
+    assert!(serde_json::to_value(&back).unwrap().get("place").is_none());
     assert_eq!(MODEL_VERSION, 1);
 }

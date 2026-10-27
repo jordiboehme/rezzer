@@ -1357,7 +1357,7 @@ pub(crate) fn render_pages(
             Some(asset) => {
                 // The page render is read cheaply at its own scale; the likely codes on it
                 // are looked at again finer below.
-                scans.read(n, asset, &page, Some(need), budget, true);
+                scans.read(n, asset, &page, Some((need, None)), budget, true);
                 if files {
                     match encode(page.pixmap) {
                         Ok(png) => {
@@ -1375,7 +1375,7 @@ pub(crate) fn render_pages(
                         break;
                     }
                     if let Ok(r) = pages.region(n, need, region, 0, &mut scans) {
-                        scans.read(n, asset, &r, Some(need), budget, false);
+                        scans.read(n, asset, &r, Some((need, Some(region))), budget, false);
                     }
                 }
             }
@@ -2141,15 +2141,15 @@ impl Scans {
     }
 
     /// Reads `picture` (of page `n`, for asset `asset`) for codes, with the cheap attempts
-    /// only when `quick`. With `need`, the picture is the page or a part of it, and each code
-    /// gets its box on the page. Returns how many new codes it gave, `None` when it was not
-    /// read.
+    /// only when `quick`. With `on`, the picture is the page, or the part of it that is the
+    /// region given, and each code gets its box on the page and its place in words. Returns
+    /// how many new codes it gave, `None` when it was not read.
     fn read(
         &mut self,
         n: u32,
         asset: usize,
         picture: &Rendered,
-        need: Option<&Need>,
+        on: Option<(&Need, Option<&Region>)>,
         budget: &Budget,
         quick: bool,
     ) -> Option<usize> {
@@ -2209,6 +2209,9 @@ impl Scans {
             }
         };
         let mut added = 0;
+        // The region's box is one code's box: with more codes in one render, each keeps the
+        // decoder's own box.
+        let alone = codes.len() == 1;
         for c in codes {
             if self.kept >= FILE_CODES {
                 self.halt(
@@ -2222,9 +2225,38 @@ impl Scans {
             if b.text.is_none() && b.base64.is_none() {
                 self.large_payloads += 1;
             }
-            b.bounds = need.map(|need| page_box(picture, need, c.bounds));
+            let mut drawn = false;
+            if let Some((need, region)) = on {
+                let px = page_rect(picture, need, c.bounds);
+                // The decoder's box of a linear code can be one line across its bars: a code
+                // drawn as paths or a picture that looks like a code takes the box drawn.
+                let shape = region.filter(|r| alone && overlap(&px, &r.b)).map(|r| r.b);
+                drawn = shape.is_some();
+                let (w, h) = need.size;
+                let framed = need
+                    .turn
+                    .place_box(shape.unwrap_or(px), w, h)
+                    .map(|v| (v * 10.0).round() / 10.0);
+                let (fw, fh) = need.turn.size(w, h);
+                b.place = Some(place_words(framed, fw, fh));
+                b.bounds = Some(framed);
+            }
             let found = self.found.entry(asset).or_default();
-            if found.codes.iter().any(|o| same_code(o, &b)) {
+            let same: Vec<usize> = (0..found.codes.len())
+                .filter(|&i| same_code(&found.codes[i], &b))
+                .collect();
+            if let Some(&first) = same.first() {
+                // Read again from its region: the box drawn replaces the page read's, and the
+                // page read's copies at other lines across the same bars are this code too.
+                if drawn {
+                    for &i in same[1..].iter().rev() {
+                        found.codes.remove(i);
+                        self.kept -= 1;
+                    }
+                    let o = &mut found.codes[first];
+                    o.bounds = b.bounds;
+                    o.place = b.place;
+                }
                 continue;
             }
             let size = b.text.as_ref().map_or(0, String::len)
@@ -2361,7 +2393,7 @@ fn same_code(a: &Barcode, b: &Barcode) -> bool {
         && a.base64 == b.base64
         && a.bytes == b.bytes
         && match (a.bounds, b.bounds) {
-            (Some(p), Some(q)) => p[0] <= q[2] && q[0] <= p[2] && p[1] <= q[3] && q[1] <= p[3],
+            (Some(p), Some(q)) => overlap(&p, &q),
             _ => true,
         }
 }
@@ -2384,12 +2416,42 @@ fn barcode(c: &barcodes::Code) -> Barcode {
         base64,
         bytes: c.bytes as u64,
         bounds: None,
+        place: None,
     }
 }
 
-/// The box of pixels `px` of `picture` on its page, in points in the frame of the page's
-/// text, rounded to a tenth.
-fn page_box(picture: &Rendered, need: &Need, px: [u32; 4]) -> [f32; 4] {
+/// Where the box `b` lies on a page `w` wide and `h` high, in words, by its middle and thirds
+/// of the page (y grows upward): `top left of the page`, `middle of the page`.
+pub(crate) fn place_words(b: [f32; 4], w: f32, h: f32) -> String {
+    let (x, y) = ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0);
+    let v = if y > h * 2.0 / 3.0 {
+        "top"
+    } else if y < h / 3.0 {
+        "bottom"
+    } else {
+        "middle"
+    };
+    let across = if x < w / 3.0 {
+        "left"
+    } else if x > w * 2.0 / 3.0 {
+        "right"
+    } else {
+        "centre"
+    };
+    match (v, across) {
+        ("middle", "centre") => "middle of the page".to_string(),
+        _ => format!("{v} {across} of the page"),
+    }
+}
+
+/// Whether two boxes (x0, y0, x1, y1) overlap or touch.
+fn overlap(a: &[f32; 4], b: &[f32; 4]) -> bool {
+    a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3]
+}
+
+/// The box of pixels `px` of `picture` on its page, in points in the visible page box (the
+/// frame of [`Region::b`]), not turned.
+fn page_rect(picture: &Rendered, need: &Need, px: [u32; 4]) -> [f32; 4] {
     let back = picture.transform.inverse();
     let corners = [
         (px[0], px[1]),
@@ -2402,9 +2464,7 @@ fn page_box(picture: &Rendered, need: &Need, px: [u32; 4]) -> [f32; 4] {
     let ys = corners.map(|p| p.y as f32 - need.origin.1);
     let min = |v: [f32; 4]| v.into_iter().fold(f32::MAX, f32::min);
     let max = |v: [f32; 4]| v.into_iter().fold(f32::MIN, f32::max);
-    let b = [min(xs), min(ys), max(xs), max(ys)];
-    let b = need.turn.place_box(b, need.size.0, need.size.1);
-    b.map(|v| (v * 10.0).round() / 10.0)
+    [min(xs), min(ys), max(xs), max(ys)]
 }
 
 /// The new words of the places of one asset after it was read for codes.
@@ -2585,6 +2645,36 @@ mod tests {
         assert_eq!(all.ids, HashSet::from([7]));
         assert!(!all.spots.holds(&[0.0, 0.0, 30.0, 30.0], 7));
         assert!(!all.spots.holds(&[200.0, 0.0, 230.0, 30.0], 7));
+    }
+
+    #[test]
+    fn place_words_thirds() {
+        // By the middle of the box, in thirds of the page: y grows upward.
+        let (w, h) = (595.0, 842.0);
+        let words = |b: [f32; 4]| place_words(b, w, h);
+        assert_eq!(words([40.0, 760.0, 200.0, 780.0]), "top left of the page");
+        assert_eq!(words([420.0, 760.0, 560.0, 780.0]), "top right of the page");
+        assert_eq!(words([40.0, 40.0, 200.0, 60.0]), "bottom left of the page");
+        assert_eq!(
+            words([420.0, 40.0, 560.0, 60.0]),
+            "bottom right of the page"
+        );
+        assert_eq!(words([250.0, 400.0, 350.0, 440.0]), "middle of the page");
+        assert_eq!(
+            words([250.0, 760.0, 350.0, 780.0]),
+            "top centre of the page"
+        );
+        assert_eq!(
+            words([40.0, 400.0, 200.0, 440.0]),
+            "middle left of the page"
+        );
+        // A box over a third line goes by its middle: 195 is left of 198.3.
+        assert_eq!(words([150.0, 40.0, 240.0, 60.0]), "bottom left of the page");
+        // The thirds are of the page given: the same box is right on a narrow page.
+        assert_eq!(
+            place_words([150.0, 40.0, 240.0, 60.0], 280.0, h),
+            "bottom right of the page"
+        );
     }
 
     #[test]

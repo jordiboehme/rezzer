@@ -1281,3 +1281,23 @@ pub fn small_picture_pages(pages: usize, per_page: usize) -> Vec<u8> {
     b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
     b.finish(catalog)
 }
+
+/// The modules of a code of kind `s` with `text`.
+pub fn modules(s: barcodes::Symbology, text: &str) -> barcodes::encode::Modules {
+    barcodes::encode::text(s, text, &barcodes::encode::Options::default()).expect("encode")
+}
+
+/// A Code 128 of `text` drawn as bars: one filled `re` for each dark module column, `module`
+/// points wide and `height` high, the code's lower left corner (its first module, light or
+/// dark) at (`x`, `y`).
+pub fn code128_bars(text: &str, x: f32, y: f32, module: f32, height: f32) -> String {
+    let m = modules(barcodes::Symbology::Code128, text);
+    let mut out = String::from("q 0 g\n");
+    for col in 0..m.width {
+        if m.dark[col as usize] {
+            let left = x + col as f32 * module;
+            out += &format!("{left:.3} {y:.3} {module:.3} {height:.3} re\n");
+        }
+    }
+    out + "f Q\n"
+}

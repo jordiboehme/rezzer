@@ -3740,6 +3740,7 @@ fn coded(texts: &[&str], places: usize) -> String {
                 base64: None,
                 bytes: t.len() as u64,
                 bounds: None,
+                place: None,
             })
             .collect(),
         code_unread: false,
@@ -3752,6 +3753,47 @@ fn coded(texts: &[&str], places: usize) -> String {
         })
         .collect();
     render(&d, Completeness::Complete, &opts())
+}
+
+#[test]
+fn code_place_in_words() {
+    // A code read from a page that needs vision says where it lies in words; the box stays
+    // in the JSON only.
+    let mut d = doc();
+    d.assets = vec![Asset {
+        id: "page-1".into(),
+        path: Some("assets/page-1.png".into()),
+        sha256: "ff".into(),
+        mime: "image/png".into(),
+        caption: None,
+        alt: Some("1 picture".into()),
+        needs_vision: true,
+        codes: vec![rezzer_model::Barcode {
+            symbology: "Code 128".into(),
+            text: Some("0000000001".into()),
+            base64: None,
+            bytes: 10,
+            bounds: Some([40.0, 760.0, 200.0, 780.0]),
+            place: Some("top left of the page".into()),
+        }],
+        code_unread: false,
+    }];
+    d.body = vec![Block::Media {
+        asset: "page-1".into(),
+        alt: Some("1 picture".into()),
+        anchor: None,
+    }];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        md.contains("Code 128, top left of the page: 0000000001"),
+        "{md}"
+    );
+    assert!(!md.contains("box 40"), "{md}");
+    // Without a place the head is the kind alone, never the numbers.
+    d.assets[0].codes[0].place = None;
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(md.contains("Code 128: 0000000001"), "{md}");
+    assert!(!md.contains("box 40"), "{md}");
 }
 
 #[test]

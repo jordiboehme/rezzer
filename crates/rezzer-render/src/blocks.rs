@@ -1525,22 +1525,16 @@ fn media(id: &str, place: Option<&str>, ctx: &Ctx) -> String {
     out
 }
 
-/// One code read from a picture: `QR Code: <payload>`. Its payload is data: a web address
-/// becomes a link, other text stays escaped text (a payload of several lines a fenced block,
-/// control characters as their symbols), bytes are written in base64.
+/// One code read from a picture: `QR Code: <payload>`, with its place on the page when it
+/// has one (`Code 128, top left of the page: <payload>`); its box in points is in the JSON
+/// only. Its payload is data: a web address becomes a link, other text stays escaped text (a
+/// payload of several lines a fenced block, control characters as their symbols), bytes are
+/// written in base64.
 fn code_lines(c: &Barcode) -> String {
-    let mut head = c.symbology.clone();
-    if let Some(b) = c.bounds {
-        let r = |v: f32| v.round() as i64;
-        head.push_str(&format!(
-            ", box {}, {} to {}, {}",
-            r(b[0]),
-            r(b[1]),
-            r(b[2]),
-            r(b[3])
-        ));
-    }
-    head.push_str(": ");
+    let head = match &c.place {
+        Some(place) => format!("{}, {place}: ", c.symbology),
+        None => format!("{}: ", c.symbology),
+    };
     let mut parts = vec![Inline::plain(head.clone())];
     match (&c.text, &c.base64) {
         (Some(t), _) if t.contains(['\n', '\r']) => {

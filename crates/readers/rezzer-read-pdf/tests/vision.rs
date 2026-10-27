@@ -10,7 +10,7 @@ mod common;
 use std::io::Write;
 use std::path::PathBuf;
 
-use common::{Builder, markdown, needing};
+use common::{Builder, code128_bars, markdown, modules, needing};
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
     Anchor, Asset, Block, Completeness, LossReason, ReadOptions, ReadOutcome, SectionKind,
@@ -1913,11 +1913,6 @@ use barcodes::encode::{self as code, Options};
 
 const TICKET_URL: &str = "https://example.org/t/dNuKThV1";
 
-/// The modules of a code with `text`.
-fn modules(s: Symbology, text: &str) -> code::Modules {
-    code::text(s, text, &Options::default()).expect("encode")
-}
-
 /// A gray picture of a code, `px` pixels a module and a quiet zone of `quiet` modules, as
 /// dictionary and deflated data.
 fn code_picture(m: &code::Modules, px: u32, quiet: u32) -> (String, Vec<u8>) {
@@ -2247,6 +2242,162 @@ fn code_on_a_scan_page_is_listed_with_the_page() {
         (b[0] - 300.0).abs() < 25.0 && (b[3] - 242.0).abs() < 25.0,
         "{b:?}"
     );
+}
+
+/// One page of `w` by `h` points with `extra` (for example `/Rotate 90`) in its dictionary,
+/// Helvetica as `/F1` and a gray picture of 4 by 4 pixels as `/P0`.
+fn pictured_page(content: &str, w: f32, h: f32, extra: &str) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let (dict, data) = gray(200);
+    let picture = b.stream(dict, &data);
+    let cs = b.stream("", content.as_bytes());
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 {w} {h}] {extra} \
+         /Resources << /Font << /F1 {font} 0 R >> /XObject << /P0 {picture} 0 R >> >> \
+         /Contents {cs} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+/// The box of the bars of [`code128_bars`] for `text` at (`x`, `y`): from the left edge of the
+/// first dark module to the right edge of the last one.
+fn bars_box(text: &str, x: f32, y: f32, module: f32, height: f32) -> [f32; 4] {
+    let m = modules(Symbology::Code128, text);
+    let dark: Vec<u32> = (0..m.width).filter(|&c| m.dark[c as usize]).collect();
+    let (first, last) = (dark[0], dark[dark.len() - 1]);
+    [
+        x + first as f32 * module,
+        y,
+        x + (last + 1) as f32 * module,
+        y + height,
+    ]
+}
+
+/// Asserts that the one code of `out` is the Code 128 `0000000001` boxed within 0.5 points of
+/// `bars`, at `place`, and that the Markdown says so in words without the numbers.
+fn assert_code_at(out: &ReadOutcome, bars: [f32; 4], place: &str, case: &str) {
+    assert_eq!(needing(out), ["page-1"], "{case}");
+    let a = asset(out, "page-1");
+    assert_eq!(
+        codes_of(out, "page-1"),
+        [("Code 128".to_string(), "0000000001".to_string())],
+        "{case}"
+    );
+    let b = a.codes[0].bounds.expect("box");
+    assert!(
+        b.iter()
+            .zip(bars)
+            .all(|(got, want)| (got - want).abs() <= 0.5),
+        "{case}: {b:?}, the bars are {bars:?}"
+    );
+    assert_eq!(a.codes[0].place.as_deref(), Some(place), "{case}");
+    let md = markdown(out);
+    assert!(
+        md.contains(&format!("Code 128, {place}: 0000000001")),
+        "{case}: {md}"
+    );
+    assert!(!md.contains("Code 128, box"), "{case}: {md}");
+}
+
+#[test]
+fn barcode_box_is_the_bars() {
+    // A page that needs vision for a picture of 300 by 200 points, with a Code 128 drawn as
+    // bars beside it: the code's box is its bars, not the line the decoder read, and the
+    // Markdown says where it is in words.
+    let bars = code128_bars("0000000001", 100.0, 500.0, 0.8, 20.0);
+    let content = format!(
+        "BT /F1 11 Tf 72 780 Td (Lieferschein 0000) Tj ET\n\
+         q 300 0 0 200 150 300 cm /P0 Do Q\n{bars}"
+    );
+    let out = read(&pictured_page(&content, 595.0, 842.0, ""));
+    let want = bars_box("0000000001", 100.0, 500.0, 0.8, 20.0);
+    assert_code_at(&out, want, "middle left of the page", "A4");
+}
+
+/// A page of the paper `paper` (portrait width and height) at `scale`, turned by `turn`
+/// degrees (0, 90 or 270) for display, that needs vision for a picture; laid out in the frame
+/// it is shown in: three lines of text, the picture and a Code 128 whose middle is at
+/// (`fx`, `fy`) of the shown width and height. Returns the file and the box of the bars in
+/// the shown frame.
+fn turned_code_page(
+    paper: (f32, f32),
+    scale: f32,
+    turn: u32,
+    (fx, fy): (f32, f32),
+) -> (Vec<u8>, [f32; 4]) {
+    let (pw, ph) = (paper.0 * scale, paper.1 * scale);
+    let (w, h) = if turn == 0 { (pw, ph) } else { (ph, pw) };
+    let (module, height) = (0.8 * scale, 20.0 * scale);
+    let m = modules(Symbology::Code128, "0000000001");
+    let x = fx * w - m.width as f32 * module / 2.0;
+    let y = fy * h - height / 2.0;
+    let size = 11.0 * scale;
+    let mut shown = String::new();
+    for (k, line) in ["Lieferschein 0000", "Muster GmbH", "Musterweg 1"]
+        .iter()
+        .enumerate()
+    {
+        shown += &format!(
+            "BT /F1 {size} Tf {:.2} {:.2} Td ({line}) Tj ET\n",
+            0.1 * w,
+            (0.70 - 0.04 * k as f32) * h
+        );
+    }
+    shown += &format!(
+        "q {:.2} 0 0 {:.2} {:.2} {:.2} cm /P0 Do Q\n",
+        0.6 * w,
+        0.2 * h,
+        0.2 * w,
+        0.22 * h
+    );
+    shown += &code128_bars("0000000001", x, y, module, height);
+    let (content, extra) = match turn {
+        0 => (shown, String::new()),
+        90 => (
+            format!("q 0 1 -1 0 {pw} 0 cm\n{shown}Q\n"),
+            "/Rotate 90".into(),
+        ),
+        _ => (
+            format!("q 0 -1 1 0 0 {ph} cm\n{shown}Q\n"),
+            "/Rotate 270".into(),
+        ),
+    };
+    let file = pictured_page(&content, pw, ph, &extra);
+    (file, bars_box("0000000001", x, y, module, height))
+}
+
+#[test]
+fn barcode_box_is_the_bars_at_every_scale_paper_place_and_turn() {
+    // The place words take thirds of the page as it is shown: the same words at every scale,
+    // on A4 and Letter, and on pages turned a quarter either way.
+    let papers = [("A4", (595.0, 842.0)), ("Letter", (612.0, 792.0))];
+    let across = [(1.0 / 6.0, "left"), (0.5, "centre"), (5.0 / 6.0, "right")];
+    let up = [(1.0 / 6.0, "bottom"), (0.5, "middle"), (5.0 / 6.0, "top")];
+    for (name, paper) in papers {
+        for scale in [0.75, 1.0, 1.5] {
+            for turn in [0, 90, 270] {
+                for (fx, hw) in across {
+                    for (fy, vw) in up {
+                        let place = match (vw, hw) {
+                            ("middle", "centre") => "middle of the page".to_string(),
+                            _ => format!("{vw} {hw} of the page"),
+                        };
+                        let (file, bars) = turned_code_page(paper, scale, turn, (fx, fy));
+                        let case = format!("{name} at {scale}, turned {turn}, {place}");
+                        assert_code_at(&read(&file), bars, &place, &case);
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[test]

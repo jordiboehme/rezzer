@@ -174,10 +174,15 @@ pub struct Barcode {
     /// nor base64, only its size.
     pub bytes: u64,
     /// About where the code lies on its page, in points (left, bottom, right, top in the
-    /// frame of the page's text), when the picture is the page. A small picture shared by
+    /// frame of the page's text), when the picture is the page. A code drawn as paths, or a
+    /// picture that looks like a code, has the box of that drawing or picture. A small picture shared by
     /// several places has no box here: each place says where the picture is.
     #[serde(rename = "box", default, skip_serializing_if = "Option::is_none")]
     pub bounds: Option<[f32; 4]>,
+    /// Where the code lies on its page in words, by thirds of the page in the frame of its
+    /// text, for example `top left of the page`, when it has a box.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub place: Option<String>,
 }
 
 /// A short map of the document: its parts and the main facts. Built by the enrich passes.
