@@ -40,5 +40,5 @@ slow-timeout = { period = "60s", terminate-after = 2 }
 # safety stop, checked when the call returns. A call that hangs is ended after 2 minutes and
 # fails the run instead of hanging it.
 [[profile.default.overrides]]
-filter = '(package(sheetparts) & binary(odf)) | (package(rezzer-enrich) & binary(enrich)) | (package(csvsniff) & binary(csvsniff)) | (package(formulakit) & binary(logic)) | (package(rezzer-read-markdown) & binary(markdown))'
+filter = '(package(sheetparts) & binary(odf)) | (package(rezzer-enrich) & binary(enrich)) | (package(csvsniff) & binary(csvsniff)) | (package(formulakit) & binary(logic)) | (package(rezzer-read-markdown) & binary(markdown)) | (package(rezzer-model) & binary(model)) | (package(rezzer-derez) & (binary(source) | binary(fit)))'
 slow-timeout = { period = "60s", terminate-after = 2 }

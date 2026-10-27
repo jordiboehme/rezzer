@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use rezzer_derez::grid::Pos;
 use rezzer_derez::plan::{
@@ -189,8 +189,40 @@ fn share(plan: &Plan, w: u16, h: u16) -> Option<f32> {
 
 /// A time bound in milliseconds: 50 in an optimized build, 500 with debug assertions, so a
 /// loaded machine does not make a debug test run fail.
-fn limit_ms() -> u128 {
-    if cfg!(debug_assertions) { 500 } else { 50 }
+/// The wall-clock stop of the work-bound tests: far above any machine, so only a hang fails
+/// it. The work itself is bounded by counted steps.
+const SAFETY: Duration = Duration::from_secs(60);
+
+/// Runs `f` and gives its result, the steps of work it did ([`rezzer_derez::work_steps`],
+/// `None` in a release build) and its wall time.
+fn counted<T>(f: impl FnOnce() -> T) -> (T, Option<u64>, Duration) {
+    let before = rezzer_derez::work_steps();
+    let start = Instant::now();
+    let out = f();
+    let took = start.elapsed();
+    let steps = before.zip(rezzer_derez::work_steps()).map(|(b, a)| a - b);
+    (out, steps, took)
+}
+
+/// Checks a work bound: at most the `measured` steps with half of them again as margin (in
+/// a debug build, which counts them), and the wall time under [`SAFETY`]. Each `measured`
+/// was taken once (2026-10-27, debug build, `--no-capture`): the count is the same on every
+/// machine, and a growth past the margin is a change in the work, not a slow machine.
+fn assert_work(what: &str, steps: Option<u64>, measured: u64, took: Duration) {
+    let max = measured + measured / 2;
+    eprintln!("{what}: {steps:?} steps (bound {max}) in {took:?}");
+    if cfg!(debug_assertions) {
+        // At least half the measured count too: a count of 0 would mean the work ran where
+        // it is not counted (another thread), not that it got cheaper.
+        assert!(
+            steps.is_some_and(|n| (measured / 2..=max).contains(&n)),
+            "{what}: {steps:?} steps of work, expected {}..={max}",
+            measured / 2
+        );
+    } else {
+        assert_eq!(steps, None);
+    }
+    assert!(took < SAFETY, "{what}: took {took:?}");
 }
 
 fn costs() -> Document {
@@ -241,14 +273,9 @@ fn sheets_become_rounds() {
 
 #[test]
 fn huge_sheet_range_is_clipped() {
-    let started = Instant::now();
     let d = doc(vec![sheet("Big", vec![table(3, 3, Some("A1:XFD1048576"))])]);
-    let p = plans(&d);
-    assert!(
-        started.elapsed().as_millis() < limit_ms(),
-        "{:?}",
-        started.elapsed()
-    );
+    let (p, steps, took) = counted(|| plans(&d));
+    assert_work("huge sheet range", steps, 96, took);
     assert_eq!(p.len(), 1);
     assert_eq!(count(&p[0], ShapeKind::Outline), 1);
     assert!(row_borders(&p[0]) <= 12, "{}", row_borders(&p[0]));
@@ -727,13 +754,8 @@ fn deeply_nested_sections_do_not_overflow() {
         block = section(SectionKind::Other, None, vec![block]);
     }
     let mut d = doc(vec![block]);
-    let started = Instant::now();
-    let p = plans(&d);
-    assert!(
-        started.elapsed().as_millis() < limit_ms(),
-        "{:?}",
-        started.elapsed()
-    );
+    let (p, steps, took) = counted(|| plans(&d));
+    assert_work("deeply nested sections", steps, 20_002, took);
     assert_eq!(p.len(), 1);
     assert_eq!(p[0].label, "section 1");
     assert_eq!(count(&p[0], ShapeKind::Line), 1);
@@ -750,13 +772,8 @@ fn a_long_body_is_fast() {
         })
         .collect();
     let d = doc(body);
-    let started = Instant::now();
-    let p = plans(&d);
-    assert!(
-        started.elapsed().as_millis() < limit_ms(),
-        "{:?}",
-        started.elapsed()
-    );
+    let (p, steps, took) = counted(|| plans(&d));
+    assert_work("long body", steps, 100_801, took);
     assert_eq!(p.len(), MAX_PLANS);
 }
 
@@ -1140,13 +1157,10 @@ fn pages_tried_are_capped() {
 fn many_crowded_pages_are_fast() {
     let pages: Vec<PageGeometry> = (1..=5000).map(|n| page(n, tiles())).collect();
     let d = with_pages(Vec::new(), pages);
-    let start = Instant::now();
-    let ps = plans(&d);
-    let took = start.elapsed().as_millis();
+    let (ps, steps, took) = counted(|| plans(&d));
     assert!(ps.is_empty());
-    // Only the first 200 pages with shapes are tried: about 16 ms with debug assertions and
-    // 8 ms optimized here, against 500 and 50.
-    assert!(took < limit_ms(), "{took} ms");
+    // Only the first 200 pages with shapes are tried.
+    assert_work("many crowded pages", steps, 540_200, took);
 }
 
 /// The free cells of `g` that `from` reaches.
@@ -1263,10 +1277,8 @@ fn stray_cells_among_many_tables_are_fast() {
         .map(|n| page(n, tables_and_stray_cells()))
         .collect();
     let d = with_pages(Vec::new(), pages);
-    let start = Instant::now();
-    let _ = plans(&d);
-    let took = start.elapsed().as_millis();
-    // Matching every cell against every table took about 150 ms here, optimized or not; with
-    // the bounded search about 22 ms with debug assertions and 14 ms optimized.
-    assert!(took < limit_ms(), "{took} ms");
+    let (_, steps, took) = counted(|| plans(&d));
+    // Each cell is tried against at most 16 tables; matching it against every table of its
+    // page would count about 200 million steps.
+    assert_work("stray cells among many tables", steps, 1_893_168, took);
 }

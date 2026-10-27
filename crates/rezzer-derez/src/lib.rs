@@ -18,8 +18,10 @@ mod run;
 pub mod steer;
 mod term;
 pub mod ui;
+mod work;
 
 pub use plan::{Rounds, rounds};
+pub use work::work_steps;
 
 #[doc(hidden)]
 pub use term::{Crossterm, Guard, Screen, install_restore_hook};
