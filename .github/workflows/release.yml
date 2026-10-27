@@ -138,26 +138,36 @@ jobs:
         run: |
           "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 5 cargo fetch --locked
 
+      # cargo-about runs online (the chrono workaround fetches its license
+      # file), so the run retries. The script overwrites its output, so a
+      # second try starts clean.
       - name: Write the notices
         run: |
           set -euo pipefail
           mkdir -p notices
-          scripts/third-party-notices.sh notices/THIRD-PARTY-NOTICES.txt
+          "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 3 \
+            scripts/third-party-notices.sh notices/THIRD-PARTY-NOTICES.txt
 
-      # The licenses and crates the file must name. The license ids are checked
-      # in their heading line "<name> (<id>)", since a plain "MIT" also matches
-      # "LIMITED". windows-sys proves the Windows targets are in the graph;
-      # Adobe, PDFium, Foxit and CC0 that bundled-data.txt is appended.
+      # The licenses and crates the file must name. A license id must end a
+      # heading line "<name> (<id>)": a plain "MIT" also matches "LIMITED", and
+      # a regex would read the "." in "Apache-2.0" as any character. The
+      # bundled data is checked by lines from the copied texts, not by our own
+      # summary at the top of bundled-data.txt. windows-sys proves the Windows
+      # targets are in the graph.
       - name: Check the notices
         run: |
           set -euo pipefail
           file=notices/THIRD-PARTY-NOTICES.txt
           missing=0
           for id in MIT Apache-2.0 BSD-3-Clause; do
-            grep -qE -- " \($id\)\$" "$file" || { echo "::error::$file has no $id license"; missing=1; }
+            awk -v want=" ($id)" '
+              length($0) > length(want) && substr($0, length($0) - length(want) + 1) == want { found = 1 }
+              END { exit !found }
+            ' "$file" || { echo "::error::$file has no $id license"; missing=1; }
           done
-          for word in Adobe PDFium Foxit CC0; do
-            grep -qF -- "$word" "$file" || { echo "::error::$file does not name $word"; missing=1; }
+          for text in 'Copyright 1990-2023 Adobe' 'Copyright 2014 PDFium Authors' \
+            'Original code copyright 2014 Foxit Software Inc.' 'CC0 1.0 Universal'; do
+            grep -qF -- "$text" "$file" || { echo "::error::$file lacks '$text'"; missing=1; }
           done
           for crate in rxing hayro-interpret calamine windows-sys; do
             grep -qE -- "^  - $crate [0-9]" "$file" \
@@ -531,7 +541,8 @@ jobs:
           notices=notices/THIRD-PARTY-NOTICES.txt
           [ -s "$notices" ] || { echo "::error::$notices is missing or empty (artifact third-party-notices)"; exit 1; }
           cp "$notices" "$stage/"
-          grep -q 'Adobe' "$stage/THIRD-PARTY-NOTICES.txt" \
+          # A line of the copied Adobe license, not the summary at the top.
+          grep -qF -- 'Copyright 1990-2023 Adobe' "$stage/THIRD-PARTY-NOTICES.txt" \
             || { echo "::error::$stage/THIRD-PARTY-NOTICES.txt lacks the Adobe CMap notice"; exit 1; }
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "STAGE=$name" >> "$GITHUB_ENV"
