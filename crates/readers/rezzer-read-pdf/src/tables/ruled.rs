@@ -6,7 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::banded::{BAND_EDGE, Band, Shared, Taken, banded, row_starts};
+use super::banded::{BAND_EDGE, BODY_GAP, Band, Shared, Taken, banded, row_starts};
 use super::pairs::{
     Field, Top, claim, field_cuts, field_strips, frame_tops, frames, holds_values, pairs_table,
     taken_by_grids,
@@ -1794,13 +1794,15 @@ fn places_of(mut spans: Vec<Span>) -> Vec<Place> {
 /// them as words (a note across the section, see [`prose_like`]). So do the inner column
 /// edges of a row of three drawn cells or more (a header band, see `banded`) the lines under
 /// it, down to the first of the page's horizontal rules `hs` (sorted by height) as wide as
-/// the row: its table's lines without rules. A rule within a tenth of the text size of a gap
+/// the row or to a gap of [`BODY_GAP`] line heights: its table's lines without rules. A rule within a tenth of the text size of a gap
 /// cuts there; a rule inside a word cuts nothing. A cut part keeps the run's place in the
 /// reading order. False when more than `budget` steps were needed: the runs past them stay
 /// whole.
 fn cut_at_columns(flow: &mut Flow, parts: &[Part], hs: &[Seg], budget: usize) -> bool {
     // The rules as drawn, and the inner column edges of hanging headers below their feet.
     let (mut drawn, mut hanging): (Vec<Span>, Vec<Span>) = (Vec::new(), Vec::new());
+    // The page's lines from the top, for the bodies of rows of drawn cells, once needed.
+    let mut lines: Option<Vec<FlowLine>> = None;
     for p in parts {
         let (xs, ys) = edges(&p.h, &p.v);
         if xs.len() < 3 || ys.len() < 2 {
@@ -1820,12 +1822,35 @@ fn cut_at_columns(flow: &mut Flow, parts: &[Part], hs: &[Seg], budget: usize) ->
         if ys.len() == 2 && xs.len() >= 4 {
             let (left, right, bottom) = (xs[0], xs[xs.len() - 1], ys[1]);
             let tol = SNAP.max(BAND_EDGE * (right - left));
-            let floor = hs[..hs.partition_point(|s| s.at < bottom - SNAP)]
+            let rule = hs[..hs.partition_point(|s| s.at < bottom - SNAP)]
                 .iter()
                 .rev()
                 .find(|s| s.from <= left + tol && s.to >= right - tol)
                 .map_or(f32::MIN, |s| s.at);
-            hanging.extend(inner.iter().map(|&x| (x, floor, bottom)));
+            // As far down as the band's body reaches (see `body_below`): its lines follow each
+            // other at most BODY_GAP line heights apart.
+            let mut floor = bottom;
+            let mut last = bottom;
+            let below = lines.get_or_insert_with(|| {
+                let mut all = flow_lines(flow);
+                all.sort_by(|a, b| b.y.total_cmp(&a.y));
+                all
+            });
+            for l in below.iter().filter(|l| l.y < bottom && l.y > rule) {
+                let inside = flow.runs[l.start..l.end].iter().any(|r| {
+                    let (cx, _) = middle(r);
+                    cx > left - SNAP && cx < right + SNAP && !r.text.trim().is_empty()
+                });
+                if !inside {
+                    continue;
+                }
+                if last - l.y > BODY_GAP * l.size.max(1.0) {
+                    break;
+                }
+                last = l.y;
+                floor = l.y - 0.25 * l.size;
+            }
+            hanging.extend(inner.iter().map(|&x| (x, floor.max(rule), bottom)));
         }
     }
     if drawn.is_empty() && hanging.is_empty() {
@@ -2355,6 +2380,25 @@ mod tests {
             100
         ));
         assert_eq!(flow.runs.len(), 1);
+    }
+
+    /// A row of three drawn cells cuts the lines under it at its inner edges, as far as its
+    /// body reaches: a line more than [`BODY_GAP`] line heights under the one over it is not
+    /// its body.
+    #[test]
+    fn a_band_cuts_only_the_lines_of_its_body() {
+        for (y, cut) in [(80.0, true), (20.0, false)] {
+            let mut run = spaced("AA  BB", 0.0);
+            run.y = y;
+            let mut flow = flow_of(vec![run]);
+            assert!(cut_at_columns(
+                &mut flow,
+                &[one_row(&[-10.0, 20.0, 60.0, 100.0])],
+                &[],
+                100
+            ));
+            assert_eq!(flow.runs.len(), if cut { 2 } else { 1 }, "{y}");
+        }
     }
 
     #[test]

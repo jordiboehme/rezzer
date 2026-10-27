@@ -23,7 +23,7 @@ pub(super) struct Band {
 const BAND_HEIGHT: f32 = 4.0;
 
 /// Lines below a band at most this many line heights apart belong to its table.
-const BODY_GAP: f32 = 3.0;
+pub(super) const BODY_GAP: f32 = 3.0;
 
 /// Lines a page's bands may look at together; past them the rest are not looked at.
 const BAND_WORK: usize = 4_000_000;
