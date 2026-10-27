@@ -19,7 +19,8 @@
 //! Only a growth by half or more is moved: a block grown in small exact steps (a buffer that
 //! reserves 64 KiB more each time) would be copied whole at every step, which is quadratic.
 //! Growth by doubling, as `Vec` does it, is moved; smaller growth and shrinking go to the
-//! system's realloc, which does them in place on macOS and Linux. On Windows, HeapReAlloc
+//! system's realloc, which does them in place on macOS and glibc Linux. Whether musl's realloc
+//! does is measured by the Linux allocator probe (`tests/linux_rss.rs`). On Windows, HeapReAlloc
 //! copies a large block at each small step. The policy still forwards small growth to the
 //! system on purpose, so the small-step test checks no time there.
 //!

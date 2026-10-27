@@ -198,7 +198,7 @@ impl Config {
 
 /// The config file path from the values of `XDG_CONFIG_HOME`, `HOME` and `USERPROFILE`. An
 /// empty or relative `XDG_CONFIG_HOME` is ignored, as the XDG base directory spec says. The
-/// home is found by [`home_dir`]: `HOME`, or `USERPROFILE` (which Windows sets) when `HOME`
+/// home is `HOME`, or `USERPROFILE` (which Windows sets) when `HOME`
 /// is empty or unset. Without an absolute home there is no path, so a config file is never
 /// read from the working directory. Absoluteness follows the rules of the system this runs on.
 pub fn config_path_from(

@@ -859,15 +859,21 @@ fn config_path_falls_back_to_userprofile() {
 
 #[test]
 fn config_path_needs_an_absolute_base() {
-    // A relative or empty HOME never gives a config file in the working directory, with or
-    // without a relative XDG_CONFIG_HOME.
+    // A relative or empty HOME or USERPROFILE never gives a config file in the working
+    // directory, with or without a relative XDG_CONFIG_HOME.
     for home in [None, Some(""), Some("rel")] {
-        for xdg in [None, Some(""), Some("rel")] {
-            assert_eq!(
-                rezzer_pipeline::config_path_from(xdg.map(OsStr::new), home.map(OsStr::new), None),
-                None,
-                "{xdg:?} {home:?}"
-            );
+        for profile in [None, Some(""), Some("rel")] {
+            for xdg in [None, Some(""), Some("rel")] {
+                assert_eq!(
+                    rezzer_pipeline::config_path_from(
+                        xdg.map(OsStr::new),
+                        home.map(OsStr::new),
+                        profile.map(OsStr::new)
+                    ),
+                    None,
+                    "{xdg:?} {home:?} {profile:?}"
+                );
+            }
         }
     }
     // An absolute XDG_CONFIG_HOME is enough on its own.
