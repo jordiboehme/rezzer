@@ -7,7 +7,9 @@
 use std::collections::{HashMap, HashSet};
 
 use super::banded::{Band, Shared, Taken, banded, row_starts};
-use super::pairs::{Field, claim, field_cuts, field_strips, frames, pairs_table, taken_by_grids};
+use super::pairs::{
+    Field, claim, field_cuts, field_strips, frame_tops, frames, pairs_table, taken_by_grids,
+};
 use super::sections::{CUT_WORK, sections};
 use super::side::{Beside, SIDE_FOUND_BY, SIDE_WORK, Side, StripKind, side_columns, totals_top};
 use super::*;
@@ -79,7 +81,13 @@ pub(super) fn ruled(
     // The horizontal lines a grid takes; the others may bound a column of totals or a strip
     // of fields.
     let taken = taken_by_grids(hs.len(), &groups);
-    let frames = cut_runs(page, flow, (&hs, &vs, &taken), &grids, found);
+    let frames = cut_runs(
+        page,
+        flow,
+        (&hs, &vs, &frame_tops(&hs, &groups)),
+        &grids,
+        found,
+    );
     let lines = flow_lines(flow);
     let by_y = ByY::new(flow, &lines);
     let per_line = texted_per_line(flow);
@@ -788,17 +796,17 @@ fn grid_parts(
     grids
 }
 
-/// Cuts the runs of the page at the edges of the fields between rules (the frames of the
-/// horizontal lines `hs` no grid takes, see `taken`, with their dividers among `vs`), at a word
-/// gap, and at the column lines of the sections `grids`. The frames found.
+/// Cuts the runs of the page at the edges of the fields between rules (the frames under the
+/// horizontal lines `hs` that `tops` names, see `frame_tops`, with their dividers among `vs`),
+/// at a word gap, and at the column lines of the sections `grids`. The frames found.
 fn cut_runs(
     page: u32,
     flow: &mut Flow,
-    (hs, vs, taken): (&[Seg], &[Seg], &[bool]),
+    (hs, vs, tops): (&[Seg], &[Seg], &[bool]),
     grids: &[Part],
     found: &mut Found,
 ) -> Vec<Frame> {
-    let frames = frames(hs, taken, vs);
+    let frames = frames(hs, tops, vs);
     if frames.is_none() {
         found.skipped.push(format!(
             "label and value fields between rules on page {page} are not looked for: the page \

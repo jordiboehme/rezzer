@@ -8,7 +8,7 @@
 //! Each read holds the invariants and the reading the table of ends gives: the fields pair,
 //! or they stay text with a loss that names them.
 
-use crate::check::{Broken, Inv, Known, check_fields, read_pages, unexpected};
+use crate::check::{Broken, Inv, check_fields, read_pages, unexpected};
 use crate::shapes::{Built, FieldSpec, Geo, REAL, ROWS, Rows, rows_page};
 use crate::{draw, looks};
 
@@ -416,13 +416,11 @@ fn every_cell_of_the_ends_reads_as_the_table_says() {
 /// Reads `layouts` of the matrix with `extra` drawn on each page (in geometry `g`, from its
 /// top rule), in every look: no field pairs wrongly, every value stands once, and each field
 /// with a value pairs right or a loss names it. An empty field left as text loses no value:
-/// it need not be named. `known` are the layouts (by name) that break an invariant today, in
-/// every look.
+/// it need not be named.
 fn labels_under_with(
     what: &str,
     layouts: Vec<Layout>,
     extra: fn(&Geo, f32) -> String,
-    known: &[Known],
 ) -> Vec<String> {
     let mut reads = Vec::new();
     for l in layouts {
@@ -448,19 +446,7 @@ fn labels_under_with(
             reads.push((format!("{}, {what}, {look}", l.name()), broken));
         }
     }
-    // A known layout is known in every look.
-    let known: Vec<Known> = known
-        .iter()
-        .flat_map(|k| {
-            std::iter::once("real")
-                .chain(looks().into_iter().map(|(look, _)| look))
-                .map(move |look| {
-                    let name: &'static str = Box::leak(format!("{}, {what}, {look}", k.0).into());
-                    (name, k.1, k.2)
-                })
-        })
-        .collect();
-    unexpected(reads, &known)
+    unexpected(reads, &[])
 }
 
 /// Every labels-under layout of the matrix split by a double rule: a second rule a third of
@@ -471,18 +457,13 @@ fn labels_under_with(
 fn a_labels_under_grid_split_by_a_double_rule_never_pairs_shifted() {
     let layouts: Vec<Layout> = candidates().into_iter().filter(|l| l.under).collect();
     assert_eq!(layouts.len(), 42);
-    let wrong = labels_under_with(
-        "split",
-        layouts,
-        |g, top| {
-            g.hrule(
-                g.col(0) - 0.12,
-                g.col(50),
-                top - 2.4 * g.data - g.data / 3.0,
-            )
-        },
-        &[],
-    );
+    let wrong = labels_under_with("split", layouts, |g, top| {
+        g.hrule(
+            g.col(0) - 0.12,
+            g.col(50),
+            top - 2.4 * g.data - g.data / 3.0,
+        )
+    });
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
@@ -491,7 +472,8 @@ fn a_labels_under_grid_split_by_a_double_rule_never_pairs_shifted() {
 /// the grid's: the box's grid takes the top rule, so the grid's first row is text between two
 /// rules, and what the box holds is a table's. Runs a table holds, and a row between two
 /// rules, count toward a loss only. A left-out layout is the page of a grid of the other way,
-/// and the box adds nothing to it. The layouts of [`BOXED_KNOWN`] break an invariant today.
+/// and the box adds nothing to it. The grid's first row is still a row of fields under the
+/// box's lowest rule, so a grid whose last row is labels only is read too (and not clear).
 #[test]
 fn a_labels_under_grid_under_a_boxed_section_never_pairs_shifted() {
     let layouts: Vec<Layout> = layouts()
@@ -500,84 +482,16 @@ fn a_labels_under_grid_under_a_boxed_section_never_pairs_shifted() {
         .filter(|l| l.under)
         .collect();
     assert_eq!(layouts.len(), 32);
-    let wrong = labels_under_with(
-        "boxed",
-        layouts,
-        |g, top| {
-            let (h, x0, x1) = (2.4 * g.data, g.col(0) - 0.12, g.col(50));
-            let mut c = g.hrule(x0, x1, top + h);
-            for x in [x0, g.col(20), x1] {
-                c += &g.vrule(x, top, top + h);
-            }
-            c
-        },
-        &BOXED_KNOWN,
-    );
+    let wrong = labels_under_with("boxed", layouts, |g, top| {
+        let (h, x0, x1) = (2.4 * g.data, g.col(0) - 0.12, g.col(50));
+        let mut c = g.hrule(x0, x1, top + h);
+        for x in [x0, g.col(20), x1] {
+            c += &g.vrule(x, top, top + h);
+        }
+        c
+    });
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
-
-/// Why a boxed layout with an empty last row breaks [`Inv::ClearPairs`]: the box's grid
-/// takes the grid's top rule, so its first row is no row of fields, and its last row is labels
-/// only, so no group with a value is read at all. The fields stay text, and no loss names
-/// them.
-const BOXED_GAP: &str = "the box takes the top rule and the last row is labels only: no group \
-                         with a value is read, and no loss names the fields";
-
-/// The boxed layouts that break an invariant today, in every look (see [`BOXED_GAP`]).
-const BOXED_KNOWN: [Known; 9] = [
-    (
-        "two fields, labels under, first full, last empty, over None, beyond None",
-        Inv::ClearPairs,
-        BOXED_GAP,
-    ),
-    (
-        "two fields, a value of two lines, labels under, first full, last empty, over None, \
-         beyond None",
-        Inv::ClearPairs,
-        BOXED_GAP,
-    ),
-    (
-        "two fields, a value of two lines, labels under, first half empty, last empty, over \
-         None, beyond None",
-        Inv::ClearPairs,
-        BOXED_GAP,
-    ),
-    (
-        "two fields, a value of two lines, labels under, first empty, last empty, over None, \
-         beyond None",
-        Inv::ClearPairs,
-        BOXED_GAP,
-    ),
-    (
-        "two fields, a value of two lines, labels under, first empty, last empty, over \
-         Partial, beyond None",
-        Inv::ClearPairs,
-        BOXED_GAP,
-    ),
-    (
-        "one field, labels under, first full, last empty, over None, beyond None",
-        Inv::ClearPairs,
-        BOXED_GAP,
-    ),
-    (
-        "one field, a value of two lines, labels under, first full, last empty, over None, \
-         beyond None",
-        Inv::ClearPairs,
-        BOXED_GAP,
-    ),
-    (
-        "one field, a value of two lines, labels under, first empty, last empty, over None, \
-         beyond None",
-        Inv::ClearPairs,
-        BOXED_GAP,
-    ),
-    (
-        "one field, a value of two lines, labels under, first empty, last empty, over \
-         Partial, beyond None",
-        Inv::ClearPairs,
-        BOXED_GAP,
-    ),
-];
 
 /// A grid of labels under values with a rule under its last labels is the page of a grid of
 /// labels over values with an empty last row (see [`Layout::twin`]): both read the same, in

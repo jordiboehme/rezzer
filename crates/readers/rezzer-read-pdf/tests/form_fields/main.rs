@@ -731,8 +731,10 @@ fn labels_under_values_split_by_a_double_rule_give_a_loss() {
 /// Labels under the rule their values stand on, every row full, under a section rule one row
 /// pitch over the top rule, with upright lines boxing that frame into two cells whose divider
 /// is not in line with the grid's (the reviewer's probe P5), with and without a rule one pitch
-/// under the last labels. The box's table holds the first row's values; they still count
-/// toward a loss: the grid never pairs shifted, and a loss names its fields.
+/// under the last labels. The box holds the first row's values, and the grid's first row is a
+/// row of fields under the box's lowest rule. With the rule under the last labels (an own
+/// bottom) one end is complete: no field pairs and a loss names them all. Without it both ends
+/// are complete: the fields pair labels under values. The grid never pairs shifted.
 #[test]
 fn labels_under_values_under_a_boxed_section_never_pair_shifted() {
     let s = Rows {
@@ -743,7 +745,7 @@ fn labels_under_values_under_a_boxed_section_never_pair_shifted() {
     let mut reads = Vec::new();
     for (look, g) in std::iter::once(("real", REAL)).chain(looks()) {
         for (mid, own) in [(20usize, true), (20, false), (45, true), (45, false)] {
-            let mut b = rows_page(&g, &s, &THREE_ROWS, &all);
+            let mut b = rows_page(&g, &s, &THREE_ROWS, if own { &all } else { &[] });
             let (h, top) = (2.4 * g.data, 760.0 + g.dy);
             let (x0, x1) = (g.col(0) - 0.12, g.col(50));
             b.page.template += &g.hrule(x0, x1, top + h);

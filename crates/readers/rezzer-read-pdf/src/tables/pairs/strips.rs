@@ -64,7 +64,7 @@ pub(crate) fn field_frames(rules: &[Rule]) -> Vec<Frame> {
     let Ok(g) = grids(rules) else {
         return Vec::new();
     };
-    frames(&g.hs, &taken_by_grids(g.hs.len(), &g.groups), &g.vs).unwrap_or_default()
+    frames(&g.hs, &frame_tops(&g.hs, &g.groups), &g.vs).unwrap_or_default()
 }
 
 /// Whether the page's drawing shows a form: a drawn box its text is read in (`boxes`), a grid
@@ -82,7 +82,7 @@ pub(crate) fn form_drawn(rules: &[Rule], boxes: &[[f32; 4]]) -> bool {
     g.groups
         .iter()
         .any(|group| crate::regions::inner_ruled(&g, group))
-        || frames(&g.hs, &taken_by_grids(g.hs.len(), &g.groups), &g.vs)
+        || frames(&g.hs, &frame_tops(&g.hs, &g.groups), &g.vs)
             .is_some_and(|f| f.iter().any(|f| !f.dividers.is_empty()))
 }
 
@@ -100,14 +100,31 @@ pub(in crate::tables) fn taken_by_grids(
     taken
 }
 
-/// The frames of the page's horizontal lines `hs` (sorted by height) that no grid takes
-/// (`taken`), with the dividers among the vertical lines `vs` (sorted by place); `None` past
-/// [`STRIP_WORK`] steps.
-pub(in crate::tables) fn frames(hs: &[Seg], taken: &[bool], vs: &[Seg]) -> Option<Vec<Frame>> {
+/// Which of the horizontal lines `hs` may be the top rule of a frame of fields: those no grid
+/// of `groups` takes, and the lowest line of each grid. A box drawn over a row of fields (a
+/// section's title cells) takes the row's top rule into its grid; the row under it is still a
+/// row of fields.
+pub(in crate::tables) fn frame_tops(hs: &[Seg], groups: &[(Vec<usize>, Vec<usize>)]) -> Vec<bool> {
+    let mut tops: Vec<bool> = taken_by_grids(hs.len(), groups)
+        .into_iter()
+        .map(|t| !t)
+        .collect();
+    for (gh, _) in groups {
+        if let Some(&low) = gh.iter().min_by(|&&a, &&b| hs[a].at.total_cmp(&hs[b].at)) {
+            tops[low] = true;
+        }
+    }
+    tops
+}
+
+/// The frames under the page's horizontal lines `hs` (sorted by height) that `tops` names
+/// (see [`frame_tops`]), with the dividers among the vertical lines `vs` (sorted by place);
+/// `None` past [`STRIP_WORK`] steps.
+pub(in crate::tables) fn frames(hs: &[Seg], tops: &[bool], vs: &[Seg]) -> Option<Vec<Frame>> {
     let mut work = 0usize;
     let mut out = Vec::new();
     for (j, up) in hs.iter().enumerate() {
-        if taken[j] {
+        if !tops[j] {
             continue;
         }
         // The nearest rule below that reaches under it, and it must cover it.
