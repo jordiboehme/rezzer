@@ -26,8 +26,9 @@
 //!   selection
 //! - A hard line break is a backslash at the line end
 //! - A list item that Crystalline would read as an observation or a relation (a bullet that
-//!   opens with `[category]`, or one word before a link to a `.md` file) gets the `* `
-//!   bullet, so it stays text (P5-S)
+//!   opens with `[category]` but not `[^`, one lowercase word or a quoted phrase before a
+//!   link to a `.md` file, or one word before a `[[wikilink]]`) gets the `* ` bullet, so it
+//!   stays text (P5-S)
 //! - An annotation stands at its passage: after the first block with its anchor, or at the
 //!   end of its page section. Only the others are listed in `## Annotations`. Blocks of a
 //!   sheet take none: a cell comment stays in the list

@@ -233,7 +233,7 @@ fn safe_asset_id(id: &str) -> bool {
 }
 
 /// The media types whose files Rezzer writes under their own extension (ruling P5-AJ), each
-/// one Crystalline 0.29.0 copies on import (its `attachment_mime` list). Any other picture
+/// one Crystalline 0.29.1 copies on import (its `attachment_mime` list). Any other picture
 /// or attachment is written as [`OTHER_EXTENSION`].
 const ASSET_TYPES: [(&str, &str); 13] = [
     ("image/png", "png"),
