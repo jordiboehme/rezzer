@@ -738,7 +738,8 @@ jobs:
   # Everything publish needs, built and checked on the dispatch too: the
   # archives and SBOMs, exactly the expected names for this run's version,
   # each archive's contents and SHA256SUMS over all of them. Uploads them as
-  # one artifact, release-assets, which is all the tag jobs download.
+  # one artifact, release-assets, which is all the tag jobs download besides
+  # the Homebrew formula (its own artifact, homebrew-formula).
   collect:
     name: collect and check the release assets
     needs: [notes, build, sbom]
@@ -750,6 +751,12 @@ jobs:
     outputs:
       platforms: ${{ steps.expected.outputs.platforms }}
     steps:
+      # For scripts/ci/homebrew-formula.sh. First, because a checkout cleans
+      # the workspace and would remove downloads/ and release/.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       # The expected asset names, from RELEASE_PLATFORMS only. The matrix
       # for attest-sboms comes from here too, and is checked here, so its
       # shape is proven on the dispatch.
@@ -888,9 +895,29 @@ jobs:
           grep -qE '^GitVersion:[[:space:]]+v3\.1\.4$' <<< "$out" \
             || { echo "::error::cosign is not v3.1.4"; exit 1; }
 
-      # Task 8 adds the Homebrew formula here: rendered from SHA256SUMS on
-      # the dispatch too, uploaded as its own artifact (not in
-      # release-assets, so it does not become a release asset).
+      # The Homebrew formula from this run's SHA256SUMS, on the dispatch too
+      # (with v0.0.0-dev), so the dry run shows the file the tap gets. Its
+      # own artifact, not in release-assets, so it does not become a
+      # release asset. The homebrew job renders it again from the
+      # published SHA256SUMS and checks it is this file.
+      - name: Render the Homebrew formula
+        env:
+          RELEASE_VERSION: ${{ needs.notes.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/homebrew-formula"
+          formula="$RUNNER_TEMP/homebrew-formula/rezzer.rb"
+          scripts/ci/homebrew-formula.sh "$RELEASE_VERSION" release/SHA256SUMS > "$formula"
+          ruby --version
+          ruby -c "$formula"
+          cat "$formula"
+
+      - name: Upload the Homebrew formula
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: homebrew-formula
+          path: ${{ runner.temp }}/homebrew-formula/rezzer.rb
+          if-no-files-found: error
 
   # Each platform's SBOM, attested against its archive. One leg per entry of
   # RELEASE_PLATFORMS (through collect). The legs run on the dispatch too and
@@ -1031,49 +1058,119 @@ jobs:
           esac
           gh release create "$GITHUB_REF_NAME" release/* "${args[@]}"
 
-  # Homebrew tap update. Disabled: there is no formula for Rezzer in
-  # jordiboehme/homebrew-tap yet. To turn it on, add the formula to the tap,
-  # add a TAP_GITHUB_TOKEN secret (a fine-grained token with contents write
-  # on the tap only) and uncomment this job. The pattern follows the
-  # agent-cli-tools release workflow.
-  #
-  # homebrew:
-  #   name: update homebrew tap
-  #   needs: [notes, publish]
-  #   timeout-minutes: 10
-  #   runs-on: ubuntu-latest
-  #   # Only a tag push, never a dispatch (see the notes job).
-  #   if: ${{ needs.notes.outputs.publish == 'true' }}
-  #   permissions:
-  #     contents: read
-  #   steps:
-  #     - name: Download release checksums
-  #       env:
-  #         GH_TOKEN: ${{ github.token }}
-  #       run: |
-  #         set -euo pipefail
-  #         mkdir -p "$RUNNER_TEMP/release"
-  #         gh release download "$GITHUB_REF_NAME" \
-  #           --repo "$GITHUB_REPOSITORY" \
-  #           --pattern SHA256SUMS --dir "$RUNNER_TEMP/release"
-  #
-  #     - name: Regenerate and push the formula
-  #       env:
-  #         TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
-  #       run: |
-  #         set -euo pipefail
-  #         TAG="$GITHUB_REF_NAME"
-  #         VERSION="${TAG#v}"
-  #         sums="$RUNNER_TEMP/release/SHA256SUMS"
-  #         sha_for() { grep "rezzer-${TAG}-$1.tar.gz" "$sums" | awk '{print $1}'; }
-  #         git clone "https://x-access-token:${TAP_GITHUB_TOKEN}@github.com/jordiboehme/homebrew-tap.git" \
-  #           "$RUNNER_TEMP/homebrew-tap"
-  #         # Write Formula/rezzer.rb here with VERSION and
-  #         # $(sha_for macos-arm64), $(sha_for macos-intel),
-  #         # $(sha_for linux-amd64) and $(sha_for linux-arm64).
-  #         cd "$RUNNER_TEMP/homebrew-tap"
-  #         git config user.name "github-actions[bot]"
-  #         git config user.email "github-actions[bot]@users.noreply.github.com"
-  #         git add Formula/rezzer.rb
-  #         git commit -m "Update rezzer to ${VERSION}"
-  #         git push
+  # Writes Formula/rezzer.rb in jordiboehme/homebrew-tap once the release
+  # exists. Only a tag push, never a dispatch (see the notes job): there is
+  # no dev channel, and only this job writes the tap file. The formula is
+  # rendered with the script collect runs on the dispatch, now from the
+  # published SHA256SUMS, and must equal collect's homebrew-formula artifact.
+  # A re-run after a push that already landed finds the tap current and
+  # stops green.
+  homebrew:
+    name: update the Homebrew tap
+    needs: [notes, publish]
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    if: ${{ needs.notes.outputs.publish == 'true' }}
+    # The protected release environment holds TAP_GITHUB_TOKEN, a
+    # fine-grained token with contents write on jordiboehme/homebrew-tap only.
+    environment:
+      name: release
+      deployment: false
+    # Reading the release of this repository. The tap push uses the token.
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # For scripts/ci. Nothing else from the tree runs here.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # --clobber: a try after a failed one overwrites what it left behind.
+      - name: Download the published SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.notes.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/release"
+          "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 5 gh release download "$RELEASE_VERSION" \
+            --repo "$GITHUB_REPOSITORY" --pattern SHA256SUMS \
+            --dir "$RUNNER_TEMP/release" --clobber
+
+      - name: Download the formula collect rendered
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: homebrew-formula
+          path: ${{ runner.temp }}/collect
+
+      - name: Render the formula from the published SHA256SUMS
+        env:
+          RELEASE_VERSION: ${{ needs.notes.outputs.version }}
+        run: |
+          set -euo pipefail
+          formula="$RUNNER_TEMP/rezzer.rb"
+          scripts/ci/homebrew-formula.sh "$RELEASE_VERSION" "$RUNNER_TEMP/release/SHA256SUMS" > "$formula"
+          ruby -c "$formula"
+          if ! diff -u "$RUNNER_TEMP/collect/rezzer.rb" "$formula"; then
+            echo "::error::the formula from the published SHA256SUMS differs from the one collect rendered (- collect, + published)"
+            exit 1
+          fi
+          cat "$formula"
+
+      # The token never goes into a URL or onto a command line: retry.sh
+      # prints its command on a failed try, and a URL would keep the token
+      # in .git/config. Git asks the credential helper below, which reads the
+      # token from this step's environment when git runs it; the clone's
+      # config holds only the helper text. GitHub masks the secret in logs.
+      # Another push to the tap can land first: a rejected push rebases onto
+      # the tap's newer commit and tries again, five times at most. What is
+      # written does not change.
+      - name: Push the formula to the tap
+        env:
+          TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ needs.notes.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TAP_GITHUB_TOKEN:-}" ]; then
+            echo "::error::TAP_GITHUB_TOKEN is not set in the release environment"
+            exit 1
+          fi
+          version="${RELEASE_VERSION#v}"
+          tap="$RUNNER_TEMP/homebrew-tap"
+          # $1 and the token are expanded by git when it runs the helper.
+          # shellcheck disable=SC2016
+          helper='!f() { test "$1" = get || exit 0; echo username=x-access-token; echo "password=$TAP_GITHUB_TOKEN"; }; f'
+          # Each try starts without the folder a failed try may leave.
+          # shellcheck disable=SC2016
+          "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 5 bash -c \
+            'rm -rf "$2" && git -c credential.helper="$1" clone https://github.com/jordiboehme/homebrew-tap.git "$2"' \
+            _ "$helper" "$tap"
+          cd "$tap"
+          git config credential.helper "$helper"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          mkdir -p Formula
+          cp "$RUNNER_TEMP/rezzer.rb" Formula/rezzer.rb
+          git add Formula/rezzer.rb
+          if git diff --cached --quiet; then
+            echo "Formula/rezzer.rb in the tap is already rezzer $version, nothing to push"
+            exit 0
+          fi
+          git commit -m "Update rezzer to ${version}"
+          for attempt in 1 2 3 4 5; do
+            if git push; then
+              exit 0
+            fi
+            echo "::warning::push rejected (attempt $attempt of 5), rebasing onto the tap and trying again"
+            sleep $((attempt * 5))
+            if ! git pull --rebase; then
+              git rebase --abort || true
+              echo "::error::could not rebase Formula/rezzer.rb onto the tap"
+              exit 1
+            fi
+          done
+          echo "::error::could not push Formula/rezzer.rb to the tap"
+          exit 1
