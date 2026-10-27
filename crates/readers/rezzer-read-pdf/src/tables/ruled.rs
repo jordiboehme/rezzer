@@ -15,8 +15,8 @@ use super::sections::{CUT_WORK, sections};
 use super::side::{Beside, SIDE_FOUND_BY, SIDE_WORK, Side, StripKind, side_columns, totals_top};
 use super::*;
 use crate::marks::is_placeholder;
-use crate::order::SIZE_STEP;
 use crate::regions::{Grids, Seg, Unsearched, clustered, grids};
+use crate::tables::LABEL_STEP;
 
 /// Where a run a table took goes: the table, its row and its cell.
 type Claim = Option<(usize, usize, usize)>;
@@ -815,7 +815,7 @@ fn header_rows_of(
         };
         let bold = !top.is_empty() && top.iter().all(|r| r.bold) && below.iter().any(|r| !r.bold);
         let (a, b) = (median(&mut top), median(&mut below));
-        !below.is_empty() && (bold || a.max(b) >= SIZE_STEP * a.min(b))
+        !below.is_empty() && (bold || a.max(b) >= LABEL_STEP * a.min(b))
     };
     (head, styled)
 }

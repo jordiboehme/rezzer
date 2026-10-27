@@ -673,6 +673,9 @@ fn gutter(p: &[Piece], ids: &[usize]) -> Option<(f32, f32, Split, f32)> {
 /// bands.
 const BAND_STEP: f32 = 1.0 / 8.0;
 
+/// The most steps a region is measured in.
+const BAND_STEPS: usize = 20_000;
+
 /// The best band of white space between the pieces `inked` (of median text size `size`) at
 /// least [`GUTTER`] sizes wide with text on both sides: of those covered by the fewest pieces
 /// (a ragged line end next to the gutter must not widen it), up to `allowed` pieces, the
@@ -686,7 +689,10 @@ fn best_band(p: &[Piece], inked: &[usize], allowed: i32, size: f32) -> Option<(f
     if !(hi - lo).is_finite() || step.is_nan() || step <= 0.0 || hi - lo < 2.0 * step {
         return None;
     }
-    let width = (((hi - lo) / step).ceil() as usize).min(20_000) + 2;
+    // The span from the leftmost to the rightmost ink in a whole number of steps of about
+    // `step`, so that a page printed larger or smaller has the same steps: a thousandth of a
+    // step of float noise does not add a step.
+    let width = (((hi - lo) / step - 1e-3).ceil().max(1.0) as usize).min(BAND_STEPS) + 2;
     let scale = (hi - lo) / (width - 2) as f32;
     let bin = |x: f32| (((x - lo) / scale) as usize).min(width - 1);
     let mut diff = vec![0i32; width + 1];
@@ -1583,42 +1589,53 @@ mod tests {
         }
     }
 
-    /// The band of white space is measured in steps of the text size, so a page printed at
-    /// 0.7 gives the band of the page at 1 times 0.7; and two pieces of one line that touch
-    /// close the band before them, also when their ends differ in their last bits.
+    /// Which band wins does not depend on the scale: two gaps of one line, 10 and 11.6 points
+    /// wide at 8 points, are measured in steps of the text size, so the wider one wins at
+    /// every scale from 0.6 to 1.6. Measured in whole points, the two swap places at some
+    /// scales, and the line is cut at the other gap.
     #[test]
-    fn bands_hold_at_every_scale() {
-        let at = |k: f32, noise: f32| {
+    fn the_same_band_wins_at_every_scale() {
+        let band = |k: f32| {
+            let ps = vec![
+                ink_piece(20.0 * k, 100.0 * k, 0),
+                ink_piece(110.0 * k, 200.0 * k, 0),
+                ink_piece(211.6 * k, 300.0 * k, 0),
+            ];
+            let ids: Vec<usize> = (0..ps.len()).collect();
+            best_band(&ps, &ids, 0, 8.0 * k)
+        };
+        for n in 0..=20 {
+            let k = 0.6 + 0.05 * n as f32;
+            let (g0, g1) = band(k).expect("a band");
+            let middle = (g0 + g1) / 2.0 / k;
+            assert!((middle - 205.8).abs() < 1.0, "{k}: {g0} {g1}");
+        }
+    }
+
+    /// Two pieces of one line that touch close the band before them, also when their ends
+    /// differ in their last bits.
+    #[test]
+    fn touching_pieces_close_a_band() {
+        let at = |noise: f32| {
             // A line across all, a line that ends in two touching pieces, and a line with a
             // narrow gap: the widest band of the fewest pieces runs up to where the two pieces
             // touch.
             let ps = vec![
-                ink_piece(0.0, 500.0 * k, 0),
-                ink_piece(0.0, 100.0 * k, 1),
-                ink_piece(140.0 * k, 450.0 * k, 1),
-                ink_piece(450.0 * k + noise, 500.0 * k, 1),
-                ink_piece(0.0, 125.0 * k, 2),
-                ink_piece(130.0 * k, 400.0 * k, 2),
+                ink_piece(0.0, 500.0, 0),
+                ink_piece(0.0, 100.0, 1),
+                ink_piece(140.0, 450.0, 1),
+                ink_piece(450.0 + noise, 500.0, 1),
+                ink_piece(0.0, 125.0, 2),
+                ink_piece(130.0, 400.0, 2),
             ];
             let ids: Vec<usize> = (0..ps.len()).collect();
-            best_band(&ps, &ids, 8, 12.5 * k)
+            best_band(&ps, &ids, 8, 12.5)
         };
-        let (a, b) = at(1.0, 0.0).expect("a band");
-        assert!(
-            (400.0..402.0).contains(&a) && b > 448.0 && b <= 450.0,
-            "{a} {b}"
-        );
-        for (k, noise) in [
-            (0.7, 0.0),
-            (0.7, 3e-5),
-            (0.75, 0.0),
-            (1.5, 0.0),
-            (1.0, 3e-5),
-        ] {
-            let (c, d) = at(k, noise).expect("a band");
+        for noise in [0.0, 3e-5] {
+            let (a, b) = at(noise).expect("a band");
             assert!(
-                (c - a * k).abs() < 1e-3 && (d - b * k).abs() < 1e-3,
-                "{k} {noise}: {c} {d} against {a} {b}"
+                (400.0..402.0).contains(&a) && b > 448.0 && b <= 450.0,
+                "{noise}: {a} {b}"
             );
         }
     }

@@ -9,8 +9,8 @@
 use std::collections::{HashMap, HashSet};
 
 use super::*;
-use crate::order::SIZE_STEP;
 use crate::regions::{Seg, grids};
+use crate::tables::LABEL_STEP;
 
 /// The note before the first table of fields between rules of a page.
 pub(super) const STRIP_FOUND_BY: &str = "Found by: label and value pairs from rows of fields \
@@ -1719,7 +1719,7 @@ fn under_labels(flow: &Flow, labels: &[Vec<usize>], values: &[usize]) -> Option<
 
 /// The labels of the first of the `lines` of a cell when that line is labels over values: in
 /// the cell's smallest size (a raised marker aside), over lines a size step larger (see
-/// [`SIZE_STEP`]).
+/// [`LABEL_STEP`]).
 fn first_line_labels(flow: &Flow, lines: &[Vec<usize>]) -> Option<Vec<Vec<usize>>> {
     let (Some(first), true) = (lines.first(), lines.len() >= 2) else {
         return None;
@@ -1732,10 +1732,10 @@ fn first_line_labels(flow: &Flow, lines: &[Vec<usize>]) -> Option<Vec<Vec<usize>
         .map(|&i| size(i))
         .fold(f32::MIN, f32::max);
     let marker = markers(flow, &lines[..1]);
-    if below < SIZE_STEP * small
+    if below < LABEL_STEP * small
         || first
             .iter()
-            .any(|&i| size(i) >= SIZE_STEP * small && !marker.contains(&i))
+            .any(|&i| size(i) >= LABEL_STEP * small && !marker.contains(&i))
     {
         return None;
     }
@@ -1780,7 +1780,7 @@ fn label_names(flow: &Flow, cell: &[usize]) -> Vec<String> {
             let labels: Vec<usize> = l
                 .iter()
                 .copied()
-                .filter(|&i| !marker.contains(&i) && flow.runs[i].size < SIZE_STEP * small)
+                .filter(|&i| !marker.contains(&i) && flow.runs[i].size < LABEL_STEP * small)
                 .collect();
             labels_in_line(flow, &labels)
         })
@@ -1967,5 +1967,34 @@ mod tests {
                 "{label} {value}"
             );
         }
+    }
+
+    /// At the sizes of a form, labels half a point smaller than their values (8 over 8.5,
+    /// 9 over 9.5, 10 over 10.5) are labels, as they were when the step was half a point; a
+    /// first line that mixes 8 and 8.5 points is no line of labels (its 8.5 point run may be
+    /// a value).
+    #[test]
+    fn labels_half_a_point_under_their_values_at_8_to_10_points() {
+        let cell = |sizes: [f32; 2], value: f32| {
+            let mut v = run("Erika Mustermann Musterstadt", 4.0, 70.0, value);
+            v.line = 1;
+            flow_of(vec![
+                run("Name", 4.0, 100.0, sizes[0]),
+                run("Ort", 120.0, 100.0, sizes[1]),
+                v,
+            ])
+        };
+        for size in [8.0, 9.0, 10.0] {
+            let flow = cell([size, size], size + 0.5);
+            let lines = lines_of(&flow, &[0, 1, 2]);
+            assert_eq!(
+                first_line_labels(&flow, &lines).map(|l| l.len()),
+                Some(2),
+                "{size}"
+            );
+        }
+        let flow = cell([8.0, 8.5], 10.0);
+        let lines = lines_of(&flow, &[0, 1, 2]);
+        assert_eq!(first_line_labels(&flow, &lines).map(|l| l.len()), None);
     }
 }

@@ -7,8 +7,8 @@
 //! boxes beside them and of framed boxes over their lines.
 
 use super::*;
-use crate::order::SIZE_STEP;
 use crate::regions::{Index, Seg, grids, regions_of};
+use crate::tables::LABEL_STEP;
 use crate::tables::banded::heads_lines;
 
 /// The note before the first table of drawn boxes of a page.
@@ -366,7 +366,7 @@ fn framed_titles(
         lines.len() >= 2
             && styles.len() == 1
             && !styles[0].1
-            && styles[0].0 as f32 / 2.0 >= SIZE_STEP * title_size
+            && styles[0].0 as f32 / 2.0 >= LABEL_STEP * title_size
     };
     let mut out = Vec::new();
     for (b, ids) in own.iter().enumerate() {

@@ -218,6 +218,11 @@ pub(crate) fn plural(why: &str) -> &str {
 /// Lines this close are one line, and line ends this close meet, in points.
 pub(crate) const SNAP: f32 = 2.0;
 
+/// A label or a title differs in size from the text beside it when the larger is at least
+/// this many times the smaller: half a point at 12.5 points, and less than half a point at
+/// the sizes of forms (8 over 8.5 points differ). A ratio, so that it holds at every scale.
+pub(crate) const LABEL_STEP: f32 = 1.04;
+
 /// A grid of drawn rules with more columns than this is a form or a chart, not a table.
 const MAX_COLUMNS: usize = 15;
 

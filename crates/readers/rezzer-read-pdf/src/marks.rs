@@ -8,8 +8,9 @@
 //! page's glyphs; once every page is read, the placeholders become the separators the
 //! file's own text uses, or are removed and the number is listed as not read.
 
-use crate::order::{SIZE_STEP, Turn};
+use crate::order::Turn;
 use crate::scan;
+use crate::tables::LABEL_STEP;
 use crate::tables::{Rule, RuleKind};
 use crate::text::{Gl, PageItems};
 
@@ -17,10 +18,14 @@ use crate::text::{Gl, PageItems};
 /// data): a separator is much shorter than the digits it stands between. Relative, so that a
 /// form printed larger or smaller has the same marks.
 pub(crate) const MARK_LONG: f32 = 0.32;
-/// The long side of a mark is at least this many times its short side. This bounds its
-/// thickness too (at most about a tenth of the text size): a thickness of its own in points
-/// would not hold for the dashes of a rule, which keep their pen width at every scale.
+/// The long side of a mark is at least this many times its short side.
 pub(crate) const MARK_RATIO: f32 = 3.0;
+/// The short side of a mark is at most this many sizes of its text (0.5 points at 9.5 point
+/// data), or [`MARK_PEN`] points: a filled divider of a comb field, a point wide, is no mark.
+pub(crate) const MARK_THIN: f32 = 0.053;
+/// A mark may always be this many points thick: the pen of a dashed rule keeps its width
+/// when the text is set smaller.
+pub(crate) const MARK_PEN: f32 = 0.5;
 /// Marks one page keeps.
 pub(crate) const MAX_MARKS: usize = 100_000;
 /// Marks one page may test against its digits; past it, the rest is not looked at.
@@ -36,6 +41,15 @@ pub(crate) const SEP: char = '\u{FDD0}';
 /// The placeholder a mark puts between two digits that do not read in the direction of the
 /// page's text: their separator is not read, and the number is listed as not read.
 pub(crate) const SEP_TURNED: char = '\u{FDD1}';
+/// The placeholder a bar puts between two digits that has every trait of a separator mark but
+/// is too long for one of their size: it is not read as one, and the number is listed as
+/// not read, so its digits never stand without a word for what was drawn between them.
+pub(crate) const SEP_LONG: char = '\u{FDD2}';
+
+/// Whether `c` is a placeholder [`insert`] puts between two digits.
+fn is_sep(c: char) -> bool {
+    c == SEP || c == SEP_TURNED || c == SEP_LONG
+}
 
 /// Whether `c` is one of the noncharacters U+FDD0 to U+FDEF: Rezzer's own placeholders,
 /// dropped from the text of a file.
@@ -52,11 +66,18 @@ pub(crate) fn mark_shaped(b: [f32; 4]) -> bool {
     short > 0.0 && long >= MARK_RATIO * short
 }
 
-/// Whether a box is a mark with text of `size`: of [`mark_shaped`] shape and short for that
-/// size.
+/// Whether a box is thin enough for a mark with text of `size`: at most [`MARK_THIN`] sizes
+/// thick, or [`MARK_PEN`] points, whichever is more.
+fn thin_for(b: [f32; 4], size: f32) -> bool {
+    let short = (b[2] - b[0]).min(b[3] - b[1]);
+    short <= MARK_PEN.max(MARK_THIN * size)
+}
+
+/// Whether a box is a mark with text of `size`: of [`mark_shaped`] shape, thin and short for
+/// that size.
 pub(crate) fn is_mark(b: [f32; 4], size: f32) -> bool {
     let long = (b[2] - b[0]).max(b[3] - b[1]);
-    mark_shaped(b) && long <= MARK_LONG * size
+    mark_shaped(b) && thin_for(b, size) && long <= MARK_LONG * size
 }
 
 /// The text size a page's marks are measured by when they stand by no digits (dashes of a
@@ -363,6 +384,7 @@ const NO_DATE: &str = "the dates written as text in this file do not show one da
 const DATE_ORDER: &str =
     "the dates written as text in this file put day, month and year in another order";
 const TURNED: &str = "its digits do not read in the direction of the page's text";
+const LONG: &str = "a bar between its digits is too long for a separator of their size";
 
 /// The characters for the separators of a number of digit groups `lens`, with their kinds,
 /// or why they are not read. A date with the year first takes only `-`, and one with the
@@ -398,14 +420,18 @@ fn decide(text: &str, style: &SeparatorStyle, seen: &mut Seen<'_>) -> Vec<Option
     let mut lens: Vec<usize> = vec![0];
     let mut seps: Vec<usize> = Vec::new();
     let mut turned = false;
+    let mut long = false;
     let mut flush = |digits: &mut String,
                      lens: &mut Vec<usize>,
                      seps: &mut Vec<usize>,
                      turned: &mut bool,
+                     long: &mut bool,
                      out: &mut Vec<Option<char>>| {
         if !seps.is_empty() {
             let read = if *turned {
                 Err(TURNED)
+            } else if *long {
+                Err(LONG)
             } else {
                 read(lens, style)
             };
@@ -427,6 +453,7 @@ fn decide(text: &str, style: &SeparatorStyle, seen: &mut Seen<'_>) -> Vec<Option
         *lens = vec![0];
         seps.clear();
         *turned = false;
+        *long = false;
     };
     for c in text.chars() {
         if c.is_ascii_digit() {
@@ -435,19 +462,34 @@ fn decide(text: &str, style: &SeparatorStyle, seen: &mut Seen<'_>) -> Vec<Option
             }
             digits.push(c);
             *lens.last_mut().expect("a group") += 1;
-        } else if c == SEP || c == SEP_TURNED {
+        } else if is_sep(c) {
             turned |= c == SEP_TURNED;
+            long |= c == SEP_LONG;
             if seps.len() == lens.len() {
                 *seps.last_mut().expect("a placeholder") += 1;
             } else {
                 seps.push(1);
             }
         } else {
-            flush(&mut digits, &mut lens, &mut seps, &mut turned, &mut out);
+            flush(
+                &mut digits,
+                &mut lens,
+                &mut seps,
+                &mut turned,
+                &mut long,
+                &mut out,
+            );
         }
     }
     // A number that ends with placeholders: they cut off an empty group.
-    flush(&mut digits, &mut lens, &mut seps, &mut turned, &mut out);
+    flush(
+        &mut digits,
+        &mut lens,
+        &mut seps,
+        &mut turned,
+        &mut long,
+        &mut out,
+    );
     out
 }
 
@@ -455,7 +497,7 @@ fn decide(text: &str, style: &SeparatorStyle, seen: &mut Seen<'_>) -> Vec<Option
 fn apply(text: &str, decided: &mut dyn Iterator<Item = Option<char>>) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars() {
-        if c == SEP || c == SEP_TURNED {
+        if is_sep(c) {
             out.extend(decided.next().flatten());
         } else if !is_placeholder(c) {
             out.push(c);
@@ -618,8 +660,8 @@ pub(crate) fn insert(
                 continue;
             }
             // Where a mark's middle may be: between the digit middles, from 0.3 sizes under
-            // the baseline to the top of the longest mark that may stand on it.
-            (from, to, -0.3 * size, (0.3 + MARK_LONG) * size)
+            // the baseline to the middle of the highest bar that fits (see `fits`).
+            (from, to, -0.3 * size, 0.55 * size)
         };
         let corners = [(from, t0), (from, t1), (to, t0), (to, t1)]
             .map(|(s, t)| (a.x + s * d.0 + t * up.0, a.y + s * d.1 + t * up.1));
@@ -631,6 +673,16 @@ pub(crate) fn insert(
             cell(lo(|c| c.0))..=cell(hi(|c| c.0)),
         );
         let readable = Turn::of(a.dx, a.dy) == Some(turn) && !a.vertical;
+        let ahead = if a.vertical {
+            0.1 * step
+        } else {
+            0.75 * a.adv.unwrap_or(0.5 * size)
+        };
+        // The placeholder stands just after the first digit, on its way to the second one, so
+        // it stays between them in reading order.
+        let at = (a.x + ahead * d.0, a.y + ahead * d.1);
+        // A bar that is a mark in all but its length, if no mark stands between the two.
+        let mut long = false;
         for row in rows {
             work += 1;
             let first = marks.partition_point(|m| cell_of(m) < (row, *cols.start()));
@@ -654,30 +706,37 @@ pub(crate) fn insert(
                 } else {
                     bottom.abs() <= 0.3 * size && top - bottom <= 0.5 * size
                 };
-                if s > from && s < to && fits && is_mark(*m, size) {
-                    // The placeholder stands just after the first digit, on its way to the
-                    // second one, so it stays between them in reading order.
-                    let ahead = if a.vertical {
-                        0.1 * step
-                    } else {
-                        0.75 * a.adv.unwrap_or(0.5 * size)
-                    };
-                    let at = (a.x + ahead * d.0, a.y + ahead * d.1);
-                    after.push((i, if readable { SEP } else { SEP_TURNED }, at));
-                    used.push(*m);
-                    continue 'pairs;
+                if s > from && s < to && fits {
+                    if is_mark(*m, size) {
+                        after.push((i, if readable { SEP } else { SEP_TURNED }, at));
+                        used.push(*m);
+                        continue 'pairs;
+                    }
+                    // Only a bar that stands across the baseline, as a separator does: a rule
+                    // along it, under the digits, is no bar between them.
+                    let along_m = [(m[0], m[1]), (m[0], m[3]), (m[2], m[1]), (m[2], m[3])]
+                        .map(|(x, y)| along(x, y));
+                    let wide = along_m.iter().copied().fold(f32::MIN, f32::max)
+                        - along_m.iter().copied().fold(f32::MAX, f32::min);
+                    long |= !a.vertical
+                        && MARK_RATIO * wide <= top - bottom
+                        && mark_shaped(*m)
+                        && thin_for(*m, size);
                 }
             }
+        }
+        if long {
+            after.push((i, if readable { SEP_LONG } else { SEP_TURNED }, at));
         }
     }
     let (Some(&(last, ..)), Ok(at)) = (after.last(), u32::try_from(text.len())) else {
         return whole;
     };
     // Each placeholder has its text once at the end of the page's text.
-    text.push(SEP);
-    text.push(SEP_TURNED);
+    let all = [SEP, SEP_TURNED, SEP_LONG];
+    all.iter().for_each(|&c| text.push(c));
     let len = SEP.len_utf8() as u32;
-    let start = |c: char| if c == SEP { at } else { at + len };
+    let start = |c: char| at + len * all.iter().position(|&p| p == c).unwrap_or(0) as u32;
     // Moved up from the back, each placeholder goes in right after its first digit.
     let n = glyphs.len();
     glyphs.resize(n + after.len(), glyphs[last]);
@@ -874,7 +933,7 @@ pub(crate) fn cut_at_dividers(glyphs: &mut Vec<Gl>, text: &mut String, rules: &[
             // Smaller text over the number in the frame: its labels.
             let labelled = fits
                 && any(line.0 + 0.5 * size, f.top, &|g, _| {
-                    g.size * SIZE_STEP <= size && g.x > f.x0 && g.x < f.x1
+                    g.size * LABEL_STEP <= size && g.x > f.x0 && g.x < f.x1
                 });
             // Nothing else in the next field on the number's line.
             let alone = labelled
@@ -1365,7 +1424,7 @@ mod tests {
     fn a_long_mark_is_a_separator_by_large_digits_only() {
         // A mark 3.15 points high between two digits of 15.75 points (a form printed at 1.5
         // with larger text) is a separator; between digits of 9.5 points the same bar is too
-        // long for one, and stays what it is.
+        // long for one: it stays what it is, and its number is listed as not read.
         let mark = |size: f32| {
             let x = 100.0 + 0.6 * size;
             [
@@ -1395,7 +1454,9 @@ mod tests {
             Turn::None,
             &mut used
         ));
-        assert_eq!((glyphs.len(), used.len()), (2, 0));
+        // It is named: a placeholder that lists the number as not read.
+        assert_eq!((glyphs.len(), used.len()), (3, 0));
+        assert_eq!(&text[glyphs[1].start as usize..][..3], SEP_LONG.to_string());
     }
 
     #[test]
