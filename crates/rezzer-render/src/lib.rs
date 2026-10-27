@@ -39,7 +39,7 @@
 //! - A leading level-1 heading equal to the title is not repeated; body headings shift down
 //!   so none is level 1. Titled sections get `##`, nested ones `###` and so on
 //! - A document whose body is over the part size is cut into units at its own borders by
-//!   `split` (spec 5); the units' links are written for their place one folder down.
+//!   [`split`](fn@split) (spec 5); the units' links are written for their place one folder down.
 //!   [`render_output`] writes them as part files with `part_of` and `follows` relations, and
 //!   a main document with the stats, capped extracts and the list of the parts
 

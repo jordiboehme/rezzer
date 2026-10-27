@@ -575,7 +575,7 @@ impl<'b> Builder<'b> {
     /// Charges one model element. False when the element budget ran out with this one: the
     /// element is dropped and reading stops. Once stopped, the frames still open are closed
     /// without charge (their number is bounded by the depth limit).
-    pub(super) fn charge(&mut self) -> bool {
+    fn charge(&mut self) -> bool {
         if self.elements_stopped {
             return true;
         }
