@@ -26,9 +26,8 @@
 //! Every buffer is filled with a non-zero byte: a page that is only reserved, or zeroed by a
 //! fresh mapping, is not resident and would measure nothing.
 //!
-//! Note for the policy step: if Linux later forwards `realloc` to `System`, the unit test
-//! `a_move_counts_the_bytes_it_copies` in `src/alloc.rs` (which expects 3 MiB moved in debug
-//! builds) needs a Linux cfg.
+//! The policy the figures are compared for: on Linux every `realloc` goes to the system, and on
+//! glibc every block from 1 MiB on is its own mapping (see the module docs of `src/alloc.rs`).
 
 #![cfg(target_os = "linux")]
 

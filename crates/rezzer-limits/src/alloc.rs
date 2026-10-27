@@ -2,8 +2,9 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! The allocator of the Rezzer binary: the system allocator, except that a block that grows
-//! to 1 MiB or more, by at least half its size at once, is moved by allocate, copy and free.
+//! The allocator of the Rezzer binary: the system allocator, except that outside Linux a block
+//! that grows to 1 MiB or more, by at least half its size at once, is moved by allocate, copy
+//! and free.
 //!
 //! Why: decoders grow their output by reallocating (the Flate decoder of a page picture goes
 //! from 4 to 8 to 16 MiB). On macOS the system's realloc of large blocks leaves memory
@@ -19,16 +20,20 @@
 //! Only a growth by half or more is moved: a block grown in small exact steps (a buffer that
 //! reserves 64 KiB more each time) would be copied whole at every step, which is quadratic.
 //! Growth by doubling, as `Vec` does it, is moved; smaller growth and shrinking go to the
-//! system's realloc, which does them in place on macOS and glibc Linux. Whether musl's realloc
-//! does is measured by the Linux allocator probe (`tests/linux_rss.rs`). On Windows, HeapReAlloc
-//! copies a large block at each small step. The policy still forwards small growth to the
-//! system on purpose, so the small-step test checks no time there.
+//! system's realloc, which does them in place on macOS. On Windows, HeapReAlloc copies a large
+//! block at each small step. The policy still forwards small growth to the system on purpose,
+//! so the small-step test checks no time there.
 //!
-//! The move is the same on every system, though the cause was seen on macOS only. On Linux,
-//! glibc can grow a large block in place by remapping its pages, and the move gives that up
-//! for one copy of each large doubling. It is kept there so the binary behaves the same on
-//! every system, and so the memory tests that CI runs on Linux measure the allocator that
-//! ships, not a variant of it.
+//! Linux does not move by hand: every `realloc` goes to the system. glibc and musl both keep a
+//! large block in its own mapping, grow it in place by remapping its pages (`mremap`) and give
+//! the pages back when it is freed, so the move would only add a copy and a moment with both
+//! blocks held. With glibc that holds only for blocks above its mapping threshold, which it
+//! raises up to 32 MiB after a mapped block is freed; a freed block below the threshold stays
+//! in the heap and can stay resident. So on glibc the first allocation sets the threshold to
+//! 1 MiB once with `mallopt(M_MMAP_THRESHOLD)`, which also stops it from moving: every block
+//! from 1 MiB on is its own mapping. musl has no such setting and needs none: its allocator
+//! maps large blocks by itself. The Linux release binaries are static musl; the glibc and musl
+//! figures of the probe in `tests/linux_rss.rs` decide whether this policy stays.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 #[cfg(debug_assertions)]
@@ -36,6 +41,10 @@ use std::cell::Cell;
 
 /// New sizes from which a block is moved by allocate, copy and free.
 const MOVE_FROM: usize = 1 << 20;
+
+/// Whether this system moves large growth by hand at all. Linux leaves every `realloc` to the
+/// system (see the module docs).
+const MOVES_BY_HAND: bool = !cfg!(target_os = "linux");
 
 /// Whether a block of `old` bytes that is to hold `new` is moved by hand: from 1 MiB on, and
 /// only when it grows by half or more.
@@ -54,7 +63,8 @@ thread_local! {
 }
 
 /// The bytes the move by hand copied on this thread so far, so a test can check which growth
-/// is copied. Debug builds only: release builds do not count and give `None`.
+/// is copied. Debug builds only: release builds do not count and give `None`. On Linux, which
+/// does not move by hand, the count stays 0.
 pub fn moved_bytes() -> Option<u64> {
     #[cfg(debug_assertions)]
     {
@@ -72,19 +82,53 @@ fn count_moved(n: usize) {
     let _ = MOVED.try_with(|m| m.set(m.get().saturating_add(n as u64)));
 }
 
-/// The system allocator, with large blocks moved by hand when they grow by half or more.
+/// Sets glibc's mapping threshold to 1 MiB, once, before the first block is made.
+///
+/// Safe inside the allocator: it does not allocate (an atomic flag and one `mallopt` call,
+/// which takes glibc's arena lock and allocates nothing), cannot panic and keeps no thread
+/// state. Two threads that race here may both call `mallopt` with the same value, which is
+/// harmless; a block made by a thread that sees the flag before the call is done uses the old
+/// threshold, which is the state before this policy. The Rust runtime makes its first blocks
+/// on the main thread before any other thread starts, so in practice the call comes first.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn map_large_blocks() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    /// 1 MiB, the size from which glibc gives every block its own mapping.
+    const MAPPED_FROM: libc::c_int = 1 << 20;
+    static DONE: AtomicBool = AtomicBool::new(false);
+
+    if DONE.load(Ordering::Relaxed) || DONE.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    // SAFETY: `mallopt` takes two integers and touches only glibc's own malloc settings. The
+    // result is not checked: if glibc refuses the value, its own default stays, which is the
+    // state before this policy.
+    unsafe {
+        libc::mallopt(libc::M_MMAP_THRESHOLD, MAPPED_FROM);
+    }
+}
+
+/// Nothing to set outside glibc (musl has no `mallopt`).
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn map_large_blocks() {}
+
+/// The system allocator, with large blocks moved by hand when they grow by half or more
+/// (outside Linux), and on glibc every block from 1 MiB on in its own mapping.
 pub struct Allocator;
 
 // SAFETY: every call goes to `System` with the layout it was given; `realloc` keeps the
 // contract of `GlobalAlloc::realloc` (the old block stays valid on failure, the contents up
-// to the smaller size are kept).
+// to the smaller size are kept). `map_large_blocks` neither allocates nor panics.
 unsafe impl GlobalAlloc for Allocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        map_large_blocks();
         // SAFETY: forwarded unchanged.
         unsafe { System.alloc(layout) }
     }
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        map_large_blocks();
         // SAFETY: forwarded unchanged.
         unsafe { System.alloc_zeroed(layout) }
     }
@@ -95,7 +139,7 @@ unsafe impl GlobalAlloc for Allocator {
     }
 
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        if !moved_by_hand(layout.size(), new_size) {
+        if !MOVES_BY_HAND || !moved_by_hand(layout.size(), new_size) {
             // SAFETY: forwarded unchanged.
             return unsafe { System.realloc(ptr, layout, new_size) };
         }
@@ -254,8 +298,9 @@ mod tests {
                 a.dealloc(q, Layout::from_size_align(5 * MIB, 8).unwrap());
             }
         });
-        let expected = cfg!(debug_assertions).then_some(3 * MIB as u64);
-        assert_eq!(moved, expected);
+        // Linux leaves the growth to the system's realloc, so nothing is copied by hand there.
+        let copied = if MOVES_BY_HAND { 3 * MIB as u64 } else { 0 };
+        assert_eq!(moved, cfg!(debug_assertions).then_some(copied));
     }
 
     /// Rezzer's move leaves small exact growth to the system's realloc. Whether that realloc

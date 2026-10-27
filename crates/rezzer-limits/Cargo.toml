@@ -9,5 +9,9 @@ publish = false
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 
+[target.'cfg(all(target_os = "linux", target_env = "gnu"))'.dependencies]
+# Only for mallopt(M_MMAP_THRESHOLD) in the allocator; musl has no such setting.
+libc.workspace = true
+
 [dev-dependencies]
 serde_json.workspace = true
