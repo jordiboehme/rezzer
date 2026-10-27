@@ -618,6 +618,17 @@ pub(in crate::tables) fn field_strips(
         .collect();
     // Runs beyond a group that a group read with its labels under their values took.
     let mut outside: HashSet<usize> = HashSet::new();
+    // The strips of the groups that are read (they hold a value): each says of its own fields,
+    // in a pair or in a loss.
+    let read: HashSet<usize> = groups
+        .iter()
+        .filter(|g| {
+            g.iter()
+                .any(|&k| strips[k].fields.iter().any(|f| !f.value.is_empty()))
+        })
+        .flatten()
+        .copied()
+        .collect();
     for g in groups {
         let list: Vec<&Field> = g.iter().flat_map(|&k| &strips[k].fields).collect();
         if list.iter().all(|f| f.value.is_empty()) {
@@ -782,7 +793,15 @@ pub(in crate::tables) fn field_strips(
             },
             Ends::Unclear(below) => {
                 let mut names: Vec<String> = list.iter().map(|f| words(flow, &f.label)).collect();
-                for line in lines_of(flow, &below) {
+                // A label another group that is read holds is named by that group: a field is
+                // named in one loss only.
+                let theirs = |i: &usize| {
+                    holder
+                        .get(i)
+                        .is_some_and(|k| !g.contains(k) && read.contains(k))
+                };
+                let named: Vec<usize> = below.iter().copied().filter(|i| !theirs(i)).collect();
+                for line in lines_of(flow, &named) {
                     for l in labels_in_line(flow, &line) {
                         let name = words(flow, &l);
                         if !names.contains(&name) {

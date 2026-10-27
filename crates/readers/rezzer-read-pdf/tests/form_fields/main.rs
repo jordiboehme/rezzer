@@ -1373,6 +1373,56 @@ fn every_pair_of_ends_in_tables_holds_the_invariants() {
     assert!(paired.is_empty(), "{paired:#?}");
 }
 
+/// The losses of the three groups of [`labels_under_values_in_three_groups_never_pair_shifted`]
+/// overlap at their double rules: each field is named in one loss only, that of the group that
+/// holds it.
+#[test]
+fn a_field_of_a_grid_in_three_groups_is_named_once() {
+    let s = Rows {
+        under: true,
+        ..ROWS
+    };
+    let mut twice = Vec::new();
+    for (look, g) in std::iter::once(("real", REAL)).chain(looks()) {
+        for (hausnr, land) in [("", ""), ("", "DE"), ("12", "")] {
+            let rows: [&[FieldSpec]; 4] = [
+                &[
+                    (0, 30, "Name", "Erika Mustermann"),
+                    (30, 20, "Ort", "Musterstadt"),
+                ],
+                &[
+                    (0, 30, "Strasse", "Musterweg 1"),
+                    (30, 20, "Hausnr", hausnr),
+                ],
+                &[(0, 30, "PLZ", "12345"), (30, 20, "Land", land)],
+                &[(0, 30, "Tel", "0000"), (30, 20, "Fax", "1111")],
+            ];
+            let mut b = rows_page(&g, &s, &rows, &[]);
+            let (h, top) = (2.4 * g.data, 760.0 + g.dy);
+            let (x0, x1) = (g.col(0) - 0.12, g.col(50));
+            b.page.template += &g.hrule(x0, x1, top - h - 3.0);
+            b.page.template += &g.hrule(x0, x1, top - 2.0 * h - 3.0);
+            let out = read_pages(&[&b]);
+            for name in [
+                "Name", "Ort", "Strasse", "Hausnr", "PLZ", "Land", "Tel", "Fax",
+            ] {
+                let n = out
+                    .document
+                    .losses
+                    .iter()
+                    .filter(|l| l.what.split([' ', ',']).any(|w| w == name))
+                    .count();
+                if n > 1 {
+                    twice.push(format!(
+                        "{name} in {n} losses: Hausnr {hausnr:?}, Land {land:?}, {look}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(twice.is_empty(), "{}", twice.join("\n"));
+}
+
 /// A row between two rules, parted by a divider, whose every cell holds text in three styles
 /// (a caption, a line of text and a note, as on a page of prose between rules): it never
 /// looked like a row of fields, so it gives no loss.
