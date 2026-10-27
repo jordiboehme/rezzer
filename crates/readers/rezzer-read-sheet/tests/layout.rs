@@ -1271,24 +1271,6 @@ fn ods_looks_mark_the_header() {
     assert_eq!(r.layout.header_paths, ["Name", "City"]);
 }
 
-/// The CPU time the calling thread has used: work bounds do not depend on a busy machine.
-#[cfg(unix)]
-fn thread_cpu() -> std::time::Duration {
-    let mut t = libc::timespec {
-        tv_sec: 0,
-        tv_nsec: 0,
-    };
-    // SAFETY: clock_gettime fills the timespec we pass.
-    let r = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut t) };
-    assert_eq!(r, 0, "clock_gettime");
-    std::time::Duration::new(t.tv_sec as u64, t.tv_nsec as u32)
-}
-
-#[cfg(not(unix))]
-fn thread_cpu() -> std::time::Duration {
-    std::time::Duration::ZERO
-}
-
 /// A tall merged title (A1 over A1:Z10000) and a table of 6 rows starting `gap` empty rows
 /// below it: every row of the table is shown, nothing is cut at the cell cap, and the
 /// covered positions cost no cells and no elements (ruling P4-AQ).
@@ -1385,10 +1367,27 @@ fn tall_merged_title_costs_no_cells_xlsx() {
             max_elements: 2_000,
             ..Limits::default()
         };
-        let start = thread_cpu();
-        let out = read_with(Book::default().sheet("S", &s).bytes(), limits);
-        let used = thread_cpu() - start;
-        assert!(used.as_secs_f64() < 2.0, "{used:?}");
+        let bytes = Book::default().sheet("S", &s).bytes();
+        let before = sheetlayout::work_steps();
+        let start = std::time::Instant::now();
+        let out = read_with(bytes, limits);
+        let took = start.elapsed();
+        let steps = before.zip(sheetlayout::work_steps()).map(|(b, a)| a - b);
+        // The steps of layout work ([`sheetlayout::work_steps`], debug builds), measured once
+        // (2026-10-27, debug build, `--no-capture`) with half again as margin: 137 with the
+        // table one row below the title, 140 six rows below. Covered positions made into
+        // cells would add 259,974 cells to sort and cut. The wall time is only a safety stop.
+        let measured: u64 = if near { 137 } else { 140 };
+        eprintln!("tall title, gap {gap}: {steps:?} layout steps in {took:?}");
+        if cfg!(debug_assertions) {
+            assert!(
+                steps.is_some_and(|n| n <= measured + measured / 2),
+                "{steps:?} layout steps, measured {measured}"
+            );
+        } else {
+            assert_eq!(steps, None);
+        }
+        assert!(took < std::time::Duration::from_secs(60), "{took:?}");
         assert_eq!(
             out.completeness,
             Completeness::Complete,

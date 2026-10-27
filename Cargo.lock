@@ -1922,7 +1922,6 @@ dependencies = [
  "calamine",
  "cfb",
  "formulakit",
- "libc",
  "quick-xml",
  "rezzer-layout",
  "rezzer-limits",
