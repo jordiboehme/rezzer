@@ -251,13 +251,22 @@ fn tiles_differ_without_colour() {
             ("▀".to_string(), "▀".to_string()),
         ]
     );
-    let distinct: HashSet<_> = symbols.iter().collect();
-    assert_eq!(distinct.len(), 4);
-
     let round = app.round().unwrap();
     for p in round.programs() {
-        assert_eq!(cell(&app, &buf, p.pos), ("◆".to_string(), "◆".to_string()));
+        let want = if p.id == 0 { "◆" } else { "◇" };
+        assert_eq!(
+            cell(&app, &buf, p.pos),
+            (want.to_string(), want.to_string())
+        );
     }
+    // User head, other head, user trail, other trail, wall and tower: six different symbols.
+    let mut all = vec![
+        cell(&app, &buf, round.programs()[0].pos),
+        cell(&app, &buf, round.programs()[1].pos),
+    ];
+    all.extend(symbols);
+    let distinct: HashSet<_> = all.iter().collect();
+    assert_eq!(distinct.len(), 6, "{all:?}");
     // Empty cells: a dot every 4th column and row, else blank.
     let g = round.grid();
     for y in 0..g.height() {

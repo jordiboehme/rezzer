@@ -199,7 +199,9 @@ fn draw_grid(app: &App, round: &Round, grid_area: Rect, clip: Rect, buf: &mut Bu
         let colour = colour_of(program.id);
         if !program.derezzed {
             let style = Style::new().fg(colour).add_modifier(Modifier::BOLD);
-            put(buf, grid_area, clip, program.pos, ["◆", "◆"], style);
+            // A glyph of its own, so the user program stands out without colour too.
+            let head = if program.id == 0 { "◆" } else { "◇" };
+            put(buf, grid_area, clip, program.pos, [head, head], style);
         } else if app.just_derezzed().contains(&program.id) {
             put(
                 buf,
