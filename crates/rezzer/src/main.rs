@@ -2,6 +2,8 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+mod greetings;
+
 use rezzer_model::Registry;
 
 /// The system allocator with large blocks moved by hand (see `rezzer_limits::Allocator`):
@@ -10,7 +12,7 @@ use rezzer_model::Registry;
 static ALLOCATOR: rezzer_limits::Allocator = rezzer_limits::Allocator;
 
 fn main() -> std::process::ExitCode {
-    rezzer_cli::main(registry())
+    rezzer_cli::main_with(registry(), greetings::after_read)
 }
 
 /// The readers of this build, chosen by the `fmt-*` cargo features.
