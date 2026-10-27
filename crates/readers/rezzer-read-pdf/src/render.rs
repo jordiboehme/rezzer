@@ -2210,8 +2210,8 @@ impl Scans {
         };
         let mut added = 0;
         // The region's box is one code's box: with more codes in one render, each keeps the
-        // decoder's own box.
-        let alone = codes.len() == 1;
+        // decoder's own box. One code read twice, at two lines across its bars, is one code.
+        let alone = distinct_codes(&codes) == 1;
         for c in codes {
             if self.kept >= FILE_CODES {
                 self.halt(
@@ -2248,10 +2248,12 @@ impl Scans {
             if let Some(&first) = same.first() {
                 // Read again from its region: the box drawn replaces the page read's, and the
                 // page read's copies at other lines across the same bars are this code too.
+                // Each copy dropped gives back its count and its element.
                 if drawn {
                     for &i in same[1..].iter().rev() {
                         found.codes.remove(i);
                         self.kept -= 1;
+                        budget.release_elements(1);
                     }
                     let o = &mut found.codes[first];
                     o.bounds = b.bounds;
@@ -2418,6 +2420,17 @@ fn barcode(c: &barcodes::Code) -> Barcode {
         bounds: None,
         place: None,
     }
+}
+
+/// How many different codes, by kind and payload, `codes` holds.
+fn distinct_codes(codes: &[barcodes::Code]) -> usize {
+    let mut seen: Vec<(&barcodes::Symbology, &barcodes::Payload)> = Vec::new();
+    for c in codes {
+        if !seen.contains(&(&c.symbology, &c.payload)) {
+            seen.push((&c.symbology, &c.payload));
+        }
+    }
+    seen.len()
 }
 
 /// Where the box `b` lies on a page `w` wide and `h` high, in words, by its middle and thirds
@@ -2645,6 +2658,34 @@ mod tests {
         assert_eq!(all.ids, HashSet::from([7]));
         assert!(!all.spots.holds(&[0.0, 0.0, 30.0, 30.0], 7));
         assert!(!all.spots.holds(&[200.0, 0.0, 230.0, 30.0], 7));
+    }
+
+    #[test]
+    fn distinct_codes_count_kind_and_payload() {
+        let code = |s, t: &str, top| barcodes::Code {
+            symbology: s,
+            payload: barcodes::Payload::Text(t.to_string()),
+            bytes: t.len(),
+            bounds: [0, top, 100, top + 2],
+        };
+        use barcodes::Symbology::{Code128, QrCode};
+        assert_eq!(distinct_codes(&[]), 0);
+        // One linear code read at two lines across its bars is one code.
+        let twice = [
+            code(Code128, "0000000001", 10),
+            code(Code128, "0000000001", 30),
+        ];
+        assert_eq!(distinct_codes(&twice), 1);
+        let two = [
+            code(Code128, "0000000001", 10),
+            code(Code128, "0000000002", 10),
+        ];
+        assert_eq!(distinct_codes(&two), 2);
+        let kinds = [
+            code(Code128, "0000000001", 10),
+            code(QrCode, "0000000001", 10),
+        ];
+        assert_eq!(distinct_codes(&kinds), 2);
     }
 
     #[test]

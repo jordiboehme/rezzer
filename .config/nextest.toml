@@ -5,6 +5,13 @@
 filter = 'binary(hostile) | binary(hostile_render)'
 slow-timeout = { period = "60s", terminate-after = 3 }
 
+# The vision tests render pages and read them for codes inside the reader's time limit; some
+# read many pages in one test. One that hangs anyway is reported as slow after 60 seconds and
+# ended after 3 minutes, so it fails the run instead of hanging it.
+[[profile.default.overrides]]
+filter = 'package(rezzer-read-pdf) & binary(vision)'
+slow-timeout = { period = "60s", terminate-after = 3 }
+
 # These tests walk hostile shapes with no time stop, so only a work bound ends them. A broken
 # bound loops: it is ended after 2 minutes and fails the run instead of hanging it.
 [[profile.default.overrides]]

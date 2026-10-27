@@ -237,3 +237,24 @@ fn a_failed_time_check_is_a_time_stop() {
     assert!(cancelled.check_time().is_err());
     assert!(cancelled.time_stopped());
 }
+
+#[test]
+fn elements_given_back_count_again_until_the_limit_was_hit() {
+    let b = Budget::new(Limits {
+        max_elements: 3,
+        ..Limits::default()
+    });
+    assert!(b.add_elements(3).is_ok());
+    b.release_elements(1);
+    assert_eq!(b.elements(), 2);
+    assert!(b.add_elements(1).is_ok());
+    // Once over the limit, giving elements back does not open it again.
+    assert!(b.add_elements(1).is_err());
+    b.release_elements(1);
+    assert_eq!(b.elements(), 4);
+    assert!(b.add_elements(1).is_err());
+    // Never below zero.
+    let c = Budget::new(Limits::default());
+    c.release_elements(5);
+    assert_eq!(c.elements(), 0);
+}
