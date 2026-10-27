@@ -1991,34 +1991,42 @@ fn without_marker(runs: &[&Run], cut: usize) -> Vec<Run> {
     runs
 }
 
-/// The losses for a page's grids and header bands refused without a note: one for its grids
-/// and one for its bands, each naming why, by reason in reading order.
+/// The losses for a page's grids, header bands and blocks in columns refused without a note:
+/// one for each kind, naming why, by reason in reading order.
 fn refused_quietly(
     page: u32,
     mut quiet: Vec<(usize, &'static str, tables::Refused)>,
 ) -> Vec<String> {
     quiet.sort_by_key(|q| q.0);
     let mut out = Vec::new();
-    for (kind, one, many, what) in [
+    for (kind, one, many, tail, tails) in [
         (
             tables::Refused::Grid,
             "a grid of drawn rules",
             "grids of drawn rules",
-            "grid",
+            "its text is read without the grid",
+            "their text is read without the grids",
         ),
         (
             tables::Refused::Band,
             "a header band",
             "header bands",
-            "band",
+            "its text is read without the band",
+            "their text is read without the bands",
+        ),
+        (
+            tables::Refused::Region,
+            "a block of text in columns",
+            "blocks of text in columns",
+            "its text stays paragraphs",
+            "their text stays paragraphs",
         ),
     ] {
         let why: Vec<&str> = quiet.iter().filter(|q| q.2 == kind).map(|q| q.1).collect();
         match why.as_slice() {
             [] => {}
             [why] => out.push(format!(
-                "{one} on page {page} is not read as a table: {why}; its text is read without \
-                 the {what}"
+                "{one} on page {page} is not read as a table: {why}; {tail}"
             )),
             _ => {
                 // One reason for all is said once, without a count.
@@ -2028,8 +2036,7 @@ fn refused_quietly(
                     tables::counted(why.iter().copied())
                 };
                 out.push(format!(
-                    "{} {many} on page {page} are not read as tables: {reasons}; their text \
-                     is read without the {what}s",
+                    "{} {many} on page {page} are not read as tables: {reasons}; {tails}",
                     why.len()
                 ));
             }

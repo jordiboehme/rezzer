@@ -481,6 +481,11 @@ pub fn boxed(x: f32, y: f32, w: f32, h: f32) -> String {
     format!("{x} {y} {w} {h} re S\n")
 }
 
+/// A stroked horizontal rule of 0.5 points from `(x0, y)` to `(x1, y)`.
+pub fn hrule(x0: f32, x1: f32, y: f32) -> String {
+    format!("0.5 w {x0} {y} m {x1} {y} l S\n")
+}
+
 /// A drawn separator: a filled rectangle of 0.24 by 2 points at `(x, y)`, as boxed number
 /// fields print their decimal and date separators.
 pub fn mark(x: f32, y: f32) -> String {

@@ -109,6 +109,8 @@ pub(super) fn ruled(
     let mut title_work = 0usize;
     let mut refusals: Vec<(usize, f32, &'static str)> = Vec::new();
     let mut quiet: Vec<(usize, &'static str, Refused)> = Vec::new();
+    // Runs of grids and bands refused without a note: their loss speaks for them.
+    let mut quietly: Vec<bool> = vec![false; flow.runs.len()];
     let mut bands: Vec<Band> = Vec::new();
     // Cells drawn as icons, the page's rule boxes sorted by their bottom once needed, and
     // the steps spent looking.
@@ -309,6 +311,9 @@ pub(super) fn ruled(
             if !noted {
                 if !chart {
                     quiet.push((at, why, Refused::Grid));
+                    for &i in &mine {
+                        quietly[i] = true;
+                    }
                 }
                 return;
             }
@@ -658,6 +663,7 @@ pub(super) fn ruled(
             held: &mut held,
             refusals: &mut refusals,
             quiet: &mut quiet,
+            quietly: &mut quietly,
             tables: &mut tables,
             skipped: &mut found.skipped,
         },
@@ -689,17 +695,25 @@ pub(super) fn ruled(
         if held.contains(&true) {
             found.held = held;
         }
+        if quietly.contains(&true) {
+            found.quietly = quietly;
+        }
         return;
     }
     // The runs of all grids leave the flow at once; the runs held stay where they are.
-    if held.contains(&true) {
-        found.held = held
+    let left = |marks: &[bool]| -> Vec<bool> {
+        if !marks.contains(&true) {
+            return Vec::new();
+        }
+        marks
             .iter()
             .zip(&claimed)
             .filter(|(_, c)| c.is_none())
             .map(|(h, _)| *h)
-            .collect();
-    }
+            .collect()
+    };
+    found.held = left(&held);
+    found.quietly = left(&quietly);
     let target: Vec<Target> = claimed
         .into_iter()
         .map(|c| c.map(|(t, r, k)| (t as u32, r as u32, k as u32)))

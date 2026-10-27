@@ -45,8 +45,9 @@ pub(super) struct Taken<'a> {
     pub claimed: &'a mut [Option<(usize, usize, usize)>],
     pub held: &'a mut [bool],
     pub refusals: &'a mut Vec<(usize, f32, &'static str)>,
-    /// Bands refused without a note, for the losses of the page.
+    /// Bands refused without a note, for the losses of the page, and their runs.
     pub quiet: &'a mut Vec<(usize, &'static str, Refused)>,
+    pub quietly: &'a mut [bool],
     pub tables: &'a mut Vec<Planned>,
     pub skipped: &'a mut Vec<String>,
 }
@@ -164,6 +165,9 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
                 "its cells hold too few column titles"
             };
             take.quiet.push((at, why, Refused::Band));
+            for &i in &head {
+                take.quietly[i] = true;
+            }
         }
         return;
     }
@@ -272,6 +276,9 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
         // grid, but a loss. On a picture the band is a chart's: no loss either.
         if !sh.area.on_picture(area) {
             take.quiet.push((at, why, Refused::Band));
+            for &i in runs() {
+                take.quietly[i] = true;
+            }
         }
         return;
     }

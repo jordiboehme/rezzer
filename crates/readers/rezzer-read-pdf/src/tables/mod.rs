@@ -39,6 +39,17 @@ pub(crate) enum RuleKind {
     Rect,
 }
 
+/// A horizontal rule of the page, its pieces joined: its height `y`, its ends and its
+/// thickness `h`. A stroked line and a filled bar of up to two points come out of the text
+/// pass as lines without a thickness, so `h` is 0 for them and only a drawn rectangle has one.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct HRule {
+    pub y: f32,
+    pub x0: f32,
+    pub x1: f32,
+    pub h: f32,
+}
+
 /// A table found on a page, with the runs of each cell. Its cells' text is not built yet.
 #[derive(Debug)]
 pub(crate) struct Planned {
@@ -114,6 +125,13 @@ pub(crate) struct Found {
     /// Text a detector left as it stands, unsure what it is: the layout writes each as an
     /// Info `Uncertain` loss.
     pub uncertain: Vec<String>,
+    /// For each run of the flow, whether a grid or band of `quiet` holds it: its loss speaks
+    /// for the run already. Empty when none holds a run.
+    pub quietly: Vec<bool>,
+    /// The horizontal rules of the page, sorted by height: a rule across a region without
+    /// rules may end its table (see `borderless`). Empty when the page's lines were not
+    /// searched.
+    pub ends: Vec<HRule>,
 }
 
 /// What a refusal without a note refused.
@@ -123,6 +141,8 @@ pub(crate) enum Refused {
     Grid,
     /// A header band and the lines below it.
     Band,
+    /// A block of lines in columns without rules.
+    Region,
 }
 
 /// Why a grid or band on a picture is not a table. It is a chart, so its refusal is no loss.
@@ -170,6 +190,12 @@ pub(crate) fn plural(why: &str) -> &str {
         "its text runs on from row to row like prose" => {
             "their text runs on from row to row like prose"
         }
+        "some of its text stands between its columns" => {
+            "some of their text stands between their columns"
+        }
+        "its columns are not clean" => "their columns are not clean",
+        "all its rows read the same" => "all their rows read the same",
+        "it reads like a table of contents" => "they read like tables of contents",
         other => other,
     }
 }
@@ -237,10 +263,46 @@ pub(crate) fn untagged(
         body_size: drawn.body_size,
     };
     if !drawn.lines_unsearched {
+        found.ends = end_rules(drawn.rules);
         ruled::ruled(page, flow, drawn.rules, &area, stop, &mut found);
     }
     borderless::borderless(page, flow, &area, stop, &mut found);
     found
+}
+
+/// The horizontal rules of `rules`, sorted by height: lines with their collinear pieces
+/// joined (a dashed rule is one), and rectangles wider than high as they are.
+fn end_rules(rules: &[Rule]) -> Vec<HRule> {
+    let mut lines = Vec::new();
+    let mut out = Vec::new();
+    for r in rules {
+        let (x0, x1) = (r.x0.min(r.x1), r.x0.max(r.x1));
+        let (y0, y1) = (r.y0.min(r.y1), r.y0.max(r.y1));
+        if y1 - y0 >= x1 - x0 {
+            continue;
+        }
+        match r.kind {
+            RuleKind::Line => lines.push(crate::regions::Seg {
+                at: (y0 + y1) / 2.0,
+                from: x0,
+                to: x1,
+            }),
+            RuleKind::Rect => out.push(HRule {
+                y: (y0 + y1) / 2.0,
+                x0,
+                x1,
+                h: y1 - y0,
+            }),
+        }
+    }
+    out.extend(crate::regions::merged(lines).into_iter().map(|s| HRule {
+        y: s.at,
+        x0: s.from,
+        x1: s.to,
+        h: 0.0,
+    }));
+    out.sort_by(|a, b| a.y.total_cmp(&b.y));
+    out
 }
 
 /// Why a grid or region is the page's frame.

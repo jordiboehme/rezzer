@@ -9,7 +9,7 @@
 mod common;
 
 use common::{FormPage, print_form, show};
-use rezzer_model::{Block, Inline, ReadOutcome, plain_text};
+use rezzer_model::{Block, Completeness, Inline, LossReason, ReadOutcome, Severity, plain_text};
 
 /// The allocator of the Rezzer binary, so the reads run as they run in it.
 #[global_allocator]
@@ -190,4 +190,325 @@ fn cover_title_stays_a_heading() {
     };
     let out = common::read(&print_form(&[cover, text], "", ""));
     assert_eq!(headings(&out), [(1, "Jahresbericht".to_string())]);
+}
+
+/// How the rules of a generated block are drawn, and how large its page is printed.
+#[derive(Debug, Clone, Copy)]
+enum Look {
+    /// Stroked lines of 0.5 points.
+    Plain,
+    /// Filled bars of 1 point.
+    Bar,
+    /// Rows of short filled dashes, a dash and a gap of a fifth and a tenth of the text size.
+    Dashed,
+    /// Stroked lines with a pattern of dots and round caps.
+    Dotted,
+    /// The whole page drawn this many times as large.
+    Scaled(f32),
+}
+
+const LOOKS: [Look; 6] = [
+    Look::Plain,
+    Look::Bar,
+    Look::Dashed,
+    Look::Dotted,
+    Look::Scaled(0.7),
+    Look::Scaled(1.5),
+];
+
+/// A horizontal rule from `x0` to `x1` at `y` as `look` draws it; `size` (the text size) sets
+/// the dashes and dots.
+fn rule(look: Look, x0: f32, x1: f32, y: f32, size: f32) -> String {
+    match look {
+        Look::Plain | Look::Scaled(_) => common::hrule(x0, x1, y),
+        Look::Bar => format!("{x0} {} {} 1 re f\n", y - 0.5, x1 - x0),
+        Look::Dashed => {
+            let (dash, step) = (0.2 * size, 0.3 * size);
+            let mut out = String::new();
+            let mut x = x0;
+            while x < x1 {
+                out += &format!("{x} {} {} 0.5 re f\n", y - 0.25, dash.min(x1 - x));
+                x += step;
+            }
+            out
+        }
+        Look::Dotted => format!(
+            "q 0.5 w 1 J [0 {}] 0 d {x0} {y} m {x1} {y} l S Q\n",
+            0.15 * size
+        ),
+    }
+}
+
+/// `text` in Helvetica (`/FL`) or Helvetica-Bold (`/FB`) at `size`, its right end at `x`.
+fn right(bold: bool, size: f32, x: f32, y: f32, text: &str) -> String {
+    let font = if bold { "FB" } else { "FL" };
+    show(font, size, x - common::helvetica_width(text, size), y, text)
+}
+
+/// The rules under the line items of [`invoice`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Rules {
+    /// A rule under the header only.
+    Header,
+    /// A rule under the header and one under the last item, over the totals.
+    End,
+    /// A rule under every line but the last.
+    Rows,
+}
+
+/// Line items of an invoice at `k` times 8 pt text, their lines `10 k` apart from the header
+/// on the baseline 600 down: the bold header `Pos`, `Artikel`, `Menge` at x 40, 80 and 300 and
+/// `Preis` and `Betrag` flush right at x 420 and 540, three items, with the rules of `rules`
+/// drawn as `look`. With `End`, the totals follow the rule, their labels at x 340 (between
+/// `Menge` and `Preis`) and their values flush right at x 540.
+fn invoice(k: f32, rules: Rules, look: Look) -> String {
+    let size = 8.0 * k;
+    let y = |dy: f32| 600.0 - dy * k;
+    let mut out = show("FB", size, 40.0, y(0.0), "Pos")
+        + &show("FB", size, 80.0, y(0.0), "Artikel")
+        + &show("FB", size, 300.0, y(0.0), "Menge")
+        + &right(true, size, 420.0, y(0.0), "Preis")
+        + &right(true, size, 540.0, y(0.0), "Betrag");
+    out += &rule(look, 40.0, 540.0, y(4.0), size);
+    let items = [
+        ["1", "Beratung", "2", "500,00", "1.000,00"],
+        ["2", "Material", "1", "200,00", "200,00"],
+        ["3", "Versand", "1", "34,56", "34,56"],
+    ];
+    for (n, item) in items.iter().enumerate() {
+        let at = y(10.0 * (n as f32 + 1.0));
+        out += &show("FL", size, 40.0, at, item[0]);
+        out += &show("FL", size, 80.0, at, item[1]);
+        out += &show("FL", size, 300.0, at, item[2]);
+        out += &right(false, size, 420.0, at, item[3]);
+        out += &right(false, size, 540.0, at, item[4]);
+        if rules == Rules::Rows && n < 2 {
+            out += &rule(look, 40.0, 540.0, y(10.0 * (n as f32 + 1.0) + 4.0), size);
+        }
+    }
+    if rules == Rules::End {
+        out += &rule(look, 40.0, 540.0, y(36.0), size);
+        let totals = [
+            (false, "Nettobetrag", "1.234,56"),
+            (false, "USt 19 %", "234,57"),
+            (true, "Gesamtbetrag", "1.469,13"),
+        ];
+        for (n, (bold, label, value)) in totals.iter().enumerate() {
+            let at = y(44.0 + 10.0 * n as f32);
+            out += &show(if *bold { "FB" } else { "FL" }, size, 340.0, at, label);
+            out += &right(*bold, size, 540.0, at, value);
+        }
+    }
+    out
+}
+
+/// A file of one page that holds `template` over the 7 pt body, drawn as `look`.
+fn page_in(template: &str, look: Look) -> Vec<u8> {
+    let page = FormPage {
+        template: format!("{template}{}", body(7.0, 420.0)),
+        scale: match look {
+            Look::Scaled(s) => s,
+            _ => 1.0,
+        },
+        ..FormPage::default()
+    };
+    print_form(&[page], "", "")
+}
+
+/// The tables of the body: header rows and the text of each cell.
+fn tables(out: &ReadOutcome) -> Vec<(usize, Vec<Vec<String>>)> {
+    blocks(out)
+        .into_iter()
+        .filter_map(|b| match b {
+            Block::Table {
+                header_rows, rows, ..
+            } => Some((
+                *header_rows,
+                rows.iter()
+                    .map(|r| r.iter().map(|c| plain_text(&c.inlines)).collect())
+                    .collect(),
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+fn owned(rows: &[&[&str]]) -> Vec<Vec<String>> {
+    rows.iter()
+        .map(|r| r.iter().map(|c| (*c).to_string()).collect())
+        .collect()
+}
+
+/// The table of the line items of [`invoice`].
+fn items_table() -> (usize, Vec<Vec<String>>) {
+    (
+        1,
+        owned(&[
+            &["Pos", "Artikel", "Menge", "Preis", "Betrag"],
+            &["1", "Beratung", "2", "500,00", "1.000,00"],
+            &["2", "Material", "1", "200,00", "200,00"],
+            &["3", "Versand", "1", "34,56", "34,56"],
+        ]),
+    )
+}
+
+/// Every size and look of the invoice with `rules`, and what each read gave.
+fn invoice_reads(rules: Rules) -> Vec<(String, ReadOutcome)> {
+    let mut out = Vec::new();
+    for k in [0.75, 1.0, 1.5] {
+        for look in LOOKS {
+            let name = format!("{k}x, {look:?}");
+            out.push((name, common::read(&page_in(&invoice(k, rules, look), look))));
+        }
+    }
+    out
+}
+
+/// Line items, a rule and the totals under it: the rule ends the table of the items, and the
+/// totals are a table of their own, in every size and look.
+#[test]
+fn rule_ends_a_table_without_rules() {
+    let totals = owned(&[
+        &["Nettobetrag", "1.234,56"],
+        &["USt 19 %", "234,57"],
+        &["Gesamtbetrag", "1.469,13"],
+    ]);
+    for (name, out) in invoice_reads(Rules::End) {
+        let got = tables(&out);
+        assert_eq!(got.len(), 2, "{name}: {got:?}");
+        assert_eq!(got[0], items_table(), "{name}");
+        assert_eq!(got[1].1, totals, "{name}");
+        assert!(
+            out.document.losses.is_empty(),
+            "{name}: {:?}",
+            out.document.losses
+        );
+    }
+}
+
+/// Guard: the rule under the header row is no end of the table.
+#[test]
+fn header_rule_is_not_an_end() {
+    for (name, out) in invoice_reads(Rules::Header) {
+        assert_eq!(tables(&out), [items_table()], "{name}");
+        assert!(
+            out.document.losses.is_empty(),
+            "{name}: {:?}",
+            out.document.losses
+        );
+    }
+}
+
+/// Guard: a rule under every line parts rows, not tables.
+#[test]
+fn row_rules_do_not_end_a_table() {
+    for (name, out) in invoice_reads(Rules::Rows) {
+        assert_eq!(tables(&out), [items_table()], "{name}");
+        assert!(
+            out.document.losses.is_empty(),
+            "{name}: {:?}",
+            out.document.losses
+        );
+    }
+}
+
+/// Four lines of three pieces at x 40, 200 and 360, from the baseline 600 down, the first line
+/// with its middle piece at x 150, in the gutter. (The columns are those of the lines under the
+/// first, which may be a header that spans them: a piece of a lower line at x 150 would be a
+/// column of its own.)
+fn columns_block() -> String {
+    columns_block_at(600.0)
+}
+
+/// The lines of [`columns_block`] from the baseline `top` down.
+fn columns_block_at(top: f32) -> String {
+    let lines = [
+        ["Muster GmbH", "Musterweg 1", "1.234,56"],
+        ["Erika Mustermann", "Musterweg 2", "234,57"],
+        ["Max Muster", "Musterweg 3", "34,56"],
+        ["Muster AG", "Musterweg 4", "200,00"],
+    ];
+    let mut out = String::new();
+    for (n, line) in lines.iter().enumerate() {
+        let y = top - 10.0 * n as f32;
+        let middle = if n == 0 { 150.0 } else { 200.0 };
+        out += &show("FL", 8.0, 40.0, y, line[0]);
+        out += &show("FL", 8.0, middle, y, line[1]);
+        out += &show("FL", 8.0, 360.0, y, line[2]);
+    }
+    out
+}
+
+/// The loss for the block of [`columns_block`].
+const REGION_LOSS: &str = "a block of text in columns on page 1 is not read as a table: some \
+                           of its text stands between its columns; its text stays paragraphs";
+
+#[test]
+fn refused_region_without_caption_is_a_loss() {
+    let out = common::read(&page_in(&columns_block(), Look::Plain));
+    let losses = &out.document.losses;
+    assert_eq!(losses.len(), 1, "{losses:?}\n{:?}", tables(&out));
+    assert_eq!(losses[0].what, REGION_LOSS);
+    assert_eq!(losses[0].why, LossReason::Uncertain);
+    assert_eq!(losses[0].severity, Severity::Info);
+    assert_eq!(out.completeness, Completeness::Complete);
+    let text = common::all_text(&out);
+    for word in columns_block()
+        .lines()
+        .filter_map(|l| l.split('(').nth(1)?.split(')').next())
+        .flat_map(str::split_whitespace)
+    {
+        assert!(text.contains(word), "{word} in {text}");
+    }
+}
+
+/// Two such blocks on a page give one loss that counts them.
+#[test]
+fn refused_regions_of_a_page_give_one_loss() {
+    let template = columns_block_at(700.0) + &columns_block();
+    let out = common::read(&page_in(&template, Look::Plain));
+    let losses: Vec<&str> = out
+        .document
+        .losses
+        .iter()
+        .map(|l| l.what.as_str())
+        .collect();
+    assert_eq!(
+        losses,
+        [
+            "2 blocks of text in columns on page 1 are not read as tables: some of their text \
+          stands between their columns; their text stays paragraphs"
+        ]
+    );
+}
+
+/// Guard: a block next to a figure caption is a chart's, and no loss.
+#[test]
+fn region_beside_a_figure_caption_gives_no_loss() {
+    let template = show("FL", 8.0, 40.0, 616.0, "Figure 1: Muster") + &columns_block();
+    let out = common::read(&page_in(&template, Look::Plain));
+    assert!(out.document.losses.is_empty(), "{:?}", out.document.losses);
+}
+
+/// A ruled grid over 70 % of the page, refused without a note, holds the block: its loss
+/// says so, and the block gives none of its own.
+#[test]
+fn quiet_grid_and_region_over_the_same_text_give_one_loss() {
+    // Two by two cells: the inner rules stand clear of the text.
+    let grid = common::hrule(20.0, 575.0, 800.0)
+        + &common::hrule(20.0, 575.0, 120.0)
+        + &common::hrule(20.0, 575.0, 100.0)
+        + "0.5 w 20 100 m 20 800 l S\n"
+        + "0.5 w 560 100 m 560 800 l S\n"
+        + "0.5 w 575 100 m 575 800 l S\n";
+    let template = grid + &show("FL", 8.0, 40.0, 640.0, "Muster GmbH") + &columns_block();
+    let out = common::read(&page_in(&template, Look::Plain));
+    let losses = &out.document.losses;
+    assert_eq!(losses.len(), 1, "{losses:?}");
+    assert!(
+        losses[0]
+            .what
+            .starts_with("a grid of drawn rules on page 1"),
+        "{losses:?}"
+    );
 }

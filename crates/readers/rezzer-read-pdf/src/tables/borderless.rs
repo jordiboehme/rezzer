@@ -118,8 +118,11 @@ pub(super) fn borderless(
             }
             end += 1;
         }
-        regions.push((i, last_multi + 1));
-        i = last_multi + 1;
+        // A rule across the lines may end their table: the lines below it are a region of
+        // their own (totals under line items).
+        let z = ended(flow, &lines, (i, last_multi + 1), &found.ends).unwrap_or(last_multi + 1);
+        regions.push((i, z));
+        i = z;
     }
     // Accepted regions, and for each run the table, row and cell it goes to.
     let mut claim: Vec<Planned> = Vec::new();
@@ -221,6 +224,8 @@ pub(super) fn borderless(
         };
         let split = sets.len() > 1;
         let mut refused: Option<(&'static str, f32, usize)> = None;
+        // Why a region without a caption is no table, when its refusal is a loss.
+        let mut lost: Option<&'static str> = None;
         let mut taken = false;
         for pieces in &sets {
             let runs: Vec<usize> = pieces
@@ -312,16 +317,30 @@ pub(super) fn borderless(
                         let why = if split { SIDE_BY_SIDE } else { why };
                         refused = Some((why, b[3], line));
                     }
+                    // Next to a figure caption or on a picture, the region is a chart's.
+                    if caption_line.is_none() && !split && !figure_caption && !area.on_picture(b) {
+                        lost = Some(why);
+                    }
                 }
             }
         }
+        // A grid of rules over the same text may have said so already.
+        let (lo, hi) = (flow.at[lines[a].start], flow.at[lines[z - 1].end - 1]);
+        let said = found.unsure.iter().any(|u| (lo..=hi).contains(&u.at));
+        if let (false, Some(why)) = (taken, lost) {
+            // A block of three lines or more in three columns or more looks like a table: its
+            // refusal is a loss, unless a grid or band refused without a note holds its text
+            // and its loss speaks for it.
+            let columned = (a..z).filter(|&k| counts[k] >= 3).count();
+            let quietly = (lines[a].start..lines[z - 1].end)
+                .any(|i| found.quietly.get(i).copied().unwrap_or(false));
+            if z - a >= 3 && columned >= 3 && !said && !quietly {
+                found.quiet.push((lo, why, Refused::Region));
+            }
+        }
         if let (false, Some((why, top, line))) = (taken, refused) {
-            // A grid of rules over the same text may have said so already, and a caption
-            // gates one note: a region it gated before said so.
-            let (lo, hi) = (flow.at[lines[a].start], flow.at[lines[z - 1].end - 1]);
-            let said =
-                noted.contains(&line) || found.unsure.iter().any(|u| (lo..=hi).contains(&u.at));
-            if !said {
+            // A caption gates one note: a region it gated before said so.
+            if !said && !noted.contains(&line) {
                 noted.push(line);
                 found.unsure.push(Unsure {
                     at: flow.at[lines[a].start],
@@ -348,6 +367,55 @@ pub(super) fn borderless(
         found.tables.push(p);
     }
     found.tables.sort_by_key(|t| t.at);
+}
+
+/// A rule that ends a region without rules is at most its median text size divided by this
+/// high and at least this many times that size wide, and spans this share of the ink of the
+/// lines above it.
+const THIN_RULE: f32 = 8.0;
+const END_RULE: f32 = 4.5;
+const END_SHARE: f32 = 0.9;
+
+/// Where a rule of `ends` ends the region of lines `a..z`: the line right under the one rule
+/// between two of its lines that is thin and long for its text (see [`THIN_RULE`]) and spans
+/// [`END_SHARE`] of the ink of the lines above it. A rule under the first line underlines a
+/// header, and rules between two pairs of lines or more part rows: neither ends the region.
+fn ended(flow: &Flow, lines: &[FlowLine], (a, z): (usize, usize), ends: &[HRule]) -> Option<usize> {
+    if ends.is_empty() || z - a < 3 {
+        return None;
+    }
+    let mut sizes: Vec<f32> = lines[a..z].iter().map(|l| l.size).collect();
+    sizes.sort_by(f32::total_cmp);
+    let size = sizes[sizes.len() / 2];
+    // The ink of the lines above the pair looked at, from the smallest run x to the largest
+    // run end.
+    let (mut x0, mut x1) = (f32::MAX, f32::MIN);
+    let mut end = None;
+    for k in a + 1..z {
+        for r in &flow.runs[lines[k - 1].start..lines[k - 1].end] {
+            x0 = x0.min(r.x);
+            x1 = x1.max(r.x + r.w);
+        }
+        if k == a + 1 {
+            continue;
+        }
+        let (lo, hi) = (lines[k].y, lines[k - 1].y);
+        let ruled = ends[ends.partition_point(|e| e.y <= lo)..]
+            .iter()
+            .take_while(|e| e.y < hi)
+            .any(|e| {
+                e.h <= size / THIN_RULE
+                    && e.x1 - e.x0 >= END_RULE * size
+                    && e.x1.min(x1) - e.x0.max(x0) >= END_SHARE * (x1 - x0)
+            });
+        if ruled {
+            if end.is_some() {
+                return None;
+            }
+            end = Some(k);
+        }
+    }
+    end
 }
 
 /// Lines of labels and values one table may have at most.
