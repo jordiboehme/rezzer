@@ -1113,7 +1113,8 @@ fn grid_of(
                     .collect();
                 Shape::most(&shapes)
             };
-            let differ = shape_of(c) != shape_of(c + 1);
+            // A column with no shape allows no cut.
+            let differ = matches!((shape_of(c), shape_of(c + 1)), (Some(a), Some(b)) if a != b);
             title_cut(flow, &pieces[0][k], (columns[c], columns[c + 1]), differ)
         } else {
             None
@@ -1286,63 +1287,95 @@ const TITLE_ALIGN: f32 = 0.25;
 /// column's end.
 const COVER_END: f32 = 0.5;
 
-/// The shape of a value: what a column of values holds.
+/// The shape of a value: what a column of values holds. A shape read wrong may only keep a
+/// title merged, never cut one, so the shapes are few and broad.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Shape {
-    /// Digits only, with a sign before them.
-    Whole,
-    /// Digits with decimal or thousands marks, or an amount with a currency.
-    Decimal,
-    /// A number with a percent sign.
+    /// A whole number, a decimal or an amount: digits with thousands or decimal marks, a sign
+    /// before them and a currency sign or code before or after them (`1.200`, `-6,98`,
+    /// `12,50 EUR`, `\u{20ac} 3,00`).
+    Number,
+    /// A number with a percent sign (`19%`, `19 %`).
     Percent,
-    /// Three groups of digits parted by dots, slashes or hyphens.
+    /// A day, a month and a year in range, parted by dots, slashes or hyphens (`01.01.2026`,
+    /// `2026-01-01`, `1/31/2026`).
     Date,
     Text,
 }
 
+/// Currency signs and codes a number may have before or after it.
+const CURRENCIES: [&str; 7] = ["\u{20ac}", "$", "\u{a3}", "EUR", "USD", "GBP", "CHF"];
+
 impl Shape {
     fn of(text: &str) -> Shape {
         let t = text.trim();
-        let digits = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit());
-        let number = |s: &str| {
-            let s = s.trim_start_matches(['-', '+']);
-            !s.is_empty()
-                && s.chars().any(|c| c.is_ascii_digit())
-                && s.chars()
-                    .all(|c| c.is_ascii_digit() || matches!(c, '.' | ','))
-        };
         if let Some(n) = t.strip_suffix('%')
             && number(n.trim_end())
         {
             return Shape::Percent;
         }
-        if digits(t.trim_start_matches(['-', '+'])) {
-            return Shape::Whole;
-        }
-        let parts: Vec<&str> = t.split(['.', '/', '-']).collect();
-        if parts.len() == 3 && parts.iter().all(|p| digits(p)) && !t.contains(',') {
+        if date(t) {
             return Shape::Date;
         }
-        let amount = t
-            .trim_end_matches(['\u{20ac}', '$'])
-            .trim_end()
-            .trim_end_matches("EUR")
-            .trim_end();
-        if number(amount) {
-            return Shape::Decimal;
+        let mut n = t;
+        for c in CURRENCIES {
+            n = n.strip_prefix(c).unwrap_or(n).trim();
+            n = n.strip_suffix(c).unwrap_or(n).trim();
+        }
+        if number(n) {
+            return Shape::Number;
         }
         Shape::Text
     }
 
-    /// The shape most of `shapes` have (one of them on a tie), text when there are none.
-    fn most(shapes: &[Shape]) -> Shape {
-        let count = |s: &Shape| shapes.iter().filter(|x| *x == s).count();
+    /// The shape more than half of `shapes` have; none on a tie, without a majority or
+    /// without values.
+    fn most(shapes: &[Shape]) -> Option<Shape> {
         shapes
             .iter()
-            .max_by_key(|s| count(s))
+            .find(|s| 2 * shapes.iter().filter(|x| x == s).count() > shapes.len())
             .copied()
-            .unwrap_or(Shape::Text)
     }
+}
+
+/// Whether `text` is a number: digits, with a sign before them and thousands or decimal marks
+/// (dots, commas, spaces) between them, never two marks in a row.
+fn number(text: &str) -> bool {
+    let t = text.strip_prefix(['-', '+']).unwrap_or(text);
+    let b = t.as_bytes();
+    !b.is_empty()
+        && b[0].is_ascii_digit()
+        && b[b.len() - 1].is_ascii_digit()
+        && b.iter()
+            .all(|c| c.is_ascii_digit() || matches!(c, b'.' | b',' | b' '))
+        && !b
+            .windows(2)
+            .any(|w| !w[0].is_ascii_digit() && !w[1].is_ascii_digit())
+}
+
+/// Whether `text` is a date: three groups of digits parted by one kind of mark, a year of
+/// four digits first (`2026-01-01`) or a year of two or four digits last, and a day and a
+/// month in range (day first, or month first with slashes: `1/31/2026`).
+fn date(text: &str) -> bool {
+    let Some(mark) = text.chars().find(|c| matches!(c, '.' | '/' | '-')) else {
+        return false;
+    };
+    let parts: Vec<&str> = text.split(mark).collect();
+    let [a, b, c] = parts[..] else { return false };
+    if [a, b, c]
+        .iter()
+        .any(|p| p.is_empty() || !p.chars().all(|ch| ch.is_ascii_digit()))
+    {
+        return false;
+    }
+    let value = |p: &str| p.parse::<u32>().unwrap_or(0);
+    let day = |d: &str| (1..=31).contains(&value(d)) && d.len() <= 2;
+    let month = |m: &str| (1..=12).contains(&value(m)) && m.len() <= 2;
+    if a.len() == 4 {
+        return month(b) && day(c);
+    }
+    let year = matches!(c.len(), 2 | 4);
+    year && ((day(a) && month(b)) || (mark == '/' && month(a) && day(b)))
 }
 
 /// Where the piece `p` of a header line, over the columns `left` and `right` side by side, is
@@ -1541,23 +1574,46 @@ mod tests {
     #[test]
     fn values_have_shapes() {
         for (text, shape) in [
-            ("2", Shape::Whole),
-            ("-12", Shape::Whole),
-            ("1.234,56", Shape::Decimal),
-            ("34,56 EUR", Shape::Decimal),
+            // Numbers: whole, decimal, amounts, thousands marks, signs and currencies.
+            ("2", Shape::Number),
+            ("-12", Shape::Number),
+            ("+5", Shape::Number),
+            ("-6,98", Shape::Number),
+            ("1.234,56", Shape::Number),
+            ("1.200", Shape::Number),
+            ("1,200", Shape::Number),
+            ("1 200", Shape::Number),
+            ("1.234.567", Shape::Number),
+            ("12,50 EUR", Shape::Number),
+            ("12,50 \u{20ac}", Shape::Number),
+            ("\u{20ac} 12,50", Shape::Number),
+            ("EUR 12,50", Shape::Number),
+            ("$3.50", Shape::Number),
+            // Percentages.
             ("19%", Shape::Percent),
-            ("7 %", Shape::Percent),
-            ("01.03.2026", Shape::Date),
+            ("19 %", Shape::Percent),
+            // Dates with day and month in range.
+            ("01.01.2026", Shape::Date),
+            ("31.01.26", Shape::Date),
+            ("2026-01-01", Shape::Date),
+            ("1/31/2026", Shape::Date),
             ("31/12/2026", Shape::Date),
+            // No date out of range: digits with dots only.
+            ("32.01.2026", Shape::Number),
+            ("01.13.2026", Shape::Number),
+            // Text.
             ("Stk", Shape::Text),
+            ("Jan 26", Shape::Text),
+            ("1..2", Shape::Text),
+            ("", Shape::Text),
         ] {
-            assert_eq!(Shape::of(text), shape, "{text}");
+            assert_eq!(Shape::of(text), shape, "{text:?}");
         }
-        assert_eq!(
-            Shape::most(&[Shape::Whole, Shape::Text, Shape::Whole]),
-            Shape::Whole
-        );
-        assert_eq!(Shape::most(&[]), Shape::Text);
+        use Shape::{Number, Percent, Text};
+        assert_eq!(Shape::most(&[Number, Text, Number]), Some(Number));
+        assert_eq!(Shape::most(&[Number, Text, Number, Text]), None, "a tie");
+        assert_eq!(Shape::most(&[Number, Text, Percent]), None, "no majority");
+        assert_eq!(Shape::most(&[]), None);
     }
 
     #[test]

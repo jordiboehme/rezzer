@@ -2184,6 +2184,8 @@ enum Place {
     Center,
     /// From the first column's start.
     Left,
+    /// Flush right with the second column's end.
+    Right,
 }
 
 /// Line items of `n` rows at `k` times 8 pt in `face`: `Pos` and `Artikel` at x 40 and 80,
@@ -2209,6 +2211,7 @@ fn narrow_spanned(
     let tx = match place {
         Place::Center => (a0 + eb - w(tf, title)) / 2.0,
         Place::Left => a0,
+        Place::Right => eb - w(tf, title),
     };
     let mut t = show(tf, size, 40.0, 600.0, "Pos")
         + &show(tf, size, 80.0, 600.0, "Artikel")
@@ -2342,6 +2345,199 @@ fn close_titles_over_two_columns_of_one_shape_stay_merged() {
         }
     }
     assert_eq!(reads, 336);
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// Two columns of values of one kind, as the shape of a column may be misread (the
+/// re-review's sets of round 4, ruling of fix round 5): a tie of numbers, whole numbers with
+/// thousands marks, amounts with the euro sign after and before, negative amounts, whole
+/// and decimal numbers, percentages with and without a space, dates, large numbers with
+/// thousands marks, empty cells, and a mix of text and numbers.
+const SHAPE_SETS: [(&str, [&str; 4], [&str; 4]); 10] = [
+    (
+        "tie",
+        ["12", "3,50", "12", "3,50"],
+        ["3,50", "12", "3,50", "12"],
+    ),
+    (
+        "thousands",
+        ["500", "80", "1.200", "20"],
+        ["1.250", "2.400", "90", "1.100"],
+    ),
+    (
+        "euro",
+        [
+            "12,50 \u{20ac}",
+            "3,00 \u{20ac}",
+            "7,10 \u{20ac}",
+            "1,00 \u{20ac}",
+        ],
+        [
+            "\u{20ac} 12,50",
+            "\u{20ac} 3,00",
+            "\u{20ac} 7,10",
+            "\u{20ac} 1,00",
+        ],
+    ),
+    (
+        "negatives",
+        ["-6,98", "-1,20", "-3,00", "-0,50"],
+        ["6,98", "1,20", "3,00", "0,50"],
+    ),
+    (
+        "whole and decimal",
+        ["-6", "-1", "-3", "-2"],
+        ["-6,98", "-1,20", "-3,00", "-0,50"],
+    ),
+    (
+        "percent",
+        ["19 %", "7 %", "19 %", "0 %"],
+        ["19%", "7%", "19%", "0%"],
+    ),
+    (
+        "dates",
+        ["01.01.2026", "01.02.2026", "01.03.2026", "01.04.2026"],
+        ["31.01.2026", "28.02.2026", "31.03.2026", "30.04.2026"],
+    ),
+    (
+        "large",
+        ["1.234.567", "2.000.000", "1.500.000", "3.100.200"],
+        ["12.345", "67.890", "10.000", "99.999"],
+    ),
+    ("empty cells", ["12", "", "5", ""], ["", "3,50", "", "1,20"]),
+    (
+        "mixed",
+        ["12", "Std", "3,50", "x"],
+        ["Stk", "4", "1,20", "y"],
+    ),
+];
+
+/// Line items of `n` rows at `k` times 8 pt in `face`: `Pos` and `Artikel` at x 40 and 80,
+/// `title` over two columns of the values `a` and `b` (each as wide as its widest value, the
+/// second `gap` sizes after the first, from x 300; flush right, or flush left when
+/// `flush_left`; an empty value leaves its cell empty), set as `place` says, and `Betrag`
+/// flush right at x 540, with no line under the title. Gives the template and the columns
+/// (the title's lines are the values of a row).
+fn shaped_spanned(
+    k: f32,
+    (fonts, bold): ((&str, &str), bool),
+    n: usize,
+    title: &str,
+    (a, b): (&[&str; 4], &[&str; 4]),
+    (place, flush_left, gap): (Place, bool, f32),
+) -> (String, Vec<Column>) {
+    let size = 8.0 * k;
+    let (vf, tf) = (fonts.0, if bold { fonts.1 } else { fonts.0 });
+    let w = |font: &str, t: &str| common::font_width(font, t, size);
+    let widest = |v: &[&str; 4]| v.iter().map(|v| w(vf, v)).fold(0.0f32, f32::max);
+    let a0 = 300.0;
+    let ea = a0 + widest(a);
+    let b0 = ea + gap * size;
+    let eb = b0 + widest(b);
+    let tx = match place {
+        Place::Center => (a0 + eb - w(tf, title)) / 2.0,
+        Place::Left => a0,
+        Place::Right => eb - w(tf, title),
+    };
+    let mut t = show(tf, size, 40.0, 600.0, "Pos")
+        + &show(tf, size, 80.0, 600.0, "Artikel")
+        + &show(tf, size, tx, 600.0, title)
+        + &show(tf, size, 540.0 - w(tf, "Betrag"), 600.0, "Betrag");
+    for r in 0..n {
+        let y = 600.0 - 10.0 * k * (r as f32 + 1.0);
+        t += &show(vf, size, 40.0, y, ITEMS[r][0]);
+        t += &show(vf, size, 80.0, y, ITEMS[r][1]);
+        for (v, start, end) in [(a[r], a0, ea), (b[r], b0, eb)] {
+            if !v.is_empty() {
+                let x = if flush_left { start } else { end - w(vf, v) };
+                t += &show(vf, size, x, y, v);
+            }
+        }
+        t += &show(vf, size, 540.0 - w(vf, ITEMS[r][4]), y, ITEMS[r][4]);
+    }
+    let values = (0..n)
+        .map(|r| {
+            [a[r], b[r]]
+                .iter()
+                .filter(|v| !v.is_empty())
+                .copied()
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect();
+    let columns = vec![
+        (
+            "Pos".to_string(),
+            ITEMS[..n].iter().map(|r| r[0].to_string()).collect(),
+        ),
+        (
+            "Artikel".to_string(),
+            ITEMS[..n].iter().map(|r| r[1].to_string()).collect(),
+        ),
+        (title.to_string(), values),
+        (
+            "Betrag".to_string(),
+            ITEMS[..n].iter().map(|r| r[4].to_string()).collect(),
+        ),
+    ];
+    (t, columns)
+}
+
+/// The re-review's finding of round 4 (ruling of fix round 5): a title of two capitalized
+/// words over two columns of values of one kind ([`SHAPE_SETS`]) is never cut, however the
+/// shapes of the columns may be misread: centered, from the first column's start or flush
+/// right with the second column's end, values flush right or flush left, the columns 1.4 or
+/// 2 sizes apart, in every size, font and weight and with 2 to 4 rows, the title stands whole
+/// in one header cell and no header cell holds a part of it. (A title narrower than the first
+/// column of wide values stands over that column only; that is no cut.)
+#[test]
+fn titles_over_two_columns_of_one_kind_of_values_stay_spanned() {
+    let titles = [
+        "Gesamt Preis",
+        "Unit Price",
+        "Date Range",
+        "Total Amount",
+        "Preis EUR",
+    ];
+    let mut wrong = Vec::new();
+    let mut reads = 0;
+    for title in titles {
+        for (name, a, b) in &SHAPE_SETS {
+            for place in [Place::Center, Place::Left, Place::Right] {
+                for flush_left in [false, true] {
+                    for gap in [1.4, 2.0] {
+                        for k in [0.75, 1.0, 1.5] {
+                            for face in faces() {
+                                for n in 2..=4 {
+                                    let set = (place, flush_left, gap);
+                                    let (t, _) = shaped_spanned(k, face, n, title, (a, b), set);
+                                    let out = common::read(&page_in(&t, Look::Plain));
+                                    reads += 1;
+                                    let head = header_cells(&out);
+                                    let words: Vec<&str> = title.split(' ').collect();
+                                    let whole = head.iter().any(|c| c.0 == title);
+                                    let part = head.iter().any(|c| words.contains(&c.0.as_str()));
+                                    if !whole || part {
+                                        wrong.push(format!(
+                                            "{title}, {name}, {place:?}, flush left \
+                                             {flush_left}, gap {gap}, {k}x, {face:?}, {n} \
+                                             rows: header {head:?}"
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(reads, 21600);
     assert!(
         wrong.is_empty(),
         "{} wrong:\n{}",
