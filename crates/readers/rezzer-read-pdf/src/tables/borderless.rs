@@ -726,26 +726,23 @@ fn joined_tail(
         });
         let wrap =
             close && within && same_face && !numbers && !numeric(&text) && !page_number(&text);
-        // A number at the pitch of the rows, in the column of numbers it stands in (flush with
-        // its start or its end), under a number of the last line, is one more row of its own
-        // (see [`grid_of`]) when the region has such rows already: a line of numbers only,
-        // each under a number of the line above. Else it may be a total under the items, and
-        // it stays out.
-        let numbers_only = |line: &[Piece]| {
-            !line.is_empty() && line.iter().all(|q| numeric(&text_of(flow, q.start, q.end)))
-        };
+        // An amount at the pitch of the rows, in the column of numbers it stands in (flush with
+        // its start or its end), under an amount of the last line, is one more row of its own
+        // (see [`grid_of`]) when the region has such rows already: a line of amounts only, each
+        // under an amount of the line above. Else it may be a total under the items, and it
+        // stays out.
+        let amount = |q: &Piece| Shape::of(&text_of(flow, q.start, q.end)) == Some(Shape::Number);
+        let numbers_only = |line: &[Piece]| !line.is_empty() && line.iter().all(amount);
         let under_numbers = |k: usize, line: &[Piece]| {
             line.iter().all(|q| {
                 let cols = over(q);
-                pieces[k - 1]
-                    .iter()
-                    .any(|a| over(a) == cols && numeric(&text_of(flow, a.start, a.end)))
+                pieces[k - 1].iter().any(|a| over(a) == cols && amount(a))
             })
         };
         let stacked = (2..core).any(|k| numbers_only(&pieces[k]) && under_numbers(k, &pieces[k]));
         let flush =
             within || ((p.x1 - columns[c].1).abs() <= WRAP_ALIGN * size && p.x0 >= columns[c].0);
-        if stacked && close && flush && same_face && numeric(&text) && under_numbers(core, &own) {
+        if stacked && close && flush && same_face && amount(p) && under_numbers(core, &own) {
             return (1, false);
         }
         return (0, wrap);
@@ -1204,14 +1201,17 @@ fn grid_of(
         c.dedup();
         c.len()
     };
-    // A line of numbers only, each under a number of the row above in its column, is a row of
-    // its own too: two values in one cell are never one cell's (the rule of a header band's
-    // body, see `banded::row_starts`).
+    // A line of amounts only (see [`Shape::Number`]), each under an amount of the row above in
+    // its column, is a row of its own too: two amounts in one cell are never one cell's (the
+    // rule of a header band's body, see `banded::row_starts`). A date or a range under a date
+    // goes on in its cell.
     let mut anchors: Vec<usize> = Vec::new();
-    // The columns of the row being built that hold a number.
+    // The columns of the row being built that hold an amount.
     let mut above: Vec<usize> = Vec::new();
     for (k, row) in placed.iter().enumerate() {
-        let number = |&(_, span, (s, e)): &Placement| span == 1 && numeric(&text_of(flow, s, e));
+        let number = |&(_, span, (s, e)): &Placement| {
+            span == 1 && Shape::of(&text_of(flow, s, e)) == Some(Shape::Number)
+        };
         let stacked = !anchors.is_empty()
             && !row.is_empty()
             && row.iter().all(|x| number(x) && above.contains(&x.0));

@@ -1734,6 +1734,70 @@ fn a_wrapped_item_line_without_rules_joins_its_cell_or_is_named() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// Items without rules whose period wraps a date range into a second line (`01.10.2026 -`
+/// over `31.10.2026`), in every size and font: the second line is never a row of its own
+/// (only an amount under an amount is one); between two rows it goes on in its cell. (The
+/// cell's text joins the two lines after the dash without a space, as after a hyphen.) All
+/// values are invented.
+#[test]
+fn a_wrapped_date_range_stays_in_its_cell() {
+    let mut wrong = Vec::new();
+    for k in [0.75, 1.0, 1.5] {
+        for fonts in FONTS {
+            let size = 8.0 * k;
+            let flush_right = |x: f32, y: f32, t: &str| {
+                show(
+                    fonts.0,
+                    size,
+                    x - common::font_width(fonts.0, t, size),
+                    y,
+                    t,
+                )
+            };
+            let mut y = 600.0;
+            let mut t = show(fonts.1, size, 40.0, y, "Pos")
+                + &show(fonts.1, size, 80.0, y, "Zeitraum")
+                + &show(fonts.1, size, 300.0, y, "Art")
+                + &flush_right(540.0, y, "Betrag");
+            let rows = [
+                ("1", "01.10.2026 -", "31.10.2026", "Miete", "1.000,00"),
+                ("2", "01.11.2026 -", "30.11.2026", "Miete", "1.000,00"),
+                ("3", "01.12.2026 -", "31.12.2026", "Pacht", "200,00"),
+            ];
+            for (pos, from, to, art, amount) in rows {
+                y -= 10.0 * k;
+                t += &show(fonts.0, size, 40.0, y, pos);
+                t += &show(fonts.0, size, 80.0, y, from);
+                t += &show(fonts.0, size, 300.0, y, art);
+                t += &flush_right(540.0, y, amount);
+                y -= 10.0 * k;
+                t += &show(fonts.0, size, 80.0, y, to);
+            }
+            let out = common::read(&page_in(&t, Look::Plain));
+            let found = tables(&out);
+            let cells: Vec<String> = found
+                .iter()
+                .flat_map(|t| t.1.iter().filter_map(|r| r.get(1)))
+                .map(|c| c.split_whitespace().collect())
+                .collect();
+            let alone = found.iter().flat_map(|t| &t.1).any(|r| {
+                rows.iter().any(|row| r.get(1).is_some_and(|c| c == row.2))
+                    && r.iter().filter(|c| !c.is_empty()).count() == 1
+            });
+            if alone {
+                wrong.push(format!("{k}x, {fonts:?}: a date is a row: {found:?}"));
+            }
+            for (_, from, to, _, _) in &rows[..2] {
+                let cell: String = format!("{from}{to}").split_whitespace().collect();
+                if !cells.contains(&cell) {
+                    wrong.push(format!("{k}x, {fonts:?}: no cell {from} {to}: {found:?}"));
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// How a line under the items of [`lines_under_items_without_rules_are_named_or_stay_paragraphs`]
 /// is set: in the items' font and size, at 0.75 times their size, or in the other family.
 #[derive(Debug, Clone, Copy, PartialEq)]
