@@ -101,6 +101,10 @@ struct Layout {
     /// Under the last rule: column titles (labels over values), or a rule under the last
     /// labels (labels under values, `Bottom::Own`).
     beyond: Bottom,
+    /// Labels under values: the value of the second row's first field has two lines, so its
+    /// strip is no line of labels over one line of values. (Over labels in a row of one pitch
+    /// a second value line has no room: the variant is drawn for labels under values only.)
+    two_line: bool,
 }
 
 impl Layout {
@@ -131,13 +135,29 @@ impl Layout {
         }
     }
 
+    /// How the table reads it: a strip of another shape reads labels under values never, and
+    /// labels over values only without evidence at either end.
+    fn outcome(&self) -> Outcome {
+        let (top, bottom) = self.ends();
+        match table(self.single, top, bottom) {
+            _ if self.two_line && top == Top::None && bottom == Bottom::None => Outcome::Over,
+            _ if self.two_line => Outcome::Unclear,
+            o => o,
+        }
+    }
+
     fn name(&self) -> String {
         format!(
-            "{}, labels {}, first {}, last {}, over {:?}, beyond {:?}",
+            "{}{}, labels {}, first {}, last {}, over {:?}, beyond {:?}",
             if self.single {
                 "one field"
             } else {
                 "two fields"
+            },
+            if self.two_line {
+                ", a value of two lines"
+            } else {
+                ""
             },
             if self.under { "under" } else { "over" },
             if self.half_first {
@@ -153,13 +173,19 @@ impl Layout {
         )
     }
 
-    /// The page in geometry `g`, with what to expect of each field when the grid reads
-    /// `outcome`.
-    fn page(&self, g: &Geo, outcome: Outcome) -> Built {
+    /// The rows of fields drawn.
+    fn rows(&self) -> Vec<Vec<FieldSpec>> {
         let mut rows = rows(self.single, self.first_empty, self.last_empty);
         if self.half_first {
             rows[0][0].3 = "";
         }
+        rows
+    }
+
+    /// The page in geometry `g`, with what to expect of each field when the grid reads
+    /// `outcome`.
+    fn page(&self, g: &Geo, outcome: Outcome) -> Built {
+        let rows = self.rows();
         let specs: Vec<&[FieldSpec]> = rows.iter().map(|r| r.as_slice()).collect();
         let s = Rows {
             under: self.under,
@@ -217,12 +243,61 @@ impl Layout {
                     false,
                 );
             }
+            // One row pitch under the last rule and as long as the grid's rules: the page of
+            // a grid of labels over values with an empty last row (see [`Layout::twin`]).
             Bottom::Own => {
-                b.page.template += &g.hrule(g.col(0) - 0.6 * d, g.col(70), last - 1.5 * h);
+                b.page.template += &g.hrule(g.col(0) - 0.12, g.col(50), last - h);
             }
             Bottom::Free => {}
         }
+        if self.two_line {
+            // Over the second row's first value, which stands on the second rule.
+            let y = top - h + 0.17 * d + 0.75 * d;
+            text(&mut b, 0.3, y, d, "Hinterhaus", true);
+        }
         b
+    }
+
+    /// For a grid of labels under values with a rule under its last labels: the same page
+    /// drawn as a grid of labels over values whose last row is empty, its first row's values
+    /// a line over its top rule. None for the other layouts.
+    fn twin(&self, g: &Geo) -> Option<Built> {
+        if !(self.under && self.beyond == Bottom::Own && !self.last_empty) {
+            return None;
+        }
+        let rows = self.rows();
+        let shifted: Vec<Vec<FieldSpec>> = (0..3)
+            .map(|k| {
+                rows[k]
+                    .iter()
+                    .enumerate()
+                    .map(|(n, f)| {
+                        let value = rows.get(k + 1).map_or("", |r| r[n].3);
+                        (f.0, f.1, f.2, value)
+                    })
+                    .collect()
+            })
+            .collect();
+        let specs: Vec<&[FieldSpec]> = shifted.iter().map(|r| r.as_slice()).collect();
+        let s = Rows {
+            dividers: !self.single,
+            ..ROWS
+        };
+        let mut b = rows_page(g, &s, &specs, &[]);
+        let (d, h) = (g.data, 2.4 * g.data);
+        let top = 760.0 + g.dy;
+        for f in rows[0].iter().filter(|f| !f.3.is_empty()) {
+            b.page.template += &draw::courier(g.col(f.0) + 0.3 * g.pitch(), top + 0.17 * d, d, f.3);
+        }
+        if self.over == Top::Partial && self.first_empty {
+            b.page.template +=
+                &draw::courier(g.col(0) + 10.3 * g.pitch(), top + 0.17 * d, d, "Lohn");
+        }
+        if self.two_line {
+            let y = top - h + 0.17 * d + 0.75 * d;
+            b.page.template += &draw::courier(g.col(0) + 0.3 * g.pitch(), y, d, "Hinterhaus");
+        }
+        Some(b)
     }
 }
 
@@ -257,6 +332,7 @@ fn candidates() -> Vec<Layout> {
                             half_first: false,
                             over,
                             beyond,
+                            two_line: false,
                         });
                     }
                 }
@@ -285,15 +361,18 @@ fn candidates() -> Vec<Layout> {
                 (false, Bottom::Own),
                 (true, Bottom::None),
             ] {
-                out.push(Layout {
-                    single,
-                    under: true,
-                    first_empty,
-                    last_empty,
-                    half_first,
-                    over,
-                    beyond,
-                });
+                for two_line in [false, true] {
+                    out.push(Layout {
+                        single,
+                        under: true,
+                        first_empty,
+                        last_empty,
+                        half_first,
+                        over,
+                        beyond,
+                        two_line,
+                    });
+                }
             }
         }
     }
@@ -305,8 +384,7 @@ fn layouts() -> Vec<(Layout, Outcome)> {
     candidates()
         .into_iter()
         .filter_map(|l| {
-            let (top, bottom) = l.ends();
-            let outcome = table(l.single, top, bottom);
+            let outcome = l.outcome();
             let truth = if l.under {
                 Outcome::Under
             } else {
@@ -335,15 +413,64 @@ fn every_cell_of_the_ends_reads_as_the_table_says() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// The size of the matrix and its cells per outcome, for the report.
+/// A grid of labels under values with a rule under its last labels is the page of a grid of
+/// labels over values with an empty last row (see [`Layout::twin`]): both read the same, in
+/// every look with hanging dividers, so the table cannot tell them apart and reads that page
+/// one way.
 #[test]
-fn the_matrix_covers_every_outcome() {
-    let all = layouts();
-    for o in [Outcome::Over, Outcome::Under, Outcome::Unclear] {
-        let n = all.iter().filter(|(_, x)| *x == o).count();
-        assert!(n > 0, "{o:?}");
-        eprintln!("ENDS {o:?}: {n} layouts");
+fn a_rule_under_the_last_labels_reads_as_its_twin() {
+    let mut differ = Vec::new();
+    // Dividers that rise from the lower rule rise from the other rule of a row in the two
+    // drawings, so those pages are not the same; every other look is.
+    let same = looks().into_iter().filter(|(_, g)| !g.rising);
+    for l in candidates() {
+        for (look, g) in std::iter::once(("real", REAL)).chain(same.clone()) {
+            let Some(twin) = l.twin(&g) else {
+                continue;
+            };
+            let page = l.page(&g, l.outcome());
+            let (a, b) = (read_pages(&[&page]), read_pages(&[&twin]));
+            let read = |o: &rezzer_model::ReadOutcome| {
+                let losses: Vec<String> =
+                    o.document.losses.iter().map(|l| l.what.clone()).collect();
+                (crate::common::text(crate::check::blocks(o)), losses)
+            };
+            if read(&a) != read(&b) {
+                differ.push(format!(
+                    "{}, {look}:\n{:#?}\n{:#?}",
+                    l.name(),
+                    read(&a),
+                    read(&b)
+                ));
+            }
+        }
     }
+    assert!(differ.is_empty(), "{}", differ.join("\n"));
+}
+
+/// The layouts left out of the matrix (see [`candidates`]), by name.
+const LEFT_OUT: [&str; 12] = [
+    "one field, labels under, first empty, last empty, over None, beyond None",
+    "one field, labels under, first empty, last empty, over Partial, beyond None",
+    "one field, labels under, first empty, last full, over None, beyond Own",
+    "one field, labels under, first empty, last full, over Partial, beyond Own",
+    "two fields, labels over, first empty, last full, over Complete, beyond Free",
+    "two fields, labels over, first full, last full, over Complete, beyond Free",
+    "two fields, labels under, first empty, last empty, over None, beyond None",
+    "two fields, labels under, first empty, last empty, over Partial, beyond None",
+    "two fields, labels under, first empty, last full, over None, beyond Own",
+    "two fields, labels under, first empty, last full, over Partial, beyond Own",
+    "two fields, labels under, first half empty, last empty, over None, beyond None",
+    "two fields, labels under, first half empty, last full, over None, beyond Own",
+];
+
+/// The matrix is pinned: its size, its layouts per outcome, the cells it reaches and the
+/// layouts it leaves out, so that no change drops a layout without a failing test. With
+/// `--no-capture` it prints them for the report.
+#[test]
+fn the_matrix_is_pinned() {
+    let all = layouts();
+    let count = |o: Outcome| all.iter().filter(|(_, x)| *x == o).count();
     let mut cells: Vec<(bool, Top, Bottom)> = Vec::new();
     for (l, _) in &all {
         let (t, b) = l.ends();
@@ -351,13 +478,34 @@ fn the_matrix_covers_every_outcome() {
             cells.push((l.single, t, b));
         }
     }
-    eprintln!(
-        "ENDS all: {} layouts of {} candidates, {} cells",
-        all.len(),
-        candidates().len(),
-        cells.len()
-    );
     for c in &cells {
         eprintln!("ENDS cell {c:?}: {:?}", table(c.0, c.1, c.2));
     }
+    let mut left: Vec<String> = candidates()
+        .iter()
+        .map(Layout::name)
+        .filter(|n| !all.iter().any(|(k, _)| k.name() == *n))
+        .collect();
+    left.sort();
+    eprintln!(
+        "ENDS {} layouts of {} candidates, {} cells: Over {}, Under {}, Unclear {}",
+        all.len(),
+        candidates().len(),
+        cells.len(),
+        count(Outcome::Over),
+        count(Outcome::Under),
+        count(Outcome::Unclear)
+    );
+    assert_eq!(
+        (
+            candidates().len(),
+            all.len(),
+            count(Outcome::Over),
+            count(Outcome::Under),
+            count(Outcome::Unclear),
+            cells.len()
+        ),
+        (90, 78, 24, 1, 53, 24)
+    );
+    assert_eq!(left, LEFT_OUT);
 }

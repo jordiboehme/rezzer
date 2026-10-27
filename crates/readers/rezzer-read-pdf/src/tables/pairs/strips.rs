@@ -387,6 +387,9 @@ pub(in crate::tables) fn field_strips(
         ));
     };
     let mut strips: Vec<Strip> = Vec::new();
+    // The runs of rows refused with a loss: they look like a row of fields, so they are no
+    // text beyond another group either.
+    let mut refused: HashSet<usize> = HashSet::new();
     for fr in frames {
         let ids = frame_runs(flow, by_y, fr, busy);
         if ids.is_empty() || lines_of(flow, &ids).len() > STRIP_LINES {
@@ -480,6 +483,7 @@ pub(in crate::tables) fn field_strips(
             }
             for &i in &ids {
                 kept[i] = true;
+                refused.insert(i);
             }
             continue;
         }
@@ -537,7 +541,9 @@ pub(in crate::tables) fn field_strips(
             }
             continue;
         }
-        let free = |i: usize| !busy(i) && !held.contains(&i) && !outside.contains(&i);
+        let free = |i: usize| {
+            !busy(i) && !held.contains(&i) && !refused.contains(&i) && !outside.contains(&i)
+        };
         let under: Vec<Field>;
         let list: Vec<&Field> = match ends(flow, by_y, &free, frames, &strips, &g) {
             Ends::Over => list,
@@ -798,13 +804,22 @@ fn ends(
     strips: &[Strip],
     g: &[usize],
 ) -> Ends {
-    let Some(rows) = g
+    // Each strip's line of labels and line of values; for a strip of another shape (a value of
+    // two lines) the labels and values of its fields. Such a strip cannot be read with its
+    // labels under its values: its ends can only make the group not clear.
+    let shaped = g.iter().all(|&k| strips[k].rows.is_some());
+    let rows: Vec<_> = g
         .iter()
-        .map(|&k| strips[k].rows.as_ref().map(|r| (&strips[k], r)))
-        .collect::<Option<Vec<_>>>()
-    else {
-        return Ends::Over;
-    };
+        .map(|&k| {
+            let s = &strips[k];
+            let lines = s.rows.clone().unwrap_or_else(|| {
+                let labels = s.fields.iter().flat_map(|f| f.label.iter().copied());
+                let values = s.fields.iter().flat_map(|f| f.value.iter().copied());
+                (labels.collect(), values.collect())
+            });
+            (s, lines)
+        })
+        .collect();
     let marker = markers(
         flow,
         &rows.iter().map(|(_, r)| r.0.clone()).collect::<Vec<_>>(),
@@ -831,6 +846,7 @@ fn ends(
         .flat_map(|(s, _)| &s.fields)
         .filter_map(|f| Some(flow.runs[*f.value.first()?].x - flow.runs[*f.label.first()?].x))
         .collect();
+    // No field with a value: the caller reads no such group, and no pair comes of it.
     if vs.is_empty() || ls.is_empty() || offset.is_empty() {
         return Ends::Over;
     }
@@ -1029,7 +1045,13 @@ fn ends(
                 !std::ptr::eq(*s, *t) && near(t.top, s.top) && near(t.bottom, s.bottom)
             })
     });
-    match way_of(single, top, bottom) {
+    let way = match way_of(single, top, bottom) {
+        // A strip of another shape: labels over values only without evidence at either end.
+        Way::Under if !shaped => Way::Unclear,
+        Way::Over if !shaped && (top != TopEnd::None || bottom != BottomEnd::None) => Way::Unclear,
+        way => way,
+    };
+    match way {
         Way::Under => Ends::Under(above, below),
         Way::Over => Ends::Over,
         // The labels beyond the group are named; values over it are not those of a field.

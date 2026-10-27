@@ -631,6 +631,32 @@ fn a_column_of_labels_under_values_with_an_empty_first_value_gives_a_loss() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// Labels under the rule their values stand on, two fields a row, every row full, one value
+/// of two lines (the reviewer's probe P1): both ends are complete, but the strip of the
+/// two-line value is no line of labels over one line of values, which is how labels under
+/// values are paired. So no field pairs (never a label with the value of the row under it),
+/// and a loss names them all.
+#[test]
+fn labels_under_values_with_a_value_of_two_lines_give_a_loss() {
+    let s = Rows {
+        under: true,
+        ..ROWS
+    };
+    let all = ["Name", "Ort", "Strasse", "Hausnr", "PLZ", "Land"];
+    let mut reads = Vec::new();
+    for (look, g) in std::iter::once(("real", REAL)).chain(looks()) {
+        let mut b = rows_page(&g, &s, &THREE_ROWS, &all);
+        let rule = 760.0 + g.dy - 2.4 * g.data;
+        let t = "Hinterhaus";
+        let y = rule + 0.17 * g.data + 0.95 * g.data;
+        b.page.template += &draw::courier(g.col(0) + 0.3 * g.pitch(), y, g.data, t);
+        let out = read_pages(&[&b]);
+        reads.push((look.to_string(), check_fields(&out, &b)));
+    }
+    let wrong = unexpected(reads, &[]);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// A row between two rules, parted by a divider, whose every cell holds text in three styles
 /// (a caption, a line of text and a note, as on a page of prose between rules): it never
 /// looked like a row of fields, so it gives no loss.
