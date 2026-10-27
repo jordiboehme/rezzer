@@ -913,6 +913,131 @@ fn labels_under_values_in_three_groups_never_pair_shifted() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// Where the end of a grid of labels under values lies in [`labels_under_values_with_a_value_of_two_lines_between_tables_give_a_loss`]:
+/// free, in a box of drawn rules over (or under) it whose divider is at the data column
+/// `mid`, in a ruled table of two rows (its lower row over the grid, its upper row under
+/// it), or (under it) the title over a ruled table one row pitch under its last rule.
+#[derive(Debug, Clone, Copy)]
+enum EndIn {
+    Free,
+    Box(usize),
+    Table,
+    Caption,
+}
+
+/// The reviewer's probe for the ruled `tabled` exclusion: labels under the rule their values
+/// stand on, every row full, the second row's first value of two lines (`Hinterhof` over
+/// `Musterweg 1`), its ends in boxes of drawn rules (their divider in line with the grid's, or
+/// not), one end free, or the last labels the title over a ruled table under the grid. A grid
+/// with a strip of another shape never reads labels under values: no field pairs with the
+/// value of another row, and each field with a value pairs right or a loss names it.
+#[test]
+fn labels_under_values_with_a_value_of_two_lines_between_tables_give_a_loss() {
+    let s = Rows {
+        under: true,
+        ..ROWS
+    };
+    let mut reads = Vec::new();
+    for (look, g) in std::iter::once(("real", REAL)).chain(looks()) {
+        for (over, under) in [
+            (EndIn::Table, EndIn::Table),
+            (EndIn::Table, EndIn::Free),
+            (EndIn::Free, EndIn::Table),
+            (EndIn::Box(30), EndIn::Box(30)),
+            (EndIn::Box(20), EndIn::Box(20)),
+            (EndIn::Box(30), EndIn::Free),
+            (EndIn::Free, EndIn::Box(30)),
+            (EndIn::Free, EndIn::Caption),
+            (EndIn::Box(30), EndIn::Caption),
+        ] {
+            let mut b = rows_page(&g, &s, &THREE_ROWS, &[]);
+            let (d, h, top) = (g.data, 2.4 * g.data, 760.0 + g.dy);
+            let (x0, x1) = (g.col(0) - 0.12, g.col(50));
+            let last = top - 2.0 * h;
+            let t = "Hinterhof";
+            let y = top - h + 0.17 * d + 0.75 * d;
+            b.page.template += &draw::courier(g.col(0) + 0.3 * g.pitch(), y, d, t);
+            b.values.push(t.into());
+            let boxed = |b: &mut Built, mid: usize, lo: f32, hi: f32| {
+                b.page.template += &g.hrule(x0, x1, if lo < last { lo } else { hi });
+                let x = if mid == 30 {
+                    g.col(30) - 0.06
+                } else {
+                    g.col(mid)
+                };
+                for x in [x0, x, x1] {
+                    b.page.template += &g.vrule(x, lo, hi);
+                }
+            };
+            // A ruled table of two rows from `hi` down, its divider in line with the grid's, the
+            // text `row` in the row away from the grid.
+            let table = |b: &mut Built, hi: f32, row: f32, text: [&'static str; 2]| {
+                for k in 0..3 {
+                    b.page.template += &g.hrule(x0, x1, hi - h * k as f32);
+                }
+                for x in [x0, g.col(30) - 0.06, x1] {
+                    b.page.template += &g.vrule(x, hi - 2.0 * h, hi);
+                }
+                for (k, t) in [0, 30].into_iter().zip(text) {
+                    let x = g.col(k) + 0.3 * g.pitch();
+                    b.page.template += &draw::courier(x, row + 0.6 * d, d, t);
+                    b.values.push(t.to_string());
+                }
+            };
+            match over {
+                EndIn::Box(mid) => boxed(&mut b, mid, top, top + h),
+                EndIn::Table => table(&mut b, top + 2.0 * h, top + h, ["Anschrift", "Kontakt"]),
+                _ => {}
+            }
+            match under {
+                EndIn::Free => {}
+                EndIn::Box(mid) => boxed(&mut b, mid, last - h, last),
+                EndIn::Table => table(&mut b, last, last - 2.0 * h, ["1000", "1.111,11"]),
+                EndIn::Caption => {
+                    // A ruled table of two rows and three columns one row pitch under the
+                    // last rule, the last labels over it.
+                    let (t0, xs) = (last - h, [x0, g.col(15), g.col(35), x1]);
+                    for k in 0..3 {
+                        b.page.template += &g.hrule(x0, x1, t0 - h * k as f32);
+                    }
+                    for x in xs {
+                        b.page.template += &g.vrule(x, t0 - 2.0 * h, t0);
+                    }
+                    let cells = [
+                        ["Lohnart", "Bezeichnung", "Betrag"],
+                        ["1000", "Gehalt", "1.111,11"],
+                    ];
+                    for (k, row) in cells.iter().enumerate() {
+                        for (c, text) in row.iter().enumerate() {
+                            let x = xs[c] + 0.3 * g.pitch();
+                            let y = t0 - h * (k as f32 + 1.0) + 0.6 * d;
+                            b.page.template += &draw::courier(x, y, d, text);
+                            b.values.push(text.to_string());
+                        }
+                    }
+                }
+            }
+            let out = read_pages(&[&b]);
+            let named = |n: &str| {
+                out.document
+                    .losses
+                    .iter()
+                    .any(|l| l.what.contains(&format!(" {n}")))
+            };
+            let broken: Vec<Broken> = check_fields(&out, &b)
+                .into_iter()
+                .filter(|x| {
+                    let field = x.1.strip_suffix(" does not pair");
+                    !(x.0 == Inv::ClearPairs && field.is_some_and(named))
+                })
+                .collect();
+            reads.push((format!("over {over:?}, under {under:?}, {look}"), broken));
+        }
+    }
+    let wrong = unexpected(reads, &[]);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// A row between two rules, parted by a divider, whose every cell holds text in three styles
 /// (a caption, a line of text and a note, as on a page of prose between rules): it never
 /// looked like a row of fields, so it gives no loss.

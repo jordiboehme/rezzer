@@ -163,20 +163,19 @@ pub(in crate::tables) fn frames(hs: &[Seg], tops: &[bool], vs: &[Seg]) -> Option
                 break;
             }
             // A column rule of a grid over the frame that runs on through its top rule (the
-            // grid's lowest, see [`frame_tops`]) and ends in the frame hangs from its top.
-            let to = if v.from < top - SNAP && v.to > top + SNAP {
-                top
-            } else {
-                v.to
-            };
-            let reaches = (to - top).abs() <= SNAP || (v.from - bottom).abs() <= SNAP;
+            // grid's lowest, see [`frame_tops`]) and ends in the frame hangs from its top; one
+            // of a grid under it that runs on through its bottom rule rises from its bottom.
+            let through = |at: f32| v.from < at - SNAP && v.to > at + SNAP;
+            let to = if through(top) { top } else { v.to };
+            let from = if through(bottom) { bottom } else { v.from };
+            let reaches = (to - top).abs() <= SNAP || (from - bottom).abs() <= SNAP;
             if reaches
-                && to - v.from >= DIVIDER * (top - bottom)
-                && v.from >= bottom - SNAP
+                && to - from >= DIVIDER * (top - bottom)
+                && from >= bottom - SNAP
                 && to <= top + SNAP
             {
                 dividers.push(v.at);
-                spans.push((v.from, to));
+                spans.push((from, to));
             }
         }
         out.push(Frame {
@@ -570,12 +569,19 @@ pub(in crate::tables) fn field_strips(
         // add evidence, which under the table of ends gives a loss or the reading both ways
         // agree on.
         let own: HashSet<usize> = runs.iter().copied().collect();
-        // A group with a strip of another shape (a block of labels beside their values) takes
-        // any evidence as a loss, so the runs of ruled tables are no evidence for it: the row
-        // of a section over such a block is that table's text. Held and free runs still count.
+        // A group with a strip of another shape takes any evidence as a loss. When its labels
+        // stand beside their values (a block of labels and values) no reading puts them under
+        // the rule their values stand on, so the runs of ruled tables are no evidence for it:
+        // the row of a section over such a block is that table's text. Labels over a value of
+        // two lines may stand under the rule of the values over them: for them, as for every
+        // other group, the runs of ruled tables count. Held and free runs always count.
         let shaped = g.iter().all(|&k| strips[k].rows.is_some());
-        let with_held =
-            |i: usize| !own.contains(&i) && !outside.contains(&i) && (shaped || !tabled(i));
+        let beside = g
+            .iter()
+            .any(|&k| strips[k].fields.iter().any(|f| beside_value(flow, f)));
+        let with_held = |i: usize| {
+            !own.contains(&i) && !outside.contains(&i) && (shaped || !beside || !tabled(i))
+        };
         // One field alone between its rules reads like a caption over a line: it is not
         // paired, and that is said, with the labels under its rule that may be of its value.
         if list.len() < 2 {
@@ -663,6 +669,15 @@ pub(in crate::tables) fn field_strips(
         };
         claim(claimed, tables.len(), &list);
         tables.push(p);
+    }
+}
+
+/// Whether a field's label stands beside its value: its last label run and its first value
+/// run share a line.
+fn beside_value(flow: &Flow, f: &Field) -> bool {
+    match (f.label.last(), f.value.first()) {
+        (Some(&l), Some(&v)) => lines_of(flow, &[l, v]).len() == 1,
+        _ => false,
     }
 }
 

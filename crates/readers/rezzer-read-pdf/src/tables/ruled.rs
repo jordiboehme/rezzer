@@ -146,16 +146,25 @@ pub(super) fn ruled(
         }
         let (mut xs, mut ys) = edges(&h, &v);
         // Column rules that hang below the grid's lowest rule into a frame of fields under it
-        // part the fields, not rows of the grid: the grid ends at that rule.
-        if let (Some(low), Some(&l), Some(&r)) = (
+        // part the fields, not rows of the grid: the grid ends at that rule. So do column rules
+        // that rise over its highest rule into a frame over it.
+        if let (Some(low), Some(high), Some(&l), Some(&r)) = (
             h.iter().map(|s| s.at).reduce(f32::min),
+            h.iter().map(|s| s.at).reduce(f32::max),
             xs.first(),
             xs.last(),
-        ) && frames
-            .iter()
-            .any(|f| (f.top - low).abs() <= SNAP && f.x0 < r && l < f.x1)
-        {
-            ys.retain(|y| *y >= low - SNAP);
+        ) {
+            let framed = |at: f32, edge: fn(&Frame) -> f32| {
+                frames
+                    .iter()
+                    .any(|f| (edge(f) - at).abs() <= SNAP && f.x0 < r && l < f.x1)
+            };
+            if framed(low, |f| f.top) {
+                ys.retain(|y| *y >= low - SNAP);
+            }
+            if framed(high, |f| f.bottom) {
+                ys.retain(|y| *y <= high + SNAP);
+            }
         }
         // A section below a cut reaches only as far left as its own top rule: where another
         // block draws the rule at that height over its left part (fields beside it), the
