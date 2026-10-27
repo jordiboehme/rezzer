@@ -244,10 +244,9 @@ jobs:
   build:
     name: build (${{ matrix.platform }})
     needs: [notes, notices]
-    # Worst case of the notarization step is 3 x 15 min + 15 s of waits, about
-    # 45.5 min (the step is capped at 50). That leaves 50 min of the 100 for the
-    # checkout, build, signing, smoke test and packaging, so a hanging notary
-    # service ends in the step's clean ::error:: and not in a cancelled job.
+    # Same numbers as the notarize step: its worst case is 3560 s = 59.3 min and
+    # its cap is 65 min. Add 30 min of build and signing before it and 2 min of
+    # packaging after it: 97 min, inside the 100.
     timeout-minutes: 100
     runs-on: ${{ matrix.os }}
     # The Apple signing secrets belong in this environment, not in the
@@ -526,8 +525,11 @@ jobs:
       - name: Notarize the binary
         if: ${{ steps.signing.outputs.sign == 'true' }}
         shell: bash
-        # Backstop only: 3 tries x 15 min + 5 s + 10 s of waits is about 45.3 min.
-        timeout-minutes: 50
+        # Worst case, in seconds: upload 3 x 300 + waits 5 + 10 = 915; wait
+        # 2 x 1260 + 5 = 2525; log 120; total 3560 s = 59.3 min. The cap of 65
+        # min is a backstop above that, so the clean ::error:: always comes
+        # first. Job: 30 min build and signing + 65 + 2 min packaging = 97 <= 100.
+        timeout-minutes: 65
         env:
           APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
@@ -537,34 +539,41 @@ jobs:
           key="$RUNNER_TEMP/asc-key.p8"
           printf '%s\n' "$APPLE_API_KEY_P8" > "$key"
           zip="$RUNNER_TEMP/notarize-rezzer.zip"
+          sub="$RUNNER_TEMP/notarize-submit.json"
           result="$RUNNER_TEMP/notarize-rezzer.json"
           ditto -c -k --keepParent "target/$TARGET/release/rezzer" "$zip"
+          # notarytool --timeout only limits the polling, so every call also gets
+          # a hard limit from perl's alarm. The redirect sits inside bash -c so the
+          # ::warning:: lines of retry.sh stay out of the JSON; each try overwrites it.
+          # Upload once (retried only for a failed upload), then wait on its id:
+          # waiting again on the same id is safe and never queues a second upload.
           set +e
-          # The redirect sits inside bash -c so the ::warning:: lines of retry.sh
-          # stay out of the JSON; each try overwrites it. The status check below
-          # still decides: a submit that ends Invalid fails the step.
           # shellcheck disable=SC2016  # the $1..$3 are for the inner bash
-          "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 3 bash -c '
-            xcrun notarytool submit "$1" \
-              --key "$2" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" \
-              --wait --timeout 15m --output-format json > "$3"
-          ' _ "$zip" "$key" "$result"
+          "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 3 bash -c 'perl -e "alarm shift; exec @ARGV" 300 xcrun notarytool submit "$1" --key "$2" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" --no-wait --output-format json > "$3"' _ "$zip" "$key" "$sub"
           submit_rc=$?
           set -e
-          cat "$result"
-          # The last try can leave nothing or no JSON (timeout, network, crash).
-          if ! jq -e . "$result" > /dev/null 2>&1; then
-            echo "::error::notarization failed: notarytool returned no JSON (exit $submit_rc)"
+          cat "$sub" 2>/dev/null || true
+          if ! jq -e 'type == "object" and (.id | type == "string")' "$sub" > /dev/null 2>&1; then
+            echo "::error::notarization failed: upload returned no submission id (exit $submit_rc)"
+            exit 1
+          fi
+          submission_id="$(jq -r '.id' "$sub")"
+          set +e
+          # shellcheck disable=SC2016  # the $1..$3 are for the inner bash
+          "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 2 bash -c 'perl -e "alarm shift; exec @ARGV" 1260 xcrun notarytool wait "$1" --key "$2" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" --timeout 20m --output-format json > "$3"' _ "$submission_id" "$key" "$result"
+          wait_rc=$?
+          set -e
+          cat "$result" 2>/dev/null || true
+          # The last try can leave nothing or no JSON object (timeout, network, crash).
+          if ! jq -e 'type == "object"' "$result" > /dev/null 2>&1; then
+            echo "::error::notarization failed: notarytool returned no JSON (exit $wait_rc)"
             exit 1
           fi
           status="$(jq -r '.status // "unknown"' "$result")"
-          if [ "$submit_rc" -ne 0 ] || [ "$status" != "Accepted" ]; then
-            echo "::error::notarization failed (notarytool exit $submit_rc, status $status)"
-            submission_id="$(jq -r '.id // empty' "$result")"
-            if [ -n "$submission_id" ]; then
-              xcrun notarytool log "$submission_id" \
-                --key "$key" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" || true
-            fi
+          if [ "$wait_rc" -ne 0 ] || [ "$status" != "Accepted" ]; then
+            echo "::error::notarization failed (notarytool exit $wait_rc, status $status)"
+            perl -e 'alarm shift; exec @ARGV' 120 xcrun notarytool log "$submission_id" \
+              --key "$key" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" || true
             exit 1
           fi
           rm -f "$zip"
