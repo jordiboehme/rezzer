@@ -3925,13 +3925,12 @@ fn a_two_page_invoice_footer_is_furniture_on_both_pages() {
 /// A measured line: x, baseline, size, bold and its invented text.
 type Measured = (f32, f32, f32, bool, &'static str);
 
-/// The footer columns of the invoice of fix round 3, measured on the real file and set with
-/// invented text of the same lengths and shapes: (x, lines), each line its baseline, size,
-/// bold and text. The second column ends in two lines of white space only, a little left of
+/// The footer columns of a reduced model of a real invoice footer shape, with invented text and
+/// rounded, moved and varied places: (x, lines), each line its baseline, size, bold and text. The second column ends in two lines of white space only, a little left of
 /// its text (a print run blanks them), and the fourth is a bold 11 pt shop name over a bold
 /// web address.
 fn measured_footer() -> Vec<Vec<Measured>> {
-    let rows = [67.35, 58.84, 50.34, 41.84, 33.33, 24.83];
+    let rows = [69.0, 61.0, 52.0, 44.0, 35.0, 27.0];
     let column = |x: f32, lines: &[&'static str]| -> Vec<Measured> {
         lines
             .iter()
@@ -3941,64 +3940,65 @@ fn measured_footer() -> Vec<Vec<Measured>> {
     };
     vec![
         column(
-            125.63,
+            129.0,
             &[
                 "Muster Shop GmbH",
-                "Inh. Erika Mustermann e.K.",
+                "Inhaberin Erika Mustermann",
                 "Musterweg 12a",
-                "Tel. +49 000 000 00 00",
+                "Telefon 000 000 00 00",
                 "E-Mail info@muster.example",
                 "www.muster.example",
             ],
         ),
         column(
-            233.35,
+            236.0,
             &[
                 "Bankverbindung",
-                "Musterbank-Nord",
+                "Musterbank Nord",
                 "IBAN DE00 0000 0000 0000 0000 00",
                 "SWIFT-BIC MUSTDEXX000",
             ],
         ),
         column(
-            363.74,
+            367.0,
             &[
                 "Gesch\u{e4}ftsf\u{fc}hrer Max",
                 "Mustermann, Erika Musterfrau",
                 "Sitz Musterstadt,",
-                "Registergericht: Amtsgericht Ost",
+                "Register: Amtsgericht Musterstadt",
                 "HRB 00000 USt-IdNr. DE000000000",
-                "Steuer-Nr. 000/000",
+                "Steuernummer 000/000/000",
             ],
         ),
         vec![
-            (489.31, 50.92, 11.0, true, "Shop Muster"),
-            (488.91, 39.67, 7.0, true, "shop.muster.example"),
+            (492.0, 53.0, 11.0, true, "Shop Muster"),
+            (492.0, 42.0, 7.0, true, "shop.muster.example"),
         ],
     ]
 }
 
-/// A page of the invoice of fix round 3 (`first` for page 1): the measured lines of the real
-/// file with invented text, the page number `Seite n von 2` at x 486 over the footer, and the
-/// footer of [`measured_footer`] with its two blank lines.
+/// Page `n` of the reduced invoice model of fix round 3: a letter with a sender line, a
+/// recipient, a bold title beside a field list, line items and closing lines on page 1, one
+/// line on page 2, the page number `Seite n von 2` over the footer, and the footer of
+/// [`measured_footer`] with its two blank lines.
 fn measured_invoice_page(n: u32) -> String {
     let mut t = String::new();
     if n == 1 {
         t += &show(
             "FL",
             6.0,
-            73.7,
-            711.11,
+            77.0,
+            713.0,
             "Beispiel Handel KG - Beispielweg 4b - 54321 Beispielort - Telefon 111 111 11 11 - post@beispiel.example",
         );
         for (y, l) in [
-            (690.37, "Herrn Max B."),
-            (676.20, "Beispielweg 3a"),
-            (662.02, "54321 Beispielort"),
+            (692.0, "Herrn Max B."),
+            (678.0, "Beispielweg 3a"),
+            (664.0, "54321 Beispielort"),
         ] {
-            t += &show("FL", 9.0, 73.7, y, l);
+            t += &show("FL", 9.0, 77.0, y, l);
         }
-        t += &show("FB", 9.0, 73.7, 575.57, "Rechnungsnr. 0000001");
+        t += &show("FB", 9.0, 77.0, 578.0, "Rechnungsnr. 0000001");
         for (k, (label, value)) in [
             ("Datum", "01.02.2026"),
             ("Kundennummer", "000000000"),
@@ -4009,40 +4009,40 @@ fn measured_invoice_page(n: u32) -> String {
         .iter()
         .enumerate()
         {
-            let y = 607.65 - 11.34 * k as f32;
-            t += &show("FL", 6.0, 362.84, y, label);
-            t += &show("FL", 6.0, 440.0, y, value);
+            let y = 610.0 - 11.0 * k as f32;
+            t += &show("FL", 6.0, 366.0, y, label);
+            t += &show("FL", 6.0, 443.0, y, value);
         }
         t += &show(
             "FL",
             9.0,
-            73.7,
-            527.20,
+            77.0,
+            529.0,
             "Sehr geehrter Herr Beispiel, vielen Dank f\u{fc}r Ihre Bestellung, die wir wie folgt berechnen.",
         );
         t += &show(
             "FL",
             9.0,
-            73.7,
-            515.50,
+            77.0,
+            518.0,
             "Bitte zahlen Sie den Betrag ohne Abzug bis zum genannten Datum.",
         );
         // The line items: a bold header of six titles, three items of seven cells (two with
         // a wrapped item text under them) and the totals of label and amount.
         let header = [
-            (76.54, "Pos."),
-            (100.0, "Artikel"),
-            (158.74, "Bezeichnung"),
-            (380.0, "Menge"),
-            (440.0, "Einzel"),
-            (500.0, "Gesamt EUR"),
+            (80.0, "Pos."),
+            (103.0, "Artikel"),
+            (162.0, "Bezeichnung"),
+            (383.0, "Menge"),
+            (443.0, "Einzel"),
+            (503.0, "Gesamt EUR"),
         ];
         for (x, text) in header {
-            t += &show("FB", 8.0, x, 455.37, text);
+            t += &show("FB", 8.0, x, 457.0, text);
         }
         for (y, cells) in [
             (
-                437.24,
+                439.0,
                 [
                     "1",
                     "00001",
@@ -4054,7 +4054,7 @@ fn measured_invoice_page(n: u32) -> String {
                 ],
             ),
             (
-                398.38,
+                400.0,
                 [
                     "2",
                     "00002",
@@ -4066,11 +4066,11 @@ fn measured_invoice_page(n: u32) -> String {
                 ],
             ),
             (
-                368.61,
+                371.0,
                 ["3", "00003", "Versand", "1", "Pauschal", "4,90", "4,90"],
             ),
         ] {
-            for (x, c) in [83.92, 100.0, 158.74, 380.0, 400.0, 450.0, 510.0]
+            for (x, c) in [87.0, 103.0, 162.0, 383.0, 403.0, 453.0, 513.0]
                 .iter()
                 .zip(cells)
             {
@@ -4078,27 +4078,25 @@ fn measured_invoice_page(n: u32) -> String {
             }
         }
         for (y, text) in [
-            (428.44, "Farbe Blau, Gr\u{f6}\u{df}e M"),
-            (419.34, "mit Tasche und Anleitung, Modell 2026"),
-            (389.58, "Farbe Rot"),
+            (430.0, "Farbe Blau, Gr\u{f6}\u{df}e M"),
+            (421.0, "mit Tasche und Anleitung, Modell 2026"),
+            (392.0, "Farbe Rot"),
         ] {
-            t += &show("FL", 7.0, 158.74, y, text);
+            t += &show("FL", 7.0, 162.0, y, text);
         }
         for (y, size, bold, label, value) in [
-            (342.50, 9.0, false, "Summe netto", "204,90 EUR"),
-            (331.76, 7.0, false, "zzgl. 19 % USt", "38,93 EUR"),
-            (323.26, 7.0, false, "zzgl. Versand netto", "0,00 EUR"),
-            (305.65, 9.0, true, "Gesamtbetrag", "243,83 EUR"),
+            (345.0, 9.0, false, "Summe netto", "204,90 EUR"),
+            (334.0, 7.0, false, "zzgl. 19 % USt", "38,93 EUR"),
+            (325.0, 7.0, false, "zzgl. Versand netto", "0,00 EUR"),
+            (308.0, 9.0, true, "Gesamtbetrag", "243,83 EUR"),
         ] {
             let font = if bold { "FB" } else { "FL" };
-            t += &show(font, size, 345.83, y, label);
-            t += &right(bold, size, 538.58, y, value);
+            t += &show(font, size, 349.0, y, label);
+            t += &right(bold, size, 542.0, y, value);
         }
-        for (k, y) in [
-            251.15, 240.75, 219.95, 209.55, 167.95, 157.55, 136.75, 115.95,
-        ]
-        .into_iter()
-        .enumerate()
+        for (k, y) in [253.0, 243.0, 222.0, 212.0, 170.0, 160.0, 139.0, 118.0]
+            .into_iter()
+            .enumerate()
         {
             let line = [
                 "Zahlungsart",
@@ -4110,24 +4108,25 @@ fn measured_invoice_page(n: u32) -> String {
                 "Ihr Team vom Shop",
                 "Ihr Kundenservice",
             ][k];
-            t += &show(if k == 0 { "FB" } else { "FL" }, 8.0, 73.7, y, line);
+            t += &show(if k == 0 { "FB" } else { "FL" }, 8.0, 77.0, y, line);
         }
     } else {
-        t += &show("FL", 8.0, 73.7, 671.76, "Fortsetzung der Seite");
+        t += &show("FL", 8.0, 77.0, 674.0, "Fortsetzung der Seite");
     }
-    t += &show("FL", 8.0, 486.0, 99.65, &format!("Seite {n} von 2"));
+    t += &show("FL", 8.0, 489.0, 102.0, &format!("Seite {n} von 2"));
     for column in measured_footer() {
         for (x, y, size, bold, text) in column {
             t += &show(if bold { "FB" } else { "FL" }, size, x, y, text);
         }
     }
-    for y in [33.33, 24.83] {
-        t += &show("FL", 7.0, 229.61, y, &" ".repeat(20));
+    for y in [35.0, 27.0] {
+        t += &show("FL", 7.0, 233.0, y, &" ".repeat(20));
     }
     t
 }
 
-/// Fix round 3: the invoice of two pages measured on the real file. On both pages every line
+/// Fix round 3: the reduced model of an invoice of two pages (a real footer shape, no source
+/// named). On both pages every line
 /// of the footer and the page number are running footers, the three text columns are one
 /// block each with a line break between their lines, and the 11 pt shop name of the footer is
 /// no heading: the bold title of the page is the only heading, at level 1. Two lines of white
