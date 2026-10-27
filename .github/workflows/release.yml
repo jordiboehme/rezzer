@@ -95,8 +95,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     # The Apple signing secrets belong in this environment, not in the
     # repository secrets, so only this job can read them. Restrict the
-    # environment's deployments to main (the dry run) and v* tags. Without
-    # the secrets the build still runs and ships unsigned binaries.
+    # environment's deployments to main (the dry run) and v* tags. A
+    # dispatch without the secrets builds unsigned macOS binaries with a
+    # notice; a tag without them fails.
     environment: release
     strategy:
       fail-fast: false
@@ -227,6 +228,9 @@ jobs:
 
       # --frozen: Cargo.lock is the build's input and the crates are already
       # fetched, so the build neither re-resolves nor touches the network.
+      # RUSTFLAGS is empty on the legs without matrix rustflags. An empty
+      # value still overrides any rustflags a .cargo/config.toml might set
+      # later, so such a file must move its flags into the matrix.
       - name: Build
         env:
           RUSTFLAGS: ${{ matrix.rustflags }}
@@ -277,6 +281,8 @@ jobs:
           $machine = '{0:x4}' -f [BitConverter]::ToUInt16($bytes, $pe + 4)
           Write-Output "PE machine: $machine (expected $env:PE_MACHINE)"
           if ($machine -ne $env:PE_MACHINE) { throw "$bin is built for machine $machine, not $env:PE_MACHINE" }
+          # A heuristic, not an import table parse: if it ever fires on a good
+          # static binary, drop this check, not the +crt-static flag.
           $text = [System.Text.Encoding]::Latin1.GetString($bytes)
           if ($text.IndexOf('vcruntime140', [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
             throw "$bin names vcruntime140, so the C runtime is not linked in (+crt-static missing)"
@@ -442,7 +448,16 @@ jobs:
         if: ${{ matrix.archive_ext == 'zip' }}
         shell: pwsh
         working-directory: dist
-        run: Compress-Archive -Path $env:STAGE -DestinationPath "$env:STAGE.zip"
+        # Not Compress-Archive: some Microsoft.PowerShell.Archive versions write
+        # backslashes in entry names. ZipFile on .NET writes forward slashes,
+        # and $true keeps the top folder.
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $here = Get-Location
+          [System.IO.Compression.ZipFile]::CreateFromDirectory(
+            (Join-Path $here $env:STAGE), (Join-Path $here "$env:STAGE.zip"),
+            [System.IO.Compression.CompressionLevel]::Optimal, $true)
 
       # The zip must keep the top folder and use forward slashes, as the
       # tar.gz archives do.
