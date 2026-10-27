@@ -1182,17 +1182,27 @@ jobs:
             exit 0
           fi
           git commit -m "Update rezzer to ${version}"
-          for attempt in 1 2 3 4 5; do
+          tries=5
+          for attempt in $(seq "$tries"); do
             if git push; then
               exit 0
             fi
-            echo "::warning::push rejected (attempt $attempt of 5), rebasing onto the tap and trying again"
+            if [ "$attempt" -eq "$tries" ]; then
+              break
+            fi
+            echo "::warning::push rejected (attempt $attempt of $tries), rebasing onto the tap and trying again"
             sleep $((attempt * 5))
-            if ! git pull --rebase; then
+            # The fetch is the network part and is retried; the rebase is
+            # local, so a failure there is a real conflict.
+            if ! "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 3 git fetch origin; then
+              echo "::error::could not fetch the tap"
+              exit 1
+            fi
+            if ! git rebase '@{upstream}'; then
               git rebase --abort || true
               echo "::error::could not rebase Formula/rezzer.rb onto the tap"
               exit 1
             fi
           done
-          echo "::error::could not push Formula/rezzer.rb to the tap"
+          echo "::error::could not push Formula/rezzer.rb to the tap after $tries tries"
           exit 1

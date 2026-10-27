@@ -86,7 +86,8 @@ sha_linux_amd64="$(sum_for linux-amd64)" || bad=1
 sha_linux_arm64="$(sum_for linux-arm64)" || bad=1
 [ "$bad" -eq 0 ] || exit 1
 
-# #{version} is Ruby interpolation, written as is.
+# #{version} is Ruby interpolation, written as is. on_arm comes before
+# on_intel in both blocks, the order homebrew-core formulas use.
 cat <<FORMULA
 class Rezzer < Formula
   desc "Turns files into knowledge for AI agents"
@@ -107,14 +108,14 @@ class Rezzer < Formula
   end
 
   on_linux do
-    on_intel do
-      url "https://github.com/jordiboehme/rezzer/releases/download/v#{version}/rezzer-v#{version}-linux-amd64.tar.gz"
-      sha256 "${sha_linux_amd64}"
-    end
-
     on_arm do
       url "https://github.com/jordiboehme/rezzer/releases/download/v#{version}/rezzer-v#{version}-linux-arm64.tar.gz"
       sha256 "${sha_linux_arm64}"
+    end
+
+    on_intel do
+      url "https://github.com/jordiboehme/rezzer/releases/download/v#{version}/rezzer-v#{version}-linux-amd64.tar.gz"
+      sha256 "${sha_linux_amd64}"
     end
   end
 

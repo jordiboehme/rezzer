@@ -97,8 +97,8 @@ formula_pairs_each_block_with_its_archive_and_sum() {
   printf '%s\n' \
     "macos arm macos-arm64 $SUM_MACOS_ARM" \
     "macos intel macos-intel $SUM_MACOS_INTEL" \
-    "linux intel linux-amd64 $SUM_LINUX_AMD" \
-    "linux arm linux-arm64 $SUM_LINUX_ARM" >"$work/want"
+    "linux arm linux-arm64 $SUM_LINUX_ARM" \
+    "linux intel linux-amd64 $SUM_LINUX_AMD" >"$work/want"
   diff -u "$work/want" "$work/blocks"
 }
 
