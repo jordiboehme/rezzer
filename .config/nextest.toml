@@ -28,3 +28,9 @@ success-output = "immediate"
 [[profile.default.overrides]]
 filter = 'binary(linux_rss)'
 slow-timeout = { period = "60s", terminate-after = 2 }
+
+# The decode tests scan with a 60 second safety stop a picture and bound their work by counted
+# decoder calls. A run that turns slow is ended after 2 minutes and fails instead.
+[[profile.default.overrides]]
+filter = 'package(barcodes) & binary(decode)'
+slow-timeout = { period = "60s", terminate-after = 2 }

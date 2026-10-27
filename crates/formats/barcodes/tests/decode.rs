@@ -20,12 +20,13 @@ fn modules(s: Symbology, text: &str, ec: Option<&str>) -> Modules {
     .expect("encode")
 }
 
-/// The default limits with a time far above any machine: what a scan finds must not depend
-/// on the machine's speed or load (the default 10 s ran out under load). Work bounds are
-/// checked by counted decoder calls ([`barcodes::work_steps`]), not by time.
+/// The default limits with 60 s a picture, a safety stop with room for any machine (the
+/// slowest scan here took 8.25 s under load): what a scan finds must not depend on the
+/// machine's speed or load (the default 10 s ran out under load). Work bounds are checked by
+/// counted decoder calls ([`barcodes::work_steps`]), not by time.
 fn unhurried() -> Limits {
     Limits {
-        time: Duration::from_secs(600),
+        time: Duration::from_secs(60),
         ..Limits::default()
     }
 }
@@ -496,7 +497,7 @@ fn a_code_in_a_large_picture_is_found_in_its_tile() {
     }
     // The work is bounded by the decoder calls, not by the machine: the default 10 s per
     // picture ran out under load (`Time(Scan { codes: [QrCode ..] })`, the code found but the
-    // other tiles not done), so the scan has a time far above any machine.
+    // other tiles not done), so the scan has the 60 s safety stop.
     // STEPS was measured once (2026-10-27): the decoder calls of all tiles and attempts. At
     // least STEPS: every tile was read, not only the one with the code.
     const STEPS: u64 = 33;
