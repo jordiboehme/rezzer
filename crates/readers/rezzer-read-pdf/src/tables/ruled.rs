@@ -351,6 +351,22 @@ fn section_edges(sh: &Sheet<'_>, h: &[Seg], v: &[Seg], cut_above: bool) -> (Vec<
         if framed(high, |f| f.bottom) {
             ys.retain(|y| *y <= high + SNAP);
         }
+        // A row beyond the grid's lowest or highest rule that only the ends of column rules
+        // bound and that holds no text is no row of it.
+        let empty = |lo: f32, hi: f32| {
+            !sh.by_y.runs_between(lo, hi).into_iter().any(|i| {
+                let run = &sh.flow.runs[i];
+                let (cx, _) = middle(run);
+                cx > l && cx < r && !run.text.trim().is_empty()
+            })
+        };
+        if ys.len() >= 3 && ys[0] > high + SNAP && empty(high, ys[0]) {
+            ys.remove(0);
+        }
+        let n = ys.len();
+        if n >= 3 && ys[n - 1] < low - SNAP && empty(ys[n - 1], low) {
+            ys.pop();
+        }
     }
     // A section below a cut reaches only as far left as its own top rule: where another
     // block draws the rule at that height over its left part (fields beside it), the
