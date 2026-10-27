@@ -4,8 +4,8 @@
 
 //! The allocator of the Rezzer binary: the system allocator, except that outside Linux a block
 //! that grows to 1 MiB or more, by at least half its size at once, is moved by allocate, copy
-//! and free, and that on Linux every `realloc` goes to the system while glibc maps every block
-//! from 1 MiB on (see the Linux section below).
+//! and free; on Linux every `realloc` goes to the system and glibc maps every block from 1 MiB
+//! on (see the Linux section below).
 //!
 //! Why: decoders grow their output by reallocating (the Flate decoder of a page picture goes
 //! from 4 to 8 to 16 MiB). On macOS the system's realloc of large blocks leaves memory
@@ -65,12 +65,13 @@
 //! noise. The wall time of `small_exact_growth` went from 233 to 90 ms on glibc and from 78 to
 //! 101 ms on musl. The hostile PDF tests of the binary (`crates/rezzer/tests/hostile.rs`) print
 //! their maximum resident set: no line rose by more than 2 MiB or 5 % on either libc. The
-//! largest are
-//! `hundred_thousand_pages_stop_in_time` (glibc 382 to 383 MiB, musl 425 to 425 MiB),
-//! `hundred_thousand_pages_stay_under_the_memory_limit` (glibc 305 to 305, musl 303 to 303),
-//! `huge_script_is_bounded` (glibc 214 to 215, musl 211 to 211) and
+//! largest are `hundred_thousand_pages_stop_in_time` (glibc 382 to 383 MiB, musl 425 to 425
+//! MiB), `hundred_thousand_pages_stay_under_the_memory_limit` (glibc 305 to 305, musl 303 to
+//! 303), `huge_script_is_bounded` (glibc 214 to 215, musl 211 to 211),
 //! `pages_with_their_own_resources_are_read_under_the_memory_limit` (glibc 117 to 119, musl
-//! 115 to 114); the small ones went from 22 to 23 MiB on glibc and from 21 to 22 on musl.
+//! 115 to 114) and `objstm_bomb_is_bounded` (glibc 77 to 76, musl 74 to 74). The other five
+//! lines are small and rose by 1 MiB at most: on glibc from 22 to 23 MiB
+//! (`many_merges_without_values_is_bounded` 23 to 23), on musl from 21 to 22 MiB.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 #[cfg(debug_assertions)]
@@ -127,11 +128,10 @@ fn count_moved(n: usize) {
 /// Safe inside the allocator: it does not allocate (an atomic flag and one `mallopt` call,
 /// which takes glibc's arena lock and allocates nothing), cannot panic and keeps no thread
 /// state. The swap of the flag lets exactly one thread call `mallopt`. Another thread that
-/// sees the flag set before that call is done makes its block under glibc's default
-/// threshold of 128 KiB, which is harmless: what matters is the first Rust block of 1 MiB or
-/// more, not the first allocation of the process, and the default threshold maps such a
-/// block anyway. Blocks the C library made before Rust's first one do not pass through here
-/// and do not matter either.
+/// sees the flag set before that call is done makes its block under glibc's default, dynamic
+/// threshold (128 KiB at start), as before this policy. What matters is the first Rust block
+/// of 1 MiB or more, not the first allocation of the process, and the threshold at start maps
+/// such a block anyway. Blocks the C library makes do not pass through this allocator.
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 fn map_large_blocks() {
     use std::sync::atomic::{AtomicBool, Ordering};
