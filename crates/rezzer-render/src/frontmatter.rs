@@ -178,7 +178,9 @@ pub(crate) fn shown_description(doc: &Document, opts: &RenderOptions) -> String 
 }
 
 /// The document's own date (`YYYY-MM-DD`): its modified date, else its created date, else
-/// the date its text gives ([`found_date`]), when that is a real calendar date.
+/// the date its text gives ([`found_date`]), when that is a real calendar date. A created or
+/// modified value that is no calendar date counts as none, so the found date is used then
+/// too.
 pub(crate) fn own_date(doc: &Document) -> Option<&str> {
     let p = &doc.properties;
     p.modified

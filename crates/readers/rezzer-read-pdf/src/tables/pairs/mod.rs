@@ -315,6 +315,12 @@ fn short(flow: &Flow, f: &Field) -> bool {
         && words(flow, &f.value).chars().count() <= VALUE_CHARS
 }
 
+/// Whether `note` is the found-by note of a table of labels and values from drawn boxes or
+/// rows of fields.
+pub(super) fn is_pairs_note(note: &str) -> bool {
+    note == boxes::BOX_FOUND_BY || note == strips::STRIP_FOUND_BY
+}
+
 /// A table of two columns, a label and its value in each row, for `fields` in order; `top` is
 /// its top. An empty value is a grey `empty` status. Every table of labels and values is built
 /// here: drawn boxes, rows of fields between rules and the totals of a column beside a section.

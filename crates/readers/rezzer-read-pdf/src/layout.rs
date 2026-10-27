@@ -25,7 +25,7 @@ mod footnotes;
 mod head;
 mod shape;
 
-pub(crate) use head::{PageDate, TITLE_FROM, page_document_date};
+pub(crate) use head::{Dates, PageDate, TITLE_FROM, document_date, page_dates};
 pub(crate) use shape::{address_block, address_shaped, page_text_sizes, page_text_sizes_of};
 use shape::{bold_led, data_only, ends_in_amount, listed, padded_mark};
 
@@ -760,9 +760,11 @@ pub(crate) struct Laid {
     pub probes_cut: bool,
     /// What the layout found by a rule of its own and says at the top of the page.
     pub found_by: Option<String>,
-    /// The title the page's head gives (see [`head::page_title`]), on page 1 of an untagged
-    /// file only.
+    /// The title the page's head gives (see [`head::page_title`]), on page 1 only.
     pub title: Option<String>,
+    /// The dates the laid out text and the pairs of page 1 give as values of labels (see
+    /// [`head::laid_dates`]), on page 1 only.
+    pub dates: Option<Dates>,
 }
 
 /// Where a limit cut a page: the first part not kept.
@@ -1054,15 +1056,29 @@ pub(crate) fn page_blocks_at(
         let (lb, tb) = b.at();
         la.cmp(&lb).then(tb.total_cmp(&ta))
     });
-    // The title of the document: the heading lines of page 1 as the layout reads them.
-    let title = match (page, height, cx.tree) {
-        (1, Some(height), None) => head::page_title(
-            &lines(&flow.runs),
-            &heading_of(cx.style, &text_sizes),
-            height,
-            cx.style.body_size,
-        ),
-        _ => None,
+    // The title and the labelled dates of the document: the lines of page 1 as the layout
+    // lays them out as text, and the pairs it read.
+    let (title, dates) = match page {
+        1 => {
+            let text = lines(&flow.runs);
+            let title = height.and_then(|height| {
+                head::page_title(
+                    &text,
+                    &heading_of(cx.style, &text_sizes),
+                    height,
+                    cx.style.body_size,
+                )
+            });
+            let pairs: Vec<(String, String)> = placed
+                .iter()
+                .flat_map(|p| match p {
+                    Placed::Table(t) => t.pairs(),
+                    _ => Vec::new(),
+                })
+                .collect();
+            (title, Some(head::laid_dates(&text, &pairs)))
+        }
+        _ => (None, None),
     };
     let lay = |runs: &[Run], slots: &[Slot], built: &mut Built| match cx.tree {
         Some(_) => tagged(runs, slots, cx, built),
@@ -1167,6 +1183,7 @@ pub(crate) fn page_blocks_at(
     laid.probes_cut = probes_cut;
     laid.found_by = footnotes::note(page, footnotes_written, linked_written);
     laid.title = title;
+    laid.dates = dates;
     let (mut b, mut t) = (0, 0);
     for block in &mut laid.blocks {
         let anchor = if matches!(block, Block::Table { .. }) {
@@ -1359,6 +1376,7 @@ impl Built {
             probes_cut: false,
             found_by: None,
             title: None,
+            dates: None,
         }
     }
 

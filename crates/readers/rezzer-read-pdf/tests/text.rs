@@ -1679,3 +1679,84 @@ fn two_page_letterhead_stays_content() {
         }
     }
 }
+
+#[test]
+fn tagged_file_without_a_title_gets_its_heading() {
+    let out = read(&corpus("pdfjs-structure-simple.pdf"));
+    let p = &out.document.properties;
+    assert_eq!(p.title.as_deref(), Some("Heading 1"));
+    assert_eq!(
+        p.title_from.as_deref(),
+        Some("largest heading in the top third of page 1")
+    );
+}
+
+/// A tagged page: an `H1` in `title_size` pt Helvetica-Bold on top, then a `P` of prose
+/// lines in 10 pt.
+fn tagged_report(title_size: f32) -> Vec<u8> {
+    let mut c = format!(
+        "/H1 <</MCID 0>> BDC BT /F2 {title_size} Tf 72 780 Td (Musterbericht 2026) Tj ET EMC\n\
+         /P <</MCID 1>> BDC BT /F1 10 Tf 72 700 Td 13 TL\n"
+    );
+    for _ in 0..12 {
+        c.push_str("(die Muster GmbH liefert die bestellte Ware wie vereinbart aus) ' \n");
+    }
+    c.push_str("ET EMC\n");
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let kid = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let bold = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
+    let cs = b.stream("", c.as_bytes());
+    let root = b.reserve();
+    let doc = b.reserve();
+    let h1 = b.add(format!(
+        "<< /Type /StructElem /S /H1 /P {doc} 0 R /Pg {kid} 0 R /K 0 >>"
+    ));
+    let p = b.add(format!(
+        "<< /Type /StructElem /S /P /P {doc} 0 R /Pg {kid} 0 R /K 1 >>"
+    ));
+    b.set(
+        doc,
+        format!("<< /Type /StructElem /S /Document /P {root} 0 R /K [{h1} 0 R {p} 0 R] >>"),
+    );
+    b.set(
+        root,
+        format!(
+            "<< /Type /StructTreeRoot /K {doc} 0 R /ParentTree << /Nums [0 [{h1} 0 R {p} 0 R]] >> >>"
+        ),
+    );
+    b.set(
+        kid,
+        format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] /StructParents 0 \
+             /Resources << /Font << /F1 {font} 0 R /F2 {bold} 0 R >> >> /Contents {cs} 0 R >>"
+        ),
+    );
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(
+        catalog,
+        format!(
+            "<< /Type /Catalog /Pages {tree} 0 R /MarkInfo << /Marked true >> \
+             /StructTreeRoot {root} 0 R >>"
+        ),
+    );
+    b.finish(catalog)
+}
+
+#[test]
+fn tagged_heading_on_top_is_the_title() {
+    for size in [14.0f32, 18.0, 24.0] {
+        let out = read(&tagged_report(size));
+        assert_eq!(out.document.properties.facts.tagged, Some(true));
+        assert_eq!(
+            out.document.properties.title.as_deref(),
+            Some("Musterbericht 2026"),
+            "{size} pt"
+        );
+    }
+}

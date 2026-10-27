@@ -443,7 +443,16 @@ fn symbol_font_reads_greek() {
         1 begincodespacerange <00> <FF> endcodespacerange \
         3 beginbfchar <61> <0061> <62> <0062> <57> <0057> endbfchar \
         endcmap CMapName currentdict /CMap defineresource pop end end";
-    for name in ["Symbol", "ABCDEF+Symbol"] {
+    // The base name after a subset prefix, with or without a style part.
+    for name in [
+        "Symbol",
+        "ABCDEF+Symbol",
+        "SymbolMT",
+        "Symbol,Bold",
+        "Symbol-Bold",
+        "SymbolMT,Bold",
+        "ABCDEF+SymbolMT",
+    ] {
         let mut b = Builder::default();
         let catalog = b.reserve();
         let tree = b.reserve();
@@ -490,6 +499,42 @@ fn symbol_font_reads_greek() {
               ToUnicode map gives Latin letters"
             ],
             "{name}"
+        );
+    }
+}
+
+#[test]
+fn symbol_like_names_are_not_symbol() {
+    // A font whose name only starts like Symbol keeps its ToUnicode text.
+    let cmap = "/CIDInit /ProcSet findresource begin 12 dict begin begincmap \
+        /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def \
+        /CMapName /Adobe-Identity-UCS def /CMapType 2 def \
+        1 begincodespacerange <00> <FF> endcodespacerange \
+        1 beginbfchar <61> <0061> endbfchar \
+        endcmap CMapName currentdict /CMap defineresource pop end end";
+    for name in ["SymbolSans", "Symbolic", "MusterSymbol"] {
+        let mut b = Builder::default();
+        let catalog = b.reserve();
+        let tree = b.reserve();
+        let map = b.stream("", cmap.as_bytes());
+        let font = b.add(format!(
+            "<< /Type /Font /Subtype /Type1 /BaseFont /{name} /ToUnicode {map} 0 R >>"
+        ));
+        let content = b.stream("", b"BT /F2 12 Tf 72 700 Td (a) Tj ET\n");
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F2 {font} 0 R >> >> /Contents {content} 0 R >>"
+        ));
+        b.set(
+            tree,
+            format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+        );
+        b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+        let out = read(&b.finish(catalog));
+        let text = common::all_text(&out);
+        assert!(
+            text.contains('a') && !text.contains('\u{3b1}'),
+            "{name}: {text}"
         );
     }
 }

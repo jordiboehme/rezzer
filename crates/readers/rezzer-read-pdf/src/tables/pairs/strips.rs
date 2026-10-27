@@ -12,7 +12,7 @@ use super::*;
 use crate::regions::{Seg, grids};
 
 /// The note before the first table of fields between rules of a page.
-const STRIP_FOUND_BY: &str = "Found by: label and value pairs from rows of fields \
+pub(super) const STRIP_FOUND_BY: &str = "Found by: label and value pairs from rows of fields \
      between drawn rules; each label is the smaller text and pairs with the value beside it or \
      under it.";
 

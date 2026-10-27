@@ -599,7 +599,7 @@ struct FontInfo {
     /// The CID collection of a CID font whose glyph ids are its CIDs (a TrueType CID font with
     /// the identity CIDToGIDMap), or whose CFF program is CID-keyed.
     collection: Option<CidFamily>,
-    /// The font's base name, without a subset prefix, is `Symbol`: a glyph whose text is one
+    /// The font's base name, without a subset prefix, is `Symbol` (see [`is_symbol`]): a glyph whose text is one
     /// ASCII character is read through the Adobe Symbol encoding (`a` is the alpha), as
     /// pdf.js and pdfminer read it. Such a font's ToUnicode map often gives the Latin letter
     /// of the code.
@@ -2104,7 +2104,7 @@ fn font_info(font: &Dict<'_>) -> FontInfo {
         embedded,
         program: None,
         collection,
-        symbol: name == "symbol",
+        symbol: is_symbol(&name),
     }
 }
 
@@ -3427,6 +3427,14 @@ impl<'a> Device<'a> for TextDevice<'_> {
         self.tick();
         self.open.pop();
     }
+}
+
+/// Whether a font's base name (lowercase, subset prefix removed) is the font Symbol: `symbol`
+/// or `symbolmt`, alone or with a style part after a comma or a hyphen (`symbol,bold`,
+/// `symbolmt-bold`).
+fn is_symbol(name: &str) -> bool {
+    let base = name.split([',', '-']).next().unwrap_or(name);
+    matches!(base, "symbol" | "symbolmt")
 }
 
 /// The text a glyph of the font `Symbol` stands for, when its `text` is one printable ASCII

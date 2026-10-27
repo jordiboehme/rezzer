@@ -42,26 +42,14 @@ fn assert_no_placeholder(out: &ReadOutcome) {
     assert!(!json.contains(placeholder), "a placeholder in the JSON");
 }
 
-/// The read is complete and names one loss only: that the `n` dates in the head of page 1
-/// give no document date. The dates of a header field grid stand under their labels, in a row
-/// of fields; the label `Datum` there is not taken as the mark of the document date.
-fn assert_only_head_dates_loss(out: &ReadOutcome, n: usize) {
+/// The `Datum` of the header field grid, a label over its value in a row of fields, is the
+/// document date: the pairs of the grid say it.
+fn assert_grid_date(out: &ReadOutcome) {
+    let found = out.document.properties.document_date.as_ref();
     assert_eq!(
-        out.completeness,
-        Completeness::Complete,
-        "{:?}",
-        out.document.losses
+        found.map(|d| (d.date.as_str(), d.from.as_str())),
+        Some(("2026-10-01", "date label \"Datum\" on page 1"))
     );
-    let said: Vec<(&str, LossReason)> = out
-        .document
-        .losses
-        .iter()
-        .map(|l| (l.what.as_str(), l.why))
-        .collect();
-    let want =
-        format!("{n} dates stand in the head of page 1; none is marked as the document date");
-    assert_eq!(said, [(want.as_str(), LossReason::Uncertain)]);
-    assert_eq!(out.document.properties.document_date, None);
 }
 
 /// The read is complete and names no loss.
@@ -2174,7 +2162,8 @@ fn assert_pay_slip(out: &ReadOutcome) {
         );
     }
     assert_eq!(values_alone(out), Vec::<String>::new());
-    assert_only_head_dates_loss(out, 3);
+    assert_no_loss(out);
+    assert_grid_date(out);
 }
 
 /// The pay slip with its separator marks filled and stroked (`B*`), as the print run draws
@@ -3906,7 +3895,8 @@ fn header_field_grid_reads_as_pairs() {
         1,
         "{notes:?}"
     );
-    assert_only_head_dates_loss(&out, 3);
+    assert_no_loss(&out);
+    assert_grid_date(&out);
 }
 
 /// Rows of fields as a print run fills them (ruling P6-X): each row a rule over 6.6 point
@@ -4328,7 +4318,7 @@ fn labelled_date_is_document_date() {
         .as_ref()
         .expect("date");
     assert_eq!(found.date, "2026-02-01");
-    assert_eq!(found.from, "date label Datum on page 1");
+    assert_eq!(found.from, "date label \"Datum\" on page 1");
     assert_eq!(front(&out, "source_date").as_deref(), Some("2026-02-01"));
     assert_eq!(
         front(&out, "temporal_confidence").as_deref(),
@@ -4340,7 +4330,7 @@ fn labelled_date_is_document_date() {
     );
     assert_eq!(
         front(&out, "document_date_from").as_deref(),
-        Some("\"date label Datum on page 1\"")
+        Some("\"date label \\\"Datum\\\" on page 1\"")
     );
     assert!(unsure(&out).is_empty(), "{:?}", unsure(&out));
 }
@@ -4384,7 +4374,7 @@ fn labelled_dates_of_every_form() {
         (
             &[
                 ("Ausgestellt am:", 40.0, 200.0, 0.0),
-                ("01.02.2026", 300.0, 200.0, 0.0),
+                ("01.02.2026", 150.0, 200.0, 0.0),
             ],
             Some("2026-02-01"),
         ),
@@ -4393,7 +4383,11 @@ fn labelled_dates_of_every_form() {
         for (size, font, scale) in [(7.0f32, "FL", 0.8f32), (9.5, "FB", 1.0), (12.0, "FT", 1.25)] {
             let head: String = lines
                 .iter()
-                .map(|(t, x, y, below)| common::show(font, size, *x, y - below * size * 1.2, t))
+                .map(|(t, x, y, below)| {
+                    // x as set in 10 pt, moved with the size from the left margin.
+                    let x = 40.0 + (x - 40.0) * size / 10.0;
+                    common::show(font, size, x, y - below * size * 1.2, t)
+                })
                 .collect();
             let out = read(&headed(&head, size, scale, ""));
             let got = out.document.properties.document_date.as_ref();
@@ -4495,6 +4489,152 @@ fn compound_english_date_label_is_no_label() {
                 .map(|d| d.date.as_str()),
             Some("2026-02-01"),
             "{label}"
+        );
+    }
+}
+
+#[test]
+fn other_named_dates_are_no_document_date() {
+    // A date with a label of its own that names another date: never the document date, also
+    // when it is the only date in the head.
+    for line in [
+        "Due date 15.03.2026",
+        "Geburtsdatum 01.01.1970",
+        "Eintrittsdatum 01.01.2020",
+        "Rechnungsdatum 01.02.2026",
+        "F\u{e4}llig am 15.02.2026",
+        "Lieferung: 15.02.2026",
+    ] {
+        for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
+            for font in ["FL", "FB"] {
+                let head = common::show("FB", size * 1.6, 40.0, 790.0, "Musterbescheid")
+                    + &common::show(font, size, 40.0, 760.0, line);
+                let out = read(&headed(&head, size, scale, ""));
+                assert_eq!(
+                    out.document.properties.document_date, None,
+                    "{line} in {size} pt {font}"
+                );
+                assert_eq!(front(&out, "source_date"), None, "{line}");
+            }
+        }
+    }
+}
+
+#[test]
+fn labelled_date_wins_over_a_due_date() {
+    for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
+        for font in ["FL", "FB"] {
+            let head = common::show(font, size, 400.0, 760.0, "Datum 01.02.2026")
+                + &common::show(font, size, 40.0, 700.0, "F\u{e4}llig am 15.02.2026");
+            let out = read(&headed(&head, size, scale, ""));
+            assert_eq!(
+                out.document
+                    .properties
+                    .document_date
+                    .as_ref()
+                    .map(|d| d.date.as_str()),
+                Some("2026-02-01"),
+                "{size} pt {font}"
+            );
+            assert!(unsure(&out).is_empty(), "{:?}", unsure(&out));
+        }
+    }
+}
+
+#[test]
+fn date_column_of_a_table_gives_no_date() {
+    // A grid of three columns below the top third: `Datum` is a column title over one row,
+    // no label of a pair.
+    let mut head = String::new();
+    for x in [40.0f32, 140.0, 280.0, 380.0] {
+        head += &format!("0.5 w {x} 150 m {x} 210 l S\n");
+    }
+    for y in [150.0f32, 180.0, 210.0] {
+        head += &common::hrule(40.0, 380.0, y);
+    }
+    for (x, t) in [(45.0f32, "Pos"), (145.0, "Datum"), (285.0, "Betrag")] {
+        head += &common::show("FL", 9.0, x, 190.0, t);
+    }
+    for (x, t) in [(45.0f32, "1"), (145.0, "01.02.2026"), (285.0, "9,99")] {
+        head += &common::show("FL", 9.0, x, 160.0, t);
+    }
+    let out = read(&headed(&head, 9.0, 1.0, ""));
+    assert_eq!(out.document.properties.document_date, None);
+    let tables = out
+        .document
+        .body
+        .iter()
+        .flat_map(|b| match b {
+            Block::Section { blocks, .. } => blocks.as_slice(),
+            _ => std::slice::from_ref(b),
+        })
+        .filter(|b| matches!(b, Block::Table { .. }))
+        .count();
+    assert_eq!(tables, 1, "the grid is read as a table");
+    assert!(unsure(&out).is_empty(), "{:?}", unsure(&out));
+}
+
+#[test]
+fn labelled_date_not_read_for_sure_says_so() {
+    for (line, want) in [
+        (
+            "Date 02/03/2026",
+            "the date 02/03/2026 after the label \"Date\" on page 1 can be read two ways",
+        ),
+        (
+            "Datum 31.04.2026",
+            "the date 31.04.2026 after the label \"Datum\" on page 1 is no day of the calendar",
+        ),
+    ] {
+        let head = common::show("FL", 9.0, 400.0, 760.0, line)
+            + &common::show("FL", 9.0, 40.0, 700.0, "Zeitraum 01.01.2026 bis 31.01.2026");
+        let out = read(&headed(&head, 9.0, 1.0, ""));
+        assert_eq!(out.document.properties.document_date, None);
+        assert_eq!(unsure(&out), [want]);
+    }
+}
+
+#[test]
+fn two_word_label_with_wide_space() {
+    let head = common::show("FL", 9.0, 400.0, 760.0, "Erstellt   am 01.02.2026");
+    let out = read(&headed(&head, 9.0, 1.0, ""));
+    let found = out
+        .document
+        .properties
+        .document_date
+        .as_ref()
+        .expect("date");
+    assert_eq!(found.date, "2026-02-01");
+    assert_eq!(found.from, "date label \"Erstellt am\" on page 1");
+}
+
+#[test]
+fn far_value_on_the_label_baseline_is_not_its_value() {
+    // Below the top third, so only a label could make it the document date.
+    let head = common::show("FL", 9.0, 40.0, 200.0, "Datum:")
+        + &common::show("FL", 9.0, 480.0, 200.0, "01.02.2026");
+    let out = read(&headed(&head, 9.0, 1.0, ""));
+    assert_eq!(out.document.properties.document_date, None);
+}
+
+#[test]
+fn contents_heading_is_no_title() {
+    for contents in [
+        "Contents",
+        "Table of Contents",
+        "INHALTSVERZEICHNIS",
+        "Inhalt",
+        "Table des mati\u{e8}res",
+        "\u{cd}ndice",
+        "Index:",
+    ] {
+        let head = common::show("FB", 14.0, 40.0, 790.0, contents)
+            + &common::show("FB", 12.0, 40.0, 740.0, "Musterbericht");
+        let out = read(&headed(&head, 9.0, 1.0, ""));
+        assert_eq!(
+            out.document.properties.title.as_deref(),
+            Some("Musterbericht"),
+            "{contents}"
         );
     }
 }

@@ -11,7 +11,7 @@ use crate::regions::{Index, Seg, grids, regions_of};
 use crate::tables::banded::heads_lines;
 
 /// The note before the first table of drawn boxes of a page.
-const BOX_FOUND_BY: &str = "Found by: label and value pairs from drawn boxes; the label \
+pub(super) const BOX_FOUND_BY: &str = "Found by: label and value pairs from drawn boxes; the label \
      is the smaller text at the top of each box.";
 
 /// Boxes of one row or column of fields touch within this share of the size of their

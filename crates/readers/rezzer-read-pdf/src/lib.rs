@@ -615,11 +615,16 @@ fn lay_out(
                 body_size: style.body_size,
             };
             symbols += items.symbol;
-            if n == 1 {
-                page_date(&items.runs, height, budget, out);
-            }
+            // The dates of page 1's lines are gathered before the layout takes its runs.
+            let mut dates = (n == 1).then(|| layout::page_dates(&items.runs, height));
             let runs = std::mem::take(&mut items.runs);
             let mut laid = layout::page_blocks_at(n, height, runs, &drawn, &cx, &points);
+            if let Some(dates) = &mut dates {
+                if let Some(more) = laid.dates.take() {
+                    dates.merge(more);
+                }
+                page_date(dates, budget, out);
+            }
             if let Some(title) = laid.title.take() {
                 match budget.charge_text(title.len()) {
                     Ok(()) => out.found_title = Some(title),
@@ -1472,10 +1477,10 @@ fn notes(page: u32, items: &PageItems, out: &mut Out) {
     }
 }
 
-/// The document date of page 1 (see [`layout::page_document_date`]), set in the
-/// properties, or an `Uncertain` loss when page 1 holds several dates and none is marked.
-fn page_date(runs: &[Run], height: Option<f32>, budget: &Budget, out: &mut Out) {
-    match layout::page_document_date(runs, height) {
+/// The document date of page 1 (see [`layout::document_date`]), set in the properties, or
+/// an `Uncertain` loss that says why there is none.
+fn page_date(dates: &layout::Dates, budget: &Budget, out: &mut Out) {
+    match layout::document_date(dates) {
         layout::PageDate::None => {}
         layout::PageDate::Found(found) => {
             match budget.charge_text(found.date.len() + found.from.len()) {
