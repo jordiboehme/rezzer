@@ -305,6 +305,8 @@ pub struct FormPage {
     /// The whole page drawn turned a quarter turn counterclockwise on a landscape page box, as
     /// a form scanned or printed across.
     pub turn: bool,
+    /// With `turn`, the page is turned a quarter turn clockwise instead.
+    pub clockwise: bool,
     /// The page box before `scale`, in points: A4 (595 by 842) unless set.
     pub paper: (f32, f32),
     /// A picture of the page's own (`/Photo`, different on every page) drawn in this box
@@ -323,6 +325,7 @@ impl Default for FormPage {
             bold_data: false,
             scale: 1.0,
             turn: false,
+            clockwise: false,
             paper: (595.0, 842.0),
             photo: None,
         }
@@ -378,7 +381,9 @@ pub fn print_form(pages: &[FormPage], info: &str, catalog_extra: &str) -> Vec<u8
         } else {
             (pw * s, ph * s)
         };
-        let mut content = if page.turn {
+        let mut content = if page.turn && page.clockwise {
+            format!("q 0 {} {s} 0 0 {h} cm q /Tpl Do Q\n", -s)
+        } else if page.turn {
             format!("q 0 {s} {} 0 {w} 0 cm q /Tpl Do Q\n", -s)
         } else {
             format!("q {s} 0 0 {s} 0 0 cm q /Tpl Do Q\n")

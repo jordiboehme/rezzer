@@ -51,6 +51,9 @@ pub(crate) struct Geo {
     pub scale: f32,
     /// The whole page drawn a quarter turn across.
     pub turn: bool,
+    /// The template labels are set in Times-Roman afterwards (the variant generator does
+    /// that): their widths are those of Times.
+    pub times_labels: bool,
 }
 
 /// The geometry of the real form.
@@ -70,6 +73,7 @@ pub(crate) const REAL: Geo = Geo {
     rising: false,
     scale: 1.0,
     turn: false,
+    times_labels: false,
 };
 
 /// A field to expect: its label and the value it must pair with (`None`: empty), or `Err`
@@ -195,10 +199,11 @@ impl Geo {
     }
 }
 
-/// About the width of a template label (see [`label`]): Helvetica at 90 %, half a size a
-/// character on the average.
-fn label_width(text: &str, size: f32) -> f32 {
-    0.9 * 0.55 * size * text.chars().count() as f32
+/// The width of a template label (see [`label`]): its font's standard widths at 90 %, and
+/// the kern in its middle.
+fn label_width(g: &Geo, text: &str, size: f32) -> f32 {
+    let font = if g.times_labels { "FT" } else { "FL" };
+    0.9 * (crate::common::font_width(font, text, size) + 0.02 * size)
 }
 
 /// F1: a strip of seven fields (`left` to `right` in data columns) between two rules, all
@@ -235,7 +240,7 @@ pub(crate) fn strip_f1(g: &Geo, b: &mut Built, top: f32, overflow: bool, one_run
     // a template sets it.
     let marker_w = 0.556 * 0.71 * g.label;
     b.page.template += &plain(
-        (lab(g.k(43)) + label_width("Satz %", g.label)).min(g.col(g.k(47)) - 0.3 - marker_w),
+        (lab(g.k(43)) + label_width(g, "Satz %", g.label)).min(g.col(g.k(47)) - 0.3 - marker_w),
         base + 0.29 * g.label,
         0.71 * g.label,
         "8",
@@ -594,7 +599,7 @@ pub(crate) fn header_grid(g: &Geo, b: &mut Built, top: f32) -> f32 {
             b.page.template += &label(lab(k), base, g.label, l);
             if l == "Stkl" {
                 b.page.template += &plain(
-                    lab(k) + label_width(l, g.label),
+                    lab(k) + label_width(g, l, g.label),
                     base + 0.29 * g.label,
                     0.71 * g.label,
                     "1",
