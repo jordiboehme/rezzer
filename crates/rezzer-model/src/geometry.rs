@@ -15,13 +15,19 @@ pub const MAX_BOXES: usize = 200_000;
 /// What a [`PlacedBox`] frames.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BoxKind {
+    /// A run of text.
     Text,
     /// A heading, with its depth.
     Heading(u8),
+    /// A table.
     Table,
+    /// One cell of a table.
     Cell,
+    /// A ruled line.
     Rule,
+    /// A drawn shape that is not a line or a picture.
     Drawn,
+    /// A picture.
     Picture,
 }
 
@@ -46,9 +52,17 @@ pub struct PageGeometry {
 }
 
 /// The pages of a paged source with their boxes.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default)]
 pub struct Geometry {
     pub pages: Vec<PageGeometry>,
+    /// The boxes added through [`Geometry::push`], so the total cap needs no sum over pages.
+    pushed: usize,
+}
+
+impl PartialEq for Geometry {
+    fn eq(&self, other: &Geometry) -> bool {
+        self.pages == other.pages
+    }
 }
 
 impl Geometry {
@@ -56,7 +70,12 @@ impl Geometry {
     /// added before.
     pub fn add_page(&mut self, page: u32, size: [f32; 2]) -> bool {
         let valid = size.iter().all(|v| v.is_finite() && *v > 0.0);
-        if !valid || self.pages.iter().any(|p| p.page == page) {
+        // Pages come in order: the last one answers the usual case, a scan the rest.
+        let known = match self.pages.last() {
+            Some(last) if last.page < page => false,
+            _ => self.pages.iter().any(|p| p.page == page),
+        };
+        if !valid || known {
             return false;
         }
         self.pages.push(PageGeometry {
@@ -74,16 +93,17 @@ impl Geometry {
         if !b.bounds.iter().all(|v| v.is_finite()) || x1 < x0 || y1 < y0 {
             return false;
         }
-        if self.len() >= MAX_BOXES {
+        if self.pushed >= MAX_BOXES {
             return false;
         }
-        let Some(p) = self.pages.iter_mut().find(|p| p.page == page) else {
+        let Some(p) = self.pages.iter_mut().rev().find(|p| p.page == page) else {
             return false;
         };
         if p.boxes.len() >= MAX_BOXES_PER_PAGE {
             return false;
         }
         p.boxes.push(b);
+        self.pushed += 1;
         true
     }
 

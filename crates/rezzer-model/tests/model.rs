@@ -1199,3 +1199,23 @@ fn box_of_finds_anchor() {
     );
     assert!(g.box_of(&Anchor("nope".into())).is_none());
 }
+
+#[test]
+fn many_pages_fill_fast() {
+    let start = std::time::Instant::now();
+    let mut g = Geometry::default();
+    for page in 1..=50_000u32 {
+        assert!(g.add_page(page, [100.0, 100.0]));
+        for i in 0..3 {
+            let x = i as f32;
+            assert!(g.push(page, placed(BoxKind::Text, [x, 0.0, x + 1.0, 1.0], None)));
+        }
+    }
+    assert_eq!(g.len(), 150_000);
+    assert!(
+        !g.add_page(7, [100.0, 100.0]),
+        "an earlier page is still known"
+    );
+    // Quadratic filling took minutes here; the linear one takes milliseconds.
+    assert!(start.elapsed() < std::time::Duration::from_secs(5));
+}
