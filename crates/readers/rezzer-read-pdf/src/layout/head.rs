@@ -4,8 +4,8 @@
 
 //! What the head of page 1 says about the document: its title and its date. Both are found
 //! by general rules. A date is chosen only when something marks it as the document date: a
-//! whole date label beside it or over it, a pair of a field table in the top third, or a
-//! place with `den` before it. A date nothing marks is never chosen, also when it is the only
+//! whole date label beside it or over it, a label cell of a table with the date in the cell
+//! to its right, or a place with `den` before it. A date nothing marks is never chosen, also when it is the only
 //! date of the head: the loss says that it stands there.
 
 use rezzer_model::FoundDate;
@@ -226,14 +226,15 @@ pub(crate) enum PageDate {
 /// A date as written: its separator and its parts.
 type Written = (char, [u32; 3]);
 
-/// A label and its value as a pair table of page 1 reads them (see
-/// `tables::Planned::pairs`): the value's line, if it has text, and the top of the table.
+/// A table the layout made on page 1, its rows as the text of their cells.
 #[derive(Debug, Clone)]
-pub(crate) struct Pair {
-    pub label: String,
-    pub value: String,
-    pub line: Option<u32>,
+pub(crate) struct Table {
+    /// The field reader made it from drawn boxes or rows of fields: a label and its value in
+    /// each row, also where column titles stand over one row of items.
+    pub pairs: bool,
+    /// The top of the table, in the frame of the runs.
     pub top: f32,
+    pub rows: Vec<Vec<String>>,
 }
 
 /// What marks a date of page 1 as the document date.
@@ -385,14 +386,17 @@ fn ink_gap(l: &Line<'_>, end: usize, start: usize) -> f32 {
 }
 
 /// The dates the laid out text of page 1 gives as values of date labels: `runs` are the runs
-/// the layout lays out as text (tables taken out), read piece by piece (see [`pieces`]),
-/// `pairs` the pairs that the layout read from drawn boxes and rows of fields, with `height`
-/// the height of the page. A piece that is a whole [`DATE_LABELS`] entry marks the value
-/// beside it or right below it (see [`value_of`]); a pair whose label is a whole entry marks
-/// its value when its table's top lies in the top third of the page, where the header fields
-/// of a form stand (a pair table lower down may be one row of items under small column
-/// titles). A table of columns gives no pairs: its column title is no label of one value.
-pub(crate) fn laid_dates(runs: &[Run], pairs: &[Pair], height: Option<f32>) -> Dates {
+/// the layout lays out as text (tables taken out), read piece by piece (see [`pieces`]), and
+/// `tables` every table the layout made on the page, with `height` the height of the page. A
+/// piece that is a whole [`DATE_LABELS`] entry marks the value beside it or right below it
+/// (see [`value_of`]). In a table, a cell that is a whole entry marks its right neighbour in
+/// the row when that cell is a full date and nothing else (`Datum: | 26.10.2026`): a column
+/// title `Datum` of an item table has another title beside it, not a date, and a row `Datum |
+/// Name | 01.02.2026` marks nothing. A table of label and value pairs that the field reader
+/// made counts only when its top lies in the top third of the page, where the header fields
+/// of a form stand: lower down it may be one row of items under small column titles, each
+/// title read as the label of the value below it.
+pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: Option<f32>) -> Dates {
     let mut out = Dates::default();
     let lines = pieces(runs);
     let add = |label: String, value: &str, out: &mut Dates| {
@@ -417,9 +421,20 @@ pub(crate) fn laid_dates(runs: &[Run], pairs: &[Pair], height: Option<f32>) -> D
         }
     }
     let head = |top: f32| height.is_some_and(|h| h > 0.0 && top >= h * HEAD_SHARE);
-    for p in pairs.iter().filter(|p| head(p.top) && p.line.is_some()) {
-        if let Some(label) = whole_label(&p.label) {
-            add(label, p.value.trim(), &mut out);
+    let rows = tables
+        .iter()
+        .filter(|t| !t.pairs || head(t.top))
+        .flat_map(|t| &t.rows);
+    for row in rows {
+        for pair in row.windows(2) {
+            let value = pair[1].trim();
+            if let Some(label) = whole_label(&pair[0])
+                && scan::dates(value, 4..=4)
+                    .first()
+                    .is_some_and(|d| d.start == 0 && d.end == value.len())
+            {
+                add(label, value, &mut out);
+            }
         }
     }
     out
@@ -507,8 +522,8 @@ const BESIDE_SIZES: f32 = 6.0;
 /// The value of the label piece `all[k]`: among the next [`VALUE_LINES`] pieces, the nearest
 /// that starts with a date and stands beside it on its baseline (to its right, at most
 /// [`BESIDE_SIZES`] label sizes after its end), else the one right below it at its left edge
-/// (within [`EDGE`]) that is a date alone on its line (see [`date_alone`]): a row of items
-/// under column titles has more cells on the line and is no value of one label.
+/// (within the label's size) that is a date alone on its line (see [`date_alone`]): a row of
+/// items under column titles has more cells on the line and is no value of one label.
 fn value_of<'a, 'r>(all: &'a [Line<'r>], k: usize) -> Option<&'a Line<'r>> {
     let label = &all[k];
     let end = label.runs.iter().map(|r| r.x + r.w).fold(label.x, f32::max);
@@ -529,7 +544,7 @@ fn value_of<'a, 'r>(all: &'a [Line<'r>], k: usize) -> Option<&'a Line<'r>> {
         .min_by(|a, b| a.x.total_cmp(&b.x));
     beside.or_else(|| {
         after
-            .filter(|v| right_below(label, v) && (v.x - label.x).abs() <= EDGE)
+            .filter(|v| right_below(label, v) && (v.x - label.x).abs() <= label.size)
             .filter(|v| date_alone(all, v))
             .max_by(|a, b| a.y.total_cmp(&b.y))
     })

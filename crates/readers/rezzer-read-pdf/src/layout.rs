@@ -1069,23 +1069,27 @@ pub(crate) fn page_blocks_at(
                     cx.style.body_size,
                 )
             });
-            let pairs: Vec<head::Pair> = placed
+            // Every table of the page, its rows as the text of their cells.
+            let tables: Vec<head::Table> = placed
                 .iter()
-                .flat_map(|p| match p {
-                    Placed::Table(t) => t
-                        .pairs()
-                        .into_iter()
-                        .map(|(label, value, line)| head::Pair {
-                            label,
-                            value,
-                            line,
-                            top: t.top,
-                        })
-                        .collect(),
-                    _ => Vec::new(),
+                .filter_map(|p| match p {
+                    Placed::Table(t) => Some(head::Table {
+                        pairs: t.is_pairs(),
+                        top: t.top,
+                        rows: t
+                            .rows
+                            .iter()
+                            .map(|row| {
+                                row.iter()
+                                    .map(|c| c.runs.iter().map(|r| r.text.as_str()).collect())
+                                    .collect()
+                            })
+                            .collect(),
+                    }),
+                    _ => None,
                 })
                 .collect();
-            (title, Some(head::laid_dates(&flow.runs, &pairs, height)))
+            (title, Some(head::laid_dates(&flow.runs, &tables, height)))
         }
         _ => (None, None),
     };

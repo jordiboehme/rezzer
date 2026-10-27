@@ -5267,3 +5267,152 @@ fn rereview_r4_probes_give_no_wrong_date() {
         }
     }
 }
+
+/// A two-column table of label and value rows in the head of a `headed` page, `Datum:` with
+/// its date among them: `ruled` draws the grid, else the columns stand in white space alone.
+fn label_value_rows(font: &str, size: f32, ruled: bool) -> String {
+    let rows = [
+        ("Rechnungsnummer:", "0000-0001"),
+        ("Kundennummer:", "00000"),
+        ("Datum:", "26.10.2026"),
+        ("Sachbearbeiter:", "Erika Mustermann"),
+        ("Seite:", "1 von 2"),
+    ];
+    let pitch = size * 2.0;
+    let (top, xs) = (770.0, [40.0f32, 220.0, 400.0]);
+    let bottom = top - pitch * rows.len() as f32;
+    let mut head = String::new();
+    if ruled {
+        for x in xs {
+            head += &format!("0.5 w {x} {bottom} m {x} {top} l S\n");
+        }
+        for k in 0..=rows.len() {
+            head += &common::hrule(xs[0], xs[2], top - pitch * k as f32);
+        }
+    }
+    for (k, (label, value)) in rows.iter().enumerate() {
+        let y = top - pitch * (k as f32 + 0.7);
+        head += &common::show(font, size, xs[0] + 5.0, y, label);
+        head += &common::show(font, size, xs[1] + 5.0, y, value);
+    }
+    head
+}
+
+/// Three boxed fields in a row in the head, `Datum` the second: the label of each in its box
+/// over its value, the values one padded data line (as `boxed_fields`).
+fn boxed_date_fields(scale: f32, bold_data: bool) -> FormPage {
+    let labels = ["Personalnummer", "Datum", "Steuerklasse"];
+    let values = ["00000", "26.10.2026", "1"];
+    let mut t = String::new();
+    let mut line = String::new();
+    for (k, x) in [40.0f32, 160.0, 280.0].into_iter().enumerate() {
+        t += &boxed(x, 700.0, 120.0, 24.0);
+        t += &label(x + 3.0, 716.0, 6.0, labels[k]);
+        line = format!("{line:<0$}{1}", pad_to(x + 5.0), values[k]);
+    }
+    let mut lines = vec![DataLine {
+        y: 703.0,
+        text: line,
+    }];
+    for (k, l) in ["Muster GmbH", "Musterweg 1", "12345 Musterstadt"]
+        .iter()
+        .enumerate()
+    {
+        lines.push(DataLine {
+            y: 600.0 - 12.0 * k as f32,
+            text: (*l).into(),
+        });
+    }
+    FormPage {
+        template: t,
+        lines,
+        scale,
+        bold_data,
+        ..FormPage::default()
+    }
+}
+
+#[test]
+fn date_label_cell_beside_its_date_cell_marks_it() {
+    // A table row `Datum: | 26.10.2026` among other rows: as a ruled table, as a borderless
+    // table of two columns, and as a row of a pair table of boxed fields. The label cell with
+    // the date as its right neighbour marks the date.
+    let want = HeadWant::Date("2026-10-26", "date label \"Datum\" on page 1");
+    for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
+        for font in ["FL", "FB"] {
+            for ruled in [true, false] {
+                let title = common::show("FB", size * 1.6, 40.0, 800.0, "Musterbescheid");
+                let head = title + &label_value_rows(font, size, ruled);
+                let out = read(&headed(&head, size, scale, ""));
+                let how = if ruled { "ruled" } else { "borderless" };
+                let case = format!("{how} rows in {size} pt {font}");
+                let found = out.document.properties.document_date.as_ref();
+                assert_eq!(found.map(|d| d.date.as_str()), Some("2026-10-26"), "{case}");
+                assert_eq!(
+                    found.map(|d| d.from.as_str()),
+                    Some("date label \"Datum\" on page 1"),
+                    "{case}"
+                );
+                // The borderless table may note the line under it; no loss speaks of the date.
+                assert!(
+                    !unsure(&out)
+                        .iter()
+                        .any(|w| w.contains("in the head of page 1")),
+                    "{case}: {:?}",
+                    unsure(&out)
+                );
+                assert_eq!(
+                    front(&out, "source_date").as_deref(),
+                    Some("2026-10-26"),
+                    "{case}"
+                );
+            }
+        }
+    }
+    for scale in [0.8f32, 1.0, 1.25] {
+        for bold in [false, true] {
+            let out = read(&print_form(&[boxed_date_fields(scale, bold)], "", ""));
+            let case = format!("boxed fields at scale {scale}, bold {bold}");
+            assert_head(&out, want, &case);
+        }
+    }
+}
+
+#[test]
+fn date_label_cell_with_a_cell_between_marks_nothing() {
+    // A table row `Datum | Name | 01.02.2026`: the date is not the label's right neighbour,
+    // so it is not marked. Ruled, and as plain pieces on one baseline.
+    for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
+        for font in ["FL", "FB"] {
+            for ruled in [true, false] {
+                let rows = [
+                    ["Datum", "Name", "01.02.2026"],
+                    ["Kundennummer", "00000", "4711"],
+                ];
+                let pitch = size * 2.0;
+                let (top, xs) = (770.0, [40.0f32, 160.0, 300.0, 440.0]);
+                let bottom = top - pitch * rows.len() as f32;
+                let mut head = common::show("FB", size * 1.6, 40.0, 800.0, "Musterbescheid");
+                if ruled {
+                    for x in xs {
+                        head += &format!("0.5 w {x} {bottom} m {x} {top} l S\n");
+                    }
+                    for k in 0..=rows.len() {
+                        head += &common::hrule(xs[0], xs[3], top - pitch * k as f32);
+                    }
+                }
+                for (k, row) in rows.iter().enumerate() {
+                    for (x, text) in xs.iter().zip(row) {
+                        let y = top - pitch * (k as f32 + 0.7);
+                        head += &common::show(font, size, x + 5.0, y, text);
+                    }
+                }
+                let out = read(&headed(&head, size, scale, ""));
+                let how = if ruled { "ruled" } else { "plain" };
+                let case = format!("{how} in {size} pt {font}");
+                assert_head(&out, HeadWant::Lost(ONE_DATE), &case);
+                assert_eq!(front(&out, "source_date"), None, "{case}");
+            }
+        }
+    }
+}

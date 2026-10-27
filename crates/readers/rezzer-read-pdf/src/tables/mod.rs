@@ -77,30 +77,12 @@ pub(crate) struct Planned {
 }
 
 impl Planned {
-    /// The label and value text of each row, when the table is one of labels and values:
-    /// from drawn boxes, rows of fields or the totals of a column beside a section (each row
-    /// a label cell and a value cell). Other tables give none.
-    /// The number of the value's line comes with it (see [`Run::line`]), when it has text.
-    pub(crate) fn pairs(&self) -> Vec<(String, String, Option<u32>)> {
-        let pairs = self
-            .found_by
-            .is_some_and(|n| pairs::is_pairs_note(n) || n == side::SIDE_FOUND_BY);
-        if !pairs {
-            return Vec::new();
-        }
-        let text = |c: &PlannedCell| {
-            let joined: String = c.runs.iter().map(|r| r.text.as_str()).collect();
-            joined.trim().to_string()
-        };
-        self.rows
-            .iter()
-            .filter_map(|row| match row.as_slice() {
-                [label, value] => {
-                    Some((text(label), text(value), value.runs.first().map(|r| r.line)))
-                }
-                _ => None,
-            })
-            .collect()
+    /// Whether the table is one of labels and values that the field reader made: from drawn
+    /// boxes, rows of fields or the totals of a column beside a section. Its rows are label
+    /// and value, also where column titles stand over one row of items.
+    pub(crate) fn is_pairs(&self) -> bool {
+        self.found_by
+            .is_some_and(|n| pairs::is_pairs_note(n) || n == side::SIDE_FOUND_BY)
     }
 }
 
