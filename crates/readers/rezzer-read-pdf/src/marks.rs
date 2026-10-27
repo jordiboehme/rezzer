@@ -791,13 +791,17 @@ const CUT_WORK: usize = 1_000_000;
 ///   character of it, and nothing else stands in the next field on the number's line.
 ///
 /// Only the first divider of a number cuts. Runs only in the direction of the page's text,
-/// `turn`: on a page read turned, the digits, the rules and the dividers are looked at in the
-/// frame its text reads in, as on an upright page.
+/// `turn`: on a page read turned a quarter, the digits, the rules and the dividers are looked
+/// at in the frame its text reads in, as on an upright page (a page upside down is not cut).
 pub(crate) fn cut_at_dividers(glyphs: &mut Vec<Gl>, text: &mut String, rules: &[Rule], turn: Turn) {
     if !text.contains(SEP) || rules.is_empty() {
         return;
     }
     // After which glyph a space goes, and where on the page.
+    // A page read upside down has no turned frame here: its digits are not cut.
+    if turn == Turn::Half {
+        return;
+    }
     let spaces: Vec<(usize, (f32, f32))> = if turn == Turn::None {
         divider_spaces(glyphs, text, rules)
             .into_iter()

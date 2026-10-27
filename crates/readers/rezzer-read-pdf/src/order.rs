@@ -1147,6 +1147,7 @@ fn line_runs(page: u32, frags: &[Frag], ids: &[usize], line: u32, links: &[Link]
         let t = &frags[first].text;
         keep[0].0 = t.len() - t.trim_start_matches(is_pad).len();
     }
+    let rtl = ids.iter().any(|&i| frags[i].text.chars().any(is_rtl));
     for pos in 1..n {
         let (p, f) = (&frags[ids[pos - 1]], &frags[ids[pos]]);
         // White space that opens a piece gap is padding: it is written as one space.
@@ -1165,9 +1166,10 @@ fn line_runs(page: u32, frags: &[Frag], ids: &[usize], line: u32, links: &[Link]
         // A gap after the run before is a word space. So is a start left of where the run
         // before starts: a run that moves with the chain of a padded value run (see
         // [`chain_heads`]) is put before a label drawn between its values, and the label
-        // goes on after it, never as one word with it.
+        // goes on after it, never as one word with it. A line with right-to-left text keeps
+        // its visual order here, so only the gap counts there.
         let size = f.size.max(p.size);
-        if !glued && (f.x - p.end > WORD_GAP * size || f.x < p.x) {
+        if !glued && (f.x - p.end > WORD_GAP * size || (!rtl && f.x < p.x)) {
             spaced[pos] = true;
         }
     }
@@ -1204,7 +1206,6 @@ fn line_runs(page: u32, frags: &[Frag], ids: &[usize], line: u32, links: &[Link]
         note: false,
         gaps: Gaps::default(),
     };
-    let rtl = ids.iter().any(|&i| frags[i].text.chars().any(is_rtl));
     if !rtl {
         return (0..n)
             .map(|pos| {
