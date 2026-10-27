@@ -376,9 +376,10 @@ const THIN_RULE: f32 = 8.0;
 const END_RULE: f32 = 4.5;
 const END_SHARE: f32 = 0.9;
 
-/// The glyphs of a line reach this share of its size over its baseline and this share under
-/// it: a rule there crosses them.
-const GLYPH_TOP: f32 = 0.7;
+/// The glyphs of a line reach this share of its size over its baseline (its x-height) and
+/// this share under it: a rule there crosses them (a strike-through stands at a quarter to a
+/// third of the size).
+const GLYPH_TOP: f32 = 0.5;
 const GLYPH_FOOT: f32 = 0.2;
 
 /// Where a rule of `ends` ends the region of lines `a..z`: the line right under the one rule

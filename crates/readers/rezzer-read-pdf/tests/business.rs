@@ -646,3 +646,59 @@ fn a_struck_through_item_does_not_end_a_table() {
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
+
+/// The invoice of [`invoice`] at `size` pt with its lines `lead` sizes apart, the totals right
+/// under the items and a rule from x 40 to 540 midway between the last item and the first
+/// total, drawn as `look`.
+fn tight_invoice(size: f32, lead: f32, look: Look) -> String {
+    let p = lead * size;
+    let y = |n: f32| 600.0 - n * p;
+    let mut out = show("FB", size, 40.0, y(0.0), "Pos")
+        + &show("FB", size, 80.0, y(0.0), "Artikel")
+        + &show("FB", size, 300.0, y(0.0), "Menge")
+        + &right(true, size, 420.0, y(0.0), "Preis")
+        + &right(true, size, 540.0, y(0.0), "Betrag");
+    for (n, item) in ITEMS.iter().take(3).enumerate() {
+        let at = y(n as f32 + 1.0);
+        out += &show("FL", size, 40.0, at, item[0]);
+        out += &show("FL", size, 80.0, at, item[1]);
+        out += &show("FL", size, 300.0, at, item[2]);
+        out += &right(false, size, 420.0, at, item[3]);
+        out += &right(false, size, 540.0, at, item[4]);
+    }
+    out += &rule(look, 40.0, 540.0, y(3.5), size);
+    for (n, (label, value)) in [
+        ("Nettobetrag", "1.234,56"),
+        ("USt 19 %", "234,57"),
+        ("Gesamtbetrag", "1.469,13"),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let at = y(4.0 + n as f32);
+        out += &show("FL", size, 340.0, at, label);
+        out += &right(false, size, 540.0, at, value);
+    }
+    out
+}
+
+/// A rule midway between the last item and the first total at tight leading (1.1 and 1.2
+/// sizes) lies in the gap between the two lines, over the x-height of the lower one: it ends
+/// the items' table, and the totals are a table of their own, in every look.
+#[test]
+fn a_midway_rule_at_tight_leading_ends_a_table() {
+    let mut wrong = Vec::new();
+    for size in [6.0, 8.0] {
+        for lead in [1.1, 1.2] {
+            for look in LOOKS {
+                let out = common::read(&page_in(&tight_invoice(size, lead, look), look));
+                let got = tables(&out);
+                let items = got.first().map(|t| t.1.clone());
+                if got.len() != 2 || items != Some(items_of(3)) {
+                    wrong.push(format!("{size} pt, {lead}, {look:?}: {got:?}"));
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
