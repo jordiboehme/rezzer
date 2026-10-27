@@ -6153,3 +6153,34 @@ fn rereview_r11_probes_give_no_wrong_date() {
         }
     }
 }
+
+#[test]
+fn rereview_r12_probe_gives_no_wrong_date() {
+    // The probe of the round 12 re-review (R4): the rest of the list writes its dates as a
+    // day, a month name and a year joined by a sign (`16-Jan-2026`). The first entry is one of a
+    // list, not the document date. Never a wrong date.
+    for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
+        for font in ["FL", "FB"] {
+            let s = |x: f32, y: f32, t: &str| common::show(font, size, x, y, t);
+            let pitch = size * 1.2;
+            let below = 760.0 - pitch;
+            let title = common::show("FB", size * 1.6, 40.0, 800.0, "Musterbescheid");
+            for (how, second, third) in [
+                ("dashes", "16-Jan-2026", "17-Jan-2026"),
+                ("slashes", "16/Jan/2026", "17/Jan/2026"),
+                ("dots", "16.Jan.2026", "17.Jan.2026"),
+                ("month first", "Jan-16-2026", "Jan-17-26"),
+            ] {
+                let head = title.clone()
+                    + &s(40.0, 760.0, "Datum")
+                    + &s(40.0, below, "15.01.2026")
+                    + &s(40.0, below - pitch, second)
+                    + &s(40.0, below - 2.0 * pitch, third);
+                let out = read(&headed(&head, size, scale, ""));
+                let case = format!("R4 {how} in {size} pt {font}");
+                assert_head(&out, HeadWant::Lost(ONE_DATE), &case);
+                assert_eq!(front(&out, "source_date"), None, "{case}");
+            }
+        }
+    }
+}

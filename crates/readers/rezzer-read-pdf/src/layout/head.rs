@@ -375,7 +375,8 @@ pub(crate) fn page_dates(runs: &[Run], height: Option<f32>) -> Dates {
 /// (`2026-01-16`, `2026/01/16`), or without a year (`16.01.`, `17/1`), day and month in their
 /// ranges; a day next to a month name or its abbreviation, with or without a dot after the
 /// day, or a month name next to a four-digit year (`16. Januar 2026`, `January 16, 2026`,
-/// `17 janvier`, `16 stycznia 2026`, `Jan. 2026`), in German, English, French, Spanish,
+/// `17 janvier`, `16 stycznia 2026`, `Jan. 2026`), or the three joined by one `-`, `/` or `.`
+/// with a year of two or four digits (`16-Jan-2026`, `Jan/17/26`), in German, English, French, Spanish,
 /// Italian, Portuguese, Dutch and Polish (see [`MONTHS`], accents folded); and the CJK forms
 /// of digits with 年 and 月, 月 and 日, or 월 and 일 (`2026年1月16日`, `1月 17日`).
 fn date_like(text: &str) -> Vec<(usize, usize)> {
@@ -439,6 +440,9 @@ fn date_like(text: &str) -> Vec<(usize, usize)> {
             .get(k)
             .is_some_and(|t| t.2 - t.1 == c.len_utf8() && text[t.1..].starts_with(c))
     };
+    // The sign that joins a day, a month name and a year (`16-Jan-2026`, `16.Jan.26`), if one
+    // stands at token `k`.
+    let joiner = |k: usize| ['.', '-', '/'].into_iter().find(|&c| sign(k, c));
     // A short word between a day and its month or a month and its year (`16 de enero de 2026`,
     // `16 di gennaio`): a particle, not a month and not a number.
     let particle = |k: usize| {
@@ -485,16 +489,23 @@ fn date_like(text: &str) -> Vec<(usize, usize)> {
                     }
                 });
                 numeric.or_else(|| {
-                    // `16. Januar 2026`, `16 janvier`, `16 stycznia 2026`, `16 de enero de 2026`.
-                    let mut m = if sign(k + 1, '.') { k + 2 } else { k + 1 };
-                    if particle(m) {
+                    // `16. Januar 2026`, `16 janvier`, `16 stycznia 2026`, `16 de enero de
+                    // 2026`, `16-Jan-2026`, `16.Jan.26`.
+                    let joined = joiner(k + 1).is_some();
+                    let mut m = if joined { k + 2 } else { k + 1 };
+                    if !joined && particle(m) {
                         m += 1;
                     }
                     match tokens.get(m) {
                         Some((Kind::Month, _, end)) if day(v1) => {
-                            let y = if particle(m + 1) { m + 2 } else { m + 1 };
+                            let (y, short) = match joiner(m + 1) {
+                                Some(_) => (m + 2, true),
+                                None if particle(m + 1) => (m + 2, false),
+                                None => (m + 1, false),
+                            };
                             match digits(y) {
                                 Some((4, _, end4)) => Some((y + 1, end4)),
+                                Some((2, _, end2)) if short => Some((y + 1, end2)),
                                 _ => Some((m + 1, *end)),
                             }
                         }
@@ -512,12 +523,24 @@ fn date_like(text: &str) -> Vec<(usize, usize)> {
                 })
             }
             Kind::Month => {
-                // `January 16, 2026`, `Jan. 2026`.
-                let after = if sign(k + 1, '.') { k + 2 } else { k + 1 };
+                // `January 16, 2026`, `Jan. 2026`, `Jan-16-2026`, `Jan/17/26`.
+                let after = if joiner(k + 1).is_some() {
+                    k + 2
+                } else {
+                    k + 1
+                };
                 match digits(after) {
                     Some((n, v, end)) if n <= 2 && day(v) => {
-                        match (sign(after + 1, ','), digits(after + 2)) {
-                            (true, Some((4, _, end4))) => Some((after + 3, end4)),
+                        let (y, short) = if sign(after + 1, ',') {
+                            (after + 2, false)
+                        } else if joiner(after + 1).is_some() {
+                            (after + 2, true)
+                        } else {
+                            (after + 1, false)
+                        };
+                        match digits(y) {
+                            Some((4, _, end4)) => Some((y + 1, end4)),
+                            Some((2, _, end2)) if short => Some((y + 1, end2)),
                             _ => Some((after + 1, end)),
                         }
                     }
@@ -1078,6 +1101,16 @@ mod tests {
             spans("16 de enero de 2026 e 3 di marzo"),
             ["16 de enero de 2026", "3 di marzo"]
         );
+        // Day, month name and year joined by one sign, two- or four-digit years, either order.
+        assert_eq!(
+            spans("16-Jan-2026 16/Jan/2026 16.Jan.2026"),
+            ["16-Jan-2026", "16/Jan/2026", "16.Jan.2026"]
+        );
+        assert_eq!(
+            spans("16-Jan-26 Jan-16-2026 Jan/17/26 Jan.18.2026"),
+            ["16-Jan-26", "Jan-16-2026", "Jan/17/26", "Jan.18.2026"]
+        );
+        assert_eq!(spans("16-Jan und Jan-2026"), ["16-Jan", "Jan-2026"]);
         // CJK.
         assert_eq!(
             spans("2026\u{5e74}1\u{6708}16\u{65e5}"),
