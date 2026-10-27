@@ -3577,6 +3577,79 @@ fn footer_columns_read_apart_in_every_size_and_font() {
     );
 }
 
+/// The sender block, the bold title under it and the address beside them of the carried
+/// finding C-r4-b, at `size` pt (8 in the finding) and its distances in that ratio: the
+/// sender `Muster GmbH` and `Musterweg 2` at x 40 from the baseline 722 down, 10 apart, the
+/// title `Rechnung` bold in `title` pt 12 under them, and the address of four lines at x 360
+/// from 1.5 under the title's baseline, 10 apart.
+fn sender_title_address(fonts: (&str, &str), size: f32, title: f32) -> String {
+    let k = size / 8.0;
+    let mut t = show(fonts.0, size, 40.0, 722.0, "Muster GmbH")
+        + &show(fonts.0, size, 40.0, 722.0 - 10.0 * k, "Musterweg 2")
+        + &show(fonts.1, title, 40.0, 722.0 - 22.0 * k, "Rechnung");
+    for (n, line) in ADDRESS.iter().enumerate() {
+        let y = 722.0 - 23.5 * k - 10.0 * k * n as f32;
+        t += &show(fonts.0, size, 360.0, y, line);
+    }
+    t
+}
+
+/// The address of [`sender_title_address`].
+const ADDRESS: [&str; 4] = [
+    "Erika Mustermann",
+    "Musterstrasse 1",
+    "12345 Musterstadt",
+    "Deutschland",
+];
+
+/// Carried finding C-r4-b: a bold title under the sender lines and beside the address of a
+/// letter stays apart from both, in every page size, font, text size and title size, also in
+/// the size of the sender: no block holds the title and a line of the sender or the address,
+/// the sender lines are one block and the address another, each line read once.
+#[test]
+fn a_bold_title_under_the_sender_stays_apart() {
+    let mut wrong = Vec::new();
+    for k in [0.75, 1.0, 1.5] {
+        for fonts in FONTS {
+            for (size, ratio) in [6.0, 8.0, 10.0]
+                .into_iter()
+                .flat_map(|s| [0.875, 1.0, 1.125, 1.25, 1.5].map(|r| (s, r)))
+            {
+                let title = size * ratio;
+                let name = format!("{k}x, {fonts:?}, {size} pt, title {title} pt");
+                let t = sender_title_address(fonts, size, title);
+                let out = common::read(&footed_pages(&t, 1, k, false));
+                let texts = page_texts(&out, 1);
+                let sender = ["Muster GmbH", "Musterweg 2"];
+                for (_, s) in &texts {
+                    let titled = words(s).any(|w| w == "Rechnung");
+                    let other = sender.iter().chain(&ADDRESS).any(|l| s.contains(l));
+                    if titled && other {
+                        wrong.push(format!("{name}: the title shares {s:?}"));
+                    }
+                }
+                for block in [&sender[..], &ADDRESS[..]] {
+                    if !texts.iter().any(|(_, s)| *s == block.join(" ")) {
+                        wrong.push(format!("{name}: {block:?} is not one block: {texts:?}"));
+                    }
+                }
+                for line in sender.iter().chain(&ADDRESS).chain(&["Rechnung"]) {
+                    let n: usize = texts.iter().map(|(_, s)| s.matches(line).count()).sum();
+                    if n != 1 {
+                        wrong.push(format!("{name}: {line:?} read {n} times: {texts:?}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
 /// Finding B5: an address block with one line wider than 24 times its size (a long name of
 /// the managing director) keeps a line break after each line: the width of a block of short
 /// lines in the shape of an address does not make it prose.

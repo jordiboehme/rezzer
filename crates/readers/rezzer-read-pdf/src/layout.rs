@@ -1955,6 +1955,44 @@ fn continues(prev: &Line<'_>, cur: &Line<'_>) -> bool {
     gap > 0.0 && gap <= GAP_RATIO * height && (prev.size - cur.size).abs() <= SIZE_SLACK
 }
 
+/// A bold line under plain lines stands this many times farther from them than their pitch
+/// when it is a title of its own.
+const TITLE_STEP: f32 = 1.1;
+
+/// Line heights one line of text steps down by, for a block of one line that has no pitch of
+/// its own.
+const LEADING: f32 = 1.2;
+
+/// Whether the last of `lines` is a title under the block of the others: all its ink is bold,
+/// none of theirs is, and it stands farther under them than [`TITLE_STEP`] times their pitch
+/// (or than the leading of one line, see [`LEADING`], under a block of one line). A bold
+/// title of the size of the sender lines under them (`Rechnung` under the sender of a letter)
+/// is no line of the sender's block; a bold line at the block's own pitch is.
+fn bold_title_after(lines: &[Line<'_>]) -> bool {
+    let [above @ .., prev, cur] = lines else {
+        return false;
+    };
+    let inked = |l: &Line<'_>| {
+        l.runs
+            .iter()
+            .filter(|r| !r.text.trim().is_empty())
+            .map(|r| r.bold)
+            .collect::<Vec<bool>>()
+    };
+    let (bold, plain) = (inked(cur), inked(prev));
+    if bold.is_empty() || !bold.iter().all(|b| *b) || plain.iter().any(|b| *b) {
+        return false;
+    }
+    if above.iter().any(|l| inked(l).iter().any(|b| *b)) {
+        return false;
+    }
+    let pitch = match above.last() {
+        Some(a) => a.y - prev.y,
+        None => LEADING * prev.size,
+    };
+    pitch > 0.0 && prev.y - cur.y > TITLE_STEP * pitch
+}
+
 /// The marker of a list line: `(ordered, bytes of marker and the space after it)`.
 fn list_marker(text: &str) -> Option<(bool, usize)> {
     let first = text.chars().next()?;
@@ -2153,6 +2191,7 @@ fn untagged(flow: &[Run], text_sizes: &[f32], cx: &Context<'_>, out: &mut Built)
             && heading_level(&all[j]).is_none()
             && marker(j).is_none()
             && continues(&all[j - 1], &all[j])
+            && !bold_title_after(&all[i..=j])
         {
             runs.extend(all[j].runs.iter());
             j += 1;
