@@ -1221,7 +1221,10 @@ fn box_of_finds_anchor() {
 
 #[test]
 fn many_pages_fill_fast() {
+    // The work is counted (`work_steps`, debug builds only); time is only a safety stop for a
+    // hang, far above any machine.
     let start = std::time::Instant::now();
+    let before = rezzer_model::work_steps();
     let mut g = Geometry::default();
     for page in 1..=50_000u32 {
         assert!(g.add_page(page, [100.0, 100.0]));
@@ -1230,11 +1233,22 @@ fn many_pages_fill_fast() {
             assert!(g.push(page, placed(BoxKind::Text, [x, 0.0, x + 1.0, 1.0], None)));
         }
     }
+    let filled = rezzer_model::work_steps();
     assert_eq!(g.len(), 150_000);
     assert!(
         !g.add_page(7, [100.0, 100.0]),
         "an earlier page is still known"
     );
-    // Quadratic filling took minutes here; the linear one takes milliseconds.
-    assert!(start.elapsed() < std::time::Duration::from_secs(5));
+    let after = rezzer_model::work_steps();
+    let steps = |a: Option<u64>, b: Option<u64>| a.zip(b).map(|(a, b)| b - a);
+    if cfg!(debug_assertions) {
+        // One step per page added (its check of the last page) and one per box pushed (the
+        // last page is its page). A scan of the pages from the front would take billions.
+        assert_eq!(steps(before, filled), Some(50_000 + 150_000));
+        // An earlier page: the check of the last page, then the scan up to page 7.
+        assert_eq!(steps(filled, after), Some(1 + 7));
+    } else {
+        assert_eq!(after, None);
+    }
+    assert!(start.elapsed() < std::time::Duration::from_secs(60));
 }
