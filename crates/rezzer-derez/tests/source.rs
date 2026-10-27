@@ -187,8 +187,6 @@ fn share(plan: &Plan, w: u16, h: u16) -> Option<f32> {
     Some(taken as f32 / (f32::from(gw - 2 * m) * f32::from(gh - 2 * m)))
 }
 
-/// A time bound in milliseconds: 50 in an optimized build, 500 with debug assertions, so a
-/// loaded machine does not make a debug test run fail.
 /// The wall-clock stop of the work-bound tests: far above any machine, so only a hang fails
 /// it. The work itself is bounded by counted steps.
 const SAFETY: Duration = Duration::from_secs(60);

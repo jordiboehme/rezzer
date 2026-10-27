@@ -1282,7 +1282,13 @@ fn crystalline_imports_without_errors() {
     for path in &written {
         let Some(name) = hard_names.iter().copied().find(|name| {
             let stem = rezzer_pipeline::parts_folder(&rezzer_pipeline::folder_stem(name));
-            path.contains(&format!("/{stem}/"))
+            // A folder of the path below the top one, matched by path component so the
+            // separator of the system does not matter.
+            Path::new(path).parent().is_some_and(|dir| {
+                dir.components()
+                    .skip(1)
+                    .any(|c| c.as_os_str() == stem.as_str())
+            })
         }) else {
             continue;
         };

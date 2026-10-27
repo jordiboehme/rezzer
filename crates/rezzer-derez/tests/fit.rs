@@ -412,7 +412,8 @@ fn shapes_past_the_cap_are_skipped() {
     eprintln!("100,000 shapes at 120x60: {steps:?} steps in {took:?}");
     if cfg!(debug_assertions) {
         // One step per shape drawn: the first MAX_SHAPES, twice when the blocks are redrawn
-        // as outlines.
+        // as outlines. The upper limit 2 * MAX_SHAPES is structural, not measured: the fit
+        // draws in at most two passes.
         assert!(
             steps.is_some_and(|n| (MAX_SHAPES as u64..=2 * MAX_SHAPES as u64).contains(&n)),
             "{steps:?}"
