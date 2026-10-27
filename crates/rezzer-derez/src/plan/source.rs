@@ -58,6 +58,10 @@ const PAGES_TRIED: usize = 4 * MAX_PLANS;
 /// How close, in unit coordinates, two cell edges are to count as one, and how far a cell
 /// may stick out of its table.
 const EDGE: f32 = 1e-3;
+/// The tables of a page one cell is matched against, nearest in box order first, so a page of
+/// many tables and cells costs about linear time; a cell whose table is further away in box
+/// order is an outline of its own.
+const TABLES_TRIED: usize = 16;
 
 /// The plans of a run: the file name for the status line, the plans in round order and, when
 /// the file gives no grid, a note for the status line and the same note without the file name
@@ -200,15 +204,28 @@ fn page_shapes(page: &PageGeometry) -> Vec<Shape> {
     // The cell edges of each table: x edges, then y edges.
     let mut edges: Vec<(Vec<f32>, Vec<f32>)> = vec![Default::default(); tables.len()];
     let mut owned = vec![false; mapped.len()];
+    // The bounding box of all tables: a cell outside it lies in no table.
+    let all = tables.iter().fold(None, |acc: Option<[f32; 4]>, &t| {
+        let r = mapped[t].1.rect;
+        Some(acc.map_or(r, |a| {
+            [
+                a[0].min(r[0]),
+                a[1].min(r[1]),
+                a[2].max(r[2]),
+                a[3].max(r[3]),
+            ]
+        }))
+    });
     for (i, (kind, cell)) in mapped.iter().enumerate() {
-        if *kind != BoxKind::Cell {
+        if *kind != BoxKind::Cell || !all.is_some_and(|a| contains(a, cell.rect)) {
             continue;
         }
-        // Cells usually follow their table: the last table before the cell is tried first.
+        // Cells usually follow their table: the last table before the cell is tried first,
+        // then the ones before it, then the ones after it, at most TABLES_TRIED of them.
         let before = tables.partition_point(|&t| t < i);
         let order = (0..before).rev().chain(before..tables.len());
         let Some(t) = order
-            .into_iter()
+            .take(TABLES_TRIED)
             .find(|&t| contains(mapped[tables[t]].1.rect, cell.rect))
         else {
             continue;

@@ -1238,3 +1238,35 @@ fn table_borders_are_capped_and_loose_cells_are_outlines() {
     let ps = plans(&with_pages(Vec::new(), vec![page(1, boxes)]));
     assert_eq!(count(&ps[0], ShapeKind::Outline), 2);
 }
+
+/// A hostile page: 2048 small tables in a 64 by 32 raster and 2048 cells in the gaps between
+/// them, inside the tables' bounding box but in no table.
+fn tables_and_stray_cells() -> Vec<PlacedBox> {
+    let mut boxes = Vec::with_capacity(4096);
+    for i in 0..2048u16 {
+        let (col, row) = (f32::from(i % 64), f32::from(i / 64));
+        let (x, y) = (10.0 + col * 9.0, 10.0 + row * 24.0);
+        boxes.push(placed(BoxKind::Table, [x, y, x + 4.0, y + 10.0]));
+    }
+    for i in 0..2048u16 {
+        let (col, row) = (f32::from(i % 64), f32::from(i / 64));
+        let (x, y) = (16.0 + col * 9.0, 22.0 + row * 24.0);
+        boxes.push(placed(BoxKind::Cell, [x, y, x + 1.0, y + 1.0]));
+    }
+    boxes
+}
+
+#[test]
+fn stray_cells_among_many_tables_are_fast() {
+    // As many such pages as the total box cap allows.
+    let pages: Vec<PageGeometry> = (1..=48)
+        .map(|n| page(n, tables_and_stray_cells()))
+        .collect();
+    let d = with_pages(Vec::new(), pages);
+    let start = Instant::now();
+    let _ = plans(&d);
+    let took = start.elapsed().as_millis();
+    // Matching every cell against every table took about 150 ms here, optimized or not; with
+    // the bounded search about 22 ms with debug assertions and 14 ms optimized.
+    assert!(took < limit_ms(), "{took} ms");
+}
