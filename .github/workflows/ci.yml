@@ -253,7 +253,9 @@ jobs:
 
       # --no-tests=warn: a workspace whose crates have no tests yet is not an
       # error. --workspace-remap: the run reads .config/nextest.toml from the
-      # checkout, so the profile overrides apply.
+      # checkout, so the profile overrides apply. The binaries hold paths fixed
+      # at build time (CARGO_MANIFEST_DIR, snapshot paths, cargo_bin), so the
+      # run has to happen in the same job at the same path as the build.
       - name: run tests
         run: cargo nextest run --archive-file "$RUNNER_TEMP/$TESTS_ARCHIVE" --workspace-remap "$GITHUB_WORKSPACE" --no-tests=warn
 
