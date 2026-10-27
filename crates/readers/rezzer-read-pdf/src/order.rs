@@ -11,7 +11,7 @@ use std::rc::Rc;
 use unicode_bidi::{BidiClass, Level, ParagraphBidiInfo, bidi_class};
 
 use crate::layout::{Gap, Gaps, Run};
-use crate::regions::{Part, offset_baselines};
+use crate::regions::{BASELINE_NEAR, Part, offset_baselines};
 use crate::tables::{Rule, RuleKind};
 use crate::text::{Gl, Link, Texts};
 
@@ -302,6 +302,8 @@ struct Piece {
     /// A glyph with ink is in the piece: a piece of white space only has no size to align
     /// with the cell beside it.
     inked: bool,
+    /// Every fragment with ink of the piece is bold (false for a piece without ink).
+    bold: bool,
 }
 
 /// The white space between a run or piece whose gap counts from `free` (`padded` when white
@@ -411,6 +413,9 @@ fn pieces_in(frags: &[Frag], ids: &[usize], head: &[usize], base: usize) -> (Vec
                     p.y1 = p.y1.max(hi);
                     p.size = p.size.max(f.size);
                     p.chars += f.chars;
+                    if f.inked {
+                        p.bold = f.bold && (p.bold || !p.inked);
+                    }
                     p.inked |= f.inked;
                     p.frags.push(i);
                     continue;
@@ -432,6 +437,7 @@ fn pieces_in(frags: &[Frag], ids: &[usize], head: &[usize], base: usize) -> (Vec
                 stand: None,
                 rows: 1,
                 inked: f.inked,
+                bold: f.inked && f.bold,
             });
         }
         out.extend(piece);
@@ -447,13 +453,41 @@ pub(crate) type HRule = (f32, f32, f32);
 /// A rule this share of a region's width or wider, across its gutter, parts its bands.
 const WIDE_RULE: f32 = 2.0 / 3.0;
 
-fn reading_order(pieces: &[Piece], rules: &[HRule]) -> Vec<usize> {
-    let mut out = Vec::with_capacity(pieces.len());
+/// Pieces in reading order, and where the second side of a column gutter starts.
+#[derive(Debug, Default)]
+struct Order {
+    ids: Vec<usize>,
+    /// The places in `ids`, ascending, where the right side of a gutter of a lone row starts
+    /// (see [`Split::Lone`]): the piece there starts a line even when it shares the row of
+    /// the piece before it, which stands on the left side (a title beside the first line of
+    /// a field list).
+    sides: Vec<usize>,
+}
+
+impl Order {
+    /// Whether the piece at place `k` starts the side of a gutter.
+    fn starts_side(&self, k: usize) -> bool {
+        self.sides.binary_search(&k).is_ok()
+    }
+
+    /// Puts `other` (an order of its own) at the end, its places of sides moved along.
+    fn append(&mut self, other: Order) {
+        let at = self.ids.len();
+        self.sides.extend(other.sides.iter().map(|k| k + at));
+        self.ids.extend(other.ids);
+    }
+}
+
+fn reading_order(pieces: &[Piece], rules: &[HRule]) -> Order {
+    let mut out = Order {
+        ids: Vec::with_capacity(pieces.len()),
+        sides: Vec::new(),
+    };
     region(pieces, (0..pieces.len()).collect(), 0, rules, &mut out);
     out
 }
 
-fn region(p: &[Piece], mut ids: Vec<usize>, depth: usize, rules: &[HRule], out: &mut Vec<usize>) {
+fn region(p: &[Piece], mut ids: Vec<usize>, depth: usize, rules: &[HRule], out: &mut Order) {
     let deep = ids.len() > 3 && depth < COLUMN_DEPTH && ids.len() <= COLUMN_PIECES;
     let found = if deep { gutter(p, &ids) } else { None };
     // A gutter that only a drawn box makes is taken after the bands of white space across:
@@ -467,16 +501,22 @@ fn region(p: &[Piece], mut ids: Vec<usize>, depth: usize, rules: &[HRule], out: 
             return;
         }
     }
-    if let Some((g0, g1, _)) = found {
+    if let Some((g0, g1, split)) = found {
         ids.sort_by(|&a, &b| p[a].row.cmp(&p[b].row).then(p[a].x0.total_cmp(&p[b].x0)));
         let mut band: Vec<usize> = Vec::new();
-        let flush = |band: &mut Vec<usize>, out: &mut Vec<usize>| {
+        let flush = |band: &mut Vec<usize>, out: &mut Order| {
             if band.is_empty() {
                 return;
             }
             let (left, right): (Vec<usize>, Vec<usize>) =
                 band.drain(..).partition(|&i| p[i].x1 <= g0 + 0.5);
             region(p, left, depth + 1, rules, out);
+            // A lone title and the line of the block whose row it shares are two lines. The
+            // pieces of a row beside other gutters stay one line, as they read: cells of a
+            // table in columns, labels of fields side by side.
+            if split == Split::Lone {
+                out.sides.push(out.ids.len());
+            }
             region(p, right, depth + 1, rules, out);
         };
         // A drawn rule across the gutter and most of the region parts the bands too: the
@@ -497,7 +537,7 @@ fn region(p: &[Piece], mut ids: Vec<usize>, depth: usize, rules: &[HRule], out: 
             }
             if p[id].x1 > g0 + 0.5 && p[id].x0 < g1 - 0.5 {
                 flush(&mut band, out);
-                out.push(id);
+                out.ids.push(id);
                 low = f32::MAX;
             } else {
                 band.push(id);
@@ -520,7 +560,7 @@ fn region(p: &[Piece], mut ids: Vec<usize>, depth: usize, rules: &[HRule], out: 
         region(p, rest, depth + 1, rules, out);
         return;
     }
-    out.extend(ids);
+    out.ids.extend(ids);
 }
 
 /// Where to cut pieces sorted by row: after the row with the widest white space below it,
@@ -555,13 +595,29 @@ enum Split {
     Prose,
     /// Blocks of lines whose baselines do not line up.
     Offset,
+    /// A lone row beside a block of lines of one pitch, apart from them by size or weight
+    /// and baseline: a title beside a field list.
+    Lone,
     /// Only a drawn box on one side.
     Boxed,
 }
 
+/// A block beside a lone row has at least this many rows: a lone cell beside fewer is a row
+/// of a table, not a title.
+const LONE_BLOCK: usize = 3;
+
+/// Each step between the baselines of a block beside a lone row is within this share of
+/// their median step: the block keeps one pitch, as the lines of a field list do.
+const LONE_PITCH: f32 = 0.15;
+
+/// The median sizes of two sides differ when the larger is at least this many times the
+/// smaller (0.5 points at 6 points): a ratio, so that it holds at every scale of the page.
+const SIZE_STEP: f32 = 1.08;
+
 /// A column gutter in a region: the widest vertical band of white space that only a few
 /// pieces cross, with blocks on both sides that stand side by side: prose, lines whose
-/// baselines do not line up, or a drawn box; and which of them makes it.
+/// baselines do not line up, a lone row beside a block (see [`lone_row`]) or a drawn box; and
+/// which of them makes it.
 fn gutter(p: &[Piece], ids: &[usize]) -> Option<(f32, f32, Split)> {
     let lo = ids.iter().map(|&i| p[i].x0).fold(f32::MAX, f32::min);
     let hi = ids.iter().map(|&i| p[i].x1).fold(f32::MIN, f32::max);
@@ -659,6 +715,8 @@ fn gutter(p: &[Piece], ids: &[usize]) -> Option<(f32, f32, Split)> {
         Split::Prose
     } else if apart() {
         Split::Offset
+    } else if lone_row(p, &left, &right) || lone_row(p, &right, &left) {
+        Split::Lone
     } else if !left.is_empty() && !right.is_empty() && (boxed(&left) || boxed(&right)) {
         Split::Boxed
     } else {
@@ -677,6 +735,67 @@ fn gutter(p: &[Piece], ids: &[usize]) -> Option<(f32, f32, Split)> {
     (overlap / smaller >= 0.3).then_some((g0, g1, split))
 }
 
+/// Whether the pieces `one` are a lone row beside the block `block`, a title beside a field
+/// list: the pieces of `one` with ink all lie in one row; those of `block` lie in
+/// [`LONE_BLOCK`] rows or more whose baselines step at one pitch (see [`LONE_PITCH`]); the
+/// row is larger than the block by its median size (see [`SIZE_STEP`]), or bold beside a
+/// block without bold and not smaller; and the baseline of each piece of `one` lies farther
+/// than [`BASELINE_NEAR`] of the smaller size from every baseline of `block`. A lone cell on
+/// the baseline of a row is a cell of that row, and a smaller bold term beside the lines of
+/// its definition is a cell of a glossary.
+fn lone_row(p: &[Piece], one: &[usize], block: &[usize]) -> bool {
+    let inked =
+        |side: &[usize]| -> Vec<usize> { side.iter().copied().filter(|&i| p[i].inked).collect() };
+    let (one, mut block) = (inked(one), inked(block));
+    let Some(&first) = one.first() else {
+        return false;
+    };
+    if one.iter().any(|&i| p[i].row != p[first].row) || block.len() < LONE_BLOCK {
+        return false;
+    }
+    // The baseline of each row of the block, top down: its highest one.
+    block.sort_by_key(|&i| p[i].row);
+    let mut rows: Vec<(usize, f32)> = Vec::new();
+    for &i in &block {
+        match rows.last_mut() {
+            Some(r) if r.0 == p[i].row => r.1 = r.1.max(p[i].y),
+            _ => rows.push((p[i].row, p[i].y)),
+        }
+    }
+    if rows.len() < LONE_BLOCK {
+        return false;
+    }
+    let mut steps: Vec<f32> = rows.windows(2).map(|w| w[0].1 - w[1].1).collect();
+    steps.sort_by(f32::total_cmp);
+    let pitch = steps[steps.len() / 2];
+    if pitch <= 0.0 || steps.iter().any(|s| (s - pitch).abs() > LONE_PITCH * pitch) {
+        return false;
+    }
+    let median = |side: &[usize]| {
+        let mut sizes: Vec<f32> = side.iter().map(|&i| p[i].size).collect();
+        sizes.sort_by(f32::total_cmp);
+        sizes[sizes.len() / 2]
+    };
+    let (a, b) = (median(&one), median(&block));
+    // The row stands out as a title does: larger, or bold beside plain lines and not smaller
+    // than them. A smaller bold term beside the lines of its definition is a cell of a row.
+    let larger = a >= SIZE_STEP * b;
+    let bolder =
+        one.iter().all(|&i| p[i].bold) && block.iter().all(|&i| !p[i].bold) && a * SIZE_STEP > b;
+    if !larger && !bolder {
+        return false;
+    }
+    let small = a.min(b);
+    let mut ys: Vec<f32> = block.iter().map(|&i| p[i].y).collect();
+    ys.sort_by(f32::total_cmp);
+    let near = BASELINE_NEAR * small;
+    one.iter().all(|&i| {
+        let y = p[i].y;
+        let k = ys.partition_point(|b| *b < y - near);
+        ys.get(k).is_none_or(|b| *b > y + near)
+    })
+}
+
 /// Lines of fragments in reading order, as lists of fragment indices.
 #[cfg(test)]
 fn lines_of(frags: &[Frag], columns: bool) -> Vec<Vec<usize>> {
@@ -690,7 +809,7 @@ fn lines_of(frags: &[Frag], columns: bool) -> Vec<Vec<usize>> {
 fn lines_in(frags: &[Frag], columns: bool, boxes: &[[f32; 4]], rules: &[HRule]) -> Vec<Vec<usize>> {
     let head = chain_heads(frags);
     let boxed = columns && frags.iter().any(|f| f.region.is_some());
-    let order: Vec<usize>;
+    let order: Order;
     let ps: Vec<Piece>;
     if !boxed {
         let all: Vec<usize> = (0..frags.len()).collect();
@@ -705,16 +824,21 @@ fn lines_in(frags: &[Frag], columns: bool, boxes: &[[f32; 4]], rules: &[HRule]) 
                     .cmp(&ps[b].row)
                     .then(ps[a].x0.total_cmp(&ps[b].x0))
             });
-            o
+            Order {
+                ids: o,
+                sides: Vec::new(),
+            }
         };
     } else {
         (ps, order) = boxed_order(frags, &head, boxes, rules);
     }
     let mut lines: Vec<Vec<usize>> = Vec::new();
     let mut last_row = None;
-    for i in order {
+    for (k, &i) in order.ids.iter().enumerate() {
         let p = &ps[i];
+        // Two pieces of a row on the two sides of a gutter are two lines.
         if last_row == Some(p.row)
+            && !order.starts_side(k)
             && let Some(l) = lines.last_mut()
         {
             l.extend(p.frags.iter().copied());
@@ -735,7 +859,7 @@ fn boxed_order(
     head: &[usize],
     boxes: &[[f32; 4]],
     rules: &[HRule],
-) -> (Vec<Piece>, Vec<usize>) {
+) -> (Vec<Piece>, Order) {
     // Free text first, then the fragments of each box, in the order the boxes are first met.
     let mut group_of: Vec<Option<usize>> = vec![None; boxes.len()];
     let mut groups: Vec<(u32, Vec<usize>)> = Vec::new();
@@ -795,6 +919,7 @@ fn boxed_order(
             stand: Some(g),
             rows,
             inked: true,
+            bold: false,
         });
         ps.extend(list);
         inner.push(at..ps.len());
@@ -891,13 +1016,23 @@ fn boxed_order(
     let top: Vec<usize> = (0..free_end.min(first_stand))
         .chain(first_stand..ps.len())
         .collect();
-    let mut out = Vec::with_capacity(ps.len());
+    let mut out = Order::default();
     region(&ps, top, 0, rules, &mut out);
-    let mut order = Vec::with_capacity(ps.len());
-    for id in out {
+    let mut order = Order {
+        ids: Vec::with_capacity(ps.len()),
+        sides: Vec::new(),
+    };
+    for (k, &id) in out.ids.iter().enumerate() {
+        if out.starts_side(k) {
+            order.sides.push(order.ids.len());
+        }
         match ps[id].stand {
-            Some(g) => region(&ps, inner[g].clone().collect(), 0, rules, &mut order),
-            None => order.push(id),
+            Some(g) => {
+                let mut boxed = Order::default();
+                region(&ps, inner[g].clone().collect(), 0, rules, &mut boxed);
+                order.append(boxed);
+            }
+            None => order.ids.push(id),
         }
     }
     (ps, order)
@@ -1710,5 +1845,104 @@ mod tests {
         let lines = lines_of(&frags, true);
         assert_eq!(lines.len(), 6, "{lines:?}");
         assert_eq!(lines[0], [0, 1]);
+    }
+
+    /// A title of `size` points (bold when `bold`) at x 40 beside field lines of 6 points at
+    /// x 360 (label) and x 440 (value) on the baselines `ys`, the title 1.5 points under the
+    /// baseline of field line `at`. The fragments: the title first, then label and value of
+    /// each line.
+    fn title_beside(size: f32, bold: bool, ys: &[f32], at: usize) -> Vec<Frag> {
+        let small = |t: &str, x: f32, y: f32| Frag {
+            size: 6.0,
+            end: x + 3.0 * t.chars().count() as f32,
+            pen: x + 3.0 * t.chars().count() as f32,
+            free: x + 3.0 * t.chars().count() as f32,
+            ..frag(t, x, y)
+        };
+        let mut frags = vec![Frag {
+            size,
+            bold,
+            ..frag("Rechnung", 40.0, ys[at] - 1.5)
+        }];
+        for (k, &y) in ys.iter().enumerate() {
+            frags.push(small(&format!("Feld {k}"), 360.0, y));
+            frags.push(small(&format!("Wert {k}"), 440.0, y));
+        }
+        frags
+    }
+
+    /// The lines of [`lines_of`] in columns, as their texts.
+    fn line_texts(frags: &[Frag]) -> Vec<String> {
+        lines_of(frags, true)
+            .iter()
+            .map(|l| {
+                l.iter()
+                    .map(|&i| frags[i].text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_lone_title_beside_a_field_list_is_a_line_of_its_own() {
+        let ys = [703.0, 695.0, 687.0, 679.0];
+        for (size, bold) in [(9.0, true), (9.0, false), (6.0, true)] {
+            for at in 0..ys.len() {
+                let lines = line_texts(&title_beside(size, bold, &ys, at));
+                let mut want = vec!["Rechnung".to_string()];
+                want.extend((0..ys.len()).map(|k| format!("Feld {k} Wert {k}")));
+                assert_eq!(lines, want, "{size} pt, bold {bold}, on {at}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_lone_title_beside_a_field_list_in_a_box_is_a_line_of_its_own() {
+        // The title and the field lines in one drawn box, a line of free text over it: the
+        // lines of the box keep the title apart from the field line it shares a row with.
+        let mut frags = title_beside(9.0, true, &[703.0, 695.0, 687.0, 679.0], 0);
+        frags.iter_mut().for_each(|f| f.region = Some(0));
+        frags.push(frag("Muster GmbH", 40.0, 760.0));
+        let lines = lines_in(&frags, true, &[[30.0, 670.0, 560.0, 715.0]], &[]);
+        let text: Vec<String> = lines
+            .iter()
+            .map(|l| {
+                l.iter()
+                    .map(|&i| frags[i].text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect();
+        let mut want = vec!["Muster GmbH".to_string(), "Rechnung".to_string()];
+        want.extend((0..4).map(|k| format!("Feld {k} Wert {k}")));
+        assert_eq!(text, want);
+    }
+
+    #[test]
+    fn lone_side_needs_one_pitch() {
+        // The field lines step 8, 8 and 20 points: no block of one pitch, so no gutter. (The
+        // region is then cut at the wide step, and the three lines over it are one.)
+        let frags = title_beside(9.0, true, &[703.0, 695.0, 687.0, 667.0], 0);
+        let ps = pieces(&frags);
+        let ids: Vec<usize> = (0..ps.len()).collect();
+        assert_eq!(gutter(&ps, &ids), None);
+        // At one pitch, the lone title makes the gutter.
+        let frags = title_beside(9.0, true, &[703.0, 695.0, 687.0, 679.0], 0);
+        let ps = pieces(&frags);
+        let ids: Vec<usize> = (0..ps.len()).collect();
+        assert_eq!(gutter(&ps, &ids).map(|g| g.2), Some(Split::Lone));
+    }
+
+    #[test]
+    fn lone_side_needs_another_size_or_weight() {
+        // A plain title of the size of the fields stands in their row: a cell, no title.
+        let lines = line_texts(&title_beside(6.0, false, &[703.0, 695.0, 687.0, 679.0], 0));
+        assert_eq!(lines[0], "Rechnung Feld 0 Wert 0", "{lines:?}");
+        // Sizes differ from 1.08 times on: 6.5 against 6 does, 6.4 does not.
+        let lines = line_texts(&title_beside(6.5, false, &[703.0, 695.0, 687.0, 679.0], 0));
+        assert_eq!(lines[0], "Rechnung", "{lines:?}");
+        let lines = line_texts(&title_beside(6.4, false, &[703.0, 695.0, 687.0, 679.0], 0));
+        assert_eq!(lines[0], "Rechnung Feld 0 Wert 0", "{lines:?}");
     }
 }

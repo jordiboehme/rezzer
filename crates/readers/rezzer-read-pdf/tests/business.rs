@@ -2636,3 +2636,202 @@ fn a_line_over_the_top_rule_of_a_frame_of_items_is_no_header() {
         wrong.join("\n")
     );
 }
+
+/// How the title of [`title_beside_fields`] stands out from its field lines.
+#[derive(Debug, Clone, Copy)]
+enum Stand {
+    /// Bold and one and a half times the size of the fields.
+    BoldLarger,
+    /// Bold, in the size of the fields.
+    Bold,
+    /// Plain, one and a half times the size of the fields.
+    Larger,
+}
+
+/// The field lines beside the title of [`title_beside_fields`]: label and value.
+const TITLE_FIELDS: [[&str; 2]; 6] = [
+    ["Rechnungsnummer", "0000-0001"],
+    ["Kundennummer", "00000"],
+    ["Datum", "01.02.2026"],
+    ["Seite", "1 von 1"],
+    ["Bestellnummer", "4711"],
+    ["Lieferdatum", "03.02.2026"],
+];
+
+/// The title `Rechnung` at x 40 beside `n` field lines of `6 k` pt at x 360 (label) and
+/// x 360 + 80 k (value), 8 k apart from the baseline 703 down, in the fonts `fonts` (plain, bold), the title
+/// standing out as `stand`. Its baseline lies 1.5 k under that of field line `at`, so it shares
+/// that line's row of text but not its baseline.
+fn title_beside_fields(k: f32, fonts: (&str, &str), stand: Stand, n: usize, at: usize) -> String {
+    let fs = 6.0 * k;
+    let base = |i: usize| 703.0 - 8.0 * k * i as f32;
+    let (font, size) = match stand {
+        Stand::BoldLarger => (fonts.1, 1.5 * fs),
+        Stand::Bold => (fonts.1, fs),
+        Stand::Larger => (fonts.0, 1.5 * fs),
+    };
+    let mut t = show(font, size, 40.0, base(at) - 1.5 * k, "Rechnung");
+    for (i, [label, value]) in TITLE_FIELDS.iter().take(n).enumerate() {
+        t += &show(fonts.0, fs, 360.0, base(i), label);
+        t += &show(fonts.0, fs, 360.0 + 80.0 * k, base(i), value);
+    }
+    t
+}
+
+/// The text of each paragraph, heading, list item and table row of the body.
+fn texts_of(out: &ReadOutcome) -> Vec<String> {
+    let mut found = Vec::new();
+    for b in blocks(out) {
+        match b {
+            Block::Table { rows, .. } => found.extend(rows.iter().map(|r| {
+                r.iter()
+                    .map(|c| plain_text(&c.inlines))
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            })),
+            _ => {
+                let mut s = String::new();
+                common::block_text(b, &mut s);
+                found.push(s);
+            }
+        }
+    }
+    found
+}
+
+/// The words of a text of [`texts_of`]: cut at white space and cell bounds.
+fn words(s: &str) -> impl Iterator<Item = &str> {
+    s.split(|c: char| c.is_whitespace() || c == '|')
+}
+
+/// Finding B2: a larger or bold title beside a block of small field lines, its baseline a
+/// little off theirs, stands apart: no block or row holds the title and a field line, the
+/// fields are one table of label and value, and no line is lost; in every size, font, look
+/// of the title, with 3 to 6 field lines and the title on the first, a middle and the last
+/// line's row (ruling P6-Y).
+#[test]
+fn title_beside_field_list() {
+    let mut wrong = Vec::new();
+    let mut reads = 0;
+    for k in [0.75, 1.0, 1.5] {
+        for fonts in FONTS {
+            for stand in [Stand::BoldLarger, Stand::Bold, Stand::Larger] {
+                for n in 3..=6 {
+                    for at in [0, n / 2, n - 1] {
+                        let t = title_beside_fields(k, fonts, stand, n, at);
+                        let out = common::read(&page_in(&t, Look::Plain));
+                        reads += 1;
+                        let name = format!("{k}x, {fonts:?}, {stand:?}, {n} lines, on {at}");
+                        let fields = &TITLE_FIELDS[..n];
+                        let field_text = |s: &str| fields.iter().flatten().any(|f| s.contains(f));
+                        let texts = texts_of(&out);
+                        for s in &texts {
+                            let titled = words(s).any(|w| w == "Rechnung");
+                            if titled && field_text(s) {
+                                wrong.push(format!("{name}: the title shares {s:?}"));
+                            }
+                        }
+                        let want: Vec<Vec<String>> = fields
+                            .iter()
+                            .map(|f| f.iter().map(|c| (*c).to_string()).collect())
+                            .collect();
+                        if !tables(&out).iter().any(|t| t.1 == want) {
+                            wrong.push(format!(
+                                "{name}: no table of the fields: {:?}",
+                                tables(&out)
+                            ));
+                        }
+                        let all = common::all_text(&out);
+                        for s in fields.iter().flatten() {
+                            if !all.contains(s) {
+                                wrong.push(format!("{name}: {s:?} is lost"));
+                            }
+                        }
+                        if !texts.iter().any(|s| words(s).any(|w| w == "Rechnung")) {
+                            wrong.push(format!("{name}: the title is lost"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(reads, 216);
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// Rows of goods in [`grouped_rows`]: article, quantity and amount.
+const GROUP_ROWS: [[&str; 3]; 3] = [
+    ["Beratung", "2", "1.000,00"],
+    ["Material", "1", "200,00"],
+    ["Versand", "1", "34,56"],
+];
+
+/// A table without rules at `k` times 8 pt in the fonts `fonts` (plain, bold), rows `10 k`
+/// apart: the bold titles `Gruppe`, `Artikel`, `Menge` and `Betrag`, then the three rows of
+/// [`GROUP_ROWS`], the article at x 40 + 100 k, the quantity at x 300 and the amount flush
+/// right at x 540; the first column at x 40 holds only `Gruppe A`, standing out as `stand`,
+/// on the baseline of the first row under the titles.
+fn grouped_rows(k: f32, fonts: (&str, &str), stand: Stand) -> String {
+    let size = 8.0 * k;
+    let (font, group) = match stand {
+        Stand::BoldLarger => (fonts.1, 1.5 * size),
+        Stand::Bold => (fonts.1, size),
+        Stand::Larger => (fonts.0, 1.5 * size),
+    };
+    let ax = 40.0 + 100.0 * k;
+    let flush_right = |font: &str, y: f32, t: &str| {
+        show(font, size, 540.0 - common::font_width(font, t, size), y, t)
+    };
+    let top = 600.0 + 10.0 * k;
+    let mut t = show(fonts.1, size, 40.0, top, "Gruppe")
+        + &show(fonts.1, size, ax, top, "Artikel")
+        + &show(fonts.1, size, 300.0, top, "Menge")
+        + &flush_right(fonts.1, top, "Betrag");
+    t += &show(font, group, 40.0, 600.0, "Gruppe A");
+    for (r, row) in GROUP_ROWS.iter().enumerate() {
+        let y = 600.0 - 10.0 * k * r as f32;
+        t += &show(fonts.0, size, ax, y, row[0]);
+        t += &show(fonts.0, size, 300.0, y, row[1]);
+        t += &flush_right(fonts.0, y, row[2]);
+    }
+    t
+}
+
+/// A lone cell on the baseline of a row of a table without rules is no title beside a block:
+/// one table of the titles and three rows, `Gruppe A` in the first row, in every size, font
+/// and look of the cell.
+#[test]
+fn lone_cell_on_a_row_baseline_stays_in_its_row() {
+    let mut wrong = Vec::new();
+    for k in [0.75, 1.0, 1.5] {
+        for fonts in FONTS {
+            for stand in [Stand::BoldLarger, Stand::Bold, Stand::Larger] {
+                let out = common::read(&page_in(&grouped_rows(k, fonts, stand), Look::Plain));
+                let mut want: Vec<Vec<String>> =
+                    vec![owned(&[&["Gruppe", "Artikel", "Menge", "Betrag"]]).remove(0)];
+                want.extend(GROUP_ROWS.iter().enumerate().map(|(r, row)| {
+                    let first = if r == 0 { "Gruppe A" } else { "" };
+                    std::iter::once(first)
+                        .chain(row.iter().copied())
+                        .map(str::to_string)
+                        .collect()
+                }));
+                let got = tables(&out);
+                if got.len() != 1 || got[0].1 != want {
+                    wrong.push(format!("{k}x, {fonts:?}, {stand:?}: {got:?}"));
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}

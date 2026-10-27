@@ -607,7 +607,7 @@ impl<'b> Index<'b> {
 
 /// Two baselines this many font sizes apart or less are one: lines side by side that share
 /// most of their baselines are rows, not two blocks.
-const BASELINE_NEAR: f32 = 0.15;
+pub(crate) const BASELINE_NEAR: f32 = 0.15;
 
 /// Lines of one block follow each other at most this many font sizes apart, on median.
 const BLOCK_PITCH: f32 = 4.0;
