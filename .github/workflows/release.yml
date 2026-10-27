@@ -244,10 +244,10 @@ jobs:
   build:
     name: build (${{ matrix.platform }})
     needs: [notes, notices]
-    # Same numbers as the notarize step: its worst case is 3560 s = 59.3 min and
-    # its cap is 65 min. Add 30 min of build and signing before it and 2 min of
-    # packaging after it: 97 min, inside the 100.
-    timeout-minutes: 100
+    # Same numbers as the notarize step: its worst case is 4830 s = 80.5 min and
+    # its cap is 85 min. Add 30 min of build and signing before it (not measured),
+    # 2 min of packaging after it and 20 min of slack: 137 min, inside the 140.
+    timeout-minutes: 140
     runs-on: ${{ matrix.os }}
     # The Apple signing secrets belong in this environment, not in the
     # repository secrets, so only this job can read them. Restrict the
@@ -526,10 +526,11 @@ jobs:
         if: ${{ steps.signing.outputs.sign == 'true' }}
         shell: bash
         # Worst case, in seconds: upload 3 x 300 + waits 5 + 10 = 915; wait
-        # 2 x 1260 + 5 = 2525; log 120; total 3560 s = 59.3 min. The cap of 65
-        # min is a backstop above that, so the clean ::error:: always comes
-        # first. Job: 30 min build and signing + 65 + 2 min packaging = 97 <= 100.
-        timeout-minutes: 65
+        # 3 x 1260 + 5 + 10 = 3795; log 120; total 4830 s = 80.5 min. The cap of
+        # 85 min is a backstop above that, so the clean ::error:: always comes
+        # first. Job: 30 min build and signing + 85 + 2 min packaging + 20 min
+        # slack = 137 <= 140.
+        timeout-minutes: 85
         env:
           APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 }}
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
@@ -560,13 +561,13 @@ jobs:
           submission_id="$(jq -r '.id' "$sub")"
           set +e
           # shellcheck disable=SC2016  # the $1..$3 are for the inner bash
-          "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 2 bash -c 'perl -e "alarm shift; exec @ARGV" 1260 xcrun notarytool wait "$1" --key "$2" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" --timeout 20m --output-format json > "$3"' _ "$submission_id" "$key" "$result"
+          "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 3 bash -c 'perl -e "alarm shift; exec @ARGV" 1260 xcrun notarytool wait "$1" --key "$2" --key-id "$APPLE_API_KEY_ID" --issuer "$APPLE_API_ISSUER_ID" --timeout 20m --output-format json > "$3"' _ "$submission_id" "$key" "$result"
           wait_rc=$?
           set -e
           cat "$result" 2>/dev/null || true
           # The last try can leave nothing or no JSON object (timeout, network, crash).
           if ! jq -e 'type == "object"' "$result" > /dev/null 2>&1; then
-            echo "::error::notarization failed: notarytool returned no JSON (exit $wait_rc)"
+            echo "::error::notarization failed: notarytool returned no JSON for submission $submission_id (exit $wait_rc)"
             exit 1
           fi
           status="$(jq -r '.status // "unknown"' "$result")"
