@@ -1163,13 +1163,15 @@ fn line_runs(page: u32, frags: &[Frag], ids: &[usize], line: u32, links: &[Link]
         let glued = pad_after[pos - 1]
             || p.text.ends_with(char::is_whitespace)
             || f.text[keep[pos].0..].starts_with(char::is_whitespace);
-        // A gap after the run before is a word space. So is a start left of where the run
-        // before starts: a run that moves with the chain of a padded value run (see
-        // [`chain_heads`]) is put before a label drawn between its values, and the label
-        // goes on after it, never as one word with it. A line with right-to-left text keeps
-        // its visual order here, so only the gap counts there.
+        // A gap after the run before is a word space. So is a run that stands wholly left of
+        // where the run before starts: a run that moves with the chain of a padded value run
+        // (see [`chain_heads`]) is put before a label drawn between its values, and the label
+        // goes on after it, never as one word with it. A run over the start of the run before
+        // (an accent drawn on its own over a first letter) joins it. A line with right-to-left
+        // text keeps its visual order here, so only the gap counts there.
         let size = f.size.max(p.size);
-        if !glued && (f.x - p.end > WORD_GAP * size || (!rtl && f.x < p.x)) {
+        let before = f.x < p.x && f.end <= p.x + WORD_GAP * size;
+        if !glued && (f.x - p.end > WORD_GAP * size || (!rtl && before)) {
             spaced[pos] = true;
         }
     }
@@ -1786,6 +1788,33 @@ mod tests {
             &[],
         );
         assert_eq!(runs[0].text, "Codes:");
+    }
+
+    /// A run put after the run it goes on in reading order gets a word space only when it
+    /// starts well left of that run: a label drawn in the padding of a value run that the chain
+    /// order puts before it. An accent drawn as a run of its own over the first letter of a
+    /// word, a little left of the word's start or inside it, joins the word.
+    #[test]
+    fn a_run_left_of_the_run_before_is_spaced_only_when_well_left() {
+        let text = |a: Frag, b: Frag| -> String {
+            line_runs(1, &[a, b], &[0, 1], 0, &[])
+                .iter()
+                .map(|r| r.text.as_str())
+                .collect()
+        };
+        assert_eq!(
+            text(frag("Uber", 100.0, 700.0), frag("\u{a8}", 99.6, 700.0)),
+            "Uber\u{a8}"
+        );
+        assert_eq!(
+            text(frag("Uber", 100.0, 700.0), frag("\u{a8}", 101.0, 700.0)),
+            "Uber\u{a8}"
+        );
+        // Ten sizes left: the label `Kranken` in the padding of a run of values.
+        assert_eq!(
+            text(frag("98,76", 200.0, 700.0), frag("Kranken", 100.0, 700.0)),
+            "98,76 Kranken"
+        );
     }
 
     /// Glyphs of `parts` (text, bold) in a fixed-pitch font of `size` with an advance of
