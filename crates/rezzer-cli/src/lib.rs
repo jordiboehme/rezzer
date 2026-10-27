@@ -7,6 +7,8 @@
 //! Exit codes: 0 complete, 2 partial, 1 failed or any error (usage errors too, so 2 always
 //! means a partial read). Errors go to stderr as one line `rezzer: <message>`.
 
+#![forbid(unsafe_code)]
+
 mod derez;
 mod formats;
 mod inspect;
