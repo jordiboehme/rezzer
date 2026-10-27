@@ -111,7 +111,7 @@ impl Worker {
     /// Scans `picture` like [`crate::decode`], with each decoder call on a worker thread.
     /// At the time limit the scan stops waiting and returns [`Stop::Time`] with the codes
     /// found until then; the call that runs is left to end on its own, and a new thread
-    /// takes the next call, with at most [`MAX_STUCK`] such calls at once. A call left
+    /// takes the next call, with at most `MAX_STUCK` such calls at once. A call left
     /// behind holds one tile, never the whole picture.
     pub fn decode(&self, picture: &Picture<'_>, limits: &Limits) -> Result<Scan, Stop> {
         crate::scan(picture, limits, &mut Remote(self))

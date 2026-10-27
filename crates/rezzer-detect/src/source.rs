@@ -215,7 +215,7 @@ fn safe_url(raw: &str) -> Option<String> {
 /// Unicode general category Cf (format characters), as of Unicode 16.0.
 ///
 /// To refresh for a newer Unicode version, list the code points whose second field is `Cf`
-/// in that version's `UnicodeData.txt` (https://www.unicode.org/Public/<version>/ucd/),
+/// in that version's `UnicodeData.txt` (`https://www.unicode.org/Public/<version>/ucd/`),
 /// join neighbours into ranges and replace the table. Unicode 14 added U+0890 and U+0891,
 /// Unicode 15 extended U+13430..U+13438 to U+1343F; nothing changed in 16.0.
 fn is_format_char(c: char) -> bool {

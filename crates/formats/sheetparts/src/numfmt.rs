@@ -4,7 +4,7 @@
 
 //! Excel number format codes: the built-in table and a formatter.
 //!
-//! [`format`] turns a number and a format code into the text a person sees, and says what
+//! [`fn@format`] turns a number and a format code into the text a person sees, and says what
 //! kind of value it is (percent, currency, date, ...) and which unit the format adds
 //! (a currency symbol, or literal text such as the `m` in `0.0" m"`). Locale-dependent
 //! built-in ids follow en-US. Rounding is half away from zero on the 15 significant digits
@@ -37,7 +37,7 @@ pub enum NumKind {
     Text,
 }
 
-/// The result of [`format`].
+/// The result of [`fn@format`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Formatted {
     /// The text as a person would read it in the cell.
