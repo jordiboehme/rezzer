@@ -352,7 +352,8 @@ fn holds_fields(flow: &Flow, fr: &Frame, ids: &[usize], inner: &[f32]) -> bool {
 /// value is named in a loss. Text just beyond such a group, at both its ends, can show that
 /// its labels stand under the rule their values stand on (see [`ends`]; only text no row of
 /// fields holds counts, every group read the normal way first): its fields are then read that way (see
-/// [`pair_under`]), or left as text with a loss when that is not clear. Runs `busy` names are
+/// [`pair_under`]), or left as text with a loss when that is not clear (`tabled` names the
+/// runs of ruled tables among them). Runs `busy` names are
 /// not looked at. The runs of each table found go to `claimed` under its place in `tables`;
 /// the runs of a row or a group left as text with a loss are marked in `kept`, so that no later
 /// table takes them: a table of the text of fields reads as pairs too.
@@ -364,6 +365,7 @@ pub(in crate::tables) fn field_strips(
     frames: &[Frame],
     hs: &[Seg],
     busy: &dyn Fn(usize) -> bool,
+    tabled: &dyn Fn(usize) -> bool,
     text_sizes: &[f32],
     claimed: &mut [Option<(usize, usize, usize)>],
     kept: &mut [bool],
@@ -544,7 +546,12 @@ pub(in crate::tables) fn field_strips(
         // add evidence, which under the table of ends gives a loss or the reading both ways
         // agree on.
         let own: HashSet<usize> = runs.iter().copied().collect();
-        let with_held = |i: usize| !own.contains(&i) && !outside.contains(&i);
+        // A group with a strip of another shape (a block of labels beside their values) takes
+        // any evidence as a loss, so the runs of ruled tables are no evidence for it: the row
+        // of a section over such a block is that table's text. Held and free runs still count.
+        let shaped = g.iter().all(|&k| strips[k].rows.is_some());
+        let with_held =
+            |i: usize| !own.contains(&i) && !outside.contains(&i) && (shaped || !tabled(i));
         // One field alone between its rules reads like a caption over a line: it is not
         // paired, and that is said, with the labels under its rule that may be of its value.
         if list.len() < 2 {
@@ -1145,19 +1152,8 @@ fn ends(
     });
     let way = match way_of(single, top, bottom) {
         // A strip of another shape: labels over values only without evidence at either end.
-        // With the runs other groups and tables hold (`open`) only a complete end counts: the
-        // row of a table over a block of labels beside their values is that table's text.
         Way::Under if !shaped => Way::Unclear,
-        Way::Over
-            if !shaped
-                && if open.is_some() {
-                    top == TopEnd::Complete || matches!(bottom, BottomEnd::Free | BottomEnd::Own)
-                } else {
-                    top != TopEnd::None || bottom != BottomEnd::None
-                } =>
-        {
-            Way::Unclear
-        }
+        Way::Over if !shaped && (top != TopEnd::None || bottom != BottomEnd::None) => Way::Unclear,
         way => way,
     };
     match way {

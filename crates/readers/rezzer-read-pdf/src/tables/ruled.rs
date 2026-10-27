@@ -667,6 +667,7 @@ pub(super) fn ruled(
     let busy: Vec<bool> = (0..flow.runs.len())
         .map(|i| claimed[i].is_some() || held[i] || titles[i])
         .collect();
+    let tabled: Vec<bool> = claimed.iter().map(Option::is_some).collect();
     strip_tables(
         page,
         flow,
@@ -674,6 +675,7 @@ pub(super) fn ruled(
         &frames,
         &hs,
         &busy,
+        &tabled,
         &mut claimed,
         &mut held,
         &mut tables,
@@ -847,8 +849,8 @@ fn totals_tables(
 }
 
 /// The rows of fields between rules in `frames` (of the page's horizontal rules `hs`), among
-/// the runs `busy` does not name, planned in `tables` with their runs in `claimed`; the runs of
-/// rows left as text go to `held`.
+/// the runs `busy` does not name (`tabled` the runs of ruled tables), planned in `tables` with
+/// their runs in `claimed`; the runs of rows left as text go to `held`.
 #[allow(clippy::too_many_arguments)]
 fn strip_tables(
     page: u32,
@@ -857,6 +859,7 @@ fn strip_tables(
     frames: &[Frame],
     hs: &[Seg],
     busy: &[bool],
+    tabled: &[bool],
     claimed: &mut [Claim],
     held: &mut [bool],
     tables: &mut Vec<Planned>,
@@ -871,6 +874,7 @@ fn strip_tables(
         frames,
         hs,
         &|i| busy[i],
+        &|i| tabled[i],
         &text_sizes,
         &mut strip_claims,
         held,
