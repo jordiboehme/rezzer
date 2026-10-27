@@ -353,6 +353,17 @@ pub(super) fn borderless(
                             }
                         }
                     }
+                    // A line the grid leaves out is said, unless the loss of its frame says it.
+                    let unframed = grid
+                        .left
+                        .iter()
+                        .any(|&(s, e)| (s..e).any(|i| body_of(i).is_none()));
+                    if unframed {
+                        found.uncertain.push(format!(
+                            "a line between the rows of a table on page {page} runs over its \
+                             columns: it is read as a paragraph after the table"
+                        ));
+                    }
                     if frame_titles(flow, &grid, &body_of, &found.body_labels) {
                         titled.push(claim.len());
                     }
@@ -814,10 +825,12 @@ fn split_title(row: &mut [PlannedCell], cell: usize, run: usize, byte: usize) {
 }
 
 /// A grid rebuilt from white space gutters: rows of cells, each cell its runs as flow ranges;
-/// and the runs of close titles to cut.
+/// the runs of close titles to cut; and the flow ranges of the lines it leaves out (see
+/// [`grid_of`]).
 struct Grid {
     rows: Vec<Vec<GridCell>>,
     cuts: Vec<TitleCut>,
+    left: Vec<(usize, usize)>,
 }
 
 /// A run of close titles to cut, once the runs are in their cells: its row, its cell, its
@@ -1060,6 +1073,28 @@ fn grid_of(
             None => row.push((c, span, (start, end))),
         }
     }
+    // A line under the first that would join the row of another and has a piece over a gutter,
+    // or one that runs past the middle of a gutter (a note between rows), is no text of the
+    // cells: it would make one cell of two columns, or put the note in a cell. It stays out of
+    // the grid, its text read as it stands.
+    let runs_over = |&(col, span, (s, e)): &Placement| {
+        let rs = &flow.runs[s..e];
+        let x0 = rs.iter().map(|r| r.x).fold(f32::MAX, f32::min);
+        let x1 = rs.iter().map(|r| r.x + r.w).fold(f32::MIN, f32::max);
+        let before = col
+            .checked_sub(1)
+            .is_some_and(|c| x0 < (columns[c].1 + columns[col].0) / 2.0);
+        let after = columns
+            .get(col + 1)
+            .is_some_and(|n| x1 > (columns[col].1 + n.0) / 2.0);
+        span > 1 || before || after
+    };
+    let mut left: Vec<(usize, usize)> = Vec::new();
+    for (k, row) in placed.iter_mut().enumerate().skip(1) {
+        if anchors.binary_search(&k).is_err() && row.iter().any(runs_over) {
+            left.extend(row.drain(..).map(|x| x.2));
+        }
+    }
     let mut rows: Vec<Vec<GridCell>> = anchors
         .iter()
         .map(|_| {
@@ -1179,7 +1214,7 @@ fn grid_of(
     {
         return Err("it reads like a table of contents");
     }
-    Ok(Grid { rows, cuts })
+    Ok(Grid { rows, cuts, left })
 }
 
 /// Each part of a cut title stands within this many sizes of its column's start or of its

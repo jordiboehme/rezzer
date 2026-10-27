@@ -1968,3 +1968,121 @@ fn close_column_titles_in_a_frame_head_their_columns() {
         wrong.join("\n")
     );
 }
+
+/// Line items of `n` rows of [`ITEMS`] at `k` times 8 pt in the fonts and weight `face` (the
+/// titles bold when it says so), between two rules drawn as `frame` when there is one, with
+/// the line `note` at x `x` one row under row `after`. Gives the template and the columns.
+fn items_with_note(
+    k: f32,
+    frame: Option<Look>,
+    (fonts, bold): ((&str, &str), bool),
+    (n, after): (usize, usize),
+    (note, x): (&str, f32),
+) -> (String, Vec<Column>) {
+    let size = 8.0 * k;
+    let (vf, tf) = (fonts.0, if bold { fonts.1 } else { fonts.0 });
+    let flush_right = |font: &str, x: f32, y: f32, t: &str| {
+        show(font, size, x - common::font_width(font, t, size), y, t)
+    };
+    let mut y = 600.0;
+    let mut t = String::new();
+    if let Some(look) = frame {
+        t += &rule(look, 40.0, 540.0, y + 8.0 * k, size);
+    }
+    for (x, s) in [(40.0, "Pos"), (80.0, "Artikel"), (300.0, "Menge")] {
+        t += &show(tf, size, x, y, s);
+    }
+    t += &flush_right(tf, 420.0, y, "Preis");
+    t += &flush_right(tf, 540.0, y, "Betrag");
+    for (r, item) in ITEMS.iter().take(n).enumerate() {
+        y -= 10.0 * k;
+        t += &show(vf, size, 40.0, y, item[0]);
+        t += &show(vf, size, 80.0, y, item[1]);
+        t += &show(vf, size, 300.0, y, item[2]);
+        t += &flush_right(vf, 420.0, y, item[3]);
+        t += &flush_right(vf, 540.0, y, item[4]);
+        if r == after {
+            y -= 10.0 * k;
+            t += &show(vf, size, x, y, note);
+        }
+    }
+    if let Some(look) = frame {
+        t += &rule(look, 40.0, 540.0, y - 6.0 * k, size);
+    }
+    let columns = ["Pos", "Artikel", "Menge", "Preis", "Betrag"]
+        .iter()
+        .enumerate()
+        .map(|(c, title)| {
+            (
+                (*title).to_string(),
+                ITEMS.iter().take(n).map(|r| r[c].to_string()).collect(),
+            )
+        })
+        .collect();
+    (t, columns)
+}
+
+/// The review's finding K3: a note between two rows of items that runs over a gutter (from
+/// x 40 over `Pos` and `Artikel`, from x 80 over `Artikel` and `Menge`, from x 300 over `Menge`
+/// and `Preis`), with no frame and in a frame of plain or dashed rules, in every size, font and
+/// weight and with 3 to 5 rows: the note joins no row (no cell holds the values of two
+/// columns), every title heads the column of its values, and the note's text is read.
+#[test]
+fn a_note_across_a_gutter_between_rows_joins_no_row() {
+    let notes = [
+        ("Alle Preise in EUR", 40.0),
+        (
+            "Lieferung erfolgt in zwei Teilen ab Lager Musterstadt bis Ende des Monats",
+            80.0,
+        ),
+        (
+            "Hinweis: Lieferung erfolgt in zwei Teilen ab Lager Musterstadt",
+            40.0,
+        ),
+        (
+            "Rabatt 10 % auf alle Positionen dieser Rechnung gewaehrt",
+            300.0,
+        ),
+    ];
+    let mut wrong = Vec::new();
+    let mut reads = 0;
+    for (note, x) in notes {
+        for k in [0.75, 1.0, 1.5] {
+            for frame in [None, Some(Look::Plain), Some(Look::Dashed)] {
+                for face in faces() {
+                    for n in 3..=5 {
+                        for after in 0..n - 1 {
+                            let (t, columns) =
+                                items_with_note(k, frame, face, (n, after), (note, x));
+                            let out = common::read(&page_in(&t, frame.unwrap_or(Look::Plain)));
+                            reads += 1;
+                            let mut b = columns_broken(&out, &columns);
+                            let head = note.split(' ').next().unwrap_or(note);
+                            let in_cell = tables(&out)
+                                .iter()
+                                .any(|t| t.1.iter().flatten().any(|c| c.contains(head)));
+                            if in_cell || !common::all_text(&out).contains(note) {
+                                b.push(format!(
+                                    "the note is in a cell or lost: {:?}",
+                                    tables(&out)
+                                ));
+                            }
+                            let name = format!(
+                                "{:.12} at {x}, {k}x, {frame:?}, {face:?}, {n} rows, after {after}",
+                                note
+                            );
+                            wrong.extend(b.into_iter().map(|b| format!("{name}: {b}")));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(reads, 1296);
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
