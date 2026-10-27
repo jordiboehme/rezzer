@@ -450,6 +450,7 @@ pub(in crate::tables) fn field_strips(
     kept: &mut [bool],
     tables: &mut Vec<Planned>,
     unsure: &mut Vec<String>,
+    bodies: &mut Vec<(Vec<usize>, Vec<String>)>,
 ) {
     let how = Reading {
         one_field: false,
@@ -486,8 +487,12 @@ pub(in crate::tables) fn field_strips(
         edges.extend(&fr.dividers);
         edges.push(fr.x1);
         let cells = cells_of(flow, &edges, &ids);
-        // Column titles over rows of items are a table's body, left to the table pass.
+        // Column titles over rows of items are a table's body, left to the table pass; its
+        // runs and the names of its titles go to `bodies`, so that a line the table pass
+        // leaves out is said.
         if table_body(flow, &cells) {
+            let names = cells.iter().flat_map(|c| first_labels(flow, c)).collect();
+            bodies.push((ids, names));
             continue;
         }
         // Never a wrong pair: a run over a divider leaves the cells it stands in as text; the
@@ -809,8 +814,19 @@ pub(in crate::tables) fn field_strips(
 const BODY_COLUMNS: usize = 3;
 const BODY_LINES: usize = 2;
 
+/// The names of the labels on the first line of a cell, when it is labels over values (see
+/// [`first_line_labels`]).
+fn first_labels(flow: &Flow, cell: &[usize]) -> Vec<String> {
+    first_line_labels(flow, &lines_of(flow, cell))
+        .unwrap_or_default()
+        .iter()
+        .map(|l| words(flow, l))
+        .collect()
+}
+
 /// Whether the cells of a frame are a table's body, not fields: labels on a first line, each
-/// over the value lines under it (see [`parts_of`]), and [`BODY_COLUMNS`] of them or more over
+/// over the value lines under it (see [`parts_of`]) and none without one, and [`BODY_COLUMNS`]
+/// of them or more over
 /// [`BODY_LINES`] value lines or more each, those lines in the same rows across the columns
 /// (their baselines within a third of their size). A field's value of two lines stands under
 /// one label, not under three in the same rows.
@@ -826,6 +842,11 @@ fn table_body(flow: &Flow, cells: &[Vec<usize>]) -> bool {
         };
         for part in parts {
             let lines = lines_of(flow, &part);
+            // A title with no value under it is an empty field: a column of a table has its
+            // values.
+            if lines.len() < 2 {
+                return false;
+            }
             let rows: Vec<(f32, f32)> = lines[1..]
                 .iter()
                 .map(|l| {

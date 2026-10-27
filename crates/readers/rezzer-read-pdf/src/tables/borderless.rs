@@ -85,6 +85,9 @@ pub(super) fn borderless(
     let counts: Vec<usize> = lines.iter().map(|l| piece_count(flow, l)).collect();
     // Lines of other directions, and lines a refused ruled grid holds, are in no region.
     let held = |i: usize| found.held.get(i).copied().unwrap_or(false);
+    // The frame of column titles over items that holds a run, if one does.
+    let bodies = std::mem::take(&mut found.bodies);
+    let body_of = |i: usize| bodies.get(i).copied().flatten();
     let off: Vec<bool> = lines
         .iter()
         .map(|l| flow.runs[l.start..l.end].iter().any(|r| r.off_axis) || (l.start..l.end).any(held))
@@ -120,7 +123,24 @@ pub(super) fn borderless(
         }
         // A rule across the lines may end their table: the lines below it are a region of
         // their own (totals under line items).
-        let z = ended(flow, &lines, (i, last_multi + 1), &found.ends).unwrap_or(last_multi + 1);
+        let mut z = ended(flow, &lines, (i, last_multi + 1), &found.ends).unwrap_or(last_multi + 1);
+        // Lines under the region that the frame of column titles over items it holds holds
+        // too (a wrapped last item) are its own.
+        if z == last_multi + 1 {
+            let held_bodies: Vec<u32> = (lines[i].start..lines[z - 1].end)
+                .filter_map(body_of)
+                .collect();
+            while z < lines.len() && !off[z] {
+                let (prev, cur) = (&lines[z - 1], &lines[z]);
+                let gap = prev.y - cur.y;
+                let own = (cur.start..cur.end)
+                    .all(|r| body_of(r).is_some_and(|b| held_bodies.contains(&b)));
+                if gap <= 0.0 || gap > 3.0 * prev.size.max(cur.size) || !own {
+                    break;
+                }
+                z += 1;
+            }
+        }
         regions.push((i, z));
         i = z;
     }
@@ -333,7 +353,7 @@ pub(super) fn borderless(
             // and its loss speaks for it.
             let columned = (a..z).filter(|&k| counts[k] >= 3).count();
             let quietly = (lines[a].start..lines[z - 1].end)
-                .any(|i| found.quietly.get(i).copied().unwrap_or(false));
+                .any(|i| found.quietly.get(i).copied().unwrap_or(false) || body_of(i).is_some());
             if z - a >= 3 && columned >= 3 && !said && !quietly {
                 found.quiet.push((lo, why, Refused::Region));
             }
@@ -349,6 +369,26 @@ pub(super) fn borderless(
                     text: None,
                 });
             }
+        }
+    }
+    // A frame of column titles over items whose every line no table took is said, by its
+    // titles.
+    let mut left: Vec<bool> = vec![false; found.body_labels.len()];
+    for (i, b) in bodies.iter().enumerate() {
+        if let Some(b) = b
+            && target.get(i).is_none_or(Option::is_none)
+            && !flow.runs[i].text.trim().is_empty()
+        {
+            left[*b as usize] = true;
+        }
+    }
+    for (b, names) in found.body_labels.iter().enumerate() {
+        if left[b] {
+            found.uncertain.push(format!(
+                "the lines under the column titles {} on page {page} are not all read as a \
+                 table: their text is read as it stands",
+                names.join(", ")
+            ));
         }
     }
     if claim.is_empty() {

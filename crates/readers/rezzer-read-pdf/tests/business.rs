@@ -702,3 +702,220 @@ fn a_midway_rule_at_tight_leading_ends_a_table() {
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
+
+/// A row of fields between a rule over it and one under it: small 6 k pt labels at x 40, 170,
+/// 300 and 430 over values of `values[c]` lines each at 8 k pt, no dividers unless `dividers`,
+/// a lone upright rule far from it when `upright`, the rules drawn as `look`.
+fn fields_row(k: f32, look: Look, values: &[&[&str]], upright: bool, dividers: bool) -> String {
+    let (size, ts) = (8.0 * k, 6.0 * k);
+    let y = |dy: f32| 600.0 - dy * k;
+    let n = values.iter().map(|v| v.len()).max().unwrap_or(1);
+    let bottom = y(10.0 * n as f32 + 6.0);
+    let mut t = rule(look, 40.0, 540.0, y(-8.0), size);
+    for (c, v) in values.iter().enumerate() {
+        t += &show("FL", ts, FIELD_XS[c], y(0.0), FIELD_LABELS[c]);
+        for (r, line) in v.iter().enumerate() {
+            t += &show("FL", size, FIELD_XS[c], y(10.0 * (r as f32 + 1.0)), line);
+        }
+        if dividers && c > 0 {
+            let x = FIELD_XS[c] - 5.0;
+            t += &format!("0.5 w {x} {bottom} m {x} {} l S\n", y(-8.0));
+        }
+    }
+    t += &rule(look, 40.0, 540.0, bottom, size);
+    if upright {
+        t += "0.5 w 30 200 m 30 300 l S\n";
+    }
+    t
+}
+
+const FIELD_LABELS: [&str; 4] = [
+    "Rechnungsanschrift",
+    "Lieferanschrift",
+    "Bankverbindung",
+    "Zahlungsziel",
+];
+const FIELD_XS: [f32; 4] = [40.0, 170.0, 300.0, 430.0];
+
+/// The rows of fields of [`fields_row`]: values of one, two and three lines, of lines of
+/// different counts, and an empty field.
+fn field_rows() -> Vec<(&'static str, Vec<&'static [&'static str]>)> {
+    vec![
+        (
+            "one",
+            vec![&["Muster GmbH"], &["Erika Mustermann"], &["DE00 1234 5678"]],
+        ),
+        (
+            "two",
+            vec![
+                &["Muster GmbH", "Musterweg 1"],
+                &["Erika Mustermann", "Musterstadt"],
+                &["DE00 1234 5678", "Musterbank"],
+            ],
+        ),
+        (
+            "three",
+            vec![
+                &["Muster GmbH", "Musterweg 1", "12345 Musterstadt"],
+                &["Erika Mustermann", "Musterweg 2", "54321 Musterdorf"],
+                &["DE00 1234 5678", "Musterbank", "Muster AG"],
+            ],
+        ),
+        (
+            "four",
+            vec![
+                &["Muster GmbH", "Musterweg 1"],
+                &["Erika Mustermann", "Musterstadt"],
+                &["DE00 1234 5678", "Musterbank"],
+                &["30 Tage"],
+            ],
+        ),
+        (
+            "uneven",
+            vec![
+                &["Muster GmbH", "Musterweg 1", "12345 Musterstadt"],
+                &["Erika Mustermann", "Musterstadt"],
+                &["DE00 1234 5678", "Musterbank"],
+            ],
+        ),
+        (
+            "uneven2",
+            vec![
+                &["Muster GmbH", "Musterweg 1"],
+                &["Erika Mustermann", "Musterstadt", "Musterland"],
+                &["DE00 1234 5678", "Musterbank"],
+            ],
+        ),
+        (
+            "gap",
+            vec![
+                &["Muster GmbH", "Musterweg 1"],
+                &[],
+                &["DE00 1234 5678", "Musterbank"],
+                &["30 Tage", "netto"],
+            ],
+        ),
+    ]
+}
+
+/// What breaks the invariant of a row of fields read from `out`: a pair of a label with
+/// another value than its own whole value (its lines joined), or a value line that stands in
+/// no table cell while no loss names every label of the row.
+fn fields_broken(out: &ReadOutcome, values: &[&[&str]]) -> Vec<String> {
+    let mut broken = Vec::new();
+    let cells: Vec<String> = tables(out)
+        .into_iter()
+        .flat_map(|t| t.1.into_iter().flatten())
+        .collect();
+    for t in tables(out) {
+        if t.0 != 0 {
+            continue;
+        }
+        for row in &t.1 {
+            let [l, v] = row.as_slice() else { continue };
+            if let Some(c) = FIELD_LABELS.iter().position(|f| f == l) {
+                let want = values.get(c).map(|v| v.join(" ")).unwrap_or_default();
+                let empty = want.is_empty() && v == "empty";
+                if *v != want && !empty {
+                    broken.push(format!("wrong pair {l}: {v}, want {want}"));
+                }
+            }
+        }
+    }
+    // A loss names the row's labels, or says that its block in columns stays paragraphs.
+    let named = out.document.losses.iter().any(|l| {
+        l.what.starts_with("a block of text in columns")
+            || (0..values.len()).all(|c| l.what.contains(FIELD_LABELS[c]) || values[c].is_empty())
+    });
+    for line in values.iter().flat_map(|v| v.iter()) {
+        let paired = tables(out).iter().any(|t| {
+            t.0 == 0
+                && t.1
+                    .iter()
+                    .any(|r| r.len() == 2 && r[1].split(' ').count() > 0 && r[1].contains(line))
+        });
+        if !cells.iter().any(|c| c.contains(line)) && !paired && !named {
+            broken.push(format!("{line:?} is in no table and no loss names the row"));
+        }
+    }
+    broken
+}
+
+/// Rows of fields with values of many lines, of lines of different counts, and with an empty
+/// field, in three sizes, every look, alone and with an upright rule elsewhere: no label pairs
+/// with another than its own value, and every value line stands in a table or a loss says so
+/// (it names the row's labels, or its block in columns). (Dividers between the fields without rules at the row's ends make a row of
+/// drawn cells whose outer cells are read otherwise, an older gap left to another task.)
+#[test]
+fn rows_of_fields_with_values_of_many_lines_keep_every_line() {
+    let mut wrong = Vec::new();
+    for (name, values) in field_rows() {
+        for k in [0.75, 1.0, 1.5] {
+            for look in LOOKS {
+                for (upright, dividers) in [(false, false), (true, false)] {
+                    let page = fields_row(k, look, &values, upright, dividers);
+                    let out = common::read(&page_in(&page, look));
+                    for b in fields_broken(&out, &values) {
+                        wrong.push(format!(
+                            "{name}, {k}x, {look:?}, upright {upright}, dividers {dividers}: {b}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Line items of three rows under small titles between two rules, the Artikel of one row
+/// (the first, the middle or the last) wrapping to a second line `frei Haus` at its column, in
+/// three sizes and every look, with and without an upright rule elsewhere: the wrapped line
+/// joins its cell, in the last row as well.
+#[test]
+fn a_wrapped_item_line_joins_its_cell() {
+    let mut wrong = Vec::new();
+    for k in [0.75, 1.0, 1.5] {
+        for look in LOOKS {
+            for upright in [false, true] {
+                for wrap in 0..3 {
+                    let (size, ts) = (8.0 * k, 6.0 * k);
+                    let mut y = 600.0;
+                    let mut t = rule(look, 40.0, 540.0, y + 8.0 * k, size);
+                    for (x, s) in [(40.0, "Pos"), (80.0, "Artikel"), (300.0, "Menge")] {
+                        t += &show("FL", ts, x, y, s);
+                    }
+                    t += &right(false, ts, 420.0, y, "Preis");
+                    t += &right(false, ts, 540.0, y, "Betrag");
+                    for (n, item) in ITEMS.iter().take(3).enumerate() {
+                        y -= 10.0 * k;
+                        t += &show("FL", size, 40.0, y, item[0]);
+                        t += &show("FL", size, 80.0, y, item[1]);
+                        t += &show("FL", size, 300.0, y, item[2]);
+                        t += &right(false, size, 420.0, y, item[3]);
+                        t += &right(false, size, 540.0, y, item[4]);
+                        if n == wrap {
+                            y -= 10.0 * k;
+                            t += &show("FL", size, 80.0, y, "frei Haus");
+                        }
+                    }
+                    t += &rule(look, 40.0, 540.0, y - 6.0 * k, size);
+                    if upright {
+                        t += "0.5 w 30 200 m 30 300 l S\n";
+                    }
+                    let out = common::read(&page_in(&t, look));
+                    let mut want = items_of(3);
+                    want[wrap + 1][1] += " frei Haus";
+                    let got: Vec<Vec<Vec<String>>> =
+                        tables(&out).into_iter().map(|t| t.1).collect();
+                    if got != [want] {
+                        wrong.push(format!(
+                            "{k}x, {look:?}, upright {upright}, wrap {wrap}: {got:?} {:?}",
+                            out.document.losses
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}

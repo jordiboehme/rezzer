@@ -1113,6 +1113,15 @@ fn leave_flow(
     };
     found.held = left(&held);
     found.quietly = left(&quietly);
+    if !found.bodies.is_empty() {
+        found.bodies = found
+            .bodies
+            .iter()
+            .zip(&claimed)
+            .filter(|(_, c)| c.is_none())
+            .map(|(b, _)| *b)
+            .collect();
+    }
     let target: Vec<Target> = claimed
         .into_iter()
         .map(|c| c.map(|(t, r, k)| (t as u32, r as u32, k as u32)))
@@ -1286,6 +1295,7 @@ fn strip_tables(
     found: &mut Found,
 ) {
     let mut strip_claims = vec![None; flow.runs.len()];
+    let mut bodies = Vec::new();
     let text_sizes = crate::layout::page_text_sizes(&flow.runs);
     field_strips(
         page,
@@ -1301,7 +1311,19 @@ fn strip_tables(
         held,
         tables,
         &mut found.uncertain,
+        &mut bodies,
     );
+    // The runs of each frame of column titles over items, by the frame, and its titles.
+    if !bodies.is_empty() {
+        found.bodies = vec![None; flow.runs.len()];
+        for (ids, names) in bodies {
+            let id = found.body_labels.len() as u32;
+            for i in ids {
+                found.bodies[i] = Some(id);
+            }
+            found.body_labels.push(names);
+        }
+    }
     for (c, s) in claimed.iter_mut().zip(strip_claims) {
         if s.is_some() {
             *c = s;

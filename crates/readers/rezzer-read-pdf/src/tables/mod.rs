@@ -128,6 +128,11 @@ pub(crate) struct Found {
     /// For each run of the flow, whether a grid or band of `quiet` holds it: its loss speaks
     /// for the run already. Empty when none holds a run.
     pub quietly: Vec<bool>,
+    /// For each run of the flow, the frame of column titles over items between rules that the
+    /// field reader left to the table pass, if one holds it (see `pairs::table_body`), and the
+    /// titles of each frame. Empty when none holds a run.
+    pub bodies: Vec<Option<u32>>,
+    pub body_labels: Vec<Vec<String>>,
     /// The horizontal rules of the page, sorted by height: a rule across a region without
     /// rules may end its table (see `borderless`). Empty when the page's lines were not
     /// searched.
