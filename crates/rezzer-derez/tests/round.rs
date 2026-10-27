@@ -150,6 +150,9 @@ fn same_cell_derezzes_both() {
 
 #[test]
 fn swapping_cells_derezzes_both() {
+    // Each next cell is the other program's head. A head is always marked as a trail, so the
+    // "next cell is not empty" rule derezzes both here; the swap rule in `tick_with` is a second
+    // safeguard that this public API cannot reach alone. The test pins the outcome.
     let mut r = Round::new(
         Grid::new(10, 5),
         &[(pos(2, 2), Dir::Right), (pos(3, 2), Dir::Left)],
@@ -161,6 +164,8 @@ fn swapping_cells_derezzes_both() {
     gone.sort_unstable();
     assert_eq!(gone, vec![0, 1]);
     assert_eq!(r.status(), Status::AllDerezzed);
+    assert_eq!(r.programs()[0].pos, pos(2, 2), "neither program moved");
+    assert_eq!(r.programs()[1].pos, pos(3, 2));
 }
 
 #[test]
@@ -334,25 +339,61 @@ fn tick_with_asks_each_live_program_before_moving() {
 
 #[test]
 fn same_seed_same_round() {
+    // The other programs take a random free direction each tick (from the round's generator),
+    // so the seed decides their paths. The user program follows a fixed steer list.
     let run = |seed: u64| {
         let mut r = Round::new(
             Grid::new(40, 20),
             &[
                 (pos(2, 10), Dir::Right),
-                (pos(37, 5), Dir::Left),
-                (pos(37, 15), Dir::Left),
+                (pos(37, 3), Dir::Left),
+                (pos(37, 17), Dir::Left),
             ],
             2,
             seed,
         );
-        let steers = [Dir::Up, Dir::Right, Dir::Down, Dir::Right, Dir::Up];
+        let steers = [Dir::Up, Dir::Right, Dir::Down, Dir::Right];
+        let mut user_ticks = 0;
         for t in 0..50 {
             if t % 4 == 0 {
                 r.steer(steers[(t / 4) % steers.len()]);
             }
-            r.tick_with(|round, _| Dir::ALL[round.rng().below(4) as usize]);
+            r.tick_with(|round, i| {
+                let me = &round.programs()[i];
+                let (at, dir) = (me.pos, me.dir);
+                let free: Vec<Dir> = Dir::ALL
+                    .into_iter()
+                    .filter(|d| {
+                        *d != dir.opposite()
+                            && round
+                                .grid()
+                                .step(at, *d)
+                                .is_some_and(|n| round.grid().is_free(n))
+                    })
+                    .collect();
+                if free.is_empty() {
+                    dir
+                } else {
+                    free[round.rng().below(free.len() as u32) as usize]
+                }
+            });
+            if !r.programs()[0].derezzed {
+                user_ticks += 1;
+            }
         }
-        (r.grid().clone(), r.status(), r.rng().next_u64())
+        let tail = r.rng().next_u64();
+        (
+            r.grid().clone(),
+            r.programs().to_vec(),
+            r.status(),
+            tail,
+            user_ticks,
+        )
     };
-    assert_eq!(run(3), run(3));
+    let first = run(3);
+    assert!(first.4 >= 40, "the user program ran {} ticks", first.4);
+    assert_eq!(first, run(3));
+    let other = run(4);
+    assert_ne!(first.0, other.0, "another seed gives other trails");
+    assert_ne!(first.1, other.1);
 }

@@ -160,6 +160,8 @@ impl Round {
             for b in a + 1..live.len() {
                 let (pa, pb) = (self.programs[live[a]].pos, self.programs[live[b]].pos);
                 let same = na.is_some() && na == next[b];
+                // A head is always marked as a trail, so the not-empty rule above already
+                // derezzes a swap; this is a second safeguard should that ever change.
                 let swap = na == Some(pb) && next[b] == Some(pa);
                 if same || swap {
                     gone[a] = true;
