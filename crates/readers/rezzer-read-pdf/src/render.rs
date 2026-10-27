@@ -231,8 +231,9 @@ pub(crate) fn furniture<'a>(pages: impl Iterator<Item = &'a PageItems>) -> Spots
 pub(crate) struct Everywhere {
     /// By `PageItems::images_id`, anywhere on the page: such a picture is a logo.
     pub ids: HashSet<u64>,
-    /// At one place (within [`SAME_SPOT`]) on every page: such a picture does not count
-    /// toward the share of a page that needs vision.
+    /// At one place (within [`SAME_SPOT`]) on both pages of a file of two: such a picture
+    /// does not count toward the share of a page that needs vision. Empty for longer files,
+    /// where such pictures are [`furniture`].
     pub spots: Spots,
 }
 
@@ -244,9 +245,13 @@ pub(crate) fn on_every_page<'a>(
     count: usize,
 ) -> Everywhere {
     let mut spots = SpotPages::default();
+    let mut read = 0usize;
     let mut found: Option<HashSet<u64>> = None;
     for items in pages {
-        spots.add(items);
+        read += 1;
+        if count == 2 {
+            spots.add(items);
+        }
         let here: HashSet<u64> = items.images_id.iter().copied().collect();
         found = Some(match found {
             None => here,
@@ -257,7 +262,7 @@ pub(crate) fn on_every_page<'a>(
         });
     }
     match found {
-        Some(ids) if count >= 2 && spots.read == count => Everywhere {
+        Some(ids) if count >= 2 && read == count => Everywhere {
             ids,
             spots: spots.only(|n, read| n == read),
         },
@@ -331,8 +336,9 @@ fn looks_like_code(items: &PageItems, k: usize) -> bool {
 /// in a logo place that is part of a figure reaching out of it is no logo.
 const FIGURE_GAP: f32 = 0.01;
 
-/// Pictures of one page past which none is a logo by its place: finding the figures would
-/// take too long, and the pictures count toward the share as they are.
+/// Pictures of one page past which none is a logo of the template by its place: finding the
+/// figures would take too long, so the pictures count toward the share as they are. Those in
+/// a logo place are still called logos when the page does not need vision.
 const FIGURE_PICTURES: usize = 256;
 
 /// The visible part of box `b` on a page `width` by `height` points, in square points.
@@ -371,14 +377,17 @@ fn logos(
             everywhere.spots.holds(b, id) && visible_in(b, width, height) < FURNITURE_SHARE * area
         })
         .collect();
-    let mut placed: Vec<bool> = (0..shown.len())
+    let in_place: Vec<bool> = (0..shown.len())
         .map(|i| {
-            shown.len() <= FIGURE_PICTURES
-                && !code[i]
+            !code[i]
                 && in_logo_place(&framed[i], fw, fh)
                 && visible_in(&items.images[shown[i]], width, height) < PICTURE_SHARE * area
         })
         .collect();
+    // Past the cap no picture is placed: all count toward the share, and those in a logo
+    // place are still called logos.
+    let searched = shown.len() <= FIGURE_PICTURES;
+    let mut placed: Vec<bool> = in_place.iter().map(|&p| p && searched).collect();
     // A picture of content (not a code, not a logo by its place or its repeats) makes every
     // picture of its figure content.
     let (gx, gy) = (FIGURE_GAP * fw, FIGURE_GAP * fh);
@@ -412,8 +421,9 @@ fn logos(
         .map(|i| {
             let template = !code[i] && (placed[i] || repeated[i]);
             let id = items.images_id.get(shown[i]).copied().unwrap_or(0);
+            let unsearched = !searched && in_place[i];
             (
-                template || (!code[i] && everywhere.ids.contains(&id)),
+                template || unsearched || (!code[i] && everywhere.ids.contains(&id)),
                 template,
             )
         })

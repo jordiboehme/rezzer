@@ -1076,6 +1076,34 @@ fn single_logo_in_corner_needs_no_vision() {
 }
 
 #[test]
+fn a_logo_beside_many_tiny_pictures_stays_a_logo() {
+    // 300 tiny pictures (4 by 4 points, too small to be listed) mid-page, about 1 % of it,
+    // and the corner logo: more pictures than the figures are looked for on, yet the logo is
+    // still one.
+    let mut draws: Vec<Draw> = (0..300)
+        .map(|i| {
+            (
+                100.0 + (i % 30) as f32 * 8.0,
+                300.0 + (i / 30) as f32 * 8.0,
+                4.0,
+                4.0,
+                0,
+            )
+        })
+        .collect();
+    draws.push((500.0, 130.0, 60.0, 35.0, 1));
+    let out = read(&picture_pages(&[draws], &[gray(10), gray(100)]));
+    assert!(needing(&out).is_empty(), "{:#?}", out.document.assets);
+    let alts: Vec<&str> = out
+        .document
+        .assets
+        .iter()
+        .filter_map(|a| a.alt.as_deref())
+        .collect();
+    assert_eq!(alts, ["logo or small picture, box 500, 130 to 560, 165"]);
+}
+
+#[test]
 fn small_code_keeps_needs_vision_with_crop() {
     // A 1-bit square code in the bottom right corner.
     let content = "BT /F1 12 Tf 72 780 Td (Ticket.) Tj ET\nq 85 0 0 85 480 20 cm /Im1 Do Q\n";

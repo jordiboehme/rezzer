@@ -4631,6 +4631,21 @@ fn template_logo_variant(
         if content != needing.contains(&page.as_str()) {
             wrong.push(format!("{name}: page {n} needing {needing:?}"));
         }
+        // Its alt text counts the logos with the content picture; from three pages on they
+        // are page furniture, which it does not count.
+        if content {
+            let k = if count >= 3 { 1 } else { places.len() + 1 };
+            let want = format!("{k} {}", if k == 1 { "picture" } else { "pictures" });
+            let alt = out
+                .document
+                .assets
+                .iter()
+                .find(|a| a.id == page)
+                .and_then(|a| a.alt.clone());
+            if alt.as_deref() != Some(want.as_str()) {
+                wrong.push(format!("{name}: page {n} alt {alt:?}"));
+            }
+        }
         // Every logo of a page that is not rendered whole is listed as a logo. From three
         // pages on, logos at one place are page furniture, which is not listed unless it
         // holds a code.
