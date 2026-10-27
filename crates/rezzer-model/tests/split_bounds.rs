@@ -80,9 +80,12 @@ fn assert_work(what: &str, steps: Option<u64>, measured: u64, took: Duration) {
     let max = measured + measured / 2;
     eprintln!("{what}: {steps:?} steps (bound {max}) in {took:?}");
     if cfg!(debug_assertions) {
+        // At least half the measured count too: a count of 0 would mean the work ran where
+        // it is not counted (another thread), not that it got cheaper.
         assert!(
-            steps.is_some_and(|n| n <= max),
-            "{what}: {steps:?} steps of work, bound {max}"
+            steps.is_some_and(|n| (measured / 2..=max).contains(&n)),
+            "{what}: {steps:?} steps of work, expected {}..={max}",
+            measured / 2
         );
     } else {
         assert_eq!(steps, None);

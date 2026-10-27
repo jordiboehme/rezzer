@@ -974,7 +974,7 @@ fn long_style_chain_resolves_in_linear_time() {
     eprintln!("long style chain: {steps:?} steps in {took:?}");
     if cfg!(debug_assertions) {
         assert!(
-            steps.is_some_and(|s| s <= STEPS + STEPS / 2),
+            steps.is_some_and(|s| (STEPS / 2..=STEPS + STEPS / 2).contains(&s)),
             "{steps:?} steps, measured {STEPS}"
         );
     } else {

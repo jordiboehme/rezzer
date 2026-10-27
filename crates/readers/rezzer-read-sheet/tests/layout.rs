@@ -1381,7 +1381,7 @@ fn tall_merged_title_costs_no_cells_xlsx() {
         eprintln!("tall title, gap {gap}: {steps:?} layout steps in {took:?}");
         if cfg!(debug_assertions) {
             assert!(
-                steps.is_some_and(|n| n <= measured + measured / 2),
+                steps.is_some_and(|n| (measured / 2..=measured + measured / 2).contains(&n)),
                 "{steps:?} layout steps, measured {measured}"
             );
         } else {

@@ -247,7 +247,7 @@ fn long_scripts_are_scanned_once() {
     const STEPS: u64 = 3_698_637;
     if cfg!(debug_assertions) {
         assert!(
-            steps.is_some_and(|n| n <= STEPS + STEPS / 2),
+            steps.is_some_and(|n| (STEPS / 2..=STEPS + STEPS / 2).contains(&n)),
             "{steps:?} steps, measured {STEPS}"
         );
     } else {

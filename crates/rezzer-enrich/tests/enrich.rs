@@ -414,7 +414,7 @@ fn big_document_takes_linear_work() {
     eprintln!("big document: {steps:?} steps in {took:?}");
     if cfg!(debug_assertions) {
         assert!(
-            steps.is_some_and(|n| n <= STEPS + STEPS / 2),
+            steps.is_some_and(|n| (STEPS / 2..=STEPS + STEPS / 2).contains(&n)),
             "{steps:?} steps, measured {STEPS}"
         );
     } else {

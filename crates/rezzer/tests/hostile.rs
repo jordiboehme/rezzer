@@ -83,16 +83,19 @@ fn peak_heap<T>(f: impl FnOnce() -> T) -> (T, usize) {
 /// readings, and the wall time only catches a hang.
 const SAFETY: Duration = Duration::from_secs(60);
 
-/// Whether a run read its step clock no more than half again as often as measured: the count
-/// is exact when one thread reads the clock, readings on other threads may move it a little.
+/// Whether a run read its step clock no more than half again as often as measured and at least
+/// half as often: the count is exact when one thread reads the clock, readings on other threads
+/// may move it a little.
 fn assert_reads(clock: &Clock, measured: u64) {
     assert_readings(clock.reads(), measured);
 }
 
 /// [`assert_reads`] for readings already taken.
 fn assert_readings(reads: u64, measured: u64) {
+    // At least half the measured readings too: none would mean the read took no time
+    // checks on this clock at all, not that it got cheaper.
     assert!(
-        reads <= measured + measured / 2,
+        (measured / 2..=measured + measured / 2).contains(&reads),
         "{reads} clock readings, measured {measured}"
     );
 }
@@ -1020,7 +1023,7 @@ fn assert_layout_work(what: &str, steps: Option<u64>, measured: u64, took: Durat
     );
     if cfg!(debug_assertions) {
         assert!(
-            steps.is_some_and(|n| n <= measured + measured / 2),
+            steps.is_some_and(|n| (measured / 2..=measured + measured / 2).contains(&n)),
             "{what}: {steps:?} layout steps, measured {measured}"
         );
     } else {

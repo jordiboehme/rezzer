@@ -75,16 +75,20 @@ fn counted<T>(f: impl FnOnce() -> T) -> (T, Option<u64>, Duration) {
     (out, steps, took)
 }
 
-/// Checks a work bound: at most `max` steps (in a debug build, which counts them) and the
-/// wall time under [`SAFETY`]. Each bound is the count measured when it was set (2026-10-27,
-/// debug build, `--no-capture`), with half of it again as margin: a growth past that is a
-/// change in the work, not a slow machine.
-fn assert_work(what: &str, steps: Option<u64>, max: u64, took: Duration) {
+/// Checks a work bound: at most the `measured` steps with half of them again as margin and
+/// at least half of them (in a debug build, which counts them), and the wall time under
+/// [`SAFETY`]. Each `measured` is the count when the bound was set (2026-10-27, debug build,
+/// `--no-capture`): a growth past the margin is a change in the work, not a slow machine.
+fn assert_work(what: &str, steps: Option<u64>, measured: u64, took: Duration) {
+    let max = measured + measured / 2;
     eprintln!("{what}: {steps:?} steps (bound {max}) in {took:?}");
     if cfg!(debug_assertions) {
+        // At least half the measured count too: a count of 0 would mean the work ran where
+        // it is not counted (another thread), not that it got cheaper.
         assert!(
-            steps.is_some_and(|n| n <= max),
-            "{what}: {steps:?} steps of work, bound {max}"
+            steps.is_some_and(|n| (measured / 2..=max).contains(&n)),
+            "{what}: {steps:?} steps of work, expected {}..={max}",
+            measured / 2
         );
     } else {
         assert_eq!(steps, None);
@@ -200,12 +204,7 @@ fn whole_column_does_not_expand() {
     eprintln!("whole_column_does_not_expand: peak heap {peak} bytes");
     // Measured once (2026-10-27): 30,017 steps, about three a constant cell.
     const STEPS: u64 = 30_017;
-    assert_work(
-        "whole_column_does_not_expand",
-        steps,
-        STEPS + STEPS / 2,
-        took,
-    );
+    assert_work("whole_column_does_not_expand", steps, STEPS, took);
     assert!(peak < 50 * 1024 * 1024, "peak heap {peak} bytes");
     assert_eq!(logic.parameters.len(), 10_000);
     assert!(logic.parameters.iter().all(|p| p.read_by == 2));
@@ -232,12 +231,7 @@ fn percent_of_total_stays_fast() {
     });
     // Measured once (2026-10-27): 80,022 steps, four a formula.
     const STEPS: u64 = 80_022;
-    assert_work(
-        "percent_of_total_stays_fast",
-        steps,
-        STEPS + STEPS / 2,
-        took,
-    );
+    assert_work("percent_of_total_stays_fast", steps, STEPS, took);
     assert_eq!(logic.groups.len(), 1);
     assert_eq!(logic.parameters.len(), 20_000);
     assert!(logic.parameters.iter().all(|p| p.read_by == 20_000));
@@ -413,7 +407,7 @@ fn many_names_resolve_fast() {
     });
     // Measured once (2026-10-27): 90,023 steps, about four a formula.
     const STEPS: u64 = 90_023;
-    assert_work("many_names_resolve_fast", steps, STEPS + STEPS / 2, took);
+    assert_work("many_names_resolve_fast", steps, STEPS, took);
     // Names match in any letter case, also beyond ASCII.
     assert_eq!(logic.parameters.len(), 5_000);
     assert!(logic.parameters.iter().all(|p| p.read_by == 4));
@@ -461,12 +455,7 @@ fn running_totals_stay_near_linear() {
     });
     // Measured once (2026-10-27): 600,148 steps, six a formula.
     const STEPS: u64 = 600_148;
-    assert_work(
-        "running_totals_stay_near_linear",
-        steps,
-        STEPS + STEPS / 2,
-        took,
-    );
+    assert_work("running_totals_stay_near_linear", steps, STEPS, took);
     assert!(!logic.stopped);
     assert_eq!(logic.groups.len(), 1);
     assert_eq!(logic.parameters.len(), 100_000);
