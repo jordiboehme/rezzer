@@ -14,19 +14,25 @@ use rezzer_pipeline::{Config, Pipeline, Request};
 
 use crate::DerezArgs;
 
-/// Checks the path and the terminal before any read, reads the file (if any) with the normal
-/// pipeline and runs the rounds until the user quits.
-pub(crate) fn run(
-    config: Config,
-    registry: Registry,
-    args: &DerezArgs,
-) -> Result<ExitCode, String> {
+/// Checks the path, then the terminal. Called before the config is loaded, so without a
+/// terminal a broken config still gives the terminal error.
+pub(crate) fn check(args: &DerezArgs) -> Result<(), String> {
     if args.path.as_ref().is_some_and(|p| p.as_os_str() == "-") {
         return Err("derez needs a file path, not stdin".to_string());
     }
     if !std::io::stdout().is_terminal() || !std::io::stdin().is_terminal() {
         return Err("derez needs a terminal".to_string());
     }
+    Ok(())
+}
+
+/// Reads the file (if any) with the normal pipeline and runs the rounds until the user quits.
+/// [`check`] comes first.
+pub(crate) fn run(
+    config: Config,
+    registry: Registry,
+    args: &DerezArgs,
+) -> Result<ExitCode, String> {
     let rounds = match &args.path {
         None => rezzer_derez::rounds("", None, None),
         Some(path) => {

@@ -1125,6 +1125,28 @@ fn derez_needs_a_terminal() {
 }
 
 #[test]
+fn derez_checks_the_terminal_before_the_config() {
+    let env = Env::new();
+    let config = env.root.path().join("config/rezzer/config.toml");
+    std::fs::write(&config, "colour = \"red\"\n").unwrap();
+    for args in [vec!["derez"], vec!["derez", "missing.pdf"]] {
+        env.cmd()
+            .args(&args)
+            .assert()
+            .code(1)
+            .stdout("")
+            .stderr("rezzer: derez needs a terminal\n");
+    }
+    // Stdin is refused before the terminal is checked, and before the config too.
+    env.cmd()
+        .args(["derez", "-"])
+        .assert()
+        .code(1)
+        .stdout("")
+        .stderr("rezzer: derez needs a file path, not stdin\n");
+}
+
+#[test]
 fn derez_refuses_stdin() {
     let env = Env::new();
     env.cmd()

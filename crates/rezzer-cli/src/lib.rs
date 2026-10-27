@@ -217,7 +217,10 @@ fn run(cli: Cli, registry: Registry, after_read: fn(&std::path::Path)) -> Result
         Command::Inspect { path } => inspect::run(load_config()?, registry, &path),
         Command::Formats => formats::run(&registry),
         Command::Mcp => mcp(load_config()?, registry),
-        Command::Derez(args) => derez::run(load_config()?, registry, &args),
+        Command::Derez(args) => {
+            derez::check(&args)?;
+            derez::run(load_config()?, registry, &args)
+        }
     }
 }
 
