@@ -20,6 +20,16 @@ fn modules(s: Symbology, text: &str, ec: Option<&str>) -> Modules {
     .expect("encode")
 }
 
+/// The default limits with a time far above any machine: what a scan finds must not depend
+/// on the machine's speed or load (the default 10 s ran out under load). Work bounds are
+/// checked by counted decoder calls ([`barcodes::work_steps`]), not by time.
+fn unhurried() -> Limits {
+    Limits {
+        time: Duration::from_secs(600),
+        ..Limits::default()
+    }
+}
+
 fn scan_gray(gray: &[u8], w: u32, h: u32) -> Scan {
     decode(
         &Picture {
@@ -27,7 +37,7 @@ fn scan_gray(gray: &[u8], w: u32, h: u32) -> Scan {
             width: w,
             height: h,
         },
-        &Limits::default(),
+        &unhurried(),
     )
     .expect("scan")
 }
@@ -39,7 +49,7 @@ fn scan_rgba(rgba: &[u8], w: u32, h: u32) -> Scan {
             width: w,
             height: h,
         },
-        &Limits::default(),
+        &unhurried(),
     )
     .expect("scan")
 }
@@ -484,7 +494,16 @@ fn a_code_in_a_large_picture_is_found_in_its_tile() {
         page[to..to + gw as usize]
             .copy_from_slice(&g[(row * gw) as usize..((row + 1) * gw) as usize]);
     }
+    // The work is bounded by the decoder calls, not by the machine: the default 10 s per
+    // picture ran out under load (`Time(Scan { codes: [QrCode ..] })`, the code found but the
+    // other tiles not done), so the scan has a time far above any machine.
+    // STEPS was measured once (2026-10-27): the decoder calls of all tiles and attempts. At
+    // least STEPS: every tile was read, not only the one with the code.
+    const STEPS: u64 = 33;
+    let before = barcodes::work_steps();
     let scan = scan_gray(&page, w, h);
+    let steps = before.zip(barcodes::work_steps()).map(|(b, a)| a - b);
+    eprintln!("a code in a large picture: {steps:?} decoder calls");
     assert_eq!(texts(&scan), vec![(Symbology::QrCode, URL.to_string())]);
     // Its box lies at the code.
     let b = scan.codes[0].bounds;
@@ -492,6 +511,14 @@ fn a_code_in_a_large_picture_is_found_in_its_tile() {
         b[0] + 20 >= x && b[2] <= x + gw + 20 && b[1] + 20 >= y && b[3] <= y + gh + 20,
         "{b:?}"
     );
+    if cfg!(debug_assertions) {
+        assert!(
+            steps.is_some_and(|n| (STEPS..=STEPS + STEPS / 2).contains(&n)),
+            "{steps:?} decoder calls, measured {STEPS}"
+        );
+    } else {
+        assert_eq!(steps, None);
+    }
 }
 
 #[test]
