@@ -1035,9 +1035,14 @@ fn deep_dotted_field_names_resolve_quickly() {
     let mut f = formula(&format!("field:{name}"), &refs);
     f.dialect = "pdf-js".into();
     d.facets.formulas = vec![f];
+    // Every parent is found by a search in the sorted field names. Taking each of the 500,000
+    // parents of the name as an anchor of its own would copy about 250 GB, which does not
+    // end in any time, so the end of the call is the proof; the empty losses show every
+    // reference resolved. The wall time is only a safety stop (the whole test took 143 ms on
+    // 2026-10-27, load average 37).
     let start = Instant::now();
     enrich(&mut d, &only(&[]));
-    assert!(start.elapsed().as_secs() < 5, "{:?}", start.elapsed());
+    assert!(start.elapsed().as_secs() < 60, "{:?}", start.elapsed());
     assert!(d.losses.is_empty(), "{:?}", d.losses.len());
 }
 
