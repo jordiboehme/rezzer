@@ -142,7 +142,8 @@ fn contents_title(words: &[&str]) -> bool {
 }
 
 /// `text` in small letters with its accents folded: an umlaut as its two letters (`ä` as
-/// `ae`), `ß` as `ss`, another letter with an accent as the letter (`è` as `e`).
+/// `ae`), `ß` as `ss`, another letter with an accent or a Polish mark as the letter (`è` as
+/// `e`, `ś` as `s`).
 fn fold(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for c in text.chars().flat_map(char::to_lowercase) {
@@ -159,6 +160,13 @@ fn fold(text: &str) -> String {
             '\u{f2}'..='\u{f5}' | '\u{f8}' => out.push('o'),
             '\u{f9}'..='\u{fb}' => out.push('u'),
             '\u{fd}' | '\u{ff}' => out.push('y'),
+            '\u{105}' => out.push('a'),
+            '\u{107}' => out.push('c'),
+            '\u{119}' => out.push('e'),
+            '\u{142}' => out.push('l'),
+            '\u{144}' => out.push('n'),
+            '\u{15b}' => out.push('s'),
+            '\u{17a}' | '\u{17c}' => out.push('z'),
             c => out.push(c),
         }
     }
@@ -323,8 +331,8 @@ fn pieces(runs: &[Run]) -> Vec<Line<'_>> {
 
 /// The dates of the lines of page 1 (its runs as read, tables and furniture still in), read
 /// piece by piece (see [`pieces`]), with `height` the height of the page. Only full dates
-/// count, with a year of four digits; where each stands is kept (see [`Dates::spots`]). A
-/// date is marked when the text of its piece before it is a whole [`DATE_LABELS`] entry and
+/// count, with a year of four digits; where every date-like token stands is kept too (see
+/// [`Dates::spots`] and [`date_like`]). A date is marked when the text of its piece before it is a whole [`DATE_LABELS`] entry and
 /// nothing else (see [`whole_label`]: `Datum 01.02.2026`, `DATE: 2026-02-01`; not `Eintritt:
 /// Datum 01.01.2020` or `Kundennr. 4711 Datum 01.02.2026`), at most [`BESIDE_SIZES`] sizes
 /// away, and the piece holds no other date (`Datum 01.01.2026 bis 31.01.2026` marks nothing).
@@ -333,6 +341,9 @@ pub(crate) fn page_dates(runs: &[Run], height: Option<f32>) -> Dates {
     let mut out = Dates::default();
     let in_head = |l: &Line<'_>| height.is_some_and(|h| h > 0.0 && l.y + l.h >= h * HEAD_SHARE);
     for l in &pieces(runs) {
+        for (start, end) in date_like(&l.text) {
+            out.spots.push(spot_of(l, start, end));
+        }
         let found = scan::dates(&l.text, 4..=4);
         for d in &found {
             let written = (d.sep, d.parts);
@@ -340,7 +351,6 @@ pub(crate) fn page_dates(runs: &[Run], height: Option<f32>) -> Dates {
                 out.head.push(written);
             }
             let spot = spot_of(l, d.start, d.end);
-            out.spots.push(spot);
             let before = &l.text[..d.start];
             let label = whole_label(before).filter(|_| {
                 let label_end = before.trim_end().len();
@@ -358,6 +368,345 @@ pub(crate) fn page_dates(runs: &[Run], height: Option<f32>) -> Dates {
     }
     out
 }
+
+/// The byte spans of the date-like tokens of `text`, in any usual form, for the test whether
+/// another date stands in a column (see [`document_date`]): a numeric date of day, month and a
+/// year of two or four digits (`16.01.26`, `16/1/2026`, `16-01-26`), year first with four digits
+/// (`2026-01-16`, `2026/01/16`), or without a year (`16.01.`, `17/1`), day and month in their
+/// ranges; a day next to a month name or its abbreviation, with or without a dot after the
+/// day, or a month name next to a four-digit year (`16. Januar 2026`, `January 16, 2026`,
+/// `17 janvier`, `16 stycznia 2026`, `Jan. 2026`), in German, English, French, Spanish,
+/// Italian, Portuguese, Dutch and Polish (see [`MONTHS`], accents folded); and the CJK forms
+/// of digits with 年 and 月, 月 and 日, or 월 and 일 (`2026年1月16日`, `1月 17日`).
+fn date_like(text: &str) -> Vec<(usize, usize)> {
+    #[derive(Clone, Copy, PartialEq)]
+    enum Kind {
+        Digits(usize, u32),
+        Month,
+        /// A CJK date mark: year, month or day.
+        Mark(char),
+        Other,
+    }
+    // The CJK marks for year, month and day, and the Korean ones for month and day.
+    let is_mark = |c: char| {
+        matches!(
+            c,
+            '\u{5e74}' | '\u{6708}' | '\u{65e5}' | '\u{c6d4}' | '\u{c77c}'
+        )
+    };
+    // The tokens of the text: digit runs, words, single other characters, white space left out.
+    let mut tokens: Vec<(Kind, usize, usize)> = Vec::new();
+    let mut chars = text.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        let mut end = i + c.len_utf8();
+        if c.is_ascii_digit() {
+            let mut n = 1;
+            let mut v = u32::from(c as u8 - b'0');
+            while let Some(&(j, d)) = chars.peek()
+                && d.is_ascii_digit()
+            {
+                n += 1;
+                v = v
+                    .saturating_mul(10)
+                    .saturating_add(u32::from(d as u8 - b'0'));
+                end = j + 1;
+                chars.next();
+            }
+            tokens.push((Kind::Digits(n, v), i, end));
+        } else if c.is_alphabetic() && !is_mark(c) {
+            while let Some(&(j, d)) = chars.peek()
+                && d.is_alphabetic()
+                && !is_mark(d)
+            {
+                end = j + d.len_utf8();
+                chars.next();
+            }
+            let word = fold(&text[i..end]);
+            let kind = if MONTHS.contains(&word.as_str()) {
+                Kind::Month
+            } else {
+                Kind::Other
+            };
+            tokens.push((kind, i, end));
+        } else if is_mark(c) {
+            tokens.push((Kind::Mark(c), i, end));
+        } else if !c.is_whitespace() {
+            tokens.push((Kind::Other, i, end));
+        }
+    }
+    let sign = |k: usize, c: char| {
+        tokens
+            .get(k)
+            .is_some_and(|t| t.2 - t.1 == c.len_utf8() && text[t.1..].starts_with(c))
+    };
+    // A short word between a day and its month or a month and its year (`16 de enero de 2026`,
+    // `16 di gennaio`): a particle, not a month and not a number.
+    let particle = |k: usize| {
+        tokens.get(k).is_some_and(|t| {
+            t.0 == Kind::Other && text[t.1..t.2].chars().all(char::is_alphabetic) && t.2 - t.1 <= 3
+        })
+    };
+    let day = |v: u32| (1..=31).contains(&v);
+    let month = |v: u32| (1..=12).contains(&v);
+    let mut out = Vec::new();
+    let mut k = 0;
+    while k < tokens.len() {
+        let (kind, start, _) = tokens[k];
+        let digits = |at: usize| match tokens.get(at) {
+            Some((Kind::Digits(n, v), _, end)) => Some((*n, *v, *end)),
+            _ => None,
+        };
+        let taken = match kind {
+            Kind::Digits(n1, v1) if (1..=2).contains(&n1) => {
+                // d.m.yy, d.m.yyyy, d.m., d/m/yy, d/m, d-m-yy; then a day and a month name.
+                let numeric = ['.', '/', '-'].into_iter().find_map(|sep| {
+                    if !sign(k + 1, sep) {
+                        return None;
+                    }
+                    let (n2, v2, end2) = digits(k + 2).filter(|(n, _, _)| (1..=2).contains(n))?;
+                    let fits = match sep {
+                        '/' => day(v1) && day(v2) && (month(v1) || month(v2)),
+                        _ => day(v1) && month(v2),
+                    };
+                    if !fits {
+                        return None;
+                    }
+                    if sign(k + 3, sep) {
+                        match digits(k + 4) {
+                            Some((n3, _, end3)) if n3 == 2 || n3 == 4 => Some((k + 5, end3)),
+                            Some(_) => None,
+                            // `16.01.` without a year.
+                            None if sep == '.' => Some((k + 4, end2 + 1)),
+                            None => None,
+                        }
+                    } else {
+                        // `17/1` without a year; `16.01` without the second dot is a number.
+                        (sep == '/' && n2 <= 2).then_some((k + 3, end2))
+                    }
+                });
+                numeric.or_else(|| {
+                    // `16. Januar 2026`, `16 janvier`, `16 stycznia 2026`, `16 de enero de 2026`.
+                    let mut m = if sign(k + 1, '.') { k + 2 } else { k + 1 };
+                    if particle(m) {
+                        m += 1;
+                    }
+                    match tokens.get(m) {
+                        Some((Kind::Month, _, end)) if day(v1) => {
+                            let y = if particle(m + 1) { m + 2 } else { m + 1 };
+                            match digits(y) {
+                                Some((4, _, end4)) => Some((y + 1, end4)),
+                                _ => Some((m + 1, *end)),
+                            }
+                        }
+                        _ => None,
+                    }
+                })
+            }
+            Kind::Digits(4, _) => {
+                // yyyy-mm-dd, yyyy/mm/dd; 2026年1月16日.
+                ['-', '/'].into_iter().find_map(|sep| {
+                    let (_, v2, _) = digits(k + 2).filter(|(n, _, _)| *n <= 2)?;
+                    let (_, v3, end3) = digits(k + 4).filter(|(n, _, _)| *n <= 2)?;
+                    (sign(k + 1, sep) && sign(k + 3, sep) && month(v2) && day(v3))
+                        .then_some((k + 5, end3))
+                })
+            }
+            Kind::Month => {
+                // `January 16, 2026`, `Jan. 2026`.
+                let after = if sign(k + 1, '.') { k + 2 } else { k + 1 };
+                match digits(after) {
+                    Some((n, v, end)) if n <= 2 && day(v) => {
+                        match (sign(after + 1, ','), digits(after + 2)) {
+                            (true, Some((4, _, end4))) => Some((after + 3, end4)),
+                            _ => Some((after + 1, end)),
+                        }
+                    }
+                    Some((4, _, end)) => Some((after + 1, end)),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        // A CJK form: digits and a mark, twice in a row, with 年 before 月 or 月 before 日.
+        let cjk = match (
+            kind,
+            tokens.get(k + 1),
+            tokens.get(k + 2),
+            tokens.get(k + 3),
+        ) {
+            (
+                Kind::Digits(..),
+                Some((Kind::Mark(a), ..)),
+                Some((Kind::Digits(..), ..)),
+                Some((Kind::Mark(b), _, end)),
+            ) if matches!(
+                (a, b),
+                ('\u{5e74}', '\u{6708}') | ('\u{6708}', '\u{65e5}') | ('\u{c6d4}', '\u{c77c}')
+            ) =>
+            {
+                Some((k + 4, *end))
+            }
+            _ => None,
+        };
+        match taken.or(cjk) {
+            Some((next, end)) => {
+                out.push((start, end));
+                k = next;
+            }
+            None => k += 1,
+        }
+    }
+    out
+}
+
+/// Month names and their usual abbreviations, accent folded (see [`fold`]), in German,
+/// English, French, Spanish, Italian, Portuguese, Dutch and Polish (with the genitive forms
+/// a date uses, `stycznia`).
+const MONTHS: &[&str] = &[
+    // German
+    "januar",
+    "februar",
+    "maerz",
+    "april",
+    "mai",
+    "juni",
+    "juli",
+    "august",
+    "september",
+    "oktober",
+    "november",
+    "dezember",
+    "jan",
+    "feb",
+    "mrz",
+    "maer",
+    "apr",
+    "jun",
+    "jul",
+    "aug",
+    "sep",
+    "sept",
+    "okt",
+    "nov",
+    "dez",
+    // English
+    "january",
+    "february",
+    "march",
+    "may",
+    "june",
+    "july",
+    "october",
+    "december",
+    "mar",
+    "oct",
+    "dec",
+    // French
+    "janvier",
+    "fevrier",
+    "mars",
+    "avril",
+    "juin",
+    "juillet",
+    "aout",
+    "septembre",
+    "octobre",
+    "novembre",
+    "decembre",
+    "janv",
+    "fevr",
+    "avr",
+    "juil",
+    // Spanish
+    "enero",
+    "febrero",
+    "marzo",
+    "abril",
+    "mayo",
+    "junio",
+    "julio",
+    "agosto",
+    "septiembre",
+    "setiembre",
+    "octubre",
+    "noviembre",
+    "diciembre",
+    "ene",
+    "abr",
+    "ago",
+    "dic",
+    // Italian
+    "gennaio",
+    "febbraio",
+    "aprile",
+    "maggio",
+    "giugno",
+    "luglio",
+    "settembre",
+    "ottobre",
+    "dicembre",
+    "gen",
+    "mag",
+    "giu",
+    "lug",
+    "set",
+    "ott",
+    // Portuguese
+    "janeiro",
+    "fevereiro",
+    "marco",
+    "maio",
+    "junho",
+    "julho",
+    "setembro",
+    "outubro",
+    "novembro",
+    "dezembro",
+    "fev",
+    "out",
+    // Dutch
+    "januari",
+    "februari",
+    "maart",
+    "mei",
+    "augustus",
+    "mrt",
+    // Polish
+    "styczen",
+    "stycznia",
+    "luty",
+    "lutego",
+    "marzec",
+    "marca",
+    "kwiecien",
+    "kwietnia",
+    "maj",
+    "maja",
+    "czerwiec",
+    "czerwca",
+    "lipiec",
+    "lipca",
+    "sierpien",
+    "sierpnia",
+    "wrzesien",
+    "wrzesnia",
+    "pazdziernik",
+    "pazdziernika",
+    "listopad",
+    "listopada",
+    "grudzien",
+    "grudnia",
+    "sty",
+    "lut",
+    "kwi",
+    "cze",
+    "lip",
+    "sie",
+    "wrz",
+    "paz",
+    "lis",
+    "gru",
+];
 
 /// Where the bytes `start..end` of the text of `l` stand (see [`span_of`]).
 fn spot_of(l: &Line<'_>, start: usize, end: usize) -> Spot {
@@ -436,8 +785,9 @@ fn ink_gap(l: &Line<'_>, end: usize, start: usize) -> f32 {
 /// (see [`value_of`]). In a table of exactly two columns (labels and values) whose top lies in
 /// the top half of the page, a cell that is a whole entry marks the cell right of it when that
 /// cell is a full date and nothing else (`Datum: | 26.10.2026`), it is the only such label
-/// cell with a date in the table, and no row has a date under a label cell without letters (a
-/// list goes on in the value column, under an empty cell or a dash). A table of more columns
+/// cell with a date in the table, and no row has a date in any form (see [`date_like`]) under
+/// a label cell without letters (a list goes on in the value column, under an empty cell or a
+/// dash). A table of more columns
 /// marks nothing: a row of items may end in `Datum | 15.01.2026` or list dates after a title
 /// (`Datum | 15.01.2026 | 16.01.2026`, `Datum | 15.01.2026 | Stunden | 8`), and a column title
 /// `Datum` has another title beside it. A table of label and value pairs that the field
@@ -483,11 +833,11 @@ pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: Option<f32>) ->
         .filter(|t| above(t.top, if t.pairs { HEAD_SHARE } else { HALF }))
         .filter(|t| t.rows.iter().all(|row| row.len() == 2))
     {
-        // A date under a label cell without letters continues a list in the value column.
-        let continued = t
-            .rows
-            .iter()
-            .any(|row| !row[0].text.chars().any(char::is_alphabetic) && is_date(&row[1]));
+        // A date in any form under a label cell without letters continues a list in the value
+        // column.
+        let continued = t.rows.iter().any(|row| {
+            !row[0].text.chars().any(char::is_alphabetic) && !date_like(&row[1].text).is_empty()
+        });
         let mut labelled = t
             .rows
             .iter()
@@ -508,9 +858,10 @@ pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: Option<f32>) ->
 const HALF: f32 = 0.5;
 
 /// The document date of page 1 from what `dates` holds: a date that a date label marks and
-/// that is the only date in its column on page 1 (every date whose x span, widened by
-/// [`BESIDE_SIZES`] sizes on each side, overlaps the marked date's x span, above or below it,
-/// from the top of the page to its end: a list of dates under or over a label marks none).
+/// that is the only date in its column on page 1 (every date-like token, in any form, see
+/// [`date_like`], whose x span widened by [`BESIDE_SIZES`] sizes on each side overlaps the
+/// marked date's x span, above or below it, from the top of the page to its end: a list of
+/// dates under or over a label marks none, however its other entries are written).
 /// Marked dates that differ give no date, and a marked date that cannot be read for sure
 /// gives none either; both say so. A date nothing marks is never chosen: when the
 /// top third of the page holds dates, the loss says how many stand there. A dotted date
@@ -691,6 +1042,55 @@ mod tests {
     fn accents_fold() {
         assert_eq!(fold("Table des Mati\u{e8}res"), "table des matieres");
         assert_eq!(fold("G\u{fc}ltig bis"), "gueltig bis");
+    }
+
+    #[test]
+    fn date_like_tokens_of_every_form() {
+        fn spans(t: &str) -> Vec<&str> {
+            date_like(t).into_iter().map(|(a, b)| &t[a..b]).collect()
+        }
+        // Numeric, day first, a year of two or four digits.
+        assert_eq!(
+            spans("am 16.01.26 und 17.1.2026"),
+            ["16.01.26", "17.1.2026"]
+        );
+        assert_eq!(
+            spans("16/01/26 16/1/2026 1/16/2026"),
+            ["16/01/26", "16/1/2026", "1/16/2026"]
+        );
+        assert_eq!(spans("16-01-26 16-1-2026"), ["16-01-26", "16-1-2026"]);
+        // Year first.
+        assert_eq!(spans("2026-01-16 2026/1/16"), ["2026-01-16", "2026/1/16"]);
+        // Without a year.
+        assert_eq!(spans("16.01. und 17/1 Uhr"), ["16.01.", "17/1"]);
+        // Day and month name, month name and year.
+        assert_eq!(spans("16. Januar 2026"), ["16. Januar 2026"]);
+        assert_eq!(spans("17 janvier"), ["17 janvier"]);
+        assert_eq!(
+            spans("January 16, 2026 and Jan. 2026"),
+            ["January 16, 2026", "Jan. 2026"]
+        );
+        assert_eq!(
+            spans("16 stycznia 2026, 3 pa\u{17a}dziernika"),
+            ["16 stycznia 2026", "3 pa\u{17a}dziernika"]
+        );
+        assert_eq!(
+            spans("16 de enero de 2026 e 3 di marzo"),
+            ["16 de enero de 2026", "3 di marzo"]
+        );
+        // CJK.
+        assert_eq!(
+            spans("2026\u{5e74}1\u{6708}16\u{65e5}"),
+            ["2026\u{5e74}1\u{6708}"]
+        );
+        assert_eq!(spans("1\u{6708} 17\u{65e5}"), ["1\u{6708} 17\u{65e5}"]);
+        assert_eq!(spans("1\u{c6d4} 17\u{c77c}"), ["1\u{c6d4} 17\u{c77c}"]);
+        // No dates: a number, an amount, a time, a day out of range, a month out of range, a
+        // version, a word that is no month.
+        assert!(
+            spans("16 1.234,56 16:30 32.01.26 16.13.2026 1.2.3 Muster 16 Summe 2026").is_empty()
+        );
+        assert!(spans("16.01 2026").is_empty());
     }
 
     #[test]

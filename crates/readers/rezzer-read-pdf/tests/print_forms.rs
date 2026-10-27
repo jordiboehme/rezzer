@@ -6050,3 +6050,106 @@ fn rereview_r10_probes_give_no_wrong_date() {
         }
     }
 }
+
+#[test]
+fn rereview_r11_probes_give_no_wrong_date() {
+    // The probes of the round 11 re-review (finding S, S1 to S7) as a test: a list whose other
+    // entries are dates in a short or long form (a two-digit year, a month name, no year, a
+    // Polish form) still makes the first entry one of a list; the CJK forms are unit tests, as
+    // the test fonts hold no CJK glyphs. Never a wrong date.
+    use HeadWant::*;
+    let by_label = Date("2026-01-15", "date label \"Datum\" on page 1");
+    for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
+        for font in ["FL", "FB"] {
+            let s = |x: f32, y: f32, t: &str| common::show(font, size, x, y, t);
+            let ruled =
+                |rows: &[&[&str]], xs: &[f32], top: f32| ruled_rows(rows, xs, top, size, font);
+            let pitch = size * 1.2;
+            let below = 760.0 - pitch;
+            let title = common::show("FB", size * 1.6, 40.0, 800.0, "Musterbescheid");
+            let two_cols = [40.0f32, 160.0];
+            let short_years: &[&[&str]] = &[
+                &["Datum", "15.01.2026"],
+                &["", "16.01.26"],
+                &["", "17.01.26"],
+            ];
+            let list = |second: &str, third: &str| {
+                title.clone()
+                    + &s(40.0, 760.0, "Datum")
+                    + &s(40.0, below, "15.01.2026")
+                    + &s(40.0, below - pitch, second)
+                    + &s(40.0, below - 2.0 * pitch, third)
+            };
+            let cases: Vec<(&str, String, HeadWant)> = vec![
+                (
+                    "S1: the rest of the list with two-digit years",
+                    list("16.01.26", "17.01.26"),
+                    Lost(ONE_DATE),
+                ),
+                (
+                    "S2: the rest of the list written out",
+                    list("16. Januar 2026", "17. Januar 2026"),
+                    Lost(ONE_DATE),
+                ),
+                (
+                    "S3: the rest of the list without a year",
+                    list("16.01.", "17.01."),
+                    Lost(ONE_DATE),
+                ),
+                (
+                    "S4: continuation rows with two-digit years",
+                    title.clone() + &ruled(short_years, &two_cols, 750.0),
+                    Lost(ONE_DATE),
+                ),
+                (
+                    "S5: a date beside its label, ISO dates offset below",
+                    title.clone()
+                        + &s(40.0, 760.0, "Datum 15.01.2026")
+                        + &s(40.0 + size * 3.0, below, "2026-01-16")
+                        + &s(40.0 + size * 3.0, below - pitch, "2026-01-17"),
+                    Lost(
+                        "3 dates stand in the head of page 1; none is marked as the document date",
+                    ),
+                ),
+                (
+                    "S7: a lone date far below, offset 0.4 sizes",
+                    title.clone()
+                        + &s(40.0, 760.0, "Datum")
+                        + &s(40.0, below, "15.01.2026")
+                        + &s(40.0 + size * 0.4, 300.0, "16.01.2026"),
+                    Lost(ONE_DATE),
+                ),
+                (
+                    "S8: English and French forms",
+                    list("January 16, 2026", "17 janvier 2026"),
+                    Lost(ONE_DATE),
+                ),
+                (
+                    "S9: Polish genitive and a slashed form without a year",
+                    list("16 stycznia 2026", "17/1"),
+                    Lost(ONE_DATE),
+                ),
+                (
+                    "S11: words that are no dates below the lone date",
+                    list("Muster 16", "Summe 2026"),
+                    by_label,
+                ),
+                (
+                    "S12: an amount and a time below the lone date",
+                    list("1.234,56", "16:30"),
+                    by_label,
+                ),
+            ];
+            for (name, head, want) in cases {
+                let out = read(&headed(&head, size, scale, ""));
+                let case = format!("{name} in {size} pt {font}");
+                assert_head(&out, want, &case);
+                let date = match want {
+                    Date(date, _) => Some(date),
+                    _ => None,
+                };
+                assert_eq!(front(&out, "source_date").as_deref(), date, "{case}");
+            }
+        }
+    }
+}
