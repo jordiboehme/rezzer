@@ -220,6 +220,8 @@ shape_tests! {
     barcode_module_08_height_20 => "barcode, module 0.8, height 20",
     barcode_module_10_height_30 => "barcode, module 1.0, height 30",
     barcode_module_12_height_20 => "barcode, module 1.2, height 20",
+    barcode_module_12_height_30 => "barcode, module 1.2, height 30",
     barcode_module_12_height_40 => "barcode, module 1.2, height 40",
+    barcode_module_12_height_80 => "barcode, module 1.2, height 80",
     barcode_module_08_height_60 => "barcode, module 0.8, height 60",
 }

@@ -284,30 +284,32 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
     }
     if n == 0 {
         let props = &out.document.properties;
-        if let Some(t) = &want.title {
-            match &props.title {
-                Some(found) if found == t => {}
-                Some(found) => broken.push(Broken(
-                    Inv::WrongValue,
-                    format!("title {found:?}, want {t:?}"),
-                )),
-                None => broken.push(Broken(Inv::DocTitle, format!("no title, want {t:?}"))),
-            }
+        // A found title is the page's title, or a title the page may have besides (a bold
+        // title over a block); a page that names none may have no other found.
+        match (&want.title, &props.title) {
+            (Some(t), Some(found)) if found == t => {}
+            (_, Some(found)) if want.may_title.contains(found) => {}
+            (want_title, Some(found)) => broken.push(Broken(
+                Inv::WrongValue,
+                format!("title {found:?}, want {want_title:?}"),
+            )),
+            (Some(t), None) => broken.push(Broken(Inv::DocTitle, format!("no title, want {t:?}"))),
+            (None, None) => {}
         }
-        if let Some(d) = &want.date {
-            match &props.document_date {
-                Some(found) if found.date == *d => {}
-                Some(found) => broken.push(Broken(
-                    Inv::WrongValue,
-                    format!("document date {:?}, want {d:?}", found.date),
-                )),
-                None => broken.push(Broken(
-                    Inv::DocDate,
-                    format!("no document date, want {d:?}"),
-                )),
-            }
+        // A page that names no document date may have none found: any found date is wrong.
+        match (&want.date, &props.document_date) {
+            (Some(d), Some(found)) if found.date == *d => {}
+            (want, Some(found)) => broken.push(Broken(
+                Inv::WrongValue,
+                format!("document date {:?}, want {want:?}", found.date),
+            )),
+            (Some(d), None) => broken.push(Broken(
+                Inv::DocDate,
+                format!("no document date, want {d:?}"),
+            )),
+            (None, None) => {}
         }
-        if !want.codes.is_empty() {
+        {
             let found: Vec<(String, String)> = out
                 .document
                 .assets

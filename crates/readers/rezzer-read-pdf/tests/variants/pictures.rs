@@ -88,6 +88,16 @@ pub(crate) fn shapes() -> Vec<Shape> {
             draw: |v| (barcode(v, 1.2, 20.0), None),
         },
         Shape {
+            name: "barcode, module 1.2, height 30",
+            axes: RENDERED,
+            draw: |v| (barcode(v, 1.2, 30.0), None),
+        },
+        Shape {
+            name: "barcode, module 1.2, height 80",
+            axes: RENDERED,
+            draw: |v| (barcode(v, 1.2, 80.0), None),
+        },
+        Shape {
             name: "barcode, module 1.2, height 40",
             axes: RENDERED,
             draw: |v| (barcode(v, 1.2, 40.0), None),

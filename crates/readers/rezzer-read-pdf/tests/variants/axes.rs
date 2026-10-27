@@ -393,6 +393,8 @@ pub(crate) struct Want {
     pub apart: Vec<(String, String)>,
     /// The document title the read must find (on the first page only).
     pub title: Option<String>,
+    /// Titles the read may find instead (a bold title over the shape).
+    pub may_title: Vec<String>,
     /// The document date the read must find (yyyy-mm-dd), on the first page only.
     pub date: Option<String>,
     /// Codes to find once each: symbology and text.
@@ -507,6 +509,7 @@ fn neighbour(v: &Variant, sheet: &mut Sheet, e: Extent) {
             let t = "Monatsabrechnung Muster";
             b.page.template += &bold(g.col(0), e.top + 2.6 * d, 1.4 * d, t);
             b.values.push(t.into());
+            sheet.want.may_title.push(t.into());
         }
         Next::LineOver => {
             let t = "Abrechnung Oktober 2026";
