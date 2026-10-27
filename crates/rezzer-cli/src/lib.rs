@@ -259,3 +259,46 @@ fn print(text: &str) -> Result<(), String> {
         Err(e) => Err(format!("cannot write to stdout: {e}")),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn suggested(e: &clap::Error) -> Vec<String> {
+        match e.get(ContextKind::SuggestedSubcommand) {
+            Some(ContextValue::Strings(s)) => s.clone(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// clap itself suggests `derez`; only `hide_suggestion` takes it out.
+    #[test]
+    fn clap_suggests_derez_and_hide_suggestion_drops_it() {
+        let e = Cli::try_parse_from(["rezzer", "eread"]).unwrap_err();
+        let before = suggested(&e);
+        assert!(before.contains(&"derez".to_string()), "{before:?}");
+        assert!(before.contains(&"read".to_string()), "{before:?}");
+        assert_eq!(suggested(&hide_suggestion(e)), ["read"]);
+
+        let e = Cli::try_parse_from(["rezzer", "dere"]).unwrap_err();
+        assert_eq!(suggested(&e), ["derez"]);
+        let e = hide_suggestion(e);
+        assert_eq!(e.kind(), ErrorKind::InvalidSubcommand);
+        assert!(suggested(&e).is_empty());
+        let zzzz = Cli::try_parse_from(["rezzer", "zzzz"]).unwrap_err();
+        assert_eq!(
+            e.render().to_string().replace("dere", "zzzz"),
+            zzzz.render().to_string()
+        );
+    }
+
+    #[test]
+    fn other_errors_pass_unchanged() {
+        let e = Cli::try_parse_from(["rezzer", "rea"]).unwrap_err();
+        let text = e.render().to_string();
+        assert_eq!(hide_suggestion(e).render().to_string(), text);
+        let e = Cli::try_parse_from(["rezzer", "read"]).unwrap_err();
+        let text = e.render().to_string();
+        assert_eq!(hide_suggestion(e).render().to_string(), text);
+    }
+}
