@@ -842,11 +842,15 @@ fn pdf_like_page_gives_walls_and_towers() {
     assert_eq!(ps.len(), 1);
     let p = &ps[0];
     assert_eq!(p.label, "page 1 of 1");
-    assert_eq!(count(p, ShapeKind::Line), 1);
-    assert_eq!(count(p, ShapeKind::Outline), 5);
+    // The rule, and the cells as the inner borders of the table: one column line and one
+    // row border in two pieces. The table is the one outline.
+    assert_eq!(count(p, ShapeKind::Line), 4);
+    assert_eq!(count(p, ShapeKind::Outline), 1);
     assert_eq!(count(p, ShapeKind::Block), 1);
     assert_eq!(count(p, ShapeKind::Tower), 1);
-    assert_eq!(p.shapes.len(), 8);
+    assert_eq!(p.shapes.len(), 7);
+    assert_eq!(column_borders(p), 1);
+    assert_eq!(row_borders(p), 2);
     let tower = p
         .shapes
         .iter()
@@ -855,6 +859,14 @@ fn pdf_like_page_gives_walls_and_towers() {
     // y is flipped: the heading at the top of the page is near y 0.
     assert!(tower.rect[3] < 0.1, "{:?}", tower.rect);
     let rule = p.shapes.iter().find(|s| s.kind == ShapeKind::Line).unwrap();
+    assert!(close(
+        p.shapes
+            .iter()
+            .find(|s| s.kind == ShapeKind::Outline)
+            .unwrap()
+            .rect,
+        [100.0 / 600.0, 0.375, 500.0 / 600.0, 0.625]
+    ));
     assert!(close(
         rule.rect,
         [50.0 / 600.0, 0.125, 550.0 / 600.0, 0.125]
@@ -944,21 +956,28 @@ fn degenerate_geometry_is_ignored() {
     assert!(y1 - y0 >= 0.02 - 1e-6, "{:?}", tower.rect);
     assert!(fit(&ps[0], 80, 40).is_ok());
 
-    // 100,000 rules on one page: no panic and a usable grid, or the Grid with a note.
-    let many = (0..100_000)
+    // 100,000 rules spread over one page: no panic; the rules that are drawn crowd the
+    // page, so it gives the Grid with a note.
+    let many = (0..100_000u32)
         .map(|i| {
-            let y = 800.0 * i as f32 / 100_000.0;
+            let y = 800.0 * ((i * 7919) % 100_000) as f32 / 100_000.0;
             placed(BoxKind::Rule, [0.0, y, 600.0, y])
         })
         .collect();
     let d = with_pages(Vec::new(), vec![page(1, many)]);
-    let ps = plans(&d);
-    for p in &ps {
-        assert!(p.shapes.len() <= MAX_SHAPES);
-        assert!(fit(p, 80, 40).is_ok(), "{}", p.label);
-    }
+    assert_eq!(plans(&d), Vec::new());
     let r = rounds("ruled.pdf", Some(&d), None);
-    assert!(r.plans[0].label != "the Grid" || r.note.is_some());
+    assert_eq!(r.plans.len(), 1);
+    assert_eq!(r.plans[0].label, "the Grid");
+    assert_eq!(
+        r.note.as_deref(),
+        Some("ruled.pdf gives no grid: nothing to build a grid from. Using the Grid.")
+    );
+
+    // More boxes than a plan draws: the shapes stop at the cap.
+    let same = vec![placed(BoxKind::Drawn, [100.0, 100.0, 300.0, 300.0]); MAX_SHAPES + 500];
+    let ps = plans(&with_pages(Vec::new(), vec![page(1, same)]));
+    assert_eq!(ps[0].shapes.len(), MAX_SHAPES);
 
     // A tiny page with bounds as large as an f32 allows: quotients overflow to infinity.
     let huge = PageGeometry {
@@ -1063,20 +1082,159 @@ fn geometry_wins_over_text() {
     assert_eq!(plans(&d), plans(&doc(body)));
 }
 
-#[test]
-fn crowded_pages_are_left_out() {
-    // Pictures side by side fill the page: crowded at 80 by 40, so the page gives no plan.
-    let tiles = (0..30)
+/// Pictures side by side that fill the page: crowded at 80 by 40.
+fn tiles() -> Vec<PlacedBox> {
+    (0..30)
         .flat_map(|r| {
             (0..30).map(move |c| {
                 let (x, y) = (20.0 * c as f32, 800.0 / 30.0 * r as f32);
                 placed(BoxKind::Picture, [x, y, x + 19.0, y + 26.0])
             })
         })
-        .collect();
+        .collect()
+}
+
+#[test]
+fn crowded_pages_are_left_out() {
+    let tiles = tiles();
     let rule = vec![placed(BoxKind::Rule, [50.0, 400.0, 550.0, 400.0])];
     let d = with_pages(Vec::new(), vec![page(1, tiles), page(2, rule)]);
     let ps = plans(&d);
     let labels: Vec<&str> = ps.iter().map(|p| p.label.as_str()).collect();
     assert_eq!(labels, ["page 2 of 2"]);
+}
+
+#[test]
+fn all_pages_crowded_gives_the_text_plans() {
+    let body: Vec<Block> = (0..20)
+        .map(|i| heading(1, &format!("Heading {i}")))
+        .collect();
+    let d = with_pages(body.clone(), vec![page(1, tiles()), page(2, tiles())]);
+    let ps = plans(&d);
+    assert!(!ps.is_empty());
+    assert_eq!(ps, plans(&doc(body)));
+}
+
+#[test]
+fn pages_tried_are_capped() {
+    // 200 crowded pages use up the pages tried, so the good page after them is not reached.
+    let rule = vec![placed(BoxKind::Rule, [50.0, 400.0, 550.0, 400.0])];
+    let mut pages: Vec<PageGeometry> = (1..=4 * MAX_PLANS as u32)
+        .map(|n| page(n, tiles()))
+        .collect();
+    pages.push(page(4 * MAX_PLANS as u32 + 1, rule.clone()));
+    assert_eq!(plans(&with_pages(Vec::new(), pages)), Vec::new());
+    // One page fewer, and it is.
+    let mut pages: Vec<PageGeometry> = (1..4 * MAX_PLANS as u32)
+        .map(|n| page(n, tiles()))
+        .collect();
+    pages.push(page(4 * MAX_PLANS as u32, rule));
+    let labels: Vec<String> = plans(&with_pages(Vec::new(), pages))
+        .into_iter()
+        .map(|p| p.label)
+        .collect();
+    assert_eq!(labels, ["page 200 of 200"]);
+}
+
+#[test]
+fn many_crowded_pages_are_fast() {
+    let pages: Vec<PageGeometry> = (1..=5000).map(|n| page(n, tiles())).collect();
+    let d = with_pages(Vec::new(), pages);
+    let start = Instant::now();
+    let ps = plans(&d);
+    let took = start.elapsed().as_millis();
+    assert!(ps.is_empty());
+    // Only the first 200 pages with shapes are tried: about 16 ms with debug assertions and
+    // 8 ms optimized here, against 500 and 50.
+    assert!(took < limit_ms(), "{took} ms");
+}
+
+/// The free cells of `g` that `from` reaches.
+fn reached(g: &rezzer_derez::grid::Grid, from: Pos) -> Vec<bool> {
+    use rezzer_derez::grid::Dir;
+    let w = usize::from(g.width());
+    let mut seen = vec![false; w * usize::from(g.height())];
+    let mut todo = vec![from];
+    seen[usize::from(from.y) * w + usize::from(from.x)] = true;
+    while let Some(p) = todo.pop() {
+        for d in Dir::ALL {
+            if let Some(q) = g.step(p, d).filter(|&q| g.is_free(q)) {
+                let i = usize::from(q.y) * w + usize::from(q.x);
+                if !seen[i] {
+                    seen[i] = true;
+                    todo.push(q);
+                }
+            }
+        }
+    }
+    seen
+}
+
+/// A table of `rows` by `cols` cells over the lower half of a 600 by 800 page.
+fn half_page_table(rows: u32, cols: u32) -> Vec<PlacedBox> {
+    let (x0, y0, x1, y1) = (60.0, 40.0, 540.0, 400.0);
+    let mut boxes = vec![placed(BoxKind::Table, [x0, y0, x1, y1])];
+    let (cw, ch) = ((x1 - x0) / cols as f32, (y1 - y0) / rows as f32);
+    for r in 0..rows {
+        for c in 0..cols {
+            let (cx, cy) = (x0 + cw * c as f32, y0 + ch * r as f32);
+            boxes.push(placed(BoxKind::Cell, [cx, cy, cx + cw, cy + ch]));
+        }
+    }
+    boxes
+}
+
+#[test]
+fn table_cells_stay_open() {
+    for (rows, cols) in [(2, 2), (6, 4)] {
+        let ps = plans(&with_pages(
+            Vec::new(),
+            vec![page(1, half_page_table(rows, cols))],
+        ));
+        assert_eq!(ps.len(), 1, "{rows}x{cols}");
+        let p = &ps[0];
+        assert_eq!(count(p, ShapeKind::Outline), 1, "{rows}x{cols}");
+        assert_eq!(column_borders(p), cols as usize - 1, "{rows}x{cols}");
+        assert_eq!(row_borders(p), rows as usize - 1, "{rows}x{cols}");
+        let f = fit(p, 80, 40).unwrap();
+        let seen = reached(&f.grid, f.starts[0].0);
+        // The cells strictly inside the outline of the table rect (x 0.1..0.9, y 0.5..0.95):
+        // more than two thirds stay free and reached (2x2: 702 of 741, 6x4: 578 of 741).
+        let m = 1 + MARGIN;
+        let (iw, ih) = (f.grid.width() - 2 * m, f.grid.height() - 2 * m);
+        let cell = |u: f32, n: u16| m + (u * f32::from(n)).floor() as u16;
+        let (gx0, gx1) = (cell(0.1, iw) + 1, cell(0.9, iw) - 1);
+        let (gy0, gy1) = (cell(0.5, ih) + 1, cell(0.95, ih) - 1);
+        let (mut inside, mut open) = (0, 0);
+        for y in gy0..gy1 {
+            for x in gx0..gx1 {
+                inside += 1;
+                let at = usize::from(y) * usize::from(f.grid.width()) + usize::from(x);
+                if f.grid.is_free(Pos { x, y }) && seen[at] {
+                    open += 1;
+                }
+            }
+        }
+        assert!(
+            open * 3 > inside * 2,
+            "{rows}x{cols}: {open} of {inside} reached"
+        );
+    }
+}
+
+#[test]
+fn table_borders_are_capped_and_loose_cells_are_outlines() {
+    // 40 by 30 cells: at most 8 row and 6 column bands are shown.
+    let ps = plans(&with_pages(
+        Vec::new(),
+        vec![page(1, half_page_table(40, 30))],
+    ));
+    assert!(row_borders(&ps[0]) <= 7, "{}", row_borders(&ps[0]));
+    assert!(column_borders(&ps[0]) <= 5, "{}", column_borders(&ps[0]));
+    assert!(fit(&ps[0], 80, 40).is_ok());
+    // A cell outside every table is an outline of its own.
+    let mut boxes = half_page_table(2, 2);
+    boxes.push(placed(BoxKind::Cell, [100.0, 600.0, 300.0, 700.0]));
+    let ps = plans(&with_pages(Vec::new(), vec![page(1, boxes)]));
+    assert_eq!(count(&ps[0], ShapeKind::Outline), 2);
 }

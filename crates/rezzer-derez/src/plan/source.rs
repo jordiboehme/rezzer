@@ -53,6 +53,11 @@ const TOWER_HEIGHT: f32 = 0.02;
 /// [`NARROWEST_TOWER`].
 const WIDEST_TOWER: f32 = 0.6;
 const NARROWEST_TOWER: f32 = 0.2;
+/// The most pages with shapes whose plans are tried, so many crowded pages stay fast.
+const PAGES_TRIED: usize = 4 * MAX_PLANS;
+/// How close, in unit coordinates, two cell edges are to count as one, and how far a cell
+/// may stick out of its table.
+const EDGE: f32 = 1e-3;
 
 /// The plans of a run: the file name for the status line, the plans in round order and, when
 /// the file gives no grid, a note for the status line and the same note without the file name
@@ -140,9 +145,11 @@ pub fn plans(doc: &Document) -> Vec<Plan> {
 }
 
 /// The plans of the pages of `doc.geometry` in page order, at most [`MAX_PLANS`]: one per
-/// page that gives a shape and whose plan fits a [`REFERENCE`] grid. Labelled
-/// `page <n> of <pages>`, `<pages>` from the page count of the file when set, else (and never
-/// less than) the largest page number in the geometry.
+/// page that gives a shape and whose plan fits a [`REFERENCE`] grid, out of the first
+/// [`PAGES_TRIED`] pages that give a shape. Labelled `page <n> of <pages>`, `<pages>` from the
+/// page count of the file when set, else (and never less than) the largest page number in the
+/// geometry. Two pages with the same number, built past `Geometry::add_page` (which refuses
+/// them), give two plans with the same label.
 fn page_plans(doc: &Document) -> Vec<Plan> {
     let Some(geometry) = doc.geometry.as_deref() else {
         return Vec::new();
@@ -153,14 +160,16 @@ fn page_plans(doc: &Document) -> Vec<Plan> {
     let largest = pages.last().map_or(0, |p| p.page);
     let total = doc.properties.facts.pages.unwrap_or(0).max(largest);
     let mut out = Vec::new();
+    let mut tried = 0;
     for page in pages {
-        if out.len() >= MAX_PLANS {
+        if out.len() >= MAX_PLANS || tried >= PAGES_TRIED {
             break;
         }
         let shapes = page_shapes(page);
         if shapes.is_empty() {
             continue;
         }
+        tried += 1;
         let plan = Plan {
             label: format!("page {} of {total}", page.page),
             shapes,
@@ -172,18 +181,91 @@ fn page_plans(doc: &Document) -> Vec<Plan> {
     out
 }
 
-/// The shapes of one page, at most [`MAX_SHAPES`]; none for a size that is not finite and
-/// positive.
+/// The shapes of one page in box order, at most [`MAX_SHAPES`]; none for a size that is not
+/// finite and positive. A table is its outline, with the cells inside it as its inner borders
+/// (see [`table_borders`]); a cell inside no table is an outline of its own.
 fn page_shapes(page: &PageGeometry) -> Vec<Shape> {
     let [w, h] = page.size;
     if ![w, h].iter().all(|v| v.is_finite() && *v > 0.0) {
         return Vec::new();
     }
-    page.boxes
+    let mapped: Vec<(BoxKind, Shape)> = page
+        .boxes
         .iter()
-        .filter_map(|b| page_shape(b, w, h))
-        .take(MAX_SHAPES)
-        .collect()
+        .filter_map(|b| page_shape(b, w, h).map(|s| (b.kind, s)))
+        .collect();
+    let tables: Vec<usize> = (0..mapped.len())
+        .filter(|&i| mapped[i].0 == BoxKind::Table)
+        .collect();
+    // The cell edges of each table: x edges, then y edges.
+    let mut edges: Vec<(Vec<f32>, Vec<f32>)> = vec![Default::default(); tables.len()];
+    let mut owned = vec![false; mapped.len()];
+    for (i, (kind, cell)) in mapped.iter().enumerate() {
+        if *kind != BoxKind::Cell {
+            continue;
+        }
+        // Cells usually follow their table: the last table before the cell is tried first.
+        let before = tables.partition_point(|&t| t < i);
+        let order = (0..before).rev().chain(before..tables.len());
+        let Some(t) = order
+            .into_iter()
+            .find(|&t| contains(mapped[tables[t]].1.rect, cell.rect))
+        else {
+            continue;
+        };
+        owned[i] = true;
+        let [x0, y0, x1, y1] = cell.rect;
+        edges[t].0.extend([x0, x1]);
+        edges[t].1.extend([y0, y1]);
+    }
+    let mut out = Vec::new();
+    let mut table = 0;
+    for (i, (kind, shape)) in mapped.iter().enumerate() {
+        if out.len() >= MAX_SHAPES {
+            break;
+        }
+        if owned[i] {
+            continue;
+        }
+        out.push(*shape);
+        if *kind == BoxKind::Table {
+            let (xs, ys) = &edges[table];
+            table_borders(shape.rect, xs, ys, &mut out);
+            table += 1;
+        }
+    }
+    out.truncate(MAX_SHAPES);
+    out
+}
+
+/// True when `inner` lies in `outer`, give or take [`EDGE`].
+fn contains(outer: [f32; 4], inner: [f32; 4]) -> bool {
+    inner[0] >= outer[0] - EDGE
+        && inner[1] >= outer[1] - EDGE
+        && inner[2] <= outer[2] + EDGE
+        && inner[3] <= outer[3] + EDGE
+}
+
+/// Pushes the inner borders of a table in `rect` to `out`, as [`cell_grid`] draws them: its
+/// cells' distinct `xs` and `ys` edges inside the rect become column and row borders, at most
+/// [`COL_BANDS`] and [`ROW_BANDS`] bands of them.
+fn table_borders(rect: [f32; 4], xs: &[f32], ys: &[f32], out: &mut Vec<Shape>) {
+    let inner = |edges: &[f32], lo: f32, hi: f32, bands: u32| -> Vec<f32> {
+        let mut v: Vec<f32> = edges
+            .iter()
+            .copied()
+            .filter(|&e| e > lo + EDGE && e < hi - EDGE)
+            .collect();
+        v.sort_by(f32::total_cmp);
+        v.dedup_by(|a, b| (*a - *b).abs() <= EDGE);
+        // `n` edges part `n + 1` bands; edge `k - 1` comes before band `k`.
+        borders(count(v.len() + 1), bands)
+            .map(|k| v[k as usize - 1])
+            .collect()
+    };
+    let cols = inner(xs, rect[0], rect[2], COL_BANDS);
+    let rows = inner(ys, rect[1], rect[3], ROW_BANDS);
+    grid_borders(rect, &cols, &rows, out);
 }
 
 /// The shape of box `b` on a page of `w` by `h` points: its bounds mapped to the unit square
@@ -487,9 +569,22 @@ fn cell_grid(rect: [f32; 4], rows: u32, cols: u32, bands: (u32, u32), out: &mut 
         rect,
     });
     let at = |lo: f32, hi: f32, n: u32, k: u32| lo + (hi - lo) * k as f32 / n as f32;
+    let cols: Vec<f32> = borders(cols, bands.1)
+        .map(|k| at(x0, x1, cols, k))
+        .collect();
+    let rows: Vec<f32> = borders(rows, bands.0)
+        .map(|k| at(y0, y1, rows, k))
+        .collect();
+    grid_borders(rect, &cols, &rows, out);
+}
+
+/// Pushes the inner borders of a cell grid in `rect` to `out`: a full line at each column
+/// border `x` of `cols`, and at each row border `y` of `rows` one piece per column band that
+/// leaves [`GAP`] of the band free at both ends.
+fn grid_borders(rect: [f32; 4], cols: &[f32], rows: &[f32], out: &mut Vec<Shape>) {
+    let [x0, y0, x1, y1] = rect;
     let mut xs = vec![x0];
-    for k in borders(cols, bands.1) {
-        let x = at(x0, x1, cols, k);
+    for &x in cols {
         xs.push(x);
         out.push(Shape {
             kind: ShapeKind::Line,
@@ -497,8 +592,7 @@ fn cell_grid(rect: [f32; 4], rows: u32, cols: u32, bands: (u32, u32), out: &mut 
         });
     }
     xs.push(x1);
-    for k in borders(rows, bands.0) {
-        let y = at(y0, y1, rows, k);
+    for &y in rows {
         for band in xs.windows(2) {
             let gap = GAP * (band[1] - band[0]);
             out.push(Shape {
