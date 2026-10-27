@@ -1507,7 +1507,6 @@ fn grids() -> Vec<(&'static str, Grid)> {
                 under: false,
                 courier: false,
                 whole_bottom: false,
-                own_bottom: false,
             };
             (b, at)
         }),
@@ -1520,7 +1519,6 @@ fn grids() -> Vec<(&'static str, Grid)> {
                 under: false,
                 courier: true,
                 whole_bottom: true,
-                own_bottom: false,
             };
             (rows_page(g, &ROWS, &THREE_ROWS, &[]), at)
         }),
@@ -1533,7 +1531,6 @@ fn grids() -> Vec<(&'static str, Grid)> {
                 under: false,
                 courier: true,
                 whole_bottom: false,
-                own_bottom: true,
             };
             (rows_page(g, &ROWS, &EMPTY_LAST, &[]), at)
         }),
@@ -1550,7 +1547,6 @@ fn grids() -> Vec<(&'static str, Grid)> {
                 under: true,
                 courier: true,
                 whole_bottom: true,
-                own_bottom: false,
             };
             (rows_page(g, &s, &THREE_ROWS, &[]), at)
         }),

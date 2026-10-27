@@ -574,6 +574,17 @@ pub(in crate::tables) fn field_strips(
         .flat_map(|f| f.label.iter().chain(&f.value))
         .copied()
         .collect();
+    // The strip that holds each run of a field.
+    let holder: HashMap<usize, usize> = strips
+        .iter()
+        .enumerate()
+        .flat_map(|(k, s)| {
+            s.fields
+                .iter()
+                .flat_map(|f| f.label.iter().chain(&f.value))
+                .map(move |&i| (i, k))
+        })
+        .collect();
     // Runs beyond a group that a group read with its labels under their values took.
     let mut outside: HashSet<usize> = HashSet::new();
     for g in groups {
@@ -616,13 +627,38 @@ pub(in crate::tables) fn field_strips(
         let with_held = |i: usize| {
             !own.contains(&i) && !outside.contains(&i) && (shaped || !beside || !tabled(i))
         };
+        // A run of a strip of another group joined to this one by its rules: over or under a
+        // strip of the group, across a stretch both share, its rule within one row pitch of
+        // the group's (the two rules of a double rule).
+        let neighbour = |i: usize| {
+            holder.get(&i).is_some_and(|&k| {
+                let t = &strips[k];
+                !g.contains(&k)
+                    && g.iter().any(|&o| {
+                        let s = &strips[o];
+                        let pitch = s.top - s.bottom;
+                        s.x0 < t.x1
+                            && t.x0 < s.x1
+                            && ((t.bottom - s.top).abs() <= pitch
+                                || (s.bottom - t.top).abs() <= pitch)
+                    })
+            })
+        };
         // One field alone between its rules reads like a caption over a line: it is not
         // paired, and that is said, with the labels under its rule that may be of its value.
         if list.len() < 2 {
             let mut names: Vec<String> = list.iter().map(|f| words(flow, &f.label)).collect();
-            if let Ends::Under(_, below) | Ends::Unclear(below) =
-                ends(flow, by_y, &with_held, &free, Some(hs), frames, &strips, &g)
-            {
+            if let Ends::Under(_, below) | Ends::Unclear(below) = ends(
+                flow,
+                by_y,
+                &with_held,
+                &free,
+                Some(hs),
+                &neighbour,
+                frames,
+                &strips,
+                &g,
+            ) {
                 for line in lines_of(flow, &below) {
                     for l in labels_in_line(flow, &line) {
                         let name = words(flow, &l);
@@ -638,8 +674,28 @@ pub(in crate::tables) fn field_strips(
             }
             continue;
         }
-        let without = ends(flow, by_y, &free, &free, None, frames, &strips, &g);
-        let with = ends(flow, by_y, &with_held, &free, Some(hs), frames, &strips, &g);
+        let without = ends(
+            flow,
+            by_y,
+            &free,
+            &free,
+            None,
+            &|_| false,
+            frames,
+            &strips,
+            &g,
+        );
+        let with = ends(
+            flow,
+            by_y,
+            &with_held,
+            &free,
+            Some(hs),
+            &neighbour,
+            frames,
+            &strips,
+            &g,
+        );
         let found = match (without, with) {
             (Ends::Over, Ends::Over) => Ends::Over,
             (Ends::Under(above, below), Ends::Under(..)) => Ends::Under(above, below),
@@ -930,6 +986,7 @@ fn ends(
     free: &dyn Fn(usize) -> bool,
     veto: &dyn Fn(usize) -> bool,
     open: Option<&[Seg]>,
+    neighbour: &dyn Fn(usize) -> bool,
     frames: &[Frame],
     strips: &[Strip],
     g: &[usize],
@@ -1227,10 +1284,18 @@ fn ends(
         // A strip of another shape: labels over values only without evidence at either end.
         Way::Under if !shaped => Way::Unclear,
         Way::Over if !shaped && (top != TopEnd::None || bottom != BottomEnd::None) => Way::Unclear,
-        // With the runs other groups hold (`open`), evidence at both ends, if only in part, is
-        // a grid parted by double rules whose ends lie in its neighbours, with fields left
-        // empty there: not clear.
-        Way::Over if open.is_some() && top == TopEnd::Partial && bottom == BottomEnd::Partial => {
+        // With the runs other groups hold (`open`), evidence in part at both ends that runs of
+        // a field group joined to this one by its rules (`neighbour`) make at each end is a
+        // grid parted by double rules, with fields left empty at its inner ends: not clear.
+        // Evidence in part from other text (a loose line, column titles, a table's runs) keeps
+        // labels over values.
+        Way::Over
+            if open.is_some()
+                && top == TopEnd::Partial
+                && bottom == BottomEnd::Partial
+                && above.iter().any(|&i| neighbour(i))
+                && below.iter().any(|&i| neighbour(i)) =>
+        {
             Way::Unclear
         }
         way => way,
@@ -1308,8 +1373,9 @@ enum Way {
 /// column titles of a next table, a line of data over it), so it is not clear. An own row of
 /// labels is the group's own empty last row as much as labels over a rule under the last
 /// labels: no end. One field a row is too little evidence for labels under values. Found with
-/// the runs other groups hold, evidence in part at both ends is not clear either (see
-/// [`ends`]).
+/// the runs other groups hold, evidence in part at both ends is not clear either when runs of
+/// a field group joined to this one by its rules make it at each end (a grid parted by double
+/// rules); from other text it keeps labels over values (see [`ends`]).
 fn way_of(single: bool, top: TopEnd, bottom: BottomEnd) -> Way {
     match (single, top, bottom) {
         (true, TopEnd::Complete, _) | (true, _, BottomEnd::Free) => Way::Unclear,

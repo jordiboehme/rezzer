@@ -1106,10 +1106,9 @@ pub(crate) enum Neighbour {
     /// A short data line at the values' depth over the top rule from the first field's start,
     /// and the column titles alone under the last rule. When they could head every lowest
     /// field with a value, the same page is a grid of labels under their values whose first row
-    /// has one value. Else they are evidence in part at both ends, which a grid parted by
-    /// double rules has in its neighbours. Neither reading is clear, so every field of the grid
-    /// is to stay text with a loss. Under a last row of labels only the titles are no end: the
-    /// grid pairs, labels over values.
+    /// has one value: neither reading is clear, so every field of the grid is to stay text with
+    /// a loss. Else they are evidence in part at both ends from loose text, no field group's:
+    /// the grid pairs, labels over values.
     LineAndTitles,
 }
 
@@ -1118,8 +1117,7 @@ pub(crate) enum Neighbour {
 /// whether its labels and values are set in Courier (see [`rows_page`]) rather than in the
 /// label font and the data layer, and whether its last rule runs under every field with a
 /// value and no field under it (the header grid's right part ends after its first row), so
-/// that column titles under it could head them all, and whether its last row is labels only
-/// (an empty last row), so that text under its last rule is no end of it.
+/// that column titles under it could head them all.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct GridAt {
     pub top: f32,
@@ -1128,7 +1126,6 @@ pub(crate) struct GridAt {
     pub under: bool,
     pub courier: bool,
     pub whole_bottom: bool,
-    pub own_bottom: bool,
 }
 
 impl GridAt {
@@ -1237,7 +1234,7 @@ pub(crate) fn neighbour(g: &Geo, b: &mut Built, at: GridAt, n: Neighbour) {
             at.data(g, b, at.top + 0.17 * d, &[(0, t)]);
             b.values.push(t.to_string());
             neighbour(g, b, at, Neighbour::ColumnTitles { body: false });
-            if !at.own_bottom {
+            if at.whole_bottom {
                 for f in &mut b.fields {
                     f.1 = Err(());
                 }
