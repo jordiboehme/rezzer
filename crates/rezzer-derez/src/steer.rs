@@ -69,8 +69,8 @@ pub fn choose(round: &mut Round, id: usize) -> Dir {
         .map(|&(d, c)| {
             let space = fill.space_after(grid, c);
             // A cell another head can enter this tick may end both programs. Any cell next to
-            // a head counts: the one behind it is its own trail after the first tick, so this is
-            // broader only on that first tick, on purpose: it keeps the check simple.
+            // a head counts. After the first tick the cell behind a head is its own trail, so
+            // only the first tick counts more cells than needed. That keeps the check simple.
             let contested = round
                 .programs()
                 .iter()
@@ -117,13 +117,13 @@ pub fn choose(round: &mut Round, id: usize) -> Dir {
     }
 }
 
-/// The number of free cells reachable from `from` over the four neighbours, at most `cap`.
-/// Zero when `from` is not free. Each call fills with its own buffers; the steering itself
-/// uses `Fill` to reuse them.
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn reachable(grid: &Grid, from: Pos, cap: usize) -> usize {
+/// The free cells reachable from `from` over the four neighbours, as a mask indexed by
+/// `y * width + x`; all false when `from` is not free. Fitting a plan uses it to find the
+/// cells sealed off from the lane.
+pub(crate) fn region(grid: &Grid, from: Pos) -> Vec<bool> {
     let mut fill = Fill::new(grid);
-    fill.count(grid, from, None, cap)
+    fill.count(grid, from, None, usize::MAX);
+    fill.seen
 }
 
 /// Flood fill buffers, reused for every fill of one choice.
@@ -218,22 +218,31 @@ mod tests {
     use crate::grid::Tile;
 
     #[test]
-    fn reachable_counts_free_cells_up_to_the_cap() {
+    fn count_and_region_find_free_cells_up_to_the_cap() {
         let mut g = Grid::new(6, 4);
         // A wall column at x = 2 splits off a 2 by 4 area on the left.
         for y in 0..4 {
             g.set(Pos { x: 2, y }, Tile::Wall);
         }
-        assert_eq!(reachable(&g, Pos { x: 0, y: 0 }, FILL_CAP), 8);
-        assert_eq!(reachable(&g, Pos { x: 5, y: 3 }, FILL_CAP), 12);
-        assert_eq!(reachable(&g, Pos { x: 5, y: 3 }, 5), 5);
-        assert_eq!(reachable(&g, Pos { x: 2, y: 1 }, FILL_CAP), 0, "a wall");
+        let count = |from: Pos, cap: usize| Fill::new(&g).count(&g, from, None, cap);
+        assert_eq!(count(Pos { x: 0, y: 0 }, FILL_CAP), 8);
+        assert_eq!(count(Pos { x: 5, y: 3 }, FILL_CAP), 12);
+        assert_eq!(count(Pos { x: 5, y: 3 }, 5), 5);
+        assert_eq!(count(Pos { x: 2, y: 1 }, FILL_CAP), 0, "a wall");
+        assert_eq!(count(Pos { x: 9, y: 9 }, FILL_CAP), 0, "off the grid");
+        assert_eq!(count(Pos { x: 0, y: 0 }, 0), 0);
+
+        let left = region(&g, Pos { x: 1, y: 2 });
+        assert_eq!(left.iter().filter(|s| **s).count(), 8);
+        assert!(left[0] && left[1] && !left[2] && !left[3]);
         assert_eq!(
-            reachable(&g, Pos { x: 9, y: 9 }, FILL_CAP),
-            0,
-            "off the grid"
+            region(&g, Pos { x: 4, y: 0 })
+                .iter()
+                .filter(|s| **s)
+                .count(),
+            12
         );
-        assert_eq!(reachable(&g, Pos { x: 0, y: 0 }, 0), 0);
+        assert!(!region(&g, Pos { x: 2, y: 0 }).contains(&true), "a wall");
     }
 
     #[test]

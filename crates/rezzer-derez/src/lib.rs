@@ -10,6 +10,7 @@
 #![forbid(unsafe_code)]
 
 pub mod grid;
+pub mod plan;
 pub mod rng;
 pub mod round;
 pub mod steer;
