@@ -4,14 +4,16 @@
 
 //! How the other programs steer: by the free space they can still reach two steps ahead, with
 //! a chase of a near user program and a few random slips, so they can be beaten but not
-//! trivially.
+//! trivially. A slip takes a random safe direction that still has a way out (any safe one when
+//! none has).
 
 use std::collections::VecDeque;
 
 use crate::grid::{Dir, Grid, Pos};
 use crate::round::Round;
 
-/// The chance in 1000 that a program takes a random safe direction instead of the best one.
+/// The chance in 1000 that a program takes a random safe direction that still has a way out
+/// (any safe one when none has) instead of the best one.
 pub const SLIP_PER_MILLE: u32 = 80;
 
 /// The Manhattan distance up to which a program chases the user program.
@@ -21,7 +23,9 @@ pub const CHASE_RANGE: u16 = 8;
 pub const FILL_CAP: usize = 4000;
 
 /// The direction of the program at index `id` (from 1) for the next tick. Never reverses.
-/// Without a free cell ahead or to the side it keeps its direction (and is derezzed).
+/// Without a free cell ahead or to the side it keeps its direction (and is derezzed). Else it
+/// slips now and then (see [`SLIP_PER_MILLE`]); otherwise it takes the most free space two
+/// steps ahead, or chases a near user program when that costs little space.
 pub fn choose(round: &mut Round, id: usize) -> Dir {
     let grid = round.grid();
     let me = &round.programs()[id];
@@ -64,7 +68,9 @@ pub fn choose(round: &mut Round, id: usize) -> Dir {
         .iter()
         .map(|&(d, c)| {
             let space = fill.space_after(grid, c);
-            // A cell another head can enter this tick may end both programs.
+            // A cell another head can enter this tick may end both programs. Any cell next to
+            // a head counts: the one behind it is its own trail after the first tick, so this is
+            // broader only on that first tick, on purpose: it keeps the check simple.
             let contested = round
                 .programs()
                 .iter()
@@ -91,6 +97,7 @@ pub fn choose(round: &mut Round, id: usize) -> Dir {
                 .into_iter()
                 .filter(|r| distance(r.1, target) == nearest)
                 .collect();
+            // Tie-break among the chasing candidates: the closest, then the most space.
             let most = nearest.iter().map(|r| r.2).max().unwrap_or(0);
             winners = nearest
                 .iter()
@@ -111,7 +118,8 @@ pub fn choose(round: &mut Round, id: usize) -> Dir {
 }
 
 /// The number of free cells reachable from `from` over the four neighbours, at most `cap`.
-/// Zero when `from` is not free.
+/// Zero when `from` is not free. Each call fills with its own buffers; the steering itself
+/// uses `Fill` to reuse them.
 #[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn reachable(grid: &Grid, from: Pos, cap: usize) -> usize {
     let mut fill = Fill::new(grid);

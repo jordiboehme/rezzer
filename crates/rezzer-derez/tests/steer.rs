@@ -260,7 +260,8 @@ fn fill(g: &Grid, from: Pos, blocked: Pos, seen: &mut [bool]) -> usize {
 }
 
 /// The space rule without slips or chase, for the user program: free space two steps ahead,
-/// halved where another head can enter. Ties keep the direction, then the order of `Dir::ALL`.
+/// halved next to another head (as `steer::choose` does). Ties keep the direction, then the
+/// order of `Dir::ALL`.
 fn user_choice(round: &Round) -> Dir {
     let g = round.grid();
     let me = &round.programs()[0];
@@ -360,6 +361,5 @@ fn can_be_beaten_but_not_trivially() {
         }
     }
     let summary = format!("derezzed {derezzed}, cleared {cleared}, all derezzed {all} of 200");
-    eprintln!("{summary}");
     assert!((40..=160).contains(&derezzed), "{summary}");
 }
