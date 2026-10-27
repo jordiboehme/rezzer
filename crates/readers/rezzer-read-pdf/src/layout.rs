@@ -1085,7 +1085,7 @@ pub(crate) fn page_blocks_at(
                     _ => Vec::new(),
                 })
                 .collect();
-            (title, Some(head::laid_dates(&text, &pairs, height)))
+            (title, Some(head::laid_dates(&flow.runs, &pairs, height)))
         }
         _ => (None, None),
     };

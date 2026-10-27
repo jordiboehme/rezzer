@@ -10,7 +10,7 @@ use rezzer_model::FoundDate;
 
 use super::{
     EDGE, GAP_RATIO, HEADING_PLAIN_RATIO, Line, Run, SIZE_SLACK, address_shaped, heading_block,
-    ink, lines, size_key,
+    ink, line, lines, size_key,
 };
 use crate::scan;
 
@@ -267,8 +267,9 @@ pub(crate) struct Dates {
     labelled: Vec<Seen>,
     /// Dates in the top third of the page without a label of their own.
     head: Vec<Seen>,
-    /// Dates a label names as another date, where each stands: never a head candidate. Only
-    /// the date at that place is left out, not another with the same value.
+    /// Dates a label names as another date, where each stands: never the document date, though
+    /// one in the head still counts as a date of the head. Only the date at that place is
+    /// meant, not another with the same value.
     other: Vec<At>,
 }
 
@@ -281,15 +282,36 @@ impl Dates {
     }
 }
 
-/// The dates of the lines of page 1 (its runs as read, tables and furniture still in), with
-/// `height` the height of the page: a date right after a document-date label on its line; a
-/// date in the top third without a label of its own; a date whose own label (the text before
-/// it on its line, from the date before it on) names another date (see
-/// [`OTHER_DATE_WORDS`]). Only full dates count, with a year of four digits.
+/// The pieces of the lines of `runs`, in order: each line cut where the white space between
+/// two of its runs is wider than [`BESIDE_SIZES`] times the line's size. A piece is the text
+/// of one column of the page on that line: a label and its date stand in one piece, and a
+/// label never reaches across a column gap.
+fn pieces(runs: &[Run]) -> Vec<Line<'_>> {
+    let mut out = Vec::new();
+    for l in lines(runs) {
+        let mut start = 0;
+        for k in 1..l.runs.len() {
+            let (a, b) = (&l.runs[k - 1], &l.runs[k]);
+            if b.x - (a.x + a.w) > BESIDE_SIZES * l.size {
+                out.push(line(&l.runs[start..k]));
+                start = k;
+            }
+        }
+        out.push(line(&l.runs[start..]));
+    }
+    out
+}
+
+/// The dates of the lines of page 1 (its runs as read, tables and furniture still in), read
+/// piece by piece (see [`pieces`]), with `height` the height of the page: a date right after a
+/// document-date label in its piece; a date in the top third without a label of its own; a
+/// date whose own label (the text before it in its piece, from the date before it on) names
+/// another date (see [`OTHER_DATE_WORDS`]). Only full dates count, with a year of four
+/// digits.
 pub(crate) fn page_dates(runs: &[Run], height: Option<f32>) -> Dates {
     let mut out = Dates::default();
     let in_head = |l: &Line<'_>| height.is_some_and(|h| h > 0.0 && l.y + l.h >= h * HEAD_SHARE);
-    for l in &lines(runs) {
+    for l in &pieces(runs) {
         let line = l.runs.first().map_or(0, |r| r.line);
         let mut from = 0;
         for d in scan::dates(&l.text, 4..=4) {
@@ -308,10 +330,13 @@ pub(crate) fn page_dates(runs: &[Run], height: Option<f32>) -> Dates {
             };
             if seen.label.is_some() {
                 out.labelled.push(seen);
-            } else if names_other_date(own) {
-                out.other.push((line, seen.written));
-            } else if in_head(l) {
-                out.head.push(seen);
+            } else {
+                if names_other_date(own) {
+                    out.other.push((line, seen.written));
+                }
+                if in_head(l) {
+                    out.head.push(seen);
+                }
             }
         }
     }
@@ -337,15 +362,18 @@ fn ink_gap(l: &Line<'_>, end: usize, start: usize) -> f32 {
     }
 }
 
-/// The dates the laid out text of page 1 gives as values of labels: `lines` are the lines the
-/// layout lays out as text (tables taken out), `pairs` the pairs that the layout read from
-/// drawn boxes and rows of fields, with `height` the height of the page. A label alone on its
-/// line marks the value beside it or right below it (see [`value_of`]); a pair marks its
+/// The dates the laid out text of page 1 gives as values of labels: `runs` are the runs the
+/// layout lays out as text (tables taken out), read piece by piece (see [`pieces`]), `pairs`
+/// the pairs that the layout read from drawn boxes and rows of fields, with `height` the
+/// height of the page. A label alone in its piece marks the value beside it or right below it
+/// (see [`value_of`]); a pair marks its
 /// value when its table's top lies in the top third of the page, where the header fields of a
 /// form stand (a pair table lower down may be one row of items under small column titles). A
 /// table of columns gives no pairs: its column title is no label of one value.
-pub(crate) fn laid_dates(lines: &[Line<'_>], pairs: &[Pair], height: Option<f32>) -> Dates {
+pub(crate) fn laid_dates(runs: &[Run], pairs: &[Pair], height: Option<f32>) -> Dates {
     let mut out = Dates::default();
+    let lines = pieces(runs);
+    let lines = lines.as_slice();
     let add = |label: &str, value: &str, line: u32, out: &mut Dates| {
         let Some(d) = scan::dates(value, 4..=4)
             .into_iter()
@@ -386,8 +414,9 @@ pub(crate) fn laid_dates(lines: &[Line<'_>], pairs: &[Pair], height: Option<f32>
 
 /// The document date of page 1 from what `dates` holds. A date a document-date label marks
 /// wins; labelled dates that differ give no date, and a labelled date that cannot be read for
-/// sure gives none either; both say so. Else the only date of the head that no label names
-/// as another date is the document's; several there give no date and say so. A dotted date
+/// sure gives none either; both say so. Else the only date of the head is the document's,
+/// unless a label names it as another date; several dates there (named other dates counted)
+/// give no date and say so. A dotted date
 /// reads day first, a dashed one year first, a slashed one only when one part is over 12;
 /// only a day the calendar has.
 pub(crate) fn document_date(dates: &Dates) -> PageDate {
@@ -411,14 +440,13 @@ pub(crate) fn document_date(dates: &Dates) -> PageDate {
             )),
         };
     }
-    let head: Vec<&Seen> = dates
-        .head
-        .iter()
-        .filter(|s| !dates.other.contains(&(s.line, s.written)))
-        .collect();
-    match distinct(head.iter().map(|s| s.written)) {
+    // Every date of the head counts, a named other date too: it is a date the head holds,
+    // only it can never be the document's.
+    let other = |s: &Seen| dates.other.contains(&(s.line, s.written));
+    match distinct(dates.head.iter().map(|s| s.written)) {
         0 => PageDate::None,
-        1 => match iso(head[0].written) {
+        1 if dates.head.iter().any(other) => PageDate::None,
+        1 => match iso(dates.head[0].written) {
             Ok(date) => PageDate::Found(FoundDate {
                 date,
                 from: "only date in the top third of page 1".to_string(),
@@ -479,7 +507,7 @@ fn whole_label(text: &str) -> Option<String> {
 /// A label's value stands beside it at most this many label sizes after its end.
 const BESIDE_SIZES: f32 = 6.0;
 
-/// The value of the label line `all[k]`: among the next [`VALUE_LINES`] lines, the nearest
+/// The value of the label piece `all[k]`: among the next [`VALUE_LINES`] pieces, the nearest
 /// that starts with a date and stands beside it on its baseline (to its right, at most
 /// [`BESIDE_SIZES`] label sizes after its end) or right below it at its left edge (within its
 /// size).

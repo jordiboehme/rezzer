@@ -4694,3 +4694,26 @@ fn one_row_item_grid_with_small_titles_gives_no_date() {
         }
     }
 }
+
+#[test]
+fn other_date_label_across_a_column_gap_stays_its_own() {
+    // An other date's label over its value in one column, a head date on the label's baseline
+    // in another column: the label belongs to its column, so the head holds two dates.
+    let want = ["2 dates stand in the head of page 1; none is marked as the document date"];
+    for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
+        for font in ["FL", "FB"] {
+            for other in ["Geburtsdatum", "Lieferdatum"] {
+                for (left, right) in [(40.0f32, 300.0f32), (300.0, 40.0)] {
+                    let head = common::show("FB", size * 1.6, 40.0, 790.0, "Musterbescheid")
+                        + &common::show(font, size, left, 760.0, other)
+                        + &common::show(font, size, left, 760.0 - size * 1.2, "01.01.1970")
+                        + &common::show(font, size, right, 760.0, "Kunde seit 01.01.2020");
+                    let out = read(&headed(&head, size, scale, ""));
+                    let case = format!("{size} pt {font}, {other} at x {left}");
+                    assert_eq!(out.document.properties.document_date, None, "{case}");
+                    assert_eq!(unsure(&out), want, "{case}");
+                }
+            }
+        }
+    }
+}
