@@ -6,6 +6,9 @@
 
 use super::*;
 
+/// Per number format id without a known code: how many cells, and the first cell.
+type Unapplied = BTreeMap<u32, (u64, (u32, u32))>;
+
 /// Shows cell values as the file formats them.
 pub(super) struct Formatter<'a> {
     pub(super) wb: &'a WorkbookParts,

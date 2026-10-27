@@ -433,6 +433,3 @@ pub(crate) fn section(name: &str, q: &str, blocks: Vec<Block>) -> Block {
         blocks,
     }
 }
-
-/// Per number format id without a known code: how many cells, and the first cell.
-type Unapplied = BTreeMap<u32, (u64, (u32, u32))>;

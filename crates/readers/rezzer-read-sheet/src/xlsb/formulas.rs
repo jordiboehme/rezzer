@@ -135,23 +135,6 @@ pub(super) fn merge_formula_cells(
     missing
 }
 
-/// The text of a cell as shown: dates in ISO form, numbers in general form.
-pub(super) fn shown(c: &RawCell, dates: &HashMap<(u32, u32), u32>, system: DateSystem) -> String {
-    match &c.val {
-        Val::Empty => String::new(),
-        Val::Num(v) => {
-            let code = dates
-                .get(&(c.row, c.col))
-                .and_then(|k| DATE_CODES.get(*k as usize))
-                .copied()
-                .unwrap_or("General");
-            numfmt::format_with(code, *v, system).text
-        }
-        Val::Text(s) | Val::Error(s) | Val::Iso(s) => s.clone(),
-        Val::Bool(b) => if *b { "TRUE" } else { "FALSE" }.to_string(),
-    }
-}
-
 /// Calls in a formula text that calamine writes for tokens it does not resolve: an add-in
 /// or newer Excel function (`EXTERNAL_WB_NAME`) or a user-defined function (`User(`).
 fn unresolved_call(text: &str) -> bool {

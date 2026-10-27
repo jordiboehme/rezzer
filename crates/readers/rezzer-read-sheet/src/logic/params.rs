@@ -6,6 +6,9 @@
 
 use super::*;
 
+/// The kind of edge in the dependency graph: `from` feeds `to` (`to` reads `from`).
+const EDGE_KIND: &str = "feeds";
+
 /// The value of a cell as a typed value; a number with a percent format is a percent.
 pub(crate) fn cell_value(val: &Val, code: Option<&str>) -> Option<Value> {
     match val {

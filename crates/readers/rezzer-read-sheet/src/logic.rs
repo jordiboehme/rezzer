@@ -28,10 +28,12 @@ use crate::units;
 mod calls;
 mod labels;
 mod params;
+mod pass;
 
-pub(crate) use calls::*;
+use calls::*;
 pub(crate) use labels::*;
 pub(crate) use params::*;
+pub(crate) use pass::*;
 
 /// Excel's own maximum length of a formula, in characters. Longer texts are refused.
 pub(crate) const MAX_FORMULA_CHARS: usize = 8_192;

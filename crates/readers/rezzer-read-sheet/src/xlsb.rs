@@ -667,3 +667,20 @@ pub(crate) fn read(bytes: &[u8], budget: &Budget, mut out: Out) -> ReadOutcome {
     crate::logic::workbook_logic(&mut out, formulas, facts, state, budget);
     out.finish()
 }
+
+/// The text of a cell as shown: dates in ISO form, numbers in general form.
+fn shown(c: &RawCell, dates: &HashMap<(u32, u32), u32>, system: DateSystem) -> String {
+    match &c.val {
+        Val::Empty => String::new(),
+        Val::Num(v) => {
+            let code = dates
+                .get(&(c.row, c.col))
+                .and_then(|k| DATE_CODES.get(*k as usize))
+                .copied()
+                .unwrap_or("General");
+            numfmt::format_with(code, *v, system).text
+        }
+        Val::Text(s) | Val::Error(s) | Val::Iso(s) => s.clone(),
+        Val::Bool(b) => if *b { "TRUE" } else { "FALSE" }.to_string(),
+    }
+}
