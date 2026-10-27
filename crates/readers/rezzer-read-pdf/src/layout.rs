@@ -542,12 +542,19 @@ impl Style {
         if !self.may_head(line) {
             return None;
         }
+        // A size the style pass did not see as a heading size (its line there held a smaller
+        // cell beside it, which a table took later) takes its place among the sizes.
         let key = size_key(line.size);
         let index = self
             .heading_sizes
             .iter()
             .position(|s| size_key(*s) == key)
-            .unwrap_or(SIZE_LEVELS - 1);
+            .unwrap_or_else(|| {
+                self.heading_sizes
+                    .iter()
+                    .filter(|s| size_key(**s) > key)
+                    .count()
+            });
         Some(index.min(SIZE_LEVELS - 1) as u8 + 1)
     }
 }
@@ -2768,6 +2775,28 @@ mod tests {
         assert_eq!(room.left.get(), 1_000 - (1 + 3 + 1 + LINK_COST));
         assert!(room.take(&UriTarget::new("\u{1}"), 1));
         assert_eq!(room.left.get(), 1_000 - (5 + LINK_COST) - (6 + LINK_COST));
+    }
+
+    /// Fix round 2 of Task 13, item 2: a heading whose size the style pass did not see as a
+    /// heading size (its line there held a smaller cell beside it) gets the level of its size
+    /// among the heading sizes, not the deepest level: a title larger than all but one heading
+    /// size is level 2.
+    #[test]
+    fn a_heading_size_not_seen_takes_its_place_among_the_sizes() {
+        let style = Style {
+            body_size: 7.0,
+            heading_sizes: vec![20.0, 12.0],
+            ..Style::default()
+        };
+        let runs = [run("Rechnung", 0, 690.0, 14.0)];
+        assert_eq!(style.heading_level(&line(&runs)), Some(2));
+        let runs = [run("Rechnung", 0, 690.0, 24.0)];
+        assert_eq!(style.heading_level(&line(&runs)), Some(1));
+        // A size seen keeps its place; one smaller than all is the deepest level.
+        let runs = [run("Rechnung", 0, 690.0, 12.0)];
+        assert_eq!(style.heading_level(&line(&runs)), Some(2));
+        let runs = [run("Rechnung", 0, 690.0, 11.0)];
+        assert_eq!(style.heading_level(&line(&runs)), Some(3));
     }
 
     #[test]
