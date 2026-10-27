@@ -1091,9 +1091,18 @@ pub(crate) enum Neighbour {
     /// A grid of two fields a row beside it on the same top rule, with rows of another pitch.
     Beside,
     /// A rule across the page a row pitch and a half over the grid's top rule (a section's
-    /// rule), or as far under its last rule, its two rules framing nothing of the grid.
+    /// rule), or as far under its last rule. Under a grid of labels under their values, the
+    /// rule under its last labels makes them a row of labels only, as the empty last row of a
+    /// grid of labels over values is: neither reading is clear, so every field of the grid is
+    /// to stay text with a loss.
     RuleOver,
     RuleUnder,
+    /// A data line at the values' depth over the top rule with a value at each field start of
+    /// the grid's last row. Over rows of fields whose rows have the same fields it fills the
+    /// first row: one complete end, which a grid of labels under their values could have as
+    /// well. Neither reading is clear, so every field of the grid is to stay text with a loss.
+    /// Over the header grid, whose first row has other fields, it fills only some: it pairs.
+    FullLine,
     /// A short data line at the values' depth over the top rule from the first field's start,
     /// and the column titles alone under the last rule. When they could head every lowest
     /// field with a value, the same page is a grid of labels under their values whose first row
@@ -1202,6 +1211,22 @@ pub(crate) fn neighbour(g: &Geo, b: &mut Built, at: GridAt, n: Neighbour) {
                 at.bottom - 1.5 * h
             };
             b.page.template += &g.hrule(g.col(0) - 0.6 * d, g.col(70), y);
+            if n == Neighbour::RuleUnder && at.under {
+                for f in &mut b.fields {
+                    f.1 = Err(());
+                }
+            }
+        }
+        Neighbour::FullLine => {
+            let words = ["Lohn", "Okt", "Jahr"];
+            let parts: Vec<(usize, &str)> = at.starts.iter().copied().zip(words).collect();
+            at.data(g, b, at.top + 0.17 * d, &parts);
+            b.values.extend(parts.iter().map(|p| p.1.to_string()));
+            if at.courier {
+                for f in &mut b.fields {
+                    f.1 = Err(());
+                }
+            }
         }
         Neighbour::LineAndTitles => {
             let t = "Abrechnung";

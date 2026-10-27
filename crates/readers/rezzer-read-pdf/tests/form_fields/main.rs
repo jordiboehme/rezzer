@@ -498,6 +498,111 @@ fn labels_under_values_with_an_empty_first_row_give_a_loss() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// Three rows of two fields, the last row's values empty.
+const EMPTY_LAST: [&[FieldSpec]; 3] = [
+    &[
+        (0, 30, "Name", "Erika Mustermann"),
+        (30, 20, "Ort", "Musterstadt"),
+    ],
+    &[(0, 30, "Strasse", "Musterweg 1"), (30, 20, "Hausnr", "12")],
+    &[(0, 30, "PLZ", ""), (30, 20, "Land", "")],
+];
+
+/// Three rows of one field each (no dividers), the last value empty or not.
+const ONE_FIELD_ROWS: [&[FieldSpec]; 3] = [
+    &[(0, 50, "Name", "Erika Mustermann")],
+    &[(0, 50, "Strasse", "Musterweg 1")],
+    &[(0, 50, "Ort", "")],
+];
+
+const ONE_FIELD_ROWS_FULL: [&[FieldSpec]; 3] = [
+    &[(0, 50, "Name", "Erika Mustermann")],
+    &[(0, 50, "Strasse", "Musterweg 1")],
+    &[(0, 50, "Ort", "Musterstadt")],
+];
+
+/// Grids of labels over values whose last row is empty or which have one field a row, with a
+/// line of data over the top rule, at every field start, and with or without the column title
+/// of a next table under the last rule, in the real look and each of [`looks`]. A last row of
+/// labels only looks like the labels under the last rule of a grid of labels under values,
+/// and one field a row is too little evidence for that reading: the fields never pair shifted.
+/// With a full line over them they stay text with a loss; with nothing over them they pair.
+#[test]
+fn grids_with_an_empty_last_row_or_one_field_a_row_never_pair_shifted() {
+    let mut reads = Vec::new();
+    for (look, g) in std::iter::once(("real", REAL)).chain(looks()) {
+        let top = 760.0 + g.dy;
+        let line = |b: &mut Built, parts: &[(usize, &'static str)]| {
+            for &(k, t) in parts {
+                b.page.template +=
+                    &draw::courier(g.col(k) + 0.3 * g.pitch(), top + 0.17 * g.data, g.data, t);
+                b.values.push(t.into());
+            }
+        };
+        let unclear = |b: &mut Built| {
+            for f in &mut b.fields {
+                f.1 = Err(());
+            }
+        };
+        // An empty last row and a line with a value at both field starts.
+        let mut b = rows_page(&g, &ROWS, &EMPTY_LAST, &[]);
+        line(&mut b, &[(0, "Abrechnung"), (30, "Oktober")]);
+        unclear(&mut b);
+        reads.push((format!("empty last row, a full line over it, {look}"), b));
+        // The same with nothing over it: it pairs.
+        let b = rows_page(&g, &ROWS, &EMPTY_LAST, &[]);
+        reads.push((format!("empty last row, {look}"), b));
+        // One field a row, its last value empty, a heading line over it.
+        let one = Rows {
+            dividers: false,
+            ..ROWS
+        };
+        let mut b = rows_page(&g, &one, &ONE_FIELD_ROWS, &[]);
+        line(&mut b, &[(0, "Abrechnung Oktober 2026")]);
+        unclear(&mut b);
+        reads.push((format!("one field a row, a line over it, {look}"), b));
+        // One field a row, all filled, a heading line over it and a column title under it.
+        let mut b = rows_page(&g, &one, &ONE_FIELD_ROWS_FULL, &[]);
+        line(&mut b, &[(0, "Abrechnung Oktober 2026")]);
+        let bottom = top - 3.0 * 2.4 * g.data;
+        b.page.template += &draw::courier(
+            g.col(0) + 0.18 * g.label,
+            bottom - 0.86 * g.data,
+            g.label,
+            "Lohnart",
+        );
+        unclear(&mut b);
+        reads.push((
+            format!("one field a row, a line over it and a title under it, {look}"),
+            b,
+        ));
+    }
+    let reads = reads
+        .into_iter()
+        .map(|(name, b)| {
+            let out = read_pages(&[&b]);
+            let mut broken = check_fields(&out, &b);
+            // A loss names each label once.
+            for l in &out.document.losses {
+                let Some(names) = l
+                    .what
+                    .strip_prefix("the fields ")
+                    .and_then(|w| w.split(" of a row").next())
+                else {
+                    continue;
+                };
+                let list: Vec<&str> = names.split(", ").collect();
+                if (1..list.len()).any(|k| list[..k].contains(&list[k])) {
+                    broken.push(Broken(Inv::UnclearSaid, format!("named twice: {}", l.what)));
+                }
+            }
+            (name, broken)
+        })
+        .collect();
+    let wrong = unexpected(reads, &[]);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// A row between two rules, parted by a divider, whose every cell holds text in three styles
 /// (a caption, a line of text and a note, as on a page of prose between rules): it never
 /// looked like a row of fields, so it gives no loss.
@@ -925,6 +1030,18 @@ fn grids() -> Vec<(&'static str, Grid)> {
             };
             (rows_page(g, &ROWS, &THREE_ROWS, &[]), at)
         }),
+        ("rows with an empty last row", |g| {
+            let top = 760.0 + g.dy;
+            let at = GridAt {
+                top,
+                bottom: top - 3.0 * 2.4 * g.data,
+                starts: &[0, 30],
+                under: false,
+                courier: true,
+                whole_bottom: false,
+            };
+            (rows_page(g, &ROWS, &EMPTY_LAST, &[]), at)
+        }),
         ("labels under values", |g| {
             let s = Rows {
                 under: true,
@@ -969,6 +1086,10 @@ fn neighbours(under: bool) -> Vec<(&'static str, Neighbour)> {
             (
                 "a short line over it and column titles alone under it",
                 Neighbour::LineAndTitles,
+            ),
+            (
+                "a line with a value at every field start over it",
+                Neighbour::FullLine,
             ),
         ]);
     }

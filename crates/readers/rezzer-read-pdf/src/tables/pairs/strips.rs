@@ -559,7 +559,12 @@ pub(in crate::tables) fn field_strips(
             Ends::Unclear(below) => {
                 let mut names: Vec<String> = list.iter().map(|f| words(flow, &f.label)).collect();
                 for line in lines_of(flow, &below) {
-                    names.extend(labels_in_line(flow, &line).iter().map(|l| words(flow, l)));
+                    for l in labels_in_line(flow, &line) {
+                        let name = words(flow, &l);
+                        if !names.contains(&name) {
+                            names.push(name);
+                        }
+                    }
                 }
                 say(unsure, &names, UNDER_UNCLEAR);
                 for &i in runs.iter().chain(&below) {
@@ -868,7 +873,7 @@ fn ends(
     };
     // Under the bottom rule: labels under every strip with values and no values under it.
     // A strip of labels only under it (a rule drawn under the last labels) holds them.
-    let (mut below, mut bottom) = (Vec::new(), true);
+    let (mut below, mut bottom, mut own) = (Vec::new(), true, false);
     for (s, (_, values)) in &rows {
         let under: Vec<_> = rows
             .iter()
@@ -902,6 +907,7 @@ fn ends(
                 })
                 .collect()
         } else {
+            own = true;
             under
                 .iter()
                 .flat_map(|(_, r)| r.0.iter().copied())
@@ -994,7 +1000,30 @@ fn ends(
         above.extend(found);
     }
     let top = !above.is_empty() && clear;
-    match (bottom, top) {
+    // The labels of a row of labels only in the group are its own empty last row as well as
+    // the labels over a rule drawn under the last labels: no evidence of labels under values
+    // beyond the group. One field a row is too little evidence at each end for that reading.
+    let single = rows.iter().all(|(s, (labels, _))| {
+        labels_in_line(flow, labels).len() == 1
+            && !rows.iter().any(|(t, _)| {
+                !std::ptr::eq(*s, *t) && near(t.top, s.top) && near(t.bottom, s.bottom)
+            })
+    });
+    match (bottom && !own, top) {
+        _ if single => {
+            if bottom && top {
+                Ends::Unclear(below)
+            } else {
+                Ends::Over
+            }
+        }
+        _ if own && bottom => {
+            if top {
+                Ends::Unclear(Vec::new())
+            } else {
+                Ends::Over
+            }
+        }
         (true, true) => Ends::Under(above, below),
         (true, false) => Ends::Unclear(below),
         // The values over the top rule are not those of a next table: they are not named.
