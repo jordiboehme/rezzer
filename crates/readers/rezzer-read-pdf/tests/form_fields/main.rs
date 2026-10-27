@@ -476,6 +476,97 @@ fn labels_under_values_with_a_line_over_an_empty_first_row_give_a_loss() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// Rows of fields with their labels under the rule their values stand on, the first row's
+/// values empty and nothing over the top rule: the labels under the bottom rule show labels
+/// under values, but the same page is a grid of labels over values with the column titles of
+/// a table under it. Neither reading is clear: no field pairs (never a label with the value of
+/// the row under it), and a loss names them all.
+#[test]
+fn labels_under_values_with_an_empty_first_row_give_a_loss() {
+    let s = Rows {
+        under: true,
+        ..ROWS
+    };
+    let all = ["Name", "Ort", "Strasse", "Hausnr", "PLZ", "Land"];
+    let mut reads = Vec::new();
+    for (geo, g) in geometries().into_iter().chain(looks()) {
+        let b = rows_page(&g, &s, &EMPTY_FIRST, &all);
+        let out = read_pages(&[&b]);
+        reads.push((geo.to_string(), check_fields(&out, &b)));
+    }
+    let wrong = unexpected(reads, &[]);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// A row between two rules, parted by a divider, whose every cell holds text in three styles
+/// (a caption, a line of text and a note, as on a page of prose between rules): it never
+/// looked like a row of fields, so it gives no loss.
+#[test]
+fn a_row_of_three_styles_between_rules_gives_no_loss() {
+    let mut b = rows_page(
+        &REAL,
+        &ROWS,
+        &[&[(0, 30, "Abb", ""), (30, 20, "Tab", "")]],
+        &[],
+    );
+    let (top, d) = (760.0, REAL.data);
+    for k in [0usize, 30] {
+        let x = REAL.col(k) + 0.3 * REAL.pitch();
+        b.page.template += &draw::courier(x, top - 1.5 * d, d, "Muster");
+        b.page.template += &draw::courier(x, top - 2.2 * d, 0.8 * d, "Beispiel");
+    }
+    b.fields.clear();
+    let out = read_pages(&[&b]);
+    let row: Vec<&str> = out
+        .document
+        .losses
+        .iter()
+        .map(|l| l.what.as_str())
+        .filter(|w| w.contains("row of fields"))
+        .collect();
+    assert!(row.is_empty(), "{row:#?}");
+}
+
+/// A bold heading over lines of smaller prose between two rules (a picture of a page): its
+/// first style met is the larger one, but its text is longer than a field's, so it never looked
+/// like a row of fields and gives no loss.
+#[test]
+fn a_heading_over_prose_between_rules_gives_no_loss() {
+    // Without dividers a vertical rule stands far from the row: the page has both directions.
+    let s = Rows {
+        dividers: false,
+        ..ROWS
+    };
+    let mut b = rows_page(&REAL, &s, &[&[(0, 60, "Abb", "")]], &[]);
+    let (top, d) = (760.0, REAL.data);
+    b.page.template = b.page.template.replacen(
+        &format!("{} Td (Abb)", top - 0.86 * d),
+        &format!("{} Td ()", top - 0.86 * d),
+        1,
+    );
+    b.page.template += &draw::bold(REAL.col(0), top - 0.7 * d, 0.7 * d, "MUSTER");
+    for (k, l) in [
+        "Das Muster ist ein Beispiel fuer einen Text ueber",
+        "mehrere Zeilen, der in einem Rahmen steht und",
+    ]
+    .iter()
+    .enumerate()
+    {
+        b.page.template +=
+            &draw::plain(REAL.col(0), top - 1.3 * d - 0.5 * d * k as f32, 0.4 * d, l);
+    }
+    b.fields.clear();
+    let out = read_pages(&[&b]);
+    let row: Vec<&str> = out
+        .document
+        .losses
+        .iter()
+        .map(|l| l.what.as_str())
+        .filter(|w| w.contains("row of fields"))
+        .collect();
+    assert!(row.is_empty(), "{row:#?}");
+}
+
 /// A row of fields between two rules, parted by a divider, whose every field has its label
 /// under its value: no field is read as labels and values, and a loss says that the row's text
 /// is read as it stands, though it names no label (it cannot tell which text is one).

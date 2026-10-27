@@ -353,8 +353,9 @@ fn holds_fields(flow: &Flow, fr: &Frame, ids: &[usize], inner: &[f32]) -> bool {
 /// its labels stand under the rule their values stand on (see [`ends`]; only text no row of
 /// fields holds counts, every group read the normal way first): its fields are then read that way (see
 /// [`pair_under`]), or left as text with a loss when that is not clear. Runs `busy` names are
-/// not looked at. The runs of each table found go to `claimed` under
-/// its place in `tables`.
+/// not looked at. The runs of each table found go to `claimed` under its place in `tables`;
+/// the runs of a row or a group left as text with a loss are marked in `kept`, so that no later
+/// table takes them: a table of the text of fields reads as pairs too.
 #[allow(clippy::too_many_arguments)]
 pub(in crate::tables) fn field_strips(
     page: u32,
@@ -364,6 +365,7 @@ pub(in crate::tables) fn field_strips(
     busy: &dyn Fn(usize) -> bool,
     text_sizes: &[f32],
     claimed: &mut [Option<(usize, usize, usize)>],
+    kept: &mut [bool],
     tables: &mut Vec<Planned>,
     unsure: &mut Vec<String>,
 ) {
@@ -423,7 +425,9 @@ pub(in crate::tables) fn field_strips(
         }
         let mut fields: Vec<Field> = Vec::new();
         let mut left_out: Vec<(&'static str, Vec<String>)> = Vec::new();
-        let (mut fits, mut unread) = (true, None);
+        // A cell not clear for a reason of fields (a label under its value, a weight only) whose
+        // text is as short as a field's (see [`field_sized`]), not for its many styles alone.
+        let (mut fits, mut unread, mut field_why) = (true, false, None);
         for (c, cell) in cells.iter().enumerate().filter(|(_, c)| !c.is_empty()) {
             let why = if over[c] {
                 Some(ACROSS)
@@ -435,7 +439,12 @@ pub(in crate::tables) fn field_strips(
                                 Parsed::Fields(f) if f.iter().all(|f| short(flow, f)) => {
                                     fields.extend(f);
                                 }
-                                Parsed::Unsure(why) => unread = unread.or(Some(why)),
+                                Parsed::Unsure(why) => {
+                                    unread = true;
+                                    if why != THREE_STYLES && field_sized(flow, &part) {
+                                        field_why = field_why.or(Some(why));
+                                    }
+                                }
                                 _ => fits = false,
                             }
                         }
@@ -453,17 +462,24 @@ pub(in crate::tables) fn field_strips(
         }
         // Text that is not fields makes the strip no row of fields; labels and values in the
         // wrong places beside fields read right make it one that is not clear, and that is
-        // said. A row whose every field is not clear is said too, without names: which of its
-        // text is a label is what is not clear.
+        // said. A row whose every field is not clear for a reason of fields is said too,
+        // without names: which of its text is a label is what is not clear. Text in three
+        // styles alone is no sign of a row of fields (a caption, prose and a note between
+        // rules), so it is not said.
         if !fits {
             continue;
         }
-        if let Some(why) = unread {
-            if fields.is_empty() {
-                say(unsure, &[], why);
-            } else {
+        if unread {
+            if !fields.is_empty() {
                 let names: Vec<String> = cells.iter().flat_map(|c| label_names(flow, c)).collect();
                 say(unsure, &names, NOT_FIELDS);
+            } else if let Some(why) = field_why {
+                say(unsure, &[], why);
+            } else {
+                continue;
+            }
+            for &i in &ids {
+                kept[i] = true;
             }
             continue;
         }
@@ -507,9 +523,18 @@ pub(in crate::tables) fn field_strips(
         }
         // One field alone between its rules reads like a caption over a line: it is not
         // paired, and that is said.
+        // The runs of the group, kept as text when it is not paired.
+        let runs: Vec<usize> = list
+            .iter()
+            .flat_map(|f| f.label.iter().chain(&f.value))
+            .copied()
+            .collect();
         if list.len() < 2 {
             let names: Vec<String> = list.iter().map(|f| words(flow, &f.label)).collect();
             say(unsure, &names, LONE);
+            for &i in &runs {
+                kept[i] = true;
+            }
             continue;
         }
         let free = |i: usize| !busy(i) && !held.contains(&i) && !outside.contains(&i);
@@ -525,6 +550,9 @@ pub(in crate::tables) fn field_strips(
                 _ => {
                     let names: Vec<String> = list.iter().map(|f| words(flow, &f.label)).collect();
                     say(unsure, &names, UNDER_UNCLEAR);
+                    for &i in runs.iter().chain(&below) {
+                        kept[i] = true;
+                    }
                     continue;
                 }
             },
@@ -534,6 +562,9 @@ pub(in crate::tables) fn field_strips(
                     names.extend(labels_in_line(flow, &line).iter().map(|l| words(flow, l)));
                 }
                 say(unsure, &names, UNDER_UNCLEAR);
+                for &i in runs.iter().chain(&below) {
+                    kept[i] = true;
+                }
                 continue;
             }
         };
@@ -544,6 +575,25 @@ pub(in crate::tables) fn field_strips(
         claim(claimed, tables.len(), &list);
         tables.push(p);
     }
+}
+
+/// Whether the text of a part of a cell is as short as a field's: by style, the text of some
+/// style as short as a label, and the text of every style as short as a value. A heading over
+/// lines of prose between rules is no field whose label stands under its value.
+fn field_sized(flow: &Flow, part: &[usize]) -> bool {
+    let mut by_style: Vec<(Style, Vec<usize>)> = Vec::new();
+    for &i in part.iter().filter(|&&i| inked(&flow.runs[i])) {
+        let s = style_of(&flow.runs[i]);
+        match by_style.iter_mut().find(|b| b.0 == s) {
+            Some(b) => b.1.push(i),
+            None => by_style.push((s, vec![i])),
+        }
+    }
+    let text: Vec<String> = by_style.iter().map(|b| words(flow, &b.1)).collect();
+    text.iter().all(|t| t.chars().count() <= VALUE_CHARS)
+        && text.iter().any(|t| {
+            t.chars().count() <= LABEL_CHARS && t.split_whitespace().count() <= LABEL_WORDS
+        })
 }
 
 /// The groups of `strips` (sorted top first, then left to right) that make one table each, in
@@ -702,9 +752,8 @@ enum Ends {
     /// The labels stand under the rule their values stand on: the values over the top rule
     /// and the labels under the bottom rule, field for field.
     Under(Vec<usize>, Vec<usize>),
-    /// The labels under the bottom rule show labels under values, but over the top rule stand
-    /// runs in the values' role that are not field for field: neither reading is clear. The
-    /// labels under the bottom rule, to name them.
+    /// One end is complete and the other is not: neither reading is clear. The labels under
+    /// the bottom rule when that end is complete, to name them.
     Unclear(Vec<usize>),
 }
 
@@ -718,28 +767,28 @@ fn in_role(set: &[(Style, u32)], r: &Run) -> bool {
 
 /// The text just beyond the group `g` of `strips` that shows its labels stand under the rule
 /// their values stand on (a signature line). Only a group whose every strip is one line of
-/// labels over one line of values can show it, and only by evidence at both ends, among the
-/// runs `free` allows (the runs of no row of fields):
+/// labels over one line of values can show it, among the runs `free` allows (the runs of no
+/// row of fields). Each end is complete when, field for field, every field of its strips has
+/// one run:
 /// - under the bottom rule of every strip with values and no values under it, runs in the
 ///   role (style and font family) of the group's labels, as far under the rule as its labels
 ///   stand under theirs (half a size of play): the labels of a strip of labels only under it
 ///   (a rule drawn under the last labels), or else free runs with no run in the values' role
 ///   under them within one row pitch or up to the next rule of a frame; each label heads a
 ///   field of that strip that holds one of its values, at the offset from label to value the
-///   group shows inside its strips (a character of play), and crosses no divider;
+///   group shows inside its strips (a character of play), crosses no divider, and each value
+///   has one;
 /// - over the top rule of every strip with no strip over it, runs in the values' role as far
 ///   over the rule as its values stand over theirs, with no label over them within the same
 ///   reach; each value starts within a character of the start of a field of that strip (where
 ///   one of its labels starts, or the divider or left end before it), crosses no divider, and
 ///   every field has one.
 ///
-/// Without the labels under the bottom rule the group reads labels over values, whatever
-/// stands over its top rule (a data line, a title, a date); without anything over its top rule
-/// as well. With the labels under the bottom rule and a value over the top rule for every field,
-/// its labels stand under their values; with them and runs over the top rule that are not
-/// field for field (a line across a divider, a value of some fields only), it is not clear:
-/// the same page may be a grid with its labels over its values beside a line over it and the
-/// column titles of a table under it.
+/// Both ends complete: its labels stand under their values. One end complete is not clear:
+/// a grid of labels under values whose first row is empty, or whose last labels are missing,
+/// looks the same as a grid of labels over values with the column titles of a table under it
+/// or a line of values over it. Neither end complete (nothing there, a title, a data line
+/// across a divider, a value of some fields only): the group reads labels over values.
 fn ends(
     flow: &Flow,
     by_y: &ByY,
@@ -819,7 +868,7 @@ fn ends(
     };
     // Under the bottom rule: labels under every strip with values and no values under it.
     // A strip of labels only under it (a rule drawn under the last labels) holds them.
-    let mut below = Vec::new();
+    let (mut below, mut bottom) = (Vec::new(), true);
     for (s, (_, values)) in &rows {
         let under: Vec<_> = rows
             .iter()
@@ -859,32 +908,28 @@ fn ends(
                 .filter(|&i| at_depth(i))
                 .collect()
         };
-        if found.is_empty() {
-            return Ends::Over;
-        }
-        // Each label heads a field of the strip with one of its values in it.
-        let mut headed: HashSet<usize> = HashSet::new();
+        // Each label heads a field of the strip with one of its values in it, and each value
+        // of the strip has its label.
+        let fields = labels_in_line(flow, &by_x(values.clone()));
+        let mut headed = vec![false; fields.len()];
         for label in labels_in_line(flow, &by_x(found.clone())) {
             let l = &flow.runs[label[0]];
-            let value = values.iter().copied().find(|&v| {
-                let r = &flow.runs[v];
-                ((r.x - l.x) - offset).abs() <= CHAR * r.size.max(1.0) && !headed.contains(&v)
+            let value = fields.iter().position(|f| {
+                let r = &flow.runs[f[0]];
+                ((r.x - l.x) - offset).abs() <= CHAR * r.size.max(1.0)
             });
             let crossed = label
                 .iter()
                 .any(|&i| s.dividers.iter().any(|&d| across(&flow.runs[i], d)));
             match value {
-                Some(v) if !crossed => {
-                    headed.insert(v);
-                }
-                _ => return Ends::Over,
+                Some(v) if !crossed && !headed[v] => headed[v] = true,
+                _ => bottom = false,
             }
         }
+        bottom &= headed.iter().all(|h| *h);
         below.extend(found);
     }
-    if below.is_empty() {
-        return Ends::Over;
-    }
+    bottom &= !below.is_empty();
     // Over the top rule: values over every strip with none over it, field for field.
     let mut above = Vec::new();
     let mut clear = true;
@@ -948,10 +993,13 @@ fn ends(
         clear &= taken.iter().all(|t| *t);
         above.extend(found);
     }
-    match (above.is_empty(), clear) {
-        (true, _) => Ends::Over,
-        (false, true) => Ends::Under(above, below),
-        (false, false) => Ends::Unclear(below),
+    let top = !above.is_empty() && clear;
+    match (bottom, top) {
+        (true, true) => Ends::Under(above, below),
+        (true, false) => Ends::Unclear(below),
+        // The values over the top rule are not those of a next table: they are not named.
+        (false, true) => Ends::Unclear(Vec::new()),
+        (false, false) => Ends::Over,
     }
 }
 

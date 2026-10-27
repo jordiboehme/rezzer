@@ -674,6 +674,7 @@ pub(super) fn ruled(
         &frames,
         &busy,
         &mut claimed,
+        &mut held,
         &mut tables,
         found,
     );
@@ -845,7 +846,7 @@ fn totals_tables(
 }
 
 /// The rows of fields between rules in `frames`, among the runs `busy` does not name, planned
-/// in `tables` with their runs in `claimed`.
+/// in `tables` with their runs in `claimed`; the runs of rows left as text go to `held`.
 #[allow(clippy::too_many_arguments)]
 fn strip_tables(
     page: u32,
@@ -854,6 +855,7 @@ fn strip_tables(
     frames: &[Frame],
     busy: &[bool],
     claimed: &mut [Claim],
+    held: &mut [bool],
     tables: &mut Vec<Planned>,
     found: &mut Found,
 ) {
@@ -867,6 +869,7 @@ fn strip_tables(
         &|i| busy[i],
         &text_sizes,
         &mut strip_claims,
+        held,
         tables,
         &mut found.uncertain,
     );

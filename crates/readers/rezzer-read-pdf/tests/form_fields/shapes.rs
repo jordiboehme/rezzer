@@ -1082,6 +1082,9 @@ pub(crate) enum Neighbour {
     /// The column titles of the next table in the labels' style, as far under the last rule
     /// of labels as labels stand under their rules and at the field starts of the last row,
     /// no rule under them; with lines of that table in the data font under them, or alone.
+    /// Alone under a grid of labels over values where they could head every lowest field with
+    /// a value, the same page is a grid of labels under their values with an empty first row:
+    /// neither reading is clear, so every field of the grid is to stay text with a loss.
     ColumnTitles {
         body: bool,
     },
@@ -1181,6 +1184,10 @@ pub(crate) fn neighbour(g: &Geo, b: &mut Built, at: GridAt, n: Neighbour) {
                         .collect();
                     at.data(g, b, base - 1.2 * d * (n as f32 + 1.0), &parts);
                     b.values.extend(parts.iter().map(|p| p.1.to_string()));
+                }
+            } else if at.whole_bottom && !at.under {
+                for f in &mut b.fields {
+                    f.1 = Err(());
                 }
             }
         }
