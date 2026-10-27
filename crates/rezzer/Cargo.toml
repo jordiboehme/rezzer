@@ -31,6 +31,7 @@ rezzer-read-sheet = { path = "../readers/rezzer-read-sheet", optional = true, de
 rezzer-read-pdf = { path = "../readers/rezzer-read-pdf", optional = true }
 
 [dev-dependencies]
+rezzer-derez = { path = "../rezzer-derez" }
 rezzer-model = { path = "../rezzer-model" }
 rezzer-pipeline = { path = "../rezzer-pipeline" }
 insta.workspace = true

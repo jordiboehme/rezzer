@@ -6909,3 +6909,27 @@ fn long_own_description_stays_one_scalar() {
     let at = scalars.iter().position(|s| s == "description").unwrap();
     assert_eq!(scalars[at + 1], long.trim());
 }
+
+#[test]
+fn geometry_does_not_change_markdown() {
+    for plain in [rich_document(), paged_document()] {
+        let mut with = plain.clone();
+        let mut g = rezzer_model::Geometry::default();
+        assert!(g.add_page(1, [612.0, 792.0]));
+        assert!(g.push(
+            1,
+            rezzer_model::PlacedBox {
+                kind: rezzer_model::BoxKind::Text,
+                bounds: [10.0, 10.0, 100.0, 40.0],
+                anchor: None,
+            }
+        ));
+        with.geometry = Some(Box::new(g));
+        for completeness in [Completeness::Complete, Completeness::Partial] {
+            assert_eq!(
+                render(&plain, completeness, &opts()),
+                render(&with, completeness, &opts())
+            );
+        }
+    }
+}

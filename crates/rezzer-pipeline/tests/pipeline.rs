@@ -2996,3 +2996,71 @@ fn a_failed_check_creates_no_folder() {
     );
     assert!(!out.join("notes.txt.assets").exists());
 }
+
+/// A text reader that records whether each read asked for page geometry.
+struct GeometrySeen {
+    seen: Arc<std::sync::Mutex<Vec<bool>>>,
+}
+
+impl Reader for GeometrySeen {
+    fn id(&self) -> &'static str {
+        "geometry-seen"
+    }
+    fn version(&self) -> &'static str {
+        "1.0.0"
+    }
+    fn formats(&self) -> &'static [FormatId] {
+        &[FormatId::Text]
+    }
+    fn read(&self, src: &Source, opts: &ReadOptions, _budget: &Budget) -> ReadOutcome {
+        self.seen.lock().unwrap().push(opts.geometry);
+        let mut document = Document::new(source_info(src));
+        if opts.geometry {
+            // Marks the document of a geometry run, so a store of it would show later.
+            document.body.push(Block::Paragraph {
+                inlines: vec![Inline::Text {
+                    text: "with geometry".into(),
+                    emphasis: false,
+                    strong: false,
+                    strike: false,
+                }],
+                role: None,
+                anchor: None,
+            });
+        }
+        ReadOutcome {
+            blobs: Vec::new(),
+            document,
+            completeness: Completeness::Complete,
+        }
+    }
+}
+
+#[test]
+fn geometry_request_skips_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut registry = Registry::new();
+    registry.register(Box::new(GeometrySeen { seen: seen.clone() }));
+    let pipeline = Pipeline::new(config(Some(dir.path())), registry);
+    let geo = Request {
+        geometry: true,
+        ..request()
+    };
+    pipeline.run_bytes("a.txt", b"hello".to_vec(), None, &geo);
+    pipeline.run_bytes("a.txt", b"hello".to_vec(), None, &geo);
+    assert_eq!(*seen.lock().unwrap(), [true, true]);
+    assert!(cache_files(dir.path()).is_empty());
+    seen.lock().unwrap().clear();
+    // A normal run stores the entry; a geometry run does not look it up.
+    pipeline.run_bytes("a.txt", b"hello".to_vec(), None, &request());
+    assert_eq!(cache_files(dir.path()).len(), 1);
+    pipeline.run_bytes("a.txt", b"hello".to_vec(), None, &geo);
+    assert_eq!(*seen.lock().unwrap(), [false, true]);
+    // The geometry run did not store: a later normal run takes the entry of the first
+    // normal run from the cache (no read) and it has no mark of the geometry run.
+    let later = pipeline.run_bytes("a.txt", b"hello".to_vec(), None, &request());
+    assert_eq!(*seen.lock().unwrap(), [false, true]);
+    assert!(paragraphs(&later.document.unwrap()).is_empty());
+    assert_eq!(cache_files(dir.path()).len(), 1);
+}

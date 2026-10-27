@@ -103,6 +103,9 @@ pub struct Request {
     /// The sheets to write, by name or `#n` (1-based position); empty writes all. Only
     /// changes rendering, so it is not part of the cache key.
     pub sheets: Vec<String>,
+    /// Ask the reader for page geometry. Such a run neither looks up nor stores the cache,
+    /// because the cache keeps the serialized model, which has no geometry.
+    pub geometry: bool,
 }
 
 impl Default for Request {
@@ -118,6 +121,7 @@ impl Default for Request {
             cancel: CancelToken::default(),
             table_style: None,
             sheets: Vec::new(),
+            geometry: false,
         }
     }
 }
@@ -135,6 +139,7 @@ impl fmt::Debug for Request {
             .field("cancelled", &self.cancel.is_cancelled())
             .field("table_style", &self.table_style)
             .field("sheets", &self.sheets)
+            .field("geometry", &self.geometry)
             .finish()
     }
 }
@@ -559,7 +564,7 @@ impl Pipeline {
         let cache = self
             .cache
             .as_ref()
-            .filter(|_| req.password.is_none() && req.output_dir.is_none());
+            .filter(|_| req.password.is_none() && req.output_dir.is_none() && !req.geometry);
         let key = cache.map(|_| cache::key(src, reader, &self.config));
         if let (Some(cache), Some(key)) = (cache, &key)
             && let Some((mut document, completeness)) = cache.get(key, src)
@@ -631,6 +636,7 @@ impl Pipeline {
         let opts = ReadOptions {
             extract_assets: req.output_dir.is_some(),
             password: req.password.clone(),
+            geometry: req.geometry,
         };
         match panics::contained(|| reader.read(src, &opts, &budget)) {
             Ok(outcome) => (

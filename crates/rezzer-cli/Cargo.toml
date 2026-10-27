@@ -12,6 +12,7 @@ rezzer-model = { path = "../rezzer-model" }
 rezzer-limits = { path = "../rezzer-limits" }
 rezzer-pipeline = { path = "../rezzer-pipeline" }
 rezzer-render = { path = "../rezzer-render" }
+rezzer-derez = { path = "../rezzer-derez" }
 clap = { workspace = true, features = ["derive"] }
 rezzer-mcp = { path = "../rezzer-mcp" }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
