@@ -5763,3 +5763,157 @@ fn rereview_r8_probes_give_no_wrong_date() {
         }
     }
 }
+
+#[test]
+fn rereview_r9_probes_give_no_wrong_date() {
+    // The probes of the round 9 re-review (Y1b with V1 to V3, Y3 with V12, and the checks
+    // beside them) as a test, with lists of dates beside a label too. A label marks a date
+    // only when it governs one date: no other date below the label in its column, no
+    // continuation rows in a two-column table, no dates under a date beside its label. Never
+    // a wrong date.
+    use HeadWant::*;
+    let one = Lost(ONE_DATE);
+    let two = Lost(TWO_DATES);
+    let three = Lost("3 dates stand in the head of page 1; none is marked as the document date");
+    let by_label = Date("2026-01-15", "date label \"Datum\" on page 1");
+    for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
+        for font in ["FL", "FB"] {
+            let s = |x: f32, y: f32, t: &str| common::show(font, size, x, y, t);
+            let ruled =
+                |rows: &[&[&str]], xs: &[f32], top: f32| ruled_rows(rows, xs, top, size, font);
+            let pitch = size * 1.2;
+            let below = 760.0 - pitch;
+            let title = common::show("FB", size * 1.6, 40.0, 800.0, "Musterbescheid");
+            let then_pos: &[&[&str]] = &[&["Datum", "15.01.2026"], &["Pos", "1"]];
+            let item_table: &[&[&str]] = &[&["Datum", "Betrag"], &["15.01.2026", "9,99"]];
+            let continued: &[&[&str]] = &[
+                &["Datum", "15.01.2026"],
+                &["", "16.01.2026"],
+                &["", "17.01.2026"],
+            ];
+            let two_cols = [40.0f32, 160.0];
+            let cases: Vec<(&str, String, HeadWant)> = vec![
+                (
+                    "V1: a list of entries of two lines each under Datum",
+                    title.clone()
+                        + &s(40.0, 760.0, "Datum")
+                        + &s(40.0, below, "15.01.2026")
+                        + &s(40.0, below - pitch, "Muster Text")
+                        + &s(40.0, below - 2.0 * pitch, "16.01.2026")
+                        + &s(40.0, below - 3.0 * pitch, "Muster Text"),
+                    two,
+                ),
+                (
+                    "V2: a loosely spaced list under Datum",
+                    title.clone()
+                        + &s(40.0, 760.0, "Datum")
+                        + &s(40.0, below, "15.01.2026")
+                        + &s(40.0, below - 2.6 * size, "16.01.2026")
+                        + &s(40.0, below - 5.2 * size, "17.01.2026"),
+                    three,
+                ),
+                (
+                    "V3: the second date of the list indented",
+                    title.clone()
+                        + &s(40.0, 760.0, "Datum")
+                        + &s(40.0, below, "15.01.2026")
+                        + &s(40.0 + size * 6.0, below - pitch, "16.01.2026"),
+                    two,
+                ),
+                (
+                    "V4: list entries of a date and text",
+                    title.clone()
+                        + &s(40.0, 760.0, "Datum")
+                        + &s(40.0, below, "15.01.2026")
+                        + &s(40.0, below - pitch, "16.01.2026 Muster"),
+                    two,
+                ),
+                (
+                    "V5: two lists side by side",
+                    title.clone()
+                        + &s(40.0, 760.0, "Datum")
+                        + &s(40.0, below, "15.01.2026")
+                        + &s(40.0, below - pitch, "16.01.2026")
+                        + &s(300.0, 760.0, "Datum")
+                        + &s(300.0, below, "15.01.2026"),
+                    two,
+                ),
+                (
+                    "V6: Datum over its date, Lieferdatum over its own below",
+                    title.clone()
+                        + &s(40.0, 760.0, "Datum")
+                        + &s(40.0, below, "01.02.2026")
+                        + &s(40.0, below - pitch, "Lieferdatum")
+                        + &s(40.0, below - 2.0 * pitch, "15.02.2026"),
+                    two,
+                ),
+                (
+                    "V7: Datum over its date, a date in another column one line lower",
+                    title.clone()
+                        + &s(40.0, 760.0, "Datum")
+                        + &s(40.0, below, "01.02.2026")
+                        + &s(300.0, below - pitch, "15.02.2026"),
+                    Date("2026-02-01", "date label \"Datum\" on page 1"),
+                ),
+                (
+                    "V8: Datum over its date, a word below",
+                    title.clone()
+                        + &s(40.0, 760.0, "Datum")
+                        + &s(40.0, below, "15.01.2026")
+                        + &s(40.0, below - pitch, "Summe"),
+                    by_label,
+                ),
+                (
+                    "V9: a column of dates offset half a size under Datum",
+                    title.clone()
+                        + &s(40.0, 760.0, "Datum")
+                        + &s(40.0 + size * 0.5, below, "15.01.2026")
+                        + &s(40.0 + size * 0.5, below - pitch, "16.01.2026"),
+                    two,
+                ),
+                (
+                    "V10: a two-column table, Datum row then Pos row",
+                    title.clone() + &ruled(then_pos, &two_cols, 750.0),
+                    by_label,
+                ),
+                (
+                    "V11: a two-column item table Datum | Betrag",
+                    title.clone() + &ruled(item_table, &two_cols, 750.0),
+                    one,
+                ),
+                (
+                    "V12: a Datum row with continuation rows",
+                    title.clone() + &ruled(continued, &two_cols, 750.0),
+                    three,
+                ),
+                (
+                    "B1: a list of dates under Datum 15.01.2026",
+                    title.clone()
+                        + &s(40.0, 760.0, "Datum 15.01.2026")
+                        + &s(40.0 + size * 4.0, below, "16.01.2026")
+                        + &s(40.0 + size * 4.0, below - pitch, "17.01.2026"),
+                    three,
+                ),
+                (
+                    "B2: Datum: and its value as pieces, a list of dates under the value",
+                    title.clone()
+                        + &s(40.0, 760.0, "Datum:")
+                        + &s(40.0 + size * 8.0, 760.0, "15.01.2026")
+                        + &s(40.0 + size * 8.0, below, "16.01.2026")
+                        + &s(40.0 + size * 8.0, below - pitch, "17.01.2026"),
+                    three,
+                ),
+            ];
+            for (name, head, want) in cases {
+                let out = read(&headed(&head, size, scale, ""));
+                let case = format!("{name} in {size} pt {font}");
+                assert_head(&out, want, &case);
+                let date = match want {
+                    Date(date, _) => Some(date),
+                    _ => None,
+                };
+                assert_eq!(front(&out, "source_date").as_deref(), date, "{case}");
+            }
+        }
+    }
+}
