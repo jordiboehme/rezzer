@@ -167,6 +167,8 @@ pub(super) fn borderless(
     // Tables of labels and values, and their rows whose one run holds label and value.
     let mut kv: Vec<usize> = Vec::new();
     let mut splits: Vec<(usize, usize)> = Vec::new();
+    // Tables whose first row is the line of titles of a frame of column titles over items.
+    let mut titled: Vec<usize> = Vec::new();
     // Tables with close titles to cut, and where (see [`Grid`]).
     let mut title_cuts: Vec<(usize, Vec<TitleCut>)> = Vec::new();
     for (g, (a, mut z, tail)) in regions.into_iter().enumerate() {
@@ -351,6 +353,9 @@ pub(super) fn borderless(
                             }
                         }
                     }
+                    if frame_titles(flow, &grid, &body_of, &found.body_labels) {
+                        titled.push(claim.len());
+                    }
                     if !grid.cuts.is_empty() {
                         title_cuts.push((claim.len(), grid.cuts));
                     }
@@ -436,12 +441,48 @@ pub(super) fn borderless(
         }
     }
     for (t, mut p) in planned.into_iter().enumerate() {
-        if !kv.contains(&t) {
+        if titled.contains(&t) {
+            p.header_rows = 1;
+        } else if !kv.contains(&t) {
             p.header_rows = header_of(&p.rows);
         }
         found.tables.push(p);
     }
     found.tables.sort_by_key(|t| t.at);
+}
+
+/// Whether the first row of `grid` is the line of titles of one frame of column titles over
+/// items (see [`Found::body_labels`]): all its runs are the frame's, and its text is the
+/// frame's titles.
+fn frame_titles(
+    flow: &Flow,
+    grid: &Grid,
+    body_of: &dyn Fn(usize) -> Option<u32>,
+    labels: &[Vec<String>],
+) -> bool {
+    let Some(first) = grid.rows.first() else {
+        return false;
+    };
+    let mut ranges: Vec<(usize, usize)> = first.iter().flat_map(|c| c.ranges.clone()).collect();
+    ranges.sort_unstable();
+    let Some(&(s, _)) = ranges.first() else {
+        return false;
+    };
+    let Some(frame) = body_of(s) else {
+        return false;
+    };
+    if !ranges
+        .iter()
+        .all(|&(s, e)| (s..e).all(|i| body_of(i) == Some(frame)))
+    {
+        return false;
+    }
+    let text: Vec<String> = ranges.iter().map(|&(s, e)| text_of(flow, s, e)).collect();
+    let titles = labels.get(frame as usize).map(|l| l.join(" "));
+    titles.is_some_and(|t| {
+        t.split_whitespace()
+            .eq(text.iter().flat_map(|t| t.split_whitespace()))
+    })
 }
 
 /// The lines right under a region that may go on in its last row: up to line `end`, either

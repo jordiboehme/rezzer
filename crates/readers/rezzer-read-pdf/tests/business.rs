@@ -1714,3 +1714,40 @@ fn a_note_across_a_gutter_in_a_frame_of_items_joins_no_cell() {
         wrong.join("\n")
     );
 }
+
+/// The reviewer's finding R3-M4: a row of fields read as a table whose first row holds the
+/// labels has them as its header row, also when no column under them holds numbers (three
+/// lines a field), in every size and look, alone and with an upright rule elsewhere.
+#[test]
+fn the_labels_over_a_row_of_fields_read_as_a_table_are_its_header() {
+    let mut wrong = Vec::new();
+    let mut tabled = 0;
+    for (name, values) in field_rows() {
+        for k in [0.75, 1.0, 1.5] {
+            for look in LOOKS {
+                for upright in [false, true] {
+                    let page = fields_row(k, look, &values, upright, false);
+                    let out = common::read(&page_in(&page, look));
+                    for (header_rows, rows) in tables(&out) {
+                        let titles = rows[0]
+                            .iter()
+                            .filter(|c| FIELD_LABELS.contains(&c.as_str()))
+                            .count();
+                        if titles < 2 {
+                            continue;
+                        }
+                        tabled += 1;
+                        if header_rows != 1 {
+                            wrong.push(format!(
+                                "{name}, {k}x, {look:?}, upright {upright}: header rows \
+                                 {header_rows}"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(tabled >= 200, "{tabled}");
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
