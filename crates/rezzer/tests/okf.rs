@@ -1037,8 +1037,9 @@ fn crystalline_version(text: &str) -> Option<(u32, u32, u32)> {
 /// The oldest Crystalline whose reading of Rezzer's output the tests rely on.
 const MIN_CRYSTALLINE: (u32, u32, u32) = (0, 29, 1);
 
-/// Fails the test when the `crystalline` of `cr` is older than [`MIN_CRYSTALLINE`].
-fn require_min_version(cr: &Isolated) {
+/// Fails the test when the `crystalline` of `cr` is older than [`MIN_CRYSTALLINE`]; returns
+/// what `crystalline --version` printed.
+fn require_min_version(cr: &Isolated) -> String {
     let (_, text, _) = cr.call(&["--version"], false);
     let version = crystalline_version(&text);
     let found = match version {
@@ -1050,10 +1051,12 @@ fn require_min_version(cr: &Isolated) {
         "crystalline on PATH is {found}; Rezzer's output needs 0.29.1 or later: update it or \
          take it off PATH"
     );
+    text
 }
 
 /// Writes `files` (path, text) into a fresh folder, imports it into a fresh domain, syncs,
-/// and returns `crystalline read <permalink> --json` of each file by its path.
+/// and returns `crystalline read <permalink> --json` of each file by its path. A file the
+/// import derives no permalink for cannot be read by one and is left out.
 fn import_probe(cr: &Isolated, files: &[(&str, &str)]) -> BTreeMap<String, Value> {
     let src = cr.root.join("probe-src");
     let dom = cr.root.join("probe-dom");
@@ -1076,19 +1079,17 @@ fn import_probe(cr: &Isolated, files: &[(&str, &str)]) -> BTreeMap<String, Value
     let mut read = BTreeMap::new();
     for file in import["files"].as_array().unwrap() {
         let path = file["path"].as_str().unwrap().to_string();
-        let permalink = file["changes"]
+        // `import --json` has no permalink field of its own (a file has `path`, `action`
+        // and `changes`), so it is taken from the change the import reports.
+        let Some(permalink) = file["changes"]
             .as_array()
             .into_iter()
             .flatten()
             .filter_map(Value::as_str)
             .find_map(|c| c.strip_prefix("permalink: missing -> `")?.strip_suffix('`'))
-            .or_else(|| {
-                // A name the import derives no permalink from carries its own.
-                let (_, text) = files.iter().find(|(p, _)| *p == path)?;
-                let line = text.lines().find_map(|l| l.strip_prefix("permalink: "))?;
-                Some(line.trim_matches('"'))
-            })
-            .unwrap_or_else(|| panic!("{path}: no permalink in {file}"));
+        else {
+            continue;
+        };
         let engram =
             serde_json::from_str(&cr.run(&["read", permalink, "--domain", "probe", "--json"]))
                 .unwrap();
@@ -1119,9 +1120,8 @@ fn crystalline_imports_without_errors() {
     };
     let tmp = tempfile::tempdir().unwrap();
     let cr = Isolated::new(bin, &tmp.path().join("crystalline"));
-    let (_, version, _) = cr.call(&["--version"], false);
+    let version = require_min_version(&cr);
     println!("found {}", version.trim());
-    require_min_version(&cr);
 
     // Both part sizes, each in its own folder of the one import.
     let out = tmp.path().join("out");
@@ -1288,7 +1288,7 @@ fn crystalline_reads_the_shapes_rezzer_relies_on() {
     let cr = Isolated::new(bin, &tmp.path().join("crystalline"));
     require_min_version(&cr);
 
-    const SHAPES: [(&str, &str); 13] = [
+    const SHAPES: [(&str, &str); 14] = [
         ("prose-link.md", "- See [Three](three.md)"),
         ("lower-link.md", "- see [Three](three.md)"),
         ("umlaut-link.md", "- \u{fc}ber [Three](three.md)"),
@@ -1297,6 +1297,10 @@ fn crystalline_reads_the_shapes_rezzer_relies_on() {
         ("wikilink.md", "- Tok [[Three]]"),
         (
             "ideographic.md",
+            "- part_of [D](Bericht\u{3000}\u{65e5}\u{672c}.md)",
+        ),
+        (
+            "cjk-only.md",
             "- part_of [D](\u{65e5}\u{672c}\u{3000}\u{5831}\u{544a}.md)",
         ),
         ("no-break.md", "- part_of [D](a\u{a0}b.md)"),
@@ -1307,10 +1311,11 @@ fn crystalline_reads_the_shapes_rezzer_relies_on() {
         ("three.md", "Line three of Three."),
     ];
     let targets = [
-        "\u{65e5}\u{672c}\u{3000}\u{5831}\u{544a}.md",
+        "Bericht\u{3000}\u{65e5}\u{672c}.md",
         "a\u{a0}b.md",
         "[[x]].md",
         "b.md",
+        "\u{65e5}\u{672c}\u{3000}\u{5831}\u{544a}.md",
     ];
     let files: Vec<(String, String)> = SHAPES
         .iter()
@@ -1323,14 +1328,8 @@ fn crystalline_reads_the_shapes_rezzer_relies_on() {
         .map(|(name, line)| {
             let title = name.trim_end_matches(".md");
             let title = if name == "three.md" { "Three" } else { title };
-            // The import derives no permalink from a name without ASCII letters.
-            let permalink = if name == targets[0] {
-                "permalink: \"nihon-houkoku\"\n"
-            } else {
-                ""
-            };
             let text = format!(
-                "---\ntype: engram\ntitle: \"{title}\"\n{permalink}---\n\
+                "---\ntype: engram\ntitle: \"{title}\"\n---\n\
                  Line one of {title}.\n\nLine two.\n\n{line}\n"
             );
             (name, text)
@@ -1354,7 +1353,10 @@ fn crystalline_reads_the_shapes_rezzer_relies_on() {
             .iter()
             .map(|r| {
                 let rel = r["rel_type"].as_str().unwrap_or("").to_string();
-                (rel, target(r), r["resolved"] == true)
+                // A relative relation names the permalink it resolved to; a wikilink one
+                // has none.
+                let to_engram = r.get("permalink").is_none_or(|p| p != "");
+                (rel, target(r), r["resolved"] == true && to_engram)
             })
             .collect()
     };
@@ -1373,71 +1375,99 @@ fn crystalline_reads_the_shapes_rezzer_relies_on() {
         }
     };
 
+    let relation = |rel: &str, to: &str| vec![(rel.to_string(), to.to_string(), true)];
+
+    // Relation shapes: the relation and nothing read as an observation.
     check(
         "prose-link.md",
         "no relation, one link to three.md",
         relations_of("prose-link.md").is_empty() && links("prose-link.md") == ["three.md"],
     );
-    for (path, rel) in [("lower-link.md", "see"), ("umlaut-link.md", "\u{fc}ber")] {
-        check(
-            path,
-            &format!("relation {rel} to three.md"),
-            relations_of(path) == [(rel.to_string(), "three.md".to_string(), true)],
-        );
-    }
-    check(
-        "footnote.md",
-        "no observation",
-        categories("footnote.md").is_empty(),
-    );
-    check(
-        "category.md",
-        "observation c",
-        categories("category.md") == ["c"],
-    );
-    check(
-        "wikilink.md",
-        "relation Tok to Three",
-        relations_of("wikilink.md") == [("Tok".to_string(), "Three".to_string(), true)],
-    );
-    for (path, to) in [
-        ("ideographic.md", targets[0]),
-        ("no-break.md", targets[1]),
-        ("brackets.md", targets[2]),
+    for (path, rel, to) in [
+        ("lower-link.md", "see", "three.md"),
+        ("umlaut-link.md", "\u{fc}ber", "three.md"),
+        ("wikilink.md", "Tok", "Three"),
+        ("ideographic.md", "part_of", targets[0]),
+        ("no-break.md", "part_of", targets[1]),
+        ("brackets.md", "part_of", targets[2]),
     ] {
         check(
             path,
-            &format!("one resolved part_of to {to}"),
-            relations_of(path) == [("part_of".to_string(), to.to_string(), true)],
+            &format!("one resolved {rel} to {to}"),
+            relations_of(path) == relation(rel, to),
         );
     }
     check(
         "brackets.md",
         "no wikilink to x",
-        !relations_of("brackets.md")
-            .iter()
-            .any(|(_, to, _)| to == "x")
-            && !links("brackets.md").iter().any(|to| to == "x"),
-    );
-    check(
-        "escaped-category.md",
-        "an observation",
-        categories("escaped-category.md").len() == 1,
+        !links("brackets.md").iter().any(|to| to == "x"),
     );
     // `(b)` is no link to a note, so the scan goes on to the next `](`, and the link text
     // reaches back past the escaped `]` to the first `[`: a relation to three.md.
     check(
         "escaped-text.md",
         "one resolved part_of to three.md",
-        relations_of("escaped-text.md") == [("part_of".to_string(), "three.md".to_string(), true)],
+        relations_of("escaped-text.md") == relation("part_of", "three.md"),
     );
     // A link to a note ends its text at the first `](`, escaped or not: the relation goes
     // to b.md, and three.md is a prose link.
     check(
         "escaped-note.md",
         "one resolved part_of to b.md, a link to three.md",
-        relations_of("escaped-note.md") == [("part_of".to_string(), "b.md".to_string(), true)]
+        relations_of("escaped-note.md") == relation("part_of", "b.md")
             && links("escaped-note.md") == ["three.md"],
+    );
+    for path in [
+        "prose-link.md",
+        "lower-link.md",
+        "umlaut-link.md",
+        "wikilink.md",
+        "ideographic.md",
+        "no-break.md",
+        "brackets.md",
+        "escaped-text.md",
+        "escaped-note.md",
+    ] {
+        check(path, "no observation", categories(path).is_empty());
+    }
+
+    // Observation shapes: the observation and no relation.
+    check(
+        "footnote.md",
+        "no observation, no relation",
+        categories("footnote.md").is_empty() && relations_of("footnote.md").is_empty(),
+    );
+    check(
+        "category.md",
+        "observation c, no relation",
+        categories("category.md") == ["c"] && relations_of("category.md").is_empty(),
+    );
+    // A category ends at the first `]`, escaped or not.
+    check(
+        "escaped-category.md",
+        "observation A\\, no relation, a link to three.md",
+        categories("escaped-category.md") == ["A\\"]
+            && relations_of("escaped-category.md").is_empty()
+            && links("escaped-category.md") == ["three.md"],
+    );
+
+    // A Crystalline gap, not Rezzer's: the import derives no permalink from a name without
+    // ASCII letters and writes none, so that engram cannot be read by permalink, and a
+    // relation to it counts as resolved with an empty permalink.
+    check(
+        targets[4],
+        "not readable by permalink",
+        !read.contains_key(targets[4]),
+    );
+    let cjk = get("cjk-only.md", "relations");
+    check(
+        "cjk-only.md",
+        "one part_of to the CJK name, resolved, empty permalink",
+        cjk.len() == 1
+            && cjk[0]["rel_type"] == "part_of"
+            && target(&cjk[0]) == targets[4]
+            && cjk[0]["resolved"] == true
+            && cjk[0]["permalink"] == "",
     );
     assert!(
         problems.is_empty(),
