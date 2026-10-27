@@ -704,18 +704,27 @@ fn a_midway_rule_at_tight_leading_ends_a_table() {
 }
 
 /// A row of fields between a rule over it and one under it: small 6 k pt labels at x 40, 170,
-/// 300 and 430 over values of `values[c]` lines each at 8 k pt, no dividers unless `dividers`,
-/// a lone upright rule far from it when `upright`, the rules drawn as `look`.
-fn fields_row(k: f32, look: Look, values: &[&[&str]], upright: bool, dividers: bool) -> String {
+/// 300 and 430 over values of `values[c]` lines each at 8 k pt in the fonts `fonts` (plain,
+/// bold; the labels bold when `bold`), no dividers unless `dividers`, a lone upright rule far
+/// from it when `upright`, the rules drawn as `look`.
+fn fields_row(
+    k: f32,
+    look: Look,
+    (fonts, bold): ((&str, &str), bool),
+    values: &[&[&str]],
+    upright: bool,
+    dividers: bool,
+) -> String {
     let (size, ts) = (8.0 * k, 6.0 * k);
+    let (vf, tf) = (fonts.0, if bold { fonts.1 } else { fonts.0 });
     let y = |dy: f32| 600.0 - dy * k;
     let n = values.iter().map(|v| v.len()).max().unwrap_or(1);
     let bottom = y(10.0 * n as f32 + 6.0);
     let mut t = rule(look, 40.0, 540.0, y(-8.0), size);
     for (c, v) in values.iter().enumerate() {
-        t += &show("FL", ts, FIELD_XS[c], y(0.0), FIELD_LABELS[c]);
+        t += &show(tf, ts, FIELD_XS[c], y(0.0), FIELD_LABELS[c]);
         for (r, line) in v.iter().enumerate() {
-            t += &show("FL", size, FIELD_XS[c], y(10.0 * (r as f32 + 1.0)), line);
+            t += &show(vf, size, FIELD_XS[c], y(10.0 * (r as f32 + 1.0)), line);
         }
         if dividers && c > 0 {
             let x = FIELD_XS[c] - 5.0;
@@ -958,28 +967,34 @@ fn the_check_of_fields_finds_lines_in_the_cells_of_other_fields() {
 }
 
 /// Rows of fields with values of many lines, of lines of different counts, and with an empty
-/// field, in three sizes, every look, alone and with an upright rule elsewhere: no label pairs
-/// with another than its own value, and every value line stands in a table or a loss says so
-/// (it names the row's labels, or its block in columns). (Dividers between the fields without rules at the row's ends make a row of
-/// drawn cells whose outer cells are read otherwise, an older gap left to another task.)
+/// field, in three sizes, every look, Helvetica and Times, plain and bold labels, alone and
+/// with an upright rule elsewhere: see [`fields_broken_in`]. (Dividers between the fields
+/// without rules at the row's ends make a row of drawn cells whose outer cells are read
+/// otherwise, an older gap left to another task.)
 #[test]
 fn rows_of_fields_with_values_of_many_lines_keep_every_line() {
     let mut wrong = Vec::new();
+    let mut reads = 0;
     for (name, values) in field_rows() {
         for k in [0.75, 1.0, 1.5] {
             for look in LOOKS {
-                for (upright, dividers) in [(false, false), (true, false)] {
-                    let page = fields_row(k, look, &values, upright, dividers);
-                    let out = common::read(&page_in(&page, look));
-                    for b in fields_broken(&out, &values) {
-                        wrong.push(format!(
-                            "{name}, {k}x, {look:?}, upright {upright}, dividers {dividers}: {b}"
-                        ));
+                for face in FONTS.iter().flat_map(|f| [(*f, false), (*f, true)]) {
+                    for (upright, dividers) in [(false, false), (true, false)] {
+                        let page = fields_row(k, look, face, &values, upright, dividers);
+                        let out = common::read(&page_in(&page, look));
+                        reads += 1;
+                        for b in fields_broken(&out, &values) {
+                            wrong.push(format!(
+                                "{name}, {k}x, {look:?}, {face:?}, upright {upright}, dividers \
+                                 {dividers}: {b}"
+                            ));
+                        }
                     }
                 }
             }
         }
     }
+    assert_eq!(reads, 1584);
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
@@ -1206,6 +1221,9 @@ enum Close {
     /// under the end of `Menge`, the tax rates (a percentage) flush right under the end of
     /// `USt-Satz`.
     FlushRight,
+    /// As `FlushRight` with the titles 0.9 sizes apart: the text layer makes two runs of them
+    /// (a gap of more than 0.8 sizes), one piece still (a cell gap is 1 size).
+    Apart,
 }
 
 /// Rows of line items: position, article, quantity, unit, tax rate and amount.
@@ -1236,7 +1254,12 @@ fn close_titles(
     let rows = &CLOSE_ROWS[..n];
     let (second, a, b) = match close {
         Close::OneShow => ("Einheit", 2, 3),
-        Close::FlushRight => ("USt-Satz", 2, 4),
+        Close::FlushRight | Close::Apart => ("USt-Satz", 2, 4),
+    };
+    let apart = if matches!(close, Close::Apart) {
+        0.9
+    } else {
+        0.4
     };
     let mut t = show(tf, size, 40.0, 600.0, "Pos") + &show(tf, size, 80.0, 600.0, "Artikel");
     // Where the second title starts, and where the values of each title stand.
@@ -1245,8 +1268,8 @@ fn close_titles(
             t += &show(tf, size, 300.0, 600.0, "Menge Einheit");
             300.0 + common::font_width(tf, "Menge ", size)
         }
-        Close::FlushRight => {
-            let x2 = 300.0 + common::font_width(tf, "Menge", size) + 0.4 * size;
+        Close::FlushRight | Close::Apart => {
+            let x2 = 300.0 + common::font_width(tf, "Menge", size) + apart * size;
             t += &show(tf, size, 300.0, 600.0, "Menge");
             t += &show(tf, size, x2, 600.0, second);
             x2
@@ -1262,7 +1285,7 @@ fn close_titles(
                 t += &show(vf, size, 300.0, y, row[a]);
                 t += &show(vf, size, x2, y, row[b]);
             }
-            Close::FlushRight => {
+            Close::FlushRight | Close::Apart => {
                 let end = 300.0 + common::font_width(tf, "Menge", size);
                 t += &flush_right(vf, end, y, row[a]);
                 t += &flush_right(vf, x2 + common::font_width(tf, second, size), y, row[b]);
@@ -1340,7 +1363,7 @@ fn close_column_titles_are_cut() {
 fn close_column_titles_head_their_columns_in_every_size_and_font() {
     let mut wrong = Vec::new();
     let mut reads = 0;
-    for close in [Close::OneShow, Close::FlushRight] {
+    for close in [Close::OneShow, Close::FlushRight, Close::Apart] {
         for k in [0.75, 1.0, 1.5] {
             for fonts in FONTS {
                 for bold in [false, true] {
@@ -1363,106 +1386,119 @@ fn close_column_titles_head_their_columns_in_every_size_and_font() {
             }
         }
     }
-    assert_eq!(reads, 96);
+    assert_eq!(reads, 144);
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
 /// Guard: one word over two columns of dates has no word space to cut at: its cell keeps
-/// its span of two columns.
+/// its span of two columns, in every size, font and weight and with 2 to 5 rows, and the
+/// dates of each row stand under it.
 #[test]
 fn one_word_title_over_two_columns_stays_spanned() {
+    let rows = [
+        ["1", "Beratung", "01.01.2026", "31.01.2026", "1.000,00"],
+        ["2", "Wartung", "01.02.2026", "28.02.2026", "200,00"],
+        ["3", "Support", "01.03.2026", "31.03.2026", "34,56"],
+        ["4", "Montage", "01.04.2026", "30.04.2026", "30,00"],
+        ["5", "Pruefung", "01.05.2026", "31.05.2026", "99,00"],
+    ];
+    let mut wrong = Vec::new();
     for k in [0.75, 1.0, 1.5] {
         for fonts in FONTS {
             for bold in [false, true] {
-                let size = 8.0 * k;
-                let tf = if bold { fonts.1 } else { fonts.0 };
-                let date = common::font_width(fonts.0, "01.01.2026", size);
-                let mut t = show(tf, size, 40.0, 600.0, "Pos")
-                    + &show(tf, size, 80.0, 600.0, "Artikel")
-                    + &show(tf, size, 300.0, 600.0, "Leistungszeitraum");
-                t += &show(
-                    tf,
-                    size,
-                    540.0 - common::font_width(tf, "Betrag", size),
-                    600.0,
-                    "Betrag",
-                );
-                let rows = [
-                    ["1", "Beratung", "01.01.2026", "31.01.2026", "1.000,00"],
-                    ["2", "Wartung", "01.02.2026", "28.02.2026", "200,00"],
-                    ["3", "Support", "01.03.2026", "31.03.2026", "34,56"],
-                ];
-                for (r, row) in rows.iter().enumerate() {
-                    let y = 600.0 - 10.0 * k * (r as f32 + 1.0);
-                    t += &show(fonts.0, size, 40.0, y, row[0]);
-                    t += &show(fonts.0, size, 80.0, y, row[1]);
-                    t += &show(fonts.0, size, 300.0, y, row[2]);
-                    t += &show(fonts.0, size, 300.0 + 1.25 * date, y, row[3]);
-                    let w = common::font_width(fonts.0, row[4], size);
-                    t += &show(fonts.0, size, 540.0 - w, y, row[4]);
-                }
-                let out = common::read(&page_in(&t, Look::Plain));
-                let name = format!("{k}x, {fonts:?}, bold {bold}");
-                assert_eq!(
-                    header_cells(&out),
-                    [
+                for n in 2..=5 {
+                    let size = 8.0 * k;
+                    let tf = if bold { fonts.1 } else { fonts.0 };
+                    let date = common::font_width(fonts.0, "01.01.2026", size);
+                    let mut t = show(tf, size, 40.0, 600.0, "Pos")
+                        + &show(tf, size, 80.0, 600.0, "Artikel")
+                        + &show(tf, size, 300.0, 600.0, "Leistungszeitraum");
+                    let w = common::font_width(tf, "Betrag", size);
+                    t += &show(tf, size, 540.0 - w, 600.0, "Betrag");
+                    for (r, row) in rows[..n].iter().enumerate() {
+                        let y = 600.0 - 10.0 * k * (r as f32 + 1.0);
+                        t += &show(fonts.0, size, 40.0, y, row[0]);
+                        t += &show(fonts.0, size, 80.0, y, row[1]);
+                        t += &show(fonts.0, size, 300.0, y, row[2]);
+                        t += &show(fonts.0, size, 300.0 + 1.25 * date, y, row[3]);
+                        let w = common::font_width(fonts.0, row[4], size);
+                        t += &show(fonts.0, size, 540.0 - w, y, row[4]);
+                    }
+                    let out = common::read(&page_in(&t, Look::Plain));
+                    let name = format!("{k}x, {fonts:?}, bold {bold}, {n} rows");
+                    let column = |title: &str, f: &dyn Fn(&[&str; 5]) -> String| -> Column {
+                        (title.to_string(), rows[..n].iter().map(f).collect())
+                    };
+                    let columns = [
+                        column("Pos", &|r| r[0].to_string()),
+                        column("Artikel", &|r| r[1].to_string()),
+                        column("Leistungszeitraum", &|r| format!("{} {}", r[2], r[3])),
+                        column("Betrag", &|r| r[4].to_string()),
+                    ];
+                    let mut b = columns_broken(&out, &columns);
+                    let want = [
                         ("Pos".to_string(), 1),
                         ("Artikel".to_string(), 1),
                         ("Leistungszeitraum".to_string(), 2),
                         ("Betrag".to_string(), 1),
-                    ],
-                    "{name}: {:?}",
-                    tables(&out)
-                );
+                    ];
+                    if header_cells(&out) != want {
+                        b.push(format!("header {:?}", header_cells(&out)));
+                    }
+                    wrong.extend(b.into_iter().map(|b| format!("{name}: {b}")));
+                }
             }
         }
     }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
 /// Guard: tax rates flush right under a short title `USt` 0.9 sizes after `Menge` reach left
 /// past the title, to a third of a size from the quantities: each quantity and its rate are
-/// one piece of text, so the two are one column. The titles are not cut, and each row keeps
-/// both its values in the cell under both titles (no title over another's value).
+/// one piece of text, so the two are one column. In every size, font and weight and with 2 to
+/// 5 rows, the titles are not cut, and each row keeps both its values in the cell under both
+/// titles (no title over another's value).
 #[test]
 fn close_titles_over_values_that_touch_stay_one_column() {
     let mut wrong = Vec::new();
     for k in [0.75, 1.0, 1.5] {
         for fonts in FONTS {
-            let size = 8.0 * k;
-            let w = |t: &str| common::font_width(fonts.0, t, size);
-            let x2 = 300.0 + w("Menge") + 0.9 * size;
-            let mut t = show(fonts.0, size, 40.0, 600.0, "Pos")
-                + &show(fonts.0, size, 80.0, 600.0, "Artikel")
-                + &show(fonts.0, size, 300.0, 600.0, "Menge")
-                + &show(fonts.0, size, x2, 600.0, "USt")
-                + &show(fonts.0, size, 540.0 - w("Betrag"), 600.0, "Betrag");
-            for (r, row) in CLOSE_ROWS[..3].iter().enumerate() {
-                let y = 600.0 - 10.0 * k * (r as f32 + 1.0);
-                t += &show(fonts.0, size, 40.0, y, row[0]);
-                t += &show(fonts.0, size, 80.0, y, row[1]);
-                t += &show(fonts.0, size, 300.0 + w("Menge") - w(row[2]), y, row[2]);
-                t += &show(fonts.0, size, x2 + w("USt") - w(row[4]), y, row[4]);
-                t += &show(fonts.0, size, 540.0 - w(row[5]), y, row[5]);
-            }
-            let out = common::read(&page_in(&t, Look::Plain));
-            let got = tables(&out);
-            let ok = got.iter().all(|(_, rows)| {
-                rows.iter().all(|r| {
-                    let head = r
-                        .iter()
-                        .position(|c| c.contains("Menge") || c.contains("USt"));
-                    head.is_none_or(|h| r[h] == "Menge USt")
-                }) && rows
-                    .iter()
-                    .skip(1)
-                    .zip(&CLOSE_ROWS)
-                    .all(|(r, want)| r.iter().any(|c| *c == format!("{} {}", want[2], want[4])))
-            });
-            if !ok {
-                wrong.push(format!(
-                    "{k}x, {fonts:?}: {got:?} {:?}",
-                    out.document.losses
-                ));
+            for bold in [false, true] {
+                for n in 2..=5 {
+                    let size = 8.0 * k;
+                    let (vf, tf) = (fonts.0, if bold { fonts.1 } else { fonts.0 });
+                    let w = |font: &str, t: &str| common::font_width(font, t, size);
+                    let x2 = 300.0 + w(tf, "Menge") + 0.9 * size;
+                    let mut t = show(tf, size, 40.0, 600.0, "Pos")
+                        + &show(tf, size, 80.0, 600.0, "Artikel")
+                        + &show(tf, size, 300.0, 600.0, "Menge")
+                        + &show(tf, size, x2, 600.0, "USt")
+                        + &show(tf, size, 540.0 - w(tf, "Betrag"), 600.0, "Betrag");
+                    let rows = &CLOSE_ROWS[..n];
+                    for (r, row) in rows.iter().enumerate() {
+                        let y = 600.0 - 10.0 * k * (r as f32 + 1.0);
+                        let end = 300.0 + w(tf, "Menge");
+                        t += &show(vf, size, 40.0, y, row[0]);
+                        t += &show(vf, size, 80.0, y, row[1]);
+                        t += &show(vf, size, end - w(vf, row[2]), y, row[2]);
+                        t += &show(vf, size, x2 + w(tf, "USt") - w(vf, row[4]), y, row[4]);
+                        t += &show(vf, size, 540.0 - w(vf, row[5]), y, row[5]);
+                    }
+                    let out = common::read(&page_in(&t, Look::Plain));
+                    let column = |title: &str, f: &dyn Fn(&[&str; 6]) -> String| -> Column {
+                        (title.to_string(), rows.iter().map(f).collect())
+                    };
+                    let columns = [
+                        column("Pos", &|r| r[0].to_string()),
+                        column("Artikel", &|r| r[1].to_string()),
+                        column("Menge USt", &|r| format!("{} {}", r[2], r[4])),
+                        column("Betrag", &|r| r[5].to_string()),
+                    ];
+                    let name = format!("{k}x, {fonts:?}, bold {bold}, {n} rows");
+                    for b in columns_broken(&out, &columns) {
+                        wrong.push(format!("{name}: {b} {:?}", tables(&out)));
+                    }
+                }
             }
         }
     }
@@ -1572,14 +1608,15 @@ fn a_wrapped_item_line_without_rules_joins_its_cell_or_is_named() {
 }
 
 /// Guard: lines right under line items without rules that are no wrap of their last row do
-/// not join it, in every size and font: a note across the gutter between `Pos` and `Artikel`,
-/// a line under `Artikel` wider than its column, and a word under `Pos` wider than its
-/// numbers. They stay text out of the table, with no loss. A short word under `Artikel` that
+/// not join it, in every size, font and weight and with 2 to 5 rows: a note across the gutter
+/// between `Pos` and `Artikel`, a line under `Artikel` wider than its column, and a word under
+/// `Pos` wider than its numbers. They stay text out of the table, with no loss. A short word under `Artikel` that
 /// starts half a size into the column stays out of the table too, and a loss says that it may
 /// go on in the last row.
 #[test]
 fn lines_under_items_without_rules_that_are_no_wrap_stay_paragraphs() {
     let mut wrong = Vec::new();
+    let mut reads = 0;
     for k in [0.75, 1.0, 1.5] {
         for fonts in FONTS {
             for bold in [false, true] {
@@ -1589,34 +1626,38 @@ fn lines_under_items_without_rules_that_are_no_wrap_stay_paragraphs() {
                     ("Hinweis", 40.0, false),
                     ("inkl.", 80.0 + 4.0 * k, true),
                 ] {
-                    let (t, columns) = unruled_items(k, fonts, bold, 3, None, Some((text, x)));
-                    let out = common::read(&page_in(&t, Look::Plain));
-                    let name = format!("{k}x, {fonts:?}, bold {bold}, {text:?}");
-                    let mut b = columns_broken(&out, &columns);
-                    if tables(&out).len() != 1 {
-                        b.push(format!("tables {:?}", tables(&out)));
+                    for n in 2..=5 {
+                        let (t, columns) = unruled_items(k, fonts, bold, n, None, Some((text, x)));
+                        let out = common::read(&page_in(&t, Look::Plain));
+                        reads += 1;
+                        let name = format!("{k}x, {fonts:?}, bold {bold}, {n} rows, {text:?}");
+                        let mut b = columns_broken(&out, &columns);
+                        if tables(&out).len() != 1 {
+                            b.push(format!("tables {:?}", tables(&out)));
+                        }
+                        let in_cell = tables(&out)
+                            .iter()
+                            .any(|t| t.1.iter().flatten().any(|c| c.contains(text)));
+                        if in_cell || !common::all_text(&out).contains(text) {
+                            b.push(format!("{text:?} is in a cell or lost"));
+                        }
+                        let losses: Vec<&str> = out
+                            .document
+                            .losses
+                            .iter()
+                            .map(|l| l.what.as_str())
+                            .collect();
+                        let said = losses == [WRAP_LOSS];
+                        if said != loss {
+                            b.push(format!("losses {losses:?}"));
+                        }
+                        wrong.extend(b.into_iter().map(|b| format!("{name}: {b}")));
                     }
-                    let in_cell = tables(&out)
-                        .iter()
-                        .any(|t| t.1.iter().flatten().any(|c| c.contains(text)));
-                    if in_cell || !common::all_text(&out).contains(text) {
-                        b.push(format!("{text:?} is in a cell or lost"));
-                    }
-                    let losses: Vec<&str> = out
-                        .document
-                        .losses
-                        .iter()
-                        .map(|l| l.what.as_str())
-                        .collect();
-                    let said = losses == [WRAP_LOSS];
-                    if said != loss {
-                        b.push(format!("losses {losses:?}"));
-                    }
-                    wrong.extend(b.into_iter().map(|b| format!("{name}: {b}")));
                 }
             }
         }
     }
+    assert_eq!(reads, 192);
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
@@ -1737,16 +1778,21 @@ fn a_note_across_a_gutter_in_a_frame_of_items_joins_no_cell() {
 
 /// The reviewer's finding R3-M4: a row of fields read as a table whose first row holds the
 /// labels has them as its header row, also when no column under them holds numbers (three
-/// lines a field), in every size and look, alone and with an upright rule elsewhere.
+/// lines a field), in every size, look, font and weight, alone and with an upright rule
+/// elsewhere.
 #[test]
 fn the_labels_over_a_row_of_fields_read_as_a_table_are_its_header() {
     let mut wrong = Vec::new();
     let mut tabled = 0;
     for (name, values) in field_rows() {
         for k in [0.75, 1.0, 1.5] {
-            for look in LOOKS {
+            for (look, face) in LOOKS.iter().flat_map(|l| {
+                FONTS
+                    .iter()
+                    .flat_map(move |f| [(*l, (*f, false)), (*l, (*f, true))])
+            }) {
                 for upright in [false, true] {
-                    let page = fields_row(k, look, &values, upright, false);
+                    let page = fields_row(k, look, face, &values, upright, false);
                     let out = common::read(&page_in(&page, look));
                     for (header_rows, rows) in tables(&out) {
                         let titles = rows[0]
@@ -1759,8 +1805,8 @@ fn the_labels_over_a_row_of_fields_read_as_a_table_are_its_header() {
                         tabled += 1;
                         if header_rows != 1 {
                             wrong.push(format!(
-                                "{name}, {k}x, {look:?}, upright {upright}: header rows \
-                                 {header_rows}"
+                                "{name}, {k}x, {look:?}, {face:?}, upright {upright}: header \
+                                 rows {header_rows}"
                             ));
                         }
                     }
@@ -1768,7 +1814,7 @@ fn the_labels_over_a_row_of_fields_read_as_a_table_are_its_header() {
             }
         }
     }
-    assert!(tabled >= 200, "{tabled}");
+    assert!(tabled >= 800, "{tabled}");
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
@@ -1779,7 +1825,7 @@ fn the_labels_over_a_row_of_fields_read_as_a_table_are_its_header() {
 fn close_column_titles_in_a_frame_head_their_columns() {
     let mut wrong = Vec::new();
     let mut reads = 0;
-    for close in [Close::OneShow, Close::FlushRight] {
+    for close in [Close::OneShow, Close::FlushRight, Close::Apart] {
         for k in [0.75, 1.0, 1.5] {
             for look in LOOKS {
                 for fonts in FONTS {
@@ -1811,7 +1857,7 @@ fn close_column_titles_in_a_frame_head_their_columns() {
             }
         }
     }
-    assert_eq!(reads, 576);
+    assert_eq!(reads, 864);
     assert!(
         wrong.is_empty(),
         "{} wrong:\n{}",
