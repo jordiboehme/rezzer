@@ -40,6 +40,11 @@ const SHARE_LINES: usize = 3;
 /// text on that page, never a heading: the data lines of a form set beside many small
 /// labels, or the back of a form printed in larger type, are text.
 pub(crate) fn page_text_sizes(runs: &[Run]) -> Vec<f32> {
+    page_text_sizes_of(runs.iter())
+}
+
+/// [`page_text_sizes`] of the runs `runs`, which may come from several lists.
+pub(crate) fn page_text_sizes_of<'a>(runs: impl Iterator<Item = &'a Run>) -> Vec<f32> {
     // For each size: its ink characters and the lines it sets ink on.
     let mut chars: HashMap<i32, (usize, HashSet<u32>)> = HashMap::new();
     for r in runs {

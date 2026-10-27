@@ -24,7 +24,7 @@ use crate::tables::{self, Planned, PlannedCell, Rule, Tables, Unsure};
 mod footnotes;
 mod shape;
 
-pub(crate) use shape::{address_block, address_shaped, page_text_sizes};
+pub(crate) use shape::{address_block, address_shaped, page_text_sizes, page_text_sizes_of};
 use shape::{bold_led, data_only, ends_in_amount, listed, padded_mark};
 
 /// A piece of text in one style on one line. The text parser and the fallback parser fill it,
@@ -251,6 +251,11 @@ pub(crate) struct Style {
     /// Lines that repeat at the top or bottom of at least [`REPEATS`] pages at the same
     /// height, or at the bottom of both pages of a file of two, with digits replaced.
     furniture: HashMap<Furniture, Vec<(f32, f32)>>,
+    /// The footer lines among them that are furniture by the two-page rule only. They are
+    /// running footers by their role, but their ink still counts for the body size and the
+    /// text sizes of a page, as it did before the rule: an invoice of two pages keeps the body
+    /// size and so the headings it had.
+    two_page: HashSet<Furniture>,
     /// The footnote legend of each untagged page that has one, by the page's runs.
     legends: HashMap<u32, footnotes::Found>,
 }
@@ -387,6 +392,7 @@ impl Style {
         #[cfg(test)]
         BODY_KEPT.with(|k| k.set(body.len()));
         let mut furniture: HashMap<Furniture, Vec<(f32, f32)>> = HashMap::new();
+        let mut two_page: HashSet<Furniture> = HashSet::new();
         for (key, mut at) in seen {
             if key.1.chars().any(char::is_alphabetic) && body.contains(&key.1) {
                 continue;
@@ -403,6 +409,9 @@ impl Style {
                     j += 1;
                 }
                 let both = pages.len() == 2 && key.0 == Band::Bottom && pages_at.len() == 2;
+                if both && pages_at.len() < REPEATS {
+                    two_page.insert(key.clone());
+                }
                 if pages_at.len() >= REPEATS || both {
                     furniture
                         .entry(key.clone())
@@ -414,12 +423,22 @@ impl Style {
         }
         let mut style = Style {
             furniture,
+            two_page,
             ..Style::default()
         };
         let mut chars: HashMap<i32, usize> = HashMap::new();
         for p in pages {
             let all = lines(p.runs);
             let bands = style.furniture(&all, p.height, &[]);
+            for (l, b) in all.iter().zip(&bands) {
+                let counted = b.is_some()
+                    && furniture_key_of(l, p.height).is_some_and(|k| style.two_page.contains(&k));
+                if counted {
+                    for r in l.runs {
+                        *chars.entry(size_key(r.size)).or_default() += ink(&r.text);
+                    }
+                }
+            }
             // The lines without running headers and footers, as the layout of the page sees
             // them, and where each starts among the page's runs.
             let mut body = Vec::with_capacity(all.len());
@@ -481,7 +500,7 @@ impl Style {
 
     /// The band of each line that is a running header or footer on its page. A header stands
     /// above all text of the page and a footer below it: a repeated line inside the text
-    /// stays text.
+    /// stays text. Lines of white space only are no text of the page.
     /// A line marked in `content` is never a header or footer; an empty `content` marks none.
     fn furniture(
         &self,
@@ -505,7 +524,14 @@ impl Style {
                     .then_some(key.0)
             })
             .collect();
-        let body = || lines.iter().zip(&found).filter(|(_, b)| b.is_none());
+        // Lines of white space only are no text to stand above or below: a print run blanks
+        // the empty lines of a footer column with spaces.
+        let body = || {
+            lines
+                .iter()
+                .zip(&found)
+                .filter(|(l, b)| b.is_none() && !l.text.is_empty())
+        };
         let top = body().map(|(l, _)| l.middle()).fold(f32::MIN, f32::max);
         let bottom = body().map(|(l, _)| l.middle()).fold(f32::MAX, f32::min);
         lines
@@ -968,8 +994,14 @@ pub(crate) fn page_blocks_at(
         notes.push((why, LossReason::Uncertain, Severity::Info));
     }
     // The text sizes are counted over all text of the page but its legend, also what tables
-    // take later: the values of a form are its data lines.
-    let text_sizes = page_text_sizes(&flow.runs);
+    // take later (the values of a form are its data lines), and a footer of a file of two pages
+    // (see [`Style::two_page`]).
+    let two_page_lines = lines(&footers);
+    let two_page = two_page_lines
+        .iter()
+        .filter(|l| furniture_key_of(l, height).is_some_and(|k| cx.style.two_page.contains(&k)))
+        .flat_map(|l| l.runs.iter());
+    let text_sizes = page_text_sizes_of(flow.runs.iter().chain(two_page));
     if geometry && let Some(height) = height {
         // Drawn boxes of a label over its value are taken first: a row of them is no header
         // band. A page with form fields is the form's (see `tables::untagged`).
