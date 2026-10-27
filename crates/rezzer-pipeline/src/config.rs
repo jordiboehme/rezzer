@@ -41,8 +41,9 @@ pub struct Config {
     pub limits: Limits,
     /// Results are cached unless this is false.
     pub cache: bool,
-    /// Where cache entries live; `None` is the user cache dir
-    /// (`directories::ProjectDirs::cache_dir`).
+    /// Where cache entries live; `None` is the user cache dir of [`cache_dir_from`]
+    /// (`~/.cache/rezzer` on Linux, `~/Library/Caches/rezzer` on macOS,
+    /// `%LOCALAPPDATA%\rezzer\cache` on Windows), and no cache when there is none.
     pub cache_dir: Option<PathBuf>,
     /// Size cap of the cache dir. After a write over the cap the oldest entries are removed
     /// until the cache is under 90 % of it.
@@ -201,6 +202,95 @@ pub fn config_path_from(xdg_config_home: Option<&OsStr>, home: Option<&OsStr>) -
         None => PathBuf::from(home.filter(|h| !h.is_empty())?).join(".config"),
     };
     Some(base.join("rezzer").join("config.toml"))
+}
+
+/// The system whose rules [`cache_dir_from`] follows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheOs {
+    /// Linux and every other Unix but macOS.
+    Unix,
+    MacOs,
+    Windows,
+}
+
+impl CacheOs {
+    /// The system this program was built for.
+    pub(crate) fn current() -> CacheOs {
+        if cfg!(windows) {
+            CacheOs::Windows
+        } else if cfg!(any(target_os = "macos", target_os = "ios")) {
+            CacheOs::MacOs
+        } else {
+            CacheOs::Unix
+        }
+    }
+}
+
+/// The user cache dir of Rezzer from the values of `XDG_CACHE_HOME`, `HOME` and
+/// `LOCALAPPDATA`, the same folder the `directories` crate (6.0.0) gave:
+///
+/// - Unix: `$XDG_CACHE_HOME/rezzer` when that is absolute, else `$HOME/.cache/rezzer`
+/// - macOS: `$HOME/Library/Caches/rezzer` (`XDG_CACHE_HOME` is not used)
+/// - Windows: `%LOCALAPPDATA%\rezzer\cache` (`HOME` is not used)
+///
+/// On Unix and macOS `HOME` must be set and absolute, even when `XDG_CACHE_HOME` is. A value
+/// that is not absolute by the rules of `os` (an empty one included) gives `None`, so the
+/// cache is off and never lands in the working directory. Absoluteness follows `os`, not the
+/// system this runs on.
+pub fn cache_dir_from(
+    os: CacheOs,
+    xdg_cache_home: Option<&OsStr>,
+    home: Option<&OsStr>,
+    local_app_data: Option<&OsStr>,
+) -> Option<PathBuf> {
+    match os {
+        CacheOs::Windows => {
+            let base = local_app_data.filter(|v| windows_absolute(v))?;
+            Some(PathBuf::from(base).join("rezzer").join("cache"))
+        }
+        CacheOs::MacOs => {
+            let home = home.filter(|v| unix_absolute(v))?;
+            Some(PathBuf::from(home).join("Library/Caches").join("rezzer"))
+        }
+        CacheOs::Unix => {
+            let home = home.filter(|v| unix_absolute(v))?;
+            let base = match xdg_cache_home.filter(|v| unix_absolute(v)) {
+                Some(xdg) => PathBuf::from(xdg),
+                None => PathBuf::from(home).join(".cache"),
+            };
+            Some(base.join("rezzer"))
+        }
+    }
+}
+
+/// The user cache dir on this system, see [`cache_dir_from`].
+pub(crate) fn default_cache_dir() -> Option<PathBuf> {
+    let xdg = std::env::var_os("XDG_CACHE_HOME");
+    let home = std::env::var_os("HOME");
+    let local_app_data = std::env::var_os("LOCALAPPDATA");
+    cache_dir_from(
+        CacheOs::current(),
+        xdg.as_deref(),
+        home.as_deref(),
+        local_app_data.as_deref(),
+    )
+}
+
+/// A Unix path is absolute when it starts with `/`.
+fn unix_absolute(path: &OsStr) -> bool {
+    path.as_encoded_bytes().first() == Some(&b'/')
+}
+
+/// A Windows path is absolute with a drive and a separator (`C:\`, `C:/`) or as a UNC or
+/// device path (`\\server\share`, `\\?\C:\`). `C:x` and `\x` are relative to a current
+/// folder.
+fn windows_absolute(path: &OsStr) -> bool {
+    let separator = |b: u8| b == b'\\' || b == b'/';
+    match path.as_encoded_bytes() {
+        [drive, b':', sep, ..] => drive.is_ascii_alphabetic() && separator(*sep),
+        [b'\\', b'\\', ..] => true,
+        _ => false,
+    }
 }
 
 fn line_of(text: &str, offset: usize) -> usize {

@@ -2,6 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -12,7 +13,7 @@ use rezzer_model::{
     Asset, Blob, Block, Completeness, Document, FormatId, Inline, LossReason, ReadOptions,
     ReadOutcome, Reader, Registry, Source, source_info,
 };
-use rezzer_pipeline::{Config, OutputKind, OutputSection, Pipeline, Request, TableStyle};
+use rezzer_pipeline::{CacheOs, Config, OutputKind, OutputSection, Pipeline, Request, TableStyle};
 
 const AT: &str = "2026-10-19T08:30:00Z";
 
@@ -817,6 +818,103 @@ fn config_load_uses_xdg_config_home() {
         Some(home.join(".config/rezzer/config.toml"))
     );
     assert_eq!(rezzer_pipeline::config_path_from(None, None), None);
+}
+
+// The cache folder lookup is tested with given values only: no test sets an environment
+// variable, because they are process-wide.
+
+fn cache_dir(
+    os: CacheOs,
+    xdg: Option<&str>,
+    home: Option<&str>,
+    local_app_data: Option<&str>,
+) -> Option<PathBuf> {
+    rezzer_pipeline::cache_dir_from(
+        os,
+        xdg.map(OsStr::new),
+        home.map(OsStr::new),
+        local_app_data.map(OsStr::new),
+    )
+}
+
+#[test]
+fn cache_dir_on_linux_follows_xdg() {
+    assert_eq!(
+        cache_dir(CacheOs::Unix, Some("/x"), Some("/home/a"), None),
+        Some(PathBuf::from("/x/rezzer"))
+    );
+    let fallback = Some(PathBuf::from("/home/a/.cache/rezzer"));
+    for xdg in [None, Some("rel"), Some("")] {
+        assert_eq!(
+            cache_dir(CacheOs::Unix, xdg, Some("/home/a"), Some(r"C:\L")),
+            fallback,
+            "{xdg:?}"
+        );
+    }
+}
+
+#[test]
+fn cache_dir_on_macos_is_library_caches() {
+    let expected = Some(PathBuf::from("/Users/a/Library/Caches/rezzer"));
+    assert_eq!(
+        cache_dir(CacheOs::MacOs, None, Some("/Users/a"), None),
+        expected
+    );
+    // As in the directories crate, macOS ignores XDG_CACHE_HOME.
+    assert_eq!(
+        cache_dir(CacheOs::MacOs, Some("/x"), Some("/Users/a"), None),
+        expected
+    );
+}
+
+#[test]
+fn cache_dir_on_windows_is_local_app_data() {
+    let base = r"C:\Users\a\AppData\Local";
+    let expected = Some(PathBuf::from(base).join("rezzer").join("cache"));
+    assert_eq!(
+        cache_dir(CacheOs::Windows, None, None, Some(base)),
+        expected
+    );
+    // HOME and XDG_CACHE_HOME play no part on Windows.
+    assert_eq!(
+        cache_dir(CacheOs::Windows, Some("/x"), Some("/home/a"), Some(base)),
+        expected
+    );
+    let unc = r"\\server\share\a";
+    assert_eq!(
+        cache_dir(CacheOs::Windows, None, None, Some(unc)),
+        Some(PathBuf::from(unc).join("rezzer").join("cache"))
+    );
+    for local in [
+        None,
+        Some("rel"),
+        Some(""),
+        Some("/x"),
+        Some(r"\x"),
+        Some("C:rel"),
+    ] {
+        assert_eq!(
+            cache_dir(CacheOs::Windows, None, Some("/home/a"), local),
+            None,
+            "{local:?}"
+        );
+    }
+}
+
+#[test]
+fn cache_dir_needs_an_absolute_base() {
+    for os in [CacheOs::Unix, CacheOs::MacOs] {
+        for home in [None, Some(""), Some("rel"), Some(r"C:\Users\a")] {
+            assert_eq!(cache_dir(os, None, home, None), None, "{os:?} {home:?}");
+            // An absolute XDG_CACHE_HOME does not stand in for HOME, as in the directories
+            // crate.
+            assert_eq!(
+                cache_dir(os, Some("/x"), home, None),
+                None,
+                "{os:?} {home:?}"
+            );
+        }
+    }
 }
 
 fn panicking_detector(_: &str, _: Option<&str>, _: &[u8]) -> (FormatId, rezzer_model::Detection) {

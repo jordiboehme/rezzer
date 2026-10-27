@@ -30,6 +30,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
+use crate::config::default_cache_dir;
 use crate::{BUILD_ID, Config, VERSION};
 
 pub(crate) struct Cache {
@@ -46,15 +47,15 @@ struct Entry {
 impl Cache {
     /// The cache of `config`, or None when caching is off or there is no cache dir.
     pub(crate) fn of(config: &Config) -> Option<Cache> {
+        Cache::with_default(config, default_cache_dir())
+    }
+
+    /// The cache of `config` with `default` as the dir when the config names none.
+    pub(crate) fn with_default(config: &Config, default: Option<PathBuf>) -> Option<Cache> {
         if !config.cache {
             return None;
         }
-        let dir = match &config.cache_dir {
-            Some(dir) => dir.clone(),
-            None => directories::ProjectDirs::from("", "", "rezzer")?
-                .cache_dir()
-                .to_path_buf(),
-        };
+        let dir = config.cache_dir.clone().or(default)?;
         Some(Cache {
             dir,
             max_bytes: config.cache_max_bytes,
@@ -211,6 +212,61 @@ mod tests {
         fn flush(&mut self) -> std::io::Result<()> {
             Ok(())
         }
+    }
+
+    /// The `.json` files in `dir`.
+    fn json_files(dir: &Path) -> Vec<PathBuf> {
+        let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.extension().is_some_and(|x| x == "json"))
+            .collect();
+        files.sort();
+        files
+    }
+
+    #[test]
+    fn no_cache_dir_reads_without_cache() {
+        let config = Config {
+            cache: true,
+            cache_dir: None,
+            ..Config::default()
+        };
+        assert!(Cache::with_default(&config, None).is_none());
+        // A config cache_dir still wins over a missing default.
+        let dir = tempfile::tempdir().unwrap();
+        let own = Config {
+            cache_dir: Some(dir.path().to_path_buf()),
+            ..config.clone()
+        };
+        assert_eq!(
+            Cache::with_default(&own, None).map(|c| c.dir),
+            Some(dir.path().to_path_buf())
+        );
+
+        // The pipeline is built here with no default, so the user's real cache is never used.
+        let mut registry = crate::Registry::new();
+        registry.register(Box::new(rezzer_read_text::TextReader));
+        let pipeline = crate::Pipeline {
+            cache: Cache::with_default(&config, None),
+            config,
+            registry,
+            detector: rezzer_detect::detect_with_hints,
+        };
+        let input = dir.path().join("note.txt");
+        std::fs::write(&input, "Muster GmbH\n").unwrap();
+        let cwd = std::env::current_dir().unwrap();
+        let before = json_files(&cwd);
+        let out = pipeline.run_path(&input, &crate::Request::default());
+        assert_eq!(
+            out.completeness,
+            Completeness::Complete,
+            "{:?}",
+            out.message
+        );
+        assert!(out.markdown_pages.concat().contains("Muster GmbH"));
+        assert_eq!(json_files(dir.path()), Vec::<PathBuf>::new());
+        assert_eq!(json_files(&cwd), before);
     }
 
     #[test]

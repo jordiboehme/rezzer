@@ -30,7 +30,10 @@ use rezzer_model::{
 };
 use rezzer_render::RenderOptions;
 
-pub use config::{Config, ConfigError, DEFAULT_CACHE_MAX_BYTES, ReadDefaults, config_path_from};
+pub use config::{
+    CacheOs, Config, ConfigError, DEFAULT_CACHE_MAX_BYTES, ReadDefaults, cache_dir_from,
+    config_path_from,
+};
 pub use files::{bundle_name, folder_stem, main_name, parts_folder};
 pub use rezzer_limits::{CancelToken, check_part_size};
 pub use rezzer_render::{OutputSection, TableStyle};
