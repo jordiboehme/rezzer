@@ -85,7 +85,7 @@ than none.
 | Confidence / abstaining | confidence and `is_reliable` | none | confidence values; `with_minimum_relative_distance` makes `detect_language_of` return `None` when not reliable (default 0.0: `None` only on a tie) | normalized score, `min_confidence` gives `und` |
 | Probe size, stripped (baseline harness 0.45 MB) | 0.70 MB (+0.25 MB) | 0.71 MB (+0.26 MB) | 249.4 MB with Rezzer's 57 languages; 291.8 MB with all 75; 12.2 MB with German and English only | 9.8 MB (+9.3 MB; the model file is 8.96 MB) |
 | Peak RSS over all samples | 4 MB | 3 MB | 162 MB (57 languages), 195 MB (75) | 110 MB |
-| ms per 100 KiB (English, German, place names) | 1.33, 1.42, 1.37 | 1.01, 0.99, 1.00 | 50.6, 55.8, 60.4 (57 languages) | 1.07, 1.13, 1.10 |
+| ms per 100 KiB (English, German, place names) | 1.33, 1.42, 1.37 | 1.01, 0.99, 1.00 | 51 to 57, 56 to 63, 60 to 69 (57 languages, default settings; range over the runs in the lingua settings table below) | 1.07, 1.13, 1.10 |
 
 For scale: Rezzer's own release binary on this branch is 16.6 MB.
 
@@ -112,7 +112,9 @@ rust-py3langid is not among options A to D. It was probed because the brief list
 | rust-py3langid | 30 | 2 | 0 | 25 |
 
 Counting the raw top answer instead (no abstaining) gives the same number right for every
-probe, so that column is left out. For whatlang the two differ only in which samples are
+probe except the two distance 0.5 rows, so that column is left out. In those two rows the
+`None` of `detect_language_of` is the abstention: their one extra right answer is the `None`
+on qpdf-aes128, where the raw top answer is `lt` (raw: 27 and 25 right). For whatlang the two differ only in which samples are
 right: the raw answer is right on `form:en-application` (`en`, not reliable) and wrong on the
 place names (`it`, not reliable); abstaining turns the first into a missed answer and the
 second into a right "no answer". For py3langid the three answers below 0.5 are on samples
