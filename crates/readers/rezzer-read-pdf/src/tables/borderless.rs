@@ -93,8 +93,9 @@ pub(super) fn borderless(
         .map(|l| flow.runs[l.start..l.end].iter().any(|r| r.off_axis) || (l.start..l.end).any(held))
         .collect();
     // Regions: lines that follow each other down the page, most of them in two pieces or
-    // more; at most two lines of one piece in a row (cell text that wraps).
-    let mut regions: Vec<(usize, usize)> = Vec::new();
+    // more; at most two lines of one piece in a row (cell text that wraps). Each region also
+    // has the lines right under it that may go on in its last row (see [`Tail`]).
+    let mut regions: Vec<(usize, usize, Tail)> = Vec::new();
     let mut i = 0;
     while i < lines.len() {
         if off[i] || counts[i] < 2 {
@@ -123,10 +124,16 @@ pub(super) fn borderless(
         }
         // A rule across the lines may end their table: the lines below it are a region of
         // their own (totals under line items).
-        let mut z = ended(flow, &lines, (i, last_multi + 1), &found.ends).unwrap_or(last_multi + 1);
+        let z = ended(flow, &lines, (i, last_multi + 1), &found.ends).unwrap_or(last_multi + 1);
+        let mut tail = Tail {
+            end: z,
+            marked: false,
+        };
         // Lines under the region that the frame of column titles over items it holds holds
-        // too (a wrapped last item) are its own.
+        // too (a wrapped last item) may be its own; else the lines of one piece the region
+        // ends with.
         if z == last_multi + 1 {
+            let mut z = z;
             let held_bodies: Vec<u32> = (lines[i].start..lines[z - 1].end)
                 .filter_map(body_of)
                 .collect();
@@ -140,9 +147,17 @@ pub(super) fn borderless(
                 }
                 z += 1;
             }
+            tail = if z > last_multi + 1 {
+                Tail {
+                    end: z,
+                    marked: true,
+                }
+            } else {
+                Tail { end, marked: false }
+            };
         }
-        regions.push((i, z));
-        i = z;
+        regions.push((i, z, tail));
+        i = tail.end.max(z);
     }
     // Accepted regions, and for each run the table, row and cell it goes to.
     let mut claim: Vec<Planned> = Vec::new();
@@ -154,7 +169,7 @@ pub(super) fn borderless(
     let mut splits: Vec<(usize, usize)> = Vec::new();
     // Tables with close titles to cut, and where (see [`Grid`]).
     let mut title_cuts: Vec<(usize, Vec<TitleCut>)> = Vec::new();
-    for (g, (a, z)) in regions.into_iter().enumerate() {
+    for (g, (a, mut z, tail)) in regions.into_iter().enumerate() {
         if g % CHECK_EVERY == CHECK_EVERY - 1 && stop() {
             found.skipped.push(format!(
                 "tables without rules on page {page} are looked for only in part: the time \
@@ -170,7 +185,7 @@ pub(super) fn borderless(
         if multi < 2 {
             continue;
         }
-        let pieces: Vec<Vec<Piece>> = lines[a..z].iter().map(|l| pieces_of(flow, l)).collect();
+        let mut pieces: Vec<Vec<Piece>> = lines[a..z].iter().map(|l| pieces_of(flow, l)).collect();
         // A block of labels and values is a table of two columns.
         match key_values(flow, &lines, a, z, &pieces, &off) {
             KeyValues::No => {}
@@ -230,6 +245,10 @@ pub(super) fn borderless(
                 continue;
             }
         }
+        // The lines under the region that go on in its last row join it.
+        let (joined, doubt) = joined_tail(flow, &lines[a..tail.end], &pieces, tail.marked);
+        pieces.extend(lines[z..z + joined].iter().map(|l| pieces_of(flow, l)));
+        z += joined;
         // Two blocks side by side are judged each alone.
         let sets: Vec<Vec<Vec<Piece>>> = match side_by_side(flow, &lines[a..z], &pieces) {
             Some(x) => vec![
@@ -349,6 +368,12 @@ pub(super) fn borderless(
                 }
             }
         }
+        if taken && doubt {
+            found.uncertain.push(format!(
+                "a line right under a table on page {page} may go on in its last row: it is \
+                 read as a paragraph after the table"
+            ));
+        }
         // A grid of rules over the same text may have said so already.
         let (lo, hi) = (flow.at[lines[a].start], flow.at[lines[z - 1].end - 1]);
         let said = found.unsure.iter().any(|u| (lo..=hi).contains(&u.at));
@@ -417,6 +442,84 @@ pub(super) fn borderless(
         found.tables.push(p);
     }
     found.tables.sort_by_key(|t| t.at);
+}
+
+/// The lines right under a region that may go on in its last row: up to line `end`, either
+/// lines of one piece, or (`marked`) lines whose every run the frame of column titles over
+/// items the region holds holds too.
+#[derive(Debug, Clone, Copy)]
+struct Tail {
+    end: usize,
+    marked: bool,
+}
+
+/// A line of one piece goes on in the cell above it when it starts within this many sizes
+/// of the text of that cell and ends within as many of the end of its column.
+const WRAP_ALIGN: f32 = 0.1;
+
+/// How many of the lines under a region (`lines`, the region's first, its `pieces` the
+/// region's own) go on in its last row, and whether the first that does not may (a loss says
+/// so). A marked line (see [`Tail`]) does. A line of one piece does when it stands over one
+/// column of the region (it crosses no gutter), starts flush
+/// with the text over it in its column (see [`WRAP_ALIGN`]), ends within the column, stands
+/// no farther under the line over it than the lines of the region stand apart, and its
+/// column does not hold numbers (a word under a column of numbers is no wrap: it may be,
+/// so a loss says so).
+fn joined_tail(
+    flow: &Flow,
+    lines: &[FlowLine],
+    pieces: &[Vec<Piece>],
+    marked: bool,
+) -> (usize, bool) {
+    let core = pieces.len();
+    if lines.len() <= core || core < 2 {
+        return (0, false);
+    }
+    let columns = columns_of(pieces);
+    let over = |p: &Piece| -> Vec<usize> {
+        (0..columns.len())
+            .filter(|&c| p.x1 > columns[c].0 && p.x0 < columns[c].1)
+            .collect()
+    };
+    let pitch = (1..core)
+        .map(|k| lines[k - 1].y - lines[k].y)
+        .fold(0.0f32, f32::max);
+    let mut joined = 0;
+    for (t, line) in lines.iter().enumerate().skip(core) {
+        let own = pieces_of(flow, line);
+        if marked {
+            joined += 1;
+            continue;
+        }
+        let ([p], size) = (own.as_slice(), line.size.max(1.0)) else {
+            return (joined, false);
+        };
+        let [c] = over(p)[..] else {
+            return (joined, false);
+        };
+        let close = lines[t - 1].y - line.y <= pitch + WRAP_ALIGN * size;
+        let within = p.x1 <= columns[c].1 + WRAP_ALIGN * size;
+        if !close || !within {
+            return (joined, false);
+        }
+        // The text over the line in its column: the piece of the nearest line above.
+        let above = (0..core)
+            .rev()
+            .find_map(|k| pieces[k].iter().find(|q| over(q) == [c]));
+        let flush = above.is_some_and(|q| (q.x0 - p.x0).abs() <= WRAP_ALIGN * size);
+        let texts: Vec<String> = pieces[1..core]
+            .iter()
+            .flatten()
+            .filter(|q| over(q) == [c])
+            .map(|q| text_of(flow, q.start, q.end))
+            .collect();
+        let numbers = 2 * texts.iter().filter(|t| numeric(t)).count() >= texts.len();
+        if !flush || numbers {
+            return (joined, true);
+        }
+        joined += 1;
+    }
+    (joined, false)
 }
 
 /// A rule that ends a region without rules is at most its median text size divided by this

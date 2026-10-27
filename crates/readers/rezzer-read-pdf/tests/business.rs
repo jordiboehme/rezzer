@@ -1352,3 +1352,138 @@ fn close_titles_over_values_that_touch_stay_one_column() {
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
+
+/// Line items of `n` rows of [`ITEMS`] without any rule at `k` times 8 pt in the fonts
+/// `fonts` (plain, bold), their titles bold when `bold`, rows `10 k` apart: the `Artikel` of
+/// row `wrap` (when there is one) goes on in a line `frei Haus` under it, and `after` (a text
+/// and its x) is a line `10 k` under the last. Gives the template and the columns.
+fn unruled_items(
+    k: f32,
+    fonts: (&str, &str),
+    bold: bool,
+    n: usize,
+    wrap: Option<usize>,
+    after: Option<(&str, f32)>,
+) -> (String, Vec<Column>) {
+    let size = 8.0 * k;
+    let (vf, tf) = (fonts.0, if bold { fonts.1 } else { fonts.0 });
+    let flush_right = |font: &str, x: f32, y: f32, t: &str| {
+        show(font, size, x - common::font_width(font, t, size), y, t)
+    };
+    let mut y = 600.0;
+    let mut t = show(tf, size, 40.0, y, "Pos")
+        + &show(tf, size, 80.0, y, "Artikel")
+        + &show(tf, size, 300.0, y, "Menge")
+        + &flush_right(tf, 420.0, y, "Preis")
+        + &flush_right(tf, 540.0, y, "Betrag");
+    let mut columns: Vec<Column> = ["Pos", "Artikel", "Menge", "Preis", "Betrag"]
+        .iter()
+        .map(|c| ((*c).to_string(), Vec::new()))
+        .collect();
+    for (r, item) in ITEMS.iter().take(n).enumerate() {
+        y -= 10.0 * k;
+        t += &show(vf, size, 40.0, y, item[0]);
+        t += &show(vf, size, 80.0, y, item[1]);
+        t += &show(vf, size, 300.0, y, item[2]);
+        t += &flush_right(vf, 420.0, y, item[3]);
+        t += &flush_right(vf, 540.0, y, item[4]);
+        for (c, column) in columns.iter_mut().enumerate() {
+            column.1.push(item[c].to_string());
+        }
+        if wrap == Some(r) {
+            y -= 10.0 * k;
+            t += &show(vf, size, 80.0, y, "frei Haus");
+            columns[1].1[r] += " frei Haus";
+        }
+    }
+    if let Some((text, x)) = after {
+        t += &show(vf, size, x, y - 10.0 * k, text);
+    }
+    (t, columns)
+}
+
+/// Line items without rules whose `Artikel` goes on in a second line, in the first, a middle
+/// or the last row, in every size, font and weight and with 2 to 5 rows: the line joins its
+/// cell, and every title heads the column of its values.
+#[test]
+fn a_wrapped_item_line_without_rules_joins_its_cell() {
+    let mut wrong = Vec::new();
+    let mut reads = 0;
+    for k in [0.75, 1.0, 1.5] {
+        for fonts in FONTS {
+            for bold in [false, true] {
+                for n in 2..=5 {
+                    for wrap in 0..n {
+                        let (t, columns) = unruled_items(k, fonts, bold, n, Some(wrap), None);
+                        let out = common::read(&page_in(&t, Look::Plain));
+                        reads += 1;
+                        let name = format!("{k}x, {fonts:?}, bold {bold}, {n} rows, wrap {wrap}");
+                        let mut b = columns_broken(&out, &columns);
+                        if tables(&out).len() != 1 {
+                            b.push(format!("tables {:?}", tables(&out)));
+                        }
+                        if !out.document.losses.is_empty() {
+                            b.push(format!("losses {:?}", out.document.losses));
+                        }
+                        wrong.extend(b.into_iter().map(|b| format!("{name}: {b}")));
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(reads, 168);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Guard: lines right under line items without rules that are no wrap of their last row do
+/// not join it, in every size and font: a note across the gutter between `Pos` and `Artikel`,
+/// a line under `Artikel` wider than its column, and a word under `Pos` wider than its
+/// numbers. They stay text out of the table, with no loss. A short word under `Artikel` that
+/// starts half a size into the column stays out of the table too, and a loss says that it may
+/// go on in the last row.
+#[test]
+fn lines_under_items_without_rules_that_are_no_wrap_stay_paragraphs() {
+    let mut wrong = Vec::new();
+    for k in [0.75, 1.0, 1.5] {
+        for fonts in FONTS {
+            for bold in [false, true] {
+                for (text, x, loss) in [
+                    ("Alle Preise in EUR", 40.0, false),
+                    ("Zahlbar bis zum 01.03.2026 ohne Abzug", 80.0, false),
+                    ("Hinweis", 40.0, false),
+                    ("inkl.", 80.0 + 4.0 * k, true),
+                ] {
+                    let (t, columns) = unruled_items(k, fonts, bold, 3, None, Some((text, x)));
+                    let out = common::read(&page_in(&t, Look::Plain));
+                    let name = format!("{k}x, {fonts:?}, bold {bold}, {text:?}");
+                    let mut b = columns_broken(&out, &columns);
+                    if tables(&out).len() != 1 {
+                        b.push(format!("tables {:?}", tables(&out)));
+                    }
+                    let in_cell = tables(&out)
+                        .iter()
+                        .any(|t| t.1.iter().flatten().any(|c| c.contains(text)));
+                    if in_cell || !common::all_text(&out).contains(text) {
+                        b.push(format!("{text:?} is in a cell or lost"));
+                    }
+                    let losses: Vec<&str> = out
+                        .document
+                        .losses
+                        .iter()
+                        .map(|l| l.what.as_str())
+                        .collect();
+                    let said = losses == [WRAP_LOSS];
+                    if said != loss {
+                        b.push(format!("losses {losses:?}"));
+                    }
+                    wrong.extend(b.into_iter().map(|b| format!("{name}: {b}")));
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// The loss for a line under a table that may go on in its last row.
+const WRAP_LOSS: &str = "a line right under a table on page 1 may go on in its last row: it \
+                         is read as a paragraph after the table";
