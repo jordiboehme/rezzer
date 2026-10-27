@@ -80,7 +80,8 @@ impl Planned {
     /// The label and value text of each row, when the table is one of labels and values:
     /// from drawn boxes, rows of fields or the totals of a column beside a section (each row
     /// a label cell and a value cell). Other tables give none.
-    pub(crate) fn pairs(&self) -> Vec<(String, String)> {
+    /// The number of the value's line comes with it (see [`Run::line`]), when it has text.
+    pub(crate) fn pairs(&self) -> Vec<(String, String, Option<u32>)> {
         let pairs = self
             .found_by
             .is_some_and(|n| pairs::is_pairs_note(n) || n == side::SIDE_FOUND_BY);
@@ -94,7 +95,9 @@ impl Planned {
         self.rows
             .iter()
             .filter_map(|row| match row.as_slice() {
-                [label, value] => Some((text(label), text(value))),
+                [label, value] => {
+                    Some((text(label), text(value), value.runs.first().map(|r| r.line)))
+                }
                 _ => None,
             })
             .collect()

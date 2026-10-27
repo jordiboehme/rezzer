@@ -232,11 +232,27 @@ const OTHER_DATE_WORDS: [&str; 12] = [
 /// A date as written: its separator and its parts.
 type Written = (char, [u32; 3]);
 
+/// Where a date stands on page 1: the number of its line in reading order (see
+/// [`Run::line`]), and the date as written.
+type At = (u32, Written);
+
+/// A label and its value as a pair table of page 1 reads them (see
+/// `tables::Planned::pairs`): the value's line, if it has text, and the top of the table.
+#[derive(Debug, Clone)]
+pub(crate) struct Pair {
+    pub label: String,
+    pub value: String,
+    pub line: Option<u32>,
+    pub top: f32,
+}
+
 /// A date found on page 1 that a label marks as the document date, or that may be the only
 /// date of the head.
 #[derive(Debug, Clone)]
 struct Seen {
     written: Written,
+    /// The number of its line on the page.
+    line: u32,
     /// The date as it stands in the text.
     text: String,
     /// The label as written, white space collapsed, when one marks it.
@@ -251,8 +267,9 @@ pub(crate) struct Dates {
     labelled: Vec<Seen>,
     /// Dates in the top third of the page without a label of their own.
     head: Vec<Seen>,
-    /// Dates a label names as another date: never a head candidate.
-    other: Vec<Written>,
+    /// Dates a label names as another date, where each stands: never a head candidate. Only
+    /// the date at that place is left out, not another with the same value.
+    other: Vec<At>,
 }
 
 impl Dates {
@@ -273,6 +290,7 @@ pub(crate) fn page_dates(runs: &[Run], height: Option<f32>) -> Dates {
     let mut out = Dates::default();
     let in_head = |l: &Line<'_>| height.is_some_and(|h| h > 0.0 && l.y + l.h >= h * HEAD_SHARE);
     for l in &lines(runs) {
+        let line = l.runs.first().map_or(0, |r| r.line);
         let mut from = 0;
         for d in scan::dates(&l.text, 4..=4) {
             let own = &l.text[from..d.start];
@@ -284,13 +302,14 @@ pub(crate) fn page_dates(runs: &[Run], height: Option<f32>) -> Dates {
             });
             let seen = Seen {
                 written: (d.sep, d.parts),
+                line,
                 text: l.text[d.start..d.end].to_string(),
                 label,
             };
             if seen.label.is_some() {
                 out.labelled.push(seen);
             } else if names_other_date(own) {
-                out.other.push(seen.written);
+                out.other.push((line, seen.written));
             } else if in_head(l) {
                 out.head.push(seen);
             }
@@ -319,13 +338,15 @@ fn ink_gap(l: &Line<'_>, end: usize, start: usize) -> f32 {
 }
 
 /// The dates the laid out text of page 1 gives as values of labels: `lines` are the lines the
-/// layout lays out as text (tables taken out), `pairs` the label and value text of the pairs
-/// that the layout read from drawn boxes and rows of fields. A label alone on its line marks
-/// the value beside it or right below it (see [`value_of`]); a pair marks its value. A table
-/// of columns gives no pairs: its column title is no label of one value.
-pub(crate) fn laid_dates(lines: &[Line<'_>], pairs: &[(String, String)]) -> Dates {
+/// layout lays out as text (tables taken out), `pairs` the pairs that the layout read from
+/// drawn boxes and rows of fields, with `height` the height of the page. A label alone on its
+/// line marks the value beside it or right below it (see [`value_of`]); a pair marks its
+/// value when its table's top lies in the top third of the page, where the header fields of a
+/// form stand (a pair table lower down may be one row of items under small column titles). A
+/// table of columns gives no pairs: its column title is no label of one value.
+pub(crate) fn laid_dates(lines: &[Line<'_>], pairs: &[Pair], height: Option<f32>) -> Dates {
     let mut out = Dates::default();
-    let add = |label: &str, value: &str, out: &mut Dates| {
+    let add = |label: &str, value: &str, line: u32, out: &mut Dates| {
         let Some(d) = scan::dates(value, 4..=4)
             .into_iter()
             .next()
@@ -337,11 +358,12 @@ pub(crate) fn laid_dates(lines: &[Line<'_>], pairs: &[(String, String)]) -> Date
         if let Some(label) = whole_label(label) {
             out.labelled.push(Seen {
                 written,
+                line,
                 text: value[d.start..d.end].to_string(),
                 label: Some(label),
             });
         } else if names_other_date(label) {
-            out.other.push(written);
+            out.other.push((line, written));
         }
     };
     for (k, l) in lines.iter().enumerate() {
@@ -349,11 +371,15 @@ pub(crate) fn laid_dates(lines: &[Line<'_>], pairs: &[(String, String)]) -> Date
             && (whole_label(&l.text).is_some() || names_other_date(&l.text))
             && let Some(v) = value_of(lines, k)
         {
-            add(&l.text, &v.text, &mut out);
+            let line = v.runs.first().map_or(0, |r| r.line);
+            add(&l.text, &v.text, line, &mut out);
         }
     }
-    for (label, value) in pairs {
-        add(label, value.trim(), &mut out);
+    let head = |top: f32| height.is_some_and(|h| h > 0.0 && top >= h * HEAD_SHARE);
+    for p in pairs.iter().filter(|p| head(p.top)) {
+        if let Some(line) = p.line {
+            add(&p.label, p.value.trim(), line, &mut out);
+        }
     }
     out
 }
@@ -388,7 +414,7 @@ pub(crate) fn document_date(dates: &Dates) -> PageDate {
     let head: Vec<&Seen> = dates
         .head
         .iter()
-        .filter(|s| !dates.other.contains(&s.written))
+        .filter(|s| !dates.other.contains(&(s.line, s.written)))
         .collect();
     match distinct(head.iter().map(|s| s.written)) {
         0 => PageDate::None,

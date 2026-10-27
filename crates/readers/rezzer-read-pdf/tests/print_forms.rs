@@ -4638,3 +4638,59 @@ fn contents_heading_is_no_title() {
         );
     }
 }
+
+#[test]
+fn equal_value_of_another_date_keeps_the_head_date() {
+    // The delivery date below the head has the value of a head date: only its own date is
+    // another date, so the head still holds two dates and none is taken.
+    let want = ["2 dates stand in the head of page 1; none is marked as the document date"];
+    for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
+        for font in ["FL", "FB"] {
+            let head = common::show("FB", size * 1.6, 40.0, 790.0, "Musterbescheid")
+                + &common::show(font, size, 400.0, 760.0, "Musterstadt, 01.02.2026")
+                + &common::show(font, size, 40.0, 740.0, "Kunde seit 01.01.2020");
+            // The other date's label on the date's line, or alone over it.
+            for other in [
+                common::show(font, size, 40.0, 200.0, "Lieferdatum 01.02.2026"),
+                common::show(font, size, 40.0, 200.0, "Lieferdatum")
+                    + &common::show(font, size, 40.0, 200.0 - size * 1.2, "01.02.2026"),
+            ] {
+                let out = read(&headed(&format!("{head}{other}"), size, scale, ""));
+                assert_eq!(
+                    out.document.properties.document_date, None,
+                    "{size} pt {font}: {other}"
+                );
+                assert_eq!(unsure(&out), want, "{size} pt {font}: {other}");
+            }
+        }
+    }
+}
+
+#[test]
+fn one_row_item_grid_with_small_titles_gives_no_date() {
+    // Column titles smaller than their values, one row, below the top third: the pairs layer
+    // may read `Datum` over its value, but a pair table there gives no document date.
+    for (size, scale) in [(7.0f32, 0.8f32), (9.0, 1.0), (12.0, 1.25)] {
+        for font in ["FL", "FB"] {
+            let title = size * 6.6 / 9.0;
+            let mut head = String::new();
+            for x in [40.0f32, 140.0, 280.0, 380.0] {
+                head += &format!("0.5 w {x} 150 m {x} 210 l S\n");
+            }
+            for y in [150.0f32, 210.0] {
+                head += &common::hrule(40.0, 380.0, y);
+            }
+            for (x, t) in [(45.0f32, "Pos"), (145.0, "Datum"), (285.0, "Betrag")] {
+                head += &common::show("FL", title, x, 200.0, t);
+            }
+            for (x, t) in [(45.0f32, "1"), (145.0, "01.02.2026"), (285.0, "9,99")] {
+                head += &common::show(font, size, x, 160.0, t);
+            }
+            let out = read(&headed(&head, size, scale, ""));
+            assert_eq!(
+                out.document.properties.document_date, None,
+                "{size} pt {font}, scale {scale}"
+            );
+        }
+    }
+}
