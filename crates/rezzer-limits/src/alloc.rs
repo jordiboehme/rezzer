@@ -4,7 +4,8 @@
 
 //! The allocator of the Rezzer binary: the system allocator, except that outside Linux a block
 //! that grows to 1 MiB or more, by at least half its size at once, is moved by allocate, copy
-//! and free.
+//! and free, and that on Linux every `realloc` goes to the system while glibc maps every block
+//! from 1 MiB on (see the Linux section below).
 //!
 //! Why: decoders grow their output by reallocating (the Flate decoder of a page picture goes
 //! from 4 to 8 to 16 MiB). On macOS the system's realloc of large blocks leaves memory
@@ -24,22 +25,60 @@
 //! block at each small step. The policy still forwards small growth to the system on purpose,
 //! so the small-step test checks no time there.
 //!
+//! # Linux
+//!
 //! Linux does not move by hand: every `realloc` goes to the system. glibc and musl both keep a
 //! large block in its own mapping, grow it in place by remapping its pages (`mremap`) and give
 //! the pages back when it is freed, so the move would only add a copy and a moment with both
 //! blocks held. With glibc that holds only for blocks above its mapping threshold, which it
 //! raises up to 32 MiB after a mapped block is freed; a freed block below the threshold stays
-//! in the heap and can stay resident. So on glibc the first allocation sets the threshold to
-//! 1 MiB once with `mallopt(M_MMAP_THRESHOLD)`, which also stops it from moving: every block
-//! from 1 MiB on is its own mapping. musl has no such setting and needs none: its allocator
-//! maps large blocks by itself. The Linux release binaries are static musl; the glibc and musl
-//! figures of the probe in `tests/linux_rss.rs` decide whether this policy stays.
+//! in the heap and can stay resident. So on glibc the first allocation through this allocator
+//! sets the threshold to 1 MiB once with `mallopt(M_MMAP_THRESHOLD)`, which also stops it from
+//! moving: every block from 1 MiB on is its own mapping. musl has no such setting and needs
+//! none: its allocator maps large blocks by itself.
+//!
+//! The fixed threshold starts at 1 MiB, not at glibc's default of 128 KiB, so on glibc a block
+//! between 128 KiB and 1 MiB now lives in the heap instead of its own mapping. The figures
+//! below show that this costs nothing there: no shape keeps more resident after free, and the page
+//! pictures (whose 256 KiB pieces are such blocks) keep less.
+//!
+//! The Linux release binaries are static musl, so CI measures musl as well as glibc, and a
+//! glibc result never decides alone. The policy was kept on both after these figures of
+//! 2026-10-27 (GitHub Actions on `ubuntu-latest`, x86_64, `cargo nextest`, debug build), from
+//! CI run 40552689712 before the policy (every growth of 1 MiB or more by half moved by hand)
+//! and CI run 40559816952 after it. The probe shapes of `tests/linux_rss.rs` give the peak and
+//! the resident set after free, in MiB, before and after; the resident set at the start is
+//! 2.7 to 2.8 MiB on glibc and 0.9 to 1.0 MiB on musl:
+//!
+//! | shape | glibc peak | glibc after free | musl peak | musl after free |
+//! |---|---|---|---|---|
+//! | `a_known_size_buffer` | 40.8 to 31.2 | 2.8 to 2.7 | 38.8 to 29.3 | 1.0 to 0.9 |
+//! | `doubling_to_64_mib` | 66.7 to 66.9 | 2.9 to 2.9 | 65.0 to 64.8 | 1.1 to 1.0 |
+//! | `many_threads_small_blocks` | 206.4 to 211.4 | 4.0 to 3.9 | 236.1 to 258.2 | 1.1 to 1.0 |
+//! | `small_exact_growth` | 128.7 to 128.8 | 2.8 to 2.8 | 127.0 to 126.8 | 1.1 to 1.0 |
+//! | `page_pictures_grow_and_go` | 45.7 to 33.7 | 30.0 to 18.0 | 31.7 to 31.8 | 16.1 to 16.2 |
+//!
+//! `page_pictures_grow_and_go` still holds 15.0 MiB live after free; on musl its start moved
+//! from 0.9 to 1.0 MiB, so its 0.1 MiB more after free is the start, not the policy.
+//! `many_threads_small_blocks` makes no `realloc` and only blocks of 1 to 4 KiB, which the
+//! policy does not touch, so its higher peaks (2.4 % on glibc, 9.4 % on musl) are run to run
+//! noise. The wall time of `small_exact_growth` went from 233 to 90 ms on glibc and from 78 to
+//! 101 ms on musl. The hostile PDF tests of the binary (`crates/rezzer/tests/hostile.rs`) print
+//! their maximum resident set: no line rose by more than 2 MiB or 5 % on either libc. The
+//! largest are
+//! `hundred_thousand_pages_stop_in_time` (glibc 382 to 383 MiB, musl 425 to 425 MiB),
+//! `hundred_thousand_pages_stay_under_the_memory_limit` (glibc 305 to 305, musl 303 to 303),
+//! `huge_script_is_bounded` (glibc 214 to 215, musl 211 to 211) and
+//! `pages_with_their_own_resources_are_read_under_the_memory_limit` (glibc 117 to 119, musl
+//! 115 to 114); the small ones went from 22 to 23 MiB on glibc and from 21 to 22 on musl.
 
 use std::alloc::{GlobalAlloc, Layout, System};
 #[cfg(debug_assertions)]
 use std::cell::Cell;
 
-/// New sizes from which a block is moved by allocate, copy and free.
+/// New sizes from which a block is moved by allocate, copy and free, outside Linux. Linux
+/// never moves by hand (see [`MOVES_BY_HAND`]); there glibc maps every block from this same
+/// 1 MiB on instead (see `map_large_blocks`).
 const MOVE_FROM: usize = 1 << 20;
 
 /// Whether this system moves large growth by hand at all. Linux leaves every `realloc` to the
@@ -82,14 +121,17 @@ fn count_moved(n: usize) {
     let _ = MOVED.try_with(|m| m.set(m.get().saturating_add(n as u64)));
 }
 
-/// Sets glibc's mapping threshold to 1 MiB, once, before the first block is made.
+/// Sets glibc's mapping threshold to 1 MiB, once, on the first block made through this
+/// allocator.
 ///
 /// Safe inside the allocator: it does not allocate (an atomic flag and one `mallopt` call,
 /// which takes glibc's arena lock and allocates nothing), cannot panic and keeps no thread
-/// state. Two threads that race here may both call `mallopt` with the same value, which is
-/// harmless; a block made by a thread that sees the flag before the call is done uses the old
-/// threshold, which is the state before this policy. The Rust runtime makes its first blocks
-/// on the main thread before any other thread starts, so in practice the call comes first.
+/// state. The swap of the flag lets exactly one thread call `mallopt`. Another thread that
+/// sees the flag set before that call is done makes its block under glibc's default
+/// threshold of 128 KiB, which is harmless: what matters is the first Rust block of 1 MiB or
+/// more, not the first allocation of the process, and the default threshold maps such a
+/// block anyway. Blocks the C library made before Rust's first one do not pass through here
+/// and do not matter either.
 #[cfg(all(target_os = "linux", target_env = "gnu"))]
 fn map_large_blocks() {
     use std::sync::atomic::{AtomicBool, Ordering};
