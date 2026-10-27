@@ -272,23 +272,6 @@ pub(crate) const KNOWN: &[Known] = &[
         why: "carry from Task 13 fix round 5 (ruling P6-X5) and C-3: the footer columns of a file of one page are no furniture and read as at b9c878e, a table that mixes the lines of the columns, with no loss",
     },
     Known {
-        shape: "F1 to F3",
-        variants: &[
-            "turned 90",
-            "turned 270",
-            "scale 0.7, larger text, courier, times labels, dashed, turned 90, two pages",
-            "scale 1.5, times labels, rising, turned 90, two pages",
-            "scale 0.7, larger text, courier, dotted, turned 270",
-            "scale 0.7, larger text, courier, rising, turned 270",
-            "scale 0.7, larger text, courier, times labels, thick, turned 90, two pages",
-            "scale 1.5, dashed, turned 270",
-            "scale 1.5, dotted, turned 90",
-        ],
-        broken: &[Inv::ValueOnce, Inv::ClearPairs],
-        cause: Cause::New,
-        why: "P6-X, values lost but named by a loss (allowed by the ruling): on a turned page the rate run is not cut at the divider between `Satz %` and `Gr C`: the run `1234567` is kept whole with a loss that names both fields and one that says its drawn mark is not read; upright the same run is cut and pairs",
-    },
-    Known {
         shape: "label block and bank row",
         variants: &["scale 0.75, smaller text, proportional, dashed, turned 90, beside"],
         broken: &[Inv::SameReading],

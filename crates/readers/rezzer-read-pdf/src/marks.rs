@@ -790,15 +790,88 @@ const CUT_WORK: usize = 1_000_000;
 /// - the number starts at its field's start, the digits after the divider start within a
 ///   character of it, and nothing else stands in the next field on the number's line.
 ///
-/// Only the first divider of a number cuts. Runs only in the direction of the page's text.
-pub(crate) fn cut_at_dividers(glyphs: &mut Vec<Gl>, text: &mut String, rules: &[Rule]) {
-    let upright = |r: &Rule| r.kind == RuleKind::Line && (r.x1 - r.x0).abs() < (r.y1 - r.y0).abs();
-    if !text.contains(SEP) || !rules.iter().any(upright) {
+/// Only the first divider of a number cuts. Runs only in the direction of the page's text,
+/// `turn`: on a page read turned, the digits, the rules and the dividers are looked at in the
+/// frame its text reads in, as on an upright page.
+pub(crate) fn cut_at_dividers(glyphs: &mut Vec<Gl>, text: &mut String, rules: &[Rule], turn: Turn) {
+    if !text.contains(SEP) || rules.is_empty() {
         return;
+    }
+    // After which glyph a space goes, and where on the page.
+    let spaces: Vec<(usize, (f32, f32))> = if turn == Turn::None {
+        divider_spaces(glyphs, text, rules)
+            .into_iter()
+            .map(|(k, x)| (k, (x, glyphs[k].y)))
+            .collect()
+    } else {
+        let view: Vec<Gl> = glyphs
+            .iter()
+            .map(|g| {
+                let ((x, y), (dx, dy)) = (turn.apply(g.x, g.y), turn.apply(g.dx, g.dy));
+                Gl { x, y, dx, dy, ..*g }
+            })
+            .collect();
+        let turned: Vec<Rule> = rules
+            .iter()
+            .map(|r| {
+                let (a, b) = (turn.apply(r.x0, r.y0), turn.apply(r.x1, r.y1));
+                Rule {
+                    x0: a.0.min(b.0),
+                    y0: a.1.min(b.1),
+                    x1: a.0.max(b.0),
+                    y1: a.1.max(b.1),
+                    kind: r.kind,
+                }
+            })
+            .collect();
+        // Back on the page: as far along the digit's baseline from it as in the frame.
+        divider_spaces(&view, text, &turned)
+            .into_iter()
+            .map(|(k, x)| {
+                let (g, along) = (&glyphs[k], x - view[k].x);
+                (k, (g.x + along * g.dx, g.y + along * g.dy))
+            })
+            .collect()
+    };
+    if spaces.is_empty() {
+        return;
+    }
+    let Ok(at) = u32::try_from(text.len()) else {
+        return;
+    };
+    text.push(' ');
+    // Moved up from the back, each space goes in right after its digit, with no advance.
+    let n = glyphs.len();
+    glyphs.resize(n + spaces.len(), glyphs[0]);
+    let (mut src, mut dst) = (n, glyphs.len());
+    for &(k, (x, y)) in spaces.iter().rev() {
+        while src > k + 1 {
+            src -= 1;
+            dst -= 1;
+            glyphs[dst] = glyphs[src];
+        }
+        dst -= 1;
+        glyphs[dst] = Gl {
+            start: at,
+            len: 1,
+            x,
+            y,
+            adv: Some(0.0),
+            ..glyphs[k]
+        };
+    }
+}
+
+/// The spaces [`cut_at_dividers`] puts in on a page read upright: after which glyph each goes,
+/// and at which x (the divider's).
+fn divider_spaces(glyphs: &[Gl], text: &str, rules: &[Rule]) -> Vec<(usize, f32)> {
+    let upright = |r: &Rule| r.kind == RuleKind::Line && (r.x1 - r.x0).abs() < (r.y1 - r.y0).abs();
+    if !rules.iter().any(upright) {
+        return Vec::new();
     }
     let frames = crate::tables::field_frames(rules);
     if frames.iter().all(|f| f.dividers.is_empty()) {
-        return;
+        return Vec::new();
     }
     let bytes = text.as_bytes();
     let char_at = |g: &Gl| text[g.start as usize..].chars().next();
@@ -947,32 +1020,7 @@ pub(crate) fn cut_at_dividers(glyphs: &mut Vec<Gl>, text: &mut String, rules: &[
             break;
         }
     }
-    if spaces.is_empty() {
-        return;
-    }
-    let Ok(at) = u32::try_from(text.len()) else {
-        return;
-    };
-    text.push(' ');
-    // Moved up from the back, each space goes in right after its digit, with no advance.
-    let n = glyphs.len();
-    glyphs.resize(n + spaces.len(), glyphs[0]);
-    let (mut src, mut dst) = (n, glyphs.len());
-    for &(k, x) in spaces.iter().rev() {
-        while src > k + 1 {
-            src -= 1;
-            dst -= 1;
-            glyphs[dst] = glyphs[src];
-        }
-        dst -= 1;
-        glyphs[dst] = Gl {
-            start: at,
-            len: 1,
-            x,
-            adv: Some(0.0),
-            ..glyphs[k]
-        };
-    }
+    spaces
 }
 
 /// Marks of one line lie within this share of their thickness of each other across it, and
