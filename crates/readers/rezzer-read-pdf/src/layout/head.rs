@@ -343,12 +343,12 @@ fn ink_gap(l: &Line<'_>, end: usize, start: usize) -> f32 {
 /// the layout lays out as text (tables taken out), read piece by piece (see [`pieces`]), and
 /// `tables` every table the layout made on the page, with `height` the height of the page. A
 /// piece that is a whole [`DATE_LABELS`] entry marks the value beside it or right below it
-/// (see [`value_of`]). In a table whose top lies in the top half of the page, a cell that is a
-/// whole entry marks the cell right of it in its row when that cell is a full date and nothing
-/// else, and the table has two columns (labels and values, `Datum: | 26.10.2026`) or the two
-/// cells end their row and no other cell of the row holds a date. A table that lists dates in
-/// a row (`Datum | 15.01.2026 | 16.01.2026`, `Datum | 15.01.2026 | Stunden | 8`) and a column
-/// title `Datum` with another title beside it mark nothing. A table of label and value pairs
+/// (see [`value_of`]). In a table of exactly two columns (labels and values) whose top lies in
+/// the top half of the page, a cell that is a whole entry marks the cell right of it when that
+/// cell is a full date and nothing else (`Datum: | 26.10.2026`). A table of more columns marks
+/// nothing: a row of items may end in `Datum | 15.01.2026` or list dates after a title
+/// (`Datum | 15.01.2026 | 16.01.2026`, `Datum | 15.01.2026 | Stunden | 8`), and a column title
+/// `Datum` has another title beside it. A table of label and value pairs
 /// that the field reader made counts only when its top lies in the top third of the page,
 /// where the header fields of a form stand: lower down it may be one row of items under small
 /// column titles, each title read as the label of the value below it.
@@ -386,14 +386,10 @@ pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: Option<f32>) ->
     for t in tables
         .iter()
         .filter(|t| above(t.top, if t.pairs { HEAD_SHARE } else { HALF }))
+        .filter(|t| t.rows.iter().all(|row| row.len() == 2))
     {
-        let two_columns = t.rows.iter().all(|row| row.len() == 2);
         for row in &t.rows {
-            let Some([label, value]) = row.last_chunk::<2>() else {
-                continue;
-            };
-            let dates = row.iter().filter(|c| is_date(c)).count();
-            if (two_columns || dates == 1)
+            if let [label, value] = row.as_slice()
                 && is_date(value)
                 && let Some(label) = whole_label(label)
             {
@@ -471,8 +467,9 @@ const BESIDE_SIZES: f32 = 6.0;
 /// The value of the label piece `all[k]`: among the next [`VALUE_LINES`] pieces, the nearest
 /// that starts with a date and stands beside it on its baseline (to its right, at most
 /// [`BESIDE_SIZES`] label sizes after its end), else the one right below it at its left edge
-/// (within the label's size) that is a date alone on its line (see [`date_alone`]): a row of
-/// items under column titles has more cells on the line and is no value of one label.
+/// (within the label's size) that is a date alone on its line (see [`date_alone`]) with no
+/// date right below it (see [`date_below`]): a row of items under column titles has more cells
+/// on the line, and a column of dates under a title is a list, neither the value of one label.
 fn value_of<'a, 'r>(all: &'a [Line<'r>], k: usize) -> Option<&'a Line<'r>> {
     let label = &all[k];
     let end = label.runs.iter().map(|r| r.x + r.w).fold(label.x, f32::max);
@@ -494,8 +491,23 @@ fn value_of<'a, 'r>(all: &'a [Line<'r>], k: usize) -> Option<&'a Line<'r>> {
     beside.or_else(|| {
         after
             .filter(|v| right_below(label, v) && (v.x - label.x).abs() <= label.size)
-            .filter(|v| date_alone(all, v))
+            .filter(|v| date_alone(all, v) && !date_below(all, v))
             .max_by(|a, b| a.y.total_cmp(&b.y))
+    })
+}
+
+/// Whether a piece that starts with a date stands right below the piece `v` among the pieces
+/// `all` (see [`right_below`]), its x span overlapping `v`'s: `v` is then one entry of a
+/// column of dates, not the value of the label over it.
+fn date_below(all: &[Line<'_>], v: &Line<'_>) -> bool {
+    let right = |l: &Line<'_>| l.runs.iter().map(|r| r.x + r.w).fold(l.x, f32::max);
+    all.iter().any(|w| {
+        right_below(v, w)
+            && w.x <= right(v)
+            && right(w) >= v.x
+            && scan::dates(&w.text, 4..=4)
+                .first()
+                .is_some_and(|d| d.start == 0)
     })
 }
 

@@ -5641,3 +5641,125 @@ fn rereview_r6_probes_give_no_wrong_date() {
         }
     }
 }
+
+#[test]
+fn rereview_r8_probes_give_no_wrong_date() {
+    // The probes of the round 8 re-review (Y1, Y2 and the checks beside them) as a test. A
+    // label over a column of lone dates marks none of them; a label cell marks the date cell
+    // beside it only in a table of two columns. Never a wrong date.
+    use HeadWant::*;
+    let one = Lost(ONE_DATE);
+    let three = Lost("3 dates stand in the head of page 1; none is marked as the document date");
+    for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
+        for font in ["FL", "FB"] {
+            let s = |x: f32, y: f32, t: &str| common::show(font, size, x, y, t);
+            let ruled =
+                |rows: &[&[&str]], xs: &[f32], top: f32| ruled_rows(rows, xs, top, size, font);
+            let pitch = size * 1.2;
+            let below = 760.0 - pitch;
+            let title = common::show("FB", size * 1.6, 40.0, 800.0, "Musterbescheid");
+            let one_row: &[&[&str]] = &[&["Stunden", "8", "Datum", "15.01.2026"]];
+            let row_ends_with_label: &[&[&str]] = &[
+                &["Pos", "Text", "Datum", "Betrag"],
+                &["1", "Muster", "Datum", "15.01.2026"],
+            ];
+            let with_header: &[&[&str]] = &[&["Ereignis", "Datum"], &["Datum", "01.02.2026"]];
+            let repeated: &[&[&str]] = &[&["Datum", "15.01.2026"], &["Datum", "16.01.2026"]];
+            let item_titles: &[&[&str]] = &[&["Leistung", "Datum"], &["Muster", "15.01.2026"]];
+            let wide = [40.0f32, 140.0, 260.0, 380.0];
+            let two_cols = [40.0f32, 160.0];
+            // The one-row grid with small column titles of `one_row_item_grid_with_small_titles_gives_no_date`,
+            // in the top half but below the top third.
+            let small_titles = {
+                let title_size = size * 6.6 / 9.0;
+                let mut h = String::new();
+                for x in [40.0f32, 140.0, 280.0, 380.0] {
+                    h += &format!("0.5 w {x} 450 m {x} 510 l S\n");
+                }
+                for y in [450.0f32, 510.0] {
+                    h += &common::hrule(40.0, 380.0, y);
+                }
+                for (x, t) in [(45.0f32, "Pos"), (145.0, "Datum"), (285.0, "Betrag")] {
+                    h += &common::show("FL", title_size, x, 500.0, t);
+                }
+                for (x, t) in [(45.0f32, "1"), (145.0, "01.02.2026"), (285.0, "9,99")] {
+                    h += &s(x, 460.0, t);
+                }
+                h
+            };
+            let cases: Vec<(&str, String, HeadWant)> = vec![
+                (
+                    "Z1: Datum over a column of lone dates in the head",
+                    title.clone()
+                        + &s(40.0, 760.0, "Datum")
+                        + &s(40.0, below, "15.01.2026")
+                        + &s(40.0, below - pitch, "16.01.2026")
+                        + &s(40.0, below - 2.0 * pitch, "17.01.2026"),
+                    three,
+                ),
+                (
+                    "Z1b: Datum over a column of lone dates in the body",
+                    title.clone()
+                        + &s(40.0, 250.0, "Datum")
+                        + &s(40.0, 250.0 - pitch, "15.01.2026")
+                        + &s(40.0, 250.0 - 2.0 * pitch, "16.01.2026"),
+                    Nothing,
+                ),
+                (
+                    "Z2: one ruled row Stunden | 8 | Datum | date",
+                    title.clone() + &ruled(one_row, &wide, 750.0),
+                    one,
+                ),
+                (
+                    "Z3: an item row that ends with Datum | date",
+                    title.clone() + &ruled(row_ends_with_label, &wide, 750.0),
+                    one,
+                ),
+                (
+                    "Z4: a two-column table with a header and a Datum row",
+                    title.clone() + &ruled(with_header, &two_cols, 750.0),
+                    Date("2026-02-01", "date label \"Datum\" on page 1"),
+                ),
+                (
+                    "Z5: two Datum rows that differ",
+                    title.clone() + &ruled(repeated, &two_cols, 750.0),
+                    NoDate,
+                ),
+                (
+                    "Z6: item titles Leistung | Datum over one row",
+                    title.clone() + &ruled(item_titles, &two_cols, 750.0),
+                    one,
+                ),
+                (
+                    "Z7: Datum: before the date, then the page number",
+                    title.clone() + &s(400.0, 760.0, "Datum: 01.02.2026 Seite 1"),
+                    Date("2026-02-01", "date label \"Datum\" on page 1"),
+                ),
+                (
+                    "Z8: Datum over one lone date, another column's cells on other baselines",
+                    title.clone()
+                        + &s(40.0, 760.0, "Datum")
+                        + &s(40.0, below, "15.01.2026")
+                        + &s(300.0, 760.0, "Betrag")
+                        + &s(300.0, below - pitch * 3.0, "9,99"),
+                    Date("2026-01-15", "date label \"Datum\" on page 1"),
+                ),
+                (
+                    "N2b: a one-row grid with small titles below the top third",
+                    title.clone() + &small_titles,
+                    Nothing,
+                ),
+            ];
+            for (name, head, want) in cases {
+                let out = read(&headed(&head, size, scale, ""));
+                let case = format!("{name} in {size} pt {font}");
+                assert_head(&out, want, &case);
+                let date = match want {
+                    Date(date, _) => Some(date),
+                    _ => None,
+                };
+                assert_eq!(front(&out, "source_date").as_deref(), date, "{case}");
+            }
+        }
+    }
+}
