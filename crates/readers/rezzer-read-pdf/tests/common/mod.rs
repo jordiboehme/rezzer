@@ -308,7 +308,8 @@ impl Default for FormPage {
 
 /// A file of A4 print-run form pages. The page and the template have the fonts `/FL`
 /// (Helvetica, for labels), `/FD` (Courier, for data lines), `/FB` (Helvetica-Bold) and
-/// `/FDB` (Courier-Bold, for data lines with `bold_data`), all
+/// `/FDB` (Courier-Bold, for data lines with `bold_data`), `/FT` (Times-Roman) and `/FTB`
+/// (Times-Bold), all
 /// in WinAnsi: the template and the data lines are written in that encoding, so labels may
 /// hold umlauts, `\u{df}` and the euro sign.
 /// `info` holds the entries of the Info dictionary (for example `/Title (Lohn)`); with `""`
@@ -326,8 +327,12 @@ pub fn print_form(pages: &[FormPage], info: &str, catalog_extra: &str) -> Vec<u8
     let data = b.add(font("Courier"));
     let bold = b.add(font("Helvetica-Bold"));
     let bold_data = b.add(font("Courier-Bold"));
-    let fonts =
-        format!("/Font << /FL {label} 0 R /FD {data} 0 R /FB {bold} 0 R /FDB {bold_data} 0 R >>");
+    let times = b.add(font("Times-Roman"));
+    let times_bold = b.add(font("Times-Bold"));
+    let fonts = format!(
+        "/Font << /FL {label} 0 R /FD {data} 0 R /FB {bold} 0 R /FDB {bold_data} 0 R \
+         /FT {times} 0 R /FTB {times_bold} 0 R >>"
+    );
     let mut kids = Vec::new();
     let mut all_annots = Vec::new();
     for page in pages {
@@ -1003,6 +1008,87 @@ pub fn helvetica_width(text: &str, size: f32) -> f32 {
             '-' => 333,
             _ => 278,
         })
+        .sum();
+    units as f32 * size / 1000.0
+}
+
+/// The width of `text` at `size` in the font that [`print_form`] names `font` (`FL`, `FB`,
+/// `FT` or `FTB`): the font's standard widths for letters, digits, the space and the signs
+/// `-`, `%`, `.` and `,`; other characters count as a space.
+pub fn font_width(font: &str, text: &str, size: f32) -> f32 {
+    type Widths = ([u16; 26], [u16; 26], u16, u16, [u16; 4]);
+    const HELVETICA: Widths = (
+        [
+            556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556, 556, 556,
+            333, 500, 278, 556, 500, 722, 500, 500, 500,
+        ],
+        [
+            667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778, 667, 778,
+            722, 667, 611, 722, 667, 944, 667, 667, 611,
+        ],
+        556,
+        278,
+        [333, 889, 278, 278],
+    );
+    const HELVETICA_BOLD: Widths = (
+        [
+            556, 611, 556, 611, 556, 333, 611, 611, 278, 278, 556, 278, 889, 611, 611, 611, 611,
+            389, 556, 333, 611, 556, 778, 556, 556, 500,
+        ],
+        [
+            722, 722, 722, 722, 667, 611, 778, 722, 278, 556, 722, 611, 833, 722, 778, 667, 778,
+            722, 667, 611, 722, 667, 944, 667, 667, 611,
+        ],
+        556,
+        278,
+        [333, 889, 278, 278],
+    );
+    const TIMES: Widths = (
+        [
+            444, 500, 444, 500, 444, 333, 500, 500, 278, 278, 500, 278, 778, 500, 500, 500, 500,
+            333, 389, 278, 500, 500, 722, 500, 500, 444,
+        ],
+        [
+            722, 667, 667, 722, 611, 556, 722, 722, 333, 389, 722, 611, 889, 722, 722, 556, 722,
+            667, 556, 611, 722, 722, 944, 722, 722, 611,
+        ],
+        500,
+        250,
+        [333, 833, 250, 250],
+    );
+    const TIMES_BOLD: Widths = (
+        [
+            500, 556, 444, 556, 444, 333, 500, 556, 278, 333, 556, 278, 833, 556, 500, 556, 556,
+            444, 389, 333, 556, 500, 722, 500, 500, 444,
+        ],
+        [
+            722, 667, 722, 722, 667, 611, 778, 778, 389, 500, 778, 667, 944, 722, 778, 611, 778,
+            722, 556, 667, 722, 722, 1000, 722, 722, 667,
+        ],
+        500,
+        250,
+        [333, 1000, 250, 250],
+    );
+    let (lower, upper, digit, space, signs) = match font {
+        "FL" => HELVETICA,
+        "FB" => HELVETICA_BOLD,
+        "FT" => TIMES,
+        "FTB" => TIMES_BOLD,
+        other => panic!("no widths for the font {other}"),
+    };
+    let units: u32 = text
+        .chars()
+        .map(|c| match c {
+            'a'..='z' => lower[c as usize - 'a' as usize],
+            'A'..='Z' => upper[c as usize - 'A' as usize],
+            '0'..='9' => digit,
+            '-' => signs[0],
+            '%' => signs[1],
+            '.' => signs[2],
+            ',' => signs[3],
+            _ => space,
+        })
+        .map(u32::from)
         .sum();
     units as f32 * size / 1000.0
 }

@@ -919,3 +919,436 @@ fn a_wrapped_item_line_joins_its_cell() {
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
+
+/// A cell of a read table: the column it starts in (the spans of the cells before it and the
+/// row spans of the rows above counted), its column span and its text.
+#[derive(Debug, Clone, PartialEq)]
+struct Placed {
+    col: usize,
+    span: usize,
+    text: String,
+}
+
+/// The tables of the body, each with its header rows and its cells placed in their columns.
+fn placed_tables(out: &ReadOutcome) -> Vec<(usize, Vec<Vec<Placed>>)> {
+    blocks(out)
+        .into_iter()
+        .filter_map(|b| match b {
+            Block::Table {
+                header_rows, rows, ..
+            } => {
+                // For each column, the rows a cell above still covers.
+                let mut covered: Vec<usize> = Vec::new();
+                let placed = rows
+                    .iter()
+                    .map(|r| {
+                        let mut col = 0;
+                        let mut out = Vec::new();
+                        for c in r {
+                            while covered.get(col).is_some_and(|n| *n > 0) {
+                                col += 1;
+                            }
+                            let span = c.col_span.max(1) as usize;
+                            if covered.len() < col + span {
+                                covered.resize(col + span, 0);
+                            }
+                            for slot in &mut covered[col..col + span] {
+                                *slot = c.row_span.max(1) as usize;
+                            }
+                            out.push(Placed {
+                                col,
+                                span,
+                                text: plain_text(&c.inlines),
+                            });
+                            col += span;
+                        }
+                        for slot in &mut covered {
+                            *slot = slot.saturating_sub(1);
+                        }
+                        out
+                    })
+                    .collect();
+                Some((*header_rows, placed))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// One column of a generated table or row of fields: its title and the lines under it, top
+/// down.
+type Column = (String, Vec<String>);
+
+/// What breaks the column invariant in the read table `rows` for `columns`, when one of its
+/// rows holds two titles or more (a table of labels and values holds one a row):
+/// - each title stands in a cell of its own text, and heads the column its lines stand in:
+///   the cells under it (in its columns, down to the last row) hold its lines whole and in
+///   order, the cell of each row the line of that row, the last row also the lines past the
+///   rows (a value of more lines than the others has);
+/// - no cell holds text of two columns: every cell with text is a title or stands under one.
+///
+/// The titles found are added to `found`.
+fn table_broken(rows: &[Vec<Placed>], columns: &[Column], found: &mut Vec<String>) -> Vec<String> {
+    let mut broken = Vec::new();
+    let is_title = |t: &str| columns.iter().any(|c| c.0 == t);
+    let Some(top) = rows
+        .iter()
+        .position(|r| r.iter().filter(|c| is_title(&c.text)).count() >= 2)
+    else {
+        return broken;
+    };
+    let below = &rows[top + 1..];
+    // The column range of each title found.
+    let mut heads: Vec<(usize, usize)> = Vec::new();
+    for (title, lines) in columns {
+        let Some(head) = rows[top].iter().find(|c| c.text == *title) else {
+            if let Some(c) = rows
+                .iter()
+                .flatten()
+                .find(|c| c.text.contains(title.as_str()))
+            {
+                broken.push(format!("the title {title:?} is in the cell {:?}", c.text));
+            }
+            continue;
+        };
+        found.push(title.clone());
+        heads.push((head.col, head.col + head.span));
+        let under = |r: &Vec<Placed>| -> String {
+            r.iter()
+                .filter(|c| c.col >= head.col && c.col + c.span <= head.col + head.span)
+                .map(|c| c.text.as_str())
+                .filter(|t| !t.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        let n = below.len();
+        for (k, r) in below.iter().enumerate() {
+            let want = if k + 1 == n {
+                lines.get(k..).map(|l| l.join(" ")).unwrap_or_default()
+            } else {
+                lines.get(k).cloned().unwrap_or_default()
+            };
+            let got = under(r);
+            if got != want {
+                broken.push(format!(
+                    "under {title:?}, row {}: {got:?}, want {want:?}",
+                    k + 1
+                ));
+            }
+        }
+        if n == 0 && !lines.is_empty() {
+            broken.push(format!("no row under {title:?}"));
+        }
+    }
+    for (k, r) in rows.iter().enumerate() {
+        for c in r.iter().filter(|c| !c.text.is_empty()) {
+            let titled = k == top && is_title(&c.text);
+            let under = k > top && heads.iter().any(|h| c.col >= h.0 && c.col + c.span <= h.1);
+            if !titled && !under {
+                broken.push(format!(
+                    "the cell {:?} of row {k} is under no one title",
+                    c.text
+                ));
+            }
+        }
+    }
+    broken
+}
+
+/// What breaks the column invariant in `out` for a generated table of `columns`: see
+/// [`table_broken`]; and no title is lost or silent: one that heads no table stands in no
+/// cell, and a loss says that some text is not read as a table.
+fn columns_broken(out: &ReadOutcome, columns: &[Column]) -> Vec<String> {
+    let mut broken = Vec::new();
+    let mut found = Vec::new();
+    for (_, rows) in placed_tables(out) {
+        broken.extend(table_broken(&rows, columns, &mut found));
+    }
+    if found.len() < columns.len() && out.document.losses.is_empty() {
+        let lost: Vec<&str> = columns
+            .iter()
+            .map(|c| c.0.as_str())
+            .filter(|t| !found.iter().any(|f| f == t))
+            .collect();
+        broken.push(format!(
+            "the titles {lost:?} head no table and no loss says so"
+        ));
+    }
+    broken
+}
+
+/// The text fonts of generated tables: Helvetica and Times, each as plain and bold.
+const FONTS: [(&str, &str); 2] = [("FL", "FB"), ("FT", "FTB")];
+
+/// How two close column titles stand over their two columns of values in [`close_titles`].
+#[derive(Debug, Clone, Copy)]
+enum Close {
+    /// One show `Menge Einheit`, the quantities flush left under `Menge`, the units flush left
+    /// under `Einheit`.
+    OneShow,
+    /// Two shows `Menge` and `USt-Satz` 0.4 sizes apart, the quantities (a digit) flush right
+    /// under the end of `Menge`, the tax rates (a percentage) flush right under the end of
+    /// `USt-Satz`.
+    FlushRight,
+}
+
+/// Rows of line items: position, article, quantity, unit, tax rate and amount.
+const CLOSE_ROWS: [[&str; 6]; 5] = [
+    ["1", "Beratung", "2", "Std", "19 %", "1.000,00"],
+    ["2", "Material", "1", "Stk", "7 %", "200,00"],
+    ["3", "Versand", "1", "Stk", "19 %", "34,56"],
+    ["4", "Montage", "3", "Std", "0 %", "30,00"],
+    ["5", "Pruefung", "1", "Stk", "19 %", "99,00"],
+];
+
+/// Line items of `n` rows at `k` times 8 pt in the fonts `fonts` (plain, bold), their titles
+/// bold when `bold`: `Pos` and `Artikel` at x 40 and 80, two close titles as `close` sets
+/// them from x 300, and `Betrag` flush right at x 540, the rows `10 k` apart from the baseline
+/// 600 down. Gives the page's template and its columns.
+fn close_titles(
+    k: f32,
+    fonts: (&str, &str),
+    bold: bool,
+    n: usize,
+    close: Close,
+) -> (String, Vec<Column>) {
+    let size = 8.0 * k;
+    let (vf, tf) = (fonts.0, if bold { fonts.1 } else { fonts.0 });
+    let flush_right = |font: &str, x: f32, y: f32, t: &str| {
+        show(font, size, x - common::font_width(font, t, size), y, t)
+    };
+    let rows = &CLOSE_ROWS[..n];
+    let (second, a, b) = match close {
+        Close::OneShow => ("Einheit", 2, 3),
+        Close::FlushRight => ("USt-Satz", 2, 4),
+    };
+    let mut t = show(tf, size, 40.0, 600.0, "Pos") + &show(tf, size, 80.0, 600.0, "Artikel");
+    // Where the second title starts, and where the values of each title stand.
+    let x2 = match close {
+        Close::OneShow => {
+            t += &show(tf, size, 300.0, 600.0, "Menge Einheit");
+            300.0 + common::font_width(tf, "Menge ", size)
+        }
+        Close::FlushRight => {
+            let x2 = 300.0 + common::font_width(tf, "Menge", size) + 0.4 * size;
+            t += &show(tf, size, 300.0, 600.0, "Menge");
+            t += &show(tf, size, x2, 600.0, second);
+            x2
+        }
+    };
+    t += &flush_right(tf, 540.0, 600.0, "Betrag");
+    for (r, row) in rows.iter().enumerate() {
+        let y = 600.0 - 10.0 * k * (r as f32 + 1.0);
+        t += &show(vf, size, 40.0, y, row[0]);
+        t += &show(vf, size, 80.0, y, row[1]);
+        match close {
+            Close::OneShow => {
+                t += &show(vf, size, 300.0, y, row[a]);
+                t += &show(vf, size, x2, y, row[b]);
+            }
+            Close::FlushRight => {
+                let end = 300.0 + common::font_width(tf, "Menge", size);
+                t += &flush_right(vf, end, y, row[a]);
+                t += &flush_right(vf, x2 + common::font_width(tf, second, size), y, row[b]);
+            }
+        }
+        t += &flush_right(vf, 540.0, y, row[5]);
+    }
+    let column = |title: &str, c: usize| -> Column {
+        (
+            title.to_string(),
+            rows.iter().map(|r| r[c].to_string()).collect(),
+        )
+    };
+    let columns = vec![
+        column("Pos", 0),
+        column("Artikel", 1),
+        column("Menge", a),
+        column(second, b),
+        column("Betrag", 5),
+    ];
+    (t, columns)
+}
+
+/// Header cells of the first table: their text and column span.
+fn header_cells(out: &ReadOutcome) -> Vec<(String, u32)> {
+    blocks(out)
+        .into_iter()
+        .find_map(|b| match b {
+            Block::Table { rows, .. } => Some(
+                rows[0]
+                    .iter()
+                    .map(|c| (plain_text(&c.inlines), c.col_span))
+                    .collect(),
+            ),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+/// Two column titles closer than a cell gap, set as one show over two columns of values, are
+/// cut at the word space over the gutter between the columns: each heads its own column.
+#[test]
+fn close_column_titles_are_cut() {
+    let mut t = show("FB", 8.0, 40.0, 600.0, "Pos")
+        + &show("FB", 8.0, 80.0, 600.0, "Artikel")
+        + &show("FB", 8.0, 300.0, 600.0, "Menge Einheit")
+        + &right(true, 8.0, 540.0, 600.0, "Betrag");
+    let rows = [
+        ["1", "Beratung", "2", "Std", "1.000,00"],
+        ["2", "Material", "1", "Stk", "200,00"],
+        ["3", "Versand", "1", "Stk", "34,56"],
+    ];
+    for (r, row) in rows.iter().enumerate() {
+        let y = 590.0 - 10.0 * r as f32;
+        t += &show("FL", 8.0, 40.0, y, row[0]);
+        t += &show("FL", 8.0, 80.0, y, row[1]);
+        t += &show("FL", 8.0, 300.0, y, row[2]);
+        t += &show("FL", 8.0, 328.0, y, row[3]);
+        t += &right(false, 8.0, 540.0, y, row[4]);
+    }
+    let out = common::read(&page_in(&t, Look::Plain));
+    let mut want = vec![owned(&[&["Pos", "Artikel", "Menge", "Einheit", "Betrag"]])[0].clone()];
+    want.extend(owned(&rows.iter().map(|r| &r[..]).collect::<Vec<_>>()));
+    assert_eq!(tables(&out), [(1, want)], "{:?}", out.document.losses);
+    let spans: Vec<u32> = header_cells(&out).iter().map(|c| c.1).collect();
+    assert_eq!(spans, [1, 1, 1, 1, 1]);
+}
+
+/// Close column titles over two columns of values, in every size, font and weight and with 2
+/// to 5 rows, set as one show over values flush left and as two shows over short values flush
+/// right (a quantity and a tax rate): each title heads the column of its values, no cell
+/// holds text of two columns, and no title is lost or silent. Each reads as one table of five
+/// columns.
+#[test]
+fn close_column_titles_head_their_columns_in_every_size_and_font() {
+    let mut wrong = Vec::new();
+    let mut reads = 0;
+    for close in [Close::OneShow, Close::FlushRight] {
+        for k in [0.75, 1.0, 1.5] {
+            for fonts in FONTS {
+                for bold in [false, true] {
+                    for n in 2..=5 {
+                        let (t, columns) = close_titles(k, fonts, bold, n, close);
+                        let out = common::read(&page_in(&t, Look::Plain));
+                        reads += 1;
+                        let name = format!("{close:?}, {k}x, {fonts:?}, bold {bold}, {n} rows");
+                        for b in columns_broken(&out, &columns) {
+                            wrong.push(format!("{name}: {b}"));
+                        }
+                        let titles: Vec<String> = columns.iter().map(|c| c.0.clone()).collect();
+                        let head: Vec<String> =
+                            header_cells(&out).into_iter().map(|c| c.0).collect();
+                        if head != titles {
+                            wrong.push(format!("{name}: header {head:?}"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(reads, 96);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Guard: one word over two columns of dates has no word space to cut at: its cell keeps
+/// its span of two columns.
+#[test]
+fn one_word_title_over_two_columns_stays_spanned() {
+    for k in [0.75, 1.0, 1.5] {
+        for fonts in FONTS {
+            for bold in [false, true] {
+                let size = 8.0 * k;
+                let tf = if bold { fonts.1 } else { fonts.0 };
+                let date = common::font_width(fonts.0, "01.01.2026", size);
+                let mut t = show(tf, size, 40.0, 600.0, "Pos")
+                    + &show(tf, size, 80.0, 600.0, "Artikel")
+                    + &show(tf, size, 300.0, 600.0, "Leistungszeitraum");
+                t += &show(
+                    tf,
+                    size,
+                    540.0 - common::font_width(tf, "Betrag", size),
+                    600.0,
+                    "Betrag",
+                );
+                let rows = [
+                    ["1", "Beratung", "01.01.2026", "31.01.2026", "1.000,00"],
+                    ["2", "Wartung", "01.02.2026", "28.02.2026", "200,00"],
+                    ["3", "Support", "01.03.2026", "31.03.2026", "34,56"],
+                ];
+                for (r, row) in rows.iter().enumerate() {
+                    let y = 600.0 - 10.0 * k * (r as f32 + 1.0);
+                    t += &show(fonts.0, size, 40.0, y, row[0]);
+                    t += &show(fonts.0, size, 80.0, y, row[1]);
+                    t += &show(fonts.0, size, 300.0, y, row[2]);
+                    t += &show(fonts.0, size, 300.0 + 1.25 * date, y, row[3]);
+                    let w = common::font_width(fonts.0, row[4], size);
+                    t += &show(fonts.0, size, 540.0 - w, y, row[4]);
+                }
+                let out = common::read(&page_in(&t, Look::Plain));
+                let name = format!("{k}x, {fonts:?}, bold {bold}");
+                assert_eq!(
+                    header_cells(&out),
+                    [
+                        ("Pos".to_string(), 1),
+                        ("Artikel".to_string(), 1),
+                        ("Leistungszeitraum".to_string(), 2),
+                        ("Betrag".to_string(), 1),
+                    ],
+                    "{name}: {:?}",
+                    tables(&out)
+                );
+            }
+        }
+    }
+}
+
+/// Guard: tax rates flush right under a short title `USt` 0.9 sizes after `Menge` reach left
+/// past the title, to a third of a size from the quantities: each quantity and its rate are
+/// one piece of text, so the two are one column. The titles are not cut, and each row keeps
+/// both its values in the cell under both titles (no title over another's value).
+#[test]
+fn close_titles_over_values_that_touch_stay_one_column() {
+    let mut wrong = Vec::new();
+    for k in [0.75, 1.0, 1.5] {
+        for fonts in FONTS {
+            let size = 8.0 * k;
+            let w = |t: &str| common::font_width(fonts.0, t, size);
+            let x2 = 300.0 + w("Menge") + 0.9 * size;
+            let mut t = show(fonts.0, size, 40.0, 600.0, "Pos")
+                + &show(fonts.0, size, 80.0, 600.0, "Artikel")
+                + &show(fonts.0, size, 300.0, 600.0, "Menge")
+                + &show(fonts.0, size, x2, 600.0, "USt")
+                + &show(fonts.0, size, 540.0 - w("Betrag"), 600.0, "Betrag");
+            for (r, row) in CLOSE_ROWS[..3].iter().enumerate() {
+                let y = 600.0 - 10.0 * k * (r as f32 + 1.0);
+                t += &show(fonts.0, size, 40.0, y, row[0]);
+                t += &show(fonts.0, size, 80.0, y, row[1]);
+                t += &show(fonts.0, size, 300.0 + w("Menge") - w(row[2]), y, row[2]);
+                t += &show(fonts.0, size, x2 + w("USt") - w(row[4]), y, row[4]);
+                t += &show(fonts.0, size, 540.0 - w(row[5]), y, row[5]);
+            }
+            let out = common::read(&page_in(&t, Look::Plain));
+            let got = tables(&out);
+            let ok = got.iter().all(|(_, rows)| {
+                rows.iter().all(|r| {
+                    let head = r
+                        .iter()
+                        .position(|c| c.contains("Menge") || c.contains("USt"));
+                    head.is_none_or(|h| r[h] == "Menge USt")
+                }) && rows
+                    .iter()
+                    .skip(1)
+                    .zip(&CLOSE_ROWS)
+                    .all(|(r, want)| r.iter().any(|c| *c == format!("{} {}", want[2], want[4])))
+            });
+            if !ok {
+                wrong.push(format!(
+                    "{k}x, {fonts:?}: {got:?} {:?}",
+                    out.document.losses
+                ));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}

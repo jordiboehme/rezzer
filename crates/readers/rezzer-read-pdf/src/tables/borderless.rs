@@ -152,6 +152,8 @@ pub(super) fn borderless(
     // Tables of labels and values, and their rows whose one run holds label and value.
     let mut kv: Vec<usize> = Vec::new();
     let mut splits: Vec<(usize, usize)> = Vec::new();
+    // Tables with close titles to cut, and where (see [`Grid`]).
+    let mut title_cuts: Vec<(usize, Vec<TitleCut>)> = Vec::new();
     for (g, (a, z)) in regions.into_iter().enumerate() {
         if g % CHECK_EVERY == CHECK_EVERY - 1 && stop() {
             found.skipped.push(format!(
@@ -330,6 +332,9 @@ pub(super) fn borderless(
                             }
                         }
                     }
+                    if !grid.cuts.is_empty() {
+                        title_cuts.push((claim.len(), grid.cuts));
+                    }
                     claim.push(planned);
                 }
                 Err(why) => {
@@ -399,6 +404,11 @@ pub(super) fn borderless(
     fill(&mut planned, flow, &target);
     for (t, k) in splits {
         split_label(&mut planned[t].rows[k]);
+    }
+    for (t, cuts) in title_cuts {
+        for (r, cell, run, byte) in cuts {
+            split_title(&mut planned[t].rows[r], cell, run, byte);
+        }
     }
     for (t, mut p) in planned.into_iter().enumerate() {
         if !kv.contains(&t) {
@@ -605,39 +615,70 @@ fn split_label(row: &mut [PlannedCell]) {
     let Some(cut) = run.text[lead..].find(": ").map(|c| lead + c + 1) else {
         return;
     };
-    // At the gap after the colon where the glyphs say where it is; else by an even share of
-    // the characters.
-    let words = run.text[..cut].split_whitespace().count() as u32;
+    let rest = cut_run(run, cut);
+    value.runs.push(rest);
+    value.runs.extend(label.runs.drain(1..));
+}
+
+/// Cuts `run` at byte `at` of its text: it keeps the text before, and the text after, white
+/// space at the cut trimmed, comes back as a run of its own. The cut is at the gap between
+/// the words where the glyphs say where it is; else the run's width is shared out by its
+/// characters.
+fn cut_run(run: &mut Run, at: usize) -> Run {
+    let words = run.text[..at].split_whitespace().count() as u32;
     let cut_at_gap = run
         .gaps
         .iter()
         .position(|g| g.words == words)
         .and_then(|k| run.cut_at(k));
-    let rest = if let Some((before, mut rest)) = cut_at_gap {
+    if let Some((before, mut rest)) = cut_at_gap {
         rest.text = rest.text.trim_start().to_string();
         *run = before;
-        rest
-    } else {
-        let mut rest = run.clone();
-        let chars = run.text.chars().count().max(1) as f32;
-        let before = run.text[..cut].chars().count() as f32;
-        rest.text = run.text[cut..].trim_start().to_string();
-        rest.x = run.x + run.w * before / chars;
-        rest.w = run.w - (rest.x - run.x);
-        rest.gaps = Gaps::default();
-        run.text.truncate(cut);
-        run.w -= rest.w;
-        run.gaps = Gaps::default();
-        rest
-    };
-    value.runs.push(rest);
-    value.runs.extend(label.runs.drain(1..));
+        return rest;
+    }
+    let mut rest = run.clone();
+    let chars = run.text.chars().count().max(1) as f32;
+    let before = run.text[..at].chars().count() as f32;
+    rest.text = run.text[at..].trim_start().to_string();
+    rest.x = run.x + run.w * before / chars;
+    rest.w = run.w - (rest.x - run.x);
+    rest.gaps = Gaps::default();
+    run.text.truncate(at);
+    run.text.truncate(run.text.trim_end().len());
+    run.w -= rest.w;
+    run.gaps = Gaps::default();
+    rest
 }
 
-/// A grid rebuilt from white space gutters: rows of cells, each cell its runs as flow ranges.
+/// Cuts the cell `cell` of `row` (a header row) at byte `byte` of its run `run`: the text
+/// after the cut goes first into the next cell, the cell of the next column.
+fn split_title(row: &mut [PlannedCell], cell: usize, run: usize, byte: usize) {
+    let Some(r) = row.get_mut(cell).and_then(|c| c.runs.get_mut(run)) else {
+        return;
+    };
+    if byte == 0 || byte >= r.text.len() {
+        return;
+    }
+    let rest = cut_run(r, byte);
+    if let Some(next) = row.get_mut(cell + 1) {
+        next.runs.insert(0, rest);
+    }
+}
+
+/// A grid rebuilt from white space gutters: rows of cells, each cell its runs as flow ranges;
+/// and the runs of close titles to cut.
 struct Grid {
     rows: Vec<Vec<GridCell>>,
+    cuts: Vec<TitleCut>,
 }
+
+/// A run of close titles to cut, once the runs are in their cells: its row, its cell, its
+/// place among the runs of the cell and the byte of its text the next title starts at (see
+/// [`title_cut`]).
+type TitleCut = (usize, usize, usize, usize);
+
+/// Where a piece of a line goes in a grid: its column, its column span and its flow range.
+type Placement = (usize, u32, (usize, usize));
 
 struct GridCell {
     ranges: Vec<(usize, usize)>,
@@ -779,9 +820,10 @@ fn grid_of(
             .filter(|&c| p.x1 > columns[c].0 && p.x0 < columns[c].1)
             .collect()
     };
-    // The column of each piece; a line whose piece crosses a gutter is not clean.
+    // The column of each piece, and its flow range; a line whose piece crosses a gutter is
+    // not clean.
     let mut clean = 0usize;
-    let mut placed: Vec<Vec<(usize, u32, &Piece)>> = Vec::with_capacity(lines.len());
+    let mut placed: Vec<Vec<Placement>> = Vec::with_capacity(lines.len());
     for (k, line) in pieces.iter().enumerate() {
         let mut row = Vec::new();
         let mut ok = true;
@@ -798,7 +840,7 @@ fn grid_of(
                     (many[0], (many[many.len() - 1] - many[0] + 1) as u32)
                 }
             };
-            row.push((col, span, p));
+            row.push((col, span, (p.start, p.end)));
         }
         if ok {
             clean += 1;
@@ -810,7 +852,7 @@ fn grid_of(
     }
     // Rows: lines that fill at least half the columns; other lines join the row of the
     // nearest one above them (lines above the first join the first).
-    let filled = |row: &Vec<(usize, u32, &Piece)>| {
+    let filled = |row: &Vec<Placement>| {
         let mut c: Vec<usize> = row.iter().map(|x| x.0).collect();
         c.dedup();
         c.len()
@@ -820,6 +862,55 @@ fn grid_of(
         .collect();
     if anchors.len() < rows_needed.max(1) {
         return Err("too few rows");
+    }
+    // The row each line goes to: its own when it is an anchor, else the one before it.
+    let row_of = |k: usize| {
+        let after = anchors.partition_point(|&a| a < k);
+        if anchors.get(after) == Some(&k) {
+            after
+        } else {
+            after.saturating_sub(1)
+        }
+    };
+    // Close titles of the first line over two columns are cut at the gutter between them.
+    // The cut that falls inside a run is made once the runs are in their cells.
+    let mut inside: Vec<(usize, usize)> = Vec::new();
+    let first = std::mem::take(&mut placed[0]);
+    for (k, &(c, span, (start, end))) in first.iter().enumerate() {
+        // Both columns hold text of their own in two lines below or more, and no other line
+        // of the first row has text in them.
+        let alone = |col: usize| {
+            (1..lines.len())
+                .filter(|&j| placed[j].iter().any(|x| x.0 == col && x.1 == 1))
+                .count()
+                >= 2
+        };
+        let shared = (1..lines.len()).any(|j| {
+            row_of(j) == row_of(0)
+                && placed[j]
+                    .iter()
+                    .any(|x| x.0 <= c + 1 && x.0 + x.1 as usize > c)
+        });
+        let cut = if span == 2 && !shared && alone(c) && alone(c + 1) {
+            title_cut(flow, &pieces[0][k], columns[c], columns[c + 1])
+        } else {
+            None
+        };
+        let row = &mut placed[0];
+        match cut {
+            Some((run, 0)) => {
+                row.push((c, 1, (start, run)));
+                row.push((c + 1, 1, (run, end)));
+            }
+            Some((run, byte)) => {
+                row.push((c, 1, (start, run + 1)));
+                if run + 1 < end {
+                    row.push((c + 1, 1, (run + 1, end)));
+                }
+                inside.push((run, byte));
+            }
+            None => row.push((c, span, (start, end))),
+        }
     }
     let mut rows: Vec<Vec<GridCell>> = anchors
         .iter()
@@ -833,16 +924,9 @@ fn grid_of(
         })
         .collect();
     for (k, row) in placed.iter().enumerate() {
-        // The anchor rows are in order: the line itself, else the one before it.
-        let after = anchors.partition_point(|&a| a < k);
-        let target = if anchors.get(after) == Some(&k) {
-            after
-        } else {
-            after.saturating_sub(1)
-        };
-        for &(col, span, p) in row {
-            let cell = &mut rows[target][col];
-            cell.ranges.push((p.start, p.end));
+        for &(col, span, range) in row {
+            let cell = &mut rows[row_of(k)][col];
+            cell.ranges.push(range);
             cell.span = cell.span.max(span);
         }
     }
@@ -860,6 +944,23 @@ fn grid_of(
         }
         row.retain(|c| c.span > 0);
     }
+    // Each cut inside a run: the cell that holds the run, and the run's place among the runs
+    // of the cell, which go to it in flow order.
+    let r0 = row_of(0);
+    let cuts = inside
+        .into_iter()
+        .filter_map(|(run, byte)| {
+            let cell = rows[r0]
+                .iter()
+                .position(|c| c.ranges.iter().any(|&(s, e)| (s..e).contains(&run)))?;
+            let before = rows[r0][cell]
+                .ranges
+                .iter()
+                .map(|&(s, e)| run.clamp(s, e) - s)
+                .sum();
+            Some((r0, cell, before, byte))
+        })
+        .collect();
     // Short cells, or mostly numbers.
     let texts: Vec<Vec<String>> = rows
         .iter()
@@ -930,7 +1031,65 @@ fn grid_of(
     {
         return Err("it reads like a table of contents");
     }
-    Ok(Grid { rows })
+    Ok(Grid { rows, cuts })
+}
+
+/// Where the piece `p` of a header line, over the columns `left` and `right` side by side, is
+/// cut into two titles: the last word space whose words before it end before `right` and
+/// whose words after it start after `left`, so that each part stands over one column only.
+/// Gives the run whose text the cut starts in, and its byte; byte 0 when the cut lies between
+/// two runs. A word space inside a run is where the glyphs say, else where the run's width
+/// shared out by its characters puts it.
+fn title_cut(
+    flow: &Flow,
+    p: &Piece,
+    left: (f32, f32),
+    right: (f32, f32),
+) -> Option<(usize, usize)> {
+    // A space from `from` to `to` that lets both parts stand over their own column.
+    let fits =
+        |from: f32, to: f32| from > left.0 && from <= right.0 && to >= left.1 && to < right.1;
+    let mut cut = None;
+    for i in p.start..p.end {
+        let r = &flow.runs[i];
+        if i > p.start {
+            let prev = &flow.runs[i - 1];
+            if !r.text.trim().is_empty() && fits(prev.x + prev.w, r.x) {
+                cut = Some((i, 0));
+            }
+        }
+        // The word starts of the run's text after its first word, by bytes and characters.
+        let mut starts: Vec<(usize, usize, usize)> = Vec::new();
+        let (mut seen, mut space) = (false, None);
+        for (n, (b, ch)) in r.text.char_indices().enumerate() {
+            if ch.is_whitespace() {
+                if seen && space.is_none() {
+                    space = Some(n);
+                }
+            } else {
+                if let Some(from) = space.take() {
+                    starts.push((b, from, n));
+                }
+                seen = true;
+            }
+        }
+        let chars = r.text.chars().count().max(1) as f32;
+        for (w, &(byte, from, to)) in starts.iter().enumerate() {
+            let words = w as u32 + 1;
+            let (x0, x1) = match r.gaps.iter().find(|g| g.words == words) {
+                Some(g) => (g.from, g.to),
+                None if r.gaps.is_empty() => (
+                    r.x + r.w * from as f32 / chars,
+                    r.x + r.w * to as f32 / chars,
+                ),
+                None => continue,
+            };
+            if fits(x0, x1) {
+                cut = Some((i, byte));
+            }
+        }
+    }
+    cut
 }
 
 #[cfg(test)]
@@ -957,6 +1116,60 @@ mod tests {
             note: false,
             gaps: crate::layout::Gaps::default(),
         }
+    }
+
+    /// A flow of `runs` on one line.
+    fn flow_of(runs: Vec<Run>) -> Flow {
+        let n = runs.len();
+        Flow {
+            runs,
+            slots: vec![Slot::Free; n],
+            at: (0..n).collect(),
+        }
+    }
+
+    #[test]
+    fn close_titles_are_cut_between_runs_and_by_characters() {
+        let (left, right) = ((300.0, 305.0), (330.0, 345.0));
+        let piece = |flow: &Flow| Piece {
+            x0: flow.runs[0].x,
+            x1: flow.runs.iter().map(|r| r.x + r.w).fold(f32::MIN, f32::max),
+            start: 0,
+            end: flow.runs.len(),
+        };
+        // Two runs: between them, from the end of the first to the start of the second.
+        let two = flow_of(vec![
+            run("Menge", 300.0, 600.0, 0),
+            run("Einheit", 328.0, 600.0, 0),
+        ]);
+        assert_eq!(title_cut(&two, &piece(&two), left, right), Some((1, 0)));
+        // One run without glyph gaps: its 13 characters share its width of 65, so the space
+        // lies from 325 to 330, over the gutter.
+        let one = flow_of(vec![run("Menge Einheit", 300.0, 600.0, 0)]);
+        assert_eq!(title_cut(&one, &piece(&one), left, right), Some((0, 6)));
+        // A space that lies over the left column (the words after it start in it) is none.
+        assert_eq!(
+            title_cut(&one, &piece(&one), (300.0, 331.0), (335.0, 345.0)),
+            None
+        );
+        let mut row = vec![
+            PlannedCell {
+                runs: one.runs.clone(),
+                row_span: 1,
+                col_span: 1,
+                status: None,
+            },
+            PlannedCell {
+                runs: Vec::new(),
+                row_span: 1,
+                col_span: 1,
+                status: None,
+            },
+        ];
+        split_title(&mut row, 0, 0, 6);
+        let texts: Vec<&str> = row.iter().map(|c| c.runs[0].text.as_str()).collect();
+        assert_eq!(texts, ["Menge", "Einheit"]);
+        assert_eq!((row[1].runs[0].x, row[1].runs[0].w), (330.0, 35.0));
     }
 
     #[test]
