@@ -9,6 +9,7 @@ use std::collections::VecDeque;
 
 use crate::grid::{Dir, Grid, Pos, Tile};
 use crate::rng::Rng;
+use crate::steer;
 
 /// The most turns of the user program that wait for the next ticks.
 pub const MAX_QUEUED_TURNS: usize = 2;
@@ -113,10 +114,10 @@ impl Round {
         };
     }
 
-    /// One tick in which the other programs keep their direction. Returns the ids derezzed in
-    /// this tick.
+    /// One tick in which the other programs steer by [`steer::choose`]. Returns the ids
+    /// derezzed in this tick.
     pub fn tick(&mut self) -> Vec<u8> {
-        self.tick_with(|round, i| round.programs[i].dir)
+        self.tick_with(steer::choose)
     }
 
     /// One tick. `choose` gives the direction of each other program that is not derezzed (by

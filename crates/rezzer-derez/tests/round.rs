@@ -15,6 +15,11 @@ fn alone(w: u16, h: u16, at: Pos, dir: Dir) -> Round {
     Round::new(Grid::new(w, h), &[(at, dir)], 0, 1)
 }
 
+/// One tick in which the other programs keep their direction, so a test can aim them.
+fn keep_dirs(r: &mut Round) -> Vec<u8> {
+    r.tick_with(|round, i| round.programs()[i].dir)
+}
+
 #[test]
 fn rng_is_deterministic() {
     let mut a = Rng::new(7);
@@ -140,7 +145,7 @@ fn same_cell_derezzes_both() {
         1,
     );
     r.steer(Dir::Right);
-    let mut gone = r.tick();
+    let mut gone = keep_dirs(&mut r);
     gone.sort_unstable();
     assert_eq!(gone, vec![0, 1]);
     assert!(r.programs().iter().all(|p| p.derezzed));
@@ -160,7 +165,7 @@ fn swapping_cells_derezzes_both() {
         1,
     );
     r.steer(Dir::Right);
-    let mut gone = r.tick();
+    let mut gone = keep_dirs(&mut r);
     gone.sort_unstable();
     assert_eq!(gone, vec![0, 1]);
     assert_eq!(r.status(), Status::AllDerezzed);
@@ -231,10 +236,10 @@ fn derezzed_trail_is_cleared() {
     g.set(pos(8, 1), Tile::Wall);
     let mut r = Round::new(g, &[(pos(1, 4), Dir::Right), (pos(5, 1), Dir::Right)], 1, 1);
     r.steer(Dir::Right);
-    assert!(r.tick().is_empty()); // program 1 at (6,1)
-    assert!(r.tick().is_empty()); // program 1 at (7,1)
+    assert!(keep_dirs(&mut r).is_empty()); // program 1 at (6,1)
+    assert!(keep_dirs(&mut r).is_empty()); // program 1 at (7,1)
     assert_eq!(r.grid().get(pos(7, 1)), Tile::Trail(1));
-    assert_eq!(r.tick(), vec![1]);
+    assert_eq!(keep_dirs(&mut r), vec![1]);
     for x in 0..12 {
         for y in 0..6 {
             assert_ne!(r.grid().get(pos(x, y)), Tile::Trail(1), "cell ({x},{y})");
@@ -255,10 +260,10 @@ fn cleared_and_derezzed_status() {
     g.set(pos(6, 1), Tile::Wall);
     let mut r = Round::new(g, &[(pos(1, 4), Dir::Right), (pos(5, 1), Dir::Right)], 1, 1);
     r.steer(Dir::Right);
-    assert_eq!(r.tick(), vec![1]);
+    assert_eq!(keep_dirs(&mut r), vec![1]);
     assert_eq!(r.status(), Status::Cleared);
     let before = r.grid().clone();
-    assert!(r.tick().is_empty(), "an ended round does not move");
+    assert!(keep_dirs(&mut r).is_empty(), "an ended round does not move");
     assert_eq!(r.grid(), &before);
 
     // The user program runs into a wall while another is left.
@@ -266,7 +271,7 @@ fn cleared_and_derezzed_status() {
     g.set(pos(2, 4), Tile::Wall);
     let mut r = Round::new(g, &[(pos(1, 4), Dir::Right), (pos(5, 1), Dir::Right)], 1, 1);
     r.steer(Dir::Right);
-    assert_eq!(r.tick(), vec![0]);
+    assert_eq!(keep_dirs(&mut r), vec![0]);
     assert_eq!(r.status(), Status::Derezzed);
     r.steer(Dir::Up);
     assert_eq!(
