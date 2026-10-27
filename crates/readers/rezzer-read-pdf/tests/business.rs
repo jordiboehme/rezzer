@@ -795,50 +795,166 @@ fn field_rows() -> Vec<(&'static str, Vec<&'static [&'static str]>)> {
                 &["30 Tage", "netto"],
             ],
         ),
+        // The reviewer's layouts of round 3 (`rr_probe_round3_h1_more`).
+        (
+            "4-2-2",
+            vec![
+                &[
+                    "Muster GmbH",
+                    "Abt. Einkauf",
+                    "Musterweg 1",
+                    "12345 Musterstadt",
+                ],
+                &["Erika Mustermann", "Musterstadt"],
+                &["DE00 1234 5678", "Musterbank"],
+            ],
+        ),
+        (
+            "3-3-2",
+            vec![
+                &["Muster GmbH", "Musterweg 1", "12345 Musterstadt"],
+                &["Erika Mustermann", "Musterweg 2", "54321 Musterdorf"],
+                &["DE00 1234 5678", "Musterbank"],
+            ],
+        ),
+        (
+            "2-2-3",
+            vec![
+                &["Muster GmbH", "Musterweg 1"],
+                &["Erika Mustermann", "Musterstadt"],
+                &["DE00 1234 5678", "Musterbank", "BIC MUSTDEXX"],
+            ],
+        ),
+        (
+            "2-2-2-3",
+            vec![
+                &["Muster GmbH", "Musterweg 1"],
+                &["Erika Mustermann", "Musterstadt"],
+                &["DE00 1234 5678", "Musterbank"],
+                &["30 Tage", "netto", "ohne Abzug"],
+            ],
+        ),
     ]
 }
 
-/// What breaks the invariant of a row of fields read from `out`: a pair of a label with
-/// another value than its own whole value (its lines joined), or a value line that stands in
-/// no table cell while no loss names every label of the row.
+/// What breaks the invariant of a row of fields read from `out`: see [`fields_broken_in`].
 fn fields_broken(out: &ReadOutcome, values: &[&[&str]]) -> Vec<String> {
+    let losses: Vec<String> = out.document.losses.iter().map(|l| l.what.clone()).collect();
+    fields_broken_in(&placed_tables(out), &losses, values)
+}
+
+/// What breaks the invariant of a row of fields read as `tables` with `losses`:
+/// - in a table of labels and values (one label a row), a pair of a label with another value
+///   than its own whole value (its lines joined);
+/// - in a table whose labels stand in one row over their values, what [`table_broken`] finds:
+///   each label heads the column its lines stand in, every line whole in the row it stands in
+///   (the last row also the lines past the rows), and no cell holds text of two fields;
+/// - a label of a field with a value that is in no table, while no loss names every label of
+///   the row (or says that its block in columns stays paragraphs).
+fn fields_broken_in(
+    tables: &[(usize, Vec<Vec<Placed>>)],
+    losses: &[String],
+    values: &[&[&str]],
+) -> Vec<String> {
     let mut broken = Vec::new();
-    let cells: Vec<String> = tables(out)
-        .into_iter()
-        .flat_map(|t| t.1.into_iter().flatten())
+    let columns: Vec<Column> = values
+        .iter()
+        .enumerate()
+        .map(|(c, v)| {
+            (
+                FIELD_LABELS[c].to_string(),
+                v.iter().map(|l| (*l).to_string()).collect(),
+            )
+        })
         .collect();
-    for t in tables(out) {
-        if t.0 != 0 {
+    let mut found: Vec<String> = Vec::new();
+    for (header_rows, rows) in tables {
+        let titled = rows.iter().any(|r| {
+            r.iter()
+                .filter(|c| FIELD_LABELS.contains(&c.text.as_str()))
+                .count()
+                >= 2
+        });
+        if titled {
+            broken.extend(table_broken(rows, &columns, &mut found));
             continue;
         }
-        for row in &t.1 {
+        if *header_rows != 0 {
+            continue;
+        }
+        for row in rows {
             let [l, v] = row.as_slice() else { continue };
-            if let Some(c) = FIELD_LABELS.iter().position(|f| f == l) {
-                let want = values.get(c).map(|v| v.join(" ")).unwrap_or_default();
-                let empty = want.is_empty() && v == "empty";
-                if *v != want && !empty {
-                    broken.push(format!("wrong pair {l}: {v}, want {want}"));
+            if let Some(c) = FIELD_LABELS[..values.len()]
+                .iter()
+                .position(|f| *f == l.text)
+            {
+                let want = values[c].join(" ");
+                let empty = want.is_empty() && v.text == "empty";
+                if v.text != want && !empty {
+                    broken.push(format!("wrong pair {}: {}, want {want}", l.text, v.text));
                 }
+                found.push(l.text.clone());
             }
         }
     }
     // A loss names the row's labels, or says that its block in columns stays paragraphs.
-    let named = out.document.losses.iter().any(|l| {
-        l.what.starts_with("a block of text in columns")
-            || (0..values.len()).all(|c| l.what.contains(FIELD_LABELS[c]) || values[c].is_empty())
+    let named = losses.iter().any(|l| {
+        l.starts_with("a block of text in columns")
+            || (0..values.len()).all(|c| l.contains(FIELD_LABELS[c]) || values[c].is_empty())
     });
-    for line in values.iter().flat_map(|v| v.iter()) {
-        let paired = tables(out).iter().any(|t| {
-            t.0 == 0
-                && t.1
-                    .iter()
-                    .any(|r| r.len() == 2 && r[1].split(' ').count() > 0 && r[1].contains(line))
-        });
-        if !cells.iter().any(|c| c.contains(line)) && !paired && !named {
-            broken.push(format!("{line:?} is in no table and no loss names the row"));
+    for (c, v) in values.iter().enumerate() {
+        if !v.is_empty() && !found.iter().any(|f| f == FIELD_LABELS[c]) && !named {
+            broken.push(format!(
+                "{:?} is in no table and no loss names the row",
+                FIELD_LABELS[c]
+            ));
         }
     }
     broken
+}
+
+/// The reviewer's finding R3-M3: the check of a row of fields finds a value line in the cell
+/// of another field (`Musterstadt` of `Lieferanschrift` is no part of `12345 Musterstadt`),
+/// and a value line in the column of another title.
+#[test]
+fn the_check_of_fields_finds_lines_in_the_cells_of_other_fields() {
+    let values: Vec<&[&str]> = vec![
+        &["Muster GmbH", "Musterweg 1", "12345 Musterstadt"],
+        &["Erika Mustermann", "Musterstadt"],
+        &["DE00 1234 5678", "Musterbank"],
+    ];
+    let cell = |col: usize, text: &str| Placed {
+        col,
+        span: 1,
+        text: text.to_string(),
+    };
+    let table = |second: [&str; 3]| {
+        vec![(
+            1,
+            vec![
+                vec![
+                    cell(0, FIELD_LABELS[0]),
+                    cell(1, FIELD_LABELS[1]),
+                    cell(2, FIELD_LABELS[2]),
+                ],
+                vec![
+                    cell(0, "Muster GmbH"),
+                    cell(1, "Erika Mustermann"),
+                    cell(2, "DE00 1234 5678"),
+                ],
+                vec![cell(0, second[0]), cell(1, second[1]), cell(2, second[2])],
+            ],
+        )]
+    };
+    let right = table(["Musterweg 1 12345 Musterstadt", "Musterstadt", "Musterbank"]);
+    assert!(fields_broken_in(&right, &[], &values).is_empty());
+    let lost = table(["Musterweg 1 12345 Musterstadt", "", "Musterbank"]);
+    assert!(!fields_broken_in(&lost, &[], &values).is_empty(), "lost");
+    let swapped = table(["Musterweg 1 12345 Musterstadt", "Musterbank", "Musterstadt"]);
+    assert!(
+        !fields_broken_in(&swapped, &[], &values).is_empty(),
+        "swapped"
+    );
 }
 
 /// Rows of fields with values of many lines, of lines of different counts, and with an empty
