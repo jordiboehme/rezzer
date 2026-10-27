@@ -22,8 +22,8 @@ mod value;
 
 pub use block::{Align, Block, CalloutKind, Cell, SectionKind, TaskState, column_letter};
 pub use document::{
-    Asset, Barcode, Confidence, Detection, Document, MODEL_VERSION, Overview, OverviewPart,
-    Properties, ReaderInfo, SourceInfo,
+    Asset, Barcode, Confidence, Detection, Document, FoundDate, MODEL_VERSION, Overview,
+    OverviewPart, Properties, ReaderInfo, SourceInfo,
 };
 pub use facet::{
     Annotation, Edge, Embedded, Event, Facets, FieldAction, FileFacts, FormField, Formula,

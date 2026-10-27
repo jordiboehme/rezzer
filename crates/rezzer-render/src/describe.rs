@@ -15,7 +15,7 @@ use std::collections::HashSet;
 use rezzer_model::{Block, Document, FormatId, LayoutKind, SectionKind, Signature};
 
 use crate::blocks::MAX_DEPTH;
-use crate::frontmatter::{document_date, format_name};
+use crate::frontmatter::{format_name, own_date};
 
 /// The tags of a document, in this order: `rezzer`, the format word, the kind words, the
 /// folded document keywords, the folded file system tags. Each tag once, at its first place.
@@ -237,7 +237,7 @@ pub(crate) fn description(doc: &Document) -> String {
     {
         head.push(format!("\"{own}\""));
     }
-    if let Some(date) = document_date(doc) {
+    if let Some(date) = own_date(doc) {
         head.push(date.to_string());
     }
     let mut out = format!("{}.", head.join(", "));

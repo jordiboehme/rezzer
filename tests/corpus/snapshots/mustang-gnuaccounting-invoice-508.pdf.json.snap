@@ -237,6 +237,10 @@ source: crates/rezzer/tests/corpus.rs
         "value": "LibreOffice 7.0"
       }
     },
+    "document_date": {
+      "date": "2020-11-21",
+      "from": "only date in the top third of page 1"
+    },
     "facts": {
       "encrypted": false,
       "has_javascript": false,

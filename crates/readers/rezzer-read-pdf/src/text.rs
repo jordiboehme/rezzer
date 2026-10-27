@@ -122,6 +122,9 @@ pub(crate) struct PageItems {
     pub unmapped: u64,
     /// Visible glyphs without a Unicode mapping.
     pub unmapped_visible: u64,
+    /// Glyphs of the font `Symbol` whose ASCII text was read through the Adobe Symbol
+    /// encoding (see `FontInfo::symbol`).
+    pub symbol: u64,
     /// What on this page was not read, and why.
     pub notes: Vec<Note>,
     /// A limit cut the page's text: what is missing was not read, it is not missing in the
@@ -596,6 +599,11 @@ struct FontInfo {
     /// The CID collection of a CID font whose glyph ids are its CIDs (a TrueType CID font with
     /// the identity CIDToGIDMap), or whose CFF program is CID-keyed.
     collection: Option<CidFamily>,
+    /// The font's base name, without a subset prefix, is `Symbol`: a glyph whose text is one
+    /// ASCII character is read through the Adobe Symbol encoding (`a` is the alpha), as
+    /// pdf.js and pdfminer read it. Such a font's ToUnicode map often gives the Latin letter
+    /// of the code.
+    symbol: bool,
 }
 
 /// A marked content sequence the walk met, in the order the interpreter meets it.
@@ -849,6 +857,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
             unmapped: 0,
             unmapped_visible: 0,
             mapped: 0,
+            symbol: 0,
         };
         let run = panic::catch_unwind(AssertUnwindSafe(|| {
             interpret(TypedIter::new(&data), page.resources(), &mut ctx, &mut dev);
@@ -1087,6 +1096,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
         items.mapped = dev.mapped;
         items.unmapped = dev.unmapped;
         items.unmapped_visible = dev.unmapped_visible;
+        items.symbol = dev.symbol;
         // The glyph buffers are kept for the next page: built again for each page, their
         // memory would not be used again.
         let (mut glyphs, mut text) = (
@@ -2094,6 +2104,7 @@ fn font_info(font: &Dict<'_>) -> FontInfo {
         embedded,
         program: None,
         collection,
+        symbol: name == "symbol",
     }
 }
 
@@ -2678,6 +2689,8 @@ struct TextDevice<'d> {
     unmapped: u64,
     unmapped_visible: u64,
     mapped: u64,
+    /// Glyphs read through the Adobe Symbol encoding.
+    symbol: u64,
 }
 
 impl TextDevice<'_> {
@@ -3308,10 +3321,16 @@ impl<'a> Device<'a> for TextDevice<'_> {
                 }
                 continue;
             }
-            let text = g
+            let mut text = g
                 .as_unicode()
                 .and_then(clean_bf)
                 .or_else(|| self.fallback(g));
+            if info.symbol
+                && let Some(read) = text.as_deref().and_then(symbol_text)
+            {
+                self.symbol += 1;
+                text = Some(read);
+            }
             match text {
                 Some(t) => {
                     if !invisible {
@@ -3408,6 +3427,19 @@ impl<'a> Device<'a> for TextDevice<'_> {
         self.tick();
         self.open.pop();
     }
+}
+
+/// The text a glyph of the font `Symbol` stands for, when its `text` is one printable ASCII
+/// character that the Adobe Symbol encoding reads as another character.
+fn symbol_text(text: &str) -> Option<String> {
+    let mut chars = text.chars();
+    let (Some(c), None) = (chars.next(), chars.next()) else {
+        return None;
+    };
+    let code = u8::try_from(c).ok().filter(|b| (0x20..=0x7e).contains(b))?;
+    crate::symbol::to_unicode(code)
+        .filter(|read| *read != c)
+        .map(String::from)
 }
 
 /// Marks each glyph with the first of `links` whose box holds the glyph's middle (half its

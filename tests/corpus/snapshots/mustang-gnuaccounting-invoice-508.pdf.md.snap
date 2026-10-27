@@ -28,6 +28,8 @@ has_javascript: false
 authors: ["Jochen Stärk"]
 language: "de-DE"
 created: "2020-11-21T18:21:23+01:00"
+document_date: "2020-11-21"
+document_date_from: "only date in the top third of page 1"
 ---
 
 # mustang-gnuaccounting-invoice-508.pdf

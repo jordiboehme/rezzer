@@ -22,8 +22,10 @@ use rezzer_model::{Anchor, Block, Cell, Inline, LossReason, SectionKind, Severit
 use crate::tables::{self, Planned, PlannedCell, Rule, Tables, Unsure};
 
 mod footnotes;
+mod head;
 mod shape;
 
+pub(crate) use head::{PageDate, TITLE_FROM, page_document_date};
 pub(crate) use shape::{address_block, address_shaped, page_text_sizes, page_text_sizes_of};
 use shape::{bold_led, data_only, ends_in_amount, listed, padded_mark};
 
@@ -758,6 +760,9 @@ pub(crate) struct Laid {
     pub probes_cut: bool,
     /// What the layout found by a rule of its own and says at the top of the page.
     pub found_by: Option<String>,
+    /// The title the page's head gives (see [`head::page_title`]), on page 1 of an untagged
+    /// file only.
+    pub title: Option<String>,
 }
 
 /// Where a limit cut a page: the first part not kept.
@@ -1049,6 +1054,16 @@ pub(crate) fn page_blocks_at(
         let (lb, tb) = b.at();
         la.cmp(&lb).then(tb.total_cmp(&ta))
     });
+    // The title of the document: the heading lines of page 1 as the layout reads them.
+    let title = match (page, height, cx.tree) {
+        (1, Some(height), None) => head::page_title(
+            &lines(&flow.runs),
+            &heading_of(cx.style, &text_sizes),
+            height,
+            cx.style.body_size,
+        ),
+        _ => None,
+    };
     let lay = |runs: &[Run], slots: &[Slot], built: &mut Built| match cx.tree {
         Some(_) => tagged(runs, slots, cx, built),
         None => untagged(runs, &text_sizes, cx, built),
@@ -1151,6 +1166,7 @@ pub(crate) fn page_blocks_at(
     let mut laid = built.laid(notes);
     laid.probes_cut = probes_cut;
     laid.found_by = footnotes::note(page, footnotes_written, linked_written);
+    laid.title = title;
     let (mut b, mut t) = (0, 0);
     for block in &mut laid.blocks {
         let anchor = if matches!(block, Block::Table { .. }) {
@@ -1342,6 +1358,7 @@ impl Built {
             probed: Vec::new(),
             probes_cut: false,
             found_by: None,
+            title: None,
         }
     }
 
@@ -2285,13 +2302,7 @@ fn refused_quietly(
 /// in one of the page's `text_sizes`, or less than [`HEADING_RATIO`] times the largest of
 /// them, is no heading.
 fn untagged(flow: &[Run], text_sizes: &[f32], cx: &Context<'_>, out: &mut Built) {
-    let largest = text_sizes.last().copied();
-    let heading_level = |l: &Line<'_>| {
-        cx.style.heading_level(l).filter(|_| {
-            !text_sizes.iter().any(|s| size_key(*s) == size_key(l.size))
-                && largest.is_none_or(|b| l.size >= b * HEADING_RATIO)
-        })
-    };
+    let heading_level = heading_of(cx.style, text_sizes);
     let all = lines(flow);
     // A number of three digits or more that opens a line in the middle of a sentence is part
     // of the sentence ("31 CFR 209 and/or / 210. The information"), not a list item.
@@ -2315,25 +2326,13 @@ fn untagged(flow: &[Run], text_sizes: &[f32], cx: &Context<'_>, out: &mut Built)
             continue;
         }
         if let Some(level) = heading_level(l) {
-            let mut runs: Vec<&Run> = l.runs.iter().collect();
-            let mut j = i + 1;
-            while j < all.len()
-                && heading_level(&all[j]) == Some(level)
-                && continues(&all[j - 1], &all[j])
-            {
-                runs.extend(all[j].runs.iter());
-                j += 1;
-            }
-            // Bold lines a little larger than the body that read as an address or as
-            // sentences are a paragraph: the address of an invoice, its closing words.
+            let (j, heading) = heading_block(&all, i, level, &heading_level, cx.style.body_size);
             let block = &all[i..j];
-            let texts: Vec<&str> = block.iter().map(|l| l.text.as_str()).collect();
-            let one_edge = block.iter().all(|b| (b.x - l.x).abs() <= EDGE);
-            let small = l.size < HEADING_PLAIN_RATIO * cx.style.body_size;
-            if small && ((address_shaped(&texts) && one_edge) || sentences(block)) {
-                out.broken_paragraph(runs, &line_breaks(block), None, cx);
-            } else {
+            let runs: Vec<&Run> = block.iter().flat_map(|l| l.runs.iter()).collect();
+            if heading {
                 out.heading(level, runs, cx);
+            } else {
+                out.broken_paragraph(runs, &line_breaks(block), None, cx);
             }
             open_list = None;
             i = j;
@@ -2379,6 +2378,46 @@ fn untagged(flow: &[Run], text_sizes: &[f32], cx: &Context<'_>, out: &mut Built)
         out.broken_paragraph(runs, &breaks, None, cx);
         i = j;
     }
+}
+
+/// The heading level of an untagged line on a page whose text is set in `text_sizes`: none
+/// for a line in one of them, or less than [`HEADING_RATIO`] times the largest of them.
+fn heading_of<'s>(
+    style: &'s Style,
+    text_sizes: &'s [f32],
+) -> impl Fn(&Line<'_>) -> Option<u8> + 's {
+    let largest = text_sizes.last().copied();
+    move |l: &Line<'_>| {
+        style.heading_level(l).filter(|_| {
+            !text_sizes.iter().any(|s| size_key(*s) == size_key(l.size))
+                && largest.is_none_or(|b| l.size >= b * HEADING_RATIO)
+        })
+    }
+}
+
+/// The heading that starts at line `i` of `all`, a line of `level`: the end of its lines
+/// (each after the first of `level` and going on the one before), and whether they are a
+/// heading. Bold lines a little larger than the body (`body_size`) that read as an address
+/// or as sentences are a paragraph: the address of an invoice, its closing words.
+fn heading_block(
+    all: &[Line<'_>],
+    i: usize,
+    level: u8,
+    heading_level: &dyn Fn(&Line<'_>) -> Option<u8>,
+    body_size: f32,
+) -> (usize, bool) {
+    let mut j = i + 1;
+    while j < all.len() && heading_level(&all[j]) == Some(level) && continues(&all[j - 1], &all[j])
+    {
+        j += 1;
+    }
+    let block = &all[i..j];
+    let first = &all[i];
+    let texts: Vec<&str> = block.iter().map(|l| l.text.as_str()).collect();
+    let one_edge = block.iter().all(|b| (b.x - first.x).abs() <= EDGE);
+    let small = first.size < HEADING_PLAIN_RATIO * body_size;
+    let paragraph = small && ((address_shaped(&texts) && one_edge) || sentences(block));
+    (j, !paragraph)
 }
 
 /// A line is short when the next first word fits after it with this share of the widest

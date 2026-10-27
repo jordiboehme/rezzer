@@ -29,6 +29,7 @@ mod quote;
 mod regions;
 mod render;
 mod scan;
+mod symbol;
 mod tables;
 mod text;
 
@@ -470,6 +471,8 @@ fn lay_out(
     // table among the section's blocks, and its anchor.
     let mut placed: Placed = HashMap::new();
     let widgets = pdf.map(widget_boxes).unwrap_or_default();
+    // Glyphs of the font Symbol read through its encoding, over all pages.
+    let mut symbols: u64 = 0;
     for info in pages {
         let n = info.number;
         // The section and its marker.
@@ -611,8 +614,23 @@ fn lay_out(
                 width,
                 body_size: style.body_size,
             };
+            symbols += items.symbol;
+            if n == 1 {
+                page_date(&items.runs, height, budget, out);
+            }
             let runs = std::mem::take(&mut items.runs);
-            let laid = layout::page_blocks_at(n, height, runs, &drawn, &cx, &points);
+            let mut laid = layout::page_blocks_at(n, height, runs, &drawn, &cx, &points);
+            if let Some(title) = laid.title.take() {
+                match budget.charge_text(title.len()) {
+                    Ok(()) => out.found_title = Some(title),
+                    Err(hit) => out.loss(
+                        "p1",
+                        format!("{hit}: the title found on page 1 is not kept"),
+                        LossReason::Limit,
+                        Severity::Warning,
+                    ),
+                }
+            }
             let annot_probes = &laid.probed[..probes_from.min(laid.probed.len())];
             for (&i, two) in here.iter().zip(annot_probes.chunks(2)) {
                 spots[i].anchor = two.iter().flatten().next().cloned();
@@ -864,6 +882,7 @@ fn lay_out(
                 .get_or_insert_with(|| Anchor(format!("p{n}")));
         }
     }
+    symbol_loss(symbols, out);
     let places = pictures.finish(out);
     quote::losses(&unquoted, quotes_cut, quote_visits, out);
     if let Some((count, first, last)) = links.cut() {
@@ -1453,6 +1472,49 @@ fn notes(page: u32, items: &PageItems, out: &mut Out) {
     }
 }
 
+/// The document date of page 1 (see [`layout::page_document_date`]), set in the
+/// properties, or an `Uncertain` loss when page 1 holds several dates and none is marked.
+fn page_date(runs: &[Run], height: Option<f32>, budget: &Budget, out: &mut Out) {
+    match layout::page_document_date(runs, height) {
+        layout::PageDate::None => {}
+        layout::PageDate::Found(found) => {
+            match budget.charge_text(found.date.len() + found.from.len()) {
+                Ok(()) => out.doc.properties.document_date = Some(found),
+                Err(hit) => out.loss(
+                    "p1",
+                    format!("{hit}: the date found on page 1 is not kept"),
+                    LossReason::Limit,
+                    Severity::Warning,
+                ),
+            }
+        }
+        layout::PageDate::Unsure(what) => {
+            out.loss("p1", what, LossReason::Uncertain, Severity::Info);
+        }
+    }
+}
+
+/// The one loss of a file that says how many characters of the font Symbol were read
+/// through the Adobe Symbol encoding.
+fn symbol_loss(n: u64, out: &mut Out) {
+    if n > 0 {
+        let (characters, are) = if n == 1 {
+            ("character", "is")
+        } else {
+            ("characters", "are")
+        };
+        out.loss(
+            "document",
+            format!(
+                "{n} {characters} of the font Symbol {are} read through the Adobe Symbol \
+                 encoding: its ToUnicode map gives Latin letters"
+            ),
+            LossReason::Uncertain,
+            Severity::Info,
+        );
+    }
+}
+
 /// The lines of runs: the runs of one line joined.
 fn run_lines(runs: &[Run]) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
@@ -1553,6 +1615,9 @@ pub(crate) struct Out {
     pub blobs: Vec<Blob>,
     /// The bytes rendered pages and extracted attachments may still take.
     pub blob_room: u64,
+    /// The title the head of page 1 gives; it is the document's title when the Info
+    /// dictionary and XMP give none.
+    pub found_title: Option<String>,
 }
 
 impl Out {
@@ -1562,6 +1627,7 @@ impl Out {
             partial: false,
             blobs: Vec::new(),
             blob_room: 0,
+            found_title: None,
         }
     }
 
@@ -1605,7 +1671,15 @@ impl Out {
         });
     }
 
-    pub fn finish(self) -> ReadOutcome {
+    pub fn finish(mut self) -> ReadOutcome {
+        // The title found on page 1 stands in for a title the file does not give.
+        let p = &mut self.doc.properties;
+        if p.title.as_deref().is_none_or(|t| t.trim().is_empty())
+            && let Some(title) = self.found_title.take()
+        {
+            p.title = Some(title);
+            p.title_from = Some(layout::TITLE_FROM.to_string());
+        }
         ReadOutcome {
             blobs: self.blobs,
             document: self.doc,

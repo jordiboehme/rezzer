@@ -130,6 +130,24 @@ pub struct Properties {
     /// Facts about the file as a whole (page count, signed, encrypted and so on).
     #[serde(default, skip_serializing_if = "FileFacts::is_empty")]
     pub facts: FileFacts,
+    /// Where `title` was found when the file's own properties give none, in words (for
+    /// example `largest heading in the top third of page 1`). `None` when the title is the
+    /// file's own or there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_from: Option<String>,
+    /// The date the document's own text gives as its date (a printed `Datum 01.02.2026`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_date: Option<FoundDate>,
+}
+
+/// A date found in the document's text, with where it was found.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct FoundDate {
+    /// The date as `YYYY-MM-DD`.
+    pub date: String,
+    /// Where it was found, in words (for example `date label Datum on page 1`).
+    pub from: String,
 }
 
 /// An extracted picture or file.

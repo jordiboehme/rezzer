@@ -4877,3 +4877,65 @@ fn furniture_on_a_page_rendered_whole_is_named_with_every_page() {
     assert_eq!(media_alts(&out, 2), [alt]);
     assert!(media_alts(&out, 3).is_empty());
 }
+
+/// A file of one page with `head` over the body in `body` pt, drawn `scale` times as large.
+fn page_with(head: &str, body_size: f32, scale: f32) -> Vec<u8> {
+    let page = FormPage {
+        template: format!("{head}{}", body(body_size, 500.0)),
+        scale,
+        ..FormPage::default()
+    };
+    print_form(&[page], "", "")
+}
+
+#[test]
+fn recipient_name_is_not_the_title() {
+    let head = show("FB", 10.0, 40.0, 720.0, "Erika Mustermann")
+        + &show("FL", 8.0, 40.0, 709.0, "Musterweg 1")
+        + &show("FL", 8.0, 40.0, 699.0, "12345 Musterstadt")
+        + &show("FB", 9.0, 40.0, 640.0, "Rechnung");
+    let out = common::read(&page_with(&head, 7.0, 1.0));
+    assert_eq!(out.document.properties.title.as_deref(), Some("Rechnung"));
+}
+
+#[test]
+fn recipient_name_is_not_the_title_in_any_size_and_font() {
+    // The same shape in other sizes, fonts and page sizes: every size relative to the body.
+    for b in [6.0f32, 7.0, 9.0] {
+        for (bold, plain) in [("FB", "FL"), ("FTB", "FT")] {
+            for scale in [0.8f32, 1.0, 1.25] {
+                let step = b * 8.0 / 7.0 * 1.3;
+                let head = show(bold, b * 10.0 / 7.0, 40.0, 720.0, "Erika Mustermann")
+                    + &show(plain, b * 8.0 / 7.0, 40.0, 720.0 - step, "Musterweg 1")
+                    + &show(
+                        plain,
+                        b * 8.0 / 7.0,
+                        40.0,
+                        720.0 - 2.0 * step,
+                        "12345 Musterstadt",
+                    )
+                    + &show(bold, b * 9.0 / 7.0, 40.0, 640.0, "Rechnung");
+                let out = common::read(&page_with(&head, b, scale));
+                assert_eq!(
+                    out.document.properties.title.as_deref(),
+                    Some("Rechnung"),
+                    "body {b}, fonts {bold} {plain}, scale {scale}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn footer_heading_does_not_hide_the_title() {
+    for (b, scale) in [(7.0f32, 0.8f32), (7.0, 1.0), (9.0, 1.25)] {
+        let head = show("FB", b * 10.0 / 7.0, 40.0, 720.0, "Rechnung")
+            + &show("FB", b * 12.0 / 7.0, 40.0, 40.0, "Muster GmbH");
+        let out = common::read(&page_with(&head, b, scale));
+        assert_eq!(
+            out.document.properties.title.as_deref(),
+            Some("Rechnung"),
+            "body {b}, scale {scale}"
+        );
+    }
+}

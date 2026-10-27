@@ -432,3 +432,64 @@ fn pdf_inspector_not_in_tree() {
     }
     assert!(lock.contains("name = \"hayro-interpret\""));
 }
+
+#[test]
+fn symbol_font_reads_greek() {
+    // A Symbol font whose ToUnicode map gives the Latin letter of each code, as many
+    // producers write it, beside a Helvetica line.
+    let cmap = "/CIDInit /ProcSet findresource begin 12 dict begin begincmap \
+        /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def \
+        /CMapName /Adobe-Identity-UCS def /CMapType 2 def \
+        1 begincodespacerange <00> <FF> endcodespacerange \
+        3 beginbfchar <61> <0061> <62> <0062> <57> <0057> endbfchar \
+        endcmap CMapName currentdict /CMap defineresource pop end end";
+    for name in ["Symbol", "ABCDEF+Symbol"] {
+        let mut b = Builder::default();
+        let catalog = b.reserve();
+        let tree = b.reserve();
+        let helvetica = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+        let map = b.stream("", cmap.as_bytes());
+        let symbol = b.add(format!(
+            "<< /Type /Font /Subtype /Type1 /BaseFont /{name} /ToUnicode {map} 0 R >>"
+        ));
+        let content = b.stream(
+            "",
+            b"BT /F1 12 Tf 72 700 Td (Winkel ) Tj /F2 12 Tf (ab) Tj /F1 12 Tf ( und ) Tj \
+              /F2 12 Tf (W) Tj ET\n\
+              BT /F1 12 Tf 72 680 Td (ab W) Tj ET\n",
+        );
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F1 {helvetica} 0 R /F2 {symbol} 0 R >> >> \
+             /Contents {content} 0 R >>"
+        ));
+        b.set(
+            tree,
+            format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+        );
+        b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+        let out = read(&b.finish(catalog));
+        let text = common::all_text(&out);
+        assert!(
+            text.contains("Winkel \u{3b1}\u{3b2} und \u{3a9}"),
+            "{name}: {text}"
+        );
+        // Helvetica keeps its Latin letters.
+        assert!(text.contains("ab W"), "{name}: {text}");
+        let said: Vec<&str> = out
+            .document
+            .losses
+            .iter()
+            .filter(|l| l.why == LossReason::Uncertain)
+            .map(|l| l.what.as_str())
+            .collect();
+        assert_eq!(
+            said,
+            [
+                "3 characters of the font Symbol are read through the Adobe Symbol encoding: its \
+              ToUnicode map gives Latin letters"
+            ],
+            "{name}"
+        );
+    }
+}

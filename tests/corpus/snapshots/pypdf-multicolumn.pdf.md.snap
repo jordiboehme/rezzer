@@ -3,8 +3,8 @@ source: crates/rezzer/tests/corpus.rs
 ---
 ---
 type: source
-title: "pypdf-multicolumn.pdf"
-description: "PDF, 3 pages, 2024-01-03. 1 table."
+title: "Two-Column Document with Lorem Ipsum"
+description: "PDF, 3 pages, \"Two-Column Document with Lorem Ipsum\", 2024-01-03. 1 table."
 resource: "<corpus>/pdf/pypdf-multicolumn.pdf"
 tags: ["rezzer", "pdf"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
@@ -28,9 +28,10 @@ has_javascript: false
 language: "la"
 created: "2024-01-03T09:38:26+01:00"
 modified: "2024-01-03T09:38:26+01:00"
+title_from: "largest heading in the top third of page 1"
 ---
 
-# pypdf-multicolumn.pdf
+# Two-Column Document with Lorem Ipsum
 
 ## Overview
 

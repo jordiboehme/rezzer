@@ -177,21 +177,31 @@ pub(crate) fn shown_description(doc: &Document, opts: &RenderOptions) -> String 
     }
 }
 
-/// The document's own date (`YYYY-MM-DD`): its modified date, else its created date, when
-/// that is a real calendar date.
-pub(crate) fn document_date(doc: &Document) -> Option<&str> {
+/// The document's own date (`YYYY-MM-DD`): its modified date, else its created date, else
+/// the date its text gives ([`found_date`]), when that is a real calendar date.
+pub(crate) fn own_date(doc: &Document) -> Option<&str> {
     let p = &doc.properties;
     p.modified
         .as_ref()
         .and_then(value_date)
         .or_else(|| p.created.as_ref().and_then(value_date))
+        .or_else(|| found_date(doc).map(|f| f.date.as_str()))
+}
+
+/// The date the document's text gives as its date, when it is a real calendar date written
+/// `YYYY-MM-DD`.
+fn found_date(doc: &Document) -> Option<&rezzer_model::FoundDate> {
+    doc.properties
+        .document_date
+        .as_ref()
+        .filter(|f| f.date.len() == 10 && date_prefix(&f.date).is_some_and(is_real_date))
 }
 
 /// The date of the source with how sure it is: the document's own date is `explicit`, a
 /// file system date (modified, else created) `inferred`. Only a real calendar date counts
 /// (Crystalline's T003); without one there is no date.
 fn source_date(doc: &Document) -> Option<(&str, &'static str)> {
-    if let Some(date) = document_date(doc) {
+    if let Some(date) = own_date(doc) {
         return Some((date, "explicit"));
     }
     let s = &doc.source;
@@ -206,7 +216,8 @@ fn source_date(doc: &Document) -> Option<(&str, &'static str)> {
 /// (`type`, `title`, `description`, `resource`, `tags`, `generated`, `source_date`,
 /// `temporal_confidence`, `sources`, `status`), then Rezzer's: the source and its file
 /// system facts, the read, the part keys, the file facts, the render options, the document
-/// properties.
+/// properties, then what the reader found in the document's text (`title_from`,
+/// `document_date`, `document_date_from`).
 pub(crate) fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) -> String {
     let p = &doc.properties;
     let s = &doc.source;
@@ -305,6 +316,14 @@ pub(crate) fn render(doc: &Document, completeness: Completeness, opts: &RenderOp
     }
     if let Some(v) = &p.modified {
         out.push_str(&format!("modified: {}\n", yaml_value(v, 0)));
+    }
+    // What the reader found in the document's text, and where.
+    if let Some(from) = p.title_from.as_deref().filter(|f| !f.trim().is_empty()) {
+        out.push_str(&format!("title_from: {}\n", quote(from)));
+    }
+    if let Some(found) = found_date(doc) {
+        out.push_str(&format!("document_date: {}\n", quote(&found.date)));
+        out.push_str(&format!("document_date_from: {}\n", quote(&found.from)));
     }
     out.push_str("---\n");
     out

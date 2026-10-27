@@ -42,6 +42,28 @@ fn assert_no_placeholder(out: &ReadOutcome) {
     assert!(!json.contains(placeholder), "a placeholder in the JSON");
 }
 
+/// The read is complete and names one loss only: that the `n` dates in the head of page 1
+/// give no document date. The dates of a header field grid stand under their labels, in a row
+/// of fields; the label `Datum` there is not taken as the mark of the document date.
+fn assert_only_head_dates_loss(out: &ReadOutcome, n: usize) {
+    assert_eq!(
+        out.completeness,
+        Completeness::Complete,
+        "{:?}",
+        out.document.losses
+    );
+    let said: Vec<(&str, LossReason)> = out
+        .document
+        .losses
+        .iter()
+        .map(|l| (l.what.as_str(), l.why))
+        .collect();
+    let want =
+        format!("{n} dates stand in the head of page 1; none is marked as the document date");
+    assert_eq!(said, [(want.as_str(), LossReason::Uncertain)]);
+    assert_eq!(out.document.properties.document_date, None);
+}
+
 /// The read is complete and names no loss.
 fn assert_no_loss(out: &ReadOutcome) {
     assert_eq!(
@@ -2152,7 +2174,7 @@ fn assert_pay_slip(out: &ReadOutcome) {
         );
     }
     assert_eq!(values_alone(out), Vec::<String>::new());
-    assert_no_loss(out);
+    assert_only_head_dates_loss(out, 3);
 }
 
 /// The pay slip with its separator marks filled and stroked (`B*`), as the print run draws
@@ -3884,7 +3906,7 @@ fn header_field_grid_reads_as_pairs() {
         1,
         "{notes:?}"
     );
-    assert_no_loss(&out);
+    assert_only_head_dates_loss(&out, 3);
 }
 
 /// Rows of fields as a print run fills them (ruling P6-X): each row a rule over 6.6 point
@@ -4169,4 +4191,291 @@ fn padded_value_lines_under_a_band_are_cut_at_its_columns() {
         all_text(&out),
         out.document.losses
     );
+}
+
+/// Lines of plain `size` pt prose in Helvetica from `top` down, at least 600 ink characters,
+/// so that `size` is the body size.
+fn prose(size: f32, top: f32) -> String {
+    const LINE: &str = "die Angaben werden von der Muster GmbH vertraulich behandelt und";
+    let mut out = String::new();
+    let (mut ink, mut y) = (0, top);
+    while ink < 600 {
+        out.push_str(&common::show("FL", size, 40.0, y, LINE));
+        ink += LINE.chars().filter(|c| !c.is_whitespace()).count();
+        y -= size * 1.3;
+    }
+    out
+}
+
+/// A one-page form whose template holds `head` over prose in `size` pt from y 450 down, drawn
+/// `scale` times as large, with the Info entries `info`.
+fn headed(head: &str, size: f32, scale: f32, info: &str) -> Vec<u8> {
+    let page = FormPage {
+        template: format!("{head}{}", prose(size, 450.0)),
+        scale,
+        ..FormPage::default()
+    };
+    print_form(&[page], info, "")
+}
+
+/// The value of the frontmatter key `key` of the Markdown of `out`, if it is there.
+fn front(out: &ReadOutcome, key: &str) -> Option<String> {
+    let md = common::markdown(out);
+    let head = md.split("\n---\n").next().unwrap_or("").to_string();
+    head.lines()
+        .find_map(|l| l.strip_prefix(key)?.strip_prefix(": "))
+        .map(str::to_string)
+}
+
+/// The words of the losses of `out` that are `Uncertain`.
+fn unsure(out: &ReadOutcome) -> Vec<&str> {
+    out.document
+        .losses
+        .iter()
+        .filter(|l| l.why == LossReason::Uncertain)
+        .map(|l| l.what.as_str())
+        .collect()
+}
+
+#[test]
+fn title_from_largest_heading() {
+    let head = common::show("FB", 14.0, 40.0, 780.0, "Entgeltabrechnung Muster GmbH")
+        + &common::show("FB", 11.0, 40.0, 740.0, "Abrechnungszeitraum");
+    let out = read(&headed(&head, 9.0, 1.0, ""));
+    let p = &out.document.properties;
+    assert_eq!(p.title.as_deref(), Some("Entgeltabrechnung Muster GmbH"));
+    assert_eq!(
+        p.title_from.as_deref(),
+        Some("largest heading in the top third of page 1")
+    );
+    assert_eq!(
+        front(&out, "title").as_deref(),
+        Some("\"Entgeltabrechnung Muster GmbH\"")
+    );
+    assert_eq!(
+        front(&out, "title_from").as_deref(),
+        Some("\"largest heading in the top third of page 1\"")
+    );
+}
+
+#[test]
+fn title_from_largest_heading_in_any_size_and_font() {
+    // The body size, the title's style and font and the page size vary; the title is always
+    // larger than the body by the same share.
+    for body in [7.0f32, 9.5, 12.0] {
+        for (font, ratio) in [("FB", 1.3f32), ("FL", 1.6), ("FTB", 1.3), ("FT", 1.6)] {
+            for scale in [0.8f32, 1.0, 1.25] {
+                let head = common::show(font, body * ratio, 40.0, 780.0, "Musterbescheid 2026")
+                    + &common::show("FL", body, 40.0, 600.0, "Muster GmbH");
+                let out = read(&headed(&head, body, scale, ""));
+                assert_eq!(
+                    out.document.properties.title.as_deref(),
+                    Some("Musterbescheid 2026"),
+                    "body {body}, font {font}, ratio {ratio}, scale {scale}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn heading_below_the_top_third_is_no_title() {
+    // The only heading stands at the middle of the page.
+    let head = common::show("FB", 14.0, 40.0, 500.0, "Musterbescheid");
+    let out = read(&headed(&head, 9.0, 1.0, ""));
+    assert_eq!(out.document.properties.title, None);
+    assert_eq!(out.document.properties.title_from, None);
+    assert_eq!(front(&out, "title").as_deref(), Some("\"file.pdf\""));
+}
+
+#[test]
+fn equal_headings_go_by_bold_then_height() {
+    // Two headings of one size: the bold one wins over the higher plain one.
+    let head = common::show("FL", 14.0, 40.0, 790.0, "Musterkopf")
+        + &common::show("FB", 14.0, 40.0, 740.0, "Musterbescheid");
+    let out = read(&headed(&head, 9.0, 1.0, ""));
+    assert_eq!(
+        out.document.properties.title.as_deref(),
+        Some("Musterbescheid")
+    );
+    // Both bold: the higher one.
+    let head = common::show("FB", 14.0, 40.0, 790.0, "Musterkopf")
+        + &common::show("FB", 14.0, 40.0, 740.0, "Musterbescheid");
+    let out = read(&headed(&head, 9.0, 1.0, ""));
+    assert_eq!(out.document.properties.title.as_deref(), Some("Musterkopf"));
+}
+
+#[test]
+fn info_title_wins() {
+    let head = common::show("FB", 14.0, 40.0, 780.0, "Entgeltabrechnung Muster GmbH");
+    let out = read(&headed(&head, 9.0, 1.0, "/Title (Lohn Muster)"));
+    let p = &out.document.properties;
+    assert_eq!(p.title.as_deref(), Some("Lohn Muster"));
+    assert_eq!(p.title_from, None);
+    assert_eq!(front(&out, "title_from"), None);
+}
+
+#[test]
+fn labelled_date_is_document_date() {
+    let head = common::show("FB", 14.0, 40.0, 780.0, "Musterbescheid")
+        + &common::show("FL", 9.0, 400.0, 760.0, "Datum 01.02.2026")
+        + &common::show("FL", 9.0, 40.0, 700.0, "Zeitraum 01.01.2026 31.01.2026");
+    let out = read(&headed(&head, 9.0, 1.0, ""));
+    let found = out
+        .document
+        .properties
+        .document_date
+        .as_ref()
+        .expect("date");
+    assert_eq!(found.date, "2026-02-01");
+    assert_eq!(found.from, "date label Datum on page 1");
+    assert_eq!(front(&out, "source_date").as_deref(), Some("2026-02-01"));
+    assert_eq!(
+        front(&out, "temporal_confidence").as_deref(),
+        Some("explicit")
+    );
+    assert_eq!(
+        front(&out, "document_date").as_deref(),
+        Some("\"2026-02-01\"")
+    );
+    assert_eq!(
+        front(&out, "document_date_from").as_deref(),
+        Some("\"date label Datum on page 1\"")
+    );
+    assert!(unsure(&out).is_empty(), "{:?}", unsure(&out));
+}
+
+#[test]
+fn labelled_dates_of_every_form() {
+    // The label on the date's line, with or without a colon, in any case, or over its value
+    // (one line below it); sizes, fonts and the page size vary.
+    // Each line: its text, x, y and how many lines below y it stands.
+    type Lines<'a> = &'a [(&'a str, f32, f32, f32)];
+    let cases: [(Lines<'_>, Option<&str>); 9] = [
+        (
+            &[("Datum: 01.02.2026", 40.0, 760.0, 0.0)],
+            Some("2026-02-01"),
+        ),
+        (&[("DATE 2026-02-01", 40.0, 760.0, 0.0)], Some("2026-02-01")),
+        (
+            &[("Erstellt am 1.2.2026", 40.0, 760.0, 0.0)],
+            Some("2026-02-01"),
+        ),
+        (
+            &[("Fecha: 13/02/2026", 40.0, 760.0, 0.0)],
+            Some("2026-02-13"),
+        ),
+        (
+            &[("Dated 02/13/2026", 40.0, 760.0, 0.0)],
+            Some("2026-02-13"),
+        ),
+        // Both parts 12 or less: not read.
+        (&[("Date 02/03/2026", 40.0, 760.0, 0.0)], None),
+        // No such day.
+        (&[("Datum 31.04.2026", 40.0, 760.0, 0.0)], None),
+        // The label over its value, and the label beside it.
+        (
+            &[
+                ("Datum", 400.0, 200.0, 0.0),
+                ("01.02.2026", 400.0, 200.0, 1.0),
+            ],
+            Some("2026-02-01"),
+        ),
+        (
+            &[
+                ("Ausgestellt am:", 40.0, 200.0, 0.0),
+                ("01.02.2026", 300.0, 200.0, 0.0),
+            ],
+            Some("2026-02-01"),
+        ),
+    ];
+    for (lines, want) in cases {
+        for (size, font, scale) in [(7.0f32, "FL", 0.8f32), (9.5, "FB", 1.0), (12.0, "FT", 1.25)] {
+            let head: String = lines
+                .iter()
+                .map(|(t, x, y, below)| common::show(font, size, *x, y - below * size * 1.2, t))
+                .collect();
+            let out = read(&headed(&head, size, scale, ""));
+            let got = out.document.properties.document_date.as_ref();
+            assert_eq!(
+                got.map(|d| d.date.as_str()),
+                want,
+                "{lines:?} in {size} pt {font}, scale {scale}"
+            );
+        }
+    }
+}
+
+#[test]
+fn only_date_in_the_head_is_document_date() {
+    let head = common::show("FL", 9.0, 400.0, 760.0, "Musterstadt, 01.02.2026");
+    let out = read(&headed(&head, 9.0, 1.0, ""));
+    let found = out
+        .document
+        .properties
+        .document_date
+        .as_ref()
+        .expect("date");
+    assert_eq!(found.date, "2026-02-01");
+    assert_eq!(found.from, "only date in the top third of page 1");
+    // The same date twice is still one date.
+    let head = head + &common::show("FL", 9.0, 40.0, 700.0, "Stand 01.02.2026");
+    let out = read(&headed(&head, 9.0, 1.0, ""));
+    assert_eq!(
+        out.document
+            .properties
+            .document_date
+            .as_ref()
+            .map(|d| d.date.as_str()),
+        Some("2026-02-01")
+    );
+}
+
+#[test]
+fn two_unlabelled_dates_are_not_guessed() {
+    for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
+        let head = common::show("FL", size, 400.0, 760.0, "Musterstadt, 01.02.2026")
+            + &common::show(
+                "FL",
+                size,
+                40.0,
+                700.0,
+                "Zeitraum 01.01.2026 bis 31.01.2026",
+            );
+        let out = read(&headed(&head, size, scale, ""));
+        assert_eq!(out.document.properties.document_date, None);
+        assert_eq!(front(&out, "document_date"), None);
+        assert_eq!(front(&out, "source_date"), None);
+        assert_eq!(
+            unsure(&out),
+            ["3 dates stand in the head of page 1; none is marked as the document date"],
+            "{size} pt, scale {scale}"
+        );
+        assert_eq!(out.completeness, Completeness::Complete);
+    }
+}
+
+#[test]
+fn two_labelled_dates_that_differ_are_not_guessed() {
+    let head = common::show("FL", 9.0, 400.0, 760.0, "Datum 01.02.2026")
+        + &common::show("FL", 9.0, 40.0, 200.0, "Date 15.02.2026");
+    let out = read(&headed(&head, 9.0, 1.0, ""));
+    assert_eq!(out.document.properties.document_date, None);
+    assert_eq!(
+        unsure(&out),
+        [
+            "2 different dates stand after a date label on page 1; none is taken as the document \
+          date"
+        ]
+    );
+}
+
+#[test]
+fn compound_date_label_is_not_the_document_date() {
+    // Below the top third, so only a label could make it the document date.
+    let head = common::show("FL", 9.0, 40.0, 200.0, "Eintrittsdatum 01.01.2020");
+    let out = read(&headed(&head, 9.0, 1.0, ""));
+    assert_eq!(out.document.properties.document_date, None);
+    assert_eq!(front(&out, "document_date"), None);
+    assert!(unsure(&out).is_empty(), "{:?}", unsure(&out));
 }
