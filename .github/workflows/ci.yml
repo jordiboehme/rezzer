@@ -207,6 +207,9 @@ jobs:
       matrix:
         # macos-latest is Apple silicon.
         os: [ubuntu-latest, macos-latest]
+    env:
+      # The file name of the test archive, inside RUNNER_TEMP.
+      TESTS_ARCHIVE: tests.tar.zst
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -241,13 +244,21 @@ jobs:
           shared-key: test
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      # The test binaries are built once and run from an archive, so the build
+      # and the run are timed as separate steps. The archive lives in
+      # RUNNER_TEMP, outside target, so the cache does not store it.
+      # --locked: the build fails instead of re-resolving Cargo.lock.
+      - name: build tests
+        run: cargo nextest archive --workspace --locked --archive-file "$RUNNER_TEMP/$TESTS_ARCHIVE"
+
       # --no-tests=warn: a workspace whose crates have no tests yet is not an
-      # error.
-      - name: cargo nextest run
-        run: cargo nextest run --workspace --locked --no-tests=warn
+      # error. --workspace-remap: the run reads .config/nextest.toml from the
+      # checkout, so the profile overrides apply.
+      - name: run tests
+        run: cargo nextest run --archive-file "$RUNNER_TEMP/$TESTS_ARCHIVE" --workspace-remap "$GITHUB_WORKSPACE" --no-tests=warn
 
       # nextest does not run doctests.
-      - name: cargo test --doc
+      - name: doctests
         run: cargo test --workspace --doc --locked
 
   # Dependency audit: advisories (RustSec), licenses (the allowlist in
