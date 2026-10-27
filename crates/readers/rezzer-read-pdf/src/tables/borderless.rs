@@ -1105,7 +1105,16 @@ fn grid_of(
                     .any(|x| x.0 <= c + 1 && x.0 + x.1 as usize > c)
         });
         let cut = if span == 2 && !shared && alone(c) && alone(c + 1) {
-            title_cut(flow, &pieces[0][k], columns[c], columns[c + 1])
+            // The shape of most values of a column, from its own text in the lines below.
+            let shape_of = |col: usize| {
+                let shapes: Vec<Shape> = (1..lines.len())
+                    .flat_map(|j| placed[j].iter().filter(move |x| x.0 == col && x.1 == 1))
+                    .map(|x| Shape::of(&text_of(flow, x.2.0, x.2.1)))
+                    .collect();
+                Shape::most(&shapes)
+            };
+            let differ = shape_of(c) != shape_of(c + 1);
+            title_cut(flow, &pieces[0][k], (columns[c], columns[c + 1]), differ)
         } else {
             None
         };
@@ -1273,6 +1282,69 @@ fn grid_of(
 /// column's end (a title is set flush left or flush right with its values).
 const TITLE_ALIGN: f32 = 0.25;
 
+/// A part of a cut title that covers its column ends at most this many sizes after the
+/// column's end.
+const COVER_END: f32 = 0.5;
+
+/// The shape of a value: what a column of values holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Shape {
+    /// Digits only, with a sign before them.
+    Whole,
+    /// Digits with decimal or thousands marks, or an amount with a currency.
+    Decimal,
+    /// A number with a percent sign.
+    Percent,
+    /// Three groups of digits parted by dots, slashes or hyphens.
+    Date,
+    Text,
+}
+
+impl Shape {
+    fn of(text: &str) -> Shape {
+        let t = text.trim();
+        let digits = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit());
+        let number = |s: &str| {
+            let s = s.trim_start_matches(['-', '+']);
+            !s.is_empty()
+                && s.chars().any(|c| c.is_ascii_digit())
+                && s.chars()
+                    .all(|c| c.is_ascii_digit() || matches!(c, '.' | ','))
+        };
+        if let Some(n) = t.strip_suffix('%')
+            && number(n.trim_end())
+        {
+            return Shape::Percent;
+        }
+        if digits(t.trim_start_matches(['-', '+'])) {
+            return Shape::Whole;
+        }
+        let parts: Vec<&str> = t.split(['.', '/', '-']).collect();
+        if parts.len() == 3 && parts.iter().all(|p| digits(p)) && !t.contains(',') {
+            return Shape::Date;
+        }
+        let amount = t
+            .trim_end_matches(['\u{20ac}', '$'])
+            .trim_end()
+            .trim_end_matches("EUR")
+            .trim_end();
+        if number(amount) {
+            return Shape::Decimal;
+        }
+        Shape::Text
+    }
+
+    /// The shape most of `shapes` have (one of them on a tie), text when there are none.
+    fn most(shapes: &[Shape]) -> Shape {
+        let count = |s: &Shape| shapes.iter().filter(|x| *x == s).count();
+        shapes
+            .iter()
+            .max_by_key(|s| count(s))
+            .copied()
+            .unwrap_or(Shape::Text)
+    }
+}
+
 /// Where the piece `p` of a header line, over the columns `left` and `right` side by side, is
 /// cut into two titles: the last word space whose words before it end before `right` and
 /// whose words after it start after `left`, so that each part stands over one column only.
@@ -1280,11 +1352,19 @@ const TITLE_ALIGN: f32 = 0.25;
 /// two runs. A word space inside a run is where the glyphs say, else where the run's width
 /// shared out by its characters puts it.
 ///
-/// One title over both columns has word spaces over the gutter too, so a cut also needs:
+/// One title over both columns has word spaces over the gutter too, so a cut also needs
+/// (ruling P6-X2 for the first):
+/// - the two columns hold values of different shapes (see [`Shape`]): two close titles head
+///   different kinds of values (a quantity and a tax rate), a title over both stands over
+///   values of one kind (`Gesamt Preis` over two columns of numbers, `Date Range` over two
+///   columns of dates);
 /// - each part lines up with its own column, at its start or at its end, or covers the
-///   column's whole width (see [`TITLE_ALIGN`]; values set inside a wider title, as a digit
-///   under `Menge`); a title centered over two columns wider than its words does neither
-///   (the words before the space never reach into the other column, see above);
+///   column's whole width and ends at most [`COVER_END`] after it (see [`TITLE_ALIGN`];
+///   values set inside a wider title, as a digit under `Menge`); a title centered over two
+///   columns wider than its words does neither (the words before the space never reach into
+///   the other column, see above). Measured: the parts of close titles over values set inside
+///   them end 0.29 to 0.38 sizes after their columns, the words of titles centered over two
+///   narrow columns 1.2 sizes and more;
 /// - the words on both sides of the space do not start with a small letter: a title starts
 ///   with a capital, a digit or a sign, and a word in small letters goes on the words before
 ///   it (`Gueltig von bis`, `Zeitraum der Leistung`).
@@ -1299,24 +1379,28 @@ const TITLE_ALIGN: f32 = 0.25;
 fn title_cut(
     flow: &Flow,
     p: &Piece,
-    left: (f32, f32),
-    right: (f32, f32),
+    (left, right): ((f32, f32), (f32, f32)),
+    differ: bool,
 ) -> Option<(usize, usize)> {
     let size = flow.runs[p.start..p.end]
         .iter()
         .map(|r| r.size)
         .fold(1.0f32, f32::max);
     let near = |a: f32, b: f32| (a - b).abs() <= TITLE_ALIGN * size;
-    // A part from `x0` to `x1` over the whole width of `column`.
+    // A part from `x0` to `x1` over the whole width of `column`, ending near its end, over
+    // values of another shape than the other column's.
     let covers = |x0: f32, x1: f32, column: (f32, f32)| {
-        x0 <= column.0 + TITLE_ALIGN * size && x1 >= column.1 - TITLE_ALIGN * size
+        x0 <= column.0 + TITLE_ALIGN * size
+            && x1 >= column.1 - TITLE_ALIGN * size
+            && x1 <= column.1 + COVER_END * size
     };
     // A space from `from` to `to` that lets both parts stand over their own column, each lined
     // up with it, between two words that start with no small letter.
     let fits = |from: f32, to: f32, before: &str, after: &str| {
         let small = |w: &str| w.chars().next().is_some_and(char::is_lowercase);
         let last = before.split_whitespace().next_back().unwrap_or("");
-        from > left.0
+        differ
+            && from > left.0
             && from <= right.0
             && to >= left.1
             && to < right.1
@@ -1418,14 +1502,20 @@ mod tests {
             run("Menge", 300.0, 600.0, 0),
             run("Einheit", 328.0, 600.0, 0),
         ]);
-        assert_eq!(title_cut(&two, &piece(&two), left, right), Some((1, 0)));
+        assert_eq!(
+            title_cut(&two, &piece(&two), (left, right), true),
+            Some((1, 0))
+        );
         // One run without glyph gaps: its 13 characters share its width of 65, so the space
         // lies from 325 to 330, over the gutter.
         let one = flow_of(vec![run("Menge Einheit", 300.0, 600.0, 0)]);
-        assert_eq!(title_cut(&one, &piece(&one), left, right), Some((0, 6)));
+        assert_eq!(
+            title_cut(&one, &piece(&one), (left, right), true),
+            Some((0, 6))
+        );
         // A space that lies over the left column (the words after it start in it) is none.
         assert_eq!(
-            title_cut(&one, &piece(&one), (300.0, 331.0), (335.0, 345.0)),
+            title_cut(&one, &piece(&one), ((300.0, 331.0), (335.0, 345.0)), true),
             None
         );
         let mut row = vec![
@@ -1446,6 +1536,28 @@ mod tests {
         let texts: Vec<&str> = row.iter().map(|c| c.runs[0].text.as_str()).collect();
         assert_eq!(texts, ["Menge", "Einheit"]);
         assert_eq!((row[1].runs[0].x, row[1].runs[0].w), (330.0, 35.0));
+    }
+
+    #[test]
+    fn values_have_shapes() {
+        for (text, shape) in [
+            ("2", Shape::Whole),
+            ("-12", Shape::Whole),
+            ("1.234,56", Shape::Decimal),
+            ("34,56 EUR", Shape::Decimal),
+            ("19%", Shape::Percent),
+            ("7 %", Shape::Percent),
+            ("01.03.2026", Shape::Date),
+            ("31/12/2026", Shape::Date),
+            ("Stk", Shape::Text),
+        ] {
+            assert_eq!(Shape::of(text), shape, "{text}");
+        }
+        assert_eq!(
+            Shape::most(&[Shape::Whole, Shape::Text, Shape::Whole]),
+            Shape::Whole
+        );
+        assert_eq!(Shape::most(&[]), Shape::Text);
     }
 
     #[test]

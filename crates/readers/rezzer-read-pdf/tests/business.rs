@@ -1227,9 +1227,13 @@ enum Close {
     /// As `FlushRight` with the rate title `MwSt.` over rates set without a space (`19%`).
     Rate,
     /// The geometry of a real invoice (finding L1): `Menge` and `MwSt.` 0.45 sizes apart, the
-    /// quantities and the rates (`19%`) flush right 0.35 sizes inside the end of their title,
-    /// so each title starts well before its values and ends a little after them.
+    /// quantities and the rates (`19%`) flush right 0.2 and 0.3 sizes inside the end of their
+    /// title by the standard widths (the reader measures 0.29 to 0.38 and 0.3), so each title
+    /// starts well before its values and ends a little after them.
     Inside,
+    /// As `Inside` with `Anzahl` over a second column of whole numbers: two columns of one
+    /// shape, so a title over both (ruling P6-X2).
+    SameShape,
 }
 
 /// Rows of line items: position, article, quantity, unit, tax rate and amount.
@@ -1270,17 +1274,18 @@ fn close_titles(
         Close::OneShow => ("Einheit", 2, 3),
         Close::FlushRight | Close::Apart => ("USt-Satz", 2, 4),
         Close::Rate | Close::Inside => ("MwSt.", 2, 4),
+        Close::SameShape => ("Anzahl", 2, 0),
     };
     let apart = match close {
         Close::Apart => 0.9,
-        Close::Inside => 0.45,
+        Close::Inside | Close::SameShape => 0.45,
         _ => 0.4,
     };
-    // How far inside the end of its title a value ends.
-    let inside = if matches!(close, Close::Inside) {
-        0.35 * size
+    // How far inside the end of its title a value ends: the quantity and the rate.
+    let inside = if matches!(close, Close::Inside | Close::SameShape) {
+        (0.2 * size, 0.3 * size)
     } else {
-        0.0
+        (0.0, 0.0)
     };
     let mut t = show(tf, size, 40.0, 600.0, "Pos") + &show(tf, size, 80.0, 600.0, "Artikel");
     // Where the second title starts, and where the values of each title stand.
@@ -1289,7 +1294,7 @@ fn close_titles(
             t += &show(tf, size, 300.0, 600.0, "Menge Einheit");
             300.0 + common::font_width(tf, "Menge ", size)
         }
-        Close::FlushRight | Close::Apart | Close::Rate | Close::Inside => {
+        Close::FlushRight | Close::Apart | Close::Rate | Close::Inside | Close::SameShape => {
             let x2 = 300.0 + common::font_width(tf, "Menge", size) + apart * size;
             t += &show(tf, size, 300.0, 600.0, "Menge");
             t += &show(tf, size, x2, 600.0, second);
@@ -1306,10 +1311,10 @@ fn close_titles(
                 t += &show(vf, size, 300.0, y, &row[a]);
                 t += &show(vf, size, x2, y, &row[b]);
             }
-            Close::FlushRight | Close::Apart | Close::Rate | Close::Inside => {
-                let end = 300.0 + common::font_width(tf, "Menge", size) - inside;
+            Close::FlushRight | Close::Apart | Close::Rate | Close::Inside | Close::SameShape => {
+                let end = 300.0 + common::font_width(tf, "Menge", size) - inside.0;
                 t += &flush_right(vf, end, y, &row[a]);
-                let end = x2 + common::font_width(tf, second, size) - inside;
+                let end = x2 + common::font_width(tf, second, size) - inside.1;
                 t += &flush_right(vf, end, y, &row[b]);
             }
         }
@@ -2155,6 +2160,188 @@ fn a_note_across_a_gutter_between_rows_joins_no_row() {
         }
     }
     assert_eq!(reads, 1296);
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// Two columns of small whole numbers for [`narrow_spanned`].
+const NARROW_ROWS: [[&str; 2]; 5] = [
+    ["12", "34"],
+    ["5", "17"],
+    ["20", "8"],
+    ["3", "11"],
+    ["7", "25"],
+];
+
+/// Where a title over two columns stands in [`narrow_spanned`].
+#[derive(Debug, Clone, Copy)]
+enum Place {
+    /// Centered over both columns.
+    Center,
+    /// From the first column's start.
+    Left,
+}
+
+/// Line items of `n` rows at `k` times 8 pt in `face`: `Pos` and `Artikel` at x 40 and 80,
+/// `title` over two columns of small whole numbers (each as wide as `34`, the second `gap`
+/// sizes after the first, from x 300; the numbers flush right, or flush left when
+/// `flush_left`), set as `place` says, and `Betrag` flush right at x 540, with no line under
+/// the title. Gives the template and the columns (the title's lines are both numbers of a
+/// row).
+fn narrow_spanned(
+    k: f32,
+    (fonts, bold): ((&str, &str), bool),
+    n: usize,
+    title: &str,
+    (place, flush_left, gap): (Place, bool, f32),
+) -> (String, Vec<Column>) {
+    let size = 8.0 * k;
+    let (vf, tf) = (fonts.0, if bold { fonts.1 } else { fonts.0 });
+    let w = |font: &str, t: &str| common::font_width(font, t, size);
+    let a0 = 300.0;
+    let ea = a0 + w(vf, "34");
+    let b0 = ea + gap * size;
+    let eb = b0 + w(vf, "34");
+    let tx = match place {
+        Place::Center => (a0 + eb - w(tf, title)) / 2.0,
+        Place::Left => a0,
+    };
+    let mut t = show(tf, size, 40.0, 600.0, "Pos")
+        + &show(tf, size, 80.0, 600.0, "Artikel")
+        + &show(tf, size, tx, 600.0, title)
+        + &show(tf, size, 540.0 - w(tf, "Betrag"), 600.0, "Betrag");
+    let rows = &NARROW_ROWS[..n];
+    for (r, v) in rows.iter().enumerate() {
+        let y = 600.0 - 10.0 * k * (r as f32 + 1.0);
+        t += &show(vf, size, 40.0, y, ITEMS[r][0]);
+        t += &show(vf, size, 80.0, y, ITEMS[r][1]);
+        if flush_left {
+            t += &show(vf, size, a0, y, v[0]);
+            t += &show(vf, size, b0, y, v[1]);
+        } else {
+            t += &show(vf, size, ea - w(vf, v[0]), y, v[0]);
+            t += &show(vf, size, eb - w(vf, v[1]), y, v[1]);
+        }
+        t += &show(vf, size, 540.0 - w(vf, ITEMS[r][4]), y, ITEMS[r][4]);
+    }
+    let columns = vec![
+        (
+            "Pos".to_string(),
+            ITEMS[..n].iter().map(|r| r[0].to_string()).collect(),
+        ),
+        (
+            "Artikel".to_string(),
+            ITEMS[..n].iter().map(|r| r[1].to_string()).collect(),
+        ),
+        (
+            title.to_string(),
+            rows.iter().map(|v| format!("{} {}", v[0], v[1])).collect(),
+        ),
+        (
+            "Betrag".to_string(),
+            ITEMS[..n].iter().map(|r| r[4].to_string()).collect(),
+        ),
+    ];
+    (t, columns)
+}
+
+/// The re-review's finding (ruling P6-X2): a title of two capitalized words over two narrow
+/// columns of values of one shape (small whole numbers), centered over both or set from the
+/// first column's start, with no line under it, is one title: in every size, font and weight,
+/// with 2 to 5 rows, values flush right or flush left and the columns 1.4 or 2 sizes apart,
+/// its cell keeps its span of two columns and the numbers of each row stand under it.
+#[test]
+fn capitalized_titles_over_two_columns_of_one_shape_stay_spanned() {
+    let titles = [
+        "Gesamt Preis",
+        "Date Range",
+        "Total Amount",
+        "Lager Bestand",
+        "Unit Price",
+    ];
+    let mut wrong = Vec::new();
+    let mut reads = 0;
+    for title in titles {
+        for place in [Place::Center, Place::Left] {
+            for flush_left in [false, true] {
+                for gap in [1.4, 2.0] {
+                    for k in [0.75, 1.0, 1.5] {
+                        for face in faces() {
+                            for n in 2..=5 {
+                                let set = (place, flush_left, gap);
+                                let (t, columns) = narrow_spanned(k, face, n, title, set);
+                                let out = common::read(&page_in(&t, Look::Plain));
+                                reads += 1;
+                                for b in spanned_broken(&out, &columns) {
+                                    wrong.push(format!(
+                                        "{title}, {place:?}, flush left {flush_left}, gap {gap}, \
+                                         {k}x, {face:?}, {n} rows: {b}"
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(reads, 1920);
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// Ruling P6-X2: close titles set as on the real invoice (`Close::Inside`) over two columns
+/// of one shape, a quantity and a count, without and in a frame of every look, in every size,
+/// font and weight and with 2 to 5 rows, are one title: the header holds `Menge Anzahl` in one
+/// cell over both columns, and the two numbers of each row stand under it.
+#[test]
+fn close_titles_over_two_columns_of_one_shape_stay_merged() {
+    let mut wrong = Vec::new();
+    let mut reads = 0;
+    for k in [0.75, 1.0, 1.5] {
+        for frame in std::iter::once(None).chain(LOOKS.map(Some)) {
+            for (fonts, bold) in faces() {
+                for n in 2..=5 {
+                    let (mut t, c) = close_titles(k, fonts, bold, n, Close::SameShape);
+                    let look = frame.unwrap_or(Look::Plain);
+                    if let Some(look) = frame {
+                        let size = 8.0 * k;
+                        let bottom = 600.0 - 10.0 * k * n as f32 - 6.0 * k;
+                        t = rule(look, 40.0, 540.0, 600.0 + 8.0 * k, size)
+                            + &t
+                            + &rule(look, 40.0, 540.0, bottom, size);
+                    }
+                    let out = common::read(&page_in(&t, look));
+                    reads += 1;
+                    let merged: Vec<String> = c[2]
+                        .1
+                        .iter()
+                        .zip(&c[3].1)
+                        .map(|(a, b)| format!("{a} {b}"))
+                        .collect();
+                    let columns = vec![
+                        c[0].clone(),
+                        c[1].clone(),
+                        ("Menge Anzahl".to_string(), merged),
+                        c[4].clone(),
+                    ];
+                    let name = format!("{k}x, {frame:?}, {fonts:?}, bold {bold}, {n} rows");
+                    for b in spanned_broken(&out, &columns) {
+                        wrong.push(format!("{name}: {b}"));
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(reads, 336);
     assert!(
         wrong.is_empty(),
         "{} wrong:\n{}",
