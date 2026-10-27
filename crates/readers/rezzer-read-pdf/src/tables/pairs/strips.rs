@@ -757,8 +757,8 @@ enum Ends {
     /// The labels stand under the rule their values stand on: the values over the top rule
     /// and the labels under the bottom rule, field for field.
     Under(Vec<usize>, Vec<usize>),
-    /// One end is complete and the other is not: neither reading is clear. The labels under
-    /// the bottom rule when that end is complete, to name them.
+    /// Neither reading is clear (see [`way_of`]). The labels under the bottom rule beyond the
+    /// group, to name them.
     Unclear(Vec<usize>),
 }
 
@@ -789,11 +789,7 @@ fn in_role(set: &[(Style, u32)], r: &Run) -> bool {
 ///   one of its labels starts, or the divider or left end before it), crosses no divider, and
 ///   every field has one.
 ///
-/// Both ends complete: its labels stand under their values. One end complete is not clear:
-/// a grid of labels under values whose first row is empty, or whose last labels are missing,
-/// looks the same as a grid of labels over values with the column titles of a table under it
-/// or a line of values over it. Neither end complete (nothing there, a title, a data line
-/// across a divider, a value of some fields only): the group reads labels over values.
+/// The ends give the way the group reads by the table of [`way_of`].
 fn ends(
     flow: &Flow,
     by_y: &ByY,
@@ -874,6 +870,8 @@ fn ends(
     // Under the bottom rule: labels under every strip with values and no values under it.
     // A strip of labels only under it (a rule drawn under the last labels) holds them.
     let (mut below, mut bottom, mut own) = (Vec::new(), true, false);
+    // Labels beyond a row of labels only of the group, to name them.
+    let mut further: Vec<usize> = Vec::new();
     for (s, (_, values)) in &rows {
         let under: Vec<_> = rows
             .iter()
@@ -908,6 +906,21 @@ fn ends(
                 .collect()
         } else {
             own = true;
+            for (t, _) in &under {
+                let pitch = t.top - t.bottom;
+                further.extend(
+                    by_y.runs_between(t.bottom - pitch, t.bottom)
+                        .into_iter()
+                        .filter(|&i| {
+                            let r = &flow.runs[i];
+                            usable(i)
+                                && r.y < t.bottom
+                                && inside(i, t)
+                                && in_role(&ls, r)
+                                && ((t.bottom - r.y) - a).abs() <= 0.5 * r.size
+                        }),
+                );
+            }
             under
                 .iter()
                 .flat_map(|(_, r)| r.0.iter().copied())
@@ -999,36 +1012,92 @@ fn ends(
         clear &= taken.iter().all(|t| *t);
         above.extend(found);
     }
-    let top = !above.is_empty() && clear;
-    // The labels of a row of labels only in the group are its own empty last row as well as
-    // the labels over a rule drawn under the last labels: no evidence of labels under values
-    // beyond the group. One field a row is too little evidence at each end for that reading.
+    let top = match (above.is_empty(), clear) {
+        (true, _) => TopEnd::None,
+        (false, false) => TopEnd::Partial,
+        (false, true) => TopEnd::Complete,
+    };
+    let bottom = match (bottom, own, below.is_empty()) {
+        (true, false, _) => BottomEnd::Free,
+        (true, true, _) => BottomEnd::Own,
+        (false, _, false) => BottomEnd::Partial,
+        (false, _, true) => BottomEnd::None,
+    };
     let single = rows.iter().all(|(s, (labels, _))| {
         labels_in_line(flow, labels).len() == 1
             && !rows.iter().any(|(t, _)| {
                 !std::ptr::eq(*s, *t) && near(t.top, s.top) && near(t.bottom, s.bottom)
             })
     });
-    match (bottom && !own, top) {
-        _ if single => {
-            if bottom && top {
-                Ends::Unclear(below)
-            } else {
-                Ends::Over
-            }
-        }
-        _ if own && bottom => {
-            if top {
-                Ends::Unclear(Vec::new())
-            } else {
-                Ends::Over
-            }
-        }
-        (true, true) => Ends::Under(above, below),
-        (true, false) => Ends::Unclear(below),
-        // The values over the top rule are not those of a next table: they are not named.
-        (false, true) => Ends::Unclear(Vec::new()),
-        (false, false) => Ends::Over,
+    match way_of(single, top, bottom) {
+        Way::Under => Ends::Under(above, below),
+        Way::Over => Ends::Over,
+        // The labels beyond the group are named; values over it are not those of a field.
+        Way::Unclear => match bottom {
+            BottomEnd::Free => Ends::Unclear(below),
+            BottomEnd::Own => Ends::Unclear(further),
+            _ => Ends::Unclear(Vec::new()),
+        },
+    }
+}
+
+/// What stands over the top rule of a group of strips (see [`ends`]): nothing in the values'
+/// role, values of some of its fields only (or runs at no field start), or a value for every
+/// field of its top strips.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TopEnd {
+    None,
+    Partial,
+    Complete,
+}
+
+/// What stands under the bottom rule of a group of strips (see [`ends`]): nothing in the
+/// labels' role, labels of some of its lowest values only (or at no value), a label for every
+/// lowest value beyond the group, or a row of labels only of the group itself (its empty last
+/// row, or labels over a rule drawn under them).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum BottomEnd {
+    None,
+    Partial,
+    Free,
+    Own,
+}
+
+/// The way a group of strips reads by its ends (ruling P6-Z2).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Way {
+    /// Labels over (or beside) their values.
+    Over,
+    /// Labels under the rule their values stand on.
+    Under,
+    /// Neither is clear: a loss names the fields.
+    Unclear,
+}
+
+/// The way a group reads by its ends, `single` when it has one field a row:
+///
+/// | fields a row | top | bottom | reading |
+/// | --- | --- | --- | --- |
+/// | two or more | complete | free, complete | labels under values |
+/// | two or more | complete | none, partial, own | not clear |
+/// | two or more | none, partial | free, complete | not clear |
+/// | two or more | none, partial | none, partial, own | labels over values |
+/// | one | complete | any | not clear |
+/// | one | any | free, complete | not clear |
+/// | one | none, partial | none, partial, own | labels over values |
+///
+/// Labels under values need both ends complete, field for field, beyond the group. One
+/// complete end is also what a grid of the other way shows (an empty first or last row, the
+/// column titles of a next table, a line of data over it), so it is not clear. An own row of
+/// labels is the group's own empty last row as much as labels over a rule under the last
+/// labels: no end. One field a row is too little evidence for labels under values.
+fn way_of(single: bool, top: TopEnd, bottom: BottomEnd) -> Way {
+    match (single, top, bottom) {
+        (true, TopEnd::Complete, _) | (true, _, BottomEnd::Free) => Way::Unclear,
+        (true, _, _) => Way::Over,
+        (false, TopEnd::Complete, BottomEnd::Free) => Way::Under,
+        (false, TopEnd::Complete, _) | (false, _, BottomEnd::Free) => Way::Unclear,
+        (false, _, _) => Way::Over,
     }
 }
 

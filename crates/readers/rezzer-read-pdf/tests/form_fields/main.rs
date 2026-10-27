@@ -16,6 +16,7 @@ mod common;
 
 mod check;
 mod draw;
+mod ends;
 mod shapes;
 
 use check::{
@@ -599,6 +600,33 @@ fn grids_with_an_empty_last_row_or_one_field_a_row_never_pair_shifted() {
             (name, broken)
         })
         .collect();
+    let wrong = unexpected(reads, &[]);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Labels under the rule their values stand on, one field a row, the first value empty and
+/// nothing over the top rule (the reviewer's probe E): the last label under the bottom rule is
+/// one complete end, which a column of labels over values with a column title under it has as
+/// well. Neither reading is clear: no field pairs (never a label with the value of the row
+/// under it), and a loss names them all.
+#[test]
+fn a_column_of_labels_under_values_with_an_empty_first_value_gives_a_loss() {
+    let s = Rows {
+        under: true,
+        dividers: false,
+        ..ROWS
+    };
+    let rows: [&[FieldSpec]; 3] = [
+        &[(0, 50, "Name", "")],
+        &[(0, 50, "Strasse", "Musterweg 1")],
+        &[(0, 50, "Ort", "Musterstadt")],
+    ];
+    let mut reads = Vec::new();
+    for (look, g) in std::iter::once(("real", REAL)).chain(looks()) {
+        let b = rows_page(&g, &s, &rows, &["Name", "Strasse", "Ort"]);
+        let out = read_pages(&[&b]);
+        reads.push((look.to_string(), check_fields(&out, &b)));
+    }
     let wrong = unexpected(reads, &[]);
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
