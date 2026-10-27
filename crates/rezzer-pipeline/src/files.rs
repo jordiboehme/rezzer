@@ -44,7 +44,8 @@
 //!
 //! On Unix every write, read and removal under the output folder goes through a handle of
 //! the folder opened once, without following a symlink ([`Folder`]): the output folder is
-//! opened once per run, and the parts and assets folders once each below it. Someone who can
+//! opened once per run, and each write, decision and removal in the parts or assets folder
+//! goes through one handle of that folder, opened without following a symlink. Someone who can
 //! write to the output folder and swaps the parts or assets folder for a symlink or another
 //! folder after it was opened redirects nothing: the run writes into the folder it opened,
 //! and the cleanup removes only there. The output folder itself may be a symlink the user

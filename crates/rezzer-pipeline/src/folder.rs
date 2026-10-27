@@ -8,10 +8,12 @@
 //! relative to it (`openat`, `mkdirat`, `unlinkat`, `fstatat`), so a folder that someone swaps
 //! for a symlink or for another folder after it was opened takes no write, read or removal
 //! elsewhere. Every method takes one path component, never a path: an empty name, `.`, `..`
-//! or a name with `/` or a backslash is refused with [`ErrorKind::InvalidInput`]. The last
+//! or a name with `/` or a backslash (off Unix also a `:`) is refused with
+//! [`ErrorKind::InvalidInput`]. The last
 //! component is opened with `O_NOFOLLOW`, so that one flag guards the whole path. Only the
 //! output folder itself is opened by its path ([`Folder::open`], [`Folder::create`]): it may
-//! be a symlink the user chose, and it is resolved once there.
+//! be a symlink the user chose, and it is resolved once there. It must be readable as well
+//! as writable, since it is opened for reading (`O_RDONLY | O_DIRECTORY`).
 //!
 //! Known Windows limit (0.1.0): on other systems a `Folder` keeps its path, and each call
 //! checks the entry with `symlink_metadata` and then opens it by name, as before. A folder
@@ -43,20 +45,43 @@ pub(crate) struct Folder {
     fd: std::os::fd::OwnedFd,
 }
 
-/// `name` when it is one path component, else an [`ErrorKind::InvalidInput`] error.
-fn component(name: &OsStr) -> io::Result<&OsStr> {
+/// Whether `name` is one plain path component: not empty, `.` or `..`, and without `/` or a
+/// backslash. With `drive`, a `:` is refused too, so a Windows name such as `C:x.md` cannot
+/// name another drive's folder.
+fn plain(name: &OsStr, drive: bool) -> bool {
     let bytes = name.as_encoded_bytes();
-    let bad = bytes.is_empty()
+    !(bytes.is_empty()
         || bytes == b"."
         || bytes == b".."
-        || bytes.iter().any(|b| matches!(b, b'/' | b'\\'));
-    if bad {
+        || bytes
+            .iter()
+            .any(|b| matches!(b, b'/' | b'\\') || (drive && *b == b':')))
+}
+
+/// `name` when it is one path component, else an [`ErrorKind::InvalidInput`] error. Off Unix
+/// the name must also parse as exactly one normal component, so joining it to the folder's
+/// path never drops or leaves that path.
+fn component(name: &OsStr) -> io::Result<&OsStr> {
+    if !(plain(name, cfg!(not(unix))) && one_normal(name)) {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
             format!("{} is not a plain file name", name.display()),
         ));
     }
     Ok(name)
+}
+
+/// On Unix [`plain`] is the whole rule: the kernel takes the name as it is.
+#[cfg(unix)]
+fn one_normal(_: &OsStr) -> bool {
+    true
+}
+
+/// Whether `name` parses as exactly one normal component (no drive, root or share prefix).
+#[cfg(not(unix))]
+fn one_normal(name: &OsStr) -> bool {
+    let mut parts = Path::new(name).components();
+    matches!(parts.next(), Some(std::path::Component::Normal(_))) && parts.next().is_none()
 }
 
 /// The error for a subfolder that is a symlink, a file or anything but a plain directory.
@@ -337,6 +362,40 @@ mod by_path {
                 entries.push((entry.file_name(), kind_of(entry.file_type()?)));
             }
             Ok(entries)
+        }
+    }
+}
+
+#[cfg(test)]
+mod rule_tests {
+    use std::ffi::OsStr;
+
+    use super::plain;
+
+    /// The name rule of every system, checked on any host.
+    #[test]
+    fn only_one_plain_component_is_a_name() {
+        for name in ["a/b", "..", ".", "", "a\\b", "/a", "a/"] {
+            for drive in [false, true] {
+                assert!(!plain(OsStr::new(name), drive), "{name:?} {drive}");
+            }
+        }
+        for name in ["a.md", "page-1.png", ".hidden", "a b.md", "a..b"] {
+            assert!(plain(OsStr::new(name), true), "{name:?}");
+        }
+        // A `:` names a drive on Windows; on Unix it is a plain char.
+        for name in ["C:x.md", "C:", "a:b.md"] {
+            assert!(!plain(OsStr::new(name), true), "{name:?}");
+            assert!(plain(OsStr::new(name), false), "{name:?}");
+        }
+    }
+
+    #[cfg(not(unix))]
+    #[test]
+    fn a_drive_name_is_refused() {
+        for name in ["C:x.md", "C:", "\\\\server\\share"] {
+            let err = super::component(OsStr::new(name)).unwrap_err();
+            assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput, "{name:?}");
         }
     }
 }

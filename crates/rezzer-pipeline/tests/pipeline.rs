@@ -2718,5 +2718,10 @@ fn a_failed_check_creates_no_folder() {
     std::fs::write(out.join(&first.parts[0].path), "# My own start\n").unwrap();
     let res = pipeline.run_bytes("notes.txt", LARGE.to_vec(), None, &written(&out));
     assert_eq!(res.completeness, Completeness::Failed);
+    let message = res.message.unwrap();
+    assert!(
+        message.contains("is in the way and is not a part Rezzer wrote"),
+        "{message}"
+    );
     assert!(!out.join("notes.txt.assets").exists());
 }
