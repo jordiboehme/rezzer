@@ -34,3 +34,10 @@ slow-timeout = { period = "60s", terminate-after = 2 }
 [[profile.default.overrides]]
 filter = 'package(barcodes) & binary(decode)'
 slow-timeout = { period = "60s", terminate-after = 2 }
+
+# These tests bound their work by counted steps and keep the wall time only as a 60 second
+# safety stop, checked when the call returns. A call that hangs is ended after 2 minutes and
+# fails the run instead of hanging it.
+[[profile.default.overrides]]
+filter = '(package(sheetparts) & binary(odf)) | (package(rezzer-enrich) & binary(enrich)) | (package(csvsniff) & binary(csvsniff)) | (package(formulakit) & binary(logic)) | (package(rezzer-read-markdown) & binary(markdown))'
+slow-timeout = { period = "60s", terminate-after = 2 }
