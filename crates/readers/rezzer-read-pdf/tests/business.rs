@@ -2576,3 +2576,63 @@ fn titles_over_two_columns_of_one_kind_of_values_stay_spanned() {
         wrong.join("\n")
     );
 }
+
+/// The carry C-r3-a: a line of two pieces, `Rechnung 4711` at x 40 and `Datum 01.01.2026`
+/// flush right at x 540, `8 k` over the top rule of a frame of line items (see
+/// [`framed_items`]), in every size, look, font and weight, with 2 to 5 rows, alone and with
+/// an upright rule elsewhere: the line is no part of the table header, every title heads the
+/// column of its values, and the line is read.
+#[test]
+fn a_line_over_the_top_rule_of_a_frame_of_items_is_no_header() {
+    let mut wrong = Vec::new();
+    let mut reads = 0;
+    for k in [0.75, 1.0, 1.5] {
+        for look in LOOKS {
+            for fonts in FONTS {
+                for bold in [false, true] {
+                    for n in 2..=5 {
+                        for upright in [false, true] {
+                            let (mut t, columns) = framed_items(k, look, fonts, bold, n, None);
+                            // The top rule of the frame is at 600 + 8 k.
+                            let (size, over) = (8.0 * k, 600.0 + 16.0 * k);
+                            let date = "Datum 01.01.2026";
+                            t += &show(fonts.0, size, 40.0, over, "Rechnung 4711");
+                            let w = common::font_width(fonts.0, date, size);
+                            t += &show(fonts.0, size, 540.0 - w, over, date);
+                            if upright {
+                                t += "0.5 w 30 200 m 30 300 l S\n";
+                            }
+                            let out = common::read(&page_in(&t, look));
+                            reads += 1;
+                            let name = format!(
+                                "{k}x, {look:?}, {fonts:?}, bold {bold}, {n} rows, upright \
+                                 {upright}"
+                            );
+                            let mut b = columns_broken(&out, &columns);
+                            let in_cell = tables(&out).iter().any(|t| {
+                                t.1.iter()
+                                    .flatten()
+                                    .any(|c| c.contains("4711") || c.contains("01.01.2026"))
+                            });
+                            let all = common::all_text(&out);
+                            if in_cell || !all.contains("Rechnung 4711") || !all.contains(date) {
+                                b.push(format!(
+                                    "the line is in a cell or lost: {:?}",
+                                    tables(&out)
+                                ));
+                            }
+                            wrong.extend(b.into_iter().map(|b| format!("{name}: {b}")));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(reads, 576);
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}

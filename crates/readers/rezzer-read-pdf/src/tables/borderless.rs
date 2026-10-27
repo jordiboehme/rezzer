@@ -115,6 +115,14 @@ pub(super) fn borderless(
             if found.cuts.get(cut).is_some_and(|y| *y < prev.y) {
                 break;
             }
+            // A frame of column titles over items starts a region of its own: the lines over
+            // its top rule (a title line of two pieces) are not part of its header.
+            let starts_body = (cur.start..cur.end)
+                .filter_map(body_of)
+                .any(|b| !(prev.start..prev.end).any(|r| body_of(r) == Some(b)));
+            if starts_body {
+                break;
+            }
             if counts[end] >= 2 {
                 last_multi = end;
             } else if end - last_multi > 2 {
