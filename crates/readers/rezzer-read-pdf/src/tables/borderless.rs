@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use super::*;
 use crate::layout::Gaps;
-use crate::regions::{Part, offset_baselines};
+use crate::regions::{BASELINE_NEAR, Part, offset_baselines};
 
 /// A run of text of one line, apart from its neighbours by a gap: one cell's text.
 #[derive(Debug, Clone)]
@@ -104,12 +104,28 @@ pub(super) fn borderless(
         }
         let mut end = i + 1;
         let mut last_multi = i;
+        // The widest step between two lines of the region so far.
+        let mut pitch = 0.0f32;
         while end < lines.len() && !off[end] {
             let (prev, cur) = (&lines[end - 1], &lines[end]);
             let gap = prev.y - cur.y;
             if gap <= 0.0 || gap > 3.0 * prev.size.max(cur.size) {
                 break;
             }
+            // A gap of more than twice the steps of the lines on both sides of it parts two
+            // blocks (a table under a field list or under totals, with no rule between).
+            let next = lines
+                .get(end + 1)
+                .filter(|_| !off[end + 1])
+                .map(|n| cur.y - n.y)
+                .filter(|&g| g > 0.0 && g <= 3.0 * cur.size.max(lines[end + 1].size));
+            if let Some(next) = next
+                && pitch > 0.0
+                && gap > REGION_STEPS * pitch.max(next)
+            {
+                break;
+            }
+            pitch = pitch.max(gap);
             // A header band's rule between the lines parts them.
             let cut = found.cuts.partition_point(|y| *y <= cur.y);
             if found.cuts.get(cut).is_some_and(|y| *y < prev.y) {
@@ -376,6 +392,12 @@ pub(super) fn borderless(
                              columns: it is read as a paragraph after the table"
                         ));
                     }
+                    if goes_on_beside(flow, &lines[a..z], &by_y, b, &in_region) {
+                        found.uncertain.push(format!(
+                            "a table on page {page} may go on in a column beside it, on the \
+                             baselines of its rows: that column is read apart from the table"
+                        ));
+                    }
                     if frame_titles(flow, &grid, &body_of, &found.body_labels) {
                         titled.push(claim.len());
                     }
@@ -540,6 +562,84 @@ fn page_number(text: &str) -> bool {
         && words.iter().all(|w| letters(w) || number(w))
         && words.iter().any(|w| number(w))
 }
+
+/// Whether text beside the table of the region `lines` (its box `b`) is a column of it that
+/// the reading order put apart: on each line of the region (two or more), text right of the
+/// table, or each left of it, on the line's baseline (within [`BASELINE_NEAR`] of its size),
+/// the texts of one side starting or ending together (within [`WRAP_ALIGN`] of the size), and
+/// no other text of that column within one and a half steps of the region over its first line
+/// or under its last: a column of the table's own rows, not prose that goes on beside it.
+fn goes_on_beside(
+    flow: &Flow,
+    lines: &[FlowLine],
+    by_y: &ByY,
+    b: [f32; 4],
+    in_region: &dyn Fn(usize) -> bool,
+) -> bool {
+    if lines.len() < 2 {
+        return false;
+    }
+    let pitch = lines
+        .windows(2)
+        .map(|w| w[0].y - w[1].y)
+        .fold(0.0f32, f32::max);
+    let inked = |i: usize| !in_region(i) && !flow.runs[i].text.trim().is_empty();
+    // The stretch of the text beside each line on one side, if every line has some.
+    let side = |right: bool| -> Option<Vec<(f32, f32)>> {
+        lines
+            .iter()
+            .map(|l| {
+                let near = BASELINE_NEAR * l.size;
+                let (mut x0, mut x1) = (f32::MAX, f32::MIN);
+                for i in by_y.runs_between(l.y - l.size, l.y + l.size) {
+                    let r = &flow.runs[i];
+                    let beside = if right {
+                        r.x >= b[2]
+                    } else {
+                        r.x + r.w <= b[0]
+                    };
+                    if inked(i) && (r.y - l.y).abs() <= near && beside && !r.off_axis {
+                        x0 = x0.min(r.x);
+                        x1 = x1.max(r.x + r.w);
+                    }
+                }
+                (x0 <= x1).then_some((x0, x1))
+            })
+            .collect()
+    };
+    let size = lines.iter().map(|l| l.size).fold(0.0f32, f32::max);
+    let tol = WRAP_ALIGN * size;
+    let column = |spans: &[(f32, f32)]| {
+        let together = |k: fn(&(f32, f32)) -> f32| {
+            let lo = spans.iter().map(k).fold(f32::MAX, f32::min);
+            let hi = spans.iter().map(k).fold(f32::MIN, f32::max);
+            hi - lo <= tol
+        };
+        if !(together(|s| s.0) || together(|s| s.1)) {
+            return false;
+        }
+        let (x0, x1) = spans
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(a, z), s| (a.min(s.0), z.max(s.1)));
+        let (top, bottom) = (lines[0].y, lines[lines.len() - 1].y);
+        let reach = 1.5 * pitch;
+        // Other text of the column right over or under the rows.
+        let more = |lo: f32, hi: f32| {
+            by_y.runs_between(lo, hi).into_iter().any(|i| {
+                let r = &flow.runs[i];
+                inked(i) && r.x < x1 && r.x + r.w > x0 && (r.y > top || r.y < bottom)
+            })
+        };
+        !more(top + 0.5 * size, top + reach) && !more(bottom - reach, bottom - 0.5 * size)
+    };
+    [true, false]
+        .into_iter()
+        .any(|right| side(right).is_some_and(|spans| column(&spans)))
+}
+
+/// Two lines of a region without rules stand at most this many times the widest step of the
+/// region so far, or of the next two lines, apart: a wider gap parts two blocks.
+const REGION_STEPS: f32 = 2.0;
 
 /// A line of one piece under a table may go on in its last row when it starts within this
 /// many sizes of the start of its column; its font size may differ from the column's by this

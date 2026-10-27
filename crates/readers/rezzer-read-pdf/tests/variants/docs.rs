@@ -310,6 +310,11 @@ fn title_beside_fields(v: &Variant) -> Sheet {
         .push(("Rechnung".into(), "Rechnungsnummer".into()));
     s.want.title = Some("Rechnung".into());
     s.want.date = Some("2026-02-01".into());
+    // The third column of the table under it stands under the field list: when the reading
+    // order puts it apart from the table, a loss says so.
+    if v.next == Next::RowUnder {
+        s.want.losses.push("may go on in a column beside it".into());
+    }
     s
 }
 
