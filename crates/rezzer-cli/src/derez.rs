@@ -31,7 +31,7 @@ pub(crate) fn run(
         None => rezzer_derez::rounds("", None, None),
         Some(path) => {
             let pipeline = Pipeline::new(config, registry);
-            let result = pipeline.run_path(path, &Request::default());
+            let result = pipeline.run_path(path, &request());
             let Some(doc) = &result.document else {
                 return Err(result
                     .message
@@ -48,6 +48,15 @@ pub(crate) fn run(
     let seed = args.seed.unwrap_or_else(clock_seed);
     rezzer_derez::derez(rounds, seed)?;
     Ok(ExitCode::SUCCESS)
+}
+
+/// The request of a derez read: a normal read that also asks for page geometry, so a paged
+/// file gives its drawn pages. Such a read skips the cache, which keeps no geometry.
+fn request() -> Request {
+    Request {
+        geometry: true,
+        ..Request::default()
+    }
 }
 
 /// Why a read document gives no grid: no reader for its format, else the message of a failed
@@ -81,6 +90,18 @@ fn clock_seed() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn derez_asks_for_page_geometry() {
+        let req = request();
+        assert!(req.geometry);
+        // Nothing else differs from a normal read.
+        let rest = Request {
+            geometry: false,
+            ..req
+        };
+        assert_eq!(format!("{rest:?}"), format!("{:?}", Request::default()));
+    }
 
     #[test]
     fn why_not_names_a_missing_reader_then_a_failed_read() {

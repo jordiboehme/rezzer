@@ -4,18 +4,21 @@
 
 //! Grid plans from a read document.
 //!
-//! Every document gets a generic plan from its block tree alone, so any format gives a grid.
-//! A sheet with tables refines its region: the cells of its tables become a cell grid and its
-//! formula cells towers.
+//! A document with page geometry gives one plan per page from its drawn boxes: rules and
+//! frames become walls, pictures blocks and headings towers. Without it, every document gets
+//! a generic plan from its block tree alone, so any format gives a grid. A sheet with tables
+//! refines its region: the cells of its tables become a cell grid and its formula cells
+//! towers.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
 
 use rezzer_model::{
-    Block, Cell, Document, Formula, SectionKind, a1_position, plain_text, sheet_cell,
+    Block, BoxKind, Cell, Document, Formula, PageGeometry, PlacedBox, SectionKind, a1_position,
+    plain_text, sheet_cell,
 };
 
-use super::{Plan, Shape, ShapeKind, builtin, fit};
+use super::{MAX_SHAPES, Plan, Shape, ShapeKind, builtin, fit};
 
 /// The most plans one document gives.
 pub const MAX_PLANS: usize = 50;
@@ -42,6 +45,14 @@ const REFERENCE: (u16, u16) = (80, 40);
 /// Where bars start on the left and end on the right.
 const LEFT: f32 = 0.05;
 const RIGHT: f32 = 0.95;
+/// The share of its page above which a picture is drawn as an outline, not a block.
+const LARGE_PICTURE: f32 = 0.25;
+/// The least height of a heading tower, in unit coordinates.
+const TOWER_HEIGHT: f32 = 0.02;
+/// The widest heading tower of depth 1; each deeper depth is 0.1 narrower, down to
+/// [`NARROWEST_TOWER`].
+const WIDEST_TOWER: f32 = 0.6;
+const NARROWEST_TOWER: f32 = 0.2;
 
 /// The plans of a run: the file name for the status line, the plans in round order and, when
 /// the file gives no grid, a note for the status line and the same note without the file name
@@ -56,10 +67,16 @@ pub struct Rounds {
 
 /// The plans of `doc`, at most [`MAX_PLANS`]; empty when it has no content.
 ///
-/// Each section of the body is a region, and so is each run of other blocks of the body;
-/// without sections the body is one region. A sheet section with tables gives one plan of its
-/// cells when that plan fits an 80 by 40 grid. Every other region gives chunks of 16 items.
+/// When the page geometry of `doc` gives a page plan that fits an 80 by 40 grid, those page
+/// plans are all: geometry wins over text. Otherwise each section of the body is a region,
+/// and so is each run of other blocks of the body; without sections the body is one region.
+/// A sheet section with tables gives one plan of its cells when that plan fits an 80 by 40
+/// grid. Every other region gives chunks of 16 items.
 pub fn plans(doc: &Document) -> Vec<Plan> {
+    let pages = page_plans(doc);
+    if !pages.is_empty() {
+        return pages;
+    }
     let mut out = Vec::new();
     let body = &doc.body;
     let mut i = 0;
@@ -120,6 +137,103 @@ pub fn plans(doc: &Document) -> Vec<Plan> {
     }
     out.truncate(MAX_PLANS);
     out
+}
+
+/// The plans of the pages of `doc.geometry` in page order, at most [`MAX_PLANS`]: one per
+/// page that gives a shape and whose plan fits a [`REFERENCE`] grid. Labelled
+/// `page <n> of <pages>`, `<pages>` from the page count of the file when set, else (and never
+/// less than) the largest page number in the geometry.
+fn page_plans(doc: &Document) -> Vec<Plan> {
+    let Some(geometry) = doc.geometry.as_deref() else {
+        return Vec::new();
+    };
+    let mut pages: Vec<&PageGeometry> = geometry.pages.iter().collect();
+    // Pages added past `Geometry::add_page` may come in any order.
+    pages.sort_by_key(|p| p.page);
+    let largest = pages.last().map_or(0, |p| p.page);
+    let total = doc.properties.facts.pages.unwrap_or(0).max(largest);
+    let mut out = Vec::new();
+    for page in pages {
+        if out.len() >= MAX_PLANS {
+            break;
+        }
+        let shapes = page_shapes(page);
+        if shapes.is_empty() {
+            continue;
+        }
+        let plan = Plan {
+            label: format!("page {} of {total}", page.page),
+            shapes,
+        };
+        if fit(&plan, REFERENCE.0, REFERENCE.1).is_ok() {
+            out.push(plan);
+        }
+    }
+    out
+}
+
+/// The shapes of one page, at most [`MAX_SHAPES`]; none for a size that is not finite and
+/// positive.
+fn page_shapes(page: &PageGeometry) -> Vec<Shape> {
+    let [w, h] = page.size;
+    if ![w, h].iter().all(|v| v.is_finite() && *v > 0.0) {
+        return Vec::new();
+    }
+    page.boxes
+        .iter()
+        .filter_map(|b| page_shape(b, w, h))
+        .take(MAX_SHAPES)
+        .collect()
+}
+
+/// The shape of box `b` on a page of `w` by `h` points: its bounds mapped to the unit square
+/// with y flipped and clipped to it. `None` for text, bounds that are not finite or are
+/// reversed, a box off the page, or one that keeps no extent on it.
+fn page_shape(b: &PlacedBox, w: f32, h: f32) -> Option<Shape> {
+    let [x0, y0, x1, y1] = b.bounds;
+    if !b.bounds.iter().all(|v| v.is_finite()) || x1 < x0 || y1 < y0 {
+        return None;
+    }
+    // Finite over finite and positive is never NaN; a quotient that overflows to infinity
+    // on a tiny page is off the page or clamped below.
+    let (ux0, ux1) = (x0 / w, x1 / w);
+    let (uy0, uy1) = (1.0 - y1 / h, 1.0 - y0 / h);
+    // Off the page in x or in y: checked before clipping, so a rule beside the page does not
+    // become a line on its edge.
+    if ux1 < 0.0 || ux0 > 1.0 || uy1 < 0.0 || uy0 > 1.0 {
+        return None;
+    }
+    let mut rect = [
+        ux0.clamp(0.0, 1.0),
+        uy0.clamp(0.0, 1.0),
+        ux1.clamp(0.0, 1.0),
+        uy1.clamp(0.0, 1.0),
+    ];
+    let (dx, dy) = (rect[2] - rect[0], rect[3] - rect[1]);
+    let kind = match b.kind {
+        BoxKind::Text => return None,
+        BoxKind::Rule => ShapeKind::Line,
+        BoxKind::Drawn | BoxKind::Table | BoxKind::Cell => ShapeKind::Outline,
+        BoxKind::Picture if dx * dy > LARGE_PICTURE => ShapeKind::Outline,
+        BoxKind::Picture => ShapeKind::Block,
+        BoxKind::Heading(depth) => {
+            let cut = WIDEST_TOWER - 0.1 * f32::from(depth.max(1) - 1);
+            rect[2] = rect[2].min(rect[0] + cut.max(NARROWEST_TOWER));
+            if dy < TOWER_HEIGHT {
+                let mid = (rect[1] + rect[3]) / 2.0;
+                let top = (mid - TOWER_HEIGHT / 2.0).clamp(0.0, 1.0 - TOWER_HEIGHT);
+                rect[1] = top;
+                rect[3] = top + TOWER_HEIGHT;
+            }
+            ShapeKind::Tower
+        }
+    };
+    let empty = match kind {
+        ShapeKind::Line => dx <= 0.0 && dy <= 0.0,
+        ShapeKind::Tower => rect[2] <= rect[0],
+        _ => dx <= 0.0 || dy <= 0.0,
+    };
+    (!empty).then_some(Shape { kind, rect })
 }
 
 /// The cells `(row, col)` of the formulas in cells, grouped by sheet name without quotes, in

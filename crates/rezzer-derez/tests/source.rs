@@ -5,10 +5,13 @@
 use std::time::Instant;
 
 use rezzer_derez::grid::Pos;
-use rezzer_derez::plan::{MARGIN, MAX_PLANS, Plan, Shape, ShapeKind, fit, plans, rounds};
+use rezzer_derez::plan::{
+    MARGIN, MAX_PLANS, MAX_SHAPES, Plan, Shape, ShapeKind, fit, plans, rounds,
+};
 use rezzer_model::{
-    Anchor, Block, Cell, Certainty, Confidence, Detection, Document, FormatId, Formula, Inline,
-    LayoutKind, SectionKind, SourceInfo, TableLayout, TaskState,
+    Anchor, Block, BoxKind, Cell, Certainty, Confidence, Detection, Document, FormatId, Formula,
+    Geometry, Inline, LayoutKind, PageGeometry, PlacedBox, SectionKind, SourceInfo, TableLayout,
+    TaskState,
 };
 
 fn doc(body: Vec<Block>) -> Document {
@@ -784,4 +787,296 @@ fn a_title_with_a_quote_matches_its_quoted_formulas() {
     let p = plans(&d);
     assert_eq!(p[0].label, "sheet Q1 '24");
     assert_eq!(count(&p[0], ShapeKind::Tower), 2);
+}
+
+fn placed(kind: BoxKind, bounds: [f32; 4]) -> PlacedBox {
+    PlacedBox {
+        kind,
+        bounds,
+        anchor: None,
+    }
+}
+
+/// A page of 600 by 800 points with `boxes`, built past the checks of `Geometry::push`.
+fn page(page: u32, boxes: Vec<PlacedBox>) -> PageGeometry {
+    PageGeometry {
+        page,
+        size: [600.0, 800.0],
+        boxes,
+    }
+}
+
+fn with_pages(body: Vec<Block>, pages: Vec<PageGeometry>) -> Document {
+    let mut d = doc(body);
+    let mut g = Geometry::default();
+    g.pages = pages;
+    d.geometry = Some(Box::new(g));
+    d
+}
+
+/// An invented PDF-like page: a rule, a table of four cells, a picture, a heading and text.
+fn pdf_like_page() -> Vec<PlacedBox> {
+    vec![
+        placed(BoxKind::Heading(1), [50.0, 740.0, 400.0, 760.0]),
+        placed(BoxKind::Rule, [50.0, 700.0, 550.0, 700.0]),
+        placed(BoxKind::Text, [50.0, 600.0, 550.0, 650.0]),
+        placed(BoxKind::Table, [100.0, 300.0, 500.0, 500.0]),
+        placed(BoxKind::Cell, [100.0, 400.0, 300.0, 500.0]),
+        placed(BoxKind::Cell, [300.0, 400.0, 500.0, 500.0]),
+        placed(BoxKind::Cell, [100.0, 300.0, 300.0, 400.0]),
+        placed(BoxKind::Cell, [300.0, 300.0, 500.0, 400.0]),
+        placed(BoxKind::Picture, [400.0, 100.0, 500.0, 200.0]),
+    ]
+}
+
+#[test]
+fn pdf_like_page_gives_walls_and_towers() {
+    let mut d = doc(Vec::new());
+    let mut g = Geometry::default();
+    assert!(g.add_page(1, [600.0, 800.0]));
+    for b in pdf_like_page() {
+        assert!(g.push(1, b));
+    }
+    d.geometry = Some(Box::new(g));
+    let ps = plans(&d);
+    assert_eq!(ps.len(), 1);
+    let p = &ps[0];
+    assert_eq!(p.label, "page 1 of 1");
+    assert_eq!(count(p, ShapeKind::Line), 1);
+    assert_eq!(count(p, ShapeKind::Outline), 5);
+    assert_eq!(count(p, ShapeKind::Block), 1);
+    assert_eq!(count(p, ShapeKind::Tower), 1);
+    assert_eq!(p.shapes.len(), 8);
+    let tower = p
+        .shapes
+        .iter()
+        .find(|s| s.kind == ShapeKind::Tower)
+        .unwrap();
+    // y is flipped: the heading at the top of the page is near y 0.
+    assert!(tower.rect[3] < 0.1, "{:?}", tower.rect);
+    let rule = p.shapes.iter().find(|s| s.kind == ShapeKind::Line).unwrap();
+    assert!(close(
+        rule.rect,
+        [50.0 / 600.0, 0.125, 550.0 / 600.0, 0.125]
+    ));
+    let picture = p
+        .shapes
+        .iter()
+        .find(|s| s.kind == ShapeKind::Block)
+        .unwrap();
+    assert!(close(
+        picture.rect,
+        [400.0 / 600.0, 0.75, 500.0 / 600.0, 0.875]
+    ));
+    assert!(fit(p, 80, 40).is_ok());
+}
+
+#[test]
+fn pages_become_rounds() {
+    let rule = || vec![placed(BoxKind::Rule, [50.0, 400.0, 550.0, 400.0])];
+    let pages = vec![page(1, rule()), page(2, Vec::new()), page(3, rule())];
+    let d = with_pages(Vec::new(), pages.clone());
+    let labels: Vec<String> = plans(&d).into_iter().map(|p| p.label).collect();
+    assert_eq!(labels, ["page 1 of 3", "page 3 of 3"]);
+    // The page count of the file wins over the largest page with geometry.
+    let mut d = with_pages(Vec::new(), pages);
+    d.properties.facts.pages = Some(5);
+    let labels: Vec<String> = plans(&d).into_iter().map(|p| p.label).collect();
+    assert_eq!(labels, ["page 1 of 5", "page 3 of 5"]);
+}
+
+#[test]
+fn page_plans_are_capped() {
+    let pages = (1..=80)
+        .map(|n| page(n, vec![placed(BoxKind::Rule, [50.0, 400.0, 550.0, 400.0])]))
+        .collect();
+    let ps = plans(&with_pages(Vec::new(), pages));
+    assert_eq!(ps.len(), MAX_PLANS);
+    assert_eq!(ps[0].label, "page 1 of 80");
+}
+
+#[test]
+fn degenerate_geometry_is_ignored() {
+    let rule = placed(BoxKind::Rule, [50.0, 400.0, 550.0, 400.0]);
+    let pages = vec![
+        PageGeometry {
+            page: 1,
+            size: [f32::NAN, 800.0],
+            boxes: vec![rule.clone()],
+        },
+        PageGeometry {
+            page: 2,
+            size: [0.0, 800.0],
+            boxes: vec![rule.clone()],
+        },
+        PageGeometry {
+            page: 3,
+            size: [600.0, f32::INFINITY],
+            boxes: vec![rule.clone()],
+        },
+        page(
+            4,
+            vec![
+                placed(BoxKind::Drawn, [100.0, 500.0, 200.0, 400.0]),
+                placed(BoxKind::Drawn, [200.0, 100.0, 100.0, 200.0]),
+                placed(BoxKind::Drawn, [1.0e6, 1.0e6, 2.0e6, 2.0e6]),
+                placed(BoxKind::Rule, [-900.0, -50.0, -100.0, -50.0]),
+                placed(BoxKind::Drawn, [0.0, 0.0, f32::INFINITY, 100.0]),
+                placed(BoxKind::Picture, [f32::NAN, 0.0, 100.0, 100.0]),
+                placed(BoxKind::Heading(0), [-50.0, 700.0, 300.0, 700.0]),
+                rule.clone(),
+            ],
+        ),
+    ];
+    let ps = plans(&with_pages(Vec::new(), pages));
+    assert_eq!(ps.len(), 1);
+    assert_eq!(ps[0].label, "page 4 of 4");
+    // Only the rule and the heading, clipped to the page and raised, are valid.
+    assert_eq!(ps[0].shapes.len(), 2, "{:?}", ps[0].shapes);
+    assert_eq!(count(&ps[0], ShapeKind::Line), 1);
+    let tower = ps[0]
+        .shapes
+        .iter()
+        .find(|s| s.kind == ShapeKind::Tower)
+        .unwrap();
+    let [x0, y0, x1, y1] = tower.rect;
+    assert!(x0 >= 0.0 && x1 <= 1.0 && x0 < x1, "{:?}", tower.rect);
+    assert!(y1 - y0 >= 0.02 - 1e-6, "{:?}", tower.rect);
+    assert!(fit(&ps[0], 80, 40).is_ok());
+
+    // 100,000 rules on one page: no panic and a usable grid, or the Grid with a note.
+    let many = (0..100_000)
+        .map(|i| {
+            let y = 800.0 * i as f32 / 100_000.0;
+            placed(BoxKind::Rule, [0.0, y, 600.0, y])
+        })
+        .collect();
+    let d = with_pages(Vec::new(), vec![page(1, many)]);
+    let ps = plans(&d);
+    for p in &ps {
+        assert!(p.shapes.len() <= MAX_SHAPES);
+        assert!(fit(p, 80, 40).is_ok(), "{}", p.label);
+    }
+    let r = rounds("ruled.pdf", Some(&d), None);
+    assert!(r.plans[0].label != "the Grid" || r.note.is_some());
+
+    // A tiny page with bounds as large as an f32 allows: quotients overflow to infinity.
+    let huge = PageGeometry {
+        page: 1,
+        size: [1.0e-30, 1.0e-30],
+        boxes: vec![placed(
+            BoxKind::Picture,
+            [-f32::MAX, -f32::MAX, f32::MAX, f32::MAX],
+        )],
+    };
+    let ps = plans(&with_pages(Vec::new(), vec![huge]));
+    assert_eq!(ps.len(), 1);
+    assert_eq!(ps[0].shapes[0].kind, ShapeKind::Outline);
+    assert!(close(ps[0].shapes[0].rect, [0.0, 0.0, 1.0, 1.0]));
+}
+
+#[test]
+fn full_page_picture_is_an_outline() {
+    let ps = plans(&with_pages(
+        Vec::new(),
+        vec![page(
+            1,
+            vec![placed(BoxKind::Picture, [0.0, 0.0, 600.0, 800.0])],
+        )],
+    ));
+    assert_eq!(ps.len(), 1);
+    assert_eq!(ps[0].shapes.len(), 1);
+    assert_eq!(ps[0].shapes[0].kind, ShapeKind::Outline);
+    assert!(close(ps[0].shapes[0].rect, [0.0, 0.0, 1.0, 1.0]));
+    assert!(fit(&ps[0], 80, 40).is_ok());
+    // The share counts the part on the page: half of this picture is off the page.
+    let ps = plans(&with_pages(
+        Vec::new(),
+        vec![page(
+            1,
+            vec![placed(BoxKind::Picture, [-600.0, 0.0, 300.0, 800.0])],
+        )],
+    ));
+    assert_eq!(ps[0].shapes[0].kind, ShapeKind::Outline);
+    assert!(close(ps[0].shapes[0].rect, [0.0, 0.0, 0.5, 1.0]));
+    // A fifth of the page stays a block.
+    let ps = plans(&with_pages(
+        Vec::new(),
+        vec![page(
+            1,
+            vec![placed(BoxKind::Picture, [0.0, 0.0, 120.0, 800.0])],
+        )],
+    ));
+    assert_eq!(ps[0].shapes[0].kind, ShapeKind::Block);
+}
+
+#[test]
+fn headings_are_cut_by_depth() {
+    let wide = |depth| placed(BoxKind::Heading(depth), [0.0, 400.0, 600.0, 400.0]);
+    let ps = plans(&with_pages(
+        Vec::new(),
+        vec![page(1, vec![wide(1), wide(3), wide(9)])],
+    ));
+    let widths: Vec<f32> = ps[0].shapes.iter().map(|s| s.rect[2] - s.rect[0]).collect();
+    assert_eq!(widths.len(), 3);
+    for (w, want) in widths.iter().zip([0.6, 0.4, 0.2]) {
+        assert!((w - want).abs() < 1e-4, "{widths:?}");
+    }
+    for s in &ps[0].shapes {
+        assert_eq!(s.kind, ShapeKind::Tower);
+        assert!(s.rect[3] - s.rect[1] >= 0.02 - 1e-6, "{:?}", s.rect);
+    }
+    // A heading on the bottom edge is raised inside the page.
+    let ps = plans(&with_pages(
+        Vec::new(),
+        vec![page(
+            1,
+            vec![placed(BoxKind::Heading(2), [0.0, 0.0, 100.0, 0.0])],
+        )],
+    ));
+    let [_, y0, _, y1] = ps[0].shapes[0].rect;
+    assert!(y1 <= 1.0 && (y1 - y0 - 0.02).abs() < 1e-4, "{y0} {y1}");
+}
+
+#[test]
+fn geometry_wins_over_text() {
+    let body: Vec<Block> = (0..20)
+        .map(|i| heading(1, &format!("Heading {i}")))
+        .collect();
+    let d = with_pages(
+        body.clone(),
+        vec![page(
+            1,
+            vec![placed(BoxKind::Rule, [50.0, 400.0, 550.0, 400.0])],
+        )],
+    );
+    let labels: Vec<String> = plans(&d).into_iter().map(|p| p.label).collect();
+    assert_eq!(labels, ["page 1 of 1"]);
+    // Geometry with nothing but text gives no shape, so the text gives the plans.
+    let d = with_pages(
+        body.clone(),
+        vec![page(
+            1,
+            vec![placed(BoxKind::Text, [50.0, 400.0, 550.0, 450.0])],
+        )],
+    );
+    assert_eq!(plans(&d), plans(&doc(body)));
+}
+
+#[test]
+fn crowded_pages_are_left_out() {
+    // Pictures side by side fill the page: crowded at 80 by 40, so the page gives no plan.
+    let tiles = (0..30)
+        .flat_map(|r| {
+            (0..30).map(move |c| {
+                let (x, y) = (20.0 * c as f32, 800.0 / 30.0 * r as f32);
+                placed(BoxKind::Picture, [x, y, x + 19.0, y + 26.0])
+            })
+        })
+        .collect();
+    let rule = vec![placed(BoxKind::Rule, [50.0, 400.0, 550.0, 400.0])];
+    let d = with_pages(Vec::new(), vec![page(1, tiles), page(2, rule)]);
+    let ps = plans(&d);
+    let labels: Vec<&str> = ps.iter().map(|p| p.label.as_str()).collect();
+    assert_eq!(labels, ["page 2 of 2"]);
 }
