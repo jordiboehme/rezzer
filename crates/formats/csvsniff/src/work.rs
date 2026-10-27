@@ -6,8 +6,8 @@
 //! (a CI runner can be twice as slow as a laptop); this count is the same everywhere for the
 //! same input. It is kept in debug builds only, so a release build pays nothing for it.
 //!
-//! The count goes up by the bytes of text each pass of [`sniff`](fn@crate::sniff) has in reach: the
-//! check for other formats and the reading of each candidate delimiter.
+//! The count goes up by the bytes of text each pass of [`sniff`](fn@crate::sniff) has in
+//! reach: the check for other formats and the reading of each candidate delimiter.
 
 #[cfg(debug_assertions)]
 thread_local! {
