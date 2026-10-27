@@ -3613,9 +3613,7 @@ fn lay_out(
         items.links_cut = !link_glyphs(&mut visible, text, links, x0, y0);
     }
     let linked = !items.links_cut && !links.is_empty();
-    let unturned = (turn == Turn::None).then_some(height);
-    (items.runs, items.boxes_unused) =
-        runs_in(page, &visible, text, turn, links, boxes, rules, unturned);
+    (items.runs, items.boxes_unused) = runs_in(page, &visible, text, turn, links, boxes, rules);
     if linked {
         for uri in unplaced_links(&visible, &items.runs, links) {
             items.notes.push(Note::Unsupported(format!(

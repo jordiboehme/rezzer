@@ -3237,7 +3237,9 @@ const BLANK_COLUMNS: [(f32, [&str; 3]); 3] = [
 /// Finding B5: three columns of an address, a bank and a register entry in a 6 pt footer, each
 /// row drawn over a string of 150 spaces from x 40 that reaches past the first gutter (as a
 /// print run blanks its field first): each column is read as one paragraph of three lines, the
-/// columns one after the other.
+/// columns one after the other. The footer stands on both pages of a file of two, so it is a
+/// running footer: by ruling P6-X5 address columns part only on furniture lines (on a file of
+/// one page the footer is body text and reads as at b9c878e).
 #[test]
 fn blank_strings_do_not_block_columns() {
     for font in ["FL", "FT"] {
@@ -3250,7 +3252,7 @@ fn blank_strings_do_not_block_columns() {
         }
         for k in [0.75, 1.0, 1.5] {
             for wide in [false, true] {
-                blank_columns_read(&footed_pages(&t, 1, k, wide));
+                blank_columns_read(&footed_pages(&t, 2, k, wide));
             }
         }
     }
@@ -3494,6 +3496,22 @@ fn body_of(size: f32, top: f32, wide: bool) -> String {
     out
 }
 
+/// What is wrong with the footer `columns` on page `n` of `out` where it is body text: a line
+/// not read or read twice, or a line in a running header or footer.
+fn footer_lines_kept(out: &ReadOutcome, n: u32, columns: &[Vec<&str>]) -> Vec<String> {
+    let texts = page_texts(out, n);
+    let mut wrong = Vec::new();
+    for line in columns.iter().flatten() {
+        let holders: Vec<&(Option<String>, String)> =
+            texts.iter().filter(|(_, t)| t.contains(line)).collect();
+        let k: usize = holders.iter().map(|(_, t)| t.matches(line).count()).sum();
+        if k != 1 || holders.iter().any(|(r, _)| r.is_some()) {
+            wrong.push(format!("page {n}: {line:?} in {holders:?}"));
+        }
+    }
+    wrong
+}
+
 /// A file of `count` pages, each the 7 pt body (wide or not) with `extra` under it, drawn `k`
 /// times as large.
 fn footed_pages(extra: &str, count: usize, k: f32, wide: bool) -> Vec<u8> {
@@ -3546,11 +3564,13 @@ fn footer_sets() -> Vec<(String, Vec<Vec<&'static str>>)> {
     out
 }
 
-/// Finding B5 under ruling P6-Y: a footer of two to four address-shaped columns, in every size
-/// and font, set flush to the top or centred, with no bold line, a bold first line of its last
-/// column or a bold second line of its first, on one, two or three pages: no block holds lines
-/// of two columns, every line is read once, each column is one block in column order, a running
-/// footer on files of two and three pages and body text on a file of one, and no loss.
+/// Finding B5 under rulings P6-Y and P6-X5: a footer of two to four address-shaped columns, in
+/// every size and font, set flush to the top or centred, with no bold line, a bold first line
+/// of its last column or a bold second line of its first, on one, two or three pages. On files
+/// of two and three pages, where it is a running footer: no block holds lines of two columns,
+/// every line is read once, each column is one block in column order, and no loss. On a file
+/// of one it is body text and reads as at b9c878e (address columns part only on furniture
+/// lines): every line is read once, as body text.
 #[test]
 fn footer_columns_read_apart_in_every_size_and_font() {
     let mut wrong = Vec::new();
@@ -3565,13 +3585,18 @@ fn footer_columns_read_apart_in_every_size_and_font() {
                         for (count, wide) in (1..=3usize).flat_map(|c| [(c, false), (c, true)]) {
                             let out = common::read(&footed_pages(&t, count, k, wide));
                             reads += 1;
-                            let role = (count >= 2).then_some("page-footer");
                             let name = format!(
                                 "{set}, {k}x, {fonts:?}, {stack:?}, bold {bold:?}, {count} pages, \
                                  wide {wide}"
                             );
+                            if count == 1 {
+                                for w in footer_lines_kept(&out, 1, &columns) {
+                                    wrong.push(format!("{name}: {w}"));
+                                }
+                                continue;
+                            }
                             for p in 1..=count as u32 {
-                                for w in footer_broken(&out, p, &columns, role) {
+                                for w in footer_broken(&out, p, &columns, Some("page-footer")) {
                                     wrong.push(format!("{name}: {w}"));
                                 }
                             }
@@ -3691,11 +3716,11 @@ fn a_wide_address_line_keeps_its_line_breaks() {
     }
 }
 
-/// Guards of finding B5 under ruling P6-Y: the footer columns of
+/// Guards of finding B5 under rulings P6-Y and P6-X5: the footer columns of
 /// [`footer_columns_read_apart_in_every_size_and_font`] on pages 1 and 2 of a file of three
-/// pages, and the same columns at the top of both pages of a file of two, are content: each
-/// column one block in column order and no running footer or header, in every size, font and
-/// column set.
+/// pages, and the same columns at the top of both pages of a file of two, are content: no
+/// running footer or header, every line read once as body text, in every size, font and column
+/// set. Being no furniture, they read as at b9c878e.
 #[test]
 fn footer_columns_on_too_few_pages_or_at_the_top_stay_content() {
     let mut wrong = Vec::new();
@@ -3716,7 +3741,7 @@ fn footer_columns_on_too_few_pages_or_at_the_top_stay_content() {
                         let out = common::read(&print_form(&two_of_three, "", ""));
                         reads += 1;
                         for n in 1..=2 {
-                            for w in footer_broken(&out, n, &columns, None) {
+                            for w in footer_lines_kept(&out, n, &columns) {
                                 wrong.push(format!("{name}, on 2 of 3 pages: {w}"));
                             }
                         }
@@ -3725,7 +3750,7 @@ fn footer_columns_on_too_few_pages_or_at_the_top_stay_content() {
                             common::read(&print_form(&[page(head.clone()), page(head)], "", ""));
                         reads += 1;
                         for n in 1..=2 {
-                            for w in footer_broken(&out, n, &columns, None) {
+                            for w in footer_lines_kept(&out, n, &columns) {
                                 wrong.push(format!("{name}, at the top: {w}"));
                             }
                         }
@@ -4233,19 +4258,29 @@ fn probe_looks() -> Vec<(f32, (&'static str, &'static str))> {
         .collect()
 }
 
-/// Ruling P6-X4 (review finding I-1): a two-column table in the body with a header row and
+/// The looks of the review's probes with the first baseline of the block: in the body (700),
+/// wholly in the top band (780) and wholly in the bottom band (140) of the page.
+fn probe_places() -> Vec<(f32, (&'static str, &'static str), f32)> {
+    probe_looks()
+        .into_iter()
+        .flat_map(|(k, f)| [700.0, 780.0, 140.0].map(|top| (k, f, top)))
+        .collect()
+}
+
+/// Rulings P6-X4 and P6-X5 (review findings I-1 and M-6): a two-column table in the body or
+/// wholly in a page band that is no running header or footer, with a header row and
 /// cells of text and numbers stays a table, its values set flush left at x 200 or flush right
 /// at x 260, in every size and font. Address-shaped columns are a matter of the page bands
 /// only.
 #[test]
 fn two_column_body_tables_with_a_header_stay_tables() {
     let mut wrong = Vec::new();
-    for (k, fonts) in probe_looks() {
+    for (k, fonts, top) in probe_places() {
         for table in BODY_TABLES {
             for flush_right in [false, true] {
                 let mut t = String::new();
                 for (r, [a, b]) in table.iter().enumerate() {
-                    let y = 700.0 - 10.0 * r as f32;
+                    let y = top - 10.0 * r as f32;
                     let font = if r == 0 { fonts.1 } else { fonts.0 };
                     t += &show(font, 8.0, 40.0, y, a);
                     let x = if flush_right {
@@ -4262,7 +4297,7 @@ fn two_column_body_tables_with_a_header_stay_tables() {
                     .collect();
                 if !tables(&out).iter().any(|t| t.1 == want) {
                     wrong.push(format!(
-                        "{k}x, {fonts:?}, {}, flush right {flush_right}: {:?} {:?}",
+                        "{k}x, {fonts:?}, top {top}, {}, flush right {flush_right}: {:?} {:?}",
                         table[0][0],
                         tables(&out),
                         texts_of(&out)
@@ -4290,17 +4325,18 @@ const NOTICE_PAIRS: [(&str, &str); 6] = [
     ("Bearbeitung", "Max Mustermann"),
 ];
 
-/// Ruling P6-X4 (review finding I-1): the notice block in the body, the labels plain at x 40
+/// Rulings P6-X4 and P6-X5 (review findings I-1 and M-6): the notice block in the body or wholly
+/// in a page band that is no running header or footer, the labels plain at x 40
 /// and the values bold flush right at x 300 or plain at x 160, on shared baselines: each
 /// value is read with its label, before the next label, in every size and font.
 #[test]
 fn a_headerless_notice_block_in_the_body_keeps_its_pairs() {
     let mut wrong = Vec::new();
-    for (k, fonts) in probe_looks() {
+    for (k, fonts, top) in probe_places() {
         for bold_right in [true, false] {
             let mut t = String::new();
             for (r, (label, value)) in NOTICE_PAIRS.iter().enumerate() {
-                let y = 700.0 - 10.0 * r as f32;
+                let y = top - 10.0 * r as f32;
                 t += &show(fonts.0, 8.0, 40.0, y, label);
                 if value.is_empty() {
                     continue;
@@ -4321,7 +4357,9 @@ fn a_headerless_notice_block_in_the_body_keeps_its_pairs() {
                 let next = NOTICE_PAIRS.get(r + 1).map(|p| p.0);
                 let order: Vec<&str> = [*label, *value].into_iter().chain(next).collect();
                 if let Err(e) = common::in_order(&all, &order) {
-                    wrong.push(format!("{k}x, {fonts:?}, bold right {bold_right}: {e}"));
+                    wrong.push(format!(
+                        "{k}x, {fonts:?}, top {top}, bold right {bold_right}: {e}"
+                    ));
                 }
             }
         }

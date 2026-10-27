@@ -188,7 +188,7 @@ impl UriTarget {
 
 /// Share of the page height at the top and the bottom where running headers and footers sit.
 /// pdflatex sets page numbers about 11 % above the bottom edge of an A4 page.
-pub(crate) const BAND: f32 = 0.18;
+const BAND: f32 = 0.18;
 
 /// Pages a header or footer line must repeat on. In a file of two pages, a footer line repeats
 /// on both (see [`Style::learn`]).
@@ -1113,21 +1113,9 @@ pub(crate) fn page_blocks_at(
         .map(|n| n.0.as_str())
         .collect();
     footnotes::unlink(&mut built.blocks, &legend, &unwritten);
-    // The lines of a footer that go on one another at one left edge are one block: a column
-    // of a footer in columns (an address, a bank, a register entry). Each of its lines is a
-    // line of its own: a footer lists facts (`USt-IdNr. DE000000000`, `www.muster.example`),
-    // it is no prose to join; only a sentence that wraps goes on (see [`footer_wrap`]).
+    // The running footer, block by block (see [`footer_blocks`]).
     let footer_lines = lines(&footers);
-    let mut i = 0;
-    while i < footer_lines.len() {
-        let mut j = i + 1;
-        while j < footer_lines.len()
-            && continues(&footer_lines[j - 1], &footer_lines[j])
-            && (footer_lines[j].x - footer_lines[i].x).abs() <= EDGE
-        {
-            j += 1;
-        }
-        let block = &footer_lines[i..j];
+    for block in footer_blocks(&footer_lines) {
         let runs: Vec<&Run> = block.iter().flat_map(|l| l.runs.iter()).collect();
         let mut breaks: Vec<(u32, u32)> = block
             .windows(2)
@@ -1136,7 +1124,6 @@ pub(crate) fn page_blocks_at(
             .collect();
         breaks.sort_unstable();
         built.broken_paragraph(runs, &breaks, Some("page-footer"), cx);
-        i = j;
     }
     if built.tables_as_text > 0 {
         let k = built.tables_as_text;
@@ -2000,6 +1987,83 @@ fn continues(prev: &Line<'_>, cur: &Line<'_>) -> bool {
     let gap = prev.y - cur.y;
     let height = prev.h.max(cur.h).max(1.0);
     gap > 0.0 && gap <= GAP_RATIO * height && (prev.size - cur.size).abs() <= SIZE_SLACK
+}
+
+/// The blocks of a running footer, in reading order. Footer lines that go on one another at
+/// one left edge are one block. A footer set in columns (an address, a bank, a register entry,
+/// a contact) is read column by column (ruling P6-X5: on furniture lines only): the ink of its
+/// lines falls into columns apart by white space, and the parts of the lines in each column
+/// are blocks of their own, when every block of three lines or more is an [`address_block`]
+/// and one is. Otherwise the lines stay whole, as the reading order gives them. Each line of
+/// a block is a line of its own: a footer lists facts (`USt-IdNr. DE000000000`,
+/// `www.muster.example`), it is no prose to join; only a sentence that wraps goes on (see
+/// [`footer_wrap`]).
+fn footer_blocks<'a>(lines: &[Line<'a>]) -> Vec<Vec<Line<'a>>> {
+    let whole = || stacked(lines.iter().map(|l| line(l.runs)).collect());
+    // The columns: the extents of the ink of every line, merged where they overlap.
+    let mut spans: Vec<(f32, f32)> = lines
+        .iter()
+        .flat_map(|l| l.runs.iter())
+        .filter(|r| !r.text.trim().is_empty())
+        .map(|r| (r.x, r.x + r.w))
+        .collect();
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut columns: Vec<(f32, f32)> = Vec::new();
+    for (x0, x1) in spans {
+        match columns.last_mut() {
+            Some(c) if x0 < c.1 => c.1 = c.1.max(x1),
+            _ => columns.push((x0, x1)),
+        }
+    }
+    if columns.len() < 2 {
+        return whole();
+    }
+    let column_of = |r: &Run| columns.partition_point(|c| c.1 <= r.x);
+    // The part of each line in each column; a line whose parts of one column are not next to
+    // each other keeps the lines whole.
+    let mut parts: Vec<Vec<Line<'a>>> = (0..columns.len()).map(|_| Vec::new()).collect();
+    for l in lines {
+        let mut start = 0;
+        let mut seen: Vec<usize> = Vec::new();
+        while start < l.runs.len() {
+            let c = column_of(&l.runs[start]);
+            let mut end = start + 1;
+            while end < l.runs.len() && column_of(&l.runs[end]) == c {
+                end += 1;
+            }
+            if seen.contains(&c) {
+                return whole();
+            }
+            seen.push(c);
+            let part = line(&l.runs[start..end]);
+            if !part.text.is_empty() {
+                parts[c.min(columns.len() - 1)].push(part);
+            }
+            start = end;
+        }
+    }
+    let blocks: Vec<Vec<Line<'a>>> = parts.into_iter().flat_map(stacked).collect();
+    let tall: Vec<&Vec<Line<'a>>> = blocks.iter().filter(|b| b.len() >= 3).collect();
+    let shaped =
+        |b: &Vec<Line<'a>>| address_block(&b.iter().map(|l| l.text.as_str()).collect::<Vec<_>>());
+    if tall.is_empty() || !tall.iter().all(|b| shaped(b)) {
+        return whole();
+    }
+    blocks
+}
+
+/// Lines in reading order cut into blocks of lines that go on one another at one left edge.
+fn stacked(lines: Vec<Line<'_>>) -> Vec<Vec<Line<'_>>> {
+    let mut out: Vec<Vec<Line<'_>>> = Vec::new();
+    for l in lines {
+        match out.last_mut() {
+            Some(b) if continues(&b[b.len() - 1], &l) && (l.x - b[0].x).abs() <= EDGE => {
+                b.push(l);
+            }
+            _ => out.push(vec![l]),
+        }
+    }
+    out
 }
 
 /// Whether the footer line `next` goes on the sentence of `line` above it at its edge: `line`
