@@ -739,7 +739,7 @@ fn gutter(p: &[Piece], ids: &[usize]) -> Option<(f32, f32, Split)> {
 /// list: the pieces of `one` with ink all lie in one row; those of `block` lie in
 /// [`LONE_BLOCK`] rows or more whose baselines step at one pitch (see [`LONE_PITCH`]); the
 /// row is larger than the block by its median size (see [`SIZE_STEP`]), or bold beside a
-/// block without bold and not smaller; and the baseline of each piece of `one` lies farther
+/// block that is not all bold and not smaller; and the baseline of each piece of `one` lies farther
 /// than [`BASELINE_NEAR`] of the smaller size from every baseline of `block`. A lone cell on
 /// the baseline of a row is a cell of that row, and a smaller bold term beside the lines of
 /// its definition is a cell of a glossary.
@@ -777,11 +777,12 @@ fn lone_row(p: &[Piece], one: &[usize], block: &[usize]) -> bool {
         sizes[sizes.len() / 2]
     };
     let (a, b) = (median(&one), median(&block));
-    // The row stands out as a title does: larger, or bold beside plain lines and not smaller
-    // than them. A smaller bold term beside the lines of its definition is a cell of a row.
+    // The row stands out as a title does: larger, or bold beside lines that are not all bold
+    // (bold labels beside plain values) and not smaller than them. A smaller bold term beside
+    // the lines of its definition is a cell of a row.
     let larger = a >= SIZE_STEP * b;
     let bolder =
-        one.iter().all(|&i| p[i].bold) && block.iter().all(|&i| !p[i].bold) && a * SIZE_STEP > b;
+        one.iter().all(|&i| p[i].bold) && !block.iter().all(|&i| p[i].bold) && a * SIZE_STEP > b;
     if !larger && !bolder {
         return false;
     }

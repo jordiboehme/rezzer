@@ -2697,11 +2697,17 @@ const TITLE_FIELDS: [[&str; 2]; 6] = [
     ["Lieferdatum", "03.02.2026"],
 ];
 
-/// The title `Rechnung` at x 40 beside `n` field lines of `6 k` pt at x 360 (label) and
-/// x 360 + 80 k (value), 8 k apart from the baseline 703 down, in the fonts `fonts` (plain, bold), the title
-/// standing out as `stand`. Its baseline lies 1.5 k under that of field line `at`, so it shares
-/// that line's row of text but not its baseline.
-fn title_beside_fields(k: f32, fonts: (&str, &str), stand: Stand, n: usize, at: usize) -> String {
+/// The title `Rechnung` at x 40 beside `n` field lines of `6 k` pt at x 360 (label, bold when
+/// `bold_labels`) and x 360 + 80 k (value), 8 k apart from the baseline 703 down, in the fonts
+/// `fonts` (plain, bold), the title standing out as `stand`. Its baseline lies 1.5 k under that
+/// of field line `at`, so it shares that line's row of text but not its baseline.
+fn title_beside_fields(
+    (k, fonts): (f32, (&str, &str)),
+    stand: Stand,
+    bold_labels: bool,
+    n: usize,
+    at: usize,
+) -> String {
     let fs = 6.0 * k;
     let base = |i: usize| 703.0 - 8.0 * k * i as f32;
     let (font, size) = match stand {
@@ -2711,7 +2717,8 @@ fn title_beside_fields(k: f32, fonts: (&str, &str), stand: Stand, n: usize, at: 
     };
     let mut t = show(font, size, 40.0, base(at) - 1.5 * k, "Rechnung");
     for (i, [label, value]) in TITLE_FIELDS.iter().take(n).enumerate() {
-        t += &show(fonts.0, fs, 360.0, base(i), label);
+        let label_font = if bold_labels { fonts.1 } else { fonts.0 };
+        t += &show(label_font, fs, 360.0, base(i), label);
         t += &show(fonts.0, fs, 360.0 + 80.0 * k, base(i), value);
     }
     t
@@ -2754,13 +2761,18 @@ fn title_beside_field_list() {
     let mut reads = 0;
     for k in [0.75, 1.0, 1.5] {
         for fonts in FONTS {
-            for stand in [Stand::BoldLarger, Stand::Bold, Stand::Larger] {
+            for (stand, labels) in [Stand::BoldLarger, Stand::Bold, Stand::Larger]
+                .into_iter()
+                .flat_map(|s| [(s, false), (s, true)])
+            {
                 for n in 3..=6 {
                     for at in [0, n / 2, n - 1] {
-                        let t = title_beside_fields(k, fonts, stand, n, at);
+                        let t = title_beside_fields((k, fonts), stand, labels, n, at);
                         let out = common::read(&page_in(&t, Look::Plain));
                         reads += 1;
-                        let name = format!("{k}x, {fonts:?}, {stand:?}, {n} lines, on {at}");
+                        let name = format!(
+                            "{k}x, {fonts:?}, {stand:?}, bold labels {labels}, {n} lines, on {at}"
+                        );
                         let fields = &TITLE_FIELDS[..n];
                         let field_text = |s: &str| fields.iter().flatten().any(|f| s.contains(f));
                         let texts = texts_of(&out);
@@ -2794,7 +2806,7 @@ fn title_beside_field_list() {
             }
         }
     }
-    assert_eq!(reads, 216);
+    assert_eq!(reads, 432);
     assert!(
         wrong.is_empty(),
         "{} wrong:\n{}",
