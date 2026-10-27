@@ -1994,35 +1994,87 @@ fn continues(prev: &Line<'_>, cur: &Line<'_>) -> bool {
 /// a contact) is read column by column (ruling P6-X5: on furniture lines only): the ink of its
 /// lines falls into columns apart by white space, and the parts of the lines in each column
 /// are blocks of their own, when every block of three lines or more is an [`address_block`]
-/// and one is. Otherwise the lines stay whole, as the reading order gives them. Each line of
+/// and one is. A line of its own in one piece (a page number centred over or under the
+/// columns) takes no part in finding the columns: it would bridge their gutter. It is read whole, before the
+/// columns when it stands before them in the reading order, else after them. Otherwise the
+/// lines stay whole, as the reading order gives them. Each line of
 /// a block is a line of its own: a footer lists facts (`USt-IdNr. DE000000000`,
 /// `www.muster.example`), it is no prose to join; only a sentence that wraps goes on (see
 /// [`footer_wrap`]).
-fn footer_blocks<'a>(lines: &[Line<'a>]) -> Vec<Vec<Line<'a>>> {
-    let whole = || stacked(lines.iter().map(|l| line(l.runs)).collect());
-    // The columns: the extents of the ink of every line, merged where they overlap.
-    let mut spans: Vec<(f32, f32)> = lines
-        .iter()
-        .flat_map(|l| l.runs.iter())
-        .filter(|r| !r.text.trim().is_empty())
-        .map(|r| (r.x, r.x + r.w))
-        .collect();
-    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let mut columns: Vec<(f32, f32)> = Vec::new();
-    for (x0, x1) in spans {
-        match columns.last_mut() {
-            Some(c) if x0 < c.1 => c.1 = c.1.max(x1),
-            _ => columns.push((x0, x1)),
+fn footer_blocks<'a>(all: &[Line<'a>]) -> Vec<Vec<Line<'a>>> {
+    let whole = || stacked(all.iter().map(|l| line(l.runs)).collect());
+    let ink = |l: &Line<'a>| -> Vec<(f32, f32)> {
+        l.runs
+            .iter()
+            .filter(|r| !r.text.trim().is_empty())
+            .map(|r| (r.x, r.x + r.w))
+            .collect()
+    };
+    // The lines of their own: the blocks of one line whose ink is one piece. A row of the
+    // columns that stands alone (columns centred on one another) has gaps in it.
+    let one_piece = |l: &Line<'a>| {
+        let size = l.size.max(1.0);
+        ink(l)
+            .windows(2)
+            .all(|w| w[1].0 - w[0].1 <= crate::order::PIECE_GAP * size)
+    };
+    let mut single = vec![false; all.len()];
+    let mut k = 0;
+    for b in stacked(all.iter().map(|l| line(l.runs)).collect()) {
+        single[k] = b.len() == 1 && one_piece(&all[k]);
+        k += b.len();
+    }
+    // The columns: the extents of the ink of the lines in blocks, merged where they overlap.
+    let columns_of = |single: &[bool]| -> Vec<(f32, f32)> {
+        let mut spans: Vec<(f32, f32)> = (0..all.len())
+            .filter(|&i| !single[i])
+            .flat_map(|i| ink(&all[i]))
+            .collect();
+        spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut columns: Vec<(f32, f32)> = Vec::new();
+        for (x0, x1) in spans {
+            match columns.last_mut() {
+                Some(c) if x0 < c.1 => c.1 = c.1.max(x1),
+                _ => columns.push((x0, x1)),
+            }
+        }
+        columns
+    };
+    // A line of its own over the gutter between two of those columns (a page number centred
+    // over or under them) is read on its own. Any other is a line of the columns: the first
+    // line of a column centred lower than its neighbours, or the lines of a short column.
+    let found = columns_of(&single);
+    for (i, l) in all.iter().enumerate() {
+        if single[i] {
+            let touched = found
+                .iter()
+                .filter(|c| ink(l).iter().any(|r| r.0 < c.1 && r.1 > c.0))
+                .count();
+            single[i] = touched >= 2;
         }
     }
+    let columns = columns_of(&single);
     if columns.len() < 2 {
         return whole();
     }
+    let Some(first) = single.iter().position(|s| !s) else {
+        return whole();
+    };
+    let lines: Vec<&Line<'a>> = (0..all.len())
+        .filter(|&i| !single[i])
+        .map(|i| &all[i])
+        .collect();
+    let alone = |range: std::ops::Range<usize>| -> Vec<Vec<Line<'a>>> {
+        range
+            .filter(|&i| single[i])
+            .map(|i| vec![line(all[i].runs)])
+            .collect()
+    };
     let column_of = |r: &Run| columns.partition_point(|c| c.1 <= r.x);
     // The part of each line in each column; a line whose parts of one column are not next to
     // each other keeps the lines whole.
     let mut parts: Vec<Vec<Line<'a>>> = (0..columns.len()).map(|_| Vec::new()).collect();
-    for l in lines {
+    for l in &lines {
         let mut start = 0;
         let mut seen: Vec<usize> = Vec::new();
         while start < l.runs.len() {
@@ -2049,7 +2101,10 @@ fn footer_blocks<'a>(lines: &[Line<'a>]) -> Vec<Vec<Line<'a>>> {
     if tall.is_empty() || !tall.iter().all(|b| shaped(b)) {
         return whole();
     }
-    blocks
+    let mut out = alone(0..first);
+    out.extend(blocks);
+    out.extend(alone(first..all.len()));
+    out
 }
 
 /// Lines in reading order cut into blocks of lines that go on one another at one left edge.

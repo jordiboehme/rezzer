@@ -4435,3 +4435,71 @@ fn a_wrapped_footer_sentence_joins_and_footer_items_keep_their_breaks() {
         wrong.join("\n")
     );
 }
+
+/// Review carry C-6: the footer of [`FOOTER`] at 7 pt in columns at x 40, 180, 330 and 460 from
+/// the baseline 100 down, 8.4 apart, and the page number `Seite n von N` centred at x 290,
+/// 20 points over the first row (`above`) or 40 points under the last row.
+fn footer_with_page_number(fonts: (&str, &str), n: usize, pages: usize, above: bool) -> String {
+    let mut t = String::new();
+    for (c, lines) in FOOTER.iter().enumerate() {
+        let x = [40.0, 180.0, 330.0, 460.0][c];
+        for (k, line) in lines.iter().enumerate() {
+            t += &show(fonts.0, 7.0, x, 100.0 - 8.4 * k as f32, line);
+        }
+    }
+    let rows = FOOTER.iter().map(|c| c.len()).max().unwrap_or(0);
+    let y = if above {
+        120.0
+    } else {
+        100.0 - 8.4 * (rows - 1) as f32 - 40.0
+    };
+    t + &show(fonts.0, 7.0, 290.0, y, &format!("Seite {n} von {pages}"))
+}
+
+/// Review carry C-6 (fix round 6): a page number centred over or under a running footer of
+/// four columns takes no part in finding its columns. Each column is one block in column
+/// order, no block holds lines of two columns, and the page number is a running footer of its
+/// own, in every size and font, on files of two and three pages.
+#[test]
+fn a_centred_page_number_does_not_bridge_footer_columns() {
+    let columns: Vec<Vec<&str>> = FOOTER.iter().map(|c| c.to_vec()).collect();
+    let mut wrong = Vec::new();
+    for (k, fonts) in probe_looks() {
+        for pages in [2, 3] {
+            for above in [true, false] {
+                let file: Vec<FormPage> = (1..=pages)
+                    .map(|n| FormPage {
+                        template: format!(
+                            "{}{}",
+                            body_of(7.0, 500.0, true),
+                            footer_with_page_number(fonts, n, pages, above)
+                        ),
+                        scale: k,
+                        ..FormPage::default()
+                    })
+                    .collect();
+                let out = common::read(&print_form(&file, "", ""));
+                let name = format!("{k}x, {fonts:?}, {pages} pages, above {above}");
+                for n in 1..=pages as u32 {
+                    for w in footer_broken(&out, n, &columns, Some("page-footer")) {
+                        wrong.push(format!("{name}: {w}"));
+                    }
+                    let number = format!("Seite {n} von {pages}");
+                    let texts = page_texts(&out, n);
+                    if !texts
+                        .iter()
+                        .any(|(r, t)| r.as_deref() == Some("page-footer") && *t == number)
+                    {
+                        wrong.push(format!("{name}: page {n} number: {texts:?}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
