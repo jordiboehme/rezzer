@@ -9,6 +9,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::*;
+use crate::order::SIZE_STEP;
 use crate::regions::{Seg, grids};
 
 /// The note before the first table of fields between rules of a page.
@@ -1717,7 +1718,8 @@ fn under_labels(flow: &Flow, labels: &[Vec<usize>], values: &[usize]) -> Option<
 }
 
 /// The labels of the first of the `lines` of a cell when that line is labels over values: in
-/// the cell's smallest size (a raised marker aside), over lines larger by half a point.
+/// the cell's smallest size (a raised marker aside), over lines a size step larger (see
+/// [`SIZE_STEP`]).
 fn first_line_labels(flow: &Flow, lines: &[Vec<usize>]) -> Option<Vec<Vec<usize>>> {
     let (Some(first), true) = (lines.first(), lines.len() >= 2) else {
         return None;
@@ -1730,10 +1732,10 @@ fn first_line_labels(flow: &Flow, lines: &[Vec<usize>]) -> Option<Vec<Vec<usize>
         .map(|&i| size(i))
         .fold(f32::MIN, f32::max);
     let marker = markers(flow, &lines[..1]);
-    if below - small < 0.5
+    if below < SIZE_STEP * small
         || first
             .iter()
-            .any(|&i| size(i) - small >= 0.5 && !marker.contains(&i))
+            .any(|&i| size(i) >= SIZE_STEP * small && !marker.contains(&i))
     {
         return None;
     }
@@ -1778,7 +1780,7 @@ fn label_names(flow: &Flow, cell: &[usize]) -> Vec<String> {
             let labels: Vec<usize> = l
                 .iter()
                 .copied()
-                .filter(|&i| !marker.contains(&i) && flow.runs[i].size - small < 0.5)
+                .filter(|&i| !marker.contains(&i) && flow.runs[i].size < SIZE_STEP * small)
                 .collect();
             labels_in_line(flow, &labels)
         })
@@ -1935,5 +1937,35 @@ mod tests {
             },
         ]);
         assert_eq!(field_cuts(&flow, &[frame()]), [(2, vec![1])]);
+    }
+
+    /// Labels a size step under their values are labels at every scale: printed at 0.4, labels
+    /// of 4.8 points over values of 5.2 differ by less than half a point; labels and values of
+    /// one size are no labels over values.
+    #[test]
+    fn labels_over_values_by_a_size_step_at_any_scale() {
+        let cell = |label: f32, value: f32| {
+            let mut v = run(
+                "Erika Mustermann Musterstadt",
+                4.0,
+                100.0 - 2.0 * value,
+                value,
+            );
+            v.line = 1;
+            flow_of(vec![
+                run("Name", 4.0, 100.0, label),
+                run("Ort", 4.0 + 10.0 * label, 100.0, label),
+                v,
+            ])
+        };
+        for (label, value, labels) in [(12.0, 13.0, true), (4.8, 5.2, true), (5.0, 5.0, false)] {
+            let flow = cell(label, value);
+            let lines = lines_of(&flow, &[0, 1, 2]);
+            assert_eq!(
+                first_line_labels(&flow, &lines).map(|l| l.len()),
+                labels.then_some(2),
+                "{label} {value}"
+            );
+        }
     }
 }

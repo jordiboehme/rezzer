@@ -503,7 +503,7 @@ fn region(p: &[Piece], mut ids: Vec<usize>, depth: usize, rules: &[HRule], out: 
     let found = if deep { gutter(p, &ids) } else { None };
     // A gutter that only a drawn box makes is taken after the bands of white space across:
     // text above or below the boxes is not part of their columns.
-    if let Some((_, _, Split::Boxed)) = found {
+    if let Some((_, _, Split::Boxed, _)) = found {
         ids.sort_by(|&a, &b| p[a].row.cmp(&p[b].row).then(p[a].x0.total_cmp(&p[b].x0)));
         if let Some(at) = widest_gap(p, &ids) {
             let rest = ids.split_off(at);
@@ -512,15 +512,16 @@ fn region(p: &[Piece], mut ids: Vec<usize>, depth: usize, rules: &[HRule], out: 
             return;
         }
     }
-    if let Some((g0, g1, split)) = found {
+    if let Some((g0, g1, split, slack)) = found {
         ids.sort_by(|&a, &b| p[a].row.cmp(&p[b].row).then(p[a].x0.total_cmp(&p[b].x0)));
         let mut band: Vec<usize> = Vec::new();
         let flush = |band: &mut Vec<usize>, out: &mut Order| {
             if band.is_empty() {
                 return;
             }
-            let (left, right): (Vec<usize>, Vec<usize>) =
-                band.drain(..).partition(|&i| on_left(&p[i], g0, g1));
+            let (left, right): (Vec<usize>, Vec<usize>) = band
+                .drain(..)
+                .partition(|&i| on_left(&p[i], (g0, g1), slack));
             region(p, left, depth + 1, rules, out);
             // A lone title and the line of the block whose row it shares are two lines. The
             // pieces of a row beside other gutters stay one line, as they read: cells of a
@@ -546,7 +547,7 @@ fn region(p: &[Piece], mut ids: Vec<usize>, depth: usize, rules: &[HRule], out: 
                 flush(&mut band, out);
                 low = f32::MAX;
             }
-            if crosses(&p[id], g0, g1) {
+            if crosses(&p[id], (g0, g1), slack) {
                 flush(&mut band, out);
                 out.ids.push(id);
                 low = f32::MAX;
@@ -574,22 +575,26 @@ fn region(p: &[Piece], mut ids: Vec<usize>, depth: usize, rules: &[HRule], out: 
     out.ids.extend(ids);
 }
 
+/// A piece reaches into a gutter when it reaches past its edge by more than this share of
+/// a step of the bands (see [`BAND_STEP`]): half a point at 8 points.
+const GUTTER_SLACK: f32 = 0.5 * BAND_STEP;
+
 /// Whether the piece `p` stands on the left side of the gutter from `g0` to `g1`: its end is
-/// before the gutter. A piece of white space only has no ink to stand by: it goes with the
-/// side its start lies on.
-fn on_left(p: &Piece, g0: f32, g1: f32) -> bool {
+/// before the gutter, within `slack`. A piece of white space only has no ink to stand by: it
+/// goes with the side its start lies on.
+fn on_left(p: &Piece, (g0, g1): (f32, f32), slack: f32) -> bool {
     if p.inked {
-        p.x1 <= g0 + 0.5
+        p.x1 <= g0 + slack
     } else {
         p.x0 < (g0 + g1) / 2.0
     }
 }
 
 /// Whether the piece `p` crosses the gutter from `g0` to `g1`: a piece with ink that reaches
-/// into it from both sides. White space crosses nothing: a blank string that a print run
-/// draws under a row of fields is no text across the columns.
-fn crosses(p: &Piece, g0: f32, g1: f32) -> bool {
-    p.inked && p.x1 > g0 + 0.5 && p.x0 < g1 - 0.5
+/// into it from both sides by more than `slack`. White space crosses nothing: a blank string
+/// that a print run draws under a row of fields is no text across the columns.
+fn crosses(p: &Piece, (g0, g1): (f32, f32), slack: f32) -> bool {
+    p.inked && p.x1 > g0 + slack && p.x0 < g1 - slack
 }
 
 /// Where to cut pieces sorted by row: after the row with the widest white space below it,
@@ -639,9 +644,9 @@ const LONE_BLOCK: usize = 3;
 /// their median step: the block keeps one pitch, as the lines of a field list do.
 const LONE_PITCH: f32 = 0.15;
 
-/// The median sizes of two sides differ when the larger is at least this many times the
-/// smaller (0.5 points at 6 points): a ratio, so that it holds at every scale of the page.
-const SIZE_STEP: f32 = 1.08;
+/// Two text sizes differ when the larger is at least this many times the smaller (0.5 points
+/// at 6 points): a ratio, so that it holds at every scale of the page.
+pub(crate) const SIZE_STEP: f32 = 1.08;
 
 /// A column gutter in a region: the widest vertical band of white space that only a few
 /// pieces cross, with blocks on both sides that stand side by side: prose, lines whose
@@ -650,7 +655,7 @@ const SIZE_STEP: f32 = 1.08;
 /// the best band is tried (see [`best_band`]): a band after it, where the best one fails, cuts
 /// label and value blocks and table columns apart (ruling P6-X3). Pieces of white space only
 /// are no text: they neither fill nor cross a band.
-fn gutter(p: &[Piece], ids: &[usize]) -> Option<(f32, f32, Split)> {
+fn gutter(p: &[Piece], ids: &[usize]) -> Option<(f32, f32, Split, f32)> {
     let inked: Vec<usize> = ids.iter().copied().filter(|&i| p[i].inked).collect();
     if inked.is_empty() {
         return None;
@@ -660,7 +665,7 @@ fn gutter(p: &[Piece], ids: &[usize]) -> Option<(f32, f32, Split)> {
     sizes.sort_by(f32::total_cmp);
     let size = sizes[sizes.len() / 2];
     let (g0, g1) = best_band(p, &inked, allowed, size)?;
-    split_at(p, ids, (g0, g1), allowed, size).map(|s| (g0, g1, s))
+    split_at(p, ids, (g0, g1), allowed, size).map(|s| (g0, g1, s, GUTTER_SLACK * size))
 }
 
 /// The pieces' places are measured in steps of this share of their median text size (a point
@@ -734,19 +739,23 @@ fn split_at(
     allowed: i32,
     size: f32,
 ) -> Option<Split> {
-    let crossing = ids.iter().filter(|&&i| crosses(&p[i], g0, g1)).count();
+    let slack = GUTTER_SLACK * size;
+    let crossing = ids
+        .iter()
+        .filter(|&&i| crosses(&p[i], (g0, g1), slack))
+        .count();
     if crossing as i32 > allowed {
         return None;
     }
     let left: Vec<usize> = ids
         .iter()
         .copied()
-        .filter(|&i| !crosses(&p[i], g0, g1) && on_left(&p[i], g0, g1))
+        .filter(|&i| !crosses(&p[i], (g0, g1), slack) && on_left(&p[i], (g0, g1), slack))
         .collect();
     let right: Vec<usize> = ids
         .iter()
         .copied()
-        .filter(|&i| !crosses(&p[i], g0, g1) && !on_left(&p[i], g0, g1))
+        .filter(|&i| !crosses(&p[i], (g0, g1), slack) && !on_left(&p[i], (g0, g1), slack))
         .collect();
     let prose = |side: &[usize]| {
         let inked: Vec<usize> = side.iter().copied().filter(|&i| p[i].inked).collect();

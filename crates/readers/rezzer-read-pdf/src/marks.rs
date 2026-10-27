@@ -8,7 +8,7 @@
 //! page's glyphs; once every page is read, the placeholders become the separators the
 //! file's own text uses, or are removed and the number is listed as not read.
 
-use crate::order::Turn;
+use crate::order::{SIZE_STEP, Turn};
 use crate::scan;
 use crate::tables::{Rule, RuleKind};
 use crate::text::{Gl, PageItems};
@@ -874,7 +874,7 @@ pub(crate) fn cut_at_dividers(glyphs: &mut Vec<Gl>, text: &mut String, rules: &[
             // Smaller text over the number in the frame: its labels.
             let labelled = fits
                 && any(line.0 + 0.5 * size, f.top, &|g, _| {
-                    g.size <= size - 0.5 && g.x > f.x0 && g.x < f.x1
+                    g.size * SIZE_STEP <= size && g.x > f.x0 && g.x < f.x1
                 });
             // Nothing else in the next field on the number's line.
             let alone = labelled
@@ -916,14 +916,16 @@ pub(crate) fn cut_at_dividers(glyphs: &mut Vec<Gl>, text: &mut String, rules: &[
     }
 }
 
-/// Marks of one line lie within this many points of each other across it.
-const DASH_SNAP: f32 = 0.1;
+/// Marks of one line lie within this share of their thickness of each other across it, and
+/// differ in thickness by at most this share (0.1 points for dashes of 0.4 points): relative
+/// to the pen, so that a rule drawn thicker or thinner joins the same.
+const DASH_SNAP: f32 = 0.25;
 
 /// Lines drawn as rows of marks: dashed or dotted rules of filled dashes, which are marks by
-/// shape. Marks of one direction on one line (their middles within [`DASH_SNAP`] across it,
-/// the same thickness), each at most its own length after the one before (or over it, as a
-/// copy), make one line when at least three of them reach past the ones before. The marks of
-/// such lines are taken out of `marks`: they are rules, not separators.
+/// shape. Marks of one direction on one line (their middles within [`DASH_SNAP`] of their
+/// thickness across it, the same thickness), each at most its own length after the one before
+/// (or over it, as a copy), make one line when at least three of them reach past the ones
+/// before. The marks of such lines are taken out of `marks`: they are rules, not separators.
 pub(crate) fn dashed_rules(marks: &mut Vec<[f32; 4]>) -> Vec<Rule> {
     // Along the long side: (upright, across, start, end, thickness).
     let flat = |m: &[f32; 4]| {
@@ -944,12 +946,12 @@ pub(crate) fn dashed_rules(marks: &mut Vec<[f32; 4]>) -> Vec<Rule> {
     while i < marks.len() {
         // One line: marks of one direction whose middles lie within the snap of the first,
         // so a little float noise across it neither loses nor splits it.
-        let (upright, across, ..) = flat(&marks[i]);
+        let (upright, across, _, _, thick) = flat(&marks[i]);
         let n = marks[i..]
             .iter()
             .take_while(|m| {
                 let (u, c, ..) = flat(m);
-                u == upright && c - across <= DASH_SNAP
+                u == upright && c - across <= DASH_SNAP * thick
             })
             .count();
         let line = &mut marks[i..i + n];
@@ -965,7 +967,7 @@ pub(crate) fn dashed_rules(marks: &mut Vec<[f32; 4]>) -> Vec<Rule> {
             while let Some(m) = line.get(j) {
                 let (_, c, s, e, t) = flat(m);
                 let gap = s - end;
-                if (t - thick).abs() > 0.1 || gap > e - s {
+                if (t - thick).abs() > DASH_SNAP * thick.max(t) || gap > e - s {
                     break;
                 }
                 if e > end {

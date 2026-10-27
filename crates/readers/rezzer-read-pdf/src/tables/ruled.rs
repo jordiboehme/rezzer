@@ -15,6 +15,7 @@ use super::sections::{CUT_WORK, sections};
 use super::side::{Beside, SIDE_FOUND_BY, SIDE_WORK, Side, StripKind, side_columns, totals_top};
 use super::*;
 use crate::marks::is_placeholder;
+use crate::order::SIZE_STEP;
 use crate::regions::{Grids, Seg, Unsearched, clustered, grids};
 
 /// Where a run a table took goes: the table, its row and its cell.
@@ -813,7 +814,8 @@ fn header_rows_of(
             runs.get(runs.len() / 2).map_or(0.0, |r| r.size)
         };
         let bold = !top.is_empty() && top.iter().all(|r| r.bold) && below.iter().any(|r| !r.bold);
-        !below.is_empty() && (bold || (median(&mut top) - median(&mut below)).abs() > 0.5)
+        let (a, b) = (median(&mut top), median(&mut below));
+        !below.is_empty() && (bold || a.max(b) >= SIZE_STEP * a.min(b))
     };
     (head, styled)
 }

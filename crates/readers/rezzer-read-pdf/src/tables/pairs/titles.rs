@@ -6,6 +6,7 @@
 //! with the lines under the rule as its text.
 
 use super::*;
+use crate::order::SIZE_STEP;
 use crate::regions::{Seg, grids};
 
 /// Lines under an underlined title follow each other at most this many line heights
@@ -146,7 +147,7 @@ pub(crate) fn underlined_titles(flow: &mut Flow, rules: &[Rule]) -> Vec<BoxTitle
             if gap > limit || ruled || !one || style.is_some_and(|s| s != styles[0]) {
                 break;
             }
-            if styles[0].0 as f32 / 2.0 - size < 0.5 {
+            if (styles[0].0 as f32 / 2.0) < SIZE_STEP * size {
                 break;
             }
             style = Some(styles[0]);
