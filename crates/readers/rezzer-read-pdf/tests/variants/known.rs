@@ -243,19 +243,6 @@ pub(crate) const KNOWN: &[Known] = &[
         why: "a row of column titles under the bank row makes the block a grid of labels under their values to the reader, which refuses it with a loss that names its fields: a loss where the fields are clear, never a wrong pair; its text as it stands keeps every value a word of its own",
     },
     Known {
-        shape: "labels under values",
-        variants: &[
-            "beside",
-            "scale 0.7, larger text, courier, rising, turned 270, beside, two pages",
-            "scale 0.75, smaller text, proportional, dashed, turned 90, beside",
-            "scale 1.5, dotted, turned 90, beside",
-            "times labels, thick, beside",
-        ],
-        broken: &[Inv::RightPair, Inv::ClearPairs],
-        cause: Cause::New,
-        why: "P6-X, wrong pairs: a block of fields with labels over their values beside a grid of labels under their values, on the same rules, makes the grid pair each label with the value of the next row (`Name`: `Musterweg 1`), with no loss",
-    },
-    Known {
         shape: "letter head",
         variants: &[
             "two pages",

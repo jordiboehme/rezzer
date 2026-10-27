@@ -617,6 +617,39 @@ pub(in crate::tables) fn field_strips(
                 .map(move |&i| (i, k))
         })
         .collect();
+    // Blocks of a group side by side on the same rules (no rule of one reaches the other)
+    // may set their labels in different ways: when the text beyond them reads one block with
+    // its labels under its values and another with its labels over them, each block is a group
+    // of its own, so the labels of one block never pair by the way of the other.
+    let groups: Vec<Vec<usize>> = groups
+        .into_iter()
+        .flat_map(|g| {
+            let blocks = side_blocks(&strips, &g);
+            if blocks.len() < 2 {
+                return vec![g];
+            }
+            let free = |i: usize| !busy(i) && !held.contains(&i);
+            let ways: Vec<Ends> = blocks
+                .iter()
+                .map(|b| {
+                    ends(
+                        flow,
+                        by_y,
+                        &free,
+                        &free,
+                        None,
+                        &|_| false,
+                        frames,
+                        &strips,
+                        b,
+                    )
+                })
+                .collect();
+            let under = ways.iter().any(|w| matches!(w, Ends::Under(..)));
+            let over = ways.iter().any(|w| matches!(w, Ends::Over));
+            if under && over { blocks } else { vec![g] }
+        })
+        .collect();
     // Runs beyond a group that a group read with its labels under their values took.
     let mut outside: HashSet<usize> = HashSet::new();
     // The strips of the groups that are read (they hold a value): each says of its own fields,
@@ -982,6 +1015,40 @@ fn connected(strips: &[Strip]) -> Vec<Vec<usize>> {
         }
     }
     groups
+}
+
+/// The blocks of the group `g` of `strips` side by side: strips whose stretches overlap or
+/// touch (within [`SNAP`]) are one block, each in the order of `g`.
+fn side_blocks(strips: &[Strip], g: &[usize]) -> Vec<Vec<usize>> {
+    let mut blocks: Vec<(f32, f32, Vec<usize>)> = Vec::new();
+    for &k in g {
+        let s = &strips[k];
+        let (mut x0, mut x1, mut members) = (s.x0, s.x1, vec![k]);
+        // Every block this strip meets joins it.
+        let mut i = 0;
+        while i < blocks.len() {
+            let b = &blocks[i];
+            if b.0 <= x1 + SNAP && x0 <= b.1 + SNAP {
+                let (bx0, bx1, bm) = blocks.swap_remove(i);
+                x0 = x0.min(bx0);
+                x1 = x1.max(bx1);
+                members.extend(bm);
+                i = 0;
+            } else {
+                i += 1;
+            }
+        }
+        blocks.push((x0, x1, members));
+    }
+    let mut out: Vec<Vec<usize>> = blocks
+        .into_iter()
+        .map(|(_, _, mut m)| {
+            m.sort_by_key(|k| g.iter().position(|x| x == k));
+            m
+        })
+        .collect();
+    out.sort_by_key(|b| b.first().and_then(|k| g.iter().position(|x| x == k)));
+    out
 }
 
 /// What a value is, to tell the values of a column of fields apart: a number (digits with
