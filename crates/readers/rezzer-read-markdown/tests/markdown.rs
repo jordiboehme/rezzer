@@ -42,6 +42,44 @@ fn read(text: &str) -> ReadOutcome {
     read_with(text.as_bytes(), Limits::default())
 }
 
+/// The wall-clock stop of the work-bound tests: far above any machine, so only a hang fails
+/// it. The work itself is bounded by counted steps.
+const SAFETY: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Reads `text` and gives the outcome, the steps of frontmatter work it did
+/// ([`rezzer_read_markdown::work_steps`], `None` in a release build) and its wall time.
+fn counted_read(text: &str) -> (ReadOutcome, Option<u64>, std::time::Duration) {
+    let before = rezzer_read_markdown::work_steps();
+    let start = std::time::Instant::now();
+    let out = read(text);
+    let took = start.elapsed();
+    let steps = before
+        .zip(rezzer_read_markdown::work_steps())
+        .map(|(b, a)| a - b);
+    (out, steps, took)
+}
+
+/// Checks a work bound: at most the `measured` steps with half of them again as margin (in a
+/// debug build, which counts them), and the wall time under [`SAFETY`]. Each `measured` is
+/// the count of the input when the bound was set (2026-10-27, debug build, `--no-capture`):
+/// a growth past the margin is a change in the work, not a slow machine. A count of 0 means
+/// the YAML parser was not asked at all (frontmatter over 256 KiB is kept as text unread).
+/// The work inside the YAML parser between two events is not counted; it is linear in the
+/// text, and the safety stop catches a hang.
+fn assert_work(what: &str, steps: Option<u64>, measured: u64, took: std::time::Duration) {
+    let max = measured + measured / 2;
+    eprintln!("{what}: {steps:?} steps (bound {max}) in {took:?}");
+    if cfg!(debug_assertions) {
+        assert!(
+            steps.is_some_and(|n| n <= max),
+            "{what}: {steps:?} steps of work, bound {max}"
+        );
+    } else {
+        assert_eq!(steps, None);
+    }
+    assert!(took < SAFETY, "{what}: took {took:?}");
+}
+
 fn plain(inlines: &[Inline]) -> String {
     inlines
         .iter()
@@ -439,13 +477,9 @@ fn images_are_references_with_graph_and_embedded() {
 #[test]
 fn flow_nesting_bomb_in_yaml_is_fast_and_kept_as_text() {
     let input = format!("---\nk: {}\n---\n\nBody\n", "[".repeat(300_000));
-    let start = std::time::Instant::now();
-    let out = read(&input);
-    assert!(
-        start.elapsed() < std::time::Duration::from_secs(3),
-        "{:?}",
-        start.elapsed()
-    );
+    let (out, steps, took) = counted_read(&input);
+    // Over 256 KiB: kept as text, the parser is never asked (0 steps, measured 2026-10-27).
+    assert_work("flow nesting bomb", steps, 0, took);
     assert!(
         out.document
             .losses
@@ -637,15 +671,12 @@ fn depth_loss_names_the_line() {
     assert!(loss.location.contains("line 5"), "{}", loss.location);
 }
 
-fn assert_bomb_rejected(frontmatter_value: &str) {
+/// Reads frontmatter `k: <frontmatter_value>` and checks it is rejected and kept as text,
+/// with the work bound of `measured` steps (see [`assert_work`]).
+fn assert_bomb_rejected(frontmatter_value: &str, measured: u64) {
     let input = format!("---\nk: {frontmatter_value}\n---\n\nBody\n");
-    let start = std::time::Instant::now();
-    let out = read(&input);
-    assert!(
-        start.elapsed() < std::time::Duration::from_secs(1),
-        "{:?}",
-        start.elapsed()
-    );
+    let (out, steps, took) = counted_read(&input);
+    assert_work("bomb", steps, measured, took);
     assert!(
         out.document
             .losses
@@ -657,14 +688,15 @@ fn assert_bomb_rejected(frontmatter_value: &str) {
 
 #[test]
 fn quoted_bracket_bombs_are_rejected_fast() {
+    // The second figures are the steps measured once (2026-10-27).
     // Over the parse size cap.
-    assert_bomb_rejected(&"[\"]\",".repeat(200_000));
-    assert_bomb_rejected(&"[']',".repeat(200_000));
+    assert_bomb_rejected(&"[\"]\",".repeat(200_000), 0);
+    assert_bomb_rejected(&"[']',".repeat(200_000), 0);
     // Under the cap: the depth scan itself must see the nesting.
-    assert_bomb_rejected(&"[\"]\",".repeat(40_000));
-    assert_bomb_rejected(&"[']',".repeat(40_000));
+    assert_bomb_rejected(&"[\"]\",".repeat(40_000), 11);
+    assert_bomb_rejected(&"[']',".repeat(40_000), 11);
     // A plain scalar with a quote character does not hide real nesting.
-    assert_bomb_rejected(&format!("[a '{}", "[".repeat(5_000)));
+    assert_bomb_rejected(&format!("[a '{}", "[".repeat(5_000)), 9);
     // A stray quote in a block scalar does not flip the quote parity afterwards.
     let input = format!(
         "---\nk: |\n  \"\nz: {}\n---\n\nBody\n",
@@ -730,9 +762,10 @@ fn image_kind_wins_and_h_prefix_is_not_doubled() {
 
 #[test]
 fn continuation_line_quote_does_not_hide_nesting() {
-    // YAML reads the quote on the second line as plain text of the scalar `a "`.
-    assert_bomb_rejected(&format!("a\n \"\nz: {}", "[".repeat(250_000)));
-    assert_bomb_rejected(&format!("a\n '\nz: {}", "[".repeat(250_000)));
+    // YAML reads the quote on the second line as plain text of the scalar `a "`. The second
+    // figures are the steps measured once (2026-10-27).
+    assert_bomb_rejected(&format!("a\n \"\nz: {}", "[".repeat(250_000)), 13);
+    assert_bomb_rejected(&format!("a\n '\nz: {}", "[".repeat(250_000)), 13);
 }
 
 #[test]
@@ -744,13 +777,9 @@ fn wide_alias_of_a_big_map_is_cut_by_the_node_budget() {
     }
     fm.push(']');
     let input = format!("---\n{fm}\n---\n\nBody\n");
-    let start = std::time::Instant::now();
-    let out = read(&input);
-    assert!(
-        start.elapsed() < std::time::Duration::from_secs(1),
-        "{:?}",
-        start.elapsed()
-    );
+    let (out, steps, took) = counted_read(&input);
+    // Measured once (2026-10-27): the node budget of 100,000 runs out at 104,060 steps.
+    assert_work("wide alias", steps, 104_060, took);
     assert!(
         out.document
             .losses
@@ -839,12 +868,12 @@ fn custom_bytes(out: &ReadOutcome) -> usize {
         .sum()
 }
 
-fn assert_flatten_bounded(fm: &str) -> ReadOutcome {
+/// Reads frontmatter `fm` and checks that writing its properties stops at a limit, with the
+/// work bound of `measured` steps (see [`assert_work`]).
+fn assert_flatten_bounded(fm: &str, measured: u64) -> ReadOutcome {
     let input = format!("---\n{fm}\n---\n\nBody\n");
-    let start = std::time::Instant::now();
-    let out = read(&input);
-    let took = start.elapsed();
-    assert!(took < std::time::Duration::from_secs(1), "{took:?}");
+    let (out, steps, took) = counted_read(&input);
+    assert_work("flatten", steps, measured, took);
     assert!(custom_bytes(&out) <= 1024 * 1024, "{}", custom_bytes(&out));
     assert!(
         out.document
@@ -885,7 +914,8 @@ fn long_key_path_times_aliased_leaves_is_bounded() {
         fm.push_str(&format!("  {}: *l\n", b36(i)));
     }
     assert!(fm.len() < 256 * 1024);
-    let out = assert_flatten_bounded(&fm);
+    // The steps were measured once (2026-10-27).
+    let out = assert_flatten_bounded(&fm, 105_739);
     // What was written before the budget ran out is kept.
     assert!(out.document.properties.custom.contains_key("l.k0"));
 }
@@ -898,7 +928,8 @@ fn long_key_path_without_aliases_is_bounded() {
         fm.push_str(&format!("  {}: 1\n", b36(i)));
         i += 1;
     }
-    assert_flatten_bounded(&fm);
+    // The steps were measured once (2026-10-27).
+    assert_flatten_bounded(&fm, 89_828);
 }
 
 #[test]
@@ -908,7 +939,8 @@ fn flattened_output_is_capped_at_one_mebibyte() {
     for i in 0..300 {
         fm.push_str(&format!("  {}: 1\n", b36(i)));
     }
-    let out = assert_flatten_bounded(&fm);
+    // The steps were measured once (2026-10-27).
+    let out = assert_flatten_bounded(&fm, 34_087);
     assert!(custom_bytes(&out) > 900 * 1024, "{}", custom_bytes(&out));
     assert!(
         out.document.losses.iter().any(|l| l.what.contains("1 MiB")),

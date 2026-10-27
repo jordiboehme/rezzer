@@ -82,6 +82,7 @@ struct Work {
 impl Work {
     /// Charges `units`; `false` once the budget is used up.
     fn charge(&mut self, units: usize) -> bool {
+        crate::work::add(units as u64);
         self.spent = self.spent.saturating_add(units);
         self.spent <= MAX_YAML_NODES
     }
@@ -245,6 +246,7 @@ fn parse_yaml(
     let mut charge = |units: usize| work.charge_node(units);
 
     for (n, item) in Parser::new_from_str(text).enumerate() {
+        crate::work::add(1);
         if n % CHECK_EVERY == CHECK_EVERY - 1 && budget.check_time().is_err() {
             return Err(FmError::Limit("time limit reached".into()));
         }

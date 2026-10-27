@@ -12,6 +12,7 @@
 
 mod builder;
 mod frontmatter;
+mod work;
 
 use rezzer_limits::Budget;
 use rezzer_model::{
@@ -20,6 +21,7 @@ use rezzer_model::{
 };
 
 use builder::Builder;
+pub use work::work_steps;
 
 /// Reads Markdown. The encoding is detected; existing frontmatter becomes properties, GFM
 /// alerts become callouts and links and wikilinks form a link graph.
