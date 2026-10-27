@@ -4717,3 +4717,377 @@ fn other_date_label_across_a_column_gap_stays_its_own() {
         }
     }
 }
+
+#[test]
+fn other_label_over_an_offset_value_names_it() {
+    // A label that names another date over its value, the value indented, right aligned or
+    // centred under it: the label stands over the value, so the value is no plain head date.
+    for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
+        for font in ["FL", "FB"] {
+            for label in ["Geburtsdatum", "Kunde seit", "Lieferdatum"] {
+                let value = "01.01.1970";
+                let slack =
+                    common::font_width(font, label, size) - common::font_width(font, value, size);
+                for (how, x) in [
+                    ("indented", 40.0 + size * 1.5),
+                    ("right aligned", 40.0 + slack),
+                    ("centred", 40.0 + slack / 2.0),
+                ] {
+                    let head = common::show("FB", size * 1.6, 40.0, 790.0, "Musterbescheid")
+                        + &common::show(font, size, 40.0, 760.0, label)
+                        + &common::show(font, size, x, 760.0 - size * 1.2, value);
+                    let out = read(&headed(&head, size, scale, ""));
+                    let case = format!("{label} over the value {how} in {size} pt {font}");
+                    assert_eq!(out.document.properties.document_date, None, "{case}");
+                    assert_eq!(front(&out, "source_date"), None, "{case}");
+                    assert!(unsure(&out).is_empty(), "{case}: {:?}", unsure(&out));
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn place_and_comma_before_the_head_date_is_no_label() {
+    for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
+        for font in ["FL", "FB"] {
+            let head = common::show("FB", size * 1.6, 40.0, 790.0, "Musterbescheid")
+                + &common::show(font, size, 400.0, 760.0, "Musterstadt, 01.02.2026");
+            let out = read(&headed(&head, size, scale, ""));
+            let case = format!("{size} pt {font}");
+            let found = out.document.properties.document_date.as_ref();
+            assert_eq!(found.map(|d| d.date.as_str()), Some("2026-02-01"), "{case}");
+            assert_eq!(
+                found.map(|d| d.from.as_str()),
+                Some("only date in the top third of page 1"),
+                "{case}"
+            );
+            assert!(unsure(&out).is_empty(), "{case}: {:?}", unsure(&out));
+        }
+    }
+}
+
+#[test]
+fn heading_over_a_plain_date_is_a_label_only_where_it_overlaps() {
+    for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
+        for font in ["FL", "FB"] {
+            let heading =
+                |x: f32| common::show("FB", size * 1.6, x, 760.0 + size * 1.3, "Rechnung");
+            let case = format!("{size} pt {font}");
+            // The heading at the left margin, the date in the right column: chosen.
+            let head = heading(40.0) + &common::show(font, size, 400.0, 760.0, "01.02.2026");
+            let out = read(&headed(&head, size, scale, ""));
+            let found = out.document.properties.document_date.as_ref();
+            assert_eq!(found.map(|d| d.date.as_str()), Some("2026-02-01"), "{case}");
+            assert_eq!(
+                found.map(|d| d.from.as_str()),
+                Some("only date in the top third of page 1"),
+                "{case}"
+            );
+            // The heading right over the date: a label over it, so the date is not chosen.
+            let head = heading(400.0) + &common::show(font, size, 400.0, 760.0, "01.02.2026");
+            let out = read(&headed(&head, size, scale, ""));
+            assert_eq!(out.document.properties.document_date, None, "{case}");
+            assert!(unsure(&out).is_empty(), "{case}: {:?}", unsure(&out));
+        }
+    }
+}
+
+/// What the head rule gives for a layout: a date (by the head rule or a label), no date and no
+/// loss, or the loss that several head dates give.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum HeadWant {
+    Date(&'static str, &'static str),
+    Nothing,
+    TwoDates,
+}
+
+#[test]
+fn head_layouts_with_one_other_date() {
+    // Layouts of the head with one date that has a label of its own which is no document-date
+    // label, and one plain date or none. The rule: a head date is chosen only when it has no
+    // label beside it or over it; a labelled date counts but is never chosen. Never a wrong
+    // date: a loss or no date is fine.
+    use HeadWant::*;
+    let two = "2 dates stand in the head of page 1; none is marked as the document date";
+    for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
+        for font in ["FL", "FB"] {
+            let s = |x: f32, y: f32, t: &str| common::show(font, size, x, y, t);
+            let w = |t: &str| common::font_width(font, t, size);
+            let below = |n: f32| 760.0 - n * size * 1.2;
+            // An other date below the head, so that it says nothing about the head.
+            let low = s(40.0, 200.0, "Lieferdatum 15.02.2026");
+            let title = common::show("FB", size * 1.6, 40.0, 790.0, "Musterbescheid");
+            let cases: Vec<(&str, String, HeadWant)> = vec![
+                (
+                    "A: other label beside its value as its own run",
+                    title.clone()
+                        + &s(40.0, 760.0, "Geburtsdatum:")
+                        + &s(40.0 + size * 8.0, 760.0, "01.01.1970"),
+                    Nothing,
+                ),
+                (
+                    "B: other label far left of its value on one baseline",
+                    title.clone() + &s(40.0, 760.0, "Kunde seit") + &s(300.0, 760.0, "01.01.2020"),
+                    Nothing,
+                ),
+                (
+                    "C: two rows of a label column and a value column",
+                    title.clone()
+                        + &s(40.0, 760.0, "Name")
+                        + &s(200.0, 760.0, "Erika Mustermann")
+                        + &s(40.0, below(1.0), "Geburtsdatum")
+                        + &s(200.0, below(1.0), "01.01.1970"),
+                    Nothing,
+                ),
+                (
+                    "D: letter with the place and date on the baseline of the first address line",
+                    title.clone()
+                        + &s(40.0, 760.0, "Erika Mustermann")
+                        + &s(400.0, 760.0, "Musterstadt, 01.02.2026")
+                        + &s(40.0, below(1.0), "Musterweg 1")
+                        + &s(40.0, below(2.0), "12345 Musterstadt")
+                        + &low,
+                    Nothing,
+                ),
+                (
+                    "E: letter with the place and date alone on its line below the address",
+                    title.clone()
+                        + &s(40.0, 760.0, "Erika Mustermann")
+                        + &s(40.0, below(1.0), "Musterweg 1")
+                        + &s(40.0, below(2.0), "12345 Musterstadt")
+                        + &s(400.0, 700.0, "Musterstadt, 01.02.2026")
+                        + &low,
+                    Date("2026-02-01", "only date in the top third of page 1"),
+                ),
+                (
+                    "F: other label over a centred value, a labelled document date beside",
+                    title.clone()
+                        + &s(40.0, 760.0, "Geburtsdatum")
+                        + &s(
+                            40.0 + (w("Geburtsdatum") - w("01.01.1970")) / 2.0,
+                            below(1.0),
+                            "01.01.1970",
+                        )
+                        + &s(400.0, 760.0, "Datum 01.02.2026"),
+                    Date("2026-02-01", "date label \"Datum\" on page 1"),
+                ),
+                (
+                    "G: the place on the line over the date",
+                    title.clone()
+                        + &s(400.0, 760.0, "Musterstadt,")
+                        + &s(400.0, below(1.0), "01.02.2026")
+                        + &low,
+                    Nothing,
+                ),
+                (
+                    "H: place, comma and the article before the date",
+                    title.clone() + &s(400.0, 760.0, "Musterstadt, den 01.02.2026") + &low,
+                    Nothing,
+                ),
+                (
+                    "I: a heading right over the date",
+                    common::show("FB", size * 1.6, 40.0, 760.0 + size * 1.3, "Rechnung")
+                        + &s(40.0, 760.0, "01.02.2026")
+                        + &low,
+                    Nothing,
+                ),
+                (
+                    "J: a heading over the line of the date, in another column",
+                    common::show("FB", size * 1.6, 40.0, 760.0 + size * 1.3, "Rechnung")
+                        + &s(400.0, 760.0, "01.02.2026")
+                        + &low,
+                    Date("2026-02-01", "only date in the top third of page 1"),
+                ),
+                (
+                    "K: the other label after its value",
+                    title.clone() + &s(40.0, 760.0, "01.01.1970 (Geburtsdatum)"),
+                    Nothing,
+                ),
+                (
+                    "L: a name with its birth date, the plain date alone lower in the head",
+                    title.clone()
+                        + &s(40.0, 760.0, "Erika Mustermann, geb. 01.01.1970")
+                        + &s(400.0, 700.0, "Musterstadt, 01.02.2026"),
+                    TwoDates,
+                ),
+                (
+                    "M: other label over its value, the plain date alone lower in the head",
+                    title.clone()
+                        + &s(40.0, 760.0, "Geburtsdatum")
+                        + &s(40.0, below(1.0), "01.01.1970")
+                        + &s(400.0, 700.0, "Musterstadt, 01.02.2026"),
+                    TwoDates,
+                ),
+                (
+                    "N: validity label over a right aligned value",
+                    title.clone()
+                        + &s(40.0, 760.0, "G\u{fc}ltig bis")
+                        + &s(
+                            40.0 + w("Gultig bis") - w("31.12.2026"),
+                            below(1.0),
+                            "31.12.2026",
+                        )
+                        + &low,
+                    Nothing,
+                ),
+                (
+                    "O: company name far left of the date on one baseline",
+                    s(40.0, 800.0, "Muster GmbH") + &s(450.0, 800.0, "01.02.2026") + &low,
+                    Nothing,
+                ),
+                (
+                    "P: a period of two dates, the second after a word",
+                    title.clone() + &s(40.0, 760.0, "Zeitraum 01.01.2026 bis 31.01.2026") + &low,
+                    TwoDates,
+                ),
+                (
+                    "Q: other label over the value in the right column, plain date left on the value's baseline",
+                    title.clone()
+                        + &s(400.0, 760.0, "Geburtsdatum")
+                        + &s(
+                            400.0 + w("Geburtsdatum") - w("01.01.1970"),
+                            below(1.0),
+                            "01.01.1970",
+                        )
+                        + &s(40.0, below(1.0), "Musterstadt, 01.02.2026"),
+                    TwoDates,
+                ),
+                (
+                    "R: a date and the other date two lines below it, same column",
+                    title.clone()
+                        + &s(400.0, 760.0, "Musterstadt, 01.02.2026")
+                        + &s(400.0, below(2.0), "Kunde seit 01.01.2020"),
+                    TwoDates,
+                ),
+            ];
+            for (name, head, want) in cases {
+                let out = read(&headed(&head, size, scale, ""));
+                let found = out.document.properties.document_date.as_ref();
+                let case = format!("{name} in {size} pt {font}");
+                match want {
+                    Date(date, from) => {
+                        assert_eq!(found.map(|d| d.date.as_str()), Some(date), "{case}");
+                        assert_eq!(found.map(|d| d.from.as_str()), Some(from), "{case}");
+                        assert!(unsure(&out).is_empty(), "{case}: {:?}", unsure(&out));
+                    }
+                    Nothing => {
+                        assert_eq!(found, None, "{case}");
+                        assert!(unsure(&out).is_empty(), "{case}: {:?}", unsure(&out));
+                    }
+                    TwoDates => {
+                        assert_eq!(found, None, "{case}");
+                        assert_eq!(unsure(&out), [two], "{case}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn rereview_probes_keep_their_results() {
+    // The probes of the round 3 re-review, each with the result it had then, now as a test.
+    use HeadWant::*;
+    let two = "2 dates stand in the head of page 1; none is marked as the document date";
+    let by_label = Date("2026-02-01", "date label \"Datum\" on page 1");
+    for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
+        for font in ["FL", "FB"] {
+            let s = |x: f32, y: f32, t: &str| common::show(font, size, x, y, t);
+            let below = 760.0 - size * 1.2;
+            let title = common::show("FB", size * 1.6, 40.0, 790.0, "Musterbescheid");
+            let cases: Vec<(&str, String, HeadWant)> = vec![
+                (
+                    "P1: labels over values, the other date left",
+                    title.clone()
+                        + &s(40.0, 760.0, "Geburtsdatum")
+                        + &s(40.0, below, "01.01.1970")
+                        + &s(300.0, 760.0, "Datum")
+                        + &s(300.0, below, "01.02.2026"),
+                    by_label,
+                ),
+                (
+                    "P2: labels over values, the other date right",
+                    title.clone()
+                        + &s(300.0, 760.0, "Geburtsdatum")
+                        + &s(300.0, below, "01.01.1970")
+                        + &s(40.0, 760.0, "Datum")
+                        + &s(40.0, below, "01.02.2026"),
+                    by_label,
+                ),
+                (
+                    "P3: labels beside their values in two columns",
+                    title.clone()
+                        + &s(40.0, 760.0, "Geburtsdatum 01.01.1970")
+                        + &s(300.0, 760.0, "Datum 01.02.2026"),
+                    by_label,
+                ),
+                (
+                    "P3b: the same, swapped",
+                    title.clone()
+                        + &s(300.0, 760.0, "Geburtsdatum 01.01.1970")
+                        + &s(40.0, 760.0, "Datum 01.02.2026"),
+                    by_label,
+                ),
+                (
+                    "P4: other date beside its label, place and date in the other column",
+                    title.clone()
+                        + &s(40.0, 760.0, "Geburtsdatum 01.01.1970")
+                        + &s(300.0, 760.0, "Musterstadt, 01.02.2026"),
+                    TwoDates,
+                ),
+                (
+                    "P5: label piece, the value beside it as its own run",
+                    title.clone()
+                        + &s(40.0, 760.0, "Lieferdatum:")
+                        + &s(40.0 + size * 8.0, 760.0, "15.02.2026"),
+                    Nothing,
+                ),
+                (
+                    "P6: label over the value indented 1.5 sizes",
+                    title.clone()
+                        + &s(40.0, 760.0, "Geburtsdatum")
+                        + &s(40.0 + size * 1.5, below, "01.01.1970"),
+                    Nothing,
+                ),
+                (
+                    "P7: labels over values in close columns",
+                    title.clone()
+                        + &s(40.0, 760.0, "Geburtsdatum")
+                        + &s(40.0, below, "01.01.1970")
+                        + &s(40.0 + size * 10.0, 760.0, "Datum")
+                        + &s(40.0 + size * 10.0, below, "01.02.2026"),
+                    TwoDates,
+                ),
+                (
+                    "P8: Datum alone far left of an other label over its value",
+                    title.clone()
+                        + &s(40.0, 760.0, "Datum")
+                        + &s(300.0, 760.0, "Lieferdatum")
+                        + &s(300.0, below, "15.02.2026"),
+                    Nothing,
+                ),
+            ];
+            for (name, head, want) in cases {
+                let out = read(&headed(&head, size, scale, ""));
+                let found = out.document.properties.document_date.as_ref();
+                let case = format!("{name} in {size} pt {font}");
+                match want {
+                    Date(date, from) => {
+                        assert_eq!(found.map(|d| d.date.as_str()), Some(date), "{case}");
+                        assert_eq!(found.map(|d| d.from.as_str()), Some(from), "{case}");
+                        assert!(unsure(&out).is_empty(), "{case}: {:?}", unsure(&out));
+                    }
+                    Nothing => {
+                        assert_eq!(found, None, "{case}");
+                        assert!(unsure(&out).is_empty(), "{case}: {:?}", unsure(&out));
+                    }
+                    TwoDates => {
+                        assert_eq!(found, None, "{case}");
+                        assert_eq!(unsure(&out), [two], "{case}");
+                    }
+                }
+            }
+        }
+    }
+}

@@ -257,6 +257,9 @@ struct Seen {
     text: String,
     /// The label as written, white space collapsed, when one marks it.
     label: Option<String>,
+    /// A label of its own that is no document-date label stands beside it or over it (see
+    /// [`page_dates`]): it counts as a date of the head but is never the document date.
+    named: bool,
 }
 
 /// What page 1 holds of dates, gathered from its lines before the layout and from its laid
@@ -265,7 +268,8 @@ struct Seen {
 pub(crate) struct Dates {
     /// Dates a document-date label marks.
     labelled: Vec<Seen>,
-    /// Dates in the top third of the page without a label of their own.
+    /// Dates in the top third of the page without a document-date label, plain or with a label
+    /// of their own (see [`Seen::named`]).
     head: Vec<Seen>,
     /// Dates a label names as another date, where each stands: never the document date, though
     /// one in the head still counts as a date of the head. Only the date at that place is
@@ -304,43 +308,151 @@ fn pieces(runs: &[Run]) -> Vec<Line<'_>> {
 
 /// The dates of the lines of page 1 (its runs as read, tables and furniture still in), read
 /// piece by piece (see [`pieces`]), with `height` the height of the page: a date right after a
-/// document-date label in its piece; a date in the top third without a label of its own; a
-/// date whose own label (the text before it in its piece, from the date before it on) names
-/// another date (see [`OTHER_DATE_WORDS`]). Only full dates count, with a year of four
-/// digits.
+/// document-date label in its piece; a date in the top third, plain or with a label of its
+/// own; a date whose label names another date (see [`OTHER_DATE_WORDS`]). Only full dates
+/// count, with a year of four digits.
+///
+/// A date has a label of its own when text stands beside it or over it (see [`labels_of`]):
+/// beside, the other text of its piece (from the date before it to the date after it) or a
+/// text piece that ends to its left on its baseline, unless that text is a place followed by
+/// a comma (`Musterstadt, 01.02.2026`, see [`place_and_comma`]); over, a piece on the line
+/// right above it whose x span overlaps the date's, with any alignment (a label over an
+/// indented, right aligned or centred value, a heading). Such a date is never the document
+/// date (see [`document_date`]): a label Rezzer does not know may name any date.
 pub(crate) fn page_dates(runs: &[Run], height: Option<f32>) -> Dates {
     let mut out = Dates::default();
     let in_head = |l: &Line<'_>| height.is_some_and(|h| h > 0.0 && l.y + l.h >= h * HEAD_SHARE);
-    for l in &pieces(runs) {
+    let all = pieces(runs);
+    for l in &all {
         let line = l.runs.first().map_or(0, |r| r.line);
-        let mut from = 0;
-        for d in scan::dates(&l.text, 4..=4) {
-            let own = &l.text[from..d.start];
-            from = d.end;
+        let found = scan::dates(&l.text, 4..=4);
+        for (i, d) in found.iter().enumerate() {
+            let own = &l.text[found.get(i.wrapping_sub(1)).map_or(0, |p| p.end)..d.start];
+            let after = &l.text[d.end..found.get(i + 1).map_or(l.text.len(), |n| n.start)];
             // A label stands right before its date: at most [`BESIDE_SIZES`] sizes apart.
             let label = label_before(own).filter(|_| {
                 let label_end = d.start - (own.len() - own.trim_end().len());
                 ink_gap(l, label_end, d.start) <= BESIDE_SIZES * l.size
             });
+            if let Some(label) = label {
+                out.labelled.push(Seen {
+                    written: (d.sep, d.parts),
+                    line,
+                    text: l.text[d.start..d.end].to_string(),
+                    label: Some(label),
+                    named: false,
+                });
+                continue;
+            }
+            let labels = labels_of(&all, l, own, after, d.start, d.end);
             let seen = Seen {
                 written: (d.sep, d.parts),
                 line,
                 text: l.text[d.start..d.end].to_string(),
-                label,
+                label: None,
+                named: !labels.is_empty(),
             };
-            if seen.label.is_some() {
-                out.labelled.push(seen);
-            } else {
-                if names_other_date(own) {
-                    out.other.push((line, seen.written));
-                }
-                if in_head(l) {
-                    out.head.push(seen);
-                }
+            if labels.iter().any(|t| names_other_date(t)) {
+                out.other.push((line, seen.written));
+            }
+            if in_head(l) {
+                out.head.push(seen);
             }
         }
     }
     out
+}
+
+/// The texts that label the date at bytes `start..end` of the piece `l` among the pieces
+/// `all` of the page without being a document-date label (see [`page_dates`]): `own`, the
+/// text before it in its piece, and `after`, the text after it, when either is text and not a
+/// place followed by a comma; a text piece that ends to the left of the date on its baseline,
+/// at any distance, unless it is such a place; and a piece on the line right above it (see
+/// [`right_below`]) whose x span overlaps the date's within [`SPAN_SLACK`] sizes.
+fn labels_of<'a>(
+    all: &'a [Line<'_>],
+    l: &'a Line<'_>,
+    own: &'a str,
+    after: &'a str,
+    start: usize,
+    end: usize,
+) -> Vec<&'a str> {
+    let beside_text = |t: &str| is_text(t) && !place_and_comma(t);
+    let mut out: Vec<&str> = Vec::new();
+    if beside_text(own) {
+        out.push(own);
+    }
+    if beside_text(after) {
+        out.push(after);
+    }
+    let (x0, x1) = span_of(l, start, end);
+    let slack = SPAN_SLACK * l.size;
+    for p in all.iter().filter(|p| !std::ptr::eq(*p, l)) {
+        let right = p.runs.iter().map(|r| r.x + r.w).fold(p.x, f32::max);
+        let beside =
+            (p.y - l.y).abs() <= l.size / 2.0 && right <= x0 + slack && beside_text(&p.text);
+        let over =
+            right_below(p, l) && p.x <= x1 + slack && right >= x0 - slack && is_text(&p.text);
+        if beside || over {
+            out.push(&p.text);
+        }
+    }
+    out
+}
+
+/// The x spans of a date and of a piece over it may miss each other by this many sizes and
+/// still overlap: the place of a date inside a run is taken by its share of the run's
+/// characters, which is a little off in a proportional font.
+const SPAN_SLACK: f32 = 0.5;
+
+/// Whether `text` holds a word: a letter or a digit. Signs alone (`-`, `(`, `|`) label
+/// nothing.
+fn is_text(text: &str) -> bool {
+    text.chars().any(char::is_alphanumeric)
+}
+
+/// Whether `text` is a place followed by a comma, as a letter writes it before its date
+/// (`Musterstadt,`, `Frankfurt am Main,`, `St. Gallen,`): words in letters, with a hyphen, a
+/// period, an apostrophe or a slash inside, that name no other date (see
+/// [`names_other_date`]), and a comma after them.
+fn place_and_comma(text: &str) -> bool {
+    let Some(place) = text.trim_end().strip_suffix(',') else {
+        return false;
+    };
+    let place = place.trim();
+    place.chars().any(char::is_alphabetic)
+        && place
+            .chars()
+            .all(|c| c.is_alphabetic() || c.is_whitespace() || matches!(c, '-' | '.' | '\'' | '/'))
+        && !names_other_date(place)
+}
+
+/// The x span of the bytes `start..end` of the text of `l`: from the runs that hold them, a
+/// place inside a run taken by its share of the run's characters.
+fn span_of(l: &Line<'_>, start: usize, end: usize) -> (f32, f32) {
+    let joined: String = l.runs.iter().map(|r| r.text.as_str()).collect();
+    let lead = joined.len() - joined.trim_start().len();
+    // The x of byte `b` of the joined text; a byte at the end of a run is the run's end when
+    // `closing`, else the start of the next run.
+    let x_at = |b: usize, closing: bool| {
+        let b = b + lead;
+        let mut at = 0;
+        for (k, r) in l.runs.iter().enumerate() {
+            let next = at + r.text.len();
+            if b < next || (closing && b == next) || k + 1 == l.runs.len() {
+                let cut = b.saturating_sub(at).min(r.text.len());
+                let chars = r.text.chars().count().max(1) as f32;
+                let before = r
+                    .text
+                    .get(..cut)
+                    .map_or(chars, |t| t.chars().count() as f32);
+                return r.x + r.w * (before / chars);
+            }
+            at = next;
+        }
+        l.x
+    };
+    (x_at(start, false), x_at(end, true))
 }
 
 /// The white space in points between the ink that ends at byte `end` of the text of `l` and
@@ -389,6 +501,7 @@ pub(crate) fn laid_dates(runs: &[Run], pairs: &[Pair], height: Option<f32>) -> D
                 line,
                 text: value[d.start..d.end].to_string(),
                 label: Some(label),
+                named: false,
             });
         } else if names_other_date(label) {
             out.other.push((line, written));
@@ -415,10 +528,10 @@ pub(crate) fn laid_dates(runs: &[Run], pairs: &[Pair], height: Option<f32>) -> D
 /// The document date of page 1 from what `dates` holds. A date a document-date label marks
 /// wins; labelled dates that differ give no date, and a labelled date that cannot be read for
 /// sure gives none either; both say so. Else the only date of the head is the document's,
-/// unless a label names it as another date; several dates there (named other dates counted)
-/// give no date and say so. A dotted date
-/// reads day first, a dashed one year first, a slashed one only when one part is over 12;
-/// only a day the calendar has.
+/// when it stands there once without a label of its own (see [`Seen::named`]) and no label
+/// names it as another date; several dates there (dates with a label of their own counted)
+/// give no date and say so. A dotted date reads day first, a dashed one year first, a slashed
+/// one only when one part is over 12; only a day the calendar has.
 pub(crate) fn document_date(dates: &Dates) -> PageDate {
     if let Some(first) = dates.labelled.first() {
         let kinds = distinct(dates.labelled.iter().map(|s| s.written));
@@ -440,18 +553,20 @@ pub(crate) fn document_date(dates: &Dates) -> PageDate {
             )),
         };
     }
-    // Every date of the head counts, a named other date too: it is a date the head holds,
-    // only it can never be the document's.
+    // Every date of the head counts, one with a label of its own too: it is a date the head
+    // holds, only it can never be the document's. One value that a label names as another
+    // date anywhere in the head is that other date wherever it stands; one value with a label
+    // of its own at one place and plain at another is the plain date.
     let other = |s: &Seen| dates.other.contains(&(s.line, s.written));
     match distinct(dates.head.iter().map(|s| s.written)) {
         0 => PageDate::None,
         1 if dates.head.iter().any(other) => PageDate::None,
-        1 => match iso(dates.head[0].written) {
-            Ok(date) => PageDate::Found(FoundDate {
+        1 => match dates.head.iter().find(|s| !s.named).map(|s| iso(s.written)) {
+            Some(Ok(date)) => PageDate::Found(FoundDate {
                 date,
                 from: "only date in the top third of page 1".to_string(),
             }),
-            Err(_) => PageDate::None,
+            _ => PageDate::None,
         },
         n => PageDate::Unsure(format!(
             "{n} dates stand in the head of page 1; none is marked as the document date"
@@ -609,6 +724,25 @@ mod tests {
         assert!(!names_other_date("Musterstadt, "));
         assert_eq!(fold("Table des Mati\u{e8}res"), "table des matieres");
         assert_eq!(fold("G\u{fc}ltig bis"), "gueltig bis");
+    }
+
+    #[test]
+    fn a_place_with_a_comma_labels_nothing() {
+        assert!(place_and_comma("Musterstadt, "));
+        assert!(place_and_comma("Frankfurt am Main,"));
+        assert!(place_and_comma("St. Gallen,"));
+        assert!(place_and_comma("Baden-Baden, "));
+        // The article after the comma, a postcode, a colon, a number, an other date's label.
+        assert!(!place_and_comma("Musterstadt, den "));
+        assert!(!place_and_comma("12345 Musterstadt, "));
+        assert!(!place_and_comma("Datum: Musterstadt, "));
+        assert!(!place_and_comma("Nr. 4711, "));
+        assert!(!place_and_comma("Geburtsort, "));
+        assert!(!place_and_comma(""));
+        assert!(!place_and_comma(", "));
+        assert!(is_text("Kunde seit "));
+        assert!(!is_text(" - "));
+        assert!(!is_text(""));
     }
 
     #[test]
