@@ -210,8 +210,8 @@ fn sections(v: &Variant) -> (Sheet, Option<Extent>) {
         .chain(SECTION_B.iter())
         .flat_map(|r| r.iter().map(|c| c.to_string()))
         .collect();
-    crate::axes::register_once(&mut b, &cells);
     let mut s = Sheet::new(b);
+    s.once = cells;
     s.want.tables = vec![owned(&SECTION_A), owned(&SECTION_B)];
     let e = Extent {
         top: t,

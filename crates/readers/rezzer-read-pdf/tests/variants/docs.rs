@@ -25,14 +25,14 @@ const DOC: Axes = Axes {
     ..ALL
 };
 
-/// The looks of the rules of a business page: stroked lines, dashed, dotted, and bars of a
-/// point.
 /// The axes of a business page with its neighbours over and under it.
 const DOC_NEXT: Axes = Axes {
     next: &[Next::None, Next::TitleOver, Next::LineOver, Next::RowUnder],
     ..DOC
 };
 
+/// The looks of the rules of a business page: stroked lines, dashed, dotted, and bars of a
+/// point.
 const RULED: Axes = Axes {
     look: &[Look::Real, Look::Dashed, Look::Dotted, Look::Thick],
     ..DOC_NEXT
@@ -69,7 +69,7 @@ struct Span {
 /// The page of a business shape: `template`, the variant's neighbour next to the shape at
 /// `span` (a bold title or a line over it, a table of three columns under it; none beside, as
 /// the shapes run over the width of the page), and the body from `body_top`. Every text shown
-/// once on the page is a value to find once.
+/// on the page is a value to find as many times as it is drawn.
 fn sheet(v: &Variant, template: String, body_top: f32, span: Option<Span>) -> Sheet {
     let k = v.k();
     let (plain, bold) = v.faces();
@@ -112,11 +112,10 @@ fn sheet(v: &Variant, template: String, body_top: f32, span: Option<Span>) -> Sh
     }
     let mut s = Sheet::new(doc_page(v, t, body_top));
     s.want = want;
-    let texts: Vec<String> = crate::axes::shown(&s.built.page.template)
+    s.once = crate::axes::shown(&s.built.page.template)
         .into_iter()
         .filter(|x| !x.contains('*'))
         .collect();
-    crate::axes::register_once(&mut s.built, &texts);
     s
 }
 
@@ -162,9 +161,9 @@ const ITEMS: [[&str; 5]; 3] = [
 
 /// Task 10: line items at 8 points times the size factor, the bold header `Pos`, `Artikel`,
 /// `Menge` at x 40, 80 and 300 and `Preis` and `Betrag` flush right at x 420 and 540, a rule
-/// under the header (unless `header_rule` is false), and with `end` a rule under the last item over three totals (labels at x
-/// 340, values flush right at 540), else a rule under every item but the last. The items are
-/// one table, and the totals another.
+/// under the header (unless `header_rule` is false), and with `end` a rule under the last
+/// item over three totals (labels at x 340, values flush right at 540), else a rule under
+/// every item but the last. The items are one table, and the totals another.
 fn items(v: &Variant, end: bool, header_rule: bool) -> Sheet {
     let k = v.k();
     let (plain, bold) = v.faces();

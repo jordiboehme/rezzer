@@ -80,9 +80,9 @@ pub(crate) const REAL: Geo = Geo {
 /// when the geometry leaves the field unclear (it must not pair, and a loss must name it).
 pub(crate) type Expect = (&'static str, Result<Option<&'static str>, ()>);
 
-/// A page being built: its template, its data lines, the values to find once each, the fields
-/// to expect, the columns a section must hold (its title and its values from the top), and the
-/// raised markers labels carry.
+/// A page being built: its template, its data lines, the values to find (each as often as it
+/// is listed), the fields to expect, the columns a section must hold (its title and its values
+/// from the top), and the raised markers labels carry.
 pub(crate) struct Built {
     pub page: FormPage,
     pub values: Vec<String>,

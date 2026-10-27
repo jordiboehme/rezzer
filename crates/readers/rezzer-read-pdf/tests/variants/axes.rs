@@ -411,6 +411,9 @@ pub(crate) struct Want {
 pub(crate) struct Sheet {
     pub built: Built,
     pub want: Want,
+    /// Texts the shape shows, each to be found as many times as it is drawn (see
+    /// [`expect_drawn`]).
+    pub once: Vec<String>,
 }
 
 impl Sheet {
@@ -418,6 +421,7 @@ impl Sheet {
         Sheet {
             built,
             want: Want::default(),
+            once: Vec::new(),
         }
     }
 }
@@ -456,12 +460,13 @@ pub fn variants(shape: &Shape) -> impl Iterator<Item = Page> + '_ {
 pub(crate) fn page_of(shape: &Shape, v: Variant) -> Page {
     let count = if v.pages == Pages::Two { 2 } else { 1 };
     let sheets = (0..count)
-        .map(|_| {
+        .map(|n| {
             let (mut sheet, extent) = (shape.draw)(&v);
             if let Some(e) = extent {
                 neighbour(&v, &mut sheet, e);
             }
             finish(&v, &mut sheet);
+            expect_drawn(&mut sheet, n + 1);
             sheet
         })
         .collect();
@@ -564,27 +569,61 @@ fn words_of(s: &str) -> Vec<&str> {
     s.split_whitespace().collect()
 }
 
-/// Adds to the values of `b` each text of `texts` whose words stand once among all of them
-/// (a text drawn twice, or inside another one, can not be found once): every value drawn on
-/// the page is then to be found once in its read.
-pub(crate) fn register_once(b: &mut Built, texts: &[String]) {
-    // The page's own marker and the address under a form shape (see `Built::address`) are
-    // text of the page too.
-    let context = [
-        "Page 1",
-        "Page 2",
-        "Muster GmbH",
-        "Musterweg 2",
-        "54321 Musterdorf",
-    ];
-    let all: Vec<Vec<&str>> = texts
-        .iter()
-        .map(|t| words_of(t))
-        .chain(context.iter().map(|t| words_of(t)))
-        .collect();
+/// The texts drawn on `page`: each text of the template shown with `Tj`, each template label
+/// shown with `TJ` (its parts joined), and each data line.
+fn drawn(page: &crate::common::FormPage) -> Vec<String> {
+    let mut out = Vec::new();
+    for chunk in page.template.split("BT ").skip(1) {
+        let Some((head, _)) = chunk.split_once("ET") else {
+            continue;
+        };
+        if head.contains(") Tj") || head.contains("] TJ") {
+            out.push(literals(head));
+        }
+    }
+    out.extend(page.lines.iter().map(|l| l.text.clone()));
+    out
+}
+
+/// The strings of the literals `(...)` in `ops`, joined, escapes undone.
+fn literals(ops: &str) -> String {
+    let mut out = String::new();
+    let (mut inside, mut escaped) = (false, false);
+    for c in ops.chars() {
+        match (inside, escaped, c) {
+            (true, true, _) => {
+                out.push(c);
+                escaped = false;
+            }
+            (true, false, '\\') => escaped = true,
+            (true, false, ')') => inside = false,
+            (true, false, _) => out.push(c),
+            (false, _, '(') => inside = true,
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Holds every value of `sheet`, page `number` of its file, to be found as many times as it
+/// is drawn: each value of the page and each text of `once` (the texts a shape shows) is
+/// listed in the values once for every place its words stand, one after the other, in a drawn
+/// text or in the page's marker (`Page 1`, which the read writes as a paragraph). A text of
+/// `once` that is drawn nowhere as it stands (a run cut by the read) is left out.
+pub(crate) fn expect_drawn(sheet: &mut Sheet, number: usize) {
+    let mut drawn = drawn(&sheet.built.page);
+    drawn.push(format!("Page {number}"));
+    let all: Vec<Vec<&str>> = drawn.iter().map(|t| words_of(t)).collect();
+    let b = &mut sheet.built;
+    let mut texts: Vec<String> = Vec::new();
+    for t in b.values.iter().chain(sheet.once.iter()) {
+        if !texts.contains(t) {
+            texts.push(t.clone());
+        }
+    }
     for t in texts {
-        let want = words_of(t);
-        if want.is_empty() || b.values.contains(t) {
+        let want = words_of(&t);
+        if want.is_empty() {
             continue;
         }
         let n: usize = all
@@ -595,7 +634,8 @@ pub(crate) fn register_once(b: &mut Built, texts: &[String]) {
                     .count()
             })
             .sum();
-        if n == 1 {
+        let have = b.values.iter().filter(|x| **x == t).count();
+        for _ in have..n {
             b.values.push(t.clone());
         }
     }

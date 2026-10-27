@@ -102,8 +102,9 @@ pub(crate) fn check_fields(out: &ReadOutcome, b: &Built) -> Vec<Broken> {
 
 /// The invariants on page `n` (from 0) of a read whose page `b` was built: every pair is a
 /// right pair, each clear field pairs (an empty one with `empty`), each unclear field does not
-/// pair and a loss of the page names it, every value stands once in the page's text, each
-/// column of totals joins its section, and each note stands once. Each broken one is listed.
+/// pair and a loss of the page names it, every value stands in the page's text as often as it
+/// is listed, each column of totals joins its section, and each note stands once. Each broken
+/// one is listed.
 pub(crate) fn check_page(out: &ReadOutcome, n: usize, b: &Built) -> Vec<Broken> {
     let mut broken = Vec::new();
     let blocks = page_blocks(out, n);
@@ -169,14 +170,22 @@ pub(crate) fn check_page(out: &ReadOutcome, n: usize, b: &Built) -> Vec<Broken> 
         .split(|c: char| c.is_whitespace() || c == '|')
         .filter(|w| !w.is_empty())
         .collect();
-    for v in &b.values {
+    // A value listed k times is drawn k times, and stands k times in the text.
+    for (k, v) in b.values.iter().enumerate() {
+        if b.values[..k].contains(v) {
+            continue;
+        }
+        let drawn = b.values.iter().filter(|x| *x == v).count();
         let parts: Vec<&str> = v.split_whitespace().collect();
         let n = words
             .windows(parts.len())
             .filter(|w| *w == parts.as_slice())
             .count();
-        if n != 1 {
-            broken.push(Broken(Inv::ValueOnce, format!("{v:?} stands {n} times")));
+        if n != drawn {
+            broken.push(Broken(
+                Inv::ValueOnce,
+                format!("{v:?} stands {n} times, drawn {drawn} times"),
+            ));
         }
     }
     let mut notes: HashMap<String, usize> = HashMap::new();

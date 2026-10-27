@@ -584,7 +584,12 @@ pub(crate) fn reads(shape: &Shape) -> Reads {
 
 /// Holds page `n` of `mine` to the reading of `theirs`: the same blocks, the same losses (by
 /// kind and the fields they name, numbers masked), and no loss where `theirs` has none.
-fn compare(mine: &ReadOutcome, theirs: &ReadOutcome, n: usize, broken: &mut Vec<Broken>) {
+pub(crate) fn compare(
+    mine: &ReadOutcome,
+    theirs: &ReadOutcome,
+    n: usize,
+    broken: &mut Vec<Broken>,
+) {
     let (mine, theirs) = (reading(mine, n), reading(theirs, n));
     let only = |a: &[String], b: &[String]| -> Vec<String> {
         a.iter().filter(|x| !b.contains(x)).cloned().collect()

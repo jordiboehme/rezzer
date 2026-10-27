@@ -170,6 +170,65 @@ fn every_pinned_entry_names_a_shape_and_a_reason() {
     assert_eq!(pinned.len(), n, "a variant is pinned twice");
 }
 
+/// A value drawn more than once on a page is to be found as many times as it is drawn
+/// (`20` stands in both rows of a section, `Muster` in a cell and in the address under it),
+/// and a read that holds it fewer or more times breaks `ValueOnce`.
+#[test]
+fn a_value_drawn_twice_is_expected_twice() {
+    let page = axes::page_of(&shape("section grids"), axes::BASE);
+    let values = &page.sheets[0].built.values;
+    let times = |t: &str| values.iter().filter(|v| *v == t).count();
+    assert_eq!((times("20"), times("Muster"), times("1001")), (2, 2, 1));
+    let out = inv::read(&page);
+    assert!(inv::check_read(&out, &page).is_empty());
+    let mut more = axes::page_of(&shape("section grids"), axes::BASE);
+    more.sheets[0].built.values.push("20".into());
+    let broken = inv::check_read(&out, &more);
+    assert!(
+        broken
+            .iter()
+            .any(|b| b.0 == Inv::ValueOnce && b.1.contains("\"20\" stands 2 times, drawn 3")),
+        "{broken:?}"
+    );
+}
+
+/// Two reads that differ only in their losses do not read the same: a loss where the
+/// reference has none is `NoLoss`, another loss where it has one is `SameReading`.
+#[test]
+fn reads_that_differ_only_in_their_losses_differ() {
+    let page = axes::page_of(&shape("section grids"), axes::BASE);
+    let theirs = inv::read(&page);
+    assert!(theirs.document.losses.is_empty());
+    let loss = |what: &str| rezzer_model::Loss {
+        location: "p1".into(),
+        what: what.into(),
+        why: rezzer_model::LossReason::Uncertain,
+        severity: rezzer_model::Severity::Info,
+    };
+    let held = |mine: &rezzer_model::ReadOutcome, theirs: &rezzer_model::ReadOutcome| {
+        let mut broken = Vec::new();
+        inv::compare(mine, theirs, 0, &mut broken);
+        broken.into_iter().map(|b| b.0).collect::<Vec<Inv>>()
+    };
+    assert!(held(&theirs, &theirs).is_empty());
+    let mut mine = theirs.clone();
+    mine.document
+        .losses
+        .push(loss("the field Name is not read"));
+    assert_eq!(held(&mine, &theirs), [Inv::NoLoss]);
+    let mut other = theirs.clone();
+    other
+        .document
+        .losses
+        .push(loss("the field Art is not read"));
+    assert_eq!(held(&mine, &other), [Inv::SameReading]);
+    // The numbers of a loss are masked: the same loss with another number reads the same.
+    let (mut at, mut moved) = (theirs.clone(), theirs.clone());
+    at.document.losses.push(loss("the number 12,34 is kept"));
+    moved.document.losses.push(loss("the number 56,78 is kept"));
+    assert!(held(&at, &moved).is_empty());
+}
+
 macro_rules! shape_tests {
     ($($test:ident => $name:literal,)*) => {
         $(
