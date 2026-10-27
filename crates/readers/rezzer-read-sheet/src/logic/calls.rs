@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Parsing of call arguments and literals, and the facts a sheet gives the logic pass.
+//! Parsing of call arguments and literals.
 
 use super::*;
 
