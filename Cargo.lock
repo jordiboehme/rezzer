@@ -2135,6 +2135,7 @@ dependencies = [
  "percent-encoding",
  "predicates",
  "rezzer-cli",
+ "rezzer-derez",
  "rezzer-limits",
  "rezzer-model",
  "rezzer-pipeline",
