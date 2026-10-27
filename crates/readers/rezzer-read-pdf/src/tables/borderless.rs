@@ -1167,27 +1167,56 @@ fn grid_of(
     Ok(Grid { rows, cuts })
 }
 
+/// Each part of a cut title stands within this many sizes of its column's start or of its
+/// column's end (a title is set flush left or flush right with its values).
+const TITLE_ALIGN: f32 = 0.25;
+
 /// Where the piece `p` of a header line, over the columns `left` and `right` side by side, is
 /// cut into two titles: the last word space whose words before it end before `right` and
 /// whose words after it start after `left`, so that each part stands over one column only.
 /// Gives the run whose text the cut starts in, and its byte; byte 0 when the cut lies between
 /// two runs. A word space inside a run is where the glyphs say, else where the run's width
 /// shared out by its characters puts it.
+///
+/// One title over both columns has word spaces over the gutter too, so a cut also needs:
+/// - each part lines up with its own column, at its start or at its end (see
+///   [`TITLE_ALIGN`]); a title centered over both columns does not;
+/// - the words on both sides of the space do not start with a small letter: a title starts
+///   with a capital, a digit or a sign, and a word in small letters goes on the words before
+///   it (`Gueltig von bis`, `Zeitraum der Leistung`).
+///
+/// Where these cannot tell, the title stays one cell over both columns.
 fn title_cut(
     flow: &Flow,
     p: &Piece,
     left: (f32, f32),
     right: (f32, f32),
 ) -> Option<(usize, usize)> {
-    // A space from `from` to `to` that lets both parts stand over their own column.
-    let fits =
-        |from: f32, to: f32| from > left.0 && from <= right.0 && to >= left.1 && to < right.1;
+    let size = flow.runs[p.start..p.end]
+        .iter()
+        .map(|r| r.size)
+        .fold(1.0f32, f32::max);
+    let near = |a: f32, b: f32| (a - b).abs() <= TITLE_ALIGN * size;
+    // A space from `from` to `to` that lets both parts stand over their own column, each lined
+    // up with it, between two words that start with no small letter.
+    let fits = |from: f32, to: f32, before: &str, after: &str| {
+        let small = |w: &str| w.chars().next().is_some_and(char::is_lowercase);
+        let last = before.split_whitespace().next_back().unwrap_or("");
+        from > left.0
+            && from <= right.0
+            && to >= left.1
+            && to < right.1
+            && (near(p.x0, left.0) || near(from, left.1))
+            && (near(to, right.0) || near(p.x1, right.1))
+            && !small(last)
+            && !small(after.trim_start())
+    };
     let mut cut = None;
     for i in p.start..p.end {
         let r = &flow.runs[i];
         if i > p.start {
             let prev = &flow.runs[i - 1];
-            if !r.text.trim().is_empty() && fits(prev.x + prev.w, r.x) {
+            if !r.text.trim().is_empty() && fits(prev.x + prev.w, r.x, &prev.text, &r.text) {
                 cut = Some((i, 0));
             }
         }
@@ -1217,7 +1246,7 @@ fn title_cut(
                 ),
                 None => continue,
             };
-            if fits(x0, x1) {
+            if fits(x0, x1, &r.text[..byte], &r.text[byte..]) {
                 cut = Some((i, byte));
             }
         }

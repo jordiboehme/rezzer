@@ -1224,6 +1224,8 @@ enum Close {
     /// As `FlushRight` with the titles 0.9 sizes apart: the text layer makes two runs of them
     /// (a gap of more than 0.8 sizes), one piece still (a cell gap is 1 size).
     Apart,
+    /// As `FlushRight` with the rate title `MwSt.` over rates set without a space (`19%`).
+    Rate,
 }
 
 /// Rows of line items: position, article, quantity, unit, tax rate and amount.
@@ -1251,10 +1253,19 @@ fn close_titles(
     let flush_right = |font: &str, x: f32, y: f32, t: &str| {
         show(font, size, x - common::font_width(font, t, size), y, t)
     };
-    let rows = &CLOSE_ROWS[..n];
+    let rows: Vec<[String; 6]> = CLOSE_ROWS[..n]
+        .iter()
+        .map(|r| {
+            r.map(|c| match close {
+                Close::Rate => c.replace(" %", "%"),
+                _ => c.to_string(),
+            })
+        })
+        .collect();
     let (second, a, b) = match close {
         Close::OneShow => ("Einheit", 2, 3),
         Close::FlushRight | Close::Apart => ("USt-Satz", 2, 4),
+        Close::Rate => ("MwSt.", 2, 4),
     };
     let apart = if matches!(close, Close::Apart) {
         0.9
@@ -1268,7 +1279,7 @@ fn close_titles(
             t += &show(tf, size, 300.0, 600.0, "Menge Einheit");
             300.0 + common::font_width(tf, "Menge ", size)
         }
-        Close::FlushRight | Close::Apart => {
+        Close::FlushRight | Close::Apart | Close::Rate => {
             let x2 = 300.0 + common::font_width(tf, "Menge", size) + apart * size;
             t += &show(tf, size, 300.0, 600.0, "Menge");
             t += &show(tf, size, x2, 600.0, second);
@@ -1278,25 +1289,25 @@ fn close_titles(
     t += &flush_right(tf, 540.0, 600.0, "Betrag");
     for (r, row) in rows.iter().enumerate() {
         let y = 600.0 - 10.0 * k * (r as f32 + 1.0);
-        t += &show(vf, size, 40.0, y, row[0]);
-        t += &show(vf, size, 80.0, y, row[1]);
+        t += &show(vf, size, 40.0, y, &row[0]);
+        t += &show(vf, size, 80.0, y, &row[1]);
         match close {
             Close::OneShow => {
-                t += &show(vf, size, 300.0, y, row[a]);
-                t += &show(vf, size, x2, y, row[b]);
+                t += &show(vf, size, 300.0, y, &row[a]);
+                t += &show(vf, size, x2, y, &row[b]);
             }
-            Close::FlushRight | Close::Apart => {
+            Close::FlushRight | Close::Apart | Close::Rate => {
                 let end = 300.0 + common::font_width(tf, "Menge", size);
-                t += &flush_right(vf, end, y, row[a]);
-                t += &flush_right(vf, x2 + common::font_width(tf, second, size), y, row[b]);
+                t += &flush_right(vf, end, y, &row[a]);
+                t += &flush_right(vf, x2 + common::font_width(tf, second, size), y, &row[b]);
             }
         }
-        t += &flush_right(vf, 540.0, y, row[5]);
+        t += &flush_right(vf, 540.0, y, &row[5]);
     }
     let column = |title: &str, c: usize| -> Column {
         (
             title.to_string(),
-            rows.iter().map(|r| r[c].to_string()).collect(),
+            rows.iter().map(|r| r[c].clone()).collect(),
         )
     };
     let columns = vec![
@@ -1363,7 +1374,7 @@ fn close_column_titles_are_cut() {
 fn close_column_titles_head_their_columns_in_every_size_and_font() {
     let mut wrong = Vec::new();
     let mut reads = 0;
-    for close in [Close::OneShow, Close::FlushRight, Close::Apart] {
+    for close in [Close::OneShow, Close::FlushRight, Close::Apart, Close::Rate] {
         for k in [0.75, 1.0, 1.5] {
             for fonts in FONTS {
                 for bold in [false, true] {
@@ -1386,8 +1397,87 @@ fn close_column_titles_head_their_columns_in_every_size_and_font() {
             }
         }
     }
-    assert_eq!(reads, 144);
+    assert_eq!(reads, 192);
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// Rows of dates for [`spanned_title`]: position, article, from, to and amount.
+const DATE_ROWS: [[&str; 5]; 5] = [
+    ["1", "Beratung", "01.01.2026", "31.01.2026", "1.000,00"],
+    ["2", "Wartung", "01.02.2026", "28.02.2026", "200,00"],
+    ["3", "Support", "01.03.2026", "31.03.2026", "34,56"],
+    ["4", "Montage", "01.04.2026", "30.04.2026", "30,00"],
+    ["5", "Pruefung", "01.05.2026", "31.05.2026", "99,00"],
+];
+
+/// Line items of `n` rows of [`DATE_ROWS`] at `k` times 8 pt in the fonts `fonts` (plain,
+/// bold), their titles bold when `bold`: `Pos` and `Artikel` at x 40 and 80, `title` over two
+/// columns of dates (from x 300, and 1.25 date widths further), from x 300 or centered over
+/// both, and `Betrag` flush right at x 540. Gives the template and the columns (the title's
+/// lines are the two dates of a row).
+fn spanned_title(
+    k: f32,
+    (fonts, bold): ((&str, &str), bool),
+    n: usize,
+    title: &str,
+    centered: bool,
+) -> (String, Vec<Column>) {
+    let size = 8.0 * k;
+    let (vf, tf) = (fonts.0, if bold { fonts.1 } else { fonts.0 });
+    let w = |font: &str, t: &str| common::font_width(font, t, size);
+    let date = w(vf, "01.01.2026");
+    let x2 = 300.0 + 1.25 * date;
+    let tx = if centered {
+        (300.0 + x2 + date - w(tf, title)) / 2.0
+    } else {
+        300.0
+    };
+    let mut t = show(tf, size, 40.0, 600.0, "Pos")
+        + &show(tf, size, 80.0, 600.0, "Artikel")
+        + &show(tf, size, tx, 600.0, title)
+        + &show(tf, size, 540.0 - w(tf, "Betrag"), 600.0, "Betrag");
+    let rows = &DATE_ROWS[..n];
+    for (r, row) in rows.iter().enumerate() {
+        let y = 600.0 - 10.0 * k * (r as f32 + 1.0);
+        t += &show(vf, size, 40.0, y, row[0]);
+        t += &show(vf, size, 80.0, y, row[1]);
+        t += &show(vf, size, 300.0, y, row[2]);
+        t += &show(vf, size, x2, y, row[3]);
+        t += &show(vf, size, 540.0 - w(vf, row[4]), y, row[4]);
+    }
+    let column = |title: &str, f: &dyn Fn(&[&str; 5]) -> String| -> Column {
+        (title.to_string(), rows.iter().map(f).collect())
+    };
+    let columns = vec![
+        column("Pos", &|r| r[0].to_string()),
+        column("Artikel", &|r| r[1].to_string()),
+        column(title, &|r| format!("{} {}", r[2], r[3])),
+        column("Betrag", &|r| r[4].to_string()),
+    ];
+    (t, columns)
+}
+
+/// What a title over two columns of dates breaks in `out`: see [`columns_broken`], and its
+/// header cell is the whole title with a span of 2.
+fn spanned_broken(out: &ReadOutcome, columns: &[Column]) -> Vec<String> {
+    let mut b = columns_broken(out, columns);
+    let want: Vec<(String, u32)> = columns
+        .iter()
+        .enumerate()
+        .map(|(c, t)| (t.0.clone(), if c == 2 { 2 } else { 1 }))
+        .collect();
+    if header_cells(out) != want {
+        b.push(format!("header {:?}", header_cells(out)));
+    }
+    b
+}
+
+/// Every font and weight of the generated tables.
+fn faces() -> Vec<((&'static str, &'static str), bool)> {
+    FONTS
+        .iter()
+        .flat_map(|f| [(*f, false), (*f, true)])
+        .collect()
 }
 
 /// Guard: one word over two columns of dates has no word space to cut at: its cell keeps
@@ -1395,62 +1485,61 @@ fn close_column_titles_head_their_columns_in_every_size_and_font() {
 /// dates of each row stand under it.
 #[test]
 fn one_word_title_over_two_columns_stays_spanned() {
-    let rows = [
-        ["1", "Beratung", "01.01.2026", "31.01.2026", "1.000,00"],
-        ["2", "Wartung", "01.02.2026", "28.02.2026", "200,00"],
-        ["3", "Support", "01.03.2026", "31.03.2026", "34,56"],
-        ["4", "Montage", "01.04.2026", "30.04.2026", "30,00"],
-        ["5", "Pruefung", "01.05.2026", "31.05.2026", "99,00"],
-    ];
     let mut wrong = Vec::new();
     for k in [0.75, 1.0, 1.5] {
-        for fonts in FONTS {
-            for bold in [false, true] {
-                for n in 2..=5 {
-                    let size = 8.0 * k;
-                    let tf = if bold { fonts.1 } else { fonts.0 };
-                    let date = common::font_width(fonts.0, "01.01.2026", size);
-                    let mut t = show(tf, size, 40.0, 600.0, "Pos")
-                        + &show(tf, size, 80.0, 600.0, "Artikel")
-                        + &show(tf, size, 300.0, 600.0, "Leistungszeitraum");
-                    let w = common::font_width(tf, "Betrag", size);
-                    t += &show(tf, size, 540.0 - w, 600.0, "Betrag");
-                    for (r, row) in rows[..n].iter().enumerate() {
-                        let y = 600.0 - 10.0 * k * (r as f32 + 1.0);
-                        t += &show(fonts.0, size, 40.0, y, row[0]);
-                        t += &show(fonts.0, size, 80.0, y, row[1]);
-                        t += &show(fonts.0, size, 300.0, y, row[2]);
-                        t += &show(fonts.0, size, 300.0 + 1.25 * date, y, row[3]);
-                        let w = common::font_width(fonts.0, row[4], size);
-                        t += &show(fonts.0, size, 540.0 - w, y, row[4]);
-                    }
-                    let out = common::read(&page_in(&t, Look::Plain));
-                    let name = format!("{k}x, {fonts:?}, bold {bold}, {n} rows");
-                    let column = |title: &str, f: &dyn Fn(&[&str; 5]) -> String| -> Column {
-                        (title.to_string(), rows[..n].iter().map(f).collect())
-                    };
-                    let columns = [
-                        column("Pos", &|r| r[0].to_string()),
-                        column("Artikel", &|r| r[1].to_string()),
-                        column("Leistungszeitraum", &|r| format!("{} {}", r[2], r[3])),
-                        column("Betrag", &|r| r[4].to_string()),
-                    ];
-                    let mut b = columns_broken(&out, &columns);
-                    let want = [
-                        ("Pos".to_string(), 1),
-                        ("Artikel".to_string(), 1),
-                        ("Leistungszeitraum".to_string(), 2),
-                        ("Betrag".to_string(), 1),
-                    ];
-                    if header_cells(&out) != want {
-                        b.push(format!("header {:?}", header_cells(&out)));
-                    }
-                    wrong.extend(b.into_iter().map(|b| format!("{name}: {b}")));
+        for face in faces() {
+            for n in 2..=5 {
+                let (t, columns) = spanned_title(k, face, n, "Leistungszeitraum", false);
+                let out = common::read(&page_in(&t, Look::Plain));
+                for b in spanned_broken(&out, &columns) {
+                    wrong.push(format!("{k}x, {face:?}, {n} rows: {b}"));
                 }
             }
         }
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// The review's finding K1: a title of two words or more over two columns of dates, set from
+/// the first column's start or centered over both, is one title: it is not cut at a word
+/// space over the gutter. In every size, font and weight and with 2 to 5 rows its cell keeps
+/// its span of two columns, and the dates of each row stand under it.
+#[test]
+fn titles_of_many_words_over_two_columns_stay_spanned() {
+    let titles = [
+        "Zeitraum der Leistung",
+        "Service period",
+        "Gueltig von bis",
+        "Leistung vom bis",
+        "Leistungszeitraum",
+    ];
+    let mut wrong = Vec::new();
+    let mut reads = 0;
+    for title in titles {
+        for centered in [false, true] {
+            for k in [0.75, 1.0, 1.5] {
+                for face in faces() {
+                    for n in 2..=5 {
+                        let (t, columns) = spanned_title(k, face, n, title, centered);
+                        let out = common::read(&page_in(&t, Look::Plain));
+                        reads += 1;
+                        for b in spanned_broken(&out, &columns) {
+                            wrong.push(format!(
+                                "{title}, centered {centered}, {k}x, {face:?}, {n} rows: {b}"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(reads, 480);
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
 }
 
 /// Guard: tax rates flush right under a short title `USt` 0.9 sizes after `Menge` reach left
@@ -1825,7 +1914,7 @@ fn the_labels_over_a_row_of_fields_read_as_a_table_are_its_header() {
 fn close_column_titles_in_a_frame_head_their_columns() {
     let mut wrong = Vec::new();
     let mut reads = 0;
-    for close in [Close::OneShow, Close::FlushRight, Close::Apart] {
+    for close in [Close::OneShow, Close::FlushRight, Close::Apart, Close::Rate] {
         for k in [0.75, 1.0, 1.5] {
             for look in LOOKS {
                 for fonts in FONTS {
@@ -1857,7 +1946,7 @@ fn close_column_titles_in_a_frame_head_their_columns() {
             }
         }
     }
-    assert_eq!(reads, 864);
+    assert_eq!(reads, 1152);
     assert!(
         wrong.is_empty(),
         "{} wrong:\n{}",
