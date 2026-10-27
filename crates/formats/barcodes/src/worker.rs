@@ -138,7 +138,7 @@ impl Worker {
             state.next_id += 1;
             state.queue.push_back(Task { job, id });
             state.phases.push((id, Phase::Queued));
-            if !self.grow(&mut state) {
+            if !grow(&self.shared, &mut state) {
                 state.queue.retain(|t| t.id != id);
                 state.forget(id);
                 return Err(Stop::Internal);
@@ -176,7 +176,7 @@ impl Worker {
                 }
                 state.stuck += 1;
                 // Calls queued behind it may now have no thread left to run them.
-                if !state.queue.is_empty() && self.grow(&mut state) {
+                if !state.queue.is_empty() && grow(&self.shared, &mut state) {
                     self.shared.ready.notify_one();
                 }
             }
@@ -189,25 +189,6 @@ impl Worker {
             Some(Phase::Stuck) | None => state.forget(id),
         }
         Err(Stop::Time(Scan::default()))
-    }
-
-    /// Starts a thread when every live thread is stuck and fewer than [`MAX_STUCK`] are.
-    /// False when a thread is needed and none can be had: no thread lives and the system
-    /// gives none.
-    fn grow(&self, state: &mut State) -> bool {
-        if state.threads > state.stuck || state.stuck >= MAX_STUCK {
-            return true;
-        }
-        state.threads += 1;
-        let shared = self.shared.clone();
-        let started = std::thread::Builder::new()
-            .name("barcodes".into())
-            .spawn(move || serve(&shared))
-            .is_ok();
-        if !started {
-            state.threads -= 1;
-        }
-        started || state.threads > 0
     }
 
     /// The live decoder threads.
@@ -224,8 +205,61 @@ impl Drop for Worker {
     }
 }
 
+/// Starts a thread when every live thread is stuck and fewer than [`MAX_STUCK`] are.
+/// False when a thread is needed and none can be had: no thread lives and the system gives
+/// none.
+fn grow(shared: &Arc<Shared>, state: &mut State) -> bool {
+    if state.threads > state.stuck || state.stuck >= MAX_STUCK {
+        return true;
+    }
+    state.threads += 1;
+    let shared = shared.clone();
+    let started = std::thread::Builder::new()
+        .name("barcodes".into())
+        .spawn(move || serve(&shared))
+        .is_ok();
+    if !started {
+        state.threads -= 1;
+    }
+    started || state.threads > 0
+}
+
+/// Puts the counts right when a decoder thread unwinds. The job catches the panics of the
+/// decoder, but a panic can still get out of it, for example from the drop of a panic
+/// payload. The caller of that job then gets [`Stop::Internal`].
+struct Unwind<'s> {
+    shared: &'s Arc<Shared>,
+    /// The call the thread runs.
+    running: Option<u64>,
+}
+
+impl Drop for Unwind<'_> {
+    fn drop(&mut self) {
+        if !std::thread::panicking() {
+            return;
+        }
+        let mut state = self.shared.lock();
+        state.threads -= 1;
+        if let Some(id) = self.running {
+            if state.phase(id).is_some_and(|p| *p == Phase::Stuck) {
+                state.stuck -= 1;
+            }
+            state.forget(id);
+        }
+        // Calls queued now may have no thread left to run them.
+        if !state.queue.is_empty() {
+            grow(self.shared, &mut state);
+            self.shared.ready.notify_one();
+        }
+    }
+}
+
 /// The loop of one decoder thread.
-fn serve(shared: &Shared) {
+fn serve(shared: &Arc<Shared>) {
+    let mut unwind = Unwind {
+        shared,
+        running: None,
+    };
     let mut state = shared.lock();
     loop {
         if let Some(task) = state.queue.pop_front() {
@@ -233,8 +267,10 @@ fn serve(shared: &Shared) {
                 *p = Phase::Running;
             }
             drop(state);
-            // The job catches its own panics and sends its answer.
+            unwind.running = Some(task.id);
+            // The job catches the decoder's panics and sends its answer.
             (task.job)();
+            unwind.running = None;
             state = shared.lock();
             match state.phase(task.id) {
                 Some(Phase::Stuck) => {
@@ -268,11 +304,9 @@ impl Runner for Remote<'_> {
         if Instant::now() >= deadline {
             return Err(Stop::Time(Scan::default()));
         }
-        match self.0.call(Box::new(move || read::run(job)), deadline) {
-            Ok(found) => found,
-            Err(Stop::Time(_)) => Err(Stop::Time(Scan::default())),
-            Err(e) => Err(e),
-        }
+        self.0
+            .call(Box::new(move || read::run(job)), deadline)
+            .and_then(|found| found)
     }
 }
 
@@ -305,7 +339,7 @@ mod tests {
     fn a_stuck_call_does_not_hold_up_the_next() {
         let worker = Worker::new();
         let (release, a) = blocked();
-        assert!(matches!(worker.call(a, soon(50)), Err(Stop::Time(_))));
+        assert!(matches!(worker.call(a, soon(500)), Err(Stop::Time(_))));
         let b: Box<dyn FnOnce() -> u32 + Send> = Box::new(|| 7);
         assert_eq!(worker.call(b, Instant::now() + SAFETY), Ok(7));
         // A is still blocked here: it is released only now.
@@ -318,14 +352,15 @@ mod tests {
         let mut releases = Vec::new();
         for _ in 0..MAX_STUCK + 1 {
             let (release, f) = blocked();
-            assert!(matches!(worker.call(f, soon(200)), Err(Stop::Time(_))));
+            assert!(matches!(worker.call(f, soon(500)), Err(Stop::Time(_))));
             releases.push(release);
         }
-        assert!(worker.threads() <= MAX_STUCK + 1, "{}", worker.threads());
+        // The first two calls hold a thread each; the third waited in the queue.
+        assert_eq!(worker.threads(), MAX_STUCK);
         // Every thread is stuck and no new one may start: the call waits and gives up.
         let f: Box<dyn FnOnce() -> u32 + Send> = Box::new(|| 7);
-        assert!(matches!(worker.call(f, soon(200)), Err(Stop::Time(_))));
-        assert!(worker.threads() <= MAX_STUCK + 1, "{}", worker.threads());
+        assert!(matches!(worker.call(f, soon(500)), Err(Stop::Time(_))));
+        assert_eq!(worker.threads(), MAX_STUCK);
         // The last blocked call was skipped, never run: its send finds no receiver.
         for release in releases {
             let _ = release.send(());
@@ -347,5 +382,26 @@ mod tests {
         assert_eq!(worker.threads(), 1);
         let f: Box<dyn FnOnce() -> u32 + Send> = Box::new(|| 7);
         assert_eq!(worker.call(f, Instant::now() + SAFETY), Ok(7));
+    }
+
+    /// A panic payload whose drop panics too.
+    struct Bomb;
+
+    impl Drop for Bomb {
+        fn drop(&mut self) {
+            panic!("the payload's drop");
+        }
+    }
+
+    #[test]
+    fn a_thread_that_unwinds_keeps_the_counts_right() {
+        let worker = Worker::new();
+        let f: Box<dyn FnOnce() -> u32 + Send> = Box::new(|| std::panic::panic_any(Bomb));
+        assert_eq!(worker.call(f, Instant::now() + SAFETY), Err(Stop::Internal));
+        // The thread is gone; the next call gets a new one, also when it comes before the
+        // old thread has put its count right.
+        let f: Box<dyn FnOnce() -> u32 + Send> = Box::new(|| 7);
+        assert_eq!(worker.call(f, Instant::now() + SAFETY), Ok(7));
+        assert_eq!(worker.threads(), 1);
     }
 }

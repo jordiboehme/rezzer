@@ -164,7 +164,7 @@ QR Code: [https://example.org/t/dNuKThV1](https://example.org/t/dNuKThV1)
 - Codes are read as text or bytes. What a ticket, a payment or a boarding pass code means (EPC QR, Swiss QR bill, UIC 918, IATA BCBP) is read in a later version
 - A code drawn as one outline path, not as squares or bars, is only found when its page is rendered for vision
 - Codes in scans are read from the page render at 144 dpi only. A code whose modules are finer than about 2 pixels at 144 dpi is not read. An invoice QR code of about 20 mm still has about 2.3 pixels a module there
-- When the decoder runs past its time on one file, Rezzer starts a new worker, so later files are not held up. When two such calls still run, later files wait for them.
+- When the decoder runs past its time on one file, Rezzer starts a new worker, so later files are not held up. When two such calls still run, later files wait for them. Those files name the pages without codes in an info note
 - Without an output directory, a page that draws more than 1,000 pictures is not rendered to look for codes. The output says so
 - Equal pictures are found by all of their data. Two copies of one picture with different compression get a file each, and so do two copies in their own objects after the first 65,536 picture objects of a file. A stencil mask drawn in two colors is one picture
 - At a low memory limit (256 MiB) a large file like the NIST report with 492 pages is not read, and the output says which limit was hit
