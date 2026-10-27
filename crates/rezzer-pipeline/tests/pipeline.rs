@@ -804,19 +804,48 @@ fn config_load_uses_xdg_config_home() {
     // Only the path lookup is tested; the real home config is never read.
     let dir = tempfile::tempdir().unwrap();
     assert_eq!(
-        rezzer_pipeline::config_path_from(Some(dir.path().as_os_str()), None),
+        rezzer_pipeline::config_path_from(Some(dir.path().as_os_str()), None, None),
         Some(dir.path().join("rezzer/config.toml"))
     );
     let home = Path::new("/home/someone");
     assert_eq!(
-        rezzer_pipeline::config_path_from(Some("".as_ref()), Some(home.as_os_str())),
+        rezzer_pipeline::config_path_from(Some("".as_ref()), Some(home.as_os_str()), None),
         Some(home.join(".config/rezzer/config.toml"))
     );
     assert_eq!(
-        rezzer_pipeline::config_path_from(Some("relative".as_ref()), Some(home.as_os_str())),
+        rezzer_pipeline::config_path_from(Some("relative".as_ref()), Some(home.as_os_str()), None),
         Some(home.join(".config/rezzer/config.toml"))
     );
-    assert_eq!(rezzer_pipeline::config_path_from(None, None), None);
+    assert_eq!(rezzer_pipeline::config_path_from(None, None, None), None);
+}
+
+#[test]
+fn config_path_falls_back_to_userprofile() {
+    // Windows sets USERPROFILE, not HOME. Plain values, so the test means the same on every OS.
+    let home = Path::new("home");
+    let profile = Path::new("profile");
+    let path = |xdg: Option<&str>, home: Option<&Path>, profile: Option<&Path>| {
+        rezzer_pipeline::config_path_from(
+            xdg.map(std::ffi::OsStr::new),
+            home.map(Path::as_os_str),
+            profile.map(Path::as_os_str),
+        )
+    };
+    let in_profile = Some(profile.join(".config").join("rezzer").join("config.toml"));
+    assert_eq!(path(None, None, Some(profile)), in_profile);
+    assert_eq!(path(None, Some(Path::new("")), Some(profile)), in_profile);
+    // HOME wins over USERPROFILE, and an absolute XDG_CONFIG_HOME over both.
+    assert_eq!(
+        path(None, Some(home), Some(profile)),
+        Some(home.join(".config").join("rezzer").join("config.toml"))
+    );
+    let xdg = std::env::temp_dir();
+    assert_eq!(
+        path(Some(xdg.to_str().unwrap()), Some(home), Some(profile)),
+        Some(xdg.join("rezzer").join("config.toml"))
+    );
+    // An empty USERPROFILE counts as none.
+    assert_eq!(path(None, None, Some(Path::new(""))), None);
 }
 
 fn panicking_detector(_: &str, _: Option<&str>, _: &[u8]) -> (FormatId, rezzer_model::Detection) {

@@ -3,8 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! The user's config file: `$XDG_CONFIG_HOME/rezzer/config.toml`, else
-//! `~/.config/rezzer/config.toml` (on macOS too, as the spec says). A missing file means the
-//! defaults; an unknown key is an error that names the file and the key.
+//! `~/.config/rezzer/config.toml` (on macOS too, as the spec says). The home is `HOME`, or
+//! `USERPROFILE` when `HOME` is empty or unset, so on Windows the file is
+//! `%USERPROFILE%\.config\rezzer\config.toml`. A missing file means the defaults; an unknown
+//! key is an error that names the file and the key.
 //!
 //! ```toml
 //! cache = true
@@ -112,7 +114,8 @@ impl Config {
     pub fn load() -> Result<Config, ConfigError> {
         let xdg = std::env::var_os("XDG_CONFIG_HOME");
         let home = std::env::var_os("HOME");
-        match config_path_from(xdg.as_deref(), home.as_deref()) {
+        let user_profile = std::env::var_os("USERPROFILE");
+        match config_path_from(xdg.as_deref(), home.as_deref(), user_profile.as_deref()) {
             Some(path) => Config::load_from(&path),
             None => Ok(Config::default()),
         }
@@ -190,17 +193,29 @@ impl Config {
     }
 }
 
-/// The config file path from the values of `XDG_CONFIG_HOME` and `HOME`. An empty or
-/// relative `XDG_CONFIG_HOME` is ignored, as the XDG base directory spec says.
-pub fn config_path_from(xdg_config_home: Option<&OsStr>, home: Option<&OsStr>) -> Option<PathBuf> {
+/// The config file path from the values of `XDG_CONFIG_HOME`, `HOME` and `USERPROFILE`. An
+/// empty or relative `XDG_CONFIG_HOME` is ignored, as the XDG base directory spec says. The
+/// home is `HOME`, or `USERPROFILE` (which Windows sets) when `HOME` is empty or unset.
+pub fn config_path_from(
+    xdg_config_home: Option<&OsStr>,
+    home: Option<&OsStr>,
+    user_profile: Option<&OsStr>,
+) -> Option<PathBuf> {
     let xdg = xdg_config_home
         .map(PathBuf::from)
         .filter(|p| p.is_absolute());
     let base = match xdg {
         Some(dir) => dir,
-        None => PathBuf::from(home.filter(|h| !h.is_empty())?).join(".config"),
+        None => home_dir(home, user_profile)?.join(".config"),
     };
     Some(base.join("rezzer").join("config.toml"))
+}
+
+/// The home directory: `home` unless it is empty or unset, else `user_profile` unless that is
+/// empty or unset.
+fn home_dir(home: Option<&OsStr>, user_profile: Option<&OsStr>) -> Option<PathBuf> {
+    let given = |v: Option<&OsStr>| v.filter(|v| !v.is_empty()).map(PathBuf::from);
+    given(home).or_else(|| given(user_profile))
 }
 
 fn line_of(text: &str, offset: usize) -> usize {
