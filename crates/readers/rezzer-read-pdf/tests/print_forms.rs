@@ -4802,12 +4802,15 @@ fn plain_date_under_or_beside_a_heading_is_not_guessed() {
     }
 }
 
-/// What a layout of the head gives: a date with what `document_date_from` says, or no date
-/// with a loss.
+/// What a layout gives: a date with what `document_date_from` says, no date and no loss about
+/// a date (the layout may note a table), or no date with a loss about dates.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum HeadWant {
     Date(&'static str, &'static str),
+    Nothing,
     Lost(&'static str),
+    /// No date, with a loss about dates whose words vary with the size.
+    NoDate,
 }
 
 /// Asserts that `out` gives `want`, naming `case` when it does not.
@@ -4819,9 +4822,25 @@ fn assert_head(out: &ReadOutcome, want: HeadWant, case: &str) {
             assert_eq!(found.map(|d| d.from.as_str()), Some(from), "{case}");
             assert!(unsure(out).is_empty(), "{case}: {:?}", unsure(out));
         }
+        HeadWant::Nothing => {
+            assert_eq!(found, None, "{case}");
+            let about_dates: Vec<&str> = unsure(out)
+                .into_iter()
+                .filter(|w| w.contains("of page 1") && w.contains("date"))
+                .collect();
+            assert!(about_dates.is_empty(), "{case}: {about_dates:?}");
+        }
         HeadWant::Lost(loss) => {
             assert_eq!(found, None, "{case}");
             assert_eq!(unsure(out), [loss], "{case}");
+        }
+        HeadWant::NoDate => {
+            assert_eq!(found, None, "{case}");
+            let losses = unsure(out);
+            assert!(
+                losses.len() == 1 && losses[0].contains("date"),
+                "{case}: {losses:?}"
+            );
         }
     }
 }
@@ -4829,8 +4848,8 @@ fn assert_head(out: &ReadOutcome, want: HeadWant, case: &str) {
 #[test]
 fn head_layouts_with_one_other_date() {
     // Layouts of the head with one date that has a label of its own which is no date label,
-    // and one plain date or none. The rule: a date is chosen only when a date label, a pair
-    // of a field table or `<place>, den` marks it; the dates of the head give a loss. Never a
+    // and one plain date or none. The rule: a date is chosen only when a date label marks it,
+    // beside it, over it or in the cell left of it; the dates of the head give a loss. Never a
     // wrong date: a loss or no date is fine.
     use HeadWant::*;
     let one = Lost(ONE_DATE);
@@ -4908,10 +4927,7 @@ fn head_layouts_with_one_other_date() {
                 (
                     "H: place, comma and the article before the date",
                     title.clone() + &s(400.0, 760.0, "Musterstadt, den 01.02.2026") + &low,
-                    Date(
-                        "2026-02-01",
-                        "date after the place \"Musterstadt, den\" on page 1",
-                    ),
+                    one,
                 ),
                 (
                     "I: a heading right over the date",
@@ -5145,38 +5161,27 @@ fn head_date_with_text_after_it_is_not_guessed() {
 }
 
 #[test]
-fn place_and_den_before_the_date_mark_it() {
-    // `Musterstadt, den 01.02.2026`: the place, a comma and `den` (in any case) mark the date
-    // as a German letter writes it. Lower on the page too.
+fn place_and_den_before_the_date_mark_nothing() {
+    // `Musterstadt, den 01.02.2026`: a place with `den` cannot be told from a weekday, an
+    // appointment or a birth place (`Montag, den 15.02.2026`), so it marks no date. In the
+    // head the date gives the loss; lower on the page nothing is said.
     for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
         for font in ["FL", "FB"] {
-            for (line, place) in [
-                ("Musterstadt, den 01.02.2026", "Musterstadt, den"),
-                ("MUSTERSTADT, DEN 01.02.2026", "MUSTERSTADT, DEN"),
-                (
-                    "Frankfurt am Main, den 01.02.2026",
-                    "Frankfurt am Main, den",
-                ),
+            for line in [
+                "Musterstadt, den 01.02.2026",
+                "MUSTERSTADT, DEN 01.02.2026",
+                "Frankfurt am Main, den 01.02.2026",
             ] {
-                for y in [760.0, 300.0] {
+                for (y, want) in [
+                    (760.0, HeadWant::Lost(ONE_DATE)),
+                    (300.0, HeadWant::Nothing),
+                ] {
                     let head = common::show("FB", size * 1.6, 40.0, 800.0, "Musterbescheid")
                         + &common::show(font, size, 400.0, y, line);
                     let out = read(&headed(&head, size, scale, ""));
-                    let from = format!("date after the place \"{place}\" on page 1");
                     let case = format!("{line} at y {y} in {size} pt {font}");
-                    let found = out.document.properties.document_date.as_ref();
-                    assert_eq!(found.map(|d| d.date.as_str()), Some("2026-02-01"), "{case}");
-                    assert_eq!(
-                        found.map(|d| d.from.as_str()),
-                        Some(from.as_str()),
-                        "{case}"
-                    );
-                    assert!(unsure(&out).is_empty(), "{case}: {:?}", unsure(&out));
-                    assert_eq!(
-                        front(&out, "source_date").as_deref(),
-                        Some("2026-02-01"),
-                        "{case}"
-                    );
+                    assert_head(&out, want, &case);
+                    assert_eq!(front(&out, "source_date"), None, "{case}");
                 }
             }
         }
@@ -5412,6 +5417,226 @@ fn date_label_cell_with_a_cell_between_marks_nothing() {
                 let case = format!("{how} in {size} pt {font}");
                 assert_head(&out, HeadWant::Lost(ONE_DATE), &case);
                 assert_eq!(front(&out, "source_date"), None, "{case}");
+            }
+        }
+    }
+}
+
+/// A ruled table of `rows` in `font` and `size`: its columns start at `xs` (the last one is
+/// 120 points wide), its top at `top`; an empty cell draws no text.
+fn ruled_rows(rows: &[&[&str]], xs: &[f32], top: f32, size: f32, font: &str) -> String {
+    let pitch = size * 1.8;
+    let bottom = top - pitch * rows.len() as f32;
+    let right = xs[xs.len() - 1] + 120.0;
+    let mut out = String::new();
+    for x in xs.iter().chain(std::iter::once(&right)) {
+        out += &format!("0.5 w {x} {bottom} m {x} {top} l S\n");
+    }
+    for r in 0..=rows.len() {
+        out += &common::hrule(xs[0], right, top - pitch * r as f32);
+    }
+    for (r, row) in rows.iter().enumerate() {
+        let y = top - pitch * (r as f32 + 1.0) + size * 0.5;
+        for (x, text) in xs.iter().zip(row.iter()) {
+            if !text.is_empty() {
+                out += &common::show(font, size, x + 4.0, y, text);
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn rereview_r6_probes_give_no_wrong_date() {
+    // The probes of the round 6 re-review (X1 to X4 and the checks beside them) as a test.
+    // Tables at y 750 stand in the head, at y 250 in the body under the prose. Never a wrong
+    // date.
+    use HeadWant::*;
+    let one = Lost(ONE_DATE);
+    let two = Lost(TWO_DATES);
+    let three = Lost("3 dates stand in the head of page 1; none is marked as the document date");
+    for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
+        for font in ["FL", "FB"] {
+            let s = |x: f32, y: f32, t: &str| common::show(font, size, x, y, t);
+            let ruled =
+                |rows: &[&[&str]], xs: &[f32], top: f32| ruled_rows(rows, xs, top, size, font);
+            let below = 760.0 - size * 1.2;
+            let title = common::show("FB", size * 1.6, 40.0, 800.0, "Musterbescheid");
+            let transposed: &[&[&str]] = &[
+                &["Datum", "15.01.2026", "16.01.2026", "17.01.2026"],
+                &["Betrag", "9,99", "19,99", "29,99"],
+            ];
+            let transposed_3: &[&[&str]] = &[
+                &["Pos", "1", "2"],
+                &["Datum", "15.01.2026", "16.01.2026"],
+                &["Betrag", "9,99", "19,99"],
+            ];
+            let timesheet: &[&[&str]] = &[
+                &["Datum", "15.01.2026", "Stunden", "8"],
+                &["Datum", "16.01.2026", "Stunden", "7"],
+            ];
+            let appointment: &[&[&str]] = &[
+                &["Termin", "Raum 1"],
+                &["Datum", "15.01.2026"],
+                &["Uhrzeit", "10:00"],
+            ];
+            let items: &[&[&str]] = &[
+                &["Datum", "Text", "Betrag"],
+                &["15.01.2026", "Muster", "9,99"],
+                &["16.01.2026", "Muster", "9,99"],
+            ];
+            let two_titles: &[&[&str]] = &[
+                &["Datum", "Datum", "Betrag"],
+                &["15.01.2026", "16.01.2026", "9,99"],
+            ];
+            let gap: &[&[&str]] = &[
+                &["Datum", "", "01.02.2026"],
+                &["Name", "Erika", "Mustermann"],
+            ];
+            let key_value: &[&[&str]] = &[&["Datum", "15.01.2026"], &["Lieferdatum", "16.01.2026"]];
+            let wide = [40.0f32, 140.0, 260.0, 380.0];
+            let three_cols = [40.0f32, 160.0, 300.0];
+            let two_cols = [40.0f32, 160.0];
+            let cases: Vec<(&str, String, HeadWant)> = vec![
+                (
+                    "F: Datum: far left of the date on one baseline",
+                    title.clone() + &s(40.0, 760.0, "Datum:") + &s(450.0, 760.0, "01.02.2026"),
+                    one,
+                ),
+                (
+                    "O: the value over Datum",
+                    title.clone() + &s(40.0, 760.0, "01.02.2026") + &s(40.0, below, "Datum"),
+                    one,
+                ),
+                (
+                    "I: Datum over Lieferdatum over the date",
+                    title.clone()
+                        + &s(40.0, 760.0, "Datum")
+                        + &s(40.0, below, "Lieferdatum")
+                        + &s(40.0, below - size * 1.2, "15.02.2026"),
+                    one,
+                ),
+                (
+                    "T1: transposed table in the head",
+                    title.clone() + &ruled(transposed, &wide, 750.0),
+                    three,
+                ),
+                (
+                    "T2: transposed table in the body",
+                    title.clone() + &ruled(transposed, &wide, 250.0),
+                    Nothing,
+                ),
+                (
+                    "T3: transposed table of three rows in the body",
+                    title.clone() + &ruled(transposed_3, &three_cols, 250.0),
+                    Nothing,
+                ),
+                (
+                    "T4: timesheet rows in the body",
+                    title.clone() + &ruled(timesheet, &wide, 250.0),
+                    Nothing,
+                ),
+                (
+                    // At 12 pt each row is one piece `Datum 15.01.2026 Stunden 8`, so both
+                    // rows are marked and differ; at smaller sizes the dates are far from
+                    // their labels and the head holds two plain dates.
+                    "T4h: timesheet rows in the head",
+                    title.clone() + &ruled(timesheet, &wide, 750.0),
+                    NoDate,
+                ),
+                (
+                    "T5: appointment table in the body",
+                    title.clone() + &ruled(appointment, &two_cols, 250.0),
+                    Nothing,
+                ),
+                (
+                    "T6: item table with Datum as its first column",
+                    title.clone() + &ruled(items, &three_cols, 750.0),
+                    two,
+                ),
+                (
+                    "T7: two Datum titles",
+                    title.clone() + &ruled(two_titles, &three_cols, 750.0),
+                    two,
+                ),
+                (
+                    "T8: an empty cell between Datum and the date",
+                    title.clone() + &ruled(gap, &three_cols, 750.0),
+                    one,
+                ),
+                (
+                    "T9: key and value table with Datum and Lieferdatum",
+                    title.clone() + &ruled(key_value, &two_cols, 750.0),
+                    Date("2026-01-15", "date label \"Datum\" on page 1"),
+                ),
+                (
+                    "D1: weekday and den in the body",
+                    title.clone() + &s(40.0, 250.0, "Bitte zahlen Sie bis Montag, den 15.02.2026"),
+                    Nothing,
+                ),
+                (
+                    "D2: weekday and den in the head",
+                    title.clone() + &s(40.0, 760.0, "Zahlbar bis Montag, den 15.02.2026"),
+                    one,
+                ),
+                (
+                    "D3: an appointment with den in the body",
+                    title.clone()
+                        + &s(
+                            40.0,
+                            250.0,
+                            "Ihr Termin ist am Montag, den 15.02.2026 um 10 Uhr",
+                        ),
+                    Nothing,
+                ),
+                (
+                    "D4: a birth place with den",
+                    title.clone()
+                        + &s(
+                            40.0,
+                            760.0,
+                            "Erika Mustermann geboren in Musterstadt, den 01.01.1970",
+                        ),
+                    one,
+                ),
+                (
+                    "D5: a place with den",
+                    title.clone() + &s(400.0, 760.0, "Musterstadt, den 01.02.2026"),
+                    one,
+                ),
+                (
+                    "L1: a number before the label",
+                    title.clone() + &s(40.0, 760.0, "Kundennr. 4711 Datum 01.02.2026"),
+                    one,
+                ),
+                (
+                    "L2: another field's name before the label",
+                    title.clone() + &s(40.0, 760.0, "Eintritt: Datum 01.01.2020"),
+                    one,
+                ),
+                (
+                    "L3: Datum over a date with text beside it",
+                    title.clone()
+                        + &s(40.0, 760.0, "Datum")
+                        + &s(40.0, below, "01.02.2026")
+                        + &s(40.0 + size * 7.0, below, "Muster"),
+                    one,
+                ),
+                (
+                    "L4: a period after the label",
+                    title.clone() + &s(40.0, 760.0, "Datum 01.01.2026 bis 31.01.2026"),
+                    two,
+                ),
+            ];
+            for (name, head, want) in cases {
+                let out = read(&headed(&head, size, scale, ""));
+                let case = format!("{name} in {size} pt {font}");
+                assert_head(&out, want, &case);
+                assert_eq!(
+                    front(&out, "source_date").as_deref(),
+                    matches!(want, Date(..)).then_some("2026-01-15"),
+                    "{case}"
+                );
             }
         }
     }

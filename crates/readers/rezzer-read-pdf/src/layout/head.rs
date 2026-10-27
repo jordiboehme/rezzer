@@ -3,10 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! What the head of page 1 says about the document: its title and its date. Both are found
-//! by general rules. A date is chosen only when something marks it as the document date: a
-//! whole date label beside it or over it, a label cell of a table with the date in the cell
-//! to its right, or a place with `den` before it. A date nothing marks is never chosen, also when it is the only
-//! date of the head: the loss says that it stands there.
+//! by general rules. A date is chosen only when a whole date label marks it as the document
+//! date: before it on its line, over it, or in the cell left of it in a table. A date nothing
+//! marks is never chosen, also when it is the only date of the head: the loss says that it
+//! stands there.
 
 use rezzer_model::FoundDate;
 
@@ -237,47 +237,21 @@ pub(crate) struct Table {
     pub rows: Vec<Vec<String>>,
 }
 
-/// What marks a date of page 1 as the document date.
-#[derive(Debug, Clone)]
-enum Mark {
-    /// A whole [`DATE_LABELS`] entry, as written, white space collapsed.
-    Label(String),
-    /// A place, a comma and `den` before the date, as written (`Musterstadt, den`).
-    Place(String),
-}
-
-impl Mark {
-    /// Where the date comes from, as `document_date_from` says it.
-    fn from(&self) -> String {
-        match self {
-            Mark::Label(label) => format!("date label \"{label}\" on page 1"),
-            Mark::Place(place) => format!("date after the place \"{place}\" on page 1"),
-        }
-    }
-
-    /// What the date stands after, for a loss.
-    fn after(&self) -> String {
-        match self {
-            Mark::Label(label) => format!("the label \"{label}\""),
-            Mark::Place(place) => format!("the place \"{place}\""),
-        }
-    }
-}
-
-/// A date of page 1 that something marks as the document date.
+/// A date of page 1 that a date label marks as the document date.
 #[derive(Debug, Clone)]
 struct Marked {
     written: Written,
     /// The date as it stands in the text.
     text: String,
-    mark: Mark,
+    /// The label as written, white space collapsed.
+    label: String,
 }
 
 /// What page 1 holds of dates, gathered from its lines before the layout and from its laid
 /// out text and pairs after it, decided once by [`document_date`].
 #[derive(Debug, Default)]
 pub(crate) struct Dates {
-    /// Dates something marks as the document date (see [`Mark`]).
+    /// Dates a date label marks as the document date.
     marked: Vec<Marked>,
     /// Every full date in the top third of the page, marked or not.
     head: Vec<Written>,
@@ -313,57 +287,37 @@ fn pieces(runs: &[Run]) -> Vec<Line<'_>> {
 
 /// The dates of the lines of page 1 (its runs as read, tables and furniture still in), read
 /// piece by piece (see [`pieces`]), with `height` the height of the page. Only full dates
-/// count, with a year of four digits. A date is marked when the text right before it in its
-/// piece (from the date before it on), at most [`BESIDE_SIZES`] sizes away, ends in a whole
-/// [`DATE_LABELS`] entry (see [`label_before`]: `Datum 01.02.2026`, `Ort, Datum: 01.02.2026`)
-/// or is a place, a comma and `den` (see [`place_den`]: `Musterstadt, den 01.02.2026`). Every
-/// date in the top third of the page is a date of the head, marked or not.
+/// count, with a year of four digits. A date is marked when the text of its piece before it
+/// is a whole [`DATE_LABELS`] entry and nothing else (see [`whole_label`]: `Datum 01.02.2026`,
+/// `DATE: 2026-02-01`; not `Eintritt: Datum 01.01.2020` or `Kundennr. 4711 Datum 01.02.2026`),
+/// at most [`BESIDE_SIZES`] sizes away, and the piece holds no other date (`Datum 01.01.2026
+/// bis 31.01.2026` marks nothing). Every date in the top third of the page is a date of the
+/// head, marked or not.
 pub(crate) fn page_dates(runs: &[Run], height: Option<f32>) -> Dates {
     let mut out = Dates::default();
     let in_head = |l: &Line<'_>| height.is_some_and(|h| h > 0.0 && l.y + l.h >= h * HEAD_SHARE);
     for l in &pieces(runs) {
         let found = scan::dates(&l.text, 4..=4);
-        for (i, d) in found.iter().enumerate() {
+        for d in &found {
             let written = (d.sep, d.parts);
             if in_head(l) {
                 out.head.push(written);
             }
-            let before = &l.text[found.get(i.wrapping_sub(1)).map_or(0, |p| p.end)..d.start];
-            let mark = label_before(before)
-                .map(Mark::Label)
-                .or_else(|| place_den(before).map(Mark::Place))
-                .filter(|_| {
-                    let mark_end = d.start - (before.len() - before.trim_end().len());
-                    ink_gap(l, mark_end, d.start) <= BESIDE_SIZES * l.size
-                });
-            if let Some(mark) = mark {
+            let before = &l.text[..d.start];
+            let label = whole_label(before).filter(|_| {
+                let label_end = before.trim_end().len();
+                found.len() == 1 && ink_gap(l, label_end, d.start) <= BESIDE_SIZES * l.size
+            });
+            if let Some(label) = label {
                 out.marked.push(Marked {
                     written,
                     text: l.text[d.start..d.end].to_string(),
-                    mark,
+                    label,
                 });
             }
         }
     }
     out
-}
-
-/// The place, comma and `den` that `before` is, as written with its white space collapsed
-/// (`Musterstadt, den`, `Frankfurt am Main, den`, `MUSTERSTADT, DEN`): a place is words in
-/// letters, with a hyphen, a period, an apostrophe or a slash inside; `den` matches case
-/// folded. A name with a comma and no `den` (`Erika Mustermann, 01.01.1970`) is none.
-fn place_den(before: &str) -> Option<String> {
-    let (place, den) = before.trim().rsplit_once(char::is_whitespace)?;
-    if fold(den) != "den" {
-        return None;
-    }
-    let name = place.trim_end().strip_suffix(',')?.trim();
-    let is_place = name.chars().any(char::is_alphabetic)
-        && name
-            .chars()
-            .all(|c| c.is_alphabetic() || c.is_whitespace() || matches!(c, '-' | '.' | '\'' | '/'));
-    let name: Vec<&str> = name.split_whitespace().collect();
-    is_place.then(|| format!("{}, {den}", name.join(" ")))
 }
 
 /// The white space in points between the ink that ends at byte `end` of the text of `l` and
@@ -389,13 +343,15 @@ fn ink_gap(l: &Line<'_>, end: usize, start: usize) -> f32 {
 /// the layout lays out as text (tables taken out), read piece by piece (see [`pieces`]), and
 /// `tables` every table the layout made on the page, with `height` the height of the page. A
 /// piece that is a whole [`DATE_LABELS`] entry marks the value beside it or right below it
-/// (see [`value_of`]). In a table, a cell that is a whole entry marks its right neighbour in
-/// the row when that cell is a full date and nothing else (`Datum: | 26.10.2026`): a column
-/// title `Datum` of an item table has another title beside it, not a date, and a row `Datum |
-/// Name | 01.02.2026` marks nothing. A table of label and value pairs that the field reader
-/// made counts only when its top lies in the top third of the page, where the header fields
-/// of a form stand: lower down it may be one row of items under small column titles, each
-/// title read as the label of the value below it.
+/// (see [`value_of`]). In a table whose top lies in the top half of the page, a cell that is a
+/// whole entry marks the cell right of it in its row when that cell is a full date and nothing
+/// else, and the table has two columns (labels and values, `Datum: | 26.10.2026`) or the two
+/// cells end their row and no other cell of the row holds a date. A table that lists dates in
+/// a row (`Datum | 15.01.2026 | 16.01.2026`, `Datum | 15.01.2026 | Stunden | 8`) and a column
+/// title `Datum` with another title beside it mark nothing. A table of label and value pairs
+/// that the field reader made counts only when its top lies in the top third of the page,
+/// where the header fields of a form stand: lower down it may be one row of items under small
+/// column titles, each title read as the label of the value below it.
 pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: Option<f32>) -> Dates {
     let mut out = Dates::default();
     let lines = pieces(runs);
@@ -410,7 +366,7 @@ pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: Option<f32>) ->
         out.marked.push(Marked {
             written: (d.sep, d.parts),
             text: value[d.start..d.end].to_string(),
-            mark: Mark::Label(label),
+            label,
         });
     };
     for (k, l) in lines.iter().enumerate() {
@@ -420,29 +376,40 @@ pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: Option<f32>) ->
             add(label, &v.text, &mut out);
         }
     }
-    let head = |top: f32| height.is_some_and(|h| h > 0.0 && top >= h * HEAD_SHARE);
-    let rows = tables
+    let above = |top: f32, share: f32| height.is_some_and(|h| h > 0.0 && top >= h * share);
+    let is_date = |cell: &str| {
+        let cell = cell.trim();
+        scan::dates(cell, 4..=4)
+            .first()
+            .is_some_and(|d| d.start == 0 && d.end == cell.len())
+    };
+    for t in tables
         .iter()
-        .filter(|t| !t.pairs || head(t.top))
-        .flat_map(|t| &t.rows);
-    for row in rows {
-        for pair in row.windows(2) {
-            let value = pair[1].trim();
-            if let Some(label) = whole_label(&pair[0])
-                && scan::dates(value, 4..=4)
-                    .first()
-                    .is_some_and(|d| d.start == 0 && d.end == value.len())
+        .filter(|t| above(t.top, if t.pairs { HEAD_SHARE } else { HALF }))
+    {
+        let two_columns = t.rows.iter().all(|row| row.len() == 2);
+        for row in &t.rows {
+            let Some([label, value]) = row.last_chunk::<2>() else {
+                continue;
+            };
+            let dates = row.iter().filter(|c| is_date(c)).count();
+            if (two_columns || dates == 1)
+                && is_date(value)
+                && let Some(label) = whole_label(label)
             {
-                add(label, value, &mut out);
+                add(label, value.trim(), &mut out);
             }
         }
     }
     out
 }
 
-/// The document date of page 1 from what `dates` holds: a date that a mark marks (see
-/// [`Mark`]). Marked dates that differ give no date, and a marked date that cannot be read
-/// for sure gives none either; both say so. A date nothing marks is never chosen: when the
+/// A table whose top lies in the upper half of the page may hold the document date.
+const HALF: f32 = 0.5;
+
+/// The document date of page 1 from what `dates` holds: a date that a date label marks.
+/// Marked dates that differ give no date, and a marked date that cannot be read for sure
+/// gives none either; both say so. A date nothing marks is never chosen: when the
 /// top third of the page holds dates, the loss says how many stand there. A dotted date
 /// reads day first, a dashed one year first, a slashed one only when one part is over 12;
 /// only a day the calendar has.
@@ -458,12 +425,11 @@ pub(crate) fn document_date(dates: &Dates) -> PageDate {
         return match iso(first.written) {
             Ok(date) => PageDate::Found(FoundDate {
                 date,
-                from: first.mark.from(),
+                from: format!("date label \"{}\" on page 1", first.label),
             }),
             Err(why) => PageDate::Unsure(format!(
-                "the date {} after {} on page 1 {why}",
-                first.text,
-                first.mark.after()
+                "the date {} after the label \"{}\" on page 1 {why}",
+                first.text, first.label
             )),
         };
     }
@@ -486,34 +452,17 @@ fn distinct(written: impl Iterator<Item = Written>) -> usize {
     kinds.len()
 }
 
-/// The date label `before` ends with (white space and a colon after it aside), white space
-/// inside it collapsed, when it stands as a whole: its words are the last words of `before`
-/// (`Liefer-Datum` is one word, no label), and no word in letters stands right before them
-/// (`Due date`, `Invoice date`: a word group is none of the list). A number or a sign before
-/// it may stand (`Kundennr. 4711 Datum`, `Ort, Datum`).
-fn label_before(before: &str) -> Option<String> {
-    let before = before.trim_end();
-    let before = before.strip_suffix(':').unwrap_or(before).trim_end();
-    let words: Vec<&str> = before.split_whitespace().collect();
-    DATE_LABELS.iter().find_map(|label| {
-        let n = label.split(' ').count();
-        let at = words.len().checked_sub(n)?;
-        let tail = words[at..].join(" ");
-        let alone = at == 0
-            || words[at - 1]
-                .chars()
-                .next_back()
-                .is_none_or(|c| !c.is_alphabetic());
-        (alone && fold(&tail) == *label).then_some(tail)
-    })
-}
-
-/// The date label a line is in whole (with a colon after it or not), white space collapsed.
+/// The date label `text` is in whole (white space around it and a colon after it aside), white
+/// space inside it collapsed: a [`DATE_LABELS`] entry, case folded (`DATE:`, `Erstellt   am`).
+/// A word more is no label (`Due date`, `Eintrittsdatum`, `Ort, Datum`, `Liefer-Datum`).
 fn whole_label(text: &str) -> Option<String> {
     let text = text.trim();
     let bare = text.strip_suffix(':').unwrap_or(text).trim_end();
-    let label = label_before(bare)?;
-    (label.split(' ').count() == bare.split_whitespace().count()).then_some(label)
+    let words: Vec<&str> = bare.split_whitespace().collect();
+    let label = words.join(" ");
+    DATE_LABELS
+        .contains(&fold(&label).as_str())
+        .then_some(label)
 }
 
 /// A label's value stands beside it at most this many label sizes after its end.
@@ -595,19 +544,23 @@ mod tests {
 
     #[test]
     fn labels_stand_whole() {
-        let label = |t: &str| label_before(t);
+        let label = |t: &str| whole_label(t);
         assert_eq!(label("Datum ").as_deref(), Some("Datum"));
+        assert_eq!(label("DATE:").as_deref(), Some("DATE"));
         assert_eq!(label("Erstellt   am").as_deref(), Some("Erstellt am"));
-        assert_eq!(label("Ort, Datum:").as_deref(), Some("Datum"));
+        assert_eq!(
+            label(" Ausgestellt am: ").as_deref(),
+            Some("Ausgestellt am")
+        );
+        assert_eq!(label("Ort, Datum:"), None);
+        assert_eq!(label("Kundennr. 4711 Datum"), None);
+        assert_eq!(label("Eintritt: Datum"), None);
         assert_eq!(label("Liefer-Datum:"), None);
         assert_eq!(label("Due date"), None);
-        assert_eq!(label("Kundennr. 4711 Datum").as_deref(), Some("Datum"));
-        assert_eq!(label("Erstellt am").as_deref(), Some("Erstellt am"));
         assert_eq!(label("Eintrittsdatum"), None);
         assert_eq!(label("Update"), None);
+        assert_eq!(label("Datum der Zahlung"), None);
         assert_eq!(label(""), None);
-        assert_eq!(whole_label("DATE:").as_deref(), Some("DATE"));
-        assert_eq!(whole_label("Datum der Zahlung"), None);
     }
 
     #[test]
@@ -630,34 +583,6 @@ mod tests {
     fn accents_fold() {
         assert_eq!(fold("Table des Mati\u{e8}res"), "table des matieres");
         assert_eq!(fold("G\u{fc}ltig bis"), "gueltig bis");
-    }
-
-    #[test]
-    fn a_place_and_den_mark_the_date() {
-        let place = |t: &str| place_den(t);
-        assert_eq!(
-            place("Musterstadt, den ").as_deref(),
-            Some("Musterstadt, den")
-        );
-        assert_eq!(
-            place("Frankfurt am Main,  den").as_deref(),
-            Some("Frankfurt am Main, den")
-        );
-        assert_eq!(place("St. Gallen, den").as_deref(), Some("St. Gallen, den"));
-        assert_eq!(
-            place("Baden-Baden, DEN").as_deref(),
-            Some("Baden-Baden, DEN")
-        );
-        // No `den`, a name with a comma, `den` alone, a postcode, a label, a number.
-        assert_eq!(place("Musterstadt, "), None);
-        assert_eq!(place("Erika Mustermann, "), None);
-        assert_eq!(place("Dresden, "), None);
-        assert_eq!(place("den "), None);
-        assert_eq!(place(", den"), None);
-        assert_eq!(place("12345 Musterstadt, den"), None);
-        assert_eq!(place("Datum: Musterstadt, den"), None);
-        assert_eq!(place("Nr. 4711, den"), None);
-        assert_eq!(place(""), None);
     }
 
     #[test]
