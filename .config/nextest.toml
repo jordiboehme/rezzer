@@ -11,8 +11,9 @@ slow-timeout = { period = "60s", terminate-after = 3 }
 filter = 'package(pdfparts) & (binary(amplify) | binary(amplify_readers))'
 slow-timeout = { period = "60s", terminate-after = 2 }
 
-# The layout work bounds run with no time stop and check thread CPU time. A broken bound loops:
-# it is ended after 2 minutes and fails the run instead of hanging it.
+# The layout work bounds run with no time stop, count their steps of work and keep thread CPU
+# time only as a 10 second safety stop. A broken bound loops: it is ended after 2 minutes and
+# fails the run instead of hanging it.
 [[profile.default.overrides]]
 filter = 'package(sheetlayout)'
 slow-timeout = { period = "60s", terminate-after = 2 }
