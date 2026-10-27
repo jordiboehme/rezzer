@@ -319,13 +319,22 @@ mod tests {
     /// fail.
     const SAFETY: Duration = Duration::from_secs(30);
 
-    /// A call that blocks until its sender sends or is dropped.
-    fn blocked() -> (mpsc::Sender<()>, Box<dyn FnOnce() -> u32 + Send>) {
-        let (tx, rx) = mpsc::channel::<()>();
+    /// A call that says when it starts, then blocks until its release sends or is dropped.
+    /// Returns the release, the start signal and the call. A call that is skipped, never
+    /// run, is dropped, so its start signal ends without a message.
+    fn blocked() -> (
+        mpsc::Sender<()>,
+        mpsc::Receiver<()>,
+        Box<dyn FnOnce() -> u32 + Send>,
+    ) {
+        let (release, wait) = mpsc::channel::<()>();
+        let (start, started) = mpsc::channel::<()>();
         (
-            tx,
+            release,
+            started,
             Box::new(move || {
-                let _ = rx.recv();
+                let _ = start.send(());
+                let _ = wait.recv();
                 1
             }),
         )
@@ -335,11 +344,26 @@ mod tests {
         Instant::now() + Duration::from_millis(ms)
     }
 
+    /// Leaves one blocked call stuck on a thread and returns its release. A call whose
+    /// thread was not scheduled before the deadline is skipped, not stuck: it is made
+    /// again, so the outcome does not depend on the load of the machine.
+    fn stick(worker: &Worker) -> mpsc::Sender<()> {
+        let stop = Instant::now() + SAFETY;
+        loop {
+            let (release, started, f) = blocked();
+            assert!(matches!(worker.call(f, soon(200)), Err(Stop::Time(_))));
+            // Waits until the call runs (stuck) or is dropped (skipped).
+            if started.recv().is_ok() {
+                return release;
+            }
+            assert!(Instant::now() < stop, "no blocked call ever started");
+        }
+    }
+
     #[test]
     fn a_stuck_call_does_not_hold_up_the_next() {
         let worker = Worker::new();
-        let (release, a) = blocked();
-        assert!(matches!(worker.call(a, soon(500)), Err(Stop::Time(_))));
+        let release = stick(&worker);
         let b: Box<dyn FnOnce() -> u32 + Send> = Box::new(|| 7);
         assert_eq!(worker.call(b, Instant::now() + SAFETY), Ok(7));
         // A is still blocked here: it is released only now.
@@ -349,19 +373,20 @@ mod tests {
     #[test]
     fn stuck_threads_are_capped_and_go_away() {
         let worker = Worker::new();
-        let mut releases = Vec::new();
-        for _ in 0..MAX_STUCK + 1 {
-            let (release, f) = blocked();
-            assert!(matches!(worker.call(f, soon(500)), Err(Stop::Time(_))));
-            releases.push(release);
-        }
-        // The first two calls hold a thread each; the third waited in the queue.
+        let mut releases: Vec<_> = (0..MAX_STUCK).map(|_| stick(&worker)).collect();
+        // Each stuck call holds a thread, and no new one may start.
+        assert_eq!(worker.threads(), MAX_STUCK);
+        // The next blocked call waits in the queue and is skipped, never run.
+        let (release, started, f) = blocked();
+        assert!(matches!(worker.call(f, soon(200)), Err(Stop::Time(_))));
+        assert!(started.recv().is_err(), "a skipped call never starts");
+        releases.push(release);
         assert_eq!(worker.threads(), MAX_STUCK);
         // Every thread is stuck and no new one may start: the call waits and gives up.
         let f: Box<dyn FnOnce() -> u32 + Send> = Box::new(|| 7);
-        assert!(matches!(worker.call(f, soon(500)), Err(Stop::Time(_))));
+        assert!(matches!(worker.call(f, soon(200)), Err(Stop::Time(_))));
         assert_eq!(worker.threads(), MAX_STUCK);
-        // The last blocked call was skipped, never run: its send finds no receiver.
+        // The skipped call's release finds no receiver.
         for release in releases {
             let _ = release.send(());
         }

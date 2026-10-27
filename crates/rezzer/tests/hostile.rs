@@ -69,7 +69,8 @@ static ALLOCATOR: Counting = Counting;
 
 /// Runs `f` and returns its result with the peak heap it added on this thread, in bytes.
 /// The measure covers the calling thread only: memory that a reader allocates on another
-/// thread is not seen. Every reader runs on the calling thread today.
+/// thread is not seen. Every reader runs on the calling thread today; only the barcode
+/// decoder of the PDF reader has threads of its own (see the hostile PDFs below).
 fn peak_heap<T>(f: impl FnOnce() -> T) -> (T, usize) {
     let base = CURRENT.with(Cell::get);
     PEAK.with(|p| p.set(base));
@@ -1179,9 +1180,10 @@ fn one_huge_merge_is_bounded() {
 }
 
 // Hostile PDFs. The files are written by hand (a classic cross-reference table, or a
-// cross-reference stream where an object stream needs one). The PDF reader works on more than
-// one thread, so memory is measured as the maximum resident set size of the process, not as
-// the heap of the calling thread.
+// cross-reference stream where an object stream needs one). The PDF reader runs on the calling
+// thread, but its barcode decoder runs on threads of its own, so memory is measured as the
+// maximum resident set size of the process, not as the heap of the calling thread. The
+// decoder threads never read the budget clock: only the calling thread does.
 
 /// Maximum resident set size of the process. It is the figure of one test only under
 /// nextest, which runs every test in its own process; under `cargo test` it covers every
