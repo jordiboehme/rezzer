@@ -16,6 +16,7 @@
 
 mod derived;
 mod sniff;
+mod stop;
 mod types;
 
 pub use sniff::{CellClass, analyze, analyze_until, cell_class, sniff};

@@ -184,6 +184,8 @@ pub struct StepClock {
 impl Clock {
     /// A clock that moves by `step` at each reading: each [`Budget::elapsed`] and
     /// [`Budget::check_time`] is one reading and gives `step` times the readings so far.
+    /// Any `elapsed` call is a reading too, also one a reader makes for its own use (a share
+    /// of the time limit): a reader that adds such calls changes the counts tests measured.
     /// Readings are counted per clock, not per budget, so one such clock is meant for one
     /// read.
     pub fn steps(step: Duration) -> Clock {

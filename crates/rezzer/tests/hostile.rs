@@ -165,31 +165,37 @@ fn deep_markdown_nesting_is_partial() {
 
 #[test]
 fn huge_csv_row_respects_time_limit() {
-    // READS: measured once with this step, printed below (2026-10-27, macOS, debug). The
-    // one row is read with one clock reading, so the limit cannot cut it whatever the step:
-    // the reading count shows that the row adds no work between two time checks.
-    const STEP: Duration = Duration::from_micros(100);
-    const READS: u64 = 1;
+    // A few short rows, then one row with a field of 50 MiB. The analysis asks the time limit
+    // every 64 KiB, inside the long row too, so the limit cuts it. READS: measured once with
+    // this step, printed below (2026-10-27, macOS, debug); the whole read takes 3,204.
+    const STEP: Duration = Duration::from_micros(800);
+    const READS: u64 = 1_251;
     let limit = Duration::from_secs(1);
     let clock = Clock::steps(STEP);
     let p = pipeline_with_clock(limit, clock.clone());
-    let mut bytes = Vec::new();
+    let mut bytes = b"a,b,c\n1,2,3\n4,5,6\n7,8,9\n10,11,".to_vec();
     bytes.extend(std::iter::repeat_n(b'x', 50 * 1024 * 1024));
     bytes.push(b'\n');
     let start = Instant::now();
     let result = p.run_bytes("huge.csv", bytes, None, &request());
     let took = start.elapsed();
-    eprintln!("huge_csv_row: {} clock readings", clock.reads());
+    eprintln!(
+        "huge_csv_row: {:?}, {} clock readings in {took:?}: {:?} {:?}",
+        result.completeness,
+        clock.reads(),
+        result.document.as_ref().map(|d| d.source.format),
+        losses(&result)
+    );
     assert!(took < SAFETY, "took {took:?}");
     assert_reads(&clock, READS);
-    // Either the limit was hit (Partial with a Limit loss) or the run finished in time
-    // (Complete); both are clean. With one reading the run ends Complete.
-    match result.completeness {
-        Completeness::Partial => assert!(has_loss(&result, LossReason::Limit), "{result:?}"),
-        Completeness::Complete => {}
-        Completeness::Failed => panic!("{result:?}"),
-    }
-    eprintln!("huge_csv_row: {:?} in {took:?}", result.completeness);
+    assert_eq!(result.completeness, Completeness::Partial, "{result:?}");
+    assert!(
+        losses(&result)
+            .iter()
+            .any(|l| l.starts_with("Limit") && l.contains("time limit reached during the analysis")),
+        "{:?}",
+        losses(&result)
+    );
 }
 
 #[test]
@@ -199,9 +205,9 @@ fn many_csv_rows_stop_at_the_time_limit() {
     // fails on a fast machine when the analysis ignores the limit. The file is written in
     // a stream to a temp dir and read with run_path (memory-mapped).
     // READS: measured once with this step, printed below (2026-10-27, macOS, debug). The
-    // whole analysis takes 6,187 readings, so the limit (2,001 readings) cuts it short.
+    // whole analysis takes 12,587 readings, so the limit (2,002 readings) cuts it short.
     const STEP: Duration = Duration::from_micros(25);
-    const READS: u64 = 2_001;
+    const READS: u64 = 2_002;
     let limit = Duration::from_millis(50);
     let clock = Clock::steps(STEP);
     let p = pipeline_with_clock(limit, clock.clone());
@@ -644,24 +650,15 @@ fn ods_repeat_bomb_is_bounded() {
     // calamine's issue 594: repeat counts that ask for about 3.9 TB of cells.
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../tests/corpus/office/malformed/issue_594_dos.ods");
-    // READS: measured once with this step, printed below (2026-10-27, macOS, debug). The
-    // repeat counts are refused before the first time check, so the clock is never read.
-    const STEP: Duration = Duration::from_micros(1_000);
-    const READS: u64 = 0;
-    let limit = Duration::from_secs(10);
-    let clock = Clock::steps(STEP);
-    let p = pipeline_with_clock(limit, clock.clone());
+    // The repeat counts are refused before any time check, so no time limit plays a part:
+    // the wall time only catches a hang.
+    let p = sheet_pipeline();
     let start = Instant::now();
     let (result, peak) = peak_heap(|| p.run_path(&path, &markdown_request()));
     let took = start.elapsed();
-    eprintln!(
-        "ods_repeat_bomb: peak heap {} MB, {} clock readings in {took:?}",
-        peak / MB,
-        clock.reads()
-    );
+    eprintln!("ods_repeat_bomb: peak heap {} MB in {took:?}", peak / MB);
     assert!(peak < 512 * MB, "peak heap {peak} bytes");
     assert!(took < SAFETY, "took {took:?}");
-    assert_reads(&clock, READS);
     assert_eq!(
         result.completeness,
         Completeness::Failed,
@@ -1600,10 +1597,13 @@ fn hundred_thousand_pages_stop_in_time() {
     many_pages(&path, PAGES, false);
     // READS and READ: measured once with this step, printed below (2026-10-27, macOS,
     // debug). Listing the pages takes 200,255 readings; the text stops at three quarters of
-    // the limit (202,703 readings), so a few pages are read before.
-    const STEP: Duration = Duration::from_nanos(7_400);
-    const READS: u64 = 207_605;
-    const READ: usize = 1_225;
+    // the limit, at 208,333 readings: a margin of 8,078 readings (4 % of the listing) for the
+    // pages. A larger margin reads more pages, and their memory takes the max RSS toward its
+    // 512 MiB bound (7.1 us: 5,508 pages, 508 MiB; this step: 464 to 471 MiB). The PDF
+    // reader changes in plan 6: measure these numbers again after it merges.
+    const STEP: Duration = Duration::from_nanos(7_200);
+    const READS: u64 = 224_501;
+    const READ: usize = 4_041;
     let limit = Duration::from_secs(2);
     let clock = Clock::steps(STEP);
     let p = pipeline_with_clock(limit, clock.clone());

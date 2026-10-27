@@ -93,7 +93,7 @@ The corpus has 13 public ODS test files from LibreOffice and calamine. One of th
 
 Extreme cases the test suite holds, at the default limits unless a limit is named (the figures are the bounds the tests check):
 
-- Repeat counts that ask for about 3.9 TB of cells, with a time limit of 10 seconds: refused within the limit plus 2 seconds, peak heap under 512 MB
+- Repeat counts that ask for about 3.9 TB of cells: refused before any time check, peak heap under 512 MB
 - 100,000 nested spans in one cell: refused for its depth before any parser reads it
 - An entity bomb that expands to a billion words: the DOCTYPE is refused, nothing expands
 

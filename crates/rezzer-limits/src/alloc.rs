@@ -255,8 +255,10 @@ mod tests {
         assert_eq!(moved, expected);
     }
 
+    /// Rezzer's move leaves small exact growth to the system's realloc. Whether that realloc
+    /// itself is fast (musl's may copy) is measured by the Linux allocator probe, not here.
     #[test]
-    fn growth_in_small_exact_steps_stays_fast() {
+    fn small_exact_growth_is_never_moved_by_hand() {
         // 2,000 steps of 64 KiB, from 1 MiB to about 126 MiB. None of them grows by half, so
         // the move copies nothing: copied whole at every step this would be quadratic. The
         // count of copied bytes is the check; the time is only a stop for a hang.

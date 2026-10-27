@@ -580,6 +580,41 @@ fn analyze_until_stops_early_and_says_so() {
 }
 
 #[test]
+fn analyze_until_stops_inside_one_long_record() {
+    // One record of 4 MiB: the stop is asked while it is read, not only after it.
+    let mut text = "x".repeat(4 * 1024 * 1024);
+    text.push('\n');
+    let d = csvsniff::Dialect {
+        delimiter: b',',
+        quote: b'"',
+        lead_records: 0,
+        has_header: false,
+        consistent_rows: 1.0,
+    };
+    let calls = std::cell::Cell::new(0usize);
+    let stop = || {
+        calls.set(calls.get() + 1);
+        calls.get() >= 3
+    };
+    let a = csvsniff::analyze_until(&text, &d, 1000, &stop);
+    assert!(a.truncated);
+    assert_eq!(a.rows, 0);
+    // Two asks without a stop, the third stops pass 1; pass 2 asks once more and stops.
+    assert_eq!(calls.get(), 4);
+    // Without a stop the record is read whole, and short texts never ask.
+    let whole = csvsniff::analyze_until(&text, &d, 1000, &|| false);
+    assert!(!whole.truncated);
+    assert_eq!(whole.rows, 1);
+    let asked = std::cell::Cell::new(false);
+    let short = csvsniff::analyze_until("a,b\n1,2\n", &d, 1000, &|| {
+        asked.set(true);
+        false
+    });
+    assert_eq!(short.rows, 2);
+    assert!(!asked.get());
+}
+
+#[test]
 fn sniff_looks_only_at_the_first_mebibyte() {
     // A normal start, then a record of 64 MiB: sniffing must not scan it.
     let mut text = String::from("a,b,c\n1,2,3\n4,5,6\n7,8,9\n");

@@ -2,10 +2,12 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::hash::{DefaultHasher, Hash, Hasher};
 
 use crate::derived::{self, MAX_NUMERIC_COLUMNS, NumCol};
+use crate::stop::StopRead;
 use crate::types::{Analysis, Column, ColumnKind, Dialect, QuoteProblem, RaggedRow};
 
 const CANDIDATES: &[u8; 4] = b",;\t|";
@@ -26,13 +28,13 @@ fn strip_bom(text: &str) -> &str {
     text.strip_prefix('\u{feff}').unwrap_or(text)
 }
 
-fn reader(text: &str, delimiter: u8, quote: u8) -> csv::Reader<&[u8]> {
+fn reader<R: std::io::Read>(input: R, delimiter: u8, quote: u8) -> csv::Reader<R> {
     csv::ReaderBuilder::new()
         .delimiter(delimiter)
         .quote(quote)
         .has_headers(false)
         .flexible(true)
-        .from_reader(text.as_bytes())
+        .from_reader(input)
 }
 
 /// Modal field count of a histogram: the most frequent one, the larger on ties.
@@ -343,7 +345,7 @@ pub fn sniff(text: &str) -> Option<Dialect> {
     for &delimiter in CANDIDATES {
         let mut rows: Vec<Vec<String>> = Vec::new();
         let mut quoted: Vec<Vec<bool>> = Vec::new();
-        for rec in reader(text, delimiter, quote)
+        for rec in reader(text.as_bytes(), delimiter, quote)
             .records()
             .take(SAMPLE_RECORDS)
             .map_while(Result::ok)
@@ -843,7 +845,8 @@ pub fn analyze(text: &str, dialect: &Dialect, max_rows: usize) -> Analysis {
 /// Records between two calls of the stop callback.
 const STOP_CHECK_EVERY: usize = 4096;
 
-/// Like [`analyze`], but asks `stop` every few thousand records and ends the analysis early
+/// Like [`analyze`], but asks `stop` every few thousand records and every 64 KiB of text
+/// (also inside one long record) and ends the analysis early
 /// when it returns true (a time limit, a cancel). The result then has `truncated` set: the
 /// row count and column facts cover only the records read so far, and the derived-column and
 /// quote checks are skipped.
@@ -859,7 +862,8 @@ pub fn analyze_until(
 
     // Pass 1: field count histogram (no per-cell allocation).
     let mut hist: HashMap<usize, usize> = HashMap::new();
-    let mut rdr = reader(text, delimiter, quote);
+    let stopped = Cell::new(false);
+    let mut rdr = reader(StopRead::new(text, stop, &stopped), delimiter, quote);
     let mut byte_rec = csv::ByteRecord::new();
     let mut seen = 0usize;
     // Title lines above the table are not part of it.
@@ -874,6 +878,7 @@ pub fn analyze_until(
             break;
         }
     }
+    truncated |= stopped.get();
     let expected = modal(&hist).map_or(0, |(c, _)| c);
 
     // Pass 2: column statistics and ragged rows.
@@ -883,7 +888,8 @@ pub fn analyze_until(
     let mut ragged_total = 0;
     let mut rows = 0;
     let mut budget = UNIQUE_BUDGET;
-    let mut rdr = reader(text, delimiter, quote);
+    let stopped = Cell::new(false);
+    let mut rdr = reader(StopRead::new(text, stop, &stopped), delimiter, quote);
     let mut rec = csv::StringRecord::new();
     let mut first = true;
     let mut seen = 0usize;
@@ -916,6 +922,7 @@ pub fn analyze_until(
         }
         first = false;
     }
+    truncated |= stopped.get();
     let columns: Vec<Column> = accs
         .iter()
         .enumerate()
@@ -964,7 +971,7 @@ pub fn analyze_until(
         if eligible.len() >= 3 {
             let mut values: Vec<Vec<Option<f64>>> =
                 vec![Vec::with_capacity(checked_rows); eligible.len()];
-            let mut rdr = reader(text, delimiter, quote);
+            let mut rdr = reader(text.as_bytes(), delimiter, quote);
             let skip = lead + usize::from(dialect.has_header);
             for rec in rdr
                 .records()
