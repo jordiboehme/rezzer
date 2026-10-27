@@ -2178,7 +2178,6 @@ dependencies = [
 name = "sheetparts"
 version = "0.1.0"
 dependencies = [
- "libc",
  "quick-xml",
  "zip",
  "zipguard",
