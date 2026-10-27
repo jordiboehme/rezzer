@@ -1135,6 +1135,33 @@ fn a_second_run_with_fewer_pictures_leaves_no_old_file() {
 }
 
 #[test]
+fn a_name_that_copies_a_hash_keeps_its_own_pictures() {
+    use rezzer_pipeline::folder_stem;
+    let out = tempfile::tempdir().unwrap();
+    let req = Request {
+        output_dir: Some(out.path().to_path_buf()),
+        ..request()
+    };
+    let copy = folder_stem("a b.txt");
+    let sources: [(&str, &[&'static str]); 2] =
+        [("a b.txt", &["page-1", "page-2"]), (&copy, &["page-3"])];
+    for _ in 0..2 {
+        for (name, ids) in sources {
+            let (registry, _) = pictures(ids);
+            let res =
+                Pipeline::new(config(None), registry).run_bytes(name, b"x".to_vec(), None, &req);
+            assert_eq!(res.completeness, Completeness::Complete, "{name}");
+        }
+        let first = out.path().join(format!("{copy}.assets"));
+        let second = out.path().join(format!("{}.assets", folder_stem(&copy)));
+        assert_eq!(names_in(&first), ["page-1.png", "page-2.png"]);
+        assert_eq!(names_in(&second), ["page-3.png"]);
+        assert_ne!(first, second);
+        assert!(assert_links_resolve(out.path()) >= 3);
+    }
+}
+
+#[test]
 fn attachments_get_the_extension_their_bytes_confirm() {
     let out = tempfile::tempdir().unwrap();
     let req = Request {

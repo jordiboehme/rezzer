@@ -33,10 +33,10 @@
 //!
 //! Files an earlier run left that this run does not write are removed, but only files
 //! Rezzer names itself (rulings P5-Y, P5-AC and P5-AK): in the assets folder regular files
-//! named as Rezzer names pictures and attachments ([`is_asset_name`]), in the parts folder Markdown parts that Rezzer
-//! wrote for this source ([`holder`]). A file a user put there stays. An empty parts folder
-//! is removed, also one Rezzer did not make. Symlinks and folders inside are never followed
-//! or removed.
+//! named as Rezzer names pictures and attachments ([`is_asset_name`]), in the parts folder
+//! Markdown parts that Rezzer wrote for this source ([`holder`]). A file a user put there
+//! stays. An empty parts folder is removed, also one Rezzer did not make. Symlinks and
+//! folders inside are never followed or removed.
 //!
 //! Each Markdown and JSON path is looked at again right before its write, and a path that
 //! was free is created exclusively without removing anything: a file that appears after the
@@ -45,17 +45,20 @@
 //! On Unix every write, read and removal under the output folder goes through a handle of
 //! the folder opened once, without following a symlink ([`Folder`]): the output folder is
 //! opened once per run, and each write, decision and removal in the parts or assets folder
-//! goes through one handle of that folder, opened without following a symlink. Someone who can
-//! write to the output folder and swaps the parts or assets folder for a symlink or another
-//! folder after it was opened redirects nothing: the run writes into the folder it opened,
-//! and the cleanup removes only there. The output folder itself may be a symlink the user
-//! chose. Known Windows limit: on other systems each call still opens its path by name, so
-//! such a swap between the check and a call can redirect it there.
+//! goes through one handle of that folder. Someone who can write to the output folder and
+//! swaps the parts or assets folder for a symlink or another folder after it was opened
+//! redirects nothing: the run writes into the folder it opened, and the cleanup removes only
+//! there. The output folder itself may be a symlink the user chose. Known Windows limit: on
+//! other systems each call still opens its path by name, so such a swap between the check
+//! and a call can redirect it there.
 //!
-//! Known gap: the assets folder is found by its name only, not by its source.
-//! A source whose plain name equals another source's hashed stem (`a_b.pdf-<hash>` next to
-//! `a b.pdf`) shares that folder, and its run removes the other one's pictures as stale.
-//! Such a name has to copy the hash on purpose.
+//! The assets folder is found by its name only, not by its source, so a name that looks
+//! like a hashed stem (it ends in `-` and 8 hex digits, in any case) gets its own name hash
+//! too ([`folder_stem`]): `a_b.pdf-<hash>` next to `a b.pdf` gets `a_b.pdf-<hash>-<hash>`,
+//! and neither run removes the other one's pictures as stale, also with the hash in upper
+//! case on a file system that ignores case. Two sources still share a folder when their
+//! names give the same 32-bit name hash, which takes a collision made on purpose, as for
+//! every hashed name. That is accepted.
 //!
 //! Order: the pictures are planned while the document is read, because the Markdown links
 //! name them. After the render the part paths are checked, so a run that fails there has
@@ -134,19 +137,32 @@ fn ends_with_ignore_case(name: &str, suffix: &str) -> bool {
         && name[name.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
 }
 
+/// Whether `name` looks like a hashed stem: it ends in `-` and 8 ASCII hex digits, in any
+/// case.
+fn looks_hashed(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    bytes.len() >= HASH_LEN
+        && bytes[bytes.len() - HASH_LEN] == b'-'
+        && bytes[bytes.len() - HASH_LEN + 1..]
+            .iter()
+            .all(u8::is_ascii_hexdigit)
+}
+
 /// The stem of the parts folder `<stem>.parts/` and the assets folder `<stem>.assets/` of
 /// `source_name` (decision 8): [`bundle_name`] of the NFC name, plus `-<name hash>` when
-/// `bundle_name` changed the name (also a leading `.`), or when the name ends in `.md`,
-/// `.json`, `.assets` or `.parts` (any case). So `a b.pdf` and `a_b.pdf` never share a
-/// folder, and the folders of one source never land on a file or folder of another (`x` and
-/// `x.assets`, `x` and `x.parts`, `a` with its JSON and `a.json`).
+/// `bundle_name` changed the name (also a leading `.`), when the name ends in `.md`,
+/// `.json`, `.assets` or `.parts` (any case), or when it looks like a hashed stem (ends in
+/// `-` and 8 hex digits, any case). So `a b.pdf` and `a_b.pdf` never share a folder, nor
+/// `a b.pdf` and a source named after its stem `a_b.pdf-<hash>`, and the folders of one
+/// source never land on a file or folder of another (`x` and `x.assets`, `x` and `x.parts`,
+/// `a` with its JSON and `a.json`).
 pub fn folder_stem(source_name: &str) -> String {
     let name = last_component(source_name);
     let stem = bundle_name(&name);
     let clash = [".md", ".json", ".assets", ".parts"]
         .iter()
         .any(|suffix| ends_with_ignore_case(&name, suffix));
-    if stem != name || clash {
+    if stem != name || clash || looks_hashed(&name) {
         format!("{stem}-{}", name_hash(&name))
     } else {
         stem

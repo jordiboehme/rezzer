@@ -9,11 +9,11 @@
 //! for a symlink or for another folder after it was opened takes no write, read or removal
 //! elsewhere. Every method takes one path component, never a path: an empty name, `.`, `..`
 //! or a name with `/` or a backslash (off Unix also a `:`) is refused with
-//! [`ErrorKind::InvalidInput`]. The last
-//! component is opened with `O_NOFOLLOW`, so that one flag guards the whole path. Only the
-//! output folder itself is opened by its path ([`Folder::open`], [`Folder::create`]): it may
-//! be a symlink the user chose, and it is resolved once there. It must be readable as well
-//! as writable, since it is opened for reading (`O_RDONLY | O_DIRECTORY`).
+//! [`ErrorKind::InvalidInput`]. The last component is opened with `O_NOFOLLOW`, so that one
+//! flag guards the whole path. Only the output folder itself is opened by its path
+//! ([`Folder::open`], [`Folder::create`]): it may be a symlink the user chose, and it is
+//! resolved once there. It must be readable as well as writable, since it is opened for
+//! reading (`O_RDONLY | O_DIRECTORY`).
 //!
 //! Known Windows limit (0.1.0): on other systems a `Folder` keeps its path, and each call
 //! checks the entry with `symlink_metadata` and then opens it by name, as before. A folder

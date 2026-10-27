@@ -231,3 +231,25 @@ fn a_swap_between_pictures_and_cleaning_is_caught() {
     super::clean_assets(&out, None, "x.txt", &Default::default()).unwrap();
     assert_eq!(std::fs::read_dir(&victim).unwrap().count(), 2);
 }
+
+#[test]
+fn a_name_like_a_hashed_stem_gets_its_own_hash() {
+    use super::folder_stem;
+    let hashed_tail = |s: &str| {
+        s.len() > 9
+            && s.as_bytes()[s.len() - 9] == b'-'
+            && s[s.len() - 8..]
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    };
+    let y = folder_stem("a b.pdf");
+    assert!(hashed_tail(&y), "{y}");
+    assert_ne!(folder_stem(&y), y);
+    let upper = folder_stem(&y.to_uppercase());
+    assert!(!upper.eq_ignore_ascii_case(&y), "{upper} and {y}");
+    assert_eq!(folder_stem("report-2024.pdf"), "report-2024.pdf");
+    assert_eq!(folder_stem("x-deadbee"), "x-deadbee");
+    let own = folder_stem("x-DEADBEEF");
+    assert!(own.starts_with("x-DEADBEEF-"), "{own}");
+    assert!(hashed_tail(&own), "{own}");
+}
