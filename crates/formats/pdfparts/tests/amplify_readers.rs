@@ -653,24 +653,20 @@ fn shared_byte_range_is_bounded() {
     // bound the array is walked until the 2,000,000 visits of the signatures reader are spent
     // (20 fields); without it each field would walk the array again, 10,000 times. The
     // counted steps show the bound, so a busy machine does not fail the test.
-    let file = |m: usize| {
-        let n = 10_000;
-        let fields: String = (0..n).map(|i| format!("{} 0 R ", 100 + i)).collect();
-        let big: String = (0..m).map(|_| "1 ").collect();
-        let mut objects = vec![(9, format!("[{big}]").into_bytes())];
-        for i in 0..n {
-            objects.push((
-                100 + i as u32,
-                format!("<< /T (f{i}) /FT /Sig /V << /Type /Sig /ByteRange 9 0 R >> >>")
-                    .into_bytes(),
-            ));
-        }
-        Pdf::open(&form_file(&fields, objects), None, &limits(), &never).unwrap()
-    };
-    let big = file(100_000);
+    let (n, m) = (10_000, 100_000);
+    let fields: String = (0..n).map(|i| format!("{} 0 R ", 100 + i)).collect();
+    let big: String = (0..m).map(|_| "1 ").collect();
+    let mut objects = vec![(9, format!("[{big}]").into_bytes())];
+    for i in 0..n {
+        objects.push((
+            100 + i as u32,
+            format!("<< /T (f{i}) /FT /Sig /V << /Type /Sig /ByteRange 9 0 R >> >>").into_bytes(),
+        ));
+    }
+    let pdf = Pdf::open(&form_file(&fields, objects), None, &limits(), &never).unwrap();
     // Measured once (2026-10-27): a visit and a reference followed for each number walked.
-    assert_form_readers(&big, [98_894, 3, 4_020_022]);
-    assert!(has_limit(&big, "signatures"), "{:?}", big.issues());
+    assert_form_readers(&pdf, [98_894, 3, 4_020_022]);
+    assert!(has_limit(&pdf, "signatures"), "{:?}", pdf.issues());
 }
 
 #[test]
