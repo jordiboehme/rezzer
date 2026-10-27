@@ -228,9 +228,6 @@ jobs:
     defaults:
       run:
         shell: bash
-    env:
-      # The file name of the test archive, inside RUNNER_TEMP.
-      TESTS_ARCHIVE: tests.tar.zst
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -277,29 +274,32 @@ jobs:
           shared-key: ${{ matrix.libc == 'musl' && 'test-musl' || 'test' }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      # The test binaries are built once and run from an archive, so the build
-      # and the run are timed as separate steps. The archive lives in
-      # RUNNER_TEMP, outside target, so the cache does not store it.
+      # The build step compiles the test binaries, so its time shows alone. The run
+      # step below finds them fresh and only runs them. An archive would need the
+      # target directory twice on the runner, which does not fit.
       # --locked: the build fails instead of re-resolving Cargo.lock.
       - name: build tests
         if: ${{ matrix.libc != 'musl' }}
-        run: cargo nextest archive --workspace --locked --archive-file "$RUNNER_TEMP/$TESTS_ARCHIVE"
+        run: cargo nextest run --workspace --locked --no-run
 
-      # The archive records the target, so the run step below is the same for every leg.
       - name: build tests (musl)
         if: ${{ matrix.libc == 'musl' }}
         env:
           TARGET: ${{ matrix.target }}
-        run: cargo nextest archive -p rezzer-limits -p rezzer --locked --target "$TARGET" --archive-file "$RUNNER_TEMP/$TESTS_ARCHIVE"
+        run: cargo nextest run -p rezzer-limits -p rezzer --locked --target "$TARGET" --no-run
 
       # --no-tests=warn: a workspace whose crates have no tests yet is not an
-      # error. --workspace-remap: the run reads .config/nextest.toml from the
-      # checkout, so the profile overrides apply. The binaries hold paths fixed
-      # at build time (CARGO_MANIFEST_DIR, snapshot paths, cargo_bin), so the
-      # run has to happen in the same job at the same path as the build.
-      # --no-fail-fast: one red run shows every failing test, at no cost when all pass.
+      # error. --no-fail-fast: one red run shows every failing test, at no cost
+      # when all pass.
       - name: run tests
-        run: cargo nextest run --archive-file "$RUNNER_TEMP/$TESTS_ARCHIVE" --workspace-remap "$GITHUB_WORKSPACE" --no-tests=warn --no-fail-fast
+        if: ${{ matrix.libc != 'musl' }}
+        run: cargo nextest run --workspace --locked --no-tests=warn --no-fail-fast
+
+      - name: run tests (musl)
+        if: ${{ matrix.libc == 'musl' }}
+        env:
+          TARGET: ${{ matrix.target }}
+        run: cargo nextest run -p rezzer-limits -p rezzer --locked --target "$TARGET" --no-tests=warn --no-fail-fast
 
       # nextest does not run doctests. The musl leg leaves them out: they run on the
       # host target, which the ubuntu-latest leg covers.
