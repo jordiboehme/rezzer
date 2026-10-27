@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use super::*;
-use crate::layout::Gaps;
+use crate::layout::{Gaps, address_block};
 use crate::regions::{Part, offset_baselines};
 
 /// A run of text of one line, apart from its neighbours by a gap: one cell's text.
@@ -748,6 +748,13 @@ fn key_values(
     let label = |p: &Piece| text_of(flow, p.start, p.end);
     let labels: Vec<String> = pieces.iter().map(|p| label(&p[0])).collect();
     let colons = labels.iter().all(|l| l.ends_with(':'));
+    // Without colons, two columns in the shape of addresses are two blocks side by side.
+    let values: Vec<String> = pieces.iter().map(|p| label(&p[1])).collect();
+    let left: Vec<&str> = labels.iter().map(String::as_str).collect();
+    let right: Vec<&str> = values.iter().map(String::as_str).collect();
+    if !colons && address_columns(&left, &right) {
+        return KeyValues::No;
+    }
     // Lines after the region whose one run starts with a short label and a colon.
     let mut extra: Vec<usize> = Vec::new();
     let mut end = z;
@@ -823,6 +830,14 @@ fn key_values(
         value: None,
     }));
     KeyValues::Rows(rows)
+}
+
+/// Whether two columns of lines side by side are two addresses, no labels beside values: the
+/// lines of both are an [`address_block`] (the bank and the register entry in an invoice
+/// footer, the sender beside the recipient). A column of amounts holds no letter and is never
+/// address shaped, nor is a column of labels without a digit or of labels of one form.
+fn address_columns(left: &[&str], right: &[&str]) -> bool {
+    address_block(left) && address_block(right)
 }
 
 /// Cuts a row of two cells whose first cell holds label and value in one run after the
@@ -1245,6 +1260,19 @@ fn grid_of(
     if texts.len() > 1 && texts.iter().all(|r| *r == texts[0]) {
         return Err("all its rows read the same");
     }
+    // Two columns in the shape of addresses are two blocks side by side, no table.
+    if cols == 2 {
+        let column = |c: usize| -> Vec<&str> {
+            texts
+                .iter()
+                .filter_map(|r| r.get(c).map(String::as_str))
+                .filter(|t| !t.is_empty())
+                .collect()
+        };
+        if address_columns(&column(0), &column(1)) {
+            return Err("its two columns read as addresses");
+        }
+    }
     let numbers = texts.iter().flatten().filter(|t| numeric(t)).count();
     let short = if table_caption { 60 } else { SHORT_CELL };
     if lens.is_empty() || (lens[lens.len() / 2] >= short && 2 * numbers < lens.len()) {
@@ -1555,6 +1583,68 @@ mod tests {
             slots: vec![Slot::Free; n],
             at: (0..n).collect(),
         }
+    }
+
+    /// The bank and register blocks of an invoice footer side by side, at x 40 and 300.
+    const BANK: [&str; 3] = [
+        "Musterbank",
+        "IBAN DE00 0000 0000 0000 0000 00",
+        "BIC MUSTDEXXXXX",
+    ];
+    const REGISTER: [&str; 3] = [
+        "Amtsgericht Musterstadt",
+        "HRB 00000",
+        "Gesch\u{e4}ftsf\u{fc}hrung Erika Mustermann",
+    ];
+
+    /// A flow of three lines of two pieces, `left` at x 40 and `right` at x 300.
+    fn two_columns(left: &[&str; 3], right: &[&str; 3]) -> Flow {
+        let mut runs = Vec::new();
+        for k in 0..3 {
+            let y = 60.0 - 8.0 * k as f32;
+            runs.push(run(left[k], 40.0, y, k as u32));
+            runs.push(run(right[k], 300.0, y, k as u32));
+        }
+        flow_of(runs)
+    }
+
+    #[test]
+    fn address_columns_are_two_addresses() {
+        assert!(address_columns(&BANK, &REGISTER));
+        // Labels beside their values, amounts beside their labels: no addresses.
+        let labels = ["Rechnungsnummer", "Kundennummer", "Datum"];
+        let values = ["0000-0001", "00000", "01.02.2026"];
+        assert!(!address_columns(&labels, &values));
+        let totals = ["Nettobetrag", "USt 19 %", "Gesamtbetrag"];
+        let amounts = ["1.234,56", "234,57", "1.469,13"];
+        assert!(!address_columns(&totals, &amounts));
+    }
+
+    #[test]
+    fn two_address_columns_are_no_labels_and_values_and_no_grid() {
+        let flow = two_columns(&BANK, &REGISTER);
+        let lines = flow_lines(&flow);
+        let pieces: Vec<Vec<Piece>> = lines.iter().map(|l| pieces_of(&flow, l)).collect();
+        let off = vec![false; lines.len()];
+        assert!(matches!(
+            key_values(&flow, &lines, 0, lines.len(), &pieces, &off),
+            KeyValues::No
+        ));
+        assert_eq!(
+            grid_of(&flow, &lines, &pieces, 3, false).err(),
+            Some("its two columns read as addresses")
+        );
+        // Labels beside values still pair.
+        let flow = two_columns(
+            &["Rechnungsnummer", "Kundennummer", "Datum"],
+            &["0000-0001", "00000", "01.02.2026"],
+        );
+        let lines = flow_lines(&flow);
+        let pieces: Vec<Vec<Piece>> = lines.iter().map(|l| pieces_of(&flow, l)).collect();
+        assert!(matches!(
+            key_values(&flow, &lines, 0, lines.len(), &pieces, &off),
+            KeyValues::Rows(_)
+        ));
     }
 
     #[test]

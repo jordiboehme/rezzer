@@ -260,6 +260,19 @@ pub fn all_text(out: &ReadOutcome) -> String {
     text(&out.document.body)
 }
 
+/// Whether each of `order` stands in `text`, each after the one before it; else which one
+/// does not.
+pub fn in_order(text: &str, order: &[&str]) -> Result<(), String> {
+    let mut from = 0;
+    for t in order {
+        let at = text[from..]
+            .find(t)
+            .ok_or_else(|| format!("no {t:?} after byte {from} in {text}"))?;
+        from += at + t.len();
+    }
+    Ok(())
+}
+
 /// One line of the data layer of a print-run form.
 #[derive(Clone)]
 pub struct DataLine {

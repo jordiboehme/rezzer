@@ -24,7 +24,7 @@ use crate::tables::{self, Planned, PlannedCell, Rule, Tables, Unsure};
 mod footnotes;
 mod shape;
 
-pub(crate) use shape::{address_shaped, page_text_sizes};
+pub(crate) use shape::{address_block, address_shaped, page_text_sizes};
 use shape::{bold_led, data_only, ends_in_amount, listed, padded_mark};
 
 /// A piece of text in one style on one line. The text parser and the fallback parser fill it,
@@ -190,7 +190,8 @@ impl UriTarget {
 /// pdflatex sets page numbers about 11 % above the bottom edge of an A4 page.
 const BAND: f32 = 0.18;
 
-/// Pages a header or footer line must repeat on.
+/// Pages a header or footer line must repeat on. In a file of two pages, a footer line repeats
+/// on both (see [`Style::learn`]).
 const REPEATS: usize = 3;
 
 /// A line at least this many times the body size is a heading in an untagged file.
@@ -248,7 +249,7 @@ pub(crate) struct Style {
     /// Distinct heading sizes of an untagged file, largest first.
     heading_sizes: Vec<f32>,
     /// Lines that repeat at the top or bottom of at least [`REPEATS`] pages at the same
-    /// height, with digits replaced.
+    /// height, or at the bottom of both pages of a file of two, with digits replaced.
     furniture: HashMap<Furniture, Vec<(f32, f32)>>,
     /// The footnote legend of each untagged page that has one, by the page's runs.
     legends: HashMap<u32, footnotes::Found>,
@@ -360,7 +361,10 @@ impl Style {
     }
 
     /// Learns body size, heading sizes, running headers and footers and, for an untagged
-    /// file (`tagged` false), the footnote legends from every page.
+    /// file (`tagged` false), the footnote legends from every page. A line at the foot of both
+    /// pages of a file of two is a footer: a letter or an invoice of two pages has no third
+    /// page to repeat it on. A letterhead at the top of both is content: the title and fields
+    /// of an invoice repeat on its second page.
     pub(crate) fn learn(pages: &[PageText<'_>], tagged: bool) -> Style {
         let mut seen: HashMap<Furniture, Vec<(f32, u32)>> = HashMap::new();
         // Texts that stand in the middle of some page are content, wherever else they stand.
@@ -398,7 +402,8 @@ impl Style {
                     pages_at.insert(at[j].1);
                     j += 1;
                 }
-                if pages_at.len() >= REPEATS {
+                let both = pages.len() == 2 && key.0 == Band::Bottom && pages_at.len() == 2;
+                if pages_at.len() >= REPEATS || both {
                     furniture
                         .entry(key.clone())
                         .or_default()
@@ -1069,8 +1074,22 @@ pub(crate) fn page_blocks_at(
         .map(|n| n.0.as_str())
         .collect();
     footnotes::unlink(&mut built.blocks, &legend, &unwritten);
-    for l in lines(&footers) {
-        built.paragraph(l.runs.iter().collect(), Some("page-footer"), cx);
+    // The lines of a footer that go on one another at one left edge are one block: a column
+    // of a footer in columns (an address, a bank, a register entry).
+    let footer_lines = lines(&footers);
+    let mut i = 0;
+    while i < footer_lines.len() {
+        let mut j = i + 1;
+        while j < footer_lines.len()
+            && continues(&footer_lines[j - 1], &footer_lines[j])
+            && (footer_lines[j].x - footer_lines[i].x).abs() <= EDGE
+        {
+            j += 1;
+        }
+        let block = &footer_lines[i..j];
+        let runs: Vec<&Run> = block.iter().flat_map(|l| l.runs.iter()).collect();
+        built.broken_paragraph(runs, &line_breaks(block), Some("page-footer"), cx);
+        i = j;
     }
     if built.tables_as_text > 0 {
         let k = built.tables_as_text;
@@ -2144,9 +2163,6 @@ fn untagged(flow: &[Run], text_sizes: &[f32], cx: &Context<'_>, out: &mut Built)
     }
 }
 
-/// Lines of a block whose widest line is at most this many font sizes are short lines.
-const SHORT_MEASURE: f32 = 24.0;
-
 /// A line is short when the next first word fits after it with this share of the widest
 /// line to spare.
 const SHORT_ROOM: f32 = 0.15;
@@ -2159,11 +2175,12 @@ const EDGE: f32 = 1.0;
 /// line with [`SHORT_ROOM`] of it to spare (and that line does not end in a hyphen), or the
 /// paragraph is set flush right or centred and the two lines share a right edge or a centre
 /// but not a left edge, or the
-/// paragraph is a block of short lines (its widest line at most [`SHORT_MEASURE`] font
-/// sizes) each of which after the first starts with a capital or a digit, none ends in a
-/// hyphen or a comma, the lines do not read as sentences, share their left edge and have the
-/// shape of an address or a list (list markers, or at most [`ADDRESS_WORDS`] words a line).
-/// Prose that fills its measure keeps joining, also where every line starts with a capital.
+/// paragraph is a block of short lines each of which after the first starts with a capital or
+/// a digit, none ends in a hyphen or a comma, the lines do not read as sentences, share their
+/// left edge and have the shape of an address or a list (list markers, or at most
+/// [`ADDRESS_WORDS`] words a line). How wide the block is does not matter: a long name in an
+/// address is still a line of it. Prose that fills its measure keeps joining, also where
+/// every line starts with a capital.
 fn line_breaks(lines: &[Line<'_>]) -> Vec<(u32, u32)> {
     if lines.len() < 2 {
         return Vec::new();
@@ -2180,15 +2197,12 @@ fn line_breaks(lines: &[Line<'_>]) -> Vec<(u32, u32)> {
         .collect();
     let right = edges.iter().map(|e| e.1).fold(f32::MIN, f32::max);
     let left = edges.iter().map(|e| e.0).fold(f32::MAX, f32::min);
-    let size = lines.iter().map(|l| l.size).fold(0.0f32, f32::max).max(1.0);
-    let short = right - left <= SHORT_MEASURE * size
-        && lines[1..].iter().all(|l| {
-            l.text
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_uppercase() || c.is_ascii_digit())
-        })
-        && lines.iter().all(|l| !l.text.ends_with(['-', ',']))
+    let short = lines[1..].iter().all(|l| {
+        l.text
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_uppercase() || c.is_ascii_digit())
+    }) && lines.iter().all(|l| !l.text.ends_with(['-', ',']))
         && !sentences(lines)
         && edges.iter().all(|e| (e.0 - left).abs() <= EDGE)
         && listed(&lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>());

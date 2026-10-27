@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use unicode_bidi::{BidiClass, Level, ParagraphBidiInfo, bidi_class};
 
-use crate::layout::{Gap, Gaps, Run};
+use crate::layout::{Gap, Gaps, Run, address_block};
 use crate::regions::{BASELINE_NEAR, Part, offset_baselines};
 use crate::tables::{Rule, RuleKind};
 use crate::text::{Gl, Link, Texts};
@@ -280,8 +280,11 @@ fn fragments(glyphs: &[Gl], text: &Texts<'_>, turn: Turn, page: Turn) -> Vec<Fra
 #[derive(Debug, Clone)]
 struct Piece {
     row: usize,
+    /// The start of the piece's first fragment with ink (of its first fragment when it has
+    /// no ink).
     x0: f32,
-    /// The end of the piece's last glyph, white space too.
+    /// The end of the piece's last glyph, white space too; fragments of white space only
+    /// count only in a piece without ink.
     x1: f32,
     /// Where a gap to the next fragment starts to count (see [`Frag::free`]), and whether
     /// white space ends the piece.
@@ -403,7 +406,14 @@ fn pieces_in(frags: &[Frag], ids: &[usize], head: &[usize], base: usize) -> (Vec
             let (lo, hi) = extent(f);
             if let Some(p) = piece.as_mut() {
                 if gap(p.free, p.padded, f) <= PIECE_GAP * f.size.max(p.size) {
-                    p.x1 = p.x1.max(f.pen);
+                    // A piece stands where its ink stands: a string of white space under the
+                    // text (a field a print run blanks before it writes the value) or after
+                    // it does not widen it.
+                    if f.inked && !p.inked {
+                        (p.x0, p.x1) = (f.x, f.pen.max(f.x));
+                    } else if f.inked || !p.inked {
+                        p.x1 = p.x1.max(f.pen);
+                    }
                     if f.inked {
                         (p.free, p.padded) = (f.free, f.padded);
                     } else if !p.padded {
@@ -457,10 +467,11 @@ const WIDE_RULE: f32 = 2.0 / 3.0;
 #[derive(Debug, Default)]
 struct Order {
     ids: Vec<usize>,
-    /// The places in `ids`, ascending, where the right side of a gutter of a lone row starts
-    /// (see [`Split::Lone`]): the piece there starts a line even when it shares the row of
-    /// the piece before it, which stands on the left side (a title beside the first line of
-    /// a field list).
+    /// The places in `ids`, ascending, where the right side of a gutter of a lone row or of
+    /// address columns starts (see [`Split::Lone`] and [`Split::Listed`]): the piece there
+    /// starts a line even when it shares the row of the piece before it, which stands on the
+    /// left side (a title beside the first line of a field list, the last line of an address
+    /// beside the first of the next).
     sides: Vec<usize>,
 }
 
@@ -478,26 +489,31 @@ impl Order {
     }
 }
 
-fn reading_order(pieces: &[Piece], rules: &[HRule]) -> Order {
+fn reading_order(pieces: &[Piece], frags: &[Frag], rules: &[HRule]) -> Order {
     let mut out = Order {
         ids: Vec::with_capacity(pieces.len()),
         sides: Vec::new(),
     };
-    region(pieces, (0..pieces.len()).collect(), 0, rules, &mut out);
+    let all = (0..pieces.len()).collect();
+    region((pieces, frags), all, 0, rules, &mut out);
     out
 }
 
-fn region(p: &[Piece], mut ids: Vec<usize>, depth: usize, rules: &[HRule], out: &mut Order) {
+/// The pieces of a page and the fragments they are made of.
+type Laid<'a> = (&'a [Piece], &'a [Frag]);
+
+fn region(laid: Laid<'_>, mut ids: Vec<usize>, depth: usize, rules: &[HRule], out: &mut Order) {
+    let p = laid.0;
     let deep = ids.len() > 3 && depth < COLUMN_DEPTH && ids.len() <= COLUMN_PIECES;
-    let found = if deep { gutter(p, &ids) } else { None };
+    let found = if deep { gutter(laid, &ids) } else { None };
     // A gutter that only a drawn box makes is taken after the bands of white space across:
     // text above or below the boxes is not part of their columns.
     if let Some((_, _, Split::Boxed)) = found {
         ids.sort_by(|&a, &b| p[a].row.cmp(&p[b].row).then(p[a].x0.total_cmp(&p[b].x0)));
         if let Some(at) = widest_gap(p, &ids) {
             let rest = ids.split_off(at);
-            region(p, ids, depth + 1, rules, out);
-            region(p, rest, depth + 1, rules, out);
+            region(laid, ids, depth + 1, rules, out);
+            region(laid, rest, depth + 1, rules, out);
             return;
         }
     }
@@ -509,15 +525,16 @@ fn region(p: &[Piece], mut ids: Vec<usize>, depth: usize, rules: &[HRule], out: 
                 return;
             }
             let (left, right): (Vec<usize>, Vec<usize>) =
-                band.drain(..).partition(|&i| p[i].x1 <= g0 + 0.5);
-            region(p, left, depth + 1, rules, out);
-            // A lone title and the line of the block whose row it shares are two lines. The
-            // pieces of a row beside other gutters stay one line, as they read: cells of a
-            // table in columns, labels of fields side by side.
-            if split == Split::Lone {
+                band.drain(..).partition(|&i| on_left(&p[i], g0, g1));
+            region(laid, left, depth + 1, rules, out);
+            // A lone title and the line of the block whose row it shares are two lines, and
+            // so are the lines of two address blocks side by side. The pieces of a row beside
+            // other gutters stay one line, as they read: cells of a table in columns, labels
+            // of fields side by side.
+            if matches!(split, Split::Lone | Split::Listed) {
                 out.sides.push(out.ids.len());
             }
-            region(p, right, depth + 1, rules, out);
+            region(laid, right, depth + 1, rules, out);
         };
         // A drawn rule across the gutter and most of the region parts the bands too: the
         // text above it is read before the text below it (a titled block before a grid).
@@ -535,7 +552,7 @@ fn region(p: &[Piece], mut ids: Vec<usize>, depth: usize, rules: &[HRule], out: 
                 flush(&mut band, out);
                 low = f32::MAX;
             }
-            if p[id].x1 > g0 + 0.5 && p[id].x0 < g1 - 0.5 {
+            if crosses(&p[id], g0, g1) {
                 flush(&mut band, out);
                 out.ids.push(id);
                 low = f32::MAX;
@@ -556,11 +573,29 @@ fn region(p: &[Piece], mut ids: Vec<usize>, depth: usize, rules: &[HRule], out: 
         && let Some(at) = widest_gap(p, &ids)
     {
         let rest = ids.split_off(at);
-        region(p, ids, depth + 1, rules, out);
-        region(p, rest, depth + 1, rules, out);
+        region(laid, ids, depth + 1, rules, out);
+        region(laid, rest, depth + 1, rules, out);
         return;
     }
     out.ids.extend(ids);
+}
+
+/// Whether the piece `p` stands on the left side of the gutter from `g0` to `g1`: its end is
+/// before the gutter. A piece of white space only has no ink to stand by: it goes with the
+/// side its start lies on.
+fn on_left(p: &Piece, g0: f32, g1: f32) -> bool {
+    if p.inked {
+        p.x1 <= g0 + 0.5
+    } else {
+        p.x0 < (g0 + g1) / 2.0
+    }
+}
+
+/// Whether the piece `p` crosses the gutter from `g0` to `g1`: a piece with ink that reaches
+/// into it from both sides. White space crosses nothing: a blank string that a print run
+/// draws under a row of fields is no text across the columns.
+fn crosses(p: &Piece, g0: f32, g1: f32) -> bool {
+    p.inked && p.x1 > g0 + 0.5 && p.x0 < g1 - 0.5
 }
 
 /// Where to cut pieces sorted by row: after the row with the widest white space below it,
@@ -598,9 +633,16 @@ enum Split {
     /// A lone row beside a block of lines of one pitch, apart from them by size or weight
     /// and baseline: a title beside a field list.
     Lone,
+    /// Blocks of short lines on both sides, each column of them in the shape of an address
+    /// (see [`listed_side`]): the address, bank and register blocks of a letter's footer, the
+    /// sender beside the recipient.
+    Listed,
     /// Only a drawn box on one side.
     Boxed,
 }
+
+/// At most this many bands of white space are tried for a gutter, from the best one on.
+const GUTTER_TRIES: usize = 4;
 
 /// A block beside a lone row has at least this many rows: a lone cell beside fewer is a row
 /// of a table, not a title.
@@ -616,76 +658,111 @@ const SIZE_STEP: f32 = 1.08;
 
 /// A column gutter in a region: the widest vertical band of white space that only a few
 /// pieces cross, with blocks on both sides that stand side by side: prose, lines whose
-/// baselines do not line up, a lone row beside a block (see [`lone_row`]) or a drawn box; and
-/// which of them makes it.
-fn gutter(p: &[Piece], ids: &[usize]) -> Option<(f32, f32, Split)> {
-    let lo = ids.iter().map(|&i| p[i].x0).fold(f32::MAX, f32::min);
-    let hi = ids.iter().map(|&i| p[i].x1).fold(f32::MIN, f32::max);
-    if !(hi - lo).is_finite() || hi - lo < 2.0 {
+/// baselines do not line up, a lone row beside a block (see [`lone_row`]), columns in the
+/// shape of addresses (see [`listed_side`]) or a drawn box; and which of them makes it. The
+/// bands are tried from the best on (see [`bands`]), at most [`GUTTER_TRIES`]. Pieces of white
+/// space only are no text: they neither fill nor cross a band.
+fn gutter(laid: Laid<'_>, ids: &[usize]) -> Option<(f32, f32, Split)> {
+    let p = laid.0;
+    let inked: Vec<usize> = ids.iter().copied().filter(|&i| p[i].inked).collect();
+    if inked.is_empty() {
         return None;
+    }
+    let allowed = (CROSSERS * inked.len() as f32).floor() as i32;
+    let mut sizes: Vec<f32> = inked.iter().map(|&i| p[i].size).collect();
+    sizes.sort_by(f32::total_cmp);
+    let size = sizes[sizes.len() / 2];
+    bands(p, &inked, allowed, GUTTER * size)
+        .into_iter()
+        .take(GUTTER_TRIES)
+        .find_map(|(g0, g1)| split_at(laid, ids, (g0, g1), allowed, size).map(|s| (g0, g1, s)))
+}
+
+/// The bands of white space between the pieces `inked` at least `min_gap` wide with text on
+/// both sides, best first: those covered by the fewest pieces first (a ragged line end next to
+/// the gutter must not widen it), up to `allowed` pieces, and the widest first within a cover.
+fn bands(p: &[Piece], inked: &[usize], allowed: i32, min_gap: f32) -> Vec<(f32, f32)> {
+    let lo = inked.iter().map(|&i| p[i].x0).fold(f32::MAX, f32::min);
+    let hi = inked.iter().map(|&i| p[i].x1).fold(f32::MIN, f32::max);
+    if !(hi - lo).is_finite() || hi - lo < 2.0 {
+        return Vec::new();
     }
     let width = ((hi - lo).ceil() as usize).min(20_000) + 2;
     let scale = (hi - lo) / (width - 2) as f32;
     let bin = |x: f32| (((x - lo) / scale) as usize).min(width - 1);
     let mut diff = vec![0i32; width + 1];
-    for &i in ids {
+    for &i in inked {
         diff[bin(p[i].x0)] += 1;
         diff[bin(p[i].x1) + 1] -= 1;
     }
-    let allowed = (CROSSERS * ids.len() as f32).floor() as i32;
-    let mut sizes: Vec<f32> = ids.iter().map(|&i| p[i].size).collect();
-    sizes.sort_by(f32::total_cmp);
-    let min_gap = GUTTER * sizes[sizes.len() / 2];
     let mut cover = Vec::with_capacity(width);
     let mut c = 0;
     for d in diff.iter().take(width) {
         c += d;
         cover.push(c);
     }
-    // The band covered by the fewest pieces wins: a ragged line end next to the gutter must
-    // not widen it. Only bands with text on both sides count.
-    let band = |level: i32| {
-        let mut best: Option<(f32, f32)> = None;
+    let mut out: Vec<(f32, f32)> = Vec::new();
+    for level in 0..=allowed {
+        let mut found: Vec<(f32, f32)> = Vec::new();
         let mut start = None;
         for (b, &c) in cover.iter().enumerate() {
             match (c <= level, start) {
                 (true, None) => start = Some(b),
                 (false, Some(s)) => {
                     let (g0, g1) = (lo + s as f32 * scale, lo + b as f32 * scale);
-                    if s > 0 && g1 - g0 >= min_gap && best.is_none_or(|(a, z)| g1 - g0 > z - a) {
-                        best = Some((g0, g1));
+                    if s > 0 && g1 - g0 >= min_gap {
+                        found.push((g0, g1));
                     }
                     start = None;
                 }
                 _ => {}
             }
         }
-        best
-    };
-    let best = (0..=allowed).find_map(band);
-    let (g0, g1) = best?;
-    let crossing = ids
-        .iter()
-        .filter(|&&i| p[i].x1 > g0 + 0.5 && p[i].x0 < g1 - 0.5)
-        .count();
+        found.sort_by(|a, b| (b.1 - b.0).total_cmp(&(a.1 - a.0)));
+        for g in found {
+            if !out.contains(&g) {
+                out.push(g);
+            }
+        }
+        if out.len() >= GUTTER_TRIES {
+            break;
+        }
+    }
+    out
+}
+
+/// What makes the band from `g0` to `g1` a gutter of the pieces `ids`, if anything: at most
+/// `allowed` of them cross it, the blocks on its sides stand side by side and are prose, lines
+/// whose baselines do not line up, a lone row beside a block, columns in the shape of
+/// addresses or a drawn box. `size` is the median size of the pieces.
+fn split_at(
+    laid: Laid<'_>,
+    ids: &[usize],
+    (g0, g1): (f32, f32),
+    allowed: i32,
+    size: f32,
+) -> Option<Split> {
+    let p = laid.0;
+    let crossing = ids.iter().filter(|&&i| crosses(&p[i], g0, g1)).count();
     if crossing as i32 > allowed {
         return None;
     }
     let left: Vec<usize> = ids
         .iter()
         .copied()
-        .filter(|&i| p[i].x1 <= g0 + 0.5)
+        .filter(|&i| !crosses(&p[i], g0, g1) && on_left(&p[i], g0, g1))
         .collect();
     let right: Vec<usize> = ids
         .iter()
         .copied()
-        .filter(|&i| p[i].x0 >= g1 - 0.5)
+        .filter(|&i| !crosses(&p[i], g0, g1) && !on_left(&p[i], g0, g1))
         .collect();
     let prose = |side: &[usize]| {
-        if side.len() < 2 {
+        let inked: Vec<usize> = side.iter().copied().filter(|&i| p[i].inked).collect();
+        if inked.len() < 2 {
             return false;
         }
-        let mut chars: Vec<usize> = side.iter().map(|&i| p[i].chars).collect();
+        let mut chars: Vec<usize> = inked.iter().map(|&i| p[i].chars).collect();
         chars.sort_unstable();
         chars[chars.len() / 2] >= PROSE_CHARS
     };
@@ -709,7 +786,6 @@ fn gutter(p: &[Piece], ids: &[usize]) -> Option<(f32, f32, Split)> {
         }
         out
     };
-    let size = sizes[sizes.len() / 2];
     let apart = || offset_baselines(&baselines(&left), &baselines(&right), size);
     let split = if prose(&left) && prose(&right) {
         Split::Prose
@@ -717,6 +793,8 @@ fn gutter(p: &[Piece], ids: &[usize]) -> Option<(f32, f32, Split)> {
         Split::Offset
     } else if lone_row(p, &left, &right) || lone_row(p, &right, &left) {
         Split::Lone
+    } else if listed_side(laid, &left) && listed_side(laid, &right) {
+        Split::Listed
     } else if !left.is_empty() && !right.is_empty() && (boxed(&left) || boxed(&right)) {
         Split::Boxed
     } else {
@@ -732,7 +810,57 @@ fn gutter(p: &[Piece], ids: &[usize]) -> Option<(f32, f32, Split)> {
     let (a, b) = (span(&left), span(&right));
     let overlap = a.1.min(b.1) - a.0.max(b.0);
     let smaller = (a.1 - a.0).min(b.1 - b.0).max(0.01);
-    (overlap / smaller >= 0.3).then_some((g0, g1, split))
+    (overlap / smaller >= 0.3).then_some(split)
+}
+
+/// Whether the pieces `side` of a gutter are columns of short lines in the shape of addresses:
+/// the pieces with ink, grouped into columns where their extents overlap, hold one piece a row
+/// in each column, and the lines of each column are an [`address_block`]: a name, a street, a
+/// postcode and town. A column of amounts holds no letter, a column of names no digit, and a
+/// column of labels or values of one form (`Feld 1`, `Feld 2`) one shape: the columns of a
+/// table are not addresses.
+fn listed_side((p, f): Laid<'_>, side: &[usize]) -> bool {
+    let mut inked: Vec<usize> = side.iter().copied().filter(|&i| p[i].inked).collect();
+    if inked.is_empty() || inked.iter().any(|&i| p[i].stand.is_some()) {
+        return false;
+    }
+    inked.sort_by(|&a, &b| p[a].x0.total_cmp(&p[b].x0));
+    let mut columns: Vec<(f32, Vec<usize>)> = Vec::new();
+    for i in inked {
+        match columns.last_mut() {
+            Some((end, column)) if p[i].x0 < *end => {
+                *end = end.max(p[i].free);
+                column.push(i);
+            }
+            _ => columns.push((p[i].free, vec![i])),
+        }
+    }
+    columns.into_iter().all(|(_, mut column)| {
+        column.sort_by_key(|&i| p[i].row);
+        if column.windows(2).any(|w| p[w[0]].row == p[w[1]].row) {
+            return false;
+        }
+        let texts: Vec<String> = column.iter().map(|&i| piece_text(&p[i], f)).collect();
+        address_block(&texts.iter().map(String::as_str).collect::<Vec<_>>())
+    })
+}
+
+/// The text of a piece, its fragments joined with a space where a word gap parts them, the
+/// padding at its ends left out.
+fn piece_text(p: &Piece, f: &[Frag]) -> String {
+    let mut out = String::new();
+    let mut end: Option<f32> = None;
+    for &i in &p.frags {
+        let fr = &f[i];
+        if end.is_some_and(|e| fr.x - e > WORD_GAP * fr.size) && !out.ends_with(is_pad) {
+            out.push(' ');
+        }
+        out.push_str(&fr.text);
+        if fr.inked {
+            end = Some(fr.end);
+        }
+    }
+    out.trim_matches(is_pad).to_string()
 }
 
 /// Whether the pieces `one` are a lone row beside the block `block`, a title beside a field
@@ -816,7 +944,7 @@ fn lines_in(frags: &[Frag], columns: bool, boxes: &[[f32; 4]], rules: &[HRule]) 
         let all: Vec<usize> = (0..frags.len()).collect();
         ps = pieces_in(frags, &all, &head, 0).0;
         order = if columns {
-            reading_order(&ps, rules)
+            reading_order(&ps, frags, rules)
         } else {
             let mut o: Vec<usize> = (0..ps.len()).collect();
             o.sort_by(|&a, &b| {
@@ -1018,7 +1146,7 @@ fn boxed_order(
         .chain(first_stand..ps.len())
         .collect();
     let mut out = Order::default();
-    region(&ps, top, 0, rules, &mut out);
+    region((&ps, frags), top, 0, rules, &mut out);
     let mut order = Order {
         ids: Vec::with_capacity(ps.len()),
         sides: Vec::new(),
@@ -1030,7 +1158,13 @@ fn boxed_order(
         match ps[id].stand {
             Some(g) => {
                 let mut boxed = Order::default();
-                region(&ps, inner[g].clone().collect(), 0, rules, &mut boxed);
+                region(
+                    (&ps, frags),
+                    inner[g].clone().collect(),
+                    0,
+                    rules,
+                    &mut boxed,
+                );
                 order.append(boxed);
             }
             None => order.ids.push(id),
@@ -1947,12 +2081,12 @@ mod tests {
         let frags = title_beside(9.0, true, &[703.0, 695.0, 687.0, 667.0], 0);
         let ps = pieces(&frags);
         let ids: Vec<usize> = (0..ps.len()).collect();
-        assert_eq!(gutter(&ps, &ids), None);
+        assert_eq!(gutter((&ps, &frags), &ids), None);
         // At one pitch, the lone title makes the gutter.
         let frags = title_beside(9.0, true, &[703.0, 695.0, 687.0, 679.0], 0);
         let ps = pieces(&frags);
         let ids: Vec<usize> = (0..ps.len()).collect();
-        assert_eq!(gutter(&ps, &ids).map(|g| g.2), Some(Split::Lone));
+        assert_eq!(gutter((&ps, &frags), &ids).map(|g| g.2), Some(Split::Lone));
     }
 
     #[test]

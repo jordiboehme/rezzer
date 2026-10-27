@@ -9,7 +9,7 @@ mod common;
 
 use std::time::{Duration, Instant};
 
-use common::{DataLine, FormPage, all_text, boxed, data_line, label, mark, print_form};
+use common::{DataLine, FormPage, all_text, boxed, data_line, in_order, label, mark, print_form};
 use rezzer_model::{Block, Completeness, Inline, LossReason, ReadOutcome, Severity, plain_text};
 
 /// The allocator of the Rezzer binary, so the reads run as they run in it.
@@ -575,19 +575,6 @@ fn label_then_value_on_one_row() {
         text.lines().any(|l| l == "Auszahlungsbetrag 1.234,56"),
         "{text:?}"
     );
-}
-
-/// Whether each of `order` stands in `text`, each after the one before it; else which one
-/// does not.
-fn in_order(text: &str, order: &[&str]) -> Result<(), String> {
-    let mut from = 0;
-    for t in order {
-        let at = text[from..]
-            .find(t)
-            .ok_or_else(|| format!("no {t:?} after byte {from} in {text}"))?;
-        from += at + t.len();
-    }
-    Ok(())
 }
 
 /// A column of long labels with their values on the same baselines, the values padded from

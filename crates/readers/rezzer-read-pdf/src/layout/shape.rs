@@ -168,6 +168,32 @@ pub(crate) fn address_shaped(lines: &[&str]) -> bool {
             .any(|l| l.chars().any(|c| c.is_ascii_digit()))
 }
 
+/// Whether lines are a block of an address, a bank or a register entry: [`address_shaped`],
+/// and not all of one shape (see [`word_shape`]), as a name, a street and a postcode with its
+/// town are not. The labels or values of one form in a column of a table (`Feld 1`,
+/// `Feld 2`, or `Musterweg 1`, `Musterweg 2`) have one shape.
+pub(crate) fn address_block(lines: &[&str]) -> bool {
+    let Some(first) = lines.first() else {
+        return false;
+    };
+    let shape = word_shape(first);
+    lines.iter().any(|l| word_shape(l) != shape) && address_shaped(lines)
+}
+
+/// The shape of a line by its words: for each run of words with a digit and each run of words
+/// without one, whether it holds a digit. `Musterweg 1` and `Feld 2` have one shape, `Muster
+/// GmbH` and `12345 Musterstadt` each another.
+fn word_shape(text: &str) -> Vec<bool> {
+    let mut out: Vec<bool> = Vec::new();
+    for w in text.split_whitespace() {
+        let digit = w.chars().any(|c| c.is_ascii_digit());
+        if out.last() != Some(&digit) {
+            out.push(digit);
+        }
+    }
+    out
+}
+
 /// Words that start with a small letter, not counting name particles ("von der Heide",
 /// "Maria de la Cruz") before a capitalised word. German articles on their own are no
 /// particles: they precede nouns in prose.
@@ -314,6 +340,28 @@ mod tests {
         assert!(!data_only("Bericht 2025"));
         assert!(!data_only("EUR"));
         assert!(!data_only("Rechnung"));
+    }
+
+    #[test]
+    fn address_blocks_have_lines_of_more_than_one_shape() {
+        assert!(address_block(&[
+            "Muster GmbH",
+            "Musterweg 1",
+            "12345 Musterstadt"
+        ]));
+        assert!(address_block(&[
+            "Musterbank",
+            "IBAN DE00 0000 0000 0000 0000 00",
+            "BIC MUSTDEXXXXX"
+        ]));
+        // The labels or values of one form in a column of a table.
+        assert!(!address_block(&["Label 0", "Label 1", "Label 2"]));
+        assert!(!address_block(&[
+            "Musterweg 1",
+            "Musterweg 2",
+            "Musterweg 3"
+        ]));
+        assert!(!address_block(&[]));
     }
 
     #[test]

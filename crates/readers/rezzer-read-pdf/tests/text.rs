@@ -1584,3 +1584,98 @@ fn indented_prose_keeps_its_paragraphs() {
         .collect();
     assert_eq!(found, want);
 }
+
+/// A page of body text with `extra` drawn on it.
+fn page_with(extra: &str) -> Page {
+    Page::text(format!(
+        "{}{extra}",
+        show(
+            "F1",
+            10.0,
+            72.0,
+            600.0,
+            "The text of the page in plain words, as a letter has it."
+        )
+    ))
+}
+
+/// The footer line of the tests of two-page furniture.
+const FIRM_LINE: &str = "Muster GmbH, Musterweg 1, 12345 Musterstadt";
+
+/// A line at the foot of both pages of a file of two pages is a running footer: a letter or
+/// invoice of two pages has no third page to repeat it on.
+#[test]
+fn two_page_footer_is_furniture() {
+    let pages: Vec<Page> = (0..2)
+        .map(|_| page_with(&show("F1", 8.0, 72.0, 40.0, FIRM_LINE)))
+        .collect();
+    let out = read(&pdf(&pages, ""));
+    for n in 1..=2u32 {
+        let roles = roles_of(&out, n);
+        assert_eq!(
+            roles.last(),
+            Some(&(Some("page-footer".into()), FIRM_LINE.into())),
+            "page {n}: {roles:?}"
+        );
+        assert_eq!(
+            roles.iter().filter(|(_, t)| t == FIRM_LINE).count(),
+            1,
+            "page {n}: {roles:?}"
+        );
+    }
+}
+
+/// Guard: a line at the foot of two pages of three is body text: it repeats on too few pages.
+#[test]
+fn line_on_two_of_three_pages_is_not_furniture() {
+    let pages: Vec<Page> = (0..3)
+        .map(|n| {
+            if n < 2 {
+                page_with(&show("F1", 8.0, 72.0, 40.0, FIRM_LINE))
+            } else {
+                page_with("")
+            }
+        })
+        .collect();
+    let out = read(&pdf(&pages, ""));
+    for n in 1..=2u32 {
+        let roles = roles_of(&out, n);
+        assert!(
+            roles.iter().any(|(r, t)| r.is_none() && t == FIRM_LINE),
+            "page {n}: {roles:?}"
+        );
+    }
+}
+
+/// Guard: a letterhead at the top of both pages of a file of two pages stays content: the
+/// title and the fields of an invoice repeat on its second page, and they are the reader's to
+/// read.
+#[test]
+fn two_page_letterhead_stays_content() {
+    let head = show("F2", 14.0, 72.0, 800.0, "Rechnung")
+        + &show("F1", 9.0, 72.0, 784.0, "Rechnungsnummer 0000-0001")
+        + &show("F1", 9.0, 72.0, 773.0, "Kundennummer 00000");
+    let pages: Vec<Page> = (0..2).map(|_| page_with(&head)).collect();
+    let out = read(&pdf(&pages, ""));
+    for n in 1..=2u32 {
+        let roles = roles_of(&out, n);
+        assert!(
+            roles
+                .iter()
+                .all(|(r, _)| r.as_deref() != Some("page-header")),
+            "page {n}: {roles:?}"
+        );
+        let all = roles
+            .iter()
+            .map(|(_, t)| t.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        for t in [
+            "Rechnung",
+            "Rechnungsnummer 0000-0001",
+            "Kundennummer 00000",
+        ] {
+            assert!(all.contains(t), "page {n}: {t} in {roles:?}");
+        }
+    }
+}

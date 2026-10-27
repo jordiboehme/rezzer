@@ -3162,3 +3162,438 @@ fn a_group_label_beside_rows_is_read_before_them() {
         wrong.join("\n")
     );
 }
+
+/// The blocks of page `n` that are not its body text or its page marker: their role and text.
+fn page_texts(out: &ReadOutcome, n: u32) -> Vec<(Option<String>, String)> {
+    let want = rezzer_model::Anchor(format!("p{n}"));
+    let page = out
+        .document
+        .body
+        .iter()
+        .find_map(|b| match b {
+            Block::Section {
+                kind: rezzer_model::SectionKind::Page,
+                anchor: Some(a),
+                blocks,
+                ..
+            } if *a == want => Some(blocks.as_slice()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no page {n}"));
+    let mut found = Vec::new();
+    for b in page {
+        let role = match b {
+            Block::Paragraph { role, .. } => role.clone(),
+            _ => None,
+        };
+        if role.as_deref() == Some("page") {
+            continue;
+        }
+        let text = match b {
+            Block::Table { rows, .. } => rows
+                .iter()
+                .map(|r| {
+                    r.iter()
+                        .map(|c| plain_text(&c.inlines))
+                        .collect::<Vec<_>>()
+                        .join(" | ")
+                })
+                .collect::<Vec<_>>()
+                .join(" / "),
+            _ => {
+                let mut s = String::new();
+                common::block_text(b, &mut s);
+                s.trim().to_string()
+            }
+        };
+        if !text.starts_with("die Muster") {
+            found.push((role, text));
+        }
+    }
+    found
+}
+
+/// The three columns of the finding B5 at x 40, 230 and 420 on the baselines 60, 52 and 44.
+const BLANK_COLUMNS: [(f32, [&str; 3]); 3] = [
+    (40.0, ["Muster GmbH", "Musterweg 1", "12345 Musterstadt"]),
+    (
+        230.0,
+        [
+            "Musterbank",
+            "IBAN DE00 0000 0000 0000 0000 00",
+            "BIC MUSTDEXXXXX",
+        ],
+    ),
+    (
+        420.0,
+        [
+            "Amtsgericht Musterstadt",
+            "HRB 00000",
+            "Gesch\u{e4}ftsf\u{fc}hrung Erika Mustermann",
+        ],
+    ),
+];
+
+/// Finding B5: three columns of an address, a bank and a register entry in a 6 pt footer, each
+/// row drawn over a string of 150 spaces from x 40 that reaches past the first gutter (as a
+/// print run blanks its field first): each column is read as one paragraph of three lines, the
+/// columns one after the other.
+#[test]
+fn blank_strings_do_not_block_columns() {
+    let mut t = String::new();
+    for (k, y) in [60.0, 52.0, 44.0].into_iter().enumerate() {
+        t += &show("FL", 6.0, 40.0, y, &" ".repeat(150));
+        for (x, lines) in BLANK_COLUMNS {
+            t += &show("FL", 6.0, x, y, lines[k]);
+        }
+    }
+    for wide in [false, true] {
+        blank_columns_read(&footed_pages(&t, 1, 1.0, wide));
+    }
+}
+
+/// The checks of [`blank_strings_do_not_block_columns`] on the file `bytes`.
+fn blank_columns_read(bytes: &[u8]) {
+    let out = common::read(bytes);
+    let texts = page_texts(&out, 1);
+    let joined = texts
+        .iter()
+        .map(|(_, t)| t.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let order: Vec<&str> = BLANK_COLUMNS.iter().flat_map(|c| c.1).collect();
+    common::in_order(&joined, &order).unwrap_or_else(|e| panic!("{e}"));
+    for (_, lines) in BLANK_COLUMNS {
+        let found = paragraph(&out, lines[0]).unwrap_or_else(|| panic!("{lines:?} in {texts:?}"));
+        assert_eq!(plain_text(found), lines.join(" "), "{texts:?}");
+        assert_eq!(line_breaks(found), 2, "{found:?}");
+    }
+}
+
+/// Finding B5: the bank and the register column side by side on shared baselines, without
+/// colons, are two addresses and no table of labels and values: no table, each line read once.
+#[test]
+fn two_address_columns_are_not_key_values() {
+    let mut t = String::new();
+    for (k, y) in [60.0, 52.0, 44.0].into_iter().enumerate() {
+        t += &show("FL", 6.0, 40.0, y, BLANK_COLUMNS[1].1[k]);
+        t += &show("FL", 6.0, 300.0, y, BLANK_COLUMNS[2].1[k]);
+    }
+    for wide in [false, true] {
+        let out = common::read(&footed_pages(&t, 1, 1.0, wide));
+        assert!(tables(&out).is_empty(), "wide {wide}: {:?}", tables(&out));
+        let texts = page_texts(&out, 1);
+        for line in BLANK_COLUMNS[1].1.iter().chain(&BLANK_COLUMNS[2].1) {
+            let n: usize = texts.iter().map(|(_, t)| t.matches(line).count()).sum();
+            assert_eq!(n, 1, "wide {wide}: {line:?} in {texts:?}");
+        }
+    }
+}
+
+/// Guard: labels without colons beside their values still read as a table of label and value.
+#[test]
+fn labels_without_colons_still_pair() {
+    let fields = [
+        ["Rechnungsnummer", "0000-0001"],
+        ["Kundennummer", "00000"],
+        ["Datum", "01.02.2026"],
+    ];
+    let mut t = String::new();
+    for (k, [label, value]) in fields.iter().enumerate() {
+        let y = 700.0 - 10.0 * k as f32;
+        t += &show("FL", 8.0, 40.0, y, label);
+        t += &show("FL", 8.0, 160.0, y, value);
+    }
+    let out = common::read(&page_in(&t, Look::Plain));
+    let want: Vec<&[&str]> = fields.iter().map(|f| f.as_slice()).collect();
+    assert_eq!(tables(&out), [(0, owned(&want))]);
+}
+
+/// Guard: the totals under line items, labels without colons beside amounts, stay a table.
+#[test]
+fn totals_still_pair() {
+    let totals = owned(&[
+        &["Nettobetrag", "1.234,56"],
+        &["USt 19 %", "234,57"],
+        &["Gesamtbetrag", "1.469,13"],
+    ]);
+    for (name, out) in invoice_reads(Rules::End) {
+        let found = tables(&out);
+        assert_eq!(found.len(), 2, "{name}: {found:?}");
+        assert_eq!(found[1].1, totals, "{name}");
+    }
+}
+
+/// The blocks of an invented invoice footer, each a column: the firm's address, its bank, its
+/// register entry and its shop's contact.
+const FOOTER: [&[&str]; 4] = [
+    &[
+        "Muster GmbH",
+        "Musterweg 1",
+        "12345 Musterstadt",
+        "Deutschland",
+    ],
+    &[
+        "Musterbank",
+        "IBAN DE00 0000 0000 0000 0000 00",
+        "BIC MUSTDEXXXXX",
+    ],
+    &[
+        "Amtsgericht Musterstadt",
+        "HRB 00000",
+        "USt-IdNr. DE000000000",
+        "Gesch\u{e4}ftsf\u{fc}hrung",
+        "Erika Mustermann",
+        "Max Mustermann",
+    ],
+    &[
+        "Muster Shop",
+        "Tel. 0000 000000",
+        "E-Mail info@muster.example",
+        "Web www.muster.example",
+    ],
+];
+
+/// How the columns of a generated footer stand.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Stack {
+    /// Every column starts on the first baseline.
+    Top,
+    /// A shorter column is centred on the height of the longest (half a line off when the
+    /// counts differ by an odd number).
+    Centred,
+}
+
+/// A footer of the `columns` (their lines) at 7 pt in `fonts` (plain, bold), the line `bold`
+/// (column, line) set bold, the first baseline at 70 and 8.4 points apart, each column three
+/// sizes right of the widest line of the one before it.
+fn footer(
+    fonts: (&str, &str),
+    columns: &[Vec<&str>],
+    bold: Option<(usize, usize)>,
+    stack: Stack,
+) -> String {
+    let size = 7.0;
+    let rows = columns.iter().map(Vec::len).max().unwrap_or(0);
+    let mut t = String::new();
+    let mut x = 40.0;
+    for (c, lines) in columns.iter().enumerate() {
+        let off = match stack {
+            Stack::Top => 0.0,
+            Stack::Centred => (rows - lines.len()) as f32 / 2.0,
+        };
+        let mut widest: f32 = 0.0;
+        for (k, line) in lines.iter().enumerate() {
+            let font = if bold == Some((c, k)) {
+                fonts.1
+            } else {
+                fonts.0
+            };
+            t += &show(font, size, x, 70.0 - 8.4 * (k as f32 + off), line);
+            widest = widest.max(common::font_width(font, line, size));
+        }
+        x += widest + 3.0 * size;
+    }
+    t
+}
+
+/// What is wrong with the footer `columns` on page `n` of `out`: a block that holds lines of
+/// two columns, a line not read or read twice, a column that is not one block or not in
+/// column order, or a column whose role is not `role`.
+fn footer_broken(
+    out: &ReadOutcome,
+    n: u32,
+    columns: &[Vec<&str>],
+    role: Option<&str>,
+) -> Vec<String> {
+    let texts = page_texts(out, n);
+    let mut wrong = Vec::new();
+    // The columns whose lines each block holds.
+    let holds = |s: &str| -> Vec<usize> {
+        (0..columns.len())
+            .filter(|&c| columns[c].iter().any(|l| s.contains(l)))
+            .collect()
+    };
+    for (_, s) in &texts {
+        if holds(s).len() > 1 {
+            wrong.push(format!("page {n}: {s:?} holds lines of two columns"));
+        }
+    }
+    for line in columns.iter().flatten() {
+        let k: usize = texts.iter().map(|(_, s)| s.matches(line).count()).sum();
+        if k != 1 {
+            wrong.push(format!("page {n}: {line:?} is read {k} times"));
+        }
+    }
+    let mut last = None;
+    for (c, lines) in columns.iter().enumerate() {
+        let at: Vec<usize> = (0..texts.len())
+            .filter(|&b| lines.iter().any(|l| texts[b].1.contains(l)))
+            .collect();
+        match at.as_slice() {
+            [b] => {
+                if texts[*b].1 != lines.join(" ") {
+                    wrong.push(format!("page {n}: column {c} reads {:?}", texts[*b].1));
+                }
+                if texts[*b].0.as_deref() != role {
+                    wrong.push(format!(
+                        "page {n}: column {c} has the role {:?}",
+                        texts[*b].0
+                    ));
+                }
+                if last.is_some_and(|l| l >= *b) {
+                    wrong.push(format!(
+                        "page {n}: column {c} is read before the one before it"
+                    ));
+                }
+                last = Some(*b);
+            }
+            _ => wrong.push(format!("page {n}: column {c} is in blocks {at:?}")),
+        }
+    }
+    if !wrong.is_empty() {
+        wrong.push(format!("page {n}: {texts:?}"));
+    }
+    wrong
+}
+
+/// A line of body text that runs over the width of the page, as the lines of an item table or
+/// a letter do: no gutter of the footer runs through it.
+const WIDE_LINE: &str = "die Muster GmbH liefert die bestellte Ware gem\u{e4}\u{df} den Bedingungen und \
+                         berechnet die Leistungen wie vereinbart, zahlbar ohne Abzug bis zum Ende des Monats";
+
+/// Lines of plain `size` pt body text from `top` down, at least 600 ink characters, each
+/// [`WIDE_LINE`] when `wide`, else [`BODY_LINE`].
+fn body_of(size: f32, top: f32, wide: bool) -> String {
+    if !wide {
+        return body(size, top);
+    }
+    let mut out = String::new();
+    let mut ink = 0;
+    let mut y = top;
+    while ink < 600 {
+        out.push_str(&show("FL", size, 40.0, y, WIDE_LINE));
+        ink += WIDE_LINE.chars().filter(|c| !c.is_whitespace()).count();
+        y -= size * 1.3;
+    }
+    out
+}
+
+/// A file of `count` pages, each the 7 pt body (wide or not) with `extra` under it, drawn `k`
+/// times as large.
+fn footed_pages(extra: &str, count: usize, k: f32, wide: bool) -> Vec<u8> {
+    let page = FormPage {
+        template: format!("{}{extra}", body_of(7.0, 500.0, wide)),
+        scale: k,
+        ..FormPage::default()
+    };
+    print_form(&vec![page; count], "", "")
+}
+
+/// Carried from Task 10 (an invoice of two pages, its shape only): a footer of 7 pt text in
+/// four columns of uneven length, the address, the bank, the register entry and the contact
+/// under a bold shop name, at the foot of both pages. Each column is one block, in column
+/// order, a running footer on both pages, and the file has no loss.
+#[test]
+fn invoice_footer_columns_are_furniture_on_two_pages() {
+    let columns: Vec<Vec<&str>> = FOOTER.iter().map(|c| c.to_vec()).collect();
+    let t = footer(("FL", "FB"), &columns, Some((3, 0)), Stack::Top);
+    let mut wrong = Vec::new();
+    for wide in [false, true] {
+        let out = common::read(&footed_pages(&t, 2, 1.0, wide));
+        for n in 1..=2 {
+            wrong.extend(footer_broken(&out, n, &columns, Some("page-footer")));
+        }
+        if !out.document.losses.is_empty() {
+            wrong.push(format!("wide {wide}: {:?}", out.document.losses));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// The column sets of the generated footers: two to four blocks of [`FOOTER`] next to each
+/// other, with their uneven line counts, and each cut to three lines.
+fn footer_sets() -> Vec<(String, Vec<Vec<&'static str>>)> {
+    let mut out = Vec::new();
+    for n in 2..=4 {
+        for start in 0..=FOOTER.len() - n {
+            let blocks = &FOOTER[start..start + n];
+            out.push((
+                format!("{n} columns from {start}"),
+                blocks.iter().map(|b| b.to_vec()).collect(),
+            ));
+            out.push((
+                format!("{n} columns from {start}, three lines"),
+                blocks.iter().map(|b| b[..3].to_vec()).collect(),
+            ));
+        }
+    }
+    out
+}
+
+/// Finding B5 under ruling P6-Y: a footer of two to four address-shaped columns, in every size
+/// and font, set flush to the top or centred, with no bold line, a bold first line of its last
+/// column or a bold second line of its first, on one, two or three pages: no block holds lines
+/// of two columns, every line is read once, each column is one block in column order, a running
+/// footer on files of two and three pages and body text on a file of one, and no loss.
+#[test]
+fn footer_columns_read_apart_in_every_size_and_font() {
+    let mut wrong = Vec::new();
+    let mut reads = 0;
+    for (set, columns) in footer_sets() {
+        let n = columns.len();
+        for k in [0.75, 1.0, 1.5] {
+            for fonts in FONTS {
+                for stack in [Stack::Top, Stack::Centred] {
+                    for bold in [None, Some((n - 1, 0)), Some((0, 1))] {
+                        let t = footer(fonts, &columns, bold, stack);
+                        for (count, wide) in (1..=3usize).flat_map(|c| [(c, false), (c, true)]) {
+                            let out = common::read(&footed_pages(&t, count, k, wide));
+                            reads += 1;
+                            let role = (count >= 2).then_some("page-footer");
+                            let name = format!(
+                                "{set}, {k}x, {fonts:?}, {stack:?}, bold {bold:?}, {count} pages, \
+                                 wide {wide}"
+                            );
+                            for p in 1..=count as u32 {
+                                for w in footer_broken(&out, p, &columns, role) {
+                                    wrong.push(format!("{name}: {w}"));
+                                }
+                            }
+                            if !out.document.losses.is_empty() {
+                                wrong.push(format!("{name}: {:?}", out.document.losses));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong in {reads} reads:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// Finding B5: an address block with one line wider than 24 times its size (a long name of
+/// the managing director) keeps a line break after each line: the width of a block of short
+/// lines in the shape of an address does not make it prose.
+#[test]
+fn a_wide_address_line_keeps_its_line_breaks() {
+    let lines = [
+        "Muster GmbH",
+        "Vertretungsberechtigte Gesch\u{e4}ftsf\u{fc}hrerin Erika Mustermann-Musterfrau",
+        "Musterweg 1",
+        "12345 Musterstadt",
+    ];
+    let mut t = String::new();
+    for (k, line) in lines.iter().enumerate() {
+        t += &show("FL", 8.0, 40.0, 700.0 - 10.0 * k as f32, line);
+    }
+    let out = common::read(&pages(&[t]));
+    let found = paragraph(&out, "Muster GmbH Vertretungs").expect("the address paragraph");
+    assert_eq!(plain_text(found), lines.join(" "));
+    assert_eq!(line_breaks(found), 3, "{found:?}");
+}

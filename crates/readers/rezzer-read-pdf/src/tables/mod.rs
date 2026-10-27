@@ -200,6 +200,7 @@ pub(crate) fn plural(why: &str) -> &str {
         }
         "its columns are not clean" => "their columns are not clean",
         "all its rows read the same" => "all their rows read the same",
+        "its two columns read as addresses" => "their two columns read as addresses",
         "it reads like a table of contents" => "they read like tables of contents",
         other => other,
     }

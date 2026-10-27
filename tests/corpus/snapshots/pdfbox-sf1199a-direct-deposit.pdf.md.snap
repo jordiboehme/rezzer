@@ -411,13 +411,24 @@ Most of the information needed to complete boxes A, C, and F in Section 1 is pri
 
 **United States Treasury** 000
 
-Month Day  Year\
-08 31 84
+Pay to\
+the order of
 
-AUSTIN, TEXAS
+Month Day  Year AUSTIN, TEXAS 08 31 84
 
-29-693-775 00 **C** 28 28 Pay to VA  COMP the order of JOHN DOE\
-123 BRISTOL STREET **F** HAWKINS BRANCH  TX  76543
+29-693-775 00 **C**
+
+JOHN DOE\
+123 BRISTOL STREET\
+HAWKINS BRANCH  TX  76543
+
+**A**
+
+28 28
+
+VA  COMP
+
+**F**
 
 Check No.
 
@@ -426,8 +437,6 @@ Check No.
 DOLLARS CTS
 
 $\*\*\*\*100 00
-
-**A**
 
 **NOT NEGOTIABLE**
 
