@@ -2975,3 +2975,98 @@ fn lone_cell_on_a_row_baseline_stays_in_its_row() {
         wrong.join("\n")
     );
 }
+
+/// Where the group label of [`group_label_rows`] stands, and how it stands out.
+#[derive(Debug, Clone, Copy)]
+enum Group {
+    /// Bold and one and a half times the size of the rows, centred on the three rows.
+    BoldLarger,
+    /// Plain and one and a half times the size of the rows, centred on the three rows.
+    Larger,
+    /// Bold in the size of the rows, centred between the first two rows.
+    BoldBetween,
+}
+
+/// The three rows of [`GROUP_ROWS`] without rules at `k` times 8 pt in the fonts `fonts`
+/// (plain, bold), `10 k` apart from the baseline 600 down, the article at x 200, the quantity
+/// at x 300 and the amount flush right at x 420, with the bold titles `Artikel`, `Menge` and
+/// `Betrag` over them when `titled`; the group label `Gruppe A` at x 40 placed as `group`,
+/// so that the white space after it is the widest of the block.
+fn group_label_rows(k: f32, fonts: (&str, &str), group: Group, titled: bool) -> String {
+    let size = 8.0 * k;
+    let row = |r: usize| 600.0 - 10.0 * k * r as f32;
+    let flush_right = |font: &str, y: f32, t: &str| {
+        show(font, size, 420.0 - common::font_width(font, t, size), y, t)
+    };
+    let mut t = String::new();
+    if titled {
+        let top = row(0) + 10.0 * k;
+        t += &show(fonts.1, size, 200.0, top, "Artikel");
+        t += &show(fonts.1, size, 300.0, top, "Menge");
+        t += &flush_right(fonts.1, top, "Betrag");
+    }
+    // A label of size `l` centred on rows of size `size` around the baseline `mid`: the middle
+    // of its letters (0.35 of its size over the baseline) on theirs.
+    let centred = |mid: f32, l: f32| mid + 0.35 * (size - l);
+    let (font, label, y) = match group {
+        Group::BoldLarger => (fonts.1, 1.5 * size, centred(row(1), 1.5 * size)),
+        Group::Larger => (fonts.0, 1.5 * size, centred(row(1), 1.5 * size)),
+        Group::BoldBetween => (fonts.1, size, (row(0) + row(1)) / 2.0),
+    };
+    t += &show(font, label, 40.0, y, "Gruppe A");
+    for (r, cells) in GROUP_ROWS.iter().enumerate() {
+        t += &show(fonts.0, size, 200.0, row(r), cells[0]);
+        t += &show(fonts.0, size, 300.0, row(r), cells[1]);
+        t += &flush_right(fonts.0, row(r), cells[2]);
+    }
+    t
+}
+
+/// The finding M2 of the Task 12 review: a group label beside three rows of a table without
+/// rules, larger or bold and centred on them, is read once and before its rows, never between
+/// them or in a cell; the rows are one table of their cells (under their titles when there
+/// are titles); in every size, font, look and place of the label, with and without titles.
+#[test]
+fn a_group_label_beside_rows_is_read_before_them() {
+    let mut wrong = Vec::new();
+    for k in [0.75, 1.0, 1.5] {
+        for fonts in FONTS {
+            for group in [Group::BoldLarger, Group::Larger, Group::BoldBetween] {
+                for titled in [false, true] {
+                    let name = format!("{k}x, {fonts:?}, {group:?}, titled {titled}");
+                    let t = group_label_rows(k, fonts, group, titled);
+                    let out = common::read(&page_in(&t, Look::Plain));
+                    let texts = texts_of(&out);
+                    let with_label: Vec<usize> = (0..texts.len())
+                        .filter(|&i| texts[i].contains("Gruppe A"))
+                        .collect();
+                    let first_row = texts.iter().position(|s| s.contains("Beratung"));
+                    let alone = with_label.len() == 1
+                        && texts[with_label[0]].trim() == "Gruppe A"
+                        && first_row.is_some_and(|r| with_label[0] < r);
+                    if !alone {
+                        wrong.push(format!("{name}: the label is not alone before: {texts:?}"));
+                    }
+                    let mut want: Vec<Vec<String>> = Vec::new();
+                    if titled {
+                        want.push(owned(&[&["Artikel", "Menge", "Betrag"]]).remove(0));
+                    }
+                    want.extend(
+                        GROUP_ROWS
+                            .iter()
+                            .map(|r| r.iter().map(|c| c.to_string()).collect()),
+                    );
+                    if !tables(&out).iter().any(|t| t.1 == want) {
+                        wrong.push(format!("{name}: no table of the rows: {:?}", tables(&out)));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
