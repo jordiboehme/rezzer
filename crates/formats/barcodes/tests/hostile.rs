@@ -28,7 +28,7 @@ fn max_rss_bytes() -> u64 {
     }
 }
 
-/// No `getrusage` here: the figure is 0, so the time bounds are still checked and only the
+/// No `getrusage` here: the figure is 0, so the work bounds are still checked and only the
 /// memory bound is not.
 #[cfg(not(unix))]
 fn max_rss_bytes() -> u64 {
@@ -57,7 +57,21 @@ fn block_noise(w: u32, h: u32, block: u32) -> Vec<u8> {
     out
 }
 
-fn scan(gray: &[u8], w: u32, h: u32, time: Duration) -> (Result<barcodes::Scan, Stop>, Duration) {
+/// The wall-clock stop of these tests: far above any machine, so only a hang fails it. The
+/// time limit of a scan is wall clock by design (`Limits::time`), so the work a scan does
+/// before it depends on the machine; that the wait for a running call ends at the deadline is
+/// shown by the worker's own tests, with calls that block until they are released.
+const SAFETY: Duration = Duration::from_secs(60);
+
+/// A scan on the worker with its result, its wall time and the decoder calls it made
+/// ([`barcodes::work_steps`], `None` in a release build).
+fn scan(
+    gray: &[u8],
+    w: u32,
+    h: u32,
+    time: Duration,
+) -> (Result<barcodes::Scan, Stop>, Duration, Option<u64>) {
+    let before = barcodes::work_steps();
     let start = Instant::now();
     let got = Worker::global().decode(
         &Picture {
@@ -70,25 +84,44 @@ fn scan(gray: &[u8], w: u32, h: u32, time: Duration) -> (Result<barcodes::Scan, 
             ..Limits::default()
         },
     );
-    (got, start.elapsed())
+    let took = start.elapsed();
+    let steps = before.zip(barcodes::work_steps()).map(|(b, a)| a - b);
+    (got, took, steps)
+}
+
+/// Checks that a scan made at most `max` decoder calls (in a debug build, which counts them).
+fn assert_steps(steps: Option<u64>, max: u64) {
+    if cfg!(debug_assertions) {
+        assert!(
+            steps.is_some_and(|n| (1..=max).contains(&n)),
+            "{steps:?} decoder calls, at most {max}"
+        );
+    } else {
+        assert_eq!(steps, None);
+    }
 }
 
 #[test]
 fn noise_of_64_mp_is_read_in_tiles_and_stops_at_its_time() {
     let twin = block_noise(1000, 1000, 3);
-    let (_, twin_time) = scan(&twin, 1000, 1000, Duration::from_secs(3));
+    let (_, twin_time, _) = scan(&twin, 1000, 1000, Duration::from_secs(3));
     let noise = block_noise(8000, 8000, 3);
-    let (got, took) = scan(&noise, 8000, 8000, Duration::from_secs(3));
+    let (got, took, steps) = scan(&noise, 8000, 8000, Duration::from_secs(3));
     let rss = max_rss_bytes();
     eprintln!(
-        "twin {twin_time:?}, 64 MP {took:?}, max RSS {} MiB",
+        "twin {twin_time:?}, 64 MP {took:?}, {steps:?} decoder calls, max RSS {} MiB",
         rss >> 20
     );
     match got {
         Ok(s) | Err(Stop::Time(s)) => assert!(s.codes.is_empty(), "{s:?}"),
         other => panic!("{other:?}"),
     }
-    assert!(took < Duration::from_millis(3_500), "{took:?}");
+    // FULL was measured once (2026-10-27, debug build, a 600 s limit): the whole scan of the
+    // 64 MP in tiles makes 1,497 decoder calls (10.4 s). The 3 s limit cuts it on this Mac;
+    // a machine fast enough to finish it still stays inside the tile walk's own calls.
+    const FULL: u64 = 1_497;
+    assert_steps(steps, FULL);
+    assert!(took < SAFETY, "{took:?}");
     // The picture itself (64 MB), a tile in its attempts and rxing's working set for one
     // tile of 4 MP.
     assert!(rss < 400 << 20, "max RSS {} MiB", rss >> 20);
@@ -116,15 +149,20 @@ fn finders(n: u32) -> (Vec<u8>, u32) {
 #[test]
 fn five_thousand_finders_stop_at_the_time_limit() {
     let (twin, ts) = finders(50);
-    let (_, twin_time) = scan(&twin, ts, ts, Duration::from_secs(2));
+    let (_, twin_time, _) = scan(&twin, ts, ts, Duration::from_secs(2));
     let (gray, side) = finders(5_000);
-    let (got, took) = scan(&gray, side, side, Duration::from_secs(2));
+    let (got, took, steps) = scan(&gray, side, side, Duration::from_secs(2));
     let rss = max_rss_bytes();
     eprintln!(
-        "twin {twin_time:?}, 5,000 finders {took:?}, max RSS {} MiB",
+        "twin {twin_time:?}, 5,000 finders {took:?}, {steps:?} decoder calls, max RSS {} MiB",
         rss >> 20
     );
     assert!(matches!(got, Err(Stop::Time(_))), "{got:?}");
-    assert!(took < Duration::from_millis(2_500), "{took:?}");
+    // FULL was measured once (2026-10-27, debug build, a 600 s limit): the whole scan makes
+    // 9 decoder calls and takes 59 s, so only the time stop ends it within 2 s; the
+    // `Stop::Time` above is that stop.
+    const FULL: u64 = 9;
+    assert_steps(steps, FULL);
+    assert!(took < SAFETY, "{took:?}");
     assert!(rss < 400 << 20, "max RSS {} MiB", rss >> 20);
 }
