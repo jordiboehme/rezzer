@@ -860,6 +860,59 @@ fn labels_under_values_in_three_groups_with_a_value_of_two_lines_never_pair_shif
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// The reviewer's probe P7 without its value of two lines: labels under the rule their values
+/// stand on, four rows of two fields, parted into three groups by two double rules, with
+/// some values empty. The middle group's ends lie in the groups beside it: with `Hausnr` and
+/// `Land` empty both are partial, which with the runs those groups hold is not clear. No
+/// group pairs shifted; each field with a value pairs right or a loss names it.
+#[test]
+fn labels_under_values_in_three_groups_never_pair_shifted() {
+    let s = Rows {
+        under: true,
+        ..ROWS
+    };
+    let mut reads = Vec::new();
+    for (look, g) in std::iter::once(("real", REAL)).chain(looks()) {
+        for (hausnr, land) in [("", ""), ("", "DE"), ("12", "")] {
+            let rows: [&[FieldSpec]; 4] = [
+                &[
+                    (0, 30, "Name", "Erika Mustermann"),
+                    (30, 20, "Ort", "Musterstadt"),
+                ],
+                &[
+                    (0, 30, "Strasse", "Musterweg 1"),
+                    (30, 20, "Hausnr", hausnr),
+                ],
+                &[(0, 30, "PLZ", "12345"), (30, 20, "Land", land)],
+                &[(0, 30, "Tel", "0000"), (30, 20, "Fax", "1111")],
+            ];
+            let mut b = rows_page(&g, &s, &rows, &[]);
+            let (h, top) = (2.4 * g.data, 760.0 + g.dy);
+            let (x0, x1) = (g.col(0) - 0.12, g.col(50));
+            b.page.template += &g.hrule(x0, x1, top - h - 3.0);
+            b.page.template += &g.hrule(x0, x1, top - 2.0 * h - 3.0);
+            let out = read_pages(&[&b]);
+            let named = |n: &str| {
+                out.document
+                    .losses
+                    .iter()
+                    .any(|l| l.what.contains(&format!(" {n}")))
+            };
+            let empty = |n: &str| b.fields.iter().any(|f| f.0 == n && f.1 == Ok(None));
+            let broken: Vec<Broken> = check_fields(&out, &b)
+                .into_iter()
+                .filter(|x| {
+                    let field = x.1.strip_suffix(" does not pair");
+                    !(x.0 == Inv::ClearPairs && field.is_some_and(|n| named(n) || empty(n)))
+                })
+                .collect();
+            reads.push((format!("Hausnr {hausnr:?}, Land {land:?}, {look}"), broken));
+        }
+    }
+    let wrong = unexpected(reads, &[]);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// A row between two rules, parted by a divider, whose every cell holds text in three styles
 /// (a caption, a line of text and a note, as on a page of prose between rules): it never
 /// looked like a row of fields, so it gives no loss.
@@ -1272,6 +1325,7 @@ fn grids() -> Vec<(&'static str, Grid)> {
                 under: false,
                 courier: false,
                 whole_bottom: false,
+                own_bottom: false,
             };
             (b, at)
         }),
@@ -1284,6 +1338,7 @@ fn grids() -> Vec<(&'static str, Grid)> {
                 under: false,
                 courier: true,
                 whole_bottom: true,
+                own_bottom: false,
             };
             (rows_page(g, &ROWS, &THREE_ROWS, &[]), at)
         }),
@@ -1296,6 +1351,7 @@ fn grids() -> Vec<(&'static str, Grid)> {
                 under: false,
                 courier: true,
                 whole_bottom: false,
+                own_bottom: true,
             };
             (rows_page(g, &ROWS, &EMPTY_LAST, &[]), at)
         }),
@@ -1312,6 +1368,7 @@ fn grids() -> Vec<(&'static str, Grid)> {
                 under: true,
                 courier: true,
                 whole_bottom: true,
+                own_bottom: false,
             };
             (rows_page(g, &s, &THREE_ROWS, &[]), at)
         }),

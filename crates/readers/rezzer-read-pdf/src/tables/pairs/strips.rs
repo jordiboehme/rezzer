@@ -1178,6 +1178,12 @@ fn ends(
         // A strip of another shape: labels over values only without evidence at either end.
         Way::Under if !shaped => Way::Unclear,
         Way::Over if !shaped && (top != TopEnd::None || bottom != BottomEnd::None) => Way::Unclear,
+        // With the runs other groups hold (`open`), evidence at both ends, if only in part, is
+        // a grid parted by double rules whose ends lie in its neighbours, with fields left
+        // empty there: not clear.
+        Way::Over if open.is_some() && top == TopEnd::Partial && bottom == BottomEnd::Partial => {
+            Way::Unclear
+        }
         way => way,
     };
     match way {

@@ -47,8 +47,11 @@ enum Outcome {
 /// labels under values with both ends complete, are not clear with one complete end (an own
 /// row of labels counts only with a complete top), and read labels over values with none;
 /// one field a row never reads labels under values, and is not clear with any complete end.
+/// Evidence in part at both ends is not clear either: the reader counts it with the runs other
+/// groups hold, where it is a grid parted by double rules with fields left empty at its ends.
 fn table(single: bool, top: Top, bottom: Bottom) -> Outcome {
     match (single, top, bottom) {
+        (_, Top::Partial, Bottom::Partial) => Outcome::Unclear,
         (true, Top::Complete, _) | (true, _, Bottom::Free) => Outcome::Unclear,
         (true, _, _) => Outcome::Over,
         (false, Top::Complete, Bottom::Free) => Outcome::Under,
@@ -585,7 +588,7 @@ fn the_matrix_is_pinned() {
             count(Outcome::Unclear),
             cells.len()
         ),
-        (90, 78, 24, 1, 53, 24)
+        (90, 78, 20, 1, 57, 24)
     );
     assert_eq!(left, LEFT_OUT);
 }
