@@ -612,7 +612,7 @@ const LONE_PITCH: f32 = 0.15;
 
 /// The median sizes of two sides differ when the larger is at least this many times the
 /// smaller (0.5 points at 6 points): a ratio, so that it holds at every scale of the page.
-pub(crate) const SIZE_STEP: f32 = 1.08;
+const SIZE_STEP: f32 = 1.08;
 
 /// A column gutter in a region: the widest vertical band of white space that only a few
 /// pieces cross, with blocks on both sides that stand side by side: prose, lines whose

@@ -2679,14 +2679,51 @@ fn a_line_over_the_top_rule_of_a_frame_of_items_is_no_header() {
     );
 }
 
+/// What breaks the reading of column titles of two lines whose first lines (`Anzahl` and
+/// `Einzel`, in `font` at `size`, their x in `xs`) stand at `y`, over the top rule of a frame
+/// of line items: the template and columns of the frame. The first line must be a paragraph
+/// right before the table, holding both words, in no cell, and the titles under the rule must
+/// head the columns of their values.
+fn first_title_line_broken(
+    (mut t, columns): (String, Vec<Column>),
+    (font, size): (&str, f32),
+    xs: (f32, f32),
+    y: f32,
+    look: Look,
+) -> Vec<String> {
+    t += &show(font, size, xs.0, y, "Anzahl");
+    t += &show(font, size, xs.1, y, "Einzel");
+    let out = common::read(&page_in(&t, look));
+    let mut b = columns_broken(&out, &columns);
+    let texts = texts_of(&out);
+    let line = texts
+        .iter()
+        .position(|s| s.contains("Anzahl") && s.contains("Einzel") && !s.contains('|'));
+    let head = texts.iter().position(|s| s.starts_with("Pos | "));
+    let before = matches!((line, head), (Some(l), Some(h)) if l + 1 == h);
+    let in_cell = tables(&out).iter().any(|t| {
+        t.1.iter()
+            .flatten()
+            .any(|c| c.contains("Anzahl") || c.contains("Einzel"))
+    });
+    if !before || in_cell {
+        b.push(format!("not a paragraph right before the table: {texts:?}"));
+    }
+    b
+}
+
 /// The finding M1 of the Task 12 review: column titles of two lines over line items between
-/// rules (see [`framed_items`]) whose first lines in the titles' size and font stand `3 k` over
-/// the top rule, `Anzahl` flush left at x 300 over `Menge` and `Einzel` flush right at x 420
-/// over `Preis`: their words join their titles, `Anzahl Menge` and `Einzel Preis`, and every
-/// title heads the column of its values; in every size, look, font and weight, with 2 to 5
-/// rows. Also the reviewer's layout: `Einzel` at x 380, at 1x in Helvetica.
+/// rules (see [`framed_items`]) whose first lines, in the titles' size and font, stand `3 k`
+/// over the top rule, `Anzahl` flush left at x 300 over `Menge` and `Einzel` flush right at
+/// x 420 over `Preis`. The first line stays a paragraph right before the table, and every
+/// title under the rule heads the column of its values: every word is read, only the link of
+/// the first line to its titles is lost. Joining it would need a bound that tells it from a
+/// short line set over the rule, and none does (see
+/// [`a_short_line_over_the_top_rule_joins_no_title`]): a wrong header cell is worse than the
+/// lost link (ruling P6-X). In every size, look, font and weight, with 2 to 5 rows; also the
+/// reviewer's layout, `Einzel` at x 380, at 1x in Helvetica.
 #[test]
-fn the_first_line_of_two_line_titles_over_the_top_rule_joins_its_titles() {
+fn the_first_line_of_two_line_titles_over_the_top_rule_stays_a_paragraph_before_the_table() {
     let mut wrong = Vec::new();
     let mut reads = 0;
     for k in [0.75, 1.0, 1.5] {
@@ -2694,23 +2731,17 @@ fn the_first_line_of_two_line_titles_over_the_top_rule_joins_its_titles() {
             for fonts in FONTS {
                 for bold in [false, true] {
                     for n in 2..=5 {
-                        let (mut t, mut columns) = framed_items(k, look, fonts, bold, n, None);
                         let (font, size) = (if bold { fonts.1 } else { fonts.0 }, 6.0 * k);
-                        // The top rule of the frame is at 600 + 8 k.
-                        t += &show(font, size, 300.0, 600.0 + 11.0 * k, "Anzahl");
                         let w = common::font_width(font, "Einzel", size);
-                        t += &show(font, size, 420.0 - w, 600.0 + 11.0 * k, "Einzel");
-                        columns[2].0 = "Anzahl Menge".to_string();
-                        columns[3].0 = "Einzel Preis".to_string();
-                        let out = common::read(&page_in(&t, look));
+                        // The top rule of the frame is at 600 + 8 k.
+                        let b = first_title_line_broken(
+                            framed_items(k, look, fonts, bold, n, None),
+                            (font, size),
+                            (300.0, 420.0 - w),
+                            600.0 + 11.0 * k,
+                            look,
+                        );
                         reads += 1;
-                        let mut b = columns_broken(&out, &columns);
-                        let head = header_cells(&out);
-                        for title in ["Anzahl Menge", "Einzel Preis"] {
-                            if !head.iter().any(|c| c.0 == title) {
-                                b.push(format!("no header cell {title:?}: {head:?}"));
-                            }
-                        }
                         wrong.extend(b.into_iter().map(|b| {
                             format!("{k}x, {look:?}, {fonts:?}, bold {bold}, {n} rows: {b}")
                         }));
@@ -2722,20 +2753,81 @@ fn the_first_line_of_two_line_titles_over_the_top_rule_joins_its_titles() {
     assert_eq!(reads, 288);
     for look in [Look::Plain, Look::Bar] {
         for bold in [false, true] {
-            let (mut t, mut columns) = framed_items(1.0, look, FONTS[0], bold, 3, None);
             let font = if bold { "FB" } else { "FL" };
-            t += &show(font, 6.0, 300.0, 611.0, "Anzahl");
-            t += &show(font, 6.0, 380.0, 611.0, "Einzel");
-            columns[2].0 = "Anzahl Menge".to_string();
-            columns[3].0 = "Einzel Preis".to_string();
-            let out = common::read(&page_in(&t, look));
-            let b = columns_broken(&out, &columns);
+            let frame = framed_items(1.0, look, FONTS[0], bold, 3, None);
+            let b = first_title_line_broken(frame, (font, 6.0), (300.0, 380.0), 611.0, look);
             wrong.extend(
                 b.into_iter()
                     .map(|b| format!("x 380, {look:?}, bold {bold}: {b}")),
             );
         }
     }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// Short lines over the top rule of a frame of line items in the review of fix round 1 (I1),
+/// each as its left piece and x, and its right piece and the x it ends at (flush right).
+const SHORT_OVER: [(&str, f32, &str, f32); 4] = [
+    ("Nr.", 40.0, "Datum", 540.0),
+    ("Nr. 12", 40.0, "Seite 1", 540.0),
+    ("Kunde", 80.0, "Datum", 420.0),
+    ("Nr.", 43.0, "Datum", 537.0),
+];
+
+/// The review's guard I1 of fix round 1: a short line of two pieces over the top rule of a
+/// frame of line items (see [`framed_items`]), in the titles' size and font and lined up with
+/// two of them (see [`SHORT_OVER`]), `d k` over the titles' baseline for d from 9.5 to 18: no
+/// header cell holds its words, every title heads the column of its values, and the line is
+/// read; in every size, look, font and weight.
+#[test]
+fn a_short_line_over_the_top_rule_joins_no_title() {
+    let mut wrong = Vec::new();
+    let mut reads = 0;
+    for (left, lx, right, rx) in SHORT_OVER {
+        for d in [9.5, 11.0, 13.0, 15.0, 18.0] {
+            for k in [0.75, 1.0, 1.5] {
+                for look in LOOKS {
+                    for fonts in FONTS {
+                        for bold in [false, true] {
+                            let (mut t, columns) = framed_items(k, look, fonts, bold, 3, None);
+                            let (font, size) = (if bold { fonts.1 } else { fonts.0 }, 6.0 * k);
+                            let y = 600.0 + d * k;
+                            t += &show(font, size, lx, y, left);
+                            let w = common::font_width(font, right, size);
+                            t += &show(font, size, rx - w, y, right);
+                            let out = common::read(&page_in(&t, look));
+                            reads += 1;
+                            let mut b = columns_broken(&out, &columns);
+                            let head = header_cells(&out);
+                            if head
+                                .iter()
+                                .any(|c| c.0.contains(left) || c.0.contains(right))
+                            {
+                                b.push(format!("the line joins the header: {head:?}"));
+                            }
+                            let texts = texts_of(&out);
+                            let read = |p: &str| texts.iter().any(|s| s.contains(p));
+                            if !read(left) || !read(right) {
+                                b.push(format!("the line is lost: {texts:?}"));
+                            }
+                            wrong.extend(b.into_iter().map(|b| {
+                                format!(
+                                    "{left}/{right} at {lx}, d {d}, {k}x, {look:?}, {fonts:?}, \
+                                     bold {bold}: {b}"
+                                )
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(reads, 1440);
     assert!(
         wrong.is_empty(),
         "{} wrong:\n{}",

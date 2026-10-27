@@ -8,7 +8,6 @@ use std::collections::HashMap;
 
 use super::*;
 use crate::layout::Gaps;
-use crate::order::SIZE_STEP;
 use crate::regions::{Part, offset_baselines};
 
 /// A run of text of one line, apart from its neighbours by a gap: one cell's text.
@@ -71,48 +70,6 @@ fn text_of(flow: &Flow, start: usize, end: usize) -> String {
     s
 }
 
-/// The first line of a column title of two lines lies at most this many of its sizes beside
-/// the title's second line.
-const HEAD_REACH: f32 = 2.0;
-
-/// The first line of a column title of two lines is at most this many times as wide as the
-/// title's second line (or one size, for a very short title).
-const HEAD_WIDTH: f32 = 2.0;
-
-/// Whether the line `over`, right over the top rule of a frame of column titles, holds the
-/// first lines of titles of two lines whose second lines are the pieces of `titles`: two
-/// pieces or more, each over at most one title and within [`HEAD_REACH`] of one, a different
-/// one each, in that title's size (see [`SIZE_STEP`]) and weight and not much wider than it
-/// (see [`HEAD_WIDTH`]). A title and a date over the frame, set larger than the titles,
-/// across two of them or far wider than the title under them, are no part of the header.
-fn title_heads(flow: &Flow, over: &FlowLine, titles: &FlowLine) -> bool {
-    let (heads, below) = (pieces_of(flow, over), pieces_of(flow, titles));
-    if heads.len() < 2 {
-        return false;
-    }
-    let mut used = vec![false; below.len()];
-    for h in &heads {
-        let gap = |t: &Piece| (t.x0 - h.x1).max(h.x0 - t.x1).max(0.0);
-        if below.iter().filter(|t| gap(t) == 0.0).count() > 1 {
-            return false;
-        }
-        let Some(k) = (0..below.len()).min_by(|&a, &b| gap(&below[a]).total_cmp(&gap(&below[b])))
-        else {
-            return false;
-        };
-        let (rh, rt) = (&flow.runs[h.start], &flow.runs[below[k].start]);
-        let (sh, st) = (rh.size.max(1.0), rt.size.max(1.0));
-        let near = gap(&below[k]) <= HEAD_REACH * sh;
-        let narrow = h.x1 - h.x0 <= HEAD_WIDTH * (below[k].x1 - below[k].x0).max(st);
-        let alike = sh.max(st) < SIZE_STEP * sh.min(st) && rh.bold == rt.bold;
-        if used[k] || !near || !narrow || !alike {
-            return false;
-        }
-        used[k] = true;
-    }
-    true
-}
-
 /// Tables without rules: regions of lines whose pieces stand in columns with white space
 /// between them, accepted only on strong evidence.
 pub(super) fn borderless(
@@ -159,21 +116,16 @@ pub(super) fn borderless(
                 break;
             }
             // A frame of column titles over items starts a region of its own: the lines over
-            // its top rule (a title line of two pieces) are not part of its header. Only the
-            // first lines of titles of two lines (see [`title_heads`]) right over the rule go
-            // with the frame: the region then starts at them.
+            // its top rule (a title line of two pieces, a reference and a date) are not part of
+            // its header. The first line of a column title of two lines with the rule drawn
+            // between them stays out too, as a paragraph before the table: no bound of size,
+            // height or alignment tells it from a short line set over the rule, and a wrong
+            // header cell is worse than the lost link.
             let starts_body = (cur.start..cur.end)
                 .filter_map(body_of)
                 .any(|b| !(prev.start..prev.end).any(|r| body_of(r) == Some(b)));
             if starts_body {
-                if !title_heads(flow, prev, cur) {
-                    break;
-                }
-                if end - 1 > i {
-                    end -= 1;
-                    last_multi = (i..end).rev().find(|&k| counts[k] >= 2).unwrap_or(i);
-                    break;
-                }
+                break;
             }
             if counts[end] >= 2 {
                 last_multi = end;
