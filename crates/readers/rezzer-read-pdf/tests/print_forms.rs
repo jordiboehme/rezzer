@@ -4125,3 +4125,61 @@ fn framed_box_title_heads_its_lines() {
         );
     }
 }
+
+/// A header band of four drawn cells, and under it value lines padded into its columns with
+/// one or two spaces between two fields, each line one run of the data font: each line is cut
+/// at the band's column edges where a word gap lies there, and the lines are the band's rows.
+#[test]
+fn padded_value_lines_under_a_band_are_cut_at_its_columns() {
+    // Courier at 9.5 pt is 5.7 points a character; the band's edges fall in the spaces after
+    // characters 4, 13 and 17 of the lines.
+    let ch = 0.6 * 9.5;
+    let edges = [
+        36.0,
+        40.0 + 4.5 * ch,
+        40.0 + 13.5 * ch,
+        40.0 + 18.0 * ch,
+        40.0 + 28.0 * ch,
+    ];
+    let mut template = String::new();
+    for w in edges.windows(2) {
+        template += &boxed(w[0], 700.0, w[1] - w[0], 12.0);
+    }
+    for (x, t) in edges.iter().zip(["Nr", "Text", "Mg", "Betrag"]) {
+        template += &label(x + 2.0, 703.0, 6.0, t);
+    }
+    let lines = [
+        "1000 Gehalt     2  1.111,11",
+        "2000 Zulage     1     22,22",
+        "3000 Bonus      1    333,33",
+    ];
+    let page = FormPage {
+        template,
+        lines: lines
+            .iter()
+            .enumerate()
+            .map(|(k, t)| DataLine {
+                y: 688.0 - 11.4 * k as f32,
+                text: (*t).to_string(),
+            })
+            .collect(),
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    let want: Vec<Vec<String>> = [
+        ["Nr", "Text", "Mg", "Betrag"],
+        ["1000", "Gehalt", "2", "1.111,11"],
+        ["2000", "Zulage", "1", "22,22"],
+        ["3000", "Bonus", "1", "333,33"],
+    ]
+    .iter()
+    .map(|r| r.iter().map(|c| (*c).to_string()).collect())
+    .collect();
+    assert_eq!(
+        read_tables(&out),
+        [want],
+        "{}\n{:?}",
+        all_text(&out),
+        out.document.losses
+    );
+}

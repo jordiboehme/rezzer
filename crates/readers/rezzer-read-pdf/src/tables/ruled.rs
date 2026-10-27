@@ -6,7 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::banded::{Band, Shared, Taken, banded, row_starts};
+use super::banded::{BAND_EDGE, Band, Shared, Taken, banded, row_starts};
 use super::pairs::{
     Field, claim, field_cuts, field_strips, frame_tops, frames, holds_values, pairs_table,
     taken_by_grids,
@@ -844,7 +844,7 @@ fn cut_runs(
     if !frames.is_empty() {
         apply_cuts(flow, field_cuts(flow, &frames));
     }
-    if !cut_at_columns(flow, grids, COLUMN_CUT_WORK) {
+    if !cut_at_columns(flow, grids, hs, COLUMN_CUT_WORK) {
         found.skipped.push(format!(
             "text across column lines on page {page} is cut at them only in part: the page has \
              too many runs across its column lines"
@@ -1419,11 +1419,14 @@ fn places_of(mut spans: Vec<Span>) -> Vec<Place> {
 /// fields often has only one or two spaces between two fields. A rule cuts at the heights it
 /// is drawn at; the inner rules of a header of hanging rules also cut the lines below them in
 /// their section (see [`hanging_feet`]), but not a sentence alone on its line that runs over
-/// them as words (a note across the section, see [`prose_like`]). A rule within a tenth of
-/// the text size of a gap cuts there; a rule inside a word cuts nothing. A cut part keeps
-/// the run's place in the reading order. False when more than `budget` steps were needed:
-/// the runs past them stay whole.
-fn cut_at_columns(flow: &mut Flow, parts: &[Part], budget: usize) -> bool {
+/// them as words (a note across the section, see [`prose_like`]). So do the inner column
+/// edges of a row of three drawn cells or more (a header band, see `banded`) the lines under
+/// it, down to the first of the page's horizontal rules `hs` (sorted by height) as wide as
+/// the row: its table's lines without rules. A rule within a tenth of the text size of a gap
+/// cuts there; a rule inside a word cuts nothing. A cut part keeps the run's place in the
+/// reading order. False when more than `budget` steps were needed: the runs past them stay
+/// whole.
+fn cut_at_columns(flow: &mut Flow, parts: &[Part], hs: &[Seg], budget: usize) -> bool {
     // The rules as drawn, and the inner column edges of hanging headers below their feet.
     let (mut drawn, mut hanging): (Vec<Span>, Vec<Span>) = (Vec::new(), Vec::new());
     for p in parts {
@@ -1441,6 +1444,16 @@ fn cut_at_columns(flow: &mut Flow, parts: &[Part], budget: usize) -> bool {
             for (foot, bottom) in hanging_feet(&p.v, &xs, &ys) {
                 hanging.extend(inner.iter().map(|&x| (x, bottom, foot)));
             }
+        }
+        if ys.len() == 2 && xs.len() >= 4 {
+            let (left, right, bottom) = (xs[0], xs[xs.len() - 1], ys[1]);
+            let tol = SNAP.max(BAND_EDGE * (right - left));
+            let floor = hs[..hs.partition_point(|s| s.at < bottom - SNAP)]
+                .iter()
+                .rev()
+                .find(|s| s.from <= left + tol && s.to >= right - tol)
+                .map_or(f32::MIN, |s| s.at);
+            hanging.extend(inner.iter().map(|&x| (x, floor, bottom)));
         }
     }
     if drawn.is_empty() && hanging.is_empty() {
@@ -1933,6 +1946,7 @@ mod tests {
         assert!(cut_at_columns(
             &mut flow,
             &[one_row(&[-10.0, 20.0, 100.0])],
+            &[],
             100
         ));
         let texts: Vec<&str> = flow.runs.iter().map(|r| r.text.as_str()).collect();
@@ -1950,6 +1964,7 @@ mod tests {
         assert!(cut_at_columns(
             &mut flow,
             &[one_row(&[-10.0, 9.0, 100.0])],
+            &[],
             100
         ));
         assert_eq!(flow.runs.len(), 1);
@@ -1964,6 +1979,7 @@ mod tests {
         assert!(cut_at_columns(
             &mut flow,
             &[one_row(&[-10.0, 20.0, 100.0])],
+            &[],
             100
         ));
         assert_eq!(flow.runs.len(), 1);
@@ -1976,6 +1992,7 @@ mod tests {
         assert!(!cut_at_columns(
             &mut flow,
             &[one_row(&[-10.0, 20.0, 100.0])],
+            &[],
             2
         ));
         let texts: Vec<&str> = flow.runs.iter().map(|r| r.text.as_str()).collect();

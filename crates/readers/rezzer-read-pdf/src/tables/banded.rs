@@ -28,6 +28,10 @@ const BODY_GAP: f32 = 3.0;
 /// Lines a page's bands may look at together; past them the rest are not looked at.
 const BAND_WORK: usize = 4_000_000;
 
+/// A rule ends a band's table when it is as wide as the band, short of it at each end by at
+/// most this share of the band's width (or [`SNAP`]).
+pub(super) const BAND_EDGE: f32 = 0.05;
+
 /// What the ruled detector shares with the band search.
 pub(super) struct Shared<'a> {
     pub page: u32,
@@ -375,7 +379,7 @@ fn body_below(
         let top = l.y + l.size;
         let from = sh.hs.partition_point(|s| s.at < top);
         let to = sh.hs.partition_point(|s| s.at < last_y);
-        let tol = SNAP.max(0.05 * (b[2] - b[0]));
+        let tol = SNAP.max(BAND_EDGE * (b[2] - b[0]));
         *work += to.saturating_sub(from);
         if sh.hs[from..to.max(from)]
             .iter()
@@ -383,12 +387,19 @@ fn body_below(
         {
             break;
         }
-        // Pieces: runs apart by more than a cell gap; each must stand in one column.
+        // Pieces: runs apart by more than a cell gap, or by a column edge of the band in the
+        // white space between them (a value line padded into the band's columns is cut there,
+        // see `cut_at_columns`); each must stand in one column.
+        let inner = &xs[1..xs.len() - 1];
         let mut pieces: Vec<(f32, f32, Vec<usize>)> = Vec::new();
         for &i in &runs {
             let r = &flow.runs[i];
+            let tol = 0.1 * r.size.max(1.0);
             match pieces.last_mut() {
-                Some(p) if r.x - p.1 <= CELL_GAP * r.size.max(1.0) => {
+                Some(p)
+                    if r.x - p.1 <= CELL_GAP * r.size.max(1.0)
+                        && !inner.iter().any(|&e| e >= p.1 - tol && e <= r.x + tol) =>
+                {
                     p.1 = p.1.max(r.x + r.w);
                     p.2.push(i);
                 }
