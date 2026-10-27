@@ -626,3 +626,23 @@ fn items_between_horizontal_rules_hold_in_every_size_and_look() {
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
+
+/// Guard: a rule through the glyphs of an item (a cancelled item struck through) lies in no
+/// gap between two lines, so it ends no table: one table with header and three rows, in every
+/// size and look.
+#[test]
+fn a_struck_through_item_does_not_end_a_table() {
+    let mut wrong = Vec::new();
+    for k in [0.75, 1.0, 1.5] {
+        for look in LOOKS {
+            let size = 8.0 * k;
+            let strike = 600.0 - 20.0 * k + 0.3 * size;
+            let t = invoice(k, Rules::Header, look) + &rule(look, 40.0, 540.0, strike, size);
+            let out = common::read(&page_in(&t, look));
+            if tables(&out) != [items_table()] {
+                wrong.push(format!("{k}x, {look:?}: {:?}", tables(&out)));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}

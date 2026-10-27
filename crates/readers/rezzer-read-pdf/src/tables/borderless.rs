@@ -376,8 +376,13 @@ const THIN_RULE: f32 = 8.0;
 const END_RULE: f32 = 4.5;
 const END_SHARE: f32 = 0.9;
 
+/// The glyphs of a line reach this share of its size over its baseline and this share under
+/// it: a rule there crosses them.
+const GLYPH_TOP: f32 = 0.7;
+const GLYPH_FOOT: f32 = 0.2;
+
 /// Where a rule of `ends` ends the region of lines `a..z`: the line right under the one rule
-/// between two of its lines that is thin and long for its text (see [`THIN_RULE`]) and spans
+/// in the gap between two of its lines (see [`GLYPH_TOP`]) that is thin and long for its text (see [`THIN_RULE`]) and spans
 /// [`END_SHARE`] of the ink of the lines above it. A rule under the first line underlines a
 /// header, and rules between two pairs of lines or more part rows: neither ends the region.
 fn ended(flow: &Flow, lines: &[FlowLine], (a, z): (usize, usize), ends: &[HRule]) -> Option<usize> {
@@ -399,7 +404,12 @@ fn ended(flow: &Flow, lines: &[FlowLine], (a, z): (usize, usize), ends: &[HRule]
         if k == a + 1 {
             continue;
         }
-        let (lo, hi) = (lines[k].y, lines[k - 1].y);
+        // In the gap between the two lines, not through the glyphs of either (a rule through
+        // an item strikes it out).
+        let (lo, hi) = (
+            lines[k].y + GLYPH_TOP * lines[k].size,
+            lines[k - 1].y - GLYPH_FOOT * lines[k - 1].size,
+        );
         let ruled = ends[ends.partition_point(|e| e.y <= lo)..]
             .iter()
             .take_while(|e| e.y < hi)
