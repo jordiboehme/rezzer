@@ -108,7 +108,7 @@ jobs:
 
       - name: Install Rust toolchain
         run: |
-          rustup toolchain install
+          "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 5 rustup toolchain install
           rustup show active-toolchain
 
       - name: Initialize CodeQL

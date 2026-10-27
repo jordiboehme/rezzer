@@ -100,15 +100,15 @@ jobs:
 
       - name: Install Rust toolchain
         run: |
-          rustup toolchain install
-          rustup target add "$TARGET"
+          "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 5 rustup toolchain install
+          "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 5 rustup target add "$TARGET"
           rustup show active-toolchain
 
       - name: Install musl-tools
         if: ${{ matrix.musl }}
         run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools
+          "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 5 sudo apt-get update
+          "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 5 sudo apt-get install -y musl-tools
 
       # No Rust cache in a release build: a tag run can only restore what
       # main saved, so a poisoned cache entry would end up in a shipped
@@ -145,15 +145,31 @@ jobs:
       # osv-scanner can name the crates inside a shipped binary later.
       # `fallback: none` fails the step rather than downloading an unpinned
       # binary.
+      # The second step is the same install and runs only after the first
+      # one failed (a bad network day).
       - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        id: auditable
+        continue-on-error: true
         with:
           tool: cargo-auditable@0.7.7
           fallback: none
 
-      # --locked: Cargo.lock is the build's input, and a lockfile that would
-      # need an update fails the build instead of being re-resolved here.
+      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        if: ${{ steps.auditable.outcome == 'failure' }}
+        with:
+          tool: cargo-auditable@0.7.7
+          fallback: none
+
+      # The registry fetch is its own step so it can retry. --locked: a
+      # lockfile that would need an update fails here.
+      - name: Fetch crates
+        run: |
+          "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 5 cargo fetch --locked --target "$TARGET"
+
+      # --frozen: Cargo.lock is the build's input and the crates are already
+      # fetched, so the build neither re-resolves nor touches the network.
       - name: Build
-        run: cargo auditable build --release --locked --target "$TARGET" -p rezzer
+        run: cargo auditable build --release --frozen --target "$TARGET" -p rezzer
 
       - name: Smoke test
         shell: bash
