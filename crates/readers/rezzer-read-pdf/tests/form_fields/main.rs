@@ -1056,6 +1056,45 @@ fn labels_under_values_with_a_value_of_two_lines_between_tables_give_a_loss() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// Rows of two fields between horizontal rules alone, with no upright rule on the page: the
+/// fields of a row are parted by their labels, labels over or under their values. Each reads
+/// as it does with a lone upright rule far from the grid, and pairs.
+#[test]
+fn rows_of_fields_between_horizontal_rules_alone_pair() {
+    let mut reads = Vec::new();
+    for under in [false, true] {
+        let s = Rows {
+            under,
+            dividers: false,
+            ..ROWS
+        };
+        for (look, g) in std::iter::once(("real", REAL)).chain(looks()) {
+            let with = rows_page(&g, &s, &THREE_ROWS, &[]);
+            let lone = g.vrule(30.0 + g.dx, 200.0 + g.dy, 300.0 + g.dy);
+            let mut b = rows_page(&g, &s, &THREE_ROWS, &[]);
+            b.page.template = b.page.template.replace(&lone, "");
+            assert_ne!(b.page.template, with.page.template);
+            let (out, twin) = (read_pages(&[&b]), read_pages(&[&with]));
+            let mut broken = check_fields(&out, &b);
+            let read = |o: &rezzer_model::ReadOutcome| {
+                let losses: Vec<String> =
+                    o.document.losses.iter().map(|l| l.what.clone()).collect();
+                (common::text(blocks(o)), losses)
+            };
+            if read(&out) != read(&twin) {
+                broken.push(Broken(
+                    Inv::ClearPairs,
+                    format!("reads otherwise with the upright rule: {:?}", read(&twin)),
+                ));
+            }
+            let name = format!("labels {}, {look}", if under { "under" } else { "over" });
+            reads.push((name, broken));
+        }
+    }
+    let wrong = unexpected(reads, &[]);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// A row between two rules, parted by a divider, whose every cell holds text in three styles
 /// (a caption, a line of text and a note, as on a page of prose between rules): it never
 /// looked like a row of fields, so it gives no loss.

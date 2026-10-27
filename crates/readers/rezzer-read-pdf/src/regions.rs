@@ -168,7 +168,8 @@ pub(crate) fn inner_ruled(g: &Grids, (gh, gv): &(Vec<usize>, Vec<usize>)) -> boo
         || distinct(gv.iter().map(|&k| g.vs[k].at).collect()) >= 3
 }
 
-/// Horizontal and vertical lines that meet, in groups. A rectangle gives its four sides.
+/// Horizontal and vertical lines that meet, in groups. A rectangle gives its four sides. A
+/// page without vertical lines has its horizontal lines and no group.
 pub(crate) fn grids(rules: &[Rule]) -> Result<Grids, Unsearched> {
     let flat = |r: &Rule| (r.y0 - r.y1).abs() <= SNAP / 2.0;
     // Counted before anything is built: a page may keep many more lines than are searched.
@@ -180,7 +181,9 @@ pub(crate) fn grids(rules: &[Rule]) -> Result<Grids, Unsearched> {
             RuleKind::Rect => (h, v) = (h + 2, v + 2),
         }
     }
-    if h == 0 || v == 0 {
+    // Without horizontal lines there is no grid and no row of fields; horizontal lines alone
+    // still part rows of fields (see `tables::field_frames`), so they are kept with no group.
+    if h == 0 {
         return Ok(Grids::default());
     }
     if h + v > MAX_SEGMENTS {

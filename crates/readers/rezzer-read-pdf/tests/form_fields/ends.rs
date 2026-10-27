@@ -416,6 +416,35 @@ fn every_cell_of_the_ends_reads_as_the_table_says() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// The lone upright rule far from the fields that [`rows_page`] draws on a page of grids of one
+/// field a row (they have no dividers), so that the page has a rule of each direction.
+fn lone_vertical(g: &Geo) -> String {
+    g.vrule(30.0 + g.dx, 200.0 + g.dy, 300.0 + g.dy)
+}
+
+/// Every layout of the matrix of one field a row, drawn without the lone upright rule: a page
+/// of horizontal rules alone. It holds the invariants and reads as the table of ends says, as
+/// it does with that rule.
+#[test]
+fn every_cell_of_one_field_a_row_reads_so_without_an_upright_rule() {
+    let mut reads = Vec::new();
+    let mut count = 0;
+    for (l, outcome) in layouts().into_iter().filter(|(l, _)| l.single) {
+        for (look, g) in std::iter::once(("real", REAL)).chain(looks()) {
+            let mut b = l.page(&g, outcome);
+            let lone = lone_vertical(&g);
+            assert!(b.page.template.contains(&lone), "{}", l.name());
+            b.page.template = b.page.template.replace(&lone, "");
+            let out = read_pages(&[&b]);
+            reads.push((format!("{}, {look}", l.name()), check_fields(&out, &b)));
+            count += 1;
+        }
+    }
+    assert_eq!(count, 38 * 6);
+    let wrong = unexpected(reads, &[]);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// Reads `layouts` of the matrix with `extra` drawn on each page (in geometry `g`, from its
 /// top rule), in every look: no field pairs wrongly, every value stands once, and each field
 /// with a value pairs right or a loss names it. An empty field left as text loses no value:
