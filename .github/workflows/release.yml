@@ -56,6 +56,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       publish: ${{ steps.version.outputs.publish }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -69,6 +70,9 @@ jobs:
       # attestations, publish with its signature, the tap push): true only
       # for a tag push. A dispatch on a tag ref also has ref_type tag, so
       # ref_type alone would let a rehearsal publish.
+      # prerelease is true when the version has a suffix after a '-' (v0.2.0-rc.1,
+      # and v0.0.0-dev): publish marks such a release as a pre-release, and
+      # the homebrew job skips it, so only a plain release reaches the tap.
       - name: Resolve the release version and whether this run publishes
         id: version
         shell: bash
@@ -84,9 +88,16 @@ jobs:
           else
             publish=false
           fi
-          echo "event $GITHUB_EVENT_NAME on $GITHUB_REF: version $version, publish $publish"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          case "$version" in
+            *-*) prerelease=true ;;
+            *) prerelease=false ;;
+          esac
+          echo "event $GITHUB_EVENT_NAME on $GITHUB_REF: version $version, publish $publish, prerelease $prerelease"
+          {
+            echo "version=$version"
+            echo "publish=$publish"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
 
       # Runs on a dispatch too, so the dry run proves the cargo metadata path.
       - name: Install Rust toolchain
@@ -1045,16 +1056,21 @@ jobs:
       # The release body is release-notes/<tag>.md from the tagged tree (the
       # `notes` job already checked it). The release name stays the plain
       # version; the motto heading leads the page itself.
+      # A pre-release (notes' prerelease output, for example v0.2.0-rc.1)
+      # is created with --prerelease, so GitHub never shows it as the latest
+      # release.
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          PRERELEASE: ${{ needs.notes.outputs.prerelease }}
         run: |
           set -euo pipefail
           args=(--repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --verify-tag
                 --notes-file "release-notes/${GITHUB_REF_NAME}.md")
-          # A tag like v1.2.0-rc.1 is a pre-release.
-          case "$GITHUB_REF_NAME" in
-            *-*) args+=(--prerelease) ;;
+          case "$PRERELEASE" in
+            true) args+=(--prerelease) ;;
+            false) ;;
+            *) echo "::error::prerelease output is '$PRERELEASE', expected true or false"; exit 1 ;;
           esac
           gh release create "$GITHUB_REF_NAME" release/* "${args[@]}"
 
@@ -1065,12 +1081,18 @@ jobs:
   # published SHA256SUMS, and must equal collect's homebrew-formula artifact.
   # A re-run after a push that already landed finds the tap current and
   # stops green.
+  # A pre-release tag (v0.2.0-rc.1) never reaches the tap: no dev channel,
+  # the job is skipped (notes' prerelease output).
+  # This job is the tap-push exception of the rule that no step may first
+  # run at the tag: it needs the published release and the tap token. The
+  # parts that can be rehearsed, the script and `ruby -c`, run in collect
+  # on every dispatch.
   homebrew:
     name: update the Homebrew tap
     needs: [notes, publish]
     timeout-minutes: 10
     runs-on: ubuntu-latest
-    if: ${{ needs.notes.outputs.publish == 'true' }}
+    if: ${{ needs.notes.outputs.publish == 'true' && needs.notes.outputs.prerelease == 'false' }}
     # The protected release environment holds TAP_GITHUB_TOKEN, a
     # fine-grained token with contents write on jordiboehme/homebrew-tap only.
     environment:
