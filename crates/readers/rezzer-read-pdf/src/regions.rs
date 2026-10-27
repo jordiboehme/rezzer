@@ -182,8 +182,9 @@ pub(crate) fn grids(rules: &[Rule]) -> Result<Grids, Unsearched> {
         }
     }
     // Without horizontal lines there is no grid and no row of fields; horizontal lines alone
-    // still part rows of fields (see `tables::field_frames`), so they are kept with no group.
-    if h == 0 {
+    // still part rows of fields (see `tables::field_frames`), so they are kept with no group,
+    // unless they are more than are searched (hatching): then there is nothing to say either.
+    if h == 0 || (v == 0 && h > MAX_SEGMENTS) {
         return Ok(Grids::default());
     }
     if h + v > MAX_SEGMENTS {
@@ -749,6 +750,17 @@ mod tests {
             y1,
             kind: RuleKind::Line,
         }
+    }
+
+    /// A page of more horizontal lines than are searched and no upright one (hatching) is not
+    /// searched as before: no grid, no line kept, and no note that it was not searched.
+    #[test]
+    fn many_horizontal_lines_alone_are_no_grid_and_no_note() {
+        let rules: Vec<Rule> = (0..=MAX_SEGMENTS)
+            .map(|k| line(0.0, k as f32 * 0.04, 100.0, k as f32 * 0.04))
+            .collect();
+        let found = grids(&rules).expect("no note");
+        assert!(found.hs.is_empty() && found.groups.is_empty());
     }
 
     #[test]
