@@ -99,9 +99,12 @@ const MERGE_GROUPS: usize = 2_000;
 /// a code: at least [`MIN_CELLS`] small rectangles on one module lattice, close to each
 /// other, that make the pattern of a code. A matrix code shows its finder (QR Code and Micro
 /// QR Code: the corner squares, Data Matrix: the solid L, Aztec: the bullseye, PDF417: the
-/// start bars). A linear code has bars of one height and at least two widths, standing up or
-/// lying down, with a quiet zone of 5 modules at both ends. Groups in one row band a few
-/// modules apart are one region (a PDF417 has light columns through all its rows). At most
+/// start bars). A linear code has bars of one height (of any length, at least two modules)
+/// and at least two widths, its bars and spaces whole modules wide, standing up or lying
+/// down, with a quiet zone of 5 modules at both ends; bars of one band join across their
+/// spaces whatever their shape, bars one after the other along their length do not. Groups
+/// in one row band a few modules apart are one region (a PDF417 has light columns through
+/// all its rows). At most
 /// [`MAX_REGIONS`], the ones with the most rectangles first. `Err` says why the page was not
 /// searched: its work would pass [`MAX_ENTRIES`] or [`MAX_PAIRS`].
 pub(crate) fn vector_codes(cells: &[[f32; 4]]) -> Result<Vec<VectorCode>, String> {
@@ -174,17 +177,19 @@ pub(crate) fn vector_codes(cells: &[[f32; 4]]) -> Result<Vec<VectorCode>, String
                     let mut joined = gap_x <= near && gap_y <= near;
                     let far = reach.max(reach_of(&d));
                     match (shape(c), shape(&d)) {
+                        // Bars one after the other along their length, apart, are two codes
+                        // stacked; touching, one bar drawn in pieces.
                         (Shape::Up, Shape::Up) => {
                             let hh = c[3] - c[1];
                             let same =
                                 (c[1] - d[1]).abs() <= 0.1 * hh && (c[3] - d[3]).abs() <= 0.1 * hh;
-                            joined |= same && gap_x <= far;
+                            joined = (joined && gap_y <= 0.01) || (same && gap_x <= far);
                         }
                         (Shape::Flat, Shape::Flat) => {
                             let ww = c[2] - c[0];
                             let same =
                                 (c[0] - d[0]).abs() <= 0.1 * ww && (c[2] - d[2]).abs() <= 0.1 * ww;
-                            joined |= same && gap_y <= far;
+                            joined = (joined && gap_x <= 0.01) || (same && gap_y <= far);
                         }
                         _ => {}
                     }
@@ -198,6 +203,8 @@ pub(crate) fn vector_codes(cells: &[[f32; 4]]) -> Result<Vec<VectorCode>, String
             }
         }
     }
+    join_bands(&cells, &mut parent, false);
+    join_bands(&cells, &mut parent, true);
     let mut groups: HashMap<usize, Vec<usize>> = HashMap::new();
     for i in 0..cells.len() {
         let r = find(&mut parent, i);
@@ -230,6 +237,111 @@ pub(crate) fn vector_codes(cells: &[[f32; 4]]) -> Result<Vec<VectorCode>, String
     Ok(found.into_iter().map(|(_, c)| c).collect())
 }
 
+/// The ends of `c` along its bars and its extent across them: for bars standing up its
+/// bottom and top and its left and right, for bars lying down (`flat`) the other way round.
+fn along(c: &[f32; 4], flat: bool) -> ((f32, f32), (f32, f32)) {
+    if flat {
+        ((c[0], c[2]), (c[1], c[3]))
+    } else {
+        ((c[1], c[3]), (c[0], c[2]))
+    }
+}
+
+/// Whether two lengths along bars, `a` and `b`, are one: both ends within a tenth of the
+/// shorter.
+fn same_ends(a: (f32, f32), b: (f32, f32)) -> bool {
+    let tol = 0.1 * (a.1 - a.0).min(b.1 - b.0);
+    (a.0 - b.0).abs() <= tol && (a.1 - b.1).abs() <= tol
+}
+
+/// The rectangles before one in its band that [`join_bands`] compares it with, at most.
+const BAND_LOOK: usize = 8;
+
+/// Joins the rectangles of one band (one bottom and one top, or with `flat` one left and one
+/// right side) that stand at most four and a half of the narrower one's width apart across
+/// the band: the bars of a linear code, of any shape but the other way's. Short bars are
+/// wider than a quarter of their length, so they are no `Shape::Up`, and their spaces are
+/// wider than the reach of a module.
+fn join_bands(cells: &[[f32; 4]], parent: &mut [usize], flat: bool) {
+    // A bar of the other way is no bar of this one: two codes stacked stay apart.
+    let other = if flat { Shape::Up } else { Shape::Flat };
+    let mut order: Vec<usize> = (0..cells.len())
+        .filter(|&i| shape(&cells[i]) != other)
+        .collect();
+    order.sort_by(|&i, &j| {
+        let (a, b) = (along(&cells[i], flat).0, along(&cells[j], flat).0);
+        a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1))
+    });
+    // Runs of rectangles whose first end is within the tolerance of the run's first.
+    let mut start = 0;
+    while start < order.len() {
+        let first = along(&cells[order[start]], flat).0;
+        let mut end = start + 1;
+        while end < order.len() {
+            let a = along(&cells[order[end]], flat).0;
+            if (a.0 - first.0).abs() > 0.1 * (first.1 - first.0).min(a.1 - a.0) {
+                break;
+            }
+            end += 1;
+        }
+        let mut band: Vec<usize> = order[start..end].to_vec();
+        band.sort_by(|&i, &j| {
+            along(&cells[i], flat)
+                .1
+                .0
+                .total_cmp(&along(&cells[j], flat).1.0)
+        });
+        // Each rectangle joins the nearest one before it in the band with the same ends.
+        let mut last: Vec<usize> = Vec::new();
+        for &k in &band {
+            let (ends, across) = along(&cells[k], flat);
+            // The last few before it are enough: the bars of a code follow each other.
+            if last.len() > BAND_LOOK {
+                last.remove(0);
+            }
+            if let Some(&p) = last
+                .iter()
+                .rev()
+                .find(|&&p| same_ends(along(&cells[p], flat).0, ends))
+            {
+                let (_, q) = along(&cells[p], flat);
+                let narrow = (q.1 - q.0).min(across.1 - across.0);
+                if across.0 - q.1 <= 4.5 * narrow + 0.01 {
+                    let (ri, rj) = (find(parent, p), find(parent, k));
+                    if ri != rj {
+                        parent[ri.max(rj)] = ri.min(rj);
+                    }
+                }
+            }
+            last.push(k);
+        }
+        start = end;
+    }
+}
+
+/// Whether the rectangles `members` of `cells` share one band: one bottom and one top (or
+/// with `flat` one left and one right side), as the bars of a linear code without guard bars.
+fn one_band(cells: &[[f32; 4]], members: &[usize], flat: bool) -> bool {
+    let Some(&first) = members.first() else {
+        return false;
+    };
+    let ends = along(&cells[first], flat).0;
+    members
+        .iter()
+        .all(|&i| same_ends(along(&cells[i], flat).0, ends))
+}
+
+/// Whether most of `members` are bars standing up (or lying down, with `flat`): of that
+/// shape, or all of one band.
+fn bars(cells: &[[f32; 4]], members: &[usize], flat: bool) -> bool {
+    let want = if flat { Shape::Flat } else { Shape::Up };
+    let shaped = members
+        .iter()
+        .filter(|&&i| shape(&cells[i]) == want)
+        .count();
+    shaped * 10 >= members.len() * 8 || one_band(cells, members, flat)
+}
+
 /// The box and the narrowest side of `members` of `cells`.
 fn bounds(cells: &[[f32; 4]], members: &[usize]) -> ([f32; 4], f32) {
     let mut b = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
@@ -249,16 +361,23 @@ fn bounds(cells: &[[f32; 4]], members: &[usize]) -> ([f32; 4], f32) {
 
 /// Groups that share their row band (bottom and top within a module) and stand at most 5
 /// modules apart side by side, or share their column band and stand at most 5 modules apart
-/// one above the other, merged.
+/// one above the other, merged; but not two groups of bars one after the other along their
+/// bars (stacked linear codes).
 fn merge_bands(cells: &[[f32; 4]], groups: Vec<Vec<usize>>) -> Vec<Vec<usize>> {
     let mut parent: Vec<usize> = (0..groups.len()).collect();
     let info: Vec<([f32; 4], f32)> = groups.iter().map(|g| bounds(cells, g)).collect();
+    let standing: Vec<bool> = groups.iter().map(|g| bars(cells, g, false)).collect();
+    let lying: Vec<bool> = groups.iter().map(|g| bars(cells, g, true)).collect();
     for i in 0..groups.len() {
         for j in i + 1..groups.len() {
             let ((a, ma), (b, mb)) = (info[i], info[j]);
             let m = ma.min(mb);
-            let rows = (a[1] - b[1]).abs() <= m && (a[3] - b[3]).abs() <= m;
-            let cols = (a[0] - b[0]).abs() <= m && (a[2] - b[2]).abs() <= m;
+            // Two linear codes one after the other along their bars are two codes.
+            let rows =
+                (a[1] - b[1]).abs() <= m && (a[3] - b[3]).abs() <= m && !(lying[i] && lying[j]);
+            let cols = (a[0] - b[0]).abs() <= m
+                && (a[2] - b[2]).abs() <= m
+                && !(standing[i] && standing[j]);
             let gap_x = (b[0] - a[2]).max(a[0] - b[2]);
             let gap_y = (b[1] - a[3]).max(a[1] - b[3]);
             if (rows && gap_x <= 5.0 * m) || (cols && gap_y <= 5.0 * m) {
@@ -324,35 +443,28 @@ fn region(
     if !(0.15..=0.85).contains(&cover) {
         return None;
     }
-    // Every edge on one lattice of the module size, from the region's corner.
+    // A matrix code has every edge on one lattice of the module size, from the region's
+    // corner; a linear code its bars and spaces across (see [`linear`]).
     let on = |v: f32, o: f32| {
         let k = (v - o) / module;
         (k - k.round()).abs() <= 0.2
     };
-    let lattice = members
-        .iter()
-        .filter(|&&i| {
-            let c = cells[i];
-            on(c[0], b[0]) && on(c[2], b[0]) && on(c[1], b[1]) && on(c[3], b[1])
-        })
-        .count();
-    if lattice * 10 < members.len() * 9 {
-        return None;
-    }
-    let up = members
-        .iter()
-        .filter(|&&i| shape(&cells[i]) == Shape::Up)
-        .count();
-    let flat = members
-        .iter()
-        .filter(|&&i| shape(&cells[i]) == Shape::Flat)
-        .count();
-    let kind_ok = if up * 10 >= members.len() * 8 {
+    let lattice = || {
+        let on_it = members
+            .iter()
+            .filter(|&&i| {
+                let c = cells[i];
+                on(c[0], b[0]) && on(c[2], b[0]) && on(c[1], b[1]) && on(c[3], b[1])
+            })
+            .count();
+        on_it * 10 >= members.len() * 9
+    };
+    let kind_ok = if bars(cells, members, false) {
         linear(cells, members, b, module, false, quiet)
-    } else if flat * 10 >= members.len() * 8 && linear(cells, members, b, module, true, quiet) {
+    } else if bars(cells, members, true) && linear(cells, members, b, module, true, quiet) {
         true
     } else {
-        matrix(cells, members, b, module)
+        lattice() && matrix(cells, members, b, module)
     };
     if !kind_ok {
         return None;
@@ -378,8 +490,9 @@ fn region(
 }
 
 /// Whether bars `members` (standing up, or lying down with `flat`) in box `b` are a linear
-/// code: about as long as the region, of at least two widths, with 5 modules free at both
-/// ends.
+/// code: about as long as the region and at least two modules long, of at least two widths,
+/// every bar and nearly every space a whole number of modules wide, with 5 modules free at
+/// both ends.
 fn linear(
     cells: &[[f32; 4]],
     members: &[usize],
@@ -418,6 +531,25 @@ fn linear(
             Some(last) if a <= last.1 + 0.2 * module => last.1 = last.1.max(z),
             _ => runs.push((a, z)),
         }
+    }
+    // Bars at least two modules long; every bar and space a whole number of modules wide,
+    // but for a few spaces (codes side by side closer than their quiet zone).
+    if members
+        .iter()
+        .any(|&i| long(&cells[i]) < 2.0 * module - 0.01)
+    {
+        return false;
+    }
+    let whole = |v: f32| {
+        let k = v / module;
+        k.round() >= 1.0 && (k - k.round()).abs() <= 0.2
+    };
+    if runs.iter().any(|(a, z)| !whole(z - a)) {
+        return false;
+    }
+    let spaces = runs.windows(2).filter(|w| !whole(w[1].0 - w[0].1)).count();
+    if spaces * 10 > runs.len().saturating_sub(1) {
+        return false;
     }
     let mut widths: Vec<i32> = runs
         .iter()
@@ -658,6 +790,179 @@ mod tests {
                 })
                 .collect(),
         );
+    }
+
+    /// The bars of a Code 128 of `text`, `module` points a module and `bar` points long, its
+    /// first module at `at`: standing up, or lying down (`flat`, the first module at the top).
+    /// With `one_each`, one rectangle for each dark module column, else one for each bar.
+    fn code128(
+        text: &str,
+        at: (f32, f32),
+        module: f32,
+        bar: f32,
+        flat: bool,
+        one_each: bool,
+    ) -> Vec<[f32; 4]> {
+        let m = barcodes::encode::text(
+            barcodes::Symbology::Code128,
+            text,
+            &barcodes::encode::Options::default(),
+        )
+        .expect("encode");
+        let mut runs: Vec<(u32, u32)> = Vec::new();
+        for col in 0..m.width {
+            if !m.dark[col as usize] {
+                continue;
+            }
+            match runs.last_mut() {
+                Some(r) if !one_each && r.1 == col => r.1 = col + 1,
+                _ => runs.push((col, col + 1)),
+            }
+        }
+        runs.into_iter()
+            .map(|(a, z)| {
+                let (a, z) = (a as f32 * module, z as f32 * module);
+                if flat {
+                    [at.0, at.1 - z, at.0 + bar, at.1 - a]
+                } else {
+                    [at.0 + a, at.1, at.0 + z, at.1 + bar]
+                }
+            })
+            .collect()
+    }
+
+    /// The box of `cells`.
+    fn box_of(cells: &[[f32; 4]]) -> [f32; 4] {
+        bounds(cells, &(0..cells.len()).collect::<Vec<_>>()).0
+    }
+
+    #[test]
+    fn linear_codes_of_any_bar_length_are_regions() {
+        // A linear code's bars need not be a whole number of modules long, and short bars are
+        // wider than a quarter of their length: each is one region, boxed by its bars.
+        for module in [0.5, 0.8, 1.2] {
+            for bar in [3.0, 5.0, 8.0, 20.0, 30.0, 40.0, 80.0, 150.0] {
+                for flat in [false, true] {
+                    for one_each in [false, true] {
+                        let cells =
+                            code128("0000000001", (350.0, 600.0), module, bar, flat, one_each);
+                        let case = format!(
+                            "module {module}, bars {bar} long, flat {flat}, one rectangle a module \
+                             {one_each}"
+                        );
+                        let found = vector_codes(&cells).expect("searched");
+                        assert_eq!(found.len(), 1, "{case}: {found:?}");
+                        let want = box_of(&cells);
+                        assert!(
+                            found[0]
+                                .b
+                                .iter()
+                                .zip(want)
+                                .all(|(a, b)| (a - b).abs() < 0.01),
+                            "{case}: {:?} for {want:?}",
+                            found[0].b
+                        );
+                        assert!((found[0].module - module).abs() < 0.01, "{case}: {found:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn rows_of_dashes_dots_and_dividers_are_not_codes() {
+        let none = |name: &str, cells: Vec<[f32; 4]>| {
+            assert!(vector_codes(&cells).expect("searched").is_empty(), "{name}");
+        };
+        // A dashed rule of dashes of two lengths, 0.5 points thick.
+        let mut x = 50.0;
+        let mut dashes = Vec::new();
+        for k in 0..40 {
+            let w = if k % 3 == 0 { 6.0 } else { 3.0 };
+            dashes.push([x, 100.0, x + w, 100.5]);
+            x += w + 1.5;
+        }
+        none("dashed rule", dashes.clone());
+        // The same rule standing up.
+        none(
+            "dashed rule standing",
+            dashes.iter().map(|d| [d[1], d[0], d[3], d[2]]).collect(),
+        );
+        // A dotted leader of squares of 0.5 points.
+        none(
+            "dotted leader",
+            (0..60)
+                .map(|k| {
+                    let x = 50.0 + k as f32 * 2.0;
+                    [x, 100.0, x + 0.5, 100.5]
+                })
+                .collect(),
+        );
+        // A leader of thick dots, every fifth one wider.
+        none(
+            "thick dots",
+            (0..60)
+                .map(|k| {
+                    let x = 50.0 + k as f32 * 3.0;
+                    let w = if k % 5 == 0 { 2.0 } else { 1.0 };
+                    [x, 100.0, x + w, 101.0]
+                })
+                .collect(),
+        );
+        // The dividers of a comb of boxes: thin bars of two widths, 12 points apart.
+        none(
+            "comb dividers",
+            (0..30)
+                .map(|k| {
+                    let x = 50.0 + k as f32 * 12.0;
+                    let w = if k % 4 == 0 { 1.0 } else { 0.5 };
+                    [x, 100.0, x + w, 112.0]
+                })
+                .collect(),
+        );
+        // Squares of a rating scale, 4 points, 1 apart.
+        none(
+            "rating squares",
+            (0..30)
+                .map(|k| {
+                    let x = 50.0 + k as f32 * 5.0;
+                    [x, 100.0, x + 4.0, 104.0]
+                })
+                .collect(),
+        );
+    }
+
+    #[test]
+    fn twin_codes_side_by_side_are_one_region_and_stacked_ones_two() {
+        // Two equal codes closer than their quiet zone: side by side they are one drawing that
+        // looks like a code (it may not decode, and that is said); one over the other each
+        // keeps its own region.
+        for gap in [1.0, 2.0, 3.0] {
+            let mut side = code128("0000000001", (100.0, 500.0), 0.8, 20.0, false, true);
+            let w = box_of(&side)[2] - 100.0;
+            side.extend(code128(
+                "0000000001",
+                (100.0 + w + gap, 500.0),
+                0.8,
+                20.0,
+                false,
+                true,
+            ));
+            let found = vector_codes(&side).expect("searched");
+            assert_eq!(found.len(), 1, "beside, {gap} apart: {found:?}");
+            assert_eq!(found[0].b, box_of(&side), "beside, {gap} apart");
+            let low = code128("0000000001", (100.0, 500.0), 0.8, 20.0, false, true);
+            let high = code128("0000000001", (100.0, 520.0 + gap), 0.8, 20.0, false, true);
+            let mut both = low.clone();
+            both.extend(high.iter().copied());
+            let mut found: Vec<[f32; 4]> = vector_codes(&both)
+                .expect("searched")
+                .iter()
+                .map(|c| c.b)
+                .collect();
+            found.sort_by(|a, b| a[1].total_cmp(&b[1]));
+            assert_eq!(found, [box_of(&low), box_of(&high)], "over, {gap} apart");
+        }
     }
 
     #[test]
