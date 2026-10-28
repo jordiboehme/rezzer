@@ -39,9 +39,6 @@ const MAX_BAR: f32 = 300.0;
 /// The narrowest module that is looked at, in points.
 const MIN_MODULE: f32 = 0.15;
 
-/// A region larger than this on a side, in points, is not a code.
-const MAX_SIDE: f32 = 500.0;
-
 /// Grid cells of the search: four times the median narrow side of the rectangles, within
 /// these bounds in points.
 const GRID_MIN: f32 = 0.5;
@@ -463,8 +460,8 @@ fn codes_among(
         }
         // Short bars of codes one over the other are close enough to join as modules: each
         // band of them may be a code of its own.
+        let mut any = false;
         for flat in [false, true] {
-            let mut any = false;
             for part in band_parts(&cells, &members, flat) {
                 if part.len() >= MIN_CELLS {
                     any |= look(&part, &mut found);
@@ -699,7 +696,10 @@ fn region(
 ) -> Option<VectorCode> {
     let (b, module) = bounds(cells, members);
     let (w, h) = (b[2] - b[0], b[3] - b[1]);
-    if w.max(h) > MAX_SIDE || module < min_module.max(MIN_MODULE) {
+    // No size in points bounds a region: two codes side by side past their quiet zone may
+    // join into one wider than any code, and are still looked at (and named when the codes
+    // read do not fill them).
+    if module < min_module.max(MIN_MODULE) {
         return None;
     }
     let area: f32 = members

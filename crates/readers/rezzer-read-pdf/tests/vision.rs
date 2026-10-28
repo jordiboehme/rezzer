@@ -3327,6 +3327,11 @@ fn drawings_past_the_page_cap_that_give_no_code_are_said_once() {
 /// `lefts` (the left edge of its first module, in points from the left edge of the page), cut
 /// at the edge of the page.
 fn crisp_scan(res: u32, px: u32, bar: u32, lefts: &[f32]) -> Vec<u8> {
+    blurred_scan(res, px, bar, lefts, 0)
+}
+
+/// [`crisp_scan`] blurred `blur` times by a 3 by 3 box.
+fn blurred_scan(res: u32, px: u32, bar: u32, lefts: &[f32], blur: u32) -> Vec<u8> {
     let m = modules(Symbology::Code128, "0000000001");
     let (w, h) = (595 * res, 842 * res);
     let mut scan = vec![235u8; (w * h) as usize];
@@ -3340,7 +3345,63 @@ fn crisp_scan(res: u32, px: u32, bar: u32, lefts: &[f32]) -> Vec<u8> {
             }
         }
     }
+    for _ in 0..blur {
+        let src = scan.clone();
+        for y in 1..h - 1 {
+            for x in 1..w - 1 {
+                let mut s = 0u32;
+                for dy in 0..3 {
+                    for dx in 0..3 {
+                        s += u32::from(src[((y + dy - 1) * w + x + dx - 1) as usize]);
+                    }
+                }
+                scan[(y * w + x) as usize] = (s / 9) as u8;
+            }
+        }
+    }
     image_page(595, 842, "q 595 0 0 842 0 0 cm /Im1 Do Q\n", w, h, &scan)
+}
+
+#[test]
+fn twin_codes_by_the_edge_of_a_scan_are_said() {
+    // Two equal codes 7 or 8 modules apart (past their quiet zone) at 1 pixel a point, the
+    // second cut by the edge of the page by a few modules: together wider than any code, they
+    // are no silent gap. Both are listed, or the page says a part of it looks like a code and
+    // was not decoded. At 4 pixels a module only the first fits whole; the second keeps too
+    // few bars to be a code, but the first is listed or said.
+    let m = modules(Symbology::Code128, "0000000001");
+    for bar in [30u32, 60] {
+        for blur in [0u32, 1] {
+            let width = (m.width * 3) as f32;
+            for (gap, cut) in [(7u32, 2.0f32), (7, 4.0), (7, 6.0), (8, 3.0)] {
+                let second = 595.0 - width + cut * 3.0;
+                let first = second - width - (gap * 3) as f32;
+                let out = read(&blurred_scan(1, 3, bar, &[first, second], blur));
+                let n = asset(&out, "page-1").codes.len();
+                let case = format!("px 3, bars {bar}, blur {blur}, {gap} apart, cut {cut}");
+                assert!(n <= 2, "{case}: {n}");
+                assert!(
+                    n == 2 || says_code_unread(&out),
+                    "{case}: {n} read, {:?}",
+                    asset(&out, "page-1").alt
+                );
+            }
+            // Bars 30 points high are under 8 modules of 4 points: too short for a printed code.
+            if bar < 60 {
+                continue;
+            }
+            let width = (m.width * 4) as f32;
+            let out = read(&blurred_scan(1, 4, bar, &[40.0, 40.0 + width + 28.0], blur));
+            let n = asset(&out, "page-1").codes.len();
+            let case = format!("px 4, bars {bar}, blur {blur}");
+            assert!(n <= 1, "{case}: {n}");
+            assert!(
+                n == 1 || says_code_unread(&out),
+                "{case}: {n} read, {:?}",
+                asset(&out, "page-1").alt
+            );
+        }
+    }
 }
 
 /// Whether the page asset of `out` says that a part of it looks like a code and was not (or
