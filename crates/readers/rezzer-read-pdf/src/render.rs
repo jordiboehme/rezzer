@@ -2398,8 +2398,12 @@ impl Scans {
         }
         if more > 0 {
             found.unread.push(format!(
-                "{more} more {} that look like a barcode or QR code, not scanned",
-                if more == 1 { "part" } else { "parts" }
+                "{more} more {} like a barcode or QR code, not scanned",
+                if more == 1 {
+                    "part that looks"
+                } else {
+                    "parts that look"
+                }
             ));
         }
         if capped {
@@ -2460,8 +2464,12 @@ impl Scans {
         }
         if more > 0 {
             found.unread.push(format!(
-                "{more} more printed {} that look like a barcode or QR code, not decoded",
-                if more == 1 { "part" } else { "parts" }
+                "{more} more printed {} like a barcode or QR code, not decoded",
+                if more == 1 {
+                    "part that looks"
+                } else {
+                    "parts that look"
+                }
             ));
         }
     }

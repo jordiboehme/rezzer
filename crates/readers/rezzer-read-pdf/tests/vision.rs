@@ -3293,7 +3293,7 @@ fn drawings_past_the_page_cap_that_give_no_code_are_said_once() {
     // such drawing is said once: named, or past the named ones counted, never again as a
     // printed part of the render.
     let width = modules(Symbology::Code128, "0000000001").width as f32;
-    for n in [12usize, 20, 22] {
+    for n in [12usize, 19, 20, 22] {
         let mut bars = String::new();
         for k in 0..n {
             let (x, y) = (40.0 + (k % 2) as f32 * 260.0, 60.0 + (k / 2) as f32 * 45.0);
@@ -3316,9 +3316,15 @@ fn drawings_past_the_page_cap_that_give_no_code_are_said_once() {
             .count();
         let counted: usize = alt
             .split(", ")
-            .find_map(|w| w.strip_suffix(" more parts that look like a barcode or QR code"))
+            .find_map(|w| {
+                w.strip_suffix(" more parts that look like a barcode or QR code")
+                    .or_else(|| w.strip_suffix(" more part that looks like a barcode or QR code"))
+            })
             .map_or(0, |k| k.parse().expect("count"));
         assert_eq!(named + counted, n, "{case}");
+        if n == 19 {
+            assert!(alt.contains("1 more part that looks like"), "{case}");
+        }
     }
 }
 
