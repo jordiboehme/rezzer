@@ -92,6 +92,120 @@ fn shape(c: &[f32; 4]) -> Shape {
     }
 }
 
+/// About the bytes one rectangle of [`pixel_cells`] takes while it is searched: itself in
+/// pixels and in points, and its share of [`search_bytes`].
+pub(crate) const PIXEL_CELL_BYTES: u64 = 16 + 16 + 32 + 4 * 56;
+
+/// Dark parts of a render smaller than this many pixels both ways are left out by
+/// [`pixel_cells`]: no bar or module is read at that size.
+const PIXEL_MIN: u32 = 3;
+
+/// The gray levels by which the dark and the light tone of a render differ at least for it to
+/// be searched by [`pixel_cells`].
+const PIXEL_CONTRAST: u32 = 64;
+
+/// The dark parts of a render (`rgba`, `w` by `h` opaque pixels, row by row from the top
+/// left) as filled rectangles in pixels (left, top, right, bottom): each run of dark pixels
+/// in a row, joined with the runs at the same place in the rows under it, so a bar or a
+/// module of a code printed in a picture is one rectangle, as one drawn as paths is (for
+/// [`vector_codes`]). Dark is darker than the render's Otsu threshold of gray; a render
+/// without two tones [`PIXEL_CONTRAST`] apart has none. A part smaller than [`PIXEL_MIN`]
+/// pixels both ways is left out. `None` when there are more than `max`.
+pub(crate) fn pixel_cells(rgba: &[u8], w: usize, h: usize, max: usize) -> Option<Vec<[u32; 4]>> {
+    if w == 0 || h == 0 || rgba.len() < w * h * 4 {
+        return Some(Vec::new());
+    }
+    let gray = |i: usize| gray_at(rgba, i);
+    let mut hist = [0u64; 256];
+    for i in 0..w * h {
+        hist[usize::from(gray(i))] += 1;
+    }
+    let Some(t) = otsu(&hist) else {
+        return Some(Vec::new());
+    };
+    let mut cells: Vec<[u32; 4]> = Vec::new();
+    // The runs still open from the rows above: left, right and first row, by left.
+    let mut open: Vec<(u32, u32, u32)> = Vec::new();
+    let mut next: Vec<(u32, u32, u32)> = Vec::new();
+    let close = |run: (u32, u32, u32), y: u32, cells: &mut Vec<[u32; 4]>| {
+        let (x0, x1, top) = run;
+        if x1 - x0 >= PIXEL_MIN || y - top >= PIXEL_MIN {
+            cells.push([x0, top, x1, y]);
+        }
+        cells.len() <= max
+    };
+    for y in 0..=h {
+        next.clear();
+        let mut k = 0;
+        let mut x = 0;
+        while y < h && x < w {
+            if gray(y * w + x) > t {
+                x += 1;
+                continue;
+            }
+            let x0 = x;
+            while x < w && gray(y * w + x) <= t {
+                x += 1;
+            }
+            let (x0, x1) = (x0 as u32, x as u32);
+            // The open runs that start before this one end here.
+            while k < open.len() && open[k].0 < x0 {
+                if !close(open[k], y as u32, &mut cells) {
+                    return None;
+                }
+                k += 1;
+            }
+            if k < open.len() && open[k].0 == x0 && open[k].1 == x1 {
+                next.push(open[k]);
+                k += 1;
+            } else {
+                next.push((x0, x1, y as u32));
+            }
+        }
+        for &run in &open[k..] {
+            if !close(run, y as u32, &mut cells) {
+                return None;
+            }
+        }
+        std::mem::swap(&mut open, &mut next);
+    }
+    Some(cells)
+}
+
+/// The gray of pixel `i` of `rgba`.
+fn gray_at(rgba: &[u8], i: usize) -> u8 {
+    let p = &rgba[i * 4..i * 4 + 3];
+    ((u32::from(p[0]) * 299 + u32::from(p[1]) * 587 + u32::from(p[2]) * 114) / 1000) as u8
+}
+
+/// The Otsu threshold of gray histogram `hist`: the level that splits it into its dark and
+/// light tones best; `None` when they are not [`PIXEL_CONTRAST`] apart.
+fn otsu(hist: &[u64; 256]) -> Option<u8> {
+    let total: u64 = hist.iter().sum();
+    let sum: f64 = hist
+        .iter()
+        .enumerate()
+        .map(|(v, &n)| v as f64 * n as f64)
+        .sum();
+    let (mut below, mut below_sum) = (0u64, 0f64);
+    let mut best = (0f64, 0u8, 0f64, 0f64);
+    for (v, &n) in hist.iter().enumerate() {
+        below += n;
+        below_sum += v as f64 * n as f64;
+        let above = total - below;
+        if below == 0 || above == 0 {
+            continue;
+        }
+        let dark = below_sum / below as f64;
+        let light = (sum - below_sum) / above as f64;
+        let between = below as f64 * above as f64 * (dark - light).powi(2);
+        if between > best.0 {
+            best = (between, v as u8, dark, light);
+        }
+    }
+    (best.0 > 0.0 && best.3 - best.2 >= f64::from(PIXEL_CONTRAST)).then_some(best.1)
+}
+
 /// Groups of at least this many rectangles are looked at for merging, at most this many.
 const MERGE_CELLS: usize = 8;
 const MERGE_GROUPS: usize = 2_000;
@@ -109,6 +223,32 @@ const MERGE_GROUPS: usize = 2_000;
 /// reads the first [`MAX_REGIONS`] and says the others. `Err` says why the page was not
 /// searched: its work would pass [`MAX_ENTRIES`] or [`MAX_PAIRS`].
 pub(crate) fn vector_codes(cells: &[[f32; 4]]) -> Result<Vec<VectorCode>, String> {
+    codes_among(cells, false)
+}
+
+/// The bars of a code drawn as paths are at least this many modules long.
+const DRAWN_BAR: f32 = 2.0;
+
+/// The bars of a code printed in a picture are at least this many modules long: in pixels the
+/// strokes of letters and the pixels of a picture drawn large also stand in rows of short
+/// bars of whole pixels, and a decoder reads a code along a few of its lines.
+const PRINTED_BAR: f32 = 8.0;
+
+/// The most bars after which the bars of a linear code printed in a picture may repeat:
+/// hatching or a ruler drawn at a pitch that is no whole number of pixels steps in a pattern
+/// of a few bars that repeats, a code does not.
+const PRINTED_PERIOD: usize = 6;
+
+/// The regions among `cells`, the dark parts of a render in points (see [`pixel_cells`]),
+/// that look like a code printed there: as [`vector_codes`], with the bars of a linear code
+/// at least [`PRINTED_BAR`] modules long and not repeating after a few
+/// ([`PRINTED_PERIOD`]).
+pub(crate) fn printed_codes(cells: &[[f32; 4]]) -> Result<Vec<VectorCode>, String> {
+    codes_among(cells, true)
+}
+
+/// [`vector_codes`], or with `printed` [`printed_codes`].
+fn codes_among(cells: &[[f32; 4]], printed: bool) -> Result<Vec<VectorCode>, String> {
     let cells: Vec<[f32; 4]> = cells
         .iter()
         .copied()
@@ -222,6 +362,7 @@ pub(crate) fn vector_codes(cells: &[[f32; 4]]) -> Result<Vec<VectorCode>, String
     let look = |members: &[usize], found: &mut Vec<(usize, VectorCode)>| match region(
         &cells,
         members,
+        printed,
         &|b| quiet(&cells, &grid_of, members, b, &key),
     ) {
         Some(code) => {
@@ -467,6 +608,7 @@ const MAX_MODULES: usize = 200;
 fn region(
     cells: &[[f32; 4]],
     members: &[usize],
+    printed: bool,
     quiet: &dyn Fn([f32; 4]) -> bool,
 ) -> Option<VectorCode> {
     let (b, module) = bounds(cells, members);
@@ -499,8 +641,10 @@ fn region(
         on_it * 10 >= members.len() * 9
     };
     let kind_ok = if bars(cells, members, false) {
-        linear(cells, members, b, module, false, quiet)
-    } else if bars(cells, members, true) && linear(cells, members, b, module, true, quiet) {
+        linear(cells, members, (b, module, printed), false, quiet)
+    } else if bars(cells, members, true)
+        && linear(cells, members, (b, module, printed), true, quiet)
+    {
         true
     } else {
         lattice() && matrix(cells, members, b, module)
@@ -528,15 +672,16 @@ fn region(
     })
 }
 
-/// Whether bars `members` (standing up, or lying down with `flat`) in box `b` are a linear
-/// code: about as long as the region and at least two modules long, of at least two widths
-/// and at most 4 modules wide, every bar and nearly every space a whole number of modules
-/// wide, not all at one pitch, with 5 modules free at both ends.
+/// Whether bars `members` (standing up, or lying down with `flat`) in box `b` of `module`
+/// are a linear code: about as long as the region and at least [`DRAWN_BAR`] modules long, of
+/// at least two widths and at most 4 modules wide, every bar and nearly every space a whole
+/// number of modules wide, not all at one pitch, with 5 modules free at both ends. A code
+/// `printed` in a picture has bars [`PRINTED_BAR`] modules long and does not repeat after a
+/// few bars.
 fn linear(
     cells: &[[f32; 4]],
     members: &[usize],
-    b: [f32; 4],
-    module: f32,
+    (b, module, printed): ([f32; 4], f32, bool),
     flat: bool,
     quiet: &dyn Fn([f32; 4]) -> bool,
 ) -> bool {
@@ -571,11 +716,12 @@ fn linear(
             _ => runs.push((a, z)),
         }
     }
-    // Bars at least two modules long; every bar and space a whole number of modules wide,
+    // Bars at least `bar` modules long; every bar and space a whole number of modules wide,
     // but for a few spaces (codes side by side closer than their quiet zone).
+    let bar = if printed { PRINTED_BAR } else { DRAWN_BAR };
     if members
         .iter()
-        .any(|&i| long(&cells[i]) < 2.0 * module - 0.01)
+        .any(|&i| long(&cells[i]) < bar * module - 0.01)
     {
         return false;
     }
@@ -613,6 +759,9 @@ fn linear(
     if one_pitch(&|r| r.0) || one_pitch(&|r| r.1) || one_pitch(&|r| (r.0 + r.1) / 2.0) {
         return false;
     }
+    if printed && repeats(&runs, module) {
+        return false;
+    }
     let mut widths: Vec<i32> = runs
         .iter()
         .map(|(a, z)| ((z - a) / module).round() as i32)
@@ -628,6 +777,21 @@ fn linear(
     } else {
         quiet([b[0] - q, b[1], b[0] - 0.01, b[3]]) && quiet([b[2] + 0.01, b[1], b[2] + q, b[3]])
     }
+}
+
+/// Whether bars `runs` (start and end across, `module` wide) repeat after at most
+/// [`PRINTED_PERIOD`] bars: nine in ten of them start one step after the bar so many before
+/// as that one did and are as wide.
+fn repeats(runs: &[(f32, f32)], module: f32) -> bool {
+    let q = |v: f32| (v / module * 4.0).round() as i32;
+    let bars: Vec<(i32, i32)> = runs
+        .windows(2)
+        .map(|w| (q(w[1].0 - w[0].0), q(w[1].1 - w[1].0)))
+        .collect();
+    (1..=PRINTED_PERIOD).any(|p| {
+        let n = bars.len().saturating_sub(p);
+        n > 0 && (0..n).filter(|&i| bars[i] == bars[i + p]).count() * 10 >= n * 9
+    })
 }
 
 /// Whether `members` in box `b` on a lattice of `module` make a matrix code's finder: QR Code
@@ -1142,5 +1306,52 @@ mod tests {
         let found = vector_codes(&cells).expect("searched");
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].module, 0.5);
+    }
+
+    #[test]
+    fn dark_parts_of_a_render_are_rectangles_joined_down() {
+        // 12 by 8 pixels of paper (230) with a bar 2 wide and 6 high, a square of 2 that is
+        // too small, and a run that changes width from row to row.
+        let (w, h) = (12usize, 8usize);
+        let mut gray = vec![230u8; w * h];
+        for y in 1..7 {
+            gray[y * w + 1] = 10;
+            gray[y * w + 2] = 10;
+        }
+        for y in 1..3 {
+            gray[y * w + 5] = 10;
+            gray[y * w + 6] = 10;
+        }
+        for y in 4..7 {
+            for x in 8..8 + y - 3 {
+                gray[y * w + x] = 10;
+            }
+        }
+        let rgba: Vec<u8> = gray.iter().flat_map(|&g| [g, g, g, 255]).collect();
+        let mut cells = pixel_cells(&rgba, w, h, 100).expect("within");
+        cells.sort_unstable();
+        assert_eq!(cells, [[1, 1, 3, 7], [8, 6, 11, 7]]);
+        assert_eq!(pixel_cells(&rgba, w, h, 1), None);
+        // One tone only: nothing is dark.
+        let paper: Vec<u8> = vec![230; w * h * 4];
+        assert_eq!(pixel_cells(&paper, w, h, 100), Some(Vec::new()));
+    }
+
+    #[test]
+    fn printed_bars_that_repeat_after_a_few_are_no_code() {
+        // Hatching at a pitch of no whole pixels: bars of 2, 2 and 1 pixels, again and again.
+        let module = 0.5;
+        let mut runs = Vec::new();
+        let mut x = 0.0;
+        for k in 0..30 {
+            let w = if k % 3 == 2 { 0.5 } else { 1.0 };
+            runs.push((x, x + w));
+            x += w + 0.5 + if k % 3 == 1 { 0.5 } else { 0.0 };
+        }
+        assert!(repeats(&runs, module));
+        // The bars of a Code 128 do not.
+        let bars = code128("0000000001", (0.0, 0.0), module, 20.0, false, false);
+        let runs: Vec<(f32, f32)> = bars.iter().map(|c| (c[0], c[2])).collect();
+        assert!(!repeats(&runs, module));
     }
 }

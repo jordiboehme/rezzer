@@ -1372,7 +1372,12 @@ pub(crate) fn render_pages(
             Some(asset) => {
                 // The page render is read cheaply at its own scale; the likely codes on it
                 // are looked at again finer below.
-                scans.read(n, asset, &page, Some((need, None)), budget, true);
+                let page_read = scans
+                    .read(n, asset, &page, Some((need, None)), budget, true)
+                    .is_some();
+                // Codes printed in the page's pictures that the decoder did not read are
+                // looked for in its render, as codes drawn as paths are.
+                let printed = page_read.then(|| printed_codes(&page, need, pages.room));
                 if files {
                     match encode(page.pixmap) {
                         Ok(png) => {
@@ -1397,6 +1402,9 @@ pub(crate) fn render_pages(
                     }
                 }
                 scans.regions_unread(asset, need, &read);
+                if let Some(printed) = printed {
+                    scans.printed_unread(asset, need, printed);
+                }
             }
             None => {
                 let mut cut = Cut {
@@ -2074,6 +2082,10 @@ pub(crate) struct Scans {
     large_payloads: usize,
     /// Pages with parts not rendered again to be read finer, by why.
     unrendered: HashMap<Unrendered, Vec<u32>>,
+    /// Pages whose render was not searched for printed parts that look like codes, and why
+    /// for the first.
+    unsearched: Vec<u32>,
+    unsearched_why: Option<String>,
 }
 
 #[cfg(test)]
@@ -2122,6 +2134,8 @@ impl Scans {
             internal: Vec::new(),
             large_payloads: 0,
             unrendered: HashMap::new(),
+            unsearched: Vec::new(),
+            unsearched_why: None,
         }
     }
 
@@ -2325,36 +2339,17 @@ impl Scans {
         let mut capped = need.past > 0;
         for (k, r) in need.regions.iter().enumerate() {
             let framed = need.turn.place_box(r.b, w, h);
-            let on: Vec<&Barcode> = found
-                .codes
-                .iter()
-                .filter(|c| c.bounds.is_some_and(|b| overlap(&b, &framed)))
-                .collect();
             // A matrix code read there fills it; linear codes reach its ends.
-            let missing = match r.how {
-                How::Modules(_) if !on.iter().any(|c| two_d(&c.symbology)) => {
-                    let mut u = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
-                    for b in on.iter().filter_map(|c| c.bounds) {
-                        u = [
-                            u[0].min(b[0]),
-                            u[1].min(b[1]),
-                            u[2].max(b[2]),
-                            u[3].max(b[3]),
-                        ];
-                    }
-                    on.is_empty() || !fills(&u, &framed)
-                }
-                _ => on.is_empty(),
-            };
-            if !missing {
+            let Some(part) = unread_at(&found.codes, &framed, matches!(r.how, How::Modules(_)))
+            else {
                 continue;
-            }
+            };
             capped |= k >= PAGE_REGIONS;
             let what = match r.how {
                 How::Modules(_) => DRAWING,
                 How::Picture(..) => "a picture that looks like a barcode or QR code",
             };
-            let part = if on.is_empty() { "" } else { "part of " };
+            let part = if part { "part of " } else { "" };
             let scanned = read.get(k).copied().unwrap_or(false);
             found.unread.push(format!(
                 "{part}{what}, {}, {}",
@@ -2371,6 +2366,62 @@ impl Scans {
         }
         if capped {
             self.unrendered(need.page, Unrendered::PageCap);
+        }
+    }
+
+    /// Marks the parts of the render of page `need` (a page that needs vision as a whole,
+    /// asset `asset`) that look like a code and gave none, from `printed` (their boxes in the
+    /// visible page box, see [`printed_codes`]): a part no code read lies in, or one whose
+    /// linear codes read do not fill most of it. Parts that are regions of the page are left
+    /// to [`Scans::regions_unread`]. The first [`SMALL_LISTED`] get their words for the page's
+    /// alt text, the others are counted. `Err` says why the render was not searched.
+    fn printed_unread(
+        &mut self,
+        asset: usize,
+        need: &Need,
+        printed: Result<Vec<[f32; 4]>, String>,
+    ) {
+        let printed = match printed {
+            Ok(p) => p,
+            Err(why) => {
+                add_page(&mut self.unsearched, need.page);
+                self.unsearched_why.get_or_insert(why);
+                return;
+            }
+        };
+        let (w, h) = need.size;
+        let (fw, fh) = need.turn.size(w, h);
+        let found = self.found.entry(asset).or_default();
+        let mut more = 0;
+        let mut listed = 0;
+        for b in printed {
+            if need.regions.iter().any(|r| overlap(&r.b, &b)) {
+                continue;
+            }
+            let framed = need.turn.place_box(b, w, h);
+            let Some(part) = unread_at(&found.codes, &framed, true) else {
+                continue;
+            };
+            if listed == SMALL_LISTED {
+                more += 1;
+                continue;
+            }
+            listed += 1;
+            found.unread.push(format!(
+                "{PRINTED}, {}, {}",
+                place_words(framed, fw, fh),
+                if part {
+                    "only in part decoded"
+                } else {
+                    "not decoded"
+                }
+            ));
+        }
+        if more > 0 {
+            found.unread.push(format!(
+                "{more} more printed {} that look like a barcode or QR code, not decoded",
+                if more == 1 { "part" } else { "parts" }
+            ));
         }
     }
 
@@ -2437,6 +2488,19 @@ impl Scans {
                 ),
                 LossReason::Limit,
                 Severity::Warning,
+            );
+        }
+        if let (Some(&first), Some(why)) = (self.unsearched.first(), &self.unsearched_why) {
+            // The page keeps its need of vision: an agent looks at it anyway.
+            out.loss_info(
+                format!("p{first}"),
+                format!(
+                    "the renders of {} are not searched for printed parts that look like a \
+                     barcode or QR code the decoder did not read: {why}",
+                    page_list(&self.unsearched)
+                ),
+                LossReason::Limit,
+                Severity::Info,
             );
         }
         for why in [
@@ -2579,6 +2643,70 @@ fn takes_region(px: &[f32; 4], two_d: bool, r: &Region) -> bool {
             How::Modules(_) if !two_d => fills(px, &r.b),
             _ => true,
         }
+}
+
+/// Whether box `framed` (in the frame of the codes' boxes) gave no code of `codes`
+/// (`Some(false)`), or only in part (`Some(true)`): no code read lies in it, or, when it
+/// `may_be_linear` and no matrix code was read there, the linear codes read there do not fill
+/// it ([`fills`]). `None` when it was read.
+fn unread_at(codes: &[Barcode], framed: &[f32; 4], may_be_linear: bool) -> Option<bool> {
+    let on: Vec<[f32; 4]> = codes
+        .iter()
+        .filter_map(|c| c.bounds)
+        .filter(|b| overlap(b, framed))
+        .collect();
+    if on.is_empty() {
+        return Some(false);
+    }
+    let matrix = codes
+        .iter()
+        .any(|c| two_d(&c.symbology) && c.bounds.is_some_and(|b| overlap(&b, framed)));
+    if !may_be_linear || matrix {
+        return None;
+    }
+    let u = on
+        .iter()
+        .fold([f32::MAX, f32::MAX, f32::MIN, f32::MIN], |u, b| {
+            [
+                u[0].min(b[0]),
+                u[1].min(b[1]),
+                u[2].max(b[2]),
+                u[3].max(b[3]),
+            ]
+        });
+    (!fills(&u, framed)).then_some(true)
+}
+
+/// What a printed part of a render that passed the code-shape test is called.
+const PRINTED: &str = "a printed part that looks like a barcode or QR code";
+
+/// The parts of the render of a page that needs vision (`page`, of `need`) that look like a
+/// code: its dark parts as rectangles in points (see [`crate::codes::pixel_cells`]),
+/// searched as codes drawn as paths are ([`crate::codes::printed_codes`]), within `room`
+/// bytes with the render. Their boxes in the visible page box; `Err` says why the render
+/// was not searched.
+fn printed_codes(page: &Rendered, need: &Need, room: u64) -> Result<Vec<[f32; 4]>, String> {
+    let p = &page.pixmap;
+    let (w, h) = (usize::from(p.width()), usize::from(p.height()));
+    let held = (w * h * 4) as u64;
+    let max = (room.saturating_sub(held) / crate::codes::PIXEL_CELL_BYTES)
+        .min(crate::codes::MAX_CELLS as u64) as usize;
+    let cells = crate::codes::pixel_cells(p.data_as_u8_slice(), w, h, max)
+        .ok_or_else(|| format!("it has more dark parts than are searched ({max})"))?;
+    // A bar cut across by the edge of the render is no whole bar: left out, the code's bars
+    // before it are looked at as they are.
+    let (wr, hr) = (w as u32, h as u32);
+    let points: Vec<[f32; 4]> = cells
+        .iter()
+        .filter(|c| {
+            let (cw, ch) = (c[2] - c[0], c[3] - c[1]);
+            !((c[0] == 0 || c[2] == wr) && ch > cw || (c[1] == 0 || c[3] == hr) && cw > ch)
+        })
+        .map(|c| page_rect(page, need, *c))
+        .collect();
+    drop(cells);
+    let found = crate::codes::printed_codes(&points)?;
+    Ok(found.into_iter().map(|c| c.b).collect())
 }
 
 /// Whether box `a` fills at least [`FILLS`] of box `b` each way.

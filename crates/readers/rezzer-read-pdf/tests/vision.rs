@@ -3241,3 +3241,164 @@ fn drawn_codes_past_the_page_cap_are_said() {
         assert_eq!(loss.why, LossReason::Limit, "{n} codes");
     }
 }
+
+/// A crisp scanned A4 page of `res` pixels a point (one gray picture over all of it, no text)
+/// with a Code 128 `0000000001` of `px` pixels a module and bars `bar` pixels high at each of
+/// `lefts` (the left edge of its first module, in points from the left edge of the page), cut
+/// at the edge of the page.
+fn crisp_scan(res: u32, px: u32, bar: u32, lefts: &[f32]) -> Vec<u8> {
+    let m = modules(Symbology::Code128, "0000000001");
+    let (w, h) = (595 * res, 842 * res);
+    let mut scan = vec![235u8; (w * h) as usize];
+    let top = 200 * res;
+    for &left in lefts {
+        let x0 = (left * res as f32).round() as u32;
+        for y in top..top + bar {
+            for c in (0..m.width).filter(|&c| m.dark[c as usize]) {
+                let (a, z) = ((x0 + c * px).min(w), (x0 + c * px + px).min(w));
+                scan[(y * w + a) as usize..(y * w + z) as usize].fill(0);
+            }
+        }
+    }
+    image_page(595, 842, "q 595 0 0 842 0 0 cm /Im1 Do Q\n", w, h, &scan)
+}
+
+/// Whether the page asset of `out` says that a part of it looks like a code and was not (or
+/// only in part) decoded.
+fn says_code_unread(out: &ReadOutcome) -> bool {
+    let a = asset(out, "page-1");
+    a.code_unread
+        && a.alt
+            .as_deref()
+            .is_some_and(|t| t.contains("looks like a barcode or QR code") && t.contains("decoded"))
+        && markdown(out).contains("looks like a barcode or QR code")
+}
+
+#[test]
+fn codes_in_a_scan_the_decoder_misses_are_said() {
+    // Bars in a scan that the decoder reads no code from are no silent gap: two equal codes
+    // side by side a few modules apart (closer than the quiet zone the decoder wants) are both
+    // listed or the page says a part of it looks like a code and was not decoded; so is a code
+    // cut by the edge of the page. A code read whole leaves nothing to say.
+    let m = modules(Symbology::Code128, "0000000001");
+    for res in [1u32, 2] {
+        for px in [2u32, 3, 4] {
+            let width = (m.width * px) as f32 / res as f32;
+            // Bars of a code printed in a picture are 8 modules long at least: shorter, the
+            // edges of a picture drawn large make rows of such bars too.
+            for bar in [10 * px, 60] {
+                let case = format!("{res} pixels a point, {px} a module, bars {bar}");
+                let alone = read(&crisp_scan(res, px, bar, &[40.0]));
+                if asset(&alone, "page-1").codes.len() != 1 {
+                    continue;
+                }
+                assert!(
+                    !says_code_unread(&alone),
+                    "{case}: {:?}",
+                    asset(&alone, "page-1").alt
+                );
+                for gap in [5u32, 6, 7, 8] {
+                    let second = 40.0 + width + (gap * px) as f32 / res as f32;
+                    if second + width > 585.0 {
+                        continue;
+                    }
+                    let out = read(&crisp_scan(res, px, bar, &[40.0, second]));
+                    let n = asset(&out, "page-1").codes.len();
+                    let case = format!("{case}, {gap} modules apart");
+                    assert!(n <= 2, "{case}: {n}");
+                    if n == 2 {
+                        assert!(!says_code_unread(&out), "{case}");
+                    } else {
+                        assert!(
+                            says_code_unread(&out),
+                            "{case}: {n} read, {:?}",
+                            asset(&out, "page-1").alt
+                        );
+                    }
+                }
+                // Cut to fewer bars than a code has at least, it is no code (as one drawn).
+                for cut in [3.0, 10.0, 15.0] {
+                    let left = 595.0 - width + cut * px as f32 / res as f32;
+                    let out = read(&crisp_scan(res, px, bar, &[left]));
+                    let case = format!("{case}, cut {cut} modules");
+                    let n = asset(&out, "page-1").codes.len();
+                    assert!(n == 1 || says_code_unread(&out), "{case}: {n} read");
+                }
+            }
+        }
+    }
+}
+
+/// A page of `w` by `h` points with `content`, Helvetica as `/F1` and the 4 by 4 gray
+/// pictures `/P0` (light shades) and `/P1` (dark shades).
+fn shaded_page(content: &str, w: f32, h: f32) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let dict = "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray \
+                /BitsPerComponent 8";
+    let shades = |base: u8| (0..16u8).map(|i| base + i * 9).collect::<Vec<u8>>();
+    let light = b.stream(dict, &shades(100));
+    let dark = b.stream(dict, &shades(30));
+    let cs = b.stream("", content.as_bytes());
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 {w} {h}] \
+         /Resources << /Font << /F1 {font} 0 R >> /XObject << /P0 {light} 0 R /P1 {dark} 0 R >> \
+         >> /Contents {cs} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+#[test]
+fn print_on_a_page_that_needs_vision_is_no_code() {
+    // A page that needs vision is looked at for codes in its render too: its text at any size,
+    // a ruled table, the ticks of a ruler, hatching and the soft edges of a small picture drawn
+    // large are no code and are not said as one, on a page of any size.
+    let mut content = String::from("q 200 0 0 150 300 600 cm /P0 Do Q\n");
+    for (x, y) in [(200.0, 236.0), (40.0, 420.0), (330.0, 450.0)] {
+        content += &format!("q 200 0 0 70 {x} {y} cm /P1 Do Q\n");
+    }
+    let mut y = 780.0;
+    for size in [5.0, 6.0, 8.0, 10.0, 12.0, 16.0, 24.0] {
+        for line in [
+            "Illlll IIII 1111 |||| mmmm nnnn Lieferschein 0000",
+            "Muster GmbH, Musterweg 1, 00000 Musterstadt, Kundennummer 0000000001",
+        ] {
+            content += &format!("BT /F1 {size} Tf 40 {y} Td ({line}) Tj ET\n");
+            y -= size * 1.3;
+        }
+    }
+    content += "q 0 g\n";
+    for k in 0..11 {
+        content += &format!("{} 100 0.5 150 re\n", 50.0 + k as f32 * 25.0);
+    }
+    for k in 0..31 {
+        content += &format!("50 {} 250 0.5 re\n", 100.0 + k as f32 * 5.0);
+    }
+    for k in 0..100 {
+        let w = if k % 5 == 0 { 1.0 } else { 0.5 };
+        content += &format!("{} 300 {w} 3 re\n", 330.0 + k as f32 * 2.0);
+    }
+    for k in 0..40 {
+        content += &format!("{} 360 1 40 re\n", 330.0 + k as f32 * 2.0);
+    }
+    content += "f Q\n";
+    for k in [0.7f32, 0.75, 1.0, 1.5] {
+        let page = format!("q {k} 0 0 {k} 0 0 cm\n{content}Q\n");
+        let out = read(&shaded_page(&page, 595.0 * k, 842.0 * k));
+        assert_eq!(needing(&out), ["page-1"], "scale {k}");
+        let a = asset(&out, "page-1");
+        assert!(a.codes.is_empty(), "scale {k}: {:?}", a.codes);
+        assert!(!a.code_unread, "scale {k}: {:?}", a.alt);
+        assert!(
+            !markdown(&out).contains("looks like a barcode"),
+            "scale {k}"
+        );
+    }
+}
