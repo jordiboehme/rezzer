@@ -2949,44 +2949,49 @@ fn drawn_codes_of_every_module_and_height_are_listed_once_at_their_bars() {
 #[test]
 fn a_code_in_a_scanned_page_is_listed_once_at_its_bars() {
     // A scanned page (one picture over all of it, no text) with a Code 128 in its pixels: the
-    // code has no region of its own, so the page read gives its box. It is listed once, and
-    // its box is its bars, not the line the decoder read.
+    // code has no region of its own, so the page read gives its box. It is listed once (the
+    // decoder may read it along two lines), and its box is its bars, not the line read.
     let m = modules(Symbology::Code128, "0000000001");
-    let (w, h) = (595u32, 842u32);
-    for (px, bar) in [(2u32, 20u32), (2, 40), (2, 80), (3, 30), (3, 120)] {
-        let mut scan = vec![235u8; (w * h) as usize];
-        let (x0, top) = (300u32, 200u32);
-        for y in top..top + bar {
-            for c in 0..m.width {
-                if m.dark[c as usize] {
-                    let at = (y * w + x0 + c * px) as usize;
-                    scan[at..at + px as usize].fill(0);
+    for res in [1u32, 2] {
+        let (w, h) = (595 * res, 842 * res);
+        for px in [2u32, 3] {
+            for bar in [20u32, 40, 80, 120, 200] {
+                let mut scan = vec![235u8; (w * h) as usize];
+                let (x0, top) = (300 * res, 200 * res);
+                for y in top..top + bar {
+                    for c in 0..m.width {
+                        if m.dark[c as usize] {
+                            let at = (y * w + x0 + c * px) as usize;
+                            scan[at..at + px as usize].fill(0);
+                        }
+                    }
                 }
+                let content = "q 595 0 0 842 0 0 cm /Im1 Do Q\n";
+                let out = read(&image_page(595, 842, content, w, h, &scan));
+                let case = format!("{res} pixels a point, {px} pixels a module, bars {bar} high");
+                assert_eq!(
+                    codes_of(&out, "page-1"),
+                    [("Code 128".to_string(), "0000000001".to_string())],
+                    "{case}"
+                );
+                // y grows down in the picture and up on the page.
+                let dark: Vec<u32> = (0..m.width).filter(|&c| m.dark[c as usize]).collect();
+                let pt = |v: u32| v as f32 / res as f32;
+                let want = [
+                    pt(x0 + dark[0] * px),
+                    pt(h - top - bar),
+                    pt(x0 + (dark[dark.len() - 1] + 1) * px),
+                    pt(h - top),
+                ];
+                let b = asset(&out, "page-1").codes[0].bounds.expect("box");
+                assert!(
+                    b.iter()
+                        .zip(want)
+                        .all(|(got, want)| (got - want).abs() <= 1.5),
+                    "{case}: {b:?}, the bars are {want:?}"
+                );
             }
         }
-        let content = "q 595 0 0 842 0 0 cm /Im1 Do Q\n";
-        let out = read(&image_page(595, 842, content, w, h, &scan));
-        let case = format!("{px} pixels a module, bars {bar} high");
-        assert_eq!(
-            codes_of(&out, "page-1"),
-            [("Code 128".to_string(), "0000000001".to_string())],
-            "{case}"
-        );
-        // One pixel is one point; y grows down in the picture and up on the page.
-        let dark: Vec<u32> = (0..m.width).filter(|&c| m.dark[c as usize]).collect();
-        let want = [
-            (x0 + dark[0] * px) as f32,
-            (h - top - bar) as f32,
-            (x0 + (dark[dark.len() - 1] + 1) * px) as f32,
-            (h - top) as f32,
-        ];
-        let b = asset(&out, "page-1").codes[0].bounds.expect("box");
-        assert!(
-            b.iter()
-                .zip(want)
-                .all(|(got, want)| (got - want).abs() <= 1.5),
-            "{case}: {b:?}, the bars are {want:?}"
-        );
     }
 }
 

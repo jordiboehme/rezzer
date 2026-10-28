@@ -156,14 +156,15 @@ macro_rules! grid {
     };
 }
 
-/// The shapes of two equal codes closer than their quiet zone: `$name => (on, gap, beside)`.
+/// The shapes of two equal codes of module 0.8 close to each other:
+/// `$name => (on, height, gap, beside)`.
 macro_rules! twins {
-    ($($name:literal => ($on:expr, $gap:literal, $beside:literal),)*) => {
+    ($($name:literal => ($on:expr, $height:literal, $gap:literal, $beside:literal),)*) => {
         vec![$(
             Shape {
                 name: $name,
                 axes: GRID,
-                draw: |v| (codes_page(v, $on, (0.8, 20.0), 1, $gap, $beside), None),
+                draw: |v| (codes_page(v, $on, (0.8, $height), 1, $gap, $beside), None),
             },
         )*]
     };
@@ -269,16 +270,22 @@ pub(crate) fn shapes() -> Vec<Shape> {
     });
     // Two equal codes closer than their quiet zone.
     all.extend(twins! {
-        "twin barcodes 1 pt apart" => (On::Business, 1.0, true),
-        "twin barcodes 3 pt apart" => (On::Business, 3.0, true),
-        "twin barcodes 5 pt apart" => (On::Business, 5.0, true),
-        "twin barcodes 1 pt apart, one over the other" => (On::Business, 1.0, false),
-        "twin barcodes 3 pt apart, one over the other" => (On::Business, 3.0, false),
-        "twin barcodes beside a photo 1 pt apart" => (On::Photo, 1.0, true),
-        "twin barcodes beside a photo 3 pt apart" => (On::Photo, 3.0, true),
-        "twin barcodes beside a photo 5 pt apart" => (On::Photo, 5.0, true),
-        "twin barcodes beside a photo 1 pt apart, one over the other" => (On::Photo, 1.0, false),
-        "twin barcodes beside a photo 3 pt apart, one over the other" => (On::Photo, 3.0, false),
+        "twin barcodes 1 pt apart" => (On::Business, 20.0, 1.0, true),
+        "twin barcodes 3 pt apart" => (On::Business, 20.0, 3.0, true),
+        "twin barcodes 4 pt apart" => (On::Business, 20.0, 4.0, true),
+        "twin barcodes 5 pt apart" => (On::Business, 20.0, 5.0, true),
+        "twin barcodes 1 pt apart, one over the other" => (On::Business, 20.0, 1.0, false),
+        "twin barcodes 3 pt apart, one over the other" => (On::Business, 20.0, 3.0, false),
+        "twin barcodes 3 pt high 1 pt apart, one over the other" => (On::Business, 3.0, 1.0, false),
+        "twin barcodes 5 pt high 1 pt apart, one over the other" => (On::Business, 5.0, 1.0, false),
+        "twin barcodes beside a photo 1 pt apart" => (On::Photo, 20.0, 1.0, true),
+        "twin barcodes beside a photo 3 pt apart" => (On::Photo, 20.0, 3.0, true),
+        "twin barcodes beside a photo 4 pt apart" => (On::Photo, 20.0, 4.0, true),
+        "twin barcodes beside a photo 5 pt apart" => (On::Photo, 20.0, 5.0, true),
+        "twin barcodes beside a photo 1 pt apart, one over the other" => (On::Photo, 20.0, 1.0, false),
+        "twin barcodes beside a photo 3 pt apart, one over the other" => (On::Photo, 20.0, 3.0, false),
+        "twin barcodes 3 pt high beside a photo 1 pt apart, one over the other" => (On::Photo, 3.0, 1.0, false),
+        "twin barcodes 5 pt high beside a photo 1 pt apart, one over the other" => (On::Photo, 5.0, 1.0, false),
     });
     all
 }
