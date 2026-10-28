@@ -1814,6 +1814,195 @@ fn lines_of_a_label_and_its_bold_value_never_join() {
     );
 }
 
+/// A column of `lines` at one left edge on an even pitch from x 320, each line its parts in
+/// their faces one after the other (a space or, `gapped`, two sizes apart), at `size`, beside a
+/// letter address at 7 points; `boxed` draws a box around the lines `boxed.0..boxed.1`.
+fn one_face_column(
+    lines: &[Vec<(&str, &str)>],
+    size: f32,
+    gapped: bool,
+    boxed: Option<(usize, usize)>,
+) -> String {
+    let pitch = 1.2 * size;
+    let (x0, top) = (320.0, 700.0);
+    let mut t = String::new();
+    for (n, parts) in lines.iter().enumerate() {
+        let y = top - pitch * n as f32;
+        let mut x = x0;
+        for (font, text) in parts {
+            t += &show(font, size, x, y, text);
+            x += common::font_width(font, text, size) + if gapped { 2.0 } else { 0.28 } * size;
+        }
+    }
+    if let Some((a, b)) = boxed {
+        let y0 = top - pitch * (b as f32 - 1.0) - 0.4 * size;
+        let y1 = top - pitch * a as f32 + size;
+        t += &format!("0 0 0 RG 0.5 w {} {y0} 240 {} re S\n", x0 - 4.0, y1 - y0);
+    }
+    for (n, l) in ["Muster GmbH", "Musterweg 1", "12345 Musterstadt"]
+        .iter()
+        .enumerate()
+    {
+        t += &show("FL", 7.0, 40.0, top - 8.4 * n as f32, l);
+    }
+    t
+}
+
+/// Task 15b part 2e-1 fix round 2 (review M1): a short line (`Hinweis:`) over a long line that
+/// starts right of where it ends (an indented continuation) are one paragraph: only a line not
+/// much wider than the short line over it is a cell of another column. Sizes 6 to 12, both
+/// fonts.
+#[test]
+fn a_short_line_over_an_indented_continuation_joins() {
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 10.0, 12.0] {
+        for fonts in FONTS {
+            let x = 40.0 + common::font_width(fonts.0, "Hinweis:", size) + 2.0 * size;
+            let t = show(fonts.0, size, 40.0, 700.0, "Hinweis:")
+                + &show(
+                    fonts.0,
+                    size,
+                    x,
+                    700.0 - 1.2 * size,
+                    "die Zahlung ist bis zum Ende des Monats auf das genannte Konto zu leisten",
+                );
+            let out = common::read(&page_in(&t, Look::Plain));
+            let joined = common::read_units(&out.document.body)
+                .iter()
+                .any(|u| u.contains("Hinweis: die Zahlung"));
+            if !joined {
+                wrong.push(format!(
+                    "{size}, {fonts:?}: {:?}",
+                    common::read_units(&out.document.body)
+                ));
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// Task 15b part 2e-1 fix round 2 (review R1 and R2; ruling P6-X): a column of short lines of
+/// one face at one left edge (labels alone, values alone, short value words, an address, fields
+/// whose label and value share the face, item lines of a label and an amount), whole, in a box,
+/// and cut by a box around two of its lines: no two lines are one line of text or one heading
+/// (`## Seite 1 von 2 Bearbeiter Muster`, `Kundennummer Rechnungsnummer`). A line joins the
+/// next only as wrapped text. Sizes 6 to 12, plain and bold Helvetica and Times, the parts of a
+/// line a space or two sizes apart.
+#[test]
+fn short_lines_of_one_face_never_join() {
+    let shapes: [(&str, &[&[&str]]); 6] = [
+        (
+            "fields of one face",
+            &[
+                &["Kundennummer", "12345"],
+                &["Rechnungsnummer", "67890"],
+                &["Datum", "01.10.2026"],
+                &["Seite", "1 von 2"],
+                &["Bearbeiter", "Muster"],
+            ],
+        ),
+        (
+            "labels alone",
+            &[
+                &["Kundennummer"],
+                &["Rechnungsnummer"],
+                &["Datum"],
+                &["Seite"],
+                &["Bearbeiter"],
+            ],
+        ),
+        (
+            "values alone",
+            &[
+                &["4711"],
+                &["DE00 1234 5678"],
+                &["01.10.2026"],
+                &["Muster GmbH"],
+                &["Beispiel"],
+            ],
+        ),
+        (
+            "value words",
+            &[
+                &["Beispiel"],
+                &["Musterstadt"],
+                &["Probe"],
+                &["Muster"],
+                &["Sitz"],
+            ],
+        ),
+        (
+            "address",
+            &[
+                &["Muster GmbH"],
+                &["Herrn Max Beispiel"],
+                &["Musterweg 1"],
+                &["12345 Musterstadt"],
+                &["Deutschland"],
+            ],
+        ),
+        (
+            "item lines",
+            &[
+                &["Beratung", "120,00"],
+                &["Fahrtkosten", "45,67"],
+                &["Material", "12,00"],
+                &["Porto", "3,50"],
+                &["Summe", "181,17"],
+            ],
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for (name, shape) in shapes {
+        for size in [6.0f32, 8.0, 9.0, 10.0, 12.0] {
+            for font in ["FL", "FB", "FT", "FTB"] {
+                for gapped in [false, true] {
+                    for boxed in [
+                        None,
+                        Some((0, 5)),
+                        Some((0, 2)),
+                        Some((1, 3)),
+                        Some((2, 4)),
+                        Some((3, 5)),
+                    ] {
+                        let lines: Vec<Vec<(&str, &str)>> = shape
+                            .iter()
+                            .map(|l| l.iter().map(|t| (font, *t)).collect())
+                            .collect();
+                        let out = common::read(&page_in(
+                            &one_face_column(&lines, size, gapped, boxed),
+                            Look::Plain,
+                        ));
+                        let md = common::markdown(&out).replace("**", "");
+                        let texts: Vec<String> = shape.iter().map(|l| l.join(" ")).collect();
+                        for w in texts.windows(2) {
+                            let last = w[0].rsplit(' ').next().unwrap_or("");
+                            let first = w[1].split(' ').next().unwrap_or("");
+                            let joined = format!("{last} {first}");
+                            if md.lines().any(|l| l.contains(&joined) && !l.contains('|')) {
+                                wrong.push(format!(
+                                    "{name}, {size}, {font}, gapped {gapped}, boxed {boxed:?}: {joined:?}"
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
 /// Task 15b part 2e-1 (item 6, part 2b re-review r1; ruling P6-X): a table of taxes without
 /// rules, an amount alone under an amount of its column (a row of its own), then two lines of
 /// one amount each in two other columns under the last row (`5,00` under the base, `125,00`

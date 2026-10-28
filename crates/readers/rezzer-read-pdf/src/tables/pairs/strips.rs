@@ -138,10 +138,11 @@ pub(in crate::tables) fn frame_tops(
         };
         let (x0, x1) = (hs[a].from.min(hs[b].from), hs[a].to.max(hs[b].to));
         let (y0, y1) = (hs[a].at.min(hs[b].at), hs[a].at.max(hs[b].at));
-        let inner = gv.iter().all(|&k| {
-            let v = &vs[k];
-            v.at > x0 + SNAP && v.at < x1 - SNAP && v.from >= y0 - SNAP && v.to <= y1 + SNAP
-        });
+        let inner = !gv.is_empty()
+            && gv.iter().all(|&k| {
+                let v = &vs[k];
+                v.at > x0 + SNAP && v.at < x1 - SNAP && v.from >= y0 - SNAP && v.to <= y1 + SNAP
+            });
         if inner {
             let top = if hs[a].at > hs[b].at { a } else { b };
             tops[top] = Top::Free;

@@ -2065,24 +2065,35 @@ fn inlines(
 
 /// Whether `cur` goes on in the same paragraph as `prev`: below it, near enough and in the
 /// same size, and not wholly right of it: a line that starts [`BESIDE_GAP`] sizes or more
-/// after the ink of the line over it ends stands in another column (an amount alone under a
-/// table in another column than the one over it), as text that wraps goes on at the left.
+/// after the ink of the line over it ends, and is not much wider than it, stands in another
+/// column (an amount alone under a table in another column than the one over it), as text that
+/// wraps goes on at the left.
 fn continues(prev: &Line<'_>, cur: &Line<'_>) -> bool {
     let gap = prev.y - cur.y;
     let height = prev.h.max(cur.h).max(1.0);
-    let end = prev
-        .runs
-        .iter()
-        .filter(|r| !r.text.trim().is_empty())
-        .map(|r| r.x + r.w.max(0.0))
-        .fold(f32::MIN, f32::max);
-    let beside = cur.x >= end + BESIDE_GAP * prev.size.max(cur.size).max(1.0);
+    let ink = |l: &Line<'_>| {
+        l.runs
+            .iter()
+            .filter(|r| !r.text.trim().is_empty())
+            .fold((f32::MAX, f32::MIN), |(a, b), r| {
+                (a.min(r.x), b.max(r.x + r.w.max(0.0)))
+            })
+    };
+    let ((p0, end), (c0, c1)) = (ink(prev), ink(cur));
+    // A line that is much wider than a short line over it is text going on after a label or
+    // a marker (an indented continuation), not a cell of another column.
+    let narrow = c1 - c0 <= BESIDE_WIDTH * (end - p0).max(prev.size);
+    let beside = narrow && c0 >= end + BESIDE_GAP * prev.size.max(cur.size).max(1.0);
     gap > 0.0 && gap <= GAP_RATIO * height && (prev.size - cur.size).abs() <= SIZE_SLACK && !beside
 }
 
 /// A line that starts this many sizes or more right of where the line over it ends goes on
 /// no paragraph of it (see [`continues`]): the white space of a cell gap, far over a space.
 const BESIDE_GAP: f32 = 1.0;
+
+/// A line beside the line over it (see [`BESIDE_GAP`]) is a cell of another column only when
+/// it is at most this many times as wide as that line.
+const BESIDE_WIDTH: f32 = 2.0;
 
 /// The blocks of a running footer, in reading order. Footer lines that go on one another at
 /// one left edge are one block. A footer set in columns (an address, a bank, a register entry,
@@ -2503,14 +2514,64 @@ fn heading_block(
     {
         j += 1;
     }
-    let block = &all[i..j];
     let first = &all[i];
+    let small = first.size < HEADING_PLAIN_RATIO * body_size;
+    let block = &all[i..j];
+    // Lines that keep a break between them (items, fields) are no heading but a paragraph with
+    // its breaks, when they are a little larger than the body or three lines or more (a column
+    // of items, also where a box cuts it). Two large short lines are a title over two lines.
+    // The lines of the same column over the block (a box may have cut it off them), two at
+    // most: enough to make it three lines.
+    let mut over = i;
+    while over > 0
+        && i - over < 2
+        && heading_level(&all[over - 1]) == Some(level)
+        && continues(&all[over - 1], &all[over])
+    {
+        over -= 1;
+    }
+    let column = &all[over..j];
+    let items = block_listed(column);
+    if (small || column.len() >= 3) && (1..block.len()).any(|k| lines_apart(block, k, items)) {
+        return (j, false);
+    }
     let texts: Vec<&str> = block.iter().map(|l| l.text.as_str()).collect();
     let one_edge = block.iter().all(|b| (b.x - first.x).abs() <= EDGE);
-    let small = first.size < HEADING_PLAIN_RATIO * body_size;
     let paragraph = small && ((address_shaped(&texts) && one_edge) || sentences(block));
     (j, !paragraph)
 }
+
+/// Whether the line `k` of `block` (a paragraph or a heading) starts after a line break
+/// whatever the width of the block, as no wrapped text is made of it and the line over it:
+/// the block's lines are short items (an address, a column of labels, of values, or of fields
+/// of one face; see [`listed`]: at most a few words each and few small words) and the two
+/// lines share their left edge, or both lines are a label and its value in the same two faces
+/// (see [`field_line`]) and not long lines of prose.
+/// `items` is whether the block is [`listed`] (see [`block_listed`]).
+fn lines_apart(block: &[Line<'_>], k: usize, items: bool) -> bool {
+    let (a, b) = (&block[k - 1], &block[k]);
+    let left = |l: &Line<'_>| {
+        l.runs
+            .iter()
+            .filter(|r| !r.text.trim().is_empty())
+            .map(|r| r.x)
+            .fold(f32::MAX, f32::min)
+    };
+    let items = items && (left(a) - left(b)).abs() <= EDGE;
+    let words = |l: &Line<'_>| l.text.split_whitespace().count();
+    let fields = field_line(a).is_some_and(|f| field_line(b) == Some(f))
+        && words(a).max(words(b)) <= FIELD_WORDS;
+    items || fields
+}
+
+/// Whether the lines of `block` are [`listed`]: short items.
+fn block_listed(block: &[Line<'_>]) -> bool {
+    listed(&block.iter().map(|l| l.text.as_str()).collect::<Vec<_>>())
+}
+
+/// A line of more words than this is a line of prose, though it starts plain and ends bold (see
+/// [`lines_apart`]).
+const FIELD_WORDS: usize = 8;
 
 /// A line is short when the next first word fits after it with this share of the widest
 /// line to spare.
@@ -2575,6 +2636,7 @@ fn line_breaks(lines: &[Line<'_>]) -> Vec<(u32, u32)> {
         ((a.0 + a.1) / 2.0 - (b.0 + b.1) / 2.0).abs() <= EDGE && (a.1 - b.1).abs() > EDGE
     };
     let set_aligned = (pairs >= 2 && 2 * pairs >= edges.len() - 1) || centred_pair;
+    let items = block_listed(lines);
     let mut out = Vec::new();
     for k in 0..lines.len() - 1 {
         let (a, b) = (edges[k], edges[k + 1]);
@@ -2596,8 +2658,7 @@ fn line_breaks(lines: &[Line<'_>]) -> Vec<(u32, u32)> {
         let room = SHORT_ROOM * (right - left);
         let fits = a.1 + 0.25 * next.size + word + room <= right && !lines[k].text.ends_with('-');
         let aligned = set_aligned && aligned_pair(a, b);
-        let fields = field_line(&lines[k]).is_some_and(|f| field_line(next) == Some(f));
-        if fits || aligned || short || fields {
+        if fits || aligned || short || lines_apart(lines, k + 1, items) {
             out.push((next.runs[0].page, next.runs[0].line));
         }
     }

@@ -496,6 +496,51 @@ fn field_lines(v: &Variant, boxed: Option<(usize, usize)>) -> Sheet {
     s
 }
 
+/// Part 2e-1 fix round 2 (review R1 and R2): a column of five short lines of one face at one
+/// left edge beside a letter address, at `size` points times the size factor in the bold face
+/// (`bold`) or the plain one, with a box around the lines `boxed` (none: no box). No line of
+/// the read, and no heading, holds two of them.
+fn one_face_column(v: &Variant, size: f32, bold: bool, boxed: Option<(usize, usize)>) -> Sheet {
+    let k = v.k();
+    let (plain, heavy) = v.faces();
+    let font = if bold { heavy } else { plain };
+    let size = size * k;
+    let pitch = 1.2 * size;
+    let (x0, top) = (320.0, 640.0);
+    let lines = [
+        "Kundennummer 12345",
+        "Rechnungsnummer 67890",
+        "Datum 01.10.2026",
+        "Seite 1 von 2",
+        "Bearbeiter Muster",
+    ];
+    let mut t = String::new();
+    for (n, l) in lines.iter().enumerate() {
+        t += &show(font, size, x0, top - pitch * n as f32, l);
+    }
+    if let Some((a, b)) = boxed {
+        let y0 = top - pitch * (b as f32 - 1.0) - 0.4 * size;
+        let y1 = top - pitch * a as f32 + size;
+        t += &format!("0 0 0 RG 0.5 w {} {y0} 240 {} re S\n", x0 - 4.0, y1 - y0);
+    }
+    for (n, l) in ["Erika Mustermann", "Beispielweg 2", "54321 Beispielstadt"]
+        .iter()
+        .enumerate()
+    {
+        t += &show(plain, 7.0 * k, 40.0, top - 8.4 * k * n as f32, l);
+    }
+    let bottom = top - pitch * 5.0;
+    let mut s = sheet(v, t, 420.0, Some(Span { top, bottom }));
+    for w in lines.windows(2) {
+        s.want
+            .lines_apart
+            .push((w[0].to_string(), w[1].to_string()));
+    }
+    // `Datum` labels the date of the document.
+    s.want.date = Some("2026-10-01".into());
+    s
+}
+
 /// Part 2e-1 (items 6 and 7): line items without rules at 8 points times the size factor, a
 /// bold header `Pos`, `Zeitraum`, `Basis` and `Betrag`; with `range` the first two periods
 /// wrap after their dash (`01.10.2026 -` over `31.10.2026`) and the cell keeps the space after
@@ -1420,6 +1465,26 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "lines of a label and its bold value, the middle two boxed",
             axes: DOC_NEXT,
             draw: |v| (field_lines(v, Some((1, 3))), None),
+        },
+        Shape {
+            name: "a column of bold lines at heading size with a box around two of them",
+            axes: DOC,
+            draw: |v| (one_face_column(v, 9.5, true, Some((3, 5))), None),
+        },
+        Shape {
+            name: "a column of bold lines at heading size with a box around the middle two",
+            axes: DOC,
+            draw: |v| (one_face_column(v, 9.5, true, Some((1, 3))), None),
+        },
+        Shape {
+            name: "a column of lines of one face",
+            axes: DOC,
+            draw: |v| (one_face_column(v, 8.0, false, None), None),
+        },
+        Shape {
+            name: "a column of lines of one face with a box around two of them",
+            axes: DOC,
+            draw: |v| (one_face_column(v, 8.0, false, Some((2, 4))), None),
         },
         Shape {
             name: "line items with wrapped date ranges",
