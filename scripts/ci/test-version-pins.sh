@@ -160,6 +160,12 @@ version_pins_fails_on_a_stale_pre_release_archive() {
   ! run "$work/t" && grep -q 'rezzer-v1.2.3-rc.1-' "$work/out"
 }
 
+version_pins_fails_on_a_stale_hyphenated_pre_release_archive() {
+  tree "$work/t" 0.1.0
+  printf 'Download rezzer-v0.1.0-rc-1-linux-amd64.tar.gz.\n' >>"$work/t/README.md"
+  ! run "$work/t" && grep -q 'rezzer-v0.1.0-rc-1-' "$work/out"
+}
+
 version_pins_passes_on_the_real_tree() {
   run "$repo"
 }
@@ -180,6 +186,7 @@ for t in \
   version_pins_fails_on_a_stale_reader_pin \
   version_pins_passes_with_a_pre_release \
   version_pins_fails_on_a_stale_pre_release_archive \
+  version_pins_fails_on_a_stale_hyphenated_pre_release_archive \
   version_pins_passes_on_the_real_tree; do
   "$t"
   check "$t" "$?"

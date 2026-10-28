@@ -52,7 +52,7 @@ fi
 # `generated: { by: rezzer/<version> }` line and the reader ids such as
 # `reader: "sheet/<version>"` of the example output. Placeholders like
 # `rezzer-v<version>-` have no digits and are not pins.
-semver='[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?'
+semver='[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?'
 pins=""
 if [ ! -f "$root/README.md" ]; then
   echo "::error file=README.md::README.md is missing." >&2

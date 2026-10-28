@@ -30,6 +30,8 @@ barcodes = { path = "../crates/formats/barcodes", features = ["encode"] }
 rezzer-read-pdf = { path = "../crates/readers/rezzer-read-pdf" }
 fileattrs = { path = "../crates/formats/fileattrs" }
 # Builds the small packages of the part reader targets (stored entries only).
+# Not 9.1.3: it refuses an archive with a 0xa11e alignment extra field under 2 bytes
+# (zipguard test alignment_extra_fields_short_and_normal).
 zip = { version = "=9.1.2", default-features = false }
 
 # Not part of the workspace: cargo-fuzz needs nightly.
