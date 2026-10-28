@@ -6662,3 +6662,258 @@ fn an_address_cell_is_left_out_of_its_row_and_said() {
         wrong.join("\n")
     );
 }
+
+/// The middle cell of [`three_cells`]: its first lines (`head`, in `font` at `size` times the
+/// labels' size; F2 is bold) and the lines under them at the value size in the data font.
+#[derive(Clone, Copy)]
+struct Middle<'a> {
+    head: &'a [&'a str],
+    size: f32,
+    font: Option<&'a str>,
+    lines: &'a [&'a str],
+}
+
+/// How the three cells of [`three_cells`] are drawn: boxes in a row, boxes in a column, or
+/// a strip between two rules with no rule between its cells.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Cells {
+    Row,
+    Column,
+    Strip,
+}
+
+/// Three cells, `Name` over `Beispiel`, the cell `m`, and `Nr` over `4711`, the labels in
+/// `font` at `size`, the values a `step` larger: drawn as `how` says.
+fn three_cells(m: Middle, size: f32, step: f32, font: &str, how: Cells) -> ReadOutcome {
+    let value = size * step;
+    let k = size / 8.0;
+    let mut c = String::from("0 0 0 RG 0.5 w\n");
+    let h = 5.0 * value;
+    let (x0, top) = (60.0, 760.0);
+    let width = 120.0 * k;
+    let cells: [(&[&str], f32, &str, &[&str]); 3] = [
+        (&["Name"], size, font, &["Beispiel"]),
+        (m.head, m.size * size, m.font.unwrap_or(font), m.lines),
+        (&["Nr"], size, font, &["4711"]),
+    ];
+    // Each cell's left edge and top.
+    let at = |n: usize| match how {
+        Cells::Column => (x0, top - h * n as f32),
+        _ => (x0 + width * n as f32, top),
+    };
+    match how {
+        Cells::Strip => {
+            for y in [top, top - h] {
+                c += &format!("{x0} {y} m {} {y} l S\n", x0 + 3.0 * width);
+            }
+        }
+        _ => {
+            for n in 0..3 {
+                let (x, y) = at(n);
+                c += &format!("{x} {} {width} {h} re S\n", y - h);
+            }
+        }
+    }
+    for (n, (head, hs, hf, values)) in cells.iter().enumerate() {
+        let (x, y) = at(n);
+        for (l, t) in head.iter().enumerate() {
+            c += &shown(
+                hf,
+                *hs,
+                x + 4.0 * k,
+                y - 1.1 * size - 1.15 * hs * l as f32,
+                t,
+            );
+        }
+        let low = y - h + 0.4 * value;
+        for (l, v) in values.iter().rev().enumerate() {
+            c += &shown(font, value, x + 4.0 * k, low + 1.2 * value * l as f32, v);
+        }
+    }
+    read(&three_font_page(&c))
+}
+
+/// The texts of the blocks of a read that are no table, sections opened.
+fn text_blocks(blocks: &[Block], out: &mut Vec<String>) {
+    for b in blocks {
+        match b {
+            Block::Section { blocks, .. } => text_blocks(blocks, out),
+            Block::Table { .. } => {}
+            b => {
+                let mut s = String::new();
+                common::block_text(b, &mut s);
+                out.push(s.trim().replace('\n', " / "));
+            }
+        }
+    }
+}
+
+/// What the middle cell of [`three_cells`] must read as.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Want {
+    /// Its first line the label, the lines under it the value.
+    Pair,
+    /// In no pair, and a loss names its first line.
+    Said,
+    /// In no pair; no loss is needed (a title).
+    Alone,
+}
+
+/// What is wrong with the read `out` of [`three_cells`] around `m`: `Name: Beispiel` and
+/// `Nr: 4711` pair; the middle cell reads as `want` says; no block that is no table holds
+/// words of two cells (words of one cell only, the words they share aside).
+fn three_cells_wrong(out: &ReadOutcome, m: Middle, want: Want) -> Vec<String> {
+    let mut wrong = Vec::new();
+    let rows: Vec<String> = read_tables(out)
+        .iter()
+        .flatten()
+        .map(|r| r.join(": "))
+        .collect();
+    for want in ["Name: Beispiel", "Nr: 4711"] {
+        if !rows.iter().any(|r| r == want) {
+            wrong.push(format!("no {want} in {rows:?}"));
+        }
+    }
+    let head = m.head.join(" ");
+    let paired = rows
+        .iter()
+        .any(|r| m.head.iter().chain(m.lines).any(|t| r.contains(t)));
+    if want == Want::Pair {
+        let want = format!("{head}: {}", m.lines.join(" "));
+        if !rows.contains(&want) {
+            wrong.push(format!("no {want} in {rows:?}"));
+        }
+    } else {
+        let said = want == Want::Alone
+            || out
+                .document
+                .losses
+                .iter()
+                .any(|l| l.what.contains(m.head[0]));
+        if paired || !said {
+            let losses: Vec<&str> = out
+                .document
+                .losses
+                .iter()
+                .map(|l| l.what.as_str())
+                .collect();
+            wrong.push(format!("paired {paired}, said {said}: {rows:?} {losses:?}"));
+        }
+    }
+    let words = |ts: &[&str]| -> Vec<String> {
+        ts.iter()
+            .flat_map(|t| t.split_whitespace())
+            .map(str::to_string)
+            .collect()
+    };
+    let mut middle = m.head.to_vec();
+    middle.extend(m.lines);
+    let cells = [
+        words(&["Name", "Beispiel"]),
+        words(&middle),
+        words(&["Nr", "4711"]),
+    ];
+    let own = |c: usize, w: &str| {
+        cells[c].iter().any(|x| x == w)
+            && (0..3).all(|o| o == c || !cells[o].iter().any(|x| x == w))
+    };
+    let mut blocks = Vec::new();
+    text_blocks(&out.document.body, &mut blocks);
+    for b in blocks {
+        let of: Vec<usize> = (0..3)
+            .filter(|&c| b.split_whitespace().any(|w| own(c, w)))
+            .collect();
+        if of.len() > 1 {
+            wrong.push(format!("a block mixes cells {of:?}: {b:?}"));
+        }
+    }
+    wrong
+}
+
+
+/// The middle cells of the matrix tests below: a name or a label over an address, its first
+/// line at `size` times the labels' size in `font` (none: the labels' font), and how it reads
+/// (it pairs when a colon ends it or it has the labels' style and font).
+type Case = (
+    &'static str,
+    &'static [&'static str],
+    &'static [&'static str],
+    f32,
+    Option<bool>,
+    Want,
+);
+
+const ADDR: &[&str] = &["Musterweg 1", "12345 Musterstadt"];
+
+/// Runs the cases over sizes 6 to 14, steps 1.0625 to 1.25, both data fonts and the ways
+/// `hows`; a case's font `Some(true)` is the other data font, `Some(false)` the bold one.
+fn middle_matrix(cases: &[Case], hows: &[Cells]) -> Vec<String> {
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+        for step in [1.0625f32, 1.125, 1.25] {
+            for font in ["F1", "F3"] {
+                let other = if font == "F1" { "F3" } else { "F1" };
+                for &how in hows {
+                    for &(name, head, lines, hs, hf, want) in cases {
+                        let m = Middle {
+                            head,
+                            size: if hs == 0.0 { step } else { hs },
+                            font: hf.map(|o| if o { other } else { "F2" }),
+                            lines,
+                        };
+                        let at = format!("{name} {how:?} {size} pt x {step}, {font}");
+                        let out = three_cells(m, size, step, font, how);
+                        wrong.extend(
+                            three_cells_wrong(&out, m, want)
+                                .into_iter()
+                                .map(|e| format!("{at}: {e}")),
+                        );
+                    }
+                }
+            }
+        }
+    }
+    wrong
+}
+
+
+
+/// Task 15b part 2d item 4 (ruling P6-X): the font family is part of a label's style. A name
+/// over an address at the labels' size in another family than the labels beside it is no
+/// label: it pairs with nothing and a loss names it; in the labels' own family it pairs. Boxes in a row and in a column, and a strip between two rules.
+#[test]
+fn a_name_in_another_font_family_is_no_label() {
+    let cases: [Case; 3] = [
+        (
+            "name in another family",
+            &["Muster GmbH"],
+            ADDR,
+            1.0,
+            Some(true),
+            Want::Said,
+        ),
+        (
+            "person in another family",
+            &["Erika Mustermann"],
+            &["c/o Muster GmbH", "Musterweg 1", "12345 Musterstadt"],
+            1.0,
+            Some(true),
+            Want::Said,
+        ),
+        (
+            "name in the labels' family",
+            &["Muster GmbH"],
+            ADDR,
+            1.0,
+            None,
+            Want::Pair,
+        ),
+    ];
+    let wrong = middle_matrix(&cases, &[Cells::Row, Cells::Column, Cells::Strip]);
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}

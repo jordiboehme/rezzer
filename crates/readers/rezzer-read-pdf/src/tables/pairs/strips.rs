@@ -1212,12 +1212,12 @@ enum Ends {
     Unclear(Vec<usize>),
 }
 
-/// Whether the run `r` is in one of the roles `set` (a style and a font family): of its style,
-/// and of its family where both families are known.
-fn in_role(set: &[(Style, u32)], r: &Run) -> bool {
+/// Whether the run `r` is in one of the roles `set` (styles with their font family): of its
+/// size, weight and slant, and of its family where both families are known.
+fn in_role(set: &[Style], r: &Run) -> bool {
     let s = style_of(r);
     set.iter()
-        .any(|&(t, f)| t == s && (f == 0 || r.family == 0 || f == r.family))
+        .any(|t| (t.0, t.1, t.2) == (s.0, s.1, s.2) && (t.3 == 0 || s.3 == 0 || t.3 == s.3))
 }
 
 /// The text just beyond the group `g` of `strips` that shows its labels stand under the rule
@@ -1272,9 +1272,9 @@ fn ends(
         flow,
         &rows.iter().map(|(_, r)| r.0.clone()).collect::<Vec<_>>(),
     );
-    let role = |r: &Run| (style_of(r), r.family);
-    let mut ls: Vec<(Style, u32)> = Vec::new();
-    let mut vs: Vec<(Style, u32)> = Vec::new();
+    let role = style_of;
+    let mut ls: Vec<Style> = Vec::new();
+    let mut vs: Vec<Style> = Vec::new();
     // How far the labels stand under the rule over them, and the values over the rule under
     // them.
     let (mut a, mut b): (Vec<f32>, Vec<f32>) = (Vec::new(), Vec::new());

@@ -9,7 +9,7 @@
 
 use crate::axes::{ALL, Axes, Data, Extent, Look, Next, Shape, Sheet, Variant};
 use crate::common::label;
-use crate::draw::mark_b;
+use crate::draw::{courier, mark_b};
 use crate::shapes::{
     BLOCK_A, Built, DataFont, Geo, ROWS, Rows, THREE_ROWS, boxed_row, grids_side_by_side,
     header_grid, label_block, lone_field, overflow_rows, page, rows_page, short_value_rows,
@@ -57,6 +57,20 @@ fn address_box_row(g: &Geo, b: &mut Built, top: f32) -> f32 {
 /// and a postcode with its town in the data font: nothing shows the name to be a label, so it
 /// pairs with nothing and a loss names it; the fields beside it pair.
 fn company_box_row(g: &Geo, b: &mut Built, top: f32) -> f32 {
+    company_row(g, b, top, |g, x, y, l| label(x, y, 0.8 * g.data, l))
+}
+
+/// Task 15b part 2d item 4: [`company_box_row`] with the company name at the labels' size in
+/// Courier, another font family than the labels' (Helvetica or Times): its style is not the
+/// labels', so it pairs with nothing and a loss names it.
+fn company_in_another_font_row(g: &Geo, b: &mut Built, top: f32) -> f32 {
+    company_row(g, b, top, |g, x, y, l| courier(x, y, g.label, l))
+}
+
+/// A row of three boxed fields whose middle box holds a company name, drawn by `name`, over a
+/// street and a postcode with its town in the data font: it must not pair, a loss names it,
+/// and the fields beside it pair.
+fn company_row(g: &Geo, b: &mut Built, top: f32, name: fn(&Geo, f32, f32, &str) -> String) -> f32 {
     let h = 3.6 * g.data;
     let mut parts = Vec::new();
     for (k, l, v) in [
@@ -69,13 +83,12 @@ fn company_box_row(g: &Geo, b: &mut Built, top: f32) -> f32 {
         b.page.template += &g.hrule(x0, x1, top - h);
         b.page.template += &g.vrule(x0, top - h, top);
         b.page.template += &g.vrule(x1, top - h, top);
-        let size = if k == 20 { 0.8 * g.data } else { g.label };
-        b.page.template += &label(
-            g.col(k) + 0.3 * g.label,
-            top - 0.9 * g.label - 0.3 * g.data,
-            size,
-            l,
-        );
+        let (x, y) = (g.col(k) + 0.3 * g.label, top - 0.9 * g.label - 0.3 * g.data);
+        b.page.template += &if k == 20 {
+            name(g, x, y, l)
+        } else {
+            label(x, y, g.label, l)
+        };
         if k == 20 {
             b.values.push(l.to_string());
             b.fields.push((l, Err(())));
@@ -394,6 +407,14 @@ pub(crate) fn shapes() -> Vec<Shape> {
                 ..ALL
             },
             draw: |v| drawn(v, company_box_row, 60),
+        },
+        Shape {
+            name: "boxed fields beside a company in another font",
+            axes: Axes {
+                look: NO_RISING,
+                ..ALL
+            },
+            draw: |v| drawn(v, company_in_another_font_row, 60),
         },
         Shape {
             name: "boxed fields beside an address",

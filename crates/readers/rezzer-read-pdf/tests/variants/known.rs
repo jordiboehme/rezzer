@@ -313,7 +313,7 @@ pub(crate) const KNOWN: &[Known] = &[
         ],
         broken: &[Inv::ClearPairs],
         cause: Cause::FormEvidence,
-        why: "part 3: boxes whose bold label and plain value have one size do not pair (their loss: its label and its value differ in weight or slant only), though the box with its label alone shows the page's one label style",
+        why: "part 3: boxes whose bold label and plain value have one size do not pair (their loss: its label and its value differ in weight, slant or font only), though the box with its label alone shows the page's one label style",
     },
     Known {
         shape: "title beside a field list",

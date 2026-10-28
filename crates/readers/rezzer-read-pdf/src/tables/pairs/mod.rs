@@ -38,8 +38,8 @@ pub(super) const ADDRESS: &str = "its lines read as an address, not as a label o
 pub(super) const NAMED_ADDRESS: &str = "its lines read as an address under a name, and nothing \
      shows its first line to be a label";
 
-const WEIGHT_ONLY: &str = "its label and its value differ in weight or slant only, so which is \
-     the label is not clear";
+const WEIGHT_ONLY: &str = "its label and its value differ in weight, slant or font only, so \
+     which is the label is not clear";
 
 /// A label is at most this many characters and words, a value of a field between rules at
 /// most this many characters.
@@ -81,11 +81,13 @@ enum Parsed {
     Unsure(&'static str),
 }
 
-/// A run's style: its size in half points, bold and italic.
-type Style = (i32, bool, bool);
+/// A run's style: its size in half points, bold, italic, and its font family (see
+/// [`crate::text::family_of`]; 0 when not known). A bold or italic face of a family is that
+/// family: an address in Courier beside labels in Helvetica of one size is not in their style.
+type Style = (i32, bool, bool, u32);
 
 fn style_of(r: &Run) -> Style {
-    ((r.size * 2.0).round() as i32, r.bold, r.italic)
+    ((r.size * 2.0).round() as i32, r.bold, r.italic, r.family)
 }
 
 fn inked(r: &Run) -> bool {
@@ -218,7 +220,9 @@ fn parse(flow: &Flow, ids: &[usize], how: Reading) -> Parsed {
     }
     let apart = |label: Style, value: Style| {
         value.0 - label.0 >= 1
-            || (!how.smaller && (label.1, label.2) != (value.1, value.2) && label.0 <= value.0)
+            || (!how.smaller
+                && (label.1, label.2, label.3) != (value.1, value.2, value.3)
+                && label.0 <= value.0)
     };
     let (label, value) = (styles[0], styles[1]);
     // Lines that read as an address are no label over its value: a first line with a number
@@ -253,9 +257,9 @@ fn parse(flow: &Flow, ids: &[usize], how: Reading) -> Parsed {
             Parsed::No
         };
     }
-    // Of one size, weight or slant alone does not say which line is the label (a bold value
-    // over a regular label reads like a bold label over a regular value): only a style known
-    // as a label's does.
+    // Of one size, weight, slant or font alone does not say which line is the label (a bold
+    // value over a regular label reads like a bold label over a regular value): only a style
+    // known as a label's does.
     if label.0 == value.0 {
         if how.labels.contains(&value) {
             return Parsed::Unsure(LABEL_BELOW);

@@ -88,7 +88,7 @@ pub(crate) fn box_pairs(
         }
     }
     // The style of the text alone in an empty boxed field is a label's: boxes whose label and
-    // value differ in weight or slant only are read again knowing it.
+    // value differ in weight, slant or font only are read again knowing it.
     let mut known: Vec<Style> = fields
         .iter()
         .flatten()
