@@ -104,7 +104,7 @@ pub(super) fn borderless(
         }
         let mut end = i + 1;
         let mut last_multi = i;
-        // The widest step between two lines of the region so far.
+        // The widest step between two lines of the region so far, blank rows aside.
         let mut pitch = 0.0f32;
         while end < lines.len() && !off[end] {
             let (prev, cur) = (&lines[end - 1], &lines[end]);
@@ -121,15 +121,19 @@ pub(super) fn borderless(
                 .filter(|_| !off[end + 1])
                 .map(|n| cur.y - n.y)
                 .filter(|&g| g > 0.0 && g <= 3.0 * cur.size.max(lines[end + 1].size));
-            if let Some(next) = next
-                && pitch > 0.0
-                && gap > REGION_STEPS * pitch.max(next)
+            let blank =
+                next.is_some_and(|next| pitch > 0.0 && gap > REGION_STEPS * pitch.max(next));
+            if blank
                 && (!in_columns(flow, &lines[i..end], cur)
                     || header_line(flow, &lines[i..end], cur, &lines[end + 1]))
             {
                 break;
             }
-            pitch = pitch.max(gap);
+            // A blank row the region goes on over is no step of its rows: a gap after it is
+            // judged by the rows' own steps.
+            if !blank {
+                pitch = pitch.max(gap);
+            }
             // A header band's rule between the lines parts them.
             let cut = found.cuts.partition_point(|y| *y <= cur.y);
             if found.cuts.get(cut).is_some_and(|y| *y < prev.y) {
@@ -717,8 +721,9 @@ fn in_columns(flow: &Flow, region: &[FlowLine], line: &FlowLine) -> bool {
 /// [`HEADER_DIGITS`] digits (a year, `2025`), one with a letter, none an amount or a date; and
 /// it stands apart from the region's rows by its style (all bold over rows that mostly are
 /// not, or a size step larger than most of them, see [`crate::order::SIZE_STEP`]; a bold
-/// total row among them does not count) or by its shape (no digit, over a line with a digit,
-/// under rows that all hold one after the region's first line).
+/// total row among them does not count) or by its shape (no digit, over a line with a digit
+/// whose cells have another shape than every row of the region, see [`Shape`], under rows that
+/// all hold one after the region's first line).
 fn header_line(flow: &Flow, region: &[FlowLine], line: &FlowLine, next: &FlowLine) -> bool {
     if region.is_empty() {
         return false;
@@ -754,7 +759,21 @@ fn header_line(flow: &Flow, region: &[FlowLine], line: &FlowLine, next: &FlowLin
             .iter()
             .any(|r| r.text.chars().any(|c| c.is_ascii_digit()))
     };
-    let shaped = region.len() > 1 && !digit(line) && digit(next) && region[1..].iter().all(digit);
+    // The shapes of a line's cells, left to right: a row under the line that has the shape of
+    // the region's own rows goes on the region's table, and the line over it is one of its
+    // rows too (a note row between groups of rows), not the header of another table.
+    let shapes = |l: &FlowLine| -> Vec<Option<Shape>> {
+        pieces_of(flow, l)
+            .iter()
+            .map(|p| Shape::of(&text_of(flow, p.start, p.end)))
+            .collect()
+    };
+    let own_rows = region[1..].iter().any(|l| shapes(l) == shapes(next));
+    let shaped = region.len() > 1
+        && !digit(line)
+        && digit(next)
+        && region[1..].iter().all(digit)
+        && !own_rows;
     styled || shaped
 }
 

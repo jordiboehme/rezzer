@@ -576,6 +576,24 @@ fn rows_shape(v: &Variant, what: Rows) -> Sheet {
 /// `plain` the second header is plain, else bold with years. At 8 points times the size
 /// factor, the columns at x 40, 112 and flush right at 400 times the factor. Two tables.
 fn two_tables(v: &Variant, plain: bool) -> Sheet {
+    two_tables_or_note(v, if plain { Second::Plain } else { Second::Years })
+}
+
+/// What [`two_tables_or_note`] draws after the blank row.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Second {
+    /// A second table under a plain header.
+    Plain,
+    /// A second table under a bold header of years.
+    Years,
+    /// A note row of text over more rows of the first table's shape: one table, the note row
+    /// a body row of it.
+    Note,
+}
+
+/// [`two_tables`], or with [`Second::Note`] a note row and two more rows of the first table.
+fn two_tables_or_note(v: &Variant, second_kind: Second) -> Sheet {
+    let plain = second_kind != Second::Years;
     let k = v.k();
     let (plain_face, bold) = v.faces();
     let size = 8.0 * k;
@@ -587,12 +605,24 @@ fn two_tables(v: &Variant, plain: bool) -> Sheet {
         ["1020", "Fahrgeld", "45,67"],
         ["Summe", "", "3.195,67"],
     ];
-    let header = if plain {
-        ["Kennung", "Menge", "Wert"]
-    } else {
-        ["Vorgang", "2025", "2026"]
+    let second = match second_kind {
+        Second::Plain => [
+            ["Kennung", "Menge", "Wert"],
+            ["7001", "12", "45,67"],
+            ["7002", "3", "8,90"],
+        ],
+        Second::Years => [
+            ["Vorgang", "2025", "2026"],
+            ["7001", "12", "45,67"],
+            ["7002", "3", "8,90"],
+        ],
+        Second::Note => [
+            ["Hinweis", "siehe Anlage", "Seite"],
+            ["3000", "Bonus", "500,00"],
+            ["3010", "Praemie", "50,00"],
+        ],
     };
-    let second = [header, ["7001", "12", "45,67"], ["7002", "3", "8,90"]];
+    let note = second_kind == Second::Note;
     let (x0, x1, x2) = (40.0, 40.0 + 72.0 * k, 40.0 + 360.0 * k);
     let mid = x1 + font_width(bold, "Bezeichnung", size);
     let mut t = String::new();
@@ -610,7 +640,11 @@ fn two_tables(v: &Variant, plain: bool) -> Sheet {
     for (n, row) in second.iter().enumerate() {
         let font = if n == 0 && !plain { bold } else { plain_face };
         t += &show(font, size, x0, y, row[0]);
-        t += &right(font, size, mid, y, row[1]);
+        if note {
+            t += &show(font, size, x1, y, row[1]);
+        } else {
+            t += &right(font, size, mid, y, row[1]);
+        }
         t += &right(font, size, x2, y, row[2]);
         y -= pitch;
     }
@@ -619,12 +653,17 @@ fn two_tables(v: &Variant, plain: bool) -> Sheet {
         bottom: y + pitch,
     };
     let mut s = sheet(v, t, 420.0, Some(span));
-    s.want
-        .tables
-        .push(owned(&first.iter().map(|r| &r[..]).collect::<Vec<_>>()));
-    s.want
-        .tables
-        .push(owned(&second.iter().map(|r| &r[..]).collect::<Vec<_>>()));
+    if note {
+        let all: Vec<&[&str]> = first.iter().chain(&second).map(|r| &r[..]).collect();
+        s.want.tables.push(owned(&all));
+    } else {
+        s.want
+            .tables
+            .push(owned(&first.iter().map(|r| &r[..]).collect::<Vec<_>>()));
+        s.want
+            .tables
+            .push(owned(&second.iter().map(|r| &r[..]).collect::<Vec<_>>()));
+    }
     s
 }
 
@@ -885,6 +924,11 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "a second table under a plain header after a bold total",
             axes: DOC_NEXT,
             draw: |v| (two_tables(v, true), None),
+        },
+        Shape {
+            name: "a note row after a blank row in a table",
+            axes: DOC_NEXT,
+            draw: |v| (two_tables_or_note(v, Second::Note), None),
         },
         Shape {
             name: "a second table under a header of years after a bold total",

@@ -1950,6 +1950,59 @@ fn dashed_end_rules_part_tables_on_a_turned_page() {
     );
 }
 
+/// Task 15b part 2c re-review r1 (Minor 1): a row of text only after a blank row, over rows of
+/// the first table's own shape (`Hinweis | siehe Anlage | Seite` over `3000 | Bonus | 500,00`),
+/// is no header of a second table: it is a row of the first table or text of its own, never a
+/// table's header row. Sizes 6 to 14, both fonts.
+#[test]
+fn a_note_row_after_a_blank_row_heads_no_table() {
+    let first = [
+        ["Lohnart", "Bezeichnung", "Betrag"],
+        ["1000", "Gehalt", "3.000,00"],
+        ["1010", "Zulage", "150,00"],
+        ["1020", "Fahrgeld", "45,67"],
+    ];
+    let after = [
+        ["Hinweis", "siehe Anlage", "Seite"],
+        ["3000", "Bonus", "500,00"],
+        ["3010", "Praemie", "50,00"],
+    ];
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+        for fonts in FONTS {
+            let k = size / 9.0;
+            let pitch = 1.25 * size;
+            let mut t = String::new();
+            let mut y = 700.0;
+            for (n, row) in first.iter().chain(&after).enumerate() {
+                if n == 4 {
+                    y -= 1.2 * pitch;
+                }
+                let font = if n == 0 { fonts.1 } else { fonts.0 };
+                t += &show(font, size, 40.0, y, row[0]);
+                t += &show(font, size, 40.0 + 72.0 * k, y, row[1]);
+                let x = 40.0 + 360.0 * k - common::font_width(font, row[2], size);
+                t += &show(font, size, x, y, row[2]);
+                y -= pitch;
+            }
+            let out = common::read(&page_in(&t, Look::Plain));
+            let found = tables(&out);
+            let headed = found
+                .iter()
+                .any(|t| t.0 > 0 && t.1.first().is_some_and(|r| r[0] == "Hinweis"));
+            if headed {
+                wrong.push(format!("{size}, {fonts:?}: {found:?}"));
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
 /// Task 15b part 2b re-review (probe C) and part 2c review (Important 4, Minors 1 and 2; ruling
 /// P6-X): a second table under the first after a blank row (2.2 pitches), no rule between,
 /// whose middle column ends where the first table's middle title ends, so that its lines stand

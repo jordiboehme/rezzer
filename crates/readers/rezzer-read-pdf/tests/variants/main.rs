@@ -288,6 +288,7 @@ shape_tests! {
     close_column_titles => "close column titles",
     title_beside_a_field_list => "title beside a field list",
     address_columns_in_the_body => "address columns in the body",
+    a_note_row_after_a_blank_row => "a note row after a blank row in a table",
     a_second_table_under_a_plain_header => "a second table under a plain header after a bold total",
     a_second_table_under_a_header_of_years => "a second table under a header of years after a bold total",
     a_small_table_of_records_under_a_plain_header => "a small table of records under a plain header",
