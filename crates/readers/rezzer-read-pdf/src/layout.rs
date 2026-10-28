@@ -2527,7 +2527,8 @@ const EDGE: f32 = 1.0;
 /// paragraph is a block of short lines each of which after the first starts with a capital or
 /// a digit, none ends in a hyphen or a comma, the lines do not read as sentences, share their
 /// left edge and have the shape of an address or a list (list markers, or at most
-/// [`ADDRESS_WORDS`] words a line). How wide the block is does not matter: a long name in an
+/// [`ADDRESS_WORDS`] words a line), or the two lines are each a label and its value in the
+/// same two faces (see [`field_line`]). How wide the block is does not matter: a long name in an
 /// address is still a line of it. Prose that fills its measure keeps joining, also where
 /// every line starts with a capital.
 fn line_breaks(lines: &[Line<'_>]) -> Vec<(u32, u32)> {
@@ -2595,12 +2596,25 @@ fn line_breaks(lines: &[Line<'_>]) -> Vec<(u32, u32)> {
         let room = SHORT_ROOM * (right - left);
         let fits = a.1 + 0.25 * next.size + word + room <= right && !lines[k].text.ends_with('-');
         let aligned = set_aligned && aligned_pair(a, b);
-        if fits || aligned || short {
+        let fields = field_line(&lines[k]).is_some_and(|f| field_line(next) == Some(f));
+        if fits || aligned || short || fields {
             out.push((next.runs[0].page, next.runs[0].line));
         }
     }
     out.sort_unstable();
     out
+}
+
+/// The faces of a line that is a label and its value: the face its ink starts in and the other
+/// face it ends in (a plain label, then a bold value), each as weight, slant, family and size.
+/// Two lines one under the other that are each a label and its value in the same two faces are
+/// two fields, never one line of text going on (see [`line_breaks`]).
+fn field_line(l: &Line<'_>) -> Option<[(bool, bool, u32, i32); 2]> {
+    let face = |r: &Run| (r.bold, r.italic, r.family, (r.size * 2.0).round() as i32);
+    let mut inked = l.runs.iter().filter(|r| !r.text.trim().is_empty());
+    let first = face(inked.next()?);
+    let last = face(inked.next_back()?);
+    (first != last).then_some([first, last])
 }
 
 /// Whether the lines read as sentences: one holds a sentence end with more text after it, or

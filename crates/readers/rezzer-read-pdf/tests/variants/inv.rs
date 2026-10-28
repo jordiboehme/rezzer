@@ -199,6 +199,19 @@ fn flat(blocks: &[Block]) -> Vec<&Block> {
     out
 }
 
+/// The lines of a heading or paragraph, parted at its line breaks, white space collapsed; a
+/// table row is one line; other blocks have none here.
+fn lines_of(b: &Block) -> Vec<String> {
+    match b {
+        Block::Heading { inlines, .. } | Block::Paragraph { inlines, .. } => inlines
+            .split(|i| matches!(i, rezzer_model::Inline::LineBreak))
+            .map(|part| collapse(&plain_text(part)))
+            .collect(),
+        Block::Table { rows, .. } => cells(rows).iter().map(|r| r.join(" | ")).collect(),
+        _ => Vec::new(),
+    }
+}
+
 /// The text of a block as [`text`] writes it, white space collapsed.
 fn block_text(b: &Block) -> String {
     collapse(&text(std::slice::from_ref(b)))
@@ -369,6 +382,18 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
                     "page {p}: {a:?} and {b:?} stand in one block: {:?}",
                     block_text(bl)
                 ),
+            ));
+        }
+    }
+    for (a, b) in &want.lines_apart {
+        if let Some(l) = blocks
+            .iter()
+            .flat_map(|bl| lines_of(bl))
+            .find(|l| has_words(l, a) && has_words(l, b))
+        {
+            broken.push(Broken(
+                Inv::Cells,
+                format!("page {p}: {a:?} and {b:?} stand on one line: {l:?}"),
             ));
         }
     }

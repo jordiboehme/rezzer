@@ -446,6 +446,56 @@ const NET_TAX_GROSS_TOTALS: [TotalsRow; 2] = [
     ],
 ];
 
+/// Part 2e-1 fix round 1 (the private notice): a block of five lines at one left edge beside
+/// a letter address, each a label at 8 points times the size factor and its bold value after
+/// it, with a box around the lines `boxed` (none: no box). No line of the read holds the value
+/// of one line and the label of the next: each line is a field of its own.
+fn field_lines(v: &Variant, boxed: Option<(usize, usize)>) -> Sheet {
+    let k = v.k();
+    let (plain, bold) = v.faces();
+    let size = 8.0 * k;
+    let pitch = 1.2 * size;
+    let (x0, top) = (320.0, 640.0);
+    let lines = [
+        ("Ihr Zeichen vom", "12 Monate"),
+        ("Unser Zeichen vom", "Muster"),
+        ("Ort der", "Sitz"),
+        ("Ab", "Datum"),
+        ("Az.-Nr. Kd/Ref", "12345678 Muster GmbH"),
+    ];
+    let mut t = String::new();
+    for (n, (l, val)) in lines.iter().enumerate() {
+        let y = top - pitch * n as f32;
+        t += &show(plain, size, x0, y, l);
+        t += &show(
+            bold,
+            size,
+            x0 + font_width(plain, l, size) + 0.28 * size,
+            y,
+            val,
+        );
+    }
+    if let Some((a, b)) = boxed {
+        let y0 = top - pitch * (b as f32 - 1.0) - 0.4 * size;
+        let y1 = top - pitch * a as f32 + size;
+        t += &format!("0 0 0 RG 0.5 w {} {y0} 240 {} re S\n", x0 - 4.0, y1 - y0);
+    }
+    for (n, l) in ["Erika Mustermann", "Beispielweg 2", "54321 Beispielstadt"]
+        .iter()
+        .enumerate()
+    {
+        t += &show(plain, size, 40.0, top - pitch * n as f32, l);
+    }
+    let bottom = top - pitch * 5.0;
+    let mut s = sheet(v, t, 420.0, Some(Span { top, bottom }));
+    for w in lines.windows(2) {
+        s.want
+            .lines_apart
+            .push((w[0].1.to_string(), w[1].0.to_string()));
+    }
+    s
+}
+
 /// Part 2e-1 (items 6 and 7): line items without rules at 8 points times the size factor, a
 /// bold header `Pos`, `Zeitraum`, `Basis` and `Betrag`; with `range` the first two periods
 /// wrap after their dash (`01.10.2026 -` over `31.10.2026`) and the cell keeps the space after
@@ -1355,6 +1405,21 @@ pub(crate) fn shapes() -> Vec<Shape> {
                     None,
                 )
             },
+        },
+        Shape {
+            name: "lines of a label and its bold value",
+            axes: DOC_NEXT,
+            draw: |v| (field_lines(v, None), None),
+        },
+        Shape {
+            name: "lines of a label and its bold value, two of them boxed",
+            axes: DOC_NEXT,
+            draw: |v| (field_lines(v, Some((0, 2))), None),
+        },
+        Shape {
+            name: "lines of a label and its bold value, the middle two boxed",
+            axes: DOC_NEXT,
+            draw: |v| (field_lines(v, Some((1, 3))), None),
         },
         Shape {
             name: "line items with wrapped date ranges",

@@ -1734,6 +1734,86 @@ fn a_wrapped_item_line_without_rules_joins_its_cell_or_is_named() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// The lines of [`field_lines`]: a label in the plain face and its value in the bold one.
+const FIELD_LINES: [(&str, &str); 5] = [
+    ("Ihr Zeichen vom", "12 Monate"),
+    ("Unser Zeichen vom", "Muster"),
+    ("Ort der", "Sitz"),
+    ("Ab", "Datum"),
+    ("Az.-Nr. Kd/Ref", "12345678 Muster GmbH"),
+];
+
+/// A block of [`FIELD_LINES`] at one left edge on an even pitch beside a letter address, each a
+/// label with its bold value after it, at `size` in `fonts`; `boxed` draws a box around the
+/// lines `boxed.0..boxed.1`.
+fn field_lines(size: f32, fonts: (&str, &str), boxed: Option<(usize, usize)>) -> String {
+    let pitch = 1.2 * size;
+    let (x0, top) = (320.0, 700.0);
+    let mut t = String::new();
+    for (n, (l, v)) in FIELD_LINES.iter().enumerate() {
+        let y = top - pitch * n as f32;
+        t += &show(fonts.0, size, x0, y, l);
+        let vx = x0 + common::font_width(fonts.0, l, size) + 0.28 * size;
+        t += &show(fonts.1, size, vx, y, v);
+    }
+    if let Some((a, b)) = boxed {
+        let y0 = top - pitch * (b as f32 - 1.0) - 0.4 * size;
+        let y1 = top - pitch * a as f32 + size;
+        t += &format!(
+            "0 0 0 RG 0.5 w {} {y0} {} {} re S\n",
+            x0 - 4.0,
+            240.0,
+            y1 - y0
+        );
+    }
+    for (n, l) in ["Muster GmbH", "Musterweg 1", "12345 Musterstadt"]
+        .iter()
+        .enumerate()
+    {
+        t += &show(fonts.0, size, 40.0, top - pitch * n as f32, l);
+    }
+    t
+}
+
+/// Task 15b part 2e-1 fix round 1 (the private notice; ruling P6-X): a block of lines that are
+/// each a label and its bold value, at one left edge, with no box, in a box, and with a box
+/// around two of its lines: no two lines are ever one line of text (a field of one line read
+/// on into the next), whether the block reads as one paragraph with a break after each line or
+/// as a paragraph per line. Sizes 6 to 10 over the 7 pt body (larger lines are headings),
+/// both fonts.
+#[test]
+fn lines_of_a_label_and_its_bold_value_never_join() {
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 7.0, 8.0, 9.0, 10.0] {
+        for fonts in FONTS {
+            for boxed in [None, Some((0, 5)), Some((0, 2)), Some((1, 3)), Some((2, 4))] {
+                let out = common::read(&page_in(&field_lines(size, fonts, boxed), Look::Plain));
+                let at = format!("{size}, {fonts:?}, boxed {boxed:?}");
+                // Each line's texts as the read writes them: one per line of the block, with a
+                // line break (or a paragraph) between two lines.
+                let md = common::markdown(&out);
+                for w in FIELD_LINES.windows(2) {
+                    let joined = format!("**{}** {}", w[0].1, w[1].0);
+                    if md.contains(&joined) {
+                        wrong.push(format!("{at}: {joined:?} on one line"));
+                    }
+                }
+                for (l, v) in FIELD_LINES {
+                    if !md.contains(&format!("{l} **{v}**")) {
+                        wrong.push(format!("{at}: no line {l:?} {v:?}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
 /// Task 15b part 2e-1 (item 6, part 2b re-review r1; ruling P6-X): a table of taxes without
 /// rules, an amount alone under an amount of its column (a row of its own), then two lines of
 /// one amount each in two other columns under the last row (`5,00` under the base, `125,00`
