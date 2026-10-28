@@ -2,7 +2,7 @@
 
 Rezzer reads OpenDocument text files with their structure and the layer behind the text: annotations with replies, tracked changes, notes and fields.
 
-Status: 🗓️ planned for 0.2.0. Nothing is implemented yet.
+Status: 📝 planned. The release is not set yet. Nothing is implemented yet.
 
 File types: `.odt`. Rezzer detects the format by content, not by extension. A file named `.odt` that is not an OpenDocument file is reported as such.
 

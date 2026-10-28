@@ -31,7 +31,7 @@ One Rust binary. It runs locally as an MCP server and a CLI on macOS, Linux and 
 
 ## Status
 
-Early. The foundation is in: the pipeline, the document model, the renderer, the CLI and the MCP server. Rezzer reads plain text in any encoding, Markdown, CSV, spreadsheets (XLSX, XLSM, XLSB and ODS) and PDF today. For spreadsheets you get the values and the logic behind them: formulas, inputs, results, names and dependencies. Rezzer finds the tables, headers and titles inside a sheet, can write each row as a record and can read only the sheets you pick. For PDF you get the text in reading order with its tables, the outline, annotations at their passage, form fields with their calculations, scripts, signatures and revisions. These formats make up 0.1.0, the first release. Release 0.2.0 brings HTML, the office formats, EPUB and Atlassian Document Format. Star the repo if you want to see it rez.
+Early. The foundation is in: the pipeline, the document model, the renderer, the CLI and the MCP server. Rezzer reads plain text in any encoding, Markdown, CSV, spreadsheets (XLSX, XLSM, XLSB and ODS) and PDF today. For spreadsheets you get the values and the logic behind them: formulas, inputs, results, names and dependencies. Rezzer finds the tables, headers and titles inside a sheet, can write each row as a record and can read only the sheets you pick. For PDF you get the text in reading order with its tables, the outline, annotations at their passage, form fields with their calculations, scripts, signatures and revisions. These formats make up 0.1.0, the first release. Release 0.2.0 brings PowerPoint, EPUB, HTML and more languages. Star the repo if you want to see it rez.
 
 ## Try it
 
@@ -265,7 +265,7 @@ Label and value pairs A5:C17:
 
 Each format has its own page with what Rezzer extracts and the known limitations. The pages of the available formats also show real output and how they are tested: the test files, the hostile cases and the speed. The [format overview](docs/formats/README.md) explains each status.
 
-✅ available · 🟡 partial · 🗓️ planned for 0.2.0 · 🔭 later
+✅ available · 🟡 partial · 🗓️ planned for 0.2.0 · 📝 planned, release not set yet · 🔭 later
 
 | Format | Status | What Rezzer gets | Built on |
 |---|---|---|---|
@@ -277,16 +277,16 @@ Each format has its own page with what Rezzer extracts and the known limitations
 | [Text](docs/formats/text.md) | ✅ | Any encoding, language | [chardetng](https://crates.io/crates/chardetng), [encoding_rs](https://crates.io/crates/encoding_rs), [whatlang](https://crates.io/crates/whatlang) |
 | [Markdown](docs/formats/markdown.md) | ✅ | Structure and existing frontmatter | [pulldown-cmark](https://crates.io/crates/pulldown-cmark) |
 | [HTML](docs/formats/html.md) | 🗓️ | Main content, landmarks, tables, forms, structured data, link graph | [scraper](https://crates.io/crates/scraper), [dom_smoothie](https://crates.io/crates/dom_smoothie) |
-| [DOCX](docs/formats/docx.md) | 🗓️ | Styles as structure, comments with replies, tracked changes, footnotes, fields, content controls | own reader |
+| [DOCX](docs/formats/docx.md) | 📝 | Styles as structure, comments with replies, tracked changes, footnotes, fields, content controls | own reader |
 | [PPTX](docs/formats/pptx.md) | 🗓️ | Slides, speaker notes, comments, sections, chart data | own reader |
-| [ODT](docs/formats/odt.md) | 🗓️ | Structure, comments, tracked changes, footnotes | own reader |
-| [ODP](docs/formats/odp.md) | 🗓️ | Slides, notes, comments | own reader |
-| [DOC](docs/formats/doc.md) | 🗓️ | Text and structure from Word 97-2003 | [office_oxide](https://crates.io/crates/office_oxide), [anydoc](https://crates.io/crates/anydoc) |
-| [XLS](docs/formats/xls.md) | 🗓️ | Values and formulas from Excel 97-2003 | [calamine](https://crates.io/crates/calamine), [formualizer-parse](https://crates.io/crates/formualizer-parse) |
-| [PPT](docs/formats/ppt.md) | 🗓️ | Slides, notes and comments from PowerPoint 97-2003 | own reader, [cfb](https://crates.io/crates/cfb) |
-| [RTF](docs/formats/rtf.md) | 🗓️ | Text and structure | [anydoc](https://crates.io/crates/anydoc) |
+| [ODT](docs/formats/odt.md) | 📝 | Structure, comments, tracked changes, footnotes | own reader |
+| [ODP](docs/formats/odp.md) | 📝 | Slides, notes, comments | own reader |
+| [DOC](docs/formats/doc.md) | 📝 | Text and structure from Word 97-2003 | [office_oxide](https://crates.io/crates/office_oxide), [anydoc](https://crates.io/crates/anydoc) |
+| [XLS](docs/formats/xls.md) | 📝 | Values and formulas from Excel 97-2003 | [calamine](https://crates.io/crates/calamine), [formualizer-parse](https://crates.io/crates/formualizer-parse) |
+| [PPT](docs/formats/ppt.md) | 📝 | Slides, notes and comments from PowerPoint 97-2003 | own reader, [cfb](https://crates.io/crates/cfb) |
+| [RTF](docs/formats/rtf.md) | 📝 | Text and structure | [anydoc](https://crates.io/crates/anydoc) |
 | [EPUB](docs/formats/epub.md) | 🗓️ | Chapters, table of contents, footnotes, authors with roles, series | [rbook](https://crates.io/crates/rbook) |
-| [ADF](docs/formats/adf.md) | 🗓️ | Jira and Confluence rich text: structure, tables, code, panels, mentions, links, attachments by id | own reader |
+| [ADF](docs/formats/adf.md) | 📝 | Jira and Confluence rich text: structure, tables, code, panels, mentions, links, attachments by id | own reader |
 | [CAD and engineering](docs/formats/cad.md) | 🔭 | FreeCAD, STEP, IGES, IFC, DXF, 3MF, STL, OBJ, glTF, G-code, KiCad, Gerber, OpenSCAD: units, layers, parts lists, assembly and feature trees, parameters and what drives them, PMI, nets, print settings | own readers, [stepq](https://crates.io/crates/stepq) |
 | [PostScript, EPS](docs/formats/postscript.md) | 🔭 | Document facts from the header, text after that | own reader |
 
