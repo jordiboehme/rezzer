@@ -125,7 +125,7 @@ pub(super) fn borderless(
                 && pitch > 0.0
                 && gap > REGION_STEPS * pitch.max(next)
                 && (!in_columns(flow, &lines[i..end], cur)
-                    || header_line(flow, &lines[i..end], cur))
+                    || header_line(flow, &lines[i..end], cur, &lines[end + 1]))
             {
                 break;
             }
@@ -712,20 +712,26 @@ fn in_columns(flow: &Flow, region: &[FlowLine], line: &FlowLine) -> bool {
         })
 }
 
-/// Whether `line` has the shape of the header of a table under the lines `region`: text in
-/// every column (as many pieces as the region's fullest line), no piece a number, an amount
-/// or a date (see [`numeric`]), and a style step over the line before it: all bold under a
-/// line that is not, or a size step larger (see [`crate::order::SIZE_STEP`]).
-fn header_line(flow: &Flow, region: &[FlowLine], line: &FlowLine) -> bool {
-    let Some(prev) = region.last() else {
+/// Whether `line` has the shape of the header of a table of its own under the lines `region`,
+/// the line `next` under it: two pieces or more, each words or a whole number of at most
+/// [`HEADER_DIGITS`] digits (a year, `2025`), one with a letter, none an amount or a date; and
+/// it stands apart from the region's rows by its style (all bold over rows that mostly are
+/// not, or a size step larger than most of them, see [`crate::order::SIZE_STEP`]; a bold
+/// total row among them does not count) or by its shape (no digit, over a line with a digit,
+/// under rows that all hold one after the region's first line).
+fn header_line(flow: &Flow, region: &[FlowLine], line: &FlowLine, next: &FlowLine) -> bool {
+    if region.is_empty() {
         return false;
-    };
+    }
     let own = pieces_of(flow, line);
-    let fullest = region
-        .iter()
-        .map(|l| piece_count(flow, l))
-        .max()
-        .unwrap_or(0);
+    let texts: Vec<String> = own.iter().map(|p| text_of(flow, p.start, p.end)).collect();
+    let year = |t: &str| t.len() <= HEADER_DIGITS && t.chars().all(|c| c.is_ascii_digit());
+    let cells = own.len() >= 2
+        && texts.iter().any(|t| t.chars().any(char::is_alphabetic))
+        && texts.iter().all(|t| year(t) || !numeric(t));
+    if !cells {
+        return false;
+    }
     let inked = |l: &FlowLine| {
         flow.runs[l.start..l.end]
             .iter()
@@ -737,11 +743,23 @@ fn header_line(flow: &Flow, region: &[FlowLine], line: &FlowLine) -> bool {
         !rs.is_empty() && rs.iter().all(|r| r.bold)
     };
     let size = |l: &FlowLine| inked(l).iter().map(|r| r.size).fold(0.0f32, f32::max);
-    let stepped = (bold(line) && !bold(prev)) || size(line) >= crate::order::SIZE_STEP * size(prev);
-    own.len() >= 2.max(fullest)
-        && own.iter().all(|p| !numeric(&text_of(flow, p.start, p.end)))
-        && stepped
+    // The rows' style: what most of them have.
+    let body_bold = 2 * region.iter().filter(|l| bold(l)).count() > region.len();
+    let mut sizes: Vec<f32> = region.iter().map(size).collect();
+    sizes.sort_by(f32::total_cmp);
+    let body_size = sizes[sizes.len() / 2];
+    let styled = (bold(line) && !body_bold) || size(line) >= crate::order::SIZE_STEP * body_size;
+    let digit = |l: &FlowLine| {
+        flow.runs[l.start..l.end]
+            .iter()
+            .any(|r| r.text.chars().any(|c| c.is_ascii_digit()))
+    };
+    let shaped = region.len() > 1 && !digit(line) && digit(next) && region[1..].iter().all(digit);
+    styled || shaped
 }
+
+/// A header cell may be a whole number of at most this many digits (a year).
+const HEADER_DIGITS: usize = 4;
 
 /// Whether `text` is an amount: a number (see [`Shape::Number`]) with a decimal part of two
 /// digits (`20,00`, `1.000,00`, `12,50 EUR`). Whole numbers, rates and dates are none.

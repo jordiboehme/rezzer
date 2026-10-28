@@ -1950,11 +1950,13 @@ fn dashed_end_rules_part_tables_on_a_turned_page() {
     );
 }
 
-/// Task 15b part 2b re-review (probe C, ruling P6-X): a second table under the first after a
-/// blank row (2.2 pitches), no rule between, whose middle column ends where the first table's
-/// middle title ends, so that its lines stand in the first table's columns: its bold header
-/// line (no amounts, text in every column, bold under plain rows) starts a table of its own,
-/// and no header becomes a row of the first. Sizes 6 to 14 in both fonts.
+/// Task 15b part 2b re-review (probe C) and part 2c review (Important 4, Minors 1 and 2; ruling
+/// P6-X): a second table under the first after a blank row (2.2 pitches), no rule between,
+/// whose middle column ends where the first table's middle title ends, so that its lines stand
+/// in the first table's columns: its header line starts a table of its own, and no header
+/// becomes a row of the first, whether the header is bold, plain, a size step larger, bold
+/// after a bold total row, holds years, or has two cells over two columns. Sizes 6 to 14 in
+/// both fonts.
 #[test]
 fn a_header_after_a_blank_row_starts_a_table_of_its_own() {
     let first = [
@@ -1963,46 +1965,83 @@ fn a_header_after_a_blank_row_starts_a_table_of_its_own() {
         ["1010", "Zulage", "150,00"],
         ["1020", "Fahrgeld", "45,67"],
     ];
-    let second = [
-        ["Kennung", "Menge", "Wert"],
-        ["7001", "12", "45,67"],
-        ["7002", "3", "8,90"],
+    let body = [["7001", "12", "45,67"], ["7002", "3", "8,90"]];
+    // A name, whether the header is bold, its size factor, a bold total row before the gap,
+    // the header cells (an empty middle cell: two columns).
+    let cases: [(&str, bool, f32, bool, [&str; 3]); 6] = [
+        ("bold", true, 1.0, false, ["Kennung", "Menge", "Wert"]),
+        ("plain", false, 1.0, false, ["Kennung", "Menge", "Wert"]),
+        ("larger", false, 1.15, false, ["Kennung", "Menge", "Wert"]),
+        (
+            "after a bold total",
+            true,
+            1.0,
+            true,
+            ["Kennung", "Menge", "Wert"],
+        ),
+        ("years", true, 1.0, false, ["Bezeichnung", "2025", "2026"]),
+        ("two columns", true, 1.0, false, ["Kennung", "", "Wert"]),
     ];
     let mut wrong = Vec::new();
     for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
         for fonts in FONTS {
-            let k = size / 9.0;
-            let pitch = 1.25 * size;
-            let right = |font: &str, x: f32, y: f32, t: &str| {
-                show(font, size, x - common::font_width(font, t, size), y, t)
-            };
-            let mut t = String::new();
-            let mut y = 700.0;
-            for (n, row) in first.iter().enumerate() {
-                let font = if n == 0 { fonts.1 } else { fonts.0 };
-                t += &show(font, size, 40.0, y, row[0]);
-                t += &show(font, size, 40.0 + 72.0 * k, y, row[1]);
-                t += &right(font, 40.0 + 360.0 * k, y, row[2]);
-                y -= pitch;
-            }
-            y -= 1.2 * pitch;
-            let mid = 40.0 + 72.0 * k + common::font_width(fonts.1, "Bezeichnung", size);
-            for (n, row) in second.iter().enumerate() {
-                let font = if n == 0 { fonts.1 } else { fonts.0 };
-                t += &show(font, size, 40.0, y, row[0]);
-                t += &right(font, mid, y, row[1]);
-                t += &right(font, 40.0 + 360.0 * k, y, row[2]);
-                y -= pitch;
-            }
-            let out = common::read(&page_in(&t, Look::Plain));
-            let found = tables(&out);
-            for want in [&first[..], &second[..]] {
-                let want: Vec<Vec<String>> = want
-                    .iter()
-                    .map(|r| r.iter().map(|c| (*c).to_string()).collect())
-                    .collect();
-                if !found.iter().any(|t| t.1 == want) {
-                    wrong.push(format!("{size}, {fonts:?}: no table {want:?} in {found:?}"));
+            for (name, bold, step, total, header) in cases {
+                let k = size / 9.0;
+                let pitch = 1.25 * size;
+                let right = |font: &str, size: f32, x: f32, y: f32, t: &str| {
+                    show(font, size, x - common::font_width(font, t, size), y, t)
+                };
+                let mut t = String::new();
+                let mut y = 700.0;
+                let mut want_first: Vec<Vec<String>> = Vec::new();
+                for (n, row) in first.iter().enumerate() {
+                    let font = if n == 0 { fonts.1 } else { fonts.0 };
+                    t += &show(font, size, 40.0, y, row[0]);
+                    t += &show(font, size, 40.0 + 72.0 * k, y, row[1]);
+                    t += &right(font, size, 40.0 + 360.0 * k, y, row[2]);
+                    want_first.push(row.iter().map(|c| (*c).to_string()).collect());
+                    y -= pitch;
+                }
+                if total {
+                    t += &show(fonts.1, size, 40.0, y, "Summe");
+                    t += &right(fonts.1, size, 40.0 + 360.0 * k, y, "3.195,67");
+                    want_first.push(vec!["Summe".into(), String::new(), "3.195,67".into()]);
+                    y -= pitch;
+                }
+                y -= 1.2 * pitch;
+                let mid = 40.0 + 72.0 * k + common::font_width(fonts.1, "Bezeichnung", size);
+                let hf = if bold { fonts.1 } else { fonts.0 };
+                let hs = step * size;
+                t += &show(hf, hs, 40.0, y, header[0]);
+                if !header[1].is_empty() {
+                    t += &right(hf, hs, mid, y, header[1]);
+                }
+                t += &right(hf, hs, 40.0 + 360.0 * k, y, header[2]);
+                let two = header[1].is_empty();
+                let cells = |r: [&str; 3]| -> Vec<String> {
+                    r.iter()
+                        .filter(|c| !two || !c.is_empty())
+                        .map(|c| (*c).to_string())
+                        .collect()
+                };
+                let mut want_second = vec![cells(header)];
+                for row in body {
+                    y -= pitch;
+                    t += &show(fonts.0, size, 40.0, y, row[0]);
+                    if !two {
+                        t += &right(fonts.0, size, mid, y, row[1]);
+                    }
+                    t += &right(fonts.0, size, 40.0 + 360.0 * k, y, row[2]);
+                    want_second.push(cells(if two { [row[0], "", row[2]] } else { row }));
+                }
+                let out = common::read(&page_in(&t, Look::Plain));
+                let found = tables(&out);
+                for want in [&want_first, &want_second] {
+                    if !found.iter().any(|t| t.1 == *want) {
+                        wrong.push(format!(
+                            "{name}, {size}, {fonts:?}: no table {want:?} in {found:?}"
+                        ));
+                    }
                 }
             }
         }

@@ -562,6 +562,63 @@ fn rows_shape(v: &Variant, what: Rows) -> Sheet {
     s
 }
 
+/// Task 15b part 2c review (Important 4, Minor 1): line items over a bold total, a blank row,
+/// then a second table whose middle column ends where the first one's middle title ends. With
+/// `plain` the second header is plain, else bold with years. At 8 points times the size
+/// factor, the columns at x 40, 112 and flush right at 400 times the factor. Two tables.
+fn two_tables(v: &Variant, plain: bool) -> Sheet {
+    let k = v.k();
+    let (plain_face, bold) = v.faces();
+    let size = 8.0 * k;
+    let pitch = 1.25 * size;
+    let first: [[&str; 3]; 5] = [
+        ["Lohnart", "Bezeichnung", "Betrag"],
+        ["1000", "Gehalt", "3.000,00"],
+        ["1010", "Zulage", "150,00"],
+        ["1020", "Fahrgeld", "45,67"],
+        ["Summe", "", "3.195,67"],
+    ];
+    let header = if plain {
+        ["Kennung", "Menge", "Wert"]
+    } else {
+        ["Vorgang", "2025", "2026"]
+    };
+    let second = [header, ["7001", "12", "45,67"], ["7002", "3", "8,90"]];
+    let (x0, x1, x2) = (40.0, 40.0 + 72.0 * k, 40.0 + 360.0 * k);
+    let mid = x1 + font_width(bold, "Bezeichnung", size);
+    let mut t = String::new();
+    let mut y = 650.0;
+    for (n, row) in first.iter().enumerate() {
+        let font = if n == 0 || n == 4 { bold } else { plain_face };
+        t += &show(font, size, x0, y, row[0]);
+        if !row[1].is_empty() {
+            t += &show(font, size, x1, y, row[1]);
+        }
+        t += &right(font, size, x2, y, row[2]);
+        y -= pitch;
+    }
+    y -= 1.2 * pitch;
+    for (n, row) in second.iter().enumerate() {
+        let font = if n == 0 && !plain { bold } else { plain_face };
+        t += &show(font, size, x0, y, row[0]);
+        t += &right(font, size, mid, y, row[1]);
+        t += &right(font, size, x2, y, row[2]);
+        y -= pitch;
+    }
+    let span = Span {
+        top: 650.0,
+        bottom: y + pitch,
+    };
+    let mut s = sheet(v, t, 420.0, Some(span));
+    s.want
+        .tables
+        .push(owned(&first.iter().map(|r| &r[..]).collect::<Vec<_>>()));
+    s.want
+        .tables
+        .push(owned(&second.iter().map(|r| &r[..]).collect::<Vec<_>>()));
+    s
+}
+
 /// The lines of the prose of [`prose_beside`].
 const PROSE: [&str; 6] = [
     "Die Messung zeigt einen klaren Anstieg der Werte im",
@@ -814,6 +871,16 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "blocks side by side under their headings",
             axes: DOC_NEXT,
             draw: |v| (rows_shape(v, Rows::Headed), None),
+        },
+        Shape {
+            name: "a second table under a plain header after a bold total",
+            axes: DOC_NEXT,
+            draw: |v| (two_tables(v, true), None),
+        },
+        Shape {
+            name: "a second table under a header of years after a bold total",
+            axes: DOC_NEXT,
+            draw: |v| (two_tables(v, false), None),
         },
         Shape {
             name: "a heading over a rule on a prose page",
