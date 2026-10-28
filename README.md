@@ -31,7 +31,7 @@ One Rust binary. It runs locally as an MCP server and a CLI on macOS, Linux and 
 
 ## Status
 
-Early. The foundation is in: the pipeline, the document model, the renderer, the CLI and the MCP server. Rezzer reads plain text in any encoding, Markdown, CSV, spreadsheets (XLSX, XLSM, XLSB and ODS) and PDF today. For spreadsheets you get the values and the logic behind them: formulas, inputs, results, names and dependencies. Rezzer finds the tables, headers and titles inside a sheet, can write each row as a record and can read only the sheets you pick. For PDF you get the text in reading order with its tables, the outline, annotations at their passage, form fields with their calculations, scripts, signatures and revisions. These formats make up 0.1.0, the first release. Release 0.2.0 brings PowerPoint, EPUB, HTML and more languages. Star the repo if you want to see it rez.
+Early. The foundation is in: the pipeline, the document model, the renderer, the CLI and the MCP server. Rezzer reads plain text in any encoding, Markdown, CSV, spreadsheets (XLSX, XLSM, XLSB and ODS) and PDF today. For spreadsheets you get the values and the logic behind them: formulas, inputs, results, names and dependencies. Rezzer finds the tables, headers and titles inside a sheet, can write each row as a record and can read only the sheets you pick. For PDF you get the text in reading order with its tables, the outline, annotations at their passage, form fields with their calculations, scripts, signatures and revisions. These formats make up 0.1.0, the first release. Release 0.2.0 brings PowerPoint, EPUB and HTML. It also reads dates and titles in more languages. Star the repo if you want to see it rez.
 
 ## Try it
 
@@ -265,7 +265,7 @@ Label and value pairs A5:C17:
 
 Each format has its own page with what Rezzer extracts and the known limitations. The pages of the available formats also show real output and how they are tested: the test files, the hostile cases and the speed. The [format overview](docs/formats/README.md) explains each status.
 
-✅ available · 🟡 partial · 🗓️ planned for 0.2.0 · 📝 planned, release not set yet · 🔭 later
+✅ available · 🟡 partial · 🗓️ planned for 0.2.0 · 📝 planned, release not set yet (it may still be 0.2.0) · 🔭 later, after 0.2.0
 
 | Format | Status | What Rezzer gets | Built on |
 |---|---|---|---|

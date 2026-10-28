@@ -12,6 +12,8 @@ One page per format: what Rezzer gets out of it, which crates it builds on, how 
 | 📝 Planned | Planned, but the release is not set yet. Nothing is implemented yet. The page describes what is planned |
 | 🔭 Later | Planned for a release after 0.2.0. Nothing is implemented yet |
 
+📝 Planned and 🔭 Later both have no release yet. A 📝 format may still come in 0.2.0. A 🔭 format comes after 0.2.0.
+
 Release 0.2.0 brings PowerPoint (PPTX) first, then EPUB, then HTML. With it, Rezzer also reads dates and titles in more languages.
 
 ## All formats
