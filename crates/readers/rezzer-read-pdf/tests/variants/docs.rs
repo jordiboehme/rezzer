@@ -778,6 +778,71 @@ fn justified_pair(v: &Variant) -> Sheet {
     s
 }
 
+/// `text` in `font` at `size` wrapped greedily to `measure` points: its lines.
+fn wrapped(text: &str, font: &str, size: f32, measure: f32) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for w in text.split_whitespace() {
+        let cand = if cur.is_empty() {
+            w.to_string()
+        } else {
+            format!("{cur} {w}")
+        };
+        if cur.is_empty() || font_width(font, &cand, size) <= measure {
+            cur = cand;
+        } else {
+            lines.push(std::mem::replace(&mut cur, w.to_string()));
+        }
+    }
+    lines.push(cur);
+    lines
+}
+
+/// Part 2e-4 (item 8): prose of two sentences right over, and right under, a column of field
+/// lines in its face, at its pitch and left edge (`line_breaks` takes evidence from the lines
+/// over and under a block): the prose goes on line by line, the field lines keep their breaks,
+/// and no field line goes on the prose.
+fn prose_by_fields(v: &Variant, under: bool) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let size = 8.0 * k;
+    let top = 640.0;
+    let fields = [
+        "Kunde Muster GmbH",
+        "Projekt 4711 Musterstadt",
+        "Lieferdatum 01.10.2026",
+    ];
+    let text = "Die Muster GmbH liefert die bestellte Ware innerhalb von zehn Werktagen an die \
+                genannte Anschrift. Bitte pruefen Sie die Lieferung bei Erhalt und melden Sie \
+                Schaeden sofort.";
+    let prose = wrapped(text, plain, size, 30.0 * size);
+    let mut all: Vec<String> = Vec::new();
+    if under {
+        all.extend(fields.iter().map(|f| f.to_string()));
+        all.extend(prose.iter().cloned());
+    } else {
+        all.extend(prose.iter().cloned());
+        all.extend(fields.iter().map(|f| f.to_string()));
+    }
+    let mut t = String::new();
+    for (n, l) in all.iter().enumerate() {
+        t += &show(plain, size, 40.0, top - 1.2 * size * n as f32, l);
+    }
+    let bottom = top - 1.2 * size * (all.len() as f32 - 1.0);
+    let mut s = sheet(v, t, 420.0, Some(Span { top, bottom }));
+    for w in all.windows(2) {
+        let field = fields.contains(&w[0].as_str()) || fields.contains(&w[1].as_str());
+        let a = w[0].rsplit(' ').next().unwrap_or("").to_string();
+        let b = w[1].split(' ').next().unwrap_or("").to_string();
+        if field {
+            s.want.lines_apart.push((w[0].clone(), w[1].clone()));
+        } else {
+            s.want.lines_joined.push((a, b));
+        }
+    }
+    s
+}
+
 /// Part 2e-4 (item 2): a paragraph without a stop set full (justified) in a column of 14 ems,
 /// three words or so a line, its word gaps wide enough to part the words into pieces: prose, no
 /// table of three columns; each line goes on in the next.
@@ -2139,6 +2204,16 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "two lines of three words set full",
             axes: DOC,
             draw: |v| (justified_pair(v), None),
+        },
+        Shape {
+            name: "prose right under a column of field lines",
+            axes: DOC,
+            draw: |v| (prose_by_fields(v, true), None),
+        },
+        Shape {
+            name: "prose right over a column of field lines",
+            axes: DOC,
+            draw: |v| (prose_by_fields(v, false), None),
         },
         Shape {
             name: "a paragraph without a stop set full in a narrow column",

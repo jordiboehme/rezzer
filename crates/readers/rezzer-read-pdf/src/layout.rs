@@ -2779,7 +2779,8 @@ fn line_breaks(all: &[Line<'_>], i: usize, j: usize) -> Vec<(u32, u32)> {
     let set_aligned = (pairs >= 2 && 2 * pairs >= edges.len() - 1) || centred_pair;
     let items = block_listed(lines);
     let wraps = wraps(lines, &edges);
-    let mut out = Vec::new();
+    // Whether a line break stands before each line.
+    let mut broken = vec![false; lines.len()];
     for k in 0..lines.len() - 1 {
         let (a, b) = (edges[k], edges[k + 1]);
         let next = &lines[k + 1];
@@ -2791,10 +2792,23 @@ fn line_breaks(all: &[Line<'_>], i: usize, j: usize) -> Vec<(u32, u32)> {
         let fits = a.1 + 0.25 * next.size + word + room <= right && !word_cut(&lines[k].text);
         let aligned = set_aligned && aligned_pair(a, b);
         let apart = !wraps[k] || !around[i - lo + k];
-        if fits || aligned || short || apart || lines_apart(lines, k + 1, items) {
-            out.push((next.runs[0].page, next.runs[0].line));
+        broken[k + 1] = fits || aligned || short || apart || lines_apart(lines, k + 1, items);
+    }
+    // A line of words after the end of a sentence that ends no sentence and stands on a line of
+    // its own (a break after it, before a line of the block) is no text the sentence before goes
+    // on in: a field line under prose (`Schaeden sofort.` over `Kunde Muster GmbH`). A line of
+    // punctuation alone (a dash that ends a verse) still ends the line before.
+    let stop = |l: &Line<'_>| l.text.ends_with(['.', '!', '?']);
+    let words = |l: &Line<'_>| l.text.chars().any(char::is_alphanumeric);
+    for k in 1..lines.len().saturating_sub(1) {
+        if stop(&lines[k - 1]) && !stop(&lines[k]) && words(&lines[k]) && broken[k + 1] {
+            broken[k] = true;
         }
     }
+    let mut out: Vec<(u32, u32)> = (1..lines.len())
+        .filter(|&k| broken[k])
+        .map(|k| (lines[k].runs[0].page, lines[k].runs[0].line))
+        .collect();
     out.sort_unstable();
     out
 }

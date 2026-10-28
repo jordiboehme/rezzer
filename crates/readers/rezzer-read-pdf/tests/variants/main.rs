@@ -335,6 +335,8 @@ shape_tests! {
     a_value_that_touches_its_label => "a value that touches its label",
     prose_with_a_number_at_a_line_end => "prose with a number at a line end",
     two_lines_of_three_words_set_full => "two lines of three words set full",
+    prose_right_under_field_lines => "prose right under a column of field lines",
+    prose_right_over_field_lines => "prose right over a column of field lines",
     a_paragraph_set_full_in_a_narrow_column => "a paragraph without a stop set full in a narrow column",
     line_items_with_a_hanging_credit_minus => "line items with a hanging credit minus over a total",
     line_items_with_a_deduction_under_an_amount => "line items with a deduction with a minus under an amount",

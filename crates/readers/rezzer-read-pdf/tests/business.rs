@@ -2644,6 +2644,68 @@ fn paragraphs_set_full_in_a_narrow_column_are_no_tables() {
     );
 }
 
+/// Task 15b part 2e-4 (item 8): `line_breaks` takes evidence from up to two lines over and
+/// under a block (the column it stands in). Prose of sentences set right under, or right over,
+/// a column of field lines in its face, at its pitch and left edge, still goes on line by line,
+/// and the field lines keep their breaks. Prose under field lines held at 98c7309 (a guard);
+/// over them, the first field line went on the prose's last sentence (`sofort. Kunde`) at some
+/// measures: a line after a sentence end that ends no sentence and stands on a line of its own
+/// is a line of its own. Sizes 6 to 14, Helvetica and Times, measures of 30 and 40 ems.
+#[test]
+fn prose_beside_field_lines_in_one_column_still_joins() {
+    let fields = [
+        "Kunde Muster GmbH",
+        "Projekt 4711 Musterstadt",
+        "Lieferdatum 01.10.2026",
+    ];
+    let text = "Die Muster GmbH liefert die bestellte Ware innerhalb von zehn Werktagen an die \
+                genannte Anschrift. Bitte pruefen Sie die Lieferung bei Erhalt und melden Sie \
+                Schaeden sofort.";
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0] {
+        for font in ["FL", "FT"] {
+            for ems in [30.0f32, 40.0] {
+                for under in [true, false] {
+                    let (lines, _) = set_prose(text, font, size, ems * size, false);
+                    let mut all: Vec<&str> = Vec::new();
+                    if under {
+                        all.extend(fields);
+                        all.extend(lines.iter().map(String::as_str));
+                    } else {
+                        all.extend(lines.iter().map(String::as_str));
+                        all.extend(fields);
+                    }
+                    let mut t = String::new();
+                    for (k, l) in all.iter().enumerate() {
+                        t += &show(font, size, 50.0, 700.0 - 1.2 * size * k as f32, l);
+                    }
+                    let md = common::markdown(&common::read(&page_in(&t, Look::Plain)))
+                        .replace('\\', "");
+                    let at = format!("{size}, {font}, {ems} ems, prose under {under}");
+                    if !md.contains(text) {
+                        wrong.push(format!("{at}: the prose does not go on"));
+                    }
+                    // The field lines, and the field line next to the prose, keep their breaks.
+                    for w in all.windows(2) {
+                        let field = fields.contains(&w[0]) || fields.contains(&w[1]);
+                        let a = w[0].rsplit(' ').next().unwrap_or("");
+                        let b = w[1].split(' ').next().unwrap_or("");
+                        if field && md.contains(&format!("{a} {b}")) {
+                            wrong.push(format!("{at}: {a} {b} joined"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
 /// Task 15b part 2e-2 fix round 1 (C2; ruling P6-X): two lines of three words set full in a
 /// narrow column (12 to 18 ems), the second with a digit (`Unsere Lieferung erfolgt` over `in 2
 /// Teilen.`), are prose: no table makes the first line a header over the second. Sizes 6 to
