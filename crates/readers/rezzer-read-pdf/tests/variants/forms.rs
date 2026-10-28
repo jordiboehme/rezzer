@@ -195,17 +195,18 @@ fn open_strip(
     top: f32,
     middle: fn(&Geo, &mut Built, f32, f32) -> bool,
 ) -> f32 {
-    open_strip_at(g, b, top, middle, 20)
+    open_strip_at(g, b, top, middle, 20, 1.0)
 }
 
 /// [`open_strip`] with the middle field in data column `at` (0, 20 or 40) and the two fields
-/// in the other two.
+/// in the other two, the label of the first of them `first` times the labels' size.
 fn open_strip_at(
     g: &Geo,
     b: &mut Built,
     top: f32,
     middle: fn(&Geo, &mut Built, f32, f32) -> bool,
     at: usize,
+    first: f32,
 ) -> f32 {
     let h = 3.6 * g.data;
     let (x0, x1) = (g.col(0) - 0.12, g.col(60) - 0.12);
@@ -213,11 +214,12 @@ fn open_strip_at(
     b.page.template += &g.hrule(x0, x1, top - h);
     let fields: Vec<usize> = [0usize, 20, 40].into_iter().filter(|&k| k != at).collect();
     let named = [("Personalnummer", "00000"), ("Eintritt", "01.01.2020")];
-    for (&k, (l, _)) in fields.iter().zip(named) {
+    for (n, (&k, (l, _))) in fields.iter().zip(named).enumerate() {
+        let size = if n == 0 { first * g.label } else { g.label };
         b.page.template += &label(
             g.col(k) + 0.3 * g.label,
             top - 0.9 * g.label - 0.3 * g.data,
-            g.label,
+            size,
             l,
         );
     }
@@ -711,7 +713,21 @@ pub(crate) fn shapes() -> Vec<Shape> {
             draw: |v| {
                 open_strip_shape(
                     v,
-                    |g, b, t| open_strip_at(g, b, t, smaller_name, 0),
+                    |g, b, t| open_strip_at(g, b, t, smaller_name, 0, 1.0),
+                    &SMALLER_NAME,
+                )
+            },
+        },
+        Shape {
+            name: "a strip of a smaller label beside a smaller name over its address",
+            axes: Axes {
+                look: NO_RISING,
+                ..ALL
+            },
+            draw: |v| {
+                open_strip_shape(
+                    v,
+                    |g, b, t| open_strip_at(g, b, t, smaller_name, 20, 0.9),
                     &SMALLER_NAME,
                 )
             },

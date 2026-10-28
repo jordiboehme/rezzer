@@ -114,33 +114,6 @@ pub(crate) fn box_pairs(
         }
         unsure.retain(|u| !u.1.is_empty());
     }
-    // A name over an address in a box is a label when it has the label style of the fields
-    // of other boxes.
-    if unsure.iter().any(|u| u.1 == NAMED_ADDRESS) {
-        let mut styles: Vec<Style> = fields
-            .iter()
-            .flatten()
-            .filter_map(|f| f.label.first().map(|&i| style_of(&flow.runs[i])))
-            .collect();
-        styles.sort_unstable();
-        styles.dedup();
-        let with_labels = Reading {
-            labels: &styles,
-            ..how
-        };
-        for (b, why) in &mut unsure {
-            if *why != NAMED_ADDRESS {
-                continue;
-            }
-            if let Parsed::Fields(mut f) = parse(flow, &in_box[*b], with_labels)
-                && f.len() == 1
-            {
-                fields[*b] = f.pop();
-                *why = "";
-            }
-        }
-        unsure.retain(|u| !u.1.is_empty());
-    }
     // How near two boxes touch: by the size of their smallest text (see [`TOUCH`]).
     let touch: Vec<f32> = in_box
         .iter()

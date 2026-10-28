@@ -224,13 +224,15 @@ fn a_name_over_an_address_pairs_only_on_evidence() {
 /// Task 15b part 2c review (Important 2 and 3, concern 4; ruling P6-X): a field cell whose lines
 /// are an address, between `Name` over `Muster` and `Nr` over `4711`, is left out of its row and
 /// a loss says so; the two other fields still pair. An address whose first line holds a number
-/// (a street, a PO box, a postcode over the country, `c/o`) is no pair at any size step; a first
-/// line without one over address lines (a name, a company, the label `Anschrift`) pairs as a
-/// label in the label style of the fields beside it (concern 3 ruling). Steps 1.0625 to 1.25,
-/// sizes 6 to 14, both fonts.
+/// (a street, a PO box, a postcode over the country, `c/o`) is no pair at any size step; nor is
+/// a first line without one over address lines (a name, a company, the label `Anschrift`), even
+/// in the label style of the fields beside it: only a colon shows it to be a label (Task 15b part
+/// 2d fix round 2, ruling on I1, which ends the label-style half of the concern 3 ruling). Steps
+/// 1.0625 to 1.25, sizes 6 to 14, both fonts.
 #[test]
 fn an_address_cell_is_left_out_of_its_row_and_said() {
-    // The first line, the lines under it, and whether it is an address by its number.
+    // The first line, the lines under it, and whether it is an address by its number (each is
+    // left out either way).
     let cases: [(&str, &[&str], bool); 12] = [
         ("Musterweg 1", &["12345 Musterstadt"], true),
         ("Musterweg 1", &["12345 Musterstadt", "Deutschland"], true),
@@ -258,7 +260,8 @@ fn an_address_cell_is_left_out_of_its_row_and_said() {
         for step in [1.0625f32, 1.08, 1.125, 1.25] {
             for font in ["F1", "F3"] {
                 for (first, rest, numbered) in cases {
-                    let at = format!("{first:?} {size} pt x {step}, {font}");
+                    let kind = if numbered { "numbered" } else { "named" };
+                    let at = format!("{first:?} ({kind}) {size} pt x {step}, {font}");
                     let out = cell_between(first, rest, size, step, font);
                     let rows: Vec<String> = read_tables(&out)
                         .iter()
@@ -270,22 +273,14 @@ fn an_address_cell_is_left_out_of_its_row_and_said() {
                             wrong.push(format!("{at}: no {want} in {rows:?}"));
                         }
                     }
-                    let address = numbered;
                     let paired = rows.iter().any(|r| r.contains(first));
                     let said = out
                         .document
                         .losses
                         .iter()
                         .any(|l| l.what.contains("read as an address"));
-                    if address && (paired || !said) {
+                    if paired || !said {
                         wrong.push(format!("{at}: paired {paired}, said {said}: {rows:?}"));
-                    }
-                    if !address
-                        && !rows
-                            .iter()
-                            .any(|r| *r == format!("{first}: {}", rest.join(" ")))
-                    {
-                        wrong.push(format!("{at}: the label does not pair: {rows:?}"));
                     }
                     let mut order = vec![first];
                     order.extend(rest.iter().copied());
@@ -473,7 +468,7 @@ pub(crate) fn three_cells_wrong(out: &ReadOutcome, m: Middle, want: Want) -> Vec
 
 /// The middle cells of the matrix tests below: a name or a label over an address, its first
 /// line at `size` times the labels' size in `font` (none: the labels' font), and how it reads
-/// (it pairs when a colon ends it or it has the labels' style and font).
+/// (a name over an address pairs only when a colon ends it).
 pub(crate) type Case = (
     &'static str,
     &'static [&'static str],
@@ -518,7 +513,9 @@ pub(crate) fn middle_matrix(cases: &[Case], hows: &[Cells]) -> Vec<String> {
 
 /// Task 15b part 2d item 4 (ruling P6-X): the font family is part of a label's style. A name
 /// over an address at the labels' size in another family than the labels beside it is no
-/// label: it pairs with nothing and a loss names it; in the labels' own family it pairs. Boxes in a row and in a column, and a strip between two rules.
+/// label: it pairs with nothing and a loss names it. Since fix round 2 (ruling on I1) the same
+/// holds in the labels' own family: only a colon makes such a name a label. Boxes in a row and
+/// in a column, and a strip between two rules.
 #[test]
 fn a_name_in_another_font_family_is_no_label() {
     let cases: [Case; 3] = [
@@ -544,7 +541,7 @@ fn a_name_in_another_font_family_is_no_label() {
             ADDR,
             1.0,
             None,
-            Want::Pair,
+            Want::Said,
         ),
     ];
     let wrong = middle_matrix(&cases, &[Cells::Row, Cells::Column, Cells::Strip]);
@@ -656,8 +653,9 @@ fn a_box_at_the_value_size_is_left_out_of_its_row_and_said() {
 /// Task 15b part 2d item 3 (ruling P6-X): a strip of three fields between two rules with no
 /// rule between them, its middle cell's first line a little smaller than the labels beside
 /// it, at the values' size, or a bold title: the cells are read apart, never line by line
-/// across them; `Name: Beispiel` and `Nr: 4711` pair; the middle cell pairs only on a colon or
-/// the labels' style, a title is in no pair, and else a loss names it.
+/// across them; `Name: Beispiel` and `Nr: 4711` pair; a name over an address pairs only on a
+/// colon (fix round 2, ruling on I1), a label over a value by its size, a title is in no pair,
+/// and else a loss names it.
 #[test]
 fn a_strip_without_dividers_reads_its_cells_apart() {
     let cases: [Case; 11] = [
@@ -724,7 +722,7 @@ fn a_strip_without_dividers_reads_its_cells_apart() {
             ADDR,
             1.0,
             None,
-            Want::Pair,
+            Want::Said,
         ),
         (
             "name at value size",
@@ -786,7 +784,8 @@ pub(crate) fn open_strip_of(cells: &[StripCell], size: f32, step: f32, font: &st
 /// over its lines) or a loss names it; the cells marked to pair do; no block that is no table
 /// holds words of two cells. Fix round 1 (rulings on concerns 1 and 3): one field beside the
 /// name pairs only when a colon ends its label, else it is refused, and the refused strip reads
-/// cell by cell. Sizes 6 to 14, steps 1.0625 to 1.25, both data fonts.
+/// cell by cell. Fix round 2 (I1): a smaller label that pairs by its size gives a name beside
+/// it no label style to pair by. Sizes 6 to 14, steps 1.0625 to 1.25, both data fonts.
 #[test]
 fn strips_of_two_to_four_cells_read_their_cells_apart() {
     const NAME: StripCell = ("Muster GmbH", 0.9, &["Musterweg 1", "12345 Musterstadt"]);
@@ -799,14 +798,25 @@ fn strips_of_two_to_four_cells_read_their_cells_apart() {
     const KEY: StripCell = ("Name", 1.0, &["Beispiel"]);
     const DATE: StripCell = ("Datum", 1.0, &["01.01.2020"]);
     const NR_COLON: StripCell = ("Nr:", 1.0, &["4711"]);
+    const SMALL_KEY: StripCell = ("Kundennummer", 0.9, &["00000"]);
     // The cells, the heads that must pair, and the heads that must not (a lone field with no
-    // sign of a label).
+    // sign of a label, a name over an address beside a smaller label that pairs by its size).
     type Layout = (
         &'static [StripCell],
         &'static [&'static str],
         &'static [&'static str],
     );
-    let layouts: [Layout; 7] = [
+    let layouts: [Layout; 9] = [
+        (
+            &[SMALL_KEY, NAME, NR],
+            &["Kundennummer", "Nr"],
+            &["Muster GmbH"],
+        ),
+        (
+            &[KEY, NAME, PERSON, NR],
+            &["Name", "Nr"],
+            &["Muster GmbH", "Erika Mustermann"],
+        ),
         (&[NAME, NR_COLON], &["Nr:"], &[]),
         (&[NAME, NR], &[], &["Nr"]),
         (&[KEY, NAME], &[], &["Name"]),
@@ -819,7 +829,7 @@ fn strips_of_two_to_four_cells_read_their_cells_apart() {
     for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
         for step in [1.0625f32, 1.125, 1.25] {
             for font in ["F1", "F3"] {
-                for (cells, pairs, lone) in layouts {
+                for (cells, pairs, never) in layouts {
                     let heads: Vec<&str> = cells.iter().map(|c| c.0).collect();
                     let at = format!("{heads:?} {size} pt x {step}, {font}");
                     let out = open_strip_of(cells, size, step, font);
@@ -841,8 +851,8 @@ fn strips_of_two_to_four_cells_read_their_cells_apart() {
                         if pairs.contains(head) && !rows.contains(&want) {
                             wrong.push(format!("{at}: no {want} in {rows:?}"));
                         }
-                        if lone.contains(head) && paired {
-                            wrong.push(format!("{at}: the lone {head} pairs: {rows:?}"));
+                        if never.contains(head) && paired {
+                            wrong.push(format!("{at}: {head} pairs: {rows:?}"));
                         }
                     }
                     let words: Vec<Vec<&str>> = cells

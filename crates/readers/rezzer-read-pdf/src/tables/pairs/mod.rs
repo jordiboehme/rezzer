@@ -37,8 +37,7 @@ pub(super) const NO_LABEL: &str = "its text is of one style, with no label set a
 pub(super) const ADDRESS: &str = "its lines read as an address, not as a label over its value";
 
 /// Why a cell of a row of fields is left out of it: its lines read as an address under a
-/// first line without a number, which no colon and no label style of the fields beside it
-/// shows to be a label.
+/// first line without a number and without a colon at its end.
 pub(super) const NAMED_ADDRESS: &str = "its lines read as an address under a name, and nothing \
      shows its first line to be a label";
 
@@ -163,11 +162,9 @@ struct Reading<'a> {
     smaller: bool,
     /// Text of one style under this size (half points) is labels only: empty fields.
     small: i32,
-    /// Styles known as labels' on the page (the text alone in an empty boxed field, or the
-    /// labels of the fields beside a cell): a label and a value of one size that differ in
-    /// weight or slant only pair when the label's style is one of them, else which one is the
-    /// label is not clear; a name over an address pairs as a label when its style is one of
-    /// them.
+    /// Styles known as labels' on the page (the text alone in an empty boxed field): a label
+    /// and a value of one size that differ in weight, slant or font only pair when the label's
+    /// style is one of them, else which one is the label is not clear.
     labels: &'a [Style],
 }
 
@@ -236,18 +233,15 @@ fn parse(flow: &Flow, ids: &[usize], how: Reading) -> Parsed {
     match address_cell(flow, &lines, &marker) {
         Some(Address::Numbered) => return Parsed::Unsure(ADDRESS),
         Some(Address::Named) => {
-            // The first line is a label only on evidence: it ends with a colon, or it has the
-            // style the labels of other fields beside it have.
+            // The first line is a label only when it ends with a colon: a style shared with
+            // other labels is no evidence here, as such a style may itself come from a pair
+            // that size alone decided.
             let head: Vec<usize> = lines[0]
                 .iter()
                 .copied()
                 .filter(|i| !marker.contains(i))
                 .collect();
-            let colon = words(flow, &head).ends_with(':');
-            let styled = head
-                .first()
-                .is_some_and(|&i| how.labels.contains(&style_of(&flow.runs[i])));
-            if !colon && !styled {
+            if !words(flow, &head).ends_with(':') {
                 return Parsed::Unsure(NAMED_ADDRESS);
             }
         }

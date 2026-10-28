@@ -41,8 +41,6 @@ struct Strip {
     rows: Option<(Vec<usize>, Vec<usize>)>,
     /// A field of it was left as text.
     left_out: bool,
-    /// The styles of the first lines of its cells left as text (see [`head_style`]).
-    left_heads: Vec<Style>,
 }
 
 /// Where fields between rules may stand: a rule no grid takes and the nearest rule below it
@@ -537,33 +535,9 @@ pub(in crate::tables) fn field_strips(
         // A cell not clear for a reason of fields (a label under its value, a weight only) whose
         // text is as short as a field's (see [`field_sized`]), not for its many styles alone.
         let (mut fits, mut unread, mut field_why) = (true, false, None);
-        let mut left_heads: Vec<Style> = Vec::new();
         // The heads of a cell in three styles whose first line is heads over lines of their
         // own: the row is a row of fields not clear, which is said by them.
         let mut styled_heads: Vec<String> = Vec::new();
-        // The label styles of the strip's fields: a name over an address in one of them is a
-        // label too.
-        let mut label_styles: Vec<Style> = Vec::new();
-        for (c, cell) in cells.iter().enumerate() {
-            if cell.is_empty() || over[c] {
-                continue;
-            }
-            for part in parts_of(flow, cell).unwrap_or_default() {
-                if let Parsed::Fields(f) = parse(flow, &part, how) {
-                    label_styles.extend(
-                        f.iter()
-                            .filter_map(|f| f.label.first())
-                            .map(|&i| style_of(&flow.runs[i])),
-                    );
-                }
-            }
-        }
-        label_styles.sort_unstable();
-        label_styles.dedup();
-        let with_labels = Reading {
-            labels: &label_styles,
-            ..how
-        };
         for (c, cell) in cells.iter().enumerate().filter(|(_, c)| !c.is_empty()) {
             let why = if over[c] {
                 Some(ACROSS)
@@ -572,11 +546,7 @@ pub(in crate::tables) fn field_strips(
                     Some(parts) => {
                         let beside = parts.len() >= 2;
                         for part in parts {
-                            let mut parsed = parse(flow, &part, how);
-                            if matches!(parsed, Parsed::Unsure(NAMED_ADDRESS)) {
-                                parsed = parse(flow, &part, with_labels);
-                            }
-                            match parsed {
+                            match parse(flow, &part, how) {
                                 Parsed::Fields(f) if f.iter().all(|f| short(flow, f)) => {
                                     fields.extend(f);
                                 }
@@ -585,7 +555,6 @@ pub(in crate::tables) fn field_strips(
                                 // text of one style with no label is said, by its first line.
                                 Parsed::No if beside && title_part(flow, &part) => {}
                                 Parsed::No if beside && value_sized(flow, &part) => {
-                                    left_heads.extend(head_style(flow, &part));
                                     let names: Vec<String> = lines_of(flow, &part)
                                         .first()
                                         .map(|l| words(flow, l))
@@ -599,7 +568,6 @@ pub(in crate::tables) fn field_strips(
                                 // An address is left out of the row, which is said;
                                 // the other fields of the row stay.
                                 Parsed::Unsure(why @ (ADDRESS | NAMED_ADDRESS)) => {
-                                    left_heads.extend(head_style(flow, &part));
                                     let names = label_names(flow, &part);
                                     match left_out.iter_mut().find(|l| l.0 == why) {
                                         Some(l) => l.1.extend(names),
@@ -626,7 +594,6 @@ pub(in crate::tables) fn field_strips(
                 }
             };
             if let Some(why) = why {
-                left_heads.extend(head_style(flow, cell));
                 match left_out.iter_mut().find(|l| l.0 == why) {
                     Some(l) => l.1.extend(label_names(flow, cell)),
                     None => left_out.push((why, label_names(flow, cell))),
@@ -678,7 +645,6 @@ pub(in crate::tables) fn field_strips(
             fields,
             rows: two_lines(flow, &ids),
             left_out: !left_out.is_empty(),
-            left_heads,
         });
     }
     rows_in_order(&mut strips);
@@ -827,16 +793,11 @@ pub(in crate::tables) fn field_strips(
         };
         // One field alone between its rules reads like a caption over a line: it is not
         // paired, and that is said, with the labels under its rule that may be of its value.
-        // Beside a cell of its row left out, it is a field of the row only on evidence that
-        // its label is one: a colon at its end, or the style of the first line of a cell left
-        // out (a label of the row too). A small caption over a short line stays no pair.
-        let labelled = |f: &Field| {
-            words(flow, &f.label).ends_with(':')
-                || f.label
-                    .first()
-                    .is_some_and(|&i| strips[g[0]].left_heads.contains(&style_of(&flow.runs[i])))
-        };
-        let row = g.len() == 1 && strips[g[0]].left_out && list.iter().all(|f| labelled(f));
+        // Beside a cell of its row left out, it is a field of the row only when a colon ends
+        // its label: a style is no evidence (it may come from a pair that size alone decided).
+        let row = g.len() == 1
+            && strips[g[0]].left_out
+            && list.iter().all(|f| words(flow, &f.label).ends_with(':'));
         if list.len() < 2 && !row {
             let mut names: Vec<String> = list.iter().map(|f| words(flow, &f.label)).collect();
             if let Ends::Under(_, below) | Ends::Unclear(below) = ends(
@@ -1136,17 +1097,6 @@ fn cell_order(
             .flat_map(|c| lines_of(flow, c).into_iter().flatten())
             .collect(),
     )
-}
-
-/// The style of the first run of the first line of a part of a cell, if it has ink.
-fn head_style(flow: &Flow, part: &[usize]) -> Option<Style> {
-    let ids: Vec<usize> = part
-        .iter()
-        .copied()
-        .filter(|&i| inked(&flow.runs[i]))
-        .collect();
-    let first = lines_of(flow, &ids).into_iter().next()?;
-    first.first().map(|&i| style_of(&flow.runs[i]))
 }
 
 /// Whether the text of a part of a cell is as short as a value.
@@ -2228,7 +2178,6 @@ mod tests {
             fields: Vec::new(),
             rows: None,
             left_out: false,
-            left_heads: Vec::new(),
         };
         let mut strips = vec![
             strip(737.08, 42.4),

@@ -39,6 +39,18 @@ pub(crate) struct Known {
 /// Every pinned break.
 pub(crate) const KNOWN: &[Known] = &[
     Known {
+        shape: "a strip of a smaller label beside a smaller name over its address",
+        variants: &[
+            "beside",
+            "scale 0.7, larger text, courier, thick, turned 270, beside, two pages",
+            "scale 0.75, smaller text, proportional, dashed, turned 90, beside",
+            "scale 1.5, times labels, dotted, beside",
+        ],
+        broken: &[Inv::Cells],
+        cause: Cause::New,
+        why: "P6-X (Task 15b part 2d fix round 2, I3): with the block beside on the lines of the strip, the name left out of the strip is parted from its address by that block's table",
+    },
+    Known {
         shape: "a strip without dividers after a smaller name over its address",
         variants: &[
             "base",
