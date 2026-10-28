@@ -633,11 +633,11 @@ pub(in crate::tables) fn field_strips(
         for (why, names) in &left_out {
             say(unsure, names, why);
         }
-        // Every cell left out: no row of fields is read. When it is one row of labels over their
-        // values it is read cell by cell; else (totals between rules) its text is free for the
+        // Every cell left out: no row of fields is read, and it is read cell by cell, but for
+        // totals between rules (rows of a label and an amount), whose text is free for the
         // table pass as it stands.
         if fields.is_empty() {
-            if !left_out.is_empty() && label_heads(flow, &cells, &ids) {
+            if !left_out.is_empty() && !totals_rows(flow, &ids) {
                 apart.extend(cell_order(
                     flow,
                     by_y,
@@ -1054,21 +1054,39 @@ fn heads_over_lines(flow: &Flow, cell: &[usize]) -> Option<Vec<String>> {
     fields.then(|| heads.iter().map(|h| words(flow, h)).collect())
 }
 
-/// Whether the runs `ids` of a frame with no field read are a row of fields all the same: some
-/// cell of `cells` (between its dividers), or the frame whole, has a first line of heads that
-/// are labels over their values (see [`heads_over_lines`]) and one line of values under it. It
-/// is then read cell by cell. Rows under a smaller first row (totals between rules) are more
-/// lines than one: their text is free for the table pass.
-fn label_heads(flow: &Flow, cells: &[Vec<usize>], ids: &[usize]) -> bool {
-    let one_row = |c: &[usize]| {
-        let ids: Vec<usize> = c
+/// Whether the runs `ids` of a frame are rows of one grid of totals: two lines or more that are
+/// each a label and an amount flush right (see [`crate::tables::borderless::amount`]), their
+/// amounts ending in one place, and every other line one piece (a note under them). Such a
+/// frame with no field read is left to the table pass; any other is read cell by cell.
+fn totals_rows(flow: &Flow, ids: &[usize]) -> bool {
+    let ids: Vec<usize> = ids
+        .iter()
+        .copied()
+        .filter(|&i| inked(&flow.runs[i]))
+        .collect();
+    let mut ends: Vec<(f32, f32)> = Vec::new();
+    for line in lines_of(flow, &ids) {
+        let pieces = labels_in_line(flow, &line);
+        match pieces.as_slice() {
+            [_] => {}
+            [label, value]
+                if words(flow, label).chars().any(char::is_alphabetic)
+                    && crate::tables::borderless::amount(&words(flow, value)) =>
+            {
+                let (_, end) = extent(flow, value);
+                let size = value
+                    .iter()
+                    .map(|&i| flow.runs[i].size)
+                    .fold(0.0f32, f32::max);
+                ends.push((end, size));
+            }
+            _ => return false,
+        }
+    }
+    ends.len() >= 2
+        && ends
             .iter()
-            .copied()
-            .filter(|&i| inked(&flow.runs[i]))
-            .collect();
-        heads_over_lines(flow, &ids).is_some() && lines_of(flow, &ids).len() == 2
-    };
-    cells.iter().any(|c| one_row(c)) || one_row(ids)
+            .all(|&(e, size)| (e - ends[0].0).abs() <= CHAR * size.max(ends[0].1))
 }
 
 /// The cells of a row of fields between the rules `top` and `bottom` from `x0` to `x1`, with

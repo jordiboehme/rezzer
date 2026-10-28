@@ -296,6 +296,69 @@ fn gap_box_row(g: &Geo, b: &mut Built, top: f32, middle: Option<&'static str>) -
     top - h
 }
 
+/// Task 15b part 2d fix round 4: a strip between two rules with no rule between its cells,
+/// `Personalnummer` over a value of two lines, `Eintritt` over its date, and a value under no
+/// label on the data line: no field is read (a value stands under no label), a loss names the
+/// fields, and the strip is read cell by cell.
+fn two_line_strip(g: &Geo, b: &mut Built, top: f32) -> f32 {
+    let h = 3.6 * g.data;
+    let (x0, x1) = (g.col(0) - 0.12, g.col(60) - 0.12);
+    b.page.template += &g.hrule(x0, x1, top);
+    b.page.template += &g.hrule(x0, x1, top - h);
+    let y = top - 0.9 * g.label - 0.3 * g.data;
+    for (k, l) in [(0usize, "Personalnummer"), (20, "Eintritt")] {
+        b.page.template += &label(g.col(k) + 0.3 * g.label, y, g.label, l);
+        b.fields.push((l, Err(())));
+    }
+    let bottom = top - h + 0.3 * g.data;
+    g.values(b, bottom + 1.2 * g.data, &[(1, "00000")]);
+    g.values(
+        b,
+        bottom,
+        &[(1, "Zusatz"), (21, "01.01.2020"), (41, "Beispielwert")],
+    );
+    for v in ["00000", "Zusatz", "01.01.2020", "Beispielwert"] {
+        b.values.push(v.to_string());
+    }
+    top - h
+}
+
+/// Task 15b part 2d fix round 4: two named addresses side by side between two rules, a name at
+/// the labels' size over a street and a town each: neither is a label (no colon), both are left
+/// out with a loss, and the strip is read cell by cell.
+fn two_addresses(g: &Geo, b: &mut Built, top: f32) -> f32 {
+    let h = 3.6 * g.data;
+    let (x0, x1) = (g.col(0) - 0.12, g.col(40) - 0.12);
+    b.page.template += &g.hrule(x0, x1, top);
+    b.page.template += &g.hrule(x0, x1, top - h);
+    let y = top - 0.9 * g.label - 0.3 * g.data;
+    for (k, l) in [(0usize, "Beispiel AG"), (20, "Probe KG")] {
+        b.page.template += &label(g.col(k) + 0.3 * g.label, y, g.label, l);
+        b.fields.push((l, Err(())));
+        b.values.push(l.to_string());
+    }
+    let bottom = top - h + 0.3 * g.data;
+    g.values(
+        b,
+        bottom + 1.2 * g.data,
+        &[(1, "Musterweg 1"), (21, "Probeweg 3")],
+    );
+    g.values(
+        b,
+        bottom,
+        &[(1, "12345 Musterstadt"), (21, "67890 Probedorf")],
+    );
+    for v in [
+        "Musterweg 1",
+        "Probeweg 3",
+        "12345 Musterstadt",
+        "67890 Probedorf",
+    ] {
+        b.values.push(v.to_string());
+    }
+    top - h
+}
+
 /// Task 15b part 2d fix round 2: a strip of two cells between two rules with no rule between
 /// them, `Personalnummer` over its value beside a value alone on the same data line: the field
 /// is one field alone between its rules, refused, and the strip is read cell by cell.
@@ -766,6 +829,43 @@ pub(crate) fn shapes() -> Vec<Shape> {
                     v,
                     |g, b, t| open_strip_at(g, b, t, smaller_name, 20, 0.9),
                     &SMALLER_NAME,
+                )
+            },
+        },
+        Shape {
+            name: "a refused strip with a value of two lines",
+            axes: Axes {
+                look: NO_RISING,
+                ..ALL
+            },
+            draw: |v| {
+                with_cells(
+                    v,
+                    two_line_strip,
+                    60,
+                    &[
+                        &["Personalnummer", "00000", "Zusatz"],
+                        &["Eintritt", "01.01.2020"],
+                        &["Beispielwert"],
+                    ],
+                )
+            },
+        },
+        Shape {
+            name: "two named addresses between rules",
+            axes: Axes {
+                look: NO_RISING,
+                ..ALL
+            },
+            draw: |v| {
+                with_cells(
+                    v,
+                    two_addresses,
+                    40,
+                    &[
+                        &["Beispiel AG", "Musterweg 1", "12345 Musterstadt"],
+                        &["Probe KG", "Probeweg 3", "67890 Probedorf"],
+                    ],
                 )
             },
         },
