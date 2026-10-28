@@ -267,6 +267,7 @@ shape_tests! {
     header_grid => "header grid",
     column_of_totals => "column of totals",
     boxed_fields => "boxed fields",
+    boxed_fields_beside_an_address => "boxed fields beside an address",
     label_block_and_bank_row => "label block and bank row",
     overflow_into_an_empty_field => "overflow into an empty field",
     a_short_value_after_a_full_field => "a short value after a full field",

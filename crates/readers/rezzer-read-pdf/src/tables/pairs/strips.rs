@@ -382,7 +382,12 @@ fn holds_fields(flow: &Flow, fr: &Frame, ids: &[usize], inner: &[f32]) -> bool {
     cells_of(flow, &xs, &rest)
         .iter()
         .filter(|c| !c.is_empty())
-        .all(|c| matches!(parse(flow, c, how), Parsed::Fields(f) if f.iter().all(|f| short(flow, f))))
+        .all(|c| match parse(flow, c, how) {
+            Parsed::Fields(f) => f.iter().all(|f| short(flow, f)),
+            // An address is a cell of the row, left out of it when the row is read.
+            Parsed::Unsure(why) => why == ADDRESS,
+            Parsed::No => false,
+        })
 }
 
 /// Whether the frame `fr` holds a row of fields with a value: its cells between dividers read
@@ -412,6 +417,8 @@ pub(in crate::tables) fn holds_values(flow: &Flow, by_y: &ByY, fr: &Frame) -> bo
                 Parsed::Fields(f) if f.iter().all(|f| short(flow, f)) => {
                     value |= f.iter().any(|f| !f.value.is_empty());
                 }
+                // An address is a cell of the row, no value of a field.
+                Parsed::Unsure(ADDRESS) => {}
                 _ => return false,
             }
         }
@@ -530,6 +537,15 @@ pub(in crate::tables) fn field_strips(
                             match parse(flow, &part, how) {
                                 Parsed::Fields(f) if f.iter().all(|f| short(flow, f)) => {
                                     fields.extend(f);
+                                }
+                                // An address is left out of the row, which is said;
+                                // the other fields of the row stay.
+                                Parsed::Unsure(ADDRESS) => {
+                                    let names = label_names(flow, &part);
+                                    match left_out.iter_mut().find(|l| l.0 == ADDRESS) {
+                                        Some(l) => l.1.extend(names),
+                                        None => left_out.push((ADDRESS, names)),
+                                    }
                                 }
                                 Parsed::Unsure(why) => {
                                     unread = true;

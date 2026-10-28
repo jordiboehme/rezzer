@@ -29,6 +29,9 @@ const THREE_STYLES: &str = "it holds text in three styles or more";
 
 const LABEL_BELOW: &str = "its label stands below its value";
 
+/// Why a cell of a row of fields is left out of it: its lines are an address.
+pub(super) const ADDRESS: &str = "its lines read as an address, not as a label over its value";
+
 const WEIGHT_ONLY: &str = "its label and its value differ in weight or slant only, so which is \
      the label is not clear";
 
@@ -210,21 +213,24 @@ fn parse(flow: &Flow, ids: &[usize], how: Reading) -> Parsed {
             || (!how.smaller && (label.1, label.2) != (value.1, value.2) && label.0 <= value.0)
     };
     let (label, value) = (styles[0], styles[1]);
-    // Lines of one weight and slant whose sizes differ by less than a size step, at one left
-    // edge, that read as an address whose first line holds a number (a street over its
-    // postcode and town) are an address, not a label over its value. A first line without a
-    // number may be a label over an address (`Anschrift`): it pairs.
+    // Lines at one left edge that read as an address are no label over its value: a first line
+    // with a number (a street over its postcode and town) at any size; a first line without
+    // one over address lines (a name, a company) where no size step or weight sets it apart as
+    // a label (a label `Anschrift` over an address is set apart that way). Such a cell is left
+    // out of its row, its text read as it stands, and a loss says so.
     let sizes = lines
         .iter()
         .flatten()
         .filter(|i| !marker.contains(i))
         .map(|&i| flow.runs[i].size);
     let (small, large) = sizes.fold((f32::MAX, 0.0f32), |(a, b), s| (a.min(s), b.max(s)));
-    if (label.1, label.2) == (value.1, value.2)
-        && large < crate::order::SIZE_STEP * small
-        && address_cell(flow, &lines, &marker)
-    {
-        return Parsed::No;
+    let one_style = (label.1, label.2) == (value.1, value.2);
+    match address_cell(flow, &lines, &marker) {
+        Some(Address::Numbered) => return Parsed::Unsure(ADDRESS),
+        Some(Address::Named) if one_style && large < crate::order::SIZE_STEP * small => {
+            return Parsed::Unsure(ADDRESS);
+        }
+        _ => {}
     }
     if !apart(label, value) {
         // The label's style first met under the value's: the label stands below it.
@@ -309,33 +315,83 @@ fn parse(flow: &Flow, ids: &[usize], how: Reading) -> Parsed {
     Parsed::Fields(fields)
 }
 
+/// A cell of an address holds at most this many lines: a name, a line more, a street, a
+/// postcode and town, a country.
+const ADDRESS_LINES: usize = 5;
+
 /// The lines of an address in a cell start within this share of their size of one left edge.
 const ADDRESS_EDGE: f32 = 0.25;
 
-/// Whether `lines` (raised markers aside) start at one left edge and read as an address that
-/// starts with a number: two address lines (see [`crate::layout::address_lines`]), or three
-/// lines or more of an address's shape (see [`crate::layout::address_shaped`]) whose first
-/// line holds a letter and a number (`Musterweg 1` over `12345 Musterstadt`, `Deutschland`).
-fn address_cell(flow: &Flow, lines: &[Vec<usize>], marker: &HashSet<usize>) -> bool {
+/// What [`address_cell`] finds a cell's lines to be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Address {
+    /// An address whose first line holds a number, or starts with `c/o`: a street over its
+    /// postcode and town, a postcode and town over the country.
+    Numbered,
+    /// A first line without a number (a name, a company, or a label) over address lines.
+    Named,
+}
+
+/// Whether `lines` (raised markers aside) read as an address (see [`Address`]): two address
+/// lines (see [`crate::layout::address_lines`]); three lines or more
+/// of an address's shape (see [`crate::layout::address_shaped`]) whose first line holds a
+/// letter and a number; a first line that starts with `c/o`, or with a postcode (a number of
+/// four digits or more) and a town over the country (words only); or, the lines starting at
+/// one left edge, a first line without a number over lines that are an address by one of
+/// these. Two to [`ADDRESS_LINES`] lines, none with an amount, a decimal number or a date.
+fn address_cell(flow: &Flow, lines: &[Vec<usize>], marker: &HashSet<usize>) -> Option<Address> {
     let kept: Vec<Vec<usize>> = lines
         .iter()
         .map(|l| l.iter().copied().filter(|i| !marker.contains(i)).collect())
         .filter(|l: &Vec<usize>| !l.is_empty())
         .collect();
-    let Some(first) = kept.first() else {
-        return false;
-    };
+    let first = kept.first()?;
     let r0 = &flow.runs[first[0]];
     let edge = kept.iter().all(|l| {
         let r = &flow.runs[l[0]];
         (r.x - r0.x).abs() <= ADDRESS_EDGE * r.size.min(r0.size)
     });
+    if !(2..=ADDRESS_LINES).contains(&kept.len()) {
+        return None;
+    }
     let texts: Vec<String> = kept.iter().map(|l| words(flow, l)).collect();
     let texts: Vec<&str> = texts.iter().map(String::as_str).collect();
-    let numbered =
-        texts[0].chars().any(char::is_alphabetic) && texts[0].chars().any(|c| c.is_ascii_digit());
-    edge && (crate::layout::address_lines(&texts)
-        || (numbered && crate::layout::address_shaped(&texts)))
+    // An address holds no amount, no decimal number, no date: digits on both sides of a
+    // point or a comma.
+    let decimal = |t: &str| {
+        let c: Vec<char> = t.chars().collect();
+        c.windows(3)
+            .any(|w| w[0].is_ascii_digit() && matches!(w[1], '.' | ',') && w[2].is_ascii_digit())
+    };
+    if texts.iter().any(|t| decimal(t)) {
+        return None;
+    }
+    let numbered = |t: &[&str]| {
+        let head = t[0];
+        let letters = |l: &str| l.chars().any(char::is_alphabetic);
+        let digits = |l: &str| l.chars().any(|c| c.is_ascii_digit());
+        let words = |l: &str| letters(l) && !digits(l);
+        let postcode = head
+            .split_whitespace()
+            .next()
+            .is_some_and(|w| w.len() >= 4 && w.chars().all(|c| c.is_ascii_digit()))
+            && letters(head);
+        crate::layout::address_lines(t)
+            || (letters(head) && digits(head) && crate::layout::address_shaped(t))
+            || (head.to_lowercase().starts_with("c/o ") && t[1..].iter().all(|l| letters(l)))
+            || (postcode && t[1..].iter().all(|l| words(l)) && t.len() == 2)
+    };
+    if numbered(&texts) {
+        Some(Address::Numbered)
+    } else if edge
+        && !texts[0].chars().any(|c| c.is_ascii_digit())
+        && texts.len() >= 3
+        && (numbered(&texts[1..]) || crate::layout::address_shaped(&texts[1..]))
+    {
+        Some(Address::Named)
+    } else {
+        None
+    }
 }
 
 /// The text of runs, words joined by one space.

@@ -16,6 +16,42 @@ use crate::shapes::{
     title_grid_page, total_column,
 };
 
+/// Task 15b part 2c review (Important 2 and 3): a row of three boxed fields whose middle box
+/// holds an address, a street in the label font over its postcode and town in the data font:
+/// it is left out of the row and a loss says so; the fields beside it pair.
+fn address_box_row(g: &Geo, b: &mut Built, top: f32) -> f32 {
+    let h = 2.4 * g.data;
+    let mut parts = Vec::new();
+    for (k, l, v) in [
+        (0usize, "Personalnummer", "00000"),
+        (20, "Musterweg 1", "12345 Musterstadt"),
+        (40, "Eintritt", "01.01.2020"),
+    ] {
+        let (x0, x1) = (g.col(k) - 0.12, g.col(k + 20) - 0.12);
+        b.page.template += &g.hrule(x0, x1, top);
+        b.page.template += &g.hrule(x0, x1, top - h);
+        b.page.template += &g.vrule(x0, top - h, top);
+        b.page.template += &g.vrule(x1, top - h, top);
+        b.page.template += &label(
+            g.col(k) + 0.3 * g.label,
+            top - 0.9 * g.label - 0.3 * g.data,
+            g.label,
+            l,
+        );
+        parts.push((k + 1, v));
+        b.values.push(v.to_string());
+        if k == 20 {
+            // Not clear as a field: it must not pair, and a loss names it.
+            b.values.push(l.to_string());
+            b.fields.push((l, Err(())));
+        } else {
+            b.fields.push((l, Ok(Some(v))));
+        }
+    }
+    g.values(b, top - h + 0.3 * g.data, &parts);
+    top - h
+}
+
 /// The top of a shape on its page.
 fn top(g: &Geo) -> f32 {
     760.0 + g.dy
@@ -305,6 +341,14 @@ pub(crate) fn shapes() -> Vec<Shape> {
                 ..ALL
             },
             draw: |v| drawn(v, boxed_row, 60),
+        },
+        Shape {
+            name: "boxed fields beside an address",
+            axes: Axes {
+                look: NO_RISING,
+                ..ALL
+            },
+            draw: |v| drawn(v, address_box_row, 60),
         },
         Shape {
             name: "label block and bank row",

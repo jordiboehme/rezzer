@@ -138,8 +138,16 @@ pub(crate) fn box_pairs(
             (a[0] - b[0]).abs() <= t && ((a[1] - b[3]).abs() <= t || (b[1] - a[3]).abs() <= t);
         row || column
     };
+    // A box whose lines are an address is a box of its row, with no field: the fields on
+    // both sides of it stay one row.
+    let address: Vec<bool> = (0..boxes.len())
+        .map(|b| unsure.iter().any(|u| u.0 == b && u.1 == ADDRESS))
+        .collect();
+    let two_fields = |c: &[usize]| c.iter().filter(|&&b| fields[b].is_some()).count() >= 2;
     // Rows first: boxes left to right, each going on the row whose last box it touches.
-    let mut order: Vec<usize> = (0..boxes.len()).filter(|&b| fields[b].is_some()).collect();
+    let mut order: Vec<usize> = (0..boxes.len())
+        .filter(|&b| fields[b].is_some() || address[b])
+        .collect();
     order.sort_by(|&a, &b| boxes[a][0].total_cmp(&boxes[b][0]));
     let chains = |order: &[usize], next: &dyn Fn(usize, usize) -> bool| {
         let mut out: Vec<Vec<usize>> = Vec::new();
@@ -162,7 +170,7 @@ pub(crate) fn box_pairs(
         let (a, b, t) = (boxes[p], boxes[q], touch[p].max(touch[q]));
         (a[3] - b[3]).abs() <= t && (a[2] - b[0]).abs() <= t
     }) {
-        if c.len() < 2 || !has_value(&c) {
+        if !two_fields(&c) || !has_value(&c) {
             continue;
         }
         // A row of boxes over lines in its columns heads a table.
@@ -188,25 +196,51 @@ pub(crate) fn box_pairs(
         let (a, b, t) = (boxes[p], boxes[q], touch[p].max(touch[q]));
         (a[0] - b[0]).abs() <= t && (a[1] - b[3]).abs() <= t
     }) {
-        if c.len() >= 2 && has_value(&c) {
+        if two_fields(&c) && has_value(&c) {
             groups.push(c);
         }
     }
     // A box that is no field beside the boxes of fields says why; so do boxes next to each
     // other whose label and value differ in weight only, which are fields but for that.
     let paired: Vec<usize> = groups.iter().flatten().copied().collect();
+    let said_of = |b: &usize, why: &&str| {
+        paired.iter().any(|&p| near(*b, p))
+            || ((*why == WEIGHT_ONLY || *why == ADDRESS)
+                && unsure
+                    .iter()
+                    .any(|(o, w)| o != b && *w == *why && near(*b, *o)))
+    };
     let reasons: Vec<&str> = unsure
         .iter()
-        .filter(|(b, why)| {
-            paired.iter().any(|&p| near(*b, p))
-                || (*why == WEIGHT_ONLY
-                    && unsure
-                        .iter()
-                        .any(|(o, w)| o != b && *w == WEIGHT_ONLY && near(*b, *o)))
-        })
+        .filter(|(b, why)| said_of(b, why))
         .map(|(_, why)| *why)
         .collect();
     let mut said: Vec<String> = Vec::new();
+    // A box of an address is named by its first line.
+    let addresses: Vec<String> = unsure
+        .iter()
+        .filter(|(b, why)| *why == ADDRESS && said_of(b, why))
+        .filter_map(|(b, _)| {
+            let ids: Vec<usize> = in_box[*b]
+                .iter()
+                .copied()
+                .filter(|&i| inked(&flow.runs[i]))
+                .collect();
+            lines_of(flow, &ids).first().map(|l| words(flow, l))
+        })
+        .collect();
+    if !addresses.is_empty() {
+        let (s, verb) = if addresses.len() == 1 {
+            ("", "is")
+        } else {
+            ("es", "are")
+        };
+        said.push(format!(
+            "the drawn box{s} {} beside label and value fields on page {page} {verb} not read as \
+             a label and its value ({ADDRESS}): the text is read as it stands",
+            addresses.join(", ")
+        ));
+    }
     for why in [THREE_STYLES, LABEL_BELOW, WEIGHT_ONLY] {
         let n = reasons.iter().filter(|w| **w == why).count();
         if n > 0 {
