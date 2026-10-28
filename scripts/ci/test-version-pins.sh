@@ -47,7 +47,8 @@ name = "rezzer"
 version.workspace = true
 edition.workspace = true
 EOF
-  printf '# Rezzer\n\nOutput carries generated: { by: rezzer/%s }.\n' "$2" >"$dir/README.md"
+  printf '# Rezzer\n\ngenerated: { by: rezzer/%s, at: 2026-10-26T14:04:36Z }\nreader: "sheet/%s"\n' \
+    "$2" "$2" >"$dir/README.md"
   printf '# Greetings, programs\n\nThe first release.\n' >"$dir/release-notes/v$2.md"
 }
 
@@ -127,6 +128,38 @@ EOF
   ! run "$work/t" && grep -q '::error file=crates/rezzer/Cargo.toml::' "$work/out"
 }
 
+version_pins_fails_without_a_readme() {
+  tree "$work/t" 1.2.3
+  rm "$work/t/README.md"
+  ! run "$work/t" && grep -q '::error file=README.md::' "$work/out"
+}
+
+version_pins_fails_on_a_stale_generated_by_pin() {
+  tree "$work/t" 1.2.3
+  printf 'generated: { by: rezzer/1.2.2 }\n' >>"$work/t/README.md"
+  ! run "$work/t" && grep -q '::error file=README.md' "$work/out" \
+    && grep -q 'rezzer/1.2.2' "$work/out"
+}
+
+version_pins_fails_on_a_stale_reader_pin() {
+  tree "$work/t" 1.2.3
+  printf 'reader: "pdf/1.2.2"\n' >>"$work/t/README.md"
+  ! run "$work/t" && grep -q '::error file=README.md' "$work/out" \
+    && grep -q 'pdf/1.2.2' "$work/out"
+}
+
+version_pins_passes_with_a_pre_release() {
+  tree "$work/t" 1.2.3-rc.1
+  printf 'Download rezzer-v1.2.3-rc.1-linux-arm64.tar.gz.\n' >>"$work/t/README.md"
+  run "$work/t" && grep -q '1.2.3-rc.1' "$work/out"
+}
+
+version_pins_fails_on_a_stale_pre_release_archive() {
+  tree "$work/t" 1.2.3
+  printf 'Download rezzer-v1.2.3-rc.1-linux-arm64.tar.gz.\n' >>"$work/t/README.md"
+  ! run "$work/t" && grep -q 'rezzer-v1.2.3-rc.1-' "$work/out"
+}
+
 version_pins_passes_on_the_real_tree() {
   run "$repo"
 }
@@ -142,6 +175,11 @@ for t in \
   version_pins_fails_without_a_workspace_version \
   version_pins_reads_only_the_workspace_package_version \
   version_pins_fails_when_rezzer_has_its_own_version \
+  version_pins_fails_without_a_readme \
+  version_pins_fails_on_a_stale_generated_by_pin \
+  version_pins_fails_on_a_stale_reader_pin \
+  version_pins_passes_with_a_pre_release \
+  version_pins_fails_on_a_stale_pre_release_archive \
   version_pins_passes_on_the_real_tree; do
   "$t"
   check "$t" "$?"

@@ -10,8 +10,9 @@
 # - release-notes/v<version>.md exists, is not empty and opens with a
 #   level-one heading, the release motto. The release workflow's `notes` job
 #   checks the same on the tag and publishes the file as the release page
-# - every archive name `rezzer-v<x.y.z>-` in README.md names this version. A
-#   README that names no archive passes
+# - README.md exists, and every version pin in it names this version: the
+#   archive names `rezzer-v<version>-<os>-`, `rezzer/<version>` and the
+#   reader ids like `reader: "sheet/<version>"`. A README without pins passes
 #
 # Reads the files only: no cargo, no network. root defaults to the repository
 # this script is in. Exit 1 with an ::error:: line for each problem.
@@ -46,15 +47,39 @@ elif ! head -n1 "$root/$notes" | grep -qE '^# .*[^[:space:]]'; then
   bad=1
 fi
 
-archives="$(grep -oE 'rezzer-v[0-9]+\.[0-9]+\.[0-9]+-' "$root/README.md" | sort -u || true)"
-while read -r name; do
-  [ -n "$name" ] || continue
-  if [ "$name" != "rezzer-v$version-" ]; then
-    echo "::error file=README.md::README.md names the archive ${name}... but the workspace version is $version. Update the README with the version bump." >&2
+# The README pins, each matched with the full version (a pre-release such as
+# 0.2.0-rc.1 included): archive names (`rezzer-v<version>-<os>-`), the
+# `generated: { by: rezzer/<version> }` line and the reader ids such as
+# `reader: "sheet/<version>"` of the example output. Placeholders like
+# `rezzer-v<version>-` have no digits and are not pins.
+semver='[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?'
+pins=""
+if [ ! -f "$root/README.md" ]; then
+  echo "::error file=README.md::README.md is missing." >&2
+  bad=1
+else
+  # grep exits 1 when nothing matches, which is fine; 2 is an error.
+  found() {
+    grep -oE "$1" "$root/README.md" || [ "$?" -eq 1 ]
+  }
+  pins="$(
+    {
+      found "rezzer-v${semver}-(linux|macos|windows)-" \
+        | sed -E 's/^rezzer-v(.*)-(linux|macos|windows)-$/archive rezzer-v\1- \1/'
+      found "rezzer/${semver}" | sed -E 's|^rezzer/(.*)$|generated rezzer/\1 \1|'
+      found "reader: \"[a-z0-9_-]+/${semver}\"" \
+        | sed -E 's|^reader: "([a-z0-9_-]+)/(.*)"$|reader \1/\2 \2|'
+    } | sort -u
+  )"
+fi
+while read -r kind pin pinned; do
+  [ -n "$kind" ] || continue
+  if [ "$pinned" != "$version" ]; then
+    echo "::error file=README.md::README.md names $pin (the $kind pin) but the workspace version is $version. Update the README with the version bump." >&2
     bad=1
   fi
-done <<<"$archives"
+done <<<"$pins"
 
 [ "$bad" = "0" ] || exit 1
-count="$(printf '%s' "$archives" | grep -c . || true)"
-echo "version pins: $version (Cargo.toml, crates/rezzer, $notes, $count archive name(s) in README.md)"
+count="$(printf '%s' "$pins" | grep -c . || true)"
+echo "version pins: $version (Cargo.toml, crates/rezzer, $notes, $count pin(s) in README.md)"
