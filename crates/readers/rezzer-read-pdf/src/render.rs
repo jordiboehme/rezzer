@@ -82,10 +82,10 @@ pub(crate) struct Vision {
     pub first: Option<[f32; 4]>,
     /// Parts of the page rendered again on their own and read for codes: pictures at a finer
     /// scale than the page's render, codes drawn as paths. The first [`PAGE_REGIONS`] are
-    /// rendered again; the others, at most [`SMALL_LISTED`], are named when the page's read
+    /// rendered again; the others, at most [`KEPT_REGIONS`], are named when the page's read
     /// gave no code there.
     pub regions: Vec<Region>,
-    /// How many more such parts there are, past those in `regions`.
+    /// How many more such parts there are, past those in `regions`: not checked.
     pub past: usize,
 }
 
@@ -111,6 +111,10 @@ pub(crate) enum How {
 /// The most regions of one page that needs vision that are rendered again; the others are
 /// said.
 pub(crate) const PAGE_REGIONS: usize = 8;
+
+/// The most regions of one page that needs vision that are kept past [`PAGE_REGIONS`], to be
+/// checked against the codes the page's read gave; past them they are counted.
+const KEPT_REGIONS: usize = 256;
 
 /// How far the edges of one picture may move between pages, in points, and as a share of its
 /// larger side: a logo scaled a little differently on each page is still the same logo.
@@ -627,9 +631,9 @@ pub(crate) fn vision(
                     })
                 }),
         );
-        // Past the parts rendered again, a few are kept to be named, the rest counted.
-        let past = regions.len().saturating_sub(PAGE_REGIONS + SMALL_LISTED);
-        regions.truncate(PAGE_REGIONS + SMALL_LISTED);
+        // Past the parts rendered again, many are kept to be checked, the rest counted.
+        let past = regions.len().saturating_sub(PAGE_REGIONS + KEPT_REGIONS);
+        regions.truncate(PAGE_REGIONS + KEPT_REGIONS);
         return Some(Seen::Page(Vision {
             alt: words.join(", "),
             first,
@@ -1024,7 +1028,7 @@ pub(crate) struct Need {
     /// Parts of a page that needs vision as a whole to be read again for codes: the first
     /// [`PAGE_REGIONS`] are rendered again, the others only named (`Vision::regions`).
     pub regions: Vec<Region>,
-    /// How many more such parts there are (`Vision::past`).
+    /// How many more such parts there are, not checked (`Vision::past`).
     pub past: usize,
     /// How the frame of the page's text is turned, and the size of the visible page box:
     /// the box of a code read from the page is given in that frame.
@@ -1821,6 +1825,9 @@ pub(crate) enum Unrendered {
     Cap,
     /// Past [`PAGE_REGIONS`] of one page.
     PageCap,
+    /// Past [`PAGE_REGIONS`] and [`KEPT_REGIONS`] of one page: not even checked against the
+    /// codes the page's read gave.
+    Unchecked,
     Room,
     Damaged,
     Time,
@@ -2355,13 +2362,15 @@ impl Scans {
     /// than their quiet zone). `read` says for each of `need.regions` whether it was rendered
     /// again and read. Each part gets its words for the page's alt text: what it is, where,
     /// and `not decoded` (or `not scanned`). The parts past [`PAGE_REGIONS`] are not rendered
-    /// again: those the page's read gave no code are named not scanned, the ones past
-    /// `need.regions` counted, and a loss says why.
+    /// again: those the page's read gave no code are named not scanned (past
+    /// [`PAGE_REGIONS`] and [`SMALL_LISTED`] of them, counted), and a loss says why. A loss
+    /// also says when parts past `need.regions` were not checked.
     fn regions_unread(&mut self, asset: usize, need: &Need, read: &[bool]) {
         let (w, h) = need.size;
         let (fw, fh) = need.turn.size(w, h);
         let found = self.found.entry(asset).or_default();
-        let mut capped = need.past > 0;
+        let mut capped = false;
+        let (mut named, mut more) = (0, 0);
         for (k, r) in need.regions.iter().enumerate() {
             let framed = need.turn.place_box(r.b, w, h);
             // A matrix code read there fills it; linear codes reach its ends.
@@ -2370,6 +2379,11 @@ impl Scans {
                 continue;
             };
             capped |= k >= PAGE_REGIONS;
+            if named == PAGE_REGIONS + SMALL_LISTED {
+                more += 1;
+                continue;
+            }
+            named += 1;
             let what = match r.how {
                 How::Modules(_) => DRAWING,
                 How::Picture(..) => "a picture that looks like a barcode or QR code",
@@ -2382,15 +2396,17 @@ impl Scans {
                 drawing_words(scanned)
             ));
         }
-        if need.past > 0 {
+        if more > 0 {
             found.unread.push(format!(
-                "{} more {} that may look like a barcode or QR code, not scanned",
-                need.past,
-                if need.past == 1 { "part" } else { "parts" }
+                "{more} more {} that look like a barcode or QR code, not scanned",
+                if more == 1 { "part" } else { "parts" }
             ));
         }
         if capped {
             self.unrendered(need.page, Unrendered::PageCap);
+        }
+        if need.past > 0 {
+            self.unrendered(need.page, Unrendered::Unchecked);
         }
     }
 
@@ -2531,6 +2547,7 @@ impl Scans {
         for why in [
             Unrendered::Cap,
             Unrendered::PageCap,
+            Unrendered::Unchecked,
             Unrendered::Room,
             Unrendered::Damaged,
             Unrendered::Time,
@@ -2540,9 +2557,11 @@ impl Scans {
             };
             let reason = match why {
                 Unrendered::Damaged => LossReason::Damaged,
-                Unrendered::Cap | Unrendered::PageCap | Unrendered::Room | Unrendered::Time => {
-                    LossReason::Limit
-                }
+                Unrendered::Cap
+                | Unrendered::PageCap
+                | Unrendered::Unchecked
+                | Unrendered::Room
+                | Unrendered::Time => LossReason::Limit,
             };
             let words = match why {
                 Unrendered::Cap => {
@@ -2551,6 +2570,11 @@ impl Scans {
                 Unrendered::PageCap => {
                     format!("a page renders at most {PAGE_REGIONS} parts again")
                 }
+                Unrendered::Unchecked => format!(
+                    "a page keeps at most {} parts that look like a code; the others are not \
+                     checked against the codes its render gave",
+                    PAGE_REGIONS + KEPT_REGIONS
+                ),
                 Unrendered::Room => {
                     "their render would take more than a render may take (a quarter of the memory \
                      limit)"

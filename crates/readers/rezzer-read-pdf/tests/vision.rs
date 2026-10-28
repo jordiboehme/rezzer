@@ -3258,6 +3258,70 @@ fn drawn_codes_past_the_page_cap_are_said() {
     }
 }
 
+#[test]
+fn drawn_codes_past_the_page_cap_that_the_page_read_reads_are_not_said() {
+    // Past the 8 parts a page renders again, a drawing whose code the page's own read gave is
+    // read: it is neither named nor counted, and no loss says it was not looked at.
+    for n in [9usize, 18, 19, 20, 24] {
+        let mut bars = String::new();
+        for k in 0..n {
+            let (x, y) = (40.0 + (k % 3) as f32 * 180.0, 60.0 + (k / 3) as f32 * 45.0);
+            bars += &code128_bars(&format!("{:010}", k + 1), x, y, 1.0, 30.0);
+        }
+        let content = format!(
+            "BT /F1 11 Tf 72 790 Td (Lieferschein 0000) Tj ET\n\
+             q 200 0 0 150 300 600 cm /P0 Do Q\n{bars}"
+        );
+        let out = read(&pictured_page(&content, 595.0, 842.0, ""));
+        let case = format!("{n} codes");
+        assert_eq!(asset(&out, "page-1").codes.len(), n, "{case}");
+        assert_no_doubt(&out, &case);
+        assert!(
+            !out.document
+                .losses
+                .iter()
+                .any(|l| l.what.contains("finer scale")),
+            "{case}: {:#?}",
+            out.document.losses
+        );
+    }
+}
+
+#[test]
+fn drawings_past_the_page_cap_that_give_no_code_are_said_once() {
+    // Twin codes 2 modules apart give no code. Past the 8 parts a page renders again, each
+    // such drawing is said once: named, or past the named ones counted, never again as a
+    // printed part of the render.
+    let width = modules(Symbology::Code128, "0000000001").width as f32;
+    for n in [12usize, 20, 22] {
+        let mut bars = String::new();
+        for k in 0..n {
+            let (x, y) = (40.0 + (k % 2) as f32 * 260.0, 60.0 + (k / 2) as f32 * 45.0);
+            bars += &code128_bars("0000000001", x, y, 1.0, 30.0);
+            bars += &code128_bars("0000000001", x + width + 2.0, y, 1.0, 30.0);
+        }
+        let content = format!(
+            "BT /F1 11 Tf 72 790 Td (Lieferschein 0000) Tj ET\n\
+             q 200 0 0 150 300 600 cm /P0 Do Q\n{bars}"
+        );
+        let out = read(&pictured_page(&content, 595.0, 842.0, ""));
+        let a = asset(&out, "page-1");
+        let alt = a.alt.clone().unwrap_or_default();
+        let case = format!("{n} drawings: {alt}");
+        assert!(a.codes.is_empty(), "{case}");
+        assert!(a.code_unread, "{case}");
+        assert!(!alt.contains("printed part"), "{case}");
+        let named = alt
+            .matches("a drawing that looks like a barcode or QR code")
+            .count();
+        let counted: usize = alt
+            .split(", ")
+            .find_map(|w| w.strip_suffix(" more parts that look like a barcode or QR code"))
+            .map_or(0, |k| k.parse().expect("count"));
+        assert_eq!(named + counted, n, "{case}");
+    }
+}
+
 /// A crisp scanned A4 page of `res` pixels a point (one gray picture over all of it, no text)
 /// with a Code 128 `0000000001` of `px` pixels a module and bars `bar` pixels high at each of
 /// `lefts` (the left edge of its first module, in points from the left edge of the page), cut
