@@ -195,11 +195,25 @@ fn open_strip(
     top: f32,
     middle: fn(&Geo, &mut Built, f32, f32) -> bool,
 ) -> f32 {
+    open_strip_at(g, b, top, middle, 20)
+}
+
+/// [`open_strip`] with the middle field in data column `at` (0, 20 or 40) and the two fields
+/// in the other two.
+fn open_strip_at(
+    g: &Geo,
+    b: &mut Built,
+    top: f32,
+    middle: fn(&Geo, &mut Built, f32, f32) -> bool,
+    at: usize,
+) -> f32 {
     let h = 3.6 * g.data;
     let (x0, x1) = (g.col(0) - 0.12, g.col(60) - 0.12);
     b.page.template += &g.hrule(x0, x1, top);
     b.page.template += &g.hrule(x0, x1, top - h);
-    for (k, l) in [(0usize, "Personalnummer"), (40, "Eintritt")] {
+    let fields: Vec<usize> = [0usize, 20, 40].into_iter().filter(|&k| k != at).collect();
+    let named = [("Personalnummer", "00000"), ("Eintritt", "01.01.2020")];
+    for (&k, (l, _)) in fields.iter().zip(named) {
         b.page.template += &label(
             g.col(k) + 0.3 * g.label,
             top - 0.9 * g.label - 0.3 * g.data,
@@ -207,22 +221,61 @@ fn open_strip(
             l,
         );
     }
-    let address = middle(g, b, g.col(20) + 0.3 * g.label, top);
-    for (l, v) in [("Personalnummer", "00000"), ("Eintritt", "01.01.2020")] {
+    let address = middle(g, b, g.col(at) + 0.3 * g.label, top);
+    for (l, v) in named {
         b.values.push(v.to_string());
         b.fields.push((l, Ok(Some(v))));
     }
     let bottom = top - h + 0.3 * g.data;
+    let mut low: Vec<(usize, &str)> = fields
+        .iter()
+        .zip(named)
+        .map(|(&k, (_, v))| (k + 1, v))
+        .collect();
     if address {
-        g.values(b, bottom + 1.2 * g.data, &[(21, "Musterweg 1")]);
-        g.values(
-            b,
-            bottom,
-            &[(1, "00000"), (21, "12345 Musterstadt"), (41, "01.01.2020")],
-        );
-    } else {
-        g.values(b, bottom, &[(1, "00000"), (41, "01.01.2020")]);
+        g.values(b, bottom + 1.2 * g.data, &[(at + 1, "Musterweg 1")]);
+        low.push((at + 1, "12345 Musterstadt"));
     }
+    low.sort_by_key(|p| p.0);
+    g.values(b, bottom, &low);
+    top - h
+}
+
+/// A shape drawn by `draw` with the cells `cells` listed (see [`crate::axes::Want::cells`]).
+fn with_cells(
+    v: &Variant,
+    draw: fn(&Geo, &mut Built, f32) -> f32,
+    right: usize,
+    cells: &[&[&str]],
+) -> (Sheet, Option<Extent>) {
+    let (mut s, e) = drawn(v, draw, right);
+    for c in cells {
+        s.want
+            .cells
+            .push(c.iter().map(|t| (*t).to_string()).collect());
+    }
+    (s, e)
+}
+
+/// Task 15b part 2d fix round 2: a strip of two cells between two rules with no rule between
+/// them, `Personalnummer` over its value beside a value alone on the same data line: the field
+/// is one field alone between its rules, refused, and the strip is read cell by cell.
+fn lone_beside_a_value(g: &Geo, b: &mut Built, top: f32) -> f32 {
+    let h = 3.6 * g.data;
+    let (x0, x1) = (g.col(0) - 0.12, g.col(40) - 0.12);
+    b.page.template += &g.hrule(x0, x1, top);
+    b.page.template += &g.hrule(x0, x1, top - h);
+    let y = top - 0.9 * g.label - 0.3 * g.data;
+    b.page.template += &label(g.col(0) + 0.3 * g.label, y, g.label, "Personalnummer");
+    b.fields.push(("Personalnummer", Err(())));
+    for v in ["00000", "Beispielwert"] {
+        b.values.push(v.to_string());
+    }
+    g.values(
+        b,
+        top - h + 0.3 * g.data,
+        &[(1, "00000"), (21, "Beispielwert")],
+    );
     top - h
 }
 
@@ -255,6 +308,9 @@ fn open_strip_shape(
     theirs: &[&str],
 ) -> (Sheet, Option<Extent>) {
     let (mut s, e) = drawn(v, draw, 60);
+    s.want
+        .cells
+        .push(theirs.iter().map(|t| (*t).to_string()).collect());
     for o in ["Personalnummer", "00000", "Eintritt", "01.01.2020"] {
         for t in theirs {
             s.want.apart.push((o.to_string(), (*t).to_string()));
@@ -270,16 +326,20 @@ fn smaller_name(g: &Geo, b: &mut Built, x: f32, top: f32) -> bool {
         x,
         top - 0.9 * g.label - 0.3 * g.data,
         0.9 * g.label,
-        "Muster GmbH",
+        "Beispiel AG",
     );
-    b.fields.push(("Muster GmbH", Err(())));
-    for t in NAME_AND_ADDRESS {
+    b.fields.push(("Beispiel AG", Err(())));
+    for t in SMALLER_NAME {
         b.values.push(t.to_string());
     }
     true
 }
 
-/// The texts of [`smaller_name`].
+/// The texts of [`smaller_name`]: a name the address under the shape does not hold, so that
+/// each of its texts is drawn once.
+const SMALLER_NAME: [&str; 3] = ["Beispiel AG", "Musterweg 1", "12345 Musterstadt"];
+
+/// The texts of the company boxes.
 const NAME_AND_ADDRESS: [&str; 3] = ["Muster GmbH", "Musterweg 1", "12345 Musterstadt"];
 
 /// The middle of [`open_strip`]: a bold title at the data size, its own text in no pair.
@@ -585,7 +645,7 @@ pub(crate) fn shapes() -> Vec<Shape> {
                 look: NO_RISING,
                 ..ALL
             },
-            draw: |v| drawn(v, company_box_row, 60),
+            draw: |v| with_cells(v, company_box_row, 60, &[&NAME_AND_ADDRESS]),
         },
         Shape {
             name: "boxed fields beside a bold title",
@@ -594,7 +654,7 @@ pub(crate) fn shapes() -> Vec<Shape> {
                 ..ALL
             },
             draw: |v| {
-                let (mut s, e) = drawn(v, title_box_row, 60);
+                let (mut s, e) = with_cells(v, title_box_row, 60, &[&["Angaben zum", "Betrieb"]]);
                 s.want.headings.push("Angaben zum Betrieb".into());
                 (s, e)
             },
@@ -605,7 +665,7 @@ pub(crate) fn shapes() -> Vec<Shape> {
                 look: NO_RISING,
                 ..ALL
             },
-            draw: |v| drawn(v, value_box_row, 60),
+            draw: |v| with_cells(v, value_box_row, 60, &[&NAME_AND_ADDRESS]),
         },
         Shape {
             name: "a strip without dividers beside a smaller name over its address",
@@ -617,7 +677,7 @@ pub(crate) fn shapes() -> Vec<Shape> {
                 open_strip_shape(
                     v,
                     |g, b, t| open_strip(g, b, t, smaller_name),
-                    &NAME_AND_ADDRESS,
+                    &SMALLER_NAME,
                 )
             },
         },
@@ -628,13 +688,47 @@ pub(crate) fn shapes() -> Vec<Shape> {
                 ..ALL
             },
             draw: |v| {
-                let (mut s, e) = drawn(v, lone_strip, 40);
+                let (mut s, e) = with_cells(
+                    v,
+                    lone_strip,
+                    40,
+                    &[&SMALLER_NAME, &["Personalnummer", "00000"]],
+                );
                 for o in ["Personalnummer", "00000"] {
-                    for t in NAME_AND_ADDRESS {
+                    for t in SMALLER_NAME {
                         s.want.apart.push((o.to_string(), t.to_string()));
                     }
                 }
                 (s, e)
+            },
+        },
+        Shape {
+            name: "a strip without dividers after a smaller name over its address",
+            axes: Axes {
+                look: NO_RISING,
+                ..ALL
+            },
+            draw: |v| {
+                open_strip_shape(
+                    v,
+                    |g, b, t| open_strip_at(g, b, t, smaller_name, 0),
+                    &SMALLER_NAME,
+                )
+            },
+        },
+        Shape {
+            name: "a lone field in a strip beside a value",
+            axes: Axes {
+                look: NO_RISING,
+                ..ALL
+            },
+            draw: |v| {
+                with_cells(
+                    v,
+                    lone_beside_a_value,
+                    40,
+                    &[&["Personalnummer", "00000"], &["Beispielwert"]],
+                )
             },
         },
         Shape {
@@ -651,7 +745,7 @@ pub(crate) fn shapes() -> Vec<Shape> {
                 look: NO_RISING,
                 ..ALL
             },
-            draw: |v| drawn(v, company_in_another_font_row, 60),
+            draw: |v| with_cells(v, company_in_another_font_row, 60, &[&NAME_AND_ADDRESS]),
         },
         Shape {
             name: "boxed fields beside an address",
@@ -659,7 +753,14 @@ pub(crate) fn shapes() -> Vec<Shape> {
                 look: NO_RISING,
                 ..ALL
             },
-            draw: |v| drawn(v, address_box_row, 60),
+            draw: |v| {
+                with_cells(
+                    v,
+                    address_box_row,
+                    60,
+                    &[&["Musterweg 1", "12345 Musterstadt"]],
+                )
+            },
         },
         Shape {
             name: "label block and bank row",

@@ -405,6 +405,10 @@ pub(crate) struct Want {
     pub vision: Option<bool>,
     /// Parts of the text of losses the page must have.
     pub losses: Vec<String>,
+    /// The texts drawn in one cell each, in the order to read them (Task 15b part 2d fix
+    /// round 2): besides the fields' own cells (a label and its value), cells whose texts the
+    /// fields do not list, an address under a name, a title.
+    pub cells: Vec<Vec<String>>,
 }
 
 /// One page of a variant: what is drawn and what it must read as.
@@ -585,7 +589,7 @@ fn words_of(s: &str) -> Vec<&str> {
 
 /// The texts drawn on `page`: each text of the template shown with `Tj`, each template label
 /// shown with `TJ` (its parts joined), and each data line.
-fn drawn(page: &crate::common::FormPage) -> Vec<String> {
+pub(crate) fn drawn(page: &crate::common::FormPage) -> Vec<String> {
     let mut out = Vec::new();
     for chunk in page.template.split("BT ").skip(1) {
         let Some((head, _)) = chunk.split_once("ET") else {

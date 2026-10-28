@@ -1306,3 +1306,126 @@ pub fn code128_bars(text: &str, x: f32, y: f32, module: f32, height: f32) -> Str
     }
     out + "f Q\n"
 }
+
+/// The units of a read that the cell check of [`cells_apart`] looks at, in reading order:
+/// each heading, paragraph or task, and each row of a table (its cells joined by ` | `), white
+/// space collapsed. Sections, quotes, callouts and lists are opened.
+pub fn read_units(blocks: &[Block]) -> Vec<String> {
+    let collapse = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut out = Vec::new();
+    for b in blocks {
+        match b {
+            Block::Heading { inlines, .. }
+            | Block::Paragraph { inlines, .. }
+            | Block::Task { inlines, .. } => out.push(collapse(&plain_text(inlines))),
+            Block::Section { blocks, .. }
+            | Block::Quote { blocks, .. }
+            | Block::Callout { blocks, .. } => out.extend(read_units(blocks)),
+            Block::List { items, .. } => {
+                for i in items {
+                    out.extend(read_units(i));
+                }
+            }
+            Block::Table { rows, .. } => {
+                for row in rows {
+                    let cells: Vec<String> = row
+                        .iter()
+                        .map(|c| collapse(&plain_text(&c.inlines)))
+                        .collect();
+                    out.push(cells.join(" | "));
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// What is wrong with how the texts of drawn cells stand in the units of a read (see
+/// [`read_units`]), found by the span each drawn text produced, not by words (a value glued to
+/// the line before it is still found): each cell's texts stand together, no text of another
+/// cell between them; with `ordered`, in the order given; and no unit holds texts of two
+/// cells. A text is found where it stands in a unit, the longer texts first, so a short text
+/// inside a longer one is not found twice. A text that `ambiguous` names (drawn more than once
+/// on the page, or inside text no cell holds) or that stands more than once is left out of the
+/// check.
+pub fn cells_apart(
+    units: &[String],
+    cells: &[Vec<String>],
+    ordered: &[bool],
+    ambiguous: &dyn Fn(&str) -> bool,
+) -> Vec<String> {
+    // Every text with its cell and its place in the cell; a text of two cells is no one's.
+    let mut texts: Vec<(&str, usize, usize)> = Vec::new();
+    for (c, cell) in cells.iter().enumerate() {
+        for (k, t) in cell.iter().enumerate() {
+            let t = t.as_str();
+            if t.trim().is_empty() || ambiguous(t) {
+                continue;
+            }
+            let shared = cells
+                .iter()
+                .enumerate()
+                .any(|(o, other)| o != c && other.iter().any(|x| x == t));
+            if !shared {
+                texts.push((t, c, k));
+            }
+        }
+    }
+    texts.sort_by_key(|t| std::cmp::Reverse(t.0.len()));
+    // The spans found: unit, start, end, cell, place.
+    let mut spans: Vec<(usize, usize, usize, usize, usize)> = Vec::new();
+    for (u, unit) in units.iter().enumerate() {
+        let mut taken: Vec<(usize, usize)> = Vec::new();
+        for &(t, c, k) in &texts {
+            let t = t.split_whitespace().collect::<Vec<_>>().join(" ");
+            let mut from = 0;
+            while let Some(at) = unit[from..].find(&t) {
+                let (a, b) = (from + at, from + at + t.len());
+                from = b;
+                if taken.iter().any(|&(x, y)| a < y && x < b) {
+                    continue;
+                }
+                taken.push((a, b));
+                spans.push((u, a, b, c, k));
+            }
+        }
+    }
+    // A text found more than once is left out.
+    let mut seen: std::collections::HashMap<(usize, usize), usize> = Default::default();
+    for s in &spans {
+        *seen.entry((s.3, s.4)).or_default() += 1;
+    }
+    spans.retain(|s| seen[&(s.3, s.4)] == 1);
+    spans.sort_by_key(|s| (s.0, s.1));
+    let mut wrong = Vec::new();
+    let name = |c: usize| cells[c].join(" / ");
+    for (u, unit) in units.iter().enumerate() {
+        let mut of: Vec<usize> = spans.iter().filter(|s| s.0 == u).map(|s| s.3).collect();
+        of.sort_unstable();
+        of.dedup();
+        if of.len() > 1 {
+            let names: Vec<String> = of.iter().map(|&c| name(c)).collect();
+            wrong.push(format!("{unit:?} holds texts of the cells {names:?}"));
+        }
+    }
+    for c in 0..cells.len() {
+        let mine: Vec<usize> = (0..spans.len()).filter(|&i| spans[i].3 == c).collect();
+        let (Some(&first), Some(&last)) = (mine.first(), mine.last()) else {
+            continue;
+        };
+        if let Some(o) = (first..=last).find(|&i| spans[i].3 != c) {
+            wrong.push(format!(
+                "the cell {:?} is not read together: {:?} stands between its texts",
+                name(c),
+                units[spans[o].0]
+            ));
+        }
+        if ordered.get(c).copied().unwrap_or(false)
+            && mine.windows(2).any(|w| spans[w[0]].4 > spans[w[1]].4)
+        {
+            wrong.push(format!("the cell {:?} is not read in its order", name(c)));
+        }
+    }
+    wrong
+}

@@ -42,6 +42,10 @@ pub(crate) enum Inv {
     /// Texts that belong to different blocks are not read into one block (P6-X: a block that
     /// mixes them is a wrong reading order).
     Apart,
+    /// The texts of each drawn cell stand together (and, for a cell the shape lists, in their
+    /// order), and no block or table row holds texts of two cells, found by the span each
+    /// drawn text produced (P6-X: a wrong reading order).
+    Cells,
     /// The page's text holds the expected texts in their reading order.
     Order,
     /// The document title is found.
@@ -66,7 +70,7 @@ impl Inv {
     pub(crate) fn wrong(self) -> bool {
         matches!(
             self,
-            Inv::RightPair | Inv::ValueOnce | Inv::WrongValue | Inv::Apart
+            Inv::RightPair | Inv::ValueOnce | Inv::WrongValue | Inv::Apart | Inv::Cells
         )
     }
 }
@@ -215,6 +219,45 @@ fn collapse(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// The cells of a page held to [`Inv::Cells`]: the cells the shape lists, in their order, and
+/// each field's own cell (its label and its value) that no listed cell holds, in any order (a
+/// label under its value reads after it).
+fn check_cells(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broken>) {
+    let mut cells: Vec<Vec<String>> = sheet.want.cells.clone();
+    let mut ordered = vec![true; cells.len()];
+    for (label, value) in &sheet.built.fields {
+        if cells.iter().any(|c| c.iter().any(|t| t == label)) {
+            continue;
+        }
+        let mut cell = vec![(*label).to_string()];
+        if let Ok(Some(v)) = value {
+            cell.push((*v).to_string());
+        }
+        cells.push(cell);
+        ordered.push(false);
+    }
+    if cells.is_empty() {
+        return;
+    }
+    let drawn: Vec<String> = crate::axes::drawn(&sheet.built.page)
+        .iter()
+        .map(|t| collapse(t))
+        .collect();
+    // A text drawn more than once, or as a part of more than one drawn text, is not checked.
+    let ambiguous = |t: &str| {
+        let t = collapse(t);
+        drawn
+            .iter()
+            .map(|d| d.matches(t.as_str()).count())
+            .sum::<usize>()
+            != 1
+    };
+    let units = crate::common::read_units(page_blocks(out, n));
+    for w in crate::common::cells_apart(&units, &cells, &ordered, &ambiguous) {
+        broken.push(Broken(Inv::Cells, format!("page {}: {w}", n + 1)));
+    }
+}
+
 /// The page's own checks of [`crate::axes::Want`].
 fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broken>) {
     let want = &sheet.want;
@@ -312,6 +355,7 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
             ));
         }
     }
+    check_cells(out, n, sheet, broken);
     if n == 0 {
         let props = &out.document.properties;
         // A found title is the page's title, or a title the page may have besides (a bold
