@@ -2020,10 +2020,14 @@ fn joined_lines(md: &str, texts: &[String]) -> Vec<String> {
     out
 }
 
+/// A way to draw a column of [`one_face_column`]: its size, its face, whether the parts of a
+/// line stand two sizes apart, and the lines a box goes around.
+type ColumnVariant = (f32, &'static str, bool, Option<(usize, usize)>);
+
 /// The sizes, faces, gaps and boxes a column of [`one_face_column`] is drawn in: sizes 6 to
 /// 14, plain and bold Helvetica and Times, the parts of a line a space or two sizes apart, no
 /// box, a box around all five lines and boxes around two of them.
-fn column_variants() -> Vec<(f32, &'static str, bool, Option<(usize, usize)>)> {
+fn column_variants() -> Vec<ColumnVariant> {
     let mut out = Vec::new();
     for size in [6.0f32, 8.0, 9.0, 10.0, 12.0, 14.0] {
         for font in ["FL", "FB", "FT", "FTB"] {
