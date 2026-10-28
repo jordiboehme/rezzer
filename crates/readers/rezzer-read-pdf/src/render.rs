@@ -708,7 +708,8 @@ pub(crate) fn vision(
             furniture: skip.spot(&b, id),
         }
     }));
-    if list.is_empty() {
+    // With no room for any of them (`cap` 0), the counts are still said.
+    if list.is_empty() && more == 0 && unread == 0 {
         return None;
     }
     Some(Seen::Small(list, more, unread))
@@ -3071,6 +3072,64 @@ mod tests {
         // One page is not every page.
         let all = on_every_page(read[..1].iter(), 1);
         assert!(all.ids.is_empty() && all.spots.boxes.is_empty());
+    }
+
+    #[test]
+    fn small_pictures_and_drawings_past_a_cap_of_0_are_counted() {
+        // A page with three small pictures and ten drawings that look like codes, and no room
+        // for any of them: none is listed, but how many are not is said (the caller turns the
+        // counts into losses), and the drawings past the most a page reads apart.
+        let info = PageInfo {
+            number: 1,
+            label: None,
+            width: 595.0,
+            height: 842.0,
+            rotation: 0,
+            has_fonts: true,
+            images: std::sync::Arc::from(Vec::new()),
+        };
+        let items = PageItems {
+            page: 1,
+            mapped: 10,
+            images: (0..3)
+                .map(|k| [40.0 + 60.0 * k as f32, 400.0, 80.0 + 60.0 * k as f32, 440.0])
+                .collect(),
+            images_id: vec![1, 2, 3],
+            codes: (0..10)
+                .map(|k| crate::codes::VectorCode {
+                    b: [40.0 + 50.0 * k as f32, 100.0, 80.0 + 50.0 * k as f32, 120.0],
+                    module: 0.5,
+                    id: k,
+                })
+                .collect(),
+            ..PageItems::default()
+        };
+        let none = furniture(std::iter::empty());
+        let every = on_every_page(std::iter::empty(), 1);
+        match vision(&info, &items, &none, &every, 0) {
+            Some(Seen::Small(list, more, unread)) => {
+                assert!(list.is_empty());
+                assert_eq!((more, unread), (3 + crate::codes::MAX_REGIONS, 2));
+            }
+            _ => panic!("the counts are not said"),
+        }
+        // With room, the same page lists them.
+        match vision(&info, &items, &none, &every, 100) {
+            Some(Seen::Small(list, more, unread)) => {
+                assert_eq!(
+                    (list.len(), more, unread),
+                    (3 + crate::codes::MAX_REGIONS, 0, 2)
+                );
+            }
+            _ => panic!("nothing listed"),
+        }
+        // A page without small pictures or drawings has nothing to say.
+        let bare = PageItems {
+            page: 1,
+            mapped: 10,
+            ..PageItems::default()
+        };
+        assert!(vision(&info, &bare, &none, &every, 0).is_none());
     }
 
     #[test]
