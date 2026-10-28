@@ -173,6 +173,21 @@ pub(crate) fn address_shaped(lines: &[&str]) -> bool {
             .any(|l| l.chars().any(|c| c.is_ascii_digit()))
 }
 
+/// Whether lines one under the other are an address: [`address_shaped`], or two lines that
+/// are each a few words (at most [`ADDRESS_WORDS`]) with letters and a number, in another
+/// order on each (see [`word_shape`]): a street and its number over a postcode and its town.
+/// A label over its value has a number on one line at most (`Nr` over `4711`, `Strasse` over
+/// `Musterweg 1`). Their left edge is the caller's to check.
+pub(crate) fn address_lines(lines: &[&str]) -> bool {
+    let two = |l: &&str| {
+        word_count(l) <= ADDRESS_WORDS
+            && l.chars().any(char::is_alphabetic)
+            && l.chars().any(|c| c.is_ascii_digit())
+    };
+    address_shaped(lines)
+        || matches!(lines, [a, b] if two(a) && two(b) && word_shape(a) != word_shape(b))
+}
+
 /// Whether lines are a block of an address, a bank or a register entry: [`address_shaped`],
 /// and not all of one shape (see [`word_shape`]), as a name, a street and a postcode with its
 /// town are not. The labels or values of one form in a column of a table (`Feld 1`,
@@ -547,6 +562,22 @@ mod tests {
         assert_eq!(address_columns(&columns_of(&amounts, false)), Columns::Rows);
         let long: Vec<&[&str]> = (0..6).map(|k| blocks[k % 3]).collect();
         assert_eq!(address_columns(&columns_of(&long, false)), Columns::Rows);
+    }
+
+    #[test]
+    fn two_address_lines_have_numbers_in_another_order() {
+        assert!(address_lines(&["Musterweg 1", "12345 Musterstadt"]));
+        assert!(address_lines(&["Am Hang 3", "11111 Neudorf"]));
+        assert!(address_lines(&[
+            "Muster GmbH",
+            "Musterweg 1",
+            "12345 Musterstadt"
+        ]));
+        // A label over its value: a number on one line at most, or in the same order.
+        assert!(!address_lines(&["Strasse", "Musterweg 1"]));
+        assert!(!address_lines(&["Nr", "4711"]));
+        assert!(!address_lines(&["Zimmer 2", "Raum 101"]));
+        assert!(!address_lines(&["Name", "Erika Mustermann"]));
     }
 
     #[test]

@@ -6376,3 +6376,87 @@ fn labels_half_a_point_smaller_pair() {
         }
     }
 }
+
+/// The lines of three cells for [`address_cells`]: two address lines each, or a label over
+/// its value.
+const ADDRESS_CELLS: [(&str, &str); 3] = [
+    ("Musterweg 1", "12345 Musterstadt"),
+    ("Hauptstr. 2", "54321 Beispielort"),
+    ("Am Hang 3", "11111 Neudorf"),
+];
+const LABEL_CELLS: [(&str, &str); 3] = [("Name", "Muster"), ("Ort", "Musterstadt"), ("Nr", "4711")];
+
+/// A row of three fields between rules (task 15b part 2 re-review, its probe): in each cell a
+/// first line of `size` over a second line `step` times as large, in `font`.
+fn address_cells(cells: [(&str, &str); 3], size: f32, step: f32, font: &str) -> ReadOutcome {
+    let value = size * step;
+    let mut c = String::from("0 0 0 RG 0.5 w\n");
+    let k = size / 8.0;
+    let (x0, x1, top) = (60.0, 60.0 + 360.0 * k, 760.0);
+    let bottom = top - 2.6 * value;
+    for y in [top, bottom] {
+        c += &format!("{x0} {y} m {x1} {y} l S\n");
+    }
+    for x in [x0, 60.0 + 120.0 * k, 60.0 + 240.0 * k, x1] {
+        c += &format!("{x} {bottom} m {x} {top} l S\n");
+    }
+    for (n, (l, v)) in cells.iter().enumerate() {
+        let x = 64.0 + 120.0 * k * n as f32;
+        c += &shown(font, size, x, top - 1.1 * size, l);
+        c += &shown(font, value, x, bottom + 0.4 * value, v);
+    }
+    read(&three_font_page(&c))
+}
+
+/// Task 15b part 2 re-review (ruling P6-X): a field cell of two address lines, the second a
+/// little larger than the first (less than a size step), is an address, not a label over its
+/// value: no pair, both lines read in order. A label over its value at the same sizes pairs
+/// (but at 6 points 1.04 times, which the half-point style of a run does not tell apart).
+/// Sizes 6 to 14, both fonts.
+#[test]
+fn a_cell_of_two_address_lines_is_no_pair() {
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+        for step in [1.04f32, 1.0625] {
+            for font in ["F1", "F3"] {
+                let at = format!("{size} pt x {step}, {font}");
+                let out = address_cells(ADDRESS_CELLS, size, step, font);
+                let rows: Vec<String> = read_tables(&out)
+                    .iter()
+                    .flatten()
+                    .map(|r| r.join(": "))
+                    .collect();
+                let text = all_text(&out);
+                for (l, v) in ADDRESS_CELLS {
+                    if rows.iter().any(|r| r.contains(l) || r.contains(v)) {
+                        wrong.push(format!("{at}: {l} in a table {rows:?}"));
+                    }
+                    if let Err(e) = common::in_order(&text, &[l, v]) {
+                        wrong.push(format!("{at}: {e}"));
+                    }
+                }
+                // At 6 points 1.04 times is under the half point a style tells (part 2d).
+                if step < 1.05 && size < 8.0 {
+                    continue;
+                }
+                let out = address_cells(LABEL_CELLS, size, step, font);
+                let rows: Vec<String> = read_tables(&out)
+                    .iter()
+                    .flatten()
+                    .map(|r| r.join(": "))
+                    .collect();
+                for (l, v) in LABEL_CELLS {
+                    if !rows.iter().any(|r| *r == format!("{l}: {v}")) {
+                        wrong.push(format!("{at}: no pair {l}: {v} in {rows:?}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}

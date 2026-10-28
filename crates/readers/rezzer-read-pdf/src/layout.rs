@@ -27,8 +27,8 @@ mod shape;
 
 pub(crate) use head::{Dates, PageDate, TITLE_FROM, document_date, page_dates};
 pub(crate) use shape::{
-    ColumnLine, Columns, address_block, address_columns, address_shaped, page_text_sizes,
-    page_text_sizes_of,
+    ColumnLine, Columns, address_block, address_columns, address_lines, address_shaped,
+    page_text_sizes, page_text_sizes_of,
 };
 use shape::{bold_led, data_only, ends_in_amount, listed, padded_mark};
 

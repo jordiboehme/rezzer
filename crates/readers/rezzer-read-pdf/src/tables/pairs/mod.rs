@@ -210,6 +210,20 @@ fn parse(flow: &Flow, ids: &[usize], how: Reading) -> Parsed {
             || (!how.smaller && (label.1, label.2) != (value.1, value.2) && label.0 <= value.0)
     };
     let (label, value) = (styles[0], styles[1]);
+    // Lines of one weight and slant whose sizes differ by less than a size step, at one left
+    // edge, that read as an address, are an address, not a label over its value.
+    let sizes = lines
+        .iter()
+        .flatten()
+        .filter(|i| !marker.contains(i))
+        .map(|&i| flow.runs[i].size);
+    let (small, large) = sizes.fold((f32::MAX, 0.0f32), |(a, b), s| (a.min(s), b.max(s)));
+    if (label.1, label.2) == (value.1, value.2)
+        && large < crate::order::SIZE_STEP * small
+        && address_cell(flow, &lines, &marker)
+    {
+        return Parsed::No;
+    }
     if !apart(label, value) {
         // The label's style first met under the value's: the label stands below it.
         return if apart(value, label) {
@@ -291,6 +305,29 @@ fn parse(flow: &Flow, ids: &[usize], how: Reading) -> Parsed {
         }
     }
     Parsed::Fields(fields)
+}
+
+/// The lines of an address in a cell start within this share of their size of one left edge.
+const ADDRESS_EDGE: f32 = 0.25;
+
+/// Whether `lines` (raised markers aside) start at one left edge and read as an address (see
+/// [`crate::layout::address_lines`]).
+fn address_cell(flow: &Flow, lines: &[Vec<usize>], marker: &HashSet<usize>) -> bool {
+    let kept: Vec<Vec<usize>> = lines
+        .iter()
+        .map(|l| l.iter().copied().filter(|i| !marker.contains(i)).collect())
+        .filter(|l: &Vec<usize>| !l.is_empty())
+        .collect();
+    let Some(first) = kept.first() else {
+        return false;
+    };
+    let r0 = &flow.runs[first[0]];
+    let edge = kept.iter().all(|l| {
+        let r = &flow.runs[l[0]];
+        (r.x - r0.x).abs() <= ADDRESS_EDGE * r.size.min(r0.size)
+    });
+    let texts: Vec<String> = kept.iter().map(|l| words(flow, l)).collect();
+    edge && crate::layout::address_lines(&texts.iter().map(String::as_str).collect::<Vec<_>>())
 }
 
 /// The text of runs, words joined by one space.
