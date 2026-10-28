@@ -1370,14 +1370,18 @@ pub(crate) fn render_pages(
                 } else {
                     drop(page);
                 }
-                for region in &need.regions {
+                let mut read = vec![false; need.regions.len()];
+                for (k, region) in need.regions.iter().enumerate() {
                     if scans.stopped() {
                         break;
                     }
                     if let Ok(r) = pages.region(n, need, region, 0, &mut scans) {
-                        scans.read(n, asset, &r, Some((need, Some(region))), budget, false);
+                        read[k] = scans
+                            .read(n, asset, &r, Some((need, Some(region))), budget, false)
+                            .is_some();
                     }
                 }
+                scans.regions_unread(asset, need, &read);
             }
             None => {
                 let mut cut = Cut {
@@ -2020,6 +2024,9 @@ pub(crate) struct Found {
     pub codes: Vec<Barcode>,
     /// It was read.
     pub read: bool,
+    /// For a page that needs vision as a whole: the words for each part of it that looks
+    /// like a code and gave none (see [`Scans::regions_unread`]).
+    pub unread: Vec<String>,
 }
 
 /// The barcode scans of one read: their bounds, what they found and what they could not do.
@@ -2228,9 +2235,16 @@ impl Scans {
             let mut drawn = false;
             if let Some((need, region)) = on {
                 let px = page_rect(picture, need, c.bounds);
-                // The decoder's box of a linear code can be one line across its bars: a code
-                // drawn as paths or a picture that looks like a code takes the box drawn.
-                let shape = region.filter(|r| alone && overlap(&px, &r.b)).map(|r| r.b);
+                // A code drawn as paths or a picture that looks like a code takes the box
+                // drawn; a linear code drawn as paths only when its bars fill it (codes side
+                // by side closer than their quiet zone are one drawing).
+                let fills = |r: &Region| match r.how {
+                    How::Modules(m) if !c.symbology.two_d() => covers(&px, &r.b, 2.0 * m + 0.5),
+                    _ => true,
+                };
+                let shape = region
+                    .filter(|r| alone && overlap(&px, &r.b) && fills(r))
+                    .map(|r| r.b);
                 drawn = shape.is_some();
                 let (w, h) = need.size;
                 let framed = need
@@ -2281,6 +2295,56 @@ impl Scans {
             added += 1;
         }
         Some(added)
+    }
+
+    /// Marks the parts of the page `need` (a page that needs vision as a whole, asset `asset`)
+    /// that look like a code and gave none: a part no code read on the page lies in, or a code
+    /// drawn as paths whose linear codes read do not reach its ends (codes side by side closer
+    /// than their quiet zone). `read` says for each of `need.regions` whether it was rendered
+    /// again and read. Each part gets its words for the page's alt text: what it is, where,
+    /// and `not decoded` (or `not scanned`).
+    fn regions_unread(&mut self, asset: usize, need: &Need, read: &[bool]) {
+        let (w, h) = need.size;
+        let (fw, fh) = need.turn.size(w, h);
+        let found = self.found.entry(asset).or_default();
+        for (k, r) in need.regions.iter().enumerate() {
+            let framed = need.turn.place_box(r.b, w, h);
+            let on: Vec<&Barcode> = found
+                .codes
+                .iter()
+                .filter(|c| c.bounds.is_some_and(|b| overlap(&b, &framed)))
+                .collect();
+            // A matrix code read there fills it; linear codes reach its ends.
+            let missing = match r.how {
+                How::Modules(m) if !on.iter().any(|c| two_d(&c.symbology)) => {
+                    let mut u = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+                    for b in on.iter().filter_map(|c| c.bounds) {
+                        u = [
+                            u[0].min(b[0]),
+                            u[1].min(b[1]),
+                            u[2].max(b[2]),
+                            u[3].max(b[3]),
+                        ];
+                    }
+                    on.is_empty() || !covers(&u, &framed, 2.0 * m + 0.5)
+                }
+                _ => on.is_empty(),
+            };
+            if !missing {
+                continue;
+            }
+            let what = match r.how {
+                How::Modules(_) => DRAWING,
+                How::Picture(..) => "a picture that looks like a barcode or QR code",
+            };
+            let part = if on.is_empty() { "" } else { "part of " };
+            let scanned = read.get(k).copied().unwrap_or(false);
+            found.unread.push(format!(
+                "{part}{what}, {}, {}",
+                place_words(framed, fw, fh),
+                drawing_words(scanned)
+            ));
+        }
     }
 
     /// Says in losses what was not read: one for a stop, one for each kind of other gap.
@@ -2462,6 +2526,20 @@ fn overlap(a: &[f32; 4], b: &[f32; 4]) -> bool {
     a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3]
 }
 
+/// Whether the code kind named `name` (as [`barcodes::Symbology::name`] gives it) is a matrix
+/// or stacked code.
+fn two_d(name: &str) -> bool {
+    use barcodes::Symbology::{Aztec, DataMatrix, MicroQrCode, Pdf417, QrCode};
+    [QrCode, MicroQrCode, DataMatrix, Aztec, Pdf417]
+        .iter()
+        .any(|s| s.name() == name)
+}
+
+/// Whether box `a` reaches each side of box `b` within `tol`.
+fn covers(a: &[f32; 4], b: &[f32; 4], tol: f32) -> bool {
+    a[0] <= b[0] + tol && a[1] <= b[1] + tol && a[2] >= b[2] - tol && a[3] >= b[3] - tol
+}
+
 /// The box of pixels `px` of `picture` on its page, in points in the visible page box (the
 /// frame of [`Region::b`]), not turned.
 fn page_rect(picture: &Rendered, need: &Need, px: [u32; 4]) -> [f32; 4] {
@@ -2553,10 +2631,19 @@ pub(crate) fn apply_codes(scans: Option<Scans>, places: Vec<(usize, Places)>, ou
         p.read = read;
         a.alt = Some(p.alt());
     }
-    // Pages that need vision as a whole keep it, and list their codes.
+    // Pages that need vision as a whole keep it, and list their codes; their alt says what
+    // looks like a code there and gave none.
     for (asset, f) in found {
         if let Some(a) = out.doc.assets.get_mut(asset) {
             a.codes = f.codes;
+            if !f.unread.is_empty() {
+                a.code_unread = true;
+                let words = f.unread.join(", ");
+                a.alt = Some(match a.alt.take() {
+                    Some(alt) if !alt.is_empty() => format!("{alt}, {words}"),
+                    _ => words,
+                });
+            }
         }
     }
     if places_of.is_empty() {

@@ -177,7 +177,8 @@ pub struct Asset {
     /// The barcodes and QR codes read from the picture, in the order they were found.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub codes: Vec<Barcode>,
-    /// The picture looks like a barcode or QR code, but none was read from it.
+    /// The picture looks like a barcode or QR code, or holds a part that does, but no code
+    /// was read from it there.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub code_unread: bool,
 }
@@ -201,8 +202,9 @@ pub struct Barcode {
     /// About where the code lies on its page, in points (left, bottom, right, top in the
     /// frame of the page's text), when the picture is the page. A code drawn as paths, or a
     /// picture that looks like a code, has the box of that drawing or picture when it is read
-    /// again from its region and is the only code there; else it has the box of the line the
-    /// decoder read. A small picture shared by several places has no box here: each place
+    /// again from its region and is the only code there (a linear code drawn as paths only
+    /// when its bars fill that drawing); else a linear code has the box of its bars as the
+    /// decoder sees them, a matrix code the box of its finder patterns. A small picture shared by several places has no box here: each place
     /// says where the picture is.
     #[serde(rename = "box", default, skip_serializing_if = "Option::is_none")]
     pub bounds: Option<[f32; 4]>,
