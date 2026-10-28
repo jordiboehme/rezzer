@@ -5034,7 +5034,31 @@ fn small_tables_keep_their_rows() {
         &["Material", "200,00 EUR"],
         &["Versand 3", "34,56 EUR"],
     ];
-    let cases: [(&str, &[&[&str]], bool); 5] = [
+    let units: &[&[&str]] = &[
+        &["Schraube M4", "Halle 2", "12 Stueck"],
+        &["Kabel", "Regal 3B", "8 Meter"],
+        &["Farbe", "Keller 1", "20 Liter"],
+    ];
+    let contacts: &[&[&str]] = &[
+        &["Name", "Telefon", "Raum"],
+        &["Erika Mustermann", "0000 1234", "Raum 101"],
+        &["Max Muster", "0000 5678", "B 2"],
+    ];
+    let digit_labels: &[&[&str]] = &[
+        &["Kundennr. 1", "Muster GmbH"],
+        &["Vertrag 7", "Musterweg 1"],
+        &["Tarif A2", "12345 Musterstadt"],
+    ];
+    let versions: &[&[&str]] = &[
+        &["Version 1.2", "Stand Januar"],
+        &["Revision 3", "Freigabe Max Muster"],
+        &["Projekt X9", "Abteilung Einkauf"],
+    ];
+    let cases: [(&str, &[&[&str]], bool); 9] = [
+        ("units differ, headerless", units, false),
+        ("contacts", contacts, false),
+        ("labels with digits", digit_labels, false),
+        ("versions", versions, false),
         ("plain header, 3 rows", &items[..4], false),
         ("plain header, 4 rows", items, false),
         ("bold header", &items[..4], true),
@@ -5138,9 +5162,12 @@ fn label_blocks_keep_their_pairs_or_say_so() {
     );
 }
 
-/// Task 15b part 2c review (Strengths, Minor 5): blocks side by side one line lower, bottom
-/// aligned, with a PO box, a c/o line, or under bold headings are read block by block, or a
-/// loss says that a table there may be blocks; every line is read. Sizes 6 to 14, both fonts.
+/// Task 15b part 2c review (Strengths, Minor 5) and re-review r1 (Important 1): blocks side by
+/// side one line lower, bottom aligned, with a PO box, a c/o line, under bold headings, with a
+/// colon heading, with lines of one kind (two phones, two banks), a repeated word or an amount,
+/// or two addresses, in the body or at the foot of a page, are read block by block, or a loss
+/// says that they may be blocks; never mixed in silence; every line is read. Sizes 6 to 14,
+/// both fonts.
 #[test]
 fn side_blocks_offset_or_headed_are_apart_or_said() {
     let addr: &[&str] = &[
@@ -5180,7 +5207,78 @@ fn side_blocks_offset_or_headed_are_apart_or_said() {
     ];
     let h_reg: &[&str] = &["Register", "Amtsgericht Musterstadt", "HRB 00000"];
     type Blocks<'a> = Vec<(&'a [&'a str], usize, bool)>;
+    let sitz: &[&str] = &["Sitz Musterstadt", "Amtsgericht Musterstadt", "HRB 00000"];
+    let gf: &[&str] = &["Geschaeftsfuehrung", "Max Muster", "Erika Mustermann"];
+    let tel: &[&str] = &[
+        "Tel. 0000 000000",
+        "Tel. 0000 000001",
+        "info@muster.example",
+    ];
+    let colon: &[&str] = &[
+        "Bankverbindung:",
+        "Musterbank",
+        "IBAN DE00 0000 0000 0000 0000 00",
+    ];
+    let kap: &[&str] = &[
+        "Amtsgericht Musterstadt",
+        "HRB 00000",
+        "Stammkapital 25.000,00 EUR",
+    ];
+    let two_banks: &[&str] = &[
+        "Musterbank",
+        "IBAN DE00 0000 0000 0000 0000 00",
+        "Beispielbank",
+        "IBAN DE11 1111 1111 1111 1111 11",
+    ];
+    let addr2: &[&str] = &["Beispiel AG", "Beispielweg 2", "54321 Beispielort"];
+    let dup: &[&str] = &["Berliner Bank", "Berliner Str. 5", "12345 Musterstadt"];
+    let lastdup: &[&str] = &[
+        "Muster GmbH",
+        "Musterweg 1",
+        "12345 Musterstadt",
+        "Musterstadt",
+    ];
+    let contact: &[&str] = &["Telefon 0000 1", "Telefon 0000 2", "Fax 0000 3"];
     let cases: Vec<(&str, Blocks<'_>)> = vec![
+        (
+            "sitz repeats its end word",
+            vec![(addr, 0, false), (bank, 0, false), (sitz, 0, false)],
+        ),
+        (
+            "managers without a digit",
+            vec![(addr, 0, false), (bank, 0, false), (gf, 0, false)],
+        ),
+        (
+            "two phone lines",
+            vec![(addr, 0, false), (bank, 0, false), (tel, 0, false)],
+        ),
+        ("a colon heading", vec![(addr, 0, false), (colon, 0, false)]),
+        (
+            "a capital amount",
+            vec![(addr, 0, false), (bank, 0, false), (kap, 0, false)],
+        ),
+        ("two banks", vec![(addr, 0, false), (two_banks, 0, false)]),
+        ("two addresses", vec![(addr, 0, false), (addr2, 0, false)]),
+        (
+            "two addresses 3/3",
+            vec![(&addr[..3], 0, false), (addr2, 0, false)],
+        ),
+        (
+            "a repeated first word",
+            vec![(dup, 0, false), (bank, 0, false)],
+        ),
+        (
+            "a repeated last word",
+            vec![(lastdup, 0, false), (bank, 0, false), (sitz, 0, false)],
+        ),
+        (
+            "two phones",
+            vec![
+                (&addr[..3], 0, false),
+                (contact, 0, false),
+                (sitz, 0, false),
+            ],
+        ),
         ("top 4/3", vec![(addr, 0, false), (bank, 0, false)]),
         (
             "bank one lower",
@@ -5201,7 +5299,10 @@ fn side_blocks_offset_or_headed_are_apart_or_said() {
         ),
     ];
     let mut wrong = Vec::new();
-    for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+    for (size, top) in [6.0f32, 8.0, 10.0, 12.0, 14.0]
+        .into_iter()
+        .flat_map(|s| [700.0f32, 90.0].map(|t| (s, t)))
+    {
         for fonts in FONTS {
             for (name, blocks) in &cases {
                 let mut t = String::new();
@@ -5210,7 +5311,7 @@ fn side_blocks_offset_or_headed_are_apart_or_said() {
                     let mut widest: f32 = 0.0;
                     for (n, line) in lines.iter().enumerate() {
                         let f = if *bold && n == 0 { fonts.1 } else { fonts.0 };
-                        t += &show(f, size, x, 700.0 - 1.2 * size * (n + off) as f32, line);
+                        t += &show(f, size, x, top - 1.2 * size * (n + off) as f32, line);
                         widest = widest.max(common::font_width(f, line, size));
                     }
                     x += widest + 3.0 * size;

@@ -667,6 +667,84 @@ fn two_tables_or_note(v: &Variant, second_kind: Second) -> Sheet {
     s
 }
 
+/// The blocks of [`side_blocks`]: an address beside two banks; an address beside two phone
+/// lines and a register; an address beside a bank under a colon heading.
+const TWO_BANKS: [&[&str]; 2] = [
+    &[
+        "Muster GmbH",
+        "Musterweg 1",
+        "12345 Musterstadt",
+        "Deutschland",
+    ],
+    &[
+        "Musterbank",
+        "IBAN DE00 0000 0000 0000 0000 00",
+        "Beispielbank",
+        "IBAN DE11 1111 1111 1111 1111 11",
+    ],
+];
+const TWO_PHONES: [&[&str]; 3] = [
+    &["Muster GmbH", "Musterweg 1", "12345 Musterstadt"],
+    &["Telefon 0000 1", "Telefon 0000 2", "Fax 0000 3"],
+    &[
+        "Amtsgericht Musterstadt",
+        "HRB 00000",
+        "USt-IdNr. DE000000000",
+    ],
+];
+const COLON_HEADING: [&[&str]; 2] = [
+    &[
+        "Muster GmbH",
+        "Musterweg 1",
+        "12345 Musterstadt",
+        "Deutschland",
+    ],
+    &[
+        "Bankverbindung:",
+        "Musterbank",
+        "IBAN DE00 0000 0000 0000 0000 00",
+    ],
+];
+
+/// Task 15b part 2c re-review r1 (Important 1): `blocks` side by side at 7 points times the
+/// size factor from the baseline 650, 1.2 sizes apart, each three sizes right of the widest
+/// line of the one before: no block holds lines of two of them, and the loss of blocks side
+/// by side is said.
+fn side_blocks(v: &Variant, blocks: &[&[&str]]) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let size = 7.0 * k;
+    let mut t = String::new();
+    let mut x = 40.0;
+    let mut height = 0;
+    for lines in blocks {
+        let mut widest: f32 = 0.0;
+        for (n, line) in lines.iter().enumerate() {
+            t += &show(plain, size, x, 650.0 - 1.2 * size * n as f32, line);
+            widest = widest.max(font_width(plain, line, size));
+        }
+        height = height.max(lines.len());
+        x += widest + 3.0 * size;
+    }
+    let span = Span {
+        top: 650.0,
+        bottom: 650.0 - 1.2 * size * (height - 1) as f32,
+    };
+    let mut s = sheet(v, t, 500.0, Some(span));
+    for (a, left) in blocks.iter().enumerate() {
+        s.built.values.extend(left.iter().map(|l| l.to_string()));
+        for right in &blocks[a + 1..] {
+            for l in left.iter() {
+                for r in right.iter() {
+                    s.want.apart.push((l.to_string(), r.to_string()));
+                }
+            }
+        }
+    }
+    s.want.losses.push("side by side".into());
+    s
+}
+
 /// The lines of the prose of [`prose_beside`].
 const PROSE: [&str; 6] = [
     "Die Messung zeigt einen klaren Anstieg der Werte im",
@@ -934,6 +1012,21 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "a second table under a header of years after a bold total",
             axes: DOC_NEXT,
             draw: |v| (two_tables(v, false), None),
+        },
+        Shape {
+            name: "an address beside two banks",
+            axes: DOC_NEXT,
+            draw: |v| (side_blocks(v, &TWO_BANKS), None),
+        },
+        Shape {
+            name: "an address beside two phone lines and a register",
+            axes: DOC_NEXT,
+            draw: |v| (side_blocks(v, &TWO_PHONES), None),
+        },
+        Shape {
+            name: "an address beside a bank under a colon heading",
+            axes: DOC_NEXT,
+            draw: |v| (side_blocks(v, &COLON_HEADING), None),
         },
         Shape {
             name: "a heading over a rule on a prose page",

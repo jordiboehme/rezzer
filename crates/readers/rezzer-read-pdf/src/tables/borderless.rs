@@ -236,6 +236,12 @@ pub(super) fn borderless(
         {
             if verdict == Columns::Headed {
                 headed = true;
+            } else if verdict == Columns::Doubt {
+                found.uncertain.push(format!(
+                    "lines side by side on page {page} are read row by row, though a column of \
+                     them holds an address: they may be blocks side by side, whose lines do not \
+                     belong together"
+                ));
             } else {
                 found.uncertain.push(format!(
                     "blocks of short lines side by side on page {page} are read one block after \
@@ -1312,6 +1318,7 @@ fn side_blocks(
     body_of: &dyn Fn(usize) -> Option<u32>,
 ) -> Option<(usize, Vec<usize>, Columns)> {
     let ends = if y > z { vec![y, z] } else { vec![z] };
+    let mut doubt: Option<(usize, Vec<usize>)> = None;
     for end in ends {
         let (s, e) = (lines[a].start, lines[end - 1].end);
         if (s..e).any(|i| body_of(i).is_some()) {
@@ -1327,10 +1334,11 @@ fn side_blocks(
         }
         match address_columns(&columns) {
             Columns::Rows => {}
+            Columns::Doubt => doubt = doubt.or(Some((s, order))),
             verdict => return Some((s, order, verdict)),
         }
     }
-    None
+    doubt.map(|(s, order)| (s, order, Columns::Doubt))
 }
 
 /// The lines of a region by column (see [`columns_of`]), each column's line on each row, and
