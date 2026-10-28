@@ -4658,6 +4658,88 @@ const NOTICE_PAIRS: [(&str, &str); 6] = [
     ("Bearbeitung", "Max Mustermann"),
 ];
 
+/// The address, bank, register and contact blocks of carries C-5 and C-3, of 3 to 5 lines.
+const SIDE_BLOCKS: [&[&str]; 4] = [
+    &[
+        "Muster GmbH",
+        "Musterweg 1",
+        "12345 Musterstadt",
+        "Deutschland",
+    ],
+    &[
+        "Musterbank",
+        "IBAN DE00 0000 0000 0000 0000 00",
+        "BIC MUSTDEXXXXX",
+    ],
+    &[
+        "Amtsgericht Musterstadt",
+        "HRB 00000",
+        "USt-IdNr. DE000000000",
+        "Geschaeftsfuehrer Max Muster",
+        "Erika Mustermann",
+    ],
+    &[
+        "Tel. 0000 000000",
+        "E-Mail info@muster.example",
+        "Web www.muster.example",
+    ],
+];
+
+/// Carries C-5 and C-3 (ruling P6-X: a block that mixes two columns is a wrong reading order):
+/// blocks of an address, a bank, a register entry and a contact side by side on shared
+/// baselines, top aligned, three sizes apart, in the body at the top of a page or at its foot
+/// on a file of one page (no running footer), cut to their first 3 lines or whole: no block
+/// of the read holds lines of two of them, and each line is read. Sizes 6 to 14, both fonts.
+#[test]
+fn blocks_side_by_side_in_the_body_are_read_block_by_block() {
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+        for fonts in FONTS {
+            for (top, whole) in [(700.0, false), (700.0, true), (90.0, true)] {
+                let blocks: Vec<&[&str]> = SIDE_BLOCKS
+                    .iter()
+                    .map(|b| if whole { *b } else { &b[..3] })
+                    .collect();
+                let mut t = String::new();
+                let mut x = 40.0;
+                for lines in &blocks {
+                    let mut widest: f32 = 0.0;
+                    for (n, line) in lines.iter().enumerate() {
+                        t += &show(fonts.0, size, x, top - 1.2 * size * n as f32, line);
+                        widest = widest.max(common::font_width(fonts.0, line, size));
+                    }
+                    x += widest + 3.0 * size;
+                }
+                let out = common::read(&page_in(&t, Look::Plain));
+                let texts = texts_of(&out);
+                let at = format!("{size} pt, {fonts:?}, top {top}, whole {whole}");
+                for (c, lines) in blocks.iter().enumerate() {
+                    for line in lines.iter() {
+                        if !texts.iter().any(|t| t.contains(line)) {
+                            wrong.push(format!("{at}: {line:?} not read: {texts:?}"));
+                        }
+                    }
+                    for other in &blocks[c + 1..] {
+                        let mixed = texts.iter().find(|t| {
+                            lines.iter().any(|l| t.contains(l))
+                                && other.iter().any(|l| t.contains(l))
+                        });
+                        if let Some(m) = mixed {
+                            wrong.push(format!("{at}: two blocks in {m:?}"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
 /// Rulings P6-X4 and P6-X5 (review findings I-1 and M-6): the notice block in the body or wholly
 /// in a page band that is no running header or footer, the labels plain at x 40
 /// and the values bold flush right at x 300 or plain at x 160, on shared baselines: each

@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use super::*;
-use crate::layout::Gaps;
+use crate::layout::{ColumnLine, Columns, Gaps, Slot, address_columns};
 use crate::regions::{BASELINE_NEAR, Part, offset_baselines};
 
 /// A run of text of one line, apart from its neighbours by a gap: one cell's text.
@@ -202,6 +202,9 @@ pub(super) fn borderless(
     let mut titled: Vec<usize> = Vec::new();
     // Tables with close titles to cut, and where (see [`Grid`]).
     let mut title_cuts: Vec<(usize, Vec<TitleCut>)> = Vec::new();
+    // Blocks side by side read one after the other: where their runs start in the flow, and
+    // the runs in the order to read them.
+    let mut apart: Vec<(usize, Vec<usize>)> = Vec::new();
     for (g, (a, mut z, tail)) in regions.into_iter().enumerate() {
         if g % CHECK_EVERY == CHECK_EVERY - 1 && stop() {
             found.skipped.push(format!(
@@ -219,6 +222,21 @@ pub(super) fn borderless(
             continue;
         }
         let mut pieces: Vec<Vec<Piece>> = lines[a..z].iter().map(|l| pieces_of(flow, l)).collect();
+        // Blocks of an address, a bank or a register side by side are no table: their runs are
+        // read block by block.
+        if let Some((s, order, verdict)) =
+            side_blocks(flow, &lines, (a, z, tail.end.max(z)), &pieces, &body_of)
+        {
+            if verdict == Columns::ApartUnsure {
+                found.uncertain.push(format!(
+                    "two blocks of lines side by side on page {page} are read one after the \
+                     other, as blocks of an address, a bank or a register: if their lines are \
+                     labels and values, those pairs are not kept"
+                ));
+            }
+            apart.push((s, order));
+            continue;
+        }
         // A block of labels and values is a table of two columns.
         match key_values(flow, &lines, a, z, &pieces, &off) {
             KeyValues::No => {}
@@ -478,6 +496,15 @@ pub(super) fn borderless(
                  table: their text is read as it stands",
                 names.join(", ")
             ));
+        }
+    }
+    // The runs of blocks side by side go in the flow block by block; their places stay.
+    for (start, order) in apart {
+        let runs: Vec<Run> = order.iter().map(|&i| flow.runs[i].clone()).collect();
+        let slots: Vec<Slot> = order.iter().map(|&i| flow.slots[i]).collect();
+        for (k, (r, sl)) in runs.into_iter().zip(slots).enumerate() {
+            flow.runs[start + k] = r;
+            flow.slots[start + k] = sl;
         }
     }
     if claim.is_empty() {
@@ -1191,6 +1218,77 @@ fn side_by_side(flow: &Flow, lines: &[FlowLine], pieces: &[Vec<Piece>]) -> Optio
             .collect()
     };
     offset_baselines(&side(true), &side(false), size).then_some(mid)
+}
+
+/// Whether the lines `a..z` of a region (their `pieces`) are blocks side by side (see
+/// [`address_columns`]), with the lines of one piece under them up to `y` that end a longer
+/// block, or without those: where their runs start in the flow, the runs in the order to read
+/// them, block by block, and the verdict. Lines a frame of column titles over items holds are
+/// no such blocks.
+fn side_blocks(
+    flow: &Flow,
+    lines: &[FlowLine],
+    (a, z, y): (usize, usize, usize),
+    pieces: &[Vec<Piece>],
+    body_of: &dyn Fn(usize) -> Option<u32>,
+) -> Option<(usize, Vec<usize>, Columns)> {
+    let ends = if y > z { vec![y, z] } else { vec![z] };
+    for end in ends {
+        let (s, e) = (lines[a].start, lines[end - 1].end);
+        if (s..e).any(|i| body_of(i).is_some()) {
+            return None;
+        }
+        let mut all = pieces.to_vec();
+        all.extend(lines[z..end].iter().map(|l| pieces_of(flow, l)));
+        let (columns, order) = blocks_of(flow, &all);
+        let mut sorted = order.clone();
+        sorted.sort_unstable();
+        if !sorted.iter().copied().eq(s..e) {
+            continue;
+        }
+        match address_columns(&columns) {
+            Columns::Rows => {}
+            verdict => return Some((s, order, verdict)),
+        }
+    }
+    None
+}
+
+/// The lines of a region by column (see [`columns_of`]), each column's line on each row, and
+/// the region's runs column by column, each column top down. A piece over two columns, two
+/// pieces of a row in one column or a piece in no column gives no columns.
+fn blocks_of(flow: &Flow, pieces: &[Vec<Piece>]) -> (Vec<Vec<Option<ColumnLine>>>, Vec<usize>) {
+    let columns = columns_of(pieces);
+    let none = || (Vec::new(), Vec::new());
+    let mut lines: Vec<Vec<Option<ColumnLine>>> = vec![vec![None; pieces.len()]; columns.len()];
+    let mut runs: Vec<Vec<usize>> = vec![Vec::new(); columns.len()];
+    for (row, line) in pieces.iter().enumerate() {
+        for p in line {
+            let hit: Vec<usize> = (0..columns.len())
+                .filter(|&c| p.x1 > columns[c].0 && p.x0 < columns[c].1)
+                .collect();
+            let [c] = hit[..] else {
+                return none();
+            };
+            if lines[c][row].is_some() {
+                return none();
+            }
+            let inked: Vec<&Run> = flow.runs[p.start..p.end]
+                .iter()
+                .filter(|r| !r.text.trim().is_empty())
+                .collect();
+            if inked.is_empty() {
+                return none();
+            }
+            lines[c][row] = Some(ColumnLine {
+                text: text_of(flow, p.start, p.end),
+                bold: inked.iter().all(|r| r.bold),
+                size: inked.iter().map(|r| r.size).fold(0.0f32, f32::max),
+            });
+            runs[c].extend(p.start..p.end);
+        }
+    }
+    (lines, runs.into_iter().flatten().collect())
 }
 
 /// Rebuilds the grid of a region and tests it, or says why it is no table.
