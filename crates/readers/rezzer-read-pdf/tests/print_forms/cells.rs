@@ -309,13 +309,15 @@ pub(crate) struct Middle<'a> {
     lines: &'a [&'a str],
 }
 
-/// How the three cells of [`three_cells`] are drawn: boxes in a row, boxes in a column, or
-/// a strip between two rules with no rule between its cells.
+/// How the three cells of [`three_cells`] are drawn: boxes in a row, boxes in a column, a
+/// strip between two rules with no rule between its cells, or a strip between two rules with
+/// dividers between its cells and none at its ends (part 2e-1, item 2).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Cells {
     Row,
     Column,
     Strip,
+    Divided,
 }
 
 /// Three cells, `Name` over `Beispiel`, the cell `m`, and `Nr` over `4711`, the labels in
@@ -338,9 +340,15 @@ pub(crate) fn three_cells(m: Middle, size: f32, step: f32, font: &str, how: Cell
         _ => (x0 + width * n as f32, top),
     };
     match how {
-        Cells::Strip => {
+        Cells::Strip | Cells::Divided => {
             for y in [top, top - h] {
                 c += &format!("{x0} {y} m {} {y} l S\n", x0 + 3.0 * width);
+            }
+            if how == Cells::Divided {
+                for n in 1..3 {
+                    let x = x0 + width * n as f32;
+                    c += &format!("{x} {} m {x} {top} l S\n", top - h);
+                }
             }
         }
         _ => {
@@ -494,7 +502,8 @@ pub(crate) fn middle_matrix(cases: &[Case], hows: &[Cells]) -> Vec<String> {
 /// over an address at the labels' size in another family than the labels beside it is no
 /// label: it pairs with nothing and a loss names it. Since fix round 2 (ruling on I1) the same
 /// holds in the labels' own family: only a colon makes such a name a label. Boxes in a row and
-/// in a column, and a strip between two rules.
+/// in a column, and a strip between two rules (part 2e-1: also with dividers between its cells
+/// and none at its ends).
 #[test]
 fn a_name_in_another_font_family_is_no_label() {
     let cases: [Case; 3] = [
@@ -523,7 +532,10 @@ fn a_name_in_another_font_family_is_no_label() {
             Want::Said,
         ),
     ];
-    let wrong = middle_matrix(&cases, &[Cells::Row, Cells::Column, Cells::Strip]);
+    let wrong = middle_matrix(
+        &cases,
+        &[Cells::Row, Cells::Column, Cells::Strip, Cells::Divided],
+    );
     assert!(
         wrong.is_empty(),
         "{} wrong:\n{}",
@@ -634,7 +646,8 @@ fn a_box_at_the_value_size_is_left_out_of_its_row_and_said() {
 /// it, at the values' size, or a bold title: the cells are read apart, never line by line
 /// across them; `Name: Beispiel` and `Nr: 4711` pair; a name over an address pairs only on a
 /// colon (fix round 2, ruling on I1), a label over a value by its size, a title is in no pair,
-/// and else a loss names it.
+/// and else a loss names it. Part 2e-1 (item 2): so does a strip with dividers between its
+/// cells and none at its ends.
 #[test]
 fn a_strip_without_dividers_reads_its_cells_apart() {
     let cases: [Case; 11] = [
@@ -720,7 +733,7 @@ fn a_strip_without_dividers_reads_its_cells_apart() {
             Want::Pair,
         ),
     ];
-    let wrong = middle_matrix(&cases, &[Cells::Strip]);
+    let wrong = middle_matrix(&cases, &[Cells::Strip, Cells::Divided]);
     assert!(
         wrong.is_empty(),
         "{} wrong:\n{}",
@@ -749,6 +762,18 @@ pub(crate) fn open_strip_in(
     lf: &str,
     vf: &str,
 ) -> ReadOutcome {
+    strip_in(cells, size, step, (lf, vf), false)
+}
+
+/// [`open_strip_in`], with `divided` a divider between each two cells and none at the strip's
+/// ends (part 2e-1, item 2).
+pub(crate) fn strip_in(
+    cells: &[StripCell],
+    size: f32,
+    step: f32,
+    (lf, vf): (&str, &str),
+    divided: bool,
+) -> ReadOutcome {
     let value = size * step;
     let k = size / 8.0;
     let width = 120.0 * k;
@@ -757,6 +782,12 @@ pub(crate) fn open_strip_in(
     let mut c = String::from("0 0 0 RG 0.5 w\n");
     for y in [top, top - h] {
         c += &format!("{x0} {y} m {} {y} l S\n", x0 + width * cells.len() as f32);
+    }
+    if divided {
+        for n in 1..cells.len() {
+            let x = x0 + width * n as f32;
+            c += &format!("{x} {} m {x} {top} l S\n", top - h);
+        }
     }
     for (n, (head, hs, lines)) in cells.iter().enumerate() {
         let x = x0 + width * n as f32 + 4.0 * k;
@@ -781,6 +812,11 @@ pub(crate) fn open_strip_in(
 /// in another font with an empty field; only totals (rows of a label and an amount) are left to
 /// the table pass. Checked
 /// by the spans of the drawn texts. Sizes 6 to 14, steps 1.125 and 1.25, both data fonts.
+/// Part 2e-1 (items 2 and 4): each strip also with dividers between its cells and none at its
+/// ends, which read as the strip without them (they read no field and said nothing, and
+/// labels at the values' size read line by line across the dividers); and a name over an
+/// address beside a value of two lines, every cell left out, whose lines line up as if they
+/// were rows of a table (they read line by line across the cells).
 #[test]
 fn refused_strips_read_cell_by_cell() {
     // The cells, the value size as a step (0: the labels' size), the value font (none: the
@@ -792,7 +828,20 @@ fn refused_strips_read_cell_by_cell() {
         Option<&'static str>,
         &'static [&'static [&'static str]],
     );
-    let cases: [Refused; 8] = [
+    let cases: [Refused; 9] = [
+        (
+            "a name over an address beside a value of two lines",
+            &[
+                ("Muster GmbH", 0.9, &["Musterweg 1", "12345 Musterstadt"]),
+                ("", 1.0, &["Beispiel AG", "Probeweg 12"]),
+            ],
+            false,
+            None,
+            &[
+                &["Muster GmbH", "Musterweg 1", "12345 Musterstadt"],
+                &["Beispiel AG", "Probeweg 12"],
+            ],
+        ),
         (
             "a value of two lines",
             &[
@@ -896,10 +945,13 @@ fn refused_strips_read_cell_by_cell() {
         for step in [1.125f32, 1.25] {
             for font in ["F1", "F3"] {
                 let other = if font == "F1" { "F3" } else { "F1" };
-                for (name, cells, same, vf, want) in cases {
-                    let at = format!("{name} {size} pt x {step}, {font}");
+                for ((name, cells, same, vf, want), divided) in
+                    cases.iter().flat_map(|c| [(*c, false), (*c, true)])
+                {
+                    let at = format!("{name} {size} pt x {step}, {font}, divided {divided}");
                     let vf = vf.map_or(font, |_| other);
-                    let out = open_strip_in(cells, size, if same { 1.0 } else { step }, font, vf);
+                    let step = if same { 1.0 } else { step };
+                    let out = strip_in(cells, size, step, (font, vf), divided);
                     let want: Vec<Vec<&str>> = want.iter().map(|c| c.to_vec()).collect();
                     wrong.extend(
                         cells_wrong(&out, &want)
@@ -929,7 +981,8 @@ fn refused_strips_read_cell_by_cell() {
 /// holds words of two cells. Fix round 1 (rulings on concerns 1 and 3): one field beside the
 /// name pairs only when a colon ends its label, else it is refused, and the refused strip reads
 /// cell by cell. Fix round 2 (I1): a smaller label that pairs by its size gives a name beside
-/// it no label style to pair by. Sizes 6 to 14, steps 1.0625 to 1.25, both data fonts.
+/// it no label style to pair by. Sizes 6 to 14, steps 1.0625 to 1.25, both data fonts. Part
+/// 2e-1 (item 2): each strip also with dividers between its cells and none at its ends.
 #[test]
 fn strips_of_two_to_four_cells_read_their_cells_apart() {
     const NAME: StripCell = ("Muster GmbH", 0.9, &["Musterweg 1", "12345 Musterstadt"]);
@@ -973,10 +1026,12 @@ fn strips_of_two_to_four_cells_read_their_cells_apart() {
     for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
         for step in [1.0625f32, 1.125, 1.25] {
             for font in ["F1", "F3"] {
-                for (cells, pairs, never) in layouts {
+                for ((cells, pairs, never), divided) in
+                    layouts.iter().flat_map(|l| [(*l, false), (*l, true)])
+                {
                     let heads: Vec<&str> = cells.iter().map(|c| c.0).collect();
-                    let at = format!("{heads:?} {size} pt x {step}, {font}");
-                    let out = open_strip_of(cells, size, step, font);
+                    let at = format!("{heads:?} {size} pt x {step}, {font}, divided {divided}");
+                    let out = strip_in(cells, size, step, (font, font), divided);
                     let rows: Vec<String> = read_tables(&out)
                         .iter()
                         .flatten()

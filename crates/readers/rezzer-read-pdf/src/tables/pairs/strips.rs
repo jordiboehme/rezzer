@@ -68,7 +68,7 @@ pub(crate) fn field_frames(rules: &[Rule]) -> Vec<Frame> {
     let Ok(g) = grids(rules) else {
         return Vec::new();
     };
-    frames(&g.hs, &frame_tops(&g.hs, &g.groups, false), &g.vs).unwrap_or_default()
+    frames(&g.hs, &frame_tops(&g.hs, &g.vs, &g.groups, false), &g.vs).unwrap_or_default()
 }
 
 /// Whether the page's drawing shows a form: a drawn box its text is read in (`boxes`), a grid
@@ -86,7 +86,7 @@ pub(crate) fn form_drawn(rules: &[Rule], boxes: &[[f32; 4]]) -> bool {
     g.groups
         .iter()
         .any(|group| crate::regions::inner_ruled(&g, group))
-        || frames(&g.hs, &frame_tops(&g.hs, &g.groups, false), &g.vs)
+        || frames(&g.hs, &frame_tops(&g.hs, &g.vs, &g.groups, false), &g.vs)
             .is_some_and(|f| f.iter().any(|f| !f.dividers.is_empty()))
 }
 
@@ -118,9 +118,13 @@ pub(in crate::tables) enum Top {
 }
 
 /// What each of the horizontal lines `hs` may be to a frame of fields under it (see [`Top`]):
-/// with `lowest`, the lowest line of each grid of `groups` may top one too.
+/// with `lowest`, the lowest line of each grid of `groups` may top one too. A grid of two
+/// rules and dividers between them (`vs`), none at their ends and none running on over or
+/// under them (a row of fields open at both ends), is no grid to its top rule: the frame under
+/// it is a row of fields with dividers.
 pub(in crate::tables) fn frame_tops(
     hs: &[Seg],
+    vs: &[Seg],
     groups: &[(Vec<usize>, Vec<usize>)],
     lowest: bool,
 ) -> Vec<Top> {
@@ -128,6 +132,21 @@ pub(in crate::tables) fn frame_tops(
         .into_iter()
         .map(|t| if t { Top::No } else { Top::Free })
         .collect();
+    for (gh, gv) in groups {
+        let [a, b] = gh[..] else {
+            continue;
+        };
+        let (x0, x1) = (hs[a].from.min(hs[b].from), hs[a].to.max(hs[b].to));
+        let (y0, y1) = (hs[a].at.min(hs[b].at), hs[a].at.max(hs[b].at));
+        let inner = gv.iter().all(|&k| {
+            let v = &vs[k];
+            v.at > x0 + SNAP && v.at < x1 - SNAP && v.from >= y0 - SNAP && v.to <= y1 + SNAP
+        });
+        if inner {
+            let top = if hs[a].at > hs[b].at { a } else { b };
+            tops[top] = Top::Free;
+        }
+    }
     if lowest {
         for (gh, _) in groups {
             if let Some(&low) = gh.iter().min_by(|&&a, &&b| hs[a].at.total_cmp(&hs[b].at)) {
@@ -511,11 +530,6 @@ pub(in crate::tables) fn field_strips(
             bodies.push((ids, names));
             continue;
         }
-        // Rows of a table between rules (totals under line items, a larger total last) are no
-        // row of fields: their text is free for the table pass as it stands.
-        if table_rows(flow, &ids) {
-            continue;
-        }
         // Never a wrong pair: a run over a divider leaves the cells it stands in as text; the
         // other cells of the row still pair.
         let inner = &edges[1..edges.len() - 1];
@@ -549,7 +563,8 @@ pub(in crate::tables) fn field_strips(
             } else {
                 match parts_of(flow, cell) {
                     Some(parts) => {
-                        let beside = parts.len() >= 2;
+                        // Parts side by side in a cell, or cells parted by dividers.
+                        let beside = parts.len() >= 2 || cells.len() >= 2;
                         for part in parts {
                             match parse(flow, &part, how) {
                                 Parsed::Fields(f) if f.iter().all(|f| short(flow, f)) => {
@@ -605,6 +620,15 @@ pub(in crate::tables) fn field_strips(
                 }
             }
         }
+        // A cell left out as an address under a name is no row of a table or of totals,
+        // though its lines may line up with the lines beside it.
+        let address = left_out.iter().any(|l| l.0 == NAMED_ADDRESS);
+        // Rows of a table between rules (totals under line items, a larger total last) are no
+        // row of fields, whatever pairs their sizes make: their text is free for the table pass
+        // as it stands.
+        if !address && table_rows(flow, &ids) {
+            continue;
+        }
         // Text that is not fields makes the strip no row of fields; labels and values in the
         // wrong places beside fields read right make it one that is not clear, and that is
         // said. A row whose every field is not clear for a reason of fields is said too,
@@ -639,7 +663,7 @@ pub(in crate::tables) fn field_strips(
         // totals between rules (rows of a label and an amount), whose text is free for the
         // table pass as it stands: they are no row of fields, and no loss names them as one
         // (nor the note under them).
-        let to_tables = fields.is_empty() && totals_rows(flow, &ids);
+        let to_tables = fields.is_empty() && !address && totals_rows(flow, &ids);
         if !to_tables {
             for (why, names) in &left_out {
                 say(unsure, names, why);
@@ -1270,7 +1294,8 @@ fn beside_labels(flow: &Flow, parts: Vec<Vec<usize>>) -> Vec<Vec<usize>> {
 /// Reads the strips `g` of a group whose labels may stand under their values cell by cell,
 /// each strip between its own rules, and so the band of one strip's height over its top rule
 /// (the first values, when the labels stand under them) and under its bottom rule (the last
-/// labels), each with its cells by gutters, each line of a cell a block of its own.
+/// labels), each with its cells by gutters, each line of a cell a block of its own, and on
+/// a line each stretch of runs of one style (see [`by_style`]).
 fn read_group_cells(
     flow: &Flow,
     by_y: &ByY,
@@ -1285,9 +1310,9 @@ fn read_group_cells(
         cells
             .into_iter()
             .flat_map(|c| {
-                lines_of(flow, &c).into_iter().map(|mut l| {
+                lines_of(flow, &c).into_iter().flat_map(|mut l| {
                     l.sort_unstable();
-                    l
+                    by_style(flow, l)
                 })
             })
             .collect()
@@ -1312,6 +1337,28 @@ fn read_group_cells(
     for band in [(top + over, top, x0, x1), (bottom, bottom - under, x0, x1)] {
         apart.extend(cell_order(flow, by_y, band, &[], busy).map(by_line));
     }
+}
+
+/// The runs `line` of one line (in flow order) parted where the style changes (see
+/// [`style_of`]; white space goes with the runs before it): a label and a value line of
+/// another field that stand on one line (a value printed over the label of the row above it)
+/// are two texts, never one word.
+fn by_style(flow: &Flow, line: Vec<usize>) -> Vec<Vec<usize>> {
+    let mut out: Vec<(Option<Style>, Vec<usize>)> = Vec::new();
+    for i in line {
+        let r = &flow.runs[i];
+        let style = inked(r).then(|| style_of(r));
+        match out.last_mut() {
+            Some((s, runs)) if style.is_none() || *s == style || s.is_none() => {
+                if s.is_none() {
+                    *s = style;
+                }
+                runs.push(i);
+            }
+            _ => out.push((style, vec![i])),
+        }
+    }
+    out.into_iter().map(|(_, runs)| runs).collect()
 }
 
 /// Reads the strip `s` of fields cell by cell (see [`cell_order`]): its cells go to `apart`.

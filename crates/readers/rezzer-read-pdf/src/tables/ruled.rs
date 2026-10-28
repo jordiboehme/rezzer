@@ -91,7 +91,7 @@ pub(super) fn ruled(
     let frames = cut_runs(
         page,
         flow,
-        (&hs, &vs, &frame_tops(&hs, &groups, true)),
+        (&hs, &vs, &frame_tops(&hs, &vs, &groups, true)),
         &grids,
         found,
     );

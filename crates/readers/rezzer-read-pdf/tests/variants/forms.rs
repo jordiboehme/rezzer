@@ -323,6 +323,37 @@ fn two_line_strip(g: &Geo, b: &mut Built, top: f32) -> f32 {
     top - h
 }
 
+/// Part 2e-1 (item 2, part 2d review M2): three fields between two rules with dividers
+/// between them and none at the rules' ends, labels over their values: a row of fields like
+/// a strip with its ends drawn; every field pairs.
+fn divided_strip(g: &Geo, b: &mut Built, top: f32) -> f32 {
+    let h = 2.4 * g.data;
+    let (x0, x1) = (g.col(0) - 0.12, g.col(60) - 0.12);
+    b.page.template += &g.hrule(x0, x1, top);
+    b.page.template += &g.hrule(x0, x1, top - h);
+    for k in [20usize, 40] {
+        b.page.template += &g.vrule(g.col(k) - 0.12, top - h, top);
+    }
+    let mut parts = Vec::new();
+    for (k, l, v) in [
+        (0usize, "Personalnummer", "00000"),
+        (20, "Eintritt", "01.01.2020"),
+        (40, "Kostenstelle", "4711"),
+    ] {
+        b.page.template += &label(
+            g.col(k) + 0.3 * g.label,
+            top - 0.9 * g.label - 0.3 * g.data,
+            g.label,
+            l,
+        );
+        parts.push((k + 1, v));
+        b.values.push(v.to_string());
+        b.fields.push((l, Ok(Some(v))));
+    }
+    g.values(b, top - h + 0.3 * g.data, &parts);
+    top - h
+}
+
 /// Task 15b part 2d fix round 4: two named addresses side by side between two rules, a name at
 /// the labels' size over a street and a town each: neither is a label (no colon), both are left
 /// out with a loss, and the strip is read cell by cell.
@@ -524,6 +555,32 @@ fn labels_under(v: &Variant) -> (Sheet, Option<Extent>) {
 
 /// The digits of a boxed field: one box a digit of the data pitch from data column `k`, its
 /// data line at `y`, and a drawn mark before each of `before`.
+/// Part 2e-1 (item 3): labels under their values with a second line of the first value set on
+/// the line of the label `Name` over it: the grid is not clear (refused with a loss) and is read
+/// cell by cell; the value line is a text of its own, never glued to the label.
+fn labels_under_two_lines(v: &Variant) -> (Sheet, Option<Extent>) {
+    let g = v.geo();
+    let t = top(&g);
+    let s = Rows {
+        under: true,
+        ..ROWS
+    };
+    let all = ["Name", "Ort", "Strasse", "Hausnr", "PLZ", "Land"];
+    let mut b = rows_page(&g, &s, &THREE_ROWS, &all);
+    let rule = t - 2.4 * g.data;
+    let y = rule + 0.17 * g.data + 0.95 * g.data;
+    b.page.template += &crate::draw::courier(g.col(0) + 0.3 * g.pitch(), y, g.data, "Hinterhaus");
+    b.values.push("Hinterhaus".into());
+    let mut sheet = Sheet::new(b);
+    sheet.want.cells.push(vec!["Hinterhaus".into()]);
+    let e = Extent {
+        top: t,
+        bottom: t - 2.0 * 2.4 * g.data - 1.2 * g.data,
+        right: g.col(50),
+    };
+    (sheet, Some(e))
+}
+
 fn boxed_digits(g: &Geo, b: &mut Built, k: usize, y: f32, digits: &str, before: &[usize]) {
     for i in 0..digits.len() {
         let x = g.col(k + i);
@@ -852,6 +909,14 @@ pub(crate) fn shapes() -> Vec<Shape> {
             },
         },
         Shape {
+            name: "a strip with dividers and no ends",
+            axes: Axes {
+                look: NO_RISING,
+                ..ALL
+            },
+            draw: |v| drawn(v, divided_strip, 60),
+        },
+        Shape {
             name: "two named addresses between rules",
             axes: Axes {
                 look: NO_RISING,
@@ -970,6 +1035,11 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "rows of fields",
             axes: ALL,
             draw: rows,
+        },
+        Shape {
+            name: "labels under values with a second value line on a label's line",
+            axes: ALL,
+            draw: labels_under_two_lines,
         },
         Shape {
             name: "labels under values",

@@ -316,6 +316,19 @@ pub(crate) const KNOWN: &[Known] = &[
         why: "part 3: boxes whose bold label and plain value have one size do not pair (their loss: its label and its value differ in weight, slant or font only), though the box with its label alone shows the page's one label style",
     },
     Known {
+        shape: "labels under values with a second value line on a label's line",
+        variants: &[
+            "beside",
+            "scale 0.7, larger text, courier, rising, turned 270, beside, two pages",
+            "scale 0.75, smaller text, proportional, dashed, turned 90, beside",
+            "scale 1.5, dotted, turned 90, beside",
+            "times labels, thick, beside",
+        ],
+        broken: &[Inv::ClearPairs, Inv::Cells],
+        cause: Cause::New,
+        why: "P6-X (found by part 2e-1, the same at b0a0bb1): the block of fields beside the grid stands on the grid's rows, so `connected` joins its strips to the grid's group; the grid is not clear (a value of two lines), and the whole group is refused and read line by line in each cell, over the width of both: the beside block's fields do not pair and its last label `Zeichen` reads in one block with the grid's last labels `PLZ Land`. Splitting a group whose blocks read in different ways is done only for labels under against labels over (part 2b, group 5), as the parts of one header grid read Unclear and Over",
+    },
+    Known {
         shape: "title beside a field list",
         variants: &[
             "row under",

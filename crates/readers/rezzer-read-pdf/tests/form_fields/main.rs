@@ -2008,7 +2008,9 @@ fn turned_forms_never_pair_wrongly() {
 /// under the rule their values stand on, not clear (a value of two lines, or an empty first
 /// value), is refused with a loss and read cell by cell, each line of a cell a block of its
 /// own: no block holds a value of one field and a label or value of another, in every look,
-/// with and without dividers. Found by the spans of the drawn texts.
+/// with and without dividers. Found by the spans of the drawn texts. Part 2e-1 (item 3): the
+/// second value line `Hinterhaus`, set on the line of the label `Name` over it, is a text of
+/// its own too, not glued to the label (`NameHinterhaus`).
 #[test]
 fn a_refused_grid_of_labels_under_values_reads_cell_by_cell() {
     let all = ["Name", "Ort", "Strasse", "Hausnr", "PLZ", "Land"];
@@ -2034,6 +2036,7 @@ fn a_refused_grid_of_labels_under_values_reads_cell_by_cell() {
                     let y = rule + 0.17 * g.data + 0.95 * g.data;
                     b.page.template +=
                         &draw::courier(g.col(0) + 0.3 * g.pitch(), y, g.data, "Hinterhaus");
+                    texts.push("Hinterhaus");
                 }
                 let out = read_pages(&[&b]);
                 let at = format!("{name}, dividers {dividers}, {look}");

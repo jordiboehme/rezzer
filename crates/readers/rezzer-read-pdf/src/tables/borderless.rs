@@ -4,7 +4,7 @@
 
 //! Tables without rules, from the white space between columns.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::*;
 use crate::layout::{ColumnLine, Columns, Gaps, Slot, address_columns};
@@ -98,7 +98,7 @@ pub(super) fn borderless(
     let mut regions: Vec<(usize, usize, Tail)> = Vec::new();
     // The lines where a region was parted from the one over it: by a blank row before a header
     // of its own or other columns, or by a rule that ends a table.
-    let mut parted: Vec<usize> = Vec::new();
+    let mut parted: HashSet<usize> = HashSet::new();
     // The first runs of lines of text after a blank row over rows of their region's shape.
     let mut maybe_heads: Vec<usize> = Vec::new();
     let mut i = 0;
@@ -135,11 +135,11 @@ pub(super) fn borderless(
             if blank {
                 match header_line(flow, &lines[i..end], cur, &lines[end + 1]) {
                     Head::Header => {
-                        parted.push(end);
+                        parted.insert(end);
                         break;
                     }
                     _ if !in_columns(flow, &lines[i..end], cur) => {
-                        parted.push(end);
+                        parted.insert(end);
                         break;
                     }
                     // A line of text over rows of the region's own shape goes on as a row of
