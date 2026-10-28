@@ -2534,9 +2534,22 @@ fn heading_block(
     }
     let column = &all[over..j];
     let items = block_listed(column);
+    // Lines that each stand in pieces apart by a cell gap (cells of columns) are no title.
+    let pieced = |l: &Line<'_>| {
+        let mut end: Option<f32> = None;
+        l.runs
+            .iter()
+            .filter(|r| !r.text.trim().is_empty())
+            .any(|r| {
+                let gap = end.is_some_and(|e| r.x - e > crate::order::PIECE_GAP * r.size);
+                end = Some(r.x + r.w);
+                gap
+            })
+    };
     let apart = (1..block.len()).any(|k| lines_apart(block, k, items))
-        || wraps(column, &ink_edges(column), false).contains(&false);
-    if (small || column.len() >= 3) && apart {
+        || wraps(column, &ink_edges(column), false).contains(&false)
+        || (block.len() >= 2 && block.iter().all(pieced));
+    if (small || column.len() >= 3 || block.iter().all(pieced)) && apart {
         return (j, false);
     }
     let texts: Vec<&str> = block.iter().map(|l| l.text.as_str()).collect();

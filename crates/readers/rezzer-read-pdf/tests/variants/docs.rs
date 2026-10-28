@@ -620,6 +620,30 @@ fn cut_rows(v: &Variant) -> Sheet {
     s
 }
 
+/// Part 2e-2 (item 2): two lines in three columns alone in the body, titles over one row of
+/// values, at 8 points times the size factor: a table of a header and one row.
+fn two_lines_in_columns(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let size = 8.0 * k;
+    let top = 640.0;
+    let rows = [["Name", "Ort", "Nr"], ["Beispiel", "Musterstadt", "4711"]];
+    let mut t = String::new();
+    for (n, row) in rows.iter().enumerate() {
+        for (x, c) in [40.0f32, 200.0, 400.0].iter().zip(row) {
+            t += &show(plain, size, *x, top - 1.3 * size * n as f32, c);
+        }
+    }
+    let bottom = top - 2.6 * size;
+    let mut s = sheet(v, t, 420.0, Some(Span { top, bottom }));
+    s.want.tables.push(
+        rows.iter()
+            .map(|r| r.iter().map(|c| c.to_string()).collect())
+            .collect(),
+    );
+    s
+}
+
 /// Part 2e-1 (items 6 and 7): line items without rules at 8 points times the size factor, a
 /// bold header `Pos`, `Zeitraum`, `Basis` and `Betrag`; with `range` the first two periods
 /// wrap after their dash (`01.10.2026 -` over `31.10.2026`) and the cell keeps the space after
@@ -1613,6 +1637,11 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "a row label cut by a hyphen and a row of numbers over prose",
             axes: DOC,
             draw: |v| (cut_rows(v), None),
+        },
+        Shape {
+            name: "two lines in three columns alone in the body",
+            axes: DOC,
+            draw: |v| (two_lines_in_columns(v), None),
         },
         Shape {
             name: "line items with wrapped date ranges",

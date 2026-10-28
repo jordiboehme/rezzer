@@ -941,7 +941,7 @@ pub(crate) fn shapes() -> Vec<Shape> {
                 ..ALL
             },
             draw: |v| {
-                with_cells(
+                let (mut s, e) = with_cells(
                     v,
                     one_style_box_column,
                     20,
@@ -950,7 +950,12 @@ pub(crate) fn shapes() -> Vec<Shape> {
                         &["Eintritt", "01.01.2020"],
                         &["Klasse", "1"],
                     ],
-                )
+                );
+                // Part 2e-2 (item 2): read box by box, and that is said.
+                s.want
+                    .losses
+                    .push("the drawn boxes Personal, Eintritt, Klasse on page".into());
+                (s, e)
             },
         },
         Shape {

@@ -255,6 +255,24 @@ pub(super) fn borderless(
             continue;
         }
         let mut pieces: Vec<Vec<Piece>> = lines[a..z].iter().map(|l| pieces_of(flow, l)).collect();
+        // Two lines alone whose pieces stand in the same three columns or more, piece for piece,
+        // the first of titles without a digit over a row that holds one (`Pos Datum Betrag`
+        // over `1 15.01.2026 9,99`), are a table of a header and one row, or its refusal is
+        // said.
+        let digit = |p: &Piece| {
+            flow.runs[p.start..p.end]
+                .iter()
+                .any(|r| r.text.chars().any(|c| c.is_ascii_digit()))
+        };
+        let aligned = z - a == 2
+            && pieces[0].len() >= 3
+            && pieces[0].len() == pieces[1].len()
+            && pieces[0]
+                .iter()
+                .zip(&pieces[1])
+                .all(|(p, q)| p.x0 < q.x1 && q.x0 < p.x1)
+            && !pieces[0].iter().any(digit)
+            && pieces[1].iter().any(digit);
         // Blocks of an address, a bank or a register side by side are no table: their runs are
         // read block by block. Rows were possible too, so that is said. Under a header row of
         // their headings, they are read as the table they make, with the doubt said.
@@ -394,7 +412,11 @@ pub(super) fn borderless(
             let (caption_line, figure_caption) =
                 captions_near(flow, &lines, &by_y, b, &line_sizes, &in_region);
             let table_caption = caption_line.is_some();
-            let rows_needed = if table_caption || after_table { 2 } else { 3 };
+            let rows_needed = if table_caption || after_table || aligned {
+                2
+            } else {
+                3
+            };
             let verdict =
                 grid_of(flow, &lines[a..z], pieces, rows_needed, table_caption).and_then(|grid| {
                     if figure_caption {
@@ -513,7 +535,7 @@ pub(super) fn borderless(
             let looks = if after_table {
                 z - a >= 2 && columned >= 2
             } else {
-                z - a >= 3 && columned >= 3
+                (z - a >= 3 && columned >= 3) || aligned
             };
             if looks && !said && !quietly {
                 found.quiet.push((lo, why, Refused::Region));

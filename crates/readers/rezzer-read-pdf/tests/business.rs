@@ -2301,6 +2301,66 @@ fn a_cut_row_label_and_a_row_of_numbers_stay_apart_from_the_next_line() {
     );
 }
 
+/// Task 15b part 2e-2 (item 2, part 2e-1 concern 2; ruling P6-X): two lines whose pieces stand
+/// in the same three columns, titles without a digit over a row with one (`Name Ort Nr` over
+/// `Beispiel Musterstadt 4711`), alone in the body or between two rules with no dividers, are a
+/// table of a header and one row (or, refused, that is said), and the two lines are never one
+/// line or one heading. Sizes 6 to 14, both fonts.
+#[test]
+fn two_lines_in_three_columns_alone_are_a_table() {
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 9.0, 10.0, 12.0, 14.0] {
+        for font in ["FL", "FT"] {
+            for ruled in [false, true] {
+                let p = 1.3 * size;
+                let mut t = String::new();
+                for (n, row) in [["Name", "Ort", "Nr"], ["Beispiel", "Musterstadt", "4711"]]
+                    .iter()
+                    .enumerate()
+                {
+                    for (x, c) in [40.0f32, 200.0, 400.0].iter().zip(row) {
+                        t += &show(font, size, *x, 700.0 - p * n as f32, c);
+                    }
+                }
+                if ruled {
+                    let (over, under) = (700.0 + 1.2 * size, 700.0 - p - 0.5 * size);
+                    t += &format!(
+                        "0 0 0 RG 0.5 w 36 {over} m 520 {over} l S 36 {under} m 520 {under} l S\n"
+                    );
+                }
+                let out = common::read(&page_in(&t, Look::Plain));
+                let at = format!("{size}, {font}, ruled {ruled}");
+                let want = vec![
+                    vec!["Name".to_string(), "Ort".into(), "Nr".into()],
+                    vec!["Beispiel".to_string(), "Musterstadt".into(), "4711".into()],
+                ];
+                let table = tables(&out).iter().any(|t| t.1 == want);
+                let said = out
+                    .document
+                    .losses
+                    .iter()
+                    .any(|l| l.what.contains("is not read as a table"));
+                if !table && !said {
+                    wrong.push(format!(
+                        "{at}: neither a table nor said: {:?}",
+                        tables(&out)
+                    ));
+                }
+                let md = common::markdown(&out);
+                if md.lines().any(|l| l.contains("Nr Beispiel")) {
+                    wrong.push(format!("{at}: the two lines are one"));
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
 /// Task 15b part 2e-1 (item 6, part 2b re-review r1; ruling P6-X): a table of taxes without
 /// rules, an amount alone under an amount of its column (a row of its own), then two lines of
 /// one amount each in two other columns under the last row (`5,00` under the base, `125,00`

@@ -357,6 +357,35 @@ pub(crate) fn box_pairs(
             unsure.push((b, NO_LABEL));
         }
     }
+    // Boxes side by side or one under the other that each hold a short line over a line, all
+    // in one style, look like fields whose label is not set apart from its value: they are
+    // read box by box, and that is said.
+    let one_style = |b: usize| {
+        let ids = inked_of(b);
+        let lines = lines_of(flow, &ids);
+        let first = lines.first().map(|l| words(flow, l)).unwrap_or_default();
+        lines.len() == 2
+            && fields[b].as_ref().is_none_or(|f| f.value.is_empty())
+            && !unsure.iter().any(|u| u.0 == b)
+            && !paired.contains(&b)
+            && first.chars().count() <= LABEL_CHARS
+            && first.split_whitespace().count() <= LABEL_WORDS
+            && ids
+                .windows(2)
+                .all(|w| style_of(&flow.runs[w[0]]) == style_of(&flow.runs[w[1]]))
+    };
+    let alike: Vec<usize> = (0..boxes.len()).filter(|&b| one_style(b)).collect();
+    let mut lone: Vec<usize> = alike
+        .iter()
+        .copied()
+        .filter(|&b| alike.iter().any(|&o| o != b && near(b, o)))
+        .collect();
+    // In reading order: top down, then left to right.
+    lone.sort_by(|&p, &q| {
+        boxes[q][3]
+            .total_cmp(&boxes[p][3])
+            .then(boxes[p][0].total_cmp(&boxes[q][0]))
+    });
     let said_of = |b: &usize, why: &&str| {
         paired.iter().any(|&p| near(*b, p))
             || ((*why == WEIGHT_ONLY || *why == ADDRESS)
@@ -395,6 +424,16 @@ pub(crate) fn box_pairs(
         said.push(format!(
             "the drawn box{s} {} beside label and value fields on page {page} {verb} not read as \
              a label and its value ({why}): the text is read as it stands",
+            names.join(", ")
+        ));
+    }
+    let names: Vec<String> = lone
+        .iter()
+        .filter_map(|&b| lines_of(flow, &inked_of(b)).first().map(|l| words(flow, l)))
+        .collect();
+    if !names.is_empty() {
+        said.push(format!(
+            "the drawn boxes {} on page {page} are not read as labels and their values              ({NO_LABEL}): the text of each box is read as it stands",
             names.join(", ")
         ));
     }
