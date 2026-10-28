@@ -52,8 +52,14 @@ pub(crate) enum Inv {
     DocTitle,
     /// The document date is found.
     DocDate,
-    /// Each code is found once.
+    /// Each code is found as many times as it is drawn.
     Code,
+    /// A code is never found more often than it is drawn, and a page with a code not found
+    /// says that a code there is not decoded (P6-X: never a value doubled or lost silently).
+    CodeSaid,
+    /// A code found with a box is boxed by the bars of a code drawn: within a point at scale
+    /// 1, more on a larger page.
+    CodeBox,
     /// The page needs vision exactly when it should.
     Vision,
     /// Each expected loss is said.
@@ -70,7 +76,12 @@ impl Inv {
     pub(crate) fn wrong(self) -> bool {
         matches!(
             self,
-            Inv::RightPair | Inv::ValueOnce | Inv::WrongValue | Inv::Apart | Inv::Cells
+            Inv::RightPair
+                | Inv::ValueOnce
+                | Inv::WrongValue
+                | Inv::Apart
+                | Inv::Cells
+                | Inv::CodeSaid
         )
     }
 }
@@ -410,8 +421,9 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
             }
         }
     }
-    // The codes of this page: those of the assets its picture blocks show (a code drawn the
-    // same on every page is one asset, shown on each page).
+    // The codes of this page: those of the assets its picture blocks show, once for each
+    // block (a code drawn the same on every page, or twice on one, is one asset, shown at
+    // each place).
     let shown: Vec<&str> = blocks
         .iter()
         .filter_map(|b| match b {
@@ -419,21 +431,58 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
             _ => None,
         })
         .collect();
-    let found: Vec<(String, String)> = out
-        .document
-        .assets
+    let assets: Vec<&rezzer_model::Asset> = shown
         .iter()
-        .filter(|a| shown.contains(&a.id.as_str()))
+        .filter_map(|id| out.document.assets.iter().find(|a| a.id == *id))
+        .collect();
+    let found: Vec<(String, String)> = assets
+        .iter()
         .flat_map(|a| a.codes.iter())
         .map(|c| (c.symbology.clone(), c.text.clone().unwrap_or_default()))
         .collect();
+    let unread = assets.iter().any(|a| a.code_unread);
+    let mut checked: Vec<&(String, String)> = Vec::new();
     for c in &want.codes {
+        if checked.contains(&c) {
+            continue;
+        }
+        checked.push(c);
+        let drawn = want.codes.iter().filter(|w| *w == c).count();
         let k = found.iter().filter(|f| *f == c).count();
-        if k != 1 {
+        if k != drawn {
             broken.push(Broken(
                 Inv::Code,
-                format!("page {p}: {c:?} found {k} times: {found:?}"),
+                format!("page {p}: {c:?} found {k} times, drawn {drawn}: {found:?}"),
             ));
+        }
+        if k > drawn || (k < drawn && !unread) {
+            broken.push(Broken(
+                Inv::CodeSaid,
+                format!(
+                    "page {p}: {c:?} found {k} times, drawn {drawn}, a code not decoded said: \
+                     {unread}"
+                ),
+            ));
+        }
+    }
+    let scale = sheet.built.page.scale;
+    for a in &assets {
+        for c in &a.codes {
+            let Some(b) = c.bounds else { continue };
+            let near = |bars: &[f32; 4]| {
+                b.iter()
+                    .zip(bars)
+                    .all(|(got, want)| (got - want * scale).abs() <= scale.max(1.0))
+            };
+            if !want.code_bars.is_empty() && !want.code_bars.iter().any(near) {
+                broken.push(Broken(
+                    Inv::CodeBox,
+                    format!(
+                        "page {p}: a code boxed {b:?}, the bars are {:?} at scale {scale}",
+                        want.code_bars
+                    ),
+                ));
+            }
         }
     }
     for f in &found {
