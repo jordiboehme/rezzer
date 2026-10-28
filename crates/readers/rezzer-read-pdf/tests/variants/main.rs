@@ -295,6 +295,9 @@ shape_tests! {
     letter_head => "letter head",
     letter_head_with_a_larger_name => "letter head with a larger name",
     letter_head_with_the_date_beside_the_name => "letter head with the date beside the name",
+    line_items_with_a_larger_total_between_rules => "line items with a larger total between rules over a note",
+    line_items_with_a_smaller_first_total_between_rules => "line items with a smaller first total between rules over a note",
+    a_notice_band_between_rules => "a notice band between rules",
     line_items_with_totals_between_rules => "line items with totals between rules over a note",
     line_items_with_an_end_rule => "line items with an end rule",
     line_items_with_row_rules => "line items with row rules",
@@ -327,4 +330,30 @@ shape_tests! {
     barcode_module_12_height_40 => "barcode, module 1.2, height 40",
     barcode_module_12_height_80 => "barcode, module 1.2, height 80",
     barcode_module_08_height_60 => "barcode, module 0.8, height 60",
+}
+
+/// Task 15b part 2d fix round 3 (M1): the cell check counts the texts it leaves out, and a list
+/// of cells whose every text is left out (drawn twice, or inside another text) is caught, so the
+/// check never passes empty; a glued value is still found.
+#[test]
+fn the_cell_check_never_passes_empty() {
+    let units = vec!["Name | Beispiel".to_string(), "Musterweg 14711".to_string()];
+    let cells = vec![
+        vec!["Name".to_string(), "Beispiel".to_string()],
+        vec!["Musterweg 1".to_string()],
+        vec!["4711".to_string()],
+    ];
+    let none = |_: &str| false;
+    let found = common::cells_check(&units, &cells, &[true, true, true], &none);
+    assert_eq!(found.skipped, [0, 0, 0]);
+    assert!(
+        found.wrong.iter().any(|w| w.contains("holds texts")),
+        "{:?}",
+        found.wrong
+    );
+    let twice = |_: &str| true;
+    let found = common::cells_check(&units, &cells, &[true, true, true], &twice);
+    assert_eq!(found.skipped, [2, 1, 1]);
+    assert!(found.all_skipped(&cells, &[true, true, true]));
+    assert!(!found.all_skipped(&cells, &[false, false, false]));
 }

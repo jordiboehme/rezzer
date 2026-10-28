@@ -405,6 +405,8 @@ pub(crate) struct Want {
     pub vision: Option<bool>,
     /// Parts of the text of losses the page must have.
     pub losses: Vec<String>,
+    /// Parts of the text of losses the page must not have (noise where nothing is lost).
+    pub no_losses: Vec<String>,
     /// The texts drawn in one cell each, in the order to read them (Task 15b part 2d fix
     /// round 2): besides the fields' own cells (a label and its value), cells whose texts the
     /// fields do not list, an address under a name, a title.

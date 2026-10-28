@@ -253,8 +253,25 @@ fn check_cells(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Brok
             != 1
     };
     let units = crate::common::read_units(page_blocks(out, n));
-    for w in crate::common::cells_apart(&units, &cells, &ordered, &ambiguous) {
+    let found = crate::common::cells_check(&units, &cells, &ordered, &ambiguous);
+    for w in &found.wrong {
         broken.push(Broken(Inv::Cells, format!("page {}: {w}", n + 1)));
+    }
+    // The cells a shape lists are checked: a list whose every text is left out (drawn twice or
+    // inside other text) checks nothing, so it fails.
+    let listed: Vec<bool> = (0..cells.len())
+        .map(|c| c < sheet.want.cells.len())
+        .collect();
+    if found.all_skipped(&cells, &listed) {
+        broken.push(Broken(
+            Inv::Cells,
+            format!(
+                "page {}: every text of the listed cells is left out of the check ({} texts): \
+                 each is drawn more than once or inside other text",
+                n + 1,
+                found.skipped.iter().sum::<usize>()
+            ),
+        ));
     }
 }
 
@@ -437,6 +454,18 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
             broken.push(Broken(
                 Inv::LossSaid,
                 format!("page {p}: no loss {l:?}: {:?}", out.document.losses),
+            ));
+        }
+    }
+    for l in &want.no_losses {
+        if let Some(x) =
+            out.document.losses.iter().find(|x| {
+                x.what.contains(l.as_str()) && (x.location == loc || x.location.is_empty())
+            })
+        {
+            broken.push(Broken(
+                Inv::NoLoss,
+                format!("page {p}: a loss {l:?} that is noise: {:?}", x.what),
             ));
         }
     }

@@ -6010,7 +6010,10 @@ fn recipient_name_over_a_longer_line_is_not_the_title() {
 /// label, a bold total), between the rule under the items and a rule under a smaller note: the
 /// totals read as one table of their four rows, as at 926b275, and no loss calls them a row of
 /// fields. Sizes 6 to 14, both fonts, the totals 1.5 or 2 rows under the items, the total row
-/// one or 1.5 rows under the tax rows, the labels at three places.
+/// one or 1.5 rows under the tax rows, the labels at three places. Fix round 3 (C1): so do totals
+/// whose rows are not of one size (the total 1.15 or 1.25 times larger, a bold first row with a
+/// larger total, a first row at 0.85); no loss calls them three styles (the older `UNDER_NONE`
+/// loss that names the note is part 2e's).
 #[test]
 fn totals_between_rules_under_line_items_stay_one_table() {
     let totals = [
@@ -6023,13 +6026,22 @@ fn totals_between_rules_under_line_items_stay_one_table() {
         .iter()
         .map(|(l, v, _)| vec![(*l).to_string(), (*v).to_string()])
         .collect();
+    // The size factor of each totals row and whether the first row is bold.
+    let looks: [(&str, [f32; 4], bool); 5] = [
+        ("one size", [1.0, 1.0, 1.0, 1.0], false),
+        ("total 1.15", [1.0, 1.0, 1.0, 1.15], false),
+        ("total 1.25", [1.0, 1.0, 1.0, 1.25], false),
+        ("bold first, total 1.25", [1.0, 1.0, 1.0, 1.25], true),
+        ("first 0.85", [0.85, 1.0, 1.0, 1.0], false),
+    ];
     let mut wrong = Vec::new();
     for size in [6.0f32, 8.0, 9.0, 10.0, 12.0, 14.0] {
         for fonts in FONTS {
-            for (over, total, at) in [1.5f32, 2.0]
+            for (over, total, at, (look, factors, bold_first)) in [1.5f32, 2.0]
                 .into_iter()
                 .flat_map(|o| [1.0f32, 1.5].map(|t| (o, t)))
                 .flat_map(|(o, t)| [1usize, 2, 3].map(|a| (o, t, a)))
+                .flat_map(|(o, t, a)| looks.map(|l| (o, t, a, l)))
             {
                 let pitch = 1.25 * size;
                 let k = size / 9.0;
@@ -6065,9 +6077,14 @@ fn totals_between_rules_under_line_items_stay_one_table() {
                     if n == 3 {
                         y -= (total - 1.0) * pitch;
                     }
-                    let f = if *bold { fonts.1 } else { fonts.0 };
-                    t += &show(f, size, x0, y, l);
-                    t += &right(f, xr, y, v);
+                    let f = if *bold || (n == 0 && bold_first) {
+                        fonts.1
+                    } else {
+                        fonts.0
+                    };
+                    let fs = factors[n] * size;
+                    t += &show(f, fs, x0, y, l);
+                    t += &show(f, fs, xr - common::font_width(f, v, fs), y, v);
                     y -= pitch;
                 }
                 y -= 0.5 * pitch;
@@ -6079,18 +6096,17 @@ fn totals_between_rules_under_line_items_stay_one_table() {
                     "Zahlbar innerhalb von 14 Tagen ohne Abzug.",
                 );
                 t += &rule(y - pitch);
-                let at = format!("{size}, {fonts:?}, {over}/{total} at {at}");
+                let at = format!("{look}, {size}, {fonts:?}, {over}/{total} at {at}");
                 let out = common::read(&page_in(&t, Look::Plain));
                 let found = tables(&out);
                 if !found.iter().any(|t| t.1 == want) {
                     wrong.push(format!("{at}: no totals table in {found:?}"));
                 }
-                if let Some(l) = out
-                    .document
-                    .losses
-                    .iter()
-                    .find(|l| l.what.contains("row of fields"))
-                {
+                let noise = |w: &str| {
+                    w.contains("row of fields")
+                        && (look == "one size" || w.contains("three styles"))
+                };
+                if let Some(l) = out.document.losses.iter().find(|l| noise(&l.what)) {
                     wrong.push(format!("{at}: {}", l.what));
                 }
             }
@@ -6173,6 +6189,59 @@ fn a_text_line_over_rows_of_the_tables_shape_is_a_row_and_said() {
                         .any(|l| l.what.contains("may start a table of its own"));
                     if !said {
                         wrong.push(format!("{at}: not said"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// Task 15b part 2d fix round 3 (the private notice's loss): a notice band between two rules, a
+/// bold slogan 1.15 or 1.25 times the size beside a reference or a date, over one long line 1.1
+/// times the size, holds no field: no loss calls it a row of fields. Sizes 8 to 10, both fonts.
+#[test]
+fn a_notice_band_between_rules_is_no_row_of_fields() {
+    let mut wrong = Vec::new();
+    for size in [8.0f32, 9.0, 10.0] {
+        for fonts in FONTS {
+            for (slogan, right, body) in [
+                (
+                    "Neu - jetzt online!",
+                    "Az. 12-345",
+                    "Ihre Unterlagen finden Sie ab sofort bequem und sicher im Kundenportal unter Service.",
+                ),
+                (
+                    "Jetzt neu - Ihr Portal!",
+                    "Stand 01.2020",
+                    "Ab sofort finden Sie alle Bescheide und Mitteilungen bequem und sicher im Kundenportal.",
+                ),
+            ] {
+                for big in [1.15f32, 1.25] {
+                    let k = size / 9.0;
+                    let (x0, x1) = (50.0, 50.0 + 480.0 * k);
+                    let rule = |y: f32| format!("0 0 0 RG 0.5 w {x0} {y} m {x1} {y} l S\n");
+                    let top = 700.0;
+                    let mut t = rule(top + 0.8 * size);
+                    let y0 = top - 1.2 * size;
+                    t += &show(fonts.1, big * size, x0, y0, slogan);
+                    t += &show(fonts.0, size, x0 + 360.0 * k, y0, right);
+                    let y1 = y0 - 1.5 * size;
+                    t += &show(fonts.0, 1.1 * size, x0, y1, body);
+                    t += &rule(y1 - 0.8 * size);
+                    let out = common::read(&page_in(&t, Look::Plain));
+                    if let Some(l) = out
+                        .document
+                        .losses
+                        .iter()
+                        .find(|l| l.what.contains("row of fields"))
+                    {
+                        wrong.push(format!("{slogan} x{big} {size} {fonts:?}: {}", l.what));
                     }
                 }
             }

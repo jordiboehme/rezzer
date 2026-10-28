@@ -1348,26 +1348,64 @@ pub fn read_units(blocks: &[Block]) -> Vec<String> {
 /// cells. A text is found where it stands in a unit, the longer texts first, so a short text
 /// inside a longer one is not found twice. A text that `ambiguous` names (drawn more than once
 /// on the page, or inside text no cell holds) or that stands more than once is left out of the
-/// check.
+/// check, and counted (see [`cells_check`]).
 pub fn cells_apart(
     units: &[String],
     cells: &[Vec<String>],
     ordered: &[bool],
     ambiguous: &dyn Fn(&str) -> bool,
 ) -> Vec<String> {
+    cells_check(units, cells, ordered, ambiguous).wrong
+}
+
+/// What [`cells_check`] found: what is wrong, and how many texts of the cells it left out
+/// (drawn more than once, inside other text, or found more than once), by cell.
+pub struct CellsCheck {
+    pub wrong: Vec<String>,
+    pub skipped: Vec<usize>,
+}
+
+impl CellsCheck {
+    /// Whether every text of the cells `listed` (by their place) was left out: the check of
+    /// them says nothing then.
+    pub fn all_skipped(&self, cells: &[Vec<String>], listed: &[bool]) -> bool {
+        let mut any = false;
+        for (c, cell) in cells.iter().enumerate() {
+            if listed.get(c).copied().unwrap_or(false) {
+                any = true;
+                if self.skipped[c] < cell.len() {
+                    return false;
+                }
+            }
+        }
+        any
+    }
+}
+
+/// [`cells_apart`], with the count of the texts it left out.
+pub fn cells_check(
+    units: &[String],
+    cells: &[Vec<String>],
+    ordered: &[bool],
+    ambiguous: &dyn Fn(&str) -> bool,
+) -> CellsCheck {
+    let mut skipped = vec![0usize; cells.len()];
     // Every text with its cell and its place in the cell; a text of two cells is no one's.
     let mut texts: Vec<(&str, usize, usize)> = Vec::new();
     for (c, cell) in cells.iter().enumerate() {
         for (k, t) in cell.iter().enumerate() {
             let t = t.as_str();
             if t.trim().is_empty() || ambiguous(t) {
+                skipped[c] += 1;
                 continue;
             }
             let shared = cells
                 .iter()
                 .enumerate()
                 .any(|(o, other)| o != c && other.iter().any(|x| x == t));
-            if !shared {
+            if shared {
+                skipped[c] += 1;
+            } else {
                 texts.push((t, c, k));
             }
         }
@@ -1396,6 +1434,12 @@ pub fn cells_apart(
     for s in &spans {
         *seen.entry((s.3, s.4)).or_default() += 1;
     }
+    for (&(c, _), &n) in &seen {
+        if n > 1 {
+            skipped[c] += 1;
+        }
+    }
+    // A text found nowhere is no span and no skip: the value checks find it lost.
     spans.retain(|s| seen[&(s.3, s.4)] == 1);
     spans.sort_by_key(|s| (s.0, s.1));
     let mut wrong = Vec::new();
@@ -1427,5 +1471,5 @@ pub fn cells_apart(
             wrong.push(format!("the cell {:?} is not read in its order", name(c)));
         }
     }
-    wrong
+    CellsCheck { wrong, skipped }
 }

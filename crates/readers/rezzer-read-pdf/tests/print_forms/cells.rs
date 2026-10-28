@@ -774,9 +774,11 @@ pub(crate) fn open_strip_in(
 /// Task 15b part 2d fix round 2 (I2, ruling on concern 1): every way a strip without dividers
 /// is refused or keeps a cell out of its pairs reads cell by cell, each cell's lines together,
 /// never one line across two cells: a value under no label (`UNDER_NONE`), one field beside a
-/// value alone (`LONE`), a caption beside a value, labels of the values' size over values in
-/// another font with an empty field (every cell left out), and a value-size head beside a label
-/// with nothing under it (it may be that label's value, so the two read as one cell). Checked
+/// value alone (`LONE`), a caption beside a value, and a value-size head beside a label with
+/// nothing under it (it may be that label's value, so the two read as one cell). (Fix round 3:
+/// a frame with no field read whose first line is no labels over values, such as labels of the
+/// values' size, is no row of fields to read cell by cell: its text is free for the table pass,
+/// as totals between rules need.) Checked
 /// by the spans of the drawn texts. Sizes 6 to 14, steps 1.125 and 1.25, both data fonts.
 #[test]
 fn refused_strips_read_cell_by_cell() {
@@ -789,7 +791,7 @@ fn refused_strips_read_cell_by_cell() {
         Option<&'static str>,
         &'static [&'static [&'static str]],
     );
-    let cases: [Refused; 5] = [
+    let cases: [Refused; 4] = [
         (
             "under none",
             &[
@@ -817,17 +819,6 @@ fn refused_strips_read_cell_by_cell() {
             false,
             None,
             &[&["Hinweis", "siehe Anlage"], &["Muster GmbH"]],
-        ),
-        (
-            "labels of the values' size",
-            &[
-                ("Name", 1.0, &["Beispiel"]),
-                ("Datum", 1.0, &[]),
-                ("Nr", 1.0, &["4711"]),
-            ],
-            true,
-            Some("other"),
-            &[&["Name", "Beispiel"], &["Datum"], &["Nr", "4711"]],
         ),
         (
             "value head beside an empty label",

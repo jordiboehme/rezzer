@@ -167,6 +167,18 @@ const ITEMS: [[&str; 5]; 3] = [
 /// smaller note stands under the totals over a rule of its own, so the totals stand between two
 /// rules in three styles. The items are one table, and the totals another.
 fn items(v: &Variant, end: bool, header_rule: bool, note: bool) -> Sheet {
+    items_sized(v, end, header_rule, note, (1.0, 1.0))
+}
+
+/// [`items`] with the first totals row and the last one `first` and `last` times the size of
+/// the others (Task 15b part 2d fix round 3, C1: totals not of one size between rules).
+fn items_sized(
+    v: &Variant,
+    end: bool,
+    header_rule: bool,
+    note: bool,
+    (first, last): (f32, f32),
+) -> Sheet {
     let k = v.k();
     let (plain, bold) = v.faces();
     let size = 8.0 * k;
@@ -200,8 +212,14 @@ fn items(v: &Variant, end: bool, header_rule: bool, note: bool) -> Sheet {
         for (n, (label, value)) in totals.iter().enumerate() {
             let at = y(44.0 + 10.0 * n as f32);
             let font = if n == 2 { bold } else { plain };
-            t += &show(font, size, 340.0, at, label);
-            t += &right(font, size, 540.0, at, value);
+            let fs = size
+                * match n {
+                    0 => first,
+                    2 => last,
+                    _ => 1.0,
+                };
+            t += &show(font, fs, 340.0, at, label);
+            t += &right(font, fs, 540.0, at, value);
         }
     }
     if note {
@@ -251,6 +269,45 @@ fn items(v: &Variant, end: bool, header_rule: bool, note: bool) -> Sheet {
                 .collect(),
         );
     }
+    s
+}
+
+/// Task 15b part 2d fix round 3: a notice band between two rules, a bold slogan 1.25 times
+/// the size beside a reference at the size, over one long line of text 1.1 times the size (three
+/// styles). It holds no field: no loss may call it a row of fields.
+fn notice_band(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, bold) = v.faces();
+    let size = 9.0 * k;
+    // Under the top third of the page: the slogan is no title of the page.
+    let top = 520.0;
+    let mut t = rule(v, 40.0, 540.0, top, size);
+    t += &show(
+        bold,
+        1.25 * size,
+        44.0,
+        top - 1.5 * size,
+        "Neu - jetzt online!",
+    );
+    t += &show(plain, size, 440.0, top - 1.5 * size, "Az. 12-345");
+    t += &show(
+        plain,
+        1.1 * size,
+        44.0,
+        top - 3.0 * size,
+        "Ihre Unterlagen finden Sie ab sofort bequem und sicher im Kundenportal unter Service.",
+    );
+    t += &rule(v, 40.0, 540.0, top - 4.0 * size, size);
+    let mut s = sheet(
+        v,
+        t,
+        380.0,
+        Some(Span {
+            top,
+            bottom: top - 4.0 * size,
+        }),
+    );
+    s.want.no_losses.push("row of fields".into());
     s
 }
 
@@ -972,6 +1029,21 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "letter head with the date beside the name",
             axes: DOC_NEXT,
             draw: |v| (letter_head(v, false, true), None),
+        },
+        Shape {
+            name: "line items with a larger total between rules over a note",
+            axes: RULED,
+            draw: |v| (items_sized(v, true, true, true, (1.0, 1.25)), None),
+        },
+        Shape {
+            name: "line items with a smaller first total between rules over a note",
+            axes: RULED,
+            draw: |v| (items_sized(v, true, true, true, (0.85, 1.0)), None),
+        },
+        Shape {
+            name: "a notice band between rules",
+            axes: DOC_NEXT,
+            draw: |v| (notice_band(v), None),
         },
         Shape {
             name: "line items with totals between rules over a note",

@@ -633,9 +633,11 @@ pub(in crate::tables) fn field_strips(
         for (why, names) in &left_out {
             say(unsure, names, why);
         }
+        // Every cell left out: no row of fields is read. When it is one row of labels over their
+        // values it is read cell by cell; else (totals between rules) its text is free for the
+        // table pass as it stands.
         if fields.is_empty() {
-            // Every cell left out, and said: read cell by cell.
-            if !left_out.is_empty() {
+            if !left_out.is_empty() && label_heads(flow, &cells, &ids) {
                 apart.extend(cell_order(
                     flow,
                     by_y,
@@ -1008,10 +1010,11 @@ fn table_body(flow: &Flow, cells: &[Vec<usize>]) -> bool {
 }
 
 /// The names of the heads of a cell's first line (runs apart by a cell gap, see
-/// [`labels_in_line`]) when there are two or more and one of them is a label over its value:
-/// ink of the lines under it stands under it, some of it a size step larger (see
-/// [`LABEL_STEP`]). The cell is set as fields side by side, whatever their styles. Lines of one
-/// size side by side (a label beside its amount over more such rows: totals) are no such heads.
+/// [`labels_in_line`]) when there are two or more, each of them a label over its value (all ink
+/// of the lines under it that stands under it is a size step larger, see [`LABEL_STEP`]) or a
+/// head with nothing under it, and one of them a label: the cell is set as fields side by side,
+/// whatever their styles. Lines of one size side by side (a label beside its amount over more
+/// such rows: totals) and a slogan over a body line are no such heads.
 fn heads_over_lines(flow: &Flow, cell: &[usize]) -> Option<Vec<String>> {
     let lines = lines_of(flow, cell);
     let heads = labels_in_line(flow, lines.first()?);
@@ -1021,6 +1024,7 @@ fn heads_over_lines(flow: &Flow, cell: &[usize]) -> Option<Vec<String>> {
     let pieces: Vec<(f32, f32, f32)> = lines[1..]
         .iter()
         .flatten()
+        .filter(|&&i| inked(&flow.runs[i]))
         .flat_map(|&i| {
             let size = flow.runs[i].size;
             ink_pieces(&flow.runs[i])
@@ -1028,16 +1032,43 @@ fn heads_over_lines(flow: &Flow, cell: &[usize]) -> Option<Vec<String>> {
                 .map(move |(a, b)| (a, b, size))
         })
         .collect();
-    heads
+    // For each head: whether ink stands under it, and whether all of it is a step larger.
+    let kinds: Vec<(bool, bool)> = heads
         .iter()
-        .any(|h| {
+        .map(|h| {
             let (x0, x1) = extent(flow, h);
             let size = h.iter().map(|&i| flow.runs[i].size).fold(0.0f32, f32::max);
-            pieces
+            let under: Vec<f32> = pieces
                 .iter()
-                .any(|&(a, b, s)| a < x1 && b > x0 && s >= LABEL_STEP * size)
+                .filter(|&&(a, b, _)| a < x1 && b > x0)
+                .map(|p| p.2)
+                .collect();
+            (
+                !under.is_empty(),
+                under.iter().all(|&v| v >= LABEL_STEP * size),
+            )
         })
-        .then(|| heads.iter().map(|h| words(flow, h)).collect())
+        .collect();
+    let fields = kinds.iter().all(|&(ink, larger)| !ink || larger)
+        && kinds.iter().any(|&(ink, larger)| ink && larger);
+    fields.then(|| heads.iter().map(|h| words(flow, h)).collect())
+}
+
+/// Whether the runs `ids` of a frame with no field read are a row of fields all the same: some
+/// cell of `cells` (between its dividers), or the frame whole, has a first line of heads that
+/// are labels over their values (see [`heads_over_lines`]) and one line of values under it. It
+/// is then read cell by cell. Rows under a smaller first row (totals between rules) are more
+/// lines than one: their text is free for the table pass.
+fn label_heads(flow: &Flow, cells: &[Vec<usize>], ids: &[usize]) -> bool {
+    let one_row = |c: &[usize]| {
+        let ids: Vec<usize> = c
+            .iter()
+            .copied()
+            .filter(|&i| inked(&flow.runs[i]))
+            .collect();
+        heads_over_lines(flow, &ids).is_some() && lines_of(flow, &ids).len() == 2
+    };
+    cells.iter().any(|c| one_row(c)) || one_row(ids)
 }
 
 /// The cells of a row of fields between the rules `top` and `bottom` from `x0` to `x1`, with
