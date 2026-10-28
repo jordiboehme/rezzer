@@ -1110,10 +1110,8 @@ fn cells_or_rows(v: &Variant) -> Sheet {
         ["Beispiel AG", "Probeweg 12"],
     ];
     let mut s = two_cells(v, false, cells);
-    for n in 0..2 {
-        s.want
-            .lines_joined
-            .push((cells[0][n].to_string(), cells[1][n].to_string()));
+    for (a, b) in cells[0].iter().zip(cells[1]) {
+        s.want.lines_joined.push((a.to_string(), b.to_string()));
     }
     s.want
         .losses

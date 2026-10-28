@@ -385,9 +385,7 @@ fn address_cell(flow: &Flow, lines: &[Vec<usize>], marker: &HashSet<usize>) -> O
             && letters(head);
         // The line under a street holds a word (a town, a country): a line of codes and numbers
         // alone under a numbered label (`Konto 1` over `DE00 1234 5678`) is its value.
-        let word_under = t[1..]
-            .iter()
-            .any(|l| l.split_whitespace().any(|w| words(w)));
+        let word_under = t[1..].iter().any(|l| l.split_whitespace().any(&words));
         (crate::layout::address_lines(t) && word_under)
             || (letters(head) && digits(head) && crate::layout::address_shaped(t))
             || (head.to_lowercase().starts_with("c/o ") && t[1..].iter().all(|l| letters(l)))
