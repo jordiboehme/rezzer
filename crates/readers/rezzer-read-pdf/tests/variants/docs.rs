@@ -753,6 +753,67 @@ fn justified_pair(v: &Variant) -> Sheet {
     s
 }
 
+/// Part 2e-4 (item 2): a paragraph without a stop set full (justified) in a column of 14 ems,
+/// three words or so a line, its word gaps wide enough to part the words into pieces: prose, no
+/// table of three columns; each line goes on in the next.
+fn justified_paragraph(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let size = 9.0 * k;
+    let top = 640.0;
+    let m = 14.0 * size;
+    let text = "Weitere Informationen zu unseren Angeboten und Leistungen erhalten Sie jederzeit \
+                in unseren Filialen oder im Kundenportal der Muster GmbH";
+    let mut lines: Vec<Vec<&str>> = vec![Vec::new()];
+    for w in text.split_whitespace() {
+        let mut cand = lines.last().cloned().unwrap_or_default();
+        cand.push(w);
+        if lines.last().is_some_and(Vec::is_empty) || font_width(plain, &cand.join(" "), size) <= m
+        {
+            if let Some(l) = lines.last_mut() {
+                l.push(w);
+            }
+        } else {
+            lines.push(vec![w]);
+        }
+    }
+    let mut t = String::new();
+    let n = lines.len();
+    for (row, words) in lines.iter().enumerate() {
+        let total: f32 = words.iter().map(|w| font_width(plain, w, size)).sum();
+        let space = font_width(plain, " ", size);
+        let gap = if row + 1 < n && words.len() > 1 {
+            (m - total) / (words.len() as f32 - 1.0)
+        } else {
+            space
+        };
+        let mut x = 40.0;
+        for w in words {
+            t += &show(plain, size, x, top - 1.2 * size * row as f32, w);
+            x += font_width(plain, w, size) + gap;
+        }
+    }
+    let mut s = sheet(
+        v,
+        t,
+        420.0,
+        Some(Span {
+            top,
+            bottom: top - 1.2 * size * n as f32,
+        }),
+    );
+    // Each word is drawn on its own: the text is found as the words of the paragraph.
+    s.once
+        .retain(|o| !text.split_whitespace().any(|w| w == o.trim()));
+    s.once.push(text.into());
+    for w in lines.windows(2) {
+        if let (Some(a), Some(b)) = (w[0].last(), w[1].first()) {
+            s.want.lines_joined.push((a.to_string(), b.to_string()));
+        }
+    }
+    s
+}
+
 /// Part 2e-2 fix round 1 (C1): line items with amounts flush left, the last a credit with a
 /// trailing minus (`10,00-`), over a total under the amounts at the row pitch: the total is no
 /// end of the credit's cell.
@@ -1934,6 +1995,11 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "two lines of three words set full",
             axes: DOC,
             draw: |v| (justified_pair(v), None),
+        },
+        Shape {
+            name: "a paragraph without a stop set full in a narrow column",
+            axes: DOC,
+            draw: |v| (justified_paragraph(v), None),
         },
         Shape {
             name: "line items with a credit over a total",

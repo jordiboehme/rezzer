@@ -20,6 +20,72 @@ struct Piece {
     end: usize,
 }
 
+/// Whether the lines of a region (their `pieces`) are a paragraph set full (justified): every
+/// line starts where the others do, and every line of two pieces or more ends where they end,
+/// within half a size; every line of three pieces or
+/// more has gaps that are even (the word spacing of a line set full is the same between all its
+/// words), and two lines or more are such lines; and their words are prose: a piece opens with
+/// a small letter, or the gaps differ from line to line by more than half a size (each line set
+/// full is spaced to fill the measure on its own). The rows of a table have gaps of the widths
+/// their cells leave, which are not even on a row, and a grid of cells of one width whose gaps
+/// are even (numbers flush right) has the same gaps on every row and no word in small letters.
+/// A line of two pieces shows nothing: one gap is always even, and a gap at the edge of a cell
+/// gap may join two words of a line set full into one piece.
+fn set_full(flow: &Flow, pieces: &[Vec<Piece>], lines: &[FlowLine]) -> bool {
+    let tol = 0.5
+        * lines
+            .iter()
+            .map(|l| l.size)
+            .fold(f32::MAX, f32::min)
+            .max(1.0);
+    let used: Vec<&Vec<Piece>> = pieces.iter().filter(|l| !l.is_empty()).collect();
+    let left = used
+        .iter()
+        .flat_map(|l| l.first())
+        .map(|p| p.x0)
+        .fold(f32::MAX, f32::min);
+    let right = used
+        .iter()
+        .flat_map(|l| l.last())
+        .map(|p| p.x1)
+        .fold(f32::MIN, f32::max);
+    // A line of one piece (one word, which no spacing can fill out, or a line whose spaces are
+    // too narrow to part it) starts at the left edge only.
+    let edges = used.iter().all(|l| {
+        l.first().is_some_and(|p| (p.x0 - left).abs() <= tol)
+            && (l.len() < 2 || l.last().is_some_and(|p| (p.x1 - right).abs() <= tol))
+    });
+    if !edges {
+        return false;
+    }
+    // The even gap of each line of three pieces or more.
+    let mut spacing: Vec<f32> = Vec::new();
+    for l in used.iter().filter(|l| l.len() >= 3) {
+        let gaps: Vec<f32> = l.windows(2).map(|w| w[1].x0 - w[0].x1).collect();
+        let (lo, hi) = gaps
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(lo, hi), &g| (lo.min(g), hi.max(g)));
+        if hi - lo > tol {
+            return false;
+        }
+        spacing.push(0.5 * (lo + hi));
+    }
+    if spacing.len() < 2 {
+        return false;
+    }
+    let (lo, hi) = spacing
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(lo, hi), &g| (lo.min(g), hi.max(g)));
+    let small = used.iter().flat_map(|l| l.iter()).any(|p| {
+        text_of(flow, p.start, p.end)
+            .trim_start()
+            .chars()
+            .next()
+            .is_some_and(char::is_lowercase)
+    });
+    small || hi - lo > tol
+}
+
 /// How many pieces `pieces_of` finds in a line, without building them.
 fn piece_count(flow: &Flow, l: &FlowLine) -> usize {
     let mut n = 0;
@@ -255,6 +321,11 @@ pub(super) fn borderless(
             continue;
         }
         let mut pieces: Vec<Vec<Piece>> = lines[a..z].iter().map(|l| pieces_of(flow, l)).collect();
+        // A paragraph set full (justified) in a narrow column, whose word gaps are wide enough
+        // to part its words into pieces, is prose: no columns.
+        if set_full(flow, &pieces, &lines[a..z]) {
+            continue;
+        }
         // Two lines alone whose pieces stand in the same three columns or more, piece for piece,
         // the first of titles (one word each, no digit) over a row that holds a digit (`Pos
         // Datum Betrag` over `1 15.01.2026 9,99`), are a table of a header and one row, or its

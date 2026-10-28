@@ -2486,7 +2486,9 @@ fn set_prose(
 /// whose lines end in a number over a noun (`mit 2` over `Prozent Skonto`, `due by 31` over
 /// `October 2026`), and a paragraph whose last line ends in no stop, goes on line by line: no
 /// line break inside it. Sizes 6 to 14, Helvetica and Times, 14 to 50 ems, ragged and set
-/// full.
+/// full. Part 2e-4 (item 2, P6-X): every size from 6 to 14, and no case left out: the paragraph
+/// without a stop, set full at 14 ems in Helvetica, was read as a table without rules of three
+/// columns at every size.
 #[test]
 fn prose_with_numbers_at_line_ends_still_joins() {
     let texts = [
@@ -2496,18 +2498,13 @@ fn prose_with_numbers_at_line_ends_still_joins() {
     ];
     let mut wrong = Vec::new();
     for text in texts {
-        for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+        for size in [6.0f32, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0] {
             for font in ["FL", "FT"] {
                 for ems in [14.0f32, 22.0, 34.0, 50.0] {
                     for justified in [false, true] {
                         let (lines, t) =
                             set_prose(text, font, size, (ems * size).min(500.0), justified);
-                        // Older (the same at c2b204b): set full at 14 ems in Helvetica, the
-                        // paragraph without a stop is read as a table without rules of three
-                        // columns; the borderless table pass, not the joins, which this tests.
-                        let older =
-                            text.starts_with("Weitere") && ems == 14.0 && justified && font == "FL";
-                        if lines.len() < 2 || older {
+                        if lines.len() < 2 {
                             continue;
                         }
                         let (_, under) = set_prose(BODY_LINE, "FL", 7.0, 450.0, false);
@@ -2522,6 +2519,54 @@ fn prose_with_numbers_at_line_ends_still_joins() {
                                 &text[..20]
                             ));
                         }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// Task 15b part 2e-4 (item 2, P6-X): paragraphs set full (justified) in a narrow column of 10
+/// to 22 ems, whose word gaps are wide enough to part the words into pieces, are prose: no
+/// table of their words, and no loss of a block of text in columns. Four texts (German and
+/// English, with and without numbers and a final stop), sizes 6 to 14, Helvetica and Times.
+#[test]
+fn paragraphs_set_full_in_a_narrow_column_are_no_tables() {
+    let texts = [
+        "Weitere Informationen zu unseren Angeboten und Leistungen erhalten Sie jederzeit in unseren Filialen oder im Kundenportal der Muster GmbH",
+        "The Muster GmbH delivers the goods within ten working days. All prices are net prices. Please check the delivery on arrival and report any damage to us at once.",
+        "Die Muster GmbH liefert die Ware innerhalb von zehn Werktagen. Alle Preise verstehen sich zuzueglich der gesetzlichen Mehrwertsteuer. Bitte pruefen Sie die Lieferung sofort nach Erhalt",
+        "Bitte ueberweisen Sie den Betrag von 45,67 EUR bis zum 31.10.2026 unter Angabe der Rechnungsnummer 2026 0815 auf das Konto der Muster GmbH bei der Musterbank in Musterstadt",
+    ];
+    let mut wrong = Vec::new();
+    for text in texts {
+        for size in [6.0f32, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0] {
+            for font in ["FL", "FT"] {
+                for ems in [10.0f32, 12.0, 14.0, 16.0, 18.0, 22.0] {
+                    let (_, t) = set_prose(text, font, size, ems * size, true);
+                    let (_, under) = set_prose(BODY_LINE, "FL", 7.0, 450.0, false);
+                    let page = FormPage {
+                        template: format!("{t}{}", under.replace("760", "300")),
+                        ..FormPage::default()
+                    };
+                    let out = common::read(&print_form(&[page], "", ""));
+                    let at = format!("{:?}, {size}, {font}, {ems} ems", &text[..20]);
+                    if !tables(&out).is_empty() {
+                        wrong.push(format!("{at}: a table"));
+                    }
+                    if out
+                        .document
+                        .losses
+                        .iter()
+                        .any(|l| l.what.contains("a block of text in columns"))
+                    {
+                        wrong.push(format!("{at}: a block of text in columns"));
                     }
                 }
             }
