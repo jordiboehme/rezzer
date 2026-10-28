@@ -6830,7 +6830,6 @@ fn three_cells_wrong(out: &ReadOutcome, m: Middle, want: Want) -> Vec<String> {
     wrong
 }
 
-
 /// The middle cells of the matrix tests below: a name or a label over an address, its first
 /// line at `size` times the labels' size in `font` (none: the labels' font), and how it reads
 /// (it pairs when a colon ends it or it has the labels' style and font).
@@ -6876,8 +6875,6 @@ fn middle_matrix(cases: &[Case], hows: &[Cells]) -> Vec<String> {
     wrong
 }
 
-
-
 /// Task 15b part 2d item 4 (ruling P6-X): the font family is part of a label's style. A name
 /// over an address at the labels' size in another family than the labels beside it is no
 /// label: it pairs with nothing and a loss names it; in the labels' own family it pairs. Boxes in a row and in a column, and a strip between two rules.
@@ -6910,6 +6907,103 @@ fn a_name_in_another_font_family_is_no_label() {
         ),
     ];
     let wrong = middle_matrix(&cases, &[Cells::Row, Cells::Column, Cells::Strip]);
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// Task 15b part 2d item 1 (ruling P6-X): a bold title in a drawn box between boxed fields, of
+/// one line or two at the labels' size, the values' size or larger, in a row of boxes or a
+/// column of them: the title is a heading of its own, and the fields on both sides keep their
+/// pairs. Sizes 6 to 14, steps 1.0625 to 1.25, both data fonts.
+#[test]
+fn a_bold_title_in_a_box_between_fields_is_a_heading_of_its_own() {
+    let titles: [&[&str]; 2] = [&["Angaben zum Betrieb"], &["Angaben zum", "Betrieb"]];
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+        for step in [1.0625f32, 1.125, 1.25] {
+            for font in ["F1", "F3"] {
+                for how in [Cells::Row, Cells::Column] {
+                    for title in titles {
+                        for big in [1.0, step, 1.2 * step] {
+                            let m = Middle {
+                                head: title,
+                                size: big,
+                                font: Some("F2"),
+                                lines: &[],
+                            };
+                            let at = format!("{title:?} x{big} {how:?} {size} pt x {step}, {font}");
+                            let out = three_cells(m, size, step, font, how);
+                            let mut w = three_cells_wrong(&out, m, Want::Alone);
+                            let heading = out.document.body.iter().any(|b| {
+                                let mut found = false;
+                                let mut stack = vec![b];
+                                while let Some(b) = stack.pop() {
+                                    match b {
+                                        Block::Section { blocks, .. } => stack.extend(blocks),
+                                        Block::Heading { inlines, .. } => {
+                                            found |= plain_text(inlines) == title.join(" ");
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                found
+                            });
+                            if !heading {
+                                w.push(format!("no heading {:?}", title.join(" ")));
+                            }
+                            wrong.extend(w.into_iter().map(|e| format!("{at}: {e}")));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// Task 15b part 2d item 2 (ruling P6-X): a boxed cell between boxed fields whose first line
+/// has the values' size (a name over an address, a value with no label, two lines of one
+/// style) is left out of its row and a loss names it; `Name: Beispiel` and `Nr: 4711` pair, in
+/// a row of boxes and in a column. (A size 0.0 below is the values' size.)
+#[test]
+fn a_box_at_the_value_size_is_left_out_of_its_row_and_said() {
+    let cases: [Case; 4] = [
+        (
+            "name at value size",
+            &["Muster GmbH"],
+            ADDR,
+            0.0,
+            None,
+            Want::Said,
+        ),
+        ("value alone", &["Musterwert"], &[], 0.0, None, Want::Said),
+        (
+            "two lines of one style",
+            &["Musterwert"],
+            &["Zweite Zeile"],
+            0.0,
+            None,
+            Want::Said,
+        ),
+        (
+            "name over a PO box",
+            &["Muster GmbH"],
+            &["Postfach 12 34", "12345 Musterstadt"],
+            0.0,
+            None,
+            Want::Said,
+        ),
+    ];
+    let wrong = middle_matrix(&cases, &[Cells::Row, Cells::Column]);
     assert!(
         wrong.is_empty(),
         "{} wrong:\n{}",

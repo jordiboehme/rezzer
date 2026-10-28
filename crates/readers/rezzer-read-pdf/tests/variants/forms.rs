@@ -9,7 +9,7 @@
 
 use crate::axes::{ALL, Axes, Data, Extent, Look, Next, Shape, Sheet, Variant};
 use crate::common::label;
-use crate::draw::{courier, mark_b};
+use crate::draw::{bold, courier, mark_b};
 use crate::shapes::{
     BLOCK_A, Built, DataFont, Geo, ROWS, Rows, THREE_ROWS, boxed_row, grids_side_by_side,
     header_grid, label_block, lone_field, overflow_rows, page, rows_page, short_value_rows,
@@ -101,6 +101,82 @@ fn company_row(g: &Geo, b: &mut Built, top: f32, name: fn(&Geo, f32, f32, &str) 
                 b.values.push(line.to_string());
             }
         } else {
+            parts.push((k + 1, v));
+            b.values.push(v.to_string());
+            b.fields.push((l, Ok(Some(v))));
+        }
+    }
+    g.values(b, top - h + 0.3 * g.data, &parts);
+    top - h
+}
+
+/// Task 15b part 2d item 1: a row of three boxed fields whose middle box holds a bold title of
+/// two lines, at the data size: the title is a heading of its own, and the fields on both
+/// sides of it pair.
+fn title_box_row(g: &Geo, b: &mut Built, top: f32) -> f32 {
+    let h = 3.6 * g.data;
+    let mut parts = Vec::new();
+    for (k, l, v) in [
+        (0usize, "Personalnummer", "00000"),
+        (20, "", ""),
+        (40, "Eintritt", "01.01.2020"),
+    ] {
+        let (x0, x1) = (g.col(k) - 0.12, g.col(k + 20) - 0.12);
+        b.page.template += &g.hrule(x0, x1, top);
+        b.page.template += &g.hrule(x0, x1, top - h);
+        b.page.template += &g.vrule(x0, top - h, top);
+        b.page.template += &g.vrule(x1, top - h, top);
+        let x = g.col(k) + 0.3 * g.label;
+        if k == 20 {
+            for (n, line) in ["Angaben zum", "Betrieb"].iter().enumerate() {
+                let y = top - 1.2 * g.data - 1.2 * g.data * n as f32;
+                b.page.template += &bold(x, y, g.data, line);
+                b.values.push(line.to_string());
+            }
+        } else {
+            b.page.template += &label(x, top - 0.9 * g.label - 0.3 * g.data, g.label, l);
+            parts.push((k + 1, v));
+            b.values.push(v.to_string());
+            b.fields.push((l, Ok(Some(v))));
+        }
+    }
+    g.values(b, top - h + 0.3 * g.data, &parts);
+    top - h
+}
+
+/// Task 15b part 2d item 2: a row of three boxed fields whose middle box holds a company name
+/// at the data size in the data font, over its street and its postcode with the town: the box
+/// has no label, so it pairs with nothing and a loss names it; the fields beside it pair.
+fn value_box_row(g: &Geo, b: &mut Built, top: f32) -> f32 {
+    let h = 3.6 * g.data;
+    let mut parts = Vec::new();
+    for (k, l, v) in [
+        (0usize, "Personalnummer", "00000"),
+        (20, "Muster GmbH", ""),
+        (40, "Eintritt", "01.01.2020"),
+    ] {
+        let (x0, x1) = (g.col(k) - 0.12, g.col(k + 20) - 0.12);
+        b.page.template += &g.hrule(x0, x1, top);
+        b.page.template += &g.hrule(x0, x1, top - h);
+        b.page.template += &g.vrule(x0, top - h, top);
+        b.page.template += &g.vrule(x1, top - h, top);
+        if k == 20 {
+            b.fields.push((l, Err(())));
+            for (n, line) in [l, "Musterweg 1", "12345 Musterstadt"].iter().enumerate() {
+                g.values(
+                    b,
+                    top - h + (2.7 - 1.2 * n as f32) * g.data,
+                    &[(k + 1, line)],
+                );
+                b.values.push(line.to_string());
+            }
+        } else {
+            b.page.template += &label(
+                g.col(k) + 0.3 * g.label,
+                top - 0.9 * g.label - 0.3 * g.data,
+                g.label,
+                l,
+            );
             parts.push((k + 1, v));
             b.values.push(v.to_string());
             b.fields.push((l, Ok(Some(v))));
@@ -407,6 +483,26 @@ pub(crate) fn shapes() -> Vec<Shape> {
                 ..ALL
             },
             draw: |v| drawn(v, company_box_row, 60),
+        },
+        Shape {
+            name: "boxed fields beside a bold title",
+            axes: Axes {
+                look: NO_RISING,
+                ..ALL
+            },
+            draw: |v| {
+                let (mut s, e) = drawn(v, title_box_row, 60);
+                s.want.headings.push("Angaben zum Betrieb".into());
+                (s, e)
+            },
+        },
+        Shape {
+            name: "boxed fields beside a box at the value size",
+            axes: Axes {
+                look: NO_RISING,
+                ..ALL
+            },
+            draw: |v| drawn(v, value_box_row, 60),
         },
         Shape {
             name: "boxed fields beside a company in another font",

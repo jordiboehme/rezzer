@@ -165,21 +165,27 @@ pub(crate) fn box_pairs(
             (a[0] - b[0]).abs() <= t && ((a[1] - b[3]).abs() <= t || (b[1] - a[3]).abs() <= t);
         row || column
     };
-    // A box whose lines are an address is a box of its row, with no field: the fields on
-    // both sides of it stay one row.
-    let address: Vec<bool> = (0..boxes.len())
-        .map(|b| {
-            unsure
-                .iter()
-                .any(|u| u.0 == b && (u.1 == ADDRESS || u.1 == NAMED_ADDRESS))
-        })
+    // Every other box with text is a box of its row or column, with no field: an address, a
+    // title, text of one style with no label, a box not clear. The fields on both sides of it
+    // stay one row; it is said or read as a title below.
+    let inked_of = |b: usize| -> Vec<usize> {
+        in_box[b]
+            .iter()
+            .copied()
+            .filter(|&i| inked(&flow.runs[i]) && !flow.runs[i].off_axis)
+            .collect()
+    };
+    let bridge: Vec<bool> = (0..boxes.len())
+        .map(|b| fields[b].is_none() && !consumed[b] && !inked_of(b).is_empty())
         .collect();
     let two_fields = |c: &[usize]| c.iter().filter(|&&b| fields[b].is_some()).count() >= 2;
     // Rows first: boxes left to right, each going on the row whose last box it touches.
     let mut order: Vec<usize> = (0..boxes.len())
-        .filter(|&b| fields[b].is_some() || address[b])
+        .filter(|&b| fields[b].is_some() || bridge[b])
         .collect();
     order.sort_by(|&a, &b| boxes[a][0].total_cmp(&boxes[b][0]));
+    // A box with no field joins the fields on both sides of it: one at an end of its row
+    // joins nothing, so it is no part of the row (the lines under a title there are its own).
     let chains = |order: &[usize], next: &dyn Fn(usize, usize) -> bool| {
         let mut out: Vec<Vec<usize>> = Vec::new();
         for &b in order {
@@ -188,7 +194,13 @@ pub(crate) fn box_pairs(
                 None => out.push(vec![b]),
             }
         }
-        out
+        out.into_iter()
+            .filter_map(|c| {
+                let first = c.iter().position(|&b| fields[b].is_some())?;
+                let last = c.iter().rposition(|&b| fields[b].is_some())?;
+                Some(c[first..=last].to_vec())
+            })
+            .collect::<Vec<_>>()
     };
     let has_value = |c: &[usize]| {
         c.iter()
@@ -233,7 +245,35 @@ pub(crate) fn box_pairs(
     }
     // A box that is no field beside the boxes of fields says why; so do boxes next to each
     // other whose label and value differ in weight only, which are fields but for that.
-    let paired: Vec<usize> = groups.iter().flatten().copied().collect();
+    let paired: Vec<usize> = groups
+        .iter()
+        .flatten()
+        .copied()
+        .filter(|&b| fields[b].is_some())
+        .collect();
+    // A box of bold text alone beside the fields is a title (see below); other text of one
+    // style with no label beside them is said, by its first line.
+    let title_box = |b: usize| {
+        let ids: Vec<usize> = in_box[b]
+            .iter()
+            .copied()
+            .filter(|&i| inked(&flow.runs[i]))
+            .collect();
+        !ids.is_empty()
+            && ids
+                .iter()
+                .all(|&i| flow.runs[i].bold && !flow.runs[i].off_axis)
+            && lines_of(flow, &ids).len() <= LABEL_LINES
+    };
+    for (b, &bridged) in bridge.iter().enumerate() {
+        if bridged
+            && !title_box(b)
+            && !unsure.iter().any(|u| u.0 == b)
+            && paired.iter().any(|&p| near(b, p))
+        {
+            unsure.push((b, NO_LABEL));
+        }
+    }
     let said_of = |b: &usize, why: &&str| {
         paired.iter().any(|&p| near(*b, p))
             || ((*why == WEIGHT_ONLY || *why == ADDRESS)
@@ -247,29 +287,32 @@ pub(crate) fn box_pairs(
         .map(|(_, why)| *why)
         .collect();
     let mut said: Vec<String> = Vec::new();
-    // A box of an address is named by its first line.
-    let addresses: Vec<String> = unsure
-        .iter()
-        .filter(|(b, why)| (*why == ADDRESS || *why == NAMED_ADDRESS) && said_of(b, why))
-        .filter_map(|(b, _)| {
-            let ids: Vec<usize> = in_box[*b]
-                .iter()
-                .copied()
-                .filter(|&i| inked(&flow.runs[i]))
-                .collect();
-            lines_of(flow, &ids).first().map(|l| words(flow, l))
-        })
-        .collect();
-    if !addresses.is_empty() {
-        let (s, verb) = if addresses.len() == 1 {
+    // A box of an address, or of text with no label, is named by its first line.
+    for (kinds, why) in [
+        (&[ADDRESS, NAMED_ADDRESS][..], ADDRESS),
+        (&[NO_LABEL][..], NO_LABEL),
+    ] {
+        let names: Vec<String> = unsure
+            .iter()
+            .filter(|(b, w)| kinds.contains(w) && said_of(b, w))
+            .filter_map(|(b, _)| {
+                lines_of(flow, &inked_of(*b))
+                    .first()
+                    .map(|l| words(flow, l))
+            })
+            .collect();
+        if names.is_empty() {
+            continue;
+        }
+        let (s, verb) = if names.len() == 1 {
             ("", "is")
         } else {
             ("es", "are")
         };
         said.push(format!(
             "the drawn box{s} {} beside label and value fields on page {page} {verb} not read as \
-             a label and its value ({ADDRESS}): the text is read as it stands",
-            addresses.join(", ")
+             a label and its value ({why}): the text is read as it stands",
+            names.join(", ")
         ));
     }
     for why in [THREE_STYLES, LABEL_BELOW, WEIGHT_ONLY] {
@@ -323,17 +366,7 @@ pub(crate) fn box_pairs(
         if consumed[b] {
             continue;
         }
-        let inked_ids: Vec<usize> = ids
-            .iter()
-            .copied()
-            .filter(|&i| inked(&flow.runs[i]))
-            .collect();
-        let bold = !inked_ids.is_empty()
-            && inked_ids
-                .iter()
-                .all(|&i| flow.runs[i].bold && !flow.runs[i].off_axis)
-            && lines_of(flow, &inked_ids).len() <= LABEL_LINES;
-        if fields[b].is_some() || !bold || !paired.iter().any(|&p| near(b, p)) {
+        if fields[b].is_some() || !title_box(b) || !paired.iter().any(|&p| near(b, p)) {
             continue;
         }
         for &i in ids {

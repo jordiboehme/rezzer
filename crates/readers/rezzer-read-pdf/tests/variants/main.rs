@@ -268,6 +268,8 @@ shape_tests! {
     column_of_totals => "column of totals",
     boxed_fields => "boxed fields",
     boxed_fields_beside_a_company => "boxed fields beside a company over its address",
+    boxed_fields_beside_a_bold_title => "boxed fields beside a bold title",
+    boxed_fields_beside_a_box_at_the_value_size => "boxed fields beside a box at the value size",
     boxed_fields_beside_a_company_in_another_font => "boxed fields beside a company in another font",
     boxed_fields_beside_an_address => "boxed fields beside an address",
     label_block_and_bank_row => "label block and bank row",
