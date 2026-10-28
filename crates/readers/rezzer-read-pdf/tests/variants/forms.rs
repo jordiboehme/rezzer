@@ -459,6 +459,30 @@ fn lone_strip(g: &Geo, b: &mut Built, top: f32) -> f32 {
     top - h
 }
 
+/// Part 2e-4 (item 9, list line 9): a strip of three fields between two rules with no rule
+/// between them, the middle one a numbered label over a line of codes (`Konto 1` over `DE00
+/// 1234 5678`): no address (the line under it holds no word), so all three fields pair.
+fn numbered_label_strip(g: &Geo, b: &mut Built, top: f32) -> f32 {
+    let h = 3.6 * g.data;
+    let (x0, x1) = (g.col(0) - 0.12, g.col(60) - 0.12);
+    b.page.template += &g.hrule(x0, x1, top);
+    b.page.template += &g.hrule(x0, x1, top - h);
+    let y = top - 0.9 * g.label - 0.3 * g.data;
+    let fields = [
+        (0usize, "Personalnummer", "00000"),
+        (20, "Konto 1", "DE00 1234 5678"),
+        (40, "Eintritt", "01.01.2020"),
+    ];
+    for (k, l, v) in fields {
+        b.page.template += &label(g.col(k) + 0.3 * g.label, y, g.label, l);
+        b.values.push(v.to_string());
+        b.fields.push((l, Ok(Some(v))));
+    }
+    let parts: Vec<(usize, &str)> = fields.iter().map(|&(k, _, v)| (k + 1, v)).collect();
+    g.values(b, top - h + 0.3 * g.data, &parts);
+    top - h
+}
+
 /// [`open_strip`] with `middle` as a shape: no block holds a text of the middle field with a
 /// label or a value of the fields beside it.
 fn open_strip_shape(
@@ -851,6 +875,14 @@ pub(crate) fn shapes() -> Vec<Shape> {
                 ..ALL
             },
             draw: |v| with_cells(v, value_box_row, 60, &[&NAME_AND_ADDRESS]),
+        },
+        Shape {
+            name: "a numbered label over a line of codes in a strip",
+            axes: Axes {
+                look: NO_RISING,
+                ..ALL
+            },
+            draw: |v| drawn(v, numbered_label_strip, 60),
         },
         Shape {
             name: "a strip without dividers beside a smaller name over its address",
