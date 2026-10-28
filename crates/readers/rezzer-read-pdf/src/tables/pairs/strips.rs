@@ -1180,8 +1180,37 @@ fn grid_sizes(flow: &Flow, ids: &[usize]) -> Option<Vec<(f32, f32)>> {
         })
     };
     let column = |k: usize| same(k, false) || same(k, true);
-    (column(0) && column(1) && (same(0, true) || same(1, true)))
+    // A flush right column holds a number on every line but a first line of titles (an
+    // amount, a rate, a count): lines that end in one place by chance (a street and its town
+    // beside two lines of a name) are no rows of totals.
+    let numbers = |k: usize| {
+        lines_of(flow, &ids).iter().skip(1).all(|line| {
+            let pieces = labels_in_line(flow, line);
+            pieces.len() < 2
+                || numeric_piece(&words(
+                    flow,
+                    &pieces[if k == 0 { 0 } else { pieces.len() - 1 }],
+                ))
+        })
+    };
+    let flush = |k: usize| same(k, true) && numbers(k);
+    (column(0) && column(1) && (flush(0) || flush(1)))
         .then(|| rows.iter().map(|r| (r[0].2, r[1].2)).collect())
+}
+
+/// Whether `text` is a number of a row of totals: digits with separators, signs and spaces, and
+/// at most a currency or a percent sign or code beside them (`1.234,56`, `19 %`, `EUR 12,00`,
+/// `12,50-`).
+fn numeric_piece(text: &str) -> bool {
+    let rest: String = text
+        .split_whitespace()
+        .filter(|w| !matches!(*w, "EUR" | "USD" | "CHF" | "GBP" | "€" | "$" | "£" | "%"))
+        .collect();
+    let rest = rest.trim_matches(['€', '$', '£', '%']);
+    rest.chars().any(|c| c.is_ascii_digit())
+        && rest
+            .chars()
+            .all(|c| c.is_ascii_digit() || ".,'+-".contains(c))
 }
 
 /// The cells of a row of fields between the rules `top` and `bottom` from `x0` to `x1`, with

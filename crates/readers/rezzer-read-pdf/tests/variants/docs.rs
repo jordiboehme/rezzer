@@ -644,12 +644,46 @@ fn two_lines_in_columns(v: &Variant) -> Sheet {
     s
 }
 
+/// Part 2e-2 (item 3): a value printed over the label of its line, at 9 points times the size
+/// factor, the label at 0.7 of it: two texts, never one word.
+fn overprinted(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, bold) = v.faces();
+    let size = 9.0 * k;
+    let top = 640.0;
+    let mut t = show(plain, 0.7 * size, 40.0, top, "Name");
+    t += &show(
+        bold,
+        size,
+        40.0 + 0.3 * size,
+        top + 0.3 * size,
+        "Hinterhaus",
+    );
+    let mut s = sheet(
+        v,
+        t,
+        420.0,
+        Some(Span {
+            top,
+            bottom: top - size,
+        }),
+    );
+    s.want.paragraphs.push("Name Hinterhaus".into());
+    s
+}
+
 /// Part 2e-1 (items 6 and 7): line items without rules at 8 points times the size factor, a
 /// bold header `Pos`, `Zeitraum`, `Basis` and `Betrag`; with `range` the first two periods
 /// wrap after their dash (`01.10.2026 -` over `31.10.2026`) and the cell keeps the space after
 /// the dash; else the last row is followed by an amount alone under the base and one alone
 /// under the amount, on two lines, which are never one block.
 fn period_items(v: &Variant, range: bool) -> Sheet {
+    period_items_of(v, range, false)
+}
+
+/// [`period_items`], with `last` the last period a range that wraps too (`01.12.2026 -` over
+/// `31.12.2026`, part 2e-2 item 3): its second line, under the table, ends its cell.
+fn period_items_of(v: &Variant, range: bool, last: bool) -> Sheet {
     let k = v.k();
     let (plain, bold) = v.faces();
     let size = 8.0 * k;
@@ -662,7 +696,11 @@ fn period_items(v: &Variant, range: bool) -> Sheet {
     let rows: [[&str; 5]; 3] = [
         ["1", "01.10.2026 -", "31.10.2026", "1.000,00", "100,00"],
         ["2", "01.11.2026 -", "30.11.2026", "500,00", "50,00"],
-        ["3", "Dezember", "", "200,00", "20,00"],
+        if last {
+            ["3", "01.12.2026 -", "31.12.2026", "200,00", "20,00"]
+        } else {
+            ["3", "Dezember", "", "200,00", "20,00"]
+        },
     ];
     let mut table = vec![vec![
         "Pos".to_string(),
@@ -1644,9 +1682,19 @@ pub(crate) fn shapes() -> Vec<Shape> {
             draw: |v| (two_lines_in_columns(v), None),
         },
         Shape {
+            name: "a value printed over its label",
+            axes: DOC,
+            draw: |v| (overprinted(v), None),
+        },
+        Shape {
             name: "line items with wrapped date ranges",
             axes: DOC_NEXT,
             draw: |v| (period_items(v, true), None),
+        },
+        Shape {
+            name: "line items whose last period wraps under the table",
+            axes: DOC_NEXT,
+            draw: |v| (period_items_of(v, true, true), None),
         },
         Shape {
             name: "line items over two amounts alone in two columns",

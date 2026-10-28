@@ -2361,6 +2361,40 @@ fn two_lines_in_three_columns_alone_are_a_table() {
     );
 }
 
+/// Task 15b part 2e-2 (item 3, part 2e-1 concern 5; ruling P6-X): a value printed over the
+/// label of its line (it starts well inside the label's ink, a little higher), outside any
+/// grid, is another text: `Name Hinterhaus`, never the one word `NameHinterhaus`. Sizes 6 to
+/// 14, the value in Courier, Helvetica or Helvetica-Bold, the label at 0.7 of its size.
+#[test]
+fn a_value_printed_over_its_label_stays_apart() {
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 9.0, 10.0, 12.0, 14.0] {
+        for (label, value) in [("FL", "FD"), ("FL", "FL"), ("FT", "FB")] {
+            for dx in [0.2f32, 0.5] {
+                let mut t = show(label, 0.7 * size, 40.0, 700.0, "Name");
+                t += &show(
+                    value,
+                    size,
+                    40.0 + dx * size,
+                    700.0 + 0.3 * size,
+                    "Hinterhaus",
+                );
+                let out = common::read(&page_in(&t, Look::Plain));
+                let md = common::markdown(&out).replace("**", "");
+                if md.contains("NameHinterhaus") {
+                    wrong.push(format!("{size}, {label}/{value}, {dx}: `NameHinterhaus`"));
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
 /// Task 15b part 2e-1 (item 6, part 2b re-review r1; ruling P6-X): a table of taxes without
 /// rules, an amount alone under an amount of its column (a row of its own), then two lines of
 /// one amount each in two other columns under the last row (`5,00` under the base, `125,00`
@@ -2442,7 +2476,9 @@ fn lone_amounts_in_two_columns_stay_apart() {
 /// over `31.10.2026`), in every size and font: the second line is never a row of its own
 /// (only an amount under an amount is one); between two rows it goes on in its cell, and the
 /// dash keeps the space after it (`01.10.2026 - 31.10.2026`; part 2e-1, item 7: it was joined
-/// as after a hyphen). Sizes 6 to 14 in both fonts. All values are invented.
+/// as after a hyphen). The last row's range goes on in its cell under the table too (part 2e-2,
+/// item 3: `31.12.2026` was read as a paragraph after it). Sizes 6 to 14 in both fonts. All
+/// values are invented.
 #[test]
 fn a_wrapped_date_range_stays_in_its_cell() {
     let mut wrong = Vec::new();
@@ -2491,7 +2527,8 @@ fn a_wrapped_date_range_stays_in_its_cell() {
             if alone {
                 wrong.push(format!("{k}x, {fonts:?}: a date is a row: {found:?}"));
             }
-            for (_, from, to, _, _) in &rows[..2] {
+            // Part 2e-2 (item 3): the last row's range goes on under the table too.
+            for (_, from, to, _, _) in &rows {
                 let cell: String = format!("{from}{to}").split_whitespace().collect();
                 if !cells.contains(&cell) {
                     wrong.push(format!("{k}x, {fonts:?}: no cell {from} {to}: {found:?}"));

@@ -302,7 +302,21 @@ fn lines(runs: &[Run]) -> Vec<Line<'_>> {
 }
 
 fn line(runs: &[Run]) -> Line<'_> {
-    let text: String = runs.iter().map(|r| r.text.as_str()).collect();
+    // A run printed over the run before it is another text (see [`OVERPRINT`]).
+    let mut text = String::new();
+    let mut ink_end = f32::MIN;
+    for r in runs {
+        if r.x + OVERPRINT * r.size < ink_end
+            && !r.text.starts_with(char::is_whitespace)
+            && !text.ends_with(char::is_whitespace)
+        {
+            text.push(' ');
+        }
+        text.push_str(&r.text);
+        if !r.text.trim().is_empty() {
+            ink_end = ink_end.max(r.x + r.w);
+        }
+    }
     // The run with the most characters sets the size and the baseline.
     let main = runs
         .iter()
@@ -1893,6 +1907,8 @@ fn inlines(
     }
     let mut pieces: Vec<Piece> = Vec::new();
     let mut last: Option<(u32, u32)> = None;
+    // Where the ink of the last run with text ends, on its line.
+    let mut ink_end = f32::MIN;
     for (k, r) in runs.iter().enumerate() {
         if k % CHECK_EVERY == 0 {
             time_over(budget)?;
@@ -1909,6 +1925,25 @@ fn inlines(
             continue;
         }
         last = Some((r.page, r.line));
+        // A run that starts well inside the ink of the run before it on its line is printed
+        // over it (a value over a label): another text, never one word with it.
+        let over = !new_line
+            && k > 0
+            && r.x + OVERPRINT * r.size < ink_end
+            && !text.starts_with(char::is_whitespace)
+            && pieces
+                .last()
+                .is_some_and(|p| !p.text.ends_with(char::is_whitespace));
+        if over {
+            text.insert(0, ' ');
+        }
+        if !r.text.trim().is_empty() {
+            ink_end = if new_line {
+                r.x + r.w
+            } else {
+                ink_end.max(r.x + r.w)
+            };
+        }
         let broken = new_line && breaks.binary_search(&(r.page, r.line)).is_ok();
         // A hyphen at the end of a line joins the word that wraps; one with white space before
         // it is a dash (`01.10.2026 -` over `31.10.2026`), and the space after it stays.
@@ -2062,6 +2097,11 @@ fn inlines(
     // is.
     Ok(out)
 }
+
+/// A run that starts this many of its sizes or more left of where the ink of the run before it
+/// on its line ends is printed over that run (see [`inlines`]): far more than a kerning pair
+/// takes back.
+const OVERPRINT: f32 = 0.5;
 
 /// Whether `cur` goes on in the same paragraph as `prev`: below it, near enough and in the
 /// same size, and not wholly right of it: a line that starts [`BESIDE_GAP`] sizes or more

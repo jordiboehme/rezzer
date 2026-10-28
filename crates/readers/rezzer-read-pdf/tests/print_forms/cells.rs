@@ -974,6 +974,58 @@ fn refused_strips_read_cell_by_cell() {
     );
 }
 
+/// Task 15b part 2e-2 (item 3, part 2e-1 concern 7; ruling P6-X): cells of a row between rules
+/// with dividers whose lines line up by chance (first pieces at one start, last pieces ending
+/// in one place) are no rows of totals unless the column that ends in one place holds a number
+/// on every line: a street over its town, or a name over a firm, beside a firm over a street
+/// read cell by cell, never line by line across the cells, and a loss says so. Sizes 6 to 14,
+/// steps 1.125 and 1.25, both data fonts.
+#[test]
+fn cells_lining_up_by_chance_are_no_totals() {
+    let cases: [(&str, [StripCell; 2]); 2] = [
+        (
+            "a street over its town",
+            [
+                ("", 1.0, &["Musterweg 1", "12345 Musterstadt"]),
+                ("", 1.0, &["Beispiel AG", "Probeweg 12"]),
+            ],
+        ),
+        (
+            "a name over a firm",
+            [
+                ("", 1.0, &["Erika Mustermann", "Muster GmbH"]),
+                ("", 1.0, &["Beispiel AG", "Probeweg 12"]),
+            ],
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+        for step in [1.125f32, 1.25] {
+            for font in ["F1", "F3"] {
+                for (name, cells) in &cases {
+                    let at = format!("{name} {size} pt x {step}, {font}");
+                    let out = strip_in(cells, size, step, (font, font), true);
+                    let want: Vec<Vec<&str>> = cells.iter().map(|c| c.2.to_vec()).collect();
+                    wrong.extend(
+                        cells_wrong(&out, &want)
+                            .into_iter()
+                            .map(|e| format!("{at}: {e}")),
+                    );
+                    if read_tables(&out).is_empty() && out.document.losses.is_empty() {
+                        wrong.push(format!("{at}: no pair and no loss"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
 /// Task 15b part 2d item 3 (ruling P6-X), beyond one odd cell between two labels: strips of
 /// two to four cells with a name a little smaller than the labels over an address first, last,
 /// in the middle or twice, beside labels over their values. Each cell pairs right (its label

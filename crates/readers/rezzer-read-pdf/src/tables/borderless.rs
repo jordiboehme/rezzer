@@ -973,6 +973,16 @@ fn joined_tail(
                 .iter()
                 .any(|f| f.0 == r.family && (f.1 - r.size).abs() <= WRAP_ALIGN * f.1)
         });
+        // The cell of the column on the last line ends in a dash or a comma: its text goes on
+        // (`01.12.2026 -` over `31.12.2026`), and the line set as its wrap is its end.
+        let cut = pieces[core - 1].iter().filter(|q| over(q) == [c]).any(|q| {
+            text_of(flow, q.start, q.end)
+                .trim_end()
+                .ends_with(['-', ','])
+        });
+        if close && within && same_face && cut && !page_number(&text) {
+            return (1, false, false);
+        }
         let wrap =
             close && within && same_face && !numbers && !numeric(&text) && !page_number(&text);
         // An amount alone at the pitch of the rows, in the column of numbers it stands in (flush
