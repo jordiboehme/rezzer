@@ -405,9 +405,10 @@ fn is_html_type(media: &str) -> bool {
 /// is multipart/related with an HTML root. The `type` parameter names the root's type;
 /// without it the first part is the root (RFC 2387). Browsers write From, Subject and Date
 /// too, so this runs before the mail check. A mail with an HTML body and its pictures has
-/// the same shape: a block with transport headers (To, Cc, Message-ID, Received) stays a
-/// mail, unless Chrome's `Snapshot-Content-Location` marks it as a saved page (then the
-/// result is certain).
+/// the same shape: a block with a mail header (To, Cc, Bcc, Reply-To, In-Reply-To,
+/// References, Message-ID, Received, Return-Path, Delivered-To, DKIM-Signature, Sender)
+/// stays a mail, unless Chrome's `Snapshot-Content-Location` marks it as a saved page
+/// (then the result is certain).
 fn mhtml(lines: &[&str]) -> Option<Found> {
     let (fields, used) = header_fields(lines)?;
     let content_type = field(&fields, "Content-Type")?;
@@ -416,9 +417,22 @@ fn mhtml(lines: &[&str]) -> Option<Found> {
         return None;
     }
     let snapshot = field(&fields, "Snapshot-Content-Location").is_some();
-    let mail = ["To", "Cc", "Message-ID", "Received"]
-        .into_iter()
-        .any(|n| field(&fields, n).is_some());
+    let mail = [
+        "To",
+        "Cc",
+        "Bcc",
+        "Reply-To",
+        "In-Reply-To",
+        "References",
+        "Message-ID",
+        "Received",
+        "Return-Path",
+        "Delivered-To",
+        "DKIM-Signature",
+        "Sender",
+    ]
+    .into_iter()
+    .any(|n| field(&fields, n).is_some());
     if mail && !snapshot {
         return None;
     }

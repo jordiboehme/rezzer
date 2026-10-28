@@ -2275,3 +2275,44 @@ Content-Type: text/html\n\
 --b1--\n";
     assert_eq!(detect("x", mail.as_bytes()).0, FormatId::Eml);
 }
+
+#[test]
+fn each_mail_header_keeps_a_multipart_related_mail_a_mail() {
+    // A saved draft or a sent copy may have no To and no Message-ID. Any of these headers
+    // is still a mail header that a saved page never has.
+    let page = |extra: &str| {
+        format!(
+            "From: a@example.org\n\
+Date: Mon, 1 Jan 2024 10:00:00 +0000\n\
+Subject: hi\n\
+MIME-Version: 1.0\n\
+{extra}\
+Content-Type: multipart/related; type=\"text/html\"; boundary=\"b1\"\n\
+\n\
+--b1\n\
+Content-Type: text/html\n\
+\n\
+<html><body>hi</body></html>\n\
+--b1--\n"
+        )
+    };
+    let (f, d) = detect("x", page("").as_bytes());
+    assert_eq!(f, FormatId::Mhtml, "without a mail header: {}", d.evidence);
+    for header in [
+        "To: b@example.org",
+        "Cc: b@example.org",
+        "Bcc: b@example.org",
+        "Reply-To: b@example.org",
+        "In-Reply-To: <0@example.org>",
+        "References: <0@example.org>",
+        "Message-ID: <1@example.org>",
+        "Received: from relay.example.org",
+        "Return-Path: <a@example.org>",
+        "Delivered-To: b@example.org",
+        "DKIM-Signature: v=1; a=rsa-sha256; d=example.org",
+        "Sender: a@example.org",
+    ] {
+        let (f, d) = detect("x", page(&format!("{header}\n")).as_bytes());
+        assert_eq!(f, FormatId::Eml, "{header}: {}", d.evidence);
+    }
+}
