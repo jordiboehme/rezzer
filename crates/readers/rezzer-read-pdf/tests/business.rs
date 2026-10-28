@@ -6502,6 +6502,69 @@ fn small_tables_keep_their_rows() {
     );
 }
 
+/// Task 15b part 2e-4 (item 9, list line 9; guard of part 2b's region end rule): a gap of more
+/// than `REGION_STEPS` times the steps on both sides of it ends a region without rules, where
+/// "both sides" is the region's steps so far and the step of the next two lines. A header of
+/// two tight lines (`Pos Artikel Betrag` over `Nr. Bezeichnung in EUR`) over rows set wide
+/// apart, whose amounts stand flush right in no column of the header, is one table: its rows
+/// are as far apart as the gap under the header. With the region's steps alone the header was
+/// cut off as lines of its own (checked by changing the rule). Sizes 6 to 14, both fonts.
+#[test]
+fn a_tight_header_over_wide_rows_is_one_table() {
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0] {
+        for (font, _) in FONTS {
+            let mut t = String::new();
+            let top = 650.0;
+            for (n, row) in [
+                ["Pos", "Artikel", "Betrag"],
+                ["Nr.", "Bezeichnung", "in EUR"],
+            ]
+            .iter()
+            .enumerate()
+            {
+                for (x, c) in [40.0f32, 120.0, 480.0].iter().zip(row) {
+                    t += &show(font, size, *x, top - 1.05 * size * n as f32, c);
+                }
+            }
+            let mut y = top - 1.05 * size;
+            for row in [
+                ["1", "Schrauben", "50,00"],
+                ["2", "Muttern", "40,00"],
+                ["3", "Scheiben", "12,50"],
+                ["4", "Duebel", "8,00"],
+            ] {
+                y -= 2.6 * size;
+                t += &show(font, size, 40.0, y, row[0]);
+                t += &show(font, size, 120.0, y, row[1]);
+                t += &show(
+                    font,
+                    size,
+                    540.0 - common::font_width(font, row[2], size),
+                    y,
+                    row[2],
+                );
+            }
+            let out = common::read(&page_in(&t, Look::Plain));
+            let one = tables(&out).iter().any(|(_, rows)| {
+                let cells: Vec<&String> = rows.iter().flatten().collect();
+                ["Pos", "Bezeichnung", "in EUR", "Schrauben", "8,00"]
+                    .iter()
+                    .all(|w| cells.iter().any(|c| c.as_str() == *w))
+            });
+            if !one {
+                wrong.push(format!("{size}, {font}: {:?}", tables(&out)));
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
 /// Task 15b part 2e-4 (item 9, list line 9): labels with a short index (`Kundennr. 1`, `Vertrag
 /// 7`, `Tarif A2`) beside the lines of an address are rows of labels and values: the table is
 /// read and no loss doubts it (the doubt that blocks may stand side by side was noise there).
