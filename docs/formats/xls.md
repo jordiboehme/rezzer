@@ -2,7 +2,7 @@
 
 Rezzer reads old binary Excel workbooks: values, formulas with the cells they read and the cached results.
 
-Status: 🗓️ planned for 0.2.0. Nothing is implemented yet.
+Status: 📝 planned. The release is not set yet. Nothing is implemented yet.
 
 File types: `.xls`. Rezzer detects the format by content, not by extension.
 

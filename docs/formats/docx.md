@@ -2,7 +2,7 @@
 
 Rezzer reads Word documents with their structure and the layer behind the text: comment threads, tracked changes, fields, cross references, mail merge and embedded objects.
 
-Status: 🗓️ planned for 0.2.0. Nothing is implemented yet.
+Status: 📝 planned. The release is not set yet. Nothing is implemented yet.
 
 File types: `.docx`. Rezzer detects the format by content, not by extension.
 

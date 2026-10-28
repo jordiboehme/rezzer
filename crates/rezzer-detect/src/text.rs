@@ -135,6 +135,9 @@ fn classify(
     if let Some(f) = html(trimmed) {
         return f;
     }
+    if let Some(f) = mhtml(&lines) {
+        return f;
+    }
     if let Some(f) = eml(&lines) {
         return f;
     }
@@ -350,6 +353,119 @@ fn header_block<'a>(lines: &[&'a str]) -> Option<Vec<&'a str>> {
         names.push(header_name(line)?);
     }
     Some(names)
+}
+
+/// The header fields of the block starting at `lines[0]`, folded lines joined to their
+/// field, and the number of lines the block takes. None when a line is no header or the
+/// block is empty.
+fn header_fields(lines: &[&str]) -> Option<(Vec<(String, String)>, usize)> {
+    let mut fields: Vec<(String, String)> = Vec::new();
+    let mut used = 0;
+    for line in lines {
+        used += 1;
+        if line.is_empty() {
+            break;
+        }
+        if line.starts_with([' ', '\t']) {
+            let (_, value) = fields.last_mut()?;
+            value.push(' ');
+            value.push_str(line.trim());
+            continue;
+        }
+        let name = header_name(line)?;
+        fields.push((name.to_string(), line[name.len() + 1..].trim().to_string()));
+    }
+    (!fields.is_empty()).then_some((fields, used))
+}
+
+fn field<'a>(fields: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    fields
+        .iter()
+        .find(|(n, _)| n.eq_ignore_ascii_case(name))
+        .map(|(_, v)| v.as_str())
+}
+
+/// The value of a parameter of a MIME header value (`type="text/html"`), quotes taken
+/// off. The name is matched without regard to case.
+fn mime_param<'a>(value: &'a str, name: &str) -> Option<&'a str> {
+    value.split(';').skip(1).find_map(|p| {
+        let (key, val) = p.split_once('=')?;
+        key.trim()
+            .eq_ignore_ascii_case(name)
+            .then(|| val.trim().trim_matches('"'))
+    })
+}
+
+fn is_html_type(media: &str) -> bool {
+    let media = media.split(';').next().unwrap_or("").trim();
+    media.eq_ignore_ascii_case("text/html") || media.eq_ignore_ascii_case("application/xhtml+xml")
+}
+
+/// MHTML, a web page saved as one file (RFC 2557): a MIME header block whose Content-Type
+/// is multipart/related with an HTML root. The `type` parameter names the root's type;
+/// without it the first part is the root (RFC 2387). Browsers write From, Subject and Date
+/// too, so this runs before the mail check. A mail with an HTML body and its pictures has
+/// the same shape: a block with a mail header (To, Cc, Bcc, Reply-To, In-Reply-To,
+/// References, Message-ID, Received, Return-Path, Delivered-To, DKIM-Signature, Sender)
+/// stays a mail, unless Chrome's `Snapshot-Content-Location` marks it as a saved page
+/// (then the result is certain).
+fn mhtml(lines: &[&str]) -> Option<Found> {
+    let (fields, used) = header_fields(lines)?;
+    let content_type = field(&fields, "Content-Type")?;
+    let media = content_type.split(';').next().unwrap_or("").trim();
+    if !media.eq_ignore_ascii_case("multipart/related") {
+        return None;
+    }
+    let snapshot = field(&fields, "Snapshot-Content-Location").is_some();
+    let mail = [
+        "To",
+        "Cc",
+        "Bcc",
+        "Reply-To",
+        "In-Reply-To",
+        "References",
+        "Message-ID",
+        "Received",
+        "Return-Path",
+        "Delivered-To",
+        "DKIM-Signature",
+        "Sender",
+    ]
+    .into_iter()
+    .any(|n| field(&fields, n).is_some());
+    if mail && !snapshot {
+        return None;
+    }
+    let root = match mime_param(content_type, "type") {
+        Some(t) => {
+            if !is_html_type(t) {
+                return None;
+            }
+            "the type parameter"
+        }
+        None => {
+            let boundary = mime_param(content_type, "boundary").filter(|b| !b.is_empty())?;
+            let delimiter = format!("--{boundary}");
+            let rest = &lines[used.min(lines.len())..];
+            let start = rest.iter().position(|l| l.trim_end() == delimiter)?;
+            let (part, _) = header_fields(&rest[start + 1..])?;
+            if !field(&part, "Content-Type").is_some_and(is_html_type) {
+                return None;
+            }
+            "the first part"
+        }
+    };
+    // Only a browser writes this header: the file is a saved page.
+    let (confidence, saved) = if snapshot {
+        (Confidence::Certain, ", Snapshot-Content-Location")
+    } else {
+        (Confidence::Likely, "")
+    };
+    Some(found(
+        FormatId::Mhtml,
+        confidence,
+        format!("MIME header block, multipart/related with an HTML root (by {root}){saved}"),
+    ))
 }
 
 fn eml(lines: &[&str]) -> Option<Found> {

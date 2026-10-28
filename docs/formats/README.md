@@ -9,9 +9,12 @@ One page per format: what Rezzer gets out of it, which crates it builds on, how 
 | ✅ Available | Works in the development version and is part of 0.1.0, the first release. The page shows real output from the test files and how the format is tested |
 | 🟡 Partial | Works, but Rezzer reads only part of what the format holds. The page says what is missing |
 | 🗓️ 0.2.0 | Planned for release 0.2.0. Nothing is implemented yet. The page describes what is planned |
+| 📝 Planned | Planned, but the release is not set yet. Nothing is implemented yet. The page describes what is planned |
 | 🔭 Later | Planned for a release after 0.2.0. Nothing is implemented yet |
 
-Release 0.2.0 brings HTML first, then the office formats, then EPUB, then Atlassian Document Format.
+📝 Planned and 🔭 Later both have no release yet. A 📝 format may still come in 0.2.0. A 🔭 format comes after 0.2.0.
+
+Release 0.2.0 brings PowerPoint (PPTX) first, then EPUB, then HTML. With it, Rezzer also reads dates and titles in more languages.
 
 ## All formats
 
@@ -25,16 +28,16 @@ Release 0.2.0 brings HTML first, then the office formats, then EPUB, then Atlass
 | [Plain text](text.md) | Plain text in any encoding | ✅ Available |
 | [Markdown](markdown.md) | Markdown | ✅ Available |
 | [HTML](html.md) | HTML | 🗓️ 0.2.0 |
-| [DOCX](docx.md) | DOCX | 🗓️ 0.2.0 |
+| [DOCX](docx.md) | DOCX | 📝 Planned |
 | [PPTX](pptx.md) | PPTX | 🗓️ 0.2.0 |
-| [ODT](odt.md) | ODT | 🗓️ 0.2.0 |
-| [ODP](odp.md) | ODP | 🗓️ 0.2.0 |
-| [DOC](doc.md) | DOC (Word 97-2003) | 🗓️ 0.2.0 |
-| [XLS](xls.md) | XLS (Excel 97-2003) | 🗓️ 0.2.0 |
-| [PPT](ppt.md) | PPT (PowerPoint 97-2003) | 🗓️ 0.2.0 |
-| [RTF](rtf.md) | RTF | 🗓️ 0.2.0 |
+| [ODT](odt.md) | ODT | 📝 Planned |
+| [ODP](odp.md) | ODP | 📝 Planned |
+| [DOC](doc.md) | DOC (Word 97-2003) | 📝 Planned |
+| [XLS](xls.md) | XLS (Excel 97-2003) | 📝 Planned |
+| [PPT](ppt.md) | PPT (PowerPoint 97-2003) | 📝 Planned |
+| [RTF](rtf.md) | RTF | 📝 Planned |
 | [EPUB](epub.md) | EPUB 2 and 3 | 🗓️ 0.2.0 |
-| [ADF](adf.md) | Atlassian Document Format (Jira and Confluence) | 🗓️ 0.2.0 |
+| [ADF](adf.md) | Atlassian Document Format (Jira and Confluence) | 📝 Planned |
 | [CAD](cad.md) | FreeCAD, STEP, IGES, IFC, DXF, 3MF, STL, OBJ, glTF, G-code, KiCad, Gerber, OpenSCAD; DWG and closed native formats after that | 🔭 Later |
 | [PostScript](postscript.md) | PostScript, EPS | 🔭 Later |
 | [Mail](mail.md) | EML, MBOX, MSG, Outlook PST and OST | 🔭 Later |

@@ -2,7 +2,7 @@
 
 Rezzer reads old binary Word documents: headings, lists, tables, notes, headers and footers, comments with their author and the document properties.
 
-Status: 🗓️ planned for 0.2.0. Nothing is implemented yet.
+Status: 📝 planned. The release is not set yet. Nothing is implemented yet.
 
 File types: `.doc`. Rezzer detects the format by content, not by extension.
 

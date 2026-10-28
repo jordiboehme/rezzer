@@ -382,6 +382,15 @@ jobs:
           done
           exit "$failed"
 
+      # The release notes file for the workspace version and the archive
+      # names in the README. It reads [workspace.package] with awk instead
+      # of cargo metadata: no toolchain to install in this job, no network.
+      # This job runs on a documentation-only change too, so a release PR
+      # that touches only the notes or the README is still checked.
+      - name: version pins
+        shell: bash
+        run: bash scripts/ci/version-pins.sh
+
   # The one check a branch protection rule requires. It always runs and
   # passes when every job above passed or was skipped (a documentation-only
   # change, or a tree without Cargo.toml). Any failure or cancellation fails
