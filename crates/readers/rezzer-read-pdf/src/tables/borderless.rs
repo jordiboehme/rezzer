@@ -833,7 +833,7 @@ const HEADER_DIGITS: usize = 4;
 
 /// Whether `text` is an amount: a number (see [`Shape::Number`]) with a decimal part of two
 /// digits (`20,00`, `1.000,00`, `12,50 EUR`). Whole numbers, rates and dates are none.
-pub(super) fn amount(text: &str) -> bool {
+fn amount(text: &str) -> bool {
     if Shape::of(text) != Some(Shape::Number) {
         return false;
     }

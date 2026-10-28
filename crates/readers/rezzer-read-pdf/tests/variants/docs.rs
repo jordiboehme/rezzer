@@ -272,6 +272,117 @@ fn items_sized(
     s
 }
 
+/// A row of totals of [`totals_shape`]: its cells (text, x, flush right), empty cells left out.
+type TotalsRow = &'static [(&'static str, f32, bool)];
+
+/// Task 15b part 2d fix round 5 (R1): line items over totals of another shape between the rule
+/// under the items and a rule under a smaller note: `rows`, the last one (the total) bold and
+/// `last` times the size. The totals are one table of their rows.
+fn totals_shape(v: &Variant, rows: &[TotalsRow], last: f32) -> Sheet {
+    let k = v.k();
+    let (plain, bold) = v.faces();
+    let size = 8.0 * k;
+    let y = |dy: f32| 600.0 - dy * k;
+    let mut t = show(bold, size, 40.0, y(0.0), "Pos")
+        + &show(bold, size, 80.0, y(0.0), "Artikel")
+        + &right(bold, size, 540.0, y(0.0), "Betrag");
+    for (n, item) in ITEMS.iter().enumerate() {
+        let at = y(10.0 * (n as f32 + 1.0));
+        t += &show(plain, size, 40.0, at, item[0]);
+        t += &show(plain, size, 80.0, at, item[1]);
+        t += &right(plain, size, 540.0, at, item[4]);
+    }
+    t += &rule(v, 40.0, 540.0, y(36.0), size);
+    let mut table: Vec<Vec<String>> = Vec::new();
+    for (n, cells) in rows.iter().enumerate() {
+        let total = n + 1 == rows.len();
+        let (font, fs) = if total {
+            (bold, last * size)
+        } else {
+            (plain, size)
+        };
+        let at = y(44.0 + 10.0 * n as f32);
+        for &(text, x, flush) in cells.iter().filter(|c| !c.0.is_empty()) {
+            t += &if flush {
+                right(font, fs, x, at, text)
+            } else {
+                show(font, fs, x, at, text)
+            };
+        }
+        table.push(cells.iter().map(|c| c.0.to_string()).collect());
+    }
+    let low = 44.0 + 10.0 * rows.len() as f32;
+    t += &show(
+        plain,
+        0.8 * size,
+        40.0,
+        y(low + 6.0),
+        "Zahlbar innerhalb von 14 Tagen ohne Abzug.",
+    );
+    t += &rule(v, 40.0, 540.0, y(low + 14.0), size);
+    let mut s = sheet(
+        v,
+        t,
+        420.0,
+        Some(Span {
+            top: y(0.0),
+            bottom: y(low + 14.0),
+        }),
+    );
+    s.want.tables.push(table);
+    s
+}
+
+/// The totals of [`totals_shape`]: a currency column, the label right of its amount, amounts
+/// without decimals, and a percent column in every row.
+const CURRENCY_TOTALS: [TotalsRow; 3] = [
+    &[
+        ("Nettobetrag", 300.0, false),
+        ("EUR", 450.0, false),
+        ("1.234,56", 540.0, true),
+    ],
+    &[
+        ("zzgl. USt. 19 %", 300.0, false),
+        ("EUR", 450.0, false),
+        ("234,57", 540.0, true),
+    ],
+    &[
+        ("Gesamt", 300.0, false),
+        ("EUR", 450.0, false),
+        ("1.469,13", 540.0, true),
+    ],
+];
+const LABEL_RIGHT_TOTALS: [TotalsRow; 3] = [
+    &[("1.234,56 EUR", 400.0, true), ("Nettobetrag", 420.0, false)],
+    &[
+        ("234,57 EUR", 400.0, true),
+        ("zzgl. USt. 19 %", 420.0, false),
+    ],
+    &[("1.469,13 EUR", 400.0, true), ("Gesamt", 420.0, false)],
+];
+const WHOLE_TOTALS: [TotalsRow; 3] = [
+    &[("Nettobetrag", 300.0, false), ("1.200 EUR", 540.0, true)],
+    &[("zzgl. USt. 19 %", 300.0, false), ("228 EUR", 540.0, true)],
+    &[("Gesamt", 300.0, false), ("1.428 EUR", 540.0, true)],
+];
+const PERCENT_TOTALS: [TotalsRow; 3] = [
+    &[
+        ("USt.", 300.0, false),
+        ("7 %", 450.0, true),
+        ("1,00", 540.0, true),
+    ],
+    &[
+        ("USt.", 300.0, false),
+        ("19 %", 450.0, true),
+        ("19,00", 540.0, true),
+    ],
+    &[
+        ("Gesamt", 300.0, false),
+        ("", 450.0, true),
+        ("120,00", 540.0, true),
+    ],
+];
+
 /// Task 15b part 2d fix round 3: a notice band between two rules, a bold slogan 1.25 times
 /// the size beside a reference at the size, over one long line of text 1.1 times the size (three
 /// styles). It holds no field: no loss may call it a row of fields.
@@ -1039,6 +1150,46 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "line items with a smaller first total between rules over a note",
             axes: RULED,
             draw: |v| (items_sized(v, true, true, true, (0.85, 1.0)), None),
+        },
+        Shape {
+            name: "totals with a currency column between rules over a note",
+            axes: RULED,
+            draw: |v| (totals_shape(v, &CURRENCY_TOTALS, 1.0), None),
+        },
+        Shape {
+            name: "totals with a currency column and a larger total between rules over a note",
+            axes: RULED,
+            draw: |v| (totals_shape(v, &CURRENCY_TOTALS, 1.25), None),
+        },
+        Shape {
+            name: "totals with the label right of its amount between rules over a note",
+            axes: RULED,
+            draw: |v| (totals_shape(v, &LABEL_RIGHT_TOTALS, 1.0), None),
+        },
+        Shape {
+            name: "totals with the label right of its amount and a larger total between rules over a note",
+            axes: RULED,
+            draw: |v| (totals_shape(v, &LABEL_RIGHT_TOTALS, 1.25), None),
+        },
+        Shape {
+            name: "totals with whole amounts between rules over a note",
+            axes: RULED,
+            draw: |v| (totals_shape(v, &WHOLE_TOTALS, 1.0), None),
+        },
+        Shape {
+            name: "totals with whole amounts and a larger total between rules over a note",
+            axes: RULED,
+            draw: |v| (totals_shape(v, &WHOLE_TOTALS, 1.25), None),
+        },
+        Shape {
+            name: "totals with a percent column between rules over a note",
+            axes: RULED,
+            draw: |v| (totals_shape(v, &PERCENT_TOTALS, 1.0), None),
+        },
+        Shape {
+            name: "totals with a percent column and a larger total between rules over a note",
+            axes: RULED,
+            draw: |v| (totals_shape(v, &PERCENT_TOTALS, 1.25), None),
         },
         Shape {
             name: "a notice band between rules",

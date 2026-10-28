@@ -1054,39 +1054,48 @@ fn heads_over_lines(flow: &Flow, cell: &[usize]) -> Option<Vec<String>> {
     fields.then(|| heads.iter().map(|h| words(flow, h)).collect())
 }
 
-/// Whether the runs `ids` of a frame are rows of one grid of totals: two lines or more that are
-/// each a label and an amount flush right (see [`crate::tables::borderless::amount`]), their
-/// amounts ending in one place, and every other line one piece (a note under them). Such a
-/// frame with no field read is left to the table pass; any other is read cell by cell.
+/// Whether the runs `ids` of a frame are rows of one grid of a table, by their places alone: two
+/// lines or more of two pieces or more (runs apart by a cell gap, see [`labels_in_line`]), their
+/// first pieces in one column and their last pieces in one column, one of the two flush right
+/// (ending in one place: amounts, with or without a currency or a percent column between), and
+/// every other line one piece (a note under them). Such a frame with no field read is left to
+/// the table pass; any other (address blocks side by side, a cell of two lines beside cells of
+/// one) is read cell by cell.
 fn totals_rows(flow: &Flow, ids: &[usize]) -> bool {
     let ids: Vec<usize> = ids
         .iter()
         .copied()
         .filter(|&i| inked(&flow.runs[i]))
         .collect();
-    let mut ends: Vec<(f32, f32)> = Vec::new();
+    // The first and the last piece of each line of two pieces or more: start, end, size.
+    let mut rows: Vec<[(f32, f32, f32); 2]> = Vec::new();
     for line in lines_of(flow, &ids) {
         let pieces = labels_in_line(flow, &line);
-        match pieces.as_slice() {
-            [_] => {}
-            [label, value]
-                if words(flow, label).chars().any(char::is_alphabetic)
-                    && crate::tables::borderless::amount(&words(flow, value)) =>
-            {
-                let (_, end) = extent(flow, value);
-                let size = value
-                    .iter()
-                    .map(|&i| flow.runs[i].size)
-                    .fold(0.0f32, f32::max);
-                ends.push((end, size));
-            }
-            _ => return false,
+        if pieces.len() < 2 {
+            continue;
         }
+        let at = |p: &Vec<usize>| {
+            let (a, b) = extent(flow, p);
+            let size = p.iter().map(|&i| flow.runs[i].size).fold(0.0f32, f32::max);
+            (a, b, size)
+        };
+        rows.push([at(&pieces[0]), at(&pieces[pieces.len() - 1])]);
     }
-    ends.len() >= 2
-        && ends
-            .iter()
-            .all(|&(e, size)| (e - ends[0].0).abs() <= CHAR * size.max(ends[0].1))
+    if rows.len() < 2 {
+        return false;
+    }
+    let same = |k: usize, end: bool| {
+        rows.iter().all(|r| {
+            let (x, y) = if end {
+                (r[k].1, rows[0][k].1)
+            } else {
+                (r[k].0, rows[0][k].0)
+            };
+            (x - y).abs() <= CHAR * r[k].2.max(rows[0][k].2)
+        })
+    };
+    let column = |k: usize| same(k, false) || same(k, true);
+    column(0) && column(1) && (same(0, true) || same(1, true))
 }
 
 /// The cells of a row of fields between the rules `top` and `bottom` from `x0` to `x1`, with

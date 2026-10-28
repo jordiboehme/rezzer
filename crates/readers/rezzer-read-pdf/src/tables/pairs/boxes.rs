@@ -155,8 +155,18 @@ pub(crate) fn box_pairs(
         let r = &flow.runs[first];
         Some((style_of(r), boxes[b][3] - r.y))
     };
+    // The label places of the field boxes, found once.
+    let labelled: Vec<(usize, (Style, f32))> = (0..boxes.len())
+        .filter_map(|f| {
+            let field = fields[f].as_ref()?;
+            Some((f, label_at(f, &field.label)?))
+        })
+        .collect();
     let mut empty: Vec<(usize, Vec<usize>)> = Vec::new();
     for b in 0..boxes.len() {
+        if labelled.is_empty() {
+            break;
+        }
         let ids = inked_of(b);
         if fields[b].is_some() || consumed[b] || ids.is_empty() || unsure.iter().any(|u| u.0 == b) {
             continue;
@@ -171,13 +181,9 @@ pub(crate) fn box_pairs(
             continue;
         };
         let size = flow.runs[ids[0]].size;
-        let beside = (0..boxes.len()).any(|f| {
-            fields[f].as_ref().is_some_and(|field| {
-                near(b, f)
-                    && label_at(f, &field.label)
-                        .is_some_and(|(s, o)| s == style && (o - offset).abs() <= 0.5 * size)
-            })
-        });
+        let beside = labelled
+            .iter()
+            .any(|&(f, (s, o))| near(b, f) && s == style && (o - offset).abs() <= 0.5 * size);
         if beside {
             empty.push((b, ids));
         }
@@ -225,13 +231,24 @@ pub(crate) fn box_pairs(
     // The page's lines, once needed: a box drawn with no text in it is no reading region, so
     // the boxes beside it touch it, not each other; the lines show it drawn.
     let lines = std::cell::OnceCell::new();
-    let lines = || lines.get_or_init(|| grids(rules).map(|g| (g.hs, g.vs)).unwrap_or_default());
+    // Sorted by their place across, so the lines near a place are found by a search.
+    let lines = || {
+        lines.get_or_init(|| {
+            let (mut hs, mut vs) = grids(rules).map(|g| (g.hs, g.vs)).unwrap_or_default();
+            hs.sort_by(|a, b| a.at.total_cmp(&b.at));
+            vs.sort_by(|a, b| a.at.total_cmp(&b.at));
+            (hs, vs)
+        })
+    };
     // Whether lines `segs` at `at` (within `t`) cover the stretch `lo..hi`.
     let covered = |segs: &[Seg], at: f32, lo: f32, hi: f32, t: f32| {
         let mut end = lo;
-        let mut parts: Vec<&Seg> = segs
+        let tol = t.max(SNAP);
+        let from = segs.partition_point(|s| s.at < at - tol);
+        let mut parts: Vec<&Seg> = segs[from..]
             .iter()
-            .filter(|s| (s.at - at).abs() <= t.max(SNAP) && s.to > lo && s.from < hi)
+            .take_while(|s| s.at <= at + tol)
+            .filter(|s| s.to > lo && s.from < hi)
             .collect();
         parts.sort_by(|a, b| a.from.total_cmp(&b.from));
         for s in parts {
@@ -244,15 +261,22 @@ pub(crate) fn box_pairs(
     };
     // Two boxes of a row with an empty drawn box between them: its top and bottom drawn across
     // the gap. Two of a column: its sides drawn down the gap.
+    // The gap is at most as wide as twice the wider box: an empty box beside boxes like it.
     let empty_row = |a: [f32; 4], b: [f32; 4], t: f32| {
+        let gap = b[0] - a[2];
+        if gap <= t || gap > 2.0 * (a[2] - a[0]).max(b[2] - b[0]) {
+            return false;
+        }
         let (hs, _) = lines();
-        b[0] - a[2] > t
-            && covered(hs, a[3], a[2], b[0], t)
-            && covered(hs, a[1].max(b[1]), a[2], b[0], t)
+        covered(hs, a[3], a[2], b[0], t) && covered(hs, a[1].max(b[1]), a[2], b[0], t)
     };
     let empty_column = |a: [f32; 4], b: [f32; 4], t: f32| {
+        let gap = a[1] - b[3];
+        if gap <= t || gap > 2.0 * (a[3] - a[1]).max(b[3] - b[1]) {
+            return false;
+        }
         let (_, vs) = lines();
-        a[1] - b[3] > t && covered(vs, a[0], b[3], a[1], t) && covered(vs, a[2], b[3], a[1], t)
+        covered(vs, a[0], b[3], a[1], t) && covered(vs, a[2], b[3], a[1], t)
     };
     let mut hs: Option<Vec<Seg>> = None;
     let mut groups: Vec<Vec<usize>> = Vec::new();

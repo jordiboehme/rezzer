@@ -6254,3 +6254,335 @@ fn a_notice_band_between_rules_is_no_row_of_fields() {
         wrong.join("\n")
     );
 }
+
+/// Task 15b part 2d fix round 5 (R1, the part 2d re-review r4 probe): totals in other common
+/// shapes between the rule under the items and a rule under a note, or under a rule only: a
+/// percent column in one row or in all, amounts without decimals, a currency column, the label
+/// right of its amount, two plain columns, a euro sign, a minus amount, and net, tax and gross
+/// titles over their amounts; the total row at the size or 1.25 times it. Each row's texts
+/// stand together, in one table row or one line, never a label parted from its amount (found
+/// by the spans of the drawn texts), as at d925e37. Sizes 6 to 12, both fonts. Each row: its
+/// cells (text, x as a share of the width, flush right), bold, size.
+#[test]
+fn totals_of_other_shapes_keep_their_rows() {
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 9.0, 10.0, 12.0] {
+        for fonts in FONTS {
+            // (text, x share of width, right aligned)
+            type C<'a> = (&'a str, f32, bool);
+            type Row<'a> = (Vec<C<'a>>, bool, f32);
+            let cases: Vec<(&str, Vec<Row>)> = vec![
+                (
+                    "percent column",
+                    vec![
+                        (
+                            vec![("Nettobetrag", 0.45, false), ("99,99 EUR", 1.0, true)],
+                            false,
+                            1.0,
+                        ),
+                        (
+                            vec![
+                                ("USt.", 0.45, false),
+                                ("19 %", 0.75, true),
+                                ("19,00 EUR", 1.0, true),
+                            ],
+                            false,
+                            1.0,
+                        ),
+                        (
+                            vec![("Gesamt", 0.45, false), ("118,99 EUR", 1.0, true)],
+                            true,
+                            1.0,
+                        ),
+                    ],
+                ),
+                (
+                    "percent column all rows",
+                    vec![
+                        (
+                            vec![
+                                ("USt.", 0.45, false),
+                                ("7 %", 0.75, true),
+                                ("1,00", 1.0, true),
+                            ],
+                            false,
+                            1.0,
+                        ),
+                        (
+                            vec![
+                                ("USt.", 0.45, false),
+                                ("19 %", 0.75, true),
+                                ("19,00", 1.0, true),
+                            ],
+                            false,
+                            1.0,
+                        ),
+                        (
+                            vec![
+                                ("Gesamt", 0.45, false),
+                                ("", 0.75, true),
+                                ("120,00", 1.0, true),
+                            ],
+                            true,
+                            1.0,
+                        ),
+                    ],
+                ),
+                (
+                    "no decimals",
+                    vec![
+                        (
+                            vec![("Nettobetrag", 0.45, false), ("100 EUR", 1.0, true)],
+                            false,
+                            1.0,
+                        ),
+                        (
+                            vec![("zzgl. USt. 19 %", 0.45, false), ("19 EUR", 1.0, true)],
+                            false,
+                            1.0,
+                        ),
+                        (
+                            vec![("Gesamt", 0.45, false), ("119 EUR", 1.0, true)],
+                            true,
+                            1.0,
+                        ),
+                    ],
+                ),
+                (
+                    "currency column",
+                    vec![
+                        (
+                            vec![
+                                ("Nettobetrag", 0.45, false),
+                                ("EUR", 0.8, false),
+                                ("99,99", 1.0, true),
+                            ],
+                            false,
+                            1.0,
+                        ),
+                        (
+                            vec![
+                                ("zzgl. USt. 19 %", 0.45, false),
+                                ("EUR", 0.8, false),
+                                ("19,00", 1.0, true),
+                            ],
+                            false,
+                            1.0,
+                        ),
+                        (
+                            vec![
+                                ("Gesamt", 0.45, false),
+                                ("EUR", 0.8, false),
+                                ("118,99", 1.0, true),
+                            ],
+                            true,
+                            1.0,
+                        ),
+                    ],
+                ),
+                (
+                    "label right",
+                    vec![
+                        (
+                            vec![("99,99 EUR", 0.6, true), ("Nettobetrag", 0.65, false)],
+                            false,
+                            1.0,
+                        ),
+                        (
+                            vec![("19,00 EUR", 0.6, true), ("zzgl. USt. 19 %", 0.65, false)],
+                            false,
+                            1.0,
+                        ),
+                        (
+                            vec![("118,99 EUR", 0.6, true), ("Gesamt", 0.65, false)],
+                            true,
+                            1.0,
+                        ),
+                    ],
+                ),
+                (
+                    "plain two col",
+                    vec![
+                        (
+                            vec![("Nettobetrag", 0.45, false), ("99,99 EUR", 1.0, true)],
+                            false,
+                            1.0,
+                        ),
+                        (
+                            vec![("zzgl. USt. 19 %", 0.45, false), ("19,00 EUR", 1.0, true)],
+                            false,
+                            1.0,
+                        ),
+                        (
+                            vec![("Gesamt", 0.45, false), ("118,99 EUR", 1.0, true)],
+                            true,
+                            1.0,
+                        ),
+                    ],
+                ),
+                (
+                    "euro sign",
+                    vec![
+                        (
+                            vec![("Nettobetrag", 0.45, false), ("99,99 \u{20ac}", 1.0, true)],
+                            false,
+                            1.0,
+                        ),
+                        (
+                            vec![
+                                ("zzgl. USt. 19 %", 0.45, false),
+                                ("19,00 \u{20ac}", 1.0, true),
+                            ],
+                            false,
+                            1.0,
+                        ),
+                        (
+                            vec![("Gesamt", 0.45, false), ("118,99 \u{20ac}", 1.0, true)],
+                            true,
+                            1.0,
+                        ),
+                    ],
+                ),
+                (
+                    "minus discount",
+                    vec![
+                        (
+                            vec![("Zwischensumme", 0.45, false), ("120,00 EUR", 1.0, true)],
+                            false,
+                            1.0,
+                        ),
+                        (
+                            vec![("Rabatt", 0.45, false), ("-20,00 EUR", 1.0, true)],
+                            false,
+                            1.0,
+                        ),
+                        (
+                            vec![("Gesamt", 0.45, false), ("100,00 EUR", 1.0, true)],
+                            true,
+                            1.0,
+                        ),
+                    ],
+                ),
+                (
+                    "net tax gross columns",
+                    vec![
+                        (
+                            vec![
+                                ("Netto", 0.45, false),
+                                ("USt.", 0.7, true),
+                                ("Brutto", 1.0, true),
+                            ],
+                            true,
+                            1.0,
+                        ),
+                        (
+                            vec![
+                                ("99,99", 0.45, false),
+                                ("19,00", 0.7, true),
+                                ("118,99", 1.0, true),
+                            ],
+                            false,
+                            1.0,
+                        ),
+                    ],
+                ),
+            ];
+            for (case, rows) in &cases {
+                for (big, note) in [(1.0f32, true), (1.25, true), (1.0, false), (1.25, false)] {
+                    let pitch = 1.25 * size;
+                    let k = size / 9.0;
+                    let xs = [40.0, 40.0 + 30.0 * k, 40.0 + 220.0 * k, 40.0 + 300.0 * k];
+                    let xr = 40.0 + 460.0 * k;
+                    let rule = |y: f32| format!("0 0 0 RG 0.5 w 40 {y} m {xr} {y} l S\n");
+                    let items = [
+                        ["Pos", "Bezeichnung", "Menge", "Einzelpreis", "Betrag"],
+                        ["1", "Musterartikel", "2", "10,00 EUR", "20,00 EUR"],
+                        ["2", "Beispielware", "1", "79,99 EUR", "79,99 EUR"],
+                    ];
+                    let right = |f: &str, s: f32, x: f32, y: f32, t: &str| {
+                        show(f, s, x - common::font_width(f, t, s), y, t)
+                    };
+                    let mut t = String::new();
+                    let mut y = 650.0;
+                    for (n, r) in items.iter().enumerate() {
+                        let f = if n == 0 { fonts.1 } else { fonts.0 };
+                        for (c, x) in xs.iter().enumerate() {
+                            t += &show(f, size, *x, y, r[c]);
+                        }
+                        t += &right(f, size, xr, y, r[4]);
+                        y -= pitch;
+                    }
+                    t += &rule(y + 0.8 * size);
+                    y -= 0.5 * pitch;
+                    let n = rows.len();
+                    for (ri, (cells, bold, _)) in rows.iter().enumerate() {
+                        let s = if ri + 1 == n { big * size } else { size };
+                        let f = if *bold { fonts.1 } else { fonts.0 };
+                        for (txt, xf, r) in cells {
+                            if txt.is_empty() {
+                                continue;
+                            }
+                            let x = 40.0 + 460.0 * k * xf;
+                            t += &if *r {
+                                right(f, s, x, y, txt)
+                            } else {
+                                show(f, s, x, y, txt)
+                            };
+                        }
+                        y -= pitch * (s / size);
+                    }
+                    if note {
+                        y -= 0.5 * pitch;
+                        t += &show(
+                            fonts.0,
+                            0.8 * size,
+                            40.0,
+                            y,
+                            "Zahlbar innerhalb von 14 Tagen ohne Abzug.",
+                        );
+                        t += &rule(y - pitch);
+                    } else {
+                        t += &rule(y + 0.3 * pitch);
+                    }
+                    let at = format!("{case} x{big} note {note}, {size}, {fonts:?}");
+                    let out = common::read(&page_in(&t, Look::Plain));
+                    // Each totals row is a cell of its own: its texts together (in one table
+                    // row or one line), no unit with texts of two rows. A text of two rows
+                    // (`EUR`, `USt.`) is left out of the check.
+                    let cells: Vec<Vec<String>> = rows
+                        .iter()
+                        .map(|(cells, _, _)| {
+                            cells
+                                .iter()
+                                .map(|c| c.0.to_string())
+                                .filter(|t| !t.is_empty())
+                                .collect()
+                        })
+                        .collect();
+                    let all: Vec<&String> = cells.iter().flatten().collect();
+                    let twice = |t: &str| all.iter().filter(|o| o.contains(t)).count() != 1;
+                    let units = common::read_units(&out.document.body);
+                    let ordered = vec![false; cells.len()];
+                    // Older (the same at d925e37, part 2e): a percent column in one row, the
+                    // net, tax and gross titles, and a larger total under a rule only, read
+                    // their rows mixed or as a turned table.
+                    let older = *case == "percent column"
+                        || *case == "net tax gross columns"
+                        || (big > 1.0 && !note);
+                    if older {
+                        continue;
+                    }
+                    for w in common::cells_apart(&units, &cells, &ordered, &twice) {
+                        wrong.push(format!("{at}: {w}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
