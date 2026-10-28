@@ -778,6 +778,37 @@ fn justified_pair(v: &Variant) -> Sheet {
     s
 }
 
+/// Part 2e-4 (item 9): labels with a short index (`Kundennr. 1`) beside the lines of an
+/// address: a table of labels and values, with no doubt that blocks stand side by side.
+fn numbered_labels(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let size = 8.0 * k;
+    let top = 640.0;
+    let rows = [
+        ["Kundennr. 1", "Muster GmbH"],
+        ["Vertrag 7", "Musterweg 1"],
+        ["Tarif A2", "12345 Musterstadt"],
+    ];
+    let mut t = String::new();
+    for (n, row) in rows.iter().enumerate() {
+        for (x, c) in [40.0f32, 220.0].iter().zip(row) {
+            t += &show(plain, size, *x, top - 1.2 * size * n as f32, c);
+        }
+    }
+    let bottom = top - 2.4 * size;
+    let mut s = sheet(v, t, 420.0, Some(Span { top, bottom }));
+    s.want.tables.push(
+        rows.iter()
+            .map(|r| r.iter().map(|c| c.to_string()).collect())
+            .collect(),
+    );
+    s.want
+        .no_losses
+        .push("though a column of them holds an address".into());
+    s
+}
+
 /// `text` in `font` at `size` wrapped greedily to `measure` points: its lines.
 fn wrapped(text: &str, font: &str, size: f32, measure: f32) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
@@ -2204,6 +2235,11 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "two lines of three words set full",
             axes: DOC,
             draw: |v| (justified_pair(v), None),
+        },
+        Shape {
+            name: "numbered labels beside an address",
+            axes: DOC,
+            draw: |v| (numbered_labels(v), None),
         },
         Shape {
             name: "prose right under a column of field lines",

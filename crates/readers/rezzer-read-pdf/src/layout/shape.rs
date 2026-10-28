@@ -301,6 +301,24 @@ fn fact_block(block: &[&ColumnLine]) -> Fact {
     }
 }
 
+/// A label's index holds at most this many characters (`1`, `12`, `A2`).
+const INDEX_CHARS: usize = 3;
+
+/// Whether `text` is a numbered label: words without a digit, then one word with a digit of at
+/// most [`INDEX_CHARS`] characters (`Kundennr. 1`, `Vertrag 7`, `Tarif A2`).
+fn indexed(text: &str) -> bool {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let Some((last, head)) = words.split_last() else {
+        return false;
+    };
+    !head.is_empty()
+        && head
+            .iter()
+            .all(|w| w.chars().any(char::is_alphabetic) && !w.chars().any(|c| c.is_ascii_digit()))
+        && last.chars().any(|c| c.is_ascii_digit())
+        && last.chars().count() <= INDEX_CHARS
+}
+
 /// Whether lines are a postal address: a line of a postcode (a number of four digits or more)
 /// and a town, and a line of a street or a PO box with its number (words, then a number of
 /// at most four characters: `Musterweg 1`, `Hauptstr. 2a`, `Postfach 12 34`).
@@ -356,12 +374,16 @@ pub(crate) fn address_columns(columns: &[Vec<Option<ColumnLine>>]) -> Columns {
         .position(|c| postal(&text_of(c).iter().map(String::as_str).collect::<Vec<_>>()));
     let has_postal = postal_at.is_some();
     // A column without a digit left of the address is its labels (`Name`, `Strasse`, `Ort`):
-    // rows, no doubt.
+    // rows, no doubt. So is one whose every line is words and a short index after them
+    // (`Kundennr. 1`, `Vertrag 7`, `Tarif A2`): numbered labels. A phone or an account line has
+    // a long number (`Telefon 0123 4567`), and stays a doubt.
     let labels = postal_at.is_some_and(|p| {
         columns[..p].iter().any(|c| {
-            !text_of(c)
+            let lines = text_of(c);
+            !lines
                 .iter()
                 .any(|t| t.chars().any(|ch| ch.is_ascii_digit()))
+                || (!lines.is_empty() && lines.iter().all(|t| indexed(t)))
         })
     });
     // A column of amounts beside it makes rows of a table: no doubt either.
@@ -742,10 +764,18 @@ mod tests {
             &["Vertrag 7", "Musterweg 1"],
             &["Tarif A2", "12345 Musterstadt"],
         ];
+        // Numbered labels beside an address are rows, with no doubt (part 2e-4, item 9); phone
+        // lines beside it may be a block of their own, which stays a doubt.
         assert_eq!(
             address_columns(&columns_of(&labelled, false)),
-            Columns::Doubt
+            Columns::Rows
         );
+        let phones: [&[&str]; 3] = [
+            &["Telefon 0123 4567", "Muster GmbH"],
+            &["Telefax 0123 4568", "Musterweg 1"],
+            &["Mobil 0170 1234", "12345 Musterstadt"],
+        ];
+        assert_eq!(address_columns(&columns_of(&phones, false)), Columns::Doubt);
     }
 
     #[test]

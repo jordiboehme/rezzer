@@ -335,6 +335,7 @@ shape_tests! {
     a_value_that_touches_its_label => "a value that touches its label",
     prose_with_a_number_at_a_line_end => "prose with a number at a line end",
     two_lines_of_three_words_set_full => "two lines of three words set full",
+    numbered_labels_beside_an_address => "numbered labels beside an address",
     prose_right_under_field_lines => "prose right under a column of field lines",
     prose_right_over_field_lines => "prose right over a column of field lines",
     a_paragraph_set_full_in_a_narrow_column => "a paragraph without a stop set full in a narrow column",

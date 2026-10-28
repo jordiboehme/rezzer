@@ -6502,6 +6502,64 @@ fn small_tables_keep_their_rows() {
     );
 }
 
+/// Task 15b part 2e-4 (item 9, list line 9): labels with a short index (`Kundennr. 1`, `Vertrag
+/// 7`, `Tarif A2`) beside the lines of an address are rows of labels and values: the table is
+/// read and no loss doubts it (the doubt that blocks may stand side by side was noise there).
+/// Lines of a phone number beside an address may be a block of their own: that doubt stays.
+/// Sizes 6 to 14, both fonts.
+#[test]
+fn numbered_labels_beside_an_address_raise_no_doubt() {
+    let labelled: &[&[&str]] = &[
+        &["Kundennr. 1", "Muster GmbH"],
+        &["Vertrag 7", "Musterweg 1"],
+        &["Tarif A2", "12345 Musterstadt"],
+    ];
+    let phones: &[&[&str]] = &[
+        &["Telefon 0123 4567", "Muster GmbH"],
+        &["Telefax 0123 4568", "Musterweg 1"],
+        &["Mobil 0170 1234", "12345 Musterstadt"],
+    ];
+    const DOUBT: &str = "though a column of them holds an address";
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0] {
+        for fonts in FONTS {
+            let out = common::read(&page_in(
+                &small_rows(labelled, size, fonts, false),
+                Look::Plain,
+            ));
+            let want: Vec<Vec<String>> = labelled
+                .iter()
+                .map(|r| r.iter().map(|c| (*c).to_string()).collect())
+                .collect();
+            if !tables(&out).iter().any(|t| t.1 == want) {
+                wrong.push(format!(
+                    "labels, {size}, {fonts:?}: no table: {:?}",
+                    texts_of(&out)
+                ));
+            }
+            if out.document.losses.iter().any(|l| l.what.contains(DOUBT)) {
+                wrong.push(format!("labels, {size}, {fonts:?}: the doubt is said"));
+            }
+            let out = common::read(&page_in(
+                &small_rows(phones, size, fonts, false),
+                Look::Plain,
+            ));
+            if !out.document.losses.iter().any(|l| l.what.contains(DOUBT)) {
+                wrong.push(format!(
+                    "phones, {size}, {fonts:?}: no doubt: {:?}",
+                    out.document.losses
+                ));
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
 /// Task 15b part 2c review (Important 1, ruling P6-X): labels beside values whose columns are
 /// of uneven height (a last label without a value, a value of two address lines) or full keep
 /// each value with its label, or a loss says that labels beside values are read apart; never
