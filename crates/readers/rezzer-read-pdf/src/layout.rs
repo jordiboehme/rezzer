@@ -2950,12 +2950,14 @@ fn wraps(lines: &[Line<'_>], edges: &[(f32, f32)]) -> Vec<bool> {
     let value_end = |k: usize| {
         let l = &lines[k];
         let next = &lines[k + 1].text;
-        let total = (ends_in_amount(&l.text) || signed_amount(&l.text))
-            && data_only(next)
-            && ends_in_amount(next);
+        let total = || {
+            data_only(next)
+                && ends_in_amount(next)
+                && (ends_in_amount(&l.text) || signed_amount(&l.text))
+        };
         !ends_sentence(l)
             && !goes_on[k]
-            && (next.chars().next().is_some_and(char::is_uppercase) || total)
+            && (next.chars().next().is_some_and(char::is_uppercase) || total())
             && l.text.split_whitespace().next_back().is_some_and(|w| {
                 w.chars().any(|c| c.is_ascii_digit())
                     && w.chars().all(|c| c.is_ascii_digit() || ".,/-".contains(c))
