@@ -2683,7 +2683,7 @@ fn first_word(line: &Line<'_>) -> f32 {
 /// that ends in a hyphen or a comma, or whose next line starts with a small letter, goes on.
 /// Otherwise no line goes on when
 /// - the lines each end with an exclamation or a question mark: sentences of their own (a
-///   slogan, a greeting);
+///   slogan, a greeting), or each opens with a star: starred items;
 /// - the lines read as no sentences and one that ends no sentence would have taken the next
 ///   line's first word in its own face within the widest line, with [`SPARE`] sizes to spare:
 ///   the lines were not filled to a measure, they are lines of their own (fields, items,
@@ -2708,6 +2708,7 @@ fn wraps(lines: &[Line<'_>], edges: &[(f32, f32)], pair: bool) -> Vec<bool> {
         .map(|k| cut(&lines[k]) || lower(&lines[k + 1]))
         .collect();
     let exclaims = lines.iter().all(|l| l.text.ends_with(['!', '?']));
+    let starred = lines.iter().all(|l| l.text.starts_with('*'));
     let right = edges.iter().map(|e| e.1).fold(f32::MIN, f32::max);
     // The face of a run: a title line in bold over plain text is no line of that text.
     let face = |r: &Run| (r.bold, r.italic, r.family, (r.size * 2.0).round() as i32);
@@ -2744,7 +2745,7 @@ fn wraps(lines: &[Line<'_>], edges: &[(f32, f32)], pair: bool) -> Vec<bool> {
             })
     };
     let values = !sentences(lines) && (0..n - 1).any(value_end);
-    if exclaims || unfilled || values || (pair && n == 2 && !one_sentence) {
+    if exclaims || starred || unfilled || values || (pair && n == 2 && !one_sentence) {
         goes_on
     } else {
         (0..n - 1).map(|k| !value_end(k)).collect()

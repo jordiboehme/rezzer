@@ -327,6 +327,7 @@ shape_tests! {
     a_column_of_bold_long_field_lines_boxed => "a column of bold field lines of 5 to 7 words at heading size, two boxed",
     slogan_lines => "slogan lines, each a sentence ending in an exclamation mark",
     bold_slogan_lines => "bold slogan lines, each a sentence ending in an exclamation mark",
+    bold_lines_of_starred_items => "bold lines of starred items",
     line_items_with_wrapped_date_ranges => "line items with wrapped date ranges",
     line_items_over_two_lone_amounts => "line items over two amounts alone in two columns",
     a_notice_band_between_rules => "a notice band between rules",

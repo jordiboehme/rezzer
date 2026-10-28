@@ -582,6 +582,38 @@ fn word_mark(word: &str) -> Option<(NoteMark, usize)> {
         .then_some((NoteMark::Raised(value), sup))
 }
 
+/// The words of `text` that end in a note marker (see [`word_mark`]), each with its byte
+/// offset, its marker and the marker's length. Stars that close text a star opens on the same
+/// line (`*Abc.-Nr. 12345*`, a starred item) are no marker: they are the end of the item, and a
+/// star the same size and on the line of the text is no evidence of a reference.
+fn word_marks(text: &str) -> Vec<(usize, &str, NoteMark, usize)> {
+    let mut out = Vec::new();
+    let mut open = false;
+    for (start, word) in word_spans(text) {
+        let w = word.trim_end_matches([':', ',', '.', ';']);
+        let opens = starred(w);
+        let mark = word_mark(word);
+        let closes = mark.is_some_and(|m| matches!(m.0, NoteMark::Stars(_)))
+            && (open || opens && w.trim_matches('*').chars().any(char::is_alphanumeric));
+        if opens {
+            open = true;
+        }
+        match mark {
+            Some(_) if closes => open = false,
+            Some((mark, len)) => out.push((start, word, mark, len)),
+            None => {}
+        }
+    }
+    out
+}
+
+/// Whether `word` opens with stars right before a letter or digit (`*Abc`): the start of a
+/// starred item.
+fn starred(word: &str) -> bool {
+    let rest = word.trim_start_matches('*');
+    rest.len() < word.len() && rest.starts_with(char::is_alphanumeric)
+}
+
 /// The marker a piece of a legend line opens with: stars, a number with `)` or a superscript
 /// number before its text, a run of digits raised against the run after it, or plain digits
 /// and a space.
@@ -614,7 +646,15 @@ fn opening(runs: &[Run]) -> Option<(NoteMark, usize)> {
     let stars = text.len() - text.trim_start_matches('*').len();
     if stars > 0 {
         let rest = &text[stars..];
-        return (stars <= 3 && opens_text(rest)).then(|| (NoteMark::Stars(stars as u8), cut(rest)));
+        // A piece that also ends in stars after its text is a starred item (`*Abc.-Nr. ab*`),
+        // not a footnote opened by its marker.
+        let whole: String = runs.iter().map(|r| r.text.as_str()).collect();
+        let whole = whole.trim().trim_end_matches([':', ',', '.', ';']);
+        let item = whole.len() > stars
+            && whole.ends_with('*')
+            && whole.trim_end_matches('*').ends_with(char::is_alphanumeric);
+        return (stars <= 3 && opens_text(rest) && !item)
+            .then(|| (NoteMark::Stars(stars as u8), cut(rest)));
     }
     let n = text.len() - text.trim_start_matches(|c: char| c.is_ascii_digit()).len();
     if (1..=2).contains(&n) {
@@ -650,7 +690,7 @@ fn references(
 ) -> Vec<Raised> {
     let l = &all[k];
     let start = starts[k];
-    marks.extend(l.text.split_whitespace().filter_map(word_mark).map(|m| m.0));
+    marks.extend(word_marks(&l.text).into_iter().map(|m| m.2));
     let mut raised = Vec::new();
     let mut word: Option<(usize, &Run)> = None;
     for (i, r) in l.runs.iter().enumerate() {
@@ -871,10 +911,7 @@ fn link_inlines(inlines: &mut Vec<Inline>, legend: &Legend) {
             strike,
         };
         let mut from = 0;
-        for (start, word) in word_spans(&text) {
-            let Some((mark, len)) = word_mark(word) else {
-                continue;
-            };
+        for (start, word, mark, len) in word_marks(&text) {
             let Some(label) = legend.labels.get(&mark) else {
                 continue;
             };

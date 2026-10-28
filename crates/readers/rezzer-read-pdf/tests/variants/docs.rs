@@ -531,6 +531,9 @@ const SLOGAN_LINES: [&str; 3] = [
     "Wir sind auch am Wochenende gerne für Sie da!",
 ];
 
+/// Part 2e-2 (item 5, O3): lines of starred items.
+const STARRED_LINES: [&str; 3] = ["* A123456B * x/y", "*Abc.-Nr. 12345* 12a", "*Abc.-Nr. ab*"];
+
 /// The lines `lines` of one face as a column at one left edge beside a letter address (see
 /// [`one_face_column`]), each line's text in one show: no line of the read, and no heading,
 /// holds two of them.
@@ -1551,6 +1554,15 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "bold slogan lines, each a sentence ending in an exclamation mark",
             axes: DOC,
             draw: |v| (column_of(v, &SLOGAN_LINES, 9.5, true, None), None),
+        },
+        Shape {
+            name: "bold lines of starred items",
+            axes: DOC,
+            draw: |v| {
+                let mut s = column_of(v, &STARRED_LINES, 9.0, true, None);
+                s.want.order = STARRED_LINES[1..].iter().map(|l| l.to_string()).collect();
+                (s, None)
+            },
         },
         Shape {
             name: "line items with wrapped date ranges",

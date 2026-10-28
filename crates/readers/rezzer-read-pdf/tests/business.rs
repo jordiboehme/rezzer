@@ -2205,6 +2205,43 @@ fn wrapped_prose_in_a_column_still_joins() {
     );
 }
 
+/// Task 15b part 2e-2 (item 5, O3 of the part 2e-1 re-review r2): bold lines of starred items
+/// (`* A123456B * x/y`, `*Abc.-Nr. 12345* 12a`, `*Abc.-Nr. ab*`) at 6 to 14 points, plain and
+/// bold Helvetica and Times: a star that closes an item a star opens on its line is no note
+/// marker, and a line that opens and ends with a star is no footnote: no footnote is read, the
+/// stars stay in the text, and each line is a line of its own.
+#[test]
+fn starred_items_are_no_footnotes() {
+    let parts = ["* A123456B * x/y", "*Abc.-Nr. 12345* 12a", "*Abc.-Nr. ab*"];
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 7.0, 8.0, 9.0, 10.0, 12.0, 14.0] {
+        for font in ["FB", "FTB", "FL", "FT"] {
+            let mut t = String::new();
+            for (k, p) in parts.iter().enumerate() {
+                t += &show(font, size, 40.0, 700.0 - 1.25 * size * k as f32, p);
+            }
+            let out = common::read(&page_in(&t, Look::Plain));
+            let md = common::markdown(&out);
+            let at = format!("{size}, {font}");
+            if md.contains("[^") {
+                wrong.push(format!("{at}: a footnote"));
+            }
+            let text = md.replace("**", "").replace('\\', "");
+            for want in ["*Abc.-Nr. 12345* 12a", "*Abc.-Nr. ab*"] {
+                if !text.lines().any(|l| l.trim() == want) {
+                    wrong.push(format!("{at}: no line {want:?}"));
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
 /// Task 15b part 2e-1 (item 6, part 2b re-review r1; ruling P6-X): a table of taxes without
 /// rules, an amount alone under an amount of its column (a row of its own), then two lines of
 /// one amount each in two other columns under the last row (`5,00` under the base, `125,00`
