@@ -7011,3 +7011,102 @@ fn a_box_at_the_value_size_is_left_out_of_its_row_and_said() {
         wrong.join("\n")
     );
 }
+
+/// Task 15b part 2d item 3 (ruling P6-X): a strip of three fields between two rules with no
+/// rule between them, its middle cell's first line a little smaller than the labels beside
+/// it, at the values' size, or a bold title: the cells are read apart, never line by line
+/// across them; `Name: Beispiel` and `Nr: 4711` pair; the middle cell pairs only on a colon or
+/// the labels' style, a title is in no pair, and else a loss names it.
+#[test]
+fn a_strip_without_dividers_reads_its_cells_apart() {
+    let cases: [Case; 11] = [
+        (
+            "bold title",
+            &["Angaben"],
+            &[],
+            1.0,
+            Some(false),
+            Want::Alone,
+        ),
+        (
+            "bold title at value size",
+            &["Angaben"],
+            &[],
+            0.0,
+            Some(false),
+            Want::Alone,
+        ),
+        (
+            "bold title of two lines",
+            &["Angaben zum", "Betrieb"],
+            &[],
+            1.0,
+            Some(false),
+            Want::Alone,
+        ),
+        ("name 0.9", &["Muster GmbH"], ADDR, 0.9, None, Want::Said),
+        (
+            "person over c/o 0.9",
+            &["Erika Mustermann"],
+            &["c/o Muster GmbH", "Musterweg 1", "12345 Musterstadt"],
+            0.9,
+            None,
+            Want::Said,
+        ),
+        (
+            "firm over a PO box 0.9",
+            &["Muster GmbH"],
+            &["Postfach 12 34", "12345 Musterstadt"],
+            0.9,
+            None,
+            Want::Said,
+        ),
+        (
+            "Anschrift: 0.9",
+            &["Anschrift:"],
+            ADDR,
+            0.9,
+            None,
+            Want::Pair,
+        ),
+        (
+            "Kunde 0.9",
+            &["Kunde"],
+            &["Muster GmbH", "Musterweg 1", "12345 Musterstadt"],
+            0.9,
+            None,
+            Want::Said,
+        ),
+        (
+            "Anschrift in the labels' style",
+            &["Anschrift"],
+            ADDR,
+            1.0,
+            None,
+            Want::Pair,
+        ),
+        (
+            "name at value size",
+            &["Muster GmbH"],
+            ADDR,
+            0.0,
+            None,
+            Want::Said,
+        ),
+        (
+            "label 0.9 over a value",
+            &["Kundennummer"],
+            &["00000"],
+            0.9,
+            None,
+            Want::Pair,
+        ),
+    ];
+    let wrong = middle_matrix(&cases, &[Cells::Strip]);
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}

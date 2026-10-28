@@ -31,7 +31,7 @@ const LABEL_BELOW: &str = "its label stands below its value";
 
 /// Why a box beside fields is not read as a field: its text is of one style, so no label is
 /// set apart from a value (a value with no label, a name over an address at the values' size).
-const NO_LABEL: &str = "its text is of one style, with no label set apart from a value";
+pub(super) const NO_LABEL: &str = "its text is of one style, with no label set apart from a value";
 
 /// Why a cell of a row of fields is left out of it: its lines are an address.
 pub(super) const ADDRESS: &str = "its lines read as an address, not as a label over its value";

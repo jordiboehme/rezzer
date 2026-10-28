@@ -379,14 +379,21 @@ fn holds_fields(flow: &Flow, fr: &Frame, ids: &[usize], inner: &[f32]) -> bool {
     let mut xs = vec![fr.x0];
     xs.extend(&fr.dividers);
     xs.push(fr.x1);
+    let fields = |c: &[usize], beside: bool| match parse(flow, c, how) {
+        Parsed::Fields(f) => f.iter().all(|f| short(flow, f)),
+        // An address is a cell of the row, left out of it when the row is read.
+        Parsed::Unsure(why) => why == ADDRESS || why == NAMED_ADDRESS,
+        // So is a title or text with no label beside other heads.
+        Parsed::No => beside && (title_part(flow, c) || value_sized(flow, c)),
+    };
     cells_of(flow, &xs, &rest)
         .iter()
         .filter(|c| !c.is_empty())
-        .all(|c| match parse(flow, c, how) {
-            Parsed::Fields(f) => f.iter().all(|f| short(flow, f)),
-            // An address is a cell of the row, left out of it when the row is read.
-            Parsed::Unsure(why) => why == ADDRESS || why == NAMED_ADDRESS,
-            Parsed::No => false,
+        .all(|c| {
+            fields(c, false)
+                || parts_of(flow, c)
+                    .filter(|p| p.len() >= 2)
+                    .is_some_and(|p| p.iter().all(|p| fields(p, true)))
         })
 }
 
@@ -556,6 +563,7 @@ pub(in crate::tables) fn field_strips(
             } else {
                 match parts_of(flow, cell) {
                     Some(parts) => {
+                        let beside = parts.len() >= 2;
                         for part in parts {
                             let mut parsed = parse(flow, &part, how);
                             if matches!(parsed, Parsed::Unsure(NAMED_ADDRESS)) {
@@ -564,6 +572,21 @@ pub(in crate::tables) fn field_strips(
                             match parsed {
                                 Parsed::Fields(f) if f.iter().all(|f| short(flow, f)) => {
                                     fields.extend(f);
+                                }
+                                // Beside the other heads of its line, a part that is no field
+                                // is left out of the row: a bold title is its own text, and
+                                // text of one style with no label is said, by its first line.
+                                Parsed::No if beside && title_part(flow, &part) => {}
+                                Parsed::No if beside && value_sized(flow, &part) => {
+                                    let names: Vec<String> = lines_of(flow, &part)
+                                        .first()
+                                        .map(|l| words(flow, l))
+                                        .into_iter()
+                                        .collect();
+                                    match left_out.iter_mut().find(|l| l.0 == NO_LABEL) {
+                                        Some(l) => l.1.extend(names),
+                                        None => left_out.push((NO_LABEL, names)),
+                                    }
                                 }
                                 // An address is left out of the row, which is said;
                                 // the other fields of the row stay.
@@ -969,6 +992,23 @@ fn table_body(flow: &Flow, cells: &[Vec<usize>]) -> bool {
             .all(|&(y, size)| widest.iter().any(|&(w, _)| (w - y).abs() <= size / 3.0))
     };
     columns.iter().filter(|c| in_rows(c)).count() >= BODY_COLUMNS
+}
+
+/// Whether the text of a part of a cell is as short as a value.
+fn value_sized(flow: &Flow, part: &[usize]) -> bool {
+    words(flow, part).chars().count() <= VALUE_CHARS
+}
+
+/// Whether a part of a cell is a title: bold text alone, of a line or two.
+fn title_part(flow: &Flow, part: &[usize]) -> bool {
+    let ids: Vec<usize> = part
+        .iter()
+        .copied()
+        .filter(|&i| inked(&flow.runs[i]))
+        .collect();
+    !ids.is_empty()
+        && ids.iter().all(|&i| flow.runs[i].bold)
+        && lines_of(flow, &ids).len() <= LABEL_LINES
 }
 
 /// Whether a field's label stands beside its value: its last label run and its first value
@@ -1827,9 +1867,11 @@ fn under_labels(flow: &Flow, labels: &[Vec<usize>], values: &[usize]) -> Option<
     Some(out)
 }
 
-/// The labels of the first of the `lines` of a cell when that line is labels over values: in
-/// the cell's smallest size (a raised marker aside), over lines a size step larger (see
-/// [`LABEL_STEP`]).
+/// The heads of the first of the `lines` of a cell when that line is labels over values, each
+/// with the value lines under it (see [`parts_of`]): labels in the cell's smallest size (a
+/// raised marker aside), over lines a size step larger (see [`LABEL_STEP`]). Labels of one
+/// size side by side may have a smaller one between them (a name a little smaller than the
+/// labels beside it, see [`heads_of`]).
 fn first_line_labels(flow: &Flow, lines: &[Vec<usize>]) -> Option<Vec<Vec<usize>>> {
     let (Some(first), true) = (lines.first(), lines.len() >= 2) else {
         return None;
@@ -1847,9 +1889,99 @@ fn first_line_labels(flow: &Flow, lines: &[Vec<usize>]) -> Option<Vec<Vec<usize>
             .iter()
             .any(|&i| size(i) >= LABEL_STEP * small && !marker.contains(&i))
     {
-        return None;
+        return heads_of(flow, lines, &marker);
     }
     Some(labels_in_line(flow, first))
+}
+
+/// The ink of a run in pieces between the gaps of its words: a value line padded into its
+/// fields is one run over them.
+fn ink_pieces(r: &Run) -> Vec<(f32, f32)> {
+    let mut out = Vec::new();
+    let mut from = r.x;
+    for g in r.gaps.iter() {
+        if g.from > from {
+            out.push((from, g.from));
+        }
+        from = from.max(g.to);
+    }
+    let end = r.x + r.w.max(0.0);
+    if end > from {
+        out.push((from, end));
+    }
+    out
+}
+
+/// The heads of a first line whose text is not of one size: its labels (runs apart by a cell
+/// gap, see [`labels_in_line`]) where two of them or more share the largest size the line's
+/// labels have, each a size step under the value lines; a head smaller than them is a label
+/// too (a value is never smaller than its label). A head a size step larger than those labels
+/// is no label: it heads its own lines only when text of its own size stands under it, or it
+/// is bold with no text under it (a title), and the labels next to it have values under them
+/// (else it may be the value beside a label). Each piece of ink under the line (see
+/// [`ink_pieces`]) stands under one head at most. None when the line is not such heads.
+fn heads_of(flow: &Flow, lines: &[Vec<usize>], marker: &HashSet<usize>) -> Option<Vec<Vec<usize>>> {
+    let heads = labels_in_line(flow, &lines[0]);
+    if heads.len() < 2 {
+        return None;
+    }
+    let size_of = |h: &Vec<usize>| {
+        h.iter()
+            .filter(|i| !marker.contains(i))
+            .map(|&i| flow.runs[i].size)
+            .fold(0.0f32, f32::max)
+    };
+    let sizes: Vec<f32> = heads.iter().map(size_of).collect();
+    // The labels' size: the largest size two heads or more share (within a size step).
+    let label = sizes
+        .iter()
+        .copied()
+        .filter(|&s| {
+            sizes
+                .iter()
+                .filter(|&&o| o < LABEL_STEP * s && s < LABEL_STEP * o)
+                .count()
+                >= 2
+        })
+        .fold(0.0f32, f32::max);
+    if label <= 0.0 {
+        return None;
+    }
+    let ends: Vec<(f32, f32)> = heads.iter().map(|h| extent(flow, h)).collect();
+    // The sizes of the ink under each head.
+    let mut under: Vec<Vec<f32>> = vec![Vec::new(); heads.len()];
+    for &i in lines[1..].iter().flatten() {
+        let r = &flow.runs[i];
+        for (a, b) in ink_pieces(r) {
+            let mut over = ends.iter().enumerate().filter(|(_, e)| a < e.1 && b > e.0);
+            let Some((k, _)) = over.next() else {
+                continue;
+            };
+            if over.next().is_some() {
+                return None;
+            }
+            under[k].push(r.size);
+        }
+    }
+    let is_label: Vec<bool> = sizes.iter().map(|&s| s < LABEL_STEP * label).collect();
+    for (k, &s) in sizes.iter().enumerate() {
+        if is_label[k] {
+            // A label stands a size step under its values.
+            if under[k].iter().any(|&v| v < LABEL_STEP * s) {
+                return None;
+            }
+            continue;
+        }
+        let bold = heads[k].iter().all(|&i| flow.runs[i].bold);
+        let own = !under[k].is_empty() && under[k].iter().all(|&v| v < LABEL_STEP * s);
+        let titled = under[k].is_empty() && bold;
+        let valued = |j: usize| !is_label[j] || !under[j].is_empty();
+        if !(own || titled) || (k > 0 && !valued(k - 1)) || (k + 1 < heads.len() && !valued(k + 1))
+        {
+            return None;
+        }
+    }
+    Some(heads)
 }
 
 /// The parts of a cell between dividers: when its first line is two labels or more over lines
@@ -2106,5 +2238,48 @@ mod tests {
         let flow = cell([8.0, 8.5], 10.0);
         let lines = lines_of(&flow, &[0, 1, 2]);
         assert_eq!(first_line_labels(&flow, &lines).map(|l| l.len()), None);
+    }
+    /// Task 15b part 2d item 3: labels of one size with a smaller name between them head their
+    /// cells, and so does a name at the values' size over lines of its size beside labels with
+    /// values under them; the same name with nothing under it, or a label with nothing under it
+    /// beside it, is no head (it may be the value beside the label).
+    #[test]
+    fn heads_of_one_size_may_hold_a_smaller_or_a_value_sized_head() {
+        let cell = |middle: f32, under: bool, left: bool| {
+            let mut runs = vec![
+                run("Name", 4.0, 100.0, 8.0),
+                run("Muster GmbH", 60.0, 100.0, middle),
+                run("Nr", 180.0, 100.0, 8.0),
+            ];
+            let mut low = |text: &str, x: f32, y: f32| {
+                let mut r = run(text, x, y, 8.5);
+                r.line = 1;
+                runs.push(r);
+            };
+            if left {
+                low("Beispiel", 4.0, 80.0);
+            }
+            if under {
+                low("Musterweg 1", 60.0, 90.0);
+                low("12345 Musterstadt", 60.0, 80.0);
+            }
+            low("4711", 180.0, 80.0);
+            flow_of(runs)
+        };
+        for (middle, under, left, heads) in [
+            (7.2, true, true, Some(3)),
+            (8.5, true, true, Some(3)),
+            (8.5, false, true, None),
+            (8.5, true, false, None),
+        ] {
+            let flow = cell(middle, under, left);
+            let ids: Vec<usize> = (0..flow.runs.len()).collect();
+            let lines = lines_of(&flow, &ids);
+            assert_eq!(
+                first_line_labels(&flow, &lines).map(|l| l.len()),
+                heads,
+                "{middle} {under} {left}"
+            );
+        }
     }
 }

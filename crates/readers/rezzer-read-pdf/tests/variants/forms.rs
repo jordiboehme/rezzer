@@ -186,6 +186,88 @@ fn value_box_row(g: &Geo, b: &mut Built, top: f32) -> f32 {
     top - h
 }
 
+/// Task 15b part 2d item 3: a strip of three fields between two rules with no rule between
+/// them, the values on padded data lines; the middle field is drawn by `middle` from the top
+/// of its cell, and says whether an address goes under it. The fields on both sides pair.
+fn open_strip(
+    g: &Geo,
+    b: &mut Built,
+    top: f32,
+    middle: fn(&Geo, &mut Built, f32, f32) -> bool,
+) -> f32 {
+    let h = 3.6 * g.data;
+    let (x0, x1) = (g.col(0) - 0.12, g.col(60) - 0.12);
+    b.page.template += &g.hrule(x0, x1, top);
+    b.page.template += &g.hrule(x0, x1, top - h);
+    for (k, l) in [(0usize, "Personalnummer"), (40, "Eintritt")] {
+        b.page.template += &label(
+            g.col(k) + 0.3 * g.label,
+            top - 0.9 * g.label - 0.3 * g.data,
+            g.label,
+            l,
+        );
+    }
+    let address = middle(g, b, g.col(20) + 0.3 * g.label, top);
+    for (l, v) in [("Personalnummer", "00000"), ("Eintritt", "01.01.2020")] {
+        b.values.push(v.to_string());
+        b.fields.push((l, Ok(Some(v))));
+    }
+    let bottom = top - h + 0.3 * g.data;
+    if address {
+        g.values(b, bottom + 1.2 * g.data, &[(21, "Musterweg 1")]);
+        g.values(
+            b,
+            bottom,
+            &[(1, "00000"), (21, "12345 Musterstadt"), (41, "01.01.2020")],
+        );
+    } else {
+        g.values(b, bottom, &[(1, "00000"), (41, "01.01.2020")]);
+    }
+    top - h
+}
+
+/// [`open_strip`] with `middle` as a shape: no block holds a text of the middle field with a
+/// label or a value of the fields beside it.
+fn open_strip_shape(
+    v: &Variant,
+    draw: fn(&Geo, &mut Built, f32) -> f32,
+    theirs: &[&str],
+) -> (Sheet, Option<Extent>) {
+    let (mut s, e) = drawn(v, draw, 60);
+    for o in ["Personalnummer", "00000", "Eintritt", "01.01.2020"] {
+        for t in theirs {
+            s.want.apart.push((o.to_string(), (*t).to_string()));
+        }
+    }
+    (s, e)
+}
+
+/// The middle of [`open_strip`]: a company name a little smaller than the labels beside it,
+/// over a street and a postcode with its town: it pairs with nothing and a loss names it.
+fn smaller_name(g: &Geo, b: &mut Built, x: f32, top: f32) -> bool {
+    b.page.template += &label(
+        x,
+        top - 0.9 * g.label - 0.3 * g.data,
+        0.9 * g.label,
+        "Muster GmbH",
+    );
+    b.fields.push(("Muster GmbH", Err(())));
+    for t in NAME_AND_ADDRESS {
+        b.values.push(t.to_string());
+    }
+    true
+}
+
+/// The texts of [`smaller_name`].
+const NAME_AND_ADDRESS: [&str; 3] = ["Muster GmbH", "Musterweg 1", "12345 Musterstadt"];
+
+/// The middle of [`open_strip`]: a bold title at the data size, its own text in no pair.
+fn strip_title(g: &Geo, b: &mut Built, x: f32, top: f32) -> bool {
+    b.page.template += &bold(x, top - 1.2 * g.data, g.data, "Angaben");
+    b.values.push("Angaben".to_string());
+    false
+}
+
 /// The top of a shape on its page.
 fn top(g: &Geo) -> f32 {
     760.0 + g.dy
@@ -503,6 +585,28 @@ pub(crate) fn shapes() -> Vec<Shape> {
                 ..ALL
             },
             draw: |v| drawn(v, value_box_row, 60),
+        },
+        Shape {
+            name: "a strip without dividers beside a smaller name over its address",
+            axes: Axes {
+                look: NO_RISING,
+                ..ALL
+            },
+            draw: |v| {
+                open_strip_shape(
+                    v,
+                    |g, b, t| open_strip(g, b, t, smaller_name),
+                    &NAME_AND_ADDRESS,
+                )
+            },
+        },
+        Shape {
+            name: "a strip without dividers beside a bold title",
+            axes: Axes {
+                look: NO_RISING,
+                ..ALL
+            },
+            draw: |v| open_strip_shape(v, |g, b, t| open_strip(g, b, t, strip_title), &["Angaben"]),
         },
         Shape {
             name: "boxed fields beside a company in another font",
