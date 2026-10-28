@@ -862,3 +862,141 @@ fn equal_codes_one_over_the_other_are_two() {
         }
     }
 }
+
+/// Copies of the linear code `m` in a scan: `px` pixels a module, bars `bar` pixels high, each
+/// dark bar grown by `gain` pixels on both sides (ink gain), and the whole picture blurred
+/// `blur` times by a 3 by 3 box; the copies stand `gap` modules apart, side by side
+/// (`beside`) or one over the other, with a quiet zone of 12 modules around. The pixels, their
+/// width and height, and the box of each copy's bars before the gain and the blur.
+#[allow(clippy::too_many_arguments)]
+fn scan_pixels(
+    m: &Modules,
+    px: u32,
+    bar: u32,
+    gain: u32,
+    blur: u32,
+    copies: u32,
+    gap: u32,
+    beside: bool,
+) -> (Vec<u8>, u32, u32, Vec<[u32; 4]>) {
+    let q = 12 * px;
+    let cw = m.width * px;
+    let (w, h) = if beside {
+        (copies * cw + (copies - 1) * gap * px + 2 * q, bar + 2 * q)
+    } else {
+        (cw + 2 * q, copies * bar + (copies - 1) * gap * px + 2 * q)
+    };
+    let first = (0..m.width).find(|&c| m.dark[c as usize]).expect("dark");
+    let last = (0..m.width)
+        .rev()
+        .find(|&c| m.dark[c as usize])
+        .expect("dark");
+    let mut g = vec![255u8; (w * h) as usize];
+    let mut boxes = Vec::new();
+    for k in 0..copies {
+        let (x0, y0) = if beside {
+            (q + k * (cw + gap * px), q)
+        } else {
+            (q, q + k * (bar + gap * px))
+        };
+        for y in y0..y0 + bar {
+            for c in 0..m.width {
+                if m.dark[c as usize] {
+                    let a = (x0 + c * px).saturating_sub(gain);
+                    let z = (x0 + c * px + px + gain).min(w);
+                    g[(y * w + a) as usize..(y * w + z) as usize].fill(0);
+                }
+            }
+        }
+        boxes.push([x0 + first * px, y0, x0 + (last + 1) * px, y0 + bar]);
+    }
+    for _ in 0..blur {
+        let src = g.clone();
+        for y in 1..h - 1 {
+            for x in 1..w - 1 {
+                let mut s = 0u32;
+                for dy in 0..3 {
+                    for dx in 0..3 {
+                        s += u32::from(src[((y + dy - 1) * w + x + dx - 1) as usize]);
+                    }
+                }
+                g[(y * w + x) as usize] = (s / 9) as u8;
+            }
+        }
+    }
+    (g, w, h, boxes)
+}
+
+/// Whether box `b` is the bars `want`, within `tol` pixels on each side.
+fn boxed(b: [u32; 4], want: [u32; 4], tol: u32) -> bool {
+    b.iter()
+        .zip(want)
+        .all(|(got, want)| got.abs_diff(want) <= tol)
+}
+
+#[test]
+fn a_blurred_or_inked_code_is_one_code_boxed_by_its_bars() {
+    // A scan softens a code's edges and its ink spreads: the decoder may read it along its
+    // soft top or bottom row. It is still one code, boxed by its bars.
+    let m = modules(Symbology::Code128, "0000000001", None);
+    for px in [2, 3, 4, 5] {
+        for gain in [0, 1] {
+            for blur in [0, 1, 2] {
+                for bar in [20, 60, 120] {
+                    let (g, w, h, boxes) = scan_pixels(&m, px, bar, gain, blur, 1, 0, true);
+                    let scan = scan_gray(&g, w, h);
+                    let case =
+                        format!("{px} pixels a module, gain {gain}, blur {blur}, bars {bar}");
+                    assert!(scan.codes.len() <= 1, "{case}: {:?}", scan.codes);
+                    if let Some(c) = scan.codes.first() {
+                        assert!(
+                            boxed(c.bounds, boxes[0], gain + blur + 1),
+                            "{case}: {:?} for the bars {:?}",
+                            c.bounds,
+                            boxes[0]
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn blurred_or_inked_equal_codes_apart_are_each_read() {
+    // Two equal codes past their quiet zone, side by side or one over the other: when one
+    // alone is read in that scan, both are, each boxed by its own bars; no box reaches across
+    // the gap.
+    let m = modules(Symbology::Code128, "0000000001", None);
+    for px in [2, 3, 4] {
+        for gain in [0, 1] {
+            for blur in [0, 1, 2] {
+                for bar in [20, 60] {
+                    let (g, w, h, _) = scan_pixels(&m, px, bar, gain, blur, 1, 0, true);
+                    if scan_gray(&g, w, h).codes.len() != 1 {
+                        continue;
+                    }
+                    for (gap, beside) in [(7, true), (8, true), (10, true), (12, true), (3, false)]
+                    {
+                        let (g, w, h, boxes) = scan_pixels(&m, px, bar, gain, blur, 2, gap, beside);
+                        let scan = scan_gray(&g, w, h);
+                        let case = format!(
+                            "{px} pixels a module, gain {gain}, blur {blur}, bars {bar}, \
+                             {gap} modules apart, beside {beside}"
+                        );
+                        let mut found: Vec<[u32; 4]> =
+                            scan.codes.iter().map(|c| c.bounds).collect();
+                        found.sort_by_key(|b| (b[0], b[1]));
+                        assert_eq!(found.len(), 2, "{case}: {found:?}");
+                        for (b, want) in found.iter().zip(&boxes) {
+                            assert!(
+                                boxed(*b, *want, gain + blur + 1),
+                                "{case}: {b:?} for the bars {want:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

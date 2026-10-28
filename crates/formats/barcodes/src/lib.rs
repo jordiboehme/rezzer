@@ -213,6 +213,10 @@ enum Attempt {
     Doubled,
 }
 
+/// Pixels painted over around a found code's box: the soft edge a blurred scan leaves, so it
+/// does not spoil the quiet zone of a code beside it.
+const FRINGE: i64 = 2;
+
 /// The most times one attempt runs again after painting over what it found.
 const ROUNDS: usize = 8;
 
@@ -420,10 +424,10 @@ pub(crate) fn scan(
                         pw,
                         ph,
                         [
-                            to(b[0], tile.x),
-                            to(b[1], tile.y),
-                            to(b[2], tile.x),
-                            to(b[3], tile.y),
+                            to(b[0], tile.x) - FRINGE,
+                            to(b[1], tile.y) - FRINGE,
+                            to(b[2], tile.x) + FRINGE,
+                            to(b[3], tile.y) + FRINGE,
                         ],
                     );
                 }
