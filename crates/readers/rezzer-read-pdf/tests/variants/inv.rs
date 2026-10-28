@@ -60,8 +60,9 @@ pub(crate) enum Inv {
     /// A code found with a box is boxed by the bars of a code drawn: within a point at scale
     /// 1, more on a larger page.
     CodeBox,
-    /// A page that draws no code says of nothing on it that it looks like a code (no false
-    /// loss on rules, ticks and hatching).
+    /// A page that draws no code, or whose codes are all found as often as they are drawn,
+    /// says of nothing on it that it looks like a code (no false loss on rules, ticks,
+    /// hatching or a code read).
     NoCode,
     /// The page needs vision exactly when it should.
     Vision,
@@ -470,6 +471,7 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
         .collect();
     let unread = assets.iter().any(|a| a.code_unread);
     let mut checked: Vec<&(String, String)> = Vec::new();
+    let mut all_found = true;
     for c in &want.codes {
         if checked.contains(&c) {
             continue;
@@ -477,6 +479,7 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
         checked.push(c);
         let drawn = want.codes.iter().filter(|w| *w == c).count();
         let k = found.iter().filter(|f| *f == c).count();
+        all_found &= k == drawn;
         if k != drawn {
             broken.push(Broken(
                 Inv::Code,
@@ -493,10 +496,14 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
             ));
         }
     }
-    if want.codes.is_empty() && unread {
+    if all_found && unread {
         broken.push(Broken(
             Inv::NoCode,
-            format!("page {p}: no code is drawn, but a picture says a code there is not decoded"),
+            format!(
+                "page {p}: every code drawn is found ({} drawn), but a picture says a code \
+                 there is not decoded",
+                want.codes.len()
+            ),
         ));
     }
     let scale = sheet.built.page.scale;

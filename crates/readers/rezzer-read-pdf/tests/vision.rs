@@ -2281,6 +2281,18 @@ fn bars_box(text: &str, x: f32, y: f32, module: f32, height: f32) -> [f32; 4] {
     ]
 }
 
+/// Asserts that the page asset of `out`, whose codes are all read, says of no part of it
+/// that it looks like a code and was not decoded.
+fn assert_no_doubt(out: &ReadOutcome, case: &str) {
+    let a = asset(out, "page-1");
+    assert!(!a.code_unread, "{case}: {:?}", a.alt);
+    let alt = a.alt.as_deref().unwrap_or_default();
+    assert!(
+        !alt.contains("lighter line") && !alt.contains("printed part"),
+        "{case}: {alt}"
+    );
+}
+
 /// Asserts that the one code of `out` is the Code 128 `0000000001` boxed within 0.5 points of
 /// `bars`, at `place`, and that the Markdown says so in words without the numbers.
 fn assert_code_at(out: &ReadOutcome, bars: [f32; 4], place: &str, case: &str) {
@@ -2299,6 +2311,7 @@ fn assert_code_at(out: &ReadOutcome, bars: [f32; 4], place: &str, case: &str) {
         "{case}: {b:?}, the bars are {bars:?}"
     );
     assert_eq!(a.codes[0].place.as_deref(), Some(place), "{case}");
+    assert_no_doubt(out, case);
     let md = markdown(out);
     assert!(
         md.contains(&format!("Code 128, {place}: 0000000001")),
@@ -2990,6 +3003,7 @@ fn a_code_in_a_scanned_page_is_listed_once_at_its_bars() {
                         .all(|(got, want)| (got - want).abs() <= 1.5),
                     "{case}: {b:?}, the bars are {want:?}"
                 );
+                assert_no_doubt(&out, &case);
             }
         }
     }
@@ -3136,6 +3150,7 @@ fn blurred_and_inked_codes_in_a_scan_are_listed_once_each_at_their_bars() {
                         read_some += 1;
                         let b = c.bounds.expect("box");
                         assert!(near(b, boxes[0], tol), "{case}: {b:?} for {:?}", boxes[0]);
+                        assert_no_doubt(&out, &case);
                         for (gap, beside) in [(8, true), (12, true), (3, false)] {
                             // Both on the page.
                             let width = 40 * res + (2 * code_modules + gap) * px;
@@ -3163,6 +3178,7 @@ fn blurred_and_inked_codes_in_a_scan_are_listed_once_each_at_their_bars() {
                             for (b, w) in found.iter().zip(&want) {
                                 assert!(near(*b, *w, tol), "{case}: {b:?} for {w:?}");
                             }
+                            assert_no_doubt(&out, &case);
                         }
                     }
                 }
@@ -3292,11 +3308,7 @@ fn codes_in_a_scan_the_decoder_misses_are_said() {
                 if asset(&alone, "page-1").codes.len() != 1 {
                     continue;
                 }
-                assert!(
-                    !says_code_unread(&alone),
-                    "{case}: {:?}",
-                    asset(&alone, "page-1").alt
-                );
+                assert_no_doubt(&alone, &case);
                 for gap in [5u32, 6, 7, 8] {
                     let second = 40.0 + width + (gap * px) as f32 / res as f32;
                     if second + width > 585.0 {
@@ -3307,7 +3319,7 @@ fn codes_in_a_scan_the_decoder_misses_are_said() {
                     let case = format!("{case}, {gap} modules apart");
                     assert!(n <= 2, "{case}: {n}");
                     if n == 2 {
-                        assert!(!says_code_unread(&out), "{case}");
+                        assert_no_doubt(&out, &case);
                     } else {
                         assert!(
                             says_code_unread(&out),
