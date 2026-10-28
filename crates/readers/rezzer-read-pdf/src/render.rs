@@ -2238,12 +2238,8 @@ impl Scans {
                 // A code drawn as paths or a picture that looks like a code takes the box
                 // drawn; a linear code drawn as paths only when its bars fill it (codes side
                 // by side closer than their quiet zone are one drawing).
-                let fills = |r: &Region| match r.how {
-                    How::Modules(m) if !c.symbology.two_d() => covers(&px, &r.b, 2.0 * m + 0.5),
-                    _ => true,
-                };
                 let shape = region
-                    .filter(|r| alone && overlap(&px, &r.b) && fills(r))
+                    .filter(|r| alone && takes_region(&px, c.symbology.two_d(), r))
                     .map(|r| r.b);
                 drawn = shape.is_some();
                 let (w, h) = need.size;
@@ -2535,6 +2531,18 @@ fn two_d(name: &str) -> bool {
         .any(|s| s.name() == name)
 }
 
+/// Whether a code read from the render of region `r`, at `px` (in the frame of `r.b`), takes
+/// the region's box: when it overlaps the region, and, for a linear code (not `two_d`) drawn
+/// as paths, when its bars fill the region within two modules (codes side by side closer than
+/// their quiet zone are one region).
+fn takes_region(px: &[f32; 4], two_d: bool, r: &Region) -> bool {
+    overlap(px, &r.b)
+        && match r.how {
+            How::Modules(m) if !two_d => covers(px, &r.b, 2.0 * m + 0.5),
+            _ => true,
+        }
+}
+
 /// Whether box `a` reaches each side of box `b` within `tol`.
 fn covers(a: &[f32; 4], b: &[f32; 4], tol: f32) -> bool {
     a[0] <= b[0] + tol && a[1] <= b[1] + tol && a[2] >= b[2] - tol && a[3] >= b[3] - tol
@@ -2773,6 +2781,84 @@ mod tests {
             code(QrCode, "0000000001", 10),
         ];
         assert_eq!(distinct_codes(&kinds), 2);
+    }
+
+    #[test]
+    fn a_linear_code_takes_its_drawing_box_only_when_its_bars_fill_it() {
+        let drawn = Region {
+            b: [100.0, 500.0, 248.0, 520.0],
+            how: How::Modules(0.8),
+        };
+        // The bars of a code that fills the drawing, a little off: its box.
+        assert!(takes_region(&[100.5, 500.2, 247.4, 519.6], false, &drawn));
+        // One of two codes side by side in one drawing: its own box.
+        assert!(!takes_region(&[100.0, 500.0, 172.0, 520.0], false, &drawn));
+        // A matrix code, and a picture that looks like a code, take the box they overlap.
+        assert!(takes_region(&[110.0, 505.0, 160.0, 515.0], true, &drawn));
+        let picture = Region {
+            how: How::Picture(300, 40),
+            ..drawn
+        };
+        assert!(takes_region(&[110.0, 505.0, 160.0, 515.0], false, &picture));
+        // Elsewhere: not.
+        assert!(!takes_region(
+            &[300.0, 500.0, 400.0, 520.0],
+            false,
+            &picture
+        ));
+    }
+
+    #[test]
+    fn parts_that_look_like_codes_and_give_none_are_named_with_their_place() {
+        let budget = Budget::new(rezzer_limits::Limits::default());
+        let region = |b: [f32; 4]| Region {
+            b,
+            how: How::Modules(0.8),
+        };
+        let need = Need {
+            page: 1,
+            whole: Some(0),
+            crops: Vec::new(),
+            origin: (0.0, 0.0),
+            cut: false,
+            fallback: false,
+            regions: vec![
+                region([330.0, 700.0, 478.0, 720.0]),
+                region([330.0, 100.0, 402.0, 120.0]),
+                region([40.0, 400.0, 112.0, 420.0]),
+                region([40.0, 100.0, 82.0, 142.0]),
+            ],
+            turn: Turn::None,
+            size: (595.0, 842.0),
+            light: true,
+        };
+        let code = |s: &str, b: [f32; 4]| Barcode {
+            symbology: s.to_string(),
+            text: Some("0000000001".into()),
+            base64: None,
+            bytes: 10,
+            bounds: Some(b),
+            place: None,
+        };
+        let mut scans = Scans::new(&budget);
+        let found = scans.found.entry(0).or_default();
+        // Half of the first drawing read; the second filled; nothing in the third; a matrix
+        // code in the fourth.
+        found.codes = vec![
+            code("Code 128", [330.0, 700.0, 402.0, 720.0]),
+            code("Code 128", [330.2, 100.1, 401.7, 119.8]),
+            code("QR Code", [44.0, 104.0, 78.0, 138.0]),
+        ];
+        scans.regions_unread(0, &need, &[true, true, false, true]);
+        assert_eq!(
+            scans.found[&0].unread,
+            [
+                "part of a drawing that looks like a barcode or QR code, top right of the page, \
+                 not decoded",
+                "a drawing that looks like a barcode or QR code, middle left of the page, not \
+                 scanned",
+            ]
+        );
     }
 
     #[test]
