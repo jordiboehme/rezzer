@@ -211,7 +211,9 @@ fn parse(flow: &Flow, ids: &[usize], how: Reading) -> Parsed {
     };
     let (label, value) = (styles[0], styles[1]);
     // Lines of one weight and slant whose sizes differ by less than a size step, at one left
-    // edge, that read as an address, are an address, not a label over its value.
+    // edge, that read as an address whose first line holds a number (a street over its
+    // postcode and town) are an address, not a label over its value. A first line without a
+    // number may be a label over an address (`Anschrift`): it pairs.
     let sizes = lines
         .iter()
         .flatten()
@@ -310,8 +312,10 @@ fn parse(flow: &Flow, ids: &[usize], how: Reading) -> Parsed {
 /// The lines of an address in a cell start within this share of their size of one left edge.
 const ADDRESS_EDGE: f32 = 0.25;
 
-/// Whether `lines` (raised markers aside) start at one left edge and read as an address (see
-/// [`crate::layout::address_lines`]).
+/// Whether `lines` (raised markers aside) start at one left edge and read as an address that
+/// starts with a number: two address lines (see [`crate::layout::address_lines`]), or three
+/// lines or more of an address's shape (see [`crate::layout::address_shaped`]) whose first
+/// line holds a letter and a number (`Musterweg 1` over `12345 Musterstadt`, `Deutschland`).
 fn address_cell(flow: &Flow, lines: &[Vec<usize>], marker: &HashSet<usize>) -> bool {
     let kept: Vec<Vec<usize>> = lines
         .iter()
@@ -327,7 +331,11 @@ fn address_cell(flow: &Flow, lines: &[Vec<usize>], marker: &HashSet<usize>) -> b
         (r.x - r0.x).abs() <= ADDRESS_EDGE * r.size.min(r0.size)
     });
     let texts: Vec<String> = kept.iter().map(|l| words(flow, l)).collect();
-    edge && crate::layout::address_lines(&texts.iter().map(String::as_str).collect::<Vec<_>>())
+    let texts: Vec<&str> = texts.iter().map(String::as_str).collect();
+    let numbered =
+        texts[0].chars().any(char::is_alphabetic) && texts[0].chars().any(|c| c.is_ascii_digit());
+    edge && (crate::layout::address_lines(&texts)
+        || (numbered && crate::layout::address_shaped(&texts)))
 }
 
 /// The text of runs, words joined by one space.

@@ -867,8 +867,10 @@ mod tests {
     /// does not pick a box.
     #[test]
     fn a_point_on_a_shared_edge_lies_in_no_box() {
-        let size = 9.5;
-        for k in [0.5f32, 0.7, 0.75, 1.0, 1.3, 1.5, 2.0] {
+        for (size, k) in [6.0f32, 8.0, 9.5, 10.0, 12.0, 14.0]
+            .into_iter()
+            .flat_map(|s| [0.5f32, 0.7, 0.75, 1.0, 1.3, 1.5, 2.0].map(|k| (s, k)))
+        {
             let w = 0.6 * size * k;
             let x0 = 60.0 * k;
             let list: Vec<[f32; 4]> = (0..6)

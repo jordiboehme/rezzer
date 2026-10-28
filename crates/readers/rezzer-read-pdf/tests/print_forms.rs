@@ -6460,3 +6460,82 @@ fn a_cell_of_two_address_lines_is_no_pair() {
         wrong.join("\n")
     );
 }
+
+/// A row of three fields between rules, three lines high: `Name` over `Muster`, a first line
+/// over two address lines (`Musterweg 1`, `12345 Musterstadt`), `Nr` over `4711`; the first
+/// lines of `size`, the others `step` times as large, in `font`.
+fn labelled_address(first: &str, size: f32, step: f32, font: &str) -> ReadOutcome {
+    let value = size * step;
+    let k = size / 8.0;
+    let mut c = String::from("0 0 0 RG 0.5 w\n");
+    let (x0, x1, top) = (60.0, 60.0 + 360.0 * k, 760.0);
+    let bottom = top - 3.8 * value;
+    for y in [top, bottom] {
+        c += &format!("{x0} {y} m {x1} {y} l S\n");
+    }
+    for x in [x0, 60.0 + 120.0 * k, 60.0 + 240.0 * k, x1] {
+        c += &format!("{x} {bottom} m {x} {top} l S\n");
+    }
+    let low = bottom + 0.4 * value;
+    let cells: [(&str, &[&str]); 3] = [
+        ("Name", &["Muster"]),
+        (first, &["Musterweg 1", "12345 Musterstadt"]),
+        ("Nr", &["4711"]),
+    ];
+    for (n, (label, values)) in cells.iter().enumerate() {
+        let x = 64.0 + 120.0 * k * n as f32;
+        c += &shown(font, size, x, top - 1.1 * size, label);
+        for (m, v) in values.iter().rev().enumerate() {
+            c += &shown(font, value, x, low + 1.2 * value * m as f32, v);
+        }
+    }
+    read(&three_font_page(&c))
+}
+
+/// Guard of [`a_cell_of_two_address_lines_is_no_pair`]: a label without a number over a value
+/// of two address lines (`Anschrift`) in sizes a little apart still pairs, beside two more
+/// fields; a street with its number over a postcode and town and a country (three lines, the
+/// first with a number) is an address and pairs with nothing. Sizes 6 to 14, both fonts.
+#[test]
+fn a_label_over_an_address_pairs_and_a_street_over_its_town_does_not() {
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+        for font in ["F1", "F3"] {
+            let at = format!("{size} pt, {font}");
+            let rows = |out: &ReadOutcome| -> Vec<String> {
+                read_tables(out)
+                    .iter()
+                    .flatten()
+                    .map(|r| r.join(": "))
+                    .collect()
+            };
+            let got = rows(&labelled_address("Anschrift", size, 1.0625, font));
+            for want in [
+                "Name: Muster",
+                "Anschrift: Musterweg 1 12345 Musterstadt",
+                "Nr: 4711",
+            ] {
+                if !got.iter().any(|r| r == want) {
+                    wrong.push(format!("{at}: no {want} in {got:?}"));
+                }
+            }
+            let out = labelled_address("Hauptstr. 2", size, 1.0625, font);
+            let got = rows(&out);
+            if got.iter().any(|r| r.contains("Hauptstr. 2")) {
+                wrong.push(format!("{at}: the street pairs: {got:?}"));
+            }
+            if let Err(e) = common::in_order(
+                &all_text(&out),
+                &["Hauptstr. 2", "Musterweg 1", "12345 Musterstadt"],
+            ) {
+                wrong.push(format!("{at}: {e}"));
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}

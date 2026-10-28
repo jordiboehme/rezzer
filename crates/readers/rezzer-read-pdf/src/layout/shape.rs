@@ -173,19 +173,19 @@ pub(crate) fn address_shaped(lines: &[&str]) -> bool {
             .any(|l| l.chars().any(|c| c.is_ascii_digit()))
 }
 
-/// Whether lines one under the other are an address: [`address_shaped`], or two lines that
-/// are each a few words (at most [`ADDRESS_WORDS`]) with letters and a number, in another
-/// order on each (see [`word_shape`]): a street and its number over a postcode and its town.
-/// A label over its value has a number on one line at most (`Nr` over `4711`, `Strasse` over
-/// `Musterweg 1`). Their left edge is the caller's to check.
+/// Whether two lines one under the other are an address: each a few words (at most
+/// [`ADDRESS_WORDS`]) with letters and a number, the number in another place on each (see
+/// [`word_shape`]): a street and its number over a postcode and its town. A label over its
+/// value has a number on one line at most (`Nr` over `4711`, `Strasse` over `Musterweg 1`), or
+/// in the same place on both (`Zimmer 2` over `Raum 101`). Their left edge is the caller's to
+/// check.
 pub(crate) fn address_lines(lines: &[&str]) -> bool {
-    let two = |l: &&str| {
+    let line = |l: &&str| {
         word_count(l) <= ADDRESS_WORDS
             && l.chars().any(char::is_alphabetic)
             && l.chars().any(|c| c.is_ascii_digit())
     };
-    address_shaped(lines)
-        || matches!(lines, [a, b] if two(a) && two(b) && word_shape(a) != word_shape(b))
+    matches!(lines, [a, b] if line(a) && line(b) && word_shape(a) != word_shape(b))
 }
 
 /// Whether lines are a block of an address, a bank or a register entry: [`address_shaped`],
@@ -568,7 +568,8 @@ mod tests {
     fn two_address_lines_have_numbers_in_another_order() {
         assert!(address_lines(&["Musterweg 1", "12345 Musterstadt"]));
         assert!(address_lines(&["Am Hang 3", "11111 Neudorf"]));
-        assert!(address_lines(&[
+        // Three lines are no two (see `address_shaped`).
+        assert!(!address_lines(&[
             "Muster GmbH",
             "Musterweg 1",
             "12345 Musterstadt"
