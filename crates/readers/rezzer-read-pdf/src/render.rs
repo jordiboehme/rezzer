@@ -2295,7 +2295,7 @@ impl Scans {
 
     /// Marks the parts of the page `need` (a page that needs vision as a whole, asset `asset`)
     /// that look like a code and gave none: a part no code read on the page lies in, or a code
-    /// drawn as paths whose linear codes read do not reach its ends (codes side by side closer
+    /// drawn as paths whose linear codes read do not fill most of it (codes side by side closer
     /// than their quiet zone). `read` says for each of `need.regions` whether it was rendered
     /// again and read. Each part gets its words for the page's alt text: what it is, where,
     /// and `not decoded` (or `not scanned`).
@@ -2312,7 +2312,7 @@ impl Scans {
                 .collect();
             // A matrix code read there fills it; linear codes reach its ends.
             let missing = match r.how {
-                How::Modules(m) if !on.iter().any(|c| two_d(&c.symbology)) => {
+                How::Modules(_) if !on.iter().any(|c| two_d(&c.symbology)) => {
                     let mut u = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
                     for b in on.iter().filter_map(|c| c.bounds) {
                         u = [
@@ -2322,7 +2322,7 @@ impl Scans {
                             u[3].max(b[3]),
                         ];
                     }
-                    on.is_empty() || !covers(&u, &framed, 2.0 * m + 0.5)
+                    on.is_empty() || !fills(&u, &framed)
                 }
                 _ => on.is_empty(),
             };
@@ -2533,20 +2533,28 @@ fn two_d(name: &str) -> bool {
 
 /// Whether a code read from the render of region `r`, at `px` (in the frame of `r.b`), takes
 /// the region's box: when it overlaps the region, and, for a linear code (not `two_d`) drawn
-/// as paths, when its bars fill the region within two modules (codes side by side closer than
-/// their quiet zone are one region).
+/// as paths, when its bars fill most of the region both ways (codes side by side closer than
+/// their quiet zone are one region, each half of it; a code partly over a dark picture shows
+/// a little less of its bars).
 fn takes_region(px: &[f32; 4], two_d: bool, r: &Region) -> bool {
     overlap(px, &r.b)
         && match r.how {
-            How::Modules(m) if !two_d => covers(px, &r.b, 2.0 * m + 0.5),
+            How::Modules(_) if !two_d => fills(px, &r.b),
             _ => true,
         }
 }
 
-/// Whether box `a` reaches each side of box `b` within `tol`.
-fn covers(a: &[f32; 4], b: &[f32; 4], tol: f32) -> bool {
-    a[0] <= b[0] + tol && a[1] <= b[1] + tol && a[2] >= b[2] - tol && a[3] >= b[3] - tol
+/// Whether box `a` fills at least [`FILLS`] of box `b` each way.
+fn fills(a: &[f32; 4], b: &[f32; 4]) -> bool {
+    let share = |a0: f32, a1: f32, b0: f32, b1: f32| {
+        (a1.min(b1) - a0.max(b0)).max(0.0) / (b1 - b0).max(f32::MIN_POSITIVE)
+    };
+    share(a[0], a[2], b[0], b[2]) >= FILLS && share(a[1], a[3], b[1], b[3]) >= FILLS
 }
+
+/// The share of a drawn code's region, each way, that the bars of a linear code read from it
+/// fill at least for the code to take the region's box.
+const FILLS: f32 = 0.75;
 
 /// The box of pixels `px` of `picture` on its page, in points in the visible page box (the
 /// frame of [`Region::b`]), not turned.
