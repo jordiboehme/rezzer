@@ -6004,3 +6004,102 @@ fn recipient_name_over_a_longer_line_is_not_the_title() {
         }
     }
 }
+
+/// Task 15b part 2d fix round 1 (the private invoice): totals under line items, a label at the
+/// left and its amount flush right on each row (net amount, two tax rows whose percent ends the
+/// label, a bold total), between the rule under the items and a rule under a smaller note: the
+/// totals read as one table of their four rows, as at 926b275, and no loss calls them a row of
+/// fields. Sizes 6 to 14, both fonts, the totals 1.5 or 2 rows under the items, the total row
+/// one or 1.5 rows under the tax rows, the labels at three places.
+#[test]
+fn totals_between_rules_under_line_items_stay_one_table() {
+    let totals = [
+        ("Nettobetrag", "99,99 EUR", false),
+        ("zzgl. USt. 7.00 %", "9,99 EUR", false),
+        ("zzgl. USt. 19.00 %", "99,99 EUR", false),
+        ("Gesamt", "99,99 EUR", true),
+    ];
+    let want: Vec<Vec<String>> = totals
+        .iter()
+        .map(|(l, v, _)| vec![(*l).to_string(), (*v).to_string()])
+        .collect();
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 9.0, 10.0, 12.0, 14.0] {
+        for fonts in FONTS {
+            for (over, total, at) in [1.5f32, 2.0]
+                .into_iter()
+                .flat_map(|o| [1.0f32, 1.5].map(|t| (o, t)))
+                .flat_map(|(o, t)| [1usize, 2, 3].map(|a| (o, t, a)))
+            {
+                let pitch = 1.25 * size;
+                let k = size / 9.0;
+                let right = |f: &str, x: f32, y: f32, t: &str| {
+                    show(f, size, x - common::font_width(f, t, size), y, t)
+                };
+                let xs = [40.0, 40.0 + 30.0 * k, 40.0 + 220.0 * k, 40.0 + 300.0 * k];
+                let xr = 40.0 + 460.0 * k;
+                let rule = |y: f32| format!("0 0 0 RG 0.5 w 40 {y} m {xr} {y} l S\n");
+                let items = [
+                    ["Pos", "Bezeichnung", "Menge", "Einzelpreis", "Betrag"],
+                    ["1", "Musterartikel", "2", "10,00 EUR", "20,00 EUR"],
+                    ["2", "Beispielware", "1", "79,99 EUR", "79,99 EUR"],
+                ];
+                let mut t = String::new();
+                let mut y = 650.0;
+                for (n, r) in items.iter().enumerate() {
+                    let f = if n == 0 { fonts.1 } else { fonts.0 };
+                    for (c, x) in xs.iter().enumerate() {
+                        t += &show(f, size, *x, y, r[c]);
+                    }
+                    t += &right(f, xr, y, r[4]);
+                    y -= pitch;
+                }
+                t += &rule(y + 0.8 * size);
+                y -= (over - 1.0) * pitch;
+                let x0 = if at == 3 {
+                    xs[2] - 40.0 * k
+                } else {
+                    xs[at + 1]
+                };
+                for (n, (l, v, bold)) in totals.iter().enumerate() {
+                    if n == 3 {
+                        y -= (total - 1.0) * pitch;
+                    }
+                    let f = if *bold { fonts.1 } else { fonts.0 };
+                    t += &show(f, size, x0, y, l);
+                    t += &right(f, xr, y, v);
+                    y -= pitch;
+                }
+                y -= 0.5 * pitch;
+                t += &show(
+                    fonts.0,
+                    0.8 * size,
+                    40.0,
+                    y,
+                    "Zahlbar innerhalb von 14 Tagen ohne Abzug.",
+                );
+                t += &rule(y - pitch);
+                let at = format!("{size}, {fonts:?}, {over}/{total} at {at}");
+                let out = common::read(&page_in(&t, Look::Plain));
+                let found = tables(&out);
+                if !found.iter().any(|t| t.1 == want) {
+                    wrong.push(format!("{at}: no totals table in {found:?}"));
+                }
+                if let Some(l) = out
+                    .document
+                    .losses
+                    .iter()
+                    .find(|l| l.what.contains("row of fields"))
+                {
+                    wrong.push(format!("{at}: {}", l.what));
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}

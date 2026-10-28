@@ -1005,24 +1005,34 @@ fn table_body(flow: &Flow, cells: &[Vec<usize>]) -> bool {
 }
 
 /// The names of the heads of a cell's first line (runs apart by a cell gap, see
-/// [`labels_in_line`]) when there are two or more and ink of the lines under it stands under
-/// each of them: the cell is set as fields side by side, whatever their styles.
+/// [`labels_in_line`]) when there are two or more and each is a label over its value: ink of
+/// the lines under it stands under it, some of it a size step larger (see [`LABEL_STEP`]). The
+/// cell is set as fields side by side, whatever their styles. Lines of one size side by side
+/// (a label beside its amount over more such rows: totals) are no such heads.
 fn heads_over_lines(flow: &Flow, cell: &[usize]) -> Option<Vec<String>> {
     let lines = lines_of(flow, cell);
     let heads = labels_in_line(flow, lines.first()?);
     if lines.len() < 2 || heads.len() < 2 {
         return None;
     }
-    let pieces: Vec<(f32, f32)> = lines[1..]
+    let pieces: Vec<(f32, f32, f32)> = lines[1..]
         .iter()
         .flatten()
-        .flat_map(|&i| ink_pieces(&flow.runs[i]))
+        .flat_map(|&i| {
+            let size = flow.runs[i].size;
+            ink_pieces(&flow.runs[i])
+                .into_iter()
+                .map(move |(a, b)| (a, b, size))
+        })
         .collect();
     heads
         .iter()
         .all(|h| {
             let (x0, x1) = extent(flow, h);
-            pieces.iter().any(|&(a, b)| a < x1 && b > x0)
+            let size = h.iter().map(|&i| flow.runs[i].size).fold(0.0f32, f32::max);
+            pieces
+                .iter()
+                .any(|&(a, b, s)| a < x1 && b > x0 && s >= LABEL_STEP * size)
         })
         .then(|| heads.iter().map(|h| words(flow, h)).collect())
 }

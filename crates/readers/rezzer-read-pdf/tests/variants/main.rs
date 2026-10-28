@@ -289,6 +289,7 @@ shape_tests! {
     letter_head => "letter head",
     letter_head_with_a_larger_name => "letter head with a larger name",
     letter_head_with_the_date_beside_the_name => "letter head with the date beside the name",
+    line_items_with_totals_between_rules => "line items with totals between rules over a note",
     line_items_with_an_end_rule => "line items with an end rule",
     line_items_with_row_rules => "line items with row rules",
     close_column_titles => "close column titles",

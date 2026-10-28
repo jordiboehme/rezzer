@@ -163,8 +163,10 @@ const ITEMS: [[&str; 5]; 3] = [
 /// `Menge` at x 40, 80 and 300 and `Preis` and `Betrag` flush right at x 420 and 540, a rule
 /// under the header (unless `header_rule` is false), and with `end` a rule under the last
 /// item over three totals (labels at x 340, values flush right at 540), else a rule under
-/// every item but the last. The items are one table, and the totals another.
-fn items(v: &Variant, end: bool, header_rule: bool) -> Sheet {
+/// every item but the last. With `note` (Task 15b part 2d fix round 1, the private invoice) a
+/// smaller note stands under the totals over a rule of its own, so the totals stand between two
+/// rules in three styles. The items are one table, and the totals another.
+fn items(v: &Variant, end: bool, header_rule: bool, note: bool) -> Sheet {
     let k = v.k();
     let (plain, bold) = v.faces();
     let size = 8.0 * k;
@@ -202,7 +204,23 @@ fn items(v: &Variant, end: bool, header_rule: bool) -> Sheet {
             t += &right(font, size, 540.0, at, value);
         }
     }
-    let bottom = if end { y(64.0) } else { y(30.0) };
+    if note {
+        t += &show(
+            plain,
+            0.8 * size,
+            40.0,
+            y(72.0),
+            "Zahlbar innerhalb von 14 Tagen ohne Abzug.",
+        );
+        t += &rule(v, 40.0, 540.0, y(80.0), size);
+    }
+    let bottom = if note {
+        y(80.0)
+    } else if end {
+        y(64.0)
+    } else {
+        y(30.0)
+    };
     let mut s = sheet(
         v,
         t,
@@ -954,19 +972,24 @@ pub(crate) fn shapes() -> Vec<Shape> {
             draw: |v| (letter_head(v, false, true), None),
         },
         Shape {
+            name: "line items with totals between rules over a note",
+            axes: RULED,
+            draw: |v| (items(v, true, true, true), None),
+        },
+        Shape {
             name: "line items with an end rule",
             axes: RULED,
-            draw: |v| (items(v, true, true), None),
+            draw: |v| (items(v, true, true, false), None),
         },
         Shape {
             name: "line items with row rules",
             axes: RULED,
-            draw: |v| (items(v, false, true), None),
+            draw: |v| (items(v, false, true, false), None),
         },
         Shape {
             name: "line items without rules over an end rule",
             axes: RULED,
-            draw: |v| (items(v, true, false), None),
+            draw: |v| (items(v, true, false, false), None),
         },
         Shape {
             name: "close column titles",
