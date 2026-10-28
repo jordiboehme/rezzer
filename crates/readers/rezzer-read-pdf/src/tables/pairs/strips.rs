@@ -1045,8 +1045,10 @@ fn heads_over_lines(flow: &Flow, cell: &[usize]) -> Option<Vec<String>> {
 /// cell by cell, left to right, each cell's lines top down. Cells are parted by the `dividers`
 /// that no run stands across and, inside them, by gutters: white space of a cell gap (see
 /// [`CELL_GAP`]) or more that no run of the cell crosses on any of its lines (a line that runs
-/// on into the next cell joins the two). None when there is one cell only. Every row of fields that is refused, or that has
-/// a cell left out of its pairs, is read this way (see [`read_cells`]).
+/// on into the next cell joins the two), and values beside their labels are a field per line
+/// (see [`beside_labels`]). One cell is read whole too: its lines together, before the text
+/// beside it on them. None when there is no run. Every row of fields that is refused, or that
+/// has a cell left out of its pairs, is read this way (see [`read_cells`]).
 fn cell_order(
     flow: &Flow,
     by_y: &ByY,
