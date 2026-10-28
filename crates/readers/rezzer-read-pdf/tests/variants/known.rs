@@ -289,13 +289,6 @@ pub(crate) const KNOWN: &[Known] = &[
         why: "group 20 (part 2c): in this variant only the items, the totals and the table of the `row under` neighbour are refused as one block of columns with a loss (some of its text stands between its columns), while the same variant at scale 1 reads all three tables",
     },
     Known {
-        shape: "separator marks",
-        variants: &["scale 0.7, larger text, courier, times labels, turned 270, beside"],
-        broken: &[Inv::SameReading],
-        cause: Cause::New,
-        why: "no threshold (part 2b): the middle of the run `1234` `56` of the boxed amount lies exactly on the edge two digit boxes share; at this scale float rounding puts it inside one box, the run is read as that box's text, and the label line and the values each become two paragraphs; at scale 1 the middle falls outside both",
-    },
-    Known {
         shape: "weight-only boxes",
         variants: &[
             "base",

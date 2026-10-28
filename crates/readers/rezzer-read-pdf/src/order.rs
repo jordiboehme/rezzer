@@ -1519,14 +1519,14 @@ pub(crate) fn runs_in(
 const TWIN_LOOK: usize = 8;
 
 /// Tags each fragment with the innermost of `boxes` its middle lies in (see
-/// [`crate::regions::regions_of`]). Past the bounds no fragment is tagged, and the reason is
+/// [`crate::regions::regions_of`]; a middle on a box's edge lies in neither box beside it). Past the bounds no fragment is tagged, and the reason is
 /// given.
 fn tag_regions(frags: &mut [Frag], boxes: &[[f32; 4]]) -> Result<(), String> {
     // The middle of the ink: padding on either side does not move the run into the box
     // beside it.
-    let points: Vec<(f32, f32)> = frags
+    let points: Vec<(f32, f32, f32)> = frags
         .iter()
-        .map(|f| ((f.x + f.end.max(f.x)) / 2.0, f.y + 0.25 * f.size))
+        .map(|f| ((f.x + f.end.max(f.x)) / 2.0, f.y + 0.25 * f.size, f.size))
         .collect();
     match crate::regions::regions_of(&points, boxes) {
         Ok(regions) => {

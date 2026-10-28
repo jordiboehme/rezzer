@@ -405,11 +405,16 @@ pub(crate) fn boxes(
     Ok(kept)
 }
 
-/// The innermost of `boxes` each of `points` lies in, as an index into `boxes`. A box that
+/// A point this share of its text size from a box's edge, or nearer, lies on the edge (see
+/// [`Index::innermost`]): far under any place text is set in a box, far over float noise.
+pub(crate) const EDGE_TIE: f32 = 0.01;
+
+/// The innermost of `boxes` each of `points` (a place and the size of its text) lies in, as an
+/// index into `boxes`. A box that
 /// holds another box a point lies in is no region: the inner one is, and the points of the
 /// outer one outside it have none. Past the bounds of the lookup, the reason.
 pub(crate) fn regions_of(
-    points: &[(f32, f32)],
+    points: &[(f32, f32, f32)],
     boxes: &[[f32; 4]],
 ) -> Result<Vec<Option<u32>>, String> {
     let Some(mut index) = Index::new(boxes) else {
@@ -418,8 +423,8 @@ pub(crate) fn regions_of(
     let too_much = || Err("its boxes take too many steps to look up".to_string());
     let mut held = vec![false; boxes.len()];
     let mut out = Vec::with_capacity(points.len());
-    for &(x, y) in points {
-        let r = index.innermost(x, y);
+    for &(x, y, size) in points {
+        let r = index.innermost(x, y, size);
         if let Some(b) = r {
             held[b as usize] = true;
         }
@@ -434,7 +439,7 @@ pub(crate) fn regions_of(
         if !held[k] {
             continue;
         }
-        index.holders((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0, |o| {
+        index.holders((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0, 0.0, |o| {
             let a = boxes[o as usize];
             if o as usize != k && a[0] <= b[0] && a[1] <= b[1] && a[2] >= b[2] && a[3] >= b[3] {
                 outer[o as usize] = true;
@@ -569,17 +574,22 @@ impl<'b> Index<'b> {
         (at(x, self.lo.0, self.step.0), at(y, self.lo.1, self.step.1))
     }
 
-    /// The smallest box that holds the point, by its index.
-    pub(crate) fn innermost(&mut self, x: f32, y: f32) -> Option<u32> {
+    /// The smallest box that holds the point of text of `size`, by its index. A point within
+    /// [`EDGE_TIE`] of its size of a box's edge lies on the edge, and in neither box on its
+    /// two sides: a run whose middle falls on the edge two digit boxes share spans both and is
+    /// the text of neither, at every scale (float rounding of the edge or of the point does
+    /// not pick one).
+    pub(crate) fn innermost(&mut self, x: f32, y: f32, size: f32) -> Option<u32> {
         if !x.is_finite() || !y.is_finite() {
             return None;
         }
+        let tie = EDGE_TIE * size.max(0.0);
         let (c, r) = self.cell(x, y);
         let mut best: Option<(f32, u32)> = None;
         for &i in &self.cells[r * INDEX_SIDE + c] {
             self.work += 1;
             let b = self.boxes[i as usize];
-            if x > b[0] && x < b[2] && y > b[1] && y < b[3] {
+            if x > b[0] + tie && x < b[2] - tie && y > b[1] + tie && y < b[3] - tie {
                 let area = (b[2] - b[0]) * (b[3] - b[1]);
                 if best.is_none_or(|(a, _)| area < a) {
                     best = Some((area, i));
@@ -589,16 +599,18 @@ impl<'b> Index<'b> {
         best.map(|(_, i)| i)
     }
 
-    /// Hands `each` every box that holds the point.
-    pub(crate) fn holders(&mut self, x: f32, y: f32, mut each: impl FnMut(u32)) {
+    /// Hands `each` every box that holds the point of text of `size` (0 for a point of no
+    /// text), on its edge within [`EDGE_TIE`] of that size as [`Index::innermost`] has it.
+    pub(crate) fn holders(&mut self, x: f32, y: f32, size: f32, mut each: impl FnMut(u32)) {
         if !x.is_finite() || !y.is_finite() {
             return;
         }
+        let tie = EDGE_TIE * size.max(0.0);
         let (c, r) = self.cell(x, y);
         for &i in &self.cells[r * INDEX_SIDE + c] {
             self.work += 1;
             let b = self.boxes[i as usize];
-            if x > b[0] && x < b[2] && y > b[1] && y < b[3] {
+            if x > b[0] + tie && x < b[2] - tie && y > b[1] + tie && y < b[3] - tie {
                 each(i);
             }
         }
@@ -844,10 +856,44 @@ mod tests {
             [60.0, 60.0, 90.0, 90.0],
         ];
         let mut index = Index::new(&list).expect("index");
-        assert_eq!(index.innermost(20.0, 20.0), Some(1));
-        assert_eq!(index.innermost(55.0, 20.0), Some(0));
-        assert_eq!(index.innermost(70.0, 70.0), Some(2));
-        assert_eq!(index.innermost(200.0, 20.0), None);
+        assert_eq!(index.innermost(20.0, 20.0, 8.0), Some(1));
+        assert_eq!(index.innermost(55.0, 20.0, 8.0), Some(0));
+        assert_eq!(index.innermost(70.0, 70.0, 8.0), Some(2));
+        assert_eq!(index.innermost(200.0, 20.0, 8.0), None);
+    }
+
+    /// A point on the edge two boxes share lies in neither, at every scale: a point within
+    /// [`EDGE_TIE`] of its size of an edge is on it, so float rounding of the edge or the point
+    /// does not pick a box.
+    #[test]
+    fn a_point_on_a_shared_edge_lies_in_no_box() {
+        let size = 9.5;
+        for k in [0.5f32, 0.7, 0.75, 1.0, 1.3, 1.5, 2.0] {
+            let w = 0.6 * size * k;
+            let x0 = 60.0 * k;
+            let list: Vec<[f32; 4]> = (0..6)
+                .map(|n| {
+                    let a = x0 + n as f32 * w;
+                    [a, 700.0 * k, a + w, 700.0 * k + 1.4 * size * k]
+                })
+                .collect();
+            let mut index = Index::new(&list).expect("index");
+            let y = 700.0 * k + 0.5 * size * k;
+            for n in 1..6 {
+                let edge = x0 + n as f32 * w;
+                let mut x = edge;
+                for _ in 0..4 {
+                    x = x.next_down();
+                }
+                for _ in 0..8 {
+                    assert_eq!(index.innermost(x, y, size * k), None, "{k} {n} {x} {edge}");
+                    x = x.next_up();
+                }
+                let off = 0.1 * size * k;
+                assert_eq!(index.innermost(edge - off, y, size * k), Some(n as u32 - 1));
+                assert_eq!(index.innermost(edge + off, y, size * k), Some(n as u32));
+            }
+        }
     }
 
     #[test]

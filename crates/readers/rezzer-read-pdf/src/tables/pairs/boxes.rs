@@ -40,14 +40,14 @@ pub(crate) fn box_pairs(
     if boxes.is_empty() || flow.runs.is_empty() {
         return (Vec::new(), Vec::new(), Vec::new());
     }
-    let points: Vec<(f32, f32)> = flow
+    let points: Vec<(f32, f32, f32)> = flow
         .runs
         .iter()
         .map(|r| {
             if r.off_axis {
-                (f32::NAN, f32::NAN)
+                (f32::NAN, f32::NAN, 0.0)
             } else {
-                (r.x + r.w.max(0.0) / 2.0, r.y + 0.25 * r.size)
+                (r.x + r.w.max(0.0) / 2.0, r.y + 0.25 * r.size, r.size)
             }
         })
         .collect();
@@ -311,11 +311,11 @@ struct Framed {
 /// under it, which are in one style, none of them bold, two lines or more. The frame's own
 /// text is what lies in it outside its boxes with text: runs `regions` gives no box (the
 /// frame holds a box with text, so it is no region of its own) whose smallest holder it is,
-/// and runs of the frame itself. `points` are the runs' ink middles.
+/// and runs of the frame itself. `points` are the runs' ink middles and sizes.
 fn framed_titles(
     flow: &Flow,
     boxes: &[[f32; 4]],
-    points: &[(f32, f32)],
+    points: &[(f32, f32, f32)],
     regions: &[Option<u32>],
     in_box: &[Vec<usize>],
 ) -> Vec<Framed> {
@@ -328,9 +328,9 @@ fn framed_titles(
         if r.is_some() || !inked(&flow.runs[i]) {
             continue;
         }
-        let (x, y) = points[i];
+        let (x, y, size) = points[i];
         let mut best: Option<u32> = None;
-        index.holders(x, y, |b| {
+        index.holders(x, y, size, |b| {
             if best.is_none_or(|o| area(boxes[b as usize]) < area(boxes[o as usize])) {
                 best = Some(b);
             }
