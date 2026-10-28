@@ -2343,7 +2343,10 @@ fn list_marker(text: &str) -> Option<(bool, usize)> {
         // Two padding characters or more after it: a mark set into a field of a form (a
         // starred amount, a dash for none), no bullet.
         let pad = rest.chars().take_while(|c| c.is_whitespace()).count();
-        if pad == 1 {
+        // A star that a lone star later on the line closes encloses an item (`* A123456B * x/y`,
+        // a code set between stars): no bullet.
+        let closed = first == '*' && rest.split_whitespace().any(|w| w == "*");
+        if pad == 1 && !closed {
             return Some((false, text.len() - rest.trim_start().len()));
         }
         return None;
@@ -3827,6 +3830,11 @@ mod tests {
         // Padding after a star or a dash: a mark set into a form field, no bullet.
         assert_eq!(list_marker("*     Betrag"), None);
         assert_eq!(list_marker("-  keine"), None);
+        // A star closed by a lone star on its line encloses an item, no bullet (part 2e-4,
+        // item 6); a star bullet over text with a star in a word still is one.
+        assert_eq!(list_marker("* A123456B * x/y"), None);
+        assert_eq!(list_marker("* Erste Position"), Some((false, 2)));
+        assert_eq!(list_marker("* Rabatt 5* auf alles"), Some((false, 2)));
         assert_eq!(list_marker("\u{2013}\t\tkeine"), None);
         assert_eq!(list_marker("* Punkt"), Some((false, 2)));
     }

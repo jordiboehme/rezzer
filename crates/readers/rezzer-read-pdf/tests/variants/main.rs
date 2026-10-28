@@ -328,6 +328,7 @@ shape_tests! {
     slogan_lines => "slogan lines, each a sentence ending in an exclamation mark",
     bold_slogan_lines => "bold slogan lines, each a sentence ending in an exclamation mark",
     bold_lines_of_starred_items => "bold lines of starred items",
+    plain_lines_of_starred_items => "plain lines of starred items",
     a_cut_row_label_and_a_row_of_numbers_over_prose => "a row label cut by a hyphen and a row of numbers over prose",
     two_lines_in_three_columns => "two lines in three columns alone in the body",
     a_value_printed_over_its_label => "a value printed over its label",

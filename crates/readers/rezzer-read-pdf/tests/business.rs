@@ -2220,12 +2220,14 @@ fn wrapped_prose_in_a_column_still_joins() {
 /// (`* A123456B * x/y`, `*Abc.-Nr. 12345* 12a`, `*Abc.-Nr. ab*`) at 6 to 14 points, plain and
 /// bold Helvetica and Times: a star that closes an item a star opens on its line is no note
 /// marker, and a line that opens and ends with a star is no footnote: no footnote is read, the
-/// stars stay in the text, and each line is a line of its own.
+/// stars stay in the text, and each line is a line of its own. Part 2e-4 (item 6): the first
+/// line too, at every size from 6 to 14: its star, closed by a lone star on its line, is no
+/// bullet (it was read as a list item at 6 to 10 points).
 #[test]
 fn starred_items_are_no_footnotes() {
     let parts = ["* A123456B * x/y", "*Abc.-Nr. 12345* 12a", "*Abc.-Nr. ab*"];
     let mut wrong = Vec::new();
-    for size in [6.0f32, 7.0, 8.0, 9.0, 10.0, 12.0, 14.0] {
+    for size in [6.0f32, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0] {
         for font in ["FB", "FTB", "FL", "FT"] {
             let mut t = String::new();
             for (k, p) in parts.iter().enumerate() {
@@ -2238,7 +2240,12 @@ fn starred_items_are_no_footnotes() {
                 wrong.push(format!("{at}: a footnote"));
             }
             let text = md.replace("**", "").replace('\\', "");
-            for want in ["*Abc.-Nr. 12345* 12a", "*Abc.-Nr. ab*"] {
+            // Part 2e-4 (item 6): the first line's star opens an item that a star closes on its
+            // line: no bullet, and no list.
+            if text.lines().any(|l| l.trim_start().starts_with("- ")) {
+                wrong.push(format!("{at}: a list item"));
+            }
+            for want in parts {
                 if !text.lines().any(|l| l.trim() == want) {
                     wrong.push(format!("{at}: no line {want:?}"));
                 }

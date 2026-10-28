@@ -2072,7 +2072,16 @@ pub(crate) fn shapes() -> Vec<Shape> {
             axes: DOC,
             draw: |v| {
                 let mut s = column_of(v, &STARRED_LINES, 9.0, true, None);
-                s.want.order = STARRED_LINES[1..].iter().map(|l| l.to_string()).collect();
+                s.want.order = STARRED_LINES.iter().map(|l| l.to_string()).collect();
+                (s, None)
+            },
+        },
+        Shape {
+            name: "plain lines of starred items",
+            axes: DOC,
+            draw: |v| {
+                let mut s = column_of(v, &STARRED_LINES, 8.0, false, None);
+                s.want.order = STARRED_LINES.iter().map(|l| l.to_string()).collect();
                 (s, None)
             },
         },
