@@ -529,9 +529,9 @@ fn region(
 }
 
 /// Whether bars `members` (standing up, or lying down with `flat`) in box `b` are a linear
-/// code: about as long as the region and at least two modules long, of at least two widths,
-/// every bar and nearly every space a whole number of modules wide, with 5 modules free at
-/// both ends.
+/// code: about as long as the region and at least two modules long, of at least two widths
+/// and at most 4 modules wide, every bar and nearly every space a whole number of modules
+/// wide, not all at one pitch, with 5 modules free at both ends.
 fn linear(
     cells: &[[f32; 4]],
     members: &[usize],
@@ -588,6 +588,29 @@ fn linear(
     }
     let spaces = runs.windows(2).filter(|w| !whole(w[1].0 - w[0].1)).count();
     if spaces * 10 > runs.len().saturating_sub(1) {
+        return false;
+    }
+    // A code's bars are at most 4 modules wide and never at one pitch: bars that start at
+    // one step after another (a ruler, a scale bar, the ticks of an axis, hatching) carry
+    // nothing.
+    if runs.iter().any(|(a, z)| (z - a) / module > 4.2) {
+        return false;
+    }
+    // At one pitch by their starts, their ends or their middles: ticks may be set by any.
+    let one_pitch = |at: &dyn Fn(&(f32, f32)) -> f32| {
+        let mut steps: Vec<i32> = runs
+            .windows(2)
+            .map(|w| ((at(&w[1]) - at(&w[0])) / module * 4.0).round() as i32)
+            .collect();
+        steps.sort_unstable();
+        let most = steps
+            .chunk_by(|a, b| a == b)
+            .map(<[i32]>::len)
+            .max()
+            .unwrap_or(0);
+        most * 10 >= steps.len() * 9
+    };
+    if one_pitch(&|r| r.0) || one_pitch(&|r| r.1) || one_pitch(&|r| (r.0 + r.1) / 2.0) {
         return false;
     }
     let mut widths: Vec<i32> = runs
@@ -1003,6 +1026,38 @@ mod tests {
                 })
                 .collect(),
         );
+    }
+
+    #[test]
+    fn ticks_of_a_ruler_are_no_code() {
+        // A ruler, a scale bar or the ticks of a chart axis: short bars of two widths at one
+        // pitch, standing up or lying down, with free space at both ends. Bars at one pitch
+        // carry nothing; a code's bars never do.
+        for (minor, major, long, pitch) in [
+            (0.5, 1.0, 3.0, 2.0),
+            (0.5, 1.0, 6.0, 2.5),
+            (0.3, 0.6, 3.0, 1.2),
+        ] {
+            let ticks: Vec<[f32; 4]> = (0..100)
+                .map(|k| {
+                    let x = 60.0 + k as f32 * pitch;
+                    let w = if k % 5 == 0 { major } else { minor };
+                    // Every other ruler sets its ticks by their right edge.
+                    let x = if pitch > 2.0 { x - w } else { x };
+                    [x, 700.0, x + w, 700.0 + long]
+                })
+                .collect();
+            let case = format!("ticks {minor} and {major} wide, {long} long, {pitch} apart");
+            assert!(vector_codes(&ticks).expect("searched").is_empty(), "{case}");
+            let lying: Vec<[f32; 4]> = ticks
+                .iter()
+                .map(|t| [t[1] - 600.0, t[0], t[3] - 600.0, t[2]])
+                .collect();
+            assert!(
+                vector_codes(&lying).expect("searched").is_empty(),
+                "{case}, lying"
+            );
+        }
     }
 
     #[test]
