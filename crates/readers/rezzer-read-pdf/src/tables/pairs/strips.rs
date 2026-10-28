@@ -534,6 +534,9 @@ pub(in crate::tables) fn field_strips(
         // A cell not clear for a reason of fields (a label under its value, a weight only) whose
         // text is as short as a field's (see [`field_sized`]), not for its many styles alone.
         let (mut fits, mut unread, mut field_why) = (true, false, None);
+        // The heads of a cell in three styles whose first line is heads over lines of their
+        // own: the row is a row of fields not clear, which is said by them.
+        let mut styled_heads: Vec<String> = Vec::new();
         // The label styles of the strip's fields: a name over an address in one of them is a
         // label too.
         let mut label_styles: Vec<Style> = Vec::new();
@@ -601,6 +604,11 @@ pub(in crate::tables) fn field_strips(
                                     unread = true;
                                     if why != THREE_STYLES && field_sized(flow, &part) {
                                         field_why = field_why.or(Some(why));
+                                    } else if why == THREE_STYLES
+                                        && let Some(names) = heads_over_lines(flow, &part)
+                                    {
+                                        field_why = field_why.or(Some(why));
+                                        styled_heads.extend(names);
                                     }
                                 }
                                 _ => fits = false,
@@ -632,7 +640,7 @@ pub(in crate::tables) fn field_strips(
                 let names: Vec<String> = cells.iter().flat_map(|c| label_names(flow, c)).collect();
                 say(unsure, &names, NOT_FIELDS);
             } else if let Some(why) = field_why {
-                say(unsure, &[], why);
+                say(unsure, &styled_heads, why);
             } else {
                 continue;
             }
@@ -804,7 +812,9 @@ pub(in crate::tables) fn field_strips(
         };
         // One field alone between its rules reads like a caption over a line: it is not
         // paired, and that is said, with the labels under its rule that may be of its value.
-        if list.len() < 2 {
+        // Beside a cell of its row left out, it is a field of the row.
+        let row = g.len() == 1 && strips[g[0]].left_out;
+        if list.len() < 2 && !row {
             let mut names: Vec<String> = list.iter().map(|f| words(flow, &f.label)).collect();
             if let Ends::Under(_, below) | Ends::Unclear(below) = ends(
                 flow,
@@ -992,6 +1002,29 @@ fn table_body(flow: &Flow, cells: &[Vec<usize>]) -> bool {
             .all(|&(y, size)| widest.iter().any(|&(w, _)| (w - y).abs() <= size / 3.0))
     };
     columns.iter().filter(|c| in_rows(c)).count() >= BODY_COLUMNS
+}
+
+/// The names of the heads of a cell's first line (runs apart by a cell gap, see
+/// [`labels_in_line`]) when there are two or more and ink of the lines under it stands under
+/// each of them: the cell is set as fields side by side, whatever their styles.
+fn heads_over_lines(flow: &Flow, cell: &[usize]) -> Option<Vec<String>> {
+    let lines = lines_of(flow, cell);
+    let heads = labels_in_line(flow, lines.first()?);
+    if lines.len() < 2 || heads.len() < 2 {
+        return None;
+    }
+    let pieces: Vec<(f32, f32)> = lines[1..]
+        .iter()
+        .flatten()
+        .flat_map(|&i| ink_pieces(&flow.runs[i]))
+        .collect();
+    heads
+        .iter()
+        .all(|h| {
+            let (x0, x1) = extent(flow, h);
+            pieces.iter().any(|&(a, b)| a < x1 && b > x0)
+        })
+        .then(|| heads.iter().map(|h| words(flow, h)).collect())
 }
 
 /// Whether the text of a part of a cell is as short as a value.
@@ -1913,13 +1946,15 @@ fn ink_pieces(r: &Run) -> Vec<(f32, f32)> {
 }
 
 /// The heads of a first line whose text is not of one size: its labels (runs apart by a cell
-/// gap, see [`labels_in_line`]) where two of them or more share the largest size the line's
-/// labels have, each a size step under the value lines; a head smaller than them is a label
-/// too (a value is never smaller than its label). A head a size step larger than those labels
-/// is no label: it heads its own lines only when text of its own size stands under it, or it
-/// is bold with no text under it (a title), and the labels next to it have values under them
-/// (else it may be the value beside a label). Each piece of ink under the line (see
-/// [`ink_pieces`]) stands under one head at most. None when the line is not such heads.
+/// gap, see [`labels_in_line`]), each a size step under the ink under it (see [`ink_pieces`]; a
+/// head with nothing under it is the label of an empty field). A head may be smaller than the
+/// labels beside it (a value is never smaller than its label), but a head a size step larger
+/// than the head left of it may be that head's value beside it: it is a head only when another
+/// head of the line has its size (within a size step), or the head left of it has a value of
+/// its own under it (ink under it alone, apart from other ink of its line by a cell gap). A
+/// head that is no label heads its own lines when the ink under it has its size (a value or a
+/// name at the values' size). Each piece of ink stands under one head at most, and one head at
+/// least is a label. None when the line is not such heads.
 fn heads_of(flow: &Flow, lines: &[Vec<usize>], marker: &HashSet<usize>) -> Option<Vec<Vec<usize>>> {
     let heads = labels_in_line(flow, &lines[0]);
     if heads.len() < 2 {
@@ -1932,56 +1967,54 @@ fn heads_of(flow: &Flow, lines: &[Vec<usize>], marker: &HashSet<usize>) -> Optio
             .fold(0.0f32, f32::max)
     };
     let sizes: Vec<f32> = heads.iter().map(size_of).collect();
-    // The labels' size: the largest size two heads or more share (within a size step).
-    let label = sizes
-        .iter()
-        .copied()
-        .filter(|&s| {
-            sizes
-                .iter()
-                .filter(|&&o| o < LABEL_STEP * s && s < LABEL_STEP * o)
-                .count()
-                >= 2
-        })
-        .fold(0.0f32, f32::max);
-    if label <= 0.0 {
-        return None;
-    }
     let ends: Vec<(f32, f32)> = heads.iter().map(|h| extent(flow, h)).collect();
-    // The sizes of the ink under each head.
+    // The sizes of the ink under each head, and whether a value stands under it alone.
     let mut under: Vec<Vec<f32>> = vec![Vec::new(); heads.len()];
+    let mut own = vec![false; heads.len()];
     for &i in lines[1..].iter().flatten() {
         let r = &flow.runs[i];
-        for (a, b) in ink_pieces(r) {
+        let pieces = ink_pieces(r);
+        // The pieces of the run in chunks parted by a cell gap.
+        let mut chunk: Vec<usize> = Vec::new();
+        for (n, &(a, b)) in pieces.iter().enumerate() {
             let mut over = ends.iter().enumerate().filter(|(_, e)| a < e.1 && b > e.0);
-            let Some((k, _)) = over.next() else {
-                continue;
-            };
-            if over.next().is_some() {
-                return None;
+            if let Some((k, _)) = over.next() {
+                if over.next().is_some() {
+                    return None;
+                }
+                under[k].push(r.size);
+                if !chunk.contains(&k) {
+                    chunk.push(k);
+                }
             }
-            under[k].push(r.size);
+            let parted = pieces
+                .get(n + 1)
+                .is_none_or(|next| next.0 - b > CELL_GAP * r.size.max(1.0));
+            if parted {
+                if let [k] = chunk[..] {
+                    own[k] = true;
+                }
+                chunk.clear();
+            }
         }
     }
-    let is_label: Vec<bool> = sizes.iter().map(|&s| s < LABEL_STEP * label).collect();
-    for (k, &s) in sizes.iter().enumerate() {
-        if is_label[k] {
-            // A label stands a size step under its values.
-            if under[k].iter().any(|&v| v < LABEL_STEP * s) {
-                return None;
-            }
-            continue;
+    let label: Vec<bool> = (0..heads.len())
+        .map(|k| under[k].iter().all(|&v| v >= LABEL_STEP * sizes[k]))
+        .collect();
+    let shared = |k: usize| {
+        (0..heads.len())
+            .any(|j| j != k && sizes[j] < LABEL_STEP * sizes[k] && sizes[k] < LABEL_STEP * sizes[j])
+    };
+    for k in 0..heads.len() {
+        if k > 0 && sizes[k] >= LABEL_STEP * sizes[k - 1] && !shared(k) && !own[k - 1] {
+            return None;
         }
-        let bold = heads[k].iter().all(|&i| flow.runs[i].bold);
-        let own = !under[k].is_empty() && under[k].iter().all(|&v| v < LABEL_STEP * s);
-        let titled = under[k].is_empty() && bold;
-        let valued = |j: usize| !is_label[j] || !under[j].is_empty();
-        if !(own || titled) || (k > 0 && !valued(k - 1)) || (k + 1 < heads.len() && !valued(k + 1))
-        {
+        // No label: the ink under it is of its own size.
+        if !label[k] && under[k].iter().any(|&v| v >= LABEL_STEP * sizes[k]) {
             return None;
         }
     }
-    Some(heads)
+    label.contains(&true).then_some(heads)
 }
 
 /// The parts of a cell between dividers: when its first line is two labels or more over lines
@@ -2240,9 +2273,9 @@ mod tests {
         assert_eq!(first_line_labels(&flow, &lines).map(|l| l.len()), None);
     }
     /// Task 15b part 2d item 3: labels of one size with a smaller name between them head their
-    /// cells, and so does a name at the values' size over lines of its size beside labels with
-    /// values under them; the same name with nothing under it, or a label with nothing under it
-    /// beside it, is no head (it may be the value beside the label).
+    /// cells, and so does a name at the values' size, over lines of its size or over nothing,
+    /// right of a label with a value under it; right of a label with nothing under it, the
+    /// name is no head (it may be the value beside the label).
     #[test]
     fn heads_of_one_size_may_hold_a_smaller_or_a_value_sized_head() {
         let cell = |middle: f32, under: bool, left: bool| {
@@ -2269,7 +2302,7 @@ mod tests {
         for (middle, under, left, heads) in [
             (7.2, true, true, Some(3)),
             (8.5, true, true, Some(3)),
-            (8.5, false, true, None),
+            (8.5, false, true, Some(3)),
             (8.5, true, false, None),
         ] {
             let flow = cell(middle, under, left);

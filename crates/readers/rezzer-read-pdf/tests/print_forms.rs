@@ -7110,3 +7110,167 @@ fn a_strip_without_dividers_reads_its_cells_apart() {
         wrong.join("\n")
     );
 }
+
+/// A cell of [`open_strip_of`]: its first line, that line's size as a share of the labels'
+/// size, and the lines under it.
+type StripCell = (&'static str, f32, &'static [&'static str]);
+
+/// A strip between two rules with no rule between its cells: each cell its first line (a
+/// label at `head` times the labels' size `size`) and the lines under it at the values' size
+/// (`size` times `step`), in `font`.
+fn open_strip_of(cells: &[StripCell], size: f32, step: f32, font: &str) -> ReadOutcome {
+    let value = size * step;
+    let k = size / 8.0;
+    let width = 120.0 * k;
+    let (x0, top) = (60.0, 760.0);
+    let h = 5.0 * value;
+    let mut c = String::from("0 0 0 RG 0.5 w\n");
+    for y in [top, top - h] {
+        c += &format!("{x0} {y} m {} {y} l S\n", x0 + width * cells.len() as f32);
+    }
+    for (n, (head, hs, lines)) in cells.iter().enumerate() {
+        let x = x0 + width * n as f32 + 4.0 * k;
+        c += &shown(font, hs * size, x, top - 1.1 * size, head);
+        let low = top - h + 0.4 * value;
+        for (l, v) in lines.iter().rev().enumerate() {
+            c += &shown(font, value, x, low + 1.2 * value * l as f32, v);
+        }
+    }
+    read(&three_font_page(&c))
+}
+
+/// Task 15b part 2d item 3 (ruling P6-X), beyond one odd cell between two labels: strips of
+/// two to four cells with a name a little smaller than the labels over an address first, last,
+/// in the middle or twice, beside labels over their values. Each cell pairs right (its label
+/// over its lines) or a loss names it; the cells marked to pair do; no block that is no table
+/// holds words of two cells. Sizes 6 to 14, steps 1.0625 to 1.25, both data fonts.
+#[test]
+fn strips_of_two_to_four_cells_read_their_cells_apart() {
+    const NAME: StripCell = ("Muster GmbH", 0.9, &["Musterweg 1", "12345 Musterstadt"]);
+    const PERSON: StripCell = (
+        "Erika Mustermann",
+        0.9,
+        &["c/o Muster GmbH", "Beispielweg 2"],
+    );
+    const NR: StripCell = ("Nr", 1.0, &["4711"]);
+    const KEY: StripCell = ("Name", 1.0, &["Beispiel"]);
+    const DATE: StripCell = ("Datum", 1.0, &["01.01.2020"]);
+    // The cells, and the heads that must pair.
+    let layouts: [(&[StripCell], &[&str]); 6] = [
+        (&[NAME, NR], &[]),
+        (&[KEY, NAME], &[]),
+        (&[NAME, KEY, NR], &["Name", "Nr"]),
+        (&[KEY, NR, NAME], &["Name", "Nr"]),
+        (&[KEY, NAME, NR, DATE], &["Name", "Nr", "Datum"]),
+        (&[NAME, PERSON, NR, KEY], &["Nr", "Name"]),
+    ];
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+        for step in [1.0625f32, 1.125, 1.25] {
+            for font in ["F1", "F3"] {
+                for (cells, pairs) in layouts {
+                    let heads: Vec<&str> = cells.iter().map(|c| c.0).collect();
+                    let at = format!("{heads:?} {size} pt x {step}, {font}");
+                    let out = open_strip_of(cells, size, step, font);
+                    let rows: Vec<String> = read_tables(&out)
+                        .iter()
+                        .flatten()
+                        .map(|r| r.join(": "))
+                        .collect();
+                    for (head, _, lines) in cells.iter() {
+                        let want = format!("{head}: {}", lines.join(" "));
+                        let paired = rows.iter().any(|r| r.starts_with(&format!("{head}:")));
+                        if paired && !rows.contains(&want) {
+                            wrong.push(format!("{at}: wrong pair for {head}: {rows:?}"));
+                        }
+                        let said = out.document.losses.iter().any(|l| l.what.contains(head));
+                        if !paired && !said {
+                            wrong.push(format!("{at}: {head} neither pairs nor is said: {rows:?}"));
+                        }
+                        if pairs.contains(head) && !rows.contains(&want) {
+                            wrong.push(format!("{at}: no {want} in {rows:?}"));
+                        }
+                    }
+                    let words: Vec<Vec<&str>> = cells
+                        .iter()
+                        .map(|(h, _, l)| {
+                            h.split_whitespace()
+                                .chain(l.iter().flat_map(|t| t.split_whitespace()))
+                                .collect()
+                        })
+                        .collect();
+                    let own = |c: usize, w: &str| {
+                        words[c].contains(&w)
+                            && (0..words.len()).all(|o| o == c || !words[o].contains(&w))
+                    };
+                    let mut blocks = Vec::new();
+                    text_blocks(&out.document.body, &mut blocks);
+                    for b in blocks {
+                        let of: Vec<usize> = (0..cells.len())
+                            .filter(|&c| b.split_whitespace().any(|w| own(c, w)))
+                            .collect();
+                        if of.len() > 1 {
+                            wrong.push(format!("{at}: a block mixes cells {of:?}: {b:?}"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// Task 15b part 2d item 3 (ruling P6-X: never silent): a strip whose cells are not clear (the
+/// address under a smaller name runs on under the next label) and whose text is in three
+/// styles is not read as fields, and a loss names its heads; no pair is made.
+#[test]
+fn a_strip_in_three_styles_not_clear_is_said() {
+    let long: &[&str] = &["Musterweg 1", "12345 Musterstadt-Beispielhausen"];
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+        for step in [1.0625f32, 1.125, 1.25] {
+            for font in ["F1", "F3"] {
+                let at = format!("{size} pt x {step}, {font}");
+                let cells: [StripCell; 3] = [
+                    ("Name", 1.0, &["Beispiel"]),
+                    ("Muster GmbH", 0.9, long),
+                    ("Nr", 1.0, &["4711"]),
+                ];
+                let out = open_strip_of(&cells, size, step, font);
+                let rows: Vec<String> = read_tables(&out)
+                    .iter()
+                    .flatten()
+                    .map(|r| r.join(": "))
+                    .collect();
+                if !rows.is_empty() {
+                    wrong.push(format!("{at}: pairs {rows:?}"));
+                }
+                let said = out
+                    .document
+                    .losses
+                    .iter()
+                    .any(|l| l.what.contains("Name, Muster GmbH, Nr"));
+                if !said {
+                    let losses: Vec<&str> = out
+                        .document
+                        .losses
+                        .iter()
+                        .map(|l| l.what.as_str())
+                        .collect();
+                    wrong.push(format!("{at}: not said: {losses:?}"));
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
