@@ -39,6 +39,27 @@ pub(crate) struct Known {
 /// Every pinned break.
 pub(crate) const KNOWN: &[Known] = &[
     Known {
+        shape: "two printed QR codes touching",
+        variants: &["base"],
+        broken: &[Inv::Code],
+        cause: Cause::Carry,
+        why: "the decoder reads fewer QR codes than are printed (touching, 1 module apart, or cut by the edge of the page); the part is named as a printed part that looks like a code, not or only in part decoded, on the evidence of its finder patterns (a named loss, P6-X holds)",
+    },
+    Known {
+        shape: "two printed QR codes 1 module apart",
+        variants: &["base"],
+        broken: &[Inv::Code],
+        cause: Cause::Carry,
+        why: "the decoder reads fewer QR codes than are printed (touching, 1 module apart, or cut by the edge of the page); the part is named as a printed part that looks like a code, not or only in part decoded, on the evidence of its finder patterns (a named loss, P6-X holds)",
+    },
+    Known {
+        shape: "a printed QR code cut in half by the edge of the page",
+        variants: &["base"],
+        broken: &[Inv::Code],
+        cause: Cause::Carry,
+        why: "the decoder reads fewer QR codes than are printed (touching, 1 module apart, or cut by the edge of the page); the part is named as a printed part that looks like a code, not or only in part decoded, on the evidence of its finder patterns (a named loss, P6-X holds)",
+    },
+    Known {
         shape: "a printed barcode cut by the edge of the page to 30 modules",
         variants: &["base"],
         broken: &[Inv::Code],

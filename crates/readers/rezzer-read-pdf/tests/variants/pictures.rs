@@ -477,6 +477,44 @@ fn printed_code(v: &Variant, bar: u32, keep: Option<u32>, blur: u32) -> Sheet {
     s
 }
 
+/// The text of the QR codes of these shapes.
+const QR: &str = "https://example.org/t/0000000001";
+
+/// Task 15b part 2e-6: a scanned page (one inline picture over all of it, 1 pixel a point,
+/// above the page's text) with printed QR codes of [`QR`], 3 pixels a module: two side by
+/// side `gap` modules apart (`Some`), or one cut in half by the right edge of the page. The
+/// decoder reads fewer than are there; the page says a part of it looks like a code, on the
+/// evidence of their finder patterns.
+fn printed_qr(v: &Variant, gap: Option<u32>) -> Sheet {
+    let m = modules(barcodes::Symbology::QrCode, QR);
+    let (w, h, px) = (595u32, 842u32, 3u32);
+    let side = m.width * px;
+    let lefts = match gap {
+        Some(g) => vec![60, 60 + side + g * px],
+        None => vec![w - side / 2],
+    };
+    let mut g = vec![235u8; (w * h) as usize];
+    for &l in &lefts {
+        for yy in 0..m.height {
+            for xx in (0..m.width).filter(|&xx| m.dark[(yy * m.width + xx) as usize]) {
+                for y in 60 + yy * px..60 + yy * px + px {
+                    for x in l + xx * px..(l + xx * px + px).min(w) {
+                        g[(y * w + x) as usize] = 0;
+                    }
+                }
+            }
+        }
+    }
+    let mut s = Sheet::new(page_of(
+        v,
+        inline_gray(&mut g, (w, h), 0, [0.0, 0.0, 595.0, 842.0]),
+    ));
+    for _ in 0..if gap.is_some() { 2 } else { 1 } {
+        s.want.codes.push(("QR Code".into(), QR.into()));
+    }
+    s
+}
+
 /// The shapes of pages the decoder read false codes from: `$name => draw`.
 macro_rules! false_reads {
     ($($name:literal => $draw:expr,)*) => {
@@ -824,6 +862,12 @@ pub(crate) fn shapes() -> Vec<Shape> {
         "a printed barcode cut by the edge of the page to 30 modules" => |v| printed_code(v, 60, Some(30), 0),
         "a printed barcode cut by the edge of the page to 45 modules, blurred" => |v| printed_code(v, 60, Some(45), 1),
         "a printed barcode with bars 6 modules long, blurred" => |v| printed_code(v, 6, None, 1),
+    });
+    // Printed QR codes the decoder does not read all of: said.
+    all.extend(false_reads! {
+        "two printed QR codes touching" => |v| printed_qr(v, Some(0)),
+        "two printed QR codes 1 module apart" => |v| printed_qr(v, Some(1)),
+        "a printed QR code cut in half by the edge of the page" => |v| printed_qr(v, None),
     });
     // Two equal codes closer than their quiet zone.
     all.extend(twins! {

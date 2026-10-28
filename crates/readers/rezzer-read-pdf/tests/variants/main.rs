@@ -518,6 +518,9 @@ shape_tests! {
     printed_code_cut_30 => "a printed barcode cut by the edge of the page to 30 modules",
     printed_code_cut_45_blur => "a printed barcode cut by the edge of the page to 45 modules, blurred",
     printed_code_short_bars_blur => "a printed barcode with bars 6 modules long, blurred",
+    printed_qr_touching => "two printed QR codes touching",
+    printed_qr_1_module_apart => "two printed QR codes 1 module apart",
+    printed_qr_cut => "a printed QR code cut in half by the edge of the page",
 }
 
 /// Task 15b part 2d fix round 3 (M1): the cell check counts the texts it leaves out, and a list

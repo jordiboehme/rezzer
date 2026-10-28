@@ -2477,15 +2477,16 @@ impl Scans {
 
     /// Marks the parts of the render of page `need` (a page that needs vision as a whole,
     /// asset `asset`) that look like a code and gave none, from `printed` (their boxes in the
-    /// visible page box, see [`printed_codes`]): a part no code read lies in, or one whose
-    /// linear codes read do not fill most of it. Parts that are regions of the page are left
+    /// visible page box, and the QR finders each shows, see [`printed_codes`]): a part no code
+    /// read lies in, one whose linear codes read do not fill most of it, or one with fewer QR
+    /// codes read in it than its finders show. Parts that are regions of the page are left
     /// to [`Scans::regions_unread`]. The first [`SMALL_LISTED`] get their words for the page's
     /// alt text, the others are counted. `Err` says why the render was not searched.
     fn printed_unread(
         &mut self,
         asset: usize,
         need: &Need,
-        printed: Result<Vec<[f32; 4]>, String>,
+        printed: Result<Vec<([f32; 4], usize)>, String>,
     ) {
         let printed = match printed {
             Ok(p) => p,
@@ -2500,13 +2501,30 @@ impl Scans {
         let found = self.found.entry(asset).or_default();
         let mut more = 0;
         let mut listed = 0;
-        for b in printed {
+        for (b, finders) in printed {
             if need.regions.iter().any(|r| overlap(&r.b, &b)) {
                 continue;
             }
             let framed = need.turn.place_box(b, w, h);
-            let Some(part) = unread_at(&found.codes, &framed, true) else {
-                continue;
+            // QR finders show how many QR codes at least are there (three finders each, a code
+            // cut by the edge of the page fewer): fewer read there, the part is said.
+            let part = if finders >= 2 {
+                let read = found
+                    .codes
+                    .iter()
+                    .filter(|c| {
+                        two_d(&c.symbology) && c.bounds.is_some_and(|q| overlap(&q, &framed))
+                    })
+                    .count();
+                if read >= finders.div_ceil(3) {
+                    continue;
+                }
+                read > 0
+            } else {
+                let Some(part) = unread_at(&found.codes, &framed, true) else {
+                    continue;
+                };
+                part
             };
             if listed == SMALL_LISTED {
                 more += 1;
@@ -2842,7 +2860,11 @@ const PRINTED: &str = "a printed part that looks like a barcode or QR code";
 /// searched as codes drawn as paths are ([`crate::codes::printed_codes`]), within `room`
 /// bytes with the render. Their boxes in the visible page box; `Err` says why the render
 /// was not searched.
-fn printed_codes(page: &Rendered, need: &Need, room: u64) -> Result<Vec<[f32; 4]>, String> {
+fn printed_codes(
+    page: &Rendered,
+    need: &Need,
+    room: u64,
+) -> Result<Vec<([f32; 4], usize)>, String> {
     let p = &page.pixmap;
     let (w, h) = (usize::from(p.width()), usize::from(p.height()));
     let held = (w * h * 4) as u64;
@@ -2867,7 +2889,7 @@ fn printed_codes(page: &Rendered, need: &Need, room: u64) -> Result<Vec<[f32; 4]
         (1.0 / page.scale) as f32,
         page_rect(page, need, [0, 0, wr, hr]),
     )?;
-    Ok(found.into_iter().map(|c| c.b).collect())
+    Ok(found.into_iter().map(|c| (c.b, c.finders)).collect())
 }
 
 /// Whether box `a` fills at least [`FILLS`] of box `b` each way.
@@ -3100,6 +3122,7 @@ mod tests {
                     b: [40.0 + 50.0 * k as f32, 100.0, 80.0 + 50.0 * k as f32, 120.0],
                     module: 0.5,
                     id: k,
+                    finders: 0,
                 })
                 .collect(),
             ..PageItems::default()

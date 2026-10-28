@@ -19,6 +19,9 @@ pub(crate) struct VectorCode {
     /// What it is: its rectangles relative to its corner, so the same code drawn on many
     /// pages is one.
     pub id: u64,
+    /// For a part printed in a picture that shows QR finder patterns (see [`printed_codes`]):
+    /// how many, 0 otherwise.
+    pub finders: usize,
 }
 
 /// The most filled rectangles a page keeps for finding codes.
@@ -820,6 +823,7 @@ fn region(
         on_it * 10 >= members.len() * 9
     };
     let edges = printed.map(|p| p.page);
+    let mut finders = 0;
     // A printed matrix code has paper around it, inside the render.
     let paper_around = || {
         let Some(p) = printed else { return true };
@@ -841,8 +845,11 @@ fn region(
     } else {
         members.len() >= MIN_CELLS
             && lattice()
-            && matrix(cells, members, b, module)
-            && paper_around()
+            && ((matrix(cells, members, b, module) && paper_around())
+                || printed.is_some() && {
+                    finders = qr_finders(cells, members, b, module);
+                    finders >= 2
+                })
     };
     if !kind_ok {
         return None;
@@ -864,6 +871,7 @@ fn region(
         b,
         module,
         id: hasher.finish(),
+        finders,
     })
 }
 
@@ -1038,6 +1046,73 @@ fn one_width(runs: &[(f32, f32)], module: f32, spread: f32) -> bool {
         .max()
         .unwrap_or(0);
     most as f32 >= SAME_WIDTH * runs.len() as f32
+}
+
+/// The QR Code finder patterns among `members` in box `b` on a lattice of `module`, each
+/// whole (7 by 7 modules: a dark ring, a light ring and a dark core of 3, nine in ten of its
+/// modules so) with its light separator wherever that lies in the box, when at least two of
+/// them stand in one row or one column of modules at least 14 modules apart (the finders of
+/// one QR code, or of several side by side, or of a QR code cut by the edge of the page). How
+/// many there are then, else 0: positive evidence of QR codes where the pattern of a whole one
+/// is not there.
+fn qr_finders(cells: &[[f32; 4]], members: &[usize], b: [f32; 4], module: f32) -> usize {
+    let n = ((b[2] - b[0]) / module).round() as usize;
+    let m = ((b[3] - b[1]) / module).round() as usize;
+    if n < 7 || m < 7 || n > 2 * MAX_MODULES || m > 2 * MAX_MODULES {
+        return 0;
+    }
+    let mut dark = vec![false; n * m];
+    for &i in members {
+        let c = cells[i];
+        let col = |v: f32| (((v - b[0]) / module).round().max(0.0) as usize).min(n);
+        let row = |v: f32| (((b[3] - v) / module).round().max(0.0) as usize).min(m);
+        for r in row(c[3])..row(c[1]) {
+            for k in col(c[0])..col(c[2]) {
+                dark[r * n + k] = true;
+            }
+        }
+    }
+    let at = |r: isize, k: isize| -> Option<bool> {
+        (r >= 0 && k >= 0 && (r as usize) < m && (k as usize) < n)
+            .then(|| dark[r as usize * n + k as usize])
+    };
+    let mut found: Vec<(usize, usize)> = Vec::new();
+    for r0 in 0..=m - 7 {
+        for k0 in 0..=n - 7 {
+            if found
+                .iter()
+                .any(|&(r, k)| r.abs_diff(r0) < 7 && k.abs_diff(k0) < 7)
+            {
+                continue;
+            }
+            // The separator (ring -1) is light; then a dark ring, a light ring and a dark
+            // core. Only the separator may lie past the box.
+            let (mut hits, mut all) = (0usize, 0usize);
+            let mut whole = true;
+            for r in -1..=7isize {
+                for k in -1..=7isize {
+                    let ring = r.min(k).min(6 - r).min(6 - k);
+                    let want = ring >= 0 && ring != 1;
+                    match at(r0 as isize + r, k0 as isize + k) {
+                        Some(v) => {
+                            all += 1;
+                            hits += usize::from(v == want);
+                        }
+                        None => whole &= ring < 0,
+                    }
+                }
+            }
+            if whole && hits * 10 >= all * 9 {
+                found.push((r0, k0));
+            }
+        }
+    }
+    let lined = found.iter().any(|&(r, k)| {
+        found
+            .iter()
+            .any(|&(q, j)| (q == r && k.abs_diff(j) >= 14) || (j == k && r.abs_diff(q) >= 14))
+    });
+    if lined { found.len() } else { 0 }
 }
 
 /// Whether `members` in box `b` on a lattice of `module` make a matrix code's finder: QR Code

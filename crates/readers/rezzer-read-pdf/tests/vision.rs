@@ -4065,3 +4065,58 @@ fn codes_with_few_or_short_bars_the_decoder_misses_are_said() {
         }
     }
 }
+
+/// A crisp scanned A4 page of `res` pixels a point with QR codes of `payload`, `px` pixels a
+/// module, their top 300 points from the top, at each of `lefts` (pixels from the left edge
+/// of the page; a code past the right edge is cut there).
+fn qr_scan(payload: &str, res: u32, px: u32, lefts: &[u32]) -> Vec<u8> {
+    let m = modules(Symbology::QrCode, payload);
+    let (w, h) = (595 * res, 842 * res);
+    let mut scan = vec![235u8; (w * h) as usize];
+    for &l in lefts {
+        for yy in 0..m.height {
+            for xx in (0..m.width).filter(|&xx| m.dark[(yy * m.width + xx) as usize]) {
+                for y in 300 * res + yy * px..300 * res + yy * px + px {
+                    for x in l + xx * px..(l + xx * px + px).min(w) {
+                        scan[(y * w + x) as usize] = 0;
+                    }
+                }
+            }
+        }
+    }
+    image_page(595, 842, "q 595 0 0 842 0 0 cm /Im1 Do Q\n", w, h, &scan)
+}
+
+#[test]
+fn qr_codes_in_a_scan_the_decoder_misses_are_said() {
+    // Two equal QR codes touching or one module apart, and a QR code cut in half by the edge
+    // of the page: the decoder reads fewer than are there, and the page says that a part of
+    // it looks like a code and was not (or only in part) decoded, on the evidence of their
+    // finder patterns. A QR code read alone, or every QR code read, leaves nothing to say.
+    let payload = "https://example.org/t/0000000001";
+    let m = modules(Symbology::QrCode, payload);
+    for res in [1u32, 2] {
+        for px in [3u32, 4] {
+            let case = format!("{res} pixels a point, {px} a module");
+            let side = m.width * px;
+            let alone = read(&qr_scan(payload, res, px, &[60 * res]));
+            assert_eq!(asset(&alone, "page-1").codes.len(), 1, "{case}");
+            assert_no_doubt(&alone, &case);
+            for (what, lefts, want) in [
+                ("touching", vec![60 * res, 60 * res + side], 2),
+                ("one module apart", vec![60 * res, 60 * res + side + px], 2),
+                ("cut in half by the edge", vec![595 * res - side / 2], 1),
+            ] {
+                let out = read(&qr_scan(payload, res, px, &lefts));
+                let n = asset(&out, "page-1").codes.len();
+                let case = format!("{case}, {what}");
+                assert!(n <= want, "{case}: {n}");
+                if n == want && what != "cut in half by the edge" {
+                    assert_no_doubt(&out, &case);
+                } else {
+                    assert!(says_code_unread(&out), "{case}: {n} read, unsaid");
+                }
+            }
+        }
+    }
+}
