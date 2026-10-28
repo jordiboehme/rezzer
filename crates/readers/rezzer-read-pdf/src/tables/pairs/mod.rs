@@ -345,7 +345,8 @@ enum Address {
 }
 
 /// Whether `lines` (raised markers aside) read as an address (see [`Address`]): two address
-/// lines (see [`crate::layout::address_lines`]); three lines or more
+/// lines (see [`crate::layout::address_lines`]) whose second holds a word without a digit (a
+/// town: a line of codes and numbers alone is a value); three lines or more
 /// of an address's shape (see [`crate::layout::address_shaped`]) whose first line holds a
 /// letter and a number; a first line that starts with `c/o`, or with a postcode (a number of
 /// four digits or more) and a town over the country (words only); or a first line without a
@@ -382,7 +383,12 @@ fn address_cell(flow: &Flow, lines: &[Vec<usize>], marker: &HashSet<usize>) -> O
             .next()
             .is_some_and(|w| w.len() >= 4 && w.chars().all(|c| c.is_ascii_digit()))
             && letters(head);
-        crate::layout::address_lines(t)
+        // The line under a street holds a word (a town, a country): a line of codes and numbers
+        // alone under a numbered label (`Konto 1` over `DE00 1234 5678`) is its value.
+        let word_under = t[1..]
+            .iter()
+            .any(|l| l.split_whitespace().any(|w| words(w)));
+        (crate::layout::address_lines(t) && word_under)
             || (letters(head) && digits(head) && crate::layout::address_shaped(t))
             || (head.to_lowercase().starts_with("c/o ") && t[1..].iter().all(|l| letters(l)))
             || (postcode && t[1..].iter().all(|l| words(l)) && t.len() == 2)

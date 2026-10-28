@@ -233,7 +233,7 @@ fn a_name_over_an_address_pairs_only_on_evidence() {
 fn an_address_cell_is_left_out_of_its_row_and_said() {
     // The first line, the lines under it, and whether it is an address by its number (each is
     // left out either way).
-    let cases: [(&str, &[&str], bool); 12] = [
+    let cases: [(&str, &[&str], bool); 11] = [
         ("Musterweg 1", &["12345 Musterstadt"], true),
         ("Musterweg 1", &["12345 Musterstadt", "Deutschland"], true),
         ("Hauptstr. 2a", &["12345 Musterstadt"], true),
@@ -241,7 +241,6 @@ fn an_address_cell_is_left_out_of_its_row_and_said() {
         ("12345 Musterstadt", &["Deutschland"], true),
         ("c/o Erika Muster", &["Musterweg 1"], true),
         ("Feld 12", &["12345 Musterstadt"], true),
-        ("Konto 1", &["DE00 1234 5678"], true),
         ("Muster GmbH", &["Musterweg 1", "12345 Musterstadt"], false),
         (
             "Erika Mustermann",
@@ -496,6 +495,48 @@ pub(crate) fn middle_matrix(cases: &[Case], hows: &[Cells]) -> Vec<String> {
         }
     }
     wrong
+}
+
+/// Task 15b part 2e-4 (item 9, list line 9): a numbered label over a line of codes and numbers
+/// alone (`Konto 1` over `DE00 1234 5678`, `Feld 12` over `4711 0815`) between `Name` over
+/// `Muster` and `Nr` over `4711` is a label and its value, no address: an address's line under
+/// its street holds a word (a town). All three fields pair. `Feld 12` or `Kostenstelle 1` over
+/// a postcode and a town stay an address: no layout tells them from a street. Steps 1.0625 to
+/// 1.25, sizes 6 to 14, both fonts.
+#[test]
+fn a_numbered_label_over_a_line_of_codes_pairs() {
+    let cases: [(&str, &str); 3] = [
+        ("Konto 1", "DE00 1234 5678"),
+        ("Feld 12", "4711 0815"),
+        ("Kostenstelle 1", "4711 0815 12"),
+    ];
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0] {
+        for step in [1.0625f32, 1.08, 1.125, 1.25] {
+            for font in ["F1", "F3"] {
+                for (label, value) in cases {
+                    let at = format!("{label:?} {size} pt x {step}, {font}");
+                    let out = cell_between(label, &[value], size, step, font);
+                    let rows: Vec<String> = read_tables(&out)
+                        .iter()
+                        .flatten()
+                        .map(|r| r.join(": "))
+                        .collect();
+                    for want in ["Name: Muster", "Nr: 4711", &format!("{label}: {value}")] {
+                        if !rows.iter().any(|r| r == want) {
+                            wrong.push(format!("{at}: no {want} in {rows:?}"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
 }
 
 /// Task 15b part 2d item 4 (ruling P6-X): the font family is part of a label's style. A name
