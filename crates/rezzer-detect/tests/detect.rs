@@ -2182,3 +2182,96 @@ mod xattrs {
         assert_eq!(src.file_tags, many[..64]);
     }
 }
+
+/// A page saved by Chrome as one file: the header block folds Content-Type over three
+/// lines and names the HTML root in its `type` parameter. Invented, no real page.
+const CHROME_MHTML: &str = "From: <Saved by Blink>\n\
+Snapshot-Content-Location: https://example.org/notes/\n\
+Subject: Field notes\n\
+Date: Tue, 28 Oct 2026 09:12:44 +0100\n\
+MIME-Version: 1.0\n\
+Content-Type: multipart/related;\n\
+\ttype=\"text/html\";\n\
+\tboundary=\"----MultipartBoundary--Xq3Lk9----\"\n\
+\n\
+\n\
+------MultipartBoundary--Xq3Lk9----\n\
+Content-Type: text/html\n\
+Content-ID: <frame-1A2B3C@mhtml.blink>\n\
+Content-Transfer-Encoding: quoted-printable\n\
+Content-Location: https://example.org/notes/\n\
+\n\
+<!DOCTYPE html><html><head><title>Field notes</title></head><body><h1>Field n=\n\
+otes</h1><p>The tide was low at noon.</p></body></html>\n\
+------MultipartBoundary--Xq3Lk9----\n\
+Content-Type: text/css\n\
+Content-Location: cid:css-1@mhtml.blink\n\
+\n\
+body { margin: 0; }\n\
+------MultipartBoundary--Xq3Lk9------\n";
+
+#[test]
+fn mhtml_saved_by_chrome_is_mhtml_not_mail() {
+    let (f, d) = detect("x", CHROME_MHTML.as_bytes());
+    assert_eq!(f, FormatId::Mhtml, "{}", d.evidence);
+    assert_eq!(d.confidence, Confidence::Certain);
+    assert!(d.evidence.contains("multipart/related"), "{}", d.evidence);
+    let crlf = CHROME_MHTML.replace('\n', "\r\n");
+    let (f, d) = detect("x", crlf.as_bytes());
+    assert_eq!(f, FormatId::Mhtml, "{}", d.evidence);
+}
+
+#[test]
+fn mhtml_without_from_or_type_takes_the_first_part_as_root() {
+    // The shape of an older `.mht` (one Content-Type line, no From, no `type` parameter):
+    // the first part is the root (RFC 2387), and it is HTML.
+    let mht = "MIME-Version: 1.0\n\
+CONTENT-TYPE: Multipart/Related; boundary=\"----=_NextPart_01DA\"\n\
+\n\
+This document is a Single File Web Page.\n\
+\n\
+------=_NextPart_01DA\n\
+Content-Location: file:///C:/notes.htm\n\
+Content-Type: text/html; charset=\"utf-8\"\n\
+\n\
+<html><body><p>Hello</p></body></html>\n\
+------=_NextPart_01DA--\n";
+    let (f, d) = detect("x", mht.as_bytes());
+    assert_eq!(f, FormatId::Mhtml, "{}", d.evidence);
+    assert_eq!(d.confidence, Confidence::Likely);
+}
+
+#[test]
+fn multipart_related_without_an_html_root_is_not_mhtml() {
+    let related = "MIME-Version: 1.0\n\
+Content-Type: multipart/related; boundary=\"b1\"\n\
+\n\
+--b1\n\
+Content-Type: application/xml\n\
+\n\
+<a/>\n\
+--b1--\n";
+    assert_ne!(detect("x", related.as_bytes()).0, FormatId::Mhtml);
+    let typed = "MIME-Version: 1.0\nContent-Type: multipart/related; type=\"application/xml\"; boundary=\"b1\"\n\n--b1\nContent-Type: text/html\n\n<html></html>\n--b1--\n";
+    assert_ne!(detect("x", typed.as_bytes()).0, FormatId::Mhtml);
+}
+
+#[test]
+fn html_mail_with_its_pictures_stays_mail() {
+    // A mail with an HTML body and inline pictures is multipart/related too. Transport
+    // headers (To, Message-ID, Received) make it a mail.
+    let mail = "From: a@example.org\n\
+To: b@example.org\n\
+Message-ID: <1@example.org>\n\
+Date: Mon, 1 Jan 2024 10:00:00 +0000\n\
+Subject: hi\n\
+MIME-Version: 1.0\n\
+Content-Type: multipart/related; type=\"text/html\"; boundary=\"b1\"\n\
+\n\
+--b1\n\
+Content-Type: text/html\n\
+\n\
+<html><body><img src=\"cid:p1\"></body></html>\n\
+--b1--\n";
+    assert_eq!(detect("x", mail.as_bytes()).0, FormatId::Eml);
+}

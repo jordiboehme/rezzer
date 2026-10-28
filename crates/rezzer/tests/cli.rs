@@ -1156,3 +1156,40 @@ fn derez_refuses_stdin() {
         .stdout("")
         .stderr("rezzer: derez needs a file path, not stdin\n");
 }
+
+#[test]
+fn mhtml_is_named_and_not_read_yet() {
+    let env = Env::new();
+    let page = env.file(
+        "page.mhtml",
+        b"From: <Saved by Blink>\n\
+Snapshot-Content-Location: https://example.org/notes/\n\
+Subject: Field notes\n\
+Date: Tue, 28 Oct 2026 09:12:44 +0100\n\
+MIME-Version: 1.0\n\
+Content-Type: multipart/related;\n\
+\ttype=\"text/html\";\n\
+\tboundary=\"----MultipartBoundary--Xq3Lk9----\"\n\
+\n\
+------MultipartBoundary--Xq3Lk9----\n\
+Content-Type: text/html\n\
+\n\
+<html><body><h1>Field notes</h1></body></html>\n\
+------MultipartBoundary--Xq3Lk9------\n",
+    );
+    env.cmd()
+        .arg("read")
+        .arg(&page)
+        .assert()
+        .code(2)
+        .stdout(predicate::str::contains("format: mhtml\n"))
+        .stdout(predicate::str::contains("description: \"MHTML,"))
+        .stdout(predicate::str::contains(
+            "Rezzer can't read this format yet.",
+        ))
+        .stdout(predicate::str::contains(
+            "| document | mhtml files | unsupported | error |",
+        ))
+        .stdout(predicate::str::contains("format: eml").not())
+        .stdout(predicate::str::contains("\"eml\"").not());
+}

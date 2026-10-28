@@ -306,6 +306,7 @@ pub(crate) fn format_label(format: FormatId) -> String {
         FormatId::Csv => "CSV",
         FormatId::Tsv => "TSV",
         FormatId::Html => "HTML",
+        FormatId::Mhtml => "MHTML",
         FormatId::Epub => "EPUB",
         FormatId::Pdf => "PDF",
         FormatId::PostScript => "PostScript",
