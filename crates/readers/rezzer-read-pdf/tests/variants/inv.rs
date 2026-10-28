@@ -501,8 +501,13 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
             Inv::NoCode,
             format!(
                 "page {p}: every code drawn is found ({} drawn), but a picture says a code \
-                 there is not decoded",
-                want.codes.len()
+                 there is not decoded: {:?}",
+                want.codes.len(),
+                assets
+                    .iter()
+                    .filter(|a| a.code_unread)
+                    .map(|a| a.alt.as_deref().unwrap_or_default())
+                    .collect::<Vec<_>>()
             ),
         ));
     }

@@ -125,6 +125,67 @@ fn codes_page(
     s
 }
 
+/// Task 15b part 2e-3: `n` different Code 128s of module 1 and 30 points high, three a row
+/// under the body of a page beside a photo (more than the 8 parts a page renders again and the
+/// 10 more it names): each is found once, and with all found nothing says a code is unread.
+fn many_codes(v: &Variant, n: usize) -> Sheet {
+    let mut t = String::new();
+    let mut want = Vec::new();
+    for k in 0..n {
+        let (x, y) = (40.0 + (k % 3) as f32 * 180.0, 40.0 + (k / 3) as f32 * 45.0);
+        let text = format!("{:010}", k + 1);
+        t += &code128_bars(&text, x, y, 1.0, 30.0);
+        let m = modules(barcodes::Symbology::Code128, &text);
+        let dark: Vec<u32> = (0..m.width).filter(|&c| m.dark[c as usize]).collect();
+        let bars = [
+            x + dark[0] as f32,
+            y,
+            x + (dark[dark.len() - 1] + 1) as f32,
+            y + 30.0,
+        ];
+        want.push((text, bars));
+    }
+    let mut built = page_of(v, t);
+    built.page.photo = Some([40.0, 560.0, 200.0, 150.0]);
+    let mut s = Sheet::new(built);
+    for (text, bars) in want {
+        s.want.codes.push(("Code 128".into(), text));
+        s.want.code_bars.push(bars);
+    }
+    s
+}
+
+/// Task 15b part 2e-3: a printed picture over the body of a page beside a photo, its soft
+/// shades (waves across it) as a halftone of round dots on a lattice turned 45 degrees,
+/// [`SCREEN`] pixels apart at one pixel a point (an inline picture): no code, and nothing said
+/// of one.
+fn halftone(v: &Variant) -> Sheet {
+    let (w, h) = (515u32, 340u32);
+    let mut hex = String::with_capacity((w * h * 2) as usize + h as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let (fx, fy) = (x as f32 / w as f32, y as f32 / h as f32);
+            let tone =
+                (0.5 + 0.25 * (fx * 9.0).sin() * (fy * 7.0).cos() + 0.2 * ((fx + fy) * 13.0).sin())
+                    .clamp(0.0, 1.0);
+            let (u, t) = ((x + y) as f32 / SCREEN, (x as f32 - y as f32) / SCREEN);
+            let (du, dt) = (u.rem_euclid(1.0) - 0.5, t.rem_euclid(1.0) - 0.5);
+            let dark = (du * du + dt * dt).sqrt() < (1.0 - tone) * 0.6;
+            hex += if dark { "14" } else { "EB" };
+        }
+        hex.push('\n');
+    }
+    let t = format!(
+        "q {w} 0 0 {h} 40 60 cm\nBI /W {w} /H {h} /CS /G /BPC 8 /F /AHx ID\n{hex}>\nEI\nQ\n"
+    );
+    let mut built = page_of(v, t);
+    built.page.photo = Some([40.0, 560.0, 200.0, 150.0]);
+    Sheet::new(built)
+}
+
+/// The pitch of the dots of [`halftone`], in pixels of its picture.
+const SCREEN: f32 = 4.2;
+
 /// Task 15b: a ruler of 100 ticks, 3 points long, 2 points apart, every fifth 1 point wide and
 /// the others half a point, at the head of a page `on`: no code, and nothing said of one.
 fn ruler(v: &Variant, on: On) -> Sheet {
@@ -298,6 +359,19 @@ pub(crate) fn shapes() -> Vec<Shape> {
         "barcode beside a photo, module 1.2, height 80" => (On::Photo, 1.2, 80.0),
         "barcode beside a photo, module 1.2, height 150" => (On::Photo, 1.2, 150.0),
     });
+    // More codes than a page renders again, all read; a halftone without a code.
+    all.extend([
+        Shape {
+            name: "21 barcodes beside a photo",
+            axes: GRID,
+            draw: |v| (many_codes(v, 21), None),
+        },
+        Shape {
+            name: "a halftone beside a photo",
+            axes: RENDERED,
+            draw: |v| (halftone(v), None),
+        },
+    ]);
     // Two equal codes closer than their quiet zone.
     all.extend(twins! {
         "twin barcodes 1 pt apart" => (On::Business, 20.0, 1.0, true),

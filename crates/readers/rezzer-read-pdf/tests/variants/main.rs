@@ -419,6 +419,8 @@ shape_tests! {
     twin_photo_barcodes_1_pt_apart_one_over_the_other => "twin barcodes beside a photo 1 pt apart, one over the other",
     twin_photo_barcodes_3_pt_apart_one_over_the_other => "twin barcodes beside a photo 3 pt apart, one over the other",
     photo_barcode_module_12_height_40 => "barcode beside a photo, module 1.2, height 40",
+    many_photo_barcodes => "21 barcodes beside a photo",
+    a_halftone_beside_a_photo => "a halftone beside a photo",
 }
 
 /// Task 15b part 2d fix round 3 (M1): the cell check counts the texts it leaves out, and a list
