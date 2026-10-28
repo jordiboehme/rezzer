@@ -325,6 +325,8 @@ shape_tests! {
     a_column_flowing_past_a_framed_figure => "a column flowing past a framed figure",
     footer_columns => "footer columns",
     template_logos => "template logos",
+    a_ruler_of_short_ticks => "a ruler of short ticks",
+    a_ruler_of_short_ticks_beside_a_photo => "a ruler of short ticks beside a photo",
     barcode_module_08_height_20 => "barcode, module 0.8, height 20",
     barcode_module_10_height_30 => "barcode, module 1.0, height 30",
     barcode_module_12_height_20 => "barcode, module 1.2, height 20",

@@ -60,6 +60,9 @@ pub(crate) enum Inv {
     /// A code found with a box is boxed by the bars of a code drawn: within a point at scale
     /// 1, more on a larger page.
     CodeBox,
+    /// A page that draws no code says of nothing on it that it looks like a code (no false
+    /// loss on rules, ticks and hatching).
+    NoCode,
     /// The page needs vision exactly when it should.
     Vision,
     /// Each expected loss is said.
@@ -464,6 +467,12 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
                 ),
             ));
         }
+    }
+    if want.codes.is_empty() && unread {
+        broken.push(Broken(
+            Inv::NoCode,
+            format!("page {p}: no code is drawn, but a picture says a code there is not decoded"),
+        ));
     }
     let scale = sheet.built.page.scale;
     for a in &assets {

@@ -125,6 +125,26 @@ fn codes_page(
     s
 }
 
+/// Task 15b: a ruler of 100 ticks, 3 points long, 2 points apart, every fifth 1 point wide and
+/// the others half a point, at the head of a page `on`: no code, and nothing said of one.
+fn ruler(v: &Variant, on: On) -> Sheet {
+    let mut t = String::from("q 0 g\n");
+    for k in 0..100 {
+        let w = if k % 5 == 0 { 1.0 } else { 0.5 };
+        t += &format!("{:.1} 760 {w} 3 re\n", 60.0 + k as f32 * 2.0);
+    }
+    t += "f Q\n";
+    let mut built = page_of(v, t);
+    if on == On::Photo {
+        built.page.photo = Some([40.0, 560.0, 200.0, 150.0]);
+    }
+    let mut s = Sheet::new(built);
+    if on == On::Business {
+        s.want.vision = Some(false);
+    }
+    s
+}
+
 /// Task 15: a Code 128 of `module` points a module and `height` points high, drawn as bars at
 /// the right of the head of a business page. It is found once, with its text.
 fn barcode(v: &Variant, module: f32, height: f32) -> Sheet {
@@ -212,6 +232,16 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "barcode, module 0.8, height 60",
             axes: RENDERED,
             draw: |v| (barcode(v, 0.8, 60.0), None),
+        },
+        Shape {
+            name: "a ruler of short ticks",
+            axes: RENDERED,
+            draw: |v| (ruler(v, On::Business), None),
+        },
+        Shape {
+            name: "a ruler of short ticks beside a photo",
+            axes: RENDERED,
+            draw: |v| (ruler(v, On::Photo), None),
         },
         Shape {
             name: "barcode beside a photo, module 1.2, height 40",
