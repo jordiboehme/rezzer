@@ -353,18 +353,35 @@ fn hand_built(entries: &[(&str, &[u8], u16, &[u8])]) -> Vec<u8> {
     out
 }
 
-/// An alignment extra field 0xa11e (written by Android tools) shorter than 2 bytes is not
-/// a reason to refuse the archive. zip 9.1.2 keeps it as an unknown field; zip 9.1.3
-/// refuses the whole archive ("Alignment extra field too short"), so Rezzer stays on
-/// 9.1.2. This test fails on a zip version that refuses it again.
+/// The alignment extra fields: 0xa11e from Apache Commons Compress and 0xd935 from
+/// Android's ZFile. Both always hold at least the 2-byte alignment. A shorter field is
+/// malformed data that no known tool writes; zip refuses such an archive as damaged
+/// ("Alignment extra field too short") since 9.1.3, and zipguard passes that on as
+/// [`ZipError::Damaged`]. A normal field of either kind opens and its entry reads.
 #[test]
 fn alignment_extra_fields_short_and_normal() {
     let bytes = hand_built(&[
-        ("short.txt", b"short field", 0xa11e, &[4]),
-        ("normal.txt", b"normal field", 0xa11e, &[4, 0]),
+        ("commons.txt", b"commons field", 0xa11e, &[4, 0]),
+        ("android.txt", b"android field", 0xd935, &[4, 0, 0, 0]),
     ]);
     let mut archive = Archive::open(&bytes, Limits::default()).expect("the archive opens");
-    assert_eq!(archive.names(), ["short.txt", "normal.txt"]);
-    assert_eq!(archive.read("normal.txt").unwrap(), b"normal field");
-    assert_eq!(archive.read("short.txt").unwrap(), b"short field");
+    assert_eq!(archive.names(), ["commons.txt", "android.txt"]);
+    assert_eq!(archive.read("commons.txt").unwrap(), b"commons field");
+    assert_eq!(archive.read("android.txt").unwrap(), b"android field");
+
+    for id in [0xa11e, 0xd935] {
+        for field in [&[][..], &[4][..]] {
+            let bytes = hand_built(&[
+                ("normal.txt", b"normal field", 0xa11e, &[4, 0]),
+                ("short.txt", b"short field", id, field),
+            ]);
+            match Archive::open(&bytes, Limits::default()) {
+                Err(ZipError::Damaged(why)) => {
+                    assert!(why.contains("Alignment extra field too short"), "{why}");
+                }
+                Err(other) => panic!("{id:#06x} with {} bytes: {other}", field.len()),
+                Ok(_) => panic!("{id:#06x} with {} bytes opened", field.len()),
+            }
+        }
+    }
 }
