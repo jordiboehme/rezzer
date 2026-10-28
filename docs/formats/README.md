@@ -43,6 +43,7 @@ Release 0.2.0 brings PowerPoint (PPTX) first, then EPUB, then HTML. With it, Rez
 | [Mail](mail.md) | EML, MBOX, MSG, Outlook PST and OST | 🔭 Later |
 | [Mathcad](mathcad.md) | Mathcad Prime, Mathcad 12-15, SMath | 🔭 Later |
 | Lotus Notes | NSF mail databases | 🔭 Later |
+| Calendars and contacts | iCalendar (ICS), vCard (VCF) | 🔭 Later |
 | Photos and scans | JPEG, PNG, TIFF, HEIC | 🔭 Later |
 | Archives | ZIP, 7z, TAR | 🔭 Later |
 | Diagrams | draw.io, Visio, Lucidchart, Excalidraw | 🔭 Later |
