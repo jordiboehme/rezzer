@@ -218,14 +218,33 @@ pub(crate) fn vector_codes(cells: &[[f32; 4]]) -> Result<Vec<VectorCode>, String
     groups.truncate(MERGE_GROUPS);
     let groups = merge_bands(&cells, groups);
     let mut found: Vec<(usize, VectorCode)> = Vec::new();
+    let look = |members: &[usize], found: &mut Vec<(usize, VectorCode)>| match region(
+        &cells,
+        members,
+        &|b| quiet(&cells, &grid_of, members, b, &key),
+    ) {
+        Some(code) => {
+            found.push((members.len(), code));
+            true
+        }
+        None => false,
+    };
     for members in groups {
-        if members.len() < MIN_CELLS {
+        if members.len() < MIN_CELLS || look(&members, &mut found) {
             continue;
         }
-        if let Some(code) = region(&cells, &members, &|b| {
-            quiet(&cells, &grid_of, &members, b, &key)
-        }) {
-            found.push((members.len(), code));
+        // Short bars of codes one over the other are close enough to join as modules: each
+        // band of them may be a code of its own.
+        for flat in [false, true] {
+            let mut any = false;
+            for part in band_parts(&cells, &members, flat) {
+                if part.len() >= MIN_CELLS {
+                    any |= look(&part, &mut found);
+                }
+            }
+            if any {
+                break;
+            }
         }
     }
     found.sort_by(|a, b| {
@@ -317,6 +336,26 @@ fn join_bands(cells: &[[f32; 4]], parent: &mut [usize], flat: bool) {
         }
         start = end;
     }
+}
+
+/// `members` of `cells` parted by band: the rectangles with the same ends along their bars
+/// (standing up, or lying down with `flat`), each band once.
+fn band_parts(cells: &[[f32; 4]], members: &[usize], flat: bool) -> Vec<Vec<usize>> {
+    let hundredths = |v: f32| (v * 100.0).round() as i64;
+    let mut order = members.to_vec();
+    order.sort_by_key(|&i| {
+        let e = along(&cells[i], flat).0;
+        (hundredths(e.0), hundredths(e.1))
+    });
+    let mut parts: Vec<Vec<usize>> = Vec::new();
+    for i in order {
+        let ends = along(&cells[i], flat).0;
+        match parts.last_mut() {
+            Some(p) if same_ends(along(&cells[p[0]], flat).0, ends) => p.push(i),
+            _ => parts.push(vec![i]),
+        }
+    }
+    parts
 }
 
 /// Whether the rectangles `members` of `cells` share one band: one bottom and one top (or
@@ -688,6 +727,40 @@ mod tests {
     }
 
     #[test]
+    fn a_matrix_drawn_as_runs_of_modules_is_one_region() {
+        // Generators often join the dark modules of a row (or a column) into one rectangle.
+        let modules = matrix(100.0, 200.0, 2.0);
+        let runs = |by_row: bool| {
+            let mut sorted = modules.clone();
+            sorted.sort_by(|a, b| {
+                let key = |c: &[f32; 4]| if by_row { (c[1], c[0]) } else { (c[0], c[1]) };
+                let (ka, kb) = (key(a), key(b));
+                ka.0.total_cmp(&kb.0).then(ka.1.total_cmp(&kb.1))
+            });
+            let mut out: Vec<[f32; 4]> = Vec::new();
+            for c in sorted {
+                match out.last_mut() {
+                    Some(l) if by_row && l[1] == c[1] && l[2] == c[0] => l[2] = c[2],
+                    Some(l) if !by_row && l[0] == c[0] && l[3] == c[1] => l[3] = c[3],
+                    _ => out.push(c),
+                }
+            }
+            out
+        };
+        for by_row in [true, false] {
+            let cells = runs(by_row);
+            assert!(cells.len() < modules.len(), "{by_row}");
+            let found = vector_codes(&cells).expect("searched");
+            assert_eq!(found.len(), 1, "runs by row {by_row}: {found:?}");
+            assert_eq!(
+                found[0].b,
+                [100.0, 200.0, 142.0, 242.0],
+                "runs by row {by_row}"
+            );
+        }
+    }
+
+    #[test]
     fn bars_of_one_height_are_a_linear_region() {
         let mut cells = Vec::new();
         let mut x = 50.0;
@@ -933,6 +1006,30 @@ mod tests {
     }
 
     #[test]
+    fn twin_codes_a_quiet_zone_apart_are_two_regions() {
+        // 5 modules apart (the quiet zone), side by side: each code is its own region.
+        let left = code128("0000000001", (100.0, 500.0), 0.8, 20.0, false, true);
+        let w = box_of(&left)[2] - 100.0;
+        let right = code128(
+            "0000000001",
+            (100.0 + w + 4.0, 500.0),
+            0.8,
+            20.0,
+            false,
+            true,
+        );
+        let mut both = left.clone();
+        both.extend(right.iter().copied());
+        let mut found: Vec<[f32; 4]> = vector_codes(&both)
+            .expect("searched")
+            .iter()
+            .map(|c| c.b)
+            .collect();
+        found.sort_by(|a, b| a[0].total_cmp(&b[0]));
+        assert_eq!(found, [box_of(&left), box_of(&right)]);
+    }
+
+    #[test]
     fn twin_codes_side_by_side_are_one_region_and_stacked_ones_two() {
         // Two equal codes closer than their quiet zone: side by side they are one drawing that
         // looks like a code (it may not decode, and that is said); one over the other each
@@ -951,17 +1048,30 @@ mod tests {
             let found = vector_codes(&side).expect("searched");
             assert_eq!(found.len(), 1, "beside, {gap} apart: {found:?}");
             assert_eq!(found[0].b, box_of(&side), "beside, {gap} apart");
-            let low = code128("0000000001", (100.0, 500.0), 0.8, 20.0, false, true);
-            let high = code128("0000000001", (100.0, 520.0 + gap), 0.8, 20.0, false, true);
-            let mut both = low.clone();
-            both.extend(high.iter().copied());
-            let mut found: Vec<[f32; 4]> = vector_codes(&both)
-                .expect("searched")
-                .iter()
-                .map(|c| c.b)
-                .collect();
-            found.sort_by(|a, b| a[1].total_cmp(&b[1]));
-            assert_eq!(found, [box_of(&low), box_of(&high)], "over, {gap} apart");
+            for bar in [3.0, 5.0, 20.0] {
+                let low = code128("0000000001", (100.0, 500.0), 0.8, bar, false, true);
+                let high = code128(
+                    "0000000001",
+                    (100.0, 500.0 + bar + gap),
+                    0.8,
+                    bar,
+                    false,
+                    true,
+                );
+                let mut both = low.clone();
+                both.extend(high.iter().copied());
+                let mut found: Vec<[f32; 4]> = vector_codes(&both)
+                    .expect("searched")
+                    .iter()
+                    .map(|c| c.b)
+                    .collect();
+                found.sort_by(|a, b| a[1].total_cmp(&b[1]));
+                assert_eq!(
+                    found,
+                    [box_of(&low), box_of(&high)],
+                    "over, bars {bar} long, {gap} apart"
+                );
+            }
         }
     }
 
