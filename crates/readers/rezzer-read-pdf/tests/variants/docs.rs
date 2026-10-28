@@ -412,10 +412,10 @@ fn footer(v: &Variant) -> Sheet {
             s.want.roles.push(("page-footer".into(), lines.join(" ")));
         }
     }
-    for a in 0..FOOTER.len() {
-        for b in a + 1..FOOTER.len() {
-            for l in FOOTER[a] {
-                for r in FOOTER[b] {
+    for (a, left) in FOOTER.iter().enumerate() {
+        for right in &FOOTER[a + 1..] {
+            for l in left.iter() {
+                for r in right.iter() {
                     s.want.apart.push((l.to_string(), r.to_string()));
                 }
             }
@@ -466,10 +466,10 @@ fn address_columns(v: &Variant) -> Sheet {
     for lines in COLUMNS {
         s.built.values.extend(lines.iter().map(|l| l.to_string()));
     }
-    for a in 0..COLUMNS.len() {
-        for b in a + 1..COLUMNS.len() {
-            for l in COLUMNS[a] {
-                for r in COLUMNS[b] {
+    for (a, left) in COLUMNS.iter().enumerate() {
+        for right in &COLUMNS[a + 1..] {
+            for l in left.iter() {
+                for r in right.iter() {
                     s.want.apart.push((l.to_string(), r.to_string()));
                 }
             }

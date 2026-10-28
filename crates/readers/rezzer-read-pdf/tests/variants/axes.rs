@@ -520,9 +520,8 @@ fn neighbour(v: &Variant, sheet: &mut Sheet, e: Extent) {
             }
         }
     };
-    match v.next {
-        Next::RowUnder => apart(&mut sheet.want, &["Kennung", "Fahrgeld", "Essensgeld"]),
-        _ => {}
+    if v.next == Next::RowUnder {
+        apart(&mut sheet.want, &["Kennung", "Fahrgeld", "Essensgeld"]);
     }
     let b = &mut sheet.built;
     match v.next {
