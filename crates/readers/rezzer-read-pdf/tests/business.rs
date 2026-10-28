@@ -4841,15 +4841,20 @@ const SIDE_BLOCKS: [&[&str]; 4] = [
 /// Carries C-5 and C-3 (ruling P6-X: a block that mixes two columns is a wrong reading order):
 /// blocks of an address, a bank, a register entry and a contact side by side on shared
 /// baselines, top aligned, three sizes apart, in the body at the top of a page or at its foot
-/// on a file of one page (no running footer), cut to their first 3 lines or whole: no block
-/// of the read holds lines of two of them, and each line is read. Sizes 6 to 14, both fonts.
+/// on a file of one page (no running footer), the first 2, 3 or 4 of them, cut to their first
+/// 3 lines or whole: no block of the read holds lines of two of them, and each line is read.
+/// Sizes 6 to 14, both fonts.
 #[test]
 fn blocks_side_by_side_in_the_body_are_read_block_by_block() {
     let mut wrong = Vec::new();
     for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
         for fonts in FONTS {
-            for (top, whole) in [(700.0, false), (700.0, true), (90.0, true)] {
-                let blocks: Vec<&[&str]> = SIDE_BLOCKS
+            for (top, whole, n) in [700.0, 90.0]
+                .into_iter()
+                .flat_map(|top| [false, true].map(|whole| (top, whole)))
+                .flat_map(|(top, whole)| [2, 3, 4].map(|n| (top, whole, n)))
+            {
+                let blocks: Vec<&[&str]> = SIDE_BLOCKS[..n]
                     .iter()
                     .map(|b| if whole { *b } else { &b[..3] })
                     .collect();
@@ -4865,7 +4870,7 @@ fn blocks_side_by_side_in_the_body_are_read_block_by_block() {
                 }
                 let out = common::read(&page_in(&t, Look::Plain));
                 let texts = texts_of(&out);
-                let at = format!("{size} pt, {fonts:?}, top {top}, whole {whole}");
+                let at = format!("{size} pt, {fonts:?}, top {top}, whole {whole}, {n} blocks");
                 for (c, lines) in blocks.iter().enumerate() {
                     for line in lines.iter() {
                         if !texts.iter().any(|t| t.contains(line)) {
