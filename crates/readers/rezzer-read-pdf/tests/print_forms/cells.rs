@@ -1146,6 +1146,49 @@ fn a_strip_in_three_styles_not_clear_is_said() {
     );
 }
 
+/// Task 15b part 2e-1 (item 2, part 2d review M2; ruling P6-X): boxes of fields whose labels
+/// and values are of one style (one size and font) are no pairs, and each box is read whole and
+/// alone: in a column the last line of one box and the first of the box under it are not one
+/// paragraph (`Beispiel Ort`). Boxes in a row and in a column, sizes 6 to 14, both data fonts;
+/// found by the spans of the drawn texts.
+#[test]
+fn boxes_of_one_style_read_box_by_box() {
+    let ort = Middle {
+        head: &["Ort"],
+        size: 1.0,
+        font: None,
+        lines: &["Musterstadt"],
+    };
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+        for font in ["F1", "F3"] {
+            for how in [Cells::Row, Cells::Column] {
+                let at = format!("{how:?} {size} pt, {font}");
+                let out = three_cells(ort, size, 1.0, font, how);
+                if !read_tables(&out).is_empty() {
+                    wrong.push(format!("{at}: pairs {:?}", read_tables(&out)));
+                }
+                let cells = [
+                    vec!["Name", "Beispiel"],
+                    vec!["Ort", "Musterstadt"],
+                    vec!["Nr", "4711"],
+                ];
+                wrong.extend(
+                    cells_wrong(&out, &cells)
+                        .into_iter()
+                        .map(|e| format!("{at}: {e}")),
+                );
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
 /// Task 15b part 2d fix round 2 (I6, M1; item 1's class): between boxed fields, a box with no
 /// text keeps the row (`Name: Beispiel` and `Nr: 4711` pair, nothing is said), and a box with a
 /// label alone in the labels' style at their place is an empty field (`Datum` with no value),

@@ -323,6 +323,32 @@ fn two_line_strip(g: &Geo, b: &mut Built, top: f32) -> f32 {
     top - h
 }
 
+/// Part 2e-1 (item 2, part 2d review M2): a column of three boxes, each a line over a line in
+/// one style (Courier at the data size): no field, as no label is set apart from a value, and
+/// each box is read whole and alone, never the last line of one box with the first of the next.
+fn one_style_box_column(g: &Geo, b: &mut Built, top: f32) -> f32 {
+    let h = 2.4 * g.data;
+    let (x0, x1) = (g.col(0) - 0.12, g.col(20) - 0.12);
+    let mut y = top;
+    for (l, v) in [
+        ("Personal", "00000"),
+        ("Eintritt", "01.01.2020"),
+        ("Klasse", "1"),
+    ] {
+        b.page.template += &g.hrule(x0, x1, y);
+        b.page.template += &g.hrule(x0, x1, y - h);
+        b.page.template += &g.vrule(x0, y - h, y);
+        b.page.template += &g.vrule(x1, y - h, y);
+        let x = g.col(0) + 0.3 * g.label;
+        b.page.template += &crate::draw::courier(x, y - 1.0 * g.data, g.data, l);
+        b.page.template += &crate::draw::courier(x, y - h + 0.3 * g.data, g.data, v);
+        b.values.push(l.to_string());
+        b.values.push(v.to_string());
+        y -= h;
+    }
+    y
+}
+
 /// Part 2e-1 (item 2, part 2d review M2): three fields between two rules with dividers
 /// between them and none at the rules' ends, labels over their values: a row of fields like
 /// a strip with its ends drawn; every field pairs.
@@ -904,6 +930,25 @@ pub(crate) fn shapes() -> Vec<Shape> {
                         &["Personalnummer", "00000", "Zusatz"],
                         &["Eintritt", "01.01.2020"],
                         &["Beispielwert"],
+                    ],
+                )
+            },
+        },
+        Shape {
+            name: "a column of boxes of one style",
+            axes: Axes {
+                look: NO_RISING,
+                ..ALL
+            },
+            draw: |v| {
+                with_cells(
+                    v,
+                    one_style_box_column,
+                    20,
+                    &[
+                        &["Personal", "00000"],
+                        &["Eintritt", "01.01.2020"],
+                        &["Klasse", "1"],
                     ],
                 )
             },

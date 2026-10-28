@@ -7,6 +7,7 @@
 //! boxes beside them and of framed boxes over their lines.
 
 use super::*;
+use crate::layout::Slot;
 use crate::regions::{Index, Seg, grids, regions_of};
 use crate::tables::LABEL_STEP;
 use crate::tables::banded::heads_lines;
@@ -58,6 +59,15 @@ pub(crate) fn box_pairs(
     for (i, r) in regions.iter().enumerate() {
         if let Some(b) = r {
             in_box[*b as usize].push(i);
+            // The text of a box is a block of its own (see [`Slot::Block`]): a paragraph never
+            // goes on from one box into the next (boxes of fields in a column whose labels and
+            // values are of one style), nor into text outside its box. Box blocks count down
+            // from the top of the numbers, apart from the blocks of cells read one by one.
+            if let Some(slot) = flow.slots.get_mut(i)
+                && *slot == Slot::Free
+            {
+                *slot = Slot::Block(usize::MAX - *b as usize);
+            }
         }
     }
     // Framed boxes with a title over their lines, found by the frame: the frame's text is

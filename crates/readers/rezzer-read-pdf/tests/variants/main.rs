@@ -275,6 +275,7 @@ shape_tests! {
     a_strip_without_dividers_after_a_smaller_name => "a strip without dividers after a smaller name over its address",
     a_strip_of_a_smaller_label_beside_a_smaller_name => "a strip of a smaller label beside a smaller name over its address",
     a_refused_strip_with_a_value_of_two_lines => "a refused strip with a value of two lines",
+    a_column_of_boxes_of_one_style => "a column of boxes of one style",
     a_strip_with_dividers_and_no_ends => "a strip with dividers and no ends",
     two_named_addresses_between_rules => "two named addresses between rules",
     a_lone_field_in_a_strip_beside_a_value => "a lone field in a strip beside a value",
