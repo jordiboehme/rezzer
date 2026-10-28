@@ -1224,7 +1224,7 @@ fn boxes_of_one_style_read_box_by_box() {
                 // first lines.
                 let said =
                     out.document.losses.iter().any(|l| {
-                        l.what.contains("Name, Ort, Nr") && l.what.contains("of one style")
+                        l.what.starts_with("the drawn boxes Name, Ort, Nr on page 1 are not read as labels and their values (its text is of one style")
                     });
                 if !said {
                     wrong.push(format!("{at}: no loss names the boxes"));

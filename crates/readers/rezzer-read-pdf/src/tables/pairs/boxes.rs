@@ -433,7 +433,8 @@ pub(crate) fn box_pairs(
         .collect();
     if !names.is_empty() {
         said.push(format!(
-            "the drawn boxes {} on page {page} are not read as labels and their values              ({NO_LABEL}): the text of each box is read as it stands",
+            "the drawn boxes {} on page {page} are not read as labels and their values \
+             ({NO_LABEL}): the text of each box is read as it stands",
             names.join(", ")
         ));
     }

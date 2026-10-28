@@ -267,15 +267,47 @@ pub(super) fn borderless(
         };
         let title =
             |p: &Piece| !digit(p) && text_of(flow, p.start, p.end).split_whitespace().count() == 1;
+        // Each title stands in one column with the value under it: their starts or their ends
+        // meet (within half a size), as columns set flush left or flush right do. Words of two
+        // lines set full (justified) share the lines' outer edges, and a middle word stands about
+        // in the middle, but no word between them starts or ends where the one under it does:
+        // middles that meet are no evidence.
+        let tol = 0.5
+            * lines[a..z]
+                .iter()
+                .map(|l| l.size)
+                .fold(f32::MAX, f32::min)
+                .max(1.0);
+        let meet = |p: &Piece, q: &Piece| (p.x0 - q.x0).abs() <= tol || (p.x1 - q.x1).abs() <= tol;
+        // Two lines whose words stand equal gaps apart and that share both outer edges are set
+        // full (justified): prose, whatever words of theirs meet by chance.
+        let even = |line: &[Piece]| {
+            let gaps: Vec<f32> = line.windows(2).map(|w| w[1].x0 - w[0].x1).collect();
+            let (lo, hi) = gaps
+                .iter()
+                .fold((f32::MAX, f32::MIN), |(l, h), &g| (l.min(g), h.max(g)));
+            hi - lo <= tol
+        };
         let aligned = z - a == 2
             && pieces[0].len() >= 3
             && pieces[0].len() == pieces[1].len()
             && pieces[0]
                 .iter()
                 .zip(&pieces[1])
-                .all(|(p, q)| p.x0 < q.x1 && q.x0 < p.x1)
+                .all(|(p, q)| p.x0 < q.x1 && q.x0 < p.x1 && meet(p, q))
+            && !(even(&pieces[0])
+                && even(&pieces[1])
+                && pieces[0]
+                    .first()
+                    .zip(pieces[1].first())
+                    .is_some_and(|(p, q)| (p.x0 - q.x0).abs() <= tol)
+                && pieces[0]
+                    .last()
+                    .zip(pieces[1].last())
+                    .is_some_and(|(p, q)| (p.x1 - q.x1).abs() <= tol))
             && pieces[0].iter().all(title)
-            && pieces[1].iter().any(digit);
+            && pieces[1].iter().any(digit)
+            && !prose_row(&text_of(flow, lines[a + 1].start, lines[a + 1].end));
         // Blocks of an address, a bank or a register side by side are no table: their runs are
         // read block by block. Rows were possible too, so that is said. Under a header row of
         // their headings, they are read as the table they make, with the doubt said.
@@ -976,14 +1008,19 @@ fn joined_tail(
                 .iter()
                 .any(|f| f.0 == r.family && (f.1 - r.size).abs() <= WRAP_ALIGN * f.1)
         });
-        // The cell of the column on the last line ends in a dash or a comma: its text goes on
-        // (`01.12.2026 -` over `31.12.2026`), and the line set as its wrap is its end.
+        // The cell of the column on the last line is open: a date, then white space and a dash
+        // (`01.12.2026 -`), over a date set as its wrap (`31.12.2026`): its range goes on. A
+        // trailing minus of an amount (`10,00-`) or a price (`50,-`) opens nothing, and an
+        // amount under the table is a total, never the end of a range.
         let cut = pieces[core - 1].iter().filter(|q| over(q) == [c]).any(|q| {
-            text_of(flow, q.start, q.end)
-                .trim_end()
-                .ends_with(['-', ','])
-        });
-        if close && within && same_face && cut && !page_number(&text) {
+            let cell = text_of(flow, q.start, q.end);
+            cell.trim_end()
+                .strip_suffix('-')
+                .filter(|rest| rest.ends_with(char::is_whitespace))
+                .and_then(|rest| rest.split_whitespace().next_back())
+                .is_some_and(|from| Shape::of(from) == Some(Shape::Date))
+        }) && Shape::of(text.trim()) == Some(Shape::Date);
+        if close && within && same_face && cut {
             return (1, false, false);
         }
         let wrap =
@@ -1326,6 +1363,14 @@ fn columns_of(pieces: &[Vec<Piece>]) -> Vec<(f32, f32)> {
         }
     }
     columns
+}
+
+/// Whether the second of two lines reads as the end of a sentence that goes on from the line
+/// over it: it opens with a small letter or ends with a full stop (`die 3 Hinweise.`). A row
+/// of values does neither.
+fn prose_row(text: &str) -> bool {
+    let t = text.trim();
+    t.starts_with(char::is_lowercase) || t.ends_with('.')
 }
 
 /// `columns` (see [`columns_of`]) with a column of their own for the pieces that stand in a
