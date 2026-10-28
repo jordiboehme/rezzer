@@ -2532,7 +2532,9 @@ fn heading_block(
     }
     let column = &all[over..j];
     let items = block_listed(column);
-    if (small || column.len() >= 3) && (1..block.len()).any(|k| lines_apart(block, k, items)) {
+    let apart = (1..block.len()).any(|k| lines_apart(block, k, items))
+        || wraps(column, &ink_edges(column), false).contains(&false);
+    if (small || column.len() >= 3) && apart {
         return (j, false);
     }
     let texts: Vec<&str> = block.iter().map(|l| l.text.as_str()).collect();
@@ -2596,16 +2598,7 @@ fn line_breaks(lines: &[Line<'_>]) -> Vec<(u32, u32)> {
     if lines.len() < 2 {
         return Vec::new();
     }
-    // The ends of each line's ink.
-    let edges: Vec<(f32, f32)> = lines
-        .iter()
-        .map(|l| {
-            let inked = l.runs.iter().filter(|r| !r.text.trim().is_empty());
-            let x0 = inked.clone().map(|r| r.x).fold(f32::MAX, f32::min);
-            let x1 = inked.map(|r| r.x + r.w).fold(f32::MIN, f32::max);
-            (x0, x1)
-        })
-        .collect();
+    let edges = ink_edges(lines);
     let right = edges.iter().map(|e| e.1).fold(f32::MIN, f32::max);
     let left = edges.iter().map(|e| e.0).fold(f32::MAX, f32::min);
     let short = lines[1..].iter().all(|l| {
@@ -2637,34 +2630,131 @@ fn line_breaks(lines: &[Line<'_>]) -> Vec<(u32, u32)> {
     };
     let set_aligned = (pairs >= 2 && 2 * pairs >= edges.len() - 1) || centred_pair;
     let items = block_listed(lines);
+    let wraps = wraps(lines, &edges, true);
     let mut out = Vec::new();
     for k in 0..lines.len() - 1 {
         let (a, b) = (edges[k], edges[k + 1]);
         let next = &lines[k + 1];
-        // The first word of the next line, by its share of the first run with text.
-        let word = next
-            .runs
-            .iter()
-            .find(|r| !r.text.trim().is_empty())
-            .map_or(f32::MAX, |r| {
-                let text = r.text.trim_start();
-                let chars = text.chars().count().max(1) as f32;
-                let first = text.split_whitespace().next().unwrap_or("");
-                r.w * first.chars().count() as f32 / chars
-            });
+        let word = first_word(next);
         // A short line: it ends well before the widest line, so far that the next line's
         // first word and a good share of the measure more would still fit. Ragged prose
         // misses a word by a little. A word cut at the line end goes on in the next line.
         let room = SHORT_ROOM * (right - left);
         let fits = a.1 + 0.25 * next.size + word + room <= right && !lines[k].text.ends_with('-');
         let aligned = set_aligned && aligned_pair(a, b);
-        if fits || aligned || short || lines_apart(lines, k + 1, items) {
+        if fits || aligned || short || !wraps[k] || lines_apart(lines, k + 1, items) {
             out.push((next.runs[0].page, next.runs[0].line));
         }
     }
     out.sort_unstable();
     out
 }
+
+/// The ends of each line's ink.
+fn ink_edges(lines: &[Line<'_>]) -> Vec<(f32, f32)> {
+    lines
+        .iter()
+        .map(|l| {
+            let inked = l.runs.iter().filter(|r| !r.text.trim().is_empty());
+            let x0 = inked.clone().map(|r| r.x).fold(f32::MAX, f32::min);
+            let x1 = inked.map(|r| r.x + r.w).fold(f32::MIN, f32::max);
+            (x0, x1)
+        })
+        .collect()
+}
+
+/// The width of the first word of `line`, by its share of the first run with text.
+fn first_word(line: &Line<'_>) -> f32 {
+    line.runs
+        .iter()
+        .find(|r| !r.text.trim().is_empty())
+        .map_or(f32::MAX, |r| {
+            let text = r.text.trim_start();
+            let chars = text.chars().count().max(1) as f32;
+            let first = text.split_whitespace().next().unwrap_or("");
+            r.w * first.chars().count() as f32 / chars
+        })
+}
+
+/// For each line of `lines` but the last (with the ends `edges` of their ink), whether it may
+/// go on in the next line as wrapped text: the positive evidence that a line was broken where
+/// it is only because its measure was full (Task 15b part 2e-2, ruling P6-X: a line of its own
+/// read as wrapped text mixes two fields; wrapped text read with a break loses nothing). A line
+/// that ends in a hyphen or a comma, or whose next line starts with a small letter, goes on.
+/// Otherwise no line goes on when
+/// - the lines each end with an exclamation or a question mark: sentences of their own (a
+///   slogan, a greeting);
+/// - the lines read as no sentences and one that ends no sentence would have taken the next
+///   line's first word in its own face within the widest line, with [`SPARE`] sizes to spare:
+///   the lines were not filled to a measure, they are lines of their own (fields, items,
+///   address lines) of any length;
+/// - the lines read as no sentences and one ends in a number (an amount, a date, a customer
+///   number) over a line that opens with a capital: a column of values;
+/// - with `pair` (paragraphs, not headings), they are two lines that do not read as one
+///   sentence (the second ends a sentence, or one holds a sentence end).
+///
+/// In prose (lines that read as sentences) a line that ends in a number over a line that opens
+/// with a capital still ends there. Prose of three lines or more that fills its measure, and
+/// two lines of one sentence, go on.
+fn wraps(lines: &[Line<'_>], edges: &[(f32, f32)], pair: bool) -> Vec<bool> {
+    let n = lines.len();
+    if n < 2 {
+        return Vec::new();
+    }
+    let ends_sentence = |l: &Line<'_>| l.text.ends_with(['.', '!', '?', ':']);
+    let cut = |l: &Line<'_>| l.text.ends_with(['-', ',']);
+    let lower = |l: &Line<'_>| l.text.chars().next().is_some_and(char::is_lowercase);
+    let goes_on: Vec<bool> = (0..n - 1)
+        .map(|k| cut(&lines[k]) || lower(&lines[k + 1]))
+        .collect();
+    let exclaims = lines.iter().all(|l| l.text.ends_with(['!', '?']));
+    let right = edges.iter().map(|e| e.1).fold(f32::MIN, f32::max);
+    // The face of a run: a title line in bold over plain text is no line of that text.
+    let face = |r: &Run| (r.bold, r.italic, r.family, (r.size * 2.0).round() as i32);
+    let one_face = |a: &Line<'_>, b: &Line<'_>| {
+        let last = a.runs.iter().rev().find(|r| !r.text.trim().is_empty());
+        let first = b.runs.iter().find(|r| !r.text.trim().is_empty());
+        last.map(face) == first.map(face)
+    };
+    let unfilled = !sentences(lines)
+        && (0..n - 1).any(|k| {
+            let l = &lines[k];
+            !ends_sentence(l)
+                && !goes_on[k]
+                && one_face(l, &lines[k + 1])
+                && edges[k].1 + (0.25 + SPARE) * lines[k + 1].size + first_word(&lines[k + 1])
+                    <= right
+        });
+    let one_sentence = n == 2 && (ends_sentence(&lines[1]) || sentences(lines));
+    // A line that ends in a number (an amount, a date, a customer number), and no sentence,
+    // over a line that opens with a capital ends a value: the next line is a field of its own,
+    // and so is every line of a block that holds such a line and no sentence.
+    let value_end = |k: usize| {
+        let l = &lines[k];
+        !ends_sentence(l)
+            && !goes_on[k]
+            && lines[k + 1]
+                .text
+                .chars()
+                .next()
+                .is_some_and(char::is_uppercase)
+            && l.text.split_whitespace().next_back().is_some_and(|w| {
+                w.chars().any(|c| c.is_ascii_digit())
+                    && w.chars().all(|c| c.is_ascii_digit() || ".,/-".contains(c))
+            })
+    };
+    let values = !sentences(lines) && (0..n - 1).any(value_end);
+    if exclaims || unfilled || values || (pair && n == 2 && !one_sentence) {
+        goes_on
+    } else {
+        (0..n - 1).map(|k| !value_end(k)).collect()
+    }
+}
+
+/// A line has room for the next line's first word when this many sizes of the widest line
+/// are left over after it and a space (see [`wraps`]): more than the error of a word's
+/// width taken from its share of a run.
+const SPARE: f32 = 1.0;
 
 /// The faces of a line that is a label and its value: the face its ink starts in and the other
 /// face it ends in (a plain label, then a bold value), each as weight, slant, family and size.

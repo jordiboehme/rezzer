@@ -2003,6 +2003,208 @@ fn short_lines_of_one_face_never_join() {
     );
 }
 
+/// The joins in the Markdown `md` (bold marks and escapes taken out) of the lines `texts`
+/// drawn one under the other: each pair of neighbours whose last and first word stand on one
+/// line of the read, outside a table row.
+fn joined_lines(md: &str, texts: &[String]) -> Vec<String> {
+    let md = md.replace("**", "").replace('\\', "");
+    let mut out = Vec::new();
+    for w in texts.windows(2) {
+        let last = w[0].rsplit(' ').next().unwrap_or("");
+        let first = w[1].split(' ').next().unwrap_or("");
+        let joined = format!("{last} {first}");
+        if md.lines().any(|l| l.contains(&joined) && !l.contains('|')) {
+            out.push(joined);
+        }
+    }
+    out
+}
+
+/// The sizes, faces, gaps and boxes a column of [`one_face_column`] is drawn in: sizes 6 to
+/// 14, plain and bold Helvetica and Times, the parts of a line a space or two sizes apart, no
+/// box, a box around all five lines and boxes around two of them.
+fn column_variants() -> Vec<(f32, &'static str, bool, Option<(usize, usize)>)> {
+    let mut out = Vec::new();
+    for size in [6.0f32, 8.0, 9.0, 10.0, 12.0, 14.0] {
+        for font in ["FL", "FB", "FT", "FTB"] {
+            for gapped in [false, true] {
+                for boxed in [
+                    None,
+                    Some((0, 5)),
+                    Some((0, 2)),
+                    Some((1, 3)),
+                    Some((2, 4)),
+                    Some((3, 5)),
+                ] {
+                    out.push((size, font, gapped, boxed));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Task 15b part 2e-2 (item 4, O2 of the part 2e-1 re-review r2; ruling P6-X): a column of
+/// field lines of one face of five to seven words each (`Zahlbar bis zum 31.10.2026 ohne Abzug`
+/// over `Bearbeiter Frau Erika Beispiel`), whole and cut by a box: no two lines are one line of
+/// text or one heading. A line joins the next only when it was broken because its measure was
+/// full: where a line of the column has room for the next line's first word, or ends in a
+/// number over a line that opens with a capital, the lines are fields of their own.
+#[test]
+fn field_lines_of_five_words_or_more_never_join() {
+    let shapes: [&[&[&str]]; 2] = [
+        &[
+            &["Zahlbar bis zum", "31.10.2026 ohne Abzug"],
+            &["Bearbeiter Frau", "Erika Beispiel"],
+            &["Ihre Kundennummer bei uns", "12345"],
+            &["Unser Zeichen", "AB 12 vom 01.10.2026"],
+            &["Seite", "1 von 2"],
+        ],
+        &[
+            &["Lieferschein Nr.", "4711 vom 01.10.2026"],
+            &["Bestellung Nr.", "815 vom 30.09.2026"],
+            &["Ihr Ansprechpartner", "Herr Max Beispiel"],
+            &["Telefon", "0123 456789 Durchwahl 12"],
+            &["Steuernummer", "12 345 678 90"],
+        ],
+    ];
+    let mut wrong = Vec::new();
+    for shape in shapes {
+        let texts: Vec<String> = shape.iter().map(|l| l.join(" ")).collect();
+        for (size, font, gapped, boxed) in column_variants() {
+            let lines: Vec<Vec<(&str, &str)>> = shape
+                .iter()
+                .map(|l| l.iter().map(|t| (font, *t)).collect())
+                .collect();
+            let out = common::read(&page_in(
+                &one_face_column(&lines, size, gapped, boxed),
+                Look::Plain,
+            ));
+            for j in joined_lines(&common::markdown(&out), &texts) {
+                wrong.push(format!(
+                    "{}, {size}, {font}, gapped {gapped}, boxed {boxed:?}: {j:?}",
+                    texts[0]
+                ));
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// Task 15b part 2e-2 (item 4, O1 of the part 2e-1 re-review r2): lines that each end in an
+/// exclamation mark (slogans under an invoice) are sentences of their own, of 8 to 12 words, in
+/// one face or with the last word bold or a point larger: no two of them are one line.
+#[test]
+fn lines_that_each_end_in_an_exclamation_mark_never_join() {
+    let sets: [&[(&str, &str)]; 3] = [
+        &[
+            ("Jetzt umsteigen und bei jeder Fahrt bares Geld", "sparen!"),
+            ("Einfach online buchen - ganz ohne Papier und", "Wartezeit!"),
+            ("Wir sind auch am Wochenende gerne für Sie", "da!"),
+        ],
+        &[
+            ("Sparen Sie mit unserem neuen Tarif ab dem ersten", "Monat!"),
+            ("Fragen Sie in jeder Filiale nach dem neuen", "Angebot!"),
+            ("Wir freuen uns auf Ihren Besuch bei", "uns!"),
+        ],
+        &[
+            (
+                "Danke für Ihren Einkauf bei der Muster GmbH in",
+                "Musterstadt!",
+            ),
+            (
+                "Besuchen Sie uns auch im Netz unter muster.example",
+                "online!",
+            ),
+            ("Ihr Team der Muster GmbH wünscht einen schönen", "Tag!"),
+        ],
+    ];
+    let mut wrong = Vec::new();
+    for set in sets {
+        let texts: Vec<String> = set.iter().map(|(a, b)| format!("{a} {b}")).collect();
+        for size in [6.0f32, 8.0, 9.0, 10.0, 12.0, 14.0] {
+            for (plain, end, larger) in [
+                ("FL", "FL", 0.0f32),
+                ("FB", "FB", 0.0),
+                ("FL", "FB", 0.0),
+                ("FB", "FB", 1.0),
+                ("FT", "FTB", 0.0),
+            ] {
+                let mut t = String::new();
+                for (n, (a, b)) in set.iter().enumerate() {
+                    let y = 700.0 - 1.25 * size * n as f32;
+                    t += &show(plain, size, 40.0, y, a);
+                    let x = 40.0 + common::font_width(plain, a, size) + 0.28 * size;
+                    t += &show(end, size + larger, x, y, b);
+                }
+                let out = common::read(&page_in(&t, Look::Plain));
+                for j in joined_lines(&common::markdown(&out), &texts) {
+                    wrong.push(format!("{size}, {plain}/{end}+{larger}: {j:?}"));
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// Task 15b part 2e-2 (item 4), guard: prose of five lines that fills its measure beside a
+/// letter address, whole and in a box, joins line by line at every size and face, also where a
+/// line starts with a capital (a noun) or holds a sentence end; cut by a box, its lines go on in
+/// each part where they hold words in small letters or a sentence.
+#[test]
+fn wrapped_prose_in_a_column_still_joins() {
+    let shape: [&[&str]; 5] = [
+        &["Wir danken Ihnen für den Auftrag und"],
+        &["berechnen die Leistungen des Monats"],
+        &["Oktober wie mit Ihnen vereinbart. Der"],
+        &["Betrag ist zahlbar bis zum Ende des"],
+        &["Monats ohne jeden Abzug."],
+    ];
+    let texts: Vec<String> = shape.iter().map(|l| l.join(" ")).collect();
+    let mut wrong = Vec::new();
+    for (size, font, gapped, boxed) in column_variants() {
+        if gapped {
+            continue;
+        }
+        let lines: Vec<Vec<(&str, &str)>> = shape
+            .iter()
+            .map(|l| l.iter().map(|t| (font, *t)).collect())
+            .collect();
+        let out = common::read(&page_in(
+            &one_face_column(&lines, size, false, boxed),
+            Look::Plain,
+        ));
+        let joins = joined_lines(&common::markdown(&out), &texts);
+        // The pairs a box leaves in one part.
+        let inside = |i: usize| boxed.is_some_and(|(a, b)| a <= i && i < b);
+        let parts = |k: usize| inside(k) == inside(k + 1);
+        for (k, w) in texts.windows(2).enumerate() {
+            let last = w[0].rsplit(' ').next().unwrap_or("");
+            let first = w[1].split(' ').next().unwrap_or("");
+            let pair = format!("{last} {first}");
+            if parts(k) && !joins.contains(&pair) {
+                wrong.push(format!("{size}, {font}, boxed {boxed:?}: {pair:?} apart"));
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
 /// Task 15b part 2e-1 (item 6, part 2b re-review r1; ruling P6-X): a table of taxes without
 /// rules, an amount alone under an amount of its column (a row of its own), then two lines of
 /// one amount each in two other columns under the last row (`5,00` under the base, `125,00`

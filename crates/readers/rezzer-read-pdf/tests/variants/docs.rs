@@ -501,12 +501,6 @@ fn field_lines(v: &Variant, boxed: Option<(usize, usize)>) -> Sheet {
 /// (`bold`) or the plain one, with a box around the lines `boxed` (none: no box). No line of
 /// the read, and no heading, holds two of them.
 fn one_face_column(v: &Variant, size: f32, bold: bool, boxed: Option<(usize, usize)>) -> Sheet {
-    let k = v.k();
-    let (plain, heavy) = v.faces();
-    let font = if bold { heavy } else { plain };
-    let size = size * k;
-    let pitch = 1.2 * size;
-    let (x0, top) = (320.0, 640.0);
     let lines = [
         "Kundennummer 12345",
         "Rechnungsnummer 67890",
@@ -514,6 +508,45 @@ fn one_face_column(v: &Variant, size: f32, bold: bool, boxed: Option<(usize, usi
         "Seite 1 von 2",
         "Bearbeiter Muster",
     ];
+    let mut s = column_of(v, &lines, size, bold, boxed);
+    // `Datum` labels the date of the document.
+    s.want.date = Some("2026-10-01".into());
+    s
+}
+
+/// Part 2e-2 (item 4, O2): field lines of one face of five to seven words each.
+const LONG_FIELD_LINES: [&str; 5] = [
+    "Zahlbar bis zum 31.10.2026 ohne Abzug",
+    "Bearbeiter Frau Erika Beispiel",
+    "Ihre Kundennummer bei uns 12345",
+    "Unser Zeichen AB 12 vom 01.10.2026",
+    "Seite 1 von 2",
+];
+
+/// Part 2e-2 (item 4, O1): slogan lines, each a sentence of 8 to 10 words ending in an
+/// exclamation mark.
+const SLOGAN_LINES: [&str; 3] = [
+    "Jetzt umsteigen und bei jeder Fahrt bares Geld sparen!",
+    "Einfach online buchen - ganz ohne Papier und Wartezeit!",
+    "Wir sind auch am Wochenende gerne für Sie da!",
+];
+
+/// The lines `lines` of one face as a column at one left edge beside a letter address (see
+/// [`one_face_column`]), each line's text in one show: no line of the read, and no heading,
+/// holds two of them.
+fn column_of(
+    v: &Variant,
+    lines: &[&str],
+    size: f32,
+    bold: bool,
+    boxed: Option<(usize, usize)>,
+) -> Sheet {
+    let k = v.k();
+    let (plain, heavy) = v.faces();
+    let font = if bold { heavy } else { plain };
+    let size = size * k;
+    let pitch = 1.2 * size;
+    let (x0, top) = (320.0, 640.0);
     let mut t = String::new();
     for (n, l) in lines.iter().enumerate() {
         t += &show(font, size, x0, top - pitch * n as f32, l);
@@ -529,15 +562,13 @@ fn one_face_column(v: &Variant, size: f32, bold: bool, boxed: Option<(usize, usi
     {
         t += &show(plain, 7.0 * k, 40.0, top - 8.4 * k * n as f32, l);
     }
-    let bottom = top - pitch * 5.0;
+    let bottom = top - pitch * lines.len() as f32;
     let mut s = sheet(v, t, 420.0, Some(Span { top, bottom }));
     for w in lines.windows(2) {
         s.want
             .lines_apart
             .push((w[0].to_string(), w[1].to_string()));
     }
-    // `Datum` labels the date of the document.
-    s.want.date = Some("2026-10-01".into());
     s
 }
 
@@ -1485,6 +1516,41 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "a column of lines of one face with a box around two of them",
             axes: DOC,
             draw: |v| (one_face_column(v, 8.0, false, Some((2, 4))), None),
+        },
+        Shape {
+            name: "a column of one-face field lines of 5 to 7 words",
+            axes: DOC,
+            draw: |v| (column_of(v, &LONG_FIELD_LINES, 8.0, false, None), None),
+        },
+        Shape {
+            name: "a column of one-face field lines of 5 to 7 words with a box around two of them",
+            axes: DOC,
+            draw: |v| {
+                (
+                    column_of(v, &LONG_FIELD_LINES, 8.0, false, Some((2, 4))),
+                    None,
+                )
+            },
+        },
+        Shape {
+            name: "a column of bold field lines of 5 to 7 words at heading size, two boxed",
+            axes: DOC,
+            draw: |v| {
+                (
+                    column_of(v, &LONG_FIELD_LINES, 9.5, true, Some((3, 5))),
+                    None,
+                )
+            },
+        },
+        Shape {
+            name: "slogan lines, each a sentence ending in an exclamation mark",
+            axes: DOC,
+            draw: |v| (column_of(v, &SLOGAN_LINES, 8.0, false, None), None),
+        },
+        Shape {
+            name: "bold slogan lines, each a sentence ending in an exclamation mark",
+            axes: DOC,
+            draw: |v| (column_of(v, &SLOGAN_LINES, 9.5, true, None), None),
         },
         Shape {
             name: "line items with wrapped date ranges",
