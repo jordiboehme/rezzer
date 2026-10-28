@@ -644,6 +644,31 @@ fn two_lines_in_columns(v: &Variant) -> Sheet {
     s
 }
 
+/// Part 2e-4 (item 7): a smaller label and its bold value set against it with no space,
+/// the value starting a fifth of a size inside the label's last letter: two texts, never one
+/// word.
+fn touching(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, bold) = v.faces();
+    let size = 9.0 * k;
+    let top = 640.0;
+    let label = 0.7 * size;
+    let end = 40.0 + font_width(plain, "Name", label);
+    let mut t = show(plain, label, 40.0, top, "Name");
+    t += &show(bold, size, end - 0.2 * size, top, "Hinterhaus");
+    let mut s = sheet(
+        v,
+        t,
+        420.0,
+        Some(Span {
+            top,
+            bottom: top - size,
+        }),
+    );
+    s.want.paragraphs.push("Name Hinterhaus".into());
+    s
+}
+
 /// Part 2e-2 (item 3): a value printed over the label of its line, at 9 points times the size
 /// factor, the label at 0.7 of it: two texts, never one word.
 fn overprinted(v: &Variant) -> Sheet {
@@ -2094,6 +2119,11 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "two lines in three columns alone in the body",
             axes: DOC,
             draw: |v| (two_lines_in_columns(v), None),
+        },
+        Shape {
+            name: "a value that touches its label",
+            axes: DOC,
+            draw: |v| (touching(v), None),
         },
         Shape {
             name: "a value printed over its label",

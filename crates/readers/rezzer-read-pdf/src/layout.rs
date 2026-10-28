@@ -302,12 +302,13 @@ fn lines(runs: &[Run]) -> Vec<Line<'_>> {
 }
 
 fn line(runs: &[Run]) -> Line<'_> {
-    // A run printed over the run before it is another text (see [`OVERPRINT`]).
+    // A run printed over the run before it, or touching it in another size or weight, is
+    // another text (see [`apart`]).
     let mut text = String::new();
     let mut ink_end = f32::MIN;
+    let mut before: Option<&Run> = None;
     for r in runs {
-        if r.x + OVERPRINT * r.size < ink_end
-            && overprints(&r.text)
+        if apart(before, r, ink_end)
             && !r.text.starts_with(char::is_whitespace)
             && !text.ends_with(char::is_whitespace)
         {
@@ -316,6 +317,7 @@ fn line(runs: &[Run]) -> Line<'_> {
         text.push_str(&r.text);
         if !r.text.trim().is_empty() {
             ink_end = ink_end.max(r.x + r.w);
+            before = Some(r);
         }
     }
     // The run with the most characters sets the size and the baseline.
@@ -1908,8 +1910,9 @@ fn inlines(
     }
     let mut pieces: Vec<Piece> = Vec::new();
     let mut last: Option<(u32, u32)> = None;
-    // Where the ink of the last run with text ends, on its line.
+    // Where the ink of the last run with text ends, on its line, and that run.
     let mut ink_end = f32::MIN;
+    let mut before: Option<&Run> = None;
     for (k, r) in runs.iter().enumerate() {
         if k % CHECK_EVERY == 0 {
             time_over(budget)?;
@@ -1927,11 +1930,11 @@ fn inlines(
         }
         last = Some((r.page, r.line));
         // A run that starts well inside the ink of the run before it on its line is printed
-        // over it (a value over a label): another text, never one word with it.
+        // over it (a value over a label), and one that touches it in another size or weight
+        // is set against it: another text, never one word with it (see [`apart`]).
         let over = !new_line
             && k > 0
-            && r.x + OVERPRINT * r.size < ink_end
-            && overprints(&r.text)
+            && apart(before, r, ink_end)
             && !text.starts_with(char::is_whitespace)
             && pieces
                 .last()
@@ -1945,6 +1948,7 @@ fn inlines(
             } else {
                 ink_end.max(r.x + r.w)
             };
+            before = Some(r);
         }
         let broken = new_line && breaks.binary_search(&(r.page, r.line)).is_ok();
         // A hyphen at the end of a line joins the word that wraps; one with white space before
@@ -2108,6 +2112,37 @@ fn inlines(
 fn overprints(text: &str) -> bool {
     text.chars().filter(|c| c.is_alphanumeric()).count() >= 2
 }
+
+/// Whether the run `r` is another text than the run `before` it on its line, whose ink ends
+/// at `ink_end`: it is printed over it (it starts [`OVERPRINT`] sizes or more left of that
+/// end, with text of its own, see [`overprints`]), or it touches it (it starts less than
+/// [`TOUCH`] sizes right of that end, or over it) in a larger size by a label step or in
+/// another weight, the words that meet each of two letters or digits or more and one with a
+/// letter: a label and its value set against it (`Name` and `Hinterhaus`). A smaller run after
+/// a word is a raised part of it (`21st`), a word in pieces of one style is one word, and a
+/// number in pieces (a change of font inside `1234,56`) is one number.
+fn apart(before: Option<&Run>, r: &Run, ink_end: f32) -> bool {
+    if r.x + OVERPRINT * r.size < ink_end && overprints(&r.text) {
+        return true;
+    }
+    let Some(b) = before else {
+        return false;
+    };
+    let (last, first) = (
+        b.text.split_whitespace().next_back(),
+        r.text.split_whitespace().next(),
+    );
+    let letters = |w: Option<&str>| w.is_some_and(|w| w.chars().any(char::is_alphabetic));
+    r.x < ink_end + TOUCH * r.size.max(b.size)
+        && (r.size >= crate::tables::LABEL_STEP * b.size || r.bold != b.bold)
+        && last.is_some_and(overprints)
+        && first.is_some_and(overprints)
+        && (letters(last) || letters(first))
+}
+
+/// A run that starts less than this many sizes right of where the ink of the run before it
+/// ends touches it (see [`apart`]): less than a space.
+const TOUCH: f32 = 0.2;
 
 /// A run that starts this many of its sizes or more left of where the ink of the run before it
 /// on its line ends is printed over that run (see [`inlines`]): far more than a kerning pair

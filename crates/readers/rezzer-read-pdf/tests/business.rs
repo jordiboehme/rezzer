@@ -2695,6 +2695,57 @@ fn two_lines_set_full_are_no_table() {
     );
 }
 
+/// Task 15b part 2e-4 (item 7): a label and its value that only touch, the value larger or in
+/// another weight (overlap under half a size, or none: `Name` and `Hinterhaus` drawn with no
+/// space between them), are two texts: never one word (`NameHinterhaus`). A word whose part in
+/// a smaller size is raised after it (`21st`, an ordinal) and a word drawn in pieces of one
+/// style stay one word. Sizes 6 to 14, the value in Courier, Helvetica or Helvetica-Bold.
+#[test]
+fn a_value_that_touches_its_label_stays_apart() {
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0] {
+        for (label, value, scale) in [
+            ("FL", "FD", 0.7),
+            ("FL", "FL", 0.7),
+            ("FT", "FB", 0.7),
+            ("FL", "FB", 1.0),
+            ("FB", "FL", 1.0),
+        ] {
+            for into in [-0.1f32, 0.0, 0.2, 0.45] {
+                let ls = scale * size;
+                let end = 40.0 + common::font_width(label, "Name", ls);
+                let mut t = show(label, ls, 40.0, 700.0, "Name");
+                t += &show(value, size, end - into * size, 700.0, "Hinterhaus");
+                let out = common::read(&page_in(&t, Look::Plain));
+                let md = common::markdown(&out).replace("**", "");
+                if md.contains("NameHinterhaus") {
+                    wrong.push(format!("{size}, {label}/{value} x {scale}, {into}: glued"));
+                }
+            }
+        }
+        // Guards: one word drawn in two pieces of one style, and an ordinal raised in a
+        // smaller size after its number.
+        let w = common::font_width("FL", "Muster", size);
+        let mut t =
+            show("FL", size, 40.0, 700.0, "Muster") + &show("FL", size, 40.0 + w, 700.0, "mann");
+        let n = common::font_width("FL", "21", size);
+        t += &show("FL", size, 40.0, 680.0, "21");
+        t += &show("FL", 0.6 * size, 40.0 + n, 680.0 + 0.35 * size, "st");
+        let md = common::markdown(&common::read(&page_in(&t, Look::Plain)));
+        for want in ["Mustermann", "21st"] {
+            if !md.contains(want) {
+                wrong.push(format!("{size}: {want} is cut"));
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
 /// Task 15b part 2e-2 fix round 1 (C1; ruling P6-X): line items whose last amount is a credit
 /// with a trailing minus (`10,00-`), the amounts flush left, over a total under the amounts at
 /// the row pitch: the total is no end of the credit's cell (`10,00-80,00`), and it stays a text

@@ -332,6 +332,7 @@ shape_tests! {
     a_cut_row_label_and_a_row_of_numbers_over_prose => "a row label cut by a hyphen and a row of numbers over prose",
     two_lines_in_three_columns => "two lines in three columns alone in the body",
     a_value_printed_over_its_label => "a value printed over its label",
+    a_value_that_touches_its_label => "a value that touches its label",
     prose_with_a_number_at_a_line_end => "prose with a number at a line end",
     two_lines_of_three_words_set_full => "two lines of three words set full",
     a_paragraph_set_full_in_a_narrow_column => "a paragraph without a stop set full in a narrow column",
