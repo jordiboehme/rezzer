@@ -365,10 +365,15 @@ pub(crate) fn vector_codes(cells: &[[f32; 4]]) -> Result<Vec<VectorCode>, String
 /// The bars of a linear code drawn as paths are at least this many modules long.
 const MIN_BAR: f32 = 2.0;
 
+/// The fewest bars of a printed linear code cut by the edge of the render, and how far its
+/// end may stand from that edge, in modules (the bar cut there, left out, and a space).
+const MIN_CUT_BARS: usize = 8;
+const CUT_REACH: f32 = 9.0;
+
 /// The bars of a linear code printed in a picture are at least this many modules long: a
 /// printed code's bars are long beside its module, while a screen of dots cut by the edge of
-/// a picture stands in short bars.
-const PRINTED_BAR: f32 = 8.0;
+/// a picture stands in bars of about 2.
+const PRINTED_BAR: f32 = 3.0;
 
 /// The share of the bars of a printed linear code that are of one width, below: its bars have
 /// several widths, the dots or lines of a screen one.
@@ -421,7 +426,13 @@ fn codes_among(cells: &[[f32; 4]], printed: Option<Printed>) -> Result<Vec<Vecto
             w.min(h) >= MIN_MODULE * 0.9 && w.min(h) <= MAX_MODULE && w.max(h) <= MAX_BAR
         })
         .collect();
-    if cells.len() < MIN_CELLS {
+    // A printed code cut by the edge of the render keeps fewer bars.
+    let floor = if printed.is_some() {
+        MIN_CUT_BARS
+    } else {
+        MIN_CELLS
+    };
+    if cells.len() < floor {
         return Ok(Vec::new());
     }
     let short = |c: &[f32; 4]| (c[2] - c[0]).min(c[3] - c[1]);
@@ -536,7 +547,7 @@ fn codes_among(cells: &[[f32; 4]], printed: Option<Printed>) -> Result<Vec<Vecto
         None => false,
     };
     for members in groups {
-        if members.len() < MIN_CELLS || look(&members, &mut found) {
+        if members.len() < floor || look(&members, &mut found) {
             continue;
         }
         // Short bars of codes one over the other are close enough to join as modules: each
@@ -544,7 +555,7 @@ fn codes_among(cells: &[[f32; 4]], printed: Option<Printed>) -> Result<Vec<Vecto
         let mut any = false;
         for flat in [false, true] {
             for part in band_parts(&cells, &members, flat) {
-                if part.len() >= MIN_CELLS {
+                if part.len() >= floor {
                     any |= look(&part, &mut found);
                 }
             }
@@ -808,7 +819,7 @@ fn region(
             .count();
         on_it * 10 >= members.len() * 9
     };
-    let is_printed = printed.is_some();
+    let edges = printed.map(|p| p.page);
     // A printed matrix code has paper around it, inside the render.
     let paper_around = || {
         let Some(p) = printed else { return true };
@@ -823,13 +834,15 @@ fn region(
             && quiet([b[0], b[3] + 0.01, b[2], b[3] + q])
     };
     let kind_ok = if bars(cells, members, false) {
-        linear(cells, members, (b, module, is_printed), false, quiet)
-    } else if bars(cells, members, true)
-        && linear(cells, members, (b, module, is_printed), true, quiet)
+        linear(cells, members, (b, module, edges), false, quiet)
+    } else if bars(cells, members, true) && linear(cells, members, (b, module, edges), true, quiet)
     {
         true
     } else {
-        lattice() && matrix(cells, members, b, module) && paper_around()
+        members.len() >= MIN_CELLS
+            && lattice()
+            && matrix(cells, members, b, module)
+            && paper_around()
     };
     if !kind_ok {
         return None;
@@ -863,10 +876,11 @@ fn region(
 fn linear(
     cells: &[[f32; 4]],
     members: &[usize],
-    (b, module, printed): ([f32; 4], f32, bool),
+    (b, module, page): ([f32; 4], f32, Option<[f32; 4]>),
     flat: bool,
     quiet: &dyn Fn([f32; 4]) -> bool,
 ) -> bool {
+    let printed = page.is_some();
     let sides = |c: &[f32; 4]| {
         if flat {
             (c[2] - c[0], c[3] - c[1])
@@ -967,11 +981,37 @@ fn linear(
         return false;
     }
     let q = 5.0 * module;
-    let ends = if flat {
-        quiet([b[0], b[1] - q, b[2], b[1] - 0.01]) && quiet([b[0], b[3] + 0.01, b[2], b[3] + q])
+    // Paper at both ends; a printed code may run off the edge of the render at one of them
+    // (its bar cut there is left out), when the other end shows its quiet zone.
+    let (first, last) = if flat {
+        (
+            quiet([b[0], b[1] - q, b[2], b[1] - 0.01]),
+            quiet([b[0], b[3] + 0.01, b[2], b[3] + q]),
+        )
     } else {
-        quiet([b[0] - q, b[1], b[0] - 0.01, b[3]]) && quiet([b[2] + 0.01, b[1], b[2] + q, b[3]])
+        (
+            quiet([b[0] - q, b[1], b[0] - 0.01, b[3]]),
+            quiet([b[2] + 0.01, b[1], b[2] + q, b[3]]),
+        )
     };
+    let reach = CUT_REACH * module;
+    let cut = page.map(|p| {
+        if flat {
+            (b[1] - p[1] <= reach, p[3] - b[3] <= reach)
+        } else {
+            (b[0] - p[0] <= reach, p[2] - b[2] <= reach)
+        }
+    });
+    let ends = match cut {
+        Some((cut_first, cut_last)) => {
+            (first && last) || (first && cut_last) || (cut_first && last)
+        }
+        None => first && last,
+    };
+    // Fewer bars than a code has at least only where it runs off the render.
+    if runs.len() < MIN_CELLS && !cut.is_some_and(|(a, z)| a || z) {
+        return false;
+    }
     // A printed code stands on paper: past the ends of its bars too, from half a module (the
     // soft ends of blurred bars) to one and a half, where a screen of dots goes on.
     let (e0, e1) = (0.5 * module, 1.5 * module);

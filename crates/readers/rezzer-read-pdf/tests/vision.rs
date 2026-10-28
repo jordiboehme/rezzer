@@ -3392,10 +3392,6 @@ fn twin_codes_by_the_edge_of_a_scan_are_said() {
                     asset(&out, "page-1").alt
                 );
             }
-            // Bars 30 points high are under 8 modules of 4 points: too short for a printed code.
-            if bar < 60 {
-                continue;
-            }
             let width = (m.width * 4) as f32;
             let out = read(&blurred_scan(1, 4, bar, &[40.0, 40.0 + width + 28.0], blur));
             let n = asset(&out, "page-1").codes.len();
@@ -3431,9 +3427,9 @@ fn codes_in_a_scan_the_decoder_misses_are_said() {
     for res in [1u32, 2] {
         for px in [2u32, 3, 4] {
             let width = (m.width * px) as f32 / res as f32;
-            // Bars of a code printed in a picture are 8 modules long at least: a screen of
-            // dots cut by the edge of a picture stands in short bars.
-            for bar in [10 * px, 60] {
+            // Bars of a code printed in a picture are 3 modules long at least: a screen of
+            // dots cut by the edge of a picture stands in bars of 2.
+            for bar in [4 * px, 10 * px, 60] {
                 let case = format!("{res} pixels a point, {px} a module, bars {bar}");
                 let alone = read(&crisp_scan(res, px, bar, &[40.0]));
                 if asset(&alone, "page-1").codes.len() != 1 {
@@ -3459,8 +3455,8 @@ fn codes_in_a_scan_the_decoder_misses_are_said() {
                         );
                     }
                 }
-                // Cut to fewer bars than a code has at least, it is no code (as one drawn).
-                for cut in [3.0, 10.0, 15.0] {
+                // Cut by the edge of the page, to a few of its bars too: listed or said.
+                for cut in [3.0, 10.0, 15.0, 30.0, 45.0, 60.0] {
                     let left = 595.0 - width + cut * px as f32 / res as f32;
                     let out = read(&crisp_scan(res, px, bar, &[left]));
                     let case = format!("{case}, cut {cut} modules");
@@ -4038,5 +4034,34 @@ fn a_code_crossed_by_a_dark_line_is_listed_once() {
         assert_eq!(boxes.len(), 2);
         assert_no_doubt(&out, &format!("{res} pixels a point, paper between"));
         assert!(!a.alt.as_deref().unwrap_or_default().contains("dark line"));
+    }
+}
+
+#[test]
+fn codes_with_few_or_short_bars_the_decoder_misses_are_said() {
+    // A printed code the decoder does not read is said when its bars show a code: bars only 4
+    // to 7 modules long, crisp or blurred, and a code cut by the edge of the page down to a
+    // few of its bars (8 at least), its other end on paper.
+    let m = modules(Symbology::Code128, "0000000001");
+    for res in [1u32, 2] {
+        for px in [2u32, 3, 4] {
+            for blur in [0u32, 1] {
+                let case = format!("{res} pixels a point, {px} a module, blur {blur}");
+                for bar in [4u32, 6, 7] {
+                    let out = read(&blurred_scan(res, px, bar * px, &[40.0], blur));
+                    let n = asset(&out, "page-1").codes.len();
+                    let case = format!("{case}, bars {bar} modules");
+                    assert!(n <= 1, "{case}: {n}");
+                    assert!(n == 1 || says_code_unread(&out), "{case}: 0 read, unsaid");
+                }
+                for keep in [30u32, 45, 60] {
+                    let left = 595.0 - (keep * px) as f32 / res as f32;
+                    let out = read(&blurred_scan(res, px, 60, &[left], blur));
+                    let case = format!("{case}, cut to {keep} of {} modules", m.width);
+                    assert!(asset(&out, "page-1").codes.is_empty(), "{case}");
+                    assert!(says_code_unread(&out), "{case}: unsaid");
+                }
+            }
+        }
     }
 }

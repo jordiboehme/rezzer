@@ -450,6 +450,33 @@ fn ruled_code(v: &Variant, rule: u32, lying: bool) -> Sheet {
     s
 }
 
+/// Task 15b part 2e-6: a scanned page (one inline picture over all of it, 1 pixel a point,
+/// under the page's text) with a printed Code 128 of [`CODE`], 3 pixels a module, its bars
+/// `bar` modules long, blurred `blur` times: whole, 40 points from the left, or (`keep`) cut by
+/// the right edge of the page to that many of its modules. The decoder does not read it; the
+/// page says a part of it looks like a code.
+fn printed_code(v: &Variant, bar: u32, keep: Option<u32>, blur: u32) -> Sheet {
+    let m = modules(barcodes::Symbology::Code128, CODE);
+    let (w, h, px) = (595u32, 842u32, 3u32);
+    let mut g = vec![235u8; (w * h) as usize];
+    let left = keep.map_or(40, |k| w as i64 - i64::from(k * px));
+    for y in 300..300 + bar * px {
+        for c in (0..m.width).filter(|&c| m.dark[c as usize]) {
+            for x in left + i64::from(c * px)..left + i64::from((c + 1) * px) {
+                if (0..i64::from(w)).contains(&x) {
+                    g[(y * w) as usize + x as usize] = 0;
+                }
+            }
+        }
+    }
+    let mut s = Sheet::new(page_of(
+        v,
+        inline_gray(&mut g, (w, h), blur, [0.0, 0.0, 595.0, 842.0]),
+    ));
+    s.want.codes.push(("Code 128".into(), CODE.into()));
+    s
+}
+
 /// The shapes of pages the decoder read false codes from: `$name => draw`.
 macro_rules! false_reads {
     ($($name:literal => $draw:expr,)*) => {
@@ -791,6 +818,12 @@ pub(crate) fn shapes() -> Vec<Shape> {
         "a printed barcode crossed by a dark line 1 px wide" => |v| ruled_code(v, 1, false),
         "a printed barcode crossed by a dark line 4 px wide" => |v| ruled_code(v, 4, false),
         "a printed barcode lying, crossed by a dark line 2 px wide" => |v| ruled_code(v, 2, true),
+    });
+    // Printed codes the decoder does not read, with few or short bars: said.
+    all.extend(false_reads! {
+        "a printed barcode cut by the edge of the page to 30 modules" => |v| printed_code(v, 60, Some(30), 0),
+        "a printed barcode cut by the edge of the page to 45 modules, blurred" => |v| printed_code(v, 60, Some(45), 1),
+        "a printed barcode with bars 6 modules long, blurred" => |v| printed_code(v, 6, None, 1),
     });
     // Two equal codes closer than their quiet zone.
     all.extend(twins! {

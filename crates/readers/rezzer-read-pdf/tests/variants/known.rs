@@ -39,6 +39,27 @@ pub(crate) struct Known {
 /// Every pinned break.
 pub(crate) const KNOWN: &[Known] = &[
     Known {
+        shape: "a printed barcode cut by the edge of the page to 30 modules",
+        variants: &["base"],
+        broken: &[Inv::Code],
+        cause: Cause::Carry,
+        why: "a code cut by the edge of the page cannot be decoded; its bars are named as a printed part that looks like a code, not decoded (a named loss, P6-X holds)",
+    },
+    Known {
+        shape: "a printed barcode cut by the edge of the page to 45 modules, blurred",
+        variants: &["base"],
+        broken: &[Inv::Code],
+        cause: Cause::Carry,
+        why: "a code cut by the edge of the page cannot be decoded; its bars are named as a printed part that looks like a code, not decoded (a named loss, P6-X holds)",
+    },
+    Known {
+        shape: "a printed barcode with bars 6 modules long, blurred",
+        variants: &["base"],
+        broken: &[Inv::Code],
+        cause: Cause::Carry,
+        why: "the decoder reads no code from short bars blurred at 1 pixel a point; its bars are named as a printed part that looks like a code, not decoded (a named loss, P6-X holds)",
+    },
+    Known {
         shape: "a printed barcode crossed by a dark line 1 px wide",
         variants: &["base"],
         broken: &[Inv::NoCode],

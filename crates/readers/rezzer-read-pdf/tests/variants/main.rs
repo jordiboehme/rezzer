@@ -515,6 +515,9 @@ shape_tests! {
     ruled_code_1_px => "a printed barcode crossed by a dark line 1 px wide",
     ruled_code_4_px => "a printed barcode crossed by a dark line 4 px wide",
     ruled_code_lying_2_px => "a printed barcode lying, crossed by a dark line 2 px wide",
+    printed_code_cut_30 => "a printed barcode cut by the edge of the page to 30 modules",
+    printed_code_cut_45_blur => "a printed barcode cut by the edge of the page to 45 modules, blurred",
+    printed_code_short_bars_blur => "a printed barcode with bars 6 modules long, blurred",
 }
 
 /// Task 15b part 2d fix round 3 (M1): the cell check counts the texts it leaves out, and a list
