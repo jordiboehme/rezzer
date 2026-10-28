@@ -3402,3 +3402,84 @@ fn print_on_a_page_that_needs_vision_is_no_code() {
         );
     }
 }
+
+/// A scanned A4 page of 2 pixels a point (one gray picture over all of it, no text) with a
+/// Code 128 `0000000001` of `px` pixels a module and bars `bar` pixels high at 40, 200
+/// points, and, with `rows`, a second one under it that many pixel rows lower (paper between
+/// them); the ink grown by `gain` pixels and the picture blurred `blur` times by a 3 by 3 box.
+fn stacked_scan(px: u32, bar: u32, gain: u32, blur: u32, rows: Option<u32>) -> Vec<u8> {
+    let m = modules(Symbology::Code128, "0000000001");
+    let (w, h) = (1190u32, 1684u32);
+    let mut scan = vec![235u8; (w * h) as usize];
+    let (x0, top) = (80u32, 400u32);
+    let mut tops = vec![top];
+    tops.extend(rows.map(|r| top + bar + r));
+    for t in tops {
+        for y in t..t + bar {
+            for c in (0..m.width).filter(|&c| m.dark[c as usize]) {
+                let a = (x0 + c * px).saturating_sub(gain);
+                let z = x0 + c * px + px + gain;
+                scan[(y * w + a) as usize..(y * w + z) as usize].fill(0);
+            }
+        }
+    }
+    for _ in 0..blur {
+        let src = scan.clone();
+        for y in 1..h - 1 {
+            for x in 1..w - 1 {
+                let mut s = 0u32;
+                for dy in 0..3 {
+                    for dx in 0..3 {
+                        s += u32::from(src[((y + dy - 1) * w + x + dx - 1) as usize]);
+                    }
+                }
+                scan[(y * w + x) as usize] = (s / 9) as u8;
+            }
+        }
+    }
+    image_page(595, 842, "q 595 0 0 842 0 0 cm /Im1 Do Q\n", w, h, &scan)
+}
+
+#[test]
+fn equal_codes_one_over_the_other_in_a_blurred_scan_are_both_said() {
+    // Two equal codes one over the other with one or two rows of paper between them blur into
+    // one: both are listed, or the page says that a part of it looks like a code and was not
+    // decoded, or the code read says that a lighter line runs across its bars, so there may be
+    // a second code. One code is never listed twice, and a code alone says
+    // nothing of the kind.
+    let mut read_some = 0;
+    for px in [2u32, 4, 6] {
+        for gain in [0u32, 1] {
+            for blur in [1u32, 2] {
+                for bar in [40u32, 80] {
+                    let case = format!("{px} a module, gain {gain}, blur {blur}, bars {bar}");
+                    let alone = read(&stacked_scan(px, bar, gain, blur, None));
+                    let a = asset(&alone, "page-1");
+                    if a.codes.len() != 1 {
+                        continue;
+                    }
+                    read_some += 1;
+                    assert!(!a.code_unread, "{case}: {:?}", a.alt);
+                    for rows in [1u32, 2] {
+                        let out = read(&stacked_scan(px, bar, gain, blur, Some(rows)));
+                        let a = asset(&out, "page-1");
+                        let case = format!("{case}, {rows} rows apart");
+                        assert!(a.codes.len() <= 2, "{case}: {:?}", a.codes);
+                        if a.codes.len() < 2 {
+                            let crossed = a.alt.as_deref().is_some_and(|t| {
+                                t.contains("a lighter line runs across the bars of the Code 128")
+                            });
+                            assert!(
+                                says_code_unread(&out) || a.code_unread && crossed,
+                                "{case}: {} read, {:?}",
+                                a.codes.len(),
+                                a.alt
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(read_some >= 4, "{read_some}");
+}

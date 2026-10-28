@@ -106,7 +106,8 @@ const PIXEL_CONTRAST: u32 = 64;
 
 /// The dark parts of a render (`rgba`, `w` by `h` opaque pixels, row by row from the top
 /// left) as filled rectangles in pixels (left, top, right, bottom): each run of dark pixels
-/// in a row, joined with the runs at the same place in the rows under it, so a bar or a
+/// in a row, joined with the runs at the same place (within [`PIXEL_SHIFT`]) in the rows
+/// under it, so a bar or a
 /// module of a code printed in a picture is one rectangle, as one drawn as paths is (for
 /// [`vector_codes`]). Dark is darker than the render's Otsu threshold of gray; a render
 /// without two tones [`PIXEL_CONTRAST`] apart has none. A part smaller than [`PIXEL_MIN`]
@@ -124,11 +125,12 @@ pub(crate) fn pixel_cells(rgba: &[u8], w: usize, h: usize, max: usize) -> Option
         return Some(Vec::new());
     };
     let mut cells: Vec<[u32; 4]> = Vec::new();
-    // The runs still open from the rows above: left, right and first row, by left.
-    let mut open: Vec<(u32, u32, u32)> = Vec::new();
-    let mut next: Vec<(u32, u32, u32)> = Vec::new();
-    let close = |run: (u32, u32, u32), y: u32, cells: &mut Vec<[u32; 4]>| {
-        let (x0, x1, top) = run;
+    // The runs still open from the rows above, by the left of their first row: that row's
+    // left and right, their widest left and right, and their first row.
+    let mut open: Vec<Open> = Vec::new();
+    let mut next: Vec<Open> = Vec::new();
+    let close = |run: Open, y: u32, cells: &mut Vec<[u32; 4]>| {
+        let (x0, x1, top) = (run.lo, run.hi, run.top);
         if x1 - x0 >= PIXEL_MIN || y - top >= PIXEL_MIN {
             cells.push([x0, top, x1, y]);
         }
@@ -149,17 +151,32 @@ pub(crate) fn pixel_cells(rgba: &[u8], w: usize, h: usize, max: usize) -> Option
             }
             let (x0, x1) = (x0 as u32, x as u32);
             // The open runs that start before this one end here.
-            while k < open.len() && open[k].0 < x0 {
+            while k < open.len() && open[k].first.0 + PIXEL_SHIFT < x0 {
                 if !close(open[k], y as u32, &mut cells) {
                     return None;
                 }
                 k += 1;
             }
-            if k < open.len() && open[k].0 == x0 && open[k].1 == x1 {
-                next.push(open[k]);
-                k += 1;
-            } else {
-                next.push((x0, x1, y as u32));
+            // A run within a pixel of an open one's first row goes on with it: the soft ends
+            // of blurred bars are a pixel narrower.
+            match open.get(k) {
+                Some(o)
+                    if o.first.0.abs_diff(x0) <= PIXEL_SHIFT
+                        && o.first.1.abs_diff(x1) <= PIXEL_SHIFT =>
+                {
+                    next.push(Open {
+                        lo: o.lo.min(x0),
+                        hi: o.hi.max(x1),
+                        ..*o
+                    });
+                    k += 1;
+                }
+                _ => next.push(Open {
+                    first: (x0, x1),
+                    lo: x0,
+                    hi: x1,
+                    top: y as u32,
+                }),
             }
         }
         for &run in &open[k..] {
@@ -172,10 +189,70 @@ pub(crate) fn pixel_cells(rgba: &[u8], w: usize, h: usize, max: usize) -> Option
     Some(cells)
 }
 
+/// A run of dark pixels of [`pixel_cells`] open from the rows above: the left and right of
+/// its first row, its widest left and right, and its first row.
+#[derive(Clone, Copy)]
+struct Open {
+    first: (u32, u32),
+    lo: u32,
+    hi: u32,
+    top: u32,
+}
+
+/// How many pixels the ends of a run may stand off those of the first row of the run above
+/// it for [`pixel_cells`] to join them.
+const PIXEL_SHIFT: u32 = 1;
+
 /// The gray of pixel `i` of `rgba`.
 fn gray_at(rgba: &[u8], i: usize) -> u8 {
     let p = &rgba[i * 4..i * 4 + 3];
     ((u32::from(p[0]) * 299 + u32::from(p[1]) * 587 + u32::from(p[2]) * 114) / 1000) as u8
+}
+
+/// How much lower than the lines on both sides the contrast of a line across the bars of a
+/// linear code is at most for [`crossed`]: a line of paper between two codes, blurred.
+const CROSSED_DIP: f32 = 0.8;
+
+/// The lines of bars on each side of such a line, at least.
+const CROSSED_PART: usize = 3;
+
+/// Whether the bars of a linear code in box `b` (pixels: left, top, right, bottom) of the
+/// render `rgba` (`size` in pixels) are crossed by a lighter line: along its bars, between two
+/// parts of at least [`CROSSED_PART`] lines of bars each, the contrast across them (from the
+/// darkest to the lightest tenth of the line) dips to [`CROSSED_DIP`] of the lower part's.
+/// The soft ends of blurred bars only fade out. The bars stand the way the lines across
+/// them show more contrast.
+pub(crate) fn crossed(rgba: &[u8], (w, h): (usize, usize), b: [u32; 4]) -> bool {
+    let (x0, x1) = (b[0] as usize, (b[2] as usize).min(w));
+    let (y0, y1) = (b[1] as usize, (b[3] as usize).min(h));
+    if x1 <= x0 || y1 <= y0 || rgba.len() < w * h * 4 {
+        return false;
+    }
+    let contrast = |pixels: &mut dyn Iterator<Item = usize>| {
+        let mut v: Vec<u8> = pixels.map(|i| gray_at(rgba, i)).collect();
+        v.sort_unstable();
+        let at = |share: usize| f32::from(v[(v.len() - 1) * share / 10]);
+        at(9) - at(1)
+    };
+    let rows: Vec<f32> = (y0..y1)
+        .map(|y| contrast(&mut (x0..x1).map(|x| y * w + x)))
+        .collect();
+    let cols: Vec<f32> = (x0..x1)
+        .map(|x| contrast(&mut (y0..y1).map(|y| y * w + x)))
+        .collect();
+    let mean = |v: &[f32]| v.iter().sum::<f32>() / v.len() as f32;
+    let lines = if mean(&rows) >= mean(&cols) {
+        rows
+    } else {
+        cols
+    };
+    (1..lines.len().saturating_sub(1)).any(|i| {
+        let (before, after) = (&lines[..i], &lines[i + 1..]);
+        let top = |v: &[f32]| v.iter().copied().fold(0.0, f32::max);
+        let low = top(before).min(top(after));
+        let strong = |v: &[f32]| v.iter().filter(|&&c| c >= 0.9 * low).count() >= CROSSED_PART;
+        low > 0.0 && lines[i] <= CROSSED_DIP * low && strong(before) && strong(after)
+    })
 }
 
 /// The Otsu threshold of gray histogram `hist`: the level that splits it into its dark and
@@ -223,7 +300,7 @@ const MERGE_GROUPS: usize = 2_000;
 /// reads the first [`MAX_REGIONS`] and says the others. `Err` says why the page was not
 /// searched: its work would pass [`MAX_ENTRIES`] or [`MAX_PAIRS`].
 pub(crate) fn vector_codes(cells: &[[f32; 4]]) -> Result<Vec<VectorCode>, String> {
-    codes_among(cells, false)
+    codes_among(cells, (false, MIN_MODULE))
 }
 
 /// The bars of a code drawn as paths are at least this many modules long.
@@ -240,15 +317,24 @@ const PRINTED_BAR: f32 = 8.0;
 const PRINTED_PERIOD: usize = 6;
 
 /// The regions among `cells`, the dark parts of a render in points (see [`pixel_cells`]),
-/// that look like a code printed there: as [`vector_codes`], with the bars of a linear code
-/// at least [`PRINTED_BAR`] modules long and not repeating after a few
+/// that look like a code printed there: as [`vector_codes`], with modules at least
+/// [`PRINTED_MODULE`] of the render's pixels (`pixel` points) wide, and the bars of a linear
+/// code at least [`PRINTED_BAR`] modules long and not repeating after a few
 /// ([`PRINTED_PERIOD`]).
-pub(crate) fn printed_codes(cells: &[[f32; 4]]) -> Result<Vec<VectorCode>, String> {
-    codes_among(cells, true)
+pub(crate) fn printed_codes(cells: &[[f32; 4]], pixel: f32) -> Result<Vec<VectorCode>, String> {
+    codes_among(cells, (true, PRINTED_MODULE * pixel))
 }
 
-/// [`vector_codes`], or with `printed` [`printed_codes`].
-fn codes_among(cells: &[[f32; 4]], printed: bool) -> Result<Vec<VectorCode>, String> {
+/// The modules of a code printed in a picture are at least this many pixels of its render
+/// wide: on a lattice of one pixel every part of a render lies, letters too.
+const PRINTED_MODULE: f32 = 2.0;
+
+/// [`vector_codes`], or with `printed` [`printed_codes`], its modules at least `min_module`
+/// points.
+fn codes_among(
+    cells: &[[f32; 4]],
+    (printed, min_module): (bool, f32),
+) -> Result<Vec<VectorCode>, String> {
     let cells: Vec<[f32; 4]> = cells
         .iter()
         .copied()
@@ -362,7 +448,7 @@ fn codes_among(cells: &[[f32; 4]], printed: bool) -> Result<Vec<VectorCode>, Str
     let look = |members: &[usize], found: &mut Vec<(usize, VectorCode)>| match region(
         &cells,
         members,
-        printed,
+        (printed, min_module),
         &|b| quiet(&cells, &grid_of, members, b, &key),
     ) {
         Some(code) => {
@@ -608,12 +694,12 @@ const MAX_MODULES: usize = 200;
 fn region(
     cells: &[[f32; 4]],
     members: &[usize],
-    printed: bool,
+    (printed, min_module): (bool, f32),
     quiet: &dyn Fn([f32; 4]) -> bool,
 ) -> Option<VectorCode> {
     let (b, module) = bounds(cells, members);
     let (w, h) = (b[2] - b[0], b[3] - b[1]);
-    if w.max(h) > MAX_SIDE || module < MIN_MODULE {
+    if w.max(h) > MAX_SIDE || module < min_module.max(MIN_MODULE) {
         return None;
     }
     let area: f32 = members
@@ -676,8 +762,8 @@ fn region(
 /// are a linear code: about as long as the region and at least [`DRAWN_BAR`] modules long, of
 /// at least two widths and at most 4 modules wide, every bar and nearly every space a whole
 /// number of modules wide, not all at one pitch, with 5 modules free at both ends. A code
-/// `printed` in a picture has bars [`PRINTED_BAR`] modules long and does not repeat after a
-/// few bars.
+/// `printed` in a picture has bars [`PRINTED_BAR`] modules long, does not repeat after a few
+/// bars, and its bars and spaces are whole modules give or take the ink's spread.
 fn linear(
     cells: &[[f32; 4]],
     members: &[usize],
@@ -716,6 +802,16 @@ fn linear(
             _ => runs.push((a, z)),
         }
     }
+    // Ink spreads in print: its bars grow and its spaces shrink by as much. The module of a
+    // printed code is the mean of its narrowest bar and space, the spread what that bar has
+    // more.
+    let (module, spread) = match runs.windows(2).map(|w| w[1].0 - w[0].1).reduce(f32::min) {
+        Some(space) if printed => {
+            let bar = runs.iter().map(|(a, z)| z - a).fold(f32::MAX, f32::min);
+            ((bar + space) / 2.0, (bar - space) / 2.0)
+        }
+        _ => (module, 0.0),
+    };
     // Bars at least `bar` modules long; every bar and space a whole number of modules wide,
     // but for a few spaces (codes side by side closer than their quiet zone).
     let bar = if printed { PRINTED_BAR } else { DRAWN_BAR };
@@ -729,17 +825,20 @@ fn linear(
         let k = v / module;
         k.round() >= 1.0 && (k - k.round()).abs() <= 0.2
     };
-    if runs.iter().any(|(a, z)| !whole(z - a)) {
+    if runs.iter().any(|(a, z)| !whole(z - a - spread)) {
         return false;
     }
-    let spaces = runs.windows(2).filter(|w| !whole(w[1].0 - w[0].1)).count();
+    let spaces = runs
+        .windows(2)
+        .filter(|w| !whole(w[1].0 - w[0].1 + spread))
+        .count();
     if spaces * 10 > runs.len().saturating_sub(1) {
         return false;
     }
     // A code's bars are at most 4 modules wide and never at one pitch: bars that start at
     // one step after another (a ruler, a scale bar, the ticks of an axis, hatching) carry
     // nothing.
-    if runs.iter().any(|(a, z)| (z - a) / module > 4.2) {
+    if runs.iter().any(|(a, z)| (z - a - spread) / module > 4.2) {
         return false;
     }
     // At one pitch by their starts, their ends or their middles: ticks may be set by any.
@@ -764,7 +863,7 @@ fn linear(
     }
     let mut widths: Vec<i32> = runs
         .iter()
-        .map(|(a, z)| ((z - a) / module).round() as i32)
+        .map(|(a, z)| ((z - a - spread) / module).round() as i32)
         .collect();
     widths.sort_unstable();
     widths.dedup();
@@ -1353,5 +1452,47 @@ mod tests {
         let bars = code128("0000000001", (0.0, 0.0), module, 20.0, false, false);
         let runs: Vec<(f32, f32)> = bars.iter().map(|c| (c[0], c[2])).collect();
         assert!(!repeats(&runs, module));
+    }
+
+    #[test]
+    fn a_lighter_line_across_bars_is_seen() {
+        // Bars of 4 pixels with spaces of 4, 40 rows high, softened at their ends, with a
+        // lighter row in the middle or none.
+        let (w, h) = (64usize, 44usize);
+        let render = |dip: Option<u8>| {
+            let mut gray = vec![235u8; w * h];
+            for y in 2..42 {
+                let ink = match y {
+                    2 | 41 => 160,
+                    3 | 40 => 60,
+                    21 => dip.unwrap_or(0),
+                    _ => 0,
+                };
+                for x in (0..w).filter(|x| x / 4 % 2 == 0) {
+                    gray[y * w + x] = ink;
+                }
+            }
+            gray.iter()
+                .flat_map(|&g| [g, g, g, 255])
+                .collect::<Vec<u8>>()
+        };
+        let b = [0, 2, 64, 42];
+        assert!(!crossed(&render(None), (w, h), b));
+        assert!(crossed(&render(Some(80)), (w, h), b));
+        // Too faint a line to tell.
+        assert!(!crossed(&render(Some(20)), (w, h), b));
+        // The same bars lying down.
+        let turned = |rgba: Vec<u8>| {
+            let mut out = vec![0u8; rgba.len()];
+            for y in 0..h {
+                for x in 0..w {
+                    let (s, d) = ((y * w + x) * 4, (x * h + y) * 4);
+                    out[d..d + 4].copy_from_slice(&rgba[s..s + 4]);
+                }
+            }
+            out
+        };
+        assert!(crossed(&turned(render(Some(80))), (h, w), [2, 0, 42, 64]));
+        assert!(!crossed(&turned(render(None)), (h, w), [2, 0, 42, 64]));
     }
 }

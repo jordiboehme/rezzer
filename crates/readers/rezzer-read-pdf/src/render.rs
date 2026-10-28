@@ -2264,6 +2264,7 @@ impl Scans {
                 self.large_payloads += 1;
             }
             let mut drawn = false;
+            let mut crossed = None;
             if let Some((need, region)) = on {
                 let px = page_rect(picture, need, c.bounds);
                 // A code drawn as paths or a picture that looks like a code takes the box
@@ -2281,8 +2282,32 @@ impl Scans {
                 let (fw, fh) = need.turn.size(w, h);
                 b.place = Some(place_words(framed, fw, fh));
                 b.bounds = Some(framed);
+                // In the page's own read, two equal linear codes one over the other with little
+                // paper between them may be read as one: a lighter line across its bars says
+                // so.
+                let p = &picture.pixmap;
+                if region.is_none()
+                    && !c.symbology.two_d()
+                    && crate::codes::crossed(
+                        p.data_as_u8_slice(),
+                        (usize::from(p.width()), usize::from(p.height())),
+                        c.bounds,
+                    )
+                {
+                    crossed = Some(format!(
+                        "a lighter line runs across the bars of the {}, {}: it may be two \
+                         codes, one not decoded",
+                        b.symbology,
+                        b.place.as_deref().unwrap_or_default()
+                    ));
+                }
             }
             let found = self.found.entry(asset).or_default();
+            if let Some(words) = crossed
+                && !found.unread.contains(&words)
+            {
+                found.unread.push(words);
+            }
             let same: Vec<usize> = (0..found.codes.len())
                 .filter(|&i| same_code(&found.codes[i], &b))
                 .collect();
@@ -2705,7 +2730,7 @@ fn printed_codes(page: &Rendered, need: &Need, room: u64) -> Result<Vec<[f32; 4]
         .map(|c| page_rect(page, need, *c))
         .collect();
     drop(cells);
-    let found = crate::codes::printed_codes(&points)?;
+    let found = crate::codes::printed_codes(&points, (1.0 / page.scale) as f32)?;
     Ok(found.into_iter().map(|c| c.b).collect())
 }
 
