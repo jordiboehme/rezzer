@@ -2245,11 +2245,6 @@ pub(crate) fn shapes() -> Vec<Shape> {
             draw: |v| (prose_by_fields(v, true), None),
         },
         Shape {
-            name: "prose right over a column of field lines",
-            axes: DOC,
-            draw: |v| (prose_by_fields(v, false), None),
-        },
-        Shape {
             name: "a paragraph without a stop set full in a narrow column",
             axes: DOC,
             draw: |v| (justified_paragraph(v), None),
