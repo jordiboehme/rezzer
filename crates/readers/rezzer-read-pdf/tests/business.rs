@@ -2003,6 +2003,72 @@ fn a_note_row_after_a_blank_row_heads_no_table() {
     );
 }
 
+/// Task 15b part 2e-1 (item 1, part 2d review I4; ruling P6-X): a table without rules, then a
+/// blank row of 2.2 or 2.4 pitches and a header of its own over one row (`Kennung Vorgang Wert`
+/// over `A-1 Fahrgeld 45,67`), plain or bold, the first table's header 1.0 or 1.6 pitches over
+/// its rows: the two lines are a table of a header and one row, not one paragraph of both lines
+/// and no loss. Sizes 6 to 14 in both fonts.
+#[test]
+fn a_header_and_one_row_after_a_table_are_a_table_of_their_own() {
+    let mut wrong = Vec::new();
+    let first = [
+        ["Lohnart", "Bezeichnung", "Betrag"],
+        ["1000", "Gehalt", "3.000,00"],
+        ["1010", "Zulage", "150,00"],
+    ];
+    let second = [["Kennung", "Vorgang", "Wert"], ["A-1", "Fahrgeld", "45,67"]];
+    // The step of the first table's header over its rows, the blank row, a bold second header.
+    let cases = [
+        (1.6, 2.2, false),
+        (1.0, 2.4, false),
+        (1.0, 2.4, true),
+        (1.6, 2.2, true),
+    ];
+    for size in [6.0f32, 8.0, 9.0, 10.0, 12.0, 14.0] {
+        for fonts in FONTS {
+            for (head, gap, bold) in cases {
+                let k = size / 9.0;
+                let pitch = 1.25 * size;
+                let right = |f: &str, x: f32, y: f32, t: &str| {
+                    show(f, size, x - common::font_width(f, t, size), y, t)
+                };
+                let line = |f: &str, y: f32, row: &[&str; 3]| {
+                    show(f, size, 40.0, y, row[0])
+                        + &show(f, size, 40.0 + 72.0 * k, y, row[1])
+                        + &right(f, 40.0 + 360.0 * k, y, row[2])
+                };
+                let mut y = 700.0;
+                let mut t = line(fonts.1, y, &first[0]);
+                y -= head * pitch;
+                t += &line(fonts.0, y, &first[1]);
+                y -= pitch;
+                t += &line(fonts.0, y, &first[2]);
+                y -= gap * pitch;
+                t += &line(if bold { fonts.1 } else { fonts.0 }, y, &second[0]);
+                y -= pitch;
+                t += &line(fonts.0, y, &second[1]);
+                let out = common::read(&page_in(&t, Look::Plain));
+                let found: Vec<Vec<Vec<String>>> = tables(&out).into_iter().map(|t| t.1).collect();
+                let at = format!("{size}, {fonts:?}, head {head}, gap {gap}, bold {bold}");
+                for want in [
+                    owned(&first.iter().map(|r| &r[..]).collect::<Vec<_>>()),
+                    owned(&second.iter().map(|r| &r[..]).collect::<Vec<_>>()),
+                ] {
+                    if !found.contains(&want) {
+                        wrong.push(format!("{at}: no table {want:?}: {found:?}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
 /// Task 15b part 2b re-review (probe C) and part 2c review (Important 4, Minors 1 and 2; ruling
 /// P6-X): a second table under the first after a blank row (2.2 pitches), no rule between,
 /// whose middle column ends where the first table's middle title ends, so that its lines stand
@@ -6261,12 +6327,19 @@ fn a_notice_band_between_rules_is_no_row_of_fields() {
 /// right of its amount, two plain columns, a euro sign, a minus amount, and net, tax and gross
 /// titles over their amounts; the total row at the size or 1.25 times it. Each row's texts
 /// stand together, in one table row or one line, never a label parted from its amount (found
-/// by the spans of the drawn texts), as at d925e37. Sizes 6 to 12, both fonts. Each row: its
+/// by the spans of the drawn texts), as at d925e37. Sizes 6 to 14, both fonts. Each row: its
 /// cells (text, x as a share of the width, flush right), bold, size.
+///
+/// Part 2e-1 (item 5) adds the shapes that read mixed or as a turned table before: a percent
+/// column in one row only (all rows were one paragraph), a larger total under a rule only (a
+/// table of the labels over the amounts) and the net, tax and gross titles over their amounts
+/// (two mixed lines). The titles over amounts a size step larger are labels over their values:
+/// they may also read as those pairs, each title with its amount. No loss names the note under
+/// the totals as a field (part 2d review M2): the totals are no row of fields.
 #[test]
 fn totals_of_other_shapes_keep_their_rows() {
     let mut wrong = Vec::new();
-    for size in [6.0f32, 8.0, 9.0, 10.0, 12.0] {
+    for size in [6.0f32, 8.0, 9.0, 10.0, 12.0, 14.0] {
         for fonts in FONTS {
             // (text, x share of width, right aligned)
             type C<'a> = (&'a str, f32, bool);
@@ -6563,17 +6636,25 @@ fn totals_of_other_shapes_keep_their_rows() {
                     let twice = |t: &str| all.iter().filter(|o| o.contains(t)).count() != 1;
                     let units = common::read_units(&out.document.body);
                     let ordered = vec![false; cells.len()];
-                    // Older (the same at d925e37, part 2e): a percent column in one row, the
-                    // net, tax and gross titles, and a larger total under a rule only, read
-                    // their rows mixed or as a turned table.
-                    let older = *case == "percent column"
-                        || *case == "net tax gross columns"
-                        || (big > 1.0 && !note);
-                    if older {
-                        continue;
+                    let mut broken = common::cells_apart(&units, &cells, &ordered, &twice);
+                    // Titles over amounts a size step larger: each title with its amount is
+                    // a right reading too.
+                    if !broken.is_empty() && *case == "net tax gross columns" && big > 1.0 {
+                        let columns: Vec<Vec<String>> = (0..cells[0].len())
+                            .map(|c| vec![cells[0][c].clone(), cells[1][c].clone()])
+                            .collect();
+                        let ordered = vec![true; columns.len()];
+                        if common::cells_apart(&units, &columns, &ordered, &twice).is_empty() {
+                            broken.clear();
+                        }
                     }
-                    for w in common::cells_apart(&units, &cells, &ordered, &twice) {
+                    for w in broken {
                         wrong.push(format!("{at}: {w}"));
+                    }
+                    for l in &out.document.losses {
+                        if l.what.contains("Zahlbar") {
+                            wrong.push(format!("{at}: a loss names the note: {}", l.what));
+                        }
                     }
                 }
             }

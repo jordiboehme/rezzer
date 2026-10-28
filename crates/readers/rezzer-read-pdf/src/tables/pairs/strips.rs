@@ -511,6 +511,11 @@ pub(in crate::tables) fn field_strips(
             bodies.push((ids, names));
             continue;
         }
+        // Rows of a table between rules (totals under line items, a larger total last) are no
+        // row of fields: their text is free for the table pass as it stands.
+        if table_rows(flow, &ids) {
+            continue;
+        }
         // Never a wrong pair: a run over a divider leaves the cells it stands in as text; the
         // other cells of the row still pair.
         let inner = &edges[1..edges.len() - 1];
@@ -630,14 +635,18 @@ pub(in crate::tables) fn field_strips(
             ));
             continue;
         }
-        for (why, names) in &left_out {
-            say(unsure, names, why);
-        }
         // Every cell left out: no row of fields is read, and it is read cell by cell, but for
         // totals between rules (rows of a label and an amount), whose text is free for the
-        // table pass as it stands.
+        // table pass as it stands: they are no row of fields, and no loss names them as one
+        // (nor the note under them).
+        let to_tables = fields.is_empty() && totals_rows(flow, &ids);
+        if !to_tables {
+            for (why, names) in &left_out {
+                say(unsure, names, why);
+            }
+        }
         if fields.is_empty() {
-            if !left_out.is_empty() && !totals_rows(flow, &ids) {
+            if !left_out.is_empty() && !to_tables {
                 apart.extend(cell_order(
                     flow,
                     by_y,
@@ -1062,6 +1071,33 @@ fn heads_over_lines(flow: &Flow, cell: &[usize]) -> Option<Vec<String>> {
 /// the table pass; any other (address blocks side by side, a cell of two lines beside cells of
 /// one) is read cell by cell.
 fn totals_rows(flow: &Flow, ids: &[usize]) -> bool {
+    grid_sizes(flow, ids).is_some()
+}
+
+/// Whether the runs `ids` of a frame are rows of one grid (see [`totals_rows`]) whose first and
+/// last pieces on each line are of one size, and two of whose lines are of one size too (each
+/// within a size step, see [`LABEL_STEP`]): rows of a table, as a label stands a size step
+/// under its value, over it or beside it. Totals under the rule of line items with a larger
+/// total last are such rows; a row of labels over their values and labels beside their values
+/// are not.
+fn table_rows(flow: &Flow, ids: &[usize]) -> bool {
+    let one = |a: f32, b: f32| a.max(b) < LABEL_STEP * a.min(b);
+    grid_sizes(flow, ids).is_some_and(|rows| {
+        let mut sizes: Vec<f32> = Vec::new();
+        for (first, last) in rows {
+            if !one(first, last) {
+                return false;
+            }
+            sizes.push(first.max(last));
+        }
+        sizes.sort_by(f32::total_cmp);
+        sizes.windows(2).any(|w| one(w[0], w[1]))
+    })
+}
+
+/// The sizes of the first and the last piece of each line of two pieces or more of the runs
+/// `ids` of a frame, when they are rows of one grid (see [`totals_rows`]).
+fn grid_sizes(flow: &Flow, ids: &[usize]) -> Option<Vec<(f32, f32)>> {
     let ids: Vec<usize> = ids
         .iter()
         .copied()
@@ -1082,7 +1118,7 @@ fn totals_rows(flow: &Flow, ids: &[usize]) -> bool {
         rows.push([at(&pieces[0]), at(&pieces[pieces.len() - 1])]);
     }
     if rows.len() < 2 {
-        return false;
+        return None;
     }
     let same = |k: usize, end: bool| {
         rows.iter().all(|r| {
@@ -1095,7 +1131,8 @@ fn totals_rows(flow: &Flow, ids: &[usize]) -> bool {
         })
     };
     let column = |k: usize| same(k, false) || same(k, true);
-    column(0) && column(1) && (same(0, true) || same(1, true))
+    (column(0) && column(1) && (same(0, true) || same(1, true)))
+        .then(|| rows.iter().map(|r| (r[0].2, r[1].2)).collect())
 }
 
 /// The cells of a row of fields between the rules `top` and `bottom` from `x0` to `x1`, with

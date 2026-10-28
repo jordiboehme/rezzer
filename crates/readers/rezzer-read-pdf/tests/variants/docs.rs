@@ -279,6 +279,22 @@ type TotalsRow = &'static [(&'static str, f32, bool)];
 /// under the items and a rule under a smaller note: `rows`, the last one (the total) bold and
 /// `last` times the size. The totals are one table of their rows.
 fn totals_shape(v: &Variant, rows: &[TotalsRow], last: f32) -> Sheet {
+    totals_drawn(v, rows, last, Under::Note)
+}
+
+/// What stands under the totals of [`totals_drawn`] (part 2e-1, item 5).
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Under {
+    /// A smaller note over a rule of its own.
+    Note,
+    /// A rule right under the totals.
+    Rule,
+    /// A rule under the note, and the first row bold: titles over their amounts.
+    Titles,
+}
+
+/// [`totals_shape`] with `under` the totals.
+fn totals_drawn(v: &Variant, rows: &[TotalsRow], last: f32, under: Under) -> Sheet {
     let k = v.k();
     let (plain, bold) = v.faces();
     let size = 8.0 * k;
@@ -296,11 +312,13 @@ fn totals_shape(v: &Variant, rows: &[TotalsRow], last: f32) -> Sheet {
     let mut table: Vec<Vec<String>> = Vec::new();
     for (n, cells) in rows.iter().enumerate() {
         let total = n + 1 == rows.len();
-        let (font, fs) = if total {
-            (bold, last * size)
+        let heads = if under == Under::Titles {
+            n == 0
         } else {
-            (plain, size)
+            total
         };
+        let font = if heads { bold } else { plain };
+        let fs = if total { last * size } else { size };
         let at = y(44.0 + 10.0 * n as f32);
         for &(text, x, flush) in cells.iter().filter(|c| !c.0.is_empty()) {
             t += &if flush {
@@ -312,14 +330,18 @@ fn totals_shape(v: &Variant, rows: &[TotalsRow], last: f32) -> Sheet {
         table.push(cells.iter().map(|c| c.0.to_string()).collect());
     }
     let low = 44.0 + 10.0 * rows.len() as f32;
-    t += &show(
-        plain,
-        0.8 * size,
-        40.0,
-        y(low + 6.0),
-        "Zahlbar innerhalb von 14 Tagen ohne Abzug.",
-    );
-    t += &rule(v, 40.0, 540.0, y(low + 14.0), size);
+    if under == Under::Rule {
+        t += &rule(v, 40.0, 540.0, y(low - 1.0), size);
+    } else {
+        t += &show(
+            plain,
+            0.8 * size,
+            40.0,
+            y(low + 6.0),
+            "Zahlbar innerhalb von 14 Tagen ohne Abzug.",
+        );
+        t += &rule(v, 40.0, 540.0, y(low + 14.0), size);
+    }
     let mut s = sheet(
         v,
         t,
@@ -380,6 +402,47 @@ const PERCENT_TOTALS: [TotalsRow; 3] = [
         ("Gesamt", 300.0, false),
         ("", 450.0, true),
         ("120,00", 540.0, true),
+    ],
+];
+
+/// Part 2e-1 (item 5): plain totals of a label and an amount with its currency.
+const PLAIN_TOTALS: [TotalsRow; 3] = [
+    &[("Nettobetrag", 300.0, false), ("1.234,56 EUR", 540.0, true)],
+    &[
+        ("zzgl. USt. 19 %", 300.0, false),
+        ("234,57 EUR", 540.0, true),
+    ],
+    &[("Gesamt", 300.0, false), ("1.469,13 EUR", 540.0, true)],
+];
+/// Part 2e-1 (item 5): a percent column in one row only.
+const PERCENT_ONE_ROW_TOTALS: [TotalsRow; 3] = [
+    &[
+        ("Nettobetrag", 300.0, false),
+        ("", 450.0, true),
+        ("1.234,56", 540.0, true),
+    ],
+    &[
+        ("USt.", 300.0, false),
+        ("19 %", 450.0, true),
+        ("234,57", 540.0, true),
+    ],
+    &[
+        ("Gesamt", 300.0, false),
+        ("", 450.0, true),
+        ("1.469,13", 540.0, true),
+    ],
+];
+/// Part 2e-1 (item 5): the net, tax and gross titles over their amounts.
+const NET_TAX_GROSS_TOTALS: [TotalsRow; 2] = [
+    &[
+        ("Netto", 300.0, false),
+        ("USt.", 450.0, true),
+        ("Brutto", 540.0, true),
+    ],
+    &[
+        ("1.234,56", 300.0, false),
+        ("234,57", 450.0, true),
+        ("1.469,13", 540.0, true),
     ],
 ];
 
@@ -770,6 +833,9 @@ fn two_tables(v: &Variant, plain: bool) -> Sheet {
 enum Second {
     /// A second table under a plain header.
     Plain,
+    /// A second table of one row under a plain header (part 2e-1, item 1: the two lines are
+    /// a table of a header and one row).
+    PlainOne,
     /// A second table under a bold header of years.
     Years,
     /// A note row of text over more rows of the first table's shape: one table, the note row
@@ -794,7 +860,7 @@ fn two_tables_or_note(v: &Variant, second_kind: Second, inner: f32) -> Sheet {
         ["Summe", "", "3.195,67"],
     ];
     let second = match second_kind {
-        Second::Plain => [
+        Second::Plain | Second::PlainOne => [
             ["Kennung", "Menge", "Wert"],
             ["7001", "12", "45,67"],
             ["7002", "3", "8,90"],
@@ -811,6 +877,11 @@ fn two_tables_or_note(v: &Variant, second_kind: Second, inner: f32) -> Sheet {
         ],
     };
     let note = second_kind == Second::Note;
+    let second = if second_kind == Second::PlainOne {
+        &second[..2]
+    } else {
+        &second[..]
+    };
     let (x0, x1, x2) = (40.0, 40.0 + 72.0 * k, 40.0 + 360.0 * k);
     let mid = x1 + font_width(bold, "Bezeichnung", size);
     let mut t = String::new();
@@ -845,7 +916,7 @@ fn two_tables_or_note(v: &Variant, second_kind: Second, inner: f32) -> Sheet {
     };
     let mut s = sheet(v, t, 420.0, Some(span));
     if note {
-        let all: Vec<&[&str]> = first.iter().chain(&second).map(|r| &r[..]).collect();
+        let all: Vec<&[&str]> = first.iter().chain(second).map(|r| &r[..]).collect();
         s.want.tables.push(owned(&all));
         // The note row may head a table of its own (Task 15b part 2d fix round 1): said.
         s.want.losses.push("may start a table of its own".into());
@@ -1192,6 +1263,36 @@ pub(crate) fn shapes() -> Vec<Shape> {
             draw: |v| (totals_shape(v, &PERCENT_TOTALS, 1.25), None),
         },
         Shape {
+            name: "totals with a percent column in one row between rules over a note",
+            axes: RULED,
+            draw: |v| (totals_shape(v, &PERCENT_ONE_ROW_TOTALS, 1.0), None),
+        },
+        Shape {
+            name: "totals with a percent column in one row and a larger total between rules over a note",
+            axes: RULED,
+            draw: |v| (totals_shape(v, &PERCENT_ONE_ROW_TOTALS, 1.25), None),
+        },
+        Shape {
+            name: "totals with a larger total under a rule",
+            axes: RULED,
+            draw: |v| (totals_drawn(v, &PLAIN_TOTALS, 1.25, Under::Rule), None),
+        },
+        Shape {
+            name: "totals with a percent column and a larger total under a rule",
+            axes: RULED,
+            draw: |v| (totals_drawn(v, &PERCENT_TOTALS, 1.25, Under::Rule), None),
+        },
+        Shape {
+            name: "net, tax and gross titles over their amounts between rules over a note",
+            axes: RULED,
+            draw: |v| {
+                (
+                    totals_drawn(v, &NET_TAX_GROSS_TOTALS, 1.0, Under::Titles),
+                    None,
+                )
+            },
+        },
+        Shape {
             name: "a notice band between rules",
             axes: DOC_NEXT,
             draw: |v| (notice_band(v), None),
@@ -1260,6 +1361,11 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "a second table under a plain header after a row set apart",
             axes: DOC_NEXT,
             draw: |v| (two_tables_or_note(v, Second::Plain, 1.5), None),
+        },
+        Shape {
+            name: "a second table of one row under a plain header after a bold total",
+            axes: DOC_NEXT,
+            draw: |v| (two_tables_or_note(v, Second::PlainOne, 1.0), None),
         },
         Shape {
             name: "a note row after a blank row in a table",

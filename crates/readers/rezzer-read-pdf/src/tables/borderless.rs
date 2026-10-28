@@ -96,6 +96,9 @@ pub(super) fn borderless(
     // more; at most two lines of one piece in a row (cell text that wraps). Each region also
     // has the lines right under it that may go on in its last row (see [`Tail`]).
     let mut regions: Vec<(usize, usize, Tail)> = Vec::new();
+    // The lines where a region was parted from the one over it: by a blank row before a header
+    // of its own or other columns, or by a rule that ends a table.
+    let mut parted: Vec<usize> = Vec::new();
     // The first runs of lines of text after a blank row over rows of their region's shape.
     let mut maybe_heads: Vec<usize> = Vec::new();
     let mut i = 0;
@@ -131,8 +134,14 @@ pub(super) fn borderless(
                 next.is_some_and(|next| pitch > 0.0 && gap > REGION_STEPS * pitch.max(next));
             if blank {
                 match header_line(flow, &lines[i..end], cur, &lines[end + 1]) {
-                    Head::Header => break,
-                    _ if !in_columns(flow, &lines[i..end], cur) => break,
+                    Head::Header => {
+                        parted.push(end);
+                        break;
+                    }
+                    _ if !in_columns(flow, &lines[i..end], cur) => {
+                        parted.push(end);
+                        break;
+                    }
                     // A line of text over rows of the region's own shape goes on as a row of
                     // its table, but it may head a table of its own: that is said.
                     Head::Doubt => maybe_heads.push(cur.start),
@@ -171,7 +180,9 @@ pub(super) fn borderless(
         }
         // A rule across the lines may end their table: the lines below it are a region of
         // their own (totals under line items).
-        let z = ended(flow, &lines, (i, last_multi + 1), &found.ends).unwrap_or(last_multi + 1);
+        let rule_end = ended(flow, &lines, (i, last_multi + 1), &found.ends);
+        parted.extend(rule_end);
+        let z = rule_end.unwrap_or(last_multi + 1);
         let mut tail = Tail {
             end: z,
             marked: false,
@@ -221,7 +232,13 @@ pub(super) fn borderless(
     // Blocks side by side read one after the other: where their runs start in the flow, and
     // the runs in the order to read them.
     let mut apart: Vec<(usize, Vec<usize>)> = Vec::new();
+    // Whether the region before was taken as a table.
+    let mut table_over = false;
     for (g, (a, mut z, tail)) in regions.into_iter().enumerate() {
+        // A region parted from a table right over it (a second table after a blank row, the
+        // titles of totals over their amounts under a table's end rule) is a table of a header
+        // and one row too, or its refusal is said.
+        let after_table = std::mem::take(&mut table_over) && parted.contains(&a);
         if g % CHECK_EVERY == CHECK_EVERY - 1 && stop() {
             found.skipped.push(format!(
                 "tables without rules on page {page} are looked for only in part: the time \
@@ -377,7 +394,7 @@ pub(super) fn borderless(
             let (caption_line, figure_caption) =
                 captions_near(flow, &lines, &by_y, b, &line_sizes, &in_region);
             let table_caption = caption_line.is_some();
-            let rows_needed = if table_caption { 2 } else { 3 };
+            let rows_needed = if table_caption || after_table { 2 } else { 3 };
             let verdict =
                 grid_of(flow, &lines[a..z], pieces, rows_needed, table_caption).and_then(|grid| {
                     if figure_caption {
@@ -493,7 +510,12 @@ pub(super) fn borderless(
             let columned = (a..z).filter(|&k| counts[k] >= 3).count();
             let quietly = (lines[a].start..lines[z - 1].end)
                 .any(|i| found.quietly.get(i).copied().unwrap_or(false) || body_of(i).is_some());
-            if z - a >= 3 && columned >= 3 && !said && !quietly {
+            let looks = if after_table {
+                z - a >= 2 && columned >= 2
+            } else {
+                z - a >= 3 && columned >= 3
+            };
+            if looks && !said && !quietly {
                 found.quiet.push((lo, why, Refused::Region));
             }
         }
@@ -509,6 +531,7 @@ pub(super) fn borderless(
                 });
             }
         }
+        table_over = taken;
     }
     // A frame of column titles over items whose every line no table took is said, by its
     // titles.
@@ -1270,6 +1293,40 @@ fn columns_of(pieces: &[Vec<Piece>]) -> Vec<(f32, f32)> {
     columns
 }
 
+/// `columns` (see [`columns_of`]) with a column of their own for the pieces that stand in a
+/// gutter between two of them, in no column, on lines under the first with more pieces than
+/// the columns: a column with text in a few rows only (a rate beside one of the totals). A
+/// line of no more pieces than the columns with text in a gutter (a note between rows, a cell
+/// over two columns) adds none. Such pieces that overlap are one column.
+fn with_sparse(columns: Vec<(f32, f32)>, pieces: &[Vec<Piece>]) -> Vec<(f32, f32)> {
+    let (Some(first), Some(last)) = (columns.first(), columns.last()) else {
+        return columns;
+    };
+    let (left, right) = (first.1, last.0);
+    let mut spans: Vec<(f32, f32)> = pieces
+        .iter()
+        .skip(1)
+        .filter(|l| l.len() > columns.len())
+        .flatten()
+        .filter(|p| p.x0 > left && p.x1 < right)
+        .filter(|p| !columns.iter().any(|c| p.x1 > c.0 && p.x0 < c.1))
+        .map(|p| (p.x0, p.x1))
+        .collect();
+    if spans.is_empty() {
+        return columns;
+    }
+    spans.extend(columns);
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut out: Vec<(f32, f32)> = Vec::new();
+    for (s, e) in spans {
+        match out.last_mut() {
+            Some(c) if s <= c.1 => c.1 = c.1.max(e),
+            _ => out.push((s, e)),
+        }
+    }
+    out
+}
+
 /// Where two blocks that stand side by side part, when they do: the widest gutter between
 /// columns, when no line crosses it, the white space all lines leave there is at least
 /// [`BLOCK_GUTTER`] font sizes wide and [`BLOCK_GUTTER_RATIO`] times the median gutter, and
@@ -1431,7 +1488,7 @@ fn grid_of(
     rows_needed: usize,
     table_caption: bool,
 ) -> Result<Grid, &'static str> {
-    let columns = columns_of(pieces);
+    let columns = with_sparse(columns_of(pieces), pieces);
     let cols = columns.len();
     if cols < 2 {
         return Err("no columns");
