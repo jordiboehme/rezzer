@@ -334,6 +334,8 @@ shape_tests! {
     prose_with_a_number_at_a_line_end => "prose with a number at a line end",
     two_lines_of_three_words_set_full => "two lines of three words set full",
     a_paragraph_set_full_in_a_narrow_column => "a paragraph without a stop set full in a narrow column",
+    line_items_with_a_hanging_credit_minus => "line items with a hanging credit minus over a total",
+    line_items_with_a_deduction_under_an_amount => "line items with a deduction with a minus under an amount",
     line_items_with_a_credit_over_a_total => "line items with a credit over a total",
     an_accent_drawn_on_its_own => "an accent drawn on its own over its word",
     cells_of_two_lines_lining_up_by_chance => "cells of two lines lining up by chance between rules",

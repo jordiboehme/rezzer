@@ -1948,12 +1948,14 @@ fn inlines(
         }
         let broken = new_line && breaks.binary_search(&(r.page, r.line)).is_ok();
         // A hyphen at the end of a line joins the word that wraps; one with white space before
-        // it is a dash (`01.10.2026 -` over `31.10.2026`), and the space after it stays.
+        // it is a dash (`01.10.2026 -` over `31.10.2026`), and the space after it stays, as it
+        // does after the minus of an amount (`10,00-` over `80,00`).
         let glued = pieces.last().is_none_or(|p| {
             p.text.ends_with(' ')
-                || p.text
-                    .strip_suffix('-')
-                    .is_some_and(|rest| !rest.is_empty() && !rest.ends_with(char::is_whitespace))
+                || (!signed_amount(&p.text)
+                    && p.text.strip_suffix('-').is_some_and(|rest| {
+                        !rest.is_empty() && !rest.ends_with(char::is_whitespace)
+                    }))
         });
         if new_line && !glued && !broken {
             text.insert(0, ' ');
@@ -2133,7 +2135,7 @@ fn continues(prev: &Line<'_>, cur: &Line<'_>) -> bool {
     // a marker (an indented continuation), not a cell of another column.
     // A word cut at the end of a line goes on at the left of the next, never right of where
     // the cut ends (`Page-` over a cell of the next row).
-    let narrow = c1 - c0 <= BESIDE_WIDTH * (end - p0).max(prev.size) || prev.text.ends_with('-');
+    let narrow = c1 - c0 <= BESIDE_WIDTH * (end - p0).max(prev.size) || word_cut(&prev.text);
     let beside = narrow && c0 >= end + BESIDE_GAP * prev.size.max(cur.size).max(1.0);
     gap > 0.0 && gap <= GAP_RATIO * height && (prev.size - cur.size).abs() <= SIZE_SLACK && !beside
 }
@@ -2712,7 +2714,9 @@ fn line_breaks(all: &[Line<'_>], i: usize, j: usize) -> Vec<(u32, u32)> {
             .chars()
             .next()
             .is_some_and(|c| c.is_uppercase() || c.is_ascii_digit())
-    }) && lines.iter().all(|l| !l.text.ends_with(['-', ',']))
+    }) && lines
+        .iter()
+        .all(|l| !word_cut(&l.text) && !l.text.ends_with(','))
         && !sentences(lines)
         && edges.iter().all(|e| (e.0 - left).abs() <= EDGE)
         && listed(&lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>());
@@ -2746,7 +2750,7 @@ fn line_breaks(all: &[Line<'_>], i: usize, j: usize) -> Vec<(u32, u32)> {
         // first word and a good share of the measure more would still fit. Ragged prose
         // misses a word by a little. A word cut at the line end goes on in the next line.
         let room = SHORT_ROOM * (right - left);
-        let fits = a.1 + 0.25 * next.size + word + room <= right && !lines[k].text.ends_with('-');
+        let fits = a.1 + 0.25 * next.size + word + room <= right && !word_cut(&lines[k].text);
         let aligned = set_aligned && aligned_pair(a, b);
         let apart = !wraps[k] || !around[i - lo + k];
         if fits || aligned || short || apart || lines_apart(lines, k + 1, items) {
@@ -2845,7 +2849,7 @@ fn first_word(line: &Line<'_>) -> f32 {
 ///   the lines were not filled to a measure, they are lines of their own (fields, items,
 ///   address lines) of any length;
 /// - the lines read as no sentences and one ends in a number (an amount, a date, a customer
-///   number) over a line that opens with a capital: a column of values.
+///   number) over a line that opens with a capital or holds only numbers: a column of values.
 ///
 /// In lines that read as sentences, only a row of cells that ends in a number over a line
 /// without cells ends there. Prose goes on, whatever its last word (a number over a noun).
@@ -2855,7 +2859,7 @@ fn wraps(lines: &[Line<'_>], edges: &[(f32, f32)]) -> Vec<bool> {
         return Vec::new();
     }
     let ends_sentence = |l: &Line<'_>| l.text.ends_with(['.', '!', '?', ':']);
-    let cut = |l: &Line<'_>| l.text.ends_with(['-', ',']);
+    let cut = |l: &Line<'_>| word_cut(&l.text) || l.text.ends_with(',');
     let lower = |l: &Line<'_>| l.text.chars().next().is_some_and(char::is_lowercase);
     // A line of punctuation alone (a dash that ends a verse, set on a line of its own) is no
     // line of its own: it ends the line before.
@@ -2887,17 +2891,15 @@ fn wraps(lines: &[Line<'_>], edges: &[(f32, f32)]) -> Vec<bool> {
                     <= right
         });
     // A line that ends in a number (an amount, a date, a customer number), and no sentence,
-    // over a line that opens with a capital ends a value: the next line is a field of its own,
-    // and so is every line of a block that holds such a line and no sentence.
+    // over a line that opens with a capital or holds only numbers (a total under an amount)
+    // ends a value: the next line is a field of its own, and so is every line of a block that
+    // holds such a line and no sentence.
     let value_end = |k: usize| {
         let l = &lines[k];
+        let next = &lines[k + 1].text;
         !ends_sentence(l)
             && !goes_on[k]
-            && lines[k + 1]
-                .text
-                .chars()
-                .next()
-                .is_some_and(char::is_uppercase)
+            && (next.chars().next().is_some_and(char::is_uppercase) || data_only(next))
             && l.text.split_whitespace().next_back().is_some_and(|w| {
                 w.chars().any(|c| c.is_ascii_digit())
                     && w.chars().all(|c| c.is_ascii_digit() || ".,/-".contains(c))
@@ -2920,6 +2922,33 @@ fn wraps(lines: &[Line<'_>], edges: &[(f32, f32)]) -> Vec<bool> {
             })
             .collect()
     }
+}
+
+/// Whether `text` ends in a hyphen that cuts a word: not the minus after an amount with
+/// cents (`10,00-`, `1.234,56-`, the way a deduction or a credit is written), which ends the
+/// amount, not a word.
+fn word_cut(text: &str) -> bool {
+    text.ends_with('-') && !signed_amount(text)
+}
+
+/// Whether the last word of `text` is an amount with a decimal part of two digits and a minus
+/// after it (`10,00-`, `1.234,56-`).
+pub(crate) fn signed_amount(text: &str) -> bool {
+    let Some(word) = text.split_whitespace().next_back() else {
+        return false;
+    };
+    let Some(number) = word.strip_suffix('-') else {
+        return false;
+    };
+    // Digits and marks only (all ASCII, so the byte offsets below are char bounds), a digit
+    // first, and a mark before two digits last.
+    let b = number.as_bytes();
+    b.len() >= 4
+        && b.iter()
+            .all(|c| c.is_ascii_digit() || matches!(c, b'.' | b','))
+        && b[0].is_ascii_digit()
+        && matches!(b[b.len() - 3], b'.' | b',')
+        && b[b.len() - 2..].iter().all(u8::is_ascii_digit)
 }
 
 /// A line has room for the next line's first word when this many sizes of the widest line
@@ -3232,6 +3261,29 @@ mod tests {
         width: 595.0,
         body_size: 10.0,
     };
+
+    /// The minus after an amount with cents ends the amount; a hyphen after a word or a whole
+    /// number cuts a word or a range (part 2e-4, item 3). Text of other scripts is read char by
+    /// char, never cut inside a char.
+    #[test]
+    fn a_minus_after_an_amount_is_no_word_cut() {
+        for signed in ["10,00-", "Rabatt 1 10,00-", "1.234,56-", "12.50-"] {
+            assert!(signed_amount(signed), "{signed}");
+            assert!(!word_cut(signed), "{signed}");
+        }
+        for cut in [
+            "Page-",
+            "Rechnungs-",
+            "2025-",
+            "1,5-",
+            "\u{201c}ab-",
+            "\u{20ac}1,00-",
+            "-",
+        ] {
+            assert!(!signed_amount(cut), "{cut}");
+            assert!(word_cut(cut), "{cut}");
+        }
+    }
 
     fn run(text: &str, line: u32, y: f32, size: f32) -> Run {
         Run {

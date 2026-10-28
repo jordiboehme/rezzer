@@ -858,6 +858,87 @@ fn credit_over_total(v: &Variant) -> Sheet {
     s
 }
 
+/// Part 2e-4 (item 3): line items with the amounts flush right at x 540 and the minus of the
+/// last one, a credit, hanging after them (`10,00` and `-`), over a total flush right under
+/// them: the total stays apart from the credit, on a line of its own, never glued
+/// (`10,00-80,00`).
+fn hanging_credit(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, bold) = v.faces();
+    let size = 8.0 * k;
+    let pitch = 1.25 * size;
+    let top = 600.0;
+    let mut y = top;
+    let mut t = String::new();
+    for (x, h) in [
+        (40.0, "Pos"),
+        (80.0, "Artikel"),
+        (300.0, "Menge"),
+        (480.0, "Betrag"),
+    ] {
+        t += &show(bold, size, x, y, h);
+    }
+    for r in [
+        ["1", "Schrauben", "10", "50,00"],
+        ["2", "Muttern", "20", "40,00"],
+        ["3", "Rabatt", "1", "10,00"],
+    ] {
+        y -= pitch;
+        for (x, c) in [40.0, 80.0, 300.0].iter().zip(r) {
+            t += &show(plain, size, *x, y, c);
+        }
+        t += &right(plain, size, 540.0, y, r[3]);
+    }
+    t += &show(plain, size, 540.0, y, "-");
+    y -= pitch;
+    t += &right(plain, size, 540.0, y, "80,00");
+    let mut s = sheet(v, t, 420.0, Some(Span { top, bottom: y }));
+    s.once.retain(|o| !matches!(o.trim(), "10,00" | "-"));
+    s.once.push("10,00-".into());
+    s.want.cells.push(vec!["10,00-".into()]);
+    s.want.cells.push(vec!["80,00".into()]);
+    s.want.lines_apart.push(("10,00-".into(), "80,00".into()));
+    s
+}
+
+/// Part 2e-4 (item 3, list line 9): line items with the amounts flush right, a deduction with a
+/// minus after it (`12,50-`) on a line of its own under the first amount: a row of its own,
+/// never one cell with the amount over it.
+fn stacked_deduction(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, bold) = v.faces();
+    let size = 8.0 * k;
+    let pitch = 1.3 * size;
+    let top = 600.0;
+    let mut y = top;
+    let mut t = String::new();
+    for (x, h) in [
+        (40.0, "Pos"),
+        (80.0, "Bezeichnung"),
+        (300.0, "Menge"),
+        (500.0, "Betrag"),
+    ] {
+        t += &show(bold, size, x, y, h);
+    }
+    for r in [
+        ["1", "Grundgehalt", "1", "2.500,00"],
+        ["", "", "", "12,50-"],
+        ["2", "Zulage", "2", "100,00"],
+        ["3", "Fahrgeld", "1", "45,67"],
+    ] {
+        y -= pitch;
+        for (x, c) in [40.0, 80.0, 300.0].iter().zip(r) {
+            t += &show(plain, size, *x, y, c);
+        }
+        t += &right(plain, size, 540.0, y, r[3]);
+    }
+    let mut s = sheet(v, t, 420.0, Some(Span { top, bottom: y }));
+    s.want
+        .lines_apart
+        .push(("2.500,00".into(), "12,50-".into()));
+    s
+}
+
 /// Part 2e-2 fix round 1 (I3): an accent drawn as a run of its own over the first letter of
 /// its word, after the word (`Uber`, the dieresis, ` den Vertrag`): it stays in its word.
 fn lone_accent(v: &Variant) -> Sheet {
@@ -2000,6 +2081,16 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "a paragraph without a stop set full in a narrow column",
             axes: DOC,
             draw: |v| (justified_paragraph(v), None),
+        },
+        Shape {
+            name: "line items with a hanging credit minus over a total",
+            axes: DOC,
+            draw: |v| (hanging_credit(v), None),
+        },
+        Shape {
+            name: "line items with a deduction with a minus under an amount",
+            axes: DOC,
+            draw: |v| (stacked_deduction(v), None),
         },
         Shape {
             name: "line items with a credit over a total",

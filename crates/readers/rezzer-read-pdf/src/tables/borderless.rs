@@ -983,12 +983,19 @@ enum Head {
 const HEADER_DIGITS: usize = 4;
 
 /// Whether `text` is an amount: a number (see [`Shape::Number`]) with a decimal part of two
-/// digits (`20,00`, `1.000,00`, `12,50 EUR`). Whole numbers, rates and dates are none.
+/// digits (`20,00`, `1.000,00`, `12,50 EUR`), or such a number with a minus after it (`12,50-`,
+/// a deduction or a credit). Whole numbers, rates and dates are none.
 fn amount(text: &str) -> bool {
+    let text = text.trim();
+    let text = if crate::layout::signed_amount(text) {
+        &text[..text.len() - 1]
+    } else {
+        text
+    };
     if Shape::of(text) != Some(Shape::Number) {
         return false;
     }
-    let mut t = text.trim();
+    let mut t = text;
     for c in CURRENCIES {
         t = t.trim_start_matches(c).trim_end_matches(c).trim();
     }

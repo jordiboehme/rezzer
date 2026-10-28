@@ -2634,38 +2634,129 @@ fn two_lines_set_full_are_no_table() {
 /// Task 15b part 2e-2 fix round 1 (C1; ruling P6-X): line items whose last amount is a credit
 /// with a trailing minus (`10,00-`), the amounts flush left, over a total under the amounts at
 /// the row pitch: the total is no end of the credit's cell (`10,00-80,00`), and it stays a text
-/// of its own. Sizes 6 to 14, Helvetica and Times.
+/// of its own. Sizes 6 to 14, Helvetica and Times. Part 2e-4 (item 3, P6-X): the same with the
+/// amounts flush right and the minus hanging after them, which at small sizes reads as lines
+/// of text (no table): the minus after an amount is no hyphen of a cut word, and a line of an
+/// amount alone under it is a line of its own, never `10,00-80,00` nor one line with it.
 #[test]
 fn a_credit_in_the_last_row_takes_no_total_under_the_table() {
     let mut wrong = Vec::new();
     for size in [6.0f32, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0] {
         for (plain, bold) in [("FL", "FB"), ("FT", "FTB")] {
-            let pitch = 1.25 * size;
-            let mut y = 600.0;
-            let mut t = String::new();
-            for (x, h) in [
-                (40.0, "Pos"),
-                (80.0, "Artikel"),
-                (300.0, "Menge"),
-                (480.0, "Betrag"),
-            ] {
-                t += &show(bold, size, x, y, h);
-            }
-            for row in [
-                ["1", "Schrauben", "10", "50,00"],
-                ["2", "Muttern", "20", "40,00"],
-                ["3", "Rabatt", "1", "10,00-"],
-            ] {
+            for hang in [false, true] {
+                let pitch = 1.25 * size;
+                let mut y = 600.0;
+                let mut t = String::new();
+                for (x, h) in [
+                    (40.0, "Pos"),
+                    (80.0, "Artikel"),
+                    (300.0, "Menge"),
+                    (480.0, "Betrag"),
+                ] {
+                    t += &show(bold, size, x, y, h);
+                }
+                // With `hang`, the amounts stand flush right at x 540 and the minus hangs after
+                // them (part 2e-4, item 3).
+                let amount = |y: f32, a: &str| {
+                    if hang {
+                        let digits = a.trim_end_matches('-');
+                        let mut out = show(
+                            plain,
+                            size,
+                            540.0 - common::font_width(plain, digits, size),
+                            y,
+                            digits,
+                        );
+                        if a.ends_with('-') {
+                            out += &show(plain, size, 540.0, y, "-");
+                        }
+                        out
+                    } else {
+                        show(plain, size, 480.0, y, a)
+                    }
+                };
+                for row in [
+                    ["1", "Schrauben", "10", "50,00"],
+                    ["2", "Muttern", "20", "40,00"],
+                    ["3", "Rabatt", "1", "10,00-"],
+                ] {
+                    y -= pitch;
+                    for (x, c) in [40.0, 80.0, 300.0].iter().zip(row) {
+                        t += &show(plain, size, *x, y, c);
+                    }
+                    t += &amount(y, row[3]);
+                }
                 y -= pitch;
-                for (x, c) in [40.0, 80.0, 300.0, 480.0].iter().zip(row) {
-                    t += &show(plain, size, *x, y, c);
+                t += &amount(y, "80,00");
+                let md = common::markdown(&common::read(&page_in(&t, Look::Plain)));
+                if md
+                    .lines()
+                    .any(|l| l.contains("10,00-") && l.contains("80,00"))
+                {
+                    wrong.push(format!(
+                        "{size}, {plain}, hanging {hang}: the total in the credit's cell or line"
+                    ));
                 }
             }
-            y -= pitch;
-            t += &show(plain, size, 480.0, y, "80,00");
-            let md = common::markdown(&common::read(&page_in(&t, Look::Plain)));
-            if md.contains("10,00-80,00") || md.contains("10,00- 80,00") {
-                wrong.push(format!("{size}, {plain}: the total in the credit's cell"));
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// Task 15b part 2e-4 (item 3, list line 9): an amount with a minus after it (`12,50-`, a
+/// deduction) on a line of its own under an amount of the row over it is a row of its own, as
+/// an amount without a sign is: never one cell with the amount over it (`2.500,00 12,50-`).
+/// Sizes 6 to 14, Helvetica and Times, amounts flush right, with and without thousands marks.
+#[test]
+fn a_deduction_with_a_minus_under_an_amount_is_a_row_of_its_own() {
+    let mut wrong = Vec::new();
+    for deduction in ["12,50-", "1.234,56-"] {
+        for size in [6.0f32, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0] {
+            for (plain, bold) in [("FL", "FB"), ("FT", "FTB")] {
+                let pitch = 1.3 * size;
+                let mut y = 600.0;
+                let mut t = String::new();
+                for (x, h) in [
+                    (40.0, "Pos"),
+                    (80.0, "Bezeichnung"),
+                    (300.0, "Menge"),
+                    (500.0, "Betrag"),
+                ] {
+                    t += &show(bold, size, x, y, h);
+                }
+                for row in [
+                    ["1", "Grundgehalt", "1", "2.500,00"],
+                    ["", "", "", deduction],
+                    ["2", "Zulage", "2", "100,00"],
+                    ["3", "Fahrgeld", "1", "45,67"],
+                ] {
+                    y -= pitch;
+                    for (x, c) in [40.0, 80.0, 300.0].iter().zip(row) {
+                        t += &show(plain, size, *x, y, c);
+                    }
+                    let a = row[3];
+                    t += &show(
+                        plain,
+                        size,
+                        540.0 - common::font_width(plain, a, size),
+                        y,
+                        a,
+                    );
+                }
+                let out = common::read(&page_in(&t, Look::Plain));
+                let glued = tables(&out).iter().any(|(_, rows)| {
+                    rows.iter()
+                        .flatten()
+                        .any(|c| c.contains("2.500,00") && c.contains(deduction))
+                });
+                if glued {
+                    wrong.push(format!("{deduction}, {size}, {plain}: one cell"));
+                }
             }
         }
     }
