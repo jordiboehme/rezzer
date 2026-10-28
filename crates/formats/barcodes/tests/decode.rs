@@ -759,3 +759,106 @@ fn work_steps_count_decoder_calls() {
         assert_eq!((first, second), (None, None));
     }
 }
+
+/// `m` (a linear code) drawn `px` pixels a module and `bar` pixels high, `copies` times one
+/// under the other with `gap` white pixels between, on white with a quiet zone of 10 modules
+/// around: the pixels, their width and height, and the box of each copy's bars (left, top,
+/// right, bottom, the right and bottom edges past the last dark pixel).
+fn linear_pixels(
+    m: &Modules,
+    px: u32,
+    bar: u32,
+    copies: u32,
+    gap: u32,
+) -> (Vec<u8>, u32, u32, Vec<[u32; 4]>) {
+    let q = 10 * px;
+    let w = m.width * px + 2 * q;
+    let h = copies * bar + (copies - 1) * gap + 2 * q;
+    let mut out = vec![255u8; (w * h) as usize];
+    let first = (0..m.width).find(|&c| m.dark[c as usize]).expect("dark");
+    let last = (0..m.width)
+        .rev()
+        .find(|&c| m.dark[c as usize])
+        .expect("dark");
+    let mut boxes = Vec::new();
+    for k in 0..copies {
+        let top = q + k * (bar + gap);
+        for y in top..top + bar {
+            for c in 0..m.width {
+                if m.dark[c as usize] {
+                    let at = (y * w + q + c * px) as usize;
+                    out[at..at + px as usize].fill(0);
+                }
+            }
+        }
+        boxes.push([q + first * px, top, q + (last + 1) * px, top + bar]);
+    }
+    (out, w, h, boxes)
+}
+
+#[test]
+fn a_linear_code_is_boxed_by_its_bars() {
+    // The decoder gives the line it read: the box reaches out along it to the first and the
+    // last bar and across it to the ends of the bars, also for short bars.
+    let m = modules(Symbology::Code128, "0000000001", None);
+    for px in [2, 3, 4] {
+        for bar in [6, 9, 15, 40, 120] {
+            let (gray, w, h, boxes) = linear_pixels(&m, px, bar, 1, 0);
+            let scan = scan_gray(&gray, w, h);
+            let case = format!("{px} pixels a module, bars {bar} high");
+            assert_eq!(
+                texts(&scan),
+                vec![(Symbology::Code128, "0000000001".to_string())],
+                "{case}"
+            );
+            let b = scan.codes[0].bounds;
+            assert!(
+                b.iter()
+                    .zip(boxes[0])
+                    .all(|(got, want)| got.abs_diff(want) <= 1),
+                "{case}: {b:?} for the bars {:?}",
+                boxes[0]
+            );
+            // Turned a quarter: the bars lie down.
+            let mut turned = vec![255u8; gray.len()];
+            for y in 0..h {
+                for x in 0..w {
+                    turned[(x * h + (h - 1 - y)) as usize] = gray[(y * w + x) as usize];
+                }
+            }
+            let scan = scan_gray(&turned, h, w);
+            assert_eq!(texts(&scan).len(), 1, "{case}, turned");
+            let t = boxes[0];
+            let want = [h - t[3], t[0], h - t[1], t[2]];
+            let b = scan.codes[0].bounds;
+            assert!(
+                b.iter()
+                    .zip(want)
+                    .all(|(got, want)| got.abs_diff(want) <= 1),
+                "{case}, turned: {b:?} for the bars {want:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn equal_codes_one_over_the_other_are_two() {
+    // Two equal codes with a few white rows between them are two codes, each with its own
+    // box; one code read along two lines is one.
+    let m = modules(Symbology::Code128, "0000000001", None);
+    for gap in [3, 6, 12] {
+        let (gray, w, h, boxes) = linear_pixels(&m, 3, 60, 2, gap);
+        let scan = scan_gray(&gray, w, h);
+        let mut found: Vec<[u32; 4]> = scan.codes.iter().map(|c| c.bounds).collect();
+        found.sort_by_key(|b| b[1]);
+        assert_eq!(found.len(), 2, "{gap} rows apart: {found:?}");
+        for (b, want) in found.iter().zip(&boxes) {
+            assert!(
+                b.iter()
+                    .zip(want)
+                    .all(|(got, want)| got.abs_diff(*want) <= 1),
+                "{gap} rows apart: {b:?} for the bars {want:?}"
+            );
+        }
+    }
+}

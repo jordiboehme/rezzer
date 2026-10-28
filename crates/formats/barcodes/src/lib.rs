@@ -151,8 +151,9 @@ pub struct Code {
     pub payload: Payload,
     /// The size of the payload in bytes, as the code holds it.
     pub bytes: usize,
-    /// About where it lies, in pixels of the picture: left, top, right and bottom. For a
-    /// linear code it is the line that was read, a little widened.
+    /// About where it lies, in pixels of the picture: left, top, right and bottom. A linear
+    /// code read along a level or upright line is boxed by its bars; read along a slanted
+    /// line, the box is that line, a little widened.
     pub bounds: [u32; 4],
 }
 
@@ -379,11 +380,20 @@ pub(crate) fn scan(
                         continue;
                     }
                     let tile_box = [tile.x, tile.y, tile.x + tile.w, tile.y + tile.h];
-                    let Some(code) =
+                    let Some(mut code) =
                         read::code_of(&hit, &map, (w, h), tile_box, limits.max_payload)
                     else {
                         continue;
                     };
+                    // A linear code is boxed by its bars, not by the line it was read on.
+                    if !code.symbology.two_d()
+                        && let Some(b) = prep::bars_box(&padded, pw, ph, &hit.points)
+                    {
+                        let (x0, y0) = map(b[0] as f32, b[1] as f32);
+                        let (x1, y1) = map(b[2] as f32, b[3] as f32);
+                        let clamp = |v: f32, max: u32| v.clamp(0.0, max as f32).round() as u32;
+                        code.bounds = [clamp(x0, w), clamp(y0, h), clamp(x1, w), clamp(y1, h)];
+                    }
                     if out.codes.iter().any(|c| prep::same(c, &code))
                         || (!code.symbology.two_d() && prep::inside_2d(&code, &out.codes))
                     {

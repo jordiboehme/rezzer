@@ -290,9 +290,11 @@ pub(crate) fn inside_2d(c: &Code, codes: &[Code]) -> bool {
 
 /// Whether a linear code read along a line of `v` (`w` by `h` pixels) between the hit's
 /// first and last point has bars: a line beside it, parallel and a little away, shows the
-/// same pattern, give or take two pixels of shift. Noise can read as a linear code along one
-/// line, but its neighbouring lines differ. The line may run in any direction, so a code
-/// turned a quarter or a little is checked along its own line.
+/// same pattern, give or take two pixels of shift; or, for bars shorter than that, the lines
+/// two pixels away on both sides show it and the lines a little away on both sides are
+/// paper. Noise can read as a linear code along one line, but its neighbouring lines differ.
+/// The line may run in any direction, so a code turned a quarter or a little is checked
+/// along its own line.
 pub(crate) fn bars_hold(v: &[u8], w: u32, h: u32, points: &[(f32, f32)]) -> bool {
     let (Some(&a), Some(&b)) = (points.first(), points.last()) else {
         return false;
@@ -343,7 +345,114 @@ pub(crate) fn bars_hold(v: &[u8], w: u32, h: u32, points: &[(f32, f32)]) -> bool
             n >= 8 && same * 100 >= n * 85
         })
     };
-    agrees(&line(d)) || agrees(&line(-d))
+    if agrees(&line(d)) || agrees(&line(-d)) {
+        return true;
+    }
+    // Bars shorter than that: the lines close by on both sides show the same bars, and the
+    // lines at `d` on both sides are paper (light, or off the picture).
+    let paper = |other: &[Option<u8>]| {
+        let known: Vec<u8> = other.iter().flatten().copied().collect();
+        known.iter().filter(|&&p| p > t).count() * 100 >= known.len() * 90
+    };
+    agrees(&line(2.0)) && agrees(&line(-2.0)) && paper(&line(d)) && paper(&line(-d))
+}
+
+/// A light run along a linear code longer than this many modules ends the code: its widest
+/// inner space is 4 modules, its quiet zone at least 5.
+const QUIET_MODULES: u32 = 4;
+
+/// The box of the bars of a linear code read along a line of `v` (`w` by `h` pixels) between
+/// the hit's first and last point: left, top, right and bottom, the right and bottom edges
+/// past the last dark pixel. Along the line it reaches out from the points (the decoder gives
+/// points inside the code, at its start and stop patterns) to the last bar before a light run
+/// of more than [`QUIET_MODULES`] modules, the narrowest bar on the line being a module; across
+/// it, to the last line on each side that shows the same bars. `None` for a line that is
+/// neither level nor upright: such a code keeps the box of its line.
+pub(crate) fn bars_box(v: &[u8], w: u32, h: u32, points: &[(f32, f32)]) -> Option<[u32; 4]> {
+    let (&a, &b) = (points.first()?, points.last()?);
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let level = dx.abs() >= 10.0 * dy.abs();
+    if !level && dy.abs() < 10.0 * dx.abs() {
+        return None;
+    }
+    // Along and across in the frame of the line: `at(t, s)` is the pixel `t` along the line
+    // and `s` across it.
+    let (len, wide) = if level { (w, h) } else { (h, w) };
+    let at = |t: u32, s: u32| -> u8 {
+        if level {
+            v[(s * w + t) as usize]
+        } else {
+            v[(t * w + s) as usize]
+        }
+    };
+    let clamp = |x: f32, max: u32| x.round().clamp(0.0, max.saturating_sub(1) as f32) as u32;
+    let (t0, t1, s0) = if level {
+        (
+            clamp(a.0.min(b.0), w),
+            clamp(a.0.max(b.0), w),
+            clamp((a.1 + b.1) / 2.0, h),
+        )
+    } else {
+        (
+            clamp(a.1.min(b.1), h),
+            clamp(a.1.max(b.1), h),
+            clamp((a.0 + b.0) / 2.0, w),
+        )
+    };
+    if t1 <= t0 + 8 {
+        return None;
+    }
+    let line: Vec<u8> = (t0..=t1).map(|t| at(t, s0)).collect();
+    let (threshold, _) = otsu(&line);
+    let dark = |t: u32, s: u32| at(t, s) <= threshold;
+    // The narrowest dark run on the line read is a module.
+    let module = runs((t0..=t1).map(|t| dark(t, s0)))
+        .iter()
+        .filter(|r| r.2)
+        .map(|r| r.1)
+        .min()?;
+    let quiet = QUIET_MODULES * module;
+    // Out from the points along the line: past dark pixels and light runs up to `quiet`.
+    let reach = |from: u32, step: i64| -> u32 {
+        let (mut edge, mut light, mut t) = (from, 0u32, i64::from(from));
+        loop {
+            t += step;
+            if t < 0 || t >= i64::from(len) {
+                return edge;
+            }
+            if dark(t as u32, s0) {
+                edge = t as u32;
+                light = 0;
+            } else {
+                light += 1;
+                if light > quiet {
+                    return edge;
+                }
+            }
+        }
+    };
+    let (first, last) = (reach(t0, -1), reach(t1, 1));
+    // Across: each line on either side that holds the same bars as the line read.
+    let row: Vec<bool> = (first..=last).map(|t| dark(t, s0)).collect();
+    let same = |s: u32| {
+        let agree = (first..=last)
+            .zip(&row)
+            .filter(|&(t, &d)| dark(t, s) == d)
+            .count();
+        agree * 100 >= row.len() * 90
+    };
+    let (mut lo, mut hi) = (s0, s0);
+    while lo > 0 && same(lo - 1) {
+        lo -= 1;
+    }
+    while hi + 1 < wide && same(hi + 1) {
+        hi += 1;
+    }
+    Some(if level {
+        [first, lo, last + 1, hi + 1]
+    } else {
+        [lo, first, hi + 1, last + 1]
+    })
 }
 
 /// The most Aztec finders looked at in one tile.
