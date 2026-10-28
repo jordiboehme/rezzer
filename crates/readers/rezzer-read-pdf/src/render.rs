@@ -2263,9 +2263,12 @@ impl Scans {
         // The region's box is one code's box: with more codes in one render, each keeps the
         // decoder's own box. One code read twice, at two lines across its bars, is one code.
         let alone = distinct_codes(&codes) == 1;
-        let drawn = self.drawn.contains(&asset);
+        let drawn_asset = self.drawn.contains(&asset);
+        // The linear codes this page read added: their boxes in the render's pixels and where
+        // they are in the asset's codes.
+        let mut read_here: Vec<([u32; 4], usize)> = Vec::new();
         for c in codes {
-            if !drawn && !evidence(&c, picture, on) {
+            if !drawn_asset && !evidence(&c, picture, on) {
                 continue;
             }
             if self.kept >= FILE_CODES {
@@ -2325,6 +2328,50 @@ impl Scans {
             {
                 found.unread.push(words);
             }
+            // In the page's own read, a dark line across the bars of a linear code (a rule, a
+            // stroke) cuts them in two, and each part reads as the code: it is one code, or two
+            // equal codes one over the other with a dark line between them, and that is said.
+            if let Some((need, None)) = on
+                && !c.symbology.two_d()
+            {
+                let p = &picture.pixmap;
+                let size = (usize::from(p.width()), usize::from(p.height()));
+                let split = read_here.iter_mut().find(|(px, i)| {
+                    let o = &found.codes[*i];
+                    o.symbology == b.symbology
+                        && o.text == b.text
+                        && o.base64 == b.base64
+                        && crate::codes::split_by_line(p.data_as_u8_slice(), size, *px, c.bounds)
+                });
+                if let Some((px, i)) = split {
+                    let u = c.bounds;
+                    *px = [
+                        px[0].min(u[0]),
+                        px[1].min(u[1]),
+                        px[2].max(u[2]),
+                        px[3].max(u[3]),
+                    ];
+                    let (w, h) = need.size;
+                    let framed = need
+                        .turn
+                        .place_box(page_rect(picture, need, *px), w, h)
+                        .map(|v| (v * 10.0).round() / 10.0);
+                    let (fw, fh) = need.turn.size(w, h);
+                    let place = place_words(framed, fw, fh);
+                    let o = &mut found.codes[*i];
+                    o.bounds = Some(framed);
+                    o.place = Some(place.clone());
+                    let words = format!(
+                        "a dark line runs across the bars of the {}, {place}: it may be two \
+                         codes, one not decoded",
+                        b.symbology
+                    );
+                    if !found.unread.contains(&words) {
+                        found.unread.push(words);
+                    }
+                    continue;
+                }
+            }
             let same: Vec<usize> = (0..found.codes.len())
                 .filter(|&i| same_code(&found.codes[i], &b))
                 .collect();
@@ -2358,6 +2405,9 @@ impl Scans {
                     true,
                 );
                 break;
+            }
+            if matches!(on, Some((_, None))) && !c.symbology.two_d() {
+                read_here.push((c.bounds, found.codes.len()));
             }
             found.codes.push(b);
             self.kept += 1;

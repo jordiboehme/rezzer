@@ -252,6 +252,68 @@ pub(crate) fn crossed(rgba: &[u8], (w, h): (usize, usize), b: [u32; 4]) -> bool 
     })
 }
 
+/// Whether boxes `a` and `b` (pixels: left, top, right, bottom) of the render `rgba` (`size`
+/// in pixels), where one linear code was read twice, are its bars on both sides of a dark line
+/// across them: they stand one after the other along the bars, across them nearly the same
+/// ([`SPLIT_SAME`] of the narrower), at most [`SPLIT_GAP`] of the shorter apart, and a line
+/// between them (or at their meeting) is dark across [`SPLIT_DARK`] of their common part.
+/// Paper between them is two codes.
+pub(crate) fn split_by_line(rgba: &[u8], (w, h): (usize, usize), a: [u32; 4], b: [u32; 4]) -> bool {
+    if rgba.len() < w * h * 4 {
+        return false;
+    }
+    let gray = |x: u32, y: u32| gray_at(rgba, y as usize * w + x as usize);
+    [false, true].into_iter().any(|lying| {
+        // Along the bars and across them: for bars standing up, y and x.
+        let parts = |r: [u32; 4]| -> ((u32, u32), (u32, u32)) {
+            if lying {
+                ((r[0], r[2]), (r[1], r[3]))
+            } else {
+                ((r[1], r[3]), (r[0], r[2]))
+            }
+        };
+        let ((a0, a1), (x0, x1)) = parts(a);
+        let ((b0, b1), (y0, y1)) = parts(b);
+        let (lo, hi) = (x0.max(y0), x1.min(y1));
+        let narrow = (x1 - x0).min(y1 - y0);
+        if hi <= lo || ((hi - lo) as f32) < SPLIT_SAME * narrow as f32 {
+            return false;
+        }
+        // The first one along, then the gap to the other.
+        let ((f0, f1), (s0, s1)) = if a0 <= b0 {
+            ((a0, a1), (b0, b1))
+        } else {
+            ((b0, b1), (a0, a1))
+        };
+        let short = (f1 - f0).min(s1 - s0);
+        if s0 + 1 < f1 || (s0.saturating_sub(f1) as f32) > SPLIT_GAP * short as f32 {
+            return false;
+        }
+        let at = |t: u32, c: u32| if lying { gray(t, c) } else { gray(c, t) };
+        // The tones of the bars: the darkest and the lightest tenth across the first one's middle.
+        let mid = (f0 + f1) / 2;
+        let mut row: Vec<u8> = (lo..hi).map(|c| at(mid, c)).collect();
+        row.sort_unstable();
+        let (dark, light) = (row[row.len() / 10], row[(row.len() - 1) * 9 / 10]);
+        if light.saturating_sub(dark) < PIXEL_CONTRAST as u8 {
+            return false;
+        }
+        let t = (u32::from(dark) + u32::from(light)) / 2;
+        let limit = if lying { w as u32 } else { h as u32 };
+        (f1.saturating_sub(1)..(s0 + 1).min(limit)).any(|l| {
+            let n = (lo..hi).filter(|&c| u32::from(at(l, c)) < t).count();
+            n as f32 >= SPLIT_DARK * (hi - lo) as f32
+        })
+    })
+}
+
+/// For [`split_by_line`]: the share of the narrower box the two have in common across the
+/// bars, the gap between them as a share of the shorter one's bars, and the share of a line
+/// between them that is dark.
+const SPLIT_SAME: f32 = 0.75;
+const SPLIT_GAP: f32 = 0.25;
+const SPLIT_DARK: f32 = 0.9;
+
 /// The Otsu threshold of gray histogram `hist`: the level that splits it into its dark and
 /// light tones best; `None` when they are not [`PIXEL_CONTRAST`] apart.
 fn otsu(hist: &[u64; 256]) -> Option<u8> {

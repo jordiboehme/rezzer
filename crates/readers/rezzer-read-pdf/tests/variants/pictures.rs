@@ -414,6 +414,42 @@ fn letters(v: &Variant, face: &str) -> Sheet {
     s
 }
 
+/// Task 15b part 2e-6: a printed Code 128 of [`CODE`] (a picture of 2 pixels a point, 3 pixels a
+/// module, bars 80 pixels long) beside a photo, crossed by a dark line `rule` pixels wide past
+/// both its ends (`lying`: the code turned a quarter). It is found once; the page says a dark
+/// line runs across its bars, as two equal codes one over the other with a dark line between
+/// them look the same.
+fn ruled_code(v: &Variant, rule: u32, lying: bool) -> Sheet {
+    let m = modules(barcodes::Symbology::Code128, CODE);
+    let (len, bar, px, quiet) = (m.width * 3, 80u32, 3u32, 30u32);
+    let (gw, gh) = (len + 2 * quiet, bar + 2 * quiet);
+    let (w, h) = if lying { (gh, gw) } else { (gw, gh) };
+    let mut g = vec![235u8; (w * h) as usize];
+    let mut paint = |along: std::ops::Range<u32>, across: std::ops::Range<u32>| {
+        for a in along {
+            for t in across.clone() {
+                let (x, y) = if lying { (t, a) } else { (a, t) };
+                g[(y * w + x) as usize] = 0;
+            }
+        }
+    };
+    for c in (0..m.width).filter(|&c| m.dark[c as usize]) {
+        paint(quiet + c * px..quiet + c * px + px, quiet..quiet + bar);
+    }
+    paint(10..gw - 10, quiet + bar / 2..quiet + bar / 2 + rule);
+    let t = inline_gray(
+        &mut g,
+        (w, h),
+        0,
+        [300.0, 500.0, w as f32 / 2.0, h as f32 / 2.0],
+    );
+    let mut built = page_of(v, t);
+    built.page.photo = Some([40.0, 560.0, 200.0, 150.0]);
+    let mut s = Sheet::new(built);
+    s.want.codes.push(("Code 128".into(), CODE.into()));
+    s
+}
+
 /// The shapes of pages the decoder read false codes from: `$name => draw`.
 macro_rules! false_reads {
     ($($name:literal => $draw:expr,)*) => {
@@ -749,6 +785,12 @@ pub(crate) fn shapes() -> Vec<Shape> {
         "a scan of dots 3.6 px apart, 2 px a point, blur 1" => |v| false_reads(v, Print::Dots(3.6, 2, 1)),
         "a scan of dots 3.8 px apart, 2 px a point, blur 1" => |v| false_reads(v, Print::Dots(3.8, 2, 1)),
         "stems and strokes in Times-Roman, twice as large" => |v| letters(v, "FT"),
+    });
+    // A printed code crossed by a dark line: found once, with words of a doubt.
+    all.extend(false_reads! {
+        "a printed barcode crossed by a dark line 1 px wide" => |v| ruled_code(v, 1, false),
+        "a printed barcode crossed by a dark line 4 px wide" => |v| ruled_code(v, 4, false),
+        "a printed barcode lying, crossed by a dark line 2 px wide" => |v| ruled_code(v, 2, true),
     });
     // Two equal codes closer than their quiet zone.
     all.extend(twins! {

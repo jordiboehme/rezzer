@@ -3938,3 +3938,96 @@ fn slanted_scan(s: Symbology, text: &str, res: u32, px: f32, deg: f32) -> Vec<u8
     }
     image_page(595, 842, "q 595 0 0 842 0 0 cm /Im1 Do Q\n", w, h, &scan)
 }
+
+/// A crisp scanned A4 page of `res` pixels a point with a Code 128 `0000000001` of `px` pixels
+/// a module and bars 80 pixels long, its first module 40 points from the left (or, `lying`,
+/// from the top) and its bars from 200 points; with `rule`, a dark line that many pixels wide
+/// across the middle of its bars, past both its ends. The box of its bars on the page.
+fn ruled_scan(res: u32, px: u32, rule: u32, lying: bool) -> (Vec<u8>, [f32; 4]) {
+    let m = modules(Symbology::Code128, "0000000001");
+    let (w, h) = (595 * res, 842 * res);
+    let mut scan = vec![235u8; (w * h) as usize];
+    let (x0, top, bar) = (40 * res, 200 * res, 80u32);
+    let mut paint = |along: std::ops::Range<u32>, across: std::ops::Range<u32>| {
+        for a in along {
+            for t in across.clone() {
+                let (x, y) = if lying { (t, a) } else { (a, t) };
+                scan[(y * w + x) as usize] = 0;
+            }
+        }
+    };
+    let dark: Vec<u32> = (0..m.width).filter(|&c| m.dark[c as usize]).collect();
+    for &c in &dark {
+        paint(x0 + c * px..x0 + c * px + px, top..top + bar);
+    }
+    paint(
+        x0 - 10..x0 + m.width * px + 10,
+        top + bar / 2..top + bar / 2 + rule,
+    );
+    let pt = |v: u32| v as f32 / res as f32;
+    let (a0, a1) = (
+        pt(x0 + dark[0] * px),
+        pt(x0 + (dark[dark.len() - 1] + 1) * px),
+    );
+    let (t0, t1) = (pt(top), pt(top + bar));
+    // y grows down in the picture and up on the page.
+    let bars = if lying {
+        [t0, 842.0 - a1, t1, 842.0 - a0]
+    } else {
+        [a0, 842.0 - t1, a1, 842.0 - t0]
+    };
+    let content = "q 595 0 0 842 0 0 cm /Im1 Do Q\n";
+    (image_page(595, 842, content, w, h, &scan), bars)
+}
+
+#[test]
+fn a_code_crossed_by_a_dark_line_is_listed_once() {
+    // A dark line across the bars of a code (a rule, a stroke) cuts them in two and each part
+    // reads as the code: it is listed once, boxed by all its bars, and the page says that a
+    // dark line runs across them, as two equal codes one over the other with a dark line
+    // between them look the same.
+    for res in [1u32, 2] {
+        for px in [2u32, 3] {
+            for rule in [1u32, 2, 4] {
+                for lying in [false, true] {
+                    let case = format!(
+                        "{res} pixels a point, {px} a module, a line {rule} pixels, lying {lying}"
+                    );
+                    let (file, bars) = ruled_scan(res, px, rule, lying);
+                    let out = read(&file);
+                    let a = asset(&out, "page-1");
+                    assert_eq!(
+                        codes_of(&out, "page-1"),
+                        [("Code 128".to_string(), "0000000001".to_string())],
+                        "{case}"
+                    );
+                    let b = a.codes[0].bounds.expect("box");
+                    assert!(
+                        b.iter()
+                            .zip(bars)
+                            .all(|(got, want)| (got - want).abs() <= 1.5),
+                        "{case}: {b:?}, the bars are {bars:?}"
+                    );
+                    assert!(a.code_unread, "{case}");
+                    let words = "a dark line runs across the bars of the Code 128";
+                    assert!(
+                        a.alt.as_deref().is_some_and(|t| t.contains(words)),
+                        "{case}: {:?}",
+                        a.alt
+                    );
+                    assert!(markdown(&out).contains(words), "{case}");
+                }
+            }
+        }
+    }
+    // Two equal codes one over the other with paper between them are two.
+    for res in [1u32, 2] {
+        let (file, boxes) = soft_scan(res, 3, 60, 0, 0, &[0, 1], 3, false);
+        let out = read(&file);
+        let a = asset(&out, "page-1");
+        assert_eq!(a.codes.len(), 2, "{res} pixels a point: {:?}", a.codes);
+        assert_eq!(boxes.len(), 2);
+        assert_no_doubt(&out, &format!("{res} pixels a point, paper between"));
+        assert!(!a.alt.as_deref().unwrap_or_default().contains("dark line"));
+    }
+}

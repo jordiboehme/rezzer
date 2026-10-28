@@ -39,6 +39,27 @@ pub(crate) struct Known {
 /// Every pinned break.
 pub(crate) const KNOWN: &[Known] = &[
     Known {
+        shape: "a printed barcode crossed by a dark line 1 px wide",
+        variants: &["base"],
+        broken: &[Inv::NoCode],
+        cause: Cause::Carry,
+        why: "a dark line across the bars of a code read is a named doubt (part 2e-6): one code, or two equal codes one over the other with a dark line between them, which look the same; the code is listed once",
+    },
+    Known {
+        shape: "a printed barcode crossed by a dark line 4 px wide",
+        variants: &["base"],
+        broken: &[Inv::NoCode],
+        cause: Cause::Carry,
+        why: "a dark line across the bars of a code read is a named doubt (part 2e-6): one code, or two equal codes one over the other with a dark line between them, which look the same; the code is listed once",
+    },
+    Known {
+        shape: "a printed barcode lying, crossed by a dark line 2 px wide",
+        variants: &["base"],
+        broken: &[Inv::NoCode],
+        cause: Cause::Carry,
+        why: "a dark line across the bars of a code read is a named doubt (part 2e-6): one code, or two equal codes one over the other with a dark line between them, which look the same; the code is listed once",
+    },
+    Known {
         shape: "twin barcodes 1 pt apart",
         variants: &["base", "turned 90"],
         broken: &[Inv::Code],

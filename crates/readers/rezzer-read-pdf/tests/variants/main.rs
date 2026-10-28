@@ -512,6 +512,9 @@ shape_tests! {
     scan_dots_3_6_px_2_px_blur_1 => "a scan of dots 3.6 px apart, 2 px a point, blur 1",
     scan_dots_3_8_px_2_px_blur_1 => "a scan of dots 3.8 px apart, 2 px a point, blur 1",
     letters_times => "stems and strokes in Times-Roman, twice as large",
+    ruled_code_1_px => "a printed barcode crossed by a dark line 1 px wide",
+    ruled_code_4_px => "a printed barcode crossed by a dark line 4 px wide",
+    ruled_code_lying_2_px => "a printed barcode lying, crossed by a dark line 2 px wide",
 }
 
 /// Task 15b part 2d fix round 3 (M1): the cell check counts the texts it leaves out, and a list
