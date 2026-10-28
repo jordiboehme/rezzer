@@ -748,7 +748,31 @@ pub(in crate::tables) fn field_strips(
                 .collect();
             let under = ways.iter().any(|w| matches!(w, Ends::Under(..)));
             let over = ways.iter().any(|w| matches!(w, Ends::Over));
-            if under && over { blocks } else { vec![g] }
+            // A block whose rules end beyond the rules of the others (rows of its own past their
+            // first or last rule) and that stands on no rule inside another block is a grid of
+            // its own beside them: its ends are its own, so when they read its labels over its
+            // values while another block is not clear, the two are read apart. A cell beside
+            // the first row of a grid (its bottom rule a rule inside the grid) is a part of it.
+            let span = |b: &[usize]| {
+                b.iter().fold((f32::MIN, f32::MAX), |(t, l), &k| {
+                    (t.max(strips[k].top), l.min(strips[k].bottom))
+                })
+            };
+            let spans: Vec<(f32, f32)> = blocks.iter().map(|b| span(b)).collect();
+            let inside = |y: f32, o: (f32, f32)| y < o.0 - SNAP && y > o.1 + SNAP;
+            let own = |k: usize| {
+                let (t, l) = spans[k];
+                let others = || spans.iter().enumerate().filter(move |&(o, _)| o != k);
+                others().all(|(_, &o)| !inside(t, o) && !inside(l, o))
+                    && others().any(|(_, &o)| t > o.0 + SNAP || l < o.1 - SNAP)
+            };
+            let apart = (0..blocks.len()).any(|k| matches!(ways[k], Ends::Over) && own(k))
+                && ways.iter().any(|w| !matches!(w, Ends::Over));
+            if (under && over) || apart {
+                blocks
+            } else {
+                vec![g]
+            }
         })
         .collect();
     // Runs beyond a group that a group read with its labels under their values took.

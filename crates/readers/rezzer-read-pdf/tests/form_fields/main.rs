@@ -2066,3 +2066,78 @@ fn a_refused_grid_of_labels_under_values_reads_cell_by_cell() {
         wrong.join("\n")
     );
 }
+
+/// Task 15b part 2e-2 (item 1, ruling P6-X): a block of three fields, each a label over its
+/// value between rules, beside a grid whose labels stand under the rule their values stand on
+/// and that is not clear (a value of two lines). The block stands on the grid's rules and has a
+/// row of its own under them: it is a grid of its own, its fields pair, and its last label
+/// `Zeichen` never reads with the grid's `PLZ Land`; the grid is refused with a loss and read
+/// cell by cell. Data sizes 6 to 14, Courier and Helvetica, with and without dividers, in every
+/// look.
+#[test]
+fn a_block_of_fields_beside_a_refused_grid_pairs_on_its_own() {
+    let all = ["Name", "Ort", "Strasse", "Hausnr", "PLZ", "Land"];
+    let mut wrong = Vec::new();
+    let mut geos: Vec<(String, Geo)> = Vec::new();
+    for size in [6.0f32, 8.0, 9.5, 11.0, 12.0, 14.0] {
+        for font in [DataFont::Courier, DataFont::Helvetica] {
+            let g = Geo {
+                data: size,
+                label: size * 6.6 / 9.5,
+                font,
+                ..REAL
+            };
+            geos.push((format!("{size} {font:?}"), g));
+        }
+    }
+    geos.extend(looks().into_iter().map(|(n, g)| (n.to_string(), g)));
+    for dividers in [true, false] {
+        let s = Rows {
+            under: true,
+            dividers,
+            ..ROWS
+        };
+        for (look, g) in &geos {
+            let mut b = rows_page(g, &s, &THREE_ROWS, &all);
+            let d = g.data;
+            let rule = 760.0 + g.dy - 2.4 * d;
+            let y = rule + 0.17 * d + 0.95 * d;
+            b.page.template += &draw::courier(g.col(0) + 0.3 * g.pitch(), y, d, "Hinterhaus");
+            b.values.push("Hinterhaus".into());
+            // The block beside: three rows on the grid's rules, the last under its last rule.
+            let k0 = 54;
+            let (x0, x1) = (g.col(k0) - 0.12, g.col(k0 + 8));
+            let (top, h) = (760.0 + g.dy, 2.4 * d);
+            for (n, (l, val)) in [("Folge", "4/9"), ("Vorg", "Q"), ("Zeichen", "770")]
+                .iter()
+                .enumerate()
+            {
+                let at = top - h * n as f32;
+                b.page.template += &g.hrule(x0, x1, at);
+                b.page.template += &label(g.col(k0) + 0.18 * g.label, at - 0.86 * d, g.label, l);
+                g.values(&mut b, at - 2.23 * d, &[(k0, val)]);
+                b.values.push(val.to_string());
+                b.fields.push((l, Ok(Some(val))));
+            }
+            b.page.template += &g.hrule(x0, x1, top - 3.0 * h);
+            let out = read_pages(&[&b]);
+            let at = format!("{look}, dividers {dividers}");
+            for broken in check_fields(&out, &b) {
+                wrong.push(format!("{at}: {broken:?}"));
+            }
+            let units = common::read_units(&out.document.body);
+            if let Some(u) = units
+                .iter()
+                .find(|u| u.contains("Zeichen") && u.contains("PLZ"))
+            {
+                wrong.push(format!("{at}: {u:?} holds `Zeichen` and `PLZ`"));
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
