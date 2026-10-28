@@ -276,6 +276,8 @@ shape_tests! {
     a_strip_of_a_smaller_label_beside_a_smaller_name => "a strip of a smaller label beside a smaller name over its address",
     a_lone_field_in_a_strip_beside_a_value => "a lone field in a strip beside a value",
     a_strip_without_dividers_beside_a_bold_title => "a strip without dividers beside a bold title",
+    boxed_fields_beside_an_empty_box => "boxed fields beside an empty box",
+    boxed_fields_beside_an_empty_field => "boxed fields beside an empty field",
     boxed_fields_beside_a_company_in_another_font => "boxed fields beside a company in another font",
     boxed_fields_beside_an_address => "boxed fields beside an address",
     label_block_and_bank_row => "label block and bank row",

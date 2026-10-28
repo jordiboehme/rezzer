@@ -1040,3 +1040,58 @@ fn a_strip_in_three_styles_not_clear_is_said() {
         wrong.join("\n")
     );
 }
+
+/// Task 15b part 2d fix round 2 (I6, M1; item 1's class): between boxed fields, a box with no
+/// text keeps the row (`Name: Beispiel` and `Nr: 4711` pair, nothing is said), and a box with a
+/// label alone in the labels' style at their place is an empty field (`Datum` with no value),
+/// in a row of boxes and in a column. Sizes 6 to 14, steps 1.125 and 1.25, both data fonts.
+#[test]
+fn an_empty_box_or_an_empty_field_keeps_the_row() {
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+        for step in [1.125f32, 1.25] {
+            for font in ["F1", "F3"] {
+                for how in [Cells::Row, Cells::Column] {
+                    for (name, head) in [("empty box", &[][..]), ("empty field", &["Datum"][..])] {
+                        let at = format!("{name} {how:?} {size} pt x {step}, {font}");
+                        let m = Middle {
+                            head,
+                            size: 1.0,
+                            font: None,
+                            lines: &[],
+                        };
+                        let out = three_cells(m, size, step, font, how);
+                        let rows: Vec<String> = read_tables(&out)
+                            .iter()
+                            .flatten()
+                            .map(|r| r.join(": "))
+                            .collect();
+                        for want in ["Name: Beispiel", "Nr: 4711"] {
+                            if !rows.iter().any(|r| r == want) {
+                                wrong.push(format!("{at}: no {want} in {rows:?}"));
+                            }
+                        }
+                        if !head.is_empty() && !rows.iter().any(|r| r.starts_with("Datum:")) {
+                            wrong.push(format!("{at}: no empty field Datum in {rows:?}"));
+                        }
+                        let losses: Vec<&str> = out
+                            .document
+                            .losses
+                            .iter()
+                            .map(|l| l.what.as_str())
+                            .collect();
+                        if losses.iter().any(|l| l.contains("drawn box")) {
+                            wrong.push(format!("{at}: a box is said: {losses:?}"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}

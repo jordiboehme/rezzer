@@ -138,9 +138,6 @@ pub(crate) fn box_pairs(
             (a[0] - b[0]).abs() <= t && ((a[1] - b[3]).abs() <= t || (b[1] - a[3]).abs() <= t);
         row || column
     };
-    // Every other box with text is a box of its row or column, with no field: an address, a
-    // title, text of one style with no label, a box not clear. The fields on both sides of it
-    // stay one row; it is said or read as a title below.
     let inked_of = |b: usize| -> Vec<usize> {
         in_box[b]
             .iter()
@@ -148,8 +145,54 @@ pub(crate) fn box_pairs(
             .filter(|&i| inked(&flow.runs[i]) && !flow.runs[i].off_axis)
             .collect()
     };
+    // A box of one line or two in one style, not bold, beside a boxed field whose label has that
+    // style and stands as far under its box's top, with nothing under it: the label of an empty
+    // field (the page's text sizes may not show it as a label's when few values are filled in).
+    let label_at = |b: usize, ids: &[usize]| -> Option<(Style, f32)> {
+        let first = *ids
+            .iter()
+            .max_by(|&&x, &&y| flow.runs[x].y.total_cmp(&flow.runs[y].y))?;
+        let r = &flow.runs[first];
+        Some((style_of(r), boxes[b][3] - r.y))
+    };
+    let mut empty: Vec<(usize, Vec<usize>)> = Vec::new();
+    for b in 0..boxes.len() {
+        let ids = inked_of(b);
+        if fields[b].is_some() || consumed[b] || ids.is_empty() || unsure.iter().any(|u| u.0 == b) {
+            continue;
+        }
+        let one = ids.iter().all(|&i| {
+            style_of(&flow.runs[i]) == style_of(&flow.runs[ids[0]]) && !flow.runs[i].bold
+        });
+        if !one || lines_of(flow, &ids).len() > LABEL_LINES {
+            continue;
+        }
+        let Some((style, offset)) = label_at(b, &ids) else {
+            continue;
+        };
+        let size = flow.runs[ids[0]].size;
+        let beside = (0..boxes.len()).any(|f| {
+            fields[f].as_ref().is_some_and(|field| {
+                near(b, f)
+                    && label_at(f, &field.label)
+                        .is_some_and(|(s, o)| s == style && (o - offset).abs() <= 0.5 * size)
+            })
+        });
+        if beside {
+            empty.push((b, ids));
+        }
+    }
+    for (b, ids) in empty {
+        fields[b] = Some(Field {
+            label: lines_of(flow, &ids).into_iter().flatten().collect(),
+            value: Vec::new(),
+        });
+    }
+    // Every other box is a box of its row or column, with no field: an address, a title, text
+    // of one style with no label, a box not clear, a box with no text. The fields on both sides
+    // of it stay one row; one with text is said or read as a title below.
     let bridge: Vec<bool> = (0..boxes.len())
-        .map(|b| fields[b].is_none() && !consumed[b] && !inked_of(b).is_empty())
+        .map(|b| fields[b].is_none() && !consumed[b])
         .collect();
     let two_fields = |c: &[usize]| c.iter().filter(|&&b| fields[b].is_some()).count() >= 2;
     // Rows first: boxes left to right, each going on the row whose last box it touches.
@@ -179,12 +222,44 @@ pub(crate) fn box_pairs(
         c.iter()
             .any(|&b| fields[b].as_ref().is_some_and(|f| !f.value.is_empty()))
     };
+    // The page's lines, once needed: a box drawn with no text in it is no reading region, so
+    // the boxes beside it touch it, not each other; the lines show it drawn.
+    let lines = std::cell::OnceCell::new();
+    let lines = || lines.get_or_init(|| grids(rules).map(|g| (g.hs, g.vs)).unwrap_or_default());
+    // Whether lines `segs` at `at` (within `t`) cover the stretch `lo..hi`.
+    let covered = |segs: &[Seg], at: f32, lo: f32, hi: f32, t: f32| {
+        let mut end = lo;
+        let mut parts: Vec<&Seg> = segs
+            .iter()
+            .filter(|s| (s.at - at).abs() <= t.max(SNAP) && s.to > lo && s.from < hi)
+            .collect();
+        parts.sort_by(|a, b| a.from.total_cmp(&b.from));
+        for s in parts {
+            if s.from > end + t.max(SNAP) {
+                return false;
+            }
+            end = end.max(s.to);
+        }
+        end >= hi - t.max(SNAP)
+    };
+    // Two boxes of a row with an empty drawn box between them: its top and bottom drawn across
+    // the gap. Two of a column: its sides drawn down the gap.
+    let empty_row = |a: [f32; 4], b: [f32; 4], t: f32| {
+        let (hs, _) = lines();
+        b[0] - a[2] > t
+            && covered(hs, a[3], a[2], b[0], t)
+            && covered(hs, a[1].max(b[1]), a[2], b[0], t)
+    };
+    let empty_column = |a: [f32; 4], b: [f32; 4], t: f32| {
+        let (_, vs) = lines();
+        a[1] - b[3] > t && covered(vs, a[0], b[3], a[1], t) && covered(vs, a[2], b[3], a[1], t)
+    };
     let mut hs: Option<Vec<Seg>> = None;
     let mut groups: Vec<Vec<usize>> = Vec::new();
     let mut used = vec![false; boxes.len()];
     for c in chains(&order, &|p, q| {
         let (a, b, t) = (boxes[p], boxes[q], touch[p].max(touch[q]));
-        (a[3] - b[3]).abs() <= t && (a[2] - b[0]).abs() <= t
+        (a[3] - b[3]).abs() <= t && ((a[2] - b[0]).abs() <= t || empty_row(a, b, t))
     }) {
         if !two_fields(&c) || !has_value(&c) {
             continue;
@@ -210,7 +285,7 @@ pub(crate) fn box_pairs(
     rest.sort_by(|&a, &b| boxes[b][3].total_cmp(&boxes[a][3]));
     for c in chains(&rest, &|p, q| {
         let (a, b, t) = (boxes[p], boxes[q], touch[p].max(touch[q]));
-        (a[0] - b[0]).abs() <= t && (a[1] - b[3]).abs() <= t
+        (a[0] - b[0]).abs() <= t && ((a[1] - b[3]).abs() <= t || empty_column(a, b, t))
     }) {
         if two_fields(&c) && has_value(&c) {
             groups.push(c);
@@ -240,6 +315,7 @@ pub(crate) fn box_pairs(
     };
     for (b, &bridged) in bridge.iter().enumerate() {
         if bridged
+            && !inked_of(b).is_empty()
             && !title_box(b)
             && !unsure.iter().any(|u| u.0 == b)
             && paired.iter().any(|&p| near(b, p))

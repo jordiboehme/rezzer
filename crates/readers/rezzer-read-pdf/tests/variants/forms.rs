@@ -259,6 +259,43 @@ fn with_cells(
     (s, e)
 }
 
+/// Task 15b part 2d fix round 2 (I6, M1): a row of three boxed fields whose middle box is
+/// `middle`: with no text (an empty box), or with a label alone (an empty field). The fields
+/// beside it pair, and an empty field is one.
+fn gap_box_row(g: &Geo, b: &mut Built, top: f32, middle: Option<&'static str>) -> f32 {
+    let h = 2.4 * g.data;
+    let mut parts = Vec::new();
+    for (k, l, v) in [
+        (0usize, Some("Personalnummer"), "00000"),
+        (20, middle, ""),
+        (40, Some("Eintritt"), "01.01.2020"),
+    ] {
+        let (x0, x1) = (g.col(k) - 0.12, g.col(k + 20) - 0.12);
+        b.page.template += &g.hrule(x0, x1, top);
+        b.page.template += &g.hrule(x0, x1, top - h);
+        b.page.template += &g.vrule(x0, top - h, top);
+        b.page.template += &g.vrule(x1, top - h, top);
+        let Some(l) = l else {
+            continue;
+        };
+        b.page.template += &label(
+            g.col(k) + 0.3 * g.label,
+            top - 0.9 * g.label - 0.3 * g.data,
+            g.label,
+            l,
+        );
+        if v.is_empty() {
+            b.fields.push((l, Ok(None)));
+        } else {
+            parts.push((k + 1, v));
+            b.values.push(v.to_string());
+            b.fields.push((l, Ok(Some(v))));
+        }
+    }
+    g.values(b, top - h + 0.3 * g.data, &parts);
+    top - h
+}
+
 /// Task 15b part 2d fix round 2: a strip of two cells between two rules with no rule between
 /// them, `Personalnummer` over its value beside a value alone on the same data line: the field
 /// is one field alone between its rules, refused, and the strip is read cell by cell.
@@ -754,6 +791,22 @@ pub(crate) fn shapes() -> Vec<Shape> {
                 ..ALL
             },
             draw: |v| open_strip_shape(v, |g, b, t| open_strip(g, b, t, strip_title), &["Angaben"]),
+        },
+        Shape {
+            name: "boxed fields beside an empty box",
+            axes: Axes {
+                look: NO_RISING,
+                ..ALL
+            },
+            draw: |v| drawn(v, |g, b, t| gap_box_row(g, b, t, None), 60),
+        },
+        Shape {
+            name: "boxed fields beside an empty field",
+            axes: Axes {
+                look: NO_RISING,
+                ..ALL
+            },
+            draw: |v| drawn(v, |g, b, t| gap_box_row(g, b, t, Some("Steuerklasse")), 60),
         },
         Shape {
             name: "boxed fields beside a company in another font",
