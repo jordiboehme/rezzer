@@ -397,6 +397,10 @@ pub(crate) fn bars_hold(v: &[u8], w: u32, h: u32, points: &[(f32, f32)]) -> bool
     agrees(&line(2.0)) && agrees(&line(-2.0)) && paper(&line(d)) && paper(&line(-d))
 }
 
+/// Gray levels between dark and light, at least, for a pixel to be told dark or light against
+/// its neighbours when the box of a linear code is measured.
+const FAINT: u8 = 24;
+
 /// A light run along a linear code longer than this many modules ends the code: its widest
 /// inner space is 4 modules, its quiet zone at least 5.
 const QUIET_MODULES: u32 = 4;
@@ -407,7 +411,8 @@ const QUIET_MODULES: u32 = 4;
 /// points inside the code, at its start and stop patterns) to the last bar before a light run
 /// of more than [`QUIET_MODULES`] modules, a module being the mean of the narrowest bar and
 /// the narrowest space on the line (ink gain and blur shift both alike); across it, to the
-/// last line on each side that shows the same bars at its own threshold. `None` for a line
+/// last line on each side that shows the same bars, each pixel dark or light against its
+/// neighbours. `None` for a line
 /// that is neither level nor upright, or for bars fewer than three lines high: such a code
 /// keeps the box of its line.
 pub(crate) fn bars_box(v: &[u8], w: u32, h: u32, points: &[(f32, f32)]) -> Option<[u32; 4]> {
@@ -477,9 +482,8 @@ pub(crate) fn bars_box(v: &[u8], w: u32, h: u32, points: &[(f32, f32)]) -> Optio
         }
     };
     let (first, last) = (reach(t0, -1), reach(t1, 1));
-    // Across: each line on either side that shows the same bars as the line read, each line
-    // taken at its own threshold (the soft rows at the ends of blurred bars are lighter); a
-    // line of little contrast is paper.
+    // Across: each line on either side that shows the same bars as the line read; a line of
+    // little contrast is paper.
     let span = |s: u32| -> Vec<u8> { (first..=last).map(|t| at(t, s)).collect() };
     let contrast = |p: &[u8]| {
         let (lo, hi) = p
@@ -487,9 +491,24 @@ pub(crate) fn bars_box(v: &[u8], w: u32, h: u32, points: &[(f32, f32)]) -> Optio
             .fold((255u8, 0u8), |(a, b), &x| (a.min(x), b.max(x)));
         hi.saturating_sub(lo)
     };
-    let pattern = |p: &[u8]| -> Vec<bool> {
+    let level_of = |p: &[u8]| -> Vec<bool> {
         let (t, _) = otsu(p);
         p.iter().map(|&x| x <= t).collect()
+    };
+    // Dark or light against the pixels within two modules around: bars over a darker picture
+    // or at the soft ends of blurred bars keep their pattern. Where those pixels hardly differ,
+    // it is paper.
+    let reach_px = (2 * module).max(2) as usize;
+    let pattern = |p: &[u8]| -> Vec<bool> {
+        (0..p.len())
+            .map(|k| {
+                let near = &p[k.saturating_sub(reach_px)..(k + reach_px + 1).min(p.len())];
+                let (lo, hi) = near
+                    .iter()
+                    .fold((255u8, 0u8), |(a, b), &x| (a.min(x), b.max(x)));
+                hi - lo >= FAINT && u16::from(p[k]) * 2 <= u16::from(lo) + u16::from(hi)
+            })
+            .collect()
     };
     let full = contrast(&span(s0));
     // Line `s` shows the bars of line `next` (the last one taken): each line is compared with
@@ -497,17 +516,21 @@ pub(crate) fn bars_box(v: &[u8], w: u32, h: u32, points: &[(f32, f32)]) -> Optio
     // followed to its ends.
     let same = |s: u32, next: u32| {
         let p = span(s);
-        if u32::from(contrast(&p)) * 2 < u32::from(full) {
+        if contrast(&p) < FAINT.max(full / 8) {
             return false;
         }
-        let (row, other) = (pattern(&span(next)), pattern(&p));
+        let q = span(next);
         // Pixels a pixel or more inside a bar or a space of the line before: the edges move
-        // with the threshold.
-        let core: Vec<usize> = (1..row.len().saturating_sub(1))
-            .filter(|&k| row[k - 1] == row[k] && row[k] == row[k + 1])
-            .collect();
-        let agree = core.iter().filter(|&&k| other[k] == row[k]).count();
-        !core.is_empty() && agree * 100 >= core.len() * 90
+        // with the threshold. Each line at its own threshold (the soft rows at the ends of
+        // blurred bars), or each pixel against its neighbours (bars over a darker picture).
+        let agrees = |row: Vec<bool>, other: Vec<bool>| {
+            let core: Vec<usize> = (1..row.len().saturating_sub(1))
+                .filter(|&k| row[k - 1] == row[k] && row[k] == row[k + 1])
+                .collect();
+            let agree = core.iter().filter(|&&k| other[k] == row[k]).count();
+            !core.is_empty() && agree * 100 >= core.len() * 90
+        };
+        agrees(level_of(&q), level_of(&p)) || agrees(pattern(&q), pattern(&p))
     };
     let (mut lo, mut hi) = (s0, s0);
     while lo > 0 && same(lo - 1, lo) {
