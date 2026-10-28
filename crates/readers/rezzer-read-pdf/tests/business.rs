@@ -2008,8 +2008,10 @@ fn a_note_row_after_a_blank_row_heads_no_table() {
 /// whose middle column ends where the first table's middle title ends, so that its lines stand
 /// in the first table's columns: its header line starts a table of its own, and no header
 /// becomes a row of the first, whether the header is bold, plain, a size step larger, bold
-/// after a bold total row, holds years, or has two cells over two columns. Sizes 6 to 14 in
-/// both fonts.
+/// after a bold total row, holds years, or has two cells over two columns. Task 15b part 2d
+/// item 5: so does it when a row of the first table stands 1.5 pitches under the row over it,
+/// and the header 2.2 or 2.4 pitches under the first table's last row: the pitch of the rows is
+/// their common step, not their widest. Sizes 6 to 14 in both fonts.
 #[test]
 fn a_header_after_a_blank_row_starts_a_table_of_its_own() {
     let first = [
@@ -2035,10 +2037,16 @@ fn a_header_after_a_blank_row_starts_a_table_of_its_own() {
         ("years", true, 1.0, false, ["Bezeichnung", "2025", "2026"]),
         ("two columns", true, 1.0, false, ["Kennung", "", "Wert"]),
     ];
+    // The step over the third row of the first table and the step to the header, in pitches.
+    let gaps = [(1.0f32, 2.2f32), (1.5, 2.2), (1.5, 2.4)];
     let mut wrong = Vec::new();
     for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
         for fonts in FONTS {
-            for (name, bold, step, total, header) in cases {
+            for ((name, bold, step, total, header), (inner, over)) in cases
+                .into_iter()
+                .flat_map(|c| gaps.into_iter().map(move |g| (c, g)))
+            {
+                let name = format!("{name} {inner}/{over}");
                 let k = size / 9.0;
                 let pitch = 1.25 * size;
                 let right = |font: &str, size: f32, x: f32, y: f32, t: &str| {
@@ -2048,6 +2056,9 @@ fn a_header_after_a_blank_row_starts_a_table_of_its_own() {
                 let mut y = 700.0;
                 let mut want_first: Vec<Vec<String>> = Vec::new();
                 for (n, row) in first.iter().enumerate() {
+                    if n == 2 {
+                        y -= (inner - 1.0) * pitch;
+                    }
                     let font = if n == 0 { fonts.1 } else { fonts.0 };
                     t += &show(font, size, 40.0, y, row[0]);
                     t += &show(font, size, 40.0 + 72.0 * k, y, row[1]);
@@ -2061,7 +2072,7 @@ fn a_header_after_a_blank_row_starts_a_table_of_its_own() {
                     want_first.push(vec!["Summe".into(), String::new(), "3.195,67".into()]);
                     y -= pitch;
                 }
-                y -= 1.2 * pitch;
+                y -= (over - 1.0) * pitch;
                 let mid = 40.0 + 72.0 * k + common::font_width(fonts.1, "Bezeichnung", size);
                 let hf = if bold { fonts.1 } else { fonts.0 };
                 let hs = step * size;

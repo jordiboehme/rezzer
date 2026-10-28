@@ -104,7 +104,11 @@ pub(super) fn borderless(
         }
         let mut end = i + 1;
         let mut last_multi = i;
-        // The widest step between two lines of the region so far, blank rows aside.
+        // The steps between two lines of the region so far, blank rows aside, sorted; the
+        // pitch of its rows is their common step, the middle one (the lower of two): a wider
+        // step inside a table (a row set a little apart) does not raise it, so a blank row
+        // after it still parts a table under it.
+        let mut steps: Vec<f32> = Vec::new();
         let mut pitch = 0.0f32;
         while end < lines.len() && !off[end] {
             let (prev, cur) = (&lines[end - 1], &lines[end]);
@@ -132,7 +136,8 @@ pub(super) fn borderless(
             // A blank row the region goes on over is no step of its rows: a gap after it is
             // judged by the rows' own steps.
             if !blank {
-                pitch = pitch.max(gap);
+                steps.insert(steps.partition_point(|s| *s < gap), gap);
+                pitch = steps[(steps.len() - 1) / 2];
             }
             // A header band's rule between the lines parts them.
             let cut = found.cuts.partition_point(|y| *y <= cur.y);
@@ -694,9 +699,9 @@ fn goes_on_beside(
         .any(|right| side(right).is_some_and(|spans| column(&spans)))
 }
 
-/// Two lines of a region without rules stand at most this many times the widest step of the
-/// region so far, or of the next two lines, apart: a wider gap parts two blocks, unless the
-/// line after it stands in the region's columns (see [`in_columns`]).
+/// Two lines of a region without rules stand at most this many times the common step of the
+/// region so far, or the step of the next two lines, apart: a wider gap parts two blocks,
+/// unless the line after it stands in the region's columns (see [`in_columns`]).
 const REGION_STEPS: f32 = 2.0;
 
 /// A piece stands in a column of a region when it starts or ends within this many sizes of

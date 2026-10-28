@@ -297,6 +297,7 @@ shape_tests! {
     an_address_beside_two_banks => "an address beside two banks",
     an_address_beside_two_phone_lines => "an address beside two phone lines and a register",
     an_address_beside_a_colon_heading => "an address beside a bank under a colon heading",
+    a_second_table_after_a_row_set_apart => "a second table under a plain header after a row set apart",
     a_note_row_after_a_blank_row => "a note row after a blank row in a table",
     a_second_table_under_a_plain_header => "a second table under a plain header after a bold total",
     a_second_table_under_a_header_of_years => "a second table under a header of years after a bold total",

@@ -576,7 +576,7 @@ fn rows_shape(v: &Variant, what: Rows) -> Sheet {
 /// `plain` the second header is plain, else bold with years. At 8 points times the size
 /// factor, the columns at x 40, 112 and flush right at 400 times the factor. Two tables.
 fn two_tables(v: &Variant, plain: bool) -> Sheet {
-    two_tables_or_note(v, if plain { Second::Plain } else { Second::Years })
+    two_tables_or_note(v, if plain { Second::Plain } else { Second::Years }, 1.0)
 }
 
 /// What [`two_tables_or_note`] draws after the blank row.
@@ -591,8 +591,10 @@ enum Second {
     Note,
 }
 
-/// [`two_tables`], or with [`Second::Note`] a note row and two more rows of the first table.
-fn two_tables_or_note(v: &Variant, second_kind: Second) -> Sheet {
+/// [`two_tables`], or with [`Second::Note`] a note row and two more rows of the first table;
+/// the third row of the first table stands `inner` pitches under the row over it (Task 15b
+/// part 2d item 5: a row set a little apart does not raise the pitch of the rows).
+fn two_tables_or_note(v: &Variant, second_kind: Second, inner: f32) -> Sheet {
     let plain = second_kind != Second::Years;
     let k = v.k();
     let (plain_face, bold) = v.faces();
@@ -628,6 +630,9 @@ fn two_tables_or_note(v: &Variant, second_kind: Second) -> Sheet {
     let mut t = String::new();
     let mut y = 650.0;
     for (n, row) in first.iter().enumerate() {
+        if n == 2 {
+            y -= (inner - 1.0) * pitch;
+        }
         let font = if n == 0 || n == 4 { bold } else { plain_face };
         t += &show(font, size, x0, y, row[0]);
         if !row[1].is_empty() {
@@ -1004,9 +1009,14 @@ pub(crate) fn shapes() -> Vec<Shape> {
             draw: |v| (two_tables(v, true), None),
         },
         Shape {
+            name: "a second table under a plain header after a row set apart",
+            axes: DOC_NEXT,
+            draw: |v| (two_tables_or_note(v, Second::Plain, 1.5), None),
+        },
+        Shape {
             name: "a note row after a blank row in a table",
             axes: DOC_NEXT,
-            draw: |v| (two_tables_or_note(v, Second::Note), None),
+            draw: |v| (two_tables_or_note(v, Second::Note, 1.0), None),
         },
         Shape {
             name: "a second table under a header of years after a bold total",
