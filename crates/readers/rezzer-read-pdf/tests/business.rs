@@ -1862,6 +1862,71 @@ fn a_blank_row_keeps_one_table() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// Task 15b part 2b re-review (probe C, ruling P6-X): a second table under the first after a
+/// blank row (2.2 pitches), no rule between, whose middle column ends where the first table's
+/// middle title ends, so that its lines stand in the first table's columns: its bold header
+/// line (no amounts, text in every column, bold under plain rows) starts a table of its own,
+/// and no header becomes a row of the first. Sizes 6 to 14 in both fonts.
+#[test]
+fn a_header_after_a_blank_row_starts_a_table_of_its_own() {
+    let first = [
+        ["Lohnart", "Bezeichnung", "Betrag"],
+        ["1000", "Gehalt", "3.000,00"],
+        ["1010", "Zulage", "150,00"],
+        ["1020", "Fahrgeld", "45,67"],
+    ];
+    let second = [
+        ["Kennung", "Menge", "Wert"],
+        ["7001", "12", "45,67"],
+        ["7002", "3", "8,90"],
+    ];
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+        for fonts in FONTS {
+            let k = size / 9.0;
+            let pitch = 1.25 * size;
+            let right = |font: &str, x: f32, y: f32, t: &str| {
+                show(font, size, x - common::font_width(font, t, size), y, t)
+            };
+            let mut t = String::new();
+            let mut y = 700.0;
+            for (n, row) in first.iter().enumerate() {
+                let font = if n == 0 { fonts.1 } else { fonts.0 };
+                t += &show(font, size, 40.0, y, row[0]);
+                t += &show(font, size, 40.0 + 72.0 * k, y, row[1]);
+                t += &right(font, 40.0 + 360.0 * k, y, row[2]);
+                y -= pitch;
+            }
+            y -= 1.2 * pitch;
+            let mid = 40.0 + 72.0 * k + common::font_width(fonts.1, "Bezeichnung", size);
+            for (n, row) in second.iter().enumerate() {
+                let font = if n == 0 { fonts.1 } else { fonts.0 };
+                t += &show(font, size, 40.0, y, row[0]);
+                t += &right(font, mid, y, row[1]);
+                t += &right(font, 40.0 + 360.0 * k, y, row[2]);
+                y -= pitch;
+            }
+            let out = common::read(&page_in(&t, Look::Plain));
+            let found = tables(&out);
+            for want in [&first[..], &second[..]] {
+                let want: Vec<Vec<String>> = want
+                    .iter()
+                    .map(|r| r.iter().map(|c| (*c).to_string()).collect())
+                    .collect();
+                if !found.iter().any(|t| t.1 == want) {
+                    wrong.push(format!("{size}, {fonts:?}: no table {want:?} in {found:?}"));
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
 /// Line items without rules with a line of amounts under the amounts of the first item, and an
 /// amount alone flush right under the last item at the row pitch, at sizes 6 to 14 in both
 /// fonts: the line of amounts is a row of its own, and the lone amount (a total, or one more

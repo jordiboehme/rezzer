@@ -114,8 +114,8 @@ pub(super) fn borderless(
             }
             // A gap of more than twice the steps of the lines on both sides of it parts two
             // blocks (a table under a field list or under totals, with no rule between) when
-            // the line after it stands in other columns; a group of rows of the same table after
-            // a blank row stands in its columns.
+            // the line after it stands in other columns, or is the header of a table of its own;
+            // a group of rows of the same table after a blank row stands in its columns.
             let next = lines
                 .get(end + 1)
                 .filter(|_| !off[end + 1])
@@ -124,7 +124,8 @@ pub(super) fn borderless(
             if let Some(next) = next
                 && pitch > 0.0
                 && gap > REGION_STEPS * pitch.max(next)
-                && !in_columns(flow, &lines[i..end], cur)
+                && (!in_columns(flow, &lines[i..end], cur)
+                    || header_line(flow, &lines[i..end], cur))
             {
                 break;
             }
@@ -699,6 +700,37 @@ fn in_columns(flow: &Flow, region: &[FlowLine], line: &FlowLine) -> bool {
                 .iter()
                 .any(|e| (p.x0 - e.0).abs() <= tol || (p.x1 - e.1).abs() <= tol)
         })
+}
+
+/// Whether `line` has the shape of the header of a table under the lines `region`: text in
+/// every column (as many pieces as the region's fullest line), no piece a number, an amount
+/// or a date (see [`numeric`]), and a style step over the line before it: all bold under a
+/// line that is not, or a size step larger (see [`crate::order::SIZE_STEP`]).
+fn header_line(flow: &Flow, region: &[FlowLine], line: &FlowLine) -> bool {
+    let Some(prev) = region.last() else {
+        return false;
+    };
+    let own = pieces_of(flow, line);
+    let fullest = region
+        .iter()
+        .map(|l| piece_count(flow, l))
+        .max()
+        .unwrap_or(0);
+    let inked = |l: &FlowLine| {
+        flow.runs[l.start..l.end]
+            .iter()
+            .filter(|r| !r.text.trim().is_empty())
+            .collect::<Vec<_>>()
+    };
+    let bold = |l: &FlowLine| {
+        let rs = inked(l);
+        !rs.is_empty() && rs.iter().all(|r| r.bold)
+    };
+    let size = |l: &FlowLine| inked(l).iter().map(|r| r.size).fold(0.0f32, f32::max);
+    let stepped = (bold(line) && !bold(prev)) || size(line) >= crate::order::SIZE_STEP * size(prev);
+    own.len() >= 2.max(fullest)
+        && own.iter().all(|p| !numeric(&text_of(flow, p.start, p.end)))
+        && stepped
 }
 
 /// Whether `text` is an amount: a number (see [`Shape::Number`]) with a decimal part of two
