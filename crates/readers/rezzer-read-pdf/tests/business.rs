@@ -1862,6 +1862,94 @@ fn a_blank_row_keeps_one_table() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// Task 15b group 20: line items with a dashed rule under the header and an end rule over the
+/// totals, each dash a fifth of the text size long and half a point thick (thin both ways at
+/// small sizes), the page upright or turned a quarter either way: the items and the totals
+/// are two tables, as upright. Sizes 6 to 14 in both fonts.
+#[test]
+fn dashed_end_rules_part_tables_on_a_turned_page() {
+    let items = [
+        ["Pos", "Artikel", "Menge", "Preis", "Betrag"],
+        ["1", "Beratung", "2", "500,00", "1.000,00"],
+        ["2", "Material", "1", "200,00", "200,00"],
+        ["3", "Versand", "1", "34,56", "34,56"],
+    ];
+    let totals = [
+        ["Nettobetrag", "1.234,56"],
+        ["USt 19 %", "234,57"],
+        ["Gesamtbetrag", "1.469,13"],
+    ];
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+        for fonts in FONTS {
+            for (turn, clockwise) in [(false, false), (true, false), (true, true)] {
+                let k = size / 8.0;
+                let y = |dy: f32| 700.0 - dy * k;
+                let right = |font: &str, x: f32, y: f32, t: &str| {
+                    show(font, size, x - common::font_width(font, t, size), y, t)
+                };
+                let dashed = |y: f32| {
+                    let mut out = String::new();
+                    let mut x = 40.0;
+                    while x < 540.0 {
+                        let dash = (0.2 * size).min(540.0 - x);
+                        out += &format!("{x} {} {dash} 0.5 re f\n", y - 0.25);
+                        x += 0.3 * size;
+                    }
+                    out
+                };
+                let xs = [40.0, 80.0, 300.0];
+                let mut t = String::new();
+                for (n, row) in items.iter().enumerate() {
+                    let font = if n == 0 { fonts.1 } else { fonts.0 };
+                    let at = y(10.0 * n as f32);
+                    for (x, c) in xs.iter().zip(&row[..3]) {
+                        t += &show(font, size, *x, at, c);
+                    }
+                    t += &right(font, 420.0, at, row[3]);
+                    t += &right(font, 540.0, at, row[4]);
+                }
+                t += &dashed(y(4.0));
+                t += &dashed(y(36.0));
+                for (n, row) in totals.iter().enumerate() {
+                    let at = y(44.0 + 10.0 * n as f32);
+                    t += &show(fonts.0, size, 340.0, at, row[0]);
+                    t += &right(fonts.0, 540.0, at, row[1]);
+                }
+                let page = FormPage {
+                    template: format!("{t}{}", body(7.0, 420.0)),
+                    turn,
+                    clockwise,
+                    ..FormPage::default()
+                };
+                let out = common::read(&print_form(&[page], "", ""));
+                let found = tables(&out);
+                let owned = |w: &[&[&str]]| -> Vec<Vec<String>> {
+                    w.iter()
+                        .map(|r| r.iter().map(|c| (*c).to_string()).collect())
+                        .collect()
+                };
+                let item_rows: Vec<&[&str]> = items.iter().map(|r| &r[..]).collect();
+                let total_rows: Vec<&[&str]> = totals.iter().map(|r| &r[..]).collect();
+                for want in [owned(&item_rows), owned(&total_rows)] {
+                    if !found.iter().any(|t| t.1 == want) {
+                        wrong.push(format!(
+                            "{size}, {fonts:?}, turn {turn} {clockwise}: no {:?} in {found:?}",
+                            want[0]
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
 /// Task 15b part 2b re-review (probe C, ruling P6-X): a second table under the first after a
 /// blank row (2.2 pitches), no rule between, whose middle column ends where the first table's
 /// middle title ends, so that its lines stand in the first table's columns: its bold header

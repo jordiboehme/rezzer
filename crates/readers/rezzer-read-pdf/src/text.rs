@@ -3144,13 +3144,16 @@ fn rectangle(points: &[Point]) -> Option<Rule> {
     bounds_rule(x0, y0, x1, y1)
 }
 
-/// The rule an area of these bounds is: a line when it is thin, a rectangle otherwise.
+/// The rule an area of these bounds is: a line when it is thin, a rectangle otherwise. A line
+/// runs along its longer side: a short dash thin both ways (a dash of a dashed rule) is a line
+/// across the page when it is wider than high and down the page when it is higher than wide,
+/// so a page turned a quarter reads its dashes as it reads them upright.
 fn bounds_rule(x0: f32, y0: f32, x1: f32, y1: f32) -> Option<Rule> {
     let (w, h) = (x1 - x0, y1 - y0);
     if w.max(h) < SHORTEST {
         return None;
     }
-    Some(if h <= THIN {
+    Some(if h <= THIN && (w > THIN || w >= h) {
         let y = (y0 + y1) / 2.0;
         Rule {
             x0,
@@ -3999,6 +4002,23 @@ mod tests {
                 .collect::<String>(),
             "Text"
         );
+    }
+
+    /// A dash thin both ways is a line along its longer side, upright or turned a quarter:
+    /// the dashes of a rule on a turned page read as they read upright.
+    #[test]
+    fn a_thin_dash_runs_along_its_longer_side() {
+        let flat = bounds_rule(100.0, 200.0, 101.08, 200.5).expect("a rule");
+        assert_eq!((flat.y0, flat.y1), (200.25, 200.25));
+        assert!((flat.x1 - flat.x0 - 1.08).abs() < 1e-4);
+        let upright = bounds_rule(100.0, 200.0, 100.5, 201.08).expect("a rule");
+        assert_eq!((upright.x0, upright.x1), (100.25, 100.25));
+        assert!((upright.y1 - upright.y0 - 1.08).abs() < 1e-4);
+        assert_eq!(upright.kind, RuleKind::Line);
+        // Longer than thin one way: a line that way, whichever is higher.
+        let long = bounds_rule(100.0, 200.0, 101.5, 210.0).expect("a rule");
+        assert_eq!((long.x0, long.x1), (100.75, 100.75));
+        assert!(bounds_rule(100.0, 200.0, 100.5, 200.9).is_none());
     }
 
     /// A separator drawn as a mark (0.24 by 2 points, or a little taller) is no rule; its

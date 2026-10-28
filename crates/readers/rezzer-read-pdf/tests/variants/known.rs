@@ -275,20 +275,6 @@ pub(crate) const KNOWN: &[Known] = &[
         why: "carry from Task 8 round 3: the address test works on whole layout lines, so a date line on the baseline of the recipient's name keeps the name out of the address paragraph",
     },
     Known {
-        shape: "line items with an end rule",
-        variants: &["scale 0.75, smaller text, dashed, turned 270, row under, two pages"],
-        broken: &[Inv::Table, Inv::SameReading, Inv::NoLoss],
-        cause: Cause::New,
-        why: "group 20 (part 2c): in this variant only the items, the totals and the table of the `row under` neighbour are refused as one block of columns with a loss (some of its text stands between its columns), while the same variant at scale 1 reads all three tables",
-    },
-    Known {
-        shape: "line items without rules over an end rule",
-        variants: &["scale 0.75, smaller text, dashed, turned 270, row under, two pages"],
-        broken: &[Inv::Table, Inv::SameReading, Inv::NoLoss],
-        cause: Cause::New,
-        why: "group 20 (part 2c): in this variant only the items, the totals and the table of the `row under` neighbour are refused as one block of columns with a loss (some of its text stands between its columns), while the same variant at scale 1 reads all three tables",
-    },
-    Known {
         shape: "weight-only boxes",
         variants: &[
             "base",
