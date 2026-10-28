@@ -271,6 +271,7 @@ shape_tests! {
     boxed_fields_beside_a_bold_title => "boxed fields beside a bold title",
     boxed_fields_beside_a_box_at_the_value_size => "boxed fields beside a box at the value size",
     a_strip_without_dividers_beside_a_smaller_name => "a strip without dividers beside a smaller name over its address",
+    a_lone_field_in_a_strip_beside_a_smaller_name => "a lone field in a strip beside a smaller name over its address",
     a_strip_without_dividers_beside_a_bold_title => "a strip without dividers beside a bold title",
     boxed_fields_beside_a_company_in_another_font => "boxed fields beside a company in another font",
     boxed_fields_beside_an_address => "boxed fields beside an address",

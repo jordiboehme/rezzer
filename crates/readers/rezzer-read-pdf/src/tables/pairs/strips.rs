@@ -41,6 +41,8 @@ struct Strip {
     rows: Option<(Vec<usize>, Vec<usize>)>,
     /// A field of it was left as text.
     left_out: bool,
+    /// The styles of the first lines of its cells left as text (see [`head_style`]).
+    left_heads: Vec<Style>,
 }
 
 /// Where fields between rules may stand: a rule no grid takes and the nearest rule below it
@@ -466,6 +468,7 @@ pub(in crate::tables) fn field_strips(
     tables: &mut Vec<Planned>,
     unsure: &mut Vec<String>,
     bodies: &mut Vec<(Vec<usize>, Vec<String>)>,
+    apart: &mut Vec<Vec<usize>>,
 ) {
     let how = Reading {
         one_field: false,
@@ -534,6 +537,7 @@ pub(in crate::tables) fn field_strips(
         // A cell not clear for a reason of fields (a label under its value, a weight only) whose
         // text is as short as a field's (see [`field_sized`]), not for its many styles alone.
         let (mut fits, mut unread, mut field_why) = (true, false, None);
+        let mut left_heads: Vec<Style> = Vec::new();
         // The heads of a cell in three styles whose first line is heads over lines of their
         // own: the row is a row of fields not clear, which is said by them.
         let mut styled_heads: Vec<String> = Vec::new();
@@ -581,6 +585,7 @@ pub(in crate::tables) fn field_strips(
                                 // text of one style with no label is said, by its first line.
                                 Parsed::No if beside && title_part(flow, &part) => {}
                                 Parsed::No if beside && value_sized(flow, &part) => {
+                                    left_heads.extend(head_style(flow, &part));
                                     let names: Vec<String> = lines_of(flow, &part)
                                         .first()
                                         .map(|l| words(flow, l))
@@ -594,6 +599,7 @@ pub(in crate::tables) fn field_strips(
                                 // An address is left out of the row, which is said;
                                 // the other fields of the row stay.
                                 Parsed::Unsure(why @ (ADDRESS | NAMED_ADDRESS)) => {
+                                    left_heads.extend(head_style(flow, &part));
                                     let names = label_names(flow, &part);
                                     match left_out.iter_mut().find(|l| l.0 == why) {
                                         Some(l) => l.1.extend(names),
@@ -620,6 +626,7 @@ pub(in crate::tables) fn field_strips(
                 }
             };
             if let Some(why) = why {
+                left_heads.extend(head_style(flow, cell));
                 match left_out.iter_mut().find(|l| l.0 == why) {
                     Some(l) => l.1.extend(label_names(flow, cell)),
                     None => left_out.push((why, label_names(flow, cell))),
@@ -647,6 +654,13 @@ pub(in crate::tables) fn field_strips(
             for &i in &ids {
                 kept[i] = true;
             }
+            apart.extend(cell_order(
+                flow,
+                by_y,
+                (fr.top, fr.bottom, fr.x0, fr.x1),
+                &fr.dividers,
+                busy,
+            ));
             continue;
         }
         for (why, names) in &left_out {
@@ -664,6 +678,7 @@ pub(in crate::tables) fn field_strips(
             fields,
             rows: two_lines(flow, &ids),
             left_out: !left_out.is_empty(),
+            left_heads,
         });
     }
     rows_in_order(&mut strips);
@@ -812,8 +827,16 @@ pub(in crate::tables) fn field_strips(
         };
         // One field alone between its rules reads like a caption over a line: it is not
         // paired, and that is said, with the labels under its rule that may be of its value.
-        // Beside a cell of its row left out, it is a field of the row.
-        let row = g.len() == 1 && strips[g[0]].left_out;
+        // Beside a cell of its row left out, it is a field of the row only on evidence that
+        // its label is one: a colon at its end, or the style of the first line of a cell left
+        // out (a label of the row too). A small caption over a short line stays no pair.
+        let labelled = |f: &Field| {
+            words(flow, &f.label).ends_with(':')
+                || f.label
+                    .first()
+                    .is_some_and(|&i| strips[g[0]].left_heads.contains(&style_of(&flow.runs[i])))
+        };
+        let row = g.len() == 1 && strips[g[0]].left_out && list.iter().all(|f| labelled(f));
         if list.len() < 2 && !row {
             let mut names: Vec<String> = list.iter().map(|f| words(flow, &f.label)).collect();
             if let Ends::Under(_, below) | Ends::Unclear(below) = ends(
@@ -839,6 +862,16 @@ pub(in crate::tables) fn field_strips(
             say(unsure, &names, LONE);
             for &i in &runs {
                 kept[i] = true;
+            }
+            if let [k] = g[..] {
+                let s = &strips[k];
+                apart.extend(cell_order(
+                    flow,
+                    by_y,
+                    (s.top, s.bottom, s.x0, s.x1),
+                    &s.dividers,
+                    busy,
+                ));
             }
             continue;
         }
@@ -1035,6 +1068,85 @@ fn heads_over_lines(flow: &Flow, cell: &[usize]) -> Option<Vec<String>> {
                 .any(|&(a, b, s)| a < x1 && b > x0 && s >= LABEL_STEP * size)
         })
         .then(|| heads.iter().map(|h| words(flow, h)).collect())
+}
+
+/// The runs of a row of fields between the rules `top` and `bottom` from `x0` to `x1` (none
+/// that `busy` names, none in another direction), in the order to read them: cell by cell, left
+/// to right, each cell's lines top down. Cells are parted by the `dividers` and, inside them, by
+/// gutters: white space of a cell gap (see [`CELL_GAP`]) or more that no run of the cell
+/// crosses on any of its lines. None when there is one cell only.
+fn cell_order(
+    flow: &Flow,
+    by_y: &ByY,
+    (top, bottom, x0, x1): (f32, f32, f32, f32),
+    dividers: &[f32],
+    busy: &dyn Fn(usize) -> bool,
+) -> Option<Vec<usize>> {
+    let ids: Vec<usize> = by_y
+        .runs_between(bottom, top)
+        .into_iter()
+        .filter(|&i| {
+            let r = &flow.runs[i];
+            let (cx, _) = middle(r);
+            !busy(i) && !r.off_axis && cx > x0 && cx < x1
+        })
+        .collect();
+    let mut edges = vec![x0];
+    edges.extend(dividers);
+    edges.push(x1);
+    let mut columns: Vec<Vec<usize>> = Vec::new();
+    for cell in cells_of(flow, &edges, &ids) {
+        // The stretches of ink of the cell's runs, merged where less than a cell gap apart.
+        let mut spans: Vec<(f32, f32, f32)> = cell
+            .iter()
+            .filter(|&&i| inked(&flow.runs[i]))
+            .map(|&i| {
+                let r = &flow.runs[i];
+                (r.x, r.x + r.w.max(0.0), r.size.max(1.0))
+            })
+            .collect();
+        spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut merged: Vec<(f32, f32, f32)> = Vec::new();
+        for (a, b, size) in spans {
+            match merged.last_mut() {
+                Some(m) if a - m.1 < CELL_GAP * size.max(m.2) => {
+                    m.1 = m.1.max(b);
+                    m.2 = m.2.max(size);
+                }
+                _ => merged.push((a, b, size)),
+            }
+        }
+        let mut parts: Vec<Vec<usize>> = vec![Vec::new(); merged.len().max(1)];
+        for &i in &cell {
+            let (cx, _) = middle(&flow.runs[i]);
+            let k = merged
+                .iter()
+                .position(|m| cx <= m.1)
+                .unwrap_or(merged.len().saturating_sub(1));
+            parts[k].push(i);
+        }
+        columns.extend(parts.into_iter().filter(|p| !p.is_empty()));
+    }
+    if columns.len() < 2 {
+        return None;
+    }
+    Some(
+        columns
+            .iter()
+            .flat_map(|c| lines_of(flow, c).into_iter().flatten())
+            .collect(),
+    )
+}
+
+/// The style of the first run of the first line of a part of a cell, if it has ink.
+fn head_style(flow: &Flow, part: &[usize]) -> Option<Style> {
+    let ids: Vec<usize> = part
+        .iter()
+        .copied()
+        .filter(|&i| inked(&flow.runs[i]))
+        .collect();
+    let first = lines_of(flow, &ids).into_iter().next()?;
+    first.first().map(|&i| style_of(&flow.runs[i]))
 }
 
 /// Whether the text of a part of a cell is as short as a value.
@@ -2116,6 +2228,7 @@ mod tests {
             fields: Vec::new(),
             rows: None,
             left_out: false,
+            left_heads: Vec::new(),
         };
         let mut strips = vec![
             strip(737.08, 42.4),

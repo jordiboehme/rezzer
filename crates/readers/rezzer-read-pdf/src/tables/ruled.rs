@@ -1074,10 +1074,11 @@ fn bands_and_strips(sh: &Sheet<'_>, take: &mut Taking, found: &mut Found) -> usi
 fn leave_flow(
     page: u32,
     flow: &mut Flow,
-    take: Taking,
+    mut take: Taking,
     (pairs, strips_from): (usize, usize),
     found: &mut Found,
 ) {
+    read_apart(flow, &mut take, found);
     let Taking {
         claimed,
         mut tables,
@@ -1156,6 +1157,43 @@ fn leave_flow(
             t.header_rows = header_of(&t.rows);
         }
         found.tables.push(t);
+    }
+}
+
+/// Puts the runs of each refused row of fields of `found.apart` in the flow in the order to
+/// read them, cell by cell; other runs of the places of the flow from the first of them to the
+/// last (a block beside the row, on its lines) follow them in their own order. The places stay,
+/// so the rest of the page reads as before, and what is known of each run (the table cell it
+/// goes to, a hold) moves with it.
+fn read_apart(flow: &mut Flow, take: &mut Taking, found: &mut Found) {
+    fn permute<T: Clone>(v: &mut [T], lo: usize, order: &[usize]) {
+        if v.len() < lo + order.len() {
+            return;
+        }
+        let moved: Vec<T> = order.iter().map(|&i| v[i].clone()).collect();
+        for (k, x) in moved.into_iter().enumerate() {
+            v[lo + k] = x;
+        }
+    }
+    for order in std::mem::take(&mut found.apart) {
+        let (Some(&lo), Some(&hi)) = (order.iter().min(), order.iter().max()) else {
+            continue;
+        };
+        let mut sorted = order.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        if sorted.len() != order.len() || order.iter().any(|&i| take.claimed[i].is_some()) {
+            continue;
+        }
+        let mut order = order;
+        order.extend((lo..=hi).filter(|i| sorted.binary_search(i).is_err()));
+        permute(&mut flow.runs, lo, &order);
+        permute(&mut flow.slots, lo, &order);
+        permute(&mut take.claimed, lo, &order);
+        permute(&mut take.held, lo, &order);
+        permute(&mut take.quietly, lo, &order);
+        permute(&mut take.titles, lo, &order);
+        permute(&mut found.bodies, lo, &order);
     }
 }
 
@@ -1314,6 +1352,7 @@ fn strip_tables(
         tables,
         &mut found.uncertain,
         &mut bodies,
+        &mut found.apart,
     );
     // The runs of each frame of column titles over items, by the frame, and its titles.
     if !bodies.is_empty() {

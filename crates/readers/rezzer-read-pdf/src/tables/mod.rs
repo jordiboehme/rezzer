@@ -147,6 +147,10 @@ pub(crate) struct Found {
     /// rules may end its table (see `borderless`). Empty when the page's lines were not
     /// searched.
     pub ends: Vec<HRule>,
+    /// Runs of rows of fields between rules that are refused, in the order to read them: cell
+    /// by cell, each cell's lines together (see `pairs::cell_order`). The ruled pass puts them
+    /// so in the flow.
+    pub apart: Vec<Vec<usize>>,
 }
 
 /// What a refusal without a note refused.

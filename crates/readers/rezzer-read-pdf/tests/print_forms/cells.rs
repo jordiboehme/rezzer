@@ -784,7 +784,9 @@ pub(crate) fn open_strip_of(cells: &[StripCell], size: f32, step: f32, font: &st
 /// two to four cells with a name a little smaller than the labels over an address first, last,
 /// in the middle or twice, beside labels over their values. Each cell pairs right (its label
 /// over its lines) or a loss names it; the cells marked to pair do; no block that is no table
-/// holds words of two cells. Sizes 6 to 14, steps 1.0625 to 1.25, both data fonts.
+/// holds words of two cells. Fix round 1 (rulings on concerns 1 and 3): one field beside the
+/// name pairs only when a colon ends its label, else it is refused, and the refused strip reads
+/// cell by cell. Sizes 6 to 14, steps 1.0625 to 1.25, both data fonts.
 #[test]
 fn strips_of_two_to_four_cells_read_their_cells_apart() {
     const NAME: StripCell = ("Muster GmbH", 0.9, &["Musterweg 1", "12345 Musterstadt"]);
@@ -796,20 +798,28 @@ fn strips_of_two_to_four_cells_read_their_cells_apart() {
     const NR: StripCell = ("Nr", 1.0, &["4711"]);
     const KEY: StripCell = ("Name", 1.0, &["Beispiel"]);
     const DATE: StripCell = ("Datum", 1.0, &["01.01.2020"]);
-    // The cells, and the heads that must pair.
-    let layouts: [(&[StripCell], &[&str]); 6] = [
-        (&[NAME, NR], &[]),
-        (&[KEY, NAME], &[]),
-        (&[NAME, KEY, NR], &["Name", "Nr"]),
-        (&[KEY, NR, NAME], &["Name", "Nr"]),
-        (&[KEY, NAME, NR, DATE], &["Name", "Nr", "Datum"]),
-        (&[NAME, PERSON, NR, KEY], &["Nr", "Name"]),
+    const NR_COLON: StripCell = ("Nr:", 1.0, &["4711"]);
+    // The cells, the heads that must pair, and the heads that must not (a lone field with no
+    // sign of a label).
+    type Layout = (
+        &'static [StripCell],
+        &'static [&'static str],
+        &'static [&'static str],
+    );
+    let layouts: [Layout; 7] = [
+        (&[NAME, NR_COLON], &["Nr:"], &[]),
+        (&[NAME, NR], &[], &["Nr"]),
+        (&[KEY, NAME], &[], &["Name"]),
+        (&[NAME, KEY, NR], &["Name", "Nr"], &[]),
+        (&[KEY, NR, NAME], &["Name", "Nr"], &[]),
+        (&[KEY, NAME, NR, DATE], &["Name", "Nr", "Datum"], &[]),
+        (&[NAME, PERSON, NR, KEY], &["Nr", "Name"], &[]),
     ];
     let mut wrong = Vec::new();
     for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
         for step in [1.0625f32, 1.125, 1.25] {
             for font in ["F1", "F3"] {
-                for (cells, pairs) in layouts {
+                for (cells, pairs, lone) in layouts {
                     let heads: Vec<&str> = cells.iter().map(|c| c.0).collect();
                     let at = format!("{heads:?} {size} pt x {step}, {font}");
                     let out = open_strip_of(cells, size, step, font);
@@ -830,6 +840,9 @@ fn strips_of_two_to_four_cells_read_their_cells_apart() {
                         }
                         if pairs.contains(head) && !rows.contains(&want) {
                             wrong.push(format!("{at}: no {want} in {rows:?}"));
+                        }
+                        if lone.contains(head) && paired {
+                            wrong.push(format!("{at}: the lone {head} pairs: {rows:?}"));
                         }
                     }
                     let words: Vec<Vec<&str>> = cells
@@ -868,7 +881,8 @@ fn strips_of_two_to_four_cells_read_their_cells_apart() {
 
 /// Task 15b part 2d item 3 (ruling P6-X: never silent): a strip whose cells are not clear (the
 /// address under a smaller name runs on under the next label) and whose text is in three
-/// styles is not read as fields, and a loss names its heads; no pair is made.
+/// styles is not read as fields, and a loss names its heads; no pair is made. Fix round 1
+/// (ruling on concern 1): its text is read cell by cell, never line by line across them.
 #[test]
 fn a_strip_in_three_styles_not_clear_is_said() {
     let long: &[&str] = &["Musterweg 1", "12345 Musterstadt-Beispielhausen"];
@@ -904,6 +918,17 @@ fn a_strip_in_three_styles_not_clear_is_said() {
                         .map(|l| l.what.as_str())
                         .collect();
                     wrong.push(format!("{at}: not said: {losses:?}"));
+                }
+                let mut blocks = Vec::new();
+                text_blocks(&out.document.body, &mut blocks);
+                for b in blocks {
+                    let of: Vec<&str> = ["Beispiel", "Musterweg", "4711"]
+                        .into_iter()
+                        .filter(|w| b.split_whitespace().any(|x| x == *w))
+                        .collect();
+                    if of.len() > 1 {
+                        wrong.push(format!("{at}: a block mixes cells: {b:?}"));
+                    }
                 }
             }
         }

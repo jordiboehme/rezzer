@@ -226,6 +226,27 @@ fn open_strip(
     top - h
 }
 
+/// Task 15b part 2d fix round 1 (rulings on concerns 1 and 3): a strip of two cells between two
+/// rules with no rule between them, `Personalnummer` over its value beside a company name a
+/// little smaller than it over its address. The name is left out, so the field is one field
+/// alone between its rules with no sign of a label: it pairs with nothing and a loss names it;
+/// the strip is read cell by cell.
+fn lone_strip(g: &Geo, b: &mut Built, top: f32) -> f32 {
+    let h = 3.6 * g.data;
+    let (x0, x1) = (g.col(0) - 0.12, g.col(40) - 0.12);
+    b.page.template += &g.hrule(x0, x1, top);
+    b.page.template += &g.hrule(x0, x1, top - h);
+    let y = top - 0.9 * g.label - 0.3 * g.data;
+    b.page.template += &label(g.col(0) + 0.3 * g.label, y, g.label, "Personalnummer");
+    b.fields.push(("Personalnummer", Err(())));
+    smaller_name(g, b, g.col(20) + 0.3 * g.label, top);
+    b.values.push("00000".to_string());
+    let bottom = top - h + 0.3 * g.data;
+    g.values(b, bottom + 1.2 * g.data, &[(21, "Musterweg 1")]);
+    g.values(b, bottom, &[(1, "00000"), (21, "12345 Musterstadt")]);
+    top - h
+}
+
 /// [`open_strip`] with `middle` as a shape: no block holds a text of the middle field with a
 /// label or a value of the fields beside it.
 fn open_strip_shape(
@@ -598,6 +619,22 @@ pub(crate) fn shapes() -> Vec<Shape> {
                     |g, b, t| open_strip(g, b, t, smaller_name),
                     &NAME_AND_ADDRESS,
                 )
+            },
+        },
+        Shape {
+            name: "a lone field in a strip beside a smaller name over its address",
+            axes: Axes {
+                look: NO_RISING,
+                ..ALL
+            },
+            draw: |v| {
+                let (mut s, e) = drawn(v, lone_strip, 40);
+                for o in ["Personalnummer", "00000"] {
+                    for t in NAME_AND_ADDRESS {
+                        s.want.apart.push((o.to_string(), t.to_string()));
+                    }
+                }
+                (s, e)
             },
         },
         Shape {
