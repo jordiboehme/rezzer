@@ -1871,7 +1871,7 @@ impl Built {
 }
 
 /// Inlines from runs in order. Runs on a new line are joined with a space, or without one
-/// after a hyphen; a line `breaks` names (page, line; sorted) starts after a line break.
+/// after a hyphen that ends a word (not after a dash with white space before it); a line `breaks` names (page, line; sorted) starts after a line break.
 /// Bold, italic and URI links are kept while `links` has room for their targets; past it a
 /// link's text stays without the link.
 fn inlines(
@@ -1910,7 +1910,14 @@ fn inlines(
         }
         last = Some((r.page, r.line));
         let broken = new_line && breaks.binary_search(&(r.page, r.line)).is_ok();
-        let glued = pieces.last().is_none_or(|p| p.text.ends_with(['-', ' ']));
+        // A hyphen at the end of a line joins the word that wraps; one with white space before
+        // it is a dash (`01.10.2026 -` over `31.10.2026`), and the space after it stays.
+        let glued = pieces.last().is_none_or(|p| {
+            p.text.ends_with(' ')
+                || p.text
+                    .strip_suffix('-')
+                    .is_some_and(|rest| !rest.is_empty() && !rest.ends_with(char::is_whitespace))
+        });
         if new_line && !glued && !broken {
             text.insert(0, ' ');
         }
@@ -2057,12 +2064,25 @@ fn inlines(
 }
 
 /// Whether `cur` goes on in the same paragraph as `prev`: below it, near enough and in the
-/// same size.
+/// same size, and not wholly right of it: a line that starts [`BESIDE_GAP`] sizes or more
+/// after the ink of the line over it ends stands in another column (an amount alone under a
+/// table in another column than the one over it), as text that wraps goes on at the left.
 fn continues(prev: &Line<'_>, cur: &Line<'_>) -> bool {
     let gap = prev.y - cur.y;
     let height = prev.h.max(cur.h).max(1.0);
-    gap > 0.0 && gap <= GAP_RATIO * height && (prev.size - cur.size).abs() <= SIZE_SLACK
+    let end = prev
+        .runs
+        .iter()
+        .filter(|r| !r.text.trim().is_empty())
+        .map(|r| r.x + r.w.max(0.0))
+        .fold(f32::MIN, f32::max);
+    let beside = cur.x >= end + BESIDE_GAP * prev.size.max(cur.size).max(1.0);
+    gap > 0.0 && gap <= GAP_RATIO * height && (prev.size - cur.size).abs() <= SIZE_SLACK && !beside
 }
+
+/// A line that starts this many sizes or more right of where the line over it ends goes on
+/// no paragraph of it (see [`continues`]): the white space of a cell gap, far over a space.
+const BESIDE_GAP: f32 = 1.0;
 
 /// The blocks of a running footer, in reading order. Footer lines that go on one another at
 /// one left edge are one block. A footer set in columns (an address, a bank, a register entry,

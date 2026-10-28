@@ -446,6 +446,70 @@ const NET_TAX_GROSS_TOTALS: [TotalsRow; 2] = [
     ],
 ];
 
+/// Part 2e-1 (items 6 and 7): line items without rules at 8 points times the size factor, a
+/// bold header `Pos`, `Zeitraum`, `Basis` and `Betrag`; with `range` the first two periods
+/// wrap after their dash (`01.10.2026 -` over `31.10.2026`) and the cell keeps the space after
+/// the dash; else the last row is followed by an amount alone under the base and one alone
+/// under the amount, on two lines, which are never one block.
+fn period_items(v: &Variant, range: bool) -> Sheet {
+    let k = v.k();
+    let (plain, bold) = v.faces();
+    let size = 8.0 * k;
+    let xs = [40.0, 80.0, 380.0 * k.max(0.9), 540.0];
+    let mut y = 600.0;
+    let mut t = show(bold, size, xs[0], y, "Pos")
+        + &show(bold, size, xs[1], y, "Zeitraum")
+        + &right(bold, size, xs[2], y, "Basis")
+        + &right(bold, size, xs[3], y, "Betrag");
+    let rows: [[&str; 5]; 3] = [
+        ["1", "01.10.2026 -", "31.10.2026", "1.000,00", "100,00"],
+        ["2", "01.11.2026 -", "30.11.2026", "500,00", "50,00"],
+        ["3", "Dezember", "", "200,00", "20,00"],
+    ];
+    let mut table = vec![vec![
+        "Pos".to_string(),
+        "Zeitraum".into(),
+        "Basis".into(),
+        "Betrag".into(),
+    ]];
+    for (n, r) in rows.iter().enumerate() {
+        y -= 10.0 * k;
+        let (from, to) = if range || n == 2 {
+            (r[1], r[2])
+        } else {
+            ("Oktober", "")
+        };
+        t += &show(plain, size, xs[0], y, r[0]);
+        t += &show(plain, size, xs[1], y, from);
+        t += &right(plain, size, xs[2], y, r[3]);
+        t += &right(plain, size, xs[3], y, r[4]);
+        if !to.is_empty() {
+            y -= 10.0 * k;
+            t += &show(plain, size, xs[1], y, to);
+        }
+        let period = if to.is_empty() {
+            from.to_string()
+        } else {
+            format!("{from} {to}")
+        };
+        table.push(vec![r[0].into(), period, r[3].into(), r[4].into()]);
+    }
+    let top = 600.0;
+    if !range {
+        y -= 10.0 * k;
+        t += &right(plain, size, xs[2], y, "5,00");
+        y -= 10.0 * k;
+        t += &right(plain, size, xs[3], y, "125,00");
+    }
+    let mut s = sheet(v, t, 420.0, Some(Span { top, bottom: y }));
+    if range {
+        s.want.tables.push(table);
+    } else {
+        s.want.apart.push(("5,00".into(), "125,00".into()));
+    }
+    s
+}
+
 /// Task 15b part 2d fix round 3: a notice band between two rules, a bold slogan 1.25 times
 /// the size beside a reference at the size, over one long line of text 1.1 times the size (three
 /// styles). It holds no field: no loss may call it a row of fields.
@@ -1291,6 +1355,16 @@ pub(crate) fn shapes() -> Vec<Shape> {
                     None,
                 )
             },
+        },
+        Shape {
+            name: "line items with wrapped date ranges",
+            axes: DOC_NEXT,
+            draw: |v| (period_items(v, true), None),
+        },
+        Shape {
+            name: "line items over two amounts alone in two columns",
+            axes: DOC_NEXT,
+            draw: |v| (period_items(v, false), None),
         },
         Shape {
             name: "a notice band between rules",

@@ -315,6 +315,8 @@ shape_tests! {
     totals_larger_under_a_rule => "totals with a larger total under a rule",
     totals_percent_larger_under_a_rule => "totals with a percent column and a larger total under a rule",
     net_tax_gross_titles => "net, tax and gross titles over their amounts between rules over a note",
+    line_items_with_wrapped_date_ranges => "line items with wrapped date ranges",
+    line_items_over_two_lone_amounts => "line items over two amounts alone in two columns",
     a_notice_band_between_rules => "a notice band between rules",
     line_items_with_totals_between_rules => "line items with totals between rules over a note",
     line_items_with_an_end_rule => "line items with an end rule",

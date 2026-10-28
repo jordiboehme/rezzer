@@ -1734,15 +1734,92 @@ fn a_wrapped_item_line_without_rules_joins_its_cell_or_is_named() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
+/// Task 15b part 2e-1 (item 6, part 2b re-review r1; ruling P6-X): a table of taxes without
+/// rules, an amount alone under an amount of its column (a row of its own), then two lines of
+/// one amount each in two other columns under the last row (`5,00` under the base, `125,00`
+/// under the amount): the two amounts are never one paragraph or one cell (`5,00 125,00`).
+/// Sizes 6 to 14 in both fonts.
+#[test]
+fn lone_amounts_in_two_columns_stay_apart() {
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 9.0, 10.0, 12.0, 14.0] {
+        for f in FONTS {
+            let k = size / 8.0;
+            let right = |x: f32, y: f32, t: &str| {
+                show(f.0, size, x - common::font_width(f.0, t, size), y, t)
+            };
+            let xs = [40.0, 40.0 + 200.0 * k, 40.0 + 300.0 * k, 40.0 + 420.0 * k];
+            let mut y = 700.0;
+            let mut t = show(f.1, size, xs[0], y, "Art")
+                + &show(
+                    f.1,
+                    size,
+                    xs[1] - common::font_width(f.1, "Basis", size),
+                    y,
+                    "Basis",
+                )
+                + &show(
+                    f.1,
+                    size,
+                    xs[2] - common::font_width(f.1, "Satz", size),
+                    y,
+                    "Satz",
+                )
+                + &show(
+                    f.1,
+                    size,
+                    xs[3] - common::font_width(f.1, "Betrag", size),
+                    y,
+                    "Betrag",
+                );
+            let lines: [&[(usize, &str)]; 5] = [
+                &[(0, "Steuer A"), (1, "1.000,00"), (2, "10 %"), (3, "100,00")],
+                &[(3, "20,00")],
+                &[(0, "Steuer C"), (1, "500,00"), (2, "5 %"), (3, "25,00")],
+                &[(1, "5,00")],
+                &[(3, "125,00")],
+            ];
+            for l in lines {
+                y -= 10.0 * k;
+                for &(c, text) in l {
+                    t += &if c == 0 {
+                        show(f.0, size, xs[0], y, text)
+                    } else {
+                        right(xs[c], y, text)
+                    };
+                }
+            }
+            let out = common::read(&page_in(&t, Look::Plain));
+            let units = common::read_units(&out.document.body);
+            // A unit (a paragraph, a table row) with both amounts as words of it.
+            let joined = units.iter().any(|u| {
+                let words: Vec<&str> = u.split(|c: char| c.is_whitespace() || c == '|').collect();
+                words.contains(&"5,00") && words.contains(&"125,00")
+            });
+            if joined {
+                wrong.push(format!(
+                    "{size}, {f:?}: one unit holds both amounts: {units:?}"
+                ));
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
 /// Items without rules whose period wraps a date range into a second line (`01.10.2026 -`
 /// over `31.10.2026`), in every size and font: the second line is never a row of its own
-/// (only an amount under an amount is one); between two rows it goes on in its cell. (The
-/// cell's text joins the two lines after the dash without a space, as after a hyphen.) All
-/// values are invented.
+/// (only an amount under an amount is one); between two rows it goes on in its cell, and the
+/// dash keeps the space after it (`01.10.2026 - 31.10.2026`; part 2e-1, item 7: it was joined
+/// as after a hyphen). Sizes 6 to 14 in both fonts. All values are invented.
 #[test]
 fn a_wrapped_date_range_stays_in_its_cell() {
     let mut wrong = Vec::new();
-    for k in [0.75, 1.0, 1.5] {
+    for k in [0.75, 1.0, 1.25, 1.5, 1.75] {
         for fonts in FONTS {
             let size = 8.0 * k;
             let flush_right = |x: f32, y: f32, t: &str| {
@@ -1791,6 +1868,15 @@ fn a_wrapped_date_range_stays_in_its_cell() {
                 let cell: String = format!("{from}{to}").split_whitespace().collect();
                 if !cells.contains(&cell) {
                     wrong.push(format!("{k}x, {fonts:?}: no cell {from} {to}: {found:?}"));
+                }
+                // The dash keeps the space after it (part 2e-1, item 7).
+                let spaced = format!("{from} {to}");
+                let exact = found
+                    .iter()
+                    .flat_map(|t| t.1.iter().filter_map(|r| r.get(1)))
+                    .any(|c| c.split_whitespace().collect::<Vec<_>>().join(" ") == spaced);
+                if !exact {
+                    wrong.push(format!("{k}x, {fonts:?}: no cell {spaced:?}: {found:?}"));
                 }
             }
         }
