@@ -412,10 +412,14 @@ fn footer(v: &Variant) -> Sheet {
             s.want.roles.push(("page-footer".into(), lines.join(" ")));
         }
     }
-    for (a, b) in [(0, 1), (1, 2), (2, 3)] {
-        s.want
-            .apart
-            .push((FOOTER[a][1].to_string(), FOOTER[b][1].to_string()));
+    for a in 0..FOOTER.len() {
+        for b in a + 1..FOOTER.len() {
+            for l in FOOTER[a] {
+                for r in FOOTER[b] {
+                    s.want.apart.push((l.to_string(), r.to_string()));
+                }
+            }
+        }
     }
     s
 }
@@ -442,7 +446,8 @@ const COLUMNS: [&[&str]; 4] = [
 
 /// Task 13 (carry C-5): address, bank, register and contact columns of three lines at 7
 /// points times the size factor in the body, top aligned at x 40, 180, 330 and 460, the first
-/// baseline 650 and 1.2 sizes apart: no block holds lines of two columns.
+/// baseline 650 and 1.2 sizes apart: no block holds lines of two columns (any line of one
+/// with any line of another).
 fn address_columns(v: &Variant) -> Sheet {
     let k = v.k();
     let (plain, _) = v.faces();
@@ -461,9 +466,13 @@ fn address_columns(v: &Variant) -> Sheet {
     for lines in COLUMNS {
         s.built.values.extend(lines.iter().map(|l| l.to_string()));
     }
-    for (a, b) in [(0, 1), (1, 2), (2, 3)] {
-        for (l, r) in COLUMNS[a].iter().zip(COLUMNS[b]) {
-            s.want.apart.push((l.to_string(), r.to_string()));
+    for a in 0..COLUMNS.len() {
+        for b in a + 1..COLUMNS.len() {
+            for l in COLUMNS[a] {
+                for r in COLUMNS[b] {
+                    s.want.apart.push((l.to_string(), r.to_string()));
+                }
+            }
         }
     }
     s

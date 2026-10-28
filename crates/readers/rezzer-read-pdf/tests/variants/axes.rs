@@ -509,6 +509,21 @@ fn times_labels(template: &str) -> String {
 fn neighbour(v: &Variant, sheet: &mut Sheet, e: Extent) {
     let g = v.geo();
     let d = g.data;
+    // The shape's own field labels, which no block may hold with the texts of a table under
+    // it. (A block of fields beside it may be read into one table of label and value pairs
+    // with the shape's: each pair is right, in the order of the blocks.)
+    let own: Vec<&'static str> = sheet.built.fields.iter().map(|f| f.0).collect();
+    let apart = |want: &mut Want, theirs: &[&str]| {
+        for o in &own {
+            for t in theirs {
+                want.apart.push(((*o).to_string(), (*t).to_string()));
+            }
+        }
+    };
+    match v.next {
+        Next::RowUnder => apart(&mut sheet.want, &["Kennung", "Fahrgeld", "Essensgeld"]),
+        _ => {}
+    }
     let b = &mut sheet.built;
     match v.next {
         Next::None => {}
