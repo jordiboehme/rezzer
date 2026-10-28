@@ -256,14 +256,17 @@ pub(super) fn borderless(
         }
         let mut pieces: Vec<Vec<Piece>> = lines[a..z].iter().map(|l| pieces_of(flow, l)).collect();
         // Two lines alone whose pieces stand in the same three columns or more, piece for piece,
-        // the first of titles without a digit over a row that holds one (`Pos Datum Betrag`
-        // over `1 15.01.2026 9,99`), are a table of a header and one row, or its refusal is
-        // said.
+        // the first of titles (one word each, no digit) over a row that holds a digit (`Pos
+        // Datum Betrag` over `1 15.01.2026 9,99`), are a table of a header and one row, or its
+        // refusal is said. Blocks side by side that open with a name of two words or more (a
+        // firm over its street beside a bank over its account) are no titles over values.
         let digit = |p: &Piece| {
             flow.runs[p.start..p.end]
                 .iter()
                 .any(|r| r.text.chars().any(|c| c.is_ascii_digit()))
         };
+        let title =
+            |p: &Piece| !digit(p) && text_of(flow, p.start, p.end).split_whitespace().count() == 1;
         let aligned = z - a == 2
             && pieces[0].len() >= 3
             && pieces[0].len() == pieces[1].len()
@@ -271,7 +274,7 @@ pub(super) fn borderless(
                 .iter()
                 .zip(&pieces[1])
                 .all(|(p, q)| p.x0 < q.x1 && q.x0 < p.x1)
-            && !pieces[0].iter().any(digit)
+            && pieces[0].iter().all(title)
             && pieces[1].iter().any(digit);
         // Blocks of an address, a bank or a register side by side are no table: their runs are
         // read block by block. Rows were possible too, so that is said. Under a header row of

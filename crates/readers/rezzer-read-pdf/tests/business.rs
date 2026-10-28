@@ -2309,7 +2309,8 @@ fn a_cut_row_label_and_a_row_of_numbers_stay_apart_from_the_next_line() {
 /// in the same three columns, titles without a digit over a row with one (`Name Ort Nr` over
 /// `Beispiel Musterstadt 4711`), alone in the body or between two rules with no dividers, are a
 /// table of a header and one row (or, refused, that is said), and the two lines are never one
-/// line or one heading. Sizes 6 to 14, both fonts.
+/// line or one heading; blocks side by side that open with a firm's name are no table. Sizes 6
+/// to 14, both fonts.
 #[test]
 fn two_lines_in_three_columns_alone_are_a_table() {
     let mut wrong = Vec::new();
@@ -2353,6 +2354,42 @@ fn two_lines_in_three_columns_alone_are_a_table() {
                 let md = common::markdown(&out);
                 if md.lines().any(|l| l.contains("Nr Beispiel")) {
                     wrong.push(format!("{at}: the two lines are one"));
+                }
+            }
+            // Guard: blocks of two lines side by side that open with a name of two words (a
+            // firm over its street beside a bank over its account, or beside phone and fax)
+            // are no titles over values: no table makes `Muster GmbH` a column title.
+            let blocks: [[[&str; 3]; 2]; 2] = [
+                [
+                    [
+                        "Muster GmbH",
+                        "Sparkasse Musterstadt",
+                        "Amtsgericht Musterstadt",
+                    ],
+                    [
+                        "Musterweg 1",
+                        "IBAN DE00 0000 0000 0000 0000 00",
+                        "HRB 12345",
+                    ],
+                ],
+                [
+                    ["Muster GmbH", "Telefon", "Telefax"],
+                    ["Musterweg 1", "0123 456789", "0123 456780"],
+                ],
+            ];
+            for rows in blocks {
+                let mut t = String::new();
+                for (n, row) in rows.iter().enumerate() {
+                    for (x, c) in [40.0f32, 220.0, 400.0].iter().zip(row) {
+                        t += &show(font, size, *x, 700.0 - 1.2 * size * n as f32, c);
+                    }
+                }
+                let out = common::read(&page_in(&t, Look::Plain));
+                if tables(&out)
+                    .iter()
+                    .any(|t| t.1.iter().flatten().any(|c| c == "Muster GmbH"))
+                {
+                    wrong.push(format!("{size}, {font}, {}: a table", rows[0][1]));
                 }
             }
         }
