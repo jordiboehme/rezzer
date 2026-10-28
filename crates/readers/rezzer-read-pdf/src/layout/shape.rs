@@ -322,7 +322,7 @@ fn indexed(text: &str) -> bool {
 /// Whether lines are a postal address: a line of a postcode (a number of four digits or more)
 /// and a town, and a line of a street or a PO box with its number (words, then a number of
 /// at most four characters: `Musterweg 1`, `Hauptstr. 2a`, `Postfach 12 34`).
-fn postal(lines: &[&str]) -> bool {
+pub(crate) fn postal(lines: &[&str]) -> bool {
     let town = lines.iter().any(|l| {
         let mut w = l.split_whitespace();
         w.next()

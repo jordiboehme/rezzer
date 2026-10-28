@@ -1092,7 +1092,7 @@ fn cells_by_chance(v: &Variant, divided: bool) -> Sheet {
         ["Musterweg 1", "12345 Musterstadt"],
         ["Beispiel AG", "Probeweg 12"],
     ];
-    let mut s = two_cells(v, divided, cells);
+    let mut s = two_cells(v, divided, &cells);
     for lines in cells {
         s.want
             .cells
@@ -1101,17 +1101,18 @@ fn cells_by_chance(v: &Variant, divided: bool) -> Sheet {
     s
 }
 
-/// Part 2e-4 (item 1): a row between rules with no divider whose two cells of two lines show
-/// no sign that their lines go together (a name over a firm beside a firm over its street):
-/// rows or cells, so the two lines read line by line and a loss says the doubt.
-fn cells_or_rows(v: &Variant) -> Sheet {
-    let cells = [
-        ["Erika Mustermann", "Muster GmbH"],
-        ["Beispiel AG", "Probeweg 12"],
-    ];
+/// Part 2e-4 (item 1): a row between rules with no divider whose `cells` of two lines show no
+/// sign that their lines go together (a name over a firm beside a firm over its street; fix
+/// round 1, C1: labels beside a street and its town, two rows of items): rows or cells, so the
+/// two lines read line by line and a loss says the doubt.
+fn cells_or_rows(v: &Variant, cells: &[[&str; 2]]) -> Sheet {
     let mut s = two_cells(v, false, cells);
-    for (a, b) in cells[0].iter().zip(cells[1]) {
-        s.want.lines_joined.push((a.to_string(), b.to_string()));
+    for n in [0, 1] {
+        for w in cells.windows(2) {
+            s.want
+                .lines_joined
+                .push((w[0][n].to_string(), w[1][n].to_string()));
+        }
     }
     s.want
         .losses
@@ -1119,19 +1120,95 @@ fn cells_or_rows(v: &Variant) -> Sheet {
     s
 }
 
-/// Two `cells` of two lines between two rules at x 44 and 224, with a divider between them
-/// when `divided`.
-fn two_cells(v: &Variant, divided: bool, cells: [[&str; 2]; 2]) -> Sheet {
+/// Fix round 1 (I1): words drawn in two weights, the second part touching the first and opening
+/// with a small letter (`Rechnungs` bold and `nummer 4711`, `Muster` and `mann GmbH` bold): one
+/// word each.
+fn two_weights(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, bold) = v.faces();
+    let size = 9.0 * k;
+    let top = 640.0;
+    let mut t = String::new();
+    let words = [
+        ("Rechnungs", bold, "nummer 4711", plain),
+        ("Muster", plain, "mann GmbH", bold),
+    ];
+    for (n, (a, fa, b, fb)) in words.iter().enumerate() {
+        let y = top - 2.0 * size * n as f32;
+        t += &show(fa, size, 40.0, y, a);
+        t += &show(fb, size, 40.0 + font_width(fa, a, size), y, b);
+    }
+    let mut s = sheet(
+        v,
+        t,
+        420.0,
+        Some(Span {
+            top,
+            bottom: top - 2.0 * size,
+        }),
+    );
+    s.once.retain(|o| {
+        !matches!(
+            o.trim(),
+            "Rechnungs" | "nummer 4711" | "Muster" | "mann GmbH"
+        )
+    });
+    for (a, b) in [("Rechnungsnummer", "4711"), ("Mustermann", "GmbH")] {
+        s.once.push(format!("{a} {b}"));
+        s.want.lines_joined.push((a.into(), b.into()));
+    }
+    // The first line in bold at the top of the page may be its title.
+    s.want.may_title.push("Rechnungsnummer 4711".into());
+    s
+}
+
+/// Fix round 1 (I2): prose whose line ends in the first half of a range (`von 08.00-` over
+/// `18.00 Uhr ...`): the range goes on with no space inside it.
+fn wrapped_range(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let size = 8.0 * k;
+    let top = 640.0;
+    let lines = [
+        "Unser Kundenservice ist montags bis freitags von 08.00-",
+        "18.00 Uhr fuer Sie erreichbar und beantwortet gerne Ihre Fragen.",
+    ];
+    let mut t = String::new();
+    for (n, l) in lines.iter().enumerate() {
+        t += &show(plain, size, 40.0, top - 1.2 * size * n as f32, l);
+    }
+    let mut s = sheet(
+        v,
+        t,
+        420.0,
+        Some(Span {
+            top,
+            bottom: top - 1.2 * size,
+        }),
+    );
+    s.once.retain(|o| !lines.contains(&o.trim()));
+    s.once.push("08.00-18.00".into());
+    s.want
+        .lines_joined
+        .push(("von".into(), "08.00-18.00 Uhr".into()));
+    s
+}
+
+/// `cells` of two lines between two rules, at x 44, 224 and on (180 points apart), with a
+/// divider between the first two when `divided`.
+fn two_cells(v: &Variant, divided: bool, cells: &[[&str; 2]]) -> Sheet {
     let k = v.k();
     let (plain, _) = v.faces();
     let size = 8.0 * k;
     let top = 640.0;
     let h = 4.0 * size;
-    let mut t = rule(v, 40.0, 400.0, top, size) + &rule(v, 40.0, 400.0, top - h, size);
+    let x1 = 40.0 + 180.0 * cells.len() as f32;
+    let mut t = rule(v, 40.0, x1, top, size) + &rule(v, 40.0, x1, top - h, size);
     if divided {
         t += &format!("0 0 0 RG 0.5 w 220 {} m 220 {top} l S\n", top - h);
     }
-    for (x, lines) in [44.0, 224.0].into_iter().zip(cells) {
+    for (c, lines) in cells.iter().enumerate() {
+        let x = 44.0 + 180.0 * c as f32;
         for (n, l) in lines.iter().enumerate() {
             t += &show(plain, size, x, top - 1.5 * size - 1.2 * size * n as f32, l);
         }
@@ -2282,7 +2359,43 @@ pub(crate) fn shapes() -> Vec<Shape> {
         Shape {
             name: "cells or rows of two lines between rules with no divider",
             axes: RULED,
-            draw: |v| (cells_or_rows(v), None),
+            draw: |v| {
+                let cells = [
+                    ["Erika Mustermann", "Muster GmbH"],
+                    ["Beispiel AG", "Probeweg 12"],
+                ];
+                (cells_or_rows(v, &cells), None)
+            },
+        },
+        Shape {
+            name: "labels beside a street and its town between rules with no divider",
+            axes: RULED,
+            draw: |v| {
+                let cells = [["Strasse", "Ort"], ["Musterweg 1", "12345 Musterstadt"]];
+                (cells_or_rows(v, &cells), None)
+            },
+        },
+        Shape {
+            name: "two rows of items between rules with no divider",
+            axes: RULED,
+            draw: |v| {
+                let cells = [
+                    ["Pos 1", "Pos 2"],
+                    ["Schrauben M4", "Muttern 8 mm"],
+                    ["Lager A", "Lager B"],
+                ];
+                (cells_or_rows(v, &cells), None)
+            },
+        },
+        Shape {
+            name: "words in two weights",
+            axes: DOC,
+            draw: |v| (two_weights(v), None),
+        },
+        Shape {
+            name: "a range that wraps after its hyphen in prose",
+            axes: DOC,
+            draw: |v| (wrapped_range(v), None),
         },
         Shape {
             name: "titles over a row that ends in a stop",

@@ -430,9 +430,11 @@ enum TextCells {
 /// The parts of the one cell of a frame with no dividers (`cells` 1), when `parts` is that cell
 /// whole, of no label, two lines whose text stands in columns parted by gutters (see
 /// [`gutter_columns`]), each column of no label, as short as a value and of both lines. A
-/// column that is a street over its town (see [`crate::layout::address_lines`]) shows that the
-/// lines of a column go together: the columns are cells of text side by side between two
-/// rules, which the gutter parts as a divider would ([`TextCells::Cells`]). Else the two lines
+/// column that is a street over its postcode and town (see [`crate::layout::postal`]), beside
+/// no column that can be its labels (a colon at a line's end, lines of one or two words with
+/// no digit, or words and a short index), shows that the lines of a column go together: the
+/// columns are cells of text side by side between two rules, which the gutter parts as a
+/// divider would ([`TextCells::Cells`]). Else the two lines
 /// may be rows (a label beside its value on each) or cells (a name over its firm beside
 /// another): they are left whole, and that is said ([`TextCells::Doubt`]). A column of numbers
 /// is a table's (see [`numeric_piece`]) and titles over one row of values are a header over a
@@ -459,10 +461,31 @@ fn text_cells(flow: &Flow, how: Reading<'_>, parts: Vec<Vec<usize>>, cells: usiz
     if columns.len() < 2 || !columns.iter().all(text) || titles_over_row(flow, &columns) {
         return TextCells::Whole(parts);
     }
-    let address = columns.iter().any(|c| {
-        let lines: Vec<String> = lines_of(flow, c).iter().map(|l| words(flow, l)).collect();
-        crate::layout::address_lines(&lines.iter().map(String::as_str).collect::<Vec<_>>())
+    let texts = |c: &Vec<usize>| -> Vec<String> {
+        lines_of(flow, c).iter().map(|l| words(flow, l)).collect()
+    };
+    let postal = columns.iter().any(|c| {
+        let lines = texts(c);
+        crate::layout::postal(&lines.iter().map(String::as_str).collect::<Vec<_>>())
     });
+    // A column that can be the labels of the column beside it: a colon at a line's end, lines
+    // of one or two words without a digit, or words and a short index (`Feld 1`).
+    let labels = columns.iter().any(|c| {
+        let lines = texts(c);
+        let digit = |t: &str| t.chars().any(|ch| ch.is_ascii_digit());
+        let indexed = |t: &str| {
+            let w: Vec<&str> = t.split_whitespace().collect();
+            w.len() >= 2
+                && !w[..w.len() - 1].iter().any(|x| digit(x))
+                && w.last().is_some_and(|x| digit(x) && x.chars().count() <= 3)
+        };
+        lines.iter().any(|t| t.ends_with(':'))
+            || lines
+                .iter()
+                .all(|t| !digit(t) && t.split_whitespace().count() <= 2)
+            || lines.iter().all(|t| indexed(t))
+    });
+    let address = postal && !labels;
     if address {
         TextCells::Cells(columns)
     } else {

@@ -28,7 +28,7 @@ mod shape;
 pub(crate) use head::{Dates, PageDate, TITLE_FROM, document_date, page_dates};
 pub(crate) use shape::{
     ColumnLine, Columns, address_block, address_columns, address_lines, address_shaped,
-    page_text_sizes, page_text_sizes_of,
+    page_text_sizes, page_text_sizes_of, postal,
 };
 use shape::{bold_led, data_only, ends_in_amount, listed, padded_mark};
 
@@ -1953,10 +1953,12 @@ fn inlines(
         let broken = new_line && breaks.binary_search(&(r.page, r.line)).is_ok();
         // A hyphen at the end of a line joins the word that wraps; one with white space before
         // it is a dash (`01.10.2026 -` over `31.10.2026`), and the space after it stays, as it
-        // does after the minus of an amount (`10,00-` over `80,00`).
+        // does after the minus of an amount before a word (`12,50-` over `gutgeschrieben`). An
+        // amount's hyphen before a number is a range that goes on (`08.00-` over `18.00 Uhr`).
+        let range = text.starts_with(|c: char| c.is_ascii_digit());
         let glued = pieces.last().is_none_or(|p| {
             p.text.ends_with(' ')
-                || (!signed_amount(&p.text)
+                || ((range || !signed_amount(&p.text))
                     && p.text.strip_suffix('-').is_some_and(|rest| {
                         !rest.is_empty() && !rest.ends_with(char::is_whitespace)
                     }))
@@ -2118,7 +2120,9 @@ fn overprints(text: &str) -> bool {
 /// end, with text of its own, see [`overprints`]), or it touches it (it starts less than
 /// [`TOUCH`] sizes right of that end, or over it) in a larger size by a label step or in
 /// another weight, the words that meet each of two letters or digits or more and one with a
-/// letter: a label and its value set against it (`Name` and `Hinterhaus`). A smaller run after
+/// letter, the second opening with a capital or a digit or the first ending in a colon: a label
+/// and its value set against it (`Name` and `Hinterhaus`). A word cut by a change of style goes
+/// on in a small letter (`Rechnungs` and `nummer`, `Muster` and `mann`): one word. A smaller run after
 /// a word is a raised part of it (`21st`), a word in pieces of one style is one word, and a
 /// number in pieces (a change of font inside `1234,56`) is one number.
 fn apart(before: Option<&Run>, r: &Run, ink_end: f32) -> bool {
@@ -2133,7 +2137,13 @@ fn apart(before: Option<&Run>, r: &Run, ink_end: f32) -> bool {
         r.text.split_whitespace().next(),
     );
     let letters = |w: Option<&str>| w.is_some_and(|w| w.chars().any(char::is_alphabetic));
-    r.x < ink_end + TOUCH * r.size.max(b.size)
+    // A new word opens with a capital or a digit (`Hinterhaus`, `4711`), or follows a label's
+    // colon; the rest of a word cut by a change of style opens with a small letter (`nummer`).
+    let opens = first
+        .is_some_and(|w| w.starts_with(|c: char| c.is_uppercase() || c.is_ascii_digit()))
+        || last.is_some_and(|w| w.ends_with(':'));
+    opens
+        && r.x < ink_end + TOUCH * r.size.max(b.size)
         && (r.size >= crate::tables::LABEL_STEP * b.size || r.bold != b.bold)
         && last.is_some_and(overprints)
         && first.is_some_and(overprints)
@@ -2170,7 +2180,7 @@ fn continues(prev: &Line<'_>, cur: &Line<'_>) -> bool {
     // a marker (an indented continuation), not a cell of another column.
     // A word cut at the end of a line goes on at the left of the next, never right of where
     // the cut ends (`Page-` over a cell of the next row).
-    let narrow = c1 - c0 <= BESIDE_WIDTH * (end - p0).max(prev.size) || word_cut(&prev.text);
+    let narrow = c1 - c0 <= BESIDE_WIDTH * (end - p0).max(prev.size) || cuts(&prev.text, &cur.text);
     let beside = narrow && c0 >= end + BESIDE_GAP * prev.size.max(cur.size).max(1.0);
     gap > 0.0 && gap <= GAP_RATIO * height && (prev.size - cur.size).abs() <= SIZE_SLACK && !beside
 }
@@ -2755,6 +2765,7 @@ fn line_breaks(all: &[Line<'_>], i: usize, j: usize) -> Vec<(u32, u32)> {
     }) && lines
         .iter()
         .all(|l| !word_cut(&l.text) && !l.text.ends_with(','))
+        && lines.windows(2).all(|w| !cuts(&w[0].text, &w[1].text))
         && !sentences(lines)
         && edges.iter().all(|e| (e.0 - left).abs() <= EDGE)
         && listed(&lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>());
@@ -2788,7 +2799,8 @@ fn line_breaks(all: &[Line<'_>], i: usize, j: usize) -> Vec<(u32, u32)> {
         // first word and a good share of the measure more would still fit. Ragged prose
         // misses a word by a little. A word cut at the line end goes on in the next line.
         let room = SHORT_ROOM * (right - left);
-        let fits = a.1 + 0.25 * next.size + word + room <= right && !word_cut(&lines[k].text);
+        let fits =
+            a.1 + 0.25 * next.size + word + room <= right && !cuts(&lines[k].text, &next.text);
         let aligned = set_aligned && aligned_pair(a, b);
         let apart = !wraps[k] || !around[i - lo + k];
         if fits || aligned || short || apart || lines_apart(lines, k + 1, items) {
@@ -2904,7 +2916,12 @@ fn wraps(lines: &[Line<'_>], edges: &[(f32, f32)]) -> Vec<bool> {
     // line of its own: it ends the line before.
     let marks = |l: &Line<'_>| !l.text.chars().any(char::is_alphanumeric);
     let goes_on: Vec<bool> = (0..n - 1)
-        .map(|k| cut(&lines[k]) || lower(&lines[k + 1]) || marks(&lines[k + 1]))
+        .map(|k| {
+            cut(&lines[k])
+                || cuts(&lines[k].text, &lines[k + 1].text)
+                || lower(&lines[k + 1])
+                || marks(&lines[k + 1])
+        })
         .collect();
     let exclaims = lines.iter().all(|l| l.text.ends_with(['!', '?']));
     let starred = lines.iter().all(|l| l.text.starts_with('*'));
@@ -2966,6 +2983,17 @@ fn wraps(lines: &[Line<'_>], edges: &[(f32, f32)]) -> Vec<bool> {
             })
             .collect()
     }
+}
+
+/// Whether the line `text` ends in a hyphen that goes on in the line `next`: a word cut (see
+/// [`word_cut`]), or the hyphen of a range after an amount over a line that opens with a number
+/// and holds words (`08.00-` over `18.00 Uhr`). Over a line of numbers alone the minus is the
+/// sign of a credit (a total under it).
+fn cuts(text: &str, next: &str) -> bool {
+    word_cut(text)
+        || (text.ends_with('-')
+            && next.starts_with(|c: char| c.is_ascii_digit())
+            && !data_only(next))
 }
 
 /// Whether `text` ends in a hyphen that cuts a word: not the minus after an amount with

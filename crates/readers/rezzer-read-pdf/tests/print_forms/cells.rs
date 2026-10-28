@@ -1030,10 +1030,10 @@ fn refused_strips_read_cell_by_cell() {
 fn cells_lining_up_by_chance_are_no_totals() {
     // The cells, and whether they read cell by cell with no divider (else line by line, with
     // the doubt said).
-    let cases: [(&str, [StripCell; 2], bool); 3] = [
+    let cases: [(&str, &[StripCell], bool); 7] = [
         (
             "a street over its town",
-            [
+            &[
                 ("", 1.0, &["Musterweg 1", "12345 Musterstadt"]),
                 ("", 1.0, &["Beispiel AG", "Probeweg 12"]),
             ],
@@ -1041,7 +1041,7 @@ fn cells_lining_up_by_chance_are_no_totals() {
         ),
         (
             "a name over a firm",
-            [
+            &[
                 ("", 1.0, &["Erika Mustermann", "Muster GmbH"]),
                 ("", 1.0, &["Beispiel AG", "Probeweg 12"]),
             ],
@@ -1049,9 +1049,45 @@ fn cells_lining_up_by_chance_are_no_totals() {
         ),
         (
             "labels beside their values",
-            [
+            &[
                 ("", 1.0, &["Lieferbedingung", "Zahlungsart"]),
                 ("", 1.0, &["frei Haus", "Ueberweisung"]),
+            ],
+            false,
+        ),
+        // Fix round 1 (C1): labels beside values with digits, with and without colons, and two
+        // rows of a table of three columns: no street over its town in a column of its own
+        // beside no labels, so they read line by line as at 98c7309.
+        (
+            "street labels",
+            &[
+                ("", 1.0, &["Strasse", "Ort"]),
+                ("", 1.0, &["Musterweg 1", "12345 Musterstadt"]),
+            ],
+            false,
+        ),
+        (
+            "colon labels",
+            &[
+                ("", 1.0, &["Strasse:", "Ort:"]),
+                ("", 1.0, &["Musterweg 1", "12345 Musterstadt"]),
+            ],
+            false,
+        ),
+        (
+            "order labels",
+            &[
+                ("", 1.0, &["Auftrag", "Lieferschein"]),
+                ("", 1.0, &["A-12 vom 01.10.2026", "LS 4711"]),
+            ],
+            false,
+        ),
+        (
+            "two rows of items",
+            &[
+                ("", 1.0, &["Pos 1", "Pos 2"]),
+                ("", 1.0, &["Schrauben M4", "Muttern 8 mm"]),
+                ("", 1.0, &["Lager A", "Lager B"]),
             ],
             false,
         ),
@@ -1065,8 +1101,9 @@ fn cells_lining_up_by_chance_are_no_totals() {
                 for ((name, cells, apart), divided) in
                     cases.iter().flat_map(|c| [(c, true), (c, false)])
                 {
-                    // Labels beside their values are no cells with a divider between them.
-                    if divided && name.starts_with("labels") {
+                    // Labels beside their values, and rows of items, are no cells with a divider
+                    // between them; a name over a firm is.
+                    if divided && !apart && *name != "a name over a firm" {
                         continue;
                     }
                     if !divided && !apart {
@@ -1074,7 +1111,8 @@ fn cells_lining_up_by_chance_are_no_totals() {
                         let out = strip_in(cells, size, step, (font, font), false);
                         let units = common::read_units(&out.document.body);
                         for n in 0..2 {
-                            let line = format!("{} {}", cells[0].2[n], cells[1].2[n]);
+                            let line: Vec<&str> = cells.iter().map(|c| c.2[n]).collect();
+                            let line = line.join(" ");
                             if !units.iter().any(|u| u.contains(&line)) {
                                 wrong.push(format!("{at}: no line {line:?} in {units:?}"));
                             }

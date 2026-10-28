@@ -2785,8 +2785,29 @@ fn a_value_that_touches_its_label_stays_apart() {
         let n = common::font_width("FL", "21", size);
         t += &show("FL", size, 40.0, 680.0, "21");
         t += &show("FL", 0.6 * size, 40.0 + n, 680.0 + 0.35 * size, "st");
-        let md = common::markdown(&common::read(&page_in(&t, Look::Plain)));
-        for want in ["Mustermann", "21st"] {
+        // Fix round 1 (I1): words in two weights or sizes, the second part touching the first
+        // and opening with a small letter, stay one word.
+        let mut y = 660.0;
+        for (a, fa, sa, b, fb) in [
+            ("Rechnungs", "FB", 1.0, "nummer 4711", "FL"),
+            ("Muster", "FL", 1.0, "mann", "FB"),
+            ("Mu", "FB", 1.0, "ster GmbH", "FL"),
+            ("Mu", "FL", 0.8, "stermann AG", "FL"),
+        ] {
+            let wa = common::font_width(fa, a, sa * size);
+            t += &show(fa, sa * size, 40.0, y, a);
+            t += &show(fb, size, 40.0 + wa, y, b);
+            y -= 2.0 * size;
+        }
+        let md = common::markdown(&common::read(&page_in(&t, Look::Plain))).replace("**", "");
+        for want in [
+            "Mustermann",
+            "21st",
+            "Rechnungsnummer 4711",
+            "Mustermann",
+            "Muster GmbH",
+            "Mustermann AG",
+        ] {
             if !md.contains(want) {
                 wrong.push(format!("{size}: {want} is cut"));
             }
@@ -2865,6 +2886,66 @@ fn a_credit_in_the_last_row_takes_no_total_under_the_table() {
                     wrong.push(format!(
                         "{size}, {plain}, hanging {hang}: the total in the credit's cell or line"
                     ));
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// Task 15b part 2e-4 fix round 1 (I2, P6-X): a range of two numbers with decimals in prose
+/// whose line ends right after the range's hyphen (`von 08.00-` over `18.00 Uhr ...`) goes on
+/// with no space inside the range: the hyphen is no minus of an amount when a number follows it
+/// on the next line. Four texts (times, prices, sections, fees), sizes 6 to 14, Helvetica and
+/// Times, ragged and set full.
+#[test]
+fn a_range_wrapped_after_its_hyphen_stays_whole() {
+    let texts = [
+        (
+            "Unser Kundenservice ist montags bis freitags von 08.00-",
+            "18.00 Uhr fuer Sie erreichbar und beantwortet gerne alle Fragen zu Ihrer Rechnung.",
+            "08.00-18.00",
+        ),
+        (
+            "Die Preise fuer die neuen Muster liegen je nach Ausfuehrung bei 10,00-",
+            "20,00 EUR je Stueck zuzueglich der Kosten fuer den Versand.",
+            "10,00-20,00",
+        ),
+        (
+            "The rules of sections 4.10-",
+            "4.12 apply to every order of the Muster GmbH and to all deliveries.",
+            "4.10-4.12",
+        ),
+        (
+            "The fee for each transfer is between 1.50-",
+            "2.50 EUR depending on the bank of Erika Mustermann.",
+            "1.50-2.50",
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for (first, rest, range) in texts {
+        for size in [6.0f32, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0] {
+            for font in ["FL", "FT"] {
+                for justified in [false, true] {
+                    let tw = if justified {
+                        (0.3 * size / first.matches(' ').count().max(1) as f32).max(0.0)
+                    } else {
+                        0.0
+                    };
+                    let t = format!(
+                        "BT /{font} {size} Tf {tw} Tw 50 760 Td ({first}) Tj ET\n\
+                         BT /{font} {size} Tf 0 Tw 50 {} Td ({rest}) Tj ET\n",
+                        760.0 - 1.2 * size
+                    );
+                    let md = common::markdown(&common::read(&page_in(&t, Look::Plain)));
+                    if !md.replace('\\', "").contains(range) {
+                        wrong.push(format!("{range}, {size}, {font}, justified {justified}"));
+                    }
                 }
             }
         }
