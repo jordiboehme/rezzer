@@ -39,7 +39,8 @@ pub(crate) enum Inv {
     Role,
     /// Each expected paragraph stands on the page with its lines.
     Paragraph,
-    /// Texts that belong to different blocks are not read into one block.
+    /// Texts that belong to different blocks are not read into one block (P6-X: a block that
+    /// mixes them is a wrong reading order).
     Apart,
     /// The page's text holds the expected texts in their reading order.
     Order,
@@ -60,9 +61,13 @@ pub(crate) enum Inv {
 }
 
 impl Inv {
-    /// The invariants of ruling P6-X: a break is a wrong value, never only a lost one.
+    /// The invariants of ruling P6-X: a break is a wrong value or a wrong reading order,
+    /// never only a lost one.
     pub(crate) fn wrong(self) -> bool {
-        matches!(self, Inv::RightPair | Inv::ValueOnce | Inv::WrongValue)
+        matches!(
+            self,
+            Inv::RightPair | Inv::ValueOnce | Inv::WrongValue | Inv::Apart
+        )
     }
 }
 

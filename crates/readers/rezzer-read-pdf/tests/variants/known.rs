@@ -90,14 +90,14 @@ pub(crate) const KNOWN: &[Known] = &[
         ],
         broken: &[Inv::Apart],
         cause: Cause::Carry,
-        why: "carry C-5 (Task 13 review, fix round 4): address, bank, register and contact columns in the body become one table that pairs address lines with bank lines, with no loss",
+        why: "P6-X (part 2c): carry C-5 (Task 13 review, fix round 4): address, bank, register and contact columns in the body become one table that pairs address lines with bank lines, with no loss",
     },
     Known {
         shape: "address columns in the body",
         variants: &["scale 0.75, smaller text, row under"],
         broken: &[Inv::Table, Inv::Apart],
         cause: Cause::Carry,
-        why: "carry C-5 as in the other variants of this shape, and the table of the `row under` neighbour is read as more rows of that same table",
+        why: "P6-X (part 2c): carry C-5 as in the other variants of this shape, and the table of the `row under` neighbour is read as more rows of that same table",
     },
     Known {
         shape: "barcode, module 1.2, height 80",
@@ -208,7 +208,7 @@ pub(crate) const KNOWN: &[Known] = &[
         ],
         broken: &[Inv::Apart],
         cause: Cause::Carry,
-        why: "carry from Task 13 fix round 5 (ruling P6-X5) and C-3: the footer columns of a file of one page are no furniture and read as at b9c878e, a table that mixes the lines of the columns, with no loss",
+        why: "P6-X (part 2c): carry from Task 13 fix round 5 (ruling P6-X5) and C-3: the footer columns of a file of one page are no furniture and read as at b9c878e, a table that mixes the lines of the columns, with no loss",
     },
     Known {
         shape: "label block and bank row",
