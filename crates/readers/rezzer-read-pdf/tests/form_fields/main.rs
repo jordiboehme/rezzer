@@ -2003,3 +2003,63 @@ fn turned_forms_never_pair_wrongly() {
     let wrong = unexpected(reads, &[]);
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
+
+/// Task 15b part 2d fix round 2 (I2, ruling on concern 1): a grid of fields whose labels stand
+/// under the rule their values stand on, not clear (a value of two lines, or an empty first
+/// value), is refused with a loss and read cell by cell, each line of a cell a block of its
+/// own: no block holds a value of one field and a label or value of another, in every look,
+/// with and without dividers. Found by the spans of the drawn texts.
+#[test]
+fn a_refused_grid_of_labels_under_values_reads_cell_by_cell() {
+    let all = ["Name", "Ort", "Strasse", "Hausnr", "PLZ", "Land"];
+    let empty_first: [&[FieldSpec]; 3] = [
+        &[(0, 30, "Name", ""), (30, 20, "Ort", "Musterstadt")],
+        &[(0, 30, "Strasse", "Musterweg 1"), (30, 20, "Hausnr", "12")],
+        &[(0, 30, "PLZ", "12345"), (30, 20, "Land", "DE")],
+    ];
+    let mut wrong = Vec::new();
+    for dividers in [true, false] {
+        let s = Rows {
+            under: true,
+            dividers,
+            ..ROWS
+        };
+        for (look, g) in std::iter::once(("real", REAL)).chain(looks()) {
+            for (name, rows) in [("two-line", &THREE_ROWS), ("empty first", &empty_first)] {
+                let mut b = rows_page(&g, &s, rows, &all);
+                let mut texts: Vec<&str> = all.to_vec();
+                texts.extend(rows.iter().flat_map(|r| r.iter().map(|f| f.3)));
+                if name == "two-line" {
+                    let rule = 760.0 + g.dy - 2.4 * g.data;
+                    let y = rule + 0.17 * g.data + 0.95 * g.data;
+                    b.page.template +=
+                        &draw::courier(g.col(0) + 0.3 * g.pitch(), y, g.data, "Hinterhaus");
+                }
+                let out = read_pages(&[&b]);
+                let at = format!("{name}, dividers {dividers}, {look}");
+                if out.document.losses.is_empty() {
+                    wrong.push(format!("{at}: no loss"));
+                }
+                // Each drawn text a cell of its own: no unit holds two of them.
+                let cells: Vec<Vec<String>> = texts
+                    .iter()
+                    .filter(|t| !t.is_empty())
+                    .map(|t| vec![(*t).to_string()])
+                    .collect();
+                let units = common::read_units(&out.document.body);
+                let ordered = vec![false; cells.len()];
+                for w in common::cells_apart(&units, &cells, &ordered, &|_| false) {
+                    if w.contains("holds texts") {
+                        wrong.push(format!("{at}: {w}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}

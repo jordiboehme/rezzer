@@ -1173,8 +1173,9 @@ fn beside_labels(flow: &Flow, parts: Vec<Vec<usize>>) -> Vec<Vec<usize>> {
 }
 
 /// Reads the strips `g` of a group whose labels may stand under their values cell by cell,
-/// each strip between its own rules (the labels under the bottom rule stay where they stand:
-/// which strip they belong to is what is not clear).
+/// each strip between its own rules, and so the band of one strip's height over its top rule
+/// (the first values, when the labels stand under them) and under its bottom rule (the last
+/// labels), each with its cells by gutters, each line of a cell a block of its own.
 fn read_group_cells(
     flow: &Flow,
     by_y: &ByY,
@@ -1183,8 +1184,38 @@ fn read_group_cells(
     busy: &dyn Fn(usize) -> bool,
     apart: &mut Vec<Vec<Vec<usize>>>,
 ) {
+    // Each line of a cell is a block of its own: a label under the rule and the value of the
+    // next row under it stand in one column, and which goes with which is what is not clear.
+    let by_line = |cells: Vec<Vec<usize>>| -> Vec<Vec<usize>> {
+        cells
+            .into_iter()
+            .flat_map(|c| {
+                lines_of(flow, &c).into_iter().map(|mut l| {
+                    l.sort_unstable();
+                    l
+                })
+            })
+            .collect()
+    };
     for &k in g {
-        read_cells(flow, by_y, &strips[k], busy, apart);
+        let s = &strips[k];
+        apart.extend(
+            cell_order(flow, by_y, (s.top, s.bottom, s.x0, s.x1), &s.dividers, busy).map(by_line),
+        );
+    }
+    let (Some(&first), Some(&last)) = (g.first(), g.last()) else {
+        return;
+    };
+    let (top, bottom) = g.iter().fold((f32::MIN, f32::MAX), |(t, b), &k| {
+        (t.max(strips[k].top), b.min(strips[k].bottom))
+    });
+    let (x0, x1) = g.iter().fold((f32::MAX, f32::MIN), |(a, b), &k| {
+        (a.min(strips[k].x0), b.max(strips[k].x1))
+    });
+    let over = strips[first].top - strips[first].bottom;
+    let under = strips[last].top - strips[last].bottom;
+    for band in [(top + over, top, x0, x1), (bottom, bottom - under, x0, x1)] {
+        apart.extend(cell_order(flow, by_y, band, &[], busy).map(by_line));
     }
 }
 
