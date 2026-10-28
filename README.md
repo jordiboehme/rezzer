@@ -300,6 +300,7 @@ Planned after that:
 |---|---|---|
 | [Mail](docs/formats/mail.md) | 🔭 | EML, MBOX, MSG, Outlook PST and OST |
 | Lotus Notes | 🔭 | NSF mail databases |
+| Calendars and contacts | 🔭 | iCalendar (ICS) and vCard (VCF): events, tasks, recurrence, attendees and contacts |
 | Photos and scans | 🔭 | JPEG, PNG, TIFF, HEIC: metadata, pages and barcodes. Text comes with OCR |
 | Archives | 🔭 | ZIP, 7z, TAR: each file inside is read as its own document |
 | Diagrams | 🔭 | draw.io, Visio, Lucidchart, Excalidraw |
