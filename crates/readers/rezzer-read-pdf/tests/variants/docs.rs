@@ -575,6 +575,51 @@ fn column_of(
     s
 }
 
+/// Part 2e-2 (item 6, the docling report's glues): rows of a table read as text, a row label
+/// cut by a hyphen (`Page-`) over the cells of the next row, which start right of the cut, and
+/// a row whose last cell is a number range over a line of prose, all in the body's size: no
+/// line of the read holds the cut label and the next row, or the range and the prose.
+fn cut_rows(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let size = 7.0 * k;
+    let pitch = 1.2 * size;
+    let top = 640.0;
+    let w = font_width(plain, "Page-", size);
+    let mut t = show(plain, size, 40.0, top, "Page-");
+    t += &show(
+        plain,
+        size,
+        40.0 + w + 2.0 * size,
+        top - pitch,
+        "70878 6.51 5.58 6.00",
+    );
+    t += &show(
+        plain,
+        size,
+        40.0,
+        top - 4.0 * pitch,
+        "Text 510377 45.82 49.28 70-85",
+    );
+    t += &show(
+        plain,
+        size,
+        40.0,
+        top - 5.0 * pitch,
+        "Preparation work included uploading the files",
+    );
+    let bottom = top - 6.0 * pitch;
+    let mut s = sheet(v, t, 420.0, Some(Span { top, bottom }));
+    s.want
+        .lines_apart
+        .push(("Page-".into(), "70878 6.51 5.58 6.00".into()));
+    s.want.lines_apart.push((
+        "Text 510377 45.82 49.28 70-85".into(),
+        "Preparation work included uploading the files".into(),
+    ));
+    s
+}
+
 /// Part 2e-1 (items 6 and 7): line items without rules at 8 points times the size factor, a
 /// bold header `Pos`, `Zeitraum`, `Basis` and `Betrag`; with `range` the first two periods
 /// wrap after their dash (`01.10.2026 -` over `31.10.2026`) and the cell keeps the space after
@@ -1563,6 +1608,11 @@ pub(crate) fn shapes() -> Vec<Shape> {
                 s.want.order = STARRED_LINES[1..].iter().map(|l| l.to_string()).collect();
                 (s, None)
             },
+        },
+        Shape {
+            name: "a row label cut by a hyphen and a row of numbers over prose",
+            axes: DOC,
+            draw: |v| (cut_rows(v), None),
         },
         Shape {
             name: "line items with wrapped date ranges",

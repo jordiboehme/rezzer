@@ -2082,7 +2082,9 @@ fn continues(prev: &Line<'_>, cur: &Line<'_>) -> bool {
     let ((p0, end), (c0, c1)) = (ink(prev), ink(cur));
     // A line that is much wider than a short line over it is text going on after a label or
     // a marker (an indented continuation), not a cell of another column.
-    let narrow = c1 - c0 <= BESIDE_WIDTH * (end - p0).max(prev.size);
+    // A word cut at the end of a line goes on at the left of the next, never right of where
+    // the cut ends (`Page-` over a cell of the next row).
+    let narrow = c1 - c0 <= BESIDE_WIDTH * (end - p0).max(prev.size) || prev.text.ends_with('-');
     let beside = narrow && c0 >= end + BESIDE_GAP * prev.size.max(cur.size).max(1.0);
     gap > 0.0 && gap <= GAP_RATIO * height && (prev.size - cur.size).abs() <= SIZE_SLACK && !beside
 }

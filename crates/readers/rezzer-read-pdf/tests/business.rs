@@ -2242,6 +2242,65 @@ fn starred_items_are_no_footnotes() {
     );
 }
 
+/// Task 15b part 2e-2 (item 6, the docling report's glues of part 2e-1 fix round 2; ruling
+/// P6-X): in rows of a table read as text, a row label cut by a hyphen (`Page-`) over a line
+/// that starts right of where the cut ends (the cells of the next row) is no word going on
+/// (`Page-70878`); and a row whose last cell is a number range (`70-85`) over a line of prose
+/// in the same face that opens with a capital is no line of that prose. Sizes 6 to 14, both
+/// fonts.
+#[test]
+fn a_cut_row_label_and_a_row_of_numbers_stay_apart_from_the_next_line() {
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 9.0, 10.0, 12.0, 14.0] {
+        for font in ["FL", "FT"] {
+            let p = 1.2 * size;
+            let w = common::font_width(font, "Page-", size);
+            let mut t = show(font, size, 40.0, 700.0, "Page-");
+            t += &show(
+                font,
+                size,
+                40.0 + w + 2.0 * size,
+                700.0 - p,
+                "70878 6.51 5.58 6.00",
+            );
+            t += &show(
+                font,
+                size,
+                40.0,
+                700.0 - 4.0 * p,
+                "Text 510377 45.82 49.28 70-85",
+            );
+            t += &show(
+                font,
+                size,
+                40.0,
+                700.0 - 5.0 * p,
+                "Preparation work included uploading the files",
+            );
+            // The body in the size of the rows: they are body text, no heading.
+            let page = FormPage {
+                template: format!("{t}{}", body(size, 420.0)),
+                ..FormPage::default()
+            };
+            let out = common::read(&print_form(&[page], "", ""));
+            let md = common::markdown(&out);
+            let at = format!("{size}, {font}");
+            if md.contains("Page-70878") {
+                wrong.push(format!("{at}: `Page-70878`"));
+            }
+            if md.lines().any(|l| l.contains("70-85 Preparation")) {
+                wrong.push(format!("{at}: `70-85 Preparation`"));
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
 /// Task 15b part 2e-1 (item 6, part 2b re-review r1; ruling P6-X): a table of taxes without
 /// rules, an amount alone under an amount of its column (a row of its own), then two lines of
 /// one amount each in two other columns under the last row (`5,00` under the base, `125,00`

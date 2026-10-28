@@ -328,6 +328,7 @@ shape_tests! {
     slogan_lines => "slogan lines, each a sentence ending in an exclamation mark",
     bold_slogan_lines => "bold slogan lines, each a sentence ending in an exclamation mark",
     bold_lines_of_starred_items => "bold lines of starred items",
+    a_cut_row_label_and_a_row_of_numbers_over_prose => "a row label cut by a hyphen and a row of numbers over prose",
     line_items_with_wrapped_date_ranges => "line items with wrapped date ranges",
     line_items_over_two_lone_amounts => "line items over two amounts alone in two columns",
     a_notice_band_between_rules => "a notice band between rules",
