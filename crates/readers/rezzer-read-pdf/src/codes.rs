@@ -300,24 +300,14 @@ pub(crate) fn vector_codes(cells: &[[f32; 4]]) -> Result<Vec<VectorCode>, String
     codes_among(cells, (false, MIN_MODULE))
 }
 
-/// The bars of a code drawn as paths are at least this many modules long.
-const DRAWN_BAR: f32 = 2.0;
-
-/// The bars of a code printed in a picture are at least this many modules long: in pixels the
-/// strokes of letters and the pixels of a picture drawn large also stand in rows of short
-/// bars of whole pixels, and a decoder reads a code along a few of its lines.
-const PRINTED_BAR: f32 = 8.0;
-
-/// The most bars after which the bars of a linear code printed in a picture may repeat:
-/// hatching or a ruler drawn at a pitch that is no whole number of pixels steps in a pattern
-/// of a few bars that repeats, a code does not.
-const PRINTED_PERIOD: usize = 6;
+/// The bars of a linear code are at least this many modules long.
+const MIN_BAR: f32 = 2.0;
 
 /// The regions among `cells`, the dark parts of a render in points (see [`pixel_cells`]),
 /// that look like a code printed there: as [`vector_codes`], with modules at least
-/// [`PRINTED_MODULE`] of the render's pixels (`pixel` points) wide, and the bars of a linear
-/// code at least [`PRINTED_BAR`] modules long and not repeating after a few
-/// ([`PRINTED_PERIOD`]).
+/// [`PRINTED_MODULE`] of the render's pixels (`pixel` points) wide, bars and spaces whole
+/// modules give or take the spread of the ink, and paper past the ends of the bars of a
+/// linear code (see [`linear`]).
 pub(crate) fn printed_codes(cells: &[[f32; 4]], pixel: f32) -> Result<Vec<VectorCode>, String> {
     codes_among(cells, (true, PRINTED_MODULE * pixel))
 }
@@ -759,11 +749,11 @@ fn region(
 }
 
 /// Whether bars `members` (standing up, or lying down with `flat`) in box `b` of `module`
-/// are a linear code: about as long as the region and at least [`DRAWN_BAR`] modules long, of
+/// are a linear code: about as long as the region and at least [`MIN_BAR`] modules long, of
 /// at least two widths and at most 4 modules wide, every bar and nearly every space a whole
 /// number of modules wide, not all at one pitch, with 5 modules free at both ends. A code
-/// `printed` in a picture has bars [`PRINTED_BAR`] modules long, does not repeat after a few
-/// bars, and its bars and spaces are whole modules give or take the ink's spread.
+/// `printed` in a picture has its bars and spaces whole modules give or take the ink's
+/// spread, and paper past the ends of its bars too.
 fn linear(
     cells: &[[f32; 4]],
     members: &[usize],
@@ -812,12 +802,11 @@ fn linear(
         }
         _ => (module, 0.0),
     };
-    // Bars at least `bar` modules long; every bar and space a whole number of modules wide,
+    // Bars at least two modules long; every bar and space a whole number of modules wide,
     // but for a few spaces (codes side by side closer than their quiet zone).
-    let bar = if printed { PRINTED_BAR } else { DRAWN_BAR };
     if members
         .iter()
-        .any(|&i| long(&cells[i]) < bar * module - 0.01)
+        .any(|&i| long(&cells[i]) < MIN_BAR * module - 0.01)
     {
         return false;
     }
@@ -858,9 +847,6 @@ fn linear(
     if one_pitch(&|r| r.0) || one_pitch(&|r| r.1) || one_pitch(&|r| (r.0 + r.1) / 2.0) {
         return false;
     }
-    if printed && repeats(&runs, module) {
-        return false;
-    }
     let mut widths: Vec<i32> = runs
         .iter()
         .map(|(a, z)| ((z - a - spread) / module).round() as i32)
@@ -871,26 +857,20 @@ fn linear(
         return false;
     }
     let q = 5.0 * module;
-    if flat {
+    let ends = if flat {
         quiet([b[0], b[1] - q, b[2], b[1] - 0.01]) && quiet([b[0], b[3] + 0.01, b[2], b[3] + q])
     } else {
         quiet([b[0] - q, b[1], b[0] - 0.01, b[3]]) && quiet([b[2] + 0.01, b[1], b[2] + q, b[3]])
-    }
-}
-
-/// Whether bars `runs` (start and end across, `module` wide) repeat after at most
-/// [`PRINTED_PERIOD`] bars: nine in ten of them start one step after the bar so many before
-/// as that one did and are as wide.
-fn repeats(runs: &[(f32, f32)], module: f32) -> bool {
-    let q = |v: f32| (v / module * 4.0).round() as i32;
-    let bars: Vec<(i32, i32)> = runs
-        .windows(2)
-        .map(|w| (q(w[1].0 - w[0].0), q(w[1].1 - w[1].0)))
-        .collect();
-    (1..=PRINTED_PERIOD).any(|p| {
-        let n = bars.len().saturating_sub(p);
-        n > 0 && (0..n).filter(|&i| bars[i] == bars[i + p]).count() * 10 >= n * 9
-    })
+    };
+    // A printed code stands on paper: past the ends of its bars too, from half a module (the
+    // soft ends of blurred bars) to one and a half, where a screen of dots goes on.
+    let (e0, e1) = (0.5 * module, 1.5 * module);
+    ends && (!printed
+        || if flat {
+            quiet([b[0] - e1, b[1], b[0] - e0, b[3]]) && quiet([b[2] + e0, b[1], b[2] + e1, b[3]])
+        } else {
+            quiet([b[0], b[1] - e1, b[2], b[1] - e0]) && quiet([b[0], b[3] + e0, b[2], b[3] + e1])
+        })
 }
 
 /// Whether `members` in box `b` on a lattice of `module` make a matrix code's finder: QR Code
@@ -1434,24 +1414,6 @@ mod tests {
         // One tone only: nothing is dark.
         let paper: Vec<u8> = vec![230; w * h * 4];
         assert_eq!(pixel_cells(&paper, w, h, 100), Some(Vec::new()));
-    }
-
-    #[test]
-    fn printed_bars_that_repeat_after_a_few_are_no_code() {
-        // Hatching at a pitch of no whole pixels: bars of 2, 2 and 1 pixels, again and again.
-        let module = 0.5;
-        let mut runs = Vec::new();
-        let mut x = 0.0;
-        for k in 0..30 {
-            let w = if k % 3 == 2 { 0.5 } else { 1.0 };
-            runs.push((x, x + w));
-            x += w + 0.5 + if k % 3 == 1 { 0.5 } else { 0.0 };
-        }
-        assert!(repeats(&runs, module));
-        // The bars of a Code 128 do not.
-        let bars = code128("0000000001", (0.0, 0.0), module, 20.0, false, false);
-        let runs: Vec<(f32, f32)> = bars.iter().map(|c| (c[0], c[2])).collect();
-        assert!(!repeats(&runs, module));
     }
 
     #[test]

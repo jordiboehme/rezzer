@@ -3386,10 +3386,6 @@ fn twin_codes_by_the_edge_of_a_scan_are_said() {
                     asset(&out, "page-1").alt
                 );
             }
-            // Bars 30 points high are under 8 modules of 4 points: too short for a printed code.
-            if bar < 60 {
-                continue;
-            }
             let width = (m.width * 4) as f32;
             let out = read(&blurred_scan(1, 4, bar, &[40.0, 40.0 + width + 28.0], blur));
             let n = asset(&out, "page-1").codes.len();
@@ -3425,9 +3421,7 @@ fn codes_in_a_scan_the_decoder_misses_are_said() {
     for res in [1u32, 2] {
         for px in [2u32, 3, 4] {
             let width = (m.width * px) as f32 / res as f32;
-            // Bars of a code printed in a picture are 8 modules long at least: shorter, the
-            // edges of a picture drawn large make rows of such bars too.
-            for bar in [10 * px, 60] {
+            for bar in [4 * px, 10 * px, 60] {
                 let case = format!("{res} pixels a point, {px} a module, bars {bar}");
                 let alone = read(&crisp_scan(res, px, bar, &[40.0]));
                 if asset(&alone, "page-1").codes.len() != 1 {
@@ -3619,4 +3613,65 @@ fn equal_codes_one_over_the_other_in_a_blurred_scan_are_both_said() {
         }
     }
     assert!(read_some >= 4, "{read_some}");
+}
+
+/// A scanned A4 page of `res` pixels a point: a picture of soft shades (waves across the
+/// page) printed as a halftone screen of round dots on a lattice of `pitch` pixels, turned
+/// 45 degrees (`turned`) or not, blurred `blur` times. No code.
+fn halftone_scan(res: u32, pitch: f32, turned: bool, blur: u32) -> Vec<u8> {
+    let (w, h) = (595 * res, 842 * res);
+    let mut scan = vec![235u8; (w * h) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let (fx, fy) = (x as f32 / w as f32, y as f32 / h as f32);
+            let tone =
+                (0.5 + 0.25 * (fx * 9.0).sin() * (fy * 7.0).cos() + 0.2 * ((fx + fy) * 13.0).sin())
+                    .clamp(0.0, 1.0);
+            let (u, t) = if turned {
+                ((x + y) as f32 / pitch, (x as f32 - y as f32) / pitch)
+            } else {
+                (x as f32 / pitch, y as f32 / pitch)
+            };
+            let (du, dt) = (u.rem_euclid(1.0) - 0.5, t.rem_euclid(1.0) - 0.5);
+            if (du * du + dt * dt).sqrt() < (1.0 - tone) * 0.6 {
+                scan[(y * w + x) as usize] = 20;
+            }
+        }
+    }
+    for _ in 0..blur {
+        let src = scan.clone();
+        for y in 1..h - 1 {
+            for x in 1..w - 1 {
+                let mut t = 0u32;
+                for dy in 0..3 {
+                    for dx in 0..3 {
+                        t += u32::from(src[((y + dy - 1) * w + x + dx - 1) as usize]);
+                    }
+                }
+                scan[(y * w + x) as usize] = (t / 9) as u8;
+            }
+        }
+    }
+    image_page(595, 842, "q 595 0 0 842 0 0 cm /Im1 Do Q\n", w, h, &scan)
+}
+
+#[test]
+fn halftone_scans_are_no_code() {
+    // A picture printed as a screen of dots, turned 45 degrees or not, makes rows of short
+    // dark parts of whole pixels: no code, and nothing said of one. (Without paper past the
+    // ends of a printed code's bars, the 45 degree screens at 1 pixel a point give printed
+    // parts that look like codes.)
+    for res in [1u32, 2] {
+        for (pitch, turned) in [(4.2f32, true), (3.3, true), (5.0, true), (3.0, false)] {
+            for blur in [0u32, 1] {
+                let out = read(&halftone_scan(res, pitch, turned, blur));
+                let case =
+                    format!("{res} pixels a point, pitch {pitch}, turned {turned}, blur {blur}");
+                assert_eq!(needing(&out), ["page-1"], "{case}");
+                let alt = asset(&out, "page-1").alt.clone().unwrap_or_default();
+                assert!(!alt.contains("looks like a barcode"), "{case}: {alt}");
+                assert!(!alt.contains("lighter line"), "{case}: {alt}");
+            }
+        }
+    }
 }
