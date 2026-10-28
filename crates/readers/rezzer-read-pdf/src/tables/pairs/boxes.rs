@@ -114,6 +114,33 @@ pub(crate) fn box_pairs(
         }
         unsure.retain(|u| !u.1.is_empty());
     }
+    // A name over an address in a box is a label when it has the label style of the fields
+    // of other boxes.
+    if unsure.iter().any(|u| u.1 == NAMED_ADDRESS) {
+        let mut styles: Vec<Style> = fields
+            .iter()
+            .flatten()
+            .filter_map(|f| f.label.first().map(|&i| style_of(&flow.runs[i])))
+            .collect();
+        styles.sort_unstable();
+        styles.dedup();
+        let with_labels = Reading {
+            labels: &styles,
+            ..how
+        };
+        for (b, why) in &mut unsure {
+            if *why != NAMED_ADDRESS {
+                continue;
+            }
+            if let Parsed::Fields(mut f) = parse(flow, &in_box[*b], with_labels)
+                && f.len() == 1
+            {
+                fields[*b] = f.pop();
+                *why = "";
+            }
+        }
+        unsure.retain(|u| !u.1.is_empty());
+    }
     // How near two boxes touch: by the size of their smallest text (see [`TOUCH`]).
     let touch: Vec<f32> = in_box
         .iter()
@@ -141,7 +168,11 @@ pub(crate) fn box_pairs(
     // A box whose lines are an address is a box of its row, with no field: the fields on
     // both sides of it stay one row.
     let address: Vec<bool> = (0..boxes.len())
-        .map(|b| unsure.iter().any(|u| u.0 == b && u.1 == ADDRESS))
+        .map(|b| {
+            unsure
+                .iter()
+                .any(|u| u.0 == b && (u.1 == ADDRESS || u.1 == NAMED_ADDRESS))
+        })
         .collect();
     let two_fields = |c: &[usize]| c.iter().filter(|&&b| fields[b].is_some()).count() >= 2;
     // Rows first: boxes left to right, each going on the row whose last box it touches.
@@ -219,7 +250,7 @@ pub(crate) fn box_pairs(
     // A box of an address is named by its first line.
     let addresses: Vec<String> = unsure
         .iter()
-        .filter(|(b, why)| *why == ADDRESS && said_of(b, why))
+        .filter(|(b, why)| (*why == ADDRESS || *why == NAMED_ADDRESS) && said_of(b, why))
         .filter_map(|(b, _)| {
             let ids: Vec<usize> = in_box[*b]
                 .iter()

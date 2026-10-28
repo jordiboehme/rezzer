@@ -52,6 +52,51 @@ fn address_box_row(g: &Geo, b: &mut Built, top: f32) -> f32 {
     top - h
 }
 
+/// Task 15b part 2c concern 3 ruling: a row of three boxed fields whose middle box holds a
+/// company name, in another size than the labels beside it and without a colon, over a street
+/// and a postcode with its town in the data font: nothing shows the name to be a label, so it
+/// pairs with nothing and a loss names it; the fields beside it pair.
+fn company_box_row(g: &Geo, b: &mut Built, top: f32) -> f32 {
+    let h = 3.6 * g.data;
+    let mut parts = Vec::new();
+    for (k, l, v) in [
+        (0usize, "Personalnummer", "00000"),
+        (20, "Muster GmbH", ""),
+        (40, "Eintritt", "01.01.2020"),
+    ] {
+        let (x0, x1) = (g.col(k) - 0.12, g.col(k + 20) - 0.12);
+        b.page.template += &g.hrule(x0, x1, top);
+        b.page.template += &g.hrule(x0, x1, top - h);
+        b.page.template += &g.vrule(x0, top - h, top);
+        b.page.template += &g.vrule(x1, top - h, top);
+        let size = if k == 20 { 0.8 * g.data } else { g.label };
+        b.page.template += &label(
+            g.col(k) + 0.3 * g.label,
+            top - 0.9 * g.label - 0.3 * g.data,
+            size,
+            l,
+        );
+        if k == 20 {
+            b.values.push(l.to_string());
+            b.fields.push((l, Err(())));
+            for (n, line) in ["Musterweg 1", "12345 Musterstadt"].iter().enumerate() {
+                g.values(
+                    b,
+                    top - h + (1.5 - 1.2 * n as f32) * g.data,
+                    &[(k + 1, line)],
+                );
+                b.values.push(line.to_string());
+            }
+        } else {
+            parts.push((k + 1, v));
+            b.values.push(v.to_string());
+            b.fields.push((l, Ok(Some(v))));
+        }
+    }
+    g.values(b, top - h + 0.3 * g.data, &parts);
+    top - h
+}
+
 /// The top of a shape on its page.
 fn top(g: &Geo) -> f32 {
     760.0 + g.dy
@@ -341,6 +386,14 @@ pub(crate) fn shapes() -> Vec<Shape> {
                 ..ALL
             },
             draw: |v| drawn(v, boxed_row, 60),
+        },
+        Shape {
+            name: "boxed fields beside a company over its address",
+            axes: Axes {
+                look: NO_RISING,
+                ..ALL
+            },
+            draw: |v| drawn(v, company_box_row, 60),
         },
         Shape {
             name: "boxed fields beside an address",

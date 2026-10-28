@@ -6476,6 +6476,19 @@ fn a_cell_of_two_address_lines_is_no_pair() {
 /// lines `rest`, `Nr` over `4711`; the first lines of `size`, the others `step` times as large,
 /// in `font`.
 fn cell_between(first: &str, rest: &[&str], size: f32, step: f32, font: &str) -> ReadOutcome {
+    cell_between_in(first, rest, size, step, font, 1.0)
+}
+
+/// [`cell_between`] with the first line of the middle cell `head` times the size of the other
+/// labels.
+fn cell_between_in(
+    first: &str,
+    rest: &[&str],
+    size: f32,
+    step: f32,
+    font: &str,
+    head: f32,
+) -> ReadOutcome {
     let value = size * step;
     let k = size / 8.0;
     let mut c = String::from("0 0 0 RG 0.5 w\n");
@@ -6491,7 +6504,8 @@ fn cell_between(first: &str, rest: &[&str], size: f32, step: f32, font: &str) ->
     let cells: [(&str, &[&str]); 3] = [("Name", &["Muster"]), (first, rest), ("Nr", &["4711"])];
     for (n, (label, values)) in cells.iter().enumerate() {
         let x = 64.0 + 120.0 * k * n as f32;
-        c += &shown(font, size, x, top - 1.1 * size, label);
+        let label_size = if n == 1 { head * size } else { size };
+        c += &shown(font, label_size, x, top - 1.1 * size, label);
         for (m, v) in values.iter().rev().enumerate() {
             c += &shown(font, value, x, low + 1.2 * value * m as f32, v);
         }
@@ -6499,12 +6513,79 @@ fn cell_between(first: &str, rest: &[&str], size: f32, step: f32, font: &str) ->
     read(&three_font_page(&c))
 }
 
+/// Task 15b part 2c concern 3 ruling: a first line without a number over address lines pairs
+/// as a label only on evidence: the label style of the fields beside it, or a colon at its
+/// end. Smaller than the labels beside it (`Muster GmbH`, `Erika Mustermann` over c/o and
+/// address, `Muster GmbH` over a PO box), it is no pair, and a loss says so; `Anschrift:` pairs.
+/// The fields beside it pair. Steps 1.0625 to 1.25, sizes 6 to 14, both fonts.
+#[test]
+fn a_name_over_an_address_pairs_only_on_evidence() {
+    let cases: [(&str, &[&str], bool); 5] = [
+        ("Muster GmbH", &["Musterweg 1", "12345 Musterstadt"], false),
+        (
+            "Muster GmbH",
+            &["Postfach 12 34", "12345 Musterstadt"],
+            false,
+        ),
+        (
+            "Erika Mustermann",
+            &["c/o Muster GmbH", "Musterweg 1", "12345 Musterstadt"],
+            false,
+        ),
+        (
+            "Kunde",
+            &["Muster GmbH", "Musterweg 1", "12345 Musterstadt"],
+            false,
+        ),
+        ("Anschrift:", &["Musterweg 1", "12345 Musterstadt"], true),
+    ];
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+        for step in [1.0625f32, 1.125, 1.25] {
+            for font in ["F1", "F3"] {
+                for (first, rest, pairs) in cases {
+                    let at = format!("{first:?} {size} pt x {step}, {font}");
+                    let out = cell_between_in(first, rest, size, step, font, 0.9);
+                    let rows: Vec<String> = read_tables(&out)
+                        .iter()
+                        .flatten()
+                        .map(|r| r.join(": "))
+                        .collect();
+                    for want in ["Name: Muster", "Nr: 4711"] {
+                        if !rows.iter().any(|r| r == want) {
+                            wrong.push(format!("{at}: no {want} in {rows:?}"));
+                        }
+                    }
+                    let paired = rows.iter().any(|r| r.contains(first));
+                    let said = out
+                        .document
+                        .losses
+                        .iter()
+                        .any(|l| l.what.contains("read as an address"));
+                    if pairs && !paired {
+                        wrong.push(format!("{at}: no pair: {rows:?}"));
+                    }
+                    if !pairs && (paired || !said) {
+                        wrong.push(format!("{at}: paired {paired}, said {said}: {rows:?}"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
 /// Task 15b part 2c review (Important 2 and 3, concern 4; ruling P6-X): a field cell whose lines
 /// are an address, between `Name` over `Muster` and `Nr` over `4711`, is left out of its row and
 /// a loss says so; the two other fields still pair. An address whose first line holds a number
 /// (a street, a PO box, a postcode over the country, `c/o`) is no pair at any size step; a first
-/// line without one over address lines (a name, a company, the label `Anschrift`) is no pair
-/// where no size step sets it apart as a label, and pairs where one does. Steps 1.0625 to 1.25,
+/// line without one over address lines (a name, a company, the label `Anschrift`) pairs as a
+/// label in the label style of the fields beside it (concern 3 ruling). Steps 1.0625 to 1.25,
 /// sizes 6 to 14, both fonts.
 #[test]
 fn an_address_cell_is_left_out_of_its_row_and_said() {
@@ -6548,7 +6629,7 @@ fn an_address_cell_is_left_out_of_its_row_and_said() {
                             wrong.push(format!("{at}: no {want} in {rows:?}"));
                         }
                     }
-                    let address = numbered || step < 1.08;
+                    let address = numbered;
                     let paired = rows.iter().any(|r| r.contains(first));
                     let said = out
                         .document

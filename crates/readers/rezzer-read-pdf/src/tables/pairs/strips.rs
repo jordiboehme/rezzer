@@ -385,7 +385,7 @@ fn holds_fields(flow: &Flow, fr: &Frame, ids: &[usize], inner: &[f32]) -> bool {
         .all(|c| match parse(flow, c, how) {
             Parsed::Fields(f) => f.iter().all(|f| short(flow, f)),
             // An address is a cell of the row, left out of it when the row is read.
-            Parsed::Unsure(why) => why == ADDRESS,
+            Parsed::Unsure(why) => why == ADDRESS || why == NAMED_ADDRESS,
             Parsed::No => false,
         })
 }
@@ -418,7 +418,7 @@ pub(in crate::tables) fn holds_values(flow: &Flow, by_y: &ByY, fr: &Frame) -> bo
                     value |= f.iter().any(|f| !f.value.is_empty());
                 }
                 // An address is a cell of the row, no value of a field.
-                Parsed::Unsure(ADDRESS) => {}
+                Parsed::Unsure(ADDRESS | NAMED_ADDRESS) => {}
                 _ => return false,
             }
         }
@@ -527,6 +527,29 @@ pub(in crate::tables) fn field_strips(
         // A cell not clear for a reason of fields (a label under its value, a weight only) whose
         // text is as short as a field's (see [`field_sized`]), not for its many styles alone.
         let (mut fits, mut unread, mut field_why) = (true, false, None);
+        // The label styles of the strip's fields: a name over an address in one of them is a
+        // label too.
+        let mut label_styles: Vec<Style> = Vec::new();
+        for (c, cell) in cells.iter().enumerate() {
+            if cell.is_empty() || over[c] {
+                continue;
+            }
+            for part in parts_of(flow, cell).unwrap_or_default() {
+                if let Parsed::Fields(f) = parse(flow, &part, how) {
+                    label_styles.extend(
+                        f.iter()
+                            .filter_map(|f| f.label.first())
+                            .map(|&i| style_of(&flow.runs[i])),
+                    );
+                }
+            }
+        }
+        label_styles.sort_unstable();
+        label_styles.dedup();
+        let with_labels = Reading {
+            labels: &label_styles,
+            ..how
+        };
         for (c, cell) in cells.iter().enumerate().filter(|(_, c)| !c.is_empty()) {
             let why = if over[c] {
                 Some(ACROSS)
@@ -534,17 +557,21 @@ pub(in crate::tables) fn field_strips(
                 match parts_of(flow, cell) {
                     Some(parts) => {
                         for part in parts {
-                            match parse(flow, &part, how) {
+                            let mut parsed = parse(flow, &part, how);
+                            if matches!(parsed, Parsed::Unsure(NAMED_ADDRESS)) {
+                                parsed = parse(flow, &part, with_labels);
+                            }
+                            match parsed {
                                 Parsed::Fields(f) if f.iter().all(|f| short(flow, f)) => {
                                     fields.extend(f);
                                 }
                                 // An address is left out of the row, which is said;
                                 // the other fields of the row stay.
-                                Parsed::Unsure(ADDRESS) => {
+                                Parsed::Unsure(why @ (ADDRESS | NAMED_ADDRESS)) => {
                                     let names = label_names(flow, &part);
-                                    match left_out.iter_mut().find(|l| l.0 == ADDRESS) {
+                                    match left_out.iter_mut().find(|l| l.0 == why) {
                                         Some(l) => l.1.extend(names),
-                                        None => left_out.push((ADDRESS, names)),
+                                        None => left_out.push((why, names)),
                                     }
                                 }
                                 Parsed::Unsure(why) => {

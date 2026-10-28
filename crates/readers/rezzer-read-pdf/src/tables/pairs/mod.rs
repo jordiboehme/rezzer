@@ -32,6 +32,12 @@ const LABEL_BELOW: &str = "its label stands below its value";
 /// Why a cell of a row of fields is left out of it: its lines are an address.
 pub(super) const ADDRESS: &str = "its lines read as an address, not as a label over its value";
 
+/// Why a cell of a row of fields is left out of it: its lines read as an address under a
+/// first line without a number, which no colon and no label style of the fields beside it
+/// shows to be a label.
+pub(super) const NAMED_ADDRESS: &str = "its lines read as an address under a name, and nothing \
+     shows its first line to be a label";
+
 const WEIGHT_ONLY: &str = "its label and its value differ in weight or slant only, so which is \
      the label is not clear";
 
@@ -151,9 +157,11 @@ struct Reading<'a> {
     smaller: bool,
     /// Text of one style under this size (half points) is labels only: empty fields.
     small: i32,
-    /// Styles known as labels' on the page (the text alone in an empty boxed field): a label
-    /// and a value of one size that differ in weight or slant only pair when the label's
-    /// style is one of them; else which one is the label is not clear.
+    /// Styles known as labels' on the page (the text alone in an empty boxed field, or the
+    /// labels of the fields beside a cell): a label and a value of one size that differ in
+    /// weight or slant only pair when the label's style is one of them, else which one is the
+    /// label is not clear; a name over an address pairs as a label when its style is one of
+    /// them.
     labels: &'a [Style],
 }
 
@@ -213,24 +221,29 @@ fn parse(flow: &Flow, ids: &[usize], how: Reading) -> Parsed {
             || (!how.smaller && (label.1, label.2) != (value.1, value.2) && label.0 <= value.0)
     };
     let (label, value) = (styles[0], styles[1]);
-    // Lines at one left edge that read as an address are no label over its value: a first line
-    // with a number (a street over its postcode and town) at any size; a first line without
-    // one over address lines (a name, a company) where no size step or weight sets it apart as
-    // a label (a label `Anschrift` over an address is set apart that way). Such a cell is left
-    // out of its row, its text read as it stands, and a loss says so.
-    let sizes = lines
-        .iter()
-        .flatten()
-        .filter(|i| !marker.contains(i))
-        .map(|&i| flow.runs[i].size);
-    let (small, large) = sizes.fold((f32::MAX, 0.0f32), |(a, b), s| (a.min(s), b.max(s)));
-    let one_style = (label.1, label.2) == (value.1, value.2);
+    // Lines that read as an address are no label over its value: a first line with a number
+    // (a street over its postcode and town) at any size; a first line without one over address
+    // lines (a name, a company, or a label) is a label only on evidence (see below). Such a
+    // cell is left out of its row, its text read as it stands, and a loss says so.
     match address_cell(flow, &lines, &marker) {
         Some(Address::Numbered) => return Parsed::Unsure(ADDRESS),
-        Some(Address::Named) if one_style && large < crate::order::SIZE_STEP * small => {
-            return Parsed::Unsure(ADDRESS);
+        Some(Address::Named) => {
+            // The first line is a label only on evidence: it ends with a colon, or it has the
+            // style the labels of other fields beside it have.
+            let head: Vec<usize> = lines[0]
+                .iter()
+                .copied()
+                .filter(|i| !marker.contains(i))
+                .collect();
+            let colon = words(flow, &head).ends_with(':');
+            let styled = head
+                .first()
+                .is_some_and(|&i| how.labels.contains(&style_of(&flow.runs[i])));
+            if !colon && !styled {
+                return Parsed::Unsure(NAMED_ADDRESS);
+            }
         }
-        _ => {}
+        None => {}
     }
     if !apart(label, value) {
         // The label's style first met under the value's: the label stands below it.
@@ -319,9 +332,6 @@ fn parse(flow: &Flow, ids: &[usize], how: Reading) -> Parsed {
 /// postcode and town, a country.
 const ADDRESS_LINES: usize = 5;
 
-/// The lines of an address in a cell start within this share of their size of one left edge.
-const ADDRESS_EDGE: f32 = 0.25;
-
 /// What [`address_cell`] finds a cell's lines to be.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Address {
@@ -336,21 +346,15 @@ enum Address {
 /// lines (see [`crate::layout::address_lines`]); three lines or more
 /// of an address's shape (see [`crate::layout::address_shaped`]) whose first line holds a
 /// letter and a number; a first line that starts with `c/o`, or with a postcode (a number of
-/// four digits or more) and a town over the country (words only); or, the lines starting at
-/// one left edge, a first line without a number over lines that are an address by one of
-/// these. Two to [`ADDRESS_LINES`] lines, none with an amount, a decimal number or a date.
+/// four digits or more) and a town over the country (words only); or a first line without a
+/// number over lines that are an address by one of these. Two to [`ADDRESS_LINES`] lines, none
+/// with an amount, a decimal number or a date.
 fn address_cell(flow: &Flow, lines: &[Vec<usize>], marker: &HashSet<usize>) -> Option<Address> {
     let kept: Vec<Vec<usize>> = lines
         .iter()
         .map(|l| l.iter().copied().filter(|i| !marker.contains(i)).collect())
         .filter(|l: &Vec<usize>| !l.is_empty())
         .collect();
-    let first = kept.first()?;
-    let r0 = &flow.runs[first[0]];
-    let edge = kept.iter().all(|l| {
-        let r = &flow.runs[l[0]];
-        (r.x - r0.x).abs() <= ADDRESS_EDGE * r.size.min(r0.size)
-    });
     if !(2..=ADDRESS_LINES).contains(&kept.len()) {
         return None;
     }
@@ -383,8 +387,7 @@ fn address_cell(flow: &Flow, lines: &[Vec<usize>], marker: &HashSet<usize>) -> O
     };
     if numbered(&texts) {
         Some(Address::Numbered)
-    } else if edge
-        && !texts[0].chars().any(|c| c.is_ascii_digit())
+    } else if !texts[0].chars().any(|c| c.is_ascii_digit())
         && texts.len() >= 3
         && (numbered(&texts[1..]) || crate::layout::address_shaped(&texts[1..]))
     {
