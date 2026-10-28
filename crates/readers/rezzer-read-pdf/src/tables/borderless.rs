@@ -96,6 +96,8 @@ pub(super) fn borderless(
     // more; at most two lines of one piece in a row (cell text that wraps). Each region also
     // has the lines right under it that may go on in its last row (see [`Tail`]).
     let mut regions: Vec<(usize, usize, Tail)> = Vec::new();
+    // The first runs of lines of text after a blank row over rows of their region's shape.
+    let mut maybe_heads: Vec<usize> = Vec::new();
     let mut i = 0;
     while i < lines.len() {
         if off[i] || counts[i] < 2 {
@@ -127,11 +129,15 @@ pub(super) fn borderless(
                 .filter(|&g| g > 0.0 && g <= 3.0 * cur.size.max(lines[end + 1].size));
             let blank =
                 next.is_some_and(|next| pitch > 0.0 && gap > REGION_STEPS * pitch.max(next));
-            if blank
-                && (!in_columns(flow, &lines[i..end], cur)
-                    || header_line(flow, &lines[i..end], cur, &lines[end + 1]))
-            {
-                break;
+            if blank {
+                match header_line(flow, &lines[i..end], cur, &lines[end + 1]) {
+                    Head::Header => break,
+                    _ if !in_columns(flow, &lines[i..end], cur) => break,
+                    // A line of text over rows of the region's own shape goes on as a row of
+                    // its table, but it may head a table of its own: that is said.
+                    Head::Doubt => maybe_heads.push(cur.start),
+                    Head::No => {}
+                }
             }
             // A blank row the region goes on over is no step of its rows: a gap after it is
             // judged by the rows' own steps.
@@ -524,6 +530,25 @@ pub(super) fn borderless(
             ));
         }
     }
+    // A line of text read as a row of a table, though it may head a table of its own.
+    let doubted = maybe_heads
+        .iter()
+        .filter(|&&r| target.get(r).is_some_and(Option::is_some))
+        .count();
+    if doubted > 0 {
+        let (s, them) = if doubted == 1 {
+            ("", "it")
+        } else {
+            ("s", "they")
+        };
+        found.uncertain.push(format!(
+            "{doubted} line{s} of text after a gap in a table without rules on page {page} {} \
+             read as a row of the table, as the rows under {them} have the table's shape: {them} \
+             may start a table of {} own",
+            if doubted == 1 { "is" } else { "are" },
+            if doubted == 1 { "its" } else { "their" },
+        ));
+    }
     // The runs of blocks side by side go in the flow block by block; their places stay.
     for (start, order) in apart {
         let runs: Vec<Run> = order.iter().map(|&i| flow.runs[i].clone()).collect();
@@ -734,10 +759,11 @@ fn in_columns(flow: &Flow, region: &[FlowLine], line: &FlowLine) -> bool {
 /// not, or a size step larger than most of them, see [`crate::order::SIZE_STEP`]; a bold
 /// total row among them does not count) or by its shape (no digit, over a line with a digit
 /// whose cells have another shape than every row of the region, see [`Shape`], under rows that
-/// all hold one after the region's first line).
-fn header_line(flow: &Flow, region: &[FlowLine], line: &FlowLine, next: &FlowLine) -> bool {
+/// all hold one after the region's first line). Over a line of a row's shape it may be either
+/// ([`Head::Doubt`]).
+fn header_line(flow: &Flow, region: &[FlowLine], line: &FlowLine, next: &FlowLine) -> Head {
     if region.is_empty() {
-        return false;
+        return Head::No;
     }
     let own = pieces_of(flow, line);
     let texts: Vec<String> = own.iter().map(|p| text_of(flow, p.start, p.end)).collect();
@@ -746,7 +772,7 @@ fn header_line(flow: &Flow, region: &[FlowLine], line: &FlowLine, next: &FlowLin
         && texts.iter().any(|t| t.chars().any(char::is_alphabetic))
         && texts.iter().all(|t| year(t) || !numeric(t));
     if !cells {
-        return false;
+        return Head::No;
     }
     let inked = |l: &FlowLine| {
         flow.runs[l.start..l.end]
@@ -780,12 +806,26 @@ fn header_line(flow: &Flow, region: &[FlowLine], line: &FlowLine, next: &FlowLin
             .collect()
     };
     let own_rows = region[1..].iter().any(|l| shapes(l) == shapes(next));
-    let shaped = region.len() > 1
-        && !digit(line)
-        && digit(next)
-        && region[1..].iter().all(digit)
-        && !own_rows;
-    styled || shaped
+    let shaped = region.len() > 1 && !digit(line) && digit(next) && region[1..].iter().all(digit);
+    if styled || (shaped && !own_rows) {
+        Head::Header
+    } else if shaped {
+        Head::Doubt
+    } else {
+        Head::No
+    }
+}
+
+/// What [`header_line`] finds a line after a blank row to be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Head {
+    /// The header of a table of its own.
+    Header,
+    /// A line of text over a row of the region's own shape: a row of the region's table (a
+    /// note row), or the header of a table of its own.
+    Doubt,
+    /// No header.
+    No,
 }
 
 /// A header cell may be a whole number of at most this many digits (a year).

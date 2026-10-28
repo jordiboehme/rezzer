@@ -6103,3 +6103,85 @@ fn totals_between_rules_under_line_items_stay_one_table() {
         wrong.join("\n")
     );
 }
+
+/// Task 15b part 2d fix round 1 (ruling on concern 2): a plain line of text after a gap in a
+/// table without rules, over rows of the first table's own shape (`Kennung | Vorgang | Wert`
+/// over `7001 | Fahrgeld | 45,67`, the part 2c re-review probe), stays a row of the table, and
+/// an Uncertain loss says it may start a table of its own; so does the note row `Hinweis | siehe
+/// Anlage | Seite`. A gap of 1.5 rows inside the table changes nothing. Sizes 6 to 14, both
+/// fonts.
+#[test]
+fn a_text_line_over_rows_of_the_tables_shape_is_a_row_and_said() {
+    let head = ["Lohnart", "Bezeichnung", "Betrag"];
+    let rows = [
+        ["1000", "Gehalt", "3.000,00"],
+        ["1010", "Zulage", "150,00"],
+        ["1020", "Bonus", "50,00"],
+    ];
+    let cases: [(&str, [&str; 3], [&str; 3]); 2] = [
+        (
+            "header",
+            ["Kennung", "Vorgang", "Wert"],
+            ["7001", "Fahrgeld", "45,67"],
+        ),
+        (
+            "note",
+            ["Hinweis", "siehe Anlage", "Seite"],
+            ["3000", "Bonus", "500,00"],
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+        for fonts in FONTS {
+            for (name, line, after) in cases {
+                for inner in [1.0f32, 1.5] {
+                    let k = size / 9.0;
+                    let pitch = 1.25 * size;
+                    let right = |f: &str, x: f32, y: f32, t: &str| {
+                        show(f, size, x - common::font_width(f, t, size), y, t)
+                    };
+                    let mut t = String::new();
+                    let mut y = 700.0;
+                    let all = [head, rows[0], rows[1], rows[2], line, after];
+                    for (n, r) in all.iter().enumerate() {
+                        if n == 2 {
+                            y -= (inner - 1.0) * pitch;
+                        }
+                        if n == 4 {
+                            y -= 1.4 * pitch;
+                        }
+                        let f = if n == 0 { fonts.1 } else { fonts.0 };
+                        t += &show(f, size, 40.0, y, r[0]);
+                        t += &show(f, size, 40.0 + 72.0 * k, y, r[1]);
+                        t += &right(f, 40.0 + 360.0 * k, y, r[2]);
+                        y -= pitch;
+                    }
+                    let at = format!("{name} {inner}, {size}, {fonts:?}");
+                    let out = common::read(&page_in(&t, Look::Plain));
+                    let found = tables(&out);
+                    let want: Vec<Vec<String>> = all
+                        .iter()
+                        .map(|r| r.iter().map(|c| (*c).to_string()).collect())
+                        .collect();
+                    if !found.iter().any(|t| t.1 == want) {
+                        wrong.push(format!("{at}: no one table in {found:?}"));
+                    }
+                    let said = out
+                        .document
+                        .losses
+                        .iter()
+                        .any(|l| l.what.contains("may start a table of its own"));
+                    if !said {
+                        wrong.push(format!("{at}: not said"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}

@@ -679,6 +679,8 @@ fn two_tables_or_note(v: &Variant, second_kind: Second, inner: f32) -> Sheet {
     if note {
         let all: Vec<&[&str]> = first.iter().chain(&second).map(|r| &r[..]).collect();
         s.want.tables.push(owned(&all));
+        // The note row may head a table of its own (Task 15b part 2d fix round 1): said.
+        s.want.losses.push("may start a table of its own".into());
     } else {
         s.want
             .tables
