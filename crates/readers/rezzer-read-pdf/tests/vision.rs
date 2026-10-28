@@ -3386,6 +3386,10 @@ fn twin_codes_by_the_edge_of_a_scan_are_said() {
                     asset(&out, "page-1").alt
                 );
             }
+            // Bars 30 points high are under 8 modules of 4 points: too short for a printed code.
+            if bar < 60 {
+                continue;
+            }
             let width = (m.width * 4) as f32;
             let out = read(&blurred_scan(1, 4, bar, &[40.0, 40.0 + width + 28.0], blur));
             let n = asset(&out, "page-1").codes.len();
@@ -3421,7 +3425,9 @@ fn codes_in_a_scan_the_decoder_misses_are_said() {
     for res in [1u32, 2] {
         for px in [2u32, 3, 4] {
             let width = (m.width * px) as f32 / res as f32;
-            for bar in [4 * px, 10 * px, 60] {
+            // Bars of a code printed in a picture are 8 modules long at least: a screen of
+            // dots cut by the edge of a picture stands in short bars.
+            for bar in [10 * px, 60] {
                 let case = format!("{res} pixels a point, {px} a module, bars {bar}");
                 let alone = read(&crisp_scan(res, px, bar, &[40.0]));
                 if asset(&alone, "page-1").codes.len() != 1 {

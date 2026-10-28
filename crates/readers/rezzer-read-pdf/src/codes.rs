@@ -297,31 +297,60 @@ const MERGE_GROUPS: usize = 2_000;
 /// reads the first [`MAX_REGIONS`] and says the others. `Err` says why the page was not
 /// searched: its work would pass [`MAX_ENTRIES`] or [`MAX_PAIRS`].
 pub(crate) fn vector_codes(cells: &[[f32; 4]]) -> Result<Vec<VectorCode>, String> {
-    codes_among(cells, (false, MIN_MODULE))
+    codes_among(cells, None)
 }
 
-/// The bars of a linear code are at least this many modules long.
+/// The bars of a linear code drawn as paths are at least this many modules long.
 const MIN_BAR: f32 = 2.0;
+
+/// The bars of a linear code printed in a picture are at least this many modules long: a
+/// printed code's bars are long beside its module, while a screen of dots cut by the edge of
+/// a picture stands in short bars.
+const PRINTED_BAR: f32 = 8.0;
+
+/// The share of the bars of a printed linear code that are of one width, below: its bars have
+/// several widths, the dots or lines of a screen one.
+const SAME_WIDTH: f32 = 0.9;
+
+/// The paper around a matrix code printed in a picture, in modules, at least, within the
+/// render: a screen of dots cut by its edge has none there.
+const PRINTED_MATRIX_QUIET: f32 = 2.0;
+
+/// What a search for codes printed in a picture holds to: the narrowest module, in points,
+/// and the box of the render, in points.
+#[derive(Clone, Copy)]
+struct Printed {
+    min_module: f32,
+    page: [f32; 4],
+}
 
 /// The regions among `cells`, the dark parts of a render in points (see [`pixel_cells`]),
 /// that look like a code printed there: as [`vector_codes`], with modules at least
-/// [`PRINTED_MODULE`] of the render's pixels (`pixel` points) wide, bars and spaces whole
-/// modules give or take the spread of the ink, and paper past the ends of the bars of a
-/// linear code (see [`linear`]).
-pub(crate) fn printed_codes(cells: &[[f32; 4]], pixel: f32) -> Result<Vec<VectorCode>, String> {
-    codes_among(cells, (true, PRINTED_MODULE * pixel))
+/// [`PRINTED_MODULE`] of the render's pixels (`pixel` points) wide, and positive evidence of a
+/// code, not of a screen: a linear code has bars [`PRINTED_BAR`] modules long at least, of
+/// several widths ([`SAME_WIDTH`]), whole modules give or take the spread of the ink,
+/// with paper past their ends (see [`linear`]); a matrix code has paper around it within the
+/// render (`page`, its box in points).
+pub(crate) fn printed_codes(
+    cells: &[[f32; 4]],
+    pixel: f32,
+    page: [f32; 4],
+) -> Result<Vec<VectorCode>, String> {
+    codes_among(
+        cells,
+        Some(Printed {
+            min_module: PRINTED_MODULE * pixel,
+            page,
+        }),
+    )
 }
 
 /// The modules of a code printed in a picture are at least this many pixels of its render
 /// wide: on a lattice of one pixel every part of a render lies, letters too.
 const PRINTED_MODULE: f32 = 2.0;
 
-/// [`vector_codes`], or with `printed` [`printed_codes`], its modules at least `min_module`
-/// points.
-fn codes_among(
-    cells: &[[f32; 4]],
-    (printed, min_module): (bool, f32),
-) -> Result<Vec<VectorCode>, String> {
+/// [`vector_codes`], or with `printed` [`printed_codes`].
+fn codes_among(cells: &[[f32; 4]], printed: Option<Printed>) -> Result<Vec<VectorCode>, String> {
     let cells: Vec<[f32; 4]> = cells
         .iter()
         .copied()
@@ -435,7 +464,7 @@ fn codes_among(
     let look = |members: &[usize], found: &mut Vec<(usize, VectorCode)>| match region(
         &cells,
         members,
-        (printed, min_module),
+        printed,
         &|b| quiet(&cells, &grid_of, members, b, &key),
     ) {
         Some(code) => {
@@ -681,9 +710,10 @@ const MAX_MODULES: usize = 200;
 fn region(
     cells: &[[f32; 4]],
     members: &[usize],
-    (printed, min_module): (bool, f32),
+    printed: Option<Printed>,
     quiet: &dyn Fn([f32; 4]) -> bool,
 ) -> Option<VectorCode> {
+    let min_module = printed.map_or(MIN_MODULE, |p| p.min_module);
     let (b, module) = bounds(cells, members);
     let (w, h) = (b[2] - b[0], b[3] - b[1]);
     // No size in points bounds a region: two codes side by side past their quiet zone may
@@ -716,14 +746,28 @@ fn region(
             .count();
         on_it * 10 >= members.len() * 9
     };
+    let is_printed = printed.is_some();
+    // A printed matrix code has paper around it, inside the render.
+    let paper_around = || {
+        let Some(p) = printed else { return true };
+        let q = PRINTED_MATRIX_QUIET * module;
+        b[0] - q >= p.page[0]
+            && b[1] - q >= p.page[1]
+            && b[2] + q <= p.page[2]
+            && b[3] + q <= p.page[3]
+            && quiet([b[0] - q, b[1] - q, b[0] - 0.01, b[3] + q])
+            && quiet([b[2] + 0.01, b[1] - q, b[2] + q, b[3] + q])
+            && quiet([b[0], b[1] - q, b[2], b[1] - 0.01])
+            && quiet([b[0], b[3] + 0.01, b[2], b[3] + q])
+    };
     let kind_ok = if bars(cells, members, false) {
-        linear(cells, members, (b, module, printed), false, quiet)
+        linear(cells, members, (b, module, is_printed), false, quiet)
     } else if bars(cells, members, true)
-        && linear(cells, members, (b, module, printed), true, quiet)
+        && linear(cells, members, (b, module, is_printed), true, quiet)
     {
         true
     } else {
-        lattice() && matrix(cells, members, b, module)
+        lattice() && matrix(cells, members, b, module) && paper_around()
     };
     if !kind_ok {
         return None;
@@ -804,9 +848,10 @@ fn linear(
     };
     // Bars at least two modules long; every bar and space a whole number of modules wide,
     // but for a few spaces (codes side by side closer than their quiet zone).
+    let min_bar = if printed { PRINTED_BAR } else { MIN_BAR };
     if members
         .iter()
-        .any(|&i| long(&cells[i]) < MIN_BAR * module - 0.01)
+        .any(|&i| long(&cells[i]) < min_bar * module - 0.01)
     {
         return false;
     }
@@ -847,6 +892,9 @@ fn linear(
     if one_pitch(&|r| r.0) || one_pitch(&|r| r.1) || one_pitch(&|r| (r.0 + r.1) / 2.0) {
         return false;
     }
+    if printed && one_width(&runs, module, spread) {
+        return false;
+    }
     let mut widths: Vec<i32> = runs
         .iter()
         .map(|(a, z)| ((z - a - spread) / module).round() as i32)
@@ -871,6 +919,23 @@ fn linear(
         } else {
             quiet([b[0], b[1] - e1, b[2], b[1] - e0]) && quiet([b[0], b[3] + e0, b[2], b[3] + e1])
         })
+}
+
+/// Whether nine in ten of bars `runs` (start and end across) of `module`, the ink spread by
+/// `spread`, are as wide as each other ([`SAME_WIDTH`]): the dots or lines of a screen are, the
+/// bars of a linear code have several widths.
+fn one_width(runs: &[(f32, f32)], module: f32, spread: f32) -> bool {
+    let mut widths: Vec<i32> = runs
+        .iter()
+        .map(|(a, z)| ((z - a - spread) / module * 4.0).round() as i32)
+        .collect();
+    widths.sort_unstable();
+    let most = widths
+        .chunk_by(|a, b| a == b)
+        .map(<[i32]>::len)
+        .max()
+        .unwrap_or(0);
+    most as f32 >= SAME_WIDTH * runs.len() as f32
 }
 
 /// Whether `members` in box `b` on a lattice of `module` make a matrix code's finder: QR Code

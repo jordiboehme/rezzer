@@ -2754,7 +2754,11 @@ fn printed_codes(page: &Rendered, need: &Need, room: u64) -> Result<Vec<[f32; 4]
         .map(|c| page_rect(page, need, *c))
         .collect();
     drop(cells);
-    let found = crate::codes::printed_codes(&points, (1.0 / page.scale) as f32)?;
+    let found = crate::codes::printed_codes(
+        &points,
+        (1.0 / page.scale) as f32,
+        page_rect(page, need, [0, 0, wr, hr]),
+    )?;
     Ok(found.into_iter().map(|c| c.b).collect())
 }
 

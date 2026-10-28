@@ -186,6 +186,177 @@ fn halftone(v: &Variant) -> Sheet {
 /// The pitch of the dots of [`halftone`], in pixels of its picture.
 const SCREEN: f32 = 4.2;
 
+/// The screens of [`halftone_sweep`]: round dots, square dots, or lines.
+#[derive(Clone, Copy, PartialEq)]
+enum Screen {
+    Dots,
+    Squares,
+    Lines,
+}
+
+/// The pitches of the screens of [`halftone_sweep`], in pixels of its picture, one row of
+/// tiles each.
+const SWEEP_PITCHES: [f32; 7] = [2.0, 3.0, 3.5, 4.2, 5.0, 6.0, 8.0];
+
+/// Task 15b part 2e-3 fix round 2: a scanned page (one inline picture over all of it, `res`
+/// pixels a point, under the page's text) printed as halftone screens of `screen`, soft shades
+/// in waves, in 7 by 7 tiles: each row of tiles one pitch of [`SWEEP_PITCHES`], each column
+/// one angle from 0 to 90 degrees in steps of 15. The tiles touch (`band` false: one screen
+/// over the whole page, to its edges, whose pitch and angle change) or are bands with paper
+/// between them. Blurred `blur`
+/// times by a 3 by 3 box. No code, and nothing said of one.
+fn halftone_sweep(v: &Variant, screen: Screen, res: u32, blur: u32, band: bool) -> Sheet {
+    let (x0, y0, wp, hp) = (0.0f32, 0.0f32, 595.0f32, 842.0f32);
+    let (w, h) = ((wp * res as f32) as u32, (hp * res as f32) as u32);
+    let (tw, th) = (w / 7, h / 7);
+    let mut g = vec![235u8; (w * h) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let (col, row) = ((x / tw).min(6), (y / th).min(6));
+            if band && (y % th) > th / 2 {
+                continue;
+            }
+            let pitch = SWEEP_PITCHES[row as usize];
+            let (s, c) = (col as f32 * 15.0).to_radians().sin_cos();
+            let (fx, fy) = (x as f32 / w as f32, y as f32 / h as f32);
+            let tone = (0.5
+                + 0.3 * (fx * 11.0).sin() * (fy * 5.0).cos()
+                + 0.15 * ((fx - fy) * 17.0).sin())
+            .clamp(0.0, 1.0);
+            let (u, t) = (
+                (x as f32 * c + y as f32 * s) / pitch,
+                (-(x as f32) * s + y as f32 * c) / pitch,
+            );
+            let dark = dark_at(screen, u, t, tone);
+            if dark {
+                g[(y * w + x) as usize] = 20;
+            }
+        }
+    }
+    let t = inline_gray(&mut g, (w, h), blur, [x0, y0, wp, hp]);
+    Sheet::new(page_of(v, t))
+}
+
+/// Task 15b part 2e-3 fix round 2: a scanned page of 1 pixel a point (one inline picture over
+/// all of it, under the page's text) printed as one halftone screen of `screen`, `pitch`
+/// pixels apart, turned `angle` degrees, over the whole page or (`band`) a band from a third
+/// to a half of its height, soft shades in waves, blurred `blur` times. No code, and nothing
+/// said of one.
+fn screen_page(
+    v: &Variant,
+    screen: Screen,
+    (pitch, angle): (f32, f32),
+    blur: u32,
+    band: bool,
+) -> Sheet {
+    let (w, h) = (595u32, 842u32);
+    let (s, c) = angle.to_radians().sin_cos();
+    let mut g = vec![240u8; (w * h) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            if band && !(y > h / 3 && y < h / 2) {
+                continue;
+            }
+            let (fx, fy) = (x as f32 / w as f32, y as f32 / h as f32);
+            let tone = (0.5
+                + 0.3 * (fx * 11.0).sin() * (fy * 5.0).cos()
+                + 0.15 * ((fx - fy) * 17.0).sin())
+            .clamp(0.0, 1.0);
+            let (u, t) = (
+                (x as f32 * c + y as f32 * s) / pitch,
+                (-(x as f32) * s + y as f32 * c) / pitch,
+            );
+            if dark_at(screen, u, t, tone) {
+                g[(y * w + x) as usize] = 20;
+            }
+        }
+    }
+    Sheet::new(page_of(
+        v,
+        inline_gray(&mut g, (w, h), blur, [0.0, 0.0, 595.0, 842.0]),
+    ))
+}
+
+/// Whether the screen `screen` is dark at (`u`, `t`) (in pitches) for a shade `tone` (0 dark,
+/// 1 light).
+fn dark_at(screen: Screen, u: f32, t: f32, tone: f32) -> bool {
+    let (du, dt) = (u.rem_euclid(1.0) - 0.5, t.rem_euclid(1.0) - 0.5);
+    match screen {
+        Screen::Dots => (du * du + dt * dt).sqrt() < (1.0 - tone) * 0.6,
+        Screen::Squares => du.abs().max(dt.abs()) < (1.0 - tone) * 0.5,
+        Screen::Lines => u.rem_euclid(1.0) < 1.0 - tone,
+    }
+}
+
+/// The gray pixels `g` (`w` by `h`), blurred `blur` times by a 3 by 3 box, as an inline
+/// picture drawn over `at` (left, bottom, width, height in points).
+fn inline_gray(g: &mut [u8], (w, h): (u32, u32), blur: u32, at: [f32; 4]) -> String {
+    for _ in 0..blur {
+        let src = g.to_vec();
+        for y in 1..h - 1 {
+            for x in 1..w - 1 {
+                let mut t = 0u32;
+                for dy in 0..3 {
+                    for dx in 0..3 {
+                        t += u32::from(src[((y + dy - 1) * w + x + dx - 1) as usize]);
+                    }
+                }
+                g[(y * w + x) as usize] = (t / 9) as u8;
+            }
+        }
+    }
+    let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    std::io::Write::write_all(&mut z, g).expect("deflate");
+    let data = z.finish().expect("deflate");
+    let mut hex = String::with_capacity(data.len() * 2 + data.len() / 32);
+    for (k, b) in data.iter().enumerate() {
+        hex += &format!("{b:02X}");
+        if k % 40 == 39 {
+            hex.push('\n');
+        }
+    }
+    let [x0, y0, wp, hp] = at;
+    format!(
+        "q {wp} 0 0 {hp} {x0} {y0} cm\nBI /W {w} /H {h} /CS /G /BPC 8 /F [/AHx /Fl] ID\n\
+         {hex}>\nEI\nQ\n"
+    )
+}
+
+/// The axes of [`halftone_sweep`]: the page once, as it is.
+const SWEEP: Axes = Axes {
+    scale: &[Scale::S100],
+    data: &[Data::CourierBold],
+    turn: &[Turn::None],
+    pages: &[Pages::One],
+    ..RENDERED
+};
+
+/// The shapes of single halftone screens: `$name => (screen, pitch, angle, blur, band)`.
+macro_rules! screens {
+    ($($name:literal => ($screen:expr, $pitch:literal, $angle:literal, $blur:literal, $band:literal),)*) => {
+        vec![$(
+            Shape {
+                name: $name,
+                axes: SWEEP,
+                draw: |v| (screen_page(v, $screen, ($pitch, $angle), $blur, $band), None),
+            },
+        )*]
+    };
+}
+
+/// The shapes of the halftone sweep: `$name => (screen, res, blur, band)`.
+macro_rules! sweep {
+    ($($name:literal => ($screen:expr, $res:literal, $blur:literal, $band:literal),)*) => {
+        vec![$(
+            Shape {
+                name: $name,
+                axes: SWEEP,
+                draw: |v| (halftone_sweep(v, $screen, $res, $blur, $band), None),
+            },
+        )*]
+    };
+}
+
 /// Task 15b: a ruler of 100 ticks, 3 points long, 2 points apart, every fifth 1 point wide and
 /// the others half a point, at the head of a page `on`: no code, and nothing said of one.
 fn ruler(v: &Variant, on: On) -> Sheet {
@@ -372,6 +543,96 @@ pub(crate) fn shapes() -> Vec<Shape> {
             draw: |v| (halftone(v), None),
         },
     ]);
+    // Single halftone screens over the whole page or a band, no code.
+    all.extend(screens! {
+        "a scan of dots 2.5 px apart at 0 degrees, crisp" => (Screen::Dots, 2.5, 0.0, 0, false),
+        "a scan of dots 2.5 px apart at 0 degrees, crisp, a band" => (Screen::Dots, 2.5, 0.0, 0, true),
+        "a scan of dots 2.5 px apart at 0 degrees, blur 1" => (Screen::Dots, 2.5, 0.0, 1, false),
+        "a scan of dots 2.5 px apart at 0 degrees, blur 1, a band" => (Screen::Dots, 2.5, 0.0, 1, true),
+        "a scan of dots 3.6 px apart at 45 degrees, crisp" => (Screen::Dots, 3.6, 45.0, 0, false),
+        "a scan of dots 3.6 px apart at 45 degrees, crisp, a band" => (Screen::Dots, 3.6, 45.0, 0, true),
+        "a scan of dots 3.6 px apart at 45 degrees, blur 1" => (Screen::Dots, 3.6, 45.0, 1, false),
+        "a scan of dots 3.6 px apart at 45 degrees, blur 1, a band" => (Screen::Dots, 3.6, 45.0, 1, true),
+        "a scan of dots 4.2 px apart at 45 degrees, crisp" => (Screen::Dots, 4.2, 45.0, 0, false),
+        "a scan of dots 4.2 px apart at 45 degrees, crisp, a band" => (Screen::Dots, 4.2, 45.0, 0, true),
+        "a scan of dots 4.2 px apart at 45 degrees, blur 1" => (Screen::Dots, 4.2, 45.0, 1, false),
+        "a scan of dots 4.2 px apart at 45 degrees, blur 1, a band" => (Screen::Dots, 4.2, 45.0, 1, true),
+        "a scan of dots 5.0 px apart at 15 degrees, crisp" => (Screen::Dots, 5.0, 15.0, 0, false),
+        "a scan of dots 5.0 px apart at 15 degrees, crisp, a band" => (Screen::Dots, 5.0, 15.0, 0, true),
+        "a scan of dots 5.0 px apart at 15 degrees, blur 1" => (Screen::Dots, 5.0, 15.0, 1, false),
+        "a scan of dots 5.0 px apart at 15 degrees, blur 1, a band" => (Screen::Dots, 5.0, 15.0, 1, true),
+        "a scan of dots 6.0 px apart at 75 degrees, crisp" => (Screen::Dots, 6.0, 75.0, 0, false),
+        "a scan of dots 6.0 px apart at 75 degrees, crisp, a band" => (Screen::Dots, 6.0, 75.0, 0, true),
+        "a scan of dots 6.0 px apart at 75 degrees, blur 1" => (Screen::Dots, 6.0, 75.0, 1, false),
+        "a scan of dots 6.0 px apart at 75 degrees, blur 1, a band" => (Screen::Dots, 6.0, 75.0, 1, true),
+        "a scan of dots 3.0 px apart at 30 degrees, crisp" => (Screen::Dots, 3.0, 30.0, 0, false),
+        "a scan of dots 3.0 px apart at 30 degrees, crisp, a band" => (Screen::Dots, 3.0, 30.0, 0, true),
+        "a scan of dots 3.0 px apart at 30 degrees, blur 1" => (Screen::Dots, 3.0, 30.0, 1, false),
+        "a scan of dots 3.0 px apart at 30 degrees, blur 1, a band" => (Screen::Dots, 3.0, 30.0, 1, true),
+        "a scan of lines 2.2 px apart at 0 degrees, crisp" => (Screen::Lines, 2.2, 0.0, 0, false),
+        "a scan of lines 2.2 px apart at 0 degrees, crisp, a band" => (Screen::Lines, 2.2, 0.0, 0, true),
+        "a scan of lines 2.2 px apart at 0 degrees, blur 1" => (Screen::Lines, 2.2, 0.0, 1, false),
+        "a scan of lines 2.2 px apart at 0 degrees, blur 1, a band" => (Screen::Lines, 2.2, 0.0, 1, true),
+        "a scan of lines 3.3 px apart at 90 degrees, crisp" => (Screen::Lines, 3.3, 90.0, 0, false),
+        "a scan of lines 3.3 px apart at 90 degrees, crisp, a band" => (Screen::Lines, 3.3, 90.0, 0, true),
+        "a scan of lines 3.3 px apart at 90 degrees, blur 1" => (Screen::Lines, 3.3, 90.0, 1, false),
+        "a scan of lines 3.3 px apart at 90 degrees, blur 1, a band" => (Screen::Lines, 3.3, 90.0, 1, true),
+        "a scan of lines 4.0 px apart at 45 degrees, crisp" => (Screen::Lines, 4.0, 45.0, 0, false),
+        "a scan of lines 4.0 px apart at 45 degrees, crisp, a band" => (Screen::Lines, 4.0, 45.0, 0, true),
+        "a scan of lines 4.0 px apart at 45 degrees, blur 1" => (Screen::Lines, 4.0, 45.0, 1, false),
+        "a scan of lines 4.0 px apart at 45 degrees, blur 1, a band" => (Screen::Lines, 4.0, 45.0, 1, true),
+        "a scan of lines 5.5 px apart at 90 degrees, crisp" => (Screen::Lines, 5.5, 90.0, 0, false),
+        "a scan of lines 5.5 px apart at 90 degrees, crisp, a band" => (Screen::Lines, 5.5, 90.0, 0, true),
+        "a scan of lines 5.5 px apart at 90 degrees, blur 1" => (Screen::Lines, 5.5, 90.0, 1, false),
+        "a scan of lines 5.5 px apart at 90 degrees, blur 1, a band" => (Screen::Lines, 5.5, 90.0, 1, true),
+        "a scan of square dots 3.5 px apart at 0 degrees, crisp" => (Screen::Squares, 3.5, 0.0, 0, false),
+        "a scan of square dots 3.5 px apart at 0 degrees, crisp, a band" => (Screen::Squares, 3.5, 0.0, 0, true),
+        "a scan of square dots 3.5 px apart at 0 degrees, blur 1" => (Screen::Squares, 3.5, 0.0, 1, false),
+        "a scan of square dots 3.5 px apart at 0 degrees, blur 1, a band" => (Screen::Squares, 3.5, 0.0, 1, true),
+        "a scan of square dots 5.0 px apart at 30 degrees, crisp" => (Screen::Squares, 5.0, 30.0, 0, false),
+        "a scan of square dots 5.0 px apart at 30 degrees, crisp, a band" => (Screen::Squares, 5.0, 30.0, 0, true),
+        "a scan of square dots 5.0 px apart at 30 degrees, blur 1" => (Screen::Squares, 5.0, 30.0, 1, false),
+        "a scan of square dots 5.0 px apart at 30 degrees, blur 1, a band" => (Screen::Squares, 5.0, 30.0, 1, true),
+    });
+    // Halftone screens of every pitch and angle, no code.
+    all.extend(sweep! {
+        "halftone dots, 1 px a point, crisp" => (Screen::Dots, 1, 0, false),
+        "halftone dots, 1 px a point, blur 1" => (Screen::Dots, 1, 1, false),
+        "halftone dots, 1 px a point, blur 2" => (Screen::Dots, 1, 2, false),
+        "halftone dots, 2 px a point, crisp" => (Screen::Dots, 2, 0, false),
+        "halftone dots, 2 px a point, blur 1" => (Screen::Dots, 2, 1, false),
+        "halftone dots, 2 px a point, blur 2" => (Screen::Dots, 2, 2, false),
+        "halftone dot bands, 1 px a point, crisp" => (Screen::Dots, 1, 0, true),
+        "halftone dot bands, 1 px a point, blur 1" => (Screen::Dots, 1, 1, true),
+        "halftone dot bands, 1 px a point, blur 2" => (Screen::Dots, 1, 2, true),
+        "halftone dot bands, 2 px a point, crisp" => (Screen::Dots, 2, 0, true),
+        "halftone dot bands, 2 px a point, blur 1" => (Screen::Dots, 2, 1, true),
+        "halftone dot bands, 2 px a point, blur 2" => (Screen::Dots, 2, 2, true),
+        "halftone square dots, 1 px a point, crisp" => (Screen::Squares, 1, 0, false),
+        "halftone square dot bands, 1 px a point, crisp" => (Screen::Squares, 1, 0, true),
+        "halftone square dots, 1 px a point, blur 1" => (Screen::Squares, 1, 1, false),
+        "halftone square dot bands, 1 px a point, blur 1" => (Screen::Squares, 1, 1, true),
+        "halftone square dots, 1 px a point, blur 2" => (Screen::Squares, 1, 2, false),
+        "halftone square dot bands, 1 px a point, blur 2" => (Screen::Squares, 1, 2, true),
+        "halftone square dots, 2 px a point, crisp" => (Screen::Squares, 2, 0, false),
+        "halftone square dot bands, 2 px a point, crisp" => (Screen::Squares, 2, 0, true),
+        "halftone square dots, 2 px a point, blur 1" => (Screen::Squares, 2, 1, false),
+        "halftone square dot bands, 2 px a point, blur 1" => (Screen::Squares, 2, 1, true),
+        "halftone square dots, 2 px a point, blur 2" => (Screen::Squares, 2, 2, false),
+        "halftone square dot bands, 2 px a point, blur 2" => (Screen::Squares, 2, 2, true),
+        "halftone lines, 1 px a point, crisp" => (Screen::Lines, 1, 0, false),
+        "halftone lines, 1 px a point, blur 1" => (Screen::Lines, 1, 1, false),
+        "halftone lines, 1 px a point, blur 2" => (Screen::Lines, 1, 2, false),
+        "halftone lines, 2 px a point, crisp" => (Screen::Lines, 2, 0, false),
+        "halftone lines, 2 px a point, blur 1" => (Screen::Lines, 2, 1, false),
+        "halftone lines, 2 px a point, blur 2" => (Screen::Lines, 2, 2, false),
+        "halftone line bands, 1 px a point, crisp" => (Screen::Lines, 1, 0, true),
+        "halftone line bands, 1 px a point, blur 1" => (Screen::Lines, 1, 1, true),
+        "halftone line bands, 1 px a point, blur 2" => (Screen::Lines, 1, 2, true),
+        "halftone line bands, 2 px a point, crisp" => (Screen::Lines, 2, 0, true),
+        "halftone line bands, 2 px a point, blur 1" => (Screen::Lines, 2, 1, true),
+        "halftone line bands, 2 px a point, blur 2" => (Screen::Lines, 2, 2, true),
+    });
     // Two equal codes closer than their quiet zone.
     all.extend(twins! {
         "twin barcodes 1 pt apart" => (On::Business, 20.0, 1.0, true),
