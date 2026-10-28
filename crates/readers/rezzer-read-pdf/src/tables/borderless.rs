@@ -224,19 +224,23 @@ pub(super) fn borderless(
         }
         let mut pieces: Vec<Vec<Piece>> = lines[a..z].iter().map(|l| pieces_of(flow, l)).collect();
         // Blocks of an address, a bank or a register side by side are no table: their runs are
-        // read block by block.
+        // read block by block. Rows were possible too, so that is said. Under a header row of
+        // their headings, they are read as the table they make, with the doubt said.
+        let mut headed = false;
         if let Some((s, order, verdict)) =
             side_blocks(flow, &lines, (a, z, tail.end.max(z)), &pieces, &body_of)
         {
-            if verdict == Columns::ApartUnsure {
+            if verdict == Columns::Headed {
+                headed = true;
+            } else {
                 found.uncertain.push(format!(
-                    "two blocks of lines side by side on page {page} are read one after the \
-                     other, as blocks of an address, a bank or a register: if their lines are \
-                     labels and values, those pairs are not kept"
+                    "blocks of short lines side by side on page {page} are read one block after \
+                     the other, as blocks of their own: if their lines are rows of a table or \
+                     labels beside values, those rows are not kept"
                 ));
+                apart.push((s, order));
+                continue;
             }
-            apart.push((s, order));
-            continue;
         }
         // A block of labels and values is a table of two columns.
         match key_values(flow, &lines, a, z, &pieces, &off) {
@@ -439,6 +443,12 @@ pub(super) fn borderless(
                     }
                 }
             }
+        }
+        if taken && headed {
+            found.uncertain.push(format!(
+                "a table on page {page} may be blocks of short lines side by side under their \
+                 headings: its rows may not belong together"
+            ));
         }
         if taken && guessed {
             found.uncertain.push(format!(

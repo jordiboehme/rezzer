@@ -53,9 +53,9 @@ pub(crate) const KNOWN: &[Known] = &[
     Known {
         shape: "address columns in the body",
         variants: &["scale 0.75, smaller text, row under"],
-        broken: &[Inv::Table, Inv::SameReading, Inv::NoLoss],
+        broken: &[Inv::Table, Inv::SameReading],
         cause: Cause::New,
-        why: "the blocks are read one after the other, but here the reading order parts the first two blocks from the others and the `Wert` column of the `row under` neighbour from its table: that column is read apart, which a loss says, and the two blocks are said as maybe labels and values; at scale 1 the order keeps the neighbour's table whole",
+        why: "the blocks are read one after the other, but here the reading order parts the first two blocks from the others and the `Wert` column of the `row under` neighbour from its table: that column is read apart and a loss says so; at scale 1 the order keeps the neighbour's table whole",
     },
     Known {
         shape: "barcode, module 1.2, height 80",

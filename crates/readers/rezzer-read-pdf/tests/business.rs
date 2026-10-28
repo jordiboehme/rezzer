@@ -4898,6 +4898,266 @@ fn blocks_side_by_side_in_the_body_are_read_block_by_block() {
     );
 }
 
+/// Lines of `rows` (cells left to right, `""` for none) at `size`, columns 15 sizes apart, the
+/// first row bold when `bold`.
+fn small_rows(rows: &[&[&str]], size: f32, fonts: (&str, &str), bold: bool) -> String {
+    let k = size / 8.0;
+    let mut t = String::new();
+    for (r, row) in rows.iter().enumerate() {
+        let f = if bold && r == 0 { fonts.1 } else { fonts.0 };
+        for (c, cell) in row.iter().enumerate() {
+            if !cell.is_empty() {
+                t += &show(
+                    f,
+                    size,
+                    40.0 + 120.0 * k * c as f32,
+                    700.0 - 1.2 * size * r as f32,
+                    cell,
+                );
+            }
+        }
+    }
+    t
+}
+
+/// Task 15b part 2c review (Critical 1, ruling P6-X): small tables whose columns list records
+/// of one kind, with a plain header, a bold one or none, and line items with amounts, are
+/// read as tables, row by row, as at f13f512, never block by block. Sizes 6 to 14, both fonts.
+#[test]
+fn small_tables_keep_their_rows() {
+    let items: &[&[&str]] = &[
+        &["Artikel", "Lager", "Menge"],
+        &["Schraube M4", "Halle 2", "12 Stueck"],
+        &["Mutter M5", "Regal 3B", "8 Stueck"],
+        &["Scheibe", "Halle 1", "20 Stueck"],
+        &["Duebel 6", "Halle 3", "5 Stueck"],
+    ];
+    let shipments: &[&[&str]] = &[
+        &["Muster GmbH", "Lieferung 12", "3 Kartons"],
+        &["Beispiel AG", "Lieferung 13", "12 Paletten"],
+        &["Muster KG 2", "Ruecksendung", "1 Karton"],
+    ];
+    let lines: &[&[&str]] = &[
+        &["Beratung 2 Std", "1.000,00 EUR"],
+        &["Material", "200,00 EUR"],
+        &["Versand 3", "34,56 EUR"],
+    ];
+    let cases: [(&str, &[&[&str]], bool); 5] = [
+        ("plain header, 3 rows", &items[..4], false),
+        ("plain header, 4 rows", items, false),
+        ("bold header", &items[..4], true),
+        ("headerless", shipments, false),
+        ("line items", lines, false),
+    ];
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+        for fonts in FONTS {
+            for (name, rows, bold) in cases {
+                let out = common::read(&page_in(&small_rows(rows, size, fonts, bold), Look::Plain));
+                let want: Vec<Vec<String>> = rows
+                    .iter()
+                    .map(|r| r.iter().map(|c| (*c).to_string()).collect())
+                    .collect();
+                if !tables(&out).iter().any(|t| t.1 == want) {
+                    wrong.push(format!("{name}, {size}, {fonts:?}: {:?}", texts_of(&out)));
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// Task 15b part 2c review (Important 1, ruling P6-X): labels beside values whose columns are
+/// of uneven height (a last label without a value, a value of two address lines) or full keep
+/// each value with its label, or a loss says that labels beside values are read apart; never
+/// silently apart. Sizes 6 to 14, both fonts.
+#[test]
+fn label_blocks_keep_their_pairs_or_say_so() {
+    let cases: [(&str, &[&[&str]]); 3] = [
+        (
+            "a last label without a value",
+            &[
+                &["Zimmer 2", "Raum 101"],
+                &["Steuerjahr 2025", "Einzelveranlagung"],
+                &["Bearbeitung", "Max Mustermann"],
+                &["Aktenzeichen", ""],
+            ],
+        ),
+        (
+            "a value of two address lines",
+            &[
+                &["Name", "Erika Mustermann"],
+                &["Steuerjahr 2025", "Raum 101"],
+                &["Anschrift", "Musterweg 1"],
+                &["", "12345 Musterstadt"],
+            ],
+        ),
+        (
+            "full",
+            &[
+                &["Zimmer 2", "Raum 101"],
+                &["Steuerjahr 2025", "Einzelveranlagung"],
+                &["Bearbeitung", "Max Mustermann 3"],
+            ],
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+        for fonts in FONTS {
+            for (name, rows) in cases {
+                let out =
+                    common::read(&page_in(&small_rows(rows, size, fonts, false), Look::Plain));
+                let said = out
+                    .document
+                    .losses
+                    .iter()
+                    .any(|l| l.what.contains("labels beside values"));
+                let found = tables(&out);
+                let paired = rows
+                    .iter()
+                    .filter(|r| !r[1].is_empty() && !r[0].is_empty())
+                    .all(|r| {
+                        found.iter().any(|t| {
+                            t.1.iter().any(|c| {
+                                c.first().map(String::as_str) == Some(r[0])
+                                    && c.get(1).is_some_and(|v| v.starts_with(r[1]))
+                            })
+                        })
+                    });
+                if !said && !paired {
+                    wrong.push(format!(
+                        "{name}, {size}, {fonts:?}: {found:?} {:?}",
+                        texts_of(&out)
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// Task 15b part 2c review (Strengths, Minor 5): blocks side by side one line lower, bottom
+/// aligned, with a PO box, a c/o line, or under bold headings are read block by block, or a
+/// loss says that a table there may be blocks; every line is read. Sizes 6 to 14, both fonts.
+#[test]
+fn side_blocks_offset_or_headed_are_apart_or_said() {
+    let addr: &[&str] = &[
+        "Muster GmbH",
+        "Musterweg 1",
+        "12345 Musterstadt",
+        "Deutschland",
+    ];
+    let bank: &[&str] = &[
+        "Musterbank",
+        "IBAN DE00 0000 0000 0000 0000 00",
+        "BIC MUSTDEXXXXX",
+    ];
+    let reg: &[&str] = &[
+        "Amtsgericht Musterstadt",
+        "HRB 00000",
+        "USt-IdNr. DE000000000",
+    ];
+    let pobox: &[&str] = &["Muster GmbH", "Postfach 12 34", "12345 Musterstadt"];
+    let co: &[&str] = &[
+        "Erika Mustermann",
+        "c/o Muster GmbH",
+        "Musterweg 1",
+        "12345 Musterstadt",
+    ];
+    let h_addr: &[&str] = &[
+        "Anschrift",
+        "Muster GmbH",
+        "Musterweg 1",
+        "12345 Musterstadt",
+    ];
+    let h_bank: &[&str] = &[
+        "Bankverbindung",
+        "Musterbank",
+        "IBAN DE00 0000 0000 0000 0000 00",
+        "BIC MUSTDEXXXXX",
+    ];
+    let h_reg: &[&str] = &["Register", "Amtsgericht Musterstadt", "HRB 00000"];
+    type Blocks<'a> = Vec<(&'a [&'a str], usize, bool)>;
+    let cases: Vec<(&str, Blocks<'_>)> = vec![
+        ("top 4/3", vec![(addr, 0, false), (bank, 0, false)]),
+        (
+            "bank one lower",
+            vec![(addr, 0, false), (bank, 1, false), (reg, 0, false)],
+        ),
+        (
+            "bottom aligned",
+            vec![(addr, 0, false), (bank, 1, false), (reg, 1, false)],
+        ),
+        (
+            "headed",
+            vec![(h_addr, 0, true), (h_bank, 0, true), (h_reg, 0, true)],
+        ),
+        ("po box", vec![(pobox, 0, false), (bank, 0, false)]),
+        (
+            "c/o",
+            vec![(co, 0, false), (bank, 0, false), (reg, 0, false)],
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+        for fonts in FONTS {
+            for (name, blocks) in &cases {
+                let mut t = String::new();
+                let mut x = 40.0;
+                for (lines, off, bold) in blocks {
+                    let mut widest: f32 = 0.0;
+                    for (n, line) in lines.iter().enumerate() {
+                        let f = if *bold && n == 0 { fonts.1 } else { fonts.0 };
+                        t += &show(f, size, x, 700.0 - 1.2 * size * (n + off) as f32, line);
+                        widest = widest.max(common::font_width(f, line, size));
+                    }
+                    x += widest + 3.0 * size;
+                }
+                let out = common::read(&page_in(&t, Look::Plain));
+                let texts = texts_of(&out);
+                let said = out
+                    .document
+                    .losses
+                    .iter()
+                    .any(|l| l.what.contains("side by side"));
+                let at = format!("{name}, {size}, {fonts:?}");
+                for (c, (lines, ..)) in blocks.iter().enumerate() {
+                    for line in lines.iter() {
+                        if !texts.iter().any(|t| t.contains(line)) {
+                            wrong.push(format!("{at}: {line:?} not read"));
+                        }
+                    }
+                    for (other, ..) in &blocks[c + 1..] {
+                        let mixed = texts.iter().find(|t| {
+                            lines.iter().any(|l| t.contains(l))
+                                && other.iter().any(|l| t.contains(l))
+                        });
+                        if let (Some(m), false) = (mixed, said) {
+                            wrong.push(format!("{at}: two blocks in {m:?}, no loss"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
 /// Rulings P6-X4 and P6-X5 (review findings I-1 and M-6): the notice block in the body or wholly
 /// in a page band that is no running header or footer, the labels plain at x 40
 /// and the values bold flush right at x 300 or plain at x 160, on shared baselines: each

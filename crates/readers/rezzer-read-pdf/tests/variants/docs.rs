@@ -469,6 +469,99 @@ fn address_columns(v: &Variant) -> Sheet {
     s
 }
 
+/// The rows of [`rows_shape`]: a small table whose columns list records under a plain
+/// header, a headerless table of records, labels beside values with a last label alone, and
+/// blocks side by side under a bold row of their headings.
+const SMALL_TABLE: [&[&str]; 4] = [
+    &["Artikel", "Lager", "Menge"],
+    &["Schraube M4", "Halle 2", "12 Stueck"],
+    &["Mutter M5", "Regal 3B", "8 Stueck"],
+    &["Scheibe", "Halle 1", "20 Stueck"],
+];
+const RECORDS: [&[&str]; 3] = [
+    &["Muster GmbH", "Lieferung 12", "3 Kartons"],
+    &["Beispiel AG", "Lieferung 13", "12 Paletten"],
+    &["Muster KG 2", "Ruecksendung", "1 Karton"],
+];
+const LABELS: [&[&str]; 4] = [
+    &["Zimmer 2", "Raum 101"],
+    &["Steuerjahr 2025", "Einzelveranlagung"],
+    &["Bearbeitung", "Max Mustermann"],
+    &["Aktenzeichen", ""],
+];
+const HEADED: [&[&str]; 4] = [
+    &["Anschrift", "Bankverbindung", "Register"],
+    &["Muster GmbH", "Musterbank", "Amtsgericht Musterstadt"],
+    &[
+        "Musterweg 1",
+        "IBAN DE00 0000 0000 0000 0000 00",
+        "HRB 00000",
+    ],
+    &[
+        "12345 Musterstadt",
+        "BIC MUSTDEXXXXX",
+        "USt-IdNr. DE000000000",
+    ],
+];
+
+/// What [`rows_shape`] draws.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Rows {
+    /// [`SMALL_TABLE`]: one table, row by row.
+    Table,
+    /// [`RECORDS`]: one table, row by row.
+    Records,
+    /// [`LABELS`]: each value with its label, or a loss that says labels beside values are
+    /// read apart.
+    Labels,
+    /// [`HEADED`], the first row bold: read block by block, or a table with a loss that says it
+    /// may be blocks under their headings.
+    Headed,
+}
+
+/// Task 15b part 2c review (Critical 1, Important 1, Minor 5): rows of 7 points times the size
+/// factor at x 40, 180 and 330, 1.2 sizes apart from the baseline 650, as `what` says.
+fn rows_shape(v: &Variant, what: Rows) -> Sheet {
+    let k = v.k();
+    let (plain, bold) = v.faces();
+    let size = 7.0 * k;
+    let rows: &[&[&str]] = match what {
+        Rows::Table => &SMALL_TABLE,
+        Rows::Records => &RECORDS,
+        Rows::Labels => &LABELS,
+        Rows::Headed => &HEADED,
+    };
+    let mut t = String::new();
+    for (r, row) in rows.iter().enumerate() {
+        let font = if what == Rows::Headed && r == 0 {
+            bold
+        } else {
+            plain
+        };
+        for (cell, x) in row.iter().zip([40.0, 180.0, 330.0]) {
+            if !cell.is_empty() {
+                t += &show(font, size, x, 650.0 - 1.2 * size * r as f32, cell);
+            }
+        }
+    }
+    let span = Span {
+        top: 650.0,
+        bottom: 650.0 - 1.2 * size * (rows.len() - 1) as f32,
+    };
+    let mut s = sheet(v, t, 500.0, Some(span));
+    for row in rows {
+        s.built
+            .values
+            .extend(row.iter().filter(|c| !c.is_empty()).map(|c| c.to_string()));
+    }
+    match what {
+        Rows::Table | Rows::Records => s.want.tables.push(owned(rows)),
+        Rows::Labels => s.want.losses.push("labels beside values".into()),
+        Rows::Headed => s.want.losses.push("under their headings".into()),
+    }
+    s
+}
+
 /// The lines of the prose of [`prose_beside`].
 const PROSE: [&str; 6] = [
     "Die Messung zeigt einen klaren Anstieg der Werte im",
@@ -701,6 +794,26 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "address columns in the body",
             axes: DOC_NEXT,
             draw: |v| (address_columns(v), None),
+        },
+        Shape {
+            name: "a small table of records under a plain header",
+            axes: DOC_NEXT,
+            draw: |v| (rows_shape(v, Rows::Table), None),
+        },
+        Shape {
+            name: "a headerless table of records",
+            axes: DOC_NEXT,
+            draw: |v| (rows_shape(v, Rows::Records), None),
+        },
+        Shape {
+            name: "labels beside values with a last label alone",
+            axes: DOC_NEXT,
+            draw: |v| (rows_shape(v, Rows::Labels), None),
+        },
+        Shape {
+            name: "blocks side by side under their headings",
+            axes: DOC_NEXT,
+            draw: |v| (rows_shape(v, Rows::Headed), None),
         },
         Shape {
             name: "a heading over a rule on a prose page",

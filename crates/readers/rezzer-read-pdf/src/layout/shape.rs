@@ -214,88 +214,111 @@ pub(crate) struct ColumnLine {
 pub(crate) enum Columns {
     /// Rows of one block, a table or labels and values: read as they are.
     Rows,
-    /// Blocks of their own, read one after the other.
-    Apart,
-    /// Blocks of their own, read one after the other; two blocks of one height may also be
-    /// labels and values, which is said.
-    ApartUnsure,
+    /// Blocks of their own, read one after the other. Rows were possible too (their lines
+    /// share baselines), so that is said.
+    Blocks,
+    /// Blocks of their own under a header row of their headings (`Anschrift`,
+    /// `Bankverbindung`): read as the table they make, with the doubt said.
+    Headed,
 }
 
 /// An address block holds at most this many lines: a name, a line more (`c/o`, a
 /// department), a street, a postcode and town, a country.
 const ADDRESS_LINES: usize = 5;
 
-/// Whether blocks of lines side by side on shared baselines are blocks of their own (an
-/// address, a bank, a register entry, a contact beside each other) and not the columns of a
-/// table or of labels and values. `columns` holds each column's lines by row, `None` where
-/// the column has no line on a row. They are blocks when all of these hold:
-/// - two columns or more and three rows or more;
-/// - each column a block: its lines one under the other from the first row on, with no row
-///   left empty between them, at least two and at most [`ADDRESS_LINES`];
-/// - each line short (at most [`ADDRESS_WORDS`] words), with a letter and with no colon at
-///   its end (a label's), each column with a digit on some line (a street number, a
-///   postcode, an account, a phone number): a column of labels has none, a column of amounts
-///   has no letter;
-/// - the first row is no header: not bold over lines that are not, not a size step larger
-///   than the lines under it;
-/// - not every column lists records: in a table each column's lines under its title have
-///   one shape (see [`word_shape`]: `Schraube M4`, `Mutter M5`), in an address the lines
-///   differ (`Musterweg 1`, `12345 Musterstadt`);
-/// - one column is an [`address_block`].
-///
-/// Two blocks of one height may also be a label and a value on each line: then the reading
-/// apart is said ([`Columns::ApartUnsure`]).
-pub(crate) fn address_columns(columns: &[Vec<Option<ColumnLine>>]) -> Columns {
-    let rows = columns.iter().map(Vec::len).max().unwrap_or(0);
-    if columns.len() < 2 || rows < 3 {
-        return Columns::Rows;
-    }
-    // Each column's lines, from the first row on without a gap.
-    let mut blocks: Vec<Vec<&ColumnLine>> = Vec::with_capacity(columns.len());
-    for c in columns {
-        let block: Vec<&ColumnLine> = c.iter().map_while(Option::as_ref).collect();
-        let height = block.len();
-        if c[height..].iter().any(Option::is_some) || !(2..=ADDRESS_LINES).contains(&height) {
-            return Columns::Rows;
-        }
-        blocks.push(block);
+/// Whether the lines of a column are a block of facts of its own (an address, a bank, a
+/// register entry, a contact): two to [`ADDRESS_LINES`] lines, each short (at most
+/// [`ADDRESS_WORDS`] words) with a letter, no colon at its end (a label's) and no amount alone
+/// (see [`data_only`]); a digit on some line (a street number, a postcode, an account, a phone
+/// number); and each line a fact of another kind: no two lines start or end with the same
+/// word, and not all have one shape (see [`word_shape`]). The lines of a column of a table
+/// are records of one kind: they share words (`Halle 2`, `Halle 1`; `12 Stueck`, `8 Stueck`;
+/// `Musterweg 1`, `Musterweg 2`) or a shape (`3 Kartons`, `12 Paletten`).
+fn fact_block(block: &[&ColumnLine]) -> bool {
+    if !(2..=ADDRESS_LINES).contains(&block.len()) {
+        return false;
     }
     let short = |l: &&ColumnLine| {
         word_count(&l.text) <= ADDRESS_WORDS
             && l.text.chars().any(char::is_alphabetic)
             && !l.text.ends_with(':')
+            && !data_only(&l.text)
     };
-    let digit = |l: &&ColumnLine| l.text.chars().any(|c| c.is_ascii_digit());
-    if !blocks
-        .iter()
-        .all(|b| b.iter().all(short) && b.iter().any(digit))
+    if !block.iter().all(short)
+        || !block
+            .iter()
+            .any(|l| l.text.chars().any(|c| c.is_ascii_digit()))
     {
+        return false;
+    }
+    let distinct = |word: &dyn Fn(&str) -> Option<String>| {
+        let mut seen: Vec<String> = block.iter().filter_map(|l| word(&l.text)).collect();
+        let n = seen.len();
+        seen.sort_unstable();
+        seen.dedup();
+        seen.len() == n
+    };
+    let first = |t: &str| t.split_whitespace().next().map(str::to_lowercase);
+    let last = |t: &str| t.split_whitespace().last().map(str::to_lowercase);
+    let shapes = block
+        .iter()
+        .any(|l| word_shape(&l.text) != word_shape(&block[0].text));
+    distinct(&first) && distinct(&last) && shapes
+}
+
+/// Whether blocks of lines side by side on shared baselines are blocks of their own (an
+/// address, a bank, a register entry, a contact beside each other) and not the columns of a
+/// table or of labels and values. `columns` holds each column's lines by row, `None` where
+/// the column has no line on a row. They are blocks when all of these hold:
+/// - two columns or more and three rows or more;
+/// - each column a block: its lines one under the other, with no row left empty between
+///   them (a block may start a row lower or end higher than the others);
+/// - each column a block of facts of its own (see [`fact_block`]): the evidence is each
+///   block's, never one column's;
+/// - one column an [`address_block`].
+///
+/// Their lines share baselines, so rows were possible too: the caller says the doubt. A first
+/// row that is a header (bold over lines that are not, or a size step larger) over such blocks
+/// may be their headings or a table's titles: [`Columns::Headed`].
+pub(crate) fn address_columns(columns: &[Vec<Option<ColumnLine>>]) -> Columns {
+    let rows = columns.iter().map(Vec::len).max().unwrap_or(0);
+    if columns.len() < 2 || rows < 3 {
         return Columns::Rows;
     }
-    // A header: the first row bold over lines that are not, or a size step larger.
-    let first: Vec<&ColumnLine> = blocks.iter().map(|b| b[0]).collect();
+    // Each column's lines, one under the other without a gap (a block may start a row
+    // lower than the others, or end higher).
+    let mut blocks: Vec<Vec<&ColumnLine>> = Vec::with_capacity(columns.len());
+    for c in columns {
+        let start = c.iter().take_while(|l| l.is_none()).count();
+        let block: Vec<&ColumnLine> = c[start..].iter().map_while(Option::as_ref).collect();
+        if c[start + block.len()..].iter().any(Option::is_some) || !fact_block(&block) {
+            return Columns::Rows;
+        }
+        blocks.push(block);
+    }
+    let addressed = blocks
+        .iter()
+        .any(|b| address_block(&b.iter().map(|l| l.text.as_str()).collect::<Vec<_>>()));
+    if !addressed {
+        return Columns::Rows;
+    }
+    // A header: the first row, a line in every column, bold over lines that are not, or a size
+    // step larger.
+    let Some(first) = columns
+        .iter()
+        .map(|c| c.first().and_then(Option::as_ref))
+        .collect::<Option<Vec<&ColumnLine>>>()
+    else {
+        return Columns::Blocks;
+    };
     let rest: Vec<&ColumnLine> = blocks.iter().flat_map(|b| b[1..].iter().copied()).collect();
     let bold_head = first.iter().all(|l| l.bold) && rest.iter().any(|l| !l.bold);
     let smallest_head = first.iter().map(|l| l.size).fold(f32::MAX, f32::min);
     let largest_rest = rest.iter().map(|l| l.size).fold(0.0f32, f32::max);
     if bold_head || smallest_head >= crate::order::SIZE_STEP * largest_rest {
-        return Columns::Rows;
-    }
-    let records = blocks.iter().all(|b| {
-        b[1..]
-            .windows(2)
-            .all(|w| word_shape(&w[0].text) == word_shape(&w[1].text))
-    });
-    let addressed = blocks
-        .iter()
-        .any(|b| address_block(&b.iter().map(|l| l.text.as_str()).collect::<Vec<_>>()));
-    if records || !addressed {
-        return Columns::Rows;
-    }
-    if blocks.len() == 2 && blocks[0].len() == blocks[1].len() {
-        Columns::ApartUnsure
+        Columns::Headed
     } else {
-        Columns::Apart
+        Columns::Blocks
     }
 }
 
@@ -519,13 +542,20 @@ mod tests {
             ],
             &["Deutschland", "", "Erika Mustermann"],
         ];
-        assert_eq!(address_columns(&columns_of(&blocks, false)), Columns::Apart);
-        // Two blocks of one height may be labels and values: said.
-        let two: Vec<&[&str]> = blocks[..3].iter().map(|r| &r[..2]).collect();
         assert_eq!(
-            address_columns(&columns_of(&two, false)),
-            Columns::ApartUnsure
+            address_columns(&columns_of(&blocks, false)),
+            Columns::Blocks
         );
+        let two: Vec<&[&str]> = blocks[..3].iter().map(|r| &r[..2]).collect();
+        assert_eq!(address_columns(&columns_of(&two, false)), Columns::Blocks);
+        // Under a bold row of their headings: the table they make, with the doubt said.
+        let headed: [&[&str]; 4] = [
+            &["Anschrift", "Bankverbindung", "Register"],
+            blocks[0],
+            blocks[1],
+            blocks[2],
+        ];
+        assert_eq!(address_columns(&columns_of(&headed, true)), Columns::Headed);
         // A table with a bold header, or whose columns list records under their titles.
         let table: [&[&str]; 4] = [
             &["Strasse", "Ort"],
@@ -562,6 +592,36 @@ mod tests {
         assert_eq!(address_columns(&columns_of(&amounts, false)), Columns::Rows);
         let long: Vec<&[&str]> = (0..6).map(|k| blocks[k % 3]).collect();
         assert_eq!(address_columns(&columns_of(&long, false)), Columns::Rows);
+        // Small tables whose columns list records of one kind (part 2c review, Critical 1),
+        // with a plain header or none, and line items with amounts.
+        let items: [&[&str]; 5] = [
+            &["Artikel", "Lager", "Menge"],
+            &["Schraube M4", "Halle 2", "12 Stueck"],
+            &["Mutter M5", "Regal 3B", "8 Stueck"],
+            &["Scheibe", "Halle 1", "20 Stueck"],
+            &["Duebel 6", "Halle 3", "5 Stueck"],
+        ];
+        for n in [4, 5] {
+            assert_eq!(
+                address_columns(&columns_of(&items[..n], false)),
+                Columns::Rows
+            );
+        }
+        let shipments: [&[&str]; 3] = [
+            &["Muster GmbH", "Lieferung 12", "3 Kartons"],
+            &["Beispiel AG", "Lieferung 13", "12 Paletten"],
+            &["Muster KG 2", "Ruecksendung", "1 Karton"],
+        ];
+        assert_eq!(
+            address_columns(&columns_of(&shipments, false)),
+            Columns::Rows
+        );
+        let lines: [&[&str]; 3] = [
+            &["Beratung 2 Std", "1.000,00 EUR"],
+            &["Material", "200,00 EUR"],
+            &["Versand 3", "34,56 EUR"],
+        ];
+        assert_eq!(address_columns(&columns_of(&lines, false)), Columns::Rows);
     }
 
     #[test]
