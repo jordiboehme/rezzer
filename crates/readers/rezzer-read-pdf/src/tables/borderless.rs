@@ -359,6 +359,15 @@ pub(super) fn borderless(
                 .fold((f32::MAX, f32::MIN), |(l, h), &g| (l.min(g), h.max(g)));
             hi - lo <= tol
         };
+        // Two lines that share both outer edges, as lines set to one measure do.
+        let outer = |a: &[Piece], b: &[Piece]| {
+            a.first()
+                .zip(b.first())
+                .is_some_and(|(p, q)| (p.x0 - q.x0).abs() <= tol)
+                && a.last()
+                    .zip(b.last())
+                    .is_some_and(|(p, q)| (p.x1 - q.x1).abs() <= tol)
+        };
         let aligned = z - a == 2
             && pieces[0].len() >= 3
             && pieces[0].len() == pieces[1].len()
@@ -366,19 +375,13 @@ pub(super) fn borderless(
                 .iter()
                 .zip(&pieces[1])
                 .all(|(p, q)| p.x0 < q.x1 && q.x0 < p.x1 && meet(p, q))
-            && !(even(&pieces[0])
-                && even(&pieces[1])
-                && pieces[0]
-                    .first()
-                    .zip(pieces[1].first())
-                    .is_some_and(|(p, q)| (p.x0 - q.x0).abs() <= tol)
-                && pieces[0]
-                    .last()
-                    .zip(pieces[1].last())
-                    .is_some_and(|(p, q)| (p.x1 - q.x1).abs() <= tol))
+            && !(even(&pieces[0]) && even(&pieces[1]) && outer(&pieces[0], &pieces[1]))
             && pieces[0].iter().all(title)
             && pieces[1].iter().any(digit)
-            && !prose_row(&text_of(flow, lines[a + 1].start, lines[a + 1].end));
+            && !prose_row(
+                &text_of(flow, lines[a + 1].start, lines[a + 1].end),
+                even(&pieces[1]) && outer(&pieces[0], &pieces[1]),
+            );
         // Blocks of an address, a bank or a register side by side are no table: their runs are
         // read block by block. Rows were possible too, so that is said. Under a header row of
         // their headings, they are read as the table they make, with the doubt said.
@@ -1444,11 +1447,14 @@ fn columns_of(pieces: &[Vec<Piece>]) -> Vec<(f32, f32)> {
 }
 
 /// Whether the second of two lines reads as the end of a sentence that goes on from the line
-/// over it: it opens with a small letter or ends with a full stop (`die 3 Hinweise.`). A row
-/// of values does neither.
-fn prose_row(text: &str) -> bool {
+/// over it: it opens with a small letter, or it ends with a full stop and is `set_full` to the
+/// measure of the line over it (its words even gaps apart, both its edges at that line's
+/// edges), as a line of prose set full is (`Die 3 Hinweise.`). A row of values does not open
+/// with a small letter, and its cells stand where their columns start or end: its last cell
+/// may end with the stop of an abbreviation (`12 Stk.`, `Muster Co. KG.`).
+fn prose_row(text: &str, set_full: bool) -> bool {
     let t = text.trim();
-    t.starts_with(char::is_lowercase) || t.ends_with('.')
+    t.starts_with(char::is_lowercase) || (t.ends_with('.') && set_full)
 }
 
 /// `columns` (see [`columns_of`]) with a column of their own for the pieces that stand in a

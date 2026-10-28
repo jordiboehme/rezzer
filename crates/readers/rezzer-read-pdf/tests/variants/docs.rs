@@ -1028,6 +1028,30 @@ fn two_cells(v: &Variant, divided: bool, cells: [[&str; 2]; 2]) -> Sheet {
     )
 }
 
+/// Part 2e-4 (item 4): titles over one row whose last cell ends with the stop of an
+/// abbreviation (`Stk.`), alone in the body: a table of a header and one row.
+fn titles_over_a_stop(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let size = 8.0 * k;
+    let top = 640.0;
+    let rows = [["Artikel", "Menge", "Einheit"], ["Schrauben", "12", "Stk."]];
+    let mut t = String::new();
+    for (n, row) in rows.iter().enumerate() {
+        for (x, c) in [40.0f32, 200.0, 400.0].iter().zip(row) {
+            t += &show(plain, size, *x, top - 1.3 * size * n as f32, c);
+        }
+    }
+    let bottom = top - 1.3 * size;
+    let mut s = sheet(v, t, 420.0, Some(Span { top, bottom }));
+    s.want.tables.push(
+        rows.iter()
+            .map(|r| r.iter().map(|c| c.to_string()).collect())
+            .collect(),
+    );
+    s
+}
+
 /// Part 2e-2 fix round 1 (M4, item 2): two lines in three columns of one style between two
 /// rules with no dividers, titles over one row of values: a table of a header and one row.
 fn two_lines_in_a_strip(v: &Variant) -> Sheet {
@@ -2116,6 +2140,11 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "cells or rows of two lines between rules with no divider",
             axes: RULED,
             draw: |v| (cells_or_rows(v), None),
+        },
+        Shape {
+            name: "titles over a row that ends in a stop",
+            axes: DOC,
+            draw: |v| (titles_over_a_stop(v), None),
         },
         Shape {
             name: "two lines in three columns between two rules",

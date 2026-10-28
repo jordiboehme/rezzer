@@ -2312,6 +2312,63 @@ fn a_cut_row_label_and_a_row_of_numbers_stay_apart_from_the_next_line() {
     );
 }
 
+/// Task 15b part 2e-4 (item 4; P6-X): titles over one row whose last cell ends with the stop of
+/// an abbreviation (`12 Stk.`, `Muster Co. KG.`, `9,99 EUR.`) are a table of a header and one
+/// row, alone in the body or between two rules, as a row without the stop is: the stop is no
+/// end of a sentence where the row is not set full to the titles' measure. They were read as
+/// lines, or as one line of titles and values, with no loss. Sizes 6 to 14, both fonts.
+#[test]
+fn titles_over_a_row_that_ends_in_a_stop_are_a_table() {
+    let sets: [[[&str; 3]; 2]; 3] = [
+        [["Artikel", "Menge", "Einheit"], ["Schrauben", "12", "Stk."]],
+        [
+            ["Name", "Nr", "Firma"],
+            ["Beispiel", "4711", "Muster Co. KG."],
+        ],
+        [["Pos", "Datum", "Betrag"], ["1", "15.01.2026", "9,99 EUR."]],
+    ];
+    let mut wrong = Vec::new();
+    for rows in sets {
+        for size in [6.0f32, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0] {
+            for font in ["FL", "FT"] {
+                for ruled in [false, true] {
+                    let p = 1.3 * size;
+                    let mut t = String::new();
+                    for (n, row) in rows.iter().enumerate() {
+                        for (x, c) in [40.0f32, 200.0, 400.0].iter().zip(row) {
+                            t += &show(font, size, *x, 700.0 - p * n as f32, c);
+                        }
+                    }
+                    if ruled {
+                        let (over, under) = (700.0 + 1.2 * size, 700.0 - p - 0.5 * size);
+                        t += &format!(
+                            "0 0 0 RG 0.5 w 36 {over} m 520 {over} l S 36 {under} m 520 {under} l S\n"
+                        );
+                    }
+                    let out = common::read(&page_in(&t, Look::Plain));
+                    let want: Vec<Vec<String>> = rows
+                        .iter()
+                        .map(|r| r.iter().map(|c| c.to_string()).collect())
+                        .collect();
+                    if !tables(&out).iter().any(|t| t.1 == want) {
+                        wrong.push(format!(
+                            "{:?}, {size}, {font}, ruled {ruled}: no table: {:?}",
+                            rows[1][2],
+                            tables(&out)
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
 /// Task 15b part 2e-2 (item 2, part 2e-1 concern 2; ruling P6-X): two lines whose pieces stand
 /// in the same three columns, titles without a digit over a row with one (`Name Ort Nr` over
 /// `Beispiel Musterstadt 4711`), alone in the body or between two rules with no dividers, are a
