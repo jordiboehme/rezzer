@@ -244,15 +244,37 @@ pub(crate) fn pad(v: &[u8], w: u32, h: u32, pad: u32) -> Vec<u8> {
 }
 
 /// Paints box `b` (left, top, right, bottom, may reach past the edges) of a picture `w` by
-/// `h` white.
+/// `h` in the paper around it: the middle value of the pixels on the line just outside the
+/// box (white when there are none). White on gray paper would leave an edge that darkens the
+/// quiet zone of a faint code beside it.
 pub(crate) fn paint(v: &mut [u8], w: u32, h: u32, b: [i64; 4]) {
     let x0 = b[0].clamp(0, i64::from(w)) as usize;
     let x1 = b[2].clamp(0, i64::from(w)) as usize;
     let y0 = b[1].clamp(0, i64::from(h)) as usize;
     let y1 = b[3].clamp(0, i64::from(h)) as usize;
+    let (wu, hu) = (w as usize, h as usize);
+    let mut ring: Vec<u8> = Vec::new();
+    for row in [y0.checked_sub(1), (y1 < hu).then_some(y1)]
+        .into_iter()
+        .flatten()
+    {
+        ring.extend_from_slice(&v[row * wu + x0..row * wu + x1]);
+    }
+    for col in [x0.checked_sub(1), (x1 < wu).then_some(x1)]
+        .into_iter()
+        .flatten()
+    {
+        ring.extend((y0..y1).map(|row| v[row * wu + col]));
+    }
+    let paper = if ring.is_empty() {
+        255
+    } else {
+        let mid = ring.len() / 2;
+        *ring.select_nth_unstable(mid).1
+    };
     for row in y0..y1 {
-        let at = row * w as usize;
-        v[at + x0..at + x1].fill(255);
+        let at = row * wu;
+        v[at + x0..at + x1].fill(paper);
     }
 }
 
@@ -290,9 +312,11 @@ pub(crate) fn inside_2d(c: &Code, codes: &[Code]) -> bool {
 
 /// Whether a linear code read along a line of `v` (`w` by `h` pixels) between the hit's
 /// first and last point has bars: a line beside it, parallel and a little away, shows the
-/// same pattern, give or take two pixels of shift. Noise can read as a linear code along one
-/// line, but its neighbouring lines differ. The line may run in any direction, so a code
-/// turned a quarter or a little is checked along its own line.
+/// same pattern, give or take two pixels of shift; or, for bars shorter than that, the lines
+/// two pixels away on both sides show it and the lines a little away on both sides are
+/// paper. Noise can read as a linear code along one line, but its neighbouring lines differ.
+/// The line may run in any direction, so a code turned a quarter or a little is checked
+/// along its own line.
 pub(crate) fn bars_hold(v: &[u8], w: u32, h: u32, points: &[(f32, f32)]) -> bool {
     let (Some(&a), Some(&b)) = (points.first(), points.last()) else {
         return false;
@@ -327,7 +351,25 @@ pub(crate) fn bars_hold(v: &[u8], w: u32, h: u32, points: &[(f32, f32)]) -> bool
     let (t, _) = otsu(&known);
     let dark: Vec<Option<bool>> = base.iter().map(|p| p.map(|p| p <= t)).collect();
     let d = (len / 20.0).max(3.0);
+    let span = |p: &[u8]| {
+        let (lo, hi) = p
+            .iter()
+            .fold((255u8, 0u8), |(a, b), &x| (a.min(x), b.max(x)));
+        hi.saturating_sub(lo)
+    };
+    let full = span(&known);
+    let square = dx.abs() >= 10.0 * dy.abs() || dy.abs() >= 10.0 * dx.abs();
     let agrees = |other: &[Option<u8>]| {
+        // On a level or upright line, the other line at its own threshold when it has the
+        // contrast of bars: the soft rows at the ends of blurred bars are lighter than the
+        // middle ones. (Such reads are boxed by their bars, so two reads of one code are one;
+        // a slanted read keeps the box of its line and the one threshold.)
+        let seen: Vec<u8> = other.iter().flatten().copied().collect();
+        let t = if square && u32::from(span(&seen)) * 2 >= u32::from(full) {
+            otsu(&seen).0
+        } else {
+            t
+        };
         (-2i32..=2).any(|shift| {
             let (mut same, mut n) = (0usize, 0usize);
             for (k, mine) in dark.iter().enumerate() {
@@ -343,7 +385,169 @@ pub(crate) fn bars_hold(v: &[u8], w: u32, h: u32, points: &[(f32, f32)]) -> bool
             n >= 8 && same * 100 >= n * 85
         })
     };
-    agrees(&line(d)) || agrees(&line(-d))
+    if agrees(&line(d)) || agrees(&line(-d)) {
+        return true;
+    }
+    // Bars shorter than that: the lines close by on both sides show the same bars, and the
+    // lines at `d` on both sides are paper (light, or off the picture).
+    let paper = |other: &[Option<u8>]| {
+        let known: Vec<u8> = other.iter().flatten().copied().collect();
+        known.iter().filter(|&&p| p > t).count() * 100 >= known.len() * 90
+    };
+    agrees(&line(2.0)) && agrees(&line(-2.0)) && paper(&line(d)) && paper(&line(-d))
+}
+
+/// Gray levels between dark and light, at least, for a pixel to be told dark or light against
+/// its neighbours when the box of a linear code is measured.
+const FAINT: u8 = 24;
+
+/// A light run along a linear code longer than this many modules ends the code: its widest
+/// inner space is 4 modules, its quiet zone at least 5.
+const QUIET_MODULES: u32 = 4;
+
+/// The box of the bars of a linear code read along a line of `v` (`w` by `h` pixels) between
+/// the hit's first and last point: left, top, right and bottom, the right and bottom edges
+/// past the last dark pixel. Along the line it reaches out from the points (the decoder gives
+/// points inside the code, at its start and stop patterns) to the last bar before a light run
+/// of more than [`QUIET_MODULES`] modules, a module being the mean of the narrowest bar and
+/// the narrowest space on the line (ink gain and blur shift both alike); across it, to the
+/// last line on each side that shows the same bars, each pixel dark or light against its
+/// neighbours. `None` for a line
+/// that is neither level nor upright, or for bars fewer than three lines high: such a code
+/// keeps the box of its line.
+pub(crate) fn bars_box(v: &[u8], w: u32, h: u32, points: &[(f32, f32)]) -> Option<[u32; 4]> {
+    let (&a, &b) = (points.first()?, points.last()?);
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let level = dx.abs() >= 10.0 * dy.abs();
+    if !level && dy.abs() < 10.0 * dx.abs() {
+        return None;
+    }
+    // Along and across in the frame of the line: `at(t, s)` is the pixel `t` along the line
+    // and `s` across it.
+    let (len, wide) = if level { (w, h) } else { (h, w) };
+    let at = |t: u32, s: u32| -> u8 {
+        if level {
+            v[(s * w + t) as usize]
+        } else {
+            v[(t * w + s) as usize]
+        }
+    };
+    let clamp = |x: f32, max: u32| x.round().clamp(0.0, max.saturating_sub(1) as f32) as u32;
+    let (t0, t1, s0) = if level {
+        (
+            clamp(a.0.min(b.0), w),
+            clamp(a.0.max(b.0), w),
+            clamp((a.1 + b.1) / 2.0, h),
+        )
+    } else {
+        (
+            clamp(a.1.min(b.1), h),
+            clamp(a.1.max(b.1), h),
+            clamp((a.0 + b.0) / 2.0, w),
+        )
+    };
+    if t1 <= t0 + 8 {
+        return None;
+    }
+    let line: Vec<u8> = (t0..=t1).map(|t| at(t, s0)).collect();
+    let (threshold, _) = otsu(&line);
+    let dark = |t: u32, s: u32| at(t, s) <= threshold;
+    // A module: the mean of the narrowest dark and the narrowest light run inside the line
+    // read. Ink gain and blur widen the dark runs and narrow the light ones alike.
+    let inside = runs((t0..=t1).map(|t| dark(t, s0)));
+    let inner = inside.get(1..inside.len().saturating_sub(1)).unwrap_or(&[]);
+    let narrowest = |d: bool| inner.iter().filter(|r| r.2 == d).map(|r| r.1).min();
+    let module = match (narrowest(true), narrowest(false)) {
+        (Some(a), Some(b)) => (a + b).div_ceil(2),
+        _ => return None,
+    };
+    let quiet = QUIET_MODULES * module;
+    // Out from the points along the line: past dark pixels and light runs up to `quiet`.
+    let reach = |from: u32, step: i64| -> u32 {
+        let (mut edge, mut light, mut t) = (from, 0u32, i64::from(from));
+        loop {
+            t += step;
+            if t < 0 || t >= i64::from(len) {
+                return edge;
+            }
+            if dark(t as u32, s0) {
+                edge = t as u32;
+                light = 0;
+            } else {
+                light += 1;
+                if light > quiet {
+                    return edge;
+                }
+            }
+        }
+    };
+    let (first, last) = (reach(t0, -1), reach(t1, 1));
+    // Across: each line on either side that shows the same bars as the line read; a line of
+    // little contrast is paper.
+    let span = |s: u32| -> Vec<u8> { (first..=last).map(|t| at(t, s)).collect() };
+    let contrast = |p: &[u8]| {
+        let (lo, hi) = p
+            .iter()
+            .fold((255u8, 0u8), |(a, b), &x| (a.min(x), b.max(x)));
+        hi.saturating_sub(lo)
+    };
+    let level_of = |p: &[u8]| -> Vec<bool> {
+        let (t, _) = otsu(p);
+        p.iter().map(|&x| x <= t).collect()
+    };
+    // Dark or light against the pixels within two modules around: bars over a darker picture
+    // or at the soft ends of blurred bars keep their pattern. Where those pixels hardly differ,
+    // it is paper.
+    let reach_px = (2 * module).max(2) as usize;
+    let pattern = |p: &[u8]| -> Vec<bool> {
+        (0..p.len())
+            .map(|k| {
+                let near = &p[k.saturating_sub(reach_px)..(k + reach_px + 1).min(p.len())];
+                let (lo, hi) = near
+                    .iter()
+                    .fold((255u8, 0u8), |(a, b), &x| (a.min(x), b.max(x)));
+                hi - lo >= FAINT && u16::from(p[k]) * 2 <= u16::from(lo) + u16::from(hi)
+            })
+            .collect()
+    };
+    let full = contrast(&span(s0));
+    // Line `s` shows the bars of line `next` (the last one taken): each line is compared with
+    // its neighbour, so a code turned a little, whose bars shift from line to line, is
+    // followed to its ends.
+    let same = |s: u32, next: u32| {
+        let p = span(s);
+        if contrast(&p) < FAINT.max(full / 8) {
+            return false;
+        }
+        let q = span(next);
+        // Pixels a pixel or more inside a bar or a space of the line before: the edges move
+        // with the threshold. Each line at its own threshold (the soft rows at the ends of
+        // blurred bars), or each pixel against its neighbours (bars over a darker picture).
+        let agrees = |row: Vec<bool>, other: Vec<bool>| {
+            let core: Vec<usize> = (1..row.len().saturating_sub(1))
+                .filter(|&k| row[k - 1] == row[k] && row[k] == row[k + 1])
+                .collect();
+            let agree = core.iter().filter(|&&k| other[k] == row[k]).count();
+            !core.is_empty() && agree * 100 >= core.len() * 90
+        };
+        agrees(level_of(&q), level_of(&p)) || agrees(pattern(&q), pattern(&p))
+    };
+    let (mut lo, mut hi) = (s0, s0);
+    while lo > 0 && same(lo - 1, lo) {
+        lo -= 1;
+    }
+    while hi + 1 < wide && same(hi + 1, hi) {
+        hi += 1;
+    }
+    // Fewer than three lines: no bars to measure across; the code keeps the box of its line.
+    if hi - lo < 2 {
+        return None;
+    }
+    Some(if level {
+        [first, lo, last + 1, hi + 1]
+    } else {
+        [lo, first, hi + 1, last + 1]
+    })
 }
 
 /// The most Aztec finders looked at in one tile.

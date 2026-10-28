@@ -2912,3 +2912,263 @@ fn qr_modules_are_not_marks() {
         "{md}"
     );
 }
+
+// ---------------------------------------------------------------------------------------
+// Task 15b part 6: codes
+
+#[test]
+fn drawn_codes_of_every_module_and_height_are_listed_once_at_their_bars() {
+    // A Code 128 drawn as bars on an A4 page that needs vision, its module and its height
+    // varied on their own and at three places: each is found as a drawn code, listed once,
+    // boxed by its bars, and said where it is.
+    let places = [
+        (0.15, 0.85, "top left of the page"),
+        (0.5, 0.5, "middle of the page"),
+        (0.85, 0.15, "bottom right of the page"),
+    ];
+    for module in [0.5, 0.8, 1.2] {
+        for height in [3.0, 5.0, 8.0, 20.0, 40.0, 80.0, 150.0] {
+            for (fx, fy, place) in places {
+                let m = modules(Symbology::Code128, "0000000001");
+                let x = fx * 595.0 - m.width as f32 * module / 2.0;
+                let y = fy * 842.0 - height / 2.0;
+                let bars = code128_bars("0000000001", x, y, module, height);
+                let content = format!(
+                    "BT /F1 11 Tf 72 790 Td (Lieferschein 0000) Tj ET\n\
+                     q 200 0 0 150 300 450 cm /P0 Do Q\n{bars}"
+                );
+                let out = read(&pictured_page(&content, 595.0, 842.0, ""));
+                let want = bars_box("0000000001", x, y, module, height);
+                let case = format!("module {module}, height {height}, {place}");
+                assert_code_at(&out, want, place, &case);
+            }
+        }
+    }
+}
+
+#[test]
+fn a_code_in_a_scanned_page_is_listed_once_at_its_bars() {
+    // A scanned page (one picture over all of it, no text) with a Code 128 in its pixels: the
+    // code has no region of its own, so the page read gives its box. It is listed once (the
+    // decoder may read it along two lines), and its box is its bars, not the line read.
+    let m = modules(Symbology::Code128, "0000000001");
+    for res in [1u32, 2] {
+        let (w, h) = (595 * res, 842 * res);
+        for px in [2u32, 3] {
+            for bar in [20u32, 40, 80, 120, 200] {
+                let mut scan = vec![235u8; (w * h) as usize];
+                let (x0, top) = (300 * res, 200 * res);
+                for y in top..top + bar {
+                    for c in 0..m.width {
+                        if m.dark[c as usize] {
+                            let at = (y * w + x0 + c * px) as usize;
+                            scan[at..at + px as usize].fill(0);
+                        }
+                    }
+                }
+                let content = "q 595 0 0 842 0 0 cm /Im1 Do Q\n";
+                let out = read(&image_page(595, 842, content, w, h, &scan));
+                let case = format!("{res} pixels a point, {px} pixels a module, bars {bar} high");
+                assert_eq!(
+                    codes_of(&out, "page-1"),
+                    [("Code 128".to_string(), "0000000001".to_string())],
+                    "{case}"
+                );
+                // y grows down in the picture and up on the page.
+                let dark: Vec<u32> = (0..m.width).filter(|&c| m.dark[c as usize]).collect();
+                let pt = |v: u32| v as f32 / res as f32;
+                let want = [
+                    pt(x0 + dark[0] * px),
+                    pt(h - top - bar),
+                    pt(x0 + (dark[dark.len() - 1] + 1) * px),
+                    pt(h - top),
+                ];
+                let b = asset(&out, "page-1").codes[0].bounds.expect("box");
+                assert!(
+                    b.iter()
+                        .zip(want)
+                        .all(|(got, want)| (got - want).abs() <= 1.5),
+                    "{case}: {b:?}, the bars are {want:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn two_equal_codes_too_close_to_tell_apart_are_said_not_decoded() {
+    // Two equal codes side by side, closer than their quiet zone, on a page that needs vision:
+    // neither decodes, and the page says that a drawing there looks like a code and was not
+    // decoded. Farther apart, both are read, each at its own bars.
+    let m = modules(Symbology::Code128, "0000000001");
+    let width = m.width as f32 * 0.8;
+    for gap in [1.0, 2.0, 3.0] {
+        let bars = code128_bars("0000000001", 330.0, 700.0, 0.8, 20.0)
+            + &code128_bars("0000000001", 330.0 + width + gap, 700.0, 0.8, 20.0);
+        let content = format!(
+            "BT /F1 11 Tf 72 790 Td (Lieferschein 0000) Tj ET\n\
+             q 200 0 0 150 40 450 cm /P0 Do Q\n{bars}"
+        );
+        let out = read(&pictured_page(&content, 595.0, 842.0, ""));
+        let a = asset(&out, "page-1");
+        assert!(a.codes.is_empty(), "{gap} apart: {:?}", a.codes);
+        assert!(a.code_unread, "{gap} apart");
+        let words = "a drawing that looks like a barcode or QR code, top right of the page, \
+                     not decoded";
+        assert!(
+            a.alt.as_deref().is_some_and(|t| t.contains(words)),
+            "{gap} apart: {:?}",
+            a.alt
+        );
+        assert!(markdown(&out).contains(words), "{gap} apart");
+    }
+    let x2 = 330.0 + width + 6.0;
+    let bars = code128_bars("0000000001", 330.0, 700.0, 0.8, 20.0)
+        + &code128_bars("0000000001", x2, 700.0, 0.8, 20.0);
+    let content = format!("q 200 0 0 150 40 450 cm /P0 Do Q\n{bars}");
+    let out = read(&pictured_page(&content, 595.0, 842.0, ""));
+    let a = asset(&out, "page-1");
+    let mut boxes: Vec<[f32; 4]> = a.codes.iter().filter_map(|c| c.bounds).collect();
+    boxes.sort_by(|p, q| p[0].total_cmp(&q[0]));
+    let want = [
+        bars_box("0000000001", 330.0, 700.0, 0.8, 20.0),
+        bars_box("0000000001", x2, 700.0, 0.8, 20.0),
+    ];
+    assert_eq!(boxes.len(), 2, "{:?}", a.codes);
+    for (b, w) in boxes.iter().zip(want) {
+        assert!(
+            b.iter().zip(w).all(|(got, want)| (got - want).abs() <= 0.5),
+            "{b:?}, the bars are {w:?}"
+        );
+    }
+    assert!(!a.code_unread);
+}
+
+/// A scanned A4 page of `res` pixels a point (one gray picture over all of it, no text) with
+/// the copies `which` (0 and 1) of a Code 128 `0000000001`, the second `gap` modules after the
+/// first, side by side (or one over the other),
+/// `px` pixels a module and bars `bar` pixels high, the ink grown by `gain` pixels and the
+/// picture blurred `blur` times by a 3 by 3 box. The file and the box of each copy's bars on
+/// the page in points (before the gain and the blur).
+#[allow(clippy::too_many_arguments)]
+fn soft_scan(
+    res: u32,
+    px: u32,
+    bar: u32,
+    gain: u32,
+    blur: u32,
+    which: &[u32],
+    gap: u32,
+    beside: bool,
+) -> (Vec<u8>, Vec<[f32; 4]>) {
+    let m = modules(Symbology::Code128, "0000000001");
+    let (w, h) = (595 * res, 842 * res);
+    let mut scan = vec![235u8; (w * h) as usize];
+    let dark: Vec<u32> = (0..m.width).filter(|&c| m.dark[c as usize]).collect();
+    let mut boxes = Vec::new();
+    for &k in which {
+        let (x0, top) = if beside {
+            (40 * res + k * (m.width + gap) * px, 200 * res)
+        } else {
+            (40 * res, 200 * res + k * (bar + gap * px))
+        };
+        for y in top..top + bar {
+            for c in &dark {
+                let a = (x0 + c * px).saturating_sub(gain);
+                let z = x0 + c * px + px + gain;
+                scan[(y * w + a) as usize..(y * w + z) as usize].fill(0);
+            }
+        }
+        let pt = |v: u32| v as f32 / res as f32;
+        boxes.push([
+            pt(x0 + dark[0] * px),
+            pt(h - top - bar),
+            pt(x0 + (dark[dark.len() - 1] + 1) * px),
+            pt(h - top),
+        ]);
+    }
+    for _ in 0..blur {
+        let src = scan.clone();
+        for y in 1..h - 1 {
+            for x in 1..w - 1 {
+                let mut s = 0u32;
+                for dy in 0..3 {
+                    for dx in 0..3 {
+                        s += u32::from(src[((y + dy - 1) * w + x + dx - 1) as usize]);
+                    }
+                }
+                scan[(y * w + x) as usize] = (s / 9) as u8;
+            }
+        }
+    }
+    let content = "q 595 0 0 842 0 0 cm /Im1 Do Q\n";
+    (image_page(595, 842, content, w, h, &scan), boxes)
+}
+
+#[test]
+fn blurred_and_inked_codes_in_a_scan_are_listed_once_each_at_their_bars() {
+    // A scan blurs a code and spreads its ink: a code read is listed once, boxed by its bars;
+    // and where each alone is read, two equal codes apart (past their quiet zone, side by side
+    // or one over the other) are both listed, each at its own bars.
+    let near = |b: [f32; 4], want: [f32; 4], tol: f32| {
+        b.iter()
+            .zip(want)
+            .all(|(got, want)| (got - want).abs() <= tol)
+    };
+    let mut read_some = 0;
+    let code_modules = modules(Symbology::Code128, "0000000001").width;
+    // At one pixel a point the page read reads none of these: the cases are at two.
+    for res in [2u32] {
+        for px in [2u32, 4, 6] {
+            for gain in [0u32, 1] {
+                for blur in [1u32, 2] {
+                    for bar in [40u32] {
+                        let case = format!(
+                            "{res} pixels a point, {px} a module, gain {gain}, blur {blur}, \
+                             bars {bar}"
+                        );
+                        let tol = (gain + blur + 2) as f32 / res as f32;
+                        let (file, boxes) = soft_scan(res, px, bar, gain, blur, &[0], 0, true);
+                        let out = read(&file);
+                        let codes = &asset(&out, "page-1").codes;
+                        assert!(codes.len() <= 1, "{case}: {codes:?}");
+                        let Some(c) = codes.first() else { continue };
+                        read_some += 1;
+                        let b = c.bounds.expect("box");
+                        assert!(near(b, boxes[0], tol), "{case}: {b:?} for {:?}", boxes[0]);
+                        for (gap, beside) in [(8, true), (12, true), (3, false)] {
+                            // Both on the page.
+                            let width = 40 * res + (2 * code_modules + gap) * px;
+                            if beside && width + 20 * res > 595 * res {
+                                continue;
+                            }
+                            // The second where it stands alone is read too.
+                            let (alone, _) = soft_scan(res, px, bar, gain, blur, &[1], gap, beside);
+                            if asset(&read(&alone), "page-1").codes.len() != 1 {
+                                continue;
+                            }
+                            let (file, boxes) =
+                                soft_scan(res, px, bar, gain, blur, &[0, 1], gap, beside);
+                            let out = read(&file);
+                            let mut found: Vec<[f32; 4]> = asset(&out, "page-1")
+                                .codes
+                                .iter()
+                                .filter_map(|c| c.bounds)
+                                .collect();
+                            found.sort_by(|p, q| p[0].total_cmp(&q[0]).then(p[1].total_cmp(&q[1])));
+                            let mut want = boxes.clone();
+                            want.sort_by(|p, q| p[0].total_cmp(&q[0]).then(p[1].total_cmp(&q[1])));
+                            let case = format!("{case}, {gap} modules apart, beside {beside}");
+                            assert_eq!(found.len(), 2, "{case}: {found:?}");
+                            for (b, w) in found.iter().zip(&want) {
+                                assert!(near(*b, *w, tol), "{case}: {b:?} for {w:?}");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Most of these are too faint for the page read; those read are the cases that count.
+    assert!(read_some >= 4, "{read_some}");
+}

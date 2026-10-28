@@ -402,8 +402,11 @@ pub(crate) struct Want {
     pub may_title: Vec<String>,
     /// The document date the read must find (yyyy-mm-dd), on the first page only.
     pub date: Option<String>,
-    /// Codes to find once each: symbology and text.
+    /// Codes to find, each as many times as it stands here: symbology and text.
     pub codes: Vec<(String, String)>,
+    /// The boxes of the bars of the codes drawn, in the frame of the shape before the page
+    /// scale: a code found with a box lies on one of them.
+    pub code_bars: Vec<[f32; 4]>,
     /// Whether some asset of the page needs vision.
     pub vision: Option<bool>,
     /// Parts of the text of losses the page must have.
