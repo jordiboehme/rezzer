@@ -417,6 +417,70 @@ fn holds_fields(flow: &Flow, fr: &Frame, ids: &[usize], inner: &[f32]) -> bool {
         })
 }
 
+/// How the one cell of a frame with no dividers is parted (see [`text_cells`]).
+enum TextCells {
+    /// As it was given.
+    Whole(Vec<Vec<usize>>),
+    /// Cells of text side by side, parted by their gutter.
+    Cells(Vec<Vec<usize>>),
+    /// Two lines of text in columns that may be rows or cells: left whole, which is said.
+    Doubt(Vec<Vec<usize>>),
+}
+
+/// The parts of the one cell of a frame with no dividers (`cells` 1), when `parts` is that cell
+/// whole, of no label, two lines whose text stands in columns parted by gutters (see
+/// [`gutter_columns`]), each column of no label, as short as a value and of both lines. A
+/// column that is a street over its town (see [`crate::layout::address_lines`]) shows that the
+/// lines of a column go together: the columns are cells of text side by side between two
+/// rules, which the gutter parts as a divider would ([`TextCells::Cells`]). Else the two lines
+/// may be rows (a label beside its value on each) or cells (a name over its firm beside
+/// another): they are left whole, and that is said ([`TextCells::Doubt`]). A column of numbers
+/// is a table's (see [`numeric_piece`]) and titles over one row of values are a header over a
+/// row (see [`titles_over_row`]); a frame of one line is a row (a table with a rule under every
+/// row), and one of three lines or more is left to the table pass: these stay whole.
+fn text_cells(flow: &Flow, how: Reading<'_>, parts: Vec<Vec<usize>>, cells: usize) -> TextCells {
+    let [cell] = &parts[..] else {
+        return TextCells::Whole(parts);
+    };
+    if cells != 1
+        || lines_of(flow, cell).len() != 2
+        || !matches!(parse(flow, cell, how), Parsed::No)
+    {
+        return TextCells::Whole(parts);
+    }
+    let columns = gutter_columns(flow, cell);
+    let text = |c: &Vec<usize>| {
+        let lines = lines_of(flow, c);
+        lines.len() == 2
+            && !lines.iter().all(|l| numeric_piece(&words(flow, l)))
+            && matches!(parse(flow, c, how), Parsed::No)
+            && value_sized(flow, c)
+    };
+    if columns.len() < 2 || !columns.iter().all(text) || titles_over_row(flow, &columns) {
+        return TextCells::Whole(parts);
+    }
+    let address = columns.iter().any(|c| {
+        let lines: Vec<String> = lines_of(flow, c).iter().map(|l| words(flow, l)).collect();
+        crate::layout::address_lines(&lines.iter().map(String::as_str).collect::<Vec<_>>())
+    });
+    if address {
+        TextCells::Cells(columns)
+    } else {
+        TextCells::Doubt(parts)
+    }
+}
+
+/// Whether the `columns` of a cell are titles over one row of values: two lines, the first
+/// one word with no digit in each column, the second with a digit in one (`Name Ort Nr` over
+/// `Beispiel Musterstadt 4711`). The table pass reads them as a header and a row.
+fn titles_over_row(flow: &Flow, columns: &[Vec<usize>]) -> bool {
+    let digit = |l: &[usize]| words(flow, l).chars().any(|c| c.is_ascii_digit());
+    let lines: Vec<Vec<Vec<usize>>> = columns.iter().map(|c| lines_of(flow, c)).collect();
+    lines.iter().all(|l| {
+        l.len() == 2 && !digit(&l[0]) && words(flow, &l[0]).split_whitespace().count() == 1
+    }) && lines.iter().any(|l| digit(&l[1]))
+}
+
 /// Whether the frame `fr` holds a row of fields with a value: its cells between dividers read
 /// as fields (see [`parse`]) that are short, one of them with a value. A row of column titles
 /// or a line of text under a rule holds none.
@@ -555,6 +619,8 @@ pub(in crate::tables) fn field_strips(
         // A cell not clear for a reason of fields (a label under its value, a weight only) whose
         // text is as short as a field's (see [`field_sized`]), not for its many styles alone.
         let (mut fits, mut unread, mut field_why) = (true, false, None);
+        // Two lines in columns that may be rows or cells (see [`text_cells`]).
+        let mut doubt = false;
         // The heads of a cell in three styles whose first line is heads over lines of their
         // own: the row is a row of fields not clear, which is said by them.
         let mut styled_heads: Vec<String> = Vec::new();
@@ -564,6 +630,13 @@ pub(in crate::tables) fn field_strips(
             } else {
                 match parts_of(flow, cell) {
                     Some(parts) => {
+                        let parts = match text_cells(flow, how, parts, cells.len()) {
+                            TextCells::Whole(p) | TextCells::Cells(p) => p,
+                            TextCells::Doubt(p) => {
+                                doubt = true;
+                                p
+                            }
+                        };
                         // Parts side by side in a cell, or cells parted by dividers.
                         let beside = parts.len() >= 2 || cells.len() >= 2;
                         for part in parts {
@@ -637,6 +710,13 @@ pub(in crate::tables) fn field_strips(
         // styles alone is no sign of a row of fields (a caption, prose and a note between
         // rules), so it is not said.
         if !fits {
+            if doubt {
+                unsure.push(format!(
+                    "two lines of text in columns between two rules on page {page} are read \
+                     line by line: each line may be a row, or each column a cell of its own \
+                     whose lines go together"
+                ));
+            }
             continue;
         }
         if unread {
@@ -1247,37 +1327,7 @@ fn cell_order(
     edges.push(x1);
     let mut columns: Vec<Vec<usize>> = Vec::new();
     for cell in cells_of(flow, &edges, &ids) {
-        // The stretches of ink of the cell's runs, merged where less than a cell gap apart.
-        let mut spans: Vec<(f32, f32, f32)> = cell
-            .iter()
-            .filter(|&&i| inked(&flow.runs[i]))
-            .map(|&i| {
-                let r = &flow.runs[i];
-                (r.x, r.x + r.w.max(0.0), r.size.max(1.0))
-            })
-            .collect();
-        spans.sort_by(|a, b| a.0.total_cmp(&b.0));
-        let mut merged: Vec<(f32, f32, f32)> = Vec::new();
-        for (a, b, size) in spans {
-            match merged.last_mut() {
-                Some(m) if a - m.1 < CELL_GAP * size.max(m.2) => {
-                    m.1 = m.1.max(b);
-                    m.2 = m.2.max(size);
-                }
-                _ => merged.push((a, b, size)),
-            }
-        }
-        let mut parts: Vec<Vec<usize>> = vec![Vec::new(); merged.len().max(1)];
-        for &i in &cell {
-            let (cx, _) = middle(&flow.runs[i]);
-            let k = merged
-                .iter()
-                .position(|m| cx <= m.1)
-                .unwrap_or(merged.len().saturating_sub(1));
-            parts[k].push(i);
-        }
-        let parts: Vec<Vec<usize>> = parts.into_iter().filter(|p| !p.is_empty()).collect();
-        columns.extend(beside_labels(flow, parts));
+        columns.extend(beside_labels(flow, gutter_columns(flow, &cell)));
     }
     if columns.is_empty() {
         return None;
@@ -1298,6 +1348,42 @@ fn cell_order(
             })
             .collect(),
     )
+}
+
+/// The runs of `cell` in columns left to right, parted by gutters: white space of a cell gap
+/// (see [`CELL_GAP`]) or more that no run of the cell crosses on any of its lines. A cell with
+/// no such gutter is one column.
+fn gutter_columns(flow: &Flow, cell: &[usize]) -> Vec<Vec<usize>> {
+    // The stretches of ink of the cell's runs, merged where less than a cell gap apart.
+    let mut spans: Vec<(f32, f32, f32)> = cell
+        .iter()
+        .filter(|&&i| inked(&flow.runs[i]))
+        .map(|&i| {
+            let r = &flow.runs[i];
+            (r.x, r.x + r.w.max(0.0), r.size.max(1.0))
+        })
+        .collect();
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut merged: Vec<(f32, f32, f32)> = Vec::new();
+    for (a, b, size) in spans {
+        match merged.last_mut() {
+            Some(m) if a - m.1 < CELL_GAP * size.max(m.2) => {
+                m.1 = m.1.max(b);
+                m.2 = m.2.max(size);
+            }
+            _ => merged.push((a, b, size)),
+        }
+    }
+    let mut parts: Vec<Vec<usize>> = vec![Vec::new(); merged.len().max(1)];
+    for &i in cell {
+        let (cx, _) = middle(&flow.runs[i]);
+        let k = merged
+            .iter()
+            .position(|m| cx <= m.1)
+            .unwrap_or(merged.len().saturating_sub(1));
+        parts[k].push(i);
+    }
+    parts.into_iter().filter(|p| !p.is_empty()).collect()
 }
 
 /// The columns of a cell between dividers, `parts` left to right, with each column that holds

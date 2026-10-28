@@ -979,16 +979,24 @@ fn refused_strips_read_cell_by_cell() {
 /// in one place) are no rows of totals unless the column that ends in one place holds a number
 /// on every line: a street over its town, or a name over a firm, beside a firm over a street
 /// read cell by cell, never line by line across the cells, and a loss says so. Sizes 6 to 14,
-/// steps 1.125 and 1.25, both data fonts.
+/// steps 1.125 and 1.25, both data fonts. Part 2e-4 (item 1, P6-X): the same cells between two
+/// rules with no divider (only the gutter parts them) read line by line across the cells with
+/// no loss. A street over its town shows that a column's lines go together: the cells read
+/// whole, and a loss says so. With no such evidence (a name over a firm beside a firm over a
+/// street, or two lines of a label beside its value), the two lines may be rows or cells: they
+/// read line by line, and a loss says that each column may be a cell of its own.
 #[test]
 fn cells_lining_up_by_chance_are_no_totals() {
-    let cases: [(&str, [StripCell; 2]); 2] = [
+    // The cells, and whether they read cell by cell with no divider (else line by line, with
+    // the doubt said).
+    let cases: [(&str, [StripCell; 2], bool); 3] = [
         (
             "a street over its town",
             [
                 ("", 1.0, &["Musterweg 1", "12345 Musterstadt"]),
                 ("", 1.0, &["Beispiel AG", "Probeweg 12"]),
             ],
+            true,
         ),
         (
             "a name over a firm",
@@ -996,15 +1004,55 @@ fn cells_lining_up_by_chance_are_no_totals() {
                 ("", 1.0, &["Erika Mustermann", "Muster GmbH"]),
                 ("", 1.0, &["Beispiel AG", "Probeweg 12"]),
             ],
+            false,
+        ),
+        (
+            "labels beside their values",
+            [
+                ("", 1.0, &["Lieferbedingung", "Zahlungsart"]),
+                ("", 1.0, &["frei Haus", "Ueberweisung"]),
+            ],
+            false,
         ),
     ];
+    const DOUBT: &str =
+        "two lines of text in columns between two rules on page 1 are read line by line";
     let mut wrong = Vec::new();
-    for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+    for size in [6.0f32, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0] {
         for step in [1.125f32, 1.25] {
             for font in ["F1", "F3"] {
-                for (name, cells) in &cases {
-                    let at = format!("{name} {size} pt x {step}, {font}");
-                    let out = strip_in(cells, size, step, (font, font), true);
+                for ((name, cells, apart), divided) in
+                    cases.iter().flat_map(|c| [(c, true), (c, false)])
+                {
+                    // Labels beside their values are no cells with a divider between them.
+                    if divided && name.starts_with("labels") {
+                        continue;
+                    }
+                    if !divided && !apart {
+                        let at = format!("{name} {size} pt x {step}, {font}, no divider");
+                        let out = strip_in(cells, size, step, (font, font), false);
+                        let units = common::read_units(&out.document.body);
+                        for n in 0..2 {
+                            let line = format!("{} {}", cells[0].2[n], cells[1].2[n]);
+                            if !units.iter().any(|u| u.contains(&line)) {
+                                wrong.push(format!("{at}: no line {line:?} in {units:?}"));
+                            }
+                        }
+                        if !out
+                            .document
+                            .losses
+                            .iter()
+                            .any(|l| l.what.starts_with(DOUBT))
+                        {
+                            wrong.push(format!(
+                                "{at}: the doubt is not said: {:?}",
+                                out.document.losses
+                            ));
+                        }
+                        continue;
+                    }
+                    let at = format!("{name} {size} pt x {step}, {font}, divided {divided}");
+                    let out = strip_in(cells, size, step, (font, font), divided);
                     let want: Vec<Vec<&str>> = cells.iter().map(|c| c.2.to_vec()).collect();
                     wrong.extend(
                         cells_wrong(&out, &want)

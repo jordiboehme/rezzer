@@ -822,25 +822,60 @@ fn lone_accent(v: &Variant) -> Sheet {
 
 /// Part 2e-2 fix round 1 (M4, item 3): a row between rules with dividers whose cells hold two
 /// lines with no label each (a street over its town beside a firm over its street), lines
-/// that line up by chance: no rows of totals; each cell is read whole.
-fn cells_by_chance(v: &Variant) -> Sheet {
+/// that line up by chance: no rows of totals; each cell is read whole. Part 2e-4 (item 1): with
+/// `divided` false the row has no divider, and the cells are still read whole.
+fn cells_by_chance(v: &Variant, divided: bool) -> Sheet {
+    let cells = [
+        ["Musterweg 1", "12345 Musterstadt"],
+        ["Beispiel AG", "Probeweg 12"],
+    ];
+    let mut s = two_cells(v, divided, cells);
+    for lines in cells {
+        s.want
+            .cells
+            .push(lines.iter().map(|l| l.to_string()).collect());
+    }
+    s
+}
+
+/// Part 2e-4 (item 1): a row between rules with no divider whose two cells of two lines show
+/// no sign that their lines go together (a name over a firm beside a firm over its street):
+/// rows or cells, so the two lines read line by line and a loss says the doubt.
+fn cells_or_rows(v: &Variant) -> Sheet {
+    let cells = [
+        ["Erika Mustermann", "Muster GmbH"],
+        ["Beispiel AG", "Probeweg 12"],
+    ];
+    let mut s = two_cells(v, false, cells);
+    for n in 0..2 {
+        s.want
+            .lines_joined
+            .push((cells[0][n].to_string(), cells[1][n].to_string()));
+    }
+    s.want
+        .losses
+        .push("two lines of text in columns between two rules".into());
+    s
+}
+
+/// Two `cells` of two lines between two rules at x 44 and 224, with a divider between them
+/// when `divided`.
+fn two_cells(v: &Variant, divided: bool, cells: [[&str; 2]; 2]) -> Sheet {
     let k = v.k();
     let (plain, _) = v.faces();
     let size = 8.0 * k;
     let top = 640.0;
     let h = 4.0 * size;
     let mut t = rule(v, 40.0, 400.0, top, size) + &rule(v, 40.0, 400.0, top - h, size);
-    t += &format!("0 0 0 RG 0.5 w 220 {} m 220 {top} l S\n", top - h);
-    let cells = [
-        (44.0, ["Musterweg 1", "12345 Musterstadt"]),
-        (224.0, ["Beispiel AG", "Probeweg 12"]),
-    ];
-    for (x, lines) in cells {
+    if divided {
+        t += &format!("0 0 0 RG 0.5 w 220 {} m 220 {top} l S\n", top - h);
+    }
+    for (x, lines) in [44.0, 224.0].into_iter().zip(cells) {
         for (n, l) in lines.iter().enumerate() {
             t += &show(plain, size, x, top - 1.5 * size - 1.2 * size * n as f32, l);
         }
     }
-    let mut s = sheet(
+    sheet(
         v,
         t,
         420.0,
@@ -848,13 +883,7 @@ fn cells_by_chance(v: &Variant) -> Sheet {
             top,
             bottom: top - h,
         }),
-    );
-    for (_, lines) in cells {
-        s.want
-            .cells
-            .push(lines.iter().map(|l| l.to_string()).collect());
-    }
-    s
+    )
 }
 
 /// Part 2e-2 fix round 1 (M4, item 2): two lines in three columns of one style between two
@@ -1919,7 +1948,17 @@ pub(crate) fn shapes() -> Vec<Shape> {
         Shape {
             name: "cells of two lines lining up by chance between rules",
             axes: DOC,
-            draw: |v| (cells_by_chance(v), None),
+            draw: |v| (cells_by_chance(v, true), None),
+        },
+        Shape {
+            name: "cells of two lines lining up by chance between rules with no divider",
+            axes: RULED,
+            draw: |v| (cells_by_chance(v, false), None),
+        },
+        Shape {
+            name: "cells or rows of two lines between rules with no divider",
+            axes: RULED,
+            draw: |v| (cells_or_rows(v), None),
         },
         Shape {
             name: "two lines in three columns between two rules",

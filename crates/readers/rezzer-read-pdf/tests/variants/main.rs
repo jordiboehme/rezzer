@@ -336,6 +336,8 @@ shape_tests! {
     line_items_with_a_credit_over_a_total => "line items with a credit over a total",
     an_accent_drawn_on_its_own => "an accent drawn on its own over its word",
     cells_of_two_lines_lining_up_by_chance => "cells of two lines lining up by chance between rules",
+    cells_of_two_lines_lining_up_by_chance_with_no_divider => "cells of two lines lining up by chance between rules with no divider",
+    cells_or_rows_of_two_lines_with_no_divider => "cells or rows of two lines between rules with no divider",
     two_lines_in_three_columns_between_two_rules => "two lines in three columns between two rules",
     short_field_lines_after_a_sentence => "a column of short field lines after a sentence",
     line_items_with_wrapped_date_ranges => "line items with wrapped date ranges",
