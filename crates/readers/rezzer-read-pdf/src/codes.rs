@@ -1018,6 +1018,601 @@ fn matrix(cells: &[[f32; 4]], members: &[usize], b: [f32; 4], module: f32) -> bo
     false
 }
 
+/// A linear code the decoder read, with what it read, for [`bars_fit`].
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Linear<'a> {
+    /// EAN-13, or UPC-A (an EAN-13 with a leading 0): its digits.
+    Ean(&'a str),
+    Code128,
+    /// Code 39: its characters, without the start and stop.
+    Code39(&'a str),
+    /// ITF: its digits.
+    Itf(&'a str),
+}
+
+/// The widths in modules of the digits of EAN-13 in the L set (space, bar, space, bar); the
+/// R set has the same widths starting with a bar, the G set the L widths turned round.
+const EAN_L: [[u8; 4]; 10] = [
+    [3, 2, 1, 1],
+    [2, 2, 2, 1],
+    [2, 1, 2, 2],
+    [1, 4, 1, 1],
+    [1, 1, 3, 2],
+    [1, 2, 3, 1],
+    [1, 1, 1, 4],
+    [1, 3, 1, 2],
+    [1, 2, 1, 3],
+    [3, 1, 1, 2],
+];
+
+/// Which of the six left digits of an EAN-13 are in the G set, by its first digit (bit 5 the
+/// first of them).
+const EAN_PARITY: [u8; 10] = [
+    0b000000, 0b001011, 0b001101, 0b001110, 0b010011, 0b011001, 0b011100, 0b010101, 0b010110,
+    0b011010,
+];
+
+/// The widths in modules of the bars and spaces of the EAN-13 of `digits` (13 digits, or 12
+/// for a UPC-A), bar first: the guards, six digits each side and the middle guard (59).
+fn ean_widths(digits: &str) -> Option<Vec<u8>> {
+    let d: Vec<usize> = digits
+        .chars()
+        .map(|c| c.to_digit(10).map(|v| v as usize))
+        .collect::<Option<_>>()?;
+    let d = match d.len() {
+        13 => d,
+        12 => [vec![0], d].concat(),
+        _ => return None,
+    };
+    let mut w = vec![1, 1, 1];
+    for (k, &v) in d[1..7].iter().enumerate() {
+        let mut digit = EAN_L[v];
+        if EAN_PARITY[d[0]] >> (5 - k) & 1 == 1 {
+            digit.reverse();
+        }
+        w.extend(digit);
+    }
+    w.extend([1, 1, 1, 1, 1]);
+    for &v in &d[7..13] {
+        w.extend(EAN_L[v]);
+    }
+    w.extend([1, 1, 1]);
+    Some(w)
+}
+
+/// The characters of Code 39 and their bars and spaces (9 bits, the first element the
+/// highest; a set bit is wide).
+const CODE39: &str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ-. $/+%";
+const CODE39_WIDE: [u16; 43] = [
+    0x034, 0x121, 0x061, 0x160, 0x031, 0x130, 0x070, 0x025, 0x124, 0x064, 0x109, 0x049, 0x148,
+    0x019, 0x118, 0x058, 0x00D, 0x10C, 0x04C, 0x01C, 0x103, 0x043, 0x142, 0x013, 0x112, 0x052,
+    0x007, 0x106, 0x046, 0x016, 0x181, 0x0C1, 0x1C0, 0x091, 0x190, 0x0D0, 0x085, 0x184, 0x0C4,
+    0x0A8, 0x0A2, 0x08A, 0x02A,
+];
+const CODE39_STAR: u16 = 0x094;
+
+/// The narrow (`Some(false)`) and wide (`Some(true)`) bars and spaces of the Code 39 of
+/// `text`, bar first, start and stop included; `None` for the space between two characters,
+/// which may have any width from narrow up.
+fn code39_wide(text: &str) -> Option<Vec<Option<bool>>> {
+    let mut chars = vec![CODE39_STAR];
+    for c in text.chars() {
+        chars.push(CODE39_WIDE[CODE39.find(c)?]);
+    }
+    chars.push(CODE39_STAR);
+    let mut out = Vec::new();
+    for (k, bits) in chars.iter().enumerate() {
+        if k > 0 {
+            out.push(None);
+        }
+        out.extend((0..9).rev().map(|b| Some(bits >> b & 1 == 1)));
+    }
+    Some(out)
+}
+
+/// The wide bars and spaces of the digits of ITF (5 elements each, 2 wide).
+const ITF_WIDE: [u8; 10] = [
+    0b00110, 0b10001, 0b01001, 0b11000, 0b00101, 0b10100, 0b01100, 0b00011, 0b10010, 0b01010,
+];
+
+/// The narrow and wide bars and spaces of the ITF of `digits` (an even count), bar first:
+/// the start (four narrow), the digits two by two (the first one's bars between the second
+/// one's spaces) and the stop (wide bar, narrow space, narrow bar).
+fn itf_wide(digits: &str) -> Option<Vec<Option<bool>>> {
+    let d: Vec<usize> = digits
+        .chars()
+        .map(|c| c.to_digit(10).map(|v| v as usize))
+        .collect::<Option<_>>()?;
+    if d.is_empty() || !d.len().is_multiple_of(2) {
+        return None;
+    }
+    let mut out = vec![Some(false); 4];
+    for pair in d.chunks(2) {
+        let (a, b) = (ITF_WIDE[pair[0]], ITF_WIDE[pair[1]]);
+        for k in (0..5).rev() {
+            out.push(Some(a >> k & 1 == 1));
+            out.push(Some(b >> k & 1 == 1));
+        }
+    }
+    out.extend([Some(true), Some(false), Some(false)]);
+    Some(out)
+}
+
+/// The start patterns of Code 128 (A, B and C) and its stop, in modules.
+const CODE128_STARTS: [[u8; 6]; 3] = [[2, 1, 1, 4, 1, 2], [2, 1, 1, 2, 1, 4], [2, 1, 1, 2, 3, 2]];
+const CODE128_STOP: [u8; 7] = [2, 3, 3, 1, 1, 1, 2];
+
+/// How far a bar or space of a linear code read may be off its whole modules (or its narrow
+/// or wide width), as a share of a module, after the ink's spread, for [`bars_fit`].
+const FIT_TOLERANCE: f32 = 0.4;
+
+/// The paper at both ends of a linear code read, in modules (narrow widths) at least, for
+/// [`bars_fit`].
+const FIT_QUIET: f32 = 3.0;
+
+/// The length of the bars of a linear code read, in modules at least, for [`bars_fit`]: the
+/// lines across them that show the code one after the other.
+const FIT_BAR: f32 = 4.0;
+
+/// One line across the bars of a code in a render: the edges of its dark runs, in pixels
+/// along the line, each where the gray crosses the line's threshold between two pixels (a run
+/// cut by an end of the line ends there). `None` when the line has too little contrast to
+/// tell bars from paper.
+fn line_edges(gray: &[u8], contrast: u8) -> Option<Vec<f32>> {
+    let (lo, hi) = gray
+        .iter()
+        .fold((255u8, 0u8), |(a, b), &v| (a.min(v), b.max(v)));
+    if hi.saturating_sub(lo) < contrast {
+        return None;
+    }
+    let mut hist = [0u64; 256];
+    for &v in gray {
+        hist[usize::from(v)] += 1;
+    }
+    let t = otsu_middle(&hist);
+    let dark = |v: u8| f32::from(v) < t;
+    let mut edges = Vec::new();
+    // A line that starts dark starts with a run cut by the line's end: a bar from there.
+    if gray.first().is_some_and(|&v| dark(v)) {
+        edges.push(0.0);
+    }
+    for k in 1..gray.len() {
+        let (a, b) = (gray[k - 1], gray[k]);
+        if dark(a) != dark(b) {
+            let (fa, fb) = (f32::from(a), f32::from(b));
+            // The pixel centres are at k - 0.5 and k + 0.5.
+            edges.push(k as f32 - 0.5 + (t - fa) / (fb - fa));
+        }
+    }
+    if gray.last().is_some_and(|&v| dark(v)) {
+        edges.push(gray.len() as f32);
+    }
+    Some(edges)
+}
+
+/// The gray halfway between the dark and the light tone of a histogram, split at its Otsu
+/// level: where a sharp edge between them lies.
+fn otsu_middle(hist: &[u64; 256]) -> f32 {
+    let total: u64 = hist.iter().sum();
+    let sum: f64 = hist
+        .iter()
+        .enumerate()
+        .map(|(v, &n)| v as f64 * n as f64)
+        .sum();
+    let (mut below, mut below_sum) = (0u64, 0f64);
+    let mut best = (0f64, 0f64);
+    for (v, &n) in hist.iter().enumerate() {
+        below += n;
+        below_sum += v as f64 * n as f64;
+        let above = total - below;
+        if below == 0 || above == 0 {
+            continue;
+        }
+        let dark = below_sum / below as f64;
+        let light = (sum - below_sum) / above as f64;
+        let between = below as f64 * above as f64 * (dark - light).powi(2);
+        if between > best.0 {
+            best = (between, (dark + light) / 2.0);
+        }
+    }
+    best.1 as f32
+}
+
+/// A window of bars and spaces on one line that fits a code: where it starts and ends along
+/// the line, in pixels, and its module (narrow width).
+#[derive(Clone, Copy, Debug)]
+struct Fit {
+    start: f32,
+    end: f32,
+    module: f32,
+}
+
+/// The ink's spread of bars `w` (bar first) beside the widths `want` (in modules, `module`
+/// each): half of what the bars have more than the spaces, on average.
+fn spread_of(w: &[f32], want: &[f32], module: f32) -> f32 {
+    let (mut bars, mut spaces, mut nb, mut ns) = (0.0, 0.0, 0.0, 0.0);
+    for (k, (&got, &e)) in w.iter().zip(want).enumerate() {
+        if k.is_multiple_of(2) {
+            bars += got - e * module;
+            nb += 1.0;
+        } else {
+            spaces += got - e * module;
+            ns += 1.0;
+        }
+    }
+    (bars / f32::max(nb, 1.0) - spaces / f32::max(ns, 1.0)) / 2.0
+}
+
+/// Whether widths `w` (bar first) are `want` modules each, give or take
+/// [`FIT_TOLERANCE`] after the ink's spread; the module when they are.
+fn fits_modules(w: &[f32], want: &[f32]) -> Option<f32> {
+    let total: f32 = want.iter().sum();
+    let module = w.iter().sum::<f32>() / total;
+    let spread = spread_of(w, want, module);
+    let ok = w.iter().zip(want).enumerate().all(|(k, (&got, &e))| {
+        let s = if k.is_multiple_of(2) { spread } else { -spread };
+        ((got - s) / module - e).abs() <= FIT_TOLERANCE
+    });
+    (ok && spread.abs() <= 0.5 * module).then_some(module)
+}
+
+/// Whether widths `w` (bar first) are narrow and wide as `wide` says (`None`: a space between
+/// characters, narrow or wider), the wide ones 2 to 3.5 times the narrow, give or take
+/// [`FIT_TOLERANCE`] of the narrow width after the ink's spread; the narrow width when they are.
+fn fits_wide(w: &[f32], wide: &[Option<bool>]) -> Option<f32> {
+    let mean = |pick: &dyn Fn(usize, bool) -> bool| {
+        let v: Vec<f32> = w
+            .iter()
+            .zip(wide)
+            .enumerate()
+            .filter(|(k, (_, f))| f.is_some_and(|f| pick(*k, f)))
+            .map(|(_, (&x, _))| x)
+            .collect();
+        (!v.is_empty()).then(|| v.iter().sum::<f32>() / v.len() as f32)
+    };
+    let narrow_bar = mean(&|k, f| k % 2 == 0 && !f)?;
+    let narrow_space = mean(&|k, f| k % 2 == 1 && !f)?;
+    let spread = (narrow_bar - narrow_space) / 2.0;
+    let narrow = (narrow_bar + narrow_space) / 2.0;
+    let fixed = |k: usize, x: f32| {
+        if k.is_multiple_of(2) {
+            x - spread
+        } else {
+            x + spread
+        }
+    };
+    let wides: Vec<f32> = w
+        .iter()
+        .zip(wide)
+        .enumerate()
+        .filter(|(_, (_, f))| **f == Some(true))
+        .map(|(k, (&x, _))| fixed(k, x))
+        .collect();
+    let wide_w = wides.iter().sum::<f32>() / f32::max(wides.len() as f32, 1.0);
+    let ratio = wide_w / narrow;
+    if wides.is_empty() || !(2.0 - FIT_TOLERANCE..=3.5 + FIT_TOLERANCE).contains(&ratio) {
+        return None;
+    }
+    let ok = w.iter().zip(wide).enumerate().all(|(k, (&x, f))| {
+        let x = fixed(k, x);
+        match f {
+            Some(true) => (x - wide_w).abs() <= FIT_TOLERANCE * narrow,
+            Some(false) => (x - narrow).abs() <= FIT_TOLERANCE * narrow,
+            None => x >= (1.0 - FIT_TOLERANCE) * narrow,
+        }
+    });
+    (ok && spread.abs() <= 0.5 * narrow).then_some(narrow)
+}
+
+/// Whether the bars and spaces `w` (bar first) from the first are a Code 128: a start
+/// pattern, symbols of 11 modules (6 bars and spaces of 1 to 4 modules), and the stop (13
+/// modules); the number of bars and spaces and the module when they are.
+fn fits_code128(w: &[f32]) -> Option<(usize, f32)> {
+    if w.len() < 6 * 3 + 7 {
+        return None;
+    }
+    let start = &w[..6];
+    let module = start.iter().sum::<f32>() / 11.0;
+    let as_f = |p: &[u8]| p.iter().map(|&v| f32::from(v)).collect::<Vec<f32>>();
+    let close = |got: &[f32], want: &[f32], m: f32| {
+        got.iter()
+            .zip(want)
+            .all(|(&g, &e)| (g / m - e).abs() <= FIT_TOLERANCE + 0.25)
+    };
+    if !CODE128_STARTS
+        .iter()
+        .any(|s| close(start, &as_f(s), module))
+    {
+        return None;
+    }
+    let mut at = 6;
+    while at + 7 <= w.len() {
+        let stop = &w[at..at + 7];
+        let m = w[..at + 7].iter().sum::<f32>() / ((at / 6) * 11 + 13) as f32;
+        if at >= 18 && close(stop, &as_f(&CODE128_STOP), m) {
+            // The whole: every bar and space whole modules after the ink's spread, symbols of
+            // 11.
+            let n = at + 7;
+            let whole = |spread: f32| {
+                let mut want: Vec<f32> = w[..at]
+                    .iter()
+                    .enumerate()
+                    .map(|(k, &v)| {
+                        let s = if k.is_multiple_of(2) { spread } else { -spread };
+                        ((v - s) / m).round().clamp(1.0, 4.0)
+                    })
+                    .collect();
+                want.extend(as_f(&CODE128_STOP));
+                want
+            };
+            let want = whole(spread_of(&w[..n], &whole(0.0), m));
+            let sums = want[..at]
+                .chunks(6)
+                .all(|s| (s.iter().sum::<f32>() - 11.0).abs() < 0.5);
+            return (sums && fits_modules(&w[..n], &want).is_some()).then_some((n, m));
+        }
+        let symbol = &w[at..at + 6];
+        let m = w[..at + 6].iter().sum::<f32>() / ((at / 6 + 1) * 11) as f32;
+        if (symbol.iter().sum::<f32>() / m - 11.0).abs() > 1.0 {
+            return None;
+        }
+        at += 6;
+    }
+    None
+}
+
+/// The windows on one line (the edges of its dark runs, `edges`) that fit `kind`, with paper
+/// for [`FIT_QUIET`] modules at both ends.
+fn line_fits(edges: &[f32], len: f32, kind: Linear<'_>, want: &Want) -> Vec<Fit> {
+    // Bars and spaces from each dark run's start: edge 2k starts bar k.
+    let mut out = Vec::new();
+    let bars = edges.len() / 2;
+    for first in 0..bars {
+        let from = 2 * first;
+        let widths = |n: usize| -> Option<Vec<f32>> {
+            (from + n < edges.len()).then(|| {
+                (from..from + n)
+                    .map(|k| edges[k + 1] - edges[k])
+                    .collect::<Vec<f32>>()
+            })
+        };
+        let found = match (kind, want) {
+            (Linear::Code128, _) => {
+                let all: Vec<f32> = (from..edges.len() - 1)
+                    .map(|k| edges[k + 1] - edges[k])
+                    .collect();
+                fits_code128(&all)
+            }
+            (_, Want::Modules(m)) => widths(m.len())
+                .and_then(|w| fits_modules(&w, m))
+                .map(|module| (m.len(), module)),
+            (_, Want::Wide(f)) => widths(f.len())
+                .and_then(|w| fits_wide(&w, f))
+                .map(|module| (f.len(), module)),
+        };
+        let Some((n, module)) = found else {
+            continue;
+        };
+        let (start, end) = (edges[from], edges[from + n]);
+        let before = if from == 0 {
+            start
+        } else {
+            start - edges[from - 1]
+        };
+        let after = if from + n + 1 >= edges.len() {
+            len - end
+        } else {
+            edges[from + n + 1] - end
+        };
+        if before >= FIT_QUIET * module && after >= FIT_QUIET * module {
+            out.push(Fit { start, end, module });
+        }
+    }
+    out
+}
+
+/// What a code's bars and spaces must be: whole modules each, or narrow and wide.
+enum Want {
+    Modules(Vec<f32>),
+    Wide(Vec<Option<bool>>),
+}
+
+/// Whether the linear code `kind`, read by the decoder in box `b` (pixels: left, top, right,
+/// bottom) of the render `rgba` (`size` in pixels), stands there in bars that fit it: on lines
+/// along the code, one after the other across its bars for [`FIT_BAR`] modules at least, the
+/// bars and spaces are those of the code (EAN-13 and UPC-A: the widths of the digits read;
+/// Code 39 and ITF: the narrow and wide of the characters read; Code 128: a start, symbols of
+/// 11 modules and the stop), whole modules give or take [`FIT_TOLERANCE`] after the ink's
+/// spread, with paper for [`FIT_QUIET`] modules at both ends. The bars may stand up or lie
+/// down. A screen, letters or noise the decoder read as a code do not.
+pub(crate) fn bars_fit(rgba: &[u8], (w, h): (usize, usize), b: [u32; 4], kind: Linear<'_>) -> bool {
+    if rgba.len() < w * h * 4 || w == 0 || h == 0 {
+        return false;
+    }
+    let want = match kind {
+        Linear::Ean(d) => match ean_widths(d) {
+            Some(m) => Want::Modules(m.into_iter().map(f32::from).collect()),
+            None => return false,
+        },
+        Linear::Code39(t) => match code39_wide(t) {
+            Some(f) => Want::Wide(f),
+            None => return false,
+        },
+        Linear::Itf(d) => match itf_wide(d) {
+            Some(f) => Want::Wide(f),
+            None => return false,
+        },
+        Linear::Code128 => Want::Modules(Vec::new()),
+    };
+    if [false, true]
+        .into_iter()
+        .any(|along_y| upright_fit(rgba, (w, h), b, kind, &want, along_y))
+    {
+        return true;
+    }
+    // Read along a slanted line, the box is that line, a little widened across (by an eighth
+    // of its width, two pixels at least): the line runs corner to corner of the rest.
+    let (bw, bh) = (
+        b[2].saturating_sub(b[0]) as f32,
+        b[3].saturating_sub(b[1]) as f32,
+    );
+    let rise = bh - 2.0 * (bw / 8.0).max(2.0);
+    if bw < 8.0 || rise < 1.0 {
+        return false;
+    }
+    [1.0f32, -1.0]
+        .into_iter()
+        .any(|sign| slanted_fit(rgba, (w, h), b, kind, &want, (bw, sign * rise)))
+}
+
+/// [`bars_fit`] along one way: lines along x (bars standing up), or with `along_y` along y,
+/// each line a row (or a column) of pixels.
+fn upright_fit(
+    rgba: &[u8],
+    (w, h): (usize, usize),
+    b: [u32; 4],
+    kind: Linear<'_>,
+    want: &Want,
+    along_y: bool,
+) -> bool {
+    let (len, wide) = if along_y { (h, w) } else { (w, h) };
+    let (a0, a1, s0, s1) = if along_y {
+        (b[1] as usize, b[3] as usize, b[0] as usize, b[2] as usize)
+    } else {
+        (b[0] as usize, b[2] as usize, b[1] as usize, b[3] as usize)
+    };
+    let span = a1.saturating_sub(a0).max(1);
+    // Room along the line for the paper at both ends; across, a little past the box.
+    let (from, to) = (
+        a0.saturating_sub(span / 2 + 8),
+        (a1 + span / 2 + 8).min(len),
+    );
+    let (c0, c1) = (s0.saturating_sub(2), (s1 + 2).min(wide));
+    if to <= from + 8 || c1 <= c0 {
+        return false;
+    }
+    let gray = |t: usize, s: usize| {
+        if along_y {
+            gray_at(rgba, (from + t) * w + s)
+        } else {
+            gray_at(rgba, s * w + from + t)
+        }
+    };
+    lines_fit(&gray, to - from, (c0, c1), wide, kind, want)
+}
+
+/// [`bars_fit`] along lines in the way `(dx, dy)` (pixels, y down) through the middle of box
+/// `b`, the gray between pixels taken from the four around.
+fn slanted_fit(
+    rgba: &[u8],
+    (w, h): (usize, usize),
+    b: [u32; 4],
+    kind: Linear<'_>,
+    want: &Want,
+    (dx, dy): (f32, f32),
+) -> bool {
+    let n = dx.hypot(dy);
+    let (ux, uy) = (dx / n, dy / n);
+    let (nx, ny) = (-uy, ux);
+    let (cx, cy) = ((b[0] + b[2]) as f32 / 2.0, (b[1] + b[3]) as f32 / 2.0);
+    let (bw, bh) = ((b[2] - b[0]) as f32, (b[3] - b[1]) as f32);
+    // Along: the line read and half its length past both ends; across: the box's breadth.
+    let half = n / 2.0 + n / 2.0 + 8.0;
+    let breadth = ((bw * nx).abs() + (bh * ny).abs()) / 2.0 + 2.0;
+    let (len, lines) = ((2.0 * half) as usize, (2.0 * breadth) as usize + 1);
+    if lines * len > 16_000_000 {
+        return false;
+    }
+    let pixel = |x: f32, y: f32| {
+        let x = x.clamp(0.0, (w - 1) as f32);
+        let y = y.clamp(0.0, (h - 1) as f32);
+        f32::from(gray_at(rgba, y as usize * w + x as usize))
+    };
+    let mut grid = vec![0u8; lines * len];
+    for s in 0..lines {
+        let off = s as f32 - breadth;
+        for t in 0..len {
+            let along = t as f32 - half;
+            // Pixel centres are at whole numbers plus a half.
+            let (x, y) = (
+                cx + ux * along + nx * off - 0.5,
+                cy + uy * along + ny * off - 0.5,
+            );
+            let (x0, y0) = (x.floor(), y.floor());
+            let (fx, fy) = (x - x0, y - y0);
+            let v = pixel(x0, y0) * (1.0 - fx) * (1.0 - fy)
+                + pixel(x0 + 1.0, y0) * fx * (1.0 - fy)
+                + pixel(x0, y0 + 1.0) * (1.0 - fx) * fy
+                + pixel(x0 + 1.0, y0 + 1.0) * fx * fy;
+            grid[s * len + t] = v.round() as u8;
+        }
+    }
+    let gray = |t: usize, s: usize| grid[s * len + t];
+    lines_fit(&gray, len, (0, lines), lines, kind, want)
+}
+
+/// Whether lines `across.0..across.1` of `wide`, each `len` grays along (`gray(t, s)`), show
+/// `kind` as [`bars_fit`] wants: fits on lines one after the other for [`FIT_BAR`] modules.
+fn lines_fit(
+    gray: &dyn Fn(usize, usize) -> u8,
+    len: usize,
+    (c0, c1): (usize, usize),
+    wide: usize,
+    kind: Linear<'_>,
+    want: &Want,
+) -> bool {
+    // The longest run of lines one after the other whose fits go on from line to line.
+    let mut best = 0f32;
+    let mut prev: Vec<(Fit, usize)> = Vec::new();
+    for s in c0..c1 {
+        // The line alone, and averaged with one or two more on each side: the stair steps of
+        // slanted bars in pixels even out.
+        let mut fits: Vec<Fit> = Vec::new();
+        for reach in 0..=2 {
+            let near: Vec<usize> = (s.saturating_sub(reach)..(s + reach + 1).min(wide)).collect();
+            let line: Vec<u8> = (0..len)
+                .map(|t| {
+                    let sum: u32 = near.iter().map(|&q| u32::from(gray(t, q))).sum();
+                    (sum / near.len() as u32) as u8
+                })
+                .collect();
+            let Some(e) = line_edges(&line, PIXEL_CONTRAST as u8) else {
+                continue;
+            };
+            // The code may run either way along the line.
+            let n = line.len() as f32;
+            let back: Vec<f32> = e.iter().rev().map(|x| n - x).collect();
+            fits.extend(line_fits(&e, n, kind, want));
+            fits.extend(line_fits(&back, n, kind, want).into_iter().map(|f| Fit {
+                start: n - f.end,
+                end: n - f.start,
+                module: f.module,
+            }));
+        }
+        let next: Vec<(Fit, usize)> = fits
+            .into_iter()
+            .map(|f| {
+                let shift = f32::max(1.5, 0.5 * f.module);
+                let run = prev
+                    .iter()
+                    .filter(|(p, _)| {
+                        (p.start - f.start).abs() <= shift && (p.end - f.end).abs() <= shift
+                    })
+                    .map(|(_, n)| n + 1)
+                    .max()
+                    .unwrap_or(1);
+                (f, run)
+            })
+            .collect();
+        // A line averaged with two more on each side may reach that far past the bars.
+        for (f, n) in &next {
+            best = best.max(n.saturating_sub(4) as f32 / f.module);
+        }
+        prev = next;
+    }
+    best >= FIT_BAR
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1479,6 +2074,53 @@ mod tests {
         // One tone only: nothing is dark.
         let paper: Vec<u8> = vec![230; w * h * 4];
         assert_eq!(pixel_cells(&paper, w, h, 100), Some(Vec::new()));
+    }
+
+    #[test]
+    fn bars_that_fit_the_value_read_are_evidence_of_a_linear_code() {
+        // An EAN-13 of 2 pixels a module, bars 20 pixels long, on paper: its bars fit its
+        // digits; not another value's, not when the bars are too short, not without paper at
+        // its ends, and not lying down when it stands.
+        let digits = "4006381333931";
+        let widths = ean_widths(digits).expect("digits");
+        let render = |bar: usize, quiet: usize| {
+            let w = 2 * 95 + 2 * quiet;
+            let h = bar + 20;
+            let mut gray = vec![235u8; w * h];
+            let mut x = quiet;
+            for (k, &e) in widths.iter().enumerate() {
+                let x1 = x + 2 * usize::from(e);
+                if k.is_multiple_of(2) {
+                    for y in 10..10 + bar {
+                        gray[y * w + x..y * w + x1].fill(0);
+                    }
+                }
+                x = x1;
+            }
+            let rgba: Vec<u8> = gray.iter().flat_map(|&g| [g, g, g, 255]).collect();
+            (
+                rgba,
+                (w, h),
+                [quiet as u32, 10, (quiet + 190) as u32, (10 + bar) as u32],
+            )
+        };
+        let (rgba, size, b) = render(20, 20);
+        assert!(bars_fit(&rgba, size, b, Linear::Ean(digits)));
+        assert!(!bars_fit(&rgba, size, b, Linear::Ean("5901234123457")));
+        assert!(!bars_fit(&rgba, size, b, Linear::Itf("12345678")));
+        let (rgba, size, b) = render(6, 20);
+        assert!(!bars_fit(&rgba, size, b, Linear::Ean(digits)), "short bars");
+        let (rgba, size, b) = render(20, 4);
+        assert!(!bars_fit(&rgba, size, b, Linear::Ean(digits)), "no paper");
+        // The tables give the patterns of the standards.
+        assert_eq!(widths.len(), 59);
+        assert_eq!(widths.iter().map(|&v| u32::from(v)).sum::<u32>(), 95);
+        let star = code39_wide("").expect("start and stop");
+        assert_eq!(star.len(), 19);
+        assert_eq!(star.iter().filter(|f| **f == Some(true)).count(), 6);
+        let itf = itf_wide("12").expect("digits");
+        assert_eq!(itf.len(), 4 + 10 + 3);
+        assert_eq!(itf.iter().filter(|f| **f == Some(true)).count(), 5);
     }
 
     #[test]

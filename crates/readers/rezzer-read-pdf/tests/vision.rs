@@ -3687,3 +3687,254 @@ fn halftone_scans_are_no_code() {
         }
     }
 }
+
+/// A one-page file of `w` by `h` points with `content`, the six standard faces as `/F1` to
+/// `/F6` (Helvetica, Helvetica-Bold, Times-Roman, Times-Bold, Courier, Courier-Bold) and a
+/// 4 by 4 gray picture as `/P0`.
+fn faces_page(content: &str, w: f32, h: f32) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let fonts: Vec<String> = [
+        "Helvetica",
+        "Helvetica-Bold",
+        "Times-Roman",
+        "Times-Bold",
+        "Courier",
+        "Courier-Bold",
+    ]
+    .iter()
+    .enumerate()
+    .map(|(i, n)| {
+        let id = b.add(format!("<< /Type /Font /Subtype /Type1 /BaseFont /{n} >>"));
+        format!("/F{} {id} 0 R", i + 1)
+    })
+    .collect();
+    let dict = "/Type /XObject /Subtype /Image /Width 4 /Height 4 /ColorSpace /DeviceGray \
+                /BitsPerComponent 8";
+    let shades: Vec<u8> = (0..16u8).map(|i| 100 + i * 9).collect();
+    let p0 = b.stream(dict, &shades);
+    let cs = b.stream("", content.as_bytes());
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 {w} {h}] \
+         /Resources << /Font << {} >> /XObject << /P0 {p0} 0 R >> >> /Contents {cs} 0 R >>",
+        fonts.join(" ")
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+/// A scanned A4 page of 1 pixel a point: soft shades in waves printed as a screen of lines
+/// standing up, `pitch` pixels apart. No code.
+fn line_screen_scan(pitch: f32) -> Vec<u8> {
+    let (w, h) = (595u32, 842u32);
+    let mut scan = vec![235u8; (w * h) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let (fx, fy) = (x as f32 / w as f32, y as f32 / h as f32);
+            let tone =
+                0.5 + 0.25 * (fx * 9.0).sin() * (fy * 7.0).cos() + 0.2 * ((fx + fy) * 13.0).sin();
+            if (x as f32 / pitch).fract() < 1.0 - tone.clamp(0.0, 1.0) {
+                scan[(y * w + x) as usize] = 20;
+            }
+        }
+    }
+    image_page(595, 842, "q 595 0 0 842 0 0 cm /Im1 Do Q\n", w, h, &scan)
+}
+
+/// A scanned A4 page of 1 pixel a point: soft shades in waves printed as round dots `pitch`
+/// pixels apart on a lattice turned `angle` degrees. No code.
+fn turned_dot_scan(pitch: f32, angle: f32) -> Vec<u8> {
+    let (w, h) = (595u32, 842u32);
+    let (s, c) = angle.to_radians().sin_cos();
+    let mut scan = vec![240u8; (w * h) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let (fx, fy) = (x as f32 / w as f32, y as f32 / h as f32);
+            let tone = (0.5
+                + 0.3 * (fx * 11.0).sin() * (fy * 5.0).cos()
+                + 0.15 * ((fx - fy) * 17.0).sin())
+            .clamp(0.0, 1.0);
+            let (x, y) = (x as f32, y as f32);
+            let (u, t) = ((x * c + y * s) / pitch, (-x * s + y * c) / pitch);
+            let (du, dt) = (u.rem_euclid(1.0) - 0.5, t.rem_euclid(1.0) - 0.5);
+            if (du * du + dt * dt).sqrt() < (1.0 - tone) * 0.6 {
+                scan[(y as u32 * w + x as u32) as usize] = 20;
+            }
+        }
+    }
+    image_page(595, 842, "q 595 0 0 842 0 0 cm /Im1 Do Q\n", w, h, &scan)
+}
+
+/// A scanned A4 page of `res` pixels a point with the linear code `s` of `text`, `px` pixels a
+/// module, its bars 60 pixels long, its first module 40 points from the left (bars standing)
+/// or from the top (`lying`, bars lying down), 200 points from the top (or the left).
+fn linear_scan(s: Symbology, text: &str, res: u32, px: u32, lying: bool) -> Vec<u8> {
+    let m = modules(s, text);
+    let (w, h) = (595 * res, 842 * res);
+    let mut scan = vec![235u8; (w * h) as usize];
+    for c in (0..m.width).filter(|&c| m.dark[c as usize]) {
+        for along in 40 * res + c * px..40 * res + c * px + px {
+            for across in 200 * res..200 * res + 60 {
+                let (x, y) = if lying {
+                    (across, along)
+                } else {
+                    (along, across)
+                };
+                scan[(y * w + x) as usize] = 0;
+            }
+        }
+    }
+    image_page(595, 842, "q 595 0 0 842 0 0 cm /Im1 Do Q\n", w, h, &scan)
+}
+
+#[test]
+fn screens_and_letters_the_decoder_misreads_list_no_code() {
+    // The decoder reads codes where there are none: an EAN-13 from a screen of lines and from
+    // letters, a UPC-A and QR codes of nothing from screens of dots, an EAN-13 and a Code 39
+    // from dots on a turned lattice. A code is listed only where bars that fit it stand (or,
+    // for a matrix code, where it holds something): none of these.
+    let mut letters = String::from("q 2 0 0 2 0 0 cm\nq 160 0 0 100 420 720 cm /P0 Do Q\n");
+    let mut y = 700.0;
+    'sizes: for size in [
+        5.0f32, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 18.0, 24.0, 36.0,
+    ] {
+        for line in [
+            "Illinois Hill Mill Lillehammer Illl lll III 1111 1111",
+            "Rechnung Nr. 0000000001 vom 01.01.2000, Kundennummer 0000000001",
+            "|||| || | ||| |||| | || ||| | |||| || | ||| || | ||||",
+            "Il1|lI1|Il1|lI1| IIIIIIIIIIIIIIIIIIIIIIIIIIII llllllllllllllllllllllll",
+            "MUSTER GMBH  HILLHEIM  ILLINGEN  IIIIII  HHHHHH  NNNNNN  UUUUUU",
+            "mmmmmm nnnnnn uuuuuu hhhhhh iiiiii jjjjjj ffff tttt rrrr",
+        ] {
+            if y < size + 10.0 {
+                break 'sizes;
+            }
+            letters += &format!("BT /F3 {size} Tf 20 {y} Td ({line}) Tj ET\n");
+            y -= size * 1.25;
+        }
+    }
+    letters += "Q\n";
+    let pages = [
+        ("a screen of lines 3.3 pixels apart", line_screen_scan(3.3)),
+        (
+            "letters in Times-Roman",
+            faces_page(&letters, 1190.0, 1684.0),
+        ),
+        (
+            "dots 3.5 pixels apart, blurred",
+            halftone_scan(2, 3.5, false, 1),
+        ),
+        (
+            "dots 3.6 pixels apart, blurred",
+            halftone_scan(2, 3.6, false, 1),
+        ),
+        (
+            "dots 3.8 pixels apart, blurred",
+            halftone_scan(2, 3.8, false, 1),
+        ),
+        (
+            "dots 3.6 pixels apart at 52 degrees",
+            turned_dot_scan(3.6, 52.0),
+        ),
+        (
+            "dots 2.7 pixels apart at 83 degrees",
+            turned_dot_scan(2.7, 83.0),
+        ),
+    ];
+    for (case, file) in pages {
+        let out = read(&file);
+        let codes: Vec<_> = out.document.assets.iter().flat_map(|a| &a.codes).collect();
+        assert!(codes.is_empty(), "{case}: {codes:?}");
+        assert!(
+            !markdown(&out).contains("lighter line"),
+            "{case}: {}",
+            markdown(&out)
+        );
+    }
+}
+
+#[test]
+fn linear_codes_of_every_kind_in_a_scan_are_listed() {
+    // Codes printed in a scan, standing, lying or turned a little, crisp: each kind of linear code the decoder
+    // reads is listed with its value wherever the decoder reads it, its bars checked against
+    // the value read.
+    let mut listed = 0;
+    for (s, text) in [
+        (Symbology::Ean13, "4006381333931"),
+        (Symbology::Ean13, "5901234123457"),
+        (Symbology::Ean13, "9780201379624"),
+        (Symbology::UpcA, "036000291452"),
+        (Symbology::Code39, "ABC-1234"),
+        (Symbology::Code39, "Z9. $/+%"),
+        (Symbology::Code39, "KLMNOPQRST"),
+        (Symbology::Itf, "12345678"),
+        (Symbology::Itf, "0987654321"),
+        (Symbology::Code128, "Muster-0001"),
+    ] {
+        for (res, px) in [(1u32, 2u32), (1, 3), (2, 2)] {
+            {
+                for lying in [false, true] {
+                    let out = read(&linear_scan(s, text, res, px, lying));
+                    let case = format!(
+                        "{} {text}, {res} pixels a point, {px} a module, lying {lying}",
+                        s.name()
+                    );
+                    let codes = codes_of(&out, "page-1");
+                    assert_eq!(codes, [(s.name().to_string(), text.to_string())], "{case}");
+                    assert_no_doubt(&out, &case);
+                    listed += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(listed, 60);
+    // Turned a little: the decoder reads along a slanted line, and the bars are checked
+    // along it.
+    for (s, text) in [
+        (Symbology::Ean13, "4006381333931"),
+        (Symbology::Code128, "0000000001"),
+        (Symbology::Code39, "ABC-12"),
+        (Symbology::Itf, "12345678"),
+    ] {
+        for (res, px) in [(1u32, 2.0f32), (2, 2.0), (2, 3.0)] {
+            let out = read(&slanted_scan(s, text, res, px, 8.0));
+            let case = format!(
+                "{} {text}, {res} pixels a point, {px} a module, 8 degrees",
+                s.name()
+            );
+            assert_eq!(
+                codes_of(&out, "page-1"),
+                [(s.name().to_string(), text.to_string())],
+                "{case}"
+            );
+        }
+    }
+}
+
+/// A scanned A4 page of `res` pixels a point with the linear code `s` of `text`, `px` pixels a
+/// module and its bars 60 pixels long, turned `deg` degrees about (300, 400) points from the
+/// top left.
+fn slanted_scan(s: Symbology, text: &str, res: u32, px: f32, deg: f32) -> Vec<u8> {
+    let m = modules(s, text);
+    let (w, h) = (595 * res, 842 * res);
+    let mut scan = vec![235u8; (w * h) as usize];
+    let (sn, cs) = deg.to_radians().sin_cos();
+    let (cx, cy) = (300.0 * res as f32, 400.0 * res as f32);
+    let len = m.width as f32 * px;
+    for y in 0..h {
+        for x in 0..w {
+            let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+            let u = dx * cs + dy * sn + len / 2.0;
+            let v = -dx * sn + dy * cs;
+            if (0.0..len).contains(&u) && v.abs() < 30.0 && m.dark[(u / px) as usize] {
+                scan[(y * w + x) as usize] = 0;
+            }
+        }
+    }
+    image_page(595, 842, "q 595 0 0 842 0 0 cm /Im1 Do Q\n", w, h, &scan)
+}

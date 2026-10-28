@@ -322,6 +322,111 @@ fn inline_gray(g: &mut [u8], (w, h): (u32, u32), blur: u32, at: [f32; 4]) -> Str
     )
 }
 
+/// What a scanned page the decoder read a false code from is printed with (Task 15b part
+/// 2e-6), soft shades in waves on paper.
+#[derive(Clone, Copy)]
+enum Print {
+    /// Lines standing up, `pitch` pixels apart, at 1 pixel a point.
+    Lines(f32),
+    /// Round dots on an upright lattice `pitch` pixels apart, at `res` pixels a point, blurred
+    /// `blur` times.
+    Dots(f32, u32, u32),
+}
+
+/// Task 15b part 2e-6: a scanned page (one inline picture over all of it, under the page's
+/// text) printed with `print`, as pages the decoder read an EAN-13, a UPC-A or empty QR codes
+/// from. No code, and nothing said of one.
+fn false_reads(v: &Variant, print: Print) -> Sheet {
+    let res = match print {
+        Print::Lines(_) => 1,
+        Print::Dots(_, res, _) => res,
+    };
+    let (w, h) = (595 * res, 842 * res);
+    let mut g = vec![235u8; (w * h) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let (fx, fy) = (x as f32 / w as f32, y as f32 / h as f32);
+            let tone =
+                (0.5 + 0.25 * (fx * 9.0).sin() * (fy * 7.0).cos() + 0.2 * ((fx + fy) * 13.0).sin())
+                    .clamp(0.0, 1.0);
+            let dark = match print {
+                Print::Lines(pitch) => (x as f32 / pitch).fract() < 1.0 - tone,
+                Print::Dots(pitch, ..) => {
+                    let (du, dt) = (
+                        (x as f32 / pitch).rem_euclid(1.0) - 0.5,
+                        (y as f32 / pitch).rem_euclid(1.0) - 0.5,
+                    );
+                    (du * du + dt * dt).sqrt() < (1.0 - tone) * 0.6
+                }
+            };
+            if dark {
+                g[(y * w + x) as usize] = 20;
+            }
+        }
+    }
+    let blur = match print {
+        Print::Lines(_) => 0,
+        Print::Dots(_, _, blur) => blur,
+    };
+    Sheet::new(page_of(
+        v,
+        inline_gray(&mut g, (w, h), blur, [0.0, 0.0, 595.0, 842.0]),
+    ))
+}
+
+/// The lines of [`letters`]: stems, rows of strokes and invented invoice words.
+const LETTERS: [&str; 6] = [
+    "Illinois Hill Mill Lillehammer Illl lll III 1111 1111",
+    "Rechnung Nr. 0000000001 vom 01.01.2000, Kundennummer 0000000001",
+    "|||| || | ||| |||| | || ||| | |||| || | ||| || | ||||",
+    "Il1|lI1|Il1|lI1| IIIIIIIIIIIIIIIIIIIIIIIIIIII llllllllllllllllllllllll",
+    "MUSTER GMBH  HILLHEIM  ILLINGEN  IIIIII  HHHHHH  NNNNNN  UUUUUU",
+    "mmmmmm nnnnnn uuuuuu hhhhhh iiiiii jjjjjj ffff tttt rrrr",
+];
+
+/// Task 15b part 2e-6: a page beside a photo, drawn twice as large, with lines of stems and
+/// strokes in the face `face` at 5 to 36 points (as on a page the decoder read an EAN-13 from
+/// in Times-Roman). No code, and nothing said of one.
+fn letters(v: &Variant, face: &str) -> Sheet {
+    let mut t = String::new();
+    let mut y = 700.0;
+    'sizes: for size in [
+        5.0f32, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 18.0, 24.0, 36.0,
+    ] {
+        for line in LETTERS {
+            if y < size + 10.0 {
+                break 'sizes;
+            }
+            t += &format!("BT /{face} {size} Tf 20 {y} Td ({line}) Tj ET\n");
+            y -= size * 1.25;
+        }
+    }
+    let mut built = Built::new(&v.geo());
+    built.page = FormPage {
+        template: t,
+        scale: 2.0,
+        photo: Some([420.0, 720.0, 160.0, 100.0]),
+        ..FormPage::default()
+    };
+    let mut s = Sheet::new(built);
+    // The first two lines, the largest text at the top, may be read as the page's title.
+    s.want.may_title = vec![format!("{} {}", LETTERS[0], LETTERS[1])];
+    s
+}
+
+/// The shapes of pages the decoder read false codes from: `$name => draw`.
+macro_rules! false_reads {
+    ($($name:literal => $draw:expr,)*) => {
+        vec![$(
+            Shape {
+                name: $name,
+                axes: SWEEP,
+                draw: |v| ($draw(v), None),
+            },
+        )*]
+    };
+}
+
 /// The axes of [`halftone_sweep`]: the page once, as it is.
 const SWEEP: Axes = Axes {
     scale: &[Scale::S100],
@@ -632,6 +737,18 @@ pub(crate) fn shapes() -> Vec<Shape> {
         "halftone line bands, 2 px a point, crisp" => (Screen::Lines, 2, 0, true),
         "halftone line bands, 2 px a point, blur 1" => (Screen::Lines, 2, 1, true),
         "halftone line bands, 2 px a point, blur 2" => (Screen::Lines, 2, 2, true),
+    });
+    // Screens and letters the decoder read false codes from: no code.
+    all.extend(screens! {
+        "a scan of dots 3.6 px apart at 52 degrees, crisp" => (Screen::Dots, 3.6, 52.0, 0, false),
+        "a scan of dots 2.7 px apart at 83 degrees, crisp" => (Screen::Dots, 2.7, 83.0, 0, false),
+    });
+    all.extend(false_reads! {
+        "a scan of lines 3.3 px apart standing up" => |v| false_reads(v, Print::Lines(3.3)),
+        "a scan of dots 3.5 px apart, 2 px a point, blur 1" => |v| false_reads(v, Print::Dots(3.5, 2, 1)),
+        "a scan of dots 3.6 px apart, 2 px a point, blur 1" => |v| false_reads(v, Print::Dots(3.6, 2, 1)),
+        "a scan of dots 3.8 px apart, 2 px a point, blur 1" => |v| false_reads(v, Print::Dots(3.8, 2, 1)),
+        "stems and strokes in Times-Roman, twice as large" => |v| letters(v, "FT"),
     });
     // Two equal codes closer than their quiet zone.
     all.extend(twins! {

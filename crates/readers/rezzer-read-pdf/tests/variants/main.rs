@@ -505,6 +505,13 @@ shape_tests! {
     halftone_line_bands_2_px_crisp => "halftone line bands, 2 px a point, crisp",
     halftone_line_bands_2_px_blur_1 => "halftone line bands, 2 px a point, blur 1",
     halftone_line_bands_2_px_blur_2 => "halftone line bands, 2 px a point, blur 2",
+    scan_dots_3_6_px_52_deg_crisp => "a scan of dots 3.6 px apart at 52 degrees, crisp",
+    scan_dots_2_7_px_83_deg_crisp => "a scan of dots 2.7 px apart at 83 degrees, crisp",
+    scan_lines_3_3_px_standing => "a scan of lines 3.3 px apart standing up",
+    scan_dots_3_5_px_2_px_blur_1 => "a scan of dots 3.5 px apart, 2 px a point, blur 1",
+    scan_dots_3_6_px_2_px_blur_1 => "a scan of dots 3.6 px apart, 2 px a point, blur 1",
+    scan_dots_3_8_px_2_px_blur_1 => "a scan of dots 3.8 px apart, 2 px a point, blur 1",
+    letters_times => "stems and strokes in Times-Roman, twice as large",
 }
 
 /// Task 15b part 2d fix round 3 (M1): the cell check counts the texts it leaves out, and a list

@@ -1650,6 +1650,9 @@ impl Cut<'_> {
                     picture = fine;
                 }
             }
+            if matches!(c.how, Some(How::Modules(_))) {
+                scans.drawn.insert(c.asset);
+            }
             let found = scans.read(n, c.asset, &picture, None, budget, false);
             if found == Some(0)
                 && let Some(how) = c.how
@@ -2074,6 +2077,8 @@ pub(crate) struct Scans {
     pub found: HashMap<usize, Found>,
     /// Small pictures whose finer look was not rendered (a loss says why).
     pub unscanned: HashSet<usize>,
+    /// The assets that are codes drawn as paths: their drawing has the pattern of a code.
+    drawn: HashSet<usize>,
     /// Why reading stopped, and on which page.
     stop: Option<(u32, String)>,
     /// The stop is a bound of the file's own (its code cap or the bytes it may keep), not
@@ -2133,6 +2138,7 @@ impl Scans {
             kept: 0,
             found: HashMap::new(),
             unscanned: HashSet::new(),
+            drawn: HashSet::new(),
             stop: None,
             stop_limit: false,
             skipped: Vec::new(),
@@ -2257,7 +2263,11 @@ impl Scans {
         // The region's box is one code's box: with more codes in one render, each keeps the
         // decoder's own box. One code read twice, at two lines across its bars, is one code.
         let alone = distinct_codes(&codes) == 1;
+        let drawn = self.drawn.contains(&asset);
         for c in codes {
+            if !drawn && !evidence(&c, picture, on) {
+                continue;
+            }
             if self.kept >= FILE_CODES {
                 self.halt(
                     n,
@@ -2603,6 +2613,45 @@ impl Scans {
             );
         }
     }
+}
+
+/// Whether code `c`, read by the decoder from `picture` (with `on` as in [`Scans::read`]),
+/// stands there on evidence of a code. A code drawn as paths has it (its own asset, its region
+/// of a page or a code of the page read there): its drawing passed the code-shape test
+/// ([`crate::codes::vector_codes`]). Else a matrix or stacked code holds a
+/// payload (a screen of dots read on a lattice gives code words of nothing but padding), and a
+/// linear code stands in bars that fit it ([`crate::codes::bars_fit`]).
+fn evidence(c: &barcodes::Code, picture: &Rendered, on: Option<(&Need, Option<&Region>)>) -> bool {
+    let drawn = |r: &Region| matches!(r.how, How::Modules(_));
+    match on {
+        Some((_, Some(r))) if drawn(r) => return true,
+        Some((need, None)) => {
+            let px = page_rect(picture, need, c.bounds);
+            if need.regions.iter().any(|r| drawn(r) && overlap(&r.b, &px)) {
+                return true;
+            }
+        }
+        _ => {}
+    }
+    use barcodes::Symbology as S;
+    let text = match &c.payload {
+        barcodes::Payload::Text(t) => t.as_str(),
+        _ => "",
+    };
+    let kind = match c.symbology {
+        S::Ean13 | S::UpcA => crate::codes::Linear::Ean(text),
+        S::Code128 => crate::codes::Linear::Code128,
+        S::Code39 => crate::codes::Linear::Code39(text),
+        S::Itf => crate::codes::Linear::Itf(text),
+        _ => return c.bytes > 0,
+    };
+    let p = &picture.pixmap;
+    crate::codes::bars_fit(
+        p.data_as_u8_slice(),
+        (usize::from(p.width()), usize::from(p.height())),
+        c.bounds,
+        kind,
+    )
 }
 
 /// Whether two codes read from one asset are the same code: same kind and payload, and boxes
