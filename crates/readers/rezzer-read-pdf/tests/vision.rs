@@ -3893,6 +3893,15 @@ fn linear_codes_of_every_kind_in_a_scan_are_listed() {
         }
     }
     assert_eq!(listed, 60);
+    // Bars only 4 modules long.
+    for (res, px) in [(1u32, 3u32), (1, 4)] {
+        let out = read(&crisp_scan(res, px, 4 * px, &[40.0]));
+        assert_eq!(
+            codes_of(&out, "page-1"),
+            [("Code 128".to_string(), "0000000001".to_string())],
+            "{res} pixels a point, {px} a module, bars 4 modules long"
+        );
+    }
     // Turned a little: the decoder reads along a slanted line, and the bars are checked
     // along it.
     for (s, text) in [

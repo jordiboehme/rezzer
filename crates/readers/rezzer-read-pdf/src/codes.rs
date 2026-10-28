@@ -1544,12 +1544,12 @@ fn upright_fit(
         (b[0] as usize, b[2] as usize, b[1] as usize, b[3] as usize)
     };
     let span = a1.saturating_sub(a0).max(1);
-    // Room along the line for the paper at both ends; across, a little past the box.
+    // Room along the line for the paper at both ends; across, the box: its bars.
     let (from, to) = (
         a0.saturating_sub(span / 2 + 8),
         (a1 + span / 2 + 8).min(len),
     );
-    let (c0, c1) = (s0.saturating_sub(2), (s1 + 2).min(wide));
+    let (c0, c1) = (s0, s1.min(wide));
     if to <= from + 8 || c1 <= c0 {
         return false;
     }
@@ -1666,9 +1666,8 @@ fn lines_fit(
                 (f, run)
             })
             .collect();
-        // A line averaged with two more on each side may reach that far past the bars.
         for (f, n) in &next {
-            best = best.max(n.saturating_sub(4) as f32 / f.module);
+            best = best.max(*n as f32 / f.module);
         }
         prev = next;
     }
