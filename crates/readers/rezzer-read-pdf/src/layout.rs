@@ -2852,7 +2852,8 @@ fn first_word(line: &Line<'_>) -> f32 {
 ///   the lines were not filled to a measure, they are lines of their own (fields, items,
 ///   address lines) of any length;
 /// - the lines read as no sentences and one ends in a number (an amount, a date, a customer
-///   number) over a line that opens with a capital or holds only numbers: a column of values.
+///   number) over a line that opens with a capital, or in an amount over a line of an amount
+///   alone: a column of values.
 ///
 /// In lines that read as sentences, only a row of cells that ends in a number over a line
 /// without cells ends there. Prose goes on, whatever its last word (a number over a noun).
@@ -2894,15 +2895,18 @@ fn wraps(lines: &[Line<'_>], edges: &[(f32, f32)]) -> Vec<bool> {
                     <= right
         });
     // A line that ends in a number (an amount, a date, a customer number), and no sentence,
-    // over a line that opens with a capital or holds only numbers (a total under an amount)
-    // ends a value: the next line is a field of its own, and so is every line of a block that
-    // holds such a line and no sentence.
+    // over a line that opens with a capital ends a value: the next line is a field of its own,
+    // and so is every line of a block that holds such a line and no sentence. So does a line
+    // that ends in an amount over a line of an amount alone (a total under it).
     let value_end = |k: usize| {
         let l = &lines[k];
         let next = &lines[k + 1].text;
+        let total = (ends_in_amount(&l.text) || signed_amount(&l.text))
+            && data_only(next)
+            && ends_in_amount(next);
         !ends_sentence(l)
             && !goes_on[k]
-            && (next.chars().next().is_some_and(char::is_uppercase) || data_only(next))
+            && (next.chars().next().is_some_and(char::is_uppercase) || total)
             && l.text.split_whitespace().next_back().is_some_and(|w| {
                 w.chars().any(|c| c.is_ascii_digit())
                     && w.chars().all(|c| c.is_ascii_digit() || ".,/-".contains(c))
