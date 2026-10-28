@@ -81,8 +81,12 @@ pub(crate) struct Vision {
     pub alt: String,
     pub first: Option<[f32; 4]>,
     /// Parts of the page rendered again on their own and read for codes: pictures at a finer
-    /// scale than the page's render, codes drawn as paths.
+    /// scale than the page's render, codes drawn as paths. The first [`PAGE_REGIONS`] are
+    /// rendered again; the others, at most [`SMALL_LISTED`], are named when the page's read
+    /// gave no code there.
     pub regions: Vec<Region>,
+    /// How many more such parts there are, past those in `regions`.
+    pub past: usize,
 }
 
 /// A part of a page that is rendered on its own to be read for codes.
@@ -104,8 +108,9 @@ pub(crate) enum How {
     Modules(f32),
 }
 
-/// The most regions of one page that needs vision.
-const PAGE_REGIONS: usize = 8;
+/// The most regions of one page that needs vision that are rendered again; the others are
+/// said.
+pub(crate) const PAGE_REGIONS: usize = 8;
 
 /// How far the edges of one picture may move between pages, in points, and as a share of its
 /// larger side: a logo scaled a little differently on each page is still the same logo.
@@ -330,9 +335,10 @@ pub(crate) struct Furniture {
 pub(crate) enum Seen {
     /// The whole page needs vision.
     Page(Vision),
-    /// Only small pictures, each of at least 1 cm2, in the order the page draws them, and how
-    /// many more there are past the cap the caller can take.
-    Small(Vec<Small>, usize),
+    /// Only small pictures, each of at least 1 cm2, in the order the page draws them, how
+    /// many more there are past the cap the caller can take, and how many drawings that look
+    /// like codes are not read past [`crate::codes::MAX_REGIONS`].
+    Small(Vec<Small>, usize, usize),
 }
 
 /// A small picture on a page that does not need vision as a whole.
@@ -590,7 +596,7 @@ pub(crate) fn vision(
             .filter(|&(k, _)| visible(&items.images[k]) >= SMALL_PICTURE)
             .collect()
     };
-    let vectors: Vec<&crate::codes::VectorCode> =
+    let mut vectors: Vec<&crate::codes::VectorCode> =
         items.codes.iter().filter(|c| visible(&c.b) > 0.0).collect();
     if !words.is_empty() {
         // The page is rendered whole: its small pictures are named in its alt text and not
@@ -621,11 +627,14 @@ pub(crate) fn vision(
                     })
                 }),
         );
-        regions.truncate(PAGE_REGIONS);
+        // Past the parts rendered again, a few are kept to be named, the rest counted.
+        let past = regions.len().saturating_sub(PAGE_REGIONS + SMALL_LISTED);
+        regions.truncate(PAGE_REGIONS + SMALL_LISTED);
         return Some(Seen::Page(Vision {
             alt: words.join(", "),
             first,
             regions,
+            past,
         }));
     }
     // Page furniture of at least 1 cm2 is read for codes too, once: a code on every page is
@@ -637,6 +646,9 @@ pub(crate) fn vision(
     if small.is_empty() && vectors.is_empty() && furniture.is_empty() {
         return None;
     }
+    // Drawings past the most a page reads are counted (the caller says them).
+    let unread = vectors.len().saturating_sub(crate::codes::MAX_REGIONS);
+    vectors.truncate(crate::codes::MAX_REGIONS);
     // Past `cap` the work for each picture is more than the caller may take.
     let more = (small.len() + vectors.len() + furniture.len()).saturating_sub(cap);
     let mut small = small;
@@ -695,7 +707,7 @@ pub(crate) fn vision(
     if list.is_empty() {
         return None;
     }
-    Some(Seen::Small(list, more))
+    Some(Seen::Small(list, more, unread))
 }
 
 /// How many pictures page `info` draws, in part or whole within the page, that are smaller
@@ -1009,8 +1021,11 @@ pub(crate) struct Need {
     pub origin: (f32, f32),
     pub cut: bool,
     pub fallback: bool,
-    /// Parts of a page that needs vision as a whole, rendered again to be read for codes.
+    /// Parts of a page that needs vision as a whole to be read again for codes: the first
+    /// [`PAGE_REGIONS`] are rendered again, the others only named (`Vision::regions`).
     pub regions: Vec<Region>,
+    /// How many more such parts there are (`Vision::past`).
+    pub past: usize,
     /// How the frame of the page's text is turned, and the size of the visible page box:
     /// the box of a code read from the page is given in that frame.
     pub turn: Turn,
@@ -1371,7 +1386,7 @@ pub(crate) fn render_pages(
                     drop(page);
                 }
                 let mut read = vec![false; need.regions.len()];
-                for (k, region) in need.regions.iter().enumerate() {
+                for (k, region) in need.regions.iter().enumerate().take(PAGE_REGIONS) {
                     if scans.stopped() {
                         break;
                     }
@@ -1796,6 +1811,8 @@ pub(crate) fn region_scale(region: &Region) -> Option<f64> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Unrendered {
     Cap,
+    /// Past [`PAGE_REGIONS`] of one page.
+    PageCap,
     Room,
     Damaged,
     Time,
@@ -2298,11 +2315,14 @@ impl Scans {
     /// drawn as paths whose linear codes read do not fill most of it (codes side by side closer
     /// than their quiet zone). `read` says for each of `need.regions` whether it was rendered
     /// again and read. Each part gets its words for the page's alt text: what it is, where,
-    /// and `not decoded` (or `not scanned`).
+    /// and `not decoded` (or `not scanned`). The parts past [`PAGE_REGIONS`] are not rendered
+    /// again: those the page's read gave no code are named not scanned, the ones past
+    /// `need.regions` counted, and a loss says why.
     fn regions_unread(&mut self, asset: usize, need: &Need, read: &[bool]) {
         let (w, h) = need.size;
         let (fw, fh) = need.turn.size(w, h);
         let found = self.found.entry(asset).or_default();
+        let mut capped = need.past > 0;
         for (k, r) in need.regions.iter().enumerate() {
             let framed = need.turn.place_box(r.b, w, h);
             let on: Vec<&Barcode> = found
@@ -2329,6 +2349,7 @@ impl Scans {
             if !missing {
                 continue;
             }
+            capped |= k >= PAGE_REGIONS;
             let what = match r.how {
                 How::Modules(_) => DRAWING,
                 How::Picture(..) => "a picture that looks like a barcode or QR code",
@@ -2340,6 +2361,16 @@ impl Scans {
                 place_words(framed, fw, fh),
                 drawing_words(scanned)
             ));
+        }
+        if need.past > 0 {
+            found.unread.push(format!(
+                "{} more {} that may look like a barcode or QR code, not scanned",
+                need.past,
+                if need.past == 1 { "part" } else { "parts" }
+            ));
+        }
+        if capped {
+            self.unrendered(need.page, Unrendered::PageCap);
         }
     }
 
@@ -2410,6 +2441,7 @@ impl Scans {
         }
         for why in [
             Unrendered::Cap,
+            Unrendered::PageCap,
             Unrendered::Room,
             Unrendered::Damaged,
             Unrendered::Time,
@@ -2419,11 +2451,16 @@ impl Scans {
             };
             let reason = match why {
                 Unrendered::Damaged => LossReason::Damaged,
-                Unrendered::Cap | Unrendered::Room | Unrendered::Time => LossReason::Limit,
+                Unrendered::Cap | Unrendered::PageCap | Unrendered::Room | Unrendered::Time => {
+                    LossReason::Limit
+                }
             };
             let words = match why {
                 Unrendered::Cap => {
                     format!("a file renders at most {MAX_REGIONS} parts of pages again")
+                }
+                Unrendered::PageCap => {
+                    format!("a page renders at most {PAGE_REGIONS} parts again")
                 }
                 Unrendered::Room => {
                     "their render would take more than a render may take (a quarter of the memory \
@@ -2836,6 +2873,7 @@ mod tests {
                 region([40.0, 400.0, 112.0, 420.0]),
                 region([40.0, 100.0, 82.0, 142.0]),
             ],
+            past: 0,
             turn: Turn::None,
             size: (595.0, 842.0),
             light: true,

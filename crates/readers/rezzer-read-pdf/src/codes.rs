@@ -24,7 +24,8 @@ pub(crate) struct VectorCode {
 /// The most filled rectangles a page keeps for finding codes.
 pub(crate) const MAX_CELLS: usize = 200_000;
 
-/// The most code regions of one page.
+/// The most code regions of one page that are rendered again and read; the regions past
+/// them are said (`render::vision`).
 pub(crate) const MAX_REGIONS: usize = 8;
 
 /// Rectangles in a region of a code, at least: a QR code of version 1 has well over this many
@@ -104,8 +105,8 @@ const MERGE_GROUPS: usize = 2_000;
 /// down, with a quiet zone of 5 modules at both ends; bars of one band join across their
 /// spaces whatever their shape, bars one after the other along their length do not. Groups
 /// in one row band a few modules apart are one region (a PDF417 has light columns through
-/// all its rows). At most
-/// [`MAX_REGIONS`], the ones with the most rectangles first. `Err` says why the page was not
+/// all its rows). All regions found, the ones with the most rectangles first: the caller
+/// reads the first [`MAX_REGIONS`] and says the others. `Err` says why the page was not
 /// searched: its work would pass [`MAX_ENTRIES`] or [`MAX_PAIRS`].
 pub(crate) fn vector_codes(cells: &[[f32; 4]]) -> Result<Vec<VectorCode>, String> {
     let cells: Vec<[f32; 4]> = cells
@@ -252,7 +253,6 @@ pub(crate) fn vector_codes(cells: &[[f32; 4]]) -> Result<Vec<VectorCode>, String
             .then(b.1.b[3].total_cmp(&a.1.b[3]))
             .then(a.1.b[0].total_cmp(&b.1.b[0]))
     });
-    found.truncate(MAX_REGIONS);
     Ok(found.into_iter().map(|(_, c)| c).collect())
 }
 

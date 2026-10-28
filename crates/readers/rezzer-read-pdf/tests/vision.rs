@@ -3172,3 +3172,72 @@ fn blurred_and_inked_codes_in_a_scan_are_listed_once_each_at_their_bars() {
     // Most of these are too faint for the page read; those read are the cases that count.
     assert!(read_some >= 4, "{read_some}");
 }
+
+/// `n` different Code 128 drawn as bars of `module` points, 20 points high, two by two from
+/// the bottom left, and the box of each one's bars.
+fn many_drawn_codes(n: usize, module: f32) -> (String, Vec<[f32; 4]>) {
+    let mut bars = String::new();
+    let mut boxes = Vec::new();
+    for k in 0..n {
+        let (x, y) = (60.0 + (k % 2) as f32 * 260.0, 60.0 + (k / 2) as f32 * 60.0);
+        let text = format!("{:010}", k + 1);
+        bars += &code128_bars(&text, x, y, module, 20.0);
+        boxes.push(bars_box(&text, x, y, module, 20.0));
+    }
+    (bars, boxes)
+}
+
+#[test]
+fn drawn_codes_past_the_page_cap_are_said() {
+    // A page reads at most 8 drawings that look like codes. Past them none is dropped
+    // without a word: on a page that needs no vision the drawings left out are a loss with
+    // their count; on a page that needs vision each one the page's own read gave no code is
+    // named in the page's alt text as not scanned, with a loss that says why.
+    for n in [9usize, 12] {
+        let (bars, _) = many_drawn_codes(n, 0.8);
+        let content = format!("BT /F1 11 Tf 72 790 Td (Lieferschein 0000) Tj ET\n{bars}");
+        let out = read(&pictured_page(&content, 595.0, 842.0, ""));
+        let codes: usize = out.document.assets.iter().map(|a| a.codes.len()).sum();
+        assert_eq!(codes, 8, "{n} codes");
+        let past = n - 8;
+        let loss = out
+            .document
+            .losses
+            .iter()
+            .find(|l| {
+                l.what
+                    .contains("like a barcode or QR code than a page reads")
+            })
+            .unwrap_or_else(|| panic!("{n} codes: {:#?}", out.document.losses));
+        assert!(
+            loss.what.contains(&format!("{past} more drawing")) && loss.what.contains("at most 8"),
+            "{n} codes: {}",
+            loss.what
+        );
+        assert_eq!(loss.why, LossReason::Limit, "{n} codes");
+        // Too fine for the page's render: only the finer look reads them.
+        let (bars, _) = many_drawn_codes(n, 0.3);
+        let content = format!(
+            "BT /F1 11 Tf 72 790 Td (Lieferschein 0000) Tj ET\n\
+             q 200 0 0 150 300 600 cm /P0 Do Q\n{bars}"
+        );
+        let out = read(&pictured_page(&content, 595.0, 842.0, ""));
+        assert_eq!(needing(&out), ["page-1"], "{n} codes");
+        let a = asset(&out, "page-1");
+        assert_eq!(a.codes.len(), 8, "{n} codes: {:?}", a.codes);
+        assert!(a.code_unread, "{n} codes");
+        let alt = a.alt.clone().unwrap_or_default();
+        let said = alt
+            .matches("a drawing that looks like a barcode or QR code")
+            .count();
+        assert_eq!(said, past, "{n} codes: {alt}");
+        assert_eq!(alt.matches("not scanned").count(), past, "{n} codes: {alt}");
+        let loss = out
+            .document
+            .losses
+            .iter()
+            .find(|l| l.what.contains("at most 8"))
+            .unwrap_or_else(|| panic!("{n} codes: {:#?}", out.document.losses));
+        assert_eq!(loss.why, LossReason::Limit, "{n} codes");
+    }
+}

@@ -544,7 +544,25 @@ fn lay_out(
                     .unwrap_or(usize::MAX);
             let seen = render::vision(info, &items, &furniture, &everywhere, cap);
             let mut work = 0;
-            if let Some(render::Seen::Small(list, more)) = &seen {
+            if let Some(render::Seen::Small(list, more, unread)) = &seen {
+                if *unread > 0 {
+                    // Drawings past the most a page reads: not read, not listed.
+                    let (what, verb, it) = if *unread == 1 {
+                        ("drawing", "looks", "it is")
+                    } else {
+                        ("drawings", "look", "they are")
+                    };
+                    out.loss(
+                        format!("p{n}"),
+                        format!(
+                            "page {n} has {unread} more {what} that {verb} like a barcode or QR \
+                             code than a page reads (at most {}): {it} not read and not listed",
+                            codes::MAX_REGIONS
+                        ),
+                        LossReason::Limit,
+                        Severity::Warning,
+                    );
+                }
                 work = list.len() as u64 * PICTURE_WORK;
                 if links.take_bytes(work).is_err() {
                     work = 0;
@@ -563,7 +581,7 @@ fn lay_out(
                 Some(render::Seen::Page(v)) => {
                     vec![render::picture_top(v, items.turn, info.width, info.height)]
                 }
-                Some(render::Seen::Small(list, _)) => list
+                Some(render::Seen::Small(list, ..)) => list
                     .iter()
                     .map(|p| Some(((p.framed[0] + p.framed[2]) / 2.0, p.framed[3])))
                     .collect(),
@@ -770,6 +788,7 @@ fn lay_out(
                                 cut: items.in_part,
                                 fallback: items.fallback,
                                 regions,
+                                past: v.past,
                                 turn: items.turn,
                                 size: (info.width, info.height),
                                 light: items.images.len() <= render::SCAN_PICTURES,
@@ -784,7 +803,7 @@ fn lay_out(
                         ),
                     }
                 }
-                Some(render::Seen::Small(list, _)) => {
+                Some(render::Seen::Small(list, ..)) => {
                     let crops = pictures.list(
                         n,
                         (&list, &spots, here),
@@ -801,6 +820,7 @@ fn lay_out(
                             cut: items.in_part,
                             fallback: items.fallback,
                             regions: Vec::new(),
+                            past: 0,
                             turn: items.turn,
                             size: (info.width, info.height),
                             light: items.images.len() <= render::SCAN_PICTURES,
