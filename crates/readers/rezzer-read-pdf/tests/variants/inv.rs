@@ -411,6 +411,18 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
             ));
         }
     }
+    for (a, b) in &want.lines_joined {
+        let one = blocks
+            .iter()
+            .flat_map(|bl| lines_of(bl))
+            .any(|l| has_words(&l, &format!("{a} {b}")));
+        if !one {
+            broken.push(Broken(
+                Inv::Paragraph,
+                format!("page {p}: {a:?} and {b:?} do not go on in one line"),
+            ));
+        }
+    }
     check_cells(out, n, sheet, broken);
     if n == 0 {
         let props = &out.document.properties;

@@ -672,6 +672,216 @@ fn overprinted(v: &Variant) -> Sheet {
     s
 }
 
+/// Part 2e-2 fix round 1 (I1): prose of sentences at 8 points times the size factor whose
+/// lines end in a number over a noun (`mit 2` over `Prozent Skonto`), and a two-line paragraph
+/// with no stop at its end: every line goes on in the next.
+fn number_prose(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let size = 8.0 * k;
+    let top = 640.0;
+    let lines = [
+        "Die Rechnung ist zahlbar innerhalb von 14 Tagen ohne Abzug oder mit 2",
+        "Prozent Skonto innerhalb von 8 Tagen. Nach dem 31.10.2026 berechnen wir 5",
+        "Prozentpunkte Zinsen ueber dem Basiszinssatz, wie es der Vertrag vorsieht.",
+    ];
+    let pair = [
+        "Weitere Informationen zu unseren Angeboten erhalten Sie in jeder Filiale oder im",
+        "Kundenportal der Muster GmbH",
+    ];
+    let mut t = String::new();
+    for (n, l) in lines.iter().enumerate() {
+        t += &show(plain, size, 40.0, top - 1.2 * size * n as f32, l);
+    }
+    let low = top - 5.0 * size;
+    for (n, l) in pair.iter().enumerate() {
+        t += &show(plain, size, 40.0, low - 1.2 * size * n as f32, l);
+    }
+    let mut s = sheet(
+        v,
+        t,
+        420.0,
+        Some(Span {
+            top,
+            bottom: low - 2.4 * size,
+        }),
+    );
+    s.want
+        .lines_joined
+        .push(("mit 2".into(), "Prozent Skonto".into()));
+    s.want
+        .lines_joined
+        .push(("wir 5".into(), "Prozentpunkte".into()));
+    s.want
+        .lines_joined
+        .push(("oder im".into(), "Kundenportal".into()));
+    s
+}
+
+/// Part 2e-2 fix round 1 (C2): two lines of three words set full in a narrow column (12 ems),
+/// the second with a digit: prose, no header over a row.
+fn justified_pair(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let size = 9.0 * k;
+    let top = 640.0;
+    let m = 14.0 * size;
+    let mut t = String::new();
+    for (n, l) in ["Unsere Lieferung erfolgt", "in 2 Teilen."]
+        .iter()
+        .enumerate()
+    {
+        let words: Vec<&str> = l.split(' ').collect();
+        let total: f32 = words.iter().map(|w| font_width(plain, w, size)).sum();
+        let gap = (m - total) / (words.len() as f32 - 1.0);
+        let mut x = 40.0;
+        for w in &words {
+            t += &show(plain, size, x, top - 1.2 * size * n as f32, w);
+            x += font_width(plain, w, size) + gap;
+        }
+    }
+    let mut s = sheet(
+        v,
+        t,
+        420.0,
+        Some(Span {
+            top,
+            bottom: top - 2.4 * size,
+        }),
+    );
+    s.want.lines_joined.push(("erfolgt".into(), "in 2".into()));
+    s
+}
+
+/// Part 2e-2 fix round 1 (C1): line items with amounts flush left, the last a credit with a
+/// trailing minus (`10,00-`), over a total under the amounts at the row pitch: the total is no
+/// end of the credit's cell.
+fn credit_over_total(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, bold) = v.faces();
+    let size = 8.0 * k;
+    let pitch = 1.25 * size;
+    let top = 600.0;
+    let mut y = top;
+    let mut t = String::new();
+    for (x, h) in [
+        (40.0, "Pos"),
+        (80.0, "Artikel"),
+        (300.0, "Menge"),
+        (480.0, "Betrag"),
+    ] {
+        t += &show(bold, size, x, y, h);
+    }
+    let rows = [
+        ["1", "Schrauben", "10", "50,00"],
+        ["2", "Muttern", "20", "40,00"],
+        ["3", "Rabatt", "1", "10,00-"],
+    ];
+    let mut table = vec![vec![
+        "Pos".to_string(),
+        "Artikel".into(),
+        "Menge".into(),
+        "Betrag".into(),
+    ]];
+    for r in rows {
+        y -= pitch;
+        for (x, c) in [40.0, 80.0, 300.0, 480.0].iter().zip(r) {
+            t += &show(plain, size, *x, y, c);
+        }
+        table.push(r.iter().map(|c| c.to_string()).collect());
+    }
+    y -= pitch;
+    t += &show(plain, size, 480.0, y, "80,00");
+    let mut s = sheet(v, t, 420.0, Some(Span { top, bottom: y }));
+    s.want.tables.push(table);
+    s
+}
+
+/// Part 2e-2 fix round 1 (I3): an accent drawn as a run of its own over the first letter of
+/// its word, after the word (`Uber`, the dieresis, ` den Vertrag`): it stays in its word.
+fn lone_accent(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let size = 9.0 * k;
+    let top = 640.0;
+    let u = font_width(plain, "Uber", size);
+    let mut t = show(plain, size, 40.0, top, "Uber");
+    t += &show(plain, size, 40.0 + 0.15 * size, top, "\u{a8}");
+    t += &show(plain, size, 40.0 + u, top, " den Vertrag");
+    let bottom = top - size;
+    let mut s = sheet(v, t, 420.0, Some(Span { top, bottom }));
+    // The three runs read as one text, the mark in its word.
+    s.once
+        .retain(|o| !matches!(o.trim(), "Uber" | "\u{a8}" | "den Vertrag"));
+    s.once.push("Uber\u{a8} den Vertrag".into());
+    s.want
+        .lines_joined
+        .push(("Uber\u{a8}".into(), "den Vertrag".into()));
+    s
+}
+
+/// Part 2e-2 fix round 1 (M4, item 3): a row between rules with dividers whose cells hold two
+/// lines with no label each (a street over its town beside a firm over its street), lines
+/// that line up by chance: no rows of totals; each cell is read whole.
+fn cells_by_chance(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let size = 8.0 * k;
+    let top = 640.0;
+    let h = 4.0 * size;
+    let mut t = rule(v, 40.0, 400.0, top, size) + &rule(v, 40.0, 400.0, top - h, size);
+    t += &format!("0 0 0 RG 0.5 w 220 {} m 220 {top} l S\n", top - h);
+    let cells = [
+        (44.0, ["Musterweg 1", "12345 Musterstadt"]),
+        (224.0, ["Beispiel AG", "Probeweg 12"]),
+    ];
+    for (x, lines) in cells {
+        for (n, l) in lines.iter().enumerate() {
+            t += &show(plain, size, x, top - 1.5 * size - 1.2 * size * n as f32, l);
+        }
+    }
+    let mut s = sheet(
+        v,
+        t,
+        420.0,
+        Some(Span {
+            top,
+            bottom: top - h,
+        }),
+    );
+    for (_, lines) in cells {
+        s.want
+            .cells
+            .push(lines.iter().map(|l| l.to_string()).collect());
+    }
+    s
+}
+
+/// Part 2e-2 fix round 1 (M4, item 2): two lines in three columns of one style between two
+/// rules with no dividers, titles over one row of values: a table of a header and one row.
+fn two_lines_in_a_strip(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let size = 8.0 * k;
+    let top = 640.0;
+    let rows = [["Name", "Ort", "Nr"], ["Beispiel", "Musterstadt", "4711"]];
+    let mut t = rule(v, 36.0, 520.0, top + 1.2 * size, size);
+    for (n, row) in rows.iter().enumerate() {
+        for (x, c) in [40.0f32, 200.0, 400.0].iter().zip(row) {
+            t += &show(plain, size, *x, top - 1.3 * size * n as f32, c);
+        }
+    }
+    let bottom = top - 1.3 * size - 0.5 * size;
+    t += &rule(v, 36.0, 520.0, bottom, size);
+    let mut s = sheet(v, t, 420.0, Some(Span { top, bottom }));
+    s.want.tables.push(
+        rows.iter()
+            .map(|r| r.iter().map(|c| c.to_string()).collect())
+            .collect(),
+    );
+    s
+}
+
 /// Part 2e-1 (items 6 and 7): line items without rules at 8 points times the size factor, a
 /// bold header `Pos`, `Zeitraum`, `Basis` and `Betrag`; with `range` the first two periods
 /// wrap after their dash (`01.10.2026 -` over `31.10.2026`) and the cell keeps the space after
@@ -1685,6 +1895,49 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "a value printed over its label",
             axes: DOC,
             draw: |v| (overprinted(v), None),
+        },
+        Shape {
+            name: "prose with a number at a line end",
+            axes: DOC,
+            draw: |v| (number_prose(v), None),
+        },
+        Shape {
+            name: "two lines of three words set full",
+            axes: DOC,
+            draw: |v| (justified_pair(v), None),
+        },
+        Shape {
+            name: "line items with a credit over a total",
+            axes: DOC,
+            draw: |v| (credit_over_total(v), None),
+        },
+        Shape {
+            name: "an accent drawn on its own over its word",
+            axes: DOC,
+            draw: |v| (lone_accent(v), None),
+        },
+        Shape {
+            name: "cells of two lines lining up by chance between rules",
+            axes: DOC,
+            draw: |v| (cells_by_chance(v), None),
+        },
+        Shape {
+            name: "two lines in three columns between two rules",
+            axes: DOC,
+            draw: |v| (two_lines_in_a_strip(v), None),
+        },
+        Shape {
+            name: "a column of short field lines after a sentence",
+            axes: DOC,
+            draw: |v| {
+                let lines = [
+                    "Zahlbar sofort.",
+                    "Lieferung frei Haus",
+                    "Versand per Spedition Muster",
+                    "Gewicht 12 kg",
+                ];
+                (column_of(v, &lines, 8.0, false, None), None)
+            },
         },
         Shape {
             name: "line items with wrapped date ranges",

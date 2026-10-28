@@ -396,6 +396,9 @@ pub(crate) struct Want {
     /// Texts no line of the read may hold together (part 2e-1 fix round 1): each pair stands
     /// in different blocks, or apart by a line break in one block.
     pub lines_apart: Vec<(String, String)>,
+    /// Texts one line of the read must hold together (part 2e-2 fix round 1): two lines of
+    /// wrapped prose go on in one line of text, with no break between them.
+    pub lines_joined: Vec<(String, String)>,
     /// The document title the read must find (on the first page only).
     pub title: Option<String>,
     /// Titles the read may find instead (a bold title over the shape).

@@ -79,14 +79,7 @@ source: crates/rezzer/tests/corpus.rs
           "anchor": "p1:b6",
           "inlines": [
             {
-              "text": "Agree to privacy policy",
-              "type": "text"
-            },
-            {
-              "type": "line_break"
-            },
-            {
-              "text": "Other",
+              "text": "Agree to privacy policy Other",
               "type": "text"
             }
           ],

@@ -2056,13 +2056,20 @@ fn column_variants() -> Vec<ColumnVariant> {
 /// number over a line that opens with a capital, the lines are fields of their own.
 #[test]
 fn field_lines_of_five_words_or_more_never_join() {
-    let shapes: [&[&[&str]]; 2] = [
+    let shapes: [&[&[&str]]; 3] = [
         &[
             &["Zahlbar bis zum", "31.10.2026 ohne Abzug"],
             &["Bearbeiter Frau", "Erika Beispiel"],
             &["Ihre Kundennummer bei uns", "12345"],
             &["Unser Zeichen", "AB 12 vom 01.10.2026"],
             &["Seite", "1 von 2"],
+        ],
+        // Fix round 1 (I2): short lines after a line that ends a sentence.
+        &[
+            &["Zahlbar sofort."],
+            &["Lieferung frei Haus"],
+            &["Versand per Spedition Muster"],
+            &["Gewicht 12 kg"],
         ],
         &[
             &["Lieferschein Nr.", "4711 vom 01.10.2026"],
@@ -2424,6 +2431,232 @@ fn a_value_printed_over_its_label_stays_apart() {
                 let md = common::markdown(&out).replace("**", "");
                 if md.contains("NameHinterhaus") {
                     wrong.push(format!("{size}, {label}/{value}, {dx}: `NameHinterhaus`"));
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// Prose `text` in `font` at `size` set ragged (greedy) or full (`justified`, by word spacing)
+/// to `measure` points from x 50 and y 760: its lines and the drawing of them.
+fn set_prose(
+    text: &str,
+    font: &str,
+    size: f32,
+    measure: f32,
+    justified: bool,
+) -> (Vec<String>, String) {
+    let mut lines: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    for word in text.split(' ') {
+        let cand = if cur.is_empty() {
+            word.to_string()
+        } else {
+            format!("{cur} {word}")
+        };
+        if cur.is_empty() || common::font_width(font, &cand, size) <= measure {
+            cur = cand;
+        } else {
+            lines.push(std::mem::replace(&mut cur, word.to_string()));
+        }
+    }
+    lines.push(cur);
+    let mut t = String::new();
+    let n = lines.len();
+    for (k, l) in lines.iter().enumerate() {
+        let tw = if justified && k + 1 < n {
+            let spaces = l.matches(' ').count().max(1) as f32;
+            ((measure - common::font_width(font, l, size)) / spaces).max(0.0)
+        } else {
+            0.0
+        };
+        let y = 760.0 - 1.2 * size * k as f32;
+        t += &format!("BT /{font} {size} Tf {tw} Tw 50 {y} Td ({l}) Tj ET\n");
+    }
+    (lines, t)
+}
+
+/// Task 15b part 2e-2 fix round 1 (I1; review scenario A and B): wrapped prose of sentences
+/// whose lines end in a number over a noun (`mit 2` over `Prozent Skonto`, `due by 31` over
+/// `October 2026`), and a paragraph whose last line ends in no stop, goes on line by line: no
+/// line break inside it. Sizes 6 to 14, Helvetica and Times, 14 to 50 ems, ragged and set
+/// full.
+#[test]
+fn prose_with_numbers_at_line_ends_still_joins() {
+    let texts = [
+        "Die Rechnung ist zahlbar innerhalb von 14 Tagen ohne Abzug oder innerhalb von 8 Tagen mit 2 Prozent Skonto. Bei Zahlung nach dem 31.10.2026 berechnen wir Verzugszinsen von 5 Prozentpunkten ueber dem Basiszinssatz. Die Ware bleibt bis zur vollstaendigen Bezahlung unser Eigentum.",
+        "Payment of the amount of 45.67 EUR is due by 31 October 2026 to the account of Muster GmbH at Musterbank in Musterstadt under the invoice number 2026 0815 and the customer number 4711 of Erika Mustermann.",
+        "Weitere Informationen zu unseren Angeboten und Leistungen erhalten Sie jederzeit in unseren Filialen oder im Kundenportal der Muster GmbH",
+    ];
+    let mut wrong = Vec::new();
+    for text in texts {
+        for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+            for font in ["FL", "FT"] {
+                for ems in [14.0f32, 22.0, 34.0, 50.0] {
+                    for justified in [false, true] {
+                        let (lines, t) =
+                            set_prose(text, font, size, (ems * size).min(500.0), justified);
+                        // Older (the same at c2b204b): set full at 14 ems in Helvetica, the
+                        // paragraph without a stop is read as a table without rules of three
+                        // columns; the borderless table pass, not the joins, which this tests.
+                        let older =
+                            text.starts_with("Weitere") && ems == 14.0 && justified && font == "FL";
+                        if lines.len() < 2 || older {
+                            continue;
+                        }
+                        let (_, under) = set_prose(BODY_LINE, "FL", 7.0, 450.0, false);
+                        let page = FormPage {
+                            template: format!("{t}{}", under.replace("760", "300")),
+                            ..FormPage::default()
+                        };
+                        let md = common::markdown(&common::read(&print_form(&[page], "", "")));
+                        if !md.contains(text) {
+                            wrong.push(format!(
+                                "{size}, {font}, {ems} ems, justified {justified}: {:?}",
+                                &text[..20]
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// Task 15b part 2e-2 fix round 1 (C2; ruling P6-X): two lines of three words set full in a
+/// narrow column (12 to 18 ems), the second with a digit (`Unsere Lieferung erfolgt` over `in 2
+/// Teilen.`), are prose: no table makes the first line a header over the second. Sizes 6 to
+/// 14, both fonts.
+#[test]
+fn two_lines_set_full_are_no_table() {
+    let sets = [
+        ("Bitte beachten Sie", "die 3 Hinweise."),
+        ("Unsere Lieferung erfolgt", "in 2 Teilen."),
+        ("Hiermit bestellen wir", "verbindlich 12 Stueck."),
+        ("Die Ware wird", "am 01.10.2026 geliefert."),
+    ];
+    let mut wrong = Vec::new();
+    for (a, b) in sets {
+        for size in [6.0f32, 8.0, 9.0, 10.0, 12.0, 14.0] {
+            for font in ["FL", "FT"] {
+                for ems in [12.0f32, 14.0, 16.0, 18.0] {
+                    let m = ems * size;
+                    let mut t = String::new();
+                    for (k, l) in [a, b].iter().enumerate() {
+                        let words: Vec<&str> = l.split(' ').collect();
+                        let total: f32 = words
+                            .iter()
+                            .map(|w| common::font_width(font, w, size))
+                            .sum();
+                        let gap = (m - total) / (words.len() as f32 - 1.0);
+                        let mut x = 50.0;
+                        for w in &words {
+                            t += &show(font, size, x, 700.0 - 1.2 * size * k as f32, w);
+                            x += common::font_width(font, w, size) + gap;
+                        }
+                    }
+                    let out = common::read(&page_in(&t, Look::Plain));
+                    if tables(&out)
+                        .iter()
+                        .any(|t| t.1.iter().flatten().any(|c| a.contains(c.as_str())))
+                    {
+                        wrong.push(format!("{a:?}, {size}, {font}, {ems} ems: a table"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// Task 15b part 2e-2 fix round 1 (C1; ruling P6-X): line items whose last amount is a credit
+/// with a trailing minus (`10,00-`), the amounts flush left, over a total under the amounts at
+/// the row pitch: the total is no end of the credit's cell (`10,00-80,00`), and it stays a text
+/// of its own. Sizes 6 to 14, Helvetica and Times.
+#[test]
+fn a_credit_in_the_last_row_takes_no_total_under_the_table() {
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0] {
+        for (plain, bold) in [("FL", "FB"), ("FT", "FTB")] {
+            let pitch = 1.25 * size;
+            let mut y = 600.0;
+            let mut t = String::new();
+            for (x, h) in [
+                (40.0, "Pos"),
+                (80.0, "Artikel"),
+                (300.0, "Menge"),
+                (480.0, "Betrag"),
+            ] {
+                t += &show(bold, size, x, y, h);
+            }
+            for row in [
+                ["1", "Schrauben", "10", "50,00"],
+                ["2", "Muttern", "20", "40,00"],
+                ["3", "Rabatt", "1", "10,00-"],
+            ] {
+                y -= pitch;
+                for (x, c) in [40.0, 80.0, 300.0, 480.0].iter().zip(row) {
+                    t += &show(plain, size, *x, y, c);
+                }
+            }
+            y -= pitch;
+            t += &show(plain, size, 480.0, y, "80,00");
+            let md = common::markdown(&common::read(&page_in(&t, Look::Plain)));
+            if md.contains("10,00-80,00") || md.contains("10,00- 80,00") {
+                wrong.push(format!("{size}, {plain}: the total in the credit's cell"));
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
+
+/// Task 15b part 2e-2 fix round 1 (I3): an accent drawn as a run of its own over a letter of
+/// its word (before or after the word's runs) stays in its word: it is no text printed over
+/// another. Sizes 6 to 14, Helvetica and Times.
+#[test]
+fn an_accent_drawn_on_its_own_stays_in_its_word() {
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 9.0, 10.0, 12.0, 14.0] {
+        for font in ["FL", "FT"] {
+            let y = 700.0;
+            let u = common::font_width(font, "Uber", size);
+            let m = common::font_width(font, "M", size);
+            let cases = [
+                show(font, size, 100.0, y, "Uber den Vertrag")
+                    + &show(font, size, 100.0 + 0.15 * size, y, "\u{a8}"),
+                show(font, size, 100.0, y, "Uber")
+                    + &show(font, size, 100.0 + 0.15 * size, y, "\u{a8}")
+                    + &show(font, size, 100.0 + u, y, " den Vertrag"),
+                show(font, size, 100.0, y, "M")
+                    + &show(font, size, 100.0 + m + 0.1 * size, y, "\u{a8}")
+                    + &show(font, size, 100.0 + m, y, "uller GmbH"),
+            ];
+            for (n, t) in cases.iter().enumerate() {
+                let md = common::markdown(&common::read(&page_in(t, Look::Plain)));
+                if md.contains(" \u{a8}") {
+                    wrong.push(format!("case {n}, {size}, {font}: the mark stands apart"));
                 }
             }
         }

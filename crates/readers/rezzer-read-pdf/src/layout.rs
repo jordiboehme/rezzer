@@ -307,6 +307,7 @@ fn line(runs: &[Run]) -> Line<'_> {
     let mut ink_end = f32::MIN;
     for r in runs {
         if r.x + OVERPRINT * r.size < ink_end
+            && overprints(&r.text)
             && !r.text.starts_with(char::is_whitespace)
             && !text.ends_with(char::is_whitespace)
         {
@@ -1930,6 +1931,7 @@ fn inlines(
         let over = !new_line
             && k > 0
             && r.x + OVERPRINT * r.size < ink_end
+            && overprints(&r.text)
             && !text.starts_with(char::is_whitespace)
             && pieces
                 .last()
@@ -2096,6 +2098,13 @@ fn inlines(
     // White space after the last link ends the text: it is dropped, as the end of the text
     // is.
     Ok(out)
+}
+
+/// Whether the text of a run may be printed over another: two letters or digits or more. A
+/// lone mark (an accent drawn as a run of its own over its letter) belongs to its word, as
+/// the reading order keeps it there.
+fn overprints(text: &str) -> bool {
+    text.chars().filter(|c| c.is_alphanumeric()).count() >= 2
 }
 
 /// A run that starts this many of its sizes or more left of where the ink of the run before it
@@ -2477,7 +2486,7 @@ fn untagged(flow: &[Run], slots: &[Slot], text_sizes: &[f32], cx: &Context<'_>, 
             if heading {
                 out.heading(level, runs, cx);
             } else {
-                out.broken_paragraph(runs, &line_breaks(block), None, cx);
+                out.broken_paragraph(runs, &line_breaks(&all, i, j), None, cx);
             }
             open_list = None;
             i = j;
@@ -2519,7 +2528,7 @@ fn untagged(flow: &[Run], slots: &[Slot], text_sizes: &[f32], cx: &Context<'_>, 
             runs.extend(all[j].runs.iter());
             j += 1;
         }
-        let breaks = line_breaks(&all[i..j]);
+        let breaks = line_breaks(&all, i, j);
         out.broken_paragraph(runs, &breaks, None, cx);
         i = j;
     }
@@ -2574,20 +2583,48 @@ fn heading_block(
     }
     let column = &all[over..j];
     let items = block_listed(column);
-    // Lines that each stand in pieces apart by a cell gap (cells of columns) are no title.
-    let pieced = |l: &Line<'_>| {
-        let mut end: Option<f32> = None;
-        l.runs
-            .iter()
-            .filter(|r| !r.text.trim().is_empty())
-            .any(|r| {
-                let gap = end.is_some_and(|e| r.x - e > crate::order::PIECE_GAP * r.size);
-                end = Some(r.x + r.w);
-                gap
-            })
+    // Lines that each stand in pieces apart by a cell gap (cells of columns) are no title; lines
+    // set full (justified: words equal gaps apart, both outer edges shared) are no cells.
+    let full = {
+        let edges = ink_edges(block);
+        let tol = 0.5
+            * block
+                .iter()
+                .map(|l| l.size)
+                .fold(f32::MAX, f32::min)
+                .max(1.0);
+        let even = |l: &Line<'_>| {
+            let mut end: Option<f32> = None;
+            let gaps: Vec<f32> = l
+                .runs
+                .iter()
+                .filter(|r| !r.text.trim().is_empty())
+                .filter_map(|r| {
+                    let gap = end.map(|e| r.x - e);
+                    end = Some(r.x + r.w);
+                    gap
+                })
+                .collect();
+            let (lo, hi) = gaps
+                .iter()
+                .fold((f32::MAX, f32::MIN), |(a, b), &g| (a.min(g), b.max(g)));
+            hi - lo <= tol
+        };
+        block.iter().all(even)
+            && edges
+                .iter()
+                .all(|e| (e.0 - edges[0].0).abs() <= tol && (e.1 - edges[0].1).abs() <= tol)
     };
+    // A sentence that goes on over its lines (a line opening with a small letter, or a last
+    // line ending with a full stop) is no row of cells either.
+    let prose = block
+        .iter()
+        .skip(1)
+        .any(|l| l.text.starts_with(char::is_lowercase))
+        || block.last().is_some_and(|l| l.text.ends_with('.'));
+    let pieced = |l: &Line<'_>| !full && !prose && cell_gaps(l) > 0;
     let apart = (1..block.len()).any(|k| lines_apart(block, k, items))
-        || wraps(column, &ink_edges(column), false).contains(&false)
+        || wraps(column, &ink_edges(column)).contains(&false)
         || (block.len() >= 2 && block.iter().all(pieced));
     if (small || column.len() >= 3 || block.iter().all(pieced)) && apart {
         return (j, false);
@@ -2616,8 +2653,9 @@ fn lines_apart(block: &[Line<'_>], k: usize, items: bool) -> bool {
     };
     let items = items && (left(a) - left(b)).abs() <= EDGE;
     let words = |l: &Line<'_>| l.text.split_whitespace().count();
-    let fields = field_line(a).is_some_and(|f| field_line(b) == Some(f))
-        && words(a).max(words(b)) <= FIELD_WORDS;
+    let fields = field_line(a).is_some_and(|f| {
+        field_line(b).is_some_and(|g| same_face(f[0], g[0]) && same_face(f[1], g[1]))
+    }) && words(a).max(words(b)) <= FIELD_WORDS;
     items || fields
 }
 
@@ -2649,10 +2687,23 @@ const EDGE: f32 = 1.0;
 /// same two faces (see [`field_line`]). How wide the block is does not matter: a long name in an
 /// address is still a line of it. Prose that fills its measure keeps joining, also where
 /// every line starts with a capital.
-fn line_breaks(lines: &[Line<'_>]) -> Vec<(u32, u32)> {
+fn line_breaks(all: &[Line<'_>], i: usize, j: usize) -> Vec<(u32, u32)> {
+    let lines = &all[i..j];
     if lines.len() < 2 {
         return Vec::new();
     }
+    // The column the block stands in: up to two lines over and under it that go on it but
+    // for a box's edge (see [`Slot::Block`]), which a box may have cut off it. Where the
+    // column shows that its lines are lines of their own, so are the block's.
+    let (mut lo, mut hi) = (i, j);
+    while lo > 0 && i - lo < 2 && continues(&all[lo - 1], &all[lo]) {
+        lo -= 1;
+    }
+    while hi < all.len() && hi - j < 2 && continues(&all[hi - 1], &all[hi]) {
+        hi += 1;
+    }
+    let column = &all[lo..hi];
+    let around = wraps(column, &ink_edges(column));
     let edges = ink_edges(lines);
     let right = edges.iter().map(|e| e.1).fold(f32::MIN, f32::max);
     let left = edges.iter().map(|e| e.0).fold(f32::MAX, f32::min);
@@ -2685,7 +2736,7 @@ fn line_breaks(lines: &[Line<'_>]) -> Vec<(u32, u32)> {
     };
     let set_aligned = (pairs >= 2 && 2 * pairs >= edges.len() - 1) || centred_pair;
     let items = block_listed(lines);
-    let wraps = wraps(lines, &edges, true);
+    let wraps = wraps(lines, &edges);
     let mut out = Vec::new();
     for k in 0..lines.len() - 1 {
         let (a, b) = (edges[k], edges[k + 1]);
@@ -2697,7 +2748,8 @@ fn line_breaks(lines: &[Line<'_>]) -> Vec<(u32, u32)> {
         let room = SHORT_ROOM * (right - left);
         let fits = a.1 + 0.25 * next.size + word + room <= right && !lines[k].text.ends_with('-');
         let aligned = set_aligned && aligned_pair(a, b);
-        if fits || aligned || short || !wraps[k] || lines_apart(lines, k + 1, items) {
+        let apart = !wraps[k] || !around[i - lo + k];
+        if fits || aligned || short || apart || lines_apart(lines, k + 1, items) {
             out.push((next.runs[0].page, next.runs[0].line));
         }
     }
@@ -2718,6 +2770,55 @@ fn ink_edges(lines: &[Line<'_>]) -> Vec<(f32, f32)> {
         .collect()
 }
 
+/// The gaps of a cell between the runs with ink of `line` (see [`crate::order::PIECE_GAP`]): the
+/// white space between cells of columns, far over a word space.
+fn cell_gaps(line: &Line<'_>) -> usize {
+    let mut end: Option<f32> = None;
+    line.runs
+        .iter()
+        .filter(|r| !r.text.trim().is_empty())
+        .filter(|r| {
+            let gap = end.is_some_and(|e| r.x - e > crate::order::PIECE_GAP * r.size);
+            end = Some(r.x + r.w);
+            gap
+        })
+        .count()
+}
+
+/// Whether the cell gaps of `line` (see [`cell_gaps`]) are all of one width, within half a
+/// size: the word spaces of a line set full (justified), no gutters of cells.
+fn set_full(line: &Line<'_>) -> bool {
+    let mut end: Option<f32> = None;
+    let gaps: Vec<f32> = line
+        .runs
+        .iter()
+        .filter(|r| !r.text.trim().is_empty())
+        .filter_map(|r| {
+            let gap = end
+                .map(|e| r.x - e)
+                .filter(|g| *g > crate::order::PIECE_GAP * r.size);
+            end = Some(r.x + r.w);
+            gap
+        })
+        .collect();
+    let (lo, hi) = gaps
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(a, b), &g| (a.min(g), b.max(g)));
+    !gaps.is_empty() && hi - lo <= 0.5 * line.size.max(1.0)
+}
+
+/// Whether the last run with ink of `line` stands after a cell gap (see [`cell_gaps`]): it
+/// is a cell of its own.
+fn last_cell(line: &Line<'_>) -> bool {
+    let mut inked = line.runs.iter().rev().filter(|r| !r.text.trim().is_empty());
+    match (inked.next(), inked.next()) {
+        (Some(last), Some(before)) => {
+            last.x - (before.x + before.w) > crate::order::PIECE_GAP * last.size
+        }
+        _ => false,
+    }
+}
+
 /// The width of the first word of `line`, by its share of the first run with text.
 fn first_word(line: &Line<'_>) -> f32 {
     line.runs
@@ -2734,24 +2835,21 @@ fn first_word(line: &Line<'_>) -> f32 {
 /// For each line of `lines` but the last (with the ends `edges` of their ink), whether it may
 /// go on in the next line as wrapped text: the positive evidence that a line was broken where
 /// it is only because its measure was full (Task 15b part 2e-2, ruling P6-X: a line of its own
-/// read as wrapped text mixes two fields; wrapped text read with a break loses nothing). A line
-/// that ends in a hyphen or a comma, or whose next line starts with a small letter, goes on.
-/// Otherwise no line goes on when
+/// read as wrapped text mixes two fields). A line that ends in a hyphen or a comma, or whose
+/// next line starts with a small letter or holds punctuation alone, goes on. Otherwise no line goes on when
 /// - the lines each end with an exclamation or a question mark: sentences of their own (a
 ///   slogan, a greeting), or each opens with a star: starred items;
-/// - the lines read as no sentences and one that ends no sentence would have taken the next
-///   line's first word in its own face within the widest line, with [`SPARE`] sizes to spare:
+/// - the lines read as no sentences and one that ends no sentence, or the first line, would
+///   have taken the next line's first word in its own face within the widest line, with
+///   [`SPARE`] sizes to spare:
 ///   the lines were not filled to a measure, they are lines of their own (fields, items,
 ///   address lines) of any length;
 /// - the lines read as no sentences and one ends in a number (an amount, a date, a customer
-///   number) over a line that opens with a capital: a column of values;
-/// - with `pair` (paragraphs, not headings), they are two lines that do not read as one
-///   sentence (the second ends a sentence, or one holds a sentence end).
+///   number) over a line that opens with a capital: a column of values.
 ///
-/// In prose (lines that read as sentences) a line that ends in a number over a line that opens
-/// with a capital still ends there. Prose of three lines or more that fills its measure, and
-/// two lines of one sentence, go on.
-fn wraps(lines: &[Line<'_>], edges: &[(f32, f32)], pair: bool) -> Vec<bool> {
+/// In lines that read as sentences, only a row of cells that ends in a number over a line
+/// without cells ends there. Prose goes on, whatever its last word (a number over a noun).
+fn wraps(lines: &[Line<'_>], edges: &[(f32, f32)]) -> Vec<bool> {
     let n = lines.len();
     if n < 2 {
         return Vec::new();
@@ -2759,29 +2857,35 @@ fn wraps(lines: &[Line<'_>], edges: &[(f32, f32)], pair: bool) -> Vec<bool> {
     let ends_sentence = |l: &Line<'_>| l.text.ends_with(['.', '!', '?', ':']);
     let cut = |l: &Line<'_>| l.text.ends_with(['-', ',']);
     let lower = |l: &Line<'_>| l.text.chars().next().is_some_and(char::is_lowercase);
+    // A line of punctuation alone (a dash that ends a verse, set on a line of its own) is no
+    // line of its own: it ends the line before.
+    let marks = |l: &Line<'_>| !l.text.chars().any(char::is_alphanumeric);
     let goes_on: Vec<bool> = (0..n - 1)
-        .map(|k| cut(&lines[k]) || lower(&lines[k + 1]))
+        .map(|k| cut(&lines[k]) || lower(&lines[k + 1]) || marks(&lines[k + 1]))
         .collect();
     let exclaims = lines.iter().all(|l| l.text.ends_with(['!', '?']));
     let starred = lines.iter().all(|l| l.text.starts_with('*'));
     let right = edges.iter().map(|e| e.1).fold(f32::MIN, f32::max);
-    // The face of a run: a title line in bold over plain text is no line of that text.
-    let face = |r: &Run| (r.bold, r.italic, r.family, (r.size * 2.0).round() as i32);
+    // A title line in bold over plain text is no line of that text.
     let one_face = |a: &Line<'_>, b: &Line<'_>| {
         let last = a.runs.iter().rev().find(|r| !r.text.trim().is_empty());
         let first = b.runs.iter().find(|r| !r.text.trim().is_empty());
-        last.map(face) == first.map(face)
+        match (last, first) {
+            (Some(x), Some(y)) => same_face(x, y),
+            (x, y) => x.is_none() && y.is_none(),
+        }
     };
     let unfilled = !sentences(lines)
         && (0..n - 1).any(|k| {
             let l = &lines[k];
-            !ends_sentence(l)
+            // A short line that ends a sentence ends a paragraph in prose, after a line that
+            // wrapped into it; as the first line of the block it is a line of its own.
+            (!ends_sentence(l) || k == 0)
                 && !goes_on[k]
                 && one_face(l, &lines[k + 1])
                 && edges[k].1 + (0.25 + SPARE) * lines[k + 1].size + first_word(&lines[k + 1])
                     <= right
         });
-    let one_sentence = n == 2 && (ends_sentence(&lines[1]) || sentences(lines));
     // A line that ends in a number (an amount, a date, a customer number), and no sentence,
     // over a line that opens with a capital ends a value: the next line is a field of its own,
     // and so is every line of a block that holds such a line and no sentence.
@@ -2800,10 +2904,21 @@ fn wraps(lines: &[Line<'_>], edges: &[(f32, f32)], pair: bool) -> Vec<bool> {
             })
     };
     let values = !sentences(lines) && (0..n - 1).any(value_end);
-    if exclaims || starred || unfilled || values || (pair && n == 2 && !one_sentence) {
+    if exclaims || starred || unfilled || values {
         goes_on
     } else {
-        (0..n - 1).map(|k| !value_end(k)).collect()
+        // In prose a line that ends in a number goes on (`mit 2` over `Prozent Skonto`), but a
+        // line that ends in a row of cells (two cell gaps or more of other widths than the word
+        // spaces of a line set full, the number a cell of its own after one) ends with that row
+        // (`79-84 70-85` over `Preparation work`).
+        (0..n - 1)
+            .map(|k| {
+                !(value_end(k)
+                    && cell_gaps(&lines[k]) >= 2
+                    && last_cell(&lines[k])
+                    && !set_full(&lines[k]))
+            })
+            .collect()
     }
 }
 
@@ -2816,12 +2931,19 @@ const SPARE: f32 = 1.0;
 /// face it ends in (a plain label, then a bold value), each as weight, slant, family and size.
 /// Two lines one under the other that are each a label and its value in the same two faces are
 /// two fields, never one line of text going on (see [`line_breaks`]).
-fn field_line(l: &Line<'_>) -> Option<[(bool, bool, u32, i32); 2]> {
-    let face = |r: &Run| (r.bold, r.italic, r.family, (r.size * 2.0).round() as i32);
+fn field_line<'a>(l: &Line<'a>) -> Option<[&'a Run; 2]> {
     let mut inked = l.runs.iter().filter(|r| !r.text.trim().is_empty());
-    let first = face(inked.next()?);
-    let last = face(inked.next_back()?);
-    (first != last).then_some([first, last])
+    let first = inked.next()?;
+    let last = inked.next_back()?;
+    (!same_face(first, last)).then_some([first, last])
+}
+
+/// Whether two runs are set in one face: weight, slant and family, and sizes less than
+/// [`crate::tables::LABEL_STEP`] apart (relative to the size, ruling P6-Y).
+fn same_face(a: &Run, b: &Run) -> bool {
+    let (lo, hi) = (a.size.min(b.size), a.size.max(b.size));
+    (a.bold, a.italic, a.family) == (b.bold, b.italic, b.family)
+        && hi < crate::tables::LABEL_STEP * lo.max(f32::MIN_POSITIVE)
 }
 
 /// Whether the lines read as sentences: one holds a sentence end with more text after it, or
