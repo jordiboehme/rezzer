@@ -369,21 +369,6 @@ pub(crate) fn three_cells(m: Middle, size: f32, step: f32, font: &str, how: Cell
     read(&three_font_page(&c))
 }
 
-/// The texts of the blocks of a read that are no table, sections opened.
-pub(crate) fn text_blocks(blocks: &[Block], out: &mut Vec<String>) {
-    for b in blocks {
-        match b {
-            Block::Section { blocks, .. } => text_blocks(blocks, out),
-            Block::Table { .. } => {}
-            b => {
-                let mut s = String::new();
-                common::block_text(b, &mut s);
-                out.push(s.trim().replace('\n', " / "));
-            }
-        }
-    }
-}
-
 /// What the middle cell of [`three_cells`] must read as.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Want {
@@ -436,34 +421,28 @@ pub(crate) fn three_cells_wrong(out: &ReadOutcome, m: Middle, want: Want) -> Vec
             wrong.push(format!("paired {paired}, said {said}: {rows:?} {losses:?}"));
         }
     }
-    let words = |ts: &[&str]| -> Vec<String> {
-        ts.iter()
-            .flat_map(|t| t.split_whitespace())
-            .map(str::to_string)
-            .collect()
-    };
     let mut middle = m.head.to_vec();
     middle.extend(m.lines);
-    let cells = [
-        words(&["Name", "Beispiel"]),
-        words(&middle),
-        words(&["Nr", "4711"]),
-    ];
-    let own = |c: usize, w: &str| {
-        cells[c].iter().any(|x| x == w)
-            && (0..3).all(|o| o == c || !cells[o].iter().any(|x| x == w))
-    };
-    let mut blocks = Vec::new();
-    text_blocks(&out.document.body, &mut blocks);
-    for b in blocks {
-        let of: Vec<usize> = (0..3)
-            .filter(|&c| b.split_whitespace().any(|w| own(c, w)))
-            .collect();
-        if of.len() > 1 {
-            wrong.push(format!("a block mixes cells {of:?}: {b:?}"));
-        }
-    }
+    wrong.extend(cells_wrong(
+        out,
+        &[vec!["Name", "Beispiel"], middle, vec!["Nr", "4711"]],
+    ));
     wrong
+}
+
+/// What is wrong with how the texts of drawn `cells` stand in the read `out`, found by the
+/// span each text produced (see `common::cells_apart`): each cell's texts together and in their
+/// order, and no block or table row holding texts of two cells. A text that stands inside
+/// another cell's text, or twice in the cells, is left out of the check.
+pub(crate) fn cells_wrong(out: &ReadOutcome, cells: &[Vec<&str>]) -> Vec<String> {
+    let all: Vec<&str> = cells.iter().flatten().copied().collect();
+    let ambiguous = |t: &str| all.iter().filter(|o| o.contains(t)).count() != 1;
+    let owned: Vec<Vec<String>> = cells
+        .iter()
+        .map(|c| c.iter().map(|t| (*t).to_string()).collect())
+        .collect();
+    let units = common::read_units(&out.document.body);
+    common::cells_apart(&units, &owned, &vec![true; cells.len()], &ambiguous)
 }
 
 /// The middle cells of the matrix tests below: a name or a label over an address, its first
@@ -758,6 +737,18 @@ pub(crate) type StripCell = (&'static str, f32, &'static [&'static str]);
 /// label at `head` times the labels' size `size`) and the lines under it at the values' size
 /// (`size` times `step`), in `font`.
 pub(crate) fn open_strip_of(cells: &[StripCell], size: f32, step: f32, font: &str) -> ReadOutcome {
+    open_strip_in(cells, size, step, font, font)
+}
+
+/// [`open_strip_of`] with the labels in `lf` and the lines under them in `vf`; an empty head
+/// is no text.
+pub(crate) fn open_strip_in(
+    cells: &[StripCell],
+    size: f32,
+    step: f32,
+    lf: &str,
+    vf: &str,
+) -> ReadOutcome {
     let value = size * step;
     let k = size / 8.0;
     let width = 120.0 * k;
@@ -769,13 +760,116 @@ pub(crate) fn open_strip_of(cells: &[StripCell], size: f32, step: f32, font: &st
     }
     for (n, (head, hs, lines)) in cells.iter().enumerate() {
         let x = x0 + width * n as f32 + 4.0 * k;
-        c += &shown(font, hs * size, x, top - 1.1 * size, head);
+        if !head.is_empty() {
+            c += &shown(lf, hs * size, x, top - 1.1 * size, head);
+        }
         let low = top - h + 0.4 * value;
         for (l, v) in lines.iter().rev().enumerate() {
-            c += &shown(font, value, x, low + 1.2 * value * l as f32, v);
+            c += &shown(vf, value, x, low + 1.2 * value * l as f32, v);
         }
     }
     read(&three_font_page(&c))
+}
+
+/// Task 15b part 2d fix round 2 (I2, ruling on concern 1): every way a strip without dividers
+/// is refused or keeps a cell out of its pairs reads cell by cell, each cell's lines together,
+/// never one line across two cells: a value under no label (`UNDER_NONE`), one field beside a
+/// value alone (`LONE`), a caption beside a value, labels of the values' size over values in
+/// another font with an empty field (every cell left out), and a value-size head beside a label
+/// with nothing under it (it may be that label's value, so the two read as one cell). Checked
+/// by the spans of the drawn texts. Sizes 6 to 14, steps 1.125 and 1.25, both data fonts.
+#[test]
+fn refused_strips_read_cell_by_cell() {
+    // The cells, the value size as a step (0: the labels' size), the value font (none: the
+    // labels' font), and the cells as they must read.
+    type Refused = (
+        &'static str,
+        &'static [StripCell],
+        bool,
+        Option<&'static str>,
+        &'static [&'static [&'static str]],
+    );
+    let cases: [Refused; 5] = [
+        (
+            "under none",
+            &[
+                ("Name", 1.0, &["Beispiel"]),
+                ("Nr", 1.0, &["4711"]),
+                ("", 1.0, &["Muster GmbH"]),
+            ],
+            false,
+            None,
+            &[&["Name", "Beispiel"], &["Nr", "4711"], &["Muster GmbH"]],
+        ),
+        (
+            "lone beside a value",
+            &[("Nr", 1.0, &["4711"]), ("", 1.0, &["Muster GmbH"])],
+            false,
+            None,
+            &[&["Nr", "4711"], &["Muster GmbH"]],
+        ),
+        (
+            "caption beside a value",
+            &[
+                ("Hinweis", 1.0, &["siehe Anlage"]),
+                ("", 1.0, &["Muster GmbH"]),
+            ],
+            false,
+            None,
+            &[&["Hinweis", "siehe Anlage"], &["Muster GmbH"]],
+        ),
+        (
+            "labels of the values' size",
+            &[
+                ("Name", 1.0, &["Beispiel"]),
+                ("Datum", 1.0, &[]),
+                ("Nr", 1.0, &["4711"]),
+            ],
+            true,
+            Some("other"),
+            &[&["Name", "Beispiel"], &["Datum"], &["Nr", "4711"]],
+        ),
+        (
+            "value head beside an empty label",
+            &[
+                ("Name", 1.0, &[]),
+                ("Muster GmbH", 1.25, &[]),
+                ("Nr", 1.0, &["4711"]),
+            ],
+            false,
+            None,
+            &[&["Name", "Muster GmbH"], &["Nr", "4711"]],
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for size in [6.0f32, 8.0, 10.0, 12.0, 14.0] {
+        for step in [1.125f32, 1.25] {
+            for font in ["F1", "F3"] {
+                let other = if font == "F1" { "F3" } else { "F1" };
+                for (name, cells, same, vf, want) in cases {
+                    let at = format!("{name} {size} pt x {step}, {font}");
+                    let vf = vf.map_or(font, |_| other);
+                    let out = open_strip_in(cells, size, if same { 1.0 } else { step }, font, vf);
+                    let want: Vec<Vec<&str>> = want.iter().map(|c| c.to_vec()).collect();
+                    wrong.extend(
+                        cells_wrong(&out, &want)
+                            .into_iter()
+                            .map(|e| format!("{at}: {e}")),
+                    );
+                    // A refused strip says so.
+                    if read_tables(&out).is_empty() && out.document.losses.is_empty() {
+                        wrong.push(format!("{at}: no pair and no loss"));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
 }
 
 /// Task 15b part 2d item 3 (ruling P6-X), beyond one odd cell between two labels: strips of
@@ -855,28 +949,15 @@ fn strips_of_two_to_four_cells_read_their_cells_apart() {
                             wrong.push(format!("{at}: {head} pairs: {rows:?}"));
                         }
                     }
-                    let words: Vec<Vec<&str>> = cells
+                    let drawn: Vec<Vec<&str>> = cells
                         .iter()
-                        .map(|(h, _, l)| {
-                            h.split_whitespace()
-                                .chain(l.iter().flat_map(|t| t.split_whitespace()))
-                                .collect()
-                        })
+                        .map(|(h, _, l)| std::iter::once(*h).chain(l.iter().copied()).collect())
                         .collect();
-                    let own = |c: usize, w: &str| {
-                        words[c].contains(&w)
-                            && (0..words.len()).all(|o| o == c || !words[o].contains(&w))
-                    };
-                    let mut blocks = Vec::new();
-                    text_blocks(&out.document.body, &mut blocks);
-                    for b in blocks {
-                        let of: Vec<usize> = (0..cells.len())
-                            .filter(|&c| b.split_whitespace().any(|w| own(c, w)))
-                            .collect();
-                        if of.len() > 1 {
-                            wrong.push(format!("{at}: a block mixes cells {of:?}: {b:?}"));
-                        }
-                    }
+                    wrong.extend(
+                        cells_wrong(&out, &drawn)
+                            .into_iter()
+                            .map(|e| format!("{at}: {e}")),
+                    );
                 }
             }
         }
@@ -892,7 +973,9 @@ fn strips_of_two_to_four_cells_read_their_cells_apart() {
 /// Task 15b part 2d item 3 (ruling P6-X: never silent): a strip whose cells are not clear (the
 /// address under a smaller name runs on under the next label) and whose text is in three
 /// styles is not read as fields, and a loss names its heads; no pair is made. Fix round 1
-/// (ruling on concern 1): its text is read cell by cell, never line by line across them.
+/// (ruling on concern 1): its text is read cell by cell. Fix round 2 (I5, by the spans of the
+/// drawn texts): the long line runs on into the next cell with no gap, so those two cells read
+/// as one, which the loss speaks for; the first cell stands apart.
 #[test]
 fn a_strip_in_three_styles_not_clear_is_said() {
     let long: &[&str] = &["Musterweg 1", "12345 Musterstadt-Beispielhausen"];
@@ -929,17 +1012,24 @@ fn a_strip_in_three_styles_not_clear_is_said() {
                         .collect();
                     wrong.push(format!("{at}: not said: {losses:?}"));
                 }
-                let mut blocks = Vec::new();
-                text_blocks(&out.document.body, &mut blocks);
-                for b in blocks {
-                    let of: Vec<&str> = ["Beispiel", "Musterweg", "4711"]
+                // The long line runs on under `Nr` with no gap: the middle cell and the `Nr`
+                // cell are one cell to the read (the mix the loss speaks for); the `Name` cell
+                // stands apart from them.
+                let cells = [
+                    vec!["Name", "Beispiel"],
+                    vec![
+                        "Muster GmbH",
+                        "Nr",
+                        "Musterweg 1",
+                        "12345 Musterstadt-Beispielhausen",
+                        "4711",
+                    ],
+                ];
+                wrong.extend(
+                    cells_wrong(&out, &cells)
                         .into_iter()
-                        .filter(|w| b.split_whitespace().any(|x| x == *w))
-                        .collect();
-                    if of.len() > 1 {
-                        wrong.push(format!("{at}: a block mixes cells: {b:?}"));
-                    }
-                }
+                        .map(|e| format!("{at}: {e}")),
+                );
             }
         }
     }

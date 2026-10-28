@@ -799,6 +799,11 @@ pub(crate) fn shapes() -> Vec<Shape> {
                             f.1 = Err(());
                         }
                     }
+                    // The value runs on into the next field: the two fields read as one cell
+                    // (Task 15b part 2d fix round 2), their labels over the value.
+                    s.want
+                        .cells
+                        .push(vec!["Name".into(), "Nr".into(), "Erika Mustermann".into()]);
                 }
                 (s, e)
             },

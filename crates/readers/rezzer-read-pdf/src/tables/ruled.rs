@@ -1160,11 +1160,14 @@ fn leave_flow(
     }
 }
 
-/// Puts the runs of each refused row of fields of `found.apart` in the flow in the order to
-/// read them, cell by cell; other runs of the places of the flow from the first of them to the
-/// last (a block beside the row, on its lines) follow them in their own order. The places stay,
-/// so the rest of the page reads as before, and what is known of each run (the table cell it
-/// goes to, a hold) moves with it.
+/// Puts the runs of each row of fields of `found.apart` in the flow in the order to read them,
+/// cell by cell; other runs of the places of the flow from the first of them to the last (a
+/// block beside the row, on its lines) follow them in their own order. The places stay, so the
+/// rest of the page reads as before, and what is known of each run (the table cell it goes to,
+/// a hold) moves with it. A cell's runs on a line that an earlier cell of the row also has get a
+/// line of their own, so the two cells are never read as one line, and each cell is a block of
+/// its own (see [`crate::layout::Slot::Block`]), so no paragraph joins two cells; each table
+/// whose runs moved stands where its first run now stands.
 fn read_apart(flow: &mut Flow, take: &mut Taking, found: &mut Found) {
     fn permute<T: Clone>(v: &mut [T], lo: usize, order: &[usize]) {
         if v.len() < lo + order.len() {
@@ -1175,25 +1178,105 @@ fn read_apart(flow: &mut Flow, take: &mut Taking, found: &mut Found) {
             v[lo + k] = x;
         }
     }
-    for order in std::mem::take(&mut found.apart) {
+    let rows = std::mem::take(&mut found.apart);
+    if rows.is_empty() {
+        return;
+    }
+    // Where each run of the flow as it was stands now.
+    let mut now: Vec<usize> = (0..flow.runs.len()).collect();
+    let mut fresh = flow.runs.iter().map(|r| r.line).max().unwrap_or(0);
+    let mut block = 0usize;
+    let mut moved_tables: Vec<usize> = Vec::new();
+    for cells in rows {
+        let cells: Vec<Vec<usize>> = cells
+            .into_iter()
+            .map(|c| c.into_iter().map(|i| now[i]).collect())
+            .collect();
+        let mut order: Vec<usize> = cells.iter().flatten().copied().collect();
         let (Some(&lo), Some(&hi)) = (order.iter().min(), order.iter().max()) else {
             continue;
         };
         let mut sorted = order.clone();
         sorted.sort_unstable();
         sorted.dedup();
-        if sorted.len() != order.len() || order.iter().any(|&i| take.claimed[i].is_some()) {
+        if sorted.len() != order.len() {
             continue;
         }
-        let mut order = order;
-        order.extend((lo..=hi).filter(|i| sorted.binary_search(i).is_err()));
+        let rest: Vec<usize> = (lo..=hi)
+            .filter(|i| sorted.binary_search(i).is_err())
+            .collect();
+        order.extend(&rest);
+        // Lines of a cell (or of the runs after the row) that an earlier cell of the row has
+        // too.
+        let mut owned: Vec<u32> = Vec::new();
+        let mut lines: Vec<(usize, u32)> = Vec::new();
+        for cell in cells.iter().chain(std::iter::once(&rest)) {
+            let mine: Vec<u32> = cell.iter().map(|&i| flow.runs[i].line).collect();
+            let mut renamed: Vec<(u32, u32)> = Vec::new();
+            for (&i, &l) in cell.iter().zip(&mine) {
+                if owned.contains(&l) {
+                    let n = match renamed.iter().find(|r| r.0 == l) {
+                        Some(r) => r.1,
+                        None => {
+                            fresh += 1;
+                            renamed.push((l, fresh));
+                            fresh
+                        }
+                    };
+                    lines.push((i, n));
+                }
+            }
+            owned.extend(mine);
+        }
+        for (i, n) in lines {
+            flow.runs[i].line = n;
+        }
+        for &i in &order {
+            if let Some((t, _, _)) = take.claimed[i]
+                && !moved_tables.contains(&t)
+            {
+                moved_tables.push(t);
+            }
+        }
+        // The flow index each original run moves to.
+        let mut back: Vec<(usize, usize)> = Vec::new();
+        for (k, &i) in order.iter().enumerate() {
+            back.push((i, lo + k));
+        }
+        for n in now.iter_mut() {
+            if (lo..=hi).contains(n)
+                && let Some(&(_, to)) = back.iter().find(|b| b.0 == *n)
+            {
+                *n = to;
+            }
+        }
         permute(&mut flow.runs, lo, &order);
         permute(&mut flow.slots, lo, &order);
+        // Each cell is a block of its own: its lines go on no line of the next cell.
+        let mut k = lo;
+        for cell in &cells {
+            for slot in &mut flow.slots[k..k + cell.len()] {
+                if *slot == crate::layout::Slot::Free {
+                    *slot = crate::layout::Slot::Block(block);
+                }
+            }
+            block += 1;
+            k += cell.len();
+        }
         permute(&mut take.claimed, lo, &order);
         permute(&mut take.held, lo, &order);
         permute(&mut take.quietly, lo, &order);
         permute(&mut take.titles, lo, &order);
         permute(&mut found.bodies, lo, &order);
+    }
+    for t in moved_tables {
+        let first = (0..flow.runs.len()).find(|&i| take.claimed[i].is_some_and(|c| c.0 == t));
+        if let (Some(i), Some(table)) = (first, take.tables.get_mut(t)) {
+            // The pieces of a run cut at a field edge share its place: a run before the table
+            // that shares the place of the table's first run stays before it.
+            let shared = i > 0 && flow.at[i - 1] == flow.at[i];
+            table.at = flow.at[i] + usize::from(shared);
+        }
     }
 }
 

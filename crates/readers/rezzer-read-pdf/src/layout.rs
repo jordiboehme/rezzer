@@ -1122,7 +1122,7 @@ pub(crate) fn page_blocks_at(
     };
     let lay = |runs: &[Run], slots: &[Slot], built: &mut Built| match cx.tree {
         Some(_) => tagged(runs, slots, cx, built),
-        None => untagged(runs, &text_sizes, cx, built),
+        None => untagged(runs, slots, &text_sizes, cx, built),
     };
     let mut start = 0;
     for p in placed {
@@ -2359,9 +2359,22 @@ fn refused_quietly(
 /// Lays out an untagged page: headings by size, lists by marker, paragraphs by gaps. A line
 /// in one of the page's `text_sizes`, or less than [`HEADING_RATIO`] times the largest of
 /// them, is no heading.
-fn untagged(flow: &[Run], text_sizes: &[f32], cx: &Context<'_>, out: &mut Built) {
+fn untagged(flow: &[Run], slots: &[Slot], text_sizes: &[f32], cx: &Context<'_>, out: &mut Built) {
     let heading_level = heading_of(cx.style, text_sizes);
     let all = lines(flow);
+    // The block of its own a line stands in, if the table pass read one (see
+    // [`Slot::Block`]): a line goes on the line before it only in the same block. A line's
+    // runs are a slice of `flow`, so its first run's place is where the slice starts.
+    let block_of = |l: &Line<'_>| -> Option<usize> {
+        let at = (l.runs.as_ptr() as usize - flow.as_ptr() as usize) / std::mem::size_of::<Run>();
+        match slots.get(at) {
+            Some(Slot::Block(b)) => Some(*b),
+            _ => None,
+        }
+    };
+    let block: Vec<Option<usize>> = all.iter().map(block_of).collect();
+    let continues =
+        |prev: &Line<'_>, cur: &Line<'_>| continues(prev, cur) && block_of(prev) == block_of(cur);
     // A number of three digits or more that opens a line in the middle of a sentence is part
     // of the sentence ("31 CFR 209 and/or / 210. The information"), not a list item.
     let marker = |k: usize| {
@@ -2385,6 +2398,7 @@ fn untagged(flow: &[Run], text_sizes: &[f32], cx: &Context<'_>, out: &mut Built)
         }
         if let Some(level) = heading_level(l) {
             let (j, heading) = heading_block(&all, i, level, &heading_level, cx.style.body_size);
+            let j = (i + 1..j).find(|&k| block[k] != block[i]).unwrap_or(j);
             let block = &all[i..j];
             let runs: Vec<&Run> = block.iter().flat_map(|l| l.runs.iter()).collect();
             if heading {
@@ -2621,6 +2635,9 @@ pub(crate) enum Slot {
         table: usize,
         cell: usize,
     },
+    /// Untagged text the table pass read as a block of its own (a cell of a row of fields read
+    /// cell by cell): its lines go on no line of another block.
+    Block(usize),
 }
 
 /// Roles that only group blocks or mark text inside a block.
@@ -2798,7 +2815,7 @@ fn tagged(flow: &[Run], slots: &[Slot], cx: &Context<'_>, out: &mut Built) {
                     *open = None;
                     out.paragraph(taken, role, cx);
                 }
-                Slot::Free | Slot::Cell { .. } => {
+                Slot::Free | Slot::Cell { .. } | Slot::Block(_) => {
                     *open = None;
                     out.paragraph(taken, None, cx);
                 }
@@ -2810,7 +2827,7 @@ fn tagged(flow: &[Run], slots: &[Slot], cx: &Context<'_>, out: &mut Built) {
         }
         // A cell run left to the text reads like a free run.
         let slot = match slot {
-            Slot::Cell { .. } => Slot::Free,
+            Slot::Cell { .. } | Slot::Block(_) => Slot::Free,
             s => *s,
         };
         let same = slot == current_slot
