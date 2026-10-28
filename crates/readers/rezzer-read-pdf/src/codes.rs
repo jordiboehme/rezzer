@@ -368,10 +368,8 @@ pub(crate) fn vector_codes(cells: &[[f32; 4]]) -> Result<Vec<VectorCode>, String
 /// The bars of a linear code drawn as paths are at least this many modules long.
 const MIN_BAR: f32 = 2.0;
 
-/// The fewest bars of a printed linear code cut by the edge of the render, and how far its
-/// end may stand from that edge, in modules (the bar cut there, left out, and a space).
+/// The fewest bars of a printed linear code cut by the edge of the render.
 const MIN_CUT_BARS: usize = 8;
-const CUT_REACH: f32 = 9.0;
 
 /// The bars of a linear code printed in a picture are at least this many modules long: a
 /// printed code's bars are long beside its module, while a screen of dots cut by the edge of
@@ -387,11 +385,13 @@ const SAME_WIDTH: f32 = 0.9;
 const PRINTED_MATRIX_QUIET: f32 = 2.0;
 
 /// What a search for codes printed in a picture holds to: the narrowest module, in points,
-/// and the box of the render, in points.
+/// the box of the render, in points, and the dark parts cut by its edge (left out of the
+/// search).
 #[derive(Clone, Copy)]
-struct Printed {
+struct Printed<'a> {
     min_module: f32,
     page: [f32; 4],
+    cut: &'a [[f32; 4]],
 }
 
 /// The regions among `cells`, the dark parts of a render in points (see [`pixel_cells`]),
@@ -405,12 +405,14 @@ pub(crate) fn printed_codes(
     cells: &[[f32; 4]],
     pixel: f32,
     page: [f32; 4],
+    cut: &[[f32; 4]],
 ) -> Result<Vec<VectorCode>, String> {
     codes_among(
         cells,
         Some(Printed {
             min_module: PRINTED_MODULE * pixel,
             page,
+            cut,
         }),
     )
 }
@@ -420,7 +422,10 @@ pub(crate) fn printed_codes(
 const PRINTED_MODULE: f32 = 2.0;
 
 /// [`vector_codes`], or with `printed` [`printed_codes`].
-fn codes_among(cells: &[[f32; 4]], printed: Option<Printed>) -> Result<Vec<VectorCode>, String> {
+fn codes_among(
+    cells: &[[f32; 4]],
+    printed: Option<Printed<'_>>,
+) -> Result<Vec<VectorCode>, String> {
     let cells: Vec<[f32; 4]> = cells
         .iter()
         .copied()
@@ -786,7 +791,7 @@ const MAX_MODULES: usize = 200;
 fn region(
     cells: &[[f32; 4]],
     members: &[usize],
-    printed: Option<Printed>,
+    printed: Option<Printed<'_>>,
     quiet: &dyn Fn([f32; 4]) -> bool,
 ) -> Option<VectorCode> {
     let min_module = printed.map_or(MIN_MODULE, |p| p.min_module);
@@ -822,7 +827,7 @@ fn region(
             .count();
         on_it * 10 >= members.len() * 9
     };
-    let edges = printed.map(|p| p.page);
+    let edges = printed.map(|p| p.cut);
     let mut finders = 0;
     // A printed matrix code has paper around it, inside the render.
     let paper_around = || {
@@ -884,11 +889,11 @@ fn region(
 fn linear(
     cells: &[[f32; 4]],
     members: &[usize],
-    (b, module, page): ([f32; 4], f32, Option<[f32; 4]>),
+    (b, module, cut): ([f32; 4], f32, Option<&[[f32; 4]]>),
     flat: bool,
     quiet: &dyn Fn([f32; 4]) -> bool,
 ) -> bool {
-    let printed = page.is_some();
+    let printed = cut.is_some();
     let sides = |c: &[f32; 4]| {
         if flat {
             (c[2] - c[0], c[3] - c[1])
@@ -1002,13 +1007,18 @@ fn linear(
             quiet([b[2] + 0.01, b[1], b[2] + q, b[3]]),
         )
     };
-    let reach = CUT_REACH * module;
-    let cut = page.map(|p| {
-        if flat {
-            (b[1] - p[1] <= reach, p[3] - b[3] <= reach)
-        } else {
-            (b[0] - p[0] <= reach, p[2] - b[2] <= reach)
-        }
+    // A bar cut by the edge of the render past an end, in the code's band, a space at most
+    // after its last bar: the code runs on there.
+    let cut = cut.map(|cut| {
+        let (ends, (lo, hi)) = along(&b, flat);
+        let runs_on = |past: &dyn Fn(f32, f32) -> f32| {
+            cut.iter().any(|c| {
+                let (e, (c0, c1)) = along(c, flat);
+                let gap = past(c0, c1);
+                same_ends(ends, e) && (-0.5 * module..=4.5 * module).contains(&gap)
+            })
+        };
+        (runs_on(&|_, c1| lo - c1), runs_on(&|c0, _| c0 - hi))
     });
     let ends = match cut {
         Some((cut_first, cut_last)) => {
@@ -1323,6 +1333,12 @@ const CODE128_STOP: [u8; 7] = [2, 3, 3, 1, 1, 1, 2];
 /// or wide width), as a share of a module, after the ink's spread, for [`bars_fit`].
 const FIT_TOLERANCE: f32 = 0.4;
 
+/// [`FIT_TOLERANCE`] for a module of `module` pixels: up to half a module where that is
+/// under a pixel or two, as each edge falls on a whole pixel.
+fn tolerance(module: f32) -> f32 {
+    FIT_TOLERANCE.max((1.0 / module).min(0.5))
+}
+
 /// The paper at both ends of a linear code read, in modules (narrow widths) at least, for
 /// [`bars_fit`].
 const FIT_QUIET: f32 = 3.0;
@@ -1426,9 +1442,10 @@ fn fits_modules(w: &[f32], want: &[f32]) -> Option<f32> {
     let total: f32 = want.iter().sum();
     let module = w.iter().sum::<f32>() / total;
     let spread = spread_of(w, want, module);
+    let tol = tolerance(module);
     let ok = w.iter().zip(want).enumerate().all(|(k, (&got, &e))| {
         let s = if k.is_multiple_of(2) { spread } else { -spread };
-        ((got - s) / module - e).abs() <= FIT_TOLERANCE
+        ((got - s) / module - e).abs() <= tol
     });
     (ok && spread.abs() <= 0.5 * module).then_some(module)
 }
@@ -1470,12 +1487,13 @@ fn fits_wide(w: &[f32], wide: &[Option<bool>]) -> Option<f32> {
     if wides.is_empty() || !(2.0 - FIT_TOLERANCE..=3.5 + FIT_TOLERANCE).contains(&ratio) {
         return None;
     }
+    let tol = tolerance(narrow);
     let ok = w.iter().zip(wide).enumerate().all(|(k, (&x, f))| {
         let x = fixed(k, x);
         match f {
-            Some(true) => (x - wide_w).abs() <= FIT_TOLERANCE * narrow,
-            Some(false) => (x - narrow).abs() <= FIT_TOLERANCE * narrow,
-            None => x >= (1.0 - FIT_TOLERANCE) * narrow,
+            Some(true) => (x - wide_w).abs() <= tol * narrow,
+            Some(false) => (x - narrow).abs() <= tol * narrow,
+            None => x >= (1.0 - tol) * narrow,
         }
     });
     (ok && spread.abs() <= 0.5 * narrow).then_some(narrow)
@@ -1539,25 +1557,65 @@ fn fits_code128(w: &[f32]) -> Option<(usize, f32)> {
 }
 
 /// The windows on one line (the edges of its dark runs, `edges`) that fit `kind`, with paper
-/// for [`FIT_QUIET`] modules at both ends.
-fn line_fits(edges: &[f32], len: f32, kind: Linear<'_>, want: &Want) -> Vec<Fit> {
+/// for [`FIT_QUIET`] modules at both ends. The render's edges lie at `inside` along the line:
+/// an end bar of a code cut there is as wide as it is meant to be, or less.
+fn line_fits(
+    edges: &[f32],
+    len: f32,
+    kind: Linear<'_>,
+    want: &Want,
+    inside: (f32, f32),
+) -> Vec<Fit> {
     // Bars and spaces from each dark run's start: edge 2k starts bar k.
     let mut out = Vec::new();
     let bars = edges.len() / 2;
+    let at_edge = |x: f32, edge: f32| (x - edge).abs() < 0.75;
     for first in 0..bars {
         let from = 2 * first;
         let widths = |n: usize| -> Option<Vec<f32>> {
             (from + n < edges.len()).then(|| {
-                (from..from + n)
-                    .map(|k| edges[k + 1] - edges[k])
-                    .collect::<Vec<f32>>()
+                let mut w: Vec<f32> = (from..from + n).map(|k| edges[k + 1] - edges[k]).collect();
+                // The end bars of EAN-13, Code 39 and ITF are one module (narrow).
+                let narrow = |w: &[f32], k: usize| -> f32 {
+                    match want {
+                        Want::Modules(m) => {
+                            let rest: f32 = m.iter().sum::<f32>() - m[k];
+                            (w.iter().sum::<f32>() - w[k]) / rest
+                        }
+                        Want::Wide(f) => {
+                            let v: Vec<f32> = (0..w.len())
+                                .filter(|&j| j != k && j.is_multiple_of(2) && f[j] == Some(false))
+                                .map(|j| w[j])
+                                .collect();
+                            v.iter().sum::<f32>() / f32::max(v.len() as f32, 1.0)
+                        }
+                    }
+                };
+                if at_edge(edges[from], inside.0) {
+                    w[0] = w[0].max(narrow(&w, 0));
+                }
+                if at_edge(edges[from + n], inside.1) {
+                    let k = n - 1;
+                    w[k] = w[k].max(narrow(&w, k));
+                }
+                w
             })
         };
         let found = match (kind, want) {
             (Linear::Code128, _) => {
-                let all: Vec<f32> = (from..edges.len() - 1)
+                let mut all: Vec<f32> = (from..edges.len() - 1)
                     .map(|k| edges[k + 1] - edges[k])
                     .collect();
+                // The end bars of Code 128 are 2 modules: the start's first, the stop's last.
+                if all.len() > 7 {
+                    if at_edge(edges[from], inside.0) {
+                        all[0] = all[0].max(2.0 * all[1..6].iter().sum::<f32>() / 9.0);
+                    }
+                    if edges.last().is_some_and(|&e| at_edge(e, inside.1)) {
+                        let k = all.len() - 1;
+                        all[k] = all[k].max(2.0 * all[k - 6..k].iter().sum::<f32>() / 11.0);
+                    }
+                }
                 fits_code128(&all)
             }
             (_, Want::Modules(m)) => widths(m.len())
@@ -1659,23 +1717,53 @@ fn upright_fit(
         (b[0] as usize, b[2] as usize, b[1] as usize, b[3] as usize)
     };
     let span = a1.saturating_sub(a0).max(1);
-    // Room along the line for the paper at both ends; across, the box: its bars.
-    let (from, to) = (
-        a0.saturating_sub(span / 2 + 8),
-        (a1 + span / 2 + 8).min(len),
-    );
-    let (c0, c1) = (s0, s1.min(wide));
-    if to <= from + 8 || c1 <= c0 {
+    // Room along the line for the paper at both ends (past the edge of the render, paper, as
+    // the decoder takes it); across, the middle of the box: its bars.
+    let reach = span / 2 + 8;
+    let (c0, c1) = middle((s0, s1.min(wide)));
+    if c1 <= c0 || a1 > len {
         return false;
     }
     let gray = |t: usize, s: usize| {
+        let Some(t) = (a0 + t).checked_sub(reach).filter(|&t| t < len) else {
+            return 255;
+        };
         if along_y {
-            gray_at(rgba, (from + t) * w + s)
+            gray_at(rgba, t * w + s)
         } else {
-            gray_at(rgba, s * w + from + t)
+            gray_at(rgba, s * w + t)
         }
     };
-    lines_fit(&gray, to - from, (c0, c1), wide, kind, want)
+    // Where the render begins and ends along the line.
+    let inside = (reach as f32 - a0 as f32, (len + reach) as f32 - a0 as f32);
+    lines_fit(
+        &gray,
+        (span + 2 * reach, inside),
+        (c0, c1),
+        wide,
+        kind,
+        want,
+    )
+}
+
+/// The bars and spaces one window of [`bars_fit`] is counted as, and the most such counts one
+/// check takes: a picture of many dark runs along a long line read as a code is not checked
+/// to the end (and the code not taken).
+const FIT_WINDOW: usize = 64;
+const FIT_WORK: usize = 200_000_000;
+
+/// The most lines across the bars of a code read that [`bars_fit`] looks at, the middle ones:
+/// enough for [`FIT_BAR`] modules of 32 pixels.
+const FIT_LINES: usize = 128;
+
+/// The middle [`FIT_LINES`] of lines `c0..c1`.
+fn middle((c0, c1): (usize, usize)) -> (usize, usize) {
+    let n = c1.saturating_sub(c0);
+    if n <= FIT_LINES {
+        return (c0, c1);
+    }
+    let from = c0 + (n - FIT_LINES) / 2;
+    (from, from + FIT_LINES)
 }
 
 /// [`bars_fit`] along lines in the way `(dx, dy)` (pixels, y down) through the middle of box
@@ -1695,14 +1783,16 @@ fn slanted_fit(
     let (bw, bh) = ((b[2] - b[0]) as f32, (b[3] - b[1]) as f32);
     // Along: the line read and half its length past both ends; across: the box's breadth.
     let half = n / 2.0 + n / 2.0 + 8.0;
-    let breadth = ((bw * nx).abs() + (bh * ny).abs()) / 2.0 + 2.0;
+    let breadth = (((bw * nx).abs() + (bh * ny).abs()) / 2.0 + 2.0).min(FIT_LINES as f32 / 2.0);
     let (len, lines) = ((2.0 * half) as usize, (2.0 * breadth) as usize + 1);
-    if lines * len > 16_000_000 {
+    if lines * len > 4_000_000 {
         return false;
     }
+    // Past the edge of the render, paper.
     let pixel = |x: f32, y: f32| {
-        let x = x.clamp(0.0, (w - 1) as f32);
-        let y = y.clamp(0.0, (h - 1) as f32);
+        if x < 0.0 || y < 0.0 || x >= w as f32 || y >= h as f32 {
+            return 255.0;
+        }
         f32::from(gray_at(rgba, y as usize * w + x as usize))
     };
     let mut grid = vec![0u8; lines * len];
@@ -1725,21 +1815,28 @@ fn slanted_fit(
         }
     }
     let gray = |t: usize, s: usize| grid[s * len + t];
-    lines_fit(&gray, len, (0, lines), lines, kind, want)
+    lines_fit(
+        &gray,
+        (len, (f32::NEG_INFINITY, f32::INFINITY)),
+        (0, lines),
+        lines,
+        kind,
+        want,
+    )
 }
 
 /// Whether lines `across.0..across.1` of `wide`, each `len` grays along (`gray(t, s)`), show
 /// `kind` as [`bars_fit`] wants: fits on lines one after the other for [`FIT_BAR`] modules.
 fn lines_fit(
     gray: &dyn Fn(usize, usize) -> u8,
-    len: usize,
+    (len, inside): (usize, (f32, f32)),
     (c0, c1): (usize, usize),
     wide: usize,
     kind: Linear<'_>,
     want: &Want,
 ) -> bool {
-    // The longest run of lines one after the other whose fits go on from line to line.
-    let mut best = 0f32;
+    // Runs of lines one after the other whose fits go on from line to line.
+    let mut work = 0usize;
     let mut prev: Vec<(Fit, usize)> = Vec::new();
     for s in c0..c1 {
         // The line alone, and averaged with one or two more on each side: the stair steps of
@@ -1756,15 +1853,26 @@ fn lines_fit(
             let Some(e) = line_edges(&line, PIXEL_CONTRAST as u8) else {
                 continue;
             };
+            // Each dark run starts a window of a code's bars, both ways along the line: past
+            // the work a code's check may take, the code is not taken.
+            work += e.len() * 2 * FIT_WINDOW;
+            if work > FIT_WORK {
+                return false;
+            }
             // The code may run either way along the line.
             let n = line.len() as f32;
             let back: Vec<f32> = e.iter().rev().map(|x| n - x).collect();
-            fits.extend(line_fits(&e, n, kind, want));
-            fits.extend(line_fits(&back, n, kind, want).into_iter().map(|f| Fit {
-                start: n - f.end,
-                end: n - f.start,
-                module: f.module,
-            }));
+            fits.extend(line_fits(&e, n, kind, want, inside));
+            let back_inside = (n - inside.1, n - inside.0);
+            fits.extend(
+                line_fits(&back, n, kind, want, back_inside)
+                    .into_iter()
+                    .map(|f| Fit {
+                        start: n - f.end,
+                        end: n - f.start,
+                        module: f.module,
+                    }),
+            );
         }
         let next: Vec<(Fit, usize)> = fits
             .into_iter()
@@ -1781,12 +1889,16 @@ fn lines_fit(
                 (f, run)
             })
             .collect();
-        for (f, n) in &next {
-            best = best.max(*n as f32 / f.module);
+        // Lines are whole pixels: half a line short of the bar length still is it.
+        if next
+            .iter()
+            .any(|(f, n)| (*n as f32 + 0.5) / f.module >= FIT_BAR)
+        {
+            return true;
         }
         prev = next;
     }
-    best >= FIT_BAR
+    false
 }
 
 #[cfg(test)]
@@ -2255,14 +2367,20 @@ mod tests {
     #[test]
     fn bars_that_fit_the_value_read_are_evidence_of_a_linear_code() {
         // An EAN-13 of 2 pixels a module, bars 20 pixels long, on paper: its bars fit its
-        // digits; not another value's, not when the bars are too short, not without paper at
-        // its ends, and not lying down when it stands.
+        // digits; not another value's or kind's, not when the bars are too short, and not with
+        // ink where its paper should be.
         let digits = "4006381333931";
         let widths = ean_widths(digits).expect("digits");
-        let render = |bar: usize, quiet: usize| {
+        let render = |bar: usize, quiet: usize, ink: bool| {
             let w = 2 * 95 + 2 * quiet;
             let h = bar + 20;
             let mut gray = vec![235u8; w * h];
+            // A dark stroke 2 pixels before the code, where its paper should be.
+            if ink {
+                for y in 0..h {
+                    gray[y * w + quiet - 6..y * w + quiet - 2].fill(0);
+                }
+            }
             let mut x = quiet;
             for (k, &e) in widths.iter().enumerate() {
                 let x1 = x + 2 * usize::from(e);
@@ -2280,14 +2398,17 @@ mod tests {
                 [quiet as u32, 10, (quiet + 190) as u32, (10 + bar) as u32],
             )
         };
-        let (rgba, size, b) = render(20, 20);
+        let (rgba, size, b) = render(20, 20, false);
         assert!(bars_fit(&rgba, size, b, Linear::Ean(digits)));
         assert!(!bars_fit(&rgba, size, b, Linear::Ean("5901234123457")));
         assert!(!bars_fit(&rgba, size, b, Linear::Itf("12345678")));
-        let (rgba, size, b) = render(6, 20);
+        let (rgba, size, b) = render(6, 20, false);
         assert!(!bars_fit(&rgba, size, b, Linear::Ean(digits)), "short bars");
-        let (rgba, size, b) = render(20, 4);
+        let (rgba, size, b) = render(20, 20, true);
         assert!(!bars_fit(&rgba, size, b, Linear::Ean(digits)), "no paper");
+        // Past the edge of the render is paper, as the decoder takes it.
+        let (rgba, size, b) = render(20, 1, false);
+        assert!(bars_fit(&rgba, size, b, Linear::Ean(digits)), "at the edge");
         // The tables give the patterns of the standards.
         assert_eq!(widths.len(), 59);
         assert_eq!(widths.iter().map(|&v| u32::from(v)).sum::<u32>(), 95);

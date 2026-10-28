@@ -2874,20 +2874,21 @@ fn printed_codes(
         .ok_or_else(|| format!("it has more dark parts than are searched ({max})"))?;
     // A bar cut across by the edge of the render is no whole bar: left out, the code's bars
     // before it are looked at as they are.
+    // They are kept apart: a code running off the edge shows them past its last bar.
     let (wr, hr) = (w as u32, h as u32);
-    let points: Vec<[f32; 4]> = cells
-        .iter()
-        .filter(|c| {
-            let (cw, ch) = (c[2] - c[0], c[3] - c[1]);
-            !((c[0] == 0 || c[2] == wr) && ch > cw || (c[1] == 0 || c[3] == hr) && cw > ch)
-        })
-        .map(|c| page_rect(page, need, *c))
-        .collect();
-    drop(cells);
+    let (cut, points): (Vec<[u32; 4]>, Vec<[u32; 4]>) = cells.into_iter().partition(|c| {
+        let (cw, ch) = (c[2] - c[0], c[3] - c[1]);
+        (c[0] == 0 || c[2] == wr) && ch > cw || (c[1] == 0 || c[3] == hr) && cw > ch
+    });
+    let to_points = |v: Vec<[u32; 4]>| -> Vec<[f32; 4]> {
+        v.into_iter().map(|c| page_rect(page, need, c)).collect()
+    };
+    let (cut, points) = (to_points(cut), to_points(points));
     let found = crate::codes::printed_codes(
         &points,
         (1.0 / page.scale) as f32,
         page_rect(page, need, [0, 0, wr, hr]),
+        &cut,
     )?;
     Ok(found.into_iter().map(|c| (c.b, c.finders)).collect())
 }

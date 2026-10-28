@@ -3793,64 +3793,73 @@ fn screens_and_letters_the_decoder_misreads_list_no_code() {
     // The decoder reads codes where there are none: an EAN-13 from a screen of lines and from
     // letters, a UPC-A and QR codes of nothing from screens of dots, an EAN-13 and a Code 39
     // from dots on a turned lattice. A code is listed only where bars that fit it stand (or,
-    // for a matrix code, where it holds something): none of these.
-    let mut letters = String::from("q 2 0 0 2 0 0 cm\nq 160 0 0 100 420 720 cm /P0 Do Q\n");
-    let mut y = 700.0;
-    'sizes: for size in [
-        5.0f32, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 18.0, 24.0, 36.0,
-    ] {
-        for line in [
-            "Illinois Hill Mill Lillehammer Illl lll III 1111 1111",
-            "Rechnung Nr. 0000000001 vom 01.01.2000, Kundennummer 0000000001",
-            "|||| || | ||| |||| | || ||| | |||| || | ||| || | ||||",
-            "Il1|lI1|Il1|lI1| IIIIIIIIIIIIIIIIIIIIIIIIIIII llllllllllllllllllllllll",
-            "MUSTER GMBH  HILLHEIM  ILLINGEN  IIIIII  HHHHHH  NNNNNN  UUUUUU",
-            "mmmmmm nnnnnn uuuuuu hhhhhh iiiiii jjjjjj ffff tttt rrrr",
+    // for a matrix code, where it holds something): none of these, in letters of every
+    // standard face, and nothing is said of a code.
+    let letters = |face: u32| {
+        let mut c = String::from("q 2 0 0 2 0 0 cm\nq 160 0 0 100 420 720 cm /P0 Do Q\n");
+        let mut y = 700.0;
+        'sizes: for size in [
+            5.0f32, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 18.0, 24.0, 36.0,
         ] {
-            if y < size + 10.0 {
-                break 'sizes;
+            for line in [
+                "Illinois Hill Mill Lillehammer Illl lll III 1111 1111",
+                "Rechnung Nr. 0000000001 vom 01.01.2000, Kundennummer 0000000001",
+                "|||| || | ||| |||| | || ||| | |||| || | ||| || | ||||",
+                "Il1|lI1|Il1|lI1| IIIIIIIIIIIIIIIIIIIIIIIIIIII llllllllllllllllllllllll",
+                "MUSTER GMBH  HILLHEIM  ILLINGEN  IIIIII  HHHHHH  NNNNNN  UUUUUU",
+                "mmmmmm nnnnnn uuuuuu hhhhhh iiiiii jjjjjj ffff tttt rrrr",
+            ] {
+                if y < size + 10.0 {
+                    break 'sizes;
+                }
+                c += &format!("BT /F{face} {size} Tf 20 {y} Td ({line}) Tj ET\n");
+                y -= size * 1.25;
             }
-            letters += &format!("BT /F3 {size} Tf 20 {y} Td ({line}) Tj ET\n");
-            y -= size * 1.25;
         }
-    }
-    letters += "Q\n";
-    let pages = [
-        ("a screen of lines 3.3 pixels apart", line_screen_scan(3.3)),
+        c += "Q\n";
+        faces_page(&c, 1190.0, 1684.0)
+    };
+    let mut pages = vec![
         (
-            "letters in Times-Roman",
-            faces_page(&letters, 1190.0, 1684.0),
+            "a screen of lines 3.3 pixels apart".to_string(),
+            line_screen_scan(3.3),
         ),
         (
-            "dots 3.5 pixels apart, blurred",
+            "dots 3.5 pixels apart, blurred".into(),
             halftone_scan(2, 3.5, false, 1),
         ),
         (
-            "dots 3.6 pixels apart, blurred",
+            "dots 3.6 pixels apart, blurred".into(),
             halftone_scan(2, 3.6, false, 1),
         ),
         (
-            "dots 3.8 pixels apart, blurred",
+            "dots 3.8 pixels apart, blurred".into(),
             halftone_scan(2, 3.8, false, 1),
         ),
         (
-            "dots 3.6 pixels apart at 52 degrees",
+            "dots 3.6 pixels apart at 52 degrees".into(),
             turned_dot_scan(3.6, 52.0),
         ),
         (
-            "dots 2.7 pixels apart at 83 degrees",
+            "dots 2.7 pixels apart at 83 degrees".into(),
             turned_dot_scan(2.7, 83.0),
         ),
     ];
+    for face in 1..=6 {
+        pages.push((format!("letters in face {face}"), letters(face)));
+    }
     for (case, file) in pages {
         let out = read(&file);
         let codes: Vec<_> = out.document.assets.iter().flat_map(|a| &a.codes).collect();
         assert!(codes.is_empty(), "{case}: {codes:?}");
         assert!(
-            !markdown(&out).contains("lighter line"),
-            "{case}: {}",
-            markdown(&out)
+            out.document.assets.iter().all(|a| !a.code_unread),
+            "{case}: a code said unread"
         );
+        let md = markdown(&out);
+        for words in ["lighter line", "dark line", "like a barcode"] {
+            assert!(!md.contains(words), "{case}: {md}");
+        }
     }
 }
 
@@ -3889,6 +3898,21 @@ fn linear_codes_of_every_kind_in_a_scan_are_listed() {
         }
     }
     assert_eq!(listed, 60);
+    // At the edge of the page, its last bar cut by half a module or one: the page's edge is
+    // its paper, and its end bar is as wide as it is meant to be, or less.
+    let m = modules(Symbology::Code128, "0000000001");
+    for (res, px) in [(1u32, 2u32), (1, 3), (2, 2), (2, 4)] {
+        let width = (m.width * px) as f32 / res as f32;
+        for cut in [0.5f32, 1.0] {
+            let left = 595.0 - width + cut * px as f32 / res as f32;
+            let out = read(&crisp_scan(res, px, 60, &[left]));
+            assert_eq!(
+                codes_of(&out, "page-1"),
+                [("Code 128".to_string(), "0000000001".to_string())],
+                "{res} pixels a point, {px} a module, cut {cut} modules"
+            );
+        }
+    }
     // Bars only 4 modules long.
     for (res, px) in [(1u32, 3u32), (1, 4)] {
         let out = read(&crisp_scan(res, px, 4 * px, &[40.0]));
