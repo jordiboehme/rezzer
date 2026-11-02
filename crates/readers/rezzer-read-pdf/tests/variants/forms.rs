@@ -52,6 +52,40 @@ fn address_box_row(g: &Geo, b: &mut Built, top: f32) -> f32 {
     top - h
 }
 
+/// Task 15b part 2e-5 fix round 1 (review I1, ruling P6-X): a strip between two rules with no
+/// dividers, three labels over their values all in the data face, the labels 3 % smaller than
+/// the values: less than a size step (`LABEL_STEP`), so no label style is set apart and the
+/// fields do not pair, but the strip is read cell by cell, never line by line across its
+/// cells, and a loss names its fields.
+fn under_step_strip(g: &Geo, b: &mut Built, top: f32) -> f32 {
+    let h = 3.6 * g.data;
+    let (x0, x1) = (g.col(0) - 0.12, g.col(60) - 0.12);
+    b.page.template += &g.hrule(x0, x1, top);
+    b.page.template += &g.hrule(x0, x1, top - h);
+    let face = match g.font {
+        DataFont::CourierBold => "FDB",
+        DataFont::Courier => "FD",
+        DataFont::Helvetica => "FL",
+    };
+    let size = g.data / 1.03;
+    let fields = [
+        (0usize, "Name", "Beispiel"),
+        (20, "Ort", "Musterstadt"),
+        (40, "Nr", "4711"),
+    ];
+    let mut parts = Vec::new();
+    for (k, l, v) in fields {
+        let (x, y) = (g.col(k) + 0.3 * g.label, top - 1.2 * g.data);
+        b.page.template += &format!("BT /{face} {size} Tf {x} {y} Td ({l}) Tj ET\n");
+        b.values.push(l.to_string());
+        b.values.push(v.to_string());
+        b.fields.push((l, Err(())));
+        parts.push((k + 1, v));
+    }
+    g.values(b, top - h + 0.3 * g.data, &parts);
+    top - h
+}
+
 /// Task 15b part 2e-5 (list line 7, `style_of` half-point key, ruling P6-X): a row of three
 /// boxed fields whose middle box holds a name over its department in the plain data font, of
 /// one size but for float noise: on the printed page (after the variant's scale) the two lines
@@ -1090,6 +1124,25 @@ pub(crate) fn shapes() -> Vec<Shape> {
                     lone_beside_a_value,
                     40,
                     &[&["Personalnummer", "00000"], &["Beispielwert"]],
+                )
+            },
+        },
+        Shape {
+            name: "a strip without dividers whose labels are 3 % smaller than their values",
+            axes: Axes {
+                look: NO_RISING,
+                ..ALL
+            },
+            draw: |v| {
+                with_cells(
+                    v,
+                    under_step_strip,
+                    60,
+                    &[
+                        &["Name", "Beispiel"],
+                        &["Ort", "Musterstadt"],
+                        &["Nr", "4711"],
+                    ],
                 )
             },
         },

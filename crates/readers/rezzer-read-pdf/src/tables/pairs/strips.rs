@@ -542,7 +542,7 @@ pub(in crate::tables) fn holds_values(flow: &Flow, by_y: &ByY, fr: &Frame) -> bo
 /// Fields between drawn rules, in the `frames` of the page. A frame's dividers part it into
 /// cells; a cell whose first line is two labels or more over lines of values is parted further,
 /// each value going to the label it stands under (see [`parts_of`]). When the text of each
-/// part is fields (see [`parse`]; the label smaller than its value by half a point) and short,
+/// part is fields (see [`parse`]; the label a size step smaller than its value) and short,
 /// the strip is a row of fields. A cell a run stands across (a value line the dividers could
 /// not cut at a word gap) or a value under no label of its own leaves its fields as text, and
 /// a strip whose labels do not all stand over or beside their values leaves all of them as
@@ -689,6 +689,17 @@ pub(in crate::tables) fn field_strips(
                                         Some(l) => l.1.extend(names),
                                         None => left_out.push((why, names)),
                                     }
+                                }
+                                // One face whose first line is smaller by less than a step:
+                                // labels not set apart from their values. The row is not
+                                // clear, which is said by its labels, and it is read cell
+                                // by cell, never line by line across its cells.
+                                Parsed::No
+                                    if under_a_step(flow, &part) && field_sized(flow, &part) =>
+                                {
+                                    unread = true;
+                                    field_why = field_why.or(Some(NO_LABEL));
+                                    styled_heads.extend(label_names(flow, &part));
                                 }
                                 Parsed::Unsure(why) => {
                                     unread = true;
@@ -1781,14 +1792,7 @@ fn two_lines(flow: &Flow, ids: &[usize]) -> Option<(Vec<usize>, Vec<usize>)> {
             let (sa, sb) = (style(a)?, style(b)?);
             // The exact sizes decide the step: two sizes on both sides of a half-point edge
             // of the style key by float noise are one size (see [`LABEL_STEP`]).
-            let size = |l: &[usize]| {
-                let s: Vec<f32> = l
-                    .iter()
-                    .filter(|i| !marker.contains(i))
-                    .map(|&i| flow.runs[i].size)
-                    .collect();
-                s.iter().sum::<f32>() / s.len().max(1) as f32
-            };
+            let size = |l: &[usize]| mean_size(flow, l.iter().copied(), &marker);
             (sb.0 - sa.0 >= 1 && size(b) >= LABEL_STEP * size(a)).then(|| (a.clone(), b.clone()))
         }
         _ => None,

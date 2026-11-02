@@ -1512,3 +1512,73 @@ fn one_size_apart_by_float_noise_at_a_key_edge_is_no_label() {
         wrong.join("\n")
     );
 }
+
+/// Task 15b part 2e-5 fix round 1 (review I1, ruling P6-X): three fields whose labels are
+/// smaller than their values by less than a size step (`LABEL_STEP`): 3 %, 3.5 % or half a
+/// point. Such labels are no clear label style, so the fields need not pair; but a strip between
+/// two rules is never read line by line with its cells mixed (`Name Ort Nr` over `Beispiel
+/// Musterstadt 4711`) and without a word: either all three pair, or none pairs, a loss names
+/// the fields and each cell's text stays together. Sizes 6 to 14 (under 9 points at 3 % the
+/// label and value share one half-point key, from 9 points they do not), both data fonts, boxes
+/// in a row and a column, strips with and without dividers.
+#[test]
+fn labels_under_a_size_step_smaller_never_mix_their_cells() {
+    let mut wrong = Vec::new();
+    let mut reads = 0;
+    for size in [
+        6.0f32, 7.0, 8.0, 8.5, 9.0, 9.5, 10.0, 11.0, 12.0, 13.0, 14.0,
+    ] {
+        for step in [1.03f32, 1.035, (size + 0.5) / size] {
+            if step >= 1.04 {
+                continue;
+            }
+            for font in ["F1", "F3"] {
+                for how in [Cells::Row, Cells::Column, Cells::Strip, Cells::Divided] {
+                    let m = Middle {
+                        head: &["Ort"],
+                        size: 1.0,
+                        font: None,
+                        lines: &["Musterstadt"],
+                    };
+                    let at = format!("{size} pt x {step} {how:?} {font}");
+                    let out = three_cells(m, size, step, font, how);
+                    reads += 1;
+                    let rows: Vec<String> = read_tables(&out)
+                        .iter()
+                        .flatten()
+                        .map(|r| r.join(": "))
+                        .collect();
+                    let all = ["Name: Beispiel", "Ort: Musterstadt", "Nr: 4711"];
+                    let paired = all.iter().filter(|w| rows.iter().any(|r| r == *w)).count();
+                    let said = out
+                        .document
+                        .losses
+                        .iter()
+                        .any(|l| l.what.contains("Name") && l.what.contains("Nr"));
+                    if paired != 3 && !(paired == 0 && said) {
+                        wrong.push(format!("{at}: {paired} pairs, said {said}: {rows:?}"));
+                    }
+                    wrong.extend(
+                        cells_wrong(
+                            &out,
+                            &[
+                                vec!["Name", "Beispiel"],
+                                vec!["Ort", "Musterstadt"],
+                                vec!["Nr", "4711"],
+                            ],
+                        )
+                        .into_iter()
+                        .map(|e| format!("{at}: {e}")),
+                    );
+                }
+            }
+        }
+    }
+    assert_eq!(reads, 192);
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}

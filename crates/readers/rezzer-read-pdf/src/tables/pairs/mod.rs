@@ -103,6 +103,49 @@ fn same_style(a: &Run, b: &Run) -> bool {
             && a.size.max(b.size) < LABEL_STEP * a.size.min(b.size))
 }
 
+/// The mean exact size of the runs `ids`, raised markers `marker` aside (0 for none): the
+/// half-point key of [`style_of`] parts sizes that differ by float noise only (8.749 and 8.751
+/// points), so a size step (see [`LABEL_STEP`]) is told by the exact sizes.
+fn mean_size(flow: &Flow, ids: impl Iterator<Item = usize>, marker: &HashSet<usize>) -> f32 {
+    let (mut sum, mut n) = (0.0f32, 0usize);
+    for i in ids.filter(|i| !marker.contains(i)) {
+        sum += flow.runs[i].size;
+        n += 1;
+    }
+    sum / n.max(1) as f32
+}
+
+/// Whether the text `ids` is lines of one face whose first line is smaller than the lines
+/// under it, but by less than a size step (see [`LABEL_STEP`]; the half-point keys may differ
+/// or not): a first line that may be meant as labels, though no label style is set apart from
+/// the values.
+fn under_a_step(flow: &Flow, ids: &[usize]) -> bool {
+    let ids: Vec<usize> = ids
+        .iter()
+        .copied()
+        .filter(|&i| inked(&flow.runs[i]) && !flow.runs[i].off_axis)
+        .collect();
+    let lines = lines_of(flow, &ids);
+    let marker = markers(flow, &lines);
+    let Some((first, rest)) = lines.split_first() else {
+        return false;
+    };
+    let face = |i: &usize| {
+        let s = style_of(&flow.runs[*i]);
+        (s.1, s.2, s.3)
+    };
+    let one_face = lines
+        .iter()
+        .flatten()
+        .filter(|i| !marker.contains(i))
+        .all(|i| face(i) == face(&first[0]));
+    let (a, b) = (
+        mean_size(flow, first.iter().copied(), &marker),
+        mean_size(flow, rest.iter().flatten().copied(), &marker),
+    );
+    one_face && !rest.is_empty() && a > 0.0 && b > a && b < LABEL_STEP * a
+}
+
 fn inked(r: &Run) -> bool {
     r.text.chars().any(|c| !c.is_whitespace())
 }
@@ -167,8 +210,8 @@ struct Reading<'a> {
     /// A box: its text is one field, its label at most [`LABEL_LINES`] lines (lines of the
     /// label style one under the other are one label).
     one_field: bool,
-    /// The label must be smaller than the value by half a point; else another weight or
-    /// slant also sets it apart.
+    /// The label must be a size step smaller than the value (see [`LABEL_STEP`]); else
+    /// another weight or slant also sets it apart.
     smaller: bool,
     /// Text of one style under this size (half points) is labels only: empty fields.
     small: i32,
@@ -229,17 +272,14 @@ fn parse(flow: &Flow, ids: &[usize], how: Reading) -> Parsed {
         2 => {}
         _ => return Parsed::Unsure(THREE_STYLES),
     }
-    // The exact size of a style's text: the half-point key parts two sizes that differ by
-    // float noise only (8.749 and 8.751 points), so a size step is told by the exact sizes
-    // (a step is `LABEL_STEP`, relative to the size).
+    // The exact size of a style's text (see [`mean_size`]).
     let exact = |s: Style| {
-        let sizes: Vec<f32> = lines
+        let of = lines
             .iter()
             .flatten()
-            .filter(|&&i| !marker.contains(&i) && style_of(&flow.runs[i]) == s)
-            .map(|&i| flow.runs[i].size)
-            .collect();
-        sizes.iter().sum::<f32>() / sizes.len().max(1) as f32
+            .copied()
+            .filter(|&i| style_of(&flow.runs[i]) == s);
+        mean_size(flow, of, &marker)
     };
     let one_size = |a: Style, b: Style| {
         let (x, y) = (exact(a), exact(b));

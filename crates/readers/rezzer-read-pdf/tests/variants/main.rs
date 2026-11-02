@@ -282,6 +282,7 @@ shape_tests! {
     two_named_addresses_between_rules => "two named addresses between rules",
     a_lone_field_in_a_strip_beside_a_value => "a lone field in a strip beside a value",
     a_strip_without_dividers_beside_a_bold_title => "a strip without dividers beside a bold title",
+    a_strip_without_dividers_whose_labels_are_a_little_smaller => "a strip without dividers whose labels are 3 % smaller than their values",
     boxed_fields_beside_an_empty_box => "boxed fields beside an empty box",
     boxed_fields_beside_an_empty_field => "boxed fields beside an empty field",
     boxed_fields_beside_a_company_in_another_font => "boxed fields beside a company in another font",
