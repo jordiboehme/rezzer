@@ -326,7 +326,9 @@ fn extent(f: &Frag) -> (f32, f32) {
 /// goes on right where the one before it ends, on its baseline in its size and in its box (a
 /// run cut at a link's edge or a change of style), moves with it, so other text that shares
 /// the row is never put in between. Where it goes on counts from its first glyph, white space
-/// too: a run cut at a change of style may start with a word space.
+/// too: a run cut at a change of style may start with a word space. A run parted by padding
+/// (white space wider than a piece gap, a value padded to its place) starts a chain of its
+/// own: a label drawn in that white space stands between the two in the order.
 fn chain_heads(frags: &[Frag]) -> Vec<usize> {
     let mut head: Vec<usize> = Vec::with_capacity(frags.len());
     for (i, f) in frags.iter().enumerate() {
@@ -337,6 +339,7 @@ fn chain_heads(frags: &[Frag]) -> Vec<usize> {
                 && (f.y - p.y).abs() <= 0.1 * size
                 && (f.size - p.size).abs() <= 0.05 * size
                 && (f.pen0 - p.pen).abs() <= 0.1 * size
+                && !(p.padded && gap(p.free, p.padded, f) > PIECE_GAP * size)
         };
         head.push(if joins { head[i - 1] } else { i });
     }

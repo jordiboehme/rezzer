@@ -208,3 +208,58 @@ fn header_field_grid_of_one_line_a_row_reads_row_by_row() {
 
 // ---------------------------------------------------------------------------------------
 // Separators drawn as marks
+
+/// Task 15b part 2e-5 (list line 7, group 17, ruling P6-X): a label of the template drawn in
+/// the padding of a data line (`Blatt:` between a date and the page number, its baseline a
+/// little higher) stands between the two parts of that line in the order: `12.34.56 Blatt: 1`,
+/// never the number before its label. The padding that parts the line is wider than a piece
+/// gap of the data size (relative). Sizes 6 to 14, plain and bold data, Helvetica and Times
+/// labels, the label's baseline on the data line's or 0.13 of the size higher.
+#[test]
+fn a_label_in_the_padding_of_a_data_line_stands_between_its_parts() {
+    let mut wrong = Vec::new();
+    let mut reads = 0;
+    for size in [6.0f32, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0] {
+        for bold_data in [false, true] {
+            for times in [false, true] {
+                for rise in [0.0f32, 0.13] {
+                    let pitch = 0.6 * size;
+                    let (left, y) = (40.0, 700.0);
+                    let x = left + 11.0 * pitch;
+                    let mut template = label(x, y + rise * size, 0.7 * size, "Blatt:");
+                    if times {
+                        template = template.replace("BT /FL ", "BT /FT ");
+                    }
+                    let page = FormPage {
+                        template,
+                        left,
+                        size,
+                        bold_data,
+                        lines: vec![DataLine {
+                            y,
+                            text: format!("12.34.56{}", padded(10, "1")),
+                        }],
+                        ..FormPage::default()
+                    };
+                    let out = read(&print_form(&[page], "", ""));
+                    reads += 1;
+                    let text = all_text(&out);
+                    let at = format!("{size} pt, bold {bold_data}, times {times}, rise {rise}");
+                    if let Err(e) = in_order(&text, &["12.34.56", "Blatt:", "1"]) {
+                        wrong.push(format!("{at}: {e}"));
+                    }
+                    if !text.contains("12.34.56 Blatt: 1") {
+                        wrong.push(format!("{at}: {text:?}"));
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(reads, 72);
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}
