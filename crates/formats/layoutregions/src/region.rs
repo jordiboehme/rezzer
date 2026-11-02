@@ -30,6 +30,23 @@ pub enum Kind {
 }
 
 impl Kind {
+    /// Every kind, in `Kind` order.
+    pub const ALL: [Kind; 13] = [
+        Kind::HeaderBand,
+        Kind::FooterBand,
+        Kind::TitleBlock,
+        Kind::Heading,
+        Kind::Paragraph,
+        Kind::List,
+        Kind::Table,
+        Kind::LabelValue,
+        Kind::Totals,
+        Kind::Figure,
+        Kind::Code,
+        Kind::FootnoteLegend,
+        Kind::Spatial,
+    ];
+
     /// The name in snake case: `header_band`, `label_value` and so on.
     pub fn name(self) -> &'static str {
         match self {

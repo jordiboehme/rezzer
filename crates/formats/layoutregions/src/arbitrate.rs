@@ -46,6 +46,12 @@ impl InOrder {
     /// the region limit is reached, one `Limit` issue is recorded the first time only, not
     /// once per refused offer.
     pub fn offer(&mut self, c: Candidate) -> Offer {
+        self.offer_as(c, Certainty::Rule)
+    }
+
+    /// [`InOrder::offer`] for a region decided with `certainty`: `Exact` where the file states
+    /// the region (a tagged table), `Rule` where a rule found it.
+    pub fn offer_as(&mut self, c: Candidate, certainty: Certainty) -> Offer {
         work::add(1 + c.prims.len() as u64);
         if self.regions.len() >= self.limits.max_regions {
             self.note_limit();
@@ -59,7 +65,7 @@ impl InOrder {
             self.owner.insert(*p, id);
         }
         self.regions
-            .push(Region::decided(id, self.page, c, Certainty::Rule));
+            .push(Region::decided(id, self.page, c, certainty));
         Offer::Accepted(id)
     }
 

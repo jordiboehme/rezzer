@@ -175,22 +175,7 @@ fn counts_by_kind_in_kind_order() {
 #[test]
 fn kind_names_are_snake_case() {
     assert_eq!(Kind::LabelValue.name(), "label_value");
-    let all = [
-        Kind::HeaderBand,
-        Kind::FooterBand,
-        Kind::TitleBlock,
-        Kind::Heading,
-        Kind::Paragraph,
-        Kind::List,
-        Kind::Table,
-        Kind::LabelValue,
-        Kind::Totals,
-        Kind::Figure,
-        Kind::Code,
-        Kind::FootnoteLegend,
-        Kind::Spatial,
-    ];
-    for k in all {
+    for k in Kind::ALL {
         assert!(
             k.name()
                 .bytes()
@@ -199,4 +184,22 @@ fn kind_names_are_snake_case() {
             k.name()
         );
     }
+}
+
+#[test]
+fn all_kinds_are_in_kind_order() {
+    assert!(Kind::ALL.windows(2).all(|w| w[0] < w[1]));
+    assert_eq!(Kind::ALL.first(), Some(&Kind::HeaderBand));
+    assert_eq!(Kind::ALL.last(), Some(&Kind::Spatial));
+}
+
+#[test]
+fn an_offer_keeps_its_certainty() {
+    let p = page();
+    let mut arb = InOrder::new(&p, &Limits::default());
+    arb.offer_as(cand(Kind::Table, vec![PrimId::Text(0)]), Certainty::Exact);
+    arb.offer(cand(Kind::Paragraph, vec![PrimId::Text(1)]));
+    let out = arb.finish();
+    assert_eq!(out.regions[0].certainty, Certainty::Exact);
+    assert_eq!(out.regions[1].certainty, Certainty::Rule);
 }
