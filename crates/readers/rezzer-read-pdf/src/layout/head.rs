@@ -230,6 +230,9 @@ pub(crate) enum PageDate {
     /// No date, with the words of an Info `Uncertain` loss: dates in the head that nothing
     /// marks, marked dates that differ, or a marked date that cannot be read for sure.
     Unsure(String),
+    /// No date, with the words of an Info `Limit` loss: page 1 holds more dates than are
+    /// checked.
+    Limit(String),
 }
 
 /// A date as written: its separator and its parts.
@@ -836,9 +839,10 @@ pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: Option<f32>) ->
             spot,
         });
     };
+    let baselines = Baselines::new(&lines);
     for (k, l) in lines.iter().enumerate() {
         if let Some(label) = whole_label(&l.text)
-            && let Some(v) = value_of(&lines, k)
+            && let Some(v) = value_of(&lines, &baselines, k)
         {
             let end = scan::dates(&v.text, 4..=4).first().map_or(0, |d| d.end);
             add(label, &v.text, spot_of(v, 0, end), &mut out);
@@ -880,6 +884,10 @@ pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: Option<f32>) ->
 /// A table whose top lies in the upper half of the page may hold the document date.
 const HALF: f32 = 0.5;
 
+/// Dates [`document_date`] may look at in all, each marked date against the dates of the page
+/// until one stands in its column; past them it takes none and says so.
+const DATE_WORK: usize = 4_000_000;
+
 /// The document date of page 1 from what `dates` holds: a date that a date label marks and
 /// that is the only date in its column on page 1 (every date-like token, in any form, see
 /// [`date_like`], whose x span widened by [`BESIDE_SIZES`] sizes on each side overlaps the
@@ -892,14 +900,30 @@ const HALF: f32 = 0.5;
 /// only a day the calendar has.
 pub(crate) fn document_date(dates: &Dates) -> PageDate {
     // A label governs one date: a marked date with another date in its column, above or below
-    // it anywhere on the page, heads or belongs to a list and is no mark.
-    let alone = |m: &&Marked| {
-        !dates
-            .spots
-            .iter()
-            .any(|s| !s.same(&m.spot) && m.spot.in_column_of(s))
-    };
-    let marked: Vec<&Marked> = dates.marked.iter().filter(alone).collect();
+    // it anywhere on the page, heads or belongs to a list and is no mark. Each date looked at
+    // is a step of the bound.
+    let mut work = 0usize;
+    let mut marked: Vec<&Marked> = Vec::new();
+    for m in &dates.marked {
+        let mut listed = false;
+        for s in &dates.spots {
+            work += 1;
+            if !s.same(&m.spot) && m.spot.in_column_of(s) {
+                listed = true;
+                break;
+            }
+        }
+        if work > DATE_WORK {
+            return PageDate::Limit(format!(
+                "page 1 holds more dates after date labels than are checked ({} of them); \
+                 none is taken as the document date",
+                dates.marked.len()
+            ));
+        }
+        if !listed {
+            marked.push(m);
+        }
+    }
     if let Some(first) = marked.first() {
         let kinds = distinct(marked.iter().map(|s| s.written));
         if kinds > 1 {
@@ -961,7 +985,7 @@ const BESIDE_SIZES: f32 = 6.0;
 /// items under column titles has more cells on the line and is no value of one label. Whether
 /// the label governs that one date (no other date in its column) is checked in
 /// [`document_date`].
-fn value_of<'a, 'r>(all: &'a [Line<'r>], k: usize) -> Option<&'a Line<'r>> {
+fn value_of<'a, 'r>(all: &'a [Line<'r>], baselines: &Baselines, k: usize) -> Option<&'a Line<'r>> {
     let label = &all[k];
     let end = right_of(label);
     let after = || all.iter().skip(k + 1).take(VALUE_LINES);
@@ -976,22 +1000,44 @@ fn value_of<'a, 'r>(all: &'a [Line<'r>], k: usize) -> Option<&'a Line<'r>> {
     beside.or_else(|| {
         after()
             .filter(|v| right_below(label, v) && (v.x - label.x).abs() <= label.size)
-            .filter(|v| date_alone(all, v))
+            .filter(|v| date_alone(all, baselines, v))
             .max_by(|a, b| a.y.total_cmp(&b.y))
     })
 }
 
-/// Whether the piece `v` among the pieces `all` is a date and nothing else, with no other
-/// piece on its baseline (within half its size).
-fn date_alone(all: &[Line<'_>], v: &Line<'_>) -> bool {
+/// The pieces of page 1 by their baseline, to find the pieces near a baseline by a search.
+struct Baselines {
+    /// Piece indices by baseline (a piece at no height is at none), and those baselines.
+    order: Vec<usize>,
+    ys: Vec<f32>,
+}
+
+impl Baselines {
+    fn new(all: &[Line<'_>]) -> Baselines {
+        let mut order: Vec<usize> = (0..all.len()).filter(|&k| !all[k].y.is_nan()).collect();
+        order.sort_by(|&a, &b| all[a].y.total_cmp(&all[b].y));
+        let ys = order.iter().map(|&k| all[k].y).collect();
+        Baselines { order, ys }
+    }
+}
+
+/// Whether the piece `v` among the pieces `all` (by baseline in `baselines`) is a date and
+/// nothing else, with no other piece on its baseline (within half its size).
+fn date_alone(all: &[Line<'_>], baselines: &Baselines, v: &Line<'_>) -> bool {
     let text = v.text.trim();
     let is_date = scan::dates(text, 4..=4)
         .first()
         .is_some_and(|d| d.start == 0 && d.end == text.len());
+    // The pieces near its baseline, a little more than half its size each way; each is
+    // tested as it stands.
+    let reach = v.size.abs() + 1.0;
+    let a = baselines.ys.partition_point(|y| *y < v.y - reach);
+    let z = baselines.ys.partition_point(|y| *y <= v.y + reach);
     is_date
-        && !all
-            .iter()
-            .any(|p| !std::ptr::eq(p, v) && (p.y - v.y).abs() <= v.size / 2.0)
+        && !baselines.order[a..z.max(a)].iter().any(|&k| {
+            let p = &all[k];
+            !std::ptr::eq(p, v) && (p.y - v.y).abs() <= v.size / 2.0
+        })
 }
 
 /// A date as `YYYY-MM-DD`, when it reads for sure: a dotted date day first, a dashed one year
@@ -1124,6 +1170,36 @@ mod tests {
             spans("16 1.234,56 16:30 32.01.26 16.13.2026 1.2.3 Muster 16 Summe 2026").is_empty()
         );
         assert!(spans("16.01 2026").is_empty());
+    }
+
+    #[test]
+    fn many_marked_dates_apart_are_checked_within_a_bound() {
+        // 3,000 marked dates, each in a column of its own: checking each against every date
+        // of the page passes the bound, which says so and takes no date.
+        let mut dates = Dates::default();
+        for k in 0..3_000 {
+            let spot = Spot {
+                y: 700.0,
+                x0: k as f32 * 2.0,
+                x1: k as f32 * 2.0 + 0.5,
+                size: 0.1,
+            };
+            dates.spots.push(spot);
+            dates.marked.push(Marked {
+                written: ('.', [1, 2, 2026]),
+                text: "01.02.2026".into(),
+                label: "Datum".into(),
+                spot,
+            });
+        }
+        match document_date(&dates) {
+            PageDate::Limit(what) => assert!(what.contains("page 1"), "{what}"),
+            other => panic!("{other:?}"),
+        }
+        // A few are checked as ever.
+        dates.marked.truncate(3);
+        dates.spots.truncate(3);
+        assert!(matches!(document_date(&dates), PageDate::Found(_)));
     }
 
     #[test]

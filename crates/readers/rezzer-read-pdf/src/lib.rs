@@ -1527,6 +1527,9 @@ fn page_date(dates: &layout::Dates, budget: &Budget, out: &mut Out) {
         layout::PageDate::Unsure(what) => {
             out.loss("p1", what, LossReason::Uncertain, Severity::Info);
         }
+        layout::PageDate::Limit(what) => {
+            out.loss("p1", what, LossReason::Limit, Severity::Info);
+        }
     }
 }
 

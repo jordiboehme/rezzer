@@ -4708,3 +4708,44 @@ fn rows_of_field_boxes_over_much_text_share_one_work_bound() {
     let body = text(page(&out, 1));
     assert!(body.contains("l000") && body.contains("r099"));
 }
+
+/// Page 1 of `n` lines of `label` alone, each over a date alone on its line at its left edge.
+fn labels_over_dates(n: usize, label: &str) -> Vec<u8> {
+    let h = (n + 2) * 16;
+    let mut c = b"BT /F1 6 Tf ".to_vec();
+    for i in 0..n {
+        let y = h - 10 - i * 16;
+        c.extend(
+            format!(
+                "1 0 0 1 72 {y} Tm ({label}) Tj 1 0 0 1 72 {} Tm ({:02}.{:02}.2026) Tj ",
+                y - 7,
+                1 + i % 28,
+                1 + i % 12
+            )
+            .as_bytes(),
+        );
+    }
+    c.extend(b"ET\n");
+    tall_page(&c, h)
+}
+
+#[test]
+fn many_date_labels_on_page_1_cost_about_what_their_text_costs() {
+    // 50,000 date labels, each over a date alone on its line, read at the default limits
+    // (the hostile memory limit holds fewer glyphs on a page): the value of each label is
+    // found by the baselines near it, so the page costs about what the same lines cost with a
+    // word that is no date label. No date is taken: the dates are a list.
+    let at_default = |bytes: &[u8]| read_with(bytes, &Budget::new(Limits::default()));
+    let start = Instant::now();
+    let _twin = at_default(&labels_over_dates(50_000, "Daten"));
+    let twin = start.elapsed();
+    let start = Instant::now();
+    let out = at_default(&labels_over_dates(50_000, "Datum"));
+    let took = start.elapsed();
+    assert!(
+        took < twin * 2 + Duration::from_secs(1),
+        "{took:?} against {twin:?}"
+    );
+    assert!(out.document.properties.document_date.is_none());
+    assert!(text(page(&out, 1)).contains("Datum"));
+}
