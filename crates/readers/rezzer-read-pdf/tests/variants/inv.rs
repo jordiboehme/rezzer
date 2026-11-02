@@ -415,6 +415,21 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
         }
     }
     check_cells(out, n, sheet, broken);
+    if !want.glyph_text.is_empty() {
+        let text: Vec<String> = blocks.iter().map(|b| block_text(b)).collect();
+        for g in &want.glyph_text {
+            let odd: Vec<char> = g.chars().filter(|c| !c.is_ascii()).collect();
+            if let Some(t) = text
+                .iter()
+                .find(|t| t.contains(g.as_str()) || odd.iter().any(|c| t.contains(*c)))
+            {
+                broken.push(Broken(
+                    Inv::WrongValue,
+                    format!("page {p}: the glyph text {g:?} of a code stands in the read: {t:?}"),
+                ));
+            }
+        }
+    }
     if n == 0 {
         let props = &out.document.properties;
         // A found title is the page's title, or a title the page may have besides (a bold

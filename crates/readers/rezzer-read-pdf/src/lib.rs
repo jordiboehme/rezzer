@@ -16,6 +16,7 @@
 //! Scripts and actions are never run, links are never followed.
 
 mod annots;
+mod barfont;
 mod codes;
 mod fallback;
 mod forms;

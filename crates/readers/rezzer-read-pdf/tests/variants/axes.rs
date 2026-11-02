@@ -417,6 +417,10 @@ pub(crate) struct Want {
     /// round 2): besides the fields' own cells (a label and its value), cells whose texts the
     /// fields do not list, an address under a name, a title.
     pub cells: Vec<Vec<String>>,
+    /// The texts of the glyphs of codes printed with a barcode font (Task 15b part 2f-1): none
+    /// may stand in the read, nor any of their characters past ASCII (P6-X: the glyph text of
+    /// a code is a wrong value).
+    pub glyph_text: Vec<String>,
 }
 
 /// One page of a variant: what is drawn and what it must read as.

@@ -22,6 +22,9 @@ pub(crate) struct VectorCode {
     /// For a part printed in a picture that shows QR finder patterns (see [`printed_codes`]):
     /// how many, 0 otherwise.
     pub finders: usize,
+    /// It is printed with a barcode font (see [`crate::barfont`]): its bars are glyphs, and
+    /// the read is checked against them as a picture's is.
+    pub font: bool,
 }
 
 /// The most filled rectangles a page keeps for finding codes.
@@ -905,6 +908,7 @@ fn region(
         module,
         id: hasher.finish(),
         finders,
+        font: false,
     })
 }
 

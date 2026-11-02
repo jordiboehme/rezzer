@@ -6,6 +6,8 @@
 
 #![allow(dead_code)]
 
+pub mod barfont;
+
 use std::alloc::{GlobalAlloc, Layout};
 use std::io::Write;
 use std::sync::Arc;
@@ -335,10 +337,11 @@ impl Default for FormPage {
 /// A file of print-run form pages, A4 unless `paper` says otherwise. The page and the
 /// template have the fonts `/FL` (Helvetica, for labels), `/FD` (Courier, for data lines),
 /// `/FB` (Helvetica-Bold) and `/FDB` (Courier-Bold, for data lines with `bold_data`), `/FT`
-/// (Times-Roman) and `/FTB` (Times-Bold), all in WinAnsi: the template and the data lines are
-/// written in that encoding, so labels may hold umlauts, `\u{df}` and the euro sign. The page
-/// and the template share one picture, `/Logo` (4 by 4 gray pixels), which [`logo`] draws.
-/// `info` holds the entries of the Info dictionary (for example `/Title (Lohn)`); with `""`
+/// (Times-Roman) and `/FTB` (Times-Bold), all in WinAnsi; a template that shows `/FC` or `/FN`
+/// gets the Code 128 barcode fonts of [`barfont`] (named for codes and not). The template and
+/// the data lines are written in that encoding, so labels may hold umlauts, `\u{df}` and the
+/// euro sign. The page and the template share one picture, `/Logo` (4 by 4 gray pixels),
+/// which [`logo`] draws. `info` holds the entries of the Info dictionary (for example `/Title (Lohn)`); with `""`
 /// the file has none. `catalog_extra` goes into the catalog dictionary, where `{annots}`
 /// stands for the references of every annotation of every page, in page order (for example
 /// `/AcroForm << /Fields [{annots}] >>`).
@@ -360,9 +363,22 @@ pub fn print_form(pages: &[FormPage], info: &str, catalog_extra: &str) -> Vec<u8
          /BitsPerComponent 8",
         &(0..16u8).map(|i| 30 + i * 9).collect::<Vec<u8>>(),
     );
+    // Barcode fonts only for pages that show them: `/FC` named `Code128`, `/FN` with a name
+    // that says nothing (see [`barfont`]).
+    let codes = pages
+        .iter()
+        .any(|p| p.template.contains("/FC ") || p.template.contains("/FN "));
+    let bar_fonts = if codes {
+        let program = barfont::program(None);
+        let named = barfont::add_font(&mut b, "Code128", &program);
+        let plain = barfont::add_font(&mut b, "ShopBars", &program);
+        format!(" /FC {named} 0 R /FN {plain} 0 R")
+    } else {
+        String::new()
+    };
     let fonts = format!(
         "/Font << /FL {label} 0 R /FD {data} 0 R /FB {bold} 0 R /FDB {bold_data} 0 R \
-         /FT {times} 0 R /FTB {times_bold} 0 R >>"
+         /FT {times} 0 R /FTB {times_bold} 0 R{bar_fonts} >>"
     );
     let mut kids = Vec::new();
     let mut all_annots = Vec::new();

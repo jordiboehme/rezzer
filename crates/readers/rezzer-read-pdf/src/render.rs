@@ -106,6 +106,20 @@ pub(crate) enum How {
     /// A code drawn as paths, modules of this many points: whole pixels a module (3), the
     /// region's corner on a whole pixel. 300 dpi when the module size is not known (0).
     Modules(f32),
+    /// A code printed with a barcode font ([`crate::barfont`]), rendered as [`How::Modules`]
+    /// is. Its glyphs passed no code-shape test of paths, so a read from it is checked
+    /// against its bars as a picture's is.
+    Glyphs(f32),
+}
+
+impl How {
+    /// The module of a code drawn as paths or printed with a barcode font.
+    fn module(self) -> Option<f32> {
+        match self {
+            How::Modules(m) | How::Glyphs(m) => Some(m),
+            How::Picture(..) => None,
+        }
+    }
 }
 
 /// The most regions of one page that needs vision that are rendered again; the others are
@@ -370,6 +384,13 @@ pub(crate) struct Small {
     pub furniture: Option<Furniture>,
 }
 
+impl Small {
+    /// It is a code printed with a barcode font.
+    fn font(&self) -> bool {
+        matches!(self.how, Some(How::Glyphs(_)))
+    }
+}
+
 /// The top or bottom band of a page, as a share of its height, where a small picture is a
 /// logo: the band of running headers and footers (`layout::BAND`).
 const LOGO_BAND: f32 = 0.18;
@@ -616,7 +637,7 @@ pub(crate) fn vision(
             .iter()
             .map(|c| Region {
                 b: c.b,
-                how: How::Modules(c.module),
+                how: modules_how(c),
             })
             .collect();
         regions.extend(
@@ -687,7 +708,7 @@ pub(crate) fn vision(
         id: c.id,
         logo: false,
         mcid: None,
-        how: Some(How::Modules(c.module)),
+        how: Some(modules_how(c)),
         hint: true,
         vector: true,
         furniture: None,
@@ -747,11 +768,24 @@ fn small_pictures(items: &PageItems, small: &[usize]) -> String {
     )
 }
 
+/// How a region of the page that may be a code is rendered again: by its modules, as a
+/// code drawn as paths or one printed with a barcode font.
+fn modules_how(c: &crate::codes::VectorCode) -> How {
+    if c.font {
+        How::Glyphs(c.module)
+    } else {
+        How::Modules(c.module)
+    }
+}
+
 /// What a picture that looks like a code but gives none is called, after its box.
 const UNREAD_WORDS: &str = ", barcode or QR code found, not decoded";
 
 /// What a drawing of paths that passed the code-shape test is called.
 const DRAWING: &str = "a drawing that looks like a barcode or QR code";
+
+/// What a code printed with a barcode font is called.
+const FONT_CODE: &str = "a barcode printed in a barcode font";
 
 /// `box 40, 760 to 100, 800`: a box in whole points.
 fn box_words(b: &[f32; 4]) -> String {
@@ -761,8 +795,10 @@ fn box_words(b: &[f32; 4]) -> String {
 
 /// What a small picture is called before it is read for codes: a code drawn as paths, a
 /// logo, or a small picture (which needs vision).
-fn small_name(logo: bool, vector: bool) -> &'static str {
-    if vector {
+fn small_name(logo: bool, vector: bool, font: bool) -> &'static str {
+    if font {
+        "barcode printed in a barcode font"
+    } else if vector {
         "barcode or QR code"
     } else if logo {
         "logo or small picture"
@@ -773,7 +809,11 @@ fn small_name(logo: bool, vector: bool) -> &'static str {
 
 /// The words for one place of a small picture: `small picture, box 40, 760 to 100, 800`.
 pub(crate) fn place_alt(s: &Small) -> String {
-    format!("{}, {}", small_name(s.logo, s.vector), box_words(&s.framed))
+    format!(
+        "{}, {}",
+        small_name(s.logo, s.vector, s.font()),
+        box_words(&s.framed)
+    )
 }
 
 /// The words of one place `alt` (from [`place_alt`]) once its picture was read for codes:
@@ -784,8 +824,8 @@ fn reread_place(alt: &str, read: Option<&Reread>, more: &str) -> String {
     match read {
         Some(Reread::Codes(name)) => format!("{name}, {rest}{more}"),
         Some(Reread::Unread) => format!("{alt}{UNREAD_WORDS}{more}"),
-        Some(Reread::Drawing(scanned)) => {
-            format!("{DRAWING}, {rest}, {}{more}", drawing_words(*scanned))
+        Some(Reread::Drawing(scanned, name)) => {
+            format!("{name}, {rest}, {}{more}", drawing_words(*scanned))
         }
         None => format!("{alt}{more}"),
     }
@@ -806,9 +846,10 @@ enum Reread {
     Codes(String),
     /// It looks like a code, but none was read.
     Unread,
-    /// A drawing of paths that looks like a code gave none (`true`), or was not rendered
-    /// again to be read (`false`, a loss says why).
-    Drawing(bool),
+    /// A drawing of paths that looks like a code, or a code printed with a barcode font, gave
+    /// none (`true`), or was not rendered again to be read (`false`, a loss says why); with
+    /// what it is called ([`DRAWING`] or [`FONT_CODE`]).
+    Drawing(bool, &'static str),
 }
 
 /// The places of one small picture asset: the page and box of each of the first
@@ -831,6 +872,8 @@ pub(crate) struct Places {
     pub logo: bool,
     /// It is a region of paths, not a picture.
     vector: bool,
+    /// It is a code printed with a barcode font.
+    font: bool,
     /// One of its places looks like a code.
     hint: bool,
     /// Every place is page furniture.
@@ -847,6 +890,7 @@ impl Places {
         let mut p = Places {
             logo: true,
             vector: s.vector,
+            font: s.font(),
             furniture: true,
             stands: s.furniture.map(|f| f.pages),
             ..Places::default()
@@ -893,16 +937,16 @@ impl Places {
     pub(crate) fn alt(&self) -> String {
         let name = match &self.read {
             Some(Reread::Codes(name)) => name.as_str(),
-            Some(Reread::Drawing(_)) => DRAWING,
-            _ => small_name(self.logo, self.vector),
+            Some(Reread::Drawing(_, name)) => name,
+            _ => small_name(self.logo, self.vector, self.font),
         };
         let drawing = match self.read {
-            Some(Reread::Drawing(scanned)) => format!(", {}", drawing_words(scanned)),
+            Some(Reread::Drawing(scanned, _)) => format!(", {}", drawing_words(scanned)),
             _ => String::new(),
         };
         let code = match self.read {
             Some(Reread::Unread) => UNREAD_WORDS,
-            Some(Reread::Drawing(_)) => drawing.as_str(),
+            Some(Reread::Drawing(..)) => drawing.as_str(),
             _ => "",
         };
         let code = format!("{code}{}", self.unconfirmed);
@@ -1654,6 +1698,7 @@ impl Cut<'_> {
                     picture = fine;
                 }
             }
+            // A code printed with a barcode font is not: its read is checked against its bars.
             if matches!(c.how, Some(How::Modules(_))) {
                 scans.drawn.insert(c.asset);
             }
@@ -1821,8 +1866,8 @@ pub(crate) fn region_scale(region: &Region) -> Option<f64> {
             };
             Some(want.min(REGION_SCALE)).filter(|&s| s > SCALE * 1.01)
         }
-        How::Modules(m) if m > 0.0 => Some(MODULE_PIXELS / f64::from(m)),
-        How::Modules(_) => Some(REGION_SCALE),
+        How::Modules(m) | How::Glyphs(m) if m > 0.0 => Some(MODULE_PIXELS / f64::from(m)),
+        How::Modules(_) | How::Glyphs(_) => Some(REGION_SCALE),
     }
 }
 
@@ -2466,8 +2511,7 @@ impl Scans {
         for (k, r) in need.regions.iter().enumerate() {
             let framed = need.turn.place_box(r.b, w, h);
             // A matrix code read there fills it; linear codes reach its ends.
-            let Some(part) = unread_at(&found.codes, &framed, matches!(r.how, How::Modules(_)))
-            else {
+            let Some(part) = unread_at(&found.codes, &framed, r.how.module().is_some()) else {
                 continue;
             };
             capped |= k >= PAGE_REGIONS;
@@ -2478,6 +2522,7 @@ impl Scans {
             named += 1;
             let what = match r.how {
                 How::Modules(_) => DRAWING,
+                How::Glyphs(_) => FONT_CODE,
                 How::Picture(..) => "a picture that looks like a barcode or QR code",
             };
             let part = if part { "part of " } else { "" };
@@ -2728,7 +2773,8 @@ fn evidence(
     on: Option<(&Need, Option<&Region>)>,
 ) -> Result<(), &'static str> {
     // A read within a drawing of paths that looks like a code (give or take two of its
-    // modules): the drawing is the evidence. A read elsewhere on the page is not.
+    // modules): the drawing is the evidence. A read elsewhere on the page is not, nor one
+    // within a code printed with a barcode font (a font named for codes may draw letters).
     let within = |r: &Region, px: &[f32; 4]| {
         let How::Modules(m) = r.how else {
             return false;
@@ -2862,7 +2908,7 @@ fn two_d(name: &str) -> bool {
 fn takes_region(px: &[f32; 4], two_d: bool, r: &Region) -> bool {
     overlap(px, &r.b)
         && match r.how {
-            How::Modules(_) if !two_d => fills(px, &r.b),
+            How::Modules(_) | How::Glyphs(_) if !two_d => fills(px, &r.b),
             _ => true,
         }
 }
@@ -3032,7 +3078,10 @@ pub(crate) fn apply_codes(scans: Option<Scans>, places: Vec<(usize, Places)>, ou
         } else if p.vector {
             a.needs_vision = true;
             a.code_unread = true;
-            Some(Reread::Drawing(f.read && !unscanned.contains(&asset)))
+            Some(Reread::Drawing(
+                f.read && !unscanned.contains(&asset),
+                if p.font { FONT_CODE } else { DRAWING },
+            ))
         } else if p.hint && f.read {
             a.code_unread = true;
             Some(Reread::Unread)
@@ -3190,6 +3239,7 @@ mod tests {
                     module: 0.5,
                     id: k,
                     finders: 0,
+                    font: false,
                 })
                 .collect(),
             ..PageItems::default()

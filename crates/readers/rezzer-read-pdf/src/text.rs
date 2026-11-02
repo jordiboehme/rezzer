@@ -604,6 +604,9 @@ struct FontInfo {
     /// pdf.js and pdfminer read it. Such a font's ToUnicode map often gives the Latin letter
     /// of the code.
     symbol: bool,
+    /// The font's base name names a barcode font (see [`crate::barfont::barcode_name`]): its
+    /// glyphs are bars, never text.
+    barcode: bool,
 }
 
 /// A marked content sequence the walk met, in the order the interpreter meets it.
@@ -859,6 +862,10 @@ impl<'p, 'a> PageReader<'p, 'a> {
             unmapped_visible: 0,
             mapped: 0,
             symbol: 0,
+            bar_fonts: HashMap::new(),
+            bar_outlines: HashMap::new(),
+            bars: Vec::new(),
+            bar_runs: 0,
         };
         let run = panic::catch_unwind(AssertUnwindSafe(|| {
             interpret(TypedIter::new(&data), page.resources(), &mut ctx, &mut dev);
@@ -1073,6 +1080,9 @@ impl<'p, 'a> PageReader<'p, 'a> {
                 "codes drawn as paths on page {n} are not looked for: {why}"
             ))),
         }
+        // Codes printed with a barcode font are read like codes drawn as paths.
+        items.codes.extend(crate::barfont::codes(&dev.bars));
+        dev.bars = Vec::new();
         if dev.cells_cut {
             notes.push(Note::Unsupported(format!(
                 "codes drawn as paths on page {n} are looked for only among the first {} small \
@@ -2120,6 +2130,7 @@ fn font_info(font: &Dict<'_>) -> FontInfo {
         program: None,
         collection,
         symbol: is_symbol(&name),
+        barcode: crate::barfont::barcode_name(&name),
     }
 }
 
@@ -2710,6 +2721,23 @@ struct TextDevice<'d> {
     mapped: u64,
     /// Glyphs read through the Adobe Symbol encoding.
     symbol: u64,
+    /// What the outlines of a font's glyphs showed so far (see [`crate::barfont`]): a font
+    /// with a glyph that is no bars is a text font, one whose run of bars fit a code is a
+    /// barcode font.
+    bar_fonts: HashMap<u128, BarFont>,
+    /// The outline of each glyph looked at, by font and glyph id.
+    bar_outlines: HashMap<(u128, u32), Rc<crate::barfont::Outline>>,
+    /// The glyphs of barcode fonts the page draws: no text, the places of codes.
+    bars: Vec<crate::barfont::Placed>,
+    /// Runs of barcode glyphs so far.
+    bar_runs: u32,
+}
+
+/// What the outlines of a font showed (see [`TextDevice::barcode_run`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BarFont {
+    Text,
+    Bars,
 }
 
 impl TextDevice<'_> {
@@ -2795,6 +2823,100 @@ impl TextDevice<'_> {
         }
         let len = u32::try_from(self.text.len() - before).unwrap_or(0);
         self.glyphs.push(Gl { start, len, ..g });
+    }
+
+    /// Whether the glyphs of `run` (drawn with `transform`) print a barcode with a barcode
+    /// font, on positive evidence only (see [`crate::barfont`]): the font's name, or outlines
+    /// of upright bars of whole modules (a run of them that fits a code makes the font a
+    /// barcode font). If so, where each glyph draws is kept in `bars`. One glyph that is not
+    /// bars makes a font a text font for the page.
+    fn barcode_run(&mut self, run: &GlyphRun<'_, '_>, transform: Affine) -> bool {
+        use crate::barfont::{Outline, Placed};
+        /// A glyph of the run: its font, id, transform, outline and advance.
+        struct Seen {
+            font: u128,
+            id: u32,
+            t: Affine,
+            outline: Rc<Outline>,
+            advance: Option<f32>,
+        }
+        let glyphs = run.glyphs();
+        let mut seen: Vec<Seen> = Vec::with_capacity(glyphs.len());
+        let mut known = true;
+        for g in glyphs {
+            let Glyph::Outline(o) = &**g else {
+                return false;
+            };
+            let key = o.font_cache_key();
+            let named = self.fonts.get(&key).is_some_and(|i| i.barcode);
+            let state = self.bar_fonts.get(&key).copied();
+            if !named && state == Some(BarFont::Text) {
+                return false;
+            }
+            let id = o.glyph_id().to_u32();
+            let outline = match self.bar_outlines.get(&(key, id)) {
+                Some(o) => o.clone(),
+                None => {
+                    let read = Rc::new(crate::barfont::outline(&o.outline()));
+                    self.bar_outlines.insert((key, id), read.clone());
+                    read
+                }
+            };
+            if !named && *outline == Outline::Other {
+                self.bar_fonts.insert(key, BarFont::Text);
+                return false;
+            }
+            known &= named || state == Some(BarFont::Bars);
+            let t = transform * g.transform();
+            seen.push(Seen {
+                font: key,
+                id,
+                t,
+                outline,
+                advance: o.advance_width(),
+            });
+        }
+        if seen.is_empty() {
+            return false;
+        }
+        if !known {
+            let looked: Vec<(u32, f64, &Outline)> = seen
+                .iter()
+                .map(|g| {
+                    let c = g.t.as_coeffs();
+                    (g.id, c[0].hypot(c[1]), g.outline.as_ref())
+                })
+                .collect();
+            if !crate::barfont::bars_fit(&looked) {
+                return false;
+            }
+            for g in &seen {
+                self.bar_fonts.insert(g.font, BarFont::Bars);
+            }
+        }
+        for (s, g) in seen.iter().zip(glyphs) {
+            if self.glyphs.len() + self.bars.len() >= self.cap {
+                panic::resume_unwind(Box::new(Abort::Cap));
+            }
+            // The ink of a glyph that is not bars (a font named for codes) is its outline's.
+            let path = match (&**g, s.outline.as_ref()) {
+                (Glyph::Outline(o), Outline::Other) => Some(o.outline()),
+                _ => None,
+            };
+            if let Some((b, module)) =
+                crate::barfont::place(s.t, &s.outline, path.as_ref(), s.advance)
+            {
+                self.bars.push(Placed {
+                    b,
+                    module,
+                    glyph: s.id,
+                    font: s.font,
+                    run: self.bar_runs,
+                });
+            }
+        }
+        self.bar_runs = self.bar_runs.wrapping_add(1);
+        true
     }
 }
 
@@ -3319,6 +3441,14 @@ impl<'a> Device<'a> for TextDevice<'_> {
         self.last = Some(key);
         let layer = self.open.iter().rev().find_map(|o| o.layer);
         let invisible = matches!(mode, DrawMode::Invisible) || layer.is_some();
+        // A barcode printed with a barcode font is no text: its bars are a code's place. An
+        // ActualText in force still gives the author's text.
+        if !invisible
+            && self.barcode_run(run, props.transform)
+            && !self.open.iter().any(|o| o.actual.is_some())
+        {
+            return;
+        }
         let mcid = self.open.iter().rev().find_map(|o| o.mcid);
         let from = self.glyphs.len();
         for g in glyphs {

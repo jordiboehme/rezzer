@@ -583,6 +583,61 @@ fn ruler(v: &Variant, on: On) -> Sheet {
     s
 }
 
+/// Task 15b part 2f-1: the info box of an online-shop invoice at the right of the head of a
+/// business page under the title `Rechnung`, two Code 128s printed in a barcode font at `size` (`/FC`, named for codes,
+/// or `/FN`, known by its bars only): one under the invoice number row, its baseline the
+/// order number row's, between the labels and the values (which start `gap` points after
+/// it); one beside `EAN:`, its baseline the bold `Referenz:` row's. Both are found with their
+/// values, boxed by their bars, and no glyph text of theirs stands in the read.
+fn font_codes(v: &Variant, font: &str, size: f32, gap: f32) -> Sheet {
+    use crate::common::barfont::{
+        BAR_UNITS, code_of, code128_string, code128_values, code128_width,
+    };
+    let (plain, bold) = v.faces();
+    let (first, second) = ("2026004711", "4006381333931");
+    let (w1, w2) = (code128_width(first, size), code128_width(second, size));
+    let xv = 380.0 + w1 + gap;
+    let x3 = 585.0 - w2;
+    let mut t = show(bold, 14.0, 40.0, 790.0, "Rechnung");
+    t += &show(plain, 9.0, 300.0, 760.0, "Rechnungs-Nr.");
+    t += &show(plain, 9.0, xv, 760.0, first);
+    t += &show(font, size, 380.0, 735.0, &code128_string(first));
+    t += &show(plain, 9.0, 300.0, 735.0, "Auftrags-Nr.");
+    t += &show(plain, 9.0, xv, 735.0, "0000000000000 / 01.01.2026");
+    t += &show(plain, 9.0, 300.0, 715.0, "Kunden-Nr.");
+    t += &show(plain, 9.0, xv, 715.0, "K-000123");
+    t += &show(bold, 9.0, 300.0, 680.0, "Referenz:");
+    t += &show(bold, 9.0, 345.0, 680.0, "RE-0001");
+    t += &show(plain, 9.0, x3 - 24.0, 686.0, "EAN:");
+    t += &show(font, size, x3, 680.0, &code128_string(second));
+    // A body as wide as the page under the box, so the page is one column (with a narrow
+    // body the layout's order of a left column and the box differs between the faces).
+    let wide = format!("{BODY_LINE} {BODY_LINE}");
+    for k in 0..8 {
+        t += &show(plain, 7.0, 40.0, 500.0 - k as f32 * 9.1, &wide);
+    }
+    let mut built = Built::new(&v.geo());
+    built.page = FormPage {
+        template: t,
+        ..FormPage::default()
+    };
+    let mut s = Sheet::new(built);
+    let high = f32::from(BAR_UNITS) / 1000.0 * size;
+    for (text, x, y, w) in [(first, 380.0, 735.0, w1), (second, x3, 680.0, w2)] {
+        s.want.codes.push(("Code 128".into(), text.into()));
+        s.want.code_bars.push([x, y, x + w, y + high]);
+        s.want.glyph_text.push(
+            code128_values(text)
+                .into_iter()
+                .map(|v| char::from(code_of(v)))
+                .collect(),
+        );
+    }
+    s.want.vision = Some(false);
+    s.want.may_title.push("Rechnung".into());
+    s
+}
+
 /// Task 15: a Code 128 of `module` points a module and `height` points high, drawn as bars at
 /// the right of the head of a business page. It is found once, with its text.
 fn barcode(v: &Variant, module: f32, height: f32) -> Sheet {
@@ -736,6 +791,30 @@ pub(crate) fn shapes() -> Vec<Shape> {
         "barcode beside a photo, module 1.2, height 80" => (On::Photo, 1.2, 80.0),
         "barcode beside a photo, module 1.2, height 150" => (On::Photo, 1.2, 150.0),
     });
+    // Task 15b part 2f-1: codes printed in a barcode font, known by its name or by its bars,
+    // at three sizes (module 0.6 to 0.96 points) and two gaps to the values after them.
+    all.extend([
+        Shape {
+            name: "codes in a barcode font named for codes, size 10, gap 5",
+            axes: RENDERED,
+            draw: |v| (font_codes(v, "FC", 10.0, 5.0), None),
+        },
+        Shape {
+            name: "codes in a barcode font named for codes, size 16, gap 12",
+            axes: RENDERED,
+            draw: |v| (font_codes(v, "FC", 16.0, 12.0), None),
+        },
+        Shape {
+            name: "codes in a barcode font known by its bars, size 12, gap 5",
+            axes: RENDERED,
+            draw: |v| (font_codes(v, "FN", 12.0, 5.0), None),
+        },
+        Shape {
+            name: "codes in a barcode font known by its bars, size 16, gap 12",
+            axes: RENDERED,
+            draw: |v| (font_codes(v, "FN", 16.0, 12.0), None),
+        },
+    ]);
     // More codes than a page renders again, all read; a halftone without a code.
     all.extend([
         Shape {
