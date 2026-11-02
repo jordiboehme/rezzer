@@ -18,6 +18,7 @@
 mod annots;
 mod barfont;
 mod codes;
+mod engine;
 mod fallback;
 mod forms;
 mod layout;
@@ -624,19 +625,20 @@ fn lay_out(
             } else {
                 fields
             };
+            // The dates of page 1's lines are gathered before the layout takes its runs.
+            let mut dates = (n == 1).then(|| layout::page_dates(&items.runs, height));
+            let runs = std::mem::take(&mut items.runs);
             let drawn = Drawn {
                 rules: &items.rules,
                 images: if items.turned { &images } else { &items.images },
                 widgets: &fields,
                 boxes: &items.boxes,
+                items: Some(&items),
                 lines_unsearched: items.lines_unsearched,
                 width,
                 body_size: style.body_size,
             };
             symbols += items.symbol;
-            // The dates of page 1's lines are gathered before the layout takes its runs.
-            let mut dates = (n == 1).then(|| layout::page_dates(&items.runs, height));
-            let runs = std::mem::take(&mut items.runs);
             let mut laid = layout::page_blocks_at(n, height, runs, &drawn, &cx, &points);
             if let Some(dates) = &mut dates {
                 if let Some(more) = laid.dates.take() {

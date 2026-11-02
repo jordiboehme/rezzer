@@ -2280,6 +2280,7 @@ dependencies = [
  "hayro-syntax",
  "insta",
  "kurbo",
+ "layoutregions",
  "libc",
  "pdfparts",
  "read-fonts 0.46.0",

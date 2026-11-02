@@ -19,6 +19,7 @@ use pdfparts::StructTree;
 use rezzer_limits::{Budget, LimitHit};
 use rezzer_model::{Anchor, Block, Cell, Inline, LossReason, SectionKind, Severity, StatusColor};
 
+use crate::engine;
 use crate::tables::{self, Planned, PlannedCell, Rule, Tables, Unsure};
 
 mod footnotes;
@@ -898,6 +899,9 @@ pub(crate) struct Drawn<'a> {
     pub widgets: &'a [[f32; 4]],
     /// The drawn boxes the page's runs are read in as reading regions.
     pub boxes: &'a [[f32; 4]],
+    /// What the text pass found on the page besides its runs (taken out of it), for the
+    /// region engine's input; `None` where a page is laid out from runs alone.
+    pub items: Option<&'a crate::text::PageItems>,
     /// The text pass found the page's lines too many to search for grids, and said so.
     pub lines_unsearched: bool,
     pub width: f32,
@@ -962,6 +966,12 @@ pub(crate) fn page_blocks_at(
             Flow::new(runs, vec![Slot::Free; n])
         }
     };
+    // The page as the region engine takes it, held next to `drawn` and not read yet. `Flow::at`
+    // is the id of a run (`engine::run_of`).
+    let _engine_in = drawn
+        .items
+        .zip(height)
+        .map(|(items, h)| engine::page_in(items, &flow.runs, drawn, [drawn.width, h]));
     let mut notes = Vec::new();
     let mut placed: Vec<Placed> = Vec::new();
     // Tagged tables are taken out before running headers and footers are looked for: the
@@ -3346,6 +3356,7 @@ mod tests {
         images: &[],
         widgets: &[],
         boxes: &[],
+        items: None,
         lines_unsearched: false,
         width: 595.0,
         body_size: 10.0,
@@ -4631,6 +4642,62 @@ mod tests {
                 row: 3
             })
         );
+    }
+
+    #[test]
+    fn tagged_page_ids_follow_the_flow() {
+        let mut elems = vec![
+            elem("Document", None, &[1, 2]),
+            elem("P", Some(0), &[]),
+            elem("P", Some(0), &[]),
+        ];
+        elems[1].actual_text = Some("Replaced".into());
+        let tree = StructTree {
+            elems,
+            roots: vec![0],
+        };
+        // Runs 0 and 1 are the glyph runs of the first paragraph, run 2 stands alone.
+        let owner = [1usize, 1, 2];
+        let mut runs = Vec::new();
+        for (i, t) in ["Gl", "yphs", "Other"].iter().enumerate() {
+            let mut r = run(t, i as u32, 700.0 - 20.0 * i as f32, 10.0);
+            r.mcid = kept_mcid(Some(i as u32));
+            runs.push(r);
+        }
+        let style = Style::new(&[PageText {
+            page: 1,
+            height: Some(842.0),
+            runs: &runs,
+        }]);
+        let budget = Budget::new(rezzer_limits::Limits::default());
+        let tables = Tables::default();
+        let roles = |m: u32| owner.get(m as usize).copied();
+        let cx = Context {
+            style: &style,
+            tree: Some(&tree),
+            roles: &roles,
+            budget: &budget,
+            tables: &tables,
+            in_part: false,
+            links: &LinkRoom::new(u64::MAX),
+        };
+        let (kept, slots) = classified(runs, &tree, &cx);
+        let flow = Flow::new(kept, slots);
+        let page = engine::page_in(
+            &crate::text::PageItems::default(),
+            &flow.runs,
+            &NOTHING_DRAWN,
+            [595.0, 842.0],
+        );
+        // The second glyph run is dropped: two texts, with the ids the flow keeps.
+        let ids: Vec<Option<usize>> = (0..page.texts.len())
+            .map(|i| engine::run_of(layoutregions::PrimId::Text(i as u32)))
+            .collect();
+        assert_eq!(ids, [Some(0), Some(1)]);
+        assert_eq!(flow.at, [0, 1]);
+        assert_eq!(page.texts[0].text, "Replaced");
+        assert_eq!(page.texts[1].text, "Other");
+        assert_eq!(engine::run_of(layoutregions::PrimId::Text(2)), Some(2));
     }
 
     #[test]
