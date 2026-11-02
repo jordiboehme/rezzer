@@ -1462,6 +1462,10 @@ pub(crate) fn render_pages(
                 let until = scans.until;
                 let late = || Instant::now() >= until || budget.check_time().is_err();
                 let printed = page_read.then(|| printed_codes(&page, need, pages.room, &late));
+                // A search cut by the time for reading codes is a time stop of the read.
+                if printed.is_some() && late() {
+                    scans.halt_time(n, budget);
+                }
                 if files {
                     match encode(page.pixmap) {
                         Ok(png) => {

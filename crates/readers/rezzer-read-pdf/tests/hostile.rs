@@ -4751,6 +4751,10 @@ fn many_date_labels_on_page_1_cost_about_what_their_text_costs() {
         took < twin * 2 + Duration::from_secs(1),
         "{took:?} against {twin:?}"
     );
+    // The page of 750,000 glyphs takes about 520 MiB at the default limits; the dates add
+    // no copy of the page.
+    let peak = heap_peak_bytes();
+    assert!(peak < 768 << 20, "heap peak {} MiB", peak >> 20);
     assert!(out.document.properties.document_date.is_none());
     assert!(text(page(&out, 1)).contains("Datum"));
 }
