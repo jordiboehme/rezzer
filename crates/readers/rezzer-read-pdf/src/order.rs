@@ -1167,11 +1167,13 @@ fn line_runs(page: u32, frags: &[Frag], ids: &[usize], line: u32, links: &[Link]
             || p.text.ends_with(char::is_whitespace)
             || f.text[keep[pos].0..].starts_with(char::is_whitespace);
         // A gap after the run before is a word space. So is a run that stands wholly left of
-        // where the run before starts: a run that moves with the chain of a padded value run
-        // (see [`chain_heads`]) is put before a label drawn between its values, and the label
-        // goes on after it, never as one word with it. A run over the start of the run before
-        // (an accent drawn on its own over a first letter) joins it. A line with right-to-left
-        // text keeps its visual order here, so only the gap counts there.
+        // where the run before starts: a run that moves with the chain of the run before it
+        // (cut at a change of style or a link's edge, see [`chain_heads`]) is put before text
+        // drawn over it, and that text goes on after it, never as one word with it. A run
+        // parted by padding starts a chain of its own and stands in its place. A run over the
+        // start of the run before (an accent drawn on its own over a first letter) joins it. A
+        // line with right-to-left text keeps its visual order here, so only the gap counts
+        // there.
         let size = f.size.max(p.size);
         let before = f.x < p.x && f.end <= p.x + WORD_GAP * size;
         if !glued && (f.x - p.end > WORD_GAP * size || (!rtl && before)) {
