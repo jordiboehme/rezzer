@@ -16,6 +16,8 @@ pub enum FormatId {
     Csv,
     Tsv,
     Html,
+    /// A web page saved as one MIME file (RFC 2557): `.mhtml`, `.mht`.
+    Mhtml,
     Epub,
     Pdf,
     PostScript,

@@ -2,7 +2,7 @@
 
 Rezzer reads old binary PowerPoint files with its own reader: slides with their text, speaker notes, comments and document properties.
 
-Status: 🗓️ planned for 0.2.0. Nothing is implemented yet.
+Status: 📝 planned. The release is not set yet. Nothing is implemented yet.
 
 File types: `.ppt`. Rezzer detects the format by content, not by extension. A `.ppt` file is an OLE compound file with a `PowerPoint Document` stream.
 

@@ -9,7 +9,7 @@ File types: `.md`, `.markdown`. Rezzer detects the format by content, not by ext
 Built on (versions as used in the development version):
 
 - [pulldown-cmark](https://crates.io/crates/pulldown-cmark) 0.13.5 for the structure, with source positions, YAML and TOML frontmatter blocks and wikilinks
-- [saphyr-parser](https://crates.io/crates/saphyr-parser) 0.3.2 for YAML frontmatter, read as events with Rezzer's own limits on depth and alias expansion
+- [saphyr-parser](https://crates.io/crates/saphyr-parser) 0.3.3 for YAML frontmatter, read as events with Rezzer's own limits on depth and alias expansion
 - [toml](https://crates.io/crates/toml) 1.1.8 for TOML frontmatter
 - Rezzer's own reader for the frontmatter values and the link table
 
