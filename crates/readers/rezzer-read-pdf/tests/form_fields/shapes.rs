@@ -784,7 +784,7 @@ pub(crate) fn short_value_rows(g: &Geo, b: &mut Built, top: f32) -> f32 {
         top,
         7,
         &[
-            ("Name", "Peters", "Kz", "V", None),
+            ("Name", "MUSTER", "Kz", "V", None),
             ("Ruf", "Max", "Haus", "12", None),
             ("Kurz", "Udo", "Zi", "34", None),
         ],
