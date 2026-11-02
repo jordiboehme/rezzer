@@ -93,6 +93,16 @@ fn style_of(r: &Run) -> Style {
     ((r.size * 2.0).round() as i32, r.bold, r.italic, r.family)
 }
 
+/// Whether two runs are in one style: one [`style_of`], or one face whose sizes are less than
+/// a size step apart (see [`LABEL_STEP`]): sizes on both sides of a half-point edge of the key
+/// by float noise are one size.
+fn same_style(a: &Run, b: &Run) -> bool {
+    let (sa, sb) = (style_of(a), style_of(b));
+    sa == sb
+        || ((sa.1, sa.2, sa.3) == (sb.1, sb.2, sb.3)
+            && a.size.max(b.size) < LABEL_STEP * a.size.min(b.size))
+}
+
 fn inked(r: &Run) -> bool {
     r.text.chars().any(|c| !c.is_whitespace())
 }
@@ -219,11 +229,27 @@ fn parse(flow: &Flow, ids: &[usize], how: Reading) -> Parsed {
         2 => {}
         _ => return Parsed::Unsure(THREE_STYLES),
     }
+    // The exact size of a style's text: the half-point key parts two sizes that differ by
+    // float noise only (8.749 and 8.751 points), so a size step is told by the exact sizes
+    // (a step is `LABEL_STEP`, relative to the size).
+    let exact = |s: Style| {
+        let sizes: Vec<f32> = lines
+            .iter()
+            .flatten()
+            .filter(|&&i| !marker.contains(&i) && style_of(&flow.runs[i]) == s)
+            .map(|&i| flow.runs[i].size)
+            .collect();
+        sizes.iter().sum::<f32>() / sizes.len().max(1) as f32
+    };
+    let one_size = |a: Style, b: Style| {
+        let (x, y) = (exact(a), exact(b));
+        x.max(y) < LABEL_STEP * x.min(y)
+    };
     let apart = |label: Style, value: Style| {
-        value.0 - label.0 >= 1
+        (value.0 - label.0 >= 1 && exact(value) >= LABEL_STEP * exact(label))
             || (!how.smaller
                 && (label.1, label.2, label.3) != (value.1, value.2, value.3)
-                && label.0 <= value.0)
+                && (label.0 <= value.0 || one_size(label, value)))
     };
     let (label, value) = (styles[0], styles[1]);
     // Lines that read as an address are no label over its value: a first line with a number
@@ -258,7 +284,7 @@ fn parse(flow: &Flow, ids: &[usize], how: Reading) -> Parsed {
     // Of one size, weight, slant or font alone does not say which line is the label (a bold
     // value over a regular label reads like a bold label over a regular value): only a style
     // known as a label's does.
-    if label.0 == value.0 {
+    if label.0 == value.0 || one_size(label, value) {
         if how.labels.contains(&value) {
             return Parsed::Unsure(LABEL_BELOW);
         }

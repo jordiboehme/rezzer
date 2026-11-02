@@ -52,6 +52,60 @@ fn address_box_row(g: &Geo, b: &mut Built, top: f32) -> f32 {
     top - h
 }
 
+/// Task 15b part 2e-5 (list line 7, `style_of` half-point key, ruling P6-X): a row of three
+/// boxed fields whose middle box holds a name over its department in the plain data font, of
+/// one size but for float noise: on the printed page (after the variant's scale) the two lines
+/// stand 0.002 points on both sides of a half-point edge of the style key, the name the
+/// smaller. One size is no label over its value: the middle box pairs with nothing, a loss
+/// names it, and the fields beside it pair.
+fn noise_box_row(g: &Geo, b: &mut Built, top: f32) -> f32 {
+    let h = 3.6 * g.data;
+    // The half-point edge (a quarter or three quarters of a point) nearest the printed size.
+    let printed = g.data * g.scale;
+    let edge = ((2.0 * printed - 0.5).round() + 0.5) / 2.0;
+    // The plain face of the data font: a bold name at the data size would be a title.
+    let face = match g.font {
+        DataFont::CourierBold | DataFont::Courier => "FD",
+        DataFont::Helvetica => "FL",
+    };
+    let mut parts = Vec::new();
+    for (k, l, v) in [
+        (0usize, "Personalnummer", "00000"),
+        (20, "", ""),
+        (40, "Eintritt", "01.01.2020"),
+    ] {
+        let (x0, x1) = (g.col(k) - 0.12, g.col(k + 20) - 0.12);
+        b.page.template += &g.hrule(x0, x1, top);
+        b.page.template += &g.hrule(x0, x1, top - h);
+        b.page.template += &g.vrule(x0, top - h, top);
+        b.page.template += &g.vrule(x1, top - h, top);
+        let x = g.col(k) + 0.3 * g.label;
+        if k == 20 {
+            // No label over its value: it must not pair, and a loss names it.
+            b.fields.push(("Erika Mustermann", Err(())));
+            for (n, (line, printed)) in [
+                ("Erika Mustermann", edge - 0.002),
+                ("Vertrieb", edge + 0.002),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let size = printed / g.scale;
+                let y = top - 1.2 * g.data - 1.2 * g.data * n as f32;
+                b.page.template += &format!("BT /{face} {size} Tf {x} {y} Td ({line}) Tj ET\n");
+                b.values.push(line.to_string());
+            }
+        } else {
+            b.page.template += &label(x, top - 0.9 * g.label - 0.3 * g.data, g.label, l);
+            parts.push((k + 1, v));
+            b.values.push(v.to_string());
+            b.fields.push((l, Ok(Some(v))));
+        }
+    }
+    g.values(b, top - h + 0.3 * g.data, &parts);
+    top - h
+}
+
 /// Task 15b part 2c concern 3 ruling: a row of three boxed fields whose middle box holds a
 /// company name, in another size than the labels beside it and without a colon, over a street
 /// and a postcode with its town in the data font: nothing shows the name to be a label, so it
@@ -867,6 +921,14 @@ pub(crate) fn shapes() -> Vec<Shape> {
                 s.want.headings.push("Angaben zum Betrieb".into());
                 (s, e)
             },
+        },
+        Shape {
+            name: "boxed fields beside a name over its department in one size but for float noise",
+            axes: Axes {
+                look: NO_RISING,
+                ..ALL
+            },
+            draw: |v| with_cells(v, noise_box_row, 60, &[&["Erika Mustermann", "Vertrieb"]]),
         },
         Shape {
             name: "boxed fields beside a box at the value size",

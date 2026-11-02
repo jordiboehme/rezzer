@@ -208,6 +208,7 @@ impl Variant {
             rule,
             bar,
             times_labels: self.labels == Labels::Times,
+            scale: self.scale.factor(),
             ..REAL
         }
     }

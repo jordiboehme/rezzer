@@ -270,6 +270,7 @@ shape_tests! {
     boxed_fields_beside_a_company => "boxed fields beside a company over its address",
     boxed_fields_beside_a_bold_title => "boxed fields beside a bold title",
     boxed_fields_beside_a_box_at_the_value_size => "boxed fields beside a box at the value size",
+    boxed_fields_beside_a_name_in_one_size_but_for_noise => "boxed fields beside a name over its department in one size but for float noise",
     a_numbered_label_over_a_line_of_codes => "a numbered label over a line of codes in a strip",
     a_strip_without_dividers_beside_a_smaller_name => "a strip without dividers beside a smaller name over its address",
     a_lone_field_in_a_strip_beside_a_smaller_name => "a lone field in a strip beside a smaller name over its address",

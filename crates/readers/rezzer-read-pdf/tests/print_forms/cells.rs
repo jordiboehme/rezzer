@@ -1464,3 +1464,51 @@ fn an_empty_box_or_an_empty_field_keeps_the_row() {
         wrong.join("\n")
     );
 }
+
+/// Task 15b part 2e-5 (list line 7, `style_of` half-point key, ruling P6-X): a name over its
+/// department in one style, whose two sizes differ only by float noise on both sides of a
+/// half-point edge of the style key (8.749 and 8.751 points), is one size: it is no label over
+/// its value, and the fields beside it pair. A label is a size step smaller than its value
+/// (`LABEL_STEP`, relative), never a rounding apart. Edges 5.25 to 17.75, noise 0.001 and
+/// 0.004 points, the smaller size over or under, boxes in a row and in a column, strips with
+/// and without dividers, both data fonts.
+#[test]
+fn one_size_apart_by_float_noise_at_a_key_edge_is_no_label() {
+    let mut wrong = Vec::new();
+    let mut reads = 0;
+    for n in 5..=17 {
+        for e in [n as f32 + 0.25, n as f32 + 0.75] {
+            for d in [0.001f32, 0.004] {
+                for (head, line) in [(e - d, e + d), (e + d, e - d)] {
+                    for font in ["F1", "F3"] {
+                        for how in [Cells::Row, Cells::Column, Cells::Strip, Cells::Divided] {
+                            // The fields beside it: labels a clear step under the values.
+                            let (size, step) = (line / 1.125, 1.125);
+                            let m = Middle {
+                                head: &["Erika Mustermann"],
+                                size: head / size,
+                                font: None,
+                                lines: &["Vertrieb"],
+                            };
+                            let at = format!("{head} over {line} {how:?} {font}");
+                            let out = three_cells(m, size, step, font, how);
+                            reads += 1;
+                            wrong.extend(
+                                three_cells_wrong(&out, m, Want::Alone)
+                                    .into_iter()
+                                    .map(|e| format!("{at}: {e}")),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(reads, 832);
+    assert!(
+        wrong.is_empty(),
+        "{} wrong:\n{}",
+        wrong.len(),
+        wrong.join("\n")
+    );
+}

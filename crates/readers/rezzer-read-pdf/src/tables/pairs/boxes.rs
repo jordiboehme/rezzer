@@ -372,7 +372,7 @@ pub(crate) fn box_pairs(
             && first.split_whitespace().count() <= LABEL_WORDS
             && ids
                 .windows(2)
-                .all(|w| style_of(&flow.runs[w[0]]) == style_of(&flow.runs[w[1]]))
+                .all(|w| same_style(&flow.runs[w[0]], &flow.runs[w[1]]))
     };
     let alike: Vec<usize> = (0..boxes.len()).filter(|&b| one_style(b)).collect();
     let mut lone: Vec<usize> = alike

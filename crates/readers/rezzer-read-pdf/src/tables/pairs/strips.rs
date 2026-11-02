@@ -1762,7 +1762,7 @@ fn overflow_back(flow: &Flow, strips: &mut [Strip], g: &[usize]) {
 }
 
 /// A strip's text as one line of labels over one line of values, each line of one style (a
-/// raised marker aside) and the upper one smaller by half a point: the runs of each line. A
+/// raised marker aside) and the upper one a size step smaller: the runs of each line. A
 /// strip of one line of one style has no values. None when its text is not that.
 fn two_lines(flow: &Flow, ids: &[usize]) -> Option<(Vec<usize>, Vec<usize>)> {
     let lines = lines_of(flow, ids);
@@ -1779,7 +1779,17 @@ fn two_lines(flow: &Flow, ids: &[usize]) -> Option<(Vec<usize>, Vec<usize>)> {
         [l] => style(l).map(|_| (l.clone(), Vec::new())),
         [a, b] => {
             let (sa, sb) = (style(a)?, style(b)?);
-            (sb.0 - sa.0 >= 1).then(|| (a.clone(), b.clone()))
+            // The exact sizes decide the step: two sizes on both sides of a half-point edge
+            // of the style key by float noise are one size (see [`LABEL_STEP`]).
+            let size = |l: &[usize]| {
+                let s: Vec<f32> = l
+                    .iter()
+                    .filter(|i| !marker.contains(i))
+                    .map(|&i| flow.runs[i].size)
+                    .collect();
+                s.iter().sum::<f32>() / s.len().max(1) as f32
+            };
+            (sb.0 - sa.0 >= 1 && size(b) >= LABEL_STEP * size(a)).then(|| (a.clone(), b.clone()))
         }
         _ => None,
     }
