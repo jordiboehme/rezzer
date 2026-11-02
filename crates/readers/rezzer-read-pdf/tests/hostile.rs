@@ -4749,3 +4749,25 @@ fn many_date_labels_on_page_1_cost_about_what_their_text_costs() {
     assert!(out.document.properties.document_date.is_none());
     assert!(text(page(&out, 1)).contains("Datum"));
 }
+
+#[test]
+fn groups_of_small_rectangles_past_the_search_bound_are_said() {
+    // 2,100 small groups of 8 filled squares each, apart: the search for codes drawn as paths
+    // looks at the largest 2,000 and says it left the others; the text is kept.
+    let start = Instant::now();
+    let mut c = b"BT /F1 10 Tf 72 880 Td (Before.) Tj ET 0 g ".to_vec();
+    for g in 0..2_100 {
+        let (x, y) = (10 + (g % 50) * 20, 20 + (g / 50) * 20);
+        for k in 0..8 {
+            c.extend(format!("{:.1} {y} 0.8 0.8 re f ", x as f32 + k as f32 * 1.2).as_bytes());
+        }
+    }
+    let out = read(&sized_page(&c, 1100, 900));
+    assert_quick(start);
+    let partly = out.document.losses.iter().find(|l| {
+        l.what.contains("codes drawn as paths on page 1 are looked for only in part")
+            && l.what.contains("2000 largest of its 2100 groups")
+    });
+    assert!(partly.is_some(), "{:?}", out.document.losses);
+    assert!(text(page(&out, 1)).contains("Before."));
+}

@@ -380,9 +380,21 @@ fn otsu(hist: &[u64; 256]) -> Option<u8> {
     (best.0 > 0.0 && best.3 - best.2 >= f64::from(PIXEL_CONTRAST)).then_some(best.1)
 }
 
-/// Groups of at least this many rectangles are looked at for merging, at most this many.
+/// Groups of at least this many rectangles are looked at for merging, at most this many: past
+/// them the search says how many it left.
 const MERGE_CELLS: usize = 8;
 const MERGE_GROUPS: usize = 2_000;
+
+/// Module places a search for codes printed in a picture may test for QR finder patterns
+/// (each place of each region looked at once); past them it stops and says so.
+const FINDER_WORK: usize = 10_000_000;
+
+/// What a search for codes found, with why it looked at only part of the page when it did.
+#[derive(Debug)]
+pub(crate) struct Searched {
+    pub codes: Vec<VectorCode>,
+    pub partly: Option<String>,
+}
 
 /// The regions among `cells` (filled axis-aligned rectangles: x0, y0, x1, y1) that look like
 /// a code: at least [`MIN_CELLS`] small rectangles on one module lattice, close to each
@@ -395,9 +407,16 @@ const MERGE_GROUPS: usize = 2_000;
 /// in one row band a few modules apart are one region (a PDF417 has light columns through
 /// all its rows). All regions found, the ones with the most rectangles first: the caller
 /// reads the first [`MAX_REGIONS`] and says the others. `Err` says why the page was not
-/// searched: its work would pass [`MAX_ENTRIES`] or [`MAX_PAIRS`].
+/// searched: its work would pass [`MAX_ENTRIES`] or [`MAX_PAIRS`]. Groups of rectangles past
+/// [`MERGE_GROUPS`] are not looked at, and [`Searched::partly`] says so.
+pub(crate) fn vector_search(cells: &[[f32; 4]]) -> Result<Searched, String> {
+    codes_among(cells, None, &|| false)
+}
+
+/// The codes [`vector_search`] finds.
+#[cfg(test)]
 pub(crate) fn vector_codes(cells: &[[f32; 4]]) -> Result<Vec<VectorCode>, String> {
-    codes_among(cells, None)
+    vector_search(cells).map(|s| s.codes)
 }
 
 /// The bars of a linear code drawn as paths are at least this many modules long.
@@ -427,6 +446,8 @@ struct Printed<'a> {
     min_module: f32,
     page: [f32; 4],
     cut: &'a [[f32; 4]],
+    /// The module places tested for QR finder patterns so far (see [`FINDER_WORK`]).
+    finder_work: &'a std::cell::Cell<usize>,
 }
 
 /// The regions among `cells`, the dark parts of a render in points (see [`pixel_cells`]),
@@ -435,20 +456,25 @@ struct Printed<'a> {
 /// code, not of a screen: a linear code has bars [`PRINTED_BAR`] modules long at least, of
 /// several widths ([`SAME_WIDTH`]), whole modules give or take the spread of the ink,
 /// with paper past their ends (see [`linear`]); a matrix code has paper around it within the
-/// render (`page`, its box in points).
+/// render (`page`, its box in points). The search stops when `late` says the time for
+/// reading codes is over, or past [`FINDER_WORK`]: [`Searched::partly`] says so.
 pub(crate) fn printed_codes(
     cells: &[[f32; 4]],
     pixel: f32,
     page: [f32; 4],
     cut: &[[f32; 4]],
-) -> Result<Vec<VectorCode>, String> {
+    late: &dyn Fn() -> bool,
+) -> Result<Searched, String> {
+    let finder_work = std::cell::Cell::new(0);
     codes_among(
         cells,
         Some(Printed {
             min_module: PRINTED_MODULE * pixel,
             page,
             cut,
+            finder_work: &finder_work,
         }),
+        late,
     )
 }
 
@@ -456,11 +482,12 @@ pub(crate) fn printed_codes(
 /// wide: on a lattice of one pixel every part of a render lies, letters too.
 const PRINTED_MODULE: f32 = 2.0;
 
-/// [`vector_codes`], or with `printed` [`printed_codes`].
+/// [`vector_search`], or with `printed` [`printed_codes`].
 fn codes_among(
     cells: &[[f32; 4]],
     printed: Option<Printed<'_>>,
-) -> Result<Vec<VectorCode>, String> {
+    late: &dyn Fn() -> bool,
+) -> Result<Searched, String> {
     let cells: Vec<[f32; 4]> = cells
         .iter()
         .copied()
@@ -476,7 +503,10 @@ fn codes_among(
         MIN_CELLS
     };
     if cells.len() < floor {
-        return Ok(Vec::new());
+        return Ok(Searched {
+            codes: Vec::new(),
+            partly: None,
+        });
     }
     let short = |c: &[f32; 4]| (c[2] - c[0]).min(c[3] - c[1]);
     let mut shorts: Vec<f32> = cells.iter().map(short).collect();
@@ -574,6 +604,17 @@ fn codes_among(
         .filter(|g| g.len() >= MERGE_CELLS)
         .collect();
     groups.sort_by_key(|g| std::cmp::Reverse(g.len()));
+    let what = if printed.is_some() {
+        "dark parts"
+    } else {
+        "small filled rectangles"
+    };
+    let mut partly = (groups.len() > MERGE_GROUPS).then(|| {
+        format!(
+            "only the {MERGE_GROUPS} largest of its {} groups of {what} are looked at",
+            groups.len()
+        )
+    });
     groups.truncate(MERGE_GROUPS);
     let groups = merge_bands(&cells, groups);
     let mut found: Vec<(usize, VectorCode)> = Vec::new();
@@ -590,6 +631,16 @@ fn codes_among(
         None => false,
     };
     for members in groups {
+        if late() {
+            partly = Some("the time for reading codes ran out".into());
+            break;
+        }
+        if printed.is_some_and(|p| p.finder_work.get() > FINDER_WORK) {
+            partly = Some(format!(
+                "its groups of {what} take too many steps to look at for QR finder patterns"
+            ));
+            break;
+        }
         if members.len() < floor || look(&members, &mut found) {
             continue;
         }
@@ -612,7 +663,10 @@ fn codes_among(
             .then(b.1.b[3].total_cmp(&a.1.b[3]))
             .then(a.1.b[0].total_cmp(&b.1.b[0]))
     });
-    Ok(found.into_iter().map(|(_, c)| c).collect())
+    Ok(Searched {
+        codes: found.into_iter().map(|(_, c)| c).collect(),
+        partly,
+    })
 }
 
 /// The ends of `c` along its bars and its extent across them: for bars standing up its
@@ -886,10 +940,10 @@ fn region(
         members.len() >= MIN_CELLS
             && lattice()
             && ((matrix(cells, members, b, module) && paper_around())
-                || printed.is_some() && {
-                    finders = qr_finders(cells, members, b, module);
+                || printed.is_some_and(|p| {
+                    finders = qr_finders(cells, members, b, module, p.finder_work);
                     finders >= 2
-                })
+                }))
     };
     if !kind_ok {
         return None;
@@ -1102,12 +1156,20 @@ fn one_width(runs: &[(f32, f32)], module: f32, spread: f32) -> bool {
 /// one QR code, or of several side by side, or of a QR code cut by the edge of the page). How
 /// many there are then, else 0: positive evidence of QR codes where the pattern of a whole one
 /// is not there.
-fn qr_finders(cells: &[[f32; 4]], members: &[usize], b: [f32; 4], module: f32) -> usize {
+/// Each module place tested is added to `work`.
+fn qr_finders(
+    cells: &[[f32; 4]],
+    members: &[usize],
+    b: [f32; 4],
+    module: f32,
+    work: &std::cell::Cell<usize>,
+) -> usize {
     let n = ((b[2] - b[0]) / module).round() as usize;
     let m = ((b[3] - b[1]) / module).round() as usize;
     if n < 7 || m < 7 || n > 2 * MAX_MODULES || m > 2 * MAX_MODULES {
         return 0;
     }
+    work.set(work.get() + n * m);
     let mut dark = vec![false; n * m];
     for &i in members {
         let c = cells[i];
@@ -1124,12 +1186,11 @@ fn qr_finders(cells: &[[f32; 4]], members: &[usize], b: [f32; 4], module: f32) -
             .then(|| dark[r as usize * n + k as usize])
     };
     let mut found: Vec<(usize, usize)> = Vec::new();
+    // The places within 6 modules of a finder found, each way: no finder starts there.
+    let mut blocked = vec![false; n * m];
     for r0 in 0..=m - 7 {
         for k0 in 0..=n - 7 {
-            if found
-                .iter()
-                .any(|&(r, k)| r.abs_diff(r0) < 7 && k.abs_diff(k0) < 7)
-            {
+            if blocked[r0 * n + k0] {
                 continue;
             }
             // The separator (ring -1) is light; then a dark ring, a light ring and a dark
@@ -1151,14 +1212,26 @@ fn qr_finders(cells: &[[f32; 4]], members: &[usize], b: [f32; 4], module: f32) -
             }
             if whole && hits * 10 >= all * 9 {
                 found.push((r0, k0));
+                for r in r0.saturating_sub(6)..(r0 + 7).min(m) {
+                    blocked[r * n + k0.saturating_sub(6)..r * n + (k0 + 7).min(n)].fill(true);
+                }
             }
         }
     }
-    let lined = found.iter().any(|&(r, k)| {
-        found
-            .iter()
-            .any(|&(q, j)| (q == r && k.abs_diff(j) >= 14) || (j == k && r.abs_diff(q) >= 14))
-    });
+    // Two finders in one row (or column) at least 14 modules apart: the first and the last
+    // of each row and column.
+    let mut rows: HashMap<usize, (usize, usize)> = HashMap::new();
+    let mut columns: HashMap<usize, (usize, usize)> = HashMap::new();
+    for &(r, k) in &found {
+        let row = rows.entry(r).or_insert((k, k));
+        *row = (row.0.min(k), row.1.max(k));
+        let column = columns.entry(k).or_insert((r, r));
+        *column = (column.0.min(r), column.1.max(r));
+    }
+    let lined = rows
+        .values()
+        .chain(columns.values())
+        .any(|&(lo, hi)| hi - lo >= 14);
     if lined { found.len() } else { 0 }
 }
 
@@ -2482,6 +2555,69 @@ mod tests {
         }
         let rgba: Vec<u8> = gray.iter().flat_map(|&g| [g, g, g, 255]).collect();
         (rgba, (w, h), [quiet as u32, 10, (w - quiet) as u32, 70])
+    }
+
+    #[test]
+    fn groups_past_the_merge_bound_are_said() {
+        // 2,100 small groups of 8 squares each, apart: the largest 2,000 are looked at and the
+        // search says it left the others.
+        let mut cells = Vec::new();
+        for g in 0..2_100 {
+            let (x, y) = ((g % 50) as f32 * 20.0, (g / 50) as f32 * 20.0);
+            for k in 0..8 {
+                let x0 = x + k as f32 * 1.5;
+                cells.push([x0, y, x0 + 1.0, y + 1.0]);
+            }
+        }
+        let searched = vector_search(&cells).expect("searched");
+        let why = searched.partly.expect("said");
+        assert!(why.contains("2000 largest of its 2100 groups"), "{why}");
+        // Fewer groups are all looked at.
+        cells.truncate(8 * 1_900);
+        assert_eq!(vector_search(&cells).expect("searched").partly, None);
+    }
+
+    #[test]
+    fn a_printed_search_stops_at_the_time_for_reading_codes() {
+        let cells = matrix(100.0, 200.0, 2.0);
+        let page = [0.0, 0.0, 600.0, 800.0];
+        let found = printed_codes(&cells, 0.5, page, &[], &|| false).expect("searched");
+        assert_eq!(found.partly, None);
+        let late = printed_codes(&cells, 0.5, page, &[], &|| true).expect("searched");
+        assert!(late.codes.is_empty());
+        assert_eq!(late.partly.as_deref(), Some("the time for reading codes ran out"));
+    }
+
+    #[test]
+    fn qr_finders_tiled_over_a_large_part_are_counted_in_one_pass() {
+        // A part of 392 by 392 modules tiled with finder patterns 8 modules apart: each is
+        // found once, and the places tested are charged.
+        let (n, pitch) = (392usize, 8usize);
+        let mut cells = Vec::new();
+        for r0 in (0..n - 7).step_by(pitch) {
+            for k0 in (0..n - 7).step_by(pitch) {
+                for r in 0..7 {
+                    for k in 0..7 {
+                        let ring = r.min(k).min(6 - r).min(6 - k);
+                        if ring != 1 {
+                            let (x, y) = ((k0 + k) as f32, (n - 1 - (r0 + r)) as f32);
+                            cells.push([x, y, x + 1.0, y + 1.0]);
+                        }
+                    }
+                }
+            }
+        }
+        let members: Vec<usize> = (0..cells.len()).collect();
+        let work = std::cell::Cell::new(0);
+        let start = std::time::Instant::now();
+        let found = qr_finders(&cells, &members, [0.0, 0.0, n as f32, n as f32], 1.0, &work);
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(2),
+            "{:?}",
+            start.elapsed()
+        );
+        assert_eq!(found, 49 * 49);
+        assert_eq!(work.get(), n * n);
     }
 
     /// [`bars_fit`] with no time limit.

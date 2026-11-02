@@ -1459,7 +1459,9 @@ pub(crate) fn render_pages(
                     .is_some();
                 // Codes printed in the page's pictures that the decoder did not read are
                 // looked for in its render, as codes drawn as paths are.
-                let printed = page_read.then(|| printed_codes(&page, need, pages.room));
+                let until = scans.until;
+                let late = || Instant::now() >= until || budget.check_time().is_err();
+                let printed = page_read.then(|| printed_codes(&page, need, pages.room, &late));
                 if files {
                     match encode(page.pixmap) {
                         Ok(png) => {
@@ -2210,6 +2212,9 @@ pub(crate) struct Scans {
     /// for the first.
     unsearched: Vec<u32>,
     unsearched_why: Option<String>,
+    /// Pages whose render was searched only in part for such parts, and why.
+    partly: Vec<u32>,
+    partly_why: Option<String>,
 }
 
 #[cfg(test)]
@@ -2262,6 +2267,8 @@ impl Scans {
             unrendered: HashMap::new(),
             unsearched: Vec::new(),
             unsearched_why: None,
+            partly: Vec::new(),
+            partly_why: None,
         }
     }
 
@@ -2663,14 +2670,15 @@ impl Scans {
     /// codes read in it than its finders show. Parts that are regions of the page are left
     /// to [`Scans::regions_unread`]. The first [`SMALL_LISTED`] get their words for the page's
     /// alt text, the others are counted. `Err` says why the render was not searched.
-    fn printed_unread(
-        &mut self,
-        asset: usize,
-        need: &Need,
-        printed: Result<Vec<([f32; 4], usize)>, String>,
-    ) {
+    fn printed_unread(&mut self, asset: usize, need: &Need, printed: Result<Printed, String>) {
         let printed = match printed {
-            Ok(p) => p,
+            Ok(p) => {
+                if let Some(why) = p.partly {
+                    add_page(&mut self.partly, need.page);
+                    self.partly_why.get_or_insert(why);
+                }
+                p.parts
+            }
             Err(why) => {
                 add_page(&mut self.unsearched, need.page);
                 self.unsearched_why.get_or_insert(why);
@@ -2807,6 +2815,18 @@ impl Scans {
                     "the renders of {} are not searched for printed parts that look like a \
                      barcode or QR code the decoder did not read: {why}",
                     page_list(&self.unsearched)
+                ),
+                LossReason::Limit,
+                Severity::Info,
+            );
+        }
+        if let (Some(&first), Some(why)) = (self.partly.first(), &self.partly_why) {
+            out.loss_info(
+                format!("p{first}"),
+                format!(
+                    "the renders of {} are searched only in part for printed parts that look \
+                     like a barcode or QR code the decoder did not read: {why}",
+                    page_list(&self.partly)
                 ),
                 LossReason::Limit,
                 Severity::Info,
@@ -3074,13 +3094,14 @@ const PRINTED: &str = "a printed part that looks like a barcode or QR code";
 /// The parts of the render of a page that needs vision (`page`, of `need`) that look like a
 /// code: its dark parts as rectangles in points (see [`crate::codes::pixel_cells`]),
 /// searched as codes drawn as paths are ([`crate::codes::printed_codes`]), within `room`
-/// bytes with the render. Their boxes in the visible page box; `Err` says why the render
-/// was not searched.
+/// bytes with the render, until `late`. Their boxes in the visible page box, and why only
+/// part of the render was searched when it was; `Err` says why the render was not searched.
 fn printed_codes(
     page: &Rendered,
     need: &Need,
     room: u64,
-) -> Result<Vec<([f32; 4], usize)>, String> {
+    late: &dyn Fn() -> bool,
+) -> Result<Printed, String> {
     let p = &page.pixmap;
     let (w, h) = (usize::from(p.width()), usize::from(p.height()));
     let held = (w * h * 4) as u64;
@@ -3105,8 +3126,19 @@ fn printed_codes(
         (1.0 / page.scale) as f32,
         page_rect(page, need, [0, 0, wr, hr]),
         &cut,
+        late,
     )?;
-    Ok(found.into_iter().map(|c| (c.b, c.finders)).collect())
+    Ok(Printed {
+        parts: found.codes.into_iter().map(|c| (c.b, c.finders)).collect(),
+        partly: found.partly,
+    })
+}
+
+/// The parts of a page's render that look like a code (their boxes in the visible page box
+/// and the QR finders each shows), and why only part of the render was searched when it was.
+struct Printed {
+    parts: Vec<([f32; 4], usize)>,
+    partly: Option<String>,
 }
 
 /// Whether box `a` fills at least [`FILLS`] of box `b` each way.

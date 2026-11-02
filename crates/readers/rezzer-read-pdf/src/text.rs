@@ -1072,7 +1072,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
         // The search holds its grid in the object pool while it runs.
         let search = crate::codes::search_bytes(&dev.cells);
         let found = if self.origin.reserve_copy(search) {
-            let found = crate::codes::vector_codes(&dev.cells);
+            let found = crate::codes::vector_search(&dev.cells);
             self.origin.release_copy(search);
             found
         } else {
@@ -1081,7 +1081,14 @@ impl<'p, 'a> PageReader<'p, 'a> {
             ))
         };
         match found {
-            Ok(codes) => items.codes = codes,
+            Ok(searched) => {
+                items.codes = searched.codes;
+                if let Some(why) = searched.partly {
+                    notes.push(Note::Unsupported(format!(
+                        "codes drawn as paths on page {n} are looked for only in part: {why}"
+                    )));
+                }
+            }
             Err(why) => notes.push(Note::Unsupported(format!(
                 "codes drawn as paths on page {n} are not looked for: {why}"
             ))),
