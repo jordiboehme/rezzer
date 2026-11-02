@@ -3814,7 +3814,8 @@ impl<'a> Device<'a> for TextDevice<'_> {
         if let Some((glyphs, named, unkept)) = bar_run {
             let keep = self.open.iter().any(|o| o.actual.is_some());
             if unkept {
-                self.bars_unread.push((from, self.glyphs.len() - from, keep));
+                self.bars_unread
+                    .push((from, self.glyphs.len() - from, keep));
             } else {
                 self.keep_bar_run(BarRun {
                     from,

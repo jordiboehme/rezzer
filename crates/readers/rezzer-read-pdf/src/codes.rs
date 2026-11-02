@@ -2585,7 +2585,10 @@ mod tests {
         assert_eq!(found.partly, None);
         let late = printed_codes(&cells, 0.5, page, &[], &|| true).expect("searched");
         assert!(late.codes.is_empty());
-        assert_eq!(late.partly.as_deref(), Some("the time for reading codes ran out"));
+        assert_eq!(
+            late.partly.as_deref(),
+            Some("the time for reading codes ran out")
+        );
     }
 
     #[test]

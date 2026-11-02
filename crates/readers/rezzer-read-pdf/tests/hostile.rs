@@ -4641,7 +4641,12 @@ fn rows_of_field_boxes(apart: bool) -> Vec<u8> {
             );
         }
     }
-    dense_runs(&mut c, 170_000, 100, [300.0, 40.0, 560.0, h as f32 / 2.0 - 20.0]);
+    dense_runs(
+        &mut c,
+        170_000,
+        100,
+        [300.0, 40.0, 560.0, h as f32 / 2.0 - 20.0],
+    );
     tall_page(&c, h)
 }
 
@@ -4765,7 +4770,8 @@ fn groups_of_small_rectangles_past_the_search_bound_are_said() {
     let out = read(&sized_page(&c, 1100, 900));
     assert_quick(start);
     let partly = out.document.losses.iter().find(|l| {
-        l.what.contains("codes drawn as paths on page 1 are looked for only in part")
+        l.what
+            .contains("codes drawn as paths on page 1 are looked for only in part")
             && l.what.contains("2000 largest of its 2100 groups")
     });
     assert!(partly.is_some(), "{:?}", out.document.losses);
@@ -4835,16 +4841,20 @@ fn glyphs_of_many_bars_in_many_fonts_are_charged_and_bounded() {
     b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
     let out = read(&b.finish(catalog));
     assert_quick(start);
-    let cut = out.document.losses.iter().find(|l| {
-        l.what.contains("page 1") && l.what.contains("different glyphs drawn as bars")
-    });
+    let cut =
+        out.document.losses.iter().find(|l| {
+            l.what.contains("page 1") && l.what.contains("different glyphs drawn as bars")
+        });
     assert!(cut.is_some(), "{:?}", out.document.losses);
     let body = text(page(&out, 1));
     assert!(body.contains("Before."));
     // The runs whose outlines were kept and that print no code stay text, as any such run;
     // the runs past the bound are no text.
     let left = body.matches("ABCDEFG").count();
-    assert!(left <= 8_192 / 107 + 1, "{left} runs of bars left in the text");
+    assert!(
+        left <= 8_192 / 107 + 1,
+        "{left} runs of bars left in the text"
+    );
     // Without the bound the outlines alone took about 75 MiB more.
     let peak = heap_peak_bytes();
     assert!(peak < 220 << 20, "heap peak {} MiB", peak >> 20);
