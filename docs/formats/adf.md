@@ -2,7 +2,7 @@
 
 Rezzer reads Atlassian Document Format, the JSON tree that Jira Cloud and Confluence Cloud use for rich text. An agent that gets a Jira issue or a Confluence page through the API gets this tree. Rezzer turns it into Markdown with its structure and metadata.
 
-Status: 🗓️ planned for 0.2.0. Nothing is implemented yet. The request is [issue 22](https://github.com/jordiboehme/rezzer/issues/22).
+Status: 📝 planned. The release is not set yet. Nothing is implemented yet. The request is [issue 22](https://github.com/jordiboehme/rezzer/issues/22).
 
 File types: `.json` files that hold an ADF document. Rezzer detects the format by content: a JSON object with `"type": "doc"`, a `version` and a `content` list. A single node or a list of comments needs a wrapper rule, which the spec decides.
 

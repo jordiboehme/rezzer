@@ -6,6 +6,8 @@ Status: 🗓️ planned for 0.2.0. Nothing is implemented yet.
 
 File types: `.html`, `.htm`. Rezzer detects the format by content, not by extension.
 
+A web page saved as one file (MHTML: `.mhtml`, `.mht`) is detected as MHTML already. Rezzer doesn't read it yet and says so in the output. It is planned together with HTML.
+
 Built on (versions as tested on 2026-10-19):
 
 - [scraper](https://crates.io/crates/scraper) 0.27.0 as the one document tree (html5ever with CSS selectors)

@@ -2,7 +2,7 @@
 
 Rezzer reads Rich Text Format files with their tables, notes, lists and links, plus the comments and the info block that the base crate leaves out.
 
-Status: 🗓️ planned for 0.2.0. Nothing is implemented yet.
+Status: 📝 planned. The release is not set yet. Nothing is implemented yet.
 
 File types: `.rtf`. Rezzer detects the format by content, not by extension.
 
