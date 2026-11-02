@@ -137,6 +137,24 @@ pub struct Properties {
     /// Facts about the file as a whole (page count, signed, encrypted and so on).
     #[serde(default, skip_serializing_if = "FileFacts::is_empty")]
     pub facts: FileFacts,
+    /// Where `title` was found when the file's own properties give none, in words (for
+    /// example `largest heading in the top third of page 1`). `None` when the title is the
+    /// file's own or there is none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_from: Option<String>,
+    /// The date the document's own text gives as its date (a printed `Datum 01.02.2026`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_date: Option<FoundDate>,
+}
+
+/// A date found in the document's text, with where it was found.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct FoundDate {
+    /// The date as `YYYY-MM-DD`.
+    pub date: String,
+    /// Where it was found, in words (for example `date label Datum on page 1`).
+    pub from: String,
 }
 
 /// An extracted picture or file.
@@ -159,7 +177,8 @@ pub struct Asset {
     /// The barcodes and QR codes read from the picture, in the order they were found.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub codes: Vec<Barcode>,
-    /// The picture looks like a barcode or QR code, but none was read from it.
+    /// The picture looks like a barcode or QR code, or holds a part that does, but no code
+    /// was read from it there.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub code_unread: bool,
 }
@@ -181,10 +200,18 @@ pub struct Barcode {
     /// nor base64, only its size.
     pub bytes: u64,
     /// About where the code lies on its page, in points (left, bottom, right, top in the
-    /// frame of the page's text), when the picture is the page. A small picture shared by
-    /// several places has no box here: each place says where the picture is.
+    /// frame of the page's text), when the picture is the page. A code drawn as paths, or a
+    /// picture that looks like a code, has the box of that drawing or picture when it is read
+    /// again from its region and is the only code there (a linear code drawn as paths only
+    /// when its bars fill that drawing); else a linear code has the box of its bars as the
+    /// decoder sees them, a matrix code the box of its finder patterns. A small picture shared
+    /// by several places has no box here: each place says where the picture is.
     #[serde(rename = "box", default, skip_serializing_if = "Option::is_none")]
     pub bounds: Option<[f32; 4]>,
+    /// Where the code lies on its page in words, by thirds of the page in the frame of its
+    /// text, for example `top left of the page`, when it has a box.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub place: Option<String>,
 }
 
 /// A short map of the document: its parts and the main facts. Built by the enrich passes.

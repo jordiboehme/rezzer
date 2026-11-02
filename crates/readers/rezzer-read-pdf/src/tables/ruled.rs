@@ -6,39 +6,46 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::banded::{Band, Shared, Taken, banded};
+use super::banded::{BAND_EDGE, BODY_GAP, Band, Shared, Taken, banded, row_starts};
+use super::pairs::{
+    Field, Top, claim, field_cuts, field_strips, frame_tops, frames, holds_values, pairs_table,
+    taken_by_grids,
+};
+use super::sections::{CUT_WORK, sections};
+use super::side::{Beside, SIDE_FOUND_BY, SIDE_WORK, Side, StripKind, side_columns, totals_top};
 use super::*;
+use crate::marks::is_placeholder;
 use crate::regions::{Grids, Seg, Unsearched, clustered, grids};
+use crate::tables::LABEL_STEP;
+
+/// Where a run a table took goes: the table, its row and its cell.
+type Claim = Option<(usize, usize, usize)>;
 
 /// Why a grid with a figure caption next to it is not a table.
 const FIGURE_NEAR: &str = "a figure caption stands next to it";
+
+/// A section of a grid: its segments, whether its grid was cut, whether a cut is its bottom
+/// or its top, and its grid's place among the page's grids.
+struct Part {
+    h: Vec<Seg>,
+    v: Vec<Seg>,
+    cut: bool,
+    cut_below: bool,
+    cut_above: bool,
+    id: usize,
+}
 
 /// The one note of a page for its grids refused with a note: a grid alone says why; several
 /// say how many and why, by reason, the reasons in the order they first came. The note stands
 /// where the first of them does.
 fn page_note(page: u32, refusals: &[(usize, f32, &'static str)]) -> Option<Unsure> {
     let first = refusals.iter().min_by_key(|r| r.0)?;
-    let mut text = None;
-    if refusals.len() > 1 {
-        let mut counts: Vec<(&str, usize)> = Vec::new();
-        for (_, _, why) in refusals {
-            match counts.iter_mut().find(|(w, _)| w == why) {
-                Some((_, n)) => *n += 1,
-                None => counts.push((why, 1)),
-            }
-        }
-        let parts: Vec<String> = counts
-            .iter()
-            .map(|&(why, n)| {
-                let why = if n == 1 { why } else { plural(why) };
-                format!("{n} ({why})")
-            })
-            .collect();
-        text = Some(format!(
+    let text = (refusals.len() > 1).then(|| {
+        format!(
             "Possible tables on page {page} not rebuilt: {}",
-            parts.join(", ")
-        ));
-    }
+            counted(refusals.iter().map(|r| r.2))
+        )
+    });
     Some(Unsure {
         at: first.0,
         top: first.1,
@@ -47,31 +54,12 @@ fn page_note(page: u32, refusals: &[(usize, f32, &'static str)]) -> Option<Unsur
     })
 }
 
-/// A reason a ruled grid is refused, said of several grids.
-fn plural(why: &str) -> &str {
-    match why {
-        "it has more than 15 columns" => "they have more than 15 columns",
-        "most of its cells are empty" => "most of their cells are empty",
-        "its boxes do not form rows and columns" => "their boxes do not form rows and columns",
-        "its text crosses its lines" => "their text crosses their lines",
-        "it covers most of the page" => "they cover most of the page",
-        "it lies on a picture" => "they lie on a picture",
-        "its text is much smaller than the body text, as in a picture of a page" => {
-            "their text is much smaller than the body text, as in pictures of pages"
-        }
-        "too few rows follow its header" => "too few rows follow their headers",
-        "the text below its header does not stand in its columns" => {
-            "the text below their headers does not stand in their columns"
-        }
-        "its cells hold long text" => "their cells hold long text",
-        "its text runs on from row to row like prose" => {
-            "their text runs on from row to row like prose"
-        }
-        other => other,
-    }
-}
-
 /// Grids of drawn rules: horizontal and vertical lines that meet, with text in their cells.
+/// The page's runs are cut at the edges of its fields and columns (see [`cut_runs`]); the
+/// columns of totals beside its sections are read first (see [`totals_tables`]), then each
+/// section of each grid top to bottom (see [`section`]), the header bands it left (see
+/// [`banded`]) and the rows of fields between rules no grid takes (see [`strip_tables`]);
+/// last the runs of all tables leave the flow (see [`leave_flow`]).
 pub(super) fn ruled(
     page: u32,
     flow: &mut Flow,
@@ -96,28 +84,48 @@ pub(super) fn ruled(
             return;
         }
     };
-    let mut grids = groups;
-    // Top to bottom.
-    grids.sort_by(|a, b| {
-        let top =
-            |g: &(Vec<usize>, Vec<usize>)| g.0.iter().map(|&j| hs[j].at).fold(f32::MIN, f32::max);
-        top(b).total_cmp(&top(a))
-    });
+    let grids = grid_parts(page, &hs, &vs, &groups, found);
+    // The horizontal lines a grid takes; the others may bound a column of totals or a strip
+    // of fields.
+    let taken = taken_by_grids(hs.len(), &groups);
+    let frames = cut_runs(
+        page,
+        flow,
+        (&hs, &vs, &frame_tops(&hs, &vs, &groups, true)),
+        &grids,
+        found,
+    );
     let lines = flow_lines(flow);
     let by_y = ByY::new(flow, &lines);
-    // Runs a grid took, and for each the table and the row and cell it goes to.
-    let mut claimed: Vec<Option<(usize, usize, usize)>> = vec![None; flow.runs.len()];
-    // Runs of grids refused with a note, and those grids: where each stands and why.
-    let mut held: Vec<bool> = vec![false; flow.runs.len()];
-    let mut refusals: Vec<(usize, f32, &'static str)> = Vec::new();
-    let mut tables: Vec<Planned> = Vec::new();
-    let mut bands: Vec<Band> = Vec::new();
-    // Cells drawn as icons, the page's rule boxes sorted by their bottom once needed, and
-    // the steps spent looking.
-    let mut icons: Vec<(usize, usize, usize, [f32; 4])> = Vec::new();
-    let mut strokes: Option<Vec<[f32; 4]>> = None;
-    let mut icon_work = 0usize;
-    'grids: for (g, (gh, gv)) in grids.into_iter().enumerate() {
+    let sh = Sheet {
+        page,
+        flow,
+        lines: &lines,
+        by_y: &by_y,
+        area,
+        rules,
+        hs: &hs,
+        vs: &vs,
+        frames: &frames,
+        taken: &taken,
+        per_line: texted_per_line(flow),
+        stop,
+    };
+    let mut take = Taking::new(flow.runs.len());
+    // A column of totals beside the sections: its totals are pairs, taken first; its other
+    // strips join the section beside them, below.
+    let sides = totals_tables(
+        page,
+        flow,
+        &by_y,
+        (&hs, &vs, &taken),
+        &grids,
+        (&mut take.claimed, &mut take.tables),
+        found,
+    );
+    // The tables of totals come first; they have no header row.
+    let pairs = take.tables.len();
+    for (g, part) in grids.into_iter().enumerate() {
         if g % CHECK_EVERY == CHECK_EVERY - 1 && stop() {
             found.skipped.push(format!(
                 "ruled tables on page {page} are looked for only in part: the time limit was \
@@ -125,112 +133,578 @@ pub(super) fn ruled(
             ));
             break;
         }
-        let h: Vec<Seg> = gh.iter().map(|&j| hs[j]).collect();
-        let v: Vec<Seg> = gv.iter().map(|&k| vs[k]).collect();
-        let mut xs: Vec<f32> = v.iter().map(|s| s.at).collect();
-        xs.push(h.iter().map(|s| s.from).fold(f32::MAX, f32::min));
-        xs.push(h.iter().map(|s| s.to).fold(f32::MIN, f32::max));
-        let mut ys: Vec<f32> = h.iter().map(|s| s.at).collect();
-        ys.push(v.iter().map(|s| s.from).fold(f32::MAX, f32::min));
-        ys.push(v.iter().map(|s| s.to).fold(f32::MIN, f32::max));
-        let xs = clustered(xs);
-        let mut ys = clustered(ys);
-        // Rows from the top.
-        ys.reverse();
-        let (cols, rows) = (xs.len().saturating_sub(1), ys.len().saturating_sub(1));
-        if rows == 1 && cols >= 2 {
-            // A row of drawn cells may head a table whose lines have no rules.
-            bands.push(Band {
-                b: [xs[0], ys[1], xs[cols], ys[0]],
-                xs,
-            });
-            continue;
-        }
-        if cols < 2 || rows < 2 {
-            continue;
-        }
-        if rows.saturating_mul(cols) > MAX_SQUARES {
-            found.skipped.push(format!(
-                "a grid of {rows} by {cols} drawn cells on page {page} is not read as a table: \
-                 it has more than {MAX_SQUARES} cells"
-            ));
-            continue;
-        }
-        let b = [xs[0], ys[rows], xs[cols], ys[0]];
-        let inside = |i: usize| {
-            let r = &flow.runs[i];
-            let (cx, _) = middle(r);
-            !r.off_axis && claimed[i].is_none() && cx > b[0] && cx < b[2]
-        };
-        let mine: Vec<usize> = by_y
-            .runs_between(b[1], b[3])
-            .into_iter()
-            .filter(|&i| inside(i))
-            .collect();
-        let within: Vec<usize> = mine
-            .iter()
-            .copied()
-            .filter(|&i| !flow.runs[i].text.trim().is_empty())
-            .collect();
-        if within.is_empty() {
-            continue;
-        }
-        if tables.len() >= MAX_TABLES {
-            found.skipped.push(too_many_tables(page));
+        if section(&sh, &sides, part, &mut take, found) == Next::Stop {
             break;
         }
-        let at = flow.at[within[0]];
-        let sizes: Vec<f32> = within.iter().map(|&i| flow.runs[i].size).collect();
-        let (caption_line, figure_caption) = captions_near(flow, &lines, &by_y, b, &sizes, &|i| {
-            let (_, cy) = middle(&flow.runs[i]);
-            inside(i) && cy > b[1] && cy < b[3]
-        });
-        let table_caption = caption_line.is_some();
-        // A refused grid gets a note when a caption names a table, or when it looks like one:
-        // three columns or more with text in two rows or in six squares, and nothing about
-        // the area (the page's frame, a picture, tiny text) that rules out a table. Its text
-        // then stays paragraphs and no detector without rules takes it.
-        let mut text_rows: HashSet<usize> = HashSet::new();
-        let mut text_squares: HashSet<(usize, usize)> = HashSet::new();
-        for &i in &within {
-            let (cx, cy) = middle(&flow.runs[i]);
-            let r = ys
-                .partition_point(|e| *e > cy)
-                .saturating_sub(1)
-                .min(rows - 1);
-            let c = xs
-                .partition_point(|e| *e < cx)
-                .saturating_sub(1)
-                .min(cols - 1);
-            text_rows.insert(r);
-            text_squares.insert((r, c));
+    }
+    if take.title_work > TITLE_WORK {
+        found.skipped.push(format!(
+            "titles over ruled grids on page {page} are looked for only in part: the page has \
+             too many column lines"
+        ));
+    }
+    let strips_from = bands_and_strips(&sh, &mut take, found);
+    leave_flow(page, flow, take, (pairs, strips_from), found);
+}
+
+/// What the grid search of a page reads: the page, its runs, lines and rules, and the frames
+/// of fields between its rules.
+struct Sheet<'a> {
+    page: u32,
+    flow: &'a Flow,
+    lines: &'a [FlowLine],
+    by_y: &'a ByY,
+    area: &'a Area<'a>,
+    rules: &'a [Rule],
+    /// The page's horizontal and vertical lines, joined.
+    hs: &'a [Seg],
+    vs: &'a [Seg],
+    frames: &'a [Frame],
+    /// The horizontal lines a grid takes.
+    taken: &'a [bool],
+    per_line: HashMap<u32, u32>,
+    stop: &'a dyn Fn() -> bool,
+}
+
+/// What the grid search of a page takes and finds as it goes.
+struct Taking {
+    /// Runs a grid took, and for each the table and the row and cell it goes to.
+    claimed: Vec<Claim>,
+    tables: Vec<Planned>,
+    /// Runs of grids refused with a note, and those grids: where each stands and why; and
+    /// the grids refused without a note.
+    held: Vec<bool>,
+    refusals: Vec<(usize, f32, &'static str)>,
+    quiet: Vec<(usize, &'static str, Refused)>,
+    /// Runs of grids and bands refused without a note: their loss speaks for them.
+    quietly: Vec<bool>,
+    /// Runs that title the section below a cut: no section above takes them, and the section
+    /// below, by its grid, has them as its caption once it is a table.
+    titles: Vec<bool>,
+    pending: HashMap<usize, Vec<usize>>,
+    title_work: usize,
+    bands: Vec<Band>,
+    /// Cells drawn as icons, the page's rule boxes sorted by their bottom once needed, and
+    /// the steps spent looking.
+    icons: Vec<(usize, usize, usize, [f32; 4])>,
+    strokes: Option<Vec<[f32; 4]>>,
+    icon_work: usize,
+}
+
+impl Taking {
+    /// Nothing taken yet of a flow of `n` runs.
+    fn new(n: usize) -> Taking {
+        Taking {
+            claimed: vec![None; n],
+            tables: Vec::new(),
+            held: vec![false; n],
+            refusals: Vec::new(),
+            quiet: Vec::new(),
+            quietly: vec![false; n],
+            titles: vec![false; n],
+            pending: HashMap::new(),
+            title_work: 0,
+            bands: Vec::new(),
+            icons: Vec::new(),
+            strokes: None,
+            icon_work: 0,
         }
-        // A grid over most of the page is its frame, unless text fills at least half of its
-        // squares in three rows and three columns or more: a table as large as the page.
-        let dense = rows >= 3 && 2 * text_squares.len() >= rows * cols;
-        let noted = table_caption
-            || (cols >= 3
-                && (text_rows.len() >= 2 || text_squares.len() >= 6)
-                && match area.refuses(b, &sizes) {
-                    None => true,
-                    Some(why) => why == PAGE_FRAME && dense,
-                });
-        // A figure caption speaks against a table: no note for it.
-        let mut refuse = |why: &'static str| {
-            if !noted || why == FIGURE_NEAR {
-                return;
-            }
-            refusals.push((at, b[3], why));
-            for &i in &mine {
-                held[i] = true;
-            }
+    }
+}
+
+/// Whether the grid search goes on with the next section or stops: the time limit was
+/// reached, or the page has as many tables as it may.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Next {
+    Section,
+    Stop,
+}
+
+/// A section of a grid ready to be read as a table: its segments, its column and row edges
+/// (from the top), the heights of its open rows (see [`hanging_rows`]), the runs of its title
+/// and whether a column of totals joins it.
+struct GridSection {
+    h: Vec<Seg>,
+    v: Vec<Seg>,
+    xs: Vec<f32>,
+    ys: Vec<f32>,
+    open: Vec<f32>,
+    title: Vec<usize>,
+    side: bool,
+}
+
+/// One section of a grid (see [`grid_parts`]): its edges (see [`section_edges`]), its title,
+/// its open rows and the column of totals it joins. A row of drawn cells goes to the header
+/// bands, a section of two rows and two columns or more is read (see [`read_grid`]).
+fn section(
+    sh: &Sheet<'_>,
+    sides: &[Side],
+    part: Part,
+    take: &mut Taking,
+    found: &mut Found,
+) -> Next {
+    let Part {
+        mut h,
+        v,
+        cut,
+        cut_below,
+        cut_above,
+        id,
+    } = part;
+    let (mut xs, mut ys) = section_edges(sh, &h, &v, cut_above);
+    let mut title = take.pending.remove(&id).unwrap_or_default();
+    if xs.len() >= 2 && ys.len() >= 2 {
+        let mut place = TitlePlace {
+            flow: sh.flow,
+            by_y: sh.by_y,
+            claimed: &take.claimed,
+            titles: &mut take.titles,
+            xs: &xs,
+            work: &mut take.title_work,
         };
-        // A grid of many columns is refused before its cells are worked out.
-        if cols > MAX_COLUMNS {
-            refuse("it has more than 15 columns");
+        // The first section of a cut grid has the line right over the grid as its title,
+        // as each section after it has the line right over its cut.
+        if cut && !cut_above {
+            title.extend(place.over_grid(sh.vs, ys[0]));
+        }
+        // The line right above a cut is the title of the section below: it leaves this
+        // section, and a row of one cell that held only it goes too.
+        if cut_below {
+            let below = place.above_cut(&v, &mut ys, &mut h);
+            take.pending.insert(id, below);
+        }
+    }
+    let open = hanging_rows(sh, take, &v, &xs, &mut ys, &mut h, cut);
+    // A strip of a column of totals beside the section, headed on the baseline of its
+    // column titles, is one more column of it, parted at each of its row edges.
+    let side = joined(sides, &xs, &ys);
+    if let Some(side) = side {
+        let right = xs[xs.len() - 1];
+        xs.push(side.x1);
+        for &y in &ys {
+            h.push(Seg {
+                at: y,
+                from: right,
+                to: side.x1,
+            });
+        }
+    }
+    let (cols, rows) = (xs.len().saturating_sub(1), ys.len().saturating_sub(1));
+    if rows == 1 && cols >= 2 {
+        // A row of drawn cells may head a table whose lines have no rules.
+        take.bands.push(Band {
+            b: [xs[0], ys[1], xs[cols], ys[0]],
+            xs,
+            cut,
+        });
+        return Next::Section;
+    }
+    if cols < 2 || rows < 2 {
+        return Next::Section;
+    }
+    if rows.saturating_mul(cols) > MAX_SQUARES {
+        found.skipped.push(format!(
+            "a grid of {rows} by {cols} drawn cells on page {} is not read as a table: it has \
+             more than {MAX_SQUARES} cells",
+            sh.page
+        ));
+        return Next::Section;
+    }
+    read_grid(
+        sh,
+        take,
+        found,
+        GridSection {
+            h,
+            v,
+            xs,
+            ys,
+            open,
+            title,
+            side: side.is_some(),
+        },
+    )
+}
+
+/// The column and row edges (from the top) of the section of segments `h` and `v`, cut at
+/// rows of fields beyond its rules and, below a cut (`cut_above`), at its own top rule.
+fn section_edges(sh: &Sheet<'_>, h: &[Seg], v: &[Seg], cut_above: bool) -> (Vec<f32>, Vec<f32>) {
+    let (mut xs, mut ys) = edges(h, v);
+    // Column rules that hang below the grid's lowest rule into a row of fields under it
+    // (a frame that holds fields with a value) part the fields, not rows of the grid: the
+    // grid ends at that rule. So do column rules that rise over its highest rule into a
+    // row of fields over it. Column titles or values over or under the rule are the
+    // grid's own open row.
+    if let (Some(low), Some(high), Some(&l), Some(&r)) = (
+        h.iter().map(|s| s.at).reduce(f32::min),
+        h.iter().map(|s| s.at).reduce(f32::max),
+        xs.first(),
+        xs.last(),
+    ) {
+        let framed = |at: f32, edge: fn(&Frame) -> f32| {
+            sh.frames.iter().any(|f| {
+                (edge(f) - at).abs() <= SNAP
+                    && f.x0 < r
+                    && l < f.x1
+                    && holds_values(sh.flow, sh.by_y, f)
+            })
+        };
+        if framed(low, |f| f.top) {
+            ys.retain(|y| *y >= low - SNAP);
+        }
+        if framed(high, |f| f.bottom) {
+            ys.retain(|y| *y <= high + SNAP);
+        }
+        // A row beyond the grid's lowest or highest rule that only the ends of column rules
+        // bound and that holds no text is no row of it.
+        let empty = |lo: f32, hi: f32| {
+            !sh.by_y.runs_between(lo, hi).into_iter().any(|i| {
+                let run = &sh.flow.runs[i];
+                let (cx, _) = middle(run);
+                cx > l && cx < r && !run.text.trim().is_empty()
+            })
+        };
+        if ys.len() >= 3 && ys[0] > high + SNAP && empty(high, ys[0]) {
+            ys.remove(0);
+        }
+        let n = ys.len();
+        if n >= 3 && ys[n - 1] < low - SNAP && empty(ys[n - 1], low) {
+            ys.pop();
+        }
+    }
+    // A section below a cut reaches only as far left as its own top rule: where another
+    // block draws the rule at that height over its left part (fields beside it), the
+    // text under that part is the other block's.
+    if cut_above && let (Some(&top), Some(&l), Some(&r)) = (ys.first(), xs.first(), xs.last()) {
+        let from = own_left(h, sh.hs, top, (l, r));
+        if from > xs[0] {
+            xs.retain(|x| *x >= from - SNAP);
+            if xs.first().is_none_or(|x| *x > from + SNAP) {
+                xs.insert(0, from);
+            }
+        }
+    }
+    (xs, ys)
+}
+
+/// The open rows of a section of column edges `xs` and row edges `ys` (from the top), its
+/// vertical segments `v`: a row whose inner column rules all hang from its top and end at one
+/// height is a header over lines without rules: a rule across at their feet parts the two,
+/// and the row below it (its lines) is open: one cell across that is no spanning box. Only in
+/// a cut grid (`cut`) or a row alone, and only over lines of text it is for. The feet are
+/// added to `ys` and as rules to `h`; their heights are returned.
+fn hanging_rows(
+    sh: &Sheet<'_>,
+    take: &Taking,
+    v: &[Seg],
+    xs: &[f32],
+    ys: &mut Vec<f32>,
+    h: &mut Vec<Seg>,
+    cut: bool,
+) -> Vec<f32> {
+    let mut open: Vec<f32> = Vec::new();
+    if xs.len() < 3 || !(cut || ys.len() == 2) {
+        return open;
+    }
+    let feet: Vec<f32> = hanging_feet(v, xs, ys)
+        .into_iter()
+        .filter(|&(foot, bottom)| {
+            sh.by_y.runs_between(bottom, foot).into_iter().any(|i| {
+                let r = &sh.flow.runs[i];
+                let (cx, cy) = middle(r);
+                !r.off_axis
+                    && take.claimed[i].is_none()
+                    && !take.titles[i]
+                    && cy < foot
+                    && cx > xs[0]
+                    && cx < xs[xs.len() - 1]
+                    && !r.text.trim().is_empty()
+            })
+        })
+        .map(|(foot, _)| foot)
+        .collect();
+    for foot in feet {
+        let at = ys.partition_point(|e| *e > foot);
+        ys.insert(at, foot);
+        open.push(foot);
+        h.push(Seg {
+            at: foot,
+            from: xs[0],
+            to: xs[xs.len() - 1],
+        });
+    }
+    open
+}
+
+/// How a grid refused is said: a grid that looks like a table (`noted`) gets a note and holds
+/// its text as paragraphs; any other grid is a loss only, unless it is a chart's (`chart`),
+/// whatever reason refuses it: its text stays free for the detector without rules, as such a
+/// grid often frames a table of its own. A figure caption speaks against a table: no note and
+/// no loss for it.
+struct Refusal<'a> {
+    at: usize,
+    top: f32,
+    noted: bool,
+    chart: bool,
+    /// The grid's runs.
+    mine: &'a [usize],
+}
+
+impl Refusal<'_> {
+    fn refuse(&self, take: &mut Taking, why: &'static str) {
+        if why == FIGURE_NEAR {
+            return;
+        }
+        if !self.noted {
+            if !self.chart {
+                take.quiet.push((self.at, why, Refused::Grid));
+                for &i in self.mine {
+                    take.quietly[i] = true;
+                }
+            }
+            return;
+        }
+        take.refusals.push((self.at, self.top, why));
+        for &i in self.mine {
+            take.held[i] = true;
+        }
+    }
+}
+
+/// Reads a section of two rows and two columns or more as a table, or refuses it (see
+/// [`Refusal`]): its cells (see [`cell_owners`]), its header (see [`header_rows_of`]), the
+/// rows of its bands and the tests a table must pass; the runs of a table are claimed for its
+/// cells (see [`plan_grid`]).
+fn read_grid(sh: &Sheet<'_>, take: &mut Taking, found: &mut Found, s: GridSection) -> Next {
+    let (flow, xs, ys) = (sh.flow, &s.xs, &s.ys);
+    let (cols, rows) = (xs.len() - 1, ys.len() - 1);
+    let b = [xs[0], ys[rows], xs[cols], ys[0]];
+    let inside = |i: usize| {
+        let r = &flow.runs[i];
+        let (cx, _) = middle(r);
+        !r.off_axis && take.claimed[i].is_none() && !take.titles[i] && cx > b[0] && cx < b[2]
+    };
+    let mine: Vec<usize> = sh
+        .by_y
+        .runs_between(b[1], b[3])
+        .into_iter()
+        .filter(|&i| inside(i))
+        .collect();
+    let within: Vec<usize> = mine
+        .iter()
+        .copied()
+        .filter(|&i| !flow.runs[i].text.trim().is_empty())
+        .collect();
+    if within.is_empty() || boxed_field(flow, &within, xs, ys) {
+        return Next::Section;
+    }
+    if take.tables.len() >= MAX_TABLES {
+        found.skipped.push(too_many_tables(sh.page));
+        return Next::Stop;
+    }
+    let at = flow.at[within[0]];
+    let sizes: Vec<f32> = within.iter().map(|&i| flow.runs[i].size).collect();
+    let (caption_line, figure_caption) = captions_near(flow, sh.lines, sh.by_y, b, &sizes, &|i| {
+        let (_, cy) = middle(&flow.runs[i]);
+        inside(i) && cy > b[1] && cy < b[3]
+    });
+    let table_caption = caption_line.is_some();
+    // A refused grid gets a note when a caption names a table, or when it looks like one:
+    // three columns or more with text in two rows or in six squares, and nothing about
+    // the area (the page's frame, a picture, tiny text) that rules out a table. Its text
+    // then stays paragraphs and no detector without rules takes it.
+    let mut text_rows: HashSet<usize> = HashSet::new();
+    let mut text_squares: HashSet<(usize, usize)> = HashSet::new();
+    for &i in &within {
+        let (cx, cy) = middle(&flow.runs[i]);
+        let r = ys
+            .partition_point(|e| *e > cy)
+            .saturating_sub(1)
+            .min(rows - 1);
+        let c = xs
+            .partition_point(|e| *e < cx)
+            .saturating_sub(1)
+            .min(cols - 1);
+        text_rows.insert(r);
+        text_squares.insert((r, c));
+    }
+    // A grid over most of the page is its frame, unless text fills at least half of its
+    // squares in three rows and three columns or more: a table as large as the page.
+    let dense = rows >= 3 && 2 * text_squares.len() >= rows * cols;
+    let noted = table_caption
+        || (cols >= 3
+            && (text_rows.len() >= 2 || text_squares.len() >= 6)
+            && match sh.area.refuses(b, &sizes) {
+                None => true,
+                Some(why) => why == PAGE_FRAME && dense,
+            });
+    let refusal = Refusal {
+        at,
+        top: b[3],
+        noted,
+        chart: figure_caption || sh.area.on_picture(b),
+        mine: &mine,
+    };
+    // A figure caption next to the grid or inside it is looked at first, so a wide chart
+    // gets no note; a grid of many columns is refused before its cells are worked out.
+    if figure_caption
+        || within
+            .iter()
+            .any(|&i| caption(&flow.runs[i].text) == Some(false))
+    {
+        refusal.refuse(take, FIGURE_NEAR);
+        return Next::Section;
+    }
+    if cols > MAX_COLUMNS {
+        refusal.refuse(take, "it has more than 15 columns");
+        return Next::Section;
+    }
+    let borders = Borders::new(&s.h, &s.v, xs, ys);
+    let Some(mut owner) = cell_owners(&borders, xs, ys, sh.stop) else {
+        found.skipped.push(format!(
+            "ruled tables on page {} are looked for only in part: the time limit was reached",
+            sh.page
+        ));
+        return Next::Stop;
+    };
+    let (head, styled) = header_rows_of(flow, &within, &borders, xs, ys);
+    // An open row (the lines under a header of hanging rules) has a cell for each of the
+    // header's columns: each value goes into the column it stands under, and a field
+    // left empty is an empty cell.
+    let is_open: Vec<bool> = (0..rows)
+        .map(|r| s.open.iter().any(|f| (ys[r] - f).abs() <= SNAP))
+        .collect();
+    for (r, row) in owner.iter_mut().enumerate() {
+        if is_open[r] {
+            *row = (0..cols).map(|c| (r, c)).collect();
+        }
+    }
+    // A band of the body that no column rule parts, under a header that has them, is
+    // read in the header's columns when its lines hold text in two columns or more.
+    if head >= 1 && cols >= 3 {
+        open_bands(flow, &within, head, xs, ys, &mut owner);
+    }
+    let cells = Cells::new(xs, ys, owner, is_open);
+    let row_at = |y: f32| cells.row_at(y);
+    let cell_at = |x: f32, y: f32| cells.cell_at(x, y);
+    // Rows of the body that only column rules part: the lines of a band that fill at
+    // least half of its columns with text, the first of them included, each start a row.
+    let mut anchors = anchor_rows(
+        flow,
+        &within,
+        head,
+        &cells.is_open,
+        &cells.owner,
+        &cells.extent,
+        &row_at,
+        &cell_at,
+    );
+    // The lines under a header of hanging rules are rows by the header's columns.
+    open_anchors(flow, &within, xs, ys, &s.open, &row_at, &mut anchors);
+    let bands = Bands { anchors };
+    // A line of prose across an open row (a note over the section) is one cell across
+    // its row of the table; the value lines around it keep their columns.
+    let mut spanned: HashSet<(usize, usize)> = HashSet::new();
+    for &i in &within {
+        let run = &flow.runs[i];
+        let r = cells.row_at(middle(run).1);
+        if !cells.is_open[r] {
             continue;
         }
-        // The segments on each boundary of the grid, found once.
+        if alone_on_line(&sh.per_line, run) && note_across(run, xs) {
+            spanned.insert((r, bands.sub_of(r, run)));
+        }
+    }
+    let planned_count: usize = (0..rows).map(|r| bands.subs(r)).sum();
+    if planned_count.saturating_mul(cols) > MAX_SQUARES {
+        found.skipped.push(format!(
+            "a grid of {planned_count} by {cols} cells on page {} is not read as a table: it \
+             has more than {MAX_SQUARES} cells; its text stays paragraphs",
+            sh.page
+        ));
+        // No detector without rules takes its text either.
+        for &i in &mine {
+            take.held[i] = true;
+        }
+        return Next::Section;
+    }
+    let mut with_text: HashSet<((usize, usize), usize)> = HashSet::new();
+    for &i in &within {
+        let r = &flow.runs[i];
+        let (cx, cy) = middle(r);
+        let o = cells.cell_at(cx, cy);
+        with_text.insert((o, bands.sub_of(o.0, r)));
+    }
+    if let Some(why) = grid_refused(flow, &within, &cells, &bands, &with_text, head)
+        .or_else(|| sh.area.refuses(b, &sizes))
+    {
+        refusal.refuse(take, why);
+        return Next::Section;
+    }
+    let (planned_rows, place) = plan_grid(&cells, &bands, &spanned, planned_count);
+    let t = take.tables.len();
+    for &i in &mine {
+        let run = &flow.runs[i];
+        let (cx, cy) = middle(run);
+        let o = cells.cell_at(cx, cy);
+        let (r, c) = place[&(o, bands.sub_of(o.0, run))];
+        take.claimed[i] = Some((t, r, c));
+    }
+    // A cell of the first row without text that holds drawn strokes is a title drawn as
+    // an icon.
+    for (c, o) in cells.owner[0].iter().enumerate() {
+        if *o != (0, c) || with_text.contains(&(*o, 0)) {
+            continue;
+        }
+        let (row_span, col_span) = cells.extent[o];
+        let cell = [
+            xs[c],
+            ys[row_span as usize],
+            xs[c + col_span as usize],
+            ys[0],
+        ];
+        if drawn_inside(&mut take.strokes, sh.rules, cell, &mut take.icon_work) {
+            let (r, k) = place[&(*o, 0)];
+            take.icons.push((t, r, k, cell));
+        }
+    }
+    for &i in &s.title {
+        take.claimed[i] = Some((t, CAPTION_ROW as usize, 0));
+    }
+    let at = s.title.iter().map(|&i| flow.at[i]).fold(at, usize::min);
+    take.tables.push(Planned {
+        at,
+        top: b[3],
+        rows: planned_rows,
+        // A header of two rows or more in a style of its own is the grid's, as are the
+        // rows over the first open row; otherwise the first row is judged by its text.
+        header_rows: if styled {
+            head
+        } else {
+            (0..cells.is_open.iter().position(|o| *o).unwrap_or(0))
+                .map(|r| bands.subs(r))
+                .sum()
+        },
+        trs: Vec::new(),
+        additions: Vec::new(),
+        tagged: None,
+        continues: false,
+        caption: Vec::new(),
+        found_by: s.side.then_some(SIDE_FOUND_BY),
+    });
+    Next::Section
+}
+
+/// The segments on each boundary of a section of column edges `xs` and row edges `ys` (from
+/// the top), found once: its vertical segments by column edge, its horizontal ones by row
+/// edge.
+struct Borders {
+    on_x: Vec<Vec<Seg>>,
+    on_y: Vec<Vec<Seg>>,
+}
+
+impl Borders {
+    fn new(h: &[Seg], v: &[Seg], xs: &[f32], ys: &[f32]) -> Borders {
         let nearest = |edges: &[f32], at: f32| -> Option<usize> {
             let k = edges.partition_point(|e| *e < at);
             [k.checked_sub(1), Some(k)]
@@ -240,94 +714,130 @@ pub(super) fn ruled(
                 .min_by(|&a, &b| (edges[a] - at).abs().total_cmp(&(edges[b] - at).abs()))
         };
         let mut on_x: Vec<Vec<Seg>> = vec![Vec::new(); xs.len()];
-        for s in &v {
-            if let Some(k) = nearest(&xs, s.at) {
+        for s in v {
+            if let Some(k) = nearest(xs, s.at) {
                 on_x[k].push(*s);
             }
         }
         let ys_up: Vec<f32> = ys.iter().rev().copied().collect();
         let mut on_y: Vec<Vec<Seg>> = vec![Vec::new(); ys.len()];
-        for s in &h {
+        for s in h {
             if let Some(k) = nearest(&ys_up, s.at) {
                 on_y[ys.len() - 1 - k].push(*s);
             }
         }
-        // Whether a boundary is drawn over at least half of a cell's side.
-        let covered = |segs: &[Seg], lo: f32, hi: f32| {
-            let len: f32 = segs
-                .iter()
-                .map(|s| (s.to.min(hi) - s.from.max(lo)).max(0.0))
-                .sum();
-            len >= 0.5 * (hi - lo)
-        };
-        // The cell each grid square belongs to: a missing line between two squares joins
-        // them, across first, then down where whole cells line up.
-        let mut owner: Vec<Vec<(usize, usize)>> = vec![vec![(0, 0); cols]; rows];
-        for (r, row) in owner.iter_mut().enumerate() {
-            if r % 1024 == 1023 && stop() {
-                found.skipped.push(format!(
-                    "ruled tables on page {page} are looked for only in part: the time limit \
-                     was reached"
-                ));
-                break 'grids;
-            }
-            for c in 0..cols {
-                row[c] = if c > 0 && !covered(&on_x[c], ys[r + 1], ys[r]) {
-                    row[c - 1]
-                } else {
-                    (r, c)
-                };
-            }
+        Borders { on_x, on_y }
+    }
+
+    /// Whether a boundary is drawn over at least half of a cell's side.
+    fn covered(segs: &[Seg], lo: f32, hi: f32) -> bool {
+        let len: f32 = segs
+            .iter()
+            .map(|s| (s.to.min(hi) - s.from.max(lo)).max(0.0))
+            .sum();
+        len >= 0.5 * (hi - lo)
+    }
+}
+
+/// The cell each grid square of a section of column edges `xs` and row edges `ys` (from the
+/// top) belongs to: a missing line between two squares joins them, across first, then down
+/// where whole cells line up. None when the time limit (`stop`) was reached.
+fn cell_owners(
+    borders: &Borders,
+    xs: &[f32],
+    ys: &[f32],
+    stop: &dyn Fn() -> bool,
+) -> Option<Vec<Vec<(usize, usize)>>> {
+    let (cols, rows) = (xs.len() - 1, ys.len() - 1);
+    let mut owner: Vec<Vec<(usize, usize)>> = vec![vec![(0, 0); cols]; rows];
+    for (r, row) in owner.iter_mut().enumerate() {
+        if r % 1024 == 1023 && stop() {
+            return None;
         }
-        let span_of =
-            |row: &[(usize, usize)], c: usize| row.iter().filter(|o| **o == row[c]).count();
-        for r in 1..rows {
-            let mut c = 0;
-            while c < cols {
-                let span = span_of(&owner[r], c);
-                let above = owner[r - 1][c];
-                let lined_up =
-                    owner[r][c] == (r, c) && above.1 == c && span_of(&owner[r - 1], c) == span;
-                if lined_up && !(c..c + span).any(|k| covered(&on_y[r], xs[k], xs[k + 1])) {
-                    owner[r][c..c + span].fill(above);
-                }
-                c += span;
-            }
-        }
-        // The header: the grid rows above the first rule under the top border that crosses
-        // every column, when rows stand below it.
-        let head = (1..rows)
-            .find(|&k| (0..cols).all(|c| covered(&on_y[k], xs[c], xs[c + 1])))
-            .unwrap_or(0);
-        // Rows above that rule are the table's header only when they look it: a style of
-        // their own (bold over plain, or another size). A cell over several rows alone makes
-        // no header.
-        let styled = head >= 2 && {
-            let (mut top, mut below): (Vec<&Run>, Vec<&Run>) = (Vec::new(), Vec::new());
-            for &i in &within {
-                let r = &flow.runs[i];
-                let (_, cy) = middle(r);
-                let row = ys.partition_point(|e| *e > cy).saturating_sub(1);
-                if row < head {
-                    top.push(r)
-                } else {
-                    below.push(r)
-                }
-            }
-            let median = |runs: &mut Vec<&Run>| {
-                runs.sort_by(|a, b| a.size.total_cmp(&b.size));
-                runs.get(runs.len() / 2).map_or(0.0, |r| r.size)
+        for c in 0..cols {
+            row[c] = if c > 0 && !Borders::covered(&borders.on_x[c], ys[r + 1], ys[r]) {
+                row[c - 1]
+            } else {
+                (r, c)
             };
-            let bold =
-                !top.is_empty() && top.iter().all(|r| r.bold) && below.iter().any(|r| !r.bold);
-            !below.is_empty() && (bold || (median(&mut top) - median(&mut below)).abs() > 0.5)
-        };
-        // A band of the body that no column rule parts, under a header that has them, is
-        // read in the header's columns when its lines hold text in two columns or more.
-        if head >= 1 && cols >= 3 {
-            open_bands(flow, &within, head, &xs, &ys, &mut owner);
         }
-        // Each cell's extent in squares: rows down and columns across.
+    }
+    let span_of = |row: &[(usize, usize)], c: usize| row.iter().filter(|o| **o == row[c]).count();
+    for r in 1..rows {
+        let mut c = 0;
+        while c < cols {
+            let span = span_of(&owner[r], c);
+            let above = owner[r - 1][c];
+            let lined_up =
+                owner[r][c] == (r, c) && above.1 == c && span_of(&owner[r - 1], c) == span;
+            if lined_up
+                && !(c..c + span).any(|k| Borders::covered(&borders.on_y[r], xs[k], xs[k + 1]))
+            {
+                owner[r][c..c + span].fill(above);
+            }
+            c += span;
+        }
+    }
+    Some(owner)
+}
+
+/// The header of a section of column edges `xs` and row edges `ys` (from the top) with the
+/// runs `within`: the grid rows above the first rule under the top border that crosses
+/// every column, when rows stand below it; and whether they look it: a style of their own
+/// (bold over plain, or another size) in two rows or more. A cell over several rows alone
+/// makes no header.
+fn header_rows_of(
+    flow: &Flow,
+    within: &[usize],
+    borders: &Borders,
+    xs: &[f32],
+    ys: &[f32],
+) -> (usize, bool) {
+    let (cols, rows) = (xs.len() - 1, ys.len() - 1);
+    let head = (1..rows)
+        .find(|&k| (0..cols).all(|c| Borders::covered(&borders.on_y[k], xs[c], xs[c + 1])))
+        .unwrap_or(0);
+    let styled = head >= 2 && {
+        let (mut top, mut below): (Vec<&Run>, Vec<&Run>) = (Vec::new(), Vec::new());
+        for &i in within {
+            let r = &flow.runs[i];
+            let (_, cy) = middle(r);
+            let row = ys.partition_point(|e| *e > cy).saturating_sub(1);
+            if row < head {
+                top.push(r)
+            } else {
+                below.push(r)
+            }
+        }
+        let median = |runs: &mut Vec<&Run>| {
+            runs.sort_by(|a, b| a.size.total_cmp(&b.size));
+            runs.get(runs.len() / 2).map_or(0.0, |r| r.size)
+        };
+        let bold = !top.is_empty() && top.iter().all(|r| r.bold) && below.iter().any(|r| !r.bold);
+        let (a, b) = (median(&mut top), median(&mut below));
+        !below.is_empty() && (bold || a.max(b) >= LABEL_STEP * a.min(b))
+    };
+    (head, styled)
+}
+
+/// The cells of a section read as a table: its column and row edges (from the top), the cell
+/// each grid square belongs to, each cell's extent in squares (rows down and columns across)
+/// and its open rows.
+struct Cells<'a> {
+    xs: &'a [f32],
+    ys: &'a [f32],
+    owner: Vec<Vec<(usize, usize)>>,
+    extent: HashMap<(usize, usize), (u32, u32)>,
+    is_open: Vec<bool>,
+}
+
+impl<'a> Cells<'a> {
+    fn new(
+        xs: &'a [f32],
+        ys: &'a [f32],
+        owner: Vec<Vec<(usize, usize)>>,
+        is_open: Vec<bool>,
+    ) -> Cells<'a> {
         let mut extent: HashMap<(usize, usize), (u32, u32)> = HashMap::new();
         for (r, row) in owner.iter().enumerate() {
             for (c, o) in row.iter().enumerate() {
@@ -340,167 +850,246 @@ pub(super) fn ruled(
                 }
             }
         }
-        let row_at = |y: f32| -> usize {
-            ys.partition_point(|e| *e > y)
-                .saturating_sub(1)
-                .min(rows - 1)
-        };
-        let cell_at = |x: f32, y: f32| -> (usize, usize) {
-            let c = xs
-                .partition_point(|e| *e < x)
-                .saturating_sub(1)
-                .min(cols - 1);
-            owner[row_at(y)][c]
-        };
-        // Rows of the body that only column rules part: the lines of a band that fill at
-        // least half of its columns with text, the first of them included, each start a row.
-        let anchors = anchor_rows(
-            flow, &within, head, rows, &owner, &extent, &row_at, &cell_at,
-        );
-        let subs = |r: usize| anchors[r].len().max(1);
-        // The row of a band a run goes to: that of the nearest anchor line at or above it.
-        let sub_of = |r: usize, run: &Run| -> usize {
-            // The baselines go up: those at or above the run are the last ones.
-            let a = &anchors[r];
-            let tol = 0.3 * run.size.max(1.0);
-            let above = a.len() - a.partition_point(|y| *y < run.y - tol);
-            above.saturating_sub(1)
-        };
-        let planned_count: usize = (0..rows).map(subs).sum();
-        if planned_count.saturating_mul(cols) > MAX_SQUARES {
-            found.skipped.push(format!(
-                "a grid of {planned_count} by {cols} cells on page {page} is not read as a \
-                 table: it has more than {MAX_SQUARES} cells; its text stays paragraphs"
-            ));
-            // No detector without rules takes its text either.
-            for &i in &mine {
-                held[i] = true;
-            }
-            continue;
+        Cells {
+            xs,
+            ys,
+            owner,
+            extent,
+            is_open,
         }
-        let mut with_text: HashSet<((usize, usize), usize)> = HashSet::new();
-        let mut crossing = 0usize;
-        let mut caption_inside = false;
-        for &i in &within {
-            let r = &flow.runs[i];
-            let (cx, cy) = middle(r);
-            let o = cell_at(cx, cy);
-            with_text.insert((o, sub_of(o.0, r)));
-            // A run that reaches over its cell's side crosses a drawn line.
-            let (x0, x1) = (xs[o.1], xs[(o.1 + extent[&o].1 as usize).min(cols)]);
-            if r.x < x0 - SNAP || r.x + r.w > x1 + SNAP {
-                crossing += 1;
-            }
-            if caption(&r.text) == Some(false) {
-                caption_inside = true;
-            }
+    }
+
+    fn cols(&self) -> usize {
+        self.xs.len() - 1
+    }
+
+    /// The grid row at the height `y`.
+    fn row_at(&self, y: f32) -> usize {
+        self.ys
+            .partition_point(|e| *e > y)
+            .saturating_sub(1)
+            .min(self.ys.len() - 2)
+    }
+
+    /// The cell at `(x, y)`.
+    fn cell_at(&self, x: f32, y: f32) -> (usize, usize) {
+        let c = self
+            .xs
+            .partition_point(|e| *e < x)
+            .saturating_sub(1)
+            .min(self.cols() - 1);
+        self.owner[self.row_at(y)][c]
+    }
+}
+
+/// The rows each grid row of a table is cut in: the baselines of their anchor lines, from the
+/// top.
+struct Bands {
+    anchors: Vec<Vec<f32>>,
+}
+
+impl Bands {
+    /// The rows grid row `r` is cut in.
+    fn subs(&self, r: usize) -> usize {
+        self.anchors[r].len().max(1)
+    }
+
+    /// The row of a band a run goes to: that of the nearest anchor line at or above it.
+    fn sub_of(&self, r: usize, run: &Run) -> usize {
+        // The baselines go up: those at or above the run are the last ones.
+        let a = &self.anchors[r];
+        let tol = 0.3 * run.size.max(1.0);
+        let above = a.len() - a.partition_point(|y| *y < run.y - tol);
+        above.saturating_sub(1)
+    }
+}
+
+/// Why the cells of a table of drawn rules with the runs `within` (in the cells `with_text`
+/// of `cells`, cut in the rows of `bands`) are no table, if they are not: most of them are
+/// empty, too many of its body span, or too much of its text crosses its lines. `head` is the
+/// number of its header rows.
+fn grid_refused(
+    flow: &Flow,
+    within: &[usize],
+    cells: &Cells<'_>,
+    bands: &Bands,
+    with_text: &HashSet<((usize, usize), usize)>,
+    head: usize,
+) -> Option<&'static str> {
+    let (xs, cols) = (cells.xs, cells.cols());
+    let mut crossing = 0usize;
+    for &i in within {
+        let r = &flow.runs[i];
+        let (cx, cy) = middle(r);
+        let o = cells.cell_at(cx, cy);
+        // A run that reaches over its cell's side crosses a drawn line. In an open row no
+        // line is drawn there: a value that runs on into the next field goes by its middle.
+        let (x0, x1) = (xs[o.1], xs[(o.1 + cells.extent[&o].1 as usize).min(cols)]);
+        if !cells.is_open[o.0] && (r.x < x0 - SNAP || r.x + r.w > x1 + SNAP) {
+            crossing += 1;
         }
-        // Cells counted with the rows each band was cut in; only cells of the body count as
-        // spanning, as a header often spans.
-        let all: usize = extent.keys().map(|o| subs(o.0)).sum();
-        let spanning: usize = extent
+    }
+    // Cells counted with the rows each band was cut in; only cells of the body count as
+    // spanning, as a header often spans.
+    let all: usize = cells.extent.keys().map(|o| bands.subs(o.0)).sum();
+    let spanning: usize = cells
+        .extent
+        .iter()
+        .filter(|(o, (rs, cs))| o.0 >= head && rs * cs > 1 && !cells.is_open[o.0])
+        .map(|(o, _)| bands.subs(o.0))
+        .sum();
+    // The fields of an open row are often left empty: its cells do not count here.
+    let counted: usize = cells
+        .extent
+        .keys()
+        .filter(|o| !cells.is_open[o.0])
+        .map(|o| bands.subs(o.0))
+        .sum();
+    let empty = counted
+        - with_text
             .iter()
-            .filter(|(o, (rs, cs))| o.0 >= head && rs * cs > 1)
-            .map(|(o, _)| subs(o.0))
-            .sum();
-        let empty = all - with_text.len();
-        let refused = if figure_caption || caption_inside {
-            Some(FIGURE_NEAR)
-        } else if empty as f32 > EMPTY_SHARE * all as f32 {
-            Some("most of its cells are empty")
-        } else if 10 * spanning > 3 * all {
-            Some("its boxes do not form rows and columns")
-        } else if 5 * crossing > within.len() {
-            Some("its text crosses its lines")
-        } else {
-            area.refuses(b, &sizes)
-        };
-        if let Some(why) = refused {
-            refuse(why);
-            continue;
-        }
-        // The place of each cell, and each row a band was cut in, in the planned rows.
-        let mut place: HashMap<((usize, usize), usize), (usize, usize)> = HashMap::new();
-        let mut planned_rows: Vec<Vec<PlannedCell>> = Vec::with_capacity(planned_count);
-        for (r, row) in owner.iter().enumerate() {
-            for sub in 0..subs(r) {
-                let mut cells = Vec::new();
-                for (c, o) in row.iter().enumerate() {
-                    if *o != (r, c) {
-                        continue;
-                    }
-                    let (row_span, col_span) = extent[o];
-                    place.insert((*o, sub), (planned_rows.len(), cells.len()));
-                    cells.push(PlannedCell {
-                        runs: Vec::new(),
-                        row_span,
-                        col_span,
-                    });
+            .filter(|(o, _)| !cells.is_open[o.0])
+            .count();
+    if empty as f32 > EMPTY_SHARE * counted as f32 {
+        Some("most of its cells are empty")
+    } else if 10 * spanning > 3 * all {
+        Some("its boxes do not form rows and columns")
+    } else if 5 * crossing > within.len() {
+        Some("its text crosses its lines")
+    } else {
+        None
+    }
+}
+
+/// The place in the planned rows of each cell of a grid (its owner square) and each row a band
+/// was cut in: the row and the cell.
+type Places = HashMap<((usize, usize), usize), (usize, usize)>;
+
+/// The planned rows of a table of `cells` cut in the rows of `bands` (`count` of them), the
+/// rows `spanned` one cell across, and the place of each cell and each row a band was cut in
+/// among them.
+fn plan_grid(
+    cells: &Cells<'_>,
+    bands: &Bands,
+    spanned: &HashSet<(usize, usize)>,
+    count: usize,
+) -> (Vec<Vec<PlannedCell>>, Places) {
+    let mut place: Places = HashMap::new();
+    let mut planned_rows: Vec<Vec<PlannedCell>> = Vec::with_capacity(count);
+    for (r, row) in cells.owner.iter().enumerate() {
+        for sub in 0..bands.subs(r) {
+            let mut planned = Vec::new();
+            if spanned.contains(&(r, sub)) {
+                for o in row {
+                    place.insert((*o, sub), (planned_rows.len(), 0));
                 }
-                planned_rows.push(cells);
-            }
-        }
-        let t = tables.len();
-        for &i in &mine {
-            let run = &flow.runs[i];
-            let (cx, cy) = middle(run);
-            let o = cell_at(cx, cy);
-            let (r, c) = place[&(o, sub_of(o.0, run))];
-            claimed[i] = Some((t, r, c));
-        }
-        // A cell of the first row without text that holds drawn strokes is a title drawn as
-        // an icon.
-        for (c, o) in owner[0].iter().enumerate() {
-            if *o != (0, c) || with_text.contains(&(*o, 0)) {
+                planned.push(PlannedCell {
+                    runs: Vec::new(),
+                    row_span: 1,
+                    col_span: cells.cols() as u32,
+                    status: None,
+                });
+                planned_rows.push(planned);
                 continue;
             }
-            let (row_span, col_span) = extent[o];
-            let cell = [
-                xs[c],
-                ys[row_span as usize],
-                xs[c + col_span as usize],
-                ys[0],
-            ];
-            if drawn_inside(&mut strokes, rules, cell, &mut icon_work) {
-                let (r, k) = place[&(*o, 0)];
-                icons.push((t, r, k, cell));
+            for (c, o) in row.iter().enumerate() {
+                if *o != (r, c) {
+                    continue;
+                }
+                let (row_span, col_span) = cells.extent[o];
+                place.insert((*o, sub), (planned_rows.len(), planned.len()));
+                planned.push(PlannedCell {
+                    runs: Vec::new(),
+                    row_span,
+                    col_span,
+                    status: None,
+                });
             }
+            planned_rows.push(planned);
         }
-        tables.push(Planned {
-            at,
-            top: b[3],
-            rows: planned_rows,
-            // A header of two rows or more in a style of its own is the grid's; otherwise the
-            // first row is judged by its text.
-            header_rows: if styled { head } else { 0 },
-            trs: Vec::new(),
-            additions: Vec::new(),
-            tagged: None,
-            continues: false,
-        });
     }
+    (planned_rows, place)
+}
+
+/// The tables under the header bands the sections left (see [`banded`]), then the rows of
+/// fields between rules no grid takes, in the text no table took (see [`strip_tables`]).
+/// Where the tables of the strips start among the page's tables.
+fn bands_and_strips(sh: &Sheet<'_>, take: &mut Taking, found: &mut Found) -> usize {
     // Regions without rules never run across a band.
-    found.cuts = bands.iter().flat_map(|b| [b.b[1], b.b[3]]).collect();
+    found.cuts = take.bands.iter().flat_map(|b| [b.b[1], b.b[3]]).collect();
     found.cuts.sort_by(f32::total_cmp);
     banded(
         &Shared {
-            page,
-            flow,
-            lines: &lines,
-            by_y: &by_y,
-            area,
-            hs: &hs,
-            stop,
+            page: sh.page,
+            flow: sh.flow,
+            lines: sh.lines,
+            by_y: sh.by_y,
+            area: sh.area,
+            hs: sh.hs,
+            stop: sh.stop,
         },
-        bands,
+        std::mem::take(&mut take.bands),
         &mut Taken {
-            claimed: &mut claimed,
-            held: &mut held,
-            refusals: &mut refusals,
-            tables: &mut tables,
+            claimed: &mut take.claimed,
+            held: &mut take.held,
+            refusals: &mut take.refusals,
+            quiet: &mut take.quiet,
+            quietly: &mut take.quietly,
+            tables: &mut take.tables,
             skipped: &mut found.skipped,
         },
     );
+    // Rows of fields between rules no grid takes, in the text no table took.
+    let strips_from = take.tables.len();
+    let busy: Vec<bool> = (0..sh.flow.runs.len())
+        .map(|i| take.claimed[i].is_some() || take.held[i] || take.titles[i])
+        .collect();
+    let tabled: Vec<bool> = take.claimed.iter().map(Option::is_some).collect();
+    let table_rules: Vec<Seg> = sh
+        .hs
+        .iter()
+        .zip(sh.taken)
+        .filter(|(_, t)| **t)
+        .map(|(s, _)| *s)
+        .collect();
+    strip_tables(
+        sh.page,
+        sh.flow,
+        sh.by_y,
+        sh.frames,
+        (sh.hs, &table_rules),
+        &busy,
+        &tabled,
+        &mut take.claimed,
+        &mut take.held,
+        &mut take.tables,
+        found,
+    );
+    strips_from
+}
+
+/// The runs of all tables of `take` leave the flow at once, each to its cell; the runs held
+/// stay where they are. Then the icons go to their cells, and the first row of each table but
+/// those of totals and of strips (`pairs..strips_from`) is judged as a header by its text.
+fn leave_flow(
+    page: u32,
+    flow: &mut Flow,
+    mut take: Taking,
+    (pairs, strips_from): (usize, usize),
+    found: &mut Found,
+) {
+    read_apart(flow, &mut take, found);
+    let Taking {
+        claimed,
+        mut tables,
+        held,
+        refusals,
+        quiet,
+        quietly,
+        icons,
+        ..
+    } = take;
+    found.quiet = quiet;
     if let Some(u) = page_note(page, &refusals) {
         found.unsure.push(u);
     }
@@ -508,15 +1097,32 @@ pub(super) fn ruled(
         if held.contains(&true) {
             found.held = held;
         }
+        if quietly.contains(&true) {
+            found.quietly = quietly;
+        }
         return;
     }
     // The runs of all grids leave the flow at once; the runs held stay where they are.
-    if held.contains(&true) {
-        found.held = held
+    let left = |marks: &[bool]| -> Vec<bool> {
+        if !marks.contains(&true) {
+            return Vec::new();
+        }
+        marks
             .iter()
             .zip(&claimed)
             .filter(|(_, c)| c.is_none())
             .map(|(h, _)| *h)
+            .collect()
+    };
+    found.held = left(&held);
+    found.quietly = left(&quietly);
+    if !found.bodies.is_empty() {
+        found.bodies = found
+            .bodies
+            .iter()
+            .zip(&claimed)
+            .filter(|(_, c)| c.is_none())
+            .map(|(b, _)| *b)
             .collect();
     }
     let target: Vec<Target> = claimed
@@ -546,12 +1152,1042 @@ pub(super) fn ruled(
             });
         }
     }
-    for mut t in tables {
-        if t.header_rows == 0 {
+    for (k, mut t) in tables.into_iter().enumerate() {
+        if t.header_rows == 0 && k >= pairs && k < strips_from {
             t.header_rows = header_of(&t.rows);
         }
         found.tables.push(t);
     }
+}
+
+/// Puts the runs of each row of fields of `found.apart` in the flow in the order to read them,
+/// cell by cell; other runs of the places of the flow from the first of them to the last (a
+/// block beside the row, on its lines) follow them in their own order. The places stay, so the
+/// rest of the page reads as before, and what is known of each run (the table cell it goes to,
+/// a hold) moves with it. A cell's runs on a line that an earlier cell of the row also has get a
+/// line of their own, so the two cells are never read as one line, and each cell is a block of
+/// its own (see [`crate::layout::Slot::Block`]), so no paragraph joins two cells; each table
+/// whose runs moved stands where its first run now stands.
+fn read_apart(flow: &mut Flow, take: &mut Taking, found: &mut Found) {
+    fn permute<T: Clone>(v: &mut [T], lo: usize, order: &[usize]) {
+        if v.len() < lo + order.len() {
+            return;
+        }
+        let moved: Vec<T> = order.iter().map(|&i| v[i].clone()).collect();
+        for (k, x) in moved.into_iter().enumerate() {
+            v[lo + k] = x;
+        }
+    }
+    let rows = std::mem::take(&mut found.apart);
+    if rows.is_empty() {
+        return;
+    }
+    // Where each run of the flow as it was stands now.
+    let mut now: Vec<usize> = (0..flow.runs.len()).collect();
+    let mut fresh = flow.runs.iter().map(|r| r.line).max().unwrap_or(0);
+    let mut block = 0usize;
+    let mut moved_tables: Vec<usize> = Vec::new();
+    for cells in rows {
+        let cells: Vec<Vec<usize>> = cells
+            .into_iter()
+            .map(|c| c.into_iter().map(|i| now[i]).collect())
+            .collect();
+        let mut order: Vec<usize> = cells.iter().flatten().copied().collect();
+        let (Some(&lo), Some(&hi)) = (order.iter().min(), order.iter().max()) else {
+            continue;
+        };
+        let mut sorted = order.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        if sorted.len() != order.len() {
+            continue;
+        }
+        let rest: Vec<usize> = (lo..=hi)
+            .filter(|i| sorted.binary_search(i).is_err())
+            .collect();
+        order.extend(&rest);
+        // Lines of a cell (or of the runs after the row) that an earlier cell of the row has
+        // too.
+        let mut owned: Vec<u32> = Vec::new();
+        let mut lines: Vec<(usize, u32)> = Vec::new();
+        for cell in cells.iter().chain(std::iter::once(&rest)) {
+            let mine: Vec<u32> = cell.iter().map(|&i| flow.runs[i].line).collect();
+            let mut renamed: Vec<(u32, u32)> = Vec::new();
+            for (&i, &l) in cell.iter().zip(&mine) {
+                if owned.contains(&l) {
+                    let n = match renamed.iter().find(|r| r.0 == l) {
+                        Some(r) => r.1,
+                        None => {
+                            fresh += 1;
+                            renamed.push((l, fresh));
+                            fresh
+                        }
+                    };
+                    lines.push((i, n));
+                }
+            }
+            owned.extend(mine);
+        }
+        for (i, n) in lines {
+            flow.runs[i].line = n;
+        }
+        for &i in &order {
+            if let Some((t, _, _)) = take.claimed[i]
+                && !moved_tables.contains(&t)
+            {
+                moved_tables.push(t);
+            }
+        }
+        // The flow index each original run moves to.
+        let mut back: Vec<(usize, usize)> = Vec::new();
+        for (k, &i) in order.iter().enumerate() {
+            back.push((i, lo + k));
+        }
+        for n in now.iter_mut() {
+            if (lo..=hi).contains(n)
+                && let Some(&(_, to)) = back.iter().find(|b| b.0 == *n)
+            {
+                *n = to;
+            }
+        }
+        permute(&mut flow.runs, lo, &order);
+        permute(&mut flow.slots, lo, &order);
+        // Each cell is a block of its own: its lines go on no line of the next cell.
+        let mut k = lo;
+        for cell in &cells {
+            for slot in &mut flow.slots[k..k + cell.len()] {
+                if *slot == crate::layout::Slot::Free {
+                    *slot = crate::layout::Slot::Block(block);
+                }
+            }
+            block += 1;
+            k += cell.len();
+        }
+        permute(&mut take.claimed, lo, &order);
+        permute(&mut take.held, lo, &order);
+        permute(&mut take.quietly, lo, &order);
+        permute(&mut take.titles, lo, &order);
+        permute(&mut found.bodies, lo, &order);
+    }
+    for t in moved_tables {
+        let first = (0..flow.runs.len()).find(|&i| take.claimed[i].is_some_and(|c| c.0 == t));
+        if let (Some(i), Some(table)) = (first, take.tables.get_mut(t)) {
+            // The pieces of a run cut at a field edge share its place: a run before the table
+            // that shares the place of the table's first run stays before it.
+            let shared = i > 0 && flow.at[i - 1] == flow.at[i];
+            table.at = flow.at[i] + usize::from(shared);
+        }
+    }
+}
+
+/// Each connected grid of `groups` (of the page's lines `hs` and `vs`) in its sections, each
+/// judged as a grid of its own, top to bottom; a section of a grid that was cut is no grid's to
+/// drop without a word.
+fn grid_parts(
+    page: u32,
+    hs: &[Seg],
+    vs: &[Seg],
+    groups: &[(Vec<usize>, Vec<usize>)],
+    found: &mut Found,
+) -> Vec<Part> {
+    let mut cut_work = 0usize;
+    let mut grids: Vec<Part> = Vec::new();
+    for (id, (gh, gv)) in groups.iter().enumerate() {
+        let h: Vec<Seg> = gh.iter().map(|&j| hs[j]).collect();
+        let v: Vec<Seg> = gv.iter().map(|&k| vs[k]).collect();
+        let parts = sections(&h, &v, hs, &mut cut_work);
+        let (cut, last) = (parts.len() > 1, parts.len().saturating_sub(1));
+        grids.extend(parts.into_iter().enumerate().map(|(k, (h, v))| Part {
+            h,
+            v,
+            cut,
+            cut_below: k < last,
+            cut_above: k > 0,
+            id,
+        }));
+    }
+    if cut_work > CUT_WORK {
+        found.skipped.push(format!(
+            "ruled grids on page {page} are cut in sections only in part: the page has too many \
+             pieces of lines at the heights of their rules"
+        ));
+    }
+    grids.sort_by(|a, b| {
+        let top = |g: &Part| g.h.iter().map(|s| s.at).fold(f32::MIN, f32::max);
+        top(b).total_cmp(&top(a))
+    });
+    grids
+}
+
+/// Cuts the runs of the page at the edges of the fields between rules (the frames under the
+/// horizontal lines `hs` that `tops` names, see `frame_tops`, with their dividers among `vs`),
+/// at a word gap, and at the column lines of the sections `grids`. The frames found.
+fn cut_runs(
+    page: u32,
+    flow: &mut Flow,
+    (hs, vs, tops): (&[Seg], &[Seg], &[Top]),
+    grids: &[Part],
+    found: &mut Found,
+) -> Vec<Frame> {
+    let frames = frames(hs, tops, vs);
+    if frames.is_none() {
+        found.skipped.push(format!(
+            "label and value fields between rules on page {page} are not looked for: the page \
+             has too many lines"
+        ));
+    }
+    let mut frames = frames.unwrap_or_default();
+    // A frame under a grid's lowest rule is a row of fields only when its text holds fields
+    // with a value: text under a table's last rule is not.
+    if frames.iter().any(|f| f.under_grid) {
+        let lines = flow_lines(flow);
+        let by_y = ByY::new(flow, &lines);
+        frames.retain(|f| !f.under_grid || holds_values(flow, &by_y, f));
+    }
+    if !frames.is_empty() {
+        apply_cuts(flow, field_cuts(flow, &frames));
+    }
+    if !cut_at_columns(flow, grids, hs, COLUMN_CUT_WORK) {
+        found.skipped.push(format!(
+            "text across column lines on page {page} is cut at them only in part: the page has \
+             too many runs across its column lines"
+        ));
+    }
+    frames
+}
+
+/// The columns of totals beside the sections `grids` (among the page's lines `hs` and `vs`,
+/// those no grid takes in `taken`), with the tables of their totals planned in `tables` and
+/// their runs in `claimed`.
+fn totals_tables(
+    page: u32,
+    flow: &Flow,
+    by_y: &ByY,
+    (hs, vs, taken): (&[Seg], &[Seg], &[bool]),
+    grids: &[Part],
+    (claimed, tables): (&mut [Claim], &mut Vec<Planned>),
+    found: &mut Found,
+) -> Vec<Side> {
+    let edged: Vec<(Vec<f32>, Vec<f32>)> = grids.iter().map(|p| edges(&p.h, &p.v)).collect();
+    let beside: Vec<Beside<'_>> = edged
+        .iter()
+        .filter(|(xs, ys)| xs.len() >= 2 && ys.len() >= 2)
+        .map(|(xs, ys)| Beside {
+            left: xs[0],
+            right: xs[xs.len() - 1],
+            ys,
+        })
+        .collect();
+    let mut work = 0;
+    let sides = side_columns(flow, by_y, hs, vs, taken, &beside, &mut work);
+    if work > SIDE_WORK {
+        found.skipped.push(format!(
+            "columns of totals beside ruled tables on page {page} are not looked for: the page \
+             has too many lines"
+        ));
+    }
+    for strip in sides.iter().flat_map(|s| &s.strips) {
+        let StripKind::Totals(totals) = &strip.kind else {
+            continue;
+        };
+        let list: Vec<&Field> = totals.iter().collect();
+        let Some(table) = pairs_table(flow, &list, totals_top(flow, totals), SIDE_FOUND_BY) else {
+            continue;
+        };
+        claim(claimed, tables.len(), &list);
+        tables.push(table);
+    }
+    sides
+}
+
+/// The rows of fields between rules in `frames` (of the page's horizontal rules `hs`), among
+/// the runs `busy` does not name (`tabled` the runs of ruled tables), planned in `tables` with
+/// their runs in `claimed`; the runs of rows left as text go to `held`.
+#[allow(clippy::too_many_arguments)]
+fn strip_tables(
+    page: u32,
+    flow: &Flow,
+    by_y: &ByY,
+    frames: &[Frame],
+    (hs, table_rules): (&[Seg], &[Seg]),
+    busy: &[bool],
+    tabled: &[bool],
+    claimed: &mut [Claim],
+    held: &mut [bool],
+    tables: &mut Vec<Planned>,
+    found: &mut Found,
+) {
+    let mut strip_claims = vec![None; flow.runs.len()];
+    let mut bodies = Vec::new();
+    let text_sizes = crate::layout::page_text_sizes(&flow.runs);
+    field_strips(
+        page,
+        flow,
+        by_y,
+        frames,
+        hs,
+        table_rules,
+        &|i| busy[i],
+        &|i| tabled[i],
+        &text_sizes,
+        &mut strip_claims,
+        held,
+        tables,
+        &mut found.uncertain,
+        &mut bodies,
+        &mut found.apart,
+    );
+    // The runs of each frame of column titles over items, by the frame, and its titles.
+    if !bodies.is_empty() {
+        found.bodies = vec![None; flow.runs.len()];
+        for (ids, names) in bodies {
+            let id = found.body_labels.len() as u32;
+            for i in ids {
+                found.bodies[i] = Some(id);
+            }
+            found.body_labels.push(names);
+        }
+    }
+    for (c, s) in claimed.iter_mut().zip(strip_claims) {
+        if s.is_some() {
+            *c = s;
+        }
+    }
+}
+
+/// A section's own top rule that starts right of its left edge by more than this share of its
+/// width is short of the edge: a rule a little shorter is the same rule.
+const OWN_LEFT: f32 = 0.05;
+
+/// Where the own top rule of a section at height `top` starts, when it starts right of the
+/// section's left edge `left` (see [`OWN_LEFT`]; `right` is its right edge) and a rule of
+/// another block at that height (among the page's `hs`, sorted by height) covers most of the
+/// stretch from `left` up to it; else `left`. `h` are the section's own horizontal segments.
+fn own_left(h: &[Seg], hs: &[Seg], top: f32, (left, right): (f32, f32)) -> f32 {
+    let Some(from) = h
+        .iter()
+        .filter(|s| (s.at - top).abs() <= SNAP)
+        .map(|s| s.from)
+        .reduce(f32::min)
+    else {
+        return left;
+    };
+    if from - left <= OWN_LEFT * (right - left) {
+        return left;
+    }
+    let lo = hs.partition_point(|s| s.at < top - SNAP);
+    let other = hs[lo..]
+        .iter()
+        .take_while(|s| s.at <= top + SNAP)
+        .any(|s| s.from <= left + SNAP && s.to < from && s.to - left >= 0.9 * (from - left));
+    if other { from } else { left }
+}
+
+/// The column of totals of `sides` that stands beside the section of column edges `xs` and
+/// row edges `ys` (from the top) with a strip that joins it: a strip that starts within the
+/// section.
+fn joined<'s>(sides: &'s [Side], xs: &[f32], ys: &[f32]) -> Option<&'s Side> {
+    let (right, top, bottom) = (*xs.last()?, *ys.first()?, *ys.last()?);
+    sides.iter().find(|s| {
+        let gap = s.x0 - right;
+        gap > SNAP
+            && gap <= s.gap
+            && s.strips.iter().any(|st| {
+                matches!(st.kind, StripKind::Joins)
+                    && st.top <= top + SNAP
+                    && st.top > bottom + SNAP
+            })
+    })
+}
+
+/// Lines a title may have.
+const TITLE_LINES: usize = 2;
+
+/// Steps the title search of one page may take over the page's column rules; past them no
+/// line over a cut grid is taken as a title.
+const TITLE_WORK: usize = 1_000_000;
+
+/// One line of text: its baseline, its largest size, whether all of it is bold, and its
+/// runs.
+pub(super) struct TextLine {
+    pub y: f32,
+    pub size: f32,
+    pub bold: bool,
+    pub runs: Vec<usize>,
+}
+
+/// The lines of `runs` from the bottom: runs whose baselines lie within a third of their
+/// size of the line's first.
+pub(super) fn lines_up(flow: &Flow, runs: &[usize]) -> Vec<TextLine> {
+    let mut sorted = runs.to_vec();
+    sorted.sort_by(|&a, &b| flow.runs[a].y.total_cmp(&flow.runs[b].y));
+    let mut out: Vec<TextLine> = Vec::new();
+    for i in sorted {
+        let r = &flow.runs[i];
+        match out.last_mut() {
+            Some(l) if r.y - l.y <= 0.3 * r.size.max(1.0) => {
+                l.size = l.size.max(r.size);
+                l.bold &= r.bold;
+                l.runs.push(i);
+            }
+            _ => out.push(TextLine {
+                y: r.y,
+                size: r.size,
+                bold: r.bold,
+                runs: vec![i],
+            }),
+        }
+    }
+    out
+}
+
+/// The title among `runs` that stands right over the rule at height `base`: the lowest line
+/// over it and, for a title of two lines, the line one line pitch above it in the same
+/// style, none crossed by a column rule (`crossed` of a height range). The title is at most
+/// twice its size over the rule and closer to it than to the next line or to `ceiling` above
+/// (the row edge over it), or bold and at most its size over the rule.
+fn title_over(
+    flow: &Flow,
+    runs: &[usize],
+    base: f32,
+    ceiling: f32,
+    crossed: &mut dyn FnMut(f32, f32) -> bool,
+) -> Vec<usize> {
+    let above: Vec<usize> = runs
+        .iter()
+        .copied()
+        .filter(|&i| flow.runs[i].y > base)
+        .collect();
+    let lines = lines_up(flow, &above);
+    let Some(first) = lines.first() else {
+        return Vec::new();
+    };
+    if crossed(first.y, first.y + first.size) {
+        return Vec::new();
+    }
+    let mut taken = 1;
+    while taken < TITLE_LINES.min(lines.len()) {
+        let (prev, next) = (&lines[taken - 1], &lines[taken]);
+        if next.y - prev.y > 1.6 * prev.size.max(next.size)
+            || next.bold != first.bold
+            || next.y + next.size > ceiling
+            || crossed(next.y, next.y + next.size)
+        {
+            break;
+        }
+        taken += 1;
+    }
+    let block = &lines[..taken];
+    let size = block.iter().map(|l| l.size).fold(0.0f32, f32::max);
+    let head = block.iter().map(|l| l.y + l.size).fold(f32::MIN, f32::max);
+    let next = lines.get(taken).map_or(f32::MAX, |l| l.y);
+    let (below, gap) = (first.y - base, next.min(ceiling) - head);
+    let bold = block.iter().all(|l| l.bold);
+    if below <= 2.0 * size && (below < gap || (bold && below <= size)) {
+        block.iter().flat_map(|l| l.runs.iter().copied()).collect()
+    } else {
+        Vec::new()
+    }
+}
+
+/// Whether a column rule of `vs` (sorted by place) strictly between `left` and `right`
+/// crosses the heights `lo..hi`. Each rule looked at is counted in `work`; past
+/// [`TITLE_WORK`] the answer is yes, so no title is taken without the look.
+fn column_across(
+    vs: &[Seg],
+    (left, right): (f32, f32),
+    (lo, hi): (f32, f32),
+    work: &mut usize,
+) -> bool {
+    let first = vs.partition_point(|s| s.at <= left);
+    for s in &vs[first..] {
+        *work += 1;
+        if *work > TITLE_WORK {
+            return true;
+        }
+        if s.at >= right {
+            break;
+        }
+        if s.from < hi && s.to > lo {
+            return true;
+        }
+    }
+    false
+}
+
+/// What the title search of a section looks at and marks.
+struct TitlePlace<'a> {
+    flow: &'a Flow,
+    by_y: &'a ByY,
+    claimed: &'a [Option<(usize, usize, usize)>],
+    titles: &'a mut Vec<bool>,
+    /// The section's column edges.
+    xs: &'a [f32],
+    work: &'a mut usize,
+}
+
+impl TitlePlace<'_> {
+    /// The runs between the heights `lo` and `hi` over the section that no table and no
+    /// title has taken.
+    fn free(&self, lo: f32, hi: f32) -> Vec<usize> {
+        let (left, right) = (self.xs[0], self.xs[self.xs.len() - 1]);
+        self.by_y
+            .runs_between(lo, hi)
+            .into_iter()
+            .filter(|&i| {
+                let r = &self.flow.runs[i];
+                let (cx, _) = middle(r);
+                !r.off_axis
+                    && self.claimed[i].is_none()
+                    && !self.titles[i]
+                    && cx > left
+                    && cx < right
+                    && !r.text.trim().is_empty()
+            })
+            .collect()
+    }
+
+    fn take(&mut self, title: &[usize]) {
+        for &i in title {
+            self.titles[i] = true;
+        }
+    }
+
+    /// The title right over the grid's top rule at `top`: no column rule of the page
+    /// (`vs`, sorted by place) may cross it.
+    fn over_grid(&mut self, vs: &[Seg], top: f32) -> Vec<usize> {
+        let runs = self.free(top, top + 2.0 * MAX_CAPTION_SIZE);
+        let (left, right) = (self.xs[0] + SNAP, self.xs[self.xs.len() - 1] - SNAP);
+        let work = &mut *self.work;
+        let mut crossed = |a: f32, b: f32| column_across(vs, (left, right), (a, b), work);
+        let title = title_over(self.flow, &runs, top, f32::MAX, &mut crossed);
+        self.take(&title);
+        title
+    }
+
+    /// The title right over the cut at the section's bottom (`ys` from the top): no inner
+    /// column rule of the section (`v`) may cross it. Its runs leave the section, and a
+    /// lowest row of one cell that held only them goes too, with its rules of `h`.
+    fn above_cut(&mut self, v: &[Seg], ys: &mut Vec<f32>, h: &mut Vec<Seg>) -> Vec<usize> {
+        let n = ys.len();
+        let runs = self.free(ys[n - 1], ys[0]);
+        let (left, right) = (self.xs[0] + SNAP, self.xs[self.xs.len() - 1] - SNAP);
+        let inner = |s: &&Seg| s.at > left && s.at < right;
+        let low = runs
+            .iter()
+            .map(|&i| self.flow.runs[i].y)
+            .fold(f32::MAX, f32::min);
+        let ceiling = ys
+            .iter()
+            .copied()
+            .filter(|e| *e > low)
+            .fold(f32::MAX, f32::min);
+        let mut crossed = |a: f32, b: f32| v.iter().filter(inner).any(|s| s.from < b && s.to > a);
+        let title = title_over(self.flow, &runs, ys[n - 1], ceiling, &mut crossed);
+        self.take(&title);
+        if !title.is_empty() && n >= 3 {
+            let (lo, hi) = (ys[n - 1], ys[n - 2]);
+            let empty = runs.iter().all(|&i| {
+                self.titles[i] || {
+                    let (_, cy) = middle(&self.flow.runs[i]);
+                    cy > hi || cy < lo
+                }
+            });
+            let parted = v
+                .iter()
+                .filter(inner)
+                .any(|s| s.from < hi - SNAP && s.to > lo + SNAP);
+            if empty && !parted {
+                ys.pop();
+                h.retain(|s| s.at >= hi - SNAP);
+            }
+        }
+        title
+    }
+}
+
+/// For each open row (its top one of the feet `open`), the lines of `within` in it that
+/// start a row, as `anchors`; a row with fewer than two such lines is left as it is.
+fn open_anchors(
+    flow: &Flow,
+    within: &[usize],
+    xs: &[f32],
+    ys: &[f32],
+    open: &[f32],
+    row_at: &dyn Fn(f32) -> usize,
+    anchors: &mut [Vec<f32>],
+) {
+    if open.is_empty() {
+        return;
+    }
+    let mut by_row: HashMap<usize, Vec<usize>> = HashMap::new();
+    for &i in within {
+        let r = row_at(middle(&flow.runs[i]).1);
+        if open.iter().any(|f| (ys[r] - f).abs() <= SNAP) {
+            by_row.entry(r).or_default().push(i);
+        }
+    }
+    for (r, runs) in by_row {
+        let lines = open_rows(flow, &runs, xs);
+        if lines.len() >= 2 {
+            anchors[r] = lines;
+        }
+    }
+}
+
+/// The baselines, going up, of the lines that start a row in an open row (lines without
+/// rules under a header of hanging rules) that holds `runs`, in lines by baseline, by the
+/// rule of a body under a header band ([`row_starts`]) in the columns of `xs`. A note across
+/// the columns (see [`note_across`]) is a row of its own; a line that goes on with it (the
+/// only run on its line, in its style, one line pitch below) joins it, and the line after the
+/// note starts a row.
+fn open_rows(flow: &Flow, runs: &[usize], xs: &[f32]) -> Vec<f32> {
+    let cols = xs.len() - 1;
+    let mut runs: Vec<(usize, usize)> = runs
+        .iter()
+        .map(|&i| {
+            let (cx, _) = middle(&flow.runs[i]);
+            let c = xs
+                .partition_point(|e| *e < cx)
+                .saturating_sub(1)
+                .min(cols - 1);
+            (i, c)
+        })
+        .collect();
+    runs.sort_by(|a, b| flow.runs[b.0].y.total_cmp(&flow.runs[a.0].y));
+    // Lines from the top: each its baseline, the text of its columns and its runs.
+    struct Line {
+        y: f32,
+        cells: Vec<(usize, String)>,
+        runs: Vec<usize>,
+    }
+    let mut lines: Vec<Line> = Vec::new();
+    for (i, c) in runs {
+        let r = &flow.runs[i];
+        if lines
+            .last()
+            .is_none_or(|l| l.y - r.y > 0.3 * r.size.max(1.0))
+        {
+            lines.push(Line {
+                y: r.y,
+                cells: Vec::new(),
+                runs: Vec::new(),
+            });
+        }
+        let Some(line) = lines.last_mut() else {
+            continue;
+        };
+        line.runs.push(i);
+        match line.cells.iter_mut().find(|p| p.0 == c) {
+            Some(p) => p.1.push_str(&r.text),
+            None => line.cells.push((c, r.text.clone())),
+        }
+    }
+    let mut used: Vec<usize> = lines
+        .iter()
+        .flat_map(|l| l.cells.iter().map(|p| p.0))
+        .collect();
+    used.sort_unstable();
+    used.dedup();
+    let pieces: Vec<Vec<(usize, bool)>> = lines
+        .iter()
+        .map(|l| l.cells.iter().map(|(c, t)| (*c, numeric(t))).collect())
+        .collect();
+    let mut starting = row_starts(&pieces, used.len());
+    // The run of a line that is its only run.
+    let only = |l: &Line| match l.runs.as_slice() {
+        [i] => Some(&flow.runs[*i]),
+        _ => None,
+    };
+    let mut in_note: Option<&Run> = None;
+    for (k, line) in lines.iter().enumerate() {
+        let run = only(line);
+        let goes_on = match (in_note, run) {
+            (Some(note), Some(r)) => goes_on_note(note, r),
+            _ => false,
+        };
+        if goes_on {
+            starting[k] = false;
+            in_note = run;
+        } else if let Some(r) = run.filter(|r| note_across(r, xs)) {
+            starting[k] = true;
+            in_note = Some(r);
+        } else {
+            if in_note.is_some() {
+                starting[k] = true;
+            }
+            in_note = None;
+        }
+    }
+    // Kept going up, for a search by baseline.
+    let mut starts: Vec<f32> = lines
+        .iter()
+        .zip(starting)
+        .filter(|(_, starts)| *starts)
+        .map(|(l, _)| l.y)
+        .collect();
+    starts.reverse();
+    starts
+}
+
+/// Whether `run` is a note across the columns of `xs`: a sentence over at least one inner
+/// column edge (see [`prose_like`]). The caller checks that it is the only run on its line.
+fn note_across(run: &Run, xs: &[f32]) -> bool {
+    let across = xs[1..xs.len() - 1]
+        .iter()
+        .filter(|&&e| e > run.x + SNAP && e < run.x + run.w - SNAP)
+        .count();
+    across > 0 && prose_like(&run.text, across + 1)
+}
+
+/// Whether `run` goes on with the line of a note `note` above it: in its size and weight,
+/// one line pitch below, and a sentence itself (see [`prose_like`]), so a value alone on
+/// the line below a note stays a row of its own. The caller checks that it is alone on its
+/// line.
+fn goes_on_note(note: &Run, run: &Run) -> bool {
+    let pitch = note.y - run.y;
+    (run.size - note.size).abs() <= 0.05 * note.size.max(1.0)
+        && run.bold == note.bold
+        && pitch > 0.3 * note.size
+        && pitch <= 1.6 * note.size.max(1.0)
+        && prose_like(&run.text, 1)
+}
+
+/// For each line of the page (by [`Run::line`]), how many of its runs hold text, wherever
+/// they stand in the flow.
+fn texted_per_line(flow: &Flow) -> HashMap<u32, u32> {
+    let mut out: HashMap<u32, u32> = HashMap::new();
+    for r in flow.runs.iter().filter(|r| !r.text.trim().is_empty()) {
+        *out.entry(r.line).or_default() += 1;
+    }
+    out
+}
+
+/// Whether `run`, which holds text, is the only run with text on its line (`per_line` from
+/// [`texted_per_line`]).
+fn alone_on_line(per_line: &HashMap<u32, u32>, run: &Run) -> bool {
+    per_line.get(&run.line).is_some_and(|n| *n == 1)
+}
+
+/// The column edges and the row edges (from the top) of a grid of horizontal segments `h`
+/// and vertical segments `v`.
+fn edges(h: &[Seg], v: &[Seg]) -> (Vec<f32>, Vec<f32>) {
+    let mut xs: Vec<f32> = v.iter().map(|s| s.at).collect();
+    xs.push(h.iter().map(|s| s.from).fold(f32::MAX, f32::min));
+    xs.push(h.iter().map(|s| s.to).fold(f32::MIN, f32::max));
+    let mut ys: Vec<f32> = h.iter().map(|s| s.at).collect();
+    ys.push(v.iter().map(|s| s.from).fold(f32::MAX, f32::min));
+    ys.push(v.iter().map(|s| s.to).fold(f32::MIN, f32::max));
+    let mut ys = clustered(ys);
+    ys.reverse();
+    (clustered(xs), ys)
+}
+
+/// Whether the text of a run that stands over `columns` columns reads as a sentence: at
+/// least [`PROSE_WORDS`] words and [`PROSE_LINE`] characters, more words than columns, and
+/// most of them words with a small letter and no digit. Values, codes, amounts and flags do
+/// not.
+fn prose_like(text: &str, columns: usize) -> bool {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let worded = words
+        .iter()
+        .filter(|w| w.chars().any(char::is_lowercase) && !w.chars().any(|c| c.is_ascii_digit()))
+        .count();
+    words.len() >= PROSE_WORDS.max(columns + 1)
+        && text.trim().chars().count() >= PROSE_LINE
+        && 2 * worded > words.len()
+}
+
+/// Steps one page may take to cut its runs at column rules; past them the rest stay whole.
+const COLUMN_CUT_WORK: usize = 1_000_000;
+
+/// A rule that may cut runs: its place and the heights it cuts at, from and to.
+type Span = (f32, f32, f32);
+
+/// A place of rules that may cut runs and the heights they cut at, as sorted ranges apart
+/// from each other.
+type Place = (f32, Vec<(f32, f32)>);
+
+/// The rules that may cut runs by place (within a tenth of a point).
+fn places_of(mut spans: Vec<Span>) -> Vec<Place> {
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut places: Vec<Place> = Vec::new();
+    for (x, from, to) in spans {
+        match places.last_mut() {
+            Some((px, list)) if x - *px <= 0.1 => list.push((from, to)),
+            _ => places.push((x, vec![(from, to)])),
+        }
+    }
+    for (_, list) in &mut places {
+        list.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut merged: Vec<(f32, f32)> = Vec::with_capacity(list.len());
+        for &(from, to) in list.iter() {
+            match merged.last_mut() {
+                Some(last) if from <= last.1 => last.1 = last.1.max(to),
+                _ => merged.push((from, to)),
+            }
+        }
+        *list = merged;
+    }
+    places
+}
+
+/// Cuts each run that an inner column rule of a section crosses in the white space between
+/// two of its words, so each part stands in its own column: a value line padded into its
+/// fields often has only one or two spaces between two fields. A rule cuts at the heights it
+/// is drawn at; the inner rules of a header of hanging rules also cut the lines below them in
+/// their section (see [`hanging_feet`]), but not a sentence alone on its line that runs over
+/// them as words (a note across the section, see [`prose_like`]). So do the inner column
+/// edges of a row of three drawn cells or more (a header band, see `banded`) the lines under
+/// it, down to the first of the page's horizontal rules `hs` (sorted by height) as wide as
+/// the row or to a gap of [`BODY_GAP`] line heights: its table's lines without rules. A rule within a tenth of the text size of a gap
+/// cuts there; a rule inside a word cuts nothing. A cut part keeps the run's place in the
+/// reading order. False when more than `budget` steps were needed: the runs past them stay
+/// whole.
+fn cut_at_columns(flow: &mut Flow, parts: &[Part], hs: &[Seg], budget: usize) -> bool {
+    // The rules as drawn, and the inner column edges of hanging headers below their feet.
+    let (mut drawn, mut hanging): (Vec<Span>, Vec<Span>) = (Vec::new(), Vec::new());
+    // The page's lines from the top, for the bodies of rows of drawn cells, once needed.
+    let mut lines: Option<Vec<FlowLine>> = None;
+    for p in parts {
+        let (xs, ys) = edges(&p.h, &p.v);
+        if xs.len() < 3 || ys.len() < 2 {
+            continue;
+        }
+        let inner = &xs[1..xs.len() - 1];
+        for s in &p.v {
+            if s.at > xs[0] + SNAP && s.at < xs[xs.len() - 1] - SNAP {
+                drawn.push((s.at, s.from, s.to));
+            }
+        }
+        if p.cut || ys.len() == 2 {
+            for (foot, bottom) in hanging_feet(&p.v, &xs, &ys) {
+                hanging.extend(inner.iter().map(|&x| (x, bottom, foot)));
+            }
+        }
+        if ys.len() == 2 && xs.len() >= 4 {
+            let (left, right, bottom) = (xs[0], xs[xs.len() - 1], ys[1]);
+            let tol = SNAP.max(BAND_EDGE * (right - left));
+            let rule = hs[..hs.partition_point(|s| s.at < bottom - SNAP)]
+                .iter()
+                .rev()
+                .find(|s| s.from <= left + tol && s.to >= right - tol)
+                .map_or(f32::MIN, |s| s.at);
+            // As far down as the band's body reaches (see `body_below`): its lines follow each
+            // other at most BODY_GAP line heights apart.
+            let mut floor = bottom;
+            let mut last = bottom;
+            let below = lines.get_or_insert_with(|| {
+                let mut all = flow_lines(flow);
+                all.sort_by(|a, b| b.y.total_cmp(&a.y));
+                all
+            });
+            for l in below.iter().filter(|l| l.y < bottom && l.y > rule) {
+                let inside = flow.runs[l.start..l.end].iter().any(|r| {
+                    let (cx, _) = middle(r);
+                    cx > left - SNAP && cx < right + SNAP && !r.text.trim().is_empty()
+                });
+                if !inside {
+                    continue;
+                }
+                if last - l.y > BODY_GAP * l.size.max(1.0) {
+                    break;
+                }
+                last = l.y;
+                floor = l.y - 0.25 * l.size;
+            }
+            hanging.extend(inner.iter().map(|&x| (x, floor.max(rule), bottom)));
+        }
+    }
+    if drawn.is_empty() && hanging.is_empty() {
+        return true;
+    }
+    let (drawn, hanging) = (places_of(drawn), places_of(hanging));
+    let mut work = 0usize;
+    let mut done = true;
+    // The runs to cut, each with the gaps it is cut at.
+    let mut cuts: Vec<(usize, Vec<usize>)> = Vec::new();
+    // The last line of a note, which the next line may go on: such a line is not cut either.
+    let mut note: Option<&Run> = None;
+    let per_line = texted_per_line(flow);
+    'runs: for (i, r) in flow.runs.iter().enumerate() {
+        if r.text.trim().is_empty() {
+            continue;
+        }
+        if let Some(n) = note.filter(|n| n.line != r.line) {
+            if goes_on_note(n, r) && alone_on_line(&per_line, r) {
+                note = Some(r);
+                continue;
+            }
+            note = None;
+        }
+        if r.off_axis || r.gaps.is_empty() {
+            continue;
+        }
+        let (_, cy) = middle(r);
+        let tol = 0.1 * r.size.max(1.0);
+        let mut at: Vec<usize> = Vec::new();
+        // At the hanging edges: the gaps found, the edges crossed and whether one of them
+        // falls inside a word.
+        let (mut below, mut crossed, mut in_word) = (Vec::new(), 0usize, false);
+        for (list, places) in [&drawn, &hanging].into_iter().enumerate() {
+            let first = places.partition_point(|p| p.0 <= r.x + tol);
+            for (x, heights) in &places[first..] {
+                if *x >= r.x + r.w - tol {
+                    break;
+                }
+                work += 1;
+                if work > budget {
+                    done = false;
+                    break 'runs;
+                }
+                let h = heights.partition_point(|s| s.0 <= cy);
+                if h == 0 || heights[h - 1].1 < cy {
+                    continue;
+                }
+                let k = r.gaps.partition_point(|g| g.to + tol < *x);
+                let gap = r.gaps.get(k).is_some_and(|g| g.from - tol <= *x);
+                if list == 0 {
+                    if gap {
+                        at.push(k);
+                    }
+                    continue;
+                }
+                crossed += 1;
+                if gap {
+                    below.push(k);
+                } else {
+                    in_word = true;
+                }
+            }
+        }
+        // A sentence alone on its line that runs over the hanging edges as words (a note)
+        // is not cut there.
+        if in_word && prose_like(&r.text, crossed + 1) && alone_on_line(&per_line, r) {
+            note = Some(r);
+        } else {
+            at.extend(below);
+        }
+        at.sort_unstable();
+        at.dedup();
+        if !at.is_empty() {
+            cuts.push((i, at));
+        }
+    }
+    apply_cuts(flow, cuts);
+    done
+}
+
+/// Cuts each run `cuts` names (by its place in `flow`, in order) at its gaps listed (sorted):
+/// the parts keep the run's slot and its place in the reading order.
+fn apply_cuts(flow: &mut Flow, cuts: Vec<(usize, Vec<usize>)>) {
+    if cuts.is_empty() {
+        return;
+    }
+    let all = std::mem::take(flow);
+    let extra: usize = cuts.iter().map(|c| c.1.len()).sum();
+    let n = all.runs.len() + extra;
+    let mut out = Flow {
+        runs: Vec::with_capacity(n),
+        slots: Vec::with_capacity(n),
+        at: Vec::with_capacity(n),
+    };
+    let mut next = cuts.into_iter().peekable();
+    for (i, ((run, slot), place)) in all.runs.into_iter().zip(all.slots).zip(all.at).enumerate() {
+        let Some((_, at)) = next.next_if(|c| c.0 == i) else {
+            out.runs.push(run);
+            out.slots.push(slot);
+            out.at.push(place);
+            continue;
+        };
+        // From the right, so the gaps to the left keep their numbers.
+        let mut parts: Vec<Run> = Vec::with_capacity(at.len() + 1);
+        let mut rest = run;
+        for &k in at.iter().rev() {
+            let Some((before, after)) = rest.cut_at(k) else {
+                break;
+            };
+            parts.push(after);
+            rest = before;
+        }
+        parts.push(rest);
+        for part in parts.into_iter().rev() {
+            out.runs.push(part);
+            out.slots.push(slot);
+            out.at.push(place);
+        }
+    }
+    *flow = out;
+}
+
+/// For the rows between the row edges `ys` (from the top) and the column edges `xs`, the
+/// heights where the inner column rules of a row end when it has some, all of them hang
+/// from its top and they end at one height clear of its bottom, each with that bottom. Each
+/// rule is looked at in the rows it reaches into, no more.
+fn hanging_feet(v: &[Seg], xs: &[f32], ys: &[f32]) -> Vec<(f32, f32)> {
+    let (left, right) = (xs[0], xs[xs.len() - 1]);
+    let rows = ys.len() - 1;
+    let mut feet: Vec<Vec<f32>> = vec![Vec::new(); rows];
+    let mut standing = vec![false; rows];
+    for s in v {
+        if s.at <= left + SNAP || s.at >= right - SNAP {
+            continue;
+        }
+        // Rows whose top is above the rule's foot and whose bottom is below its head.
+        let first = ys.partition_point(|e| *e >= s.to - SNAP).saturating_sub(1);
+        for r in first..rows {
+            if ys[r] <= s.from + SNAP {
+                break;
+            }
+            if ys[r + 1] >= s.to - SNAP {
+                continue;
+            }
+            if s.to >= ys[r] - SNAP && s.from > ys[r + 1] + SNAP {
+                feet[r].push(s.from);
+            } else {
+                standing[r] = true;
+            }
+        }
+    }
+    feet.into_iter()
+        .zip(standing)
+        .enumerate()
+        .filter_map(|(r, (f, standing))| {
+            let f = clustered(f);
+            (!standing && f.len() == 1).then(|| (f[0], ys[r + 1]))
+        })
+        .collect()
+}
+
+/// A box of a boxed field is at most this many times as wide as the size of its digits.
+const DIGIT_BOX: f32 = 1.5;
+
+/// Whether the grid of column edges `xs` and row edges `ys` (from the top) with the runs
+/// `within` is boxed fields: columns of one width, narrow as a box for each digit, and in
+/// each row at most one run of text, which is digits (with the separators read from marks).
+/// Its text is read as it is, and its refusal is no loss.
+fn boxed_field(flow: &Flow, within: &[usize], xs: &[f32], ys: &[f32]) -> bool {
+    let (Some(first), Some(size)) = (
+        xs.windows(2).map(|w| w[1] - w[0]).next(),
+        within.iter().map(|&i| flow.runs[i].size).reduce(f32::max),
+    ) else {
+        return false;
+    };
+    let digits = |t: &str| {
+        let t = t.trim();
+        t.starts_with(|c: char| c.is_ascii_digit())
+            && t.chars()
+                .all(|c| c.is_ascii_digit() || matches!(c, '.' | ',') || is_placeholder(c))
+    };
+    let mut rows: HashSet<usize> = HashSet::new();
+    xs.len() >= 3
+        && first <= DIGIT_BOX * size
+        && xs.windows(2).all(|w| (w[1] - w[0] - first).abs() <= SNAP)
+        && within.iter().all(|&i| {
+            let r = &flow.runs[i];
+            let (_, cy) = middle(r);
+            digits(&r.text) && rows.insert(ys.partition_point(|e| *e > cy))
+        })
 }
 
 /// What a title drawn as an icon is written as.
@@ -676,22 +2312,24 @@ fn open_bands(
     }
 }
 
-/// For each grid row, the baselines of the lines that start a row in it, going up: empty
-/// when the band is one row. A band of the body whose cells are each one square and of
-/// which at least two hold text is cut when at least two of its lines are anchors: lines
-/// with text in at least half of the cells that hold text in the band (an empty first cell
-/// included). No band is cut when the rules part most bands into one record each.
+/// For each grid row (`is_open` says which are rows under a header of hanging rules), the
+/// baselines of the lines that start a row in it, going up: empty when the band is one row.
+/// A band of the body whose cells are each one square and of which at least two hold text
+/// is cut when at least two of its lines are anchors: lines with text in at least half of
+/// the cells that hold text in the band (an empty first cell included). No band is cut when
+/// the rules part most bands into one record each.
 #[allow(clippy::too_many_arguments)]
 fn anchor_rows(
     flow: &Flow,
     within: &[usize],
     head: usize,
-    rows: usize,
+    is_open: &[bool],
     owner: &[Vec<(usize, usize)>],
     extent: &HashMap<(usize, usize), (u32, u32)>,
     row_at: &dyn Fn(f32) -> usize,
     cell_at: &dyn Fn(f32, f32) -> (usize, usize),
 ) -> Vec<Vec<f32>> {
+    let rows = is_open.len();
     let mut out: Vec<Vec<f32>> = vec![Vec::new(); rows];
     // Bands of the body with text in two cells or more, and of those the ones with two lines
     // or more that fill the band and start in its first cell.
@@ -711,7 +2349,8 @@ fn anchor_rows(
         let one_high = owner[r]
             .iter()
             .all(|o| o.0 == r && extent.get(o) == Some(&(1, 1)));
-        if band.len() < 2 || !one_high {
+        // An open row is cut by its own lines (see [`open_anchors`]).
+        if band.len() < 2 || !one_high || is_open[r] {
             continue;
         }
         band.sort_by(|a, b| b.0.total_cmp(&a.0));
@@ -767,6 +2406,172 @@ mod tests {
 
     fn seg(at: f32, from: f32, to: f32) -> Seg {
         Seg { at, from, to }
+    }
+
+    /// A run of `text` on the baseline 100 in the size 10, 6 points a character, with a gap
+    /// at each stretch of spaces.
+    fn spaced(text: &str, x: f32) -> Run {
+        let mut gaps = Vec::new();
+        let mut words = 0u32;
+        let mut prev = ' ';
+        for (k, c) in text.char_indices() {
+            if c != ' ' && prev == ' ' && k > 0 {
+                gaps.push(crate::layout::Gap {
+                    words,
+                    from: x + 6.0 * (text[..k].trim_end().chars().count()) as f32,
+                    to: x + 6.0 * k as f32,
+                });
+            }
+            if c != ' ' && prev == ' ' {
+                words += 1;
+            }
+            prev = c;
+        }
+        Run {
+            page: 1,
+            text: text.into(),
+            x,
+            y: 100.0,
+            w: 6.0 * text.chars().count() as f32,
+            h: 10.0,
+            size: 10.0,
+            bold: false,
+            italic: false,
+            family: 0,
+            mcid: None,
+            uri: None,
+            line: 0,
+            off_axis: false,
+            note: false,
+            gaps: crate::layout::Gaps::new(gaps),
+        }
+    }
+
+    /// A grid of one row from 90 to 120 over the column edges `xs`, its rules drawn the full
+    /// height.
+    fn one_row(xs: &[f32]) -> Part {
+        let (left, right) = (xs[0], xs[xs.len() - 1]);
+        Part {
+            h: vec![seg(90.0, left, right), seg(120.0, left, right)],
+            v: xs.iter().map(|&x| seg(x, 90.0, 120.0)).collect(),
+            cut: false,
+            cut_below: false,
+            cut_above: false,
+            id: 0,
+        }
+    }
+
+    fn flow_of(runs: Vec<Run>) -> Flow {
+        let n = runs.len();
+        Flow {
+            runs,
+            slots: vec![crate::layout::Slot::Free; n],
+            at: (0..n).collect(),
+        }
+    }
+
+    #[test]
+    fn a_run_is_alone_on_its_line_wherever_the_others_stand() {
+        // The runs of line 0 stand apart in the flow, with a run of line 1 between them.
+        let mut runs = vec![spaced("AA", 0.0), spaced("BB", 50.0), spaced("CC", 100.0)];
+        runs[1].line = 1;
+        let flow = flow_of(runs);
+        let per_line = texted_per_line(&flow);
+        assert!(!alone_on_line(&per_line, &flow.runs[0]));
+        assert!(alone_on_line(&per_line, &flow.runs[1]));
+        assert!(!alone_on_line(&per_line, &flow.runs[2]));
+    }
+
+    #[test]
+    fn a_column_rule_cuts_a_run_between_two_words() {
+        // "AA  BB CC" from 0: AA ends at 12, BB starts at 24; the rule at 20 lies in the gap.
+        let mut flow = flow_of(vec![spaced("AA  BB CC", 0.0)]);
+        assert!(cut_at_columns(
+            &mut flow,
+            &[one_row(&[-10.0, 20.0, 100.0])],
+            &[],
+            100
+        ));
+        let texts: Vec<&str> = flow.runs.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(texts, ["AA", " BB CC"]);
+        assert_eq!((flow.runs[0].x, flow.runs[0].w), (0.0, 12.0));
+        assert_eq!((flow.runs[1].x, flow.runs[1].w), (24.0, 30.0));
+        assert_eq!(flow.runs[1].gaps.len(), 1);
+        assert_eq!(flow.runs[1].gaps[0].words, 1);
+        assert_eq!(flow.at, [0, 0]);
+    }
+
+    #[test]
+    fn a_column_rule_inside_a_word_cuts_nothing() {
+        let mut flow = flow_of(vec![spaced("AAAA BB", 0.0)]);
+        assert!(cut_at_columns(
+            &mut flow,
+            &[one_row(&[-10.0, 9.0, 100.0])],
+            &[],
+            100
+        ));
+        assert_eq!(flow.runs.len(), 1);
+        assert_eq!(flow.runs[0].text, "AAAA BB");
+    }
+
+    #[test]
+    fn a_column_rule_cuts_only_at_its_heights() {
+        let mut run = spaced("AA  BB", 0.0);
+        run.y = 200.0;
+        let mut flow = flow_of(vec![run]);
+        assert!(cut_at_columns(
+            &mut flow,
+            &[one_row(&[-10.0, 20.0, 100.0])],
+            &[],
+            100
+        ));
+        assert_eq!(flow.runs.len(), 1);
+    }
+
+    /// A row of three drawn cells cuts the lines under it at its inner edges, as far as its
+    /// body reaches: a line more than [`BODY_GAP`] line heights under the one over it is not
+    /// its body.
+    #[test]
+    fn a_band_cuts_only_the_lines_of_its_body() {
+        for (y, cut) in [(80.0, true), (20.0, false)] {
+            let mut run = spaced("AA  BB", 0.0);
+            run.y = y;
+            let mut flow = flow_of(vec![run]);
+            assert!(cut_at_columns(
+                &mut flow,
+                &[one_row(&[-10.0, 20.0, 60.0, 100.0])],
+                &[],
+                100
+            ));
+            assert_eq!(flow.runs.len(), if cut { 2 } else { 1 }, "{y}");
+        }
+    }
+
+    #[test]
+    fn cuts_past_the_budget_are_left_out() {
+        let runs: Vec<Run> = (0..3).map(|_| spaced("AA  BB", 0.0)).collect();
+        let mut flow = flow_of(runs);
+        assert!(!cut_at_columns(
+            &mut flow,
+            &[one_row(&[-10.0, 20.0, 100.0])],
+            &[],
+            2
+        ));
+        let texts: Vec<&str> = flow.runs.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(texts, ["AA", " BB", "AA", " BB", "AA  BB"]);
+    }
+
+    #[test]
+    fn column_rules_across_a_title_are_looked_for_within_a_budget() {
+        let vs = [seg(100.0, 0.0, 50.0), seg(200.0, 60.0, 90.0)];
+        let mut work = 0;
+        assert!(column_across(&vs, (50.0, 300.0), (10.0, 20.0), &mut work));
+        assert!(!column_across(&vs, (50.0, 300.0), (52.0, 58.0), &mut work));
+        assert!(!column_across(&vs, (150.0, 300.0), (10.0, 20.0), &mut work));
+        // Out of steps: the answer is yes, so no line is taken as a title.
+        let mut work = TITLE_WORK;
+        assert!(column_across(&vs, (50.0, 300.0), (52.0, 58.0), &mut work));
+        assert!(work > TITLE_WORK);
     }
 
     #[test]

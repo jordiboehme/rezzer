@@ -24,6 +24,7 @@ unicode-bidi.workspace = true
 [dev-dependencies]
 barcodes = { path = "../../formats/barcodes", features = ["encode"] }
 flate2 = { workspace = true, features = ["zlib-rs"] }
+insta.workspace = true
 libc.workspace = true
 rezzer-render = { path = "../../rezzer-render" }
 serde_json.workspace = true

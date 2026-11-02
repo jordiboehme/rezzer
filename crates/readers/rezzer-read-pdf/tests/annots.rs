@@ -9,43 +9,15 @@ mod common;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::sync::Arc;
 
-use common::{Builder, Page, pdf, show};
-use rezzer_limits::{Budget, Limits};
+use common::{Builder, Page, pdf, read, show};
 use rezzer_model::{
-    Anchor, Annotation, Block, Bytes, Completeness, Confidence, Detection, FormatId, Inline,
-    LossReason, ReadOptions, ReadOutcome, Reader, Source, plain_text,
+    Anchor, Annotation, Block, Completeness, Inline, LossReason, ReadOutcome, plain_text,
 };
-use rezzer_read_pdf::PdfReader;
 
 fn corpus(name: &str) -> Vec<u8> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../tests/corpus/pdf");
     std::fs::read(path.join(name)).expect("corpus file")
-}
-
-fn read(bytes: &[u8]) -> ReadOutcome {
-    let src = Source {
-        path: None,
-        name: "file.pdf".into(),
-        bytes: Bytes::Owned(Arc::new(bytes.to_vec())),
-        sha256: "00".repeat(32),
-        size: bytes.len() as u64,
-        format: FormatId::Pdf,
-        detection: Detection {
-            confidence: Confidence::Certain,
-            evidence: "%PDF-".into(),
-        },
-        modified: None,
-        created: None,
-        downloaded_from: None,
-        file_tags: Vec::new(),
-    };
-    PdfReader.read(
-        &src,
-        &ReadOptions::default(),
-        &Budget::new(Limits::default()),
-    )
 }
 
 /// Every block anchor of the body with the block's text, pages included.
@@ -126,6 +98,9 @@ fn strikeout_and_underline_quotes() {
     assert_eq!(plain_text(&a.body), "Underline content");
 }
 
+/// The highlight over two lines quotes them and anchors to their paragraph. The line `Not
+/// highlighted` under them stands in a drawn box, so it is a paragraph of its own (Task 15b
+/// part 2e-1: the text of a box is a block of its own).
 #[test]
 fn pypdf_highlight_spans_two_lines() {
     let out = read(&corpus("pypdf-annotated.pdf"));
@@ -135,7 +110,7 @@ fn pypdf_highlight_spans_two_lines() {
     let hl = &list[1];
     assert_eq!(hl.quoted.as_deref(), Some("Line 1 Line 2"));
     let anchor = hl.anchor.as_ref().expect("an anchor");
-    assert_eq!(block_text(&out, anchor), "Line 1 Line 2 Not highlighted");
+    assert_eq!(block_text(&out, anchor), "Line 1 Line 2");
 }
 
 /// A one-page file with two paragraphs, one at the top and one low on the page, and the

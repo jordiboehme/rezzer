@@ -31,6 +31,7 @@ mod inline;
 mod stencils;
 
 use std::collections::{HashMap, HashSet};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::panic::{self, AssertUnwindSafe};
 use std::time::{Duration, Instant};
 
@@ -81,8 +82,12 @@ pub(crate) struct Vision {
     pub alt: String,
     pub first: Option<[f32; 4]>,
     /// Parts of the page rendered again on their own and read for codes: pictures at a finer
-    /// scale than the page's render, codes drawn as paths.
+    /// scale than the page's render, codes drawn as paths. The first [`PAGE_REGIONS`] are
+    /// rendered again; the others, at most [`KEPT_REGIONS`], are named when the page's read
+    /// gave no code there.
     pub regions: Vec<Region>,
+    /// How many more such parts there are, past those in `regions`: not checked.
+    pub past: usize,
 }
 
 /// A part of a page that is rendered on its own to be read for codes.
@@ -102,10 +107,55 @@ pub(crate) enum How {
     /// A code drawn as paths, modules of this many points: whole pixels a module (3), the
     /// region's corner on a whole pixel. 300 dpi when the module size is not known (0).
     Modules(f32),
+    /// A code printed with a barcode font ([`crate::barfont`]), rendered as [`How::Modules`]
+    /// is. Its glyphs passed no code-shape test of paths, so a read from it is checked
+    /// against its bars as a picture's is; when the Code 128 values its glyphs print are known
+    /// (`Need::glyphs`), a read must be one of them.
+    Glyphs(f32),
 }
 
-/// The most regions of one page that needs vision.
-const PAGE_REGIONS: usize = 8;
+/// The hashes of the Code 128 values the glyphs of a code printed with a barcode font print,
+/// read from their geometry (`VectorCode::texts`): 0 for none. All 0 when the values are not
+/// known (another symbology, or more than four).
+pub(crate) type Glyphs = [u64; 4];
+
+/// The values (see [`Glyphs`]) of the code printed with a barcode font `c`, `None` when none
+/// is known.
+pub(crate) fn glyph_values(c: &crate::codes::VectorCode) -> Option<([f32; 4], Glyphs)> {
+    let mut known = [0u64; 4];
+    if !c.font || c.texts.is_empty() || c.texts.len() > known.len() {
+        return None;
+    }
+    for (k, t) in c.texts.iter().enumerate() {
+        known[k] = value_hash(t);
+    }
+    Some((c.b, known))
+}
+
+/// The hash of a code's value, as [`Glyphs`] holds it (never 0).
+fn value_hash(text: &str) -> u64 {
+    let mut h = DefaultHasher::new();
+    text.hash(&mut h);
+    h.finish().max(1)
+}
+
+impl How {
+    /// The module of a code drawn as paths or printed with a barcode font.
+    fn module(self) -> Option<f32> {
+        match self {
+            How::Modules(m) | How::Glyphs(m) => Some(m),
+            How::Picture(..) => None,
+        }
+    }
+}
+
+/// The most regions of one page that needs vision that are rendered again; the others are
+/// said.
+pub(crate) const PAGE_REGIONS: usize = 8;
+
+/// The most regions of one page that needs vision that are kept past [`PAGE_REGIONS`], to be
+/// checked against the codes the page's read gave; past them they are counted.
+const KEPT_REGIONS: usize = 256;
 
 /// How far the edges of one picture may move between pages, in points, and as a share of its
 /// larger side: a logo scaled a little differently on each page is still the same logo.
@@ -129,6 +179,43 @@ fn same_spot(a: &[f32; 4], b: &[f32; 4]) -> bool {
 pub(crate) struct Spots {
     buckets: HashMap<(i32, i32), Vec<usize>>,
     boxes: Vec<([f32; 4], u64)>,
+    /// The pages each spot is on, for the spots of [`SpotPages::only`].
+    pages: Vec<PageRun>,
+}
+
+/// The pages something is on, added in any order, each once: the first, the last and how
+/// many.
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
+pub(crate) struct PageRun {
+    first: u32,
+    last: u32,
+    count: usize,
+}
+
+impl PageRun {
+    /// Adds page `n`, which was not added before.
+    fn add(&mut self, n: u32) {
+        if self.count == 0 {
+            (self.first, self.last) = (n, n);
+        } else {
+            self.first = self.first.min(n);
+            self.last = self.last.max(n);
+        }
+        self.count += 1;
+    }
+
+    /// As words: `page 3`, `pages 1 and 2`, `pages 1 to 12` or, with gaps, `9 of the pages 1
+    /// to 12`.
+    fn words(&self) -> String {
+        let (first, last) = (self.first, self.last);
+        let running = (last - first) as usize + 1 == self.count;
+        match self.count {
+            0 | 1 => format!("page {first}"),
+            2 if running => format!("pages {first} and {last}"),
+            _ if running => format!("pages {first} to {last}"),
+            n => format!("{n} of the pages {first} to {last}"),
+        }
+    }
 }
 
 impl Spots {
@@ -170,47 +257,133 @@ impl Spots {
     pub(crate) fn holds(&self, b: &[f32; 4], id: u64) -> bool {
         self.find(b, id).is_some()
     }
+
+    /// The spot of picture `id` at `b`, with the pages it is on, if one is known.
+    fn spot(&self, b: &[f32; 4], id: u64) -> Option<Furniture> {
+        let spot = self.find(b, id)?;
+        Some(Furniture {
+            spot,
+            pages: self.pages.get(spot).copied().unwrap_or_default(),
+        })
+    }
+}
+
+/// The spots of the pictures of the pages read so far, each with the pages it is on.
+#[derive(Default)]
+struct SpotPages {
+    all: Spots,
+    /// For each spot: the last read it was counted for, and the pages it is on.
+    seen: Vec<(usize, PageRun)>,
+    read: usize,
+}
+
+impl SpotPages {
+    fn add(&mut self, items: &PageItems) {
+        self.read += 1;
+        for (i, b) in items.images.iter().enumerate() {
+            let k = self
+                .all
+                .add(b, items.images_id.get(i).copied().unwrap_or(0));
+            if k == self.seen.len() {
+                self.seen.push((0, PageRun::default()));
+            }
+            if self.seen[k].0 != self.read {
+                self.seen[k].0 = self.read;
+                self.seen[k].1.add(items.page);
+            }
+        }
+    }
+
+    /// The spots on `keep(pages it is on, pages read)` pages, with their pages.
+    fn only(&self, keep: impl Fn(usize, usize) -> bool) -> Spots {
+        let mut out = Spots::default();
+        for (k, &(_, pages)) in self.seen.iter().enumerate() {
+            if keep(pages.count, self.read) {
+                let (b, id) = self.all.boxes[k];
+                let i = out.boxes.len();
+                out.boxes.push((b, id));
+                out.pages.push(pages);
+                out.buckets.entry(Spots::cell(&b)).or_default().push(i);
+            }
+        }
+        out
+    }
 }
 
 /// The same picture drawn at the same place (within [`SAME_SPOT`]) on at least three pages
-/// and on at least half of the pages read. When they are small, they are page furniture (a logo in the
-/// margin, a strip along the edge), like a running header, and do not make a page need vision.
+/// and on at least half of the pages read. When they are small, they are page furniture (a
+/// logo in the margin, a strip along the edge), like a running header, and do not make a page
+/// need vision.
 pub(crate) fn furniture<'a>(pages: impl Iterator<Item = &'a PageItems>) -> Spots {
-    let mut all = Spots::default();
-    // For each spot: the pages it is on and the last page it was counted for.
-    let mut seen: Vec<(usize, usize)> = Vec::new();
+    let mut spots = SpotPages::default();
+    for items in pages {
+        spots.add(items);
+    }
+    spots.only(|n, read| n >= 3 && n * 2 >= read)
+}
+
+/// The pictures drawn on every page of a file of two pages or more. In a file of two pages
+/// they are the pictures of its template, as a footer line on both pages is furniture (see
+/// `layout::Style::learn`); from three pages on, those at one place are [`furniture`].
+#[derive(Default)]
+pub(crate) struct Everywhere {
+    /// By `PageItems::images_id`, anywhere on the page: such a picture is a logo.
+    pub ids: HashSet<u64>,
+    /// At one place (within [`SAME_SPOT`]) on both pages of a file of two: such a picture
+    /// does not count toward the share of a page that needs vision. Empty for longer files,
+    /// where such pictures are [`furniture`].
+    pub spots: Spots,
+}
+
+/// The pictures on every page of a document of two pages or more. `count` is the
+/// document's page count; when fewer pages were read, no picture is known to be on every
+/// page.
+pub(crate) fn on_every_page<'a>(
+    pages: impl Iterator<Item = &'a PageItems>,
+    count: usize,
+) -> Everywhere {
+    let mut spots = SpotPages::default();
     let mut read = 0usize;
+    let mut found: Option<HashSet<u64>> = None;
     for items in pages {
         read += 1;
-        for (i, b) in items.images.iter().enumerate() {
-            let k = all.add(b, items.images_id.get(i).copied().unwrap_or(0));
-            if k == seen.len() {
-                seen.push((0, 0));
-            }
-            if seen[k].1 != read {
-                seen[k] = (seen[k].0 + 1, read);
-            }
+        if count == 2 {
+            spots.add(items);
         }
+        let here: HashSet<u64> = items.images_id.iter().copied().collect();
+        found = Some(match found {
+            None => here,
+            Some(mut all) => {
+                all.retain(|id| here.contains(id));
+                all
+            }
+        });
     }
-    let mut out = Spots::default();
-    for (k, &(n, _)) in seen.iter().enumerate() {
-        if n >= 3 && n * 2 >= read {
-            let (b, id) = all.boxes[k];
-            let i = out.boxes.len();
-            out.boxes.push((b, id));
-            out.buckets.entry(Spots::cell(&b)).or_default().push(i);
-        }
+    match found {
+        Some(ids) if count >= 2 && read == count => Everywhere {
+            ids,
+            spots: spots.only(|n, read| n == read),
+        },
+        _ => Everywhere::default(),
     }
-    out
+}
+
+/// A picture of the page furniture: its place in the furniture's [`Spots`], and every page
+/// it is on, also those rendered whole.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Furniture {
+    pub spot: usize,
+    pub pages: PageRun,
 }
 
 /// What a page shows that an agent may need to look at.
 pub(crate) enum Seen {
     /// The whole page needs vision.
     Page(Vision),
-    /// Only small pictures, each of at least 1 cm2, in the order the page draws them, and how
-    /// many more there are past the cap the caller can take.
-    Small(Vec<Small>, usize),
+    /// Only small pictures, each of at least 1 cm2, in the order the page draws them, how
+    /// many more there are past the cap the caller can take, and how many drawings that look
+    /// like codes are not read past [`crate::codes::MAX_REGIONS`].
+    Small(Vec<Small>, usize, usize),
 }
 
 /// A small picture on a page that does not need vision as a whole.
@@ -233,14 +406,21 @@ pub(crate) struct Small {
     pub hint: bool,
     /// It is not a picture but a region of paths that may be a code.
     pub vector: bool,
-    /// It is page furniture (a picture at one place on many pages): its asset stays only when
-    /// a code is read from it, named once at its first place.
-    pub furniture: bool,
+    /// It is page furniture (a picture at one place on many pages): its asset is named once,
+    /// at its first place, with its pages.
+    pub furniture: Option<Furniture>,
+}
+
+impl Small {
+    /// It is a code printed with a barcode font.
+    fn font(&self) -> bool {
+        matches!(self.how, Some(How::Glyphs(..)))
+    }
 }
 
 /// The top or bottom band of a page, as a share of its height, where a small picture is a
-/// logo.
-const LOGO_BAND: f32 = 0.15;
+/// logo: the band of running headers and footers (`layout::BAND`).
+const LOGO_BAND: f32 = 0.18;
 
 /// The corner regions of a page, as a share of its width and height, where a small picture
 /// is a logo.
@@ -266,53 +446,150 @@ fn looks_like_code(items: &PageItems, k: usize) -> bool {
     square && items.images_code.get(k).copied().unwrap_or(false)
 }
 
-/// The pictures (by `PageItems::images_id`) drawn on every page of a document of two pages
-/// or more, anywhere on the page. `count` is the document's page count; when fewer pages
-/// were read, no picture is known to be on every page.
-pub(crate) fn on_every_page<'a>(
-    pages: impl Iterator<Item = &'a PageItems>,
-    count: usize,
-) -> HashSet<u64> {
-    let mut read = 0usize;
-    let mut found: Option<HashSet<u64>> = None;
-    for items in pages {
-        read += 1;
-        let here: HashSet<u64> = items.images_id.iter().copied().collect();
-        found = Some(match found {
-            None => here,
-            Some(mut all) => {
-                all.retain(|id| here.contains(id));
-                all
+/// Pictures closer than this share of the page width and height (1 %) are one figure: a
+/// picture in a logo place that is part of a figure reaching out of it is no logo.
+const FIGURE_GAP: f32 = 0.01;
+
+/// Pictures of one page (256) past which none is a logo of the template by its place:
+/// finding the figures would take too long, so the pictures count toward the share as they
+/// are. Those in a logo place are still called logos when the page does not need vision.
+const FIGURE_PICTURES: usize = 256;
+
+/// The visible part of box `b` on a page `width` by `height` points, in square points.
+fn visible_in(b: &[f32; 4], width: f32, height: f32) -> f32 {
+    let w = (b[2].min(width) - b[0].max(0.0)).max(0.0);
+    let h = (b[3].min(height) - b[1].max(0.0)).max(0.0);
+    w * h
+}
+
+/// For each of the pictures `shown` of page `info` (not page furniture): whether it is a
+/// logo, and whether it is a logo of the template, which does not count toward the share of
+/// a page that needs vision. A logo of the template does not look like a code and either lies
+/// in a logo place, alone covers less than [`PICTURE_SHARE`] of the page and is no part of a
+/// figure (pictures within [`FIGURE_GAP`], 1 % of the page, of each other) that reaches out
+/// of the logo places or covers [`PICTURE_SHARE`] together, which is looked for on pages of
+/// at most [`FIGURE_PICTURES`] (256);
+/// or it stands at one place on every page (`everywhere`) and covers less than
+/// [`FURNITURE_SHARE`]. A picture on every page somewhere is a logo too.
+fn logos(
+    info: &PageInfo,
+    items: &PageItems,
+    shown: &[usize],
+    everywhere: &Everywhere,
+) -> Vec<(bool, bool)> {
+    let (width, height) = (info.width, info.height);
+    let area = (width * height).max(1.0);
+    let (fw, fh) = items.turn.size(width, height);
+    let framed: Vec<[f32; 4]> = shown
+        .iter()
+        .map(|&k| items.turn.place_box(items.images[k], width, height))
+        .collect();
+    let code: Vec<bool> = shown.iter().map(|&k| looks_like_code(items, k)).collect();
+    let repeated: Vec<bool> = shown
+        .iter()
+        .map(|&k| {
+            let b = &items.images[k];
+            let id = items.images_id.get(k).copied().unwrap_or(0);
+            everywhere.spots.holds(b, id) && visible_in(b, width, height) < FURNITURE_SHARE * area
+        })
+        .collect();
+    let in_place: Vec<bool> = (0..shown.len())
+        .map(|i| {
+            !code[i]
+                && in_logo_place(&framed[i], fw, fh)
+                && visible_in(&items.images[shown[i]], width, height) < PICTURE_SHARE * area
+        })
+        .collect();
+    // Past the cap no picture is placed: all count toward the share, and those in a logo
+    // place are still called logos.
+    let searched = shown.len() <= FIGURE_PICTURES;
+    let mut placed: Vec<bool> = in_place.iter().map(|&p| p && searched).collect();
+    // A picture of content (not a code, not a logo by its place or its repeats) makes every
+    // picture of its figure content.
+    let (gx, gy) = (FIGURE_GAP * fw, FIGURE_GAP * fh);
+    let near = |a: &[f32; 4], b: &[f32; 4]| {
+        a[0] - gx <= b[2] && b[0] <= a[2] + gx && a[1] - gy <= b[3] && b[1] <= a[3] + gy
+    };
+    // At most [`FIGURE_PICTURES`] pictures are placed, so this takes at most that many steps
+    // for each picture.
+    let mut left: Vec<usize> = (0..shown.len()).filter(|&i| placed[i]).collect();
+    let mut reach: Vec<usize> = if left.is_empty() {
+        Vec::new()
+    } else {
+        (0..shown.len())
+            .filter(|&i| !code[i] && !placed[i] && !repeated[i])
+            .collect()
+    };
+    while let Some(i) = reach.pop() {
+        left.retain(|&j| {
+            let joined = near(&framed[i], &framed[j]);
+            if joined {
+                placed[j] = false;
+                reach.push(j);
             }
+            !joined
         });
+        if left.is_empty() {
+            break;
+        }
     }
-    match found {
-        Some(all) if count >= 2 && read == count => all,
-        _ => HashSet::new(),
+    // The placed pictures that are left, joined into figures by the same gap: a figure that
+    // covers [`PICTURE_SHARE`] of the page together is content drawn as tiles or strips (a
+    // photo, a chart, a banner), not logos.
+    while let Some(start) = left.pop() {
+        let mut figure = vec![start];
+        let mut at = 0;
+        while at < figure.len() {
+            let i = figure[at];
+            left.retain(|&j| {
+                let joined = near(&framed[i], &framed[j]);
+                if joined {
+                    figure.push(j);
+                }
+                !joined
+            });
+            at += 1;
+        }
+        let covers: f32 = figure
+            .iter()
+            .map(|&i| visible_in(&items.images[shown[i]], width, height))
+            .sum();
+        if covers >= PICTURE_SHARE * area {
+            for i in figure {
+                placed[i] = false;
+            }
+        }
     }
+    (0..shown.len())
+        .map(|i| {
+            let template = !code[i] && (placed[i] || repeated[i]);
+            let id = items.images_id.get(shown[i]).copied().unwrap_or(0);
+            let unsearched = !searched && in_place[i];
+            (
+                template || unsearched || (!code[i] && everywhere.ids.contains(&id)),
+                template,
+            )
+        })
+        .collect()
 }
 
 /// What on page `info` with the items read from it needs a look. The whole page needs
 /// vision when it has no text layer over a picture (a scan), its glyphs have no Unicode
 /// mapping, or it is only an invisible text layer over a picture (an OCR layer); or when its
-/// pictures, without the page furniture `skip`, cover at least 2 % of it. Otherwise each of
-/// its pictures of at least 1 cm2 is a small picture of its own; one that does not look like
-/// a code and lies in the top or bottom band or a corner, or is in `everywhere`, is a logo.
-/// At most `cap` small pictures are kept, the first the page draws.
+/// pictures, without the page furniture `skip` and the logos of the template (see
+/// [`logos`]), cover at least 2 % of it. Otherwise each of its pictures of at least 1 cm2 is
+/// a small picture of its own, marked as a logo when it is one. At most `cap` small pictures
+/// are kept, the first the page draws.
 pub(crate) fn vision(
     info: &PageInfo,
     items: &PageItems,
     skip: &Spots,
-    everywhere: &HashSet<u64>,
+    everywhere: &Everywhere,
     cap: usize,
 ) -> Option<Seen> {
     let (width, height) = (info.width, info.height);
     let area = (width * height).max(1.0);
-    let visible = |b: &[f32; 4]| {
-        let w = (b[2].min(width) - b[0].max(0.0)).max(0.0);
-        let h = (b[3].min(height) - b[1].max(0.0)).max(0.0);
-        w * h
-    };
+    let visible = |b: &[f32; 4]| visible_in(b, width, height);
     let drawn: Vec<usize> = (0..items.images.len())
         .filter(|&k| visible(&items.images[k]) > 0.0)
         .collect();
@@ -328,8 +605,15 @@ pub(crate) fn vision(
         let id = items.images_id.get(k).copied().unwrap_or(0);
         !(skip.holds(b, id) && visible(b) < FURNITURE_SHARE * area)
     });
-    let shown: Vec<&[f32; 4]> = shown_at.iter().map(|&k| &items.images[k]).collect();
-    let pictured = (shown.iter().map(|b| visible(b)).sum::<f32>() / area).min(1.0);
+    let logo = logos(info, items, &shown_at, everywhere);
+    let pictured = (shown_at
+        .iter()
+        .zip(&logo)
+        .filter(|(_, (_, template))| !template)
+        .map(|(&k, _)| visible(&items.images[k]))
+        .sum::<f32>()
+        / area)
+        .min(1.0);
     let visible_text = items.mapped > 0;
     let invisible_text = !items.hidden_layer.is_empty() || !items.invisible.is_empty();
     let mut words: Vec<String> = Vec::new();
@@ -342,10 +626,11 @@ pub(crate) fn vision(
     if !visible_text && invisible_text && covered > SCAN_SHARE {
         words.push("only an invisible text layer".into());
     }
-    let mut first = shown.first().map(|b| **b);
-    let large = !shown.is_empty() && pictured >= PICTURE_SHARE;
+    let mut first = shown_at.first().map(|&k| items.images[k]);
+    let large = pictured >= PICTURE_SHARE;
     if large {
-        let k = shown.len();
+        // Logos are counted too: they are on the page rendered.
+        let k = shown_at.len();
         words.push(format!(
             "{k} {}",
             if k == 1 { "picture" } else { "pictures" }
@@ -353,22 +638,24 @@ pub(crate) fn vision(
     }
     // Pictures too small to make the page need vision are still not dropped: each one of at
     // least 1 cm2 is named with its box.
-    let small: Vec<usize> = if large {
+    let small: Vec<(usize, bool)> = if large {
         Vec::new()
     } else {
         shown_at
             .iter()
             .copied()
-            .filter(|&k| visible(&items.images[k]) >= SMALL_PICTURE)
+            .zip(logo.into_iter().map(|(logo, _)| logo))
+            .filter(|&(k, _)| visible(&items.images[k]) >= SMALL_PICTURE)
             .collect()
     };
-    let vectors: Vec<&crate::codes::VectorCode> =
+    let mut vectors: Vec<&crate::codes::VectorCode> =
         items.codes.iter().filter(|c| visible(&c.b) > 0.0).collect();
     if !words.is_empty() {
         // The page is rendered whole: its small pictures are named in its alt text and not
         // cut out again.
-        if let Some(&k) = small.first() {
+        if let Some(&(k, _)) = small.first() {
             first = Some(items.images[k]);
+            let small: Vec<usize> = small.iter().map(|&(k, _)| k).collect();
             words.push(small_pictures(items, &small));
         }
         // The page render is read cheaply; the likely codes are looked at again finer: codes
@@ -377,7 +664,7 @@ pub(crate) fn vision(
             .iter()
             .map(|c| Region {
                 b: c.b,
-                how: How::Modules(c.module),
+                how: modules_how(c),
             })
             .collect();
         regions.extend(
@@ -392,11 +679,14 @@ pub(crate) fn vision(
                     })
                 }),
         );
-        regions.truncate(PAGE_REGIONS);
+        // Past the parts rendered again, many are kept to be checked, the rest counted.
+        let past = regions.len().saturating_sub(PAGE_REGIONS + KEPT_REGIONS);
+        regions.truncate(PAGE_REGIONS + KEPT_REGIONS);
         return Some(Seen::Page(Vision {
             alt: words.join(", "),
             first,
             regions,
+            past,
         }));
     }
     // Page furniture of at least 1 cm2 is read for codes too, once: a code on every page is
@@ -408,19 +698,20 @@ pub(crate) fn vision(
     if small.is_empty() && vectors.is_empty() && furniture.is_empty() {
         return None;
     }
+    // Drawings past the most a page reads are counted (the caller says them).
+    let unread = vectors.len().saturating_sub(crate::codes::MAX_REGIONS);
+    vectors.truncate(crate::codes::MAX_REGIONS);
     // Past `cap` the work for each picture is more than the caller may take.
     let more = (small.len() + vectors.len() + furniture.len()).saturating_sub(cap);
     let mut small = small;
     small.truncate(cap);
-    let (fw, fh) = items.turn.size(width, height);
     let mut list: Vec<Small> = small
         .into_iter()
-        .map(|k| {
+        .map(|(k, logo)| {
             let b = items.images[k];
             let framed = items.turn.place_box(b, width, height);
             let id = items.images_id.get(k).copied().unwrap_or(0);
             let code = looks_like_code(items, k);
-            let logo = !code && (in_logo_place(&framed, fw, fh) || everywhere.contains(&id));
             // Rendered again at its own resolution when its crop gives no code, if that is
             // finer than the page's render.
             let how = items.images_px.get(k).map(|&(pw, ph)| How::Picture(pw, ph));
@@ -433,7 +724,7 @@ pub(crate) fn vision(
                 how,
                 hint: code,
                 vector: false,
-                furniture: false,
+                furniture: None,
             }
         })
         .collect();
@@ -444,30 +735,44 @@ pub(crate) fn vision(
         id: c.id,
         logo: false,
         mcid: None,
-        how: Some(How::Modules(c.module)),
+        how: Some(modules_how(c)),
         hint: true,
         vector: true,
-        furniture: false,
+        furniture: None,
     }));
     let room = cap.saturating_sub(list.len());
     list.extend(furniture.into_iter().take(room).map(|k| {
         let b = items.images[k];
+        let id = items.images_id.get(k).copied().unwrap_or(0);
         Small {
             b,
             framed: items.turn.place_box(b, width, height),
-            id: items.images_id.get(k).copied().unwrap_or(0),
+            id,
             logo: true,
             mcid: items.images_mcid.get(k).copied().flatten(),
             how: items.images_px.get(k).map(|&(pw, ph)| How::Picture(pw, ph)),
             hint: looks_like_code(items, k),
             vector: false,
-            furniture: true,
+            furniture: skip.spot(&b, id),
         }
     }));
-    if list.is_empty() {
+    // With no room for any of them (`cap` 0), the counts are still said.
+    if list.is_empty() && more == 0 && unread == 0 {
         return None;
     }
-    Some(Seen::Small(list, more))
+    Some(Seen::Small(list, more, unread))
+}
+
+/// How many pictures page `info` draws, in part or whole within the page, that are smaller
+/// than [`SMALL_PICTURE`] (1 cm2, a fixed size, not a share of the page): too small to be
+/// listed one by one, they are counted.
+pub(crate) fn very_small(info: &PageInfo, items: &PageItems) -> usize {
+    items
+        .images
+        .iter()
+        .map(|b| visible_in(b, info.width, info.height))
+        .filter(|&v| v > 0.0 && v < SMALL_PICTURE)
+        .count()
 }
 
 /// The alt text for small pictures `small` of a page that needs vision as a whole: how many,
@@ -490,11 +795,24 @@ fn small_pictures(items: &PageItems, small: &[usize]) -> String {
     )
 }
 
+/// How a region of the page that may be a code is rendered again: by its modules, as a
+/// code drawn as paths or one printed with a barcode font.
+fn modules_how(c: &crate::codes::VectorCode) -> How {
+    if c.font {
+        How::Glyphs(c.module)
+    } else {
+        How::Modules(c.module)
+    }
+}
+
 /// What a picture that looks like a code but gives none is called, after its box.
 const UNREAD_WORDS: &str = ", barcode or QR code found, not decoded";
 
 /// What a drawing of paths that passed the code-shape test is called.
 const DRAWING: &str = "a drawing that looks like a barcode or QR code";
+
+/// What a code printed with a barcode font is called.
+const FONT_CODE: &str = "a barcode printed in a barcode font";
 
 /// `box 40, 760 to 100, 800`: a box in whole points.
 fn box_words(b: &[f32; 4]) -> String {
@@ -504,8 +822,10 @@ fn box_words(b: &[f32; 4]) -> String {
 
 /// What a small picture is called before it is read for codes: a code drawn as paths, a
 /// logo, or a small picture (which needs vision).
-fn small_name(logo: bool, vector: bool) -> &'static str {
-    if vector {
+fn small_name(logo: bool, vector: bool, font: bool) -> &'static str {
+    if font {
+        "barcode printed in a barcode font"
+    } else if vector {
         "barcode or QR code"
     } else if logo {
         "logo or small picture"
@@ -516,17 +836,25 @@ fn small_name(logo: bool, vector: bool) -> &'static str {
 
 /// The words for one place of a small picture: `small picture, box 40, 760 to 100, 800`.
 pub(crate) fn place_alt(s: &Small) -> String {
-    format!("{}, {}", small_name(s.logo, s.vector), box_words(&s.framed))
+    format!(
+        "{}, {}",
+        small_name(s.logo, s.vector, s.font()),
+        box_words(&s.framed)
+    )
 }
 
 /// The words of one place `alt` (from [`place_alt`]) once its picture was read for codes:
-/// named after the codes read, or marked as a code not decoded or not scanned; `more` follows.
-fn reread_place(alt: &str, read: &Reread, more: &str) -> String {
+/// named after the codes read, or marked as a code not decoded or not scanned, or as it was
+/// when reading changed nothing; `more` follows.
+fn reread_place(alt: &str, read: Option<&Reread>, more: &str) -> String {
     let rest = alt.find(", box ").map_or(alt, |i| &alt[i + 2..]);
     match read {
-        Reread::Codes(name) => format!("{name}, {rest}{more}"),
-        Reread::Unread => format!("{alt}{UNREAD_WORDS}{more}"),
-        Reread::Drawing(scanned) => format!("{DRAWING}, {rest}, {}{more}", drawing_words(*scanned)),
+        Some(Reread::Codes(name)) => format!("{name}, {rest}{more}"),
+        Some(Reread::Unread) => format!("{alt}{UNREAD_WORDS}{more}"),
+        Some(Reread::Drawing(scanned, name)) => {
+            format!("{name}, {rest}, {}{more}", drawing_words(*scanned))
+        }
+        None => format!("{alt}{more}"),
     }
 }
 
@@ -539,14 +867,16 @@ fn drawing_words(scanned: bool) -> &'static str {
 }
 
 /// What reading a small picture for codes changed.
+#[derive(Clone)]
 enum Reread {
     /// The kinds of codes read: `QR Code`, `QR Code and Code 128`.
     Codes(String),
     /// It looks like a code, but none was read.
     Unread,
-    /// A drawing of paths that looks like a code gave none (`true`), or was not rendered
-    /// again to be read (`false`, a loss says why).
-    Drawing(bool),
+    /// A drawing of paths that looks like a code, or a code printed with a barcode font, gave
+    /// none (`true`), or was not rendered again to be read (`false`, a loss says why); with
+    /// what it is called ([`DRAWING`] or [`FONT_CODE`]).
+    Drawing(bool, &'static str),
 }
 
 /// The places of one small picture asset: the page and box of each of the first
@@ -560,16 +890,25 @@ pub(crate) struct Places {
     count: usize,
     /// The last page a place was added on: places come in page order.
     last: u32,
+    /// The pages of its places.
+    run: PageRun,
+    /// For page furniture: every page it is on, also the pages rendered whole, where it is
+    /// not listed.
+    stands: Option<PageRun>,
     /// Every place is a logo: the asset needs no vision.
     pub logo: bool,
     /// It is a region of paths, not a picture.
     vector: bool,
+    /// It is a code printed with a barcode font.
+    font: bool,
     /// One of its places looks like a code.
     hint: bool,
     /// Every place is page furniture.
     furniture: bool,
     /// What reading it for codes changed.
     read: Option<Reread>,
+    /// The words of reads that are not listed, each after a comma.
+    unconfirmed: String,
 }
 
 impl Places {
@@ -578,7 +917,9 @@ impl Places {
         let mut p = Places {
             logo: true,
             vector: s.vector,
+            font: s.font(),
             furniture: true,
+            stands: s.furniture.map(|f| f.pages),
             ..Places::default()
         };
         p.add(n, s);
@@ -592,6 +933,7 @@ impl Places {
             self.listed.push((n, s.framed));
         }
         if n != self.last {
+            self.run.add(n);
             if self.pages.len() < SMALL_LISTED {
                 self.pages.push(n);
             } else {
@@ -602,23 +944,16 @@ impl Places {
         self.count += 1;
         self.logo &= s.logo;
         self.hint |= s.hint;
-        self.furniture &= s.furniture;
+        self.furniture &= s.furniture.is_some();
     }
 
-    /// The asset's alt text: the place's words for one place; for more, the pages and the
-    /// box of each place listed, then how many more places there are.
-    /// The pages it is on, as words: `1, 2, 3` or `1, 2, 3 and 7 more`.
-    fn page_words(&self) -> String {
-        let mut pages: Vec<String> = self.pages.iter().map(u32::to_string).collect();
-        if self.more_pages > 0 {
-            pages.push(format!("{} more", self.more_pages));
+    /// The pages it is on: for page furniture every page it stands on, else the pages of its
+    /// places.
+    fn on_pages(&self) -> PageRun {
+        match self.stands {
+            Some(stands) if self.furniture => stands,
+            _ => self.run,
         }
-        pages.join(", ")
-    }
-
-    /// Every place is page furniture.
-    fn furniture_pages(&self) -> bool {
-        self.furniture
     }
 
     /// The page of its first place.
@@ -629,25 +964,31 @@ impl Places {
     pub(crate) fn alt(&self) -> String {
         let name = match &self.read {
             Some(Reread::Codes(name)) => name.as_str(),
-            Some(Reread::Drawing(_)) => DRAWING,
-            _ => small_name(self.logo, self.vector),
+            Some(Reread::Drawing(_, name)) => name,
+            _ => small_name(self.logo, self.vector, self.font),
         };
         let drawing = match self.read {
-            Some(Reread::Drawing(scanned)) => format!(", {}", drawing_words(scanned)),
+            Some(Reread::Drawing(scanned, _)) => format!(", {}", drawing_words(scanned)),
             _ => String::new(),
         };
         let code = match self.read {
             Some(Reread::Unread) => UNREAD_WORDS,
-            Some(Reread::Drawing(_)) => drawing.as_str(),
+            Some(Reread::Drawing(..)) => drawing.as_str(),
             _ => "",
         };
+        let code = format!("{code}{}", self.unconfirmed);
+        let first = self
+            .listed
+            .first()
+            .map(|(_, b)| box_words(b))
+            .unwrap_or_default();
+        // Page furniture stands at one place: it is named there, with its pages.
+        let on = self.on_pages();
+        if self.furniture && on.count > 1 {
+            return format!("{name}, {first}{code}, on {}", on.words());
+        }
         if self.count == 1 {
-            let b = self
-                .listed
-                .first()
-                .map(|(_, b)| box_words(b))
-                .unwrap_or_default();
-            return format!("{name}, {b}{code}");
+            return format!("{name}, {first}{code}");
         }
         let mut pages: Vec<String> = self.pages.iter().map(u32::to_string).collect();
         if self.more_pages > 0 {
@@ -759,8 +1100,11 @@ pub(crate) struct Need {
     pub origin: (f32, f32),
     pub cut: bool,
     pub fallback: bool,
-    /// Parts of a page that needs vision as a whole, rendered again to be read for codes.
+    /// Parts of a page that needs vision as a whole to be read again for codes: the first
+    /// [`PAGE_REGIONS`] are rendered again, the others only named (`Vision::regions`).
     pub regions: Vec<Region>,
+    /// How many more such parts there are, not checked (`Vision::past`).
+    pub past: usize,
     /// How the frame of the page's text is turned, and the size of the visible page box:
     /// the box of a code read from the page is given in that frame.
     pub turn: Turn,
@@ -768,6 +1112,9 @@ pub(crate) struct Need {
     /// The page draws few enough pictures to be rendered only to be read for codes, without
     /// files: at most [`SCAN_PICTURES`].
     pub light: bool,
+    /// The codes printed with a barcode font on this page whose values their glyphs print
+    /// are known: their box and values (see [`glyph_values`]).
+    pub glyphs: Vec<([f32; 4], Glyphs)>,
 }
 
 /// The most pictures a page may draw to be rendered only to be read for codes.
@@ -1107,7 +1454,18 @@ pub(crate) fn render_pages(
             Some(asset) => {
                 // The page render is read cheaply at its own scale; the likely codes on it
                 // are looked at again finer below.
-                scans.read(n, asset, &page, Some(need), budget, true);
+                let page_read = scans
+                    .read(n, asset, &page, Some((need, None)), budget, true)
+                    .is_some();
+                // Codes printed in the page's pictures that the decoder did not read are
+                // looked for in its render, as codes drawn as paths are.
+                let until = scans.until;
+                let late = || Instant::now() >= until || budget.check_time().is_err();
+                let printed = page_read.then(|| printed_codes(&page, need, pages.room, &late));
+                // A search cut by the time for reading codes is a time stop of the read.
+                if printed.is_some() && late() {
+                    scans.halt_time(n, budget);
+                }
                 if files {
                     match encode(page.pixmap) {
                         Ok(png) => {
@@ -1120,13 +1478,20 @@ pub(crate) fn render_pages(
                 } else {
                     drop(page);
                 }
-                for region in &need.regions {
+                let mut read = vec![false; need.regions.len()];
+                for (k, region) in need.regions.iter().enumerate().take(PAGE_REGIONS) {
                     if scans.stopped() {
                         break;
                     }
                     if let Ok(r) = pages.region(n, need, region, 0, &mut scans) {
-                        scans.read(n, asset, &r, Some(need), budget, false);
+                        read[k] = scans
+                            .read(n, asset, &r, Some((need, Some(region))), budget, false)
+                            .is_some();
                     }
+                }
+                scans.regions_unread(asset, need, &read);
+                if let Some(printed) = printed {
+                    scans.printed_unread(asset, need, printed);
                 }
             }
             None => {
@@ -1369,9 +1734,40 @@ impl Cut<'_> {
                     picture = fine;
                 }
             }
-            let found = scans.read(n, c.asset, &picture, None, budget, false);
+            // A code drawn as paths or printed with a barcode font is read from its own render
+            // at whole pixels a module first: the page's render may hold its modules on a
+            // pixel or so, where the decoder can read a wrong value. Only that read of a
+            // drawing skips the check of its bars (the drawing has the pattern of a code); a
+            // code printed with a font is checked against its glyphs.
+            let mut fine_first = false;
+            if let Some(how @ (How::Modules(_) | How::Glyphs(_))) = c.how {
+                if let Some((_, known)) = need.glyphs.iter().find(|(b, _)| *b == c.b) {
+                    scans.glyphs.insert(c.asset, *known);
+                }
+                let at = Region { b: c.b, how };
+                match pages.region(n, need, &at, held, scans) {
+                    Ok(fine) => {
+                        let drawn = matches!(how, How::Modules(_));
+                        if drawn {
+                            scans.drawn.insert(c.asset);
+                        }
+                        scans.read(n, c.asset, &fine, None, budget, false);
+                        scans.drawn.remove(&c.asset);
+                        fine_first = true;
+                    }
+                    Err(true) => {
+                        scans.unscanned.insert(c.asset);
+                    }
+                    Err(false) => {}
+                }
+            }
+            let found = if fine_first {
+                None
+            } else {
+                scans.read(n, c.asset, &picture, None, budget, false)
+            };
             if found == Some(0)
-                && let Some(how) = c.how
+                && let Some(how @ How::Picture(..)) = c.how
             {
                 // Finer, when that is finer than the crop: a gap when it cannot be rendered.
                 let at = Region { b: c.b, how };
@@ -1533,8 +1929,8 @@ pub(crate) fn region_scale(region: &Region) -> Option<f64> {
             };
             Some(want.min(REGION_SCALE)).filter(|&s| s > SCALE * 1.01)
         }
-        How::Modules(m) if m > 0.0 => Some(MODULE_PIXELS / f64::from(m)),
-        How::Modules(_) => Some(REGION_SCALE),
+        How::Modules(m) | How::Glyphs(m) if m > 0.0 => Some(MODULE_PIXELS / f64::from(m)),
+        How::Modules(_) | How::Glyphs(..) => Some(REGION_SCALE),
     }
 }
 
@@ -1542,6 +1938,11 @@ pub(crate) fn region_scale(region: &Region) -> Option<f64> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Unrendered {
     Cap,
+    /// Past [`PAGE_REGIONS`] of one page.
+    PageCap,
+    /// Past [`PAGE_REGIONS`] and [`KEPT_REGIONS`] of one page: not even checked against the
+    /// codes the page's read gave.
+    Unchecked,
     Room,
     Damaged,
     Time,
@@ -1770,6 +2171,12 @@ pub(crate) struct Found {
     pub codes: Vec<Barcode>,
     /// It was read.
     pub read: bool,
+    /// For a page that needs vision as a whole: the words for each part of it that looks
+    /// like a code and gave none (see [`Scans::regions_unread`]).
+    pub unread: Vec<String>,
+    /// The words for each part the decoder read as a code that is not listed, as nothing
+    /// confirms it (see [`evidence`]): its kind, its place on a page, and why.
+    pub unconfirmed: Vec<String>,
 }
 
 /// The barcode scans of one read: their bounds, what they found and what they could not do.
@@ -1785,6 +2192,11 @@ pub(crate) struct Scans {
     pub found: HashMap<usize, Found>,
     /// Small pictures whose finer look was not rendered (a loss says why).
     pub unscanned: HashSet<usize>,
+    /// The assets that are codes drawn as paths: their drawing has the pattern of a code.
+    drawn: HashSet<usize>,
+    /// The assets that are codes printed with a barcode font, with the values their glyphs
+    /// print (see [`Glyphs`]).
+    glyphs: HashMap<usize, Glyphs>,
     /// Why reading stopped, and on which page.
     stop: Option<(u32, String)>,
     /// The stop is a bound of the file's own (its code cap or the bytes it may keep), not
@@ -1800,6 +2212,13 @@ pub(crate) struct Scans {
     large_payloads: usize,
     /// Pages with parts not rendered again to be read finer, by why.
     unrendered: HashMap<Unrendered, Vec<u32>>,
+    /// Pages whose render was not searched for printed parts that look like codes, and why
+    /// for the first.
+    unsearched: Vec<u32>,
+    unsearched_why: Option<String>,
+    /// Pages whose render was searched only in part for such parts, and why.
+    partly: Vec<u32>,
+    partly_why: Option<String>,
 }
 
 #[cfg(test)]
@@ -1840,6 +2259,8 @@ impl Scans {
             kept: 0,
             found: HashMap::new(),
             unscanned: HashSet::new(),
+            drawn: HashSet::new(),
+            glyphs: HashMap::new(),
             stop: None,
             stop_limit: false,
             skipped: Vec::new(),
@@ -1848,6 +2269,10 @@ impl Scans {
             internal: Vec::new(),
             large_payloads: 0,
             unrendered: HashMap::new(),
+            unsearched: Vec::new(),
+            unsearched_why: None,
+            partly: Vec::new(),
+            partly_why: None,
         }
     }
 
@@ -1891,15 +2316,15 @@ impl Scans {
     }
 
     /// Reads `picture` (of page `n`, for asset `asset`) for codes, with the cheap attempts
-    /// only when `quick`. With `need`, the picture is the page or a part of it, and each code
-    /// gets its box on the page. Returns how many new codes it gave, `None` when it was not
-    /// read.
+    /// only when `quick`. With `on`, the picture is the page, or the part of it that is the
+    /// region given, and each code gets its box on the page and its place in words. Returns
+    /// how many new codes it gave, `None` when it was not read.
     fn read(
         &mut self,
         n: u32,
         asset: usize,
         picture: &Rendered,
-        need: Option<&Need>,
+        on: Option<(&Need, Option<&Region>)>,
         budget: &Budget,
         quick: bool,
     ) -> Option<usize> {
@@ -1959,7 +2384,83 @@ impl Scans {
             }
         };
         let mut added = 0;
+        // The region's box is one code's box: with more codes in one render, each keeps the
+        // decoder's own box. One code read twice, at two lines across its bars, is one code.
+        let alone = distinct_codes(&codes) == 1;
+        let drawn_asset = self.drawn.contains(&asset);
+        // The linear codes this page read added: their boxes in the render's pixels and where
+        // they are in the asset's codes.
+        let mut read_here: Vec<([u32; 4], usize)> = Vec::new();
         for c in codes {
+            // Checking the reads is bounded by the time for reading codes, as the reads are.
+            if Instant::now() >= self.until || budget.check_time().is_err() {
+                self.halt_time(n, budget);
+                break;
+            }
+            // A code printed with a barcode font whose glyphs' values are known: the read must
+            // be one of them. Otherwise the drawing, or the bars in the render, confirm it.
+            // A read of the page's render inside a part that is rendered again by its modules
+            // is left to that finer read: at a pixel or so a module the decoder can read a
+            // wrong value.
+            if let Some((need, None)) = on {
+                let px = page_rect(picture, need, c.bounds);
+                if need
+                    .regions
+                    .iter()
+                    .take(PAGE_REGIONS)
+                    .any(|r| r.how.module().is_some_and(|m| around(r, m, &px)))
+                {
+                    continue;
+                }
+            }
+            let known = self.glyphs.get(&asset).copied().or_else(|| {
+                let (need, region) = on?;
+                let px = page_rect(picture, need, c.bounds);
+                region
+                    .into_iter()
+                    .chain(&need.regions)
+                    .find_map(|r| match r.how {
+                        How::Glyphs(m) if around(r, m, &px) => {
+                            need.glyphs.iter().find(|(b, _)| *b == r.b).map(|(_, k)| *k)
+                        }
+                        _ => None,
+                    })
+            });
+            let until = self.until;
+            let late = || Instant::now() >= until || budget.check_time().is_err();
+            let verdict = match known.filter(|k| k.iter().any(|&h| h != 0)) {
+                Some(k) => glyph_evidence(&c, &k),
+                None if drawn_asset => Ok(()),
+                None => match evidence(&c, picture, on, &late) {
+                    Some(verdict) => verdict,
+                    // The time ran out while its bars were checked: a time stop, not a
+                    // misread.
+                    None => {
+                        self.halt_time(n, budget);
+                        break;
+                    }
+                },
+            };
+            if let Err(why) = verdict {
+                // Not listed, and said: the kind, the place and why, without the value.
+                let place = on.map_or(" ".to_string(), |(need, _)| {
+                    let (w, h) = need.size;
+                    let framed = need
+                        .turn
+                        .place_box(page_rect(picture, need, c.bounds), w, h);
+                    let (fw, fh) = need.turn.size(w, h);
+                    format!(", {}, ", place_words(framed, fw, fh))
+                });
+                let words = format!(
+                    "a part read as {}{place}{why}, not listed",
+                    c.symbology.name()
+                );
+                let found = self.found.entry(asset).or_default();
+                if !found.unconfirmed.contains(&words) {
+                    found.unconfirmed.push(words);
+                }
+                continue;
+            }
             if self.kept >= FILE_CODES {
                 self.halt(
                     n,
@@ -1972,9 +2473,115 @@ impl Scans {
             if b.text.is_none() && b.base64.is_none() {
                 self.large_payloads += 1;
             }
-            b.bounds = need.map(|need| page_box(picture, need, c.bounds));
+            let mut drawn = false;
+            let mut crossed = None;
+            if let Some((need, region)) = on {
+                let px = page_rect(picture, need, c.bounds);
+                // A code drawn as paths or a picture that looks like a code takes the box
+                // drawn; a linear code drawn as paths only when its bars fill it (codes side
+                // by side closer than their quiet zone are one drawing).
+                let shape = region
+                    .filter(|r| alone && takes_region(&px, c.symbology.two_d(), r))
+                    .map(|r| r.b);
+                drawn = shape.is_some();
+                let (w, h) = need.size;
+                let framed = need
+                    .turn
+                    .place_box(shape.unwrap_or(px), w, h)
+                    .map(|v| (v * 10.0).round() / 10.0);
+                let (fw, fh) = need.turn.size(w, h);
+                b.place = Some(place_words(framed, fw, fh));
+                b.bounds = Some(framed);
+                // In the page's own read, two equal linear codes one over the other with little
+                // paper between them may be read as one: a lighter line across its bars says
+                // so.
+                let p = &picture.pixmap;
+                if region.is_none()
+                    && !c.symbology.two_d()
+                    && crate::codes::crossed(
+                        p.data_as_u8_slice(),
+                        (usize::from(p.width()), usize::from(p.height())),
+                        c.bounds,
+                    )
+                {
+                    crossed = Some(format!(
+                        "a lighter line runs across the bars of the {}, {}: it may be two \
+                         codes, one not decoded",
+                        b.symbology,
+                        b.place.as_deref().unwrap_or_default()
+                    ));
+                }
+            }
             let found = self.found.entry(asset).or_default();
-            if found.codes.iter().any(|o| same_code(o, &b)) {
+            if let Some(words) = crossed
+                && !found.unread.contains(&words)
+            {
+                found.unread.push(words);
+            }
+            // In the page's own read, a dark line across the bars of a linear code (a rule, a
+            // stroke) cuts them in two, and each part reads as the code: it is one code, or two
+            // equal codes one over the other with a dark line between them, and that is said.
+            if let Some((need, None)) = on
+                && !c.symbology.two_d()
+            {
+                let p = &picture.pixmap;
+                let size = (usize::from(p.width()), usize::from(p.height()));
+                let split = read_here.iter_mut().find_map(|(px, i)| {
+                    let o = &found.codes[*i];
+                    (o.symbology == b.symbology && o.text == b.text && o.base64 == b.base64)
+                        .then(|| crate::codes::joined(p.data_as_u8_slice(), size, *px, c.bounds))
+                        .flatten()
+                        .map(|how| (px, i, how))
+                });
+                if let Some((px, i, how)) = split {
+                    let u = c.bounds;
+                    *px = [
+                        px[0].min(u[0]),
+                        px[1].min(u[1]),
+                        px[2].max(u[2]),
+                        px[3].max(u[3]),
+                    ];
+                    let (w, h) = need.size;
+                    let framed = need
+                        .turn
+                        .place_box(page_rect(picture, need, *px), w, h)
+                        .map(|v| (v * 10.0).round() / 10.0);
+                    let (fw, fh) = need.turn.size(w, h);
+                    let place = place_words(framed, fw, fh);
+                    let o = &mut found.codes[*i];
+                    o.bounds = Some(framed);
+                    o.place = Some(place.clone());
+                    // Read on two lines of one code, its bars going on between them: one code.
+                    if how == crate::codes::Joined::Dark {
+                        let words = format!(
+                            "a dark line runs across the bars of the {}, {place}: it may be two \
+                             codes, one not decoded",
+                            b.symbology
+                        );
+                        if !found.unread.contains(&words) {
+                            found.unread.push(words);
+                        }
+                    }
+                    continue;
+                }
+            }
+            let same: Vec<usize> = (0..found.codes.len())
+                .filter(|&i| same_code(&found.codes[i], &b))
+                .collect();
+            if let Some(&first) = same.first() {
+                // Read again from its region: the box drawn replaces the page read's, and the
+                // page read's copies at other lines across the same bars are this code too.
+                // Each copy dropped gives back its count and its element.
+                if drawn {
+                    for &i in same[1..].iter().rev() {
+                        found.codes.remove(i);
+                        self.kept -= 1;
+                        budget.release_elements(1);
+                    }
+                    let o = &mut found.codes[first];
+                    o.bounds = b.bounds;
+                    o.place = b.place;
+                }
                 continue;
             }
             let size = b.text.as_ref().map_or(0, String::len)
@@ -1992,11 +2599,151 @@ impl Scans {
                 );
                 break;
             }
+            if matches!(on, Some((_, None))) && !c.symbology.two_d() {
+                read_here.push((c.bounds, found.codes.len()));
+            }
             found.codes.push(b);
             self.kept += 1;
             added += 1;
         }
         Some(added)
+    }
+
+    /// Marks the parts of the page `need` (a page that needs vision as a whole, asset `asset`)
+    /// that look like a code and gave none: a part no code read on the page lies in, or a code
+    /// drawn as paths whose linear codes read do not fill most of it (codes side by side closer
+    /// than their quiet zone). `read` says for each of `need.regions` whether it was rendered
+    /// again and read. Each part gets its words for the page's alt text: what it is, where,
+    /// and `not decoded` (or `not scanned`). The parts past [`PAGE_REGIONS`] are not rendered
+    /// again: those the page's read gave no code are named not scanned (past
+    /// [`PAGE_REGIONS`] and [`SMALL_LISTED`] of them, counted), and a loss says why. A loss
+    /// also says when parts past `need.regions` were not checked.
+    fn regions_unread(&mut self, asset: usize, need: &Need, read: &[bool]) {
+        let (w, h) = need.size;
+        let (fw, fh) = need.turn.size(w, h);
+        let found = self.found.entry(asset).or_default();
+        let mut capped = false;
+        let (mut named, mut more) = (0, 0);
+        for (k, r) in need.regions.iter().enumerate() {
+            let framed = need.turn.place_box(r.b, w, h);
+            // A matrix code read there fills it; linear codes reach its ends.
+            let Some(part) = unread_at(&found.codes, &framed, r.how.module().is_some()) else {
+                continue;
+            };
+            capped |= k >= PAGE_REGIONS;
+            if named == PAGE_REGIONS + SMALL_LISTED {
+                more += 1;
+                continue;
+            }
+            named += 1;
+            let what = match r.how {
+                How::Modules(_) => DRAWING,
+                How::Glyphs(..) => FONT_CODE,
+                How::Picture(..) => "a picture that looks like a barcode or QR code",
+            };
+            let part = if part { "part of " } else { "" };
+            let scanned = read.get(k).copied().unwrap_or(false);
+            found.unread.push(format!(
+                "{part}{what}, {}, {}",
+                place_words(framed, fw, fh),
+                drawing_words(scanned)
+            ));
+        }
+        if more > 0 {
+            found.unread.push(format!(
+                "{more} more {} like a barcode or QR code, not scanned",
+                if more == 1 {
+                    "part that looks"
+                } else {
+                    "parts that look"
+                }
+            ));
+        }
+        if capped {
+            self.unrendered(need.page, Unrendered::PageCap);
+        }
+        if need.past > 0 {
+            self.unrendered(need.page, Unrendered::Unchecked);
+        }
+    }
+
+    /// Marks the parts of the render of page `need` (a page that needs vision as a whole,
+    /// asset `asset`) that look like a code and gave none, from `printed` (their boxes in the
+    /// visible page box, and the QR finders each shows, see [`printed_codes`]): a part no code
+    /// read lies in, one whose linear codes read do not fill most of it, or one with fewer QR
+    /// codes read in it than its finders show. Parts that are regions of the page are left
+    /// to [`Scans::regions_unread`]. The first [`SMALL_LISTED`] get their words for the page's
+    /// alt text, the others are counted. `Err` says why the render was not searched.
+    fn printed_unread(&mut self, asset: usize, need: &Need, printed: Result<Printed, String>) {
+        let printed = match printed {
+            Ok(p) => {
+                if let Some(why) = p.partly {
+                    add_page(&mut self.partly, need.page);
+                    self.partly_why.get_or_insert(why);
+                }
+                p.parts
+            }
+            Err(why) => {
+                add_page(&mut self.unsearched, need.page);
+                self.unsearched_why.get_or_insert(why);
+                return;
+            }
+        };
+        let (w, h) = need.size;
+        let (fw, fh) = need.turn.size(w, h);
+        let found = self.found.entry(asset).or_default();
+        let mut more = 0;
+        let mut listed = 0;
+        for (b, finders) in printed {
+            if need.regions.iter().any(|r| overlap(&r.b, &b)) {
+                continue;
+            }
+            let framed = need.turn.place_box(b, w, h);
+            // QR finders show how many QR codes at least are there (three finders each, a code
+            // cut by the edge of the page fewer): fewer read there, the part is said.
+            let part = if finders >= 2 {
+                let read = found
+                    .codes
+                    .iter()
+                    .filter(|c| {
+                        two_d(&c.symbology) && c.bounds.is_some_and(|q| overlap(&q, &framed))
+                    })
+                    .count();
+                if read >= finders.div_ceil(3) {
+                    continue;
+                }
+                read > 0
+            } else {
+                let Some(part) = unread_at(&found.codes, &framed, true) else {
+                    continue;
+                };
+                part
+            };
+            if listed == SMALL_LISTED {
+                more += 1;
+                continue;
+            }
+            listed += 1;
+            found.unread.push(format!(
+                "{PRINTED}, {}, {}",
+                place_words(framed, fw, fh),
+                if part {
+                    "only in part decoded"
+                } else {
+                    "not decoded"
+                }
+            ));
+        }
+        if more > 0 {
+            found.unread.push(format!(
+                "{more} more printed {} like a barcode or QR code, not decoded",
+                if more == 1 {
+                    "part that looks"
+                } else {
+                    "parts that look"
+                }
+            ));
+        }
     }
 
     /// Says in losses what was not read: one for a stop, one for each kind of other gap.
@@ -2064,8 +2811,35 @@ impl Scans {
                 Severity::Warning,
             );
         }
+        if let (Some(&first), Some(why)) = (self.unsearched.first(), &self.unsearched_why) {
+            // The page keeps its need of vision: an agent looks at it anyway.
+            out.loss_info(
+                format!("p{first}"),
+                format!(
+                    "the renders of {} are not searched for printed parts that look like a \
+                     barcode or QR code the decoder did not read: {why}",
+                    page_list(&self.unsearched)
+                ),
+                LossReason::Limit,
+                Severity::Info,
+            );
+        }
+        if let (Some(&first), Some(why)) = (self.partly.first(), &self.partly_why) {
+            out.loss_info(
+                format!("p{first}"),
+                format!(
+                    "the renders of {} are searched only in part for printed parts that look \
+                     like a barcode or QR code the decoder did not read: {why}",
+                    page_list(&self.partly)
+                ),
+                LossReason::Limit,
+                Severity::Info,
+            );
+        }
         for why in [
             Unrendered::Cap,
+            Unrendered::PageCap,
+            Unrendered::Unchecked,
             Unrendered::Room,
             Unrendered::Damaged,
             Unrendered::Time,
@@ -2075,12 +2849,24 @@ impl Scans {
             };
             let reason = match why {
                 Unrendered::Damaged => LossReason::Damaged,
-                Unrendered::Cap | Unrendered::Room | Unrendered::Time => LossReason::Limit,
+                Unrendered::Cap
+                | Unrendered::PageCap
+                | Unrendered::Unchecked
+                | Unrendered::Room
+                | Unrendered::Time => LossReason::Limit,
             };
             let words = match why {
                 Unrendered::Cap => {
                     format!("a file renders at most {MAX_REGIONS} parts of pages again")
                 }
+                Unrendered::PageCap => {
+                    format!("a page renders at most {PAGE_REGIONS} parts again")
+                }
+                Unrendered::Unchecked => format!(
+                    "a page keeps at most {} parts that look like a code; the others are not \
+                     checked against the codes its render gave",
+                    PAGE_REGIONS + KEPT_REGIONS
+                ),
                 Unrendered::Room => {
                     "their render would take more than a render may take (a quarter of the memory \
                      limit)"
@@ -2103,6 +2889,80 @@ impl Scans {
     }
 }
 
+/// Whether code `c`, read by the decoder from `picture` (with `on` as in [`Scans::read`]),
+/// stands there on evidence of a code. A code drawn as paths has it (its own asset, or a read
+/// within its region of a page): its drawing passed the code-shape test
+/// ([`crate::codes::vector_codes`]). Else a matrix or stacked code holds a
+/// payload (a screen of dots read on a lattice gives code words of nothing but padding), and a
+/// linear code stands in bars that fit it ([`crate::codes::bars_fit`]). `Err` says why not,
+/// in words after "a part read as Code 39". `None` when `late` says the time for reading codes
+/// is over before the bars are checked to the end.
+fn evidence(
+    c: &barcodes::Code,
+    picture: &Rendered,
+    on: Option<(&Need, Option<&Region>)>,
+    late: &dyn Fn() -> bool,
+) -> Option<Result<(), &'static str>> {
+    // A read of a drawing of paths that looks like a code from its own render at whole
+    // pixels a module, within it (give or take two of its modules): the drawing is the
+    // evidence. A read elsewhere on the page is not, nor a read of the page's coarser render
+    // (a part past those rendered again), nor one within a code printed with a barcode font
+    // (a font named for codes may draw letters).
+    if let Some((need, Some(r))) = on
+        && let How::Modules(m) = r.how
+        && around(r, m, &page_rect(picture, need, c.bounds))
+    {
+        return Some(Ok(()));
+    }
+    use barcodes::Symbology as S;
+    let text = match &c.payload {
+        barcodes::Payload::Text(t) => t.as_str(),
+        _ => "",
+    };
+    let kind = match c.symbology {
+        S::Ean13 | S::UpcA => crate::codes::Linear::Ean(text),
+        S::Code128 => crate::codes::Linear::Code128,
+        S::Code39 => crate::codes::Linear::Code39(text),
+        S::Itf => crate::codes::Linear::Itf(text),
+        _ if c.bytes > 0 => return Some(Ok(())),
+        _ => return Some(Err("that holds nothing")),
+    };
+    let p = &picture.pixmap;
+    let fit = crate::codes::bars_fit(
+        p.data_as_u8_slice(),
+        (usize::from(p.width()), usize::from(p.height())),
+        c.bounds,
+        kind,
+        late,
+    )?;
+    Some(fit.then_some(()).ok_or("that its bars do not confirm"))
+}
+
+/// Whether box `px` lies within region `r` of modules of `m` points, give or take two modules
+/// and a point.
+fn around(r: &Region, m: f32, px: &[f32; 4]) -> bool {
+    let g = 2.0 * m + 1.0;
+    px[0] >= r.b[0] - g && px[1] >= r.b[1] - g && px[2] <= r.b[2] + g && px[3] <= r.b[3] + g
+}
+
+/// Whether a read `c` from a code printed with a barcode font is one of the Code 128 values
+/// its glyphs print (`known`, see [`Glyphs`]): the glyphs' geometry is the evidence, and a
+/// read that differs from it is a misread.
+fn glyph_evidence(c: &barcodes::Code, known: &Glyphs) -> Result<(), &'static str> {
+    let text = match &c.payload {
+        barcodes::Payload::Text(t) => Some(t.as_str()),
+        _ => None,
+    };
+    match text {
+        Some(t)
+            if c.symbology == barcodes::Symbology::Code128 && known.contains(&value_hash(t)) =>
+        {
+            Ok(())
+        }
+        _ => Err("that the bars of its glyphs do not confirm"),
+    }
+}
+
 /// Whether two codes read from one asset are the same code: same kind and payload, and boxes
 /// that overlap when both have one.
 fn same_code(a: &Barcode, b: &Barcode) -> bool {
@@ -2111,7 +2971,7 @@ fn same_code(a: &Barcode, b: &Barcode) -> bool {
         && a.base64 == b.base64
         && a.bytes == b.bytes
         && match (a.bounds, b.bounds) {
-            (Some(p), Some(q)) => p[0] <= q[2] && q[0] <= p[2] && p[1] <= q[3] && q[1] <= p[3],
+            (Some(p), Some(q)) => overlap(&p, &q),
             _ => true,
         }
 }
@@ -2134,12 +2994,172 @@ fn barcode(c: &barcodes::Code) -> Barcode {
         base64,
         bytes: c.bytes as u64,
         bounds: None,
+        place: None,
     }
 }
 
-/// The box of pixels `px` of `picture` on its page, in points in the frame of the page's
-/// text, rounded to a tenth.
-fn page_box(picture: &Rendered, need: &Need, px: [u32; 4]) -> [f32; 4] {
+/// How many different codes, by kind and payload, `codes` holds.
+fn distinct_codes(codes: &[barcodes::Code]) -> usize {
+    let mut seen: Vec<(&barcodes::Symbology, &barcodes::Payload)> = Vec::new();
+    for c in codes {
+        if !seen.contains(&(&c.symbology, &c.payload)) {
+            seen.push((&c.symbology, &c.payload));
+        }
+    }
+    seen.len()
+}
+
+/// Where the box `b` lies on a page `w` wide and `h` high, in words, by its middle and thirds
+/// of the page (y grows upward): `top left of the page`, `middle of the page`.
+pub(crate) fn place_words(b: [f32; 4], w: f32, h: f32) -> String {
+    let (x, y) = ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0);
+    let v = if y > h * 2.0 / 3.0 {
+        "top"
+    } else if y < h / 3.0 {
+        "bottom"
+    } else {
+        "middle"
+    };
+    let across = if x < w / 3.0 {
+        "left"
+    } else if x > w * 2.0 / 3.0 {
+        "right"
+    } else {
+        "centre"
+    };
+    match (v, across) {
+        ("middle", "centre") => "middle of the page".to_string(),
+        _ => format!("{v} {across} of the page"),
+    }
+}
+
+/// Whether two boxes (x0, y0, x1, y1) overlap or touch.
+fn overlap(a: &[f32; 4], b: &[f32; 4]) -> bool {
+    a[0] <= b[2] && b[0] <= a[2] && a[1] <= b[3] && b[1] <= a[3]
+}
+
+/// Whether the code kind named `name` (as [`barcodes::Symbology::name`] gives it) is a matrix
+/// or stacked code.
+fn two_d(name: &str) -> bool {
+    use barcodes::Symbology::{Aztec, DataMatrix, MicroQrCode, Pdf417, QrCode};
+    [QrCode, MicroQrCode, DataMatrix, Aztec, Pdf417]
+        .iter()
+        .any(|s| s.name() == name)
+}
+
+/// Whether a code read from the render of region `r`, at `px` (in the frame of `r.b`), takes
+/// the region's box: when it overlaps the region, and, for a linear code (not `two_d`) drawn
+/// as paths, when its bars fill most of the region both ways (codes side by side closer than
+/// their quiet zone are one region, each half of it; a code partly over a dark picture shows
+/// a little less of its bars).
+fn takes_region(px: &[f32; 4], two_d: bool, r: &Region) -> bool {
+    overlap(px, &r.b)
+        && match r.how {
+            How::Modules(_) | How::Glyphs(..) if !two_d => fills(px, &r.b),
+            _ => true,
+        }
+}
+
+/// Whether box `framed` (in the frame of the codes' boxes) gave no code of `codes`
+/// (`Some(false)`), or only in part (`Some(true)`): no code read lies in it, or, when it
+/// `may_be_linear` and no matrix code was read there, the linear codes read there do not fill
+/// it ([`fills`]). `None` when it was read.
+fn unread_at(codes: &[Barcode], framed: &[f32; 4], may_be_linear: bool) -> Option<bool> {
+    let on: Vec<[f32; 4]> = codes
+        .iter()
+        .filter_map(|c| c.bounds)
+        .filter(|b| overlap(b, framed))
+        .collect();
+    if on.is_empty() {
+        return Some(false);
+    }
+    let matrix = codes
+        .iter()
+        .any(|c| two_d(&c.symbology) && c.bounds.is_some_and(|b| overlap(&b, framed)));
+    if !may_be_linear || matrix {
+        return None;
+    }
+    let u = on
+        .iter()
+        .fold([f32::MAX, f32::MAX, f32::MIN, f32::MIN], |u, b| {
+            [
+                u[0].min(b[0]),
+                u[1].min(b[1]),
+                u[2].max(b[2]),
+                u[3].max(b[3]),
+            ]
+        });
+    (!fills(&u, framed)).then_some(true)
+}
+
+/// What a printed part of a render that passed the code-shape test is called.
+const PRINTED: &str = "a printed part that looks like a barcode or QR code";
+
+/// The parts of the render of a page that needs vision (`page`, of `need`) that look like a
+/// code: its dark parts as rectangles in points (see [`crate::codes::pixel_cells`]),
+/// searched as codes drawn as paths are ([`crate::codes::printed_codes`]), within `room`
+/// bytes with the render, until `late`. Their boxes in the visible page box, and why only
+/// part of the render was searched when it was; `Err` says why the render was not searched.
+fn printed_codes(
+    page: &Rendered,
+    need: &Need,
+    room: u64,
+    late: &dyn Fn() -> bool,
+) -> Result<Printed, String> {
+    let p = &page.pixmap;
+    let (w, h) = (usize::from(p.width()), usize::from(p.height()));
+    let held = (w * h * 4) as u64;
+    let max = (room.saturating_sub(held) / crate::codes::PIXEL_CELL_BYTES)
+        .min(crate::codes::MAX_CELLS as u64) as usize;
+    let cells = crate::codes::pixel_cells(p.data_as_u8_slice(), w, h, max)
+        .ok_or_else(|| format!("it has more dark parts than are searched ({max})"))?;
+    // A bar cut across by the edge of the render is no whole bar: left out, the code's bars
+    // before it are looked at as they are.
+    // They are kept apart: a code running off the edge shows them past its last bar.
+    let (wr, hr) = (w as u32, h as u32);
+    let (cut, points): (Vec<[u32; 4]>, Vec<[u32; 4]>) = cells.into_iter().partition(|c| {
+        let (cw, ch) = (c[2] - c[0], c[3] - c[1]);
+        (c[0] == 0 || c[2] == wr) && ch > cw || (c[1] == 0 || c[3] == hr) && cw > ch
+    });
+    let to_points = |v: Vec<[u32; 4]>| -> Vec<[f32; 4]> {
+        v.into_iter().map(|c| page_rect(page, need, c)).collect()
+    };
+    let (cut, points) = (to_points(cut), to_points(points));
+    let found = crate::codes::printed_codes(
+        &points,
+        (1.0 / page.scale) as f32,
+        page_rect(page, need, [0, 0, wr, hr]),
+        &cut,
+        late,
+    )?;
+    Ok(Printed {
+        parts: found.codes.into_iter().map(|c| (c.b, c.finders)).collect(),
+        partly: found.partly,
+    })
+}
+
+/// The parts of a page's render that look like a code (their boxes in the visible page box
+/// and the QR finders each shows), and why only part of the render was searched when it was.
+struct Printed {
+    parts: Vec<([f32; 4], usize)>,
+    partly: Option<String>,
+}
+
+/// Whether box `a` fills at least [`FILLS`] of box `b` each way.
+fn fills(a: &[f32; 4], b: &[f32; 4]) -> bool {
+    let share = |a0: f32, a1: f32, b0: f32, b1: f32| {
+        (a1.min(b1) - a0.max(b0)).max(0.0) / (b1 - b0).max(f32::MIN_POSITIVE)
+    };
+    share(a[0], a[2], b[0], b[2]) >= FILLS && share(a[1], a[3], b[1], b[3]) >= FILLS
+}
+
+/// The share of a drawn code's region, each way, that the bars of a linear code read from it
+/// fill at least for the code to take the region's box.
+const FILLS: f32 = 0.75;
+
+/// The box of pixels `px` of `picture` on its page, in points in the visible page box (the
+/// frame of [`Region::b`]), not turned.
+fn page_rect(picture: &Rendered, need: &Need, px: [u32; 4]) -> [f32; 4] {
     let back = picture.transform.inverse();
     let corners = [
         (px[0], px[1]),
@@ -2152,19 +3172,20 @@ fn page_box(picture: &Rendered, need: &Need, px: [u32; 4]) -> [f32; 4] {
     let ys = corners.map(|p| p.y as f32 - need.origin.1);
     let min = |v: [f32; 4]| v.into_iter().fold(f32::MAX, f32::min);
     let max = |v: [f32; 4]| v.into_iter().fold(f32::MIN, f32::max);
-    let b = [min(xs), min(ys), max(xs), max(ys)];
-    let b = need.turn.place_box(b, need.size.0, need.size.1);
-    b.map(|v| (v * 10.0).round() / 10.0)
+    [min(xs), min(ys), max(xs), max(ys)]
 }
 
 /// The new words of the places of one asset after it was read for codes.
 struct Renamed {
-    read: Reread,
+    /// What reading it for codes changed, if anything.
+    read: Option<Reread>,
     /// The page of its first place: later places point there for the codes.
     first: u32,
     /// The pages it is on, said at the first place of page furniture.
     pages: Option<String>,
     codes: bool,
+    /// The words of reads not listed (see [`Places::unconfirmed`]).
+    unconfirmed: String,
 }
 
 /// Puts what the scans read into the model:
@@ -2175,7 +3196,7 @@ struct Renamed {
 /// - a drawing of paths that passed the code-shape test and gave none is listed as a drawing
 ///   that looks like a code, not decoded (or not scanned, when it was not rendered again),
 ///   and needs vision;
-/// - page furniture that gave no code is taken out with its place and file.
+/// - page furniture is named at its first place with its pages; it needs no vision.
 ///
 /// `places` are the small picture assets with their places; their alt texts are written
 /// here.
@@ -2187,13 +3208,22 @@ pub(crate) fn apply_codes(scans: Option<Scans>, places: Vec<(usize, Places)>, ou
         }
         None => (HashMap::new(), HashSet::new()),
     };
-    // The new words of each place by asset id, or `None` to take it out.
-    let mut places_of: HashMap<String, Option<Renamed>> = HashMap::new();
-    let mut gone: HashSet<usize> = HashSet::new();
+    // The new words of each place by asset id.
+    let mut places_of: HashMap<String, Renamed> = HashMap::new();
     for (asset, mut p) in places {
         let f = found.remove(&asset).unwrap_or_default();
         let a = &mut out.doc.assets[asset];
         a.needs_vision = !p.logo;
+        // Reads not listed, said after what it is.
+        p.unconfirmed = f
+            .unconfirmed
+            .iter()
+            .map(|w| format!(", {w}"))
+            .collect::<String>();
+        if !p.unconfirmed.is_empty() {
+            a.code_unread = true;
+            a.needs_vision = true;
+        }
         let read = if !f.codes.is_empty() {
             let mut names: Vec<&str> = Vec::new();
             for c in &f.codes {
@@ -2204,65 +3234,67 @@ pub(crate) fn apply_codes(scans: Option<Scans>, places: Vec<(usize, Places)>, ou
             a.needs_vision = false;
             a.codes = f.codes.clone();
             Some(Reread::Codes(names.join(" and ")))
-        } else if p.furniture {
-            places_of.insert(a.id.clone(), None);
-            gone.insert(asset);
-            continue;
         } else if p.vector {
             a.needs_vision = true;
             a.code_unread = true;
-            Some(Reread::Drawing(f.read && !unscanned.contains(&asset)))
+            Some(Reread::Drawing(
+                f.read && !unscanned.contains(&asset),
+                if p.font { FONT_CODE } else { DRAWING },
+            ))
         } else if p.hint && f.read {
             a.code_unread = true;
             Some(Reread::Unread)
         } else {
             None
         };
-        if let Some(read) = read {
-            let again = match &read {
-                Reread::Codes(name) => Reread::Codes(name.clone()),
-                Reread::Unread => Reread::Unread,
-                Reread::Drawing(s) => Reread::Drawing(*s),
-            };
+        let on = p.on_pages();
+        let pages = (p.furniture && on.count > 1).then(|| on.words());
+        if read.is_some() || pages.is_some() || !p.unconfirmed.is_empty() {
             places_of.insert(
                 a.id.clone(),
-                Some(Renamed {
-                    read: again,
+                Renamed {
+                    read: read.clone(),
                     first: p.first_page(),
-                    pages: (p.furniture_pages() && p.pages.len() + p.more_pages > 1)
-                        .then(|| p.page_words()),
+                    pages,
                     codes: !a.codes.is_empty(),
-                }),
+                    unconfirmed: p.unconfirmed.clone(),
+                },
             );
-            p.read = Some(read);
         }
+        p.read = read;
         a.alt = Some(p.alt());
     }
-    // Pages that need vision as a whole keep it, and list their codes.
+    // Pages that need vision as a whole keep it, and list their codes; their alt says what
+    // looks like a code there and gave none.
     for (asset, f) in found {
         if let Some(a) = out.doc.assets.get_mut(asset) {
             a.codes = f.codes;
+            let all: Vec<&String> = f.unread.iter().chain(&f.unconfirmed).collect();
+            if !all.is_empty() {
+                a.code_unread = true;
+                let words = all
+                    .iter()
+                    .map(|w| w.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                a.alt = Some(match a.alt.take() {
+                    Some(alt) if !alt.is_empty() => format!("{alt}, {words}"),
+                    _ => words,
+                });
+            }
         }
     }
     if places_of.is_empty() {
         return;
     }
-    fn walk(
-        blocks: &mut Vec<Block>,
-        places: &HashMap<String, Option<Renamed>>,
-        seen: &mut HashSet<String>,
-    ) {
-        blocks.retain(|b| match b {
-            Block::Media { asset, .. } => !matches!(places.get(asset), Some(None)),
-            _ => true,
-        });
+    fn walk(blocks: &mut [Block], places: &HashMap<String, Renamed>, seen: &mut HashSet<String>) {
         for b in blocks.iter_mut() {
             match b {
                 Block::Media { asset, alt, .. } => {
-                    if let (Some(Some(r)), Some(words)) = (places.get(asset), alt.as_mut()) {
+                    if let (Some(r), Some(words)) = (places.get(asset), alt.as_mut()) {
                         let first = seen.insert(asset.clone());
                         let more = match (&r.pages, first, r.codes) {
-                            (Some(pages), true, _) => format!(", on pages {pages}"),
+                            (Some(pages), true, _) => format!(", on {pages}"),
                             (_, false, true) => {
                                 format!(
                                     ", its codes are listed at its first place on page {}",
@@ -2271,7 +3303,8 @@ pub(crate) fn apply_codes(scans: Option<Scans>, places: Vec<(usize, Places)>, ou
                             }
                             _ => String::new(),
                         };
-                        *words = reread_place(words, &r.read, &more);
+                        let more = format!("{}{more}", r.unconfirmed);
+                        *words = reread_place(words, r.read.as_ref(), &more);
                     }
                 }
                 Block::Section { blocks, .. }
@@ -2287,23 +3320,6 @@ pub(crate) fn apply_codes(scans: Option<Scans>, places: Vec<(usize, Places)>, ou
         }
     }
     walk(&mut out.doc.body, &places_of, &mut HashSet::new());
-    if !gone.is_empty() {
-        let ids: HashSet<String> = gone.iter().map(|&k| out.doc.assets[k].id.clone()).collect();
-        let mut k = 0;
-        out.doc.assets.retain(|_| {
-            k += 1;
-            !gone.contains(&(k - 1))
-        });
-        let mut freed = 0;
-        out.blobs.retain(|b| {
-            let keep = !ids.contains(&b.asset);
-            if !keep {
-                freed += b.bytes.len() as u64;
-            }
-            keep
-        });
-        out.blob_room += freed;
-    }
 }
 
 /// A Figure of the tag tree with an alt text: the text, and the marked content ids of its
@@ -2344,11 +3360,229 @@ mod tests {
             ..PageItems::default()
         };
         let read = [page(1), page(2)];
-        assert_eq!(on_every_page(read.iter(), 2), HashSet::from([7]));
+        let all = on_every_page(read.iter(), 2);
+        assert_eq!(all.ids, HashSet::from([7]));
+        assert!(all.spots.holds(&[0.0, 0.0, 30.0, 30.0], 7));
         // Two pages read of three: the third may not have it.
-        assert!(on_every_page(read.iter(), 3).is_empty());
+        let all = on_every_page(read.iter(), 3);
+        assert!(all.ids.is_empty() && all.spots.boxes.is_empty());
         // One page is not every page.
-        assert!(on_every_page(read[..1].iter(), 1).is_empty());
+        let all = on_every_page(read[..1].iter(), 1);
+        assert!(all.ids.is_empty() && all.spots.boxes.is_empty());
+    }
+
+    #[test]
+    fn small_pictures_and_drawings_past_a_cap_of_0_are_counted() {
+        // A page with three small pictures and ten drawings that look like codes, and no room
+        // for any of them: none is listed, but how many are not is said (the caller turns the
+        // counts into losses), and the drawings past the most a page reads apart.
+        let info = PageInfo {
+            number: 1,
+            label: None,
+            width: 595.0,
+            height: 842.0,
+            rotation: 0,
+            has_fonts: true,
+            images: std::sync::Arc::from(Vec::new()),
+        };
+        let items = PageItems {
+            page: 1,
+            mapped: 10,
+            images: (0..3)
+                .map(|k| [40.0 + 60.0 * k as f32, 400.0, 80.0 + 60.0 * k as f32, 440.0])
+                .collect(),
+            images_id: vec![1, 2, 3],
+            codes: (0..10)
+                .map(|k| crate::codes::VectorCode {
+                    b: [40.0 + 50.0 * k as f32, 100.0, 80.0 + 50.0 * k as f32, 120.0],
+                    module: 0.5,
+                    id: k,
+                    finders: 0,
+                    font: false,
+                    texts: Vec::new(),
+                })
+                .collect(),
+            ..PageItems::default()
+        };
+        let none = furniture(std::iter::empty());
+        let every = on_every_page(std::iter::empty(), 1);
+        match vision(&info, &items, &none, &every, 0) {
+            Some(Seen::Small(list, more, unread)) => {
+                assert!(list.is_empty());
+                assert_eq!((more, unread), (3 + crate::codes::MAX_REGIONS, 2));
+            }
+            _ => panic!("the counts are not said"),
+        }
+        // With room, the same page lists them.
+        match vision(&info, &items, &none, &every, 100) {
+            Some(Seen::Small(list, more, unread)) => {
+                assert_eq!(
+                    (list.len(), more, unread),
+                    (3 + crate::codes::MAX_REGIONS, 0, 2)
+                );
+            }
+            _ => panic!("nothing listed"),
+        }
+        // A page without small pictures or drawings has nothing to say.
+        let bare = PageItems {
+            page: 1,
+            mapped: 10,
+            ..PageItems::default()
+        };
+        assert!(vision(&info, &bare, &none, &every, 0).is_none());
+    }
+
+    #[test]
+    fn a_picture_on_every_page_at_other_places_is_at_no_spot_on_every_page() {
+        let page = |n: u32, x: f32| PageItems {
+            page: n,
+            images: vec![[x, 0.0, x + 30.0, 30.0]],
+            images_id: vec![7],
+            ..PageItems::default()
+        };
+        let read = [page(1, 0.0), page(2, 200.0)];
+        let all = on_every_page(read.iter(), 2);
+        assert_eq!(all.ids, HashSet::from([7]));
+        assert!(!all.spots.holds(&[0.0, 0.0, 30.0, 30.0], 7));
+        assert!(!all.spots.holds(&[200.0, 0.0, 230.0, 30.0], 7));
+    }
+
+    #[test]
+    fn distinct_codes_count_kind_and_payload() {
+        let code = |s, t: &str, top| barcodes::Code {
+            symbology: s,
+            payload: barcodes::Payload::Text(t.to_string()),
+            bytes: t.len(),
+            bounds: [0, top, 100, top + 2],
+        };
+        use barcodes::Symbology::{Code128, QrCode};
+        assert_eq!(distinct_codes(&[]), 0);
+        // One linear code read at two lines across its bars is one code.
+        let twice = [
+            code(Code128, "0000000001", 10),
+            code(Code128, "0000000001", 30),
+        ];
+        assert_eq!(distinct_codes(&twice), 1);
+        let two = [
+            code(Code128, "0000000001", 10),
+            code(Code128, "0000000002", 10),
+        ];
+        assert_eq!(distinct_codes(&two), 2);
+        let kinds = [
+            code(Code128, "0000000001", 10),
+            code(QrCode, "0000000001", 10),
+        ];
+        assert_eq!(distinct_codes(&kinds), 2);
+    }
+
+    #[test]
+    fn a_linear_code_takes_its_drawing_box_only_when_its_bars_fill_it() {
+        let drawn = Region {
+            b: [100.0, 500.0, 248.0, 520.0],
+            how: How::Modules(0.8),
+        };
+        // The bars of a code that fills the drawing, a little off: its box.
+        assert!(takes_region(&[100.5, 500.2, 247.4, 519.6], false, &drawn));
+        // One of two codes side by side in one drawing: its own box.
+        assert!(!takes_region(&[100.0, 500.0, 172.0, 520.0], false, &drawn));
+        // A matrix code, and a picture that looks like a code, take the box they overlap.
+        assert!(takes_region(&[110.0, 505.0, 160.0, 515.0], true, &drawn));
+        let picture = Region {
+            how: How::Picture(300, 40),
+            ..drawn
+        };
+        assert!(takes_region(&[110.0, 505.0, 160.0, 515.0], false, &picture));
+        // Elsewhere: not.
+        assert!(!takes_region(
+            &[300.0, 500.0, 400.0, 520.0],
+            false,
+            &picture
+        ));
+    }
+
+    #[test]
+    fn parts_that_look_like_codes_and_give_none_are_named_with_their_place() {
+        let budget = Budget::new(rezzer_limits::Limits::default());
+        let region = |b: [f32; 4]| Region {
+            b,
+            how: How::Modules(0.8),
+        };
+        let need = Need {
+            page: 1,
+            whole: Some(0),
+            crops: Vec::new(),
+            origin: (0.0, 0.0),
+            cut: false,
+            fallback: false,
+            regions: vec![
+                region([330.0, 700.0, 478.0, 720.0]),
+                region([330.0, 100.0, 402.0, 120.0]),
+                region([40.0, 400.0, 112.0, 420.0]),
+                region([40.0, 100.0, 82.0, 142.0]),
+            ],
+            past: 0,
+            turn: Turn::None,
+            size: (595.0, 842.0),
+            light: true,
+            glyphs: Vec::new(),
+        };
+        let code = |s: &str, b: [f32; 4]| Barcode {
+            symbology: s.to_string(),
+            text: Some("0000000001".into()),
+            base64: None,
+            bytes: 10,
+            bounds: Some(b),
+            place: None,
+        };
+        let mut scans = Scans::new(&budget);
+        let found = scans.found.entry(0).or_default();
+        // Half of the first drawing read; the second filled; nothing in the third; a matrix
+        // code in the fourth.
+        found.codes = vec![
+            code("Code 128", [330.0, 700.0, 402.0, 720.0]),
+            code("Code 128", [330.2, 100.1, 401.7, 119.8]),
+            code("QR Code", [44.0, 104.0, 78.0, 138.0]),
+        ];
+        scans.regions_unread(0, &need, &[true, true, false, true]);
+        assert_eq!(
+            scans.found[&0].unread,
+            [
+                "part of a drawing that looks like a barcode or QR code, top right of the page, \
+                 not decoded",
+                "a drawing that looks like a barcode or QR code, middle left of the page, not \
+                 scanned",
+            ]
+        );
+    }
+
+    #[test]
+    fn place_words_thirds() {
+        // By the middle of the box, in thirds of the page: y grows upward.
+        let (w, h) = (595.0, 842.0);
+        let words = |b: [f32; 4]| place_words(b, w, h);
+        assert_eq!(words([40.0, 760.0, 200.0, 780.0]), "top left of the page");
+        assert_eq!(words([420.0, 760.0, 560.0, 780.0]), "top right of the page");
+        assert_eq!(words([40.0, 40.0, 200.0, 60.0]), "bottom left of the page");
+        assert_eq!(
+            words([420.0, 40.0, 560.0, 60.0]),
+            "bottom right of the page"
+        );
+        assert_eq!(words([250.0, 400.0, 350.0, 440.0]), "middle of the page");
+        assert_eq!(
+            words([250.0, 760.0, 350.0, 780.0]),
+            "top centre of the page"
+        );
+        assert_eq!(
+            words([40.0, 400.0, 200.0, 440.0]),
+            "middle left of the page"
+        );
+        // A box over a third line goes by its middle: 195 is left of 198.3.
+        assert_eq!(words([150.0, 40.0, 240.0, 60.0]), "bottom left of the page");
+        // The thirds are of the page given: the same box is right on a narrow page.
+        assert_eq!(
+            place_words([150.0, 40.0, 240.0, 60.0], 280.0, h),
+            "bottom right of the page"
+        );
     }
 
     #[test]
@@ -2379,5 +3613,39 @@ mod tests {
         // A long thin page keeps each side inside a pixmap's bounds.
         let (w, h) = pixel_size(1e9, 0.001, MAX_PIXELS);
         assert_eq!((w, h), (u16::MAX, 1));
+    }
+
+    #[test]
+    fn a_read_of_a_code_in_a_barcode_font_must_be_what_its_glyphs_print() {
+        // The value read from the glyphs' geometry is the evidence: a decoder's misread of
+        // the render (another value, or another kind) is not listed.
+        let code = |s, t: &str| barcodes::Code {
+            symbology: s,
+            payload: barcodes::Payload::Text(t.to_string()),
+            bytes: t.len(),
+            bounds: [0, 0, 100, 20],
+        };
+        use barcodes::Symbology::{Code39, Code128};
+        let known = [value_hash("4006381333931"), value_hash("2026004711"), 0, 0];
+        assert!(glyph_evidence(&code(Code128, "4006381333931"), &known).is_ok());
+        assert!(glyph_evidence(&code(Code128, "2026004711"), &known).is_ok());
+        assert!(glyph_evidence(&code(Code128, "4-(63)1%3!931"), &known).is_err());
+        assert!(glyph_evidence(&code(Code39, "2026004711"), &known).is_err());
+        // The texts of a code become the hashes of its region; past four none are known.
+        let mut c = crate::codes::VectorCode {
+            b: [0.0, 0.0, 100.0, 20.0],
+            module: 0.6,
+            id: 1,
+            finders: 0,
+            font: true,
+            texts: vec!["2026004711".into()],
+        };
+        assert!(matches!(modules_how(&c), How::Glyphs(_)));
+        assert_eq!(
+            glyph_values(&c).map(|(_, k)| k[0]),
+            Some(value_hash("2026004711"))
+        );
+        c.texts = vec!["1".into(); 5];
+        assert_eq!(glyph_values(&c), None);
     }
 }

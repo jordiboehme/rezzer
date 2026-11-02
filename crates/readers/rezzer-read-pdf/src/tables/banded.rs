@@ -11,20 +11,26 @@ use super::*;
 use crate::regions::Seg;
 
 /// A header band: a grid of drawn cells one row high. `xs` are its cell edges, `b` its box.
+/// `cut` is set for a section of a grid that was cut in sections: refused, it is a loss.
 #[derive(Debug, Clone)]
 pub(super) struct Band {
     pub xs: Vec<f32>,
     pub b: [f32; 4],
+    pub cut: bool,
 }
 
 /// A header band is at most this many times its largest title text high.
 const BAND_HEIGHT: f32 = 4.0;
 
 /// Lines below a band at most this many line heights apart belong to its table.
-const BODY_GAP: f32 = 3.0;
+pub(super) const BODY_GAP: f32 = 3.0;
 
 /// Lines a page's bands may look at together; past them the rest are not looked at.
 const BAND_WORK: usize = 4_000_000;
+
+/// A rule ends a band's table when it is as wide as the band, short of it at each end by at
+/// most this share of the band's width (or [`SNAP`]).
+pub(super) const BAND_EDGE: f32 = 0.05;
 
 /// What the ruled detector shares with the band search.
 pub(super) struct Shared<'a> {
@@ -43,6 +49,9 @@ pub(super) struct Taken<'a> {
     pub claimed: &'a mut [Option<(usize, usize, usize)>],
     pub held: &'a mut [bool],
     pub refusals: &'a mut Vec<(usize, f32, &'static str)>,
+    /// Bands refused without a note, for the losses of the page, and their runs.
+    pub quiet: &'a mut Vec<(usize, &'static str, Refused)>,
+    pub quietly: &'a mut [bool],
     pub tables: &'a mut Vec<Planned>,
     pub skipped: &'a mut Vec<String>,
 }
@@ -66,7 +75,8 @@ pub(super) fn banded(sh: &Shared<'_>, mut bands: Vec<Band>, take: &mut Taken<'_>
             ));
             break;
         }
-        if band.b[3] - band.b[1] > BAND_HEIGHT * largest {
+        // A section of a cut grid is judged by its own text below.
+        if !band.cut && band.b[3] - band.b[1] > BAND_HEIGHT * largest {
             continue;
         }
         if work > BAND_WORK {
@@ -147,98 +157,50 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
         .iter()
         .map(|&i| flow.runs[i].size)
         .fold(0.0f32, f32::max);
-    if titles.values().filter(|t| !numeric(t)).count() < 3 || b[3] - b[1] > BAND_HEIGHT * size {
+    let tall = b[3] - b[1] > BAND_HEIGHT * size;
+    if titles.values().filter(|t| !numeric(t)).count() < 3 || tall {
+        // A section of a cut grid with text is not let go without a word.
+        if band.cut
+            && let Some(at) = head.iter().map(|&i| flow.at[i]).min()
+        {
+            let why = if tall {
+                "it is too tall for a header over lines"
+            } else {
+                "its cells hold too few column titles"
+            };
+            take.quiet.push((at, why, Refused::Band));
+            for &i in &head {
+                take.quietly[i] = true;
+            }
+        }
         return;
     }
     // The body: lines below the band, from the top.
-    let lo = sh.by_y.line_y.partition_point(|y| *y < b[1]);
-    let mut body: Vec<BodyLine> = Vec::new();
-    let mut last_y = b[1];
-    let mut misfit = false;
-    for &k in sh.by_y.lines[..lo].iter().rev() {
-        *work += 1;
-        let l = &sh.lines[k];
-        if l.y <= floor {
-            break;
-        }
-        if *work > BAND_WORK {
-            // The budget ran out in this body: no table and no refusal, the note says why.
-            return;
-        }
-        let runs: Vec<usize> = (l.start..l.end)
-            .filter(|&i| {
-                let r = &flow.runs[i];
-                let (cx, _) = middle(r);
-                cx > b[0] - SNAP && cx < b[2] + SNAP && free(i, take) && !r.text.trim().is_empty()
-            })
-            .collect();
-        *work += l.end - l.start;
-        if runs.is_empty() {
-            continue;
-        }
-        if last_y - l.y > BODY_GAP * l.size.max(1.0) {
-            break;
-        }
-        // A rule as wide as the band between this line and the one above ends the table.
-        let top = l.y + l.size;
-        let from = sh.hs.partition_point(|s| s.at < top);
-        let to = sh.hs.partition_point(|s| s.at < last_y);
-        let tol = SNAP.max(0.05 * (b[2] - b[0]));
-        *work += to.saturating_sub(from);
-        if sh.hs[from..to.max(from)]
-            .iter()
-            .any(|s| s.from <= b[0] + tol && s.to >= b[2] - tol)
-        {
-            break;
-        }
-        // Pieces: runs apart by more than a cell gap; each must stand in one column.
-        let mut pieces: Vec<(f32, f32, Vec<usize>)> = Vec::new();
-        for &i in &runs {
-            let r = &flow.runs[i];
-            match pieces.last_mut() {
-                Some(p) if r.x - p.1 <= CELL_GAP * r.size.max(1.0) => {
-                    p.1 = p.1.max(r.x + r.w);
-                    p.2.push(i);
-                }
-                _ => pieces.push((r.x, r.x + r.w, vec![i])),
-            }
-        }
-        let mut placed: Vec<(usize, Vec<usize>)> = Vec::new();
-        for (x0, x1, ids) in pieces {
-            match column_of(xs, x0, x1) {
-                Some(c) => placed.push((c, ids)),
-                None => {
-                    misfit = true;
-                    break;
-                }
-            }
-        }
-        if misfit {
-            break;
-        }
-        body.push((l.y, l.size, placed));
-        last_y = l.y;
-    }
+    let free_now = |i: usize| free(i, take);
+    let Some((body, misfit)) = body_below(sh, b, xs, floor, &free_now, work) else {
+        // The budget ran out in this body: no table and no refusal, the note says why.
+        return;
+    };
     if *work > BAND_WORK {
         return;
     }
-    let at = head
-        .iter()
-        .chain(body.iter().flat_map(|l| l.2.iter().flat_map(|p| &p.1)))
-        .map(|&i| flow.at[i])
-        .min()
-        .unwrap_or(0);
-    let refuse = |why: &'static str, take: &mut Taken<'_>| {
-        take.refusals.push((at, b[3], why));
-        for &i in head
-            .iter()
+    // The runs of the band's titles and body.
+    let runs = || {
+        head.iter()
             .chain(body.iter().flat_map(|l| l.2.iter().flat_map(|p| &p.1)))
-        {
+    };
+    let at = runs().map(|&i| flow.at[i]).min().unwrap_or(0);
+    // A refused band holds them as paragraphs.
+    let hold = |take: &mut Taken<'_>| {
+        for &i in runs() {
             take.held[i] = true;
         }
     };
-    // Rows: lines with text in at least half of the columns the body uses; other lines join
-    // the row above them (lines above the first join the first).
+    let refuse = |why: &'static str, take: &mut Taken<'_>| {
+        take.refusals.push((at, b[3], why));
+        hold(take);
+    };
+    // Rows: see [`row_starts`].
     let mut used: Vec<usize> = body.iter().flat_map(|l| l.2.iter().map(|p| p.0)).collect();
     used.sort_unstable();
     used.dedup();
@@ -253,15 +215,20 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
     }
     let mut row_of: Vec<usize> = Vec::with_capacity(body.len());
     let mut rows = 0usize;
-    for (_, _, placed) in &body {
-        let mut c: Vec<usize> = placed.iter().map(|p| p.0).collect();
-        c.sort_unstable();
-        c.dedup();
-        // A line that fills half of the columns starts a row, also with an empty first
-        // cell (a date printed once a day); a line that fills less goes on the row above.
-        if 2 * c.len() >= used.len() {
-            rows += 1;
-        }
+    let pieces: Vec<Vec<(usize, bool)>> = body
+        .iter()
+        .map(|(_, _, placed)| {
+            placed
+                .iter()
+                .map(|(c, ids)| {
+                    let text: String = ids.iter().map(|&i| flow.runs[i].text.as_str()).collect();
+                    (*c, numeric(&text))
+                })
+                .collect()
+        })
+        .collect();
+    for starts in row_starts(&pieces, used.len()) {
+        rows += usize::from(starts);
         row_of.push(rows.saturating_sub(1));
     }
     if rows < 3 {
@@ -280,12 +247,7 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
             kept.len(),
             sh.page
         ));
-        for &i in head
-            .iter()
-            .chain(body.iter().flat_map(|l| l.2.iter().flat_map(|p| &p.1)))
-        {
-            take.held[i] = true;
-        }
+        hold(take);
         return;
     }
     // The text of each body cell, for the tests of a table without rules: only the kept
@@ -312,9 +274,16 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
     }
     let bottom = body.last().map_or(b[1], |l| l.0 - 0.25 * l.1);
     let sizes: Vec<f32> = body.iter().map(|l| l.1).collect();
-    if let Some(why) = sh.area.refuses([b[0], bottom, b[2], b[3]], &sizes) {
-        // The page's frame, a picture or tiny text: no note, as for a ruled grid.
-        let _ = why;
+    let area = [b[0], bottom, b[2], b[3]];
+    if let Some(why) = sh.area.refuses(area, &sizes) {
+        // The page's frame or tiny text: no note and its text stays free, as for a ruled
+        // grid, but a loss. On a picture the band is a chart's: no loss either.
+        if !sh.area.on_picture(area) {
+            take.quiet.push((at, why, Refused::Band));
+            for &i in runs() {
+                take.quietly[i] = true;
+            }
+        }
         return;
     }
     if take.tables.len() >= MAX_TABLES {
@@ -347,6 +316,7 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
                 runs: Vec::new(),
                 row_span: 1,
                 col_span: 1,
+                status: None,
             })
             .collect()
     };
@@ -359,7 +329,193 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
         additions: Vec::new(),
         tagged: None,
         continues: false,
+        caption: Vec::new(),
+        found_by: None,
     });
+}
+
+/// The lines below the band `b` with cell edges `xs` that are its body, from the top: lines
+/// of runs `free` takes, above `floor`, each less than [`BODY_GAP`] line heights below the
+/// one before, with no rule as wide as the band between them, each piece of each standing in
+/// one column. Also whether a line that does not stand in the columns ended it. `None` once
+/// `work` passes [`BAND_WORK`].
+fn body_below(
+    sh: &Shared<'_>,
+    b: [f32; 4],
+    xs: &[f32],
+    floor: f32,
+    free: &dyn Fn(usize) -> bool,
+    work: &mut usize,
+) -> Option<(Vec<BodyLine>, bool)> {
+    let flow = sh.flow;
+    let lo = sh.by_y.line_y.partition_point(|y| *y < b[1]);
+    let mut body: Vec<BodyLine> = Vec::new();
+    let mut last_y = b[1];
+    let mut misfit = false;
+    for &k in sh.by_y.lines[..lo].iter().rev() {
+        *work += 1;
+        let l = &sh.lines[k];
+        if l.y <= floor {
+            break;
+        }
+        if *work > BAND_WORK {
+            return None;
+        }
+        let runs: Vec<usize> = (l.start..l.end)
+            .filter(|&i| {
+                let r = &flow.runs[i];
+                let (cx, _) = middle(r);
+                cx > b[0] - SNAP && cx < b[2] + SNAP && free(i) && !r.text.trim().is_empty()
+            })
+            .collect();
+        *work += l.end - l.start;
+        if runs.is_empty() {
+            continue;
+        }
+        if last_y - l.y > BODY_GAP * l.size.max(1.0) {
+            break;
+        }
+        // A rule as wide as the band between this line and the one above ends the table.
+        let top = l.y + l.size;
+        let from = sh.hs.partition_point(|s| s.at < top);
+        let to = sh.hs.partition_point(|s| s.at < last_y);
+        let tol = SNAP.max(BAND_EDGE * (b[2] - b[0]));
+        *work += to.saturating_sub(from);
+        if sh.hs[from..to.max(from)]
+            .iter()
+            .any(|s| s.from <= b[0] + tol && s.to >= b[2] - tol)
+        {
+            break;
+        }
+        // Pieces: runs apart by more than a cell gap, or by a column edge of the band in the
+        // white space between them (a value line padded into the band's columns is cut there,
+        // see `cut_at_columns`); each must stand in one column.
+        let inner = &xs[1..xs.len() - 1];
+        let mut pieces: Vec<(f32, f32, Vec<usize>)> = Vec::new();
+        for &i in &runs {
+            let r = &flow.runs[i];
+            let tol = 0.1 * r.size.max(1.0);
+            match pieces.last_mut() {
+                Some(p)
+                    if r.x - p.1 <= CELL_GAP * r.size.max(1.0)
+                        && !inner.iter().any(|&e| e >= p.1 - tol && e <= r.x + tol) =>
+                {
+                    p.1 = p.1.max(r.x + r.w);
+                    p.2.push(i);
+                }
+                _ => pieces.push((r.x, r.x + r.w, vec![i])),
+            }
+        }
+        let mut placed: Vec<(usize, Vec<usize>)> = Vec::new();
+        for (x0, x1, ids) in pieces {
+            match column_of(xs, x0, x1) {
+                Some(c) => placed.push((c, ids)),
+                None => {
+                    misfit = true;
+                    break;
+                }
+            }
+        }
+        if misfit {
+            break;
+        }
+        body.push((l.y, l.size, placed));
+        last_y = l.y;
+    }
+    (*work <= BAND_WORK).then_some((body, misfit))
+}
+
+/// The lines of a page and their index by height, built once for all rows of boxes that
+/// [`heads_lines`] looks at.
+pub(super) struct Heads {
+    lines: Vec<FlowLine>,
+    by_y: ByY,
+}
+
+impl Heads {
+    pub(super) fn new(flow: &Flow) -> Heads {
+        let lines = flow_lines(flow);
+        let by_y = ByY::new(flow, &lines);
+        Heads { lines, by_y }
+    }
+}
+
+/// Whether the row of boxes `b` with cell edges `xs` heads lines of text below it that stand
+/// in its columns, as a header band heads its table (the body rule of [`one_band`]). `hs`
+/// are the page's horizontal lines, sorted by height, and `heads` the lines of `flow`.
+/// `work` is shared by all rows of the page: `None` once it passes [`BAND_WORK`].
+pub(super) fn heads_lines(
+    flow: &Flow,
+    heads: &Heads,
+    hs: &[Seg],
+    b: [f32; 4],
+    xs: &[f32],
+    work: &mut usize,
+) -> Option<bool> {
+    let area = Area {
+        width: 0.0,
+        height: 0.0,
+        images: &[],
+        body_size: 0.0,
+    };
+    let sh = Shared {
+        page: 0,
+        flow,
+        lines: &heads.lines,
+        by_y: &heads.by_y,
+        area: &area,
+        hs,
+        stop: &|| false,
+    };
+    let free = |i: usize| !flow.runs[i].off_axis;
+    body_below(&sh, b, xs, f32::MIN, &free, work).map(|(body, _)| !body.is_empty())
+}
+
+/// For the lines of a body without rules from the top, each its pieces as (column, whether
+/// the piece is a number), whether the line starts a row. A line that fills at least half of
+/// the `used` columns starts one, also with an empty first cell (a date printed once a day).
+/// A line that fills less goes on the row above only when each of its pieces goes on text in
+/// its column there and none is a number (a cell that wraps); any other line is a row of its
+/// own, with empty cells where it has no piece. Lines of words above the first line that
+/// fills half of the columns, each in a column that line fills, are the first lines of its
+/// cells (a cell that wraps upward over values set at the middle of the row): they start no
+/// row and go on the first row. Any other first line starts a row.
+pub(super) fn row_starts(lines: &[Vec<(usize, bool)>], used: usize) -> Vec<bool> {
+    let columns = |pieces: &[(usize, bool)]| {
+        let mut cols: Vec<usize> = pieces.iter().map(|p| p.0).collect();
+        cols.sort_unstable();
+        cols.dedup();
+        cols
+    };
+    let full = |pieces: &[(usize, bool)]| 2 * columns(pieces).len() >= used;
+    // The lines above the first full line that wrap upward into its cells.
+    let lead = lines
+        .iter()
+        .position(|l| full(l))
+        .filter(|&f| {
+            let below = columns(&lines[f]);
+            lines[..f]
+                .iter()
+                .flatten()
+                .all(|(c, number)| !number && below.contains(c))
+        })
+        .unwrap_or(0);
+    let mut filled: Vec<usize> = lines[..lead].iter().flat_map(|l| columns(l)).collect();
+    let mut out = vec![false; lead];
+    for (k, pieces) in lines.iter().enumerate().skip(lead) {
+        let cols = columns(pieces);
+        let joins = k > lead
+            && 2 * cols.len() < used
+            && pieces
+                .iter()
+                .all(|(c, number)| !number && filled.contains(c));
+        if !joins && k > lead {
+            filled.clear();
+        }
+        filled.extend(cols);
+        out.push(!joins);
+    }
+    out
 }
 
 /// Why the cells of a table without rules are not a table's: their text is long, or runs on

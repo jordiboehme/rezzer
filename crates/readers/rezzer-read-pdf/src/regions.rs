@@ -155,7 +155,21 @@ pub(crate) struct Grids {
     pub groups: Vec<(Vec<usize>, Vec<usize>)>,
 }
 
-/// Horizontal and vertical lines that meet, in groups. A rectangle gives its four sides.
+/// Whether the group `(gh, gv)` of `g` holds rules inside its frame: three rules or more of
+/// one direction (pieces of one line count once). A frame alone (a box, the sides of a figure
+/// or of a shaded band) has two of each.
+pub(crate) fn inner_ruled(g: &Grids, (gh, gv): &(Vec<usize>, Vec<usize>)) -> bool {
+    let distinct = |mut at: Vec<f32>| {
+        at.sort_by(f32::total_cmp);
+        at.dedup_by(|b, a| *b - *a <= SNAP);
+        at.len()
+    };
+    distinct(gh.iter().map(|&j| g.hs[j].at).collect()) >= 3
+        || distinct(gv.iter().map(|&k| g.vs[k].at).collect()) >= 3
+}
+
+/// Horizontal and vertical lines that meet, in groups. A rectangle gives its four sides. A
+/// page without vertical lines has its horizontal lines and no group.
 pub(crate) fn grids(rules: &[Rule]) -> Result<Grids, Unsearched> {
     let flat = |r: &Rule| (r.y0 - r.y1).abs() <= SNAP / 2.0;
     // Counted before anything is built: a page may keep many more lines than are searched.
@@ -167,7 +181,10 @@ pub(crate) fn grids(rules: &[Rule]) -> Result<Grids, Unsearched> {
             RuleKind::Rect => (h, v) = (h + 2, v + 2),
         }
     }
-    if h == 0 || v == 0 {
+    // Without horizontal lines there is no grid and no row of fields; horizontal lines alone
+    // still part rows of fields (see `tables::field_frames`), so they are kept with no group,
+    // unless they are more than are searched (hatching): then there is nothing to say either.
+    if h == 0 || (v == 0 && h > MAX_SEGMENTS) {
         return Ok(Grids::default());
     }
     if h + v > MAX_SEGMENTS {
@@ -388,6 +405,58 @@ pub(crate) fn boxes(
     Ok(kept)
 }
 
+/// A point this share of its text size from a box's edge, or nearer, lies on the edge (see
+/// [`Index::innermost`]): far under any place text is set in a box, far over float noise.
+pub(crate) const EDGE_TIE: f32 = 0.01;
+
+/// The innermost of `boxes` each of `points` (a place and the size of its text) lies in, as an
+/// index into `boxes`. A box that
+/// holds another box a point lies in is no region: the inner one is, and the points of the
+/// outer one outside it have none. Past the bounds of the lookup, the reason.
+pub(crate) fn regions_of(
+    points: &[(f32, f32, f32)],
+    boxes: &[[f32; 4]],
+) -> Result<Vec<Option<u32>>, String> {
+    let Some(mut index) = Index::new(boxes) else {
+        return Err("its boxes overlap too much".into());
+    };
+    let too_much = || Err("its boxes take too many steps to look up".to_string());
+    let mut held = vec![false; boxes.len()];
+    let mut out = Vec::with_capacity(points.len());
+    for &(x, y, size) in points {
+        let r = index.innermost(x, y, size);
+        if let Some(b) = r {
+            held[b as usize] = true;
+        }
+        out.push(r);
+        if index.work > BOX_WORK {
+            return too_much();
+        }
+    }
+    // Boxes that hold a box with text are outer ones.
+    let mut outer = vec![false; boxes.len()];
+    for (k, b) in boxes.iter().enumerate() {
+        if !held[k] {
+            continue;
+        }
+        index.holders((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0, 0.0, |o| {
+            let a = boxes[o as usize];
+            if o as usize != k && a[0] <= b[0] && a[1] <= b[1] && a[2] >= b[2] && a[3] >= b[3] {
+                outer[o as usize] = true;
+            }
+        });
+        if index.work > BOX_WORK {
+            return too_much();
+        }
+    }
+    for r in &mut out {
+        if r.is_some_and(|b| outer[b as usize]) {
+            *r = None;
+        }
+    }
+    Ok(out)
+}
+
 /// Cells of the map of where a page has text, along each side.
 const INKED_SIDE: usize = 64;
 
@@ -505,17 +574,22 @@ impl<'b> Index<'b> {
         (at(x, self.lo.0, self.step.0), at(y, self.lo.1, self.step.1))
     }
 
-    /// The smallest box that holds the point, by its index.
-    pub(crate) fn innermost(&mut self, x: f32, y: f32) -> Option<u32> {
+    /// The smallest box that holds the point of text of `size`, by its index. A point within
+    /// [`EDGE_TIE`] of its size of a box's edge lies on the edge, and in neither box on its
+    /// two sides: a run whose middle falls on the edge two digit boxes share spans both and is
+    /// the text of neither, at every scale (float rounding of the edge or of the point does
+    /// not pick one).
+    pub(crate) fn innermost(&mut self, x: f32, y: f32, size: f32) -> Option<u32> {
         if !x.is_finite() || !y.is_finite() {
             return None;
         }
+        let tie = EDGE_TIE * size.max(0.0);
         let (c, r) = self.cell(x, y);
         let mut best: Option<(f32, u32)> = None;
         for &i in &self.cells[r * INDEX_SIDE + c] {
             self.work += 1;
             let b = self.boxes[i as usize];
-            if x > b[0] && x < b[2] && y > b[1] && y < b[3] {
+            if x > b[0] + tie && x < b[2] - tie && y > b[1] + tie && y < b[3] - tie {
                 let area = (b[2] - b[0]) * (b[3] - b[1]);
                 if best.is_none_or(|(a, _)| area < a) {
                     best = Some((area, i));
@@ -525,16 +599,18 @@ impl<'b> Index<'b> {
         best.map(|(_, i)| i)
     }
 
-    /// Hands `each` every box that holds the point.
-    pub(crate) fn holders(&mut self, x: f32, y: f32, mut each: impl FnMut(u32)) {
+    /// Hands `each` every box that holds the point of text of `size` (0 for a point of no
+    /// text), on its edge within [`EDGE_TIE`] of that size as [`Index::innermost`] has it.
+    pub(crate) fn holders(&mut self, x: f32, y: f32, size: f32, mut each: impl FnMut(u32)) {
         if !x.is_finite() || !y.is_finite() {
             return;
         }
+        let tie = EDGE_TIE * size.max(0.0);
         let (c, r) = self.cell(x, y);
         for &i in &self.cells[r * INDEX_SIDE + c] {
             self.work += 1;
             let b = self.boxes[i as usize];
-            if x > b[0] && x < b[2] && y > b[1] && y < b[3] {
+            if x > b[0] + tie && x < b[2] - tie && y > b[1] + tie && y < b[3] - tie {
                 each(i);
             }
         }
@@ -543,7 +619,7 @@ impl<'b> Index<'b> {
 
 /// Two baselines this many font sizes apart or less are one: lines side by side that share
 /// most of their baselines are rows, not two blocks.
-const BASELINE_NEAR: f32 = 0.15;
+pub(crate) const BASELINE_NEAR: f32 = 0.15;
 
 /// Lines of one block follow each other at most this many font sizes apart, on median.
 const BLOCK_PITCH: f32 = 4.0;
@@ -688,6 +764,17 @@ mod tests {
         }
     }
 
+    /// A page of more horizontal lines than are searched and no upright one (hatching) is not
+    /// searched as before: no grid, no line kept, and no note that it was not searched.
+    #[test]
+    fn many_horizontal_lines_alone_are_no_grid_and_no_note() {
+        let rules: Vec<Rule> = (0..=MAX_SEGMENTS)
+            .map(|k| line(0.0, k as f32 * 0.04, 100.0, k as f32 * 0.04))
+            .collect();
+        let found = grids(&rules).expect("no note");
+        assert!(found.hs.is_empty() && found.groups.is_empty());
+    }
+
     #[test]
     fn boxes_from_rectangles_lines_and_one_row_grids() {
         let rules = [
@@ -769,10 +856,46 @@ mod tests {
             [60.0, 60.0, 90.0, 90.0],
         ];
         let mut index = Index::new(&list).expect("index");
-        assert_eq!(index.innermost(20.0, 20.0), Some(1));
-        assert_eq!(index.innermost(55.0, 20.0), Some(0));
-        assert_eq!(index.innermost(70.0, 70.0), Some(2));
-        assert_eq!(index.innermost(200.0, 20.0), None);
+        assert_eq!(index.innermost(20.0, 20.0, 8.0), Some(1));
+        assert_eq!(index.innermost(55.0, 20.0, 8.0), Some(0));
+        assert_eq!(index.innermost(70.0, 70.0, 8.0), Some(2));
+        assert_eq!(index.innermost(200.0, 20.0, 8.0), None);
+    }
+
+    /// A point on the edge two boxes share lies in neither, at every scale: a point within
+    /// [`EDGE_TIE`] of its size of an edge is on it, so float rounding of the edge or the point
+    /// does not pick a box.
+    #[test]
+    fn a_point_on_a_shared_edge_lies_in_no_box() {
+        for (size, k) in [6.0f32, 8.0, 9.5, 10.0, 12.0, 14.0]
+            .into_iter()
+            .flat_map(|s| [0.5f32, 0.7, 0.75, 1.0, 1.3, 1.5, 2.0].map(|k| (s, k)))
+        {
+            let w = 0.6 * size * k;
+            let x0 = 60.0 * k;
+            let list: Vec<[f32; 4]> = (0..6)
+                .map(|n| {
+                    let a = x0 + n as f32 * w;
+                    [a, 700.0 * k, a + w, 700.0 * k + 1.4 * size * k]
+                })
+                .collect();
+            let mut index = Index::new(&list).expect("index");
+            let y = 700.0 * k + 0.5 * size * k;
+            for n in 1..6 {
+                let edge = x0 + n as f32 * w;
+                let mut x = edge;
+                for _ in 0..4 {
+                    x = x.next_down();
+                }
+                for _ in 0..8 {
+                    assert_eq!(index.innermost(x, y, size * k), None, "{k} {n} {x} {edge}");
+                    x = x.next_up();
+                }
+                let off = 0.1 * size * k;
+                assert_eq!(index.innermost(edge - off, y, size * k), Some(n as u32 - 1));
+                assert_eq!(index.innermost(edge + off, y, size * k), Some(n as u32));
+            }
+        }
     }
 
     #[test]

@@ -248,6 +248,7 @@ source: crates/rezzer/tests/corpus.rs
                 "col_span": 1,
                 "inlines": [
                   {
+                    "strong": true,
                     "text": "Country",
                     "type": "text"
                   }
@@ -258,6 +259,7 @@ source: crates/rezzer/tests/corpus.rs
                 "col_span": 1,
                 "inlines": [
                   {
+                    "strong": true,
                     "text": "Population (millions)",
                     "type": "text"
                   }
@@ -268,6 +270,7 @@ source: crates/rezzer/tests/corpus.rs
                 "col_span": 1,
                 "inlines": [
                   {
+                    "strong": true,
                     "text": "Area (km2)",
                     "type": "text"
                   }
@@ -278,6 +281,7 @@ source: crates/rezzer/tests/corpus.rs
                 "col_span": 1,
                 "inlines": [
                   {
+                    "strong": true,
                     "text": "Capital",
                     "type": "text"
                   }
@@ -288,6 +292,7 @@ source: crates/rezzer/tests/corpus.rs
                 "col_span": 1,
                 "inlines": [
                   {
+                    "strong": true,
                     "text": "Official Language",
                     "type": "text"
                   }
@@ -619,7 +624,9 @@ source: crates/rezzer/tests/corpus.rs
     "modified": {
       "type": "date_time",
       "value": "2024-01-03T09:38:26+01:00"
-    }
+    },
+    "title": "Two-Column Document with Lorem Ipsum",
+    "title_from": "largest heading in the top third of page 1"
   },
   "source": {
     "detection": {

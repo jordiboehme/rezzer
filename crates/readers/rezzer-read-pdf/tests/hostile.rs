@@ -8,16 +8,14 @@
 mod common;
 
 use std::io::Write;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use common::{Builder, heap_peak_bytes, peak_of};
+use common::{Builder, body_text, heap_peak_bytes, peak_of, text};
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
-    Anchor, Block, Bytes, CalloutKind, Completeness, Confidence, Detection, FormatId, Inline, Loss,
-    LossReason, ReadOptions, ReadOutcome, Reader, SectionKind, Severity, Source, plain_text,
+    Anchor, Block, CalloutKind, Completeness, Inline, Loss, LossReason, ReadOptions, ReadOutcome,
+    SectionKind, Severity, plain_text,
 };
-use rezzer_read_pdf::PdfReader;
 
 // The memory bounds here are bounds on the live heap: the counting allocator of the tests'
 // common module adds up the bytes the read holds and keeps their peak. The resident set size
@@ -48,23 +46,7 @@ fn read(bytes: &[u8]) -> ReadOutcome {
 }
 
 fn read_with(bytes: &[u8], budget: &Budget) -> ReadOutcome {
-    let src = Source {
-        path: None,
-        name: "file.pdf".into(),
-        bytes: Bytes::Owned(Arc::new(bytes.to_vec())),
-        sha256: "00".repeat(32),
-        size: bytes.len() as u64,
-        format: FormatId::Pdf,
-        detection: Detection {
-            confidence: Confidence::Certain,
-            evidence: "%PDF-".into(),
-        },
-        modified: None,
-        created: None,
-        downloaded_from: None,
-        file_tags: Vec::new(),
-    };
-    PdfReader.read(&src, &ReadOptions::default(), budget)
+    common::read_in(bytes, &ReadOptions::default(), budget)
 }
 
 fn deflate(data: &[u8]) -> Vec<u8> {
@@ -117,35 +99,6 @@ fn page(out: &ReadOutcome, n: u32) -> &[Block] {
             _ => None,
         })
         .unwrap_or_else(|| panic!("no section p{n}"))
-}
-
-fn block_text(block: &Block, out: &mut String) {
-    match block {
-        Block::Heading { inlines, .. } | Block::Paragraph { inlines, .. } => {
-            out.push_str(&plain_text(inlines));
-            out.push('\n');
-        }
-        Block::Section { blocks, .. } | Block::Callout { blocks, .. } => {
-            blocks.iter().for_each(|b| block_text(b, out))
-        }
-        Block::List { items, .. } => items.iter().flatten().for_each(|b| block_text(b, out)),
-        _ => {}
-    }
-}
-
-fn text(blocks: &[Block]) -> String {
-    let mut out = String::new();
-    blocks.iter().for_each(|b| block_text(b, &mut out));
-    out
-}
-
-fn body_text(blocks: &[Block]) -> String {
-    let kept: Vec<Block> = blocks
-        .iter()
-        .filter(|b| !matches!(b, Block::Callout { .. }))
-        .cloned()
-        .collect();
-    text(&kept)
 }
 
 fn losses(out: &ReadOutcome, why: LossReason) -> Vec<&Loss> {
@@ -2210,28 +2163,13 @@ fn no_annots(_: usize, _: &[u32]) -> Vec<String> {
     Vec::new()
 }
 
+/// Reads a file at the hostile limits with its pictures extracted.
 fn read_extracting(bytes: &[u8]) -> ReadOutcome {
-    let src = Source {
-        path: None,
-        name: "file.pdf".into(),
-        bytes: Bytes::Owned(Arc::new(bytes.to_vec())),
-        sha256: "00".repeat(32),
-        size: bytes.len() as u64,
-        format: FormatId::Pdf,
-        detection: Detection {
-            confidence: Confidence::Certain,
-            evidence: "%PDF-".into(),
-        },
-        modified: None,
-        created: None,
-        downloaded_from: None,
-        file_tags: Vec::new(),
-    };
     let opts = ReadOptions {
         extract_assets: true,
         ..ReadOptions::default()
     };
-    PdfReader.read(&src, &opts, &Budget::new(hostile()))
+    common::read_in(bytes, &opts, &Budget::new(hostile()))
 }
 
 /// The read renders and serializes, stays within the time and memory bounds and is partial
@@ -3317,30 +3255,6 @@ fn a_probe_bound_with_every_note_placed_says_nothing() {
     );
 }
 
-fn read_assets(bytes: &[u8]) -> ReadOutcome {
-    let src = Source {
-        path: None,
-        name: "file.pdf".into(),
-        bytes: Bytes::Owned(Arc::new(bytes.to_vec())),
-        sha256: "00".repeat(32),
-        size: bytes.len() as u64,
-        format: FormatId::Pdf,
-        detection: Detection {
-            confidence: Confidence::Certain,
-            evidence: "%PDF-".into(),
-        },
-        modified: None,
-        created: None,
-        downloaded_from: None,
-        file_tags: Vec::new(),
-    };
-    let opts = ReadOptions {
-        extract_assets: true,
-        ..ReadOptions::default()
-    };
-    PdfReader.read(&src, &opts, &Budget::new(hostile()))
-}
-
 /// `pages` pages of `w` by `h` points, each drawing one shared gray picture of 8 by 8 pixels
 /// over the whole page and no text.
 fn picture_pages(pages: usize, w: u32, h: u32) -> Vec<u8> {
@@ -3372,7 +3286,7 @@ fn picture_pages(pages: usize, w: u32, h: u32) -> Vec<u8> {
 #[test]
 fn a_huge_media_box_renders_at_most_16_million_pixels() {
     // 200,000 points square: at 144 dpi that would be 160 billion pixels.
-    let out = read_assets(&picture_pages(1, 200_000, 200_000));
+    let out = read_extracting(&picture_pages(1, 200_000, 200_000));
     let blob = out
         .blobs
         .iter()
@@ -3388,7 +3302,7 @@ fn a_huge_media_box_renders_at_most_16_million_pixels() {
 #[test]
 fn many_pages_that_need_vision_render_at_most_1000() {
     let start = Instant::now();
-    let out = read_assets(&picture_pages(1010, 20, 20));
+    let out = read_extracting(&picture_pages(1010, 20, 20));
     assert!(
         start.elapsed() < Duration::from_secs(60),
         "{:?}",
@@ -4656,4 +4570,296 @@ fn a_line_of_stops_costs_about_as_much_as_its_text() {
         "{took:?} against {twin:?}"
     );
     assert!(text(page(&out, 1)).contains("Ab Cd"));
+}
+
+/// The losses of `out` for the limit of a step whose words hold `words` on page 1.
+fn step_cut<'a>(out: &'a ReadOutcome, words: &str) -> Option<&'a Loss> {
+    out.document
+        .losses
+        .iter()
+        .find(|l| l.why == LossReason::Limit && l.what.contains(words) && l.what.contains("page 1"))
+}
+
+/// `n` tiny one-glyph runs on a grid over the box `x0, y0, x1, y1` of a page, `across` a row.
+fn dense_runs(c: &mut Vec<u8>, n: usize, across: usize, [x0, y0, x1, y1]: [f32; 4]) {
+    let rows = n.div_ceil(across);
+    let (dx, dy) = ((x1 - x0) / across as f32, (y1 - y0) / rows as f32);
+    c.extend(b"BT /F1 0.5 Tf ");
+    for k in 0..n {
+        let (x, y) = (x0 + (k % across) as f32 * dx, y0 + (k / across) as f32 * dy);
+        c.extend(format!("1 0 0 1 {x:.2} {y:.2} Tm (x) Tj ").as_bytes());
+    }
+    c.extend(b"ET\n");
+}
+
+#[test]
+fn many_bars_under_dense_text_are_bounded() {
+    // A drawn box with a word (the page shows a form), 8,000 short flat bars apart from each
+    // other and 150,000 tiny runs just over them: the search for titles over a bar stops at
+    // its work bound, says so and keeps the text.
+    let start = Instant::now();
+    let mut c = b"0.1 w 20 260 60 20 re S BT /F1 8 Tf 24 266 Td (Feld) Tj ET\n".to_vec();
+    for row in 0..40 {
+        let y = 10.0 + row as f32 * 2.5;
+        for k in 0..200 {
+            let x = 5.0 + k as f32 * 15.0;
+            c.extend(format!("{x} {y} m {} {y} l S ", x + 3.0).as_bytes());
+        }
+    }
+    dense_runs(&mut c, 150_000, 1_000, [5.0, 120.0, 2995.0, 200.0]);
+    let out = read(&sized_page(&c, 3000, 300));
+    assert_quick(start);
+    assert!(
+        step_cut(&out, "underlined titles").is_some(),
+        "{:?}",
+        out.document.losses
+    );
+    assert!(text(page(&out, 1)).contains("Feld"));
+}
+
+/// 1,500 rows of two boxes of a label over a value in the top half of a tall page, the boxes
+/// of a row touching unless `apart`, and 170,000 tiny runs in its bottom half (a small box in
+/// the corner keeps them away from the boxes of the rows).
+fn rows_of_field_boxes(apart: bool) -> Vec<u8> {
+    let rows = 1_500usize;
+    let h = 2 * (rows + 2) * 30;
+    let mut c = b"0.5 w 500 4 80 20 re S BT /F1 8 Tf 504 10 Td (Ecke) Tj ET\n".to_vec();
+    let right = if apart { 192 } else { 172 };
+    for r in 0..rows {
+        let top = h - 20 - r * 30;
+        for (side, x) in [("l", 72usize), ("r", right)] {
+            c.extend(format!("{x} {} 100 24 re S ", top - 24).as_bytes());
+            c.extend(
+                format!(
+                    "BT /F1 6 Tf {} {} Td (Name) Tj ET BT /F1 10 Tf {} {} Td ({side}{r:04}) Tj ET\n",
+                    x + 4,
+                    top - 8,
+                    x + 4,
+                    top - 20
+                )
+                .as_bytes(),
+            );
+        }
+    }
+    dense_runs(
+        &mut c,
+        170_000,
+        100,
+        [300.0, 40.0, 560.0, h as f32 / 2.0 - 20.0],
+    );
+    tall_page(&c, h)
+}
+
+#[test]
+fn many_rows_of_field_boxes_beside_dense_text_cost_about_what_their_text_costs() {
+    // Whether a row of boxes heads lines below it is looked at with the page's lines built
+    // once: the rows cost about what the same boxes apart cost, which make no rows.
+    let start = Instant::now();
+    let _twin = read(&rows_of_field_boxes(true));
+    let twin = start.elapsed();
+    let start = Instant::now();
+    let out = read(&rows_of_field_boxes(false));
+    let took = start.elapsed();
+    assert!(
+        took < twin * 2 + Duration::from_secs(2),
+        "{took:?} against {twin:?}"
+    );
+    assert_heap_under_256_mib();
+    let body = text(page(&out, 1));
+    assert!(body.contains("l0000") && body.contains("r1499"));
+}
+
+#[test]
+fn rows_of_field_boxes_over_much_text_share_one_work_bound() {
+    // 100 rows of two boxes side by side across a wide page, and under them 1,500 lines of
+    // tiny runs in the gaps between the rows: each row looks through all the lines below it.
+    // The rows share one work bound for the page, which says when it is spent; the text is
+    // kept.
+    let start = Instant::now();
+    let (rows, lines) = (100usize, 1_500usize);
+    let (w, h) = (rows * 80 + 40, 1_000usize);
+    let mut c = b"0.5 w ".to_vec();
+    for r in 0..rows {
+        for (side, x) in [("l", 20 + r * 80), ("r", 50 + r * 80)] {
+            c.extend(format!("{x} {} 30 24 re S ", h - 44).as_bytes());
+            c.extend(
+                format!(
+                    "BT /F1 4 Tf {} {} Td (Nr) Tj ET BT /F1 7 Tf {} {} Td ({side}{r:03}) Tj ET\n",
+                    x + 2,
+                    h - 26,
+                    x + 2,
+                    h - 40
+                )
+                .as_bytes(),
+            );
+        }
+    }
+    c.extend(b"BT /F1 0.5 Tf ");
+    for l in 0..lines {
+        let y = 20.0 + l as f32 * 0.6;
+        for r in 0..rows {
+            let x = 85 + r * 80;
+            c.extend(format!("1 0 0 1 {x} {y:.1} Tm (x) Tj ").as_bytes());
+        }
+    }
+    c.extend(b"ET\n");
+    let out = read(&sized_page(&c, w, h));
+    assert_quick(start);
+    assert!(
+        step_cut(&out, "label and value pairs in drawn boxes").is_some(),
+        "{:?}",
+        out.document.losses
+    );
+    let body = text(page(&out, 1));
+    assert!(body.contains("l000") && body.contains("r099"));
+}
+
+/// Page 1 of `n` lines of `label` alone, each over a date alone on its line at its left edge.
+fn labels_over_dates(n: usize, label: &str) -> Vec<u8> {
+    let h = (n + 2) * 16;
+    let mut c = b"BT /F1 6 Tf ".to_vec();
+    for i in 0..n {
+        let y = h - 10 - i * 16;
+        c.extend(
+            format!(
+                "1 0 0 1 72 {y} Tm ({label}) Tj 1 0 0 1 72 {} Tm ({:02}.{:02}.2026) Tj ",
+                y - 7,
+                1 + i % 28,
+                1 + i % 12
+            )
+            .as_bytes(),
+        );
+    }
+    c.extend(b"ET\n");
+    tall_page(&c, h)
+}
+
+#[test]
+fn many_date_labels_on_page_1_cost_about_what_their_text_costs() {
+    // 50,000 date labels, each over a date alone on its line, read at the default limits
+    // (the hostile memory limit holds fewer glyphs on a page): the value of each label is
+    // found by the baselines near it, so the page costs about what the same lines cost with a
+    // word that is no date label. No date is taken: the dates are a list.
+    let at_default = |bytes: &[u8]| read_with(bytes, &Budget::new(Limits::default()));
+    let start = Instant::now();
+    let _twin = at_default(&labels_over_dates(50_000, "Daten"));
+    let twin = start.elapsed();
+    let start = Instant::now();
+    let out = at_default(&labels_over_dates(50_000, "Datum"));
+    let took = start.elapsed();
+    assert!(
+        took < twin * 2 + Duration::from_secs(1),
+        "{took:?} against {twin:?}"
+    );
+    // The page of 750,000 glyphs takes about 520 MiB at the default limits; the dates add
+    // no copy of the page.
+    let peak = heap_peak_bytes();
+    assert!(peak < 768 << 20, "heap peak {} MiB", peak >> 20);
+    assert!(out.document.properties.document_date.is_none());
+    assert!(text(page(&out, 1)).contains("Datum"));
+}
+
+#[test]
+fn groups_of_small_rectangles_past_the_search_bound_are_said() {
+    // 2,100 small groups of 8 filled squares each, apart: the search for codes drawn as paths
+    // looks at the largest 2,000 and says it left the others; the text is kept.
+    let start = Instant::now();
+    let mut c = b"BT /F1 10 Tf 72 880 Td (Before.) Tj ET 0 g ".to_vec();
+    for g in 0..2_100 {
+        let (x, y) = (10 + (g % 50) * 20, 20 + (g / 50) * 20);
+        for k in 0..8 {
+            c.extend(format!("{:.1} {y} 0.8 0.8 re f ", x as f32 + k as f32 * 1.2).as_bytes());
+        }
+    }
+    let out = read(&sized_page(&c, 1100, 900));
+    assert_quick(start);
+    let partly = out.document.losses.iter().find(|l| {
+        l.what
+            .contains("codes drawn as paths on page 1 are looked for only in part")
+            && l.what.contains("2000 largest of its 2100 groups")
+    });
+    assert!(partly.is_some(), "{:?}", out.document.losses);
+    assert!(text(page(&out, 1)).contains("Before."));
+}
+
+#[test]
+fn glyphs_of_many_bars_in_many_fonts_are_charged_and_bounded() {
+    // One font program whose 107 glyphs each draw 200 thin bars, used by 800 fonts on one
+    // page, each glyph shown once: the outline of each glyph looked at is charged and their
+    // number bounded. Past the bound the runs of bars are not read as codes, are no text,
+    // and a loss says so.
+    let start = Instant::now();
+    let thin = |_: u8| -> Vec<common::barfont::Rect> {
+        (0..200i16).map(|k| (k * 5, 0, k * 5 + 2, 1600)).collect()
+    };
+    let program = common::barfont::program(Some(&thin));
+    let fonts = 800usize;
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let ff = b.stream(&format!("/Length1 {}", program.len()), &program);
+    let desc = b.add(format!(
+        "<< /Type /FontDescriptor /FontName /ABCDEF+Muster /Flags 32 \
+         /FontBBox [0 0 1000 1600] /ItalicAngle 0 /Ascent 1600 /Descent 0 /CapHeight 1600 \
+         /StemV 80 /FontFile2 {ff} 0 R >>"
+    ));
+    let widths = vec!["1000"; 175].join(" ");
+    let mut res = String::new();
+    for k in 0..fonts {
+        let f = b.add(format!(
+            "<< /Type /Font /Subtype /TrueType /BaseFont /ABCDEF+Muster{k} /FirstChar 32 \
+             /LastChar 206 /Widths [{widths}] /Encoding /WinAnsiEncoding \
+             /FontDescriptor {desc} 0 R >>"
+        ));
+        res += &format!(" /B{k} {f} 0 R");
+    }
+    let shown: String = (32u8..=126)
+        .chain(195..=206)
+        .map(|c| match c {
+            b'(' | b')' | b'\\' => format!("\\{}", c as char),
+            32..=126 => (c as char).to_string(),
+            _ => format!("\\{c:o}"),
+        })
+        .collect();
+    let mut c = b"BT /F1 10 Tf 1 0 0 1 72 820 Tm (Before.) Tj ".to_vec();
+    for k in 0..fonts {
+        c.extend(
+            format!(
+                "/B{k} 0.5 Tf 1 0 0 1 20 {:.1} Tm ({shown}) Tj ",
+                800.0 - k as f32 * 0.9
+            )
+            .as_bytes(),
+        );
+    }
+    c.extend(b"ET\n");
+    let f1 = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let cs = b.stream("/Filter /FlateDecode", &deflate(&c));
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+         /Resources << /Font << /F1 {f1} 0 R{res} >> >> /Contents {cs} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let out = read(&b.finish(catalog));
+    assert_quick(start);
+    let cut =
+        out.document.losses.iter().find(|l| {
+            l.what.contains("page 1") && l.what.contains("different glyphs drawn as bars")
+        });
+    assert!(cut.is_some(), "{:?}", out.document.losses);
+    let body = text(page(&out, 1));
+    assert!(body.contains("Before."));
+    // The runs whose outlines were kept and that print no code stay text, as any such run;
+    // the runs past the bound are no text.
+    let left = body.matches("ABCDEFG").count();
+    assert!(
+        left <= 8_192 / 107 + 1,
+        "{left} runs of bars left in the text"
+    );
+    // Without the bound the outlines alone took about 75 MiB more.
+    let peak = heap_peak_bytes();
+    assert!(peak < 220 << 20, "heap peak {} MiB", peak >> 20);
 }

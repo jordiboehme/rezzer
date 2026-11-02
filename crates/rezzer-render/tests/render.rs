@@ -3740,6 +3740,7 @@ fn coded(texts: &[&str], places: usize) -> String {
                 base64: None,
                 bytes: t.len() as u64,
                 bounds: None,
+                place: None,
             })
             .collect(),
         code_unread: false,
@@ -3752,6 +3753,47 @@ fn coded(texts: &[&str], places: usize) -> String {
         })
         .collect();
     render(&d, Completeness::Complete, &opts())
+}
+
+#[test]
+fn code_place_in_words() {
+    // A code read from a page that needs vision says where it lies in words; the box stays
+    // in the JSON only.
+    let mut d = doc();
+    d.assets = vec![Asset {
+        id: "page-1".into(),
+        path: Some("assets/page-1.png".into()),
+        sha256: "ff".into(),
+        mime: "image/png".into(),
+        caption: None,
+        alt: Some("1 picture".into()),
+        needs_vision: true,
+        codes: vec![rezzer_model::Barcode {
+            symbology: "Code 128".into(),
+            text: Some("0000000001".into()),
+            base64: None,
+            bytes: 10,
+            bounds: Some([40.0, 760.0, 200.0, 780.0]),
+            place: Some("top left of the page".into()),
+        }],
+        code_unread: false,
+    }];
+    d.body = vec![Block::Media {
+        asset: "page-1".into(),
+        alt: Some("1 picture".into()),
+        anchor: None,
+    }];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        md.contains("Code 128, top left of the page: 0000000001"),
+        "{md}"
+    );
+    assert!(!md.contains("box 40"), "{md}");
+    // Without a place the head is the kind alone, never the numbers.
+    d.assets[0].codes[0].place = None;
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(md.contains("Code 128: 0000000001"), "{md}");
+    assert!(!md.contains("box 40"), "{md}");
 }
 
 #[test]
@@ -6908,6 +6950,89 @@ fn long_own_description_stays_one_scalar() {
     }
     let at = scalars.iter().position(|s| s == "description").unwrap();
     assert_eq!(scalars[at + 1], long.trim());
+}
+
+#[test]
+fn found_title_and_date_keys() {
+    let mut d = doc();
+    d.properties.title = Some("Rechnung".into());
+    d.properties.title_from = Some("largest heading in the top third of page 1".into());
+    d.properties.document_date = Some(rezzer_model::FoundDate {
+        date: "2026-02-01".into(),
+        from: "date label \"Datum\" on page 1".into(),
+    });
+    d.properties.language = Some("de".into());
+    let md = render(&d, Completeness::Complete, &opts());
+    // The page's date is the source date, as explicit as a date of the file's own.
+    assert!(
+        md.contains("\nsource_date: 2026-02-01\ntemporal_confidence: explicit\n"),
+        "{md}"
+    );
+    assert!(
+        md.contains(
+            "\nlanguage: \"de\"\n\
+             title_from: \"largest heading in the top third of page 1\"\n\
+             document_date: \"2026-02-01\"\n\
+             document_date_from: \"date label \\\"Datum\\\" on page 1\"\n---\n"
+        ),
+        "{md}"
+    );
+    assert_eq!(fm_line(&md, "title"), Some("\"Rechnung\""));
+    let keys = frontmatter_keys(&md);
+    let at = |k: &str| keys.iter().position(|x| x == k).unwrap_or(usize::MAX);
+    assert!(at("language") < at("title_from"), "{keys:?}");
+    assert!(at("title_from") < at("document_date"), "{keys:?}");
+    assert!(at("document_date") < at("document_date_from"), "{keys:?}");
+    assert_eq!(at("document_date_from"), keys.len() - 1, "{keys:?}");
+}
+
+#[test]
+fn file_date_wins_over_the_found_date() {
+    let mut d = doc();
+    d.properties.document_date = Some(rezzer_model::FoundDate {
+        date: "2026-02-01".into(),
+        from: "date label \"Datum\" on page 1".into(),
+    });
+    d.properties.modified = Some(Value::DateTime {
+        value: "2020-09-23T10:00:00Z".into(),
+    });
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        md.contains("\nsource_date: 2020-09-23\ntemporal_confidence: explicit\n"),
+        "{md}"
+    );
+    // The found date is still said.
+    assert_eq!(fm_line(&md, "document_date"), Some("\"2026-02-01\""));
+    // A found date that is no calendar date is neither the source date nor said.
+    let mut d = doc();
+    d.properties.document_date = Some(rezzer_model::FoundDate {
+        date: "2026-02-30".into(),
+        from: "date label \"Datum\" on page 1".into(),
+    });
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        md.contains("\nsource_date: 2026-01-05\ntemporal_confidence: inferred\n"),
+        "{md}"
+    );
+    assert_eq!(fm_line(&md, "document_date"), None, "{md}");
+    assert_eq!(fm_line(&md, "document_date_from"), None, "{md}");
+}
+
+#[test]
+fn title_from_is_only_for_the_document_title() {
+    let mut d = doc();
+    d.properties.title = Some("Rechnung".into());
+    d.properties.title_from = Some("largest heading in the top third of page 1".into());
+    let mut o = opts();
+    o.part = Some(rezzer_render::PartMeta {
+        index: 2,
+        count: 3,
+        location: "pages 3 to 4".into(),
+        title: "Rechnung: Positionen".into(),
+    });
+    let md = render(&d, Completeness::Complete, &o);
+    assert_eq!(fm_line(&md, "title"), Some("\"Rechnung: Positionen\""));
+    assert_eq!(fm_line(&md, "title_from"), None, "{md}");
 }
 
 #[test]

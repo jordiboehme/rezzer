@@ -1,0 +1,122 @@
+---
+source: crates/readers/rezzer-read-pdf/tests/business.rs
+expression: md
+---
+---
+type: source
+title: "Rechnung"
+description: "PDF, 2 pages, \"Rechnung\", 2026-02-01. 3 tables."
+resource: "file.pdf"
+tags: ["rezzer", "pdf"]
+generated: { by: rezzer/, at: "" }
+source_date: 2026-02-01
+temporal_confidence: explicit
+status: stable
+source_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+source_size: 9097
+format: pdf
+detected_by: "%PDF-"
+reader: "pdf/0.1.0"
+completeness: complete
+losses: 1
+pages: 2
+tagged: false
+encrypted: false
+signed: false
+revisions: 1
+has_javascript: false
+title_from: "largest heading in the top third of page 1"
+document_date: "2026-02-01"
+document_date_from: "date label \"Datum\" on page 1"
+---
+
+# Rechnung
+
+## Properties
+
+| Key | Value |
+| --- | --- |
+| pdf\_version | 1.7 |
+
+:status[Page 1]{grey}
+
+Picture page-1-pic-1 (image/png, logo or small picture, box 40, 770 to 140, 820) is not extracted.
+
+Picture page-1-pic-1 (image/png, logo or small picture, box 455, 692 to 555, 732) is not extracted.
+
+**Erika Mustermann**\
+**Musterweg 1**\
+**12345 Musterstadt**
+
+## Rechnung
+
+|  |  |
+| --- | --- |
+| Rechnungsnummer | 0000-0001 |
+| Kundennummer | 00000 |
+| Datum | 01.02.2026 |
+| Seite | 1 von 2 |
+
+| **Pos** | **Artikel** | **Menge** | **Einheit** | **Preis** | **Betrag** |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Beratung | 2 | Std | 500,00 | 1.000,00 |
+| 2 | Material | 1 | Stk | 200,00 | 200,00 |
+| 3 | Versand | 1 | Stk | 34,56 | 34,56 |
+
+|  |  |
+| --- | --- |
+| Nettobetrag | 1.234,56 |
+| USt 19 % | 234,57 |
+| **Gesamtbetrag** | **1.469,13** |
+
+**Bitte zahlen Sie den Betrag bis zum 01.03.2026 auf das Konto unten. Vielen Dank für Ihren Auftrag.**
+
+**Bestellnummer:** 00000
+
+Lieferbedingungen: die Muster GmbH liefert die bestellte Ware frei Haus an die genannte Anschrift, sofern nichts anderes vereinbart ist. Teillieferungen sind zulaessig und werden einzeln berechnet. Die Ware bleibt bis zur vollstaendigen Bezahlung Eigentum der Muster GmbH. Zahlungsbedingungen: der Betrag ist ohne Abzug innerhalb von vierzehn Tagen nach Erhalt der Rechnung zu zahlen. Bei Zahlung innerhalb von sieben Tagen gewaehren wir zwei Prozent Skonto auf den Warenwert. Mahnungen werden mit einer Gebuehr berechnet. Bitte geben Sie bei jeder Zahlung die Rechnungsnummer an, damit wir den Betrag richtig zuordnen koennen. Fragen zur Rechnung beantwortet Ihnen gern unser Kundenservice an allen Werktagen. Es gelten unsere allgemeinen Bedingungen.
+
+Picture page-1-code-1 (image/png, Code 128, box 100, 120 to 172, 140) is not extracted.
+
+Code 128: 0000000001
+
+Muster GmbH\
+Musterweg 1\
+12345 Musterstadt
+
+Picture page-1-pic-1 (image/png, logo or small picture, box 40, 30 to 100, 60) is not extracted.
+
+Musterbank\
+IBAN DE00 0000 0000 0000 0000 00\
+BIC MUSTDEXXXXX
+
+Amtsgericht Musterstadt\
+HRB 00000\
+Geschäftsführung Erika Mustermann
+
+:status[Page 2]{grey}
+
+Picture page-1-pic-1 (image/png, logo or small picture, box 40, 770 to 140, 820) is not extracted.
+
+Picture page-1-pic-1 (image/png, logo or small picture, box 455, 692 to 555, 732) is not extracted.
+
+Zahlbar bis 01.03.2026 ohne Abzug.
+
+Muster GmbH\
+Musterweg 1\
+12345 Musterstadt
+
+Picture page-1-pic-1 (image/png, logo or small picture, box 40, 30 to 100, 60) is not extracted.
+
+Musterbank\
+IBAN DE00 0000 0000 0000 0000 00\
+BIC MUSTDEXXXXX
+
+Amtsgericht Musterstadt\
+HRB 00000\
+Geschäftsführung Erika Mustermann
+
+## Not read
+
+| Where | What | Why | Severity |
+| --- | --- | --- | --- |
+| p1 | blocks of short lines side by side on page 1 are read one block after the other, as blocks of their own: if their lines are rows of a table or labels beside values, those rows are not kept | uncertain | info |

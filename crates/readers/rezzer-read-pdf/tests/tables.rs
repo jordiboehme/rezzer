@@ -8,15 +8,13 @@
 mod common;
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
-use common::{Builder, Page, helvetica_width, pdf, show, sized_page};
+use common::{Builder, Page, helvetica_width, markdown, pdf, show, sized_page};
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
-    Anchor, Block, Bytes, Cell, Completeness, Confidence, Detection, FormatId, LossReason,
-    ReadOptions, ReadOutcome, Reader, SectionKind, Severity, Source, plain_text,
+    Anchor, Block, Cell, Completeness, LossReason, ReadOptions, ReadOutcome, SectionKind, Severity,
+    plain_text,
 };
-use rezzer_read_pdf::PdfReader;
 
 fn corpus_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -25,23 +23,7 @@ fn corpus_path(name: &str) -> PathBuf {
 }
 
 fn read_with(bytes: &[u8], limits: Limits) -> ReadOutcome {
-    let src = Source {
-        path: None,
-        name: "file.pdf".into(),
-        bytes: Bytes::Owned(Arc::new(bytes.to_vec())),
-        sha256: "00".repeat(32),
-        size: bytes.len() as u64,
-        format: FormatId::Pdf,
-        detection: Detection {
-            confidence: Confidence::Certain,
-            evidence: "%PDF-".into(),
-        },
-        modified: None,
-        created: None,
-        downloaded_from: None,
-        file_tags: Vec::new(),
-    };
-    PdfReader.read(&src, &ReadOptions::default(), &Budget::new(limits))
+    common::read_in(bytes, &ReadOptions::default(), &Budget::new(limits))
 }
 
 fn read(bytes: &[u8]) -> ReadOutcome {
@@ -571,14 +553,6 @@ fn a_row_split_by_a_page_break_is_one_row() {
     );
     assert!(tables(page(&out, 2)).is_empty());
     assert_eq!(out.completeness, Completeness::Complete);
-}
-
-fn markdown(out: &ReadOutcome) -> String {
-    rezzer_render::render(
-        &out.document,
-        out.completeness,
-        &rezzer_render::RenderOptions::default(),
-    )
 }
 
 #[test]
@@ -1277,6 +1251,174 @@ fn header_band_over_prose_says_so() {
     assert_eq!(notes[0].why, LossReason::Uncertain);
 }
 
+/// A page with a header band of four filled cells `Art | Basis | Satz | Betrag` over lines
+/// without rules, each line a list of (column, text): the columns start at 40, 160, 280 and
+/// 400, the lines 14 points apart from the top.
+fn tax_band_page(lines: &[&[(usize, &str)]]) -> String {
+    let xs = [40.0, 160.0, 280.0, 400.0];
+    let mut c = String::from("0.9 g ");
+    for x in xs {
+        c += &format!("{} 666 120 14 re f ", x - 4.0);
+    }
+    c += "0 g ";
+    for (x, t) in xs.iter().zip(["Art", "Basis", "Satz", "Betrag"]) {
+        c += &show("F2", 8.0, *x, 670.0, t);
+    }
+    for (k, line) in lines.iter().enumerate() {
+        let y = 650.0 - 14.0 * k as f32;
+        for (col, t) in *line {
+            c += &show("F1", 8.0, xs[*col], y, t);
+        }
+    }
+    c += &show("F1", 9.0, 40.0, 500.0, "Thank you.");
+    c
+}
+
+/// The rows of a table as written, for comparing.
+fn owned(rows: &[&[&str]]) -> Vec<Vec<String>> {
+    rows.iter()
+        .map(|r| r.iter().map(|c| c.to_string()).collect())
+        .collect()
+}
+
+#[test]
+fn sparse_row_keeps_its_columns() {
+    // A line with only an amount is a row of its own: a number never joins the row above,
+    // and its empty cells stay empty.
+    let page_text = tax_band_page(&[
+        &[(0, "Steuer A"), (1, "1.000,00"), (2, "10 %"), (3, "100,00")],
+        &[(3, "20,00")],
+        &[(0, "Steuer C"), (1, "500,00"), (2, "5 %"), (3, "25,00")],
+        &[(3, "5,00")],
+    ]);
+    let out = read(&pdf(&[Page::text(page_text)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    let (head, rows) = &found[0];
+    assert_eq!(*head, 1, "{rows:?}");
+    assert_eq!(
+        rows,
+        &owned(&[
+            &["Art", "Basis", "Satz", "Betrag"],
+            &["Steuer A", "1.000,00", "10 %", "100,00"],
+            &["", "", "", "20,00"],
+            &["Steuer C", "500,00", "5 %", "25,00"],
+            &["", "", "", "5,00"],
+        ])
+    );
+}
+
+/// Guard: the header band of `sparse_row_keeps_its_columns` (a row of drawn cells, each
+/// with only its title) is no row of empty fields: it heads its table, and no note says
+/// label and value pairs were found.
+#[test]
+fn header_band_is_not_empty_fields() {
+    let page_text = tax_band_page(&[
+        &[(0, "Steuer A"), (1, "1.000,00"), (2, "10 %"), (3, "100,00")],
+        &[(3, "20,00")],
+        &[(0, "Steuer C"), (1, "500,00"), (2, "5 %"), (3, "25,00")],
+        &[(3, "5,00")],
+    ]);
+    let out = read(&pdf(&[Page::text(page_text)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    assert_eq!(found[0].0, 1, "{found:?}");
+    assert_eq!(
+        found[0].1[0],
+        ["Art", "Basis", "Satz", "Betrag"],
+        "{found:?}"
+    );
+    let text = common::all_text(&out);
+    assert!(!text.contains("Found by: label and value"), "{text}");
+}
+
+#[test]
+fn wrapped_cell_still_joins() {
+    // Guard: a second line of words in a column that has text above goes on that cell.
+    let page_text = tax_band_page(&[
+        &[(0, "Steuer A"), (1, "1.000,00"), (2, "10 %"), (3, "100,00")],
+        &[(0, "mit Zuschlag")],
+        &[(0, "Steuer C"), (1, "500,00"), (2, "5 %"), (3, "25,00")],
+        &[(0, "Steuer D"), (1, "200,00"), (2, "5 %"), (3, "10,00")],
+    ]);
+    let out = read(&pdf(&[Page::text(page_text)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    let rows = &found[0].1;
+    assert_eq!(rows.len(), 4, "{rows:?}");
+    assert_eq!(rows[1][0], "Steuer A mit Zuschlag", "{rows:?}");
+    assert_eq!(rows[2][0], "Steuer C", "{rows:?}");
+}
+
+#[test]
+fn line_in_an_empty_column_starts_a_row() {
+    // A line of words in a column that is empty in the row above starts a row of its own.
+    let page_text = tax_band_page(&[
+        &[(0, "Steuer A"), (1, "1.000,00"), (3, "100,00")],
+        &[(2, "frei")],
+        &[(0, "Steuer C"), (1, "500,00"), (2, "5 %"), (3, "25,00")],
+    ]);
+    let out = read(&pdf(&[Page::text(page_text)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    let rows = &found[0].1;
+    assert_eq!(
+        rows,
+        &owned(&[
+            &["Art", "Basis", "Satz", "Betrag"],
+            &["Steuer A", "1.000,00", "", "100,00"],
+            &["", "", "frei", ""],
+            &["Steuer C", "500,00", "5 %", "25,00"],
+        ])
+    );
+}
+
+#[test]
+fn a_first_cell_that_wraps_upward_joins_its_row() {
+    // The first line of a label alone above the line with the values set at the middle of
+    // the row: it goes on that row, not a row of its own.
+    let page_text = tax_band_page(&[
+        &[(0, "Steuer A")],
+        &[
+            (0, "mit Zuschlag"),
+            (1, "1.000,00"),
+            (2, "10 %"),
+            (3, "100,00"),
+        ],
+        &[(0, "Steuer C"), (1, "500,00"), (2, "5 %"), (3, "25,00")],
+        &[(0, "Steuer D"), (1, "200,00"), (2, "5 %"), (3, "10,00")],
+    ]);
+    let out = read(&pdf(&[Page::text(page_text)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    let rows = &found[0].1;
+    assert_eq!(rows.len(), 4, "{rows:?}");
+    assert_eq!(rows[1][0], "Steuer A mit Zuschlag", "{rows:?}");
+}
+
+#[test]
+fn word_rows_under_a_band_stay_rows() {
+    // Guard: lines of words only that each fill at least half of the columns are each a row,
+    // as before the rule for sparse lines.
+    let page_text = tax_band_page(&[
+        &[(0, "Steuer A"), (1, "frei"), (3, "offen")],
+        &[(0, "Steuer B"), (1, "frei"), (2, "keiner")],
+        &[(0, "Steuer C"), (2, "keiner"), (3, "offen")],
+    ]);
+    let out = read(&pdf(&[Page::text(page_text)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    assert_eq!(
+        found[0].1,
+        owned(&[
+            &["Art", "Basis", "Satz", "Betrag"],
+            &["Steuer A", "frei", "", "offen"],
+            &["Steuer B", "frei", "keiner", ""],
+            &["Steuer C", "", "keiner", "offen"],
+        ])
+    );
+}
+
 #[test]
 fn key_value_totals_box() {
     // A box of five labels on the left and amounts set flush right.
@@ -1667,4 +1809,175 @@ fn a_ruled_row_with_wrapped_cells_stays_one_row() {
         ["Pears", "green and juicy", "from the south"],
         "{rows:?}"
     );
+}
+
+/// One section of a ruled grid: rows `h` points high from `top` down between the column
+/// rules `xs`, every rule drawn, and in each cell the text `cell(row, column)` in `font` at
+/// 8 points (none when it is empty).
+fn grid_section(
+    xs: &[f32],
+    top: f32,
+    h: f32,
+    rows: usize,
+    font: &dyn Fn(usize) -> &'static str,
+    cell: &dyn Fn(usize, usize) -> String,
+) -> String {
+    let (x0, x1) = (xs[0], xs[xs.len() - 1]);
+    let bottom = top - h * rows as f32;
+    let mut c = String::from("0.5 w ");
+    for k in 0..=rows {
+        let y = top - h * k as f32;
+        c += &format!("{x0} {y} m {x1} {y} l S ");
+    }
+    for x in xs {
+        c += &format!("{x} {bottom} m {x} {top} l S ");
+    }
+    for r in 0..rows {
+        for (k, x) in xs[..xs.len() - 1].iter().enumerate() {
+            let text = cell(r, k);
+            if !text.is_empty() {
+                c += &show(font(r), 8.0, x + 3.0, top - h * r as f32 - h + 7.0, &text);
+            }
+        }
+    }
+    c
+}
+
+/// `n` columns of equal width from 72 to 552.
+fn columns(n: usize) -> Vec<f32> {
+    (0..=n)
+        .map(|k| 72.0 + 480.0 * k as f32 / n as f32)
+        .collect()
+}
+
+/// The one table of page 1 with the given number of columns in every row.
+fn table_of_width(out: &ReadOutcome, cols: usize) -> Vec<Vec<String>> {
+    let found = tables(page(out, 1));
+    let hits: Vec<_> = found
+        .iter()
+        .filter(|(_, rows)| rows.iter().all(|r| r.len() == cols))
+        .collect();
+    assert_eq!(hits.len(), 1, "{found:?}");
+    hits[0].1.clone()
+}
+
+#[test]
+fn two_sections_two_tables() {
+    // One connected grid: a section of 4 columns and 3 rows over one of 9 columns and 4
+    // rows, the rule between them shared: 13 column edges in all. Each section is a table
+    // of its own.
+    let bold = |r: usize| if r == 0 { "F2" } else { "F1" };
+    let mut c = grid_section(&columns(4), 700.0, 20.0, 3, &bold, &|r, k| {
+        format!("{}{r}{k}", ['K', 'L', 'M'][r])
+    });
+    c += &grid_section(&columns(9), 640.0, 20.0, 4, &bold, &|r, k| {
+        format!("w{r}{k}")
+    });
+    let out = read(&pdf(&[Page::text(c)], ""));
+    assert_eq!(
+        tables(page(&out, 1)).len(),
+        2,
+        "{:?}",
+        tables(page(&out, 1))
+    );
+    let upper = table_of_width(&out, 4);
+    assert_eq!(upper[0], ["K00", "K01", "K02", "K03"]);
+    assert_eq!(upper.len(), 3, "{upper:?}");
+    let lower = table_of_width(&out, 9);
+    assert_eq!(lower.len(), 4, "{lower:?}");
+    assert_eq!(lower[3][8], "w38");
+    assert!(out.document.losses.is_empty(), "{:?}", out.document.losses);
+}
+
+/// Guard: a header row of two cells, each over two columns of the body, stays with its
+/// body: one table, its first row the header.
+#[test]
+fn spanned_header_is_not_a_section() {
+    let xs = columns(4);
+    let bold = |r: usize| if r == 0 { "F2" } else { "F1" };
+    let mut c = grid_section(&[xs[0], xs[2], xs[4]], 700.0, 20.0, 1, &bold, &|_, k| {
+        ["Erika Mustermann", "Muster GmbH"][k].to_string()
+    });
+    c += &grid_section(&xs, 680.0, 20.0, 3, &|_| "F1", &|r, k| format!("v{r}{k}"));
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:?}");
+    let (header, rows) = &found[0];
+    assert_eq!(*header, 1, "{found:?}");
+    assert_eq!(rows[0], ["Erika Mustermann", "Muster GmbH"], "{found:?}");
+    assert_eq!(rows.len(), 4, "{found:?}");
+    assert_eq!(rows[3], ["v20", "v21", "v22", "v23"], "{found:?}");
+    assert!(out.document.losses.is_empty(), "{:?}", out.document.losses);
+}
+
+#[test]
+fn calendar_grid_is_refused_with_a_loss() {
+    // A month of 31 day columns: the days in the first row, two rows of names with a mark
+    // on some days. One section of 31 columns is no table, and its refusal is a loss.
+    let xs: Vec<f32> = (0..=31).map(|k| 40.0 + 16.0 * k as f32).collect();
+    let c = grid_section(&xs, 700.0, 16.0, 3, &|_| "F1", &|r, k| match r {
+        0 => format!("{}", k + 1),
+        _ if k % 7 == r => "x".into(),
+        _ => String::new(),
+    });
+    let out = read(&pdf(&[Page::text(c)], ""));
+    assert!(tables(page(&out, 1)).is_empty());
+    let losses = &out.document.losses;
+    assert_eq!(losses.len(), 1, "{losses:?}");
+    assert_eq!(losses[0].why, LossReason::Uncertain, "{losses:?}");
+    assert_eq!(losses[0].severity, Severity::Info, "{losses:?}");
+    assert!(
+        losses[0].what.contains("more than 15 columns"),
+        "{losses:?}"
+    );
+}
+
+/// A ruled table of a header row and three rows whose column rules run on past its first or
+/// its last horizontal rule, with no rule there (an open top or bottom), and a free rule over
+/// it (a title's underline) or under it: the open row is the table's.
+fn open_ruled_page(open_top: bool) -> Vec<u8> {
+    let rows = [
+        ["Monat", "Umsatz", "Kosten"],
+        ["Januar", "1.234,56", "234,57"],
+        ["Februar", "2.345,67", "345,68"],
+        ["Maerz", "3.456,78", "456,79"],
+    ];
+    let xs = [40.0, 200.0, 380.0, 540.0];
+    let mut c = show("F1", 10.0, 40.0, 760.0, "Muster GmbH Bericht");
+    c += "0.5 w 40 754 m 540 754 l S ";
+    // Row edges from the top; the open one has no rule.
+    let ys = [740.0, 720.0, 700.0, 680.0, 660.0];
+    for (k, y) in ys.iter().enumerate() {
+        let open = if open_top { k == 0 } else { k == ys.len() - 1 };
+        if !open {
+            c += &format!("40 {y} m 540 {y} l S ");
+        }
+    }
+    for x in xs {
+        c += &format!("{x} 660 m {x} 740 l S ");
+    }
+    if !open_top {
+        c += "40 640 m 540 640 l S ";
+    }
+    for (r, row) in rows.iter().enumerate() {
+        for (k, text) in row.iter().enumerate() {
+            c += &show("F1", 10.0, xs[k] + 5.0, ys[r] - 15.0, text);
+        }
+    }
+    c += &show("F1", 10.0, 40.0, 600.0, "A paragraph after the table.");
+    pdf(&[Page::text(c)], "")
+}
+
+/// Guard: a free rule over an open top or under an open bottom of a ruled table does not cut
+/// the open row off: it holds column titles or values, no row of fields.
+#[test]
+fn an_open_row_of_a_ruled_table_stays_its_own() {
+    for open_top in [true, false] {
+        let out = read(&open_ruled_page(open_top));
+        let found = tables(page(&out, 1));
+        assert_eq!(found.len(), 1, "{open_top}: {found:?}");
+        assert_eq!(found[0].1.len(), 4, "{open_top}: {found:?}");
+        assert_eq!(found[0].1[0], ["Monat", "Umsatz", "Kosten"], "{open_top}");
+        assert_eq!(found[0].1[3], ["Maerz", "3.456,78", "456,79"], "{open_top}");
+    }
 }

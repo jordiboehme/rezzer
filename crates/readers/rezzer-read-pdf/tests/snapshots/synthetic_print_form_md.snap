@@ -1,0 +1,136 @@
+---
+source: crates/readers/rezzer-read-pdf/tests/print_forms/main.rs
+expression: md
+---
+---
+type: source
+title: "Entgeltabrechnung"
+description: "PDF, 2 pages, \"Entgeltabrechnung\", 2026-10-01. 8 tables."
+resource: "file.pdf"
+tags: ["rezzer", "pdf"]
+generated: { by: rezzer/, at: "" }
+source_date: 2026-10-01
+temporal_confidence: explicit
+status: stable
+source_sha256: "0000000000000000000000000000000000000000000000000000000000000000"
+source_size: 9773
+format: pdf
+detected_by: "%PDF-"
+reader: "pdf/0.1.0"
+completeness: complete
+losses: 0
+pages: 2
+tagged: false
+encrypted: false
+signed: false
+revisions: 1
+has_javascript: false
+title_from: "largest heading in the top third of page 1"
+document_date: "2026-10-01"
+document_date_from: "date label \"Datum\" on page 1"
+---
+
+# Entgeltabrechnung
+
+## Properties
+
+| Key | Value |
+| --- | --- |
+| pdf\_version | 1.7 |
+
+:status[Page 1]{grey}
+
+Found by: 1 decimal separator and 2 date separators on this page are drawn marks, not text; they are written as "," and "." as in 15 amounts and 2 dates written as text in this file.
+
+## Entgeltabrechnung
+
+Muster GmbH, Musterweg 1, 12345 Musterstadt
+
+Erika Mustermann\
+Musterweg 1\
+12345 Musterstadt
+
+Found by: label and value pairs from drawn boxes; the label is the smaller text at the top of each box.
+
+|  |  |
+| --- | --- |
+| Personalnummer | 00000 |
+| Datum | 01.10.2026 |
+| Steuerklasse | :status[empty]{grey} |
+
+| Pers.-Nr. | Name | Klasse | Kinder | Kasse | Abt. |
+| --- | --- | --- | --- | --- | --- |
+| 0001 | Muster | 1 | 0,5 | Kasse A | 100 |
+
+| Nr. | Art | Std. | Satz | Brutto |
+| --- | --- | --- | --- | --- |
+| 1001 | Gehalt | 160 | 12,34 | 1.974,40 |
+| 1002 | Zulage |  |  | 40,00 |
+
+| Nr | Text | Mg | Betrag |
+| --- | --- | --- | --- |
+| 1000 | Gehalt | 2 | 1.111,11 |
+| 2000 |  |  | 22,22 |
+| 3000 | Bonus | 1 | 333,33 |
+
+Betrag\*\*
+
+Zahltag
+
+9876,54
+
+28\.02.2026
+
+Auszahlungsbetrag\* 1.234,56
+
+\* nach Abzug der Steuern\
+\*\* ohne Rundung
+
+:status[Page 2]{grey}
+
+Found by: 1 decimal separator and 2 date separators on this page are drawn marks, not text; they are written as "," and "." as in 15 amounts and 2 dates written as text in this file.
+
+## Entgeltabrechnung
+
+Muster GmbH, Musterweg 1, 12345 Musterstadt
+
+Max Mustermann\
+Beispielweg 2\
+54321 Beispielstadt
+
+Found by: label and value pairs from drawn boxes; the label is the smaller text at the top of each box.
+
+|  |  |
+| --- | --- |
+| Personalnummer | 00001 |
+| Datum | 01.11.2026 |
+| Steuerklasse | :status[empty]{grey} |
+
+| Pers.-Nr. | Name | Klasse | Kinder | Kasse | Abt. |
+| --- | --- | --- | --- | --- | --- |
+| 0002 | Beispiel | 3 | 1,0 | Kasse B | 200 |
+
+| Nr. | Art | Std. | Satz | Brutto |
+| --- | --- | --- | --- | --- |
+| 1001 | Gehalt | 150 | 13,45 | 2.017,50 |
+| 1003 | Bonus |  |  | 100,00 |
+
+| Nr | Text | Mg | Betrag |
+| --- | --- | --- | --- |
+| 1000 | Gehalt | 2 | 2.222,22 |
+| 2000 | Zulage | 1 | 44,44 |
+| 2000 | Zulage | 1 | 44,44 |
+| 4000 | Praemie | 1 | 55,55 |
+
+Betrag\*\*
+
+Zahltag
+
+8765,43
+
+31\.03.2026
+
+Auszahlungsbetrag\* 2.345,67
+
+\* nach Abzug der Steuern\
+\*\* ohne Rundung

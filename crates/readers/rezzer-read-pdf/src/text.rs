@@ -94,6 +94,10 @@ pub(crate) struct PageItems {
     /// Straight lines and rectangles the page draws, in the frame of the runs, for finding
     /// ruled tables.
     pub rules: Vec<Rule>,
+    /// Filled bars the page draws in the shape of a mark (see [`crate::marks::mark_shaped`]),
+    /// in the frame of the runs, without the dashes of dashed rules: the separators of boxed
+    /// number fields are among them. At most [`crate::marks::MAX_MARKS`].
+    pub marks: Vec<[f32; 4]>,
     /// The lower left corner of the visible page box in user space: what moves boxes of the
     /// object layer (links, form fields) into the frame of the runs.
     pub origin: (f32, f32),
@@ -118,6 +122,9 @@ pub(crate) struct PageItems {
     pub unmapped: u64,
     /// Visible glyphs without a Unicode mapping.
     pub unmapped_visible: u64,
+    /// Glyphs of the font `Symbol` whose ASCII text was read through the Adobe Symbol
+    /// encoding (see `FontInfo::symbol`).
+    pub symbol: u64,
     /// What on this page was not read, and why.
     pub notes: Vec<Note>,
     /// A limit cut the page's text: what is missing was not read, it is not missing in the
@@ -133,6 +140,9 @@ pub(crate) struct PageItems {
     pub fallback: bool,
     /// Why the page's drawn boxes were not used as reading regions, while it is laid out.
     pub boxes_unused: Option<String>,
+    /// The drawn boxes the runs are read in as reading regions, in the frame of the runs:
+    /// where the layout looks for labels and values. Empty when none is used.
+    pub boxes: Vec<[f32; 4]>,
     /// The page's lines were too many to search for grids; a loss says so already, and the
     /// ruled detector does not search them again.
     pub lines_unsearched: bool,
@@ -158,6 +168,8 @@ impl PageItems {
         copy(&mut self.runs);
         copy(&mut self.invisible);
         self.rules = self.rules.to_vec();
+        self.marks = self.marks.to_vec();
+        self.boxes = self.boxes.to_vec();
         for (_, list) in &mut self.hidden_layers {
             copy(list);
         }
@@ -175,7 +187,7 @@ impl PageItems {
                         Some(u) if links.insert(Rc::as_ptr(u)) => u.uri.len() as u64 + 64,
                         _ => 0,
                     };
-                    (std::mem::size_of::<Run>() + 32 + r.text.len()) as u64 + link
+                    (std::mem::size_of::<Run>() + 32 + r.text.len() + r.gaps.bytes()) as u64 + link
                 })
                 .sum()
         };
@@ -189,9 +201,13 @@ impl PageItems {
             .map(|l| l.len() as u64 + 32)
             .sum::<u64>();
         self.rules.shrink_to_fit();
+        self.marks.shrink_to_fit();
+        self.boxes.shrink_to_fit();
         total
+            + (std::mem::size_of::<[f32; 4]>() * self.boxes.len()) as u64
             + 25 * self.images.len() as u64
             + (std::mem::size_of::<Rule>() * self.rules.len()) as u64
+            + CELL_BYTES * self.marks.len() as u64
             + 256
     }
 }
@@ -571,6 +587,8 @@ enum Abort {
 struct FontInfo {
     bold: bool,
     italic: bool,
+    /// The font's family (see [`family_of`]).
+    family: u32,
     /// A Type0 font that writes top to bottom.
     vertical: bool,
     /// The font program is in the file, so its own tables describe its glyphs.
@@ -581,6 +599,14 @@ struct FontInfo {
     /// The CID collection of a CID font whose glyph ids are its CIDs (a TrueType CID font with
     /// the identity CIDToGIDMap), or whose CFF program is CID-keyed.
     collection: Option<CidFamily>,
+    /// The font's base name, without a subset prefix, is `Symbol` (see [`is_symbol`]): a glyph whose text is one
+    /// ASCII character is read through the Adobe Symbol encoding (`a` is the alpha), as
+    /// pdf.js and pdfminer read it. Such a font's ToUnicode map often gives the Latin letter
+    /// of the code.
+    symbol: bool,
+    /// The font's base name names a barcode font (see [`crate::barfont::barcode_name`]): its
+    /// glyphs are bars, never text.
+    barcode: bool,
 }
 
 /// A marked content sequence the walk met, in the order the interpreter meets it.
@@ -804,10 +830,14 @@ impl<'p, 'a> PageReader<'p, 'a> {
             cells: Vec::new(),
             cells_cut: false,
             cells_held: 0,
+            drawn_marks: Vec::new(),
+            drawn_marks_cut: false,
+            drawn_marks_held: 0,
             stencils,
             pictures: &mut self.pictures,
             page: n,
             rules: Vec::new(),
+            mark_rules: Vec::new(),
             rules_cut: false,
             open: Vec::new(),
             marks: if use_marks { &marks } else { &[] },
@@ -831,14 +861,33 @@ impl<'p, 'a> PageReader<'p, 'a> {
             unmapped: 0,
             unmapped_visible: 0,
             mapped: 0,
+            symbol: 0,
+            bar_fonts: HashMap::new(),
+            bar_outlines: HashMap::new(),
+            bar_runs: Vec::new(),
+            bar_glyphs: 0,
+            bars: Vec::new(),
+            bars_cut: false,
+            bars_held: 0,
+            outlines_held: 0,
+            outlines_cut: false,
+            bars_unread: Vec::new(),
+            bar_texts: Vec::new(),
         };
         let run = panic::catch_unwind(AssertUnwindSafe(|| {
             interpret(TypedIter::new(&data), page.resources(), &mut ctx, &mut dev);
         }));
         drop(ctx);
+        // The runs of bars that print codes leave the text.
+        dev.take_bars();
         if let Err(payload) = run {
+            // A page not kept gives back what its cells and marks hold of the object pool.
+            let held = dev.cells_held + dev.drawn_marks_held + dev.bars_held + dev.outlines_held;
             match payload.downcast_ref::<Abort>() {
-                Some(Abort::Stop) => return Read::Stopped,
+                Some(Abort::Stop) => {
+                    self.origin.release_copy(held);
+                    return Read::Stopped;
+                }
                 Some(Abort::Cap) => {
                     in_part = true;
                     notes.push(Note::Limit(format!(
@@ -851,6 +900,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
                     // Whatever the interpreter cached may be half built.
                     self.cache = InterpreterCache::new();
                     self.cache_bytes = 0;
+                    self.origin.release_copy(held);
                     return fail("interpreting the content".into(), Fail::Internal);
                 }
             }
@@ -893,6 +943,52 @@ impl<'p, 'a> PageReader<'p, 'a> {
                  object limit allows; their glyphs count as unmapped"
             )));
         }
+        // Which boxes of a mark's shape are marks depends on the size of the text: a mark
+        // that stands by no digit (a dash, the mark of an empty field) is measured by the page's
+        // text, one between two digits by theirs.
+        let kept_marks = dev.drawn_marks.len();
+        let size = crate::marks::page_size(&dev.glyphs, &dev.text);
+        let small = |m: &[f32; 4]| size.is_some_and(|s| crate::marks::is_mark(*m, s));
+        let (mut marks, larger): (Vec<_>, Vec<_>) = dev.drawn_marks.drain(..).partition(small);
+        // Dashed rules drawn as rows of marks are rules all the same, and their
+        // marks are no separators.
+        let dashed = crate::marks::dashed_rules(&mut marks);
+        marks.extend(larger);
+        // A separator drawn as a mark between two digits puts a placeholder between them, read
+        // once the whole file is (`marks::resolve`). The quotes below are taken with it.
+        let turn = page_turn(
+            dev.glyphs
+                .iter()
+                .filter(|g| g.layer.is_none() && !g.invisible),
+        );
+        let mut used: Vec<[f32; 4]> = Vec::new();
+        if !crate::marks::insert(&mut dev.glyphs, &mut dev.text, &mut marks, turn, &mut used) {
+            notes.push(Note::Limit(format!(
+                "separators drawn as marks on page {n} are looked for only in part: the page has \
+                 too many marks near its digits"
+            )));
+        }
+        // The boxes that are no marks are rules as drawn, in their place; the dashed rules
+        // follow them.
+        used.sort_by(|a, b| a[0].total_cmp(&b[0]));
+        restore_mark_rules(&mut dev.rules, std::mem::take(&mut dev.mark_rules), |b| {
+            small(b) || is_used(&used, b)
+        });
+        dev.rules.extend(dashed);
+        if dev.rules.len() > dev.cap {
+            dev.rules.truncate(dev.cap);
+            dev.rules_cut = true;
+        }
+        dev.drawn_marks = marks;
+        // A value that touches the next field's value, its separator drawn, is parted at the
+        // field's divider when the digits before it read as a number.
+        crate::marks::cut_at_dividers(&mut dev.glyphs, &mut dev.text, &dev.rules, turn);
+        if dev.drawn_marks_cut {
+            notes.push(Note::Limit(format!(
+                "only the first {kept_marks} drawn marks on page {n} are looked at as separators: \
+                 the page draws more than it may keep"
+            )));
+        }
         let texts = Texts {
             text: &dev.text,
             actuals: &dev.actuals,
@@ -922,8 +1018,10 @@ impl<'p, 'a> PageReader<'p, 'a> {
             .collect();
         let width = (crop.x1 - crop.x0) as f32;
         let height = (crop.y1 - crop.y0) as f32;
-        // The grid search runs once for the page; when it gives up, one loss says so for
-        // both the ruled tables and the boxes.
+        // This grid search decides for the page whether the ruled tables and the boxes are
+        // looked for; when it gives up, one loss says so for both. The layout's passes (field
+        // frames, titles, rows of boxes, ruled tables) search the grids again, each within
+        // the same work bound, six to seven times a page.
         let found = regions::grids(&dev.rules);
         let inked = regions::Inked::new(
             width,
@@ -957,6 +1055,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
             (crop.x0, crop.y0, width, height),
             &layers,
             &boxes,
+            &dev.rules,
         );
         drop(boxes);
         if let Some(why) = &unsearched {
@@ -978,7 +1077,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
         // The search holds its grid in the object pool while it runs.
         let search = crate::codes::search_bytes(&dev.cells);
         let found = if self.origin.reserve_copy(search) {
-            let found = crate::codes::vector_codes(&dev.cells);
+            let found = crate::codes::vector_search(&dev.cells);
             self.origin.release_copy(search);
             found
         } else {
@@ -987,10 +1086,39 @@ impl<'p, 'a> PageReader<'p, 'a> {
             ))
         };
         match found {
-            Ok(codes) => items.codes = codes,
+            Ok(searched) => {
+                items.codes = searched.codes;
+                if let Some(why) = searched.partly {
+                    notes.push(Note::Unsupported(format!(
+                        "codes drawn as paths on page {n} are looked for only in part: {why}"
+                    )));
+                }
+            }
             Err(why) => notes.push(Note::Unsupported(format!(
                 "codes drawn as paths on page {n} are not looked for: {why}"
             ))),
+        }
+        // Codes printed with a barcode font are read like codes drawn as paths.
+        items
+            .codes
+            .extend(crate::barfont::codes(&dev.bars, &dev.bar_texts));
+        dev.bar_texts = Vec::new();
+        if dev.bars_cut {
+            notes.push(Note::Unsupported(format!(
+                "codes printed in a barcode font on page {n} are looked for only among the \
+                 first {} glyphs drawn as bars: there are more, or the object limit holds \
+                 no more; the glyphs past them stay text",
+                dev.bar_glyphs
+            )));
+        }
+        dev.bars = Vec::new();
+        self.origin.release_copy(dev.bars_held + dev.outlines_held);
+        if dev.outlines_cut {
+            notes.push(Note::Unsupported(format!(
+                "runs of bars on page {n} are read for codes only while the page draws at most \
+                 {MAX_OUTLINES} different glyphs drawn as bars and the object limit holds \
+                 them: the runs past that are not read as codes and are left out of the text"
+            )));
         }
         if dev.cells_cut {
             notes.push(Note::Unsupported(format!(
@@ -1004,13 +1132,19 @@ impl<'p, 'a> PageReader<'p, 'a> {
         items.images_id = std::mem::take(&mut dev.images_id);
         items.images_mcid = std::mem::take(&mut dev.images_mcid);
         items.rules = std::mem::take(&mut dev.rules);
+        items.marks = std::mem::take(&mut dev.drawn_marks);
+        // What the page keeps of the marks counts against the kept bytes from here on.
+        self.origin.release_copy(dev.drawn_marks_held);
         if items.turned {
-            // The rules go into the frame of the runs, in place.
+            // The rules and marks go into the frame of the runs, in place.
             for r in &mut items.rules {
                 let b = items
                     .turn
                     .place_box([r.x0, r.y0, r.x1, r.y1], width, height);
                 (r.x0, r.y0, r.x1, r.y1) = (b[0], b[1], b[2], b[3]);
+            }
+            for m in &mut items.marks {
+                *m = items.turn.place_box(*m, width, height);
             }
         }
         items.origin = (crop.x0 as f32, crop.y0 as f32);
@@ -1024,6 +1158,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
         items.mapped = dev.mapped;
         items.unmapped = dev.unmapped;
         items.unmapped_visible = dev.unmapped_visible;
+        items.symbol = dev.symbol;
         // The glyph buffers are kept for the next page: built again for each page, their
         // memory would not be used again.
         let (mut glyphs, mut text) = (
@@ -1671,9 +1806,14 @@ impl<'w> Walk<'w> {
     /// The ActualText of a sequence's properties: inline, or a named entry of `/Properties`,
     /// read once for the file.
     fn actual_text(&mut self, props: &Object<'_>, res: &Resources<'_>) -> Option<Rc<str>> {
+        // Rezzer's placeholders are dropped from the file's text (see `TextDevice::push_glyph`).
         let read = |d: &Dict<'_>| {
             d.get::<hayro_syntax::object::String<'_>>(b"ActualText")
-                .map(|s| Rc::from(pdfparts::objects::text_string(s.as_bytes())))
+                .map(|s| {
+                    let mut text = pdfparts::objects::text_string(s.as_bytes());
+                    text.retain(|c| !crate::marks::is_placeholder(c));
+                    Rc::from(text)
+                })
         };
         if let Some((d, _)) = dict_or_stream(props) {
             return read(d);
@@ -1906,6 +2046,44 @@ fn tag_hash(tag: &[u8]) -> u64 {
     h.finish()
 }
 
+/// The family of a font by its name (in small letters, without a subset prefix): the name up
+/// to its first `-` or `,` (a style follows there), without the style words and the `mt` or
+/// `ps` marks it may end with, as a hash. A bold and a regular font of one family have the same
+/// one; 0 for a font without a name.
+pub(crate) fn family_of(name: &str) -> u32 {
+    let mut base = name.split(['-', ',']).next().unwrap_or_default();
+    while let Some(rest) = [
+        "mt", "ps", "bold", "italic", "oblique", "regular", "semibold", "demi", "black", "heavy",
+    ]
+    .iter()
+    .find_map(|w| base.strip_suffix(w).filter(|r| !r.is_empty()))
+    {
+        base = rest;
+    }
+    if base.is_empty() {
+        return 0;
+    }
+    // FNV-1a: no family hashes to 0.
+    let h = base.bytes().fold(0x811c_9dc5u32, |h, b| {
+        (h ^ u32::from(b)).wrapping_mul(0x0100_0193)
+    });
+    h.max(1)
+}
+
+/// Whether a font name (in small letters, without a subset prefix) is a bold font of the TeX
+/// families, whose names give the series as letters (`cmbx12` is Computer Modern bold
+/// extended at 12 pt) and whose descriptors carry no weight.
+fn tex_bold(name: &str) -> bool {
+    [
+        "cmbx", "cmssbx", "cmmib", "cmbsy", "ecbx", "ecsx", "ecrb", "ecbi", "ecbl",
+    ]
+    .iter()
+    .any(|p| name.starts_with(p))
+        || name
+            .strip_prefix("cmb")
+            .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit()))
+}
+
 /// Style and kind of a font from its dictionary: the descriptor's flags, weight and angle and
 /// the font's name.
 fn font_info(font: &Dict<'_>) -> FontInfo {
@@ -1949,7 +2127,8 @@ fn font_info(font: &Dict<'_>) -> FontInfo {
         || weight >= 600.0
         || ["bold", "black", "heavy", "semibold", "demi"]
             .iter()
-            .any(|w| name.contains(w));
+            .any(|w| name.contains(w))
+        || tex_bold(&name);
     let italic = flags & (1 << 6) != 0
         || angle != 0.0
         || ["italic", "oblique"].iter().any(|w| name.contains(w));
@@ -1982,10 +2161,13 @@ fn font_info(font: &Dict<'_>) -> FontInfo {
     FontInfo {
         bold,
         italic,
+        family: family_of(&name),
         vertical,
         embedded,
         program: None,
         collection,
+        symbol: is_symbol(&name),
+        barcode: crate::barfont::barcode_name(&name),
     }
 }
 
@@ -2092,7 +2274,8 @@ fn name_text(name: &str) -> Option<String> {
 
 /// The text a Unicode mapping gives, cleaned: ligatures written out, white space control
 /// characters as spaces. `None` when nothing usable is left (U+FFFD, noncharacters, other
-/// control characters).
+/// control characters). The noncharacters U+FDD0 to U+FDEF are dropped too: they are
+/// Rezzer's placeholders for separators drawn as marks.
 fn clean_bf(bf: BfString) -> Option<String> {
     let mut out = String::new();
     let mut push = |c: char| match c {
@@ -2104,7 +2287,7 @@ fn clean_bf(bf: BfString) -> Option<String> {
         '\u{FB05}' | '\u{FB06}' => out.push_str("st"),
         '\t' | '\n' | '\r' => out.push(' '),
         '\u{FFFD}' | '\u{FFFE}' | '\u{FFFF}' => {}
-        c if c.is_control() => {}
+        c if c.is_control() || crate::marks::is_placeholder(c) => {}
         c => out.push(c),
     };
     match bf {
@@ -2148,6 +2331,8 @@ pub(crate) struct Gl {
     pub adv: Option<f32>,
     pub bold: bool,
     pub italic: bool,
+    /// The family of its font (see [`family_of`]), 0 when not known.
+    pub family: u32,
     pub mcid: Option<u32>,
     pub invisible: bool,
     /// The switched-off layer the glyph stands in.
@@ -2525,6 +2710,13 @@ struct TextDevice<'d> {
     cells_cut: bool,
     /// What the cells hold of the object pool.
     cells_held: u64,
+    /// Filled bars the page draws in the shape of a mark (see
+    /// [`crate::marks::mark_shaped`]), at most [`crate::marks::MAX_MARKS`].
+    drawn_marks: Vec<[f32; 4]>,
+    /// More marks were drawn than are kept.
+    drawn_marks_cut: bool,
+    /// What the marks hold of the object pool.
+    drawn_marks_held: u64,
     images_mcid: Vec<Option<u32>>,
     /// The image object of each stencil mask dictionary the walk met, `None` when several
     /// objects share it.
@@ -2533,6 +2725,10 @@ struct TextDevice<'d> {
     pictures: &'d mut Pictures,
     page: u32,
     rules: Vec<Rule>,
+    /// The rules of boxes shaped like marks ([`crate::marks::mark_shaped`]), held back until
+    /// the page's text tells which of them are marks: each with the place in `rules` it was
+    /// drawn at and its box. The others go back into `rules` there.
+    mark_rules: Vec<(usize, [f32; 4], Rule)>,
     /// Lines were drawn past the cap and are not kept.
     rules_cut: bool,
     open: Vec<Open>,
@@ -2554,12 +2750,81 @@ struct TextDevice<'d> {
     stop: &'d dyn Fn() -> bool,
     calls: u64,
     cap: usize,
-    /// The glyph run drawn last, to read a run that is filled and then stroked once.
+    /// The key (glyphs and place on the page) of the glyph run drawn last, to read a run that
+    /// is filled and then stroked once.
     last: Option<u64>,
     unmapped: u64,
     unmapped_visible: u64,
     mapped: u64,
+    /// Glyphs read through the Adobe Symbol encoding.
+    symbol: u64,
+    /// What the outlines of a font's glyphs showed so far (see [`crate::barfont`]): a font
+    /// with a glyph that is no bars is a text font for the page, one whose runs of bars fit
+    /// a code is a barcode font.
+    bar_fonts: HashMap<u128, BarFont>,
+    /// The outline of each glyph looked at, by font and glyph id.
+    bar_outlines: HashMap<(u128, u32), Rc<crate::barfont::Outline>>,
+    /// The runs whose glyphs are all bars or spaces, in the order drawn: their glyphs are in
+    /// `glyphs` until the page is drawn, when [`TextDevice::take_bars`] decides (at most
+    /// [`crate::barfont::MAX_GLYPHS`] glyphs).
+    bar_runs: Vec<BarRun>,
+    /// Glyphs of `bar_runs`.
+    bar_glyphs: usize,
+    /// The glyphs of barcodes the page prints with a font: no text, the places of codes.
+    bars: Vec<crate::barfont::Placed>,
+    /// More glyphs of bars were drawn than are looked at.
+    bars_cut: bool,
+    /// What `bar_runs` holds of the object pool.
+    bars_held: u64,
+    /// What `bar_outlines` holds of the object pool.
+    outlines_held: u64,
+    /// More different glyphs drawn as bars than are kept (see [`MAX_OUTLINES`]), or the
+    /// object pool held no more of them: their runs are not read as codes.
+    outlines_cut: bool,
+    /// The glyphs (first and number) of runs of bars whose outlines were not kept, with
+    /// whether an ActualText gives their text: they are no text and are not read as codes.
+    bars_unread: Vec<(usize, usize, bool)>,
+    /// The Code 128 value each code printed with a font prints, read from the glyphs'
+    /// geometry, for the codes that are one.
+    bar_texts: Vec<(u32, String)>,
 }
+
+/// What the outlines of a font showed (see [`TextDevice::bar_run`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BarFont {
+    Text,
+    Bars,
+}
+
+/// One glyph of bars: its font, id, transform (font units to the page), outline and advance
+/// in font units.
+struct BarGlyph {
+    font: u128,
+    id: u32,
+    t: Affine,
+    outline: Rc<crate::barfont::Outline>,
+    advance: Option<f32>,
+}
+
+/// A run whose glyphs are all bars or spaces: where its glyphs stand in `TextDevice::glyphs`,
+/// the glyphs, whether a glyph's font is named for codes, and whether an ActualText gives its
+/// text (then the text stays).
+struct BarRun {
+    from: usize,
+    glyphs: Vec<BarGlyph>,
+    named: bool,
+    keep: bool,
+}
+
+/// What one glyph of [`BarRun`] holds, about.
+const BAR_GLYPH_BYTES: u64 = std::mem::size_of::<BarGlyph>() as u64;
+
+/// Different glyph outlines (by font and glyph) a page keeps while it looks for runs of bars,
+/// at most: a barcode font draws about a hundred.
+const MAX_OUTLINES: usize = 8_192;
+
+/// What one kept outline holds besides its bars, about: the outline and its place in the map.
+const OUTLINE_BYTES: u64 = std::mem::size_of::<crate::barfont::Outline>() as u64 + 48;
 
 impl TextDevice<'_> {
     fn tick(&mut self) {
@@ -2630,12 +2895,331 @@ impl TextDevice<'_> {
         tables.by_gid.get(&o.glyph_id().to_u32()).cloned()
     }
 
+    /// Keeps a glyph with its text. Rezzer's placeholders (U+FDD0 to U+FDEF) are dropped from
+    /// it, whatever gave the text (a glyph name, a font table), so a placeholder in the text
+    /// is always Rezzer's own.
     fn push_glyph(&mut self, text: &str, g: Gl) {
         let start = u32::try_from(self.text.len()).unwrap_or(u32::MAX);
-        self.text.push_str(text);
-        let len = u32::try_from(text.len()).unwrap_or(0);
+        let before = self.text.len();
+        if text.contains(crate::marks::is_placeholder) {
+            self.text
+                .extend(text.chars().filter(|&c| !crate::marks::is_placeholder(c)));
+        } else {
+            self.text.push_str(text);
+        }
+        let len = u32::try_from(self.text.len() - before).unwrap_or(0);
         self.glyphs.push(Gl { start, len, ..g });
     }
+
+    /// The glyphs of `run` (drawn with `transform`) when each is bars or a space and at least
+    /// one is bars (see [`crate::barfont::outline`]), with whether a font's name says it is a
+    /// barcode font. One glyph that is anything else makes its font a text font for the page.
+    /// Also whether an outline of the run could not be kept ([`MAX_OUTLINES`] or the object
+    /// pool): such a run is not read as a code.
+    fn bar_run(
+        &mut self,
+        run: &GlyphRun<'_, '_>,
+        transform: Affine,
+    ) -> Option<(Vec<BarGlyph>, bool, bool)> {
+        use crate::barfont::Outline;
+        let glyphs = run.glyphs();
+        let mut seen: Vec<BarGlyph> = Vec::with_capacity(glyphs.len());
+        let mut named = false;
+        let mut bars = false;
+        let mut unkept = false;
+        for g in glyphs {
+            self.tick();
+            let Glyph::Outline(o) = &**g else {
+                return None;
+            };
+            let key = o.font_cache_key();
+            if self.bar_fonts.get(&key) == Some(&BarFont::Text) {
+                return None;
+            }
+            let id = o.glyph_id().to_u32();
+            let outline = match self.bar_outlines.get(&(key, id)) {
+                Some(o) => o.clone(),
+                None => {
+                    let read = Rc::new(crate::barfont::outline(&o.outline()));
+                    // Each outline kept is charged; past the bound or the pool it is looked at
+                    // and not kept.
+                    let bytes = OUTLINE_BYTES
+                        + match &*read {
+                            Outline::Bars { bars, .. } => {
+                                (bars.len() * std::mem::size_of::<(f64, f64)>()) as u64
+                            }
+                            _ => 0,
+                        };
+                    if !self.outlines_cut
+                        && self.bar_outlines.len() < MAX_OUTLINES
+                        && self.origin.charge_copy(bytes)
+                    {
+                        self.outlines_held += bytes;
+                        self.bar_outlines.insert((key, id), read.clone());
+                    } else {
+                        self.outlines_cut = true;
+                        unkept = true;
+                    }
+                    read
+                }
+            };
+            match *outline {
+                Outline::Other => {
+                    self.bar_fonts.insert(key, BarFont::Text);
+                    return None;
+                }
+                Outline::Bars { .. } => bars = true,
+                Outline::Empty => {}
+            }
+            named |= self.fonts.get(&key).is_some_and(|i| i.barcode);
+            seen.push(BarGlyph {
+                font: key,
+                id,
+                t: transform * g.transform(),
+                outline,
+                advance: o.advance_width(),
+            });
+        }
+        bars.then_some((seen, named, unkept))
+    }
+
+    /// Keeps the run of bars `run`, if the page may hold its glyphs (in the object pool, a
+    /// block at a time, up to [`crate::barfont::MAX_GLYPHS`]); past that its glyphs stay
+    /// text and a note says so.
+    fn keep_bar_run(&mut self, run: BarRun) {
+        let n = run.glyphs.len();
+        if self.bars_cut || self.bar_glyphs + n > crate::barfont::MAX_GLYPHS {
+            self.bars_cut = true;
+            return;
+        }
+        while (self.bar_glyphs + n) as u64 * BAR_GLYPH_BYTES > self.bars_held {
+            if self.origin.reserve_copy(CELL_BLOCK * BAR_GLYPH_BYTES) {
+                self.bars_held += CELL_BLOCK * BAR_GLYPH_BYTES;
+            } else {
+                self.bars_cut = true;
+                return;
+            }
+        }
+        self.bar_glyphs += n;
+        self.bar_runs.push(run);
+    }
+
+    /// Decides, once the page is drawn, which runs of bars print codes, on the evidence of
+    /// their shape ([`crate::barfont::bars_fit`]): runs that continue one another along one
+    /// baseline (a code shown a glyph or a few at a time) are looked at as one; a font whose
+    /// runs fit is a barcode font for the page, and its other runs are taken too. The glyphs
+    /// of a code are taken out of the text (unless an ActualText gives it), and kept as the
+    /// places of codes with the Code 128 value their bars print, when they print one.
+    fn take_bars(&mut self) {
+        use crate::barfont::Outline;
+        let runs = std::mem::take(&mut self.bar_runs);
+        let unread = std::mem::take(&mut self.bars_unread);
+        if runs.is_empty() && unread.is_empty() {
+            return;
+        }
+        // Whether the run `b` continues the run `a`: the same size and direction, its first
+        // glyph where the last of `a` ends, on its baseline.
+        let continues = |a: &BarRun, b: &BarRun| {
+            let (Some(x), Some(y)) = (a.glyphs.last(), b.glyphs.first()) else {
+                return false;
+            };
+            let (p, q) = (x.t.as_coeffs(), y.t.as_coeffs());
+            let (lp, lq) = (p[0].hypot(p[1]), q[0].hypot(q[1]));
+            if lp <= 0.0 || (lp - lq).abs() > 0.02 * lp {
+                return false;
+            }
+            let (dx, dy) = (p[0] / lp, p[1] / lp);
+            if (q[0] / lq) * dx + (q[1] / lq) * dy < 0.999 {
+                return false;
+            }
+            let adv = f64::from(x.advance.unwrap_or(0.0));
+            let end = (p[4] + p[0] * adv, p[5] + p[1] * adv);
+            let d = (q[4] - end.0, q[5] - end.1);
+            let size = lp * 1000.0;
+            let along = d.0 * dx + d.1 * dy;
+            let across = (d.1 * dx - d.0 * dy).abs();
+            across <= 0.1 * size && along >= -0.05 * size && along <= 0.6 * size
+        };
+        let mut groups: Vec<Vec<usize>> = Vec::new();
+        for i in 0..runs.len() {
+            match groups.last_mut() {
+                Some(g) if continues(&runs[*g.last().unwrap_or(&i)], &runs[i]) => g.push(i),
+                _ => groups.push(vec![i]),
+            }
+        }
+        let looked = |g: &[usize]| -> Vec<(u32, Affine, &Outline)> {
+            g.iter()
+                .flat_map(|&i| runs[i].glyphs.iter())
+                .map(|b| (b.id, b.t, b.outline.as_ref()))
+                .collect()
+        };
+        // A group of shows that gives no code is looked at show by show.
+        let mut split: Vec<Vec<usize>> = Vec::with_capacity(groups.len());
+        let mut parts: Vec<Vec<crate::barfont::Part>> = Vec::with_capacity(groups.len());
+        for g in groups {
+            self.tick();
+            let named = |g: &[usize]| g.iter().any(|&i| runs[i].named);
+            let found = crate::barfont::code_parts(&looked(&g), named(&g));
+            if found.is_empty() && g.len() > 1 {
+                for i in g {
+                    parts.push(crate::barfont::code_parts(&looked(&[i]), named(&[i])));
+                    split.push(vec![i]);
+                }
+            } else {
+                parts.push(found);
+                split.push(g);
+            }
+        }
+        let groups = split;
+        let mut taken = vec![false; groups.len()];
+        // The parts of each group that are codes; a group taken as a run of a barcode font
+        // without a part of its own is one code.
+        for (k, g) in groups.iter().enumerate() {
+            if !parts[k].is_empty() {
+                taken[k] = true;
+                for &i in g {
+                    for b in &runs[i].glyphs {
+                        self.bar_fonts.insert(b.font, BarFont::Bars);
+                    }
+                }
+            }
+        }
+        // The other runs of a font found to be a barcode font are codes too.
+        for (k, g) in groups.iter().enumerate() {
+            if !taken[k]
+                && g.iter().all(|&i| {
+                    runs[i]
+                        .glyphs
+                        .iter()
+                        .all(|b| self.bar_fonts.get(&b.font) == Some(&BarFont::Bars))
+                })
+            {
+                taken[k] = true;
+            }
+        }
+        let mut drop_glyph = vec![false; self.glyphs.len()];
+        // Runs of bars whose outlines were not kept are no text either (unless an ActualText
+        // gives it); a note says they are not read.
+        for (from, n, keep) in unread {
+            if !keep && let Some(d) = drop_glyph.get_mut(from..from + n) {
+                d.fill(true);
+            }
+        }
+        let mut next_code = 0u32;
+        for (k, g) in groups.iter().enumerate() {
+            if !taken[k] {
+                continue;
+            }
+            let all = looked(g);
+            // Each part that is a code is a code of its own; bars past a quiet zone that are
+            // no part of one are no text and no code. A group with no part of its own is one
+            // code.
+            let first = next_code;
+            let spans = crate::barfont::glyph_spans(&all);
+            let mut code_of = vec![None; all.len()];
+            if parts[k].is_empty() {
+                if let Some(text) = crate::barfont::code128_text(&all) {
+                    self.bar_texts.push((first, text));
+                }
+                code_of.fill(Some(first));
+                next_code += 1;
+            } else {
+                for part in &parts[k] {
+                    let id = next_code;
+                    next_code += 1;
+                    if let Some(text) = &part.text {
+                        self.bar_texts.push((id, text.clone()));
+                    }
+                    let slack = 0.01 * (part.to - part.from);
+                    for (c, span) in code_of.iter_mut().zip(&spans) {
+                        if let Some((a, z)) = span
+                            && *a >= part.from - slack
+                            && *z <= part.to + slack
+                        {
+                            *c = Some(id);
+                        }
+                    }
+                }
+            }
+            let mut at = 0;
+            for &i in g {
+                let run = &runs[i];
+                for (j, b) in run.glyphs.iter().enumerate() {
+                    let code = code_of.get(at).copied().flatten();
+                    at += 1;
+                    if !run.keep
+                        && let Some(d) = drop_glyph.get_mut(run.from + j)
+                    {
+                        *d = true;
+                    }
+                    if let Some(code) = code
+                        && let Some((bx, module)) = crate::barfont::place(b.t, &b.outline)
+                    {
+                        self.bars.push(crate::barfont::Placed {
+                            b: bx,
+                            module,
+                            glyph: b.id,
+                            font: b.font,
+                            run: code,
+                        });
+                    }
+                }
+            }
+        }
+        // Their glyphs are no text: taken out, and no more counted as read characters.
+        let mut k = 0;
+        let (text, mut mapped, mut unmapped) = (&self.text, 0u64, 0u64);
+        self.glyphs.retain(|g| {
+            let out = drop_glyph.get(k).copied().unwrap_or(false);
+            k += 1;
+            if out {
+                let t = &text[g.start as usize..(g.start + g.len) as usize];
+                if t == "\u{FFFD}" {
+                    unmapped += 1;
+                } else if !t.is_empty() {
+                    mapped += 1;
+                }
+            }
+            !out
+        });
+        self.mapped = self.mapped.saturating_sub(mapped);
+        self.unmapped = self.unmapped.saturating_sub(unmapped);
+        self.unmapped_visible = self.unmapped_visible.saturating_sub(unmapped);
+    }
+}
+
+/// Puts the rules of boxes shaped like marks (`held`, each with the place in `rules` it was
+/// drawn at) back into `rules` at their places, but not those of the boxes `mark` takes for
+/// marks.
+fn restore_mark_rules(
+    rules: &mut Vec<Rule>,
+    held: Vec<(usize, [f32; 4], Rule)>,
+    mark: impl Fn(&[f32; 4]) -> bool,
+) {
+    let mut back = held.into_iter().filter(|(_, b, _)| !mark(b)).peekable();
+    if back.peek().is_none() {
+        return;
+    }
+    let drawn = std::mem::take(rules);
+    rules.reserve(drawn.len());
+    for (k, r) in drawn.into_iter().enumerate() {
+        while let Some((_, _, h)) = back.next_if(|(at, ..)| *at <= k) {
+            rules.push(h);
+        }
+        rules.push(r);
+    }
+    rules.extend(back.map(|(_, _, h)| h));
+}
+
+/// Whether `b` is one of the marks `used` (sorted by their left side), within float noise:
+/// the box of a mark's rule and of its fill are computed from the same points.
+fn is_used(used: &[[f32; 4]], b: &[f32; 4]) -> bool {
+    const NOISE: f32 = 0.01;
+    let first = used.partition_point(|u| u[0] < b[0] - NOISE);
+    used[first..]
+        .iter()
+        .take_while(|u| u[0] <= b[0] + NOISE)
+        .any(|u| (0..4).all(|k| (u[k] - b[k]).abs() <= NOISE))
 }
 
 /// A filled rectangle at most this many points thick is a rule, not a shaded area.
@@ -2731,30 +3315,45 @@ impl Subpath {
     }
 
     /// Hands on what the subpath draws once it ends.
-    fn end(self, stroke: bool, keep: &mut dyn FnMut(Rule)) {
+    fn end(self, stroke: bool, keep: &mut dyn FnMut(Rule, Option<[f32; 4]>)) {
         if let Some(r) = self.rounded_box(stroke) {
-            keep(r);
+            keep(r, None);
             return;
         }
+        let corners = &self.corners[..self.count.min(self.corners.len())];
+        let four = !self.curved && (4..=5).contains(&self.count);
+        // A mark is a separator of a boxed number field, never a rule: neither its fill nor
+        // the sides of its stroke (a print run fills and strokes it with a hairline). Whether
+        // a box of its shape is one is known once the page's text is: its rules go with it.
+        let mark = four
+            .then(|| axis_box(corners))
+            .flatten()
+            .filter(|b| crate::marks::mark_shaped(*b));
         for r in self.held.into_iter().flatten() {
-            keep(r);
+            keep(r, mark);
         }
         if !stroke
-            && !self.curved
-            && (4..=5).contains(&self.count)
-            && let Some(r) = rectangle(&self.corners[..self.count])
+            && four
+            && let Some(r) = rectangle(corners)
         {
-            keep(r);
+            keep(r, mark);
         }
     }
 }
 
 /// The rules a path draws once `transform` maps it into the page box: each straight
 /// horizontal or vertical segment of a stroked path is a line, a filled axis-aligned
-/// rectangle is a line when thin and a rectangle otherwise. A closed subpath of sides along
-/// the axes and small corner curves, stroked or filled, is the rectangle of its bounds (a
-/// box with rounded corners). Other curves and slanted segments are not rules.
-fn rules_of(path: &BezPath, transform: Affine, stroke: bool, keep: &mut dyn FnMut(Rule)) {
+/// rectangle is a line when thin and a rectangle otherwise. The rules of a box shaped like a
+/// mark ([`crate::marks::mark_shaped`]) come with that box, as they are none when it is a
+/// mark. A closed subpath of sides along the axes and small corner curves, stroked or
+/// filled, is the rectangle of its bounds (a box with rounded corners). Other curves and
+/// slanted segments are not rules.
+fn rules_of(
+    path: &BezPath,
+    transform: Affine,
+    stroke: bool,
+    keep: &mut dyn FnMut(Rule, Option<[f32; 4]>),
+) {
     use kurbo::PathEl;
     let segment = |a: Point, b: Point| -> Option<Rule> {
         let (dx, dy) = ((b.x - a.x).abs() as f32, (b.y - a.y).abs() as f32);
@@ -2776,7 +3375,7 @@ fn rules_of(path: &BezPath, transform: Affine, stroke: bool, keep: &mut dyn FnMu
         }
     };
     // A straight piece from the subpath's last point to `p`.
-    let straight = |sub: &mut Subpath, p: Point, keep: &mut dyn FnMut(Rule)| {
+    let straight = |sub: &mut Subpath, p: Point, keep: &mut dyn FnMut(Rule, Option<[f32; 4]>)| {
         let a = sub.last;
         if (p.x - a.x).abs() > 0.5 && (p.y - a.y).abs() > 0.5 {
             sub.square = false;
@@ -2787,11 +3386,11 @@ fn rules_of(path: &BezPath, transform: Affine, stroke: bool, keep: &mut dyn FnMu
                 Some(_) => {
                     // Too long to be a box: what was held goes out, and the rest as it comes.
                     for h in sub.held.take().into_iter().flatten() {
-                        keep(h);
+                        keep(h, None);
                     }
-                    keep(r);
+                    keep(r, None);
                 }
-                None => keep(r),
+                None => keep(r, None),
             }
         }
     };
@@ -2935,13 +3534,16 @@ fn rectangle(points: &[Point]) -> Option<Rule> {
     bounds_rule(x0, y0, x1, y1)
 }
 
-/// The rule an area of these bounds is: a line when it is thin, a rectangle otherwise.
+/// The rule an area of these bounds is: a line when it is thin, a rectangle otherwise. A line
+/// runs along its longer side: a short dash thin both ways (a dash of a dashed rule) is a line
+/// across the page when it is wider than high and down the page when it is higher than wide,
+/// so a page turned a quarter reads its dashes as it reads them upright.
 fn bounds_rule(x0: f32, y0: f32, x1: f32, y1: f32) -> Option<Rule> {
     let (w, h) = (x1 - x0, y1 - y0);
     if w.max(h) < SHORTEST {
         return None;
     }
-    Some(if h <= THIN {
+    Some(if h <= THIN && (w > THIN || w >= h) {
         let y = (y0 + y1) / 2.0;
         Rule {
             x0,
@@ -3020,30 +3622,49 @@ impl<'a> Device<'a> for TextDevice<'_> {
             hayro_interpret::Paint::Color(c) => c.to_rgba().to_rgba8()[3] > 127,
             _ => false,
         };
-        if !stroke && dark && !self.cells_cut {
+        // Marks are dark too, and are also cells: a bar of a code can have their shape.
+        if !stroke && dark && !(self.cells_cut && self.drawn_marks_cut) {
             let origin = self.origin;
             let (cells, cut, held) = (&mut self.cells, &mut self.cells_cut, &mut self.cells_held);
+            let (marks, marks_cut, marks_held) = (
+                &mut self.drawn_marks,
+                &mut self.drawn_marks_cut,
+                &mut self.drawn_marks_held,
+            );
             cells_of(path, props.transform, &mut |c| {
-                // The cells are held in the object pool, a block at a time.
-                if cells.len() as u64 * CELL_BYTES >= *held {
-                    if cells.len() >= crate::codes::MAX_CELLS
-                        || !origin.reserve_copy(CELL_BLOCK * CELL_BYTES)
-                    {
+                // Cells and marks are held in the object pool, a block at a time, up to their
+                // caps.
+                let keep = |list: &mut Vec<[f32; 4]>, cut: &mut bool, held: &mut u64, cap| {
+                    if list.len() >= cap {
                         *cut = true;
-                        return;
+                    } else if list.len() as u64 * CELL_BYTES >= *held {
+                        if origin.reserve_copy(CELL_BLOCK * CELL_BYTES) {
+                            *held += CELL_BLOCK * CELL_BYTES;
+                        } else {
+                            *cut = true;
+                        }
                     }
-                    *held += CELL_BLOCK * CELL_BYTES;
+                    if !*cut {
+                        list.push(c);
+                    }
+                };
+                if !*cut {
+                    keep(cells, cut, held, crate::codes::MAX_CELLS);
                 }
-                cells.push(c);
+                if !*marks_cut && crate::marks::mark_shaped(c) {
+                    keep(marks, marks_cut, marks_held, crate::marks::MAX_MARKS);
+                }
             });
         }
-        let (rules, cap) = (&mut self.rules, self.cap);
+        let (rules, mark_rules, cap) = (&mut self.rules, &mut self.mark_rules, self.cap);
         let mut cut = false;
-        rules_of(path, props.transform, stroke, &mut |r| {
-            if rules.len() < cap {
-                rules.push(r);
-            } else {
+        rules_of(path, props.transform, stroke, &mut |r, mark| {
+            if rules.len() + mark_rules.len() >= cap {
                 cut = true;
+            } else if let Some(b) = mark {
+                mark_rules.push((rules.len(), b, r));
+            } else {
+                rules.push(r);
             }
         });
         self.rules_cut |= cut;
@@ -3069,6 +3690,9 @@ impl<'a> Device<'a> for TextDevice<'_> {
         };
         let mut h = DefaultHasher::new();
         glyphs.len().hash(&mut h);
+        // The place is the text matrix and the CTM: a print run moves each line with its own
+        // `cm` and shows it at the text origin, so two equal lines differ only in the CTM.
+        props.transform.as_coeffs().map(f64::to_bits).hash(&mut h);
         first.transform().as_coeffs().map(f64::to_bits).hash(&mut h);
         for g in glyphs {
             match &**g {
@@ -3079,11 +3703,19 @@ impl<'a> Device<'a> for TextDevice<'_> {
         let key = h.finish();
         if self.last == Some(key) {
             // Fill and stroke of one text show, or the same glyphs drawn twice in one place.
+            // A copy drawn a little apart (a fake bold) is kept here and dropped in order.rs.
             return;
         }
         self.last = Some(key);
         let layer = self.open.iter().rev().find_map(|o| o.layer);
         let invisible = matches!(mode, DrawMode::Invisible) || layer.is_some();
+        // A run whose glyphs are all bars may print a code: whether it does is decided when
+        // the page is drawn ([`TextDevice::take_bars`]); until then its glyphs are text.
+        let bar_run = if invisible {
+            None
+        } else {
+            self.bar_run(run, props.transform)
+        };
         let mcid = self.open.iter().rev().find_map(|o| o.mcid);
         let from = self.glyphs.len();
         for g in glyphs {
@@ -3127,6 +3759,7 @@ impl<'a> Device<'a> for TextDevice<'_> {
                 adv,
                 bold: info.bold,
                 italic: info.italic,
+                family: info.family,
                 mcid,
                 invisible,
                 layer,
@@ -3151,10 +3784,16 @@ impl<'a> Device<'a> for TextDevice<'_> {
                 }
                 continue;
             }
-            let text = g
+            let mut text = g
                 .as_unicode()
                 .and_then(clean_bf)
                 .or_else(|| self.fallback(g));
+            if info.symbol
+                && let Some(read) = text.as_deref().and_then(symbol_text)
+            {
+                self.symbol += 1;
+                text = Some(read);
+            }
             match text {
                 Some(t) => {
                     if !invisible {
@@ -3172,6 +3811,20 @@ impl<'a> Device<'a> for TextDevice<'_> {
             }
         }
         advances_from_positions(&mut self.glyphs[from..]);
+        if let Some((glyphs, named, unkept)) = bar_run {
+            let keep = self.open.iter().any(|o| o.actual.is_some());
+            if unkept {
+                self.bars_unread
+                    .push((from, self.glyphs.len() - from, keep));
+            } else {
+                self.keep_bar_run(BarRun {
+                    from,
+                    glyphs,
+                    named,
+                    keep,
+                });
+            }
+        }
     }
 
     fn draw_image(&mut self, image: Image<'a, '_>, props: ImageDrawProps<'a>) {
@@ -3251,6 +3904,27 @@ impl<'a> Device<'a> for TextDevice<'_> {
         self.tick();
         self.open.pop();
     }
+}
+
+/// Whether a font's base name (lowercase, subset prefix removed) is the font Symbol: `symbol`
+/// or `symbolmt`, alone or with a style part after a comma or a hyphen (`symbol,bold`,
+/// `symbolmt-bold`).
+fn is_symbol(name: &str) -> bool {
+    let base = name.split([',', '-']).next().unwrap_or(name);
+    matches!(base, "symbol" | "symbolmt")
+}
+
+/// The text a glyph of the font `Symbol` stands for, when its `text` is one printable ASCII
+/// character that the Adobe Symbol encoding reads as another character.
+fn symbol_text(text: &str) -> Option<String> {
+    let mut chars = text.chars();
+    let (Some(c), None) = (chars.next(), chars.next()) else {
+        return None;
+    };
+    let code = u8::try_from(c).ok().filter(|b| (0x20..=0x7e).contains(b))?;
+    crate::symbol::to_unicode(code)
+        .filter(|read| *read != c)
+        .map(String::from)
 }
 
 /// Marks each glyph with the first of `links` whose box holds the glyph's middle (half its
@@ -3401,8 +4075,28 @@ fn unplaced_links(glyphs: &[Gl], runs: &[Run], links: &[Link]) -> Vec<String> {
         .collect()
 }
 
+/// The frame a page is read in: when most of its `visible` text reads in one other
+/// direction, that direction.
+fn page_turn<'g>(visible: impl Iterator<Item = &'g Gl>) -> Turn {
+    let mut by_dir = [0usize; 4];
+    for g in visible {
+        if g.vertical {
+            continue;
+        }
+        if let Some(t) = Turn::of(g.dx, g.dy) {
+            by_dir[t as usize] += g.len as usize;
+        }
+    }
+    let total: usize = by_dir.iter().sum();
+    [Turn::Up, Turn::Half, Turn::Down]
+        .into_iter()
+        .find(|&t| total > 0 && by_dir[t as usize] * 2 > total)
+        .unwrap_or(Turn::None)
+}
+
 /// From the glyphs of a page to its items. Coordinates are already in the visible page box;
 /// `x0`, `y0` move user space links into it; `width` and `height` are its size.
+#[allow(clippy::too_many_arguments)]
 fn lay_out(
     page: u32,
     glyphs: &[Gl],
@@ -3411,6 +4105,7 @@ fn lay_out(
     (x0, y0, width, height): (f64, f64, f32, f32),
     layers: &[String],
     boxes: &[[f32; 4]],
+    rules: &[Rule],
 ) -> PageItems {
     let mut by_layer: Vec<Vec<Gl>> = vec![Vec::new(); layers.len()];
     let mut rest: Vec<Gl> = Vec::with_capacity(glyphs.len());
@@ -3422,21 +4117,7 @@ fn lay_out(
     }
     let glyphs = &rest[..];
     let (mut visible, hidden): (Vec<Gl>, Vec<Gl>) = glyphs.iter().partition(|g| !g.invisible);
-    // When most of the text reads in one other direction, the page is read in that frame.
-    let mut by_dir = [0usize; 4];
-    for g in &visible {
-        if g.vertical {
-            continue;
-        }
-        if let Some(t) = Turn::of(g.dx, g.dy) {
-            by_dir[t as usize] += g.len as usize;
-        }
-    }
-    let total: usize = by_dir.iter().sum();
-    let turn = [Turn::Up, Turn::Half, Turn::Down]
-        .into_iter()
-        .find(|&t| total > 0 && by_dir[t as usize] * 2 > total)
-        .unwrap_or(Turn::None);
+    let turn = page_turn(visible.iter());
     let mut items = PageItems {
         page,
         turned: turn != Turn::None,
@@ -3449,7 +4130,7 @@ fn lay_out(
         items.links_cut = !link_glyphs(&mut visible, text, links, x0, y0);
     }
     let linked = !items.links_cut && !links.is_empty();
-    (items.runs, items.boxes_unused) = runs_in(page, &visible, text, turn, links, boxes);
+    (items.runs, items.boxes_unused) = runs_in(page, &visible, text, turn, links, boxes, rules);
     if linked {
         for uri in unplaced_links(&visible, &items.runs, links) {
             items.notes.push(Note::Unsupported(format!(
@@ -3469,6 +4150,21 @@ fn lay_out(
     // A turned frame is moved so the page lies between 0 and its turned size, as the page
     // box does: running headers and footers are found by height there.
     let (sx, sy) = turn.shift(width, height);
+    // The boxes the runs were read in, in the same frame as the runs.
+    if items.boxes_unused.is_none() {
+        items.boxes = boxes
+            .iter()
+            .map(|b| {
+                let (a, c) = (turn.apply(b[0], b[1]), turn.apply(b[2], b[3]));
+                [
+                    a.0.min(c.0) + sx,
+                    a.1.min(c.1) + sy,
+                    a.0.max(c.0) + sx,
+                    a.1.max(c.1) + sy,
+                ]
+            })
+            .collect();
+    }
     if (sx, sy) != (0.0, 0.0) {
         let runs = items
             .runs
@@ -3483,6 +4179,10 @@ fn lay_out(
         for r in runs {
             r.x += sx;
             r.y += sy;
+            for g in r.gaps.iter_mut() {
+                g.from += sx;
+                g.to += sx;
+            }
         }
     }
     if items.runs.is_empty() && !items.invisible.is_empty() {
@@ -3583,6 +4283,7 @@ mod tests {
             adv: None,
             bold: false,
             italic: false,
+            family: 0,
             mcid: None,
             invisible: false,
             layer: None,
@@ -3601,10 +4302,13 @@ mod tests {
             size: 10.0,
             bold: false,
             italic: false,
+            family: 0,
             mcid: None,
             uri,
             line: 0,
             off_axis: false,
+            note: false,
+            gaps: crate::layout::Gaps::default(),
         };
         // Link 0 is on a run with text; link 1 only on a run of white space.
         let glyphs = [glyph(Some(0)), glyph(Some(1)), glyph(None)];
@@ -3708,6 +4412,82 @@ mod tests {
                 .map(|r| r.text.as_str())
                 .collect::<String>(),
             "Text"
+        );
+    }
+
+    /// A dash thin both ways is a line along its longer side, upright or turned a quarter:
+    /// the dashes of a rule on a turned page read as they read upright.
+    #[test]
+    fn a_thin_dash_runs_along_its_longer_side() {
+        let flat = bounds_rule(100.0, 200.0, 101.08, 200.5).expect("a rule");
+        assert_eq!((flat.y0, flat.y1), (200.25, 200.25));
+        assert!((flat.x1 - flat.x0 - 1.08).abs() < 1e-4);
+        let upright = bounds_rule(100.0, 200.0, 100.5, 201.08).expect("a rule");
+        assert_eq!((upright.x0, upright.x1), (100.25, 100.25));
+        assert!((upright.y1 - upright.y0 - 1.08).abs() < 1e-4);
+        assert_eq!(upright.kind, RuleKind::Line);
+        // Longer than thin one way: a line that way, whichever is higher.
+        let long = bounds_rule(100.0, 200.0, 101.5, 210.0).expect("a rule");
+        assert_eq!((long.x0, long.x1), (100.75, 100.75));
+        assert!(bounds_rule(100.0, 200.0, 100.5, 200.9).is_none());
+    }
+
+    /// A separator drawn as a mark (0.24 by 2 points, or a little taller) is no rule; its
+    /// rules come with its box, as whether it is a mark is known with the page's text.
+    #[test]
+    fn mark_rules_come_with_their_box() {
+        use kurbo::Shape;
+        let drawn = |path: &kurbo::BezPath, stroke: bool| {
+            let mut rules = Vec::new();
+            rules_of(path, Affine::IDENTITY, stroke, &mut |r, b| {
+                rules.push((r, b))
+            });
+            rules
+        };
+        for h in [2.0, 2.05] {
+            let path = kurbo::Rect::new(100.0, 700.0, 100.24, 700.0 + h).to_path(0.1);
+            let rules = drawn(&path, false);
+            assert!(
+                !rules.is_empty() && rules.iter().all(|(_, b)| b.is_some()),
+                "{h}: {rules:?}"
+            );
+        }
+        // A mark drawn as four lines and a close, filled and then stroked with a hairline
+        // (`B*`): both passes give the same box.
+        let mut path = kurbo::BezPath::new();
+        path.move_to((100.24, 702.16));
+        path.line_to((100.0, 702.16));
+        path.line_to((100.0, 700.0));
+        path.line_to((100.24, 700.0));
+        path.close_path();
+        for stroke in [false, true] {
+            let rules = drawn(&path, stroke);
+            assert!(
+                rules
+                    .iter()
+                    .all(|(_, b)| *b == Some([100.0, 700.0, 100.24, 702.16])),
+                "{stroke}: {rules:?}"
+            );
+        }
+        // A box of another shape gives its rules on their own.
+        let path = kurbo::Rect::new(100.0, 700.0, 101.0, 701.5).to_path(0.1);
+        assert!(drawn(&path, false).iter().all(|(_, b)| b.is_none()));
+    }
+
+    /// On a page of 9.5 point digits a mark of 2 points is no rule, and a bar of the same
+    /// width 20 points long is one; with digits of 4 points, a bar of 2 points is a rule too.
+    #[test]
+    fn marks_are_measured_by_the_page_text() {
+        let digits = |size: f32| format!("BT /F1 {size} Tf 300 500 Td (123456) Tj ET\n");
+        let bars = "0 0 0 rg 0 w 100 700 0.24 2 re B 200 700 0.24 20 re f\n";
+        let items = rules_of_page(&(digits(9.5) + bars), "", CAPS);
+        assert_eq!(items.rules.len(), 1, "{:?}", items.rules);
+        assert!((items.rules[0].y1 - items.rules[0].y0 - 20.0).abs() < 0.01);
+        let items = rules_of_page(&(digits(4.0) + bars), "", CAPS);
+        assert!(
+            items.rules.iter().any(|r| (r.y1 - r.y0 - 2.0).abs() < 0.01),
+            "{:?}",
+            items.rules
         );
     }
 
@@ -3993,5 +4773,34 @@ mod tests {
         assert_eq!(clean_bf(BfString::Char('\u{FB01}')).as_deref(), Some("fi"));
         assert_eq!(clean_bf(BfString::Char('\u{FFFD}')), None);
         assert_eq!(clean_bf(BfString::Char('\t')).as_deref(), Some(" "));
+    }
+
+    #[test]
+    fn tex_bold_fonts_by_name() {
+        for name in [
+            "cmbx12", "cmssbx10", "cmb10", "ecbx1200", "cmmib10", "ecrb1000", "ecbi1000",
+            "ecbl1000",
+        ] {
+            assert!(tex_bold(name), "{name}");
+        }
+        for name in ["cmr10", "cmbright", "cmti10", "cmtt10", "helvetica"] {
+            assert!(!tex_bold(name), "{name}");
+        }
+    }
+
+    /// The bold and the regular font of a family are of one family; another family is not.
+    #[test]
+    fn fonts_of_one_family_by_name() {
+        for (a, b) in [
+            ("courier", "courier-bold"),
+            ("helvetica", "helvetica-boldoblique"),
+            ("arialmt", "arial-boldmt"),
+            ("timesnewromanpsmt", "timesnewromanps-bolditalicmt"),
+            ("verdana", "verdana,bold"),
+        ] {
+            assert_eq!(family_of(a), family_of(b), "{a} {b}");
+        }
+        assert_ne!(family_of("courier-bold"), family_of("helvetica-bold"));
+        assert_eq!(family_of(""), 0);
     }
 }

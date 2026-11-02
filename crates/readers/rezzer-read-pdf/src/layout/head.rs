@@ -1,0 +1,1214 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! What the head of page 1 says about the document: its title and its date. Both are found
+//! by general rules. A date is chosen only when a whole date label marks it as the document
+//! date: before it on its line, over it, or in the cell left of it in a table, and the date is
+//! the only one in its column on the page (a label over or before a list of dates marks
+//! none). A date nothing marks is never chosen, also when it is the only date of the head: the
+//! loss says that it stands there.
+
+use rezzer_model::FoundDate;
+
+use super::{
+    EDGE, GAP_RATIO, HEADING_PLAIN_RATIO, Line, Run, SIZE_SLACK, address_shaped, heading_block,
+    ink, line, lines, size_key,
+};
+use crate::scan;
+
+/// What `title_from` says of a title [`page_title`] found.
+pub(crate) const TITLE_FROM: &str = "largest heading in the top third of page 1";
+
+/// A title holds at most this many characters.
+const TITLE_CHARS: usize = 120;
+
+/// The head of a page: the top third of its height.
+const HEAD_SHARE: f32 = 2.0 / 3.0;
+
+/// The words that mark a date as the document's date, a list per language (German,
+/// English, Italian or Portuguese, Spanish). A label matches as a whole, case folded, with a
+/// colon after it or not: `Eintrittsdatum` is no date label.
+pub(crate) const DATE_LABELS: [&str; 8] = [
+    "datum",
+    "date",
+    "data",
+    "fecha",
+    "dated",
+    "issued",
+    "erstellt am",
+    "ausgestellt am",
+];
+
+/// A label line looks for its value among this many lines after it in reading order.
+const VALUE_LINES: usize = 8;
+
+/// A heading that may be the title: its size key, whether all its ink is bold, its top and
+/// its text.
+struct Candidate {
+    size: i32,
+    bold: bool,
+    top: f32,
+    text: String,
+}
+
+impl Candidate {
+    /// Whether it wins over `other`: larger, else bold where `other` is not, else higher.
+    fn beats(&self, other: &Candidate) -> bool {
+        (self.size, self.bold, self.top) > (other.size, other.bold, other.top)
+    }
+}
+
+/// The title of a page, from its lines in reading order: among its headings (each with the
+/// lines `heading` gives its level and that go on one another, as the layout joins them)
+/// whose top lies in the top third of the page (`height`), the one of the largest size
+/// wins, whatever its level; on a tie the one whose ink is all bold, then the highest. A
+/// heading the layout writes as a paragraph is none. A heading a little larger than the body
+/// (`body_size`) that opens an address is skipped (see [`opens_address`]), and so is the
+/// title of a table of contents or an index (see [`CONTENTS_TITLES`]). At most
+/// [`TITLE_CHARS`] characters, cut at a word.
+pub(crate) fn page_title(
+    lines: &[Line<'_>],
+    heading: &dyn Fn(&Line<'_>) -> Option<u8>,
+    height: f32,
+    body_size: f32,
+) -> Option<String> {
+    if height.is_nan() || height <= 0.0 {
+        return None;
+    }
+    let mut best: Option<Candidate> = None;
+    let mut i = 0;
+    while i < lines.len() {
+        let first = &lines[i];
+        let level = (!first.text.is_empty()).then(|| heading(first)).flatten();
+        let Some(level) = level else {
+            i += 1;
+            continue;
+        };
+        let (j, is_heading) = heading_block(lines, i, level, heading, body_size);
+        let block = &lines[i..j];
+        let top = first.y + first.h;
+        let small = first.size < HEADING_PLAIN_RATIO * body_size;
+        let words: Vec<&str> = block
+            .iter()
+            .flat_map(|l| l.text.split_whitespace())
+            .collect();
+        if is_heading
+            && top >= height * HEAD_SHARE
+            && !(small && opens_address(lines, i, j))
+            && !contents_title(&words)
+        {
+            let candidate = Candidate {
+                size: size_key(first.size),
+                bold: block
+                    .iter()
+                    .flat_map(|l| l.runs.iter())
+                    .filter(|r| ink(&r.text) > 0)
+                    .all(|r| r.bold),
+                top,
+                text: words.join(" "),
+            };
+            if best.as_ref().is_none_or(|b| candidate.beats(b)) {
+                best = Some(candidate);
+            }
+        }
+        i = j;
+    }
+    best.map(|b| capped(&b.text)).filter(|t| !t.is_empty())
+}
+
+/// Titles of a table of contents or an index, accent folded (see [`fold`]), a list per
+/// language as [`DATE_LABELS`]: such a heading names a part of the document, not the
+/// document.
+const CONTENTS_TITLES: [&str; 10] = [
+    "contents",
+    "table of contents",
+    "inhalt",
+    "inhaltsverzeichnis",
+    "sommaire",
+    "table des matieres",
+    "indice",
+    "contenido",
+    "contenuto",
+    "index",
+];
+
+/// Whether the words of a heading are a title of [`CONTENTS_TITLES`], a colon after it or
+/// not.
+fn contents_title(words: &[&str]) -> bool {
+    let text = fold(&words.join(" "));
+    let text = text.strip_suffix(':').unwrap_or(&text).trim_end();
+    CONTENTS_TITLES.contains(&text)
+}
+
+/// `text` in small letters with its accents folded: an umlaut as its two letters (`ä` as
+/// `ae`), `ß` as `ss`, another letter with an accent or a Polish mark as the letter (`è` as
+/// `e`, `ś` as `s`).
+fn fold(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars().flat_map(char::to_lowercase) {
+        match c {
+            '\u{e4}' => out.push_str("ae"),
+            '\u{f6}' => out.push_str("oe"),
+            '\u{fc}' => out.push_str("ue"),
+            '\u{df}' => out.push_str("ss"),
+            '\u{e0}'..='\u{e5}' => out.push('a'),
+            '\u{e7}' => out.push('c'),
+            '\u{e8}'..='\u{eb}' => out.push('e'),
+            '\u{ec}'..='\u{ef}' => out.push('i'),
+            '\u{f1}' => out.push('n'),
+            '\u{f2}'..='\u{f5}' | '\u{f8}' => out.push('o'),
+            '\u{f9}'..='\u{fb}' => out.push('u'),
+            '\u{fd}' | '\u{ff}' => out.push('y'),
+            '\u{105}' => out.push('a'),
+            '\u{107}' => out.push('c'),
+            '\u{119}' => out.push('e'),
+            '\u{142}' => out.push('l'),
+            '\u{144}' => out.push('n'),
+            '\u{15b}' => out.push('s'),
+            '\u{17a}' | '\u{17c}' => out.push('z'),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// `text` cut to at most [`TITLE_CHARS`] characters, at the last space within them when there
+/// is one.
+fn capped(text: &str) -> String {
+    if text.chars().count() <= TITLE_CHARS {
+        return text.to_string();
+    }
+    let cut: String = text.chars().take(TITLE_CHARS + 1).collect();
+    match cut.rfind(' ') {
+        Some(at) if at > 0 => cut[..at].trim_end().to_string(),
+        _ => cut.chars().take(TITLE_CHARS).collect(),
+    }
+}
+
+/// An address block holds at most this many lines.
+const ADDRESS_LINES: usize = 8;
+
+/// Whether the heading of `lines[i..j]` opens an address: its lines share one left edge and,
+/// with some of the lines right below it at that edge (each right below the one before, see
+/// [`right_below`], and not larger than the heading), have the shape of an address (see
+/// [`address_shaped`]): the heading and the first lines below, three or more in all and at
+/// most [`ADDRESS_LINES`]. The lines below may be smaller than the heading: a name in bold
+/// over its street and town; a longer line after the town does not hide the address.
+fn opens_address(lines: &[Line<'_>], i: usize, j: usize) -> bool {
+    let first = &lines[i];
+    let at_edge = |l: &Line<'_>| (l.x - first.x).abs() <= EDGE;
+    if !lines[i..j].iter().all(at_edge) {
+        return false;
+    }
+    let mut k = j;
+    while k < lines.len()
+        && k - i < ADDRESS_LINES
+        && at_edge(&lines[k])
+        && right_below(&lines[k - 1], &lines[k])
+        && lines[k].size <= first.size + SIZE_SLACK
+    {
+        k += 1;
+    }
+    let texts: Vec<&str> = lines[i..k].iter().map(|l| l.text.as_str()).collect();
+    (3..=texts.len()).any(|n| address_shaped(&texts[..n]))
+}
+
+/// Whether `cur` stands right below `prev`: under it, with a gap of at most [`GAP_RATIO`]
+/// line heights, whatever their sizes.
+fn right_below(prev: &Line<'_>, cur: &Line<'_>) -> bool {
+    let gap = prev.y - cur.y;
+    gap > 0.0 && gap <= GAP_RATIO * prev.h.max(cur.h).max(1.0)
+}
+
+/// What page 1 says its date is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PageDate {
+    /// No date, and nothing to say about it.
+    None,
+    Found(FoundDate),
+    /// No date, with the words of an Info `Uncertain` loss: dates in the head that nothing
+    /// marks, marked dates that differ, or a marked date that cannot be read for sure.
+    Unsure(String),
+    /// No date, with the words of an Info `Limit` loss: page 1 holds more dates than are
+    /// checked.
+    Limit(String),
+}
+
+/// A date as written: its separator and its parts.
+type Written = (char, [u32; 3]);
+
+/// A table the layout made on page 1, its rows as cells.
+#[derive(Debug, Clone)]
+pub(crate) struct Table {
+    /// The field reader made it from drawn boxes or rows of fields: a label and its value in
+    /// each row, also where column titles stand over one row of items.
+    pub pairs: bool,
+    /// The top of the table, in the frame of the runs.
+    pub top: f32,
+    pub rows: Vec<Vec<Cell>>,
+}
+
+/// A cell of a [`Table`]: its text and where its ink stands, when it has any.
+#[derive(Debug, Clone)]
+pub(crate) struct Cell {
+    pub text: String,
+    pub spot: Option<Spot>,
+}
+
+/// Where a date (or a cell) stands on page 1: its baseline, its x span and its size.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Spot {
+    pub y: f32,
+    pub x0: f32,
+    pub x1: f32,
+    pub size: f32,
+}
+
+impl Spot {
+    /// Whether `other` is the same place on the page, within half a size.
+    fn same(&self, other: &Spot) -> bool {
+        (self.y - other.y).abs() <= self.size / 2.0 && (self.x0 - other.x0).abs() <= self.size / 2.0
+    }
+
+    /// Whether `other` stands in this spot's column: its x span, widened by [`BESIDE_SIZES`]
+    /// of its sizes on each side (an indented entry of a list), overlaps this one's.
+    fn in_column_of(&self, other: &Spot) -> bool {
+        let slack = BESIDE_SIZES * other.size;
+        other.x0 - slack <= self.x1 && other.x1 + slack >= self.x0
+    }
+}
+
+/// A date of page 1 that a date label marks as the document date.
+#[derive(Debug, Clone)]
+struct Marked {
+    written: Written,
+    /// The date as it stands in the text.
+    text: String,
+    /// The label as written, white space collapsed.
+    label: String,
+    /// Where the date stands.
+    spot: Spot,
+}
+
+/// What page 1 holds of dates, gathered from its lines before the layout and from its laid
+/// out text and pairs after it, decided once by [`document_date`].
+#[derive(Debug, Default)]
+pub(crate) struct Dates {
+    /// Dates a date label marks as the document date.
+    marked: Vec<Marked>,
+    /// Every full date in the top third of the page, marked or not.
+    head: Vec<Written>,
+    /// Where every full date of the page stands, marked or not (see [`page_dates`]).
+    spots: Vec<Spot>,
+}
+
+impl Dates {
+    /// Adds what `more` found.
+    pub(crate) fn merge(&mut self, more: Dates) {
+        self.marked.extend(more.marked);
+        self.head.extend(more.head);
+        self.spots.extend(more.spots);
+    }
+}
+
+/// The pieces of the lines of `runs`, in order: each line cut where the white space between
+/// two of its runs is wider than [`BESIDE_SIZES`] times the line's size. A piece is the text
+/// of one column of the page on that line: a label and its date stand in one piece, and a
+/// label never reaches across a column gap.
+fn pieces(runs: &[Run]) -> Vec<Line<'_>> {
+    let mut out = Vec::new();
+    for l in lines(runs) {
+        let mut start = 0;
+        for k in 1..l.runs.len() {
+            let (a, b) = (&l.runs[k - 1], &l.runs[k]);
+            if b.x - (a.x + a.w) > BESIDE_SIZES * l.size {
+                out.push(line(&l.runs[start..k]));
+                start = k;
+            }
+        }
+        out.push(line(&l.runs[start..]));
+    }
+    out
+}
+
+/// The dates of the lines of page 1 (its runs as read, tables and furniture still in), read
+/// piece by piece (see [`pieces`]), with `height` the height of the page. Only full dates
+/// count, with a year of four digits; where every date-like token stands is kept too (see
+/// [`Dates::spots`] and [`date_like`]). A date is marked when the text of its piece before it is a whole [`DATE_LABELS`] entry and
+/// nothing else (see [`whole_label`]: `Datum 01.02.2026`, `DATE: 2026-02-01`; not `Eintritt:
+/// Datum 01.01.2020` or `Kundennr. 4711 Datum 01.02.2026`), at most [`BESIDE_SIZES`] sizes
+/// away, and the piece holds no other date (`Datum 01.01.2026 bis 31.01.2026` marks nothing).
+/// Every date in the top third of the page is a date of the head, marked or not.
+pub(crate) fn page_dates(runs: &[Run], height: Option<f32>) -> Dates {
+    let mut out = Dates::default();
+    let in_head = |l: &Line<'_>| height.is_some_and(|h| h > 0.0 && l.y + l.h >= h * HEAD_SHARE);
+    for l in &pieces(runs) {
+        for (start, end) in date_like(&l.text) {
+            out.spots.push(spot_of(l, start, end));
+        }
+        let found = scan::dates(&l.text, 4..=4);
+        for d in &found {
+            let written = (d.sep, d.parts);
+            if in_head(l) {
+                out.head.push(written);
+            }
+            let spot = spot_of(l, d.start, d.end);
+            let before = &l.text[..d.start];
+            let label = whole_label(before).filter(|_| {
+                let label_end = before.trim_end().len();
+                found.len() == 1 && ink_gap(l, label_end, d.start) <= BESIDE_SIZES * l.size
+            });
+            if let Some(label) = label {
+                out.marked.push(Marked {
+                    written,
+                    text: l.text[d.start..d.end].to_string(),
+                    label,
+                    spot,
+                });
+            }
+        }
+    }
+    out
+}
+
+/// The byte spans of the date-like tokens of `text`, in any usual form, for the test whether
+/// another date stands in a column (see [`document_date`]): a numeric date of day, month and a
+/// year of two or four digits (`16.01.26`, `16/1/2026`, `16-01-26`), year first with four digits
+/// (`2026-01-16`, `2026/01/16`), or without a year (`16.01.`, `17/1`), day and month in their
+/// ranges; a day next to a month name or its abbreviation, with or without a dot after the
+/// day, or a month name next to a four-digit year (`16. Januar 2026`, `January 16, 2026`,
+/// `17 janvier`, `16 stycznia 2026`, `Jan. 2026`), or the three joined by one `-`, `/` or `.`
+/// with a year of two or four digits (`16-Jan-2026`, `Jan/17/26`), in German, English, French, Spanish,
+/// Italian, Portuguese, Dutch and Polish (see [`MONTHS`], accents folded); and the CJK forms
+/// of digits with 年 and 月, 月 and 日, or 월 and 일 (`2026年1月16日`, `1月 17日`).
+fn date_like(text: &str) -> Vec<(usize, usize)> {
+    #[derive(Clone, Copy, PartialEq)]
+    enum Kind {
+        Digits(usize, u32),
+        Month,
+        /// A CJK date mark: year, month or day.
+        Mark(char),
+        Other,
+    }
+    // The CJK marks for year, month and day, and the Korean ones for month and day.
+    let is_mark = |c: char| {
+        matches!(
+            c,
+            '\u{5e74}' | '\u{6708}' | '\u{65e5}' | '\u{c6d4}' | '\u{c77c}'
+        )
+    };
+    // The tokens of the text: digit runs, words, single other characters, white space left out.
+    let mut tokens: Vec<(Kind, usize, usize)> = Vec::new();
+    let mut chars = text.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        let mut end = i + c.len_utf8();
+        if c.is_ascii_digit() {
+            let mut n = 1;
+            let mut v = u32::from(c as u8 - b'0');
+            while let Some(&(j, d)) = chars.peek()
+                && d.is_ascii_digit()
+            {
+                n += 1;
+                v = v
+                    .saturating_mul(10)
+                    .saturating_add(u32::from(d as u8 - b'0'));
+                end = j + 1;
+                chars.next();
+            }
+            tokens.push((Kind::Digits(n, v), i, end));
+        } else if c.is_alphabetic() && !is_mark(c) {
+            while let Some(&(j, d)) = chars.peek()
+                && d.is_alphabetic()
+                && !is_mark(d)
+            {
+                end = j + d.len_utf8();
+                chars.next();
+            }
+            let word = fold(&text[i..end]);
+            let kind = if MONTHS.contains(&word.as_str()) {
+                Kind::Month
+            } else {
+                Kind::Other
+            };
+            tokens.push((kind, i, end));
+        } else if is_mark(c) {
+            tokens.push((Kind::Mark(c), i, end));
+        } else if !c.is_whitespace() {
+            tokens.push((Kind::Other, i, end));
+        }
+    }
+    let sign = |k: usize, c: char| {
+        tokens
+            .get(k)
+            .is_some_and(|t| t.2 - t.1 == c.len_utf8() && text[t.1..].starts_with(c))
+    };
+    // The sign that joins a day, a month name and a year (`16-Jan-2026`, `16.Jan.26`), if one
+    // stands at token `k`.
+    let joiner = |k: usize| ['.', '-', '/'].into_iter().find(|&c| sign(k, c));
+    // A short word between a day and its month or a month and its year (`16 de enero de 2026`,
+    // `16 di gennaio`): a particle, not a month and not a number.
+    let particle = |k: usize| {
+        tokens.get(k).is_some_and(|t| {
+            t.0 == Kind::Other && text[t.1..t.2].chars().all(char::is_alphabetic) && t.2 - t.1 <= 3
+        })
+    };
+    let day = |v: u32| (1..=31).contains(&v);
+    let month = |v: u32| (1..=12).contains(&v);
+    let mut out = Vec::new();
+    let mut k = 0;
+    while k < tokens.len() {
+        let (kind, start, _) = tokens[k];
+        let digits = |at: usize| match tokens.get(at) {
+            Some((Kind::Digits(n, v), _, end)) => Some((*n, *v, *end)),
+            _ => None,
+        };
+        let taken = match kind {
+            Kind::Digits(n1, v1) if (1..=2).contains(&n1) => {
+                // d.m.yy, d.m.yyyy, d.m., d/m/yy, d/m, d-m-yy; then a day and a month name.
+                let numeric = ['.', '/', '-'].into_iter().find_map(|sep| {
+                    if !sign(k + 1, sep) {
+                        return None;
+                    }
+                    let (n2, v2, end2) = digits(k + 2).filter(|(n, _, _)| (1..=2).contains(n))?;
+                    let fits = match sep {
+                        '/' => day(v1) && day(v2) && (month(v1) || month(v2)),
+                        _ => day(v1) && month(v2),
+                    };
+                    if !fits {
+                        return None;
+                    }
+                    if sign(k + 3, sep) {
+                        match digits(k + 4) {
+                            Some((n3, _, end3)) if n3 == 2 || n3 == 4 => Some((k + 5, end3)),
+                            Some(_) => None,
+                            // `16.01.` without a year.
+                            None if sep == '.' => Some((k + 4, end2 + 1)),
+                            None => None,
+                        }
+                    } else {
+                        // `17/1` without a year; `16.01` without the second dot is a number.
+                        (sep == '/' && n2 <= 2).then_some((k + 3, end2))
+                    }
+                });
+                numeric.or_else(|| {
+                    // `16. Januar 2026`, `16 janvier`, `16 stycznia 2026`, `16 de enero de
+                    // 2026`, `16-Jan-2026`, `16.Jan.26`.
+                    let joined = joiner(k + 1).is_some();
+                    let mut m = if joined { k + 2 } else { k + 1 };
+                    if !joined && particle(m) {
+                        m += 1;
+                    }
+                    match tokens.get(m) {
+                        Some((Kind::Month, _, end)) if day(v1) => {
+                            let (y, short) = match joiner(m + 1) {
+                                Some(_) => (m + 2, true),
+                                None if particle(m + 1) => (m + 2, false),
+                                None => (m + 1, false),
+                            };
+                            match digits(y) {
+                                Some((4, _, end4)) => Some((y + 1, end4)),
+                                Some((2, _, end2)) if short => Some((y + 1, end2)),
+                                _ => Some((m + 1, *end)),
+                            }
+                        }
+                        _ => None,
+                    }
+                })
+            }
+            Kind::Digits(4, _) => {
+                // yyyy-mm-dd, yyyy/mm/dd; 2026年1月16日.
+                ['-', '/'].into_iter().find_map(|sep| {
+                    let (_, v2, _) = digits(k + 2).filter(|(n, _, _)| *n <= 2)?;
+                    let (_, v3, end3) = digits(k + 4).filter(|(n, _, _)| *n <= 2)?;
+                    (sign(k + 1, sep) && sign(k + 3, sep) && month(v2) && day(v3))
+                        .then_some((k + 5, end3))
+                })
+            }
+            Kind::Month => {
+                // `January 16, 2026`, `Jan. 2026`, `Jan-16-2026`, `Jan/17/26`.
+                let after = if joiner(k + 1).is_some() {
+                    k + 2
+                } else {
+                    k + 1
+                };
+                match digits(after) {
+                    Some((n, v, end)) if n <= 2 && day(v) => {
+                        let (y, short) = if sign(after + 1, ',') {
+                            (after + 2, false)
+                        } else if joiner(after + 1).is_some() {
+                            (after + 2, true)
+                        } else {
+                            (after + 1, false)
+                        };
+                        match digits(y) {
+                            Some((4, _, end4)) => Some((y + 1, end4)),
+                            Some((2, _, end2)) if short => Some((y + 1, end2)),
+                            _ => Some((after + 1, end)),
+                        }
+                    }
+                    Some((4, _, end)) => Some((after + 1, end)),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        // A CJK form: digits and a mark, twice in a row, with 年 before 月 or 月 before 日.
+        let cjk = match (
+            kind,
+            tokens.get(k + 1),
+            tokens.get(k + 2),
+            tokens.get(k + 3),
+        ) {
+            (
+                Kind::Digits(..),
+                Some((Kind::Mark(a), ..)),
+                Some((Kind::Digits(..), ..)),
+                Some((Kind::Mark(b), _, end)),
+            ) if matches!(
+                (a, b),
+                ('\u{5e74}', '\u{6708}') | ('\u{6708}', '\u{65e5}') | ('\u{c6d4}', '\u{c77c}')
+            ) =>
+            {
+                Some((k + 4, *end))
+            }
+            _ => None,
+        };
+        match taken.or(cjk) {
+            Some((next, end)) => {
+                out.push((start, end));
+                k = next;
+            }
+            None => k += 1,
+        }
+    }
+    out
+}
+
+/// Month names and their usual abbreviations, accent folded (see [`fold`]), in German,
+/// English, French, Spanish, Italian, Portuguese, Dutch and Polish (with the genitive forms
+/// a date uses, `stycznia`).
+const MONTHS: &[&str] = &[
+    // German
+    "januar",
+    "februar",
+    "maerz",
+    "april",
+    "mai",
+    "juni",
+    "juli",
+    "august",
+    "september",
+    "oktober",
+    "november",
+    "dezember",
+    "jan",
+    "feb",
+    "mrz",
+    "maer",
+    "apr",
+    "jun",
+    "jul",
+    "aug",
+    "sep",
+    "sept",
+    "okt",
+    "nov",
+    "dez",
+    // English
+    "january",
+    "february",
+    "march",
+    "may",
+    "june",
+    "july",
+    "october",
+    "december",
+    "mar",
+    "oct",
+    "dec",
+    // French
+    "janvier",
+    "fevrier",
+    "mars",
+    "avril",
+    "juin",
+    "juillet",
+    "aout",
+    "septembre",
+    "octobre",
+    "novembre",
+    "decembre",
+    "janv",
+    "fevr",
+    "avr",
+    "juil",
+    // Spanish
+    "enero",
+    "febrero",
+    "marzo",
+    "abril",
+    "mayo",
+    "junio",
+    "julio",
+    "agosto",
+    "septiembre",
+    "setiembre",
+    "octubre",
+    "noviembre",
+    "diciembre",
+    "ene",
+    "abr",
+    "ago",
+    "dic",
+    // Italian
+    "gennaio",
+    "febbraio",
+    "aprile",
+    "maggio",
+    "giugno",
+    "luglio",
+    "settembre",
+    "ottobre",
+    "dicembre",
+    "gen",
+    "mag",
+    "giu",
+    "lug",
+    "set",
+    "ott",
+    // Portuguese
+    "janeiro",
+    "fevereiro",
+    "marco",
+    "maio",
+    "junho",
+    "julho",
+    "setembro",
+    "outubro",
+    "novembro",
+    "dezembro",
+    "fev",
+    "out",
+    // Dutch
+    "januari",
+    "februari",
+    "maart",
+    "mei",
+    "augustus",
+    "mrt",
+    // Polish
+    "styczen",
+    "stycznia",
+    "luty",
+    "lutego",
+    "marzec",
+    "marca",
+    "kwiecien",
+    "kwietnia",
+    "maj",
+    "maja",
+    "czerwiec",
+    "czerwca",
+    "lipiec",
+    "lipca",
+    "sierpien",
+    "sierpnia",
+    "wrzesien",
+    "wrzesnia",
+    "pazdziernik",
+    "pazdziernika",
+    "listopad",
+    "listopada",
+    "grudzien",
+    "grudnia",
+    "sty",
+    "lut",
+    "kwi",
+    "cze",
+    "lip",
+    "sie",
+    "wrz",
+    "paz",
+    "lis",
+    "gru",
+];
+
+/// Where the bytes `start..end` of the text of `l` stand (see [`span_of`]).
+fn spot_of(l: &Line<'_>, start: usize, end: usize) -> Spot {
+    let (x0, x1) = span_of(l, start, end);
+    Spot {
+        y: l.y,
+        x0,
+        x1,
+        size: l.size,
+    }
+}
+
+/// The x span of the bytes `start..end` of the text of `l`: from the runs that hold them, a
+/// place inside a run taken by its share of the run's characters.
+fn span_of(l: &Line<'_>, start: usize, end: usize) -> (f32, f32) {
+    let joined: String = l.runs.iter().map(|r| r.text.as_str()).collect();
+    let lead = joined.len() - joined.trim_start().len();
+    // The x of byte `b` of the joined text; a byte at the end of a run is the run's end when
+    // `closing`, else the start of the next run.
+    let x_at = |b: usize, closing: bool| {
+        let b = b + lead;
+        let mut at = 0;
+        for (k, r) in l.runs.iter().enumerate() {
+            let next = at + r.text.len();
+            if b < next || (closing && b == next) || k + 1 == l.runs.len() {
+                let cut = b.saturating_sub(at).min(r.text.len());
+                let chars = r.text.chars().count().max(1) as f32;
+                let before = r
+                    .text
+                    .get(..cut)
+                    .map_or(chars, |t| t.chars().count() as f32);
+                return r.x + r.w * (before / chars);
+            }
+            at = next;
+        }
+        l.x
+    };
+    (x_at(start, false), x_at(end, true))
+}
+
+/// The right end of the ink of `l`.
+fn right_of(l: &Line<'_>) -> f32 {
+    l.runs.iter().map(|r| r.x + r.w).fold(l.x, f32::max)
+}
+
+/// Whether `l` starts with a full date.
+fn starts_with_date(l: &Line<'_>) -> bool {
+    scan::dates(&l.text, 4..=4)
+        .first()
+        .is_some_and(|d| d.start == 0)
+}
+
+/// The white space in points between the ink that ends at byte `end` of the text of `l` and
+/// the ink that starts at byte `start`: the gap between their runs, 0 within one run.
+fn ink_gap(l: &Line<'_>, end: usize, start: usize) -> f32 {
+    let joined: String = l.runs.iter().map(|r| r.text.as_str()).collect();
+    let lead = joined.len() - joined.trim_start().len();
+    // The run that holds byte `b` of the line's text.
+    let run_at = |b: usize| {
+        let mut at = 0;
+        l.runs.iter().find(|r| {
+            at += r.text.len();
+            b + lead < at
+        })
+    };
+    match (end.checked_sub(1).and_then(run_at), run_at(start)) {
+        (Some(a), Some(b)) if !std::ptr::eq(a, b) => (b.x - (a.x + a.w)).max(0.0),
+        _ => 0.0,
+    }
+}
+
+/// The dates the laid out text of page 1 gives as values of date labels: `runs` are the runs
+/// the layout lays out as text (tables taken out), read piece by piece (see [`pieces`]), and
+/// `tables` every table the layout made on the page, with `height` the height of the page. A
+/// piece that is a whole [`DATE_LABELS`] entry marks the value beside it or right below it
+/// (see [`value_of`]). In a table of exactly two columns (labels and values) whose top lies in
+/// the top half of the page, a cell that is a whole entry marks the cell right of it when that
+/// cell is a full date and nothing else (`Datum: | 26.10.2026`), it is the only such label
+/// cell with a date in the table, and no row has a date in any form (see [`date_like`]) under
+/// a label cell without letters (a list goes on in the value column, under an empty cell or a
+/// dash). A table of more columns
+/// marks nothing: a row of items may end in `Datum | 15.01.2026` or list dates after a title
+/// (`Datum | 15.01.2026 | 16.01.2026`, `Datum | 15.01.2026 | Stunden | 8`), and a column title
+/// `Datum` has another title beside it. A table of label and value pairs that the field
+/// reader made counts only when its top lies in the top third of the page, where the header
+/// fields of a form stand: lower down it may be one row of items under small column titles,
+/// each title read as the label of the value below it. Whether a marked date is the only date
+/// of its column is decided once for every mark, in [`document_date`].
+pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: Option<f32>) -> Dates {
+    let mut out = Dates::default();
+    let lines = pieces(runs);
+    let add = |label: String, value: &str, spot: Spot, out: &mut Dates| {
+        let Some(d) = scan::dates(value, 4..=4)
+            .into_iter()
+            .next()
+            .filter(|d| d.start == 0)
+        else {
+            return;
+        };
+        out.marked.push(Marked {
+            written: (d.sep, d.parts),
+            text: value[d.start..d.end].to_string(),
+            label,
+            spot,
+        });
+    };
+    let baselines = Baselines::new(&lines);
+    for (k, l) in lines.iter().enumerate() {
+        if let Some(label) = whole_label(&l.text)
+            && let Some(v) = value_of(&lines, &baselines, k)
+        {
+            let end = scan::dates(&v.text, 4..=4).first().map_or(0, |d| d.end);
+            add(label, &v.text, spot_of(v, 0, end), &mut out);
+        }
+    }
+    let above = |top: f32, share: f32| height.is_some_and(|h| h > 0.0 && top >= h * share);
+    let is_date = |cell: &Cell| {
+        let text = cell.text.trim();
+        scan::dates(text, 4..=4)
+            .first()
+            .is_some_and(|d| d.start == 0 && d.end == text.len())
+    };
+    for t in tables
+        .iter()
+        .filter(|t| above(t.top, if t.pairs { HEAD_SHARE } else { HALF }))
+        .filter(|t| t.rows.iter().all(|row| row.len() == 2))
+    {
+        // A date in any form under a label cell without letters continues a list in the value
+        // column.
+        let continued = t.rows.iter().any(|row| {
+            !row[0].text.chars().any(char::is_alphabetic) && !date_like(&row[1].text).is_empty()
+        });
+        let mut labelled = t
+            .rows
+            .iter()
+            .filter(|row| is_date(&row[1]))
+            .filter_map(|row| whole_label(&row[0].text).map(|label| (label, &row[1])));
+        if let Some((label, value)) = labelled.next()
+            && labelled.next().is_none()
+            && !continued
+            && let Some(spot) = value.spot
+        {
+            add(label, value.text.trim(), spot, &mut out);
+        }
+    }
+    out
+}
+
+/// A table whose top lies in the upper half of the page may hold the document date.
+const HALF: f32 = 0.5;
+
+/// Dates [`document_date`] may look at in all, each marked date against the dates of the page
+/// until one stands in its column; past them it takes none and says so.
+const DATE_WORK: usize = 4_000_000;
+
+/// The document date of page 1 from what `dates` holds: a date that a date label marks and
+/// that is the only date in its column on page 1 (every date-like token, in any form, see
+/// [`date_like`], whose x span widened by [`BESIDE_SIZES`] sizes on each side overlaps the
+/// marked date's x span, above or below it, from the top of the page to its end: a list of
+/// dates under or over a label marks none, however its other entries are written).
+/// Marked dates that differ give no date, and a marked date that cannot be read for sure
+/// gives none either; both say so. A date nothing marks is never chosen: when the
+/// top third of the page holds dates, the loss says how many stand there. A dotted date
+/// reads day first, a dashed one year first, a slashed one only when one part is over 12;
+/// only a day the calendar has.
+pub(crate) fn document_date(dates: &Dates) -> PageDate {
+    // A label governs one date: a marked date with another date in its column, above or below
+    // it anywhere on the page, heads or belongs to a list and is no mark. Each date looked at
+    // is a step of the bound.
+    let mut work = 0usize;
+    let mut marked: Vec<&Marked> = Vec::new();
+    for m in &dates.marked {
+        let mut listed = false;
+        for s in &dates.spots {
+            work += 1;
+            if !s.same(&m.spot) && m.spot.in_column_of(s) {
+                listed = true;
+                break;
+            }
+        }
+        if work > DATE_WORK {
+            return PageDate::Limit(format!(
+                "page 1 holds more dates after date labels than are checked ({} of them); \
+                 none is taken as the document date",
+                dates.marked.len()
+            ));
+        }
+        if !listed {
+            marked.push(m);
+        }
+    }
+    if let Some(first) = marked.first() {
+        let kinds = distinct(marked.iter().map(|s| s.written));
+        if kinds > 1 {
+            return PageDate::Unsure(format!(
+                "{kinds} different dates stand after a date label on page 1; none is taken as \
+                 the document date"
+            ));
+        }
+        return match iso(first.written) {
+            Ok(date) => PageDate::Found(FoundDate {
+                date,
+                from: format!("date label \"{}\" on page 1", first.label),
+            }),
+            Err(why) => PageDate::Unsure(format!(
+                "the date {} after the label \"{}\" on page 1 {why}",
+                first.text, first.label
+            )),
+        };
+    }
+    match distinct(dates.head.iter().copied()) {
+        0 => PageDate::None,
+        1 => PageDate::Unsure(
+            "1 date stands in the head of page 1; it is not marked as the document date".into(),
+        ),
+        n => PageDate::Unsure(format!(
+            "{n} dates stand in the head of page 1; none is marked as the document date"
+        )),
+    }
+}
+
+/// The number of different dates among `written`.
+fn distinct(written: impl Iterator<Item = Written>) -> usize {
+    let mut kinds: Vec<Written> = written.collect();
+    kinds.sort_unstable();
+    kinds.dedup();
+    kinds.len()
+}
+
+/// The date label `text` is in whole (white space around it and a colon after it aside), white
+/// space inside it collapsed: a [`DATE_LABELS`] entry, case folded (`DATE:`, `Erstellt   am`).
+/// A word more is no label (`Due date`, `Eintrittsdatum`, `Ort, Datum`, `Liefer-Datum`).
+fn whole_label(text: &str) -> Option<String> {
+    let text = text.trim();
+    let bare = text.strip_suffix(':').unwrap_or(text).trim_end();
+    let words: Vec<&str> = bare.split_whitespace().collect();
+    let label = words.join(" ");
+    DATE_LABELS
+        .contains(&fold(&label).as_str())
+        .then_some(label)
+}
+
+/// A label's value stands beside it at most this many label sizes after its end.
+const BESIDE_SIZES: f32 = 6.0;
+
+/// The value of the label piece `all[k]`: among the next [`VALUE_LINES`] pieces, the nearest
+/// that starts with a date and stands beside it on its baseline (to its right, at most
+/// [`BESIDE_SIZES`] label sizes after its end), else the one right below it at its left edge
+/// (within the label's size) that is a date alone on its line (see [`date_alone`]): a row of
+/// items under column titles has more cells on the line and is no value of one label. Whether
+/// the label governs that one date (no other date in its column) is checked in
+/// [`document_date`].
+fn value_of<'a, 'r>(all: &'a [Line<'r>], baselines: &Baselines, k: usize) -> Option<&'a Line<'r>> {
+    let label = &all[k];
+    let end = right_of(label);
+    let after = || all.iter().skip(k + 1).take(VALUE_LINES);
+    let beside = after()
+        .filter(|v| {
+            (v.y - label.y).abs() <= label.size / 2.0
+                && v.x > label.x
+                && v.x - end <= BESIDE_SIZES * label.size
+        })
+        .filter(|v| starts_with_date(v))
+        .min_by(|a, b| a.x.total_cmp(&b.x));
+    beside.or_else(|| {
+        after()
+            .filter(|v| right_below(label, v) && (v.x - label.x).abs() <= label.size)
+            .filter(|v| date_alone(all, baselines, v))
+            .max_by(|a, b| a.y.total_cmp(&b.y))
+    })
+}
+
+/// The pieces of page 1 by their baseline, to find the pieces near a baseline by a search.
+struct Baselines {
+    /// Piece indices by baseline (a piece at no height is at none), and those baselines.
+    order: Vec<usize>,
+    ys: Vec<f32>,
+}
+
+impl Baselines {
+    fn new(all: &[Line<'_>]) -> Baselines {
+        let mut order: Vec<usize> = (0..all.len()).filter(|&k| !all[k].y.is_nan()).collect();
+        order.sort_by(|&a, &b| all[a].y.total_cmp(&all[b].y));
+        let ys = order.iter().map(|&k| all[k].y).collect();
+        Baselines { order, ys }
+    }
+}
+
+/// Whether the piece `v` among the pieces `all` (by baseline in `baselines`) is a date and
+/// nothing else, with no other piece on its baseline (within half its size).
+fn date_alone(all: &[Line<'_>], baselines: &Baselines, v: &Line<'_>) -> bool {
+    let text = v.text.trim();
+    let is_date = scan::dates(text, 4..=4)
+        .first()
+        .is_some_and(|d| d.start == 0 && d.end == text.len());
+    // The pieces near its baseline, a little more than half its size each way; each is
+    // tested as it stands.
+    let reach = v.size.abs() + 1.0;
+    let a = baselines.ys.partition_point(|y| *y < v.y - reach);
+    let z = baselines.ys.partition_point(|y| *y <= v.y + reach);
+    is_date
+        && !baselines.order[a..z.max(a)].iter().any(|&k| {
+            let p = &all[k];
+            !std::ptr::eq(p, v) && (p.y - v.y).abs() <= v.size / 2.0
+        })
+}
+
+/// A date as `YYYY-MM-DD`, when it reads for sure: a dotted date day first, a dashed one year
+/// first, a slashed one only when one of its first two parts is over 12 (that part is the
+/// day); and only a day the calendar has. Else why not, in words.
+fn iso((sep, [a, b, c]): Written) -> Result<String, &'static str> {
+    let (year, month, day) = match sep {
+        '.' => (c, b, a),
+        '-' => (a, b, c),
+        _ if a > 12 => (c, b, a),
+        _ if b > 12 => (c, a, b),
+        _ => return Err("can be read two ways"),
+    };
+    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    let days = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => 0,
+    };
+    if year >= 1 && (1..=days).contains(&day) {
+        Ok(format!("{year:04}-{month:02}-{day:02}"))
+    } else {
+        Err("is no day of the calendar")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn labels_stand_whole() {
+        let label = |t: &str| whole_label(t);
+        assert_eq!(label("Datum ").as_deref(), Some("Datum"));
+        assert_eq!(label("DATE:").as_deref(), Some("DATE"));
+        assert_eq!(label("Erstellt   am").as_deref(), Some("Erstellt am"));
+        assert_eq!(
+            label(" Ausgestellt am: ").as_deref(),
+            Some("Ausgestellt am")
+        );
+        assert_eq!(label("Ort, Datum:"), None);
+        assert_eq!(label("Kundennr. 4711 Datum"), None);
+        assert_eq!(label("Eintritt: Datum"), None);
+        assert_eq!(label("Liefer-Datum:"), None);
+        assert_eq!(label("Due date"), None);
+        assert_eq!(label("Eintrittsdatum"), None);
+        assert_eq!(label("Update"), None);
+        assert_eq!(label("Datum der Zahlung"), None);
+        assert_eq!(label(""), None);
+    }
+
+    #[test]
+    fn dates_read_for_sure_only() {
+        let one = |t: &str| {
+            let d = &scan::dates(t, 4..=4)[0];
+            iso((d.sep, d.parts)).ok()
+        };
+        assert_eq!(one("01.02.2026").as_deref(), Some("2026-02-01"));
+        assert_eq!(one("2026-02-01").as_deref(), Some("2026-02-01"));
+        assert_eq!(one("13/02/2026").as_deref(), Some("2026-02-13"));
+        assert_eq!(one("02/13/2026").as_deref(), Some("2026-02-13"));
+        assert_eq!(one("02/03/2026"), None);
+        assert_eq!(one("31.04.2026"), None);
+        assert_eq!(one("29.02.2024").as_deref(), Some("2024-02-29"));
+        assert_eq!(one("29.02.2026"), None);
+    }
+
+    #[test]
+    fn accents_fold() {
+        assert_eq!(fold("Table des Mati\u{e8}res"), "table des matieres");
+        assert_eq!(fold("G\u{fc}ltig bis"), "gueltig bis");
+    }
+
+    #[test]
+    fn date_like_tokens_of_every_form() {
+        fn spans(t: &str) -> Vec<&str> {
+            date_like(t).into_iter().map(|(a, b)| &t[a..b]).collect()
+        }
+        // Numeric, day first, a year of two or four digits.
+        assert_eq!(
+            spans("am 16.01.26 und 17.1.2026"),
+            ["16.01.26", "17.1.2026"]
+        );
+        assert_eq!(
+            spans("16/01/26 16/1/2026 1/16/2026"),
+            ["16/01/26", "16/1/2026", "1/16/2026"]
+        );
+        assert_eq!(spans("16-01-26 16-1-2026"), ["16-01-26", "16-1-2026"]);
+        // Year first.
+        assert_eq!(spans("2026-01-16 2026/1/16"), ["2026-01-16", "2026/1/16"]);
+        // Without a year.
+        assert_eq!(spans("16.01. und 17/1 Uhr"), ["16.01.", "17/1"]);
+        // Day and month name, month name and year.
+        assert_eq!(spans("16. Januar 2026"), ["16. Januar 2026"]);
+        assert_eq!(spans("17 janvier"), ["17 janvier"]);
+        assert_eq!(
+            spans("January 16, 2026 and Jan. 2026"),
+            ["January 16, 2026", "Jan. 2026"]
+        );
+        assert_eq!(
+            spans("16 stycznia 2026, 3 pa\u{17a}dziernika"),
+            ["16 stycznia 2026", "3 pa\u{17a}dziernika"]
+        );
+        assert_eq!(
+            spans("16 de enero de 2026 e 3 di marzo"),
+            ["16 de enero de 2026", "3 di marzo"]
+        );
+        // Day, month name and year joined by one sign, two- or four-digit years, either order.
+        assert_eq!(
+            spans("16-Jan-2026 16/Jan/2026 16.Jan.2026"),
+            ["16-Jan-2026", "16/Jan/2026", "16.Jan.2026"]
+        );
+        assert_eq!(
+            spans("16-Jan-26 Jan-16-2026 Jan/17/26 Jan.18.2026"),
+            ["16-Jan-26", "Jan-16-2026", "Jan/17/26", "Jan.18.2026"]
+        );
+        assert_eq!(spans("16-Jan und Jan-2026"), ["16-Jan", "Jan-2026"]);
+        // CJK.
+        assert_eq!(
+            spans("2026\u{5e74}1\u{6708}16\u{65e5}"),
+            ["2026\u{5e74}1\u{6708}"]
+        );
+        assert_eq!(spans("1\u{6708} 17\u{65e5}"), ["1\u{6708} 17\u{65e5}"]);
+        assert_eq!(spans("1\u{c6d4} 17\u{c77c}"), ["1\u{c6d4} 17\u{c77c}"]);
+        // No dates: a number, an amount, a time, a day out of range, a month out of range, a
+        // version, a word that is no month.
+        assert!(
+            spans("16 1.234,56 16:30 32.01.26 16.13.2026 1.2.3 Muster 16 Summe 2026").is_empty()
+        );
+        assert!(spans("16.01 2026").is_empty());
+    }
+
+    #[test]
+    fn many_marked_dates_apart_are_checked_within_a_bound() {
+        // 3,000 marked dates, each in a column of its own: checking each against every date
+        // of the page passes the bound, which says so and takes no date.
+        let mut dates = Dates::default();
+        for k in 0..3_000 {
+            let spot = Spot {
+                y: 700.0,
+                x0: k as f32 * 2.0,
+                x1: k as f32 * 2.0 + 0.5,
+                size: 0.1,
+            };
+            dates.spots.push(spot);
+            dates.marked.push(Marked {
+                written: ('.', [1, 2, 2026]),
+                text: "01.02.2026".into(),
+                label: "Datum".into(),
+                spot,
+            });
+        }
+        match document_date(&dates) {
+            PageDate::Limit(what) => assert!(what.contains("page 1"), "{what}"),
+            other => panic!("{other:?}"),
+        }
+        // A few are checked as ever.
+        dates.marked.truncate(3);
+        dates.spots.truncate(3);
+        assert!(matches!(document_date(&dates), PageDate::Found(_)));
+    }
+
+    #[test]
+    fn long_titles_are_cut_at_a_word() {
+        let long = "Wort ".repeat(30);
+        let cut = capped(long.trim());
+        assert!(cut.chars().count() <= TITLE_CHARS, "{cut}");
+        assert!(cut.ends_with("Wort"), "{cut}");
+        let one = "\u{e4}".repeat(130);
+        assert_eq!(capped(&one).chars().count(), TITLE_CHARS);
+    }
+}

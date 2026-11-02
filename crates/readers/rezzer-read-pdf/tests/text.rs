@@ -5,14 +5,12 @@
 mod common;
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
-use common::{Builder, Page, pdf, show, zeros_packed};
+use common::{Builder, Page, all_text, body_text, pdf, show, text, zeros_packed};
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
-    Anchor, Block, Bytes, CalloutKind, Completeness, Confidence, Detection, FormatId, Inline,
-    LossReason, ReadOptions, ReadOutcome, Reader, SectionKind, Severity, Source, StatusColor,
-    plain_text,
+    Anchor, Block, CalloutKind, Completeness, FormatId, Inline, LossReason, ReadOptions,
+    ReadOutcome, Reader, SectionKind, Severity, StatusColor, plain_text,
 };
 use rezzer_read_pdf::PdfReader;
 
@@ -26,31 +24,8 @@ fn corpus(name: &str) -> Vec<u8> {
     std::fs::read(path.join(name)).expect("corpus file")
 }
 
-fn source(bytes: &[u8]) -> Source {
-    Source {
-        path: None,
-        name: "file.pdf".into(),
-        bytes: Bytes::Owned(Arc::new(bytes.to_vec())),
-        sha256: "00".repeat(32),
-        size: bytes.len() as u64,
-        format: FormatId::Pdf,
-        detection: Detection {
-            confidence: Confidence::Certain,
-            evidence: "%PDF-".into(),
-        },
-        modified: None,
-        created: None,
-        downloaded_from: None,
-        file_tags: Vec::new(),
-    }
-}
-
 fn read_with(bytes: &[u8], limits: Limits) -> ReadOutcome {
-    PdfReader.read(
-        &source(bytes),
-        &ReadOptions::default(),
-        &Budget::new(limits),
-    )
+    common::read_in(bytes, &ReadOptions::default(), &Budget::new(limits))
 }
 
 fn read(bytes: &[u8]) -> ReadOutcome {
@@ -73,53 +48,6 @@ fn page(out: &ReadOutcome, n: u32) -> &[Block] {
             _ => None,
         })
         .unwrap_or_else(|| panic!("no section p{n} in {:#?}", out.document.body))
-}
-
-/// The text of a block and the blocks inside it, one line per paragraph or heading.
-fn block_text(block: &Block, out: &mut String) {
-    match block {
-        Block::Heading { inlines, .. }
-        | Block::Paragraph { inlines, .. }
-        | Block::Task { inlines, .. } => {
-            out.push_str(&plain_text(inlines));
-            out.push('\n');
-        }
-        Block::Section { blocks, .. }
-        | Block::Quote { blocks, .. }
-        | Block::Callout { blocks, .. } => blocks.iter().for_each(|b| block_text(b, out)),
-        Block::List { items, .. } => items.iter().flatten().for_each(|b| block_text(b, out)),
-        Block::Table { rows, .. } => {
-            for row in rows {
-                for cell in row {
-                    out.push_str(&plain_text(&cell.inlines));
-                    out.push('|');
-                }
-                out.push('\n');
-            }
-        }
-        _ => {}
-    }
-}
-
-fn text(blocks: &[Block]) -> String {
-    let mut out = String::new();
-    blocks.iter().for_each(|b| block_text(b, &mut out));
-    out
-}
-
-/// The text of the page sections without the folded callouts (what an agent reads as the
-/// page's body).
-fn body_text(blocks: &[Block]) -> String {
-    let kept: Vec<Block> = blocks
-        .iter()
-        .filter(|b| !matches!(b, Block::Callout { .. }))
-        .cloned()
-        .collect();
-    text(&kept)
-}
-
-fn all_text(out: &ReadOutcome) -> String {
-    text(&out.document.body)
 }
 
 fn headings(blocks: &[Block]) -> Vec<(u8, String)> {
@@ -157,6 +85,157 @@ fn two_columns_read_in_order() {
         !t.contains("Vivamus viverra fermentum felis. pellentesque"),
         "{t}"
     );
+}
+
+/// A page of two columns of numbered lines, each column one text that flows from its top to
+/// its bottom past whatever is drawn across the page between `gap` (top and bottom of a
+/// stretch where no line stands, or none): `drawn` is added to the page.
+fn two_column_page(gap: Option<(f32, f32)>, drawn: &str) -> String {
+    let mut c = String::from(drawn);
+    for (side, x) in [("L", 56.0), ("R", 310.0)] {
+        let mut y = 760.0;
+        for k in 1..=40 {
+            if let Some((top, bottom)) = gap
+                && y < top
+                && y > bottom
+            {
+                y = bottom;
+            }
+            if y < 80.0 {
+                break;
+            }
+            c += &format!(
+                "BT /F1 10 Tf {x} {y} Td (Zeile {side}{k:02} der Spalte mit Text) Tj ET\n"
+            );
+            y -= 12.0;
+        }
+    }
+    c
+}
+
+/// Whether the numbered lines of [`two_column_page`] around a drawing across both columns
+/// between lines 20 and 21 of each column read in bands: the lines above it column by column,
+/// then the lines under it column by column, each column in its order.
+fn in_bands(t: &str) -> bool {
+    let at = |side: &str, k: usize| t.find(&format!("Zeile {side}{k:02} "));
+    let band = |from: usize, to: usize| -> Option<(usize, usize)> {
+        let mut seen = Vec::new();
+        for side in ["L", "R"] {
+            for k in from..=to {
+                if let Some(p) = at(side, k) {
+                    seen.push(p);
+                }
+            }
+        }
+        let ordered = seen.len() >= 2 && seen.windows(2).all(|w| w[0] < w[1]);
+        ordered.then(|| (seen[0], *seen.last().expect("a line")))
+    };
+    matches!((band(1, 20), band(21, 40)), (Some(above), Some(below)) if above.1 < below.0)
+}
+
+/// A framed figure across both columns in the middle of the page, with no text across the
+/// gutter: the frame's top and bottom part the columns into bands, so the lines above it are
+/// read column by column, then the lines under it. Column flow past a figure is read in bands
+/// until text evidence decides it (a word or a sentence that goes on in the column under the
+/// figure): two-column reports with a figure across the page read so, and their columns may
+/// as well flow past it.
+#[test]
+fn columns_past_a_framed_figure_across_them_read_in_bands() {
+    let frame = "q 0.5 w 56 390 484 130 re S Q\n";
+    let out = read(&pdf(
+        &[Page::text(two_column_page(Some((532.0, 380.0)), frame))],
+        "",
+    ));
+    let t = all_text(&out);
+    assert!(in_bands(&t), "{t}");
+}
+
+/// The same with the frame drawn as four lines that meet.
+#[test]
+fn columns_past_a_figure_framed_by_four_lines_read_in_bands() {
+    let frame = "q 0.5 w 56 390 m 540 390 l S 56 520 m 540 520 l S \
+                 56 390 m 56 520 l S 540 390 m 540 520 l S Q\n";
+    let out = read(&pdf(
+        &[Page::text(two_column_page(Some((532.0, 380.0)), frame))],
+        "",
+    ));
+    let t = all_text(&out);
+    assert!(in_bands(&t), "{t}");
+}
+
+/// A framed chart across both columns with one rule across it and one up it inside the frame
+/// (a grid with rules inside, but no text in its cells): it parts the columns into bands as a
+/// framed figure does.
+#[test]
+fn columns_past_a_framed_chart_with_inner_rules_read_in_bands() {
+    let frame = "q 0.5 w 56 390 484 130 re S 56 455 m 540 455 l S 298 390 m 298 520 l S Q\n";
+    let out = read(&pdf(
+        &[Page::text(two_column_page(Some((532.0, 380.0)), frame))],
+        "",
+    ));
+    let t = all_text(&out);
+    assert!(in_bands(&t), "{t}");
+}
+
+/// Guard: a shaded band across both columns behind their text is a box the text in it is read
+/// in, as it was before drawn rules parted bands of columns: the columns above it, then the
+/// lines in it, then the columns under it, each column by column. Its edges add no band of
+/// their own.
+#[test]
+fn columns_read_through_a_shaded_band_across_them() {
+    let band = "q 0.9 g 50 400 496 100 re f Q\n";
+    let out = read(&pdf(&[Page::text(two_column_page(None, band))], ""));
+    let t = all_text(&out);
+    let order = [
+        "Zeile L01 ",
+        "Zeile L22 ",
+        "Zeile R01 ",
+        "Zeile R22 ",
+        "Zeile L23 ",
+        "Zeile L31 ",
+        "Zeile R23 ",
+        "Zeile R31 ",
+        "Zeile L32 ",
+        "Zeile L40 ",
+        "Zeile R32 ",
+        "Zeile R40 ",
+    ];
+    let at: Vec<Option<usize>> = order.iter().map(|w| t.find(w)).collect();
+    assert!(
+        at.iter().all(Option::is_some) && at.windows(2).all(|w| w[0] < w[1]),
+        "{t}"
+    );
+}
+
+/// Guard: a ruled grid of two columns of fields across a page (a rule under each row of fields
+/// over both columns, the grid's sides and a rule between the columns) is a table, read row by
+/// row as before drawn rules parted bands of columns; its rules add no band of their own.
+#[test]
+fn a_ruled_grid_of_two_field_columns_stays_a_table() {
+    let mut drawn = String::from("q 0.5 w\n");
+    for k in 0..=10 {
+        let y = 772.0 - 12.0 * k as f32;
+        drawn += &format!("50 {y} m 546 {y} l S\n");
+    }
+    for x in [50.0, 298.0, 546.0] {
+        drawn += &format!("{x} 652 m {x} 772 l S\n");
+    }
+    drawn += "Q\n";
+    let mut c = drawn;
+    for (side, x) in [("L", 56.0), ("R", 310.0)] {
+        for k in 1..=10 {
+            let y = 762.0 - 12.0 * (k - 1) as f32;
+            c += &format!("BT /F1 10 Tf {x} {y} Td (Zeile {side}{k:02} Feld) Tj ET\n");
+        }
+    }
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let t = all_text(&out);
+    for k in 1..=10 {
+        assert!(
+            t.contains(&format!("Zeile L{k:02} Feld|Zeile R{k:02} Feld|")),
+            "{t}"
+        );
+    }
 }
 
 #[test]
@@ -798,8 +877,8 @@ fn wrong_password_is_said() {
         password: Some("not the password".into()),
         ..ReadOptions::default()
     };
-    let out = PdfReader.read(
-        &source(&corpus("qpdf-user-password.pdf")),
+    let out = common::read_in(
+        &corpus("qpdf-user-password.pdf"),
         &opts,
         &Budget::new(Limits::default()),
     );
@@ -1468,5 +1547,216 @@ fn very_narrow_german_prose_keeps_joining() {
     for para in &paras {
         let joined = format!("\n{}\n", para.join(" "));
         assert!(md.contains(&joined), "{joined} in {md}");
+    }
+}
+
+/// Guard: prose whose first lines start with two space glyphs (an indent typed as spaces),
+/// and a line inside a paragraph that starts with one, keeps its paragraphs and its words.
+#[test]
+fn indented_prose_keeps_its_paragraphs() {
+    let paragraphs = [
+        vec![
+            "  The payroll office of Muster GmbH sends the statement at the end",
+            "of every month to each employee by post, together with the notes",
+            " on taxes and social insurance that apply to the month in question,",
+            "and keeps a copy of every statement for the records of the firm.",
+        ],
+        vec![
+            "  Erika Mustermann reads the statement and checks the amounts, the",
+            "days of leave and the hours worked against her own notes for the",
+            "month before she signs the form and sends it back to the office.",
+        ],
+    ];
+    let mut c = String::new();
+    let mut y = 760.0;
+    for lines in &paragraphs {
+        for l in lines {
+            c += &show("F1", 10.0, 72.0, y, l);
+            y -= 12.0;
+        }
+        y -= 12.0;
+    }
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let found: Vec<String> = roles_of(&out, 1).into_iter().map(|(_, t)| t).collect();
+    let want: Vec<String> = paragraphs
+        .iter()
+        .map(|lines| lines.iter().map(|l| l.trim()).collect::<Vec<_>>().join(" "))
+        .collect();
+    assert_eq!(found, want);
+}
+
+/// A page of body text with `extra` drawn on it.
+fn page_with(extra: &str) -> Page {
+    Page::text(format!(
+        "{}{extra}",
+        show(
+            "F1",
+            10.0,
+            72.0,
+            600.0,
+            "The text of the page in plain words, as a letter has it."
+        )
+    ))
+}
+
+/// The footer line of the tests of two-page furniture.
+const FIRM_LINE: &str = "Muster GmbH, Musterweg 1, 12345 Musterstadt";
+
+/// A line at the foot of both pages of a file of two pages is a running footer: a letter or
+/// invoice of two pages has no third page to repeat it on.
+#[test]
+fn two_page_footer_is_furniture() {
+    let pages: Vec<Page> = (0..2)
+        .map(|_| page_with(&show("F1", 8.0, 72.0, 40.0, FIRM_LINE)))
+        .collect();
+    let out = read(&pdf(&pages, ""));
+    for n in 1..=2u32 {
+        let roles = roles_of(&out, n);
+        assert_eq!(
+            roles.last(),
+            Some(&(Some("page-footer".into()), FIRM_LINE.into())),
+            "page {n}: {roles:?}"
+        );
+        assert_eq!(
+            roles.iter().filter(|(_, t)| t == FIRM_LINE).count(),
+            1,
+            "page {n}: {roles:?}"
+        );
+    }
+}
+
+/// Guard: a line at the foot of two pages of three is body text: it repeats on too few pages.
+#[test]
+fn line_on_two_of_three_pages_is_not_furniture() {
+    let pages: Vec<Page> = (0..3)
+        .map(|n| {
+            if n < 2 {
+                page_with(&show("F1", 8.0, 72.0, 40.0, FIRM_LINE))
+            } else {
+                page_with("")
+            }
+        })
+        .collect();
+    let out = read(&pdf(&pages, ""));
+    for n in 1..=2u32 {
+        let roles = roles_of(&out, n);
+        assert!(
+            roles.iter().any(|(r, t)| r.is_none() && t == FIRM_LINE),
+            "page {n}: {roles:?}"
+        );
+    }
+}
+
+/// Guard: a letterhead at the top of both pages of a file of two pages stays content: the
+/// title and the fields of an invoice repeat on its second page, and they are the reader's to
+/// read.
+#[test]
+fn two_page_letterhead_stays_content() {
+    let head = show("F2", 14.0, 72.0, 800.0, "Rechnung")
+        + &show("F1", 9.0, 72.0, 784.0, "Rechnungsnummer 0000-0001")
+        + &show("F1", 9.0, 72.0, 773.0, "Kundennummer 00000");
+    let pages: Vec<Page> = (0..2).map(|_| page_with(&head)).collect();
+    let out = read(&pdf(&pages, ""));
+    for n in 1..=2u32 {
+        let roles = roles_of(&out, n);
+        assert!(
+            roles
+                .iter()
+                .all(|(r, _)| r.as_deref() != Some("page-header")),
+            "page {n}: {roles:?}"
+        );
+        let all = roles
+            .iter()
+            .map(|(_, t)| t.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        for t in [
+            "Rechnung",
+            "Rechnungsnummer 0000-0001",
+            "Kundennummer 00000",
+        ] {
+            assert!(all.contains(t), "page {n}: {t} in {roles:?}");
+        }
+    }
+}
+
+#[test]
+fn tagged_file_without_a_title_gets_its_heading() {
+    let out = read(&corpus("pdfjs-structure-simple.pdf"));
+    let p = &out.document.properties;
+    assert_eq!(p.title.as_deref(), Some("Heading 1"));
+    assert_eq!(
+        p.title_from.as_deref(),
+        Some("largest heading in the top third of page 1")
+    );
+}
+
+/// A tagged page: an `H1` in `title_size` pt Helvetica-Bold on top, then a `P` of prose
+/// lines in 10 pt.
+fn tagged_report(title_size: f32) -> Vec<u8> {
+    let mut c = format!(
+        "/H1 <</MCID 0>> BDC BT /F2 {title_size} Tf 72 780 Td (Musterbericht 2026) Tj ET EMC\n\
+         /P <</MCID 1>> BDC BT /F1 10 Tf 72 700 Td 13 TL\n"
+    );
+    for _ in 0..12 {
+        c.push_str("(die Muster GmbH liefert die bestellte Ware wie vereinbart aus) ' \n");
+    }
+    c.push_str("ET EMC\n");
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let kid = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let bold = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
+    let cs = b.stream("", c.as_bytes());
+    let root = b.reserve();
+    let doc = b.reserve();
+    let h1 = b.add(format!(
+        "<< /Type /StructElem /S /H1 /P {doc} 0 R /Pg {kid} 0 R /K 0 >>"
+    ));
+    let p = b.add(format!(
+        "<< /Type /StructElem /S /P /P {doc} 0 R /Pg {kid} 0 R /K 1 >>"
+    ));
+    b.set(
+        doc,
+        format!("<< /Type /StructElem /S /Document /P {root} 0 R /K [{h1} 0 R {p} 0 R] >>"),
+    );
+    b.set(
+        root,
+        format!(
+            "<< /Type /StructTreeRoot /K {doc} 0 R /ParentTree << /Nums [0 [{h1} 0 R {p} 0 R]] >> >>"
+        ),
+    );
+    b.set(
+        kid,
+        format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] /StructParents 0 \
+             /Resources << /Font << /F1 {font} 0 R /F2 {bold} 0 R >> >> /Contents {cs} 0 R >>"
+        ),
+    );
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(
+        catalog,
+        format!(
+            "<< /Type /Catalog /Pages {tree} 0 R /MarkInfo << /Marked true >> \
+             /StructTreeRoot {root} 0 R >>"
+        ),
+    );
+    b.finish(catalog)
+}
+
+#[test]
+fn tagged_heading_on_top_is_the_title() {
+    for size in [14.0f32, 18.0, 24.0] {
+        let out = read(&tagged_report(size));
+        assert_eq!(out.document.properties.facts.tagged, Some(true));
+        assert_eq!(
+            out.document.properties.title.as_deref(),
+            Some("Musterbericht 2026"),
+            "{size} pt"
+        );
     }
 }

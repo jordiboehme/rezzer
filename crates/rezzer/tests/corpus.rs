@@ -1984,6 +1984,19 @@ fn sf1199a_back_page_reads_as_prose() {
     );
 }
 
+/// Ruling P6-X3: on the sample check of the form, the city of issue and the titles of the date
+/// fields are two blocks: no paragraph holds both.
+#[test]
+fn sf1199a_check_city_stays_apart_from_the_date_titles() {
+    let out = pdf("pdfbox-sf1199a-direct-deposit.pdf");
+    for block in out.markdown.split("\n\n") {
+        assert!(
+            !(block.contains("AUSTIN, TEXAS") && block.contains("Month Day")),
+            "{block:?}"
+        );
+    }
+}
+
 #[test]
 fn multicolumn_reads_column_by_column() {
     // The left column of page 1 ends with "Donec nonummy"; the right column goes on with

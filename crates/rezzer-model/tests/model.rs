@@ -7,12 +7,12 @@ use std::io::Write;
 use std::sync::Arc;
 
 use rezzer_model::{
-    Align, Anchor, Annotation, Asset, Block, Bytes, CalloutKind, Cell, Certainty, Completeness,
-    Confidence, Detection, Document, Edge, Embedded, Event, Evidence, FieldAction, FileFacts,
-    FormField, FormatId, Formula, FormulaKind, Graph, Inline, LayoutKind, Loss, LossReason,
-    MODEL_VERSION, Node, OutlineEntry, Parameter, Properties, ReadOptions, ReaderInfo, Role,
-    RowKind, RowNote, Rule, SectionKind, Severity, Signature, Source, SourceInfo, StatusColor,
-    TableLayout, TaskState, Value,
+    Align, Anchor, Annotation, Asset, Barcode, Block, Bytes, CalloutKind, Cell, Certainty,
+    Completeness, Confidence, Detection, Document, Edge, Embedded, Event, Evidence, FieldAction,
+    FileFacts, FormField, FormatId, Formula, FormulaKind, FoundDate, Graph, Inline, LayoutKind,
+    Loss, LossReason, MODEL_VERSION, Node, OutlineEntry, Parameter, Properties, ReadOptions,
+    ReaderInfo, Role, RowKind, RowNote, Rule, SectionKind, Severity, Signature, Source, SourceInfo,
+    StatusColor, TableLayout, TaskState, Value,
 };
 use rezzer_model::{BoxKind, Geometry, MAX_BOXES_PER_PAGE, PlacedBox};
 
@@ -52,6 +52,11 @@ fn full_document() -> Document {
     let mut doc = Document::new(src());
     doc.properties = Properties {
         facts: Default::default(),
+        title_from: Some("largest heading in the top third of page 1".into()),
+        document_date: Some(FoundDate {
+            date: "2026-02-01".into(),
+            from: "date label Datum on page 1".into(),
+        }),
         title: Some("Costs".into()),
         description: Some("Quarterly costs".into()),
         authors: vec!["Ada".into()],
@@ -1111,6 +1116,55 @@ fn old_json_without_file_facts_reads() {
             "{key} leaked into {back}"
         );
     }
+    assert_eq!(MODEL_VERSION, 1);
+}
+
+#[test]
+fn barcode_place_roundtrips() {
+    let code = Barcode {
+        symbology: "Code 128".into(),
+        text: Some("0000000001".into()),
+        base64: None,
+        bytes: 10,
+        bounds: Some([40.0, 760.0, 200.0, 780.0]),
+        place: Some("top left of the page".into()),
+    };
+    let json = serde_json::to_value(&code).unwrap();
+    assert_eq!(json["place"], "top left of the page");
+    assert_eq!(json["box"], serde_json::json!([40.0, 760.0, 200.0, 780.0]));
+    let back: Barcode = serde_json::from_value(json).unwrap();
+    assert_eq!(back, code);
+    // A code without a place writes no key and reads back without one.
+    let old = serde_json::json!({"symbology": "QR Code", "text": "x", "bytes": 1});
+    let back: Barcode = serde_json::from_value(old).unwrap();
+    assert_eq!(back.place, None);
+    assert!(serde_json::to_value(&back).unwrap().get("place").is_none());
+    assert_eq!(MODEL_VERSION, 1);
+}
+
+#[test]
+fn found_title_and_date_roundtrip() {
+    let doc = full_document();
+    let json = serde_json::to_value(&doc).unwrap();
+    let p = &json["properties"];
+    assert_eq!(
+        p["title_from"],
+        "largest heading in the top third of page 1"
+    );
+    assert_eq!(
+        p["document_date"],
+        serde_json::json!({"date": "2026-02-01", "from": "date label Datum on page 1"})
+    );
+    let back: Document = serde_json::from_value(json).unwrap();
+    assert_eq!(back, doc);
+    // Properties without them write no key and read back without them.
+    let old: Properties = serde_json::from_value(serde_json::json!({"title": "A"})).unwrap();
+    assert_eq!(
+        (old.title_from.as_ref(), old.document_date.as_ref()),
+        (None, None)
+    );
+    let written = serde_json::to_value(&old).unwrap();
+    assert!(written.get("title_from").is_none() && written.get("document_date").is_none());
     assert_eq!(MODEL_VERSION, 1);
 }
 

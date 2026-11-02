@@ -16,10 +16,12 @@
 //! Scripts and actions are never run, links are never followed.
 
 mod annots;
+mod barfont;
 mod codes;
 mod fallback;
 mod forms;
 mod layout;
+mod marks;
 mod meta;
 mod objects;
 mod open;
@@ -27,12 +29,17 @@ mod order;
 mod quote;
 mod regions;
 mod render;
+mod scan;
+mod symbol;
 mod tables;
 mod text;
 
 #[cfg(test)]
 #[path = "../tests/common/mod.rs"]
 mod fixtures;
+/// The test fixtures name this crate as the integration tests do.
+#[cfg(test)]
+extern crate self as rezzer_read_pdf;
 
 use std::collections::{HashMap, HashSet};
 
@@ -262,6 +269,122 @@ fn extract(
     extracted
 }
 
+/// Adds a `found-by` note paragraph to the blocks of page `n`, charged to the budget; past
+/// the budget the read says that the note saying `what` is not written.
+fn found_by_note(
+    blocks: &mut Vec<Block>,
+    note: String,
+    what: &str,
+    n: u32,
+    budget: &Budget,
+    out: &mut Out,
+) {
+    let charged = budget
+        .add_elements(1)
+        .and_then(|()| budget.charge_text(note.len()));
+    match charged {
+        Ok(()) => blocks.push(Block::Paragraph {
+            inlines: vec![Inline::plain(note)],
+            role: Some("found-by".into()),
+            anchor: None,
+        }),
+        Err(hit) => out.loss(
+            format!("p{n}"),
+            format!("{hit}: the note that says {what} is not written"),
+            LossReason::Limit,
+            Severity::Warning,
+        ),
+    }
+}
+
+/// The line that says how many pictures of page `n` are too small to be listed (`count`),
+/// if any; when the limits leave no room for it, a loss says so.
+fn very_small_note(n: u32, count: usize, budget: &Budget, out: &mut Out) -> Option<Block> {
+    if count == 0 {
+        return None;
+    }
+    let text = if count == 1 {
+        "1 very small picture (under 1 cm2) is not listed".to_string()
+    } else {
+        format!("{count} very small pictures (under 1 cm2) are not listed")
+    };
+    match budget
+        .add_elements(1)
+        .and_then(|()| budget.charge_text(text.len()))
+    {
+        Ok(()) => Some(Block::Paragraph {
+            inlines: vec![Inline::Status {
+                text,
+                color: StatusColor::Grey,
+            }],
+            role: Some("pictures".into()),
+            anchor: None,
+        }),
+        Err(hit) => {
+            out.loss(
+                format!("p{n}"),
+                format!("{hit}: the count of the very small pictures of page {n} is not written"),
+                LossReason::Limit,
+                Severity::Warning,
+            );
+            None
+        }
+    }
+}
+
+/// Reads the separators drawn as marks on `pages` with the style the file's visible text
+/// shows (each line of runs scanned whole), before the pages are laid out. A number whose
+/// separators are not read is a Warning loss and makes the read partial: it may be off by a
+/// factor of 10 or 100. Returns the `found-by` note of each page that got separators.
+fn separators(pages: &mut [PageItems], out: &mut Out) -> HashMap<u32, String> {
+    // Only visible glyphs get placeholders: they are in the runs and the quotes.
+    let placed = |p: &PageItems| {
+        p.runs
+            .iter()
+            .any(|r| r.text.contains(marks::is_placeholder))
+            || p.quotes
+                .iter()
+                .flat_map(|q| &q.text)
+                .any(|t| t.contains(marks::is_placeholder))
+    };
+    if !pages.iter().any(placed) {
+        return HashMap::new();
+    }
+    let (style, votes) = marks::style_in(pages);
+    let mut notes = HashMap::new();
+    for (page, got) in marks::resolve(pages, &style) {
+        for why in &got.unread {
+            out.loss(
+                format!("p{page}"),
+                format!("a separator drawn as a mark on page {page} is not read: {why}"),
+                LossReason::Unsupported,
+                Severity::Warning,
+            );
+        }
+        if got.more > 0 {
+            out.loss(
+                format!("p{page}"),
+                format!(
+                    "separators drawn as marks in {} more numbers on page {page} are not read; \
+                     their digits are kept without them",
+                    got.more
+                ),
+                LossReason::Unsupported,
+                Severity::Warning,
+            );
+        }
+        // Content Rezzer cannot read: an `Unsupported` loss, which by itself leaves a read
+        // complete, so the read is made partial here.
+        if !got.unread.is_empty() {
+            out.partial = true;
+        }
+        if let Some(note) = marks::note(&got, &style, &votes) {
+            notes.insert(page, note);
+        }
+    }
+    notes
+}
+
 /// The page marker text: `Page 3`, or `Page iii (3)` when the page has its own label.
 pub(crate) fn marker(page: &PageInfo) -> String {
     let n = page.number;
@@ -297,7 +420,7 @@ fn lay_out(
     out: &mut Out,
 ) -> LaidOut {
     let Extracted {
-        pages: read,
+        pages: mut read,
         failed,
         stopped_at,
         kept_left,
@@ -310,6 +433,7 @@ fn lay_out(
     }
     let mut spots = vec![annots::Placed::default(); annots.len()];
     let mut unquoted = quote::Unquoted::default();
+    let mut found_by = separators(&mut read, out);
     let info_of: HashMap<u32, &PageInfo> = pages.iter().map(|p| (p.number, p)).collect();
     let texts: Vec<PageText<'_>> = read
         .iter()
@@ -322,15 +446,16 @@ fn lay_out(
             })
         })
         .collect();
-    let style = Style::new(&texts);
-    drop(texts);
-    let mut read: HashMap<u32, PageItems> = read.into_iter().map(|p| (p.page, p)).collect();
-    // The pages whose text was laid out.
-    let mut read_pages: HashSet<u32> = HashSet::new();
     let tree = match pdf {
         Some(pdf) if pdf.tagged() => pdf.struct_tree(),
         _ => None,
     };
+    // The layout reads a page by its tags only with a structure tree.
+    let style = Style::learn(&texts, tree.is_some());
+    drop(texts);
+    let mut read: HashMap<u32, PageItems> = read.into_iter().map(|p| (p.page, p)).collect();
+    // The pages whose text was laid out.
+    let mut read_pages: HashSet<u32> = HashSet::new();
     let figures = pdf.map(render::page_figures).unwrap_or_default();
     let furniture = render::furniture(read.values());
     let count = pdf.map_or(pages.len(), |pdf| pdf.page_count() as usize);
@@ -347,6 +472,8 @@ fn lay_out(
     // table among the section's blocks, and its anchor.
     let mut placed: Placed = HashMap::new();
     let widgets = pdf.map(widget_boxes).unwrap_or_default();
+    // Glyphs of the font Symbol read through its encoding, over all pages.
+    let mut symbols: u64 = 0;
     for info in pages {
         let n = info.number;
         // The section and its marker.
@@ -372,6 +499,17 @@ fn lay_out(
             anchor: None,
         }];
         if let (false, Some(mut items)) = (halted, read.remove(&n)) {
+            if let Some(note) = found_by.remove(&n) {
+                // The separators drawn as marks that were written, said at the top of the page.
+                found_by_note(
+                    &mut blocks,
+                    note,
+                    &format!("which separators on page {n} are drawn marks"),
+                    n,
+                    budget,
+                    out,
+                );
+            }
             let roles = |mcid: u32| pdf.and_then(|pdf| pdf.role_of(n, mcid));
             let cx = Context {
                 style: &style,
@@ -407,7 +545,25 @@ fn lay_out(
                     .unwrap_or(usize::MAX);
             let seen = render::vision(info, &items, &furniture, &everywhere, cap);
             let mut work = 0;
-            if let Some(render::Seen::Small(list, more)) = &seen {
+            if let Some(render::Seen::Small(list, more, unread)) = &seen {
+                if *unread > 0 {
+                    // Drawings past the most a page reads: not read, not listed.
+                    let (what, verb, it) = if *unread == 1 {
+                        ("drawing", "looks", "it is")
+                    } else {
+                        ("drawings", "look", "they are")
+                    };
+                    out.loss(
+                        format!("p{n}"),
+                        format!(
+                            "page {n} has {unread} more {what} that {verb} like a barcode or QR \
+                             code than a page reads (at most {}): {it} not read and not listed",
+                            codes::MAX_REGIONS
+                        ),
+                        LossReason::Limit,
+                        Severity::Warning,
+                    );
+                }
                 work = list.len() as u64 * PICTURE_WORK;
                 if links.take_bytes(work).is_err() {
                     work = 0;
@@ -426,7 +582,7 @@ fn lay_out(
                 Some(render::Seen::Page(v)) => {
                     vec![render::picture_top(v, items.turn, info.width, info.height)]
                 }
-                Some(render::Seen::Small(list, _)) => list
+                Some(render::Seen::Small(list, ..)) => list
                     .iter()
                     .map(|p| Some(((p.framed[0] + p.framed[2]) / 2.0, p.framed[3])))
                     .collect(),
@@ -472,12 +628,33 @@ fn lay_out(
                 rules: &items.rules,
                 images: if items.turned { &images } else { &items.images },
                 widgets: &fields,
+                boxes: &items.boxes,
                 lines_unsearched: items.lines_unsearched,
                 width,
                 body_size: style.body_size,
             };
+            symbols += items.symbol;
+            // The dates of page 1's lines are gathered before the layout takes its runs.
+            let mut dates = (n == 1).then(|| layout::page_dates(&items.runs, height));
             let runs = std::mem::take(&mut items.runs);
-            let laid = layout::page_blocks_at(n, height, runs, &drawn, &cx, &points);
+            let mut laid = layout::page_blocks_at(n, height, runs, &drawn, &cx, &points);
+            if let Some(dates) = &mut dates {
+                if let Some(more) = laid.dates.take() {
+                    dates.merge(more);
+                }
+                page_date(dates, budget, out);
+            }
+            if let Some(title) = laid.title.take() {
+                match budget.charge_text(title.len()) {
+                    Ok(()) => out.found_title = Some(title),
+                    Err(hit) => out.loss(
+                        "p1",
+                        format!("{hit}: the title found on page 1 is not kept"),
+                        LossReason::Limit,
+                        Severity::Warning,
+                    ),
+                }
+            }
             let annot_probes = &laid.probed[..probes_from.min(laid.probed.len())];
             for (&i, two) in here.iter().zip(annot_probes.chunks(2)) {
                 spots[i].anchor = two.iter().flatten().next().cloned();
@@ -506,6 +683,17 @@ fn lay_out(
             }
             for (what, why, severity) in laid.notes {
                 out.loss(format!("p{n}"), what, why, severity);
+            }
+            if let Some(note) = laid.found_by {
+                // The footnotes the layout found, said at the top of the page too.
+                found_by_note(
+                    &mut blocks,
+                    note,
+                    &format!("which paragraphs on page {n} are footnotes"),
+                    n,
+                    budget,
+                    out,
+                );
             }
             let section = out.doc.body.len();
             let first_table = blocks.len();
@@ -561,6 +749,14 @@ fn lay_out(
                 .collect();
             drop(anchored);
             let mut media: Vec<(usize, Block)> = Vec::new();
+            // Pictures too small to be listed on a page that is not rendered whole are
+            // counted, at the end of the page.
+            if !matches!(seen, Some(render::Seen::Page(_))) {
+                let tiny = render::very_small(info, &items);
+                if let Some(note) = very_small_note(n, tiny, budget, out) {
+                    media.push((blocks.len(), note));
+                }
+            }
             let here = figures.get(&n).map_or(&[][..], Vec::as_slice);
             // The Figure alt texts no picture took as its caption, with where they go.
             let mut unmatched: Vec<(usize, String)> = Vec::new();
@@ -593,9 +789,15 @@ fn lay_out(
                                 cut: items.in_part,
                                 fallback: items.fallback,
                                 regions,
+                                past: v.past,
                                 turn: items.turn,
                                 size: (info.width, info.height),
                                 light: items.images.len() <= render::SCAN_PICTURES,
+                                glyphs: items
+                                    .codes
+                                    .iter()
+                                    .filter_map(render::glyph_values)
+                                    .collect(),
                             });
                             out.doc.assets.push(render::asset(n, v.alt, caption));
                         }
@@ -607,7 +809,7 @@ fn lay_out(
                         ),
                     }
                 }
-                Some(render::Seen::Small(list, _)) => {
+                Some(render::Seen::Small(list, ..)) => {
                     let crops = pictures.list(
                         n,
                         (&list, &spots, here),
@@ -624,9 +826,15 @@ fn lay_out(
                             cut: items.in_part,
                             fallback: items.fallback,
                             regions: Vec::new(),
+                            past: 0,
                             turn: items.turn,
                             size: (info.width, info.height),
                             light: items.images.len() <= render::SCAN_PICTURES,
+                            glyphs: items
+                                .codes
+                                .iter()
+                                .filter_map(render::glyph_values)
+                                .collect(),
                         });
                     }
                 }
@@ -710,6 +918,7 @@ fn lay_out(
                 .get_or_insert_with(|| Anchor(format!("p{n}")));
         }
     }
+    symbol_loss(symbols, out);
     let places = pictures.finish(out);
     quote::losses(&unquoted, quotes_cut, quote_visits, out);
     if let Some((count, first, last)) = links.cut() {
@@ -851,12 +1060,13 @@ const PLACE_COST: u64 = std::mem::size_of::<Block>() as u64;
 /// Small pictures listed between two questions to the clock.
 const PICTURES_PER_CHECK: usize = 4_096;
 
-/// The small pictures of the document by what they are (`PageItems::images_id`), so equal
-/// pictures share one asset: the index of the asset and its places. Also the small pictures
-/// not listed: how many, on which pages, and why the first were not.
+/// The small pictures of the document by what they are (`PageItems::images_id`) and, for
+/// page furniture, its place, so equal pictures share one asset: the index of the asset and
+/// its places. Also the small pictures not listed: how many, on which pages, and why the
+/// first were not.
 #[derive(Default)]
 struct Pictures {
-    known: HashMap<u64, usize>,
+    known: HashMap<(u64, Option<usize>), usize>,
     assets: Vec<(usize, render::Places)>,
     unlisted: Option<(usize, u32, u32, String)>,
 }
@@ -907,13 +1117,10 @@ impl Pictures {
         for (k, &i) in order.iter().enumerate() {
             let p = &list[i];
             let words = render::place_alt(p);
-            // Page furniture is an asset of its own, apart from places of the same picture
-            // in the text: it stays only when a code is read from it.
-            let key = if p.furniture {
-                p.id ^ 0x9e37_79b9_7f4a_7c15
-            } else {
-                p.id
-            };
+            // Page furniture is an asset of its own for each of its places, apart from places
+            // of the same picture in the text.
+            let key = (p.id, p.furniture.map(|f| f.spot));
+            let furniture = p.furniture.is_some();
             let known = self.known.get(&key).copied();
             let checked = if k % PICTURES_PER_CHECK == PICTURES_PER_CHECK - 1 {
                 budget.check_time()
@@ -934,23 +1141,26 @@ impl Pictures {
                 self.unlist(order.len() - k, n, hit.to_string());
                 break;
             }
-            // Page furniture is not listed unless it holds a code: it takes no Figure.
+            // Page furniture takes no Figure: it stands apart from the page's content.
             let figure = p
                 .mcid
-                .filter(|_| !p.furniture)
+                .filter(|_| !furniture)
                 .and_then(|m| by_mcid.get(&m))
                 .copied();
-            // Regions of paths and page furniture stay only as codes: they are named as codes.
-            let name = if p.vector || p.furniture {
+            // Regions of paths are named as codes, pictures as pictures. Page furniture is
+            // named at its first place only: its later places take no number.
+            let name = if p.vector {
                 codes += 1;
                 format!("page-{n}-code-{codes}")
+            } else if furniture && known.is_some() {
+                String::new()
             } else {
                 pics += 1;
                 format!("page-{n}-pic-{pics}")
             };
             let asset = match known {
                 // Page furniture is named once, at its first place.
-                Some(at) if p.furniture => {
+                Some(at) if furniture => {
                     self.assets[at].1.add(n, p);
                     continue;
                 }
@@ -981,7 +1191,7 @@ impl Pictures {
                     ));
                     self.known.insert(key, self.assets.len());
                     self.assets.push((asset, render::Places::new(n, p)));
-                    if !p.vector && !p.furniture {
+                    if !p.vector && !furniture {
                         new.push(asset);
                     }
                     asset
@@ -1013,7 +1223,7 @@ impl Pictures {
         }
         let first = order
             .iter()
-            .find(|&&i| !list[i].furniture)
+            .find(|&&i| list[i].furniture.is_none())
             .map(|&i| spots[i])
             // Only page furniture: the end of the page, as on a page without pictures.
             .unwrap_or(usize::MAX);
@@ -1298,6 +1508,52 @@ fn notes(page: u32, items: &PageItems, out: &mut Out) {
     }
 }
 
+/// The document date of page 1 (see [`layout::document_date`]), set in the properties, or
+/// an `Uncertain` loss that says why there is none.
+fn page_date(dates: &layout::Dates, budget: &Budget, out: &mut Out) {
+    match layout::document_date(dates) {
+        layout::PageDate::None => {}
+        layout::PageDate::Found(found) => {
+            match budget.charge_text(found.date.len() + found.from.len()) {
+                Ok(()) => out.doc.properties.document_date = Some(found),
+                Err(hit) => out.loss(
+                    "p1",
+                    format!("{hit}: the date found on page 1 is not kept"),
+                    LossReason::Limit,
+                    Severity::Warning,
+                ),
+            }
+        }
+        layout::PageDate::Unsure(what) => {
+            out.loss("p1", what, LossReason::Uncertain, Severity::Info);
+        }
+        layout::PageDate::Limit(what) => {
+            out.loss("p1", what, LossReason::Limit, Severity::Info);
+        }
+    }
+}
+
+/// The one loss of a file that says how many characters of the font Symbol were read
+/// through the Adobe Symbol encoding.
+fn symbol_loss(n: u64, out: &mut Out) {
+    if n > 0 {
+        let (characters, are) = if n == 1 {
+            ("character", "is")
+        } else {
+            ("characters", "are")
+        };
+        out.loss(
+            "document",
+            format!(
+                "{n} {characters} of the font Symbol {are} read through the Adobe Symbol \
+                 encoding: its ToUnicode map gives Latin letters"
+            ),
+            LossReason::Uncertain,
+            Severity::Info,
+        );
+    }
+}
+
 /// The lines of runs: the runs of one line joined.
 fn run_lines(runs: &[Run]) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
@@ -1398,6 +1654,9 @@ pub(crate) struct Out {
     pub blobs: Vec<Blob>,
     /// The bytes rendered pages and extracted attachments may still take.
     pub blob_room: u64,
+    /// The title the head of page 1 gives; it is the document's title when the Info
+    /// dictionary and XMP give none.
+    pub found_title: Option<String>,
 }
 
 impl Out {
@@ -1407,6 +1666,7 @@ impl Out {
             partial: false,
             blobs: Vec::new(),
             blob_room: 0,
+            found_title: None,
         }
     }
 
@@ -1450,7 +1710,15 @@ impl Out {
         });
     }
 
-    pub fn finish(self) -> ReadOutcome {
+    pub fn finish(mut self) -> ReadOutcome {
+        // The title found on page 1 stands in for a title the file does not give.
+        let p = &mut self.doc.properties;
+        if p.title.as_deref().is_none_or(|t| t.trim().is_empty())
+            && let Some(title) = self.found_title.take()
+        {
+            p.title = Some(title);
+            p.title_from = Some(layout::TITLE_FROM.to_string());
+        }
         ReadOutcome {
             blobs: self.blobs,
             document: self.doc,
@@ -1473,10 +1741,7 @@ impl Out {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use rezzer_limits::Limits;
-    use rezzer_model::{Bytes, Confidence, Detection};
 
     use super::*;
     use crate::fixtures::{Page, pdf, show};
@@ -1560,22 +1825,7 @@ mod tests {
         // 5,000 different small pictures on one page of a read whose time is spent: the
         // listing asks the clock after 4,096 pictures, keeps those it listed and says how
         // many are not listed and why.
-        let mut out = Out::new(Document::new(source_info(&Source {
-            path: None,
-            name: "f.pdf".into(),
-            bytes: Bytes::Owned(Arc::new(Vec::new())),
-            sha256: "00".repeat(32),
-            size: 0,
-            format: FormatId::Pdf,
-            detection: Detection {
-                confidence: Confidence::Certain,
-                evidence: "x".into(),
-            },
-            modified: None,
-            created: None,
-            downloaded_from: None,
-            file_tags: Vec::new(),
-        })));
+        let mut out = Out::new(Document::new(source_info(&fixtures::source(&[]))));
         let budget = Budget::new(Limits::default());
         budget.cancel();
         let list: Vec<render::Small> = (0..5_000u64)
@@ -1589,7 +1839,7 @@ mod tests {
                     how: None,
                     hint: false,
                     vector: false,
-                    furniture: false,
+                    furniture: None,
                     logo: false,
                     mcid: None,
                 }
@@ -1619,22 +1869,7 @@ mod tests {
 
     #[test]
     fn failures_are_grouped_by_run_of_pages() {
-        let mut out = Out::new(Document::new(source_info(&Source {
-            path: None,
-            name: "f.pdf".into(),
-            bytes: Bytes::Owned(Arc::new(Vec::new())),
-            sha256: "00".repeat(32),
-            size: 0,
-            format: FormatId::Pdf,
-            detection: Detection {
-                confidence: Confidence::Certain,
-                evidence: "x".into(),
-            },
-            modified: None,
-            created: None,
-            downloaded_from: None,
-            file_tags: Vec::new(),
-        })));
+        let mut out = Out::new(Document::new(source_info(&fixtures::source(&[]))));
         let bad = |page: u32, why: &str| Failure {
             page,
             why: why.to_string(),
@@ -1727,22 +1962,7 @@ mod tests {
         );
         b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
         let bytes = b.finish(catalog);
-        let src = Source {
-            path: None,
-            name: "file.pdf".into(),
-            bytes: Bytes::Owned(Arc::new(bytes.clone())),
-            sha256: "00".repeat(32),
-            size: bytes.len() as u64,
-            format: FormatId::Pdf,
-            detection: Detection {
-                confidence: Confidence::Certain,
-                evidence: "%PDF-".into(),
-            },
-            modified: None,
-            created: None,
-            downloaded_from: None,
-            file_tags: Vec::new(),
-        };
+        let src = fixtures::source(&bytes);
         let budget = Budget::new(Limits::default());
         let before = render::SCAN_RUNS.with(std::cell::Cell::get);
         let out = read_pdf_in(
@@ -1762,22 +1982,7 @@ mod tests {
     #[test]
     fn crops_stop_when_the_blob_room_is_spent() {
         let bytes = crate::fixtures::small_pictures_twin(2_000);
-        let src = Source {
-            path: None,
-            name: "file.pdf".into(),
-            bytes: Bytes::Owned(Arc::new(bytes.clone())),
-            sha256: "00".repeat(32),
-            size: bytes.len() as u64,
-            format: FormatId::Pdf,
-            detection: Detection {
-                confidence: Confidence::Certain,
-                evidence: "%PDF-".into(),
-            },
-            modified: None,
-            created: None,
-            downloaded_from: None,
-            file_tags: Vec::new(),
-        };
+        let src = fixtures::source(&bytes);
         let opts = ReadOptions {
             extract_assets: true,
             ..ReadOptions::default()
@@ -1817,22 +2022,7 @@ mod tests {
     fn time_stop_between_pages_is_partial() {
         let page = Page::text(show("F1", 12.0, 72.0, 700.0, "Some words."));
         let bytes = pdf(&std::iter::repeat_n(page, 70).collect::<Vec<_>>(), "");
-        let src = Source {
-            path: None,
-            name: "file.pdf".into(),
-            bytes: Bytes::Owned(Arc::new(bytes.clone())),
-            sha256: "00".repeat(32),
-            size: bytes.len() as u64,
-            format: FormatId::Pdf,
-            detection: Detection {
-                confidence: Confidence::Certain,
-                evidence: "%PDF-".into(),
-            },
-            modified: None,
-            created: None,
-            downloaded_from: None,
-            file_tags: Vec::new(),
-        };
+        let src = fixtures::source(&bytes);
         let asked = std::cell::Cell::new(0);
         let budget = Budget::new(Limits::default());
         // The time runs out after 64 pages: from then on the budget says so too.

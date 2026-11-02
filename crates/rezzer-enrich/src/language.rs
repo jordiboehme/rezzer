@@ -51,6 +51,7 @@ impl Pass for Language {
 }
 
 /// The words of paragraphs, headings, tasks and cells, one line each, cut at [`MAX_BYTES`].
+/// Statuses and `found-by` notes are the reader's words and are left out.
 /// Only words made of letters count (apostrophes and hyphens inside a word are fine, edge
 /// punctuation is dropped): numbers, dates and codes such as `A12-B7` say nothing about the
 /// language and make whatlang report a false, "reliable" answer. Code and formulas are left
@@ -86,22 +87,28 @@ fn body_text(body: &[Block]) -> String {
         if generated.contains(&(b as *const Block)) {
             return true;
         }
+        // A note in which the reader says how it found something is not the author's text.
+        if matches!(b, Block::Paragraph { role: Some(r), .. } if r == "found-by") {
+            return true;
+        }
         walk::block_inlines(b, |list| {
-            walk::inlines(list, |i| match i {
-                Inline::Text { text: t, .. } | Inline::Status { text: t, .. } => {
-                    for word in t.split_whitespace() {
-                        // One huge text must not be scanned to the end once the sample is full.
-                        if text.len() >= MAX_BYTES {
-                            break;
-                        }
-                        let word = word.trim_matches(|c: char| !c.is_alphabetic());
-                        if is_word(word) {
-                            push_capped(&mut text, word);
-                            push_capped(&mut text, " ");
-                        }
+            walk::inlines(list, |i| {
+                // A status (a page marker, an empty field) is the reader's word, not the
+                // author's.
+                let Inline::Text { text: t, .. } = i else {
+                    return;
+                };
+                for word in t.split_whitespace() {
+                    // One huge text must not be scanned to the end once the sample is full.
+                    if text.len() >= MAX_BYTES {
+                        break;
+                    }
+                    let word = word.trim_matches(|c: char| !c.is_alphabetic());
+                    if is_word(word) {
+                        push_capped(&mut text, word);
+                        push_capped(&mut text, " ");
                     }
                 }
-                _ => {}
             });
             push_capped(&mut text, "\n");
         });
@@ -243,6 +250,74 @@ mod tests {
         assert!(!is_word("A12-B7"));
         assert!(!is_word("2025-01-02"));
         assert!(!is_word("6.5e3"));
+    }
+
+    /// A form whose text is mostly label and value pairs in tables, with the reader's English
+    /// found-by notes and grey `empty` statuses beside it, still reads as German: notes and
+    /// statuses are the reader's, not the author's text.
+    #[test]
+    fn a_form_of_pairs_keeps_its_language() {
+        use rezzer_model::{Cell, StatusColor};
+        let labels = [
+            ("Bruttobezüge", "1.234,56"),
+            ("Steuerklasse", ""),
+            ("Kirchensteuer", "12,34"),
+            ("Solidaritätszuschlag", ""),
+            ("Krankenversicherung", "56,78"),
+            ("Rentenversicherung", ""),
+            ("Arbeitslosenversicherung", ""),
+            ("Pflegeversicherung", ""),
+            ("Auszahlungsbetrag", "1.000,00"),
+            ("Überweisung an die Bank", ""),
+            ("Urlaubsanspruch im Jahr", ""),
+            ("Resturlaub aus dem Vorjahr", ""),
+            ("Freibetrag monatlich", ""),
+            ("Eintritt in die Firma", ""),
+        ];
+        let rows: Vec<Vec<Cell>> = labels
+            .iter()
+            .map(|(l, v)| {
+                let value = if v.is_empty() {
+                    vec![Inline::Status {
+                        text: "empty".into(),
+                        color: StatusColor::Grey,
+                    }]
+                } else {
+                    vec![Inline::plain(*v)]
+                };
+                vec![Cell::new(vec![Inline::plain(*l)]), Cell::new(value)]
+            })
+            .collect();
+        let note = |t: &str| Block::Paragraph {
+            inlines: vec![Inline::plain(t)],
+            role: Some("found-by".into()),
+            anchor: None,
+        };
+        let body = vec![
+            note(
+                "Found by: label and value pairs from rows of fields between drawn rules; each label is the smaller text and pairs with the value beside it or under it.",
+            ),
+            note(
+                "Found by: a column of amounts beside a table, drawn with rules that line up with the table's rules; its amounts are read as one more column of the table, and each total label in it pairs with the amount under it.",
+            ),
+            note(
+                "Found by: 12 decimal separators on this page are drawn marks, not text; they are written as \",\" as in 12 amounts written as text in this file.",
+            ),
+            Block::Table {
+                caption: None,
+                header_rows: 0,
+                role: None,
+                rows,
+                alignments: Vec::new(),
+                anchor: None,
+                layout: None,
+            },
+        ];
+        let text = body_text(&body);
+        assert!(!text.contains("Found"), "{text}");
+        assert!(!text.contains("empty"), "{text}");
+        let info = whatlang::detect(&text).expect("a language");
+        assert_eq!(info.lang().code(), "deu", "{text}");
     }
 
     #[test]

@@ -340,6 +340,18 @@ impl Budget {
         Ok(())
     }
 
+    /// Gives back `n` model elements counted before, for elements the caller dropped again.
+    /// Once the count was over [`Limits::max_elements`] it stays there, so the limit stays
+    /// hit. The count never goes below zero.
+    pub fn release_elements(&self, n: u64) {
+        let max = self.limits.max_elements;
+        let _ = self
+            .elements
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |t| {
+                (t <= max).then(|| t.saturating_sub(n))
+            });
+    }
+
     /// Checks the size of one text run (a paragraph, a cell, a line) against
     /// [`Limits::max_text_bytes`]. Call it before the text is copied or built, with the size
     /// the run would have. Runs are checked one by one; nothing is added up.

@@ -9,16 +9,14 @@ mod common;
 
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use common::{Builder, Page, pdf, show};
+use common::{Builder, Page, body_text, pdf, show, text};
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
-    Anchor, Block, Bytes, CalloutKind, Completeness, Confidence, Detection, FormatId, Loss,
-    LossReason, ReadOptions, ReadOutcome, Reader, SectionKind, Severity, Source, plain_text,
+    Anchor, Block, CalloutKind, Completeness, Loss, LossReason, ReadOptions, ReadOutcome,
+    SectionKind, Severity,
 };
-use rezzer_read_pdf::PdfReader;
 
 /// The allocator of the Rezzer binary: the memory these tests measure is the memory it
 /// ships with.
@@ -30,31 +28,8 @@ fn corpus(name: &str) -> Vec<u8> {
     std::fs::read(path.join(name)).expect("corpus file")
 }
 
-fn source(bytes: &[u8]) -> Source {
-    Source {
-        path: None,
-        name: "file.pdf".into(),
-        bytes: Bytes::Owned(Arc::new(bytes.to_vec())),
-        sha256: "00".repeat(32),
-        size: bytes.len() as u64,
-        format: FormatId::Pdf,
-        detection: Detection {
-            confidence: Confidence::Certain,
-            evidence: "%PDF-".into(),
-        },
-        modified: None,
-        created: None,
-        downloaded_from: None,
-        file_tags: Vec::new(),
-    }
-}
-
 fn read_with(bytes: &[u8], limits: Limits) -> ReadOutcome {
-    PdfReader.read(
-        &source(bytes),
-        &ReadOptions::default(),
-        &Budget::new(limits),
-    )
+    common::read_in(bytes, &ReadOptions::default(), &Budget::new(limits))
 }
 
 fn read(bytes: &[u8]) -> ReadOutcome {
@@ -85,36 +60,6 @@ fn page(out: &ReadOutcome, n: u32) -> &[Block] {
             _ => None,
         })
         .unwrap_or_else(|| panic!("no section p{n}"))
-}
-
-fn block_text(block: &Block, out: &mut String) {
-    match block {
-        Block::Heading { inlines, .. } | Block::Paragraph { inlines, .. } => {
-            out.push_str(&plain_text(inlines));
-            out.push('\n');
-        }
-        Block::Section { blocks, .. } | Block::Callout { blocks, .. } => {
-            blocks.iter().for_each(|b| block_text(b, out))
-        }
-        Block::List { items, .. } => items.iter().flatten().for_each(|b| block_text(b, out)),
-        _ => {}
-    }
-}
-
-fn text(blocks: &[Block]) -> String {
-    let mut out = String::new();
-    blocks.iter().for_each(|b| block_text(b, &mut out));
-    out
-}
-
-/// The page text without the folded callouts.
-fn body_text(blocks: &[Block]) -> String {
-    let kept: Vec<Block> = blocks
-        .iter()
-        .filter(|b| !matches!(b, Block::Callout { .. }))
-        .cloned()
-        .collect();
-    text(&kept)
 }
 
 fn losses_at<'a>(out: &'a ReadOutcome, location: &str) -> Vec<&'a Loss> {
@@ -486,4 +431,110 @@ fn pdf_inspector_not_in_tree() {
         );
     }
     assert!(lock.contains("name = \"hayro-interpret\""));
+}
+
+#[test]
+fn symbol_font_reads_greek() {
+    // A Symbol font whose ToUnicode map gives the Latin letter of each code, as many
+    // producers write it, beside a Helvetica line.
+    let cmap = "/CIDInit /ProcSet findresource begin 12 dict begin begincmap \
+        /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def \
+        /CMapName /Adobe-Identity-UCS def /CMapType 2 def \
+        1 begincodespacerange <00> <FF> endcodespacerange \
+        3 beginbfchar <61> <0061> <62> <0062> <57> <0057> endbfchar \
+        endcmap CMapName currentdict /CMap defineresource pop end end";
+    // The base name after a subset prefix, with or without a style part.
+    for name in [
+        "Symbol",
+        "ABCDEF+Symbol",
+        "SymbolMT",
+        "Symbol,Bold",
+        "Symbol-Bold",
+        "SymbolMT,Bold",
+        "ABCDEF+SymbolMT",
+    ] {
+        let mut b = Builder::default();
+        let catalog = b.reserve();
+        let tree = b.reserve();
+        let helvetica = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+        let map = b.stream("", cmap.as_bytes());
+        let symbol = b.add(format!(
+            "<< /Type /Font /Subtype /Type1 /BaseFont /{name} /ToUnicode {map} 0 R >>"
+        ));
+        let content = b.stream(
+            "",
+            b"BT /F1 12 Tf 72 700 Td (Winkel ) Tj /F2 12 Tf (ab) Tj /F1 12 Tf ( und ) Tj \
+              /F2 12 Tf (W) Tj ET\n\
+              BT /F1 12 Tf 72 680 Td (ab W) Tj ET\n",
+        );
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F1 {helvetica} 0 R /F2 {symbol} 0 R >> >> \
+             /Contents {content} 0 R >>"
+        ));
+        b.set(
+            tree,
+            format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+        );
+        b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+        let out = read(&b.finish(catalog));
+        let text = common::all_text(&out);
+        assert!(
+            text.contains("Winkel \u{3b1}\u{3b2} und \u{3a9}"),
+            "{name}: {text}"
+        );
+        // Helvetica keeps its Latin letters.
+        assert!(text.contains("ab W"), "{name}: {text}");
+        let said: Vec<&str> = out
+            .document
+            .losses
+            .iter()
+            .filter(|l| l.why == LossReason::Uncertain)
+            .map(|l| l.what.as_str())
+            .collect();
+        assert_eq!(
+            said,
+            [
+                "3 characters of the font Symbol are read through the Adobe Symbol encoding: its \
+              ToUnicode map gives Latin letters"
+            ],
+            "{name}"
+        );
+    }
+}
+
+#[test]
+fn symbol_like_names_are_not_symbol() {
+    // A font whose name only starts like Symbol keeps its ToUnicode text.
+    let cmap = "/CIDInit /ProcSet findresource begin 12 dict begin begincmap \
+        /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def \
+        /CMapName /Adobe-Identity-UCS def /CMapType 2 def \
+        1 begincodespacerange <00> <FF> endcodespacerange \
+        1 beginbfchar <61> <0061> endbfchar \
+        endcmap CMapName currentdict /CMap defineresource pop end end";
+    for name in ["SymbolSans", "Symbolic", "MusterSymbol"] {
+        let mut b = Builder::default();
+        let catalog = b.reserve();
+        let tree = b.reserve();
+        let map = b.stream("", cmap.as_bytes());
+        let font = b.add(format!(
+            "<< /Type /Font /Subtype /Type1 /BaseFont /{name} /ToUnicode {map} 0 R >>"
+        ));
+        let content = b.stream("", b"BT /F2 12 Tf 72 700 Td (a) Tj ET\n");
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F2 {font} 0 R >> >> /Contents {content} 0 R >>"
+        ));
+        b.set(
+            tree,
+            format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+        );
+        b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+        let out = read(&b.finish(catalog));
+        let text = common::all_text(&out);
+        assert!(
+            text.contains('a') && !text.contains('\u{3b1}'),
+            "{name}: {text}"
+        );
+    }
 }

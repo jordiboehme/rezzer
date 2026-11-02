@@ -9,13 +9,17 @@
 
 mod banded;
 mod borderless;
+mod pairs;
 mod ruled;
+mod sections;
+mod side;
 mod tagged;
 
 use std::collections::HashMap;
 
 use crate::layout::{Drawn, Flow, Run};
 
+pub(crate) use pairs::{BoxTitle, Frame, box_pairs, field_frames, form_drawn, underlined_titles};
 pub(crate) use tagged::{Tables, tagged};
 
 /// A drawn line or rectangle, in points in the visible page box like the runs, `y` upward.
@@ -33,6 +37,17 @@ pub(crate) struct Rule {
 pub(crate) enum RuleKind {
     Line,
     Rect,
+}
+
+/// A horizontal rule of the page, its pieces joined: its height `y`, its ends and its
+/// thickness `h`. A stroked line and a filled bar of up to two points come out of the text
+/// pass as lines without a thickness, so `h` is 0 for them and only a drawn rectangle has one.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct HRule {
+    pub y: f32,
+    pub x0: f32,
+    pub x1: f32,
+    pub h: f32,
 }
 
 /// A table found on a page, with the runs of each cell. Its cells' text is not built yet.
@@ -54,6 +69,21 @@ pub(crate) struct Planned {
     pub tagged: Option<usize>,
     /// The rows go on a table that started on an earlier page.
     pub continues: bool,
+    /// The runs of the table's title line, read as its caption.
+    pub caption: Vec<Run>,
+    /// The rule that found the table, when it is one the output states: a `found-by` note
+    /// with this text stands before the first table of the page it found.
+    pub found_by: Option<&'static str>,
+}
+
+impl Planned {
+    /// Whether the table is one of labels and values that the field reader made: from drawn
+    /// boxes, rows of fields or the totals of a column beside a section. Its rows are label
+    /// and value, also where column titles stand over one row of items.
+    pub(crate) fn is_pairs(&self) -> bool {
+        self.found_by
+            .is_some_and(|n| pairs::is_pairs_note(n) || n == side::SIDE_FOUND_BY)
+    }
 }
 
 /// Runs for a cell of a row an earlier page began: the row's place in its table and the
@@ -70,6 +100,8 @@ pub(crate) struct PlannedCell {
     pub runs: Vec<Run>,
     pub row_span: u32,
     pub col_span: u32,
+    /// What the cell says when it has no runs: a field left empty is a grey status.
+    pub status: Option<&'static str>,
 }
 
 /// What a detector found on a page besides tables: a region that may be a table and is left as
@@ -90,15 +122,111 @@ pub(crate) struct Found {
     pub tables: Vec<Planned>,
     pub unsure: Vec<Unsure>,
     pub skipped: Vec<String>,
-    /// For each run of the flow, whether a refused grid with a note holds it: no detector
-    /// after it may take the run into a table. Empty when no grid holds a run.
+    /// For each run of the flow, whether a grid or band refused with a note (or with a
+    /// limit note for its size) holds it: no detector after it may take the run into a table.
+    /// Empty when none holds a run.
     pub held: Vec<bool>,
     /// Heights of the rules of header bands, sorted: no region without rules runs across one.
     pub cuts: Vec<f32>,
+    /// Grids and bands with text refused without a note: where each stands in the reading
+    /// order, why and what it is. Their text is free for the detector without rules. The
+    /// layout writes them as losses, one per kind and page.
+    pub quiet: Vec<(usize, &'static str, Refused)>,
+    /// Text a detector left as it stands, unsure what it is: the layout writes each as an
+    /// Info `Uncertain` loss.
+    pub uncertain: Vec<String>,
+    /// For each run of the flow, whether a grid or band of `quiet` holds it: its loss speaks
+    /// for the run already. Empty when none holds a run.
+    pub quietly: Vec<bool>,
+    /// For each run of the flow, the frame of column titles over items between rules that the
+    /// field reader left to the table pass, if one holds it (see `pairs::table_body`), and the
+    /// titles of each frame. Empty when none holds a run.
+    pub bodies: Vec<Option<u32>>,
+    pub body_labels: Vec<Vec<String>>,
+    /// The horizontal rules of the page, sorted by height: a rule across a region without
+    /// rules may end its table (see `borderless`). Empty when the page's lines were not
+    /// searched.
+    pub ends: Vec<HRule>,
+    /// Rows of fields between rules that are refused or have a cell left out of their pairs:
+    /// their cells, each with its runs in the order to read them (see `pairs::cell_order`). The
+    /// ruled pass puts them so in the flow, each cell's lines together and apart from the next
+    /// cell's.
+    pub apart: Vec<Vec<Vec<usize>>>,
+}
+
+/// What a refusal without a note refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Refused {
+    /// A grid of drawn rules.
+    Grid,
+    /// A header band and the lines below it.
+    Band,
+    /// A block of lines in columns without rules.
+    Region,
+}
+
+/// Why a grid or band on a picture is not a table. It is a chart, so its refusal is no loss.
+const ON_PICTURE: &str = "it lies on a picture";
+
+/// Reasons said of several grids or bands: how many have each and why, as `2 (they cover
+/// most of the page), 1 (most of its cells are empty)`, in the order the reasons first come.
+pub(crate) fn counted<'a>(reasons: impl Iterator<Item = &'a str>) -> String {
+    let mut counts: Vec<(&str, usize)> = Vec::new();
+    for why in reasons {
+        match counts.iter_mut().find(|(w, _)| *w == why) {
+            Some((_, n)) => *n += 1,
+            None => counts.push((why, 1)),
+        }
+    }
+    let parts: Vec<String> = counts
+        .iter()
+        .map(|&(why, n)| {
+            let why = if n == 1 { why } else { plural(why) };
+            format!("{n} ({why})")
+        })
+        .collect();
+    parts.join(", ")
+}
+
+/// A reason a ruled grid or a header band is refused, said of several.
+pub(crate) fn plural(why: &str) -> &str {
+    match why {
+        "it has more than 15 columns" => "they have more than 15 columns",
+        "most of its cells are empty" => "most of their cells are empty",
+        "its boxes do not form rows and columns" => "their boxes do not form rows and columns",
+        "its text crosses its lines" => "their text crosses their lines",
+        "it covers most of the page" => "they cover most of the page",
+        ON_PICTURE => "they lie on a picture",
+        "its text is much smaller than the body text, as in a picture of a page" => {
+            "their text is much smaller than the body text, as in pictures of pages"
+        }
+        "too few rows follow its header" => "too few rows follow their headers",
+        "the text below its header does not stand in its columns" => {
+            "the text below their headers does not stand in their columns"
+        }
+        "its cells hold long text" => "their cells hold long text",
+        "it is too tall for a header over lines" => "they are too tall for headers over lines",
+        "its cells hold too few column titles" => "their cells hold too few column titles",
+        "its text runs on from row to row like prose" => {
+            "their text runs on from row to row like prose"
+        }
+        "some of its text stands between its columns" => {
+            "some of their text stands between their columns"
+        }
+        "its columns are not clean" => "their columns are not clean",
+        "all its rows read the same" => "all their rows read the same",
+        "it reads like a table of contents" => "they read like tables of contents",
+        other => other,
+    }
 }
 
 /// Lines this close are one line, and line ends this close meet, in points.
 pub(crate) const SNAP: f32 = 2.0;
+
+/// A label or a title differs in size from the text beside it when the larger is at least
+/// this many times the smaller: half a point at 12.5 points, and less than half a point at
+/// the sizes of forms (8 over 8.5 points differ). A ratio, so that it holds at every scale.
+pub(crate) const LABEL_STEP: f32 = 1.04;
 
 /// A grid of drawn rules with more columns than this is a form or a chart, not a table.
 const MAX_COLUMNS: usize = 15;
@@ -160,10 +288,46 @@ pub(crate) fn untagged(
         body_size: drawn.body_size,
     };
     if !drawn.lines_unsearched {
+        found.ends = end_rules(drawn.rules);
         ruled::ruled(page, flow, drawn.rules, &area, stop, &mut found);
     }
     borderless::borderless(page, flow, &area, stop, &mut found);
     found
+}
+
+/// The horizontal rules of `rules`, sorted by height: lines with their collinear pieces
+/// joined (a dashed rule is one), and rectangles wider than high as they are.
+fn end_rules(rules: &[Rule]) -> Vec<HRule> {
+    let mut lines = Vec::new();
+    let mut out = Vec::new();
+    for r in rules {
+        let (x0, x1) = (r.x0.min(r.x1), r.x0.max(r.x1));
+        let (y0, y1) = (r.y0.min(r.y1), r.y0.max(r.y1));
+        if y1 - y0 >= x1 - x0 {
+            continue;
+        }
+        match r.kind {
+            RuleKind::Line => lines.push(crate::regions::Seg {
+                at: (y0 + y1) / 2.0,
+                from: x0,
+                to: x1,
+            }),
+            RuleKind::Rect => out.push(HRule {
+                y: (y0 + y1) / 2.0,
+                x0,
+                x1,
+                h: y1 - y0,
+            }),
+        }
+    }
+    out.extend(crate::regions::merged(lines).into_iter().map(|s| HRule {
+        y: s.at,
+        x0: s.from,
+        x1: s.to,
+        h: 0.0,
+    }));
+    out.sort_by(|a, b| a.y.total_cmp(&b.y));
+    out
 }
 
 /// Why a grid or region is the page's frame.
@@ -179,14 +343,21 @@ struct Area<'a> {
 }
 
 impl Area<'_> {
+    /// Whether a picture lies under most of `b` (x0, y0, x1, y1): a grid or band there is a
+    /// chart's.
+    fn on_picture(&self, b: [f32; 4]) -> bool {
+        let size = (b[2] - b[0]).max(0.0) * (b[3] - b[1]).max(0.0);
+        self.images.iter().any(|i| overlap(*i, b) > 0.5 * size)
+    }
+
     /// Why a table cannot stand in `b` (x0, y0, x1, y1) with text of `sizes`, if it cannot.
     fn refuses(&self, b: [f32; 4], sizes: &[f32]) -> Option<&'static str> {
         let size = (b[2] - b[0]).max(0.0) * (b[3] - b[1]).max(0.0);
         if size > PAGE_SHARE * self.width * self.height {
             return Some(PAGE_FRAME);
         }
-        if self.images.iter().any(|i| overlap(*i, b) > 0.5 * size) {
-            return Some("it lies on a picture");
+        if self.on_picture(b) {
+            return Some(ON_PICTURE);
         }
         let mut sizes = sizes.to_vec();
         sizes.sort_by(f32::total_cmp);
@@ -357,6 +528,13 @@ impl ByY {
         }
     }
 
+    /// The number of runs whose middle lies between the heights `lo` and `hi`.
+    fn count_between(&self, lo: f32, hi: f32) -> usize {
+        let a = self.run_y.partition_point(|y| *y <= lo);
+        let z = self.run_y.partition_point(|y| *y < hi);
+        z.saturating_sub(a)
+    }
+
     /// The runs whose middle lies between the heights `lo` and `hi`, in page order.
     fn runs_between(&self, lo: f32, hi: f32) -> Vec<usize> {
         let a = self.run_y.partition_point(|y| *y <= lo);
@@ -375,6 +553,9 @@ fn middle(r: &Run) -> (f32, f32) {
 /// Where a run of the page goes: the table, row and cell of `planned`.
 type Target = Option<(u32, u32, u32)>;
 
+/// The row of a [`Target`] that sends a run to the table's caption.
+const CAPTION_ROW: u32 = u32::MAX;
+
 /// Moves the runs `target` names out of `flow` into the cells of `planned`. Each cell is sized
 /// for its runs first: a list grown one run at a time keeps room for four.
 fn fill(planned: &mut [Planned], flow: &mut Flow, target: &[Target]) {
@@ -383,6 +564,9 @@ fn fill(planned: &mut [Planned], flow: &mut Flow, target: &[Target]) {
         *counts.entry(*t).or_default() += 1;
     }
     for ((t, r, c), n) in counts {
+        if r == CAPTION_ROW {
+            continue;
+        }
         planned[t as usize].rows[r as usize][c as usize]
             .runs
             .reserve_exact(n);
@@ -390,6 +574,10 @@ fn fill(planned: &mut [Planned], flow: &mut Flow, target: &[Target]) {
     let stay = target.iter().filter(|t| t.is_none()).count()
         + flow.runs.len().saturating_sub(target.len());
     flow.take_each(stay, |i, r| match target.get(i).copied().flatten() {
+        Some((t, CAPTION_ROW, _)) => {
+            planned[t as usize].caption.push(r);
+            None
+        }
         Some((t, row, cell)) => {
             planned[t as usize].rows[row as usize][cell as usize]
                 .runs

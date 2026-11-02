@@ -12,13 +12,25 @@
 
 use std::cell::Cell as Counter;
 use std::collections::{HashMap, HashSet};
+use std::num::NonZeroU32;
 use std::rc::Rc;
 
 use pdfparts::StructTree;
 use rezzer_limits::{Budget, LimitHit};
-use rezzer_model::{Anchor, Block, Cell, Inline, LossReason, Severity};
+use rezzer_model::{Anchor, Block, Cell, Inline, LossReason, SectionKind, Severity, StatusColor};
 
 use crate::tables::{self, Planned, PlannedCell, Rule, Tables, Unsure};
+
+mod footnotes;
+mod head;
+mod shape;
+
+pub(crate) use head::{Dates, PageDate, TITLE_FROM, document_date, page_dates};
+pub(crate) use shape::{
+    ColumnLine, Columns, address_block, address_columns, address_lines, address_shaped,
+    page_text_sizes, page_text_sizes_of, postal,
+};
+use shape::{bold_led, data_only, ends_in_amount, listed, padded_mark};
 
 /// A piece of text in one style on one line. The text parser and the fallback parser fill it,
 /// in the order and with the line numbers and word spaces [`crate::text::PageItems`] states.
@@ -36,8 +48,12 @@ pub(crate) struct Run {
     pub size: f32,
     pub bold: bool,
     pub italic: bool,
-    /// The marked content id the run is shown in, for the structure tree.
-    pub mcid: Option<u32>,
+    /// The family of the font of its first glyph (see [`crate::text::family_of`]), 0 when not
+    /// known: a data font told apart from a title font of the same size and weight.
+    pub family: u32,
+    /// The marked content id the run is shown in, for the structure tree, kept one up (see
+    /// [`Run::mcid`]): with no room taken for its absence the run stays 80 bytes.
+    pub mcid: Option<NonZeroU32>,
     /// The target of a URI link whose box holds the middle of the run, shared by all the
     /// runs of the link.
     pub uri: Option<Rc<UriTarget>>,
@@ -47,6 +63,115 @@ pub(crate) struct Run {
     /// The run reads in another direction than the page's text (margin notes, stamps,
     /// vertical writing); its `x` and `y` are where it starts.
     pub off_axis: bool,
+    /// The run is a reference to a footnote of its page: its text is the footnote's label.
+    pub note: bool,
+    /// Where the white space between its words lies, from the glyphs: what a column rule
+    /// that crosses the run may cut it at. Empty when the run has one word, reads in another
+    /// direction or from right to left, or its text was not laid out from glyphs. They are
+    /// kept up to date until tables are built; text cut off later (a list marker) leaves them
+    /// as they were.
+    pub gaps: Gaps,
+}
+
+/// The gaps of a run behind one pointer, none for a run without them: a run is no larger for
+/// them than a pointer.
+// A box of a list is one pointer where a boxed slice is two: the run stays 80 bytes.
+#[allow(clippy::box_collection)]
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct Gaps(Option<Box<Vec<Gap>>>);
+
+impl Gaps {
+    pub(crate) fn new(list: Vec<Gap>) -> Gaps {
+        Gaps((!list.is_empty()).then(|| Box::new(list)))
+    }
+
+    /// The memory the list takes besides the run.
+    pub(crate) fn bytes(&self) -> usize {
+        self.0.as_ref().map_or(0, |l| {
+            std::mem::size_of::<Vec<Gap>>() + l.capacity() * std::mem::size_of::<Gap>()
+        })
+    }
+}
+
+impl std::ops::Deref for Gaps {
+    type Target = [Gap];
+    fn deref(&self) -> &[Gap] {
+        self.0.as_deref().map_or(&[], Vec::as_slice)
+    }
+}
+
+impl std::ops::DerefMut for Gaps {
+    fn deref_mut(&mut self) -> &mut [Gap] {
+        self.0.as_deref_mut().map_or(&mut [], Vec::as_mut_slice)
+    }
+}
+
+/// The white space between two words of a run: after its first `words` words (as
+/// `split_whitespace` counts them, which separators put in later do not change), from the
+/// end of the ink before it to the start of the ink after it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Gap {
+    pub words: u32,
+    pub from: f32,
+    pub to: f32,
+}
+
+// The kept text of a file is bounded by the size of its runs: a field more costs every page.
+#[cfg(target_pointer_width = "64")]
+const _: () = assert!(std::mem::size_of::<Run>() == 80);
+
+/// A marked content id as a run keeps it (see [`Run::mcid`]); an id of `u32::MAX` is none.
+pub(crate) fn kept_mcid(mcid: Option<u32>) -> Option<NonZeroU32> {
+    mcid.and_then(|m| NonZeroU32::new(m.wrapping_add(1)))
+}
+
+impl Run {
+    /// The marked content id the run is shown in.
+    pub(crate) fn mcid(&self) -> Option<u32> {
+        self.mcid.map(|m| m.get() - 1)
+    }
+
+    /// The run cut at its gap `k`: the words before it, and the words after it as a run that
+    /// starts a new word, each with its own extent and gaps. `None` when the text no longer
+    /// has the words the gap was taken after.
+    pub(crate) fn cut_at(&self, k: usize) -> Option<(Run, Run)> {
+        let gap = *self.gaps.get(k)?;
+        let mut seen = 0u32;
+        let mut in_word = false;
+        let mut at = None;
+        for (i, c) in self.text.char_indices() {
+            if c.is_whitespace() {
+                in_word = false;
+            } else if !in_word {
+                if seen == gap.words {
+                    at = Some(i);
+                    break;
+                }
+                seen += 1;
+                in_word = true;
+            }
+        }
+        let at = at.filter(|_| gap.words > 0)?;
+        let end = self.x + self.w;
+        let mut before = self.clone();
+        before.text = self.text[..at].trim_end().to_string();
+        before.w = (gap.from - self.x).max(0.0);
+        before.gaps = Gaps::new(self.gaps[..k].to_vec());
+        let mut after = self.clone();
+        after.text = format!(" {}", &self.text[at..]);
+        after.x = gap.to;
+        after.w = (end - gap.to).max(0.0);
+        after.gaps = Gaps::new(
+            self.gaps[k + 1..]
+                .iter()
+                .map(|g| Gap {
+                    words: g.words.saturating_sub(gap.words),
+                    ..*g
+                })
+                .collect(),
+        );
+        Some((before, after))
+    }
 }
 
 /// The target of a URI link, with the most bytes its copy can be written as. The size is
@@ -70,11 +195,17 @@ impl UriTarget {
 /// pdflatex sets page numbers about 11 % above the bottom edge of an A4 page.
 const BAND: f32 = 0.18;
 
-/// Pages a header or footer line must repeat on.
+/// Pages a header or footer line must repeat on. In a file of two pages, a footer line repeats
+/// on both (see [`Style::learn`]).
 const REPEATS: usize = 3;
 
 /// A line at least this many times the body size is a heading in an untagged file.
 const HEADING_RATIO: f32 = 1.2;
+
+/// A line smaller than this many times the body size is a heading only when it is led by
+/// bold ink (see [`bold_led`]): data lines and labels set a little larger than the body are
+/// no headings.
+const HEADING_PLAIN_RATIO: f32 = 1.5;
 
 /// A heading line is shorter than this many characters.
 const HEADING_CHARS: usize = 120;
@@ -117,14 +248,21 @@ pub(crate) struct PageText<'a> {
 /// What the layout learns from the whole file before it lays out a page.
 #[derive(Debug, Default)]
 pub(crate) struct Style {
-    /// The most common font size, by character count, of the text outside running headers
-    /// and footers.
+    /// The most common font size, by ink character count, of the text outside running
+    /// headers and footers.
     pub body_size: f32,
     /// Distinct heading sizes of an untagged file, largest first.
     heading_sizes: Vec<f32>,
     /// Lines that repeat at the top or bottom of at least [`REPEATS`] pages at the same
-    /// height, with digits replaced.
+    /// height, or at the bottom of both pages of a file of two, with digits replaced.
     furniture: HashMap<Furniture, Vec<(f32, f32)>>,
+    /// The footer lines among them that are furniture by the two-page rule only. They are
+    /// running footers by their role, but their ink still counts for the body size and the
+    /// text sizes of a page, as it did before the rule: an invoice of two pages keeps the body
+    /// size and so the headings it had.
+    two_page: HashSet<Furniture>,
+    /// The footnote legend of each untagged page that has one, by the page's runs.
+    legends: HashMap<u32, footnotes::Found>,
 }
 
 /// One visual line.
@@ -164,7 +302,24 @@ fn lines(runs: &[Run]) -> Vec<Line<'_>> {
 }
 
 fn line(runs: &[Run]) -> Line<'_> {
-    let text: String = runs.iter().map(|r| r.text.as_str()).collect();
+    // A run printed over the run before it, or touching it in another size or weight, is
+    // another text (see [`apart`]).
+    let mut text = String::new();
+    let mut ink_end = f32::MIN;
+    let mut before: Option<&Run> = None;
+    for r in runs {
+        if apart(before, r, ink_end)
+            && !r.text.starts_with(char::is_whitespace)
+            && !text.ends_with(char::is_whitespace)
+        {
+            text.push(' ');
+        }
+        text.push_str(&r.text);
+        if !r.text.trim().is_empty() {
+            ink_end = ink_end.max(r.x + r.w);
+            before = Some(r);
+        }
+    }
     // The run with the most characters sets the size and the baseline.
     let main = runs
         .iter()
@@ -215,14 +370,29 @@ fn furniture_key_of(line: &Line<'_>, height: Option<f32>) -> Option<Furniture> {
     (!key.is_empty()).then_some((b, key))
 }
 
+/// The ink characters of `text`: white space is not counted.
+fn ink(text: &str) -> usize {
+    text.chars().filter(|c| !c.is_whitespace()).count()
+}
+
 /// Rounds a font size to half points.
 fn size_key(size: f32) -> i32 {
     (size * 2.0).round() as i32
 }
 
 impl Style {
-    /// Learns body size, heading sizes and running headers and footers from every page.
+    /// [`Style::learn`] for an untagged file.
+    #[cfg(test)]
     pub(crate) fn new(pages: &[PageText<'_>]) -> Style {
+        Style::learn(pages, false)
+    }
+
+    /// Learns body size, heading sizes, running headers and footers and, for an untagged
+    /// file (`tagged` false), the footnote legends from every page. A line at the foot of both
+    /// pages of a file of two is a footer: a letter or an invoice of two pages has no third
+    /// page to repeat it on. A letterhead at the top of both is content: the title and fields
+    /// of an invoice repeat on its second page.
+    pub(crate) fn learn(pages: &[PageText<'_>], tagged: bool) -> Style {
         let mut seen: HashMap<Furniture, Vec<(f32, u32)>> = HashMap::new();
         // Texts that stand in the middle of some page are content, wherever else they stand.
         // A bare page number is not held against: numbers fill tables too.
@@ -244,6 +414,7 @@ impl Style {
         #[cfg(test)]
         BODY_KEPT.with(|k| k.set(body.len()));
         let mut furniture: HashMap<Furniture, Vec<(f32, f32)>> = HashMap::new();
+        let mut two_page: HashSet<Furniture> = HashSet::new();
         for (key, mut at) in seen {
             if key.1.chars().any(char::is_alphabetic) && body.contains(&key.1) {
                 continue;
@@ -259,7 +430,11 @@ impl Style {
                     pages_at.insert(at[j].1);
                     j += 1;
                 }
-                if pages_at.len() >= REPEATS {
+                let both = pages.len() == 2 && key.0 == Band::Bottom && pages_at.len() == 2;
+                if both && pages_at.len() < REPEATS {
+                    two_page.insert(key.clone());
+                }
+                if pages_at.len() >= REPEATS || both {
                     furniture
                         .entry(key.clone())
                         .or_default()
@@ -270,33 +445,83 @@ impl Style {
         }
         let mut style = Style {
             furniture,
+            two_page,
             ..Style::default()
         };
-        let mut chars: HashMap<i32, usize> = HashMap::new();
+        // Ink characters by size (half points), and the sum of their exact sizes.
+        let mut chars: HashMap<i32, (usize, f64)> = HashMap::new();
+        let count = |chars: &mut HashMap<i32, (usize, f64)>, r: &Run| {
+            let n = ink(&r.text);
+            let e = chars.entry(size_key(r.size)).or_default();
+            e.0 += n;
+            e.1 += n as f64 * f64::from(r.size);
+        };
         for p in pages {
             let all = lines(p.runs);
             let bands = style.furniture(&all, p.height, &[]);
             for (l, b) in all.iter().zip(&bands) {
-                if b.is_some() {
-                    continue;
-                }
-                for r in l.runs {
-                    *chars.entry(size_key(r.size)).or_default() += r.text.chars().count();
+                let counted = b.is_some()
+                    && furniture_key_of(l, p.height).is_some_and(|k| style.two_page.contains(&k));
+                if counted {
+                    for r in l.runs {
+                        count(&mut chars, r);
+                    }
                 }
             }
+            // The lines without running headers and footers, as the layout of the page sees
+            // them, and where each starts among the page's runs.
+            let mut body = Vec::with_capacity(all.len());
+            let mut starts = Vec::with_capacity(all.len());
+            let mut at = 0;
+            for (l, b) in all.into_iter().zip(&bands) {
+                if b.is_none() {
+                    starts.push(at);
+                }
+                at += l.runs.len();
+                if b.is_none() {
+                    body.push(l);
+                }
+            }
+            // A legend of footnotes is no body text: a dense legend in a tiny size would make
+            // every line a heading. A tagged file says its notes.
+            let legend = if tagged {
+                None
+            } else {
+                footnotes::find_lines(&body, &starts)
+            };
+            let in_legend: HashSet<usize> = legend
+                .as_ref()
+                .map(|f| f.legend_runs().collect())
+                .unwrap_or_default();
+            for (l, first) in body.iter().zip(&starts) {
+                for (k, r) in l.runs.iter().enumerate() {
+                    if !in_legend.contains(&(first + k)) {
+                        count(&mut chars, r);
+                    }
+                }
+            }
+            if let Some(found) = legend {
+                style.legends.insert(p.page, found);
+            }
         }
-        // The most characters wins; on a tie the smaller size.
+        // The most ink characters wins; on a tie the smaller size. Padding is no text: a data
+        // line padded into its place would count its spaces. The body size is the mean exact
+        // size of the winning half point, not the half point: the ratios to it then hold for a
+        // page printed at any scale.
         style.body_size = chars
             .iter()
-            .max_by_key(|(size, n)| (**n, -**size))
-            .map(|(size, _)| *size as f32 / 2.0)
+            .max_by_key(|(size, (n, _))| (*n, -**size))
+            .map(|(size, (n, sum))| match *n {
+                0 => *size as f32 / 2.0,
+                n => (sum / n as f64) as f32,
+            })
             .unwrap_or(0.0);
         let mut sizes: Vec<i32> = Vec::new();
         for p in pages {
             let all = lines(p.runs);
             let bands = style.furniture(&all, p.height, &[]);
             for (l, b) in all.iter().zip(&bands) {
-                if b.is_none() && style.is_heading_size(l) {
+                if b.is_none() && style.may_head(l) {
                     sizes.push(size_key(l.size));
                 }
             }
@@ -309,7 +534,7 @@ impl Style {
 
     /// The band of each line that is a running header or footer on its page. A header stands
     /// above all text of the page and a footer below it: a repeated line inside the text
-    /// stays text.
+    /// stays text. Lines of white space only are no text of the page.
     /// A line marked in `content` is never a header or footer; an empty `content` marks none.
     fn furniture(
         &self,
@@ -333,7 +558,14 @@ impl Style {
                     .then_some(key.0)
             })
             .collect();
-        let body = || lines.iter().zip(&found).filter(|(_, b)| b.is_none());
+        // Lines of white space only are no text to stand above or below: a print run blanks
+        // the empty lines of a footer column with spaces.
+        let body = || {
+            lines
+                .iter()
+                .zip(&found)
+                .filter(|(l, b)| b.is_none() && !l.text.is_empty())
+        };
         let top = body().map(|(l, _)| l.middle()).fold(f32::MIN, f32::max);
         let bottom = body().map(|(l, _)| l.middle()).fold(f32::MAX, f32::min);
         lines
@@ -354,17 +586,35 @@ impl Style {
             && line.text.chars().any(char::is_alphanumeric)
     }
 
+    /// Whether an untagged line may be a heading by its own text and style: large enough,
+    /// short, not ending in an amount, and, when it is smaller than [`HEADING_PLAIN_RATIO`]
+    /// times the body size, led by bold ink (see [`bold_led`]) and not only data.
+    fn may_head(&self, line: &Line<'_>) -> bool {
+        // A number set large (a form or file number) stays a heading.
+        let large = line.size >= HEADING_PLAIN_RATIO * self.body_size;
+        self.is_heading_size(line)
+            && !ends_in_amount(&line.text)
+            && (large || (!data_only(&line.text) && bold_led(line)))
+    }
+
     /// The heading level of an untagged line, `None` for body text.
     fn heading_level(&self, line: &Line<'_>) -> Option<u8> {
-        if !self.is_heading_size(line) {
+        if !self.may_head(line) {
             return None;
         }
+        // A size the style pass did not see as a heading size (its line there held a smaller
+        // cell beside it, which a table took later) takes its place among the sizes.
         let key = size_key(line.size);
         let index = self
             .heading_sizes
             .iter()
             .position(|s| size_key(*s) == key)
-            .unwrap_or(SIZE_LEVELS - 1);
+            .unwrap_or_else(|| {
+                self.heading_sizes
+                    .iter()
+                    .filter(|s| size_key(**s) > key)
+                    .count()
+            });
         Some(index.min(SIZE_LEVELS - 1) as u8 + 1)
     }
 }
@@ -540,6 +790,13 @@ pub(crate) struct Laid {
     pub probed: Vec<Option<Anchor>>,
     /// The page has too many points near its runs to place them all; the rest have no block.
     pub probes_cut: bool,
+    /// What the layout found by a rule of its own and says at the top of the page.
+    pub found_by: Option<String>,
+    /// The title the page's head gives (see [`head::page_title`]), on page 1 only.
+    pub title: Option<String>,
+    /// The dates the laid out text and the pairs of page 1 give as values of labels (see
+    /// [`head::laid_dates`]), on page 1 only.
+    pub dates: Option<Dates>,
 }
 
 /// Where a limit cut a page: the first part not kept.
@@ -639,6 +896,8 @@ pub(crate) struct Drawn<'a> {
     pub images: &'a [[f32; 4]],
     /// Boxes of the form fields on the page.
     pub widgets: &'a [[f32; 4]],
+    /// The drawn boxes the page's runs are read in as reading regions.
+    pub boxes: &'a [[f32; 4]],
     /// The text pass found the page's lines too many to search for grids, and said so.
     pub lines_unsearched: bool,
     pub width: f32,
@@ -763,8 +1022,63 @@ pub(crate) fn page_blocks_at(
     for l in lines(&headers) {
         built.paragraph(l.runs.iter().collect(), Some("page-header"), cx);
     }
+    // Footnotes are found before tables and lists: a legend set in columns is no table, and
+    // a star that opens a footnote is no bullet. A tagged file says its notes.
+    let mut legend = if cx.tree.is_none() {
+        footnotes::take(page, &mut flow, cx.style.legends.get(&page))
+    } else {
+        footnotes::Legend::default()
+    };
+    if let Some(why) = legend.refused.take() {
+        notes.push((why, LossReason::Uncertain, Severity::Info));
+    }
+    // The text sizes are counted over all text of the page but its legend, also what tables
+    // take later (the values of a form are its data lines), and a footer of a file of two pages
+    // (see [`Style::two_page`]).
+    let two_page_lines = lines(&footers);
+    let two_page = two_page_lines
+        .iter()
+        .filter(|l| furniture_key_of(l, height).is_some_and(|k| cx.style.two_page.contains(&k)))
+        .flat_map(|l| l.runs.iter());
+    let text_sizes = page_text_sizes_of(flow.runs.iter().chain(two_page));
     if geometry && let Some(height) = height {
+        // Drawn boxes of a label over its value are taken first: a row of them is no header
+        // band. A page with form fields is the form's (see `tables::untagged`).
         let stop = || time_over(cx.budget).is_err();
+        if drawn.widgets.is_empty() {
+            // A title over a bar is a form's: a page of prose keeps its headings and
+            // paragraphs.
+            if tables::form_drawn(drawn.rules, drawn.boxes) {
+                let (titles, halted) = tables::underlined_titles(&mut flow, drawn.rules, &stop);
+                placed.extend(titles.into_iter().map(Placed::Title));
+                if let Some(why) = halted {
+                    notes.push((
+                        format!(
+                            "underlined titles on page {page} are looked for only in part: \
+                             {why}; the text past that is read as it stands"
+                        ),
+                        LossReason::Limit,
+                        Severity::Info,
+                    ));
+                }
+            }
+            let (found, titles, unsure, skipped) = tables::box_pairs(
+                page,
+                &mut flow,
+                drawn.boxes,
+                drawn.rules,
+                &text_sizes,
+                &stop,
+            );
+            placed.extend(found.into_iter().map(Placed::Table));
+            placed.extend(titles.into_iter().map(Placed::Title));
+            notes.extend(
+                unsure
+                    .into_iter()
+                    .map(|w| (w, LossReason::Uncertain, Severity::Info)),
+            );
+            notes.extend(skipped.map(|w| (w, LossReason::Limit, Severity::Info)));
+        }
         let found = tables::untagged(page, &mut flow, drawn, height, &stop);
         placed.extend(found.tables.into_iter().map(Placed::Table));
         placed.extend(found.unsure.into_iter().map(Placed::Unsure));
@@ -774,16 +1088,75 @@ pub(crate) fn page_blocks_at(
                 .into_iter()
                 .map(|w| (w, LossReason::Limit, Severity::Info)),
         );
+        notes.extend(
+            found
+                .uncertain
+                .into_iter()
+                .map(|w| (w, LossReason::Uncertain, Severity::Info)),
+        );
+        notes.extend(
+            refused_quietly(page, found.quiet)
+                .into_iter()
+                .map(|w| (w, LossReason::Uncertain, Severity::Info)),
+        );
     }
     placed.sort_by(|a, b| {
         let (la, ta) = a.at();
         let (lb, tb) = b.at();
         la.cmp(&lb).then(tb.total_cmp(&ta))
     });
-    let page_body = page_body_size(&flow.runs);
+    // The title and the labelled dates of the document: the lines of page 1 as the layout
+    // lays them out as text, and the pairs it read.
+    let (title, dates) = match page {
+        1 => {
+            let text = lines(&flow.runs);
+            let title = height.and_then(|height| {
+                head::page_title(
+                    &text,
+                    &heading_of(cx.style, &text_sizes),
+                    height,
+                    cx.style.body_size,
+                )
+            });
+            // Every table of the page, its rows as the text of their cells.
+            let tables: Vec<head::Table> = placed
+                .iter()
+                .filter_map(|p| match p {
+                    Placed::Table(t) => Some(head::Table {
+                        pairs: t.is_pairs(),
+                        top: t.top,
+                        rows: t
+                            .rows
+                            .iter()
+                            .map(|row| {
+                                row.iter()
+                                    .map(|c| head::Cell {
+                                        text: c.runs.iter().map(|r| r.text.as_str()).collect(),
+                                        spot: c.runs.first().map(|first| head::Spot {
+                                            y: first.y,
+                                            x0: c.runs.iter().map(|r| r.x).fold(first.x, f32::min),
+                                            x1: c
+                                                .runs
+                                                .iter()
+                                                .map(|r| r.x + r.w)
+                                                .fold(first.x, f32::max),
+                                            size: first.size,
+                                        }),
+                                    })
+                                    .collect()
+                            })
+                            .collect(),
+                    }),
+                    _ => None,
+                })
+                .collect();
+            (title, Some(head::laid_dates(&flow.runs, &tables, height)))
+        }
+        _ => (None, None),
+    };
     let lay = |runs: &[Run], slots: &[Slot], built: &mut Built| match cx.tree {
         Some(_) => tagged(runs, slots, cx, built),
-        None => untagged(runs, page_body, cx, built),
+        None => untagged(runs, slots, &text_sizes, cx, built),
     };
     let mut start = 0;
     for p in placed {
@@ -793,6 +1166,18 @@ pub(crate) fn page_blocks_at(
         start = end;
         match p {
             Placed::Table(t) => built.table(t, cx),
+            Placed::Title(t) => {
+                let mut runs: Vec<&Run> = t.runs.iter().collect();
+                runs.sort_by(|a, b| a.line.cmp(&b.line).then(a.x.total_cmp(&b.x)));
+                built.heading(SIZE_LEVELS as u8, runs, cx);
+                // The lines of its box or bar follow it, each a paragraph: they are lines of
+                // a form (a dash that opens one is no list).
+                let mut text = t.text;
+                text.sort_by(|a, b| a.line.cmp(&b.line).then(a.x.total_cmp(&b.x)));
+                for l in lines(&text) {
+                    built.paragraph(l.runs.iter().collect(), None, cx);
+                }
+            }
             Placed::Unsure(u) => {
                 let what = u.text.unwrap_or_else(|| {
                     format!(
@@ -806,8 +1191,44 @@ pub(crate) fn page_blocks_at(
         }
     }
     lay(&flow.runs[start..], &flow.slots[start..], &mut built);
-    for l in lines(&footers) {
-        built.paragraph(l.runs.iter().collect(), Some("page-footer"), cx);
+    // Markers that end a word above refer to the footnotes too. Only the footnotes written
+    // are said: a stop writes none.
+    footnotes::link_words(&mut built.blocks, &legend);
+    // A footnote no reference points to is a paragraph of its own: a Markdown viewer hides a
+    // footnote definition without a reference.
+    let linked = footnotes::referenced(&mut built.blocks);
+    let before = built.blocks.len();
+    let mut linked_written = 0;
+    for (label, runs, cut) in &legend.notes {
+        let runs: Vec<&Run> = runs.iter().collect();
+        if linked.contains(label) {
+            // The label says the marker: the footnote's text starts after it.
+            let text = without_marker(&runs, *cut);
+            let at = built.blocks.len();
+            built.footnote(label, text.iter().collect(), cx);
+            linked_written += built.blocks.len() - at;
+        } else {
+            built.paragraph(runs, Some("footnote"), cx);
+        }
+    }
+    let footnotes_written = built.blocks.len() - before;
+    // References to footnotes a stop did not write go back to text.
+    let unwritten: Vec<&str> = legend.notes[footnotes_written.min(legend.notes.len())..]
+        .iter()
+        .map(|n| n.0.as_str())
+        .collect();
+    footnotes::unlink(&mut built.blocks, &legend, &unwritten);
+    // The running footer, block by block (see [`footer_blocks`]).
+    let footer_lines = lines(&footers);
+    for block in footer_blocks(&footer_lines) {
+        let runs: Vec<&Run> = block.iter().flat_map(|l| l.runs.iter()).collect();
+        let mut breaks: Vec<(u32, u32)> = block
+            .windows(2)
+            .filter(|w| !footer_wrap(&w[0], &w[1]))
+            .map(|w| (w[1].runs[0].page, w[1].runs[0].line))
+            .collect();
+        breaks.sort_unstable();
+        built.broken_paragraph(runs, &breaks, Some("page-footer"), cx);
     }
     if built.tables_as_text > 0 {
         let k = built.tables_as_text;
@@ -834,6 +1255,9 @@ pub(crate) fn page_blocks_at(
     let probes_cut = built.probes_cut;
     let mut laid = built.laid(notes);
     laid.probes_cut = probes_cut;
+    laid.found_by = footnotes::note(page, footnotes_written, linked_written);
+    laid.title = title;
+    laid.dates = dates;
     let (mut b, mut t) = (0, 0);
     for block in &mut laid.blocks {
         let anchor = if matches!(block, Block::Table { .. }) {
@@ -866,6 +1290,8 @@ fn anchor_of(block: &Block) -> Option<Anchor> {
 enum Placed {
     Table(Planned),
     Unsure(Unsure),
+    /// The title of a box beside boxed fields, a heading of the lowest level.
+    Title(tables::BoxTitle),
 }
 
 impl Placed {
@@ -874,6 +1300,7 @@ impl Placed {
         match self {
             Placed::Table(t) => (t.at, t.top),
             Placed::Unsure(u) => (u.at, u.top),
+            Placed::Title(t) => (t.at, t.top),
         }
     }
 }
@@ -939,6 +1366,8 @@ struct Built {
     /// Run and point pairs the page may still test.
     probe_work: usize,
     probes_cut: bool,
+    /// The `found-by` notes of tables said on the page so far.
+    found_by: Vec<&'static str>,
 }
 
 /// What a page's layout is building.
@@ -1019,6 +1448,9 @@ impl Built {
             notes,
             probed: Vec::new(),
             probes_cut: false,
+            found_by: None,
+            title: None,
+            dates: None,
         }
     }
 
@@ -1100,6 +1532,71 @@ impl Built {
                 self.added.push((t, add.row, add.cell, inlines));
             }
         }
+        // The rule that found the table is said once on the page, before its first table.
+        if let Some(note) = plan.found_by.filter(|n| !self.found_by.contains(n)) {
+            self.found_by.push(note);
+            self.pending = Pending::Block;
+            if let Err(hit) = time_over(cx.budget).and_then(|()| cx.budget.charge_text(note.len()))
+            {
+                self.stop_at(hit, cx);
+                return;
+            }
+            self.push(
+                Block::Paragraph {
+                    inlines: vec![Inline::plain(note)],
+                    role: Some("found-by".into()),
+                    anchor: None,
+                },
+                cx,
+            );
+            if self.stop.is_some() {
+                return;
+            }
+        }
+        // The title line or lines, left to right, are built first, as they come before the
+        // table: charged like any text, links kept.
+        let mut title = std::mem::take(&mut plan.caption);
+        title.sort_by(|a, b| a.line.cmp(&b.line).then(a.x.total_cmp(&b.x)));
+        let title: Option<Vec<Inline>> = if title.is_empty() {
+            None
+        } else {
+            self.pending = Pending::Block;
+            let refs: Vec<&Run> = title.iter().collect();
+            // The title's mark stays: a stop before the title is pushed or the table is
+            // kept gives its link counts back with the table's.
+            let built = self.inlines(&refs, cx);
+            if built.is_none() {
+                return;
+            }
+            built
+        };
+        // A title is the table's caption when a table is built and the title is plain text;
+        // otherwise it is a paragraph with role `caption` right before what it titles.
+        let title_paragraph = |built: &mut Self, title: Option<Vec<Inline>>| {
+            if let Some(inlines) = title {
+                built.pending = Pending::Block;
+                built.push(
+                    Block::Paragraph {
+                        inlines,
+                        role: Some("caption".into()),
+                        anchor: None,
+                    },
+                    cx,
+                );
+            }
+        };
+        // A title with a link goes first, before the table is set aside, as a caption is
+        // plain text.
+        let title = match title {
+            Some(t) if t.iter().any(|i| matches!(i, Inline::Link { .. })) => {
+                title_paragraph(self, Some(t));
+                if self.stop.is_some() {
+                    return;
+                }
+                None
+            }
+            other => other,
+        };
         // What the table's cells and rows cost beyond their text is set aside at once. When it
         // does not fit, the table's text is laid out as paragraphs: the overhead of a table
         // never stops the text.
@@ -1108,15 +1605,20 @@ impl Built {
             + ROW_COST * plan.rows.len() as u64
             + CELL_COST * cells as u64;
         if !plan.rows.is_empty() {
+            // The overhead alone goes back when it does not fit: the title is still placed
+            // (as a paragraph), so what its links took, cut links too, stays counted. A later
+            // stop drops the title with the table and gives back from the title's mark.
+            let title_mark = self.mark.take();
             let mark = cx.links.mark();
             if cx.links.take_bytes(overhead).is_err() {
                 cx.links.restore(mark);
                 let rows = std::mem::take(&mut plan.rows);
+                title_paragraph(self, title);
                 self.as_text(rows, plan.tagged, cx);
                 return;
             }
             // The overhead goes back with the table's first row if that is dropped.
-            self.mark = Some(mark);
+            self.mark = Some(title_mark.unwrap_or(mark));
         }
         let table = match earlier {
             Some(t) => TableRef::Earlier(t),
@@ -1149,9 +1651,15 @@ impl Built {
             }
             let mut cells = Vec::with_capacity(row.len());
             for c in row {
-                let Some(inlines) = self.cell_inlines(&c.runs, cx) else {
+                let Some(mut inlines) = self.cell_inlines(&c.runs, cx) else {
                     break 'rows;
                 };
+                if let (true, Some(text)) = (inlines.is_empty(), c.status) {
+                    inlines.push(Inline::Status {
+                        text: text.into(),
+                        color: StatusColor::Grey,
+                    });
+                }
                 cells.push(Cell {
                     inlines,
                     row_span: c.row_span,
@@ -1169,6 +1677,7 @@ impl Built {
         if rows.is_empty() {
             self.probe_pending.clear();
             self.probe_round += 1;
+            title_paragraph(self, title);
             return;
         }
         match earlier {
@@ -1180,8 +1689,11 @@ impl Built {
             }
             None => {
                 self.tagged.push(plan.tagged);
+                let caption = title
+                    .map(|t| rezzer_model::plain_text(&t).trim().to_string())
+                    .filter(|t| !t.is_empty());
                 self.blocks.push(Block::Table {
-                    caption: None,
+                    caption,
                     header_rows: plan.header_rows.min(rows.len()),
                     role: None,
                     rows,
@@ -1301,6 +1813,35 @@ impl Built {
         }
     }
 
+    /// A footnote: a footnote section labelled `label` that holds its text as a paragraph
+    /// with the role `footnote`.
+    fn footnote(&mut self, label: &str, runs: Vec<&Run>, cx: &Context<'_>) {
+        self.pending = Pending::Block;
+        if self.stop.is_some() {
+            return;
+        }
+        // The paragraph inside the section is an element too.
+        if let Err(hit) = cx.budget.add_elements(1) {
+            self.stop_at(hit, cx);
+            return;
+        }
+        if let Some(inlines) = self.inlines(&runs, cx) {
+            self.push(
+                Block::Section {
+                    kind: SectionKind::Other,
+                    title: None,
+                    anchor: Some(Anchor(format!("fn:{label}"))),
+                    blocks: vec![Block::Paragraph {
+                        inlines,
+                        role: Some("footnote".into()),
+                        anchor: None,
+                    }],
+                },
+                cx,
+            );
+        }
+    }
+
     fn heading(&mut self, level: u8, runs: Vec<&Run>, cx: &Context<'_>) {
         self.pending = Pending::Block;
         if let Some(mut inlines) = self.inlines(&runs, cx) {
@@ -1364,7 +1905,7 @@ impl Built {
 }
 
 /// Inlines from runs in order. Runs on a new line are joined with a space, or without one
-/// after a hyphen; a line `breaks` names (page, line; sorted) starts after a line break.
+/// after a hyphen that ends a word (not after a dash with white space before it); a line `breaks` names (page, line; sorted) starts after a line break.
 /// Bold, italic and URI links are kept while `links` has room for their targets; past it a
 /// link's text stays without the link.
 fn inlines(
@@ -1381,9 +1922,14 @@ fn inlines(
         page: u32,
         /// A line break stands before it.
         broken: bool,
+        /// A footnote reference, its text the label.
+        note: bool,
     }
     let mut pieces: Vec<Piece> = Vec::new();
     let mut last: Option<(u32, u32)> = None;
+    // Where the ink of the last run with text ends, on its line, and that run.
+    let mut ink_end = f32::MIN;
+    let mut before: Option<&Run> = None;
     for (k, r) in runs.iter().enumerate() {
         if k % CHECK_EVERY == 0 {
             time_over(budget)?;
@@ -1400,8 +1946,40 @@ fn inlines(
             continue;
         }
         last = Some((r.page, r.line));
+        // A run that starts well inside the ink of the run before it on its line is printed
+        // over it (a value over a label), and one that touches it in another size or weight
+        // is set against it: another text, never one word with it (see [`apart`]).
+        let over = !new_line
+            && k > 0
+            && apart(before, r, ink_end)
+            && !text.starts_with(char::is_whitespace)
+            && pieces
+                .last()
+                .is_some_and(|p| !p.text.ends_with(char::is_whitespace));
+        if over {
+            text.insert(0, ' ');
+        }
+        if !r.text.trim().is_empty() {
+            ink_end = if new_line {
+                r.x + r.w
+            } else {
+                ink_end.max(r.x + r.w)
+            };
+            before = Some(r);
+        }
         let broken = new_line && breaks.binary_search(&(r.page, r.line)).is_ok();
-        let glued = pieces.last().is_none_or(|p| p.text.ends_with(['-', ' ']));
+        // A hyphen at the end of a line joins the word that wraps; one with white space before
+        // it is a dash (`01.10.2026 -` over `31.10.2026`), and the space after it stays, as it
+        // does after the minus of an amount before a word (`12,50-` over `gutgeschrieben`). An
+        // amount's hyphen before a number is a range that goes on (`08.00-` over `18.00 Uhr`).
+        let range = text.starts_with(|c: char| c.is_ascii_digit());
+        let glued = pieces.last().is_none_or(|p| {
+            p.text.ends_with(' ')
+                || ((range || !signed_amount(&p.text))
+                    && p.text.strip_suffix('-').is_some_and(|rest| {
+                        !rest.is_empty() && !rest.ends_with(char::is_whitespace)
+                    }))
+        });
         if new_line && !glued && !broken {
             text.insert(0, ' ');
         }
@@ -1410,8 +1988,19 @@ fn inlines(
             let end = p.text.trim_end().len();
             p.text.truncate(end);
         }
+        if r.note {
+            // A reference stands right after its word.
+            text = r.text.trim().to_string();
+        }
         match pieces.last_mut() {
-            Some(p) if !broken && p.bold == r.bold && p.italic == r.italic && p.uri == r.uri => {
+            Some(p)
+                if !broken
+                    && !r.note
+                    && !p.note
+                    && p.bold == r.bold
+                    && p.italic == r.italic
+                    && p.uri == r.uri =>
+            {
                 p.text.push_str(&text)
             }
             _ => pieces.push(Piece {
@@ -1421,6 +2010,7 @@ fn inlines(
                 uri: r.uri.clone(),
                 page: r.page,
                 broken,
+                note: r.note,
             }),
         }
     }
@@ -1447,6 +2037,20 @@ fn inlines(
             trail.clear();
             refused = None;
             out.push(Inline::LineBreak);
+        }
+        if p.note {
+            let rest = std::mem::take(&mut trail);
+            if !rest.is_empty() {
+                out.push(Inline::plain(rest));
+            }
+            // The white space before a reference goes: it stands at its word.
+            if let Some(Inline::Text { text, .. }) = out.last_mut() {
+                let end = text.trim_end().len();
+                text.truncate(end);
+            }
+            refused = None;
+            out.push(Inline::FootnoteRef { id: p.text });
+            continue;
         }
         // White space at the edge of a link belongs outside it.
         let (inner, lead) = match p.uri {
@@ -1521,12 +2125,272 @@ fn inlines(
     Ok(out)
 }
 
+/// Whether the text of a run may be printed over another: two letters or digits or more. A
+/// lone mark (an accent drawn as a run of its own over its letter) belongs to its word, as
+/// the reading order keeps it there.
+fn overprints(text: &str) -> bool {
+    text.chars().filter(|c| c.is_alphanumeric()).count() >= 2
+}
+
+/// Whether the run `r` is another text than the run `before` it on its line, whose ink ends
+/// at `ink_end`: it is printed over it (it starts [`OVERPRINT`] sizes or more left of that
+/// end, with text of its own, see [`overprints`]), or it touches it (it starts less than
+/// [`TOUCH`] sizes right of that end, or over it) in a larger size by a label step or in
+/// another weight, the words that meet each of two letters or digits or more and one with a
+/// letter, the second opening with a capital or a digit or the first ending in a colon: a label
+/// and its value set against it (`Name` and `Hinterhaus`). A word cut by a change of style goes
+/// on in a small letter (`Rechnungs` and `nummer`, `Muster` and `mann`): one word. A smaller run after
+/// a word is a raised part of it (`21st`), a word in pieces of one style is one word, and a
+/// number in pieces (a change of font inside `1234,56`) is one number.
+fn apart(before: Option<&Run>, r: &Run, ink_end: f32) -> bool {
+    if r.x + OVERPRINT * r.size < ink_end && overprints(&r.text) {
+        return true;
+    }
+    let Some(b) = before else {
+        return false;
+    };
+    let (last, first) = (
+        b.text.split_whitespace().next_back(),
+        r.text.split_whitespace().next(),
+    );
+    let letters = |w: Option<&str>| w.is_some_and(|w| w.chars().any(char::is_alphabetic));
+    // A new word opens with a capital or a digit (`Hinterhaus`, `4711`), or follows a label's
+    // colon; the rest of a word cut by a change of style opens with a small letter (`nummer`).
+    let opens = first
+        .is_some_and(|w| w.starts_with(|c: char| c.is_uppercase() || c.is_ascii_digit()))
+        || last.is_some_and(|w| w.ends_with(':'));
+    opens
+        && r.x < ink_end + TOUCH * r.size.max(b.size)
+        && (r.size >= crate::tables::LABEL_STEP * b.size || r.bold != b.bold)
+        && last.is_some_and(overprints)
+        && first.is_some_and(overprints)
+        && (letters(last) || letters(first))
+}
+
+/// A run that starts less than this many sizes right of where the ink of the run before it
+/// ends touches it (see [`apart`]): less than a space.
+const TOUCH: f32 = 0.2;
+
+/// A run that starts this many of its sizes or more left of where the ink of the run before it
+/// on its line ends is printed over that run (see [`inlines`]): far more than a kerning pair
+/// takes back.
+const OVERPRINT: f32 = 0.5;
+
 /// Whether `cur` goes on in the same paragraph as `prev`: below it, near enough and in the
-/// same size.
+/// same size, and not wholly right of it: a line that starts [`BESIDE_GAP`] sizes or more
+/// after the ink of the line over it ends, and is not much wider than it, stands in another
+/// column (an amount alone under a table in another column than the one over it), as text that
+/// wraps goes on at the left.
 fn continues(prev: &Line<'_>, cur: &Line<'_>) -> bool {
     let gap = prev.y - cur.y;
     let height = prev.h.max(cur.h).max(1.0);
-    gap > 0.0 && gap <= GAP_RATIO * height && (prev.size - cur.size).abs() <= SIZE_SLACK
+    let ink = |l: &Line<'_>| {
+        l.runs
+            .iter()
+            .filter(|r| !r.text.trim().is_empty())
+            .fold((f32::MAX, f32::MIN), |(a, b), r| {
+                (a.min(r.x), b.max(r.x + r.w.max(0.0)))
+            })
+    };
+    let ((p0, end), (c0, c1)) = (ink(prev), ink(cur));
+    // A line that is much wider than a short line over it is text going on after a label or
+    // a marker (an indented continuation), not a cell of another column.
+    // A word cut at the end of a line goes on at the left of the next, never right of where
+    // the cut ends (`Page-` over a cell of the next row).
+    let narrow = c1 - c0 <= BESIDE_WIDTH * (end - p0).max(prev.size) || cuts(&prev.text, &cur.text);
+    let beside = narrow && c0 >= end + BESIDE_GAP * prev.size.max(cur.size).max(1.0);
+    gap > 0.0 && gap <= GAP_RATIO * height && (prev.size - cur.size).abs() <= SIZE_SLACK && !beside
+}
+
+/// A line that starts this many sizes or more right of where the line over it ends goes on
+/// no paragraph of it (see [`continues`]): the white space of a cell gap, far over a space.
+const BESIDE_GAP: f32 = 1.0;
+
+/// A line beside the line over it (see [`BESIDE_GAP`]) is a cell of another column only when
+/// it is at most this many times as wide as that line.
+const BESIDE_WIDTH: f32 = 2.0;
+
+/// The blocks of a running footer, in reading order. Footer lines that go on one another at
+/// one left edge are one block. A footer set in columns (an address, a bank, a register entry,
+/// a contact) is read column by column (ruling P6-X5: on furniture lines only): the ink of its
+/// lines falls into columns apart by white space, and the parts of the lines in each column
+/// are blocks of their own, when every block of three lines or more is an [`address_block`]
+/// and one is. A line of its own in one piece (a page number centred over or under the
+/// columns) takes no part in finding the columns: it would bridge their gutter. It is read whole, before the
+/// columns when it stands before them in the reading order, else after them. Otherwise the
+/// lines stay whole, as the reading order gives them. Each line of
+/// a block is a line of its own: a footer lists facts (`USt-IdNr. DE000000000`,
+/// `www.muster.example`), it is no prose to join; only a sentence that wraps goes on (see
+/// [`footer_wrap`]).
+fn footer_blocks<'a>(all: &[Line<'a>]) -> Vec<Vec<Line<'a>>> {
+    let whole = || stacked(all.iter().map(|l| line(l.runs)).collect());
+    let ink = |l: &Line<'a>| -> Vec<(f32, f32)> {
+        l.runs
+            .iter()
+            .filter(|r| !r.text.trim().is_empty())
+            .map(|r| (r.x, r.x + r.w))
+            .collect()
+    };
+    // The lines of their own: the blocks of one line whose ink is one piece. A row of the
+    // columns that stands alone (columns centred on one another) has gaps in it.
+    let one_piece = |l: &Line<'a>| {
+        let size = l.size.max(1.0);
+        ink(l)
+            .windows(2)
+            .all(|w| w[1].0 - w[0].1 <= crate::order::PIECE_GAP * size)
+    };
+    let mut single = vec![false; all.len()];
+    let mut k = 0;
+    for b in stacked(all.iter().map(|l| line(l.runs)).collect()) {
+        single[k] = b.len() == 1 && one_piece(&all[k]);
+        k += b.len();
+    }
+    // The columns: the extents of the ink of the lines in blocks, merged where they overlap.
+    let columns_of = |single: &[bool]| -> Vec<(f32, f32)> {
+        let mut spans: Vec<(f32, f32)> = (0..all.len())
+            .filter(|&i| !single[i])
+            .flat_map(|i| ink(&all[i]))
+            .collect();
+        spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut columns: Vec<(f32, f32)> = Vec::new();
+        for (x0, x1) in spans {
+            match columns.last_mut() {
+                Some(c) if x0 < c.1 => c.1 = c.1.max(x1),
+                _ => columns.push((x0, x1)),
+            }
+        }
+        columns
+    };
+    // A line of its own over the gutter between two of those columns (a page number centred
+    // over or under them) is read on its own. Any other is a line of the columns: the first
+    // line of a column centred lower than its neighbours, or the lines of a short column.
+    let found = columns_of(&single);
+    for (i, l) in all.iter().enumerate() {
+        if single[i] {
+            let touched = found
+                .iter()
+                .filter(|c| ink(l).iter().any(|r| r.0 < c.1 && r.1 > c.0))
+                .count();
+            single[i] = touched >= 2;
+        }
+    }
+    let columns = columns_of(&single);
+    if columns.len() < 2 {
+        return whole();
+    }
+    let Some(first) = single.iter().position(|s| !s) else {
+        return whole();
+    };
+    let lines: Vec<&Line<'a>> = (0..all.len())
+        .filter(|&i| !single[i])
+        .map(|i| &all[i])
+        .collect();
+    let alone = |range: std::ops::Range<usize>| -> Vec<Vec<Line<'a>>> {
+        range
+            .filter(|&i| single[i])
+            .map(|i| vec![line(all[i].runs)])
+            .collect()
+    };
+    let column_of = |r: &Run| columns.partition_point(|c| c.1 <= r.x);
+    // The part of each line in each column; a line whose parts of one column are not next to
+    // each other keeps the lines whole.
+    let mut parts: Vec<Vec<Line<'a>>> = (0..columns.len()).map(|_| Vec::new()).collect();
+    for l in &lines {
+        let mut start = 0;
+        let mut seen: Vec<usize> = Vec::new();
+        while start < l.runs.len() {
+            let c = column_of(&l.runs[start]);
+            let mut end = start + 1;
+            while end < l.runs.len() && column_of(&l.runs[end]) == c {
+                end += 1;
+            }
+            if seen.contains(&c) {
+                return whole();
+            }
+            seen.push(c);
+            let part = line(&l.runs[start..end]);
+            if !part.text.is_empty() {
+                parts[c.min(columns.len() - 1)].push(part);
+            }
+            start = end;
+        }
+    }
+    let blocks: Vec<Vec<Line<'a>>> = parts.into_iter().flat_map(stacked).collect();
+    let tall: Vec<&Vec<Line<'a>>> = blocks.iter().filter(|b| b.len() >= 3).collect();
+    let shaped =
+        |b: &Vec<Line<'a>>| address_block(&b.iter().map(|l| l.text.as_str()).collect::<Vec<_>>());
+    if tall.is_empty() || !tall.iter().all(|b| shaped(b)) {
+        return whole();
+    }
+    let mut out = alone(0..first);
+    out.extend(blocks);
+    out.extend(alone(first..all.len()));
+    out
+}
+
+/// Lines in reading order cut into blocks of lines that go on one another at one left edge.
+fn stacked(lines: Vec<Line<'_>>) -> Vec<Vec<Line<'_>>> {
+    let mut out: Vec<Vec<Line<'_>>> = Vec::new();
+    for l in lines {
+        match out.last_mut() {
+            Some(b) if continues(&b[b.len() - 1], &l) && (l.x - b[0].x).abs() <= EDGE => {
+                b.push(l);
+            }
+            _ => out.push(vec![l]),
+        }
+    }
+    out
+}
+
+/// Whether the footer line `next` goes on the sentence of `line` above it at its edge: `line`
+/// ends with no sentence end, comma or colon, and `next` starts with a word in small letters
+/// that is no web or mail address (`www.muster.example`, `info@muster.example` are items of
+/// their own).
+fn footer_wrap(line: &Line<'_>, next: &Line<'_>) -> bool {
+    let open = !line.text.ends_with(['.', '!', '?', ',', ':', ';']);
+    let first = next.text.split_whitespace().next().unwrap_or("");
+    let address = first.contains('@')
+        || first.contains('/')
+        || first.trim_end_matches(['.', ',']).contains('.');
+    open && first.chars().next().is_some_and(char::is_lowercase) && !address
+}
+
+/// A bold line under plain lines stands this many times farther from them than their pitch
+/// when it is a title of its own.
+const TITLE_STEP: f32 = 1.1;
+
+/// Line heights one line of text steps down by, for a block of one line that has no pitch of
+/// its own.
+const LEADING: f32 = 1.2;
+
+/// Whether the last of `lines` is a title under the block of the others: all its ink is bold,
+/// none of theirs is, and it stands farther under them than [`TITLE_STEP`] times their pitch
+/// (or than the leading of one line, see [`LEADING`], under a block of one line). A bold
+/// title of the size of the sender lines under them (`Rechnung` under the sender of a letter)
+/// is no line of the sender's block; a bold line at the block's own pitch is.
+fn bold_title_after(lines: &[Line<'_>]) -> bool {
+    let [above @ .., prev, cur] = lines else {
+        return false;
+    };
+    let inked = |l: &Line<'_>| {
+        l.runs
+            .iter()
+            .filter(|r| !r.text.trim().is_empty())
+            .map(|r| r.bold)
+            .collect::<Vec<bool>>()
+    };
+    let (bold, plain) = (inked(cur), inked(prev));
+    if bold.is_empty() || !bold.iter().all(|b| *b) || plain.iter().any(|b| *b) {
+        return false;
+    }
+    if above.iter().any(|l| inked(l).iter().any(|b| *b)) {
+        return false;
+    }
+    let pitch = match above.last() {
+        Some(a) => a.y - prev.y,
+        None => LEADING * prev.size,
+    };
+    pitch > 0.0 && prev.y - cur.y > TITLE_STEP * pitch
 }
 
 /// The marker of a list line: `(ordered, bytes of marker and the space after it)`.
@@ -1538,7 +2402,13 @@ fn list_marker(text: &str) -> Option<(bool, usize)> {
     }
     if matches!(first, '-' | '*' | '\u{2013}') {
         let rest = &text[first.len_utf8()..];
-        if rest.starts_with(char::is_whitespace) {
+        // Two padding characters or more after it: a mark set into a field of a form (a
+        // starred amount, a dash for none), no bullet.
+        let pad = rest.chars().take_while(|c| c.is_whitespace()).count();
+        // A star that a lone star later on the line closes encloses an item (`* A123456B * x/y`,
+        // a code set between stars): no bullet.
+        let closed = first == '*' && rest.split_whitespace().any(|w| w == "*");
+        if pad == 1 && !closed {
             return Some((false, text.len() - rest.trim_start().len()));
         }
         return None;
@@ -1581,36 +2451,85 @@ fn without_marker(runs: &[&Run], cut: usize) -> Vec<Run> {
     runs
 }
 
-/// A page needs this many characters in one size for that size to be its own body size.
-const PAGE_BODY_CHARS: usize = 400;
-
-/// The size most characters of a page are set in, when they are at least
-/// [`PAGE_BODY_CHARS`]: a page set mostly in a larger size than the rest of the file (the back
-/// of a form printed in larger type) has its own body text, which is not a heading.
-fn page_body_size(runs: &[Run]) -> Option<f32> {
-    let mut chars: HashMap<i32, usize> = HashMap::new();
-    for r in runs {
-        *chars.entry(size_key(r.size)).or_default() += r.text.chars().count();
+/// The losses for a page's grids, header bands and blocks in columns refused without a note:
+/// one for each kind, naming why, by reason in reading order.
+fn refused_quietly(
+    page: u32,
+    mut quiet: Vec<(usize, &'static str, tables::Refused)>,
+) -> Vec<String> {
+    quiet.sort_by_key(|q| q.0);
+    let mut out = Vec::new();
+    for (kind, one, many, tail, tails) in [
+        (
+            tables::Refused::Grid,
+            "a grid of drawn rules",
+            "grids of drawn rules",
+            "its text is read without the grid",
+            "their text is read without the grids",
+        ),
+        (
+            tables::Refused::Band,
+            "a header band",
+            "header bands",
+            "its text is read without the band",
+            "their text is read without the bands",
+        ),
+        (
+            tables::Refused::Region,
+            "a block of text in columns",
+            "blocks of text in columns",
+            "its text stays paragraphs",
+            "their text stays paragraphs",
+        ),
+    ] {
+        let why: Vec<&str> = quiet.iter().filter(|q| q.2 == kind).map(|q| q.1).collect();
+        match why.as_slice() {
+            [] => {}
+            [why] => out.push(format!(
+                "{one} on page {page} is not read as a table: {why}; {tail}"
+            )),
+            _ => {
+                // One reason for all is said once, without a count.
+                let reasons = if why.iter().all(|w| *w == why[0]) {
+                    tables::plural(why[0]).to_string()
+                } else {
+                    tables::counted(why.iter().copied())
+                };
+                out.push(format!(
+                    "{} {many} on page {page} are not read as tables: {reasons}; {tails}",
+                    why.len()
+                ));
+            }
+        }
     }
-    chars
-        .into_iter()
-        .max_by_key(|(size, n)| (*n, -*size))
-        .filter(|(_, n)| *n >= PAGE_BODY_CHARS)
-        .map(|(size, _)| size as f32 / 2.0)
+    out
 }
 
 /// Lays out an untagged page: headings by size, lists by marker, paragraphs by gaps. A line
-/// is a heading only when it is also larger than `page_body`, the page's own body size.
-fn untagged(flow: &[Run], page_body: Option<f32>, cx: &Context<'_>, out: &mut Built) {
-    let heading_level = |l: &Line<'_>| {
-        cx.style
-            .heading_level(l)
-            .filter(|_| page_body.is_none_or(|b| l.size >= b * HEADING_RATIO))
-    };
+/// in one of the page's `text_sizes`, or less than [`HEADING_RATIO`] times the largest of
+/// them, is no heading.
+fn untagged(flow: &[Run], slots: &[Slot], text_sizes: &[f32], cx: &Context<'_>, out: &mut Built) {
+    let heading_level = heading_of(cx.style, text_sizes);
     let all = lines(flow);
+    // The block of its own a line stands in, if the table pass read one (see
+    // [`Slot::Block`]): a line goes on the line before it only in the same block. A line's
+    // runs are a slice of `flow`, so its first run's place is where the slice starts.
+    let block_of = |l: &Line<'_>| -> Option<usize> {
+        let at = (l.runs.as_ptr() as usize - flow.as_ptr() as usize) / std::mem::size_of::<Run>();
+        match slots.get(at) {
+            Some(Slot::Block(b)) => Some(*b),
+            _ => None,
+        }
+    };
+    let block: Vec<Option<usize>> = all.iter().map(block_of).collect();
+    let continues =
+        |prev: &Line<'_>, cur: &Line<'_>| continues(prev, cur) && block_of(prev) == block_of(cur);
     // A number of three digits or more that opens a line in the middle of a sentence is part
     // of the sentence ("31 CFR 209 and/or / 210. The information"), not a list item.
     let marker = |k: usize| {
+        if padded_mark(&all[k]) {
+            return None;
+        }
         let found = list_marker(&all[k].text)?;
         let digits = all[k].text.chars().take_while(char::is_ascii_digit).count();
         let mid_sentence = k > 0
@@ -1627,16 +2546,15 @@ fn untagged(flow: &[Run], page_body: Option<f32>, cx: &Context<'_>, out: &mut Bu
             continue;
         }
         if let Some(level) = heading_level(l) {
-            let mut runs: Vec<&Run> = l.runs.iter().collect();
-            let mut j = i + 1;
-            while j < all.len()
-                && heading_level(&all[j]) == Some(level)
-                && continues(&all[j - 1], &all[j])
-            {
-                runs.extend(all[j].runs.iter());
-                j += 1;
+            let (j, heading) = heading_block(&all, i, level, &heading_level, cx.style.body_size);
+            let j = (i + 1..j).find(|&k| block[k] != block[i]).unwrap_or(j);
+            let block = &all[i..j];
+            let runs: Vec<&Run> = block.iter().flat_map(|l| l.runs.iter()).collect();
+            if heading {
+                out.heading(level, runs, cx);
+            } else {
+                out.broken_paragraph(runs, &line_breaks(&all, i, j), None, cx);
             }
-            out.heading(level, runs, cx);
             open_list = None;
             i = j;
             continue;
@@ -1672,18 +2590,150 @@ fn untagged(flow: &[Run], page_body: Option<f32>, cx: &Context<'_>, out: &mut Bu
             && heading_level(&all[j]).is_none()
             && marker(j).is_none()
             && continues(&all[j - 1], &all[j])
+            && !bold_title_after(&all[i..=j])
         {
             runs.extend(all[j].runs.iter());
             j += 1;
         }
-        let breaks = line_breaks(&all[i..j]);
+        let breaks = line_breaks(&all, i, j);
         out.broken_paragraph(runs, &breaks, None, cx);
         i = j;
     }
 }
 
-/// Lines of a block whose widest line is at most this many font sizes are short lines.
-const SHORT_MEASURE: f32 = 24.0;
+/// The heading level of an untagged line on a page whose text is set in `text_sizes`: none
+/// for a line in one of them, or less than [`HEADING_RATIO`] times the largest of them.
+fn heading_of<'s>(
+    style: &'s Style,
+    text_sizes: &'s [f32],
+) -> impl Fn(&Line<'_>) -> Option<u8> + 's {
+    let largest = text_sizes.last().copied();
+    move |l: &Line<'_>| {
+        style.heading_level(l).filter(|_| {
+            !text_sizes.iter().any(|s| size_key(*s) == size_key(l.size))
+                && largest.is_none_or(|b| l.size >= b * HEADING_RATIO)
+        })
+    }
+}
+
+/// The heading that starts at line `i` of `all`, a line of `level`: the end of its lines
+/// (each after the first of `level` and going on the one before), and whether they are a
+/// heading. Bold lines a little larger than the body (`body_size`) that read as an address
+/// or as sentences are a paragraph: the address of an invoice, its closing words.
+fn heading_block(
+    all: &[Line<'_>],
+    i: usize,
+    level: u8,
+    heading_level: &dyn Fn(&Line<'_>) -> Option<u8>,
+    body_size: f32,
+) -> (usize, bool) {
+    let mut j = i + 1;
+    while j < all.len() && heading_level(&all[j]) == Some(level) && continues(&all[j - 1], &all[j])
+    {
+        j += 1;
+    }
+    let first = &all[i];
+    let small = first.size < HEADING_PLAIN_RATIO * body_size;
+    let block = &all[i..j];
+    // Lines that keep a break between them (items, fields) are no heading but a paragraph with
+    // its breaks, when they are a little larger than the body or three lines or more (a column
+    // of items, also where a box cuts it). Two large short lines are a title over two lines.
+    // The lines of the same column over the block (a box may have cut it off them), two at
+    // most: enough to make it three lines.
+    let mut over = i;
+    while over > 0
+        && i - over < 2
+        && heading_level(&all[over - 1]) == Some(level)
+        && continues(&all[over - 1], &all[over])
+    {
+        over -= 1;
+    }
+    let column = &all[over..j];
+    let items = block_listed(column);
+    // Lines that each stand in pieces apart by a cell gap (cells of columns) are no title; lines
+    // set full (justified: words equal gaps apart, both outer edges shared) are no cells.
+    let full = {
+        let edges = ink_edges(block);
+        let tol = 0.5
+            * block
+                .iter()
+                .map(|l| l.size)
+                .fold(f32::MAX, f32::min)
+                .max(1.0);
+        let even = |l: &Line<'_>| {
+            let mut end: Option<f32> = None;
+            let gaps: Vec<f32> = l
+                .runs
+                .iter()
+                .filter(|r| !r.text.trim().is_empty())
+                .filter_map(|r| {
+                    let gap = end.map(|e| r.x - e);
+                    end = Some(r.x + r.w);
+                    gap
+                })
+                .collect();
+            let (lo, hi) = gaps
+                .iter()
+                .fold((f32::MAX, f32::MIN), |(a, b), &g| (a.min(g), b.max(g)));
+            hi - lo <= tol
+        };
+        block.iter().all(even)
+            && edges
+                .iter()
+                .all(|e| (e.0 - edges[0].0).abs() <= tol && (e.1 - edges[0].1).abs() <= tol)
+    };
+    // A sentence that goes on over its lines (a line opening with a small letter, or a last
+    // line ending with a full stop) is no row of cells either.
+    let prose = block
+        .iter()
+        .skip(1)
+        .any(|l| l.text.starts_with(char::is_lowercase))
+        || block.last().is_some_and(|l| l.text.ends_with('.'));
+    let pieced = |l: &Line<'_>| !full && !prose && cell_gaps(l) > 0;
+    let apart = (1..block.len()).any(|k| lines_apart(block, k, items))
+        || wraps(column, &ink_edges(column)).contains(&false)
+        || (block.len() >= 2 && block.iter().all(pieced));
+    if (small || column.len() >= 3 || block.iter().all(pieced)) && apart {
+        return (j, false);
+    }
+    let texts: Vec<&str> = block.iter().map(|l| l.text.as_str()).collect();
+    let one_edge = block.iter().all(|b| (b.x - first.x).abs() <= EDGE);
+    let paragraph = small && ((address_shaped(&texts) && one_edge) || sentences(block));
+    (j, !paragraph)
+}
+
+/// Whether the line `k` of `block` (a paragraph or a heading) starts after a line break
+/// whatever the width of the block, as no wrapped text is made of it and the line over it:
+/// the block's lines are short items (an address, a column of labels, of values, or of fields
+/// of one face; see [`listed`]: at most a few words each and few small words) and the two
+/// lines share their left edge, or both lines are a label and its value in the same two faces
+/// (see [`field_line`]) and not long lines of prose.
+/// `items` is whether the block is [`listed`] (see [`block_listed`]).
+fn lines_apart(block: &[Line<'_>], k: usize, items: bool) -> bool {
+    let (a, b) = (&block[k - 1], &block[k]);
+    let left = |l: &Line<'_>| {
+        l.runs
+            .iter()
+            .filter(|r| !r.text.trim().is_empty())
+            .map(|r| r.x)
+            .fold(f32::MAX, f32::min)
+    };
+    let items = items && (left(a) - left(b)).abs() <= EDGE;
+    let words = |l: &Line<'_>| l.text.split_whitespace().count();
+    let fields = field_line(a).is_some_and(|f| {
+        field_line(b).is_some_and(|g| same_face(f[0], g[0]) && same_face(f[1], g[1]))
+    }) && words(a).max(words(b)) <= FIELD_WORDS;
+    items || fields
+}
+
+/// Whether the lines of `block` are [`listed`]: short items.
+fn block_listed(block: &[Line<'_>]) -> bool {
+    listed(&block.iter().map(|l| l.text.as_str()).collect::<Vec<_>>())
+}
+
+/// A line of more words than this is a line of prose, though it starts plain and ends bold (see
+/// [`lines_apart`]).
+const FIELD_WORDS: usize = 8;
 
 /// A line is short when the next first word fits after it with this share of the widest
 /// line to spare.
@@ -1697,39 +2747,45 @@ const EDGE: f32 = 1.0;
 /// line with [`SHORT_ROOM`] of it to spare (and that line does not end in a hyphen), or the
 /// paragraph is set flush right or centred and the two lines share a right edge or a centre
 /// but not a left edge, or the
-/// paragraph is a block of short lines (its widest line at most [`SHORT_MEASURE`] font
-/// sizes) each of which after the first starts with a capital or a digit, none ends in a
-/// hyphen or a comma, the lines do not read as sentences, share their left edge and have the
-/// shape of an address or a list (list markers, or at most [`ADDRESS_WORDS`] words a line).
-/// Prose that fills its measure keeps joining, also where every line starts with a capital.
-fn line_breaks(lines: &[Line<'_>]) -> Vec<(u32, u32)> {
+/// paragraph is a block of short lines each of which after the first starts with a capital or
+/// a digit, none ends in a hyphen or a comma, the lines do not read as sentences, share their
+/// left edge and have the shape of an address or a list (list markers, or at most
+/// [`ADDRESS_WORDS`] words a line), or the two lines are each a label and its value in the
+/// same two faces (see [`field_line`]). How wide the block is does not matter: a long name in an
+/// address is still a line of it. Prose that fills its measure keeps joining, also where
+/// every line starts with a capital.
+fn line_breaks(all: &[Line<'_>], i: usize, j: usize) -> Vec<(u32, u32)> {
+    let lines = &all[i..j];
     if lines.len() < 2 {
         return Vec::new();
     }
-    // The ends of each line's ink.
-    let edges: Vec<(f32, f32)> = lines
-        .iter()
-        .map(|l| {
-            let inked = l.runs.iter().filter(|r| !r.text.trim().is_empty());
-            let x0 = inked.clone().map(|r| r.x).fold(f32::MAX, f32::min);
-            let x1 = inked.map(|r| r.x + r.w).fold(f32::MIN, f32::max);
-            (x0, x1)
-        })
-        .collect();
+    // The column the block stands in: up to two lines over and under it that go on it but
+    // for a box's edge (see [`Slot::Block`]), which a box may have cut off it. Where the
+    // column shows that its lines are lines of their own, so are the block's.
+    let (mut lo, mut hi) = (i, j);
+    while lo > 0 && i - lo < 2 && continues(&all[lo - 1], &all[lo]) {
+        lo -= 1;
+    }
+    while hi < all.len() && hi - j < 2 && continues(&all[hi - 1], &all[hi]) {
+        hi += 1;
+    }
+    let column = &all[lo..hi];
+    let around = wraps(column, &ink_edges(column));
+    let edges = ink_edges(lines);
     let right = edges.iter().map(|e| e.1).fold(f32::MIN, f32::max);
     let left = edges.iter().map(|e| e.0).fold(f32::MAX, f32::min);
-    let size = lines.iter().map(|l| l.size).fold(0.0f32, f32::max).max(1.0);
-    let short = right - left <= SHORT_MEASURE * size
-        && lines[1..].iter().all(|l| {
-            l.text
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_uppercase() || c.is_ascii_digit())
-        })
-        && lines.iter().all(|l| !l.text.ends_with(['-', ',']))
+    let short = lines[1..].iter().all(|l| {
+        l.text
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_uppercase() || c.is_ascii_digit())
+    }) && lines
+        .iter()
+        .all(|l| !word_cut(&l.text) && !l.text.ends_with(','))
+        && lines.windows(2).all(|w| !cuts(&w[0].text, &w[1].text))
         && !sentences(lines)
         && edges.iter().all(|e| (e.0 - left).abs() <= EDGE)
-        && listed(lines);
+        && listed(&lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>());
     // Lines set flush right or centred: most pairs of lines in a row, and at least two,
     // share a right edge or a centre but not a left edge. One indented first line of
     // justified prose is not that.
@@ -1749,28 +2805,22 @@ fn line_breaks(lines: &[Line<'_>]) -> Vec<(u32, u32)> {
         ((a.0 + a.1) / 2.0 - (b.0 + b.1) / 2.0).abs() <= EDGE && (a.1 - b.1).abs() > EDGE
     };
     let set_aligned = (pairs >= 2 && 2 * pairs >= edges.len() - 1) || centred_pair;
+    let items = block_listed(lines);
+    let wraps = wraps(lines, &edges);
     let mut out = Vec::new();
     for k in 0..lines.len() - 1 {
         let (a, b) = (edges[k], edges[k + 1]);
         let next = &lines[k + 1];
-        // The first word of the next line, by its share of the first run with text.
-        let word = next
-            .runs
-            .iter()
-            .find(|r| !r.text.trim().is_empty())
-            .map_or(f32::MAX, |r| {
-                let text = r.text.trim_start();
-                let chars = text.chars().count().max(1) as f32;
-                let first = text.split_whitespace().next().unwrap_or("");
-                r.w * first.chars().count() as f32 / chars
-            });
+        let word = first_word(next);
         // A short line: it ends well before the widest line, so far that the next line's
         // first word and a good share of the measure more would still fit. Ragged prose
         // misses a word by a little. A word cut at the line end goes on in the next line.
         let room = SHORT_ROOM * (right - left);
-        let fits = a.1 + 0.25 * next.size + word + room <= right && !lines[k].text.ends_with('-');
+        let fits =
+            a.1 + 0.25 * next.size + word + room <= right && !cuts(&lines[k].text, &next.text);
         let aligned = set_aligned && aligned_pair(a, b);
-        if fits || aligned || short {
+        let apart = !wraps[k] || !around[i - lo + k];
+        if fits || aligned || short || apart || lines_apart(lines, k + 1, items) {
             out.push((next.runs[0].page, next.runs[0].line));
         }
     }
@@ -1778,57 +2828,240 @@ fn line_breaks(lines: &[Line<'_>]) -> Vec<(u32, u32)> {
     out
 }
 
-/// Lines of an address or a list of labels hold at most this many words; lines of prose in a
-/// narrow column hold more.
-const ADDRESS_WORDS: usize = 4;
-
-/// Whether lines have the shape of an address or a list: each starts with a list marker, or
-/// none holds more than [`ADDRESS_WORDS`] words and words in small letters are rare (at most
-/// one for every two lines, name particles aside). Prose, also German prose whose nouns
-/// start with capitals, holds many words in small letters.
-fn listed(lines: &[Line<'_>]) -> bool {
-    if lines.iter().all(|l| list_marker(&l.text).is_some()) {
-        return true;
-    }
-    let total: usize = lines.iter().map(|l| small_words(&l.text)).sum();
+/// The ends of each line's ink.
+fn ink_edges(lines: &[Line<'_>]) -> Vec<(f32, f32)> {
     lines
         .iter()
-        .all(|l| l.text.split_whitespace().count() <= ADDRESS_WORDS)
-        && 2 * total <= lines.len()
+        .map(|l| {
+            let inked = l.runs.iter().filter(|r| !r.text.trim().is_empty());
+            let x0 = inked.clone().map(|r| r.x).fold(f32::MAX, f32::min);
+            let x1 = inked.map(|r| r.x + r.w).fold(f32::MIN, f32::max);
+            (x0, x1)
+        })
+        .collect()
 }
 
-/// Words that start with a small letter, not counting name particles ("von der Heide",
-/// "Maria de la Cruz") before a capitalised word. German articles on their own are no
-/// particles: they precede nouns in prose.
-fn small_words(text: &str) -> usize {
-    const PARTICLES: [&str; 17] = [
-        "von", "van", "de", "del", "della", "di", "da", "du", "la", "le", "ten", "ter", "zu",
-        "zum", "zur", "bin", "al",
-    ];
-    const ARTICLES: [&str; 4] = ["der", "den", "dem", "des"];
-    const LINKS: [&str; 3] = ["von", "van", "zu"];
-    let words: Vec<&str> = text.split_whitespace().collect();
-    let capital =
-        |w: Option<&&str>| w.is_some_and(|w| w.chars().next().is_some_and(char::is_uppercase));
-    let mut count = 0;
-    for (k, w) in words.iter().enumerate() {
-        if !w.chars().next().is_some_and(char::is_lowercase) {
-            continue;
+/// The gaps of a cell between the runs with ink of `line` (see [`crate::order::PIECE_GAP`]): the
+/// white space between cells of columns, far over a word space.
+fn cell_gaps(line: &Line<'_>) -> usize {
+    let mut end: Option<f32> = None;
+    line.runs
+        .iter()
+        .filter(|r| !r.text.trim().is_empty())
+        .filter(|r| {
+            let gap = end.is_some_and(|e| r.x - e > crate::order::PIECE_GAP * r.size);
+            end = Some(r.x + r.w);
+            gap
+        })
+        .count()
+}
+
+/// Whether the cell gaps of `line` (see [`cell_gaps`]) are all of one width, within half a
+/// size: the word spaces of a line set full (justified), no gutters of cells.
+fn set_full(line: &Line<'_>) -> bool {
+    let mut end: Option<f32> = None;
+    let gaps: Vec<f32> = line
+        .runs
+        .iter()
+        .filter(|r| !r.text.trim().is_empty())
+        .filter_map(|r| {
+            let gap = end
+                .map(|e| r.x - e)
+                .filter(|g| *g > crate::order::PIECE_GAP * r.size);
+            end = Some(r.x + r.w);
+            gap
+        })
+        .collect();
+    let (lo, hi) = gaps
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(a, b), &g| (a.min(g), b.max(g)));
+    !gaps.is_empty() && hi - lo <= 0.5 * line.size.max(1.0)
+}
+
+/// Whether the last run with ink of `line` stands after a cell gap (see [`cell_gaps`]): it
+/// is a cell of its own.
+fn last_cell(line: &Line<'_>) -> bool {
+    let mut inked = line.runs.iter().rev().filter(|r| !r.text.trim().is_empty());
+    match (inked.next(), inked.next()) {
+        (Some(last), Some(before)) => {
+            last.x - (before.x + before.w) > crate::order::PIECE_GAP * last.size
         }
-        let next = words.get(k + 1);
-        let exempt = if PARTICLES.contains(w) {
-            capital(next)
-                || (LINKS.contains(w)
-                    && next.is_some_and(|n| ARTICLES.contains(n))
-                    && capital(words.get(k + 2)))
-        } else {
-            ARTICLES.contains(w) && k > 0 && LINKS.contains(&words[k - 1]) && capital(next)
-        };
-        if !exempt {
-            count += 1;
-        }
+        _ => false,
     }
-    count
+}
+
+/// The width of the first word of `line`, by its share of the first run with text.
+fn first_word(line: &Line<'_>) -> f32 {
+    line.runs
+        .iter()
+        .find(|r| !r.text.trim().is_empty())
+        .map_or(f32::MAX, |r| {
+            let text = r.text.trim_start();
+            let chars = text.chars().count().max(1) as f32;
+            let first = text.split_whitespace().next().unwrap_or("");
+            r.w * first.chars().count() as f32 / chars
+        })
+}
+
+/// For each line of `lines` but the last (with the ends `edges` of their ink), whether it may
+/// go on in the next line as wrapped text: the positive evidence that a line was broken where
+/// it is only because its measure was full (Task 15b part 2e-2, ruling P6-X: a line of its own
+/// read as wrapped text mixes two fields). A line that ends in a hyphen or a comma, or whose
+/// next line starts with a small letter or holds punctuation alone, goes on. Otherwise no line goes on when
+/// - the lines each end with an exclamation or a question mark: sentences of their own (a
+///   slogan, a greeting), or each opens with a star: starred items;
+/// - the lines read as no sentences and one that ends no sentence, or the first line, would
+///   have taken the next line's first word in its own face within the widest line, with
+///   [`SPARE`] sizes to spare:
+///   the lines were not filled to a measure, they are lines of their own (fields, items,
+///   address lines) of any length;
+/// - the lines read as no sentences and one ends in a number (an amount, a date, a customer
+///   number) over a line that opens with a capital, or in an amount over a line of an amount
+///   alone: a column of values.
+///
+/// In lines that read as sentences, only a row of cells that ends in a number over a line
+/// without cells ends there. Prose goes on, whatever its last word (a number over a noun).
+fn wraps(lines: &[Line<'_>], edges: &[(f32, f32)]) -> Vec<bool> {
+    let n = lines.len();
+    if n < 2 {
+        return Vec::new();
+    }
+    let ends_sentence = |l: &Line<'_>| l.text.ends_with(['.', '!', '?', ':']);
+    let cut = |l: &Line<'_>| word_cut(&l.text) || l.text.ends_with(',');
+    let lower = |l: &Line<'_>| l.text.chars().next().is_some_and(char::is_lowercase);
+    // A line of punctuation alone (a dash that ends a verse, set on a line of its own) is no
+    // line of its own: it ends the line before.
+    let marks = |l: &Line<'_>| !l.text.chars().any(char::is_alphanumeric);
+    let goes_on: Vec<bool> = (0..n - 1)
+        .map(|k| {
+            cut(&lines[k])
+                || cuts(&lines[k].text, &lines[k + 1].text)
+                || lower(&lines[k + 1])
+                || marks(&lines[k + 1])
+        })
+        .collect();
+    let exclaims = lines.iter().all(|l| l.text.ends_with(['!', '?']));
+    let starred = lines.iter().all(|l| l.text.starts_with('*'));
+    let right = edges.iter().map(|e| e.1).fold(f32::MIN, f32::max);
+    // A title line in bold over plain text is no line of that text.
+    let one_face = |a: &Line<'_>, b: &Line<'_>| {
+        let last = a.runs.iter().rev().find(|r| !r.text.trim().is_empty());
+        let first = b.runs.iter().find(|r| !r.text.trim().is_empty());
+        match (last, first) {
+            (Some(x), Some(y)) => same_face(x, y),
+            (x, y) => x.is_none() && y.is_none(),
+        }
+    };
+    let unfilled = !sentences(lines)
+        && (0..n - 1).any(|k| {
+            let l = &lines[k];
+            // A short line that ends a sentence ends a paragraph in prose, after a line that
+            // wrapped into it; as the first line of the block it is a line of its own.
+            (!ends_sentence(l) || k == 0)
+                && !goes_on[k]
+                && one_face(l, &lines[k + 1])
+                && edges[k].1 + (0.25 + SPARE) * lines[k + 1].size + first_word(&lines[k + 1])
+                    <= right
+        });
+    // A line that ends in a number (an amount, a date, a customer number), and no sentence,
+    // over a line that opens with a capital ends a value: the next line is a field of its own,
+    // and so is every line of a block that holds such a line and no sentence. So does a line
+    // that ends in an amount over a line of an amount alone (a total under it).
+    let value_end = |k: usize| {
+        let l = &lines[k];
+        let next = &lines[k + 1].text;
+        let total = || {
+            data_only(next)
+                && ends_in_amount(next)
+                && (ends_in_amount(&l.text) || signed_amount(&l.text))
+        };
+        !ends_sentence(l)
+            && !goes_on[k]
+            && (next.chars().next().is_some_and(char::is_uppercase) || total())
+            && l.text.split_whitespace().next_back().is_some_and(|w| {
+                w.chars().any(|c| c.is_ascii_digit())
+                    && w.chars().all(|c| c.is_ascii_digit() || ".,/-".contains(c))
+            })
+    };
+    let values = !sentences(lines) && (0..n - 1).any(value_end);
+    if exclaims || starred || unfilled || values {
+        goes_on
+    } else {
+        // In prose a line that ends in a number goes on (`mit 2` over `Prozent Skonto`), but a
+        // line that ends in a row of cells (two cell gaps or more of other widths than the word
+        // spaces of a line set full, the number a cell of its own after one) ends with that row
+        // (`79-84 70-85` over `Preparation work`).
+        (0..n - 1)
+            .map(|k| {
+                !(value_end(k)
+                    && cell_gaps(&lines[k]) >= 2
+                    && last_cell(&lines[k])
+                    && !set_full(&lines[k]))
+            })
+            .collect()
+    }
+}
+
+/// Whether the line `text` ends in a hyphen that goes on in the line `next`: a word cut (see
+/// [`word_cut`]), or the hyphen of a range after an amount over a line that opens with a number
+/// and holds words (`08.00-` over `18.00 Uhr`). Over a line of numbers alone the minus is the
+/// sign of a credit (a total under it).
+fn cuts(text: &str, next: &str) -> bool {
+    word_cut(text)
+        || (text.ends_with('-')
+            && next.starts_with(|c: char| c.is_ascii_digit())
+            && !data_only(next))
+}
+
+/// Whether `text` ends in a hyphen that cuts a word: not the minus after an amount with
+/// cents (`10,00-`, `1.234,56-`, the way a deduction or a credit is written), which ends the
+/// amount, not a word.
+fn word_cut(text: &str) -> bool {
+    text.ends_with('-') && !signed_amount(text)
+}
+
+/// Whether the last word of `text` is an amount with a decimal part of two digits and a minus
+/// after it (`10,00-`, `1.234,56-`).
+pub(crate) fn signed_amount(text: &str) -> bool {
+    let Some(word) = text.split_whitespace().next_back() else {
+        return false;
+    };
+    let Some(number) = word.strip_suffix('-') else {
+        return false;
+    };
+    // Digits and marks only (all ASCII, so the byte offsets below are char bounds), a digit
+    // first, and a mark before two digits last.
+    let b = number.as_bytes();
+    b.len() >= 4
+        && b.iter()
+            .all(|c| c.is_ascii_digit() || matches!(c, b'.' | b','))
+        && b[0].is_ascii_digit()
+        && matches!(b[b.len() - 3], b'.' | b',')
+        && b[b.len() - 2..].iter().all(u8::is_ascii_digit)
+}
+
+/// A line has room for the next line's first word when this many sizes of the widest line
+/// are left over after it and a space (see [`wraps`]): more than the error of a word's
+/// width taken from its share of a run.
+const SPARE: f32 = 1.0;
+
+/// The faces of a line that is a label and its value: the face its ink starts in and the other
+/// face it ends in (a plain label, then a bold value), each as weight, slant, family and size.
+/// Two lines one under the other that are each a label and its value in the same two faces are
+/// two fields, never one line of text going on (see [`line_breaks`]).
+fn field_line<'a>(l: &Line<'a>) -> Option<[&'a Run; 2]> {
+    let mut inked = l.runs.iter().filter(|r| !r.text.trim().is_empty());
+    let first = inked.next()?;
+    let last = inked.next_back()?;
+    (!same_face(first, last)).then_some([first, last])
+}
+
+/// Whether two runs are set in one face: weight, slant and family, and sizes less than
+/// [`crate::tables::LABEL_STEP`] apart (relative to the size, ruling P6-Y).
+fn same_face(a: &Run, b: &Run) -> bool {
+    let (lo, hi) = (a.size.min(b.size), a.size.max(b.size));
+    (a.bold, a.italic, a.family) == (b.bold, b.italic, b.family)
+        && hi < crate::tables::LABEL_STEP * lo.max(f32::MIN_POSITIVE)
 }
 
 /// Whether the lines read as sentences: one holds a sentence end with more text after it, or
@@ -1883,6 +3116,9 @@ pub(crate) enum Slot {
         table: usize,
         cell: usize,
     },
+    /// Untagged text the table pass read as a block of its own (a cell of a row of fields read
+    /// cell by cell): its lines go on no line of another block.
+    Block(usize),
 }
 
 /// Roles that only group blocks or mark text inside a block.
@@ -1998,7 +3234,7 @@ fn classified(runs: Vec<Run>, tree: &StructTree, cx: &Context<'_>) -> (Vec<Run>,
     // ActualText of an element replaces the text of all its runs: the first run carries it.
     let mut replaced: HashSet<usize> = HashSet::new();
     for mut r in runs {
-        let (slot, actual) = match r.mcid.and_then(|m| (cx.roles)(m)) {
+        let (slot, actual) = match r.mcid().and_then(|m| (cx.roles)(m)) {
             Some(e) if e < tree.elems.len() => classify(tree, e),
             _ => (Slot::Free, None),
         };
@@ -2060,7 +3296,7 @@ fn tagged(flow: &[Run], slots: &[Slot], cx: &Context<'_>, out: &mut Built) {
                     *open = None;
                     out.paragraph(taken, role, cx);
                 }
-                Slot::Free | Slot::Cell { .. } => {
+                Slot::Free | Slot::Cell { .. } | Slot::Block(_) => {
                     *open = None;
                     out.paragraph(taken, None, cx);
                 }
@@ -2072,7 +3308,7 @@ fn tagged(flow: &[Run], slots: &[Slot], cx: &Context<'_>, out: &mut Built) {
         }
         // A cell run left to the text reads like a free run.
         let slot = match slot {
-            Slot::Cell { .. } => Slot::Free,
+            Slot::Cell { .. } | Slot::Block(_) => Slot::Free,
             s => *s,
         };
         let same = slot == current_slot
@@ -2109,10 +3345,34 @@ mod tests {
         rules: &[],
         images: &[],
         widgets: &[],
+        boxes: &[],
         lines_unsearched: false,
         width: 595.0,
         body_size: 10.0,
     };
+
+    /// The minus after an amount with cents ends the amount; a hyphen after a word or a whole
+    /// number cuts a word or a range (part 2e-4, item 3). Text of other scripts is read char by
+    /// char, never cut inside a char.
+    #[test]
+    fn a_minus_after_an_amount_is_no_word_cut() {
+        for signed in ["10,00-", "Rabatt 1 10,00-", "1.234,56-", "12.50-"] {
+            assert!(signed_amount(signed), "{signed}");
+            assert!(!word_cut(signed), "{signed}");
+        }
+        for cut in [
+            "Page-",
+            "Rechnungs-",
+            "2025-",
+            "1,5-",
+            "\u{201c}ab-",
+            "\u{20ac}1,00-",
+            "-",
+        ] {
+            assert!(!signed_amount(cut), "{cut}");
+            assert!(word_cut(cut), "{cut}");
+        }
+    }
 
     fn run(text: &str, line: u32, y: f32, size: f32) -> Run {
         Run {
@@ -2125,11 +3385,29 @@ mod tests {
             size,
             bold: false,
             italic: false,
+            family: 0,
             mcid: None,
             uri: None,
             line,
             off_axis: false,
+            note: false,
+            gaps: Gaps::default(),
         }
+    }
+
+    #[test]
+    fn a_cut_at_words_the_text_no_longer_has_is_none() {
+        let mut r = run("AA BB", 0, 700.0, 10.0);
+        r.gaps = Gaps::new(vec![Gap {
+            words: 1,
+            from: 82.0,
+            to: 86.0,
+        }]);
+        let (before, after) = r.cut_at(0).expect("a cut");
+        assert_eq!((before.text.as_str(), after.text.as_str()), ("AA", " BB"));
+        r.text = "AABB".into();
+        assert!(r.cut_at(0).is_none());
+        assert!(r.cut_at(1).is_none());
     }
 
     #[test]
@@ -2282,6 +3560,28 @@ mod tests {
         assert_eq!(room.left.get(), 1_000 - (5 + LINK_COST) - (6 + LINK_COST));
     }
 
+    /// Fix round 2 of Task 13, item 2: a heading whose size the style pass did not see as a
+    /// heading size (its line there held a smaller cell beside it) gets the level of its size
+    /// among the heading sizes, not the deepest level: a title larger than all but one heading
+    /// size is level 2.
+    #[test]
+    fn a_heading_size_not_seen_takes_its_place_among_the_sizes() {
+        let style = Style {
+            body_size: 7.0,
+            heading_sizes: vec![20.0, 12.0],
+            ..Style::default()
+        };
+        let runs = [run("Rechnung", 0, 690.0, 14.0)];
+        assert_eq!(style.heading_level(&line(&runs)), Some(2));
+        let runs = [run("Rechnung", 0, 690.0, 24.0)];
+        assert_eq!(style.heading_level(&line(&runs)), Some(1));
+        // A size seen keeps its place; one smaller than all is the deepest level.
+        let runs = [run("Rechnung", 0, 690.0, 12.0)];
+        assert_eq!(style.heading_level(&line(&runs)), Some(2));
+        let runs = [run("Rechnung", 0, 690.0, 11.0)];
+        assert_eq!(style.heading_level(&line(&runs)), Some(3));
+    }
+
     #[test]
     fn a_dropped_block_gives_back_its_link_counts() {
         let a = UriTarget::new("https://example.org/a");
@@ -2315,6 +3615,244 @@ mod tests {
         assert!(built.blocks.is_empty());
         assert!(built.stop.is_some());
         assert_eq!(room.cut(), None);
+    }
+
+    /// A ruled table of one row holding "cell", with the title "Muster Titel" (with a link
+    /// when `uri`), laid out with `room` bytes of link and table room.
+    fn titled_table(rows: usize, uri: bool, room: u64) -> Vec<Block> {
+        let style = Style::new(&[PageText {
+            page: 1,
+            height: Some(842.0),
+            runs: &[],
+        }]);
+        let budget = Budget::new(rezzer_limits::Limits::default());
+        let links = LinkRoom::new(room);
+        let tables = Tables::default();
+        let cx = Context {
+            style: &style,
+            tree: None,
+            roles: &|_| None,
+            budget: &budget,
+            tables: &tables,
+            in_part: false,
+            links: &links,
+        };
+        let title = Run {
+            uri: uri.then(|| UriTarget::new("https://example.org/titel")),
+            ..run("Muster Titel", 0, 700.0, 10.0)
+        };
+        let plan = Planned {
+            at: 0,
+            top: 710.0,
+            rows: (0..rows)
+                .map(|_| {
+                    vec![PlannedCell {
+                        runs: vec![run("cell", 1, 680.0, 10.0)],
+                        row_span: 1,
+                        col_span: 1,
+                        status: None,
+                    }]
+                })
+                .collect(),
+            trs: Vec::new(),
+            additions: Vec::new(),
+            header_rows: 0,
+            tagged: None,
+            continues: false,
+            caption: vec![title],
+            found_by: None,
+        };
+        let mut built = Built::default();
+        built.table(plan, &cx);
+        built.blocks
+    }
+
+    /// The kind and text of each block.
+    fn kinds(blocks: &[Block]) -> Vec<(String, String)> {
+        blocks
+            .iter()
+            .map(|b| match b {
+                Block::Table { caption, rows, .. } => (
+                    format!("table {caption:?}"),
+                    rows.iter()
+                        .flatten()
+                        .map(|c| rezzer_model::plain_text(&c.inlines))
+                        .collect(),
+                ),
+                Block::Paragraph { inlines, role, .. } => (
+                    format!("paragraph {role:?}"),
+                    rezzer_model::plain_text(inlines),
+                ),
+                other => (format!("{other:?}"), String::new()),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_title_is_the_caption_of_its_table() {
+        let blocks = titled_table(1, false, 10_000);
+        assert_eq!(
+            kinds(&blocks),
+            [(
+                "table Some(\"Muster Titel\")".to_string(),
+                "cell".to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn a_title_with_a_link_stands_before_its_table() {
+        let blocks = titled_table(1, true, 10_000);
+        assert_eq!(kinds(&blocks)[0].0, "paragraph Some(\"caption\")");
+        assert!(matches!(
+            &blocks[0],
+            Block::Paragraph { inlines, .. } if matches!(inlines[0], Inline::Link { .. })
+        ));
+        assert_eq!(kinds(&blocks)[1].0, "table None");
+    }
+
+    #[test]
+    fn a_title_of_a_table_kept_as_paragraphs_comes_first() {
+        // No room for the table's overhead: its text is paragraphs, the title before it.
+        let blocks = titled_table(1, false, 0);
+        let k = kinds(&blocks);
+        assert_eq!(
+            k[0],
+            (
+                "paragraph Some(\"caption\")".to_string(),
+                "Muster Titel".to_string()
+            )
+        );
+        assert!(k[1..].iter().any(|(_, t)| t == "cell"), "{k:?}");
+        assert!(
+            !k.iter().any(|(kind, _)| kind.starts_with("table")),
+            "{k:?}"
+        );
+    }
+
+    #[test]
+    fn a_stop_at_a_linked_title_names_it_and_gives_its_links_back() {
+        // No room for any element: the caption paragraph of the linked title is the block the
+        // stop names, nothing of it is kept, and the link counts it took go back.
+        let style = Style::new(&[PageText {
+            page: 1,
+            height: Some(842.0),
+            runs: &[],
+        }]);
+        let budget = Budget::new(rezzer_limits::Limits {
+            max_elements: 0,
+            ..rezzer_limits::Limits::default()
+        });
+        let links = LinkRoom::new(10_000);
+        let tables = Tables::default();
+        let cx = Context {
+            style: &style,
+            tree: None,
+            roles: &|_| None,
+            budget: &budget,
+            tables: &tables,
+            in_part: false,
+            links: &links,
+        };
+        let before = (links.left.get(), links.freed.get());
+        let plan = Planned {
+            at: 0,
+            top: 710.0,
+            rows: vec![vec![PlannedCell {
+                runs: vec![run("cell", 1, 680.0, 10.0)],
+                row_span: 1,
+                col_span: 1,
+                status: None,
+            }]],
+            trs: Vec::new(),
+            additions: Vec::new(),
+            header_rows: 0,
+            tagged: None,
+            continues: false,
+            caption: vec![Run {
+                uri: Some(UriTarget::new("https://example.org/titel")),
+                ..run("Muster Titel", 0, 700.0, 10.0)
+            }],
+            found_by: None,
+        };
+        let mut built = Built::default();
+        built.table(plan, &cx);
+        assert!(built.stop.is_some());
+        assert_eq!(built.cut, Some(Cut::Block(1)));
+        assert!(built.blocks.is_empty(), "{:?}", built.blocks);
+        assert_eq!((links.left.get(), links.freed.get()), before);
+    }
+
+    #[test]
+    fn a_cut_title_link_stays_counted_when_its_table_is_kept_as_text() {
+        // No link room: the title's link is cut (its text stays plain, so the title is a
+        // plain caption), and the table's overhead does not fit either. The table is text,
+        // the title a caption paragraph before it, and the cut link is still counted for
+        // its loss.
+        let style = Style::new(&[PageText {
+            page: 1,
+            height: Some(842.0),
+            runs: &[],
+        }]);
+        let budget = Budget::new(rezzer_limits::Limits::default());
+        let links = LinkRoom::new(0);
+        let tables = Tables::default();
+        let cx = Context {
+            style: &style,
+            tree: None,
+            roles: &|_| None,
+            budget: &budget,
+            tables: &tables,
+            in_part: false,
+            links: &links,
+        };
+        let plan = Planned {
+            at: 0,
+            top: 710.0,
+            rows: vec![vec![PlannedCell {
+                runs: vec![run("cell", 1, 680.0, 10.0)],
+                row_span: 1,
+                col_span: 1,
+                status: None,
+            }]],
+            trs: Vec::new(),
+            additions: Vec::new(),
+            header_rows: 0,
+            tagged: None,
+            continues: false,
+            caption: vec![Run {
+                uri: Some(UriTarget::new("https://example.org/titel")),
+                ..run("Muster Titel", 0, 700.0, 10.0)
+            }],
+            found_by: None,
+        };
+        let mut built = Built::default();
+        built.table(plan, &cx);
+        let k = kinds(&built.blocks);
+        assert_eq!(
+            k[0],
+            (
+                "paragraph Some(\"caption\")".to_string(),
+                "Muster Titel".to_string()
+            )
+        );
+        assert!(
+            !k.iter().any(|(kind, _)| kind.starts_with("table")),
+            "{k:?}"
+        );
+        assert_eq!(links.cut(), Some((1, 1, 1)));
+    }
+
+    #[test]
+    fn a_title_of_a_table_without_rows_stays() {
+        let blocks = titled_table(0, false, 10_000);
+        assert_eq!(
+            kinds(&blocks),
+            [(
+                "paragraph Some(\"caption\")".to_string(),
+                "Muster Titel".to_string()
+            )]
+        );
     }
 
     /// A block built in two calls, as a table is, one cell per call: the first cell cuts its
@@ -2375,6 +3913,16 @@ mod tests {
         assert_eq!(list_marker("-5 degrees"), None);
         assert_eq!(list_marker("2024 was"), None);
         assert_eq!(list_marker("1.5 litres"), None);
+        // Padding after a star or a dash: a mark set into a form field, no bullet.
+        assert_eq!(list_marker("*     Betrag"), None);
+        assert_eq!(list_marker("-  keine"), None);
+        // A star closed by a lone star on its line encloses an item, no bullet (part 2e-4,
+        // item 6); a star bullet over text with a star in a word still is one.
+        assert_eq!(list_marker("* A123456B * x/y"), None);
+        assert_eq!(list_marker("* Erste Position"), Some((false, 2)));
+        assert_eq!(list_marker("* Rabatt 5* auf alles"), Some((false, 2)));
+        assert_eq!(list_marker("\u{2013}\t\tkeine"), None);
+        assert_eq!(list_marker("* Punkt"), Some((false, 2)));
     }
 
     #[test]
@@ -2473,7 +4021,7 @@ mod tests {
             .enumerate()
             .map(|(k, t)| {
                 let mut r = run(t, k as u32, top - 14.0 * k as f32, 10.0);
-                r.mcid = Some(k as u32);
+                r.mcid = kept_mcid(Some(k as u32));
                 r
             })
             .collect()
@@ -2923,6 +4471,129 @@ mod tests {
         assert_eq!(laid.cut, Some(Cut::Item { block: 1, item: 3 }));
     }
 
+    /// The legend leaves the body size only in an untagged file, where the layout takes it
+    /// too; a tagged file counts it, as the text sizes of its pages do.
+    #[test]
+    fn only_an_untagged_legend_leaves_the_body_size() {
+        let mut runs = vec![run("Wert1) und Wert2) gemeldet", 0, 700.0, 9.0)];
+        runs.extend((1..=2).map(|k| {
+            run(
+                &format!("{k}) Muster der Erklaerung zu diesem Wert mit vielen Worten"),
+                k,
+                140.0 - 8.0 * k as f32,
+                6.0,
+            )
+        }));
+        let pages = [PageText {
+            page: 1,
+            height: Some(842.0),
+            runs: &runs,
+        }];
+        let untagged = Style::learn(&pages, false);
+        assert_eq!(untagged.body_size, 9.0);
+        assert!(untagged.legends.contains_key(&1));
+        let tagged = Style::learn(&pages, true);
+        assert_eq!(tagged.body_size, 6.0);
+        assert!(tagged.legends.is_empty());
+    }
+
+    /// The body size is the exact size of the body text, not its half point: a letter printed
+    /// at 0.675 sets its body of 7 points at 4.725, which a half point would make 4.5, and a
+    /// name of 6.75 points (10 at full size, under 1.5 times the body there) would then be
+    /// 1.5 times the body.
+    #[test]
+    fn the_body_size_is_exact() {
+        let runs: Vec<Run> = (0..4)
+            .map(|k| {
+                run(
+                    "die Firma liefert die bestellte Ware",
+                    k,
+                    700.0 - 6.0 * k as f32,
+                    4.725,
+                )
+            })
+            .collect();
+        let pages = [PageText {
+            page: 1,
+            height: Some(842.0),
+            runs: &runs,
+        }];
+        let style = Style::learn(&pages, false);
+        assert!(
+            (style.body_size - 4.725).abs() < 1e-4,
+            "{}",
+            style.body_size
+        );
+        assert!(6.75 < HEADING_PLAIN_RATIO * style.body_size);
+    }
+
+    /// A stop inside the legend: the references to the footnotes it cut are text again, so
+    /// no reference is left without its footnote, whatever the limit.
+    #[test]
+    fn a_stop_inside_the_legend_unlinks_what_it_cut() {
+        let mut runs: Vec<Run> = (1..=6)
+            .map(|k| {
+                run(
+                    &format!("Wert{k}) {k},00"),
+                    k - 1,
+                    700.0 - 12.0 * k as f32,
+                    9.0,
+                )
+            })
+            .collect();
+        runs.extend((1..=6).map(|k| {
+            run(
+                &format!("{k}) Muster {k}"),
+                k + 5,
+                140.0 - 8.0 * k as f32,
+                6.0,
+            )
+        }));
+        // The style pass finds the legend the layout takes.
+        let style = Style::new(&[PageText {
+            page: 1,
+            height: Some(842.0),
+            runs: &runs,
+        }]);
+        let mut cut = 0;
+        for max_elements in 1..60 {
+            let budget = Budget::new(rezzer_limits::Limits {
+                max_elements,
+                ..rezzer_limits::Limits::default()
+            });
+            let cx = Context {
+                style: &style,
+                tree: None,
+                roles: &|_| None,
+                budget: &budget,
+                tables: &Tables::default(),
+                in_part: false,
+                links: &LinkRoom::new(u64::MAX),
+            };
+            let mut laid = page_blocks(1, Some(842.0), runs.clone(), &NOTHING_DRAWN, &cx);
+            let notes: Vec<String> = laid
+                .blocks
+                .iter()
+                .filter_map(|b| match b {
+                    Block::Section {
+                        anchor: Some(a), ..
+                    } => a.0.strip_prefix("fn:").map(str::to_string),
+                    _ => None,
+                })
+                .collect();
+            let refs = footnotes::referenced(&mut laid.blocks);
+            for r in &refs {
+                assert!(notes.contains(r), "{max_elements}: {r} without {notes:?}");
+            }
+            if (1..6).contains(&notes.len()) {
+                cut += 1;
+                // The cut ones are their markers as text again.
+                assert_eq!(refs.len(), notes.len(), "{max_elements}");
+            }
+        }
+        assert!(cut > 0, "no limit stopped inside the legend");
+    }
+
     #[test]
     fn a_stop_inside_a_table_keeps_its_rows_before() {
         let (tree, cells) = table_tree(&[&["TD"], &["TD"], &["TD"]]);
@@ -3005,7 +4676,7 @@ mod tests {
             }
             let mut r = run(t, 0, y, 10.0);
             r.line = (800.0 - y) as u32;
-            r.mcid = Some(i as u32);
+            r.mcid = kept_mcid(Some(i as u32));
             runs.push(r);
         }
         let style = Style::new(&[PageText {
@@ -3103,7 +4774,7 @@ mod tests {
             let runs: Vec<Run> = (0..PER_PAGE)
                 .map(|k| {
                     let mut r = run("cell", k as u32, 800.0 - k as f32 * 7.0, 6.0);
-                    r.mcid = Some(k as u32);
+                    r.mcid = kept_mcid(Some(k as u32));
                     r
                 })
                 .collect();

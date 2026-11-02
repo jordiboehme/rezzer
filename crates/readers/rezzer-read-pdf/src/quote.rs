@@ -537,10 +537,13 @@ mod tests {
             size: 12.0,
             bold: false,
             italic: false,
+            family: 0,
             mcid: None,
             uri: None,
             line,
             off_axis: false,
+            note: false,
+            gaps: crate::layout::Gaps::default(),
         }
     }
 

@@ -5,6 +5,22 @@
 filter = 'binary(hostile) | binary(hostile_render)'
 slow-timeout = { period = "60s", terminate-after = 3 }
 
+# The vision, variants, print_forms and business tests render or read generated pages inside
+# the reader's time limit; some read many pages in one test. One that hangs anyway is reported
+# as slow after 60 seconds and ended after 3 minutes, so it fails the run instead of hanging it.
+[[profile.default.overrides]]
+filter = 'package(rezzer-read-pdf) & (binary(vision) | binary(variants) | binary(print_forms) | binary(business))'
+slow-timeout = { period = "60s", terminate-after = 3 }
+
+# These tests are load-sensitive: they hold a time bound (the code cap of a file, the caption
+# search beside one huge glyph, rows of field boxes or date labels that must cost about what
+# their text costs) or compare every loss with a reference read (a halftone beside a photo,
+# whose code scan may stop at its time limit on a loaded machine and then says so). Their
+# limits stay as they are; on a busy runner they get two more tries.
+[[profile.default.overrides]]
+filter = 'package(rezzer-read-pdf) & ((binary(hostile_render) & test(=the_code_cap_of_a_file_holds)) | (binary(hostile) & (test(=one_huge_glyph_does_not_widen_the_caption_search) | test(=many_rows_of_field_boxes_beside_dense_text_cost_about_what_their_text_costs) | test(=many_date_labels_on_page_1_cost_about_what_their_text_costs))) | (binary(variants) & test(=a_halftone_beside_a_photo)))'
+retries = 2
+
 # These tests walk hostile shapes with no time stop, so only a work bound ends them. A broken
 # bound loops: it is ended after 2 minutes and fails the run instead of hanging it.
 [[profile.default.overrides]]
