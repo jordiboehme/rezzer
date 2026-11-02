@@ -801,7 +801,6 @@ fn a_linear_code_is_boxed_by_its_bars() {
     // The decoder gives the line it read: the box reaches out along it to the first and the
     // last bar and across it to the ends of the bars, also for short bars.
     let m = modules(Symbology::Code128, "0000000001", None);
-    let mut looked = 0;
     for px in [2, 3, 4] {
         for bar in [6, 9, 15, 40, 120] {
             let (gray, w, h, boxes) = linear_pixels(&m, px, bar, 1, 0);
