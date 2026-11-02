@@ -103,8 +103,9 @@ pub trait Finder<C: ?Sized> {
     fn find(&mut self, page: &PageIn, cx: &mut C, arb: &mut InOrder);
 }
 
-/// Calls each finder once, in slice order. When `stop()` is true between two finders, the
-/// rest are skipped and a `Stopped` issue is recorded.
+/// Calls each finder once, in slice order. `stop()` is asked before every finder, the first
+/// one included; when it is true, that finder and the rest are skipped and a `Stopped` issue
+/// is recorded.
 pub fn find_in_order<C: ?Sized>(
     page: &PageIn,
     finders: &mut [&mut dyn Finder<C>],
@@ -112,9 +113,9 @@ pub fn find_in_order<C: ?Sized>(
     arb: &mut InOrder,
     stop: &dyn Fn() -> bool,
 ) {
-    for (i, f) in finders.iter_mut().enumerate() {
+    for f in finders.iter_mut() {
         work::add(1);
-        if i > 0 && stop() {
+        if stop() {
             arb.note_stopped();
             return;
         }

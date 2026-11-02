@@ -129,8 +129,27 @@ fn stop_between_finders_is_an_issue() {
     let mut arb = InOrder::new(&p, &Limits::default());
     let (mut a, mut b) = (Named("a"), Named("b"));
     let mut cx = Vec::new();
-    find_in_order(&p, &mut [&mut a, &mut b], &mut cx, &mut arb, &|| true);
+    let asked = std::cell::Cell::new(0);
+    let stop = || {
+        asked.set(asked.get() + 1);
+        asked.get() > 1
+    };
+    find_in_order(&p, &mut [&mut a, &mut b], &mut cx, &mut arb, &stop);
     assert_eq!(cx, ["a"]);
+    assert_eq!(asked.get(), 2);
+    let out = arb.finish();
+    assert_eq!(out.issues.len(), 1);
+    assert_eq!(out.issues[0].kind, IssueKind::Stopped);
+}
+
+#[test]
+fn stop_before_the_first_finder_runs_none() {
+    let p = page();
+    let mut arb = InOrder::new(&p, &Limits::default());
+    let (mut a, mut b) = (Named("a"), Named("b"));
+    let mut cx = Vec::new();
+    find_in_order(&p, &mut [&mut a, &mut b], &mut cx, &mut arb, &|| true);
+    assert!(cx.is_empty());
     let out = arb.finish();
     assert_eq!(out.issues.len(), 1);
     assert_eq!(out.issues[0].kind, IssueKind::Stopped);
