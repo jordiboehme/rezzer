@@ -347,6 +347,7 @@ shape_tests! {
     cells_of_two_lines_lining_up_by_chance_with_no_divider => "cells of two lines lining up by chance between rules with no divider",
     cells_or_rows_of_two_lines_with_no_divider => "cells or rows of two lines between rules with no divider",
     labels_beside_a_street_with_no_divider => "labels beside a street and its town between rules with no divider",
+    abbreviated_labels_beside_a_street_with_no_divider => "abbreviated labels beside a street and its town between rules with no divider",
     two_rows_of_items_with_no_divider => "two rows of items between rules with no divider",
     words_in_two_weights => "words in two weights",
     a_range_that_wraps_after_its_hyphen => "a range that wraps after its hyphen in prose",

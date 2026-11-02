@@ -1030,7 +1030,7 @@ fn refused_strips_read_cell_by_cell() {
 fn cells_lining_up_by_chance_are_no_totals() {
     // The cells, and whether they read cell by cell with no divider (else line by line, with
     // the doubt said).
-    let cases: [(&str, &[StripCell], bool); 7] = [
+    let cases: [(&str, &[StripCell], bool); 11] = [
         (
             "a street over its town",
             &[
@@ -1070,6 +1070,39 @@ fn cells_lining_up_by_chance_are_no_totals() {
             "colon labels",
             &[
                 ("", 1.0, &["Strasse:", "Ort:"]),
+                ("", 1.0, &["Musterweg 1", "12345 Musterstadt"]),
+            ],
+            false,
+        ),
+        // Fix round 2 (C1-r): labels of three tokens or more, abbreviated or with a slash.
+        (
+            "slash labels",
+            &[
+                ("", 1.0, &["Strasse / Nr.", "PLZ / Ort"]),
+                ("", 1.0, &["Musterweg 1", "12345 Musterstadt"]),
+            ],
+            false,
+        ),
+        (
+            "dotted labels",
+            &[
+                ("", 1.0, &["Str. u. Nr.", "PLZ u. Ort"]),
+                ("", 1.0, &["Musterweg 1", "12345 Musterstadt"]),
+            ],
+            false,
+        ),
+        (
+            "labels with und",
+            &[
+                ("", 1.0, &["Str. und Nr.", "PLZ und Ort"]),
+                ("", 1.0, &["Musterweg 1", "12345 Musterstadt"]),
+            ],
+            false,
+        ),
+        (
+            "long labels",
+            &[
+                ("", 1.0, &["Neue Str. Nr.", "Neuer Wohnort"]),
                 ("", 1.0, &["Musterweg 1", "12345 Musterstadt"]),
             ],
             false,

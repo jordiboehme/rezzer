@@ -431,8 +431,8 @@ enum TextCells {
 /// whole, of no label, two lines whose text stands in columns parted by gutters (see
 /// [`gutter_columns`]), each column of no label, as short as a value and of both lines. A
 /// column that is a street over its postcode and town (see [`crate::layout::postal`]), beside
-/// no column that can be its labels (a colon at a line's end, lines of one or two words with
-/// no digit, or words and a short index), shows that the lines of a column go together: the
+/// no column that can be its labels (a colon at a line's end, no digit on any line, or words
+/// and a short index), shows that the lines of a column go together: the
 /// columns are cells of text side by side between two rules, which the gutter parts as a
 /// divider would ([`TextCells::Cells`]). Else the two lines
 /// may be rows (a label beside its value on each) or cells (a name over its firm beside
@@ -468,8 +468,9 @@ fn text_cells(flow: &Flow, how: Reading<'_>, parts: Vec<Vec<usize>>, cells: usiz
         let lines = texts(c);
         crate::layout::postal(&lines.iter().map(String::as_str).collect::<Vec<_>>())
     });
-    // A column that can be the labels of the column beside it: a colon at a line's end, lines
-    // of one or two words without a digit, or words and a short index (`Feld 1`).
+    // A column that can be the labels of the column beside it: a colon at a line's end, no
+    // digit on any line (whatever its words: `Strasse / Nr.`, `Str. u. Nr.`), or words and a
+    // short index (`Feld 1`).
     let labels = columns.iter().any(|c| {
         let lines = texts(c);
         let digit = |t: &str| t.chars().any(|ch| ch.is_ascii_digit());
@@ -480,9 +481,7 @@ fn text_cells(flow: &Flow, how: Reading<'_>, parts: Vec<Vec<usize>>, cells: usiz
                 && w.last().is_some_and(|x| digit(x) && x.chars().count() <= 3)
         };
         lines.iter().any(|t| t.ends_with(':'))
-            || lines
-                .iter()
-                .all(|t| !digit(t) && t.split_whitespace().count() <= 2)
+            || lines.iter().all(|t| !digit(t))
             || lines.iter().all(|t| indexed(t))
     });
     let address = postal && !labels;

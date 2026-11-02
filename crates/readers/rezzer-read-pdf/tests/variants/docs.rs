@@ -2376,6 +2376,17 @@ pub(crate) fn shapes() -> Vec<Shape> {
             },
         },
         Shape {
+            name: "abbreviated labels beside a street and its town between rules with no divider",
+            axes: RULED,
+            draw: |v| {
+                let cells = [
+                    ["Str. u. Nr.", "PLZ u. Ort"],
+                    ["Musterweg 1", "12345 Musterstadt"],
+                ];
+                (cells_or_rows(v, &cells), None)
+            },
+        },
+        Shape {
             name: "two rows of items between rules with no divider",
             axes: RULED,
             draw: |v| {
