@@ -545,16 +545,19 @@ fn raised_ref(run: &Run, word: &Run) -> Option<(u8, Option<Split>)> {
     best.map(|b| (n, b.1))
 }
 
-/// The value of one or two superscript digits.
+/// The value of one or two superscript digits. More digits are no marker (a power, `10³⁰⁰`).
 fn superscript_value(digits: &str) -> Option<u8> {
     let mut n: u8 = 0;
     let mut count = 0;
     for c in digits.chars() {
         let d = SUPERSCRIPTS.iter().position(|s| *s == c)?;
-        n = n * 10 + d as u8;
         count += 1;
+        if count > 2 {
+            return None;
+        }
+        n = n * 10 + d as u8;
     }
-    (1..=2).contains(&count).then_some(n)
+    (count >= 1).then_some(n)
 }
 
 /// The note marker a word ends with, after an alphanumeric character (`Betrag*`,
@@ -987,6 +990,11 @@ mod tests {
         assert_eq!(word_mark("*"), None);
         assert_eq!(word_mark("12)"), None);
         assert_eq!(word_mark("Betrag"), None);
+        // Three superscript digits or more are a power, no marker, and never overflow.
+        assert_eq!(word_mark("10\u{b3}\u{2070}\u{2070}"), None);
+        assert_eq!(word_mark("x\u{2079}\u{2079}\u{2079}"), None);
+        assert_eq!(superscript_value("\u{b3}\u{2070}\u{2070}"), None);
+        assert_eq!(superscript_value("\u{2079}\u{2079}"), Some(99));
         let opens = |text: &str| opening_mark(&[run(text, 0, 40.0, 60.0, 6.0)]);
         assert_eq!(opens("* steuerfrei"), Some(NoteMark::Stars(1)));
         assert_eq!(opens("*** ohne"), Some(NoteMark::Stars(3)));
