@@ -864,16 +864,19 @@ impl<'p, 'a> PageReader<'p, 'a> {
             symbol: 0,
             bar_fonts: HashMap::new(),
             bar_outlines: HashMap::new(),
+            bar_runs: Vec::new(),
+            bar_glyphs: 0,
             bars: Vec::new(),
             bars_cut: false,
             bars_held: 0,
-            bar_runs: 0,
             bar_texts: Vec::new(),
         };
         let run = panic::catch_unwind(AssertUnwindSafe(|| {
             interpret(TypedIter::new(&data), page.resources(), &mut ctx, &mut dev);
         }));
         drop(ctx);
+        // The runs of bars that print codes leave the text.
+        dev.take_bars();
         if let Err(payload) = run {
             // A page not kept gives back what its cells and marks hold of the object pool.
             let held = dev.cells_held + dev.drawn_marks_held + dev.bars_held;
@@ -1091,9 +1094,9 @@ impl<'p, 'a> PageReader<'p, 'a> {
         if dev.bars_cut {
             notes.push(Note::Unsupported(format!(
                 "codes printed in a barcode font on page {n} are looked for only among the \
-                 first {} glyphs of barcode fonts: there are more, or the object limit holds \
-                 no more; the glyphs past them are not read as text either",
-                dev.bars.len()
+                 first {} glyphs drawn as bars: there are more, or the object limit holds \
+                 no more; the glyphs past them stay text",
+                dev.bar_glyphs
             )));
         }
         dev.bars = Vec::new();
@@ -2737,32 +2740,57 @@ struct TextDevice<'d> {
     /// Glyphs read through the Adobe Symbol encoding.
     symbol: u64,
     /// What the outlines of a font's glyphs showed so far (see [`crate::barfont`]): a font
-    /// with a glyph that is no bars is a text font, one whose run of bars fit a code is a
-    /// barcode font.
+    /// with a glyph that is no bars is a text font for the page, one whose runs of bars fit
+    /// a code is a barcode font.
     bar_fonts: HashMap<u128, BarFont>,
-    /// The outline of each glyph looked at, by font and glyph id, and the box of its ink
-    /// when it is not bars.
-    bar_outlines: HashMap<(u128, u32), Rc<crate::barfont::Looked>>,
-    /// The glyphs of barcode fonts the page draws: no text, the places of codes (at most
-    /// [`crate::barfont::MAX_GLYPHS`]).
+    /// The outline of each glyph looked at, by font and glyph id.
+    bar_outlines: HashMap<(u128, u32), Rc<crate::barfont::Outline>>,
+    /// The runs whose glyphs are all bars or spaces, in the order drawn: their glyphs are in
+    /// `glyphs` until the page is drawn, when [`TextDevice::take_bars`] decides (at most
+    /// [`crate::barfont::MAX_GLYPHS`] glyphs).
+    bar_runs: Vec<BarRun>,
+    /// Glyphs of `bar_runs`.
+    bar_glyphs: usize,
+    /// The glyphs of barcodes the page prints with a font: no text, the places of codes.
     bars: Vec<crate::barfont::Placed>,
-    /// More glyphs of barcode fonts were drawn than are kept.
+    /// More glyphs of bars were drawn than are looked at.
     bars_cut: bool,
-    /// What `bars` holds of the object pool.
+    /// What `bar_runs` holds of the object pool.
     bars_held: u64,
-    /// Runs of barcode glyphs so far.
-    bar_runs: u32,
-    /// The Code 128 value each run of barcode glyphs prints, read from the glyphs' geometry,
-    /// for the runs that are one.
+    /// The Code 128 value each code printed with a font prints, read from the glyphs'
+    /// geometry, for the codes that are one.
     bar_texts: Vec<(u32, String)>,
 }
 
-/// What the outlines of a font showed (see [`TextDevice::barcode_run`]).
+/// What the outlines of a font showed (see [`TextDevice::bar_run`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BarFont {
     Text,
     Bars,
 }
+
+/// One glyph of bars: its font, id, transform (font units to the page), outline and advance
+/// in font units.
+struct BarGlyph {
+    font: u128,
+    id: u32,
+    t: Affine,
+    outline: Rc<crate::barfont::Outline>,
+    advance: Option<f32>,
+}
+
+/// A run whose glyphs are all bars or spaces: where its glyphs stand in `TextDevice::glyphs`,
+/// the glyphs, whether a glyph's font is named for codes, and whether an ActualText gives its
+/// text (then the text stays).
+struct BarRun {
+    from: usize,
+    glyphs: Vec<BarGlyph>,
+    named: bool,
+    keep: bool,
+}
+
+/// What one glyph of [`BarRun`] holds, about.
+const BAR_GLYPH_BYTES: u64 = std::mem::size_of::<BarGlyph>() as u64;
 
 impl TextDevice<'_> {
     fn tick(&mut self) {
@@ -2849,114 +2877,200 @@ impl TextDevice<'_> {
         self.glyphs.push(Gl { start, len, ..g });
     }
 
-    /// Whether the glyphs of `run` (drawn with `transform`) print a barcode with a barcode
-    /// font, on positive evidence only (see [`crate::barfont`]): the font's name, or outlines
-    /// of upright bars of whole modules (a run of them that fits a code makes the font a
-    /// barcode font). If so, where each glyph draws is kept in `bars`. One glyph that is not
-    /// bars makes a font a text font for the page.
-    fn barcode_run(&mut self, run: &GlyphRun<'_, '_>, transform: Affine) -> bool {
-        use crate::barfont::{Outline, Placed};
-        /// A glyph of the run: its font, id, transform, outline (with the box of its ink when
-        /// it is not bars) and advance.
-        struct Seen {
-            font: u128,
-            id: u32,
-            t: Affine,
-            outline: Rc<crate::barfont::Looked>,
-            advance: Option<f32>,
-        }
+    /// The glyphs of `run` (drawn with `transform`) when each is bars or a space and at least
+    /// one is bars (see [`crate::barfont::outline`]), with whether a font's name says it is a
+    /// barcode font. One glyph that is anything else makes its font a text font for the page.
+    fn bar_run(
+        &mut self,
+        run: &GlyphRun<'_, '_>,
+        transform: Affine,
+    ) -> Option<(Vec<BarGlyph>, bool)> {
+        use crate::barfont::Outline;
         let glyphs = run.glyphs();
-        let mut seen: Vec<Seen> = Vec::with_capacity(glyphs.len());
-        let mut known = true;
+        let mut seen: Vec<BarGlyph> = Vec::with_capacity(glyphs.len());
+        let mut named = false;
+        let mut bars = false;
         for g in glyphs {
             self.tick();
             let Glyph::Outline(o) = &**g else {
-                return false;
+                return None;
             };
             let key = o.font_cache_key();
-            let named = self.fonts.get(&key).is_some_and(|i| i.barcode);
-            let state = self.bar_fonts.get(&key).copied();
-            if !named && state == Some(BarFont::Text) {
-                return false;
+            if self.bar_fonts.get(&key) == Some(&BarFont::Text) {
+                return None;
             }
             let id = o.glyph_id().to_u32();
             let outline = match self.bar_outlines.get(&(key, id)) {
                 Some(o) => o.clone(),
                 None => {
-                    let path = o.outline();
-                    let shape = crate::barfont::outline(&path);
-                    let ink = (shape == Outline::Other).then(|| crate::barfont::ink(&path));
-                    let read = Rc::new((shape, ink.flatten()));
+                    let read = Rc::new(crate::barfont::outline(&o.outline()));
                     self.bar_outlines.insert((key, id), read.clone());
                     read
                 }
             };
-            if !named && outline.0 == Outline::Other {
-                self.bar_fonts.insert(key, BarFont::Text);
-                return false;
+            match *outline {
+                Outline::Other => {
+                    self.bar_fonts.insert(key, BarFont::Text);
+                    return None;
+                }
+                Outline::Bars { .. } => bars = true,
+                Outline::Empty => {}
             }
-            known &= named || state == Some(BarFont::Bars);
-            let t = transform * g.transform();
-            seen.push(Seen {
+            named |= self.fonts.get(&key).is_some_and(|i| i.barcode);
+            seen.push(BarGlyph {
                 font: key,
                 id,
-                t,
+                t: transform * g.transform(),
                 outline,
                 advance: o.advance_width(),
             });
         }
-        if seen.is_empty() {
-            return false;
+        bars.then_some((seen, named))
+    }
+
+    /// Keeps the run of bars `run`, if the page may hold its glyphs (in the object pool, a
+    /// block at a time, up to [`crate::barfont::MAX_GLYPHS`]); past that its glyphs stay
+    /// text and a note says so.
+    fn keep_bar_run(&mut self, run: BarRun) {
+        let n = run.glyphs.len();
+        if self.bars_cut || self.bar_glyphs + n > crate::barfont::MAX_GLYPHS {
+            self.bars_cut = true;
+            return;
         }
-        let looked: Vec<(u32, Affine, &Outline)> =
-            seen.iter().map(|g| (g.id, g.t, &g.outline.0)).collect();
-        if !known {
-            if !crate::barfont::bars_fit(&looked) {
+        while (self.bar_glyphs + n) as u64 * BAR_GLYPH_BYTES > self.bars_held {
+            if self.origin.reserve_copy(CELL_BLOCK * BAR_GLYPH_BYTES) {
+                self.bars_held += CELL_BLOCK * BAR_GLYPH_BYTES;
+            } else {
+                self.bars_cut = true;
+                return;
+            }
+        }
+        self.bar_glyphs += n;
+        self.bar_runs.push(run);
+    }
+
+    /// Decides, once the page is drawn, which runs of bars print codes, on the evidence of
+    /// their shape ([`crate::barfont::bars_fit`]): runs that continue one another along one
+    /// baseline (a code shown a glyph or a few at a time) are looked at as one; a font whose
+    /// runs fit is a barcode font for the page, and its other runs are taken too. The glyphs
+    /// of a code are taken out of the text (unless an ActualText gives it), and kept as the
+    /// places of codes with the Code 128 value their bars print, when they print one.
+    fn take_bars(&mut self) {
+        use crate::barfont::Outline;
+        let runs = std::mem::take(&mut self.bar_runs);
+        if runs.is_empty() {
+            return;
+        }
+        // Whether the run `b` continues the run `a`: the same size and direction, its first
+        // glyph where the last of `a` ends, on its baseline.
+        let continues = |a: &BarRun, b: &BarRun| {
+            let (Some(x), Some(y)) = (a.glyphs.last(), b.glyphs.first()) else {
+                return false;
+            };
+            let (p, q) = (x.t.as_coeffs(), y.t.as_coeffs());
+            let (lp, lq) = (p[0].hypot(p[1]), q[0].hypot(q[1]));
+            if lp <= 0.0 || (lp - lq).abs() > 0.02 * lp {
                 return false;
             }
-            for g in &seen {
-                self.bar_fonts.insert(g.font, BarFont::Bars);
+            let (dx, dy) = (p[0] / lp, p[1] / lp);
+            if (q[0] / lq) * dx + (q[1] / lq) * dy < 0.999 {
+                return false;
+            }
+            let adv = f64::from(x.advance.unwrap_or(0.0));
+            let end = (p[4] + p[0] * adv, p[5] + p[1] * adv);
+            let d = (q[4] - end.0, q[5] - end.1);
+            let size = lp * 1000.0;
+            let along = d.0 * dx + d.1 * dy;
+            let across = (d.1 * dx - d.0 * dy).abs();
+            across <= 0.1 * size && along >= -0.05 * size && along <= 0.6 * size
+        };
+        let mut groups: Vec<Vec<usize>> = Vec::new();
+        for i in 0..runs.len() {
+            match groups.last_mut() {
+                Some(g) if continues(&runs[*g.last().unwrap_or(&i)], &runs[i]) => g.push(i),
+                _ => groups.push(vec![i]),
             }
         }
-        // The value its bars print, to check the read from the render against.
-        if !self.bars_cut
-            && let Some(text) = crate::barfont::code128_text(&looked)
-        {
-            self.bar_texts.push((self.bar_runs, text));
-        }
-        drop(looked);
-        for s in &seen {
-            if self.glyphs.len() + self.bars.len() >= self.cap {
-                panic::resume_unwind(Box::new(Abort::Cap));
-            }
-            // Held in the object pool a block at a time, up to their cap; past it a note says
-            // so.
-            if self.bars.len() >= crate::barfont::MAX_GLYPHS {
-                self.bars_cut = true;
-            } else if self.bars.len() as u64 * PLACED_BYTES >= self.bars_held {
-                if self.origin.reserve_copy(CELL_BLOCK * PLACED_BYTES) {
-                    self.bars_held += CELL_BLOCK * PLACED_BYTES;
-                } else {
-                    self.bars_cut = true;
+        let looked = |g: &[usize]| -> Vec<(u32, Affine, &Outline)> {
+            g.iter()
+                .flat_map(|&i| runs[i].glyphs.iter())
+                .map(|b| (b.id, b.t, b.outline.as_ref()))
+                .collect()
+        };
+        let mut taken = vec![false; groups.len()];
+        for (k, g) in groups.iter().enumerate() {
+            self.tick();
+            let named = g.iter().any(|&i| runs[i].named);
+            if crate::barfont::bars_fit(&looked(g), named) {
+                taken[k] = true;
+                for &i in g {
+                    for b in &runs[i].glyphs {
+                        self.bar_fonts.insert(b.font, BarFont::Bars);
+                    }
                 }
             }
-            if self.bars_cut {
-                continue;
-            }
-            if let Some((b, module)) =
-                crate::barfont::place(s.t, &s.outline.0, s.outline.1, s.advance)
+        }
+        // The other runs of a font found to be a barcode font are codes too.
+        for (k, g) in groups.iter().enumerate() {
+            if !taken[k]
+                && g.iter().all(|&i| {
+                    runs[i]
+                        .glyphs
+                        .iter()
+                        .all(|b| self.bar_fonts.get(&b.font) == Some(&BarFont::Bars))
+                })
             {
-                self.bars.push(Placed {
-                    b,
-                    module,
-                    glyph: s.id,
-                    font: s.font,
-                    run: self.bar_runs,
-                });
+                taken[k] = true;
             }
         }
-        self.bar_runs = self.bar_runs.wrapping_add(1);
-        true
+        let mut drop_glyph = vec![false; self.glyphs.len()];
+        for (k, g) in groups.iter().enumerate() {
+            if !taken[k] {
+                continue;
+            }
+            let code = u32::try_from(k).unwrap_or(u32::MAX);
+            if let Some(text) = crate::barfont::code128_text(&looked(g)) {
+                self.bar_texts.push((code, text));
+            }
+            for &i in g {
+                let run = &runs[i];
+                for (j, b) in run.glyphs.iter().enumerate() {
+                    if !run.keep
+                        && let Some(d) = drop_glyph.get_mut(run.from + j)
+                    {
+                        *d = true;
+                    }
+                    if let Some((bx, module)) = crate::barfont::place(b.t, &b.outline) {
+                        self.bars.push(crate::barfont::Placed {
+                            b: bx,
+                            module,
+                            glyph: b.id,
+                            font: b.font,
+                            run: code,
+                        });
+                    }
+                }
+            }
+        }
+        // Their glyphs are no text: taken out, and no more counted as read characters.
+        let mut k = 0;
+        let (text, mut mapped, mut unmapped) = (&self.text, 0u64, 0u64);
+        self.glyphs.retain(|g| {
+            let out = drop_glyph.get(k).copied().unwrap_or(false);
+            k += 1;
+            if out {
+                let t = &text[g.start as usize..(g.start + g.len) as usize];
+                if t == "\u{FFFD}" {
+                    unmapped += 1;
+                } else if !t.is_empty() {
+                    mapped += 1;
+                }
+            }
+            !out
+        });
+        self.mapped = self.mapped.saturating_sub(mapped);
+        self.unmapped = self.unmapped.saturating_sub(unmapped);
+        self.unmapped_visible = self.unmapped_visible.saturating_sub(unmapped);
     }
 }
 
@@ -3217,9 +3331,6 @@ fn rules_of(
 
 /// What one kept filled rectangle takes, and how many are reserved at a time.
 const CELL_BYTES: u64 = 16;
-
-/// What one glyph of a barcode font takes in `TextDevice::bars`, about.
-const PLACED_BYTES: u64 = std::mem::size_of::<crate::barfont::Placed>() as u64;
 const CELL_BLOCK: u64 = 8_192;
 
 /// The filled subpaths of `path` that are rectangles with horizontal and vertical sides, as
@@ -3484,14 +3595,13 @@ impl<'a> Device<'a> for TextDevice<'_> {
         self.last = Some(key);
         let layer = self.open.iter().rev().find_map(|o| o.layer);
         let invisible = matches!(mode, DrawMode::Invisible) || layer.is_some();
-        // A barcode printed with a barcode font is no text: its bars are a code's place. An
-        // ActualText in force still gives the author's text.
-        if !invisible
-            && self.barcode_run(run, props.transform)
-            && !self.open.iter().any(|o| o.actual.is_some())
-        {
-            return;
-        }
+        // A run whose glyphs are all bars may print a code: whether it does is decided when
+        // the page is drawn ([`TextDevice::take_bars`]); until then its glyphs are text.
+        let bar_run = if invisible {
+            None
+        } else {
+            self.bar_run(run, props.transform)
+        };
         let mcid = self.open.iter().rev().find_map(|o| o.mcid);
         let from = self.glyphs.len();
         for g in glyphs {
@@ -3587,6 +3697,15 @@ impl<'a> Device<'a> for TextDevice<'_> {
             }
         }
         advances_from_positions(&mut self.glyphs[from..]);
+        if let Some((glyphs, named)) = bar_run {
+            let keep = self.open.iter().any(|o| o.actual.is_some());
+            self.keep_bar_run(BarRun {
+                from,
+                glyphs,
+                named,
+                keep,
+            });
+        }
     }
 
     fn draw_image(&mut self, image: Image<'a, '_>, props: ImageDrawProps<'a>) {

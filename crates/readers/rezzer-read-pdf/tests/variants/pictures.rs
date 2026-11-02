@@ -654,6 +654,116 @@ fn font_codes(v: &Variant, font: &str, size: f32, gap: f32, photo: bool) -> Shee
     s
 }
 
+/// Task 15b part 2f-1 fix round 2: the coding line of a payment slip set in a letter font
+/// whose name looks like a code's (`font`, see `BAR_FONTS`): its text stays, and no code is
+/// claimed (a name never takes a run).
+fn coding_line(v: &Variant, font: &str) -> Sheet {
+    let (plain, bold) = v.faces();
+    let line = "Konto 1234567890 Betrag 12,50 EUR";
+    let mut t = show(bold, 14.0, 40.0, 790.0, "Zahlschein");
+    t += &show(plain, 9.0, 40.0, 700.0, "Zahlung an:");
+    t += &show(font, 10.0, 120.0, 700.0, line);
+    let mut built = Built::new(&v.geo());
+    built.page = FormPage {
+        template: t,
+        ..FormPage::default()
+    };
+    let mut s = Sheet::new(built);
+    s.want.order.push(line.into());
+    s.want.vision = Some(false);
+    s.want.may_title.push("Zahlschein".into());
+    s
+}
+
+/// Task 15b part 2f-1 fix round 2: a code of `sym` with `text` in the bar font `font` at
+/// `size` beside `Menge 2` and under `Artikel-Nr. A-0042`, each glyph its own show with
+/// `per_glyph`. A one-bar-a-glyph font (`FP` to `FS`) prints any symbology from its elements;
+/// a Code 128 font prints Code 128. It is found with its value, and its glyph text stands
+/// nowhere in the read.
+fn font_code_of(
+    v: &Variant,
+    font: &str,
+    sym: barcodes::Symbology,
+    text: &str,
+    size: f32,
+    per_glyph: bool,
+) -> Sheet {
+    use crate::common::barfont::{
+        BAR_FONTS, Set, bar_codes, bar_height, codes_ink_width, elements, pair_codes, pdf_string,
+    };
+    let set = BAR_FONTS
+        .iter()
+        .find(|f| f.0 == font)
+        .map(|f| f.2)
+        .expect("a bar font");
+    let codes = match set {
+        Set::Pairs => pair_codes(&elements(&modules(sym, text).dark)),
+        _ => bar_codes(set, text),
+    };
+    let (plain, bold) = v.faces();
+    let shows: String = if per_glyph {
+        codes
+            .iter()
+            .map(|&c| format!("({}) Tj ", pdf_string(&[c])))
+            .collect()
+    } else {
+        format!("({}) Tj", pdf_string(&codes))
+    };
+    let mut t = show(bold, 14.0, 40.0, 790.0, "Lieferschein");
+    t += &show(plain, 9.0, 300.0, 680.0, "Artikel-Nr.");
+    t += &show(plain, 9.0, 380.0, 680.0, "A-0042");
+    t += &format!("BT /{font} {size} Tf 300 600 Td {shows} ET\n");
+    t += &show(plain, 9.0, 72.0, 600.0, "Menge 2");
+    let mut built = Built::new(&v.geo());
+    built.page = FormPage {
+        template: t,
+        ..FormPage::default()
+    };
+    let mut s = Sheet::new(built);
+    s.want
+        .codes
+        .push((sym.name().to_string(), text.to_string()));
+    if set == Set::Pairs {
+        let w = codes_ink_width(set, &codes, size);
+        s.want
+            .code_bars
+            .push([300.0, 600.0, 300.0 + w, 600.0 + bar_height(set, size)]);
+    }
+    s.want
+        .glyph_text
+        .push(codes.iter().map(|&c| char::from(c)).collect());
+    s.want.vision = Some(false);
+    s.want.may_title.push("Lieferschein".into());
+    s
+}
+
+/// Task 15b part 2f-1 fix round 2: an EAN-13 of `text` drawn as paths, one rectangle a bar,
+/// `module` points a module, its first bar at `x`, on a page beside a photo with `photo`. It
+/// is found with its value (a UPC-A as the EAN-13 with a leading 0 counts), or named; never
+/// listed with other digits.
+fn drawn_ean(v: &Variant, text: &str, module: f32, x: f32, photo: bool) -> Sheet {
+    use crate::common::barfont::elements;
+    let w = elements(&modules(barcodes::Symbology::Ean13, text).dark);
+    let mut t = String::from("q 0 g\n");
+    let mut at = x;
+    for (k, &e) in w.iter().enumerate() {
+        let wd = f32::from(e) * module;
+        if k % 2 == 0 {
+            t += &format!("{at:.3} 690 {wd:.3} 30 re\n");
+        }
+        at += wd;
+    }
+    t += "f Q\n";
+    let mut built = page_of(v, t);
+    if photo {
+        built.page.photo = Some([40.0, 560.0, 200.0, 150.0]);
+    }
+    let mut s = Sheet::new(built);
+    s.want.codes.push(("EAN-13".into(), text.into()));
+    s.want.code_bars.push([x, 690.0, at, 720.0]);
+    s
+}
+
 /// Task 15: a Code 128 of `module` points a module and `height` points high, drawn as bars at
 /// the right of the head of a business page. It is found once, with its text.
 fn barcode(v: &Variant, module: f32, height: f32) -> Sheet {
@@ -861,6 +971,82 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "codes in a bar-a-glyph full TrueType font known by its bars, size 24",
             axes: RENDERED,
             draw: |v| (font_codes(v, "FS", 24.0, 8.0, false), None),
+        },
+        // Fix round 2: letter fonts with code-like names keep their text; a human-readable
+        // bar font is taken by its bars; Code 39 and ITF in a font known only by its bars;
+        // a code shown a glyph at a time; EAN-13 drawn as paths at fine modules.
+        Shape {
+            name: "a coding line in a letter font named IDAutomationOCRb",
+            axes: RENDERED,
+            draw: |v| (coding_line(v, "FO"), None),
+        },
+        Shape {
+            name: "a coding line in a letter font named Ocean13",
+            axes: RENDERED,
+            draw: |v| (coding_line(v, "FM"), None),
+        },
+        Shape {
+            name: "a Code 128 in a human-readable bar font, size 12",
+            axes: RENDERED,
+            draw: |v| {
+                let s = font_code_of(
+                    v,
+                    "FH",
+                    barcodes::Symbology::Code128,
+                    "2026004711",
+                    12.0,
+                    false,
+                );
+                (s, None)
+            },
+        },
+        Shape {
+            name: "a Code 39 in a bar-a-glyph font known by its bars, size 30",
+            axes: RENDERED,
+            draw: |v| {
+                let s = font_code_of(
+                    v,
+                    "FS",
+                    barcodes::Symbology::Code39,
+                    "ABC-1234",
+                    30.0,
+                    false,
+                );
+                (s, None)
+            },
+        },
+        Shape {
+            name: "an ITF in a bar-a-glyph Type1 font known by its bars, size 30",
+            axes: RENDERED,
+            draw: |v| {
+                let s = font_code_of(v, "FQ", barcodes::Symbology::Itf, "12345670", 30.0, false);
+                (s, None)
+            },
+        },
+        Shape {
+            name: "a Code 128 shown a glyph at a time in a bar-a-glyph font known by its bars",
+            axes: RENDERED,
+            draw: |v| {
+                let s = font_code_of(
+                    v,
+                    "FS",
+                    barcodes::Symbology::Code128,
+                    "2026004711",
+                    30.0,
+                    true,
+                );
+                (s, None)
+            },
+        },
+        Shape {
+            name: "an EAN-13 drawn as paths, module 0.62",
+            axes: RENDERED,
+            draw: |v| (drawn_ean(v, "4006381333931", 0.62, 330.1, false), None),
+        },
+        Shape {
+            name: "an EAN-13 drawn as paths beside a photo, module 0.57",
+            axes: RENDERED,
+            draw: |v| (drawn_ean(v, "5901234123457", 0.57, 330.6, true), None),
         },
         Shape {
             name: "codes in a bar-a-glyph TrueType subset font beside a photo, size 36",

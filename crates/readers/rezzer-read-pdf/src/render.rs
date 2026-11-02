@@ -1728,22 +1728,25 @@ impl Cut<'_> {
                     picture = fine;
                 }
             }
-            // A code printed with a barcode font is not: its read is checked against its bars.
-            if matches!(c.how, Some(How::Modules(_))) {
-                scans.drawn.insert(c.asset);
-            }
-            // A code printed with a barcode font is read from its own render at whole pixels
-            // a module first: the page's render may hold its modules on a pixel or so, where
-            // the decoder can read a wrong value.
+            // A code drawn as paths or printed with a barcode font is read from its own render
+            // at whole pixels a module first: the page's render may hold its modules on a
+            // pixel or so, where the decoder can read a wrong value. Only that read of a
+            // drawing skips the check of its bars (the drawing has the pattern of a code); a
+            // code printed with a font is checked against its glyphs.
             let mut fine_first = false;
-            if let Some(how @ How::Glyphs(_)) = c.how {
+            if let Some(how @ (How::Modules(_) | How::Glyphs(_))) = c.how {
                 if let Some((_, known)) = need.glyphs.iter().find(|(b, _)| *b == c.b) {
                     scans.glyphs.insert(c.asset, *known);
                 }
                 let at = Region { b: c.b, how };
                 match pages.region(n, need, &at, held, scans) {
                     Ok(fine) => {
+                        let drawn = matches!(how, How::Modules(_));
+                        if drawn {
+                            scans.drawn.insert(c.asset);
+                        }
                         scans.read(n, c.asset, &fine, None, budget, false);
+                        scans.drawn.remove(&c.asset);
                         fine_first = true;
                     }
                     Err(true) => {
@@ -1758,7 +1761,7 @@ impl Cut<'_> {
                 scans.read(n, c.asset, &picture, None, budget, false)
             };
             if found == Some(0)
-                && let Some(how) = c.how
+                && let Some(how @ How::Picture(..)) = c.how
             {
                 // Finer, when that is finer than the crop: a gap when it cannot be rendered.
                 let at = Region { b: c.b, how };
@@ -2385,6 +2388,20 @@ impl Scans {
             }
             // A code printed with a barcode font whose glyphs' values are known: the read must
             // be one of them. Otherwise the drawing, or the bars in the render, confirm it.
+            // A read of the page's render inside a part that is rendered again by its modules
+            // is left to that finer read: at a pixel or so a module the decoder can read a
+            // wrong value.
+            if let Some((need, None)) = on {
+                let px = page_rect(picture, need, c.bounds);
+                if need
+                    .regions
+                    .iter()
+                    .take(PAGE_REGIONS)
+                    .any(|r| r.how.module().is_some_and(|m| around(r, m, &px)))
+                {
+                    continue;
+                }
+            }
             let known = self.glyphs.get(&asset).copied().or_else(|| {
                 let (need, region) = on?;
                 let px = page_rect(picture, need, c.bounds);
@@ -2850,22 +2867,16 @@ fn evidence(
     picture: &Rendered,
     on: Option<(&Need, Option<&Region>)>,
 ) -> Result<(), &'static str> {
-    // A read within a drawing of paths that looks like a code (give or take two of its
-    // modules): the drawing is the evidence. A read elsewhere on the page is not, nor one
-    // within a code printed with a barcode font (a font named for codes may draw letters).
-    let within = |r: &Region, px: &[f32; 4]| match r.how {
-        How::Modules(m) => around(r, m, px),
-        _ => false,
-    };
-    if let Some((need, region)) = on {
-        let px = page_rect(picture, need, c.bounds);
-        if region
-            .into_iter()
-            .chain(&need.regions)
-            .any(|r| within(r, &px))
-        {
-            return Ok(());
-        }
+    // A read of a drawing of paths that looks like a code from its own render at whole
+    // pixels a module, within it (give or take two of its modules): the drawing is the
+    // evidence. A read elsewhere on the page is not, nor a read of the page's coarser render
+    // (a part past those rendered again), nor one within a code printed with a barcode font
+    // (a font named for codes may draw letters).
+    if let Some((need, Some(r))) = on
+        && let How::Modules(m) = r.how
+        && around(r, m, &page_rect(picture, need, c.bounds))
+    {
+        return Ok(());
     }
     use barcodes::Symbology as S;
     let text = match &c.payload {

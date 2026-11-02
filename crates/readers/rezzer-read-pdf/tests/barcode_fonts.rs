@@ -12,7 +12,7 @@ mod common;
 use common::barfont::{
     BAR_UNITS, Glyphs, Kind, PATTERNS, Set, bar_codes, bar_ink_width, bar_width, code_of,
     code128_string, code128_values, code128_width, page_with_bar_fonts, page_with_fonts,
-    pdf_string, program,
+    pattern_rects, pdf_string, program,
 };
 use common::{all_text, markdown, read};
 use rezzer_model::ReadOutcome;
@@ -193,21 +193,204 @@ fn a_code_in_a_barcode_font_that_is_not_decoded_is_named() {
 }
 
 #[test]
-fn a_font_named_for_codes_that_draws_no_bars_gives_no_code() {
-    // A font named `Barcode` whose glyphs are squares: its name is the evidence, so its text
-    // is no text; its squares give no code, and the read says so.
-    let squares = |v: u8| {
-        let x = i16::from(v % 4) * 100;
-        vec![(x, 0, x + 300, 300), (x + 400, 400, x + 600, 600)]
+fn fonts_whose_names_say_codes_but_draw_letters_keep_their_text() {
+    // Ruling of part 2f-1 fix round 2: a name never takes a run on its own. OCR-B and MICR
+    // fonts of a barcode vendor, and names with a code inside a word or as a word, that draw
+    // letters (blocks here): the coding line of a payment slip stays text, and no code is
+    // claimed. At 1cb34b0 the names took the runs and the values were gone.
+    let letter = |v: u8| {
+        if v == 0 {
+            vec![]
+        } else {
+            vec![(50, 0, 550, 700)]
+        }
     };
-    let out = read(&shown_in("Barcode", Some(&squares), "ABCDEF"));
-    let md = markdown(&out);
-    assert!(codes(&out).is_empty(), "{:?}", codes(&out));
-    assert!(
-        md.contains("a barcode printed in a barcode font") && md.contains("not decoded"),
-        "{md}"
+    for name in [
+        "IDAutomationOCRb",
+        "IDAutomationMICR",
+        "Ocean13",
+        "Bean#2013",
+        "BarcodeSans",
+        "Mono-C128",
+        "Code128",
+        "BC#20C128#20HD#20Wide",
+        "Barcode",
+    ] {
+        let content = "BT /F1 10 Tf 72 760 Td (Zahlung an:) Tj ET\n\
+                       BT /F3 10 Tf 150 760 Td (Konto 1234567890 Betrag 12,50 EUR) Tj ET\n";
+        let out = read(&page_with_fonts(
+            content,
+            &[("F3", name, &program(Some(&letter)))],
+        ));
+        let md = markdown(&out);
+        assert!(
+            all_text(&out).contains("Konto 1234567890 Betrag 12,50 EUR"),
+            "{name}: {md}"
+        );
+        assert!(out.document.assets.is_empty(), "{name}: {md}");
+        assert!(!md.contains("barcode font"), "{name}: {md}");
+    }
+}
+
+#[test]
+fn a_human_readable_bar_font_is_taken_by_its_bars() {
+    // Bars with digits under them in the same glyph (blocks under the bars here), as Libre
+    // Barcode 128 Text draws them: the bar part is the evidence, named or not.
+    let readable = |v: u8| {
+        let (bars, _) = pattern_rects(v);
+        let mut r: Vec<(i16, i16, i16, i16)> = bars
+            .iter()
+            .map(|&(x0, _, x1, y1)| (x0, 300, x1, y1))
+            .collect();
+        r.push((60, 0, 300, 200));
+        r
+    };
+    for name in [
+        "Libre#20Barcode#20128#20Text",
+        "LibreBarcode128Text-Regular",
+    ] {
+        let content = format!(
+            "BT /F1 10 Tf 72 760 Td (Lieferschein 0000) Tj ET\n\
+             BT /F3 12 Tf 100 600 Td ({}) Tj ET\n",
+            code128_string("2026004711")
+        );
+        let out = read(&page_with_fonts(
+            &content,
+            &[("F3", name, &program(Some(&readable)))],
+        ));
+        assert_eq!(
+            codes(&out),
+            [("Code 128".to_string(), "2026004711".to_string())],
+            "{name}: {}",
+            markdown(&out)
+        );
+        assert_no_glyph_text(&out, &["2026004711"], name);
+    }
+}
+
+#[test]
+fn codes_of_two_widths_in_fonts_known_only_by_their_bars_are_read() {
+    // Code 39 and ITF have two widths. In a font whose name says nothing they leaked their
+    // glyph text, glued to the value beside them, with no code and no word (part 2f-1 review
+    // I1); now their structure is the evidence. Equal bars stay text.
+    use barcodes::Symbology as S;
+    for (s, text, kind) in [
+        (S::Code39, "ABC-1234", "Code 39"),
+        (S::Code39, "R7", "Code 39"),
+        (S::Itf, "12345670", "ITF"),
+        (S::Itf, "0042", "ITF"),
+    ] {
+        let w = elements(&common::modules(s, text).dark);
+        let glyphs = pair_glyphs(&w);
+        for k in [Kind::TrueTypeSubset, Kind::Type1, Kind::Cff] {
+            for size in [18.0, 30.0, 42.0] {
+                let content = format!(
+                    "BT /F1 9 Tf 300 640 Td (Artikel-Nr.) Tj ET\n\
+                     BT /F1 9 Tf 360 640 Td (A-0042) Tj ET\n\
+                     BT /F3 {size} Tf 300 600 Td ({}) Tj ET\n\
+                     BT /F1 9 Tf 72 600 Td (Menge 2) Tj ET\n",
+                    pdf_string(&glyphs)
+                );
+                let out = read(&page_with_bar_fonts(
+                    &content,
+                    &[("F3", "ShopBars", Set::Pairs, k)],
+                ));
+                let case = format!("{kind} {text} {k:?} {size}");
+                let all = all_text(&out);
+                let g = String::from_utf8_lossy(&glyphs).to_string();
+                assert!(!all.contains(&g[..6]), "{case}: {all}");
+                assert!(
+                    all.contains("Menge 2") && all.contains("A-0042"),
+                    "{case}: {all}"
+                );
+                let found = codes(&out);
+                let md = markdown(&out);
+                assert!(
+                    found == [(kind.to_string(), text.to_string())]
+                        || (found.is_empty()
+                            && md.contains("barcode font")
+                            && md.contains("not decoded")),
+                    "{case}: {found:?} {md}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn a_code_shown_a_glyph_at_a_time_is_one_code() {
+    // A font known only by its bars, one glyph a show (`(A) Tj (B) Tj ...`): the shows that
+    // continue one another on one baseline are looked at as one run (round 1 concern 3).
+    let glyphs = bar_codes(Set::Pairs, "2026004711");
+    let shows: String = glyphs
+        .iter()
+        .map(|&c| format!("({}) Tj ", pdf_string(&[c])))
+        .collect();
+    let content = format!(
+        "BT /F1 9 Tf 72 640 Td (Rechnungs-Nr.) Tj ET\n\
+         BT /F3 30 Tf 160 600 Td {shows}ET\n\
+         BT /F1 9 Tf 72 560 Td (Danke) Tj ET\n"
     );
-    assert!(!all_text(&out).contains("ABCDEF"), "{md}");
+    let out = read(&page_with_bar_fonts(
+        &content,
+        &[("F3", "ShopBars", Set::Pairs, Kind::TrueTypeFull)],
+    ));
+    assert_eq!(
+        codes(&out),
+        [("Code 128".to_string(), "2026004711".to_string())],
+        "{}",
+        markdown(&out)
+    );
+    let g = String::from_utf8_lossy(&glyphs).to_string();
+    assert!(!all_text(&out).contains(&g[..4]), "{}", all_text(&out));
+}
+
+#[test]
+fn equal_bars_in_a_font_known_only_by_its_bars_stay_text() {
+    // A row of equal bars (a ruler, a decoration) in the one-bar-a-glyph font: one width is no
+    // code.
+    let out = read(&page_with_bar_fonts(
+        "BT /F1 10 Tf 72 760 Td (Kapitel 1) Tj ET\n\
+         BT /F3 12 Tf 72 740 Td (AAAAAAAAAAAAAAAAAAAAAAAA) Tj ET\n",
+        &[("F3", "ShopBars", Set::Pairs, Kind::TrueTypeFull)],
+    ));
+    assert!(
+        all_text(&out).contains("AAAAAAAAAAAAAAAAAAAAAAAA"),
+        "{}",
+        all_text(&out)
+    );
+    assert!(out.document.assets.is_empty());
+}
+
+/// The bar and space widths of the dark modules `dark`, from the first dark one to the last.
+fn elements(dark: &[bool]) -> Vec<u8> {
+    let first = dark.iter().position(|&d| d).expect("a bar");
+    let last = dark.iter().rposition(|&d| d).expect("a bar");
+    let mut out = Vec::new();
+    let (mut cur, mut n) = (dark[first], 0u8);
+    for &d in &dark[first..=last] {
+        if d == cur {
+            n += 1;
+        } else {
+            out.push(n);
+            (cur, n) = (d, 1);
+        }
+    }
+    out.push(n);
+    out
+}
+
+/// The codes of the one-bar-a-glyph font ([`Set::Pairs`]) for elements `w` (bar, space, ...):
+/// `A` to `P` for a bar of 1 to 4 modules and its space of 1 to 4, `Q` for a last bar of 2.
+fn pair_glyphs(w: &[u8]) -> Vec<u8> {
+    w.chunks(2)
+        .map(|p| match p.get(1) {
+            Some(&sp) => b'A' + (p[0] - 1) * 4 + (sp - 1),
+            None if p[0] == 2 => b'Q',
+            // A last bar of another width: with a space of one module after it.
+            None => b'A' + (p[0] - 1) * 4,
+        })
+        .collect()
 }
 
 #[test]
@@ -354,8 +537,8 @@ fn codes_in_a_barcode_font_on_a_page_that_needs_vision_are_read_or_named() {
 
 #[test]
 fn glyphs_of_barcode_fonts_past_the_cap_are_said() {
-    // More glyphs of a barcode font than a page keeps the places of (50,000), drawn off the
-    // page: the note says the codes there are looked for only among the first ones.
+    // More glyphs of bars than a page looks at (50,000), drawn off the page: the note says
+    // the codes there are looked for only among the first ones, and the rest stay text.
     let line: String = "A".repeat(1000);
     let mut content = String::from(
         "BT /F1 10 Tf 72 700 Td (Lieferschein 0000) Tj ET\nBT /F3 2 Tf 3 TL -90000 400 Td\n",
@@ -377,11 +560,10 @@ fn glyphs_of_barcode_fonts_past_the_cap_are_said() {
     assert!(
         said.iter().any(|w| w.starts_with(
             "codes printed in a barcode font on page 1 are looked for only among the first \
-             50000 glyphs of barcode fonts"
+             50000 glyphs drawn as bars"
         )),
         "{said:?}"
     );
-    assert!(!all_text(&out).contains("AAA"), "{}", all_text(&out));
 }
 
 /// The invoice of [`invoice`] with the codes in a bar font of `set` in the structure `kind`

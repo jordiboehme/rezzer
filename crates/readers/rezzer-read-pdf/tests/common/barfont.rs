@@ -148,6 +148,11 @@ fn rect_glyph(rects: &[(i16, i16, i16, i16)]) -> Vec<u8> {
     g
 }
 
+/// The bars of Code 128 symbol value `v` as rectangles of [`program`], and its advance.
+pub fn pattern_rects(v: u8) -> (Vec<Rect>, u16) {
+    pattern_bars(PATTERNS[v as usize])
+}
+
 /// The bars of a pattern (`212222`) as rectangles, and the advance in font units.
 fn pattern_bars(pattern: &str) -> (Vec<(i16, i16, i16, i16)>, u16) {
     let mut x = 0i16;
@@ -374,6 +379,11 @@ fn page_of(content: &str, fonts: &[(&str, &str, &[u8])], photo: bool) -> Vec<u8>
 pub enum Set {
     Symbols,
     Pairs,
+    /// Code 128 symbols with the bars raised over a digit under them in the same glyph (a
+    /// block here), as a human-readable bar font draws them.
+    Readable,
+    /// Letters (a block a glyph, the space empty): a text font, as an OCR-B or MICR font.
+    Letters,
 }
 
 /// The structure of a bar font's program.
@@ -414,6 +424,32 @@ fn pair_code(b: u8, s: u8) -> u8 {
 /// The glyphs of a font of `set`.
 pub fn bar_glyphs(set: Set) -> Vec<BarGlyph> {
     match set {
+        Set::Readable => (0..107u8)
+            .map(|v| {
+                let (rects, adv) = pattern_bars(PATTERNS[v as usize]);
+                let mut rects: Vec<Rect> = rects
+                    .iter()
+                    .map(|&(x0, _, x1, y1)| (x0, 300, x1, y1))
+                    .collect();
+                rects.push((60, 0, 300, 200));
+                BarGlyph {
+                    code: code_of(v),
+                    rects,
+                    adv,
+                }
+            })
+            .collect(),
+        Set::Letters => (32..=126u8)
+            .map(|c| BarGlyph {
+                code: c,
+                rects: if c == b' ' {
+                    Vec::new()
+                } else {
+                    vec![(50, 0, 550, 700)]
+                },
+                adv: 600,
+            })
+            .collect(),
         Set::Symbols => (0..107u8)
             .map(|v| {
                 let (rects, adv) = pattern_bars(PATTERNS[v as usize]);
@@ -450,7 +486,8 @@ pub fn bar_glyphs(set: Set) -> Vec<BarGlyph> {
 pub fn bar_codes(set: Set, text: &str) -> Vec<u8> {
     let values = code128_values(text);
     match set {
-        Set::Symbols => values.into_iter().map(code_of).collect(),
+        Set::Symbols | Set::Readable => values.into_iter().map(code_of).collect(),
+        Set::Letters => text.bytes().collect(),
         Set::Pairs => {
             let mut out = Vec::new();
             for v in values {
@@ -500,11 +537,15 @@ pub fn bar_width(set: Set, text: &str, size: f32) -> f32 {
 /// The width of the ink of `text` as a Code 128 in a font of `set` at `size`: to the right of
 /// the last bar.
 pub fn bar_ink_width(set: Set, text: &str, size: f32) -> f32 {
+    codes_ink_width(set, &bar_codes(set, text), size)
+}
+
+/// The width of the ink of the glyph codes `codes` in a font of `set` at `size`.
+pub fn codes_ink_width(set: Set, codes: &[u8], size: f32) -> f32 {
     let glyphs = bar_glyphs(set);
-    let codes = bar_codes(set, text);
     let mut x = 0.0;
     let mut right = 0.0f32;
-    for c in &codes {
+    for c in codes {
         if let Some(g) = glyphs.iter().find(|g| g.code == *c) {
             for r in &g.rects {
                 right = right.max(x + f32::from(r.2));
@@ -518,8 +559,9 @@ pub fn bar_ink_width(set: Set, text: &str, size: f32) -> f32 {
 /// The height of the bars of a font of `set` at `size`.
 pub fn bar_height(set: Set, size: f32) -> f32 {
     let h = match set {
-        Set::Symbols => BAR_UNITS,
+        Set::Symbols | Set::Readable => BAR_UNITS,
         Set::Pairs => PAIR_HEIGHT,
+        Set::Letters => 700,
     };
     f32::from(h) / 1000.0 * size
 }
@@ -1032,7 +1074,7 @@ pub fn add_bar_font(b: &mut Builder, name: &str, set: Set, kind: Kind) -> u32 {
         }
     };
     let (ascent, bbox) = match set {
-        Set::Symbols => (BAR_UNITS, format!("0 0 1000 {BAR_UNITS}")),
+        Set::Symbols | Set::Readable | Set::Letters => (BAR_UNITS, format!("0 0 1000 {BAR_UNITS}")),
         Set::Pairs => (PAIR_HEIGHT, format!("0 0 438 {PAIR_HEIGHT}")),
     };
     let desc = b.add(format!(
@@ -1083,8 +1125,9 @@ pub fn page_with_bar_fonts(content: &str, fonts: &[(&str, &str, Set, Kind)]) -> 
 /// The bar fonts a print form may show (see `print_form`): resource name, base name as
 /// written, glyph set and structure. `FC` and `FN` are Code 128 symbol fonts named for codes
 /// and not; `FP` to `FS` draw one bar and its space a glyph, as `BC C128 HD Wide` does, in
-/// each structure.
-pub const BAR_FONTS: [(&str, &str, Set, Kind); 6] = [
+/// each structure; `FO` and `FM` are letter fonts with names that look like codes; `FH` is a
+/// human-readable bar font.
+pub const BAR_FONTS: [(&str, &str, Set, Kind); 9] = [
     ("FC", "Code128", Set::Symbols, Kind::TrueTypeSubset),
     ("FN", "ShopBars", Set::Symbols, Kind::TrueTypeSubset),
     (
@@ -1096,4 +1139,43 @@ pub const BAR_FONTS: [(&str, &str, Set, Kind); 6] = [
     ("FQ", "ShopBars", Set::Pairs, Kind::Type1),
     ("FR", "BC#20C128#20HD#20Wide", Set::Pairs, Kind::Cff),
     ("FS", "ShopBars", Set::Pairs, Kind::TrueTypeFull),
+    ("FO", "IDAutomationOCRb", Set::Letters, Kind::TrueTypeSubset),
+    ("FM", "Ocean13", Set::Letters, Kind::Cff),
+    (
+        "FH",
+        "Libre#20Barcode#20128#20Text",
+        Set::Readable,
+        Kind::TrueTypeSubset,
+    ),
 ];
+
+/// The codes of the one-bar-a-glyph font ([`Set::Pairs`]) for elements `w` (bar, space,
+/// ...): `A` to `P` for a bar of 1 to 4 modules and its space of 1 to 4, `Q` for a last bar
+/// of 2, and a last bar of another width with a space of one module.
+pub fn pair_codes(w: &[u8]) -> Vec<u8> {
+    w.chunks(2)
+        .map(|p| match p.get(1) {
+            Some(&sp) => pair_code(p[0], sp),
+            None if p[0] == 2 => b'Q',
+            None => pair_code(p[0], 1),
+        })
+        .collect()
+}
+
+/// The bar and space widths of the dark modules `dark`, from the first dark one to the last.
+pub fn elements(dark: &[bool]) -> Vec<u8> {
+    let first = dark.iter().position(|&d| d).expect("a bar");
+    let last = dark.iter().rposition(|&d| d).expect("a bar");
+    let mut out = Vec::new();
+    let (mut cur, mut n) = (dark[first], 0u8);
+    for &d in &dark[first..=last] {
+        if d == cur {
+            n += 1;
+        } else {
+            out.push(n);
+            (cur, n) = (d, 1);
+        }
+    }
+    out.push(n);
+    out
+}
