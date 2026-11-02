@@ -588,8 +588,9 @@ fn ruler(v: &Variant, on: On) -> Sheet {
 /// or `/FN`, known by its bars only): one under the invoice number row, its baseline the
 /// order number row's, between the labels and the values (which start `gap` points after
 /// it); one beside `EAN:`, its baseline the bold `Referenz:` row's. Both are found with their
-/// values, boxed by their bars, and no glyph text of theirs stands in the read.
-fn font_codes(v: &Variant, font: &str, size: f32, gap: f32) -> Sheet {
+/// values, boxed by their bars, and no glyph text of theirs stands in the read. With `photo`, a
+/// photo at the left makes the page need vision: the codes are read from the page render.
+fn font_codes(v: &Variant, font: &str, size: f32, gap: f32, photo: bool) -> Sheet {
     use crate::common::barfont::{
         BAR_UNITS, code_of, code128_string, code128_values, code128_width,
     };
@@ -621,6 +622,9 @@ fn font_codes(v: &Variant, font: &str, size: f32, gap: f32) -> Sheet {
         template: t,
         ..FormPage::default()
     };
+    if photo {
+        built.page.photo = Some([40.0, 560.0, 200.0, 150.0]);
+    }
     let mut s = Sheet::new(built);
     let high = f32::from(BAR_UNITS) / 1000.0 * size;
     for (text, x, y, w) in [(first, 380.0, 735.0, w1), (second, x3, 680.0, w2)] {
@@ -633,7 +637,7 @@ fn font_codes(v: &Variant, font: &str, size: f32, gap: f32) -> Sheet {
                 .collect(),
         );
     }
-    s.want.vision = Some(false);
+    s.want.vision = Some(photo);
     s.want.may_title.push("Rechnung".into());
     s
 }
@@ -797,22 +801,32 @@ pub(crate) fn shapes() -> Vec<Shape> {
         Shape {
             name: "codes in a barcode font named for codes, size 10, gap 5",
             axes: RENDERED,
-            draw: |v| (font_codes(v, "FC", 10.0, 5.0), None),
+            draw: |v| (font_codes(v, "FC", 10.0, 5.0, false), None),
         },
         Shape {
             name: "codes in a barcode font named for codes, size 16, gap 12",
             axes: RENDERED,
-            draw: |v| (font_codes(v, "FC", 16.0, 12.0), None),
+            draw: |v| (font_codes(v, "FC", 16.0, 12.0, false), None),
         },
         Shape {
             name: "codes in a barcode font known by its bars, size 12, gap 5",
             axes: RENDERED,
-            draw: |v| (font_codes(v, "FN", 12.0, 5.0), None),
+            draw: |v| (font_codes(v, "FN", 12.0, 5.0, false), None),
         },
         Shape {
             name: "codes in a barcode font known by its bars, size 16, gap 12",
             axes: RENDERED,
-            draw: |v| (font_codes(v, "FN", 16.0, 12.0), None),
+            draw: |v| (font_codes(v, "FN", 16.0, 12.0, false), None),
+        },
+        Shape {
+            name: "codes in a barcode font known by its bars beside a photo, size 12, gap 5",
+            axes: RENDERED,
+            draw: |v| (font_codes(v, "FN", 12.0, 5.0, true), None),
+        },
+        Shape {
+            name: "codes in a barcode font named for codes beside a photo, size 10, gap 5",
+            axes: RENDERED,
+            draw: |v| (font_codes(v, "FC", 10.0, 5.0, true), None),
         },
     ]);
     // More codes than a page renders again, all read; a halftone without a code.

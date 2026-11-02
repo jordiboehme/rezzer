@@ -10,8 +10,8 @@
 mod common;
 
 use common::barfont::{
-    Glyphs, PATTERNS, code_of, code128_string, code128_values, code128_width, page_with_fonts,
-    program,
+    BAR_UNITS, Glyphs, PATTERNS, code_of, code128_string, code128_values, code128_width,
+    page_with_fonts, program,
 };
 use common::{all_text, markdown, read};
 use rezzer_model::ReadOutcome;
@@ -118,6 +118,27 @@ fn codes_printed_in_a_barcode_font_are_listed_and_their_glyphs_are_no_text() {
                     "{case}: {md}"
                 );
                 assert!(!md.contains("not decoded"), "{case}: {md}");
+                // Each code is a small picture of its own, named by the box of its bars (a
+                // code of a small picture has its place in the picture's words, not a box of
+                // its own, as a code drawn as paths has).
+                let high = f32::from(BAR_UNITS) / 1000.0 * size;
+                let (w1, w2) = (
+                    code128_width("2026004711", size),
+                    code128_width("4006381333931", size),
+                );
+                for (text, bars) in [
+                    ("2026004711", [380.0, 735.0, 380.0 + w1, 735.0 + high]),
+                    ("4006381333931", [585.0 - w2, 680.0, 585.0, 680.0 + high]),
+                ] {
+                    let words = format!(
+                        "Code 128, box {}, {} to {}, {}",
+                        bars[0].round(),
+                        bars[1].round(),
+                        bars[2].round(),
+                        bars[3].round()
+                    );
+                    assert!(md.contains(&words), "{case}: {text}: {words} in {md}");
+                }
             }
         }
     }
@@ -298,6 +319,23 @@ fn codes_in_a_barcode_font_on_a_page_that_needs_vision_are_read_or_named() {
             markdown(&out)
         );
         assert_no_glyph_text(&out, &["2026004711"], font);
+        // Read from the page, the code has the box of its bars and its place in words.
+        let c = &out.document.assets[0].codes[0];
+        let high = f32::from(BAR_UNITS) / 1000.0 * 12.0;
+        let bars = [
+            100.0,
+            650.0,
+            100.0 + code128_width("2026004711", 12.0),
+            650.0 + high,
+        ];
+        let b = c.bounds.expect("a box");
+        assert!(
+            b.iter()
+                .zip(bars)
+                .all(|(got, want)| (got - want).abs() <= 1.0),
+            "{font}: boxed {b:?}, the bars are {bars:?}"
+        );
+        assert_eq!(c.place.as_deref(), Some("top left of the page"), "{font}");
         let bad = format!(
             "{photo}BT /F1 10 Tf 72 780 Td (Lieferschein 0000) Tj ET\n\
              BT /F3 12 Tf 100 650 Td ({}) Tj ET\n",
@@ -311,4 +349,36 @@ fn codes_in_a_barcode_font_on_a_page_that_needs_vision_are_read_or_named() {
             "{font}: {md}"
         );
     }
+}
+
+#[test]
+fn glyphs_of_barcode_fonts_past_the_cap_are_said() {
+    // More glyphs of a barcode font than a page keeps the places of (50,000), drawn off the
+    // page: the note says the codes there are looked for only among the first ones.
+    let line: String = "A".repeat(1000);
+    let mut content = String::from(
+        "BT /F1 10 Tf 72 700 Td (Lieferschein 0000) Tj ET\nBT /F3 2 Tf 3 TL -90000 400 Td\n",
+    );
+    for _ in 0..51 {
+        content += &format!("({line}) Tj T*\n");
+    }
+    content += "ET\n";
+    let out = read(&page_with_fonts(
+        &content,
+        &[("F3", "Code128", &program(None))],
+    ));
+    let said: Vec<&str> = out
+        .document
+        .losses
+        .iter()
+        .map(|l| l.what.as_str())
+        .collect();
+    assert!(
+        said.iter().any(|w| w.starts_with(
+            "codes printed in a barcode font on page 1 are looked for only among the first \
+             50000 glyphs of barcode fonts"
+        )),
+        "{said:?}"
+    );
+    assert!(!all_text(&out).contains("AAA"), "{}", all_text(&out));
 }

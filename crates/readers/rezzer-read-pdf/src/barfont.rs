@@ -59,6 +59,9 @@ const JOIN_MODULES: f32 = 3.0;
 /// region of its own.
 const MAX_JOINED: usize = 2000;
 
+/// Glyphs of barcode fonts a page keeps the places of, at most: past them a note says so.
+pub(crate) const MAX_GLYPHS: usize = 50_000;
+
 /// What the outline of a glyph is, in font units (1000 to the em).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Outline {
@@ -74,6 +77,9 @@ pub(crate) enum Outline {
     /// Anything else: curves, slanted lines, a single bar, bars of different heights.
     Other,
 }
+
+/// What a glyph's outline is, with the box of its ink in font units when it is not bars.
+pub(crate) type Looked = (Outline, Option<[f64; 4]>);
 
 /// The rectangle a subpath of `points` draws, when it has four corners and sides along the
 /// axes (a closing point on the first is left out).
@@ -262,13 +268,19 @@ fn mapped(t: Affine, b: [f64; 4]) -> [f32; 4] {
     [x0 as f32, y0 as f32, x1 as f32, y1 as f32]
 }
 
+/// The box of the ink of `path` in font units, `None` when it has none.
+pub(crate) fn ink(path: &BezPath) -> Option<[f64; 4]> {
+    let r = path.bounding_box();
+    (r.area() > 0.0).then_some([r.x0, r.y0, r.x1, r.y1])
+}
+
 /// Where a glyph of a barcode font draws, with transform `t` (font units to the page) and
-/// outline `o` (`path` when it is not bars), its advance `advance` in font units when known:
-/// its box and its narrowest bar in points. `None` when it draws nothing.
+/// outline `o` (the box of its ink `ink` when it is not bars), its advance `advance` in font
+/// units when known: its box and its narrowest bar in points. `None` when it draws nothing.
 pub(crate) fn place(
     t: Affine,
     o: &Outline,
-    path: Option<&BezPath>,
+    ink: Option<[f64; 4]>,
     advance: Option<f32>,
 ) -> Option<([f32; 4], f32)> {
     let scale = {
@@ -284,9 +296,8 @@ pub(crate) fn place(
         }
         Outline::Empty => None,
         Outline::Other => {
-            let ink = path.map(|p| p.bounding_box()).filter(|r| r.area() > 0.0);
             let b = match ink {
-                Some(r) => [r.x0, r.y0, r.x1, r.y1],
+                Some(b) => b,
                 None => [0.0, 0.0, f64::from(advance.filter(|a| *a > 0.0)?), 1000.0],
             };
             Some((mapped(t, b), 0.0))

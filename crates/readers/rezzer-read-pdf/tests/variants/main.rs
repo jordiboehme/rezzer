@@ -356,6 +356,8 @@ shape_tests! {
     codes_in_a_barcode_font_named_for_codes_size_16 => "codes in a barcode font named for codes, size 16, gap 12",
     codes_in_a_barcode_font_known_by_its_bars_size_12 => "codes in a barcode font known by its bars, size 12, gap 5",
     codes_in_a_barcode_font_known_by_its_bars_size_16 => "codes in a barcode font known by its bars, size 16, gap 12",
+    codes_in_a_barcode_font_known_by_its_bars_beside_a_photo => "codes in a barcode font known by its bars beside a photo, size 12, gap 5",
+    codes_in_a_barcode_font_named_for_codes_beside_a_photo => "codes in a barcode font named for codes beside a photo, size 10, gap 5",
     a_ruler_of_short_ticks_beside_a_photo => "a ruler of short ticks beside a photo",
     barcode_module_08_height_20 => "barcode, module 0.8, height 20",
     barcode_module_10_height_30 => "barcode, module 1.0, height 30",
