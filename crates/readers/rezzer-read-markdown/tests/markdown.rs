@@ -247,6 +247,18 @@ fn wikilinks_in_link_graph() {
     );
 }
 
+/// RUSTSEC-2026-0433: with wikilinks on, pulldown-cmark before 0.13.6 rescans the body of
+/// every enclosing `![[` of nested image wikilinks, quadratic in the depth. The read must
+/// end well inside [`SAFETY`].
+#[test]
+fn nested_image_wikilinks_read_in_linear_time() {
+    let depth = 500_000;
+    let text = format!("{}x{}\n", "![[".repeat(depth), "]]".repeat(depth));
+    let (out, _, took) = counted_read(&text);
+    assert!(!out.document.body.is_empty());
+    assert!(took < SAFETY, "took {took:?}");
+}
+
 #[test]
 fn no_links_no_graph() {
     assert!(read("plain text\n").document.facets.graphs.is_empty());
