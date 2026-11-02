@@ -38,6 +38,45 @@ Built on (versions as used in the development version):
 - File facts in the frontmatter: pages, tagged, encrypted, signed, signatures, revisions, form fields, whether it has scripts and layers
 - Title and date from page 1 when the file has none: the largest heading in the top third of the page is the title (`title_from` says so). A date is the document date only when something marks it as that: a date label such as `Datum`, `Date`, `Fecha` or `Erstellt am` right before it on its line or right over it, or, in a two-column table of labels and values in the top half of the page, a label cell with the date in the cell beside it. A label marks one date only: the date must be the only date in its column of the page, dates in short or long forms counted (`16.01.`, `16.01.26`, `16. Januar 2026`), so a label over or before a list of dates, or a table row whose list goes on below it, marks none of them. `document_date_from` names the label. A date that nothing marks is never taken, also when it is the only date at the top of the page; a loss then says how many dates stand there. Dates are read only when they read one way: `01.02.2026` and `2026-02-01` as written, `02/13/2026` only because 13 can only be the day
 
+### Print-run forms
+
+Pay slips, tax notices and similar forms are often printed in two layers: a template with the labels, rules and boxes, and a data layer with the values. The data layer is often set in a fixed-pitch font, and each value is padded with spaces into its place. Rezzer reads both layers as one page.
+
+- Each line of the data layer is read, also when it is moved into place on its own. The padding is no text: a value starts where its ink starts, and spaces are not counted for the size of the text
+- A label in the template and a value padded onto the same line read as one line, label first, like `Auszahlungsbetrag 1.234,56`
+- Boxed fields: a drawn box with a small label at its top and a value under it is a field. Fields in a row or in a column of boxes become one table of label and value pairs. A box with only its label is an empty field, shown as a grey `empty` mark. A note before the table says: `Found by: label and value pairs from drawn boxes; the label is the smaller text at the top of each box.`
+- Rows of fields between rules: a header grid whose column lines hang from the rule above, or a block of labels with their values on the same lines, is read the same way. Each label is smaller than its value and pairs with the value beside it or under it. The note says: `Found by: label and value pairs from rows of fields between drawn rules`
+- A column of totals: a narrow column drawn with horizontal rules only, beside a grid whose rules line up with it, joins that grid as one more column. Each total label in it pairs with the amount under it. The note says that the amounts of the column are read as one more column of the table
+- A header band of drawn cells over value lines: each value line is cut at the column edges of the band, and the lines are the rows of the table. An empty field stays an empty cell in its column
+- One grid over several sections with columns of their own is cut into one table for each section
+- Separators drawn as marks: some forms print an amount or a date in a row of boxes, one digit a box, and draw the decimal comma or the date points as small marks between the boxes. Rezzer puts the separator back into the number, written as the file writes amounts and dates as text elsewhere. A note at the top of the page says how many separators were found this way and how they are written, for example: `Found by: 1 decimal separator and 2 date separators on this page are drawn marks, not text; they are written as "," and "." as in 15 amounts and 2 dates written as text in this file.`
+- Each kind of note stands once on each page where it applies
+
+What stays under "Not read", with the reason:
+
+- A separator drawn as a mark when the file writes no amount or date as text, or writes them in two styles, so Rezzer cannot tell which sign it stands for
+- A box with text in three styles or more, or with its label below the value: its text stays as it is and is not paired
+- A field cell whose lines are an address: it is left out of the pairs of its row and read as a whole
+- A grid or header band that is not read as a table, for example because its text is much smaller than the body text, as in a picture of a page
+- A date at the top of page 1 that no date label marks: it is not taken as the document date
+
+### Invoices and other business documents
+
+Invoices, offers, orders and delivery notes of one or two pages read as their title, their fields, their line items, their totals, their address and their footer.
+
+- The title is the largest heading in the top third of page 1. A larger name in the recipient address is no title. A title beside a block of small field lines stands on its own, and the field lines become a table of label and value pairs
+- Line items without upright rules are one table. A horizontal rule as wide as the items ends the table. A rule right under the header row does not, and rules between every row do not either. The totals below the end rule (`Nettobetrag`, `USt 19 %`, `Gesamtbetrag`) become label and value pairs
+- Amount titles set flush right over their column head that column. Two column titles set close together, like `Menge Einheit`, are cut at the word space over the gap between their columns
+- A line a little larger than the body text is a heading only when it starts in bold. An address in bold stays one paragraph with its line breaks, and two bold lines of a sentence stay one paragraph. A bold label with a colon before a plain value, like `Bestellnummer: 00000`, is no heading
+- A footer in columns (address, bank, register) is read column by column, each column one paragraph with its line breaks. White space drawn at the left margin does not join the columns. In a file of two pages, a footer line at the bottom of both pages is a running footer
+- Logos of the template do not make a page need vision: a small picture in the top or bottom 18 % of the page or in a corner that alone covers less than 2 % of the page, or the same picture on every page of a file of two pages or more that covers less than a quarter of the page
+- A Code 128 drawn as bars is read and listed once, below its place
+
+What stays under "Not read", with the reason:
+
+- Blocks of short lines side by side that are read one block after the other: if their lines were rows of a table or labels beside values, those rows are not kept
+- A block of three lines or more, set in three parts or more, that is not read as a table and has no caption near it
+
 ### Hidden logic
 
 - Annotations: highlight, underline, strikeout, squiggly, free text, sticky notes, ink, caret, stamps, shapes and others, with author and date. A markup annotation quotes the exact words under it. Replies stay with their annotation, and a review state marks it as resolved
@@ -55,7 +94,7 @@ Built on (versions as used in the development version):
 
 - A page without a text layer, with glyphs that have no Unicode mapping or with large pictures needs vision. It is listed with the reason. With an output directory (`-o` on the command line), Rezzer renders it to a PNG file at 144 dpi, at most 16 million pixels
 - Small pictures (1 square centimeter or more, together under 2 % of the page) do not make the whole page need vision. Each one is written at its place in the text with its box in points. With an output directory, Rezzer cuts it out of the page render with a margin of 8 pixels and writes it as `page-<N>-pic-<K>.png` (picture K on page N, in reading order). On a very large page, where the page render is coarser than 144 dpi, the crop is rendered again at 144 dpi
-- A small picture is a logo when it does not look like a barcode or QR code and lies in the top or bottom 15 % of the page or in a corner, or when the same picture is on every page of a file with two pages or more. A logo is written as "logo or small picture" with its box. It does not need vision. All other small pictures are marked "Needs vision", unless a code is read from them
+- A small picture is a logo when it does not look like a barcode or QR code and lies in the top or bottom 18 % of the page or in a corner, or when the same picture is on every page of a file with two pages or more. A logo is written as "logo or small picture" with its box. It does not need vision. All other small pictures are marked "Needs vision", unless a code is read from them
 - Equal pictures share one file. The same picture on three pages is one PNG, and each place links to it with its own box. The list of pictures that need vision has it once, with its pages and boxes. When the page of its first place is not rendered, the file is cut from the next page that shows it. The overview counts the places and the distinct pictures
 - In a tagged file, the alt text of a Figure goes to the picture drawn inside it. A Figure that marks no picture gives its alt text to the one new small picture of its page. Every other Figure alt text stays in the text as "Figure (not matched to a picture): " and the alt text. It stands at the picture the Figure marks, else at the first picture of the page, else at the end of the page
 - A picture at the same place on at least 3 pages and half the pages is page furniture, like a running header. It is not listed
@@ -174,6 +213,9 @@ QR Code: [https://example.org/t/dNuKThV1](https://example.org/t/dNuKThV1)
 - The text parser holds about 2 KB for every page of the file. When that does not fit in the memory left after the objects of the file (for example 100,000 pages with their own content streams at a 512 MiB limit), the text is not read and the output says so
 - A word split by a hyphen at a line end keeps its hyphen ("adip-iscing"). Rezzer cannot tell a break hyphen from a real one, so it keeps both
 - Paragraphs marked only by an indent of their first line, with no space between them, stay one paragraph with line breaks (as in LaTeX two-column papers)
+- On an invoice of two pages, a footer is a running footer only when its lines are cut into the same columns on both pages. When the body text of one page runs across the gap between two footer columns, the footer of that page is cut differently. It is then read column by column as normal text, and a note under "Not read" says that blocks side by side were read one after the other
+- A legend of footnotes that stands at the foot of both pages of a two-page form is taken as a running footer. Its text is kept, but the markers above stay text and do not link to the footnotes
+- A label over a boxed amount and a label over a boxed date in the same column are read first, before both values. The values keep their separators
 - On a form page, a block of two text columns can be read in bands across both columns, with each printed line as its own paragraph (the directions on the front of the SF 1199A form)
 - When the object layer cannot be read, Rezzer falls back to hayro for the text and says so in the output. Annotations, forms, scripts and signatures are then not read
 - Revision diffs count the first save of a linearized file as one save
