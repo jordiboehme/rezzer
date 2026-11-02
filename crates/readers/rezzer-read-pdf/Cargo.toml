@@ -28,3 +28,7 @@ insta.workspace = true
 libc.workspace = true
 rezzer-render = { path = "../../rezzer-render" }
 serde_json.workspace = true
+
+[[example]]
+name = "region-report"
+path = "examples/region-report.rs"

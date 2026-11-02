@@ -616,3 +616,46 @@ fn the_cell_check_never_passes_empty() {
     assert!(found.all_skipped(&cells, &[true, true, true]));
     assert!(!found.all_skipped(&cells, &[false, false, false]));
 }
+
+/// A name as a file name: a slash would make a folder.
+fn file_name(name: &str) -> String {
+    name.replace(['/', '\\'], "_")
+}
+
+/// Writes the Markdown and the JSON of every sampled variant of every shape to
+/// `<dir>/<shape name>/<variant name>.md` and `.json`, for the dir in `REZZER_DUMP_DIR`; to
+/// compare the reads of two builds byte for byte. Without the variable it does nothing. The
+/// time limit is one hour, so the dump does not depend on the load of the machine.
+#[test]
+#[ignore = "writes files when REZZER_DUMP_DIR is set"]
+fn dump_generated_reads() {
+    let Some(dir) = std::env::var_os("REZZER_DUMP_DIR") else {
+        return;
+    };
+    let dir = std::path::PathBuf::from(dir);
+    let options = rezzer_render::RenderOptions {
+        generated_at: "2026-01-01T00:00:00Z".to_string(),
+        rezzer_version: env!("CARGO_PKG_VERSION").to_string(),
+        ..rezzer_render::RenderOptions::default()
+    };
+    let limits = rezzer_limits::Limits {
+        max_time: std::time::Duration::from_secs(3600),
+        ..rezzer_limits::Limits::default()
+    };
+    for shape in all_shapes() {
+        let folder = dir.join(file_name(shape.name));
+        std::fs::create_dir_all(&folder).unwrap();
+        for page in axes::variants(&shape) {
+            let out = common::read_in(
+                &inv::file(&page),
+                &rezzer_model::ReadOptions::default(),
+                &rezzer_limits::Budget::new(limits.clone()),
+            );
+            let markdown = rezzer_render::render(&out.document, out.completeness, &options);
+            let json = serde_json::to_string_pretty(&out.document).unwrap();
+            let name = file_name(&page.name);
+            std::fs::write(folder.join(format!("{name}.md")), markdown).unwrap();
+            std::fs::write(folder.join(format!("{name}.json")), json).unwrap();
+        }
+    }
+}
