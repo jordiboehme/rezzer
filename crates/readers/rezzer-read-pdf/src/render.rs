@@ -2415,10 +2415,20 @@ impl Scans {
                         _ => None,
                     })
             });
+            let until = self.until;
+            let late = || Instant::now() >= until || budget.check_time().is_err();
             let verdict = match known.filter(|k| k.iter().any(|&h| h != 0)) {
                 Some(k) => glyph_evidence(&c, &k),
                 None if drawn_asset => Ok(()),
-                None => evidence(&c, picture, on),
+                None => match evidence(&c, picture, on, &late) {
+                    Some(verdict) => verdict,
+                    // The time ran out while its bars were checked: a time stop, not a
+                    // misread.
+                    None => {
+                        self.halt_time(n, budget);
+                        break;
+                    }
+                },
             };
             if let Err(why) = verdict {
                 // Not listed, and said: the kind, the place and why, without the value.
@@ -2861,12 +2871,14 @@ impl Scans {
 /// ([`crate::codes::vector_codes`]). Else a matrix or stacked code holds a
 /// payload (a screen of dots read on a lattice gives code words of nothing but padding), and a
 /// linear code stands in bars that fit it ([`crate::codes::bars_fit`]). `Err` says why not,
-/// in words after "a part read as Code 39".
+/// in words after "a part read as Code 39". `None` when `late` says the time for reading codes
+/// is over before the bars are checked to the end.
 fn evidence(
     c: &barcodes::Code,
     picture: &Rendered,
     on: Option<(&Need, Option<&Region>)>,
-) -> Result<(), &'static str> {
+    late: &dyn Fn() -> bool,
+) -> Option<Result<(), &'static str>> {
     // A read of a drawing of paths that looks like a code from its own render at whole
     // pixels a module, within it (give or take two of its modules): the drawing is the
     // evidence. A read elsewhere on the page is not, nor a read of the page's coarser render
@@ -2876,7 +2888,7 @@ fn evidence(
         && let How::Modules(m) = r.how
         && around(r, m, &page_rect(picture, need, c.bounds))
     {
-        return Ok(());
+        return Some(Ok(()));
     }
     use barcodes::Symbology as S;
     let text = match &c.payload {
@@ -2888,18 +2900,18 @@ fn evidence(
         S::Code128 => crate::codes::Linear::Code128,
         S::Code39 => crate::codes::Linear::Code39(text),
         S::Itf => crate::codes::Linear::Itf(text),
-        _ if c.bytes > 0 => return Ok(()),
-        _ => return Err("that holds nothing"),
+        _ if c.bytes > 0 => return Some(Ok(())),
+        _ => return Some(Err("that holds nothing")),
     };
     let p = &picture.pixmap;
-    crate::codes::bars_fit(
+    let fit = crate::codes::bars_fit(
         p.data_as_u8_slice(),
         (usize::from(p.width()), usize::from(p.height())),
         c.bounds,
         kind,
-    )
-    .then_some(())
-    .ok_or("that its bars do not confirm")
+        late,
+    )?;
+    Some(fit.then_some(()).ok_or("that its bars do not confirm"))
 }
 
 /// Whether box `px` lies within region `r` of modules of `m` points, give or take two modules
