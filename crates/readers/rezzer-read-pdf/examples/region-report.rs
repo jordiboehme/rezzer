@@ -86,7 +86,7 @@ fn read(name: &str, bytes: Vec<u8>) -> (String, String) {
     let out = PdfReader.read(&source, &ReadOptions::default(), &Budget::new(limits));
     let options = rezzer_render::RenderOptions {
         generated_at: GENERATED_AT.to_string(),
-        rezzer_version: env!("CARGO_PKG_VERSION").to_string(),
+        rezzer_version: "dump".to_string(),
         ..rezzer_render::RenderOptions::default()
     };
     let markdown = rezzer_render::render(&out.document, out.completeness, &options);
@@ -105,6 +105,7 @@ fn write(out: &Path, relative: &str, text: &str) -> std::io::Result<()> {
 
 fn dump(out: &Path, inputs: &[String]) -> Result<usize, String> {
     let mut count = 0;
+    let mut seen: std::collections::HashMap<String, String> = std::collections::HashMap::new();
     for input in inputs {
         let path = Path::new(input);
         let meta = std::fs::symlink_metadata(path).map_err(|e| format!("{input}: {e}"))?;
@@ -117,6 +118,13 @@ fn dump(out: &Path, inputs: &[String]) -> Result<usize, String> {
             (root, vec![path.to_path_buf()])
         };
         for file in files {
+            let target = out_path(&root.to_string_lossy(), &file.to_string_lossy(), "md");
+            if let Some(first) = seen.insert(target.clone(), file.display().to_string()) {
+                return Err(format!(
+                    "{first} and {} would both be dumped to {target}",
+                    file.display()
+                ));
+            }
             let bytes = std::fs::read(&file).map_err(|e| format!("{}: {e}", file.display()))?;
             let name = file
                 .file_name()

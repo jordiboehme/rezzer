@@ -635,17 +635,31 @@ fn dump_generated_reads() {
     let dir = std::path::PathBuf::from(dir);
     let options = rezzer_render::RenderOptions {
         generated_at: "2026-01-01T00:00:00Z".to_string(),
-        rezzer_version: env!("CARGO_PKG_VERSION").to_string(),
+        rezzer_version: "dump".to_string(),
         ..rezzer_render::RenderOptions::default()
     };
     let limits = rezzer_limits::Limits {
         max_time: std::time::Duration::from_secs(3600),
         ..rezzer_limits::Limits::default()
     };
+    let mut folders = std::collections::HashMap::new();
     for shape in all_shapes() {
         let folder = dir.join(file_name(shape.name));
+        if let Some(first) = folders.insert(folder.clone(), shape.name) {
+            panic!(
+                "the shapes {first:?} and {:?} share the folder {folder:?}",
+                shape.name
+            );
+        }
         std::fs::create_dir_all(&folder).unwrap();
+        let mut files = std::collections::HashMap::new();
         for page in axes::variants(&shape) {
+            if let Some(first) = files.insert(file_name(&page.name), page.name.clone()) {
+                panic!(
+                    "the variants {first:?} and {:?} of {:?} share a file name",
+                    page.name, shape.name
+                );
+            }
             let out = common::read_in(
                 &inv::file(&page),
                 &rezzer_model::ReadOptions::default(),
