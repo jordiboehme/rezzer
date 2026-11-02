@@ -1594,6 +1594,7 @@ pub fn synthetic_print_form_pages() -> Vec<FormPage> {
             ],
             band: [
                 "1000 Gehalt     2  2.222,22",
+                // Drawn twice on purpose: a repeated row is read twice.
                 "2000 Zulage     1     44,44",
                 "2000 Zulage     1     44,44",
                 "4000 Praemie    1     55,55",
