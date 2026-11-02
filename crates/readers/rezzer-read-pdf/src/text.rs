@@ -1018,8 +1018,10 @@ impl<'p, 'a> PageReader<'p, 'a> {
             .collect();
         let width = (crop.x1 - crop.x0) as f32;
         let height = (crop.y1 - crop.y0) as f32;
-        // The grid search runs once for the page; when it gives up, one loss says so for
-        // both the ruled tables and the boxes.
+        // This grid search decides for the page whether the ruled tables and the boxes are
+        // looked for; when it gives up, one loss says so for both. The layout's passes (field
+        // frames, titles, rows of boxes, ruled tables) search the grids again, each within
+        // the same work bound, six to seven times a page.
         let found = regions::grids(&dev.rules);
         let inked = regions::Inked::new(
             width,
