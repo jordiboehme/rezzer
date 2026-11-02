@@ -327,6 +327,10 @@ pub(crate) struct Part {
     pub text: Option<String>,
 }
 
+/// Bars a part of a taken run that fits no code has at least to be a code region of its own
+/// (named as not decoded): fewer are an ornament past a quiet zone.
+const PART_BARS: usize = 4;
+
 /// The parts of a run of bars that are codes. A run may hold a quiet zone of white glyphs
 /// and more bars past it: each part between wide spaces ([`segments`]) is looked at on its
 /// own.
@@ -360,15 +364,111 @@ pub(crate) fn code_parts(glyphs: &[(u32, Affine, &Outline)], named: bool) -> Vec
             None => false,
         }
     };
-    segments(&joined)
+    // Each part between quiet zones is cut again where a space is wider than a code's and
+    // where one Code 128 stops and the next starts ([`pieces`]); the pieces that fit are
+    // codes. A part that fits only whole is one code.
+    let mut parts: Vec<(&[(f64, f64)], bool)> = Vec::new();
+    for seg in segments(&joined) {
+        let cut = pieces(seg);
+        let fit: Vec<bool> = cut.iter().map(|p| fits(p)).collect();
+        if fit.iter().any(|f| *f) {
+            parts.extend(cut.into_iter().zip(fit));
+        } else {
+            parts.push((seg, fits(seg)));
+        }
+    }
+    // By the ruling of fix round 4, a run taken as bars (one part of it fits a code) leaves
+    // no glyph text: its other parts of a few bars or more are regions too, named as not
+    // decoded when the decoder reads nothing there.
+    if !parts.iter().any(|(_, f)| *f) {
+        return Vec::new();
+    }
+    parts
         .into_iter()
-        .filter(|part| fits(part))
-        .map(|part| Part {
+        .filter(|(part, f)| *f || part.len() >= PART_BARS)
+        .map(|(part, f)| Part {
             from: part[0].0,
             to: part[part.len() - 1].1,
-            text: code128_of(&widths_of(part)),
+            text: if f {
+                code128_of(&widths_of(part))
+            } else {
+                None
+            },
         })
         .collect()
+}
+
+/// The Code 128 stop (bar first) and starts, in modules.
+const STOP: [i64; 7] = [2, 3, 3, 1, 1, 1, 2];
+const STARTS: [[i64; 6]; 3] = [[2, 1, 1, 4, 1, 2], [2, 1, 1, 2, 1, 4], [2, 1, 1, 2, 3, 2]];
+
+/// The module and the ink spread of bars and spaces `w` (bar, space, ..., bar), from the sums
+/// of each bar and the space after it: the largest module that makes most of them (three in
+/// four) whole, the least of them 2 to 8 modules; the spread is what the bars hold past whole
+/// modules on average. `None` when no module fits.
+fn module_of(w: &[f64]) -> Option<(f64, f64)> {
+    let sums: Vec<f64> = w
+        .chunks(2)
+        .filter(|p| p.len() == 2)
+        .map(|p| p[0] + p[1])
+        .collect();
+    let least = sums.iter().copied().fold(f64::MAX, f64::min);
+    if sums.is_empty() || least <= 0.0 || !least.is_finite() {
+        return None;
+    }
+    let module = (2..=8).map(|k| least / f64::from(k)).find(|&m| {
+        let whole = sums
+            .iter()
+            .filter(|&&x| {
+                let n = x / m;
+                (n - n.round()).abs() <= PAIR_WHOLE
+            })
+            .count();
+        4 * whole >= 3 * sums.len()
+    })?;
+    let bars: Vec<f64> = w.iter().step_by(2).copied().collect();
+    let spread = bars
+        .iter()
+        .map(|&b| b - (b / module).round().max(1.0) * module)
+        .sum::<f64>()
+        / bars.len() as f64;
+    Some((module, spread))
+}
+
+/// The pieces of the bars `seg`: cut at each space wider than [`MOST_MODULES`] modules (with
+/// the spread taken out) and after each Code 128 stop that a start follows, as two codes close
+/// together show. The whole when no module is found.
+fn pieces(seg: &[(f64, f64)]) -> Vec<&[(f64, f64)]> {
+    let w = widths_of(seg);
+    let Some((module, spread)) = module_of(&w) else {
+        return vec![seg];
+    };
+    let n: Vec<i64> = w
+        .iter()
+        .enumerate()
+        .map(|(k, &x)| {
+            let x = if k % 2 == 0 { x - spread } else { x + spread };
+            (x / module).round() as i64
+        })
+        .collect();
+    let mut out = Vec::new();
+    let mut from = 0;
+    for k in 0..seg.len().saturating_sub(1) {
+        // The space after bar k.
+        let wide = n[2 * k + 1] > MOST_MODULES as i64;
+        // Bar k ends a stop (its last bar) and a start begins at bar k + 1.
+        let stop_start = 2 * k + 1 >= 6
+            && n[2 * k - 6..=2 * k] == STOP
+            && STARTS
+                .iter()
+                .any(|st| n.get(2 * k + 2..2 * k + 8).is_some_and(|x| x == st));
+        if wide || stop_start {
+            out.push(&seg[from..=k]);
+            from = k + 1;
+        }
+    }
+    out.push(&seg[from..]);
+    out
 }
 
 /// Where the bars of each glyph of a run stand, in points along the baseline of its first
@@ -478,6 +578,32 @@ fn two_widths(w: &[f64]) -> Option<Vec<bool>> {
     let lo = w.iter().copied().fold(f64::MAX, f64::min);
     let hi = w.iter().copied().fold(f64::MIN, f64::max);
     if lo <= 0.0 || !lo.is_finite() || hi < WIDE_FROM * lo * (1.0 - CLASS_SPREAD) {
+        return None;
+    }
+    // The ink spread makes bars wider and spaces as much narrower: half of what the narrow
+    // bars hold over the narrow spaces is taken out before the classes are told apart.
+    let cut = (lo + hi) / 2.0;
+    let narrow_mean = |bars: bool| {
+        let v: Vec<f64> = w
+            .iter()
+            .enumerate()
+            .filter(|&(k, &x)| (k % 2 == 0) == bars && x <= cut)
+            .map(|(_, &x)| x)
+            .collect();
+        (!v.is_empty()).then(|| v.iter().sum::<f64>() / v.len() as f64)
+    };
+    let spread = match (narrow_mean(true), narrow_mean(false)) {
+        (Some(b), Some(sp)) => (b - sp) / 2.0,
+        _ => 0.0,
+    };
+    let w: Vec<f64> = w
+        .iter()
+        .enumerate()
+        .map(|(k, &x)| if k % 2 == 0 { x - spread } else { x + spread })
+        .collect();
+    let lo = w.iter().copied().fold(f64::MAX, f64::min);
+    let hi = w.iter().copied().fold(f64::MIN, f64::max);
+    if lo <= 0.0 {
         return None;
     }
     let cut = (lo + hi) / 2.0;

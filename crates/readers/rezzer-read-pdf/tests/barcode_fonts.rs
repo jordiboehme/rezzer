@@ -10,8 +10,8 @@
 mod common;
 
 use common::barfont::{
-    BAR_UNITS, Glyphs, Kind, PATTERNS, Set, bar_codes, bar_ink_width, bar_width, code_of,
-    code128_string, code128_values, code128_width, page_with_bar_fonts, page_with_fonts,
+    BAR_UNITS, Glyphs, Kind, PAIR_MODULE, PATTERNS, Set, bar_codes, bar_ink_width, bar_width,
+    code_of, code128_string, code128_values, code128_width, page_with_bar_fonts, page_with_fonts,
     pattern_rects, pdf_string, program,
 };
 use common::{all_text, markdown, read};
@@ -712,6 +712,118 @@ fn the_glyph_program_of_a_real_shop_barcode_font_is_taken() {
             for size in [45.0, 44.997, 30.0] {
                 let (file, glyphs) = invoice_in(Set::Hd, kind, name, size, 8.0);
                 assert_invoice(&read(&file), &glyphs, &format!("{kind:?} {name} {size}"));
+            }
+        }
+    }
+}
+
+/// A page with two Code 128 (`2026004711` and `4006381333931`) in the one-bar-a-glyph font
+/// named `name` at `size` on one baseline, `gap` modules of paper between the last bar of the
+/// first and the first bar of the second: in one show (the gap made of white glyphs) or two.
+fn two_codes(name: &str, size: f32, gap: u8, one_show: bool) -> (Vec<u8>, [Vec<u8>; 2]) {
+    let (c1, c2) = (
+        bar_codes(Set::Pairs, "2026004711"),
+        bar_codes(Set::Pairs, "4006381333931"),
+    );
+    let shows = if one_show {
+        let mut all = c1.clone();
+        all.extend(std::iter::repeat_n(b'R', usize::from(gap)));
+        all.extend(&c2);
+        format!("BT /F3 {size} Tf 100 600 Td ({}) Tj ET\n", pdf_string(&all))
+    } else {
+        let module = PAIR_MODULE / 1000.0 * size;
+        let x2 = 100.0 + bar_width(Set::Pairs, "2026004711", size) + f32::from(gap) * module;
+        format!(
+            "BT /F3 {size} Tf 100 600 Td ({}) Tj ET\nBT /F3 {size} Tf {x2:.3} 600 Td ({}) Tj ET\n",
+            pdf_string(&c1),
+            pdf_string(&c2)
+        )
+    };
+    let content = format!(
+        "BT /F1 9 Tf 72 700 Td (Versand) Tj ET\n{shows}BT /F1 9 Tf 72 500 Td (Ende) Tj ET\n"
+    );
+    (
+        page_with_bar_fonts(&content, &[("F3", name, Set::Pairs, Kind::TrueTypeFull)]),
+        [c1, c2],
+    )
+}
+
+#[test]
+fn two_codes_close_on_one_baseline_never_leave_glyph_text() {
+    // Part 2f-1 re-review R1: two codes 5 modules apart (and some 6 apart) stayed text, glued
+    // into one word, with no code and no word. By the ruling of fix round 4, a run taken as
+    // bars never leaves glyph text: each code is read, or named as not decoded.
+    let mut tally: Vec<String> = Vec::new();
+    for gap in 1..=12u8 {
+        for one_show in [true, false] {
+            for name in ["ShopBars", "BC#20C128#20HD#20Wide"] {
+                for size in [12.0, 24.0] {
+                    let (file, glyphs) = two_codes(name, size, gap, one_show);
+                    let out = read(&file);
+                    let case = format!("gap {gap}, one show {one_show}, {name}, {size}");
+                    let all: String = all_text(&out).split_whitespace().collect();
+                    for g in &glyphs {
+                        let g = String::from_utf8_lossy(&g[..8]).to_string();
+                        assert!(!all.contains(&g), "{case}: glyph text {g} in {all}");
+                    }
+                    let found = codes(&out);
+                    for (s, t) in &found {
+                        assert!(
+                            s == "Code 128" && (t == "2026004711" || t == "4006381333931"),
+                            "{case}: {found:?}"
+                        );
+                    }
+                    let md = markdown(&out);
+                    if found.len() < 2 {
+                        assert!(md.contains("not decoded"), "{case}: {found:?} {md}");
+                    }
+                    if gap >= 5 && found.len() < 2 {
+                        tally.push(case);
+                    }
+                }
+            }
+        }
+    }
+    // From 5 modules apart both are read (the decoder wants a little paper between them).
+    assert!(tally.is_empty(), "{tally:#?}");
+}
+
+#[test]
+fn codes_of_two_widths_with_heavy_ink_spread_never_leave_glyph_text() {
+    // Part 2f-1 re-review R2: unnamed Code 39 and ITF whose bars are 25 % or 30 % of a module
+    // wider (spaces as much narrower) stayed text glued to their neighbour. The spread is
+    // taken out before their two widths are told apart.
+    use barcodes::Symbology as S;
+    for (s, text, kind) in [
+        (S::Code39, "ABC-1234", "Code 39"),
+        (S::Code39, "R7", "Code 39"),
+        (S::Itf, "12345670", "ITF"),
+        (S::Itf, "0042", "ITF"),
+    ] {
+        let glyphs = pair_glyphs(&elements(&common::modules(s, text).dark));
+        for spread in [0u8, 10, 20, 25, 30] {
+            for size in [18.0, 36.0] {
+                let content = format!(
+                    "BT /F1 9 Tf 72 640 Td (Artikel-Nr. A-0042) Tj ET\n\
+                     BT /F3 {size} Tf 300 600 Td ({}) Tj ET\n\
+                     BT /F1 9 Tf 72 600 Td (Menge 2) Tj ET\n",
+                    pdf_string(&glyphs)
+                );
+                let out = read(&page_with_bar_fonts(
+                    &content,
+                    &[("F3", "ShopBars", Set::Spread(spread), Kind::TrueTypeFull)],
+                ));
+                let case = format!("{kind} {text}, spread {spread} %, {size}");
+                let all = all_text(&out);
+                let g = String::from_utf8_lossy(&glyphs).to_string();
+                assert!(!all.contains(&g[..6]), "{case}: {all}");
+                let found = codes(&out);
+                let md = markdown(&out);
+                assert!(
+                    found == [(kind.to_string(), text.to_string())]
+                        || (found.is_empty() && md.contains("not decoded")),
+                    "{case}: {found:?} {md}"
+                );
             }
         }
     }

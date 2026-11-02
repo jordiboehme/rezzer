@@ -384,6 +384,9 @@ pub enum Set {
     Readable,
     /// Letters (a block a glyph, the space empty): a text font, as an OCR-B or MICR font.
     Letters,
+    /// [`Set::Pairs`] with each bar wider by this many percent of a module (ink spread; its
+    /// space as much narrower).
+    Spread(u8),
     /// The glyph program of a real shop's `BC C128 HD Wide` (fix round 3), 2048 units an em:
     /// each glyph one rectangle at x 0, 1559 high, its bar 36, 72, 107 or 143 units wide (1 to
     /// 4 modules of about 34.3, the bars a little wider than whole modules) and its advance 3
@@ -530,22 +533,32 @@ pub fn bar_glyphs(set: Set) -> Vec<BarGlyph> {
                 }
             })
             .collect(),
-        Set::Pairs => {
+        Set::Pairs | Set::Spread(_) => {
             let mut out = Vec::new();
             let at = |k: u8| (f32::from(k) * PAIR_MODULE).round() as i16;
+            let extra = match set {
+                Set::Spread(p) => (f32::from(p) / 100.0 * PAIR_MODULE).round() as i16,
+                _ => 0,
+            };
             for b in 1..=4u8 {
                 for s in 1..=4u8 {
                     out.push(BarGlyph {
                         code: pair_code(b, s),
-                        rects: vec![(0, 0, at(b), PAIR_HEIGHT)],
+                        rects: vec![(0, 0, at(b) + extra, PAIR_HEIGHT)],
                         adv: at(b + s) as u16,
                     });
                 }
             }
             out.push(BarGlyph {
                 code: b'Q',
-                rects: vec![(0, 0, at(2), PAIR_HEIGHT)],
+                rects: vec![(0, 0, at(2) + extra, PAIR_HEIGHT)],
                 adv: at(2) as u16,
+            });
+            // A white glyph of one module.
+            out.push(BarGlyph {
+                code: b'R',
+                rects: Vec::new(),
+                adv: at(1) as u16,
             });
             out
         }
@@ -558,7 +571,7 @@ pub fn bar_codes(set: Set, text: &str) -> Vec<u8> {
     match set {
         Set::Symbols | Set::Readable => values.into_iter().map(code_of).collect(),
         Set::Letters => text.bytes().collect(),
-        Set::Pairs | Set::Hd => {
+        Set::Pairs | Set::Spread(_) | Set::Hd => {
             let mut out = Vec::new();
             for v in values {
                 let w: Vec<u8> = PATTERNS[v as usize].bytes().map(|b| b - b'0').collect();
@@ -652,7 +665,7 @@ pub fn codes_ink_width(set: Set, codes: &[u8], size: f32) -> f32 {
 pub fn bar_height(set: Set, size: f32) -> f32 {
     let h = match set {
         Set::Symbols | Set::Readable => BAR_UNITS,
-        Set::Pairs => PAIR_HEIGHT,
+        Set::Pairs | Set::Spread(_) => PAIR_HEIGHT,
         Set::Letters => 700,
         Set::Hd => return f32::from(HD_HEIGHT) / 2048.0 * size,
     };
@@ -1168,7 +1181,7 @@ pub fn add_bar_font(b: &mut Builder, name: &str, set: Set, kind: Kind) -> u32 {
     };
     let (ascent, bbox) = match set {
         Set::Symbols | Set::Readable | Set::Letters => (BAR_UNITS, format!("0 0 1000 {BAR_UNITS}")),
-        Set::Pairs => (PAIR_HEIGHT, format!("0 0 438 {PAIR_HEIGHT}")),
+        Set::Pairs | Set::Spread(_) => (PAIR_HEIGHT, format!("0 0 438 {PAIR_HEIGHT}")),
         Set::Hd => (761, "0 0 438 761".to_string()),
     };
     let desc = b.add(format!(

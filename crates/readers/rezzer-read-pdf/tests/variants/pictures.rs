@@ -654,6 +654,51 @@ fn font_codes(v: &Variant, font: &str, size: f32, gap: f32, photo: bool) -> Shee
     s
 }
 
+/// Task 15b part 2f-1 fix round 4: two Code 128 in the one-bar-a-glyph font known by its bars
+/// (`FS`) at 24 points on one baseline, `gap` modules of paper between them, in one show (the
+/// gap of white glyphs) or two: both are found, or (a gap the decoder cannot read past) named;
+/// no glyph text stays.
+fn two_font_codes(v: &Variant, gap: u8, one_show: bool) -> Sheet {
+    use crate::common::barfont::{PAIR_MODULE, Set, bar_codes, bar_width, pdf_string};
+    let (plain, bold) = v.faces();
+    let size = 24.0;
+    let (first, second) = ("2026004711", "4006381333931");
+    let (c1, c2) = (bar_codes(Set::Pairs, first), bar_codes(Set::Pairs, second));
+    let shows = if one_show {
+        let mut all = c1.clone();
+        all.extend(std::iter::repeat_n(b'R', usize::from(gap)));
+        all.extend(&c2);
+        format!("BT /FS {size} Tf 300 600 Td ({}) Tj ET\n", pdf_string(&all))
+    } else {
+        let x2 = 300.0
+            + bar_width(Set::Pairs, first, size)
+            + f32::from(gap) * PAIR_MODULE / 1000.0 * size;
+        format!(
+            "BT /FS {size} Tf 300 600 Td ({}) Tj ET\nBT /FS {size} Tf {x2:.3} 600 Td ({}) Tj ET\n",
+            pdf_string(&c1),
+            pdf_string(&c2)
+        )
+    };
+    let mut t = show(bold, 14.0, 40.0, 790.0, "Versandschein");
+    t += &show(plain, 9.0, 72.0, 600.0, "Versand");
+    t += &shows;
+    t += &show(plain, 9.0, 72.0, 560.0, "Ende der Sendung");
+    let mut built = Built::new(&v.geo());
+    built.page = FormPage {
+        template: t,
+        ..FormPage::default()
+    };
+    let mut s = Sheet::new(built);
+    for (text, c) in [(first, &c1), (second, &c2)] {
+        s.want.codes.push(("Code 128".into(), text.into()));
+        s.want
+            .glyph_text
+            .push(c.iter().map(|&x| char::from(x)).collect());
+    }
+    s.want.may_title.push("Versandschein".into());
+    s
+}
+
 /// Task 15b part 2f-1 fix round 2: the coding line of a payment slip set in a letter font
 /// whose name looks like a code's (`font`, see `BAR_FONTS`): its text stays, and no code is
 /// claimed (a name never takes a run).
@@ -987,6 +1032,67 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "codes in the real shop font's glyph program known by its bars beside a photo, size 34",
             axes: RENDERED,
             draw: |v| (font_codes(v, "FY", 34.0, 8.0, true), None),
+        },
+        // Fix round 4: two codes side by side, 3 to 12 modules apart, in one show and two.
+        Shape {
+            name: "two codes in a bar-a-glyph font 3 modules apart, one show",
+            axes: RENDERED,
+            draw: |v| (two_font_codes(v, 3, true), None),
+        },
+        Shape {
+            name: "two codes in a bar-a-glyph font 3 modules apart, two shows",
+            axes: RENDERED,
+            draw: |v| (two_font_codes(v, 3, false), None),
+        },
+        Shape {
+            name: "two codes in a bar-a-glyph font 4 modules apart, one show",
+            axes: RENDERED,
+            draw: |v| (two_font_codes(v, 4, true), None),
+        },
+        Shape {
+            name: "two codes in a bar-a-glyph font 4 modules apart, two shows",
+            axes: RENDERED,
+            draw: |v| (two_font_codes(v, 4, false), None),
+        },
+        Shape {
+            name: "two codes in a bar-a-glyph font 5 modules apart, one show",
+            axes: RENDERED,
+            draw: |v| (two_font_codes(v, 5, true), None),
+        },
+        Shape {
+            name: "two codes in a bar-a-glyph font 5 modules apart, two shows",
+            axes: RENDERED,
+            draw: |v| (two_font_codes(v, 5, false), None),
+        },
+        Shape {
+            name: "two codes in a bar-a-glyph font 6 modules apart, one show",
+            axes: RENDERED,
+            draw: |v| (two_font_codes(v, 6, true), None),
+        },
+        Shape {
+            name: "two codes in a bar-a-glyph font 6 modules apart, two shows",
+            axes: RENDERED,
+            draw: |v| (two_font_codes(v, 6, false), None),
+        },
+        Shape {
+            name: "two codes in a bar-a-glyph font 7 modules apart, one show",
+            axes: RENDERED,
+            draw: |v| (two_font_codes(v, 7, true), None),
+        },
+        Shape {
+            name: "two codes in a bar-a-glyph font 7 modules apart, two shows",
+            axes: RENDERED,
+            draw: |v| (two_font_codes(v, 7, false), None),
+        },
+        Shape {
+            name: "two codes in a bar-a-glyph font 12 modules apart, one show",
+            axes: RENDERED,
+            draw: |v| (two_font_codes(v, 12, true), None),
+        },
+        Shape {
+            name: "two codes in a bar-a-glyph font 12 modules apart, two shows",
+            axes: RENDERED,
+            draw: |v| (two_font_codes(v, 12, false), None),
         },
         Shape {
             name: "a coding line in a letter font named IDAutomationOCRb",

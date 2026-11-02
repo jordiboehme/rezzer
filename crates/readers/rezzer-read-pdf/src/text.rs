@@ -2997,14 +2997,28 @@ impl TextDevice<'_> {
                 .map(|b| (b.id, b.t, b.outline.as_ref()))
                 .collect()
         };
+        // A group of shows that gives no code is looked at show by show.
+        let mut split: Vec<Vec<usize>> = Vec::with_capacity(groups.len());
+        let mut parts: Vec<Vec<crate::barfont::Part>> = Vec::with_capacity(groups.len());
+        for g in groups {
+            self.tick();
+            let named = |g: &[usize]| g.iter().any(|&i| runs[i].named);
+            let found = crate::barfont::code_parts(&looked(&g), named(&g));
+            if found.is_empty() && g.len() > 1 {
+                for i in g {
+                    parts.push(crate::barfont::code_parts(&looked(&[i]), named(&[i])));
+                    split.push(vec![i]);
+                }
+            } else {
+                parts.push(found);
+                split.push(g);
+            }
+        }
+        let groups = split;
         let mut taken = vec![false; groups.len()];
         // The parts of each group that are codes; a group taken as a run of a barcode font
         // without a part of its own is one code.
-        let mut parts: Vec<Vec<crate::barfont::Part>> = Vec::with_capacity(groups.len());
         for (k, g) in groups.iter().enumerate() {
-            self.tick();
-            let named = g.iter().any(|&i| runs[i].named);
-            parts.push(crate::barfont::code_parts(&looked(g), named));
             if !parts[k].is_empty() {
                 taken[k] = true;
                 for &i in g {
