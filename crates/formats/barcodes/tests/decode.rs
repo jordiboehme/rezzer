@@ -801,6 +801,7 @@ fn a_linear_code_is_boxed_by_its_bars() {
     // The decoder gives the line it read: the box reaches out along it to the first and the
     // last bar and across it to the ends of the bars, also for short bars.
     let m = modules(Symbology::Code128, "0000000001", None);
+    let mut looked = 0;
     for px in [2, 3, 4] {
         for bar in [6, 9, 15, 40, 120] {
             let (gray, w, h, boxes) = linear_pixels(&m, px, bar, 1, 0);
@@ -939,6 +940,7 @@ fn a_blurred_or_inked_code_is_one_code_boxed_by_its_bars() {
     // A scan softens a code's edges and its ink spreads: the decoder may read it along its
     // soft top or bottom row. It is still one code, boxed by its bars.
     let m = modules(Symbology::Code128, "0000000001", None);
+    let mut read = 0;
     for px in [2, 3, 4, 5] {
         for gain in [0, 1] {
             for blur in [0, 1, 2] {
@@ -948,6 +950,12 @@ fn a_blurred_or_inked_code_is_one_code_boxed_by_its_bars() {
                     let case =
                         format!("{px} pixels a module, gain {gain}, blur {blur}, bars {bar}");
                     assert!(scan.codes.len() <= 1, "{case}: {:?}", scan.codes);
+                    // A sharp code of 3 pixels a module or more is read: the box check below
+                    // means something only on reads.
+                    if px >= 3 && gain == 0 && blur == 0 {
+                        assert_eq!(scan.codes.len(), 1, "{case}: not read");
+                    }
+                    read += scan.codes.len();
                     if let Some(c) = scan.codes.first() {
                         assert!(
                             boxed(c.bounds, boxes[0], gain + blur + 1),
@@ -960,6 +968,8 @@ fn a_blurred_or_inked_code_is_one_code_boxed_by_its_bars() {
             }
         }
     }
+    // Most of the 72 cases are read, not only the sharp ones.
+    assert!(read >= 36, "{read} of 72 read");
 }
 
 #[test]
@@ -968,14 +978,22 @@ fn blurred_or_inked_equal_codes_apart_are_each_read() {
     // alone is read in that scan, both are, each boxed by its own bars; no box reaches across
     // the gap.
     let m = modules(Symbology::Code128, "0000000001", None);
+    let mut looked = 0;
     for px in [2, 3, 4] {
         for gain in [0, 1] {
             for blur in [0, 1, 2] {
                 for bar in [20, 60] {
                     let (g, w, h, _) = scan_pixels(&m, px, bar, gain, blur, 1, 0, true);
                     if scan_gray(&g, w, h).codes.len() != 1 {
+                        // A sharp code of 3 pixels a module or more is read alone, so the
+                        // pairs below are looked at.
+                        assert!(
+                            px < 3 || gain > 0 || blur > 0,
+                            "{px} pixels a module, bars {bar}: one code alone not read"
+                        );
                         continue;
                     }
+                    looked += 1;
                     for (gap, beside) in [(7, true), (8, true), (10, true), (12, true), (3, false)]
                     {
                         let (g, w, h, boxes) = scan_pixels(&m, px, bar, gain, blur, 2, gap, beside);
@@ -999,4 +1017,6 @@ fn blurred_or_inked_equal_codes_apart_are_each_read() {
             }
         }
     }
+    // Most of the 36 settings read one code alone, so their pairs are looked at.
+    assert!(looked >= 18, "{looked} of 36 looked at");
 }
