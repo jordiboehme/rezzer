@@ -2998,10 +2998,14 @@ impl TextDevice<'_> {
                 .collect()
         };
         let mut taken = vec![false; groups.len()];
+        // The parts of each group that are codes; a group taken as a run of a barcode font
+        // without a part of its own is one code.
+        let mut parts: Vec<Vec<crate::barfont::Part>> = Vec::with_capacity(groups.len());
         for (k, g) in groups.iter().enumerate() {
             self.tick();
             let named = g.iter().any(|&i| runs[i].named);
-            if crate::barfont::bars_fit(&looked(g), named) {
+            parts.push(crate::barfont::code_parts(&looked(g), named));
+            if !parts[k].is_empty() {
                 taken[k] = true;
                 for &i in g {
                     for b in &runs[i].glyphs {
@@ -3024,23 +3028,56 @@ impl TextDevice<'_> {
             }
         }
         let mut drop_glyph = vec![false; self.glyphs.len()];
+        let mut next_code = 0u32;
         for (k, g) in groups.iter().enumerate() {
             if !taken[k] {
                 continue;
             }
-            let code = u32::try_from(k).unwrap_or(u32::MAX);
-            if let Some(text) = crate::barfont::code128_text(&looked(g)) {
-                self.bar_texts.push((code, text));
+            let all = looked(g);
+            // Each part that is a code is a code of its own; bars past a quiet zone that are
+            // no part of one are no text and no code. A group with no part of its own is one
+            // code.
+            let first = next_code;
+            let spans = crate::barfont::glyph_spans(&all);
+            let mut code_of = vec![None; all.len()];
+            if parts[k].is_empty() {
+                if let Some(text) = crate::barfont::code128_text(&all) {
+                    self.bar_texts.push((first, text));
+                }
+                code_of.fill(Some(first));
+                next_code += 1;
+            } else {
+                for part in &parts[k] {
+                    let id = next_code;
+                    next_code += 1;
+                    if let Some(text) = &part.text {
+                        self.bar_texts.push((id, text.clone()));
+                    }
+                    let slack = 0.01 * (part.to - part.from);
+                    for (c, span) in code_of.iter_mut().zip(&spans) {
+                        if let Some((a, z)) = span
+                            && *a >= part.from - slack
+                            && *z <= part.to + slack
+                        {
+                            *c = Some(id);
+                        }
+                    }
+                }
             }
+            let mut at = 0;
             for &i in g {
                 let run = &runs[i];
                 for (j, b) in run.glyphs.iter().enumerate() {
+                    let code = code_of.get(at).copied().flatten();
+                    at += 1;
                     if !run.keep
                         && let Some(d) = drop_glyph.get_mut(run.from + j)
                     {
                         *d = true;
                     }
-                    if let Some((bx, module)) = crate::barfont::place(b.t, &b.outline) {
+                    if let Some(code) = code
+                        && let Some((bx, module)) = crate::barfont::place(b.t, &b.outline)
+                    {
                         self.bars.push(crate::barfont::Placed {
                             b: bx,
                             module,

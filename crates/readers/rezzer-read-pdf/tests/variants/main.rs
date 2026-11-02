@@ -363,6 +363,8 @@ shape_tests! {
     codes_in_a_bar_a_glyph_cff_font => "codes in a bar-a-glyph CFF font named BC C128 HD Wide, size 36",
     codes_in_a_bar_a_glyph_full_truetype_font => "codes in a bar-a-glyph full TrueType font known by its bars, size 24",
     codes_in_a_bar_a_glyph_font_beside_a_photo => "codes in a bar-a-glyph TrueType subset font beside a photo, size 36",
+    codes_in_the_real_shop_font_named => "codes in the real shop font's glyph program named BC C128 HD Wide, size 30",
+    codes_in_the_real_shop_font_beside_a_photo => "codes in the real shop font's glyph program known by its bars beside a photo, size 34",
     a_coding_line_in_a_letter_font_named_idautomationocrb => "a coding line in a letter font named IDAutomationOCRb",
     a_coding_line_in_a_letter_font_named_ocean13 => "a coding line in a letter font named Ocean13",
     a_code_128_in_a_human_readable_bar_font => "a Code 128 in a human-readable bar font, size 12",

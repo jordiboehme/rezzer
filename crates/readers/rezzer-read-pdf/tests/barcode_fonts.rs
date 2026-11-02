@@ -698,3 +698,21 @@ fn the_widths_of_a_font_alone_are_no_evidence() {
     );
     assert!(out.document.assets.is_empty(), "{:?}", out.document.assets);
 }
+
+#[test]
+fn the_glyph_program_of_a_real_shop_barcode_font_is_taken() {
+    // Fix round 3: the real font's glyph program. 2048 units an em, one rectangle a glyph at
+    // x 0, 1559 high, its bars a little wider than whole modules (36, 72, 107, 143 for a
+    // module of 34.3) so its spaces are a little narrower, PDF widths rounded down, a full bar
+    // and a white glyph of 2 modules, and a glyph of two bars far apart after a quiet zone;
+    // shown at 45 points as one show. At 6062133 its glyph text was glued into the values
+    // and no code was listed.
+    for kind in [Kind::TrueTypeSubset, Kind::TrueTypeFull] {
+        for name in ["BC#20C128#20HD#20Wide", "ShopBars"] {
+            for size in [45.0, 44.997, 30.0] {
+                let (file, glyphs) = invoice_in(Set::Hd, kind, name, size, 8.0);
+                assert_invoice(&read(&file), &glyphs, &format!("{kind:?} {name} {size}"));
+            }
+        }
+    }
+}

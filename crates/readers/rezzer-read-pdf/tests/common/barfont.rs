@@ -384,6 +384,48 @@ pub enum Set {
     Readable,
     /// Letters (a block a glyph, the space empty): a text font, as an OCR-B or MICR font.
     Letters,
+    /// The glyph program of a real shop's `BC C128 HD Wide` (fix round 3), 2048 units an em:
+    /// each glyph one rectangle at x 0, 1559 high, its bar 36, 72, 107 or 143 units wide (1 to
+    /// 4 modules of about 34.3, the bars a little wider than whole modules) and its advance 3
+    /// to 6 modules; a full bar of 2 modules with no space (`Q`), a white glyph of 2 modules
+    /// (`R`), and a glyph of two bars far apart (`S`, advance 1024). Its PDF widths are
+    /// rounded down to the 1000-unit em as the real file's are.
+    Hd,
+}
+
+/// Font units of a module of [`Set::Hd`], its bars, and its height, in 2048 units an em.
+pub const HD_MODULE: f64 = 34.3;
+pub const HD_BARS: [i16; 4] = [36, 72, 107, 143];
+pub const HD_HEIGHT: i16 = 1559;
+
+/// The advance of `k` modules in [`Set::Hd`], in its units, and its PDF width.
+fn hd_advance(k: u8) -> (u16, u16) {
+    let units = (f64::from(k) * HD_MODULE).round() as u16;
+    let pdf = match units {
+        69 => 33,
+        103 => 50,
+        137 => 66,
+        172 => 83,
+        206 => 100,
+        240 => 117,
+        274 => 134,
+        u => u * 1000 / 2048,
+    };
+    (units, pdf)
+}
+
+/// The PDF width (1000 units an em) of a glyph of `set` that advances `adv` font units.
+fn pdf_width(set: Set, adv: u16) -> u16 {
+    match set {
+        Set::Hd if adv == 1024 => 500,
+        Set::Hd => hd_advance((f64::from(adv) / HD_MODULE).round() as u8).1,
+        _ => adv,
+    }
+}
+
+/// The units an em of the fonts of `set`.
+fn units_per_em(set: Set) -> u16 {
+    if set == Set::Hd { 2048 } else { 1000 }
 }
 
 /// The structure of a bar font's program.
@@ -439,6 +481,34 @@ pub fn bar_glyphs(set: Set) -> Vec<BarGlyph> {
                 }
             })
             .collect(),
+        Set::Hd => {
+            let mut out = Vec::new();
+            for b in 1..=4u8 {
+                for sp in 1..=4u8 {
+                    out.push(BarGlyph {
+                        code: pair_code(b, sp),
+                        rects: vec![(0, 0, HD_BARS[usize::from(b - 1)], HD_HEIGHT)],
+                        adv: hd_advance(b + sp).0,
+                    });
+                }
+            }
+            out.push(BarGlyph {
+                code: b'Q',
+                rects: vec![(0, 0, 69, HD_HEIGHT)],
+                adv: 69,
+            });
+            out.push(BarGlyph {
+                code: b'R',
+                rects: Vec::new(),
+                adv: 69,
+            });
+            out.push(BarGlyph {
+                code: b'S',
+                rects: vec![(128, 0, 196, HD_HEIGHT), (828, 0, 896, HD_HEIGHT)],
+                adv: 1024,
+            });
+            out
+        }
         Set::Letters => (32..=126u8)
             .map(|c| BarGlyph {
                 code: c,
@@ -488,13 +558,22 @@ pub fn bar_codes(set: Set, text: &str) -> Vec<u8> {
     match set {
         Set::Symbols | Set::Readable => values.into_iter().map(code_of).collect(),
         Set::Letters => text.bytes().collect(),
-        Set::Pairs => {
+        Set::Pairs | Set::Hd => {
             let mut out = Vec::new();
             for v in values {
                 let w: Vec<u8> = PATTERNS[v as usize].bytes().map(|b| b - b'0').collect();
                 for p in w.chunks(2) {
                     out.push(pair_code(p[0], p.get(1).copied().unwrap_or(0)));
                 }
+            }
+            if set == Set::Hd {
+                // A bar of 2 and its space of 2 as the full bar and the white glyph, and after
+                // the stop a quiet zone of white glyphs and the glyph of two bars.
+                if let Some(k) = out.iter().position(|&c| c == pair_code(2, 2)) {
+                    out.splice(k..=k, *b"QR");
+                }
+                out.extend([b'R'; 6]);
+                out.push(b'S');
             }
             out
         }
@@ -527,7 +606,7 @@ pub fn bar_width(set: Set, text: &str, size: f32) -> f32 {
             glyphs
                 .iter()
                 .find(|g| g.code == *c)
-                .map_or(0.0, |g| f32::from(g.adv))
+                .map_or(0.0, |g| f32::from(pdf_width(set, g.adv)))
         })
         .sum::<f32>()
         / 1000.0
@@ -540,6 +619,18 @@ pub fn bar_ink_width(set: Set, text: &str, size: f32) -> f32 {
     codes_ink_width(set, &bar_codes(set, text), size)
 }
 
+/// The width of the ink of the code of `text` alone: for [`Set::Hd`] without the quiet zone
+/// and the glyph of two bars after it.
+pub fn code_ink_width(set: Set, text: &str, size: f32) -> f32 {
+    let codes = bar_codes(set, text);
+    let n = if set == Set::Hd {
+        codes.len() - 7
+    } else {
+        codes.len()
+    };
+    codes_ink_width(set, &codes[..n], size)
+}
+
 /// The width of the ink of the glyph codes `codes` in a font of `set` at `size`.
 pub fn codes_ink_width(set: Set, codes: &[u8], size: f32) -> f32 {
     let glyphs = bar_glyphs(set);
@@ -547,10 +638,11 @@ pub fn codes_ink_width(set: Set, codes: &[u8], size: f32) -> f32 {
     let mut right = 0.0f32;
     for c in codes {
         if let Some(g) = glyphs.iter().find(|g| g.code == *c) {
+            let em = f32::from(units_per_em(set)) / 1000.0;
             for r in &g.rects {
-                right = right.max(x + f32::from(r.2));
+                right = right.max(x + f32::from(r.2) / em);
             }
-            x += f32::from(g.adv);
+            x += f32::from(pdf_width(set, g.adv));
         }
     }
     right / 1000.0 * size
@@ -562,6 +654,7 @@ pub fn bar_height(set: Set, size: f32) -> f32 {
         Set::Symbols | Set::Readable => BAR_UNITS,
         Set::Pairs => PAIR_HEIGHT,
         Set::Letters => 700,
+        Set::Hd => return f32::from(HD_HEIGHT) / 2048.0 * size,
     };
     f32::from(h) / 1000.0 * size
 }
@@ -688,7 +781,7 @@ fn glyph_name(c: u8) -> String {
 
 /// A TrueType program of `glyphs`, mapped from the Unicode character of each code (WinAnsi,
 /// Latin-1 for the codes used), ascent `ascent`.
-fn truetype(glyphs: &[BarGlyph], ascent: i16) -> Vec<u8> {
+fn truetype(glyphs: &[BarGlyph], ascent: i16, upem: u16) -> Vec<u8> {
     let n = glyphs.len() as u16 + 1;
     let mut glyf = Vec::new();
     let mut loca = Vec::new();
@@ -709,9 +802,9 @@ fn truetype(glyphs: &[BarGlyph], ascent: i16) -> Vec<u8> {
     be32(&mut head, 0);
     be32(&mut head, 0x5F0F_3CF5);
     be16(&mut head, 0);
-    be16(&mut head, 1000);
+    be16(&mut head, upem);
     head.extend([0u8; 16]);
-    for v in [0u16, 0, 1000, ascent as u16] {
+    for v in [0u16, 0, upem, ascent as u16] {
         be16(&mut head, v);
     }
     be16(&mut head, 0);
@@ -1056,7 +1149,7 @@ pub fn add_bar_font(b: &mut Builder, name: &str, set: Set, kind: Kind) -> u32 {
     };
     let (file, subtype) = match kind {
         Kind::TrueTypeSubset | Kind::TrueTypeFull => {
-            let p = truetype(&glyphs, PAIR_HEIGHT.max(BAR_UNITS));
+            let p = truetype(&glyphs, PAIR_HEIGHT.max(BAR_UNITS), units_per_em(set));
             let ff = b.stream(&format!("/Length1 {}", p.len()), &p);
             (format!("/FontFile2 {ff} 0 R"), "TrueType")
         }
@@ -1076,6 +1169,7 @@ pub fn add_bar_font(b: &mut Builder, name: &str, set: Set, kind: Kind) -> u32 {
     let (ascent, bbox) = match set {
         Set::Symbols | Set::Readable | Set::Letters => (BAR_UNITS, format!("0 0 1000 {BAR_UNITS}")),
         Set::Pairs => (PAIR_HEIGHT, format!("0 0 438 {PAIR_HEIGHT}")),
+        Set::Hd => (761, "0 0 438 761".to_string()),
     };
     let desc = b.add(format!(
         "<< /Type /FontDescriptor /FontName /{base} /Flags 32 /FontBBox [{bbox}] \
@@ -1086,7 +1180,7 @@ pub fn add_bar_font(b: &mut Builder, name: &str, set: Set, kind: Kind) -> u32 {
             glyphs
                 .iter()
                 .find(|g| u16::from(g.code) == c)
-                .map_or("5".to_string(), |g| g.adv.to_string())
+                .map_or("5".to_string(), |g| pdf_width(set, g.adv).to_string())
         })
         .collect();
     b.add(format!(
@@ -1126,8 +1220,9 @@ pub fn page_with_bar_fonts(content: &str, fonts: &[(&str, &str, Set, Kind)]) -> 
 /// written, glyph set and structure. `FC` and `FN` are Code 128 symbol fonts named for codes
 /// and not; `FP` to `FS` draw one bar and its space a glyph, as `BC C128 HD Wide` does, in
 /// each structure; `FO` and `FM` are letter fonts with names that look like codes; `FH` is a
-/// human-readable bar font.
-pub const BAR_FONTS: [(&str, &str, Set, Kind); 9] = [
+/// human-readable bar font; `FX` and `FY` have the glyph program of a real shop's font
+/// ([`Set::Hd`]), named and not.
+pub const BAR_FONTS: [(&str, &str, Set, Kind); 11] = [
     ("FC", "Code128", Set::Symbols, Kind::TrueTypeSubset),
     ("FN", "ShopBars", Set::Symbols, Kind::TrueTypeSubset),
     (
@@ -1147,6 +1242,8 @@ pub const BAR_FONTS: [(&str, &str, Set, Kind); 9] = [
         Set::Readable,
         Kind::TrueTypeSubset,
     ),
+    ("FX", "BC#20C128#20HD#20Wide", Set::Hd, Kind::TrueTypeSubset),
+    ("FY", "ShopBars", Set::Hd, Kind::TrueTypeFull),
 ];
 
 /// The codes of the one-bar-a-glyph font ([`Set::Pairs`]) for elements `w` (bar, space,

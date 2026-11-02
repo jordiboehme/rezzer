@@ -313,39 +313,162 @@ pub(crate) fn outline(path: &BezPath) -> Outline {
 /// With `named` (the font's name says it is a barcode font) the shape needs less: at least
 /// [`NAMED_MIN_BARS`] bars, of one glyph or more, and whole modules of any number of widths,
 /// or two widths in any order. The glyphs must still be bars.
+#[cfg(test)]
 pub(crate) fn bars_fit(glyphs: &[(u32, Affine, &Outline)], named: bool) -> bool {
+    !code_parts(glyphs, named).is_empty()
+}
+
+/// A part of a run of bars that is a code (see [`bars_fit`]): from the left of its first bar
+/// to the right of its last, in points along the baseline of the run's first glyph (as
+/// [`glyph_spans`] gives them), and the Code 128 value its bars print, when they print one.
+pub(crate) struct Part {
+    pub from: f64,
+    pub to: f64,
+    pub text: Option<String>,
+}
+
+/// The parts of a run of bars that are codes. A run may hold a quiet zone of white glyphs
+/// and more bars past it: each part between wide spaces ([`segments`]) is looked at on its
+/// own.
+pub(crate) fn code_parts(glyphs: &[(u32, Affine, &Outline)], named: bool) -> Vec<Part> {
     let Some((joined, kinds)) = run_bars(glyphs) else {
-        return false;
+        return Vec::new();
     };
     let (min_bars, min_kinds) = if named {
         (NAMED_MIN_BARS, 1)
     } else {
         (MIN_BARS, MIN_KINDS)
     };
-    if kinds < min_kinds || joined.len() < min_bars {
-        return false;
+    if kinds < min_kinds {
+        return Vec::new();
     }
-    let widths = widths_of(&joined);
-    let module = widths.iter().copied().fold(f64::MAX, f64::min);
-    if module <= 0.0 || !module.is_finite() {
-        return false;
-    }
-    let mut seen: Vec<i64> = Vec::new();
-    let whole = widths.iter().all(|&w| {
-        let n = w / module;
-        let r = n.round();
-        if !seen.contains(&(r as i64)) {
-            seen.push(r as i64);
+    let fits = |part: &[(f64, f64)]| {
+        if part.len() < min_bars {
+            return false;
         }
-        (1.0..=MOST_MODULES).contains(&r) && (n - r).abs() <= WHOLE
-    });
-    if whole && (seen.len() >= MIN_WIDTHS || (named && seen.len() >= 2)) {
-        return true;
+        let widths = widths_of(part);
+        if let Some(modules) = whole_modules(&widths) {
+            let mut seen: Vec<u8> = modules.clone();
+            seen.sort_unstable();
+            seen.dedup();
+            if seen.len() >= MIN_WIDTHS || (named && seen.len() >= 2) {
+                return true;
+            }
+        }
+        match two_widths(&widths) {
+            Some(wide) => named || code39(&wide) || itf(&wide),
+            None => false,
+        }
+    };
+    segments(&joined)
+        .into_iter()
+        .filter(|part| fits(part))
+        .map(|part| Part {
+            from: part[0].0,
+            to: part[part.len() - 1].1,
+            text: code128_of(&widths_of(part)),
+        })
+        .collect()
+}
+
+/// Where the bars of each glyph of a run stand, in points along the baseline of its first
+/// glyph: from the left of its first bar to the right of its last, `None` for a space.
+pub(crate) fn glyph_spans(glyphs: &[(u32, Affine, &Outline)]) -> Vec<Option<(f64, f64)>> {
+    let Some(along) = glyphs.first().and_then(|g| baseline(g.1)) else {
+        return vec![None; glyphs.len()];
+    };
+    glyphs
+        .iter()
+        .map(|&(_, t, o)| {
+            let Outline::Bars { y0, bars, .. } = o else {
+                return None;
+            };
+            let (x0, x1) = (bars.first()?.0, bars.last()?.1);
+            let (a, z) = (
+                along(t * Point::new(x0, *y0)),
+                along(t * Point::new(x1, *y0)),
+            );
+            Some((a.min(z), a.max(z)))
+        })
+        .collect()
+}
+
+/// The place of a point along the baseline of a glyph drawn with `first`, in points from its
+/// origin. `None` for a transform that draws nothing.
+fn baseline(first: Affine) -> Option<impl Fn(Point) -> f64> {
+    let c = first.as_coeffs();
+    let len = c[0].hypot(c[1]);
+    if len <= 0.0 {
+        return None;
     }
-    match two_widths(&widths) {
-        Some(wide) => named || code39(&wide) || itf(&wide),
-        None => false,
+    let (dx, dy) = (c[0] / len, c[1] / len);
+    let origin = Point::new(c[4], c[5]);
+    Some(move |p: Point| (p.x - origin.x) * dx + (p.y - origin.y) * dy)
+}
+
+/// A space of a code is at most [`MOST_MODULES`]: a space wider than this many times the
+/// run's narrowest element (a quiet zone) ends a part of the run ([`segments`]).
+const QUIET: f64 = 6.0;
+
+/// The parts of bars `joined` between spaces wider than [`QUIET`] times the narrowest bar or
+/// space of the run.
+fn segments(joined: &[(f64, f64)]) -> Vec<&[(f64, f64)]> {
+    let narrowest = widths_of(joined).into_iter().fold(f64::MAX, f64::min);
+    let mut out = Vec::new();
+    let mut from = 0;
+    for k in 1..joined.len() {
+        if joined[k].0 - joined[k - 1].1 > QUIET * narrowest {
+            out.push(&joined[from..k]);
+            from = k;
+        }
     }
+    if from < joined.len() {
+        out.push(&joined[from..]);
+    }
+    out
+}
+
+/// How far the sum of a bar and the space after it may lie from a whole number of modules.
+const PAIR_WHOLE: f64 = 0.15;
+
+/// The widths `w` (bar, space, ..., bar) in whole modules of 1 to [`MOST_MODULES`], when they
+/// are: the module from the sums of each bar and the space after it (whole numbers of modules
+/// whatever the spread of the ink, which makes bars wider and spaces narrower by the same),
+/// the largest that fits them all; then the spread, and each bar less it and each space with
+/// it within [`WHOLE`] of a whole module. `None` otherwise.
+fn whole_modules(w: &[f64]) -> Option<Vec<u8>> {
+    let sums: Vec<f64> = w
+        .chunks(2)
+        .filter(|p| p.len() == 2)
+        .map(|p| p[0] + p[1])
+        .collect();
+    let least = sums.iter().copied().fold(f64::MAX, f64::min);
+    if sums.is_empty() || least <= 0.0 || !least.is_finite() {
+        return None;
+    }
+    // The least sum is 2 to 8 modules.
+    let module = (2..=8).map(|k| least / f64::from(k)).find(|&m| {
+        sums.iter().all(|&x| {
+            let n = x / m;
+            (n - n.round()).abs() <= PAIR_WHOLE
+        })
+    })?;
+    // The spread: what the bars hold past whole modules, on average.
+    let bars: Vec<f64> = w.iter().step_by(2).copied().collect();
+    let spread = bars
+        .iter()
+        .map(|&b| b - (b / module).round().max(1.0) * module)
+        .sum::<f64>()
+        / bars.len() as f64;
+    w.iter()
+        .enumerate()
+        .map(|(k, &x)| {
+            let x = if k % 2 == 0 { x - spread } else { x + spread };
+            let n = x / module;
+            let r = n.round();
+            ((1.0..=MOST_MODULES).contains(&r) && (n - r).abs() <= WHOLE).then_some(r as u8)
+        })
+        .collect()
 }
 
 /// The widths `w` as narrow (`false`) and wide (`true`) when they are of two widths only: the
@@ -413,14 +536,7 @@ fn run_bars(glyphs: &[(u32, Affine, &Outline)]) -> Option<(Vec<(f64, f64)>, usiz
         return None;
     }
     let &(_, first, _) = glyphs.first()?;
-    let c = first.as_coeffs();
-    let len = c[0].hypot(c[1]);
-    if len <= 0.0 {
-        return None;
-    }
-    let (dx, dy) = (c[0] / len, c[1] / len);
-    let origin = Point::new(c[4], c[5]);
-    let along = |p: Point| (p.x - origin.x) * dx + (p.y - origin.y) * dy;
+    let along = baseline(first)?;
     let mut height: Option<(f64, f64)> = None;
     let mut bars: Vec<(f64, f64)> = Vec::new();
     let mut kinds: Vec<u32> = Vec::new();
@@ -517,7 +633,14 @@ fn symbol(w: &[f64], modules: f64) -> Option<u8> {
 /// read from the render is checked as a picture's is.
 pub(crate) fn code128_text(glyphs: &[(u32, Affine, &Outline)]) -> Option<String> {
     let (joined, _) = run_bars(glyphs)?;
-    let w = widths_of(&joined);
+    // The part of the run between quiet zones that is a Code 128, if one is.
+    segments(&joined)
+        .into_iter()
+        .find_map(|part| code128_of(&widths_of(part)))
+}
+
+/// The text of the Code 128 whose bar and space widths are `w`, if they are one.
+fn code128_of(w: &[f64]) -> Option<String> {
     // A start, at least one symbol and the check (6 each), and the stop (7).
     if w.len() < 6 * 3 + 7 || !(w.len() - 7).is_multiple_of(6) {
         return None;
@@ -1093,5 +1216,61 @@ mod tests {
         assert!(!fit(&one_bar_glyphs(
             &[(1, 1), (1, 1), (1, 1), (1, 1), (2, 1)].repeat(5)
         )));
+    }
+
+    /// [`one_bar_glyphs`] with each bar `spread` units wider (its space as much narrower), and
+    /// after the code a quiet zone of `quiet` modules and a lone bar.
+    fn spread_glyphs(w: &[(u8, u8)], spread: f64, quiet: u8) -> Vec<(u32, Affine, Outline)> {
+        let mut out = one_bar_glyphs(w);
+        for g in &mut out {
+            if let Outline::Bars { bars, .. } = &mut g.2 {
+                bars[0].1 += spread;
+            }
+        }
+        if quiet > 0 {
+            let width: f64 = w.iter().map(|&(b, s)| f64::from(b + s) * 60.0).sum();
+            let x = (width + f64::from(quiet) * 60.0) * 0.012;
+            let o = outline(&rects(&[[0.0, 0.0, 120.0, 1600.0]]));
+            out.push((
+                77,
+                Affine::new([0.012, 0.0, 0.0, 0.012, 100.0 + x, 500.0]),
+                o,
+            ));
+        }
+        out
+    }
+
+    #[test]
+    fn ink_spread_and_a_quiet_zone_do_not_hide_a_code() {
+        // Bars a tenth of a module wider than whole modules (spaces as much narrower), as a
+        // real font draws them, and a lone bar past a quiet zone of 12 modules in the same
+        // run: the module comes from bar and space together, and the part before the quiet
+        // zone is the code.
+        let fit = |g: &[(u32, Affine, Outline)]| {
+            let r: Vec<(u32, Affine, &Outline)> = g.iter().map(|(i, t, o)| (*i, *t, o)).collect();
+            bars_fit(&r, false)
+        };
+        let read = |g: &[(u32, Affine, Outline)]| {
+            let r: Vec<(u32, Affine, &Outline)> = g.iter().map(|(i, t, o)| (*i, *t, o)).collect();
+            code128_text(&r)
+        };
+        let mut pairs = Vec::new();
+        for v in [104u8, 33, 17, 68, 106] {
+            let w: Vec<u8> = CODE128[usize::from(v)].bytes().map(|b| b - b'0').collect();
+            for p in w.chunks(2) {
+                pairs.push((p[0], p.get(1).copied().unwrap_or(0)));
+            }
+        }
+        for spread in [0.0, 6.0, -6.0] {
+            for quiet in [0, 12] {
+                let g = spread_glyphs(&pairs, spread, quiet);
+                assert!(fit(&g), "spread {spread}, quiet {quiet}");
+                assert_eq!(
+                    read(&g).as_deref(),
+                    Some("A1"),
+                    "spread {spread}, quiet {quiet}"
+                );
+            }
+        }
     }
 }

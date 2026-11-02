@@ -592,7 +592,7 @@ fn ruler(v: &Variant, on: On) -> Sheet {
 /// photo at the left makes the page need vision: the codes are read from the page render.
 fn font_codes(v: &Variant, font: &str, size: f32, gap: f32, photo: bool) -> Sheet {
     use crate::common::barfont::{
-        BAR_FONTS, bar_codes, bar_height, bar_ink_width, bar_width, pdf_string,
+        BAR_FONTS, bar_codes, bar_height, bar_ink_width, bar_width, code_ink_width, pdf_string,
     };
     let set = BAR_FONTS
         .iter()
@@ -603,11 +603,11 @@ fn font_codes(v: &Variant, font: &str, size: f32, gap: f32, photo: bool) -> Shee
     let (first, second) = ("2026004711", "4006381333931");
     let w1 = bar_width(set, first, size);
     let (i1, i2) = (
-        bar_ink_width(set, first, size),
-        bar_ink_width(set, second, size),
+        code_ink_width(set, first, size),
+        code_ink_width(set, second, size),
     );
     let xv = 380.0 + w1 + gap;
-    let x3 = 585.0 - i2;
+    let x3 = 585.0 - bar_ink_width(set, second, size);
     let mut t = show(bold, 14.0, 40.0, 790.0, "Rechnung");
     t += &show(plain, 9.0, 300.0, 760.0, "Rechnungs-Nr.");
     t += &show(plain, 9.0, xv, 760.0, first);
@@ -975,6 +975,19 @@ pub(crate) fn shapes() -> Vec<Shape> {
         // Fix round 2: letter fonts with code-like names keep their text; a human-readable
         // bar font is taken by its bars; Code 39 and ITF in a font known only by its bars;
         // a code shown a glyph at a time; EAN-13 drawn as paths at fine modules.
+        // Fix round 3: the glyph program of a real shop's font (2048 units an em, bars a
+        // little wider than whole modules, a white glyph, a quiet zone and a glyph of two bars
+        // after the code in the same show).
+        Shape {
+            name: "codes in the real shop font's glyph program named BC C128 HD Wide, size 30",
+            axes: RENDERED,
+            draw: |v| (font_codes(v, "FX", 30.0, 8.0, false), None),
+        },
+        Shape {
+            name: "codes in the real shop font's glyph program known by its bars beside a photo, size 34",
+            axes: RENDERED,
+            draw: |v| (font_codes(v, "FY", 34.0, 8.0, true), None),
+        },
         Shape {
             name: "a coding line in a letter font named IDAutomationOCRb",
             axes: RENDERED,
