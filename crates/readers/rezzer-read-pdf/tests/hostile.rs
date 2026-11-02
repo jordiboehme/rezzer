@@ -4571,3 +4571,140 @@ fn a_line_of_stops_costs_about_as_much_as_its_text() {
     );
     assert!(text(page(&out, 1)).contains("Ab Cd"));
 }
+
+/// The losses of `out` for the limit of a step whose words hold `words` on page 1.
+fn step_cut<'a>(out: &'a ReadOutcome, words: &str) -> Option<&'a Loss> {
+    out.document
+        .losses
+        .iter()
+        .find(|l| l.why == LossReason::Limit && l.what.contains(words) && l.what.contains("page 1"))
+}
+
+/// `n` tiny one-glyph runs on a grid over the box `x0, y0, x1, y1` of a page, `across` a row.
+fn dense_runs(c: &mut Vec<u8>, n: usize, across: usize, [x0, y0, x1, y1]: [f32; 4]) {
+    let rows = n.div_ceil(across);
+    let (dx, dy) = ((x1 - x0) / across as f32, (y1 - y0) / rows as f32);
+    c.extend(b"BT /F1 0.5 Tf ");
+    for k in 0..n {
+        let (x, y) = (x0 + (k % across) as f32 * dx, y0 + (k / across) as f32 * dy);
+        c.extend(format!("1 0 0 1 {x:.2} {y:.2} Tm (x) Tj ").as_bytes());
+    }
+    c.extend(b"ET\n");
+}
+
+#[test]
+fn many_bars_under_dense_text_are_bounded() {
+    // A drawn box with a word (the page shows a form), 8,000 short flat bars apart from each
+    // other and 150,000 tiny runs just over them: the search for titles over a bar stops at
+    // its work bound, says so and keeps the text.
+    let start = Instant::now();
+    let mut c = b"0.1 w 20 260 60 20 re S BT /F1 8 Tf 24 266 Td (Feld) Tj ET\n".to_vec();
+    for row in 0..40 {
+        let y = 10.0 + row as f32 * 2.5;
+        for k in 0..200 {
+            let x = 5.0 + k as f32 * 15.0;
+            c.extend(format!("{x} {y} m {} {y} l S ", x + 3.0).as_bytes());
+        }
+    }
+    dense_runs(&mut c, 150_000, 1_000, [5.0, 120.0, 2995.0, 200.0]);
+    let out = read(&sized_page(&c, 3000, 300));
+    assert_quick(start);
+    assert!(
+        step_cut(&out, "underlined titles").is_some(),
+        "{:?}",
+        out.document.losses
+    );
+    assert!(text(page(&out, 1)).contains("Feld"));
+}
+
+/// 1,500 rows of two boxes of a label over a value in the top half of a tall page, the boxes
+/// of a row touching unless `apart`, and 170,000 tiny runs in its bottom half (a small box in
+/// the corner keeps them away from the boxes of the rows).
+fn rows_of_field_boxes(apart: bool) -> Vec<u8> {
+    let rows = 1_500usize;
+    let h = 2 * (rows + 2) * 30;
+    let mut c = b"0.5 w 500 4 80 20 re S BT /F1 8 Tf 504 10 Td (Ecke) Tj ET\n".to_vec();
+    let right = if apart { 192 } else { 172 };
+    for r in 0..rows {
+        let top = h - 20 - r * 30;
+        for (side, x) in [("l", 72usize), ("r", right)] {
+            c.extend(format!("{x} {} 100 24 re S ", top - 24).as_bytes());
+            c.extend(
+                format!(
+                    "BT /F1 6 Tf {} {} Td (Name) Tj ET BT /F1 10 Tf {} {} Td ({side}{r:04}) Tj ET\n",
+                    x + 4,
+                    top - 8,
+                    x + 4,
+                    top - 20
+                )
+                .as_bytes(),
+            );
+        }
+    }
+    dense_runs(&mut c, 170_000, 100, [300.0, 40.0, 560.0, h as f32 / 2.0 - 20.0]);
+    tall_page(&c, h)
+}
+
+#[test]
+fn many_rows_of_field_boxes_beside_dense_text_cost_about_what_their_text_costs() {
+    // Whether a row of boxes heads lines below it is looked at with the page's lines built
+    // once: the rows cost about what the same boxes apart cost, which make no rows.
+    let start = Instant::now();
+    let _twin = read(&rows_of_field_boxes(true));
+    let twin = start.elapsed();
+    let start = Instant::now();
+    let out = read(&rows_of_field_boxes(false));
+    let took = start.elapsed();
+    assert!(
+        took < twin * 2 + Duration::from_secs(2),
+        "{took:?} against {twin:?}"
+    );
+    assert_heap_under_256_mib();
+    let body = text(page(&out, 1));
+    assert!(body.contains("l0000") && body.contains("r1499"));
+}
+
+#[test]
+fn rows_of_field_boxes_over_much_text_share_one_work_bound() {
+    // 100 rows of two boxes side by side across a wide page, and under them 1,500 lines of
+    // tiny runs in the gaps between the rows: each row looks through all the lines below it.
+    // The rows share one work bound for the page, which says when it is spent; the text is
+    // kept.
+    let start = Instant::now();
+    let (rows, lines) = (100usize, 1_500usize);
+    let (w, h) = (rows * 80 + 40, 1_000usize);
+    let mut c = b"0.5 w ".to_vec();
+    for r in 0..rows {
+        for (side, x) in [("l", 20 + r * 80), ("r", 50 + r * 80)] {
+            c.extend(format!("{x} {} 30 24 re S ", h - 44).as_bytes());
+            c.extend(
+                format!(
+                    "BT /F1 4 Tf {} {} Td (Nr) Tj ET BT /F1 7 Tf {} {} Td ({side}{r:03}) Tj ET\n",
+                    x + 2,
+                    h - 26,
+                    x + 2,
+                    h - 40
+                )
+                .as_bytes(),
+            );
+        }
+    }
+    c.extend(b"BT /F1 0.5 Tf ");
+    for l in 0..lines {
+        let y = 20.0 + l as f32 * 0.6;
+        for r in 0..rows {
+            let x = 85 + r * 80;
+            c.extend(format!("1 0 0 1 {x} {y:.1} Tm (x) Tj ").as_bytes());
+        }
+    }
+    c.extend(b"ET\n");
+    let out = read(&sized_page(&c, w, h));
+    assert_quick(start);
+    assert!(
+        step_cut(&out, "label and value pairs in drawn boxes").is_some(),
+        "{:?}",
+        out.document.losses
+    );
+    let body = text(page(&out, 1));
+    assert!(body.contains("l000") && body.contains("r099"));
+}

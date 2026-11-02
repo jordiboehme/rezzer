@@ -425,12 +425,33 @@ fn body_below(
     (*work <= BAND_WORK).then_some((body, misfit))
 }
 
+/// The lines of a page and their index by height, built once for all rows of boxes that
+/// [`heads_lines`] looks at.
+pub(super) struct Heads {
+    lines: Vec<FlowLine>,
+    by_y: ByY,
+}
+
+impl Heads {
+    pub(super) fn new(flow: &Flow) -> Heads {
+        let lines = flow_lines(flow);
+        let by_y = ByY::new(flow, &lines);
+        Heads { lines, by_y }
+    }
+}
+
 /// Whether the row of boxes `b` with cell edges `xs` heads lines of text below it that stand
 /// in its columns, as a header band heads its table (the body rule of [`one_band`]). `hs`
-/// are the page's horizontal lines, sorted by height.
-pub(super) fn heads_lines(flow: &Flow, hs: &[Seg], b: [f32; 4], xs: &[f32]) -> bool {
-    let lines = flow_lines(flow);
-    let by_y = ByY::new(flow, &lines);
+/// are the page's horizontal lines, sorted by height, and `heads` the lines of `flow`.
+/// `work` is shared by all rows of the page: `None` once it passes [`BAND_WORK`].
+pub(super) fn heads_lines(
+    flow: &Flow,
+    heads: &Heads,
+    hs: &[Seg],
+    b: [f32; 4],
+    xs: &[f32],
+    work: &mut usize,
+) -> Option<bool> {
     let area = Area {
         width: 0.0,
         height: 0.0,
@@ -440,15 +461,14 @@ pub(super) fn heads_lines(flow: &Flow, hs: &[Seg], b: [f32; 4], xs: &[f32]) -> b
     let sh = Shared {
         page: 0,
         flow,
-        lines: &lines,
-        by_y: &by_y,
+        lines: &heads.lines,
+        by_y: &heads.by_y,
         area: &area,
         hs,
         stop: &|| false,
     };
-    let mut work = 0;
     let free = |i: usize| !flow.runs[i].off_axis;
-    body_below(&sh, b, xs, f32::MIN, &free, &mut work).is_some_and(|(body, _)| !body.is_empty())
+    body_below(&sh, b, xs, f32::MIN, &free, work).map(|(body, _)| !body.is_empty())
 }
 
 /// For the lines of a body without rules from the top, each its pieces as (column, whether

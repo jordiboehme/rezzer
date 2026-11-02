@@ -16,14 +16,23 @@ const TITLE_TEXT_PITCH: f32 = 1.6;
 /// Lines of text one underlined title may have.
 const TITLE_TEXT_LINES: usize = 20;
 
+/// Steps the search for underlined titles may take on one page (runs looked at near a bar,
+/// bars looked at for a rule between lines); past them it stops and says so.
+const TITLE_WORK: usize = 4_000_000;
+
 /// Titles over a drawn bar: a line of bold text alone over a horizontal rule that no grid
 /// takes, the rule under its baseline by at most the title's size, longer than the title and
 /// starting within two of its sizes of the title's start; and under the rule, within its
 /// stretch, the lines of one style larger than the title (by half a point, any weight) that
 /// follow each other, the first within two line heights of the rule and no rule between
 /// them. Each title is a heading where it stands and its lines its text; their runs leave
-/// `flow`. `rules` are the page's drawn rules.
-pub(crate) fn underlined_titles(flow: &mut Flow, rules: &[Rule]) -> Vec<BoxTitle> {
+/// `flow`. `rules` are the page's drawn rules. The search stops at `stop` or past
+/// [`TITLE_WORK`] steps, with the titles found before it and why it stopped.
+pub(crate) fn underlined_titles(
+    flow: &mut Flow,
+    rules: &[Rule],
+    stop: &dyn Fn() -> bool,
+) -> (Vec<BoxTitle>, Option<&'static str>) {
     // A line rule runs along one axis by how it is made: it is flat when it is wider than high.
     let flat = |r: &Rule| r.kind == RuleKind::Line && (r.y0 - r.y1).abs() < (r.x0 - r.x1).abs();
     let segs: Vec<Seg> = rules
@@ -36,9 +45,22 @@ pub(crate) fn underlined_titles(flow: &mut Flow, rules: &[Rule]) -> Vec<BoxTitle
         })
         .collect();
     if segs.is_empty() || flow.runs.is_empty() {
-        return Vec::new();
+        return (Vec::new(), None);
     }
     let hs = crate::regions::merged(segs);
+    // The bars by their height (a bar at no height is at none), to find those near a height
+    // by a search.
+    let mut by_at: Vec<usize> = (0..hs.len()).filter(|&k| !hs[k].at.is_nan()).collect();
+    by_at.sort_by(|&a, &b| hs[a].at.total_cmp(&hs[b].at));
+    let ats: Vec<f32> = by_at.iter().map(|&k| hs[k].at).collect();
+    // The bars whose height lies within `lo..hi` at most (a superset: the caller tests each).
+    let near = |lo: f32, hi: f32| {
+        let a = ats.partition_point(|v| *v < lo);
+        let z = ats.partition_point(|v| *v <= hi);
+        &by_at[a..z.max(a)]
+    };
+    let mut work = 0usize;
+    let too_much = "the page has too many bars and too much text over them";
     // The rules of grids are a table's or a section's, not a title's.
     let taken: Vec<bool> = match grids(rules) {
         Ok(g) if !g.hs.is_empty() => {
@@ -46,7 +68,13 @@ pub(crate) fn underlined_titles(flow: &mut Flow, rules: &[Rule]) -> Vec<BoxTitle
             for (gh, _) in &g.groups {
                 for &j in gh {
                     let s = g.hs[j];
-                    for (k, h) in hs.iter().enumerate() {
+                    let close = near(s.at - 2.0 * SNAP, s.at + 2.0 * SNAP);
+                    work += close.len() + 1;
+                    if work > TITLE_WORK {
+                        return (Vec::new(), Some(too_much));
+                    }
+                    for &k in close {
+                        let h = hs[k];
                         if (h.at - s.at).abs() <= SNAP && h.from < s.to && h.to > s.from {
                             t[k] = true;
                         }
@@ -61,9 +89,19 @@ pub(crate) fn underlined_titles(flow: &mut Flow, rules: &[Rule]) -> Vec<BoxTitle
     let by_y = ByY::new(flow, &lines);
     let mut used = vec![false; flow.runs.len()];
     let mut found: Vec<(Vec<usize>, Vec<usize>, f32)> = Vec::new();
+    let mut halted: Option<&'static str> = None;
+    // Runs between two heights, charged to the work before they are copied.
+    let between = |lo: f32, hi: f32, work: &mut usize| -> Option<Vec<usize>> {
+        *work += by_y.count_between(lo, hi) + 1;
+        (*work <= TITLE_WORK).then(|| by_y.runs_between(lo, hi))
+    };
     for (k, bar) in hs.iter().enumerate() {
         if taken[k] {
             continue;
+        }
+        if stop() {
+            halted = Some("the time limit was reached");
+            break;
         }
         let in_range = |i: usize| {
             let (cx, _) = middle(&flow.runs[i]);
@@ -74,8 +112,11 @@ pub(crate) fn underlined_titles(flow: &mut Flow, rules: &[Rule]) -> Vec<BoxTitle
             !used[i] && !r.off_axis && inked(r)
         };
         // The title: the lowest line over the bar within its size.
-        let near = by_y.runs_between(bar.at, bar.at + 3.0 * MAX_CAPTION_SIZE);
-        let over: Vec<usize> = near
+        let Some(close) = between(bar.at, bar.at + 3.0 * MAX_CAPTION_SIZE, &mut work) else {
+            halted = Some(too_much);
+            break;
+        };
+        let over: Vec<usize> = close
             .into_iter()
             .filter(|&i| {
                 let r = &flow.runs[i];
@@ -106,8 +147,11 @@ pub(crate) fn underlined_titles(flow: &mut Flow, rules: &[Rule]) -> Vec<BoxTitle
             .fold(f32::MIN, f32::max);
         // Nothing else stands on the title's line within the bar's stretch.
         let line_y = flow.runs[low].y;
-        let alone = by_y
-            .runs_between(line_y - size, line_y + size)
+        let Some(beside) = between(line_y - size, line_y + size, &mut work) else {
+            halted = Some(too_much);
+            break;
+        };
+        let alone = beside
             .into_iter()
             .filter(|&i| in_range(i) && inked(&flow.runs[i]))
             .all(|i| title.contains(&i) || (flow.runs[i].y - line_y).abs() > 0.3 * size);
@@ -120,11 +164,15 @@ pub(crate) fn underlined_titles(flow: &mut Flow, rules: &[Rule]) -> Vec<BoxTitle
             continue;
         }
         // Its text: the lines under the bar within its stretch.
-        let below: Vec<usize> = by_y
-            .runs_between(
-                bar.at - 2.0 * TITLE_TEXT_LINES as f32 * size * TITLE_TEXT_PITCH,
-                bar.at,
-            )
+        let Some(under) = between(
+            bar.at - 2.0 * TITLE_TEXT_LINES as f32 * size * TITLE_TEXT_PITCH,
+            bar.at,
+            &mut work,
+        ) else {
+            halted = Some(too_much);
+            break;
+        };
+        let below: Vec<usize> = under
             .into_iter()
             .filter(|&i| usable(i, &used) && in_range(i))
             .collect();
@@ -139,9 +187,14 @@ pub(crate) fn underlined_titles(flow: &mut Flow, rules: &[Rule]) -> Vec<BoxTitle
             let first = text.is_empty();
             let limit = if first { 2.0 * h } else { TITLE_TEXT_PITCH * h };
             // A rule between the lines ends the text.
-            let ruled = hs
-                .iter()
-                .any(|s| s.at < last - SNAP && s.at > y && s.from < bar.to && s.to > bar.from);
+            let a = ats.partition_point(|v| *v <= y);
+            let z = ats.partition_point(|v| *v < last - SNAP);
+            let lying = &by_at[a..z.max(a)];
+            work += lying.len();
+            let ruled = lying.iter().any(|&j| {
+                let s = hs[j];
+                s.at < last - SNAP && s.at > y && s.from < bar.to && s.to > bar.from
+            });
             let styles: Vec<Style> = l.iter().map(|&i| style_of(&flow.runs[i])).collect();
             let one = styles.iter().all(|s| *s == styles[0]);
             if gap > limit || ruled || !one || style.is_some_and(|s| s != styles[0]) {
@@ -167,7 +220,7 @@ pub(crate) fn underlined_titles(flow: &mut Flow, rules: &[Rule]) -> Vec<BoxTitle
         found.push((title, text, top));
     }
     if found.is_empty() {
-        return Vec::new();
+        return (Vec::new(), halted);
     }
     let mut owner: Vec<Option<(usize, bool)>> = vec![None; flow.runs.len()];
     let mut out: Vec<BoxTitle> = Vec::with_capacity(found.len());
@@ -197,5 +250,5 @@ pub(crate) fn underlined_titles(flow: &mut Flow, rules: &[Rule]) -> Vec<BoxTitle
             None => {}
         }
     }
-    out
+    (out, halted)
 }

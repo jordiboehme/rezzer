@@ -10,7 +10,7 @@ use super::*;
 use crate::layout::Slot;
 use crate::regions::{Index, Seg, grids, regions_of};
 use crate::tables::LABEL_STEP;
-use crate::tables::banded::heads_lines;
+use crate::tables::banded::{Heads, heads_lines};
 
 /// The note before the first table of drawn boxes of a page.
 pub(super) const BOX_FOUND_BY: &str = "Found by: label and value pairs from drawn boxes; the label \
@@ -30,16 +30,19 @@ const TOUCH: f32 = 0.5;
 /// below is a header band, not fields. Their runs leave `flow`. Also says, for boxes beside
 /// fields that are not read as fields, why: a box of three styles or more, or one whose
 /// label stands below its value. A box beside boxed fields whose text is bold alone is a
-/// title: its runs leave `flow` as a [`BoxTitle`].
+/// title: its runs leave `flow` as a [`BoxTitle`]. Whether rows of boxes head lines is looked
+/// at within one work bound for the page and until `stop`: past either, the rows left are
+/// read as text and the last value says why.
 pub(crate) fn box_pairs(
     page: u32,
     flow: &mut Flow,
     boxes: &[[f32; 4]],
     rules: &[Rule],
     text_sizes: &[f32],
-) -> (Vec<Planned>, Vec<BoxTitle>, Vec<String>) {
+    stop: &dyn Fn() -> bool,
+) -> (Vec<Planned>, Vec<BoxTitle>, Vec<String>, Option<String>) {
     if boxes.is_empty() || flow.runs.is_empty() {
-        return (Vec::new(), Vec::new(), Vec::new());
+        return (Vec::new(), Vec::new(), Vec::new(), None);
     }
     let points: Vec<(f32, f32, f32)> = flow
         .runs
@@ -53,7 +56,7 @@ pub(crate) fn box_pairs(
         })
         .collect();
     let Ok(regions) = regions_of(&points, boxes) else {
-        return (Vec::new(), Vec::new(), Vec::new());
+        return (Vec::new(), Vec::new(), Vec::new(), None);
     };
     let mut in_box: Vec<Vec<usize>> = vec![Vec::new(); boxes.len()];
     for (i, r) in regions.iter().enumerate() {
@@ -289,6 +292,10 @@ pub(crate) fn box_pairs(
         covered(vs, a[0], b[3], a[1], t) && covered(vs, a[2], b[3], a[1], t)
     };
     let mut hs: Option<Vec<Seg>> = None;
+    // The page's lines, built once for every row, and the work they take for the page.
+    let mut heads: Option<Heads> = None;
+    let mut work = 0usize;
+    let mut spent: Option<&str> = None;
     let mut groups: Vec<Vec<usize>> = Vec::new();
     let mut used = vec![false; boxes.len()];
     for c in chains(&order, &|p, q| {
@@ -310,11 +317,27 @@ pub(crate) fn box_pairs(
         for &k in &c {
             used[k] = true;
         }
+        // Past the time limit or the work bound, a row is read as text: no pairs.
+        if spent.is_none() && stop() {
+            spent = Some("the time limit was reached");
+        }
+        if spent.is_some() {
+            continue;
+        }
         let hs = hs.get_or_insert_with(|| grids(rules).map(|g| g.hs).unwrap_or_default());
-        if !heads_lines(flow, hs, b, &xs) {
-            groups.push(c);
+        let heads = heads.get_or_insert_with(|| Heads::new(flow));
+        match heads_lines(flow, heads, hs, b, &xs, &mut work) {
+            Some(false) => groups.push(c),
+            Some(true) => {}
+            None => spent = Some("the page has too much text below its rows of boxes"),
         }
     }
+    let skipped = spent.map(|why| {
+        format!(
+            "label and value pairs in drawn boxes on page {page} are looked for only in part: \
+             {why}; the rows of boxes past that are read as text"
+        )
+    });
     let mut rest: Vec<usize> = order.into_iter().filter(|&b| !used[b]).collect();
     rest.sort_by(|&a, &b| boxes[b][3].total_cmp(&boxes[a][3]));
     for c in chains(&rest, &|p, q| {
@@ -454,7 +477,7 @@ pub(crate) fn box_pairs(
         }
     }
     if groups.is_empty() && framed.is_empty() {
-        return (Vec::new(), Vec::new(), said);
+        return (Vec::new(), Vec::new(), said, skipped);
     }
     let mut planned: Vec<Planned> = Vec::new();
     let mut target: Vec<Option<(usize, usize, usize)>> = vec![None; flow.runs.len()];
@@ -515,7 +538,7 @@ pub(crate) fn box_pairs(
             (None, None) => {}
         }
     }
-    (planned, titles, said)
+    (planned, titles, said, skipped)
 }
 
 /// A framed box read as a title over its lines: the boxes it takes (the frame and a title

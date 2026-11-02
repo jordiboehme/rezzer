@@ -528,6 +528,13 @@ impl ByY {
         }
     }
 
+    /// The number of runs whose middle lies between the heights `lo` and `hi`.
+    fn count_between(&self, lo: f32, hi: f32) -> usize {
+        let a = self.run_y.partition_point(|y| *y <= lo);
+        let z = self.run_y.partition_point(|y| *y < hi);
+        z.saturating_sub(a)
+    }
+
     /// The runs whose middle lies between the heights `lo` and `hi`, in page order.
     fn runs_between(&self, lo: f32, hi: f32) -> Vec<usize> {
         let a = self.run_y.partition_point(|y| *y <= lo);

@@ -1044,15 +1044,32 @@ pub(crate) fn page_blocks_at(
     if geometry && let Some(height) = height {
         // Drawn boxes of a label over its value are taken first: a row of them is no header
         // band. A page with form fields is the form's (see `tables::untagged`).
+        let stop = || time_over(cx.budget).is_err();
         if drawn.widgets.is_empty() {
             // A title over a bar is a form's: a page of prose keeps its headings and
             // paragraphs.
             if tables::form_drawn(drawn.rules, drawn.boxes) {
-                let titles = tables::underlined_titles(&mut flow, drawn.rules);
+                let (titles, halted) = tables::underlined_titles(&mut flow, drawn.rules, &stop);
                 placed.extend(titles.into_iter().map(Placed::Title));
+                if let Some(why) = halted {
+                    notes.push((
+                        format!(
+                            "underlined titles on page {page} are looked for only in part: \
+                             {why}; the text past that is read as it stands"
+                        ),
+                        LossReason::Limit,
+                        Severity::Info,
+                    ));
+                }
             }
-            let (found, titles, unsure) =
-                tables::box_pairs(page, &mut flow, drawn.boxes, drawn.rules, &text_sizes);
+            let (found, titles, unsure, skipped) = tables::box_pairs(
+                page,
+                &mut flow,
+                drawn.boxes,
+                drawn.rules,
+                &text_sizes,
+                &stop,
+            );
             placed.extend(found.into_iter().map(Placed::Table));
             placed.extend(titles.into_iter().map(Placed::Title));
             notes.extend(
@@ -1060,8 +1077,8 @@ pub(crate) fn page_blocks_at(
                     .into_iter()
                     .map(|w| (w, LossReason::Uncertain, Severity::Info)),
             );
+            notes.extend(skipped.map(|w| (w, LossReason::Limit, Severity::Info)));
         }
-        let stop = || time_over(cx.budget).is_err();
         let found = tables::untagged(page, &mut flow, drawn, height, &stop);
         placed.extend(found.tables.into_iter().map(Placed::Table));
         placed.extend(found.unsure.into_iter().map(Placed::Unsure));
