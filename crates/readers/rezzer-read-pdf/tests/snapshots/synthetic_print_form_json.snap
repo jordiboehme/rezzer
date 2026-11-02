@@ -1,0 +1,1442 @@
+---
+source: crates/readers/rezzer-read-pdf/tests/print_forms/main.rs
+expression: json
+---
+{
+  "model_version": 1,
+  "source": {
+    "name": "file.pdf",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "size": 9773,
+    "format": "pdf",
+    "detection": {
+      "confidence": "certain",
+      "evidence": "%PDF-"
+    },
+    "reader": {
+      "id": "pdf",
+      "version": "0.1.0"
+    }
+  },
+  "properties": {
+    "title": "Entgeltabrechnung",
+    "custom": {
+      "pdf_version": {
+        "type": "text",
+        "value": "1.7"
+      }
+    },
+    "facts": {
+      "pages": 2,
+      "tagged": false,
+      "encrypted": false,
+      "signed": false,
+      "revisions": 1,
+      "has_javascript": false
+    },
+    "title_from": "largest heading in the top third of page 1",
+    "document_date": {
+      "date": "2026-10-01",
+      "from": "date label \"Datum\" on page 1"
+    }
+  },
+  "body": [
+    {
+      "type": "section",
+      "kind": "page",
+      "anchor": "p1",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "type": "status",
+              "text": "Page 1",
+              "color": "grey"
+            }
+          ],
+          "role": "page"
+        },
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "type": "text",
+              "text": "Found by: 1 decimal separator and 2 date separators on this page are drawn marks, not text; they are written as \",\" and \".\" as in 15 amounts and 2 dates written as text in this file."
+            }
+          ],
+          "role": "found-by"
+        },
+        {
+          "type": "heading",
+          "level": 1,
+          "inlines": [
+            {
+              "type": "text",
+              "text": "Entgeltabrechnung"
+            }
+          ],
+          "anchor": "p1:b1"
+        },
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "type": "text",
+              "text": "Muster GmbH, Musterweg 1, 12345 Musterstadt"
+            }
+          ],
+          "anchor": "p1:b2"
+        },
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "type": "text",
+              "text": "Erika Mustermann"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "type": "text",
+              "text": "Musterweg 1"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "type": "text",
+              "text": "12345 Musterstadt"
+            }
+          ],
+          "anchor": "p1:b3"
+        },
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "type": "text",
+              "text": "Found by: label and value pairs from drawn boxes; the label is the smaller text at the top of each box."
+            }
+          ],
+          "role": "found-by",
+          "anchor": "p1:b4"
+        },
+        {
+          "type": "table",
+          "header_rows": 0,
+          "rows": [
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Personalnummer"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "00000"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ],
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Datum"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "01.10.2026"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ],
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Steuerklasse"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "status",
+                    "text": "empty",
+                    "color": "grey"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ]
+          ],
+          "anchor": "p1:t1"
+        },
+        {
+          "type": "table",
+          "header_rows": 1,
+          "rows": [
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Pers.-Nr."
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Name"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Klasse"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Kinder"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Kasse"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Abt."
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ],
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "0001"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Muster"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "1"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "0,5"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Kasse A"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "100"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ]
+          ],
+          "anchor": "p1:t2"
+        },
+        {
+          "type": "table",
+          "header_rows": 1,
+          "rows": [
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Nr."
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Art"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Std."
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Satz"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Brutto"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ],
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "1001"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Gehalt"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "160"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "12,34"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "1.974,40"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ],
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "1002"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Zulage"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "40,00"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ]
+          ],
+          "anchor": "p1:t3"
+        },
+        {
+          "type": "table",
+          "header_rows": 1,
+          "rows": [
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Nr"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Text"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Mg"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Betrag"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ],
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "1000"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Gehalt"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "2"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "1.111,11"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ],
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "2000"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "22,22"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ],
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "3000"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Bonus"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "1"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "333,33"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ]
+          ],
+          "anchor": "p1:t4"
+        },
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "type": "text",
+              "text": "Betrag**"
+            }
+          ],
+          "anchor": "p1:b5"
+        },
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "type": "text",
+              "text": "Zahltag"
+            }
+          ],
+          "anchor": "p1:b6"
+        },
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "type": "text",
+              "text": "9876,54"
+            }
+          ],
+          "anchor": "p1:b7"
+        },
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "type": "text",
+              "text": "28.02.2026"
+            }
+          ],
+          "anchor": "p1:b8"
+        },
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "type": "text",
+              "text": "Auszahlungsbetrag* 1.234,56"
+            }
+          ],
+          "anchor": "p1:b9"
+        },
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "type": "text",
+              "text": "* nach Abzug der Steuern"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "type": "text",
+              "text": "** ohne Rundung"
+            }
+          ],
+          "role": "page-footer",
+          "anchor": "p1:b10"
+        }
+      ]
+    },
+    {
+      "type": "section",
+      "kind": "page",
+      "anchor": "p2",
+      "blocks": [
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "type": "status",
+              "text": "Page 2",
+              "color": "grey"
+            }
+          ],
+          "role": "page"
+        },
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "type": "text",
+              "text": "Found by: 1 decimal separator and 2 date separators on this page are drawn marks, not text; they are written as \",\" and \".\" as in 15 amounts and 2 dates written as text in this file."
+            }
+          ],
+          "role": "found-by"
+        },
+        {
+          "type": "heading",
+          "level": 1,
+          "inlines": [
+            {
+              "type": "text",
+              "text": "Entgeltabrechnung"
+            }
+          ],
+          "anchor": "p2:b1"
+        },
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "type": "text",
+              "text": "Muster GmbH, Musterweg 1, 12345 Musterstadt"
+            }
+          ],
+          "anchor": "p2:b2"
+        },
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "type": "text",
+              "text": "Max Mustermann"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "type": "text",
+              "text": "Beispielweg 2"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "type": "text",
+              "text": "54321 Beispielstadt"
+            }
+          ],
+          "anchor": "p2:b3"
+        },
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "type": "text",
+              "text": "Found by: label and value pairs from drawn boxes; the label is the smaller text at the top of each box."
+            }
+          ],
+          "role": "found-by",
+          "anchor": "p2:b4"
+        },
+        {
+          "type": "table",
+          "header_rows": 0,
+          "rows": [
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Personalnummer"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "00001"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ],
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Datum"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "01.11.2026"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ],
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Steuerklasse"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "status",
+                    "text": "empty",
+                    "color": "grey"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ]
+          ],
+          "anchor": "p2:t1"
+        },
+        {
+          "type": "table",
+          "header_rows": 1,
+          "rows": [
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Pers.-Nr."
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Name"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Klasse"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Kinder"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Kasse"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Abt."
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ],
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "0002"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Beispiel"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "3"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "1,0"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Kasse B"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "200"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ]
+          ],
+          "anchor": "p2:t2"
+        },
+        {
+          "type": "table",
+          "header_rows": 1,
+          "rows": [
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Nr."
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Art"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Std."
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Satz"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Brutto"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ],
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "1001"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Gehalt"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "150"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "13,45"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "2.017,50"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ],
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "1003"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Bonus"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "100,00"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ]
+          ],
+          "anchor": "p2:t3"
+        },
+        {
+          "type": "table",
+          "header_rows": 1,
+          "rows": [
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Nr"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Text"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Mg"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Betrag"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ],
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "1000"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Gehalt"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "2"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "2.222,22"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ],
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "2000"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Zulage"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "1"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "44,44"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ],
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "2000"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Zulage"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "1"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "44,44"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ],
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "4000"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Praemie"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "1"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "55,55"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ]
+          ],
+          "anchor": "p2:t4"
+        },
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "type": "text",
+              "text": "Betrag**"
+            }
+          ],
+          "anchor": "p2:b5"
+        },
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "type": "text",
+              "text": "Zahltag"
+            }
+          ],
+          "anchor": "p2:b6"
+        },
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "type": "text",
+              "text": "8765,43"
+            }
+          ],
+          "anchor": "p2:b7"
+        },
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "type": "text",
+              "text": "31.03.2026"
+            }
+          ],
+          "anchor": "p2:b8"
+        },
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "type": "text",
+              "text": "Auszahlungsbetrag* 2.345,67"
+            }
+          ],
+          "anchor": "p2:b9"
+        },
+        {
+          "type": "paragraph",
+          "inlines": [
+            {
+              "type": "text",
+              "text": "* nach Abzug der Steuern"
+            },
+            {
+              "type": "line_break"
+            },
+            {
+              "type": "text",
+              "text": "** ohne Rundung"
+            }
+          ],
+          "role": "page-footer",
+          "anchor": "p2:b10"
+        }
+      ]
+    }
+  ],
+  "facets": {}
+}

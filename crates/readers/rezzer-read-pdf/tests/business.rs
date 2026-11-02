@@ -8198,3 +8198,119 @@ fn totals_of_other_shapes_keep_their_rows() {
         wrong.join("\n")
     );
 }
+
+/// The golden file of the synthetic invoice: its Markdown and its JSON are kept as snapshots,
+/// so a later change of the reader shows in them. The facts next to them hold whatever the
+/// snapshots say.
+#[test]
+fn synthetic_invoice_golden() {
+    let out = common::read(&common::synthetic_invoice());
+    let md = markdown(&out);
+    let json = serde_json::to_string_pretty(&out.document).expect("json");
+    insta::assert_snapshot!("synthetic_invoice_md", md);
+    insta::assert_snapshot!("synthetic_invoice_json", json);
+
+    assert_eq!(out.completeness, Completeness::Complete);
+    // Known gap, kept as it reads today: page 1 cuts the footer rows at other gutters than
+    // page 2 (the body text of page 1 runs across the gutter between the first two columns),
+    // so the footer lines are not the same lines on both pages and are no running footer.
+    // The footer then reads as blocks side by side with this loss. Wanted: no loss.
+    let what: Vec<&str> = out
+        .document
+        .losses
+        .iter()
+        .map(|l| l.what.as_str())
+        .collect();
+    assert_eq!(
+        what,
+        [
+            "blocks of short lines side by side on page 1 are read one block after the other, \
+             as blocks of their own: if their lines are rows of a table or labels beside \
+             values, those rows are not kept"
+        ]
+    );
+    let props = &out.document.properties;
+    assert_eq!(props.title.as_deref(), Some("Rechnung"));
+    assert_eq!(
+        props.title_from.as_deref(),
+        Some("largest heading in the top third of page 1")
+    );
+    assert_eq!(
+        props.document_date.as_ref().map(|d| d.date.as_str()),
+        Some("2026-02-01")
+    );
+    let mut items = vec![vec![
+        "Pos", "Artikel", "Menge", "Einheit", "Preis", "Betrag",
+    ]];
+    items.extend([
+        vec!["1", "Beratung", "2", "Std", "500,00", "1.000,00"],
+        vec!["2", "Material", "1", "Stk", "200,00", "200,00"],
+        vec!["3", "Versand", "1", "Stk", "34,56", "34,56"],
+    ]);
+    let items: Vec<&[&str]> = items.iter().map(|r| r.as_slice()).collect();
+    assert_eq!(
+        tables(&out),
+        [
+            (
+                0,
+                owned(&[
+                    &["Rechnungsnummer", "0000-0001"],
+                    &["Kundennummer", "00000"],
+                    &["Datum", "01.02.2026"],
+                    &["Seite", "1 von 2"],
+                ])
+            ),
+            (1, owned(&items)),
+            (
+                0,
+                owned(&[
+                    &["Nettobetrag", "1.234,56"],
+                    &["USt 19 %", "234,57"],
+                    &["Gesamtbetrag", "1.469,13"],
+                ])
+            ),
+        ]
+    );
+    assert_eq!(headings(&out), [(1, "Rechnung".to_string())]);
+    let address = paragraph(&out, "Erika Mustermann").expect("the address");
+    assert_eq!(
+        plain_text(address),
+        "Erika Mustermann Musterweg 1 12345 Musterstadt"
+    );
+    assert_eq!(line_breaks(address), 2, "{address:?}");
+    let sentence = paragraph(&out, "Bitte zahlen").expect("the sentence");
+    assert_eq!(
+        plain_text(sentence),
+        "Bitte zahlen Sie den Betrag bis zum 01.03.2026 auf das Konto unten. Vielen Dank f\u{fc}r \
+         Ihren Auftrag."
+    );
+    // The footer, column by column on both pages. Known gap (see above): no `page-footer`
+    // role today. Wanted: `Some("page-footer")`.
+    for n in 1..=2 {
+        let texts = page_texts(&out, n);
+        let at: Vec<Option<usize>> = BLANK_COLUMNS
+            .iter()
+            .map(|(_, lines)| {
+                let want = lines.join(" ");
+                let found: Vec<usize> = (0..texts.len())
+                    .filter(|&b| texts[b].1 == want && texts[b].0.is_none())
+                    .collect();
+                (found.len() == 1).then(|| found[0])
+            })
+            .collect();
+        assert!(
+            at.iter().all(Option::is_some) && at.windows(2).all(|w| w[0] < w[1]),
+            "page {n}: {at:?} in {texts:?}"
+        );
+    }
+    assert!(needing(&out).is_empty(), "{:#?}", out.document.assets);
+    let codes: Vec<&str> = out
+        .document
+        .assets
+        .iter()
+        .flat_map(|a| &a.codes)
+        .filter_map(|c| c.text.as_deref())
+        .collect();
+    assert_eq!(codes, ["0000000001"]);
+    assert_eq!(md.matches("Code 128: 0000000001").count(), 1, "{md}");
+}

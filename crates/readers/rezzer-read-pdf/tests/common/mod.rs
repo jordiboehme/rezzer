@@ -1473,3 +1473,396 @@ pub fn cells_check(
     }
     CellsCheck { wrong, skipped }
 }
+
+/// The pitch of the data font of [`print_form`]: Courier at 9.5 points is 5.7 points a
+/// character.
+const FORM_PITCH: f32 = 5.7;
+
+/// The data column of a data line from x 40 in Courier 9.5 that starts nearest `x`.
+fn form_column(x: f32) -> usize {
+    ((x - 40.0) / FORM_PITCH).round() as usize
+}
+
+/// A data line of `parts`, each text padded to the data column nearest its x.
+fn form_line(y: f32, parts: &[(f32, &str)]) -> DataLine {
+    let mut text = String::new();
+    for (x, t) in parts {
+        let len = text.chars().count();
+        let at = form_column(*x).max(if len == 0 { 0 } else { len + 1 });
+        text += &" ".repeat(at - len);
+        text += t;
+    }
+    DataLine { y, text }
+}
+
+/// A stroked grid of 0.5 points over the column edges `xs` and the row edges `ys`.
+fn form_grid(xs: &[f32], ys: &[f32]) -> String {
+    let (x0, x1) = (xs[0], xs[xs.len() - 1]);
+    let (y0, y1) = (ys[0], ys[ys.len() - 1]);
+    let mut c = String::from("0.5 w ");
+    for y in ys {
+        c += &format!("{x0} {y} m {x1} {y} l S ");
+    }
+    for x in xs {
+        c += &format!("{x} {y0} m {x} {y1} l S ");
+    }
+    c.push('\n');
+    c
+}
+
+/// One section of the ruled table of [`synthetic_print_form`]: rows of 16 points from `top`
+/// down between the column edges `xs`, every rule drawn, the first row holding the labels
+/// `titles`.
+fn form_section(xs: &[f32], top: f32, titles: &[&str], rows: usize) -> String {
+    let ys: Vec<f32> = (0..=rows + 1).map(|k| top - 16.0 * k as f32).collect();
+    let mut c = form_grid(xs, &ys);
+    for (k, t) in titles.iter().enumerate() {
+        c += &label(xs[k] + 3.0, top - 11.0, 7.0, t);
+    }
+    c
+}
+
+/// A boxed number field of `digits` cells from `x` with the data baseline `y`: one stroked
+/// box a digit, and a drawn mark before each cell of `marks_before` (0-based).
+fn form_boxed_digits(x: f32, y: f32, digits: usize, marks_before: &[usize]) -> String {
+    let mut out = String::new();
+    for k in 0..digits {
+        out += &boxed(x + k as f32 * FORM_PITCH, y - 2.0, FORM_PITCH, 11.0);
+    }
+    for &k in marks_before {
+        out += &mark(x + k as f32 * FORM_PITCH - 0.12, y - 0.5);
+    }
+    out
+}
+
+/// The invented values of one page of [`synthetic_print_form`].
+struct FormValues {
+    address: [&'static str; 3],
+    head: [&'static str; 3],
+    personal: [&'static str; 6],
+    earnings: [[&'static str; 5]; 2],
+    band: [&'static str; 4],
+    amount: &'static str,
+    date: &'static str,
+    payout: &'static str,
+}
+
+/// The pages of [`synthetic_print_form`], so a test can check every data line.
+pub fn synthetic_print_form_pages() -> Vec<FormPage> {
+    let values = [
+        FormValues {
+            address: ["Erika Mustermann", "Musterweg 1", "12345 Musterstadt"],
+            head: ["00000", "01.10.2026", ""],
+            personal: ["0001", "Muster", "1", "0,5", "Kasse A", "100"],
+            earnings: [
+                ["1001", "Gehalt", "160", "12,34", "1.974,40"],
+                ["1002", "Zulage", "", "", "40,00"],
+            ],
+            band: [
+                "1000 Gehalt     2  1.111,11",
+                "2000                 22,22",
+                "3000 Bonus      1    333,33",
+                "",
+            ],
+            amount: "987654",
+            date: "28022026",
+            payout: "1.234,56",
+        },
+        FormValues {
+            address: ["Max Mustermann", "Beispielweg 2", "54321 Beispielstadt"],
+            head: ["00001", "01.11.2026", ""],
+            personal: ["0002", "Beispiel", "3", "1,0", "Kasse B", "200"],
+            earnings: [
+                ["1001", "Gehalt", "150", "13,45", "2.017,50"],
+                ["1003", "Bonus", "", "", "100,00"],
+            ],
+            band: [
+                "1000 Gehalt     2  2.222,22",
+                "2000 Zulage     1     44,44",
+                "2000 Zulage     1     44,44",
+                "4000 Praemie    1     55,55",
+            ],
+            amount: "876543",
+            date: "31032026",
+            payout: "2.345,67",
+        },
+    ];
+    values.iter().map(form_page).collect()
+}
+
+/// One page of [`synthetic_print_form`] with `v`: the template is the same on every page.
+fn form_page(v: &FormValues) -> FormPage {
+    let mut t = show("FB", 14.0, 40.0, 800.0, "Entgeltabrechnung");
+    t += &label(
+        40.0,
+        778.0,
+        6.0,
+        "Muster GmbH, Musterweg 1, 12345 Musterstadt",
+    );
+    let mut lines = Vec::new();
+    // The address block.
+    for (k, l) in v.address.iter().enumerate() {
+        lines.push(DataLine {
+            y: 760.0 - 12.0 * k as f32,
+            text: (*l).to_string(),
+        });
+    }
+    // A header of boxed fields, the third left empty.
+    let mut head = Vec::new();
+    for (k, l) in ["Personalnummer", "Datum", "Steuerklasse"]
+        .iter()
+        .enumerate()
+    {
+        let x = 40.0 + 120.0 * k as f32;
+        t += &boxed(x, 700.0, 120.0, 24.0);
+        t += &label(x + 3.0, 716.0, 6.0, l);
+        if !v.head[k].is_empty() {
+            head.push((x + 5.0, v.head[k]));
+        }
+    }
+    lines.push(form_line(703.0, &head));
+    // A ruled table of two sections that share only their outer edges.
+    let six: Vec<f32> = (0..=6).map(|k| 40.0 + 515.0 * k as f32 / 6.0).collect();
+    let five: Vec<f32> = (0..=5).map(|k| 40.0 + 515.0 * k as f32 / 5.0).collect();
+    t += &form_section(
+        &six,
+        670.0,
+        &["Pers.-Nr.", "Name", "Klasse", "Kinder", "Kasse", "Abt."],
+        1,
+    );
+    let row: Vec<(f32, &str)> = six
+        .iter()
+        .zip(v.personal)
+        .map(|(x, s)| (x + 3.0, s))
+        .collect();
+    lines.push(form_line(670.0 - 32.0 + 5.0, &row));
+    t += &form_section(&five, 638.0, &["Nr.", "Art", "Std.", "Satz", "Brutto"], 2);
+    for (r, values) in v.earnings.iter().enumerate() {
+        let row: Vec<(f32, &str)> = five
+            .iter()
+            .zip(values)
+            .filter(|(_, s)| !s.is_empty())
+            .map(|(x, s)| (x + 3.0, *s))
+            .collect();
+        lines.push(form_line(638.0 - 16.0 * (r + 2) as f32 + 5.0, &row));
+    }
+    // A band table: a header band of four drawn cells over value lines padded into its
+    // columns, the edges in the spaces after characters 4, 13 and 17.
+    let edges = [
+        36.0,
+        40.0 + 4.5 * FORM_PITCH,
+        40.0 + 13.5 * FORM_PITCH,
+        40.0 + 18.0 * FORM_PITCH,
+        40.0 + 28.0 * FORM_PITCH,
+    ];
+    for w in edges.windows(2) {
+        t += &boxed(w[0], 560.0, w[1] - w[0], 12.0);
+    }
+    for (x, s) in edges.iter().zip(["Nr", "Text", "Mg", "Betrag"]) {
+        t += &label(x + 2.0, 563.0, 6.0, s);
+    }
+    for (k, l) in v.band.iter().enumerate().filter(|(_, l)| !l.is_empty()) {
+        lines.push(DataLine {
+            y: 548.0 - 11.4 * k as f32,
+            text: (*l).to_string(),
+        });
+    }
+    // A boxed amount and a boxed date in the right half, their separators drawn as marks.
+    let x = 40.0 + 60.0 * FORM_PITCH;
+    t += &label(300.0, 470.0, 6.0, "Betrag**");
+    t += &form_boxed_digits(x, 460.0, v.amount.len(), &[4]);
+    lines.push(DataLine {
+        y: 460.0,
+        text: format!("{}{}", " ".repeat(60), v.amount),
+    });
+    t += &label(300.0, 440.0, 6.0, "Zahltag");
+    t += &form_boxed_digits(x, 430.0, v.date.len(), &[2, 4]);
+    lines.push(DataLine {
+        y: 430.0,
+        text: format!("{}{}", " ".repeat(60), v.date),
+    });
+    // The total line: its label in the template, its value padded onto the label's baseline.
+    t += &label(60.0, 400.0, 8.0, "Auszahlungsbetrag*");
+    lines.push(DataLine {
+        y: 400.0,
+        text: format!("{}{}", " ".repeat(30), v.payout),
+    });
+    // Two footnotes.
+    t += &show("FL", 6.0, 40.0, 60.0, "* nach Abzug der Steuern");
+    t += &show("FL", 6.0, 40.0, 52.0, "** ohne Rundung");
+    FormPage {
+        template: t,
+        lines,
+        ..FormPage::default()
+    }
+}
+
+/// A print-run form of two pages with invented values: a header of boxed fields (one empty),
+/// an address block, a ruled table of two sections, a band table with a sparse row under a
+/// header band of drawn cells, a boxed amount and a boxed date with marks, the total line
+/// `Auszahlungsbetrag` with its value and two footnotes. Page 2 repeats the template with
+/// other values and two identical lines.
+pub fn synthetic_print_form() -> Vec<u8> {
+    print_form(&synthetic_print_form_pages(), "", "")
+}
+
+/// `text` in the font `font` of [`print_form`] at `size`, its right end at `x`.
+fn flush_right(font: &str, size: f32, x: f32, y: f32, text: &str) -> String {
+    show(font, size, x - font_width(font, text, size), y, text)
+}
+
+/// The parts of [`synthetic_invoice`] that both pages share: three logos and a footer of
+/// three columns at 6 pt, each row drawn over a string of 150 spaces from the left margin.
+fn invoice_shared() -> String {
+    let mut t = [
+        logo(40.0, 770.0, 100.0, 50.0),
+        logo(455.0, 692.0, 100.0, 40.0),
+        logo(40.0, 30.0, 60.0, 30.0),
+    ]
+    .concat();
+    let columns: [(f32, [&str; 3]); 3] = [
+        (40.0, ["Muster GmbH", "Musterweg 1", "12345 Musterstadt"]),
+        (
+            230.0,
+            [
+                "Musterbank",
+                "IBAN DE00 0000 0000 0000 0000 00",
+                "BIC MUSTDEXXXXX",
+            ],
+        ),
+        (
+            420.0,
+            [
+                "Amtsgericht Musterstadt",
+                "HRB 00000",
+                "Gesch\u{e4}ftsf\u{fc}hrung Erika Mustermann",
+            ],
+        ),
+    ];
+    for (k, y) in [100.0, 92.0, 84.0].into_iter().enumerate() {
+        t += &show("FL", 6.0, 40.0, y, &" ".repeat(150));
+        for (x, lines) in columns {
+            t += &show("FL", 6.0, x, y, lines[k]);
+        }
+    }
+    t
+}
+
+/// An invented invoice of two pages, built with [`print_form`] (template only, no data
+/// lines). Page 1: the logos, the recipient, the bold title `Rechnung` beside a field list,
+/// line items with a header rule and an end rule, the totals, a two line bold sentence, a
+/// bold label with its value, a body of 7 pt text, a Code 128 drawn as bars and the footer.
+/// Page 2: the logos, one line and the footer.
+pub fn synthetic_invoice() -> Vec<u8> {
+    let mut one = invoice_shared();
+    // The recipient.
+    for (k, l) in ["Erika Mustermann", "Musterweg 1", "12345 Musterstadt"]
+        .iter()
+        .enumerate()
+    {
+        one += &show("FB", 9.0, 40.0, 750.0 - 11.0 * k as f32, l);
+    }
+    // The title beside the field list, its baseline 1.5 points under the first field line.
+    one += &show("FB", 9.0, 40.0, 670.0 - 1.5, "Rechnung");
+    for (k, [l, v]) in [
+        ["Rechnungsnummer", "0000-0001"],
+        ["Kundennummer", "00000"],
+        ["Datum", "01.02.2026"],
+        ["Seite", "1 von 2"],
+    ]
+    .iter()
+    .enumerate()
+    {
+        let y = 670.0 - 8.0 * k as f32;
+        one += &show("FL", 6.0, 360.0, y, l);
+        one += &show("FL", 6.0, 440.0, y, v);
+    }
+    // Line items: bold titles, `Menge Einheit` as one show, the amount titles flush right at
+    // their column edge, a header rule, three rows and an end rule.
+    let size = 8.0;
+    one += &show("FB", size, 40.0, 600.0, "Pos");
+    one += &show("FB", size, 80.0, 600.0, "Artikel");
+    one += &show("FB", size, 300.0, 600.0, "Menge Einheit");
+    one += &flush_right("FB", size, 420.0, 600.0, "Preis");
+    one += &flush_right("FB", size, 540.0, 600.0, "Betrag");
+    one += &hrule(40.0, 540.0, 596.0);
+    let unit_x = 300.0 + font_width("FB", "Menge ", size);
+    for (r, row) in [
+        ["1", "Beratung", "2", "Std", "500,00", "1.000,00"],
+        ["2", "Material", "1", "Stk", "200,00", "200,00"],
+        ["3", "Versand", "1", "Stk", "34,56", "34,56"],
+    ]
+    .iter()
+    .enumerate()
+    {
+        let y = 590.0 - 10.0 * r as f32;
+        one += &show("FL", size, 40.0, y, row[0]);
+        one += &show("FL", size, 80.0, y, row[1]);
+        one += &show("FL", size, 300.0, y, row[2]);
+        one += &show("FL", size, unit_x, y, row[3]);
+        one += &flush_right("FL", size, 420.0, y, row[4]);
+        one += &flush_right("FL", size, 540.0, y, row[5]);
+    }
+    one += &hrule(40.0, 540.0, 564.0);
+    for (k, (bold, l, v)) in [
+        (false, "Nettobetrag", "1.234,56"),
+        (false, "USt 19 %", "234,57"),
+        (true, "Gesamtbetrag", "1.469,13"),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let font = if *bold { "FB" } else { "FL" };
+        let y = 556.0 - 10.0 * k as f32;
+        one += &show(font, size, 340.0, y, l);
+        one += &flush_right(font, size, 540.0, y, v);
+    }
+    // The closing sentence of two bold lines, and a bold label with its plain value.
+    one += &show(
+        "FB",
+        9.0,
+        40.0,
+        512.0,
+        "Bitte zahlen Sie den Betrag bis zum 01.03.2026 auf das Konto unten.",
+    );
+    one += &show(
+        "FB",
+        9.0,
+        40.0,
+        501.0,
+        "Vielen Dank f\u{fc}r Ihren Auftrag.",
+    );
+    one += "BT /FB 9 Tf 40 482 Td (Bestellnummer:) Tj /FL 9 Tf ( 00000) Tj ET\n";
+    // The body: plain 7 pt text of at least 600 ink characters.
+    let body = [
+        "Lieferbedingungen: die Muster GmbH liefert die bestellte Ware frei Haus",
+        "an die genannte Anschrift, sofern nichts anderes vereinbart ist. Teillieferungen",
+        "sind zulaessig und werden einzeln berechnet. Die Ware bleibt bis zur",
+        "vollstaendigen Bezahlung Eigentum der Muster GmbH. Zahlungsbedingungen: der",
+        "Betrag ist ohne Abzug innerhalb von vierzehn Tagen nach Erhalt der Rechnung",
+        "zu zahlen. Bei Zahlung innerhalb von sieben Tagen gewaehren wir zwei Prozent",
+        "Skonto auf den Warenwert. Mahnungen werden mit einer Gebuehr berechnet. Bitte",
+        "geben Sie bei jeder Zahlung die Rechnungsnummer an, damit wir den Betrag",
+        "richtig zuordnen koennen. Fragen zur Rechnung beantwortet Ihnen gern unser",
+        "Kundenservice an allen Werktagen. Es gelten unsere allgemeinen Bedingungen.",
+    ];
+    let ink: usize = body
+        .iter()
+        .map(|l| l.chars().filter(|c| !c.is_whitespace()).count())
+        .sum();
+    assert!(ink >= 600, "{ink} ink characters");
+    for (k, l) in body.iter().enumerate() {
+        one += &show("FL", 7.0, 40.0, 460.0 - 9.1 * k as f32, l);
+    }
+    one += &code128_bars("0000000001", 100.0, 120.0, 0.8, 20.0);
+    let two =
+        invoice_shared() + &show("FL", 9.0, 40.0, 700.0, "Zahlbar bis 01.03.2026 ohne Abzug.");
+    let pages: Vec<FormPage> = [one, two]
+        .into_iter()
+        .map(|template| FormPage {
+            template,
+            ..FormPage::default()
+        })
+        .collect();
+    print_form(&pages, "", "")
+}
