@@ -109,6 +109,11 @@ fn assert_no_loss_but_the_head_date(out: &ReadOutcome) {
 /// The golden file of the synthetic print-run form: its Markdown and its JSON are kept as
 /// snapshots, so a later change of the reader shows in them. The facts next to them hold
 /// whatever the snapshots say; [`read`] also checks that no placeholder reaches either.
+///
+/// Known wrong order, pinned on purpose until the region engine reads it: the labels over the
+/// boxed amount and the boxed date in one column come before both values
+/// (`Betrag`, `Zahltag`, `9876,54`, `28.02.2026`). Wanted: each label with its own value,
+/// `Betrag` 9876,54 then `Zahltag` 28.02.2026. The snapshot changes when that is fixed.
 #[test]
 fn synthetic_print_form_golden() {
     let out = read(&common::synthetic_print_form());
