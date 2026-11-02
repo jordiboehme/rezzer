@@ -10,8 +10,9 @@
 mod common;
 
 use common::barfont::{
-    BAR_UNITS, Glyphs, PATTERNS, code_of, code128_string, code128_values, code128_width,
-    page_with_fonts, program,
+    BAR_UNITS, Glyphs, Kind, PATTERNS, Set, bar_codes, bar_ink_width, bar_width, code_of,
+    code128_string, code128_values, code128_width, page_with_bar_fonts, page_with_fonts,
+    pdf_string, program,
 };
 use common::{all_text, markdown, read};
 use rezzer_model::ReadOutcome;
@@ -381,4 +382,137 @@ fn glyphs_of_barcode_fonts_past_the_cap_are_said() {
         "{said:?}"
     );
     assert!(!all_text(&out).contains("AAA"), "{}", all_text(&out));
+}
+
+/// The invoice of [`invoice`] with the codes in a bar font of `set` in the structure `kind`
+/// named `name` (as written in the PDF) at `size`, the values `gap` points after the first
+/// code. Returns the file and the glyph codes of both codes.
+fn invoice_in(set: Set, kind: Kind, name: &str, size: f32, gap: f32) -> (Vec<u8>, [Vec<u8>; 2]) {
+    let (first, second) = ("2026004711", "4006381333931");
+    let w1 = bar_width(set, first, size);
+    let w2 = bar_ink_width(set, second, size);
+    let (c1, c2) = (bar_codes(set, first), bar_codes(set, second));
+    let content = format!(
+        "BT /F2 14 Tf 72 790 Td (Rechnung) Tj ET\n\
+         BT /F1 9 Tf 72 760 Td (Muster Versand GmbH) Tj ET\n\
+         BT /F1 9 Tf 72 748 Td (Beispielweg 1, 12345 Musterstadt) Tj ET\n\
+         BT /F1 9 Tf 300 760 Td (Rechnungs-Nr.) Tj ET\n\
+         BT /F1 9 Tf {x2:.2} 760 Td ({first}) Tj ET\n\
+         BT /F3 {size} Tf 380 735 Td ({s1}) Tj ET\n\
+         BT /F1 9 Tf 300 735 Td (Auftrags-Nr.) Tj ET\n\
+         BT /F1 9 Tf {x2:.2} 735 Td (0000000000000 / 01.01.2026) Tj ET\n\
+         BT /F1 9 Tf 300 715 Td (Kunden-Nr.) Tj ET\n\
+         BT /F1 9 Tf {x2:.2} 715 Td (K-000123) Tj ET\n\
+         BT /F2 9 Tf 300 680 Td (Referenz:) Tj ET\n\
+         BT /F2 9 Tf 345 680 Td (RE-0001) Tj ET\n\
+         BT /F1 9 Tf {xe:.2} 686 Td (EAN:) Tj ET\n\
+         BT /F3 {size} Tf {x3:.2} 680 Td ({s2}) Tj ET\n\
+         BT /F1 10 Tf 72 600 Td (Artikel) Tj 200 0 Td (Menge) Tj 100 0 Td (Preis) Tj ET\n\
+         BT /F1 10 Tf 72 585 Td (Stuhl) Tj 200 0 Td (2) Tj 100 0 Td (40,00 EUR) Tj ET\n",
+        s1 = pdf_string(&c1),
+        s2 = pdf_string(&c2),
+        x2 = 380.0 + w1 + gap,
+        x3 = 585.0 - w2,
+        xe = 561.0 - w2,
+    );
+    (
+        page_with_bar_fonts(&content, &[("F3", name, set, kind)]),
+        [c1, c2],
+    )
+}
+
+/// Asserts the read of [`invoice_in`]: both codes listed, no glyph text glued anywhere.
+fn assert_invoice(out: &ReadOutcome, glyphs: &[Vec<u8>; 2], case: &str) {
+    let md = markdown(out);
+    let all = all_text(out);
+    for g in glyphs {
+        let s: String = g.iter().map(|&c| char::from(c)).collect();
+        for w in s.as_bytes().windows(6) {
+            let w = String::from_utf8_lossy(w);
+            assert!(
+                !all.contains(w.as_ref()),
+                "{case}: glyph text {w:?} in {all}"
+            );
+        }
+    }
+    assert!(
+        md.contains("| Auftrags-Nr. | 0000000000000 / 01.01.2026 |"),
+        "{case}: {md}"
+    );
+    assert!(md.contains("RE-0001**"), "{case}: {md}");
+    let mut found = codes(out);
+    found.sort();
+    assert_eq!(
+        found,
+        [
+            ("Code 128".to_string(), "2026004711".to_string()),
+            ("Code 128".to_string(), "4006381333931".to_string()),
+        ],
+        "{case}: {md}"
+    );
+}
+
+#[test]
+fn the_structure_of_a_real_shop_barcode_font_is_taken() {
+    // A simple TrueType subset named `BC C128 HD Wide` behind its prefix, WinAnsi, one bar
+    // and its space a glyph (widths 33 to 134 units, a module of 16.7), cap height 0,
+    // descent 0: at 3679bdb its glyph text leaked and no code was listed (neither its name nor
+    // its one-bar glyphs were evidence). At 36 points the page render's crop read the second
+    // code as `4-(63)1%3!931` before the fix; the code is now read from its own render first,
+    // and a read must be what the glyphs print.
+    for size in [24.0, 36.0] {
+        let (file, glyphs) = invoice_in(
+            Set::Pairs,
+            Kind::TrueTypeSubset,
+            "BC#20C128#20HD#20Wide",
+            size,
+            8.0,
+        );
+        assert_invoice(&read(&file), &glyphs, &format!("BC C128 HD Wide at {size}"));
+    }
+}
+
+#[test]
+fn bar_fonts_of_every_structure_are_taken() {
+    // Both glyph sets in a TrueType subset, a full TrueType, a Type1 and a CFF program, named
+    // with a short form of the code (`C128`), or with a name that says nothing (taken by its
+    // bars).
+    for set in [Set::Pairs, Set::Symbols] {
+        for kind in [
+            Kind::TrueTypeSubset,
+            Kind::TrueTypeFull,
+            Kind::Type1,
+            Kind::Cff,
+        ] {
+            for name in ["BC#20C128#20HD#20Wide", "ShopBars"] {
+                let size = if set == Set::Pairs { 30.0 } else { 12.0 };
+                let (file, glyphs) = invoice_in(set, kind, name, size, 8.0);
+                assert_invoice(&read(&file), &glyphs, &format!("{set:?} {kind:?} {name}"));
+            }
+        }
+    }
+}
+
+#[test]
+fn the_widths_of_a_font_alone_are_no_evidence() {
+    // A font whose glyphs are letters (curves cut into squares here: squares and a slanted
+    // block) with the widths of a bar font, named for nothing: its text stays text.
+    let out = read(&page_with_bar_fonts(
+        "BT /F1 10 Tf 72 700 Td (Lieferschein 0000) Tj ET\n\
+         BT /F3 12 Tf 100 600 Td (ABCDEFGHIJKLMNOPQ) Tj ET\n",
+        &[("F3", "ShopSans", Set::Pairs, Kind::TrueTypeFull)],
+    ));
+    // The pairs font is bars: it is taken (glyph evidence) - the control.
+    assert!(!all_text(&out).contains("ABCDEFGH"), "{}", all_text(&out));
+    let squares = |v: u8| {
+        let x = i16::from(v % 4) * 10;
+        vec![(x, 0, x + 300, 300), (x + 400, 400, x + 700, 700)]
+    };
+    let out = read(&shown_in("ShopSans", Some(&squares), "ABCDEFGHIJKLMNOPQ"));
+    assert!(
+        all_text(&out).contains("ABCDEFGHIJKLMNOPQ"),
+        "{}",
+        all_text(&out)
+    );
+    assert!(out.document.assets.is_empty(), "{:?}", out.document.assets);
 }

@@ -31,6 +31,7 @@ mod inline;
 mod stencils;
 
 use std::collections::{HashMap, HashSet};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::panic::{self, AssertUnwindSafe};
 use std::time::{Duration, Instant};
 
@@ -108,8 +109,34 @@ pub(crate) enum How {
     Modules(f32),
     /// A code printed with a barcode font ([`crate::barfont`]), rendered as [`How::Modules`]
     /// is. Its glyphs passed no code-shape test of paths, so a read from it is checked
-    /// against its bars as a picture's is.
+    /// against its bars as a picture's is; when the Code 128 values its glyphs print are known
+    /// (`Need::glyphs`), a read must be one of them.
     Glyphs(f32),
+}
+
+/// The hashes of the Code 128 values the glyphs of a code printed with a barcode font print,
+/// read from their geometry (`VectorCode::texts`): 0 for none. All 0 when the values are not
+/// known (another symbology, or more than four).
+pub(crate) type Glyphs = [u64; 4];
+
+/// The values (see [`Glyphs`]) of the code printed with a barcode font `c`, `None` when none
+/// is known.
+pub(crate) fn glyph_values(c: &crate::codes::VectorCode) -> Option<([f32; 4], Glyphs)> {
+    let mut known = [0u64; 4];
+    if !c.font || c.texts.is_empty() || c.texts.len() > known.len() {
+        return None;
+    }
+    for (k, t) in c.texts.iter().enumerate() {
+        known[k] = value_hash(t);
+    }
+    Some((c.b, known))
+}
+
+/// The hash of a code's value, as [`Glyphs`] holds it (never 0).
+fn value_hash(text: &str) -> u64 {
+    let mut h = DefaultHasher::new();
+    text.hash(&mut h);
+    h.finish().max(1)
 }
 
 impl How {
@@ -387,7 +414,7 @@ pub(crate) struct Small {
 impl Small {
     /// It is a code printed with a barcode font.
     fn font(&self) -> bool {
-        matches!(self.how, Some(How::Glyphs(_)))
+        matches!(self.how, Some(How::Glyphs(..)))
     }
 }
 
@@ -1085,6 +1112,9 @@ pub(crate) struct Need {
     /// The page draws few enough pictures to be rendered only to be read for codes, without
     /// files: at most [`SCAN_PICTURES`].
     pub light: bool,
+    /// The codes printed with a barcode font on this page whose values their glyphs print
+    /// are known: their box and values (see [`glyph_values`]).
+    pub glyphs: Vec<([f32; 4], Glyphs)>,
 }
 
 /// The most pictures a page may draw to be rendered only to be read for codes.
@@ -1702,7 +1732,31 @@ impl Cut<'_> {
             if matches!(c.how, Some(How::Modules(_))) {
                 scans.drawn.insert(c.asset);
             }
-            let found = scans.read(n, c.asset, &picture, None, budget, false);
+            // A code printed with a barcode font is read from its own render at whole pixels
+            // a module first: the page's render may hold its modules on a pixel or so, where
+            // the decoder can read a wrong value.
+            let mut fine_first = false;
+            if let Some(how @ How::Glyphs(_)) = c.how {
+                if let Some((_, known)) = need.glyphs.iter().find(|(b, _)| *b == c.b) {
+                    scans.glyphs.insert(c.asset, *known);
+                }
+                let at = Region { b: c.b, how };
+                match pages.region(n, need, &at, held, scans) {
+                    Ok(fine) => {
+                        scans.read(n, c.asset, &fine, None, budget, false);
+                        fine_first = true;
+                    }
+                    Err(true) => {
+                        scans.unscanned.insert(c.asset);
+                    }
+                    Err(false) => {}
+                }
+            }
+            let found = if fine_first {
+                None
+            } else {
+                scans.read(n, c.asset, &picture, None, budget, false)
+            };
             if found == Some(0)
                 && let Some(how) = c.how
             {
@@ -1867,7 +1921,7 @@ pub(crate) fn region_scale(region: &Region) -> Option<f64> {
             Some(want.min(REGION_SCALE)).filter(|&s| s > SCALE * 1.01)
         }
         How::Modules(m) | How::Glyphs(m) if m > 0.0 => Some(MODULE_PIXELS / f64::from(m)),
-        How::Modules(_) | How::Glyphs(_) => Some(REGION_SCALE),
+        How::Modules(_) | How::Glyphs(..) => Some(REGION_SCALE),
     }
 }
 
@@ -2131,6 +2185,9 @@ pub(crate) struct Scans {
     pub unscanned: HashSet<usize>,
     /// The assets that are codes drawn as paths: their drawing has the pattern of a code.
     drawn: HashSet<usize>,
+    /// The assets that are codes printed with a barcode font, with the values their glyphs
+    /// print (see [`Glyphs`]).
+    glyphs: HashMap<usize, Glyphs>,
     /// Why reading stopped, and on which page.
     stop: Option<(u32, String)>,
     /// The stop is a bound of the file's own (its code cap or the bytes it may keep), not
@@ -2191,6 +2248,7 @@ impl Scans {
             found: HashMap::new(),
             unscanned: HashSet::new(),
             drawn: HashSet::new(),
+            glyphs: HashMap::new(),
             stop: None,
             stop_limit: false,
             skipped: Vec::new(),
@@ -2325,7 +2383,27 @@ impl Scans {
                 self.halt_time(n, budget);
                 break;
             }
-            if !drawn_asset && let Err(why) = evidence(&c, picture, on) {
+            // A code printed with a barcode font whose glyphs' values are known: the read must
+            // be one of them. Otherwise the drawing, or the bars in the render, confirm it.
+            let known = self.glyphs.get(&asset).copied().or_else(|| {
+                let (need, region) = on?;
+                let px = page_rect(picture, need, c.bounds);
+                region
+                    .into_iter()
+                    .chain(&need.regions)
+                    .find_map(|r| match r.how {
+                        How::Glyphs(m) if around(r, m, &px) => {
+                            need.glyphs.iter().find(|(b, _)| *b == r.b).map(|(_, k)| *k)
+                        }
+                        _ => None,
+                    })
+            });
+            let verdict = match known.filter(|k| k.iter().any(|&h| h != 0)) {
+                Some(k) => glyph_evidence(&c, &k),
+                None if drawn_asset => Ok(()),
+                None => evidence(&c, picture, on),
+            };
+            if let Err(why) = verdict {
                 // Not listed, and said: the kind, the place and why, without the value.
                 let place = on.map_or(" ".to_string(), |(need, _)| {
                     let (w, h) = need.size;
@@ -2522,7 +2600,7 @@ impl Scans {
             named += 1;
             let what = match r.how {
                 How::Modules(_) => DRAWING,
-                How::Glyphs(_) => FONT_CODE,
+                How::Glyphs(..) => FONT_CODE,
                 How::Picture(..) => "a picture that looks like a barcode or QR code",
             };
             let part = if part { "part of " } else { "" };
@@ -2775,12 +2853,9 @@ fn evidence(
     // A read within a drawing of paths that looks like a code (give or take two of its
     // modules): the drawing is the evidence. A read elsewhere on the page is not, nor one
     // within a code printed with a barcode font (a font named for codes may draw letters).
-    let within = |r: &Region, px: &[f32; 4]| {
-        let How::Modules(m) = r.how else {
-            return false;
-        };
-        let g = 2.0 * m + 1.0;
-        px[0] >= r.b[0] - g && px[1] >= r.b[1] - g && px[2] <= r.b[2] + g && px[3] <= r.b[3] + g
+    let within = |r: &Region, px: &[f32; 4]| match r.how {
+        How::Modules(m) => around(r, m, px),
+        _ => false,
     };
     if let Some((need, region)) = on {
         let px = page_rect(picture, need, c.bounds);
@@ -2814,6 +2889,31 @@ fn evidence(
     )
     .then_some(())
     .ok_or("that its bars do not confirm")
+}
+
+/// Whether box `px` lies within region `r` of modules of `m` points, give or take two modules
+/// and a point.
+fn around(r: &Region, m: f32, px: &[f32; 4]) -> bool {
+    let g = 2.0 * m + 1.0;
+    px[0] >= r.b[0] - g && px[1] >= r.b[1] - g && px[2] <= r.b[2] + g && px[3] <= r.b[3] + g
+}
+
+/// Whether a read `c` from a code printed with a barcode font is one of the Code 128 values
+/// its glyphs print (`known`, see [`Glyphs`]): the glyphs' geometry is the evidence, and a
+/// read that differs from it is a misread.
+fn glyph_evidence(c: &barcodes::Code, known: &Glyphs) -> Result<(), &'static str> {
+    let text = match &c.payload {
+        barcodes::Payload::Text(t) => Some(t.as_str()),
+        _ => None,
+    };
+    match text {
+        Some(t)
+            if c.symbology == barcodes::Symbology::Code128 && known.contains(&value_hash(t)) =>
+        {
+            Ok(())
+        }
+        _ => Err("that the bars of its glyphs do not confirm"),
+    }
 }
 
 /// Whether two codes read from one asset are the same code: same kind and payload, and boxes
@@ -2908,7 +3008,7 @@ fn two_d(name: &str) -> bool {
 fn takes_region(px: &[f32; 4], two_d: bool, r: &Region) -> bool {
     overlap(px, &r.b)
         && match r.how {
-            How::Modules(_) | How::Glyphs(_) if !two_d => fills(px, &r.b),
+            How::Modules(_) | How::Glyphs(..) if !two_d => fills(px, &r.b),
             _ => true,
         }
 }
@@ -3240,6 +3340,7 @@ mod tests {
                     id: k,
                     finders: 0,
                     font: false,
+                    texts: Vec::new(),
                 })
                 .collect(),
             ..PageItems::default()
@@ -3364,6 +3465,7 @@ mod tests {
             turn: Turn::None,
             size: (595.0, 842.0),
             light: true,
+            glyphs: Vec::new(),
         };
         let code = |s: &str, b: [f32; 4]| Barcode {
             symbology: s.to_string(),
@@ -3452,5 +3554,39 @@ mod tests {
         // A long thin page keeps each side inside a pixmap's bounds.
         let (w, h) = pixel_size(1e9, 0.001, MAX_PIXELS);
         assert_eq!((w, h), (u16::MAX, 1));
+    }
+
+    #[test]
+    fn a_read_of_a_code_in_a_barcode_font_must_be_what_its_glyphs_print() {
+        // The value read from the glyphs' geometry is the evidence: a decoder's misread of
+        // the render (another value, or another kind) is not listed.
+        let code = |s, t: &str| barcodes::Code {
+            symbology: s,
+            payload: barcodes::Payload::Text(t.to_string()),
+            bytes: t.len(),
+            bounds: [0, 0, 100, 20],
+        };
+        use barcodes::Symbology::{Code39, Code128};
+        let known = [value_hash("4006381333931"), value_hash("2026004711"), 0, 0];
+        assert!(glyph_evidence(&code(Code128, "4006381333931"), &known).is_ok());
+        assert!(glyph_evidence(&code(Code128, "2026004711"), &known).is_ok());
+        assert!(glyph_evidence(&code(Code128, "4-(63)1%3!931"), &known).is_err());
+        assert!(glyph_evidence(&code(Code39, "2026004711"), &known).is_err());
+        // The texts of a code become the hashes of its region; past four none are known.
+        let mut c = crate::codes::VectorCode {
+            b: [0.0, 0.0, 100.0, 20.0],
+            module: 0.6,
+            id: 1,
+            finders: 0,
+            font: true,
+            texts: vec!["2026004711".into()],
+        };
+        assert!(matches!(modules_how(&c), How::Glyphs(_)));
+        assert_eq!(
+            glyph_values(&c).map(|(_, k)| k[0]),
+            Some(value_hash("2026004711"))
+        );
+        c.texts = vec!["1".into(); 5];
+        assert_eq!(glyph_values(&c), None);
     }
 }

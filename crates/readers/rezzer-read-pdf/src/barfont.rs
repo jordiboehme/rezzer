@@ -18,23 +18,44 @@ use crate::codes::VectorCode;
 /// Parts of a font's base name (lowercase, without a subset prefix, spaces, hyphens and
 /// underscores) that name a barcode font: `Code128`, `Code 128`, `Code39`, `3of9`, `EAN13`,
 /// `Barcode`, `IDAutomation`, `Libre Barcode` and the like.
-const NAMES: [&str; 7] = [
+const NAMES: [&str; 8] = [
     "code128",
     "code39",
     "code93",
     "3of9",
+    "2of5",
     "ean13",
     "barcode",
     "idautomation",
 ];
 
-/// Whether a font's base name (lowercase, subset prefix removed) names a barcode font.
+/// Short names of a symbology that name a barcode font only as a whole word of the name
+/// (`BC C128 HD Wide`), as they are short enough to stand inside other words.
+const SHORT: [&str; 9] = [
+    "c128", "c39", "c93", "i2of5", "i25", "ean13", "ean8", "upca", "upce",
+];
+
+/// Whether a font's base name (lowercase, subset prefix removed) names a barcode font: one of
+/// [`NAMES`] anywhere in it, or one of [`SHORT`] as a word (words are cut at anything but a
+/// letter or digit; two words in a row count too, so `UPC-A` is `upca`).
 pub(crate) fn barcode_name(name: &str) -> bool {
+    let name = name.replace("#20", " ");
     let squeezed: String = name
         .chars()
         .filter(|c| !matches!(c, ' ' | '-' | '_'))
         .collect();
-    NAMES.iter().any(|n| squeezed.contains(n))
+    if NAMES.iter().any(|n| squeezed.contains(n)) {
+        return true;
+    }
+    let words: Vec<&str> = name
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect();
+    let short = |w: &str| SHORT.contains(&w);
+    words.iter().any(|w| short(w))
+        || words
+            .windows(2)
+            .any(|p| short(&format!("{}{}", p[0], p[1])))
 }
 
 /// The widest bar or space of a code, in modules: Code 128 and EAN have bars of up to 4.
@@ -47,10 +68,17 @@ const WHOLE: f64 = 0.2;
 /// differ.
 const SAME_HEIGHT: f64 = 0.02;
 
-/// Glyphs of bars a run has at least, and different glyphs among them, to be a code by its
-/// outlines: a code has a start, symbols and a stop.
-const MIN_GLYPHS: usize = 3;
+/// Bars a run shows at least (bars of glyphs that touch are one), different glyphs among them,
+/// and different widths of its bars and spaces, to be a code by its outlines: the shortest
+/// Code 128 (a start, one symbol, the check and the stop) has 13 bars and widths of 1 to 4
+/// modules.
+const MIN_BARS: usize = 12;
 const MIN_KINDS: usize = 2;
+const MIN_WIDTHS: usize = 3;
+
+/// Bars of glyphs side by side whose gap is under this share of the run's narrowest bar are
+/// one bar (a font that draws a bar across two glyphs, widths rounded to font units).
+const TOUCH: f64 = 0.25;
 
 /// The bars of a run may stand this many modules apart (each way) and still be one code.
 const JOIN_MODULES: f32 = 3.0;
@@ -67,40 +95,55 @@ pub(crate) const MAX_GLYPHS: usize = 50_000;
 pub(crate) enum Outline {
     /// Nothing is drawn (a space).
     Empty,
-    /// Two or more upright bars side by side from `y0` to `y1`, each from its left to its
-    /// right, left to right.
+    /// One or more upright bars side by side from `y0` to `y1`, each from its left to its
+    /// right, left to right, each at least twice as high as the widest. A font may draw one
+    /// bar a glyph, so one bar is a bar here; whether a run of them is a code is the run's
+    /// question ([`bars_fit`]).
     Bars {
         y0: f64,
         y1: f64,
         bars: Vec<(f64, f64)>,
     },
-    /// Anything else: curves, slanted lines, a single bar, bars of different heights.
+    /// Anything else: curves, slanted lines, bars of different heights, squares.
     Other,
 }
 
 /// What a glyph's outline is, with the box of its ink in font units when it is not bars.
 pub(crate) type Looked = (Outline, Option<[f64; 4]>);
 
-/// The rectangle a subpath of `points` draws, when it has four corners and sides along the
-/// axes (a closing point on the first is left out).
+/// The rectangle a subpath of `points` draws, when its sides lie along the axes and it has
+/// four corners: points on a side between two corners (as a TrueType contour may have) and a
+/// closing point on the first are left out.
 fn upright_rect(points: &[Point]) -> Option<[f64; 4]> {
-    let mut p: Vec<Point> = Vec::with_capacity(5);
+    let mut p: Vec<Point> = Vec::with_capacity(8);
     for &q in points {
         if p.last() != Some(&q) {
             p.push(q);
         }
     }
-    if p.len() == 5 && p[0] == p[4] {
+    while p.len() > 1 && p.first() == p.last() {
         p.pop();
     }
-    if p.len() != 4 {
+    // Every side along an axis.
+    let n = p.len();
+    if !(4..=16).contains(&n) {
         return None;
     }
-    for k in 0..4 {
-        let (a, b) = (p[k], p[(k + 1) % 4]);
+    for k in 0..n {
+        let (a, b) = (p[k], p[(k + 1) % n]);
         if a.x != b.x && a.y != b.y {
             return None;
         }
+    }
+    // The corners: points where the side turns.
+    let corners = (0..n)
+        .filter(|&k| {
+            let (a, b, c) = (p[(k + n - 1) % n], p[k], p[(k + 1) % n]);
+            (a.x == b.x) != (b.x == c.x)
+        })
+        .count();
+    if corners != 4 {
+        return None;
     }
     let x0 = p.iter().map(|q| q.x).fold(f64::MAX, f64::min);
     let x1 = p.iter().map(|q| q.x).fold(f64::MIN, f64::max);
@@ -109,7 +152,20 @@ fn upright_rect(points: &[Point]) -> Option<[f64; 4]> {
     (x1 > x0 && y1 > y0).then_some([x0, y0, x1, y1])
 }
 
-/// What the outline `path` of a glyph is (see [`Outline`]).
+/// Whether a curve from `a` to `b` with control points `c` is a straight side along an axis:
+/// every control point on that side.
+fn straight(a: Point, b: Point, c: &[Point]) -> bool {
+    (a.x == b.x
+        && c.iter()
+            .all(|q| q.x == a.x && q.y >= a.y.min(b.y) && q.y <= a.y.max(b.y)))
+        || (a.y == b.y
+            && c.iter()
+                .all(|q| q.y == a.y && q.x >= a.x.min(b.x) && q.x <= a.x.max(b.x)))
+}
+
+/// What the outline `path` of a glyph is (see [`Outline`]). It is read the same for every
+/// font program (TrueType, Type1, CFF): a curve whose control points lie on a straight side
+/// along an axis is that side.
 pub(crate) fn outline(path: &BezPath) -> Outline {
     let mut rects: Vec<[f64; 4]> = Vec::new();
     let mut points: Vec<Point> = Vec::new();
@@ -136,14 +192,21 @@ pub(crate) fn outline(path: &BezPath) -> Outline {
                 points.push(p);
             }
             PathEl::LineTo(p) => points.push(p),
+            PathEl::QuadTo(c, p) => match points.last() {
+                Some(&a) if straight(a, p, &[c]) => points.push(p),
+                _ => return Outline::Other,
+            },
+            PathEl::CurveTo(c1, c2, p) => match points.last() {
+                Some(&a) if straight(a, p, &[c1, c2]) => points.push(p),
+                _ => return Outline::Other,
+            },
             PathEl::ClosePath => {
                 if !end(&mut points, &mut rects) {
                     return Outline::Other;
                 }
             }
-            PathEl::QuadTo(..) | PathEl::CurveTo(..) => return Outline::Other,
         }
-        if rects.len() > 64 || points.len() > 6 {
+        if rects.len() > 64 || points.len() > 17 {
             return Outline::Other;
         }
     }
@@ -152,9 +215,6 @@ pub(crate) fn outline(path: &BezPath) -> Outline {
     }
     if rects.is_empty() {
         return Outline::Empty;
-    }
-    if rects.len() < 2 {
-        return Outline::Other;
     }
     rects.sort_by(|a, b| a[0].total_cmp(&b[0]));
     let (y0, y1) = (rects[0][1], rects[0][3]);
@@ -174,68 +234,210 @@ pub(crate) fn outline(path: &BezPath) -> Outline {
     }
 }
 
-/// Whether the outlines of a run's glyphs (each with its glyph id and the scale of its
-/// transform, points to a font unit) are a code: at least [`MIN_GLYPHS`] glyphs of bars,
-/// [`MIN_KINDS`] of them different, the bars of one height, and every bar and every space
-/// between the bars of a glyph a whole number of modules (the narrowest bar), at most
-/// [`MOST_MODULES`].
-pub(crate) fn bars_fit(glyphs: &[(u32, f64, &Outline)]) -> bool {
-    // Each glyph of bars: its id, its scale, its bottom and top, and its bars.
-    struct Barred<'a> {
-        id: u32,
-        scale: f64,
-        y0: f64,
-        y1: f64,
-        bars: &'a [(f64, f64)],
-    }
-    let barred: Vec<Barred<'_>> = glyphs
-        .iter()
-        .filter_map(|&(id, scale, o)| match o {
-            Outline::Bars { y0, y1, bars } => Some(Barred {
-                id,
-                scale,
-                y0: *y0,
-                y1: *y1,
-                bars,
-            }),
-            _ => None,
-        })
-        .collect();
-    // Spaces may stand among them; anything else drawn may not.
-    if barred.len() < MIN_GLYPHS || glyphs.iter().any(|(_, _, o)| matches!(o, Outline::Other)) {
+/// Whether the outlines of a run's glyphs (each with its glyph id and its transform, font
+/// units to the page) are a code, on the run's bars as the page shows them: no glyph is
+/// anything but bars or a space; all bars of one height; bars of glyphs that touch joined
+/// into one; at least [`MIN_BARS`] bars, from [`MIN_KINDS`] different glyphs; every bar and
+/// every space between two bars a whole number of modules (the narrowest of them), at most
+/// [`MOST_MODULES`], and at least [`MIN_WIDTHS`] different widths among them. A row of equal
+/// bars (a ruler, `||||`) or of one glyph is no code; nor are letters, which are not bars.
+pub(crate) fn bars_fit(glyphs: &[(u32, Affine, &Outline)]) -> bool {
+    let Some((joined, kinds)) = run_bars(glyphs) else {
+        return false;
+    };
+    if kinds < MIN_KINDS || joined.len() < MIN_BARS {
         return false;
     }
-    let mut kinds: Vec<u32> = barred.iter().map(|b| b.id).collect();
-    kinds.sort_unstable();
-    kinds.dedup();
-    if kinds.len() < MIN_KINDS {
-        return false;
-    }
-    let (y0, y1) = (barred[0].y0, barred[0].y1);
-    let height = y1 - y0;
-    if barred.iter().any(|b| {
-        (b.y0 - y0).abs() > SAME_HEIGHT * height || (b.y1 - y1).abs() > SAME_HEIGHT * height
-    }) {
-        return false;
-    }
-    let mut widths: Vec<f64> = Vec::new();
-    let mut module = f64::MAX;
-    for b in &barred {
-        for (k, &(x0, x1)) in b.bars.iter().enumerate() {
-            widths.push((x1 - x0) * b.scale);
-            module = module.min((x1 - x0) * b.scale);
-            if let Some(&(next, _)) = b.bars.get(k + 1) {
-                widths.push((next - x1) * b.scale);
-            }
-        }
-    }
+    let widths = widths_of(&joined);
+    let module = widths.iter().copied().fold(f64::MAX, f64::min);
     if module <= 0.0 || !module.is_finite() {
         return false;
     }
-    widths.iter().all(|&w| {
+    let mut seen: Vec<i64> = Vec::new();
+    for &w in &widths {
         let n = w / module;
-        n.round() >= 1.0 && n.round() <= MOST_MODULES && (n - n.round()).abs() <= WHOLE
-    })
+        let r = n.round();
+        if r < 1.0 || r > MOST_MODULES || (n - r).abs() > WHOLE {
+            return false;
+        }
+        if !seen.contains(&(r as i64)) {
+            seen.push(r as i64);
+        }
+    }
+    seen.len() >= MIN_WIDTHS
+}
+
+/// The bars of a run as the page shows them, in points along the baseline of its first glyph
+/// (bars of glyphs that touch joined into one), and how many different glyphs drew them.
+/// `None` when a glyph is not bars or a space, or the bars differ in height.
+fn run_bars(glyphs: &[(u32, Affine, &Outline)]) -> Option<(Vec<(f64, f64)>, usize)> {
+    if glyphs.iter().any(|(_, _, o)| matches!(o, Outline::Other)) {
+        return None;
+    }
+    let &(_, first, _) = glyphs.first()?;
+    let c = first.as_coeffs();
+    let len = c[0].hypot(c[1]);
+    if len <= 0.0 {
+        return None;
+    }
+    let (dx, dy) = (c[0] / len, c[1] / len);
+    let origin = Point::new(c[4], c[5]);
+    let along = |p: Point| (p.x - origin.x) * dx + (p.y - origin.y) * dy;
+    let mut height: Option<(f64, f64)> = None;
+    let mut bars: Vec<(f64, f64)> = Vec::new();
+    let mut kinds: Vec<u32> = Vec::new();
+    for &(id, t, o) in glyphs {
+        let Outline::Bars { y0, y1, bars: b } = o else {
+            continue;
+        };
+        match height {
+            None => height = Some((*y0, *y1)),
+            Some((h0, h1)) => {
+                let h = h1 - h0;
+                if (y0 - h0).abs() > SAME_HEIGHT * h || (y1 - h1).abs() > SAME_HEIGHT * h {
+                    return None;
+                }
+            }
+        }
+        kinds.push(id);
+        for &(x0, x1) in b {
+            let (a, z) = (
+                along(t * Point::new(x0, *y0)),
+                along(t * Point::new(x1, *y0)),
+            );
+            bars.push((a.min(z), a.max(z)));
+        }
+    }
+    kinds.sort_unstable();
+    kinds.dedup();
+    bars.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let narrowest = bars.iter().map(|b| b.1 - b.0).fold(f64::MAX, f64::min);
+    let mut joined: Vec<(f64, f64)> = Vec::with_capacity(bars.len());
+    for b in bars {
+        match joined.last_mut() {
+            Some(last) if b.0 - last.1 < TOUCH * narrowest => {
+                last.1 = last.1.max(b.1);
+            }
+            _ => joined.push(b),
+        }
+    }
+    Some((joined, kinds.len()))
+}
+
+/// The widths of bars `joined` and of the spaces between them, in order: bar, space, bar.
+fn widths_of(joined: &[(f64, f64)]) -> Vec<f64> {
+    let mut widths: Vec<f64> = Vec::with_capacity(2 * joined.len());
+    for (k, b) in joined.iter().enumerate() {
+        widths.push(b.1 - b.0);
+        if let Some(next) = joined.get(k + 1) {
+            widths.push(next.0 - b.1);
+        }
+    }
+    widths
+}
+
+/// The bar and space widths of each Code 128 symbol in modules, bar first; the stop (106)
+/// has 7. From the Code 128 symbology (ISO/IEC 15417), a table of facts.
+const CODE128: [&str; 107] = [
+    "212222", "222122", "222221", "121223", "121322", "131222", "122213", "122312", "132212",
+    "221213", "221312", "231212", "112232", "122132", "122231", "113222", "123122", "123221",
+    "223211", "221132", "221231", "213212", "223112", "312131", "311222", "321122", "321221",
+    "312212", "322112", "322211", "212123", "212321", "232121", "111323", "131123", "131321",
+    "112313", "132113", "132311", "211313", "231113", "231311", "112133", "112331", "132131",
+    "113123", "113321", "133121", "313121", "211331", "231131", "213113", "213311", "213131",
+    "311123", "311321", "331121", "312113", "312311", "332111", "314111", "221411", "431111",
+    "111224", "111422", "121124", "121421", "141122", "141221", "112214", "112412", "122114",
+    "122411", "142112", "142211", "241211", "221114", "413111", "241112", "134111", "111242",
+    "121142", "121241", "114212", "124112", "124211", "411212", "421112", "421211", "212141",
+    "214121", "412121", "111143", "111341", "131141", "114113", "114311", "411113", "411311",
+    "113141", "114131", "311141", "411131", "211412", "211214", "211232", "2331112",
+];
+
+/// The symbol a group of element widths (in points) is: the widths in modules (the group's
+/// width over `modules`), each 1 to 4 within [`WHOLE`], looked up in [`CODE128`].
+fn symbol(w: &[f64], modules: f64) -> Option<u8> {
+    let module = w.iter().sum::<f64>() / modules;
+    let mut key = String::with_capacity(w.len());
+    for &x in w {
+        let n = x / module;
+        let r = n.round();
+        if !(1.0..=4.0).contains(&r) || (n - r).abs() > WHOLE {
+            return None;
+        }
+        key.push(char::from(b'0' + r as u8));
+    }
+    CODE128
+        .iter()
+        .position(|p| *p == key)
+        .and_then(|v| u8::try_from(v).ok())
+}
+
+/// The text of the Code 128 the bars of a run print, read from the glyphs' geometry (no
+/// render): the symbols from the start to the stop, the check symbol right, and only the
+/// characters of code sets A, B and C with their switches and shifts. `None` when the bars
+/// are no such Code 128 (another symbology, a function character, a damaged run): then the
+/// read from the render is checked as a picture's is.
+pub(crate) fn code128_text(glyphs: &[(u32, Affine, &Outline)]) -> Option<String> {
+    let (joined, _) = run_bars(glyphs)?;
+    let w = widths_of(&joined);
+    // A start, at least one symbol and the check (6 each), and the stop (7).
+    if w.len() < 6 * 3 + 7 || !(w.len() - 7).is_multiple_of(6) {
+        return None;
+    }
+    let k = (w.len() - 7) / 6;
+    let mut values: Vec<u8> = Vec::with_capacity(k);
+    for i in 0..k {
+        values.push(symbol(&w[6 * i..6 * i + 6], 11.0)?);
+    }
+    if symbol(&w[6 * k..], 13.0)? != 106 {
+        return None;
+    }
+    let (start, rest) = values.split_first()?;
+    let (check, data) = rest.split_last()?;
+    let sum = data
+        .iter()
+        .enumerate()
+        .fold(u32::from(*start), |s, (i, &v)| {
+            s + (i as u32 + 1) * u32::from(v)
+        });
+    if sum % 103 != u32::from(*check) {
+        return None;
+    }
+    #[derive(Clone, Copy, PartialEq)]
+    enum Set {
+        A,
+        B,
+        C,
+    }
+    let mut set = match start {
+        103 => Set::A,
+        104 => Set::B,
+        105 => Set::C,
+        _ => return None,
+    };
+    let mut text = String::new();
+    let mut shift = false;
+    for &v in data {
+        let now = if shift {
+            shift = false;
+            if set == Set::A { Set::B } else { Set::A }
+        } else {
+            set
+        };
+        match (now, v) {
+            (Set::C, 0..=99) => text.push_str(&format!("{v:02}")),
+            (Set::C, 100) => set = Set::B,
+            (Set::C, 101) => set = Set::A,
+            (Set::A | Set::B, 0..=63) => text.push(char::from(v + 32)),
+            (Set::A, 64..=95) => text.push(char::from(v - 64)),
+            (Set::B, 64..=95) => text.push(char::from(v + 32)),
+            (Set::A | Set::B, 98) => shift = true,
+            (Set::A | Set::B, 99) => set = Set::C,
+            (Set::A, 100) | (Set::B, 101) => set = if set == Set::A { Set::B } else { Set::A },
+            _ => return None,
+        }
+    }
+    Some(text)
 }
 
 /// One glyph of a barcode font as the page draws it.
@@ -324,7 +526,7 @@ fn find(parent: &mut [usize], mut i: usize) -> usize {
 /// The codes printed by the glyphs `placed`: the glyphs of one draw call are one run, and
 /// runs whose boxes stand within [`JOIN_MODULES`] modules of each other (a point when the
 /// module is not known) are one code. Each is a region read like a code drawn as paths.
-pub(crate) fn codes(placed: &[Placed]) -> Vec<VectorCode> {
+pub(crate) fn codes(placed: &[Placed], texts: &[(u32, String)]) -> Vec<VectorCode> {
     // The runs: their box, module and members.
     let mut runs: Vec<([f32; 4], f32, Vec<usize>)> = Vec::new();
     for (k, p) in placed.iter().enumerate() {
@@ -405,12 +607,28 @@ pub(crate) fn codes(placed: &[Placed]) -> Vec<VectorCode> {
                     }
                 }
             }
+            // The values its glyphs print, when each of its runs is a Code 128 read from them.
+            let mut values: Vec<String> = Vec::new();
+            let all = g.iter().all(|&i| {
+                let run = placed[runs[i].2[0]].run;
+                match texts.iter().find(|(r, _)| *r == run) {
+                    Some((_, t)) => {
+                        values.push(t.clone());
+                        true
+                    }
+                    None => false,
+                }
+            });
+            if !all {
+                values.clear();
+            }
             VectorCode {
                 b,
                 module,
                 id: h.finish(),
                 finders: 0,
                 font: true,
+                texts: values,
             }
         })
         .collect()
@@ -458,6 +676,16 @@ mod tests {
             "ean-13",
             "code_39",
             "barcodefont",
+            "bc c128 hd wide",
+            "bc#20c128#20hd#20wide",
+            "my-c93",
+            "i2of5 std",
+            "font i25",
+            "ean8",
+            "upc-a",
+            "upc a",
+            "shop upce",
+            "interleaved 2of5",
         ] {
             assert!(barcode_name(name), "{name}");
         }
@@ -467,6 +695,11 @@ mod tests {
             "symbol",
             "times-roman",
             "codesans",
+            "arc128",
+            "c1280",
+            "upcase sans",
+            "cupcake",
+            "sec39ure",
         ] {
             assert!(!barcode_name(name), "{name}");
         }
@@ -479,8 +712,25 @@ mod tests {
             Outline::Bars { .. }
         ));
         assert_eq!(outline(&BezPath::new()), Outline::Empty);
-        // One bar (an `l`, an `I`, a `|`) is not bars.
-        assert_eq!(outline(&rects(&[[0.0, 0.0, 80.0, 700.0]])), Outline::Other);
+        // One bar is a bar: a font may draw one bar a glyph (whether a run is a code is the
+        // run's question).
+        assert!(matches!(
+            outline(&rects(&[[0.0, 0.0, 80.0, 700.0]])),
+            Outline::Bars { .. }
+        ));
+        // A bar whose contour has a point in the middle of a side, or straight curves.
+        let mut p = BezPath::new();
+        p.move_to((0.0, 0.0));
+        p.line_to((0.0, 300.0));
+        p.line_to((0.0, 700.0));
+        p.quad_to((40.0, 700.0), (80.0, 700.0));
+        p.line_to((80.0, 0.0));
+        p.close_path();
+        assert!(
+            matches!(outline(&p), Outline::Bars { .. }),
+            "{:?}",
+            outline(&p)
+        );
         // Two bars of different heights, or lying bars (an `=`), are not.
         assert_eq!(
             outline(&rects(&[
@@ -496,37 +746,137 @@ mod tests {
             ])),
             Outline::Other
         );
-        // A curve is not.
+        // A curve is not, nor an L.
         let mut c = pattern(&[2, 1, 2]);
         c.curve_to((0.0, 0.0), (10.0, 10.0), (20.0, 0.0));
         assert_eq!(outline(&c), Outline::Other);
+        let mut l = BezPath::new();
+        l.move_to((0.0, 0.0));
+        l.line_to((0.0, 700.0));
+        l.line_to((80.0, 700.0));
+        l.line_to((80.0, 80.0));
+        l.line_to((300.0, 80.0));
+        l.line_to((300.0, 0.0));
+        l.close_path();
+        assert_eq!(outline(&l), Outline::Other);
+    }
+
+    /// The glyphs of the bar and space widths `w` (in modules of 60 units), one bar and its
+    /// space a glyph, each with its id and transform at 12 points, set one after the other.
+    fn one_bar_glyphs(w: &[(u8, u8)]) -> Vec<(u32, Affine, Outline)> {
+        let mut x = 0.0;
+        w.iter()
+            .map(|&(b, s)| {
+                let o = outline(&rects(&[[0.0, 0.0, f64::from(b) * 60.0, 1600.0]]));
+                let t = Affine::new([0.012, 0.0, 0.0, 0.012, 100.0 + x, 500.0]);
+                x += f64::from(b + s) * 60.0 * 0.012;
+                (u32::from(b * 4 + s), t, o)
+            })
+            .collect()
     }
 
     #[test]
-    fn a_run_is_a_code_only_with_glyphs_of_whole_modules() {
+    fn a_run_is_a_code_only_with_bars_of_whole_modules() {
+        let fit = |g: &[(u32, Affine, Outline)]| {
+            let r: Vec<(u32, Affine, &Outline)> = g.iter().map(|(i, t, o)| (*i, *t, o)).collect();
+            bars_fit(&r)
+        };
+        // Code 128 `A1` as one bar and its space a glyph: start B, A, 1, check, stop.
+        let pairs = [
+            (2, 1),
+            (1, 2),
+            (1, 4),
+            (1, 1),
+            (1, 3),
+            (2, 3),
+            (1, 2),
+            (3, 3),
+            (2, 1),
+            (1, 3),
+            (2, 2),
+            (1, 1),
+            (2, 3),
+            (3, 1),
+            (1, 1),
+            (2, 0),
+        ];
+        assert!(fit(&one_bar_glyphs(&pairs)));
+        // Bars that touch across glyphs are one bar.
+        let mut touching = one_bar_glyphs(&pairs);
+        let split = touching.remove(3);
+        let half = outline(&rects(&[[0.0, 0.0, 30.0, 1600.0]]));
+        let at = split.1;
+        touching.insert(3, (99, at, half.clone()));
+        touching.insert(4, (98, at * Affine::translate((30.0, 0.0)), half));
+        assert!(fit(&touching));
+        // Too few bars, one glyph only, equal bars (a ruler), widths that are no whole
+        // modules, or a glyph that is not bars among them.
+        assert!(!fit(&one_bar_glyphs(&pairs[..8])));
+        assert!(!fit(&one_bar_glyphs(&[(1, 1); 20])));
+        assert!(!fit(&one_bar_glyphs(&[(1, 1), (2, 2)].repeat(10))));
+        let mut odd = one_bar_glyphs(&pairs);
+        odd[5].2 = outline(&rects(&[[0.0, 0.0, 150.0, 1600.0]]));
+        assert!(!fit(&odd));
+        let mut other = one_bar_glyphs(&pairs);
+        other[2].2 = Outline::Other;
+        assert!(!fit(&other));
+        // The 11-module glyphs of a Code 128 font.
         let a = outline(&pattern(&[2, 1, 1, 2, 1, 4]));
         let b = outline(&pattern(&[2, 1, 2, 2, 2, 2]));
         let c = outline(&pattern(&[2, 3, 3, 1, 1, 1, 2]));
-        let s = 0.012;
-        assert!(bars_fit(&[(1, s, &a), (2, s, &b), (3, s, &c)]));
-        // Too few glyphs, or one glyph three times.
-        assert!(!bars_fit(&[(1, s, &a), (2, s, &b)]));
-        assert!(!bars_fit(&[(1, s, &a), (1, s, &a), (1, s, &a)]));
-        // Widths that are no whole modules (a double bar sign of 1 : 2.5).
-        let odd = outline(&rects(&[
-            [0.0, 0.0, 60.0, 900.0],
-            [210.0, 0.0, 270.0, 900.0],
+        let t = |k: f64| Affine::new([0.012, 0.0, 0.0, 0.012, 100.0 + k * 660.0 * 0.012, 500.0]);
+        assert!(bars_fit(&[
+            (1, t(0.0), &a),
+            (2, t(1.0), &b),
+            (2, t(2.0), &b),
+            (3, t(3.0), &c)
         ]));
-        let odd2 = outline(&rects(&[
-            [0.0, 0.0, 60.0, 900.0],
-            [150.0, 0.0, 300.0, 900.0],
-        ]));
-        assert!(!bars_fit(&[(1, s, &odd), (2, s, &odd2), (1, s, &odd)]));
-        // A glyph that is not bars among them.
         assert!(!bars_fit(&[
-            (1, s, &a),
-            (2, s, &b),
-            (3, s, &Outline::Other)
+            (1, t(0.0), &a),
+            (1, t(1.0), &a),
+            (1, t(2.0), &a)
         ]));
+    }
+
+    /// The glyphs of a Code 128 of symbol values `values`, one bar and its space a glyph
+    /// (bars 60 units a module), set one after the other at 12 points.
+    fn code_glyphs(values: &[u8]) -> Vec<(u32, Affine, Outline)> {
+        let mut pairs = Vec::new();
+        for &v in values {
+            let w: Vec<u8> = CODE128[usize::from(v)].bytes().map(|b| b - b'0').collect();
+            for p in w.chunks(2) {
+                pairs.push((p[0], p.get(1).copied().unwrap_or(0)));
+            }
+        }
+        one_bar_glyphs(&pairs)
+    }
+
+    #[test]
+    fn the_value_a_run_of_bars_prints_is_read_from_its_geometry() {
+        let read = |g: &[(u32, Affine, Outline)]| {
+            let r: Vec<(u32, Affine, &Outline)> = g.iter().map(|(i, t, o)| (*i, *t, o)).collect();
+            code128_text(&r)
+        };
+        // `A1` in code set B: start B, 33, 17, the check (104 + 33 + 2 * 17) % 103 = 68, stop.
+        assert_eq!(
+            read(&code_glyphs(&[104, 33, 17, 68, 106])).as_deref(),
+            Some("A1")
+        );
+        // `2026004711` in code set C.
+        let c = [105u8, 20, 26, 0, 47, 11];
+        let check = (u32::from(c[0])
+            + c[1..]
+                .iter()
+                .enumerate()
+                .map(|(i, &v)| (i as u32 + 1) * u32::from(v))
+                .sum::<u32>())
+            % 103;
+        let mut v = c.to_vec();
+        v.extend([check as u8, 106]);
+        assert_eq!(read(&code_glyphs(&v)).as_deref(), Some("2026004711"));
+        // A wrong check symbol, a missing stop, or a function character give none.
+        assert_eq!(read(&code_glyphs(&[104, 33, 17, 69, 106])), None);
+        assert_eq!(read(&code_glyphs(&[104, 33, 17, 68])), None);
+        assert_eq!(read(&code_glyphs(&[104, 102, 17, 34, 106])), None);
     }
 }

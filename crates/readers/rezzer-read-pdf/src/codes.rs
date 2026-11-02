@@ -25,6 +25,10 @@ pub(crate) struct VectorCode {
     /// It is printed with a barcode font (see [`crate::barfont`]): its bars are glyphs, and
     /// the read is checked against them as a picture's is.
     pub font: bool,
+    /// For a code printed with a barcode font: the Code 128 values its glyphs print, read
+    /// from their geometry, when each of its runs is one (empty otherwise). A read from it
+    /// must be one of them.
+    pub texts: Vec<String>,
 }
 
 /// The most filled rectangles a page keeps for finding codes.
@@ -909,6 +913,7 @@ fn region(
         id: hasher.finish(),
         finders,
         font: false,
+        texts: Vec::new(),
     })
 }
 

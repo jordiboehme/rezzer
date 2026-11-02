@@ -592,17 +592,32 @@ fn ruler(v: &Variant, on: On) -> Sheet {
 /// photo at the left makes the page need vision: the codes are read from the page render.
 fn font_codes(v: &Variant, font: &str, size: f32, gap: f32, photo: bool) -> Sheet {
     use crate::common::barfont::{
-        BAR_UNITS, code_of, code128_string, code128_values, code128_width,
+        BAR_FONTS, bar_codes, bar_height, bar_ink_width, bar_width, pdf_string,
     };
+    let set = BAR_FONTS
+        .iter()
+        .find(|f| f.0 == font)
+        .map(|f| f.2)
+        .expect("a bar font");
     let (plain, bold) = v.faces();
     let (first, second) = ("2026004711", "4006381333931");
-    let (w1, w2) = (code128_width(first, size), code128_width(second, size));
+    let w1 = bar_width(set, first, size);
+    let (i1, i2) = (
+        bar_ink_width(set, first, size),
+        bar_ink_width(set, second, size),
+    );
     let xv = 380.0 + w1 + gap;
-    let x3 = 585.0 - w2;
+    let x3 = 585.0 - i2;
     let mut t = show(bold, 14.0, 40.0, 790.0, "Rechnung");
     t += &show(plain, 9.0, 300.0, 760.0, "Rechnungs-Nr.");
     t += &show(plain, 9.0, xv, 760.0, first);
-    t += &show(font, size, 380.0, 735.0, &code128_string(first));
+    t += &show(
+        font,
+        size,
+        380.0,
+        735.0,
+        &pdf_string(&bar_codes(set, first)),
+    );
     t += &show(plain, 9.0, 300.0, 735.0, "Auftrags-Nr.");
     t += &show(plain, 9.0, xv, 735.0, "0000000000000 / 01.01.2026");
     t += &show(plain, 9.0, 300.0, 715.0, "Kunden-Nr.");
@@ -610,7 +625,7 @@ fn font_codes(v: &Variant, font: &str, size: f32, gap: f32, photo: bool) -> Shee
     t += &show(bold, 9.0, 300.0, 680.0, "Referenz:");
     t += &show(bold, 9.0, 345.0, 680.0, "RE-0001");
     t += &show(plain, 9.0, x3 - 24.0, 686.0, "EAN:");
-    t += &show(font, size, x3, 680.0, &code128_string(second));
+    t += &show(font, size, x3, 680.0, &pdf_string(&bar_codes(set, second)));
     // A body as wide as the page under the box, so the page is one column (with a narrow
     // body the layout's order of a left column and the box differs between the faces).
     let wide = format!("{BODY_LINE} {BODY_LINE}");
@@ -626,16 +641,13 @@ fn font_codes(v: &Variant, font: &str, size: f32, gap: f32, photo: bool) -> Shee
         built.page.photo = Some([40.0, 560.0, 200.0, 150.0]);
     }
     let mut s = Sheet::new(built);
-    let high = f32::from(BAR_UNITS) / 1000.0 * size;
-    for (text, x, y, w) in [(first, 380.0, 735.0, w1), (second, x3, 680.0, w2)] {
+    let high = bar_height(set, size);
+    for (text, x, y, w) in [(first, 380.0, 735.0, i1), (second, x3, 680.0, i2)] {
         s.want.codes.push(("Code 128".into(), text.into()));
         s.want.code_bars.push([x, y, x + w, y + high]);
-        s.want.glyph_text.push(
-            code128_values(text)
-                .into_iter()
-                .map(|v| char::from(code_of(v)))
-                .collect(),
-        );
+        s.want
+            .glyph_text
+            .push(bar_codes(set, text).into_iter().map(char::from).collect());
     }
     s.want.vision = Some(photo);
     s.want.may_title.push("Rechnung".into());
@@ -827,6 +839,33 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "codes in a barcode font named for codes beside a photo, size 10, gap 5",
             axes: RENDERED,
             draw: |v| (font_codes(v, "FC", 10.0, 5.0, true), None),
+        },
+        // Fix round 1: one bar and its space a glyph, as a real shop's font draws them, in
+        // each font structure, named with a short form (`BC C128 HD Wide`) or not.
+        Shape {
+            name: "codes in a bar-a-glyph TrueType subset font named BC C128 HD Wide, size 30",
+            axes: RENDERED,
+            draw: |v| (font_codes(v, "FP", 30.0, 8.0, false), None),
+        },
+        Shape {
+            name: "codes in a bar-a-glyph Type1 font known by its bars, size 30",
+            axes: RENDERED,
+            draw: |v| (font_codes(v, "FQ", 30.0, 8.0, false), None),
+        },
+        Shape {
+            name: "codes in a bar-a-glyph CFF font named BC C128 HD Wide, size 36",
+            axes: RENDERED,
+            draw: |v| (font_codes(v, "FR", 36.0, 8.0, false), None),
+        },
+        Shape {
+            name: "codes in a bar-a-glyph full TrueType font known by its bars, size 24",
+            axes: RENDERED,
+            draw: |v| (font_codes(v, "FS", 24.0, 8.0, false), None),
+        },
+        Shape {
+            name: "codes in a bar-a-glyph TrueType subset font beside a photo, size 36",
+            axes: RENDERED,
+            draw: |v| (font_codes(v, "FP", 36.0, 8.0, true), None),
         },
     ]);
     // More codes than a page renders again, all read; a halftone without a code.

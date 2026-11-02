@@ -868,6 +868,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
             bars_cut: false,
             bars_held: 0,
             bar_runs: 0,
+            bar_texts: Vec::new(),
         };
         let run = panic::catch_unwind(AssertUnwindSafe(|| {
             interpret(TypedIter::new(&data), page.resources(), &mut ctx, &mut dev);
@@ -1083,7 +1084,10 @@ impl<'p, 'a> PageReader<'p, 'a> {
             ))),
         }
         // Codes printed with a barcode font are read like codes drawn as paths.
-        items.codes.extend(crate::barfont::codes(&dev.bars));
+        items
+            .codes
+            .extend(crate::barfont::codes(&dev.bars, &dev.bar_texts));
+        dev.bar_texts = Vec::new();
         if dev.bars_cut {
             notes.push(Note::Unsupported(format!(
                 "codes printed in a barcode font on page {n} are looked for only among the \
@@ -2748,6 +2752,9 @@ struct TextDevice<'d> {
     bars_held: u64,
     /// Runs of barcode glyphs so far.
     bar_runs: u32,
+    /// The Code 128 value each run of barcode glyphs prints, read from the glyphs' geometry,
+    /// for the runs that are one.
+    bar_texts: Vec<(u32, String)>,
 }
 
 /// What the outlines of a font showed (see [`TextDevice::barcode_run`]).
@@ -2901,14 +2908,9 @@ impl TextDevice<'_> {
         if seen.is_empty() {
             return false;
         }
+        let looked: Vec<(u32, Affine, &Outline)> =
+            seen.iter().map(|g| (g.id, g.t, &g.outline.0)).collect();
         if !known {
-            let looked: Vec<(u32, f64, &Outline)> = seen
-                .iter()
-                .map(|g| {
-                    let c = g.t.as_coeffs();
-                    (g.id, c[0].hypot(c[1]), &g.outline.0)
-                })
-                .collect();
             if !crate::barfont::bars_fit(&looked) {
                 return false;
             }
@@ -2916,6 +2918,13 @@ impl TextDevice<'_> {
                 self.bar_fonts.insert(g.font, BarFont::Bars);
             }
         }
+        // The value its bars print, to check the read from the render against.
+        if !self.bars_cut
+            && let Some(text) = crate::barfont::code128_text(&looked)
+        {
+            self.bar_texts.push((self.bar_runs, text));
+        }
+        drop(looked);
         for s in &seen {
             if self.glyphs.len() + self.bars.len() >= self.cap {
                 panic::resume_unwind(Box::new(Abort::Cap));

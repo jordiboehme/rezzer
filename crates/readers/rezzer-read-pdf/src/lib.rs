@@ -793,6 +793,11 @@ fn lay_out(
                                 turn: items.turn,
                                 size: (info.width, info.height),
                                 light: items.images.len() <= render::SCAN_PICTURES,
+                                glyphs: items
+                                    .codes
+                                    .iter()
+                                    .filter_map(render::glyph_values)
+                                    .collect(),
                             });
                             out.doc.assets.push(render::asset(n, v.alt, caption));
                         }
@@ -825,6 +830,11 @@ fn lay_out(
                             turn: items.turn,
                             size: (info.width, info.height),
                             light: items.images.len() <= render::SCAN_PICTURES,
+                            glyphs: items
+                                .codes
+                                .iter()
+                                .filter_map(render::glyph_values)
+                                .collect(),
                         });
                     }
                 }

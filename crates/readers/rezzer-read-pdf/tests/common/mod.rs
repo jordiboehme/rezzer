@@ -337,8 +337,8 @@ impl Default for FormPage {
 /// A file of print-run form pages, A4 unless `paper` says otherwise. The page and the
 /// template have the fonts `/FL` (Helvetica, for labels), `/FD` (Courier, for data lines),
 /// `/FB` (Helvetica-Bold) and `/FDB` (Courier-Bold, for data lines with `bold_data`), `/FT`
-/// (Times-Roman) and `/FTB` (Times-Bold), all in WinAnsi; a template that shows `/FC` or `/FN`
-/// gets the Code 128 barcode fonts of [`barfont`] (named for codes and not). The template and
+/// (Times-Roman) and `/FTB` (Times-Bold), all in WinAnsi; a template that shows one of the
+/// bar fonts of [`barfont::BAR_FONTS`] gets them all. The template and
 /// the data lines are written in that encoding, so labels may hold umlauts, `\u{df}` and the
 /// euro sign. The page and the template share one picture, `/Logo` (4 by 4 gray pixels),
 /// which [`logo`] draws. `info` holds the entries of the Info dictionary (for example `/Title (Lohn)`); with `""`
@@ -363,19 +363,19 @@ pub fn print_form(pages: &[FormPage], info: &str, catalog_extra: &str) -> Vec<u8
          /BitsPerComponent 8",
         &(0..16u8).map(|i| 30 + i * 9).collect::<Vec<u8>>(),
     );
-    // Barcode fonts only for pages that show them: `/FC` named `Code128`, `/FN` with a name
-    // that says nothing (see [`barfont`]).
-    let codes = pages
-        .iter()
-        .any(|p| p.template.contains("/FC ") || p.template.contains("/FN "));
-    let bar_fonts = if codes {
-        let program = barfont::program(None);
-        let named = barfont::add_font(&mut b, "Code128", &program);
-        let plain = barfont::add_font(&mut b, "ShopBars", &program);
-        format!(" /FC {named} 0 R /FN {plain} 0 R")
-    } else {
-        String::new()
-    };
+    // Barcode fonts only for pages that show them (see [`barfont::BAR_FONTS`]).
+    let codes = pages.iter().any(|p| {
+        barfont::BAR_FONTS
+            .iter()
+            .any(|f| p.template.contains(&format!("/{} ", f.0)))
+    });
+    let mut bar_fonts = String::new();
+    if codes {
+        for (key, name, set, kind) in barfont::BAR_FONTS {
+            let f = barfont::add_bar_font(&mut b, name, set, kind);
+            bar_fonts += &format!(" /{key} {f} 0 R");
+        }
+    }
     let fonts = format!(
         "/Font << /FL {label} 0 R /FD {data} 0 R /FB {bold} 0 R /FDB {bold_data} 0 R \
          /FT {times} 0 R /FTB {times_bold} 0 R{bar_fonts} >>"

@@ -363,3 +363,737 @@ fn page_of(content: &str, fonts: &[(&str, &str, &[u8])], photo: bool) -> Vec<u8>
     b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
     b.finish(catalog)
 }
+
+// Fonts of other structures (Task 15b part 2f-1 fix round 1): the structure of a real shop's
+// barcode font (a simple TrueType subset, `BC C128 HD Wide`, one bar and its space a glyph),
+// and the same glyphs as a full TrueType, a Type1 and a CFF program.
+
+/// What the glyphs of a bar font are: Code 128 symbols (11 modules a glyph, as above), or
+/// one bar and the space after it a glyph, as `BC C128 HD Wide` draws them.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Set {
+    Symbols,
+    Pairs,
+}
+
+/// The structure of a bar font's program.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Kind {
+    /// A simple TrueType font, its name behind a six-letter subset prefix.
+    TrueTypeSubset,
+    /// A simple TrueType font without a subset prefix.
+    TrueTypeFull,
+    /// A Type1 font program (`/FontFile`, eexec encrypted).
+    Type1,
+    /// A CFF program (`/FontFile3 /Subtype /Type1C`).
+    Cff,
+}
+
+/// Font units of a module of [`Set::Pairs`] (as the real font: widths 33, 50, 66, 83 and so on)
+/// and the height of its bars (its ascent).
+pub const PAIR_MODULE: f32 = 50.0 / 3.0;
+pub const PAIR_HEIGHT: i16 = 761;
+
+/// One glyph of a bar font: its WinAnsi code, its rectangles and its advance in font units.
+pub struct BarGlyph {
+    pub code: u8,
+    pub rects: Vec<Rect>,
+    pub adv: u16,
+}
+
+/// The code of the glyph of a bar of `b` modules and the space of `s` after it in
+/// [`Set::Pairs`] (`A` to `P`), and `Q` for the last bar of the stop (2 modules, no space).
+fn pair_code(b: u8, s: u8) -> u8 {
+    if s == 0 {
+        b'Q'
+    } else {
+        b'A' + (b - 1) * 4 + (s - 1)
+    }
+}
+
+/// The glyphs of a font of `set`.
+pub fn bar_glyphs(set: Set) -> Vec<BarGlyph> {
+    match set {
+        Set::Symbols => (0..107u8)
+            .map(|v| {
+                let (rects, adv) = pattern_bars(PATTERNS[v as usize]);
+                BarGlyph {
+                    code: code_of(v),
+                    rects,
+                    adv,
+                }
+            })
+            .collect(),
+        Set::Pairs => {
+            let mut out = Vec::new();
+            let at = |k: u8| (f32::from(k) * PAIR_MODULE).round() as i16;
+            for b in 1..=4u8 {
+                for s in 1..=4u8 {
+                    out.push(BarGlyph {
+                        code: pair_code(b, s),
+                        rects: vec![(0, 0, at(b), PAIR_HEIGHT)],
+                        adv: at(b + s) as u16,
+                    });
+                }
+            }
+            out.push(BarGlyph {
+                code: b'Q',
+                rects: vec![(0, 0, at(2), PAIR_HEIGHT)],
+                adv: at(2) as u16,
+            });
+            out
+        }
+    }
+}
+
+/// The codes `text` is shown with as a Code 128 in a font of `set`.
+pub fn bar_codes(set: Set, text: &str) -> Vec<u8> {
+    let values = code128_values(text);
+    match set {
+        Set::Symbols => values.into_iter().map(code_of).collect(),
+        Set::Pairs => {
+            let mut out = Vec::new();
+            for v in values {
+                let w: Vec<u8> = PATTERNS[v as usize].bytes().map(|b| b - b'0').collect();
+                for p in w.chunks(2) {
+                    out.push(pair_code(p[0], p.get(1).copied().unwrap_or(0)));
+                }
+            }
+            out
+        }
+    }
+}
+
+/// `codes` as the body of a PDF string.
+pub fn pdf_string(codes: &[u8]) -> String {
+    let mut s = String::new();
+    for &c in codes {
+        match c {
+            b'(' | b')' | b'\\' => {
+                s.push('\\');
+                s.push(char::from(c));
+            }
+            32..=126 => s.push(char::from(c)),
+            _ => s.push_str(&format!("\\{c:03o}")),
+        }
+    }
+    s
+}
+
+/// The width in points of `text` shown as a Code 128 in a font of `set` at `size`: the sum of
+/// the advances of its glyphs.
+pub fn bar_width(set: Set, text: &str, size: f32) -> f32 {
+    let glyphs = bar_glyphs(set);
+    bar_codes(set, text)
+        .iter()
+        .map(|c| {
+            glyphs
+                .iter()
+                .find(|g| g.code == *c)
+                .map_or(0.0, |g| f32::from(g.adv))
+        })
+        .sum::<f32>()
+        / 1000.0
+        * size
+}
+
+/// The width of the ink of `text` as a Code 128 in a font of `set` at `size`: to the right of
+/// the last bar.
+pub fn bar_ink_width(set: Set, text: &str, size: f32) -> f32 {
+    let glyphs = bar_glyphs(set);
+    let codes = bar_codes(set, text);
+    let mut x = 0.0;
+    let mut right = 0.0f32;
+    for c in &codes {
+        if let Some(g) = glyphs.iter().find(|g| g.code == *c) {
+            for r in &g.rects {
+                right = right.max(x + f32::from(r.2));
+            }
+            x += f32::from(g.adv);
+        }
+    }
+    right / 1000.0 * size
+}
+
+/// The height of the bars of a font of `set` at `size`.
+pub fn bar_height(set: Set, size: f32) -> f32 {
+    let h = match set {
+        Set::Symbols => BAR_UNITS,
+        Set::Pairs => PAIR_HEIGHT,
+    };
+    f32::from(h) / 1000.0 * size
+}
+
+/// The Adobe glyph name of WinAnsi code `c`, for the codes the bar fonts use.
+fn glyph_name(c: u8) -> String {
+    const ASCII: [&str; 95] = [
+        "space",
+        "exclam",
+        "quotedbl",
+        "numbersign",
+        "dollar",
+        "percent",
+        "ampersand",
+        "quotesingle",
+        "parenleft",
+        "parenright",
+        "asterisk",
+        "plus",
+        "comma",
+        "hyphen",
+        "period",
+        "slash",
+        "zero",
+        "one",
+        "two",
+        "three",
+        "four",
+        "five",
+        "six",
+        "seven",
+        "eight",
+        "nine",
+        "colon",
+        "semicolon",
+        "less",
+        "equal",
+        "greater",
+        "question",
+        "at",
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G",
+        "H",
+        "I",
+        "J",
+        "K",
+        "L",
+        "M",
+        "N",
+        "O",
+        "P",
+        "Q",
+        "R",
+        "S",
+        "T",
+        "U",
+        "V",
+        "W",
+        "X",
+        "Y",
+        "Z",
+        "bracketleft",
+        "backslash",
+        "bracketright",
+        "asciicircum",
+        "underscore",
+        "grave",
+        "a",
+        "b",
+        "c",
+        "d",
+        "e",
+        "f",
+        "g",
+        "h",
+        "i",
+        "j",
+        "k",
+        "l",
+        "m",
+        "n",
+        "o",
+        "p",
+        "q",
+        "r",
+        "s",
+        "t",
+        "u",
+        "v",
+        "w",
+        "x",
+        "y",
+        "z",
+        "braceleft",
+        "bar",
+        "braceright",
+        "asciitilde",
+    ];
+    const HIGH: [&str; 12] = [
+        "Atilde",
+        "Adieresis",
+        "Aring",
+        "AE",
+        "Ccedilla",
+        "Egrave",
+        "Eacute",
+        "Ecircumflex",
+        "Edieresis",
+        "Igrave",
+        "Iacute",
+        "Icircumflex",
+    ];
+    match c {
+        32..=126 => ASCII[usize::from(c - 32)].to_string(),
+        195..=206 => HIGH[usize::from(c - 195)].to_string(),
+        _ => format!("g{c}"),
+    }
+}
+
+/// A TrueType program of `glyphs`, mapped from the Unicode character of each code (WinAnsi,
+/// Latin-1 for the codes used), ascent `ascent`.
+fn truetype(glyphs: &[BarGlyph], ascent: i16) -> Vec<u8> {
+    let n = glyphs.len() as u16 + 1;
+    let mut glyf = Vec::new();
+    let mut loca = Vec::new();
+    let mut hmtx = Vec::new();
+    be32(&mut loca, 0);
+    be32(&mut loca, 0);
+    be16(&mut hmtx, 500);
+    be16(&mut hmtx, 0);
+    for g in glyphs {
+        glyf.extend(rect_glyph(&g.rects));
+        be32(&mut loca, glyf.len() as u32);
+        be16(&mut hmtx, g.adv);
+        be16(&mut hmtx, 0);
+    }
+    let mut head = Vec::new();
+    be32(&mut head, 0x0001_0000);
+    be32(&mut head, 0x0001_0000);
+    be32(&mut head, 0);
+    be32(&mut head, 0x5F0F_3CF5);
+    be16(&mut head, 0);
+    be16(&mut head, 1000);
+    head.extend([0u8; 16]);
+    for v in [0u16, 0, 1000, ascent as u16] {
+        be16(&mut head, v);
+    }
+    be16(&mut head, 0);
+    be16(&mut head, 8);
+    be16(&mut head, 2);
+    be16(&mut head, 1);
+    be16(&mut head, 0);
+    let mut hhea = Vec::new();
+    be32(&mut hhea, 0x0001_0000);
+    be16(&mut hhea, ascent as u16);
+    be16(&mut hhea, 0);
+    be16(&mut hhea, 0);
+    be16(&mut hhea, 1000);
+    hhea.extend([0u8; 22]);
+    be16(&mut hhea, n);
+    let mut maxp = Vec::new();
+    be32(&mut maxp, 0x0001_0000);
+    be16(&mut maxp, n);
+    be16(&mut maxp, 64);
+    be16(&mut maxp, 16);
+    maxp.extend([0u8; 22]);
+    // cmap format 4: one segment for each glyph, in code order, and the end.
+    let mut segs: Vec<(u16, u16)> = glyphs
+        .iter()
+        .enumerate()
+        .map(|(k, g)| (u16::from(g.code), k as u16 + 1))
+        .collect();
+    segs.sort_unstable();
+    segs.push((0xFFFF, 0));
+    let mut sub = Vec::new();
+    let segx2 = (segs.len() * 2) as u16;
+    be16(&mut sub, 4);
+    be16(&mut sub, 16 + 8 * segs.len() as u16);
+    be16(&mut sub, 0);
+    be16(&mut sub, segx2);
+    be16(&mut sub, 2);
+    be16(&mut sub, 0);
+    be16(&mut sub, 0);
+    for s in &segs {
+        be16(&mut sub, s.0);
+    }
+    be16(&mut sub, 0);
+    for s in &segs {
+        be16(&mut sub, s.0);
+    }
+    for s in &segs {
+        be16(
+            &mut sub,
+            if s.0 == 0xFFFF {
+                1
+            } else {
+                s.1.wrapping_sub(s.0)
+            },
+        );
+    }
+    for _ in &segs {
+        be16(&mut sub, 0);
+    }
+    let mut cmap = Vec::new();
+    be16(&mut cmap, 0);
+    be16(&mut cmap, 1);
+    be16(&mut cmap, 3);
+    be16(&mut cmap, 1);
+    be32(&mut cmap, 12);
+    cmap.extend(sub);
+    let mut post = Vec::new();
+    be32(&mut post, 0x0003_0000);
+    post.extend([0u8; 28]);
+    let tables: Vec<(&[u8; 4], Vec<u8>)> = vec![
+        (b"cmap", cmap),
+        (b"glyf", glyf),
+        (b"head", head),
+        (b"hhea", hhea),
+        (b"hmtx", hmtx),
+        (b"loca", loca),
+        (b"maxp", maxp),
+        (b"post", post),
+    ];
+    let mut out = Vec::new();
+    be32(&mut out, 0x0001_0000);
+    be16(&mut out, tables.len() as u16);
+    be16(&mut out, 128);
+    be16(&mut out, 3);
+    be16(&mut out, 0);
+    let mut offset = 12 + 16 * tables.len() as u32;
+    let mut body = Vec::new();
+    for (tag, data) in &tables {
+        out.extend(*tag);
+        be32(&mut out, 0);
+        be32(&mut out, offset);
+        be32(&mut out, data.len() as u32);
+        body.extend(data);
+        while body.len() % 4 != 0 {
+            body.push(0);
+        }
+        offset = 12 + 16 * tables.len() as u32 + body.len() as u32;
+    }
+    out.extend(body);
+    out
+}
+
+/// The path of a glyph as relative moves: for each rectangle a move to its lower left corner
+/// and four lines around it back to that corner. `mv(dx, dy)` and `ln(dx, dy)` write them.
+fn rect_moves(rects: &[Rect], mut mv: impl FnMut(i32, i32), mut ln: impl FnMut(i32, i32)) {
+    let (mut x, mut y) = (0i32, 0i32);
+    for &(x0, y0, x1, y1) in rects {
+        let (x0, y0, x1, y1) = (i32::from(x0), i32::from(y0), i32::from(x1), i32::from(y1));
+        mv(x0 - x, y0 - y);
+        ln(0, y1 - y0);
+        ln(x1 - x0, 0);
+        ln(0, y0 - y1);
+        ln(x0 - x1, 0);
+        (x, y) = (x0, y0);
+    }
+}
+
+/// A CFF INDEX of `items`, offsets of 4 bytes.
+fn cff_index(items: &[Vec<u8>]) -> Vec<u8> {
+    let mut out = Vec::new();
+    be16(&mut out, items.len() as u16);
+    if items.is_empty() {
+        return out;
+    }
+    out.push(4);
+    let mut off = 1u32;
+    be32(&mut out, off);
+    for i in items {
+        off += i.len() as u32;
+        be32(&mut out, off);
+    }
+    for i in items {
+        out.extend(i);
+    }
+    out
+}
+
+/// A Type 2 charstring number (the 16-bit form).
+fn t2_num(out: &mut Vec<u8>, v: i32) {
+    out.push(28);
+    be16(out, v as i16 as u16);
+}
+
+/// A CFF program named `name` of `glyphs`: glyph names from WinAnsi, charset format 0.
+fn cff(name: &str, glyphs: &[BarGlyph]) -> Vec<u8> {
+    let names: Vec<String> = glyphs.iter().map(|g| glyph_name(g.code)).collect();
+    let mut charstrings = vec![{
+        let mut c = Vec::new();
+        t2_num(&mut c, 500);
+        c.push(14);
+        c
+    }];
+    for g in glyphs {
+        let mut c = Vec::new();
+        let mut first = true;
+        let cell = std::cell::RefCell::new(&mut c);
+        rect_moves(
+            &g.rects,
+            |dx, dy| {
+                let mut c = cell.borrow_mut();
+                if first {
+                    t2_num(&mut c, i32::from(g.adv));
+                    first = false;
+                }
+                t2_num(&mut c, dx);
+                t2_num(&mut c, dy);
+                c.push(21);
+            },
+            |dx, dy| {
+                let mut c = cell.borrow_mut();
+                t2_num(&mut c, dx);
+                t2_num(&mut c, dy);
+                c.push(5);
+            },
+        );
+        if g.rects.is_empty() {
+            t2_num(&mut c, i32::from(g.adv));
+        }
+        c.push(14);
+        charstrings.push(c);
+    }
+    let strings: Vec<Vec<u8>> = names.iter().map(|n| n.as_bytes().to_vec()).collect();
+    let header = vec![1u8, 0, 4, 4];
+    let name_index = cff_index(&[name.as_bytes().to_vec()]);
+    let string_index = cff_index(&strings);
+    let gsubr = cff_index(&[]);
+    let mut charset = vec![0u8];
+    for k in 0..glyphs.len() {
+        be16(&mut charset, 391 + k as u16);
+    }
+    let cs_index = cff_index(&charstrings);
+    // A Private DICT of nominalWidthX 0.
+    let private: Vec<u8> = vec![139, 21];
+    // The Top DICT holds three offsets as 5-byte numbers: its size is known before them.
+    let dict = |charset_at: u32, cs_at: u32, private_at: u32| {
+        let mut d = Vec::new();
+        let num = |d: &mut Vec<u8>, v: u32| {
+            d.push(29);
+            be32(d, v);
+        };
+        num(&mut d, charset_at);
+        d.push(15);
+        num(&mut d, cs_at);
+        d.push(17);
+        num(&mut d, private.len() as u32);
+        num(&mut d, private_at);
+        d.push(18);
+        d
+    };
+    let top_len = cff_index(&[dict(0, 0, 0)]).len();
+    let start = header.len() + name_index.len() + top_len + string_index.len() + gsubr.len();
+    let charset_at = start as u32;
+    let cs_at = charset_at + charset.len() as u32;
+    let private_at = cs_at + cs_index.len() as u32;
+    let top = cff_index(&[dict(charset_at, cs_at, private_at)]);
+    let mut out = header;
+    out.extend(name_index);
+    out.extend(top);
+    out.extend(string_index);
+    out.extend(gsubr);
+    out.extend(charset);
+    out.extend(cs_index);
+    out.extend(private);
+    out
+}
+
+/// A Type 1 charstring number.
+fn t1_num(out: &mut Vec<u8>, v: i32) {
+    match v {
+        -107..=107 => out.push((v + 139) as u8),
+        108..=1131 => {
+            let w = v - 108;
+            out.push((w / 256 + 247) as u8);
+            out.push((w % 256) as u8);
+        }
+        -1131..=-108 => {
+            let w = -v - 108;
+            out.push((w / 256 + 251) as u8);
+            out.push((w % 256) as u8);
+        }
+        _ => {
+            out.push(255);
+            be32(out, v as u32);
+        }
+    }
+}
+
+/// `data` encrypted as Type 1 does it with key `r`, after `skip` leading zero bytes.
+fn t1_encrypt(data: &[u8], mut r: u16, skip: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(data.len() + skip);
+    for &p in std::iter::repeat_n(&0u8, skip).chain(data) {
+        let c = p ^ (r >> 8) as u8;
+        r = (u16::from(c).wrapping_add(r))
+            .wrapping_mul(52845)
+            .wrapping_add(22719);
+        out.push(c);
+    }
+    out
+}
+
+/// A Type 1 program named `name` of `glyphs`, with the lengths of its clear, encrypted and
+/// trailing parts.
+fn type1(name: &str, glyphs: &[BarGlyph]) -> (Vec<u8>, usize, usize, usize) {
+    let mut clear = format!(
+        "%!PS-AdobeFont-1.0: {name} 001\n12 dict begin\n/FontName /{name} def\n/FontType 1 def\n\
+         /PaintType 0 def\n/FontMatrix [0.001 0 0 0.001 0 0] readonly def\n\
+         /FontBBox {{0 0 1000 1600}} readonly def\n\
+         /Encoding 256 array\n0 1 255 {{1 index exch /.notdef put}} for\n"
+    );
+    for g in glyphs {
+        clear += &format!("dup {} /{} put\n", g.code, glyph_name(g.code));
+    }
+    clear += "readonly def\ncurrentdict end\ncurrentfile eexec\n";
+    let mut private = format!(
+        "dup /Private 8 dict dup begin\n/RD{{string currentfile exch readstring pop}}executeonly def\n\
+         /ND{{noaccess def}}executeonly def\n/NP{{noaccess put}}executeonly def\n/lenIV 4 def\n\
+         /MinFeature{{16 16}}def\n/password 5839 def\n/BlueValues [] ND\n\
+         2 index /CharStrings {} dict dup begin\n",
+        glyphs.len() + 1
+    )
+    .into_bytes();
+    let charstring = |name: &str, adv: u16, rects: &[Rect], out: &mut Vec<u8>| {
+        let mut c = Vec::new();
+        t1_num(&mut c, 0);
+        t1_num(&mut c, i32::from(adv));
+        c.push(13);
+        let cell = std::cell::RefCell::new(&mut c);
+        rect_moves(
+            rects,
+            |dx, dy| {
+                let mut c = cell.borrow_mut();
+                t1_num(&mut c, dx);
+                t1_num(&mut c, dy);
+                c.push(21);
+            },
+            |dx, dy| {
+                let mut c = cell.borrow_mut();
+                t1_num(&mut c, dx);
+                t1_num(&mut c, dy);
+                c.push(5);
+            },
+        );
+        if !rects.is_empty() {
+            c.push(9);
+        }
+        c.push(14);
+        let enc = t1_encrypt(&c, 4330, 4);
+        out.extend(format!("/{name} {} RD ", enc.len()).as_bytes());
+        out.extend(enc);
+        out.extend(b" ND\n");
+    };
+    charstring(".notdef", 500, &[], &mut private);
+    for g in glyphs {
+        charstring(&glyph_name(g.code), g.adv, &g.rects, &mut private);
+    }
+    private.extend(
+        b"end\nend\nreadonly put\nnoaccess put\ndup /FontName get exch definefont pop\n\
+          mark currentfile closefile\n",
+    );
+    let enc = t1_encrypt(&private, 55665, 4);
+    let mut trailer = String::new();
+    for _ in 0..8 {
+        trailer += &"0".repeat(64);
+        trailer.push('\n');
+    }
+    trailer += "cleartomark\n";
+    let mut out = clear.clone().into_bytes();
+    out.extend(&enc);
+    out.extend(trailer.as_bytes());
+    (out, clear.len(), enc.len(), trailer.len())
+}
+
+/// Adds a bar font of `set` in the structure `kind` named `name` (written into the PDF as
+/// given, so a space is `#20`; a subset prefix is added for [`Kind::TrueTypeSubset`]) to `b`;
+/// returns its object number. For [`Set::Pairs`] the dictionaries are those of the real
+/// font: widths for codes 0 to 255 (5 where no glyph is), WinAnsi, ascent 761, cap height 0,
+/// descent 0, flags 32.
+pub fn add_bar_font(b: &mut Builder, name: &str, set: Set, kind: Kind) -> u32 {
+    let glyphs = bar_glyphs(set);
+    let base = match kind {
+        Kind::TrueTypeSubset => format!("ABCDEE+{name}"),
+        _ => name.to_string(),
+    };
+    let (file, subtype) = match kind {
+        Kind::TrueTypeSubset | Kind::TrueTypeFull => {
+            let p = truetype(&glyphs, PAIR_HEIGHT.max(BAR_UNITS));
+            let ff = b.stream(&format!("/Length1 {}", p.len()), &p);
+            (format!("/FontFile2 {ff} 0 R"), "TrueType")
+        }
+        Kind::Cff => {
+            let plain: String = base.replace("#20", "");
+            let p = cff(&plain, &glyphs);
+            let ff = b.stream("/Subtype /Type1C", &p);
+            (format!("/FontFile3 {ff} 0 R"), "Type1")
+        }
+        Kind::Type1 => {
+            let plain: String = base.replace("#20", "");
+            let (p, l1, l2, l3) = type1(&plain, &glyphs);
+            let ff = b.stream(&format!("/Length1 {l1} /Length2 {l2} /Length3 {l3}"), &p);
+            (format!("/FontFile {ff} 0 R"), "Type1")
+        }
+    };
+    let (ascent, bbox) = match set {
+        Set::Symbols => (BAR_UNITS, format!("0 0 1000 {BAR_UNITS}")),
+        Set::Pairs => (PAIR_HEIGHT, format!("0 0 438 {PAIR_HEIGHT}")),
+    };
+    let desc = b.add(format!(
+        "<< /Type /FontDescriptor /FontName /{base} /Flags 32 /FontBBox [{bbox}] \
+         /ItalicAngle 0 /Ascent {ascent} /Descent 0 /CapHeight 0 /StemV 0 {file} >>"
+    ));
+    let widths: Vec<String> = (0u16..=255)
+        .map(|c| {
+            glyphs
+                .iter()
+                .find(|g| u16::from(g.code) == c)
+                .map_or("5".to_string(), |g| g.adv.to_string())
+        })
+        .collect();
+    b.add(format!(
+        "<< /Type /Font /Subtype /{subtype} /BaseFont /{base} /FirstChar 0 /LastChar 255 \
+         /Widths [{}] /Encoding /WinAnsiEncoding /FontDescriptor {desc} 0 R >>",
+        widths.join(" ")
+    ))
+}
+
+/// A one-page A4 file with `content`, Helvetica as `/F1`, Helvetica-Bold as `/F2`, and the bar
+/// fonts `fonts` (resource name, base name, glyph set, structure).
+pub fn page_with_bar_fonts(content: &str, fonts: &[(&str, &str, Set, Kind)]) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let f1 = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let f2 = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
+    let mut res = format!("/F1 {f1} 0 R /F2 {f2} 0 R");
+    for (key, name, set, kind) in fonts {
+        let f = add_bar_font(&mut b, name, *set, *kind);
+        res += &format!(" /{key} {f} 0 R");
+    }
+    let c = b.stream("", content.as_bytes());
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+         /Resources << /Font << {res} >> >> /Contents {c} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+/// The bar fonts a print form may show (see `print_form`): resource name, base name as
+/// written, glyph set and structure. `FC` and `FN` are Code 128 symbol fonts named for codes
+/// and not; `FP` to `FS` draw one bar and its space a glyph, as `BC C128 HD Wide` does, in
+/// each structure.
+pub const BAR_FONTS: [(&str, &str, Set, Kind); 6] = [
+    ("FC", "Code128", Set::Symbols, Kind::TrueTypeSubset),
+    ("FN", "ShopBars", Set::Symbols, Kind::TrueTypeSubset),
+    (
+        "FP",
+        "BC#20C128#20HD#20Wide",
+        Set::Pairs,
+        Kind::TrueTypeSubset,
+    ),
+    ("FQ", "ShopBars", Set::Pairs, Kind::Type1),
+    ("FR", "BC#20C128#20HD#20Wide", Set::Pairs, Kind::Cff),
+    ("FS", "ShopBars", Set::Pairs, Kind::TrueTypeFull),
+];
