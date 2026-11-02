@@ -4771,3 +4771,81 @@ fn groups_of_small_rectangles_past_the_search_bound_are_said() {
     assert!(partly.is_some(), "{:?}", out.document.losses);
     assert!(text(page(&out, 1)).contains("Before."));
 }
+
+#[test]
+fn glyphs_of_many_bars_in_many_fonts_are_charged_and_bounded() {
+    // One font program whose 107 glyphs each draw 200 thin bars, used by 800 fonts on one
+    // page, each glyph shown once: the outline of each glyph looked at is charged and their
+    // number bounded. Past the bound the runs of bars are not read as codes, are no text,
+    // and a loss says so.
+    let start = Instant::now();
+    let thin = |_: u8| -> Vec<common::barfont::Rect> {
+        (0..200i16).map(|k| (k * 5, 0, k * 5 + 2, 1600)).collect()
+    };
+    let program = common::barfont::program(Some(&thin));
+    let fonts = 800usize;
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let ff = b.stream(&format!("/Length1 {}", program.len()), &program);
+    let desc = b.add(format!(
+        "<< /Type /FontDescriptor /FontName /ABCDEF+Muster /Flags 32 \
+         /FontBBox [0 0 1000 1600] /ItalicAngle 0 /Ascent 1600 /Descent 0 /CapHeight 1600 \
+         /StemV 80 /FontFile2 {ff} 0 R >>"
+    ));
+    let widths = vec!["1000"; 175].join(" ");
+    let mut res = String::new();
+    for k in 0..fonts {
+        let f = b.add(format!(
+            "<< /Type /Font /Subtype /TrueType /BaseFont /ABCDEF+Muster{k} /FirstChar 32 \
+             /LastChar 206 /Widths [{widths}] /Encoding /WinAnsiEncoding \
+             /FontDescriptor {desc} 0 R >>"
+        ));
+        res += &format!(" /B{k} {f} 0 R");
+    }
+    let shown: String = (32u8..=126)
+        .chain(195..=206)
+        .map(|c| match c {
+            b'(' | b')' | b'\\' => format!("\\{}", c as char),
+            32..=126 => (c as char).to_string(),
+            _ => format!("\\{c:o}"),
+        })
+        .collect();
+    let mut c = b"BT /F1 10 Tf 1 0 0 1 72 820 Tm (Before.) Tj ".to_vec();
+    for k in 0..fonts {
+        c.extend(
+            format!(
+                "/B{k} 0.5 Tf 1 0 0 1 20 {:.1} Tm ({shown}) Tj ",
+                800.0 - k as f32 * 0.9
+            )
+            .as_bytes(),
+        );
+    }
+    c.extend(b"ET\n");
+    let f1 = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let cs = b.stream("/Filter /FlateDecode", &deflate(&c));
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+         /Resources << /Font << /F1 {f1} 0 R{res} >> >> /Contents {cs} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let out = read(&b.finish(catalog));
+    assert_quick(start);
+    let cut = out.document.losses.iter().find(|l| {
+        l.what.contains("page 1") && l.what.contains("different glyphs drawn as bars")
+    });
+    assert!(cut.is_some(), "{:?}", out.document.losses);
+    let body = text(page(&out, 1));
+    assert!(body.contains("Before."));
+    // The runs whose outlines were kept and that print no code stay text, as any such run;
+    // the runs past the bound are no text.
+    let left = body.matches("ABCDEFG").count();
+    assert!(left <= 8_192 / 107 + 1, "{left} runs of bars left in the text");
+    // Without the bound the outlines alone took about 75 MiB more.
+    let peak = heap_peak_bytes();
+    assert!(peak < 220 << 20, "heap peak {} MiB", peak >> 20);
+}

@@ -869,6 +869,9 @@ impl<'p, 'a> PageReader<'p, 'a> {
             bars: Vec::new(),
             bars_cut: false,
             bars_held: 0,
+            outlines_held: 0,
+            outlines_cut: false,
+            bars_unread: Vec::new(),
             bar_texts: Vec::new(),
         };
         let run = panic::catch_unwind(AssertUnwindSafe(|| {
@@ -879,7 +882,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
         dev.take_bars();
         if let Err(payload) = run {
             // A page not kept gives back what its cells and marks hold of the object pool.
-            let held = dev.cells_held + dev.drawn_marks_held + dev.bars_held;
+            let held = dev.cells_held + dev.drawn_marks_held + dev.bars_held + dev.outlines_held;
             match payload.downcast_ref::<Abort>() {
                 Some(Abort::Stop) => {
                     self.origin.release_copy(held);
@@ -1107,7 +1110,14 @@ impl<'p, 'a> PageReader<'p, 'a> {
             )));
         }
         dev.bars = Vec::new();
-        self.origin.release_copy(dev.bars_held);
+        self.origin.release_copy(dev.bars_held + dev.outlines_held);
+        if dev.outlines_cut {
+            notes.push(Note::Unsupported(format!(
+                "runs of bars on page {n} are read for codes only while the page draws at most \
+                 {MAX_OUTLINES} different glyphs drawn as bars and the object limit holds \
+                 them: the runs past that are not read as codes and are left out of the text"
+            )));
+        }
         if dev.cells_cut {
             notes.push(Note::Unsupported(format!(
                 "codes drawn as paths on page {n} are looked for only among the first {} small \
@@ -2764,6 +2774,14 @@ struct TextDevice<'d> {
     bars_cut: bool,
     /// What `bar_runs` holds of the object pool.
     bars_held: u64,
+    /// What `bar_outlines` holds of the object pool.
+    outlines_held: u64,
+    /// More different glyphs drawn as bars than are kept (see [`MAX_OUTLINES`]), or the
+    /// object pool held no more of them: their runs are not read as codes.
+    outlines_cut: bool,
+    /// The glyphs (first and number) of runs of bars whose outlines were not kept, with
+    /// whether an ActualText gives their text: they are no text and are not read as codes.
+    bars_unread: Vec<(usize, usize, bool)>,
     /// The Code 128 value each code printed with a font prints, read from the glyphs'
     /// geometry, for the codes that are one.
     bar_texts: Vec<(u32, String)>,
@@ -2798,6 +2816,13 @@ struct BarRun {
 
 /// What one glyph of [`BarRun`] holds, about.
 const BAR_GLYPH_BYTES: u64 = std::mem::size_of::<BarGlyph>() as u64;
+
+/// Different glyph outlines (by font and glyph) a page keeps while it looks for runs of bars,
+/// at most: a barcode font draws about a hundred.
+const MAX_OUTLINES: usize = 8_192;
+
+/// What one kept outline holds besides its bars, about: the outline and its place in the map.
+const OUTLINE_BYTES: u64 = std::mem::size_of::<crate::barfont::Outline>() as u64 + 48;
 
 impl TextDevice<'_> {
     fn tick(&mut self) {
@@ -2887,16 +2912,19 @@ impl TextDevice<'_> {
     /// The glyphs of `run` (drawn with `transform`) when each is bars or a space and at least
     /// one is bars (see [`crate::barfont::outline`]), with whether a font's name says it is a
     /// barcode font. One glyph that is anything else makes its font a text font for the page.
+    /// Also whether an outline of the run could not be kept ([`MAX_OUTLINES`] or the object
+    /// pool): such a run is not read as a code.
     fn bar_run(
         &mut self,
         run: &GlyphRun<'_, '_>,
         transform: Affine,
-    ) -> Option<(Vec<BarGlyph>, bool)> {
+    ) -> Option<(Vec<BarGlyph>, bool, bool)> {
         use crate::barfont::Outline;
         let glyphs = run.glyphs();
         let mut seen: Vec<BarGlyph> = Vec::with_capacity(glyphs.len());
         let mut named = false;
         let mut bars = false;
+        let mut unkept = false;
         for g in glyphs {
             self.tick();
             let Glyph::Outline(o) = &**g else {
@@ -2911,7 +2939,25 @@ impl TextDevice<'_> {
                 Some(o) => o.clone(),
                 None => {
                     let read = Rc::new(crate::barfont::outline(&o.outline()));
-                    self.bar_outlines.insert((key, id), read.clone());
+                    // Each outline kept is charged; past the bound or the pool it is looked at
+                    // and not kept.
+                    let bytes = OUTLINE_BYTES
+                        + match &*read {
+                            Outline::Bars { bars, .. } => {
+                                (bars.len() * std::mem::size_of::<(f64, f64)>()) as u64
+                            }
+                            _ => 0,
+                        };
+                    if !self.outlines_cut
+                        && self.bar_outlines.len() < MAX_OUTLINES
+                        && self.origin.charge_copy(bytes)
+                    {
+                        self.outlines_held += bytes;
+                        self.bar_outlines.insert((key, id), read.clone());
+                    } else {
+                        self.outlines_cut = true;
+                        unkept = true;
+                    }
                     read
                 }
             };
@@ -2932,7 +2978,7 @@ impl TextDevice<'_> {
                 advance: o.advance_width(),
             });
         }
-        bars.then_some((seen, named))
+        bars.then_some((seen, named, unkept))
     }
 
     /// Keeps the run of bars `run`, if the page may hold its glyphs (in the object pool, a
@@ -2965,7 +3011,8 @@ impl TextDevice<'_> {
     fn take_bars(&mut self) {
         use crate::barfont::Outline;
         let runs = std::mem::take(&mut self.bar_runs);
-        if runs.is_empty() {
+        let unread = std::mem::take(&mut self.bars_unread);
+        if runs.is_empty() && unread.is_empty() {
             return;
         }
         // Whether the run `b` continues the run `a`: the same size and direction, its first
@@ -3049,6 +3096,13 @@ impl TextDevice<'_> {
             }
         }
         let mut drop_glyph = vec![false; self.glyphs.len()];
+        // Runs of bars whose outlines were not kept are no text either (unless an ActualText
+        // gives it); a note says they are not read.
+        for (from, n, keep) in unread {
+            if !keep && let Some(d) = drop_glyph.get_mut(from..from + n) {
+                d.fill(true);
+            }
+        }
         let mut next_code = 0u32;
         for (k, g) in groups.iter().enumerate() {
             if !taken[k] {
@@ -3755,14 +3809,18 @@ impl<'a> Device<'a> for TextDevice<'_> {
             }
         }
         advances_from_positions(&mut self.glyphs[from..]);
-        if let Some((glyphs, named)) = bar_run {
+        if let Some((glyphs, named, unkept)) = bar_run {
             let keep = self.open.iter().any(|o| o.actual.is_some());
-            self.keep_bar_run(BarRun {
-                from,
-                glyphs,
-                named,
-                keep,
-            });
+            if unkept {
+                self.bars_unread.push((from, self.glyphs.len() - from, keep));
+            } else {
+                self.keep_bar_run(BarRun {
+                    from,
+                    glyphs,
+                    named,
+                    keep,
+                });
+            }
         }
     }
 
