@@ -2091,7 +2091,6 @@ dependencies = [
  "rezzer-read-pdf",
  "rezzer-read-sheet",
  "rezzer-read-text",
- "rezzer-render",
  "saphyr-parser",
  "serde_json",
  "sha2",
