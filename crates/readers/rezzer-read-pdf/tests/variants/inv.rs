@@ -62,7 +62,9 @@ pub(crate) enum Inv {
     CodeBox,
     /// A page that draws no code, or whose codes are all found as often as they are drawn,
     /// says of nothing on it that it looks like a code (no false loss on rules, ticks,
-    /// hatching or a code read).
+    /// hatching or a code read). The words of a read that is not listed ("a part read as
+    /// EAN-13 ..., not listed") are allowed: they list no value, and on a screen or letters
+    /// they are loss noise only (cosmetic); a listed value there breaks WrongValue.
     NoCode,
     /// The page needs vision exactly when it should.
     Vision,
@@ -470,6 +472,20 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
         .map(|c| (c.symbology.clone(), c.text.clone().unwrap_or_default()))
         .collect();
     let unread = assets.iter().any(|a| a.code_unread);
+    // Words that a code is there, other than a read not listed.
+    let doubt = assets.iter().any(|a| {
+        let alt = a.alt.as_deref().unwrap_or_default();
+        a.code_unread
+            && [
+                "like a barcode",
+                "not decoded",
+                "not scanned",
+                "lighter line",
+                "dark line",
+            ]
+            .iter()
+            .any(|w| alt.contains(w))
+    });
     let mut checked: Vec<&(String, String)> = Vec::new();
     let mut all_found = true;
     for c in &want.codes {
@@ -496,7 +512,7 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
             ));
         }
     }
-    if all_found && unread {
+    if all_found && doubt {
         broken.push(Broken(
             Inv::NoCode,
             format!(

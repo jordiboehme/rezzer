@@ -255,18 +255,33 @@ pub(crate) fn crossed(rgba: &[u8], (w, h): (usize, usize), b: [u32; 4]) -> bool 
     })
 }
 
+/// How two reads of one linear code are one code: its bars go on between them, or a dark
+/// line runs across them there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Joined {
+    Bars,
+    Dark,
+}
+
 /// Whether boxes `a` and `b` (pixels: left, top, right, bottom) of the render `rgba` (`size`
-/// in pixels), where one linear code was read twice, are its bars on both sides of a dark line
-/// across them: they stand one after the other along the bars, across them nearly the same
-/// ([`SPLIT_SAME`] of the narrower), at most [`SPLIT_GAP`] of the shorter apart, and a line
-/// between them (or at their meeting) is dark across [`SPLIT_DARK`] of their common part.
-/// Paper between them is two codes.
-pub(crate) fn split_by_line(rgba: &[u8], (w, h): (usize, usize), a: [u32; 4], b: [u32; 4]) -> bool {
+/// in pixels), where one linear code was read twice, are bars of one code: they stand one
+/// after the other along the bars, across them nearly the same ([`SPLIT_SAME`] of the
+/// narrower), at most [`SPLIT_GAP`] of the shorter apart, and between them (or at their
+/// meeting) a line is dark across [`SPLIT_DARK`] of their common part ([`Joined::Dark`]: it
+/// may also be two codes with a dark line between them), or every line shows the bars as
+/// strongly as the first box does, give or take [`CROSSED_DIP`] ([`Joined::Bars`]). Paper or a
+/// lighter line between them is two codes.
+pub(crate) fn joined(
+    rgba: &[u8],
+    (w, h): (usize, usize),
+    a: [u32; 4],
+    b: [u32; 4],
+) -> Option<Joined> {
     if rgba.len() < w * h * 4 {
-        return false;
+        return None;
     }
     let gray = |x: u32, y: u32| gray_at(rgba, y as usize * w + x as usize);
-    [false, true].into_iter().any(|lying| {
+    [false, true].into_iter().find_map(|lying| {
         // Along the bars and across them: for bars standing up, y and x.
         let parts = |r: [u32; 4]| -> ((u32, u32), (u32, u32)) {
             if lying {
@@ -280,7 +295,7 @@ pub(crate) fn split_by_line(rgba: &[u8], (w, h): (usize, usize), a: [u32; 4], b:
         let (lo, hi) = (x0.max(y0), x1.min(y1));
         let narrow = (x1 - x0).min(y1 - y0);
         if hi <= lo || ((hi - lo) as f32) < SPLIT_SAME * narrow as f32 {
-            return false;
+            return None;
         }
         // The first one along, then the gap to the other.
         let ((f0, f1), (s0, s1)) = if a0 <= b0 {
@@ -290,7 +305,7 @@ pub(crate) fn split_by_line(rgba: &[u8], (w, h): (usize, usize), a: [u32; 4], b:
         };
         let short = (f1 - f0).min(s1 - s0);
         if s0 + 1 < f1 || (s0.saturating_sub(f1) as f32) > SPLIT_GAP * short as f32 {
-            return false;
+            return None;
         }
         let at = |t: u32, c: u32| if lying { gray(t, c) } else { gray(c, t) };
         // The tones of the bars: the darkest and the lightest tenth across the first one's middle.
@@ -299,18 +314,31 @@ pub(crate) fn split_by_line(rgba: &[u8], (w, h): (usize, usize), a: [u32; 4], b:
         row.sort_unstable();
         let (dark, light) = (row[row.len() / 10], row[(row.len() - 1) * 9 / 10]);
         if light.saturating_sub(dark) < PIXEL_CONTRAST as u8 {
-            return false;
+            return None;
         }
         let t = (u32::from(dark) + u32::from(light)) / 2;
         let limit = if lying { w as u32 } else { h as u32 };
-        (f1.saturating_sub(1)..(s0 + 1).min(limit)).any(|l| {
+        let gap = f1.saturating_sub(1)..(s0 + 1).min(limit);
+        if gap.clone().any(|l| {
             let n = (lo..hi).filter(|&c| u32::from(at(l, c)) < t).count();
             n as f32 >= SPLIT_DARK * (hi - lo) as f32
-        })
+        }) {
+            return Some(Joined::Dark);
+        }
+        // The contrast across a line: from its darkest to its lightest tenth.
+        let contrast = |l: u32| {
+            let mut v: Vec<u8> = (lo..hi).map(|c| at(l, c)).collect();
+            v.sort_unstable();
+            f32::from(v[(v.len() - 1) * 9 / 10]) - f32::from(v[v.len() / 10])
+        };
+        let strong = f32::from(light - dark);
+        gap.clone()
+            .all(|l| contrast(l) >= CROSSED_DIP * strong)
+            .then_some(Joined::Bars)
     })
 }
 
-/// For [`split_by_line`]: the share of the narrower box the two have in common across the
+/// For [`joined`]: the share of the narrower box the two have in common across the
 /// bars, the gap between them as a share of the shorter one's bars, and the share of a line
 /// between them that is dark.
 const SPLIT_SAME: f32 = 0.75;

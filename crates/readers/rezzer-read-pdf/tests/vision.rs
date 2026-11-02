@@ -3852,12 +3852,9 @@ fn screens_and_letters_the_decoder_misreads_list_no_code() {
         let out = read(&file);
         let codes: Vec<_> = out.document.assets.iter().flat_map(|a| &a.codes).collect();
         assert!(codes.is_empty(), "{case}: {codes:?}");
-        assert!(
-            out.document.assets.iter().all(|a| !a.code_unread),
-            "{case}: a code said unread"
-        );
+        // A read not listed may be said ("a part read as EAN-13 ..., not listed"): no value.
         let md = markdown(&out);
-        for words in ["lighter line", "dark line", "like a barcode"] {
+        for words in ["lighter line", "dark line", "like a barcode", "not decoded"] {
             assert!(!md.contains(words), "{case}: {md}");
         }
     }
@@ -4142,5 +4139,366 @@ fn qr_codes_in_a_scan_the_decoder_misses_are_said() {
                 }
             }
         }
+    }
+}
+
+/// A scanned A4 page of `res` pixels a point with the linear code `s` of `text`, `px` pixels a
+/// module, bars `bar` modules long, turned `deg` degrees about (300, 400) points from the top
+/// left, printed: each pixel the share of it the ink covers (`samples` by `samples`, the first
+/// at a fixed offset from the code's middle; 1 samples each pixel at its centre), the bars
+/// wider by `gain` modules (the ink's spread), blurred `blur` times by a 3 by 3 box.
+fn printed_scan(
+    s: Symbology,
+    text: &str,
+    (res, px, bar): (u32, f32, f32),
+    deg: f32,
+    (gain, blur, samples): (f32, u32, u32),
+) -> Vec<u8> {
+    let m = modules(s, text);
+    let (w, h) = (595 * res, 842 * res);
+    let mut scan = vec![235u8; (w * h) as usize];
+    let (sn, cs) = deg.to_radians().sin_cos();
+    let off = if samples > 1 {
+        (0.37, 0.26)
+    } else {
+        (0.0, 0.0)
+    };
+    let (cx, cy) = (300.0 * res as f32 + off.0, 400.0 * res as f32 + off.1);
+    let len = m.width as f32 * px;
+    let (half, e) = (bar * px / 2.0, gain * px / 2.0);
+    let on = |u: f32| (0.0..len).contains(&u) && m.dark[(u / px) as usize];
+    let r = (len / 2.0).hypot(half) + 6.0;
+    let (x0, x1) = (
+        (cx - r).max(1.0) as u32,
+        (cx + r).min(w as f32 - 2.0) as u32,
+    );
+    let (y0, y1) = (
+        (cy - r).max(1.0) as u32,
+        (cy + r).min(h as f32 - 2.0) as u32,
+    );
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let mut c = 0u32;
+            for sy in 0..samples {
+                for sx in 0..samples {
+                    let fx = x as f32 + (sx as f32 + 0.5) / samples as f32 - cx;
+                    let fy = y as f32 + (sy as f32 + 0.5) / samples as f32 - cy;
+                    let u = fx * cs + fy * sn + len / 2.0;
+                    let v = -fx * sn + fy * cs;
+                    let dark = v.abs() < half && (on(u) || (e > 0.0 && (on(u - e) || on(u + e))));
+                    c += u32::from(dark);
+                }
+            }
+            let share = c as f32 / (samples * samples) as f32;
+            scan[(y * w + x) as usize] = (235.0 - share * 215.0) as u8;
+        }
+    }
+    for _ in 0..blur {
+        let src = scan.clone();
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let mut t = 0u32;
+                for dy in 0..3 {
+                    for dx in 0..3 {
+                        t += u32::from(src[((y + dy - 1) * w + x + dx - 1) as usize]);
+                    }
+                }
+                scan[(y * w + x) as usize] = (t / 9) as u8;
+            }
+        }
+    }
+    image_page(595, 842, "q 595 0 0 842 0 0 cm /Im1 Do Q\n", w, h, &scan)
+}
+
+#[test]
+fn false_codes_beside_a_code_drawn_as_paths_are_not_listed() {
+    // A code drawn as paths on a scanned page is no evidence for what the decoder reads
+    // elsewhere on it: a false EAN-13 from a screen of lines and a false UPC-A from blurred dots
+    // stay unlisted next to a drawn QR code or Code 128, and the drawn code is read.
+    let qr = modules(Symbology::QrCode, "https://example.org/t/0000000001");
+    let drawn = [
+        ("QR Code", vector_code(&qr, 380.0, 500.0, 2.5)),
+        (
+            "Code 128",
+            code128_bars("0000000001", 60.0, 80.0, 1.0, 30.0),
+        ),
+    ];
+    let lines = {
+        let (w, h) = (595u32, 842u32);
+        let mut scan = vec![235u8; (w * h) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let (fx, fy) = (x as f32 / w as f32, y as f32 / h as f32);
+                let tone = 0.5
+                    + 0.25 * (fx * 9.0).sin() * (fy * 7.0).cos()
+                    + 0.2 * ((fx + fy) * 13.0).sin();
+                if (x as f32 / 3.3).fract() < 1.0 - tone.clamp(0.0, 1.0) {
+                    scan[(y * w + x) as usize] = 20;
+                }
+            }
+        }
+        (1u32, scan)
+    };
+    let dots = {
+        let (w, h) = (1190u32, 1684u32);
+        let mut g = vec![235u8; (w * h) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let (fx, fy) = (x as f32 / w as f32, y as f32 / h as f32);
+                let tone = (0.5
+                    + 0.25 * (fx * 9.0).sin() * (fy * 7.0).cos()
+                    + 0.2 * ((fx + fy) * 13.0).sin())
+                .clamp(0.0, 1.0);
+                let (du, dt) = (
+                    (x as f32 / 3.5).rem_euclid(1.0) - 0.5,
+                    (y as f32 / 3.5).rem_euclid(1.0) - 0.5,
+                );
+                if (du * du + dt * dt).sqrt() < (1.0 - tone) * 0.6 {
+                    g[(y * w + x) as usize] = 20;
+                }
+            }
+        }
+        let src = g.clone();
+        for y in 1..h - 1 {
+            for x in 1..w - 1 {
+                let mut t = 0u32;
+                for dy in 0..3 {
+                    for dx in 0..3 {
+                        t += u32::from(src[((y + dy - 1) * w + x + dx - 1) as usize]);
+                    }
+                }
+                g[(y * w + x) as usize] = (t / 9) as u8;
+            }
+        }
+        (2u32, g)
+    };
+    for (screen, (res, pixels)) in [("lines 3.3", &lines), ("dots 3.5", &dots)] {
+        for (kind, extra) in &drawn {
+            let content = format!("q 595 0 0 842 0 0 cm /Im1 Do Q\n{extra}");
+            let out = read(&image_page(
+                595,
+                842,
+                &content,
+                595 * res,
+                842 * res,
+                pixels,
+            ));
+            let codes = codes_of(&out, "page-1");
+            let case = format!("{screen} and a drawn {kind}");
+            assert!(codes.iter().all(|(k, _)| k == kind), "{case}: {codes:?}");
+        }
+    }
+}
+
+/// A picture of the linear code `s` of `text`, `px` pixels a module, bars `bar` modules long,
+/// turned `deg` degrees in it, on paper of 12 modules, blurred `blur` times: its dictionary
+/// and deflated data, and its size in pixels.
+fn slanted_picture(
+    s: Symbology,
+    text: &str,
+    (px, bar): (f32, f32),
+    deg: f32,
+    blur: u32,
+) -> ((String, Vec<u8>), (u32, u32)) {
+    let m = modules(s, text);
+    let len = m.width as f32 * px;
+    let half = bar * px / 2.0;
+    let (sn, cs) = deg.to_radians().sin_cos();
+    let w = (len * cs.abs() + 2.0 * half * sn.abs() + 24.0 * px) as u32;
+    let h = (len * sn.abs() + 2.0 * half * cs.abs() + 24.0 * px) as u32;
+    let (cx, cy) = (w as f32 / 2.0, h as f32 / 2.0);
+    let mut g = vec![240u8; (w * h) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+            let u = dx * cs + dy * sn + len / 2.0;
+            let v = -dx * sn + dy * cs;
+            if (0.0..len).contains(&u) && v.abs() < half && m.dark[(u / px) as usize] {
+                g[(y * w + x) as usize] = 10;
+            }
+        }
+    }
+    for _ in 0..blur {
+        let src = g.clone();
+        for y in 1..h - 1 {
+            for x in 1..w - 1 {
+                let mut t = 0u32;
+                for dy in 0..3 {
+                    for dx in 0..3 {
+                        t += u32::from(src[((y + dy - 1) * w + x + dx - 1) as usize]);
+                    }
+                }
+                g[(y * w + x) as usize] = (t / 9) as u8;
+            }
+        }
+    }
+    (
+        (
+            format!(
+                "/Type /XObject /Subtype /Image /Width {w} /Height {h} /ColorSpace /DeviceGray \
+                 /BitsPerComponent 8 /Filter /FlateDecode"
+            ),
+            deflate(&g),
+        ),
+        (w, h),
+    )
+}
+
+/// A QR code of version 1 whose payload is empty (byte mode, length 0), as its modules: row by
+/// row from the top, 1 dark.
+const EMPTY_QR: [&str; 21] = [
+    "111111100100101111111",
+    "100000101001001000001",
+    "101110100100001011101",
+    "101110101001001011101",
+    "101110100011101011101",
+    "100000101110101000001",
+    "111111101010101111111",
+    "000000000011100000000",
+    "111110111100110101010",
+    "011000011010100100100",
+    "000100101011010011111",
+    "100010000110000110101",
+    "111001111001010011111",
+    "000000001111111001000",
+    "111111101110101100000",
+    "100000100111111001000",
+    "101110101110100100100",
+    "101110101100100100100",
+    "101110101101010011100",
+    "100000101100000110100",
+    "111111101011010011110",
+];
+
+#[test]
+fn reads_the_bar_check_turns_down_are_said_not_listed() {
+    // A read the decoder gives and Rezzer cannot confirm (its bars do not fit the value, or a
+    // matrix code holds nothing) is not listed, and it is never dropped without a word: the
+    // page or the picture says that a part was read as that kind of code and is not listed.
+    let unconfirmed = |alt: &str, kind: &str| {
+        alt.contains(&format!("a part read as {kind}")) && alt.contains("not listed")
+    };
+    // Scans: a Code 39 turned 15 degrees, a UPC-A with spread ink, blurred, turned 1 degree.
+    for (case, file, kind, text) in [
+        (
+            "Code 39 at 15 degrees",
+            slanted_scan(Symbology::Code39, "ABC-12", 1, 2.0, 15.0),
+            "Code 39",
+            "ABC-12",
+        ),
+        (
+            "UPC-A with spread ink",
+            printed_scan(
+                Symbology::UpcA,
+                "036000291452",
+                (2, 2.0, 30.0),
+                1.0,
+                (0.15, 1, 4),
+            ),
+            "UPC-A",
+            "036000291452",
+        ),
+    ] {
+        let out = read(&file);
+        let a = asset(&out, "page-1");
+        let codes = codes_of(&out, "page-1");
+        let alt = a.alt.clone().unwrap_or_default();
+        assert!(
+            codes.iter().all(|(k, t)| k == kind && t == text),
+            "{case}: {codes:?}"
+        );
+        assert!(
+            !codes.is_empty() || (a.code_unread && unconfirmed(&alt, kind)),
+            "{case}: nothing listed, {alt}"
+        );
+        if codes.is_empty() {
+            assert!(
+                markdown(&out).contains(&format!("a part read as {kind}")),
+                "{case}"
+            );
+        }
+    }
+    // A small picture of a soft Code 39 and of an empty QR code.
+    let (picture, (w, h)) = slanted_picture(Symbology::Code39, "ABC-12", (2.0, 30.0), 0.0, 1);
+    let soft = format!(
+        "{INVOICE}q {} 0 0 {} 300 300 cm /P0 Do Q\n",
+        w as f32 / 2.0,
+        h as f32 / 2.0
+    );
+    let qr = code::Modules {
+        width: 21,
+        height: 21,
+        dark: EMPTY_QR
+            .iter()
+            .flat_map(|r| r.chars().map(|c| c == '1'))
+            .collect(),
+    };
+    let empty = code_picture(&qr, 4, 4);
+    for (case, content, picture, kind) in [
+        ("a soft Code 39", soft, picture, "Code 39"),
+        (
+            "an empty QR code",
+            format!("{INVOICE}q 60 0 0 60 400 600 cm /P0 Do Q\n"),
+            empty,
+            "QR Code",
+        ),
+    ] {
+        let out = read(&code_page(&content, &[picture]));
+        let a = out
+            .document
+            .assets
+            .iter()
+            .find(|a| a.id.starts_with("page-1-pic"))
+            .unwrap_or_else(|| panic!("{case}: no picture"));
+        let alt = a.alt.clone().unwrap_or_default();
+        assert!(
+            !a.codes.is_empty() || (a.code_unread && unconfirmed(&alt, kind)),
+            "{case}: {alt}"
+        );
+        assert!(a.codes.iter().all(|c| c.symbology == kind), "{case}");
+    }
+}
+
+#[test]
+fn a_code_read_on_several_lines_is_listed_once() {
+    // A code turned a little is read on several lines across its bars, with boxes one after
+    // the other along them: it is one code, listed once, boxed by all its bars, with nothing
+    // said of a second one.
+    for (s, text) in [
+        (Symbology::Ean13, "4006381333931"),
+        (Symbology::Code39, "ABC-12"),
+        (Symbology::Code128, "0000000001"),
+    ] {
+        let out = read(&printed_scan(s, text, (1, 2.0, 60.0), 1.0, (0.0, 0, 1)));
+        let case = format!("{} at 1 degree", s.name());
+        assert_eq!(
+            codes_of(&out, "page-1"),
+            [(s.name().to_string(), text.to_string())],
+            "{case}"
+        );
+        let b = asset(&out, "page-1").codes[0].bounds.expect("box");
+        assert!(b[3] - b[1] > 100.0, "{case}: {b:?}");
+        assert_no_doubt(&out, &case);
+    }
+}
+
+#[test]
+fn codes_read_along_a_slanted_line_are_checked_along_it() {
+    // Turned 8 to 15 degrees, the decoder reads a code along a slanted line and gives that
+    // line as its box: the bars are checked along it, and the code is listed.
+    for (s, text, res, px, deg) in [
+        (Symbology::Code128, "0000000001", 2u32, 3.0f32, 12.0f32),
+        (Symbology::Code128, "0000000001", 2, 4.0, 8.0),
+        (Symbology::Code39, "ABC-12", 1, 3.0, 10.0),
+        (Symbology::Code39, "ABC-12", 2, 2.0, 15.0),
+        (Symbology::Code39, "ABC-12", 2, 3.0, 10.0),
+    ] {
+        let out = read(&slanted_scan(s, text, res, px, deg));
+        assert_eq!(
+            codes_of(&out, "page-1"),
+            [(s.name().to_string(), text.to_string())],
+            "{} at {deg} degrees, {res} pixels a point, {px} a module",
+            s.name()
+        );
     }
 }

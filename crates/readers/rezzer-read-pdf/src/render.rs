@@ -837,6 +837,8 @@ pub(crate) struct Places {
     furniture: bool,
     /// What reading it for codes changed.
     read: Option<Reread>,
+    /// The words of reads that are not listed, each after a comma.
+    unconfirmed: String,
 }
 
 impl Places {
@@ -903,6 +905,7 @@ impl Places {
             Some(Reread::Drawing(_)) => drawing.as_str(),
             _ => "",
         };
+        let code = format!("{code}{}", self.unconfirmed);
         let first = self
             .listed
             .first()
@@ -2063,6 +2066,9 @@ pub(crate) struct Found {
     /// For a page that needs vision as a whole: the words for each part of it that looks
     /// like a code and gave none (see [`Scans::regions_unread`]).
     pub unread: Vec<String>,
+    /// The words for each part the decoder read as a code that is not listed, as nothing
+    /// confirms it (see [`evidence`]): its kind, its place on a page, and why.
+    pub unconfirmed: Vec<String>,
 }
 
 /// The barcode scans of one read: their bounds, what they found and what they could not do.
@@ -2269,7 +2275,29 @@ impl Scans {
         // they are in the asset's codes.
         let mut read_here: Vec<([u32; 4], usize)> = Vec::new();
         for c in codes {
-            if !drawn_asset && !evidence(&c, picture, on) {
+            // Checking the reads is bounded by the time for reading codes, as the reads are.
+            if Instant::now() >= self.until || budget.check_time().is_err() {
+                self.halt_time(n, budget);
+                break;
+            }
+            if !drawn_asset && let Err(why) = evidence(&c, picture, on) {
+                // Not listed, and said: the kind, the place and why, without the value.
+                let place = on.map_or(" ".to_string(), |(need, _)| {
+                    let (w, h) = need.size;
+                    let framed = need
+                        .turn
+                        .place_box(page_rect(picture, need, c.bounds), w, h);
+                    let (fw, fh) = need.turn.size(w, h);
+                    format!(", {}, ", place_words(framed, fw, fh))
+                });
+                let words = format!(
+                    "a part read as {}{place}{why}, not listed",
+                    c.symbology.name()
+                );
+                let found = self.found.entry(asset).or_default();
+                if !found.unconfirmed.contains(&words) {
+                    found.unconfirmed.push(words);
+                }
                 continue;
             }
             if self.kept >= FILE_CODES {
@@ -2337,14 +2365,14 @@ impl Scans {
             {
                 let p = &picture.pixmap;
                 let size = (usize::from(p.width()), usize::from(p.height()));
-                let split = read_here.iter_mut().find(|(px, i)| {
+                let split = read_here.iter_mut().find_map(|(px, i)| {
                     let o = &found.codes[*i];
-                    o.symbology == b.symbology
-                        && o.text == b.text
-                        && o.base64 == b.base64
-                        && crate::codes::split_by_line(p.data_as_u8_slice(), size, *px, c.bounds)
+                    (o.symbology == b.symbology && o.text == b.text && o.base64 == b.base64)
+                        .then(|| crate::codes::joined(p.data_as_u8_slice(), size, *px, c.bounds))
+                        .flatten()
+                        .map(|how| (px, i, how))
                 });
-                if let Some((px, i)) = split {
+                if let Some((px, i, how)) = split {
                     let u = c.bounds;
                     *px = [
                         px[0].min(u[0]),
@@ -2362,13 +2390,16 @@ impl Scans {
                     let o = &mut found.codes[*i];
                     o.bounds = Some(framed);
                     o.place = Some(place.clone());
-                    let words = format!(
-                        "a dark line runs across the bars of the {}, {place}: it may be two \
-                         codes, one not decoded",
-                        b.symbology
-                    );
-                    if !found.unread.contains(&words) {
-                        found.unread.push(words);
+                    // Read on two lines of one code, its bars going on between them: one code.
+                    if how == crate::codes::Joined::Dark {
+                        let words = format!(
+                            "a dark line runs across the bars of the {}, {place}: it may be two \
+                             codes, one not decoded",
+                            b.symbology
+                        );
+                        if !found.unread.contains(&words) {
+                            found.unread.push(words);
+                        }
                     }
                     continue;
                 }
@@ -2685,22 +2716,35 @@ impl Scans {
 }
 
 /// Whether code `c`, read by the decoder from `picture` (with `on` as in [`Scans::read`]),
-/// stands there on evidence of a code. A code drawn as paths has it (its own asset, its region
-/// of a page or a code of the page read there): its drawing passed the code-shape test
+/// stands there on evidence of a code. A code drawn as paths has it (its own asset, or a read
+/// within its region of a page): its drawing passed the code-shape test
 /// ([`crate::codes::vector_codes`]). Else a matrix or stacked code holds a
 /// payload (a screen of dots read on a lattice gives code words of nothing but padding), and a
-/// linear code stands in bars that fit it ([`crate::codes::bars_fit`]).
-fn evidence(c: &barcodes::Code, picture: &Rendered, on: Option<(&Need, Option<&Region>)>) -> bool {
-    let drawn = |r: &Region| matches!(r.how, How::Modules(_));
-    match on {
-        Some((_, Some(r))) if drawn(r) => return true,
-        Some((need, None)) => {
-            let px = page_rect(picture, need, c.bounds);
-            if need.regions.iter().any(|r| drawn(r) && overlap(&r.b, &px)) {
-                return true;
-            }
+/// linear code stands in bars that fit it ([`crate::codes::bars_fit`]). `Err` says why not,
+/// in words after "a part read as Code 39".
+fn evidence(
+    c: &barcodes::Code,
+    picture: &Rendered,
+    on: Option<(&Need, Option<&Region>)>,
+) -> Result<(), &'static str> {
+    // A read within a drawing of paths that looks like a code (give or take two of its
+    // modules): the drawing is the evidence. A read elsewhere on the page is not.
+    let within = |r: &Region, px: &[f32; 4]| {
+        let How::Modules(m) = r.how else {
+            return false;
+        };
+        let g = 2.0 * m + 1.0;
+        px[0] >= r.b[0] - g && px[1] >= r.b[1] - g && px[2] <= r.b[2] + g && px[3] <= r.b[3] + g
+    };
+    if let Some((need, region)) = on {
+        let px = page_rect(picture, need, c.bounds);
+        if region
+            .into_iter()
+            .chain(&need.regions)
+            .any(|r| within(r, &px))
+        {
+            return Ok(());
         }
-        _ => {}
     }
     use barcodes::Symbology as S;
     let text = match &c.payload {
@@ -2712,7 +2756,8 @@ fn evidence(c: &barcodes::Code, picture: &Rendered, on: Option<(&Need, Option<&R
         S::Code128 => crate::codes::Linear::Code128,
         S::Code39 => crate::codes::Linear::Code39(text),
         S::Itf => crate::codes::Linear::Itf(text),
-        _ => return c.bytes > 0,
+        _ if c.bytes > 0 => return Ok(()),
+        _ => return Err("that holds nothing"),
     };
     let p = &picture.pixmap;
     crate::codes::bars_fit(
@@ -2721,6 +2766,8 @@ fn evidence(c: &barcodes::Code, picture: &Rendered, on: Option<(&Need, Option<&R
         c.bounds,
         kind,
     )
+    .then_some(())
+    .ok_or("that its bars do not confirm")
 }
 
 /// Whether two codes read from one asset are the same code: same kind and payload, and boxes
@@ -2932,6 +2979,8 @@ struct Renamed {
     /// The pages it is on, said at the first place of page furniture.
     pages: Option<String>,
     codes: bool,
+    /// The words of reads not listed (see [`Places::unconfirmed`]).
+    unconfirmed: String,
 }
 
 /// Puts what the scans read into the model:
@@ -2960,6 +3009,16 @@ pub(crate) fn apply_codes(scans: Option<Scans>, places: Vec<(usize, Places)>, ou
         let f = found.remove(&asset).unwrap_or_default();
         let a = &mut out.doc.assets[asset];
         a.needs_vision = !p.logo;
+        // Reads not listed, said after what it is.
+        p.unconfirmed = f
+            .unconfirmed
+            .iter()
+            .map(|w| format!(", {w}"))
+            .collect::<String>();
+        if !p.unconfirmed.is_empty() {
+            a.code_unread = true;
+            a.needs_vision = true;
+        }
         let read = if !f.codes.is_empty() {
             let mut names: Vec<&str> = Vec::new();
             for c in &f.codes {
@@ -2982,7 +3041,7 @@ pub(crate) fn apply_codes(scans: Option<Scans>, places: Vec<(usize, Places)>, ou
         };
         let on = p.on_pages();
         let pages = (p.furniture && on.count > 1).then(|| on.words());
-        if read.is_some() || pages.is_some() {
+        if read.is_some() || pages.is_some() || !p.unconfirmed.is_empty() {
             places_of.insert(
                 a.id.clone(),
                 Renamed {
@@ -2990,6 +3049,7 @@ pub(crate) fn apply_codes(scans: Option<Scans>, places: Vec<(usize, Places)>, ou
                     first: p.first_page(),
                     pages,
                     codes: !a.codes.is_empty(),
+                    unconfirmed: p.unconfirmed.clone(),
                 },
             );
         }
@@ -3001,9 +3061,14 @@ pub(crate) fn apply_codes(scans: Option<Scans>, places: Vec<(usize, Places)>, ou
     for (asset, f) in found {
         if let Some(a) = out.doc.assets.get_mut(asset) {
             a.codes = f.codes;
-            if !f.unread.is_empty() {
+            let all: Vec<&String> = f.unread.iter().chain(&f.unconfirmed).collect();
+            if !all.is_empty() {
                 a.code_unread = true;
-                let words = f.unread.join(", ");
+                let words = all
+                    .iter()
+                    .map(|w| w.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 a.alt = Some(match a.alt.take() {
                     Some(alt) if !alt.is_empty() => format!("{alt}, {words}"),
                     _ => words,
@@ -3030,6 +3095,7 @@ pub(crate) fn apply_codes(scans: Option<Scans>, places: Vec<(usize, Places)>, ou
                             }
                             _ => String::new(),
                         };
+                        let more = format!("{}{more}", r.unconfirmed);
                         *words = reread_place(words, r.read.as_ref(), &more);
                     }
                 }
