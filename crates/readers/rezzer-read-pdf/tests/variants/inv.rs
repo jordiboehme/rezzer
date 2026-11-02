@@ -60,8 +60,11 @@ pub(crate) enum Inv {
     /// A code found with a box is boxed by the bars of a code drawn: within a point at scale
     /// 1, more on a larger page.
     CodeBox,
-    /// A page that draws no code says of nothing on it that it looks like a code (no false
-    /// loss on rules, ticks and hatching).
+    /// A page that draws no code, or whose codes are all found as often as they are drawn,
+    /// says of nothing on it that it looks like a code (no false loss on rules, ticks,
+    /// hatching or a code read). The words of a read that is not listed ("a part read as
+    /// EAN-13 ..., not listed") are allowed: they list no value, and on a screen or letters
+    /// they are loss noise only (cosmetic); a listed value there breaks WrongValue.
     NoCode,
     /// The page needs vision exactly when it should.
     Vision,
@@ -424,6 +427,21 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
         }
     }
     check_cells(out, n, sheet, broken);
+    if !want.glyph_text.is_empty() {
+        let text: Vec<String> = blocks.iter().map(|b| block_text(b)).collect();
+        for g in &want.glyph_text {
+            let odd: Vec<char> = g.chars().filter(|c| !c.is_ascii()).collect();
+            if let Some(t) = text
+                .iter()
+                .find(|t| t.contains(g.as_str()) || odd.iter().any(|c| t.contains(*c)))
+            {
+                broken.push(Broken(
+                    Inv::WrongValue,
+                    format!("page {p}: the glyph text {g:?} of a code stands in the read: {t:?}"),
+                ));
+            }
+        }
+    }
     if n == 0 {
         let props = &out.document.properties;
         // A found title is the page's title, or a title the page may have besides (a bold
@@ -481,7 +499,22 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
         .map(|c| (c.symbology.clone(), c.text.clone().unwrap_or_default()))
         .collect();
     let unread = assets.iter().any(|a| a.code_unread);
+    // Words that a code is there, other than a read not listed.
+    let doubt = assets.iter().any(|a| {
+        let alt = a.alt.as_deref().unwrap_or_default();
+        a.code_unread
+            && [
+                "like a barcode",
+                "not decoded",
+                "not scanned",
+                "lighter line",
+                "dark line",
+            ]
+            .iter()
+            .any(|w| alt.contains(w))
+    });
     let mut checked: Vec<&(String, String)> = Vec::new();
+    let mut all_found = true;
     for c in &want.codes {
         if checked.contains(&c) {
             continue;
@@ -489,6 +522,7 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
         checked.push(c);
         let drawn = want.codes.iter().filter(|w| *w == c).count();
         let k = found.iter().filter(|f| *f == c).count();
+        all_found &= k == drawn;
         if k != drawn {
             broken.push(Broken(
                 Inv::Code,
@@ -505,10 +539,19 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
             ));
         }
     }
-    if want.codes.is_empty() && unread {
+    if all_found && doubt {
         broken.push(Broken(
             Inv::NoCode,
-            format!("page {p}: no code is drawn, but a picture says a code there is not decoded"),
+            format!(
+                "page {p}: every code drawn is found ({} drawn), but a picture says a code \
+                 there is not decoded: {:?}",
+                want.codes.len(),
+                assets
+                    .iter()
+                    .filter(|a| a.code_unread)
+                    .map(|a| a.alt.as_deref().unwrap_or_default())
+                    .collect::<Vec<_>>()
+            ),
         ));
     }
     let scale = sheet.built.page.scale;

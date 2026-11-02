@@ -6,6 +6,8 @@
 
 #![allow(dead_code)]
 
+pub mod barfont;
+
 use std::alloc::{GlobalAlloc, Layout};
 use std::io::Write;
 use std::sync::Arc;
@@ -335,10 +337,11 @@ impl Default for FormPage {
 /// A file of print-run form pages, A4 unless `paper` says otherwise. The page and the
 /// template have the fonts `/FL` (Helvetica, for labels), `/FD` (Courier, for data lines),
 /// `/FB` (Helvetica-Bold) and `/FDB` (Courier-Bold, for data lines with `bold_data`), `/FT`
-/// (Times-Roman) and `/FTB` (Times-Bold), all in WinAnsi: the template and the data lines are
-/// written in that encoding, so labels may hold umlauts, `\u{df}` and the euro sign. The page
-/// and the template share one picture, `/Logo` (4 by 4 gray pixels), which [`logo`] draws.
-/// `info` holds the entries of the Info dictionary (for example `/Title (Lohn)`); with `""`
+/// (Times-Roman) and `/FTB` (Times-Bold), all in WinAnsi; a template that shows one of the
+/// bar fonts of [`barfont::BAR_FONTS`] gets them all. The template and
+/// the data lines are written in that encoding, so labels may hold umlauts, `\u{df}` and the
+/// euro sign. The page and the template share one picture, `/Logo` (4 by 4 gray pixels),
+/// which [`logo`] draws. `info` holds the entries of the Info dictionary (for example `/Title (Lohn)`); with `""`
 /// the file has none. `catalog_extra` goes into the catalog dictionary, where `{annots}`
 /// stands for the references of every annotation of every page, in page order (for example
 /// `/AcroForm << /Fields [{annots}] >>`).
@@ -360,9 +363,22 @@ pub fn print_form(pages: &[FormPage], info: &str, catalog_extra: &str) -> Vec<u8
          /BitsPerComponent 8",
         &(0..16u8).map(|i| 30 + i * 9).collect::<Vec<u8>>(),
     );
+    // Barcode fonts only for pages that show them (see [`barfont::BAR_FONTS`]).
+    let codes = pages.iter().any(|p| {
+        barfont::BAR_FONTS
+            .iter()
+            .any(|f| p.template.contains(&format!("/{} ", f.0)))
+    });
+    let mut bar_fonts = String::new();
+    if codes {
+        for (key, name, set, kind) in barfont::BAR_FONTS {
+            let f = barfont::add_bar_font(&mut b, name, set, kind);
+            bar_fonts += &format!(" /{key} {f} 0 R");
+        }
+    }
     let fonts = format!(
         "/Font << /FL {label} 0 R /FD {data} 0 R /FB {bold} 0 R /FDB {bold_data} 0 R \
-         /FT {times} 0 R /FTB {times_bold} 0 R >>"
+         /FT {times} 0 R /FTB {times_bold} 0 R{bar_fonts} >>"
     );
     let mut kids = Vec::new();
     let mut all_annots = Vec::new();
