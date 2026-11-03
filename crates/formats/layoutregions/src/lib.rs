@@ -54,5 +54,5 @@ pub use region::{
     Alternative, Bounds, Candidate, Certainty, Issue, IssueKind, Kind, PageRegions, Region,
     RegionId, Score, Signal,
 };
-pub use report::count_by_kind;
+pub use report::{count_by_kind, count_lines, moved_lines};
 pub use work::work_steps;

@@ -203,3 +203,60 @@ fn an_offer_keeps_its_certainty() {
     assert_eq!(out.regions[0].certainty, Certainty::Exact);
     assert_eq!(out.regions[1].certainty, Certainty::Rule);
 }
+
+/// The kind after `k` in `Kind` order: an exhaustive match, so a new kind must be placed here,
+/// and then `Kind::ALL` must hold it too.
+fn next(k: Kind) -> Option<Kind> {
+    match k {
+        Kind::HeaderBand => Some(Kind::FooterBand),
+        Kind::FooterBand => Some(Kind::TitleBlock),
+        Kind::TitleBlock => Some(Kind::Heading),
+        Kind::Heading => Some(Kind::Paragraph),
+        Kind::Paragraph => Some(Kind::List),
+        Kind::List => Some(Kind::Table),
+        Kind::Table => Some(Kind::LabelValue),
+        Kind::LabelValue => Some(Kind::Totals),
+        Kind::Totals => Some(Kind::Figure),
+        Kind::Figure => Some(Kind::Code),
+        Kind::Code => Some(Kind::FootnoteLegend),
+        Kind::FootnoteLegend => Some(Kind::Spatial),
+        Kind::Spatial => None,
+    }
+}
+
+#[test]
+fn all_kinds_holds_every_kind() {
+    let mut chain = vec![Kind::HeaderBand];
+    while let Some(k) = next(*chain.last().unwrap()) {
+        chain.push(k);
+    }
+    assert_eq!(chain, Kind::ALL);
+}
+
+#[test]
+fn count_lines_print_every_kind_then_the_total() {
+    let mut a = std::collections::BTreeMap::new();
+    a.insert(Kind::Table, 2);
+    a.insert(Kind::HeaderBand, 1);
+    let b = std::collections::BTreeMap::new();
+    let lines = count_lines(&[a, b]);
+    assert_eq!(lines.len(), Kind::ALL.len() + 1);
+    assert_eq!(lines[0], "header_band\t1\t0");
+    assert!(lines.contains(&"table\t2\t0".to_string()));
+    assert_eq!(lines.last().unwrap(), "total\t3\t0");
+}
+
+#[test]
+fn a_moved_line_names_its_old_and_new_line() {
+    let old = vec!["table\t2".to_string(), "total\t2".to_string()];
+    let new = vec!["table\t3".to_string(), "total\t3".to_string()];
+    assert_eq!(
+        moved_lines(&old, &new),
+        [
+            "old: table\t2\nnew: table\t3",
+            "old: total\t2\nnew: total\t3"
+        ]
+    );
+    assert!(moved_lines(&old, &old).is_empty());
+    assert_eq!(moved_lines(&old[..1], &old), ["old: (none)\nnew: total\t2"]);
+}

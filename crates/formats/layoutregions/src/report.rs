@@ -15,3 +15,39 @@ pub fn count_by_kind<'a>(regions: impl IntoIterator<Item = &'a Region>) -> BTree
     }
     counts
 }
+
+/// The lines `kind\t<count>...` for each kind in [`Kind`] order, one count per column (0 for a
+/// kind a column lacks), then `total\t<sum>...`: the region count table of a region report.
+pub fn count_lines(columns: &[BTreeMap<Kind, usize>]) -> Vec<String> {
+    let mut lines: Vec<String> = Kind::ALL
+        .iter()
+        .map(|k| {
+            let counts: String = columns
+                .iter()
+                .map(|c| format!("\t{}", c.get(k).copied().unwrap_or(0)))
+                .collect();
+            format!("{}{counts}", k.name())
+        })
+        .collect();
+    let totals: String = columns
+        .iter()
+        .map(|c| format!("\t{}", c.values().sum::<usize>()))
+        .collect();
+    lines.push(format!("total{totals}"));
+    lines
+}
+
+/// The lines of `old` and `new` that differ, by place, each as `old: <line>` and `new: <line>`
+/// on two lines (`(none)` where one side has fewer lines).
+pub fn moved_lines(old: &[String], new: &[String]) -> Vec<String> {
+    (0..old.len().max(new.len()))
+        .filter(|&i| old.get(i) != new.get(i))
+        .map(|i| {
+            format!(
+                "old: {}\nnew: {}",
+                old.get(i).map_or("(none)", String::as_str),
+                new.get(i).map_or("(none)", String::as_str)
+            )
+        })
+        .collect()
+}
