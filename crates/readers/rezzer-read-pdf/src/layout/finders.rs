@@ -10,6 +10,8 @@
 //! the layout, the blocks laid out from the runs no finder took, the pictures and the codes of
 //! the page are offered too, so every run of the page is in one region.
 
+use std::collections::HashSet;
+
 use layoutregions::{
     Bounds, Candidate, Certainty, Finder, InOrder, Kind, Offer, PageIn, PrimId, Score, Signal,
 };
@@ -55,6 +57,9 @@ pub(crate) struct PageCx<'p> {
     pub(super) footers: Vec<Run>,
     /// The blocks of the page: the running headers are built as soon as they are found.
     pub(super) built: Built,
+    /// In a debug build: the runs the tagged tables took and dropped as repeated header rows,
+    /// which no region holds.
+    pub(super) repeats: Vec<u32>,
 }
 
 /// The text sizes of a page, counted over all its text but its legend, also what tables take
@@ -207,10 +212,27 @@ impl Finder<PageCx<'_>> for TaggedTables {
         };
         // Tagged tables are taken out before running headers and footers are looked for: the
         // column titles a long table repeats at the top of each page are table text.
+        let before: Vec<u32> = if cfg!(debug_assertions) {
+            p.flow.ids.clone()
+        } else {
+            Vec::new()
+        };
         let (found, fallbacks) =
             tables::tagged(p.page, &mut p.flow, tree, cx.tables, cx.in_part, &|| {
                 time_over(cx.budget).is_err()
             });
+        if cfg!(debug_assertions) {
+            // The runs of a tagged table that adds only repeated header rows to a table begun
+            // on an earlier page are taken and dropped as repeats: no table and no region
+            // holds them (until Task 19 gives every run a region).
+            let after: HashSet<u32> = p.flow.ids.iter().copied().collect();
+            let owned: HashSet<u32> = found.iter().flat_map(|t| t.ids.iter().copied()).collect();
+            p.repeats.extend(
+                before
+                    .into_iter()
+                    .filter(|i| !after.contains(i) && !owned.contains(i)),
+            );
+        }
         for t in found {
             offer_table(page, arb, &t, Self::ID, next_host(p), Certainty::Exact);
             p.placed.push(Placed::Table(t));
@@ -463,6 +485,77 @@ impl Finder<PageCx<'_>> for Untagged {
     }
 }
 
+/// The text of a run as it was read and as a piece of it: white space at its ends left out.
+fn core(text: &str) -> &str {
+    text.trim()
+}
+
+/// Checks that each run of `flow` is the run its id names in `page`, or a piece of it (a cut,
+/// or a footnote reference whose text is its label).
+pub(super) fn check_ids(page: &PageIn, flow: &Flow) {
+    for (r, &id) in flow.runs.iter().zip(&flow.ids) {
+        let whole = page.texts.get(id as usize).map(|t| t.text.as_str());
+        let piece = core(&r.text);
+        assert!(
+            r.note || piece.is_empty() || whole.is_some_and(|w| w.contains(piece)),
+            "page {}: the run {:?} carries the id {id} of {whole:?}",
+            page.page,
+            r.text
+        );
+    }
+}
+
+/// The ids of the runs of `flow` that are pieces of a cut run: an id that stands more than once
+/// in the flow, or a run whose text is less than its id's run.
+pub(super) fn cut_runs(page: &PageIn, flow: &Flow) -> HashSet<u32> {
+    let mut seen = HashSet::new();
+    let mut cut = HashSet::new();
+    for (r, &id) in flow.runs.iter().zip(&flow.ids) {
+        let whole = page.texts.get(id as usize).map(|t| core(&t.text));
+        if !seen.insert(id) || whole.is_some_and(|w| w != core(&r.text)) {
+            cut.insert(id);
+        }
+    }
+    cut
+}
+
+/// Checks that every run of `page` is in exactly one region: the text pieces of the regions,
+/// with the runs `repeats` dropped as repeated header rows, are the ids 0 up to the page's
+/// runs, each once.
+pub(super) fn check_cover(page: &PageIn, regions: &layoutregions::PageRegions, repeats: &[u32]) {
+    let mut ids: Vec<u32> = regions
+        .regions
+        .iter()
+        .flat_map(|r| &r.prims)
+        .filter_map(|p| match p {
+            PrimId::Text(i) => Some(*i),
+            _ => None,
+        })
+        .chain(repeats.iter().copied())
+        .collect();
+    ids.sort_unstable();
+    let all = (0..page.texts.len()).map(|i| i as u32);
+    if ids.iter().copied().eq(all) {
+        return;
+    }
+    let twice: Vec<u32> = ids
+        .windows(2)
+        .filter(|w| w[0] == w[1])
+        .map(|w| w[0])
+        .collect();
+    let held: HashSet<u32> = ids.into_iter().collect();
+    let none: Vec<(u32, &str)> = (0..page.texts.len() as u32)
+        .filter(|i| !held.contains(i))
+        .take(8)
+        .map(|i| (i, page.texts[i as usize].text.as_str()))
+        .collect();
+    panic!(
+        "page {}: of {} runs, these are in no region: {none:?}; in two: {twice:?}",
+        page.page,
+        page.texts.len()
+    );
+}
+
 /// What a block laid out from the runs no finder took is as a region.
 fn kind_of(block: &Block) -> Kind {
     match block {
@@ -483,7 +576,13 @@ fn kind_of(block: &Block) -> Kind {
 /// Offers each block laid out from runs no finder took (`ids`, by block), with the block's
 /// place among `blocks` as its host; then each picture and each code of the page, the
 /// picture's or code's place as its host.
-pub(super) fn offer_rest(page: &PageIn, arb: &mut InOrder, blocks: &[Block], ids: &[Vec<u32>]) {
+pub(super) fn offer_rest(
+    page: &PageIn,
+    arb: &mut InOrder,
+    blocks: &[Block],
+    ids: &[Vec<u32>],
+    cut: &HashSet<u32>,
+) {
     for (k, (block, ids)) in blocks.iter().zip(ids).enumerate() {
         // A run cut in pieces keeps one id for all of them (`ruled::apply_cuts`): when a
         // detector took some pieces into its table and others stay text, the run is the
@@ -492,7 +591,16 @@ pub(super) fn offer_rest(page: &PageIn, arb: &mut InOrder, blocks: &[Block], ids
         let ids: Vec<u32> = ids
             .iter()
             .copied()
-            .filter(|&i| !arb.is_taken(PrimId::Text(i)))
+            .filter(|&i| {
+                let taken = arb.is_taken(PrimId::Text(i));
+                // Only a run cut in pieces may be claimed twice; anything else is a refusal.
+                debug_assert!(
+                    !taken || cut.contains(&i),
+                    "page {}: run {i} is laid out as text and claimed, but it is not cut",
+                    page.page
+                );
+                !taken
+            })
             .collect();
         if ids.is_empty() {
             continue;

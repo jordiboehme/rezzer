@@ -247,6 +247,41 @@ fn a_cut_run_belongs_to_the_table_that_cut_it() {
     assert_eq!(holders, ["pdf.untagged"]);
 }
 
+/// The ruled pass reads the labels of this strip cell by cell, so their runs move in the flow
+/// (`ruled::read_apart`): each region's pieces still name its own runs.
+#[test]
+fn region_ids_name_their_runs_on_a_reordered_page() {
+    let b = mark_row("123456", Some((50, "7")), true);
+    let (_, pages) =
+        common::read_engine_pages(&common::print_form(std::slice::from_ref(&b.page), "", ""));
+    let page = &pages[0];
+    let by = |id: &str| -> Vec<Vec<&str>> {
+        page.regions
+            .regions
+            .iter()
+            .filter(|r| r.signals[0].id == id)
+            .map(|r| common::region_texts(page, r))
+            .collect()
+    };
+    assert_eq!(
+        by("pdf.untagged"),
+        [[
+            "Feld A",
+            " Feld B",
+            " Gr D",
+            "12345678X012 Muster Kasse ",
+            "123456 78901"
+        ]]
+    );
+    assert_eq!(
+        by("pdf.lines"),
+        [
+            vec![" Satz", " Gr C"],
+            vec!["Summe 9.876,54", "Netto 1.234,56"]
+        ]
+    );
+}
+
 /// A number in boxes drawn around each digit, standing on the rule under its row: the sides
 /// of the boxes reach the row's lower rule like dividers rising from it, but more than one of
 /// them stands in the number, so it is never cut at one; it stays whole with its loss.

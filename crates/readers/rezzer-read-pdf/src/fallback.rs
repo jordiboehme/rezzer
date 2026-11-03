@@ -26,7 +26,7 @@ use rezzer_model::{Bytes, LossReason, ReadOptions, ReadOutcome, Severity, Source
 use crate::open;
 use crate::quote::Marked;
 use crate::text::{self, Caps, Extracted, Origin};
-use crate::{Out, lay_out};
+use crate::{EnginePage, Out, lay_out};
 
 /// The bytes of the file, shared with the parser without a copy.
 struct Shared(Bytes);
@@ -342,7 +342,7 @@ pub(crate) fn read_file(
     e: &OpenError,
     mut out: Out,
     text_stop: &dyn Fn() -> bool,
-    regions: Option<&mut Vec<layoutregions::PageRegions>>,
+    regions: Option<&mut Vec<EnginePage>>,
 ) -> ReadOutcome {
     let stop = || budget.check_time().is_err();
     let unused = |mut out: Out, why: String| {

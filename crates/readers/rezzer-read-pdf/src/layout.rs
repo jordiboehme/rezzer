@@ -807,6 +807,8 @@ pub(crate) struct Laid {
     /// The regions of the page: what each detector found, the blocks laid out from the rest,
     /// the pictures and the codes, each run in one.
     pub regions: PageRegions,
+    /// The page as the region engine took it; none for a page not laid out.
+    pub engine_in: Option<layoutregions::PageIn>,
 }
 
 /// The regions of a page that was not laid out.
@@ -1057,6 +1059,7 @@ fn page_blocks_until(
         headers: Vec::new(),
         footers: Vec::new(),
         built,
+        repeats: Vec::new(),
     };
     // The detectors, in their order: each takes the runs it finds out of the flow, so the
     // first claim wins (see the finders for their gates).
@@ -1086,8 +1089,17 @@ fn page_blocks_until(
         legend,
         footers,
         mut built,
+        repeats,
         ..
     } = pcx;
+    // Each run left is its id's run or a piece of it; the runs cut in pieces, for the line
+    // pass to tell a piece of a run a detector took from a run taken twice.
+    let cut = if cfg!(debug_assertions) {
+        finders::check_ids(&engine_in, &flow);
+        finders::cut_runs(&engine_in, &flow)
+    } else {
+        HashSet::new()
+    };
     // The tables and titles in reading order; `placed_at` is where each placed part went, by
     // the place it was found at.
     let mut sorted: Vec<(usize, Placed)> = placed.into_iter().enumerate().collect();
@@ -1259,13 +1271,16 @@ fn page_blocks_until(
     }
     // The blocks laid out from the runs no finder took, then the pictures and the codes.
     built.own_unlaid();
-    finders::offer_rest(&engine_in, &mut arb, &built.blocks, &built.block_ids);
+    finders::offer_rest(&engine_in, &mut arb, &built.blocks, &built.block_ids, &cut);
     let mut regions = arb.finish();
-    if regions
+    let stopped = regions
         .issues
         .iter()
-        .any(|i| i.kind == layoutregions::IssueKind::Stopped)
-    {
+        .any(|i| i.kind == layoutregions::IssueKind::Stopped);
+    // Detectors a stop skipped, on a page whose text was still laid out: its runs stand as
+    // text. Where the page stopped too (the time limit stops the blocks as well), the page's
+    // own stop loss says what is not read.
+    if stopped && built.stop.is_none() && !engine_in.texts.is_empty() {
         notes.push((
             format!(
                 "tables, running headers and footers and footnotes on page {page} are looked for \
@@ -1276,6 +1291,11 @@ fn page_blocks_until(
             Severity::Info,
         ));
     }
+    // Every run is in one region, unless a stop or the region limit ended the search (the
+    // rest of such a page gets its region in a later step).
+    if cfg!(debug_assertions) && regions.issues.is_empty() && built.stop.is_none() {
+        finders::check_cover(&engine_in, &regions, &repeats);
+    }
     for r in &mut regions.regions {
         let by = r.signals.first().map(|s| s.id);
         if by.is_some_and(|by| finders::PLACED_BY.contains(&by)) {
@@ -1285,6 +1305,7 @@ fn page_blocks_until(
     let probe_block = std::mem::take(&mut built.probe_block);
     let probes_cut = built.probes_cut;
     let mut laid = built.laid(notes, regions);
+    laid.engine_in = Some(engine_in);
     laid.probes_cut = probes_cut;
     laid.found_by = footnotes::note(page, footnotes_written, linked_written);
     laid.title = title;
@@ -1488,6 +1509,7 @@ impl Built {
             title: None,
             dates: None,
             regions,
+            engine_in: None,
         }
     }
 
@@ -4092,8 +4114,9 @@ mod tests {
         );
     }
 
-    /// A stop before the first detector runs none of them: every run of the page is still
-    /// laid out as text, in a region of its own block, and a limit note says the detectors
+    /// A stop before the first detector runs none of them: the running footer of a file of
+    /// two pages, which the furniture finder takes without the stop, is still laid out as
+    /// text, every run is in a region of its own block, and a limit note says the detectors
     /// looked only in part.
     #[test]
     fn a_stop_before_the_first_finder_keeps_all_text() {
@@ -4102,13 +4125,27 @@ mod tests {
             run("Musterweg 1", 1, 688.0, 10.0),
             run("12345 Musterstadt", 2, 676.0, 10.0),
             run("Betrag 1.234,56", 3, 640.0, 10.0),
-            run("Seite 1", 4, 30.0, 10.0),
+            run("Muster GmbH, Musterweg 1, 12345 Musterstadt", 4, 30.0, 10.0),
         ];
-        let style = Style::new(&[PageText {
-            page: 1,
-            height: Some(842.0),
-            runs: &runs,
-        }]);
+        let second: Vec<Run> = runs
+            .iter()
+            .map(|r| Run {
+                page: 2,
+                ..r.clone()
+            })
+            .collect();
+        let style = Style::new(&[
+            PageText {
+                page: 1,
+                height: Some(842.0),
+                runs: &runs,
+            },
+            PageText {
+                page: 2,
+                height: Some(842.0),
+                runs: &second,
+            },
+        ]);
         let budget = Budget::new(rezzer_limits::Limits::default());
         let cx = Context {
             style: &style,
@@ -4119,6 +4156,27 @@ mod tests {
             in_part: false,
             links: &LinkRoom::new(u64::MAX),
         };
+        let footer = |laid: &Laid| {
+            laid.blocks.iter().find_map(|b| match b {
+                Block::Paragraph { inlines, role, .. }
+                    if rezzer_model::plain_text(inlines).starts_with("Muster GmbH, ") =>
+                {
+                    Some(role.clone())
+                }
+                _ => None,
+            })
+        };
+        // Without the stop the furniture finder takes the footer.
+        let found = page_blocks_until(
+            1,
+            Some(842.0),
+            runs.clone(),
+            &NOTHING_DRAWN,
+            &cx,
+            &[],
+            &|| false,
+        );
+        assert_eq!(footer(&found), Some(Some("page-footer".to_string())));
         let n = runs.len();
         let laid = page_blocks_until(1, Some(842.0), runs, &NOTHING_DRAWN, &cx, &[], &|| true);
         assert!(laid.stop.is_none());
@@ -4134,10 +4192,11 @@ mod tests {
             "Musterweg 1",
             "12345 Musterstadt",
             "Betrag 1.234,56",
-            "Seite 1",
+            "Muster GmbH, Musterweg 1, 12345 Musterstadt",
         ] {
             assert!(text.contains(t), "{t} in {text}");
         }
+        assert_eq!(footer(&laid), Some(None), "the footer is text");
         let limits: Vec<&str> = laid
             .notes
             .iter()

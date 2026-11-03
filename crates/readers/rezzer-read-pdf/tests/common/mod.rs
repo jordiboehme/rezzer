@@ -230,11 +230,38 @@ pub fn read_regions(
     )
 }
 
+/// `bytes` read with the default options and limits, with each page as the region engine took
+/// it and its regions.
+pub fn read_engine_pages(bytes: &[u8]) -> (ReadOutcome, Vec<rezzer_read_pdf::EnginePage>) {
+    rezzer_read_pdf::read_engine_pages(
+        &source(bytes),
+        &ReadOptions::default(),
+        &Budget::new(Limits::default()),
+    )
+}
+
+/// The texts of the runs a region holds, by its pieces, in id order.
+pub fn region_texts<'a>(
+    page: &'a rezzer_read_pdf::EnginePage,
+    region: &rezzer_read_pdf::layoutregions::Region,
+) -> Vec<&'a str> {
+    region
+        .prims
+        .iter()
+        .filter_map(|p| match p {
+            rezzer_read_pdf::layoutregions::PrimId::Text(i) => {
+                Some(page.input.texts[*i as usize].text.as_str())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 /// The text runs of each page of `bytes` are each in exactly one region: the text ids of the
-/// regions of a page are 0 up to their count, each once (a refused offer stops a debug build
-/// first). No page has an issue, and every page read has its regions.
+/// regions of a page are 0 up to the page's runs, each once (a refused offer stops a debug
+/// build first). No page has an issue, and every page read has its regions.
 pub fn assert_every_run_in_one_region(bytes: &[u8]) {
-    let (out, pages) = read_regions(bytes);
+    let (out, pages) = read_engine_pages(bytes);
     let read = out
         .document
         .body
@@ -243,8 +270,14 @@ pub fn assert_every_run_in_one_region(bytes: &[u8]) {
         .count();
     assert_eq!(pages.len(), read, "pages with regions");
     for p in &pages {
-        assert!(p.issues.is_empty(), "page {}: {:?}", p.page, p.issues);
-        let mut ids: Vec<u32> = p
+        let regions = &p.regions;
+        assert!(
+            regions.issues.is_empty(),
+            "page {}: {:?}",
+            regions.page,
+            regions.issues
+        );
+        let mut ids: Vec<u32> = regions
             .regions
             .iter()
             .flat_map(|r| &r.prims)
@@ -254,9 +287,13 @@ pub fn assert_every_run_in_one_region(bytes: &[u8]) {
             })
             .collect();
         ids.sort_unstable();
-        assert!(!ids.is_empty(), "page {} has no text in a region", p.page);
-        let want: Vec<u32> = (0..ids.len() as u32).collect();
-        assert_eq!(ids, want, "page {}: text ids of its regions", p.page);
+        assert!(
+            !ids.is_empty(),
+            "page {} has no text in a region",
+            regions.page
+        );
+        let want: Vec<u32> = (0..p.input.texts.len() as u32).collect();
+        assert_eq!(ids, want, "page {}: text ids of its regions", regions.page);
     }
 }
 

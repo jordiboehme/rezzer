@@ -90,18 +90,38 @@ pub fn read_with_regions(
     opts: &ReadOptions,
     budget: &Budget,
 ) -> (ReadOutcome, Vec<layoutregions::PageRegions>) {
-    let mut regions = Vec::new();
-    let out = read_timed(src, opts, budget, Some(&mut regions));
-    (out, regions)
+    let (out, pages) = read_engine_pages(src, opts, budget);
+    (out, pages.into_iter().map(|p| p.regions).collect())
 }
 
-/// The read of [`PdfReader::read`]; the regions of each page laid out go to `regions`, if
-/// given.
+/// One page laid out, as the region engine took it and with the regions found on it.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct EnginePage {
+    /// The page's primitives: `PrimId::Text(i)` of a region is `input.texts[i]`.
+    pub input: layoutregions::PageIn,
+    pub regions: layoutregions::PageRegions,
+}
+
+/// [`read_with_regions`] with the input of each page, so a test can map a region's pieces back
+/// to their text and count the page's runs. Not a stable interface.
+#[doc(hidden)]
+pub fn read_engine_pages(
+    src: &Source,
+    opts: &ReadOptions,
+    budget: &Budget,
+) -> (ReadOutcome, Vec<EnginePage>) {
+    let mut pages = Vec::new();
+    let out = read_timed(src, opts, budget, Some(&mut pages));
+    (out, pages)
+}
+
+/// The read of [`PdfReader::read`]; each page laid out goes to `regions`, if given.
 fn read_timed(
     src: &Source,
     opts: &ReadOptions,
     budget: &Budget,
-    regions: Option<&mut Vec<layoutregions::PageRegions>>,
+    regions: Option<&mut Vec<EnginePage>>,
 ) -> ReadOutcome {
     // The text is read for three quarters of the time limit at most: the pages read must
     // still be laid out, or their text would be lost with the rest.
@@ -128,7 +148,7 @@ fn read_pdf(
     opts: &ReadOptions,
     budget: &Budget,
     text_stop: &dyn Fn() -> bool,
-    regions: Option<&mut Vec<layoutregions::PageRegions>>,
+    regions: Option<&mut Vec<EnginePage>>,
 ) -> ReadOutcome {
     // Rendered pages and extracted attachments share one room.
     let blob_room = budget.limits().max_memory_bytes / 8;
@@ -143,7 +163,7 @@ fn read_pdf_in(
     budget: &Budget,
     text_stop: &dyn Fn() -> bool,
     blob_room: u64,
-    regions: Option<&mut Vec<layoutregions::PageRegions>>,
+    regions: Option<&mut Vec<EnginePage>>,
 ) -> ReadOutcome {
     let mut info = source_info(src);
     info.reader = Some(ReaderInfo {
@@ -459,7 +479,7 @@ fn lay_out(
     annots: &[Annot],
     budget: &Budget,
     out: &mut Out,
-    mut regions: Option<&mut Vec<layoutregions::PageRegions>>,
+    mut regions: Option<&mut Vec<EnginePage>>,
 ) -> LaidOut {
     let Extracted {
         pages: mut read,
@@ -681,8 +701,13 @@ fn lay_out(
             };
             symbols += items.symbol;
             let mut laid = layout::page_blocks_at(n, height, runs, &drawn, &cx, &points);
-            if let Some(all) = regions.as_deref_mut() {
-                all.push(std::mem::replace(&mut laid.regions, layout::no_regions(n)));
+            if let Some(all) = regions.as_deref_mut()
+                && let Some(input) = laid.engine_in.take()
+            {
+                all.push(EnginePage {
+                    input,
+                    regions: std::mem::replace(&mut laid.regions, layout::no_regions(n)),
+                });
             }
             if let Some(dates) = &mut dates {
                 if let Some(more) = laid.dates.take() {

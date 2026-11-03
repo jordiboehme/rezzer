@@ -701,11 +701,7 @@ fn generated_region_counts() {
             }
         }
     }
-    let mut new: Vec<String> = layoutregions::Kind::ALL
-        .iter()
-        .map(|k| format!("{}\t{}", k.name(), counts.get(k).copied().unwrap_or(0)))
-        .collect();
-    new.push(format!("total\t{}", counts.values().sum::<usize>()));
+    let new = layoutregions::count_lines(&[counts]);
     let path =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/variants/region-counts.tsv");
     if std::env::var_os("REZZER_WRITE_COUNTS").is_some() {
@@ -717,15 +713,6 @@ fn generated_region_counts() {
         .lines()
         .map(str::to_string)
         .collect();
-    let moved: Vec<String> = (0..old.len().max(new.len()))
-        .filter(|&i| old.get(i) != new.get(i))
-        .map(|i| {
-            format!(
-                "old: {}\nnew: {}",
-                old.get(i).map_or("(none)", String::as_str),
-                new.get(i).map_or("(none)", String::as_str)
-            )
-        })
-        .collect();
+    let moved = layoutregions::moved_lines(&old, &new);
     assert!(moved.is_empty(), "{}", moved.join("\n"));
 }

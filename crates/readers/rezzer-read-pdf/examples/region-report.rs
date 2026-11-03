@@ -186,44 +186,6 @@ fn regions_of(name: &str, bytes: Vec<u8>) -> BTreeMap<Kind, usize> {
     counts
 }
 
-/// The lines `kind\t<count>...` for each kind in `Kind` order, one count per column, then
-/// `total`.
-fn table(columns: &[BTreeMap<Kind, usize>]) -> Vec<String> {
-    let mut lines: Vec<String> = Kind::ALL
-        .iter()
-        .map(|k| {
-            let counts: String = columns
-                .iter()
-                .map(|c| format!("\t{}", c.get(k).copied().unwrap_or(0)))
-                .collect();
-            format!("{}{counts}", k.name())
-        })
-        .collect();
-    let totals: String = columns
-        .iter()
-        .map(|c| format!("\t{}", c.values().sum::<usize>()))
-        .collect();
-    lines.push(format!("total{totals}"));
-    lines
-}
-
-/// The lines of `old` and `new` that differ, each as its old and its new line.
-fn moved(old: &[String], new: &[String]) -> Vec<String> {
-    let n = old.len().max(new.len());
-    (0..n)
-        .filter_map(|i| {
-            let (a, b) = (old.get(i), new.get(i));
-            (a != b).then(|| {
-                format!(
-                    "old: {}\nnew: {}",
-                    a.map_or("(none)", String::as_str),
-                    b.map_or("(none)", String::as_str)
-                )
-            })
-        })
-        .collect()
-}
-
 /// The `counts` mode: see the module.
 struct Counts {
     per_file: bool,
@@ -232,7 +194,9 @@ struct Counts {
 }
 
 impl Counts {
-    fn parse(args: &[String]) -> Option<Counts> {
+    /// The options and sets of `args`; why not, for an unknown option, `--check` without its
+    /// file, or no set.
+    fn parse(args: &[String]) -> Result<Counts, String> {
         let mut counts = Counts {
             per_file: false,
             check: None,
@@ -242,11 +206,18 @@ impl Counts {
         while let Some(a) = args.next() {
             match a.as_str() {
                 "--per-file" => counts.per_file = true,
-                "--check" => counts.check = Some(args.next()?.clone()),
+                "--check" => {
+                    let file = args.next().ok_or("--check needs a file")?;
+                    counts.check = Some(file.clone());
+                }
+                flag if flag.starts_with("--") => return Err(format!("unknown option {flag}")),
                 _ => counts.sets.push(a.clone()),
             }
         }
-        (!counts.sets.is_empty()).then_some(counts)
+        if counts.sets.is_empty() {
+            return Err("no set to count".to_string());
+        }
+        Ok(counts)
     }
 
     /// Prints the counts; `Ok(false)` when the check found a difference.
@@ -268,7 +239,7 @@ impl Counts {
             columns.push(column);
         }
         if !self.per_file {
-            for line in table(&columns) {
+            for line in layoutregions::count_lines(&columns) {
                 println!("{line}");
             }
         }
@@ -280,8 +251,8 @@ impl Counts {
             .lines()
             .map(str::to_string)
             .collect();
-        let new = table(&columns[..1]);
-        let moved = moved(&old, &new);
+        let new = layoutregions::count_lines(&columns[..1]);
+        let moved = layoutregions::moved_lines(&old, &new);
         for m in &moved {
             eprintln!("{m}");
         }
@@ -292,9 +263,15 @@ impl Counts {
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().is_some_and(|m| m == "counts") {
-        let Some(counts) = Counts::parse(&args[1..]) else {
-            eprintln!("usage: region-report counts [--per-file] [--check <file>] <set>...");
-            std::process::exit(2);
+        let counts = match Counts::parse(&args[1..]) {
+            Ok(counts) => counts,
+            Err(why) => {
+                eprintln!(
+                    "region-report: {why}\nusage: region-report counts [--per-file] [--check \
+                     <file>] <set>..."
+                );
+                std::process::exit(2);
+            }
         };
         match counts.run() {
             Ok(true) => return,
@@ -330,33 +307,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn counts_print_every_kind_then_the_total() {
-        let mut a = BTreeMap::new();
-        a.insert(Kind::Table, 2);
-        a.insert(Kind::HeaderBand, 1);
-        let b = BTreeMap::new();
-        let lines = table(&[a, b]);
-        assert_eq!(lines.len(), Kind::ALL.len() + 1);
-        assert_eq!(lines[0], "header_band\t1\t0");
-        assert!(lines.contains(&"table\t2\t0".to_string()));
-        assert_eq!(lines.last().unwrap(), "total\t3\t0");
-    }
-
-    #[test]
-    fn a_moved_count_names_its_old_and_new_line() {
-        let old = vec!["table\t2".to_string(), "total\t2".to_string()];
-        let new = vec!["table\t3".to_string(), "total\t3".to_string()];
-        assert_eq!(
-            moved(&old, &new),
-            [
-                "old: table\t2\nnew: table\t3",
-                "old: total\t2\nnew: total\t3"
-            ]
-        );
-        assert!(moved(&old, &old).is_empty());
-    }
-
-    #[test]
     fn counts_options_parse() {
         let args: Vec<String> = ["--per-file", "a", "--check", "f.tsv", "b"]
             .iter()
@@ -366,8 +316,17 @@ mod tests {
         assert!(c.per_file);
         assert_eq!(c.check.as_deref(), Some("f.tsv"));
         assert_eq!(c.sets, ["a", "b"]);
-        assert!(Counts::parse(&[]).is_none());
-        assert!(Counts::parse(&["--check".to_string()]).is_none());
+        assert_eq!(Counts::parse(&[]).err().as_deref(), Some("no set to count"));
+        assert_eq!(
+            Counts::parse(&["--check".to_string()]).err().as_deref(),
+            Some("--check needs a file")
+        );
+        assert_eq!(
+            Counts::parse(&["--perfile".to_string(), "a".to_string()])
+                .err()
+                .as_deref(),
+            Some("unknown option --perfile")
+        );
     }
 
     #[test]
