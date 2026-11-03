@@ -51,8 +51,8 @@ pub enum Source {
     /// The text of a segment beside its other parts (drawn children, given regions, its
     /// drawing): what the whitespace cut and the style steps part further.
     Rest,
-    /// The drawn primitives of a segment (rules, boxes, pictures, codes) that no drawn child
-    /// holds. It is one leaf.
+    /// Drawn primitives of a segment that no drawn child holds: its rules and boxes together,
+    /// or one picture, or one code. It is one leaf.
     Drawing,
 }
 
@@ -106,7 +106,7 @@ pub struct Segments {
 /// Where a segment has drawn children, the whitespace cut of all its text with the drawn
 /// structure left out is a second cut of it when one of its column gutters holds a vertical
 /// side of a drawn child beside its text (a gutter that a box also bounds): that cut is kept
-/// in `alternatives`. Its groups are leaves; the given regions and one drawing leaf complete
+/// in `alternatives`. Its groups are leaves; the given regions and the drawing leaves complete
 /// it. At most [`Limits::max_alternatives`] are kept per segment.
 ///
 /// Bounds: no segment nests deeper than [`Limits::max_cut_depth`] below the root. A segment
@@ -640,17 +640,18 @@ impl Builder<'_> {
         }
         let rules = rules_of(self.page, &it.others);
         let parted = !next.is_empty() || !given.is_empty();
-        if parted || (!it.texts.is_empty() && !it.others.is_empty()) {
-            // Both parts are made before the text is parted, so that the room they took stays
+        if parted
+            || (!it.texts.is_empty() && !it.others.is_empty())
+            || drawing_count(&it.others) > 1
+        {
+            // All parts are made before the text is parted, so that the room they took stays
             // theirs.
             let rest = (!it.texts.is_empty()).then(|| {
                 let mut prims: Vec<PrimId> = it.texts.iter().map(|&t| PrimId::Text(t)).collect();
                 prims.sort_unstable();
                 self.push(Source::Rest, prims, None, Some(s), true)
             });
-            if !it.others.is_empty() {
-                let mut prims = it.others.clone();
-                prims.sort_unstable();
+            for prims in drawing_parts(&it.others) {
                 self.push(Source::Drawing, prims, None, Some(s), true);
             }
             if let Some(r) = rest {
@@ -774,8 +775,9 @@ impl Builder<'_> {
 
     /// The whitespace cut of all text of segment `s` (at depth `d`) with its drawn children
     /// `kids` (items) left out, kept as an alternative when one of its column gutters holds a
-    /// vertical side of a drawn child beside its text: the gutter that a box also bounds. Its groups are
-    /// leaves; the given regions and one leaf of all drawing of the segment complete it.
+    /// vertical side of a drawn child beside its text: the gutter that a box also bounds. Its
+    /// groups are leaves; the given regions and the drawing leaves of the segment (see
+    /// [`drawing_parts`]) complete it.
     fn alternative(
         &mut self,
         items: &[Item],
@@ -874,7 +876,7 @@ impl Builder<'_> {
             self.note(Note::Alternatives);
             return;
         }
-        if !self.room(found.groups.len() + usize::from(!drawing.is_empty())) {
+        if !self.room(found.groups.len() + drawing_count(&drawing)) {
             return;
         }
         let mut alt: Vec<SegId> = given.to_vec();
@@ -883,8 +885,8 @@ impl Builder<'_> {
             prims.sort_unstable();
             alt.push(self.push(source_of(&found.splits, g), prims, None, Some(s), false));
         }
-        if !drawing.is_empty() {
-            alt.push(self.push(Source::Drawing, drawing, None, Some(s), false));
+        for prims in drawing_parts(&drawing) {
+            alt.push(self.push(Source::Drawing, prims, None, Some(s), false));
         }
         self.all[s.0 as usize].alternatives.push(alt);
     }
@@ -892,7 +894,9 @@ impl Builder<'_> {
 
 /// The segments item `i` makes for its own parts, beside `given` given regions (the root's):
 /// its drawn children that hold anything (see `sub`, or `held` past the depth bound), and when
-/// it is parted, one segment for its text and one for its drawing.
+/// it is parted, one segment for its text and its drawing leaves (see [`drawing_parts`]). It
+/// is parted when it has drawn children or given regions, text and drawing, or more than one
+/// drawing leaf.
 fn own_parts(items: &[Item], i: usize, sub: &[Vec<PrimId>], given: usize) -> usize {
     let it = &items[i];
     let kids = it
@@ -900,11 +904,50 @@ fn own_parts(items: &[Item], i: usize, sub: &[Vec<PrimId>], given: usize) -> usi
         .iter()
         .filter(|&&c| !sub[c].is_empty() || items[c].held)
         .count();
-    let split = kids > 0 || given > 0 || (!it.texts.is_empty() && !it.others.is_empty());
+    let drawings = drawing_count(&it.others);
+    let split = kids > 0 || given > 0 || (!it.texts.is_empty() && drawings > 0) || drawings > 1;
     if !split {
         return 0;
     }
-    kids + usize::from(!it.texts.is_empty()) + usize::from(!it.others.is_empty())
+    kids + usize::from(!it.texts.is_empty()) + drawings
+}
+
+/// How many drawing leaves `others` (primitives other than text) make (see
+/// [`drawing_parts`]).
+fn drawing_count(others: &[PrimId]) -> usize {
+    let rest = others
+        .iter()
+        .any(|p| matches!(p, PrimId::Rule(_) | PrimId::Box(_)));
+    let own = others
+        .iter()
+        .filter(|p| matches!(p, PrimId::Picture(_) | PrimId::Code(_)))
+        .count();
+    own + usize::from(rest)
+}
+
+/// The drawing leaves of `others` (primitives other than text), each sorted: the rules and
+/// boxes together first, then one leaf per picture and one per code, in the order of their
+/// ids. A picture and a code are each a region of their own, as a reader shows each.
+fn drawing_parts(others: &[PrimId]) -> Vec<Vec<PrimId>> {
+    work::add(others.len() as u64);
+    let mut rest: Vec<PrimId> = others
+        .iter()
+        .copied()
+        .filter(|p| matches!(p, PrimId::Rule(_) | PrimId::Box(_)))
+        .collect();
+    rest.sort_unstable();
+    let mut own: Vec<PrimId> = others
+        .iter()
+        .copied()
+        .filter(|p| matches!(p, PrimId::Picture(_) | PrimId::Code(_)))
+        .collect();
+    own.sort_unstable();
+    let mut out = Vec::with_capacity(own.len() + 1);
+    if !rest.is_empty() {
+        out.push(rest);
+    }
+    out.extend(own.into_iter().map(|p| vec![p]));
+    out
 }
 
 /// The source of group `g` of a cut with `splits`: the split before it; the first group

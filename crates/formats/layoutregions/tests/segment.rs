@@ -954,3 +954,55 @@ fn many_one_row_grids_are_bounded() {
     assert_eq!(hits.len(), 1, "{:?}", s.issues);
     assert!(hits[0].what.contains("segments"), "{}", hits[0].what);
 }
+
+/// Pictures and codes are each a leaf of their own, beside one leaf of the rules: under a
+/// page with text, and under a page of pictures alone.
+#[test]
+fn each_picture_and_code_is_a_leaf_of_its_own() {
+    let pic = |x0: f32, y0: f32| PictureIn {
+        bounds: Bounds {
+            x0,
+            y0,
+            x1: x0 + 100.0,
+            y1: y0 + 80.0,
+        },
+    };
+    let mut p = page(
+        [595.0, 842.0],
+        column(72.0, 760.0, 3, 0),
+        vec![line(72.0, 700.0, 500.0, 700.0)],
+    );
+    p.pictures = vec![pic(72.0, 500.0), pic(300.0, 500.0)];
+    p.codes = vec![CodeIn {
+        bounds: Bounds {
+            x0: 72.0,
+            y0: 300.0,
+            x1: 172.0,
+            y1: 340.0,
+        },
+    }];
+    let s = segment_page(&p, &Limits::default(), &|| false);
+    check_cover(&s, &p);
+    let drawings: Vec<Vec<PrimId>> = with_source(&s, |x| *x == Source::Drawing)
+        .iter()
+        .map(|g| g.prims.clone())
+        .collect();
+    assert_eq!(
+        drawings,
+        [
+            vec![PrimId::Rule(0)],
+            vec![PrimId::Picture(0)],
+            vec![PrimId::Picture(1)],
+            vec![PrimId::Code(0)],
+        ]
+    );
+    // Pictures alone: one leaf each, the root parted; one picture alone is the root itself.
+    let mut only = page([595.0, 842.0], Vec::new(), Vec::new());
+    only.pictures = vec![pic(72.0, 500.0), pic(300.0, 500.0)];
+    let s = segment_page(&only, &Limits::default(), &|| false);
+    check_cover(&s, &only);
+    assert_eq!(with_source(&s, |x| *x == Source::Drawing).len(), 2);
+    only.pictures.truncate(1);
+    let s = segment_page(&only, &Limits::default(), &|| false);
+    assert_eq!(s.all.len(), 1);
+}
