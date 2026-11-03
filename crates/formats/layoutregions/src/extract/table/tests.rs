@@ -280,9 +280,9 @@ fn every_prim_of_a_table_once() {
 
 #[test]
 fn a_run_over_its_cell_side_into_white_space_goes_by_its_middle() {
-    // The name runs from 5 to 113, over the rule at 100, into white space: the amount of its
-    // row starts at 140.
-    let g = items("Erika Mustermann M");
+    // The name runs from 5 to 119, over the rule at 100 inside a word (no cut there), into
+    // white space: the amount of its row starts at 140.
+    let g = items("Erika Mustermannsta");
     let Cells::Table(table) = read(&g) else {
         panic!("a table");
     };
@@ -292,9 +292,20 @@ fn a_run_over_its_cell_side_into_white_space_goes_by_its_middle() {
 
 #[test]
 fn unplaced_run_is_reported() {
-    // Ruled: the name runs from 5 to 155, over the rule at 100 and into the amount at 140 on
-    // its line. It is in no cell, and the amount keeps its own.
-    let g = items("Erika Mustermann Musterstadt");
+    // Ruled: the name runs from 5 to 155, over the rule at 100 inside a word (where no rule
+    // cuts it) and onto the amount at 140 on its line. It is in no cell, and the amount keeps
+    // its own.
+    let g = items("Erika Mustermannstadtteil");
+    let part = GridPart {
+        h: &g.h,
+        v: &g.v,
+        cut: false,
+    };
+    let (cuts, _) = column_cuts(&g.runs, &[part], &[], 1000);
+    assert!(
+        cuts.iter().all(|c| c.0 != 6),
+        "no rule cuts the name: {cuts:?}"
+    );
     let Cells::Table(table) = read(&g) else {
         panic!("a table");
     };
@@ -344,9 +355,7 @@ fn unplaced_run_is_reported() {
         pieces.push(pieces_of(&runs, start, end));
         start = end;
     }
-    let Cells::Table(table) = grid_cells(&runs, &pieces, 3, false) else {
-        panic!("a table");
-    };
+    let table = grid_cells(&runs, &pieces, 3, false).expect("a table");
     assert_eq!(table.unplaced, [(note, RUNS_OVER_COLUMNS)]);
     let at = placed(&table);
     assert_eq!(at.len() + 1, runs.len());

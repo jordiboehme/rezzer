@@ -11,7 +11,10 @@
 //! whose cells are mostly empty, columns that are not clean, text that runs on like prose.
 //! Three extractors build them: [`ruled::ruled_cells`] for a section of a grid of drawn rules,
 //! [`banded::band_cells`] for a header band of drawn cells and the lines under it, and
-//! [`grid::grid_cells`] for lines in columns without rules. Each answers with [`Cells`].
+//! [`grid::grid_cells`] for lines in columns without rules. Each answers with the table or
+//! why there is none: [`Cells`] for a ruled section, which may also be too large or stopped,
+//! [`banded::BandCells`] for a band, which may be too large, and a `Result` for lines without
+//! rules.
 //!
 //! Every function works on the reader's own runs (see [`LineRun`]), borrowed, and takes and
 //! returns indexes into the slice it is given: the reader cuts runs in pieces that share one
@@ -162,6 +165,35 @@ pub fn texted_per_line<R: LineRun>(runs: &[R]) -> HashMap<u32, u32> {
 /// [`texted_per_line`]).
 pub(crate) fn alone_on_line<R: LineRun>(per_line: &HashMap<u32, u32>, run: &R) -> bool {
     per_line.get(&run.line()).is_some_and(|n| *n == 1)
+}
+
+/// One line of runs (by [`LineRun::line`], next to each other): the range of its runs, its
+/// baseline (its first run's) and its largest size, at least 1.
+#[derive(Debug, Clone, Copy)]
+pub struct RunRange {
+    pub start: usize,
+    pub end: usize,
+    pub y: f32,
+    pub size: f32,
+}
+
+pub fn run_ranges<R: LineRun>(runs: &[R]) -> Vec<RunRange> {
+    let mut out: Vec<RunRange> = Vec::new();
+    for (i, r) in runs.iter().enumerate() {
+        match out.last_mut() {
+            Some(l) if runs[l.start].line() == r.line() => {
+                l.end = i + 1;
+                l.size = l.size.max(r.size());
+            }
+            _ => out.push(RunRange {
+                start: i,
+                end: i + 1,
+                y: r.y(),
+                size: r.size().max(1.0),
+            }),
+        }
+    }
+    out
 }
 
 /// One line of text: its baseline, its largest size, whether all of it is bold, and its

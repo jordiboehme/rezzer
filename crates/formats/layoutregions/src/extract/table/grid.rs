@@ -9,8 +9,8 @@
 use std::collections::HashMap;
 
 use super::{
-    CELL_GAP, CellOut, Cells, PROSE_LINE, PROSE_WORDS, RUNS_OVER_COLUMNS, SHORT_CELL, TableOut,
-    TitleCut, numeric,
+    CELL_GAP, CellOut, PROSE_LINE, PROSE_WORDS, RUNS_OVER_COLUMNS, SHORT_CELL, TableOut, TitleCut,
+    numeric,
 };
 use crate::extract::text::signed_amount;
 use crate::line::LineRun;
@@ -160,20 +160,21 @@ struct GridCell {
 }
 
 /// The cells of a region of lines without rules, each line its `pieces` of `runs`, or why it
-/// is no table. `rows_needed` is the fewest rows a table there must have; a `table_caption`
-/// next to it lets its cells be longer. A line between two rows that runs over the columns
-/// (a note) is [`RUNS_OVER_COLUMNS`] and in no cell; the reader keeps its text as it stands.
+/// is no table (`Err`). `rows_needed` is the fewest rows a table there must have; a
+/// `table_caption` next to it lets its cells be longer. A line between two rows that runs over
+/// the columns (a note) is [`RUNS_OVER_COLUMNS`] and in no cell; the reader keeps its text as
+/// it stands.
 pub fn grid_cells<R: LineRun>(
     runs: &[R],
     pieces: &[Vec<Piece>],
     rows_needed: usize,
     table_caption: bool,
-) -> Cells {
+) -> Result<TableOut, &'static str> {
     let lines = pieces.len();
     let columns = with_sparse(columns_of(pieces), pieces);
     let cols = columns.len();
     if cols < 2 {
-        return Cells::Refused("no columns");
+        return Err("no columns");
     }
     let over = |p: &Piece| -> Vec<usize> {
         (0..cols)
@@ -191,7 +192,7 @@ pub fn grid_cells<R: LineRun>(
             let hit = over(p);
             let (col, span) = match hit.as_slice() {
                 // Text in a gutter belongs to no column: the grid does not hold.
-                [] => return Cells::Refused("some of its text stands between its columns"),
+                [] => return Err("some of its text stands between its columns"),
                 [c] => (*c, 1),
                 many => {
                     if k > 0 {
@@ -208,7 +209,7 @@ pub fn grid_cells<R: LineRun>(
         placed.push(row);
     }
     if (clean as f32) < CLEAN_ROWS * lines as f32 {
-        return Cells::Refused("its columns are not clean");
+        return Err("its columns are not clean");
     }
     // Rows: lines that fill at least half the columns; other lines join the row of the
     // nearest one above them (lines above the first join the first).
@@ -237,7 +238,7 @@ pub fn grid_cells<R: LineRun>(
         above.extend(row.iter().filter(|x| number(x)).map(|x| x.0));
     }
     if anchors.len() < rows_needed.max(1) {
-        return Cells::Refused("too few rows");
+        return Err("too few rows");
     }
     // The row each line goes to: its own when it is an anchor, else the one before it.
     let row_of = |k: usize| {
@@ -394,14 +395,14 @@ pub fn grid_cells<R: LineRun>(
         .collect();
     lens.sort_unstable();
     if texts.len() > 1 && texts.iter().all(|r| *r == texts[0]) {
-        return Cells::Refused("all its rows read the same");
+        return Err("all its rows read the same");
     }
     // The same test with other bounds stands in `banded::long_or_prose`; Task 17 makes the
     // two one signal.
     let numbers = texts.iter().flatten().filter(|t| numeric(t)).count();
     let short = if table_caption { 60 } else { SHORT_CELL };
     if lens.is_empty() || (lens[lens.len() / 2] >= short && 2 * numbers < lens.len()) {
-        return Cells::Refused("its cells hold long text");
+        return Err("its cells hold long text");
     }
     // Text that runs on from a cell into the cell below like prose is two columns of text.
     for c in 0..cols {
@@ -415,7 +416,7 @@ pub fn grid_cells<R: LineRun>(
             let ends = above.ends_with(['.', ':', ';', '!', '?']);
             let line = words >= PROSE_WORDS && above.chars().count() >= PROSE_LINE;
             if line && !ends && below.chars().next().is_some_and(char::is_lowercase) {
-                return Cells::Refused("its text runs on from row to row like prose");
+                return Err("its text runs on from row to row like prose");
             }
         }
     }
@@ -439,12 +440,12 @@ pub fn grid_cells<R: LineRun>(
         && pages.iter().all(Option::is_some)
         && pages.windows(2).all(|w| w[0] <= w[1])
     {
-        return Cells::Refused("it reads like a table of contents");
+        return Err("it reads like a table of contents");
     }
     let expand = |ranges: &[(usize, usize)]| -> Vec<usize> {
         ranges.iter().flat_map(|&(s, e)| s..e).collect()
     };
-    Cells::Table(TableOut {
+    Ok(TableOut {
         rows: rows
             .iter()
             .map(|r| {

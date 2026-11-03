@@ -1742,8 +1742,8 @@ fn rereview_r10_probes_give_no_wrong_date() {
     let three = Lost("3 dates stand in the head of page 1; none is marked as the document date");
     let overprinted = Losses(&[
         ONE_DATE,
-        "text in a table on page 1 runs over the side of its cell into the text of another cell: \
-         it is read as a paragraph next to the table",
+        "text in the table on page 1 that starts with \"Pos\" runs over the side of its cell \
+         into the text of another cell: it is read as a paragraph next to the table",
     ]);
     for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
         for font in ["FL", "FB"] {

@@ -627,9 +627,10 @@ fn read_grid(sh: &Sheet<'_>, take: &mut Taking, found: &mut Found, s: GridSectio
             take.held[i] = true;
         }
         found.uncertain.push(format!(
-            "text in a table on page {} runs over the side of its cell into the text of another \
-             cell: it is read as a paragraph next to the table",
-            sh.page
+            "text in the table on page {} that starts with \"{}\" runs over the side of its \
+             cell into the text of another cell: it is read as a paragraph next to the table",
+            sh.page,
+            first_words(&flow.runs, &table)
         ));
     }
     for &(r, k, cell) in &table.icons {
@@ -1358,6 +1359,30 @@ fn boxed_field(flow: &Flow, within: &[usize], xs: &[f32], ys: &[f32]) -> bool {
             let (_, cy) = middle(r);
             digits(&r.text) && rows.insert(ys.partition_point(|e| *e > cy))
         })
+}
+
+/// Words of a table's first cell with text that name the table in a loss.
+const NAME_WORDS: usize = 6;
+
+/// The first [`NAME_WORDS`] words of the first cell of `table` (row by row) that holds text,
+/// its runs in the order of `runs`: what names the table in a loss.
+fn first_words(runs: &[Run], table: &TableOut) -> String {
+    let words = |c: &layoutregions::extract::table::CellOut| {
+        let mut idx = c.runs.clone();
+        idx.sort_unstable();
+        idx.iter()
+            .flat_map(|&i| runs[i].text.split_whitespace())
+            .take(NAME_WORDS)
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    table
+        .rows
+        .iter()
+        .flatten()
+        .map(words)
+        .find(|w| !w.is_empty())
+        .unwrap_or_default()
 }
 
 /// What a title drawn as an icon is written as.

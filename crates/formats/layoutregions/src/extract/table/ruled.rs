@@ -9,8 +9,8 @@ use std::collections::{HashMap, HashSet};
 
 use super::banded::{BAND_EDGE, BODY_GAP, row_starts};
 use super::{
-    CELL_GAP, CellOut, Cells, MAX_SQUARES, PROSE_LINE, PROSE_WORDS, RUNS_INTO_CELL, TableOut,
-    alone_on_line, middle, numeric, texted_per_line,
+    CELL_GAP, CellOut, Cells, MAX_SQUARES, PROSE_LINE, PROSE_WORDS, RUNS_INTO_CELL, RunRange,
+    TableOut, alone_on_line, middle, numeric, run_ranges, texted_per_line,
 };
 use crate::line::{LABEL_STEP, LineRun};
 use crate::segment::drawn::{Line, SNAP, clustered};
@@ -152,34 +152,6 @@ fn places_of(mut spans: Vec<Span>) -> Vec<Place> {
     places
 }
 
-/// One line of runs (by [`LineRun::line`], next to each other): the range of its runs, its
-/// baseline (its first run's) and its largest size, at least 1.
-struct RunRange {
-    start: usize,
-    end: usize,
-    y: f32,
-    size: f32,
-}
-
-fn run_ranges<R: LineRun>(runs: &[R]) -> Vec<RunRange> {
-    let mut out: Vec<RunRange> = Vec::new();
-    for (i, r) in runs.iter().enumerate() {
-        match out.last_mut() {
-            Some(l) if runs[l.start].line() == r.line() => {
-                l.end = i + 1;
-                l.size = l.size.max(r.size());
-            }
-            _ => out.push(RunRange {
-                start: i,
-                end: i + 1,
-                y: r.y(),
-                size: r.size().max(1.0),
-            }),
-        }
-    }
-    out
-}
-
 /// Where to cut each run of `runs` that an inner column rule of a section of `parts` crosses:
 /// in the white space between two of its words, so each part stands in its own column (a
 /// value line padded into its fields often has only one or two spaces between two fields).
@@ -288,6 +260,9 @@ pub fn column_cuts<R: LineRun>(
         let (mut below, mut crossed, mut in_word) = (Vec::new(), 0usize, false);
         for (list, places) in [&drawn, &hanging].into_iter().enumerate() {
             let first = places.partition_point(|p| p.0 <= r.x() + tol);
+            // The places go right, so the first gap that does not end before a place only
+            // moves forward: one pass over the run's gaps per list.
+            let mut gaps = r.gaps().enumerate().peekable();
             for (x, heights) in &places[first..] {
                 if *x >= r.x() + r.w() - tol {
                     break;
@@ -303,20 +278,19 @@ pub fn column_cuts<R: LineRun>(
                 }
                 // The first gap that does not end before the rule, and whether the rule lies
                 // in it (the gaps are in order).
-                let found = r.gaps().enumerate().find(|(_, g)| g.to + tol >= *x);
-                let k = found.map_or(r.gaps().count(), |(k, _)| k);
-                let gap = found.is_some_and(|(_, g)| g.from - tol <= *x);
+                while gaps.next_if(|(_, g)| g.to + tol < *x).is_some() {}
+                let gap = gaps
+                    .peek()
+                    .filter(|(_, g)| g.from - tol <= *x)
+                    .map(|(k, _)| *k);
                 if list == 0 {
-                    if gap {
-                        at.push(k);
-                    }
+                    at.extend(gap);
                     continue;
                 }
                 crossed += 1;
-                if gap {
-                    below.push(k);
-                } else {
-                    in_word = true;
+                match gap {
+                    Some(k) => below.push(k),
+                    None => in_word = true,
                 }
             }
         }
@@ -338,8 +312,9 @@ pub fn column_cuts<R: LineRun>(
 
 /// A section of a grid ready to be read as a table: its segments, its column and row edges
 /// (from the top), the feet of its open rows (rows of lines without rules under a header of
-/// hanging rules), its runs (`mine`) and those of them with text (`within`), and how many
-/// runs with text each line of the page has (see [`texted_per_line`], built once per page).
+/// hanging rules), its runs (`mine`) and those of them with text (`within`), both sorted, and
+/// how many runs with text each line of the page has (see [`texted_per_line`], built once per
+/// page).
 pub struct RuledIn<'a> {
     pub h: &'a [Line],
     pub v: &'a [Line],
@@ -366,6 +341,10 @@ pub fn ruled_cells<R: LineRun>(
     strokes: &mut dyn FnMut([f32; 4]) -> bool,
 ) -> Cells {
     let (xs, ys, within) = (s.xs, s.ys, s.within);
+    debug_assert!(
+        within.is_sorted() && s.mine.is_sorted(),
+        "the runs come sorted"
+    );
     let (cols, rows) = (xs.len() - 1, ys.len() - 1);
     let borders = Borders::new(s.h, s.v, xs, ys);
     let Some(mut owner) = cell_owners(&borders, xs, ys, stop) else {
@@ -430,6 +409,22 @@ pub fn ruled_cells<R: LineRun>(
     }
     let (mut planned_rows, place) = plan_grid(&cells, &bands, &spanned, planned_count);
     let unplaced = onto_other_cells(runs, within, &cells);
+    // The refusals above count an unplaced run as text of the cell of its middle, as they
+    // did before the guard; the icon test below looks only at the text a cell keeps.
+    let kept_text: HashSet<((usize, usize), usize)> = if unplaced.is_empty() {
+        with_text
+    } else {
+        within
+            .iter()
+            .filter(|i| unplaced.binary_search(i).is_err())
+            .map(|&i| {
+                let r = &runs[i];
+                let (cx, cy) = middle(r);
+                let o = cells.cell_at(cx, cy);
+                (o, bands.sub_of(o.0, r))
+            })
+            .collect()
+    };
     for &i in s.mine {
         if unplaced.binary_search(&i).is_ok() {
             continue;
@@ -444,7 +439,7 @@ pub fn ruled_cells<R: LineRun>(
     // an icon.
     let mut icons = Vec::new();
     for (c, o) in cells.owner[0].iter().enumerate() {
-        if *o != (0, c) || with_text.contains(&(*o, 0)) {
+        if *o != (0, c) || kept_text.contains(&(*o, 0)) {
             continue;
         }
         let (row_span, col_span) = cells.extent[o];
@@ -480,19 +475,16 @@ pub fn ruled_cells<R: LineRun>(
 /// [`SNAP`], in a row that is not open) onto the ink of a run of another cell on their line:
 /// the middle would guess their cell. A run that reaches into white space goes by its middle.
 fn onto_other_cells<R: LineRun>(runs: &[R], within: &[usize], cells: &Squares<'_>) -> Vec<usize> {
-    let (xs, cols) = (cells.xs, cells.cols());
     // Each run that crosses: its cell and the stretches of it outside the cell.
     type Crossing = (usize, (usize, usize), [(f32, f32); 2]);
-    let mut crossing: Vec<Crossing> = Vec::new();
-    for &i in within {
-        let r = &runs[i];
-        let (cx, cy) = middle(r);
-        let o = cells.cell_at(cx, cy);
-        let (x0, x1) = (xs[o.1], xs[(o.1 + cells.extent[&o].1 as usize).min(cols)]);
-        if !cells.is_open[o.0] && (r.x() < x0 - SNAP || r.x() + r.w() > x1 + SNAP) {
-            crossing.push((i, o, [(r.x(), x0), (x1, r.x() + r.w())]));
-        }
-    }
+    let crossing: Vec<Crossing> = within
+        .iter()
+        .filter_map(|&i| {
+            let r = &runs[i];
+            let (o, x0, x1) = crosses(r, cells)?;
+            Some((i, o, [(r.x(), x0), (x1, r.x() + r.w())]))
+        })
+        .collect();
     if crossing.is_empty() {
         return Vec::new();
     }
@@ -516,6 +508,18 @@ fn onto_other_cells<R: LineRun>(runs: &[R], within: &[usize], cells: &Squares<'_
         })
         .map(|(i, _, _)| i)
         .collect()
+}
+
+/// The cell of `r` (by its middle) and the cell's left and right edges, when `r` reaches over
+/// a side of it by more than [`SNAP`]: it crosses a drawn line. In an open row no line is
+/// drawn there: a value that runs on into the next field goes by its middle, so it never
+/// crosses.
+fn crosses<R: LineRun>(r: &R, cells: &Squares<'_>) -> Option<((usize, usize), f32, f32)> {
+    let (xs, cols) = (cells.xs, cells.cols());
+    let (cx, cy) = middle(r);
+    let o = cells.cell_at(cx, cy);
+    let (x0, x1) = (xs[o.1], xs[(o.1 + cells.extent[&o].1 as usize).min(cols)]);
+    (!cells.is_open[o.0] && (r.x() < x0 - SNAP || r.x() + r.w() > x1 + SNAP)).then_some((o, x0, x1))
 }
 
 /// The segments on each boundary of a section of column edges `xs` and row edges `ys` (from
@@ -740,19 +744,10 @@ fn grid_refused<R: LineRun>(
     with_text: &HashSet<((usize, usize), usize)>,
     head: usize,
 ) -> Option<&'static str> {
-    let (xs, cols) = (cells.xs, cells.cols());
-    let mut crossing = 0usize;
-    for &i in within {
-        let r = &runs[i];
-        let (cx, cy) = middle(r);
-        let o = cells.cell_at(cx, cy);
-        // A run that reaches over its cell's side crosses a drawn line. In an open row no
-        // line is drawn there: a value that runs on into the next field goes by its middle.
-        let (x0, x1) = (xs[o.1], xs[(o.1 + cells.extent[&o].1 as usize).min(cols)]);
-        if !cells.is_open[o.0] && (r.x() < x0 - SNAP || r.x() + r.w() > x1 + SNAP) {
-            crossing += 1;
-        }
-    }
+    let crossing = within
+        .iter()
+        .filter(|&&i| crosses(&runs[i], cells).is_some())
+        .count();
     // Cells counted with the rows each band was cut in; only cells of the body count as
     // spanning, as a header often spans.
     let all: usize = cells.extent.keys().map(|o| bands.subs(o.0)).sum();

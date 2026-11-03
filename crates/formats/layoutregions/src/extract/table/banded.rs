@@ -8,8 +8,7 @@
 use std::collections::BTreeMap;
 
 use super::{
-    CELL_GAP, CellOut, Cells, MAX_SQUARES, PROSE_LINE, PROSE_WORDS, SHORT_CELL, TableOut, middle,
-    numeric,
+    CELL_GAP, CellOut, MAX_SQUARES, PROSE_LINE, PROSE_WORDS, SHORT_CELL, TableOut, middle, numeric,
 };
 use crate::line::LineRun;
 use crate::segment::drawn::SNAP;
@@ -87,6 +86,19 @@ pub fn band_titles<R: LineRun>(runs: &[R], head: &[usize], xs: &[f32]) -> BTreeM
     titles
 }
 
+/// What [`band_cells`] makes of a band and its body.
+#[derive(Debug, Clone, PartialEq)]
+pub enum BandCells {
+    Table(TableOut),
+    /// No table, and why.
+    Refused(&'static str),
+    /// More cells than [`MAX_SQUARES`]: `rows` by `cols`.
+    TooLarge {
+        rows: usize,
+        cols: usize,
+    },
+}
+
 /// The table of a band of cell edges `xs` with its runs `head` and `titles` (see
 /// [`band_titles`]) over the lines `body` from the top (`misfit` when a line that does not
 /// stand in its columns ended them). Rows start by [`row_starts`]; only the columns with text
@@ -98,12 +110,12 @@ pub fn band_cells<R: LineRun>(
     titles: &BTreeMap<usize, String>,
     xs: &[f32],
     (body, misfit): (&[BodyLine], bool),
-) -> Cells {
+) -> BandCells {
     let mut used: Vec<usize> = body.iter().flat_map(|l| l.2.iter().map(|p| p.0)).collect();
     used.sort_unstable();
     used.dedup();
     if used.is_empty() {
-        return Cells::Refused(if misfit {
+        return BandCells::Refused(if misfit {
             "the text below its header does not stand in its columns"
         } else {
             "too few rows follow its header"
@@ -128,14 +140,14 @@ pub fn band_cells<R: LineRun>(
         row_of.push(rows.saturating_sub(1));
     }
     if rows < 3 {
-        return Cells::Refused("too few rows follow its header");
+        return BandCells::Refused("too few rows follow its header");
     }
     // Columns with text in the band or the body; the others are dropped.
     let mut kept: Vec<usize> = titles.keys().copied().chain(used.iter().copied()).collect();
     kept.sort_unstable();
     kept.dedup();
     if (rows + 1).saturating_mul(kept.len()) > MAX_SQUARES {
-        return Cells::TooLarge {
+        return BandCells::TooLarge {
             rows: rows + 1,
             cols: kept.len(),
         };
@@ -159,7 +171,7 @@ pub fn band_cells<R: LineRun>(
         }
     }
     if let Some(why) = long_or_prose(&texts) {
-        return Cells::Refused(why);
+        return BandCells::Refused(why);
     }
     let cell = || CellOut {
         runs: Vec::new(),
@@ -182,7 +194,7 @@ pub fn band_cells<R: LineRun>(
             }
         }
     }
-    Cells::Table(TableOut {
+    BandCells::Table(TableOut {
         rows: out,
         header_rows: 1,
         ..TableOut::default()

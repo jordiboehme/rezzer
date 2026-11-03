@@ -9,8 +9,8 @@ use std::collections::HashSet;
 use layoutregions::PrimId;
 use layoutregions::segment::Segment;
 
+use layoutregions::extract::table::TableOut;
 use layoutregions::extract::table::grid::{self, Piece, Shape, amount, columns_of, grid_cells};
-use layoutregions::extract::table::{Cells, TableOut};
 
 use super::*;
 use crate::layout::{ColumnLine, Columns, Gaps, Slot, address_columns};
@@ -553,14 +553,7 @@ pub(super) fn borderless(
             } else {
                 3
             };
-            let cells = match grid_cells(&flow.runs, pieces, rows_needed, table_caption) {
-                Cells::Table(grid) => Ok(grid),
-                Cells::Refused(why) => Err(why),
-                // Lines without rules neither count squares nor look at the clock.
-                Cells::TooLarge { .. } | Cells::Stopped => {
-                    unreachable!("grid_cells builds or refuses")
-                }
-            };
+            let cells = grid_cells(&flow.runs, pieces, rows_needed, table_caption);
             let verdict = cells.and_then(|grid| {
                 if figure_caption {
                     return Err("a figure caption stands next to it");
@@ -626,7 +619,7 @@ pub(super) fn borderless(
                         titled.push(claim.len());
                     }
                     if !grid.cuts.is_empty() {
-                        title_cuts.push((claim.len(), grid.cuts.clone()));
+                        title_cuts.push((claim.len(), grid.cuts));
                     }
                     claim.push(planned);
                 }

@@ -550,32 +550,13 @@ fn caption(text: &str) -> Option<bool> {
     .then_some(table)
 }
 
-/// One line of the flow: the range of its runs and its baseline and size.
-#[derive(Debug, Clone, Copy)]
-struct FlowLine {
-    start: usize,
-    end: usize,
-    y: f32,
-    size: f32,
-}
+/// One line of the flow: the range of its runs and its baseline and size (see
+/// [`table::RunRange`]).
+type FlowLine = table::RunRange;
 
+/// The lines of the flow (see [`table::run_ranges`]).
 fn flow_lines(flow: &Flow) -> Vec<FlowLine> {
-    let mut out: Vec<FlowLine> = Vec::new();
-    for (i, r) in flow.runs.iter().enumerate() {
-        match out.last_mut() {
-            Some(l) if flow.runs[l.start].line == r.line => {
-                l.end = i + 1;
-                l.size = l.size.max(r.size);
-            }
-            _ => out.push(FlowLine {
-                start: i,
-                end: i + 1,
-                y: r.y,
-                size: r.size.max(1.0),
-            }),
-        }
-    }
-    out
+    table::run_ranges(&flow.runs)
 }
 
 /// The caption kinds next to a box: the line of a table caption (the first found), and

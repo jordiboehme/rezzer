@@ -5,9 +5,8 @@
 //! Tables under a header band: a row of drawn cells (filled or framed) with column titles,
 //! and below it lines of text without rules that stand in the band's columns.
 
-use layoutregions::extract::table::Cells;
 use layoutregions::extract::table::banded::{
-    BAND_EDGE, BODY_GAP, BodyLine, band_cells, band_titles, body_pieces,
+    BAND_EDGE, BODY_GAP, BandCells, BodyLine, band_cells, band_titles, body_pieces,
 };
 use layoutregions::segment::drawn::Line;
 
@@ -181,8 +180,8 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
     };
     // Its cells (see `band_cells`), or why there are none.
     let table = match band_cells(&flow.runs, &head, &titles, xs, (&body, misfit)) {
-        Cells::Table(table) => table,
-        Cells::TooLarge { rows, cols } => {
+        BandCells::Table(table) => table,
+        BandCells::TooLarge { rows, cols } => {
             take.skipped.push(format!(
                 "a table of {rows} by {cols} cells under a header band on page {} is not read \
                  as a table: it has more than {MAX_SQUARES} cells; its text stays paragraphs",
@@ -191,11 +190,10 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
             hold(take);
             return;
         }
-        Cells::Refused(why) => {
+        BandCells::Refused(why) => {
             refuse(why, take);
             return;
         }
-        Cells::Stopped => return,
     };
     let bottom = body.last().map_or(b[1], |l| l.0 - 0.25 * l.1);
     let sizes: Vec<f32> = body.iter().map(|l| l.1).collect();
