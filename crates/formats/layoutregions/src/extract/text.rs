@@ -9,23 +9,21 @@
 //! walk whose steps depend on each other: a marker line ends a paragraph, a heading ends an
 //! item, a list item joins the one before it, and line breaks look at the lines around a
 //! block. [`next_block`] is one step of that walk; the reader keeps the loop (and its stop
-//! check) and builds the blocks' text from its own runs. Tasks 16 and 19 split this walk into
-//! the typers' decisions and one extractor per kind.
+//! check) and builds the blocks' text from its own runs. The typers of text regions
+//! read the walk of a segment's lines; Task 19 decides whether the extractors split it.
 //!
 //! Every function works on the lines of the reader's own runs (see [`LineRun`]), borrowed,
 //! and returns line indexes into the slice it is given.
 
-use crate::file::{HEADING_PLAIN_RATIO, data_only};
+pub mod title;
+
+use crate::file::{HEADING_PLAIN_RATIO, Levels, data_only};
 use crate::line::{EDGE, GAP_RATIO, LABEL_STEP, LineRun, PIECE_GAP, SIZE_SLACK, TextLine, ink};
 
 /// What the walk over a page's lines needs besides the lines.
-pub struct TextCx<'a, R> {
-    /// The body size of the file.
-    pub body_size: f32,
-    /// The heading level of a line, `None` for body text.
-    pub heading_level: &'a dyn Fn(&TextLine<'_, R>) -> Option<u8>,
-    /// Whether a text ends in an amount (`Gesamtbetrag 1.234,56 EUR`).
-    pub ends_in_amount: &'a dyn Fn(&str) -> bool,
+pub struct TextCx<'a> {
+    /// The heading levels of lines, with the body size and the reading of amounts.
+    pub levels: &'a Levels<'a>,
     /// The block of its own each line stands in, if the reader read one (a cell of a row of
     /// fields read cell by cell), one per line of the lines walked: a line goes on the line
     /// before it only in the same block.
@@ -38,11 +36,11 @@ pub enum TextBlock {
     /// A line with no text: no block.
     Empty,
     /// Lines of a heading of `level`. A `demoted` heading reads as a paragraph (an address,
-    /// sentences, lines of their own) and keeps a line break before each line `breaks` names
-    /// (page, line; sorted).
+    /// sentences, lines of their own; see [`Demotion`]) and keeps a line break before each
+    /// line `breaks` names (page, line; sorted).
     Heading {
         level: u8,
-        demoted: bool,
+        demoted: Option<Demotion>,
         breaks: Vec<(u32, u32)>,
     },
     /// A list item: its marker takes the first `cut` bytes of the trimmed text of its first
@@ -63,14 +61,15 @@ pub fn next_block<R: LineRun>(
     lines: &[TextLine<'_, R>],
     i: usize,
     open_list: bool,
-    cx: &TextCx<'_, R>,
+    cx: &TextCx<'_>,
 ) -> (TextBlock, usize) {
     debug_assert_eq!(cx.block.len(), lines.len(), "one block key per line");
     let l = &lines[i];
     if l.text.is_empty() {
         return (TextBlock::Empty, i + 1);
     }
-    let heading_level = cx.heading_level;
+    let levels = cx.levels;
+    let heading_level = |l: &TextLine<'_, R>| levels.level(l);
     // A line goes on the line before it only in the same block of its own.
     let goes_on =
         |p: usize, c: usize| continues(&lines[p], &lines[c]) && cx.block[p] == cx.block[c];
@@ -91,26 +90,18 @@ pub fn next_block<R: LineRun>(
         (!(found.0 && digits >= 3 && mid_sentence)).then_some(found)
     };
     if let Some(level) = heading_level(l) {
-        let (j, heading) = heading_block(
-            lines,
-            i,
-            level,
-            heading_level,
-            cx.body_size,
-            cx.ends_in_amount,
-        );
+        let (j, demoted) = heading_block(lines, i, level, levels);
         let j = (i + 1..j)
             .find(|&k| cx.block[k] != cx.block[i])
             .unwrap_or(j);
-        let breaks = if heading {
-            Vec::new()
-        } else {
-            line_breaks(lines, i, j, cx.ends_in_amount)
+        let breaks = match demoted {
+            None => Vec::new(),
+            Some(_) => line_breaks(lines, i, j, levels.ends_in_amount),
         };
         return (
             TextBlock::Heading {
                 level,
-                demoted: !heading,
+                demoted,
                 breaks,
             },
             j,
@@ -146,7 +137,7 @@ pub fn next_block<R: LineRun>(
     {
         j += 1;
     }
-    let breaks = line_breaks(lines, i, j, cx.ends_in_amount);
+    let breaks = line_breaks(lines, i, j, levels.ends_in_amount);
     (TextBlock::Paragraph { breaks }, j)
 }
 
@@ -269,18 +260,34 @@ fn padded_mark<R: LineRun>(line: &TextLine<'_, R>) -> bool {
         && next.x() - (mark.x() + mark.w()) > PIECE_GAP * mark.size().max(next.size())
 }
 
+/// Why the lines of a heading size read as a paragraph (see [`heading_block`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Demotion {
+    /// Two of its lines are short items of one column or fields in the same two faces (see
+    /// [`lines_apart`]).
+    LinesApart,
+    /// A line of its column does not go on in the next as wrapped text (see [`wraps`]).
+    Unwrapped,
+    /// Its lines each stand in pieces apart by a cell gap: cells of columns.
+    Cells,
+    /// It is a little larger than the body and has the shape of an address at one left edge.
+    Address,
+    /// It is a little larger than the body and reads as sentences.
+    Sentences,
+}
+
 /// The heading that starts at line `i` of `all`, a line of `level`: the end of its lines
-/// (each after the first of `level` and going on the one before), and whether they are a
-/// heading. Bold lines a little larger than the body (`body_size`) that read as an address
-/// or as sentences are a paragraph: the address of an invoice, its closing words.
+/// (each after the first of `level` and going on the one before), and why they are no
+/// heading, `None` when they are one. Bold lines a little larger than the body that read as an
+/// address or as sentences are a paragraph: the address of an invoice, its closing words.
 pub fn heading_block<R: LineRun>(
     all: &[TextLine<'_, R>],
     i: usize,
     level: u8,
-    heading_level: &dyn Fn(&TextLine<'_, R>) -> Option<u8>,
-    body_size: f32,
-    ends_in_amount: &dyn Fn(&str) -> bool,
-) -> (usize, bool) {
+    levels: &Levels<'_>,
+) -> (usize, Option<Demotion>) {
+    let heading_level = |l: &TextLine<'_, R>| levels.level(l);
+    let (body_size, ends_in_amount) = (levels.body_size, levels.ends_in_amount);
     let mut j = i + 1;
     while j < all.len() && heading_level(&all[j]) == Some(level) && continues(&all[j - 1], &all[j])
     {
@@ -344,16 +351,32 @@ pub fn heading_block<R: LineRun>(
         .any(|l| l.text.starts_with(char::is_lowercase))
         || block.last().is_some_and(|l| l.text.ends_with('.'));
     let pieced = |l: &TextLine<'_, R>| !full && !prose && cell_gaps(l) > 0;
-    let apart = (1..block.len()).any(|k| lines_apart(block, k, items))
-        || wraps(column, &ink_edges(column), ends_in_amount).contains(&false)
-        || (block.len() >= 2 && block.iter().all(pieced));
-    if (small || column.len() >= 3 || block.iter().all(pieced)) && apart {
-        return (j, false);
+    let apart = if (1..block.len()).any(|k| lines_apart(block, k, items)) {
+        Some(Demotion::LinesApart)
+    } else if wraps(column, &ink_edges(column), ends_in_amount).contains(&false) {
+        Some(Demotion::Unwrapped)
+    } else if block.len() >= 2 && block.iter().all(pieced) {
+        Some(Demotion::Cells)
+    } else {
+        None
+    };
+    if (small || column.len() >= 3 || block.iter().all(pieced))
+        && let Some(why) = apart
+    {
+        return (j, Some(why));
     }
     let texts: Vec<&str> = block.iter().map(|l| l.text.as_str()).collect();
     let one_edge = block.iter().all(|b| (b.x - first.x).abs() <= EDGE);
-    let paragraph = small && ((address_shaped(&texts) && one_edge) || sentences(block));
-    (j, !paragraph)
+    let demoted = if !small {
+        None
+    } else if address_shaped(&texts) && one_edge {
+        Some(Demotion::Address)
+    } else if sentences(block) {
+        Some(Demotion::Sentences)
+    } else {
+        None
+    };
+    (j, demoted)
 }
 
 /// Whether the line `k` of `block` (a paragraph or a heading) starts after a line break

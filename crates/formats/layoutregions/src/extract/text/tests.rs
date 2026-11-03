@@ -29,10 +29,7 @@ fn run(text: &str, line: u32, y: f32, size: f32) -> TextRun {
 
 /// The blocks of `lines` as a reader walks them: the list stays open after an item, a heading
 /// or a paragraph closes it, a line without text leaves it as it is.
-fn walk(
-    lines: &[TextLine<'_, TextRun>],
-    cx: &TextCx<'_, TextRun>,
-) -> Vec<(TextBlock, Range<usize>)> {
+fn walk(lines: &[TextLine<'_, TextRun>], cx: &TextCx<'_>) -> Vec<(TextBlock, Range<usize>)> {
     let mut out = Vec::new();
     let mut open = false;
     let mut i = 0;
@@ -52,6 +49,16 @@ fn walk(
 
 fn no_amount(_: &str) -> bool {
     false
+}
+
+/// Heading levels against a body of 10 points, with the heading sizes `heading_sizes`.
+fn levels(heading_sizes: &[f32]) -> Levels<'_> {
+    Levels {
+        body_size: 10.0,
+        heading_sizes,
+        text_sizes: &[],
+        ends_in_amount: &no_amount,
+    }
 }
 
 #[test]
@@ -176,9 +183,7 @@ fn a_list_between_paragraphs() {
     let lines = text_lines(&runs);
     let block = vec![None; lines.len()];
     let cx = TextCx {
-        body_size: 10.0,
-        heading_level: &|_| None,
-        ends_in_amount: &no_amount,
+        levels: &levels(&[]),
         block: &block,
     };
     assert_eq!(
@@ -224,11 +229,8 @@ fn extractors_return_every_prim_once() {
     // The last line stands in a block of its own the table pass read.
     let mut block = vec![None; lines.len()];
     block[7] = Some(0);
-    let heading = |l: &TextLine<'_, TextRun>| (l.size >= 14.0).then_some(1);
     let cx = TextCx {
-        body_size: 10.0,
-        heading_level: &heading,
-        ends_in_amount: &no_amount,
+        levels: &levels(&[16.0]),
         block: &block,
     };
     let blocks = walk(&lines, &cx);
@@ -247,7 +249,7 @@ fn extractors_return_every_prim_once() {
             (
                 TextBlock::Heading {
                     level: 1,
-                    demoted: false,
+                    demoted: None,
                     breaks: Vec::new()
                 },
                 0..1
@@ -276,15 +278,13 @@ fn extractors_return_every_prim_once() {
     );
 }
 
-/// The blocks of `runs` with no blocks of their own, headings from 11 points up.
+/// The blocks of `runs` with no blocks of their own, on a body of 10 points with headings of
+/// 16 and 12 points.
 fn blocks_of(runs: &[TextRun]) -> Vec<(TextBlock, Range<usize>)> {
     let lines = text_lines(runs);
     let block = vec![None; lines.len()];
-    let heading = |l: &TextLine<'_, TextRun>| (l.size >= 11.0).then_some(2);
     let cx = TextCx {
-        body_size: 10.0,
-        heading_level: &heading,
-        ends_in_amount: &no_amount,
+        levels: &levels(&[16.0, 12.0]),
         block: &block,
     };
     walk(&lines, &cx)
@@ -328,7 +328,7 @@ fn a_small_bold_address_is_no_heading() {
         [(
             TextBlock::Heading {
                 level: 2,
-                demoted: true,
+                demoted: Some(Demotion::LinesApart),
                 breaks: vec![(0, 1), (0, 2)]
             },
             0..3
@@ -359,5 +359,35 @@ fn a_bold_title_under_a_block_stands_alone() {
             ),
             (TextBlock::Paragraph { breaks: Vec::new() }, 2..3),
         ]
+    );
+}
+
+/// The address branch of [`heading_block`]: bold lines a little larger than the body that
+/// share a left edge and have the shape of an address read as a paragraph. It is reached only
+/// where the column over the block (a line a box cut off it) is no list of short items, so
+/// that no pair of lines is apart, and every line wraps.
+#[test]
+fn an_address_under_a_line_of_prose_is_demoted_as_an_address() {
+    let bold = |text: &str, line: u32, y: f32| TextRun {
+        bold: true,
+        ..run(text, line, y, 12.0)
+    };
+    let runs = vec![
+        bold("die Firma liefert die Ware an", 0, 714.0),
+        bold("Muster GmbH", 1, 700.0),
+        bold("Musterweg 1", 2, 686.0),
+        bold("12345 Musterstadt", 3, 672.0),
+    ];
+    let lines = text_lines(&runs);
+    let levels = levels(&[16.0, 12.0]);
+    assert_eq!(levels.level(&lines[1]), Some(2));
+    assert_eq!(
+        heading_block(&lines, 1, 2, &levels),
+        (4, Some(Demotion::Address))
+    );
+    // Without the line over it the short lines are apart: the same block is demoted for that.
+    assert_eq!(
+        heading_block(&lines[1..], 0, 2, &levels),
+        (3, Some(Demotion::LinesApart))
     );
 }

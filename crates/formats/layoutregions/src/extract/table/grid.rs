@@ -13,6 +13,7 @@ use super::{
     numeric,
 };
 use crate::extract::text::signed_amount;
+use crate::file::CURRENCIES;
 use crate::line::LineRun;
 
 /// Share of the rows of a table without rules whose pieces stay inside the columns.
@@ -485,10 +486,6 @@ pub enum Shape {
     /// Letters and no digits (`Std`, `Stk`).
     Text,
 }
-
-/// Currency signs and codes a number may have before or after it. (`file::CURRENCIES` holds
-/// the same words in another order; Task 16 makes them one list.)
-const CURRENCIES: [&str; 7] = ["\u{20ac}", "$", "\u{a3}", "EUR", "USD", "GBP", "CHF"];
 
 impl Shape {
     /// The shape of `text`; none for a value with digits in a form none of the shapes knows

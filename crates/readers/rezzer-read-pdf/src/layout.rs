@@ -22,15 +22,12 @@ use rezzer_model::{Anchor, Block, Cell, Inline, LossReason, SectionKind, Severit
 
 use layoutregions::GapIn;
 use layoutregions::extract::text::{
-    TextBlock, TextCx, continues, heading_block, list_marker, next_block, signed_amount,
+    TextBlock, TextCx, continues, list_marker, next_block, signed_amount,
 };
 #[cfg(doc)]
 use layoutregions::file::FileFacts;
-use layoutregions::file::{self, Band, FilePage, HEADING_PLAIN_RATIO, HEADING_RATIO, RunningIndex};
-use layoutregions::line::{
-    EDGE, GAP_RATIO, LineRun, SIZE_SLACK, TextLine, apart, ink, size_key, text_line as line,
-    text_lines as lines,
-};
+use layoutregions::file::{self, Band, FilePage, Levels, RunningIndex, SIZE_LEVELS};
+use layoutregions::line::{EDGE, LineRun, TextLine, apart, text_line as line, text_lines as lines};
 use layoutregions::segment::drawn::{DrawnStructure, Grids, Unsearched};
 use layoutregions::{InOrder, PageRegions, find_in_order};
 
@@ -45,9 +42,7 @@ mod shape;
 pub(crate) use finders::PageCx;
 
 pub(crate) use head::{Dates, PageDate, TITLE_FROM, document_date, page_dates};
-pub(crate) use layoutregions::extract::text::address_shaped;
 use shape::ends_in_amount;
-pub(crate) use shape::{page_text_sizes, page_text_sizes_of};
 
 use layoutregions::extract::pairs::blocks::address_block;
 
@@ -210,9 +205,6 @@ impl UriTarget {
     }
 }
 
-/// Deepest heading level the font size rule gives.
-const SIZE_LEVELS: usize = 3;
-
 /// One page as the file pass sees it: its runs, borrowed, and the height of their frame.
 pub(crate) type PageText<'a> = FilePage<'a, Run>;
 
@@ -316,25 +308,15 @@ impl Style {
         file::two_page_line(line, height, &self.two_page)
     }
 
-    /// The heading level of an untagged line, `None` for body text.
-    fn heading_level(&self, line: &Line<'_>) -> Option<u8> {
-        if !file::may_head(line, self.body_size, &ends_in_amount) {
-            return None;
+    /// The heading levels of the untagged lines of a page whose text is set in `text_sizes`
+    /// (see [`Levels::level`]).
+    fn levels<'a>(&'a self, text_sizes: &'a [f32]) -> Levels<'a> {
+        Levels {
+            body_size: self.body_size,
+            heading_sizes: &self.heading_sizes,
+            text_sizes,
+            ends_in_amount: &ends_in_amount,
         }
-        // A size the style pass did not see as a heading size (its line there held a smaller
-        // cell beside it, which a table took later) takes its place among the sizes.
-        let key = size_key(line.size);
-        let index = self
-            .heading_sizes
-            .iter()
-            .position(|s| size_key(*s) == key)
-            .unwrap_or_else(|| {
-                self.heading_sizes
-                    .iter()
-                    .filter(|s| size_key(**s) > key)
-                    .count()
-            });
-        Some(index.min(SIZE_LEVELS - 1) as u8 + 1)
     }
 }
 
@@ -849,12 +831,8 @@ fn page_blocks_until(
     let (title, dates) = match page {
         1 => {
             let text = lines(&flow.runs);
-            let title = head::page_title(
-                &text,
-                &heading_of(cx.style, &text_sizes),
-                height,
-                cx.style.body_size,
-            );
+            let title =
+                head::page_title(&text, &cx.style.levels(&text_sizes), height).map(|t| t.text);
             // Every table of the page, its rows as the text of their cells.
             let tables: Vec<head::Table> = placed
                 .iter()
@@ -2221,7 +2199,7 @@ fn span(flow: &[Run], block: &[Line<'_>]) -> Range<usize> {
 
 /// Lays out the runs of an untagged page (`ids` their ids, if they are the page's flow) as
 /// headings, lists and paragraphs, block by block as [`next_block`] reads them: headings by
-/// size (a line in one of the page's `text_sizes`, or less than [`HEADING_RATIO`] times the
+/// size (a line in one of the page's `text_sizes`, or less than [`file::HEADING_RATIO`] times the
 /// largest of them, is no heading), lists by marker, paragraphs by gaps.
 fn untagged(
     flow: &[Run],
@@ -2231,7 +2209,7 @@ fn untagged(
     cx: &Context<'_>,
     out: &mut Built,
 ) {
-    let heading_level = heading_of(cx.style, text_sizes);
+    let levels = cx.style.levels(text_sizes);
     let all = lines(flow);
     // The block of its own a line stands in, if the table pass read one (see
     // [`Slot::Block`]). A line's runs are a slice of `flow`, so its first run's place is
@@ -2246,9 +2224,7 @@ fn untagged(
         )
         .collect();
     let text = TextCx {
-        body_size: cx.style.body_size,
-        heading_level: &heading_level,
-        ends_in_amount: &ends_in_amount,
+        levels: &levels,
         block: &block,
     };
     let mut i = 0;
@@ -2264,7 +2240,7 @@ fn untagged(
             }
             TextBlock::Heading {
                 level,
-                demoted: false,
+                demoted: None,
                 ..
             } => out.heading(level, runs(), cx),
             TextBlock::Heading { breaks, .. } | TextBlock::Paragraph { breaks } => {
@@ -2290,21 +2266,6 @@ fn untagged(
         open_list = None;
         out.own(ids, span(flow, &all[i..j]));
         i = j;
-    }
-}
-
-/// The heading level of an untagged line on a page whose text is set in `text_sizes`: none
-/// for a line in one of them, or less than [`HEADING_RATIO`] times the largest of them.
-fn heading_of<'s>(
-    style: &'s Style,
-    text_sizes: &'s [f32],
-) -> impl Fn(&Line<'_>) -> Option<u8> + 's {
-    let largest = text_sizes.last().copied();
-    move |l: &Line<'_>| {
-        style.heading_level(l).filter(|_| {
-            !text_sizes.iter().any(|s| size_key(*s) == size_key(l.size))
-                && largest.is_none_or(|b| l.size >= b * HEADING_RATIO)
-        })
     }
 }
 
@@ -2732,28 +2693,6 @@ mod tests {
         assert_eq!(room.left.get(), 1_000 - (1 + 3 + 1 + LINK_COST));
         assert!(room.take(&UriTarget::new("\u{1}"), 1));
         assert_eq!(room.left.get(), 1_000 - (5 + LINK_COST) - (6 + LINK_COST));
-    }
-
-    /// Fix round 2 of Task 13, item 2: a heading whose size the style pass did not see as a
-    /// heading size (its line there held a smaller cell beside it) gets the level of its size
-    /// among the heading sizes, not the deepest level: a title larger than all but one heading
-    /// size is level 2.
-    #[test]
-    fn a_heading_size_not_seen_takes_its_place_among_the_sizes() {
-        let style = Style {
-            body_size: 7.0,
-            heading_sizes: vec![20.0, 12.0],
-            ..Style::default()
-        };
-        let runs = [run("Rechnung", 0, 690.0, 14.0)];
-        assert_eq!(style.heading_level(&line(&runs)), Some(2));
-        let runs = [run("Rechnung", 0, 690.0, 24.0)];
-        assert_eq!(style.heading_level(&line(&runs)), Some(1));
-        // A size seen keeps its place; one smaller than all is the deepest level.
-        let runs = [run("Rechnung", 0, 690.0, 12.0)];
-        assert_eq!(style.heading_level(&line(&runs)), Some(2));
-        let runs = [run("Rechnung", 0, 690.0, 11.0)];
-        assert_eq!(style.heading_level(&line(&runs)), Some(3));
     }
 
     #[test]

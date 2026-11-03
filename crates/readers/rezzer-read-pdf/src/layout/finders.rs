@@ -20,8 +20,8 @@ use layoutregions::{
 use rezzer_model::{Block, LossReason, Severity};
 
 use super::{
-    Band, Built, Context, Drawn, Flow, Placed, Run, Slot, footnotes, lines, page_text_sizes_of,
-    refused_quietly, time_over,
+    Band, Built, Context, Drawn, Flow, Placed, Run, Slot, footnotes, lines, refused_quietly,
+    time_over,
 };
 use crate::engine;
 use crate::tables::{self, BoxTitle, Detector, Doubts, Planned};
@@ -80,7 +80,7 @@ pub(super) fn text_sizes(p: &PageCx<'_>) -> Vec<f32> {
         .iter()
         .filter(|l| p.cx.style.two_page_line(l, p.height))
         .flat_map(|l| l.runs.iter());
-    page_text_sizes_of(p.flow.runs.iter().chain(two_page))
+    layoutregions::file::text_sizes(p.flow.runs.iter().chain(two_page))
 }
 
 /// The box of the runs, pictures and codes `prims` of `page`: a run's box reaches from its

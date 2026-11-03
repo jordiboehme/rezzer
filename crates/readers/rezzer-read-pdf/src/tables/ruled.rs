@@ -1092,7 +1092,7 @@ fn strip_tables(
 ) {
     let mut strip_claims = vec![None; flow.runs.len()];
     let mut bodies = Vec::new();
-    let text_sizes = crate::layout::page_text_sizes(&flow.runs);
+    let text_sizes = layoutregions::file::text_sizes(&flow.runs);
     field_strips(
         page,
         flow,

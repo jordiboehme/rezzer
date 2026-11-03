@@ -265,6 +265,95 @@ pub fn data_only(text: &str) -> bool {
     digit
 }
 
+/// Deepest heading level the font size rule gives.
+pub const SIZE_LEVELS: usize = 3;
+
+/// A size that sets at least this share of a page's ink characters is a text size there.
+const TEXT_SHARE: f32 = 0.25;
+
+/// A size that sets at least this many ink characters of a page is a text size there.
+const PAGE_BODY_CHARS: usize = 400;
+
+/// A size is a text size by its share only when it sets ink on at least this many lines: the
+/// title of a cover page with little else on it stays a heading.
+const SHARE_LINES: usize = 3;
+
+/// The text sizes of a page, smallest first: every size that sets at least [`TEXT_SHARE`] of
+/// its ink characters on [`SHARE_LINES`] lines or more, or at least [`PAGE_BODY_CHARS`] of
+/// them. A line in one of them is body text on that page, never a heading: the data lines of
+/// a form set beside many small labels, or the back of a form printed in larger type, are
+/// text. The caller picks the runs: a page's text without its running lines and its legend,
+/// with the footers of the two-page rule.
+pub fn text_sizes<'r, R: LineRun + 'r>(runs: impl IntoIterator<Item = &'r R>) -> Vec<f32> {
+    // For each size: its ink characters and the lines it sets ink on.
+    let mut chars: HashMap<i32, (usize, HashSet<u32>)> = HashMap::new();
+    for r in runs {
+        let n = ink(r.text());
+        if n > 0 {
+            let e = chars.entry(size_key(r.size())).or_default();
+            e.0 += n;
+            e.1.insert(r.line());
+        }
+    }
+    let total: usize = chars.values().map(|c| c.0).sum();
+    let mut sizes: Vec<i32> = chars
+        .into_iter()
+        .filter(|(_, (n, at))| {
+            (at.len() >= SHARE_LINES && *n as f32 >= TEXT_SHARE * total as f32)
+                || *n >= PAGE_BODY_CHARS
+        })
+        .map(|(size, _)| size)
+        .collect();
+    sizes.sort_unstable();
+    sizes.into_iter().map(|s| s as f32 / 2.0).collect()
+}
+
+/// What the heading level of an untagged line depends on: the file's body and heading sizes
+/// (see [`FileFacts`]), the text sizes of its page (see [`text_sizes`]) and the reader's
+/// reading of amounts.
+#[derive(Clone, Copy)]
+pub struct Levels<'a> {
+    pub body_size: f32,
+    /// The heading sizes of the file, largest first (see [`FileFacts::heading_sizes`]).
+    pub heading_sizes: &'a [f32],
+    /// The text sizes of the page, smallest first; empty where no page is looked at.
+    pub text_sizes: &'a [f32],
+    /// Whether a text ends in an amount (`Gesamtbetrag 1.234,56 EUR`), the reader's own
+    /// reading of amounts and dates.
+    pub ends_in_amount: &'a dyn Fn(&str) -> bool,
+}
+
+impl Levels<'_> {
+    /// The heading level of an untagged line, `None` for body text: a line that may head (see
+    /// [`may_head`]) takes the place of its size among the heading sizes, at most
+    /// [`SIZE_LEVELS`]. It is none on a page whose text is set in its size, or when it is less
+    /// than [`HEADING_RATIO`] times the largest text size of the page.
+    pub fn level<R: LineRun>(&self, line: &TextLine<'_, R>) -> Option<u8> {
+        if !may_head(line, self.body_size, self.ends_in_amount) {
+            return None;
+        }
+        let key = size_key(line.size);
+        let largest = self.text_sizes.last().copied();
+        let page_text = self.text_sizes.iter().any(|s| size_key(*s) == key);
+        if page_text || !largest.is_none_or(|b| line.size >= b * HEADING_RATIO) {
+            return None;
+        }
+        // A size the file pass did not see as a heading size (its line there held a smaller
+        // cell beside it, which a table took later) takes its place among the sizes.
+        let index = self
+            .heading_sizes
+            .iter()
+            .position(|s| size_key(*s) == key)
+            .unwrap_or_else(|| {
+                self.heading_sizes
+                    .iter()
+                    .filter(|s| size_key(**s) > key)
+                    .count()
+            });
+        Some(index.min(SIZE_LEVELS - 1) as u8 + 1)
+    }
+}
+
 /// One page as [`learn`] reads it: its number, the height of the frame its runs are in, and
 /// its runs in line order, borrowed.
 #[derive(Debug, Clone, Copy)]
@@ -794,5 +883,76 @@ mod tests {
             index.bands(&text_lines(&inside), 842.0, &[]),
             [Some(Band::Top)]
         );
+    }
+
+    #[test]
+    fn text_sizes_of_a_page() {
+        // 800 ink characters of labels, 300 of data lines with padding on 3 lines, 20 of a
+        // title.
+        let data = |line: u32| {
+            let text = format!("{}{}", "b".repeat(100), " ".repeat(300));
+            run(&text, line, 690.0 - 10.0 * line as f32, 9.5)
+        };
+        let runs = [
+            run(&"a".repeat(800), 0, 700.0, 6.0),
+            data(1),
+            data(2),
+            data(3),
+            run(&"c".repeat(20), 4, 640.0, 14.0),
+        ];
+        assert_eq!(text_sizes(&runs), [6.0, 9.5]);
+        // 400 ink characters make a text size also under a quarter of the page.
+        let runs = [
+            run(&"a".repeat(2000), 0, 700.0, 6.0),
+            run(&"b".repeat(400), 1, 680.0, 9.5),
+        ];
+        assert_eq!(text_sizes(&runs), [6.0, 9.5]);
+        // A cover page: a title of one line sets half of the little text there is, and is no
+        // text size.
+        let runs = [
+            run(&"a".repeat(30), 0, 700.0, 24.0),
+            run(&"b".repeat(10), 1, 600.0, 10.0),
+            run(&"b".repeat(10), 2, 590.0, 10.0),
+            run(&"b".repeat(10), 3, 580.0, 10.0),
+        ];
+        assert_eq!(text_sizes(&runs), [10.0]);
+    }
+
+    /// Fix round 2 of Task 13, item 2: a heading whose size the file pass did not see as a
+    /// heading size (its line there held a smaller cell beside it) gets the level of its size
+    /// among the heading sizes, not the deepest level: a title larger than all but one heading
+    /// size is level 2.
+    #[test]
+    fn a_heading_size_not_seen_takes_its_place_among_the_sizes() {
+        let levels = Levels {
+            body_size: 7.0,
+            heading_sizes: &[20.0, 12.0],
+            text_sizes: &[],
+            ends_in_amount: &no_amount,
+        };
+        let level = |size: f32| levels.level(&text_line(&[run("Rechnung", 0, 690.0, size)]));
+        assert_eq!(level(14.0), Some(2));
+        assert_eq!(level(24.0), Some(1));
+        // A size seen keeps its place; one smaller than all is the deepest level.
+        assert_eq!(level(12.0), Some(2));
+        assert_eq!(level(11.0), Some(3));
+    }
+
+    /// A line set in a text size of its page, or under a heading step over the largest of
+    /// them, is no heading there.
+    #[test]
+    fn page_text_sizes_keep_a_line_body_text() {
+        let levels = |text_sizes: &'static [f32]| Levels {
+            body_size: 7.0,
+            heading_sizes: &[20.0, 12.0],
+            text_sizes,
+            ends_in_amount: &no_amount,
+        };
+        let line = [run("Rechnung", 0, 690.0, 12.0)];
+        let line = text_line(&line);
+        assert_eq!(levels(&[7.0]).level(&line), Some(2));
+        assert_eq!(levels(&[7.0, 12.0]).level(&line), None);
+        assert_eq!(levels(&[7.0, 10.5]).level(&line), None);
+        assert_eq!(levels(&[7.0, 10.0]).level(&line), Some(2));
     }
 }
