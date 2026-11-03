@@ -495,12 +495,13 @@ fn short(flow: &Flow, f: &Field) -> bool {
 
 /// A table of two columns, a label and its value in each row, for `fields` in order; `top` is
 /// its top. An empty value is a grey `empty` status. Every table of labels and values is built
-/// here: drawn boxes, rows of fields between rules and the totals of a column beside a section.
+/// here: drawn boxes, rows of fields between rules and the totals of a column beside a section,
+/// each found `by` its detector.
 pub(super) fn pairs_table(
     flow: &Flow,
     fields: &[&Field],
     top: f32,
-    note: &'static str,
+    (note, by): (&'static str, Detector),
 ) -> Option<Planned> {
     let first = fields
         .iter()
@@ -528,6 +529,7 @@ pub(super) fn pairs_table(
         found_by: Some(note),
         kind: layoutregions::Kind::LabelValue,
         ids: Vec::new(),
+        by,
     })
 }
 

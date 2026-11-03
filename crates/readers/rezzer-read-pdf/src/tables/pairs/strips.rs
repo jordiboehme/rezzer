@@ -1106,7 +1106,7 @@ pub(in crate::tables) fn field_strips(
             read_cells(flow, by_y, &strips[k], busy, apart);
         }
         let top = strips[g[0]].top;
-        let Some(p) = pairs_table(flow, &list, top, STRIP_FOUND_BY) else {
+        let Some(p) = pairs_table(flow, &list, top, (STRIP_FOUND_BY, Detector::Strips)) else {
             continue;
         };
         claim(claimed, tables.len(), &list);

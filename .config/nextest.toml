@@ -5,6 +5,14 @@
 filter = 'binary(hostile) | binary(hostile_render)'
 slow-timeout = { period = "60s", terminate-after = 3 }
 
+# The dump of the generated reads is a manual tool, not a test: it reads every sampled variant
+# (6417 pages) with a time limit of one hour, to compare two builds byte for byte. The 3 minute
+# guard below is for hangs; on a machine loaded by other builds the full dump takes longer, so it
+# gets 20 minutes. It stands first, as the first override that matches a test sets its limit.
+[[profile.default.overrides]]
+filter = 'package(rezzer-read-pdf) & binary(variants) & test(=dump_generated_reads)'
+slow-timeout = { period = "60s", terminate-after = 20 }
+
 # The vision, variants, print_forms and business tests render or read generated pages inside
 # the reader's time limit; some read many pages in one test. One that hangs anyway is reported
 # as slow after 60 seconds and ended after 3 minutes, so it fails the run instead of hanging it.

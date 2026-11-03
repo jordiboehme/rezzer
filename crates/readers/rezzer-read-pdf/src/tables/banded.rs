@@ -54,6 +54,8 @@ pub(super) struct Taken<'a> {
     pub quietly: &'a mut [bool],
     pub tables: &'a mut Vec<Planned>,
     pub skipped: &'a mut Vec<String>,
+    /// Bands refused with a note or a loss: the ids of their runs, and why.
+    pub doubts: &'a mut Vec<(Vec<u32>, &'static str)>,
 }
 
 /// The tables under the header bands of a page, top to bottom. A band is at least three of
@@ -172,6 +174,8 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
             for &i in &head {
                 take.quietly[i] = true;
             }
+            take.doubts
+                .push((head.iter().map(|&i| flow.ids[i]).collect(), why));
         }
         return;
     }
@@ -199,6 +203,8 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
     let refuse = |why: &'static str, take: &mut Taken<'_>| {
         take.refusals.push((at, b[3], why));
         hold(take);
+        take.doubts
+            .push((runs().map(|&i| flow.ids[i]).collect(), why));
     };
     // Rows: see [`row_starts`].
     let mut used: Vec<usize> = body.iter().flat_map(|l| l.2.iter().map(|p| p.0)).collect();
@@ -283,6 +289,8 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
             for &i in runs() {
                 take.quietly[i] = true;
             }
+            take.doubts
+                .push((runs().map(|&i| flow.ids[i]).collect(), why));
         }
         return;
     }
@@ -333,6 +341,7 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
         found_by: None,
         kind: layoutregions::Kind::Table,
         ids: Vec::new(),
+        by: Detector::Banded,
     });
 }
 

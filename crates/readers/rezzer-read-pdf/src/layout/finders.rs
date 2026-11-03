@@ -2,15 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! The first detectors of a page as region finders (see `layoutregions`): tagged tables,
-//! running headers and footers, the footnote legend, underlined titles, box pairs and the
-//! tables without tags, run by [`layoutregions::find_in_order`] in the order and behind the
-//! gates [`super::page_blocks_at`] always had. Each finder offers what its detector took, one
-//! candidate per table, title or band; the arbitration keeps the first claim on a run. After
-//! the layout, the blocks laid out from the runs no finder took, the pictures and the codes of
-//! the page are offered too, so every run of the page is in one region.
+//! The detectors of a page as region finders (see `layoutregions`): tagged tables, running
+//! headers and footers, the footnote legend, underlined titles, box pairs and the tables
+//! without tags, run by [`layoutregions::find_in_order`] in the order and behind the gates
+//! [`super::page_blocks_at`] always had. Each finder offers what its detector took, one
+//! candidate per table, title or band, under the detector's own signal id (see
+//! [`Detector`]); the arbitration keeps the first claim on a run. After the layout, the blocks
+//! laid out from the runs no finder took, the pictures and the codes of the page are offered
+//! too, so every run of the page is in one region; the text of a grid, band or region refused
+//! as a table carries the reason in its regions.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use layoutregions::{
     Bounds, Candidate, Certainty, Finder, InOrder, Kind, Offer, PageIn, PrimId, Score, Signal,
@@ -22,21 +24,22 @@ use super::{
     page_text_sizes_of, refused_quietly, time_over,
 };
 use crate::engine;
-use crate::tables::{self, BoxTitle, Planned};
+use crate::tables::{self, BoxTitle, Detector, Planned};
 
 /// The score of a region a detector found: a detector's claim is not weighed yet.
 const FOUND: u16 = 1000;
 
+/// The signal id of the blocks laid out from the runs no finder took.
+const LINES: &str = "pdf.lines";
+
 /// The `host` of a region no [`Placed`] stands for (a band, a footnote legend).
 pub(super) const NO_PLACED: u32 = u32::MAX;
 
-/// The finders whose regions name a [`Placed`] by `host`.
-pub(super) const PLACED_BY: [&str; 4] = [
-    TaggedTables::ID,
-    UnderlinedTitles::ID,
-    BoxPairs::ID,
-    Untagged::ID,
-];
+/// Whether the regions of the signal `id` name a [`Placed`] by `host`: the tables of every
+/// detector (see [`Detector`]) and the titles.
+pub(super) fn placed_by(id: &str) -> bool {
+    id == UnderlinedTitles::ID || Detector::ALL.iter().any(|d| d.id() == id)
+}
 
 /// What the detectors of one page share while they run: the flow they take runs from, the
 /// tables and titles they place, their notes, and what the page is.
@@ -60,6 +63,9 @@ pub(crate) struct PageCx<'p> {
     /// In a debug build: the runs the tagged tables took and dropped as repeated header rows,
     /// which no region holds.
     pub(super) repeats: Vec<u32>,
+    /// The grids, bands and regions refused as tables whose text stays as it stands: the ids
+    /// of their runs and why (see [`mark_doubts`]).
+    pub(super) doubts: Vec<(Vec<u32>, &'static str)>,
 }
 
 /// The text sizes of a page, counted over all its text but its legend, also what tables take
@@ -161,20 +167,14 @@ fn offer(page: &PageIn, arb: &mut InOrder, c: Option<Candidate>, certainty: Cert
     );
 }
 
-/// Offers a table a detector planned, of its own kind, as the `host`th placed part.
-fn offer_table(
-    page: &PageIn,
-    arb: &mut InOrder,
-    t: &Planned,
-    id: &'static str,
-    host: u32,
-    certainty: Certainty,
-) {
+/// Offers a table a detector planned as the `host`th placed part, under its detector's id and
+/// of the kind its detector gives it (see [`Detector`]).
+fn offer_table(page: &PageIn, arb: &mut InOrder, t: &Planned, host: u32, certainty: Certainty) {
     let c = candidate(
         page,
-        t.kind,
+        t.by.region_kind(t.kind),
         texts(&t.ids),
-        id,
+        t.by.id(),
         t.found_by.unwrap_or(""),
         host,
     );
@@ -197,7 +197,7 @@ fn next_host(p: &PageCx<'_>) -> u32 {
 pub(super) struct TaggedTables;
 
 impl TaggedTables {
-    const ID: &'static str = "pdf.tagged_table";
+    const ID: &'static str = Detector::Tagged.id();
 }
 
 impl Finder<PageCx<'_>> for TaggedTables {
@@ -234,7 +234,7 @@ impl Finder<PageCx<'_>> for TaggedTables {
             );
         }
         for t in found {
-            offer_table(page, arb, &t, Self::ID, next_host(p), Certainty::Exact);
+            offer_table(page, arb, &t, next_host(p), Certainty::Exact);
             p.placed.push(Placed::Table(t));
         }
         for what in cx.tables.take_issues() {
@@ -399,7 +399,7 @@ impl Finder<PageCx<'_>> for UnderlinedTitles {
 pub(super) struct BoxPairs;
 
 impl BoxPairs {
-    const ID: &'static str = "pdf.box_pairs";
+    const ID: &'static str = Detector::BoxPairs.id();
 }
 
 impl Finder<PageCx<'_>> for BoxPairs {
@@ -422,7 +422,7 @@ impl Finder<PageCx<'_>> for BoxPairs {
             &stop,
         );
         for t in found {
-            offer_table(page, arb, &t, Self::ID, next_host(p), Certainty::Rule);
+            offer_table(page, arb, &t, next_host(p), Certainty::Rule);
             p.placed.push(Placed::Table(t));
         }
         for t in titles {
@@ -439,17 +439,34 @@ impl Finder<PageCx<'_>> for BoxPairs {
     }
 }
 
-/// The tables without tags (see `tables::untagged`): grids of drawn rules, then white space
-/// gutters. Each table is one region for now. Only where the geometric detectors run.
-pub(super) struct Untagged;
+/// The tables without tags (see `tables::untagged`), only where the geometric detectors run.
+/// One pass runs their detectors in their order: on the drawn rules the columns of totals
+/// beside ruled sections (`pdf.side_totals`), the sections of ruled grids (`pdf.ruled`), the
+/// header bands (`pdf.banded`) and the rows of fields between rules (`pdf.strips`), whose runs
+/// leave the flow together once all of them have claimed theirs; then the detector without
+/// rules by its classes (`pdf.borderless.*`). The runs of a table are known once they left the
+/// flow, so each table is offered after the pass, under its own detector, in that order.
+pub(super) struct UntaggedTables;
 
-impl Untagged {
-    const ID: &'static str = "pdf.untagged";
+impl UntaggedTables {
+    /// No region has this id: each has its detector's.
+    const NAME: &'static str = "pdf.untagged_tables";
 }
 
-impl Finder<PageCx<'_>> for Untagged {
+/// Where a detector's tables are offered among those of the tables without tags: the
+/// detectors on drawn rules in their order, then the detector without rules, whose classes
+/// are decided region by region down the page.
+fn offer_rank(by: Detector) -> usize {
+    if by.borderless() {
+        Detector::ALL.len()
+    } else {
+        Detector::ALL.iter().position(|d| *d == by).unwrap_or(0)
+    }
+}
+
+impl Finder<PageCx<'_>> for UntaggedTables {
     fn name(&self) -> &'static str {
-        Self::ID
+        Self::NAME
     }
 
     fn find(&mut self, page: &PageIn, p: &mut PageCx<'_>, arb: &mut InOrder) {
@@ -458,13 +475,66 @@ impl Finder<PageCx<'_>> for Untagged {
         };
         let cx = p.cx;
         let stop = || time_over(cx.budget).is_err();
+        // In a debug build: how often each id stands in the flow before the pass, to tell the
+        // runs it cut in pieces.
+        let before: HashMap<u32, usize> = if cfg!(debug_assertions) {
+            counts(p.flow.ids.iter())
+        } else {
+            HashMap::new()
+        };
         let found = tables::untagged(p.page, &mut p.flow, p.drawn, height, &stop);
-        for t in found.tables {
-            offer_table(page, arb, &t, Self::ID, next_host(p), Certainty::Rule);
-            p.placed.push(Placed::Table(t));
+        let cut: HashSet<u32> = if cfg!(debug_assertions) {
+            counts(
+                p.flow
+                    .ids
+                    .iter()
+                    .chain(found.tables.iter().flat_map(|t| &t.ids)),
+            )
+            .into_iter()
+            .filter(|(id, n)| *n > before.get(id).copied().unwrap_or(0))
+            .map(|(id, _)| id)
+            .collect()
+        } else {
+            HashSet::new()
+        };
+        let first = next_host(p);
+        let mut order: Vec<usize> = (0..found.tables.len()).collect();
+        order.sort_by_key(|&k| offer_rank(found.tables[k].by));
+        for k in order {
+            let t = &found.tables[k];
+            let host = first.saturating_add(u32::try_from(k).unwrap_or(NO_PLACED));
+            // A run cut in pieces keeps one id for all of them (`ruled::apply_cuts`): when two
+            // tables took pieces of it, the run is the first table's, the detector on the
+            // drawn rules that cut it. Anything else claimed twice is a refusal.
+            let ids: Vec<u32> = t
+                .ids
+                .iter()
+                .copied()
+                .filter(|&i| {
+                    let taken = arb.is_taken(PrimId::Text(i));
+                    debug_assert!(
+                        !taken || cut.contains(&i),
+                        "page {}: run {i} of a {} table is claimed, but it is not cut",
+                        page.page,
+                        t.by.id()
+                    );
+                    !taken
+                })
+                .collect();
+            let c = candidate(
+                page,
+                t.by.region_kind(t.kind),
+                texts(&ids),
+                t.by.id(),
+                t.found_by.unwrap_or(""),
+                host,
+            );
+            offer(page, arb, c, Certainty::Rule);
         }
+        p.placed.extend(found.tables.into_iter().map(Placed::Table));
         p.placed
             .extend(found.unsure.into_iter().map(Placed::Unsure));
+        p.doubts.extend(found.doubts);
         p.notes.extend(
             found
                 .skipped
@@ -482,6 +552,46 @@ impl Finder<PageCx<'_>> for Untagged {
                 .into_iter()
                 .map(|w| (w, LossReason::Uncertain, Severity::Info)),
         );
+    }
+}
+
+/// How often each id stands in `ids`.
+fn counts<'a>(ids: impl Iterator<Item = &'a u32>) -> HashMap<u32, usize> {
+    let mut out = HashMap::new();
+    for &id in ids {
+        *out.entry(id).or_insert(0) += 1;
+    }
+    out
+}
+
+/// Adds the reason of each grid, band or region refused as a table (`doubts`: the ids of its
+/// runs and why) to the `unsure` notes of the regions laid out from its runs as text, once
+/// each.
+pub(super) fn mark_doubts(regions: &mut layoutregions::PageRegions, doubts: &[(Vec<u32>, &str)]) {
+    if doubts.is_empty() {
+        return;
+    }
+    let mut why_of: HashMap<u32, Vec<&str>> = HashMap::new();
+    for (ids, why) in doubts {
+        for &id in ids {
+            let all = why_of.entry(id).or_default();
+            if !all.contains(why) {
+                all.push(why);
+            }
+        }
+    }
+    for r in &mut regions.regions {
+        if r.signals.first().map(|s| s.id) != Some(LINES) {
+            continue;
+        }
+        for p in &r.prims {
+            let PrimId::Text(id) = p else { continue };
+            for why in why_of.get(id).into_iter().flatten() {
+                if !r.unsure.iter().any(|u| u == why) {
+                    r.unsure.push((*why).to_string());
+                }
+            }
+        }
     }
 }
 
@@ -606,7 +716,7 @@ pub(super) fn offer_rest(
             continue;
         }
         let host = u32::try_from(k).unwrap_or(NO_PLACED);
-        let c = candidate(page, kind_of(block), texts(&ids), "pdf.lines", "", host);
+        let c = candidate(page, kind_of(block), texts(&ids), LINES, "", host);
         offer(page, arb, c, Certainty::Rule);
     }
     for i in 0..page.pictures.len() {

@@ -484,7 +484,7 @@ pub(crate) fn box_pairs(
     for c in &groups {
         let list: Vec<&Field> = c.iter().filter_map(|&b| fields[b].as_ref()).collect();
         let top = c.iter().map(|&b| boxes[b][3]).fold(f32::MIN, f32::max);
-        if let Some(p) = pairs_table(flow, &list, top, BOX_FOUND_BY) {
+        if let Some(p) = pairs_table(flow, &list, top, (BOX_FOUND_BY, Detector::BoxPairs)) {
             claim(&mut target, planned.len(), &list);
             planned.push(p);
         }

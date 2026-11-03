@@ -165,6 +165,8 @@ pub(super) fn borderless(
     // The lines where a region was parted from the one over it: by a blank row before a header
     // of its own or other columns, or by a rule that ends a table.
     let mut parted: HashSet<usize> = HashSet::new();
+    // Of them, the lines where a rule that ends a table parted it: totals under the table.
+    let mut ruled_off: HashSet<usize> = HashSet::new();
     // The first runs of lines of text after a blank row over rows of their region's shape.
     let mut maybe_heads: Vec<usize> = Vec::new();
     let mut i = 0;
@@ -248,6 +250,7 @@ pub(super) fn borderless(
         // their own (totals under line items).
         let rule_end = ended(flow, &lines, (i, last_multi + 1), &found.ends);
         parted.extend(rule_end);
+        ruled_off.extend(rule_end);
         let z = rule_end.unwrap_or(last_multi + 1);
         let mut tail = Tail {
             end: z,
@@ -305,6 +308,8 @@ pub(super) fn borderless(
         // titles of totals over their amounts under a table's end rule) is a table of a header
         // and one row too, or its refusal is said.
         let after_table = std::mem::take(&mut table_over) && parted.contains(&a);
+        // Totals under a table: the lines the rule that ends it parts from it.
+        let totals_under = after_table && ruled_off.contains(&a);
         if g % CHECK_EVERY == CHECK_EVERY - 1 && stop() {
             found.skipped.push(format!(
                 "tables without rules on page {page} are looked for only in part: the time \
@@ -464,6 +469,11 @@ pub(super) fn borderless(
                     found_by: None,
                     kind: layoutregions::Kind::Table,
                     ids: Vec::new(),
+                    by: if totals_under {
+                        Detector::TotalsUnder
+                    } else {
+                        Detector::KeyValues
+                    },
                 });
                 continue;
             }
@@ -569,6 +579,16 @@ pub(super) fn borderless(
                         found_by: None,
                         kind: layoutregions::Kind::Table,
                         ids: Vec::new(),
+                        // The class of the region, in this order where several hold.
+                        by: if totals_under {
+                            Detector::TotalsUnder
+                        } else if headed {
+                            Detector::SideBlocks
+                        } else if aligned {
+                            Detector::LabelsOverValues
+                        } else {
+                            Detector::Grid
+                        },
                     };
                     let t = u32::try_from(claim.len()).unwrap_or(u32::MAX);
                     for (r, cells) in grid.rows.iter().enumerate() {
@@ -652,12 +672,18 @@ pub(super) fn borderless(
             };
             if looks && !said && !quietly {
                 found.quiet.push((lo, why, Refused::Region));
+                found
+                    .doubts
+                    .push((flow.ids[lines[a].start..lines[z - 1].end].to_vec(), why));
             }
         }
         if let (false, Some((why, top, line))) = (taken, refused) {
             // A caption gates one note: a region it gated before said so.
             if !said && !noted.contains(&line) {
                 noted.push(line);
+                found
+                    .doubts
+                    .push((flow.ids[lines[a].start..lines[z - 1].end].to_vec(), why));
                 found.unsure.push(Unsure {
                     at: flow.at[lines[a].start],
                     top,

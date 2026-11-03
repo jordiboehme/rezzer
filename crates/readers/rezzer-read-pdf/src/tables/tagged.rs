@@ -401,6 +401,7 @@ pub(crate) fn tagged(
             found_by: None,
             kind: layoutregions::Kind::Table,
             ids: ids.remove(&t).unwrap_or_default(),
+            by: super::Detector::Tagged,
         });
     }
     (out, fallbacks)

@@ -244,7 +244,7 @@ fn a_cut_run_belongs_to_the_table_that_cut_it() {
         .filter(|r| r.prims.contains(&shared))
         .map(|r| r.signals[0].id)
         .collect();
-    assert_eq!(holders, ["pdf.untagged"]);
+    assert_eq!(holders, ["pdf.strips"]);
 }
 
 /// The ruled pass reads the labels of this strip cell by cell, so their runs move in the flow
@@ -264,7 +264,7 @@ fn region_ids_name_their_runs_on_a_reordered_page() {
             .collect()
     };
     assert_eq!(
-        by("pdf.untagged"),
+        by("pdf.strips"),
         [[
             "Feld A",
             " Feld B",

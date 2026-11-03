@@ -82,6 +82,99 @@ pub(crate) struct Planned {
     /// additions too, in the order taken; a run cut in parts
     /// is listed once per part.
     pub ids: Vec<u32>,
+    /// The detector that found it, which names its region (see [`Detector`]).
+    pub by: Detector,
+}
+
+/// The detector, or the class of a detector, that found a table: its region's signal id and
+/// kind (see `layoutregions`). Each detector sets it where it plans the table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Detector {
+    /// A table of the tag tree.
+    Tagged,
+    /// Drawn boxes of a label over its value.
+    BoxPairs,
+    /// The totals of a column beside the sections of a ruled grid.
+    SideTotals,
+    /// A section of a grid of drawn rules.
+    Ruled,
+    /// A header band of drawn cells and the lines under it.
+    Banded,
+    /// Rows of fields between drawn rules.
+    Strips,
+    /// Without rules: the totals under a table, parted from it by the rule that ends it.
+    TotalsUnder,
+    /// Without rules: a line of titles over one line of values.
+    LabelsOverValues,
+    /// Without rules: blocks side by side under a header row of their headings.
+    SideBlocks,
+    /// Without rules: lines of a label and its value.
+    KeyValues,
+    /// Without rules: any other grid of white space gutters.
+    Grid,
+}
+
+impl Detector {
+    /// Every detector, in the order the page runs them.
+    pub(crate) const ALL: [Detector; 11] = [
+        Detector::Tagged,
+        Detector::BoxPairs,
+        Detector::SideTotals,
+        Detector::Ruled,
+        Detector::Banded,
+        Detector::Strips,
+        Detector::TotalsUnder,
+        Detector::LabelsOverValues,
+        Detector::SideBlocks,
+        Detector::KeyValues,
+        Detector::Grid,
+    ];
+
+    /// The signal id of its regions.
+    pub(crate) const fn id(self) -> &'static str {
+        match self {
+            Detector::Tagged => "pdf.tagged_table",
+            Detector::BoxPairs => "pdf.box_pairs",
+            Detector::SideTotals => "pdf.side_totals",
+            Detector::Ruled => "pdf.ruled",
+            Detector::Banded => "pdf.banded",
+            Detector::Strips => "pdf.strips",
+            Detector::TotalsUnder => "pdf.borderless.totals_under",
+            Detector::LabelsOverValues => "pdf.borderless.labels_over_values",
+            Detector::SideBlocks => "pdf.borderless.side_blocks",
+            Detector::KeyValues => "pdf.borderless.key_values",
+            Detector::Grid => "pdf.borderless.grid",
+        }
+    }
+
+    /// What a table it found of the kind `kind` (see [`Planned::kind`]) is as a region: the
+    /// detectors whose tables are of one kind say it; the others keep the table's own.
+    pub(crate) fn region_kind(self, kind: layoutregions::Kind) -> layoutregions::Kind {
+        use layoutregions::Kind;
+        match self {
+            Detector::SideTotals | Detector::TotalsUnder => Kind::Totals,
+            Detector::LabelsOverValues | Detector::SideBlocks | Detector::KeyValues => {
+                Kind::LabelValue
+            }
+            // A ruled section a column of totals joins keeps its column titles over its rows:
+            // a table, though the layout reads its rows as labels and values.
+            Detector::Ruled | Detector::Banded | Detector::Grid => Kind::Table,
+            Detector::Tagged | Detector::BoxPairs | Detector::Strips => kind,
+        }
+    }
+
+    /// Whether it runs on the tables without rules: its tables come after those of the rules
+    /// in the page's order of detectors, but among them by their place on the page.
+    pub(crate) fn borderless(self) -> bool {
+        matches!(
+            self,
+            Detector::TotalsUnder
+                | Detector::LabelsOverValues
+                | Detector::SideBlocks
+                | Detector::KeyValues
+                | Detector::Grid
+        )
+    }
 }
 
 impl Planned {
@@ -159,6 +252,9 @@ pub(crate) struct Found {
     /// ruled pass puts them so in the flow, each cell's lines together and apart from the next
     /// cell's.
     pub apart: Vec<Vec<Vec<usize>>>,
+    /// Grids, bands and regions refused with a note or a loss that keep their text as it
+    /// stands: the ids of their runs (see [`Flow::ids`]) and why each is no table.
+    pub doubts: Vec<(Vec<u32>, &'static str)>,
 }
 
 /// What a refusal without a note refused.
@@ -674,7 +770,36 @@ mod tests {
             found_by,
             kind,
             ids: Vec::new(),
+            by: Detector::Grid,
         }
+    }
+
+    /// A detector of one kind of table gives its regions that kind; the others keep the
+    /// table's own. A ruled section a column of totals joins is a table region, while the
+    /// layout still reads it as labels and values.
+    #[test]
+    fn region_kinds_by_detector() {
+        use layoutregions::Kind;
+        assert_eq!(
+            Detector::SideTotals.region_kind(Kind::LabelValue),
+            Kind::Totals
+        );
+        assert_eq!(Detector::TotalsUnder.region_kind(Kind::Table), Kind::Totals);
+        assert_eq!(
+            Detector::KeyValues.region_kind(Kind::Table),
+            Kind::LabelValue
+        );
+        assert_eq!(Detector::Ruled.region_kind(Kind::LabelValue), Kind::Table);
+        assert_eq!(
+            Detector::Strips.region_kind(Kind::LabelValue),
+            Kind::LabelValue
+        );
+        assert_eq!(
+            Detector::BoxPairs.region_kind(Kind::LabelValue),
+            Kind::LabelValue
+        );
+        let ids: std::collections::HashSet<&str> = Detector::ALL.iter().map(|d| d.id()).collect();
+        assert_eq!(ids.len(), Detector::ALL.len());
     }
 
     /// Whether a table is one of labels and values is its kind, not the text of its note.

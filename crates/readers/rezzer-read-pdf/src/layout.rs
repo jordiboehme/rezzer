@@ -1060,6 +1060,7 @@ fn page_blocks_until(
         footers: Vec::new(),
         built,
         repeats: Vec::new(),
+        doubts: Vec::new(),
     };
     // The detectors, in their order: each takes the runs it finds out of the flow, so the
     // first claim wins (see the finders for their gates).
@@ -1071,7 +1072,7 @@ fn page_blocks_until(
             &mut finders::Footnotes,
             &mut finders::UnderlinedTitles,
             &mut finders::BoxPairs,
-            &mut finders::Untagged,
+            &mut finders::UntaggedTables,
         ],
         &mut pcx,
         &mut arb,
@@ -1090,6 +1091,7 @@ fn page_blocks_until(
         footers,
         mut built,
         repeats,
+        doubts,
         ..
     } = pcx;
     // Each run left is its id's run or a piece of it; the runs cut in pieces, for the line
@@ -1273,6 +1275,7 @@ fn page_blocks_until(
     built.own_unlaid();
     finders::offer_rest(&engine_in, &mut arb, &built.blocks, &built.block_ids, &cut);
     let mut regions = arb.finish();
+    finders::mark_doubts(&mut regions, &doubts);
     let stopped = regions
         .issues
         .iter()
@@ -1298,7 +1301,7 @@ fn page_blocks_until(
     }
     for r in &mut regions.regions {
         let by = r.signals.first().map(|s| s.id);
-        if by.is_some_and(|by| finders::PLACED_BY.contains(&by)) {
+        if by.is_some_and(finders::placed_by) {
             r.host = placed_at.get(r.host as usize).copied().unwrap_or(r.host);
         }
     }
@@ -3795,6 +3798,7 @@ mod tests {
             found_by: None,
             kind: layoutregions::Kind::Table,
             ids: Vec::new(),
+            by: crate::tables::Detector::Grid,
         };
         let mut built = Built::default();
         built.table(plan, &cx);
@@ -3910,6 +3914,7 @@ mod tests {
             found_by: None,
             kind: layoutregions::Kind::Table,
             ids: Vec::new(),
+            by: crate::tables::Detector::Grid,
         };
         let mut built = Built::default();
         built.table(plan, &cx);
@@ -3963,6 +3968,7 @@ mod tests {
             found_by: None,
             kind: layoutregions::Kind::Table,
             ids: Vec::new(),
+            by: crate::tables::Detector::Grid,
         };
         let mut built = Built::default();
         built.table(plan, &cx);

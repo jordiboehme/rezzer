@@ -310,6 +310,78 @@ fn ruled_table_grid() {
     );
 }
 
+/// A 3 x 3 ruled grid is one table region, found by the ruled pass, and holds the runs of its
+/// nine cells.
+#[test]
+fn ruled_grid_is_a_table_region() {
+    let bytes = ruled_page(&[
+        ["Fruit", "Count", "Price"],
+        ["Apples", "3", "1.20"],
+        ["Pears", "12", "0.80"],
+    ]);
+    common::assert_every_run_in_one_region(&bytes);
+    let (_, pages) = common::read_regions(&bytes);
+    let tables: Vec<&rezzer_read_pdf::layoutregions::Region> = pages
+        .iter()
+        .flat_map(|p| &p.regions)
+        .filter(|r| r.kind == rezzer_read_pdf::layoutregions::Kind::Table)
+        .collect();
+    assert_eq!(tables.len(), 1, "{pages:#?}");
+    assert_eq!(tables[0].signals[0].id, "pdf.ruled");
+    assert_eq!(tables[0].prims.len(), 9, "{:?}", tables[0].prims);
+}
+
+/// A grid of drawn rules over most of the page (the page frame of plan 6) is refused: its
+/// runs stay paragraphs, each in a paragraph region that says why the grid is no table.
+#[test]
+fn refused_grid_keeps_its_text_in_paragraph_regions_with_the_reason() {
+    let mut c = String::from("0.5 w ");
+    for y in [60.0, 410.0, 760.0] {
+        c += &format!("30 {y} m 565 {y} l S ");
+    }
+    for x in [30.0, 297.0, 565.0] {
+        c += &format!("{x} 60 m {x} 760 l S ");
+    }
+    let texts = ["Muster GmbH", "Erika Mustermann", "1.234,56"];
+    c += &show("F1", 10.0, 40.0, 740.0, texts[0]);
+    c += &show("F1", 10.0, 307.0, 740.0, texts[1]);
+    c += &show("F1", 10.0, 40.0, 390.0, texts[2]);
+    let bytes = pdf(&[Page::text(c)], "");
+    common::assert_every_run_in_one_region(&bytes);
+    let (out, pages) = common::read_engine_pages(&bytes);
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("it covers most of the page")),
+        "{:?}",
+        out.document.losses
+    );
+    let page = &pages[0];
+    for t in texts {
+        let holders: Vec<&rezzer_read_pdf::layoutregions::Region> = page
+            .regions
+            .regions
+            .iter()
+            .filter(|r| common::region_texts(page, r).iter().any(|x| x.contains(t)))
+            .collect();
+        assert_eq!(holders.len(), 1, "{t}: {holders:#?}");
+        assert_eq!(
+            holders[0].kind,
+            rezzer_read_pdf::layoutregions::Kind::Paragraph,
+            "{t}"
+        );
+        assert!(
+            holders[0]
+                .unsure
+                .iter()
+                .any(|u| u.contains("it covers most of the page")),
+            "{t}: {:?}",
+            holders[0].unsure
+        );
+    }
+}
+
 #[test]
 fn missing_inner_rules_join_ruled_cells() {
     // A 3 x 3 grid: no rule between the first two cells of row 1, so they are one cell over

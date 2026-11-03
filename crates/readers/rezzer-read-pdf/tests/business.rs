@@ -8354,3 +8354,22 @@ fn furniture_regions_on_three_pages() {
         ]
     );
 }
+
+/// The totals under the line items of the invoice (net, tax and gross) are one region of
+/// totals, found by the detector without rules as the totals under a table.
+#[test]
+fn totals_under_a_table_are_totals() {
+    let (_, pages) = common::read_engine_pages(&common::synthetic_invoice());
+    let totals: Vec<(u32, &str, Vec<&str>)> = pages
+        .iter()
+        .flat_map(|p| p.regions.regions.iter().map(move |r| (p, r)))
+        .filter(|(_, r)| r.kind == rezzer_read_pdf::layoutregions::Kind::Totals)
+        .map(|(p, r)| (r.page, r.signals[0].id, common::region_texts(p, r)))
+        .collect();
+    assert_eq!(totals.len(), 1, "{totals:#?}");
+    assert_eq!(totals[0].1, "pdf.borderless.totals_under");
+    let text = totals[0].2.concat();
+    for t in ["Nettobetrag", "1.234,56", "Gesamtbetrag", "1.469,13"] {
+        assert!(text.contains(t), "{t}: {text}");
+    }
+}

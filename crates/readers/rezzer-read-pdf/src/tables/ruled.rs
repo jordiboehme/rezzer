@@ -189,6 +189,8 @@ struct Taking {
     icons: Vec<(usize, usize, usize, [f32; 4])>,
     strokes: Option<Vec<[f32; 4]>>,
     icon_work: usize,
+    /// The grids and bands refused with a note or a loss: the ids of their runs, and why.
+    doubts: Vec<(Vec<u32>, &'static str)>,
 }
 
 impl Taking {
@@ -208,6 +210,7 @@ impl Taking {
             icons: Vec::new(),
             strokes: None,
             icon_work: 0,
+            doubts: Vec::new(),
         }
     }
 }
@@ -446,8 +449,9 @@ struct Refusal<'a> {
     top: f32,
     noted: bool,
     chart: bool,
-    /// The grid's runs.
+    /// The grid's runs, and the ids of the page's runs (see [`Flow::ids`]).
     mine: &'a [usize],
+    ids: &'a [u32],
 }
 
 impl Refusal<'_> {
@@ -461,10 +465,14 @@ impl Refusal<'_> {
                 for &i in self.mine {
                     take.quietly[i] = true;
                 }
+                take.doubts
+                    .push((self.mine.iter().map(|&i| self.ids[i]).collect(), why));
             }
             return;
         }
         take.refusals.push((self.at, self.top, why));
+        take.doubts
+            .push((self.mine.iter().map(|&i| self.ids[i]).collect(), why));
         for &i in self.mine {
             take.held[i] = true;
         }
@@ -544,6 +552,7 @@ fn read_grid(sh: &Sheet<'_>, take: &mut Taking, found: &mut Found, s: GridSectio
         noted,
         chart: figure_caption || sh.area.on_picture(b),
         mine: &mine,
+        ids: &flow.ids,
     };
     // A figure caption next to the grid or inside it is looked at first, so a wide chart
     // gets no note; a grid of many columns is refused before its cells are worked out.
@@ -697,6 +706,7 @@ fn read_grid(sh: &Sheet<'_>, take: &mut Taking, found: &mut Found, s: GridSectio
             layoutregions::Kind::Table
         },
         ids: Vec::new(),
+        by: Detector::Ruled,
     });
     Next::Section
 }
@@ -1043,6 +1053,7 @@ fn bands_and_strips(sh: &Sheet<'_>, take: &mut Taking, found: &mut Found) -> usi
             quietly: &mut take.quietly,
             tables: &mut take.tables,
             skipped: &mut found.skipped,
+            doubts: &mut take.doubts,
         },
     );
     // Rows of fields between rules no grid takes, in the text no table took.
@@ -1093,9 +1104,11 @@ fn leave_flow(
         quiet,
         quietly,
         icons,
+        doubts,
         ..
     } = take;
     found.quiet = quiet;
+    found.doubts = doubts;
     if let Some(u) = page_note(page, &refusals) {
         found.unsure.push(u);
     }
@@ -1398,7 +1411,12 @@ fn totals_tables(
             continue;
         };
         let list: Vec<&Field> = totals.iter().collect();
-        let Some(table) = pairs_table(flow, &list, totals_top(flow, totals), SIDE_FOUND_BY) else {
+        let Some(table) = pairs_table(
+            flow,
+            &list,
+            totals_top(flow, totals),
+            (SIDE_FOUND_BY, Detector::SideTotals),
+        ) else {
             continue;
         };
         claim(claimed, tables.len(), &list);

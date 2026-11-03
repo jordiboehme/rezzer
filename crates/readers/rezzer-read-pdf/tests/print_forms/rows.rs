@@ -573,3 +573,24 @@ fn a_value_below_a_note_stays_its_own_row() {
     assert_eq!(found[0][3], ["Muster A", "", "", "", ""], "{found:#?}");
     assert_no_loss(&out);
 }
+
+/// The rows of fields between rules of [`super::boxes::field_rows`] are regions of labels and
+/// values, found by the field strips.
+#[test]
+fn strip_pairs_are_label_value() {
+    let bytes = print_form(&[super::boxes::field_rows()], "", "");
+    common::assert_every_run_in_one_region(&bytes);
+    let (_, pages) = common::read_regions(&bytes);
+    let found: Vec<(rezzer_read_pdf::layoutregions::Kind, &str)> = pages
+        .iter()
+        .flat_map(|p| &p.regions)
+        .filter(|r| r.signals[0].id == "pdf.strips")
+        .map(|r| (r.kind, r.signals[0].detail.as_str()))
+        .collect();
+    // Two tables: the rows above and below the row read as text.
+    assert_eq!(found.len(), 2, "{pages:#?}");
+    for (kind, detail) in found {
+        assert_eq!(kind, rezzer_read_pdf::layoutregions::Kind::LabelValue);
+        assert!(detail.contains("rows of fields"), "{detail}");
+    }
+}
