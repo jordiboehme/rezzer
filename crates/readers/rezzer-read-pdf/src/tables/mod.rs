@@ -17,6 +17,10 @@ mod tagged;
 
 use std::collections::HashMap;
 
+use layoutregions::Bounds;
+use layoutregions::segment::drawn::{self, Grids};
+use layoutregions::segment::{Segment, Segments, Source};
+
 use crate::layout::{Drawn, Flow, Run};
 
 pub(crate) use pairs::{BoxTitle, Frame, box_pairs, field_frames, form_drawn, underlined_titles};
@@ -368,13 +372,58 @@ const PROSE_LINE: usize = 20;
 /// Share of the rows of a table without rules whose pieces stay inside the columns.
 const CLEAN_ROWS: f32 = 0.8;
 
+/// The segments of the page the detector without rules reads, each as the union of its runs:
+/// the page's root. A table often reaches past the lines drawn around part of it (a column
+/// or a caption beside a grid, header cells drawn as boxes over rows that are not, labels
+/// beside boxed values), so the drawn segments of a page are no bounds of its tables, and
+/// neither are the whitespace and style groups under them (a bold header over its rows, a
+/// blank row inside a table). Which segments a table spans is decided by typing.
+pub(crate) fn table_areas(segments: &Segments) -> Vec<&Segment> {
+    segments
+        .all
+        .get(segments.root.0 as usize)
+        .into_iter()
+        .collect()
+}
+
+/// For each group of `grids`, whether the page's segments hold it as a grid
+/// ([`Source::Grid`]): the grids the ruled detector reads. A group of one cell is a box, and
+/// a grid a bound of the segmentation left uncut is no segment (its issue names it).
+fn segment_grids(grids: &Grids, segments: &Segments) -> Vec<bool> {
+    let mut frames: Vec<(Bounds, u32, u32)> = segments
+        .all
+        .iter()
+        .filter_map(|g| match g.source {
+            Source::Grid { rows, cols } => Some((g.bounds, rows, cols)),
+            _ => None,
+        })
+        .collect();
+    frames.sort_by(|a, b| a.0.x0.total_cmp(&b.0.x0));
+    grids
+        .groups
+        .iter()
+        .map(|group| {
+            drawn::grid_frame(grids, group).is_some_and(|f| {
+                let lo = frames.partition_point(|g| g.0.x0 < f.0.x0);
+                frames[lo..]
+                    .iter()
+                    .take_while(|g| g.0.x0 == f.0.x0)
+                    .any(|g| *g == f)
+            })
+        })
+        .collect()
+}
+
 /// The tables of an untagged page (or a tagged page whose tag tree did not hold): first
 /// grids of drawn rules, then white space gutters in the text left. Their runs are taken out
 /// of `flow`. `height` is the page height; text in other directions is never in a table.
+/// `segments` are the page's segments: the grids the ruled detector reads are theirs (see
+/// [`segment_grids`]), the detector without rules reads their [`table_areas`].
 pub(crate) fn untagged(
     page: u32,
     flow: &mut Flow,
     drawn: &Drawn<'_>,
+    segments: &Segments,
     height: f32,
     stop: &dyn Fn() -> bool,
 ) -> Found {
@@ -391,16 +440,20 @@ pub(crate) fn untagged(
     };
     if !drawn.lines_unsearched {
         found.ends = end_rules(drawn.rules);
+        let grids = drawn.grids();
+        let segmented = grids
+            .map(|g| segment_grids(g, segments))
+            .unwrap_or_default();
         ruled::ruled(
             page,
             flow,
-            (drawn.rules, drawn.grids()),
+            (drawn.rules, grids, &segmented),
             &area,
             stop,
             &mut found,
         );
     }
-    borderless::borderless(page, flow, &area, stop, &mut found);
+    borderless::borderless(page, flow, &table_areas(segments), &area, stop, &mut found);
     found
 }
 

@@ -1056,12 +1056,18 @@ fn page_blocks_until(
             p
         }
     };
-    let mut arb = InOrder::new(&engine_in, &layoutregions::Limits::default());
+    let limits = layoutregions::Limits::default();
+    // The segments of the page, once, on the drawn structure the text pass read the page in
+    // (its boxes are those its runs were read in): where the table detectors look.
+    let segments =
+        layoutregions::segment::segment_drawn(&engine_in, drawn.structure, &limits, stop);
+    let mut arb = InOrder::new(&engine_in, &limits);
     let mut pcx = PageCx {
         page,
         height,
         cx,
         drawn,
+        segments: &segments,
         flow,
         placed: Vec::new(),
         notes: Vec::new(),
@@ -1295,7 +1301,24 @@ fn page_blocks_until(
     // Detectors a stop skipped, on a page whose text was still laid out: its runs stand as
     // text. Where the page stopped too (the time limit stops the blocks as well), the page's
     // own stop loss says what is not read.
-    if stopped && built.stop.is_none() && !engine_in.texts.is_empty() {
+    let time_named = stopped && built.stop.is_none() && !engine_in.texts.is_empty();
+    // What a bound of the segmentation left uncut. A stop of it is the time limit, which the
+    // notes of the detectors or of the page name already when they stopped too.
+    for issue in &segments.issues {
+        if issue.kind == layoutregions::IssueKind::Stopped && (time_named || built.stop.is_some()) {
+            continue;
+        }
+        notes.push((
+            format!(
+                "the regions of page {page} are found only in part: {}; the text there is read \
+                 as it stands",
+                issue.what
+            ),
+            LossReason::Limit,
+            Severity::Info,
+        ));
+    }
+    if time_named {
         notes.push((
             format!(
                 "tables, running headers and footers and footnotes on page {page} are looked for \
@@ -3483,6 +3506,7 @@ thread_local! {
 
 #[cfg(test)]
 mod tests {
+    use layoutregions::PrimId;
     use pdfparts::StructElem;
 
     use super::*;
@@ -4139,6 +4163,175 @@ mod tests {
     /// two pages, which the furniture finder takes without the stop, is still laid out as
     /// text, every run is in a region of its own block, and a limit note says the detectors
     /// looked only in part.
+    /// A run of a table cell at `x`, `y`, 8 points, bold or not.
+    fn cell_run(text: &str, x: f32, y: f32, line: u32, bold: bool) -> Run {
+        Run {
+            x,
+            w: 4.5 * text.chars().count() as f32,
+            bold,
+            ..run(text, line, y, 8.0)
+        }
+    }
+
+    /// The runs of a table of taxes: a header row (bold or not) and three rows of items,
+    /// in columns at 43, 162, 282 and 402.
+    fn tax_table(bold_header: bool) -> Vec<Run> {
+        let xs = [43.0, 162.0, 282.0, 402.0];
+        let rows = [
+            ["Art", "Basis", "Satz", "Betrag"],
+            ["Steuer A", "1.000,00", "10 %", "100,00"],
+            ["Steuer B", "2.000,00", "7 %", "140,00"],
+            ["Steuer C", "500,00", "19 %", "95,00"],
+        ];
+        let mut runs = Vec::new();
+        for (k, row) in rows.iter().enumerate() {
+            let y = 750.0 - 14.0 * k as f32;
+            for (x, t) in xs.iter().zip(row) {
+                runs.push(cell_run(t, *x, y, k as u32, k == 0 && bold_header));
+            }
+        }
+        runs
+    }
+
+    /// The page laid out from `runs` and `drawn`, with nothing stopping it.
+    fn laid_page(runs: Vec<Run>, drawn: &Drawn<'_>) -> Laid {
+        let style = Style::new(&[PageText {
+            page: 1,
+            height: Some(842.0),
+            runs: &runs,
+        }]);
+        let budget = Budget::new(rezzer_limits::Limits::default());
+        let cx = Context {
+            style: &style,
+            tree: None,
+            roles: &|_| None,
+            budget: &budget,
+            tables: &Tables::default(),
+            in_part: false,
+            links: &LinkRoom::new(u64::MAX),
+        };
+        page_blocks_until(1, Some(842.0), runs, drawn, &cx, &[], &|| false)
+    }
+
+    /// The tables of `laid`: their header rows and the text of their cells.
+    fn tables_of(laid: &Laid) -> Vec<(usize, Vec<String>)> {
+        laid.blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Table {
+                    rows, header_rows, ..
+                } => Some((
+                    *header_rows,
+                    rows.iter()
+                        .flatten()
+                        .map(|c| rezzer_model::plain_text(&c.inlines))
+                        .collect(),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Asserts that `laid` holds the tax table as one table under its header row.
+    fn one_tax_table(laid: &Laid) {
+        let tables = tables_of(laid);
+        assert_eq!(tables.len(), 1, "{:?}", kinds(&laid.blocks));
+        let (header_rows, cells) = &tables[0];
+        assert_eq!(*header_rows, 1);
+        assert_eq!(cells.len(), 16, "{cells:?}");
+        assert_eq!(cells[..4], ["Art", "Basis", "Satz", "Betrag"]);
+    }
+
+    #[test]
+    fn a_bold_header_over_its_body_is_one_table() {
+        // The page's segments part the bold header from its rows (by the white space under
+        // it or by its style): a hint, no wall.
+        let runs = tax_table(true);
+        let page = engine::page_in(
+            &crate::text::PageItems::default(),
+            &runs,
+            &NOTHING_DRAWN,
+            [595.0, 842.0],
+        );
+        let s = layoutregions::segment::segment_page(&page, &Default::default(), &|| false);
+        let leaf = |t: u32| {
+            s.all
+                .iter()
+                .position(|g| g.children.is_empty() && g.prims.contains(&PrimId::Text(t)))
+        };
+        // "Art" heads the first column, "Steuer A" is the first row under it.
+        assert_ne!(
+            leaf(0),
+            leaf(4),
+            "the segments part the header from its rows"
+        );
+        one_tax_table(&laid_page(runs, &NOTHING_DRAWN));
+    }
+
+    #[test]
+    fn a_table_across_boxed_cells_is_one_table() {
+        // Each header cell is drawn as a box of its own, the rows under them are not: the
+        // boxes are segments of their own, and the table reaches across them.
+        let boxes: Vec<[f32; 4]> = [39.0, 158.0, 278.0, 398.0]
+            .iter()
+            .map(|&x| [x, 746.0, x + 114.0, 760.0])
+            .collect();
+        let rules: Vec<Rule> = boxes
+            .iter()
+            .map(|b| Rule {
+                x0: b[0],
+                y0: b[1],
+                x1: b[2],
+                y1: b[3],
+                kind: crate::tables::RuleKind::Rect,
+            })
+            .collect();
+        let structure = crate::regions::structure_in_frame(&rules, &boxes);
+        let drawn = Drawn {
+            rules: &rules,
+            structure: &structure,
+            boxes: &boxes,
+            ..NOTHING_DRAWN
+        };
+        one_tax_table(&laid_page(tax_table(false), &drawn));
+    }
+
+    #[test]
+    fn a_segment_limit_reaches_the_page_notes() {
+        // 70 boxes drawn one in the other, a line of text in the innermost: the segments nest
+        // deeper than their bound, which the page says.
+        let boxes: Vec<[f32; 4]> = (0..70)
+            .map(|k| {
+                let d = 2.5 * k as f32;
+                [20.0 + d, 20.0 + d, 575.0 - d, 820.0 - d]
+            })
+            .collect();
+        let structure = crate::regions::structure_in_frame(&[], &boxes);
+        let drawn = Drawn {
+            structure: &structure,
+            boxes: &boxes,
+            ..NOTHING_DRAWN
+        };
+        let line = Run {
+            x: 250.0,
+            ..run("Muster GmbH", 0, 420.0, 10.0)
+        };
+        let laid = laid_page(vec![line], &drawn);
+        let limits: Vec<&str> = laid
+            .notes
+            .iter()
+            .filter(|n| n.1 == LossReason::Limit)
+            .map(|n| n.0.as_str())
+            .collect();
+        assert_eq!(limits.len(), 1, "{:?}", laid.notes);
+        assert!(limits[0].contains("page 1"), "{}", limits[0]);
+        assert!(
+            limits[0].contains("nest deeper than 64 levels"),
+            "{}",
+            limits[0]
+        );
+    }
+
     #[test]
     fn a_stop_before_the_first_finder_keeps_all_text() {
         let runs = vec![

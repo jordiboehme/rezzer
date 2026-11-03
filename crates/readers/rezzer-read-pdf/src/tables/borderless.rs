@@ -6,6 +6,9 @@
 
 use std::collections::{HashMap, HashSet};
 
+use layoutregions::PrimId;
+use layoutregions::segment::Segment;
+
 use super::*;
 use crate::layout::{ColumnLine, Columns, Gaps, Slot, address_columns};
 use crate::regions::{BASELINE_NEAR, Part, offset_baselines};
@@ -144,11 +147,40 @@ fn text_of(flow: &Flow, start: usize, end: usize) -> String {
     s
 }
 
+/// The area of `areas` each of `lines` is in: the first area that holds the ids of all its
+/// runs (`Flow::ids`, the page's text primitives), or `None`.
+fn line_areas(flow: &Flow, lines: &[FlowLine], areas: &[&Segment]) -> Vec<Option<usize>> {
+    let n = flow.ids.iter().map(|&i| i as usize + 1).max().unwrap_or(0);
+    let mut of: Vec<Option<usize>> = vec![None; n];
+    for (k, a) in areas.iter().enumerate() {
+        for p in &a.prims {
+            if let PrimId::Text(t) = *p
+                && let Some(slot) = of.get_mut(t as usize)
+            {
+                slot.get_or_insert(k);
+            }
+        }
+    }
+    lines
+        .iter()
+        .map(|l| {
+            let mut ids = flow.ids[l.start..l.end].iter();
+            let first = of.get(*ids.next()? as usize).copied().flatten();
+            ids.all(|&i| of.get(i as usize).copied().flatten() == first)
+                .then_some(first)
+                .flatten()
+        })
+        .collect()
+}
+
 /// Tables without rules: regions of lines whose pieces stand in columns with white space
-/// between them, accepted only on strong evidence.
+/// between them, accepted only on strong evidence. `areas` are the segments of the page it
+/// reads (see `tables::table_areas`), each as the union of its runs: a region holds the
+/// lines of one area, and a line with runs of none or of two areas is in no region.
 pub(super) fn borderless(
     page: u32,
     flow: &mut Flow,
+    areas: &[&Segment],
     area: &Area<'_>,
     stop: &dyn Fn() -> bool,
     found: &mut Found,
@@ -162,10 +194,18 @@ pub(super) fn borderless(
     // The frame of column titles over items that holds a run, if one does.
     let bodies = std::mem::take(&mut found.bodies);
     let body_of = |i: usize| bodies.get(i).copied().flatten();
+    let in_area = line_areas(flow, &lines, areas);
     let off: Vec<bool> = lines
         .iter()
-        .map(|l| flow.runs[l.start..l.end].iter().any(|r| r.off_axis) || (l.start..l.end).any(held))
+        .zip(&in_area)
+        .map(|(l, a)| {
+            a.is_none()
+                || flow.runs[l.start..l.end].iter().any(|r| r.off_axis)
+                || (l.start..l.end).any(held)
+        })
         .collect();
+    // Whether line `j` is in the area of line `i`.
+    let same_area = |i: usize, j: usize| in_area[i] == in_area[j];
     // Regions: lines that follow each other down the page, most of them in two pieces or
     // more; at most two lines of one piece in a row (cell text that wraps). Each region also
     // has the lines right under it that may go on in its last row (see [`Tail`]).
@@ -191,7 +231,7 @@ pub(super) fn borderless(
         // after it still parts a table under it.
         let mut steps: Vec<f32> = Vec::new();
         let mut pitch = 0.0f32;
-        while end < lines.len() && !off[end] {
+        while end < lines.len() && !off[end] && same_area(i, end) {
             let (prev, cur) = (&lines[end - 1], &lines[end]);
             let gap = prev.y - cur.y;
             if gap <= 0.0 || gap > 3.0 * prev.size.max(cur.size) {
@@ -203,7 +243,7 @@ pub(super) fn borderless(
             // a group of rows of the same table after a blank row stands in its columns.
             let next = lines
                 .get(end + 1)
-                .filter(|_| !off[end + 1])
+                .filter(|_| !off[end + 1] && same_area(i, end + 1))
                 .map(|n| cur.y - n.y)
                 .filter(|&g| g > 0.0 && g <= 3.0 * cur.size.max(lines[end + 1].size));
             let blank =
@@ -272,7 +312,7 @@ pub(super) fn borderless(
             let held_bodies: Vec<u32> = (lines[i].start..lines[z - 1].end)
                 .filter_map(body_of)
                 .collect();
-            while z < lines.len() && !off[z] {
+            while z < lines.len() && !off[z] && same_area(i, z) {
                 let (prev, cur) = (&lines[z - 1], &lines[z]);
                 let gap = prev.y - cur.y;
                 let own = (cur.start..cur.end)
@@ -2203,6 +2243,9 @@ fn title_cut(
 
 #[cfg(test)]
 mod tests {
+    use layoutregions::PrimId;
+    use layoutregions::segment::{SegId, Source};
+
     use super::*;
     use crate::layout::Slot;
 
@@ -2364,6 +2407,92 @@ mod tests {
         }
     }
 
+    /// A segment of the page that holds the runs `ids`.
+    fn area_of(id: u32, ids: impl Iterator<Item = u32>) -> Segment {
+        Segment {
+            id: SegId(id),
+            bounds: layoutregions::Bounds {
+                x0: 0.0,
+                y0: 0.0,
+                x1: 595.0,
+                y1: 842.0,
+            },
+            prims: ids.map(PrimId::Text).collect(),
+            source: Source::Rest,
+            parent: None,
+            children: Vec::new(),
+            alternatives: Vec::new(),
+        }
+    }
+
+    /// The words of each table found, in order.
+    fn table_words(found: &Found) -> Vec<Vec<String>> {
+        found
+            .tables
+            .iter()
+            .map(|t| {
+                t.rows
+                    .iter()
+                    .flatten()
+                    .flat_map(|c| c.runs.iter().map(|r| r.text.clone()))
+                    .collect()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn borderless_uses_the_page_segments() {
+        // Eight rows of one table of items: name, quantity and amount.
+        let mut runs = Vec::new();
+        for k in 0..8u32 {
+            let y = 700.0 - 14.0 * k as f32;
+            runs.push(run(&format!("Muster {k}"), 40.0, y, k));
+            runs.push(run(&format!("{}", k + 2), 200.0, y, k));
+            runs.push(run(&format!("1.234,{k}6"), 300.0, y, k));
+        }
+        let area = Area {
+            width: 595.0,
+            height: 842.0,
+            images: &[],
+            body_size: 8.0,
+        };
+        let read = |areas: &[&Segment]| {
+            let mut flow = flow_of(runs.clone());
+            let mut found = Found::default();
+            borderless(1, &mut flow, areas, &area, &|| false, &mut found);
+            (table_words(&found), flow.runs.len())
+        };
+        // One area that holds every run: one table of all rows, as the page's union reads.
+        let all = area_of(0, 0..24);
+        let (tables, left) = read(&[&all]);
+        assert_eq!(tables.len(), 1, "{tables:?}");
+        assert_eq!(tables[0].len(), 24);
+        assert_eq!(left, 0);
+        // Two areas: no table reaches across them.
+        let (top, bottom) = (area_of(1, 0..12), area_of(2, 12..24));
+        let (tables, _) = read(&[&top, &bottom]);
+        assert_eq!(tables.len(), 2, "{tables:?}");
+        let names = |t: &[String]| -> Vec<String> {
+            t.iter()
+                .filter(|w| w.starts_with("Muster"))
+                .cloned()
+                .collect()
+        };
+        assert_eq!(
+            names(&tables[0]),
+            ["Muster 0", "Muster 1", "Muster 2", "Muster 3"]
+        );
+        assert_eq!(
+            names(&tables[1]),
+            ["Muster 4", "Muster 5", "Muster 6", "Muster 7"]
+        );
+        // An area of the top half only: the bottom rows are no table's and stay in the flow.
+        let (tables, left) = read(&[&top]);
+        assert_eq!(tables.len(), 1, "{tables:?}");
+        assert_eq!(tables[0].len(), 12);
+        assert_eq!(left, 12);
+    }
+
     #[test]
     fn side_by_side_blocks_are_refused() {
         // Lines read row by row across two lists that stand side by side: labels and values
@@ -2393,7 +2522,8 @@ mod tests {
             body_size: 8.0,
         };
         let mut found = Found::default();
-        borderless(1, &mut flow, &area, &|| false, &mut found);
+        let every = area_of(0, 0..n as u32);
+        borderless(1, &mut flow, &[&every], &area, &|| false, &mut found);
         let left = [
             "Guest", "Sample", "Room", "101", "Arrival", "2030", "Nights", "3",
         ];

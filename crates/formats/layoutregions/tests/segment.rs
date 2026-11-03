@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 
 use layoutregions::segment::drawn::drawn;
-use layoutregions::segment::{SegId, Segment, Segments, Source, segment_page};
+use layoutregions::segment::{SegId, Segment, Segments, Source, segment_drawn, segment_page};
 use layoutregions::*;
 
 fn run(text: &str, x: f32, y: f32, w: f32, size: f32, line: u32) -> TextRun {
@@ -881,4 +881,38 @@ fn a_grid_over_most_of_the_page_is_a_segment() {
     assert_eq!(grids[0].source, Source::Grid { rows: 3, cols: 3 });
     assert_eq!(grids[0].parent, Some(s.root));
     assert_eq!(texts_of(grids[0]), [0, 1, 2]);
+}
+
+#[test]
+fn a_host_found_structure_decides_the_boxes() {
+    // Two drawn boxes; the host found text in the second only (its own test of where text
+    // lies), so only the second is a box segment, though a run's centre lies in each. The
+    // host names what its own search left out: no issue for it here.
+    let rules = vec![
+        rect(50.0, 600.0, 250.0, 640.0),
+        rect(300.0, 600.0, 500.0, 640.0),
+    ];
+    let texts = vec![
+        run("Muster GmbH", 60.0, 615.0, 50.0, 9.0, 0),
+        run("12345 Musterstadt", 310.0, 615.0, 75.0, 9.0, 0),
+    ];
+    let p = page([595.0, 842.0], texts, rules);
+    let mut found = drawn(&p, &|b: Bounds| b.x0 > 280.0);
+    assert_eq!(found.boxes.len(), 1);
+    let s = segment_drawn(&p, &found, &Limits::default(), &|| false);
+    check_cover(&s, &p);
+    let boxes = with_source(&s, |x| *x == Source::Box);
+    assert_eq!(boxes.len(), 1);
+    assert_eq!(texts_of(boxes[0]), [1]);
+    assert!(s.issues.is_empty());
+    // A structure whose boxes were not used: the host says so, the segments do not.
+    found.boxes.clear();
+    found.boxes_note = Some("its boxes overlap too much".into());
+    let s = segment_drawn(&p, &found, &Limits::default(), &|| false);
+    check_cover(&s, &p);
+    assert!(with_source(&s, |x| *x == Source::Box).is_empty());
+    assert!(s.issues.is_empty());
+    // Without a structure the segmentation finds its own and says what it left out.
+    let s = segment_page(&p, &Limits::default(), &|| false);
+    assert_eq!(with_source(&s, |x| *x == Source::Box).len(), 2);
 }

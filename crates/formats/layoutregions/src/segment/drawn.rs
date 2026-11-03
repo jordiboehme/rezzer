@@ -268,6 +268,31 @@ pub fn inner_ruled(g: &Grids, (gh, gv): &(Vec<usize>, Vec<usize>)) -> bool {
         || distinct(gv.iter().map(|&k| g.vs[k].at).collect()) >= 3
 }
 
+/// The frame of the group `(gh, gv)` of `g` with its rows and columns, counted as the box
+/// search counts them (its line places and the ends of its lines, [`clustered`]): the grid a
+/// segment of [`crate::segment::Source::Grid`] stands for. `None` for a group of one cell (a
+/// box) or none.
+pub fn grid_frame(g: &Grids, (gh, gv): &(Vec<usize>, Vec<usize>)) -> Option<(Bounds, u32, u32)> {
+    let mut xs: Vec<f32> = gv.iter().map(|&k| g.vs[k].at).collect();
+    xs.extend(gh.iter().map(|&j| g.hs[j].from).reduce(f32::min));
+    xs.extend(gh.iter().map(|&j| g.hs[j].to).reduce(f32::max));
+    let mut ys: Vec<f32> = gh.iter().map(|&j| g.hs[j].at).collect();
+    ys.extend(gv.iter().map(|&k| g.vs[k].from).reduce(f32::min));
+    ys.extend(gv.iter().map(|&k| g.vs[k].to).reduce(f32::max));
+    let (xs, ys) = (clustered(xs), clustered(ys));
+    let (cols, rows) = (xs.len().saturating_sub(1), ys.len().saturating_sub(1));
+    if cols == 0 || rows == 0 || cols * rows < 2 {
+        return None;
+    }
+    let b = Bounds {
+        x0: xs[0],
+        y0: ys[0],
+        x1: xs[cols],
+        y1: ys[rows],
+    };
+    Some((b, rows as u32, cols as u32))
+}
+
 /// Horizontal and vertical lines that meet, in groups. A rectangle gives its four sides. A
 /// page without vertical lines has its horizontal lines and no group.
 ///

@@ -65,7 +65,7 @@ fn page_note(page: u32, refusals: &[(usize, f32, &'static str)]) -> Option<Unsur
 pub(super) fn ruled(
     page: u32,
     flow: &mut Flow,
-    (rules, grids): (&[Rule], Result<&Grids, Unsearched>),
+    (rules, grids, segmented): (&[Rule], Result<&Grids, Unsearched>, &[bool]),
     area: &Area<'_>,
     stop: &dyn Fn() -> bool,
     found: &mut Found,
@@ -86,7 +86,7 @@ pub(super) fn ruled(
             return;
         }
     };
-    let grids = grid_parts(page, hs, vs, groups, found);
+    let grids = grid_parts(page, hs, vs, groups, segmented, found);
     // The horizontal lines a grid takes; the others may bound a column of totals or a strip
     // of fields.
     let taken = taken_by_grids(hs.len(), groups);
@@ -1303,7 +1303,8 @@ fn read_apart(flow: &mut Flow, take: &mut Taking, found: &mut Found) {
     }
 }
 
-/// Each connected grid of `groups` (of the page's lines `hs` and `vs`) in its sections, each
+/// Each connected grid of `groups` (of the page's lines `hs` and `vs`) that the page's
+/// segments hold as a grid (`segmented`, see `tables::segment_grids`) in its sections, each
 /// judged as a grid of its own, top to bottom; a section of a grid that was cut is no grid's to
 /// drop without a word.
 fn grid_parts(
@@ -1311,11 +1312,15 @@ fn grid_parts(
     hs: &[Line],
     vs: &[Line],
     groups: &[(Vec<usize>, Vec<usize>)],
+    segmented: &[bool],
     found: &mut Found,
 ) -> Vec<Part> {
     let mut cut_work = 0usize;
     let mut grids: Vec<Part> = Vec::new();
     for (id, (gh, gv)) in groups.iter().enumerate() {
+        if !segmented.get(id).copied().unwrap_or(false) {
+            continue;
+        }
         let h: Vec<Line> = gh.iter().map(|&j| hs[j]).collect();
         let v: Vec<Line> = gv.iter().map(|&k| vs[k]).collect();
         let parts = sections(&h, &v, hs, &mut cut_work);

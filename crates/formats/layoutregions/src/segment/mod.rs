@@ -18,7 +18,7 @@ use crate::input::{GivenRegion, PageIn, PrimId, RuleIn, TextRun};
 use crate::limits::Limits;
 use crate::region::{Bounds, Issue, IssueKind, Kind};
 use crate::segment::cut::{CutShort, Piece, Split, xy_cut};
-use crate::segment::drawn::{Line, SNAP, clustered};
+use crate::segment::drawn::{Line, SNAP};
 use crate::segment::style::style_steps;
 use crate::work;
 
@@ -144,6 +144,28 @@ pub struct Segments {
 /// assert!(s.issues.is_empty());
 /// ```
 pub fn segment_page(page: &PageIn, limits: &Limits, stop: &dyn Fn() -> bool) -> Segments {
+    segment_with(page, None, limits, stop)
+}
+
+/// [`segment_page`] on the drawn structure a host found itself, in the frame of `page`: its
+/// grids and the boxes its own test found text in (a host that reads text into boxes keeps
+/// the boxes it read). The host says what its own search left out: a grid search that was not
+/// done, or boxes that were not used, are no issue here.
+pub fn segment_drawn(
+    page: &PageIn,
+    found: &drawn::DrawnStructure,
+    limits: &Limits,
+    stop: &dyn Fn() -> bool,
+) -> Segments {
+    segment_with(page, Some(found), limits, stop)
+}
+
+fn segment_with(
+    page: &PageIn,
+    found: Option<&drawn::DrawnStructure>,
+    limits: &Limits,
+    stop: &dyn Fn() -> bool,
+) -> Segments {
     let mut b = Builder {
         page,
         limits,
@@ -164,7 +186,7 @@ pub fn segment_page(page: &PageIn, limits: &Limits, stop: &dyn Fn() -> bool) -> 
         y1: page.size[1],
     };
     let root = b.push(Source::Page, every, Some(frame), None, false);
-    b.segment(root);
+    b.segment(root, found);
     let out = Segments {
         all: b.all,
         root,
@@ -324,7 +346,7 @@ impl Builder<'_> {
     }
 
     /// Parts the root: given regions, then the drawn structure, the cut and the style steps.
-    fn segment(&mut self, root: SegId) {
+    fn segment(&mut self, root: SegId, found: Option<&drawn::DrawnStructure>) {
         let page = self.page;
         if self.halted() {
             return;
@@ -343,8 +365,46 @@ impl Builder<'_> {
                 regions.push((g.kind, prims));
             }
         }
-        // The drawn structure, from the text the given regions leave: a box holds text when
-        // the centre of a run lies in it.
+        // The drawn structure the host found, or from the text the given regions leave: a box
+        // holds text when the centre of a run lies in it.
+        let own;
+        let found = match found {
+            Some(found) => found,
+            None => {
+                own = self.drawn(&taken);
+                &own
+            }
+        };
+        let mut items = self.items(found);
+        self.assign(&mut items, &taken);
+        // Every item's primitives, its children's included; then the segments, top down. The
+        // root makes its given regions and its own parts at once, or none.
+        let mut sub = subtree_prims(&items, self.max);
+        if self.max == 0 {
+            let parts = regions.len() + own_parts(&items, 0, &sub, regions.len());
+            if parts > 0 || self.text_parts(&items[0].texts) {
+                self.note(Note::Depth);
+            }
+            return;
+        }
+        if !self.room(regions.len() + own_parts(&items, 0, &sub, regions.len())) {
+            return;
+        }
+        for (kind, prims) in regions {
+            let id = self.push(Source::Given(kind), prims, None, Some(root), true);
+            self.given.push(id);
+        }
+        let mut stack: Vec<(usize, SegId)> = vec![(0, root)];
+        while let Some((i, s)) = stack.pop() {
+            let next = self.item(&items, i, s, &mut sub);
+            stack.extend(next.into_iter().rev());
+        }
+    }
+
+    /// The drawn structure of the page, from the text the given regions leave (`taken`): a box
+    /// holds text when the centre of a run lies in it. What the search left out is an issue.
+    fn drawn(&mut self, taken: &Taken) -> drawn::DrawnStructure {
+        let page = self.page;
         let mut centres: Vec<(f32, f32)> = (0..page.texts.len())
             .filter(|&i| !taken.has(PrimId::Text(i as u32)))
             .map(|i| centre(text_bounds(&page.texts[i])))
@@ -380,30 +440,7 @@ impl Builder<'_> {
             }),
             _ => {}
         }
-        let mut items = self.items(&found);
-        self.assign(&mut items, &taken);
-        // Every item's primitives, its children's included; then the segments, top down. The
-        // root makes its given regions and its own parts at once, or none.
-        let mut sub = subtree_prims(&items, self.max);
-        if self.max == 0 {
-            let parts = regions.len() + own_parts(&items, 0, &sub, regions.len());
-            if parts > 0 || self.text_parts(&items[0].texts) {
-                self.note(Note::Depth);
-            }
-            return;
-        }
-        if !self.room(regions.len() + own_parts(&items, 0, &sub, regions.len())) {
-            return;
-        }
-        for (kind, prims) in regions {
-            let id = self.push(Source::Given(kind), prims, None, Some(root), true);
-            self.given.push(id);
-        }
-        let mut stack: Vec<(usize, SegId)> = vec![(0, root)];
-        while let Some((i, s)) = stack.pop() {
-            let next = self.item(&items, i, s, &mut sub);
-            stack.extend(next.into_iter().rev());
-        }
+        found
     }
 
     /// The grids and boxes of the page as items, nested; item 0 is the page.
@@ -412,31 +449,13 @@ impl Builder<'_> {
         let area = |b: &Bounds| (b.x1 - b.x0).max(0.0) * (b.y1 - b.y0).max(0.0);
         let mut drawn: Vec<(Bounds, Source)> = Vec::new();
         if let Ok(g) = &found.grids {
-            for (gh, gv) in &g.groups {
-                work::add((gh.len() + gv.len()) as u64);
-                // Rows and columns as the box search counts them.
-                let mut xs: Vec<f32> = gv.iter().map(|&k| g.vs[k].at).collect();
-                xs.extend(gh.iter().map(|&j| g.hs[j].from).reduce(f32::min));
-                xs.extend(gh.iter().map(|&j| g.hs[j].to).reduce(f32::max));
-                let mut ys: Vec<f32> = gh.iter().map(|&j| g.hs[j].at).collect();
-                ys.extend(gv.iter().map(|&k| g.vs[k].from).reduce(f32::min));
-                ys.extend(gv.iter().map(|&k| g.vs[k].to).reduce(f32::max));
-                let (xs, ys) = (clustered(xs), clustered(ys));
-                let (cols, rows) = (xs.len().saturating_sub(1), ys.len().saturating_sub(1));
+            for group in &g.groups {
+                work::add((group.0.len() + group.1.len()) as u64);
                 // One cell is a box (see `drawn::boxes`), not a grid.
-                if cols == 0 || rows == 0 || cols * rows < 2 {
+                let Some((b, rows, cols)) = drawn::grid_frame(g, group) else {
                     continue;
-                }
-                let b = Bounds {
-                    x0: xs[0],
-                    y0: ys[0],
-                    x1: xs[cols],
-                    y1: ys[rows],
                 };
-                let source = Source::Grid {
-                    rows: rows as u32,
-                    cols: cols as u32,
-                };
+                let source = Source::Grid { rows, cols };
                 drawn.push((b, source));
             }
         }
