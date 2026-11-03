@@ -1079,7 +1079,7 @@ const HEADER_DIGITS: usize = 4;
 /// a deduction or a credit). Whole numbers, rates and dates are none.
 fn amount(text: &str) -> bool {
     let text = text.trim();
-    let text = if crate::layout::signed_amount(text) {
+    let text = if layoutregions::extract::text::signed_amount(text) {
         &text[..text.len() - 1]
     } else {
         text

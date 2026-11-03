@@ -46,6 +46,9 @@ pub trait LineRun {
     fn h(&self) -> f32;
     fn size(&self) -> f32;
     fn bold(&self) -> bool;
+    fn italic(&self) -> bool;
+    /// The family key of its font, 0 when not known.
+    fn font(&self) -> u32;
     /// The run's line number in reading order; the runs of one line are next to each other.
     fn line(&self) -> u32;
     /// The page of the run, for a list that holds runs of several pages; 0 for one page.
@@ -77,6 +80,12 @@ impl LineRun for TextRun {
     }
     fn bold(&self) -> bool {
         self.bold
+    }
+    fn italic(&self) -> bool {
+        self.italic
+    }
+    fn font(&self) -> u32 {
+        self.font
     }
     fn line(&self) -> u32 {
         self.line

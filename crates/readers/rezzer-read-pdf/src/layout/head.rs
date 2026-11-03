@@ -12,8 +12,8 @@
 use rezzer_model::FoundDate;
 
 use super::{
-    EDGE, GAP_RATIO, HEADING_PLAIN_RATIO, Line, Run, SIZE_SLACK, address_shaped, heading_block,
-    ink, line, lines, size_key,
+    EDGE, GAP_RATIO, HEADING_PLAIN_RATIO, Line, Run, SIZE_SLACK, address_shaped, ends_in_amount,
+    heading_block, ink, line, lines, size_key,
 };
 use crate::scan;
 
@@ -85,7 +85,7 @@ pub(crate) fn page_title(
             i += 1;
             continue;
         };
-        let (j, is_heading) = heading_block(lines, i, level, heading, body_size);
+        let (j, is_heading) = heading_block(lines, i, level, heading, body_size, &ends_in_amount);
         let block = &lines[i..j];
         let top = first.y + first.h;
         let small = first.size < HEADING_PLAIN_RATIO * body_size;
