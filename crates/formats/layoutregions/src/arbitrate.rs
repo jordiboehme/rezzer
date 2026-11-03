@@ -205,7 +205,11 @@ pub struct Decision {
 /// replaces the cut when it is not `Spatial`, its score is at least the cut's weakest plus the
 /// margin, and it leads by the margin every decision of the cut (grandchildren included) of
 /// another kind, for an unsure one its best alternative of another kind: a key/value or table
-/// reading below is never folded into a weaker reading of another kind. It then carries the
+/// reading below is never folded into a weaker reading of another kind. Nor does it replace
+/// the cut when a sure decision of its own kind there scores as much as it does while a sure
+/// decision of another kind stands beside it (its reading only spreads that child's over its
+/// neighbours), or when it is a figure over a sure decision of a text kind (a figure keeps the
+/// text of its region as text). It then carries the
 /// cut's kinds as alternatives. Otherwise the cut stands and the segment's best candidate is
 /// an alternative on each of its decisions. The page root never replaces its cut: its
 /// candidates are alternatives on the decisions under it. Alternatives are one per kind (the
@@ -328,7 +332,25 @@ impl Arbiter<'_> {
         }
         let standing = start..self.out.len();
         let leads = |score: u16| u32::from(own.score.0) >= u32::from(score) + margin;
+        let cut = &self.out[standing.clone()];
+        let sure_other = |d: &Decision| {
+            d.certainty == Certainty::Rule && d.kind != own.kind && d.kind != Kind::Spatial
+        };
+        // A parent of the kind of a sure child it does not outscore only spreads that child's
+        // reading over its neighbours: no evidence for them, so it folds no sure decision of
+        // another kind (an address under a table, a company cell beside boxed fields).
+        let spreads = cut.iter().any(|d| {
+            d.certainty == Certainty::Rule && d.kind == own.kind && d.score.0 >= own.score.0
+        }) && cut.iter().any(sure_other);
+        // A figure keeps the text of its region as text: it folds no sure decision of a text
+        // kind.
+        let hides_text = own.kind == Kind::Figure
+            && cut
+                .iter()
+                .any(|d| sure_other(d) && !matches!(d.kind, Kind::Code | Kind::Figure));
         let replaces = !root
+            && !spreads
+            && !hides_text
             && own.kind != Kind::Spatial
             && u32::from(own.score.0) >= key(weakest) + margin
             && self.out[standing.clone()]

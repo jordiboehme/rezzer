@@ -971,6 +971,7 @@ fn eight_aligned_columns_read_as_a_table() {
         kind: Kind::Table,
         prims,
         order: 0,
+        level: None,
     });
     let given = Tree { page };
     given.with(|view| {
@@ -1108,7 +1109,8 @@ fn table_pair_and_totals_scores_are_scale_free() {
 #[test]
 fn worst_case_margins_of_tables_pairs_and_totals() {
     use layoutregions::typers::pairs::{
-        LABEL_BOXES_TOUCH, LABEL_FIELD_CELLS, LABEL_FIELDS, LABEL_KEY_VALUES, LABEL_STYLE,
+        LABEL_BOXES_TOUCH, LABEL_COLON, LABEL_FIELD_CELLS, LABEL_FIELDS, LABEL_KEY_VALUES,
+        LABEL_LINE_PAIRS, LABEL_STYLE, LABEL_VALUE_SHAPE,
     };
     use layoutregions::typers::table::{
         PARAGRAPH_PROSE_CELLS, TABLE_HEADER, TABLE_READING, TABLE_SHARED, TOTALS_UNDER,
@@ -1149,6 +1151,12 @@ fn worst_case_margins_of_tables_pairs_and_totals() {
             paragraph,
         ),
         ("totals over paragraph", TOTALS_UNDER, paragraph),
+        // Line pairs carry a colon or a shaped value on every line (Task 18b, ruling Q2).
+        (
+            "line pairs over paragraph",
+            LABEL_LINE_PAIRS + LABEL_COLON.min(LABEL_VALUE_SHAPE),
+            paragraph,
+        ),
         // Refused readings give nothing: a table on field cells (see
         // `field_cells_refuse_a_table`), key values or totals, and label/value pairs on totals
         // (see `amounts_under_money_columns_are_totals`).
@@ -1383,11 +1391,13 @@ fn the_seed_lines_are_pairs_themselves() {
         assert!(ids(pairs).contains(&"label_value.key_values"), "{typed:#?}");
     }
     // The seeded box alone (no box beside it) leads the paragraph its two lines join into
-    // by 100 only (650 against 550): a lone box is a Task 18b pair, not pinned here.
+    // by 50 only (650 against 600 with `paragraph.joins` at 300): no clear margin, so a lone
+    // weight-only box stays Spatial (its two lines as laid out). Task 18b counted the class
+    // (one box on the public forms, none on the corpus or the generated pages).
     let typed = seeded(true).typed(&|_, s| s.source == Source::Box);
     let (kind, lead) = winner(&typed);
     assert_eq!(kind, Kind::LabelValue, "{typed:#?}");
-    assert_eq!(lead, 100, "{typed:#?}");
+    assert_eq!(lead, 50, "{typed:#?}");
 }
 
 #[test]
@@ -1838,4 +1848,280 @@ fn a_grid_on_a_page_picture_or_with_a_caption_cell_is_no_figure() {
         let g = view.segs.all.iter().find(|s| grid(view, s)).unwrap();
         assert_eq!(refusal(view, g).unwrap().signal.id, "figure.caption_near");
     });
+}
+
+/// Lines of `rows` (pieces at `xs`), one line each from line `first` on, 12 points apart.
+fn rows_at(rows: &[&[&str]], xs: &[f32], top: f32, size: f32, first: u32) -> Vec<TextRun> {
+    let mut texts = Vec::new();
+    for (k, row) in rows.iter().enumerate() {
+        for (c, t) in row.iter().enumerate() {
+            if !t.is_empty() {
+                texts.push(run(t, xs[c], top - 12.0 * k as f32, size, first + k as u32));
+            }
+        }
+    }
+    texts
+}
+
+/// Task 18b (ruling Q2): a short label with a colon and its value in one run reads as a pair,
+/// line by line, at every scale; prose after a colon does not.
+#[test]
+fn a_colon_label_and_its_value_in_one_run_is_a_pair() {
+    let rows: [&[&str]; 3] = [
+        &["Kontonummer: 1234 5678 9012"],
+        &["Inhaber: Erika Mustermann"],
+        &["Bank: Musterbank Musterstadt"],
+    ];
+    let tree = Tree {
+        page: sheet(rows_at(&rows, &[72.0], 600.0, 9.2, 100), Vec::new()),
+    };
+    for k in [0.75f32, 1.0, 1.5] {
+        let typed = tree.scaled(k).typed(&text_of_lines(vec![100, 101, 102]));
+        let pairs = of(&typed, Kind::LabelValue);
+        assert!(ids(pairs).contains(&"label_value.line_pairs"), "{typed:#?}");
+        assert!(ids(pairs).contains(&"label_value.colon"), "{typed:#?}");
+        let (kind, lead) = winner(&typed);
+        assert_eq!(kind, Kind::LabelValue, "at {k}x: {typed:#?}");
+        assert!(lead >= MARGIN, "at {k}x: {typed:#?}");
+    }
+    // A sentence after a colon is prose.
+    let rows: [&[&str]; 1] = [&["Hinweis: die Ware bleibt bis zur Zahlung unser Eigentum."]];
+    let tree = Tree {
+        page: sheet(rows_at(&rows, &[72.0], 600.0, 9.2, 100), Vec::new()),
+    };
+    let typed = tree.typed(&text_of_lines(vec![100]));
+    assert!(find(&typed, Kind::LabelValue).is_none(), "{typed:#?}");
+}
+
+/// Task 18b (ruling Q2): a lone line of a short label and a value shaped as a code or a
+/// number, apart by a gap, is a pair; a lone line of two words is none.
+#[test]
+fn a_lone_line_of_a_label_and_a_shaped_value_is_a_pair() {
+    let rows: [&[&str]; 1] = [&["Rechnungs-Nr.", "2026004711"]];
+    let tree = Tree {
+        page: sheet(rows_at(&rows, &[72.0, 250.0], 600.0, 9.2, 100), Vec::new()),
+    };
+    let typed = tree.typed(&text_of_lines(vec![100]));
+    let (kind, lead) = winner(&typed);
+    assert_eq!(kind, Kind::LabelValue, "{typed:#?}");
+    assert!(lead >= MARGIN, "{typed:#?}");
+    let rows: [&[&str]; 1] = [&["Muster GmbH", "Beispiel AG"]];
+    let tree = Tree {
+        page: sheet(rows_at(&rows, &[72.0, 250.0], 600.0, 9.2, 100), Vec::new()),
+    };
+    let typed = tree.typed(&text_of_lines(vec![100]));
+    assert!(find(&typed, Kind::LabelValue).is_none(), "{typed:#?}");
+}
+
+/// Task 18b (ruling Q5): a block of two columns in one style without a colon or a shaped value
+/// on its lines (names beside names) is no block of labels and values.
+#[test]
+fn key_values_need_evidence_on_every_pair() {
+    let rows: [&[&str]; 3] = [
+        &["Erika Mustermann", "Musterstadt"],
+        &["Max Muster", "Beispielstadt"],
+        &["Anna Probe", "Probedorf"],
+    ];
+    let tree = Tree {
+        page: sheet(rows_at(&rows, &[72.0, 250.0], 600.0, 9.2, 100), Vec::new()),
+    };
+    let typed = tree.typed(&text_of_lines(vec![100, 101, 102]));
+    assert!(find(&typed, Kind::LabelValue).is_none(), "{typed:#?}");
+}
+
+/// Task 18b (ruling Q5): blocks side by side that share no column structure are no table: an
+/// address down one column beside a field, an address beside a bank. Rows of numbers in
+/// columns (lines the detectors without rules left as text) stay a table.
+#[test]
+fn blocks_side_by_side_are_no_table() {
+    let field_and_address: [&[&str]; 3] = [
+        &["Personalnummer", "Beispiel AG"],
+        &["00000", "Musterweg 1"],
+        &["", "12345 Musterstadt"],
+    ];
+    let address_and_bank: [&[&str]; 3] = [
+        &["Muster GmbH", "Musterbank"],
+        &["Musterweg 1", "IBAN DE00 0000 0000 0000 0000 00"],
+        &["12345 Musterstadt", "BIC MUSTDEXXXXX"],
+    ];
+    for rows in [&field_and_address[..], &address_and_bank[..]] {
+        let tree = Tree {
+            page: sheet(rows_at(rows, &[72.0, 250.0], 600.0, 9.2, 100), Vec::new()),
+        };
+        for k in [0.75f32, 1.0, 1.5] {
+            let typed = tree.scaled(k).typed(&text_of_lines(vec![100, 101, 102]));
+            assert!(find(&typed, Kind::Table).is_none(), "at {k}x: {typed:#?}");
+        }
+    }
+    let numbers: [&[&str]; 4] = [
+        &["113,35", "4120", "64", "30.09", "Gehalt"],
+        &["360,00", "4190", "70", "30.09", "Aushilfe"],
+        &["238,00", "4145", "71", "30.09", "Zulage"],
+        &["30,00", "4145", "72", "30.09", "Fahrgeld"],
+    ];
+    let tree = Tree {
+        page: sheet(
+            rows_at(
+                &numbers,
+                &[72.0, 140.0, 200.0, 250.0, 320.0],
+                600.0,
+                9.2,
+                100,
+            ),
+            Vec::new(),
+        ),
+    };
+    let typed = tree.typed(&text_of_lines(vec![100, 101, 102, 103]));
+    let (kind, lead) = winner(&typed);
+    assert_eq!(kind, Kind::Table, "{typed:#?}");
+    assert!(lead >= MARGIN, "{typed:#?}");
+}
+
+/// Task 18b (ruling Q7): a line of titles (every word capitalised, stops only after
+/// abbreviations) reads as no sentence and no prose.
+#[test]
+fn a_line_of_titles_is_no_sentence() {
+    let rows: [&[&str]; 1] = [&["Nr. Art Tage Std. Satz Brutto"]];
+    let tree = Tree {
+        page: sheet(rows_at(&rows, &[72.0], 600.0, 9.2, 100), Vec::new()),
+    };
+    let typed = tree.typed(&text_of_lines(vec![100]));
+    let paragraph = of(&typed, Kind::Paragraph);
+    assert!(
+        !ids(paragraph).contains(&"paragraph.sentences"),
+        "{typed:#?}"
+    );
+    assert!(
+        !ids(paragraph).contains(&"paragraph.prose_cells"),
+        "{typed:#?}"
+    );
+    // A sentence keeps its evidence.
+    let rows: [&[&str]; 1] = [&["Die Ware wird geliefert. Der Betrag ist sofort zu zahlen."]];
+    let tree = Tree {
+        page: sheet(rows_at(&rows, &[72.0], 600.0, 9.2, 100), Vec::new()),
+    };
+    let typed = tree.typed(&text_of_lines(vec![100]));
+    assert!(ids(of(&typed, Kind::Paragraph)).contains(&"paragraph.sentences"));
+}
+
+/// Task 18b (ruling Q3): an address in a size that is no text size of the page reads as a
+/// paragraph by its joined lines alone, and the walk keeps a line break before each of its
+/// lines.
+#[test]
+fn an_address_in_small_print_is_a_paragraph_with_its_breaks() {
+    let rows: [&[&str]; 3] = [&["Muster GmbH"], &["Musterweg 1"], &["12345 Musterstadt"]];
+    let mut texts = Vec::new();
+    for (k, row) in rows.iter().enumerate() {
+        texts.push(run(
+            row[0],
+            72.0,
+            600.0 - 8.0 * k as f32,
+            6.7,
+            100 + k as u32,
+        ));
+    }
+    let tree = Tree {
+        page: sheet(texts, Vec::new()),
+    };
+    let typed = tree.typed(&text_of_lines(vec![100, 101, 102]));
+    let paragraph = of(&typed, Kind::Paragraph);
+    assert_eq!(ids(paragraph), ["paragraph.joins"], "{typed:#?}");
+    let (kind, _) = winner(&typed);
+    assert_eq!(kind, Kind::Paragraph);
+    let breaks = tree.with(|view| {
+        use layoutregions::extract::text::{TextBlock, TextCx, next_block};
+        let runs: Vec<&TextRun> = view
+            .page
+            .texts
+            .iter()
+            .filter(|r| r.line >= 100 && r.line < 200)
+            .collect();
+        let lines = layoutregions::line::text_lines(&runs);
+        let levels = view.levels();
+        let block = vec![None; lines.len()];
+        let cx = TextCx {
+            levels: &levels,
+            block: &block,
+        };
+        match next_block(&lines, 0, false, &cx) {
+            (TextBlock::Paragraph { breaks }, 3) => breaks,
+            other => panic!("{other:?}"),
+        }
+    });
+    assert_eq!(breaks.len(), 2, "{breaks:?}");
+}
+
+/// Task 18b (ruling Q6): a text leaf whose walk reads list items and a paragraph is cut at the
+/// walk's block boundaries, so each part gets its own kind.
+#[test]
+fn a_leaf_of_mixed_text_kinds_is_cut_by_the_walk() {
+    let rows: [&[&str]; 3] = [
+        &["1. Erster Punkt der Liste"],
+        &["2. Zweiter Punkt der Liste"],
+        &["Die Firma liefert die bestellte Ware."],
+    ];
+    let page = sheet(rows_at(&rows, &[72.0], 600.0, 9.2, 100), Vec::new());
+    let file = [FilePage::of(&page)];
+    let facts = learn(&file, false, &no_amount);
+    let index = FileIndex::new(&facts);
+    let structure = drawn(&page, &|_| true);
+    let segs = segment_page(&page, &Limits::default(), &|| false);
+    let (segs, typed) =
+        layoutregions::typers::type_page(&page, &structure, segs, &facts, &index, &no_amount);
+    let lines_of = |s: &Segment| -> Vec<u32> {
+        let mut l: Vec<u32> = s
+            .prims
+            .iter()
+            .filter_map(|p| match p {
+                PrimId::Text(i) => Some(page.texts[*i as usize].line),
+                _ => None,
+            })
+            .collect();
+        l.sort_unstable();
+        l.dedup();
+        l
+    };
+    let walks: Vec<(Vec<u32>, Kind)> = segs
+        .all
+        .iter()
+        .filter(|s| s.source == Source::Walk)
+        .map(|s| (lines_of(s), winner(&typed[&s.id]).0))
+        .collect();
+    assert_eq!(
+        walks,
+        [(vec![100, 101], Kind::List), (vec![102], Kind::Paragraph)],
+        "{:#?}",
+        segs.all
+    );
+    let out = arbitrate(&segs, &typed, &Margins::default());
+    let mut got: Vec<PrimId> = out
+        .iter()
+        .flat_map(|d| segs.all[d.seg.0 as usize].prims.iter().copied())
+        .collect();
+    got.sort_unstable();
+    assert_eq!(got, segs.all[segs.root.0 as usize].prims, "the cover");
+}
+
+/// Task 18b (ruling Q7): the walk of a segment looks at the page's lines just under it, as the
+/// walk over the page does: a bold line at a heading size over more such lines of fields
+/// (a box cuts it off them) is no heading but lines apart.
+#[test]
+fn the_walk_of_a_segment_sees_the_lines_past_its_edge() {
+    let lines = ["Kundennummer 12345", "Seite 1 von 2", "Bearbeiter Muster"];
+    let texts: Vec<TextRun> = lines
+        .iter()
+        .enumerate()
+        .map(|(k, t)| bold(run(t, 75.0, 600.0 - 16.0 * k as f32, 13.8, 100 + k as u32)))
+        .collect();
+    // A box around the last two lines parts the first line off them.
+    let tree = Tree {
+        page: sheet(texts, box_rules([72.0, 560.0, 260.0, 592.0])),
+    };
+    let typed = tree.typed(&text_of_lines(vec![100]));
+    let (kind, _) = winner(&typed);
+    assert_eq!(kind, Kind::Paragraph, "{typed:#?}");
+    assert!(
+        ids(of(&typed, Kind::Paragraph)).contains(&"paragraph.lines_apart"),
+        "{typed:#?}"
+    );
 }

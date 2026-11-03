@@ -772,6 +772,14 @@ fn page_blocks_until(
             p
         }
     };
+    // The regions the page states (its tag tree's blocks and its form fields), for the shadow
+    // of the scored reading, before the detectors take runs out of the flow.
+    #[cfg(debug_assertions)]
+    let given = if crate::shadow::enabled() {
+        engine::given_regions(&engine_in, &flow.slots)
+    } else {
+        Vec::new()
+    };
     let mut arb = InOrder::new(&engine_in, &rezzer_layout::pdf::engine_limits(cx.budget));
     let mut pcx = PageCx {
         page,
@@ -1060,6 +1068,7 @@ fn page_blocks_until(
         let (facts, index) = &cx.style.facts;
         laid.shadow = crate::shadow::run(
             &engine_in,
+            given,
             facts,
             index,
             &rezzer_layout::pdf::engine_limits(cx.budget),

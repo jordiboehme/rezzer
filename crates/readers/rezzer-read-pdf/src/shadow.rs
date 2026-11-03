@@ -6,8 +6,10 @@
 //! engine lands a known difference.
 //!
 //! In a debug build with the environment variable `REZZER_SHADOW` set, the layout of each page
-//! also segments the page the engine took ([`layoutregions::segment::segment_page_drawn`]),
-//! types every segment ([`layoutregions::typers::type_segments`]) and arbitrates
+//! also segments the page the engine took with the regions the page states
+//! ([`crate::engine::given_regions`], [`layoutregions::segment::segment_page_drawn`]), cuts
+//! mixed text leaves and types every segment ([`layoutregions::typers::type_page`]) and
+//! arbitrates
 //! ([`layoutregions::arbitrate()`]), and keeps the decisions beside the in-order regions. The
 //! read itself does not change: the shadow asks no budget and decides nothing the reader uses.
 //! [`lines`] and [`records`] compare the two readings for the region report and the tests.
@@ -45,6 +47,7 @@ pub(crate) fn enabled() -> bool {
 #[cfg(debug_assertions)]
 pub(crate) fn run(
     page: &layoutregions::PageIn,
+    given: Vec<layoutregions::GivenRegion>,
     facts: &layoutregions::file::FileFacts,
     index: &layoutregions::typers::FileIndex,
     limits: &layoutregions::Limits,
@@ -55,12 +58,21 @@ pub(crate) fn run(
         return None;
     }
     let never = || false;
+    // The page with the regions it states, as Task 19 gives them.
+    let with_given;
+    let page = if given.is_empty() {
+        page
+    } else {
+        with_given = layoutregions::PageIn {
+            given,
+            ..page.clone()
+        };
+        &with_given
+    };
     let (segs, drawn) = layoutregions::segment::segment_page_drawn(page, limits, &never);
     let drawn = drawn?;
-    let view =
-        layoutregions::typers::PageView::new(page, &drawn, &segs, facts, index, ends_in_amount);
-    let typed = layoutregions::typers::type_segments(&view);
-    drop(view);
+    let (segs, typed) =
+        layoutregions::typers::type_page(page, &drawn, segs, facts, index, ends_in_amount);
     let decisions = layoutregions::arbitrate(&segs, &typed, &layoutregions::Margins::of(limits));
     Some(Shadow {
         tagged,
@@ -168,7 +180,9 @@ fn evidence(shadow: &Shadow, d: &Decision) -> String {
 ///
 /// - scored kind: the kinds of the decisions that hold the region's primitives, the one that
 ///   holds most first, joined by `+`;
-/// - certainty: the scored certainty of that decision, `in-order>scored` when they differ;
+/// - certainty: the scored certainty of that decision, `in-order>scored` when they differ
+///   (a region the file states, exact, against the in-order rule of the same kind is no
+///   difference);
 /// - best signals: that decision's evidence (see [`evidence`]);
 /// - extent: `same`, `split` (the region's primitives stand in several decisions), `merged`
 ///   (its decision holds primitives of other regions too) or `split+merged`.
@@ -221,7 +235,10 @@ pub fn lines(page: &EnginePage, extent: bool) -> Vec<String> {
             (true, true) => "split+merged",
         };
         let same_kind = kinds == [r.kind];
-        let same_certainty = d.certainty == r.certainty;
+        // A region the file states is exact in the scored reading; the in-order layout reads
+        // the same tag block with a rule. That is no difference of the reading.
+        let same_certainty = d.certainty == r.certainty
+            || (same_kind && r.certainty == Certainty::Rule && d.certainty == Certainty::Exact);
         if same_kind && same_certainty && (!extent || shape == "same") {
             continue;
         }

@@ -228,11 +228,13 @@ fn given_regions_come_first_and_whole() {
             kind: Kind::Paragraph,
             prims: vec![PrimId::Text(3), PrimId::Text(4), PrimId::Text(999)],
             order: 2,
+            level: None,
         },
         GivenRegion {
             kind: Kind::Table,
             prims: vec![PrimId::Text(2), PrimId::Text(3), PrimId::Rule(0)],
             order: 1,
+            level: None,
         },
     ];
     let s = segment_page(&p, &Limits::default(), &|| false);
@@ -572,6 +574,7 @@ fn a_grid_the_given_regions_took_is_no_segment() {
         kind: Kind::Table,
         prims,
         order: 0,
+        level: None,
     }];
     assert_eq!(
         drawn(&p, &|_| true).grids.map(|g| g.groups.len()),
@@ -713,6 +716,7 @@ fn a_child_the_given_regions_took_is_no_depth_issue() {
         kind: Kind::Table,
         prims,
         order: 0,
+        level: None,
     }];
     let one = Limits {
         max_cut_depth: 1,
@@ -740,6 +744,7 @@ fn given_regions_beside_an_alternative() {
         kind: Kind::FooterBand,
         prims: vec![PrimId::Text(20)],
         order: 0,
+        level: None,
     }];
     let s = segment_page(&p, &Limits::default(), &|| false);
     check_cover(&s, &p);

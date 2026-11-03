@@ -41,7 +41,7 @@ pub const HEADING_TITLE_LINES: u16 = 200;
 /// `paragraph.text_size`: the lines are set in a text size of the page or the body size.
 pub const PARAGRAPH_TEXT_SIZE: u16 = 300;
 /// `paragraph.joins`: lines go on one another as one paragraph.
-pub const PARAGRAPH_JOINS: u16 = 250;
+pub const PARAGRAPH_JOINS: u16 = 300;
 /// `paragraph.sentences`: the lines read as sentences.
 pub const PARAGRAPH_SENTENCES: u16 = 150;
 /// `paragraph.lines_apart`, `.unwrapped`, `.cells`, `.address` and `.sentences_demoted`: lines
@@ -90,6 +90,18 @@ pub(crate) enum Read {
     Item { joins: bool, lines: usize },
 }
 
+impl Read {
+    /// The text kind the block reads as: a heading that keeps its lines, a paragraph (a
+    /// heading size that reads as a paragraph too), a list item.
+    pub(crate) fn kind(&self) -> Kind {
+        match self {
+            Read::Heading { demoted: None, .. } => Kind::Heading,
+            Read::Heading { .. } | Read::Paragraph { .. } => Kind::Paragraph,
+            Read::Item { .. } => Kind::List,
+        }
+    }
+}
+
 /// The text of a segment as the typers read it.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SegText {
@@ -98,7 +110,9 @@ pub(crate) struct SegText {
     /// The line numbers of its runs with ink, sorted, once each.
     lines: Vec<u32>,
     /// The blocks the walk reads its lines as, in order.
-    blocks: Vec<Read>,
+    pub(crate) blocks: Vec<Read>,
+    /// The lines of each block, as a range of the segment's lines (in the order of its runs).
+    pub(crate) spans: Vec<(usize, usize)>,
     /// Every line with ink is set in a text size of the page or in the body size.
     text_size: bool,
 }
@@ -135,26 +149,55 @@ impl SegText {
             .collect();
         lines.sort_unstable();
         lines.dedup();
-        let all = text_lines(&refs);
+        let seg_lines = text_lines(&refs);
+        // The page lines just over and under the segment, for the walk's look past its edges
+        // (the heading rule looks at two lines over and under a block): the walk reads only
+        // the segment's lines, its blocks end at the segment's last line.
+        let inked_on = |line: u32| {
+            refs.iter()
+                .filter(|r| r.line == line && !r.text.trim().is_empty())
+                .count() as u32
+        };
+        let (over, under) = match (seg_lines.first(), seg_lines.last()) {
+            (Some(f), Some(l)) => {
+                let (f, l) = (f.runs[0].line, l.runs[0].line);
+                view.context((f, inked_on(f)), (l, inked_on(l)))
+            }
+            _ => (&[][..], &[][..]),
+        };
+        let texts = &view.page.texts;
+        let mut ext: Vec<&TextRun> = Vec::new();
+        for r in over {
+            ext.extend(&texts[r.start..r.end]);
+        }
+        let before = text_lines(&ext).len();
+        ext.extend(refs.iter().copied());
+        for r in under {
+            ext.extend(&texts[r.start..r.end]);
+        }
+        let all = text_lines(&ext);
+        let end = before + seg_lines.len();
         let levels = view.levels();
         let block = vec![None; all.len()];
         let cx = TextCx {
             levels: &levels,
             block: &block,
         };
-        crate::work::add((refs.len() + all.len()) as u64);
+        crate::work::add((ext.len() + all.len()) as u64);
         let body = [view.file.body_size];
-        let text_size = all
+        let text_size = seg_lines
             .iter()
             .filter(|l| !l.text.is_empty())
             .all(|l| in_text_size(l.size, view.text_sizes()) || in_text_size(l.size, &body));
         // The walk as a reader makes it: an item leaves its list open, a line without text
         // leaves it as it is, a heading or a paragraph closes it.
         let mut blocks = Vec::new();
+        let mut spans = Vec::new();
         let mut open = false;
-        let mut i = 0;
-        while i < all.len() {
+        let mut i = before;
+        while i < end {
             let (found, j) = next_block(&all, i, open, &cx);
+            let j = j.min(end);
             let read = match found {
                 TextBlock::Empty => None,
                 TextBlock::Heading { demoted, .. } => {
@@ -184,16 +227,41 @@ impl SegText {
                     })
                 }
             };
-            blocks.extend(read);
+            if let Some(read) = read {
+                blocks.push(read);
+                spans.push((i - before, j - before));
+            }
             i = j;
         }
         Some(SegText {
             runs: ids,
             lines,
             blocks,
+            spans,
             text_size,
         })
     }
+}
+
+/// A stop closes an abbreviation when the word before it has at most this many letters
+/// (`Nr.`, `Std.`, `Pos.`).
+const ABBREVIATION_LETTERS: usize = 4;
+
+/// Whether `text` is a line of titles, not a sentence: every word opens with a capital or a
+/// digit, and every stop in it closes an abbreviation (see [`ABBREVIATION_LETTERS`]):
+/// `Nr. Art Tage Std. Satz Brutto` heads columns, it says nothing.
+pub(crate) fn title_words(text: &str) -> bool {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    !words.is_empty()
+        && words.iter().all(|w| {
+            let opens = w
+                .chars()
+                .find(|c| c.is_alphanumeric())
+                .is_none_or(|c| c.is_uppercase() || c.is_ascii_digit());
+            let letters = w.chars().filter(|c| c.is_alphabetic()).count();
+            let stop = w.ends_with(['.', '!', '?']) || w.contains(['!', '?']);
+            opens && (!stop || (w.ends_with('.') && letters <= ABBREVIATION_LETTERS))
+        })
 }
 
 /// Paragraph: the walk reads every line as paragraphs, or as lines of a heading size that read
@@ -202,6 +270,18 @@ impl SegText {
 /// they read as sentences (`paragraph.sentences`), and the reason a heading's lines read as a
 /// paragraph (one signal per [`Demotion`]).
 pub fn type_paragraph(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
+    // Lines of titles (every word capitalised, stops only after abbreviations) are no prose
+    // and no sentences, wherever they stand.
+    let titles = {
+        let (refs, _) = super::seg_runs(view, seg);
+        let lines = text_lines(&refs);
+        let inked: Vec<&str> = lines
+            .iter()
+            .map(|l| l.text.as_str())
+            .filter(|t| !t.is_empty())
+            .collect();
+        !inked.is_empty() && inked.iter().all(|t| title_words(t))
+    };
     // What the table rules say of the segment: prose they refuse, or cells they read.
     let prose = super::table::refusal(view, seg)
         .filter(|r| r.kind == Kind::Paragraph && r.signal.weight > 0)
@@ -214,7 +294,8 @@ pub fn type_paragraph(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
                     PARAGRAPH_PROSE_CELLS,
                 )
             })
-        });
+        })
+        .filter(|_| !titles);
     let in_table = super::table::type_table(view, seg).is_some();
     view.with_text(seg, |t| {
         let all = t.blocks.iter().all(|b| {
@@ -260,15 +341,17 @@ pub fn type_paragraph(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
                 PARAGRAPH_JOINS,
             ));
         }
-        if t.blocks.iter().any(|b| {
-            matches!(
-                b,
-                Read::Paragraph {
-                    sentences: true,
-                    ..
-                }
-            )
-        }) {
+        if !titles
+            && t.blocks.iter().any(|b| {
+                matches!(
+                    b,
+                    Read::Paragraph {
+                        sentences: true,
+                        ..
+                    }
+                )
+            })
+        {
             signals.push(signal(
                 "paragraph.sentences",
                 "the lines read as sentences".into(),

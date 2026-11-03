@@ -947,3 +947,71 @@ fn a_caption_line_makes_no_figure_of_the_text_around_it() {
         }
     }
 }
+
+/// A parent of the kind of a sure child that it does not outscore only spreads that child's
+/// reading over its neighbours: it folds no sure sibling of another kind (an address under a
+/// table read as rows). A parent that outscores its child (a header row its reading adds)
+/// still folds.
+#[test]
+fn a_parent_that_only_spreads_a_child_folds_no_sibling() {
+    let tree = |parent: u16| {
+        let mut b = Build::new();
+        let p = b.add(Some(0), Source::Rest, Vec::new());
+        let rows = b.add(Some(p), Source::Band, vec![text(0), text(1)]);
+        let address = b.add(Some(p), Source::Band, vec![text(2)]);
+        let segs = b.done();
+        let typed = BTreeMap::from([
+            (SegId(p), vec![typed(Kind::Table, parent)]),
+            (SegId(rows), vec![typed(Kind::Table, 800)]),
+            (SegId(address), vec![typed(Kind::Paragraph, 600)]),
+        ]);
+        (segs, typed, rows, address)
+    };
+    // 800 over 600 leads by the margin, but the table child is as strong: the cut stands.
+    let (segs, typed, rows, address) = tree(800);
+    let out = decide_all(&segs, &typed);
+    assert_eq!(
+        out.iter().map(|d| (d.seg, d.kind)).collect::<Vec<_>>(),
+        [
+            (SegId(rows), Kind::Table),
+            (SegId(address), Kind::Paragraph)
+        ]
+    );
+    // A stronger parent reading (evidence the child lacks) folds them.
+    let (segs, typed, _, _) = tree(900);
+    let out = decide_all(&segs, &typed);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].kind, Kind::Table);
+}
+
+/// A figure keeps the text of its region as text: a figure parent folds no sure decision of a
+/// text kind, however strong it is.
+#[test]
+fn a_figure_folds_no_sure_text() {
+    let mut b = Build::new();
+    let p = b.add(Some(0), Source::Box, Vec::new());
+    let picture = b.add(Some(p), Source::Drawing, vec![PrimId::Picture(0)]);
+    let label = b.add(Some(p), Source::Rest, vec![text(0)]);
+    let segs = b.done();
+    let typed = BTreeMap::from([
+        (SegId(p), vec![typed(Kind::Figure, 1000)]),
+        (SegId(picture), vec![typed(Kind::Figure, 550)]),
+        (SegId(label), vec![typed(Kind::Paragraph, 300)]),
+    ]);
+    let out = decide_all(&segs, &typed);
+    assert_eq!(
+        out.iter().map(|d| (d.seg, d.kind)).collect::<Vec<_>>(),
+        [
+            (SegId(picture), Kind::Figure),
+            (SegId(label), Kind::Paragraph)
+        ]
+    );
+    // Text with no sure decision (Spatial) folds into it.
+    let unsure = BTreeMap::from([
+        (SegId(p), vec![typed_of(Kind::Figure, 1000)]),
+        (SegId(picture), vec![typed_of(Kind::Figure, 550)]),
+    ]);
+    let out = decide_all(&segs, &unsure);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].kind, Kind::Figure);
+}

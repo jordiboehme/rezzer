@@ -16,8 +16,8 @@
 use crate::extract::pairs::blocks::{KeyValues, key_values};
 use crate::extract::pairs::strips::{Kind as ValueKind, cells_of, kind_of, strip_cells};
 use crate::extract::pairs::{
-    Field, Parsed, Reading, Style, WEIGHT_ONLY, parse, small_size, style_of, touch_reach, touching,
-    words,
+    Field, Parsed, Reading, Style, WEIGHT_ONLY, parse, same_style, small_size, style_of,
+    touch_reach, touching, words,
 };
 use crate::extract::table::grid::{Shape, titles_over_values};
 use crate::extract::table::ruled::edges;
@@ -30,8 +30,9 @@ use crate::typers::{Lined, PageView, Typed, lined, seg_runs, signal, text_alone}
 /// `label_value.fields`: the pair rules read the segment as fields.
 pub const LABEL_FIELDS: u16 = 450;
 /// `label_value.field_cells`: every cell with text of a grid (drawn boxes, or fields between
-/// rules with dividers) reads as a field: the cells are fields, not a table's values.
-pub const LABEL_FIELD_CELLS: u16 = 850;
+/// rules with dividers) reads as a field: the cells are fields, not a table's values. It leads
+/// the most a paragraph reading of their text reaches (750) by the margin.
+pub const LABEL_FIELD_CELLS: u16 = 900;
 /// `label_value.key_values` and `label_value.labels_over_values`: the lines are a block of
 /// labels and values, or two lines of titles over their values (today's first readings). Such
 /// lines stand in two pieces or more, so a heading's reading of them is demoted as cells (at
@@ -44,13 +45,101 @@ pub const LABEL_STYLE: u16 = 100;
 pub const LABEL_COLON: u16 = 150;
 /// `label_value.value_shape`: the values are numbers, dates or codes.
 pub const LABEL_VALUE_SHAPE: u16 = 150;
-/// `label_value.boxes_touch`: the boxes of the fields touch in a row or a column.
-pub const LABEL_BOXES_TOUCH: u16 = 300;
+/// `label_value.boxes_touch`: the boxes of the fields touch in a row or a column. With the
+/// field and its label style (550) it reaches 900, the margin over a paragraph (750).
+pub const LABEL_BOXES_TOUCH: u16 = 350;
 /// `label_value.dividers`: the fields stand between rules with dividers.
 pub const LABEL_DIVIDERS: u16 = 100;
 /// `label_value.known_style`: a pair of one size, its label in a style that pairs with
 /// independent evidence show.
 pub const LABEL_KNOWN_STYLE: u16 = 100;
+/// `label_value.line_pairs`: every line is a short label and its value, each pair with
+/// evidence of its own (see [`line_pair`]). With the colon or the value shape it carries it
+/// reaches 900, which leads the most a paragraph reading of such lines reaches (text size,
+/// joins and sentences: 750) by the margin.
+pub const LABEL_LINE_PAIRS: u16 = 750;
+
+/// Whether every pair of a block of labels and values has evidence of its own: a label that
+/// ends with a colon, a value shaped as a number, a date or a code, or a label in another style
+/// than its value (set apart by size, weight or face). Two names side by side in one style
+/// (an address beside an address) are no pair. A label without a value (an empty field) needs
+/// none; at least one pair has a value.
+pub(crate) fn pairs_evidenced(
+    runs: &[&TextRun],
+    rows: &[crate::extract::pairs::blocks::KeyValue],
+) -> bool {
+    let mut valued = 0;
+    for row in rows {
+        let Some((s, e)) = row.value else { continue };
+        valued += 1;
+        let label: Vec<usize> = (row.label.0..row.label.1).collect();
+        let value: Vec<usize> = (s..e).collect();
+        let colon = words(runs, &label).ends_with(':');
+        let shaped = value_shape(&words(runs, &value));
+        let apart = match (label.first(), value.first()) {
+            (Some(&l), Some(&v)) => !same_style(runs[l], runs[v]),
+            _ => false,
+        };
+        if !(colon || shaped || apart) {
+            return false;
+        }
+    }
+    valued > 0
+}
+
+/// A label of a line pair holds at most this many words: a label names, it does not say.
+const PAIR_LABEL_WORDS: usize = 4;
+/// A value of a line pair that has no shape of its own holds at most this many words and no
+/// sentence: longer text after a colon is prose (`Note: this is a sentence ...`).
+const PAIR_VALUE_WORDS: usize = 6;
+
+/// The label and the value of one line of `runs` (its pieces `pieces`), each pair with
+/// evidence of its own, and whether the label ends with a colon:
+///
+/// - one piece that holds a colon after a short label (at most [`PAIR_LABEL_WORDS`] words with
+///   a letter): the value after it is shaped as a number, date or code, or short (at most
+///   [`PAIR_VALUE_WORDS`] words) and no sentence;
+/// - with `lone` (the only line of its group), two pieces: a short label with a letter and a
+///   value shaped as a number, a date or a code (`Rechnungs-Nr.   2026004711`).
+///
+/// Anything else is no pair; more pieces are a row, which the table rules read.
+pub(crate) fn line_pair(
+    runs: &[&TextRun],
+    pieces: &[crate::extract::table::grid::Piece],
+    lone: bool,
+) -> Option<(String, String, bool)> {
+    let text =
+        |p: &crate::extract::table::grid::Piece| words(runs, &(p.start..p.end).collect::<Vec<_>>());
+    let short_label = |l: &str| {
+        let n = l.split_whitespace().count();
+        (1..=PAIR_LABEL_WORDS).contains(&n) && l.chars().any(char::is_alphabetic)
+    };
+    let no_sentence = |v: &str| {
+        let n = v.split_whitespace().count();
+        n <= PAIR_VALUE_WORDS && !v.trim_end().ends_with(['.', '!', '?']) && !v.contains(". ")
+    };
+    match pieces {
+        [one] => {
+            let t = text(one);
+            let at = t.find(": ")?;
+            let (label, value) = (t[..=at].trim(), t[at + 1..].trim());
+            let label_words = label.trim_end_matches(':');
+            if value.is_empty() || !short_label(label_words) {
+                return None;
+            }
+            (value_shape(value) || no_sentence(value))
+                .then(|| (label.to_string(), value.to_string(), true))
+        }
+        [a, b] if lone => {
+            let (label, value) = (text(a), text(b));
+            (short_label(&label) && value_shape(&value)).then(|| {
+                let colon = label.ends_with(':');
+                (label, value, colon)
+            })
+        }
+        _ => None,
+    }
+}
 
 /// Whether `text` is a value of a shape of its own: a number, a percent, a date, or a code
 /// (digits and letters, every word with a digit: `RE-2026-0001`, not `Musterweg 1`).
@@ -250,8 +339,9 @@ pub(crate) fn label_value(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
                 ..
             } = lined(&refs);
             let off = vec![false; ranges.len()];
-            if let KeyValues::Rows(rows) =
-                key_values(&runs, &ranges, 0, ranges.len(), &pieces, &off)
+            let read = key_values(&runs, &ranges, 0, ranges.len(), &pieces, &off);
+            if let KeyValues::Rows(rows) = read
+                && pairs_evidenced(&runs, &rows)
             {
                 signals.push(signal(
                     "label_value.key_values",
@@ -265,7 +355,34 @@ pub(crate) fn label_value(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
                     LABEL_KEY_VALUES,
                 ));
             } else {
-                return None;
+                let lone = ranges.len() == 1;
+                let pairs: Option<Vec<(String, String, bool)>> =
+                    pieces.iter().map(|p| line_pair(&runs, p, lone)).collect();
+                let pairs = pairs.filter(|p| !p.is_empty())?;
+                signals.push(signal(
+                    "label_value.line_pairs",
+                    format!("{} lines of a short label and its value", pairs.len()),
+                    LABEL_LINE_PAIRS,
+                ));
+                if pairs.iter().all(|p| p.2) {
+                    signals.push(signal(
+                        "label_value.colon",
+                        "the labels end with a colon".into(),
+                        LABEL_COLON,
+                    ));
+                }
+                if pairs.iter().all(|p| value_shape(&p.1)) {
+                    signals.push(signal(
+                        "label_value.value_shape",
+                        "the values are numbers, dates or codes".into(),
+                        LABEL_VALUE_SHAPE,
+                    ));
+                }
+                // Neither a colon nor a shape on every line: the pairs are not evidenced
+                // as one group.
+                if signals.len() == 1 {
+                    return None;
+                }
             }
         }
         _ => return None,

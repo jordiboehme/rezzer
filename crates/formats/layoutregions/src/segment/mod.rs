@@ -54,6 +54,10 @@ pub enum Source {
     /// Drawn primitives of a segment that no drawn child holds: its rules and boxes together,
     /// or one picture, or one code. It is one leaf.
     Drawing,
+    /// Lines of a text leaf that the text walk reads as one kind (a heading, paragraphs, list
+    /// items), where the walk reads the leaf's lines as more than one kind (see
+    /// [`crate::typers::walk_cut`]).
+    Walk,
 }
 
 /// A candidate region: the primitives it holds and what parted it from the rest.

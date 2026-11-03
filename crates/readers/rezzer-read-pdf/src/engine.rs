@@ -10,6 +10,8 @@ use layoutregions::segment::drawn::{DrawnStructure, Grids};
 use layoutregions::{
     Bounds, BoxIn, CodeIn, FontKind, GapIn, PageIn, PictureIn, PrimId, RuleIn, Shift, TextRun,
 };
+#[cfg(debug_assertions)]
+use layoutregions::{GivenRegion, Kind};
 
 use crate::layout::{Drawn, Run};
 use crate::order::Turn;
@@ -315,5 +317,143 @@ mod tests {
         // The code is placed into the turned frame like the pictures.
         let c = page.codes[0].bounds;
         assert!(c.x0 >= 0.0 && c.x1 <= 800.0 && c.y0 >= 0.0 && c.y1 <= 200.0);
+    }
+}
+
+/// The regions a page states itself, as the region engine takes them: every block of the tag
+/// tree the layout reads (`slots`, one per run of `page.texts`, in their order) and every
+/// form field box. A heading element is a `Heading` with the level its role gives, a
+/// paragraph element a `Paragraph` (a caption too), a note a `FootnoteLegend`, a list (its
+/// items with it) a `List`, a table (its cells) a `Table`; each holds the runs of its element.
+/// A form field is a `LabelValue` of its box and the runs whose centre lies in it that no tag
+/// element holds. Untagged runs belong to none. In the order of their first run; the fields
+/// after the tag elements.
+/// Only the shadow uses it until Task 19, so release builds leave it out.
+#[cfg(debug_assertions)]
+pub(crate) fn given_regions(page: &PageIn, slots: &[crate::layout::Slot]) -> Vec<GivenRegion> {
+    use crate::layout::Slot;
+    use std::collections::HashMap;
+    // The element of each run, its kind and level.
+    let mut at: HashMap<(u8, usize), usize> = HashMap::new();
+    let mut out: Vec<GivenRegion> = Vec::new();
+    let mut held = vec![false; page.texts.len()];
+    for (i, slot) in slots.iter().enumerate().take(page.texts.len()) {
+        let (key, kind, level) = match *slot {
+            Slot::Heading(level, e) => ((0, e), Kind::Heading, Some(level)),
+            Slot::Para(e, Some("footnote")) => ((1, e), Kind::FootnoteLegend, None),
+            Slot::Para(e, _) => ((1, e), Kind::Paragraph, None),
+            Slot::Item { list, .. } => ((2, list), Kind::List, None),
+            Slot::Cell { table, .. } => ((3, table), Kind::Table, None),
+            Slot::Free | Slot::Block(_) => continue,
+        };
+        held[i] = true;
+        let k = *at.entry(key).or_insert_with(|| {
+            out.push(GivenRegion {
+                kind,
+                prims: Vec::new(),
+                order: out.len() as u32,
+                level,
+            });
+            out.len() - 1
+        });
+        out[k].prims.push(PrimId::Text(i as u32));
+    }
+    for (b, field) in page.boxes.iter().enumerate().filter(|(_, b)| b.widget) {
+        let f = field.bounds;
+        let mut prims = vec![PrimId::Box(b as u32)];
+        for (i, r) in page.texts.iter().enumerate() {
+            let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
+            if !held[i] && cx >= f.x0 && cx <= f.x1 && cy >= f.y0 && cy <= f.y1 {
+                held[i] = true;
+                prims.push(PrimId::Text(i as u32));
+            }
+        }
+        out.push(GivenRegion {
+            kind: Kind::LabelValue,
+            prims,
+            order: out.len() as u32,
+            level: None,
+        });
+    }
+    out
+}
+
+#[cfg(all(test, debug_assertions))]
+mod given_tests {
+    use super::*;
+    use crate::layout::Slot;
+
+    fn text(t: &str, x: f32, y: f32) -> TextRun {
+        TextRun {
+            text: t.into(),
+            x,
+            y,
+            w: 40.0,
+            h: 8.0,
+            size: 8.0,
+            font: 0,
+            font_kind: FontKind::Proportional,
+            bold: false,
+            italic: false,
+            color: None,
+            shift: Shift::Base,
+            line: 0,
+            off_axis: false,
+            gaps: Vec::new(),
+        }
+    }
+
+    /// Task 18b (ruling Q1): every tag block the layout reads is a region the page states, a
+    /// heading with its level, a list with its items, a table with its cells; a form field box
+    /// with the runs in it that no tag holds; untagged runs are in none.
+    #[test]
+    fn tag_blocks_and_form_fields_are_given_regions() {
+        let mut page = PageIn {
+            page: 1,
+            size: [600.0, 800.0],
+            turn: 0,
+            texts: (0..7)
+                .map(|k| text("Muster", 50.0, 700.0 - 20.0 * k as f32))
+                .collect(),
+            rules: Vec::new(),
+            boxes: Vec::new(),
+            pictures: Vec::new(),
+            codes: Vec::new(),
+            given: Vec::new(),
+        };
+        page.boxes.push(box_in(&[45.0, 575.0, 200.0, 590.0], true));
+        let slots = [
+            Slot::Heading(2, 10),
+            Slot::Para(11, None),
+            Slot::Item { list: 12, item: 13 },
+            Slot::Item { list: 12, item: 14 },
+            Slot::Cell {
+                table: 15,
+                cell: 16,
+            },
+            Slot::Para(17, Some("footnote")),
+            Slot::Free,
+        ];
+        let given = given_regions(&page, &slots);
+        let got: Vec<(Kind, Option<u8>, Vec<PrimId>)> = given
+            .iter()
+            .map(|g| (g.kind, g.level, g.prims.clone()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (Kind::Heading, Some(2), vec![PrimId::Text(0)]),
+                (Kind::Paragraph, None, vec![PrimId::Text(1)]),
+                (Kind::List, None, vec![PrimId::Text(2), PrimId::Text(3)]),
+                (Kind::Table, None, vec![PrimId::Text(4)]),
+                (Kind::FootnoteLegend, None, vec![PrimId::Text(5)]),
+                (
+                    Kind::LabelValue,
+                    None,
+                    vec![PrimId::Box(0), PrimId::Text(6)]
+                ),
+            ]
+        );
+        assert!(given.iter().enumerate().all(|(k, g)| g.order == k as u32));
     }
 }

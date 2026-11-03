@@ -21,7 +21,9 @@
 //! segment's path to the root, and asks whether every line of the segment holds an amount
 //! under a money column of that table.
 
-use crate::extract::pairs::blocks::{KeyValues, key_values};
+use crate::extract::pairs::blocks::{
+    Columns, KeyValues, address_block, address_columns, blocks_of, key_values, postal,
+};
 use crate::extract::table::area::{MANY_COLUMNS, MAX_COLUMNS, ON_PICTURE, PAGE_FRAME, TINY_TEXT};
 use crate::extract::table::banded::{
     BAND_WORK, BandCells, BodyBelow, band_cells, band_head_refused, band_titles, body_below,
@@ -77,6 +79,8 @@ const FIELD_CELLS: &str = "its cells each hold a label and its value";
 const KEY_VALUE_LINES: &str = "its lines are labels and values";
 /// Why two lines of titles over their values are no table.
 const TITLE_LINES: &str = "its lines are titles over their values";
+/// A refusal: the lines are blocks side by side (see [`address_columns`]).
+const SIDE_BLOCKS: &str = "its columns are blocks side by side, each a block of its own";
 /// Why lines read as totals under a table are no table of their own.
 const TOTALS_LINES: &str = "its lines are totals under the table above";
 
@@ -212,6 +216,7 @@ fn refused(speaks: Speaks, why: &'static str) -> Find {
         (Speaks::Spatial, ROWS_ALIKE) => (Kind::Spatial, "spatial.rows_alike", 0),
         (Speaks::Spatial, CROSSES_LINES) => (Kind::Spatial, "spatial.crossed_lines", 0),
         (Speaks::Spatial, NO_ROWS_AND_COLUMNS) => (Kind::Spatial, "spatial.no_rows_and_columns", 0),
+        (Speaks::Spatial, SIDE_BLOCKS) => (Kind::Spatial, "spatial.side_blocks", 0),
         (Speaks::Spatial, _) => (Kind::Spatial, "spatial.refused_table", 0),
         (Speaks::LabelValue, _) => (Kind::LabelValue, "label_value.refuses_table", 0),
         (Speaks::Totals, _) => (Kind::Totals, "totals.refuses_table", 0),
@@ -229,7 +234,7 @@ fn speaks_for(why: &'static str) -> Option<Speaks> {
         LONG_TEXT | RUNS_ON | SET_FULL | ADDRESS_TEXT | SENTENCE_TEXT => Some(Speaks::Paragraph),
         ON_PICTURE | TINY_TEXT | FIGURE_NEAR => Some(Speaks::Figure),
         PAGE_FRAME | MANY_COLUMNS | EMPTY_CELLS | NO_ROWS_AND_COLUMNS | CROSSES_LINES | COMB
-        | ROWS_ALIKE | CONTENTS => Some(Speaks::Spatial),
+        | ROWS_ALIKE | CONTENTS | SIDE_BLOCKS => Some(Speaks::Spatial),
         _ => None,
     }
 }
@@ -693,6 +698,19 @@ fn lines(view: &PageView<'_>, seg: &Segment, given: bool) -> Find {
         }
         if titles_over_values(&runs, &ranges, &pieces) {
             return refused(Speaks::LabelValue, TITLE_LINES);
+        }
+        // Blocks side by side on shared baselines, each a block of facts of its own (an
+        // address beside a bank or a register): their lines share no column structure, so
+        // they are no rows of one table (today's rule of the lines without rules, one copy).
+        // So are columns of which one holds a postal address down its lines: a table of
+        // addresses holds one address a row, never one down a column.
+        let (columns, _) = blocks_of(&runs, &pieces);
+        let address_down = columns.iter().any(|c| {
+            let lines: Vec<&str> = c.iter().flatten().map(|l| l.text.as_str()).collect();
+            address_block(&lines) && postal(&lines)
+        });
+        if address_down || matches!(address_columns(&columns), Columns::Blocks | Columns::Headed) {
+            return refused(Speaks::Spatial, SIDE_BLOCKS);
         }
     }
     let mut b = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];

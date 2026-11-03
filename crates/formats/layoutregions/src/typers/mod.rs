@@ -46,6 +46,10 @@ pub use text::{
 /// The highest score.
 pub const MAX_SCORE: u16 = 1000;
 
+/// How many lines of the page over and under a segment its walk looks at: the two-line look of
+/// the heading rule (see [`crate::extract::text::heading_block`]).
+pub const CONTEXT_LINES: usize = 2;
+
 /// What a typer found for its kind in a segment.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Typed {
@@ -83,12 +87,17 @@ pub(crate) fn text_alone(view: &PageView<'_>, seg: &Segment) -> bool {
     use crate::segment::Source;
     matches!(
         seg.source,
-        Source::Gutter | Source::Band | Source::Rule | Source::Style | Source::Rest
+        Source::Gutter | Source::Band | Source::Rule | Source::Style | Source::Rest | Source::Walk
     ) && seg.children.iter().all(|c| {
         view.segs.all.get(c.0 as usize).is_some_and(|k| {
             matches!(
                 k.source,
-                Source::Gutter | Source::Band | Source::Rule | Source::Style | Source::Rest
+                Source::Gutter
+                    | Source::Band
+                    | Source::Rule
+                    | Source::Style
+                    | Source::Rest
+                    | Source::Walk
             )
         })
     })
@@ -183,6 +192,134 @@ pub fn type_segments(view: &PageView<'_>) -> BTreeMap<SegId, Vec<Typed>> {
         .collect()
 }
 
+/// The segment tree of the view with each text leaf whose walk reads blocks of more than one
+/// text kind (a heading over its paragraph, list items and a paragraph) cut at the walk's block
+/// boundaries: one [`Source::Walk`] child per run of blocks of one kind, so each kind is typed
+/// on its own lines. Lines with no text go with the block before them. `None` when no leaf is
+/// cut. The caller types the new tree with a new view.
+///
+/// [`Source::Walk`]: crate::segment::Source::Walk
+pub fn walk_cut(view: &PageView<'_>) -> Option<Segments> {
+    use crate::segment::Source;
+    let mut cuts: Vec<(usize, Vec<Vec<PrimId>>)> = Vec::new();
+    for (k, seg) in view.segs.all.iter().enumerate() {
+        crate::work::add(1);
+        if !seg.children.is_empty() || !seg.alternatives.is_empty() || !text_alone(view, seg) {
+            continue;
+        }
+        let Some(spans) = view.with_text(seg, |t| {
+            let kinds: Vec<Kind> = t.blocks.iter().map(text::Read::kind).collect();
+            let mixed = kinds.windows(2).any(|w| w[0] != w[1]);
+            mixed.then(|| (kinds, t.spans.clone()))
+        }) else {
+            continue;
+        };
+        // The segment's lines, as the walk read them.
+        let mut refs: Vec<(&TextRun, u32)> = Vec::new();
+        for p in &seg.prims {
+            if let PrimId::Text(i) = *p
+                && let Some(r) = view.page.texts.get(i as usize)
+            {
+                refs.push((r, i));
+            }
+        }
+        let mut line_of: Vec<usize> = Vec::with_capacity(refs.len());
+        let mut n = 0usize;
+        for (j, (r, _)) in refs.iter().enumerate() {
+            if j > 0 && refs[j - 1].0.line != r.line {
+                n += 1;
+            }
+            line_of.push(n);
+        }
+        let (kinds, spans) = spans;
+        // The groups: consecutive blocks of one kind, by their first line.
+        let mut starts: Vec<usize> = Vec::new();
+        for (b, &(i, _)) in spans.iter().enumerate() {
+            if b == 0 || kinds[b] != kinds[b - 1] {
+                starts.push(if b == 0 { 0 } else { i });
+            }
+        }
+        let mut groups: Vec<Vec<PrimId>> = vec![Vec::new(); starts.len()];
+        for (j, (_, id)) in refs.iter().enumerate() {
+            let g = starts
+                .partition_point(|&s| s <= line_of[j])
+                .saturating_sub(1);
+            groups[g].push(PrimId::Text(*id));
+        }
+        groups.retain(|g| !g.is_empty());
+        if groups.len() >= 2 {
+            cuts.push((k, groups));
+        }
+    }
+    if cuts.is_empty() {
+        return None;
+    }
+    let mut segs = view.segs.clone();
+    for (k, groups) in cuts {
+        let parent = segs.all[k].id;
+        for mut prims in groups {
+            prims.sort_unstable();
+            let id = SegId(segs.all.len() as u32);
+            let bounds = text_extent(view.page, &prims);
+            segs.all.push(Segment {
+                id,
+                bounds,
+                prims,
+                source: Source::Walk,
+                parent: Some(parent),
+                children: Vec::new(),
+                alternatives: Vec::new(),
+            });
+            segs.all[k].children.push(id);
+        }
+    }
+    Some(segs)
+}
+
+/// The box of the text runs `prims` of `page`.
+fn text_extent(page: &PageIn, prims: &[PrimId]) -> crate::region::Bounds {
+    let mut b = crate::region::Bounds {
+        x0: f32::MAX,
+        y0: f32::MAX,
+        x1: f32::MIN,
+        y1: f32::MIN,
+    };
+    for p in prims {
+        if let PrimId::Text(i) = *p
+            && let Some(r) = page.texts.get(i as usize)
+        {
+            b.x0 = b.x0.min(r.x.min(r.x + r.w));
+            b.x1 = b.x1.max(r.x.max(r.x + r.w));
+            b.y0 = b.y0.min(r.y.min(r.y + r.h));
+            b.y1 = b.y1.max(r.y.max(r.y + r.h));
+        }
+    }
+    b
+}
+
+/// The segments of a page and every typer's candidates on them: the tree `segs` with the text
+/// leaves that mix kinds cut by [`walk_cut`], then [`type_segments`] over that tree. The input
+/// of [`crate::arbitrate()`].
+pub fn type_page(
+    page: &PageIn,
+    drawn: &DrawnStructure,
+    segs: Segments,
+    file: &FileFacts,
+    index: &FileIndex,
+    ends_in_amount: &dyn Fn(&str) -> bool,
+) -> (Segments, BTreeMap<SegId, Vec<Typed>>) {
+    let cut = {
+        let view = PageView::new(page, drawn, &segs, file, index, ends_in_amount);
+        walk_cut(&view)
+    };
+    let segs = cut.unwrap_or(segs);
+    let typed = {
+        let view = PageView::new(page, drawn, &segs, file, index, ends_in_amount);
+        type_segments(&view)
+    };
+    (segs, typed)
+}
+
 /// The file facts as the typers look them up, built once per file.
 #[derive(Debug, Clone, Default)]
 pub struct FileIndex {
@@ -239,6 +376,8 @@ pub struct PageView<'a> {
     hs: Vec<Line>,
     /// How many runs with text each line of the page has (see [`texted_per_line`]).
     per_line: HashMap<u32, u32>,
+    /// The place in `lines` of each line number of the page (its first range).
+    line_at: HashMap<u32, usize>,
     /// The table reading of each segment of `segs`, worked out once.
     readings: Vec<OnceCell<table::Find>>,
     /// The totals reading of each segment of `segs`, worked out once.
@@ -355,6 +494,10 @@ impl<'a> PageView<'a> {
             .unwrap_or_default();
         hs.sort_by(|a, b| a.at.total_cmp(&b.at));
         let n = segs.all.len();
+        let mut line_at: HashMap<u32, usize> = HashMap::new();
+        for (k, l) in page_lines.iter().enumerate() {
+            line_at.entry(page.texts[l.start].line).or_insert(k);
+        }
         PageView {
             page,
             drawn,
@@ -373,6 +516,7 @@ impl<'a> PageView<'a> {
             images,
             hs,
             per_line: texted_per_line(&page.texts),
+            line_at,
             readings: (0..n).map(|_| OnceCell::new()).collect(),
             totals: (0..n).map(|_| OnceCell::new()).collect(),
             seeds: OnceCell::new(),
@@ -552,6 +696,29 @@ impl<'a> PageView<'a> {
 
     pub(crate) fn per_line(&self) -> &HashMap<u32, u32> {
         &self.per_line
+    }
+
+    /// The page's lines (ranges of `page.texts`) just over the line `first` and just under the
+    /// line `last`, [`CONTEXT_LINES`] at most each, when the segment holding `inked` runs with
+    /// ink of each holds the whole of those two lines: the lines a walk over the segment looks
+    /// at for its demotions, as the walk over the page does. A line cut by a gutter has no
+    /// context (the page's line holds the other column too).
+    pub(crate) fn context(
+        &self,
+        first: (u32, u32),
+        last: (u32, u32),
+    ) -> (&[RunRange], &[RunRange]) {
+        let whole = |(line, inked): (u32, u32)| self.per_line.get(&line) == Some(&inked);
+        let (Some(&a), Some(&b)) = (self.line_at.get(&first.0), self.line_at.get(&last.0)) else {
+            return (&[], &[]);
+        };
+        if !whole(first) || !whole(last) || a > b {
+            return (&[], &[]);
+        }
+        let over = &self.lines[a.saturating_sub(CONTEXT_LINES)..a];
+        let under = &self.lines
+            [(b + 1).min(self.lines.len())..(b + 1 + CONTEXT_LINES).min(self.lines.len())];
+        (over, under)
     }
 
     pub(crate) fn band(&self, line: u32) -> Option<Band> {

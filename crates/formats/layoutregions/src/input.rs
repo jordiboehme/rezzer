@@ -107,6 +107,8 @@ pub struct GivenRegion {
     pub kind: Kind,
     pub prims: Vec<PrimId>,
     pub order: u32,
+    /// The level the file gives a heading (1 the highest); `None` for other kinds.
+    pub level: Option<u8>,
 }
 
 /// A primitive of a page: the index into one of the lists of [`PageIn`].
