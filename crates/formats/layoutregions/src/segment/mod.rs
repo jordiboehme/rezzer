@@ -202,6 +202,11 @@ struct Item {
     texts: Vec<u32>,
     /// Other primitives it holds and none of its children does.
     others: Vec<PrimId>,
+    /// The item it nests in (itself for the page).
+    parent: usize,
+    /// For an item one level past the depth bound: whether it holds a primitive (which its
+    /// parent at the bound keeps). An item the given regions took holds none.
+    held: bool,
 }
 
 impl Builder<'_> {
@@ -371,16 +376,17 @@ impl Builder<'_> {
         }
         let mut items = self.items(&found);
         self.assign(&mut items, &taken);
+        // Every item's primitives, its children's included; then the segments, top down. The
+        // root makes its given regions and its own parts at once, or none.
+        let mut sub = subtree_prims(&items, self.max);
         if self.max == 0 {
-            if !regions.is_empty() || parts(&items[0]) || self.text_parts(&items[0].texts) {
+            let parts = regions.len() + own_parts(&items, 0, &sub, regions.len());
+            if parts > 0 || self.text_parts(&items[0].texts) {
                 self.note(Note::Depth);
             }
             return;
         }
-        // Every item's primitives, its children's included; then the segments, top down. The
-        // root makes its given regions and its own parts at once, or none.
-        let mut sub = subtree_prims(&items, self.max);
-        if !self.room(regions.len() + own_parts(&items[0], &sub, regions.len())) {
+        if !self.room(regions.len() + own_parts(&items, 0, &sub, regions.len())) {
             return;
         }
         for (kind, prims) in regions {
@@ -450,6 +456,8 @@ impl Builder<'_> {
             children: Vec::new(),
             texts: Vec::new(),
             others: Vec::new(),
+            parent: 0,
+            held: false,
         }];
         for (bounds, source) in drawn {
             let mut node = 0;
@@ -473,6 +481,8 @@ impl Builder<'_> {
                 children: Vec::new(),
                 texts: Vec::new(),
                 others: Vec::new(),
+                parent: node,
+                held: false,
             });
         }
         for i in 0..items.len() {
@@ -490,7 +500,8 @@ impl Builder<'_> {
     }
 
     /// Gives each primitive the given regions leave to the innermost item that holds it, down
-    /// to the depth bound: an item at the bound keeps what the items in it hold.
+    /// to the depth bound: an item at the bound keeps what the items in it hold. The search
+    /// goes one level past the bound, to tell which items there hold anything.
     fn assign(&self, items: &mut [Item], taken: &Taken) {
         let page = self.page;
         let index: Vec<Option<Index>> = items
@@ -508,7 +519,7 @@ impl Builder<'_> {
                 }
             };
             let mut node = 0;
-            while items[node].depth < self.max {
+            while items[node].depth <= self.max {
                 let kids = &items[node].children;
                 let inner = match &index[node] {
                     Some(ix) => ix
@@ -543,11 +554,21 @@ impl Builder<'_> {
                 }
             }
         }
+        let keep = |items: &mut [Item], node: usize| {
+            if items[node].depth > self.max {
+                items[node].held = true;
+                items[node].parent
+            } else {
+                node
+            }
+        };
         for (node, t) in texts {
-            items[node].texts.push(t);
+            let at = keep(items, node);
+            items[at].texts.push(t);
         }
         for (node, p) in others {
-            items[node].others.push(p);
+            let at = keep(items, node);
+            items[at].others.push(p);
         }
     }
 
@@ -572,12 +593,14 @@ impl Builder<'_> {
             Vec::new()
         };
         if d >= self.max {
-            if parts(it) || self.text_parts(&it.texts) {
+            if own_parts(items, i, sub, 0) > 0 || self.text_parts(&it.texts) {
                 self.note(Note::Depth);
             }
             return Vec::new();
         }
-        if !self.room(own_parts(it, sub, given.len())) {
+        // The root's parts were reserved with its given regions in `segment`, in one step:
+        // the root never returns here once they are made.
+        if i != 0 && !self.room(own_parts(items, i, sub, 0)) {
             return Vec::new();
         }
         // A grid or box whose primitives the given regions took is no segment.
@@ -618,8 +641,9 @@ impl Builder<'_> {
         next
     }
 
-    /// Whether the text runs `ids` would be parted by the cut or by style steps.
-    fn text_parts(&self, ids: &[u32]) -> bool {
+    /// Whether the text runs `ids` would be parted by the cut or by style steps. A stop during
+    /// the probe stops the page and says no.
+    fn text_parts(&mut self, ids: &[u32]) -> bool {
         if ids.len() < 2 {
             return false;
         }
@@ -631,7 +655,11 @@ impl Builder<'_> {
             max_cut_depth: 0,
             ..*self.limits
         };
-        let found = xy_cut(&pieces, &[], &bound, &|| false);
+        let found = xy_cut(&pieces, &[], &bound, self.stop);
+        if found.short == Some(CutShort::Stopped) {
+            self.short(found.short);
+            return false;
+        }
         if found.groups.len() > 1 || found.short.is_some() {
             return true;
         }
@@ -759,6 +787,22 @@ impl Builder<'_> {
             .copied()
             .collect();
         work::add(ids.len() as u64);
+        // A gutter can hold a side of a drawn child only when some text ends left of that side
+        // and some starts right of it: without that, the cut is not made at all.
+        let (mut ends, mut starts) = (f32::MAX, f32::MIN);
+        for &t in &ids {
+            let b = text_bounds(&self.page.texts[t as usize]);
+            ends = ends.min(b.x1);
+            starts = starts.max(b.x0);
+        }
+        let between = |x: f32| ends <= x + SNAP && starts >= x - SNAP;
+        work::add(kids.len() as u64);
+        if !kids
+            .iter()
+            .any(|&c| between(items[c].bounds.x0) || between(items[c].bounds.x1))
+        {
+            return;
+        }
         let pieces: Vec<Piece> = ids
             .iter()
             .map(|&t| piece(&self.page.texts[t as usize]))
@@ -821,21 +865,21 @@ impl Builder<'_> {
     }
 }
 
-/// The segments item `it` makes for its own parts, beside `given` given regions (the root's):
-/// its drawn children that hold anything (see `sub`), and when it is parted, one segment for
-/// its text and one for its drawing.
-fn own_parts(it: &Item, sub: &[Vec<PrimId>], given: usize) -> usize {
-    let kids = it.children.iter().filter(|&&c| !sub[c].is_empty()).count();
+/// The segments item `i` makes for its own parts, beside `given` given regions (the root's):
+/// its drawn children that hold anything (see `sub`, or `held` past the depth bound), and when
+/// it is parted, one segment for its text and one for its drawing.
+fn own_parts(items: &[Item], i: usize, sub: &[Vec<PrimId>], given: usize) -> usize {
+    let it = &items[i];
+    let kids = it
+        .children
+        .iter()
+        .filter(|&&c| !sub[c].is_empty() || items[c].held)
+        .count();
     let split = kids > 0 || given > 0 || (!it.texts.is_empty() && !it.others.is_empty());
     if !split {
         return 0;
     }
     kids + usize::from(!it.texts.is_empty()) + usize::from(!it.others.is_empty())
-}
-
-/// Whether item `it` holds more than text: drawn children, or drawing beside text.
-fn parts(it: &Item) -> bool {
-    !it.children.is_empty() || (!it.texts.is_empty() && !it.others.is_empty())
 }
 
 /// The source of group `g` of a cut with `splits`: the split before it; the first group

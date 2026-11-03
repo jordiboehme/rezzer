@@ -128,6 +128,13 @@ fn check_cover(s: &Segments, p: &PageIn) {
     }
 }
 
+/// Whether a `Limit` issue of `s` says `words`.
+fn limit_says(s: &Segments, words: &str) -> bool {
+    s.issues
+        .iter()
+        .any(|i| i.kind == IssueKind::Limit && i.what.contains(words))
+}
+
 fn depth(s: &Segments, mut id: SegId) -> usize {
     let mut d = 0;
     while let Some(p) = seg(s, id).parent {
@@ -386,7 +393,7 @@ fn alternatives_and_depth_are_bounded() {
     // primitive of them, and the page says so.
     let deepest = s.all.iter().map(|g| depth(&s, g.id)).max().unwrap();
     assert!(deepest <= limits.max_cut_depth as usize, "{deepest}");
-    assert!(s.issues.iter().any(|i| i.kind == IssueKind::Limit));
+    assert!(limit_says(&s, "nest deeper"), "{:?}", s.issues);
     let boxes = with_source(&s, |x| *x == Source::Box);
     assert_eq!(boxes.len(), limits.max_cut_depth as usize);
     let last = boxes
@@ -429,7 +436,7 @@ fn alternatives_and_depth_are_bounded() {
     let s = segment_page(&p2, &shallow, &|| false);
     check_cover(&s, &p2);
     assert!(s.all.iter().all(|g| depth(&s, g.id) <= 1));
-    assert!(s.issues.iter().any(|i| i.kind == IssueKind::Limit));
+    assert!(limit_says(&s, "nest deeper"), "{:?}", s.issues);
 
     // Alternatives: past the cap none is kept, the page says so, the main cut stays whole.
     let p3 = boxed_column_page();
@@ -440,14 +447,15 @@ fn alternatives_and_depth_are_bounded() {
     let s = segment_page(&p3, &none, &|| false);
     check_cover(&s, &p3);
     assert!(s.all.iter().all(|g| g.alternatives.is_empty()));
-    assert!(s.issues.iter().any(|i| i.kind == IssueKind::Limit));
+    assert!(limit_says(&s, "other cuts"), "{:?}", s.issues);
 }
 
 /// Work steps of `segment_page` on the page of 50,000 runs in 200 nested boxes, the cut's own
-/// work included: 16,376,402 measured, about ten in a hundred more allowed. Most of it is each
-/// primitive once per level of nesting it stands in (64 levels at the bound): placed, held by
-/// its segment and cut again for the alternative.
-const WORK_BOUND: u64 = 18_000_000;
+/// work included: 13,228,429 measured, about ten in a hundred more allowed. Most of it is each
+/// primitive once per level of nesting it stands in (64 levels at the bound): placed and held
+/// by its segment. No text stands beside a side of an inner box, so no level cuts again for an
+/// alternative.
+const WORK_BOUND: u64 = 14_500_000;
 
 #[test]
 fn a_stop_keeps_the_rest_whole() {
@@ -609,4 +617,137 @@ fn segments_are_bounded() {
         check_cover(&s, &p);
         assert!(s.all.len() <= cap.max(1), "{cap}: {}", s.all.len());
     }
+}
+
+/// Nested boxes, each with a line of its own beside the left side of the next one, around
+/// 5,000 lines that each stand apart by a band of white space, so that the cut parts them one
+/// by one, as deep as it may.
+fn staircase_page(boxes: usize, lines: u32) -> PageIn {
+    let top = 110_000.0f32;
+    let mut rules = Vec::new();
+    let mut texts = Vec::new();
+    for k in 0..boxes {
+        let (x0, y0) = (100.0 + 30.0 * k as f32, 100.0 + 10.0 * k as f32);
+        rules.push(rect(
+            x0,
+            y0,
+            9_000.0 - 10.0 * k as f32,
+            top - 10.0 * k as f32,
+        ));
+        texts.push(run("Muster", x0 + 2.0, 50_000.0, 10.0, 6.0, 0));
+    }
+    let inner = 100.0 + 30.0 * (boxes - 1) as f32;
+    for k in 0..lines {
+        texts.push(run(
+            PROSE,
+            inner + 100.0,
+            top - 2_000.0 - 20.0 * k as f32,
+            210.0,
+            6.0,
+            1 + k,
+        ));
+    }
+    page([20_000.0, 120_000.0], texts, rules)
+}
+
+#[test]
+fn nested_boxes_around_deep_text_are_cut_in_bounded_work() {
+    let p = staircase_page(70, 5_000);
+    assert_eq!(drawn(&p, &|_| true).boxes.len(), 70);
+    let before = work_steps();
+    let started = std::time::Instant::now();
+    let s = segment_page(&p, &Limits::default(), &|| false);
+    let took = started.elapsed();
+    let after = work_steps();
+    check_cover(&s, &p);
+    if let (Some(b), Some(a)) = (before, after) {
+        eprintln!("staircase work steps {} in {took:?}", a - b);
+        assert!(a - b <= STAIRCASE_BOUND, "{} steps", a - b);
+    }
+    assert!(limit_says(&s, "nest deeper"), "{:?}", s.issues);
+}
+
+/// Work steps of `segment_page` on the staircase page (70 boxes, 5,000 lines apart):
+/// 11,230,144 measured, about ten in a hundred more allowed. The cut
+/// looks for bands only a few levels deep, so each level of boxes cuts its text in work in
+/// proportion to it.
+const STAIRCASE_BOUND: u64 = 12_500_000;
+
+#[test]
+fn a_depth_bound_of_zero_keeps_the_page_one_leaf() {
+    let p = mixed_page();
+    let zero = Limits {
+        max_cut_depth: 0,
+        ..Limits::default()
+    };
+    let s = segment_page(&p, &zero, &|| false);
+    check_cover(&s, &p);
+    assert_eq!(s.all.len(), 1);
+    assert!(limit_says(&s, "nest deeper"), "{:?}", s.issues);
+    // A page of one line has nothing to part: no issue.
+    let p = page([595.0, 842.0], column(50.0, 700.0, 1, 0), Vec::new());
+    let s = segment_page(&p, &zero, &|| false);
+    assert!(s.issues.is_empty(), "{:?}", s.issues);
+}
+
+#[test]
+fn a_child_the_given_regions_took_is_no_depth_issue() {
+    // The box at the bound holds one line; the grid in it is a given region's: the box would
+    // not be parted, so the bound costs nothing and says nothing.
+    let mut texts = vec![run("Muster GmbH", 60.0, 680.0, 80.0, 9.0, 0)];
+    let rules = vec![
+        rect(40.0, 400.0, 400.0, 700.0),
+        rect(80.0, 450.0, 300.0, 600.0),
+        line(190.0, 450.0, 190.0, 600.0),
+        line(80.0, 525.0, 300.0, 525.0),
+    ];
+    for (r, y) in [570.0f32, 495.0].into_iter().enumerate() {
+        for x in [90.0f32, 200.0] {
+            texts.push(run("1.234,56", x, y, 40.0, 9.0, 1 + r as u32));
+        }
+    }
+    let mut p = page([595.0, 842.0], texts, rules);
+    let mut prims: Vec<PrimId> = (1..5).map(PrimId::Text).collect();
+    prims.extend((0..4).map(PrimId::Rule));
+    p.given = vec![GivenRegion {
+        kind: Kind::Table,
+        prims,
+        order: 0,
+    }];
+    let one = Limits {
+        max_cut_depth: 1,
+        ..Limits::default()
+    };
+    let s = segment_page(&p, &one, &|| false);
+    check_cover(&s, &p);
+    assert_eq!(with_source(&s, |x| *x == Source::Box).len(), 1);
+    assert!(s.issues.is_empty(), "{:?}", s.issues);
+    // Without the given region the grid would be parted off at the bound: that is said.
+    p.given.clear();
+    let s = segment_page(&p, &one, &|| false);
+    check_cover(&s, &p);
+    assert!(limit_says(&s, "nest deeper"), "{:?}", s.issues);
+}
+
+#[test]
+fn given_regions_beside_an_alternative() {
+    // The boxed column page with a footer the file states: the root's alternative holds the
+    // given region too, and every prim stays in one leaf of both cuts.
+    let mut p = boxed_column_page();
+    p.texts
+        .push(run("Seite 1 von 1", 250.0, 40.0, 80.0, 7.0, 20));
+    p.given = vec![GivenRegion {
+        kind: Kind::FooterBand,
+        prims: vec![PrimId::Text(20)],
+        order: 0,
+    }];
+    let s = segment_page(&p, &Limits::default(), &|| false);
+    check_cover(&s, &p);
+    let root = seg(&s, s.root);
+    assert_eq!(
+        seg(&s, root.children[0]).source,
+        Source::Given(Kind::FooterBand)
+    );
+    assert_eq!(root.alternatives.len(), 1);
+    assert!(root.alternatives[0].contains(&root.children[0]));
 }
