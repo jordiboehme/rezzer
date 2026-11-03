@@ -512,6 +512,9 @@ fn cut_piece(p: &Piece) -> cut::Piece {
 /// bands. The cut itself is the engine's ([`cut::xy_cut`]).
 fn reading_order(pieces: &[Piece], ids: &[usize], rules: &[Line]) -> Order {
     let cutting: Vec<cut::Piece> = ids.iter().map(|&i| cut_piece(&pieces[i])).collect();
+    // The text pass orders a page before the layout has a budget at hand; of the limits the
+    // cut reads only `max_cut_depth`, which `rezzer_layout::pdf::engine_limits` keeps at its
+    // default for every budget, so the defaults are the read's limits here too.
     let found = cut::xy_cut(&cutting, rules, &Limits::default(), &|| false);
     let mut out = Order {
         ids: Vec::with_capacity(ids.len()),

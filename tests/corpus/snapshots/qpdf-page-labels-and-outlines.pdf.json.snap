@@ -1,6 +1,5 @@
 ---
 source: crates/rezzer/tests/corpus.rs
-assertion_line: 294
 ---
 {
   "body": [
@@ -595,7 +594,6 @@ assertion_line: 294
       "certainty": "rule",
       "evidence": [
         {
-          "detail": "",
           "id": "pdf.furniture",
           "kind": "rule"
         }
@@ -615,7 +613,6 @@ assertion_line: 294
       "certainty": "rule",
       "evidence": [
         {
-          "detail": "",
           "id": "pdf.furniture",
           "kind": "rule"
         }
@@ -635,7 +632,6 @@ assertion_line: 294
       "certainty": "rule",
       "evidence": [
         {
-          "detail": "",
           "id": "pdf.furniture",
           "kind": "rule"
         }
@@ -655,7 +651,6 @@ assertion_line: 294
       "certainty": "rule",
       "evidence": [
         {
-          "detail": "",
           "id": "pdf.furniture",
           "kind": "rule"
         }
@@ -675,7 +670,6 @@ assertion_line: 294
       "certainty": "rule",
       "evidence": [
         {
-          "detail": "",
           "id": "pdf.furniture",
           "kind": "rule"
         }
@@ -695,7 +689,6 @@ assertion_line: 294
       "certainty": "rule",
       "evidence": [
         {
-          "detail": "",
           "id": "pdf.furniture",
           "kind": "rule"
         }
@@ -715,7 +708,6 @@ assertion_line: 294
       "certainty": "rule",
       "evidence": [
         {
-          "detail": "",
           "id": "pdf.furniture",
           "kind": "rule"
         }
@@ -735,7 +727,6 @@ assertion_line: 294
       "certainty": "rule",
       "evidence": [
         {
-          "detail": "",
           "id": "pdf.furniture",
           "kind": "rule"
         }
@@ -755,7 +746,6 @@ assertion_line: 294
       "certainty": "rule",
       "evidence": [
         {
-          "detail": "",
           "id": "pdf.furniture",
           "kind": "rule"
         }
@@ -775,7 +765,6 @@ assertion_line: 294
       "certainty": "rule",
       "evidence": [
         {
-          "detail": "",
           "id": "pdf.furniture",
           "kind": "rule"
         }
@@ -795,7 +784,6 @@ assertion_line: 294
       "certainty": "rule",
       "evidence": [
         {
-          "detail": "",
           "id": "pdf.furniture",
           "kind": "rule"
         }
@@ -815,7 +803,6 @@ assertion_line: 294
       "certainty": "rule",
       "evidence": [
         {
-          "detail": "",
           "id": "pdf.furniture",
           "kind": "rule"
         }

@@ -91,9 +91,10 @@ pub enum Evidence {
     DefinedName {
         name: String,
     },
-    /// A layout rule with the words of the layout line.
+    /// A layout rule with the words of the layout line; no words are left out of the JSON.
     Rule {
         id: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
         detail: String,
     },
 }

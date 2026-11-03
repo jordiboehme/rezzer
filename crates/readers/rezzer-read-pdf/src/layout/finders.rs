@@ -895,3 +895,77 @@ fn near(b: Bounds, placed: &[(Bounds, usize)], count: usize) -> Option<usize> {
     let above = (q.y0 + q.y1) / 2.0 > y;
     Some(if above { (k + 1).min(count - 1) } else { *k })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use layoutregions::{PageRegions, Region, RegionId};
+    use rezzer_model::Inline;
+
+    fn region(kind: Kind, id: &'static str, host: u32, top: f32) -> Region {
+        Region {
+            id: RegionId(0),
+            page: 2,
+            kind,
+            bounds: Bounds {
+                x0: 40.0,
+                y0: top - 12.0,
+                x1: 300.0,
+                y1: top,
+            },
+            prims: Vec::new(),
+            certainty: Certainty::Rule,
+            score: Score(FOUND),
+            signals: vec![Signal {
+                id,
+                detail: String::new(),
+                weight: FOUND,
+            }],
+            alternatives: Vec::new(),
+            parent: None,
+            unsure: Vec::new(),
+            host,
+        }
+    }
+
+    /// Rows a page adds to a tagged table begun on an earlier page build no block here: the
+    /// region is given back with its table, and its host is the block of this page that
+    /// follows it, which is its anchor when that table has none.
+    #[test]
+    fn rows_of_an_earlier_table_stand_at_the_block_that_follows() {
+        let blocks = vec![
+            Block::paragraph(vec![Inline::plain("Muster GmbH")]),
+            Block::paragraph(vec![Inline::plain("Erika Mustermann")]),
+        ];
+        let mut regions = PageRegions {
+            page: 2,
+            regions: vec![
+                region(Kind::Paragraph, LINES, 0, 800.0),
+                region(Kind::Table, Detector::Tagged.id(), 0, 700.0),
+                region(Kind::Paragraph, LINES, 1, 600.0),
+            ],
+            issues: Vec::new(),
+        };
+        let earlier = block_hosts(&mut regions, &[Became::Earlier(3)], &blocks);
+        assert_eq!(earlier, [(1, 3)]);
+        let hosts: Vec<u32> = regions.regions.iter().map(|r| r.host).collect();
+        // The table's rows lie under the first paragraph: the next block is the second.
+        assert_eq!(hosts, [0, 1, 1]);
+    }
+
+    /// A region that became no block on a page whose other blocks have no region stands at
+    /// the page's last block; on a page with no block it has none.
+    #[test]
+    fn a_region_with_no_block_near_stands_at_the_last_block() {
+        let blocks = vec![Block::paragraph(vec![Inline::plain("Seite 1")])];
+        let mut regions = PageRegions {
+            page: 2,
+            regions: vec![region(Kind::Figure, "pdf.pictures", 0, 500.0)],
+            issues: Vec::new(),
+        };
+        block_hosts(&mut regions, &[], &blocks);
+        assert_eq!(regions.regions[0].host, 0);
+        block_hosts(&mut regions, &[], &[]);
+        assert_eq!(regions.regions[0].host, NO_PLACED);
+    }
+}

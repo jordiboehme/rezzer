@@ -1,6 +1,5 @@
 ---
 source: crates/rezzer/tests/corpus.rs
-assertion_line: 294
 ---
 {
   "assets": [
@@ -266,7 +265,6 @@ assertion_line: 294
       "certainty": "exact",
       "evidence": [
         {
-          "detail": "",
           "id": "pdf.tagged_table",
           "kind": "rule"
         }
@@ -286,7 +284,6 @@ assertion_line: 294
       "certainty": "exact",
       "evidence": [
         {
-          "detail": "",
           "id": "pdf.tagged_table",
           "kind": "rule"
         }
@@ -306,7 +303,6 @@ assertion_line: 294
       "certainty": "exact",
       "evidence": [
         {
-          "detail": "",
           "id": "pdf.tagged_table",
           "kind": "rule"
         }
@@ -326,7 +322,6 @@ assertion_line: 294
       "certainty": "rule",
       "evidence": [
         {
-          "detail": "",
           "id": "pdf.lines",
           "kind": "rule"
         }
@@ -346,7 +341,6 @@ assertion_line: 294
       "certainty": "rule",
       "evidence": [
         {
-          "detail": "",
           "id": "pdf.lines",
           "kind": "rule"
         }
@@ -366,7 +360,6 @@ assertion_line: 294
       "certainty": "rule",
       "evidence": [
         {
-          "detail": "",
           "id": "pdf.lines",
           "kind": "rule"
         }
@@ -386,7 +379,6 @@ assertion_line: 294
       "certainty": "rule",
       "evidence": [
         {
-          "detail": "",
           "id": "pdf.lines",
           "kind": "rule"
         }
@@ -406,7 +398,6 @@ assertion_line: 294
       "certainty": "rule",
       "evidence": [
         {
-          "detail": "",
           "id": "pdf.lines",
           "kind": "rule"
         }
@@ -426,7 +417,6 @@ assertion_line: 294
       "certainty": "rule",
       "evidence": [
         {
-          "detail": "",
           "id": "pdf.lines",
           "kind": "rule"
         }
@@ -446,7 +436,6 @@ assertion_line: 294
       "certainty": "rule",
       "evidence": [
         {
-          "detail": "",
           "id": "pdf.lines",
           "kind": "rule"
         }
@@ -466,7 +455,6 @@ assertion_line: 294
       "certainty": "rule",
       "evidence": [
         {
-          "detail": "",
           "id": "pdf.lines",
           "kind": "rule"
         }
@@ -486,7 +474,6 @@ assertion_line: 294
       "certainty": "rule",
       "evidence": [
         {
-          "detail": "",
           "id": "pdf.lines",
           "kind": "rule"
         }

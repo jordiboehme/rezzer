@@ -1,6 +1,5 @@
 ---
 source: crates/readers/rezzer-read-pdf/tests/print_forms/main.rs
-assertion_line: 130
 expression: json
 ---
 {
@@ -1456,8 +1455,7 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.furniture",
-          "detail": ""
+          "id": "pdf.furniture"
         }
       ]
     },
@@ -1496,8 +1494,7 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.ruled",
-          "detail": ""
+          "id": "pdf.ruled"
         }
       ]
     },
@@ -1516,8 +1513,7 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.ruled",
-          "detail": ""
+          "id": "pdf.ruled"
         }
       ]
     },
@@ -1536,8 +1532,7 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.banded",
-          "detail": ""
+          "id": "pdf.banded"
         }
       ]
     },
@@ -1556,8 +1551,7 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.lines",
-          "detail": ""
+          "id": "pdf.lines"
         }
       ]
     },
@@ -1576,8 +1570,7 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.lines",
-          "detail": ""
+          "id": "pdf.lines"
         }
       ]
     },
@@ -1596,8 +1589,7 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.lines",
-          "detail": ""
+          "id": "pdf.lines"
         }
       ]
     },
@@ -1616,8 +1608,7 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.lines",
-          "detail": ""
+          "id": "pdf.lines"
         }
       ]
     },
@@ -1636,8 +1627,7 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.lines",
-          "detail": ""
+          "id": "pdf.lines"
         }
       ]
     },
@@ -1656,8 +1646,7 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.lines",
-          "detail": ""
+          "id": "pdf.lines"
         }
       ]
     },
@@ -1676,8 +1665,7 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.lines",
-          "detail": ""
+          "id": "pdf.lines"
         }
       ]
     },
@@ -1696,8 +1684,7 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.lines",
-          "detail": ""
+          "id": "pdf.lines"
         }
       ]
     },
@@ -1716,8 +1703,7 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.furniture",
-          "detail": ""
+          "id": "pdf.furniture"
         }
       ]
     },
@@ -1756,8 +1742,7 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.ruled",
-          "detail": ""
+          "id": "pdf.ruled"
         }
       ]
     },
@@ -1776,8 +1761,7 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.ruled",
-          "detail": ""
+          "id": "pdf.ruled"
         }
       ]
     },
@@ -1796,8 +1780,7 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.banded",
-          "detail": ""
+          "id": "pdf.banded"
         }
       ]
     },
@@ -1816,8 +1799,7 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.lines",
-          "detail": ""
+          "id": "pdf.lines"
         }
       ]
     },
@@ -1836,8 +1818,7 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.lines",
-          "detail": ""
+          "id": "pdf.lines"
         }
       ]
     },
@@ -1856,8 +1837,7 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.lines",
-          "detail": ""
+          "id": "pdf.lines"
         }
       ]
     },
@@ -1876,8 +1856,7 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.lines",
-          "detail": ""
+          "id": "pdf.lines"
         }
       ]
     },
@@ -1896,8 +1875,7 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.lines",
-          "detail": ""
+          "id": "pdf.lines"
         }
       ]
     },
@@ -1916,8 +1894,7 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.lines",
-          "detail": ""
+          "id": "pdf.lines"
         }
       ]
     },
@@ -1936,8 +1913,7 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.lines",
-          "detail": ""
+          "id": "pdf.lines"
         }
       ]
     },
@@ -1956,8 +1932,7 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.lines",
-          "detail": ""
+          "id": "pdf.lines"
         }
       ]
     }

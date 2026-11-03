@@ -205,7 +205,8 @@ pub struct Barcode {
     /// nor base64, only its size.
     pub bytes: u64,
     /// About where the code lies on its page, in points (left, bottom, right, top in the
-    /// frame of the page's text), when the picture is the page. A code drawn as paths, or a
+    /// frame of the page's text, which is turned on a page whose text was read turned,
+    /// unlike [`crate::RegionNote::bounds`]), when the picture is the page. A code drawn as paths, or a
     /// picture that looks like a code, has the box of that drawing or picture when it is read
     /// again from its region and is the only code there (a linear code drawn as paths only
     /// when its bars fill that drawing); else a linear code has the box of its bars as the

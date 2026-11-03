@@ -1376,9 +1376,18 @@ fn region_note_round_trips() {
         serde_json::json!({
             "anchor": "p1:t1", "page": 1, "kind": "totals",
             "bounds": [72.0, 100.25, 523.5, 180.0], "certainty": "rule", "score": 1000,
-            "evidence": [{"kind": "rule", "id": "pdf.borderless.totals_under", "detail": ""}],
+            "evidence": [{"kind": "rule", "id": "pdf.borderless.totals_under"}],
             "alternatives": [{"kind": "label_value", "score": 400}]
         })
+    );
+    // Words of a rule are written; a rule without words writes no `detail`.
+    let worded = Evidence::Rule {
+        id: "pdf.ruled".into(),
+        detail: "Found by: grid".into(),
+    };
+    assert_eq!(
+        serde_json::to_value(&worded).unwrap()["detail"],
+        "Found by: grid"
     );
     // No alternatives: the key is left out.
     assert!(v["regions"][1].get("alternatives").is_none(), "{v}");

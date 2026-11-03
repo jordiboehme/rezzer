@@ -1815,15 +1815,32 @@ fn bounds_of_a_turned_page_lie_in_its_box() {
             );
         }
     }
-    // Text drawn upward stands in a tall, narrow box: the far line near the top of the page.
-    let far = out
-        .document
-        .regions
-        .iter()
-        .find(|n| n.page == 2 && n.bounds[3] > 650.0)
-        .expect("the far line near the top");
-    assert!(
-        far.bounds[2] - far.bounds[0] < far.bounds[3] - far.bounds[1],
-        "{far:#?}"
-    );
+    // Each line, drawn upward by the `cm`, stands where the page shows it: a line at x, y of
+    // the turned frame (baseline y, a box from a third of the size below it to the size above
+    // it) lies at 595 - y - 10 to 595 - y + 10 / 3 across and from x up over its width. A wrong
+    // turn back gives other numbers, not a box clamped onto an edge.
+    let expected = |text: &str, x: f32, y: f32| {
+        [
+            595.0 - y - 10.0,
+            x,
+            595.0 - y + 10.0 / 3.0,
+            x + common::helvetica_width(text, 10.0),
+        ]
+    };
+    let lines = [
+        expected("Body text of the page.", 72.0, 500.0),
+        expected("Far right in the turned frame", 700.0, 100.0),
+    ];
+    for page in [1, 2] {
+        for want in &lines {
+            let found = out.document.regions.iter().find(|n| {
+                n.page == page && n.bounds.iter().zip(want).all(|(a, b)| (a - b).abs() < 0.5)
+            });
+            assert!(
+                found.is_some(),
+                "page {page}: no region at {want:?}: {:#?}",
+                out.document.regions
+            );
+        }
+    }
 }

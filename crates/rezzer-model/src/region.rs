@@ -16,15 +16,24 @@ use crate::layout::{Certainty, Evidence};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub struct RegionNote {
-    /// The block or table the region became (`p<N>:b<K>` or `p<N>:t<K>`). A region that
-    /// became no block of its own (a picture, a code) takes the anchor of the block that
-    /// follows it on the page.
+    /// Where the region stands in the body, one of:
+    /// - `p<N>:b<K>` or `p<N>:t<K>`: the block or table it became;
+    /// - `fn:<label>`: the footnote section a footnote legend became;
+    /// - an anchor on an earlier page (`p<M>:t<K>`): the table whose rows it became, for a
+    ///   tagged table continued from that page;
+    /// - for a picture or a code, whose media block has no anchor, and for anything that
+    ///   became no block: the block of the page nearest to it by place (the one after the
+    ///   nearest region that stands above it, else that region's), which may be a neighbour
+    ///   of the media block rather than the block right after it;
+    /// - `p<N>`: the page, when it has no block at all (a scanned page).
     pub anchor: Anchor,
     /// The 1-based page.
     pub page: u32,
     pub kind: RegionKind,
     /// `x0, y0, x1, y1` in points, `y` upward, in the visible page box with its origin at the
-    /// lower left corner and the page's `/Rotate` not applied; rounded to 0.01.
+    /// lower left corner and the page's `/Rotate` not applied; rounded to 0.01. On a page
+    /// whose text was read in a turned frame this is the unturned box, unlike a
+    /// [`crate::Barcode`]'s `box`, which is in the frame of the page's text.
     pub bounds: [f32; 4],
     pub certainty: Certainty,
     /// From 0 to 1000.
