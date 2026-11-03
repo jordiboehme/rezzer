@@ -11,9 +11,10 @@ use crate::segment::cut::SIZE_STEP;
 /// Splits the runs `ids` (indices into `texts`, in reading order) into groups of one style. A
 /// run starts a new group when, against the run before it,
 ///
-/// - its size differs by a size step: the difference is at least [`SIZE_STEP`] less one of the
-///   median size of the runs (the block's own size), so that a page printed larger or smaller
-///   has the same steps;
+/// - its size differs by a size step: the larger of the two sizes is at least [`SIZE_STEP`]
+///   times the smaller, the ratio the cut uses for a title beside a field list, so that a page
+///   printed larger or smaller has the same steps and both agree. Small steps in a chain (each
+///   under the ratio against its neighbour) do not add up: a slow drift is no step;
 /// - its weight differs (bold against not bold);
 /// - its colour differs from the last colour known before it: a run without a colour
 ///   (`None`) is not compared and keeps that colour.
@@ -21,15 +22,6 @@ use crate::segment::cut::SIZE_STEP;
 /// Every id is in exactly one group, in its order. An id past the end of `texts` has no style
 /// and stays in the group it follows.
 pub fn style_steps(texts: &[TextRun], ids: &[u32]) -> Vec<Vec<u32>> {
-    let mut sizes: Vec<f32> = ids
-        .iter()
-        .filter_map(|&i| texts.get(i as usize))
-        .map(|t| t.size)
-        .filter(|s| s.is_finite())
-        .collect();
-    sizes.sort_by(f32::total_cmp);
-    let block = sizes.get(sizes.len() / 2).copied().unwrap_or(0.0);
-    let step = (SIZE_STEP - 1.0) * block;
     let mut groups: Vec<Vec<u32>> = Vec::new();
     let mut before: Option<&TextRun> = None;
     let mut known: Option<[u8; 3]> = None;
@@ -42,7 +34,7 @@ pub fn style_steps(texts: &[TextRun], ids: &[u32]) -> Vec<Vec<u32>> {
             continue;
         };
         let starts = before.is_none_or(|b| {
-            ((run.size - b.size).abs() >= step && step > 0.0)
+            (run.size.min(b.size) > 0.0 && run.size.max(b.size) >= SIZE_STEP * run.size.min(b.size))
                 || run.bold != b.bold
                 || matches!((run.color, known), (Some(x), Some(y)) if x != y)
         });
@@ -143,7 +135,7 @@ mod tests {
                 run(7.0 * k, false, None, 2),
                 // Under a step (7 against 7.4): the same group at every scale.
                 run(7.4 * k, false, None, 3),
-                // At a step (7 against 7.6): its own group at every scale.
+                // At a step (7.4 against 8.1): its own group at every scale.
                 run(8.1 * k, false, None, 4),
             ];
             assert_eq!(

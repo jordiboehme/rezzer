@@ -20,7 +20,8 @@ pub struct Piece {
     /// The extent of the piece; `y` grows upward. A piece of white space only has the extent
     /// of its blank string.
     pub bounds: Bounds,
-    /// The row of the piece: pieces of one row share a line. Rows are numbered from the top of the page.
+    /// The row of the piece: pieces of one row share a line. Rows are numbered from the top of
+    /// the page.
     pub line: u32,
     /// The baseline of the piece's first run.
     pub baseline: f32,
