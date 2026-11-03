@@ -18,7 +18,7 @@ use crate::input::{GivenRegion, PageIn, PrimId, RuleIn, TextRun};
 use crate::limits::Limits;
 use crate::region::{Bounds, Issue, IssueKind, Kind};
 use crate::segment::cut::{CutShort, Piece, Split, xy_cut};
-use crate::segment::drawn::{Line, PAGE_SHARE, SNAP, clustered};
+use crate::segment::drawn::{Line, SNAP, clustered};
 use crate::segment::style::style_steps;
 use crate::work;
 
@@ -35,7 +35,10 @@ pub enum Source {
     Given(Kind),
     /// A closed box of drawn lines that holds text.
     Box,
-    /// A grid of drawn lines of at least two rows and two columns.
+    /// A grid of drawn lines of at least two cells: a row or a column of cells (whose cells
+    /// that hold text are [`Source::Box`] segments under it), or rows and columns. A grid
+    /// over most of the page (a form drawn in its frame) is one too; whether a grid is a
+    /// table, a frame or a row of fields is the typers' decision.
     Grid { rows: u32, cols: u32 },
     /// A group of text that a column gutter of the whitespace cut parts off.
     Gutter,
@@ -87,11 +90,14 @@ pub struct Segments {
 ///
 /// 1. Given regions, in their `order`: each one leaf with [`Source::Given`]; a primitive two
 ///    of them name stays with the first, a primitive the page does not have is skipped.
-/// 2. The drawn structure ([`drawn::drawn`]): grids of at least two rows and two columns and
-///    closed boxes that hold text, nested where one holds another. A grid or box that covers
-///    more than [`PAGE_SHARE`] of the page is its frame and no segment. Text belongs to the
-///    innermost one that holds its centre, any other primitive to the innermost one that
-///    holds it whole (within [`SNAP`]).
+/// 2. The drawn structure ([`drawn::drawn`]): grids of at least two cells and closed boxes
+///    that hold text, nested where one holds another; rectangles drawn side by side that
+///    share their sides are the cells of one grid, as their lines meet. The cells of a grid
+///    of one row or one column that hold text are its boxes and nest under it. A grid over
+///    more than [`drawn::PAGE_SHARE`] of the page is a segment too; a box that large is the
+///    page's frame and no segment (see [`drawn::drawn`]). Text belongs to the innermost one
+///    that holds its centre, any other primitive to the innermost one that holds it whole
+///    (within [`SNAP`]).
 /// 3. The whitespace cut ([`cut::xy_cut`]) of the text of each segment, with its own
 ///    horizontal rules: each group a segment of [`Source::Gutter`], [`Source::Band`] or
 ///    [`Source::Rule`] (the split before it; the first group takes the split after it).
@@ -417,7 +423,8 @@ impl Builder<'_> {
                 ys.extend(gv.iter().map(|&k| g.vs[k].to).reduce(f32::max));
                 let (xs, ys) = (clustered(xs), clustered(ys));
                 let (cols, rows) = (xs.len().saturating_sub(1), ys.len().saturating_sub(1));
-                if cols < 2 || rows < 2 {
+                // One cell is a box (see `drawn::boxes`), not a grid.
+                if cols == 0 || rows == 0 || cols * rows < 2 {
                     continue;
                 }
                 let b = Bounds {
@@ -426,9 +433,6 @@ impl Builder<'_> {
                     x1: xs[cols],
                     y1: ys[rows],
                 };
-                if area(&b) > PAGE_SHARE * page.size[0].max(0.0) * page.size[1].max(0.0) {
-                    continue;
-                }
                 let source = Source::Grid {
                     rows: rows as u32,
                     cols: cols as u32,

@@ -751,3 +751,134 @@ fn given_regions_beside_an_alternative() {
     assert_eq!(root.alternatives.len(), 1);
     assert!(root.alternatives[0].contains(&root.children[0]));
 }
+
+/// The text runs a segment holds.
+fn texts_of(g: &Segment) -> Vec<u32> {
+    g.prims
+        .iter()
+        .filter_map(|p| match p {
+            PrimId::Text(t) => Some(*t),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Asserts that the one grid of `s` is `want` and that its cells are boxes nested under it,
+/// each holding the text `cells` names, in order of the boxes.
+fn grid_holds_cells(s: &Segments, want: Source, cells: &[u32]) {
+    let grids = with_source(s, |x| matches!(x, Source::Grid { .. }));
+    assert_eq!(grids.len(), 1, "one grid");
+    assert_eq!(grids[0].source, want);
+    let boxes = with_source(s, |x| *x == Source::Box);
+    assert_eq!(boxes.len(), cells.len(), "one box per cell with text");
+    for b in &boxes {
+        assert_eq!(b.parent, Some(grids[0].id), "a cell nests under its grid");
+    }
+    let mut held: Vec<u32> = boxes.iter().flat_map(|b| texts_of(b)).collect();
+    held.sort_unstable();
+    assert_eq!(held, cells);
+}
+
+#[test]
+fn a_one_row_grid_holds_its_cells() {
+    // A row of three cells drawn with lines, a word in each, and prose below.
+    let rules = vec![
+        line(50.0, 600.0, 350.0, 600.0),
+        line(50.0, 620.0, 350.0, 620.0),
+        line(50.0, 600.0, 50.0, 620.0),
+        line(150.0, 600.0, 150.0, 620.0),
+        line(250.0, 600.0, 250.0, 620.0),
+        line(350.0, 600.0, 350.0, 620.0),
+    ];
+    let mut texts = vec![
+        run("Muster GmbH", 55.0, 606.0, 50.0, 9.0, 0),
+        run("12345", 155.0, 606.0, 25.0, 9.0, 0),
+        run("1.234,56", 255.0, 606.0, 35.0, 9.0, 0),
+    ];
+    texts.extend(column(50.0, 500.0, 3, 1));
+    let p = page([595.0, 842.0], texts, rules);
+    let s = segment_page(&p, &Limits::default(), &|| false);
+    check_cover(&s, &p);
+    grid_holds_cells(&s, Source::Grid { rows: 1, cols: 3 }, &[0, 1, 2]);
+}
+
+#[test]
+fn a_one_column_grid_holds_its_cells() {
+    // A column of three fields drawn with lines, a value in each.
+    let rules = vec![
+        line(200.0, 600.0, 300.0, 600.0),
+        line(200.0, 620.0, 300.0, 620.0),
+        line(200.0, 640.0, 300.0, 640.0),
+        line(200.0, 660.0, 300.0, 660.0),
+        line(200.0, 600.0, 200.0, 660.0),
+        line(300.0, 600.0, 300.0, 660.0),
+    ];
+    let texts = vec![
+        run("101", 205.0, 646.0, 15.0, 9.0, 0),
+        run("nein", 205.0, 626.0, 20.0, 9.0, 1),
+        run("01.01.2011", 205.0, 606.0, 45.0, 9.0, 2),
+    ];
+    let p = page([595.0, 842.0], texts, rules);
+    let s = segment_page(&p, &Limits::default(), &|| false);
+    check_cover(&s, &p);
+    grid_holds_cells(&s, Source::Grid { rows: 3, cols: 1 }, &[0, 1, 2]);
+}
+
+#[test]
+fn abutting_boxes_are_one_grid() {
+    // Three rectangles drawn side by side that share their sides are the cells of one row;
+    // two rectangles a gap apart below them stay two boxes.
+    let rules = vec![
+        rect(50.0, 600.0, 150.0, 620.0),
+        rect(150.0, 600.0, 250.0, 620.0),
+        rect(250.0, 600.0, 350.0, 620.0),
+        rect(50.0, 500.0, 150.0, 520.0),
+        rect(156.0, 500.0, 256.0, 520.0),
+    ];
+    let texts = vec![
+        run("Art", 55.0, 606.0, 15.0, 9.0, 0),
+        run("Basis", 155.0, 606.0, 22.0, 9.0, 0),
+        run("Betrag", 255.0, 606.0, 27.0, 9.0, 0),
+        run("Erika", 55.0, 506.0, 22.0, 9.0, 1),
+        run("Mustermann", 160.0, 506.0, 50.0, 9.0, 1),
+    ];
+    let p = page([595.0, 842.0], texts, rules);
+    let s = segment_page(&p, &Limits::default(), &|| false);
+    check_cover(&s, &p);
+    let grids = with_source(&s, |x| matches!(x, Source::Grid { .. }));
+    assert_eq!(grids.len(), 1, "one grid");
+    assert_eq!(grids[0].source, Source::Grid { rows: 1, cols: 3 });
+    assert_eq!(texts_of(grids[0]), [0, 1, 2]);
+    let boxes = with_source(&s, |x| *x == Source::Box);
+    assert_eq!(boxes.len(), 5);
+    let apart: Vec<&&Segment> = boxes.iter().filter(|b| b.parent == Some(s.root)).collect();
+    assert_eq!(apart.len(), 2, "boxes a gap apart are no grid");
+    for b in boxes.iter().filter(|b| b.parent != Some(s.root)) {
+        assert_eq!(b.parent, Some(grids[0].id));
+    }
+}
+
+#[test]
+fn a_grid_over_most_of_the_page_is_a_segment() {
+    // A grid of three rows and three columns that covers most of the page (a form drawn in
+    // its frame): it is a segment; whether it is a table is decided later.
+    let (x0, y0, x1, y1) = (20.0, 20.0, 575.0, 820.0);
+    let mut rules = vec![rect(x0, y0, x1, y1)];
+    rules.push(line(205.0, y0, 205.0, y1));
+    rules.push(line(390.0, y0, 390.0, y1));
+    rules.push(line(x0, 286.0, x1, 286.0));
+    rules.push(line(x0, 553.0, x1, 553.0));
+    let texts = vec![
+        run("Muster GmbH", 30.0, 800.0, 50.0, 9.0, 0),
+        run("12345 Musterstadt", 215.0, 800.0, 75.0, 9.0, 0),
+        run("1.234,56", 30.0, 500.0, 35.0, 9.0, 1),
+    ];
+    let p = page([595.0, 842.0], texts, rules);
+    let s = segment_page(&p, &Limits::default(), &|| false);
+    check_cover(&s, &p);
+    let grids = with_source(&s, |x| matches!(x, Source::Grid { .. }));
+    assert_eq!(grids.len(), 1, "the grid is a segment");
+    assert_eq!(grids[0].source, Source::Grid { rows: 3, cols: 3 });
+    assert_eq!(grids[0].parent, Some(s.root));
+    assert_eq!(texts_of(grids[0]), [0, 1, 2]);
+}
