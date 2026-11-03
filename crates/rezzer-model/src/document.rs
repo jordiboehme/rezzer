@@ -206,12 +206,12 @@ pub struct Barcode {
     pub bytes: u64,
     /// About where the code lies on its page, in points (left, bottom, right, top in the
     /// frame of the page's text, which is turned on a page whose text was read turned,
-    /// unlike [`crate::RegionNote::bounds`]), when the picture is the page. A code drawn as paths, or a
-    /// picture that looks like a code, has the box of that drawing or picture when it is read
-    /// again from its region and is the only code there (a linear code drawn as paths only
-    /// when its bars fill that drawing); else a linear code has the box of its bars as the
-    /// decoder sees them, a matrix code the box of its finder patterns. A small picture shared
-    /// by several places has no box here: each place says where the picture is.
+    /// unlike [`crate::RegionNote::bounds`]), when the picture is the page. A code drawn as
+    /// paths, or a picture that looks like a code, has the box of that drawing or picture when
+    /// it is read again from its region and is the only code there (a linear code drawn as
+    /// paths only when its bars fill that drawing); else a linear code has the box of its bars
+    /// as the decoder sees them, a matrix code the box of its finder patterns. A small picture
+    /// shared by several places has no box here: each place says where the picture is.
     #[serde(rename = "box", default, skip_serializing_if = "Option::is_none")]
     pub bounds: Option<[f32; 4]>,
     /// Where the code lies on its page in words, by thirds of the page in the frame of its

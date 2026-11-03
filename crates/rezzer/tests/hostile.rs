@@ -1719,10 +1719,10 @@ fn cache_entries(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     )
 }
 
-#[test]
-fn a_text_cut_near_the_time_limit_is_not_cached() {
-    // The PDF reader stops its text at three quarters of the time limit, before the budget's
-    // own time is over. That cut depends on the machine's load, so it is not cached.
+/// Reads 20,000 pages of [`many_pages`] with the PDF reader under a time limit of 1 s on a
+/// step clock of `step`, with the cache on. Returns the result, the clock readings and the
+/// files in the cache. `name` goes into the line printed for measuring.
+fn read_near_the_limit(name: &str, step: Duration) -> (RunResult, u64, Vec<std::path::PathBuf>) {
     const PAGES: usize = 20_000;
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("pages.pdf");
@@ -1736,21 +1736,94 @@ fn a_text_cut_near_the_time_limit_is_not_cached() {
     config.limits.max_time = Duration::from_secs(1);
     let mut registry = Registry::new();
     registry.register(Box::new(rezzer_read_pdf::PdfReader));
-    let p = Pipeline::new(config, registry);
+    let clock = Clock::steps(step);
+    let p = Pipeline::new(config, registry).with_clock(clock.clone());
+    let start = Instant::now();
     let result = p.run_path(&path, &markdown_request());
-    let doc = result.document.as_ref().unwrap();
-    let cut = doc
-        .losses
-        .iter()
-        .find(|l| l.what.contains("the time limit was near"))
-        .unwrap_or_else(|| panic!("{:?}", losses(&result)));
-    assert_eq!(cut.why, LossReason::Limit);
-    assert_eq!(result.completeness, Completeness::Partial);
-    assert!(
-        cache_entries(&cache).is_empty(),
-        "{:?}",
-        cache_entries(&cache)
+    let took = start.elapsed();
+    let reads = clock.reads();
+    eprintln!(
+        "{name}: {:?}, {reads} clock readings, {} pages read in {took:?}: {:?}",
+        result.completeness,
+        pages_with_text(&result),
+        losses(&result)
     );
+    assert!(took < SAFETY, "took {took:?}");
+    (result, reads, cache_entries(&cache))
+}
+
+/// The losses of `result` that name the time limit.
+fn time_losses(result: &RunResult) -> Vec<String> {
+    losses(result)
+        .into_iter()
+        .filter(|l| l.contains("time limit"))
+        .collect()
+}
+
+#[test]
+fn a_text_cut_near_the_time_limit_is_not_cached() {
+    // The PDF reader stops its text at three quarters of the time limit, before the budget's
+    // own time is over, and lays out the pages read in the quarter left. That cut depends on
+    // the machine's load, so it is not cached.
+    //
+    // The time runs on a step clock, so the work decides the outcome, not the machine. On the
+    // wall clock (1 s, 2026-11-03, debug, load 9 to 13) the layout of the pages read took
+    // about as long as the quarter left, and in 3 runs of 4 the time limit itself stopped it:
+    // that is the case of the next test, not this one.
+    //
+    // READS: measured once with this step (2026-11-03, macOS, debug), as
+    // [`read_near_the_limit`] prints them. Listing the 20,000 pages takes 40,000 readings, the
+    // text about 2 a page and the layout about 13 a page. The text stops at 40,541 readings
+    // (242 pages), the time limit is at 54,054, and the layout of the 242 pages takes about
+    // 3,150 of the 13,513 readings left: under a quarter of the room, so a small change in the
+    // reader does not move the stop.
+    const STEP: Duration = Duration::from_nanos(18_500);
+    const READS: u64 = 43_689;
+    const PAGES: usize = 20_000;
+    let (result, reads, cached) = read_near_the_limit("text cut near the limit", STEP);
+    assert_readings(reads, READS);
+    let read = pages_with_text(&result);
+    assert!(read > 0 && read < PAGES, "{read} pages with text");
+    assert_eq!(
+        time_losses(&result),
+        [format!(
+            "Limit p{} text of pages {} to {PAGES} not read: the time limit was near, and the \
+             pages read before are laid out in the time left",
+            read + 1,
+            read + 1
+        )]
+    );
+    assert_eq!(result.completeness, Completeness::Partial);
+    assert!(cached.is_empty(), "{cached:?}");
+}
+
+#[test]
+fn a_layout_stopped_by_the_time_limit_says_which_pages_are_missing() {
+    // More text is read before the cut than the layout can lay out in the quarter left: the
+    // time limit itself stops the layout. The pages from there on are named in one loss with
+    // the limit that stopped them, which also covers the pages the text cut left out, and the
+    // result is not cached. This is what a busy machine does to the test above.
+    //
+    // READS: measured once with this step (2026-11-03, macOS, debug), as
+    // [`read_near_the_limit`] prints them. The text stops at 50,000 readings (4,972 pages),
+    // and the layout reaches the time limit (66,667 readings) at page 1,282.
+    const STEP: Duration = Duration::from_nanos(15_000);
+    const READS: u64 = 66_668;
+    const PAGES: usize = 20_000;
+    let (result, reads, cached) = read_near_the_limit("layout stopped by the limit", STEP);
+    assert_readings(reads, READS);
+    let read = pages_with_text(&result);
+    assert!(read > 0 && read < PAGES, "{read} pages with text");
+    assert_eq!(
+        time_losses(&result),
+        [format!(
+            "Limit p{} time limit reached (1000 ms > 1000 ms): pages {} to {PAGES} are not read",
+            read + 1,
+            read + 1
+        )]
+    );
+    assert_eq!(result.completeness, Completeness::Partial);
+    assert!(cached.is_empty(), "{cached:?}");
 }
 
 #[test]
