@@ -28,7 +28,8 @@ const READABLE_GAP: f32 = 2.0;
 const READABLE_WORDS: usize = 4;
 
 /// Whether `text` has the shape of a code's value: at most [`READABLE_WORDS`] words of ASCII
-/// letters, digits and `-./*+:`, with a digit or a capital letter.
+/// letters, digits and `-./*+:`, with a digit or a word of capitals only (two letters or
+/// more), so a word such as "Muster" is not a code's value.
 pub(crate) fn readable_shape(text: &str) -> bool {
     let words = text.split_whitespace().count();
     (1..=READABLE_WORDS).contains(&words)
@@ -36,9 +37,11 @@ pub(crate) fn readable_shape(text: &str) -> bool {
             .chars()
             .filter(|c| !c.is_whitespace())
             .all(|c| c.is_ascii_alphanumeric() || "-./*+:".contains(c))
-        && text
-            .chars()
-            .any(|c| c.is_ascii_digit() || c.is_ascii_uppercase())
+        && (text.chars().any(|c| c.is_ascii_digit())
+            || text.split_whitespace().any(|w| {
+                w.chars().filter(|c| c.is_ascii_alphabetic()).count() >= 2
+                    && !w.chars().any(|c| c.is_ascii_lowercase())
+            }))
 }
 
 /// Whether a line of the page of `view` stands under or over the code box `b`: its gap to the

@@ -127,6 +127,7 @@ pub fn captions_near<R: LineRun>(
     let band = 4.0 * size;
     let lo = by_y.line_y.partition_point(|y| *y < b[1] - band);
     let hi = by_y.line_y.partition_point(|y| *y <= b[3] + band);
+    crate::work::add(1 + hi.saturating_sub(lo) as u64);
     for &k in &by_y.lines[lo..hi] {
         let l = &lines[k];
         if skip(l.start) || !across(l) {

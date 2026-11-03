@@ -203,7 +203,7 @@ fn refused(speaks: Speaks, why: &'static str) -> Find {
         ),
         (Speaks::Figure, ON_PICTURE) => (Kind::Figure, "figure.on_picture", 0),
         (Speaks::Figure, TINY_TEXT) => (Kind::Figure, "figure.page_picture", 0),
-        (Speaks::Figure, _) => (Kind::Figure, "figure.caption", 0),
+        (Speaks::Figure, _) => (Kind::Figure, "figure.caption_near", 0),
         (Speaks::Spatial, PAGE_FRAME) => (Kind::Spatial, "spatial.page_frame", 0),
         (Speaks::Spatial, MANY_COLUMNS) => (Kind::Spatial, "spatial.many_columns", 0),
         (Speaks::Spatial, EMPTY_CELLS) => (Kind::Spatial, "spatial.empty_cells", 0),
@@ -1097,7 +1097,7 @@ mod tests {
             (LONG_TEXT, "paragraph.prose_cells", PARAGRAPH_PROSE_CELLS),
             (CROSSES_LINES, "spatial.crossed_lines", 0),
             (NO_ROWS_AND_COLUMNS, "spatial.no_rows_and_columns", 0),
-            (FIGURE_NEAR, "figure.caption", 0),
+            (FIGURE_NEAR, "figure.caption_near", 0),
         ] {
             let Find::Refused(r) = refused_for(why) else {
                 panic!("{why} is a refusal");

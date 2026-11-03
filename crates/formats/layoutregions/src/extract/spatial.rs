@@ -17,21 +17,21 @@ pub struct SpatialLineOut {
 
 /// A gap of this many character advances or more between two runs of a line starts a new
 /// piece.
-pub const PIECE_GAP: f32 = 2.0;
+pub const SPATIAL_PIECE_GAP: f32 = 2.0;
 
 /// The spatial reading of the text runs `prims` of `page`: one line per line number, top to
 /// bottom in the reader's line order; in a line its runs left to right (by left edge, then by
 /// id), in pieces where the gap from the right end of the piece so far to the next run's left
-/// edge is [`PIECE_GAP`] advances or more (runs that overlap stay in their piece). A piece's
-/// column is `((x0 - region x0) / adv).round()`, `adv` the median advance per character of
-/// the region's runs, `region x0` the least left edge of its runs.
+/// edge is [`SPATIAL_PIECE_GAP`] advances or more (runs that overlap stay in their piece). A
+/// piece's column is `((x0 - region x0) / adv).round()`, `adv` the median advance per character
+/// of the region's runs, `region x0` the least left edge of its runs.
 ///
 /// Every text run of `prims` is in exactly one piece, once: runs of white space and runs off
 /// the line's axis too (in the line of their number). Primitives other than text are no lines
 /// and are not in the reading: the caller shows them by their own kind (a picture as needing
-/// vision, a code with its value). Ids the page does not have are skipped. Runs without width
-/// or characters give no advance: then `adv` is half the median text size, or 1 without any
-/// size, so no column is undefined.
+/// vision, a code with its value). Ids the page does not have are skipped (a debug build
+/// asserts on them). Runs without width or characters give no advance: then `adv` is half the
+/// median text size, or 1 without any size, so no column is undefined.
 pub fn spatial(page: &PageIn, prims: &[PrimId]) -> Vec<SpatialLineOut> {
     let mut ids: Vec<u32> = prims
         .iter()
@@ -77,7 +77,7 @@ pub fn spatial(page: &PageIn, prims: &[PrimId]) -> Vec<SpatialLineOut> {
         for &i in line {
             let r = run(i);
             match pieces.last_mut() {
-                Some((_, p)) if left(r) - end < PIECE_GAP * adv => p.push(PrimId::Text(i)),
+                Some((_, p)) if left(r) - end < SPATIAL_PIECE_GAP * adv => p.push(PrimId::Text(i)),
                 _ => pieces.push((col(left(r)), vec![PrimId::Text(i)])),
             }
             end = end.max(right(r));
@@ -151,6 +151,13 @@ mod tests {
         }
     }
 
+    fn off_axis(r: TextRun) -> TextRun {
+        TextRun {
+            off_axis: true,
+            ..r
+        }
+    }
+
     fn text(i: u32) -> PrimId {
         PrimId::Text(i)
     }
@@ -169,9 +176,10 @@ mod tests {
             run("PLZ:", 72.0, 2),    // 5
             run("12345", 272.0, 2),  // 6
             run(" ", 400.0, 2),      // 7: white space keeps its place
+            off_axis(run("Muster", 500.0, 1)), // 8: off its axis, kept in its line
         ];
         let p = page(texts);
-        let mut prims: Vec<PrimId> = (0..8).rev().map(text).collect();
+        let mut prims: Vec<PrimId> = (0..9).rev().map(text).collect();
         prims.push(PrimId::Rule(0));
         let got = spatial(&p, &prims);
         // adv is 5; columns from x 72. "Ort:" and "12345" stand in one column (40).
@@ -182,7 +190,7 @@ mod tests {
                     pieces: vec![(0, vec![text(1), text(2)]), (40, vec![text(0), text(3)])]
                 },
                 SpatialLineOut {
-                    pieces: vec![(0, vec![text(4)])]
+                    pieces: vec![(0, vec![text(4)]), (86, vec![text(8)])]
                 },
                 SpatialLineOut {
                     pieces: vec![(0, vec![text(5)]), (40, vec![text(6)]), (66, vec![text(7)])]
@@ -193,9 +201,9 @@ mod tests {
             .iter()
             .flat_map(|l| l.pieces.iter().flat_map(|(_, p)| p.iter().copied()))
             .collect();
-        assert_eq!(all.len(), 8, "every run once");
+        assert_eq!(all.len(), 9, "every run once");
         all.sort_unstable();
-        assert_eq!(all, (0..8).map(text).collect::<Vec<_>>());
+        assert_eq!(all, (0..9).map(text).collect::<Vec<_>>());
         // Columns of one column line up across lines; pieces go left to right.
         for l in &got {
             assert!(l.pieces.windows(2).all(|w| w[0].0 < w[1].0));

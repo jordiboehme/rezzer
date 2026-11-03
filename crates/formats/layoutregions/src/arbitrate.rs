@@ -3,6 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::ops::Range;
 
 use crate::input::{PageIn, PrimId};
 use crate::limits::Limits;
@@ -168,11 +169,17 @@ impl Margins {
 /// The kind a segment is decided as, how sure, with its evidence and the kinds that lost.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Decision {
+    /// The segment of the tree that stands as one region.
     pub seg: SegId,
     pub kind: Kind,
+    /// `Exact` for a region the file states, `Rule` for a clear winner, `Unsure` for `Spatial`.
     pub certainty: Certainty,
+    /// The winner's score; 1000 for a region the file states, 0 for `Spatial`.
     pub score: Score,
+    /// The winner's signals; for `Spatial`, the `spatial.*` refusals that say why no table was
+    /// read (weight 0), if any; for a region the file states, `given.file_states`.
     pub signals: Vec<Signal>,
+    /// The kinds that lost, best first (see [`arbitrate()`]).
     pub alternatives: Vec<Alternative>,
 }
 
@@ -195,12 +202,18 @@ pub struct Decision {
 /// does not count. Among the cuts of a segment the one with the highest weakest score wins when
 /// it leads every other by the margin, else the children stand; the losing cuts' kinds are
 /// alternatives on the decisions that share primitives with them. The segment's own decision
-/// replaces the cut when it is not `Spatial` and its score is at least the cut's weakest plus
-/// the margin; it then carries the cut's kinds as alternatives. Otherwise the cut stands and
-/// the segment's best candidate is an alternative on each of its decisions. The page root
-/// never replaces its cut: its candidates are alternatives on the decisions under it.
-/// Alternatives are one per kind (the best score), never of a decision's own kind, best
-/// first, at most `m.max_alternatives`; a given region has none.
+/// replaces the cut when it is not `Spatial`, its score is at least the cut's weakest plus the
+/// margin, and it leads by the margin every decision of the cut (grandchildren included) of
+/// another kind, for an unsure one its best alternative of another kind: a key/value or table
+/// reading below is never folded into a weaker reading of another kind. It then carries the
+/// cut's kinds as alternatives. Otherwise the cut stands and the segment's best candidate is
+/// an alternative on each of its decisions. The page root never replaces its cut: its
+/// candidates are alternatives on the decisions under it. Alternatives are one per kind (the
+/// best score), never of a decision's own kind, best first, at most `m.max_alternatives`; a
+/// given region has none.
+///
+/// Each decision is made once and moved, never copied with its subtree: the decisions of a
+/// segment stand together at the end of one list while it is read.
 pub fn arbitrate(
     segs: &Segments,
     typed: &BTreeMap<SegId, Vec<Typed>>,
@@ -210,28 +223,24 @@ pub fn arbitrate(
         segs,
         typed,
         m,
-        memo: HashMap::new(),
+        given: HashMap::new(),
+        out: Vec::new(),
     };
-    match segs.all.get(segs.root.0 as usize) {
-        Some(_) => a.read(segs.root).decisions,
-        None => Vec::new(),
+    if segs.all.get(segs.root.0 as usize).is_some() {
+        a.read(segs.root);
     }
-}
-
-/// The decisions that stand for a segment and the weakest of them; `None` when none counts.
-#[derive(Debug, Clone)]
-struct Reading {
-    decisions: Vec<Decision>,
-    weakest: Option<u16>,
+    a.out
 }
 
 struct Arbiter<'a> {
     segs: &'a Segments,
     typed: &'a BTreeMap<SegId, Vec<Typed>>,
     m: &'a Margins,
-    /// The readings of segments read so far: a given region stands in the root's children and
-    /// in its other cuts.
-    memo: HashMap<SegId, Reading>,
+    /// The decisions of the given regions: one stands in the root's children and in its other
+    /// cuts.
+    given: HashMap<SegId, Decision>,
+    /// The decisions read so far: those of the segment being read stand at the end.
+    out: Vec<Decision>,
 }
 
 impl Arbiter<'_> {
@@ -239,127 +248,141 @@ impl Arbiter<'_> {
         self.typed.get(&s).map_or(&[], Vec::as_slice)
     }
 
-    fn read(&mut self, s: SegId) -> Reading {
-        if let Some(r) = self.memo.get(&s) {
-            return r.clone();
-        }
+    /// Reads `s`: its decisions are pushed to the end of `out`. Returns their weakest score,
+    /// `None` when none counts.
+    fn read(&mut self, s: SegId) -> Option<u16> {
         work::add(1);
         let seg = &self.segs.all[s.0 as usize];
-        let r = if let Source::Given(kind) = seg.source {
-            Reading {
-                decisions: vec![given(s, kind)],
-                weakest: Some(MAX_SCORE),
-            }
-        } else {
-            let mut cuts: Vec<&[SegId]> = Vec::new();
-            if !seg.children.is_empty() {
-                cuts.push(&seg.children);
-            }
-            cuts.extend(seg.alternatives.iter().map(Vec::as_slice));
-            let own = decide(s, self.cands(s), self.m);
-            if cuts.is_empty() {
-                let readable = seg
-                    .prims
-                    .iter()
-                    .any(|p| matches!(p, PrimId::Text(_) | PrimId::Picture(_) | PrimId::Code(_)));
-                let weakest = readable.then(|| strength(&own));
-                Reading {
-                    decisions: vec![own],
-                    weakest,
-                }
-            } else {
-                let root = seg.source == Source::Page;
-                self.parent(s, root, own, &cuts)
-            }
-        };
-        self.memo.insert(s, r.clone());
-        r
+        if let Source::Given(kind) = seg.source {
+            let d = self
+                .given
+                .entry(s)
+                .or_insert_with(|| given(s, kind))
+                .clone();
+            self.out.push(d);
+            return Some(MAX_SCORE);
+        }
+        let own = decide(s, self.cands(s), self.m);
+        if seg.children.is_empty() && seg.alternatives.is_empty() {
+            let readable = seg
+                .prims
+                .iter()
+                .any(|p| matches!(p, PrimId::Text(_) | PrimId::Picture(_) | PrimId::Code(_)));
+            let weakest = readable.then(|| strength(&own));
+            self.out.push(own);
+            return weakest;
+        }
+        let root = seg.source == Source::Page;
+        self.parent(s, root, own)
     }
 
-    /// The reading of a segment with the cuts `cuts` (its children first) and its own
+    /// Reads the segment `s` with cuts (its children first, then its other cuts) and its own
     /// decision `own`.
-    fn parent(&mut self, s: SegId, root: bool, own: Decision, cuts: &[&[SegId]]) -> Reading {
-        let mut readings: Vec<Reading> = cuts
-            .iter()
-            .map(|cut| {
-                let mut decisions = Vec::new();
-                let mut weakest: Option<u16> = None;
-                for &c in cut.iter() {
-                    let r = self.read(c);
-                    weakest = match (weakest, r.weakest) {
-                        (Some(a), Some(b)) => Some(a.min(b)),
-                        (a, b) => a.or(b),
-                    };
-                    decisions.extend(r.decisions);
-                }
-                Reading { decisions, weakest }
-            })
-            .collect();
-        let key = |r: &Reading| u32::from(r.weakest.unwrap_or(0));
+    fn parent(&mut self, s: SegId, root: bool, own: Decision) -> Option<u16> {
+        let seg = &self.segs.all[s.0 as usize];
+        let start = self.out.len();
+        let mut cuts: Vec<(Range<usize>, Option<u16>)> = Vec::new();
+        let lists = (!seg.children.is_empty())
+            .then_some(&seg.children)
+            .into_iter()
+            .chain(seg.alternatives.iter());
+        for cut in lists {
+            let from = self.out.len();
+            let mut weakest: Option<u16> = None;
+            for &c in cut {
+                let w = self.read(c);
+                weakest = match (weakest, w) {
+                    (Some(a), Some(b)) => Some(a.min(b)),
+                    (a, b) => a.or(b),
+                };
+            }
+            cuts.push((from..self.out.len(), weakest));
+        }
+        let key = |w: Option<u16>| u32::from(w.unwrap_or(0));
         let margin = u32::from(self.m.margin.0);
         let mut best = 0;
-        for k in 1..readings.len() {
-            if key(&readings[k]) > key(&readings[best]) {
+        for k in 1..cuts.len() {
+            if key(cuts[k].1) > key(cuts[best].1) {
                 best = k;
             }
         }
-        let ahead = (0..readings.len())
+        let ahead = (0..cuts.len())
             .filter(|&k| k != best)
-            .all(|k| key(&readings[best]) >= key(&readings[k]) + margin);
+            .all(|k| key(cuts[best].1) >= key(cuts[k].1) + margin);
         if !ahead {
             best = 0;
         }
-        let mut chosen = readings.swap_remove(best);
-        let losing: Vec<&Decision> = readings.iter().flat_map(|r| &r.decisions).collect();
-        if !losing.is_empty() {
-            self.share(&mut chosen.decisions, &losing);
+        let (chosen, weakest) = cuts[best].clone();
+        if cuts.len() > 1 {
+            let losers: Vec<usize> = cuts
+                .iter()
+                .enumerate()
+                .filter(|&(k, _)| k != best)
+                .flat_map(|(_, (r, _))| r.clone())
+                .collect();
+            self.share(chosen.clone(), &losers);
+            // Keep the chosen cut alone at the end: the cuts after it are cut off, those before
+            // it go and it moves up (nothing moves when the children's cut stands).
+            self.out.truncate(chosen.end);
+            self.out.drain(start..chosen.start);
         }
-        let replaces =
-            !root && own.kind != Kind::Spatial && u32::from(own.score.0) >= key(&chosen) + margin;
+        let standing = start..self.out.len();
+        let leads = |score: u16| u32::from(own.score.0) >= u32::from(score) + margin;
+        let replaces = !root
+            && own.kind != Kind::Spatial
+            && u32::from(own.score.0) >= key(weakest) + margin
+            && self.out[standing.clone()]
+                .iter()
+                .all(|d| match d.certainty {
+                    Certainty::Unsure => d
+                        .alternatives
+                        .iter()
+                        .find(|a| a.kind != own.kind)
+                        .is_none_or(|a| leads(a.score.0)),
+                    _ => d.kind == own.kind || leads(d.score.0),
+                });
+        work::add(1 + standing.len() as u64);
         if replaces {
             let mut own = own;
-            let kids: Vec<Alternative> = chosen.decisions.iter().filter_map(alternative).collect();
+            let kids: Vec<Alternative> = self.out[standing.clone()]
+                .iter()
+                .filter_map(alternative)
+                .collect();
             add(&mut own, kids, self.m);
-            let weakest = Some(own.score.0);
-            return Reading {
-                decisions: vec![own],
-                weakest,
-            };
+            self.out.truncate(start);
+            let w = Some(own.score.0);
+            self.out.push(own);
+            return w;
         }
-        let mut c = self.cands(s).to_vec();
-        sort(&mut c);
-        let from: Vec<Alternative> = c
-            .iter()
-            .filter(|t| t.kind != Kind::Spatial)
-            .take(if root { usize::MAX } else { 1 })
-            .map(|t| Alternative {
-                kind: t.kind,
-                score: t.score,
-                signals: t.signals.clone(),
-            })
-            .collect();
+        let cands = self.cands(s);
+        let mut order: Vec<&Typed> = cands.iter().filter(|t| t.kind != Kind::Spatial).collect();
+        sort(&mut order);
+        let take = if root { self.m.max_alternatives } else { 1 };
+        let from: Vec<Alternative> = order.into_iter().take(take).map(as_alternative).collect();
         if !from.is_empty() {
-            for d in &mut chosen.decisions {
+            for d in &mut self.out[standing] {
                 add(d, from.clone(), self.m);
             }
         }
-        chosen
+        weakest
     }
 
-    /// Puts the kinds of `losing` (decisions of other cuts) on each decision of `chosen` that
-    /// shares a primitive with them.
-    fn share(&self, chosen: &mut [Decision], losing: &[&Decision]) {
+    /// Puts the kinds of the decisions `losers` (indexes into `out`) of other cuts on each
+    /// decision of `chosen` that shares a primitive with them.
+    fn share(&mut self, chosen: Range<usize>, losers: &[usize]) {
         let mut at: HashMap<PrimId, usize> = HashMap::new();
-        for (k, d) in chosen.iter().enumerate() {
-            let prims = &self.segs.all[d.seg.0 as usize].prims;
+        for k in chosen {
+            let prims = &self.segs.all[self.out[k].seg.0 as usize].prims;
             work::add(prims.len() as u64);
             for p in prims {
                 at.insert(*p, k);
             }
         }
-        for l in losing {
-            let Some(alt) = alternative(l) else { continue };
-            let prims = &self.segs.all[l.seg.0 as usize].prims;
+        let mut puts: Vec<(usize, Alternative)> = Vec::new();
+        for &l in losers {
+            let d = &self.out[l];
+            let Some(alt) = alternative(d) else { continue };
+            let prims = &self.segs.all[d.seg.0 as usize].prims;
             work::add(prims.len() as u64);
             let mut hit: Vec<usize> = prims
                 .iter()
@@ -368,9 +391,10 @@ impl Arbiter<'_> {
                 .into_iter()
                 .collect();
             hit.sort_unstable();
-            for k in hit {
-                add(&mut chosen[k], vec![alt.clone()], self.m);
-            }
+            puts.extend(hit.into_iter().map(|k| (k, alt.clone())));
+        }
+        for (k, alt) in puts {
+            add(&mut self.out[k], vec![alt], self.m);
         }
     }
 }
@@ -395,7 +419,7 @@ fn alternative(d: &Decision) -> Option<Alternative> {
 }
 
 /// Best score first, then in kind order.
-fn sort(c: &mut [Typed]) {
+fn sort(c: &mut [&Typed]) {
     c.sort_by(|a, b| b.score.cmp(&a.score).then(a.kind.cmp(&b.kind)));
 }
 
@@ -418,8 +442,8 @@ fn given(s: SegId, kind: Kind) -> Decision {
 /// One segment: the best candidate wins only with positive evidence and a clear margin.
 fn decide(s: SegId, cands: &[Typed], m: &Margins) -> Decision {
     work::add(1 + cands.len() as u64);
-    let (spatial, mut c): (Vec<Typed>, Vec<Typed>) =
-        cands.iter().cloned().partition(|t| t.kind == Kind::Spatial);
+    let (spatial, mut c): (Vec<&Typed>, Vec<&Typed>) =
+        cands.iter().partition(|t| t.kind == Kind::Spatial);
     sort(&mut c);
     let second = c.get(1).map_or(Score(0), |t| t.score);
     match c.first() {
@@ -428,37 +452,44 @@ fn decide(s: SegId, cands: &[Typed], m: &Margins) -> Decision {
                 && !best.signals.is_empty()
                 && best.score.0 - second.0 >= m.margin.0 =>
         {
-            decided(s, best, Certainty::Rule, &c[1..], m)
+            let mut d = Decision {
+                seg: s,
+                kind: best.kind,
+                certainty: Certainty::Rule,
+                score: best.score,
+                signals: best.signals.clone(),
+                alternatives: Vec::new(),
+            };
+            add(&mut d, alternatives(&c[1..], m), m);
+            d
         }
-        _ => unsure(s, &c, spatial, m),
+        _ => unsure(s, &c, &spatial, m),
     }
 }
 
-fn decided(s: SegId, best: &Typed, certainty: Certainty, rest: &[Typed], m: &Margins) -> Decision {
-    let mut d = Decision {
-        seg: s,
-        kind: best.kind,
-        certainty,
-        score: best.score,
-        signals: best.signals.clone(),
-        alternatives: Vec::new(),
-    };
-    add(&mut d, rest.iter().map(as_alternative).collect(), m);
-    d
+/// The candidates `c` (sorted, one per kind) as alternatives, as many as a decision keeps.
+fn alternatives(c: &[&Typed], m: &Margins) -> Vec<Alternative> {
+    c.iter()
+        .take(m.max_alternatives)
+        .map(|t| as_alternative(t))
+        .collect()
 }
 
 /// Kind `Spatial`, certainty `Unsure`, every candidate an alternative; the signals are the
 /// `spatial.*` refusals that say why no table was read.
-fn unsure(s: SegId, c: &[Typed], spatial: Vec<Typed>, m: &Margins) -> Decision {
+fn unsure(s: SegId, c: &[&Typed], spatial: &[&Typed], m: &Margins) -> Decision {
     let mut d = Decision {
         seg: s,
         kind: Kind::Spatial,
         certainty: Certainty::Unsure,
         score: Score(0),
-        signals: spatial.into_iter().flat_map(|t| t.signals).collect(),
+        signals: spatial
+            .iter()
+            .flat_map(|t| t.signals.iter().cloned())
+            .collect(),
         alternatives: Vec::new(),
     };
-    add(&mut d, c.iter().map(as_alternative).collect(), m);
+    add(&mut d, alternatives(c, m), m);
     d
 }
 

@@ -1659,6 +1659,16 @@ fn drawn_rules_with_a_figure_caption_are_a_figure() {
         all_typed(view, seg)
     });
     assert_eq!(ids(of(&typed, Kind::Figure)), ["figure.drawn_caption"]);
+    // A lone rule under a caption line is no drawn chart: its box is no figure's size.
+    let caption = run("Abb. 4: Werte der Muster GmbH", 72.0, 385.0, 9.2, 50);
+    let tree = Tree {
+        page: sheet(vec![caption], vec![rule(72.0, 380.0, 372.0, 380.0)]),
+    };
+    tree.with(|view| {
+        for seg in &view.segs.all {
+            assert!(type_figure(view, seg).is_none(), "{seg:#?}");
+        }
+    });
     // Without a caption, rules are no figure.
     let tree = Tree {
         page: sheet(Vec::new(), box_rules([72.0, 400.0, 372.0, 600.0])),
@@ -1696,6 +1706,8 @@ fn a_code_and_its_readable_line() {
         ),
         ("MUSTER-12345", &["code.symbol", "code.readable_line"][..]),
         ("die Ware der Muster GmbH", &["code.symbol"][..]),
+        ("Muster", &["code.symbol"][..]),
+        ("SCAN ME", &["code.symbol", "code.readable_line"][..]),
         ("", &["code.symbol"][..]),
     ] {
         let tree = code_page(line);
@@ -1775,4 +1787,55 @@ fn worst_case_margins_of_figures_and_codes() {
             "figure refusal over {what}: {FIGURE_REFUSED} against {loser}"
         );
     }
+}
+
+/// A segment of two pictures is no figure of its own: each picture is.
+#[test]
+fn two_pictures_are_two_figures() {
+    let mut page = page(2, Vec::new());
+    page.pictures = vec![
+        PictureIn {
+            bounds: bounds(72.0, 400.0, 272.0, 600.0),
+        },
+        PictureIn {
+            bounds: bounds(300.0, 400.0, 500.0, 600.0),
+        },
+    ];
+    let tree = Tree { page };
+    let both = tree.typed(&holding(vec![PrimId::Picture(0), PrimId::Picture(1)]));
+    assert!(find(&both, Kind::Figure).is_none(), "{both:#?}");
+    for k in 0..2 {
+        let one = tree.typed(&holding(vec![PrimId::Picture(k)]));
+        assert_eq!(ids(of(&one, Kind::Figure)), ["figure.picture"]);
+    }
+}
+
+/// A ruled table on a picture of the whole page (a letterhead or a scan under the text) and
+/// a ruled table with a cell that opens with "Abb. 3" are no figures: the refusal names why
+/// no table was read, but a page frame under a grid or a caption in a cell is no chart.
+#[test]
+fn a_grid_on_a_page_picture_or_with_a_caption_cell_is_no_figure() {
+    let mut tree = ruled_table(ITEM_XS, 700.0, ITEMS, true, 100);
+    tree.page.pictures.push(PictureIn {
+        bounds: bounds(0.0, 0.0, 595.0, 842.0),
+    });
+    let typed = tree.typed(&grid);
+    assert!(find(&typed, Kind::Figure).is_none(), "{typed:#?}");
+    tree.with(|view| {
+        let g = view.segs.all.iter().find(|s| grid(view, s)).unwrap();
+        assert_eq!(refusal(view, g).unwrap().signal.id, "figure.on_picture");
+    });
+    let rows: &[&[&str]] = &[
+        &["Teil", "Menge", "Zeichnung"],
+        &["Muster A", "2", "Abb. 3"],
+        &["Muster B", "1", "Abb. 4"],
+        &["Muster C", "4", "Abb. 5"],
+    ];
+    let tree = ruled_table(ITEM_XS, 700.0, rows, true, 100);
+    let typed = tree.typed(&grid);
+    assert!(find(&typed, Kind::Figure).is_none(), "{typed:#?}");
+    tree.with(|view| {
+        let g = view.segs.all.iter().find(|s| grid(view, s)).unwrap();
+        assert_eq!(refusal(view, g).unwrap().signal.id, "figure.caption_near");
+    });
 }

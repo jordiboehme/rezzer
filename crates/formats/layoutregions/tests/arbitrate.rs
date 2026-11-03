@@ -513,7 +513,8 @@ fn given_stays_given() {
     assert_eq!(out[1].kind, Kind::Paragraph);
 }
 
-/// A tree: root > parent > two leaves, the second unsure.
+/// A tree: root > parent (List) > two leaves: a Heading 400 and an unsure one (Paragraph 400
+/// against Heading 350).
 fn parent_tree(parent: u16) -> (Segments, BTreeMap<SegId, Vec<Typed>>) {
     let mut b = Build::new();
     let p = b.add(Some(0), Source::Gutter, Vec::new());
@@ -522,7 +523,7 @@ fn parent_tree(parent: u16) -> (Segments, BTreeMap<SegId, Vec<Typed>>) {
     let segs = b.done();
     let typed = BTreeMap::from([
         (SegId(p), vec![typed(Kind::List, parent)]),
-        (SegId(a), vec![typed(Kind::Heading, 700)]),
+        (SegId(a), vec![typed(Kind::Heading, 400)]),
         (
             SegId(c),
             vec![typed(Kind::Paragraph, 400), typed(Kind::Heading, 350)],
@@ -541,7 +542,7 @@ fn parent_beats_unsure_children_only_by_margin() {
     assert_eq!(out[0].kind, Kind::List);
     // It carries its children's kinds.
     assert_eq!(kinds(&out[0].alternatives), [Kind::Heading]);
-    // Sure children (700 and 400 by 250) stand against a parent 100 ahead of the weakest.
+    // Sure children (400 each) stand against a parent 100 ahead of them.
     let (segs, mut typed) = parent_tree(500);
     typed.insert(SegId(3), vec![typed_of(Kind::Paragraph, 400)]);
     let out = decide_all(&segs, &typed);
@@ -576,9 +577,10 @@ fn a_rules_only_leaf_lets_no_parent_fold() {
         vec![PrimId::Rule(0), PrimId::Box(0)],
     );
     let segs = b.done();
+    // The child is of the parent's kind, so only the weakest score can block the fold.
     let typed = BTreeMap::from([
         (SegId(p), vec![typed(Kind::Paragraph, 800)]),
-        (SegId(a), vec![typed(Kind::Heading, 700)]),
+        (SegId(a), vec![typed(Kind::Paragraph, 700)]),
     ]);
     let out = decide_all(&segs, &typed);
     assert_eq!(
@@ -586,7 +588,7 @@ fn a_rules_only_leaf_lets_no_parent_fold() {
             .map(|d| (d.seg, d.kind, d.certainty))
             .collect::<Vec<_>>(),
         [
-            (SegId(a), Kind::Heading, Certainty::Rule),
+            (SegId(a), Kind::Paragraph, Certainty::Rule),
             (SegId(rules), Kind::Spatial, Certainty::Unsure),
         ]
     );
@@ -598,7 +600,7 @@ fn a_rules_only_leaf_lets_no_parent_fold() {
     let segs = b.done();
     let typed = BTreeMap::from([
         (SegId(p), vec![typed_of(Kind::Paragraph, 800)]),
-        (SegId(a), vec![typed_of(Kind::Heading, 700)]),
+        (SegId(a), vec![typed_of(Kind::Paragraph, 700)]),
     ]);
     let out = decide_all(&segs, &typed);
     assert_eq!(out.len(), 1);
@@ -651,6 +653,69 @@ fn cut_tree(main: [u16; 2], other: [u16; 2]) -> Vec<Decision> {
     decide_all(&segs, &typed)
 }
 
+/// The probe of the review: a parent paragraph 550 over a caption line (paragraph 300), lines
+/// of labels and values (900) and prose (550). The weakest check passes (550 >= 300 + 150),
+/// but the label/value child of another kind blocks the fold; so does a label/value
+/// grandchild under a child that kept its own children, and an unsure child whose best
+/// alternative of another kind is ahead.
+#[test]
+fn a_sure_child_of_another_kind_blocks_the_fold() {
+    let mut b = Build::new();
+    let p = b.add(Some(0), Source::Rest, Vec::new());
+    let cap = b.add(Some(p), Source::Band, vec![text(0)]);
+    let kv = b.add(Some(p), Source::Band, vec![text(1), text(2)]);
+    let prose = b.add(Some(p), Source::Band, vec![text(3)]);
+    let segs = b.done();
+    let mut typed = BTreeMap::from([
+        (SegId(p), vec![typed_of(Kind::Paragraph, 550)]),
+        (SegId(cap), vec![typed_of(Kind::Paragraph, 300)]),
+        (
+            SegId(kv),
+            vec![
+                typed_of(Kind::LabelValue, 900),
+                typed_of(Kind::Paragraph, 300),
+            ],
+        ),
+        (SegId(prose), vec![typed_of(Kind::Paragraph, 550)]),
+    ]);
+    let out = decide_all(&segs, &typed);
+    assert_eq!(
+        out.iter().map(|d| (d.seg, d.kind)).collect::<Vec<_>>(),
+        [
+            (SegId(cap), Kind::Paragraph),
+            (SegId(kv), Kind::LabelValue),
+            (SegId(prose), Kind::Paragraph)
+        ]
+    );
+    // An unsure child of a label/value and a table tied at 850 blocks a parent of 900.
+    typed.insert(
+        SegId(kv),
+        vec![typed_of(Kind::LabelValue, 850), typed_of(Kind::Table, 850)],
+    );
+    typed.insert(SegId(p), vec![typed_of(Kind::Paragraph, 900)]);
+    let out = decide_all(&segs, &typed);
+    assert_eq!(out.len(), 3);
+    assert_eq!(out[1].kind, Kind::Spatial);
+    // A grandchild: the child kept its own children (it is unsure of itself), and its
+    // label/value child blocks the parent.
+    let mut b = Build::new();
+    let p = b.add(Some(0), Source::Rest, Vec::new());
+    let c = b.add(Some(p), Source::Band, Vec::new());
+    let g1 = b.add(Some(c), Source::Style, vec![text(0)]);
+    let g2 = b.add(Some(c), Source::Style, vec![text(1)]);
+    let segs = b.done();
+    let typed = BTreeMap::from([
+        (SegId(p), vec![typed_of(Kind::Paragraph, 700)]),
+        (SegId(g1), vec![typed_of(Kind::LabelValue, 900)]),
+        (SegId(g2), vec![typed_of(Kind::Paragraph, 300)]),
+    ]);
+    let out = decide_all(&segs, &typed);
+    assert_eq!(
+        out.iter().map(|d| (d.seg, d.kind)).collect::<Vec<_>>(),
+        [(SegId(g1), Kind::LabelValue), (SegId(g2), Kind::Paragraph)]
+    );
+}
+
 #[test]
 fn first_cut_stands_on_a_tie() {
     let out = cut_tree([700, 600], [800, 600]);
@@ -681,6 +746,22 @@ fn same_scores_same_decision_in_any_input_order() {
         v.reverse();
     }
     assert_eq!(decide_all(&segs, &turned), base);
+    // Three candidates in every rotation give one decision.
+    let three = vec![
+        typed_of(Kind::Table, 500),
+        typed_of(Kind::Heading, 450),
+        typed_of(Kind::List, 500),
+    ];
+    let first = one_leaf(three.clone());
+    for k in 1..3 {
+        let mut c = three.clone();
+        c.rotate_left(k);
+        assert_eq!(one_leaf(c), first, "rotated by {k}");
+    }
+    assert_eq!(
+        kinds(&first.alternatives),
+        [Kind::List, Kind::Table, Kind::Heading]
+    );
     // Equal scores: the kind order settles the sort, so the same kind leads either way.
     let a = one_leaf(vec![
         typed_of(Kind::Table, 500),
