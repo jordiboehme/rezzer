@@ -340,7 +340,9 @@ fn in_order_of(page: &EnginePage, of: &HashMap<PrimId, usize>, seg: &Segment) ->
 /// The raw comparison of one page, for counts the lines do not show; tab-separated, the
 /// first field the record's type:
 ///
-/// - `p page tagged|untagged`: the page, first;
+/// - `p page tagged|untagged|none widgets`: the page, first: laid out by its tags or not, or
+///   `none` when it has no shadow (a stop before the drawn search), and how many form field
+///   boxes (widgets) it has, which the scored reading does not take as given regions yet;
 /// - `s page seg source parent depth children cuts holds candidates in-order`: every segment
 ///   of the tree, the segments of other cuts included; `candidates` are `kind score signals`
 ///   joined by ` | `;
@@ -351,10 +353,10 @@ fn in_order_of(page: &EnginePage, of: &HashMap<PrimId, usize>, seg: &Segment) ->
 ///
 /// `text` is the start of the text the decision or region holds (see [`text_of`]).
 pub fn records(page: &EnginePage) -> Vec<String> {
-    let Some(shadow) = &page.shadow else {
-        return Vec::new();
-    };
     let n = page.regions.page;
+    let Some(shadow) = &page.shadow else {
+        return vec![format!("p\t{n}\tnone\t-")];
+    };
     let of = region_of(page);
     let depth = |s: &Segment| {
         let (mut d, mut up) = (0, s.parent);
@@ -364,8 +366,9 @@ pub fn records(page: &EnginePage) -> Vec<String> {
         }
         d
     };
+    let widgets = page.input.boxes.iter().filter(|b| b.widget).count();
     let mut out = vec![format!(
-        "p\t{n}\t{}",
+        "p\t{n}\t{}\t{widgets}",
         if shadow.tagged { "tagged" } else { "untagged" }
     )];
     for seg in &shadow.segs.all {

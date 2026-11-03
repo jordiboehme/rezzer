@@ -268,8 +268,9 @@ impl Counts {
     }
 }
 
-/// The `shadow` mode: see the module. `Ok(n)`, the lines printed.
-fn shadow(args: &[String]) -> Result<usize, String> {
+/// The `shadow` mode: see the module. `Ok((lines, pages))`: the lines printed, and the pages
+/// laid out without a shadow (a stop came before the drawn search).
+fn shadow(args: &[String]) -> Result<(usize, usize), String> {
     if !cfg!(debug_assertions) || std::env::var_os("REZZER_SHADOW").is_none() {
         return Err("the shadow runs only in a debug build with REZZER_SHADOW set".to_string());
     }
@@ -290,6 +291,7 @@ fn shadow(args: &[String]) -> Result<usize, String> {
     }
     let mut raw = String::new();
     let mut printed = 0;
+    let mut without = 0;
     for input in &inputs {
         let (root, files) = files_of(input)?;
         for file in files {
@@ -303,6 +305,7 @@ fn shadow(args: &[String]) -> Result<usize, String> {
                 .trim_end_matches('.')
                 .to_string();
             for page in &pages {
+                without += usize::from(page.shadow.is_none());
                 for line in rezzer_read_pdf::shadow::lines(page, extent) {
                     println!("{name}\t{line}");
                     printed += 1;
@@ -321,14 +324,14 @@ fn shadow(args: &[String]) -> Result<usize, String> {
     if let Some(file) = records {
         std::fs::write(&file, raw).map_err(|e| format!("{file}: {e}"))?;
     }
-    Ok(printed)
+    Ok((printed, without))
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().is_some_and(|m| m == "shadow") {
         match shadow(&args[1..]) {
-            Ok(n) => eprintln!("{n} differences"),
+            Ok((n, without)) => eprintln!("{n} differences, {without} pages without a shadow"),
             Err(e) => {
                 eprintln!(
                     "region-report: {e}\nusage: region-report shadow [--extent] [--records \
