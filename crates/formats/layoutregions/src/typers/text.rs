@@ -1,0 +1,500 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The typers of text regions: paragraph, heading, list, title block, header and footer band
+//! and footnote legend.
+//!
+//! Heading, paragraph and list read one walk of [`next_block`] over the segment's lines (see
+//! [`SegText`]): a kind claims a segment only when the walk reads every line with text as
+//! blocks of that kind, so the three compete only where the walk itself says two things (lines
+//! of a heading size that read as a paragraph, see [`Demotion`]). Bands come from the running
+//! lines of the file ([`crate::file::RunningIndex`], the two-page rule), the legend from the
+//! file's footnote legends, the title block from [`crate::extract::text::title::page_title`].
+//!
+//! The weights are starting values for an arbitration that asks a score of at least 300 and a
+//! lead of 150 over the next kind. The first signal of every kind but paragraph alone reaches
+//! 450 or more. A paragraph's signals are smaller and add up: [`PARAGRAPH_TEXT_SIZE`] alone
+//! reaches the least score, so a plain line of body text is a paragraph, and it never wins
+//! against another kind's evidence. The kinds today's rules decide between win by 150 or more.
+
+use crate::extract::text::{Demotion, TextBlock, TextCx, next_block, sentences};
+use crate::file::{Band, HEADING_PLAIN_RATIO, bold_led};
+use crate::input::{PrimId, TextRun};
+use crate::line::{ink, size_key, text_lines};
+use crate::region::{Kind, Signal};
+use crate::segment::Segment;
+use crate::typers::{PageView, Typed};
+
+/// `heading.size_ratio` for a line under [`HEADING_PLAIN_RATIO`] times the body size (it
+/// needs bold ink to head) and at or over it.
+pub const HEADING_SIZE: u16 = 450;
+pub const HEADING_SIZE_LARGE: u16 = 550;
+/// `heading.bold_lead`: the line is led by bold ink.
+pub const HEADING_BOLD: u16 = 100;
+/// `heading.title_lines`: the heading's lines stay a heading (no [`Demotion`]).
+pub const HEADING_TITLE_LINES: u16 = 200;
+/// `paragraph.text_size`: the lines are set in a text size of the page or the body size.
+pub const PARAGRAPH_TEXT_SIZE: u16 = 300;
+/// `paragraph.joins`: lines go on one another as one paragraph.
+pub const PARAGRAPH_JOINS: u16 = 250;
+/// `paragraph.sentences`: the lines read as sentences.
+pub const PARAGRAPH_SENTENCES: u16 = 150;
+/// `paragraph.lines_apart`, `.unwrapped`, `.cells`, `.address` and `.sentences_demoted`: lines
+/// of a heading size read as a paragraph, for the reason the signal names.
+pub const PARAGRAPH_DEMOTED: u16 = 800;
+/// `list.marker`: each item opens with a list marker.
+pub const LIST_MARKER: u16 = 450;
+/// `list.items`: items follow one another as one list.
+pub const LIST_ITEMS: u16 = 200;
+/// `list.hanging`: an item goes on in lines right of its marker.
+pub const LIST_HANGING: u16 = 100;
+/// `header_band.running` and `footer_band.running`: running lines of the file.
+pub const BAND_RUNNING: u16 = 900;
+/// `footer_band.two_page`: footers of a file of two pages.
+pub const BAND_TWO_PAGE: u16 = 100;
+/// `footnote_legend.entries`: the runs of the page's footnote legend.
+pub const LEGEND_ENTRIES: u16 = 900;
+/// `footnote_legend.raised_refs`: raised reference numbers above the legend.
+pub const LEGEND_RAISED: u16 = 100;
+/// `title_block.largest_heading`: the largest heading in the head of page 1.
+pub const TITLE_HEADING: u16 = 700;
+/// `title_block.top_third`: its top stands in the top third of the page.
+pub const TITLE_TOP: u16 = 300;
+
+/// What the walk of the text lines reads one block as.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Read {
+    /// A heading: its first line's size as a share of the body size, whether that line is led
+    /// by bold ink, and why it reads as a paragraph, if it does.
+    Heading {
+        ratio: f32,
+        bold_lead: bool,
+        demoted: Option<Demotion>,
+    },
+    /// A paragraph of `lines` lines, which read as sentences or not.
+    Paragraph { lines: usize, sentences: bool },
+    /// A list item that joins the item before it or not, of `lines` lines.
+    Item { joins: bool, lines: usize },
+}
+
+/// The text of a segment as the typers read it.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct SegText {
+    /// Its runs with ink.
+    runs: Vec<u32>,
+    /// The line numbers of its runs with ink, sorted, once each.
+    lines: Vec<u32>,
+    /// The blocks the walk reads its lines as, in order.
+    blocks: Vec<Read>,
+    /// Every line with ink is set in a text size of the page or in the body size.
+    text_size: bool,
+}
+
+impl SegText {
+    /// The text of `seg` on the page of `view`; `None` when it holds no run with ink.
+    pub(crate) fn of(view: &PageView<'_>, seg: &Segment) -> Option<SegText> {
+        let mut ids = Vec::new();
+        let mut refs: Vec<&TextRun> = Vec::new();
+        for p in &seg.prims {
+            if let PrimId::Text(i) = *p
+                && let Some(r) = view.page.texts.get(i as usize)
+            {
+                refs.push(r);
+                if ink(&r.text) > 0 {
+                    ids.push(i);
+                }
+            }
+        }
+        if ids.is_empty() {
+            return None;
+        }
+        let mut lines: Vec<u32> = ids
+            .iter()
+            .map(|&i| view.page.texts[i as usize].line)
+            .collect();
+        lines.sort_unstable();
+        lines.dedup();
+        let all = text_lines(&refs);
+        let levels = view.levels();
+        let block = vec![None; all.len()];
+        let cx = TextCx {
+            levels: &levels,
+            block: &block,
+        };
+        let body = size_key(view.file.body_size);
+        let text_size = all.iter().filter(|l| !l.text.is_empty()).all(|l| {
+            let key = size_key(l.size);
+            key == body || view.text_sizes().iter().any(|s| size_key(*s) == key)
+        });
+        // The walk as a reader makes it: an item leaves its list open, a line without text
+        // leaves it as it is, a heading or a paragraph closes it.
+        let mut blocks = Vec::new();
+        let mut open = false;
+        let mut i = 0;
+        while i < all.len() {
+            let (found, j) = next_block(&all, i, open, &cx);
+            let read = match found {
+                TextBlock::Empty => None,
+                TextBlock::Heading { demoted, .. } => {
+                    open = false;
+                    Some(Read::Heading {
+                        ratio: all[i].size / view.file.body_size,
+                        bold_lead: bold_led(&all[i]),
+                        demoted,
+                    })
+                }
+                TextBlock::Paragraph { .. } => {
+                    open = false;
+                    Some(Read::Paragraph {
+                        lines: j - i,
+                        sentences: sentences(&all[i..j]),
+                    })
+                }
+                TextBlock::Item { joins, .. } => {
+                    open = true;
+                    Some(Read::Item {
+                        joins,
+                        lines: j - i,
+                    })
+                }
+            };
+            blocks.extend(read);
+            i = j;
+        }
+        Some(SegText {
+            runs: ids,
+            lines,
+            blocks,
+            text_size,
+        })
+    }
+}
+
+fn signal(id: &'static str, detail: String, weight: u16) -> Signal {
+    Signal { id, detail, weight }
+}
+
+/// Paragraph: the walk reads every line as paragraphs, or as lines of a heading size that read
+/// as a paragraph. Signals: the lines are set in a text size of the page or the body size
+/// (`paragraph.text_size`, the least evidence), lines go on one another (`paragraph.joins`),
+/// they read as sentences (`paragraph.sentences`), and the reason a heading's lines read as a
+/// paragraph (one signal per [`Demotion`]).
+pub fn type_paragraph(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
+    view.with_text(seg, |t| {
+        let all = t.blocks.iter().all(|b| {
+            matches!(
+                b,
+                Read::Paragraph { .. }
+                    | Read::Heading {
+                        demoted: Some(_),
+                        ..
+                    }
+            )
+        });
+        if t.blocks.is_empty() || !all {
+            return None;
+        }
+        let mut signals = Vec::new();
+        let paragraphs = t
+            .blocks
+            .iter()
+            .filter(|b| matches!(b, Read::Paragraph { .. }))
+            .count();
+        if t.text_size && paragraphs > 0 {
+            signals.push(signal(
+                "paragraph.text_size",
+                "set in a text size of the page".into(),
+                PARAGRAPH_TEXT_SIZE,
+            ));
+        }
+        let joined: usize = t
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                Read::Paragraph { lines, .. } if *lines >= 2 => Some(lines - 1),
+                _ => None,
+            })
+            .sum();
+        if joined > 0 {
+            signals.push(signal(
+                "paragraph.joins",
+                format!("{joined} lines go on the line over them"),
+                PARAGRAPH_JOINS,
+            ));
+        }
+        if t.blocks.iter().any(|b| {
+            matches!(
+                b,
+                Read::Paragraph {
+                    sentences: true,
+                    ..
+                }
+            )
+        }) {
+            signals.push(signal(
+                "paragraph.sentences",
+                "the lines read as sentences".into(),
+                PARAGRAPH_SENTENCES,
+            ));
+        }
+        let mut why: Vec<Demotion> = Vec::new();
+        for b in &t.blocks {
+            if let Read::Heading {
+                demoted: Some(d), ..
+            } = b
+                && !why.contains(d)
+            {
+                why.push(*d);
+            }
+        }
+        for d in why {
+            let (id, detail) = match d {
+                Demotion::LinesApart => (
+                    "paragraph.lines_apart",
+                    "lines of a heading size are short items or fields",
+                ),
+                Demotion::Unwrapped => (
+                    "paragraph.unwrapped",
+                    "lines of a heading size do not wrap into one another",
+                ),
+                Demotion::Cells => (
+                    "paragraph.cells",
+                    "lines of a heading size stand in cells of columns",
+                ),
+                Demotion::Address => (
+                    "paragraph.address",
+                    "lines a little larger than the body are an address",
+                ),
+                Demotion::Sentences => (
+                    "paragraph.sentences_demoted",
+                    "lines a little larger than the body read as sentences",
+                ),
+            };
+            signals.push(signal(id, detail.into(), PARAGRAPH_DEMOTED));
+        }
+        Typed::of(Kind::Paragraph, signals)
+    })
+}
+
+/// Heading: the walk reads every line as headings by their size (see
+/// [`crate::file::Levels::level`]). Signals: the size against the body size
+/// (`heading.size_ratio`, more at [`HEADING_PLAIN_RATIO`] and over), bold ink that leads each
+/// heading (`heading.bold_lead`), and lines that stay a heading (`heading.title_lines`; lines
+/// that read as a paragraph give the paragraph its evidence instead).
+pub fn type_heading(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
+    view.with_text(seg, |t| {
+        let mut ratio = f32::MAX;
+        let mut bold = true;
+        let mut kept = true;
+        for b in &t.blocks {
+            let Read::Heading {
+                ratio: r,
+                bold_lead,
+                demoted,
+            } = b
+            else {
+                return None;
+            };
+            ratio = ratio.min(*r);
+            bold &= *bold_lead;
+            kept &= demoted.is_none();
+        }
+        if t.blocks.is_empty() {
+            return None;
+        }
+        let weight = if ratio >= HEADING_PLAIN_RATIO {
+            HEADING_SIZE_LARGE
+        } else {
+            HEADING_SIZE
+        };
+        let mut signals = vec![signal(
+            "heading.size_ratio",
+            format!("{ratio:.2} times the body size"),
+            weight,
+        )];
+        if bold {
+            signals.push(signal(
+                "heading.bold_lead",
+                "led by bold ink".into(),
+                HEADING_BOLD,
+            ));
+        }
+        if kept {
+            signals.push(signal(
+                "heading.title_lines",
+                "its lines go on as one heading".into(),
+                HEADING_TITLE_LINES,
+            ));
+        }
+        Typed::of(Kind::Heading, signals)
+    })
+}
+
+/// List: the walk reads every line as list items (see [`crate::extract::text::list_marker`]).
+/// Signals: the markers (`list.marker`), items that follow one another (`list.items`), and
+/// items that go on right of their marker (`list.hanging`).
+pub fn type_list(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
+    view.with_text(seg, |t| {
+        let mut items = 0;
+        let mut joined = 0;
+        let mut hanging = 0;
+        for b in &t.blocks {
+            let Read::Item { joins, lines } = b else {
+                return None;
+            };
+            items += 1;
+            joined += usize::from(*joins);
+            hanging += usize::from(*lines > 1);
+        }
+        if items == 0 {
+            return None;
+        }
+        let mut signals = vec![signal(
+            "list.marker",
+            format!("{items} items open with a list marker"),
+            LIST_MARKER,
+        )];
+        if joined > 0 {
+            signals.push(signal(
+                "list.items",
+                format!("{joined} items follow the item before them"),
+                LIST_ITEMS,
+            ));
+        }
+        if hanging > 0 {
+            signals.push(signal(
+                "list.hanging",
+                format!("{hanging} items go on right of their marker"),
+                LIST_HANGING,
+            ));
+        }
+        Typed::of(Kind::List, signals)
+    })
+}
+
+/// Header band: every line with ink is a running header of the file on this page.
+pub fn type_header_band(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
+    view.with_text(seg, |t| {
+        t.lines
+            .iter()
+            .all(|&l| view.band(l) == Some(Band::Top))
+            .then(|| {
+                vec![signal(
+                    "header_band.running",
+                    format!("{} lines repeat at the top of the pages", t.lines.len()),
+                    BAND_RUNNING,
+                )]
+            })
+            .and_then(|s| Typed::of(Kind::HeaderBand, s))
+    })
+}
+
+/// Footer band: every line with ink is a running footer of the file on this page; footers of
+/// the two-page rule say so in a second signal.
+pub fn type_footer_band(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
+    view.with_text(seg, |t| {
+        if !t.lines.iter().all(|&l| view.band(l) == Some(Band::Bottom)) {
+            return None;
+        }
+        let mut signals = vec![signal(
+            "footer_band.running",
+            format!("{} lines repeat at the foot of the pages", t.lines.len()),
+            BAND_RUNNING,
+        )];
+        if t.lines.iter().all(|&l| view.two_page(l)) {
+            signals.push(signal(
+                "footer_band.two_page",
+                "at the foot of both pages of a file of two".into(),
+                BAND_TWO_PAGE,
+            ));
+        }
+        Typed::of(Kind::FooterBand, signals)
+    })
+}
+
+/// Footnote legend: every run with ink is a run of the page's footnote legend (see
+/// [`crate::file::FileFacts::legends`]); raised reference numbers above it are a second
+/// signal.
+pub fn type_footnote_legend(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
+    view.with_text(seg, |t| {
+        if !t.runs.iter().all(|&r| view.in_legend(r)) {
+            return None;
+        }
+        let legend = view.file.legends.get(&view.page.page)?;
+        let entries = legend
+            .entries
+            .iter()
+            .filter(|e| e.runs.iter().any(|r| t.runs.contains(r)))
+            .count();
+        let mut signals = vec![signal(
+            "footnote_legend.entries",
+            format!("{entries} footnotes of the page's legend"),
+            LEGEND_ENTRIES,
+        )];
+        if !legend.raised.is_empty() {
+            signals.push(signal(
+                "footnote_legend.raised_refs",
+                format!("{} raised references above it", legend.raised.len()),
+                LEGEND_RAISED,
+            ));
+        }
+        Typed::of(Kind::FootnoteLegend, signals)
+    })
+}
+
+/// Title block: the lines with ink are the lines of the title of page 1, the largest heading
+/// in its head (see [`crate::extract::text::title::page_title`]).
+pub fn type_title_block(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
+    let title = view.title()?;
+    view.with_text(seg, |t| {
+        if t.lines != title.lines {
+            return None;
+        }
+        let signals = vec![
+            signal(
+                "title_block.largest_heading",
+                "the largest heading in the head of page 1".into(),
+                TITLE_HEADING,
+            ),
+            signal(
+                "title_block.top_third",
+                format!("its top at {:.2} of the page height", title.top),
+                TITLE_TOP,
+            ),
+        ];
+        Typed::of(Kind::TitleBlock, signals)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::line::{LineRun, TextLine};
+
+    /// A line of the walk is borrowed from the page: the line type takes borrowed runs.
+    #[test]
+    fn lines_of_borrowed_runs() {
+        let r = TextRun {
+            text: "Muster".into(),
+            x: 0.0,
+            y: 0.0,
+            w: 10.0,
+            h: 9.0,
+            size: 9.0,
+            font: 0,
+            font_kind: crate::input::FontKind::Unknown,
+            bold: false,
+            italic: false,
+            color: None,
+            shift: crate::input::Shift::Base,
+            line: 3,
+            off_axis: false,
+            gaps: Vec::new(),
+        };
+        let refs = [&r];
+        let lines: Vec<TextLine<'_, &TextRun>> = text_lines(&refs);
+        assert_eq!(lines[0].text, "Muster");
+        assert_eq!(lines[0].runs[0].line(), 3);
+    }
+}

@@ -752,7 +752,7 @@ fn same_face<R: LineRun>(a: &R, b: &R) -> bool {
 
 /// Whether the lines read as sentences: one holds a sentence end with more text after it, or
 /// the last ends a sentence after a word in small letters. One pass over each line.
-fn sentences<R: LineRun>(lines: &[TextLine<'_, R>]) -> bool {
+pub(crate) fn sentences<R: LineRun>(lines: &[TextLine<'_, R>]) -> bool {
     // A stop after a word of three letters or more, then a space and a capital: "ul. 18" or
     // "Nr. 5" are no sentence ends.
     let inner = lines.iter().any(|l| {

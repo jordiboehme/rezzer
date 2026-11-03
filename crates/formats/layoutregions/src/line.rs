@@ -105,6 +105,52 @@ impl LineRun for TextRun {
     }
 }
 
+/// A borrowed run is a run: the lines of some runs of a page (a segment's) borrow them.
+impl<R: LineRun> LineRun for &R {
+    fn text(&self) -> &str {
+        (**self).text()
+    }
+    fn x(&self) -> f32 {
+        (**self).x()
+    }
+    fn y(&self) -> f32 {
+        (**self).y()
+    }
+    fn w(&self) -> f32 {
+        (**self).w()
+    }
+    fn h(&self) -> f32 {
+        (**self).h()
+    }
+    fn size(&self) -> f32 {
+        (**self).size()
+    }
+    fn bold(&self) -> bool {
+        (**self).bold()
+    }
+    fn italic(&self) -> bool {
+        (**self).italic()
+    }
+    fn font(&self) -> u32 {
+        (**self).font()
+    }
+    fn line(&self) -> u32 {
+        (**self).line()
+    }
+    fn off_axis(&self) -> bool {
+        (**self).off_axis()
+    }
+    fn note(&self) -> bool {
+        (**self).note()
+    }
+    fn page(&self) -> u32 {
+        (**self).page()
+    }
+    fn gaps(&self) -> impl Iterator<Item = GapIn> + '_ {
+        (**self).gaps()
+    }
+}
+
 /// One visual line.
 #[derive(Debug)]
 pub struct TextLine<'a, R> {

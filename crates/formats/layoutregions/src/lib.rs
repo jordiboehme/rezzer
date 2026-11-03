@@ -11,8 +11,8 @@
 //! [`PageRegions`]. [`segment::drawn::drawn`] finds the grids and boxes the drawn lines of a
 //! page make, once per page, for every finder that looks at them. [`segment::segment_page`]
 //! nests the regions the file states, the drawn structure, the whitespace cut and style steps
-//! into one tree of candidate regions per page. Later stages (the scored rule, the typing
-//! functions) arrive in further steps.
+//! into one tree of candidate regions per page. The [`typers`] score each segment for each
+//! kind from named signals; the scored rule that picks among them arrives in a further step.
 //!
 //! ```
 //! use layoutregions::*;
@@ -50,6 +50,7 @@ pub mod line;
 mod region;
 mod report;
 pub mod segment;
+pub mod typers;
 mod work;
 
 pub use arbitrate::{Finder, InOrder, Offer, find_in_order};
