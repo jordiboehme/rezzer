@@ -108,6 +108,83 @@ fn box_pairs_empty_field_stays_empty() {
     assert_eq!(unsure, [(0, LABEL_BELOW)]);
 }
 
+/// A label and its value of one size that differ in slant only are not clear by themselves;
+/// beside an empty field whose lone label has the slant, the slanted text is the label, and the
+/// box is read again as a field.
+#[test]
+fn box_pairs_weight_only_is_read_again_with_a_known_label_style() {
+    let italic = |mut r: TextRun| {
+        r.italic = true;
+        r
+    };
+    let runs = [
+        italic(run("Kundennr.", 4.0, 120.0, 8.0)),
+        italic(run("Datum", 104.0, 120.0, 8.0)),
+        run_on("01.03.2026", 104.0, 108.0, 8.0, 1),
+    ];
+    // Alone, which line is the label is not clear.
+    let (fields, unsure) = box_fields(&runs, &[vec![1, 2]], &[false], &[10.0]);
+    assert!(fields[0].is_none());
+    assert_eq!(unsure, [(0, WEIGHT_ONLY)]);
+    // Beside the empty field, its label's slant marks the label.
+    let (fields, unsure) = box_fields(&runs, &[vec![0], vec![1, 2]], &[false, false], &[10.0]);
+    let empty = fields[0].as_ref().expect("an empty field");
+    assert_eq!(texts(&runs, &empty.label), ["Kundennr."]);
+    assert!(empty.value.is_empty());
+    let field = fields[1].as_ref().expect("a field");
+    assert_eq!(texts(&runs, &field.label), ["Datum"]);
+    assert_eq!(texts(&runs, &field.value), ["01.03.2026"]);
+    assert!(unsure.is_empty());
+}
+
+/// A box with no runs and a box a framed title took are read as no field.
+#[test]
+fn box_pairs_empty_or_consumed_box_is_no_field() {
+    let runs = [
+        run("Firma", 4.0, 120.0, 6.0),
+        run_on("Muster GmbH", 4.0, 106.0, 10.0, 1),
+    ];
+    let (fields, unsure) = box_fields(&runs, &[vec![], vec![0, 1]], &[false, true], &[10.0]);
+    assert!(fields.iter().all(Option::is_none));
+    assert!(unsure.is_empty());
+}
+
+/// A value line that runs across a divider leaves the cells it stands in out of the row with
+/// [`ACROSS`], named by their labels; the other cells of the row still pair.
+#[test]
+fn strip_cells_leave_out_the_cells_a_run_stands_across() {
+    let runs = [
+        run("Name", 10.0, 120.0, 6.0),
+        run_on("Erika Mustermann Musterstadt", 10.0, 100.0, 10.0, 1),
+        run("Ort", 110.0, 120.0, 6.0),
+        run("Telefon", 210.0, 120.0, 6.0),
+        run_on("0123 4567", 210.0, 100.0, 10.0, 1),
+    ];
+    let edges = [0.0, 100.0, 200.0, 300.0];
+    let cells = [vec![0, 1], vec![2], vec![3, 4]];
+    let how = Reading {
+        one_field: false,
+        smaller: true,
+        small: small_size(&[10.0]).saturating_sub(1),
+        labels: &[],
+    };
+    let read = strip_cells(&runs, &edges, &cells, how);
+    assert!(read.fits && !read.unread);
+    assert_eq!(
+        read.left_out,
+        [(strips::ACROSS, vec!["Name".to_string(), "Ort".to_string()])]
+    );
+    let pairs: Vec<(Vec<String>, Vec<String>)> = read
+        .fields
+        .iter()
+        .map(|f| (texts(&runs, &f.label), texts(&runs, &f.value)))
+        .collect();
+    assert_eq!(
+        pairs,
+        [(vec!["Telefon".to_string()], vec!["0123 4567".to_string()])]
+    );
+}
+
 /// A row of fields between two rules with no dividers: the value line under two labels is cut
 /// where the second label starts, and each piece pairs with the label it stands under.
 #[test]

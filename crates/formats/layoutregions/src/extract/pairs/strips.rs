@@ -29,8 +29,8 @@ pub struct FieldFrame<'a> {
 
 /// Where to cut the runs of the page's `frames` of fields (`ids_of` gives the runs of a frame
 /// by its place in `frames`, asked once for each frame in order until the work bound is
-/// spent): a run that stands across a field edge (see [`field_edges`]) is cut at its word gap
-/// nearest the edge, when that gap lies at most [`NEAR_EDGE`] characters from it. Each run
+/// spent): a run that stands across a field edge (see `field_edges`) is cut at its word gap
+/// nearest the edge, when that gap lies at most `NEAR_EDGE` characters from it. Each run
 /// with the indexes of its gaps (see [`LineRun::gaps`]), in the order of the runs.
 pub fn field_cuts<R: LineRun>(
     runs: &[R],
@@ -146,9 +146,9 @@ pub struct StripRead {
     /// A cell is not clear for a reason of fields.
     pub unread: bool,
     /// The first reason of fields a cell is not clear for, when its text is as short as a
-    /// field's (see [`field_sized`]), not for its many styles alone.
+    /// field's (see `field_sized`), not for its many styles alone.
     pub field_why: Option<&'static str>,
-    /// Two lines in columns that may be rows or cells (see [`text_cells`]).
+    /// Two lines in columns that may be rows or cells (see `text_cells`).
     pub doubt: bool,
     /// The heads of a cell in three styles whose first line is heads over lines of their own,
     /// or of a cell of one face whose first line is a little smaller: the row is a row of
@@ -156,19 +156,24 @@ pub struct StripRead {
     pub styled_heads: Vec<String>,
 }
 
-/// The fields of the `cells` of a row of fields between rules (the runs between the `edges`,
-/// its ends and dividers, left to right), each read `how`: a cell a run stands across (a
-/// value line the dividers could not cut at a word gap) is left out with [`ACROSS`], a cell
-/// whose values stand under no label of its own with [`UNDER_NONE`]; a cell whose first line
-/// is two labels or more over lines of values is parted (see [`parts_of`]), and each part read
-/// as fields (see [`parse`]) that are short. Never a wrong pair: the other cells of the row
-/// still pair.
+/// The fields of the `cells` of a row of fields between rules, each read `how`. `edges` are
+/// the row's left end, its dividers and its right end, left to right (two at least), and
+/// `cells` the runs between each two of them, one list a cell (as [`cells_of`] parts them),
+/// so there is one cell fewer than edges. A cell a run stands across (a value line the
+/// dividers could not cut at a word gap) is left out with `ACROSS`, a cell whose values
+/// stand under no label of its own with `UNDER_NONE`; a cell whose first line is two labels
+/// or more over lines of values is parted (see [`parts_of`]), and each part is read as fields
+/// (see [`parse`]) that are short. Never a wrong pair: the other cells of the row still pair.
 pub fn strip_cells<R: LineRun>(
     runs: &[R],
     edges: &[f32],
     cells: &[Vec<usize>],
     how: Reading<'_>,
 ) -> StripRead {
+    debug_assert!(
+        edges.len() >= 2 && cells.len() == edges.len() - 1,
+        "a cell between each two edges"
+    );
     // Never a wrong pair: a run over a divider leaves the cells it stands in as text; the
     // other cells of the row still pair.
     let inner = &edges[1..edges.len() - 1];
@@ -479,7 +484,7 @@ pub(crate) const BODY_COLUMNS: usize = 3;
 pub(crate) const BODY_LINES: usize = 2;
 
 /// The names of the labels on the first line of a cell, when it is labels over values (see
-/// [`first_line_labels`]).
+/// `first_line_labels`).
 pub fn first_labels<R: LineRun>(runs: &[R], cell: &[usize]) -> Vec<String> {
     first_line_labels(runs, &lines_of(runs, cell))
         .unwrap_or_default()
@@ -489,9 +494,9 @@ pub fn first_labels<R: LineRun>(runs: &[R], cell: &[usize]) -> Vec<String> {
 }
 
 /// Whether the cells of a frame are a table's body, not fields: labels on a first line, each
-/// over the value lines under it (see [`parts_of`]) and none without one, and [`BODY_COLUMNS`]
+/// over the value lines under it (see [`parts_of`]) and none without one, and `BODY_COLUMNS`
 /// of them or more over
-/// [`BODY_LINES`] value lines or more each, those lines in the same rows across the columns
+/// `BODY_LINES` value lines or more each, those lines in the same rows across the columns
 /// (their baselines within a third of their size). A field's value of two lines stands under
 /// one label, not under three in the same rows.
 pub fn table_body<R: LineRun>(runs: &[R], cells: &[Vec<usize>]) -> bool {
@@ -1011,7 +1016,7 @@ pub fn way_of(single: bool, top: TopEnd, bottom: BottomEnd) -> Way {
 /// stands on: the labels at the top of each strip pair with the values over its top rule (at
 /// the bottom of the strip over it, or among `above` for a strip at the top), and the values
 /// at the bottom of a strip with no strip under it pair with the labels under its bottom rule
-/// (among `below`), each row of a label line and a value line read by [`pair_row`]. None when
+/// (among `below`), each row of a label line and a value line read by `pair_row`. None when
 /// a strip is no line of labels over a line of values, a field of it was left out, a row is
 /// not clear, or a value is left without its label.
 pub fn pair_under<R: LineRun>(
@@ -1314,7 +1319,7 @@ pub(crate) fn heads_of<R: LineRun>(
 }
 
 /// The parts of a cell between dividers: when its first line is two labels or more over lines
-/// of values, each label with the runs under it (see [`under_labels`]); else the cell whole.
+/// of values, each label with the runs under it (see `under_labels`); else the cell whole.
 /// None when a run under the labels has no certain label.
 pub fn parts_of<R: LineRun>(runs: &[R], cell: &[usize]) -> Option<Vec<Vec<usize>>> {
     let lines = lines_of(runs, cell);

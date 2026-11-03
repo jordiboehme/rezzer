@@ -13,8 +13,17 @@ mod boxes;
 mod strips;
 mod titles;
 
-use layoutregions::extract::pairs::strips::*;
-use layoutregions::extract::pairs::*;
+use layoutregions::extract::pairs::strips::{
+    BottomEnd, CHAR, FieldFrame, LINE_BY_LINE, LONE, NOT_FIELDS, STRIP_WORK, Strip, StripRead,
+    TopEnd, UNDER_UNCLEAR, Way, across, beside_labels, beside_value, by_style, cells_of,
+    first_labels, gutter_columns, in_role, label_names, labels_in_line, overflow_back, pair_under,
+    parts_of, strip_cells, table_body, table_rows, totals_rows, two_lines, way_of,
+};
+use layoutregions::extract::pairs::{
+    ADDRESS, Field, LABEL_BELOW, LABEL_CHARS, LABEL_LINES, LABEL_WORDS, NAMED_ADDRESS, NO_LABEL,
+    Parsed, Reading, Style, THREE_STYLES, WEIGHT_ONLY, box_fields, inked, lines_of, markers, parse,
+    same_style, short, small_size, style_of, words,
+};
 
 use super::*;
 

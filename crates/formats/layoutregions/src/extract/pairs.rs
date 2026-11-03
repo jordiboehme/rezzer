@@ -47,8 +47,9 @@ pub const NAMED_ADDRESS: &str = "its lines read as an address under a name, and 
 pub const WEIGHT_ONLY: &str = "its label and its value differ in weight, slant or font only, so \
      which is the label is not clear";
 
-/// A label is at most this many characters and words, a value of a field between rules at
-/// most this many characters.
+/// A label is at most this many characters and words, a value at most this many characters:
+/// of a field between rules, and of a block of labels and values in lines without rules (see
+/// [`blocks::key_values`]).
 pub const LABEL_CHARS: usize = 40;
 
 pub const LABEL_WORDS: usize = 6;
@@ -163,7 +164,7 @@ pub(crate) fn raised<R: LineRun>(r: &R, left: &R) -> bool {
             && r.y() - left.y() >= 0.2 * left.size())
 }
 
-/// The raised markers of `lines` (see [`raised`]): each goes with the run before it.
+/// The raised markers of `lines` (see `raised`): each goes with the run before it.
 pub fn markers<R: LineRun>(runs: &[R], lines: &[Vec<usize>]) -> HashSet<usize> {
     let mut marker: HashSet<usize> = HashSet::new();
     for line in lines {

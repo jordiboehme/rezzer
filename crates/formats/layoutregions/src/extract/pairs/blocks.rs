@@ -5,10 +5,10 @@
 //! Labels and values and blocks of facts in lines without rules: a block of lines of a label
 //! and its value ([`key_values`]), and blocks of lines side by side that are blocks of their
 //! own, an address beside a bank or a register entry, not rows ([`blocks_of`],
-//! [`address_columns`]). The rules of an address's lines ([`address_lines`], [`postal`],
+//! [`address_columns`]). The rules of an address's lines (`address_lines`, `postal`,
 //! [`address_block`]) are here too: the reader's headings and lists read them as well.
 
-use super::ADDRESS_LINES;
+use super::{ADDRESS_LINES, LABEL_CHARS, LABEL_WORDS, VALUE_CHARS};
 use crate::extract::table::grid::{Piece, columns_of, text_of};
 use crate::extract::table::{MAX_SQUARES, RunRange};
 use crate::extract::text::{ADDRESS_WORDS, address_shaped, word_count};
@@ -32,7 +32,7 @@ pub(crate) fn address_lines(lines: &[&str]) -> bool {
 }
 
 /// Whether lines are a block of an address, a bank or a register entry: [`address_shaped`],
-/// and not all of one shape (see [`word_shape`]), as a name, a street and a postcode with its
+/// and not all of one shape (see `word_shape`), as a name, a street and a postcode with its
 /// town are not. The labels or values of one form in a column of a table (`Feld 1`,
 /// `Feld 2`, or `Musterweg 1`, `Musterweg 2`) have one shape.
 pub fn address_block(lines: &[&str]) -> bool {
@@ -188,9 +188,9 @@ pub(crate) fn postal(lines: &[&str]) -> bool {
 /// - two columns or more and three rows or more;
 /// - each column a block: its lines one under the other, with no row left empty between
 ///   them (a block may start a row lower or end higher than the others);
-/// - each column a block of facts of its own (see [`fact_block`]): the evidence is each
-///   block's, never one column's. One column whose lines are of one kind ([`Fact::Kinds`]:
-///   two phone numbers, two banks) counts too, when a column of the region is a [`postal`]
+/// - each column a block of facts of its own (see `fact_block`): the evidence is each
+///   block's, never one column's. One column whose lines are of one kind (`Fact::Kinds`:
+///   two phone numbers, two banks) counts too, when a column of the region is a `postal`
 ///   address;
 /// - one column an [`address_block`].
 ///
@@ -300,11 +300,6 @@ pub(crate) const MAX_KEY_VALUES: usize = MAX_SQUARES / 2;
 /// Labels and values line up within this many points.
 const KV_ALIGN: f32 = 1.0;
 
-/// A label is at most this many characters and words; a value at most this many characters.
-const KV_LABEL: usize = 40;
-const KV_LABEL_WORDS: usize = 6;
-const KV_VALUE: usize = 80;
-
 /// One row of a block of labels and values: its line, and the flow ranges of its label and
 /// value; a row without a value range has both in one run, cut after the label's colon.
 pub struct KeyValue {
@@ -355,7 +350,7 @@ pub fn key_values<R: LineRun>(
         let text = runs[cur.start].text().trim();
         let Some(cut) = text.find(": ") else { break };
         let head = &text[..=cut];
-        if head.chars().count() > KV_LABEL || head.split_whitespace().count() > KV_LABEL_WORDS {
+        if head.chars().count() > LABEL_CHARS || head.split_whitespace().count() > LABEL_WORDS {
             break;
         }
         if (runs[cur.start].x() - pieces[0][0].x0).abs() > KV_ALIGN {
@@ -378,10 +373,10 @@ pub fn key_values<R: LineRun>(
     }
     let short = labels
         .iter()
-        .all(|l| l.chars().count() <= KV_LABEL && l.split_whitespace().count() <= KV_LABEL_WORDS)
+        .all(|l| l.chars().count() <= LABEL_CHARS && l.split_whitespace().count() <= LABEL_WORDS)
         && pieces
             .iter()
-            .all(|p| text_of(runs, p[1].start, p[1].end).chars().count() <= KV_VALUE);
+            .all(|p| text_of(runs, p[1].start, p[1].end).chars().count() <= VALUE_CHARS);
     if !short {
         return KeyValues::No;
     }

@@ -299,9 +299,9 @@ pub(in crate::tables) fn holds_values(flow: &Flow, by_y: &ByY, fr: &Frame) -> bo
 /// one table, when it has two fields or more and one of them a value; one field alone with a
 /// value is named in a loss. Text just beyond such a group, at both its ends, can show that
 /// its labels stand under the rule their values stand on (see [`ends`]; only text no row of
-/// fields holds counts, every group read the normal way first): its fields are then read that way (see
-/// [`pair_under`]), or left as text with a loss when that is not clear (`tabled` names the
-/// runs of ruled tables among them). Runs `busy` names are
+/// fields holds counts, every group read the normal way first): its fields are then read that
+/// way (see [`pair_under`]), or left as text with a loss when that is not clear (`tabled`
+/// names the runs of ruled tables among them). Runs `busy` names are
 /// not looked at. The runs of each table found go to `claimed` under its place in `tables`;
 /// the runs of a row or a group left as text with a loss are marked in `kept`, so that no later
 /// table takes them: a table of the text of fields reads as pairs too.
@@ -796,8 +796,9 @@ pub(in crate::tables) fn field_strips(
 /// their runs (none that `busy` names, none in another direction) in the order to read them:
 /// cell by cell, left to right, each cell's lines top down. Cells are parted by the `dividers`
 /// that no run stands across and, inside them, by gutters: white space of a cell gap (see
-/// [`layoutregions::extract::table::CELL_GAP`]) or more that no run of the cell crosses on any of its lines (a line that runs
-/// on into the next cell joins the two), and values beside their labels are a field per line
+/// [`layoutregions::extract::table::CELL_GAP`]) or more that no run of the cell crosses on any
+/// of its lines (a line that runs on into the next cell joins the two), and values beside
+/// their labels are a field per line
 /// (see [`beside_labels`]). One cell is read whole too: its lines together, before the text
 /// beside it on them. None when there is no run. Every row of fields that is refused, or that
 /// has a cell left out of its pairs, is read this way (see [`read_cells`]).
