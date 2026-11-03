@@ -1494,6 +1494,34 @@ fn a_total_label_may_stand_in_a_column_the_rows_fill() {
             assert!(lead >= MARGIN, "{label}: {typed:#?}");
         }
     }
+    // A label of words right-aligned under a column of words (Einheit: Stk, Std).
+    let rows: &[&[&str]] = &[
+        &["Pos", "Bezeichnung", "Einheit", "Preis"],
+        &["1", "Muster A", "Stk", "12,50"],
+        &["2", "Muster B", "Std", "3,00"],
+        &["3", "Muster C", "Stk", "8,75"],
+    ];
+    let xs = [72.0, 100.0, 260.0, 340.0, 440.0];
+    for rule_over in [false, true] {
+        let mut tree = ruled_table(&xs, 700.0, rows, true, 100);
+        let label = run("Summe netto", 0.0, 630.0, 9.2, 200);
+        let lx = 335.0 - label.w;
+        assert!(
+            lx + label.w / 2.0 > 260.0,
+            "its middle stands under Einheit"
+        );
+        tree.page.texts.push(TextRun { x: lx, ..label });
+        let v = run("28,86", 0.0, 630.0, 9.2, 200);
+        let vx = 437.0 - v.w;
+        tree.page.texts.push(TextRun { x: vx, ..v });
+        if rule_over {
+            tree.page.rules.push(rule(340.0, 641.0, 440.0, 641.0));
+        }
+        let typed = tree.typed(&text_of_lines(vec![200]));
+        let (kind, lead) = winner(&typed);
+        assert_eq!(kind, Kind::Totals, "Einheit: {typed:#?}");
+        assert!(lead >= MARGIN, "Einheit: {typed:#?}");
+    }
     // A line with a number under Pos and a quantity under Menge is a row of the table.
     let typed = pos_table("Muster D", 103.0, true, Some("4")).typed(&text_of_lines(vec![200]));
     assert!(find(&typed, Kind::Totals).is_none(), "{typed:#?}");

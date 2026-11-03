@@ -305,7 +305,8 @@ pub(crate) fn touching_boxes(view: &PageView<'_>) -> Vec<bool> {
     // top at that box's top; in a column its left edge at that box's left edge and its top at
     // that box's bottom. Each look is at the nine cells around a point, so each box looks only
     // at boxes near it in both coordinates.
-    let step = (2.0 * reach).max(f32::MIN_POSITIVE);
+    // At least a point, so a page of text without size (a reach of 0) keeps finite keys.
+    let step = (2.0 * reach).max(1.0);
     let key = |x: f32, y: f32| ((x / step).floor() as i64, (y / step).floor() as i64);
     let mut cells: std::collections::HashMap<(i64, i64), Vec<usize>> =
         std::collections::HashMap::new();
@@ -320,7 +321,8 @@ pub(crate) fn touching_boxes(view: &PageView<'_>) -> Vec<bool> {
             let (kx, ky) = key(x, y);
             for dx in -1..=1 {
                 for dy in -1..=1 {
-                    let Some(near) = cells.get(&(kx + dx, ky + dy)) else {
+                    let Some(near) = cells.get(&(kx.saturating_add(dx), ky.saturating_add(dy)))
+                    else {
                         continue;
                     };
                     for &b in near {
@@ -471,4 +473,76 @@ fn grid_fields(
     ));
     field_signals(&refs, &read.fields, signals);
     Some(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::file::FileFacts;
+    use crate::input::{FontKind, PageIn, RuleIn, Shift};
+    use crate::limits::Limits;
+    use crate::segment::drawn::drawn;
+    use crate::segment::segment_page;
+    use crate::typers::FileIndex;
+
+    /// Boxes whose runs have no size have a reach of 0: the touch search keeps finite cell
+    /// keys and does not overflow them (a panic in a debug build).
+    #[test]
+    fn boxes_of_text_without_size_do_not_overflow_the_touch_search() {
+        let side = |x0: f32, y0: f32, x1: f32, y1: f32| RuleIn {
+            x0,
+            y0,
+            x1,
+            y1,
+            thick: 0.5,
+            dashed: false,
+            rect: false,
+        };
+        let mut texts = Vec::new();
+        let mut rules = Vec::new();
+        for (k, x) in [72.0f32, 222.0].into_iter().enumerate() {
+            texts.push(TextRun {
+                text: "Feld".into(),
+                x: x + 3.0,
+                y: 683.0,
+                w: 20.0,
+                h: 0.0,
+                size: 0.0,
+                font: 1,
+                font_kind: FontKind::Proportional,
+                bold: false,
+                italic: false,
+                color: None,
+                shift: Shift::Base,
+                line: k as u32,
+                off_axis: false,
+                gaps: Vec::new(),
+            });
+            rules.extend([
+                side(x, 660.0, x + 150.0, 660.0),
+                side(x, 692.0, x + 150.0, 692.0),
+                side(x, 660.0, x, 692.0),
+                side(x + 150.0, 660.0, x + 150.0, 692.0),
+            ]);
+        }
+        let page = PageIn {
+            page: 1,
+            size: [595.0, 842.0],
+            turn: 0,
+            texts,
+            rules,
+            boxes: Vec::new(),
+            pictures: Vec::new(),
+            codes: Vec::new(),
+            given: Vec::new(),
+        };
+        let facts = FileFacts::default();
+        let index = FileIndex::new(&facts);
+        let structure = drawn(&page, &|_| true);
+        let segs = segment_page(&page, &Limits::default(), &|| false);
+        let none = |_: &str| false;
+        let view = PageView::new(&page, &structure, &segs, &facts, &index, &none);
+        let touching = touching_boxes(&view);
+        assert_eq!(touching.len(), segs.all.len());
+    }
 }

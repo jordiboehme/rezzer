@@ -1000,9 +1000,11 @@ impl TotalsRead {
                 } else if !in_description(p) {
                     // A piece of the shape of a column the rows fill (a quantity under Menge,
                     // a number under Pos): a row of the table. A label of words stands
-                    // wherever the layout puts it, flush left or against its amount.
+                    // wherever the layout puts it, flush left or against its amount, also under
+                    // a column of words (Einheit): words never make a row.
                     let c = column_at((p.x0 + p.x1) / 2.0);
-                    if shapes[c].is_some() && Shape::of(&text(p)) == shapes[c] {
+                    let shape = Shape::of(&text(p));
+                    if shape.is_some() && shape != Some(Shape::Text) && shape == shapes[c] {
                         return None;
                     }
                 }
