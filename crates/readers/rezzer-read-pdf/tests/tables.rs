@@ -523,11 +523,9 @@ fn rotated_margin_text_is_not_a_table() {
     assert!(all.contains("doi 0") && all.contains("page 2"), "{all}");
 }
 
-#[test]
-fn unsure_region_keeps_paragraphs_with_note() {
-    // A caption names a table and short pieces stand in columns, but one line has text in
-    // the gutter between two columns: no grid holds it. The text stays paragraphs, with a
-    // note where the region stands and a loss.
+/// A caption names a table and short pieces stand in columns, but one line has text in the
+/// gutter between two columns: no grid holds it.
+fn gutter_region_page() -> Vec<u8> {
     let mut c = show("F1", 10.0, 72.0, 760.0, "Table 3: Sample sizes");
     let rows = [
         ("Site A", "12", "spring"),
@@ -541,7 +539,14 @@ fn unsure_region_keeps_paragraphs_with_note() {
         c += &show("F1", 10.0, 300.0, y, s);
     }
     c += &show("F1", 10.0, 250.0, 724.0, "late");
-    let out = read(&pdf(&[Page::text(c)], ""));
+    pdf(&[Page::text(c)], "")
+}
+
+#[test]
+fn unsure_region_keeps_paragraphs_with_note() {
+    // The text of the region of `gutter_region_page` stays paragraphs, with a note where the
+    // region stands and a loss.
+    let out = read(&gutter_region_page());
     let blocks = page(&out, 1);
     assert!(tables(blocks).is_empty(), "{:?}", tables(blocks));
     let note = "Possible table on page 1 not rebuilt (reason: some of its text stands between \
@@ -685,9 +690,8 @@ fn ticket_box_next_to_table() {
     );
 }
 
-#[test]
-fn wide_ruled_grid_says_so() {
-    // A ruled grid of 20 columns and 3 rows with text in every cell, and no caption.
+/// A ruled grid of 20 columns and 3 rows with text in every cell, and no caption.
+fn wide_ruled_grid() -> Vec<u8> {
     let mut c = String::from("0.5 w ");
     for k in 0..=3 {
         let y = 700.0 - 20.0 * k as f32;
@@ -704,7 +708,12 @@ fn wide_ruled_grid_says_so() {
             c += &show("F1", 8.0, x, y, &format!("{}{k}", ['a', 'b', 'c'][r]));
         }
     }
-    let out = read(&pdf(&[Page::text(c)], ""));
+    pdf(&[Page::text(c)], "")
+}
+
+#[test]
+fn wide_ruled_grid_says_so() {
+    let out = read(&wide_ruled_grid());
     let blocks = page(&out, 1);
     assert!(tables(blocks).is_empty(), "{:?}", tables(blocks));
     let note = "Possible table on page 1 not rebuilt (reason: it has more than 15 columns)";
@@ -2051,5 +2060,33 @@ fn an_open_row_of_a_ruled_table_stays_its_own() {
         assert_eq!(found[0].1.len(), 4, "{open_top}: {found:?}");
         assert_eq!(found[0].1[0], ["Monat", "Umsatz", "Kosten"], "{open_top}");
         assert_eq!(found[0].1[3], ["Maerz", "3.456,78", "456,79"], "{open_top}");
+    }
+}
+
+/// A grid, a header band and a region without rules refused with a note keep their text as
+/// paragraphs, and the regions of those paragraphs say why the text is no table.
+#[test]
+fn noted_refusals_keep_their_reason_in_their_paragraphs() {
+    let grid = wide_ruled_grid();
+    common::assert_every_run_in_one_region(&grid);
+    common::assert_kept_with_reason(&grid, "b7", "it has more than 15 columns");
+    let band = pdf(&[Page::text(header_band_page(5, true))], "");
+    common::assert_every_run_in_one_region(&band);
+    // The band's titles: the prose under it is no text of the band, which found no body.
+    for text in ["Date", "Description", "Credits"] {
+        common::assert_kept_with_reason(
+            &band,
+            text,
+            "the text below its header does not stand in its columns",
+        );
+    }
+    let region = gutter_region_page();
+    common::assert_every_run_in_one_region(&region);
+    for text in ["Site B", "late"] {
+        common::assert_kept_with_reason(
+            &region,
+            text,
+            "some of its text stands between its columns",
+        );
     }
 }

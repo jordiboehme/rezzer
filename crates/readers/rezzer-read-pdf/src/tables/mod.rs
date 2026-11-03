@@ -252,10 +252,14 @@ pub(crate) struct Found {
     /// ruled pass puts them so in the flow, each cell's lines together and apart from the next
     /// cell's.
     pub apart: Vec<Vec<Vec<usize>>>,
-    /// Grids, bands and regions refused with a note or a loss that keep their text as it
-    /// stands: the ids of their runs (see [`Flow::ids`]) and why each is no table.
-    pub doubts: Vec<(Vec<u32>, &'static str)>,
+    /// Grids, bands, regions, rows of fields and boxes refused with a note or a loss that
+    /// keep their text as it stands: the ids of their runs (see [`Flow::ids`]) and why.
+    pub doubts: Doubts,
 }
+
+/// Text a detector refused with a note or a loss and keeps as it stands: for each refusal, the
+/// ids of its runs (see [`Flow::ids`]) and why.
+pub(crate) type Doubts = Vec<(Vec<u32>, &'static str)>;
 
 /// What a refusal without a note refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

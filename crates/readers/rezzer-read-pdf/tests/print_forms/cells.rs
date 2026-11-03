@@ -322,6 +322,11 @@ pub(crate) enum Cells {
 /// Three cells, `Name` over `Beispiel`, the cell `m`, and `Nr` over `4711`, the labels in
 /// `font` at `size`, the values a `step` larger: drawn as `how` says.
 pub(crate) fn three_cells(m: Middle, size: f32, step: f32, font: &str, how: Cells) -> ReadOutcome {
+    read(&three_cells_file(m, size, step, font, how))
+}
+
+/// The file [`three_cells`] reads.
+pub(crate) fn three_cells_file(m: Middle, size: f32, step: f32, font: &str, how: Cells) -> Vec<u8> {
     let value = size * step;
     let k = size / 8.0;
     let mut c = String::from("0 0 0 RG 0.5 w\n");
@@ -373,7 +378,7 @@ pub(crate) fn three_cells(m: Middle, size: f32, step: f32, font: &str, how: Cell
             c += &shown(font, value, x + 4.0 * k, low + 1.2 * value * l as f32, v);
         }
     }
-    read(&three_font_page(&c))
+    three_font_page(&c)
 }
 
 /// What the middle cell of [`three_cells`] must read as.
@@ -1356,6 +1361,23 @@ fn a_strip_in_three_styles_not_clear_is_said() {
         wrong.len(),
         wrong.join("\n")
     );
+}
+
+/// Boxes of one style read box by box keep their text as it stands, with the reason of their
+/// loss in its regions.
+#[test]
+fn boxes_read_as_they_stand_keep_their_reason() {
+    let ort = Middle {
+        head: &["Ort"],
+        size: 1.0,
+        font: None,
+        lines: &["Musterstadt"],
+    };
+    let bytes = three_cells_file(ort, 10.0, 1.0, "F1", Cells::Row);
+    common::assert_every_run_in_one_region(&bytes);
+    for text in ["Beispiel", "Musterstadt", "4711"] {
+        common::assert_kept_with_reason(&bytes, text, "its text is of one style");
+    }
 }
 
 /// Task 15b part 2e-1 (item 2, part 2d review M2; ruling P6-X): boxes of fields whose labels

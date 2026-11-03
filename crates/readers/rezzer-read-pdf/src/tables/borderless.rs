@@ -10,6 +10,14 @@ use super::*;
 use crate::layout::{ColumnLine, Columns, Gaps, Slot, address_columns};
 use crate::regions::{BASELINE_NEAR, Part, offset_baselines};
 
+/// Why blocks side by side are read one block after the other (see [`side_blocks`]).
+const BLOCK_BY_BLOCK: &str = "blocks of short lines side by side are read one block after the \
+     other: their lines may be rows of a table or labels beside values";
+
+/// Why lines side by side read row by row may be no rows (see [`side_blocks`]).
+const MAY_BE_BLOCKS: &str = "a column of the lines holds an address: they may be blocks side \
+     by side, whose lines do not belong together";
+
 /// A run of text of one line, apart from its neighbours by a gap: one cell's text.
 #[derive(Debug, Clone)]
 struct Piece {
@@ -397,12 +405,19 @@ pub(super) fn borderless(
             if verdict == Columns::Headed {
                 headed = true;
             } else if verdict == Columns::Doubt {
+                found.doubts.push((
+                    flow.ids[lines[a].start..lines[z - 1].end].to_vec(),
+                    MAY_BE_BLOCKS,
+                ));
                 found.uncertain.push(format!(
                     "lines side by side on page {page} are read row by row, though a column of \
                      them holds an address: they may be blocks side by side, whose lines do not \
                      belong together"
                 ));
             } else {
+                found
+                    .doubts
+                    .push((order.iter().map(|&i| flow.ids[i]).collect(), BLOCK_BY_BLOCK));
                 found.uncertain.push(format!(
                     "blocks of short lines side by side on page {page} are read one block after \
                      the other, as blocks of their own: if their lines are rows of a table or \

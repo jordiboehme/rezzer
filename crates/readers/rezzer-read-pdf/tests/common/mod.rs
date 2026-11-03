@@ -257,6 +257,36 @@ pub fn region_texts<'a>(
         .collect()
 }
 
+/// The signal id and the `unsure` notes of each region of `bytes` that holds a run whose text
+/// contains `text`.
+pub fn unsure_of(bytes: &[u8], text: &str) -> Vec<(&'static str, Vec<String>)> {
+    let (_, pages) = read_engine_pages(bytes);
+    pages
+        .iter()
+        .flat_map(|p| {
+            p.regions
+                .regions
+                .iter()
+                .filter(|r| region_texts(p, r).iter().any(|t| t.contains(text)))
+                .map(|r| (r.signals[0].id, r.unsure.clone()))
+        })
+        .collect()
+}
+
+/// Panics unless `bytes` has a region holding a run with `text`, every such region is laid out
+/// as text (`pdf.lines`), and each says `why` among its `unsure` notes.
+pub fn assert_kept_with_reason(bytes: &[u8], text: &str, why: &str) {
+    let found = unsure_of(bytes, text);
+    assert!(!found.is_empty(), "no region holds {text:?}");
+    for (id, unsure) in &found {
+        assert_eq!(*id, "pdf.lines", "{text:?}: {found:?}");
+        assert!(
+            unsure.iter().any(|u| u.contains(why)),
+            "{text:?}: {unsure:?} does not say {why:?}"
+        );
+    }
+}
+
 /// The text runs of each page of `bytes` are each in exactly one region: the text ids of the
 /// regions of a page are 0 up to the page's runs, each once (a refused offer stops a debug
 /// build first). No page has an issue, and every page read has its regions.

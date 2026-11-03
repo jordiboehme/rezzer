@@ -594,3 +594,13 @@ fn strip_pairs_are_label_value() {
         assert!(detail.contains("rows of fields"), "{detail}");
     }
 }
+
+/// A row of fields refused with a loss (a value across two fields) keeps its text as it
+/// stands, and the regions of that text say why.
+#[test]
+fn a_refused_row_of_fields_keeps_its_reason() {
+    let bytes = print_form(&[super::boxes::field_rows()], "", "");
+    for text in ["Betrag", "Zuschlag", "123456789012"] {
+        common::assert_kept_with_reason(&bytes, text, "a value stands across two fields");
+    }
+}

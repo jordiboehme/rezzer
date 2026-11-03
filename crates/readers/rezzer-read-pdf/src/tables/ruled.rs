@@ -190,7 +190,7 @@ struct Taking {
     strokes: Option<Vec<[f32; 4]>>,
     icon_work: usize,
     /// The grids and bands refused with a note or a loss: the ids of their runs, and why.
-    doubts: Vec<(Vec<u32>, &'static str)>,
+    doubts: Doubts,
 }
 
 impl Taking {
@@ -1108,7 +1108,8 @@ fn leave_flow(
         ..
     } = take;
     found.quiet = quiet;
-    found.doubts = doubts;
+    // The rows of fields refused before (see [`strip_tables`]) said theirs already.
+    found.doubts.extend(doubts);
     if let Some(u) = page_note(page, &refusals) {
         found.unsure.push(u);
     }
@@ -1459,6 +1460,7 @@ fn strip_tables(
         held,
         tables,
         &mut found.uncertain,
+        &mut found.doubts,
         &mut bodies,
         &mut found.apart,
     );

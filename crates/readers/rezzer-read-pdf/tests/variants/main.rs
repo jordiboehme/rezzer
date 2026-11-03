@@ -716,3 +716,75 @@ fn generated_region_counts() {
     let moved = layoutregions::moved_lines(&old, &new);
     assert!(moved.is_empty(), "{}", moved.join("\n"));
 }
+
+/// The detector without rules names its regions by class: a shape of each class, at its first
+/// variant, has a region of that class's signal and kind holding the shape's first word.
+#[test]
+fn borderless_classes_name_their_regions() {
+    use layoutregions::Kind;
+    for (name, id, kind, word) in [
+        (
+            "blocks side by side under their headings",
+            "pdf.borderless.side_blocks",
+            Kind::LabelValue,
+            "Anschrift",
+        ),
+        (
+            "titles over a row that ends in a stop",
+            "pdf.borderless.labels_over_values",
+            Kind::LabelValue,
+            "Artikel",
+        ),
+        (
+            "title beside a field list",
+            "pdf.borderless.key_values",
+            Kind::LabelValue,
+            "Rechnungsnummer",
+        ),
+        (
+            "a headerless table of records",
+            "pdf.borderless.grid",
+            Kind::Table,
+            "Muster GmbH",
+        ),
+        (
+            "line items with an end rule",
+            "pdf.borderless.totals_under",
+            Kind::Totals,
+            "Nettobetrag",
+        ),
+    ] {
+        let page = axes::variants(&shape(name)).next().unwrap();
+        let (_, pages) = common::read_engine_pages(&inv::file(&page));
+        let found = pages.iter().any(|p| {
+            p.regions.regions.iter().any(|r| {
+                r.signals[0].id == id
+                    && r.kind == kind
+                    && common::region_texts(p, r).iter().any(|t| t.contains(word))
+            })
+        });
+        assert!(found, "{name}: no {id} region of {kind:?} holds {word:?}");
+    }
+}
+
+/// A second table after a blank row under a table is no totals, though the region search
+/// parted it from the table right over it: only the rule that ends a table parts its totals
+/// from it. Every sampled variant.
+#[test]
+fn a_second_table_after_a_blank_row_is_no_totals() {
+    for name in [
+        "a second table under a plain header after a bold total",
+        "a second table of one row under a plain header after a bold total",
+    ] {
+        for page in axes::variants(&shape(name)) {
+            let (_, pages) = common::read_engine_pages(&inv::file(&page));
+            let totals: Vec<&str> = pages
+                .iter()
+                .flat_map(|p| &p.regions.regions)
+                .filter(|r| r.kind == layoutregions::Kind::Totals)
+                .map(|r| r.signals[0].id)
+                .collect();
+            assert!(totals.is_empty(), "{}: {totals:?}", page.name);
+        }
+    }
+}

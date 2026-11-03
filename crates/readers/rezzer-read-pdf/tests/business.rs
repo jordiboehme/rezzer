@@ -8373,3 +8373,33 @@ fn totals_under_a_table_are_totals() {
         assert!(text.contains(t), "{t}: {text}");
     }
 }
+
+/// The footer of page 1 of the invoice is read as blocks side by side, block by block, with a
+/// loss: the regions of its lines say why.
+#[test]
+fn blocks_read_one_after_the_other_keep_their_reason() {
+    let (_, pages) = common::read_engine_pages(&common::synthetic_invoice());
+    let page = &pages[0];
+    for text in ["Musterbank", "HRB 00000"] {
+        let holders: Vec<&rezzer_read_pdf::layoutregions::Region> = page
+            .regions
+            .regions
+            .iter()
+            .filter(|r| {
+                common::region_texts(page, r)
+                    .iter()
+                    .any(|t| t.contains(text))
+            })
+            .collect();
+        assert_eq!(holders.len(), 1, "{text}: {holders:#?}");
+        assert_eq!(holders[0].signals[0].id, "pdf.lines");
+        assert!(
+            holders[0]
+                .unsure
+                .iter()
+                .any(|u| u.contains("read one block after the other")),
+            "{text}: {:?}",
+            holders[0].unsure
+        );
+    }
+}

@@ -55,7 +55,7 @@ pub(super) struct Taken<'a> {
     pub tables: &'a mut Vec<Planned>,
     pub skipped: &'a mut Vec<String>,
     /// Bands refused with a note or a loss: the ids of their runs, and why.
-    pub doubts: &'a mut Vec<(Vec<u32>, &'static str)>,
+    pub doubts: &'a mut Doubts,
 }
 
 /// The tables under the header bands of a page, top to bottom. A band is at least three of

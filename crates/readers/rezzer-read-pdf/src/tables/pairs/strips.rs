@@ -245,6 +245,9 @@ const NOT_FIELDS: &str = "its labels do not all stand over or beside their value
 const UNDER_UNCLEAR: &str = "its labels stand under the rule their values stand on, and not \
      every value's label is clear";
 
+/// Why two lines in columns between two rules are read line by line.
+const LINE_BY_LINE: &str = "each line may be a row, or each column a cell of its own whose \
+     lines go together";
 const LONE: &str = "it is one field alone between its rules, which a caption over a line of \
      text between rules looks like";
 
@@ -571,6 +574,7 @@ pub(in crate::tables) fn field_strips(
     kept: &mut [bool],
     tables: &mut Vec<Planned>,
     unsure: &mut Vec<String>,
+    doubts: &mut Doubts,
     bodies: &mut Vec<(Vec<usize>, Vec<String>)>,
     apart: &mut Vec<Vec<Vec<usize>>>,
 ) {
@@ -580,7 +584,13 @@ pub(in crate::tables) fn field_strips(
         small: small_size(text_sizes).saturating_sub(1),
         labels: &[],
     };
-    let say = |unsure: &mut Vec<String>, names: &[String], why: &str| {
+    // Each loss also gives its reason to the runs it keeps as text (see `Found::doubts`).
+    let say = |unsure: &mut Vec<String>,
+               doubts: &mut Doubts,
+               names: &[String],
+               why: &'static str,
+               runs: &[usize]| {
+        doubts.push((runs.iter().map(|&i| flow.ids[i]).collect(), why));
         let names = if names.is_empty() {
             String::new()
         } else {
@@ -744,6 +754,7 @@ pub(in crate::tables) fn field_strips(
         // rules), so it is not said.
         if !fits {
             if doubt {
+                doubts.push((ids.iter().map(|&i| flow.ids[i]).collect(), LINE_BY_LINE));
                 unsure.push(format!(
                     "two lines of text in columns between two rules on page {page} are read \
                      line by line: each line may be a row, or each column a cell of its own \
@@ -755,9 +766,9 @@ pub(in crate::tables) fn field_strips(
         if unread {
             if !fields.is_empty() {
                 let names: Vec<String> = cells.iter().flat_map(|c| label_names(flow, c)).collect();
-                say(unsure, &names, NOT_FIELDS);
+                say(unsure, doubts, &names, NOT_FIELDS, &ids);
             } else if let Some(why) = field_why {
-                say(unsure, &styled_heads, why);
+                say(unsure, doubts, &styled_heads, why, &ids);
             } else {
                 continue;
             }
@@ -780,7 +791,7 @@ pub(in crate::tables) fn field_strips(
         let to_tables = fields.is_empty() && !address && totals_rows(flow, &ids);
         if !to_tables {
             for (why, names) in &left_out {
-                say(unsure, names, why);
+                say(unsure, doubts, names, why, &ids);
             }
         }
         if fields.is_empty() {
@@ -1003,7 +1014,7 @@ pub(in crate::tables) fn field_strips(
                     }
                 }
             }
-            say(unsure, &names, LONE);
+            say(unsure, doubts, &names, LONE, &runs);
             for &i in &runs {
                 kept[i] = true;
             }
@@ -1064,7 +1075,8 @@ pub(in crate::tables) fn field_strips(
                 }
                 _ => {
                     let names: Vec<String> = list.iter().map(|f| words(flow, &f.label)).collect();
-                    say(unsure, &names, UNDER_UNCLEAR);
+                    let kept_runs: Vec<usize> = runs.iter().chain(&below).copied().collect();
+                    say(unsure, doubts, &names, UNDER_UNCLEAR, &kept_runs);
                     for &i in runs.iter().chain(&below) {
                         kept[i] = true;
                     }
@@ -1090,7 +1102,12 @@ pub(in crate::tables) fn field_strips(
                         }
                     }
                 }
-                say(unsure, &names, UNDER_UNCLEAR);
+                let kept_runs: Vec<usize> = runs
+                    .iter()
+                    .chain(below.iter().filter(|i| !held.contains(i)))
+                    .copied()
+                    .collect();
+                say(unsure, doubts, &names, UNDER_UNCLEAR, &kept_runs);
                 for &i in runs
                     .iter()
                     .chain(below.iter().filter(|i| !held.contains(i)))

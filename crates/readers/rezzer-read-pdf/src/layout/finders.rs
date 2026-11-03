@@ -24,7 +24,7 @@ use super::{
     page_text_sizes_of, refused_quietly, time_over,
 };
 use crate::engine;
-use crate::tables::{self, BoxTitle, Detector, Planned};
+use crate::tables::{self, BoxTitle, Detector, Doubts, Planned};
 
 /// The score of a region a detector found: a detector's claim is not weighed yet.
 const FOUND: u16 = 1000;
@@ -65,7 +65,7 @@ pub(crate) struct PageCx<'p> {
     pub(super) repeats: Vec<u32>,
     /// The grids, bands and regions refused as tables whose text stays as it stands: the ids
     /// of their runs and why (see [`mark_doubts`]).
-    pub(super) doubts: Vec<(Vec<u32>, &'static str)>,
+    pub(super) doubts: Doubts,
 }
 
 /// The text sizes of a page, counted over all its text but its legend, also what tables take
@@ -413,7 +413,7 @@ impl Finder<PageCx<'_>> for BoxPairs {
         }
         let cx = p.cx;
         let stop = || time_over(cx.budget).is_err();
-        let (found, titles, unsure, skipped) = tables::box_pairs(
+        let (found, titles, (unsure, doubts), skipped) = tables::box_pairs(
             p.page,
             &mut p.flow,
             p.drawn.boxes,
@@ -434,6 +434,7 @@ impl Finder<PageCx<'_>> for BoxPairs {
                 .into_iter()
                 .map(|w| (w, LossReason::Uncertain, Severity::Info)),
         );
+        p.doubts.extend(doubts);
         p.notes
             .extend(skipped.map(|w| (w, LossReason::Limit, Severity::Info)));
     }

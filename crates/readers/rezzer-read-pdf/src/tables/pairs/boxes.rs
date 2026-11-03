@@ -21,6 +21,15 @@ pub(super) const BOX_FOUND_BY: &str = "Found by: label and value pairs from draw
 /// printed larger or smaller chains the same.
 const TOUCH: f32 = 0.5;
 
+/// What [`box_pairs`] reads: the tables and titles, the losses of the boxes read as they stand
+/// with their runs (see [`Doubts`]), and why the page was looked at only in part.
+pub(crate) type BoxesRead = (
+    Vec<Planned>,
+    Vec<BoxTitle>,
+    (Vec<String>, Doubts),
+    Option<String>,
+);
+
 /// Fields of drawn boxes (reading regions, in the frame of the runs): a box whose text is a
 /// label at its top or left in one style (smaller by half a point or in another weight or
 /// slant) and a value in another is a field, and a box with only a label smaller than the
@@ -40,9 +49,9 @@ pub(crate) fn box_pairs(
     rules: &[Rule],
     text_sizes: &[f32],
     stop: &dyn Fn() -> bool,
-) -> (Vec<Planned>, Vec<BoxTitle>, Vec<String>, Option<String>) {
+) -> BoxesRead {
     if boxes.is_empty() || flow.runs.is_empty() {
-        return (Vec::new(), Vec::new(), Vec::new(), None);
+        return (Vec::new(), Vec::new(), (Vec::new(), Vec::new()), None);
     }
     let points: Vec<(f32, f32, f32)> = flow
         .runs
@@ -56,7 +65,7 @@ pub(crate) fn box_pairs(
         })
         .collect();
     let Ok(regions) = regions_of(&points, boxes) else {
-        return (Vec::new(), Vec::new(), Vec::new(), None);
+        return (Vec::new(), Vec::new(), (Vec::new(), Vec::new()), None);
     };
     let mut in_box: Vec<Vec<usize>> = vec![Vec::new(); boxes.len()];
     for (i, r) in regions.iter().enumerate() {
@@ -422,6 +431,14 @@ pub(crate) fn box_pairs(
         .map(|(_, why)| *why)
         .collect();
     let mut said: Vec<String> = Vec::new();
+    // The boxes said, with the ids of their runs, which are read as they stand.
+    let ids_of = |b: usize| -> Vec<u32> { in_box[b].iter().map(|&i| flow.ids[i]).collect() };
+    let mut doubts: Doubts = unsure
+        .iter()
+        .filter(|(b, why)| said_of(b, why))
+        .map(|&(b, why)| (ids_of(b), why))
+        .collect();
+    doubts.extend(lone.iter().map(|&b| (ids_of(b), NO_LABEL)));
     // A box of an address, or of text with no label, is named by its first line.
     for (kinds, why) in [
         (&[ADDRESS, NAMED_ADDRESS][..], ADDRESS),
@@ -477,7 +494,7 @@ pub(crate) fn box_pairs(
         }
     }
     if groups.is_empty() && framed.is_empty() {
-        return (Vec::new(), Vec::new(), said, skipped);
+        return (Vec::new(), Vec::new(), (said, doubts), skipped);
     }
     let mut planned: Vec<Planned> = Vec::new();
     let mut target: Vec<Option<(usize, usize, usize)>> = vec![None; flow.runs.len()];
@@ -550,7 +567,7 @@ pub(crate) fn box_pairs(
             (None, None) => {}
         }
     }
-    (planned, titles, said, skipped)
+    (planned, titles, (said, doubts), skipped)
 }
 
 /// A framed box read as a title over its lines: the boxes it takes (the frame and a title
