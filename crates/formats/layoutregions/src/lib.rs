@@ -9,8 +9,10 @@
 //! file states). Finders offer [`Candidate`]s to [`InOrder`], which keeps the first claim on a
 //! piece. [`find_in_order`] runs the finders in order and [`InOrder::finish`] returns the
 //! [`PageRegions`]. [`segment::drawn::drawn`] finds the grids and boxes the drawn lines of a
-//! page make, once per page, for every finder that looks at them. Later stages (the cut, the
-//! scored rule, the typing functions) arrive in further steps.
+//! page make, once per page, for every finder that looks at them. [`segment::segment_page`]
+//! nests the regions the file states, the drawn structure, the whitespace cut and style steps
+//! into one tree of candidate regions per page. Later stages (the scored rule, the typing
+//! functions) arrive in further steps.
 //!
 //! ```
 //! use layoutregions::*;
