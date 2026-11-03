@@ -822,7 +822,8 @@ const NEAR_WORK: usize = 4_000_000;
 /// page places later; rows of a tagged table begun on an earlier page; anything a stop left
 /// unbuilt) takes the block that follows it, as a picture is placed: the region with a block
 /// nearest to its top centre, the next block when that region stands above it, else that
-/// block. With no block on the page, its host is [`NO_PLACED`]. Gives the regions that became
+/// block; when no region of the page has a block, the page's last block. With no block on
+/// the page, its host is [`NO_PLACED`]. Gives the regions that became
 /// rows of an earlier table, with the table.
 pub(super) fn block_hosts(
     regions: &mut layoutregions::PageRegions,
@@ -867,7 +868,8 @@ pub(super) fn block_hosts(
             Some(k) => Some(k),
             None if work >= placed.len() => {
                 work -= placed.len();
-                near(r.bounds, &placed, blocks.len())
+                // No region with a block to go by: the page's last block.
+                near(r.bounds, &placed, blocks.len()).or(last)
             }
             None => last,
         };
