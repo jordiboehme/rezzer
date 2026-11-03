@@ -52,10 +52,8 @@ fn is_sep(c: char) -> bool {
 }
 
 /// Whether `c` is one of the noncharacters U+FDD0 to U+FDEF: Rezzer's own placeholders,
-/// dropped from the text of a file.
-pub(crate) fn is_placeholder(c: char) -> bool {
-    ('\u{FDD0}'..='\u{FDEF}').contains(&c)
-}
+/// dropped from the text of a file (see `layoutregions::line::is_placeholder`).
+pub(crate) use layoutregions::line::is_placeholder;
 
 /// Whether an axis-aligned box (x0, y0, x1, y1) has the shape of a mark: long for its width.
 /// Whether it is small enough to be one depends on the text it stands with (see

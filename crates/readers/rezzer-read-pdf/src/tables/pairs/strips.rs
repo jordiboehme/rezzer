@@ -235,7 +235,7 @@ fn frame_runs(flow: &Flow, by_y: &ByY, fr: &Frame, busy: &dyn Fn(usize) -> bool)
 /// of the flow.
 pub(in crate::tables) fn field_cuts(flow: &Flow, frames: &[Frame]) -> Vec<(usize, Vec<usize>)> {
     let lines = flow_lines(flow);
-    let by_y = ByY::new(flow, &lines);
+    let by_y = ByY::new(&flow.runs, &lines);
     let edges: Vec<FieldFrame<'_>> = frames
         .iter()
         .map(|fr| FieldFrame {

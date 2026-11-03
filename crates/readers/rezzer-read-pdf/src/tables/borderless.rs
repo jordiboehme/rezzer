@@ -10,7 +10,9 @@ use layoutregions::PrimId;
 use layoutregions::segment::Segment;
 
 use layoutregions::extract::table::TableOut;
-use layoutregions::extract::table::grid::{self, Piece, Shape, amount, columns_of, grid_cells};
+use layoutregions::extract::table::grid::{
+    self, Piece, Shape, amount, columns_of, grid_cells, set_full, titles_over_values,
+};
 
 use super::*;
 use layoutregions::extract::pairs::blocks::{
@@ -27,72 +29,6 @@ const BLOCK_BY_BLOCK: &str = "blocks of short lines side by side are read one bl
 /// Why lines side by side read row by row may be no rows (see [`side_blocks`]).
 const MAY_BE_BLOCKS: &str = "a column of the lines holds an address: they may be blocks side \
      by side, whose lines do not belong together";
-
-/// Whether the lines of a region (their `pieces`) are a paragraph set full (justified): every
-/// line starts where the others do, and every line of two pieces or more ends where they end,
-/// within half a size; every line of three pieces or
-/// more has gaps that are even (the word spacing of a line set full is the same between all its
-/// words), and two lines or more are such lines; and their words are prose: a piece opens with
-/// a small letter, or the gaps differ from line to line by more than half a size (each line set
-/// full is spaced to fill the measure on its own). The rows of a table have gaps of the widths
-/// their cells leave, which are not even on a row, and a grid of cells of one width whose gaps
-/// are even (numbers flush right) has the same gaps on every row and no word in small letters.
-/// A line of two pieces shows nothing: one gap is always even, and a gap at the edge of a cell
-/// gap may join two words of a line set full into one piece.
-fn set_full(flow: &Flow, pieces: &[Vec<Piece>], lines: &[FlowLine]) -> bool {
-    let tol = 0.5
-        * lines
-            .iter()
-            .map(|l| l.size)
-            .fold(f32::MAX, f32::min)
-            .max(1.0);
-    let used: Vec<&Vec<Piece>> = pieces.iter().filter(|l| !l.is_empty()).collect();
-    let left = used
-        .iter()
-        .flat_map(|l| l.first())
-        .map(|p| p.x0)
-        .fold(f32::MAX, f32::min);
-    let right = used
-        .iter()
-        .flat_map(|l| l.last())
-        .map(|p| p.x1)
-        .fold(f32::MIN, f32::max);
-    // A line of one piece (one word, which no spacing can fill out, or a line whose spaces are
-    // too narrow to part it) starts at the left edge only.
-    let edges = used.iter().all(|l| {
-        l.first().is_some_and(|p| (p.x0 - left).abs() <= tol)
-            && (l.len() < 2 || l.last().is_some_and(|p| (p.x1 - right).abs() <= tol))
-    });
-    if !edges {
-        return false;
-    }
-    // The even gap of each line of three pieces or more.
-    let mut spacing: Vec<f32> = Vec::new();
-    for l in used.iter().filter(|l| l.len() >= 3) {
-        let gaps: Vec<f32> = l.windows(2).map(|w| w[1].x0 - w[0].x1).collect();
-        let (lo, hi) = gaps
-            .iter()
-            .fold((f32::MAX, f32::MIN), |(lo, hi), &g| (lo.min(g), hi.max(g)));
-        if hi - lo > tol {
-            return false;
-        }
-        spacing.push(0.5 * (lo + hi));
-    }
-    if spacing.len() < 2 {
-        return false;
-    }
-    let (lo, hi) = spacing
-        .iter()
-        .fold((f32::MAX, f32::MIN), |(lo, hi), &g| (lo.min(g), hi.max(g)));
-    let small = used.iter().flat_map(|l| l.iter()).any(|p| {
-        text_of(flow, p.start, p.end)
-            .trim_start()
-            .chars()
-            .next()
-            .is_some_and(char::is_lowercase)
-    });
-    small || hi - lo > tol
-}
 
 /// How many pieces `pieces_of` finds in a line, without building them.
 fn piece_count(flow: &Flow, l: &FlowLine) -> usize {
@@ -149,7 +85,7 @@ pub(super) fn borderless(
     found: &mut Found,
 ) {
     let lines = flow_lines(flow);
-    let by_y = ByY::new(flow, &lines);
+    let by_y = ByY::new(&flow.runs, &lines);
     // The number of pieces of each line; the pieces themselves are built for a region only.
     let counts: Vec<usize> = lines.iter().map(|l| piece_count(flow, l)).collect();
     // Lines of other directions, and lines a refused ruled grid holds, are in no region.
@@ -339,65 +275,10 @@ pub(super) fn borderless(
         let mut pieces: Vec<Vec<Piece>> = lines[a..z].iter().map(|l| pieces_of(flow, l)).collect();
         // A paragraph set full (justified) in a narrow column, whose word gaps are wide enough
         // to part its words into pieces, is prose: no columns.
-        if set_full(flow, &pieces, &lines[a..z]) {
+        if set_full(&flow.runs, &pieces, &lines[a..z]) {
             continue;
         }
-        // Two lines alone whose pieces stand in the same three columns or more, piece for piece,
-        // the first of titles (one word each, no digit) over a row that holds a digit (`Pos
-        // Datum Betrag` over `1 15.01.2026 9,99`), are a table of a header and one row, or its
-        // refusal is said. Blocks side by side that open with a name of two words or more (a
-        // firm over its street beside a bank over its account) are no titles over values.
-        let digit = |p: &Piece| {
-            flow.runs[p.start..p.end]
-                .iter()
-                .any(|r| r.text.chars().any(|c| c.is_ascii_digit()))
-        };
-        let title =
-            |p: &Piece| !digit(p) && text_of(flow, p.start, p.end).split_whitespace().count() == 1;
-        // Each title stands in one column with the value under it: their starts or their ends
-        // meet (within half a size), as columns set flush left or flush right do. Words of two
-        // lines set full (justified) share the lines' outer edges, and a middle word stands about
-        // in the middle, but no word between them starts or ends where the one under it does:
-        // middles that meet are no evidence.
-        let tol = 0.5
-            * lines[a..z]
-                .iter()
-                .map(|l| l.size)
-                .fold(f32::MAX, f32::min)
-                .max(1.0);
-        let meet = |p: &Piece, q: &Piece| (p.x0 - q.x0).abs() <= tol || (p.x1 - q.x1).abs() <= tol;
-        // Two lines whose words stand equal gaps apart and that share both outer edges are set
-        // full (justified): prose, whatever words of theirs meet by chance.
-        let even = |line: &[Piece]| {
-            let gaps: Vec<f32> = line.windows(2).map(|w| w[1].x0 - w[0].x1).collect();
-            let (lo, hi) = gaps
-                .iter()
-                .fold((f32::MAX, f32::MIN), |(l, h), &g| (l.min(g), h.max(g)));
-            hi - lo <= tol
-        };
-        // Two lines that share both outer edges, as lines set to one measure do.
-        let outer = |a: &[Piece], b: &[Piece]| {
-            a.first()
-                .zip(b.first())
-                .is_some_and(|(p, q)| (p.x0 - q.x0).abs() <= tol)
-                && a.last()
-                    .zip(b.last())
-                    .is_some_and(|(p, q)| (p.x1 - q.x1).abs() <= tol)
-        };
-        let aligned = z - a == 2
-            && pieces[0].len() >= 3
-            && pieces[0].len() == pieces[1].len()
-            && pieces[0]
-                .iter()
-                .zip(&pieces[1])
-                .all(|(p, q)| p.x0 < q.x1 && q.x0 < p.x1 && meet(p, q))
-            && !(even(&pieces[0]) && even(&pieces[1]) && outer(&pieces[0], &pieces[1]))
-            && pieces[0].iter().all(title)
-            && pieces[1].iter().any(digit)
-            && !prose_row(
-                &text_of(flow, lines[a + 1].start, lines[a + 1].end),
-                even(&pieces[1]) && outer(&pieces[0], &pieces[1]),
-            );
+        let aligned = titles_over_values(&flow.runs, &lines[a..z], &pieces);
         // Blocks of an address, a bank or a register side by side are no table: their runs are
         // read block by block. Rows were possible too, so that is said. Under a header row of
         // their headings, they are read as the table they make, with the doubt said.
@@ -550,7 +431,7 @@ pub(super) fn borderless(
             let in_region = |i: usize| (lines[a].start..lines[z - 1].end).contains(&i);
             let line_sizes: Vec<f32> = lines[a..z].iter().map(|l| l.size).collect();
             let (caption_line, figure_caption) =
-                captions_near(flow, &lines, &by_y, b, &line_sizes, &in_region);
+                captions_near(&flow.runs, &lines, &by_y, b, &line_sizes, &in_region);
             let table_caption = caption_line.is_some();
             let rows_needed = if table_caption || after_table || aligned {
                 2
@@ -1279,17 +1160,6 @@ const SIDE_BY_SIDE: &str = "two blocks stand side by side";
 /// no line crosses may part two blocks side by side.
 const BLOCK_GUTTER: f32 = 8.0;
 const BLOCK_GUTTER_RATIO: f32 = 3.0;
-
-/// Whether the second of two lines reads as the end of a sentence that goes on from the line
-/// over it: it opens with a small letter, or it ends with a full stop and is `set_full` to the
-/// measure of the line over it (its words even gaps apart, both its edges at that line's
-/// edges), as a line of prose set full is (`Die 3 Hinweise.`). A row of values does not open
-/// with a small letter, and its cells stand where their columns start or end: its last cell
-/// may end with the stop of an abbreviation (`12 Stk.`, `Muster Co. KG.`).
-fn prose_row(text: &str, set_full: bool) -> bool {
-    let t = text.trim();
-    t.starts_with(char::is_lowercase) || (t.ends_with('.') && set_full)
-}
 
 /// Where two blocks that stand side by side part, when they do: the widest gutter between
 /// columns, when no line crosses it, the white space all lines leave there is at least

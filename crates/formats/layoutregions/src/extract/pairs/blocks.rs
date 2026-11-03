@@ -145,7 +145,7 @@ const INDEX_CHARS: usize = 3;
 
 /// Whether `text` is a numbered label: words without a digit, then one word with a digit of at
 /// most [`INDEX_CHARS`] characters (`Kundennr. 1`, `Vertrag 7`, `Tarif A2`).
-fn indexed(text: &str) -> bool {
+pub(crate) fn indexed(text: &str) -> bool {
     let words: Vec<&str> = text.split_whitespace().collect();
     let Some((last, head)) = words.split_last() else {
         return false;

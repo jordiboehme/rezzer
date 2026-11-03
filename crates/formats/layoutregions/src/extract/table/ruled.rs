@@ -12,7 +12,7 @@ use super::{
     CELL_GAP, CellOut, Cells, MAX_SQUARES, PROSE_LINE, PROSE_WORDS, RUNS_INTO_CELL, RunRange,
     TableOut, alone_on_line, middle, numeric, run_ranges, texted_per_line,
 };
-use crate::line::{LABEL_STEP, LineRun};
+use crate::line::{LABEL_STEP, LineRun, is_placeholder};
 use crate::segment::drawn::{Line, SNAP, clustered};
 
 /// A grid whose cells are more often empty than this is a form to fill in.
@@ -72,6 +72,37 @@ pub fn hanging_feet(v: &[Line], xs: &[f32], ys: &[f32]) -> Vec<(f32, f32)> {
             (!standing && f.len() == 1).then(|| (f[0], ys[r + 1]))
         })
         .collect()
+}
+
+/// A box of a boxed field is at most this many times as wide as the size of its digits.
+const DIGIT_BOX: f32 = 1.5;
+
+/// Whether the grid of column edges `xs` and row edges `ys` (from the top) with the runs
+/// `within` of `runs` is boxed fields: columns of one width, narrow as a box for each digit,
+/// and in each row at most one run of text, which is digits (with the separators read from
+/// marks, see [`is_placeholder`]). Its text is read as it is, and its refusal is no loss.
+pub fn boxed_field<R: LineRun>(runs: &[R], within: &[usize], xs: &[f32], ys: &[f32]) -> bool {
+    let (Some(first), Some(size)) = (
+        xs.windows(2).map(|w| w[1] - w[0]).next(),
+        within.iter().map(|&i| runs[i].size()).reduce(f32::max),
+    ) else {
+        return false;
+    };
+    let digits = |t: &str| {
+        let t = t.trim();
+        t.starts_with(|c: char| c.is_ascii_digit())
+            && t.chars()
+                .all(|c| c.is_ascii_digit() || matches!(c, '.' | ',') || is_placeholder(c))
+    };
+    let mut rows: HashSet<usize> = HashSet::new();
+    xs.len() >= 3
+        && first <= DIGIT_BOX * size
+        && xs.windows(2).all(|w| (w[1] - w[0] - first).abs() <= SNAP)
+        && within.iter().all(|&i| {
+            let r = &runs[i];
+            let (_, cy) = middle(r);
+            digits(r.text()) && rows.insert(ys.partition_point(|e| *e > cy))
+        })
 }
 
 /// Whether the text of a run that stands over `columns` columns reads as a sentence: at

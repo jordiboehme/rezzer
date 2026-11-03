@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 use layoutregions::extract::pairs::Field;
 use layoutregions::extract::table::ruled::{
-    COLUMN_CUT_WORK, GridPart, RuledIn, column_cuts, edges, hanging_feet, ruled_cells,
+    COLUMN_CUT_WORK, GridPart, RuledIn, boxed_field, column_cuts, edges, hanging_feet, ruled_cells,
 };
 use layoutregions::extract::table::sections::{CUT_WORK, sections};
 use layoutregions::extract::table::{Cells, TITLE_WORK, column_across, title_over};
@@ -21,7 +21,6 @@ use super::pairs::{
 };
 use super::side::{Beside, SIDE_FOUND_BY, SIDE_WORK, Side, StripKind, side_columns, totals_top};
 use super::*;
-use crate::marks::is_placeholder;
 
 /// Where a run a table took goes: the table, its row and its cell.
 type Claim = Option<(usize, usize, usize)>;
@@ -102,7 +101,7 @@ pub(super) fn ruled(
         found,
     );
     let lines = flow_lines(flow);
-    let by_y = ByY::new(flow, &lines);
+    let by_y = ByY::new(&flow.runs, &lines);
     let sh = Sheet {
         page,
         flow,
@@ -510,7 +509,7 @@ fn read_grid(sh: &Sheet<'_>, take: &mut Taking, found: &mut Found, s: GridSectio
         .copied()
         .filter(|&i| !flow.runs[i].text.trim().is_empty())
         .collect();
-    if within.is_empty() || boxed_field(flow, &within, xs, ys) {
+    if within.is_empty() || boxed_field(&flow.runs, &within, xs, ys) {
         return Next::Section;
     }
     if take.tables.len() >= MAX_TABLES {
@@ -519,10 +518,11 @@ fn read_grid(sh: &Sheet<'_>, take: &mut Taking, found: &mut Found, s: GridSectio
     }
     let at = flow.at[within[0]];
     let sizes: Vec<f32> = within.iter().map(|&i| flow.runs[i].size).collect();
-    let (caption_line, figure_caption) = captions_near(flow, sh.lines, sh.by_y, b, &sizes, &|i| {
-        let (_, cy) = middle(&flow.runs[i]);
-        inside(i) && cy > b[1] && cy < b[3]
-    });
+    let (caption_line, figure_caption) =
+        captions_near(&flow.runs, sh.lines, sh.by_y, b, &sizes, &|i| {
+            let (_, cy) = middle(&flow.runs[i]);
+            inside(i) && cy > b[1] && cy < b[3]
+        });
     let table_caption = caption_line.is_some();
     // A refused grid gets a note when a caption names a table, or when it looks like one:
     // three columns or more with text in two rows or in six squares, and nothing about
@@ -545,7 +545,7 @@ fn read_grid(sh: &Sheet<'_>, take: &mut Taking, found: &mut Found, s: GridSectio
     }
     // A grid over most of the page is its frame, unless text fills at least half of its
     // squares in three rows and three columns or more: a table as large as the page.
-    let dense = rows >= 3 && 2 * text_squares.len() >= rows * cols;
+    let dense = dense(rows, cols, text_squares.len());
     let noted = table_caption
         || (cols >= 3
             && (text_rows.len() >= 2 || text_squares.len() >= 6)
@@ -572,7 +572,7 @@ fn read_grid(sh: &Sheet<'_>, take: &mut Taking, found: &mut Found, s: GridSectio
         return Next::Section;
     }
     if cols > MAX_COLUMNS {
-        refusal.refuse(take, "it has more than 15 columns");
+        refusal.refuse(take, MANY_COLUMNS);
         return Next::Section;
     }
     let per_line = &sh.per_line;
@@ -1004,7 +1004,7 @@ fn cut_runs(
     // with a value: text under a table's last rule is not.
     if frames.iter().any(|f| f.under_grid) {
         let lines = flow_lines(flow);
-        let by_y = ByY::new(flow, &lines);
+        let by_y = ByY::new(&flow.runs, &lines);
         frames.retain(|f| !f.under_grid || holds_values(flow, &by_y, f));
     }
     if !frames.is_empty() {
@@ -1329,37 +1329,6 @@ fn apply_cuts(flow: &mut Flow, cuts: Vec<(usize, Vec<usize>)>) {
         }
     }
     *flow = out;
-}
-
-/// A box of a boxed field is at most this many times as wide as the size of its digits.
-const DIGIT_BOX: f32 = 1.5;
-
-/// Whether the grid of column edges `xs` and row edges `ys` (from the top) with the runs
-/// `within` is boxed fields: columns of one width, narrow as a box for each digit, and in
-/// each row at most one run of text, which is digits (with the separators read from marks).
-/// Its text is read as it is, and its refusal is no loss.
-fn boxed_field(flow: &Flow, within: &[usize], xs: &[f32], ys: &[f32]) -> bool {
-    let (Some(first), Some(size)) = (
-        xs.windows(2).map(|w| w[1] - w[0]).next(),
-        within.iter().map(|&i| flow.runs[i].size).reduce(f32::max),
-    ) else {
-        return false;
-    };
-    let digits = |t: &str| {
-        let t = t.trim();
-        t.starts_with(|c: char| c.is_ascii_digit())
-            && t.chars()
-                .all(|c| c.is_ascii_digit() || matches!(c, '.' | ',') || is_placeholder(c))
-    };
-    let mut rows: HashSet<usize> = HashSet::new();
-    xs.len() >= 3
-        && first <= DIGIT_BOX * size
-        && xs.windows(2).all(|w| (w[1] - w[0] - first).abs() <= SNAP)
-        && within.iter().all(|&i| {
-            let r = &flow.runs[i];
-            let (_, cy) = middle(r);
-            digits(&r.text) && rows.insert(ys.partition_point(|e| *e > cy))
-        })
 }
 
 /// Words of a table's first cell with text that name the table in a loss.

@@ -501,3 +501,85 @@ fn values_have_shapes() {
     assert_eq!(Shape::most(&[None, None, n]), None, "most have no shape");
     assert_eq!(Shape::most(&[]), None);
 }
+
+/// The pieces and lines of `runs` (one line each by line number, in order).
+fn lined(runs: &[TextRun]) -> (Vec<RunRange>, Vec<Vec<Piece>>) {
+    let lines = run_ranges(runs);
+    let pieces = lines
+        .iter()
+        .map(|l| pieces_of(runs, l.start, l.end))
+        .collect();
+    (lines, pieces)
+}
+
+#[test]
+fn captions_name_tables_and_figures() {
+    use super::caption::caption;
+    assert_eq!(caption("Table 3: Muster"), Some(true));
+    assert_eq!(caption("Figure 2 Muster"), Some(false));
+    assert_eq!(caption("Fig. A. Muster"), Some(false));
+    assert_eq!(caption("Tables of Muster"), None);
+    assert_eq!(caption("Muster"), None);
+}
+
+#[test]
+fn titles_over_values_need_titles_over_a_row_with_a_digit() {
+    use super::grid::titles_over_values;
+    let runs = vec![
+        run_at("Pos", 100.0, 200.0, 0),
+        run_at("Datum", 200.0, 200.0, 0),
+        run_at("Betrag", 320.0, 200.0, 0),
+        run_at("1", 100.0, 186.0, 1),
+        run_at("15.01.2026", 200.0, 186.0, 1),
+        run_at("9,99", 320.0, 186.0, 1),
+    ];
+    let (lines, pieces) = lined(&runs);
+    assert!(titles_over_values(&runs, &lines, &pieces));
+    // Words over words are no titles over values.
+    let words = vec![
+        run_at("Pos", 100.0, 200.0, 0),
+        run_at("Datum", 200.0, 200.0, 0),
+        run_at("Betrag", 320.0, 200.0, 0),
+        run_at("Eins", 100.0, 186.0, 1),
+        run_at("Zwei", 200.0, 186.0, 1),
+        run_at("Drei", 320.0, 186.0, 1),
+    ];
+    let (lines, pieces) = lined(&words);
+    assert!(!titles_over_values(&words, &lines, &pieces));
+}
+
+#[test]
+fn a_line_set_full_in_pieces_is_prose() {
+    use super::grid::set_full;
+    // Three lines of four words set to one measure from 100 to 400: even gaps on each line,
+    // wider on the first, words in small letters.
+    let line = |words: &[&str], y: f32, line: u32| -> Vec<TextRun> {
+        let width: f32 = words.iter().map(|w| 6.0 * w.chars().count() as f32).sum();
+        let gap = (300.0 - width) / (words.len() - 1) as f32;
+        let mut x = 100.0;
+        words
+            .iter()
+            .map(|w| {
+                let r = run_at(w, x, y, line);
+                x += r.w + gap;
+                r
+            })
+            .collect()
+    };
+    let mut runs = line(&["die", "Ware", "geht", "an"], 200.0, 0);
+    runs.extend(line(&["den", "Kunden", "noch", "heute"], 186.0, 1));
+    runs.extend(line(&["und", "wird", "dort", "bezahlt"], 172.0, 2));
+    let (lines, pieces) = lined(&runs);
+    assert!(set_full(&runs, &pieces, &lines));
+    // Rows of a table: no line ends where the others do.
+    let table = vec![
+        run_at("Muster", 100.0, 200.0, 0),
+        run_at("2", 200.0, 200.0, 0),
+        run_at("12,50", 300.0, 200.0, 0),
+        run_at("Beispiel", 100.0, 186.0, 1),
+        run_at("10", 200.0, 186.0, 1),
+        run_at("3,00", 306.0, 186.0, 1),
+    ];
+    let (lines, pieces) = lined(&table);
+    assert!(!set_full(&table, &pieces, &lines));
+}

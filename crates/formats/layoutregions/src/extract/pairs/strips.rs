@@ -449,15 +449,9 @@ pub(crate) fn text_cells<R: LineRun>(
     let labels = columns.iter().any(|c| {
         let lines = texts(c);
         let digit = |t: &str| t.chars().any(|ch| ch.is_ascii_digit());
-        let indexed = |t: &str| {
-            let w: Vec<&str> = t.split_whitespace().collect();
-            w.len() >= 2
-                && !w[..w.len() - 1].iter().any(|x| digit(x))
-                && w.last().is_some_and(|x| digit(x) && x.chars().count() <= 3)
-        };
         lines.iter().any(|t| t.ends_with(':'))
             || lines.iter().all(|t| !digit(t))
-            || lines.iter().all(|t| indexed(t))
+            || lines.iter().all(|t| blocks::indexed(t))
     });
     let address = postal && !labels;
     if address {

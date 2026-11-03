@@ -13,15 +13,11 @@ use crate::layout::Slot;
 use crate::regions::{Index, regions_of};
 use crate::tables::LABEL_STEP;
 use crate::tables::banded::{Heads, heads_lines};
+use layoutregions::extract::pairs::{touch_reach, touching};
 
 /// The note before the first table of drawn boxes of a page.
 pub(super) const BOX_FOUND_BY: &str = "Found by: label and value pairs from drawn boxes; the label \
      is the smaller text at the top of each box.";
-
-/// Boxes of one row or column of fields touch within this share of the size of their
-/// smallest text: farther apart, they are boxes on their own. Relative to the text, so a form
-/// printed larger or smaller chains the same.
-const TOUCH: f32 = 0.5;
 
 /// What [`box_pairs`] reads: the tables and titles, the losses of the boxes read as they stand
 /// with their runs (see [`Doubts`]), and why the page was looked at only in part.
@@ -94,30 +90,12 @@ pub(crate) fn box_pairs(
         }
     }
     let (mut fields, mut unsure) = box_fields(&flow.runs, &in_box, &consumed, text_sizes);
-    // How near two boxes touch: by the size of their smallest text (see [`TOUCH`]).
+    // How near two boxes touch: by the size of their smallest text (see `touch_reach`).
     let touch: Vec<f32> = in_box
         .iter()
-        .map(|ids| {
-            let small = ids
-                .iter()
-                .filter(|&&i| inked(&flow.runs[i]))
-                .map(|&i| flow.runs[i].size)
-                .fold(f32::INFINITY, f32::min);
-            if small.is_finite() {
-                TOUCH * small
-            } else {
-                0.0
-            }
-        })
+        .map(|ids| touch_reach(&flow.runs, ids))
         .collect();
-    let near = |p: usize, q: usize| {
-        let (a, b, t) = (boxes[p], boxes[q], touch[p].max(touch[q]));
-        let row =
-            (a[3] - b[3]).abs() <= t && ((a[2] - b[0]).abs() <= t || (b[2] - a[0]).abs() <= t);
-        let column =
-            (a[0] - b[0]).abs() <= t && ((a[1] - b[3]).abs() <= t || (b[1] - a[3]).abs() <= t);
-        row || column
-    };
+    let near = |p: usize, q: usize| touching(boxes[p], boxes[q], touch[p].max(touch[q]));
     let inked_of = |b: usize| -> Vec<usize> {
         in_box[b]
             .iter()

@@ -25,7 +25,9 @@ use std::collections::HashMap;
 use crate::line::LineRun;
 use crate::segment::drawn::Line;
 
+pub mod area;
 pub mod banded;
+pub mod caption;
 pub mod grid;
 pub mod ruled;
 pub mod sections;
@@ -39,6 +41,10 @@ pub const MAX_SQUARES: usize = 100_000;
 /// Cells of a table without rules are short: their median length is under this many
 /// characters, unless most of them are numbers.
 pub(crate) const SHORT_CELL: usize = 40;
+
+/// Cells of a table without rules next to a table caption may be longer: their median length
+/// is under this many characters.
+pub(crate) const CAPTIONED_CELL: usize = 60;
 
 /// A cell of at least this many words and characters that goes on in lower case in the cell
 /// below reads as a line of prose.

@@ -8,10 +8,11 @@
 
 use std::collections::HashMap;
 
+use super::banded::long_or_prose;
 use super::{
-    CELL_GAP, CellOut, PROSE_LINE, PROSE_WORDS, RUNS_OVER_COLUMNS, SHORT_CELL, TableOut, TitleCut,
-    numeric,
+    CAPTIONED_CELL, CELL_GAP, CellOut, RUNS_OVER_COLUMNS, RunRange, SHORT_CELL, TableOut, TitleCut,
 };
+use crate::extract::pairs::words;
 use crate::extract::text::signed_amount;
 use crate::file::CURRENCIES;
 use crate::line::LineRun;
@@ -77,16 +78,8 @@ pub fn pieces_of<R: LineRun>(runs: &[R], start: usize, end: usize) -> Vec<Piece>
 
 /// The text of runs `start..end`, white space collapsed.
 pub fn text_of<R: LineRun>(runs: &[R], start: usize, end: usize) -> String {
-    let mut s = String::new();
-    for r in &runs[start..end] {
-        for w in r.text().split_whitespace() {
-            if !s.is_empty() {
-                s.push(' ');
-            }
-            s.push_str(w);
-        }
-    }
-    s
+    let ids: Vec<usize> = (start..end).collect();
+    words(runs, &ids)
 }
 
 /// Columns: the x ranges the pieces of the lines with the most common number of pieces fill;
@@ -371,7 +364,6 @@ pub fn grid_cells<R: LineRun>(
             Some((r0, cell, before, byte))
         })
         .collect();
-    // Short cells, or mostly numbers.
     let texts: Vec<Vec<String>> = rows
         .iter()
         .map(|r| {
@@ -388,38 +380,17 @@ pub fn grid_cells<R: LineRun>(
                 .collect()
         })
         .collect();
-    let mut lens: Vec<usize> = texts
-        .iter()
-        .flatten()
-        .filter(|t| !t.is_empty())
-        .map(|t| t.chars().count())
-        .collect();
-    lens.sort_unstable();
     if texts.len() > 1 && texts.iter().all(|r| *r == texts[0]) {
         return Err("all its rows read the same");
     }
-    // The same test with other bounds stands in `banded::long_or_prose`; Task 17 makes the
-    // two one signal.
-    let numbers = texts.iter().flatten().filter(|t| numeric(t)).count();
-    let short = if table_caption { 60 } else { SHORT_CELL };
-    if lens.is_empty() || (lens[lens.len() / 2] >= short && 2 * numbers < lens.len()) {
-        return Err("its cells hold long text");
-    }
-    // Text that runs on from a cell into the cell below like prose is two columns of text.
-    for c in 0..cols {
-        for r in 1..texts.len() {
-            let (Some(above), Some(below)) = (texts[r - 1].get(c), texts[r].get(c)) else {
-                continue;
-            };
-            // A line of prose: a few words that end without a stop, and the next line goes on
-            // in lower case.
-            let words = above.split_whitespace().count();
-            let ends = above.ends_with(['.', ':', ';', '!', '?']);
-            let line = words >= PROSE_WORDS && above.chars().count() >= PROSE_LINE;
-            if line && !ends && below.chars().next().is_some_and(char::is_lowercase) {
-                return Err("its text runs on from row to row like prose");
-            }
-        }
+    // Short cells, or mostly numbers; longer next to a table caption.
+    let short = if table_caption {
+        CAPTIONED_CELL
+    } else {
+        SHORT_CELL
+    };
+    if let Some(why) = long_or_prose(&texts, short) {
+        return Err(why);
     }
     // Numbered entries with page numbers in the last column, going up, are a table of
     // contents.
@@ -468,6 +439,148 @@ pub fn grid_cells<R: LineRun>(
         icons: Vec::new(),
         cuts,
     })
+}
+
+/// Whether the lines of a region (their `pieces`) are a paragraph set full (justified): every
+/// line starts where the others do, and every line of two pieces or more ends where they end,
+/// within half a size; every line of three pieces or
+/// more has gaps that are even (the word spacing of a line set full is the same between all its
+/// words), and two lines or more are such lines; and their words are prose: a piece opens with
+/// a small letter, or the gaps differ from line to line by more than half a size (each line set
+/// full is spaced to fill the measure on its own). The rows of a table have gaps of the widths
+/// their cells leave, which are not even on a row, and a grid of cells of one width whose gaps
+/// are even (numbers flush right) has the same gaps on every row and no word in small letters.
+/// A line of two pieces shows nothing: one gap is always even, and a gap at the edge of a cell
+/// gap may join two words of a line set full into one piece.
+pub fn set_full<R: LineRun>(runs: &[R], pieces: &[Vec<Piece>], lines: &[RunRange]) -> bool {
+    let tol = 0.5
+        * lines
+            .iter()
+            .map(|l| l.size)
+            .fold(f32::MAX, f32::min)
+            .max(1.0);
+    let used: Vec<&Vec<Piece>> = pieces.iter().filter(|l| !l.is_empty()).collect();
+    let left = used
+        .iter()
+        .flat_map(|l| l.first())
+        .map(|p| p.x0)
+        .fold(f32::MAX, f32::min);
+    let right = used
+        .iter()
+        .flat_map(|l| l.last())
+        .map(|p| p.x1)
+        .fold(f32::MIN, f32::max);
+    // A line of one piece (one word, which no spacing can fill out, or a line whose spaces are
+    // too narrow to part it) starts at the left edge only.
+    let edges = used.iter().all(|l| {
+        l.first().is_some_and(|p| (p.x0 - left).abs() <= tol)
+            && (l.len() < 2 || l.last().is_some_and(|p| (p.x1 - right).abs() <= tol))
+    });
+    if !edges {
+        return false;
+    }
+    // The even gap of each line of three pieces or more.
+    let mut spacing: Vec<f32> = Vec::new();
+    for l in used.iter().filter(|l| l.len() >= 3) {
+        let gaps: Vec<f32> = l.windows(2).map(|w| w[1].x0 - w[0].x1).collect();
+        let (lo, hi) = gaps
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(lo, hi), &g| (lo.min(g), hi.max(g)));
+        if hi - lo > tol {
+            return false;
+        }
+        spacing.push(0.5 * (lo + hi));
+    }
+    if spacing.len() < 2 {
+        return false;
+    }
+    let (lo, hi) = spacing
+        .iter()
+        .fold((f32::MAX, f32::MIN), |(lo, hi), &g| (lo.min(g), hi.max(g)));
+    let small = used.iter().flat_map(|l| l.iter()).any(|p| {
+        text_of(runs, p.start, p.end)
+            .trim_start()
+            .chars()
+            .next()
+            .is_some_and(char::is_lowercase)
+    });
+    small || hi - lo > tol
+}
+
+/// Whether two lines alone (`lines`, their `pieces`) are a header of titles over one row of
+/// values: their pieces stand in the same three columns or more, piece for piece, the first
+/// of titles (one word each, no digit) over a row that holds a digit (`Pos Datum Betrag` over
+/// `1 15.01.2026 9,99`). Blocks side by side that open with a name of two words or more (a
+/// firm over its street beside a bank over its account) are no titles over values.
+pub fn titles_over_values<R: LineRun>(
+    runs: &[R],
+    lines: &[RunRange],
+    pieces: &[Vec<Piece>],
+) -> bool {
+    if lines.len() != 2 || pieces.len() != 2 {
+        return false;
+    }
+    let digit = |p: &Piece| {
+        runs[p.start..p.end]
+            .iter()
+            .any(|r| r.text().chars().any(|c| c.is_ascii_digit()))
+    };
+    let title =
+        |p: &Piece| !digit(p) && text_of(runs, p.start, p.end).split_whitespace().count() == 1;
+    // Each title stands in one column with the value under it: their starts or their ends
+    // meet (within half a size), as columns set flush left or flush right do. Words of two
+    // lines set full (justified) share the lines' outer edges, and a middle word stands about
+    // in the middle, but no word between them starts or ends where the one under it does:
+    // middles that meet are no evidence.
+    let tol = 0.5
+        * lines
+            .iter()
+            .map(|l| l.size)
+            .fold(f32::MAX, f32::min)
+            .max(1.0);
+    let meet = |p: &Piece, q: &Piece| (p.x0 - q.x0).abs() <= tol || (p.x1 - q.x1).abs() <= tol;
+    // Two lines whose words stand equal gaps apart and that share both outer edges are set
+    // full (justified): prose, whatever words of theirs meet by chance.
+    let even = |line: &[Piece]| {
+        let gaps: Vec<f32> = line.windows(2).map(|w| w[1].x0 - w[0].x1).collect();
+        let (lo, hi) = gaps
+            .iter()
+            .fold((f32::MAX, f32::MIN), |(l, h), &g| (l.min(g), h.max(g)));
+        hi - lo <= tol
+    };
+    // Two lines that share both outer edges, as lines set to one measure do.
+    let outer = |a: &[Piece], b: &[Piece]| {
+        a.first()
+            .zip(b.first())
+            .is_some_and(|(p, q)| (p.x0 - q.x0).abs() <= tol)
+            && a.last()
+                .zip(b.last())
+                .is_some_and(|(p, q)| (p.x1 - q.x1).abs() <= tol)
+    };
+    pieces[0].len() >= 3
+        && pieces[0].len() == pieces[1].len()
+        && pieces[0]
+            .iter()
+            .zip(&pieces[1])
+            .all(|(p, q)| p.x0 < q.x1 && q.x0 < p.x1 && meet(p, q))
+        && !(even(&pieces[0]) && even(&pieces[1]) && outer(&pieces[0], &pieces[1]))
+        && pieces[0].iter().all(title)
+        && pieces[1].iter().any(digit)
+        && !prose_row(
+            &text_of(runs, lines[1].start, lines[1].end),
+            even(&pieces[1]) && outer(&pieces[0], &pieces[1]),
+        )
+}
+
+/// Whether the second of two lines reads as the end of a sentence that goes on from the line
+/// over it: it opens with a small letter, or it ends with a full stop and is `set_full` to the
+/// measure of the line over it (its words even gaps apart, both its edges at that line's
+/// edges), as a line of prose set full is (`Die 3 Hinweise.`). A row of values does not open
+/// with a small letter, and its cells stand where their columns start or end: its last cell
+/// may end with the stop of an abbreviation (`12 Stk.`, `Muster Co. KG.`).
+pub fn prose_row(text: &str, set_full: bool) -> bool {
+    let t = text.trim();
+    t.starts_with(char::is_lowercase) || (t.ends_with('.') && set_full)
 }
 
 /// The shape of a value: what a column of values holds. A shape read wrong may only keep a

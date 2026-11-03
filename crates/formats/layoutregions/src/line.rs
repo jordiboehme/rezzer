@@ -227,6 +227,12 @@ pub fn text_line<R: LineRun>(runs: &[R]) -> TextLine<'_, R> {
     }
 }
 
+/// Whether `c` is one of the noncharacters U+FDD0 to U+FDEF: Rezzer's own placeholders (a
+/// reader puts them where it read a mark between two digits), dropped from the text of a file.
+pub fn is_placeholder(c: char) -> bool {
+    ('\u{FDD0}'..='\u{FDEF}').contains(&c)
+}
+
 /// Whether the text of a run may be printed over another: two letters or digits or more. A
 /// lone mark (an accent drawn as a run of its own over its letter) belongs to its word, as
 /// the reading order keeps it there.

@@ -25,6 +25,13 @@ use crate::layout::{Drawn, Flow, Run};
 /// The cells of tables, built in the engine (see `layoutregions::extract::table`).
 use layoutregions::extract::table::{self, MAX_SQUARES, TableOut, middle, numeric};
 
+/// What the area of a page says against a table, and the captions next to one (see
+/// `layoutregions::extract::table::{area, caption}`).
+use layoutregions::extract::table::area::{
+    Area, MANY_COLUMNS, MAX_COLUMNS, ON_PICTURE, PAGE_FRAME, TINY_TEXT, dense,
+};
+use layoutregions::extract::table::caption::{ByY, MAX_CAPTION_SIZE, caption, captions_near};
+
 pub(crate) use pairs::{BoxTitle, Frame, box_pairs, field_frames, form_drawn, underlined_titles};
 pub(crate) use tagged::{Tables, tagged};
 
@@ -281,9 +288,6 @@ pub(crate) enum Refused {
     Region,
 }
 
-/// Why a grid or band on a picture is not a table. It is a chart, so its refusal is no loss.
-const ON_PICTURE: &str = "it lies on a picture";
-
 /// Reasons said of several grids or bands: how many have each and why, as `2 (they cover
 /// most of the page), 1 (most of its cells are empty)`, in the order the reasons first come.
 pub(crate) fn counted<'a>(reasons: impl Iterator<Item = &'a str>) -> String {
@@ -307,15 +311,13 @@ pub(crate) fn counted<'a>(reasons: impl Iterator<Item = &'a str>) -> String {
 /// A reason a ruled grid or a header band is refused, said of several.
 pub(crate) fn plural(why: &str) -> &str {
     match why {
-        "it has more than 15 columns" => "they have more than 15 columns",
+        MANY_COLUMNS => "they have more than 15 columns",
         "most of its cells are empty" => "most of their cells are empty",
         "its boxes do not form rows and columns" => "their boxes do not form rows and columns",
         "its text crosses its lines" => "their text crosses their lines",
         "it covers most of the page" => "they cover most of the page",
         ON_PICTURE => "they lie on a picture",
-        "its text is much smaller than the body text, as in a picture of a page" => {
-            "their text is much smaller than the body text, as in pictures of pages"
-        }
+        TINY_TEXT => "their text is much smaller than the body text, as in pictures of pages",
         "too few rows follow its header" => "too few rows follow their headers",
         "the text below its header does not stand in its columns" => {
             "the text below their headers does not stand in their columns"
@@ -336,24 +338,16 @@ pub(crate) fn plural(why: &str) -> &str {
     }
 }
 
-/// Lines this close are one line, and line ends this close meet, in points; a grid or region
-/// that covers more of the page than [`PAGE_SHARE`] is the page's frame; past
+/// Lines this close are one line, and line ends this close meet, in points; past
 /// [`MAX_SEGMENTS`] straight segments the grid search gives up on a page and says so. The
-/// region engine finds the grids with these values (see `layoutregions::segment::drawn`).
-pub(crate) use layoutregions::segment::drawn::{MAX_SEGMENTS, PAGE_SHARE, SNAP};
+/// region engine finds the grids with these values (see `layoutregions::segment::drawn`); a
+/// grid or region over most of the page is its frame (see
+/// `layoutregions::extract::table::area`).
+pub(crate) use layoutregions::segment::drawn::{MAX_SEGMENTS, SNAP};
 
 /// A label or a title differs in size from the text beside it when the larger is at least
 /// this many times the smaller (see `layoutregions::line::LABEL_STEP`).
 pub(crate) use layoutregions::line::LABEL_STEP;
-
-/// A grid of drawn rules with more columns than this is a form or a chart, not a table.
-const MAX_COLUMNS: usize = 15;
-
-/// Lines of a caption paragraph above a table looked at for its start.
-const CAPTION_LINES: usize = 8;
-
-/// Text smaller than this share of the body text is a picture of a page, not a table.
-const SMALL_TEXT: f32 = 0.6;
 
 /// The segments of the page the detector without rules reads, each as the union of its runs:
 /// the page's root. A table often reaches past the lines drawn around part of it (a column
@@ -483,73 +477,6 @@ fn end_rules(rules: &[Rule]) -> Vec<HRule> {
     out
 }
 
-/// Why a grid or region is the page's frame.
-const PAGE_FRAME: &str = "it covers most of the page";
-
-/// The page a detector looks at: its size and what rules out a table.
-struct Area<'a> {
-    width: f32,
-    height: f32,
-    images: &'a [[f32; 4]],
-    /// The most common font size of the file's text.
-    body_size: f32,
-}
-
-impl Area<'_> {
-    /// Whether a picture lies under most of `b` (x0, y0, x1, y1): a grid or band there is a
-    /// chart's.
-    fn on_picture(&self, b: [f32; 4]) -> bool {
-        let size = (b[2] - b[0]).max(0.0) * (b[3] - b[1]).max(0.0);
-        self.images.iter().any(|i| overlap(*i, b) > 0.5 * size)
-    }
-
-    /// Why a table cannot stand in `b` (x0, y0, x1, y1) with text of `sizes`, if it cannot.
-    fn refuses(&self, b: [f32; 4], sizes: &[f32]) -> Option<&'static str> {
-        let size = (b[2] - b[0]).max(0.0) * (b[3] - b[1]).max(0.0);
-        if size > PAGE_SHARE * self.width * self.height {
-            return Some(PAGE_FRAME);
-        }
-        if self.on_picture(b) {
-            return Some(ON_PICTURE);
-        }
-        let mut sizes = sizes.to_vec();
-        sizes.sort_by(f32::total_cmp);
-        if let Some(m) = sizes.get(sizes.len() / 2)
-            && *m < SMALL_TEXT * self.body_size
-        {
-            return Some("its text is much smaller than the body text, as in a picture of a page");
-        }
-        None
-    }
-}
-
-/// The area two boxes share.
-fn overlap(a: [f32; 4], b: [f32; 4]) -> f32 {
-    let w = a[2].min(b[2]) - a[0].max(b[0]);
-    let h = a[3].min(b[3]) - a[1].max(b[1]);
-    if w > 0.0 && h > 0.0 { w * h } else { 0.0 }
-}
-
-/// The caption kind of a line: `Some(true)` for "Table 3", `Some(false)` for "Figure 3".
-fn caption(text: &str) -> Option<bool> {
-    let t = text.trim_start();
-    let (table, rest) = match t.strip_prefix("Table") {
-        Some(r) => (true, r),
-        None => (
-            false,
-            t.strip_prefix("Figure")
-                .or_else(|| t.strip_prefix("Fig."))?,
-        ),
-    };
-    let rest = rest.trim_start();
-    let first = rest.chars().next()?;
-    (first.is_ascii_digit()
-        || (first.is_ascii_uppercase()
-            && rest.len() > 1
-            && rest[1..].starts_with(['.', ':', ' ', '-'])))
-    .then_some(table)
-}
-
 /// One line of the flow: the range of its runs and its baseline and size (see
 /// [`table::RunRange`]).
 type FlowLine = table::RunRange;
@@ -557,126 +484,6 @@ type FlowLine = table::RunRange;
 /// The lines of the flow (see [`table::run_ranges`]).
 fn flow_lines(flow: &Flow) -> Vec<FlowLine> {
     table::run_ranges(&flow.runs)
-}
-
-/// The caption kinds next to a box: the line of a table caption (the first found), and
-/// whether a figure caption is near. A caption counts when its paragraph ends within three
-/// line heights above the box, or starts within three line heights below it, and overlaps
-/// it across.
-/// Lines `skip` names (the box's own) are not looked at. `sizes` are the font sizes of the
-/// box's text: their median sets how far from the box a caption may stand.
-fn captions_near(
-    flow: &Flow,
-    lines: &[FlowLine],
-    by_y: &ByY,
-    b: [f32; 4],
-    sizes: &[f32],
-    skip: &dyn Fn(usize) -> bool,
-) -> (Option<usize>, bool) {
-    let (mut table, mut figure) = (None, false);
-    let text = |l: &FlowLine| -> String {
-        flow.runs[l.start..l.end]
-            .iter()
-            .map(|r| r.text.as_str())
-            .collect()
-    };
-    let across = |l: &FlowLine| {
-        let runs = &flow.runs[l.start..l.end];
-        let x0 = runs.iter().map(|r| r.x).fold(f32::MAX, f32::min);
-        let x1 = runs.iter().map(|r| r.x + r.w).fold(f32::MIN, f32::max);
-        !runs.iter().any(|r| r.off_axis) && x1 >= b[0] && x0 <= b[2]
-    };
-    let mut note = |k: usize| match caption(&text(&lines[k])) {
-        Some(true) => {
-            table.get_or_insert(k);
-        }
-        Some(false) => figure = true,
-        None => {}
-    };
-    // Only lines in a band around the box can be near it: a caption is set about as large as
-    // the table's own text.
-    let mut sorted = sizes.to_vec();
-    sorted.sort_by(f32::total_cmp);
-    let size = sorted
-        .get(sorted.len() / 2)
-        .copied()
-        .unwrap_or(10.0)
-        .clamp(1.0, MAX_CAPTION_SIZE);
-    let band = 4.0 * size;
-    let lo = by_y.line_y.partition_point(|y| *y < b[1] - band);
-    let hi = by_y.line_y.partition_point(|y| *y <= b[3] + band);
-    for &k in &by_y.lines[lo..hi] {
-        let l = &lines[k];
-        if skip(l.start) || !across(l) {
-            continue;
-        }
-        let near = 3.0 * l.size.min(2.0 * size);
-        if l.y < b[1] && b[1] - (l.y + l.size) <= near {
-            note(k);
-        } else if l.y > b[3] && l.y - b[3] <= near {
-            // The last line of a paragraph above: its first lines may hold the caption.
-            note(k);
-            let mut at = k;
-            for _ in 0..CAPTION_LINES {
-                let Some(prev) = at.checked_sub(1).map(|p| &lines[p]) else {
-                    break;
-                };
-                let gap = prev.y - lines[at].y;
-                if gap <= 0.0 || gap > 1.6 * prev.size.max(lines[at].size) || !across(prev) {
-                    break;
-                }
-                note(at - 1);
-                at -= 1;
-            }
-        }
-    }
-    (table, figure)
-}
-
-/// The runs and lines of a page sorted by height, so a box finds what lies in it by search.
-struct ByY {
-    /// Run indices by the height of their middle, and those heights.
-    runs: Vec<usize>,
-    run_y: Vec<f32>,
-    /// Line indices by baseline, and the baselines.
-    lines: Vec<usize>,
-    line_y: Vec<f32>,
-}
-
-impl ByY {
-    fn new(flow: &Flow, lines: &[FlowLine]) -> ByY {
-        let mut runs: Vec<(f32, usize)> = flow
-            .runs
-            .iter()
-            .enumerate()
-            .map(|(i, r)| (middle(r).1, i))
-            .collect();
-        runs.sort_by(|a, b| a.0.total_cmp(&b.0));
-        let mut ls: Vec<(f32, usize)> = lines.iter().enumerate().map(|(k, l)| (l.y, k)).collect();
-        ls.sort_by(|a, b| a.0.total_cmp(&b.0));
-        ByY {
-            run_y: runs.iter().map(|r| r.0).collect(),
-            runs: runs.into_iter().map(|r| r.1).collect(),
-            line_y: ls.iter().map(|l| l.0).collect(),
-            lines: ls.into_iter().map(|l| l.1).collect(),
-        }
-    }
-
-    /// The number of runs whose middle lies between the heights `lo` and `hi`.
-    fn count_between(&self, lo: f32, hi: f32) -> usize {
-        let a = self.run_y.partition_point(|y| *y <= lo);
-        let z = self.run_y.partition_point(|y| *y < hi);
-        z.saturating_sub(a)
-    }
-
-    /// The runs whose middle lies between the heights `lo` and `hi`, in page order.
-    fn runs_between(&self, lo: f32, hi: f32) -> Vec<usize> {
-        let a = self.run_y.partition_point(|y| *y <= lo);
-        let z = self.run_y.partition_point(|y| *y < hi);
-        let mut out = self.runs[a..z].to_vec();
-        out.sort_unstable();
-        out
-    }
 }
 
 /// Where a run of the page goes: the table, row and cell of `planned`.
@@ -721,9 +528,6 @@ fn fill(planned: &mut [Planned], flow: &mut Flow, target: &[Target]) {
         None => Some(r),
     });
 }
-
-/// The largest text size a caption search assumes for a table, in points.
-const MAX_CAPTION_SIZE: f32 = 36.0;
 
 /// Tables without tags one page may have; past them the text stays paragraphs, with a loss.
 const MAX_TABLES: usize = 5_000;

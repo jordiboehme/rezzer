@@ -59,6 +59,35 @@ pub(crate) const VALUE_CHARS: usize = 80;
 /// A box's label is at most this many lines.
 pub const LABEL_LINES: usize = 2;
 
+/// Boxes of one row or column of fields touch within this share of the size of their
+/// smallest text: farther apart, they are boxes on their own. Relative to the text, so a form
+/// printed larger or smaller chains the same.
+pub const TOUCH: f32 = 0.5;
+
+/// How near a box with the runs `ids` of `runs` touches another: [`TOUCH`] times the size of
+/// its smallest text with ink, 0 without any.
+pub fn touch_reach<R: LineRun>(runs: &[R], ids: &[usize]) -> f32 {
+    let small = ids
+        .iter()
+        .filter(|&&i| inked(&runs[i]))
+        .map(|&i| runs[i].size())
+        .fold(f32::INFINITY, f32::min);
+    if small.is_finite() {
+        TOUCH * small
+    } else {
+        0.0
+    }
+}
+
+/// Whether two boxes `a` and `b` (x0, y0, x1, y1) touch within `t` in one row (tops at one
+/// height, a side of one on a side of the other) or one column (left edges at one place, the
+/// bottom of one on the top of the other).
+pub fn touching(a: [f32; 4], b: [f32; 4], t: f32) -> bool {
+    let row = (a[3] - b[3]).abs() <= t && ((a[2] - b[0]).abs() <= t || (b[2] - a[0]).abs() <= t);
+    let column = (a[0] - b[0]).abs() <= t && ((a[1] - b[3]).abs() <= t || (b[1] - a[3]).abs() <= t);
+    row || column
+}
+
 /// One field: the runs of its label and of its value (none: the field is empty).
 #[derive(Debug, Default)]
 pub struct Field {

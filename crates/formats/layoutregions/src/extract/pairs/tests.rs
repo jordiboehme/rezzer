@@ -629,3 +629,15 @@ fn two_address_lines_have_numbers_in_another_order() {
     assert!(!address_lines(&["Zimmer 2", "Raum 101"]));
     assert!(!address_lines(&["Name", "Erika Mustermann"]));
 }
+
+/// A numbered label is words with letters and no digit, then a short index: one rule for the
+/// address columns and for the label columns of a cell.
+#[test]
+fn numbered_labels_are_words_and_a_short_index() {
+    assert!(blocks::indexed("Kundennr. 1"));
+    assert!(blocks::indexed("Tarif A2"));
+    assert!(!blocks::indexed("Feld"));
+    assert!(!blocks::indexed("Konto 12345"));
+    // A head word without a letter is no word of a label.
+    assert!(!blocks::indexed("Str. / 1"));
+}

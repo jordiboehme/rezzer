@@ -92,7 +92,7 @@ pub(crate) fn underlined_titles(
         _ => vec![false; hs.len()],
     };
     let lines = flow_lines(flow);
-    let by_y = ByY::new(flow, &lines);
+    let by_y = ByY::new(&flow.runs, &lines);
     let mut used = vec![false; flow.runs.len()];
     let mut found: Vec<TitleFound> = Vec::new();
     let mut halted: Option<&'static str> = None;

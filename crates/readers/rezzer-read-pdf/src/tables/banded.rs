@@ -6,7 +6,7 @@
 //! and below it lines of text without rules that stand in the band's columns.
 
 use layoutregions::extract::table::banded::{
-    BAND_EDGE, BODY_GAP, BandCells, BodyLine, band_cells, band_titles, body_pieces,
+    BAND_HEIGHT, BandCells, BodyBelow, band_cells, band_head_refused, band_titles, body_below,
 };
 use layoutregions::segment::drawn::Line;
 
@@ -20,9 +20,6 @@ pub(super) struct Band {
     pub b: [f32; 4],
     pub cut: bool,
 }
-
-/// A header band is at most this many times its largest title text high.
-const BAND_HEIGHT: f32 = 4.0;
 
 /// Lines a page's bands may look at together; past them the rest are not looked at.
 const BAND_WORK: usize = 4_000_000;
@@ -127,21 +124,11 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
     let titles = band_titles(&flow.runs, &head, xs);
     // Column titles are words: a row of numbers in boxes is a scale or a counter. A band is
     // a line or two high: a taller row of boxes holds blocks of text.
-    let size = head
-        .iter()
-        .map(|&i| flow.runs[i].size)
-        .fold(0.0f32, f32::max);
-    let tall = b[3] - b[1] > BAND_HEIGHT * size;
-    if titles.values().filter(|t| !numeric(t)).count() < 3 || tall {
+    if let Some(why) = band_head_refused(&flow.runs, &head, &titles, b) {
         // A section of a cut grid with text is not let go without a word.
         if band.cut
             && let Some(at) = head.iter().map(|&i| flow.at[i]).min()
         {
-            let why = if tall {
-                "it is too tall for a header over lines"
-            } else {
-                "its cells hold too few column titles"
-            };
             take.quiet.push((at, why, Refused::Band));
             for &i in &head {
                 take.quietly[i] = true;
@@ -153,7 +140,14 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
     }
     // The body: lines below the band, from the top.
     let free_now = |i: usize| free(i, take);
-    let Some((body, misfit)) = body_below(sh, b, xs, floor, &free_now, work) else {
+    let below = BodyBelow {
+        lines: sh.lines,
+        by_y: sh.by_y,
+        hs: sh.hs,
+        floor,
+        bound: BAND_WORK,
+    };
+    let Some((body, misfit)) = body_below(&flow.runs, &below, b, xs, &free_now, work) else {
         // The budget ran out in this body: no table and no refusal, the note says why.
         return;
     };
@@ -235,71 +229,6 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
     });
 }
 
-/// The lines below the band `b` with cell edges `xs` that are its body, from the top: lines
-/// of runs `free` takes, above `floor`, each less than [`BODY_GAP`] line heights below the
-/// one before, with no rule as wide as the band between them, each piece of each standing in
-/// one column. Also whether a line that does not stand in the columns ended it. `None` once
-/// `work` passes [`BAND_WORK`].
-fn body_below(
-    sh: &Shared<'_>,
-    b: [f32; 4],
-    xs: &[f32],
-    floor: f32,
-    free: &dyn Fn(usize) -> bool,
-    work: &mut usize,
-) -> Option<(Vec<BodyLine>, bool)> {
-    let flow = sh.flow;
-    let lo = sh.by_y.line_y.partition_point(|y| *y < b[1]);
-    let mut body: Vec<BodyLine> = Vec::new();
-    let mut last_y = b[1];
-    let mut misfit = false;
-    for &k in sh.by_y.lines[..lo].iter().rev() {
-        *work += 1;
-        let l = &sh.lines[k];
-        if l.y <= floor {
-            break;
-        }
-        if *work > BAND_WORK {
-            return None;
-        }
-        let runs: Vec<usize> = (l.start..l.end)
-            .filter(|&i| {
-                let r = &flow.runs[i];
-                let (cx, _) = middle(r);
-                cx > b[0] - SNAP && cx < b[2] + SNAP && free(i) && !r.text.trim().is_empty()
-            })
-            .collect();
-        *work += l.end - l.start;
-        if runs.is_empty() {
-            continue;
-        }
-        if last_y - l.y > BODY_GAP * l.size.max(1.0) {
-            break;
-        }
-        // A rule as wide as the band between this line and the one above ends the table.
-        let top = l.y + l.size;
-        let from = sh.hs.partition_point(|s| s.at < top);
-        let to = sh.hs.partition_point(|s| s.at < last_y);
-        let tol = SNAP.max(BAND_EDGE * (b[2] - b[0]));
-        *work += to.saturating_sub(from);
-        if sh.hs[from..to.max(from)]
-            .iter()
-            .any(|s| s.from <= b[0] + tol && s.to >= b[2] - tol)
-        {
-            break;
-        }
-        // Pieces, each in one column of the band (see `body_pieces`): a line that does not
-        // fit ends the body.
-        let Some(placed) = body_pieces(&flow.runs, &runs, xs) else {
-            misfit = true;
-            break;
-        };
-        body.push((l.y, l.size, placed));
-        last_y = l.y;
-    }
-    (*work <= BAND_WORK).then_some((body, misfit))
-}
-
 /// The lines of a page and their index by height, built once for all rows of boxes that
 /// [`heads_lines`] looks at.
 pub(super) struct Heads {
@@ -310,7 +239,7 @@ pub(super) struct Heads {
 impl Heads {
     pub(super) fn new(flow: &Flow) -> Heads {
         let lines = flow_lines(flow);
-        let by_y = ByY::new(flow, &lines);
+        let by_y = ByY::new(&flow.runs, &lines);
         Heads { lines, by_y }
     }
 }
@@ -327,21 +256,13 @@ pub(super) fn heads_lines(
     xs: &[f32],
     work: &mut usize,
 ) -> Option<bool> {
-    let area = Area {
-        width: 0.0,
-        height: 0.0,
-        images: &[],
-        body_size: 0.0,
-    };
-    let sh = Shared {
-        page: 0,
-        flow,
+    let below = BodyBelow {
         lines: &heads.lines,
         by_y: &heads.by_y,
-        area: &area,
         hs,
-        stop: &|| false,
+        floor: f32::MIN,
+        bound: BAND_WORK,
     };
     let free = |i: usize| !flow.runs[i].off_axis;
-    body_below(&sh, b, xs, f32::MIN, &free, work).map(|(body, _)| !body.is_empty())
+    body_below(&flow.runs, &below, b, xs, &free, work).map(|(body, _)| !body.is_empty())
 }

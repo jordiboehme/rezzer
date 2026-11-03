@@ -7,17 +7,118 @@
 
 use std::collections::BTreeMap;
 
+use super::caption::ByY;
 use super::{
-    CELL_GAP, CellOut, MAX_SQUARES, PROSE_LINE, PROSE_WORDS, SHORT_CELL, TableOut, middle, numeric,
+    CELL_GAP, CellOut, MAX_SQUARES, PROSE_LINE, PROSE_WORDS, RunRange, SHORT_CELL, TableOut,
+    middle, numeric,
 };
 use crate::line::LineRun;
-use crate::segment::drawn::SNAP;
+use crate::segment::drawn::{Line, SNAP};
 
 /// The lines of a band's body follow each other at most this many line heights apart.
 pub const BODY_GAP: f32 = 3.0;
 
 /// A rule as wide as a band, within this share of its width, ends the band's body.
 pub const BAND_EDGE: f32 = 0.05;
+
+/// A header band is at most this many times its largest title text high.
+pub const BAND_HEIGHT: f32 = 4.0;
+
+/// Why a row of drawn cells `b` (x0, y0, x1, y1) with the runs `head` of `runs` and the
+/// `titles` of its cells (see [`band_titles`]) is no header band, if it is not: column titles
+/// are words, so fewer than three cells of words is a scale or a counter; and a band is a line
+/// or two high, so one taller than [`BAND_HEIGHT`] times its largest text holds blocks of text.
+pub fn band_head_refused<R: LineRun>(
+    runs: &[R],
+    head: &[usize],
+    titles: &BTreeMap<usize, String>,
+    b: [f32; 4],
+) -> Option<&'static str> {
+    let size = head.iter().map(|&i| runs[i].size()).fold(0.0f32, f32::max);
+    let tall = b[3] - b[1] > BAND_HEIGHT * size;
+    if tall {
+        Some("it is too tall for a header over lines")
+    } else if titles.values().filter(|t| !numeric(t)).count() < 3 {
+        Some("its cells hold too few column titles")
+    } else {
+        None
+    }
+}
+
+/// Where the body of a header band is looked for: the page's lines and their index by height,
+/// its horizontal rules sorted by height, the height no body line may reach (`floor`), and the
+/// work the search may take (`bound`).
+pub struct BodyBelow<'a> {
+    pub lines: &'a [RunRange],
+    pub by_y: &'a ByY,
+    pub hs: &'a [Line],
+    pub floor: f32,
+    pub bound: usize,
+}
+
+/// The lines below the band `b` with cell edges `xs` that are its body, from the top: lines
+/// of runs `free` takes, above the floor, each less than [`BODY_GAP`] line heights below the
+/// one before, with no rule as wide as the band between them, each piece of each standing in
+/// one column. Also whether a line that does not stand in the columns ended it. `None` once
+/// `work` passes the bound.
+pub fn body_below<R: LineRun>(
+    runs: &[R],
+    at: &BodyBelow<'_>,
+    b: [f32; 4],
+    xs: &[f32],
+    free: &dyn Fn(usize) -> bool,
+    work: &mut usize,
+) -> Option<(Vec<BodyLine>, bool)> {
+    let lo = at.by_y.line_y.partition_point(|y| *y < b[1]);
+    let mut body: Vec<BodyLine> = Vec::new();
+    let mut last_y = b[1];
+    let mut misfit = false;
+    for &k in at.by_y.lines[..lo].iter().rev() {
+        *work += 1;
+        let l = &at.lines[k];
+        if l.y <= at.floor {
+            break;
+        }
+        if *work > at.bound {
+            return None;
+        }
+        let ids: Vec<usize> = (l.start..l.end)
+            .filter(|&i| {
+                let r = &runs[i];
+                let (cx, _) = middle(r);
+                cx > b[0] - SNAP && cx < b[2] + SNAP && free(i) && !r.text().trim().is_empty()
+            })
+            .collect();
+        *work += l.end - l.start;
+        if ids.is_empty() {
+            continue;
+        }
+        if last_y - l.y > BODY_GAP * l.size.max(1.0) {
+            break;
+        }
+        // A rule as wide as the band between this line and the one above ends the table.
+        let top = l.y + l.size;
+        let from = at.hs.partition_point(|s| s.at < top);
+        let to = at.hs.partition_point(|s| s.at < last_y);
+        let tol = SNAP.max(BAND_EDGE * (b[2] - b[0]));
+        *work += to.saturating_sub(from);
+        if at.hs[from..to.max(from)]
+            .iter()
+            .any(|s| s.from <= b[0] + tol && s.to >= b[2] - tol)
+        {
+            break;
+        }
+        // Pieces, each in one column of the band (see `body_pieces`): a line that does not
+        // fit ends the body.
+        let Some(placed) = body_pieces(runs, &ids, xs) else {
+            misfit = true;
+            break;
+        };
+        body.push((l.y, l.size, placed));
+        last_y = l.y;
+    }
+    (*work <= at.bound).then_some((body, misfit))
+}
 
 /// A line of a band's body: its baseline and size, and its pieces, each a column and its
 /// runs.
@@ -170,7 +271,7 @@ pub fn band_cells<R: LineRun>(
             }
         }
     }
-    if let Some(why) = long_or_prose(&texts) {
+    if let Some(why) = long_or_prose(&texts, SHORT_CELL) {
         return BandCells::Refused(why);
     }
     let cell = || CellOut {
@@ -248,10 +349,13 @@ pub(crate) fn row_starts(lines: &[Vec<(usize, bool)>], used: usize) -> Vec<bool>
     out
 }
 
-/// Why the cells of a table without rules are not a table's: their text is long, or runs on
-/// from a cell into the cell below like prose. (The same test with other bounds stands in
-/// [`super::grid::grid_cells`]; Task 17 makes the two one signal.)
-pub(crate) fn long_or_prose(texts: &[Vec<String>]) -> Option<&'static str> {
+/// Why the cells `texts` (rows of cells) of a table without rules are not a table's: their
+/// text is long (the median cell has `short` characters or more, and fewer than half of the
+/// cells are numbers), or runs on from a cell into the cell below like prose (a cell of a few
+/// words that ends without a stop over a cell that goes on in a small letter). One rule for
+/// the cells under a header band and for lines without rules (see [`super::grid::grid_cells`]),
+/// and the evidence the typers read as prose.
+pub fn long_or_prose(texts: &[Vec<String>], short: usize) -> Option<&'static str> {
     let mut lens: Vec<usize> = texts
         .iter()
         .flatten()
@@ -260,7 +364,7 @@ pub(crate) fn long_or_prose(texts: &[Vec<String>]) -> Option<&'static str> {
         .collect();
     lens.sort_unstable();
     let numbers = texts.iter().flatten().filter(|t| numeric(t)).count();
-    if lens.is_empty() || (lens[lens.len() / 2] >= SHORT_CELL && 2 * numbers < lens.len()) {
+    if lens.is_empty() || (lens[lens.len() / 2] >= short && 2 * numbers < lens.len()) {
         return Some("its cells hold long text");
     }
     for r in 1..texts.len() {
