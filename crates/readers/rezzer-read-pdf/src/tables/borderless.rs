@@ -462,6 +462,8 @@ pub(super) fn borderless(
                     continues: false,
                     caption: Vec::new(),
                     found_by: None,
+                    kind: layoutregions::Kind::Table,
+                    ids: Vec::new(),
                 });
                 continue;
             }
@@ -565,6 +567,8 @@ pub(super) fn borderless(
                         continues: false,
                         caption: Vec::new(),
                         found_by: None,
+                        kind: layoutregions::Kind::Table,
+                        ids: Vec::new(),
                     };
                     let t = u32::try_from(claim.len()).unwrap_or(u32::MAX);
                     for (r, cells) in grid.rows.iter().enumerate() {
@@ -707,9 +711,11 @@ pub(super) fn borderless(
     for (start, order) in apart {
         let runs: Vec<Run> = order.iter().map(|&i| flow.runs[i].clone()).collect();
         let slots: Vec<Slot> = order.iter().map(|&i| flow.slots[i]).collect();
-        for (k, (r, sl)) in runs.into_iter().zip(slots).enumerate() {
+        let ids: Vec<u32> = order.iter().map(|&i| flow.ids[i]).collect();
+        for (k, ((r, sl), id)) in runs.into_iter().zip(slots).zip(ids).enumerate() {
             flow.runs[start + k] = r;
             flow.slots[start + k] = sl;
+            flow.ids[start + k] = id;
         }
     }
     if claim.is_empty() {
@@ -2183,11 +2189,7 @@ mod tests {
     /// A flow of `runs` on one line.
     fn flow_of(runs: Vec<Run>) -> Flow {
         let n = runs.len();
-        Flow {
-            runs,
-            slots: vec![Slot::Free; n],
-            at: (0..n).collect(),
-        }
+        Flow::new(runs, vec![Slot::Free; n])
     }
 
     #[test]
@@ -2342,11 +2344,7 @@ mod tests {
             runs.push(run(d, 450.0, y - 4.0, line));
         }
         let n = runs.len();
-        let mut flow = Flow {
-            runs,
-            slots: vec![Slot::Free; n],
-            at: (0..n).collect(),
-        };
+        let mut flow = Flow::new(runs, vec![Slot::Free; n]);
         let area = Area {
             width: 595.0,
             height: 842.0,

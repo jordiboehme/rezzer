@@ -691,6 +691,12 @@ fn read_grid(sh: &Sheet<'_>, take: &mut Taking, found: &mut Found, s: GridSectio
         continues: false,
         caption: Vec::new(),
         found_by: s.side.then_some(SIDE_FOUND_BY),
+        kind: if s.side {
+            layoutregions::Kind::LabelValue
+        } else {
+            layoutregions::Kind::Table
+        },
+        ids: Vec::new(),
     });
     Next::Section
 }
@@ -1252,6 +1258,7 @@ fn read_apart(flow: &mut Flow, take: &mut Taking, found: &mut Found) {
         }
         permute(&mut flow.runs, lo, &order);
         permute(&mut flow.slots, lo, &order);
+        permute(&mut flow.ids, lo, &order);
         // Each cell is a block of its own: its lines go on no line of the next cell.
         let mut k = lo;
         for cell in &cells {
@@ -2091,13 +2098,18 @@ fn apply_cuts(flow: &mut Flow, cuts: Vec<(usize, Vec<usize>)>) {
         runs: Vec::with_capacity(n),
         slots: Vec::with_capacity(n),
         at: Vec::with_capacity(n),
+        ids: Vec::with_capacity(n),
     };
     let mut next = cuts.into_iter().peekable();
-    for (i, ((run, slot), place)) in all.runs.into_iter().zip(all.slots).zip(all.at).enumerate() {
+    let places = all.at.into_iter().zip(all.ids);
+    for (i, ((run, slot), (place, id))) in
+        all.runs.into_iter().zip(all.slots).zip(places).enumerate()
+    {
         let Some((_, at)) = next.next_if(|c| c.0 == i) else {
             out.runs.push(run);
             out.slots.push(slot);
             out.at.push(place);
+            out.ids.push(id);
             continue;
         };
         // From the right, so the gaps to the left keep their numbers.
@@ -2115,6 +2127,7 @@ fn apply_cuts(flow: &mut Flow, cuts: Vec<(usize, Vec<usize>)>) {
             out.runs.push(part);
             out.slots.push(slot);
             out.at.push(place);
+            out.ids.push(id);
         }
     }
     *flow = out;
@@ -2463,11 +2476,7 @@ mod tests {
 
     fn flow_of(runs: Vec<Run>) -> Flow {
         let n = runs.len();
-        Flow {
-            runs,
-            slots: vec![crate::layout::Slot::Free; n],
-            at: (0..n).collect(),
-        }
+        Flow::new(runs, vec![crate::layout::Slot::Free; n])
     }
 
     #[test]

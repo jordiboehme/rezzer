@@ -16,9 +16,9 @@ use crate::text::PageItems;
 
 /// The primitives of one page. `runs` are the runs of the page's flow in order (after the
 /// runs a tag tree's ActualText drops): `TextRun` *i* is `runs[i]`, so `PrimId::Text(i)` is the
-/// run's place in the flow (`Flow::at`) and stays its id while detectors take runs out. `size`
-/// is the frame the runs are in, turned if the page was turned.
-#[allow(dead_code)] // The region engine reads it from Task 4 on.
+/// run's id in the flow (`Flow::ids`), which moves with it while detectors take runs out or
+/// read them in another order. `size` is the frame the runs are in, turned if the page was
+/// turned.
 pub(crate) fn page_in(
     items: &PageItems,
     runs: &[Run],
@@ -86,7 +86,6 @@ pub(crate) fn page_in(
 }
 
 /// The index of a text run in the page's flow, `None` for any other primitive.
-#[allow(dead_code)] // The region engine reads it from Task 4 on.
 pub(crate) fn run_of(id: PrimId) -> Option<usize> {
     match id {
         PrimId::Text(i) => Some(i as usize),
@@ -257,8 +256,10 @@ mod tests {
         let items = PageItems {
             turn: Turn::Up,
             turned: true,
+            // In the page's own frame, 200 wide and 800 high: above the height of the turned
+            // frame, so only the turn puts it inside.
             codes: vec![crate::codes::VectorCode {
-                b: [10.0, 20.0, 50.0, 60.0],
+                b: [10.0, 500.0, 50.0, 560.0],
                 module: 2.0,
                 id: 1,
                 finders: 0,

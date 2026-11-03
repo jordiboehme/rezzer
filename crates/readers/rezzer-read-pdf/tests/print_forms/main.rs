@@ -106,6 +106,12 @@ fn assert_no_loss_but_the_head_date(out: &ReadOutcome) {
     assert_eq!(what, [ONE_DATE], "{:?}", out.document.losses);
 }
 
+/// Every text run of the synthetic print-run form is in exactly one region of its page.
+#[test]
+fn every_run_is_in_one_region() {
+    common::assert_every_run_in_one_region(&common::synthetic_print_form());
+}
+
 /// The golden file of the synthetic print-run form: its Markdown and its JSON are kept as
 /// snapshots, so a later change of the reader shows in them. The facts next to them hold
 /// whatever the snapshots say; [`read`] also checks that no placeholder reaches either.

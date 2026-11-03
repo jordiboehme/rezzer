@@ -237,16 +237,23 @@ pub(crate) fn underlined_titles(
             top: *top,
             runs: Vec::new(),
             text: Vec::new(),
+            ids: Vec::new(),
         });
     }
     let picked: Vec<usize> = (0..flow.runs.len())
         .filter(|&i| owner[i].is_some())
         .collect();
     let taken_runs = flow.take(|i, _| owner[i].is_some());
-    for ((run, _, _), i) in taken_runs.into_iter().zip(picked) {
+    for (taken, i) in taken_runs.into_iter().zip(picked) {
         match owner[i] {
-            Some((k, false)) => out[k].runs.push(run),
-            Some((k, true)) => out[k].text.push(run),
+            Some((k, false)) => {
+                out[k].runs.push(taken.run);
+                out[k].ids.push(taken.id);
+            }
+            Some((k, true)) => {
+                out[k].text.push(taken.run);
+                out[k].ids.push(taken.id);
+            }
             None => {}
         }
     }

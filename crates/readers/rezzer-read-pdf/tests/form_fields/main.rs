@@ -225,6 +225,28 @@ fn a_number_is_not_cut_into_a_field_with_a_value() {
     assert!(kept.iter().any(|w| w.contains("123456")), "{kept:?}");
 }
 
+/// The data run `123456 78901` (run 6 of the page) crosses the dividers of its strip: the ruled
+/// pass cuts it at them, the strip takes the piece in `Gr D` into its table and the number
+/// before stays text. The pieces share the run's id, which is the table's region (the first
+/// claim, the detector that cut it); nothing is refused, every run is in one region, and the
+/// number still reads.
+#[test]
+fn a_cut_run_belongs_to_the_table_that_cut_it() {
+    let b = mark_row("123456", Some((50, "7")), true);
+    let bytes = common::print_form(std::slice::from_ref(&b.page), "", "");
+    common::assert_every_run_in_one_region(&bytes);
+    let (out, pages) = common::read_regions(&bytes);
+    assert!(all_text(&out).contains("123456"), "{}", all_text(&out));
+    let shared = rezzer_read_pdf::layoutregions::PrimId::Text(6);
+    let holders: Vec<&str> = pages[0]
+        .regions
+        .iter()
+        .filter(|r| r.prims.contains(&shared))
+        .map(|r| r.signals[0].id)
+        .collect();
+    assert_eq!(holders, ["pdf.untagged"]);
+}
+
 /// A number in boxes drawn around each digit, standing on the rule under its row: the sides
 /// of the boxes reach the row's lower rule like dividers rising from it, but more than one of
 /// them stands in the number, so it is never cut at one; it stays whole with its loss.

@@ -74,6 +74,14 @@ pub(crate) struct Planned {
     /// The rule that found the table, when it is one the output states: a `found-by` note
     /// with this text stands before the first table of the page it found.
     pub found_by: Option<&'static str>,
+    /// What the table is as a region: `LabelValue` for a table of labels and values the
+    /// field reader made (drawn boxes, rows of fields, the totals of a column beside a
+    /// section), else `Table`.
+    pub kind: layoutregions::Kind,
+    /// The ids of the runs the detector took for it (see [`Flow::ids`]), its caption and
+    /// additions too, in the order taken; a run cut in parts
+    /// is listed once per part.
+    pub ids: Vec<u32>,
 }
 
 impl Planned {
@@ -81,8 +89,7 @@ impl Planned {
     /// boxes, rows of fields or the totals of a column beside a section. Its rows are label
     /// and value, also where column titles stand over one row of items.
     pub(crate) fn is_pairs(&self) -> bool {
-        self.found_by
-            .is_some_and(|n| pairs::is_pairs_note(n) || n == side::SIDE_FOUND_BY)
+        self.kind == layoutregions::Kind::LabelValue
     }
 }
 
@@ -571,6 +578,11 @@ fn fill(planned: &mut [Planned], flow: &mut Flow, target: &[Target]) {
             .runs
             .reserve_exact(n);
     }
+    for (t, id) in target.iter().zip(&flow.ids) {
+        if let Some((t, _, _)) = t {
+            planned[*t as usize].ids.push(*id);
+        }
+    }
     let stay = target.iter().filter(|t| t.is_none()).count()
         + flow.runs.len().saturating_sub(target.len());
     flow.take_each(stay, |i, r| match target.get(i).copied().flatten() {
@@ -642,4 +654,34 @@ fn numeric(text: &str) -> bool {
         .filter(|c| matches!(c, '.' | ',' | '%' | '-' | '+' | '$' | '(' | ')' | '/'))
         .count();
     digits > 0 && 2 * (digits + signs) >= chars.len()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn planned(kind: layoutregions::Kind, found_by: Option<&'static str>) -> Planned {
+        Planned {
+            at: 0,
+            top: 0.0,
+            rows: Vec::new(),
+            trs: Vec::new(),
+            additions: Vec::new(),
+            header_rows: 0,
+            tagged: None,
+            continues: false,
+            caption: Vec::new(),
+            found_by,
+            kind,
+            ids: Vec::new(),
+        }
+    }
+
+    /// Whether a table is one of labels and values is its kind, not the text of its note.
+    #[test]
+    fn is_pairs_comes_from_the_kind() {
+        assert!(planned(layoutregions::Kind::LabelValue, None).is_pairs());
+        assert!(!planned(layoutregions::Kind::Table, None).is_pairs());
+        assert!(!planned(layoutregions::Kind::Table, Some(side::SIDE_FOUND_BY)).is_pairs());
+    }
 }

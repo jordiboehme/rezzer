@@ -51,6 +51,29 @@ pub(crate) fn boxed_fields(values: [&str; 3], third: Option<String>) -> FormPage
     }
 }
 
+/// A page of boxed fields has one region of labels and values, found by the box pairs.
+#[test]
+fn box_pairs_are_label_value_regions() {
+    let (_, pages) = common::read_regions(&print_form(
+        &[boxed_fields(["00000", "01.01.2020", ""], None)],
+        "",
+        "",
+    ));
+    let pairs: Vec<&layoutregions::Region> = pages
+        .iter()
+        .flat_map(|p| &p.regions)
+        .filter(|r| r.kind == layoutregions::Kind::LabelValue)
+        .collect();
+    assert_eq!(pairs.len(), 1, "{pages:#?}");
+    let signals: Vec<(&str, &str)> = pairs[0]
+        .signals
+        .iter()
+        .map(|s| (s.id, s.detail.as_str()))
+        .collect();
+    assert_eq!(signals, [("pdf.box_pairs", BOX_NOTE)]);
+    assert_eq!(pairs[0].prims.len(), 5, "{:?}", pairs[0].prims);
+}
+
 /// Three boxed fields in a row are one table of label and value pairs, the field without a
 /// value marked empty, after one note.
 #[test]

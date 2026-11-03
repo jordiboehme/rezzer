@@ -74,34 +74,65 @@ impl Reader for PdfReader {
     }
 
     fn read(&self, src: &Source, opts: &ReadOptions, budget: &Budget) -> ReadOutcome {
-        // The text is read for three quarters of the time limit at most: the pages read must
-        // still be laid out, or their text would be lost with the rest.
-        // A stop there is a time stop of the read, as one at the limit itself is.
-        let text_time = budget.limits().max_time * 3 / 4;
-        read_pdf(self, src, opts, budget, &|| {
-            if budget.check_time().is_err() {
-                return true;
-            }
-            let near = budget.elapsed() > text_time;
-            if near {
-                budget.note_time_stop();
-            }
-            near
-        })
+        read_timed(src, opts, budget, None)
     }
 }
 
-/// Reads a file; `text_stop` is asked before each page and while a page is read.
+/// The region engine the regions of [`read_with_regions`] come from, for its callers.
+#[doc(hidden)]
+pub use layoutregions;
+
+/// [`PdfReader::read`] with the regions the layout found on each page laid out, in page
+/// order. For the region report and the tests; not a stable interface.
+#[doc(hidden)]
+pub fn read_with_regions(
+    src: &Source,
+    opts: &ReadOptions,
+    budget: &Budget,
+) -> (ReadOutcome, Vec<layoutregions::PageRegions>) {
+    let mut regions = Vec::new();
+    let out = read_timed(src, opts, budget, Some(&mut regions));
+    (out, regions)
+}
+
+/// The read of [`PdfReader::read`]; the regions of each page laid out go to `regions`, if
+/// given.
+fn read_timed(
+    src: &Source,
+    opts: &ReadOptions,
+    budget: &Budget,
+    regions: Option<&mut Vec<layoutregions::PageRegions>>,
+) -> ReadOutcome {
+    // The text is read for three quarters of the time limit at most: the pages read must
+    // still be laid out, or their text would be lost with the rest.
+    // A stop there is a time stop of the read, as one at the limit itself is.
+    let text_time = budget.limits().max_time * 3 / 4;
+    let text_stop = || {
+        if budget.check_time().is_err() {
+            return true;
+        }
+        let near = budget.elapsed() > text_time;
+        if near {
+            budget.note_time_stop();
+        }
+        near
+    };
+    read_pdf(&PdfReader, src, opts, budget, &text_stop, regions)
+}
+
+/// Reads a file; `text_stop` is asked before each page and while a page is read. The regions
+/// of each page laid out go to `regions`, if given.
 fn read_pdf(
     reader: &PdfReader,
     src: &Source,
     opts: &ReadOptions,
     budget: &Budget,
     text_stop: &dyn Fn() -> bool,
+    regions: Option<&mut Vec<layoutregions::PageRegions>>,
 ) -> ReadOutcome {
     // Rendered pages and extracted attachments share one room.
     let blob_room = budget.limits().max_memory_bytes / 8;
-    read_pdf_in(reader, src, opts, budget, text_stop, blob_room)
+    read_pdf_in(reader, src, opts, budget, text_stop, blob_room, regions)
 }
 
 /// [`read_pdf`] with `blob_room` bytes for rendered pages and extracted attachments.
@@ -112,6 +143,7 @@ fn read_pdf_in(
     budget: &Budget,
     text_stop: &dyn Fn() -> bool,
     blob_room: u64,
+    regions: Option<&mut Vec<layoutregions::PageRegions>>,
 ) -> ReadOutcome {
     let mut info = source_info(src);
     info.reader = Some(ReaderInfo {
@@ -124,7 +156,7 @@ fn read_pdf_in(
         Ok(opened) => opened,
         Err(open::Refused::Done(outcome)) => return *outcome,
         Err(open::Refused::Unreadable(e, out)) => {
-            return fallback::read_file(src, opts, budget, &e, *out, text_stop);
+            return fallback::read_file(src, opts, budget, &e, *out, text_stop, regions);
         }
     };
     let stop = || budget.check_time().is_err();
@@ -139,8 +171,15 @@ fn read_pdf_in(
     let read = Read { src, opts, budget };
     let extracted = extract(&pdf, &pages, &links, &marked, &read, &mut out, text_stop);
     drop(marked);
-    let (room, placed, needs, places) =
-        lay_out(Some(&pdf), &pages, extracted, &annots, budget, &mut out);
+    let (room, placed, needs, places) = lay_out(
+        Some(&pdf),
+        &pages,
+        extracted,
+        &annots,
+        budget,
+        &mut out,
+        regions,
+    );
     let scans = render::render_pages(&pdf, &needs, opts, budget, &mut out);
     render::apply_codes(Some(scans), places, &mut out);
     drop(needs);
@@ -411,7 +450,8 @@ fn frame_height(page: &PageInfo, items: Option<&PageItems>) -> Option<f32> {
 /// One page section per page, with the laid out text. Pages already read are laid out even
 /// when a stop cut the reading: layout is bounded by the element and text budgets. Returns
 /// what is left of the bytes the file may keep, for the object layer, and where each of
-/// `annots` stands with what it quotes.
+/// `annots` stands with what it quotes. The regions of each page laid out go to `regions`,
+/// if given.
 fn lay_out(
     pdf: Option<&Pdf>,
     pages: &[PageInfo],
@@ -419,6 +459,7 @@ fn lay_out(
     annots: &[Annot],
     budget: &Budget,
     out: &mut Out,
+    mut regions: Option<&mut Vec<layoutregions::PageRegions>>,
 ) -> LaidOut {
     let Extracted {
         pages: mut read,
@@ -640,6 +681,9 @@ fn lay_out(
             };
             symbols += items.symbol;
             let mut laid = layout::page_blocks_at(n, height, runs, &drawn, &cx, &points);
+            if let Some(all) = regions.as_deref_mut() {
+                all.push(std::mem::replace(&mut laid.regions, layout::no_regions(n)));
+            }
             if let Some(dates) = &mut dates {
                 if let Some(more) = laid.dates.take() {
                     dates.merge(more);
@@ -1974,6 +2018,7 @@ mod tests {
             &budget,
             &|| false,
             1 << 30,
+            None,
         );
         let runs = render::SCAN_RUNS.with(std::cell::Cell::get) - before;
         assert_eq!(runs, 1);
@@ -1991,7 +2036,7 @@ mod tests {
         };
         let budget = Budget::new(Limits::default());
         let room = 100_000;
-        let out = read_pdf_in(&PdfReader, &src, &opts, &budget, &|| false, room);
+        let out = read_pdf_in(&PdfReader, &src, &opts, &budget, &|| false, room, None);
         let kept: u64 = out.blobs.iter().map(|b| b.bytes.len() as u64).sum();
         assert!(kept <= room, "{kept}");
         assert!(
@@ -2035,7 +2080,14 @@ mod tests {
             }
             budget.is_cancelled()
         };
-        let out = read_pdf(&PdfReader, &src, &ReadOptions::default(), &budget, &stop);
+        let out = read_pdf(
+            &PdfReader,
+            &src,
+            &ReadOptions::default(),
+            &budget,
+            &stop,
+            None,
+        );
         assert_eq!(out.completeness, Completeness::Partial);
         let sections = out
             .document

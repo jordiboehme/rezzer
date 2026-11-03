@@ -8314,3 +8314,43 @@ fn synthetic_invoice_golden() {
     assert_eq!(codes, ["0000000001"]);
     assert_eq!(md.matches("Code 128: 0000000001").count(), 1, "{md}");
 }
+
+/// Every text run of the synthetic invoice is in exactly one region of its page.
+#[test]
+fn every_run_is_in_one_region() {
+    common::assert_every_run_in_one_region(&common::synthetic_invoice());
+}
+
+/// A footer line repeated on three pages is a running footer: one footer band region on each
+/// page, found by the furniture rule.
+#[test]
+fn furniture_regions_on_three_pages() {
+    let footer = show(
+        "FL",
+        7.0,
+        40.0,
+        30.0,
+        "Muster GmbH - Musterweg 1 - 12345 Musterstadt",
+    );
+    let bytes = pages(&[footer.clone(), footer.clone(), footer]);
+    let (out, regions) = common::read_regions(&bytes);
+    assert!(
+        markdown(&out).contains("Muster GmbH - Musterweg 1 - 12345 Musterstadt"),
+        "{}",
+        markdown(&out)
+    );
+    let bands: Vec<(u32, &str)> = regions
+        .iter()
+        .flat_map(|p| &p.regions)
+        .filter(|r| r.kind == layoutregions::Kind::FooterBand)
+        .map(|r| (r.page, r.signals[0].id))
+        .collect();
+    assert_eq!(
+        bands,
+        [
+            (1, "pdf.furniture"),
+            (2, "pdf.furniture"),
+            (3, "pdf.furniture")
+        ]
+    );
+}

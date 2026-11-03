@@ -2685,11 +2685,7 @@ mod tests {
 
     fn flow_of(runs: Vec<Run>) -> Flow {
         let n = runs.len();
-        Flow {
-            runs,
-            slots: vec![crate::layout::Slot::Free; n],
-            at: (0..n).collect(),
-        }
+        Flow::new(runs, vec![crate::layout::Slot::Free; n])
     }
 
     fn frame() -> Frame {

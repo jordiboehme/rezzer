@@ -216,6 +216,50 @@ pub fn read(bytes: &[u8]) -> ReadOutcome {
     )
 }
 
+/// `bytes` read with the default options and limits, with the regions of each page.
+pub fn read_regions(
+    bytes: &[u8],
+) -> (
+    ReadOutcome,
+    Vec<rezzer_read_pdf::layoutregions::PageRegions>,
+) {
+    rezzer_read_pdf::read_with_regions(
+        &source(bytes),
+        &ReadOptions::default(),
+        &Budget::new(Limits::default()),
+    )
+}
+
+/// The text runs of each page of `bytes` are each in exactly one region: the text ids of the
+/// regions of a page are 0 up to their count, each once (a refused offer stops a debug build
+/// first). No page has an issue, and every page read has its regions.
+pub fn assert_every_run_in_one_region(bytes: &[u8]) {
+    let (out, pages) = read_regions(bytes);
+    let read = out
+        .document
+        .body
+        .iter()
+        .filter(|b| matches!(b, Block::Section { .. }))
+        .count();
+    assert_eq!(pages.len(), read, "pages with regions");
+    for p in &pages {
+        assert!(p.issues.is_empty(), "page {}: {:?}", p.page, p.issues);
+        let mut ids: Vec<u32> = p
+            .regions
+            .iter()
+            .flat_map(|r| &r.prims)
+            .filter_map(|id| match id {
+                rezzer_read_pdf::layoutregions::PrimId::Text(i) => Some(*i),
+                _ => None,
+            })
+            .collect();
+        ids.sort_unstable();
+        assert!(!ids.is_empty(), "page {} has no text in a region", p.page);
+        let want: Vec<u32> = (0..ids.len() as u32).collect();
+        assert_eq!(ids, want, "page {}: text ids of its regions", p.page);
+    }
+}
+
 /// The text of a block and the blocks inside it: one line per heading, paragraph or task, and
 /// one line per table row with each cell followed by `|`.
 pub fn block_text(block: &Block, out: &mut String) {

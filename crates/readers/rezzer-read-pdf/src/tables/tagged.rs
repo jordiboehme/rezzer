@@ -264,14 +264,18 @@ pub(crate) fn tagged(
     // Take the runs of the tables used out of the page, by cell.
     let mut cells: HashMap<usize, Vec<Run>> = HashMap::new();
     let mut first: HashMap<usize, (usize, f32)> = HashMap::new();
+    // The ids of the runs taken, by table.
+    let mut ids: HashMap<usize, Vec<u32>> = HashMap::new();
     let taken =
         flow.take(|_, s| matches!(s, Slot::Cell { table, .. } if used.contains_key(&table)));
-    for (r, s, at) in taken {
-        if let Slot::Cell { table, cell } = s {
+    for t in taken {
+        if let Slot::Cell { table, cell } = t.slot {
+            let r = t.run;
             let top = r.y + r.h;
-            let f = first.entry(table).or_insert((at, top));
+            let f = first.entry(table).or_insert((t.at, top));
             f.1 = f.1.max(top);
             cells.entry(cell).or_default().push(r);
+            ids.entry(table).or_default().push(t.id);
         }
     }
     // A table not used leaves its text as text. The runs of a table kept as text stay in
@@ -395,6 +399,8 @@ pub(crate) fn tagged(
             continues,
             caption: Vec::new(),
             found_by: None,
+            kind: layoutregions::Kind::Table,
+            ids: ids.remove(&t).unwrap_or_default(),
         });
     }
     (out, fallbacks)

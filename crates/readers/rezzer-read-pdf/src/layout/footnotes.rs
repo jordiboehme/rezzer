@@ -74,6 +74,8 @@ pub(super) struct Legend {
     labels: HashMap<NoteMark, String>,
     /// Why a legend the style pass found is not used, as a loss.
     pub refused: Option<String>,
+    /// The ids of the legend's runs (see [`Flow::ids`]).
+    pub ids: Vec<u32>,
 }
 
 /// One footnote while the legend is read.
@@ -309,8 +311,10 @@ pub(super) fn take(page: u32, flow: &mut Flow, found: Option<&Found>) -> Legend 
     }
     let mut runs: Vec<Vec<Run>> = vec![Vec::new(); entries.len()];
     let taken = flow.take(|i, _| owner[i].is_some());
-    for ((r, _, _), n) in taken.into_iter().zip(owner.into_iter().flatten()) {
-        runs[n].push(r);
+    let mut ids = Vec::with_capacity(taken.len());
+    for (t, n) in taken.into_iter().zip(owner.into_iter().flatten()) {
+        runs[n].push(t.run);
+        ids.push(t.id);
     }
     Legend {
         notes: named
@@ -321,6 +325,7 @@ pub(super) fn take(page: u32, flow: &mut Flow, found: Option<&Found>) -> Legend 
             .collect(),
         labels,
         refused: None,
+        ids,
     }
 }
 
@@ -339,10 +344,12 @@ fn place_inside(flow: &mut Flow, mut inside: Vec<(usize, Split, usize)>) -> Vec<
     let mut runs: Vec<Option<Run>> = all.runs.into_iter().map(Some).collect();
     let mut moved = vec![0; n];
     let mut out = Flow::default();
-    let push = |out: &mut Flow, run: Run, slot, at| {
+    // A run goes with its slot and place, and with its own id (`r`, its index in `all`).
+    let push = |out: &mut Flow, run: Run, slot, at, r: usize| {
         out.runs.push(run);
         out.slots.push(slot);
         out.at.push(at);
+        out.ids.push(all.ids[r]);
         out.runs.len() - 1
     };
     let mut next = 0;
@@ -368,7 +375,7 @@ fn place_inside(flow: &mut Flow, mut inside: Vec<(usize, Split, usize)>) -> Vec<
             let here = match last {
                 // Two references after one word: the second follows the first.
                 Some(l) if l.byte == split.byte => {
-                    moved[r] = push(&mut out, reference, slot, at);
+                    moved[r] = push(&mut out, reference, slot, at, r);
                     continue;
                 }
                 None => Some(split),
@@ -381,21 +388,21 @@ fn place_inside(flow: &mut Flow, mut inside: Vec<(usize, Split, usize)>) -> Vec<
             let parts = rest.as_ref().zip(here).and_then(|(x, here)| cut(x, &here));
             match parts {
                 Some((before, after)) => {
-                    push(&mut out, before, slot, at);
+                    push(&mut out, before, slot, at, i);
                     rest = Some(after);
                     last = Some(split);
                 }
                 // Without the gap the reference goes after what is left of the run.
                 None => {
                     if let Some(x) = rest.take() {
-                        push(&mut out, x, slot, at);
+                        push(&mut out, x, slot, at, i);
                     }
                 }
             }
-            moved[r] = push(&mut out, reference, slot, at);
+            moved[r] = push(&mut out, reference, slot, at, r);
         }
         if let Some(x) = rest {
-            push(&mut out, x, slot, at);
+            push(&mut out, x, slot, at, i);
         }
     }
     *flow = out;

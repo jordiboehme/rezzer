@@ -506,6 +506,7 @@ pub(crate) fn box_pairs(
             top: f.top,
             runs: Vec::new(),
             text: Vec::new(),
+            ids: Vec::new(),
         });
     }
     for (b, ids) in in_box.iter().enumerate() {
@@ -523,6 +524,7 @@ pub(crate) fn box_pairs(
             top: boxes[b][3],
             runs: Vec::new(),
             text: Vec::new(),
+            ids: Vec::new(),
         });
     }
     // The runs of the tables and the titles leave the flow at once.
@@ -530,11 +532,21 @@ pub(crate) fn box_pairs(
         .filter(|&i| target[i].is_some() || title_of[i].is_some())
         .collect();
     let taken = flow.take(|i, _| target[i].is_some() || title_of[i].is_some());
-    for ((run, _, _), i) in taken.into_iter().zip(picked) {
+    for (taken, i) in taken.into_iter().zip(picked) {
+        let (run, id) = (taken.run, taken.id);
         match (target[i], title_of[i]) {
-            (Some((t, r, c)), _) => planned[t].rows[r][c].runs.push(run),
-            (None, Some((k, false))) => titles[k].runs.push(run),
-            (None, Some((k, true))) => titles[k].text.push(run),
+            (Some((t, r, c)), _) => {
+                planned[t].rows[r][c].runs.push(run);
+                planned[t].ids.push(id);
+            }
+            (None, Some((k, false))) => {
+                titles[k].runs.push(run);
+                titles[k].ids.push(id);
+            }
+            (None, Some((k, true))) => {
+                titles[k].text.push(run);
+                titles[k].ids.push(id);
+            }
             (None, None) => {}
         }
     }

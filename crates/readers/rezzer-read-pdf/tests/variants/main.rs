@@ -673,3 +673,59 @@ fn dump_generated_reads() {
         }
     }
 }
+
+/// The regions of each kind over every sampled variant of every shape, against
+/// `tests/variants/region-counts.tsv`: one line `kind\tcount` per kind in `Kind` order, then
+/// `total` (as `region-report counts` prints one set). A moved count fails with its old and
+/// new line. With `REZZER_WRITE_COUNTS` set, the file is written from the counts instead.
+#[test]
+#[ignore = "reads every sampled variant; run for the region counts"]
+fn generated_region_counts() {
+    let limits = rezzer_limits::Limits {
+        max_time: std::time::Duration::from_secs(3600),
+        ..rezzer_limits::Limits::default()
+    };
+    let mut counts: std::collections::BTreeMap<layoutregions::Kind, usize> =
+        std::collections::BTreeMap::new();
+    for shape in all_shapes() {
+        for page in axes::variants(&shape) {
+            let (_, pages) = rezzer_read_pdf::read_with_regions(
+                &common::source(&inv::file(&page)),
+                &rezzer_model::ReadOptions::default(),
+                &rezzer_limits::Budget::new(limits.clone()),
+            );
+            for p in &pages {
+                for (kind, n) in layoutregions::count_by_kind(&p.regions) {
+                    *counts.entry(kind).or_insert(0) += n;
+                }
+            }
+        }
+    }
+    let mut new: Vec<String> = layoutregions::Kind::ALL
+        .iter()
+        .map(|k| format!("{}\t{}", k.name(), counts.get(k).copied().unwrap_or(0)))
+        .collect();
+    new.push(format!("total\t{}", counts.values().sum::<usize>()));
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/variants/region-counts.tsv");
+    if std::env::var_os("REZZER_WRITE_COUNTS").is_some() {
+        std::fs::write(&path, new.join("\n") + "\n").unwrap();
+        return;
+    }
+    let old: Vec<String> = std::fs::read_to_string(&path)
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_string)
+        .collect();
+    let moved: Vec<String> = (0..old.len().max(new.len()))
+        .filter(|&i| old.get(i) != new.get(i))
+        .map(|i| {
+            format!(
+                "old: {}\nnew: {}",
+                old.get(i).map_or("(none)", String::as_str),
+                new.get(i).map_or("(none)", String::as_str)
+            )
+        })
+        .collect();
+    assert!(moved.is_empty(), "{}", moved.join("\n"));
+}
