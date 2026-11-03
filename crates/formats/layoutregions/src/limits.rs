@@ -5,7 +5,7 @@
 /// Work limits per page.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Limits {
-    /// Regions per page.
+    /// Regions per page; also the segments [`crate::segment::segment_page`] makes per page.
     pub max_regions: usize,
     /// Levels of the recursive cut.
     pub max_cut_depth: u32,

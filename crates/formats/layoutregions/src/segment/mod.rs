@@ -111,7 +111,9 @@ pub struct Segments {
 /// is asked once per segment that would be parted and passed to the cut; once it says stop,
 /// every segment not yet parted is one leaf and an `Issue` of kind [`IssueKind::Stopped`]
 /// says so. A grid search that was not done, or boxes that were not used, are `Limit` issues
-/// with the reason. Each kind of issue is said once per page.
+/// with the reason. A page makes at most [`Limits::max_regions`] segments: a segment whose
+/// parts would pass that stays one leaf, and an `Issue` of kind `Limit` says so. Each kind of
+/// issue is said once per page.
 ///
 /// Every primitive of the page is in exactly one leaf of the main cut, and every primitive of
 /// a segment in exactly one leaf of each of its alternatives.
@@ -143,7 +145,7 @@ pub fn segment_page(page: &PageIn, limits: &Limits, stop: &dyn Fn() -> bool) -> 
         max: limits.max_cut_depth as usize,
         all: Vec::new(),
         issues: Vec::new(),
-        noted: [false; 4],
+        noted: [false; 5],
         stopped: false,
         given: Vec::new(),
     };
@@ -173,6 +175,7 @@ enum Note {
     CutDepth,
     Alternatives,
     Stopped,
+    Segments,
 }
 
 struct Builder<'a> {
@@ -182,7 +185,7 @@ struct Builder<'a> {
     max: usize,
     all: Vec<Segment>,
     issues: Vec<Issue>,
-    noted: [bool; 4],
+    noted: [bool; 5],
     stopped: bool,
     /// The segments of the given regions.
     given: Vec<SegId>,
@@ -270,6 +273,14 @@ impl Builder<'_> {
                 ),
                 IssueKind::Limit,
             ),
+            Note::Segments => (
+                format!(
+                    "the page would make more than {} segments: each segment not yet parted \
+                     is one leaf that holds every primitive of it",
+                    self.limits.max_regions
+                ),
+                IssueKind::Limit,
+            ),
             Note::Stopped => (
                 "segmentation was stopped: each segment not yet parted is one leaf that holds \
                  every primitive of it"
@@ -278,6 +289,16 @@ impl Builder<'_> {
             ),
         };
         self.issues.push(Issue { what, kind });
+    }
+
+    /// Whether `n` more segments fit under [`Limits::max_regions`]; when they do not, the
+    /// page says so once.
+    fn room(&mut self, n: usize) -> bool {
+        if n == 0 || self.all.len() + n <= self.limits.max_regions {
+            return true;
+        }
+        self.note(Note::Segments);
+        false
     }
 
     /// Whether the work stops here: the stop callback says so now, or said so before.
@@ -356,12 +377,16 @@ impl Builder<'_> {
             }
             return;
         }
+        // Every item's primitives, its children's included; then the segments, top down. The
+        // root makes its given regions and its own parts at once, or none.
+        let mut sub = subtree_prims(&items, self.max);
+        if !self.room(regions.len() + own_parts(&items[0], &sub, regions.len())) {
+            return;
+        }
         for (kind, prims) in regions {
             let id = self.push(Source::Given(kind), prims, None, Some(root), true);
             self.given.push(id);
         }
-        // Every item's primitives, its children's included; then the segments, top down.
-        let mut sub = subtree_prims(&items, self.max);
         let mut stack: Vec<(usize, SegId)> = vec![(0, root)];
         while let Some((i, s)) = stack.pop() {
             let next = self.item(&items, i, s, &mut sub);
@@ -552,6 +577,9 @@ impl Builder<'_> {
             }
             return Vec::new();
         }
+        if !self.room(own_parts(it, sub, given.len())) {
+            return Vec::new();
+        }
         // A grid or box whose primitives the given regions took is no segment.
         let mut next = Vec::with_capacity(it.children.len());
         for &c in &it.children {
@@ -565,16 +593,20 @@ impl Builder<'_> {
         let rules = rules_of(self.page, &it.others);
         let parted = !next.is_empty() || !given.is_empty();
         if parted || (!it.texts.is_empty() && !it.others.is_empty()) {
-            if !it.texts.is_empty() {
+            // Both parts are made before the text is parted, so that the room they took stays
+            // theirs.
+            let rest = (!it.texts.is_empty()).then(|| {
                 let mut prims: Vec<PrimId> = it.texts.iter().map(|&t| PrimId::Text(t)).collect();
                 prims.sort_unstable();
-                let r = self.push(Source::Rest, prims, None, Some(s), true);
-                self.text(r, &it.texts, d + 1, &rules);
-            }
+                self.push(Source::Rest, prims, None, Some(s), true)
+            });
             if !it.others.is_empty() {
                 let mut prims = it.others.clone();
                 prims.sort_unstable();
                 self.push(Source::Drawing, prims, None, Some(s), true);
+            }
+            if let Some(r) = rest {
+                self.text(r, &it.texts, d + 1, &rules);
             }
         } else if !it.texts.is_empty() {
             self.text(s, &it.texts, d, &rules);
@@ -633,11 +665,19 @@ impl Builder<'_> {
             self.note(Note::Depth);
             return;
         }
+        if !self.room(found.groups.len()) {
+            return;
+        }
+        // Every group is made before any is parted, so that the room they took stays theirs.
+        let mut made = Vec::with_capacity(found.groups.len());
         for (g, group) in found.groups.iter().enumerate() {
             let order: Vec<u32> = group.iter().map(|&k| ids[k]).collect();
             let mut prims: Vec<PrimId> = order.iter().map(|&t| PrimId::Text(t)).collect();
             prims.sort_unstable();
             let id = self.push(source_of(&found.splits, g), prims, None, Some(s), true);
+            made.push((id, order));
+        }
+        for (id, order) in made {
             self.style(id, &order, d + 1);
         }
     }
@@ -669,6 +709,9 @@ impl Builder<'_> {
             self.note(Note::Depth);
             return;
         }
+        if !self.room(groups.len()) {
+            return;
+        }
         for g in groups {
             let mut prims: Vec<PrimId> = g.into_iter().map(PrimId::Text).collect();
             prims.sort_unstable();
@@ -677,8 +720,8 @@ impl Builder<'_> {
     }
 
     /// The whitespace cut of all text of segment `s` (at depth `d`) with its drawn children
-    /// `kids` (items) left out, kept as an alternative when one of its column gutters holds a vertical side
-    /// of a drawn child beside its text: the gutter that a box also bounds. Its groups are
+    /// `kids` (items) left out, kept as an alternative when one of its column gutters holds a
+    /// vertical side of a drawn child beside its text: the gutter that a box also bounds. Its groups are
     /// leaves; the given regions and one leaf of all drawing of the segment complete it.
     fn alternative(
         &mut self,
@@ -762,6 +805,9 @@ impl Builder<'_> {
             self.note(Note::Alternatives);
             return;
         }
+        if !self.room(found.groups.len() + usize::from(!drawing.is_empty())) {
+            return;
+        }
         let mut alt: Vec<SegId> = given.to_vec();
         for (g, group) in found.groups.iter().enumerate() {
             let mut prims: Vec<PrimId> = group.iter().map(|&k| PrimId::Text(ids[k])).collect();
@@ -773,6 +819,18 @@ impl Builder<'_> {
         }
         self.all[s.0 as usize].alternatives.push(alt);
     }
+}
+
+/// The segments item `it` makes for its own parts, beside `given` given regions (the root's):
+/// its drawn children that hold anything (see `sub`), and when it is parted, one segment for
+/// its text and one for its drawing.
+fn own_parts(it: &Item, sub: &[Vec<PrimId>], given: usize) -> usize {
+    let kids = it.children.iter().filter(|&&c| !sub[c].is_empty()).count();
+    let split = kids > 0 || given > 0 || (!it.texts.is_empty() && !it.others.is_empty());
+    if !split {
+        return 0;
+    }
+    kids + usize::from(!it.texts.is_empty()) + usize::from(!it.others.is_empty())
 }
 
 /// Whether item `it` holds more than text: drawn children, or drawing beside text.

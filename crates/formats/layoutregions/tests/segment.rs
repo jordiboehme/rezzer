@@ -443,11 +443,11 @@ fn alternatives_and_depth_are_bounded() {
     assert!(s.issues.iter().any(|i| i.kind == IssueKind::Limit));
 }
 
-/// Work steps of `segment_page` on the page of 50,000 runs in 200 nested boxes: 13,178,291
-/// measured, about ten in a hundred more allowed. Most of it is each primitive once per level
-/// of nesting it stands in (64 levels at the bound): placed, held by its segment and cut
-/// again for the alternative.
-const WORK_BOUND: u64 = 14_500_000;
+/// Work steps of `segment_page` on the page of 50,000 runs in 200 nested boxes, the cut's own
+/// work included: 16,376,402 measured, about ten in a hundred more allowed. Most of it is each
+/// primitive once per level of nesting it stands in (64 levels at the bound): placed, held by
+/// its segment and cut again for the alternative.
+const WORK_BOUND: u64 = 18_000_000;
 
 #[test]
 fn a_stop_keeps_the_rest_whole() {
@@ -574,4 +574,39 @@ fn a_grid_the_given_regions_took_is_no_segment() {
     check_cover(&s, &p);
     assert!(with_source(&s, |x| matches!(x, Source::Grid { .. })).is_empty());
     assert_eq!(with_source(&s, |x| *x == Source::Box).len(), 1);
+}
+
+#[test]
+fn segments_are_bounded() {
+    // 20,000 lines of one column whose size alternates: style steps would make one segment
+    // per line, more than the cap.
+    let texts: Vec<TextRun> = (0..20_000u32)
+        .map(|k| {
+            let size = if k % 2 == 0 { 9.0 } else { 12.0 };
+            run(PROSE, 50.0, 300_000.0 - 14.0 * k as f32, 210.0, size, k)
+        })
+        .collect();
+    let p = page([600.0, 300_100.0], texts, Vec::new());
+    let limits = Limits::default();
+    let s = segment_page(&p, &limits, &|| false);
+    check_cover(&s, &p);
+    assert!(s.all.len() <= limits.max_regions, "{}", s.all.len());
+    let hits: Vec<&Issue> = s
+        .issues
+        .iter()
+        .filter(|i| i.kind == IssueKind::Limit)
+        .collect();
+    assert_eq!(hits.len(), 1, "{:?}", s.issues);
+    assert!(hits[0].what.contains("segments"), "{}", hits[0].what);
+    // A cap of a few segments on the mixed page: inside it, every prim in one leaf.
+    let p = mixed_page();
+    for cap in 1..12 {
+        let small = Limits {
+            max_regions: cap,
+            ..Limits::default()
+        };
+        let s = segment_page(&p, &small, &|| false);
+        check_cover(&s, &p);
+        assert!(s.all.len() <= cap.max(1), "{cap}: {}", s.all.len());
+    }
 }

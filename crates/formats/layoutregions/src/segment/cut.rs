@@ -13,6 +13,7 @@
 use crate::limits::Limits;
 use crate::region::Bounds;
 use crate::segment::drawn::Line;
+use crate::work;
 
 /// A row of text on one baseline, split where a gap is wide enough to be a column gutter.
 #[derive(Debug, Clone, PartialEq)]
@@ -190,6 +191,7 @@ impl Cutter<'_> {
 
     /// Cuts the pieces `ids` (indices into the pieces) into groups, `depth` levels down.
     fn region(&self, mut ids: Vec<usize>, depth: usize, out: &mut Out) {
+        work::add(1 + ids.len() as u64);
         let p = self.p;
         let sort = |ids: &mut Vec<usize>| {
             ids.sort_by(|&a, &b| {
@@ -327,6 +329,8 @@ fn crosses(p: &Piece, (g0, g1): (f32, f32), slack: f32) -> bool {
 /// Where to cut pieces sorted by row: after the row with the widest white space below it,
 /// when that space is at least half a line high. The index is the first piece below the cut.
 fn widest_gap(p: &[Piece], ids: &[usize]) -> Option<usize> {
+    // Each piece is passed once, and once more as part of the row after a cut.
+    work::add(2 * ids.len() as u64);
     let mut best: Option<(f32, usize)> = None;
     let mut low = f32::MAX;
     for k in 1..ids.len() {
@@ -413,6 +417,7 @@ fn best_band(p: &[Piece], inked: &[usize], allowed: i32, size: f32) -> Option<(f
     let width = (((hi - lo) / step - 1e-3).ceil().max(1.0) as usize).min(BAND_STEPS) + 2;
     let scale = (hi - lo) / (width - 2) as f32;
     let bin = |x: f32| (((x - lo) / scale) as usize).min(width - 1);
+    work::add((inked.len() + width) as u64);
     let mut diff = vec![0i32; width + 1];
     for &i in inked {
         diff[bin(p[i].bounds.x0)] += 1;
@@ -430,6 +435,7 @@ fn best_band(p: &[Piece], inked: &[usize], allowed: i32, size: f32) -> Option<(f
     levels.sort_unstable();
     levels.dedup();
     for level in levels {
+        work::add(cover.len() as u64);
         let mut best: Option<(f32, f32)> = None;
         let mut start = None;
         for (b, &c) in cover.iter().enumerate() {
@@ -463,6 +469,8 @@ fn split_at(
     allowed: i32,
     size: f32,
 ) -> Option<Why> {
+    // The crossers, the two sides and the tests of the sides pass the pieces a few times.
+    work::add(4 * ids.len() as u64);
     let slack = GUTTER_SLACK * size;
     let crossing = ids
         .iter()
@@ -548,6 +556,7 @@ fn split_at(
 /// the baseline of a row is a cell of that row, and a smaller bold term beside the lines of
 /// its definition is a cell of a glossary.
 fn lone_row(p: &[Piece], one: &[usize], block: &[usize]) -> bool {
+    work::add((one.len() + block.len()) as u64);
     let inked =
         |side: &[usize]| -> Vec<usize> { side.iter().copied().filter(|&i| p[i].inked).collect() };
     let (one, mut block) = (inked(one), inked(block));
@@ -629,6 +638,7 @@ pub type Part = (f32, f32, bool);
 /// column of labels next to text, each label on a line of the text, is not apart; label and
 /// value cells of two sizes, top-aligned or centred, are rows.
 pub fn offset_baselines(left: &[Vec<Part>], right: &[Vec<Part>], size: f32) -> bool {
+    work::add((left.len() + right.len()) as u64);
     if left.len() < 2 || right.len() < 2 {
         return false;
     }
