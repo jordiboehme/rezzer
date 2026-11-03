@@ -18,7 +18,10 @@ pub struct SpatialLine {
 /// A piece of text on a spatial line.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct SpatialPiece {
-    /// Character column (Unicode scalar values, not bytes) where the piece starts.
+    /// Character column (Unicode scalar values, not bytes) where the piece starts, counted from
+    /// the line start, no tabs. The renderer aligns up to column 1024; a piece further right
+    /// follows the previous one after one space. A piece is one line: a line break in its text
+    /// is written as a space.
     pub col: u32,
     pub text: String,
 }

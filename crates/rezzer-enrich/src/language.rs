@@ -335,6 +335,33 @@ mod tests {
     }
 
     #[test]
+    fn spatial_text_is_sampled_like_a_paragraph() {
+        use rezzer_model::{SpatialLine, SpatialPiece};
+        let piece = |col, text: &str| SpatialPiece {
+            col,
+            text: text.into(),
+        };
+        let body = vec![Block::Spatial {
+            lines: vec![
+                SpatialLine {
+                    pieces: vec![piece(0, "Bruttobezüge im Monat"), piece(30, "Steuerklasse")],
+                },
+                SpatialLine {
+                    pieces: vec![piece(0, "Krankenversicherung und Rentenversicherung")],
+                },
+                SpatialLine {
+                    pieces: vec![piece(0, "Überweisung an die Bank am Monatsende")],
+                },
+            ],
+            anchor: None,
+        }];
+        let text = body_text(&body);
+        assert!(text.contains("Steuerklasse"), "{text}");
+        let info = whatlang::detect(&text).expect("a language");
+        assert_eq!(info.lang().code(), "deu", "{text}");
+    }
+
+    #[test]
     fn cap_respects_char_boundaries() {
         let mut s = "a".repeat(MAX_BYTES - 1);
         push_capped(&mut s, "äb");

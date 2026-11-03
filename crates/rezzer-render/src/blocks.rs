@@ -661,6 +661,10 @@ fn footnote(label: &str, inner: &[Block], ctx: &Ctx, depth: usize) -> String {
 /// The longest info string a fence writes.
 const MAX_INFO: usize = 64;
 
+/// The widest column a spatial piece is placed at, in characters. A piece further right is
+/// written after one space, like an overlapping piece.
+const MAX_SPATIAL_COL: usize = 1024;
+
 /// A fenced block with a fence longer than any backtick run inside.
 pub(crate) fn fence(lang: Option<&str>, text: &str) -> String {
     let fence = "`".repeat(longest_run(text, '`').max(2) + 1);
@@ -681,8 +685,10 @@ pub(crate) fn fence(lang: Option<&str>, text: &str) -> String {
 }
 
 /// Text kept in its layout: a `text` fence whose lines put each piece at its character
-/// column. A piece that starts before the end of the previous one gets one space. The text is
-/// verbatim and a line has no trailing spaces.
+/// column. A piece that starts before the end of the previous one, or at a column past
+/// `MAX_SPATIAL_COL`, gets one space: no text is lost, only the alignment. A line break inside
+/// a piece is written as a space (a piece is one line). The text is verbatim and a line has
+/// no trailing spaces.
 fn spatial_fence(lines: &[rezzer_model::SpatialLine]) -> String {
     let mut body = String::new();
     for (n, line) in lines.iter().enumerate() {
@@ -693,16 +699,27 @@ fn spatial_fence(lines: &[rezzer_model::SpatialLine]) -> String {
         let start = body.len();
         for (k, piece) in line.pieces.iter().enumerate() {
             let col = piece.col as usize;
-            let pad = if k == 0 {
+            let pad = if col > MAX_SPATIAL_COL {
+                1
+            } else if k == 0 {
                 col
             } else if col > at {
                 col - at
             } else {
                 1
             };
-            // A line is bounded by the text it holds, not by a huge column.
+            // The padding is at most MAX_SPATIAL_COL, so a line is bounded by that and the text.
             body.extend(std::iter::repeat_n(' ', pad));
-            body.push_str(&piece.text);
+            body.extend(piece.text.chars().map(|c| {
+                if matches!(
+                    c,
+                    '\n' | '\r' | '\u{b}' | '\u{c}' | '\u{85}' | '\u{2028}' | '\u{2029}'
+                ) {
+                    ' '
+                } else {
+                    c
+                }
+            }));
             at += pad + piece.text.chars().count();
         }
         let trimmed = body[start..].trim_end_matches(' ').len();

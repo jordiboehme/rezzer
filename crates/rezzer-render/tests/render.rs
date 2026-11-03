@@ -7118,3 +7118,40 @@ fn spatial_is_verbatim_without_trailing_spaces() {
     let md = body_of(vec![spatial(&[&[(0, "*a* [b](c)"), (20, "")], &[]])]);
     assert!(md.contains("\n```text\n*a* [b](c)\n\n```\n"), "{md}");
 }
+
+#[test]
+fn spatial_huge_column_keeps_text_and_stays_short() {
+    for line in [
+        &[(u32::MAX, "late"), (0, "x")][..],
+        &[(0, "a"), (u32::MAX, "late"), (u32::MAX, "end")][..],
+    ] {
+        let md = body_of(vec![spatial(&[line])]);
+        let at = md.find("```text\n").unwrap();
+        let body = &md[at..];
+        assert!(body.len() < 200, "{md}");
+        assert!(body.contains("late"), "{md}");
+    }
+    let md = body_of(vec![spatial(&[&[(0, "a"), (u32::MAX, "late")]])]);
+    assert!(md.contains("\n```text\na late\n```\n"), "{md}");
+}
+
+#[test]
+fn spatial_line_break_in_a_piece_is_a_space() {
+    let md = body_of(vec![spatial(&[&[(0, "a\nb\r\nc"), (10, "d")]])]);
+    assert!(md.contains("\n```text\na b  c    d\n```\n"), "{md}");
+}
+
+#[test]
+fn spatial_empty_lines_and_nesting() {
+    let md = body_of(vec![Block::Quote {
+        blocks: vec![spatial(&[&[(0, "a"), (3, "b")]])],
+        anchor: None,
+    }]);
+    assert!(md.contains("> ```text\n> a  b\n> ```"), "{md}");
+    let md = body_of(vec![Block::List {
+        ordered: false,
+        items: vec![vec![spatial(&[&[(0, "a"), (3, "b")]])]],
+        anchor: None,
+    }]);
+    assert!(md.contains("```text\n  a  b\n  ```"), "{md}");
+}
