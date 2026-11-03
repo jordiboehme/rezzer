@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 
 use layoutregions::extract::pairs::Field;
 use layoutregions::extract::table::ruled::{
-    COLUMN_CUT_WORK, GridPart, RuledIn, boxed_field, column_cuts, edges, hanging_feet, ruled_cells,
+    COLUMN_CUT_WORK, GridPart, RuledIn, boxed_field, column_cuts, edges, ruled_cells,
 };
 use layoutregions::extract::table::sections::{CUT_WORK, sections};
 use layoutregions::extract::table::{Cells, TITLE_WORK, column_across, title_over};
@@ -395,12 +395,8 @@ fn section_edges(sh: &Sheet<'_>, h: &[Line], v: &[Line], cut_above: bool) -> (Ve
     (xs, ys)
 }
 
-/// The open rows of a section of column edges `xs` and row edges `ys` (from the top), its
-/// vertical segments `v`: a row whose inner column rules all hang from its top and end at one
-/// height is a header over lines without rules: a rule across at their feet parts the two,
-/// and the row below it (its lines) is open: one cell across that is no spanning box. Only in
-/// a cut grid (`cut`) or a row alone, and only over lines of text it is for. The feet are
-/// added to `ys` and as rules to `h`; their heights are returned.
+/// The open rows of a section (see `layoutregions::extract::table::ruled::hanging_rows`), over
+/// the free runs of the page that are text.
 fn hanging_rows(
     sh: &Sheet<'_>,
     take: &Taking,
@@ -410,38 +406,20 @@ fn hanging_rows(
     h: &mut Vec<Line>,
     cut: bool,
 ) -> Vec<f32> {
-    let mut open: Vec<f32> = Vec::new();
-    if xs.len() < 3 || !(cut || ys.len() == 2) {
-        return open;
-    }
-    let feet: Vec<f32> = hanging_feet(v, xs, ys)
-        .into_iter()
-        .filter(|&(foot, bottom)| {
-            sh.by_y.runs_between(bottom, foot).into_iter().any(|i| {
-                let r = &sh.flow.runs[i];
-                let (cx, cy) = middle(r);
-                !r.off_axis
-                    && take.claimed[i].is_none()
-                    && !take.titles[i]
-                    && cy < foot
-                    && cx > xs[0]
-                    && cx < xs[xs.len() - 1]
-                    && !r.text.trim().is_empty()
-            })
+    let holds_text = |bottom: f32, foot: f32| {
+        sh.by_y.runs_between(bottom, foot).into_iter().any(|i| {
+            let r = &sh.flow.runs[i];
+            let (cx, cy) = middle(r);
+            !r.off_axis
+                && take.claimed[i].is_none()
+                && !take.titles[i]
+                && cy < foot
+                && cx > xs[0]
+                && cx < xs[xs.len() - 1]
+                && !r.text.trim().is_empty()
         })
-        .map(|(foot, _)| foot)
-        .collect();
-    for foot in feet {
-        let at = ys.partition_point(|e| *e > foot);
-        ys.insert(at, foot);
-        open.push(foot);
-        h.push(Line {
-            at: foot,
-            from: xs[0],
-            to: xs[xs.len() - 1],
-        });
-    }
-    open
+    };
+    layoutregions::extract::table::ruled::hanging_rows(v, xs, (ys, h), cut, &holds_text)
 }
 
 /// How a grid refused is said: a grid that looks like a table (`noted`) gets a note and holds

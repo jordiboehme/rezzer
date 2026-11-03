@@ -105,6 +105,42 @@ pub fn boxed_field<R: LineRun>(runs: &[R], within: &[usize], xs: &[f32], ys: &[f
         })
 }
 
+/// The open rows of a section of column edges `xs` and row edges `ys` (from the top), its
+/// vertical segments `v`: a row whose inner column rules all hang from its top and end at one
+/// height is a header over lines without rules: a rule across at their feet parts the two,
+/// and the row below it (its lines) is open: one cell across that is no spanning box. Only in
+/// a cut grid (`cut`) or a row alone, and only over lines of text it is for (`holds_text` of
+/// the height range from the row's bottom to the foot). The feet are added to `ys` and as
+/// rules to `h`; their heights are returned.
+pub fn hanging_rows(
+    v: &[Line],
+    xs: &[f32],
+    (ys, h): (&mut Vec<f32>, &mut Vec<Line>),
+    cut: bool,
+    holds_text: &dyn Fn(f32, f32) -> bool,
+) -> Vec<f32> {
+    let mut open: Vec<f32> = Vec::new();
+    if xs.len() < 3 || !(cut || ys.len() == 2) {
+        return open;
+    }
+    let feet: Vec<f32> = hanging_feet(v, xs, ys)
+        .into_iter()
+        .filter(|&(foot, bottom)| holds_text(bottom, foot))
+        .map(|(foot, _)| foot)
+        .collect();
+    for foot in feet {
+        let at = ys.partition_point(|e| *e > foot);
+        ys.insert(at, foot);
+        open.push(foot);
+        h.push(Line {
+            at: foot,
+            from: xs[0],
+            to: xs[xs.len() - 1],
+        });
+    }
+    open
+}
+
 /// Whether the text of a run that stands over `columns` columns reads as a sentence: at
 /// least [`PROSE_WORDS`] words and [`PROSE_LINE`] characters, more words than columns, and
 /// most of them words with a small letter and no digit. Values, codes, amounts and flags do
