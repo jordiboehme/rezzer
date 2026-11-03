@@ -9,9 +9,7 @@
 
 use std::collections::HashSet;
 
-use layoutregions::segment::drawn::{Line, clustered};
-
-use super::SNAP;
+use crate::segment::drawn::{Line, SNAP, clustered};
 
 /// Whether every value of `inner` lies within [`SNAP`] of one of `outer`. Both are sorted.
 fn holds(outer: &[f32], inner: &[f32]) -> bool {
@@ -28,7 +26,7 @@ const CUT_GAPS: f32 = 0.05;
 
 /// Pieces of the page's horizontal rules the sections of one page may look at to complete a
 /// rule across a grid; past them a rule with gaps no longer cuts.
-pub(super) const CUT_WORK: usize = 1_000_000;
+pub const CUT_WORK: usize = 1_000_000;
 
 /// Whether the rules at height `y` cross `left..right`: the pieces of `page` (sorted by
 /// height) that lie within [`SNAP`] of `y`, together reaching both ends and leaving gaps of
@@ -83,7 +81,7 @@ fn crosses(
 /// or a title band) stays with the section above. The horizontal rule of a cut belongs to
 /// both sections, vertical segments are clipped to their section. A grid without a cut is
 /// returned whole.
-pub(super) fn sections(
+pub fn sections(
     h: &[Line],
     v: &[Line],
     page: &[Line],

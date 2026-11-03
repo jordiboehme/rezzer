@@ -614,6 +614,8 @@ pub(crate) enum HeadWant {
     Date(&'static str, &'static str),
     Nothing,
     Lost(&'static str),
+    /// No date, with exactly these losses.
+    Losses(&'static [&'static str]),
     /// No date, with a loss about dates whose words vary with the size.
     NoDate,
 }
@@ -638,6 +640,10 @@ pub(crate) fn assert_head(out: &ReadOutcome, want: HeadWant, case: &str) {
         HeadWant::Lost(loss) => {
             assert_eq!(found, None, "{case}");
             assert_eq!(unsure(out), [loss], "{case}");
+        }
+        HeadWant::Losses(losses) => {
+            assert_eq!(found, None, "{case}");
+            assert_eq!(unsure(out), losses, "{case}");
         }
         HeadWant::NoDate => {
             assert_eq!(found, None, "{case}");
@@ -1734,6 +1740,11 @@ fn rereview_r10_probes_give_no_wrong_date() {
     let one = Lost(ONE_DATE);
     let two = Lost(TWO_DATES);
     let three = Lost("3 dates stand in the head of page 1; none is marked as the document date");
+    let overprinted = Losses(&[
+        ONE_DATE,
+        "text in a table on page 1 runs over the side of its cell into the text of another cell: \
+         it is read as a paragraph next to the table",
+    ]);
     for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
         for font in ["FL", "FB"] {
             let s = |x: f32, y: f32, t: &str| common::show(font, size, x, y, t);
@@ -1843,7 +1854,10 @@ fn rereview_r10_probes_give_no_wrong_date() {
                     title.clone()
                         + &label_value_rows(font, size, true)
                         + &ruled(items, &[40.0, 200.0, 320.0], 500.0),
-                    one,
+                    // At 9.5 pt the `headed` prose is printed over the last item row: a cell
+                    // that holds the row's position and the prose is no cell, so the prose
+                    // line stays a paragraph, said as a loss.
+                    if size == 9.5 { overprinted } else { one },
                 ),
             ];
             for (name, head, want) in cases {

@@ -11,7 +11,6 @@ mod banded;
 mod borderless;
 mod pairs;
 mod ruled;
-mod sections;
 mod side;
 mod tagged;
 
@@ -22,6 +21,9 @@ use layoutregions::segment::drawn::{self, Grids};
 use layoutregions::segment::{Segment, Segments, Source};
 
 use crate::layout::{Drawn, Flow, Run};
+
+/// The cells of tables, built in the engine (see `layoutregions::extract::table`).
+use layoutregions::extract::table::{self, CELL_GAP, MAX_SQUARES, TableOut, middle, numeric};
 
 pub(crate) use pairs::{BoxTitle, Frame, box_pairs, field_frames, form_drawn, underlined_titles};
 pub(crate) use tagged::{Tables, tagged};
@@ -347,32 +349,11 @@ pub(crate) use layoutregions::line::LABEL_STEP;
 /// A grid of drawn rules with more columns than this is a form or a chart, not a table.
 const MAX_COLUMNS: usize = 15;
 
-/// A grid whose cells are more often empty than this is a form to fill in.
-const EMPTY_SHARE: f32 = 0.6;
-
 /// Lines of a caption paragraph above a table looked at for its start.
 const CAPTION_LINES: usize = 8;
 
-/// Squares one grid of drawn rules may have to be read as a table.
-const MAX_SQUARES: usize = 100_000;
-
 /// Text smaller than this share of the body text is a picture of a page, not a table.
 const SMALL_TEXT: f32 = 0.6;
-
-/// A gap wider than this many font sizes between two runs of a line separates two cells.
-const CELL_GAP: f32 = 1.0;
-
-/// Cells of a table without rules are short: their median length is under this many
-/// characters, unless most of them are numbers.
-const SHORT_CELL: usize = 40;
-
-/// A cell of at least this many words and characters that goes on in lower case in the cell
-/// below reads as a line of prose.
-const PROSE_WORDS: usize = 3;
-const PROSE_LINE: usize = 20;
-
-/// Share of the rows of a table without rules whose pieces stay inside the columns.
-const CLEAN_ROWS: f32 = 0.8;
 
 /// The segments of the page the detector without rules reads, each as the union of its runs:
 /// the page's root. A table often reaches past the lines drawn around part of it (a column
@@ -717,11 +698,6 @@ impl ByY {
     }
 }
 
-/// The point of a run that decides which cell it is in.
-fn middle(r: &Run) -> (f32, f32) {
-    (r.x + r.w / 2.0, r.y + r.h * 0.3)
-}
-
 /// Where a run of the page goes: the table, row and cell of `planned`.
 type Target = Option<(u32, u32, u32)>;
 
@@ -782,43 +758,43 @@ fn too_many_tables(page: u32) -> String {
 /// Grids and regions one page may have looked at between two looks at the clock.
 const CHECK_EVERY: usize = 64;
 
-/// 1 when the first row reads as column titles: every cell has text and either a column has
-/// a word on top of numbers, or the first row is bold and the rest is not.
-fn header_of(rows: &[Vec<PlannedCell>]) -> usize {
-    let text = |c: &PlannedCell| {
-        c.runs
-            .iter()
-            .flat_map(|r| r.text.split_whitespace())
-            .collect::<Vec<_>>()
-            .join(" ")
-    };
-    let Some(first) = rows.first() else { return 0 };
-    if rows.len() < 2 || first.iter().any(|c| text(c).is_empty()) {
-        return 0;
+/// Claims the runs of the cells of `table`, the table `t` of the page, in `claimed`.
+fn claim_cells(claimed: &mut [Option<(usize, usize, usize)>], t: usize, table: &TableOut) {
+    for (r, row) in table.rows.iter().enumerate() {
+        for (c, cell) in row.iter().enumerate() {
+            for &i in &cell.runs {
+                claimed[i] = Some((t, r, c));
+            }
+        }
     }
-    let titles = (0..first.len()).any(|c| {
-        let below: Vec<String> = rows[1..]
-            .iter()
-            .filter_map(|r| r.get(c))
-            .map(text)
-            .collect();
-        let numbers = below.iter().filter(|t| numeric(t)).count();
-        !numeric(&text(&first[c])) && numbers > 0 && 2 * numbers >= below.len()
-    });
-    let bold = |row: &[PlannedCell]| row.iter().flat_map(|c| &c.runs).all(|r| r.bold);
-    let bold_titles = bold(first) && rows[1..].iter().any(|r| !bold(r));
-    usize::from(titles || bold_titles)
 }
 
-/// Whether a cell's text is a number: most of its characters are digits or signs.
-fn numeric(text: &str) -> bool {
-    let chars: Vec<char> = text.chars().filter(|c| !c.is_whitespace()).collect();
-    let digits = chars.iter().filter(|c| c.is_ascii_digit()).count();
-    let signs = chars
+/// The rows of `table` for a planned table: each cell with its spans and status, its runs
+/// filled in once they are taken out of the flow.
+fn planned_rows(table: &TableOut) -> Vec<Vec<PlannedCell>> {
+    table
+        .rows
         .iter()
-        .filter(|c| matches!(c, '.' | ',' | '%' | '-' | '+' | '$' | '(' | ')' | '/'))
-        .count();
-    digits > 0 && 2 * (digits + signs) >= chars.len()
+        .map(|r| {
+            r.iter()
+                .map(|c| PlannedCell {
+                    runs: Vec::new(),
+                    row_span: c.row_span,
+                    col_span: c.col_span,
+                    status: c.status,
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// 1 when the first row reads as column titles (see [`table::header_of`]).
+fn header_of(rows: &[Vec<PlannedCell>]) -> usize {
+    let view: Vec<Vec<&[Run]>> = rows
+        .iter()
+        .map(|r| r.iter().map(|c| c.runs.as_slice()).collect())
+        .collect();
+    table::header_of(&view)
 }
 
 #[cfg(test)]

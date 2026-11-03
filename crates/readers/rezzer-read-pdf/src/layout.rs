@@ -270,6 +270,9 @@ impl LineRun for Run {
     fn page(&self) -> u32 {
         self.page
     }
+    fn off_axis(&self) -> bool {
+        self.off_axis
+    }
     fn gaps(&self) -> impl Iterator<Item = GapIn> + '_ {
         self.gaps.iter().map(|g| GapIn {
             words: g.words,

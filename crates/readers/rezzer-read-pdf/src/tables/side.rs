@@ -191,18 +191,18 @@ fn strip_kind(
             !r.off_axis && cx > x0 && cx < x1 && !r.text.trim().is_empty()
         })
         .collect();
-    let mut lines = super::ruled::lines_up(flow, &runs);
+    let mut lines = table::lines_up(&flow.runs, &runs);
     lines.reverse();
     let Some(first) = lines.first() else {
         return StripKind::Other;
     };
-    let text = |l: &super::ruled::TextLine| -> String {
+    let text = |l: &table::RunLine| -> String {
         let mut runs = l.runs.clone();
         runs.sort_by(|&a, &b| flow.runs[a].x.total_cmp(&flow.runs[b].x));
         runs.iter().map(|&i| flow.runs[i].text.as_str()).collect()
     };
     // Text beside the column on the baseline of `l`, within the sections beside it.
-    let beside = |l: &super::ruled::TextLine| {
+    let beside = |l: &table::RunLine| {
         let tol = 0.3 * l.size.max(1.0);
         by_y.runs_between(l.y - l.size, l.y + 2.0 * l.size)
             .into_iter()

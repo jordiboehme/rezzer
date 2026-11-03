@@ -51,6 +51,8 @@ pub trait LineRun {
     fn font(&self) -> u32;
     /// The run's line number in reading order; the runs of one line are next to each other.
     fn line(&self) -> u32;
+    /// The run reads in another direction than the page's text (a margin note, a stamp).
+    fn off_axis(&self) -> bool;
     /// The page of the run, for a list that holds runs of several pages; 0 for one page.
     fn page(&self) -> u32 {
         0
@@ -89,6 +91,9 @@ impl LineRun for TextRun {
     }
     fn line(&self) -> u32 {
         self.line
+    }
+    fn off_axis(&self) -> bool {
+        self.off_axis
     }
     fn gaps(&self) -> impl Iterator<Item = GapIn> + '_ {
         self.gaps.iter().copied()
