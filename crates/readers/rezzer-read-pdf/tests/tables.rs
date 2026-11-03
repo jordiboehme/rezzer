@@ -331,6 +331,34 @@ fn ruled_grid_is_a_table_region() {
     assert_eq!(tables[0].prims.len(), 9, "{:?}", tables[0].prims);
 }
 
+/// The bounds of a ruled table reach its outer rules, past the box of its runs, and the
+/// paragraphs around it are regions of their own at their blocks.
+#[test]
+fn a_ruled_table_region_reaches_its_rules() {
+    let out = read(&ruled_page(&[
+        ["Fruit", "Count", "Price"],
+        ["Apples", "3", "1.20"],
+        ["Pears", "12", "0.80"],
+    ]));
+    let regions = &out.document.regions;
+    let table = regions
+        .iter()
+        .find(|n| n.kind == rezzer_model::RegionKind::Table)
+        .expect("a table region");
+    assert_eq!(table.bounds, [72.0, 610.0, 432.0, 700.0], "{table:#?}");
+    assert_eq!(table.anchor.0, "p1:t1");
+    assert!(
+        matches!(&table.evidence[..], [rezzer_model::Evidence::Rule { id, .. }] if id == "pdf.ruled"),
+        "{table:#?}"
+    );
+    let paragraphs: Vec<&str> = regions
+        .iter()
+        .filter(|n| n.kind == rezzer_model::RegionKind::Paragraph)
+        .map(|n| n.anchor.0.as_str())
+        .collect();
+    assert_eq!(paragraphs, ["p1:b1", "p1:b2"], "{regions:#?}");
+}
+
 /// A grid of drawn rules over most of the page (the page frame of plan 6) is refused: its
 /// runs stay paragraphs, each in a paragraph region that says why the grid is no table.
 #[test]

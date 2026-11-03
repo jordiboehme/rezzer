@@ -529,6 +529,7 @@ pub(super) fn borderless(
                     } else {
                         Detector::KeyValues
                     },
+                    drawn: None,
                 });
                 continue;
             }
@@ -644,6 +645,7 @@ pub(super) fn borderless(
                         } else {
                             Detector::Grid
                         },
+                        drawn: None,
                     };
                     let t = u32::try_from(claim.len()).unwrap_or(u32::MAX);
                     for (r, cells) in grid.rows.iter().enumerate() {

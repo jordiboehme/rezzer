@@ -1342,3 +1342,66 @@ fn schema_has_spatial() {
     assert!(text.contains("\"spatial\""));
     assert!(text.contains("SpatialPiece"));
 }
+
+#[test]
+fn region_note_round_trips() {
+    use rezzer_model::{RegionAlternative, RegionKind, RegionNote};
+    let note = RegionNote {
+        anchor: Anchor("p1:t1".into()),
+        page: 1,
+        kind: RegionKind::Totals,
+        bounds: [72.0, 100.25, 523.5, 180.0],
+        certainty: Certainty::Rule,
+        score: 1000,
+        evidence: vec![Evidence::Rule {
+            id: "pdf.borderless.totals_under".into(),
+            detail: String::new(),
+        }],
+        alternatives: vec![RegionAlternative {
+            kind: RegionKind::LabelValue,
+            score: 400,
+        }],
+    };
+    let plain = RegionNote {
+        anchor: Anchor("p1:b2".into()),
+        kind: RegionKind::Paragraph,
+        alternatives: Vec::new(),
+        ..note.clone()
+    };
+    let mut doc = Document::new(src());
+    doc.regions = vec![note.clone(), plain.clone()];
+    let v = serde_json::to_value(&doc).unwrap();
+    assert_eq!(
+        v["regions"][0],
+        serde_json::json!({
+            "anchor": "p1:t1", "page": 1, "kind": "totals",
+            "bounds": [72.0, 100.25, 523.5, 180.0], "certainty": "rule", "score": 1000,
+            "evidence": [{"kind": "rule", "id": "pdf.borderless.totals_under", "detail": ""}],
+            "alternatives": [{"kind": "label_value", "score": 400}]
+        })
+    );
+    // No alternatives: the key is left out.
+    assert!(v["regions"][1].get("alternatives").is_none(), "{v}");
+    let back: Document = serde_json::from_value(v).unwrap();
+    assert_eq!(back.regions, vec![note, plain]);
+    // A document without regions writes no key, and a model without the key reads as empty.
+    let empty = serde_json::to_string(&Document::new(src())).unwrap();
+    assert!(!empty.contains("regions"), "{empty}");
+    let back: Document = serde_json::from_str(&empty).unwrap();
+    assert!(back.regions.is_empty());
+    let schema = serde_json::to_string(&schemars::schema_for!(Document)).unwrap();
+    assert!(schema.contains("RegionNote"), "{schema}");
+}
+
+#[test]
+fn region_kinds_are_snake_case() {
+    use rezzer_model::RegionKind;
+    for (kind, name) in [
+        (RegionKind::HeaderBand, "header_band"),
+        (RegionKind::FootnoteLegend, "footnote_legend"),
+        (RegionKind::LabelValue, "label_value"),
+        (RegionKind::Spatial, "spatial"),
+    ] {
+        assert_eq!(serde_json::to_value(kind).unwrap(), name);
+    }
+}

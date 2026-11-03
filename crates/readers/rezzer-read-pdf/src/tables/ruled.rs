@@ -709,6 +709,7 @@ fn read_grid(sh: &Sheet<'_>, take: &mut Taking, found: &mut Found, s: GridSectio
         },
         ids: Vec::new(),
         by: Detector::Ruled,
+        drawn: Some(b),
     });
     Next::Section
 }
@@ -1414,12 +1415,15 @@ fn totals_tables(
              has too many lines"
         ));
     }
-    for strip in sides.iter().flat_map(|s| &s.strips) {
+    for (side, strip) in sides
+        .iter()
+        .flat_map(|s| s.strips.iter().map(move |t| (s, t)))
+    {
         let StripKind::Totals(totals) = &strip.kind else {
             continue;
         };
         let list: Vec<&Field> = totals.iter().collect();
-        let Some(table) = pairs_table(
+        let Some(mut table) = pairs_table(
             flow,
             &list,
             totals_top(flow, totals),
@@ -1427,6 +1431,8 @@ fn totals_tables(
         ) else {
             continue;
         };
+        // The rule over the strip, across its column.
+        table.drawn = Some([side.x0, strip.top, side.x1, strip.top]);
         claim(claimed, tables.len(), &list);
         tables.push(table);
     }

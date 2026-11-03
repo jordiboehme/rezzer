@@ -155,6 +155,23 @@ impl Turn {
         ]
     }
 
+    /// A box (x0, y0, x1, y1) of the turned frame of a page `w` wide and `h` high (as
+    /// [`Turn::place_box`] gives it) back in the page's own frame.
+    pub(crate) fn unplace_box(self, b: [f32; 4], w: f32, h: f32) -> [f32; 4] {
+        let (sx, sy) = self.shift(w, h);
+        let back = match self {
+            Turn::None => Turn::None,
+            Turn::Up => Turn::Down,
+            Turn::Half => Turn::Half,
+            Turn::Down => Turn::Up,
+        };
+        let (a, c) = (
+            back.apply(b[0] - sx, b[1] - sy),
+            back.apply(b[2] - sx, b[3] - sy),
+        );
+        [a.0.min(c.0), a.1.min(c.1), a.0.max(c.0), a.1.max(c.1)]
+    }
+
     /// A point or a direction in the turned frame (directions are never moved).
     pub(crate) fn apply(self, x: f32, y: f32) -> (f32, f32) {
         match self {
@@ -1220,6 +1237,21 @@ fn compose(a: Turn, b: Turn) -> Turn {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_box_placed_in_a_turned_frame_comes_back() {
+        let (w, h) = (595.0, 842.0);
+        let b = [72.0, 100.0, 300.0, 112.0];
+        for turn in [Turn::None, Turn::Up, Turn::Half, Turn::Down] {
+            let placed = turn.place_box(b, w, h);
+            let (tw, th) = turn.size(w, h);
+            assert!(
+                placed[0] >= 0.0 && placed[2] <= tw && placed[1] >= 0.0 && placed[3] <= th,
+                "{turn:?}: {placed:?}"
+            );
+            assert_eq!(turn.unplace_box(placed, w, h), b, "{turn:?}");
+        }
+    }
 
     #[test]
     fn right_to_left_line_keeps_ligature_glyphs_whole() {

@@ -12,6 +12,7 @@ use crate::facet::{Facets, FileFacts, Role};
 use crate::format::FormatId;
 use crate::geometry::Geometry;
 use crate::loss::Loss;
+use crate::region::RegionNote;
 use crate::value::Value;
 
 /// Version of the model JSON. Bump it on every incompatible change.
@@ -33,6 +34,9 @@ pub struct Document {
     pub assets: Vec<Asset>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub losses: Vec<Loss>,
+    /// The regions a paged reader found on its pages, page by page (see [`RegionNote`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub regions: Vec<RegionNote>,
     /// The structured overview, filled by the enrich pass `overview`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub overview: Option<Overview>,
@@ -54,6 +58,7 @@ impl Document {
             facets: Facets::default(),
             assets: Vec::new(),
             losses: Vec::new(),
+            regions: Vec::new(),
             overview: None,
             geometry: None,
         }

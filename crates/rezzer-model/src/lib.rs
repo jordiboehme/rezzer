@@ -16,6 +16,7 @@ mod inline;
 mod layout;
 mod loss;
 mod reader;
+mod region;
 mod registry;
 mod sheet;
 pub mod text;
@@ -43,6 +44,7 @@ pub use layout::{
 };
 pub use loss::{Loss, LossReason, STALE_RESULTS, Severity};
 pub use reader::{Blob, Bytes, ReadOptions, ReadOutcome, Reader, Source, source_info};
+pub use region::{RegionAlternative, RegionKind, RegionNote};
 pub use registry::Registry;
 pub use sheet::{CellArea, locate_cells, table_headings};
 pub use value::Value;

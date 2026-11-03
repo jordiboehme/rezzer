@@ -1,5 +1,6 @@
 ---
 source: crates/rezzer/tests/corpus.rs
+assertion_line: 294
 ---
 {
   "body": [
@@ -262,6 +263,128 @@ source: crates/rezzer/tests/corpus.rs
     "title": "Example for a Form",
     "title_from": "largest heading in the top third of page 1"
   },
+  "regions": [
+    {
+      "anchor": "p1:b1",
+      "bounds": [
+        167.1,
+        737.56,
+        428.28,
+        774.89
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "heading",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b2",
+      "bounds": [
+        56.7,
+        690.82,
+        268.4,
+        721.99
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b3",
+      "bounds": [
+        56.8,
+        660.89,
+        95.42,
+        676.89
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b4",
+      "bounds": [
+        73.3,
+        647.22,
+        154.44,
+        661.89
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b5",
+      "bounds": [
+        56.8,
+        618.59,
+        114.0,
+        634.59
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b6",
+      "bounds": [
+        73.3,
+        537.62,
+        186.28,
+        567.99
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    }
+  ],
   "source": {
     "detection": {
       "confidence": "certain",

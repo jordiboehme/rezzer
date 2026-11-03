@@ -494,7 +494,8 @@ pub(crate) fn box_pairs(
     for c in &groups {
         let list: Vec<&Field> = c.iter().filter_map(|&b| fields[b].as_ref()).collect();
         let top = c.iter().map(|&b| boxes[b][3]).fold(f32::MIN, f32::max);
-        if let Some(p) = pairs_table(flow, &list, top, (BOX_FOUND_BY, Detector::BoxPairs)) {
+        if let Some(mut p) = pairs_table(flow, &list, top, (BOX_FOUND_BY, Detector::BoxPairs)) {
+            p.drawn = union(c.iter().map(|&b| boxes[b]));
             claim(&mut target, planned.len(), &list);
             planned.push(p);
         }
@@ -517,6 +518,7 @@ pub(crate) fn box_pairs(
             runs: Vec::new(),
             text: Vec::new(),
             ids: Vec::new(),
+            drawn: union(f.boxes.iter().map(|&b| boxes[b])),
         });
     }
     for (b, ids) in in_box.iter().enumerate() {
@@ -535,6 +537,7 @@ pub(crate) fn box_pairs(
             runs: Vec::new(),
             text: Vec::new(),
             ids: Vec::new(),
+            drawn: Some(boxes[b]),
         });
     }
     // The runs of the tables and the titles leave the flow at once.

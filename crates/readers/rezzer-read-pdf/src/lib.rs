@@ -462,6 +462,25 @@ fn frame_size(page: &PageInfo, items: Option<&PageItems>) -> (f32, f32) {
     turn.size(page.width, page.height)
 }
 
+/// A box in the frame of a page's runs back in its visible box (`/Rotate` not applied, origin
+/// at the lower left corner), `w` by `h` points, as [`PageItems`] states its coordinates: a
+/// turned frame is turned back, and what reaches past the box (a run's descent at its edge)
+/// is clamped to it.
+fn page_box(b: layoutregions::Bounds, items: &PageItems, w: f32, h: f32) -> [f32; 4] {
+    let b = [b.x0, b.y0, b.x1, b.y1];
+    let [x0, y0, x1, y1] = if items.turned {
+        items.turn.unplace_box(b, w, h)
+    } else {
+        b
+    };
+    [
+        x0.clamp(0.0, w),
+        y0.clamp(0.0, h),
+        x1.clamp(0.0, w),
+        y1.clamp(0.0, h),
+    ]
+}
+
 /// The height of the page in the frame of its runs.
 fn frame_height(page: &PageInfo, items: Option<&PageItems>) -> Option<f32> {
     Some(frame_size(page, items).1)
@@ -705,14 +724,6 @@ fn lay_out(
             };
             symbols += items.symbol;
             let mut laid = layout::page_blocks_at(n, height, runs, &drawn, &cx, &points);
-            if let Some(all) = regions.as_deref_mut()
-                && let Some(input) = laid.engine_in.take()
-            {
-                all.push(EnginePage {
-                    input,
-                    regions: std::mem::replace(&mut laid.regions, layout::no_regions(n)),
-                });
-            }
             if let Some(dates) = &mut dates {
                 if let Some(more) = laid.dates.take() {
                     dates.merge(more);
@@ -801,6 +812,32 @@ fn lay_out(
                     let anchor = anchor.as_ref().map_or_else(String::new, |a| a.0.clone());
                     placed.insert(table, (section, first_table + k, anchor));
                 }
+            }
+            // The page's regions, each at the block it became (its host), rows of a tagged
+            // table begun on an earlier page at that table, in the page box.
+            let mut page_regions = std::mem::replace(&mut laid.regions, layout::no_regions(n));
+            let mut anchors: Vec<Option<Anchor>> =
+                laid.blocks.iter().map(layout::block_anchor).collect();
+            for &(r, table) in &laid.earlier {
+                if let Some((_, _, anchor)) = placed.get(&table).filter(|t| !t.2.is_empty())
+                    && let Some(region) = page_regions.regions.get_mut(r)
+                {
+                    region.host = u32::try_from(anchors.len()).unwrap_or(u32::MAX);
+                    anchors.push(Some(Anchor(anchor.clone())));
+                }
+            }
+            out.doc.regions.extend(rezzer_layout::pdf::pdf_regions(
+                std::slice::from_ref(&page_regions),
+                &|_, host| anchors.get(host as usize).cloned().flatten(),
+                &|_, b| page_box(b, &items, info.width, info.height),
+            ));
+            if let Some(all) = regions.as_deref_mut()
+                && let Some(input) = laid.engine_in.take()
+            {
+                all.push(EnginePage {
+                    input,
+                    regions: page_regions,
+                });
             }
             blocks.extend(laid.blocks);
             blocks.extend(orphans);

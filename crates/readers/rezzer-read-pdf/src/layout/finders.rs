@@ -117,18 +117,27 @@ fn bounds_of(page: &PageIn, prims: &[PrimId]) -> Option<Bounds> {
 }
 
 /// The candidate of `kind` for `prims` (sorted, each once), found by the finder `id` with the
-/// found-by text `detail`; `None` for no pieces.
+/// found-by text `detail`; `None` for no pieces. Its bounds reach over its pieces and over
+/// `drawn`, the box of the rules or boxes its detector read it by.
 fn candidate(
     page: &PageIn,
     kind: Kind,
     mut prims: Vec<PrimId>,
-    id: &'static str,
-    detail: &str,
+    (id, detail): (&'static str, &str),
+    drawn: Option<[f32; 4]>,
     host: u32,
 ) -> Option<Candidate> {
     prims.sort_unstable();
     prims.dedup();
-    let bounds = bounds_of(page, &prims)?;
+    let mut bounds = bounds_of(page, &prims)?;
+    if let Some(d) = drawn.filter(|d| d.iter().all(|v| v.is_finite())) {
+        bounds = Bounds {
+            x0: bounds.x0.min(d[0]),
+            y0: bounds.y0.min(d[1]),
+            x1: bounds.x1.max(d[2]),
+            y1: bounds.y1.max(d[3]),
+        };
+    }
     Some(Candidate {
         kind,
         prims,
@@ -177,8 +186,8 @@ fn offer_table(page: &PageIn, arb: &mut InOrder, t: &Planned, host: u32, certain
         page,
         t.by.region_kind(t.kind),
         texts(&t.ids),
-        t.by.id(),
-        t.found_by.unwrap_or(""),
+        (t.by.id(), t.found_by.unwrap_or("")),
+        t.drawn,
         host,
     );
     offer(page, arb, c, certainty);
@@ -186,7 +195,7 @@ fn offer_table(page: &PageIn, arb: &mut InOrder, t: &Planned, host: u32, certain
 
 /// Offers a title over its lines as a heading, as the `host`th placed part.
 fn offer_title(page: &PageIn, arb: &mut InOrder, t: &BoxTitle, id: &'static str, host: u32) {
-    let c = candidate(page, Kind::Heading, texts(&t.ids), id, "", host);
+    let c = candidate(page, Kind::Heading, texts(&t.ids), (id, ""), t.drawn, host);
     offer(page, arb, c, Certainty::Rule);
 }
 
@@ -310,7 +319,7 @@ impl Finder<PageCx<'_>> for Furniture {
                 .paragraph(l.runs.iter().collect(), Some("page-header"), cx);
         }
         for (kind, ids) in [(Kind::HeaderBand, top), (Kind::FooterBand, bottom)] {
-            let c = candidate(page, kind, texts(&ids), Self::ID, "", NO_PLACED);
+            let c = candidate(page, kind, texts(&ids), (Self::ID, ""), None, NO_PLACED);
             offer(page, arb, c, Certainty::Rule);
         }
     }
@@ -343,8 +352,8 @@ impl Finder<PageCx<'_>> for Footnotes {
             page,
             Kind::FootnoteLegend,
             texts(&p.legend.ids),
-            Self::ID,
-            "",
+            (Self::ID, ""),
+            None,
             NO_PLACED,
         );
         offer(page, arb, c, Certainty::Rule);
@@ -493,7 +502,7 @@ impl Finder<PageCx<'_>> for UntaggedTables {
         let segments = layoutregions::segment::segment_drawn(
             page,
             p.drawn.structure,
-            &layoutregions::Limits::default(),
+            &rezzer_layout::pdf::engine_limits(cx.budget),
             &stop,
         );
         let found = tables::untagged(p.page, &mut p.flow, p.drawn, &segments, height, &stop);
@@ -540,8 +549,8 @@ impl Finder<PageCx<'_>> for UntaggedTables {
                 page,
                 t.by.region_kind(t.kind),
                 texts(&ids),
-                t.by.id(),
-                t.found_by.unwrap_or(""),
+                (t.by.id(), t.found_by.unwrap_or("")),
+                t.drawn,
                 host,
             );
             offer(page, arb, c, Certainty::Rule);
@@ -731,7 +740,7 @@ pub(super) fn offer_rest(
             continue;
         }
         let host = u32::try_from(k).unwrap_or(NO_PLACED);
-        let c = candidate(page, kind_of(block), texts(&ids), LINES, "", host);
+        let c = candidate(page, kind_of(block), texts(&ids), (LINES, ""), None, host);
         offer(page, arb, c, Certainty::Rule);
     }
     for i in 0..page.pictures.len() {
@@ -740,15 +749,147 @@ pub(super) fn offer_rest(
             page,
             Kind::Figure,
             vec![PrimId::Picture(i)],
-            "pdf.pictures",
-            "",
+            ("pdf.pictures", ""),
+            None,
             i,
         );
         offer(page, arb, c, Certainty::Rule);
     }
     for i in 0..page.codes.len() {
         let i = u32::try_from(i).unwrap_or(u32::MAX);
-        let c = candidate(page, Kind::Code, vec![PrimId::Code(i)], "pdf.codes", "", i);
+        let c = candidate(
+            page,
+            Kind::Code,
+            vec![PrimId::Code(i)],
+            ("pdf.codes", ""),
+            None,
+            i,
+        );
         offer(page, arb, c, Certainty::Rule);
     }
+}
+
+/// What a placed part (a table or a title) became among the blocks of its page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Became {
+    /// The block at this place in the page's blocks.
+    Block(usize),
+    /// Rows of the tagged table (by its index) begun on an earlier page.
+    Earlier(usize),
+    /// No block: a stop came first, or it was a note only.
+    Nothing,
+}
+
+/// What the placed part built from `blocks[first..]` became: its table, or else its first
+/// block that is not a found-by note (a title, a caption, or the table laid out as
+/// paragraphs). Rows for a tagged table begun on an earlier page (`earlier`) build no block.
+pub(super) fn became(blocks: &[Block], first: usize, earlier: Option<usize>) -> Became {
+    let new = blocks.get(first..).unwrap_or_default();
+    let table = new.iter().position(|b| matches!(b, Block::Table { .. }));
+    let other = || {
+        new.iter().position(
+            |b| !matches!(b, Block::Paragraph { role, .. } if role.as_deref() == Some("found-by")),
+        )
+    };
+    match (table.or_else(other), earlier) {
+        (Some(k), _) => Became::Block(first + k),
+        (None, Some(t)) => Became::Earlier(t),
+        (None, None) => Became::Nothing,
+    }
+}
+
+/// The first of `blocks` built with the paragraph role `role`, inside a footnote section too.
+fn first_with_role(blocks: &[Block], role: &str) -> Option<usize> {
+    let has =
+        |b: &Block| matches!(b, Block::Paragraph { role: r, .. } if r.as_deref() == Some(role));
+    blocks.iter().position(|b| match b {
+        Block::Section { blocks, .. } => blocks.iter().any(has),
+        b => has(b),
+    })
+}
+
+/// Region and block pairs a page may weigh to find the block near a region that became no
+/// block; past it such a region stands at the page's last block.
+const NEAR_WORK: usize = 4_000_000;
+
+/// Sets the host of each region of the page to the place in `blocks` of the block it became:
+/// - a table or title: what it became (`became`, by its place among the placed parts);
+/// - the blocks laid out from the rest (`pdf.lines`): their own place already;
+/// - the running header or footer band and the footnote legend: the first block of the role
+///   they were built with (`page-header`, `page-footer`, `footnote`).
+///
+/// A region that became no block of this page (a picture or a code, whose media block the
+/// page places later; rows of a tagged table begun on an earlier page; anything a stop left
+/// unbuilt) takes the block that follows it, as a picture is placed: the region with a block
+/// nearest to its top centre, the next block when that region stands above it, else that
+/// block. With no block on the page, its host is [`NO_PLACED`]. Gives the regions that became
+/// rows of an earlier table, with the table.
+pub(super) fn block_hosts(
+    regions: &mut layoutregions::PageRegions,
+    became: &[Became],
+    blocks: &[Block],
+) -> Vec<(usize, usize)> {
+    let headers = first_with_role(blocks, "page-header");
+    let footers = first_with_role(blocks, "page-footer");
+    let notes = first_with_role(blocks, "footnote");
+    let mut earlier = Vec::new();
+    let mut hosts: Vec<Option<usize>> = Vec::with_capacity(regions.regions.len());
+    for (i, r) in regions.regions.iter().enumerate() {
+        let by = r.signals.first().map_or("", |s| s.id);
+        let host = r.host as usize;
+        hosts.push(match by {
+            LINES => Some(host),
+            Furniture::ID if r.kind == Kind::HeaderBand => headers,
+            Furniture::ID => footers,
+            Footnotes::ID => notes,
+            by if placed_by(by) => match became.get(host) {
+                Some(Became::Block(k)) => Some(*k),
+                Some(Became::Earlier(t)) => {
+                    earlier.push((i, *t));
+                    None
+                }
+                _ => None,
+            },
+            _ => None,
+        });
+    }
+    // The regions with a block, to place the others near.
+    let placed: Vec<(Bounds, usize)> = regions
+        .regions
+        .iter()
+        .zip(&hosts)
+        .filter_map(|(r, h)| h.map(|k| (r.bounds, k)))
+        .collect();
+    let last = blocks.len().checked_sub(1);
+    let mut work = NEAR_WORK;
+    for (r, h) in regions.regions.iter_mut().zip(hosts) {
+        let host = match h {
+            Some(k) => Some(k),
+            None if work >= placed.len() => {
+                work -= placed.len();
+                near(r.bounds, &placed, blocks.len())
+            }
+            None => last,
+        };
+        r.host = host.map_or(NO_PLACED, |k| u32::try_from(k).unwrap_or(NO_PLACED));
+    }
+    earlier
+}
+
+/// The block that follows a region at `b` among `count` blocks, by the regions with a block
+/// (`placed`, their bounds and block): the one nearest to the top centre of `b`, then the
+/// block after it when it stands above that point (the last block when none is after it), else
+/// its own block. Ties go to the earlier block.
+fn near(b: Bounds, placed: &[(Bounds, usize)], count: usize) -> Option<usize> {
+    let (x, y) = ((b.x0 + b.x1) / 2.0, b.y1);
+    let distance = |q: &Bounds| {
+        let dx = (q.x0 - x).max(x - q.x1).max(0.0);
+        let dy = (q.y0 - y).max(y - q.y1).max(0.0);
+        dx * dx + dy * dy
+    };
+    let (q, k) = placed
+        .iter()
+        .min_by(|(a, ka), (b, kb)| distance(a).total_cmp(&distance(b)).then(ka.cmp(kb)))?;
+    let above = (q.y0 + q.y1) / 2.0 > y;
+    Some(if above { (k + 1).min(count - 1) } else { *k })
 }

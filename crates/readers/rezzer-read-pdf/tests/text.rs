@@ -1760,3 +1760,70 @@ fn tagged_heading_on_top_is_the_title() {
         );
     }
 }
+
+/// The bounds of the regions of a turned page lie in the page box the reader reports (the
+/// visible box, `/Rotate` not applied), not in the turned frame the layout read the page in:
+/// a page with `/Rotate 90` whose text is drawn upward, and a page without `/Rotate` whose
+/// text a `cm` turns upward and stands past the box's width in the turned frame.
+#[test]
+fn bounds_of_a_turned_page_lie_in_its_box() {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let mut kids = Vec::new();
+    for rotate in ["/Rotate 90", ""] {
+        let content = "q 0 1 -1 0 595 0 cm BT /F1 10 Tf 72 500 Td (Body text of the page.) Tj ET \
+             BT /F1 10 Tf 700 100 Td (Far right in the turned frame) Tj ET Q\n";
+        let c = b.stream("", content.as_bytes());
+        kids.push(b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] {rotate} \
+             /Resources << /Font << /F1 {font} 0 R >> >> /Contents {c} 0 R >>"
+        )));
+    }
+    let refs: Vec<String> = kids.iter().map(|k| format!("{k} 0 R")).collect();
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{}] /Count 2 >>", refs.join(" ")),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let bytes = b.finish(catalog);
+    // The engine saw the turned frame: there a region reaches past the box's width.
+    let (_, pages) = common::read_regions(&bytes);
+    for p in &pages {
+        assert!(
+            p.regions.iter().any(|r| r.bounds.x1 > 595.0),
+            "page {}: the frame is not turned: {:#?}",
+            p.page,
+            p.regions
+        );
+    }
+    let out = read(&bytes);
+    for page in [1, 2] {
+        let notes: Vec<&rezzer_model::RegionNote> = out
+            .document
+            .regions
+            .iter()
+            .filter(|n| n.page == page)
+            .collect();
+        assert!(notes.len() >= 2, "page {page}: {notes:#?}");
+        for n in notes {
+            let [x0, y0, x1, y1] = n.bounds;
+            assert!(
+                0.0 <= x0 && x0 <= x1 && x1 <= 595.0 && 0.0 <= y0 && y0 <= y1 && y1 <= 842.0,
+                "page {page}: {n:#?}"
+            );
+        }
+    }
+    // Text drawn upward stands in a tall, narrow box: the far line near the top of the page.
+    let far = out
+        .document
+        .regions
+        .iter()
+        .find(|n| n.page == 2 && n.bounds[3] > 650.0)
+        .expect("the far line near the top");
+    assert!(
+        far.bounds[2] - far.bounds[0] < far.bounds[3] - far.bounds[1],
+        "{far:#?}"
+    );
+}

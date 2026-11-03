@@ -1,5 +1,6 @@
 ---
 source: crates/rezzer/tests/corpus.rs
+assertion_line: 294
 ---
 {
   "body": [
@@ -582,6 +583,249 @@ source: crates/rezzer/tests/corpus.rs
     },
     "language": "en"
   },
+  "regions": [
+    {
+      "anchor": "p1:b1",
+      "bounds": [
+        72.0,
+        712.0,
+        161.4,
+        744.0
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.furniture",
+          "kind": "rule"
+        }
+      ],
+      "kind": "header_band",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p2:b1",
+      "bounds": [
+        72.0,
+        712.0,
+        161.4,
+        744.0
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.furniture",
+          "kind": "rule"
+        }
+      ],
+      "kind": "header_band",
+      "page": 2,
+      "score": 1000
+    },
+    {
+      "anchor": "p3:b1",
+      "bounds": [
+        72.0,
+        712.0,
+        161.4,
+        744.0
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.furniture",
+          "kind": "rule"
+        }
+      ],
+      "kind": "header_band",
+      "page": 3,
+      "score": 1000
+    },
+    {
+      "anchor": "p4:b1",
+      "bounds": [
+        72.0,
+        712.0,
+        161.4,
+        744.0
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.furniture",
+          "kind": "rule"
+        }
+      ],
+      "kind": "header_band",
+      "page": 4,
+      "score": 1000
+    },
+    {
+      "anchor": "p5:b1",
+      "bounds": [
+        72.0,
+        712.0,
+        161.4,
+        744.0
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.furniture",
+          "kind": "rule"
+        }
+      ],
+      "kind": "header_band",
+      "page": 5,
+      "score": 1000
+    },
+    {
+      "anchor": "p6:b1",
+      "bounds": [
+        72.0,
+        712.0,
+        161.4,
+        744.0
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.furniture",
+          "kind": "rule"
+        }
+      ],
+      "kind": "header_band",
+      "page": 6,
+      "score": 1000
+    },
+    {
+      "anchor": "p7:b1",
+      "bounds": [
+        72.0,
+        712.0,
+        161.4,
+        744.0
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.furniture",
+          "kind": "rule"
+        }
+      ],
+      "kind": "header_band",
+      "page": 7,
+      "score": 1000
+    },
+    {
+      "anchor": "p8:b1",
+      "bounds": [
+        72.0,
+        712.0,
+        161.4,
+        744.0
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.furniture",
+          "kind": "rule"
+        }
+      ],
+      "kind": "header_band",
+      "page": 8,
+      "score": 1000
+    },
+    {
+      "anchor": "p9:b1",
+      "bounds": [
+        72.0,
+        712.0,
+        161.4,
+        744.0
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.furniture",
+          "kind": "rule"
+        }
+      ],
+      "kind": "header_band",
+      "page": 9,
+      "score": 1000
+    },
+    {
+      "anchor": "p10:b1",
+      "bounds": [
+        72.0,
+        712.0,
+        161.4,
+        744.0
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.furniture",
+          "kind": "rule"
+        }
+      ],
+      "kind": "header_band",
+      "page": 10,
+      "score": 1000
+    },
+    {
+      "anchor": "p11:b1",
+      "bounds": [
+        72.0,
+        712.0,
+        174.74,
+        744.0
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.furniture",
+          "kind": "rule"
+        }
+      ],
+      "kind": "header_band",
+      "page": 11,
+      "score": 1000
+    },
+    {
+      "anchor": "p12:b1",
+      "bounds": [
+        72.0,
+        712.0,
+        174.74,
+        744.0
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.furniture",
+          "kind": "rule"
+        }
+      ],
+      "kind": "header_band",
+      "page": 12,
+      "score": 1000
+    },
+    "<18 more items>"
+  ],
   "source": {
     "detection": {
       "confidence": "certain",

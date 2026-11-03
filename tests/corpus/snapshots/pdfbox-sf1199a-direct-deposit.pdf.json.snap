@@ -1,5 +1,6 @@
 ---
 source: crates/rezzer/tests/corpus.rs
+assertion_line: 294
 ---
 {
   "body": [
@@ -961,6 +962,249 @@ source: crates/rezzer/tests/corpus.rs
     },
     "title": "Standard Form 1199A, Direct Deposit Sign-up Form, June 1987"
   },
+  "regions": [
+    {
+      "anchor": "p1:b1",
+      "bounds": [
+        39.69,
+        650.35,
+        576.37,
+        745.65
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.furniture",
+          "kind": "rule"
+        }
+      ],
+      "kind": "header_band",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b54",
+      "bounds": [
+        444.21,
+        27.13,
+        576.04,
+        35.13
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.furniture",
+          "kind": "rule"
+        }
+      ],
+      "kind": "footer_band",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b18",
+      "bounds": [
+        45.69,
+        641.35,
+        103.37,
+        652.07
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b19",
+      "bounds": [
+        45.69,
+        614.35,
+        300.12,
+        634.07
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b20",
+      "bounds": [
+        321.69,
+        623.36,
+        576.11,
+        652.08
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b21",
+      "bounds": [
+        202.17,
+        600.18,
+        410.2,
+        613.75
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "heading",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b22",
+      "bounds": [
+        39.69,
+        588.25,
+        206.73,
+        601.53
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b23",
+      "bounds": [
+        54.09,
+        553.61,
+        220.79,
+        564.33
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b24",
+      "bounds": [
+        54.09,
+        529.61,
+        275.8,
+        540.33
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b25",
+      "bounds": [
+        39.69,
+        480.25,
+        233.45,
+        514.65
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b26",
+      "bounds": [
+        39.69,
+        456.25,
+        179.76,
+        469.53
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b27",
+      "bounds": [
+        70.07,
+        431.93,
+        215.8,
+        442.65
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    "<127 more items>"
+  ],
   "source": {
     "detection": {
       "confidence": "certain",

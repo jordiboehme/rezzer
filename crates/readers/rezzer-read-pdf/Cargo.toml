@@ -12,6 +12,7 @@ rezzer-limits = { path = "../../rezzer-limits" }
 pdfparts = { path = "../../formats/pdfparts" }
 barcodes = { path = "../../formats/barcodes" }
 layoutregions = { path = "../../formats/layoutregions" }
+rezzer-layout = { path = "../../rezzer-layout" }
 base64.workspace = true
 hayro.workspace = true
 hayro-interpret.workspace = true

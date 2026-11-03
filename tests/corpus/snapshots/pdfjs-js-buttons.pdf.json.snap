@@ -1,5 +1,6 @@
 ---
 source: crates/rezzer/tests/corpus.rs
+assertion_line: 294
 ---
 {
   "body": [
@@ -387,6 +388,68 @@ source: crates/rezzer/tests/corpus.rs
       "value": "2021-01-08T06:22:14-08:00"
     }
   },
+  "regions": [
+    {
+      "anchor": "p1:b1",
+      "bounds": [
+        74.52,
+        698.05,
+        107.32,
+        714.05
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b2",
+      "bounds": [
+        73.73,
+        673.47,
+        131.63,
+        689.47
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b3",
+      "bounds": [
+        73.33,
+        648.9,
+        162.35,
+        664.9
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    }
+  ],
   "source": {
     "detection": {
       "confidence": "certain",

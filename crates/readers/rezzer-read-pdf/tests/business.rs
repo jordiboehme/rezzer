@@ -8403,3 +8403,156 @@ fn blocks_read_one_after_the_other_keep_their_reason() {
         );
     }
 }
+
+/// The regions of a read are listed in the JSON with their kind, bounds and evidence: the
+/// totals under the invoice table are a `totals` region at the anchor of the table they
+/// became, found by the class of the detector without rules that reads them.
+#[test]
+fn regions_list_kind_bounds_and_evidence() {
+    let out = common::read(&common::synthetic_invoice());
+    let totals_table = blocks(&out)
+        .into_iter()
+        .find_map(|b| match b {
+            Block::Table { anchor, rows, .. }
+                if rows
+                    .iter()
+                    .flatten()
+                    .any(|c| plain_text(&c.inlines).contains("Gesamtbetrag")) =>
+            {
+                anchor.clone()
+            }
+            _ => None,
+        })
+        .expect("the totals table");
+    let notes: Vec<&rezzer_model::RegionNote> = out
+        .document
+        .regions
+        .iter()
+        .filter(|n| n.anchor == totals_table)
+        .collect();
+    assert_eq!(notes.len(), 1, "{notes:#?}");
+    let n = notes[0];
+    assert_eq!(n.kind, rezzer_model::RegionKind::Totals);
+    assert_eq!(n.page, 1);
+    assert_eq!(n.certainty, rezzer_model::Certainty::Rule);
+    assert_eq!(n.score, 1000);
+    assert!(
+        matches!(&n.evidence[..], [rezzer_model::Evidence::Rule { id, .. }]
+            if id == "pdf.borderless.totals_under"),
+        "{n:#?}"
+    );
+    // In the A4 page box, wider than tall like a block of totals lines.
+    let [x0, y0, x1, y1] = n.bounds;
+    assert!(0.0 <= x0 && x0 < x1 && x1 <= 595.0, "{n:#?}");
+    assert!(0.0 <= y0 && y0 < y1 && y1 <= 842.0, "{n:#?}");
+    // Every page lists its regions, each at a block of its page or at the page.
+    for page in [1, 2] {
+        assert!(
+            out.document.regions.iter().any(|n| n.page == page),
+            "page {page}"
+        );
+    }
+    for n in &out.document.regions {
+        assert!(
+            n.anchor.0 == format!("p{}", n.page)
+                || n.anchor.0.starts_with(&format!("p{}:", n.page)),
+            "{n:#?}"
+        );
+    }
+}
+
+/// The regions are in the JSON only: the Markdown of a read is the same with and without
+/// them.
+#[test]
+fn markdown_has_no_regions() {
+    let files = [
+        common::synthetic_invoice(),
+        common::synthetic_print_form(),
+        pages(&[show("FB", 9.0, 40.0, 700.0, "Rechnung")]),
+    ];
+    for bytes in &files {
+        let out = common::read(bytes);
+        assert!(!out.document.regions.is_empty(), "no regions listed");
+        let mut without = out.clone();
+        without.document.regions.clear();
+        assert_eq!(markdown(&out), markdown(&without));
+        assert!(!markdown(&out).contains("pdf.lines"));
+    }
+}
+
+/// The anchors of the blocks of page `n`, inside sections too.
+fn page_anchors(out: &ReadOutcome, n: u32) -> Vec<String> {
+    fn walk(blocks: &[Block], found: &mut Vec<String>) {
+        for b in blocks {
+            let anchor = match b {
+                Block::Section { blocks, anchor, .. } => {
+                    walk(blocks, found);
+                    anchor
+                }
+                Block::Heading { anchor, .. }
+                | Block::Paragraph { anchor, .. }
+                | Block::List { anchor, .. }
+                | Block::Table { anchor, .. } => anchor,
+                _ => &None,
+            };
+            if let Some(a) = anchor {
+                found.push(a.0.clone());
+            }
+        }
+    }
+    let want = rezzer_model::Anchor(format!("p{n}"));
+    let mut found = Vec::new();
+    for b in &out.document.body {
+        if let Block::Section {
+            anchor: Some(a),
+            blocks,
+            ..
+        } = b
+            && *a == want
+        {
+            walk(blocks, &mut found);
+        }
+    }
+    found
+}
+
+/// The pictures of a page are figure regions, each at a block of its page (the media block
+/// has no anchor: the block near it), and every other region of the invoice is at a block of
+/// its page that holds its text: no region stands at the page alone.
+#[test]
+fn every_region_is_at_a_block_of_its_page() {
+    let out = pages_logos(2);
+    for n in 1..=2 {
+        let anchors = page_anchors(&out, n);
+        let figures = out
+            .document
+            .regions
+            .iter()
+            .filter(|r| r.page == n && r.kind == rezzer_model::RegionKind::Figure)
+            .count();
+        assert_eq!(figures, 3, "page {n}: {:#?}", out.document.regions);
+        for r in out.document.regions.iter().filter(|r| r.page == n) {
+            assert!(
+                anchors.contains(&r.anchor.0),
+                "page {n}: {r:#?} not in {anchors:?}"
+            );
+        }
+    }
+    let out = common::read(&common::synthetic_invoice());
+    for r in &out.document.regions {
+        assert!(page_anchors(&out, r.page).contains(&r.anchor.0), "{r:#?}");
+    }
+    // The running footer of the invoice is a band at its first footer paragraph.
+    for r in out
+        .document
+        .regions
+        .iter()
+        .filter(|r| r.kind == rezzer_model::RegionKind::FooterBand)
+    {
+        let footer = blocks(&out).into_iter().find(|b| {
+            matches!(b, Block::Paragraph { role, anchor: Some(a), .. }
+                if role.as_deref() == Some("page-footer") && *a == r.anchor)
+        });
+        assert!(footer.is_some(), "{r:#?}");
+    }
+}

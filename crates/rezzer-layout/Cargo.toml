@@ -10,3 +10,7 @@ publish = false
 rezzer-model = { path = "../rezzer-model" }
 rezzer-limits = { path = "../rezzer-limits" }
 sheetlayout = { path = "../formats/sheetlayout" }
+layoutregions = { path = "../formats/layoutregions" }
+
+[dev-dependencies]
+serde_json.workspace = true

@@ -1,5 +1,6 @@
 ---
 source: crates/readers/rezzer-read-pdf/tests/print_forms/main.rs
+assertion_line: 130
 expression: json
 ---
 {
@@ -1438,5 +1439,527 @@ expression: json
       ]
     }
   ],
-  "facets": {}
+  "facets": {},
+  "regions": [
+    {
+      "anchor": "p1:b10",
+      "page": 1,
+      "kind": "footer_band",
+      "bounds": [
+        40.0,
+        50.0,
+        101.84,
+        66.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.furniture",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "anchor": "p1:t1",
+      "page": 1,
+      "kind": "label_value",
+      "bounds": [
+        40.0,
+        699.83,
+        400.0,
+        724.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.box_pairs",
+          "detail": "Found by: label and value pairs from drawn boxes; the label is the smaller text at the top of each box."
+        }
+      ]
+    },
+    {
+      "anchor": "p1:t2",
+      "page": 1,
+      "kind": "table",
+      "bounds": [
+        40.0,
+        638.0,
+        555.0,
+        670.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.ruled",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "anchor": "p1:t3",
+      "page": 1,
+      "kind": "table",
+      "bounds": [
+        40.0,
+        590.0,
+        555.0,
+        638.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.ruled",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "anchor": "p1:t4",
+      "page": 1,
+      "kind": "table",
+      "bounds": [
+        36.0,
+        522.03,
+        199.6,
+        572.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.banded",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "anchor": "p1:b1",
+      "page": 1,
+      "kind": "heading",
+      "bounds": [
+        40.0,
+        795.33,
+        167.57,
+        814.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.lines",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "anchor": "p1:b2",
+      "page": 1,
+      "kind": "paragraph",
+      "bounds": [
+        40.0,
+        776.0,
+        155.35,
+        784.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.lines",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "anchor": "p1:b3",
+      "page": 1,
+      "kind": "paragraph",
+      "bounds": [
+        40.0,
+        732.83,
+        136.9,
+        769.5
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.lines",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "anchor": "p1:b5",
+      "page": 1,
+      "kind": "paragraph",
+      "bounds": [
+        300.0,
+        468.0,
+        320.22,
+        476.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.lines",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "anchor": "p1:b6",
+      "page": 1,
+      "kind": "paragraph",
+      "bounds": [
+        300.0,
+        438.0,
+        318.12,
+        446.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.lines",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "anchor": "p1:b7",
+      "page": 1,
+      "kind": "paragraph",
+      "bounds": [
+        382.0,
+        456.83,
+        416.2,
+        469.5
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.lines",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "anchor": "p1:b8",
+      "page": 1,
+      "kind": "paragraph",
+      "bounds": [
+        382.0,
+        426.83,
+        427.6,
+        439.5
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.lines",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "anchor": "p1:b9",
+      "page": 1,
+      "kind": "paragraph",
+      "bounds": [
+        60.0,
+        396.83,
+        256.6,
+        409.5
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.lines",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "anchor": "p2:b10",
+      "page": 2,
+      "kind": "footer_band",
+      "bounds": [
+        40.0,
+        50.0,
+        101.84,
+        66.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.furniture",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "anchor": "p2:t1",
+      "page": 2,
+      "kind": "label_value",
+      "bounds": [
+        40.0,
+        699.83,
+        400.0,
+        724.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.box_pairs",
+          "detail": "Found by: label and value pairs from drawn boxes; the label is the smaller text at the top of each box."
+        }
+      ]
+    },
+    {
+      "anchor": "p2:t2",
+      "page": 2,
+      "kind": "table",
+      "bounds": [
+        40.0,
+        638.0,
+        555.0,
+        670.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.ruled",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "anchor": "p2:t3",
+      "page": 2,
+      "kind": "table",
+      "bounds": [
+        40.0,
+        590.0,
+        555.0,
+        638.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.ruled",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "anchor": "p2:t4",
+      "page": 2,
+      "kind": "table",
+      "bounds": [
+        36.0,
+        510.63,
+        199.6,
+        572.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.banded",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "anchor": "p2:b1",
+      "page": 2,
+      "kind": "heading",
+      "bounds": [
+        40.0,
+        795.33,
+        167.57,
+        814.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.lines",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "anchor": "p2:b2",
+      "page": 2,
+      "kind": "paragraph",
+      "bounds": [
+        40.0,
+        776.0,
+        155.35,
+        784.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.lines",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "anchor": "p2:b3",
+      "page": 2,
+      "kind": "paragraph",
+      "bounds": [
+        40.0,
+        732.83,
+        148.3,
+        769.5
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.lines",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "anchor": "p2:b5",
+      "page": 2,
+      "kind": "paragraph",
+      "bounds": [
+        300.0,
+        468.0,
+        320.22,
+        476.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.lines",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "anchor": "p2:b6",
+      "page": 2,
+      "kind": "paragraph",
+      "bounds": [
+        300.0,
+        438.0,
+        318.12,
+        446.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.lines",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "anchor": "p2:b7",
+      "page": 2,
+      "kind": "paragraph",
+      "bounds": [
+        382.0,
+        456.83,
+        416.2,
+        469.5
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.lines",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "anchor": "p2:b8",
+      "page": 2,
+      "kind": "paragraph",
+      "bounds": [
+        382.0,
+        426.83,
+        427.6,
+        439.5
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.lines",
+          "detail": ""
+        }
+      ]
+    },
+    {
+      "anchor": "p2:b9",
+      "page": 2,
+      "kind": "paragraph",
+      "bounds": [
+        60.0,
+        396.83,
+        256.6,
+        409.5
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.lines",
+          "detail": ""
+        }
+      ]
+    }
+  ]
 }

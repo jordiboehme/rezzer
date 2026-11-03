@@ -10,7 +10,11 @@
 //! heading or a caption paragraph, a note row cell a note paragraph, every other cell of a
 //! region a table cell with its `Sheet!A1` anchor. A cell under a merge that is not the
 //! merge's top-left cell is not shown and gets a loss.
+//!
+//! The PDF side ([`pdf`]) maps the regions the region engine found on a page into the model's
+//! region notes.
 
+pub mod pdf;
 mod table;
 
 use std::collections::{BTreeMap, HashSet};

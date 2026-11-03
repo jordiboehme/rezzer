@@ -343,6 +343,7 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
         kind: layoutregions::Kind::Table,
         ids: Vec::new(),
         by: Detector::Banded,
+        drawn: Some(b),
     });
 }
 

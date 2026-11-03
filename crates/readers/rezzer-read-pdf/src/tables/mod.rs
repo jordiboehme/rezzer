@@ -88,6 +88,9 @@ pub(crate) struct Planned {
     pub ids: Vec<u32>,
     /// The detector that found it, which names its region (see [`Detector`]).
     pub by: Detector,
+    /// The box of the drawn rules or boxes the detector read the table by, in the frame of
+    /// the runs; none for a detector that reads text alone. Its region reaches over it.
+    pub drawn: Option<[f32; 4]>,
 }
 
 /// The detector, or the class of a detector, that found a table: its region's signal id and
@@ -838,6 +841,7 @@ mod tests {
             kind,
             ids: Vec::new(),
             by: Detector::Grid,
+            drawn: None,
         }
     }
 

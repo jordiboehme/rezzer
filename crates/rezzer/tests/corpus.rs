@@ -2035,3 +2035,21 @@ fn census_caption_is_written_once_as_the_group_title() {
     assert!(labels.len() > 300, "{part}");
     assert!(!labels.iter().any(|l| l.contains(caption)), "{part}");
 }
+
+/// Only a paged reader lists regions: the JSON of every corpus file of another format has no
+/// `regions` key (its snapshots stay as they were).
+#[test]
+fn non_pdf_json_is_unchanged() {
+    let pipeline = pipeline();
+    for file in corpus_files() {
+        if file.parent().is_some_and(|p| p.ends_with("pdf")) {
+            continue;
+        }
+        let out = run(&pipeline, &file);
+        assert!(
+            out.json.get("regions").is_none(),
+            "{}: regions listed",
+            file.display()
+        );
+    }
+}

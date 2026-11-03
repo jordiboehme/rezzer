@@ -1,5 +1,6 @@
 ---
 source: crates/rezzer/tests/corpus.rs
+assertion_line: 294
 ---
 {
   "assets": [
@@ -253,6 +254,249 @@ source: crates/rezzer/tests/corpus.rs
     },
     "language": "de-DE"
   },
+  "regions": [
+    {
+      "anchor": "p1:t1",
+      "bounds": [
+        64.3,
+        772.83,
+        114.43,
+        786.16
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.tagged_table",
+          "kind": "rule"
+        }
+      ],
+      "kind": "table",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:t2",
+      "bounds": [
+        59.6,
+        348.26,
+        467.71,
+        448.16
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.tagged_table",
+          "kind": "rule"
+        }
+      ],
+      "kind": "table",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:t3",
+      "bounds": [
+        59.6,
+        241.86,
+        259.29,
+        304.56
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.tagged_table",
+          "kind": "rule"
+        }
+      ],
+      "kind": "table",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b1",
+      "bounds": [
+        451.1,
+        708.03,
+        518.8,
+        721.36
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b2",
+      "bounds": [
+        451.1,
+        693.86,
+        478.53,
+        703.86
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b3",
+      "bounds": [
+        451.1,
+        679.46,
+        516.8,
+        689.46
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b4",
+      "bounds": [
+        451.1,
+        665.06,
+        521.74,
+        675.06
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b5",
+      "bounds": [
+        451.1,
+        650.66,
+        489.64,
+        660.66
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b6",
+      "bounds": [
+        451.1,
+        636.26,
+        502.26,
+        646.26
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b7",
+      "bounds": [
+        451.1,
+        621.86,
+        495.11,
+        631.86
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b8",
+      "bounds": [
+        451.1,
+        607.46,
+        525.93,
+        617.46
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b9",
+      "bounds": [
+        451.1,
+        593.06,
+        518.54,
+        603.06
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    "<22 more items>"
+  ],
   "source": {
     "detection": {
       "confidence": "certain",

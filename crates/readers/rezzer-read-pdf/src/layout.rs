@@ -810,6 +810,10 @@ pub(crate) struct Laid {
     pub regions: PageRegions,
     /// The page as the region engine took it; none for a page not laid out.
     pub engine_in: Option<layoutregions::PageIn>,
+    /// The regions that became rows of a tagged table begun on an earlier page: the region's
+    /// place in `regions` and the table. Their host is a block of this page near them, for
+    /// when the table has no anchor.
+    pub earlier: Vec<(usize, usize)>,
 }
 
 /// The regions of a page that was not laid out.
@@ -1056,7 +1060,7 @@ fn page_blocks_until(
             p
         }
     };
-    let mut arb = InOrder::new(&engine_in, &layoutregions::Limits::default());
+    let mut arb = InOrder::new(&engine_in, &rezzer_layout::pdf::engine_limits(cx.budget));
     let mut pcx = PageCx {
         page,
         height,
@@ -1183,6 +1187,8 @@ fn page_blocks_until(
         None => untagged(runs, slots, Some(ids), &text_sizes, cx, built),
     };
     let mut start = 0;
+    // What each placed part became, by its place in `placed` (see [`finders::Became`]).
+    let mut became: Vec<finders::Became> = Vec::with_capacity(placed.len());
     for p in placed {
         let (at, _) = p.at();
         let end = start + flow.at[start..].partition_point(|a| *a < at);
@@ -1193,6 +1199,11 @@ fn page_blocks_until(
             &mut built,
         );
         start = end;
+        let first = built.blocks.len();
+        let earlier = match &p {
+            Placed::Table(t) => t.tagged.filter(|_| t.continues),
+            _ => None,
+        };
         match p {
             Placed::Table(t) => built.table(t, cx),
             Placed::Title(t) => {
@@ -1218,6 +1229,7 @@ fn page_blocks_until(
                 notes.push((what, LossReason::Uncertain, Severity::Info));
             }
         }
+        became.push(finders::became(&built.blocks, first, earlier));
     }
     lay(
         &flow.runs[start..],
@@ -1331,9 +1343,12 @@ fn page_blocks_until(
             r.host = placed_at.get(r.host as usize).copied().unwrap_or(r.host);
         }
     }
+    // From here on a region's host is the block it became.
+    let earlier = finders::block_hosts(&mut regions, &became, &built.blocks);
     let probe_block = std::mem::take(&mut built.probe_block);
     let probes_cut = built.probes_cut;
     let mut laid = built.laid(notes, regions);
+    laid.earlier = earlier;
     laid.engine_in = Some(engine_in);
     laid.probes_cut = probes_cut;
     laid.found_by = footnotes::note(page, footnotes_written, linked_written);
@@ -1355,6 +1370,14 @@ fn page_blocks_until(
         .map(|k| k.and_then(|k| anchor_of(laid.blocks.get(k)?)))
         .collect();
     laid
+}
+
+/// The anchor a block of a page carries, a footnote section's (`fn:<label>`) too.
+pub(crate) fn block_anchor(block: &Block) -> Option<Anchor> {
+    match block {
+        Block::Section { anchor, .. } => anchor.clone(),
+        b => anchor_of(b),
+    }
 }
 
 fn anchor_of(block: &Block) -> Option<Anchor> {
@@ -1539,6 +1562,7 @@ impl Built {
             dates: None,
             regions,
             engine_in: None,
+            earlier: Vec::new(),
         }
     }
 
@@ -3829,6 +3853,7 @@ mod tests {
             kind: layoutregions::Kind::Table,
             ids: Vec::new(),
             by: crate::tables::Detector::Grid,
+            drawn: None,
         };
         let mut built = Built::default();
         built.table(plan, &cx);
@@ -3945,6 +3970,7 @@ mod tests {
             kind: layoutregions::Kind::Table,
             ids: Vec::new(),
             by: crate::tables::Detector::Grid,
+            drawn: None,
         };
         let mut built = Built::default();
         built.table(plan, &cx);
@@ -3999,6 +4025,7 @@ mod tests {
             kind: layoutregions::Kind::Table,
             ids: Vec::new(),
             by: crate::tables::Detector::Grid,
+            drawn: None,
         };
         let mut built = Built::default();
         built.table(plan, &cx);

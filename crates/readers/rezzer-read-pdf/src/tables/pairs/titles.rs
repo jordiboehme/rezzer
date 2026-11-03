@@ -21,6 +21,10 @@ const TITLE_TEXT_LINES: usize = 20;
 /// bars looked at for a rule between lines); past them it stops and says so.
 const TITLE_WORK: usize = 4_000_000;
 
+/// A title found over a bar: the runs of its line, the runs of the lines under it, its top
+/// and the bar (x0, y0, x1, y1).
+type TitleFound = (Vec<usize>, Vec<usize>, f32, [f32; 4]);
+
 /// Titles over a drawn bar: a line of bold text alone over a horizontal rule that no grid
 /// takes, the rule under its baseline by at most the title's size, longer than the title and
 /// starting within two of its sizes of the title's start; and under the rule, within its
@@ -90,7 +94,7 @@ pub(crate) fn underlined_titles(
     let lines = flow_lines(flow);
     let by_y = ByY::new(flow, &lines);
     let mut used = vec![false; flow.runs.len()];
-    let mut found: Vec<(Vec<usize>, Vec<usize>, f32)> = Vec::new();
+    let mut found: Vec<TitleFound> = Vec::new();
     let mut halted: Option<&'static str> = None;
     // Runs between two heights, charged to the work before they are copied.
     let between = |lo: f32, hi: f32, work: &mut usize| -> Option<Vec<usize>> {
@@ -219,14 +223,14 @@ pub(crate) fn underlined_titles(
             .iter()
             .map(|&i| flow.runs[i].y + flow.runs[i].size)
             .fold(f32::MIN, f32::max);
-        found.push((title, text, top));
+        found.push((title, text, top, [bar.from, bar.at, bar.to, bar.at]));
     }
     if found.is_empty() {
         return (Vec::new(), halted);
     }
     let mut owner: Vec<Option<(usize, bool)>> = vec![None; flow.runs.len()];
     let mut out: Vec<BoxTitle> = Vec::with_capacity(found.len());
-    for (k, (title, text, top)) in found.iter().enumerate() {
+    for (k, (title, text, top, bar)) in found.iter().enumerate() {
         for &i in title {
             owner[i] = Some((k, false));
         }
@@ -240,6 +244,7 @@ pub(crate) fn underlined_titles(
             runs: Vec::new(),
             text: Vec::new(),
             ids: Vec::new(),
+            drawn: Some(*bar),
         });
     }
     let picked: Vec<usize> = (0..flow.runs.len())

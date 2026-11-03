@@ -402,6 +402,7 @@ pub(crate) fn tagged(
             kind: layoutregions::Kind::Table,
             ids: ids.remove(&t).unwrap_or_default(),
             by: super::Detector::Tagged,
+            drawn: None,
         });
     }
     (out, fallbacks)

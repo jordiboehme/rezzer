@@ -2163,8 +2163,10 @@ dependencies = [
 name = "rezzer-layout"
 version = "0.1.0"
 dependencies = [
+ "layoutregions",
  "rezzer-limits",
  "rezzer-model",
+ "serde_json",
  "sheetlayout",
 ]
 
@@ -2284,6 +2286,7 @@ dependencies = [
  "libc",
  "pdfparts",
  "read-fonts 0.46.0",
+ "rezzer-layout",
  "rezzer-limits",
  "rezzer-model",
  "rezzer-render",

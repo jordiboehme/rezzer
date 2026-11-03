@@ -1,5 +1,6 @@
 ---
 source: crates/rezzer/tests/corpus.rs
+assertion_line: 294
 ---
 {
   "body": [
@@ -628,6 +629,249 @@ source: crates/rezzer/tests/corpus.rs
     "title": "Two-Column Document with Lorem Ipsum",
     "title_from": "largest heading in the top third of page 1"
   },
+  "regions": [
+    {
+      "anchor": "p1:b9",
+      "bounds": [
+        303.13,
+        135.93,
+        308.11,
+        149.22
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.furniture",
+          "kind": "rule"
+        }
+      ],
+      "kind": "footer_band",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b1",
+      "bounds": [
+        155.83,
+        669.51,
+        455.42,
+        692.46
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "heading",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b2",
+      "bounds": [
+        276.53,
+        642.37,
+        334.73,
+        658.31
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b3",
+      "bounds": [
+        264.9,
+        619.05,
+        346.35,
+        635.0
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b4",
+      "bounds": [
+        72.0,
+        581.06,
+        133.68,
+        600.19
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "heading",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b5",
+      "bounds": [
+        72.0,
+        165.82,
+        300.65,
+        573.85
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b6",
+      "bounds": [
+        310.61,
+        451.02,
+        539.25,
+        595.81
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b7",
+      "bounds": [
+        310.61,
+        326.35,
+        539.25,
+        447.23
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b8",
+      "bounds": [
+        310.61,
+        165.82,
+        539.25,
+        322.57
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p2:b4",
+      "bounds": [
+        303.13,
+        135.93,
+        308.11,
+        149.22
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.furniture",
+          "kind": "rule"
+        }
+      ],
+      "kind": "footer_band",
+      "page": 2,
+      "score": 1000
+    },
+    {
+      "anchor": "p2:b1",
+      "bounds": [
+        72.0,
+        165.82,
+        300.65,
+        717.09
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 2,
+      "score": 1000
+    },
+    {
+      "anchor": "p2:b2",
+      "bounds": [
+        310.61,
+        608.16,
+        539.25,
+        717.09
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "",
+          "id": "pdf.lines",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 2,
+      "score": 1000
+    },
+    "<4 more items>"
+  ],
   "source": {
     "detection": {
       "confidence": "certain",

@@ -67,6 +67,9 @@ pub(crate) struct BoxTitle {
     pub text: Vec<Run>,
     /// The ids of the runs of `runs` and `text` (see [`Flow::ids`]), in the order taken.
     pub ids: Vec<u32>,
+    /// The box of the drawn box or rule the title was read by (its frame, its box, the rule
+    /// under it), in the frame of the runs. Its region reaches over it.
+    pub drawn: Option<[f32; 4]>,
 }
 
 /// One field: the runs of its label and of its value (none: the field is empty).
@@ -530,6 +533,19 @@ pub(super) fn pairs_table(
         kind: layoutregions::Kind::LabelValue,
         ids: Vec::new(),
         by,
+        drawn: None,
+    })
+}
+
+/// The box around `boxes` (x0, y0, x1, y1); `None` for none.
+pub(super) fn union(boxes: impl Iterator<Item = [f32; 4]>) -> Option<[f32; 4]> {
+    boxes.reduce(|a, b| {
+        [
+            a[0].min(b[0]),
+            a[1].min(b[1]),
+            a[2].max(b[2]),
+            a[3].max(b[3]),
+        ]
     })
 }
 
