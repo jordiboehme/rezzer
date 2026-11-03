@@ -222,6 +222,13 @@ pub(crate) struct Style {
     two_page: HashSet<String>,
     /// The footnote legend of each untagged page that has one, by the page's runs.
     legends: BTreeMap<u32, footnotes::Found>,
+    /// The facts as learned and as the typers look them up, for the shadow of the scored
+    /// reading (see [`crate::shadow`]).
+    #[cfg(debug_assertions)]
+    facts: (
+        layoutregions::file::FileFacts,
+        layoutregions::typers::FileIndex,
+    ),
 }
 
 /// One visual line.
@@ -287,12 +294,21 @@ impl Style {
     /// `tagged` files say their footnotes themselves.
     pub(crate) fn learn(pages: &[PageText<'_>], tagged: bool) -> Style {
         let facts = file::learn(pages, tagged, &ends_in_amount);
+        #[cfg(debug_assertions)]
+        let kept = if crate::shadow::enabled() {
+            let index = layoutregions::typers::FileIndex::new(&facts);
+            (facts.clone(), index)
+        } else {
+            Default::default()
+        };
         Style {
             body_size: facts.body_size,
             heading_sizes: facts.heading_sizes,
             running: RunningIndex::new(&facts.running),
             two_page: facts.two_page.into_iter().collect(),
             legends: facts.legends,
+            #[cfg(debug_assertions)]
+            facts: kept,
         }
     }
 
@@ -503,6 +519,9 @@ pub(crate) struct Laid {
     pub regions: PageRegions,
     /// The page as the region engine took it; none for a page not laid out.
     pub engine_in: Option<layoutregions::PageIn>,
+    /// The scored reading of the page beside the in-order one (see [`crate::shadow`]); only
+    /// in a debug build with `REZZER_SHADOW` set.
+    pub shadow: Option<crate::shadow::Shadow>,
     /// The regions that became rows of a tagged table begun on an earlier page: the region's
     /// place in `regions` and the table. Their host is a block of this page near them, for
     /// when the table has no anchor.
@@ -1036,6 +1055,18 @@ fn page_blocks_until(
     let probes_cut = built.probes_cut;
     let mut laid = built.laid(notes, regions);
     laid.earlier = earlier;
+    #[cfg(debug_assertions)]
+    {
+        let (facts, index) = &cx.style.facts;
+        laid.shadow = crate::shadow::run(
+            &engine_in,
+            facts,
+            index,
+            &rezzer_layout::pdf::engine_limits(cx.budget),
+            &ends_in_amount,
+            cx.tree.is_some(),
+        );
+    }
     laid.engine_in = Some(engine_in);
     laid.probes_cut = probes_cut;
     laid.found_by = footnotes::note(page, footnotes_written, linked_written);
@@ -1249,6 +1280,7 @@ impl Built {
             dates: None,
             regions,
             engine_in: None,
+            shadow: None,
             earlier: Vec::new(),
         }
     }

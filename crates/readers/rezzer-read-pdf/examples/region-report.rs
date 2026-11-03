@@ -17,6 +17,14 @@
 //! each file and each kind it has instead. With `--check <file>` it compares the first set's
 //! column with `<file>` (lines `kind\tcount`, as the first column prints) and exits 1 on a
 //! difference, naming the old and the new line.
+//!
+//! `region-report shadow [--extent] [--records <file>] <input>...` reads every `.pdf` of the
+//! inputs with the scored reading of each page beside the in-order one (see
+//! `rezzer_read_pdf::shadow`) and prints `file\tpage\tanchor\tin-order kind\tscored
+//! kind\tcertainty\tbest signals\textent` for each region where the two differ in kind or
+//! certainty (with `--extent`, in extent too). `--records` writes the raw comparison of every
+//! page to `<file>`, each line led by the file. The shadow runs only in a debug build with
+//! `REZZER_SHADOW` set.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -260,8 +268,77 @@ impl Counts {
     }
 }
 
+/// The `shadow` mode: see the module. `Ok(n)`, the lines printed.
+fn shadow(args: &[String]) -> Result<usize, String> {
+    if !cfg!(debug_assertions) || std::env::var_os("REZZER_SHADOW").is_none() {
+        return Err("the shadow runs only in a debug build with REZZER_SHADOW set".to_string());
+    }
+    let mut extent = false;
+    let mut records: Option<String> = None;
+    let mut inputs = Vec::new();
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--extent" => extent = true,
+            "--records" => records = Some(it.next().ok_or("--records needs a file")?.clone()),
+            flag if flag.starts_with("--") => return Err(format!("unknown option {flag}")),
+            _ => inputs.push(a.clone()),
+        }
+    }
+    if inputs.is_empty() {
+        return Err("no input to read".to_string());
+    }
+    let mut raw = String::new();
+    let mut printed = 0;
+    for input in &inputs {
+        let (root, files) = files_of(input)?;
+        for file in files {
+            let bytes = std::fs::read(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+            let (_, pages) = rezzer_read_pdf::read_engine_pages(
+                &source(&name_of(&file), bytes),
+                &ReadOptions::default(),
+                &budget(),
+            );
+            let name = out_path(&root.to_string_lossy(), &file.to_string_lossy(), "")
+                .trim_end_matches('.')
+                .to_string();
+            for page in &pages {
+                for line in rezzer_read_pdf::shadow::lines(page, extent) {
+                    println!("{name}\t{line}");
+                    printed += 1;
+                }
+                if records.is_some() {
+                    for line in rezzer_read_pdf::shadow::records(page) {
+                        raw.push_str(&name);
+                        raw.push('\t');
+                        raw.push_str(&line);
+                        raw.push('\n');
+                    }
+                }
+            }
+        }
+    }
+    if let Some(file) = records {
+        std::fs::write(&file, raw).map_err(|e| format!("{file}: {e}"))?;
+    }
+    Ok(printed)
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|m| m == "shadow") {
+        match shadow(&args[1..]) {
+            Ok(n) => eprintln!("{n} differences"),
+            Err(e) => {
+                eprintln!(
+                    "region-report: {e}\nusage: region-report shadow [--extent] [--records \
+                     <file>] <input>..."
+                );
+                std::process::exit(2);
+            }
+        }
+        return;
+    }
     if args.first().is_some_and(|m| m == "counts") {
         let counts = match Counts::parse(&args[1..]) {
             Ok(counts) => counts,
@@ -295,7 +372,8 @@ fn main() {
         _ => {
             eprintln!(
                 "usage: region-report dump <out-dir> <input>...\n       region-report counts \
-                 [--per-file] [--check <file>] <set>..."
+                 [--per-file] [--check <file>] <set>...\n       region-report shadow \
+                 [--extent] [--records <file>] <input>..."
             );
             std::process::exit(2);
         }

@@ -31,6 +31,8 @@ mod quote;
 mod regions;
 mod render;
 mod scan;
+#[doc(hidden)]
+pub mod shadow;
 mod symbol;
 mod tables;
 mod text;
@@ -101,6 +103,11 @@ pub struct EnginePage {
     /// The page's primitives: `PrimId::Text(i)` of a region is `input.texts[i]`.
     pub input: layoutregions::PageIn,
     pub regions: layoutregions::PageRegions,
+    /// The anchor of the block at each place a region's `host` names, if it has one.
+    pub anchors: Vec<Option<String>>,
+    /// The scored reading beside the regions (see [`shadow`]); only in a debug build with
+    /// `REZZER_SHADOW` set.
+    pub shadow: Option<shadow::Shadow>,
 }
 
 /// [`read_with_regions`] with the input of each page, so a test can map a region's pieces back
@@ -837,6 +844,11 @@ fn lay_out(
                 all.push(EnginePage {
                     input,
                     regions: page_regions,
+                    anchors: anchors
+                        .iter()
+                        .map(|a| a.as_ref().map(|a| a.0.clone()))
+                        .collect(),
+                    shadow: laid.shadow.take(),
                 });
             }
             blocks.extend(laid.blocks);

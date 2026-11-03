@@ -144,6 +144,17 @@ pub struct Segments {
 /// assert!(s.issues.is_empty());
 /// ```
 pub fn segment_page(page: &PageIn, limits: &Limits, stop: &dyn Fn() -> bool) -> Segments {
+    segment_with(page, None, limits, stop).0
+}
+
+/// [`segment_page`] with the drawn structure it found on the page (from the text the given
+/// regions leave), so a host can type the segments with the structure they were cut by;
+/// `None` when a bound or the stop came before the search.
+pub fn segment_page_drawn(
+    page: &PageIn,
+    limits: &Limits,
+    stop: &dyn Fn() -> bool,
+) -> (Segments, Option<drawn::DrawnStructure>) {
     segment_with(page, None, limits, stop)
 }
 
@@ -157,15 +168,16 @@ pub fn segment_drawn(
     limits: &Limits,
     stop: &dyn Fn() -> bool,
 ) -> Segments {
-    segment_with(page, Some(found), limits, stop)
+    segment_with(page, Some(found), limits, stop).0
 }
 
+/// The segments of `page` and the drawn structure found for them when the host gave none.
 fn segment_with(
     page: &PageIn,
     found: Option<&drawn::DrawnStructure>,
     limits: &Limits,
     stop: &dyn Fn() -> bool,
-) -> Segments {
+) -> (Segments, Option<drawn::DrawnStructure>) {
     let mut b = Builder {
         page,
         limits,
@@ -186,14 +198,14 @@ fn segment_with(
         y1: page.size[1],
     };
     let root = b.push(Source::Page, every, Some(frame), None, false);
-    b.segment(root, found);
+    let own = b.segment(root, found);
     let out = Segments {
         all: b.all,
         root,
         issues: b.issues,
     };
     debug_assert_eq!(cover_problem(&out, page), None);
-    out
+    (out, own)
 }
 
 /// The issues a page gets at most once each.
@@ -346,10 +358,16 @@ impl Builder<'_> {
     }
 
     /// Parts the root: given regions, then the drawn structure, the cut and the style steps.
-    fn segment(&mut self, root: SegId, found: Option<&drawn::DrawnStructure>) {
+    /// Segments the page under `root`; the drawn structure it found itself when `found` is
+    /// `None` and the search ran.
+    fn segment(
+        &mut self,
+        root: SegId,
+        found: Option<&drawn::DrawnStructure>,
+    ) -> Option<drawn::DrawnStructure> {
         let page = self.page;
         if self.halted() {
-            return;
+            return None;
         }
         // Given regions first; their primitives are taken out of the rest.
         let mut taken = Taken::new(page);
@@ -367,13 +385,10 @@ impl Builder<'_> {
         }
         // The drawn structure the host found, or from the text the given regions leave: a box
         // holds text when the centre of a run lies in it.
-        let own;
+        let mut own = None;
         let found = match found {
             Some(found) => found,
-            None => {
-                own = self.drawn(&taken);
-                &own
-            }
+            None => own.insert(self.drawn(&taken)),
         };
         let mut items = self.items(found);
         self.assign(&mut items, &taken);
@@ -385,10 +400,10 @@ impl Builder<'_> {
             if parts > 0 || self.text_parts(&items[0].texts) {
                 self.note(Note::Depth);
             }
-            return;
+            return own;
         }
         if !self.room(regions.len() + own_parts(&items, 0, &sub, regions.len())) {
-            return;
+            return own;
         }
         for (kind, prims) in regions {
             let id = self.push(Source::Given(kind), prims, None, Some(root), true);
@@ -399,6 +414,7 @@ impl Builder<'_> {
             let next = self.item(&items, i, s, &mut sub);
             stack.extend(next.into_iter().rev());
         }
+        own
     }
 
     /// The drawn structure of the page, from the text the given regions leave (`taken`): a box

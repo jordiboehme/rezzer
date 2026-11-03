@@ -717,6 +717,60 @@ fn generated_region_counts() {
     assert!(moved.is_empty(), "{}", moved.join("\n"));
 }
 
+/// The scored reading beside the in-order one over every sampled variant of every shape (see
+/// `rezzer_read_pdf::shadow`): writes `<dir>/shadow.tsv` (the lines of `region-report
+/// shadow`, each led by `shape/variant`) and `<dir>/records.tsv` (the raw comparison) for the
+/// dir in `REZZER_SHADOW_OUT`. Without the variable it does nothing; the shadow itself needs
+/// a debug build with `REZZER_SHADOW` set. `REZZER_SHADOW_SHAPES`, a comma list of shape
+/// numbers from 0, reads only those shapes.
+#[test]
+#[ignore = "writes files when REZZER_SHADOW_OUT is set"]
+fn shadow_generated_reads() {
+    let Some(dir) = std::env::var_os("REZZER_SHADOW_OUT") else {
+        return;
+    };
+    assert!(
+        std::env::var_os("REZZER_SHADOW").is_some(),
+        "set REZZER_SHADOW as well, in a debug build"
+    );
+    let only: Option<Vec<usize>> = std::env::var("REZZER_SHADOW_SHAPES")
+        .ok()
+        .map(|s| s.split(',').filter_map(|n| n.trim().parse().ok()).collect());
+    let dir = std::path::PathBuf::from(dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let limits = rezzer_limits::Limits {
+        max_time: std::time::Duration::from_secs(3600),
+        ..rezzer_limits::Limits::default()
+    };
+    let (mut lines, mut records) = (String::new(), String::new());
+    let mut shadowed = 0usize;
+    for (k, shape) in all_shapes().into_iter().enumerate() {
+        if only.as_ref().is_some_and(|o| !o.contains(&k)) {
+            continue;
+        }
+        for page in axes::variants(&shape) {
+            let (_, pages) = rezzer_read_pdf::read_engine_pages(
+                &common::source(&inv::file(&page)),
+                &rezzer_model::ReadOptions::default(),
+                &rezzer_limits::Budget::new(limits.clone()),
+            );
+            let name = format!("{}/{}", file_name(shape.name), file_name(&page.name));
+            for p in &pages {
+                shadowed += usize::from(p.shadow.is_some());
+                for line in rezzer_read_pdf::shadow::lines(p, false) {
+                    lines.push_str(&format!("{name}\t{line}\n"));
+                }
+                for line in rezzer_read_pdf::shadow::records(p) {
+                    records.push_str(&format!("{name}\t{line}\n"));
+                }
+            }
+        }
+    }
+    assert!(shadowed > 0, "no page has a shadow: is this a debug build?");
+    std::fs::write(dir.join("shadow.tsv"), lines).unwrap();
+    std::fs::write(dir.join("records.tsv"), records).unwrap();
+}
+
 /// The detector without rules names its regions by class: a shape of each class, at its first
 /// variant, has a region of that class's signal and kind holding the shape's first word.
 #[test]
