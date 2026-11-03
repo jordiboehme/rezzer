@@ -72,6 +72,24 @@ pub(crate) fn signal(id: &'static str, detail: String, weight: u16) -> Signal {
     Signal { id, detail, weight }
 }
 
+/// Whether `seg` is text alone: a group of the whitespace cut or of style steps, or the rest of
+/// a segment's text, with no drawn part (grid, box, drawing) or given region under it. Style
+/// steps part labels from values, so such a group need not be a leaf.
+pub(crate) fn text_alone(view: &PageView<'_>, seg: &Segment) -> bool {
+    use crate::segment::Source;
+    matches!(
+        seg.source,
+        Source::Gutter | Source::Band | Source::Rule | Source::Style | Source::Rest
+    ) && seg.children.iter().all(|c| {
+        view.segs.all.get(c.0 as usize).is_some_and(|k| {
+            matches!(
+                k.source,
+                Source::Gutter | Source::Band | Source::Rule | Source::Style | Source::Rest
+            )
+        })
+    })
+}
+
 /// The text runs of `seg` on the page of `view`, borrowed, in the order of their ids, and
 /// those ids.
 pub(crate) fn seg_runs<'a>(view: &PageView<'a>, seg: &Segment) -> (Vec<&'a TextRun>, Vec<u32>) {
@@ -86,6 +104,35 @@ pub(crate) fn seg_runs<'a>(view: &PageView<'a>, seg: &Segment) -> (Vec<&'a TextR
         }
     }
     (refs, ids)
+}
+
+/// The runs with ink of some runs (not turned off the line), each with its place among
+/// them, their lines and the pieces of each line (see
+/// [`crate::extract::table::grid::pieces_of`]).
+pub(crate) struct Lined<'r> {
+    pub runs: Vec<&'r TextRun>,
+    pub at: Vec<usize>,
+    pub ranges: Vec<RunRange>,
+    pub pieces: Vec<Vec<crate::extract::table::grid::Piece>>,
+}
+
+pub(crate) fn lined<'r>(runs: &[&'r TextRun]) -> Lined<'r> {
+    let at: Vec<usize> = (0..runs.len())
+        .filter(|&k| !runs[k].text.trim().is_empty() && !runs[k].off_axis)
+        .collect();
+    let inked: Vec<&TextRun> = at.iter().map(|&k| runs[k]).collect();
+    let ranges = run_ranges(&inked);
+    let pieces = ranges
+        .iter()
+        .map(|l| crate::extract::table::grid::pieces_of(&inked, l.start, l.end))
+        .collect();
+    crate::work::add((inked.len() + ranges.len()) as u64);
+    Lined {
+        runs: inked,
+        at,
+        ranges,
+        pieces,
+    }
 }
 
 /// A typer: the evidence for its kind in a segment of the page the view shows. Pass the
@@ -169,6 +216,15 @@ pub struct PageView<'a> {
     totals: Vec<OnceCell<Option<table::TotalsRead>>>,
     /// The label styles that pairs with independent evidence show (see [`pairs::seeds`]).
     seeds: OnceCell<Vec<Style>>,
+    /// The label/value candidate of each segment, worked out once.
+    pairs: Vec<OnceCell<Option<Typed>>>,
+    /// Whether each segment's lines read as sentences across a ruled table, worked out once.
+    across: Vec<OnceCell<bool>>,
+    /// The segments read as tables, by the bottom of their tables, lowest first.
+    tables: OnceCell<Vec<(f32, usize)>>,
+    /// For each segment, whether it is a box that touches another box of its parent (see
+    /// [`pairs::touching_boxes`]).
+    touching: OnceCell<Vec<bool>>,
 }
 
 impl<'a> PageView<'a> {
@@ -287,6 +343,10 @@ impl<'a> PageView<'a> {
             readings: (0..n).map(|_| OnceCell::new()).collect(),
             totals: (0..n).map(|_| OnceCell::new()).collect(),
             seeds: OnceCell::new(),
+            pairs: (0..n).map(|_| OnceCell::new()).collect(),
+            across: (0..n).map(|_| OnceCell::new()).collect(),
+            tables: OnceCell::new(),
+            touching: OnceCell::new(),
         }
     }
 
@@ -358,6 +418,59 @@ impl<'a> PageView<'a> {
             || table::TotalsRead::of(self, seg),
             |t| f(t.as_ref()),
         )
+    }
+
+    /// The label/value candidate of `seg` (see [`pairs::type_label_value`]).
+    pub(crate) fn pairs_of(&self, seg: &Segment) -> Option<Typed> {
+        self.cached(
+            &self.pairs,
+            seg,
+            || pairs::label_value(self, seg),
+            Clone::clone,
+        )
+    }
+
+    /// Whether the lines of `seg` read as sentences across a ruled table (see
+    /// [`table::sentences_across`]).
+    pub(crate) fn across(&self, seg: &Segment) -> bool {
+        self.cached(
+            &self.across,
+            seg,
+            || table::sentences_across(self, seg),
+            |b| *b,
+        )
+    }
+
+    /// The table reading of the segment `i` of the view's tree.
+    pub(crate) fn reading_at(&self, i: usize) -> Option<&table::Find> {
+        let seg = self.segs.all.get(i)?;
+        Some(self.readings[i].get_or_init(|| table::Find::of(self, seg)))
+    }
+
+    /// The segments of the view's tree read as tables, by the bottom of their tables, lowest
+    /// first: worked out once, as every table reading is worked out once.
+    pub(crate) fn tables(&self) -> &[(f32, usize)] {
+        self.tables.get_or_init(|| {
+            let mut out: Vec<(f32, usize)> = (0..self.segs.all.len())
+                .filter_map(|i| match self.reading_at(i) {
+                    Some(table::Find::Table(t)) => Some((t.bounds[1], i)),
+                    _ => None,
+                })
+                .collect();
+            crate::work::add(self.segs.all.len() as u64);
+            out.sort_by(|a, b| a.0.total_cmp(&b.0));
+            out
+        })
+    }
+
+    /// Whether the segment `i` of the view's tree is a box that touches another box of its
+    /// parent (see [`pairs::touching_boxes`]).
+    pub(crate) fn touches(&self, i: usize) -> bool {
+        self.touching
+            .get_or_init(|| pairs::touching_boxes(self))
+            .get(i)
+            .copied()
+            .unwrap_or(false)
     }
 
     /// The label styles of the page that may seed weight-only pairs (see [`pairs::seeds`]).

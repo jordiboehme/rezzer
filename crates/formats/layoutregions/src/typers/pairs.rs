@@ -19,13 +19,13 @@ use crate::extract::pairs::{
     Field, Parsed, Reading, Style, WEIGHT_ONLY, parse, small_size, style_of, touch_reach, touching,
     words,
 };
-use crate::extract::table::grid::{Piece, Shape, pieces_of, titles_over_values};
+use crate::extract::table::grid::{Shape, titles_over_values};
 use crate::extract::table::ruled::edges;
-use crate::extract::table::{RunRange, run_ranges};
 use crate::input::TextRun;
 use crate::region::Kind;
 use crate::segment::{Segment, Source};
-use crate::typers::{PageView, Typed, seg_runs, signal};
+use crate::typers::table::group_at;
+use crate::typers::{Lined, PageView, Typed, lined, seg_runs, signal, text_alone};
 
 /// `label_value.fields`: the pair rules read the segment as fields.
 pub const LABEL_FIELDS: u16 = 450;
@@ -33,8 +33,10 @@ pub const LABEL_FIELDS: u16 = 450;
 /// rules with dividers) reads as a field: the cells are fields, not a table's values.
 pub const LABEL_FIELD_CELLS: u16 = 850;
 /// `label_value.key_values` and `label_value.labels_over_values`: the lines are a block of
-/// labels and values, or two lines of titles over their values (today's first readings).
-pub const LABEL_KEY_VALUES: u16 = 850;
+/// labels and values, or two lines of titles over their values (today's first readings). Such
+/// lines stand in two pieces or more, so a heading's reading of them is demoted as cells (at
+/// most 650), and a list's reading reaches 750 at most.
+pub const LABEL_KEY_VALUES: u16 = 900;
 /// `label_value.label_style`: the label is set apart by a size step or another style at the
 /// top or left of its value.
 pub const LABEL_STYLE: u16 = 100;
@@ -102,21 +104,6 @@ fn box_field<'v>(
     }
 }
 
-/// The lines and their pieces of the runs with ink of `runs`.
-fn lined<'r>(runs: &[&'r TextRun]) -> (Vec<&'r TextRun>, Vec<RunRange>, Vec<Vec<Piece>>) {
-    let inked: Vec<&TextRun> = runs
-        .iter()
-        .copied()
-        .filter(|r| !r.text.trim().is_empty() && !r.off_axis)
-        .collect();
-    let ranges = run_ranges(&inked);
-    let pieces = ranges
-        .iter()
-        .map(|l| pieces_of(&inked, l.start, l.end))
-        .collect();
-    (inked, ranges, pieces)
-}
-
 /// The label styles that pairs with independent evidence show on the page: the label of a
 /// box read as a field with a value, or of a line of a block of labels and values, whose label
 /// ends with a colon or whose value is shaped as a number, a date or a code. A pair decided by
@@ -148,10 +135,13 @@ pub(crate) fn seeds(view: &PageView<'_>) -> Vec<Style> {
                     seed(&refs, &f.label, &f.value);
                 }
             }
-            Source::Gutter | Source::Band | Source::Rule | Source::Style | Source::Rest
-                if seg.children.is_empty() =>
-            {
-                let (runs, ranges, pieces) = lined(&refs);
+            _ if text_alone(view, seg) => {
+                let Lined {
+                    runs,
+                    ranges,
+                    pieces,
+                    ..
+                } = lined(&refs);
                 let off = vec![false; ranges.len()];
                 if let KeyValues::Rows(rows) =
                     key_values(&runs, &ranges, 0, ranges.len(), &pieces, &off)
@@ -205,6 +195,11 @@ fn frame(s: &Segment) -> [f32; 4] {
 /// pair read by a seeded style (`label_value.known_style`). Lines read as totals under a table
 /// are none.
 pub fn type_label_value(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
+    view.pairs_of(seg)
+}
+
+/// [`type_label_value`] worked out (the view keeps it per segment).
+pub(crate) fn label_value(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
     if view.totals_of(seg, |t| t.is_some()) {
         return None;
     }
@@ -231,7 +226,13 @@ pub fn type_label_value(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
                 LABEL_STYLE,
             ));
             field_signals(&refs, std::slice::from_ref(&field), &mut signals);
-            if box_touches(view, seg, &refs) {
+            if view.touches(seg.id.0 as usize)
+                && view
+                    .segs
+                    .all
+                    .get(seg.id.0 as usize)
+                    .is_some_and(|s| std::ptr::eq(s, seg))
+            {
                 signals.push(signal(
                     "label_value.boxes_touch",
                     "its box touches another box of a field in a row or a column".into(),
@@ -247,10 +248,13 @@ pub fn type_label_value(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
             }
         }
         Source::Grid { rows, cols } => grid_fields(view, seg, (rows, cols), &mut signals)?,
-        Source::Gutter | Source::Band | Source::Rule | Source::Style | Source::Rest
-            if seg.children.is_empty() =>
-        {
-            let (runs, ranges, pieces) = lined(&refs);
+        _ if text_alone(view, seg) => {
+            let Lined {
+                runs,
+                ranges,
+                pieces,
+                ..
+            } = lined(&refs);
             let off = vec![false; ranges.len()];
             if let KeyValues::Rows(rows) =
                 key_values(&runs, &ranges, 0, ranges.len(), &pieces, &off)
@@ -275,29 +279,112 @@ pub fn type_label_value(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
     Typed::of(Kind::LabelValue, signals)
 }
 
-/// Whether the box `seg` touches a sibling box with text in a row or a column (see
-/// [`touching`]), or stands in a grid of one row or one column.
-fn box_touches(view: &PageView<'_>, seg: &Segment, refs: &[&TextRun]) -> bool {
-    let Some(parent) = seg.parent.and_then(|p| view.segs.all.get(p.0 as usize)) else {
-        return false;
-    };
-    if matches!(parent.source, Source::Grid { rows, cols } if rows == 1 || cols == 1) {
-        return true;
-    }
-    let ids: Vec<usize> = (0..refs.len()).collect();
-    let reach = touch_reach(refs, &ids);
-    parent.children.iter().any(|c| {
-        let Some(other) = view.segs.all.get(c.0 as usize) else {
-            return false;
-        };
-        if other.id == seg.id || other.source != Source::Box {
-            return false;
+/// For each segment of the view's tree, whether it is a box with text that touches another
+/// box with text of its parent in a row or a column (see [`touching`], each box within its own
+/// reach, see [`touch_reach`]), or a box in a grid of one row or one column. The boxes are
+/// sorted by their left and top edges once, so each box looks only at the boxes whose left
+/// edge stands at its right edge or whose top stands at its bottom, within the largest reach
+/// of the page.
+pub(crate) fn touching_boxes(view: &PageView<'_>) -> Vec<bool> {
+    let all = &view.segs.all;
+    let mut out = vec![false; all.len()];
+    // Each box with text: its index, frame and reach.
+    let mut boxes: Vec<(usize, [f32; 4], f32)> = Vec::new();
+    for (i, seg) in all.iter().enumerate() {
+        if seg.source != Source::Box {
+            continue;
         }
-        let (theirs, _) = seg_runs(view, other);
-        let them: Vec<usize> = (0..theirs.len()).collect();
-        let t = reach.max(touch_reach(&theirs, &them));
-        !theirs.is_empty() && touching(frame(seg), frame(other), t)
-    })
+        let (refs, _) = seg_runs(view, seg);
+        crate::work::add(refs.len() as u64 + 1);
+        if refs.iter().all(|r| r.text.trim().is_empty()) {
+            continue;
+        }
+        let in_line = seg.parent.and_then(|p| all.get(p.0 as usize)).is_some_and(
+            |p| matches!(p.source, Source::Grid { rows, cols } if rows == 1 || cols == 1),
+        );
+        out[i] = in_line;
+        let ids: Vec<usize> = (0..refs.len()).collect();
+        boxes.push((i, frame(seg), touch_reach(&refs, &ids)));
+    }
+    let reach = boxes.iter().map(|b| b.2).fold(0.0f32, f32::max);
+    let mut by_left: Vec<usize> = (0..boxes.len()).collect();
+    by_left.sort_by(|&a, &b| boxes[a].1[0].total_cmp(&boxes[b].1[0]));
+    let mut by_top: Vec<usize> = (0..boxes.len()).collect();
+    by_top.sort_by(|&a, &b| boxes[a].1[3].total_cmp(&boxes[b].1[3]));
+    let window = |order: &[usize], key: usize, at: f32| -> (usize, usize) {
+        let lo = order.partition_point(|&k| boxes[k].1[key] < at - reach);
+        let hi = order.partition_point(|&k| boxes[k].1[key] <= at + reach);
+        (lo, hi.max(lo))
+    };
+    for a in 0..boxes.len() {
+        let (ia, fa, ra) = boxes[a];
+        let parent = all[ia].parent;
+        // Right of it (a row) and under it (a column).
+        let (l0, l1) = window(&by_left, 0, fa[2]);
+        let (t0, t1) = window(&by_top, 3, fa[1]);
+        for &b in by_left[l0..l1].iter().chain(&by_top[t0..t1]) {
+            crate::work::add(1);
+            let (ib, fb, rb) = boxes[b];
+            if ib != ia && all[ib].parent == parent && touching(fa, fb, ra.max(rb)) {
+                out[ia] = true;
+                out[ib] = true;
+            }
+        }
+    }
+    out
+}
+
+/// The fields of the cells of a Grid segment of the view: each square of its grid (its column
+/// and row edges, see [`edges`]) that holds text, read as one field (see [`parse`], with the
+/// page's seeds), when every one of them reads as a field, two or more and one with a value;
+/// the runs of the segment and the fields, which name runs of them.
+pub(crate) struct CellFields<'a> {
+    pub runs: Vec<&'a TextRun>,
+    pub fields: Vec<Field>,
+}
+
+pub(crate) fn cell_fields<'a>(view: &PageView<'a>, seg: &Segment) -> Option<CellFields<'a>> {
+    let Ok(g) = &view.drawn.grids else {
+        return None;
+    };
+    let grp = group_at(g, &seg.bounds)?;
+    let h: Vec<_> = grp.0.iter().map(|&j| g.hs[j]).collect();
+    let v: Vec<_> = grp.1.iter().map(|&k| g.vs[k]).collect();
+    let (xs, ys) = edges(&h, &v);
+    if xs.len() < 2 || ys.len() < 2 {
+        return None;
+    }
+    let (refs, _) = seg_runs(view, seg);
+    crate::work::add(refs.len() as u64);
+    let mut squares: std::collections::BTreeMap<(usize, usize), Vec<usize>> =
+        std::collections::BTreeMap::new();
+    for (k, r) in refs.iter().enumerate() {
+        if r.text.trim().is_empty() || r.off_axis {
+            continue;
+        }
+        let (cx, cy) = crate::extract::table::middle(r);
+        let c = xs
+            .partition_point(|e| *e < cx)
+            .saturating_sub(1)
+            .min(xs.len() - 2);
+        let row = ys
+            .partition_point(|e| *e > cy)
+            .saturating_sub(1)
+            .min(ys.len() - 2);
+        squares.entry((row, c)).or_default().push(k);
+    }
+    if squares.len() < 2 {
+        return None;
+    }
+    let mut fields = Vec::with_capacity(squares.len());
+    for ids in squares.values() {
+        let (f, _) = box_field(&refs, ids, view, Some(view.seeds()))?;
+        fields.push(f);
+    }
+    fields
+        .iter()
+        .any(|f| !f.value.is_empty())
+        .then_some(CellFields { runs: refs, fields })
 }
 
 /// The fields of a Grid segment: each cell box with text read as a field, at least one with a
@@ -309,32 +396,14 @@ fn grid_fields(
     (rows, cols): (u32, u32),
     signals: &mut Vec<crate::region::Signal>,
 ) -> Option<()> {
-    let (refs, _) = seg_runs(view, seg);
     let line = rows == 1 || cols == 1;
-    // The cells of the grid that hold text, each read as a field.
-    let mut fields: Vec<(Vec<&TextRun>, Field)> = Vec::new();
-    let mut all = true;
-    for c in &seg.children {
-        let Some(cell) = view.segs.all.get(c.0 as usize) else {
-            continue;
-        };
-        if cell.source != Source::Box {
-            continue;
-        }
-        let (runs, _) = seg_runs(view, cell);
-        if runs.iter().all(|r| r.text.trim().is_empty()) {
-            continue;
-        }
-        let ids: Vec<usize> = (0..runs.len()).collect();
-        match box_field(&runs, &ids, view, Some(view.seeds())) {
-            Some((f, _)) => fields.push((runs, f)),
-            None => all = false,
-        }
-    }
-    if all && fields.len() >= 2 && fields.iter().any(|(_, f)| !f.value.is_empty()) {
+    if let Some(cells) = cell_fields(view, seg) {
         signals.push(signal(
             "label_value.field_cells",
-            format!("{} cells each hold a label and its value", fields.len()),
+            format!(
+                "{} cells each hold a label and its value",
+                cells.fields.len()
+            ),
             LABEL_FIELD_CELLS,
         ));
         if line {
@@ -344,27 +413,10 @@ fn grid_fields(
                 LABEL_BOXES_TOUCH,
             ));
         }
-        let colon = fields
-            .iter()
-            .all(|(r, f)| words(r, &f.label).ends_with(':'));
-        let filled: Vec<&(Vec<&TextRun>, Field)> =
-            fields.iter().filter(|(_, f)| !f.value.is_empty()).collect();
-        if colon {
-            signals.push(signal(
-                "label_value.colon",
-                "the labels end with a colon".into(),
-                LABEL_COLON,
-            ));
-        }
-        if filled.iter().all(|(r, f)| value_shape(&words(r, &f.value))) {
-            signals.push(signal(
-                "label_value.value_shape",
-                "the values are numbers, dates or codes".into(),
-                LABEL_VALUE_SHAPE,
-            ));
-        }
+        field_signals(&cells.runs, &cells.fields, signals);
         return Some(());
     }
+    let (refs, _) = seg_runs(view, seg);
     // A row of fields between rules with dividers.
     if rows != 1 {
         return None;
@@ -372,15 +424,7 @@ fn grid_fields(
     let Ok(g) = &view.drawn.grids else {
         return None;
     };
-    let near = |a: f32, b: f32| (a - b).abs() <= crate::segment::drawn::SNAP;
-    let grp = g.groups.iter().find(|grp| {
-        crate::segment::drawn::grid_frame(g, grp).is_some_and(|(f, _, _)| {
-            near(f.x0, seg.bounds.x0)
-                && near(f.x1, seg.bounds.x1)
-                && near(f.y0, seg.bounds.y0)
-                && near(f.y1, seg.bounds.y1)
-        })
-    })?;
+    let grp = group_at(g, &seg.bounds)?;
     let h: Vec<_> = grp.0.iter().map(|&j| g.hs[j]).collect();
     let v: Vec<_> = grp.1.iter().map(|&k| g.vs[k]).collect();
     let (xs, _) = edges(&h, &v);

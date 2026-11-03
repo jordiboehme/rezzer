@@ -14,7 +14,8 @@
 //! or totals for theirs. Where today's rules read a place one way first, that reading refuses
 //! the other: lines [`key_values`] reads, two lines of titles over values (see
 //! [`titles_over_values`]), a grid whose cells all read as fields and lines read as totals
-//! under a table are no table's.
+//! under a table are no table's. Lines the walk of the text reads as an address or as
+//! sentences are no table's either: they say what the lines are.
 //!
 //! The totals typer looks for the table right above a segment among the segments beside the
 //! segment's path to the root, and asks whether every line of the segment holds an amount
@@ -27,23 +28,21 @@ use crate::extract::table::banded::{
     long_or_prose,
 };
 use crate::extract::table::caption::{FIGURE_NEAR, caption, captions_near};
-use crate::extract::table::grid::{
-    Piece, Shape, amount, grid_cells, pieces_of, set_full, titles_over_values,
-};
+use crate::extract::table::grid::{Piece, Shape, amount, grid_cells, set_full, titles_over_values};
 use crate::extract::table::ruled::{
     RuledIn, boxed_field, edges, hanging_rows, ruled_cells, sentence_across,
 };
 use crate::extract::table::sections::sections;
 use crate::extract::table::{
     CONTENTS, CROSSES_LINES, Cells, EMPTY_CELLS, LONG_TEXT, MAX_SQUARES, NO_ROWS_AND_COLUMNS,
-    ROWS_ALIKE, RUNS_ON, RunRange, SHORT_CELL, TableOut, header_of, middle, run_ranges,
+    ROWS_ALIKE, RUNS_ON, SHORT_CELL, TableOut, header_of, middle,
 };
 use crate::input::{PrimId, TextRun};
 use crate::line::LineRun;
 use crate::region::{Bounds, Kind, Signal};
 use crate::segment::drawn::{Grids, Line, SNAP, grid_frame};
 use crate::segment::{Segment, Source};
-use crate::typers::{PageView, Typed, seg_runs, signal};
+use crate::typers::{Lined, PageView, Typed, lined, seg_runs, signal, text_alone};
 
 /// `table.drawn_cells`, `table.header_band` and `table.columns`: the rule that builds the
 /// cells of a grid of drawn rules, of a header band over lines, or of lines in columns without
@@ -68,6 +67,19 @@ pub const TOTALS_RULE: u16 = 50;
 
 /// Why a reading is refused because a paragraph set full (justified) stands in pieces.
 const SET_FULL: &str = "its lines are a paragraph set full";
+/// Why lines of a heading size that read as an address are no table.
+const ADDRESS_LINES: &str = "its lines read as an address";
+/// Why lines a little larger than the body that read as sentences are no table.
+const SENTENCE_LINES: &str = "its lines read as sentences";
+/// Why a grid whose cells each hold a label and its value is no table.
+const FIELD_CELLS: &str = "its cells each hold a label and its value";
+/// Why lines of labels and values are no table.
+const KEY_VALUE_LINES: &str = "its lines are labels and values";
+/// Why two lines of titles over their values are no table.
+const TITLE_LINES: &str = "its lines are titles over their values";
+/// Why lines read as totals under a table are no table of their own.
+const TOTALS_LINES: &str = "its lines are totals under the table above";
+
 /// Why a grid of digit boxes is no table.
 const COMB: &str = "its boxes hold one digit each, a field to fill in";
 
@@ -93,9 +105,11 @@ pub(crate) enum How {
     Lines,
 }
 
-/// A refused reading: the kind its reason speaks for, as a named signal. A refusal for a
-/// paragraph carries the paragraph's weight; for a figure or the spatial fallback it carries
-/// none (those kinds weigh it themselves).
+/// A refused reading: the kind its reason speaks for, as a named signal. A refusal for prose
+/// carries the paragraph's weight ([`PARAGRAPH_PROSE_CELLS`]); every other refusal carries
+/// none: a figure's and the spatial fallback's for those kinds to weigh, and those for labels
+/// and values, totals, or an address or sentences the walk reads, because those kinds have
+/// signals of their own for the same evidence.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Refusal {
     pub kind: Kind,
@@ -127,8 +141,20 @@ impl Find {
     /// The reading of `seg` by the rule its source asks for (see the module doc), before
     /// totals are looked at.
     pub(crate) fn of(view: &PageView<'_>, seg: &Segment) -> Find {
+        let given = matches!(seg.source, Source::Given(_));
+        if !given
+            && !matches!(seg.source, Source::Drawing)
+            && let Some(why) = content_against(view, seg)
+        {
+            return refused(Speaks::Paragraph, why);
+        }
         match seg.source {
-            Source::Grid { rows, cols } if rows >= 2 && cols >= 2 => ruled(view, seg),
+            Source::Grid { rows, cols } if rows >= 2 && cols >= 2 => {
+                if super::pairs::cell_fields(view, seg).is_some() {
+                    return refused(Speaks::LabelValue, FIELD_CELLS);
+                }
+                ruled(view, seg)
+            }
             Source::Grid { .. } | Source::Drawing => Find::Nothing,
             Source::Given(_) => lines(view, seg, true),
             _ => {
@@ -153,22 +179,42 @@ impl Find {
     }
 }
 
-fn refused(kind: Kind, why: &'static str) -> Find {
-    let (id, weight) = match (kind, why) {
-        (Kind::Paragraph, _) => ("paragraph.prose_cells", PARAGRAPH_PROSE_CELLS),
-        (Kind::Figure, ON_PICTURE) => ("figure.on_picture", 0),
-        (Kind::Figure, TINY_TEXT) => ("figure.page_picture", 0),
-        (Kind::Figure, _) => ("figure.caption", 0),
-        (Kind::Spatial, PAGE_FRAME) => ("spatial.page_frame", 0),
-        (Kind::Spatial, MANY_COLUMNS) => ("spatial.many_columns", 0),
-        (Kind::Spatial, EMPTY_CELLS) => ("spatial.empty_cells", 0),
-        (Kind::Spatial, COMB) => ("spatial.comb_boxes", 0),
-        (Kind::Spatial, CONTENTS) => ("spatial.contents", 0),
-        (Kind::Spatial, ROWS_ALIKE) => ("spatial.rows_alike", 0),
-        (Kind::Spatial, _) => ("spatial.no_rows_and_columns", 0),
-        (Kind::LabelValue, _) => ("label_value.refuses_table", 0),
-        (Kind::Totals, _) => ("totals.refuses_table", 0),
-        _ => ("spatial.no_rows_and_columns", 0),
+/// The kinds a refusal of the table rules speaks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Speaks {
+    Paragraph,
+    Figure,
+    Spatial,
+    LabelValue,
+    Totals,
+}
+
+fn refused(speaks: Speaks, why: &'static str) -> Find {
+    let (kind, id, weight) = match (speaks, why) {
+        // The walk's demotion is already the paragraph's signal: the refusal names it with no
+        // weight of its own.
+        (Speaks::Paragraph, ADDRESS_LINES | SENTENCE_LINES) => {
+            (Kind::Paragraph, "paragraph.content_refuses_table", 0)
+        }
+        (Speaks::Paragraph, _) => (
+            Kind::Paragraph,
+            "paragraph.prose_cells",
+            PARAGRAPH_PROSE_CELLS,
+        ),
+        (Speaks::Figure, ON_PICTURE) => (Kind::Figure, "figure.on_picture", 0),
+        (Speaks::Figure, TINY_TEXT) => (Kind::Figure, "figure.page_picture", 0),
+        (Speaks::Figure, _) => (Kind::Figure, "figure.caption", 0),
+        (Speaks::Spatial, PAGE_FRAME) => (Kind::Spatial, "spatial.page_frame", 0),
+        (Speaks::Spatial, MANY_COLUMNS) => (Kind::Spatial, "spatial.many_columns", 0),
+        (Speaks::Spatial, EMPTY_CELLS) => (Kind::Spatial, "spatial.empty_cells", 0),
+        (Speaks::Spatial, COMB) => (Kind::Spatial, "spatial.comb_boxes", 0),
+        (Speaks::Spatial, CONTENTS) => (Kind::Spatial, "spatial.contents", 0),
+        (Speaks::Spatial, ROWS_ALIKE) => (Kind::Spatial, "spatial.rows_alike", 0),
+        (Speaks::Spatial, CROSSES_LINES) => (Kind::Spatial, "spatial.crossed_lines", 0),
+        (Speaks::Spatial, NO_ROWS_AND_COLUMNS) => (Kind::Spatial, "spatial.no_rows_and_columns", 0),
+        (Speaks::Spatial, _) => (Kind::Spatial, "spatial.refused_table", 0),
+        (Speaks::LabelValue, _) => (Kind::LabelValue, "label_value.refuses_table", 0),
+        (Speaks::Totals, _) => (Kind::Totals, "totals.refuses_table", 0),
     };
     Find::Refused(Refusal {
         kind,
@@ -176,27 +222,43 @@ fn refused(kind: Kind, why: &'static str) -> Find {
     })
 }
 
-/// The kind a reason of a table rule speaks for; `None` for a reason that only says the
-/// evidence of a table is missing (too few rows, no columns, columns not clean).
-fn speaks_for(why: &'static str) -> Option<Kind> {
+/// What a reason of a table rule speaks for; `None` for a reason that only says the evidence
+/// of a table is missing (too few rows, no columns, columns not clean).
+fn speaks_for(why: &'static str) -> Option<Speaks> {
     match why {
-        LONG_TEXT | RUNS_ON | SET_FULL => Some(Kind::Paragraph),
-        ON_PICTURE | TINY_TEXT | FIGURE_NEAR => Some(Kind::Figure),
+        LONG_TEXT | RUNS_ON | SET_FULL | ADDRESS_LINES | SENTENCE_LINES => Some(Speaks::Paragraph),
+        ON_PICTURE | TINY_TEXT | FIGURE_NEAR => Some(Speaks::Figure),
         PAGE_FRAME | MANY_COLUMNS | EMPTY_CELLS | NO_ROWS_AND_COLUMNS | CROSSES_LINES | COMB
-        | ROWS_ALIKE | CONTENTS => Some(Kind::Spatial),
+        | ROWS_ALIKE | CONTENTS => Some(Speaks::Spatial),
         _ => None,
     }
 }
 
 fn refused_for(why: &'static str) -> Find {
     match speaks_for(why) {
-        Some(kind) => refused(kind, why),
+        Some(speaks) => refused(speaks, why),
         None => Find::Nothing,
     }
 }
 
+/// Why the walk of the segment's lines speaks against a table, if it does: lines of a
+/// heading size that read as an address, or as sentences (see
+/// [`crate::extract::text::Demotion`]). These say what the lines are, as the reader's
+/// address blocks and prose refuse a table; the other demotions (lines apart, unwrapped, in
+/// cells) say how lines stand, which a table's rows do.
+fn content_against(view: &PageView<'_>, seg: &Segment) -> Option<&'static str> {
+    use crate::extract::text::Demotion;
+    view.with_text(seg, |t| {
+        t.demotions().find_map(|d| match d {
+            Demotion::Address => Some(ADDRESS_LINES),
+            Demotion::Sentences => Some(SENTENCE_LINES),
+            _ => None,
+        })
+    })
+}
+
 /// The group of `g` whose frame is `b` (within [`SNAP`]).
-fn group_at<'g>(g: &'g Grids, b: &Bounds) -> Option<&'g (Vec<usize>, Vec<usize>)> {
+pub(crate) fn group_at<'g>(g: &'g Grids, b: &Bounds) -> Option<&'g (Vec<usize>, Vec<usize>)> {
     let near = |a: f32, c: f32| (a - c).abs() <= SNAP;
     g.groups.iter().find(|grp| {
         grid_frame(g, grp).is_some_and(|(f, _, _)| {
@@ -295,7 +357,7 @@ fn ruled(view: &PageView<'_>, seg: &Segment) -> Find {
             first_refusal.get_or_insert(f);
         };
         if boxed_field(&refs, &within, &xs, &ys) {
-            refuse(refused(Kind::Spatial, COMB));
+            refuse(refused(Speaks::Spatial, COMB));
             continue;
         }
         let sizes: Vec<f32> = within.iter().map(|&k| refs[k].size).collect();
@@ -305,11 +367,11 @@ fn ruled(view: &PageView<'_>, seg: &Segment) -> Find {
         };
         let (_, figure) = figure_near(view, b, &sizes, &inside, within.iter().map(|&k| refs[k]));
         if figure {
-            refuse(refused(Kind::Figure, FIGURE_NEAR));
+            refuse(refused(Speaks::Figure, FIGURE_NEAR));
             continue;
         }
         if cols > MAX_COLUMNS {
-            refuse(refused(Kind::Spatial, MANY_COLUMNS));
+            refuse(refused(Speaks::Spatial, MANY_COLUMNS));
             continue;
         }
         let cells = ruled_cells(
@@ -330,12 +392,11 @@ fn ruled(view: &PageView<'_>, seg: &Segment) -> Find {
         );
         match cells {
             Cells::Table(t) => {
-                let read = read_of(&refs, &|k| ids[k], &t, xs.clone(), How::Ruled);
-                let texts = cell_texts(&refs, &t);
-                if let Some(why) = long_or_prose(&texts, SHORT_CELL) {
-                    refuse(refused(Kind::Paragraph, why));
+                if let Some(why) = long_or_prose(&cell_texts(&refs, &t), SHORT_CELL) {
+                    refuse(refused(Speaks::Paragraph, why));
                     continue;
                 }
+                let read = read_of(&refs, &|k| ids[k], &t, xs.clone(), How::Ruled);
                 let sentences = sentence_lines(&refs, &within, &xs);
                 // A grid's own frame bounds it.
                 let read = TableRead {
@@ -609,33 +670,29 @@ fn banded(view: &PageView<'_>, seg: &Segment, band: &Segment) -> Find {
 /// region the file states, read by geometry alone (none of those rules).
 fn lines(view: &PageView<'_>, seg: &Segment, given: bool) -> Find {
     let (refs, ids) = seg_runs(view, seg);
-    let inked: Vec<usize> = (0..refs.len())
-        .filter(|&k| !refs[k].text.trim().is_empty() && !refs[k].off_axis)
-        .collect();
-    if inked.len() < 4 {
+    let Lined {
+        runs,
+        at: inked,
+        ranges,
+        pieces,
+    } = lined(&refs);
+    if runs.len() < 4 {
         return Find::Nothing;
     }
-    let runs: Vec<&TextRun> = inked.iter().map(|&k| refs[k]).collect();
-    let ranges: Vec<RunRange> = run_ranges(&runs);
-    let pieces: Vec<Vec<Piece>> = ranges
-        .iter()
-        .map(|l| pieces_of(&runs, l.start, l.end))
-        .collect();
-    crate::work::add((runs.len() + ranges.len()) as u64);
     if pieces.iter().filter(|p| p.len() >= 2).count() < 2 {
         return Find::Nothing;
     }
     let prim = |k: usize| ids[inked[k]];
     if !given {
         if set_full(&runs, &pieces, &ranges) {
-            return refused(Kind::Paragraph, SET_FULL);
+            return refused(Speaks::Paragraph, SET_FULL);
         }
         let off = vec![false; ranges.len()];
         if let KeyValues::Rows(_) = key_values(&runs, &ranges, 0, ranges.len(), &pieces, &off) {
-            return refused(Kind::LabelValue, "its lines are labels and values");
+            return refused(Speaks::LabelValue, KEY_VALUE_LINES);
         }
         if titles_over_values(&runs, &ranges, &pieces) {
-            return refused(Kind::LabelValue, "its lines are titles over their values");
+            return refused(Speaks::LabelValue, TITLE_LINES);
         }
     }
     let mut b = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
@@ -655,7 +712,7 @@ fn lines(view: &PageView<'_>, seg: &Segment, given: bool) -> Find {
         figure_near(view, b, &sizes, &skip, runs.iter().copied())
     };
     if figure {
-        return refused(Kind::Figure, FIGURE_NEAR);
+        return refused(Speaks::Figure, FIGURE_NEAR);
     }
     let rows_needed = if table_caption { 2 } else { 3 };
     match grid_cells(&runs, &pieces, rows_needed, table_caption) {
@@ -665,10 +722,7 @@ fn lines(view: &PageView<'_>, seg: &Segment, given: bool) -> Find {
             }
             Find::Table(Box::new(read_of(&runs, &prim, &t, Vec::new(), How::Lines)))
         }
-        Err(why) if given => {
-            let _ = why;
-            Find::Nothing
-        }
+        Err(_) if given => Find::Nothing,
         Err(why) => refused_for(why),
     }
 }
@@ -678,10 +732,7 @@ fn lines(view: &PageView<'_>, seg: &Segment, given: bool) -> Find {
 fn find<U>(view: &PageView<'_>, seg: &Segment, f: impl FnOnce(&Find) -> U) -> U {
     let totals = view.totals_of(seg, |t| t.is_some());
     if totals {
-        return f(&refused(
-            Kind::Totals,
-            "its lines are totals under the table above",
-        ));
+        return f(&refused(Speaks::Totals, TOTALS_LINES));
     }
     view.reading(seg, f)
 }
@@ -736,6 +787,7 @@ pub(crate) fn sentences_across(view: &PageView<'_>, seg: &Segment) -> bool {
             refs[line[line.len() - 1]].x + refs[line[line.len() - 1]].w,
         );
         grids.iter().any(|g| {
+            crate::work::add(1);
             let b = &g.bounds;
             cy > b.y0
                 && cy < b.y1
@@ -803,77 +855,75 @@ pub(crate) struct TotalsRead {
 }
 
 impl TotalsRead {
-    /// The totals reading of `seg`: lines without drawn parts, each with an amount, under the
-    /// nearest table above among the segments beside its path to the root (at most
-    /// [`TOTALS_GAP`] sizes of their text below it), every amount under a money column of it (a
-    /// column most of whose body cells are amounts).
+    /// The totals reading of `seg`, text alone (see [`text_alone`]) of the view's tree whose every line holds an
+    /// amount, under the nearest table above among the segments beside its path to the root
+    /// (its parent stands on that path; at most [`TOTALS_GAP`] sizes of their text below it,
+    /// across it): every amount under a money column of it (a column most of whose body cells
+    /// are amounts), and every other piece of a line in its description column (a label, which
+    /// may run on over the column next to it) or in a column its rows leave mostly empty. A
+    /// piece in a column the table's rows fill (a quantity, a unit) makes the line a row of
+    /// the table, not its totals. A table whose rows fill no column but its description and its
+    /// money columns has rows of the same shape as totals: only a rule across its money columns
+    /// between them tells them apart, so its totals need that rule.
     pub(crate) fn of(view: &PageView<'_>, seg: &Segment) -> Option<TotalsRead> {
-        if !matches!(
-            seg.source,
-            Source::Gutter | Source::Band | Source::Rule | Source::Style | Source::Rest
-        ) || !seg.children.is_empty()
-        {
+        if !text_alone(view, seg) {
             return None;
         }
-        let (refs, _) = seg_runs(view, seg);
-        let runs: Vec<&TextRun> = refs
-            .into_iter()
-            .filter(|r| !r.text.trim().is_empty() && !r.off_axis)
-            .collect();
-        if runs.is_empty() {
-            return None;
-        }
-        let ranges = run_ranges(&runs);
-        let pieces: Vec<Vec<Piece>> = ranges
-            .iter()
-            .map(|l| pieces_of(&runs, l.start, l.end))
-            .collect();
-        let text = |p: &Piece| crate::extract::table::grid::text_of(&runs, p.start, p.end);
-        let size = median(ranges.iter().map(|l| l.size).collect());
-        let top = runs.iter().map(|r| r.y + r.size).fold(f32::MIN, f32::max);
-        let left = runs.iter().map(|r| r.x).fold(f32::MAX, f32::min);
-        let right = runs.iter().map(|r| r.x + r.w).fold(f32::MIN, f32::max);
-        // Every line holds an amount.
-        if !pieces.iter().all(|l| l.iter().any(|p| amount(&text(p)))) {
-            return None;
-        }
-        crate::work::add((runs.len() + ranges.len()) as u64);
-        // The nearest table above, among the segments beside the path to the root.
-        let mut best: Option<(f32, Box<TableRead>)> = None;
-        let (mut child, mut parent) = (seg.id, seg.parent);
+        // Only a segment of the view's tree has a path to the root.
         let own = view
             .segs
             .all
             .get(seg.id.0 as usize)
             .is_some_and(|s| std::ptr::eq(s, seg));
-        while own && let Some(p) = parent {
-            let Some(ps) = view.segs.all.get(p.0 as usize) else {
-                break;
+        if !own {
+            return None;
+        }
+        let (refs, _) = seg_runs(view, seg);
+        let Lined {
+            runs,
+            ranges,
+            pieces,
+            ..
+        } = lined(&refs);
+        if runs.is_empty() {
+            return None;
+        }
+        let text = |p: &Piece| crate::extract::table::grid::text_of(&runs, p.start, p.end);
+        // Every line holds an amount.
+        if !pieces.iter().all(|l| l.iter().any(|p| amount(&text(p)))) {
+            return None;
+        }
+        let size = median(ranges.iter().map(|l| l.size).collect());
+        let top = runs.iter().map(|r| r.y + r.size).fold(f32::MIN, f32::max);
+        let left = runs.iter().map(|r| r.x).fold(f32::MAX, f32::min);
+        let right = runs.iter().map(|r| r.x + r.w).fold(f32::MIN, f32::max);
+        // The segments on the path to the root.
+        let mut path: Vec<usize> = vec![seg.id.0 as usize];
+        let mut up = seg.parent;
+        while let Some(p) = up {
+            crate::work::add(1);
+            path.push(p.0 as usize);
+            up = view.segs.all.get(p.0 as usize).and_then(|s| s.parent);
+        }
+        // The nearest table above: the tables whose bottom stands in the window over the
+        // lines, found by search in the page's tables sorted by bottom.
+        let tables = view.tables();
+        let lo = tables.partition_point(|t| t.0 < top - 0.3 * size);
+        let hi = tables.partition_point(|t| t.0 <= top + TOTALS_GAP * size);
+        let mut best: Option<(f32, &TableRead)> = None;
+        for &(bottom, i) in &tables[lo..hi.max(lo)] {
+            crate::work::add(1);
+            let cand = &view.segs.all[i];
+            let beside =
+                cand.parent.is_some_and(|p| path.contains(&(p.0 as usize))) && !path.contains(&i);
+            let Some(Find::Table(t)) = view.reading_at(i) else {
+                continue;
             };
-            for c in &ps.children {
-                if *c == child {
-                    continue;
-                }
-                let Some(cs) = view.segs.all.get(c.0 as usize) else {
-                    continue;
-                };
-                let t = view.reading(cs, |f| match f {
-                    Find::Table(t) => Some(t.clone()),
-                    _ => None,
-                });
-                let Some(t) = t else { continue };
-                let gap = t.bounds[1] - top;
-                let across = t.bounds[0] < right && t.bounds[2] > left;
-                if across
-                    && gap >= -0.3 * size
-                    && gap <= TOTALS_GAP * size
-                    && best.as_ref().is_none_or(|(g, _)| gap < *g)
-                {
-                    best = Some((gap, t));
-                }
+            let gap = bottom - top;
+            let across = t.bounds[0] < right && t.bounds[2] > left;
+            if beside && across && best.is_none_or(|(g, _)| gap < g) {
+                best = Some((gap, t));
             }
-            child = p;
-            parent = ps.parent;
         }
         let (_, table) = best?;
         let edges = &table.columns.edges;
@@ -905,7 +955,22 @@ impl TotalsRead {
                 .count();
             n > 0 && 2 * words > n
         });
+        // The columns the table's rows fill (text in at least half of them) other than its
+        // description and money columns.
+        let rows = table.body.len();
+        let filled: Vec<bool> = (0..cols)
+            .map(|c| !money[c] && Some(c) != description && 2 * column(c).count() >= rows.max(1))
+            .collect();
         let slack = 0.5 * size;
+        let column_at = |x: f32| {
+            edges
+                .partition_point(|e| *e <= x)
+                .saturating_sub(1)
+                .min(cols.saturating_sub(1))
+        };
+        let in_description = |p: &Piece| {
+            description.is_some_and(|d| p.x0 >= edges[d] - slack && p.x0 <= edges[d + 1])
+        };
         let under = |p: &Piece| {
             (0..cols).any(|c| {
                 let mid = (p.x0 + p.x1) / 2.0;
@@ -917,16 +982,19 @@ impl TotalsRead {
         let mut labels = description.is_some();
         for line in &pieces {
             let first = line.iter().position(|p| amount(&text(p)))?;
-            if !line[first..].iter().filter(|p| amount(&text(p))).all(under) {
-                return None;
+            for p in line {
+                if amount(&text(p)) {
+                    if !under(p) {
+                        return None;
+                    }
+                } else if !in_description(p) && filled[column_at((p.x0 + p.x1) / 2.0)] {
+                    // A piece in a column the rows fill: a row of the table.
+                    return None;
+                }
             }
-            labels &= description.is_some_and(|d| {
-                line[..first]
-                    .first()
-                    .is_some_and(|p| p.x0 >= edges[d] - slack && p.x0 <= edges[d + 1])
-            });
+            labels &= line[..first].first().is_some_and(in_description);
         }
-        let (lo, hi) = (0..cols)
+        let (mlo, mhi) = (0..cols)
             .filter(|&c| money[c])
             .fold((f32::MAX, f32::MIN), |(lo, hi), c| {
                 (lo.min(edges[c]), hi.max(edges[c + 1]))
@@ -936,7 +1004,13 @@ impl TotalsRead {
         let to = view.hs().partition_point(|s| s.at < table.bounds[1] - SNAP);
         let rule = view.hs()[from..to.max(from)]
             .iter()
-            .any(|s| s.from <= lo + SNAP && s.to >= hi - SNAP);
+            .any(|s| s.from <= mlo + SNAP && s.to >= mhi - SNAP);
+        crate::work::add((to.saturating_sub(from) + pieces.len()) as u64);
+        // Rows of a table of a description and amounts only are told from its totals by a
+        // rule alone.
+        if !filled.iter().any(|f| *f) && !rule {
+            return None;
+        }
         Some(TotalsRead {
             lines: pieces.len(),
             labels,
@@ -976,4 +1050,30 @@ pub fn type_totals(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
         }
         Typed::of(Kind::Totals, signals)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An address or sentences that the walk reads refuse a table for the paragraph, with no
+    /// weight of their own (the demotion is the paragraph's signal); the other prose reasons
+    /// carry the paragraph's weight; every spatial reason has its own name.
+    #[test]
+    fn refusals_name_the_kind_they_speak_for() {
+        for (why, id, weight) in [
+            (ADDRESS_LINES, "paragraph.content_refuses_table", 0),
+            (SENTENCE_LINES, "paragraph.content_refuses_table", 0),
+            (LONG_TEXT, "paragraph.prose_cells", PARAGRAPH_PROSE_CELLS),
+            (CROSSES_LINES, "spatial.crossed_lines", 0),
+            (NO_ROWS_AND_COLUMNS, "spatial.no_rows_and_columns", 0),
+            (FIGURE_NEAR, "figure.caption", 0),
+        ] {
+            let Find::Refused(r) = refused_for(why) else {
+                panic!("{why} is a refusal");
+            };
+            assert_eq!((r.signal.id, r.signal.weight), (id, weight), "{why}");
+        }
+        assert_eq!(refused_for("too few rows"), Find::Nothing);
+    }
 }

@@ -8,7 +8,7 @@
 use layoutregions::file::{FilePage, learn};
 use layoutregions::segment::drawn::drawn;
 use layoutregions::segment::{SegId, Segment, Source, segment_page};
-use layoutregions::typers::table::{table_columns, type_table};
+use layoutregions::typers::table::{refusal, table_columns, type_table};
 use layoutregions::typers::text::{
     BAND_RUNNING, HEADING_BOLD, HEADING_SIZE_LARGE, HEADING_TITLE_LINES, LEGEND_ENTRIES,
     LIST_HANGING, LIST_ITEMS, LIST_MARKER, PARAGRAPH_DEMOTED, PARAGRAPH_JOINS, PARAGRAPH_SENTENCES,
@@ -999,7 +999,6 @@ fn sentence_over_row(parts: &[usize]) -> (Tree, Vec<u32>) {
     let y = 700.0 - 14.0 * 4.0 - 10.2;
     // One more row of the grid for the sentence.
     tree.page.rules = grid_rules(ITEM_XS, &[700.0, 686.0, 672.0, 658.0, 644.0, 630.0]);
-    let first = tree.page.texts.len() as u32;
     for &n in parts {
         let text = words[at..at + n].join(" ");
         at += n;
@@ -1020,7 +1019,6 @@ fn sentence_over_row(parts: &[usize]) -> (Tree, Vec<u32>) {
         .filter(|(_, r)| r.line == 104)
         .map(|(i, _)| i as u32)
         .collect();
-    let _ = first;
     (tree, ids)
 }
 
@@ -1115,8 +1113,13 @@ fn worst_case_margins_of_tables_pairs_and_totals() {
     use layoutregions::typers::table::{
         PARAGRAPH_PROSE_CELLS, TABLE_HEADER, TABLE_READING, TABLE_SHARED, TOTALS_UNDER,
     };
-    // Paragraph on any text, without a demotion (demotions are not read inside a table).
+    // Paragraph on any text, without a demotion. Inside a table reading the demotions of lines
+    // apart, unwrapped or in cells are the table's, and an address or sentences refuse the
+    // table (a content demotion against a refused table, below).
     let paragraph = PARAGRAPH_TEXT_SIZE + PARAGRAPH_JOINS + PARAGRAPH_SENTENCES;
+    // A heading on lines in two pieces or more is demoted as cells: no title lines.
+    let heading_in_cells = HEADING_SIZE_LARGE + HEADING_BOLD;
+    let list = LIST_MARKER + LIST_ITEMS + LIST_HANGING;
     // Paragraph on the lines of a table: they stand in pieces, so they join no paragraph.
     let paragraph_in_cells = PARAGRAPH_TEXT_SIZE + PARAGRAPH_SENTENCES;
     let table = TABLE_READING + TABLE_SHARED + TABLE_HEADER;
@@ -1129,14 +1132,26 @@ fn worst_case_margins_of_tables_pairs_and_totals() {
         ("prose cells over a refused table", PARAGRAPH_PROSE_CELLS, 0),
         ("field cells over paragraph", LABEL_FIELD_CELLS, paragraph),
         ("key values over paragraph", LABEL_KEY_VALUES, paragraph),
+        ("key values over list", LABEL_KEY_VALUES, list),
+        (
+            "key values over a heading in cells",
+            LABEL_KEY_VALUES,
+            heading_in_cells,
+        ),
+        (
+            "content demotion over a refused table",
+            PARAGRAPH_DEMOTED,
+            0,
+        ),
         (
             "touching boxed fields over paragraph",
             LABEL_FIELDS + LABEL_STYLE + LABEL_BOXES_TOUCH,
             paragraph,
         ),
         ("totals over paragraph", TOTALS_UNDER, paragraph),
-        // Refused readings: a table under field cells, key values or totals, and label/value
-        // pairs under totals, give nothing.
+        // Refused readings give nothing: a table on field cells (see
+        // `field_cells_refuse_a_table`), key values or totals, and label/value pairs on totals
+        // (see `amounts_under_money_columns_are_totals`).
         ("field cells over a refused table", LABEL_FIELD_CELLS, 0),
         ("totals over refused pairs", TOTALS_UNDER, 0),
         // A table's reading alone is ahead of the least evidence of a paragraph.
@@ -1188,4 +1203,237 @@ fn a_header_band_over_lines_is_table_evidence() {
         let scaled = tree.scaled(k).typed(&|_, s| s.source == Source::Page);
         assert_eq!(of(&scaled, Kind::Table).score, table.score, "at {k}x");
     }
+}
+
+/// A grid of two rows and three columns of boxes, each a small label over a value of words:
+/// no colon, no value shape.
+fn field_grid() -> Tree {
+    let cells = [
+        [
+            ("Firma", "Muster GmbH"),
+            ("Name", "Erika Mustermann"),
+            ("Ort", "Musterstadt"),
+        ],
+        [
+            ("Abteilung", "Einkauf"),
+            ("Bereich", "Verwaltung"),
+            ("Land", "Musterland"),
+        ],
+    ];
+    let xs = [72.0, 222.0, 372.0, 522.0];
+    let ys = [700.0, 668.0, 636.0];
+    let mut texts = Vec::new();
+    for (r, row) in cells.iter().enumerate() {
+        for (c, (label, value)) in row.iter().enumerate() {
+            let top = ys[r];
+            texts.push(run(label, xs[c] + 3.0, top - 9.0, 6.2, 100 + 2 * r as u32));
+            texts.push(run(value, xs[c] + 3.0, top - 24.0, 9.2, 101 + 2 * r as u32));
+        }
+    }
+    texts.sort_by_key(|r| r.line);
+    Tree {
+        page: sheet(texts, grid_rules(&xs, &ys)),
+    }
+}
+
+#[test]
+fn field_cells_refuse_a_table() {
+    let tree = field_grid();
+    let typed = tree.typed(&grid);
+    assert!(find(&typed, Kind::Table).is_none(), "{typed:#?}");
+    let pairs = of(&typed, Kind::LabelValue);
+    assert!(
+        ids(pairs).contains(&"label_value.field_cells"),
+        "{typed:#?}"
+    );
+    let (kind, lead) = winner(&typed);
+    assert_eq!(kind, Kind::LabelValue);
+    assert!(lead >= MARGIN, "{typed:#?}");
+    tree.with(|view| {
+        let g = view.segs.all.iter().find(|s| grid(view, s)).unwrap();
+        let r = refusal(view, g).expect("a refusal");
+        assert_eq!(r.kind, Kind::LabelValue);
+        assert_eq!(r.signal.id, "label_value.refuses_table");
+    });
+}
+
+/// The item grid with rows of the same table under it, out of its rules: a description, a
+/// quantity and an amount each, in its columns.
+fn continued_rows() -> Tree {
+    let mut tree = ruled_table(ITEM_XS, 700.0, ITEMS, true, 100);
+    let rows = [
+        ("Muster D", "3", "1,00"),
+        ("Muster E", "2", "5,00"),
+        ("Muster F", "1", "2,50"),
+    ];
+    for (k, (d, q, a)) in rows.iter().enumerate() {
+        let y = 630.0 - 13.0 * k as f32;
+        let line = 200 + k as u32;
+        tree.page.texts.push(run(d, 75.0, y, 9.2, line));
+        tree.page.texts.push(run(q, 223.0, y, 9.2, line));
+        let v = run(a, 0.0, y, 9.2, line);
+        let x = 417.0 - v.w;
+        tree.page.texts.push(TextRun { x, ..v });
+    }
+    tree.page.texts.sort_by_key(|r| r.line);
+    tree
+}
+
+#[test]
+fn rows_of_a_table_are_no_totals() {
+    let typed = continued_rows().typed(&text_of_lines(vec![200, 201, 202]));
+    assert!(find(&typed, Kind::Totals).is_none(), "{typed:#?}");
+    // The rows keep their table reading.
+    assert!(find(&typed, Kind::Table).is_some(), "{typed:#?}");
+}
+
+/// A table of a description and an amount only, with three more such lines under it, and a
+/// rule between them when `rule`.
+fn two_column_stack(rule: bool) -> Tree {
+    let rows: &[&[&str]] = &[
+        &["Artikel", "Preis"],
+        &["Muster A", "12,50"],
+        &["Muster B", "3,00"],
+        &["Muster C", "8,75"],
+    ];
+    let xs = [72.0, 320.0, 420.0];
+    let mut tree = ruled_table(&xs, 700.0, rows, true, 100);
+    for (k, (d, a)) in [
+        ("Muster D", "1,00"),
+        ("Muster E", "5,00"),
+        ("Muster F", "2,50"),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let y = 630.0 - 13.0 * k as f32;
+        tree.page.texts.push(run(d, 75.0, y, 9.2, 200 + k as u32));
+        let v = run(a, 0.0, y, 9.2, 200 + k as u32);
+        let x = 417.0 - v.w;
+        tree.page.texts.push(TextRun { x, ..v });
+    }
+    if rule {
+        tree.page.rules.push(rule_at(641.0));
+    }
+    tree.page.texts.sort_by_key(|r| r.line);
+    tree
+}
+
+fn rule_at(y: f32) -> RuleIn {
+    rule(320.0, y, 420.0, y)
+}
+
+#[test]
+fn a_table_of_descriptions_and_amounts_needs_a_rule_for_totals() {
+    let lines = || text_of_lines(vec![200, 201, 202]);
+    let typed = two_column_stack(false).typed(&lines());
+    assert!(find(&typed, Kind::Totals).is_none(), "{typed:#?}");
+    let typed = two_column_stack(true).typed(&lines());
+    assert!(
+        ids(of(&typed, Kind::Totals)).contains(&"totals.end_rule"),
+        "{typed:#?}"
+    );
+}
+
+#[test]
+fn one_total_under_a_table() {
+    let mut tree = ruled_table(ITEM_XS, 700.0, ITEMS, true, 100);
+    tree.page.texts.push(run("Gesamt", 75.0, 630.0, 9.2, 200));
+    let v = run("28,86", 0.0, 630.0, 9.2, 200);
+    let x = 417.0 - v.w;
+    tree.page.texts.push(TextRun { x, ..v });
+    tree.page.texts.sort_by_key(|r| r.line);
+    let typed = tree.typed(&text_of_lines(vec![200]));
+    let (kind, lead) = winner(&typed);
+    assert_eq!(kind, Kind::Totals, "{typed:#?}");
+    assert!(lead >= MARGIN);
+}
+
+#[test]
+fn a_lone_boxed_field_is_label_value() {
+    let texts = vec![
+        run("Rechnungsnummer", 75.0, 683.0, 6.2, 100),
+        run("RE-2026-0001", 75.0, 668.0, 9.2, 101),
+    ];
+    let tree = Tree {
+        page: sheet(texts, box_rules([72.0, 660.0, 222.0, 692.0])),
+    };
+    let typed = tree.typed(&|_, s| s.source == Source::Box);
+    let pairs = of(&typed, Kind::LabelValue);
+    assert!(
+        !ids(pairs).contains(&"label_value.boxes_touch"),
+        "{typed:#?}"
+    );
+    let (kind, lead) = winner(&typed);
+    assert_eq!(kind, Kind::LabelValue, "{typed:#?}");
+    assert!(lead >= MARGIN, "{typed:#?}");
+}
+
+#[test]
+fn the_seed_lines_are_pairs_themselves() {
+    // Without a colon or a value shape the lines still read as labels and values: only the
+    // seed rule keeps them from seeding the weight-only box.
+    for evidence in [true, false] {
+        let typed = seeded(evidence).typed(&text_of_lines(vec![100, 101, 102]));
+        let pairs = of(&typed, Kind::LabelValue);
+        assert!(ids(pairs).contains(&"label_value.key_values"), "{typed:#?}");
+    }
+    // The seeded box alone (no box beside it) leads the paragraph its two lines join into
+    // by 100 only (650 against 550): a lone box is a Task 18b pair, not pinned here.
+    let typed = seeded(true).typed(&|_, s| s.source == Source::Box);
+    let (kind, lead) = winner(&typed);
+    assert_eq!(kind, Kind::LabelValue, "{typed:#?}");
+    assert_eq!(lead, 100, "{typed:#?}");
+}
+
+#[test]
+fn too_little_text_is_no_table() {
+    // One line in pieces; one column of lines; three runs.
+    let cases: Vec<Vec<TextRun>> = vec![
+        vec![
+            run("Muster", 72.0, 700.0, 9.2, 100),
+            run("2", 220.0, 700.0, 9.2, 100),
+            run("12,50", 320.0, 700.0, 9.2, 100),
+        ],
+        (0..4)
+            .map(|k| run("Muster", 72.0, 700.0 - 13.0 * k as f32, 9.2, 100 + k))
+            .collect(),
+        vec![
+            run("Muster", 72.0, 700.0, 9.2, 100),
+            run("2", 220.0, 700.0, 9.2, 100),
+            run("Muster", 72.0, 687.0, 9.2, 101),
+        ],
+    ];
+    for texts in cases {
+        let lines: Vec<u32> = {
+            let mut l: Vec<u32> = texts.iter().map(|r| r.line).collect();
+            l.dedup();
+            l
+        };
+        let tree = Tree {
+            page: sheet(texts, Vec::new()),
+        };
+        let typed = tree.typed(&text_of_lines(lines));
+        assert!(find(&typed, Kind::Table).is_none(), "{typed:#?}");
+    }
+}
+
+#[test]
+fn a_page_of_tables_and_totals_is_typed_once() {
+    let tree = totals_tree(true);
+    tree.with(|view| {
+        let all = |view: &PageView<'_>| -> Vec<Vec<Typed>> {
+            view.segs.all.iter().map(|s| all_typed(view, s)).collect()
+        };
+        let first = all(view);
+        let before = work_steps();
+        let second = all(view);
+        let after = work_steps();
+        assert_eq!(first, second);
+        if let (Some(b), Some(a)) = (before, after) {
+            assert_eq!(a, b, "the second round does no work");
+        }
+        assert!(first.iter().flatten().any(|t| t.kind == Kind::Totals));
+        assert!(first.iter().flatten().any(|t| t.kind == Kind::Table));
+    });
 }

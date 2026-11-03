@@ -104,6 +104,14 @@ pub(crate) struct SegText {
 }
 
 impl SegText {
+    /// Why its blocks of a heading size read as a paragraph, in order, once per block.
+    pub(crate) fn demotions(&self) -> impl Iterator<Item = Demotion> + '_ {
+        self.blocks.iter().filter_map(|b| match b {
+            Read::Heading { demoted, .. } => *demoted,
+            _ => None,
+        })
+    }
+
     /// The text of `seg` on the page of `view`; `None` when it holds no run with ink.
     pub(crate) fn of(view: &PageView<'_>, seg: &Segment) -> Option<SegText> {
         let mut ids = Vec::new();
@@ -196,10 +204,10 @@ impl SegText {
 pub fn type_paragraph(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
     // What the table rules say of the segment: prose they refuse, or cells they read.
     let prose = super::table::refusal(view, seg)
-        .filter(|r| r.kind == Kind::Paragraph)
+        .filter(|r| r.kind == Kind::Paragraph && r.signal.weight > 0)
         .map(|r| r.signal)
         .or_else(|| {
-            super::table::sentences_across(view, seg).then(|| {
+            view.across(seg).then(|| {
                 signal(
                     "paragraph.prose_cells",
                     "its lines read as sentences across the columns of a ruled table".into(),
@@ -267,16 +275,18 @@ pub fn type_paragraph(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
                 PARAGRAPH_SENTENCES,
             ));
         }
-        // Lines of a heading size inside a table's cells read as the table's rows: the table
-        // rule reads them, so their demotion is the table's evidence, not the paragraph's.
+        // Lines of a heading size that stand apart, unwrapped or in cells inside a table's
+        // reading are the table's rows: the table rule reads them, so those demotions are the
+        // table's evidence, not the paragraph's. An address or sentences say what the lines
+        // are, and they refuse the table (see `super::table`).
         let mut why: Vec<Demotion> = Vec::new();
-        for b in t.blocks.iter().filter(|_| !in_table) {
-            if let Read::Heading {
-                demoted: Some(d), ..
-            } = b
-                && !why.contains(d)
-            {
-                why.push(*d);
+        for d in t.demotions() {
+            let geometric = matches!(
+                d,
+                Demotion::LinesApart | Demotion::Unwrapped | Demotion::Cells
+            );
+            if !(in_table && geometric) && !why.contains(&d) {
+                why.push(d);
             }
         }
         for d in why {
