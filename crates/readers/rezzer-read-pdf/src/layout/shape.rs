@@ -7,6 +7,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use layoutregions::file::{CURRENCIES, data_only};
+
 use super::{Line, Run, ink, list_marker, size_key};
 use crate::scan;
 
@@ -68,27 +70,6 @@ pub(crate) fn page_text_sizes_of<'a>(runs: impl Iterator<Item = &'a Run>) -> Vec
     sizes.into_iter().map(|s| s as f32 / 2.0).collect()
 }
 
-/// Whether a line is bold where it matters for a heading: all its ink is bold, or it opens
-/// with bold ink and goes on in plain words that are no data (`SECTION 1 (TO BE COMPLETED BY
-/// PAYEE)`). A bold label that ends in a colon before plain text is a label and its value
-/// (`Kundennummer: 00000`), and so is a bold label before a plain number or code.
-pub(super) fn bold_led(line: &Line<'_>) -> bool {
-    let inked: Vec<&Run> = line.runs.iter().filter(|r| ink(&r.text) > 0).collect();
-    let lead = inked.iter().take_while(|r| r.bold).count();
-    if lead == 0 {
-        return false;
-    }
-    if lead == inked.len() {
-        return true;
-    }
-    let label: String = inked[..lead].iter().map(|r| r.text.as_str()).collect();
-    let rest: String = inked[lead..].iter().map(|r| r.text.as_str()).collect();
-    !label.trim_end().ends_with(':') && !data_only(&rest)
-}
-
-/// Currency words and signs that may stand after an amount.
-const CURRENCIES: [&str; 7] = ["EUR", "USD", "CHF", "GBP", "\u{20ac}", "$", "\u{a3}"];
-
 /// Year widths of the dates a line is masked by before its amounts are read.
 const YEARS: std::ops::RangeInclusive<usize> = 2..=4;
 
@@ -113,21 +94,6 @@ pub(super) fn ends_in_amount(text: &str) -> bool {
     scan::amounts(t, &skip)
         .last()
         .is_some_and(|a| a.end == t.len())
-}
-
-/// Whether a line holds only numbers, codes, dates and amounts: each of its words holds a
-/// digit or is a currency word or sign, and one holds a digit (`1234567 8901 2 30`,
-/// `00123 45B`). A title holds a word (`Bericht 2025`).
-pub(super) fn data_only(text: &str) -> bool {
-    let mut digit = false;
-    for w in text.split_whitespace() {
-        if w.chars().any(|c| c.is_ascii_digit()) {
-            digit = true;
-        } else if !CURRENCIES.contains(&w) {
-            return false;
-        }
-    }
-    digit
 }
 
 /// Lines of an address or a list of labels hold at most this many words; lines of prose in a
@@ -593,17 +559,6 @@ mod tests {
     }
 
     #[test]
-    fn lines_of_data_only() {
-        assert!(data_only("1234567 8901 2 30"));
-        assert!(data_only("01.03.2026"));
-        assert!(data_only("00000000000"));
-        assert!(data_only("1.234,56 EUR"));
-        assert!(!data_only("Bericht 2025"));
-        assert!(!data_only("EUR"));
-        assert!(!data_only("Rechnung"));
-    }
-
-    #[test]
     fn address_blocks_have_lines_of_more_than_one_shape() {
         assert!(address_block(&[
             "Muster GmbH",
@@ -822,24 +777,5 @@ mod tests {
             "und bezahlt"
         ]));
         assert!(!address_shaped(&["Muster GmbH", "12345", "00000"]));
-    }
-
-    #[test]
-    fn bold_leads_a_heading_line() {
-        let bold = |text: &str| Run {
-            bold: true,
-            ..run(text, 0, 700.0, 9.0)
-        };
-        let plain = |text: &str| run(text, 0, 700.0, 9.0);
-        let all = [bold("Rechnung")];
-        assert!(bold_led(&line(&all)));
-        let section = [bold("SECTION 1"), plain(" (TO BE COMPLETED BY PAYEE)")];
-        assert!(bold_led(&line(&section)));
-        let label = [bold("Kundennummer:"), plain(" 00000")];
-        assert!(!bold_led(&line(&label)));
-        let value = [bold("Rechnungsnummer"), plain(" RE-2026-001")];
-        assert!(!bold_led(&line(&value)));
-        let plain_first = [plain("Seite"), bold(" 1")];
-        assert!(!bold_led(&line(&plain_first)));
     }
 }

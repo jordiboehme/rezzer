@@ -43,8 +43,18 @@ pub struct TextRun {
     /// Line number in the reader's line order.
     pub line: u32,
     pub off_axis: bool,
-    /// White space between words, x from and to.
-    pub gaps: Vec<[f32; 2]>,
+    /// White space between words, from the glyphs, in order.
+    pub gaps: Vec<GapIn>,
+}
+
+/// The white space between two words of a run: after its first `words` words (as
+/// `split_whitespace` counts them), from the end of the ink before it to the start of the ink
+/// after it. A run need not have a gap at each of its spaces, so `words` names the place.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GapIn {
+    pub words: u32,
+    pub from: f32,
+    pub to: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

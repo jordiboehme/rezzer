@@ -20,8 +20,8 @@ use layoutregions::{
 use rezzer_model::{Block, LossReason, Severity};
 
 use super::{
-    Band, Built, Context, Drawn, Flow, Placed, Run, Slot, footnotes, furniture_key_of, lines,
-    page_text_sizes_of, refused_quietly, time_over,
+    Band, Built, Context, Drawn, Flow, Placed, Run, Slot, footnotes, lines, page_text_sizes_of,
+    refused_quietly, time_over,
 };
 use crate::engine;
 use crate::tables::{self, BoxTitle, Detector, Doubts, Planned};
@@ -73,12 +73,12 @@ pub(crate) struct PageCx<'p> {
 
 /// The text sizes of a page, counted over all its text but its legend, also what tables take
 /// later (the values of a form are its data lines), and a footer of a file of two pages (see
-/// [`super::Style::two_page`]).
+/// `layoutregions::file::FileFacts::two_page`).
 pub(super) fn text_sizes(p: &PageCx<'_>) -> Vec<f32> {
     let two_page_lines = lines(&p.footers);
     let two_page = two_page_lines
         .iter()
-        .filter(|l| furniture_key_of(l, p.height).is_some_and(|k| p.cx.style.two_page.contains(&k)))
+        .filter(|l| p.cx.style.two_page_line(l, p.height))
         .flat_map(|l| l.runs.iter());
     page_text_sizes_of(p.flow.runs.iter().chain(two_page))
 }

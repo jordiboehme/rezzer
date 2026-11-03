@@ -11,7 +11,7 @@
 //! change of font size and where the text moves up (the next column).
 
 use std::cell::Cell as Counter;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::num::NonZeroU32;
 use std::ops::Range;
 use std::rc::Rc;
@@ -20,6 +20,13 @@ use pdfparts::StructTree;
 use rezzer_limits::{Budget, LimitHit};
 use rezzer_model::{Anchor, Block, Cell, Inline, LossReason, SectionKind, Severity, StatusColor};
 
+#[cfg(doc)]
+use layoutregions::file::FileFacts;
+use layoutregions::file::{self, Band, HEADING_PLAIN_RATIO, HEADING_RATIO, RunningIndex};
+use layoutregions::line::{
+    EDGE, GAP_RATIO, LineRun, SIZE_SLACK, TextLine, apart, ink, size_key, text_line as line,
+    text_lines as lines,
+};
 use layoutregions::segment::drawn::{DrawnStructure, Grids, Unsearched};
 use layoutregions::{InOrder, PageRegions, find_in_order};
 
@@ -34,11 +41,12 @@ mod shape;
 pub(crate) use finders::PageCx;
 
 pub(crate) use head::{Dates, PageDate, TITLE_FROM, document_date, page_dates};
+use layoutregions::file::data_only;
 pub(crate) use shape::{
     ColumnLine, Columns, address_block, address_columns, address_lines, address_shaped,
     page_text_sizes, page_text_sizes_of, postal,
 };
-use shape::{bold_led, data_only, ends_in_amount, listed, padded_mark};
+use shape::{ends_in_amount, listed, padded_mark};
 
 /// A piece of text in one style on one line. The text parser and the fallback parser fill it,
 /// in the order and with the line numbers and word spaces [`crate::text::PageItems`] states.
@@ -199,193 +207,64 @@ impl UriTarget {
     }
 }
 
-/// Share of the page height at the top and the bottom where running headers and footers sit.
-/// pdflatex sets page numbers about 11 % above the bottom edge of an A4 page.
-const BAND: f32 = 0.18;
-
-/// Pages a header or footer line must repeat on. In a file of two pages, a footer line repeats
-/// on both (see [`Style::learn`]).
-const REPEATS: usize = 3;
-
-/// A line at least this many times the body size is a heading in an untagged file.
-const HEADING_RATIO: f32 = 1.2;
-
-/// A line smaller than this many times the body size is a heading only when it is led by
-/// bold ink (see [`bold_led`]): data lines and labels set a little larger than the body are
-/// no headings.
-const HEADING_PLAIN_RATIO: f32 = 1.5;
-
-/// A heading line is shorter than this many characters.
-const HEADING_CHARS: usize = 120;
-
 /// Deepest heading level the font size rule gives.
 const SIZE_LEVELS: usize = 3;
 
-/// A new paragraph starts at a gap over this many times the line height.
-const GAP_RATIO: f32 = 1.5;
-
-/// Font sizes closer than this are the same size.
-const SIZE_SLACK: f32 = 0.5;
-
-/// Memory the mid-page line texts the style pass keeps may take, to tell running headers from
-/// content: the text and about 64 bytes of set overhead per line. Past it, no more are kept:
-/// a header text that also stands mid-page later in a huge file may then keep its header
-/// role.
-#[cfg(not(test))]
-const BODY_KEY_BYTES: usize = 32 << 20;
-#[cfg(test)]
-const BODY_KEY_BYTES: usize = 1_000;
-
-/// Set overhead of one kept line text.
-const BODY_KEY_COST: usize = 64;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Band {
-    Top,
-    Bottom,
-}
-
-/// One page as the style pass sees it.
+/// One page as the file pass sees it.
 pub(crate) struct PageText<'a> {
     pub page: u32,
-    /// The height of the page in the frame of its runs; `None` when that frame was turned.
-    pub height: Option<f32>,
+    /// The width and height of the page in the frame of its runs.
+    pub size: [f32; 2],
     pub runs: &'a [Run],
 }
 
-/// What the layout learns from the whole file before it lays out a page.
+/// What the layout learns from the whole file before it lays out a page (see
+/// [`layoutregions::file::learn`]), kept the way the layout looks it up.
 #[derive(Debug, Default)]
 pub(crate) struct Style {
-    /// The most common font size, by ink character count, of the text outside running
-    /// headers and footers.
+    /// The body size of the file (see [`FileFacts::body_size`]).
     pub body_size: f32,
     /// Distinct heading sizes of an untagged file, largest first.
     heading_sizes: Vec<f32>,
-    /// Lines that repeat at the top or bottom of at least [`REPEATS`] pages at the same
-    /// height, or at the bottom of both pages of a file of two, with digits replaced.
-    furniture: HashMap<Furniture, Vec<(f32, f32)>>,
-    /// The footer lines among them that are furniture by the two-page rule only. They are
-    /// running footers by their role, but their ink still counts for the body size and the
-    /// text sizes of a page, as it did before the rule: an invoice of two pages keeps the body
-    /// size and so the headings it had.
-    two_page: HashSet<Furniture>,
+    /// The running headers and footers by band, key and height.
+    running: RunningIndex,
+    /// The keys of the footers of a file of two pages (see [`FileFacts::two_page`]).
+    two_page: HashSet<String>,
     /// The footnote legend of each untagged page that has one, by the page's runs.
-    legends: HashMap<u32, footnotes::Found>,
+    legends: BTreeMap<u32, footnotes::Found>,
 }
 
 /// One visual line.
-struct Line<'a> {
-    runs: &'a [Run],
-    /// The text without leading and trailing white space.
-    text: String,
-    size: f32,
-    x: f32,
-    y: f32,
-    h: f32,
-}
+type Line<'a> = TextLine<'a, Run>;
 
-impl Line<'_> {
-    /// The vertical middle of the line.
-    fn middle(&self) -> f32 {
-        self.y + self.h / 2.0
+impl LineRun for Run {
+    fn text(&self) -> &str {
+        &self.text
     }
-}
-
-/// The lines of `runs`, in order.
-fn lines(runs: &[Run]) -> Vec<Line<'_>> {
-    let mut out = Vec::new();
-    let mut start = 0;
-    while start < runs.len() {
-        let mut end = start + 1;
-        while end < runs.len()
-            && runs[end].line == runs[start].line
-            && runs[end].page == runs[start].page
-        {
-            end += 1;
-        }
-        out.push(line(&runs[start..end]));
-        start = end;
+    fn x(&self) -> f32 {
+        self.x
     }
-    out
-}
-
-fn line(runs: &[Run]) -> Line<'_> {
-    // A run printed over the run before it, or touching it in another size or weight, is
-    // another text (see [`apart`]).
-    let mut text = String::new();
-    let mut ink_end = f32::MIN;
-    let mut before: Option<&Run> = None;
-    for r in runs {
-        if apart(before, r, ink_end)
-            && !r.text.starts_with(char::is_whitespace)
-            && !text.ends_with(char::is_whitespace)
-        {
-            text.push(' ');
-        }
-        text.push_str(&r.text);
-        if !r.text.trim().is_empty() {
-            ink_end = ink_end.max(r.x + r.w);
-            before = Some(r);
-        }
+    fn y(&self) -> f32 {
+        self.y
     }
-    // The run with the most characters sets the size and the baseline.
-    let main = runs
-        .iter()
-        .max_by_key(|r| r.text.chars().count())
-        .unwrap_or(&runs[0]);
-    Line {
-        runs,
-        text: text.trim().to_string(),
-        size: main.size,
-        x: runs[0].x,
-        y: main.y,
-        h: runs.iter().map(|r| r.h).fold(0.0, f32::max),
+    fn w(&self) -> f32 {
+        self.w
     }
-}
-
-/// The text of a line with every digit replaced, white space collapsed.
-fn furniture_key(text: &str) -> String {
-    let replaced: String = text
-        .chars()
-        .map(|c| if c.is_ascii_digit() { '#' } else { c })
-        .collect();
-    replaced.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn band(line: &Line<'_>, height: Option<f32>) -> Option<Band> {
-    let height = height.filter(|h| *h > 0.0)?;
-    let middle = line.middle();
-    if middle >= height * (1.0 - BAND) {
-        Some(Band::Top)
-    } else if middle <= height * BAND {
-        Some(Band::Bottom)
-    } else {
-        None
+    fn h(&self) -> f32 {
+        self.h
     }
-}
-
-/// A running header or footer line: its band and its text with digits replaced. The style
-/// keeps, for each, the heights (lowest and highest middle) it repeats at.
-type Furniture = (Band, String);
-
-/// Lines of one header or footer sit at the same height on every page, within this many
-/// points.
-const Y_STEP: f32 = 4.0;
-
-fn furniture_key_of(line: &Line<'_>, height: Option<f32>) -> Option<Furniture> {
-    let b = band(line, height)?;
-    let key = furniture_key(&line.text);
-    (!key.is_empty()).then_some((b, key))
-}
-
-/// The ink characters of `text`: white space is not counted.
-fn ink(text: &str) -> usize {
-    text.chars().filter(|c| !c.is_whitespace()).count()
-}
-
-/// Rounds a font size to half points.
-fn size_key(size: f32) -> i32 {
-    (size * 2.0).round() as i32
+    fn size(&self) -> f32 {
+        self.size
+    }
+    fn bold(&self) -> bool {
+        self.bold
+    }
+    fn line(&self) -> u32 {
+        self.line
+    }
+    fn page(&self) -> u32 {
+        self.page
+    }
 }
 
 impl Style {
@@ -395,219 +274,50 @@ impl Style {
         Style::learn(pages, false)
     }
 
-    /// Learns body size, heading sizes, running headers and footers and, for an untagged
-    /// file (`tagged` false), the footnote legends from every page. A line at the foot of both
-    /// pages of a file of two is a footer: a letter or an invoice of two pages has no third
-    /// page to repeat it on. A letterhead at the top of both is content: the title and fields
-    /// of an invoice repeat on its second page.
+    /// Learns the facts of the file from every page (see [`layoutregions::file::learn`]),
+    /// one page's text at a time; `tagged` files say their footnotes themselves.
     pub(crate) fn learn(pages: &[PageText<'_>], tagged: bool) -> Style {
-        let mut seen: HashMap<Furniture, Vec<(f32, u32)>> = HashMap::new();
-        // Texts that stand in the middle of some page are content, wherever else they stand.
-        // A bare page number is not held against: numbers fill tables too.
-        let mut body: HashSet<String> = HashSet::new();
-        let mut body_bytes = 0usize;
-        for p in pages {
-            for l in lines(p.runs) {
-                if let Some(key) = furniture_key_of(&l, p.height) {
-                    seen.entry(key).or_default().push((l.middle(), p.page));
-                } else if p.height.is_some() {
-                    let key = furniture_key(&l.text);
-                    let cost = key.len() + BODY_KEY_COST;
-                    if body_bytes + cost <= BODY_KEY_BYTES && body.insert(key) {
-                        body_bytes += cost;
-                    }
-                }
-            }
+        let facts = file::learn(
+            || {
+                pages
+                    .iter()
+                    .map(|p| engine::text_page(p.page, p.size, p.runs))
+            },
+            tagged,
+            &ends_in_amount,
+        );
+        Style {
+            body_size: facts.body_size,
+            heading_sizes: facts.heading_sizes,
+            running: RunningIndex::new(&facts.running),
+            two_page: facts.two_page.into_iter().collect(),
+            legends: facts.legends,
         }
-        #[cfg(test)]
-        BODY_KEPT.with(|k| k.set(body.len()));
-        let mut furniture: HashMap<Furniture, Vec<(f32, f32)>> = HashMap::new();
-        let mut two_page: HashSet<Furniture> = HashSet::new();
-        for (key, mut at) in seen {
-            if key.1.chars().any(char::is_alphabetic) && body.contains(&key.1) {
-                continue;
-            }
-            at.sort_by(|a, b| a.0.total_cmp(&b.0));
-            // Heights within Y_STEP of the lowest one of a group are one height.
-            let mut i = 0;
-            while i < at.len() {
-                let low = at[i].0;
-                let mut j = i;
-                let mut pages_at = HashSet::new();
-                while j < at.len() && at[j].0 - low <= Y_STEP {
-                    pages_at.insert(at[j].1);
-                    j += 1;
-                }
-                let both = pages.len() == 2 && key.0 == Band::Bottom && pages_at.len() == 2;
-                if both && pages_at.len() < REPEATS {
-                    two_page.insert(key.clone());
-                }
-                if pages_at.len() >= REPEATS || both {
-                    furniture
-                        .entry(key.clone())
-                        .or_default()
-                        .push((low, at[j - 1].0));
-                }
-                i = j;
-            }
-        }
-        let mut style = Style {
-            furniture,
-            two_page,
-            ..Style::default()
-        };
-        // Ink characters by size (half points), and the sum of their exact sizes.
-        let mut chars: HashMap<i32, (usize, f64)> = HashMap::new();
-        let count = |chars: &mut HashMap<i32, (usize, f64)>, r: &Run| {
-            let n = ink(&r.text);
-            let e = chars.entry(size_key(r.size)).or_default();
-            e.0 += n;
-            e.1 += n as f64 * f64::from(r.size);
-        };
-        for p in pages {
-            let all = lines(p.runs);
-            let bands = style.furniture(&all, p.height, &[]);
-            for (l, b) in all.iter().zip(&bands) {
-                let counted = b.is_some()
-                    && furniture_key_of(l, p.height).is_some_and(|k| style.two_page.contains(&k));
-                if counted {
-                    for r in l.runs {
-                        count(&mut chars, r);
-                    }
-                }
-            }
-            // The lines without running headers and footers, as the layout of the page sees
-            // them, and where each starts among the page's runs.
-            let mut body = Vec::with_capacity(all.len());
-            let mut starts = Vec::with_capacity(all.len());
-            let mut at = 0;
-            for (l, b) in all.into_iter().zip(&bands) {
-                if b.is_none() {
-                    starts.push(at);
-                }
-                at += l.runs.len();
-                if b.is_none() {
-                    body.push(l);
-                }
-            }
-            // A legend of footnotes is no body text: a dense legend in a tiny size would make
-            // every line a heading. A tagged file says its notes.
-            let legend = if tagged {
-                None
-            } else {
-                footnotes::find_lines(&body, &starts)
-            };
-            let in_legend: HashSet<usize> = legend
-                .as_ref()
-                .map(|f| f.legend_runs().collect())
-                .unwrap_or_default();
-            for (l, first) in body.iter().zip(&starts) {
-                for (k, r) in l.runs.iter().enumerate() {
-                    if !in_legend.contains(&(first + k)) {
-                        count(&mut chars, r);
-                    }
-                }
-            }
-            if let Some(found) = legend {
-                style.legends.insert(p.page, found);
-            }
-        }
-        // The most ink characters wins; on a tie the smaller size. Padding is no text: a data
-        // line padded into its place would count its spaces. The body size is the mean exact
-        // size of the winning half point, not the half point: the ratios to it then hold for a
-        // page printed at any scale.
-        style.body_size = chars
-            .iter()
-            .max_by_key(|(size, (n, _))| (*n, -**size))
-            .map(|(size, (n, sum))| match *n {
-                0 => *size as f32 / 2.0,
-                n => (sum / n as f64) as f32,
-            })
-            .unwrap_or(0.0);
-        let mut sizes: Vec<i32> = Vec::new();
-        for p in pages {
-            let all = lines(p.runs);
-            let bands = style.furniture(&all, p.height, &[]);
-            for (l, b) in all.iter().zip(&bands) {
-                if b.is_none() && style.may_head(l) {
-                    sizes.push(size_key(l.size));
-                }
-            }
-        }
-        sizes.sort_unstable_by(|a, b| b.cmp(a));
-        sizes.dedup();
-        style.heading_sizes = sizes.into_iter().map(|s| s as f32 / 2.0).collect();
-        style
     }
 
-    /// The band of each line that is a running header or footer on its page. A header stands
-    /// above all text of the page and a footer below it: a repeated line inside the text
-    /// stays text. Lines of white space only are no text of the page.
-    /// A line marked in `content` is never a header or footer; an empty `content` marks none.
+    /// The band of each line that is a running header or footer on its page (see
+    /// [`RunningIndex::bands`]). A line marked in `content` is never a header or footer; an
+    /// empty `content` marks none.
     fn furniture(
         &self,
         lines: &[Line<'_>],
         height: Option<f32>,
         content: &[bool],
     ) -> Vec<Option<Band>> {
-        let found: Vec<Option<Band>> = lines
-            .iter()
-            .enumerate()
-            .map(|(k, l)| {
-                if content.get(k).copied().unwrap_or(false) {
-                    return None;
-                }
-                let key = furniture_key_of(l, height)?;
-                let m = l.middle();
-                self.furniture
-                    .get(&key)?
-                    .iter()
-                    .any(|(low, high)| m >= *low && m <= *high)
-                    .then_some(key.0)
-            })
-            .collect();
-        // Lines of white space only are no text to stand above or below: a print run blanks
-        // the empty lines of a footer column with spaces.
-        let body = || {
-            lines
-                .iter()
-                .zip(&found)
-                .filter(|(l, b)| b.is_none() && !l.text.is_empty())
-        };
-        let top = body().map(|(l, _)| l.middle()).fold(f32::MIN, f32::max);
-        let bottom = body().map(|(l, _)| l.middle()).fold(f32::MAX, f32::min);
-        lines
-            .iter()
-            .zip(found)
-            .map(|(l, b)| match b {
-                Some(Band::Top) if l.middle() > top => Some(Band::Top),
-                Some(Band::Bottom) if l.middle() < bottom => Some(Band::Bottom),
-                _ => None,
-            })
-            .collect()
+        match height {
+            Some(h) => self.running.bands(lines, h, content),
+            None => vec![None; lines.len()],
+        }
     }
 
-    fn is_heading_size(&self, line: &Line<'_>) -> bool {
-        self.body_size > 0.0
-            && line.size >= self.body_size * HEADING_RATIO
-            && line.text.chars().count() < HEADING_CHARS
-            && line.text.chars().any(char::is_alphanumeric)
-    }
-
-    /// Whether an untagged line may be a heading by its own text and style: large enough,
-    /// short, not ending in an amount, and, when it is smaller than [`HEADING_PLAIN_RATIO`]
-    /// times the body size, led by bold ink (see [`bold_led`]) and not only data.
-    fn may_head(&self, line: &Line<'_>) -> bool {
-        // A number set large (a form or file number) stays a heading.
-        let large = line.size >= HEADING_PLAIN_RATIO * self.body_size;
-        self.is_heading_size(line)
-            && !ends_in_amount(&line.text)
-            && (large || (!data_only(&line.text) && bold_led(line)))
+    /// Whether a line on a page of `height` is a footer by the two-page rule.
+    fn two_page_line(&self, line: &Line<'_>, height: Option<f32>) -> bool {
+        height.is_some_and(|h| file::two_page_line(line, h, &self.two_page))
     }
 
     /// The heading level of an untagged line, `None` for body text.
     fn heading_level(&self, line: &Line<'_>) -> Option<u8> {
-        if !self.may_head(line) {
+        if !file::may_head(line, self.body_size, &ends_in_amount) {
             return None;
         }
         // A size the style pass did not see as a heading size (its line there held a smaller
@@ -2277,54 +1987,6 @@ fn inlines(
 /// Whether the text of a run may be printed over another: two letters or digits or more. A
 /// lone mark (an accent drawn as a run of its own over its letter) belongs to its word, as
 /// the reading order keeps it there.
-fn overprints(text: &str) -> bool {
-    text.chars().filter(|c| c.is_alphanumeric()).count() >= 2
-}
-
-/// Whether the run `r` is another text than the run `before` it on its line, whose ink ends
-/// at `ink_end`: it is printed over it (it starts [`OVERPRINT`] sizes or more left of that
-/// end, with text of its own, see [`overprints`]), or it touches it (it starts less than
-/// [`TOUCH`] sizes right of that end, or over it) in a larger size by a label step or in
-/// another weight, the words that meet each of two letters or digits or more and one with a
-/// letter, the second opening with a capital or a digit or the first ending in a colon: a label
-/// and its value set against it (`Name` and `Hinterhaus`). A word cut by a change of style goes
-/// on in a small letter (`Rechnungs` and `nummer`, `Muster` and `mann`): one word. A smaller run after
-/// a word is a raised part of it (`21st`), a word in pieces of one style is one word, and a
-/// number in pieces (a change of font inside `1234,56`) is one number.
-fn apart(before: Option<&Run>, r: &Run, ink_end: f32) -> bool {
-    if r.x + OVERPRINT * r.size < ink_end && overprints(&r.text) {
-        return true;
-    }
-    let Some(b) = before else {
-        return false;
-    };
-    let (last, first) = (
-        b.text.split_whitespace().next_back(),
-        r.text.split_whitespace().next(),
-    );
-    let letters = |w: Option<&str>| w.is_some_and(|w| w.chars().any(char::is_alphabetic));
-    // A new word opens with a capital or a digit (`Hinterhaus`, `4711`), or follows a label's
-    // colon; the rest of a word cut by a change of style opens with a small letter (`nummer`).
-    let opens = first
-        .is_some_and(|w| w.starts_with(|c: char| c.is_uppercase() || c.is_ascii_digit()))
-        || last.is_some_and(|w| w.ends_with(':'));
-    opens
-        && r.x < ink_end + TOUCH * r.size.max(b.size)
-        && (r.size >= crate::tables::LABEL_STEP * b.size || r.bold != b.bold)
-        && last.is_some_and(overprints)
-        && first.is_some_and(overprints)
-        && (letters(last) || letters(first))
-}
-
-/// A run that starts less than this many sizes right of where the ink of the run before it
-/// ends touches it (see [`apart`]): less than a space.
-const TOUCH: f32 = 0.2;
-
-/// A run that starts this many of its sizes or more left of where the ink of the run before it
-/// on its line ends is printed over that run (see [`inlines`]): far more than a kerning pair
-/// takes back.
-const OVERPRINT: f32 = 0.5;
-
 /// Whether `cur` goes on in the same paragraph as `prev`: below it, near enough and in the
 /// same size, and not wholly right of it: a line that starts [`BESIDE_GAP`] sizes or more
 /// after the ink of the line over it ends, and is not much wider than it, stands in another
@@ -2911,9 +2573,6 @@ const FIELD_WORDS: usize = 8;
 /// A line is short when the next first word fits after it with this share of the widest
 /// line to spare.
 const SHORT_ROOM: f32 = 0.15;
-
-/// Line ends this close, in points, are one edge.
-const EDGE: f32 = 1.0;
 
 /// The lines of a paragraph (by page and line, sorted) that start after a line break: the
 /// first word of the line would have fit at the end of the line before within the widest
@@ -3514,12 +3173,6 @@ fn tagged(flow: &[Run], slots: &[Slot], ids: Option<&[u32]>, cx: &Context<'_>, o
 }
 
 #[cfg(test)]
-thread_local! {
-    /// The mid-page line texts the last style pass kept.
-    static BODY_KEPT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-#[cfg(test)]
 mod tests {
     use layoutregions::PrimId;
     use pdfparts::StructElem;
@@ -3597,27 +3250,6 @@ mod tests {
         r.text = "AABB".into();
         assert!(r.cut_at(0).is_none());
         assert!(r.cut_at(1).is_none());
-    }
-
-    #[test]
-    fn kept_body_lines_are_bounded() {
-        // Distinct mid-page lines of 13 bytes each cost 77 bytes with the set: 1,000 bytes
-        // keep 12 of them.
-        let letter = |k: u32| char::from(b'a' + (k % 26) as u8);
-        let runs: Vec<Run> = (0..200)
-            .map(|k| {
-                let word: String = [letter(k / 676), letter(k / 26), letter(k)]
-                    .iter()
-                    .collect();
-                run(&format!("body line {word}"), k, 500.0, 10.0)
-            })
-            .collect();
-        Style::new(&[PageText {
-            page: 1,
-            height: Some(842.0),
-            runs: &runs,
-        }]);
-        assert_eq!(BODY_KEPT.with(|k| k.get()), 1_000 / (13 + BODY_KEY_COST));
     }
 
     #[test]
@@ -3780,7 +3412,7 @@ mod tests {
         }];
         let style = Style::new(&[PageText {
             page: 1,
-            height: Some(842.0),
+            size: [595.0, 842.0],
             runs: &runs,
         }]);
         // No room for the target, and no element for the block: the block is dropped, and
@@ -3811,7 +3443,7 @@ mod tests {
     fn titled_table(rows: usize, uri: bool, room: u64) -> Vec<Block> {
         let style = Style::new(&[PageText {
             page: 1,
-            height: Some(842.0),
+            size: [595.0, 842.0],
             runs: &[],
         }]);
         let budget = Budget::new(rezzer_limits::Limits::default());
@@ -3929,7 +3561,7 @@ mod tests {
         // stop names, nothing of it is kept, and the link counts it took go back.
         let style = Style::new(&[PageText {
             page: 1,
-            height: Some(842.0),
+            size: [595.0, 842.0],
             runs: &[],
         }]);
         let budget = Budget::new(rezzer_limits::Limits {
@@ -3988,7 +3620,7 @@ mod tests {
         // its loss.
         let style = Style::new(&[PageText {
             page: 1,
-            height: Some(842.0),
+            size: [595.0, 842.0],
             runs: &[],
         }]);
         let budget = Budget::new(rezzer_limits::Limits::default());
@@ -4062,7 +3694,7 @@ mod tests {
         let second = run("a second cell with more text", 1, 600.0, 10.0);
         let style = Style::new(&[PageText {
             page: 1,
-            height: Some(842.0),
+            size: [595.0, 842.0],
             runs: &[],
         }]);
         let budget = Budget::new(limits);
@@ -4140,7 +3772,7 @@ mod tests {
         ];
         let style = Style::new(&[PageText {
             page: 1,
-            height: Some(842.0),
+            size: [595.0, 842.0],
             runs: &runs,
         }]);
         let budget = Budget::new(rezzer_limits::Limits::default());
@@ -4211,7 +3843,7 @@ mod tests {
     fn laid_page(runs: Vec<Run>, drawn: &Drawn<'_>) -> Laid {
         let style = Style::new(&[PageText {
             page: 1,
-            height: Some(842.0),
+            size: [595.0, 842.0],
             runs: &runs,
         }]);
         let budget = Budget::new(rezzer_limits::Limits::default());
@@ -4433,12 +4065,12 @@ mod tests {
         let style = Style::new(&[
             PageText {
                 page: 1,
-                height: Some(842.0),
+                size: [595.0, 842.0],
                 runs: &runs,
             },
             PageText {
                 page: 2,
-                height: Some(842.0),
+                size: [595.0, 842.0],
                 runs: &second,
             },
         ]);
@@ -4659,7 +4291,7 @@ mod tests {
             .enumerate()
             .map(|(k, runs)| PageText {
                 page: k as u32 + 1,
-                height: Some(842.0),
+                size: [595.0, 842.0],
                 runs,
             })
             .collect();
@@ -5015,62 +4647,6 @@ mod tests {
         assert_eq!(laid.cut, Some(Cut::Item { block: 1, item: 3 }));
     }
 
-    /// The legend leaves the body size only in an untagged file, where the layout takes it
-    /// too; a tagged file counts it, as the text sizes of its pages do.
-    #[test]
-    fn only_an_untagged_legend_leaves_the_body_size() {
-        let mut runs = vec![run("Wert1) und Wert2) gemeldet", 0, 700.0, 9.0)];
-        runs.extend((1..=2).map(|k| {
-            run(
-                &format!("{k}) Muster der Erklaerung zu diesem Wert mit vielen Worten"),
-                k,
-                140.0 - 8.0 * k as f32,
-                6.0,
-            )
-        }));
-        let pages = [PageText {
-            page: 1,
-            height: Some(842.0),
-            runs: &runs,
-        }];
-        let untagged = Style::learn(&pages, false);
-        assert_eq!(untagged.body_size, 9.0);
-        assert!(untagged.legends.contains_key(&1));
-        let tagged = Style::learn(&pages, true);
-        assert_eq!(tagged.body_size, 6.0);
-        assert!(tagged.legends.is_empty());
-    }
-
-    /// The body size is the exact size of the body text, not its half point: a letter printed
-    /// at 0.675 sets its body of 7 points at 4.725, which a half point would make 4.5, and a
-    /// name of 6.75 points (10 at full size, under 1.5 times the body there) would then be
-    /// 1.5 times the body.
-    #[test]
-    fn the_body_size_is_exact() {
-        let runs: Vec<Run> = (0..4)
-            .map(|k| {
-                run(
-                    "die Firma liefert die bestellte Ware",
-                    k,
-                    700.0 - 6.0 * k as f32,
-                    4.725,
-                )
-            })
-            .collect();
-        let pages = [PageText {
-            page: 1,
-            height: Some(842.0),
-            runs: &runs,
-        }];
-        let style = Style::learn(&pages, false);
-        assert!(
-            (style.body_size - 4.725).abs() < 1e-4,
-            "{}",
-            style.body_size
-        );
-        assert!(6.75 < HEADING_PLAIN_RATIO * style.body_size);
-    }
-
     /// A stop inside the legend: the references to the footnotes it cut are text again, so
     /// no reference is left without its footnote, whatever the limit.
     #[test]
@@ -5096,7 +4672,7 @@ mod tests {
         // The style pass finds the legend the layout takes.
         let style = Style::new(&[PageText {
             page: 1,
-            height: Some(842.0),
+            size: [595.0, 842.0],
             runs: &runs,
         }]);
         let mut cut = 0;
@@ -5208,7 +4784,7 @@ mod tests {
         }
         let style = Style::new(&[PageText {
             page: 1,
-            height: Some(842.0),
+            size: [595.0, 842.0],
             runs: &runs,
         }]);
         let budget = Budget::new(rezzer_limits::Limits::default());
@@ -5272,7 +4848,7 @@ mod tests {
         }
         let style = Style::new(&[PageText {
             page: 1,
-            height: Some(842.0),
+            size: [595.0, 842.0],
             runs: &runs,
         }]);
         let budget = Budget::new(rezzer_limits::Limits::default());
@@ -5350,7 +4926,7 @@ mod tests {
         }
         let style = Style::new(&[PageText {
             page: 1,
-            height: Some(842.0),
+            size: [595.0, 842.0],
             runs: &runs,
         }]);
         let budget = Budget::new(rezzer_limits::Limits::default());

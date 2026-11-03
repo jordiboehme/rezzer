@@ -520,9 +520,10 @@ fn lay_out(
         .iter()
         .filter_map(|items| {
             let info = info_of.get(&items.page)?;
+            let (w, h) = frame_size(info, Some(items));
             Some(PageText {
                 page: items.page,
-                height: frame_height(info, Some(items)),
+                size: [w, h],
                 runs: &items.runs,
             })
         })

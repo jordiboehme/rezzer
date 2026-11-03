@@ -42,8 +42,10 @@
 //! ```
 
 mod arbitrate;
+pub mod file;
 mod input;
 mod limits;
+pub mod line;
 mod region;
 mod report;
 pub mod segment;
@@ -51,7 +53,7 @@ mod work;
 
 pub use arbitrate::{Finder, InOrder, Offer, find_in_order};
 pub use input::{
-    BoxIn, CodeIn, FontKind, GivenRegion, PageIn, PictureIn, PrimId, RuleIn, Shift, TextRun,
+    BoxIn, CodeIn, FontKind, GapIn, GivenRegion, PageIn, PictureIn, PrimId, RuleIn, Shift, TextRun,
 };
 pub use limits::Limits;
 pub use region::{

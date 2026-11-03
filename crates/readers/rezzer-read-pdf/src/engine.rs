@@ -8,7 +8,7 @@
 #[cfg(test)]
 use layoutregions::segment::drawn::{DrawnStructure, Grids};
 use layoutregions::{
-    Bounds, BoxIn, CodeIn, FontKind, PageIn, PictureIn, PrimId, RuleIn, Shift, TextRun,
+    Bounds, BoxIn, CodeIn, FontKind, GapIn, PageIn, PictureIn, PrimId, RuleIn, Shift, TextRun,
 };
 
 use crate::layout::{Drawn, Run};
@@ -75,6 +75,22 @@ pub(crate) fn page_in(
     }
 }
 
+/// The text of one page alone, for the file pass (`layoutregions::file::learn`): `TextRun` *i*
+/// is `runs[i]`, `size` the frame of the runs. It holds no rules, boxes, pictures or codes.
+pub(crate) fn text_page(page: u32, size: [f32; 2], runs: &[Run]) -> PageIn {
+    PageIn {
+        page,
+        size,
+        turn: 0,
+        texts: runs.iter().map(text_run).collect(),
+        rules: Vec::new(),
+        boxes: Vec::new(),
+        pictures: Vec::new(),
+        codes: Vec::new(),
+        given: Vec::new(),
+    }
+}
+
 /// The drawn structure of a page that draws nothing, for tests: a `Drawn` with no rules. A
 /// test with rules makes the structure from them (`regions::structure_in_frame`), so the two
 /// never disagree.
@@ -97,7 +113,7 @@ pub(crate) fn run_of(id: PrimId) -> Option<usize> {
     }
 }
 
-fn text_run(r: &Run) -> TextRun {
+pub(crate) fn text_run(r: &Run) -> TextRun {
     TextRun {
         text: r.text.clone(),
         x: r.x,
@@ -113,7 +129,15 @@ fn text_run(r: &Run) -> TextRun {
         shift: if r.note { Shift::Raised } else { Shift::Base },
         line: r.line,
         off_axis: r.off_axis,
-        gaps: r.gaps.iter().map(|g| [g.from, g.to]).collect(),
+        gaps: r
+            .gaps
+            .iter()
+            .map(|g| GapIn {
+                words: g.words,
+                from: g.from,
+                to: g.to,
+            })
+            .collect(),
     }
 }
 

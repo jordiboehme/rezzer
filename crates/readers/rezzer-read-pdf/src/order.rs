@@ -23,8 +23,8 @@ use crate::text::{Gl, Link, Texts};
 const WORD_GAP: f32 = 0.15;
 
 /// A gap wider than this many font sizes splits a line into pieces, which may stand in
-/// different columns.
-pub(crate) const PIECE_GAP: f32 = 0.8;
+/// different columns (see `layoutregions::line::PIECE_GAP`).
+pub(crate) use layoutregions::line::PIECE_GAP;
 
 /// Text that reads from right to left (Hebrew, Arabic and the like).
 fn is_rtl(c: char) -> bool {
