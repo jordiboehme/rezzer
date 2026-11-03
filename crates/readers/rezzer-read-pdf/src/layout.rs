@@ -5150,6 +5150,79 @@ mod tests {
         );
     }
 
+    /// The page of `a_segment_limit_loses_no_read` without its grid: 70 boxes drawn one in
+    /// the other and a paragraph in the innermost, tagged by `tree` or not. Whether the page
+    /// was segmented: a segmentation leaves its depth issue with the page's regions.
+    fn segmented(tagged: bool) -> bool {
+        let boxes: Vec<[f32; 4]> = (0..70)
+            .map(|k| {
+                let d = 2.5 * k as f32;
+                [20.0 + d, 20.0 + d, 575.0 - d, 820.0 - d]
+            })
+            .collect();
+        let structure = crate::regions::structure_in_frame(&[], &boxes);
+        let drawn = Drawn {
+            structure: &structure,
+            boxes: &boxes,
+            ..NOTHING_DRAWN
+        };
+        let tree = StructTree {
+            elems: vec![elem("Document", None, &[1]), elem("P", Some(0), &[])],
+            roots: vec![0],
+        };
+        let mut runs = Vec::new();
+        for (i, t) in ["Muster GmbH", "Musterweg 1"].iter().enumerate() {
+            let mut r = Run {
+                x: 250.0,
+                ..run(t, i as u32, 420.0 - 12.0 * i as f32, 10.0)
+            };
+            r.mcid = kept_mcid(Some(i as u32));
+            runs.push(r);
+        }
+        let style = Style::new(&[PageText {
+            page: 1,
+            height: Some(842.0),
+            runs: &runs,
+        }]);
+        let budget = Budget::new(rezzer_limits::Limits::default());
+        let tables = Tables::default();
+        let roles = |_: u32| Some(1usize);
+        let cx = Context {
+            style: &style,
+            tree: tagged.then_some(&tree),
+            roles: &roles,
+            budget: &budget,
+            tables: &tables,
+            in_part: false,
+            links: &LinkRoom::new(u64::MAX),
+        };
+        let laid = page_blocks_until(1, Some(842.0), runs, &drawn, &cx, &[], &|| false);
+        let text: Vec<String> = laid
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Paragraph { inlines, .. } => Some(rezzer_model::plain_text(inlines)),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            text.iter().any(|t| t.contains("Muster GmbH")),
+            "{tagged}: {text:?}"
+        );
+        laid.regions
+            .issues
+            .iter()
+            .any(|i| i.what.contains("nest deeper than 64 levels"))
+    }
+
+    /// The segmentation runs only where the geometric detectors look: not on a tagged page
+    /// whose tag tree holds.
+    #[test]
+    fn a_tagged_page_is_not_segmented() {
+        assert!(segmented(false), "an untagged page is segmented");
+        assert!(!segmented(true), "a tagged page whose tree holds is not");
+    }
+
     #[test]
     fn tagged_page_ids_follow_the_flow() {
         let mut elems = vec![

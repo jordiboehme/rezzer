@@ -967,11 +967,17 @@ mod tests {
             }
         }
         assert_eq!(ruled_groups(&grids, &segments), want(true, false));
-        // Where a bound cut the segmentation short, every group is read.
-        segments.issues.push(layoutregions::Issue {
-            what: "segments nest deeper than 64 levels".into(),
-            kind: layoutregions::IssueKind::Limit,
-        });
-        assert_eq!(ruled_groups(&grids, &segments), want(true, true));
+        // Where a bound or the stop cut the segmentation short, every group is read.
+        for kind in [
+            layoutregions::IssueKind::Limit,
+            layoutregions::IssueKind::Stopped,
+        ] {
+            let mut cut = segments.clone();
+            cut.issues.push(layoutregions::Issue {
+                what: "the segmentation was cut short".into(),
+                kind,
+            });
+            assert_eq!(ruled_groups(&grids, &cut), want(true, true), "{kind:?}");
+        }
     }
 }
