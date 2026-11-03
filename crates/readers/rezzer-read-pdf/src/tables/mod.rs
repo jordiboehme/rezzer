@@ -23,7 +23,7 @@ use layoutregions::segment::{Segment, Segments, Source};
 use crate::layout::{Drawn, Flow, Run};
 
 /// The cells of tables, built in the engine (see `layoutregions::extract::table`).
-use layoutregions::extract::table::{self, CELL_GAP, MAX_SQUARES, TableOut, middle, numeric};
+use layoutregions::extract::table::{self, MAX_SQUARES, TableOut, middle, numeric};
 
 pub(crate) use pairs::{BoxTitle, Frame, box_pairs, field_frames, form_drawn, underlined_titles};
 pub(crate) use tagged::{Tables, tagged};

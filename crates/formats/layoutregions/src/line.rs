@@ -53,6 +53,11 @@ pub trait LineRun {
     fn line(&self) -> u32;
     /// The run reads in another direction than the page's text (a margin note, a stamp).
     fn off_axis(&self) -> bool;
+    /// The run is a reference to a footnote of its page (its text is the footnote's label):
+    /// a raised marker that goes with the text before it. False when the reader does not know.
+    fn note(&self) -> bool {
+        false
+    }
     /// The page of the run, for a list that holds runs of several pages; 0 for one page.
     fn page(&self) -> u32 {
         0

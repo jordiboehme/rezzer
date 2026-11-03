@@ -47,10 +47,9 @@ pub(crate) use finders::PageCx;
 pub(crate) use head::{Dates, PageDate, TITLE_FROM, document_date, page_dates};
 pub(crate) use layoutregions::extract::text::address_shaped;
 use shape::ends_in_amount;
-pub(crate) use shape::{
-    ColumnLine, Columns, address_block, address_columns, address_lines, page_text_sizes,
-    page_text_sizes_of, postal,
-};
+pub(crate) use shape::{page_text_sizes, page_text_sizes_of};
+
+use layoutregions::extract::pairs::blocks::address_block;
 
 /// A piece of text in one style on one line. The text parser and the fallback parser fill it,
 /// in the order and with the line numbers and word spaces [`crate::text::PageItems`] states.
@@ -272,6 +271,9 @@ impl LineRun for Run {
     }
     fn off_axis(&self) -> bool {
         self.off_axis
+    }
+    fn note(&self) -> bool {
+        self.note
     }
     fn gaps(&self) -> impl Iterator<Item = GapIn> + '_ {
         self.gaps.iter().map(|g| GapIn {

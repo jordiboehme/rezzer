@@ -11,7 +11,6 @@ use std::collections::{HashMap, HashSet};
 use layoutregions::segment::drawn::{Grids, Line, Unsearched};
 
 use super::*;
-use crate::tables::LABEL_STEP;
 
 /// The note before the first table of fields between rules of a page.
 pub(super) const STRIP_FOUND_BY: &str = "Found by: label and value pairs from rows of fields \
@@ -24,25 +23,6 @@ const STRIP_LINES: usize = 40;
 /// A divider of a strip is at least this share of the strip's height long: it parts the
 /// fields over much of the row, where a drawn separator mark is a small share of it.
 const DIVIDER: f32 = 0.25;
-
-/// Steps the search for fields between rules may take on one page.
-const STRIP_WORK: usize = 1_000_000;
-
-/// One strip of fields between two rules: its rules' heights, its left and right ends, its
-/// dividers, and its fields by cell, left to right, read with each label over or left of its
-/// value.
-struct Strip {
-    top: f32,
-    bottom: f32,
-    x0: f32,
-    x1: f32,
-    dividers: Vec<f32>,
-    fields: Vec<Field>,
-    /// Its text as one line of labels over one line of values (see [`two_lines`]).
-    rows: Option<(Vec<usize>, Vec<usize>)>,
-    /// A field of it was left as text.
-    left_out: bool,
-}
 
 /// Where fields between rules may stand: a rule no grid takes and the nearest rule below it
 /// bound the strip, over all of the upper rule when the lower one covers it, over the lower
@@ -238,61 +218,6 @@ pub(in crate::tables) fn frames(hs: &[Line], tops: &[Top], vs: &[Line]) -> Optio
     Some(out)
 }
 
-/// Why fields between rules are not paired: a value over a field edge, a value under none of
-/// the labels of its part of the row or under two, labels that do not stand over or beside
-/// their values, labels under the rule their values stand on whose values are not all clear,
-/// and one field alone.
-const ACROSS: &str = "a value stands across two fields";
-
-const UNDER_NONE: &str = "a value stands under none of the labels of its field or under two";
-
-const NOT_FIELDS: &str = "its labels do not all stand over or beside their values";
-
-const UNDER_UNCLEAR: &str = "its labels stand under the rule their values stand on, and not \
-     every value's label is clear";
-
-/// Why two lines in columns between two rules are read line by line.
-const LINE_BY_LINE: &str = "each line may be a row, or each column a cell of its own whose \
-     lines go together";
-const LONE: &str = "it is one field alone between its rules, which a caption over a line of \
-     text between rules looks like";
-
-/// The width of a character of a data font, as a share of its size: a value line padded
-/// into its fields has one to three of them between two fields.
-const CHAR: f32 = 0.6;
-
-/// A word gap this many characters from a field edge or nearer is where the value line is
-/// cut for it.
-const NEAR_EDGE: f32 = 3.0;
-
-/// The edges of the fields of a frame: its dividers, and in each cell between them the start
-/// of each later label of its first line (see [`label_starts`]); with the frame's ends.
-fn field_edges(flow: &Flow, fr: &Frame, ids: &[usize]) -> Vec<f32> {
-    let mut xs = vec![fr.x0];
-    xs.extend(&fr.dividers);
-    xs.push(fr.x1);
-    let mut edges = xs.clone();
-    for cell in cells_of(flow, &xs, ids) {
-        edges.extend(label_starts(flow, &cell));
-    }
-    edges.sort_by(f32::total_cmp);
-    edges
-}
-
-/// The runs `ids` by the cell between the edges `xs` their middle lies in.
-fn cells_of(flow: &Flow, xs: &[f32], ids: &[usize]) -> Vec<Vec<usize>> {
-    let mut cells: Vec<Vec<usize>> = vec![Vec::new(); xs.len() - 1];
-    for &i in ids {
-        let (cx, _) = middle(&flow.runs[i]);
-        let c = xs
-            .partition_point(|e| *e < cx)
-            .saturating_sub(1)
-            .min(cells.len() - 1);
-        cells[c].push(i);
-    }
-    cells
-}
-
 /// The runs of a frame: their middle inside it, with ink, in the page's direction.
 fn frame_runs(flow: &Flow, by_y: &ByY, fr: &Frame, busy: &dyn Fn(usize) -> bool) -> Vec<usize> {
     by_y.runs_between(fr.bottom, fr.top)
@@ -305,211 +230,23 @@ fn frame_runs(flow: &Flow, by_y: &ByY, fr: &Frame, busy: &dyn Fn(usize) -> bool)
         .collect()
 }
 
-/// Whether the run stands across the field edge `e`: more than a character of it on each
-/// side.
-fn across(r: &Run, e: f32) -> bool {
-    let c = CHAR * r.size.max(1.0);
-    e - r.x > c && r.x + r.w - e > c
-}
-
-/// Where to cut the runs of the page's frames of fields: a run that stands across a field
-/// edge (see [`field_edges`]) is cut at its word gap nearest the edge, when that gap lies at
-/// most [`NEAR_EDGE`] characters from it. Each run with its gaps, in the order of the flow.
+/// Where to cut the runs of the page's `frames` of fields (see
+/// [`layoutregions::extract::pairs::strips::field_cuts`]): each run with its gaps, in the order
+/// of the flow.
 pub(in crate::tables) fn field_cuts(flow: &Flow, frames: &[Frame]) -> Vec<(usize, Vec<usize>)> {
     let lines = flow_lines(flow);
     let by_y = ByY::new(flow, &lines);
-    let mut at: HashMap<usize, Vec<usize>> = HashMap::new();
-    let mut work = 0usize;
-    for fr in frames {
-        let ids = frame_runs(flow, &by_y, fr, &|_| false);
-        work += ids.len();
-        if work > STRIP_WORK {
-            break;
-        }
-        if ids.is_empty() {
-            continue;
-        }
-        let edges = field_edges(flow, fr, &ids);
-        let inner = &edges[1..edges.len() - 1];
-        if !holds_fields(flow, fr, &ids, inner) {
-            continue;
-        }
-        for &i in &ids {
-            let r = &flow.runs[i];
-            for &e in inner.iter().filter(|&&e| across(r, e)) {
-                let distance = |g: &crate::layout::Gap| {
-                    if e < g.from {
-                        g.from - e
-                    } else if e > g.to {
-                        e - g.to
-                    } else {
-                        0.0
-                    }
-                };
-                let near = r
-                    .gaps
-                    .iter()
-                    .enumerate()
-                    .min_by(|a, b| distance(a.1).total_cmp(&distance(b.1)));
-                if let Some((k, g)) = near
-                    && distance(g) <= NEAR_EDGE * CHAR * r.size.max(1.0)
-                {
-                    at.entry(i).or_default().push(k);
-                }
-            }
-        }
-    }
-    let mut out: Vec<(usize, Vec<usize>)> = at
-        .into_iter()
-        .map(|(i, mut ks)| {
-            ks.sort_unstable();
-            ks.dedup();
-            (i, ks)
+    let edges: Vec<FieldFrame<'_>> = frames
+        .iter()
+        .map(|fr| FieldFrame {
+            x0: fr.x0,
+            x1: fr.x1,
+            dividers: &fr.dividers,
         })
         .collect();
-    out.sort_by_key(|c| c.0);
-    out
-}
-
-/// Whether the frame `fr` with the runs `ids` holds fields, judged before its runs are cut at
-/// its field edges `inner`: its cells between dividers, without the runs that stand across an
-/// edge, read as fields (see [`parse`]; labels alone are fields here) that are short, and each
-/// run that stands across an edge is in pieces between the edges no longer than a value may
-/// be. A line of prose under a smaller caption is too long for values, so it is not cut.
-fn holds_fields(flow: &Flow, fr: &Frame, ids: &[usize], inner: &[f32]) -> bool {
-    let how = Reading {
-        one_field: false,
-        smaller: true,
-        small: i32::MAX,
-        labels: &[],
-    };
-    let crossed =
-        |r: &Run| -> Vec<f32> { inner.iter().copied().filter(|&e| across(r, e)).collect() };
-    let mut rest = Vec::new();
-    for &i in ids {
-        let r = &flow.runs[i];
-        let edges = crossed(r);
-        if edges.is_empty() {
-            rest.push(i);
-            continue;
-        }
-        let chars = r.text.chars().count().max(1);
-        let per = r.w.max(0.0) / chars as f32;
-        let mut cuts = vec![r.x];
-        cuts.extend(edges);
-        cuts.push(r.x + r.w);
-        if cuts
-            .windows(2)
-            .any(|w| per > 0.0 && (w[1] - w[0]) / per > VALUE_CHARS as f32)
-        {
-            return false;
-        }
-    }
-    let mut xs = vec![fr.x0];
-    xs.extend(&fr.dividers);
-    xs.push(fr.x1);
-    let fields = |c: &[usize], beside: bool| match parse(flow, c, how) {
-        Parsed::Fields(f) => f.iter().all(|f| short(flow, f)),
-        // An address is a cell of the row, left out of it when the row is read.
-        Parsed::Unsure(why) => why == ADDRESS || why == NAMED_ADDRESS,
-        // So is a title or text with no label beside other heads.
-        Parsed::No => beside && (title_part(flow, c) || value_sized(flow, c)),
-    };
-    cells_of(flow, &xs, &rest)
-        .iter()
-        .filter(|c| !c.is_empty())
-        .all(|c| {
-            fields(c, false)
-                || parts_of(flow, c)
-                    .filter(|p| p.len() >= 2)
-                    .is_some_and(|p| p.iter().all(|p| fields(p, true)))
-        })
-}
-
-/// How the one cell of a frame with no dividers is parted (see [`text_cells`]).
-enum TextCells {
-    /// As it was given.
-    Whole(Vec<Vec<usize>>),
-    /// Cells of text side by side, parted by their gutter.
-    Cells(Vec<Vec<usize>>),
-    /// Two lines of text in columns that may be rows or cells: left whole, which is said.
-    Doubt(Vec<Vec<usize>>),
-}
-
-/// The parts of the one cell of a frame with no dividers (`cells` 1), when `parts` is that cell
-/// whole, of no label, two lines whose text stands in columns parted by gutters (see
-/// [`gutter_columns`]), each column of no label, as short as a value and of both lines. A
-/// column that is a street over its postcode and town (see [`crate::layout::postal`]), beside
-/// no column that can be its labels (a colon at a line's end, no digit on any line, or words
-/// and a short index), shows that the lines of a column go together: the
-/// columns are cells of text side by side between two rules, which the gutter parts as a
-/// divider would ([`TextCells::Cells`]). Else the two lines
-/// may be rows (a label beside its value on each) or cells (a name over its firm beside
-/// another): they are left whole, and that is said ([`TextCells::Doubt`]). A column of numbers
-/// is a table's (see [`numeric_piece`]) and titles over one row of values are a header over a
-/// row (see [`titles_over_row`]); a frame of one line is a row (a table with a rule under every
-/// row), and one of three lines or more is left to the table pass: these stay whole.
-fn text_cells(flow: &Flow, how: Reading<'_>, parts: Vec<Vec<usize>>, cells: usize) -> TextCells {
-    let [cell] = &parts[..] else {
-        return TextCells::Whole(parts);
-    };
-    if cells != 1
-        || lines_of(flow, cell).len() != 2
-        || !matches!(parse(flow, cell, how), Parsed::No)
-    {
-        return TextCells::Whole(parts);
-    }
-    let columns = gutter_columns(flow, cell);
-    let text = |c: &Vec<usize>| {
-        let lines = lines_of(flow, c);
-        lines.len() == 2
-            && !lines.iter().all(|l| numeric_piece(&words(flow, l)))
-            && matches!(parse(flow, c, how), Parsed::No)
-            && value_sized(flow, c)
-    };
-    if columns.len() < 2 || !columns.iter().all(text) || titles_over_row(flow, &columns) {
-        return TextCells::Whole(parts);
-    }
-    let texts = |c: &Vec<usize>| -> Vec<String> {
-        lines_of(flow, c).iter().map(|l| words(flow, l)).collect()
-    };
-    let postal = columns.iter().any(|c| {
-        let lines = texts(c);
-        crate::layout::postal(&lines.iter().map(String::as_str).collect::<Vec<_>>())
-    });
-    // A column that can be the labels of the column beside it: a colon at a line's end, no
-    // digit on any line (whatever its words: `Strasse / Nr.`, `Str. u. Nr.`), or words and a
-    // short index (`Feld 1`).
-    let labels = columns.iter().any(|c| {
-        let lines = texts(c);
-        let digit = |t: &str| t.chars().any(|ch| ch.is_ascii_digit());
-        let indexed = |t: &str| {
-            let w: Vec<&str> = t.split_whitespace().collect();
-            w.len() >= 2
-                && !w[..w.len() - 1].iter().any(|x| digit(x))
-                && w.last().is_some_and(|x| digit(x) && x.chars().count() <= 3)
-        };
-        lines.iter().any(|t| t.ends_with(':'))
-            || lines.iter().all(|t| !digit(t))
-            || lines.iter().all(|t| indexed(t))
-    });
-    let address = postal && !labels;
-    if address {
-        TextCells::Cells(columns)
-    } else {
-        TextCells::Doubt(parts)
-    }
-}
-
-/// Whether the `columns` of a cell are titles over one row of values: two lines, the first
-/// one word with no digit in each column, the second with a digit in one (`Name Ort Nr` over
-/// `Beispiel Musterstadt 4711`). The table pass reads them as a header and a row.
-fn titles_over_row(flow: &Flow, columns: &[Vec<usize>]) -> bool {
-    let digit = |l: &[usize]| words(flow, l).chars().any(|c| c.is_ascii_digit());
-    let lines: Vec<Vec<Vec<usize>>> = columns.iter().map(|c| lines_of(flow, c)).collect();
-    lines.iter().all(|l| {
-        l.len() == 2 && !digit(&l[0]) && words(flow, &l[0]).split_whitespace().count() == 1
-    }) && lines.iter().any(|l| digit(&l[1]))
+    layoutregions::extract::pairs::strips::field_cuts(&flow.runs, &edges, &mut |f| {
+        frame_runs(flow, &by_y, &frames[f], &|_| false)
+    })
 }
 
 /// Whether the frame `fr` holds a row of fields with a value: its cells between dividers read
@@ -530,13 +267,16 @@ pub(in crate::tables) fn holds_values(flow: &Flow, by_y: &ByY, fr: &Frame) -> bo
     xs.extend(&fr.dividers);
     xs.push(fr.x1);
     let mut value = false;
-    for cell in cells_of(flow, &xs, &ids).iter().filter(|c| !c.is_empty()) {
-        let Some(parts) = parts_of(flow, cell) else {
+    for cell in cells_of(&flow.runs, &xs, &ids)
+        .iter()
+        .filter(|c| !c.is_empty())
+    {
+        let Some(parts) = parts_of(&flow.runs, cell) else {
             return false;
         };
         for part in parts {
-            match parse(flow, &part, how) {
-                Parsed::Fields(f) if f.iter().all(|f| short(flow, f)) => {
+            match parse(&flow.runs, &part, how) {
+                Parsed::Fields(f) if f.iter().all(|f| short(&flow.runs, f)) => {
                     value |= f.iter().any(|f| !f.value.is_empty());
                 }
                 // An address is a cell of the row, no value of a field.
@@ -610,7 +350,7 @@ pub(in crate::tables) fn field_strips(
     let mut strips: Vec<Strip> = Vec::new();
     for fr in frames {
         let ids = frame_runs(flow, by_y, fr, busy);
-        if ids.is_empty() || lines_of(flow, &ids).len() > STRIP_LINES {
+        if ids.is_empty() || lines_of(&flow.runs, &ids).len() > STRIP_LINES {
             continue;
         }
         // No text between the rules may run over the frame's ends: the frame would cut it.
@@ -624,132 +364,34 @@ pub(in crate::tables) fn field_strips(
         let mut edges = vec![fr.x0];
         edges.extend(&fr.dividers);
         edges.push(fr.x1);
-        let cells = cells_of(flow, &edges, &ids);
+        let cells = cells_of(&flow.runs, &edges, &ids);
         // Column titles over rows of items are a table's body, left to the table pass; its
         // runs and the names of its titles go to `bodies`, so that a line the table pass
         // leaves out is said.
-        if table_body(flow, &cells) {
-            let names = cells.iter().flat_map(|c| first_labels(flow, c)).collect();
+        if table_body(&flow.runs, &cells) {
+            let names = cells
+                .iter()
+                .flat_map(|c| first_labels(&flow.runs, c))
+                .collect();
             bodies.push((ids, names));
             continue;
         }
-        // Never a wrong pair: a run over a divider leaves the cells it stands in as text; the
-        // other cells of the row still pair.
-        let inner = &edges[1..edges.len() - 1];
-        let cell_at = |x: f32| {
-            edges
-                .partition_point(|e| *e <= x)
-                .saturating_sub(1)
-                .min(cells.len() - 1)
-        };
-        let mut over = vec![false; cells.len()];
-        for &i in &ids {
-            let r = &flow.runs[i];
-            if inner.iter().any(|&e| across(r, e)) {
-                let c = CHAR * r.size.max(1.0);
-                for flag in &mut over[cell_at(r.x + c)..=cell_at(r.x + r.w - c)] {
-                    *flag = true;
-                }
-            }
-        }
-        let mut fields: Vec<Field> = Vec::new();
-        let mut left_out: Vec<(&'static str, Vec<String>)> = Vec::new();
-        // A cell not clear for a reason of fields (a label under its value, a weight only) whose
-        // text is as short as a field's (see [`field_sized`]), not for its many styles alone.
-        let (mut fits, mut unread, mut field_why) = (true, false, None);
-        // Two lines in columns that may be rows or cells (see [`text_cells`]).
-        let mut doubt = false;
-        // The heads of a cell in three styles whose first line is heads over lines of their
-        // own: the row is a row of fields not clear, which is said by them.
-        let mut styled_heads: Vec<String> = Vec::new();
-        for (c, cell) in cells.iter().enumerate().filter(|(_, c)| !c.is_empty()) {
-            let why = if over[c] {
-                Some(ACROSS)
-            } else {
-                match parts_of(flow, cell) {
-                    Some(parts) => {
-                        let parts = match text_cells(flow, how, parts, cells.len()) {
-                            TextCells::Whole(p) | TextCells::Cells(p) => p,
-                            TextCells::Doubt(p) => {
-                                doubt = true;
-                                p
-                            }
-                        };
-                        // Parts side by side in a cell, or cells parted by dividers.
-                        let beside = parts.len() >= 2 || cells.len() >= 2;
-                        for part in parts {
-                            match parse(flow, &part, how) {
-                                Parsed::Fields(f) if f.iter().all(|f| short(flow, f)) => {
-                                    fields.extend(f);
-                                }
-                                // Beside the other heads of its line, a part that is no field
-                                // is left out of the row: a bold title is its own text, and
-                                // text of one style with no label is said, by its first line.
-                                Parsed::No if beside && title_part(flow, &part) => {}
-                                Parsed::No if beside && value_sized(flow, &part) => {
-                                    let names: Vec<String> = lines_of(flow, &part)
-                                        .first()
-                                        .map(|l| words(flow, l))
-                                        .into_iter()
-                                        .collect();
-                                    match left_out.iter_mut().find(|l| l.0 == NO_LABEL) {
-                                        Some(l) => l.1.extend(names),
-                                        None => left_out.push((NO_LABEL, names)),
-                                    }
-                                }
-                                // An address is left out of the row, which is said;
-                                // the other fields of the row stay.
-                                Parsed::Unsure(why @ (ADDRESS | NAMED_ADDRESS)) => {
-                                    let names = label_names(flow, &part);
-                                    match left_out.iter_mut().find(|l| l.0 == why) {
-                                        Some(l) => l.1.extend(names),
-                                        None => left_out.push((why, names)),
-                                    }
-                                }
-                                // One face whose first line is smaller by less than a step:
-                                // labels not set apart from their values. The row is not
-                                // clear, which is said by its labels, and it is read cell
-                                // by cell, never line by line across its cells.
-                                Parsed::No
-                                    if under_a_step(flow, &part) && field_sized(flow, &part) =>
-                                {
-                                    unread = true;
-                                    field_why = field_why.or(Some(NO_LABEL));
-                                    styled_heads.extend(label_names(flow, &part));
-                                }
-                                Parsed::Unsure(why) => {
-                                    unread = true;
-                                    if why != THREE_STYLES && field_sized(flow, &part) {
-                                        field_why = field_why.or(Some(why));
-                                    } else if why == THREE_STYLES
-                                        && let Some(names) = heads_over_lines(flow, &part)
-                                    {
-                                        field_why = field_why.or(Some(why));
-                                        styled_heads.extend(names);
-                                    }
-                                }
-                                _ => fits = false,
-                            }
-                        }
-                        None
-                    }
-                    None => Some(UNDER_NONE),
-                }
-            };
-            if let Some(why) = why {
-                match left_out.iter_mut().find(|l| l.0 == why) {
-                    Some(l) => l.1.extend(label_names(flow, cell)),
-                    None => left_out.push((why, label_names(flow, cell))),
-                }
-            }
-        }
+        let StripRead {
+            fields,
+            left_out,
+            fits,
+            unread,
+            field_why,
+            doubt,
+            styled_heads,
+        } = strip_cells(&flow.runs, &edges, &cells, how);
         // A cell left out as an address under a name is no row of a table or of totals,
         // though its lines may line up with the lines beside it.
         let address = left_out.iter().any(|l| l.0 == NAMED_ADDRESS);
         // Rows of a table between rules (totals under line items, a larger total last) are no
         // row of fields, whatever pairs their sizes make: their text is free for the table pass
         // as it stands.
-        if !address && table_rows(flow, &ids) {
+        if !address && table_rows(&flow.runs, &ids) {
             continue;
         }
         // Text that is not fields makes the strip no row of fields; labels and values in the
@@ -771,7 +413,10 @@ pub(in crate::tables) fn field_strips(
         }
         if unread {
             if !fields.is_empty() {
-                let names: Vec<String> = cells.iter().flat_map(|c| label_names(flow, c)).collect();
+                let names: Vec<String> = cells
+                    .iter()
+                    .flat_map(|c| label_names(&flow.runs, c))
+                    .collect();
                 say(unsure, doubts, &names, NOT_FIELDS, &ids);
             } else if let Some(why) = field_why {
                 say(unsure, doubts, &styled_heads, why, &ids);
@@ -794,7 +439,7 @@ pub(in crate::tables) fn field_strips(
         // totals between rules (rows of a label and an amount), whose text is free for the
         // table pass as it stands: they are no row of fields, and no loss names them as one
         // (nor the note under them).
-        let to_tables = fields.is_empty() && !address && totals_rows(flow, &ids);
+        let to_tables = fields.is_empty() && !address && totals_rows(&flow.runs, &ids);
         if !to_tables {
             for (why, names) in &left_out {
                 say(unsure, doubts, names, why, &ids);
@@ -819,14 +464,14 @@ pub(in crate::tables) fn field_strips(
             x1: fr.x1,
             dividers: fr.dividers.clone(),
             fields,
-            rows: two_lines(flow, &ids),
+            rows: two_lines(&flow.runs, &ids),
             left_out: !left_out.is_empty(),
         });
     }
     rows_in_order(&mut strips);
     let groups = connected(&strips);
     for g in &groups {
-        overflow_back(flow, &mut strips, g);
+        overflow_back(&flow.runs, &mut strips, g);
     }
     // Text beyond a group is only what no row of fields holds: every group is read the
     // normal way first. Text between two rules that hold no fields still counts: the values of
@@ -954,8 +599,8 @@ pub(in crate::tables) fn field_strips(
         // other group, the runs of ruled tables count. Held and free runs always count.
         let shaped = g.iter().all(|&k| strips[k].rows.is_some());
         let fields = || g.iter().flat_map(|&k| &strips[k].fields);
-        let beside = fields().any(|f| beside_value(flow, f))
-            && fields().all(|f| f.value.is_empty() || beside_value(flow, f));
+        let beside = fields().any(|f| beside_value(&flow.runs, f))
+            && fields().all(|f| f.value.is_empty() || beside_value(&flow.runs, f));
         let with_held = |i: usize| {
             !own.contains(&i) && !outside.contains(&i) && (shaped || !beside || !tabled(i))
         };
@@ -997,9 +642,11 @@ pub(in crate::tables) fn field_strips(
         // its label: a style is no evidence (it may come from a pair that size alone decided).
         let row = g.len() == 1
             && strips[g[0]].left_out
-            && list.iter().all(|f| words(flow, &f.label).ends_with(':'));
+            && list
+                .iter()
+                .all(|f| words(&flow.runs, &f.label).ends_with(':'));
         if list.len() < 2 && !row {
-            let mut names: Vec<String> = list.iter().map(|f| words(flow, &f.label)).collect();
+            let mut names: Vec<String> = list.iter().map(|f| words(&flow.runs, &f.label)).collect();
             if let Ends::Under(_, below) | Ends::Unclear(below) = ends(
                 flow,
                 by_y,
@@ -1011,9 +658,9 @@ pub(in crate::tables) fn field_strips(
                 &strips,
                 &g,
             ) {
-                for line in lines_of(flow, &below) {
-                    for l in labels_in_line(flow, &line) {
-                        let name = words(flow, &l);
+                for line in lines_of(&flow.runs, &below) {
+                    for l in labels_in_line(&flow.runs, &line) {
+                        let name = words(&flow.runs, &l);
                         if !names.contains(&name) {
                             names.push(name);
                         }
@@ -1073,25 +720,29 @@ pub(in crate::tables) fn field_strips(
         let under: Vec<Field>;
         let list: Vec<&Field> = match found {
             Ends::Over => list,
-            Ends::Under(above, below) => match pair_under(flow, &strips, &g, &above, &below) {
-                Some(f) if f.len() >= 2 && f.iter().all(|f| short(flow, f)) => {
-                    under = f;
-                    outside.extend(above.iter().chain(&below));
-                    under.iter().collect()
-                }
-                _ => {
-                    let names: Vec<String> = list.iter().map(|f| words(flow, &f.label)).collect();
-                    let kept_runs: Vec<usize> = runs.iter().chain(&below).copied().collect();
-                    say(unsure, doubts, &names, UNDER_UNCLEAR, &kept_runs);
-                    for &i in runs.iter().chain(&below) {
-                        kept[i] = true;
+            Ends::Under(above, below) => {
+                match pair_under(&flow.runs, &strips, &g, &above, &below) {
+                    Some(f) if f.len() >= 2 && f.iter().all(|f| short(&flow.runs, f)) => {
+                        under = f;
+                        outside.extend(above.iter().chain(&below));
+                        under.iter().collect()
                     }
-                    read_group_cells(flow, by_y, &strips, &g, busy, apart);
-                    continue;
+                    _ => {
+                        let names: Vec<String> =
+                            list.iter().map(|f| words(&flow.runs, &f.label)).collect();
+                        let kept_runs: Vec<usize> = runs.iter().chain(&below).copied().collect();
+                        say(unsure, doubts, &names, UNDER_UNCLEAR, &kept_runs);
+                        for &i in runs.iter().chain(&below) {
+                            kept[i] = true;
+                        }
+                        read_group_cells(flow, by_y, &strips, &g, busy, apart);
+                        continue;
+                    }
                 }
-            },
+            }
             Ends::Unclear(below) => {
-                let mut names: Vec<String> = list.iter().map(|f| words(flow, &f.label)).collect();
+                let mut names: Vec<String> =
+                    list.iter().map(|f| words(&flow.runs, &f.label)).collect();
                 // A label another group that is read holds is named by that group: a field is
                 // named in one loss only.
                 let theirs = |i: &usize| {
@@ -1100,9 +751,9 @@ pub(in crate::tables) fn field_strips(
                         .is_some_and(|k| !g.contains(k) && read.contains(k))
                 };
                 let named: Vec<usize> = below.iter().copied().filter(|i| !theirs(i)).collect();
-                for line in lines_of(flow, &named) {
-                    for l in labels_in_line(flow, &line) {
-                        let name = words(flow, &l);
+                for line in lines_of(&flow.runs, &named) {
+                    for l in labels_in_line(&flow.runs, &line) {
+                        let name = words(&flow.runs, &l);
                         if !names.contains(&name) {
                             names.push(name);
                         }
@@ -1141,223 +792,11 @@ pub(in crate::tables) fn field_strips(
     }
 }
 
-/// Columns a frame's labels must head, each over this many value lines or more in the same
-/// rows, for its text to be a table's body: column titles over line items.
-const BODY_COLUMNS: usize = 3;
-const BODY_LINES: usize = 2;
-
-/// The names of the labels on the first line of a cell, when it is labels over values (see
-/// [`first_line_labels`]).
-fn first_labels(flow: &Flow, cell: &[usize]) -> Vec<String> {
-    first_line_labels(flow, &lines_of(flow, cell))
-        .unwrap_or_default()
-        .iter()
-        .map(|l| words(flow, l))
-        .collect()
-}
-
-/// Whether the cells of a frame are a table's body, not fields: labels on a first line, each
-/// over the value lines under it (see [`parts_of`]) and none without one, and [`BODY_COLUMNS`]
-/// of them or more over
-/// [`BODY_LINES`] value lines or more each, those lines in the same rows across the columns
-/// (their baselines within a third of their size). A field's value of two lines stands under
-/// one label, not under three in the same rows.
-fn table_body(flow: &Flow, cells: &[Vec<usize>]) -> bool {
-    let mut columns: Vec<Vec<(f32, f32)>> = Vec::new();
-    for cell in cells.iter().filter(|c| !c.is_empty()) {
-        let lines = lines_of(flow, cell);
-        if first_line_labels(flow, &lines).is_none_or(|l| l.len() < 2) {
-            continue;
-        }
-        let Some(parts) = parts_of(flow, cell) else {
-            continue;
-        };
-        for part in parts {
-            let lines = lines_of(flow, &part);
-            // A title with no value under it is an empty field: a column of a table has its
-            // values.
-            if lines.len() < 2 {
-                return false;
-            }
-            let rows: Vec<(f32, f32)> = lines[1..]
-                .iter()
-                .map(|l| {
-                    let r = &flow.runs[l[0]];
-                    (r.y, r.size.max(1.0))
-                })
-                .collect();
-            if rows.len() >= BODY_LINES {
-                columns.push(rows);
-            }
-        }
-    }
-    if columns.len() < BODY_COLUMNS {
-        return false;
-    }
-    // The rows of the column with the most lines; every column's lines stand in them.
-    let widest = columns
-        .iter()
-        .max_by_key(|c| c.len())
-        .cloned()
-        .unwrap_or_default();
-    let in_rows = |c: &Vec<(f32, f32)>| {
-        c.iter()
-            .all(|&(y, size)| widest.iter().any(|&(w, _)| (w - y).abs() <= size / 3.0))
-    };
-    columns.iter().filter(|c| in_rows(c)).count() >= BODY_COLUMNS
-}
-
-/// The names of the heads of a cell's first line (runs apart by a cell gap, see
-/// [`labels_in_line`]) when there are two or more, each of them a label over its value (all ink
-/// of the lines under it that stands under it is a size step larger, see [`LABEL_STEP`]) or a
-/// head with nothing under it, and one of them a label: the cell is set as fields side by side,
-/// whatever their styles. Lines of one size side by side (a label beside its amount over more
-/// such rows: totals) and a slogan over a body line are no such heads.
-fn heads_over_lines(flow: &Flow, cell: &[usize]) -> Option<Vec<String>> {
-    let lines = lines_of(flow, cell);
-    let heads = labels_in_line(flow, lines.first()?);
-    if lines.len() < 2 || heads.len() < 2 {
-        return None;
-    }
-    let pieces: Vec<(f32, f32, f32)> = lines[1..]
-        .iter()
-        .flatten()
-        .filter(|&&i| inked(&flow.runs[i]))
-        .flat_map(|&i| {
-            let size = flow.runs[i].size;
-            ink_pieces(&flow.runs[i])
-                .into_iter()
-                .map(move |(a, b)| (a, b, size))
-        })
-        .collect();
-    // For each head: whether ink stands under it, and whether all of it is a step larger.
-    let kinds: Vec<(bool, bool)> = heads
-        .iter()
-        .map(|h| {
-            let (x0, x1) = extent(flow, h);
-            let size = h.iter().map(|&i| flow.runs[i].size).fold(0.0f32, f32::max);
-            let under: Vec<f32> = pieces
-                .iter()
-                .filter(|&&(a, b, _)| a < x1 && b > x0)
-                .map(|p| p.2)
-                .collect();
-            (
-                !under.is_empty(),
-                under.iter().all(|&v| v >= LABEL_STEP * size),
-            )
-        })
-        .collect();
-    let fields = kinds.iter().all(|&(ink, larger)| !ink || larger)
-        && kinds.iter().any(|&(ink, larger)| ink && larger);
-    fields.then(|| heads.iter().map(|h| words(flow, h)).collect())
-}
-
-/// Whether the runs `ids` of a frame are rows of one grid of a table, by their places alone: two
-/// lines or more of two pieces or more (runs apart by a cell gap, see [`labels_in_line`]), their
-/// first pieces in one column and their last pieces in one column, one of the two flush right
-/// (ending in one place: amounts, with or without a currency or a percent column between), and
-/// every other line one piece (a note under them). Such a frame with no field read is left to
-/// the table pass; any other (address blocks side by side, a cell of two lines beside cells of
-/// one) is read cell by cell.
-fn totals_rows(flow: &Flow, ids: &[usize]) -> bool {
-    grid_sizes(flow, ids).is_some()
-}
-
-/// Whether the runs `ids` of a frame are rows of one grid (see [`totals_rows`]) whose first and
-/// last pieces on each line are of one size, and two of whose lines are of one size too (each
-/// within a size step, see [`LABEL_STEP`]): rows of a table, as a label stands a size step
-/// under its value, over it or beside it. Totals under the rule of line items with a larger
-/// total last are such rows; a row of labels over their values and labels beside their values
-/// are not.
-fn table_rows(flow: &Flow, ids: &[usize]) -> bool {
-    let one = |a: f32, b: f32| a.max(b) < LABEL_STEP * a.min(b);
-    grid_sizes(flow, ids).is_some_and(|rows| {
-        let mut sizes: Vec<f32> = Vec::new();
-        for (first, last) in rows {
-            if !one(first, last) {
-                return false;
-            }
-            sizes.push(first.max(last));
-        }
-        sizes.sort_by(f32::total_cmp);
-        sizes.windows(2).any(|w| one(w[0], w[1]))
-    })
-}
-
-/// The sizes of the first and the last piece of each line of two pieces or more of the runs
-/// `ids` of a frame, when they are rows of one grid (see [`totals_rows`]).
-fn grid_sizes(flow: &Flow, ids: &[usize]) -> Option<Vec<(f32, f32)>> {
-    let ids: Vec<usize> = ids
-        .iter()
-        .copied()
-        .filter(|&i| inked(&flow.runs[i]))
-        .collect();
-    // The first and the last piece of each line of two pieces or more: start, end, size.
-    let mut rows: Vec<[(f32, f32, f32); 2]> = Vec::new();
-    for line in lines_of(flow, &ids) {
-        let pieces = labels_in_line(flow, &line);
-        if pieces.len() < 2 {
-            continue;
-        }
-        let at = |p: &Vec<usize>| {
-            let (a, b) = extent(flow, p);
-            let size = p.iter().map(|&i| flow.runs[i].size).fold(0.0f32, f32::max);
-            (a, b, size)
-        };
-        rows.push([at(&pieces[0]), at(&pieces[pieces.len() - 1])]);
-    }
-    if rows.len() < 2 {
-        return None;
-    }
-    let same = |k: usize, end: bool| {
-        rows.iter().all(|r| {
-            let (x, y) = if end {
-                (r[k].1, rows[0][k].1)
-            } else {
-                (r[k].0, rows[0][k].0)
-            };
-            (x - y).abs() <= CHAR * r[k].2.max(rows[0][k].2)
-        })
-    };
-    let column = |k: usize| same(k, false) || same(k, true);
-    // A flush right column holds a number on every line but a first line of titles (an
-    // amount, a rate, a count): lines that end in one place by chance (a street and its town
-    // beside two lines of a name) are no rows of totals.
-    let numbers = |k: usize| {
-        lines_of(flow, &ids).iter().skip(1).all(|line| {
-            let pieces = labels_in_line(flow, line);
-            pieces.len() < 2
-                || numeric_piece(&words(
-                    flow,
-                    &pieces[if k == 0 { 0 } else { pieces.len() - 1 }],
-                ))
-        })
-    };
-    let flush = |k: usize| same(k, true) && numbers(k);
-    (column(0) && column(1) && (flush(0) || flush(1)))
-        .then(|| rows.iter().map(|r| (r[0].2, r[1].2)).collect())
-}
-
-/// Whether `text` is a number of a row of totals: digits with separators, signs and spaces, and
-/// at most a currency or a percent sign or code beside them (`1.234,56`, `19 %`, `EUR 12,00`,
-/// `12,50-`).
-fn numeric_piece(text: &str) -> bool {
-    let rest: String = text
-        .split_whitespace()
-        .filter(|w| !matches!(*w, "EUR" | "USD" | "CHF" | "GBP" | "€" | "$" | "£" | "%"))
-        .collect();
-    let rest = rest.trim_matches(['€', '$', '£', '%']);
-    rest.chars().any(|c| c.is_ascii_digit())
-        && rest
-            .chars()
-            .all(|c| c.is_ascii_digit() || ".,'+-".contains(c))
-}
-
 /// The cells of a row of fields between the rules `top` and `bottom` from `x0` to `x1`, with
 /// their runs (none that `busy` names, none in another direction) in the order to read them:
 /// cell by cell, left to right, each cell's lines top down. Cells are parted by the `dividers`
 /// that no run stands across and, inside them, by gutters: white space of a cell gap (see
-/// [`CELL_GAP`]) or more that no run of the cell crosses on any of its lines (a line that runs
+/// [`layoutregions::extract::table::CELL_GAP`]) or more that no run of the cell crosses on any of its lines (a line that runs
 /// on into the next cell joins the two), and values beside their labels are a field per line
 /// (see [`beside_labels`]). One cell is read whole too: its lines together, before the text
 /// beside it on them. None when there is no run. Every row of fields that is refused, or that
@@ -1386,8 +825,8 @@ fn cell_order(
     }));
     edges.push(x1);
     let mut columns: Vec<Vec<usize>> = Vec::new();
-    for cell in cells_of(flow, &edges, &ids) {
-        columns.extend(beside_labels(flow, gutter_columns(flow, &cell)));
+    for cell in cells_of(&flow.runs, &edges, &ids) {
+        columns.extend(beside_labels(&flow.runs, gutter_columns(&flow.runs, &cell)));
     }
     if columns.is_empty() {
         return None;
@@ -1398,7 +837,7 @@ fn cell_order(
         columns
             .iter()
             .map(|c| {
-                lines_of(flow, c)
+                lines_of(&flow.runs, c)
                     .into_iter()
                     .flat_map(|mut l| {
                         l.sort_unstable();
@@ -1408,87 +847,6 @@ fn cell_order(
             })
             .collect(),
     )
-}
-
-/// The runs of `cell` in columns left to right, parted by gutters: white space of a cell gap
-/// (see [`CELL_GAP`]) or more that no run of the cell crosses on any of its lines. A cell with
-/// no such gutter is one column.
-fn gutter_columns(flow: &Flow, cell: &[usize]) -> Vec<Vec<usize>> {
-    // The stretches of ink of the cell's runs, merged where less than a cell gap apart.
-    let mut spans: Vec<(f32, f32, f32)> = cell
-        .iter()
-        .filter(|&&i| inked(&flow.runs[i]))
-        .map(|&i| {
-            let r = &flow.runs[i];
-            (r.x, r.x + r.w.max(0.0), r.size.max(1.0))
-        })
-        .collect();
-    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let mut merged: Vec<(f32, f32, f32)> = Vec::new();
-    for (a, b, size) in spans {
-        match merged.last_mut() {
-            Some(m) if a - m.1 < CELL_GAP * size.max(m.2) => {
-                m.1 = m.1.max(b);
-                m.2 = m.2.max(size);
-            }
-            _ => merged.push((a, b, size)),
-        }
-    }
-    let mut parts: Vec<Vec<usize>> = vec![Vec::new(); merged.len().max(1)];
-    for &i in cell {
-        let (cx, _) = middle(&flow.runs[i]);
-        let k = merged
-            .iter()
-            .position(|m| cx <= m.1)
-            .unwrap_or(merged.len().saturating_sub(1));
-        parts[k].push(i);
-    }
-    parts.into_iter().filter(|p| !p.is_empty()).collect()
-}
-
-/// The columns of a cell between dividers, `parts` left to right, with each column that holds
-/// no label joined to the column left of it when every line of it stands beside a label there
-/// (on its baseline): values beside their labels are one field per line, not two cells. A
-/// label is a run within a size step of the cell's smallest text (see [`LABEL_STEP`]).
-fn beside_labels(flow: &Flow, parts: Vec<Vec<usize>>) -> Vec<Vec<usize>> {
-    let ink = |i: &usize| inked(&flow.runs[*i]);
-    let small = parts
-        .iter()
-        .flatten()
-        .filter(|i| ink(i))
-        .map(|&i| flow.runs[i].size)
-        .fold(f32::MAX, f32::min);
-    let label = |i: usize| inked(&flow.runs[i]) && flow.runs[i].size < LABEL_STEP * small;
-    let mut out: Vec<Vec<usize>> = Vec::new();
-    // Whether each column of `out` took values beside its labels.
-    let mut beside: Vec<bool> = Vec::new();
-    for part in parts {
-        let joins = out.last().is_some_and(|left: &Vec<usize>| {
-            !part.iter().any(|&i| label(i))
-                && part.iter().filter(|i| ink(i)).all(|&i| {
-                    let r = &flow.runs[i];
-                    left.iter()
-                        .any(|&j| label(j) && (flow.runs[j].y - r.y).abs() <= 0.3 * r.size.max(1.0))
-                })
-        });
-        match out.last_mut() {
-            Some(left) if joins => {
-                left.extend(part);
-                if let Some(b) = beside.last_mut() {
-                    *b = true;
-                }
-            }
-            _ => {
-                out.push(part);
-                beside.push(false);
-            }
-        }
-    }
-    // A column of labels with their values beside them is a field on each line.
-    out.into_iter()
-        .zip(beside)
-        .flat_map(|(c, b)| if b { lines_of(flow, &c) } else { vec![c] })
-        .collect()
 }
 
 /// Reads the strips `g` of a group whose labels may stand under their values cell by cell,
@@ -1510,9 +868,9 @@ fn read_group_cells(
         cells
             .into_iter()
             .flat_map(|c| {
-                lines_of(flow, &c).into_iter().flat_map(|mut l| {
+                lines_of(&flow.runs, &c).into_iter().flat_map(|mut l| {
                     l.sort_unstable();
-                    by_style(flow, l)
+                    by_style(&flow.runs, l)
                 })
             })
             .collect()
@@ -1539,28 +897,6 @@ fn read_group_cells(
     }
 }
 
-/// The runs `line` of one line (in flow order) parted where the style changes (see
-/// [`style_of`]; white space goes with the runs before it): a label and a value line of
-/// another field that stand on one line (a value printed over the label of the row above it)
-/// are two texts, never one word.
-fn by_style(flow: &Flow, line: Vec<usize>) -> Vec<Vec<usize>> {
-    let mut out: Vec<(Option<Style>, Vec<usize>)> = Vec::new();
-    for i in line {
-        let r = &flow.runs[i];
-        let style = inked(r).then(|| style_of(r));
-        match out.last_mut() {
-            Some((s, runs)) if style.is_none() || *s == style || s.is_none() => {
-                if s.is_none() {
-                    *s = style;
-                }
-                runs.push(i);
-            }
-            _ => out.push((style, vec![i])),
-        }
-    }
-    out.into_iter().map(|(_, runs)| runs).collect()
-}
-
 /// Reads the strip `s` of fields cell by cell (see [`cell_order`]): its cells go to `apart`.
 fn read_cells(
     flow: &Flow,
@@ -1576,51 +912,6 @@ fn read_cells(
         &s.dividers,
         busy,
     ));
-}
-
-/// Whether the text of a part of a cell is as short as a value.
-fn value_sized(flow: &Flow, part: &[usize]) -> bool {
-    words(flow, part).chars().count() <= VALUE_CHARS
-}
-
-/// Whether a part of a cell is a title: bold text alone, of a line or two.
-fn title_part(flow: &Flow, part: &[usize]) -> bool {
-    let ids: Vec<usize> = part
-        .iter()
-        .copied()
-        .filter(|&i| inked(&flow.runs[i]))
-        .collect();
-    !ids.is_empty()
-        && ids.iter().all(|&i| flow.runs[i].bold)
-        && lines_of(flow, &ids).len() <= LABEL_LINES
-}
-
-/// Whether a field's label stands beside its value: its last label run and its first value
-/// run share a line.
-fn beside_value(flow: &Flow, f: &Field) -> bool {
-    match (f.label.last(), f.value.first()) {
-        (Some(&l), Some(&v)) => lines_of(flow, &[l, v]).len() == 1,
-        _ => false,
-    }
-}
-
-/// Whether the text of a part of a cell is as short as a field's: by style, the text of some
-/// style as short as a label, and the text of every style as short as a value. A heading over
-/// lines of prose between rules is no field whose label stands under its value.
-fn field_sized(flow: &Flow, part: &[usize]) -> bool {
-    let mut by_style: Vec<(Style, Vec<usize>)> = Vec::new();
-    for &i in part.iter().filter(|&&i| inked(&flow.runs[i])) {
-        let s = style_of(&flow.runs[i]);
-        match by_style.iter_mut().find(|b| b.0 == s) {
-            Some(b) => b.1.push(i),
-            None => by_style.push((s, vec![i])),
-        }
-    }
-    let text: Vec<String> = by_style.iter().map(|b| words(flow, &b.1)).collect();
-    text.iter().all(|t| t.chars().count() <= VALUE_CHARS)
-        && text.iter().any(|t| {
-            t.chars().count() <= LABEL_CHARS && t.split_whitespace().count() <= LABEL_WORDS
-        })
 }
 
 /// Sorts `strips` top first and each row left to right: strips whose tops lie within
@@ -1718,114 +1009,6 @@ fn side_blocks(strips: &[Strip], g: &[usize]) -> Vec<Vec<usize>> {
     out
 }
 
-/// What a value is, to tell the values of a column of fields apart: a number (digits with
-/// separators), words (no digit), or a code of both.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Kind {
-    Number,
-    Words,
-    Code,
-}
-
-fn kind_of(text: &str) -> Kind {
-    let t = text.trim();
-    if !t.chars().any(|c| c.is_ascii_digit()) {
-        Kind::Words
-    } else if t
-        .chars()
-        .all(|c| c.is_ascii_digit() || matches!(c, '.' | ',' | '-' | '/' | ' ' | '%'))
-    {
-        Kind::Number
-    } else {
-        Kind::Code
-    }
-}
-
-/// Puts back whole a value that runs on into the empty next field of its row of the group `g`
-/// of `strips`: a value cut at its word gap at a divider pairs its last piece with the next
-/// field when the dividers part it there. When the other rows of the group hold values in that
-/// field's column (its label within a character of the same place), none of them of the
-/// piece's kind and all of them shorter than the piece, while the piece is of the kind of the
-/// value before it, the piece is that value's overflow: it goes back to its field, and the
-/// next field is empty. A short piece (a letter where the column holds numbers) may be that
-/// field's own odd value, so it stays where the cut put it.
-fn overflow_back(flow: &Flow, strips: &mut [Strip], g: &[usize]) {
-    let column = |f: &Field| f.label.first().map(|&i| &flow.runs[i]);
-    // The kinds of the values of the group by the place and size of their labels.
-    let mut seen: Vec<(f32, usize, Kind, usize)> = Vec::new();
-    for &k in g {
-        for f in &strips[k].fields {
-            if let (Some(l), false) = (column(f), f.value.is_empty()) {
-                let text = words(flow, &f.value);
-                seen.push((l.x, k, kind_of(&text), text.chars().count()));
-            }
-        }
-    }
-    for &k in g {
-        let dividers = strips[k].dividers.clone();
-        let fields = &mut strips[k].fields;
-        for i in 1..fields.len() {
-            let (before, after) = fields.split_at_mut(i);
-            let (a, b) = (&mut before[i - 1], &mut after[0]);
-            let (Some(&va), [vb]) = (a.value.last(), b.value.as_slice()) else {
-                continue;
-            };
-            let (ra, rb) = (&flow.runs[va], &flow.runs[*vb]);
-            let ch = CHAR * ra.size.max(1.0);
-            let end = ra.x + ra.w;
-            let touching = (ra.y - rb.y).abs() <= 0.3 * ra.size
-                && rb.x - end <= 1.5 * ch
-                && rb.x - end >= -ch
-                && dividers.iter().any(|&d| d > end - ch && d < rb.x + ch);
-            let Some(l) = column(b) else {
-                continue;
-            };
-            let piece = kind_of(&rb.text);
-            let length = rb.text.trim().chars().count();
-            let others: Vec<(Kind, usize)> = seen
-                .iter()
-                .filter(|s| s.1 != k && (s.0 - l.x).abs() <= CHAR * l.size.max(1.0))
-                .map(|s| (s.2, s.3))
-                .collect();
-            if touching
-                && !others.is_empty()
-                && others.iter().all(|&(kind, n)| kind != piece && n < length)
-                && kind_of(&ra.text) == piece
-            {
-                a.value.push(*vb);
-                b.value.clear();
-            }
-        }
-    }
-}
-
-/// A strip's text as one line of labels over one line of values, each line of one style (a
-/// raised marker aside) and the upper one a size step smaller: the runs of each line. A
-/// strip of one line of one style has no values. None when its text is not that.
-fn two_lines(flow: &Flow, ids: &[usize]) -> Option<(Vec<usize>, Vec<usize>)> {
-    let lines = lines_of(flow, ids);
-    let marker = markers(flow, &lines);
-    let style = |l: &[usize]| -> Option<Style> {
-        let mut s = l
-            .iter()
-            .filter(|i| !marker.contains(i))
-            .map(|&i| style_of(&flow.runs[i]));
-        let first = s.next()?;
-        s.all(|o| o == first).then_some(first)
-    };
-    match lines.as_slice() {
-        [l] => style(l).map(|_| (l.clone(), Vec::new())),
-        [a, b] => {
-            let (sa, sb) = (style(a)?, style(b)?);
-            // The exact sizes decide the step: two sizes on both sides of a half-point edge
-            // of the style key by float noise are one size (see [`LABEL_STEP`]).
-            let size = |l: &[usize]| mean_size(flow, l.iter().copied(), &marker);
-            (sb.0 - sa.0 >= 1 && size(b) >= LABEL_STEP * size(a)).then(|| (a.clone(), b.clone()))
-        }
-        _ => None,
-    }
-}
-
 /// What the text just beyond a group of strips shows of where its labels stand.
 #[derive(Debug)]
 enum Ends {
@@ -1837,14 +1020,6 @@ enum Ends {
     /// Neither reading is clear (see [`way_of`]). The labels under the bottom rule beyond the
     /// group, to name them.
     Unclear(Vec<usize>),
-}
-
-/// Whether the run `r` is in one of the roles `set` (styles with their font family): of its
-/// size, weight and slant, and of its family where both families are known.
-fn in_role(set: &[Style], r: &Run) -> bool {
-    let s = style_of(r);
-    set.iter()
-        .any(|t| (t.0, t.1, t.2) == (s.0, s.1, s.2) && (t.3 == 0 || s.3 == 0 || t.3 == s.3))
 }
 
 /// The text just beyond the group `g` of `strips` that shows its labels stand under the rule
@@ -1896,7 +1071,7 @@ fn ends(
         })
         .collect();
     let marker = markers(
-        flow,
+        &flow.runs,
         &rows.iter().map(|(_, r)| r.0.clone()).collect::<Vec<_>>(),
     );
     let role = style_of;
@@ -2050,9 +1225,9 @@ fn ends(
         };
         // Each label heads a field of the strip with one of its values in it, and each value
         // of the strip has its label.
-        let fields = labels_in_line(flow, &by_x(values.clone()));
+        let fields = labels_in_line(&flow.runs, &by_x(values.clone()));
         let mut headed = vec![false; fields.len()];
-        for label in labels_in_line(flow, &by_x(found.clone())) {
+        for label in labels_in_line(&flow.runs, &by_x(found.clone())) {
             let l = &flow.runs[label[0]];
             let value = fields.iter().position(|f| {
                 let r = &flow.runs[f[0]];
@@ -2104,9 +1279,9 @@ fn ends(
         // Each label of the strip heads a field from its divider (or the strip's left end)
         // or from its own start; each value over the rule starts at one of them, and each
         // field has one value.
-        let heads = labels_in_line(flow, labels);
+        let heads = labels_in_line(&flow.runs, labels);
         let mut taken = vec![false; heads.len()];
-        for value in labels_in_line(flow, &by_x(found.clone())) {
+        for value in labels_in_line(&flow.runs, &by_x(found.clone())) {
             let r = &flow.runs[value[0]];
             let ch = CHAR * r.size.max(1.0);
             let field = heads
@@ -2163,7 +1338,7 @@ fn ends(
         (false, _, true) => BottomEnd::None,
     };
     let single = rows.iter().all(|(s, (labels, _))| {
-        labels_in_line(flow, labels).len() == 1
+        labels_in_line(&flow.runs, labels).len() == 1
             && !rows.iter().any(|(t, _)| {
                 !std::ptr::eq(*s, *t) && near(t.top, s.top) && near(t.bottom, s.bottom)
             })
@@ -2212,436 +1387,6 @@ fn ends(
     }
 }
 
-/// What stands over the top rule of a group of strips (see [`ends`]): nothing in the values'
-/// role, values of some of its fields only (or runs at no field start), or a value for every
-/// field of its top strips.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum TopEnd {
-    None,
-    Partial,
-    Complete,
-}
-
-/// What stands under the bottom rule of a group of strips (see [`ends`]): nothing in the
-/// labels' role, labels of some of its lowest values only (or at no value), a label for every
-/// lowest value beyond the group, or a row of labels only of the group itself (its empty last
-/// row, or labels over a rule drawn under them).
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum BottomEnd {
-    None,
-    Partial,
-    Free,
-    Own,
-}
-
-/// The way a group of strips reads by its ends (ruling P6-Z2).
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Way {
-    /// Labels over (or beside) their values.
-    Over,
-    /// Labels under the rule their values stand on.
-    Under,
-    /// Neither is clear: a loss names the fields.
-    Unclear,
-}
-
-/// The way a group reads by its ends, `single` when it has one field a row:
-///
-/// | fields a row | top | bottom | reading |
-/// | --- | --- | --- | --- |
-/// | two or more | complete | free, complete | labels under values |
-/// | two or more | complete | none, partial, own | not clear |
-/// | two or more | none, partial | free, complete | not clear |
-/// | two or more | none, partial | none, partial, own | labels over values |
-/// | one | complete | any | not clear |
-/// | one | any | free, complete | not clear |
-/// | one | none, partial | none, partial, own | labels over values |
-///
-/// Labels under values need both ends complete, field for field, beyond the group. One
-/// complete end is also what a grid of the other way shows (an empty first or last row, the
-/// column titles of a next table, a line of data over it), so it is not clear. An own row of
-/// labels is the group's own empty last row as much as labels over a rule under the last
-/// labels: no end. One field a row is too little evidence for labels under values. Found with
-/// the runs other groups hold, evidence in part at both ends is not clear either when runs
-/// joined to the group by its rules make it at each end: of a field group (a grid parted by
-/// double rules) or of a ruled table that shares the group's end rule; from other text it
-/// keeps labels over values (see [`ends`]).
-fn way_of(single: bool, top: TopEnd, bottom: BottomEnd) -> Way {
-    match (single, top, bottom) {
-        (true, TopEnd::Complete, _) | (true, _, BottomEnd::Free) => Way::Unclear,
-        (true, _, _) => Way::Over,
-        (false, TopEnd::Complete, BottomEnd::Free) => Way::Under,
-        (false, TopEnd::Complete, _) | (false, _, BottomEnd::Free) => Way::Unclear,
-        (false, _, _) => Way::Over,
-    }
-}
-
-/// The fields of the group `g` of `strips` read with each label under the rule its value
-/// stands on: the labels at the top of each strip pair with the values over its top rule (at
-/// the bottom of the strip over it, or among `above` for a strip at the top), and the values
-/// at the bottom of a strip with no strip under it pair with the labels under its bottom rule
-/// (among `below`), each row of a label line and a value line read by [`pair_row`]. None when
-/// a strip is no line of labels over a line of values, a field of it was left out, a row is
-/// not clear, or a value is left without its label.
-fn pair_under(
-    flow: &Flow,
-    strips: &[Strip],
-    g: &[usize],
-    above: &[usize],
-    below: &[usize],
-) -> Option<Vec<Field>> {
-    let near = |a: f32, b: f32| (a - b).abs() <= SNAP;
-    let overlaps = |s: &Strip, t: &Strip| s.x0 < t.x1 && t.x0 < s.x1;
-    let inside = |i: usize, s: &Strip| {
-        let (cx, _) = middle(&flow.runs[i]);
-        cx > s.x0 && cx < s.x1
-    };
-    let mut fields = Vec::new();
-    let mut used: HashSet<usize> = HashSet::new();
-    for &k in g {
-        let s = &strips[k];
-        if s.left_out {
-            return None;
-        }
-        let (labels, values) = s.rows.as_ref()?;
-        let over: Vec<&Strip> = g
-            .iter()
-            .map(|&o| &strips[o])
-            .filter(|t| near(t.bottom, s.top) && overlaps(s, t))
-            .collect();
-        let mut dividers = s.dividers.clone();
-        let over_values: Vec<usize> = if over.is_empty() {
-            above.iter().copied().filter(|&i| inside(i, s)).collect()
-        } else {
-            for t in &over {
-                dividers.extend(t.dividers.iter().filter(|&&d| d > s.x0 && d < s.x1));
-            }
-            over.iter()
-                .filter_map(|t| t.rows.as_ref())
-                .flat_map(|r| r.1.iter().copied())
-                .filter(|&i| inside(i, s))
-                .collect()
-        };
-        dividers.sort_by(f32::total_cmp);
-        dividers.dedup();
-        fields.extend(pair_row(flow, labels, &over_values, &dividers, s.x0, s.x1)?);
-        used.extend(&over_values);
-        let last = !g
-            .iter()
-            .any(|&o| near(strips[o].top, s.bottom) && overlaps(s, &strips[o]));
-        if last && !values.is_empty() {
-            let labels: Vec<usize> = below.iter().copied().filter(|&i| inside(i, s)).collect();
-            fields.extend(pair_row(flow, &labels, values, &s.dividers, s.x0, s.x1)?);
-            used.extend(values);
-        }
-    }
-    let all_used = g
-        .iter()
-        .filter_map(|&k| strips[k].rows.as_ref())
-        .flat_map(|r| &r.1)
-        .chain(above)
-        .all(|i| used.contains(i));
-    all_used.then_some(fields)
-}
-
-/// The fields of one row of labels on one line and values on another, between `x0` and `x1`
-/// and parted by `dividers` (sorted): the label of each part with the values in it, or in a
-/// part of several labels each value with the label it stands under (see [`under_labels`]);
-/// a part's labels without values are empty fields. None when a run stands across a divider
-/// or a value has no certain label.
-fn pair_row(
-    flow: &Flow,
-    labels: &[usize],
-    values: &[usize],
-    dividers: &[f32],
-    x0: f32,
-    x1: f32,
-) -> Option<Vec<Field>> {
-    let mut edges = vec![x0];
-    edges.extend(dividers);
-    edges.push(x1);
-    let inner = &edges[1..edges.len() - 1];
-    if labels
-        .iter()
-        .chain(values)
-        .any(|&i| inner.iter().any(|&e| across(&flow.runs[i], e)))
-    {
-        return None;
-    }
-    let by_x = |mut v: Vec<usize>| {
-        v.sort_by(|&a, &b| flow.runs[a].x.total_cmp(&flow.runs[b].x));
-        v
-    };
-    let mut out = Vec::new();
-    for (ls, vs) in cells_of(flow, &edges, labels)
-        .into_iter()
-        .zip(cells_of(flow, &edges, values))
-    {
-        let labels = labels_in_line(flow, &ls);
-        if labels.is_empty() {
-            if !vs.is_empty() {
-                return None;
-            }
-            continue;
-        }
-        let under = if labels.len() == 1 {
-            vec![vs]
-        } else {
-            under_labels(flow, &labels, &vs)?
-        };
-        out.extend(labels.into_iter().zip(under).map(|(label, value)| Field {
-            label,
-            value: by_x(value),
-        }));
-    }
-    Some(out)
-}
-
-/// The labels of one line of labels, left to right: runs apart by more than a cell gap start a
-/// new label, and a raised marker goes with the label before it.
-fn labels_in_line(flow: &Flow, line: &[usize]) -> Vec<Vec<usize>> {
-    let mut sorted = line.to_vec();
-    sorted.sort_by(|&a, &b| flow.runs[a].x.total_cmp(&flow.runs[b].x));
-    let mut out: Vec<Vec<usize>> = Vec::new();
-    for i in sorted {
-        let r = &flow.runs[i];
-        if let Some(label) = out.last_mut() {
-            let prev = &flow.runs[*label.last().expect("a run")];
-            if raised(r, prev) || r.x - (prev.x + prev.w) <= CELL_GAP * prev.size.max(1.0) {
-                label.push(i);
-                continue;
-            }
-        }
-        out.push(vec![i]);
-    }
-    out
-}
-
-/// The left and right ends of the ink of runs.
-fn extent(flow: &Flow, ids: &[usize]) -> (f32, f32) {
-    ids.iter().fold((f32::MAX, f32::MIN), |(a, b), &i| {
-        let r = &flow.runs[i];
-        (a.min(r.x), b.max(r.x + r.w.max(0.0)))
-    })
-}
-
-/// Each of `values` given to the one label of `labels` (left to right, on one line) it stands
-/// under: its ink overlaps that label's and no other's, it reaches no more than a character
-/// past the middle of the room to the label before, and the same to the label after unless it
-/// starts where its label starts (a value set from its label's start may run on up to the next
-/// label). A label set in the middle or at the right end of its field over values at the left
-/// end has no value under it, so its field is not clear. None when a value stands under no
-/// label or under two.
-fn under_labels(flow: &Flow, labels: &[Vec<usize>], values: &[usize]) -> Option<Vec<Vec<usize>>> {
-    let ends: Vec<(f32, f32)> = labels.iter().map(|l| extent(flow, l)).collect();
-    let mut out = vec![Vec::new(); labels.len()];
-    for &v in values {
-        let r = &flow.runs[v];
-        let (a, b) = (r.x, r.x + r.w.max(0.0));
-        let mut under = ends.iter().enumerate().filter(|(_, e)| a < e.1 && b > e.0);
-        let (k, _) = under.next()?;
-        if under.next().is_some() {
-            return None;
-        }
-        let lo = (k > 0).then(|| (ends[k - 1].1 + ends[k].0) / 2.0);
-        let hi = (k + 1 < ends.len()).then(|| (ends[k].1 + ends[k + 1].0) / 2.0);
-        let aligned = (a - ends[k].0).abs() <= CHAR * r.size.max(1.0);
-        if lo.is_some_and(|e| across(r, e)) || (!aligned && hi.is_some_and(|e| across(r, e))) {
-            return None;
-        }
-        out[k].push(v);
-    }
-    Some(out)
-}
-
-/// The heads of the first of the `lines` of a cell when that line is labels over values, each
-/// with the value lines under it (see [`parts_of`]): labels in the cell's smallest size (a
-/// raised marker aside), over lines a size step larger (see [`LABEL_STEP`]). Labels of one
-/// size side by side may have a smaller one between them (a name a little smaller than the
-/// labels beside it, see [`heads_of`]).
-fn first_line_labels(flow: &Flow, lines: &[Vec<usize>]) -> Option<Vec<Vec<usize>>> {
-    let (Some(first), true) = (lines.first(), lines.len() >= 2) else {
-        return None;
-    };
-    let size = |i: usize| flow.runs[i].size;
-    let small = first.iter().map(|&i| size(i)).fold(f32::MAX, f32::min);
-    let below = lines[1..]
-        .iter()
-        .flatten()
-        .map(|&i| size(i))
-        .fold(f32::MIN, f32::max);
-    let marker = markers(flow, &lines[..1]);
-    if below < LABEL_STEP * small
-        || first
-            .iter()
-            .any(|&i| size(i) >= LABEL_STEP * small && !marker.contains(&i))
-    {
-        return heads_of(flow, lines, &marker);
-    }
-    Some(labels_in_line(flow, first))
-}
-
-/// The ink of a run in pieces between the gaps of its words: a value line padded into its
-/// fields is one run over them.
-fn ink_pieces(r: &Run) -> Vec<(f32, f32)> {
-    let mut out = Vec::new();
-    let mut from = r.x;
-    for g in r.gaps.iter() {
-        if g.from > from {
-            out.push((from, g.from));
-        }
-        from = from.max(g.to);
-    }
-    let end = r.x + r.w.max(0.0);
-    if end > from {
-        out.push((from, end));
-    }
-    out
-}
-
-/// The heads of a first line whose text is not of one size: its labels (runs apart by a cell
-/// gap, see [`labels_in_line`]), each a size step under the ink under it (see [`ink_pieces`]; a
-/// head with nothing under it is the label of an empty field). A head may be smaller than the
-/// labels beside it (a value is never smaller than its label), but a head a size step larger
-/// than the head left of it may be that head's value beside it: it is a head only when another
-/// head of the line has its size (within a size step), or the head left of it has a value of
-/// its own under it (ink under it alone, apart from other ink of its line by a cell gap). A
-/// head that is no label heads its own lines when the ink under it has its size (a value or a
-/// name at the values' size). Each piece of ink stands under one head at most, and one head at
-/// least is a label. None when the line is not such heads.
-fn heads_of(flow: &Flow, lines: &[Vec<usize>], marker: &HashSet<usize>) -> Option<Vec<Vec<usize>>> {
-    let heads = labels_in_line(flow, &lines[0]);
-    if heads.len() < 2 {
-        return None;
-    }
-    let size_of = |h: &Vec<usize>| {
-        h.iter()
-            .filter(|i| !marker.contains(i))
-            .map(|&i| flow.runs[i].size)
-            .fold(0.0f32, f32::max)
-    };
-    let sizes: Vec<f32> = heads.iter().map(size_of).collect();
-    let ends: Vec<(f32, f32)> = heads.iter().map(|h| extent(flow, h)).collect();
-    // The sizes of the ink under each head, and whether a value stands under it alone.
-    let mut under: Vec<Vec<f32>> = vec![Vec::new(); heads.len()];
-    let mut own = vec![false; heads.len()];
-    for &i in lines[1..].iter().flatten() {
-        let r = &flow.runs[i];
-        let pieces = ink_pieces(r);
-        // The pieces of the run in chunks parted by a cell gap.
-        let mut chunk: Vec<usize> = Vec::new();
-        for (n, &(a, b)) in pieces.iter().enumerate() {
-            let mut over = ends.iter().enumerate().filter(|(_, e)| a < e.1 && b > e.0);
-            if let Some((k, _)) = over.next() {
-                if over.next().is_some() {
-                    return None;
-                }
-                under[k].push(r.size);
-                if !chunk.contains(&k) {
-                    chunk.push(k);
-                }
-            }
-            let parted = pieces
-                .get(n + 1)
-                .is_none_or(|next| next.0 - b > CELL_GAP * r.size.max(1.0));
-            if parted {
-                if let [k] = chunk[..] {
-                    own[k] = true;
-                }
-                chunk.clear();
-            }
-        }
-    }
-    let label: Vec<bool> = (0..heads.len())
-        .map(|k| under[k].iter().all(|&v| v >= LABEL_STEP * sizes[k]))
-        .collect();
-    let shared = |k: usize| {
-        (0..heads.len())
-            .any(|j| j != k && sizes[j] < LABEL_STEP * sizes[k] && sizes[k] < LABEL_STEP * sizes[j])
-    };
-    for k in 0..heads.len() {
-        if k > 0 && sizes[k] >= LABEL_STEP * sizes[k - 1] && !shared(k) && !own[k - 1] {
-            return None;
-        }
-        // No label: the ink under it is of its own size.
-        if !label[k] && under[k].iter().any(|&v| v >= LABEL_STEP * sizes[k]) {
-            return None;
-        }
-    }
-    label.contains(&true).then_some(heads)
-}
-
-/// The parts of a cell between dividers: when its first line is two labels or more over lines
-/// of values, each label with the runs under it (see [`under_labels`]); else the cell whole.
-/// None when a run under the labels has no certain label.
-fn parts_of(flow: &Flow, cell: &[usize]) -> Option<Vec<Vec<usize>>> {
-    let lines = lines_of(flow, cell);
-    let Some(labels) = first_line_labels(flow, &lines).filter(|l| l.len() >= 2) else {
-        return Some(vec![cell.to_vec()]);
-    };
-    let rest: Vec<usize> = lines[1..].iter().flatten().copied().collect();
-    let under = under_labels(flow, &labels, &rest)?;
-    Some(
-        labels
-            .into_iter()
-            .zip(under)
-            .map(|(mut l, v)| {
-                l.extend(v);
-                l
-            })
-            .collect(),
-    )
-}
-
-/// The labels of a cell by their text, for a loss: on each line the runs of the cell's
-/// smallest size (raised markers aside), each label apart.
-fn label_names(flow: &Flow, cell: &[usize]) -> Vec<String> {
-    let lines = lines_of(flow, cell);
-    let marker = markers(flow, &lines);
-    let small = cell
-        .iter()
-        .filter(|i| !marker.contains(i))
-        .map(|&i| flow.runs[i].size)
-        .fold(f32::MAX, f32::min);
-    lines
-        .iter()
-        .flat_map(|l| {
-            let labels: Vec<usize> = l
-                .iter()
-                .copied()
-                .filter(|&i| !marker.contains(&i) && flow.runs[i].size < LABEL_STEP * small)
-                .collect();
-            labels_in_line(flow, &labels)
-        })
-        .map(|l| words(flow, &l))
-        .filter(|w| !w.is_empty())
-        .collect()
-}
-
-/// The starts of the second and later labels of the first line of a cell (see
-/// [`first_line_labels`]), each a little left of its first run: where a value line that runs
-/// on into the next label's field is cut. None when the first line is not such labels.
-fn label_starts(flow: &Flow, cell: &[usize]) -> Vec<f32> {
-    let ids: Vec<usize> = cell
-        .iter()
-        .copied()
-        .filter(|&i| inked(&flow.runs[i]))
-        .collect();
-    let lines = lines_of(flow, &ids);
-    let Some(labels) = first_line_labels(flow, &lines) else {
-        return Vec::new();
-    };
-    labels
-        .windows(2)
-        .map(|w| {
-            let (_, end) = extent(flow, &w[0]);
-            let r = &flow.runs[w[1][0]];
-            // A character of the label left of it, or half the room to the label before.
-            r.x - (CHAR * r.size).min(0.5 * (r.x - end))
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2672,197 +1417,5 @@ mod tests {
             got,
             [(759.879_76, 42.4), (759.880_25, 293.2), (737.08, 42.4)]
         );
-    }
-
-    /// A run of `text` at `x` on the baseline `y` in `size`, 0.6 of the size a character,
-    /// with a gap at each space.
-    fn run(text: &str, x: f32, y: f32, size: f32) -> Run {
-        let ch = 0.6 * size;
-        let mut gaps = Vec::new();
-        let mut words = 0u32;
-        for (k, c) in text.char_indices() {
-            if c == ' ' {
-                words += 1;
-                gaps.push(crate::layout::Gap {
-                    words,
-                    from: x + ch * k as f32,
-                    to: x + ch * (k + 1) as f32,
-                });
-            }
-        }
-        Run {
-            page: 1,
-            text: text.into(),
-            x,
-            y,
-            w: ch * text.chars().count() as f32,
-            h: size,
-            size,
-            bold: false,
-            italic: false,
-            family: 0,
-            mcid: None,
-            uri: None,
-            line: 0,
-            off_axis: false,
-            note: false,
-            gaps: crate::layout::Gaps::new(gaps),
-        }
-    }
-
-    fn flow_of(runs: Vec<Run>) -> Flow {
-        let n = runs.len();
-        Flow::new(runs, vec![crate::layout::Slot::Free; n])
-    }
-
-    fn frame() -> Frame {
-        Frame {
-            x0: 0.0,
-            x1: 700.0,
-            bottom: 80.0,
-            top: 130.0,
-            dividers: Vec::new(),
-            spans: Vec::new(),
-            under_grid: false,
-        }
-    }
-
-    /// A prose line between two rules under a smaller caption line of two parts is no row of
-    /// fields: it is too long for values, so it is not cut where the caption's second part
-    /// starts.
-    #[test]
-    fn a_prose_line_under_a_caption_is_not_cut() {
-        let mut caption = run("Abb. 1", 10.0, 120.0, 6.0);
-        caption.line = 0;
-        let mut source = run("Quelle: Muster", 200.0, 120.0, 6.0);
-        source.line = 0;
-        let mut prose = run(
-            "Die Werte steigen im Lauf des Jahres stark an und fallen erst im Herbst wieder auf \
-             den Stand des Vorjahres zurueck",
-            10.0,
-            100.0,
-            10.0,
-        );
-        prose.line = 1;
-        let flow = flow_of(vec![caption, source, prose]);
-        assert!(field_cuts(&flow, &[frame()]).is_empty());
-    }
-
-    /// Guard: a value line of two fields under their labels is cut where the second label
-    /// starts.
-    #[test]
-    fn a_value_line_under_two_labels_is_cut() {
-        let flow = flow_of(vec![
-            run("Name", 10.0, 120.0, 6.0),
-            run("Ort", 100.0, 120.0, 6.0),
-            {
-                let mut r = run("Erika Mustermann Musterstadt", 10.0, 100.0, 10.0);
-                r.line = 1;
-                r
-            },
-        ]);
-        assert_eq!(field_cuts(&flow, &[frame()]), [(2, vec![1])]);
-    }
-
-    /// Labels a size step under their values are labels at every scale: printed at 0.4, labels
-    /// of 4.8 points over values of 5.2 differ by less than half a point; labels and values of
-    /// one size are no labels over values.
-    #[test]
-    fn labels_over_values_by_a_size_step_at_any_scale() {
-        let cell = |label: f32, value: f32| {
-            let mut v = run(
-                "Erika Mustermann Musterstadt",
-                4.0,
-                100.0 - 2.0 * value,
-                value,
-            );
-            v.line = 1;
-            flow_of(vec![
-                run("Name", 4.0, 100.0, label),
-                run("Ort", 4.0 + 10.0 * label, 100.0, label),
-                v,
-            ])
-        };
-        for (label, value, labels) in [(12.0, 13.0, true), (4.8, 5.2, true), (5.0, 5.0, false)] {
-            let flow = cell(label, value);
-            let lines = lines_of(&flow, &[0, 1, 2]);
-            assert_eq!(
-                first_line_labels(&flow, &lines).map(|l| l.len()),
-                labels.then_some(2),
-                "{label} {value}"
-            );
-        }
-    }
-
-    /// At the sizes of a form, labels half a point smaller than their values (8 over 8.5,
-    /// 9 over 9.5, 10 over 10.5) are labels, as they were when the step was half a point; a
-    /// first line that mixes 8 and 8.5 points is no line of labels (its 8.5 point run may be
-    /// a value).
-    #[test]
-    fn labels_half_a_point_under_their_values_at_8_to_10_points() {
-        let cell = |sizes: [f32; 2], value: f32| {
-            let mut v = run("Erika Mustermann Musterstadt", 4.0, 70.0, value);
-            v.line = 1;
-            flow_of(vec![
-                run("Name", 4.0, 100.0, sizes[0]),
-                run("Ort", 120.0, 100.0, sizes[1]),
-                v,
-            ])
-        };
-        for size in [8.0, 9.0, 10.0] {
-            let flow = cell([size, size], size + 0.5);
-            let lines = lines_of(&flow, &[0, 1, 2]);
-            assert_eq!(
-                first_line_labels(&flow, &lines).map(|l| l.len()),
-                Some(2),
-                "{size}"
-            );
-        }
-        let flow = cell([8.0, 8.5], 10.0);
-        let lines = lines_of(&flow, &[0, 1, 2]);
-        assert_eq!(first_line_labels(&flow, &lines).map(|l| l.len()), None);
-    }
-    /// Task 15b part 2d item 3: labels of one size with a smaller name between them head their
-    /// cells, and so does a name at the values' size, over lines of its size or over nothing,
-    /// right of a label with a value under it; right of a label with nothing under it, the
-    /// name is no head (it may be the value beside the label).
-    #[test]
-    fn heads_of_one_size_may_hold_a_smaller_or_a_value_sized_head() {
-        let cell = |middle: f32, under: bool, left: bool| {
-            let mut runs = vec![
-                run("Name", 4.0, 100.0, 8.0),
-                run("Muster GmbH", 60.0, 100.0, middle),
-                run("Nr", 180.0, 100.0, 8.0),
-            ];
-            let mut low = |text: &str, x: f32, y: f32| {
-                let mut r = run(text, x, y, 8.5);
-                r.line = 1;
-                runs.push(r);
-            };
-            if left {
-                low("Beispiel", 4.0, 80.0);
-            }
-            if under {
-                low("Musterweg 1", 60.0, 90.0);
-                low("12345 Musterstadt", 60.0, 80.0);
-            }
-            low("4711", 180.0, 80.0);
-            flow_of(runs)
-        };
-        for (middle, under, left, heads) in [
-            (7.2, true, true, Some(3)),
-            (8.5, true, true, Some(3)),
-            (8.5, false, true, Some(3)),
-            (8.5, true, false, None),
-        ] {
-            let flow = cell(middle, under, left);
-            let ids: Vec<usize> = (0..flow.runs.len()).collect();
-            let lines = lines_of(&flow, &ids);
-            assert_eq!(
-                first_line_labels(&flow, &lines).map(|l| l.len()),
-                heads,
-                "{middle} {under} {left}"
-            );
-        }
     }
 }

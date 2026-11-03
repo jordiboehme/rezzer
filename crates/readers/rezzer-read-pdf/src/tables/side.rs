@@ -10,8 +10,8 @@
 
 use layoutregions::segment::drawn::Line;
 
-use super::pairs::Field;
 use super::*;
+use layoutregions::extract::pairs::Field;
 
 /// A column stands beside a grid when it starts at most this many times the size of its text
 /// right of the grid's right edge (and more than [`SNAP`], or the two would be one rule): a

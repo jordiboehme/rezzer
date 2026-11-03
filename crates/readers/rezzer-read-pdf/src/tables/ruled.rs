@@ -6,6 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use layoutregions::extract::pairs::Field;
 use layoutregions::extract::table::ruled::{
     COLUMN_CUT_WORK, GridPart, RuledIn, column_cuts, edges, hanging_feet, ruled_cells,
 };
@@ -15,7 +16,7 @@ use layoutregions::segment::drawn::{Grids, Line, Unsearched};
 
 use super::banded::{Band, Shared, Taken, banded};
 use super::pairs::{
-    Field, Top, claim, field_cuts, field_strips, frame_tops, frames, holds_values, pairs_table,
+    Top, claim, field_cuts, field_strips, frame_tops, frames, holds_values, pairs_table,
     taken_by_grids,
 };
 use super::side::{Beside, SIDE_FOUND_BY, SIDE_WORK, Side, StripKind, side_columns, totals_top};
@@ -1365,7 +1366,8 @@ fn boxed_field(flow: &Flow, within: &[usize], xs: &[f32], ys: &[f32]) -> bool {
 const NAME_WORDS: usize = 6;
 
 /// The first [`NAME_WORDS`] words of the first cell of `table` (row by row) that holds text,
-/// its runs in the order of `runs`: what names the table in a loss.
+/// its runs in the order of `runs`: what names the table in a loss, between quotes, so a quote
+/// in the text is escaped (`\"`).
 fn first_words(runs: &[Run], table: &TableOut) -> String {
     let words = |c: &layoutregions::extract::table::CellOut| {
         let mut idx = c.runs.clone();
@@ -1383,6 +1385,7 @@ fn first_words(runs: &[Run], table: &TableOut) -> String {
         .map(words)
         .find(|w| !w.is_empty())
         .unwrap_or_default()
+        .replace('"', "\\\"")
 }
 
 /// What a title drawn as an icon is written as.
@@ -1526,5 +1529,26 @@ mod tests {
         ));
         let texts: Vec<&str> = flow.runs.iter().map(|r| r.text.as_str()).collect();
         assert_eq!(texts, ["AA", " BB", "AA", " BB", "AA  BB"]);
+    }
+
+    /// A quote in the first words that name a table in a loss is escaped: the name stands
+    /// between quotes in the loss.
+    #[test]
+    fn a_quote_in_a_table_name_is_escaped() {
+        use layoutregions::extract::table::CellOut;
+        let runs = vec![spaced("Muster \"Plus\" GmbH", 10.0)];
+        let table = TableOut {
+            rows: vec![vec![
+                CellOut::default(),
+                CellOut {
+                    runs: vec![0],
+                    row_span: 1,
+                    col_span: 1,
+                    status: None,
+                },
+            ]],
+            ..TableOut::default()
+        };
+        assert_eq!(first_words(&runs, &table), "Muster \\\"Plus\\\" GmbH");
     }
 }

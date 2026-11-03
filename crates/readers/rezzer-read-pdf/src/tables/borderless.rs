@@ -13,7 +13,11 @@ use layoutregions::extract::table::TableOut;
 use layoutregions::extract::table::grid::{self, Piece, Shape, amount, columns_of, grid_cells};
 
 use super::*;
-use crate::layout::{ColumnLine, Columns, Gaps, Slot, address_columns};
+use layoutregions::extract::pairs::blocks::{
+    Columns, KeyValues, address_columns, blocks_of, key_values,
+};
+
+use crate::layout::{Gaps, Slot};
 use crate::regions::{BASELINE_NEAR, Part, offset_baselines};
 
 /// Why blocks side by side are read one block after the other (see [`side_blocks`]).
@@ -95,7 +99,7 @@ fn piece_count(flow: &Flow, l: &FlowLine) -> usize {
     grid::piece_count(&flow.runs, l.start, l.end)
 }
 
-/// The pieces of a line: runs closer than [`CELL_GAP`] font sizes are one (see
+/// The pieces of a line: runs closer than [`table::CELL_GAP`] font sizes are one (see
 /// `grid::pieces_of`).
 fn pieces_of(flow: &Flow, l: &FlowLine) -> Vec<Piece> {
     grid::pieces_of(&flow.runs, l.start, l.end)
@@ -427,7 +431,7 @@ pub(super) fn borderless(
             }
         }
         // A block of labels and values is a table of two columns.
-        match key_values(flow, &lines, a, z, &pieces, &off) {
+        match key_values(&flow.runs, &lines, a, z, &pieces, &off) {
             KeyValues::No => {}
             KeyValues::TooMany(n) => {
                 found.skipped.push(format!(
@@ -1205,131 +1209,6 @@ fn ended(flow: &Flow, lines: &[FlowLine], (a, z): (usize, usize), ends: &[HRule]
     end
 }
 
-/// Lines of labels and values one table may have at most.
-const MAX_KEY_VALUES: usize = MAX_SQUARES / 2;
-
-/// Labels and values line up within this many points.
-const KV_ALIGN: f32 = 1.0;
-
-/// A label is at most this many characters and words; a value at most this many characters.
-const KV_LABEL: usize = 40;
-const KV_LABEL_WORDS: usize = 6;
-const KV_VALUE: usize = 80;
-
-/// One row of a block of labels and values: its line, and the flow ranges of its label and
-/// value; a row without a value range has both in one run, cut after the label's colon.
-struct KeyValue {
-    line: usize,
-    label: (usize, usize),
-    value: Option<(usize, usize)>,
-}
-
-enum KeyValues {
-    No,
-    /// A block of this many lines: more than one table may have.
-    TooMany(usize),
-    Rows(Vec<KeyValue>),
-}
-
-/// The block of labels and values the lines `a..z` of a region are, when they are one: at
-/// least three lines in a row of exactly two pieces, the labels flush left, the values flush
-/// left or right or the labels ending in a colon, no label or value wrapping, short pieces,
-/// and no bold first line over plain ones (a header). A line right after the block whose one
-/// piece starts with a short label and a colon joins it, cut after the colon.
-fn key_values(
-    flow: &Flow,
-    lines: &[FlowLine],
-    a: usize,
-    z: usize,
-    pieces: &[Vec<Piece>],
-    off: &[bool],
-) -> KeyValues {
-    if pieces.iter().any(|p| p.len() != 2) || z - a < 2 {
-        return KeyValues::No;
-    }
-    if z - a > MAX_KEY_VALUES {
-        return KeyValues::TooMany(z - a);
-    }
-    let label = |p: &Piece| text_of(flow, p.start, p.end);
-    let labels: Vec<String> = pieces.iter().map(|p| label(&p[0])).collect();
-    let colons = labels.iter().all(|l| l.ends_with(':'));
-    // Lines after the region whose one run starts with a short label and a colon.
-    let mut extra: Vec<usize> = Vec::new();
-    let mut end = z;
-    while colons && end < lines.len() && !off[end] && extra.len() < MAX_KEY_VALUES {
-        let (prev, cur) = (&lines[end - 1], &lines[end]);
-        let gap = prev.y - cur.y;
-        if gap <= 0.0 || gap > 2.0 * prev.size.max(cur.size) || cur.end - cur.start != 1 {
-            break;
-        }
-        let text = flow.runs[cur.start].text.trim();
-        let Some(cut) = text.find(": ") else { break };
-        let head = &text[..=cut];
-        if head.chars().count() > KV_LABEL || head.split_whitespace().count() > KV_LABEL_WORDS {
-            break;
-        }
-        if (flow.runs[cur.start].x - pieces[0][0].x0).abs() > KV_ALIGN {
-            break;
-        }
-        extra.push(end);
-        end += 1;
-    }
-    let n = z - a + extra.len();
-    if n < 3 {
-        return KeyValues::No;
-    }
-    let x0 = pieces[0][0].x0;
-    let lefts = pieces.iter().all(|p| (p[0].x0 - x0).abs() <= KV_ALIGN);
-    let (v0, v1) = (pieces[0][1].x0, pieces[0][1].x1);
-    let flush_left = pieces.iter().all(|p| (p[1].x0 - v0).abs() <= KV_ALIGN);
-    let flush_right = pieces.iter().all(|p| (p[1].x1 - v1).abs() <= KV_ALIGN);
-    if !lefts || !(flush_left || flush_right || colons) {
-        return KeyValues::No;
-    }
-    let short = labels
-        .iter()
-        .all(|l| l.chars().count() <= KV_LABEL && l.split_whitespace().count() <= KV_LABEL_WORDS)
-        && pieces
-            .iter()
-            .all(|p| text_of(flow, p[1].start, p[1].end).chars().count() <= KV_VALUE);
-    if !short {
-        return KeyValues::No;
-    }
-    // Lines of the block follow each other at most two line heights apart.
-    let spaced = (a + 1..z).all(|k| {
-        let gap = lines[k - 1].y - lines[k].y;
-        gap > 0.0 && gap <= 2.0 * lines[k - 1].size.max(lines[k].size)
-    });
-    // A line right after the block that starts under the values goes on a value.
-    let wraps = lines.get(end).is_some_and(|next| {
-        let last = &lines[end - 1];
-        let gap = last.y - next.y;
-        gap > 0.0
-            && gap <= 1.6 * last.size.max(next.size)
-            && (flow.runs[next.start].x - v0).abs() <= KV_ALIGN
-    });
-    let bold = |l: &FlowLine| flow.runs[l.start..l.end].iter().all(|r| r.bold);
-    let header = bold(&lines[a]) && (a + 1..z).any(|k| !bold(&lines[k]));
-    if !spaced || wraps || header {
-        return KeyValues::No;
-    }
-    let mut rows: Vec<KeyValue> = pieces
-        .iter()
-        .enumerate()
-        .map(|(k, p)| KeyValue {
-            line: a + k,
-            label: (p[0].start, p[0].end),
-            value: Some((p[1].start, p[1].end)),
-        })
-        .collect();
-    rows.extend(extra.into_iter().map(|k| KeyValue {
-        line: k,
-        label: (lines[k].start, lines[k].end),
-        value: None,
-    }));
-    KeyValues::Rows(rows)
-}
-
 /// Cuts a row of two cells whose first cell holds label and value in one run after the
 /// label's colon: the rest goes to the second cell.
 fn split_label(row: &mut [PlannedCell]) {
@@ -1513,7 +1392,7 @@ fn side_blocks(
         }
         let mut all = pieces.to_vec();
         all.extend(lines[z..end].iter().map(|l| pieces_of(flow, l)));
-        let (columns, order) = blocks_of(flow, &all);
+        let (columns, order) = blocks_of(&flow.runs, &all);
         let mut sorted = order.clone();
         sorted.sort_unstable();
         if !sorted.iter().copied().eq(s..e) {
@@ -1526,43 +1405,6 @@ fn side_blocks(
         }
     }
     doubt.map(|(s, order)| (s, order, Columns::Doubt))
-}
-
-/// The lines of a region by column (see [`columns_of`]), each column's line on each row, and
-/// the region's runs column by column, each column top down. A piece over two columns, two
-/// pieces of a row in one column or a piece in no column gives no columns.
-fn blocks_of(flow: &Flow, pieces: &[Vec<Piece>]) -> (Vec<Vec<Option<ColumnLine>>>, Vec<usize>) {
-    let columns = columns_of(pieces);
-    let none = || (Vec::new(), Vec::new());
-    let mut lines: Vec<Vec<Option<ColumnLine>>> = vec![vec![None; pieces.len()]; columns.len()];
-    let mut runs: Vec<Vec<usize>> = vec![Vec::new(); columns.len()];
-    for (row, line) in pieces.iter().enumerate() {
-        for p in line {
-            let hit: Vec<usize> = (0..columns.len())
-                .filter(|&c| p.x1 > columns[c].0 && p.x0 < columns[c].1)
-                .collect();
-            let [c] = hit[..] else {
-                return none();
-            };
-            if lines[c][row].is_some() {
-                return none();
-            }
-            let inked: Vec<&Run> = flow.runs[p.start..p.end]
-                .iter()
-                .filter(|r| !r.text.trim().is_empty())
-                .collect();
-            if inked.is_empty() {
-                return none();
-            }
-            lines[c][row] = Some(ColumnLine {
-                text: text_of(flow, p.start, p.end),
-                bold: inked.iter().all(|r| r.bold),
-                size: inked.iter().map(|r| r.size).fold(0.0f32, f32::max),
-            });
-            runs[c].extend(p.start..p.end);
-        }
-    }
-    (lines, runs.into_iter().flatten().collect())
 }
 
 #[cfg(test)]

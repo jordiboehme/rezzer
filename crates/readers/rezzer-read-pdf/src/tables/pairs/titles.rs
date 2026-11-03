@@ -135,7 +135,7 @@ pub(crate) fn underlined_titles(
         else {
             continue;
         };
-        let title: Vec<usize> = lines_of(flow, &over)
+        let title: Vec<usize> = lines_of(&flow.runs, &over)
             .into_iter()
             .find(|l| l.contains(&low))
             .unwrap_or_default();
@@ -182,7 +182,7 @@ pub(crate) fn underlined_titles(
             .into_iter()
             .filter(|&i| usable(i, &used) && in_range(i))
             .collect();
-        let text_lines = lines_of(flow, &below);
+        let text_lines = lines_of(&flow.runs, &below);
         let mut text: Vec<usize> = Vec::new();
         let mut last = bar.at;
         let mut style: Option<Style> = None;

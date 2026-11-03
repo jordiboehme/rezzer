@@ -5,5 +5,6 @@
 //! What the regions of a page read as: the blocks of text lines (headings, list items and
 //! paragraphs with their line breaks) and the cells of tables.
 
+pub mod pairs;
 pub mod table;
 pub mod text;

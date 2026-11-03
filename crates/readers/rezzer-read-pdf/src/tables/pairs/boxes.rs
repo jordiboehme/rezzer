@@ -93,51 +93,7 @@ pub(crate) fn box_pairs(
             consumed[b] = true;
         }
     }
-    let mut how = Reading {
-        one_field: true,
-        smaller: false,
-        small: small_size(text_sizes).saturating_sub(1),
-        labels: &[],
-    };
-    let mut fields: Vec<Option<Field>> = (0..boxes.len()).map(|_| None).collect();
-    let mut unsure: Vec<(usize, &'static str)> = Vec::new();
-    for (b, ids) in in_box.iter().enumerate() {
-        if ids.is_empty() || consumed[b] {
-            continue;
-        }
-        match parse(flow, ids, how) {
-            Parsed::Fields(mut f) if f.len() == 1 => fields[b] = f.pop(),
-            Parsed::Unsure(why) => unsure.push((b, why)),
-            _ => {}
-        }
-    }
-    // The style of the text alone in an empty boxed field is a label's: boxes whose label and
-    // value differ in weight, slant or font only are read again knowing it.
-    let mut known: Vec<Style> = fields
-        .iter()
-        .flatten()
-        .filter(|f| f.value.is_empty())
-        .filter_map(|f| f.label.first().map(|&i| style_of(&flow.runs[i])))
-        .collect();
-    known.sort_unstable();
-    known.dedup();
-    if !known.is_empty() && unsure.iter().any(|u| u.1 == WEIGHT_ONLY) {
-        how.labels = &known;
-        for (b, why) in &mut unsure {
-            if *why != WEIGHT_ONLY {
-                continue;
-            }
-            match parse(flow, &in_box[*b], how) {
-                Parsed::Fields(mut f) if f.len() == 1 => {
-                    fields[*b] = f.pop();
-                    *why = "";
-                }
-                Parsed::Unsure(again) => *why = again,
-                _ => *why = "",
-            }
-        }
-        unsure.retain(|u| !u.1.is_empty());
-    }
+    let (mut fields, mut unsure) = box_fields(&flow.runs, &in_box, &consumed, text_sizes);
     // How near two boxes touch: by the size of their smallest text (see [`TOUCH`]).
     let touch: Vec<f32> = in_box
         .iter()
@@ -198,7 +154,7 @@ pub(crate) fn box_pairs(
         let one = ids.iter().all(|&i| {
             style_of(&flow.runs[i]) == style_of(&flow.runs[ids[0]]) && !flow.runs[i].bold
         });
-        if !one || lines_of(flow, &ids).len() > LABEL_LINES {
+        if !one || lines_of(&flow.runs, &ids).len() > LABEL_LINES {
             continue;
         }
         let Some((style, offset)) = label_at(b, &ids) else {
@@ -214,7 +170,7 @@ pub(crate) fn box_pairs(
     }
     for (b, ids) in empty {
         fields[b] = Some(Field {
-            label: lines_of(flow, &ids).into_iter().flatten().collect(),
+            label: lines_of(&flow.runs, &ids).into_iter().flatten().collect(),
             value: Vec::new(),
         });
     }
@@ -370,7 +326,7 @@ pub(crate) fn box_pairs(
             && ids
                 .iter()
                 .all(|&i| flow.runs[i].bold && !flow.runs[i].off_axis)
-            && lines_of(flow, &ids).len() <= LABEL_LINES
+            && lines_of(&flow.runs, &ids).len() <= LABEL_LINES
     };
     for (b, &bridged) in bridge.iter().enumerate() {
         if bridged
@@ -387,8 +343,11 @@ pub(crate) fn box_pairs(
     // read box by box, and that is said.
     let one_style = |b: usize| {
         let ids = inked_of(b);
-        let lines = lines_of(flow, &ids);
-        let first = lines.first().map(|l| words(flow, l)).unwrap_or_default();
+        let lines = lines_of(&flow.runs, &ids);
+        let first = lines
+            .first()
+            .map(|l| words(&flow.runs, l))
+            .unwrap_or_default();
         lines.len() == 2
             && fields[b].as_ref().is_none_or(|f| f.value.is_empty())
             && !unsure.iter().any(|u| u.0 == b)
@@ -441,9 +400,9 @@ pub(crate) fn box_pairs(
             .iter()
             .filter(|(b, w)| kinds.contains(w) && said_of(b, w))
             .filter_map(|(b, _)| {
-                lines_of(flow, &inked_of(*b))
+                lines_of(&flow.runs, &inked_of(*b))
                     .first()
-                    .map(|l| words(flow, l))
+                    .map(|l| words(&flow.runs, l))
             })
             .collect();
         if names.is_empty() {
@@ -462,7 +421,11 @@ pub(crate) fn box_pairs(
     }
     let names: Vec<String> = lone
         .iter()
-        .filter_map(|&b| lines_of(flow, &inked_of(b)).first().map(|l| words(flow, l)))
+        .filter_map(|&b| {
+            lines_of(&flow.runs, &inked_of(b))
+                .first()
+                .map(|l| words(&flow.runs, l))
+        })
         .collect();
     if !names.is_empty() {
         said.push(format!(
@@ -617,7 +580,7 @@ fn framed_titles(
             .copied()
             .filter(|&i| inked(&flow.runs[i]))
             .collect();
-        let lines = lines_of(flow, &ids);
+        let lines = lines_of(&flow.runs, &ids);
         (!lines.is_empty()
             && lines.len() <= LABEL_LINES
             && lines.iter().flatten().all(|&i| flow.runs[i].bold))
@@ -645,7 +608,7 @@ fn framed_titles(
             continue;
         }
         let fb = boxes[b];
-        let lines = lines_of(flow, &ids);
+        let lines = lines_of(&flow.runs, &ids);
         let size = |l: &Vec<usize>| l.iter().map(|&i| flow.runs[i].size).fold(0.0f32, f32::max);
         // The title at the top of the frame itself.
         let lead = lines
