@@ -340,9 +340,9 @@ fn pieces(runs: &[Run]) -> Vec<Line<'_>> {
 /// Datum 01.01.2020` or `Kundennr. 4711 Datum 01.02.2026`), at most [`BESIDE_SIZES`] sizes
 /// away, and the piece holds no other date (`Datum 01.01.2026 bis 31.01.2026` marks nothing).
 /// Every date in the top third of the page is a date of the head, marked or not.
-pub(crate) fn page_dates(runs: &[Run], height: Option<f32>) -> Dates {
+pub(crate) fn page_dates(runs: &[Run], height: f32) -> Dates {
     let mut out = Dates::default();
-    let in_head = |l: &Line<'_>| height.is_some_and(|h| h > 0.0 && l.y + l.h >= h * HEAD_SHARE);
+    let in_head = |l: &Line<'_>| height > 0.0 && l.y + l.h >= height * HEAD_SHARE;
     for l in &pieces(runs) {
         for (start, end) in date_like(&l.text) {
             out.spots.push(spot_of(l, start, end));
@@ -821,7 +821,7 @@ fn ink_gap(l: &Line<'_>, end: usize, start: usize) -> f32 {
 /// fields of a form stand: lower down it may be one row of items under small column titles,
 /// each title read as the label of the value below it. Whether a marked date is the only date
 /// of its column is decided once for every mark, in [`document_date`].
-pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: Option<f32>) -> Dates {
+pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: f32) -> Dates {
     let mut out = Dates::default();
     let lines = pieces(runs);
     let add = |label: String, value: &str, spot: Spot, out: &mut Dates| {
@@ -848,7 +848,7 @@ pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: Option<f32>) ->
             add(label, &v.text, spot_of(v, 0, end), &mut out);
         }
     }
-    let above = |top: f32, share: f32| height.is_some_and(|h| h > 0.0 && top >= h * share);
+    let above = |top: f32, share: f32| height > 0.0 && top >= height * share;
     let is_date = |cell: &Cell| {
         let text = cell.text.trim();
         scan::dates(text, 4..=4)

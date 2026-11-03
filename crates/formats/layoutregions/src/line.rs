@@ -5,7 +5,7 @@
 //! Visual lines of text runs and the text of a line: the one place where runs become a line,
 //! for the engine and for a reader that keeps runs of its own (see [`LineRun`]).
 
-use crate::input::TextRun;
+use crate::input::{GapIn, TextRun};
 
 /// A gap wider than this many font sizes splits a line into pieces, which may stand in
 /// different columns.
@@ -52,6 +52,8 @@ pub trait LineRun {
     fn page(&self) -> u32 {
         0
     }
+    /// The white space between its words, from the glyphs, in order (see [`GapIn`]).
+    fn gaps(&self) -> impl Iterator<Item = GapIn> + '_;
 }
 
 impl LineRun for TextRun {
@@ -78,6 +80,9 @@ impl LineRun for TextRun {
     }
     fn line(&self) -> u32 {
         self.line
+    }
+    fn gaps(&self) -> impl Iterator<Item = GapIn> + '_ {
+        self.gaps.iter().copied()
     }
 }
 
@@ -157,6 +162,9 @@ pub fn text_line<R: LineRun>(runs: &[R]) -> TextLine<'_, R> {
     }
 }
 
+/// Whether the text of a run may be printed over another: two letters or digits or more. A
+/// lone mark (an accent drawn as a run of its own over its letter) belongs to its word, as
+/// the reading order keeps it there.
 fn overprints(text: &str) -> bool {
     text.chars().filter(|c| c.is_alphanumeric()).count() >= 2
 }

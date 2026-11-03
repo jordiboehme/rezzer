@@ -20,9 +20,10 @@ use pdfparts::StructTree;
 use rezzer_limits::{Budget, LimitHit};
 use rezzer_model::{Anchor, Block, Cell, Inline, LossReason, SectionKind, Severity, StatusColor};
 
+use layoutregions::GapIn;
 #[cfg(doc)]
 use layoutregions::file::FileFacts;
-use layoutregions::file::{self, Band, HEADING_PLAIN_RATIO, HEADING_RATIO, RunningIndex};
+use layoutregions::file::{self, Band, FilePage, HEADING_PLAIN_RATIO, HEADING_RATIO, RunningIndex};
 use layoutregions::line::{
     EDGE, GAP_RATIO, LineRun, SIZE_SLACK, TextLine, apart, ink, size_key, text_line as line,
     text_lines as lines,
@@ -210,13 +211,8 @@ impl UriTarget {
 /// Deepest heading level the font size rule gives.
 const SIZE_LEVELS: usize = 3;
 
-/// One page as the file pass sees it.
-pub(crate) struct PageText<'a> {
-    pub page: u32,
-    /// The width and height of the page in the frame of its runs.
-    pub size: [f32; 2],
-    pub runs: &'a [Run],
-}
+/// One page as the file pass sees it: its runs, borrowed, and the height of their frame.
+pub(crate) type PageText<'a> = FilePage<'a, Run>;
 
 /// What the layout learns from the whole file before it lays out a page (see
 /// [`layoutregions::file::learn`]), kept the way the layout looks it up.
@@ -265,6 +261,13 @@ impl LineRun for Run {
     fn page(&self) -> u32 {
         self.page
     }
+    fn gaps(&self) -> impl Iterator<Item = GapIn> + '_ {
+        self.gaps.iter().map(|g| GapIn {
+            words: g.words,
+            from: g.from,
+            to: g.to,
+        })
+    }
 }
 
 impl Style {
@@ -274,18 +277,10 @@ impl Style {
         Style::learn(pages, false)
     }
 
-    /// Learns the facts of the file from every page (see [`layoutregions::file::learn`]),
-    /// one page's text at a time; `tagged` files say their footnotes themselves.
+    /// Learns the facts of the file from every page (see [`layoutregions::file::learn`]);
+    /// `tagged` files say their footnotes themselves.
     pub(crate) fn learn(pages: &[PageText<'_>], tagged: bool) -> Style {
-        let facts = file::learn(
-            || {
-                pages
-                    .iter()
-                    .map(|p| engine::text_page(p.page, p.size, p.runs))
-            },
-            tagged,
-            &ends_in_amount,
-        );
+        let facts = file::learn(pages, tagged, &ends_in_amount);
         Style {
             body_size: facts.body_size,
             heading_sizes: facts.heading_sizes,
@@ -298,21 +293,13 @@ impl Style {
     /// The band of each line that is a running header or footer on its page (see
     /// [`RunningIndex::bands`]). A line marked in `content` is never a header or footer; an
     /// empty `content` marks none.
-    fn furniture(
-        &self,
-        lines: &[Line<'_>],
-        height: Option<f32>,
-        content: &[bool],
-    ) -> Vec<Option<Band>> {
-        match height {
-            Some(h) => self.running.bands(lines, h, content),
-            None => vec![None; lines.len()],
-        }
+    fn furniture(&self, lines: &[Line<'_>], height: f32, content: &[bool]) -> Vec<Option<Band>> {
+        self.running.bands(lines, height, content)
     }
 
     /// Whether a line on a page of `height` is a footer by the two-page rule.
-    fn two_page_line(&self, line: &Line<'_>, height: Option<f32>) -> bool {
-        height.is_some_and(|h| file::two_page_line(line, h, &self.two_page))
+    fn two_page_line(&self, line: &Line<'_>, height: f32) -> bool {
+        file::two_page_line(line, height, &self.two_page)
     }
 
     /// The heading level of an untagged line, `None` for body text.
@@ -690,7 +677,7 @@ impl Drawn<'_> {
 #[cfg(test)]
 pub(crate) fn page_blocks(
     page: u32,
-    height: Option<f32>,
+    height: f32,
     runs: Vec<Run>,
     drawn: &Drawn<'_>,
     cx: &Context<'_>,
@@ -705,7 +692,7 @@ pub(crate) fn page_blocks(
 /// run.
 pub(crate) fn page_blocks_at(
     page: u32,
-    height: Option<f32>,
+    height: f32,
     runs: Vec<Run>,
     drawn: &Drawn<'_>,
     cx: &Context<'_>,
@@ -719,7 +706,7 @@ pub(crate) fn page_blocks_at(
 /// stop do not run, their runs are laid out as text, and a limit note says so.
 fn page_blocks_until(
     page: u32,
-    height: Option<f32>,
+    height: f32,
     runs: Vec<Run>,
     drawn: &Drawn<'_>,
     cx: &Context<'_>,
@@ -760,7 +747,7 @@ fn page_blocks_until(
     };
     // The page as the region engine takes it. `Flow::ids` holds the id of each run
     // (`engine::run_of`). A page laid out from runs alone has its runs only.
-    let size = [drawn.width, height.unwrap_or(0.0)];
+    let size = [drawn.width, height];
     let engine_in = match drawn.items {
         Some(items) => engine::page_in(items, &flow.runs, drawn, size),
         None => {
@@ -848,14 +835,12 @@ fn page_blocks_until(
     let (title, dates) = match page {
         1 => {
             let text = lines(&flow.runs);
-            let title = height.and_then(|height| {
-                head::page_title(
-                    &text,
-                    &heading_of(cx.style, &text_sizes),
-                    height,
-                    cx.style.body_size,
-                )
-            });
+            let title = head::page_title(
+                &text,
+                &heading_of(cx.style, &text_sizes),
+                height,
+                cx.style.body_size,
+            );
             // Every table of the page, its rows as the text of their cells.
             let tables: Vec<head::Table> = placed
                 .iter()
@@ -1984,9 +1969,6 @@ fn inlines(
     Ok(out)
 }
 
-/// Whether the text of a run may be printed over another: two letters or digits or more. A
-/// lone mark (an accent drawn as a run of its own over its letter) belongs to its word, as
-/// the reading order keeps it there.
 /// Whether `cur` goes on in the same paragraph as `prev`: below it, near enough and in the
 /// same size, and not wholly right of it: a line that starts [`BESIDE_GAP`] sizes or more
 /// after the ink of the line over it ends, and is not much wider than it, stands in another
@@ -3412,7 +3394,7 @@ mod tests {
         }];
         let style = Style::new(&[PageText {
             page: 1,
-            size: [595.0, 842.0],
+            height: 842.0,
             runs: &runs,
         }]);
         // No room for the target, and no element for the block: the block is dropped, and
@@ -3443,7 +3425,7 @@ mod tests {
     fn titled_table(rows: usize, uri: bool, room: u64) -> Vec<Block> {
         let style = Style::new(&[PageText {
             page: 1,
-            size: [595.0, 842.0],
+            height: 842.0,
             runs: &[],
         }]);
         let budget = Budget::new(rezzer_limits::Limits::default());
@@ -3561,7 +3543,7 @@ mod tests {
         // stop names, nothing of it is kept, and the link counts it took go back.
         let style = Style::new(&[PageText {
             page: 1,
-            size: [595.0, 842.0],
+            height: 842.0,
             runs: &[],
         }]);
         let budget = Budget::new(rezzer_limits::Limits {
@@ -3620,7 +3602,7 @@ mod tests {
         // its loss.
         let style = Style::new(&[PageText {
             page: 1,
-            size: [595.0, 842.0],
+            height: 842.0,
             runs: &[],
         }]);
         let budget = Budget::new(rezzer_limits::Limits::default());
@@ -3694,7 +3676,7 @@ mod tests {
         let second = run("a second cell with more text", 1, 600.0, 10.0);
         let style = Style::new(&[PageText {
             page: 1,
-            size: [595.0, 842.0],
+            height: 842.0,
             runs: &[],
         }]);
         let budget = Budget::new(limits);
@@ -3772,7 +3754,7 @@ mod tests {
         ];
         let style = Style::new(&[PageText {
             page: 1,
-            size: [595.0, 842.0],
+            height: 842.0,
             runs: &runs,
         }]);
         let budget = Budget::new(rezzer_limits::Limits::default());
@@ -3785,7 +3767,7 @@ mod tests {
             in_part: false,
             links: &LinkRoom::new(u64::MAX),
         };
-        let laid = page_blocks(1, Some(842.0), runs, &NOTHING_DRAWN, &cx);
+        let laid = page_blocks(1, 842.0, runs, &NOTHING_DRAWN, &cx);
         let texts: Vec<String> = laid
             .blocks
             .iter()
@@ -3843,7 +3825,7 @@ mod tests {
     fn laid_page(runs: Vec<Run>, drawn: &Drawn<'_>) -> Laid {
         let style = Style::new(&[PageText {
             page: 1,
-            size: [595.0, 842.0],
+            height: 842.0,
             runs: &runs,
         }]);
         let budget = Budget::new(rezzer_limits::Limits::default());
@@ -3856,7 +3838,7 @@ mod tests {
             in_part: false,
             links: &LinkRoom::new(u64::MAX),
         };
-        page_blocks_until(1, Some(842.0), runs, drawn, &cx, &[], &|| false)
+        page_blocks_until(1, 842.0, runs, drawn, &cx, &[], &|| false)
     }
 
     /// The tables of `laid`: their header rows and the text of their cells.
@@ -4065,12 +4047,12 @@ mod tests {
         let style = Style::new(&[
             PageText {
                 page: 1,
-                size: [595.0, 842.0],
+                height: 842.0,
                 runs: &runs,
             },
             PageText {
                 page: 2,
-                size: [595.0, 842.0],
+                height: 842.0,
                 runs: &second,
             },
         ]);
@@ -4095,18 +4077,10 @@ mod tests {
             })
         };
         // Without the stop the furniture finder takes the footer.
-        let found = page_blocks_until(
-            1,
-            Some(842.0),
-            runs.clone(),
-            &NOTHING_DRAWN,
-            &cx,
-            &[],
-            &|| false,
-        );
+        let found = page_blocks_until(1, 842.0, runs.clone(), &NOTHING_DRAWN, &cx, &[], &|| false);
         assert_eq!(footer(&found), Some(Some("page-footer".to_string())));
         let n = runs.len();
-        let laid = page_blocks_until(1, Some(842.0), runs, &NOTHING_DRAWN, &cx, &[], &|| true);
+        let laid = page_blocks_until(1, 842.0, runs, &NOTHING_DRAWN, &cx, &[], &|| true);
         assert!(laid.stop.is_none());
         let mut text = String::new();
         for b in &laid.blocks {
@@ -4243,7 +4217,7 @@ mod tests {
             };
             laid.push(page_blocks(
                 k as u32 + 1,
-                Some(842.0),
+                842.0,
                 tagged_runs(texts, 700.0),
                 &NOTHING_DRAWN,
                 &cx,
@@ -4291,7 +4265,7 @@ mod tests {
             .enumerate()
             .map(|(k, runs)| PageText {
                 page: k as u32 + 1,
-                size: [595.0, 842.0],
+                height: 842.0,
                 runs,
             })
             .collect();
@@ -4314,7 +4288,7 @@ mod tests {
                 in_part: false,
                 links: &links,
             };
-            let laid = page_blocks(k as u32 + 1, Some(842.0), runs.clone(), &NOTHING_DRAWN, &cx);
+            let laid = page_blocks(k as u32 + 1, 842.0, runs.clone(), &NOTHING_DRAWN, &cx);
             let header = laid.blocks.iter().any(|b| {
                 matches!(b, Block::Paragraph { role: Some(r), inlines, .. }
                     if r == "page-header" && rezzer_model::plain_text(inlines) == "ACME Catalog")
@@ -4353,7 +4327,7 @@ mod tests {
         };
         let first = page_blocks(
             1,
-            Some(842.0),
+            842.0,
             tagged_runs(&["a", "b"], 700.0),
             &NOTHING_DRAWN,
             &cx,
@@ -4367,7 +4341,7 @@ mod tests {
         };
         let second = page_blocks(
             2,
-            Some(842.0),
+            842.0,
             tagged_runs(&["c", "a longer cell"], 700.0),
             &NOTHING_DRAWN,
             &cx,
@@ -4400,13 +4374,7 @@ mod tests {
             in_part: false,
             links: &links,
         };
-        let first = page_blocks(
-            1,
-            Some(842.0),
-            tagged_runs(&["a"], 700.0),
-            &NOTHING_DRAWN,
-            &cx,
-        );
+        let first = page_blocks(1, 842.0, tagged_runs(&["a"], 700.0), &NOTHING_DRAWN, &cx);
         assert_eq!(first.blocks.len(), 1);
         let before = (links.left.get(), links.freed.get());
         let two = [cells[0][1], cells[1][0]];
@@ -4417,7 +4385,7 @@ mod tests {
         };
         let second = page_blocks(
             2,
-            Some(842.0),
+            842.0,
             tagged_runs(&["c", "a longer cell"], 700.0),
             &NOTHING_DRAWN,
             &cx,
@@ -4458,7 +4426,7 @@ mod tests {
             };
             laid.push(page_blocks(
                 k as u32 + 1,
-                Some(842.0),
+                842.0,
                 tagged_runs(&[word], 700.0),
                 &NOTHING_DRAWN,
                 &cx,
@@ -4509,7 +4477,7 @@ mod tests {
         };
         let laid = page_blocks(
             1,
-            Some(842.0),
+            842.0,
             tagged_runs(&["one", "two"], 700.0),
             &NOTHING_DRAWN,
             &cx,
@@ -4550,7 +4518,7 @@ mod tests {
         };
         let laid = page_blocks(
             1,
-            Some(842.0),
+            842.0,
             tagged_runs(&["one", "two"], 700.0),
             &NOTHING_DRAWN,
             &cx,
@@ -4595,7 +4563,7 @@ mod tests {
         };
         let laid = page_blocks(
             1,
-            Some(842.0),
+            842.0,
             tagged_runs(&["lonely"], 700.0),
             &NOTHING_DRAWN,
             &cx,
@@ -4638,7 +4606,7 @@ mod tests {
             in_part: false,
             links: &LinkRoom::new(u64::MAX),
         };
-        let laid = page_blocks(1, Some(842.0), runs, &NOTHING_DRAWN, &cx);
+        let laid = page_blocks(1, 842.0, runs, &NOTHING_DRAWN, &cx);
         match laid.blocks.as_slice() {
             [Block::List { items, .. }] => assert_eq!(items.len(), 2),
             other => panic!("{other:?}"),
@@ -4672,7 +4640,7 @@ mod tests {
         // The style pass finds the legend the layout takes.
         let style = Style::new(&[PageText {
             page: 1,
-            size: [595.0, 842.0],
+            height: 842.0,
             runs: &runs,
         }]);
         let mut cut = 0;
@@ -4690,7 +4658,7 @@ mod tests {
                 in_part: false,
                 links: &LinkRoom::new(u64::MAX),
             };
-            let mut laid = page_blocks(1, Some(842.0), runs.clone(), &NOTHING_DRAWN, &cx);
+            let mut laid = page_blocks(1, 842.0, runs.clone(), &NOTHING_DRAWN, &cx);
             let notes: Vec<String> = laid
                 .blocks
                 .iter()
@@ -4735,7 +4703,7 @@ mod tests {
         };
         let laid = page_blocks(
             1,
-            Some(842.0),
+            842.0,
             tagged_runs(&["one", "two", "a much longer third"], 700.0),
             &NOTHING_DRAWN,
             &cx,
@@ -4784,7 +4752,7 @@ mod tests {
         }
         let style = Style::new(&[PageText {
             page: 1,
-            size: [595.0, 842.0],
+            height: 842.0,
             runs: &runs,
         }]);
         let budget = Budget::new(rezzer_limits::Limits::default());
@@ -4799,7 +4767,7 @@ mod tests {
             in_part: false,
             links: &LinkRoom::new(u64::MAX),
         };
-        let laid = page_blocks_until(1, Some(842.0), runs, &drawn, &cx, &[], &|| false);
+        let laid = page_blocks_until(1, 842.0, runs, &drawn, &cx, &[], &|| false);
         let text: Vec<String> = laid
             .blocks
             .iter()
@@ -4848,7 +4816,7 @@ mod tests {
         }
         let style = Style::new(&[PageText {
             page: 1,
-            size: [595.0, 842.0],
+            height: 842.0,
             runs: &runs,
         }]);
         let budget = Budget::new(rezzer_limits::Limits::default());
@@ -4926,7 +4894,7 @@ mod tests {
         }
         let style = Style::new(&[PageText {
             page: 1,
-            size: [595.0, 842.0],
+            height: 842.0,
             runs: &runs,
         }]);
         let budget = Budget::new(rezzer_limits::Limits::default());
@@ -4941,7 +4909,7 @@ mod tests {
             in_part: false,
             links: &LinkRoom::new(u64::MAX),
         };
-        let laid = page_blocks(1, Some(842.0), runs, &NOTHING_DRAWN, &cx);
+        let laid = page_blocks(1, 842.0, runs, &NOTHING_DRAWN, &cx);
         let text = |inlines: &[Inline]| rezzer_model::plain_text(inlines);
         match laid.blocks.as_slice() {
             [
@@ -5034,7 +5002,7 @@ mod tests {
                 in_part: false,
                 links: &LinkRoom::new(u64::MAX),
             };
-            let laid = page_blocks(page as u32 + 1, None, runs, &NOTHING_DRAWN, &cx);
+            let laid = page_blocks(page as u32 + 1, 842.0, runs, &NOTHING_DRAWN, &cx);
             // The table starts on page 1; later pages add rows to it.
             match (laid.blocks.as_slice(), laid.continued.as_slice()) {
                 ([Block::Table { rows: r, .. }], []) if page == 0 => rows += r.len(),

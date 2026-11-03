@@ -397,8 +397,12 @@ mod tests {
 
     /// The legend the file pass finds on the page of `runs`, by the runs' places.
     fn find(runs: &[Run]) -> Option<Found> {
-        let texts: Vec<_> = runs.iter().map(crate::engine::text_run).collect();
-        layoutregions::file::find_legend(&texts)
+        let mut style = super::super::Style::new(&[super::super::PageText {
+            page: 1,
+            height: 842.0,
+            runs,
+        }]);
+        style.legends.remove(&1)
     }
 
     fn run(text: &str, line: u32, x: f32, y: f32, size: f32) -> Run {

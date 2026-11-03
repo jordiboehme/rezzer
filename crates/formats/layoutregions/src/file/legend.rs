@@ -8,8 +8,9 @@
 
 use std::collections::HashSet;
 
-use crate::input::TextRun;
-use crate::line::{EDGE, GAP_RATIO, PIECE_GAP, SIZE_SLACK, TextLine, ink, text_lines};
+#[cfg(test)]
+use crate::line::text_lines;
+use crate::line::{EDGE, GAP_RATIO, LineRun, PIECE_GAP, SIZE_SLACK, TextLine, ink};
 
 /// A run of digits opens a legend line raised when it is this many times the size of the
 /// text after it or smaller, or its baseline stands this many times that size higher.
@@ -115,12 +116,12 @@ pub struct Split {
 }
 
 /// The white spaces between the words of `run`, in order.
-fn splits(run: &TextRun) -> Vec<Split> {
+fn splits<R: LineRun>(run: &R) -> Vec<Split> {
     // Where each word after the first starts, and how many words stand before it.
     let mut starts = Vec::new();
     let mut words = 0;
     let mut in_word = false;
-    for (i, c) in run.text.char_indices() {
+    for (i, c) in run.text().char_indices() {
         if c.is_whitespace() {
             in_word = false;
         } else if !in_word {
@@ -131,10 +132,9 @@ fn splits(run: &TextRun) -> Vec<Split> {
             in_word = true;
         }
     }
-    if !run.gaps.is_empty() {
-        return run
-            .gaps
-            .iter()
+    let mut gaps = run.gaps().peekable();
+    if gaps.peek().is_some() {
+        return gaps
             .enumerate()
             .filter_map(|(k, g)| {
                 let &(byte, _) = starts.iter().find(|s| s.1 == g.words as usize)?;
@@ -148,17 +148,17 @@ fn splits(run: &TextRun) -> Vec<Split> {
             .collect();
     }
     // By the share of characters of the text from its first ink on.
-    let lead = run.text.len() - run.text.trim_start().len();
-    let text = run.text.trim();
+    let lead = run.text().len() - run.text().trim_start().len();
+    let text = run.text().trim();
     let total = text.chars().count().max(1) as f32;
     let at = |byte: usize| {
-        let chars = run.text[lead..byte.max(lead)].chars().count() as f32;
-        run.x + run.w * chars / total
+        let chars = run.text()[lead..byte.max(lead)].chars().count() as f32;
+        run.x() + run.w() * chars / total
     };
     starts
         .iter()
         .map(|&(byte, _)| {
-            let end = run.text[..byte].trim_end().len();
+            let end = run.text()[..byte].trim_end().len();
             Split {
                 byte,
                 from: at(end),
@@ -170,14 +170,15 @@ fn splits(run: &TextRun) -> Vec<Split> {
 }
 
 /// Whether `run` holds one or two digits raised against `base`, the text after it.
-fn raised_digits(run: &TextRun, base: &TextRun) -> Option<u8> {
-    let raised = run.size < RAISED_SIZE * base.size || run.y > base.y + RAISED_RISE * base.size;
+fn raised_digits<R: LineRun>(run: &R, base: &R) -> Option<u8> {
+    let raised =
+        run.size() < RAISED_SIZE * base.size() || run.y() > base.y() + RAISED_RISE * base.size();
     digits(run).filter(|_| raised)
 }
 
 /// The value of a run of one or two digits.
-fn digits(run: &TextRun) -> Option<u8> {
-    let t = run.text.trim();
+fn digits<R: LineRun>(run: &R) -> Option<u8> {
+    let t = run.text().trim();
     ((1..=2).contains(&t.len()) && t.bytes().all(|b| b.is_ascii_digit()))
         .then(|| t.parse().ok())
         .flatten()
@@ -187,18 +188,18 @@ fn digits(run: &TextRun) -> Option<u8> {
 /// higher than the word's, and it starts close after the end of the run's glyphs (`None`)
 /// or in one of the run's white spaces right after a word (`Some` of that space). The word
 /// before it does not end in a digit: `mtl.` or `%` take references, a number does not.
-fn raised_ref(run: &TextRun, word: &TextRun) -> Option<(u8, Option<Split>)> {
+fn raised_ref<R: LineRun>(run: &R, word: &R) -> Option<(u8, Option<Split>)> {
     let n = digits(run)?;
-    let size = word.size;
-    let rise = run.y - word.y;
+    let size = word.size();
+    let rise = run.y() - word.y();
     let raised = rise >= REF_RISE * size
-        || (run.size <= REF_SMALLER * size && rise >= REF_RISE_SMALL * size);
+        || (run.size() <= REF_SMALLER * size && rise >= REF_RISE_SMALL * size);
     if !raised {
         return None;
     }
     let no_digit = |w: &str| w.chars().next_back().is_some_and(|c| !c.is_ascii_digit());
     let lead = REF_LEAD * size;
-    let end = word.x + word.w;
+    let end = word.x() + word.w();
     // The word end nearest to the number among those it may follow.
     let mut best: Option<(f32, Option<Split>)> = None;
     let mut offer = |dist: f32, at: Option<Split>| {
@@ -206,12 +207,13 @@ fn raised_ref(run: &TextRun, word: &TextRun) -> Option<(u8, Option<Split>)> {
             best = Some((dist, at));
         }
     };
-    if run.x >= end - lead && run.x - end <= REF_GAP * size && no_digit(word.text.trim_end()) {
-        offer((run.x - end).abs(), None);
+    if run.x() >= end - lead && run.x() - end <= REF_GAP * size && no_digit(word.text().trim_end())
+    {
+        offer((run.x() - end).abs(), None);
     }
     let spaces = splits(word);
     for (k, g) in spaces.iter().enumerate() {
-        if !no_digit(word.text[..g.byte].trim_end()) {
+        if !no_digit(word.text()[..g.byte].trim_end()) {
             continue;
         }
         let (low, high) = match g.gap {
@@ -220,13 +222,13 @@ fn raised_ref(run: &TextRun, word: &TextRun) -> Option<(u8, Option<Split>)> {
             // number may stand from the start of the word before to a little before the end
             // of the word after, and goes after the word end nearest to it.
             None => {
-                let start = k.checked_sub(1).map_or(word.x, |p| spaces[p].to);
+                let start = k.checked_sub(1).map_or(word.x(), |p| spaces[p].to);
                 let next_end = spaces.get(k + 1).map_or(end, |s| s.from);
                 (start.min(g.from - lead), (next_end - lead).max(g.to))
             }
         };
-        if run.x >= low && run.x <= high {
-            offer((run.x - g.from).abs(), Some(*g));
+        if run.x() >= low && run.x() <= high {
+            offer((run.x() - g.from).abs(), Some(*g));
         }
     }
     best.map(|b| (n, b.1))
@@ -327,28 +329,28 @@ fn word_spans(text: &str) -> Vec<(usize, &str)> {
 /// The marker a piece of a legend line opens with: stars, a number with `)` or a superscript
 /// number before its text, a run of digits raised against the run after it, or plain digits
 /// and a space.
-fn opening_mark(runs: &[TextRun]) -> Option<NoteMark> {
+fn opening_mark<R: LineRun>(runs: &[R]) -> Option<NoteMark> {
     opening(runs).map(|o| o.0)
 }
 
 /// [`opening_mark`] with the bytes the marker and the white space after it take of the
 /// trimmed text of the piece: what the footnote's text leaves out.
-fn opening(runs: &[TextRun]) -> Option<(NoteMark, usize)> {
-    let mut inked = runs.iter().filter(|r| ink(&r.text) > 0);
+fn opening<R: LineRun>(runs: &[R]) -> Option<(NoteMark, usize)> {
+    let mut inked = runs.iter().filter(|r| ink(r.text()) > 0);
     let first = inked.next()?;
     if let Some(next) = inked.next()
         && let Some(n) = raised_digits(first, next)
     {
-        return Some((NoteMark::Raised(n), first.text.trim().len()));
+        return Some((NoteMark::Raised(n), first.text().trim().len()));
     }
     // The marker and the start of the text after it stand in the first two runs with ink.
     let head = runs
         .iter()
         .enumerate()
-        .filter(|(_, r)| ink(&r.text) > 0)
+        .filter(|(_, r)| ink(r.text()) > 0)
         .nth(1)
         .map_or(runs.len(), |(i, _)| i + 1);
-    let text: String = runs[..head].iter().map(|r| r.text.as_str()).collect();
+    let text: String = runs[..head].iter().map(|r| r.text()).collect();
     let text = text.trim_start();
     // The bytes up to the text after the marker.
     let cut = |after: &str| text.len() - after.trim_start().len();
@@ -358,7 +360,7 @@ fn opening(runs: &[TextRun]) -> Option<(NoteMark, usize)> {
         let rest = &text[stars..];
         // A piece that also ends in stars after its text is a starred item (`*Abc.-Nr. ab*`),
         // not a footnote opened by its marker.
-        let whole: String = runs.iter().map(|r| r.text.as_str()).collect();
+        let whole: String = runs.iter().map(|r| r.text()).collect();
         let whole = whole.trim().trim_end_matches([':', ',', '.', ';']);
         let item = whole.len() > stars
             && whole.ends_with('*')
@@ -392,8 +394,8 @@ fn opening(runs: &[TextRun]) -> Option<(NoteMark, usize)> {
 /// markers that end a word go to `marks`, numbers raised right after a word are returned. A
 /// number that opens the line belongs to the last word of the line before when it stands
 /// raised, smaller and close at that word's end.
-fn references(
-    all: &[TextLine<'_, TextRun>],
+fn references<R: LineRun>(
+    all: &[TextLine<'_, R>],
     starts: &[usize],
     k: usize,
     marks: &mut HashSet<NoteMark>,
@@ -402,9 +404,9 @@ fn references(
     let start = starts[k];
     marks.extend(word_marks(&l.text).into_iter().map(|m| m.2));
     let mut raised = Vec::new();
-    let mut word: Option<(usize, &TextRun)> = None;
+    let mut word: Option<(usize, &R)> = None;
     for (i, r) in l.runs.iter().enumerate() {
-        if ink(&r.text) == 0 {
+        if ink(r.text()) == 0 {
             continue;
         }
         let found = match word {
@@ -438,11 +440,11 @@ fn references(
 
 /// The reference `r`, the first run of line `k`, makes at the end of the line before, with
 /// the index of that line's last run with ink.
-fn above(
-    all: &[TextLine<'_, TextRun>],
+fn above<R: LineRun>(
+    all: &[TextLine<'_, R>],
     starts: &[usize],
     k: usize,
-    r: &TextRun,
+    r: &R,
 ) -> Option<(u8, RefPlace)> {
     let p = k.checked_sub(1)?;
     let prev = &all[p];
@@ -451,8 +453,8 @@ fn above(
         .iter()
         .enumerate()
         .rev()
-        .find(|(_, w)| ink(&w.text) > 0)?;
-    if r.size >= word.size {
+        .find(|(_, w)| ink(w.text()) > 0)?;
+    if r.size() >= word.size() {
         return None;
     }
     let (n, gap) = raised_ref(r, word)?;
@@ -465,35 +467,30 @@ fn above(
 }
 
 /// The pieces of a line: its runs cut where a piece gap parts two runs with ink.
-fn pieces<'a>(l: &TextLine<'a, TextRun>) -> Vec<(usize, &'a [TextRun])> {
+fn pieces<'a, R: LineRun>(l: &TextLine<'a, R>) -> Vec<(usize, &'a [R])> {
     let mut cuts = vec![0];
     let mut end: Option<f32> = None;
     for (i, r) in l.runs.iter().enumerate() {
-        if ink(&r.text) == 0 {
+        if ink(r.text()) == 0 {
             continue;
         }
         if let Some(e) = end
-            && r.x - e > PIECE_GAP * r.size
+            && r.x() - e > PIECE_GAP * r.size()
         {
             cuts.push(i);
         }
-        end = Some(r.x + r.w);
+        end = Some(r.x() + r.w());
     }
     cuts.push(l.runs.len());
     cuts.windows(2)
         .map(|w| (w[0], &l.runs[w[0]..w[1]]))
-        .filter(|(_, p)| p.iter().any(|r| ink(&r.text) > 0))
+        .filter(|(_, p)| p.iter().any(|r| ink(r.text()) > 0))
         .collect()
 }
 
-/// The legend of a page of the runs `texts`, read by position: its lines are taken top down by
-/// baseline. It opens at the first line that opens with a note marker which also stands as a
-/// reference above, in a size no larger than every line above and with no larger line below.
-/// Its lines are the lines in that size from there down; lines in other sizes stay text. Each
-/// piece of a legend line (cut at piece gaps, so columns side by side stay apart) opens a
-/// footnote with a marker or goes on the footnote of its column on the line above. Pieces that
-/// go on nothing stay text; when they outnumber the footnotes there is no legend.
-pub fn find_legend(texts: &[TextRun]) -> Option<Legend> {
+/// [`find_lines`] over all lines of the page of the runs `texts`.
+#[cfg(test)]
+fn find_legend<R: LineRun>(texts: &[R]) -> Option<Legend> {
     let all = text_lines(texts);
     let mut starts = Vec::with_capacity(all.len());
     let mut at = 0;
@@ -504,9 +501,17 @@ pub fn find_legend(texts: &[TextRun]) -> Option<Legend> {
     find_lines(&all, &starts)
 }
 
-/// [`find_legend`] over the lines `all` of a page, line `k` starting at run `starts[k]` of the
-/// page: the lines of the page without its running headers and footers.
-pub(super) fn find_lines(all: &[TextLine<'_, TextRun>], starts: &[usize]) -> Option<Legend> {
+/// The legend of a page, read by position: its lines are taken top down by
+/// baseline. It opens at the first line that opens with a note marker which also stands as a
+/// reference above, in a size no larger than every line above and with no larger line below.
+/// Its lines are the lines in that size from there down; lines in other sizes stay text. Each
+/// piece of a legend line (cut at piece gaps, so columns side by side stay apart) opens a
+/// footnote with a marker or goes on the footnote of its column on the line above. Pieces that
+/// go on nothing stay text; when they outnumber the footnotes there is no legend.
+///
+/// `all` are the lines of the page without its running headers and footers, line `k` starting
+/// at run `starts[k]` of the page.
+pub(super) fn find_lines<R: LineRun>(all: &[TextLine<'_, R>], starts: &[usize]) -> Option<Legend> {
     // Top down by baseline; lines on one baseline keep their order.
     let mut order: Vec<usize> = (0..all.len())
         .filter(|&k| !all[k].text.is_empty())
@@ -557,7 +562,7 @@ pub(super) fn find_lines(all: &[TextLine<'_, TextRun>], starts: &[usize]) -> Opt
             continue;
         }
         for (from, piece) in pieces(l) {
-            let Some(x) = piece.iter().find(|r| ink(&r.text) > 0).map(|r| r.x) else {
+            let Some(x) = piece.iter().find(|r| ink(r.text()) > 0).map(|r| r.x()) else {
                 continue;
             };
             let first = starts[k] + from;
@@ -572,7 +577,7 @@ pub(super) fn find_lines(all: &[TextLine<'_, TextRun>], starts: &[usize]) -> Opt
                     h: l.h,
                     runs: runs.collect(),
                 });
-                lines.push(piece[0].line);
+                lines.push(piece[0].line());
                 continue;
             }
             // The footnote of its column whose last line stands right above.
@@ -584,7 +589,7 @@ pub(super) fn find_lines(all: &[TextLine<'_, TextRun>], starts: &[usize]) -> Opt
                 Some(e) if e.last - l.y <= GAP_RATIO * e.h.max(l.h).max(1.0) => {
                     e.runs.extend(runs);
                     e.last = l.y;
-                    lines.push(piece[0].line);
+                    lines.push(piece[0].line());
                 }
                 _ => loose += 1,
             }
@@ -605,7 +610,7 @@ pub(super) fn find_lines(all: &[TextLine<'_, TextRun>], starts: &[usize]) -> Opt
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::input::{FontKind, GapIn, Shift};
+    use crate::input::{FontKind, GapIn, Shift, TextRun};
 
     fn run(text: &str, line: u32, x: f32, y: f32, size: f32) -> TextRun {
         TextRun {

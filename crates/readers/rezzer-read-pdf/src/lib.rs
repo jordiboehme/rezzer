@@ -482,8 +482,8 @@ fn page_box(b: layoutregions::Bounds, items: &PageItems, w: f32, h: f32) -> [f32
 }
 
 /// The height of the page in the frame of its runs.
-fn frame_height(page: &PageInfo, items: Option<&PageItems>) -> Option<f32> {
-    Some(frame_size(page, items).1)
+fn frame_height(page: &PageInfo, items: Option<&PageItems>) -> f32 {
+    frame_size(page, items).1
 }
 
 /// One page section per page, with the laid out text. Pages already read are laid out even
@@ -520,10 +520,9 @@ fn lay_out(
         .iter()
         .filter_map(|items| {
             let info = info_of.get(&items.page)?;
-            let (w, h) = frame_size(info, Some(items));
             Some(PageText {
                 page: items.page,
-                size: [w, h],
+                height: frame_height(info, Some(items)),
                 runs: &items.runs,
             })
         })

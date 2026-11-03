@@ -45,7 +45,7 @@ pub(super) fn placed_by(id: &str) -> bool {
 /// tables and titles they place, their notes, and what the page is.
 pub(crate) struct PageCx<'p> {
     pub(super) page: u32,
-    pub(super) height: Option<f32>,
+    pub(super) height: f32,
     pub(super) cx: &'p Context<'p>,
     pub(super) drawn: &'p Drawn<'p>,
     /// What a bound or the stop cut short in the segmentation of the page (see
@@ -378,7 +378,6 @@ impl Finder<PageCx<'_>> for UnderlinedTitles {
     fn find(&mut self, page: &PageIn, p: &mut PageCx<'_>, arb: &mut InOrder) {
         // A title over a bar is a form's: a page of prose keeps its headings and paragraphs.
         if !p.geometry
-            || p.height.is_none()
             || !p.drawn.widgets.is_empty()
             || !tables::form_drawn(p.drawn.grids(), p.drawn.boxes)
         {
@@ -421,7 +420,7 @@ impl Finder<PageCx<'_>> for BoxPairs {
     }
 
     fn find(&mut self, page: &PageIn, p: &mut PageCx<'_>, arb: &mut InOrder) {
-        if !p.geometry || p.height.is_none() || !p.drawn.widgets.is_empty() {
+        if !p.geometry || !p.drawn.widgets.is_empty() {
             return;
         }
         let cx = p.cx;
@@ -484,9 +483,10 @@ impl Finder<PageCx<'_>> for UntaggedTables {
     }
 
     fn find(&mut self, page: &PageIn, p: &mut PageCx<'_>, arb: &mut InOrder) {
-        let (true, Some(height)) = (p.geometry, p.height) else {
+        if !p.geometry {
             return;
-        };
+        }
+        let height = p.height;
         let cx = p.cx;
         let stop = || time_over(cx.budget).is_err();
         // In a debug build: how often each id stands in the flow before the pass, to tell the

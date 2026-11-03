@@ -6,33 +6,31 @@
 //! body size, the heading sizes, the running headers and footers, the footer of a file of two
 //! pages and the footnote legend of each page.
 //!
-//! [`learn`] reads the pages one at a time, three times over (the running lines first, then
-//! the body size without them and without the legends, then the heading sizes against that
-//! body size), so a reader hands over one page's text at a time and never the whole file's.
+//! [`learn`] reads the pages three times over (the running lines first, then the body size
+//! without them and without the legends, then the heading sizes against that body size). It
+//! borrows the runs of each page as the reader keeps them (see [`FilePage`], [`LineRun`]):
+//! nothing of the file's text is copied.
 
-use std::borrow::Borrow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
-use crate::input::PageIn;
+use crate::input::{PageIn, TextRun};
 use crate::line::{LineRun, TextLine, ink, size_key, text_lines};
 
 mod legend;
 
-pub use legend::{
-    Legend, LegendEntry, NoteMark, RaisedRef, RefPlace, Split, find_legend, word_marks,
-};
+pub use legend::{Legend, LegendEntry, NoteMark, RaisedRef, RefPlace, Split, word_marks};
 
 /// Share of the page height at the top and the bottom where running headers and footers sit.
 /// pdflatex sets page numbers about 11 % above the bottom edge of an A4 page.
-pub const BAND: f32 = 0.18;
+pub(crate) const BAND: f32 = 0.18;
 
 /// Pages a header or footer line must repeat on. In a file of two pages, a footer line repeats
 /// on both (see [`learn`]).
-pub const REPEATS: usize = 3;
+pub(crate) const REPEATS: usize = 3;
 
 /// Lines of one header or footer sit at the same height on every page, within this many
 /// points.
-pub const Y_STEP: f32 = 4.0;
+pub(crate) const Y_STEP: f32 = 4.0;
 
 /// A line at least this many times the body size is a heading in an untagged file.
 pub const HEADING_RATIO: f32 = 1.2;
@@ -43,7 +41,7 @@ pub const HEADING_RATIO: f32 = 1.2;
 pub const HEADING_PLAIN_RATIO: f32 = 1.5;
 
 /// A heading line is shorter than this many characters.
-pub const HEADING_CHARS: usize = 120;
+pub(crate) const HEADING_CHARS: usize = 120;
 
 /// Currency words and signs that may stand after an amount.
 pub const CURRENCIES: [&str; 7] = ["EUR", "USD", "CHF", "GBP", "\u{20ac}", "$", "\u{a3}"];
@@ -109,7 +107,7 @@ pub struct FileFacts {
 
 /// The text of a line with every digit replaced, white space collapsed: the same running line
 /// on every page, whatever page number it holds.
-pub fn furniture_key(text: &str) -> String {
+pub(crate) fn furniture_key(text: &str) -> String {
     let replaced: String = text
         .chars()
         .map(|c| if c.is_ascii_digit() { '#' } else { c })
@@ -118,7 +116,7 @@ pub fn furniture_key(text: &str) -> String {
 }
 
 /// The band of a page of `height` a line stands in, if any.
-pub fn band_of<R>(line: &TextLine<'_, R>, height: f32) -> Option<Band> {
+pub(crate) fn band_of<R>(line: &TextLine<'_, R>, height: f32) -> Option<Band> {
     if height <= 0.0 || height.is_nan() {
         return None;
     }
@@ -134,7 +132,7 @@ pub fn band_of<R>(line: &TextLine<'_, R>, height: f32) -> Option<Band> {
 
 /// The band and the key of a line that may be a running line on a page of `height`: it stands
 /// in a band and has text.
-pub fn running_key<R>(line: &TextLine<'_, R>, height: f32) -> Option<(Band, String)> {
+pub(crate) fn running_key<R>(line: &TextLine<'_, R>, height: f32) -> Option<(Band, String)> {
     let b = band_of(line, height)?;
     let key = furniture_key(&line.text);
     (!key.is_empty()).then_some((b, key))
@@ -211,7 +209,7 @@ impl RunningIndex {
 
 /// Whether a line is large enough and short enough to be a heading against `body_size`: at
 /// least [`HEADING_RATIO`] times it, under [`HEADING_CHARS`] characters, with a letter or digit.
-pub fn is_heading_size<R>(line: &TextLine<'_, R>, body_size: f32) -> bool {
+pub(crate) fn is_heading_size<R>(line: &TextLine<'_, R>, body_size: f32) -> bool {
     body_size > 0.0
         && line.size >= body_size * HEADING_RATIO
         && line.text.chars().count() < HEADING_CHARS
@@ -238,7 +236,7 @@ pub fn may_head<R: LineRun>(
 /// with bold ink and goes on in plain words that are no data (`SECTION 1 (TO BE COMPLETED BY
 /// PAYEE)`). A bold label that ends in a colon before plain text is a label and its value
 /// (`Kundennummer: 00000`), and so is a bold label before a plain number or code.
-pub fn bold_led<R: LineRun>(line: &TextLine<'_, R>) -> bool {
+pub(crate) fn bold_led<R: LineRun>(line: &TextLine<'_, R>) -> bool {
     let inked: Vec<&R> = line.runs.iter().filter(|r| ink(r.text()) > 0).collect();
     let lead = inked.iter().take_while(|r| r.bold()).count();
     if lead == 0 {
@@ -267,35 +265,46 @@ pub fn data_only(text: &str) -> bool {
     digit
 }
 
+/// One page as [`learn`] reads it: its number, the height of the frame its runs are in, and
+/// its runs in line order, borrowed.
+#[derive(Debug, Clone, Copy)]
+pub struct FilePage<'a, R> {
+    pub page: u32,
+    pub height: f32,
+    pub runs: &'a [R],
+}
+
+impl<'a> FilePage<'a, TextRun> {
+    /// The text of an engine page.
+    pub fn of(page: &'a PageIn) -> FilePage<'a, TextRun> {
+        FilePage {
+            page: page.page,
+            height: page.size[1],
+            runs: &page.texts,
+        }
+    }
+}
+
 /// Learns body size, heading sizes, running headers and footers and, for an untagged file
-/// (`tagged` false), the footnote legends from every page. `pages` gives the pages of the
-/// file, in order, each time it is called; it is called three times, and only the text of a
-/// page and its height (`size[1]`, the frame of its runs) are read. `ends_in_amount` tells a
-/// line that ends in an amount, which is no heading.
+/// (`tagged` false), the footnote legends from every page of `pages`, in order.
+/// `ends_in_amount` tells a line that ends in an amount, which is no heading.
 ///
 /// A line at the foot of both pages of a file of two is a footer: a letter or an invoice of two
 /// pages has no third page to repeat it on. A letterhead at the top of both is content: the
 /// title and fields of an invoice repeat on its second page.
-pub fn learn<I, P>(
-    pages: impl Fn() -> I,
+pub fn learn<R: LineRun>(
+    pages: &[FilePage<'_, R>],
     tagged: bool,
     ends_in_amount: &dyn Fn(&str) -> bool,
-) -> FileFacts
-where
-    I: IntoIterator<Item = P>,
-    P: Borrow<PageIn>,
-{
+) -> FileFacts {
     let mut seen: HashMap<(Band, String), Vec<(f32, u32)>> = HashMap::new();
     // Texts that stand in the middle of some page are content, wherever else they stand.
     // A bare page number is not held against: numbers fill tables too.
     let mut body: HashSet<String> = HashSet::new();
     let mut body_bytes = 0usize;
-    let mut count = 0usize;
-    for p in pages() {
-        let p = p.borrow();
-        count += 1;
-        for l in text_lines(&p.texts) {
-            if let Some(key) = running_key(&l, p.size[1]) {
+    for p in pages {
+        for l in text_lines(p.runs) {
+            if let Some(key) = running_key(&l, p.height) {
                 seen.entry(key).or_default().push((l.middle(), p.page));
             } else {
                 let key = furniture_key(&l.text);
@@ -325,7 +334,7 @@ where
                 pages_at.insert(at[j].1);
                 j += 1;
             }
-            let both = count == 2 && band == Band::Bottom && pages_at.len() == 2;
+            let both = pages.len() == 2 && band == Band::Bottom && pages_at.len() == 2;
             if both && pages_at.len() < REPEATS {
                 two_page.insert(key.clone());
             }
@@ -356,15 +365,14 @@ where
         e.0 += n;
         e.1 += n as f64 * f64::from(size);
     };
-    for p in pages() {
-        let p = p.borrow();
-        let height = p.size[1];
-        let all = text_lines(&p.texts);
+    for p in pages {
+        let height = p.height;
+        let all = text_lines(p.runs);
         let bands = index.bands(&all, height, &[]);
         for (l, b) in all.iter().zip(&bands) {
             if b.is_some() && two_page_line(l, height, &two_page_keys) {
                 for r in l.runs {
-                    count_run(&mut chars, &r.text, r.size);
+                    count_run(&mut chars, r.text(), r.size());
                 }
             }
         }
@@ -401,7 +409,7 @@ where
         for (l, first) in lines.iter().zip(&starts) {
             for (k, r) in l.runs.iter().enumerate() {
                 if !in_legend.contains(&((first + k) as u32)) {
-                    count_run(&mut chars, &r.text, r.size);
+                    count_run(&mut chars, r.text(), r.size());
                 }
             }
         }
@@ -422,10 +430,9 @@ where
         })
         .unwrap_or(0.0);
     let mut sizes: Vec<i32> = Vec::new();
-    for p in pages() {
-        let p = p.borrow();
-        let all = text_lines(&p.texts);
-        let bands = index.bands(&all, p.size[1], &[]);
+    for p in pages {
+        let all = text_lines(p.runs);
+        let bands = index.bands(&all, p.height, &[]);
         for (l, b) in all.iter().zip(&bands) {
             if b.is_none() && may_head(l, body_size, ends_in_amount) {
                 sizes.push(size_key(l.size));
@@ -488,7 +495,8 @@ mod tests {
     }
 
     fn learned(pages: &[PageIn], tagged: bool) -> FileFacts {
-        learn(|| pages.iter(), tagged, &no_amount)
+        let pages: Vec<FilePage<'_, TextRun>> = pages.iter().map(FilePage::of).collect();
+        learn(&pages, tagged, &no_amount)
     }
 
     #[test]
@@ -519,6 +527,32 @@ mod tests {
         assert!(!bold_led(&text_line(&value)));
         let plain_first = [plain("Seite"), bold(" 1")];
         assert!(!bold_led(&text_line(&plain_first)));
+    }
+
+    #[test]
+    fn an_empty_file_has_no_facts() {
+        assert_eq!(learned(&[], false), FileFacts::default());
+        assert_eq!(learned(&[], true), FileFacts::default());
+        assert_eq!(learned(&[page(1, Vec::new())], false), FileFacts::default());
+    }
+
+    /// A tagged file learns its body and heading sizes as an untagged one does; only the
+    /// legends are left to its tags.
+    #[test]
+    fn a_tagged_file_has_heading_sizes() {
+        let mut runs = vec![run("Kapitel Eins", 0, 650.0, 18.0)];
+        runs.extend((1..=4).map(|k| {
+            run(
+                "die Firma liefert die bestellte Ware",
+                k,
+                600.0 - 14.0 * k as f32,
+                10.0,
+            )
+        }));
+        let facts = learned(&[page(1, runs)], true);
+        assert!((facts.body_size - 10.0).abs() < 1e-4, "{}", facts.body_size);
+        assert_eq!(facts.heading_sizes, [18.0]);
+        assert!(facts.legends.is_empty());
     }
 
     #[test]
