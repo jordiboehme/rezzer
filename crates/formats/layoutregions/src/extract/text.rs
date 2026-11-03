@@ -27,7 +27,8 @@ pub struct TextCx<'a, R> {
     /// Whether a text ends in an amount (`Gesamtbetrag 1.234,56 EUR`).
     pub ends_in_amount: &'a dyn Fn(&str) -> bool,
     /// The block of its own each line stands in, if the reader read one (a cell of a row of
-    /// fields read cell by cell): a line goes on the line before it only in the same block.
+    /// fields read cell by cell), one per line of the lines walked: a line goes on the line
+    /// before it only in the same block.
     pub block: &'a [Option<usize>],
 }
 
@@ -64,6 +65,7 @@ pub fn next_block<R: LineRun>(
     open_list: bool,
     cx: &TextCx<'_, R>,
 ) -> (TextBlock, usize) {
+    debug_assert_eq!(cx.block.len(), lines.len(), "one block key per line");
     let l = &lines[i];
     if l.text.is_empty() {
         return (TextBlock::Empty, i + 1);

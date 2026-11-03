@@ -275,3 +275,89 @@ fn extractors_return_every_prim_once() {
         ]
     );
 }
+
+/// The blocks of `runs` with no blocks of their own, headings from 11 points up.
+fn blocks_of(runs: &[TextRun]) -> Vec<(TextBlock, Range<usize>)> {
+    let lines = text_lines(runs);
+    let block = vec![None; lines.len()];
+    let heading = |l: &TextLine<'_, TextRun>| (l.size >= 11.0).then_some(2);
+    let cx = TextCx {
+        body_size: 10.0,
+        heading_level: &heading,
+        ends_in_amount: &no_amount,
+        block: &block,
+    };
+    walk(&lines, &cx)
+}
+
+/// The short lines of an address at one left edge are one paragraph with a break before each
+/// line after the first.
+#[test]
+fn an_address_keeps_its_lines() {
+    let runs = vec![
+        run("Muster GmbH", 0, 700.0, 10.0),
+        run("Musterweg 1", 1, 688.0, 10.0),
+        run("12345 Musterstadt", 2, 676.0, 10.0),
+    ];
+    assert_eq!(
+        blocks_of(&runs),
+        [(
+            TextBlock::Paragraph {
+                breaks: vec![(0, 1), (0, 2)]
+            },
+            0..3
+        )]
+    );
+}
+
+/// Bold lines a little larger than the body that are the lines of an address are no heading:
+/// a paragraph with its breaks.
+#[test]
+fn a_small_bold_address_is_no_heading() {
+    let bold = |text: &str, line: u32, y: f32| TextRun {
+        bold: true,
+        ..run(text, line, y, 12.0)
+    };
+    let runs = vec![
+        bold("Muster GmbH", 0, 700.0),
+        bold("Musterweg 1", 1, 686.0),
+        bold("12345 Musterstadt", 2, 672.0),
+    ];
+    assert_eq!(
+        blocks_of(&runs),
+        [(
+            TextBlock::Heading {
+                level: 2,
+                demoted: true,
+                breaks: vec![(0, 1), (0, 2)]
+            },
+            0..3
+        )]
+    );
+}
+
+/// A bold title under plain lines, farther from them than their pitch, ends their paragraph
+/// though it is near enough to go on it.
+#[test]
+fn a_bold_title_under_a_block_stands_alone() {
+    let runs = vec![
+        run("Muster GmbH", 0, 700.0, 10.0),
+        run("Musterweg 1", 1, 690.0, 10.0),
+        TextRun {
+            bold: true,
+            ..run("Rechnung", 2, 677.0, 10.0)
+        },
+    ];
+    assert_eq!(
+        blocks_of(&runs),
+        [
+            (
+                TextBlock::Paragraph {
+                    breaks: vec![(0, 1)]
+                },
+                0..2
+            ),
+            (TextBlock::Paragraph { breaks: Vec::new() }, 2..3),
+        ]
+    );
+}
