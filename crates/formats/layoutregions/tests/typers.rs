@@ -664,6 +664,44 @@ impl Tree {
     }
 }
 
+impl Tree {
+    /// Every typer's answer for the smallest segment of the tree that holds the text of
+    /// every line of `lines` and no text of other lines.
+    fn typed_holding(&self, lines: &[u32]) -> Vec<Typed> {
+        self.with(|view| {
+            let lines_of = |s: &Segment| -> Vec<u32> {
+                let mut l: Vec<u32> = s
+                    .prims
+                    .iter()
+                    .filter_map(|p| match p {
+                        PrimId::Text(i) => Some(view.page.texts[*i as usize].line),
+                        _ => None,
+                    })
+                    .collect();
+                l.sort_unstable();
+                l.dedup();
+                l
+            };
+            let seg = view
+                .segs
+                .all
+                .iter()
+                .filter(|s| lines_of(s) == lines)
+                .max_by_key(|s| s.prims.len())
+                .unwrap_or_else(|| {
+                    let all: Vec<(Source, Vec<u32>)> = view
+                        .segs
+                        .all
+                        .iter()
+                        .map(|s| (s.source, lines_of(s)))
+                        .collect();
+                    panic!("no segment of exactly {lines:?}: {all:?}")
+                });
+            all_typed(view, seg)
+        })
+    }
+}
+
 fn all_typed(view: &PageView<'_>, seg: &Segment) -> Vec<Typed> {
     TYPERS
         .iter()
@@ -1110,7 +1148,7 @@ fn table_pair_and_totals_scores_are_scale_free() {
 fn worst_case_margins_of_tables_pairs_and_totals() {
     use layoutregions::typers::pairs::{
         LABEL_BOXES_TOUCH, LABEL_COLON, LABEL_FIELD_CELLS, LABEL_FIELDS, LABEL_KEY_VALUES,
-        LABEL_LINE_PAIRS, LABEL_STYLE, LABEL_VALUE_SHAPE,
+        LABEL_KNOWN_STYLE, LABEL_LINE_PAIRS, LABEL_STRIP_FIELDS, LABEL_STYLE, LABEL_VALUE_SHAPE,
     };
     use layoutregions::typers::table::{
         PARAGRAPH_PROSE_CELLS, TABLE_HEADER, TABLE_READING, TABLE_SHARED, TOTALS_UNDER,
@@ -1157,6 +1195,20 @@ fn worst_case_margins_of_tables_pairs_and_totals() {
             LABEL_LINE_PAIRS + LABEL_COLON.min(LABEL_VALUE_SHAPE),
             paragraph,
         ),
+        (
+            "line pairs over a large bold heading that keeps its lines",
+            LABEL_LINE_PAIRS + LABEL_COLON.min(LABEL_VALUE_SHAPE),
+            HEADING_SIZE_LARGE + HEADING_BOLD + HEADING_TITLE_LINES,
+        ),
+        // A box whose label differs in weight only, read by a seeded style, alone.
+        (
+            "lone weight-only box over paragraph",
+            LABEL_FIELDS + LABEL_STYLE + LABEL_KNOWN_STYLE,
+            paragraph,
+        ),
+        // Fields in strips between rules (Task 18b, round 2).
+        ("strip fields over a table", LABEL_STRIP_FIELDS, table),
+        ("strip fields over paragraph", LABEL_STRIP_FIELDS, paragraph),
         // Refused readings give nothing: a table on field cells (see
         // `field_cells_refuse_a_table`), key values or totals, and label/value pairs on totals
         // (see `amounts_under_money_columns_are_totals`).
@@ -1391,13 +1443,11 @@ fn the_seed_lines_are_pairs_themselves() {
         assert!(ids(pairs).contains(&"label_value.key_values"), "{typed:#?}");
     }
     // The seeded box alone (no box beside it) leads the paragraph its two lines join into
-    // by 50 only (650 against 600 with `paragraph.joins` at 300): no clear margin, so a lone
-    // weight-only box stays Spatial (its two lines as laid out). Task 18b counted the class
-    // (one box on the public forms, none on the corpus or the generated pages).
+    // by the margin: its seeded style is the evidence (950 against 600).
     let typed = seeded(true).typed(&|_, s| s.source == Source::Box);
     let (kind, lead) = winner(&typed);
     assert_eq!(kind, Kind::LabelValue, "{typed:#?}");
-    assert_eq!(lead, 50, "{typed:#?}");
+    assert!(lead >= MARGIN, "{typed:#?}");
 }
 
 #[test]
@@ -2124,4 +2174,163 @@ fn the_walk_of_a_segment_sees_the_lines_past_its_edge() {
         ids(of(&typed, Kind::Paragraph)).contains(&"paragraph.lines_apart"),
         "{typed:#?}"
     );
+}
+
+/// Horizontal rules from `x0` to `x1` at each of `ys`.
+fn h_rules(x0: f32, x1: f32, ys: &[f32]) -> Vec<RuleIn> {
+    ys.iter().map(|&y| rule(x0, y, x1, y)).collect()
+}
+
+/// Strips between rules: in each, small labels over their values in columns.
+fn strips_page(strips: &[[(&str, &str); 3]], k: f32) -> Tree {
+    let xs = [72.0, 180.0, 288.0];
+    let mut texts = Vec::new();
+    let mut ys = vec![700.0 * k];
+    for (s, strip) in strips.iter().enumerate() {
+        let top = 700.0 - 24.0 * s as f32;
+        for (c, (label, value)) in strip.iter().enumerate() {
+            texts.push(run(
+                label,
+                xs[c] * k,
+                (top - 8.0) * k,
+                6.2 * k,
+                100 + 2 * s as u32,
+            ));
+            if !value.is_empty() {
+                texts.push(run(
+                    value,
+                    xs[c] * k,
+                    (top - 19.0) * k,
+                    9.2 * k,
+                    101 + 2 * s as u32,
+                ));
+            }
+        }
+        ys.push((top - 24.0) * k);
+    }
+    texts.sort_by_key(|r| r.line);
+    let mut page = sheet(texts, h_rules(70.0 * k, 400.0 * k, &ys));
+    for r in &mut page.texts {
+        if r.line < 100 || r.line >= 900 {
+            r.x *= k;
+            r.y *= k;
+            r.size *= k;
+            r.w *= k;
+            r.h *= k;
+        }
+    }
+    Tree { page }
+}
+
+/// Task 18b round 2: strips of small labels over their values between rules, without
+/// dividers, read as fields, ahead of a table and a paragraph by the margin, at every scale;
+/// an empty field keeps its label. A value with no label in its strip reads no fields.
+#[test]
+fn fields_in_strips_between_rules_are_label_value() {
+    let strips = [
+        [
+            ("Personalnummer", "00123"),
+            ("Eintritt", "01.01.2020"),
+            ("Klasse", "3"),
+        ],
+        [("Kasse", "Muster BKK"), ("Austritt", ""), ("Kinder", "0,5")],
+    ];
+    for k in [0.75f32, 1.0, 1.5] {
+        let tree = strips_page(&strips, k);
+        for strip in [[100, 101], [102, 103]] {
+            let typed = tree.typed_holding(&strip);
+            let pairs = of(&typed, Kind::LabelValue);
+            assert!(
+                ids(pairs).contains(&"label_value.strip_fields"),
+                "at {k}x: {typed:#?}"
+            );
+            assert!(find(&typed, Kind::Table).is_none(), "at {k}x: {typed:#?}");
+            let (kind, lead) = winner(&typed);
+            assert_eq!(kind, Kind::LabelValue, "at {k}x");
+            assert!(lead >= MARGIN, "at {k}x: {typed:#?}");
+        }
+    }
+    // A value in the label size alone in a strip beside a field: no strip reading.
+    let strips = [[
+        ("Personalnummer", "00123"),
+        ("Beispielwert", ""),
+        ("Eintritt", "01.01.2020"),
+    ]];
+    let mut tree = strips_page(&strips, 1.0);
+    for r in &mut tree.page.texts {
+        if r.text == "Beispielwert" {
+            r.size = 9.2;
+            r.y -= 11.0;
+            r.line = 101;
+        }
+    }
+    tree.page.texts.sort_by_key(|r| r.line);
+    let typed = tree.typed(&text_of_lines(vec![100, 101]));
+    assert!(
+        find(&typed, Kind::LabelValue)
+            .is_none_or(|t| !ids(t).contains(&"label_value.strip_fields")),
+        "{typed:#?}"
+    );
+}
+
+/// Task 18b round 2: lines that alternate between values and their smaller labels (values
+/// over labels) are no rows of a table.
+#[test]
+fn alternating_labels_and_values_are_no_table() {
+    let rows: [(&str, &str, f32); 4] = [
+        ("Erika Mustermann", "Musterstadt", 9.2),
+        ("Name", "Ort", 6.2),
+        ("Musterweg 1", "12", 9.2),
+        ("Strasse", "Hausnr", 6.2),
+    ];
+    let mut texts = Vec::new();
+    for (k, (a, b, size)) in rows.iter().enumerate() {
+        let y = 650.0 - 9.0 * k as f32;
+        texts.push(run(a, 72.0, y, *size, 100 + k as u32));
+        texts.push(run(b, 250.0, y, *size, 100 + k as u32));
+    }
+    let tree = Tree {
+        page: sheet(texts, Vec::new()),
+    };
+    let typed = tree.typed_holding(&[100, 101, 102, 103]);
+    assert!(find(&typed, Kind::Table).is_none(), "{typed:#?}");
+}
+
+/// Task 18b round 2: lines in cells never join into a paragraph, and the pieces of a row in a
+/// ruled grid are cells, not a label and its value: the grid reads as a table.
+#[test]
+fn cells_are_no_paragraph_and_no_pair() {
+    let rows: [&[&str]; 2] = [
+        &["Steuer A", "1.000,00", "10 %"],
+        &["Steuer B", "500,00", "5 %"],
+    ];
+    let tree = Tree {
+        page: sheet(
+            rows_at(&rows, &[72.0, 200.0, 320.0], 600.0, 9.2, 100),
+            Vec::new(),
+        ),
+    };
+    let typed = tree.typed(&text_of_lines(vec![100, 101]));
+    assert!(find(&typed, Kind::Paragraph).is_none(), "{typed:#?}");
+    let xs = [72.0, 220.0, 370.0];
+    let mut texts = Vec::new();
+    for (k, row) in [["Art", "Betrag"], ["Gehalt", "1.234,56"]]
+        .iter()
+        .enumerate()
+    {
+        for (c, t) in row.iter().enumerate() {
+            texts.push(run(
+                t,
+                xs[c] + 3.0,
+                689.8 - 14.0 * k as f32,
+                9.2,
+                100 + k as u32,
+            ));
+        }
+    }
+    let tree = Tree {
+        page: sheet(texts, grid_rules(&xs, &[700.0, 686.0, 672.0])),
+    };
+    let typed = tree.typed(&text_of_lines(vec![101]));
+    assert!(find(&typed, Kind::LabelValue).is_none(), "{typed:#?}");
 }

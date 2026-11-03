@@ -243,6 +243,19 @@ impl SegText {
     }
 }
 
+/// Whether a segment that holds `seg` (its parents up to the page) reads as a table.
+fn in_a_table(view: &PageView<'_>, seg: &Segment) -> bool {
+    let mut up = seg.parent;
+    // The readings are cached per segment: a second look does no work.
+    while let Some(p) = up.and_then(|p| view.segs.all.get(p.0 as usize)) {
+        if super::table::type_table(view, p).is_some() {
+            return true;
+        }
+        up = p.parent;
+    }
+    false
+}
+
 /// A stop closes an abbreviation when the word before it has at most this many letters
 /// (`Nr.`, `Std.`, `Pos.`).
 const ABBREVIATION_LETTERS: usize = 4;
@@ -265,7 +278,8 @@ pub(crate) fn title_words(text: &str) -> bool {
 }
 
 /// Paragraph: the walk reads every line as paragraphs, or as lines of a heading size that read
-/// as a paragraph. Signals: the lines are set in a text size of the page or the body size
+/// as a paragraph; lines in cells (pieces apart by a cell gap) only one at a time and outside
+/// a segment that reads as a table, unless they read as prose across them. Signals: the lines are set in a text size of the page or the body size
 /// (`paragraph.text_size`, the least evidence), lines go on one another (`paragraph.joins`),
 /// they read as sentences (`paragraph.sentences`), and the reason a heading's lines read as a
 /// paragraph (one signal per [`Demotion`]).
@@ -309,6 +323,22 @@ pub fn type_paragraph(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
             )
         });
         if t.blocks.is_empty() || !(all || prose.is_some()) {
+            return None;
+        }
+        // Lines that stand in pieces apart by a cell gap are cells: a paragraph never joins
+        // such lines, and never reads a line of them where a segment that holds it reads as a
+        // table (a row of a table whose reading is blocked keeps its cells as laid out),
+        // unless they read as prose across them.
+        let joins_cells = t
+            .blocks
+            .iter()
+            .any(|b| matches!(b, Read::Paragraph { whole: false, lines, .. } if *lines >= 2));
+        let row = t
+            .blocks
+            .iter()
+            .any(|b| matches!(b, Read::Paragraph { whole: false, .. }))
+            && in_a_table(view, seg);
+        if (joins_cells || row) && prose.is_none() {
             return None;
         }
         let mut signals = Vec::new();

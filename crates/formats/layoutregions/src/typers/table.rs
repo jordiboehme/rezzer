@@ -37,11 +37,12 @@ use crate::extract::table::ruled::{
 use crate::extract::table::sections::sections;
 use crate::extract::table::{
     CONTENTS, CROSSES_LINES, Cells, EMPTY_CELLS, LONG_TEXT, MAX_SQUARES, NO_ROWS_AND_COLUMNS,
-    ROWS_ALIKE, RUNS_ON, SHORT_CELL, TableOut, header_of, middle,
+    ROWS_ALIKE, RUNS_ON, RunRange, SHORT_CELL, TableOut, header_of, middle,
 };
 use crate::input::{PrimId, TextRun};
 use crate::line::LineRun;
 use crate::region::{Bounds, Kind, Signal};
+use crate::segment::cut::SIZE_STEP;
 use crate::segment::drawn::{Grids, Line, SNAP, grid_frame};
 use crate::segment::{Segment, Source};
 use crate::typers::{Lined, PageView, Typed, lined, seg_runs, signal, text_alone};
@@ -79,6 +80,11 @@ const FIELD_CELLS: &str = "its cells each hold a label and its value";
 const KEY_VALUE_LINES: &str = "its lines are labels and values";
 /// Why two lines of titles over their values are no table.
 const TITLE_LINES: &str = "its lines are titles over their values";
+/// A refusal: the lines are fields in strips between rules (see
+/// [`super::pairs::strip_fields`]).
+const FIELD_STRIPS: &str = "its lines are fields in strips between rules";
+/// A refusal: the lines alternate between two styles (see [`alternating`]).
+const ALTERNATING: &str = "its lines alternate between labels and values";
 /// A refusal: the lines are blocks side by side (see [`address_columns`]).
 const SIDE_BLOCKS: &str = "its columns are blocks side by side, each a block of its own";
 /// Why lines read as totals under a table are no table of their own.
@@ -669,6 +675,34 @@ fn banded(view: &PageView<'_>, seg: &Segment, band: &Segment) -> Find {
     }
 }
 
+/// Lines a block of alternating labels and values holds at least.
+const ALTERNATING_LINES: usize = 4;
+
+/// Whether the lines `ranges` of `runs` alternate between two styles, each line in another
+/// style than the line before it (a size step, see [`SIZE_STEP`], or another weight), the
+/// style of a line being its run with the most ink, over [`ALTERNATING_LINES`] lines or more:
+/// lines of labels between lines of their values (values over labels, labels over values),
+/// which rows of a table never are (a table's body rows share one style; a header or a total
+/// changes it once).
+fn alternating(runs: &[&TextRun], ranges: &[RunRange]) -> bool {
+    if ranges.len() < ALTERNATING_LINES {
+        return false;
+    }
+    let style = |l: &RunRange| {
+        runs[l.start..l.end]
+            .iter()
+            .max_by_key(|r| crate::line::ink(&r.text))
+            .map(|r| (r.size, r.bold))
+    };
+    let styles: Vec<(f32, bool)> = ranges.iter().filter_map(style).collect();
+    let differ = |a: (f32, bool), b: (f32, bool)| {
+        a.1 != b.1 || (a.0.min(b.0) > 0.0 && a.0.max(b.0) >= SIZE_STEP * a.0.min(b.0))
+    };
+    styles.len() == ranges.len()
+        && styles.windows(2).all(|w| differ(w[0], w[1]))
+        && styles.windows(3).all(|w| !differ(w[0], w[2]))
+}
+
 /// The reading of the lines of a segment without drawn parts (see [`grid_cells`]), after the
 /// rules that read them otherwise first: a paragraph set full, labels and values, titles over
 /// one row of values; then a figure caption next to them and what the area says. `given`: a
@@ -691,6 +725,12 @@ fn lines(view: &PageView<'_>, seg: &Segment, given: bool) -> Find {
     if !given {
         if set_full(&runs, &pieces, &ranges) {
             return refused(Speaks::Paragraph, SET_FULL);
+        }
+        if super::pairs::strip_fields(view, seg).is_some() {
+            return refused(Speaks::LabelValue, FIELD_STRIPS);
+        }
+        if alternating(&runs, &ranges) {
+            return refused(Speaks::LabelValue, ALTERNATING);
         }
         let off = vec![false; ranges.len()];
         if let KeyValues::Rows(_) = key_values(&runs, &ranges, 0, ranges.len(), &pieces, &off) {
