@@ -14,7 +14,6 @@
 
 use std::collections::{HashMap, HashSet};
 
-use layoutregions::segment::Segments;
 use layoutregions::{
     Bounds, Candidate, Certainty, Finder, InOrder, Kind, Offer, PageIn, PrimId, Score, Signal,
 };
@@ -49,9 +48,9 @@ pub(crate) struct PageCx<'p> {
     pub(super) height: Option<f32>,
     pub(super) cx: &'p Context<'p>,
     pub(super) drawn: &'p Drawn<'p>,
-    /// The segments of the page (`layoutregions::segment::segment_drawn` on its drawn
-    /// structure): where the table detectors look.
-    pub(super) segments: &'p Segments,
+    /// What a bound or the stop cut short in the segmentation of the page (see
+    /// [`UntaggedTables`]).
+    pub(super) segment_issues: Vec<layoutregions::Issue>,
     pub(super) flow: Flow,
     pub(super) placed: Vec<Placed>,
     pub(super) notes: Vec<(String, LossReason, Severity)>,
@@ -488,7 +487,17 @@ impl Finder<PageCx<'_>> for UntaggedTables {
         } else {
             HashMap::new()
         };
-        let found = tables::untagged(p.page, &mut p.flow, p.drawn, p.segments, height, &stop);
+        // The segments of the page, once and only where the geometric detectors run, on the
+        // drawn structure the text pass read the page in (its boxes are those its runs were
+        // read in): where the table detectors look.
+        let segments = layoutregions::segment::segment_drawn(
+            page,
+            p.drawn.structure,
+            &layoutregions::Limits::default(),
+            &stop,
+        );
+        let found = tables::untagged(p.page, &mut p.flow, p.drawn, &segments, height, &stop);
+        p.segment_issues = segments.issues;
         let cut: HashSet<u32> = if cfg!(debug_assertions) {
             counts(
                 p.flow

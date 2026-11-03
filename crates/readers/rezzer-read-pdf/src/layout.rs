@@ -1056,18 +1056,13 @@ fn page_blocks_until(
             p
         }
     };
-    let limits = layoutregions::Limits::default();
-    // The segments of the page, once, on the drawn structure the text pass read the page in
-    // (its boxes are those its runs were read in): where the table detectors look.
-    let segments =
-        layoutregions::segment::segment_drawn(&engine_in, drawn.structure, &limits, stop);
-    let mut arb = InOrder::new(&engine_in, &limits);
+    let mut arb = InOrder::new(&engine_in, &layoutregions::Limits::default());
     let mut pcx = PageCx {
         page,
         height,
         cx,
         drawn,
-        segments: &segments,
+        segment_issues: Vec::new(),
         flow,
         placed: Vec::new(),
         notes: Vec::new(),
@@ -1105,6 +1100,7 @@ fn page_blocks_until(
         flow,
         placed,
         mut notes,
+        segment_issues,
         legend,
         footers,
         mut built,
@@ -1302,22 +1298,6 @@ fn page_blocks_until(
     // text. Where the page stopped too (the time limit stops the blocks as well), the page's
     // own stop loss says what is not read.
     let time_named = stopped && built.stop.is_none() && !engine_in.texts.is_empty();
-    // What a bound of the segmentation left uncut. A stop of it is the time limit, which the
-    // notes of the detectors or of the page name already when they stopped too.
-    for issue in &segments.issues {
-        if issue.kind == layoutregions::IssueKind::Stopped && (time_named || built.stop.is_some()) {
-            continue;
-        }
-        notes.push((
-            format!(
-                "the regions of page {page} are found only in part: {}; the text there is read \
-                 as it stands",
-                issue.what
-            ),
-            LossReason::Limit,
-            Severity::Info,
-        ));
-    }
     if time_named {
         notes.push((
             format!(
@@ -1333,6 +1313,17 @@ fn page_blocks_until(
     // rest of such a page gets its region in a later step).
     if cfg!(debug_assertions) && regions.issues.is_empty() && built.stop.is_none() {
         finders::check_cover(&engine_in, &regions, &repeats);
+    }
+    // What a bound of the segmentation cut short travels with the page's regions. The page
+    // says no loss for it: the ruled detector then reads every grid (see
+    // `tables::ruled_groups`) and the detector without rules reads the whole page, so no
+    // read is lost. A stop of it is the time limit the page names once.
+    for issue in segment_issues {
+        let said = issue.kind == layoutregions::IssueKind::Stopped
+            && regions.issues.iter().any(|i| i.kind == issue.kind);
+        if !said {
+            regions.issues.push(issue);
+        }
     }
     for r in &mut regions.regions {
         let by = r.signals.first().map(|s| s.id);
@@ -4159,10 +4150,6 @@ mod tests {
         );
     }
 
-    /// A stop before the first detector runs none of them: the running footer of a file of
-    /// two pages, which the furniture finder takes without the stop, is still laid out as
-    /// text, every run is in a region of its own block, and a limit note says the detectors
-    /// looked only in part.
     /// A run of a table cell at `x`, `y`, 8 points, bold or not.
     fn cell_run(text: &str, x: f32, y: f32, line: u32, bold: bool) -> Run {
         Run {
@@ -4293,45 +4280,113 @@ mod tests {
             boxes: &boxes,
             ..NOTHING_DRAWN
         };
-        one_tax_table(&laid_page(tax_table(false), &drawn));
+        let runs = tax_table(false);
+        let page = engine::page_in(
+            &crate::text::PageItems::default(),
+            &runs,
+            &drawn,
+            [595.0, 842.0],
+        );
+        let s =
+            layoutregions::segment::segment_drawn(&page, &structure, &Default::default(), &|| {
+                false
+            });
+        let cells: Vec<_> = s
+            .all
+            .iter()
+            .filter(|g| g.source == layoutregions::segment::Source::Box)
+            .collect();
+        assert_eq!(cells.len(), 4, "each header cell is a box segment");
+        one_tax_table(&laid_page(runs, &drawn));
     }
 
     #[test]
-    fn a_segment_limit_reaches_the_page_notes() {
-        // 70 boxes drawn one in the other, a line of text in the innermost: the segments nest
-        // deeper than their bound, which the page says.
+    fn a_segment_limit_loses_no_read() {
+        // 70 boxes drawn one in the other, and in the innermost a ruled grid of three rows and
+        // two columns: the segments nest deeper than their bound, so the grid has no segment.
+        // The ruled detector still reads it, the bound travels with the page's regions, and
+        // the page says no loss, as nothing is lost.
         let boxes: Vec<[f32; 4]> = (0..70)
             .map(|k| {
                 let d = 2.5 * k as f32;
                 [20.0 + d, 20.0 + d, 575.0 - d, 820.0 - d]
             })
             .collect();
-        let structure = crate::regions::structure_in_frame(&[], &boxes);
+        let line = |x0: f32, y0: f32, x1: f32, y1: f32| Rule {
+            x0,
+            y0,
+            x1,
+            y1,
+            kind: crate::tables::RuleKind::Line,
+        };
+        let mut rules = Vec::new();
+        for y in [400.0, 420.0, 440.0, 460.0] {
+            rules.push(line(210.0, y, 390.0, y));
+        }
+        for x in [210.0, 300.0, 390.0] {
+            rules.push(line(x, 400.0, x, 460.0));
+        }
+        let structure = crate::regions::structure_in_frame(&rules, &boxes);
         let drawn = Drawn {
+            rules: &rules,
             structure: &structure,
             boxes: &boxes,
             ..NOTHING_DRAWN
         };
-        let line = Run {
-            x: 250.0,
-            ..run("Muster GmbH", 0, 420.0, 10.0)
-        };
-        let laid = laid_page(vec![line], &drawn);
-        let limits: Vec<&str> = laid
-            .notes
-            .iter()
-            .filter(|n| n.1 == LossReason::Limit)
-            .map(|n| n.0.as_str())
-            .collect();
-        assert_eq!(limits.len(), 1, "{:?}", laid.notes);
-        assert!(limits[0].contains("page 1"), "{}", limits[0]);
+        let rows = [
+            ["Art", "Betrag"],
+            ["Steuer A", "100,00"],
+            ["Steuer B", "140,00"],
+        ];
+        let mut runs = Vec::new();
+        for (k, row) in rows.iter().enumerate() {
+            let y = 446.0 - 20.0 * k as f32;
+            runs.push(cell_run(row[0], 214.0, y, k as u32, false));
+            runs.push(cell_run(row[1], 304.0, y, k as u32, false));
+        }
+        let page = engine::page_in(
+            &crate::text::PageItems::default(),
+            &runs,
+            &drawn,
+            [595.0, 842.0],
+        );
+        let s =
+            layoutregions::segment::segment_drawn(&page, &structure, &Default::default(), &|| {
+                false
+            });
         assert!(
-            limits[0].contains("nest deeper than 64 levels"),
-            "{}",
-            limits[0]
+            !s.all
+                .iter()
+                .any(|g| matches!(g.source, layoutregions::segment::Source::Grid { .. })),
+            "the grid lies past the bound"
+        );
+        let laid = laid_page(runs, &drawn);
+        let tables = tables_of(&laid);
+        assert_eq!(tables.len(), 1, "{:?}", kinds(&laid.blocks));
+        assert_eq!(
+            tables[0].1,
+            ["Art", "Betrag", "Steuer A", "100,00", "Steuer B", "140,00"]
+        );
+        assert!(
+            laid.notes.iter().all(|n| n.1 != LossReason::Limit),
+            "{:?}",
+            laid.notes
+        );
+        assert!(
+            laid.regions
+                .issues
+                .iter()
+                .any(|i| i.kind == layoutregions::IssueKind::Limit
+                    && i.what.contains("nest deeper than 64 levels")),
+            "{:?}",
+            laid.regions.issues
         );
     }
 
+    /// A stop before the first detector runs none of them: the running footer of a file of
+    /// two pages, which the furniture finder takes without the stop, is still laid out as
+    /// text, every run is in a region of its own block, and a limit note says the detectors
+    /// looked only in part.
     #[test]
     fn a_stop_before_the_first_finder_keeps_all_text() {
         let runs = vec![

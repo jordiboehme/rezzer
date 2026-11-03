@@ -306,6 +306,87 @@ fn a_boxed_column_beside_a_section_stays_apart() {
     assert!(!side_noted(&out), "{:?}", found_by(&out));
 }
 
+/// One drawn box of one field (borders at 40 and 400, rules at 700 and 660, no column
+/// rules) with a column of totals 6 points to its right at x 406 to 480, ruled at `rules`:
+/// a strip titled "Af" on the box's label baseline over the amount of the value line, and a
+/// strip below with the total label "Ag" over its amount.
+fn box_with_totals(rules: &[f32]) -> FormPage {
+    let mut page = hanging_section(
+        &[],
+        &["Aa"],
+        vec![
+            columns_line(675.0, &[(1, "Muster"), (66, "1.234,56")]),
+            columns_line(636.0, &[(68, "99,99")]),
+        ],
+    );
+    for &y in rules {
+        page.template += &bar_h(406.0, 480.0, y, 0.48);
+    }
+    page.template += &bold(410.0, 691.0, 6.66, "Af");
+    page.template += &bold(410.0, 650.0, 6.66, "Ag");
+    page
+}
+
+/// A column of totals beside a single drawn box stands beside it as beside a section of a
+/// grid: the total under the box's row pairs with its amount, and the column's first strip
+/// joins the box.
+#[test]
+fn a_column_of_totals_beside_a_single_box_joins_it() {
+    let out = read(&print_form(
+        &[box_with_totals(&[700.0, 660.0, 630.0])],
+        "",
+        "",
+    ));
+    let found = read_tables(&out);
+    assert!(side_noted(&out), "{found:#?} {:?}", found_by(&out));
+    assert_eq!(found, [[["Ag", "99,99"]]], "{found:#?}");
+    // The strip on the box's label baseline joins the box: its title and amount are not
+    // paired as a row of fields.
+    let text = all_text(&out);
+    for t in ["Aa", "Muster", "Af", "1.234,56"] {
+        assert!(text.contains(t), "{t} in {text}");
+    }
+}
+
+/// A strip that joins a single drawn box (its title on the box's label baseline, ruled at
+/// the box's top and bottom) is one more column of it: the box and the strip are a header
+/// band, which keeps the value lines under it apart from any table across it.
+#[test]
+fn a_strip_beside_a_single_box_joins_it() {
+    // Courier at 9.5 pt is 5.7 points a character: the box ends in the spaces after
+    // character 13 of the value lines, the strip holds the amounts from character 15 on.
+    let ch = 0.6 * 9.5;
+    let right = 40.0 + 13.5 * ch;
+    let mut template = boxed(36.0, 700.0, right - 36.0, 12.0);
+    template += &label(38.0, 703.0, 6.0, "Text");
+    for y in [700.0, 712.0] {
+        template += &bar_h(right + 5.0, 200.0, y, 0.48);
+    }
+    template += &label(right + 7.0, 703.0, 6.0, "Betrag");
+    let lines = ["Gehalt           1.111,11", "Zulage              22,22"];
+    let page = FormPage {
+        template,
+        lines: lines
+            .iter()
+            .enumerate()
+            .map(|(k, t)| DataLine {
+                y: 688.0 - 11.4 * k as f32,
+                text: (*t).to_string(),
+            })
+            .collect(),
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    // The band of the box and the strip (two titles) heads no table of its own, and the
+    // lines under it are no table across it: they stay text as they read before the
+    // segmentation (Task 9 fix round 1). Whether they are a table of the band is for typing.
+    assert_eq!(read_tables(&out), Vec::<Vec<Vec<String>>>::new());
+    let text = all_text(&out);
+    for t in ["Text", "Betrag", "Gehalt", "1.111,11", "Zulage", "22,22"] {
+        assert!(text.contains(t), "{t} in {text}");
+    }
+}
+
 /// Whether the read says a column of totals joined a table.
 pub(crate) fn side_noted(out: &ReadOutcome) -> bool {
     found_by(out)

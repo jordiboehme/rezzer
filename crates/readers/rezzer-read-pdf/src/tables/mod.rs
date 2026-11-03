@@ -386,10 +386,16 @@ pub(crate) fn table_areas(segments: &Segments) -> Vec<&Segment> {
         .collect()
 }
 
-/// For each group of `grids`, whether the page's segments hold it as a grid
-/// ([`Source::Grid`]): the grids the ruled detector reads. A group of one cell is a box, and
-/// a grid a bound of the segmentation left uncut is no segment (its issue names it).
-fn segment_grids(grids: &Grids, segments: &Segments) -> Vec<bool> {
+/// For each group of `grids`, whether the ruled detector reads it: a grid of two cells or
+/// more that the page's segments hold as a grid ([`Source::Grid`]), and every group of one
+/// cell. A box is no grid to the segmentation, but a column of totals or a strip beside it
+/// joins it as a section. Where a bound or the stop cut the segmentation short (an issue says
+/// so), every group is read, as the ruled detector has its own bounds: no grid is lost to the
+/// segmentation's.
+fn ruled_groups(grids: &Grids, segments: &Segments) -> Vec<bool> {
+    if !segments.issues.is_empty() {
+        return vec![true; grids.groups.len()];
+    }
     let mut frames: Vec<(Bounds, u32, u32)> = segments
         .all
         .iter()
@@ -403,7 +409,7 @@ fn segment_grids(grids: &Grids, segments: &Segments) -> Vec<bool> {
         .groups
         .iter()
         .map(|group| {
-            drawn::grid_frame(grids, group).is_some_and(|f| {
+            drawn::grid_frame(grids, group).is_none_or(|f| {
                 let lo = frames.partition_point(|g| g.0.x0 < f.0.x0);
                 frames[lo..]
                     .iter()
@@ -418,7 +424,7 @@ fn segment_grids(grids: &Grids, segments: &Segments) -> Vec<bool> {
 /// grids of drawn rules, then white space gutters in the text left. Their runs are taken out
 /// of `flow`. `height` is the page height; text in other directions is never in a table.
 /// `segments` are the page's segments: the grids the ruled detector reads are theirs (see
-/// [`segment_grids`]), the detector without rules reads their [`table_areas`].
+/// [`ruled_groups`]), the detector without rules reads their [`table_areas`].
 pub(crate) fn untagged(
     page: u32,
     flow: &mut Flow,
@@ -441,9 +447,7 @@ pub(crate) fn untagged(
     if !drawn.lines_unsearched {
         found.ends = end_rules(drawn.rules);
         let grids = drawn.grids();
-        let segmented = grids
-            .map(|g| segment_grids(g, segments))
-            .unwrap_or_default();
+        let segmented = grids.map(|g| ruled_groups(g, segments)).unwrap_or_default();
         ruled::ruled(
             page,
             flow,
@@ -871,5 +875,103 @@ mod tests {
         assert!(planned(layoutregions::Kind::LabelValue, None).is_pairs());
         assert!(!planned(layoutregions::Kind::Table, None).is_pairs());
         assert!(!planned(layoutregions::Kind::Table, Some(side::SIDE_FOUND_BY)).is_pairs());
+    }
+
+    /// A page with a single drawn box at x 50 and two grids of 2 x 2 cells at x 250 and 400,
+    /// a word in each cell.
+    fn box_and_grids() -> layoutregions::PageIn {
+        let rule = |x0: f32, y0: f32, x1: f32, y1: f32, rect: bool| layoutregions::RuleIn {
+            x0,
+            y0,
+            x1,
+            y1,
+            thick: 0.5,
+            dashed: false,
+            rect,
+        };
+        let mut rules = vec![rule(50.0, 600.0, 150.0, 620.0, true)];
+        let mut texts = vec![(60.0, 606.0)];
+        for x in [250.0, 400.0] {
+            rules.push(rule(x, 600.0, x + 100.0, 640.0, true));
+            rules.push(rule(x + 50.0, 600.0, x + 50.0, 640.0, false));
+            rules.push(rule(x, 620.0, x + 100.0, 620.0, false));
+            for (dx, dy) in [(5.0, 606.0), (55.0, 606.0), (5.0, 626.0), (55.0, 626.0)] {
+                texts.push((x + dx, dy));
+            }
+        }
+        layoutregions::PageIn {
+            page: 1,
+            size: [595.0, 842.0],
+            turn: 0,
+            texts: texts
+                .iter()
+                .enumerate()
+                .map(|(k, &(x, y))| layoutregions::TextRun {
+                    text: "Muster".into(),
+                    x,
+                    y,
+                    w: 30.0,
+                    h: 8.0,
+                    size: 8.0,
+                    font: 1,
+                    font_kind: layoutregions::FontKind::Proportional,
+                    bold: false,
+                    italic: false,
+                    color: None,
+                    shift: layoutregions::Shift::Base,
+                    line: k as u32,
+                    off_axis: false,
+                    gaps: Vec::new(),
+                })
+                .collect(),
+            rules,
+            boxes: Vec::new(),
+            pictures: Vec::new(),
+            codes: Vec::new(),
+            given: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn ruled_groups_follow_the_grid_segments() {
+        let page = box_and_grids();
+        let grids = drawn::grids(&page.rules).expect("searched");
+        assert_eq!(grids.groups.len(), 3);
+        let mut segments =
+            layoutregions::segment::segment_page(&page, &layoutregions::Limits::default(), &|| {
+                false
+            });
+        assert!(segments.issues.is_empty());
+        // The x of each group's left edge.
+        let lefts: Vec<f32> = grids
+            .groups
+            .iter()
+            .map(|(gh, _)| {
+                gh.iter()
+                    .map(|&j| grids.hs[j].from)
+                    .fold(f32::MAX, f32::min)
+            })
+            .collect();
+        let want = |box_and_first: bool, second: bool| -> Vec<bool> {
+            lefts
+                .iter()
+                .map(|&x| if x > 390.0 { second } else { box_and_first })
+                .collect()
+        };
+        // The box is read as a section of its own; both grids have their segments.
+        assert_eq!(ruled_groups(&grids, &segments), want(true, true));
+        // A grid the segments do not hold is not read.
+        for g in &mut segments.all {
+            if matches!(g.source, Source::Grid { .. }) && g.bounds.x0 > 390.0 {
+                g.source = Source::Rest;
+            }
+        }
+        assert_eq!(ruled_groups(&grids, &segments), want(true, false));
+        // Where a bound cut the segmentation short, every group is read.
+        segments.issues.push(layoutregions::Issue {
+            what: "segments nest deeper than 64 levels".into(),
+            kind: layoutregions::IssueKind::Limit,
+        });
+        assert_eq!(ruled_groups(&grids, &segments), want(true, true));
     }
 }

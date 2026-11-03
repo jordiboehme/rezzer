@@ -1303,8 +1303,8 @@ fn read_apart(flow: &mut Flow, take: &mut Taking, found: &mut Found) {
     }
 }
 
-/// Each connected grid of `groups` (of the page's lines `hs` and `vs`) that the page's
-/// segments hold as a grid (`segmented`, see `tables::segment_grids`) in its sections, each
+/// Each connected grid of `groups` (of the page's lines `hs` and `vs`) that the ruled detector
+/// reads (`segmented`, see `tables::ruled_groups`) in its sections, each
 /// judged as a grid of its own, top to bottom; a section of a grid that was cut is no grid's to
 /// drop without a word.
 fn grid_parts(

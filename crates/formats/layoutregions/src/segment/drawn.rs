@@ -774,4 +774,32 @@ mod tests {
             [3.0, 10.0, 20.0]
         );
     }
+
+    /// Rectangles drawn side by side that share their sides are one group of lines: their
+    /// shared sides are one line, and the group is a grid of one row with a cell per
+    /// rectangle. Rectangles a gap apart stay groups of their own.
+    #[test]
+    fn abutting_rectangles_are_one_group() {
+        let rules = vec![
+            rect(50.0, 600.0, 150.0, 620.0),
+            rect(150.0, 600.0, 250.0, 620.0),
+            rect(250.0, 600.0, 350.0, 620.0),
+            rect(50.0, 500.0, 150.0, 520.0),
+            rect(156.0, 500.0, 256.0, 520.0),
+        ];
+        let g = grids(&rules).expect("searched");
+        assert_eq!(g.groups.len(), 3, "{g:?}");
+        let mut frames: Vec<(Bounds, u32, u32)> = g
+            .groups
+            .iter()
+            .filter_map(|group| grid_frame(&g, group))
+            .collect();
+        assert_eq!(frames.len(), 1, "only the abutting row is a grid");
+        let (b, rows, cols) = frames.remove(0);
+        assert_eq!((rows, cols), (1, 3));
+        assert_eq!(
+            [b.x0, b.y0, b.x1, b.y1].map(f32::round),
+            [50.0, 600.0, 350.0, 620.0]
+        );
+    }
 }

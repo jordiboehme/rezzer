@@ -916,3 +916,41 @@ fn a_host_found_structure_decides_the_boxes() {
     let s = segment_page(&p, &Limits::default(), &|| false);
     assert_eq!(with_source(&s, |x| *x == Source::Box).len(), 2);
 }
+
+#[test]
+fn many_one_row_grids_are_bounded() {
+    // 200 rows of three drawn cells each, a word in each cell: a grid and three boxes per
+    // row. A small cap on the segments holds, says so once, and keeps every prim in one leaf.
+    let mut rules = Vec::new();
+    let mut texts = Vec::new();
+    for k in 0..200u32 {
+        let y = 4_000.0 - 20.0 * k as f32;
+        for c in 0..3u32 {
+            let x = 50.0 + 100.0 * c as f32;
+            rules.push(rect(x, y, x + 100.0, y + 16.0));
+            texts.push(run("Muster", x + 5.0, y + 5.0, 30.0, 9.0, k));
+        }
+    }
+    let p = page([595.0, 4_100.0], texts, rules);
+    let s = segment_page(&p, &Limits::default(), &|| false);
+    check_cover(&s, &p);
+    assert_eq!(
+        with_source(&s, |x| *x == Source::Grid { rows: 1, cols: 3 }).len(),
+        200
+    );
+    assert_eq!(with_source(&s, |x| *x == Source::Box).len(), 600);
+    let small = Limits {
+        max_regions: 300,
+        ..Limits::default()
+    };
+    let s = segment_page(&p, &small, &|| false);
+    check_cover(&s, &p);
+    assert!(s.all.len() <= 300, "{}", s.all.len());
+    let hits: Vec<&Issue> = s
+        .issues
+        .iter()
+        .filter(|i| i.kind == IssueKind::Limit)
+        .collect();
+    assert_eq!(hits.len(), 1, "{:?}", s.issues);
+    assert!(hits[0].what.contains("segments"), "{}", hits[0].what);
+}

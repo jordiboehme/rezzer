@@ -451,7 +451,9 @@ impl Builder<'_> {
         if let Ok(g) = &found.grids {
             for group in &g.groups {
                 work::add((group.0.len() + group.1.len()) as u64);
-                // One cell is a box (see `drawn::boxes`), not a grid.
+                // One cell is a box (see `drawn::boxes`), not a grid. The cells of a grid of
+                // one row or one column are boxes too (`drawn::boxes` skips only grids of two
+                // rows and two columns or more), so they nest under this grid.
                 let Some((b, rows, cols)) = drawn::grid_frame(g, group) else {
                     continue;
                 };
