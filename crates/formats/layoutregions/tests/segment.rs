@@ -493,3 +493,85 @@ fn style_steps_part_a_leaf() {
     assert_eq!(styles.len(), 2);
     assert_eq!(styles[0].prims, vec![PrimId::Text(0)]);
 }
+
+/// Two columns of prose of 9,500 lines each, just under the size up to which the cut looks
+/// for columns, inside 70 nested boxes: every level of nesting cuts all of its text again for
+/// the alternative.
+#[test]
+fn nested_columns_are_cut_in_time() {
+    let boxes = 70usize;
+    let lines = 9_500u32;
+    let (w, h) = (4_000.0f32, 300_000.0f32);
+    let mut rules = Vec::new();
+    for k in 0..boxes {
+        let a = 100.0 + 10.0 * k as f32;
+        rules.push(rect(a, a, 2_000.0 - a + 100.0, 120_000.0 - a));
+    }
+    let inner = 100.0 + 10.0 * (boxes - 1) as f32;
+    let top = 120_000.0 - inner - 30.0;
+    let mut texts = column(inner + 20.0, top, lines, 0);
+    texts.extend(column(inner + 280.0, top, lines, 0));
+    let p = page([w, h], texts, rules);
+    assert_eq!(drawn(&p, &|_| true).boxes.len(), boxes);
+    let started = std::time::Instant::now();
+    let s = segment_page(&p, &Limits::default(), &|| false);
+    eprintln!("nested columns in {:?}", started.elapsed());
+    check_cover(&s, &p);
+    assert!(s.issues.iter().any(|i| i.kind == IssueKind::Limit));
+    // With room for every level the innermost box parts its two columns at the gutter.
+    let deep = Limits {
+        max_cut_depth: 256,
+        ..Limits::default()
+    };
+    let started = std::time::Instant::now();
+    let s = segment_page(&p, &deep, &|| false);
+    eprintln!("nested columns, every level, in {:?}", started.elapsed());
+    check_cover(&s, &p);
+    let gutters = with_source(&s, |x| *x == Source::Gutter);
+    assert_eq!(gutters.len(), 2);
+    assert_eq!(gutters[0].prims.len(), lines as usize);
+}
+
+#[test]
+fn a_stop_at_any_point_keeps_every_prim() {
+    // Stop after the n-th question: inside the parts of the page, the cut and the
+    // alternative alike, every primitive stays in one leaf.
+    for p in [mixed_page(), boxed_column_page(), nested_page(80, 2_000)] {
+        let mut asked_total = 0;
+        for n in 1..40u32 {
+            let asked = std::cell::Cell::new(0u32);
+            let stop = || {
+                asked.set(asked.get() + 1);
+                asked.get() > n
+            };
+            let s = segment_page(&p, &Limits::default(), &stop);
+            check_cover(&s, &p);
+            let stopped = s.issues.iter().any(|i| i.kind == IssueKind::Stopped);
+            assert_eq!(stopped, asked.get() > n, "{n}");
+            asked_total = asked_total.max(asked.get());
+        }
+        assert!(asked_total > 1);
+    }
+}
+
+#[test]
+fn a_grid_the_given_regions_took_is_no_segment() {
+    // The grid is still drawn, but a given region holds its lines and its cells.
+    let mut p = mixed_page();
+    let mut prims: Vec<PrimId> = (0..9).map(PrimId::Text).collect();
+    prims.extend((0..5).map(PrimId::Rule));
+    p.given = vec![GivenRegion {
+        kind: Kind::Table,
+        prims,
+        order: 0,
+    }];
+    assert_eq!(
+        drawn(&p, &|_| true).grids.map(|g| g.groups.len()),
+        Ok(2),
+        "the grid and the box are drawn"
+    );
+    let s = segment_page(&p, &Limits::default(), &|| false);
+    check_cover(&s, &p);
+    assert!(with_source(&s, |x| matches!(x, Source::Grid { .. })).is_empty());
+    assert_eq!(with_source(&s, |x| *x == Source::Box).len(), 1);
+}

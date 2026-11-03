@@ -552,14 +552,18 @@ impl Builder<'_> {
             }
             return Vec::new();
         }
+        // A grid or box whose primitives the given regions took is no segment.
         let mut next = Vec::with_capacity(it.children.len());
         for &c in &it.children {
             let prims = std::mem::take(&mut sub[c]);
+            if prims.is_empty() {
+                continue;
+            }
             let id = self.push(items[c].source, prims, Some(items[c].bounds), Some(s), true);
             next.push((c, id));
         }
         let rules = rules_of(self.page, &it.others);
-        let parted = !it.children.is_empty() || !given.is_empty();
+        let parted = !next.is_empty() || !given.is_empty();
         if parted || (!it.texts.is_empty() && !it.others.is_empty()) {
             if !it.texts.is_empty() {
                 let mut prims: Vec<PrimId> = it.texts.iter().map(|&t| PrimId::Text(t)).collect();
@@ -575,8 +579,9 @@ impl Builder<'_> {
         } else if !it.texts.is_empty() {
             self.text(s, &it.texts, d, &rules);
         }
-        if !it.children.is_empty() {
-            self.alternative(items, i, s, &given, &rules);
+        if !next.is_empty() {
+            let kids: Vec<usize> = next.iter().map(|&(c, _)| c).collect();
+            self.alternative(items, &kids, s, d, &given, &rules);
         }
         next
     }
@@ -671,12 +676,19 @@ impl Builder<'_> {
         }
     }
 
-    /// The whitespace cut of all text of segment `s` (of item `i`, which has drawn children)
-    /// with the drawn structure left out, kept as an alternative when one of its column
-    /// gutters holds a vertical side of a drawn child beside its text: the gutter that a box
-    /// also bounds. Its groups are leaves; the given regions and one leaf of all drawing of
-    /// the segment complete it.
-    fn alternative(&mut self, items: &[Item], i: usize, s: SegId, given: &[SegId], rules: &[Line]) {
+    /// The whitespace cut of all text of segment `s` (at depth `d`) with its drawn children
+    /// `kids` (items) left out, kept as an alternative when one of its column gutters holds a vertical side
+    /// of a drawn child beside its text: the gutter that a box also bounds. Its groups are
+    /// leaves; the given regions and one leaf of all drawing of the segment complete it.
+    fn alternative(
+        &mut self,
+        items: &[Item],
+        kids: &[usize],
+        s: SegId,
+        d: usize,
+        given: &[SegId],
+        rules: &[Line],
+    ) {
         if self.stopped {
             return;
         }
@@ -709,7 +721,7 @@ impl Builder<'_> {
             .map(|&t| piece(&self.page.texts[t as usize]))
             .collect();
         let bound = Limits {
-            max_cut_depth: (self.max - items[i].depth) as u32,
+            max_cut_depth: (self.max - d) as u32,
             ..*self.limits
         };
         let found = xy_cut(&pieces, rules, &bound, self.stop);
@@ -737,7 +749,7 @@ impl Builder<'_> {
             }
             let (lo, hi) = (a.y0.min(b.y0), a.y1.max(b.y1));
             let side = |x: f32| x >= g0 - SNAP && x <= g1 + SNAP;
-            items[i].children.iter().any(|&c| {
+            kids.iter().any(|&c| {
                 let cb = items[c].bounds;
                 (side(cb.x0) || side(cb.x1)) && cb.y0 < hi && cb.y1 > lo
             })
