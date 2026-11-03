@@ -1328,6 +1328,10 @@ fn a_table_of_descriptions_and_amounts_needs_a_rule_for_totals() {
     let lines = || text_of_lines(vec![200, 201, 202]);
     let typed = two_column_stack(false).typed(&lines());
     assert!(find(&typed, Kind::Totals).is_none(), "{typed:#?}");
+    // The lines keep their own reading: lines of two pieces, a description and an amount,
+    // flush at both edges, are what the key/value rule reads (it refuses a table of them).
+    let pairs = of(&typed, Kind::LabelValue);
+    assert!(ids(pairs).contains(&"label_value.key_values"), "{typed:#?}");
     let typed = two_column_stack(true).typed(&lines());
     assert!(
         ids(of(&typed, Kind::Totals)).contains(&"totals.end_rule"),
@@ -1388,11 +1392,12 @@ fn the_seed_lines_are_pairs_themselves() {
 
 #[test]
 fn too_little_text_is_no_table() {
-    // One line in pieces; one column of lines; three runs.
+    // One line in four pieces; one column of lines; three runs.
     let cases: Vec<Vec<TextRun>> = vec![
         vec![
             run("Muster", 72.0, 700.0, 9.2, 100),
             run("2", 220.0, 700.0, 9.2, 100),
+            run("Stk", 270.0, 700.0, 9.2, 100),
             run("12,50", 320.0, 700.0, 9.2, 100),
         ],
         (0..4)
@@ -1436,4 +1441,97 @@ fn a_page_of_tables_and_totals_is_typed_once() {
         assert!(first.iter().flatten().any(|t| t.kind == Kind::Totals));
         assert!(first.iter().flatten().any(|t| t.kind == Kind::Table));
     });
+}
+
+/// An item table `Pos | Bezeichnung | Menge | Preis` (Pos and Menge numbers in every row) with
+/// one line under it: `label` at `x`, its amount right under Preis, a rule over the amount
+/// when `rule`. `pos` puts a Pos number before the label (a row of the table).
+fn pos_table(label: &str, x: f32, rule_over: bool, pos: Option<&str>) -> Tree {
+    let rows: &[&[&str]] = &[
+        &["Pos", "Bezeichnung", "Menge", "Preis"],
+        &["1", "Muster A", "2", "12,50"],
+        &["2", "Muster B", "1", "3,00"],
+        &["3", "Muster C", "4", "8,75"],
+    ];
+    let xs = [72.0, 100.0, 260.0, 340.0, 440.0];
+    let mut tree = ruled_table(&xs, 700.0, rows, true, 100);
+    let y = 630.0;
+    if let Some(n) = pos {
+        tree.page.texts.push(run(n, 75.0, y, 9.2, 200));
+    }
+    tree.page.texts.push(run(label, x, y, 9.2, 200));
+    if pos.is_some() {
+        tree.page.texts.push(run("3", 263.0, y, 9.2, 200));
+    }
+    let v = run("28,86", 0.0, y, 9.2, 200);
+    let vx = 437.0 - v.w;
+    tree.page.texts.push(TextRun { x: vx, ..v });
+    if rule_over {
+        tree.page.rules.push(rule(340.0, 641.0, 440.0, 641.0));
+    }
+    tree.page
+        .texts
+        .sort_by(|a, b| a.line.cmp(&b.line).then(a.x.total_cmp(&b.x)));
+    tree
+}
+
+#[test]
+fn a_total_label_may_stand_in_a_column_the_rows_fill() {
+    // Flush left under Pos, and right-aligned against its amount under Menge.
+    let w = |t: &str| t.chars().count() as f32 * 4.6;
+    let cases = [("Netto", 75.0), ("Summe netto", 335.0 - w("Summe netto"))];
+    for (label, x) in cases {
+        for rule_over in [false, true] {
+            let typed = pos_table(label, x, rule_over, None).typed(&text_of_lines(vec![200]));
+            let totals = of(&typed, Kind::Totals);
+            assert_eq!(
+                ids(totals).contains(&"totals.end_rule"),
+                rule_over,
+                "{label}: {typed:#?}"
+            );
+            let (kind, lead) = winner(&typed);
+            assert_eq!(kind, Kind::Totals, "{label}: {typed:#?}");
+            assert!(lead >= MARGIN, "{label}: {typed:#?}");
+        }
+    }
+    // A line with a number under Pos and a quantity under Menge is a row of the table.
+    let typed = pos_table("Muster D", 103.0, true, Some("4")).typed(&text_of_lines(vec![200]));
+    assert!(find(&typed, Kind::Totals).is_none(), "{typed:#?}");
+}
+
+#[test]
+fn touching_boxes_cost_the_boxes_not_their_square() {
+    // Two columns of boxes, the second's left edges 2.5 points right of the first's right
+    // edges (apart for the drawn lines, within a box's reach): each box looks only at the boxes
+    // near it, not at every box of the other column.
+    let work = |k: usize| -> Option<u64> {
+        let mut texts = Vec::new();
+        let mut rules = Vec::new();
+        for i in 0..k {
+            let top = 1950.0 - 17.0 * i as f32;
+            for (c, x) in [(0u32, 72.0f32), (1, 224.5)] {
+                let line = 10 + 4 * i as u32 + 2 * c;
+                texts.push(run("Feld", x + 2.0, top - 6.0, 6.2, line));
+                texts.push(run("Muster", x + 2.0, top - 12.5, 9.2, line + 1));
+                rules.extend(box_rules([x, top - 14.0, x + 150.0, top]));
+            }
+        }
+        texts.sort_by_key(|r| r.line);
+        let mut page = sheet(texts, rules);
+        page.size = [595.0, 2000.0];
+        let tree = Tree { page };
+        tree.with(|view| {
+            let seg = view.segs.all.iter().find(|s| s.source == Source::Box)?;
+            let before = work_steps()?;
+            let _ = layoutregions::typers::type_label_value(view, seg);
+            Some(work_steps()? - before)
+        })
+    };
+    let (Some(small), Some(large)) = (work(25), work(100)) else {
+        // A release build counts no work.
+        assert!(work_steps().is_none(), "the page has its boxes");
+        return;
+    };
+    // Four times the boxes: about four times the work, far from sixteen.
+    assert!(large < 8 * small, "{small} then {large}");
 }

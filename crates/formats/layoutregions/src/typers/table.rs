@@ -68,9 +68,9 @@ pub const TOTALS_RULE: u16 = 50;
 /// Why a reading is refused because a paragraph set full (justified) stands in pieces.
 const SET_FULL: &str = "its lines are a paragraph set full";
 /// Why lines of a heading size that read as an address are no table.
-const ADDRESS_LINES: &str = "its lines read as an address";
+const ADDRESS_TEXT: &str = "its lines read as an address";
 /// Why lines a little larger than the body that read as sentences are no table.
-const SENTENCE_LINES: &str = "its lines read as sentences";
+const SENTENCE_TEXT: &str = "its lines read as sentences";
 /// Why a grid whose cells each hold a label and its value is no table.
 const FIELD_CELLS: &str = "its cells each hold a label and its value";
 /// Why lines of labels and values are no table.
@@ -146,7 +146,7 @@ impl Find {
             && !matches!(seg.source, Source::Drawing)
             && let Some(why) = content_against(view, seg)
         {
-            return refused(Speaks::Paragraph, why);
+            return refused_for(why);
         }
         match seg.source {
             Source::Grid { rows, cols } if rows >= 2 && cols >= 2 => {
@@ -193,7 +193,7 @@ fn refused(speaks: Speaks, why: &'static str) -> Find {
     let (kind, id, weight) = match (speaks, why) {
         // The walk's demotion is already the paragraph's signal: the refusal names it with no
         // weight of its own.
-        (Speaks::Paragraph, ADDRESS_LINES | SENTENCE_LINES) => {
+        (Speaks::Paragraph, ADDRESS_TEXT | SENTENCE_TEXT) => {
             (Kind::Paragraph, "paragraph.content_refuses_table", 0)
         }
         (Speaks::Paragraph, _) => (
@@ -226,7 +226,7 @@ fn refused(speaks: Speaks, why: &'static str) -> Find {
 /// of a table is missing (too few rows, no columns, columns not clean).
 fn speaks_for(why: &'static str) -> Option<Speaks> {
     match why {
-        LONG_TEXT | RUNS_ON | SET_FULL | ADDRESS_LINES | SENTENCE_LINES => Some(Speaks::Paragraph),
+        LONG_TEXT | RUNS_ON | SET_FULL | ADDRESS_TEXT | SENTENCE_TEXT => Some(Speaks::Paragraph),
         ON_PICTURE | TINY_TEXT | FIGURE_NEAR => Some(Speaks::Figure),
         PAGE_FRAME | MANY_COLUMNS | EMPTY_CELLS | NO_ROWS_AND_COLUMNS | CROSSES_LINES | COMB
         | ROWS_ALIKE | CONTENTS => Some(Speaks::Spatial),
@@ -250,8 +250,8 @@ fn content_against(view: &PageView<'_>, seg: &Segment) -> Option<&'static str> {
     use crate::extract::text::Demotion;
     view.with_text(seg, |t| {
         t.demotions().find_map(|d| match d {
-            Demotion::Address => Some(ADDRESS_LINES),
-            Demotion::Sentences => Some(SENTENCE_LINES),
+            Demotion::Address => Some(ADDRESS_TEXT),
+            Demotion::Sentences => Some(SENTENCE_TEXT),
             _ => None,
         })
     })
@@ -860,9 +860,9 @@ impl TotalsRead {
     /// (its parent stands on that path; at most [`TOTALS_GAP`] sizes of their text below it,
     /// across it): every amount under a money column of it (a column most of whose body cells
     /// are amounts), and every other piece of a line in its description column (a label, which
-    /// may run on over the column next to it) or in a column its rows leave mostly empty. A
-    /// piece in a column the table's rows fill (a quantity, a unit) makes the line a row of
-    /// the table, not its totals. A table whose rows fill no column but its description and its
+    /// may run on over the column next to it) or anywhere else but in the shape of a column its
+    /// rows fill: a piece of the shape most cells of such a column have (a quantity under
+    /// Menge, a number under Pos) makes the line a row of the table, not its totals. A table whose rows fill no column but its description and its
     /// money columns has rows of the same shape as totals: only a rule across its money columns
     /// between them tells them apart, so its totals need that rule.
     pub(crate) fn of(view: &PageView<'_>, seg: &Segment) -> Option<TotalsRead> {
@@ -961,6 +961,16 @@ impl TotalsRead {
         let filled: Vec<bool> = (0..cols)
             .map(|c| !money[c] && Some(c) != description && 2 * column(c).count() >= rows.max(1))
             .collect();
+        // The shape most cells of each filled column have (a number under Pos or Menge).
+        let shapes: Vec<Option<Shape>> = (0..cols)
+            .map(|c| {
+                if !filled[c] {
+                    return None;
+                }
+                let of: Vec<Option<Shape>> = column(c).map(|t| Shape::of(t)).collect();
+                Shape::most(&of)
+            })
+            .collect();
         let slack = 0.5 * size;
         let column_at = |x: f32| {
             edges
@@ -987,9 +997,14 @@ impl TotalsRead {
                     if !under(p) {
                         return None;
                     }
-                } else if !in_description(p) && filled[column_at((p.x0 + p.x1) / 2.0)] {
-                    // A piece in a column the rows fill: a row of the table.
-                    return None;
+                } else if !in_description(p) {
+                    // A piece of the shape of a column the rows fill (a quantity under Menge,
+                    // a number under Pos): a row of the table. A label of words stands
+                    // wherever the layout puts it, flush left or against its amount.
+                    let c = column_at((p.x0 + p.x1) / 2.0);
+                    if shapes[c].is_some() && Shape::of(&text(p)) == shapes[c] {
+                        return None;
+                    }
                 }
             }
             labels &= line[..first].first().is_some_and(in_description);
@@ -1062,8 +1077,8 @@ mod tests {
     #[test]
     fn refusals_name_the_kind_they_speak_for() {
         for (why, id, weight) in [
-            (ADDRESS_LINES, "paragraph.content_refuses_table", 0),
-            (SENTENCE_LINES, "paragraph.content_refuses_table", 0),
+            (ADDRESS_TEXT, "paragraph.content_refuses_table", 0),
+            (SENTENCE_TEXT, "paragraph.content_refuses_table", 0),
             (LONG_TEXT, "paragraph.prose_cells", PARAGRAPH_PROSE_CELLS),
             (CROSSES_LINES, "spatial.crossed_lines", 0),
             (NO_ROWS_AND_COLUMNS, "spatial.no_rows_and_columns", 0),

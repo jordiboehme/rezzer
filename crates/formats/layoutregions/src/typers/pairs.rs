@@ -226,13 +226,7 @@ pub(crate) fn label_value(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
                 LABEL_STYLE,
             ));
             field_signals(&refs, std::slice::from_ref(&field), &mut signals);
-            if view.touches(seg.id.0 as usize)
-                && view
-                    .segs
-                    .all
-                    .get(seg.id.0 as usize)
-                    .is_some_and(|s| std::ptr::eq(s, seg))
-            {
+            if view.touches(seg.id.0 as usize) {
                 signals.push(signal(
                     "label_value.boxes_touch",
                     "its box touches another box of a field in a row or a column".into(),
@@ -281,10 +275,9 @@ pub(crate) fn label_value(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
 
 /// For each segment of the view's tree, whether it is a box with text that touches another
 /// box with text of its parent in a row or a column (see [`touching`], each box within its own
-/// reach, see [`touch_reach`]), or a box in a grid of one row or one column. The boxes are
-/// sorted by their left and top edges once, so each box looks only at the boxes whose left
-/// edge stands at its right edge or whose top stands at its bottom, within the largest reach
-/// of the page.
+/// reach, see [`touch_reach`]), or a box in a grid of one row or one column. The boxes are put
+/// in a grid of cells by their left and top edges once, so each box looks only at the boxes
+/// near the two points where a touching box would stand.
 pub(crate) fn touching_boxes(view: &PageView<'_>) -> Vec<bool> {
     let all = &view.segs.all;
     let mut out = vec![false; all.len()];
@@ -307,42 +300,54 @@ pub(crate) fn touching_boxes(view: &PageView<'_>) -> Vec<bool> {
         boxes.push((i, frame(seg), touch_reach(&refs, &ids)));
     }
     let reach = boxes.iter().map(|b| b.2).fold(0.0f32, f32::max);
-    let mut by_left: Vec<usize> = (0..boxes.len()).collect();
-    by_left.sort_by(|&a, &b| boxes[a].1[0].total_cmp(&boxes[b].1[0]));
-    let mut by_top: Vec<usize> = (0..boxes.len()).collect();
-    by_top.sort_by(|&a, &b| boxes[a].1[3].total_cmp(&boxes[b].1[3]));
-    let window = |order: &[usize], key: usize, at: f32| -> (usize, usize) {
-        let lo = order.partition_point(|&k| boxes[k].1[key] < at - reach);
-        let hi = order.partition_point(|&k| boxes[k].1[key] <= at + reach);
-        (lo, hi.max(lo))
-    };
+    // The boxes by the cell of a grid as fine as the reach their left and top edges stand in:
+    // a box that touches another in a row has its left edge at that box's right edge and its
+    // top at that box's top; in a column its left edge at that box's left edge and its top at
+    // that box's bottom. Each look is at the nine cells around a point, so each box looks only
+    // at boxes near it in both coordinates.
+    let step = (2.0 * reach).max(f32::MIN_POSITIVE);
+    let key = |x: f32, y: f32| ((x / step).floor() as i64, (y / step).floor() as i64);
+    let mut cells: std::collections::HashMap<(i64, i64), Vec<usize>> =
+        std::collections::HashMap::new();
+    for (b, bx) in boxes.iter().enumerate() {
+        cells.entry(key(bx.1[0], bx.1[3])).or_default().push(b);
+    }
     for a in 0..boxes.len() {
         let (ia, fa, ra) = boxes[a];
         let parent = all[ia].parent;
         // Right of it (a row) and under it (a column).
-        let (l0, l1) = window(&by_left, 0, fa[2]);
-        let (t0, t1) = window(&by_top, 3, fa[1]);
-        for &b in by_left[l0..l1].iter().chain(&by_top[t0..t1]) {
-            crate::work::add(1);
-            let (ib, fb, rb) = boxes[b];
-            if ib != ia && all[ib].parent == parent && touching(fa, fb, ra.max(rb)) {
-                out[ia] = true;
-                out[ib] = true;
+        for (x, y) in [(fa[2], fa[3]), (fa[0], fa[1])] {
+            let (kx, ky) = key(x, y);
+            for dx in -1..=1 {
+                for dy in -1..=1 {
+                    let Some(near) = cells.get(&(kx + dx, ky + dy)) else {
+                        continue;
+                    };
+                    for &b in near {
+                        crate::work::add(1);
+                        let (ib, fb, rb) = boxes[b];
+                        if ib != ia && all[ib].parent == parent && touching(fa, fb, ra.max(rb)) {
+                            out[ia] = true;
+                            out[ib] = true;
+                        }
+                    }
+                }
             }
         }
     }
     out
 }
 
-/// The fields of the cells of a Grid segment of the view: each square of its grid (its column
-/// and row edges, see [`edges`]) that holds text, read as one field (see [`parse`], with the
-/// page's seeds), when every one of them reads as a field, two or more and one with a value;
-/// the runs of the segment and the fields, which name runs of them.
+/// The cells of a grid read as fields: the runs of the segment and the fields, which name
+/// runs of them.
 pub(crate) struct CellFields<'a> {
     pub runs: Vec<&'a TextRun>,
     pub fields: Vec<Field>,
 }
 
+/// The fields of the cells of a Grid segment of the view: each square of its grid (its column
+/// and row edges, see [`edges`]) that holds text, read as one field (see [`parse`], with the
+/// page's seeds), when every one of them reads as a field, two or more and one with a value.
 pub(crate) fn cell_fields<'a>(view: &PageView<'a>, seg: &Segment) -> Option<CellFields<'a>> {
     let Ok(g) = &view.drawn.grids else {
         return None;

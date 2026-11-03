@@ -106,9 +106,8 @@ pub(crate) fn seg_runs<'a>(view: &PageView<'a>, seg: &Segment) -> (Vec<&'a TextR
     (refs, ids)
 }
 
-/// The runs with ink of some runs (not turned off the line), each with its place among
-/// them, their lines and the pieces of each line (see
-/// [`crate::extract::table::grid::pieces_of`]).
+/// Runs with ink in lines: each with its place among the runs it came from, the lines and the
+/// pieces of each line.
 pub(crate) struct Lined<'r> {
     pub runs: Vec<&'r TextRun>,
     pub at: Vec<usize>,
@@ -116,6 +115,8 @@ pub(crate) struct Lined<'r> {
     pub pieces: Vec<Vec<crate::extract::table::grid::Piece>>,
 }
 
+/// The runs with ink of `runs` (not turned off the line), each with its place among them,
+/// their lines and the pieces of each line (see [`crate::extract::table::grid::pieces_of`]).
 pub(crate) fn lined<'r>(runs: &[&'r TextRun]) -> Lined<'r> {
     let at: Vec<usize> = (0..runs.len())
         .filter(|&k| !runs[k].text.trim().is_empty() && !runs[k].off_axis)
