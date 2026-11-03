@@ -19,6 +19,9 @@ use crate::segment::cut::SIZE_STEP;
 /// - its colour differs from the last colour known before it: a run without a colour
 ///   (`None`) is not compared and keeps that colour.
 ///
+/// A run without ink (white space) has no style: it stays in the group it follows, and white
+/// space before the first ink is in the group of that ink.
+///
 /// Every id is in exactly one group, in its order. An id past the end of `texts` has no style
 /// and stays in the group it follows.
 pub fn style_steps(texts: &[TextRun], ids: &[u32]) -> Vec<Vec<u32>> {
@@ -33,7 +36,16 @@ pub fn style_steps(texts: &[TextRun], ids: &[u32]) -> Vec<Vec<u32>> {
             }
             continue;
         };
-        let starts = before.is_none_or(|b| {
+        // A run without ink has no style to step: it joins the group before it (or starts the
+        // first one, which the first ink then joins) and is not compared with what follows.
+        if run.text.trim().is_empty() {
+            match groups.last_mut() {
+                Some(g) => g.push(id),
+                None => groups.push(vec![id]),
+            }
+            continue;
+        }
+        let starts = before.map_or(groups.is_empty(), |b| {
             (run.size.min(b.size) > 0.0 && run.size.max(b.size) >= SIZE_STEP * run.size.min(b.size))
                 || run.bold != b.bold
                 || matches!((run.color, known), (Some(x), Some(y)) if x != y)
@@ -144,6 +156,23 @@ mod tests {
                 "{k}"
             );
         }
+    }
+
+    /// A run without ink has no style to step: a regular space between two bold runs joins the
+    /// group before it, and white space before the first ink joins the group of that ink.
+    #[test]
+    fn white_space_starts_no_group() {
+        let mut space = run(7.0, false, None, 0);
+        space.text = " ".into();
+        let texts = vec![
+            run(7.0, true, None, 0),
+            space.clone(),
+            run(7.0, true, None, 0),
+            run(7.0, false, None, 1),
+        ];
+        assert_eq!(style_steps(&texts, &ids(4)), vec![vec![0, 1, 2], vec![3]]);
+        let texts = vec![space, run(9.0, true, None, 0), run(7.0, false, None, 1)];
+        assert_eq!(style_steps(&texts, &ids(3)), vec![vec![0, 1], vec![2]]);
     }
 
     #[test]
