@@ -579,7 +579,7 @@ pub fn titles_over_values<R: LineRun>(
 /// edges), as a line of prose set full is (`Die 3 Hinweise.`). A row of values does not open
 /// with a small letter, and its cells stand where their columns start or end: its last cell
 /// may end with the stop of an abbreviation (`12 Stk.`, `Muster Co. KG.`).
-pub fn prose_row(text: &str, set_full: bool) -> bool {
+pub(crate) fn prose_row(text: &str, set_full: bool) -> bool {
     let t = text.trim();
     t.starts_with(char::is_lowercase) || (t.ends_with('.') && set_full)
 }

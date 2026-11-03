@@ -21,6 +21,9 @@ pub const BODY_GAP: f32 = 3.0;
 /// A rule as wide as a band, within this share of its width, ends the band's body.
 pub const BAND_EDGE: f32 = 0.05;
 
+/// Lines a page's bands may look at together; past them the rest are not looked at.
+pub const BAND_WORK: usize = 4_000_000;
+
 /// A header band is at most this many times its largest title text high.
 pub const BAND_HEIGHT: f32 = 4.0;
 
@@ -355,7 +358,7 @@ pub(crate) fn row_starts(lines: &[Vec<(usize, bool)>], used: usize) -> Vec<bool>
 /// words that ends without a stop over a cell that goes on in a small letter). One rule for
 /// the cells under a header band and for lines without rules (see [`super::grid::grid_cells`]),
 /// and the evidence the typers read as prose.
-pub fn long_or_prose(texts: &[Vec<String>], short: usize) -> Option<&'static str> {
+pub(crate) fn long_or_prose(texts: &[Vec<String>], short: usize) -> Option<&'static str> {
     let mut lens: Vec<usize> = texts
         .iter()
         .flatten()

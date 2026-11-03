@@ -441,7 +441,7 @@ pub(super) fn borderless(
             let cells = grid_cells(&flow.runs, pieces, rows_needed, table_caption);
             let verdict = cells.and_then(|grid| {
                 if figure_caption {
-                    return Err("a figure caption stands next to it");
+                    return Err(FIGURE_NEAR);
                 }
                 let sizes: Vec<f32> = runs.iter().map(|&i| flow.runs[i].size).collect();
                 match area.refuses(b, &sizes) {

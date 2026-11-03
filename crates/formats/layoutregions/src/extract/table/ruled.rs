@@ -162,7 +162,7 @@ pub(crate) fn prose_like(text: &str, columns: usize) -> bool {
 /// a sentence (see [`prose_like`]) over at least one inner column edge between the start of
 /// the first run and the end of the last. A sentence printed over a ruled row stands across
 /// the rules whether it is one run, runs parted at a word gap on a rule, or many runs.
-pub fn sentence_across<R: LineRun>(runs: &[R], line: &[usize], xs: &[f32]) -> bool {
+pub(crate) fn sentence_across<R: LineRun>(runs: &[R], line: &[usize], xs: &[f32]) -> bool {
     let (Some(&first), Some(&last)) = (line.first(), line.last()) else {
         return false;
     };

@@ -6,7 +6,8 @@
 //! and below it lines of text without rules that stand in the band's columns.
 
 use layoutregions::extract::table::banded::{
-    BAND_HEIGHT, BandCells, BodyBelow, band_cells, band_head_refused, band_titles, body_below,
+    BAND_HEIGHT, BAND_WORK, BandCells, BodyBelow, band_cells, band_head_refused, band_titles,
+    body_below,
 };
 use layoutregions::segment::drawn::Line;
 
@@ -20,9 +21,6 @@ pub(super) struct Band {
     pub b: [f32; 4],
     pub cut: bool,
 }
-
-/// Lines a page's bands may look at together; past them the rest are not looked at.
-const BAND_WORK: usize = 4_000_000;
 
 /// What the ruled detector shares with the band search.
 pub(super) struct Shared<'a> {

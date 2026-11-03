@@ -23,14 +23,19 @@ use layoutregions::segment::{Segment, Segments, Source};
 use crate::layout::{Drawn, Flow, Run};
 
 /// The cells of tables, built in the engine (see `layoutregions::extract::table`).
-use layoutregions::extract::table::{self, MAX_SQUARES, TableOut, middle, numeric};
+use layoutregions::extract::table::{
+    self, CONTENTS, CROSSES_LINES, EMPTY_CELLS, LONG_TEXT, MAX_SQUARES, NO_ROWS_AND_COLUMNS,
+    ROWS_ALIKE, RUNS_ON, TableOut, middle, numeric,
+};
 
 /// What the area of a page says against a table, and the captions next to one (see
 /// `layoutregions::extract::table::{area, caption}`).
 use layoutregions::extract::table::area::{
     Area, MANY_COLUMNS, MAX_COLUMNS, ON_PICTURE, PAGE_FRAME, TINY_TEXT, dense,
 };
-use layoutregions::extract::table::caption::{ByY, MAX_CAPTION_SIZE, caption, captions_near};
+use layoutregions::extract::table::caption::{
+    ByY, FIGURE_NEAR, MAX_CAPTION_SIZE, caption, captions_near,
+};
 
 pub(crate) use pairs::{BoxTitle, Frame, box_pairs, field_frames, form_drawn, underlined_titles};
 pub(crate) use tagged::{Tables, tagged};
@@ -312,28 +317,26 @@ pub(crate) fn counted<'a>(reasons: impl Iterator<Item = &'a str>) -> String {
 pub(crate) fn plural(why: &str) -> &str {
     match why {
         MANY_COLUMNS => "they have more than 15 columns",
-        "most of its cells are empty" => "most of their cells are empty",
-        "its boxes do not form rows and columns" => "their boxes do not form rows and columns",
-        "its text crosses its lines" => "their text crosses their lines",
-        "it covers most of the page" => "they cover most of the page",
+        EMPTY_CELLS => "most of their cells are empty",
+        NO_ROWS_AND_COLUMNS => "their boxes do not form rows and columns",
+        CROSSES_LINES => "their text crosses their lines",
+        PAGE_FRAME => "they cover most of the page",
         ON_PICTURE => "they lie on a picture",
         TINY_TEXT => "their text is much smaller than the body text, as in pictures of pages",
         "too few rows follow its header" => "too few rows follow their headers",
         "the text below its header does not stand in its columns" => {
             "the text below their headers does not stand in their columns"
         }
-        "its cells hold long text" => "their cells hold long text",
+        LONG_TEXT => "their cells hold long text",
         "it is too tall for a header over lines" => "they are too tall for headers over lines",
         "its cells hold too few column titles" => "their cells hold too few column titles",
-        "its text runs on from row to row like prose" => {
-            "their text runs on from row to row like prose"
-        }
+        RUNS_ON => "their text runs on from row to row like prose",
         "some of its text stands between its columns" => {
             "some of their text stands between their columns"
         }
         "its columns are not clean" => "their columns are not clean",
-        "all its rows read the same" => "all their rows read the same",
-        "it reads like a table of contents" => "they read like tables of contents",
+        ROWS_ALIKE => "all their rows read the same",
+        CONTENTS => "they read like tables of contents",
         other => other,
     }
 }

@@ -52,7 +52,7 @@ pub const LABEL_KNOWN_STYLE: u16 = 100;
 
 /// Whether `text` is a value of a shape of its own: a number, a percent, a date, or a code
 /// (digits and letters, every word with a digit: `RE-2026-0001`, not `Musterweg 1`).
-pub fn value_shape(text: &str) -> bool {
+pub(crate) fn value_shape(text: &str) -> bool {
     matches!(
         Shape::of(text),
         Some(Shape::Number | Shape::Percent | Shape::Date)

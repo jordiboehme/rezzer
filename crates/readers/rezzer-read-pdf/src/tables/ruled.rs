@@ -25,9 +25,6 @@ use super::*;
 /// Where a run a table took goes: the table, its row and its cell.
 type Claim = Option<(usize, usize, usize)>;
 
-/// Why a grid with a figure caption next to it is not a table.
-const FIGURE_NEAR: &str = "a figure caption stands next to it";
-
 /// A section of a grid: its segments, whether its grid was cut, whether a cut is its bottom
 /// or its top, and its grid's place among the page's grids.
 struct Part {

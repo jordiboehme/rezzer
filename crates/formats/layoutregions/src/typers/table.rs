@@ -23,9 +23,10 @@
 use crate::extract::pairs::blocks::{KeyValues, key_values};
 use crate::extract::table::area::{MANY_COLUMNS, MAX_COLUMNS, ON_PICTURE, PAGE_FRAME, TINY_TEXT};
 use crate::extract::table::banded::{
-    BandCells, BodyBelow, band_cells, band_head_refused, band_titles, body_below, long_or_prose,
+    BAND_WORK, BandCells, BodyBelow, band_cells, band_head_refused, band_titles, body_below,
+    long_or_prose,
 };
-use crate::extract::table::caption::{caption, captions_near};
+use crate::extract::table::caption::{FIGURE_NEAR, caption, captions_near};
 use crate::extract::table::grid::{
     Piece, Shape, amount, grid_cells, pieces_of, set_full, titles_over_values,
 };
@@ -67,13 +68,8 @@ pub const TOTALS_RULE: u16 = 50;
 
 /// Why a reading is refused because a paragraph set full (justified) stands in pieces.
 const SET_FULL: &str = "its lines are a paragraph set full";
-/// Why a reading is refused because a figure caption stands next to it or in it.
-const FIGURE_NEAR: &str = "a figure caption stands next to it";
 /// Why a grid of digit boxes is no table.
 const COMB: &str = "its boxes hold one digit each, a field to fill in";
-
-/// Lines under a header band a page looks at for one band at most.
-const BAND_WORK: usize = 4_000_000;
 
 /// How far below a table its totals may stand: this many sizes of their text.
 const TOTALS_GAP: f32 = 3.0;

@@ -11,6 +11,9 @@ use crate::line::LineRun;
 /// Lines of a caption paragraph above a table looked at for its start.
 pub const CAPTION_LINES: usize = 8;
 
+/// Why a grid or lines next to a figure caption (or holding one) are no table: a chart's.
+pub const FIGURE_NEAR: &str = "a figure caption stands next to it";
+
 /// The largest text size a caption search assumes for a table, in points.
 pub const MAX_CAPTION_SIZE: f32 = 36.0;
 
