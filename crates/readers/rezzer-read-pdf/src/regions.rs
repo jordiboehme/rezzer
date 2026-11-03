@@ -16,18 +16,6 @@ pub(crate) use layoutregions::segment::drawn::BOX_WORK;
 
 use crate::tables::Rule;
 
-#[cfg(test)]
-thread_local! {
-    /// Grid searches run on this thread, for tests.
-    pub(crate) static GRID_SEARCHES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
-/// Counts a grid search, for tests.
-fn searched() {
-    #[cfg(test)]
-    GRID_SEARCHES.with(|n| n.set(n.get() + 1));
-}
-
 /// Places in the lookup grid boxes may take together; past them the page uses no boxes.
 const INDEX_ENTRIES: usize = 262_144;
 
@@ -44,7 +32,6 @@ pub(crate) fn structure(
     widgets: &[[f32; 4]],
     inked: &Inked,
 ) -> DrawnStructure {
-    searched();
     let page = PageIn {
         page,
         size: [width, height],
@@ -66,7 +53,6 @@ pub(crate) fn structure(
 /// [`structure_in_frame`]) and for a search that runs before the page's structure is found
 /// (see `tables::field_frames`).
 pub(crate) fn grids(rules: &[Rule]) -> Result<Grids, Unsearched> {
-    searched();
     let rules: Vec<_> = rules.iter().map(crate::engine::rule_in).collect();
     drawn::grids(&rules)
 }
@@ -444,9 +430,10 @@ mod tests {
             rect(300.0, 100.0, 500.0, 200.0),
         ];
         let inked = Inked::new(595.0, 842.0, [(100.0, 650.0), (350.0, 650.0)].into_iter());
-        let before = GRID_SEARCHES.with(std::cell::Cell::get);
+        let searches = || drawn::grid_searches().expect("a test build counts grid searches");
+        let before = searches();
         let found = structure(1, &rules, (595.0, 842.0), &[], &inked);
-        assert_eq!(GRID_SEARCHES.with(std::cell::Cell::get) - before, 1);
+        assert_eq!(searches() - before, 1);
         let at: Vec<f32> = found.boxes.iter().map(|b| b.x0).collect();
         assert_eq!(at, [40.0, 300.0]);
         assert_eq!(found.boxes[1].y0, 600.0);

@@ -3487,6 +3487,8 @@ mod tests {
 
     use super::*;
 
+    /// A page that draws nothing: no rules, so the empty structure is theirs (see
+    /// `engine::tests::no_structure_is_that_of_no_rules`).
     const NOTHING_DRAWN: Drawn<'static> = Drawn {
         rules: &[],
         structure: &crate::engine::NO_STRUCTURE,

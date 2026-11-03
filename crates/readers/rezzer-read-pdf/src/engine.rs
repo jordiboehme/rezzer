@@ -75,7 +75,9 @@ pub(crate) fn page_in(
     }
 }
 
-/// The drawn structure of a page that draws nothing, for tests.
+/// The drawn structure of a page that draws nothing, for tests: a `Drawn` with no rules. A
+/// test with rules makes the structure from them (`regions::structure_in_frame`), so the two
+/// never disagree.
 #[cfg(test)]
 pub(crate) const NO_STRUCTURE: DrawnStructure = DrawnStructure {
     grids: Ok(Grids {
@@ -226,8 +228,10 @@ mod tests {
                 kind: RuleKind::Rect,
             },
         ];
+        let structure = crate::regions::structure_in_frame(&rules, &[]);
         let drawn = Drawn {
             rules: &rules,
+            structure: &structure,
             images: &[[1.0, 2.0, 3.0, 4.0]],
             ..NOTHING
         };
@@ -242,10 +246,20 @@ mod tests {
         assert_eq!(page.pictures[0].bounds.x1, 3.0);
     }
 
+    /// The structure of the test constants is the one a page without rules or boxes has.
+    #[test]
+    fn no_structure_is_that_of_no_rules() {
+        assert_eq!(crate::regions::structure_in_frame(&[], &[]), NO_STRUCTURE);
+        assert!(NOTHING.rules.is_empty() && NOTHING.boxes.is_empty());
+    }
+
     #[test]
     fn widgets_are_boxes_marked_widget() {
+        let boxes = [[0.0, 0.0, 10.0, 10.0]];
+        let structure = crate::regions::structure_in_frame(&[], &boxes);
         let drawn = Drawn {
-            boxes: &[[0.0, 0.0, 10.0, 10.0]],
+            structure: &structure,
+            boxes: &boxes,
             widgets: &[[20.0, 20.0, 60.0, 34.0]],
             ..NOTHING
         };

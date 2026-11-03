@@ -43,6 +43,25 @@ pub const BOX_WORK: usize = 4_000_000;
 /// A box side is drawn when lines cover this share of it.
 const DRAWN_SIDE: f32 = 0.9;
 
+#[cfg(debug_assertions)]
+thread_local! {
+    static SEARCHES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// The grid searches ([`grids`], also run by [`drawn`]) done on this thread so far; `None` in
+/// a release build, which does not count them. A test reads it before and after a call, to
+/// check that a page's lines are searched once.
+pub fn grid_searches() -> Option<u64> {
+    #[cfg(debug_assertions)]
+    {
+        Some(SEARCHES.with(std::cell::Cell::get))
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        None
+    }
+}
+
 /// A straight horizontal (`at` is y, `from`..`to` along x) or vertical line.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Line {
@@ -255,6 +274,8 @@ pub fn inner_ruled(g: &Grids, (gh, gv): &(Vec<usize>, Vec<usize>)) -> bool {
 /// [`drawn`] runs this once per page; a reader calls it on its own only for rules in another
 /// frame than the page's.
 pub fn grids(rules: &[RuleIn]) -> Result<Grids, Unsearched> {
+    #[cfg(debug_assertions)]
+    SEARCHES.with(|n| n.set(n.get() + 1));
     let flat = |r: &RuleIn| (r.y0 - r.y1).abs() <= SNAP / 2.0;
     // Counted before anything is built: a page may keep many more lines than are searched.
     let (mut h, mut v) = (0usize, 0usize);
@@ -577,8 +598,12 @@ mod tests {
             .collect();
         let found = grids(&rules).expect("no note");
         assert!(found.hs.is_empty() && found.groups.is_empty());
+        let searches = || grid_searches().expect("a test build counts grid searches");
+        let before = searches();
         let found = drawn(&page(rules, &[]), &|_| true);
         assert_eq!(found.boxes_note, None);
+        // `drawn` searches the lines once.
+        assert_eq!(searches() - before, 1);
     }
 
     /// Lines past the bound are not searched, and the structure says why in the words of the

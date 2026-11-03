@@ -2183,10 +2183,16 @@ mod tests {
     /// the boxes, and once more for all the detectors of the layout, in the frame of the runs
     /// (the text pass does not keep its grids until the page is laid out, see
     /// `regions::structure_in_frame`). Before, each detector searched them on its own. A page
-    /// read turned is searched the same twice.
+    /// read turned is searched the same twice. The count is taken in the engine's grid search
+    /// itself, so any path to it counts. `tables::field_frames` keeps a search of its own by
+    /// ruling (it runs before the page's structure is found, see there); the page here draws
+    /// no separator marks, so it does not run.
     #[test]
     fn grids_are_found_once_per_page() {
-        let searches = || crate::regions::GRID_SEARCHES.with(std::cell::Cell::get);
+        let searches = || {
+            layoutregions::segment::drawn::grid_searches()
+                .expect("a test build counts grid searches")
+        };
         let pages = [
             Page::text(drawn_form_page(true)),
             Page::text(drawn_form_page(false)),
