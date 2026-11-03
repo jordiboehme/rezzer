@@ -8,7 +8,7 @@ use std::ops::Range;
 
 use super::heading_block;
 use crate::extract::text::address_shaped;
-use crate::file::{HEADING_PLAIN_RATIO, Levels};
+use crate::file::{Levels, plain_size};
 use crate::line::{EDGE, GAP_RATIO, LineRun, SIZE_SLACK, TextLine, ink, size_key};
 
 /// What `title_from` says of a title [`page_title`] found.
@@ -77,7 +77,7 @@ pub fn page_title<R: LineRun>(
         let (j, demoted) = heading_block(lines, i, level, levels);
         let block = &lines[i..j];
         let top = first.y + first.h;
-        let small = first.size < HEADING_PLAIN_RATIO * body_size;
+        let small = plain_size(first.size, body_size);
         let words: Vec<&str> = block
             .iter()
             .flat_map(|l| l.text.split_whitespace())
@@ -112,8 +112,8 @@ pub fn page_title<R: LineRun>(
 }
 
 /// Titles of a table of contents or an index, accent folded (see [`fold`]), a list per
-/// language (German, English, French, Italian or Portuguese, Spanish): such a heading names a part of the document, not the
-/// document.
+/// language (German, English, French, Italian or Portuguese, Spanish): such a heading names a
+/// part of the document, not the document.
 const CONTENTS_TITLES: [&str; 10] = [
     "contents",
     "table of contents",

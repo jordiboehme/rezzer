@@ -19,20 +19,22 @@
 //! against another kind's evidence. The kinds today's rules decide between win by 150 or more.
 
 use crate::extract::text::{Demotion, TextBlock, TextCx, next_block, sentences};
-use crate::file::{Band, HEADING_PLAIN_RATIO, bold_led};
+use crate::file::{Band, bold_led, in_text_size, plain_size};
 use crate::input::{PrimId, TextRun};
-use crate::line::{ink, size_key, text_lines};
+use crate::line::{ink, text_lines};
 use crate::region::{Kind, Signal};
 use crate::segment::Segment;
 use crate::typers::{PageView, Typed};
 
-/// `heading.size_ratio` for a line under [`HEADING_PLAIN_RATIO`] times the body size (it
-/// needs bold ink to head) and at or over it.
+/// `heading.size_ratio` for a line under [`crate::file::HEADING_PLAIN_RATIO`] times the body
+/// size (it needs bold ink to head, see [`plain_size`]) and at or over it.
 pub const HEADING_SIZE: u16 = 450;
 pub const HEADING_SIZE_LARGE: u16 = 550;
 /// `heading.bold_lead`: the line is led by bold ink.
 pub const HEADING_BOLD: u16 = 100;
-/// `heading.title_lines`: the heading's lines stay a heading (no [`Demotion`]).
+/// `heading.title_lines`: [`crate::extract::text::heading_block`] keeps the block a heading:
+/// none of its [`Demotion`]s applies. For one line this is the absence of the paragraph's
+/// evidence rather than evidence of its own (Task 18b weighs it).
 pub const HEADING_TITLE_LINES: u16 = 200;
 /// `paragraph.text_size`: the lines are set in a text size of the page or the body size.
 pub const PARAGRAPH_TEXT_SIZE: u16 = 300;
@@ -59,16 +61,19 @@ pub const LEGEND_ENTRIES: u16 = 900;
 pub const LEGEND_RAISED: u16 = 100;
 /// `title_block.largest_heading`: the largest heading in the head of page 1.
 pub const TITLE_HEADING: u16 = 700;
-/// `title_block.top_third`: its top stands in the top third of the page.
+/// `title_block.top_third`: its top stands in the top third of the page. `page_title` only
+/// picks such a heading, so this is the second half of one rule's weight, not independent
+/// evidence.
 pub const TITLE_TOP: u16 = 300;
 
 /// What the walk of the text lines reads one block as.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Read {
-    /// A heading: its first line's size as a share of the body size, whether that line is led
-    /// by bold ink, and why it reads as a paragraph, if it does.
+    /// A heading: its first line's size, whether that size is plain (see [`plain_size`]),
+    /// whether that line is led by bold ink, and why it reads as a paragraph, if it does.
     Heading {
-        ratio: f32,
+        size: f32,
+        plain: bool,
         bold_lead: bool,
         demoted: Option<Demotion>,
     },
@@ -81,7 +86,7 @@ pub(crate) enum Read {
 /// The text of a segment as the typers read it.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct SegText {
-    /// Its runs with ink.
+    /// Its runs with ink, sorted (a segment's primitives are sorted).
     runs: Vec<u32>,
     /// The line numbers of its runs with ink, sorted, once each.
     lines: Vec<u32>,
@@ -122,11 +127,12 @@ impl SegText {
             levels: &levels,
             block: &block,
         };
-        let body = size_key(view.file.body_size);
-        let text_size = all.iter().filter(|l| !l.text.is_empty()).all(|l| {
-            let key = size_key(l.size);
-            key == body || view.text_sizes().iter().any(|s| size_key(*s) == key)
-        });
+        crate::work::add((refs.len() + all.len()) as u64);
+        let body = [view.file.body_size];
+        let text_size = all
+            .iter()
+            .filter(|l| !l.text.is_empty())
+            .all(|l| in_text_size(l.size, view.text_sizes()) || in_text_size(l.size, &body));
         // The walk as a reader makes it: an item leaves its list open, a line without text
         // leaves it as it is, a heading or a paragraph closes it.
         let mut blocks = Vec::new();
@@ -139,7 +145,8 @@ impl SegText {
                 TextBlock::Heading { demoted, .. } => {
                     open = false;
                     Some(Read::Heading {
-                        ratio: all[i].size / view.file.body_size,
+                        size: all[i].size,
+                        plain: plain_size(all[i].size, view.file.body_size),
                         bold_lead: bold_led(&all[i]),
                         demoted,
                     })
@@ -279,40 +286,46 @@ pub fn type_paragraph(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
 
 /// Heading: the walk reads every line as headings by their size (see
 /// [`crate::file::Levels::level`]). Signals: the size against the body size
-/// (`heading.size_ratio`, more at [`HEADING_PLAIN_RATIO`] and over), bold ink that leads each
-/// heading (`heading.bold_lead`), and lines that stay a heading (`heading.title_lines`; lines
-/// that read as a paragraph give the paragraph its evidence instead).
+/// (`heading.size_ratio`, more at [`crate::file::HEADING_PLAIN_RATIO`] and over), bold ink
+/// that leads each heading (`heading.bold_lead`), and lines that stay a heading
+/// (`heading.title_lines`; lines that read as a paragraph give the paragraph its evidence
+/// instead).
 pub fn type_heading(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
     view.with_text(seg, |t| {
-        let mut ratio = f32::MAX;
+        let mut size = f32::MAX;
+        let mut plain = false;
         let mut bold = true;
         let mut kept = true;
         for b in &t.blocks {
             let Read::Heading {
-                ratio: r,
+                size: s,
+                plain: p,
                 bold_lead,
                 demoted,
             } = b
             else {
                 return None;
             };
-            ratio = ratio.min(*r);
+            size = size.min(*s);
+            plain |= *p;
             bold &= *bold_lead;
             kept &= demoted.is_none();
         }
         if t.blocks.is_empty() {
             return None;
         }
-        let weight = if ratio >= HEADING_PLAIN_RATIO {
-            HEADING_SIZE_LARGE
-        } else {
+        let weight = if plain {
             HEADING_SIZE
+        } else {
+            HEADING_SIZE_LARGE
         };
-        let mut signals = vec![signal(
-            "heading.size_ratio",
-            format!("{ratio:.2} times the body size"),
-            weight,
-        )];
+        let body = view.file.body_size;
+        let detail = if body > 0.0 {
+            format!("{:.2} times the body size", size / body)
+        } else {
+            "the file has no body size".into()
+        };
+        let mut signals = vec![signal("heading.size_ratio", detail, weight)];
         if bold {
             signals.push(signal(
                 "heading.bold_lead",
@@ -323,7 +336,7 @@ pub fn type_heading(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
         if kept {
             signals.push(signal(
                 "heading.title_lines",
-                "its lines go on as one heading".into(),
+                "its lines stay a heading".into(),
                 HEADING_TITLE_LINES,
             ));
         }
@@ -425,7 +438,7 @@ pub fn type_footnote_legend(view: &PageView<'_>, seg: &Segment) -> Option<Typed>
         let entries = legend
             .entries
             .iter()
-            .filter(|e| e.runs.iter().any(|r| t.runs.contains(r)))
+            .filter(|e| e.runs.iter().any(|r| t.runs.binary_search(r).is_ok()))
             .count();
         let mut signals = vec![signal(
             "footnote_legend.entries",
@@ -459,7 +472,10 @@ pub fn type_title_block(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
             ),
             signal(
                 "title_block.top_third",
-                format!("its top at {:.2} of the page height", title.top),
+                format!(
+                    "its top {:.2} of the page height from the top",
+                    1.0 - title.top
+                ),
                 TITLE_TOP,
             ),
         ];

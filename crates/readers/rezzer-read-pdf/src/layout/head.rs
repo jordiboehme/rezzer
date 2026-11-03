@@ -3,11 +3,11 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! What the head of page 1 says about the document: its date (its title is the engine's, see
-//! [`layoutregions::extract::text::title`]). It is found by general rules. A date is chosen only when a whole date label marks it as the document
-//! date: before it on its line, over it, or in the cell left of it in a table, and the date is
-//! the only one in its column on the page (a label over or before a list of dates marks
-//! none). A date nothing marks is never chosen, also when it is the only date of the head: the
-//! loss says that it stands there.
+//! [`layoutregions::extract::text::title`]). It is found by general rules. A date is chosen
+//! only when a whole date label marks it as the document date: before it on its line, over
+//! it, or in the cell left of it in a table, and the date is the only one in its column on the
+//! page (a label over or before a list of dates marks none). A date nothing marks is never
+//! chosen, also when it is the only date of the head: the loss says that it stands there.
 
 use layoutregions::extract::text::title::{HEAD_SHARE, fold, right_below};
 pub(crate) use layoutregions::extract::text::title::{TITLE_FROM, page_title};

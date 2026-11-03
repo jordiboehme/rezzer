@@ -486,6 +486,11 @@ fn values_have_shapes() {
         ("Jan 26", None),
         ("-", None),
         ("", None),
+        // Currencies are stripped once each, in the order of `file::CURRENCIES` (codes before
+        // signs): a sign before a code at the end is stripped, a sign before a code at the
+        // start is not.
+        ("12 \u{20ac} EUR", Some(Number)),
+        ("\u{20ac} EUR 12", None),
     ] {
         assert_eq!(Shape::of(text), shape, "{text:?}");
     }

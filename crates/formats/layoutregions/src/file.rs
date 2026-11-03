@@ -216,6 +216,20 @@ pub(crate) fn is_heading_size<R>(line: &TextLine<'_, R>, body_size: f32) -> bool
         && line.text.chars().any(char::is_alphanumeric)
 }
 
+/// Whether a line of `size` is set in one of `sizes`: the same half point (see [`size_key`]).
+/// A line in a text size of its page is body text there (see [`text_sizes`]).
+pub fn in_text_size(size: f32, sizes: &[f32]) -> bool {
+    let key = size_key(size);
+    sizes.iter().any(|s| size_key(*s) == key)
+}
+
+/// Whether a line of `size` is under [`HEADING_PLAIN_RATIO`] times `body_size`: a heading of
+/// this size needs bold ink to lead it, and lines of it that read as an address or as
+/// sentences are a paragraph. The product form gives a plain answer for a body size of 0.
+pub fn plain_size(size: f32, body_size: f32) -> bool {
+    size < HEADING_PLAIN_RATIO * body_size
+}
+
 /// Whether an untagged line may be a heading by its own text and style: large enough, short,
 /// not ending in an amount (`ends_in_amount`, the reader's own reading of amounts and dates),
 /// and, when it is smaller than [`HEADING_PLAIN_RATIO`] times the body size, led by bold ink
@@ -226,7 +240,7 @@ pub fn may_head<R: LineRun>(
     ends_in_amount: &dyn Fn(&str) -> bool,
 ) -> bool {
     // A number set large (a form or file number) stays a heading.
-    let large = line.size >= HEADING_PLAIN_RATIO * body_size;
+    let large = !plain_size(line.size, body_size);
     is_heading_size(line, body_size)
         && !ends_in_amount(&line.text)
         && (large || (!data_only(&line.text) && bold_led(line)))
@@ -334,7 +348,7 @@ impl Levels<'_> {
         }
         let key = size_key(line.size);
         let largest = self.text_sizes.last().copied();
-        let page_text = self.text_sizes.iter().any(|s| size_key(*s) == key);
+        let page_text = in_text_size(line.size, self.text_sizes);
         if page_text || !largest.is_none_or(|b| line.size >= b * HEADING_RATIO) {
             return None;
         }

@@ -59,7 +59,9 @@ impl Typed {
     }
 }
 
-/// A typer: the evidence for its kind in a segment of the page the view shows.
+/// A typer: the evidence for its kind in a segment of the page the view shows. Pass the
+/// segment as it stands in the view's tree (`&segs.all[i]`, not a copy): the text of a segment
+/// of the tree is walked once for all typers, a copy is walked again by each.
 pub type Typer = fn(&PageView<'_>, &Segment) -> Option<Typed>;
 
 /// Every typer, in [`Kind`] order. Spatial has none: it is what no clear evidence leaves.
@@ -136,6 +138,7 @@ impl<'a> PageView<'a> {
         ends_in_amount: &'a dyn Fn(&str) -> bool,
     ) -> PageView<'a> {
         let height = page.size[1];
+        crate::work::add(page.texts.len() as u64);
         let lines = text_lines(&page.texts);
         let found = index.running.bands(&lines, height, &[]);
         let mut bands = HashMap::new();

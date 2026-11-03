@@ -8,6 +8,11 @@
 use layoutregions::file::{FilePage, learn};
 use layoutregions::segment::drawn::drawn;
 use layoutregions::segment::{SegId, Segment, Source, segment_page};
+use layoutregions::typers::text::{
+    BAND_RUNNING, HEADING_BOLD, HEADING_SIZE_LARGE, HEADING_TITLE_LINES, LEGEND_ENTRIES,
+    LIST_HANGING, LIST_ITEMS, LIST_MARKER, PARAGRAPH_DEMOTED, PARAGRAPH_JOINS, PARAGRAPH_SENTENCES,
+    PARAGRAPH_TEXT_SIZE, TITLE_HEADING, TITLE_TOP,
+};
 use layoutregions::typers::{FileIndex, PageView, TYPERS, Typed};
 use layoutregions::*;
 
@@ -56,7 +61,8 @@ fn no_amount(_: &str) -> bool {
     false
 }
 
-/// Four lines of prose in 9 points from line `first` on, the first at `y`.
+/// Four lines of prose in 9.2 points (sizes off the edges of the half-point keys at every
+/// scale of the tests) from line `first` on, the first at `y`.
 fn prose(first: u32, y: f32) -> Vec<TextRun> {
     [
         "Die Muster GmbH liefert die bestellte Ware an den",
@@ -66,7 +72,7 @@ fn prose(first: u32, y: f32) -> Vec<TextRun> {
     ]
     .iter()
     .enumerate()
-    .map(|(k, t)| run(t, 72.0, y - 11.0 * k as f32, 9.0, first + k as u32))
+    .map(|(k, t)| run(t, 72.0, y - 11.0 * k as f32, 9.2, first + k as u32))
     .collect()
 }
 
@@ -181,9 +187,9 @@ fn winner(typed: &[Typed]) -> (Kind, u16) {
     (scores[0].1, scores[0].0 - second)
 }
 
-/// A heading of 14 points over prose of 9 points.
+/// A heading of 14.2 points over prose of 9.2 points.
 fn heading_case(lines: &[u32]) -> Case {
-    let mut texts = vec![run("Einleitung", 72.0, 780.0, 14.0, 0)];
+    let mut texts = vec![run("Einleitung", 72.0, 780.0, 14.2, 0)];
     texts.extend(prose(1, 740.0));
     Case {
         pages: vec![page(2, texts)],
@@ -195,8 +201,8 @@ fn heading_case(lines: &[u32]) -> Case {
 /// Prose and a list of two items under it.
 fn list_case() -> Case {
     let mut texts = prose(0, 740.0);
-    texts.push(run("- Erster Punkt", 72.0, 690.0, 9.0, 4));
-    texts.push(run("- Zweiter Punkt", 72.0, 679.0, 9.0, 5));
+    texts.push(run("- Erster Punkt", 72.0, 690.0, 9.2, 4));
+    texts.push(run("- Zweiter Punkt", 72.0, 679.0, 9.2, 5));
     Case {
         pages: vec![page(1, texts)],
         at: 0,
@@ -209,7 +215,7 @@ fn footer_case() -> Case {
     let pages = (1..=3)
         .map(|n| {
             let mut texts = prose(0, 500.0);
-            texts.push(run(&format!("Muster GmbH Seite {n}"), 72.0, 30.0, 9.0, 4));
+            texts.push(run(&format!("Muster GmbH Seite {n}"), 72.0, 30.0, 9.2, 4));
             page(n, texts)
         })
         .collect();
@@ -220,17 +226,17 @@ fn footer_case() -> Case {
     }
 }
 
-/// Prose with two raised references and the legend of 6 points at the foot of the page.
+/// Prose with two raised references and the legend of 6.2 points at the foot of the page.
 fn legend_case() -> Case {
     let mut texts = vec![
-        run("Einheit", 40.0, 720.0, 9.0, 0),
-        run(" 2", 72.0, 724.0, 6.0, 0),
-        run(" Beitrag", 200.0, 720.0, 9.0, 0),
-        run(" 3", 236.0, 724.0, 6.0, 0),
+        run("Einheit", 40.0, 720.0, 9.2, 0),
+        run(" 2", 72.0, 724.0, 6.2, 0),
+        run(" Beitrag", 200.0, 720.0, 9.2, 0),
+        run(" 3", 236.0, 724.0, 6.2, 0),
     ];
     texts.extend(prose(1, 690.0));
-    texts.push(run("2 Std = Stunden", 40.0, 70.0, 6.0, 5));
-    texts.push(run("3 Gegebenenfalls anteilig", 40.0, 62.0, 6.0, 6));
+    texts.push(run("2 Std = Stunden", 40.0, 70.0, 6.2, 5));
+    texts.push(run("3 Gegebenenfalls anteilig", 40.0, 62.0, 6.2, 6));
     Case {
         pages: vec![page(2, texts)],
         at: 0,
@@ -245,12 +251,12 @@ fn paren_legend_case() -> Case {
         "Der Betrag1) und die Summe2) gelten",
         72.0,
         760.0,
-        9.0,
+        9.2,
         0,
     )];
     texts.extend(prose(1, 740.0));
-    texts.push(run("1) Erste Fussnote zum Betrag", 72.0, 70.0, 6.0, 5));
-    texts.push(run("2) Zweite Fussnote zur Summe", 72.0, 62.0, 6.0, 6));
+    texts.push(run("1) Erste Fussnote zum Betrag", 72.0, 70.0, 6.2, 5));
+    texts.push(run("2) Zweite Fussnote zur Summe", 72.0, 62.0, 6.2, 6));
     Case {
         pages: vec![page(2, texts)],
         at: 0,
@@ -258,17 +264,18 @@ fn paren_legend_case() -> Case {
     }
 }
 
-/// Bold lines of an address a little larger than the prose of 10 points under them.
+/// Bold lines of an address a little larger than the prose of 10.2 points under them, which
+/// read as a paragraph: their lines are short items of one column.
 fn address_case() -> Case {
     let mut texts = vec![
-        bold(run("Muster GmbH", 72.0, 780.0, 13.0, 0)),
-        bold(run("Musterweg 1", 72.0, 765.0, 13.0, 1)),
-        bold(run("12345 Musterstadt", 72.0, 750.0, 13.0, 2)),
+        bold(run("Muster GmbH", 72.0, 780.0, 13.2, 0)),
+        bold(run("Musterweg 1", 72.0, 765.0, 13.2, 1)),
+        bold(run("12345 Musterstadt", 72.0, 750.0, 13.2, 2)),
     ];
     texts.extend(prose(3, 700.0).into_iter().map(|r| TextRun {
-        size: 10.0,
-        h: 10.0,
-        w: r.text.chars().count() as f32 * 5.0,
+        size: 10.2,
+        h: 10.2,
+        w: r.text.chars().count() as f32 * 5.1,
         ..r
     }));
     Case {
@@ -280,7 +287,7 @@ fn address_case() -> Case {
 
 /// The title of a report at the top of page 1, over prose.
 fn title_case() -> Case {
-    let mut texts = vec![run("Jahresbericht", 72.0, 800.0, 20.0, 0)];
+    let mut texts = vec![run("Jahresbericht", 72.0, 800.0, 20.2, 0)];
     texts.extend(prose(1, 740.0));
     Case {
         pages: vec![page(1, texts)],
@@ -350,7 +357,9 @@ fn running_header_and_two_page_footer() {
     }
     let typed = header.typed();
     assert_eq!(ids(of(&typed, Kind::HeaderBand)), ["header_band.running"]);
-    assert_eq!(winner(&typed).0, Kind::HeaderBand);
+    let (kind, lead) = winner(&typed);
+    assert_eq!(kind, Kind::HeaderBand);
+    assert!(lead >= MARGIN, "{typed:#?}");
     let mut two = footer_case();
     two.pages.truncate(2);
     let typed = two.typed();
@@ -437,7 +446,7 @@ fn no_signal_no_candidate() {
     }
     // A line of white space only is no text either.
     let mut blank = heading_case(&[9]);
-    blank.pages[0].texts.push(run("   ", 72.0, 600.0, 9.0, 9));
+    blank.pages[0].texts.push(run("   ", 72.0, 600.0, 9.2, 9));
     assert_eq!(blank.typed(), []);
 }
 
@@ -455,12 +464,15 @@ fn scores_are_scale_free() {
         title_case(),
     ];
     for case in cases {
-        let scores = |c: &Case| -> Vec<(Kind, u16)> {
-            c.typed().iter().map(|t| (t.kind, t.score.0)).collect()
+        let scores = |c: &Case| -> Vec<(Kind, u16, Vec<&'static str>)> {
+            c.typed()
+                .iter()
+                .map(|t| (t.kind, t.score.0, ids(t)))
+                .collect()
         };
         let at = scores(&case);
         assert!(!at.is_empty());
-        for k in [0.75, 1.5] {
+        for k in [0.75, 0.8, 1.3, 1.5] {
             assert_eq!(scores(&case.scaled(k)), at, "at {k}x of {:?}", case.lines);
         }
     }
@@ -484,4 +496,76 @@ fn a_score_is_the_sum_of_its_signals() {
             assert_eq!(u32::from(t.score.0), sum.min(1000), "{t:#?}");
         }
     }
+}
+
+/// The worst cases of the kinds today's rules decide between, by the weights alone: each
+/// winner's least score is ahead of the loser's best by the margin.
+#[test]
+fn worst_case_margins_hold_by_the_weights() {
+    let heading_kept = HEADING_SIZE_LARGE + HEADING_BOLD + HEADING_TITLE_LINES;
+    let heading_demoted = HEADING_SIZE_LARGE + HEADING_BOLD;
+    let list = LIST_MARKER + LIST_ITEMS + LIST_HANGING;
+    let paragraph = PARAGRAPH_TEXT_SIZE + PARAGRAPH_JOINS + PARAGRAPH_SENTENCES;
+    let pairs = [
+        ("demoted heading", PARAGRAPH_DEMOTED, heading_demoted),
+        (
+            "title over heading",
+            TITLE_HEADING + TITLE_TOP,
+            heading_kept,
+        ),
+        ("legend over list", LEGEND_ENTRIES, list),
+        ("legend over paragraph", LEGEND_ENTRIES, paragraph),
+        ("band over paragraph", BAND_RUNNING, paragraph),
+        ("band over list", BAND_RUNNING, list),
+    ];
+    for (what, winner, loser) in pairs {
+        assert!(winner >= loser + MARGIN, "{what}: {winner} against {loser}");
+    }
+    // The least paragraph evidence alone loses to the first signal of every other kind.
+    for first in [
+        HEADING_SIZE_LARGE.min(layoutregions::typers::text::HEADING_SIZE),
+        LIST_MARKER,
+        BAND_RUNNING,
+        LEGEND_ENTRIES,
+        TITLE_HEADING,
+    ] {
+        assert!(PARAGRAPH_TEXT_SIZE + MARGIN <= first);
+    }
+}
+
+/// A segment of the view's tree is walked once for all typers: a second round does no work
+/// and gives the same as a copy of the segment, which is walked again.
+#[test]
+fn a_segment_of_the_tree_is_walked_once() {
+    let case = heading_case(&[0]);
+    let file: Vec<FilePage<'_, TextRun>> = case.pages.iter().map(FilePage::of).collect();
+    let facts = learn(&file, false, &no_amount);
+    let index = FileIndex::new(&facts);
+    let page = &case.pages[0];
+    let structure = drawn(page, &|_| true);
+    let segs = segment_page(page, &Limits::default(), &|| false);
+    let view = PageView::new(page, &structure, &segs, &facts, &index, &no_amount);
+    let all = |seg: &Segment| -> Vec<Typed> {
+        TYPERS
+            .iter()
+            .filter_map(|(_, typer)| typer(&view, seg))
+            .collect()
+    };
+    for seg in &segs.all {
+        let before = work_steps();
+        let first = all(seg);
+        let between = work_steps();
+        let second = all(seg);
+        let after = work_steps();
+        assert_eq!(first, second);
+        assert_eq!(all(&seg.clone()), first);
+        if let (Some(a), Some(b), Some(c)) = (before, between, after) {
+            if seg.prims.iter().any(|p| matches!(p, PrimId::Text(_))) {
+                assert!(b > a, "the first round walks the text");
+            }
+            assert_eq!(c, b, "the second round is cached");
+        }
+    }
+    // The root holds every line: a heading over a paragraph is no text kind of its own.
+    assert!(all(&segs.all[segs.root.0 as usize]).is_empty());
 }

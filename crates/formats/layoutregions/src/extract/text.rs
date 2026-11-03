@@ -17,7 +17,7 @@
 
 pub mod title;
 
-use crate::file::{HEADING_PLAIN_RATIO, Levels, data_only};
+use crate::file::{Levels, data_only, plain_size};
 use crate::line::{EDGE, GAP_RATIO, LABEL_STEP, LineRun, PIECE_GAP, SIZE_SLACK, TextLine, ink};
 
 /// What the walk over a page's lines needs besides the lines.
@@ -294,7 +294,7 @@ pub fn heading_block<R: LineRun>(
         j += 1;
     }
     let first = &all[i];
-    let small = first.size < HEADING_PLAIN_RATIO * body_size;
+    let small = plain_size(first.size, body_size);
     let block = &all[i..j];
     // Lines that keep a break between them (items, fields) are no heading but a paragraph with
     // its breaks, when they are a little larger than the body or three lines or more (a column
