@@ -1036,6 +1036,7 @@ fn anchor_of(block: &Block) -> Option<&Anchor> {
         | Block::List { anchor, .. }
         | Block::Table { anchor, .. }
         | Block::Code { anchor, .. }
+        | Block::Spatial { anchor, .. }
         | Block::Quote { anchor, .. }
         | Block::Math { anchor, .. }
         | Block::Media { anchor, .. }

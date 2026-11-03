@@ -507,7 +507,7 @@ fn items(blocks: &[Block], cap: usize) -> Vec<(Item, Option<String>)> {
             Block::Math { latex, .. } => Item::Text(latex.trim().chars().count()),
             Block::List { items, .. } => Item::Run(items.len()),
             Block::Quote { blocks, .. } => Item::Run(blocks.len()),
-            Block::Code { .. } | Block::Callout { .. } => Item::Boxed,
+            Block::Code { .. } | Block::Spatial { .. } | Block::Callout { .. } => Item::Boxed,
             Block::Media { .. } => Item::Media,
             Block::Rule { .. } => Item::Rule,
             Block::Table { rows, .. } => Item::Table {

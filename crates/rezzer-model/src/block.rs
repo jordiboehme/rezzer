@@ -8,6 +8,21 @@ use serde::{Deserialize, Serialize};
 use crate::inline::{Anchor, Inline};
 use crate::layout::TableLayout;
 
+/// One line of a [`Block::Spatial`]: its pieces, left to right.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SpatialLine {
+    #[serde(default)]
+    pub pieces: Vec<SpatialPiece>,
+}
+
+/// A piece of text on a spatial line.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct SpatialPiece {
+    /// Character column (Unicode scalar values, not bytes) where the piece starts.
+    pub col: u32,
+    pub text: String,
+}
+
 /// Block-level content of a document body.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -70,6 +85,14 @@ pub enum Block {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         lang: Option<String>,
         text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        anchor: Option<Anchor>,
+    },
+    /// Text kept as laid out: a region no type had clear evidence for.
+    Spatial {
+        /// Top to bottom.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        lines: Vec<SpatialLine>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         anchor: Option<Anchor>,
     },

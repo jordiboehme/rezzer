@@ -91,6 +91,15 @@ fn body_text(body: &[Block]) -> String {
         if matches!(b, Block::Paragraph { role: Some(r), .. } if r == "found-by") {
             return true;
         }
+        // Text kept in its layout is read like a paragraph's.
+        if let Block::Spatial { lines, .. } = b {
+            for line in lines {
+                for piece in &line.pieces {
+                    add_words(&mut text, &piece.text);
+                }
+                push_capped(&mut text, "\n");
+            }
+        }
         walk::block_inlines(b, |list| {
             walk::inlines(list, |i| {
                 // A status (a page marker, an empty field) is the reader's word, not the
@@ -98,23 +107,28 @@ fn body_text(body: &[Block]) -> String {
                 let Inline::Text { text: t, .. } = i else {
                     return;
                 };
-                for word in t.split_whitespace() {
-                    // One huge text must not be scanned to the end once the sample is full.
-                    if text.len() >= MAX_BYTES {
-                        break;
-                    }
-                    let word = word.trim_matches(|c: char| !c.is_alphabetic());
-                    if is_word(word) {
-                        push_capped(&mut text, word);
-                        push_capped(&mut text, " ");
-                    }
-                }
+                add_words(&mut text, t);
             });
             push_capped(&mut text, "\n");
         });
         text.len() < MAX_BYTES
     });
     text
+}
+
+/// Appends the words of `t` to the sample.
+fn add_words(text: &mut String, t: &str) {
+    for word in t.split_whitespace() {
+        // One huge text must not be scanned to the end once the sample is full.
+        if text.len() >= MAX_BYTES {
+            break;
+        }
+        let word = word.trim_matches(|c: char| !c.is_alphabetic());
+        if is_word(word) {
+            push_capped(text, word);
+            push_capped(text, " ");
+        }
+    }
 }
 
 fn is_word(word: &str) -> bool {

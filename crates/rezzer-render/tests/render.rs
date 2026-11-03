@@ -7058,3 +7058,63 @@ fn geometry_does_not_change_markdown() {
         }
     }
 }
+
+fn spatial(lines: &[&[(u32, &str)]]) -> Block {
+    Block::Spatial {
+        lines: lines
+            .iter()
+            .map(|l| rezzer_model::SpatialLine {
+                pieces: l
+                    .iter()
+                    .map(|(col, text)| rezzer_model::SpatialPiece {
+                        col: *col,
+                        text: (*text).into(),
+                    })
+                    .collect(),
+            })
+            .collect(),
+        anchor: None,
+    }
+}
+
+#[test]
+fn spatial_renders_aligned_in_a_fence() {
+    let md = body_of(vec![spatial(&[
+        &[(0, "Name"), (12, "Betrag")],
+        &[(0, "Muster GmbH"), (12, "1.234,56")],
+    ])]);
+    assert!(
+        md.contains("\n```text\nName        Betrag\nMuster GmbH 1.234,56\n```\n"),
+        "{md}"
+    );
+}
+
+#[test]
+fn spatial_fence_outgrows_backticks() {
+    let md = body_of(vec![spatial(&[&[(0, "a ``` b")]])]);
+    assert!(md.contains("\n````text\na ``` b\n````\n"), "{md}");
+}
+
+#[test]
+fn spatial_overlap_gets_one_space() {
+    let md = body_of(vec![spatial(&[&[(0, "Muster GmbH"), (4, "x")]])]);
+    assert!(md.contains("\n```text\nMuster GmbH x\n```\n"), "{md}");
+}
+
+#[test]
+fn spatial_columns_count_characters() {
+    let md = body_of(vec![spatial(&[
+        &[(0, "Größe"), (8, "Preis")],
+        &[(0, "Maß"), (8, "1,00")],
+    ])]);
+    assert!(
+        md.contains("\n```text\nGröße   Preis\nMaß     1,00\n```\n"),
+        "{md}"
+    );
+}
+
+#[test]
+fn spatial_is_verbatim_without_trailing_spaces() {
+    let md = body_of(vec![spatial(&[&[(0, "*a* [b](c)"), (20, "")], &[]])]);
+    assert!(md.contains("\n```text\n*a* [b](c)\n\n```\n"), "{md}");
+}

@@ -201,7 +201,11 @@ pub(super) fn rewrite_block(b: &mut Block, links: &Links<'_>, depth: usize) {
                 rewrite_inlines(&mut cell.inlines, links, depth + 1);
             }
         }
-        Block::Code { .. } | Block::Math { .. } | Block::Media { .. } | Block::Rule { .. } => {}
+        Block::Code { .. }
+        | Block::Spatial { .. }
+        | Block::Math { .. }
+        | Block::Media { .. }
+        | Block::Rule { .. } => {}
     }
 }
 

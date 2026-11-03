@@ -207,7 +207,11 @@ pub(super) fn walk<'x>(list: &'x [Block], depth: usize, f: &mut dyn FnMut(Node<'
                     walk_inlines(&cell.inlines, depth + 1, f);
                 }
             }
-            Block::Code { .. } | Block::Math { .. } | Block::Media { .. } | Block::Rule { .. } => {}
+            Block::Code { .. }
+            | Block::Spatial { .. }
+            | Block::Math { .. }
+            | Block::Media { .. }
+            | Block::Rule { .. } => {}
         }
     }
 }
@@ -256,6 +260,7 @@ fn block_anchor(b: &Block) -> Option<&str> {
         | Block::List { anchor, .. }
         | Block::Table { anchor, .. }
         | Block::Code { anchor, .. }
+        | Block::Spatial { anchor, .. }
         | Block::Quote { anchor, .. }
         | Block::Math { anchor, .. }
         | Block::Media { anchor, .. }

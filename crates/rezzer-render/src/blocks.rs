@@ -144,6 +144,7 @@ fn passage_anchor(b: &Block) -> Option<&str> {
         | Block::List { anchor, .. }
         | Block::Table { anchor, .. }
         | Block::Code { anchor, .. }
+        | Block::Spatial { anchor, .. }
         | Block::Quote { anchor, .. }
         | Block::Math { anchor, .. }
         | Block::Media { anchor, .. }
@@ -419,6 +420,7 @@ fn block(b: &Block, ctx: &Ctx, depth: usize, level: u8) -> String {
             None => model_table(caption.as_deref(), *header_rows, rows, alignments),
         },
         Block::Code { lang, text, .. } => fence(lang.as_deref(), text),
+        Block::Spatial { lines, .. } => spatial_fence(lines),
         Block::Quote { blocks: inner, .. } => {
             let body = blocks(inner, ctx, depth + 1, level, false);
             prefix_lines(&body, ">")
@@ -676,6 +678,38 @@ pub(crate) fn fence(lang: Option<&str>, text: &str) -> String {
     } else {
         format!("{fence}{info}\n{body}\n{fence}")
     }
+}
+
+/// Text kept in its layout: a `text` fence whose lines put each piece at its character
+/// column. A piece that starts before the end of the previous one gets one space. The text is
+/// verbatim and a line has no trailing spaces.
+fn spatial_fence(lines: &[rezzer_model::SpatialLine]) -> String {
+    let mut body = String::new();
+    for (n, line) in lines.iter().enumerate() {
+        if n > 0 {
+            body.push('\n');
+        }
+        let mut at = 0usize;
+        let start = body.len();
+        for (k, piece) in line.pieces.iter().enumerate() {
+            let col = piece.col as usize;
+            let pad = if k == 0 {
+                col
+            } else if col > at {
+                col - at
+            } else {
+                1
+            };
+            // A line is bounded by the text it holds, not by a huge column.
+            body.extend(std::iter::repeat_n(' ', pad));
+            body.push_str(&piece.text);
+            at += pad + piece.text.chars().count();
+        }
+        let trimmed = body[start..].trim_end_matches(' ').len();
+        body.truncate(start + trimmed);
+    }
+    let fence = "`".repeat(longest_run(&body, '`').max(2) + 1);
+    format!("{fence}text\n{body}\n{fence}")
 }
 
 fn math_block(latex: &str) -> String {

@@ -1306,3 +1306,39 @@ fn many_pages_fill_fast() {
     }
     assert!(start.elapsed() < std::time::Duration::from_secs(60));
 }
+
+#[test]
+fn spatial_round_trips_json() {
+    use rezzer_model::{SpatialLine, SpatialPiece};
+    let block = Block::Spatial {
+        lines: vec![SpatialLine {
+            pieces: vec![
+                SpatialPiece {
+                    col: 0,
+                    text: "Name".into(),
+                },
+                SpatialPiece {
+                    col: 12,
+                    text: "Betrag".into(),
+                },
+            ],
+        }],
+        anchor: None,
+    };
+    let v = serde_json::to_value(&block).unwrap();
+    assert_eq!(
+        v,
+        serde_json::json!({"type": "spatial", "lines": [{"pieces": [
+            {"col": 0, "text": "Name"}, {"col": 12, "text": "Betrag"}]}]})
+    );
+    let back: Block = serde_json::from_value(v).unwrap();
+    assert_eq!(back, block);
+}
+
+#[test]
+fn schema_has_spatial() {
+    let schema = schemars::schema_for!(Document);
+    let text = serde_json::to_string(&schema).unwrap();
+    assert!(text.contains("\"spatial\""));
+    assert!(text.contains("SpatialPiece"));
+}

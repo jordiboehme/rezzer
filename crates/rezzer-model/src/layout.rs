@@ -491,6 +491,7 @@ fn block_anchor(b: &Block) -> Option<&str> {
         | Block::List { anchor, .. }
         | Block::Table { anchor, .. }
         | Block::Code { anchor, .. }
+        | Block::Spatial { anchor, .. }
         | Block::Quote { anchor, .. }
         | Block::Math { anchor, .. }
         | Block::Media { anchor, .. }
@@ -687,6 +688,11 @@ fn block_chars(block: &Block) -> usize {
             }
             Block::Table { caption, rows, .. } => caption.as_deref().map_or(0, count) + cells(rows),
             Block::Code { text, .. } => count(text),
+            Block::Spatial { lines, .. } => lines
+                .iter()
+                .flat_map(|l| &l.pieces)
+                .map(|p| count(&p.text))
+                .sum(),
             Block::Quote { blocks, .. } => {
                 stack.extend(blocks);
                 0

@@ -22,7 +22,10 @@ pub mod text;
 mod value;
 mod work;
 
-pub use block::{Align, Block, CalloutKind, Cell, SectionKind, TaskState, column_letter};
+pub use block::{
+    Align, Block, CalloutKind, Cell, SectionKind, SpatialLine, SpatialPiece, TaskState,
+    column_letter,
+};
 pub use document::{
     Asset, Barcode, Confidence, Detection, Document, FoundDate, MODEL_VERSION, Overview,
     OverviewPart, Properties, ReaderInfo, SourceInfo,
