@@ -9,8 +9,9 @@
 
 use std::collections::HashSet;
 
+use layoutregions::segment::drawn::{Line, clustered};
+
 use super::SNAP;
-use crate::regions::{Seg, clustered};
 
 /// Whether every value of `inner` lies within [`SNAP`] of one of `outer`. Both are sorted.
 fn holds(outer: &[f32], inner: &[f32]) -> bool {
@@ -34,7 +35,7 @@ pub(super) const CUT_WORK: usize = 1_000_000;
 /// at most [`CUT_GAPS`] of the width, with a piece of another group (not in `own`, by place
 /// and start) among them: a grid's own rule with gaps does not cut by itself.
 fn crosses(
-    page: &[Seg],
+    page: &[Line],
     own: &HashSet<(u32, u32)>,
     y: f32,
     (left, right): (f32, f32),
@@ -83,11 +84,11 @@ fn crosses(
 /// both sections, vertical segments are clipped to their section. A grid without a cut is
 /// returned whole.
 pub(super) fn sections(
-    h: &[Seg],
-    v: &[Seg],
-    page: &[Seg],
+    h: &[Line],
+    v: &[Line],
+    page: &[Line],
     work: &mut usize,
-) -> Vec<(Vec<Seg>, Vec<Seg>)> {
+) -> Vec<(Vec<Line>, Vec<Line>)> {
     let whole = || vec![(h.to_vec(), v.to_vec())];
     let (Some(left), Some(right)) = (
         h.iter().map(|s| s.from).reduce(f32::min),
@@ -130,7 +131,7 @@ pub(super) fn sections(
     // The bands each vertical segment reaches into, from the bottom, and the column edges of
     // each band. A segment reaches into no more bands than the rules it crossed when the
     // grid was found, so this is bounded by that search.
-    let reach = |s: &Seg| {
+    let reach = |s: &Line| {
         let first = ys
             .partition_point(|y| *y <= s.from + SNAP)
             .saturating_sub(1);
@@ -188,7 +189,7 @@ pub(super) fn sections(
     for (k, &m) in section.iter().enumerate() {
         extent[m] = (extent[m].0.min(ys[k]), extent[m].1.max(ys[k + 1]));
     }
-    let mut out: Vec<(Vec<Seg>, Vec<Seg>)> = vec![(Vec::new(), Vec::new()); n + 1];
+    let mut out: Vec<(Vec<Line>, Vec<Line>)> = vec![(Vec::new(), Vec::new()); n + 1];
     for s in h {
         let k = ys.partition_point(|y| *y <= s.at).clamp(1, bands) - 1;
         let mut last = None;
@@ -210,7 +211,7 @@ pub(super) fn sections(
             let m = section[k];
             if last != Some(m) {
                 let (lo, hi) = extent[m];
-                out[m].1.push(Seg {
+                out[m].1.push(Line {
                     at: s.at,
                     from: s.from.max(lo),
                     to: s.to.min(hi),
@@ -228,12 +229,12 @@ mod tests {
 
     /// A grid section: horizontal rules across `xs` at each of `ys`, vertical rules at each
     /// of `xs` from the lowest to the highest of `ys`.
-    fn section(xs: &[f32], ys: &[f32]) -> (Vec<Seg>, Vec<Seg>) {
+    fn section(xs: &[f32], ys: &[f32]) -> (Vec<Line>, Vec<Line>) {
         let (x0, x1) = (xs[0], xs[xs.len() - 1]);
         let (y0, y1) = (ys[0], ys[ys.len() - 1]);
         let h = ys
             .iter()
-            .map(|&at| Seg {
+            .map(|&at| Line {
                 at,
                 from: x0,
                 to: x1,
@@ -241,7 +242,7 @@ mod tests {
             .collect();
         let v = xs
             .iter()
-            .map(|&at| Seg {
+            .map(|&at| Line {
                 at,
                 from: y0,
                 to: y1,
@@ -250,7 +251,7 @@ mod tests {
         (h, v)
     }
 
-    fn stacked(parts: &[(Vec<f32>, Vec<f32>)]) -> (Vec<Seg>, Vec<Seg>) {
+    fn stacked(parts: &[(Vec<f32>, Vec<f32>)]) -> (Vec<Line>, Vec<Line>) {
         let (mut h, mut v) = (Vec::new(), Vec::new());
         for (xs, ys) in parts {
             let (a, b) = section(xs, ys);
@@ -261,14 +262,14 @@ mod tests {
     }
 
     /// The sections of `h` and `v` with no other rules on the page.
-    fn cut(h: &[Seg], v: &[Seg]) -> Vec<(Vec<Seg>, Vec<Seg>)> {
+    fn cut(h: &[Line], v: &[Line]) -> Vec<(Vec<Line>, Vec<Line>)> {
         let mut page = h.to_vec();
         page.sort_by(|a, b| a.at.total_cmp(&b.at));
         sections(h, v, &page, &mut 0)
     }
 
     /// The (bottom, top) of each section and its column edges.
-    fn shape(parts: &[(Vec<Seg>, Vec<Seg>)]) -> Vec<((f32, f32), Vec<f32>)> {
+    fn shape(parts: &[(Vec<Line>, Vec<Line>)]) -> Vec<((f32, f32), Vec<f32>)> {
         parts
             .iter()
             .map(|(h, v)| {
@@ -347,19 +348,19 @@ mod tests {
         // A table of 3 columns over a band whose one inner rule hangs from its top, at an
         // edge of the table above: the band starts a section all the same.
         let (mut h, mut v) = section(&[0.0, 100.0, 150.0, 200.0], &[80.0, 90.0, 100.0]);
-        h.push(Seg {
+        h.push(Line {
             at: 40.0,
             from: 0.0,
             to: 200.0,
         });
         for at in [0.0, 200.0] {
-            v.push(Seg {
+            v.push(Line {
                 at,
                 from: 40.0,
                 to: 80.0,
             });
         }
-        v.push(Seg {
+        v.push(Line {
             at: 100.0,
             from: 69.0,
             to: 80.0,
@@ -378,14 +379,14 @@ mod tests {
             (vec![0.0, 50.0, 150.0, 200.0], vec![50.0, 60.0, 70.0, 80.0]),
         ]);
         h.retain(|s| s.at != 80.0);
-        h.push(Seg {
+        h.push(Line {
             at: 80.0,
             from: 85.0,
             to: 200.0,
         });
         let mut page = h.clone();
         assert_eq!(cut(&h, &v).len(), 1);
-        page.push(Seg {
+        page.push(Line {
             at: 80.2,
             from: 0.0,
             to: 80.0,

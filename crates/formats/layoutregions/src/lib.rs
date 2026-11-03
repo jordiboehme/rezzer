@@ -8,8 +8,9 @@
 //! A format reader fills a [`PageIn`] (text runs, rules, boxes, pictures, codes and regions the
 //! file states). Finders offer [`Candidate`]s to [`InOrder`], which keeps the first claim on a
 //! piece. [`find_in_order`] runs the finders in order and [`InOrder::finish`] returns the
-//! [`PageRegions`]. Later stages (the cut, the scored rule, the typing functions) arrive in
-//! further steps.
+//! [`PageRegions`]. [`segment::drawn::drawn`] finds the grids and boxes the drawn lines of a
+//! page make, once per page, for every finder that looks at them. Later stages (the cut, the
+//! scored rule, the typing functions) arrive in further steps.
 //!
 //! ```
 //! use layoutregions::*;
@@ -43,6 +44,7 @@ mod input;
 mod limits;
 mod region;
 mod report;
+pub mod segment;
 mod work;
 
 pub use arbitrate::{Finder, InOrder, Offer, find_in_order};

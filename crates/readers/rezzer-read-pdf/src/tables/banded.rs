@@ -7,8 +7,9 @@
 
 use std::collections::BTreeMap;
 
+use layoutregions::segment::drawn::Line;
+
 use super::*;
-use crate::regions::Seg;
 
 /// A header band: a grid of drawn cells one row high. `xs` are its cell edges, `b` its box.
 /// `cut` is set for a section of a grid that was cut in sections: refused, it is a loss.
@@ -40,7 +41,7 @@ pub(super) struct Shared<'a> {
     pub by_y: &'a ByY,
     pub area: &'a Area<'a>,
     /// The page's horizontal lines, sorted by height.
-    pub hs: &'a [Seg],
+    pub hs: &'a [Line],
     pub stop: &'a dyn Fn() -> bool,
 }
 
@@ -458,7 +459,7 @@ impl Heads {
 pub(super) fn heads_lines(
     flow: &Flow,
     heads: &Heads,
-    hs: &[Seg],
+    hs: &[Line],
     b: [f32; 4],
     xs: &[f32],
     work: &mut usize,

@@ -5,13 +5,15 @@
 //! The page as input of the region engine (`layoutregions`): the runs, rules, boxes, pictures
 //! and codes the reader found, as primitives with the ids the reader keeps for them.
 
+#[cfg(test)]
+use layoutregions::segment::drawn::{DrawnStructure, Grids};
 use layoutregions::{
     Bounds, BoxIn, CodeIn, FontKind, PageIn, PictureIn, PrimId, RuleIn, Shift, TextRun,
 };
 
 use crate::layout::{Drawn, Run};
 use crate::order::Turn;
-use crate::tables::RuleKind;
+use crate::tables::{Rule, RuleKind};
 use crate::text::PageItems;
 
 /// The primitives of one page. `runs` are the runs of the page's flow in order (after the
@@ -26,19 +28,7 @@ pub(crate) fn page_in(
     size: [f32; 2],
 ) -> PageIn {
     let texts = runs.iter().map(text_run).collect();
-    let rules = drawn
-        .rules
-        .iter()
-        .map(|r| RuleIn {
-            x0: r.x0,
-            y0: r.y0,
-            x1: r.x1,
-            y1: r.y1,
-            thick: 0.0,
-            dashed: false,
-            rect: r.kind == RuleKind::Rect,
-        })
-        .collect();
+    let rules = drawn.rules.iter().map(rule_in).collect();
     let boxes = drawn
         .boxes
         .iter()
@@ -85,6 +75,18 @@ pub(crate) fn page_in(
     }
 }
 
+/// The drawn structure of a page that draws nothing, for tests.
+#[cfg(test)]
+pub(crate) const NO_STRUCTURE: DrawnStructure = DrawnStructure {
+    grids: Ok(Grids {
+        hs: Vec::new(),
+        vs: Vec::new(),
+        groups: Vec::new(),
+    }),
+    boxes: Vec::new(),
+    boxes_note: None,
+};
+
 /// The index of a text run in the page's flow, `None` for any other primitive.
 pub(crate) fn run_of(id: PrimId) -> Option<usize> {
     match id {
@@ -113,7 +115,20 @@ fn text_run(r: &Run) -> TextRun {
     }
 }
 
-fn bounds(b: [f32; 4]) -> Bounds {
+/// A drawn rule as the engine takes it.
+pub(crate) fn rule_in(r: &Rule) -> RuleIn {
+    RuleIn {
+        x0: r.x0,
+        y0: r.y0,
+        x1: r.x1,
+        y1: r.y1,
+        thick: 0.0,
+        dashed: false,
+        rect: r.kind == RuleKind::Rect,
+    }
+}
+
+pub(crate) fn bounds(b: [f32; 4]) -> Bounds {
     Bounds {
         x0: b[0],
         y0: b[1],
@@ -122,7 +137,7 @@ fn bounds(b: [f32; 4]) -> Bounds {
     }
 }
 
-fn box_in(b: &[f32; 4], widget: bool) -> BoxIn {
+pub(crate) fn box_in(b: &[f32; 4], widget: bool) -> BoxIn {
     BoxIn {
         bounds: bounds(*b),
         filled: false,
@@ -135,7 +150,6 @@ fn box_in(b: &[f32; 4], widget: bool) -> BoxIn {
 mod tests {
     use super::*;
     use crate::layout::Gaps;
-    use crate::tables::Rule;
 
     fn run(text: &str, x: f32, y: f32, line: u32) -> Run {
         Run {
@@ -160,6 +174,7 @@ mod tests {
 
     const NOTHING: Drawn<'static> = Drawn {
         rules: &[],
+        structure: &NO_STRUCTURE,
         images: &[],
         widgets: &[],
         boxes: &[],

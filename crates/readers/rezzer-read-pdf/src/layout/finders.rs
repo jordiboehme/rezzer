@@ -368,13 +368,14 @@ impl Finder<PageCx<'_>> for UnderlinedTitles {
         if !p.geometry
             || p.height.is_none()
             || !p.drawn.widgets.is_empty()
-            || !tables::form_drawn(p.drawn.rules, p.drawn.boxes)
+            || !tables::form_drawn(p.drawn.grids(), p.drawn.boxes)
         {
             return;
         }
         let cx = p.cx;
         let stop = || time_over(cx.budget).is_err();
-        let (titles, halted) = tables::underlined_titles(&mut p.flow, p.drawn.rules, &stop);
+        let drawn = (p.drawn.rules, p.drawn.grids());
+        let (titles, halted) = tables::underlined_titles(&mut p.flow, drawn, &stop);
         for t in titles {
             offer_title(page, arb, &t, Self::ID, next_host(p));
             p.placed.push(Placed::Title(t));
@@ -417,7 +418,7 @@ impl Finder<PageCx<'_>> for BoxPairs {
             p.page,
             &mut p.flow,
             p.drawn.boxes,
-            p.drawn.rules,
+            p.drawn.grids(),
             p.text_sizes.as_deref().unwrap_or_default(),
             &stop,
         );

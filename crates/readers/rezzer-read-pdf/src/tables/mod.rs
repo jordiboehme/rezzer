@@ -327,8 +327,11 @@ pub(crate) fn plural(why: &str) -> &str {
     }
 }
 
-/// Lines this close are one line, and line ends this close meet, in points.
-pub(crate) const SNAP: f32 = 2.0;
+/// Lines this close are one line, and line ends this close meet, in points; a grid or region
+/// that covers more of the page than [`PAGE_SHARE`] is the page's frame; past
+/// [`MAX_SEGMENTS`] straight segments the grid search gives up on a page and says so. The
+/// region engine finds the grids with these values (see `layoutregions::segment::drawn`).
+pub(crate) use layoutregions::segment::drawn::{MAX_SEGMENTS, PAGE_SHARE, SNAP};
 
 /// A label or a title differs in size from the text beside it when the larger is at least
 /// this many times the smaller: half a point at 12.5 points, and less than half a point at
@@ -340,14 +343,6 @@ const MAX_COLUMNS: usize = 15;
 
 /// A grid whose cells are more often empty than this is a form to fill in.
 const EMPTY_SHARE: f32 = 0.6;
-
-/// A grid or region that covers more of the page than this is the page's frame.
-pub(crate) const PAGE_SHARE: f32 = 0.6;
-
-/// Straight segments the ruled grid search looks at on one page, and pairs of segments it
-/// tests; past them it gives up on the page and says so.
-pub(crate) const MAX_SEGMENTS: usize = 20_000;
-pub(crate) const GRID_WORK: usize = 4_000_000;
 
 /// Lines of a caption paragraph above a table looked at for its start.
 const CAPTION_LINES: usize = 8;
@@ -396,7 +391,14 @@ pub(crate) fn untagged(
     };
     if !drawn.lines_unsearched {
         found.ends = end_rules(drawn.rules);
-        ruled::ruled(page, flow, drawn.rules, &area, stop, &mut found);
+        ruled::ruled(
+            page,
+            flow,
+            (drawn.rules, drawn.grids()),
+            &area,
+            stop,
+            &mut found,
+        );
     }
     borderless::borderless(page, flow, &area, stop, &mut found);
     found
@@ -414,7 +416,7 @@ fn end_rules(rules: &[Rule]) -> Vec<HRule> {
             continue;
         }
         match r.kind {
-            RuleKind::Line => lines.push(crate::regions::Seg {
+            RuleKind::Line => lines.push(layoutregions::segment::drawn::Line {
                 at: (y0 + y1) / 2.0,
                 from: x0,
                 to: x1,
@@ -427,12 +429,16 @@ fn end_rules(rules: &[Rule]) -> Vec<HRule> {
             }),
         }
     }
-    out.extend(crate::regions::merged(lines).into_iter().map(|s| HRule {
-        y: s.at,
-        x0: s.from,
-        x1: s.to,
-        h: 0.0,
-    }));
+    out.extend(
+        layoutregions::segment::drawn::merged(lines)
+            .into_iter()
+            .map(|s| HRule {
+                y: s.at,
+                x0: s.from,
+                x1: s.to,
+                h: 0.0,
+            }),
+    );
     out.sort_by(|a, b| a.y.total_cmp(&b.y));
     out
 }

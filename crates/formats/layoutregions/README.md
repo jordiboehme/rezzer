@@ -6,6 +6,10 @@ A format reader hands over one page. The page lists its text runs, rules, boxes,
 codes. It can also list regions that the file states itself. The crate gives back regions. Each
 region has a kind, its bounds, the pieces it holds and the signals that decided its kind.
 
+The crate finds the grids and boxes that the drawn lines of a page make. A grid of two rows and
+two columns or more is a table. A box that stands alone is a reading region: its text is read
+as one part.
+
 A piece belongs to one region only. When two finders want the same piece, one rule settles it.
 For now the first finder wins. A later step adds a scored rule and records the loser as an
 alternative.

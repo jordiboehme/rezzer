@@ -20,6 +20,7 @@ use pdfparts::StructTree;
 use rezzer_limits::{Budget, LimitHit};
 use rezzer_model::{Anchor, Block, Cell, Inline, LossReason, SectionKind, Severity, StatusColor};
 
+use layoutregions::segment::drawn::{DrawnStructure, Grids, Unsearched};
 use layoutregions::{InOrder, PageRegions, find_in_order};
 
 use crate::engine;
@@ -945,6 +946,10 @@ pub(crate) struct Taken {
 /// What a page draws besides text, for tables without tags, and its size.
 pub(crate) struct Drawn<'a> {
     pub rules: &'a [Rule],
+    /// The grids `rules` make, in the frame of the runs, found once when the page is laid out
+    /// (see `regions::structure_in_frame`), and the boxes the runs were read in. Every
+    /// detector that looks at drawn lines uses them.
+    pub structure: &'a DrawnStructure,
     pub images: &'a [[f32; 4]],
     /// Boxes of the form fields on the page.
     pub widgets: &'a [[f32; 4]],
@@ -958,6 +963,13 @@ pub(crate) struct Drawn<'a> {
     pub width: f32,
     /// The most common font size of the file's text.
     pub body_size: f32,
+}
+
+impl Drawn<'_> {
+    /// The grids of the page's rules, or why they were not searched.
+    pub(crate) fn grids(&self) -> Result<&Grids, Unsearched> {
+        self.structure.grids.as_ref().map_err(|e| *e)
+    }
 }
 
 /// [`page_blocks_at`] without points to find.
@@ -3477,6 +3489,7 @@ mod tests {
 
     const NOTHING_DRAWN: Drawn<'static> = Drawn {
         rules: &[],
+        structure: &crate::engine::NO_STRUCTURE,
         images: &[],
         widgets: &[],
         boxes: &[],

@@ -6,9 +6,11 @@
 //! another style, boxes of fields next to each other in a row or a column, and the titles of
 //! boxes beside them and of framed boxes over their lines.
 
+use layoutregions::segment::drawn::{Grids, Line, Unsearched};
+
 use super::*;
 use crate::layout::Slot;
-use crate::regions::{Index, Seg, grids, regions_of};
+use crate::regions::{Index, regions_of};
 use crate::tables::LABEL_STEP;
 use crate::tables::banded::{Heads, heads_lines};
 
@@ -46,7 +48,7 @@ pub(crate) fn box_pairs(
     page: u32,
     flow: &mut Flow,
     boxes: &[[f32; 4]],
-    rules: &[Rule],
+    grids: Result<&Grids, Unsearched>,
     text_sizes: &[f32],
     stop: &dyn Fn() -> bool,
 ) -> BoxesRead {
@@ -250,24 +252,19 @@ pub(crate) fn box_pairs(
         c.iter()
             .any(|&b| fields[b].as_ref().is_some_and(|f| !f.value.is_empty()))
     };
-    // The page's lines, once needed: a box drawn with no text in it is no reading region, so
-    // the boxes beside it touch it, not each other; the lines show it drawn.
-    let lines = std::cell::OnceCell::new();
-    // Sorted by their place across, so the lines near a place are found by a search.
-    let lines = || {
-        lines.get_or_init(|| {
-            let (mut hs, mut vs) = grids(rules).map(|g| (g.hs, g.vs)).unwrap_or_default();
-            hs.sort_by(|a, b| a.at.total_cmp(&b.at));
-            vs.sort_by(|a, b| a.at.total_cmp(&b.at));
-            (hs, vs)
-        })
+    // The page's lines: a box drawn with no text in it is no reading region, so the boxes
+    // beside it touch it, not each other; the lines show it drawn. They are sorted by their
+    // place across, so the lines near a place are found by a search.
+    let (hs, vs): (&[Line], &[Line]) = match grids {
+        Ok(g) => (&g.hs, &g.vs),
+        Err(_) => (&[], &[]),
     };
     // Whether lines `segs` at `at` (within `t`) cover the stretch `lo..hi`.
-    let covered = |segs: &[Seg], at: f32, lo: f32, hi: f32, t: f32| {
+    let covered = |segs: &[Line], at: f32, lo: f32, hi: f32, t: f32| {
         let mut end = lo;
         let tol = t.max(SNAP);
         let from = segs.partition_point(|s| s.at < at - tol);
-        let mut parts: Vec<&Seg> = segs[from..]
+        let mut parts: Vec<&Line> = segs[from..]
             .iter()
             .take_while(|s| s.at <= at + tol)
             .filter(|s| s.to > lo && s.from < hi)
@@ -289,7 +286,6 @@ pub(crate) fn box_pairs(
         if gap <= t || gap > 2.0 * (a[2] - a[0]).max(b[2] - b[0]) {
             return false;
         }
-        let (hs, _) = lines();
         covered(hs, a[3], a[2], b[0], t) && covered(hs, a[1].max(b[1]), a[2], b[0], t)
     };
     let empty_column = |a: [f32; 4], b: [f32; 4], t: f32| {
@@ -297,10 +293,8 @@ pub(crate) fn box_pairs(
         if gap <= t || gap > 2.0 * (a[3] - a[1]).max(b[3] - b[1]) {
             return false;
         }
-        let (_, vs) = lines();
         covered(vs, a[0], b[3], a[1], t) && covered(vs, a[2], b[3], a[1], t)
     };
-    let mut hs: Option<Vec<Seg>> = None;
     // The page's lines, built once for every row, and the work they take for the page.
     let mut heads: Option<Heads> = None;
     let mut work = 0usize;
@@ -333,7 +327,6 @@ pub(crate) fn box_pairs(
         if spent.is_some() {
             continue;
         }
-        let hs = hs.get_or_insert_with(|| grids(rules).map(|g| g.hs).unwrap_or_default());
         let heads = heads.get_or_insert_with(|| Heads::new(flow));
         match heads_lines(flow, heads, hs, b, &xs, &mut work) {
             Some(false) => groups.push(c),

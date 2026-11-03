@@ -8,8 +8,9 @@
 
 use std::collections::{HashMap, HashSet};
 
+use layoutregions::segment::drawn::{Grids, Line, Unsearched};
+
 use super::*;
-use crate::regions::{Seg, grids};
 use crate::tables::LABEL_STEP;
 
 /// The note before the first table of fields between rules of a page.
@@ -64,28 +65,33 @@ pub(crate) struct Frame {
 /// The frames of fields between rules among the page's `rules` (see [`frames`]), under rules
 /// no grid takes; none on a page without horizontal rules or with too many of them. (A frame
 /// under a grid's lowest rule is a row of fields only by its text, see [`holds_values`].)
+///
+/// It searches the grids of `rules` on its own: the separators drawn as marks are read (see
+/// `marks::cut_at_dividers`) before the page's drawn structure is found, as that structure's
+/// boxes need the map of the page's text with them, and on a page turned a quarter in the
+/// frame its text reads in.
 pub(crate) fn field_frames(rules: &[Rule]) -> Vec<Frame> {
-    let Ok(g) = grids(rules) else {
+    let Ok(g) = crate::regions::grids(rules) else {
         return Vec::new();
     };
     frames(&g.hs, &frame_tops(&g.hs, &g.vs, &g.groups, false), &g.vs).unwrap_or_default()
 }
 
 /// Whether the page's drawing shows a form: a drawn box its text is read in (`boxes`), a grid
-/// with rules inside its frame (see [`crate::regions::inner_ruled`]; the frame of a figure is
-/// none), or a frame of fields between rules with a divider (see [`frames`]). An underlined
-/// title is looked for only there: on a page of prose a heading over a rule is a heading of
-/// the prose.
-pub(crate) fn form_drawn(rules: &[Rule], boxes: &[[f32; 4]]) -> bool {
+/// of the page's `grids` with rules inside its frame (see
+/// [`layoutregions::segment::drawn::inner_ruled`]; the frame of a figure is none), or a frame
+/// of fields between rules with a divider (see [`frames`]). An underlined title is looked for
+/// only there: on a page of prose a heading over a rule is a heading of the prose.
+pub(crate) fn form_drawn(grids: Result<&Grids, Unsearched>, boxes: &[[f32; 4]]) -> bool {
     if !boxes.is_empty() {
         return true;
     }
-    let Ok(g) = grids(rules) else {
+    let Ok(g) = grids else {
         return false;
     };
     g.groups
         .iter()
-        .any(|group| crate::regions::inner_ruled(&g, group))
+        .any(|group| layoutregions::segment::drawn::inner_ruled(g, group))
         || frames(&g.hs, &frame_tops(&g.hs, &g.vs, &g.groups, false), &g.vs)
             .is_some_and(|f| f.iter().any(|f| !f.dividers.is_empty()))
 }
@@ -123,8 +129,8 @@ pub(in crate::tables) enum Top {
 /// under them (a row of fields open at both ends), is no grid to its top rule: the frame under
 /// it is a row of fields with dividers.
 pub(in crate::tables) fn frame_tops(
-    hs: &[Seg],
-    vs: &[Seg],
+    hs: &[Line],
+    vs: &[Line],
     groups: &[(Vec<usize>, Vec<usize>)],
     lowest: bool,
 ) -> Vec<Top> {
@@ -161,7 +167,7 @@ pub(in crate::tables) fn frame_tops(
 /// The frames under the page's horizontal lines `hs` (sorted by height) that `tops` names
 /// (see [`frame_tops`]), with the dividers among the vertical lines `vs` (sorted by place);
 /// `None` past [`STRIP_WORK`] steps.
-pub(in crate::tables) fn frames(hs: &[Seg], tops: &[Top], vs: &[Seg]) -> Option<Vec<Frame>> {
+pub(in crate::tables) fn frames(hs: &[Line], tops: &[Top], vs: &[Line]) -> Option<Vec<Frame>> {
     let mut work = 0usize;
     let mut out = Vec::new();
     for (j, up) in hs.iter().enumerate() {
@@ -169,7 +175,7 @@ pub(in crate::tables) fn frames(hs: &[Seg], tops: &[Top], vs: &[Seg]) -> Option<
             continue;
         }
         // The nearest rule below that reaches under it, and it must cover it.
-        let mut below: Option<&Seg> = None;
+        let mut below: Option<&Line> = None;
         for s in hs[..j].iter().rev() {
             work += 1;
             if work > STRIP_WORK {
@@ -565,8 +571,8 @@ pub(in crate::tables) fn field_strips(
     flow: &Flow,
     by_y: &ByY,
     frames: &[Frame],
-    hs: &[Seg],
-    table_rules: &[Seg],
+    hs: &[Line],
+    table_rules: &[Line],
     busy: &dyn Fn(usize) -> bool,
     tabled: &dyn Fn(usize) -> bool,
     text_sizes: &[f32],
@@ -1863,7 +1869,7 @@ fn ends(
     by_y: &ByY,
     free: &dyn Fn(usize) -> bool,
     veto: &dyn Fn(usize) -> bool,
-    open: Option<&[Seg]>,
+    open: Option<&[Line]>,
     neighbour: &dyn Fn(usize) -> bool,
     frames: &[Frame],
     strips: &[Strip],
@@ -1942,7 +1948,7 @@ fn ends(
         let Some(hs) = open else {
             return false;
         };
-        let over = |h: &&Seg| h.from < r.x + r.w && r.x < h.to;
+        let over = |h: &&Line| h.from < r.x + r.w && r.x < h.to;
         let up = hs
             .iter()
             .filter(over)

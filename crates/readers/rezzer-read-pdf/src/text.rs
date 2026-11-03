@@ -1018,11 +1018,12 @@ impl<'p, 'a> PageReader<'p, 'a> {
             .collect();
         let width = (crop.x1 - crop.x0) as f32;
         let height = (crop.y1 - crop.y0) as f32;
-        // This grid search decides for the page whether the ruled tables and the boxes are
-        // looked for; when it gives up, one loss says so for both. The layout's passes (field
-        // frames, titles, rows of boxes, ruled tables) search the grids again, each within
-        // the same work bound, six to seven times a page.
-        let found = regions::grids(&dev.rules);
+        // The grids and boxes of the page are found once here: the grid search decides for
+        // the page whether the ruled tables and the boxes are looked for (when it gives up,
+        // one loss says so for both). The grids are not kept until the page is laid out, as
+        // the pages of a file wait for it together within one bound of memory: the layout
+        // finds them once more, in the frame of the runs, for all its passes (titles, rows of
+        // boxes, ruled tables).
         let inked = regions::Inked::new(
             width,
             height,
@@ -1034,19 +1035,18 @@ impl<'p, 'a> PageReader<'p, 'a> {
                 )
             }),
         );
-        let (boxes, unused) = match regions::boxes(
-            found.as_ref().map_err(|e| *e),
-            width,
-            height,
-            &fields,
-            &inked,
-        ) {
-            Ok(b) => (b, None),
-            Err(why) => (Vec::new(), Some(why)),
-        };
-        let unsearched = found.as_ref().err().map(|e| e.why());
-        drop(found);
+        let found = regions::structure(n, &dev.rules, (width, height), &fields, &inked);
+        drop(inked);
         drop(fields);
+        let boxes: Vec<[f32; 4]> = found
+            .boxes
+            .iter()
+            .map(|b| [b.x0, b.y0, b.x1, b.y1])
+            .collect();
+        let unsearched = found.grids.as_ref().err().map(|e| e.why());
+        let unused = found.boxes_note;
+        drop(found.grids);
+        drop(found.boxes);
         let mut items = lay_out(
             n,
             &dev.glyphs,

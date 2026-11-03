@@ -8,9 +8,10 @@
 //! titles, the strip is one more column of that section's table; where it holds a total
 //! label alone on its line over an amount, the two are a pair.
 
+use layoutregions::segment::drawn::Line;
+
 use super::pairs::Field;
 use super::*;
-use crate::regions::Seg;
 
 /// A column stands beside a grid when it starts at most this many times the size of its text
 /// right of the grid's right edge (and more than [`SNAP`], or the two would be one rule): a
@@ -71,13 +72,13 @@ pub(super) struct Beside<'a> {
 pub(super) fn side_columns(
     flow: &Flow,
     by_y: &ByY,
-    hs: &[Seg],
-    vs: &[Seg],
+    hs: &[Line],
+    vs: &[Line],
     taken: &[bool],
     parts: &[Beside<'_>],
     work: &mut usize,
 ) -> Vec<Side> {
-    let mut free: Vec<Seg> = hs
+    let mut free: Vec<Line> = hs
         .iter()
         .zip(taken)
         .filter(|(_, t)| !**t)

@@ -5,8 +5,9 @@
 //! Titles over a drawn bar: a line of bold text alone over a horizontal rule no grid takes,
 //! with the lines under the rule as its text.
 
+use layoutregions::segment::drawn::{Grids, Line, Unsearched};
+
 use super::*;
-use crate::regions::{Seg, grids};
 use crate::tables::LABEL_STEP;
 
 /// Lines under an underlined title follow each other at most this many line heights
@@ -26,19 +27,20 @@ const TITLE_WORK: usize = 4_000_000;
 /// stretch, the lines of one style larger than the title (by half a point, any weight) that
 /// follow each other, the first within two line heights of the rule and no rule between
 /// them. Each title is a heading where it stands and its lines its text; their runs leave
-/// `flow`. `rules` are the page's drawn rules. The search stops at `stop` or past
-/// [`TITLE_WORK`] steps, with the titles found before it and why it stopped.
+/// `flow`. `rules` are the page's drawn rules and `grids` the grids they make. The search
+/// stops at `stop` or past [`TITLE_WORK`] steps, with the titles found before it and why it
+/// stopped.
 pub(crate) fn underlined_titles(
     flow: &mut Flow,
-    rules: &[Rule],
+    (rules, grids): (&[Rule], Result<&Grids, Unsearched>),
     stop: &dyn Fn() -> bool,
 ) -> (Vec<BoxTitle>, Option<&'static str>) {
     // A line rule runs along one axis by how it is made: it is flat when it is wider than high.
     let flat = |r: &Rule| r.kind == RuleKind::Line && (r.y0 - r.y1).abs() < (r.x0 - r.x1).abs();
-    let segs: Vec<Seg> = rules
+    let segs: Vec<Line> = rules
         .iter()
         .filter(|r| flat(r))
-        .map(|r| Seg {
+        .map(|r| Line {
             at: (r.y0 + r.y1) / 2.0,
             from: r.x0.min(r.x1),
             to: r.x0.max(r.x1),
@@ -47,7 +49,7 @@ pub(crate) fn underlined_titles(
     if segs.is_empty() || flow.runs.is_empty() {
         return (Vec::new(), None);
     }
-    let hs = crate::regions::merged(segs);
+    let hs = layoutregions::segment::drawn::merged(segs);
     // The bars by their height (a bar at no height is at none), to find those near a height
     // by a search.
     let mut by_at: Vec<usize> = (0..hs.len()).filter(|&k| !hs[k].at.is_nan()).collect();
@@ -62,7 +64,7 @@ pub(crate) fn underlined_titles(
     let mut work = 0usize;
     let too_much = "the page has too many bars and too much text over them";
     // The rules of grids are a table's or a section's, not a title's.
-    let taken: Vec<bool> = match grids(rules) {
+    let taken: Vec<bool> = match grids {
         Ok(g) if !g.hs.is_empty() => {
             let mut t = vec![false; hs.len()];
             for (gh, _) in &g.groups {

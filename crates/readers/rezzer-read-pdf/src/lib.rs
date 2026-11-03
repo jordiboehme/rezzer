@@ -689,8 +689,12 @@ fn lay_out(
             // The dates of page 1's lines are gathered before the layout takes its runs.
             let mut dates = (n == 1).then(|| layout::page_dates(&items.runs, height));
             let runs = std::mem::take(&mut items.runs);
+            // The grids of the page's rules, found once in the frame of its runs for every
+            // detector of the layout.
+            let structure = crate::regions::structure_in_frame(&items.rules, &items.boxes);
             let drawn = Drawn {
                 rules: &items.rules,
+                structure: &structure,
                 images: if items.turned { &images } else { &items.images },
                 widgets: &fields,
                 boxes: &items.boxes,
@@ -2136,5 +2140,69 @@ mod tests {
             .filter(|b| matches!(b, Block::Section { blocks, .. } if blocks.len() > 1))
             .count();
         assert_eq!(with_text, 64);
+    }
+
+    /// A page drawn as a form: a bold title over a rule no grid takes, a grid of two rows and
+    /// two columns and, if `boxed`, a box with text in it. Every detector that looks at drawn
+    /// lines runs (without a box, the test whether the page is drawn as a form looks at its
+    /// grids).
+    fn drawn_form_page(boxed: bool) -> String {
+        let mut c = show("F2", 12.0, 72.0, 540.0, "Muster GmbH");
+        c += &crate::fixtures::hrule(72.0, 300.0, 534.0);
+        c += &show(
+            "F1",
+            10.0,
+            72.0,
+            515.0,
+            "Erika Mustermann, 12345 Musterstadt",
+        );
+        c += "0.5 w ";
+        for y in [480.0, 450.0, 420.0] {
+            c += &format!("72 {y} m 312 {y} l S ");
+        }
+        for x in [72.0, 192.0, 312.0] {
+            c += &format!("{x} 420 m {x} 480 l S ");
+        }
+        for (x, y, t) in [
+            (78.0, 460.0, "Menge"),
+            (198.0, 460.0, "Betrag"),
+            (78.0, 430.0, "12"),
+            (198.0, 430.0, "1.234,56"),
+        ] {
+            c += &show("F1", 10.0, x, y, t);
+        }
+        if boxed {
+            c += &crate::fixtures::boxed(72.0, 300.0, 200.0, 40.0);
+        }
+        c += &show("F1", 10.0, 80.0, 315.0, "Bitte beachten");
+        c += &show("F1", 10.0, 72.0, 250.0, "A paragraph after the box.");
+        c
+    }
+
+    /// The grids of a page are found once in each pass that reads them: in the text pass with
+    /// the boxes, and once more for all the detectors of the layout, in the frame of the runs
+    /// (the text pass does not keep its grids until the page is laid out, see
+    /// `regions::structure_in_frame`). Before, each detector searched them on its own. A page
+    /// read turned is searched the same twice.
+    #[test]
+    fn grids_are_found_once_per_page() {
+        let searches = || crate::regions::GRID_SEARCHES.with(std::cell::Cell::get);
+        let pages = [
+            Page::text(drawn_form_page(true)),
+            Page::text(drawn_form_page(false)),
+        ];
+        let bytes = pdf(&pages, "");
+        let before = searches();
+        let out = crate::fixtures::read(&bytes);
+        assert_eq!(searches() - before, 4);
+        let md = crate::fixtures::markdown(&out);
+        assert!(md.contains("| Menge"), "{md}");
+        assert!(md.contains("1.234,56"), "{md}");
+        // The same page turned a quarter: its text reads upright in a turned frame.
+        let turned = Page::text(format!("q 0 1 -1 0 595 0 cm\n{}Q\n", drawn_form_page(true)));
+        let before = searches();
+        let out = crate::fixtures::read(&pdf(&[turned], ""));
+        assert_eq!(searches() - before, 2);
+        assert!(crate::fixtures::markdown(&out).contains("| Menge"));
     }
 }

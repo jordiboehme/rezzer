@@ -6,6 +6,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use layoutregions::segment::drawn::{Grids, Line, Unsearched, clustered};
+
 use super::banded::{BAND_EDGE, BODY_GAP, Band, Shared, Taken, banded, row_starts};
 use super::pairs::{
     Field, Top, claim, field_cuts, field_strips, frame_tops, frames, holds_values, pairs_table,
@@ -15,7 +17,6 @@ use super::sections::{CUT_WORK, sections};
 use super::side::{Beside, SIDE_FOUND_BY, SIDE_WORK, Side, StripKind, side_columns, totals_top};
 use super::*;
 use crate::marks::is_placeholder;
-use crate::regions::{Grids, Seg, Unsearched, clustered, grids};
 use crate::tables::LABEL_STEP;
 
 /// Where a run a table took goes: the table, its row and its cell.
@@ -27,8 +28,8 @@ const FIGURE_NEAR: &str = "a figure caption stands next to it";
 /// A section of a grid: its segments, whether its grid was cut, whether a cut is its bottom
 /// or its top, and its grid's place among the page's grids.
 struct Part {
-    h: Vec<Seg>,
-    v: Vec<Seg>,
+    h: Vec<Line>,
+    v: Vec<Line>,
     cut: bool,
     cut_below: bool,
     cut_above: bool,
@@ -59,39 +60,40 @@ fn page_note(page: u32, refusals: &[(usize, f32, &'static str)]) -> Option<Unsur
 /// columns of totals beside its sections are read first (see [`totals_tables`]), then each
 /// section of each grid top to bottom (see [`section`]), the header bands it left (see
 /// [`banded`]) and the rows of fields between rules no grid takes (see [`strip_tables`]);
-/// last the runs of all tables leave the flow (see [`leave_flow`]).
+/// last the runs of all tables leave the flow (see [`leave_flow`]). `rules` are the page's
+/// drawn rules and `grids` the grids they make.
 pub(super) fn ruled(
     page: u32,
     flow: &mut Flow,
-    rules: &[Rule],
+    (rules, grids): (&[Rule], Result<&Grids, Unsearched>),
     area: &Area<'_>,
     stop: &dyn Fn() -> bool,
     found: &mut Found,
 ) {
-    let Grids { hs, vs, groups } = match grids(rules) {
+    let Grids { hs, vs, groups } = match grids {
         Ok(g) => g,
-        Err(Unsearched::TooMany) => {
+        Err(Unsearched::TooMany { .. }) => {
             found.skipped.push(format!(
                 "ruled tables on page {page} are not looked for: the page draws more than \
                  {MAX_SEGMENTS} straight lines"
             ));
             return;
         }
-        Err(Unsearched::MeetTooOften) => {
+        Err(Unsearched::Work) => {
             found.skipped.push(format!(
                 "ruled tables on page {page} are not looked for: its lines meet too often"
             ));
             return;
         }
     };
-    let grids = grid_parts(page, &hs, &vs, &groups, found);
+    let grids = grid_parts(page, hs, vs, groups, found);
     // The horizontal lines a grid takes; the others may bound a column of totals or a strip
     // of fields.
-    let taken = taken_by_grids(hs.len(), &groups);
+    let taken = taken_by_grids(hs.len(), groups);
     let frames = cut_runs(
         page,
         flow,
-        (&hs, &vs, &frame_tops(&hs, &vs, &groups, true)),
+        (hs, vs, &frame_tops(hs, vs, groups, true)),
         &grids,
         found,
     );
@@ -104,8 +106,8 @@ pub(super) fn ruled(
         by_y: &by_y,
         area,
         rules,
-        hs: &hs,
-        vs: &vs,
+        hs,
+        vs,
         frames: &frames,
         taken: &taken,
         per_line: texted_per_line(flow),
@@ -118,7 +120,7 @@ pub(super) fn ruled(
         page,
         flow,
         &by_y,
-        (&hs, &vs, &taken),
+        (hs, vs, &taken),
         &grids,
         (&mut take.claimed, &mut take.tables),
         found,
@@ -157,8 +159,8 @@ struct Sheet<'a> {
     area: &'a Area<'a>,
     rules: &'a [Rule],
     /// The page's horizontal and vertical lines, joined.
-    hs: &'a [Seg],
-    vs: &'a [Seg],
+    hs: &'a [Line],
+    vs: &'a [Line],
     frames: &'a [Frame],
     /// The horizontal lines a grid takes.
     taken: &'a [bool],
@@ -227,8 +229,8 @@ enum Next {
 /// (from the top), the heights of its open rows (see [`hanging_rows`]), the runs of its title
 /// and whether a column of totals joins it.
 struct GridSection {
-    h: Vec<Seg>,
-    v: Vec<Seg>,
+    h: Vec<Line>,
+    v: Vec<Line>,
     xs: Vec<f32>,
     ys: Vec<f32>,
     open: Vec<f32>,
@@ -285,7 +287,7 @@ fn section(
         let right = xs[xs.len() - 1];
         xs.push(side.x1);
         for &y in &ys {
-            h.push(Seg {
+            h.push(Line {
                 at: y,
                 from: right,
                 to: side.x1,
@@ -331,7 +333,7 @@ fn section(
 
 /// The column and row edges (from the top) of the section of segments `h` and `v`, cut at
 /// rows of fields beyond its rules and, below a cut (`cut_above`), at its own top rule.
-fn section_edges(sh: &Sheet<'_>, h: &[Seg], v: &[Seg], cut_above: bool) -> (Vec<f32>, Vec<f32>) {
+fn section_edges(sh: &Sheet<'_>, h: &[Line], v: &[Line], cut_above: bool) -> (Vec<f32>, Vec<f32>) {
     let (mut xs, mut ys) = edges(h, v);
     // Column rules that hang below the grid's lowest rule into a row of fields under it
     // (a frame that holds fields with a value) part the fields, not rows of the grid: the
@@ -399,10 +401,10 @@ fn section_edges(sh: &Sheet<'_>, h: &[Seg], v: &[Seg], cut_above: bool) -> (Vec<
 fn hanging_rows(
     sh: &Sheet<'_>,
     take: &Taking,
-    v: &[Seg],
+    v: &[Line],
     xs: &[f32],
     ys: &mut Vec<f32>,
-    h: &mut Vec<Seg>,
+    h: &mut Vec<Line>,
     cut: bool,
 ) -> Vec<f32> {
     let mut open: Vec<f32> = Vec::new();
@@ -430,7 +432,7 @@ fn hanging_rows(
         let at = ys.partition_point(|e| *e > foot);
         ys.insert(at, foot);
         open.push(foot);
-        h.push(Seg {
+        h.push(Line {
             at: foot,
             from: xs[0],
             to: xs[xs.len() - 1],
@@ -715,12 +717,12 @@ fn read_grid(sh: &Sheet<'_>, take: &mut Taking, found: &mut Found, s: GridSectio
 /// the top), found once: its vertical segments by column edge, its horizontal ones by row
 /// edge.
 struct Borders {
-    on_x: Vec<Vec<Seg>>,
-    on_y: Vec<Vec<Seg>>,
+    on_x: Vec<Vec<Line>>,
+    on_y: Vec<Vec<Line>>,
 }
 
 impl Borders {
-    fn new(h: &[Seg], v: &[Seg], xs: &[f32], ys: &[f32]) -> Borders {
+    fn new(h: &[Line], v: &[Line], xs: &[f32], ys: &[f32]) -> Borders {
         let nearest = |edges: &[f32], at: f32| -> Option<usize> {
             let k = edges.partition_point(|e| *e < at);
             [k.checked_sub(1), Some(k)]
@@ -729,14 +731,14 @@ impl Borders {
                 .filter(|&i| i < edges.len() && (edges[i] - at).abs() <= SNAP)
                 .min_by(|&a, &b| (edges[a] - at).abs().total_cmp(&(edges[b] - at).abs()))
         };
-        let mut on_x: Vec<Vec<Seg>> = vec![Vec::new(); xs.len()];
+        let mut on_x: Vec<Vec<Line>> = vec![Vec::new(); xs.len()];
         for s in v {
             if let Some(k) = nearest(xs, s.at) {
                 on_x[k].push(*s);
             }
         }
         let ys_up: Vec<f32> = ys.iter().rev().copied().collect();
-        let mut on_y: Vec<Vec<Seg>> = vec![Vec::new(); ys.len()];
+        let mut on_y: Vec<Vec<Line>> = vec![Vec::new(); ys.len()];
         for s in h {
             if let Some(k) = nearest(&ys_up, s.at) {
                 on_y[ys.len() - 1 - k].push(*s);
@@ -746,7 +748,7 @@ impl Borders {
     }
 
     /// Whether a boundary is drawn over at least half of a cell's side.
-    fn covered(segs: &[Seg], lo: f32, hi: f32) -> bool {
+    fn covered(segs: &[Line], lo: f32, hi: f32) -> bool {
         let len: f32 = segs
             .iter()
             .map(|s| (s.to.min(hi) - s.from.max(lo)).max(0.0))
@@ -1062,7 +1064,7 @@ fn bands_and_strips(sh: &Sheet<'_>, take: &mut Taking, found: &mut Found) -> usi
         .map(|i| take.claimed[i].is_some() || take.held[i] || take.titles[i])
         .collect();
     let tabled: Vec<bool> = take.claimed.iter().map(Option::is_some).collect();
-    let table_rules: Vec<Seg> = sh
+    let table_rules: Vec<Line> = sh
         .hs
         .iter()
         .zip(sh.taken)
@@ -1306,16 +1308,16 @@ fn read_apart(flow: &mut Flow, take: &mut Taking, found: &mut Found) {
 /// drop without a word.
 fn grid_parts(
     page: u32,
-    hs: &[Seg],
-    vs: &[Seg],
+    hs: &[Line],
+    vs: &[Line],
     groups: &[(Vec<usize>, Vec<usize>)],
     found: &mut Found,
 ) -> Vec<Part> {
     let mut cut_work = 0usize;
     let mut grids: Vec<Part> = Vec::new();
     for (id, (gh, gv)) in groups.iter().enumerate() {
-        let h: Vec<Seg> = gh.iter().map(|&j| hs[j]).collect();
-        let v: Vec<Seg> = gv.iter().map(|&k| vs[k]).collect();
+        let h: Vec<Line> = gh.iter().map(|&j| hs[j]).collect();
+        let v: Vec<Line> = gv.iter().map(|&k| vs[k]).collect();
         let parts = sections(&h, &v, hs, &mut cut_work);
         let (cut, last) = (parts.len() > 1, parts.len().saturating_sub(1));
         grids.extend(parts.into_iter().enumerate().map(|(k, (h, v))| Part {
@@ -1346,7 +1348,7 @@ fn grid_parts(
 fn cut_runs(
     page: u32,
     flow: &mut Flow,
-    (hs, vs, tops): (&[Seg], &[Seg], &[Top]),
+    (hs, vs, tops): (&[Line], &[Line], &[Top]),
     grids: &[Part],
     found: &mut Found,
 ) -> Vec<Frame> {
@@ -1384,7 +1386,7 @@ fn totals_tables(
     page: u32,
     flow: &Flow,
     by_y: &ByY,
-    (hs, vs, taken): (&[Seg], &[Seg], &[bool]),
+    (hs, vs, taken): (&[Line], &[Line], &[bool]),
     grids: &[Part],
     (claimed, tables): (&mut [Claim], &mut Vec<Planned>),
     found: &mut Found,
@@ -1435,7 +1437,7 @@ fn strip_tables(
     flow: &Flow,
     by_y: &ByY,
     frames: &[Frame],
-    (hs, table_rules): (&[Seg], &[Seg]),
+    (hs, table_rules): (&[Line], &[Line]),
     busy: &[bool],
     tabled: &[bool],
     claimed: &mut [Claim],
@@ -1490,7 +1492,7 @@ const OWN_LEFT: f32 = 0.05;
 /// section's left edge `left` (see [`OWN_LEFT`]; `right` is its right edge) and a rule of
 /// another block at that height (among the page's `hs`, sorted by height) covers most of the
 /// stretch from `left` up to it; else `left`. `h` are the section's own horizontal segments.
-fn own_left(h: &[Seg], hs: &[Seg], top: f32, (left, right): (f32, f32)) -> f32 {
+fn own_left(h: &[Line], hs: &[Line], top: f32, (left, right): (f32, f32)) -> f32 {
     let Some(from) = h
         .iter()
         .filter(|s| (s.at - top).abs() <= SNAP)
@@ -1621,7 +1623,7 @@ fn title_over(
 /// crosses the heights `lo..hi`. Each rule looked at is counted in `work`; past
 /// [`TITLE_WORK`] the answer is yes, so no title is taken without the look.
 fn column_across(
-    vs: &[Seg],
+    vs: &[Line],
     (left, right): (f32, f32),
     (lo, hi): (f32, f32),
     work: &mut usize,
@@ -1682,7 +1684,7 @@ impl TitlePlace<'_> {
 
     /// The title right over the grid's top rule at `top`: no column rule of the page
     /// (`vs`, sorted by place) may cross it.
-    fn over_grid(&mut self, vs: &[Seg], top: f32) -> Vec<usize> {
+    fn over_grid(&mut self, vs: &[Line], top: f32) -> Vec<usize> {
         let runs = self.free(top, top + 2.0 * MAX_CAPTION_SIZE);
         let (left, right) = (self.xs[0] + SNAP, self.xs[self.xs.len() - 1] - SNAP);
         let work = &mut *self.work;
@@ -1695,11 +1697,11 @@ impl TitlePlace<'_> {
     /// The title right over the cut at the section's bottom (`ys` from the top): no inner
     /// column rule of the section (`v`) may cross it. Its runs leave the section, and a
     /// lowest row of one cell that held only them goes too, with its rules of `h`.
-    fn above_cut(&mut self, v: &[Seg], ys: &mut Vec<f32>, h: &mut Vec<Seg>) -> Vec<usize> {
+    fn above_cut(&mut self, v: &[Line], ys: &mut Vec<f32>, h: &mut Vec<Line>) -> Vec<usize> {
         let n = ys.len();
         let runs = self.free(ys[n - 1], ys[0]);
         let (left, right) = (self.xs[0] + SNAP, self.xs[self.xs.len() - 1] - SNAP);
-        let inner = |s: &&Seg| s.at > left && s.at < right;
+        let inner = |s: &&Line| s.at > left && s.at < right;
         let low = runs
             .iter()
             .map(|&i| self.flow.runs[i].y)
@@ -1898,7 +1900,7 @@ fn alone_on_line(per_line: &HashMap<u32, u32>, run: &Run) -> bool {
 
 /// The column edges and the row edges (from the top) of a grid of horizontal segments `h`
 /// and vertical segments `v`.
-fn edges(h: &[Seg], v: &[Seg]) -> (Vec<f32>, Vec<f32>) {
+fn edges(h: &[Line], v: &[Line]) -> (Vec<f32>, Vec<f32>) {
     let mut xs: Vec<f32> = v.iter().map(|s| s.at).collect();
     xs.push(h.iter().map(|s| s.from).fold(f32::MAX, f32::min));
     xs.push(h.iter().map(|s| s.to).fold(f32::MIN, f32::max));
@@ -1971,7 +1973,7 @@ fn places_of(mut spans: Vec<Span>) -> Vec<Place> {
 /// cuts there; a rule inside a word cuts nothing. A cut part keeps the run's place in the
 /// reading order. False when more than `budget` steps were needed: the runs past them stay
 /// whole.
-fn cut_at_columns(flow: &mut Flow, parts: &[Part], hs: &[Seg], budget: usize) -> bool {
+fn cut_at_columns(flow: &mut Flow, parts: &[Part], hs: &[Line], budget: usize) -> bool {
     // The rules as drawn, and the inner column edges of hanging headers below their feet.
     let (mut drawn, mut hanging): (Vec<Span>, Vec<Span>) = (Vec::new(), Vec::new());
     // The page's lines from the top, for the bodies of rows of drawn cells, once needed.
@@ -2157,7 +2159,7 @@ fn apply_cuts(flow: &mut Flow, cuts: Vec<(usize, Vec<usize>)>) {
 /// heights where the inner column rules of a row end when it has some, all of them hang
 /// from its top and they end at one height clear of its bottom, each with that bottom. Each
 /// rule is looked at in the rows it reaches into, no more.
-fn hanging_feet(v: &[Seg], xs: &[f32], ys: &[f32]) -> Vec<(f32, f32)> {
+fn hanging_feet(v: &[Line], xs: &[f32], ys: &[f32]) -> Vec<(f32, f32)> {
     let (left, right) = (xs[0], xs[xs.len() - 1]);
     let rows = ys.len() - 1;
     let mut feet: Vec<Vec<f32>> = vec![Vec::new(); rows];
@@ -2435,10 +2437,9 @@ fn anchor_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::regions::merged;
 
-    fn seg(at: f32, from: f32, to: f32) -> Seg {
-        Seg { at, from, to }
+    fn seg(at: f32, from: f32, to: f32) -> Line {
+        Line { at, from, to }
     }
 
     /// A run of `text` on the baseline 100 in the size 10, 6 points a character, with a gap
@@ -2601,52 +2602,5 @@ mod tests {
         let mut work = TITLE_WORK;
         assert!(column_across(&vs, (50.0, 300.0), (52.0, 58.0), &mut work));
         assert!(work > TITLE_WORK);
-    }
-
-    #[test]
-    fn merged_keeps_near_collinear_segments() {
-        // Two sides of a box drawn twice a little apart, and a column rule 1.5 points to
-        // the right of them in three pieces lower down: the rule's pieces stay apart from
-        // the box sides and from each other.
-        let out = merged(vec![
-            seg(411.5, 689.5, 739.8),
-            seg(412.2, 689.5, 739.8),
-            seg(413.3, 106.2, 261.5),
-            seg(413.3, 481.0, 557.5),
-            seg(413.3, 621.2, 672.2),
-        ]);
-        let mut got: Vec<(f32, f32, f32)> = out.iter().map(|s| (s.at, s.from, s.to)).collect();
-        got.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.total_cmp(&b.0)));
-        assert_eq!(got.len(), 4, "{got:?}");
-        for (k, (from, to)) in [(106.2, 261.5), (481.0, 557.5), (621.2, 672.2)]
-            .into_iter()
-            .enumerate()
-        {
-            assert_eq!(got[k], (413.3, from, to), "{got:?}");
-        }
-        assert!((got[3].0 - 411.85).abs() < 0.01, "{got:?}");
-        assert_eq!((got[3].1, got[3].2), (689.5, 739.8), "{got:?}");
-        // Pieces that touch within the snap distance join; pieces of one line far apart
-        // stay apart.
-        let out = merged(vec![
-            seg(100.0, 0.0, 10.0),
-            seg(100.5, 11.5, 20.0),
-            seg(100.0, 30.0, 40.0),
-        ]);
-        assert_eq!(out.len(), 2, "{out:?}");
-        // Bars every 1.8 points and two column rules 40 points apart among them, over other
-        // heights: the rules stay apart.
-        let mut segs: Vec<Seg> = (0..56)
-            .map(|k| seg(400.0 + 1.8 * k as f32, 100.0, 140.0))
-            .collect();
-        segs.push(seg(410.0, 640.0, 700.0));
-        segs.push(seg(450.0, 640.0, 700.0));
-        let out = merged(segs);
-        let rules: Vec<f32> = out
-            .iter()
-            .filter(|s| s.from == 640.0)
-            .map(|s| s.at)
-            .collect();
-        assert_eq!(rules, [410.0, 450.0], "{out:?}");
     }
 }
