@@ -67,6 +67,27 @@ pub(crate) const RUNS_INTO_CELL: &str =
 /// the gutter between two columns (a note between rows).
 pub(crate) const RUNS_OVER_COLUMNS: &str = "it stands between two rows and runs over their columns";
 
+/// Why cells are no table's. A grid whose cells are mostly empty: a form to fill in.
+pub const EMPTY_CELLS: &str = "most of its cells are empty";
+
+/// Why cells are no table's. A grid whose body boxes span too much: boxes, not rows and columns.
+pub const NO_ROWS_AND_COLUMNS: &str = "its boxes do not form rows and columns";
+
+/// Why cells are no table's. A grid whose text crosses its rules too often.
+pub const CROSSES_LINES: &str = "its text crosses its lines";
+
+/// Why cells are no table's. Cells of long text: prose, not values.
+pub const LONG_TEXT: &str = "its cells hold long text";
+
+/// Why cells are no table's. Cells whose text goes on into the cell below like prose.
+pub const RUNS_ON: &str = "its text runs on from row to row like prose";
+
+/// Why cells are no table's. Rows that all read the same: a repeated pattern, not a table.
+pub const ROWS_ALIKE: &str = "all its rows read the same";
+
+/// Why cells are no table's. Numbered entries with page numbers going up: a table of contents.
+pub const CONTENTS: &str = "it reads like a table of contents";
+
 /// One cell: the runs in it (indexes into the runs the extractor was given, in no particular
 /// order), how many rows and columns it spans, and what it says when it has no runs.
 #[derive(Debug, Clone, PartialEq, Default)]

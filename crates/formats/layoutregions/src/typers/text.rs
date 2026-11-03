@@ -18,13 +18,15 @@
 //! reaches the least score, so a plain line of body text is a paragraph, and it never wins
 //! against another kind's evidence. The kinds today's rules decide between win by 150 or more.
 
+use crate::extract::table::grid::piece_count;
 use crate::extract::text::{Demotion, TextBlock, TextCx, next_block, sentences};
 use crate::file::{Band, bold_led, in_text_size, plain_size};
 use crate::input::{PrimId, TextRun};
 use crate::line::{ink, text_lines};
-use crate::region::{Kind, Signal};
+use crate::region::Kind;
 use crate::segment::Segment;
-use crate::typers::{PageView, Typed};
+use crate::typers::table::PARAGRAPH_PROSE_CELLS;
+use crate::typers::{PageView, Typed, signal};
 
 /// `heading.size_ratio` for a line under [`crate::file::HEADING_PLAIN_RATIO`] times the body
 /// size (it needs bold ink to head, see [`plain_size`]) and at or over it.
@@ -77,8 +79,13 @@ pub(crate) enum Read {
         bold_lead: bool,
         demoted: Option<Demotion>,
     },
-    /// A paragraph of `lines` lines, which read as sentences or not.
-    Paragraph { lines: usize, sentences: bool },
+    /// A paragraph of `lines` lines, which read as sentences or not, and whether each of its
+    /// lines is one piece (no gap of a cell between its runs).
+    Paragraph {
+        lines: usize,
+        sentences: bool,
+        whole: bool,
+    },
     /// A list item that joins the item before it or not, of `lines` lines.
     Item { joins: bool, lines: usize },
 }
@@ -156,6 +163,9 @@ impl SegText {
                     Some(Read::Paragraph {
                         lines: j - i,
                         sentences: sentences(&all[i..j]),
+                        whole: all[i..j]
+                            .iter()
+                            .all(|l| piece_count(l.runs, 0, l.runs.len()) <= 1),
                     })
                 }
                 TextBlock::Item { joins, .. } => {
@@ -178,16 +188,26 @@ impl SegText {
     }
 }
 
-fn signal(id: &'static str, detail: String, weight: u16) -> Signal {
-    Signal { id, detail, weight }
-}
-
 /// Paragraph: the walk reads every line as paragraphs, or as lines of a heading size that read
 /// as a paragraph. Signals: the lines are set in a text size of the page or the body size
 /// (`paragraph.text_size`, the least evidence), lines go on one another (`paragraph.joins`),
 /// they read as sentences (`paragraph.sentences`), and the reason a heading's lines read as a
 /// paragraph (one signal per [`Demotion`]).
 pub fn type_paragraph(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
+    // What the table rules say of the segment: prose they refuse, or cells they read.
+    let prose = super::table::refusal(view, seg)
+        .filter(|r| r.kind == Kind::Paragraph)
+        .map(|r| r.signal)
+        .or_else(|| {
+            super::table::sentences_across(view, seg).then(|| {
+                signal(
+                    "paragraph.prose_cells",
+                    "its lines read as sentences across the columns of a ruled table".into(),
+                    PARAGRAPH_PROSE_CELLS,
+                )
+            })
+        });
+    let in_table = super::table::type_table(view, seg).is_some();
     view.with_text(seg, |t| {
         let all = t.blocks.iter().all(|b| {
             matches!(
@@ -199,7 +219,7 @@ pub fn type_paragraph(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
                     }
             )
         });
-        if t.blocks.is_empty() || !all {
+        if t.blocks.is_empty() || !(all || prose.is_some()) {
             return None;
         }
         let mut signals = Vec::new();
@@ -219,7 +239,9 @@ pub fn type_paragraph(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
             .blocks
             .iter()
             .filter_map(|b| match b {
-                Read::Paragraph { lines, .. } if *lines >= 2 => Some(lines - 1),
+                Read::Paragraph {
+                    lines, whole: true, ..
+                } if *lines >= 2 => Some(lines - 1),
                 _ => None,
             })
             .sum();
@@ -245,8 +267,10 @@ pub fn type_paragraph(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
                 PARAGRAPH_SENTENCES,
             ));
         }
+        // Lines of a heading size inside a table's cells read as the table's rows: the table
+        // rule reads them, so their demotion is the table's evidence, not the paragraph's.
         let mut why: Vec<Demotion> = Vec::new();
-        for b in &t.blocks {
+        for b in t.blocks.iter().filter(|_| !in_table) {
             if let Read::Heading {
                 demoted: Some(d), ..
             } = b
@@ -280,6 +304,7 @@ pub fn type_paragraph(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
             };
             signals.push(signal(id, detail.into(), PARAGRAPH_DEMOTED));
         }
+        signals.extend(prose.clone());
         Typed::of(Kind::Paragraph, signals)
     })
 }

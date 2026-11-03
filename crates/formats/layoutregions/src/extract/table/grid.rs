@@ -10,7 +10,8 @@ use std::collections::HashMap;
 
 use super::banded::long_or_prose;
 use super::{
-    CAPTIONED_CELL, CELL_GAP, CellOut, RUNS_OVER_COLUMNS, RunRange, SHORT_CELL, TableOut, TitleCut,
+    CAPTIONED_CELL, CELL_GAP, CONTENTS, CellOut, ROWS_ALIKE, RUNS_OVER_COLUMNS, RunRange,
+    SHORT_CELL, TableOut, TitleCut,
 };
 use crate::extract::pairs::words;
 use crate::extract::text::signed_amount;
@@ -381,7 +382,7 @@ pub fn grid_cells<R: LineRun>(
         })
         .collect();
     if texts.len() > 1 && texts.iter().all(|r| *r == texts[0]) {
-        return Err("all its rows read the same");
+        return Err(ROWS_ALIKE);
     }
     // Short cells, or mostly numbers; longer next to a table caption.
     let short = if table_caption {
@@ -412,7 +413,7 @@ pub fn grid_cells<R: LineRun>(
         && pages.iter().all(Option::is_some)
         && pages.windows(2).all(|w| w[0] <= w[1])
     {
-        return Err("it reads like a table of contents");
+        return Err(CONTENTS);
     }
     let expand = |ranges: &[(usize, usize)]| -> Vec<usize> {
         ranges.iter().flat_map(|&(s, e)| s..e).collect()

@@ -16,16 +16,24 @@
 use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
 
+use crate::extract::pairs::Style;
+use crate::extract::table::area::Area;
+use crate::extract::table::caption::ByY;
+use crate::extract::table::{RunRange, run_ranges, texted_per_line};
 use crate::extract::text::title::page_title;
 use crate::file::{Band, FileFacts, Levels, RunningIndex, text_sizes, two_page_line};
-use crate::input::{PageIn, TextRun};
+use crate::input::{PageIn, PrimId, TextRun};
 use crate::line::{LineRun, text_lines};
 use crate::region::{Kind, Score, Signal};
-use crate::segment::drawn::DrawnStructure;
+use crate::segment::drawn::{DrawnStructure, Line};
 use crate::segment::{Segment, Segments};
 
+pub mod pairs;
+pub mod table;
 pub mod text;
 
+pub use pairs::type_label_value;
+pub use table::{type_table, type_totals};
 pub use text::{
     type_footer_band, type_footnote_legend, type_header_band, type_heading, type_list,
     type_paragraph, type_title_block,
@@ -59,6 +67,27 @@ impl Typed {
     }
 }
 
+/// A signal of `id` with `detail` and `weight`.
+pub(crate) fn signal(id: &'static str, detail: String, weight: u16) -> Signal {
+    Signal { id, detail, weight }
+}
+
+/// The text runs of `seg` on the page of `view`, borrowed, in the order of their ids, and
+/// those ids.
+pub(crate) fn seg_runs<'a>(view: &PageView<'a>, seg: &Segment) -> (Vec<&'a TextRun>, Vec<u32>) {
+    let mut refs = Vec::new();
+    let mut ids = Vec::new();
+    for p in &seg.prims {
+        if let PrimId::Text(i) = *p
+            && let Some(r) = view.page.texts.get(i as usize)
+        {
+            refs.push(r);
+            ids.push(i);
+        }
+    }
+    (refs, ids)
+}
+
 /// A typer: the evidence for its kind in a segment of the page the view shows. Pass the
 /// segment as it stands in the view's tree (`&segs.all[i]`, not a copy): the text of a segment
 /// of the tree is walked once for all typers, a copy is walked again by each.
@@ -72,6 +101,9 @@ pub const TYPERS: &[(Kind, Typer)] = &[
     (Kind::Heading, type_heading),
     (Kind::Paragraph, type_paragraph),
     (Kind::List, type_list),
+    (Kind::Table, type_table),
+    (Kind::LabelValue, type_label_value),
+    (Kind::Totals, type_totals),
     (Kind::FootnoteLegend, type_footnote_legend),
 ];
 
@@ -121,6 +153,22 @@ pub struct PageView<'a> {
     title: Option<ViewTitle>,
     /// The text of each segment of `segs`, worked out once.
     texts: Vec<OnceCell<Option<text::SegText>>>,
+    /// The page's lines (runs of one line number, see [`run_ranges`]) and their index by
+    /// height, for captions and the bodies of header bands.
+    lines: Vec<RunRange>,
+    by_y: ByY,
+    /// The page's pictures (x0, y0, x1, y1).
+    images: Vec<[f32; 4]>,
+    /// The page's horizontal rules, sorted by height.
+    hs: Vec<Line>,
+    /// How many runs with text each line of the page has (see [`texted_per_line`]).
+    per_line: HashMap<u32, u32>,
+    /// The table reading of each segment of `segs`, worked out once.
+    readings: Vec<OnceCell<table::Find>>,
+    /// The totals reading of each segment of `segs`, worked out once.
+    totals: Vec<OnceCell<Option<table::TotalsRead>>>,
+    /// The label styles that pairs with independent evidence show (see [`pairs::seeds`]).
+    seeds: OnceCell<Vec<Style>>,
 }
 
 impl<'a> PageView<'a> {
@@ -203,6 +251,21 @@ impl<'a> PageView<'a> {
             top: if height > 0.0 { t.top / height } else { 0.0 },
             ..t
         });
+        crate::work::add(page.texts.len() as u64);
+        let page_lines = run_ranges(&page.texts);
+        let by_y = ByY::new(&page.texts, &page_lines);
+        let images = page
+            .pictures
+            .iter()
+            .map(|p| [p.bounds.x0, p.bounds.y0, p.bounds.x1, p.bounds.y1])
+            .collect();
+        let mut hs: Vec<Line> = drawn
+            .grids
+            .as_ref()
+            .map(|g| g.hs.clone())
+            .unwrap_or_default();
+        hs.sort_by(|a, b| a.at.total_cmp(&b.at));
+        let n = segs.all.len();
         PageView {
             page,
             drawn,
@@ -215,7 +278,15 @@ impl<'a> PageView<'a> {
             legend,
             text_sizes: sizes,
             title,
-            texts: (0..segs.all.len()).map(|_| OnceCell::new()).collect(),
+            texts: (0..n).map(|_| OnceCell::new()).collect(),
+            lines: page_lines,
+            by_y,
+            images,
+            hs,
+            per_line: texted_per_line(&page.texts),
+            readings: (0..n).map(|_| OnceCell::new()).collect(),
+            totals: (0..n).map(|_| OnceCell::new()).collect(),
+            seeds: OnceCell::new(),
         }
     }
 
@@ -241,19 +312,83 @@ impl<'a> PageView<'a> {
         seg: &Segment,
         f: impl FnOnce(&text::SegText) -> Option<T>,
     ) -> Option<T> {
+        self.cached(
+            &self.texts,
+            seg,
+            || text::SegText::of(self, seg),
+            |t| t.as_ref().and_then(f),
+        )
+    }
+
+    /// `f` of what `make` works out for `seg`: once for a segment of the view's tree (kept in
+    /// `cells`, one per segment), each time for another segment (a test's).
+    pub(crate) fn cached<T, U>(
+        &self,
+        cells: &[OnceCell<T>],
+        seg: &Segment,
+        make: impl FnOnce() -> T,
+        f: impl FnOnce(&T) -> U,
+    ) -> U {
         let own = self
             .segs
             .all
             .get(seg.id.0 as usize)
             .filter(|s| std::ptr::eq(*s, seg))
-            .and_then(|_| self.texts.get(seg.id.0 as usize));
+            .and_then(|_| cells.get(seg.id.0 as usize));
         match own {
-            Some(cell) => cell
-                .get_or_init(|| text::SegText::of(self, seg))
-                .as_ref()
-                .and_then(f),
-            None => text::SegText::of(self, seg).as_ref().and_then(f),
+            Some(cell) => f(cell.get_or_init(make)),
+            None => f(&make()),
         }
+    }
+
+    /// The table reading of `seg` (see [`table::Find`]).
+    pub(crate) fn reading<U>(&self, seg: &Segment, f: impl FnOnce(&table::Find) -> U) -> U {
+        self.cached(&self.readings, seg, || table::Find::of(self, seg), f)
+    }
+
+    /// The totals reading of `seg` (see [`table::TotalsRead`]).
+    pub(crate) fn totals_of<U>(
+        &self,
+        seg: &Segment,
+        f: impl FnOnce(Option<&table::TotalsRead>) -> U,
+    ) -> U {
+        self.cached(
+            &self.totals,
+            seg,
+            || table::TotalsRead::of(self, seg),
+            |t| f(t.as_ref()),
+        )
+    }
+
+    /// The label styles of the page that may seed weight-only pairs (see [`pairs::seeds`]).
+    pub(crate) fn seeds(&self) -> &[Style] {
+        self.seeds.get_or_init(|| pairs::seeds(self))
+    }
+
+    /// What the page's area says against a table (see [`Area`]).
+    pub(crate) fn area(&self) -> Area<'_> {
+        Area {
+            width: self.page.size[0],
+            height: self.page.size[1],
+            images: &self.images,
+            body_size: self.file.body_size,
+        }
+    }
+
+    pub(crate) fn lines(&self) -> &[RunRange] {
+        &self.lines
+    }
+
+    pub(crate) fn by_y(&self) -> &ByY {
+        &self.by_y
+    }
+
+    pub(crate) fn hs(&self) -> &[Line] {
+        &self.hs
+    }
+
+    pub(crate) fn per_line(&self) -> &HashMap<u32, u32> {
+        &self.per_line
     }
 
     pub(crate) fn band(&self, line: u32) -> Option<Band> {

@@ -8,6 +8,7 @@
 use layoutregions::file::{FilePage, learn};
 use layoutregions::segment::drawn::drawn;
 use layoutregions::segment::{SegId, Segment, Source, segment_page};
+use layoutregions::typers::table::{table_columns, type_table};
 use layoutregions::typers::text::{
     BAND_RUNNING, HEADING_BOLD, HEADING_SIZE_LARGE, HEADING_TITLE_LINES, LEGEND_ENTRIES,
     LIST_HANGING, LIST_ITEMS, LIST_MARKER, PARAGRAPH_DEMOTED, PARAGRAPH_JOINS, PARAGRAPH_SENTENCES,
@@ -568,4 +569,623 @@ fn a_segment_of_the_tree_is_walked_once() {
     }
     // The root holds every line: a heading over a paragraph is no text kind of its own.
     assert!(all(&segs.all[segs.root.0 as usize]).is_empty());
+}
+
+// ---- Tables, totals and label/value groups (Task 17) ----
+
+/// A rule from (x0, y0) to (x1, y1).
+fn rule(x0: f32, y0: f32, x1: f32, y1: f32) -> RuleIn {
+    RuleIn {
+        x0,
+        y0,
+        x1,
+        y1,
+        thick: 0.5,
+        dashed: false,
+        rect: false,
+    }
+}
+
+/// The rules of a grid of column edges `xs` and row edges `ys`.
+fn grid_rules(xs: &[f32], ys: &[f32]) -> Vec<RuleIn> {
+    let (l, r) = (xs[0], xs[xs.len() - 1]);
+    let (b, t) = (ys[ys.len() - 1], ys[0]);
+    let mut out: Vec<RuleIn> = ys.iter().map(|&y| rule(l, y, r, y)).collect();
+    out.extend(xs.iter().map(|&x| rule(x, b, x, t)));
+    out
+}
+
+/// A drawn box (x0, y0, x1, y1): its four sides as rules.
+fn box_rules(b: [f32; 4]) -> Vec<RuleIn> {
+    grid_rules(&[b[0], b[2]], &[b[3], b[1]])
+}
+
+/// A page with prose above and below (the body size) and `texts` and `rules` between.
+fn sheet(texts: Vec<TextRun>, rules: Vec<RuleIn>) -> PageIn {
+    let mut all = prose(0, 800.0);
+    all.extend(texts);
+    all.extend(prose(900, 120.0));
+    let mut p = page(2, all);
+    p.rules = rules;
+    p
+}
+
+/// What the typers say of each segment of a page's tree.
+struct Tree {
+    page: PageIn,
+}
+
+impl Tree {
+    fn scaled(&self, k: f32) -> Tree {
+        let c = Case {
+            pages: vec![self.page.clone()],
+            at: 0,
+            lines: Vec::new(),
+        };
+        let mut page = c.scaled(k).pages.remove(0);
+        page.rules = self
+            .page
+            .rules
+            .iter()
+            .map(|r| RuleIn {
+                x0: r.x0 * k,
+                y0: r.y0 * k,
+                x1: r.x1 * k,
+                y1: r.y1 * k,
+                thick: r.thick * k,
+                ..r.clone()
+            })
+            .collect();
+        Tree { page }
+    }
+
+    /// `f` of the view of the page.
+    fn with<T>(&self, f: impl FnOnce(&PageView<'_>) -> T) -> T {
+        let file = [FilePage::of(&self.page)];
+        let facts = learn(&file, false, &no_amount);
+        let index = FileIndex::new(&facts);
+        let structure = drawn(&self.page, &|_| true);
+        let segs = segment_page(&self.page, &Limits::default(), &|| false);
+        let view = PageView::new(&self.page, &structure, &segs, &facts, &index, &no_amount);
+        f(&view)
+    }
+
+    /// Every typer's answer for the segment of the tree that `pick` finds first.
+    fn typed(&self, pick: &dyn Fn(&PageView<'_>, &Segment) -> bool) -> Vec<Typed> {
+        self.with(|view| {
+            let seg = view
+                .segs
+                .all
+                .iter()
+                .find(|s| pick(view, s))
+                .unwrap_or_else(|| panic!("no such segment in {:#?}", view.segs.all));
+            all_typed(view, seg)
+        })
+    }
+}
+
+fn all_typed(view: &PageView<'_>, seg: &Segment) -> Vec<Typed> {
+    TYPERS
+        .iter()
+        .filter_map(|(kind, typer)| {
+            let t = typer(view, seg)?;
+            assert_eq!(t.kind, *kind, "a typer gives its own kind");
+            Some(t)
+        })
+        .collect()
+}
+
+fn find(typed: &[Typed], kind: Kind) -> Option<&Typed> {
+    typed.iter().find(|t| t.kind == kind)
+}
+
+/// The grid segment of the page.
+fn grid(_: &PageView<'_>, s: &Segment) -> bool {
+    matches!(s.source, Source::Grid { .. })
+}
+
+/// The segment that holds exactly the text runs of `lines` (and maybe other primitives).
+fn text_of_lines(lines: Vec<u32>) -> impl Fn(&PageView<'_>, &Segment) -> bool {
+    move |view, s| {
+        let mut own: Vec<u32> = s
+            .prims
+            .iter()
+            .filter_map(|p| match p {
+                PrimId::Text(i) => Some(view.page.texts[*i as usize].line),
+                _ => None,
+            })
+            .collect();
+        own.sort_unstable();
+        own.dedup();
+        own == lines
+    }
+}
+
+/// Cells of a ruled grid: the column edges `xs`, rows `rows` (each its cell texts, the first
+/// the header) from `top` down, 14 points a row, header bold when `bold`.
+fn ruled_table(xs: &[f32], top: f32, rows: &[&[&str]], bold: bool, first_line: u32) -> Tree {
+    let ys: Vec<f32> = (0..=rows.len()).map(|k| top - 14.0 * k as f32).collect();
+    let mut texts = Vec::new();
+    for (k, row) in rows.iter().enumerate() {
+        for (c, t) in row.iter().enumerate() {
+            let r = run(t, xs[c] + 3.0, ys[k] - 10.2, 9.2, first_line + k as u32);
+            texts.push(if bold && k == 0 { self::bold(r) } else { r });
+        }
+    }
+    Tree {
+        page: sheet(texts, grid_rules(xs, &ys)),
+    }
+}
+
+const ITEMS: &[&[&str]] = &[
+    &["Artikel", "Menge", "Preis"],
+    &["Muster A", "2", "12,50"],
+    &["Muster B", "1", "3,00"],
+    &["Muster C", "4", "8,75"],
+];
+
+const ITEM_XS: &[f32] = &[72.0, 220.0, 320.0, 420.0];
+
+#[test]
+fn ruled_grid_is_table_evidence() {
+    let tree = ruled_table(ITEM_XS, 700.0, ITEMS, true, 100);
+    let typed = tree.typed(&grid);
+    let table = of(&typed, Kind::Table);
+    assert_eq!(
+        ids(table),
+        [
+            "table.drawn_cells",
+            "table.shared_columns",
+            "table.header_row"
+        ]
+    );
+    let (kind, lead) = winner(&typed);
+    assert_eq!(kind, Kind::Table, "{typed:#?}");
+    assert!(lead >= MARGIN, "{typed:#?}");
+}
+
+/// Long sentences in a grid of two rows and two columns: the cells hold prose.
+fn prose_grid() -> Tree {
+    let rows: &[&[&str]] = &[
+        &[
+            "die Ware wird nach dem Erhalt der Rechnung geliefert.",
+            "der Betrag wird innerhalb von zehn Tagen bezahlt.",
+        ],
+        &[
+            "die Muster GmbH sendet die Ware an den Kunden.",
+            "der Kunde prueft die Ware nach dem Erhalt genau.",
+        ],
+    ];
+    ruled_table(&[40.0, 300.0, 560.0], 700.0, rows, false, 100)
+}
+
+#[test]
+fn prose_cells_speak_for_paragraph() {
+    let typed = prose_grid().typed(&grid);
+    assert!(find(&typed, Kind::Table).is_none(), "{typed:#?}");
+    let paragraph = of(&typed, Kind::Paragraph);
+    assert!(
+        ids(paragraph).contains(&"paragraph.prose_cells"),
+        "{typed:#?}"
+    );
+    let (kind, lead) = winner(&typed);
+    assert_eq!(kind, Kind::Paragraph);
+    assert!(lead >= MARGIN);
+}
+
+/// The item grid with totals under it: labels in the description column, amounts right
+/// under the price column.
+fn totals_tree(rule_over: bool) -> Tree {
+    let mut tree = ruled_table(ITEM_XS, 700.0, ITEMS, true, 100);
+    let lines: &[(&str, &str)] = &[
+        ("Summe netto", "24,25"),
+        ("MwSt 19 %", "4,61"),
+        ("Gesamt", "28,86"),
+    ];
+    for (k, (label, value)) in lines.iter().enumerate() {
+        let y = 630.0 - 13.0 * k as f32;
+        tree.page
+            .texts
+            .push(run(label, 75.0, y, 9.2, 200 + k as u32));
+        let v = run(value, 0.0, y, 9.2, 200 + k as u32);
+        let x = 417.0 - v.w;
+        tree.page.texts.push(TextRun { x, ..v });
+    }
+    if rule_over {
+        tree.page.rules.push(rule(320.0, 641.0, 420.0, 641.0));
+    }
+    tree.page.texts.sort_by_key(|r| r.line);
+    tree
+}
+
+#[test]
+fn amounts_under_money_columns_are_totals() {
+    let tree = totals_tree(false);
+    let typed = tree.typed(&text_of_lines(vec![200, 201, 202]));
+    let totals = of(&typed, Kind::Totals);
+    assert_eq!(
+        ids(totals),
+        ["totals.under_money_columns", "totals.labels_in_description"]
+    );
+    assert!(find(&typed, Kind::Table).is_none(), "{typed:#?}");
+    assert!(find(&typed, Kind::LabelValue).is_none(), "{typed:#?}");
+    let (kind, lead) = winner(&typed);
+    assert_eq!(kind, Kind::Totals, "{typed:#?}");
+    assert!(lead >= MARGIN);
+    // A rule over the amounts, across the money column, is one more signal.
+    let typed = totals_tree(true).typed(&text_of_lines(vec![200, 201, 202]));
+    assert!(ids(of(&typed, Kind::Totals)).contains(&"totals.end_rule"));
+}
+
+/// A row of three boxes side by side, each a small label over its value.
+fn boxed_fields() -> Tree {
+    let fields = [
+        ("Rechnungsnummer", "RE-2026-0001"),
+        ("Datum", "01.01.2026"),
+        ("Kundennummer", "12345"),
+    ];
+    let mut texts = Vec::new();
+    let mut rules = Vec::new();
+    for (k, (label, value)) in fields.iter().enumerate() {
+        let x = 72.0 + 150.0 * k as f32;
+        texts.push(run(label, x + 3.0, 683.0, 6.2, 100));
+        texts.push(run(value, x + 3.0, 668.0, 9.2, 101));
+        rules.extend(box_rules([x, 660.0, x + 150.0, 692.0]));
+    }
+    texts.sort_by_key(|r| r.line);
+    Tree {
+        page: sheet(texts, rules),
+    }
+}
+
+#[test]
+fn boxed_fields_are_label_value() {
+    let typed = boxed_fields().typed(&grid);
+    let pairs = of(&typed, Kind::LabelValue);
+    let found = ids(pairs);
+    assert!(found.contains(&"label_value.field_cells"), "{typed:#?}");
+    assert!(found.contains(&"label_value.boxes_touch"), "{typed:#?}");
+    assert!(found.contains(&"label_value.value_shape"), "{typed:#?}");
+    let (kind, lead) = winner(&typed);
+    assert_eq!(kind, Kind::LabelValue, "{typed:#?}");
+    assert!(lead >= MARGIN);
+}
+
+#[test]
+fn size_alone_seeds_no_style() {
+    // A firm name over its address in a smaller size, in a box: no colon, no value shape.
+    let texts = vec![
+        run("Muster GmbH", 75.0, 683.0, 10.2, 100),
+        run("Musterweg 1", 75.0, 671.0, 8.2, 101),
+        run("12345 Musterstadt", 75.0, 661.0, 8.2, 102),
+    ];
+    let tree = Tree {
+        page: sheet(texts, box_rules([72.0, 655.0, 250.0, 695.0])),
+    };
+    let typed = tree.typed(&|_, s| s.source == Source::Box);
+    assert!(find(&typed, Kind::LabelValue).is_none(), "{typed:#?}");
+}
+
+/// Labels and values in lines: bold labels, with a colon and values shaped as numbers when
+/// `evidence`, else words; and a box whose label and value differ in weight only.
+fn seeded(evidence: bool) -> Tree {
+    let rows: &[(&str, &str)] = if evidence {
+        &[
+            ("Kundennummer:", "12345"),
+            ("Vertragsnummer:", "67890"),
+            ("Rechnungsdatum:", "01.01.2026"),
+        ]
+    } else {
+        &[
+            ("Abteilung", "Einkauf"),
+            ("Bereich", "Verwaltung"),
+            ("Standort", "Musterstadt"),
+        ]
+    };
+    let mut texts = Vec::new();
+    for (k, (label, value)) in rows.iter().enumerate() {
+        let y = 700.0 - 13.0 * k as f32;
+        texts.push(bold(run(label, 72.0, y, 9.2, 100 + k as u32)));
+        texts.push(run(value, 200.0, y, 9.2, 100 + k as u32));
+    }
+    texts.push(bold(run("Ansprechpartner", 335.0, 560.0, 9.2, 150)));
+    texts.push(run("Erika Mustermann", 335.0, 547.0, 9.2, 151));
+    Tree {
+        page: sheet(texts, box_rules([330.0, 540.0, 520.0, 572.0])),
+    }
+}
+
+#[test]
+fn a_colon_pair_seeds_a_weight_only_box() {
+    let typed = seeded(true).typed(&|_, s| s.source == Source::Box);
+    let pairs = of(&typed, Kind::LabelValue);
+    assert!(
+        ids(pairs).contains(&"label_value.known_style"),
+        "{typed:#?}"
+    );
+}
+
+#[test]
+fn a_size_pair_seeds_no_weight_only_box() {
+    let typed = seeded(false).typed(&|_, s| s.source == Source::Box);
+    assert!(find(&typed, Kind::LabelValue).is_none(), "{typed:#?}");
+}
+
+/// Eight columns without rules: a bold header and four rows.
+fn eight_columns() -> Vec<TextRun> {
+    let titles = [
+        "Pos", "Nr", "Text", "Menge", "Einh", "Preis", "MwSt", "Summe",
+    ];
+    let mut texts = Vec::new();
+    for (c, t) in titles.iter().enumerate() {
+        texts.push(bold(run(t, 40.0 + 64.0 * c as f32, 700.0, 9.2, 100)));
+    }
+    for k in 0..4u32 {
+        let row = [
+            format!("{}", k + 1),
+            format!("A-10{k}"),
+            "Muster".to_string(),
+            format!("{}", k + 2),
+            "Stk".to_string(),
+            "12,50".to_string(),
+            "19%".to_string(),
+            "25,00".to_string(),
+        ];
+        for (c, t) in row.iter().enumerate() {
+            let y = 687.0 - 13.0 * k as f32;
+            texts.push(run(t, 40.0 + 64.0 * c as f32, y, 9.2, 101 + k));
+        }
+    }
+    texts
+}
+
+#[test]
+fn eight_aligned_columns_read_as_a_table() {
+    let tree = Tree {
+        page: sheet(eight_columns(), Vec::new()),
+    };
+    let lines: Vec<u32> = (100..105).collect();
+    let pick = text_of_lines(lines.clone());
+    let typed = tree.typed(&pick);
+    let (kind, _) = winner(&typed);
+    assert_eq!(kind, Kind::Table, "{typed:#?}");
+    tree.with(|view| {
+        let seg = view.segs.all.iter().find(|s| pick(view, s)).unwrap();
+        let cols = table_columns(view, seg).expect("columns");
+        assert_eq!(cols.edges.len(), 9, "{cols:#?}");
+        assert_eq!(cols.header.len(), 8);
+        assert!(cols.header.iter().all(|h| h.len() == 1), "{cols:#?}");
+        assert_eq!(cols.header_rows, 1);
+    });
+    // One region the file states (a tagged table) that holds every run: its columns read by
+    // geometry alone, and no table candidate for it (it is decided as given).
+    let mut page = sheet(eight_columns(), Vec::new());
+    let prims: Vec<PrimId> = page
+        .texts
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| (100..105).contains(&r.line))
+        .map(|(i, _)| PrimId::Text(i as u32))
+        .collect();
+    page.given.push(GivenRegion {
+        kind: Kind::Table,
+        prims,
+        order: 0,
+    });
+    let given = Tree { page };
+    given.with(|view| {
+        let seg = view
+            .segs
+            .all
+            .iter()
+            .find(|s| s.source == Source::Given(Kind::Table))
+            .unwrap();
+        let cols = table_columns(view, seg).expect("columns of a given table");
+        assert_eq!(cols.edges.len(), 9);
+        assert_eq!(cols.header.len(), 8);
+        assert!(type_table(view, seg).is_none());
+    });
+}
+
+/// The item grid with a sentence printed over its last row, from its first column into its
+/// third, in runs `parts` (word counts per run).
+fn sentence_over_row(parts: &[usize]) -> (Tree, Vec<u32>) {
+    let mut tree = ruled_table(ITEM_XS, 700.0, ITEMS, true, 100);
+    let words: Vec<&str> = "die Ware wird nach dem Erhalt der Rechnung geliefert und bezahlt"
+        .split(' ')
+        .collect();
+    let mut x = 75.0;
+    let mut at = 0;
+    let y = 700.0 - 14.0 * 4.0 - 10.2;
+    // One more row of the grid for the sentence.
+    tree.page.rules = grid_rules(ITEM_XS, &[700.0, 686.0, 672.0, 658.0, 644.0, 630.0]);
+    let first = tree.page.texts.len() as u32;
+    for &n in parts {
+        let text = words[at..at + n].join(" ");
+        at += n;
+        let r = run(&text, x, y, 9.2, 104);
+        // The gap between runs falls on a column rule when the run ends before it.
+        x = r.x + r.w + 4.6;
+        if x > 215.0 && x < 225.0 {
+            x = 223.0;
+        }
+        tree.page.texts.push(r);
+    }
+    tree.page.texts.sort_by_key(|r| r.line);
+    let ids: Vec<u32> = tree
+        .page
+        .texts
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| r.line == 104)
+        .map(|(i, _)| i as u32)
+        .collect();
+    let _ = first;
+    (tree, ids)
+}
+
+#[test]
+fn a_sentence_over_a_ruled_row_is_paragraph_evidence() {
+    // Its word gap at a column rule; then the same sentence in three runs.
+    for parts in [&[5usize, 6][..], &[4, 4, 3][..]] {
+        let (tree, sentence) = sentence_over_row(parts);
+        tree.with(|view| {
+            let seg = Segment {
+                id: SegId(u32::MAX),
+                bounds: Bounds {
+                    x0: 0.0,
+                    y0: 0.0,
+                    x1: 595.0,
+                    y1: 842.0,
+                },
+                prims: sentence.iter().map(|&i| PrimId::Text(i)).collect(),
+                source: Source::Rest,
+                parent: None,
+                children: Vec::new(),
+                alternatives: Vec::new(),
+            };
+            let typed = all_typed(view, &seg);
+            let paragraph = of(&typed, Kind::Paragraph);
+            assert!(
+                ids(paragraph).contains(&"paragraph.prose_cells"),
+                "{typed:#?}"
+            );
+            let (kind, lead) = winner(&typed);
+            assert_eq!(kind, Kind::Paragraph);
+            assert!(lead >= MARGIN);
+            // The grid's reading names the line.
+            let g = view.segs.all.iter().find(|s| grid(view, s)).unwrap();
+            let table = type_table(view, g).expect("the grid is a table");
+            assert!(
+                table.signals[0].detail.contains("sentence"),
+                "{:#?}",
+                table.signals
+            );
+        });
+    }
+}
+
+#[test]
+fn table_pair_and_totals_scores_are_scale_free() {
+    type Pick = Box<dyn Fn(&PageView<'_>, &Segment) -> bool>;
+    let cases: Vec<(Tree, Pick)> = vec![
+        (
+            ruled_table(ITEM_XS, 700.0, ITEMS, true, 100),
+            Box::new(grid),
+        ),
+        (prose_grid(), Box::new(grid)),
+        (
+            totals_tree(true),
+            Box::new(text_of_lines(vec![200, 201, 202])),
+        ),
+        (boxed_fields(), Box::new(grid)),
+        (
+            seeded(true),
+            Box::new(|_: &PageView<'_>, s: &Segment| s.source == Source::Box),
+        ),
+        (
+            Tree {
+                page: sheet(eight_columns(), Vec::new()),
+            },
+            Box::new(text_of_lines((100..105).collect())),
+        ),
+    ];
+    for (tree, pick) in &cases {
+        let scores = |t: &Tree| -> Vec<(Kind, u16, Vec<&'static str>)> {
+            t.typed(pick.as_ref())
+                .iter()
+                .map(|t| (t.kind, t.score.0, ids(t)))
+                .collect()
+        };
+        let at = scores(tree);
+        assert!(!at.is_empty());
+        for k in [0.75, 0.8, 1.3, 1.5] {
+            assert_eq!(scores(&tree.scaled(k)), at, "at {k}x");
+        }
+    }
+}
+
+/// The kinds of this task against their rivals, by the weights alone: each winner's least
+/// score is ahead of the loser's best on such text by the margin.
+#[test]
+fn worst_case_margins_of_tables_pairs_and_totals() {
+    use layoutregions::typers::pairs::{
+        LABEL_BOXES_TOUCH, LABEL_FIELD_CELLS, LABEL_FIELDS, LABEL_KEY_VALUES, LABEL_STYLE,
+    };
+    use layoutregions::typers::table::{
+        PARAGRAPH_PROSE_CELLS, TABLE_HEADER, TABLE_READING, TABLE_SHARED, TOTALS_UNDER,
+    };
+    // Paragraph on any text, without a demotion (demotions are not read inside a table).
+    let paragraph = PARAGRAPH_TEXT_SIZE + PARAGRAPH_JOINS + PARAGRAPH_SENTENCES;
+    // Paragraph on the lines of a table: they stand in pieces, so they join no paragraph.
+    let paragraph_in_cells = PARAGRAPH_TEXT_SIZE + PARAGRAPH_SENTENCES;
+    let table = TABLE_READING + TABLE_SHARED + TABLE_HEADER;
+    let pairs = [
+        (
+            "bare table over paragraph in its cells",
+            TABLE_READING,
+            paragraph_in_cells,
+        ),
+        ("prose cells over a refused table", PARAGRAPH_PROSE_CELLS, 0),
+        ("field cells over paragraph", LABEL_FIELD_CELLS, paragraph),
+        ("key values over paragraph", LABEL_KEY_VALUES, paragraph),
+        (
+            "touching boxed fields over paragraph",
+            LABEL_FIELDS + LABEL_STYLE + LABEL_BOXES_TOUCH,
+            paragraph,
+        ),
+        ("totals over paragraph", TOTALS_UNDER, paragraph),
+        // Refused readings: a table under field cells, key values or totals, and label/value
+        // pairs under totals, give nothing.
+        ("field cells over a refused table", LABEL_FIELD_CELLS, 0),
+        ("totals over refused pairs", TOTALS_UNDER, 0),
+        // A table's reading alone is ahead of the least evidence of a paragraph.
+        (
+            "table over the least paragraph",
+            TABLE_READING,
+            PARAGRAPH_TEXT_SIZE,
+        ),
+    ];
+    for (what, winner, loser) in pairs {
+        assert!(winner >= loser + MARGIN, "{what}: {winner} against {loser}");
+    }
+    assert!(table <= 1000);
+}
+
+#[test]
+fn a_header_band_over_lines_is_table_evidence() {
+    // A row of three drawn cells with column titles, and four lines without rules under it in
+    // its columns.
+    let xs = [72.0, 220.0, 320.0, 420.0];
+    let mut texts = Vec::new();
+    for (c, t) in ["Artikel", "Menge", "Preis"].iter().enumerate() {
+        texts.push(run(t, xs[c] + 3.0, 689.8, 9.2, 100));
+    }
+    for (k, row) in ITEMS[1..]
+        .iter()
+        .chain([&["Muster D", "3", "1,00"][..]].iter())
+        .enumerate()
+    {
+        for (c, t) in row.iter().enumerate() {
+            let y = 672.0 - 13.0 * k as f32;
+            texts.push(run(t, xs[c] + 3.0, y, 9.2, 101 + k as u32));
+        }
+    }
+    let tree = Tree {
+        page: sheet(texts, grid_rules(&xs, &[700.0, 686.0])),
+    };
+    let typed = tree.typed(&|_, s| s.source == Source::Page);
+    let table = of(&typed, Kind::Table);
+    assert_eq!(
+        ids(table),
+        [
+            "table.header_band",
+            "table.shared_columns",
+            "table.header_row"
+        ]
+    );
+    for k in [0.75, 1.5] {
+        let scaled = tree.scaled(k).typed(&|_, s| s.source == Source::Page);
+        assert_eq!(of(&scaled, Kind::Table).score, table.score, "at {k}x");
+    }
 }

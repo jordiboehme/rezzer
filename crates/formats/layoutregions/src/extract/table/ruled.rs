@@ -9,8 +9,9 @@ use std::collections::{HashMap, HashSet};
 
 use super::banded::{BAND_EDGE, BODY_GAP, row_starts};
 use super::{
-    CELL_GAP, CellOut, Cells, MAX_SQUARES, PROSE_LINE, PROSE_WORDS, RUNS_INTO_CELL, RunRange,
-    TableOut, alone_on_line, middle, numeric, run_ranges, texted_per_line,
+    CELL_GAP, CROSSES_LINES, CellOut, Cells, EMPTY_CELLS, MAX_SQUARES, NO_ROWS_AND_COLUMNS,
+    PROSE_LINE, PROSE_WORDS, RUNS_INTO_CELL, RunRange, TableOut, alone_on_line, middle, numeric,
+    run_ranges, texted_per_line,
 };
 use crate::line::{LABEL_STEP, LineRun, is_placeholder};
 use crate::segment::drawn::{Line, SNAP, clustered};
@@ -156,14 +157,32 @@ pub(crate) fn prose_like(text: &str, columns: usize) -> bool {
         && 2 * worded > words.len()
 }
 
-/// Whether `run` is a note across the columns of `xs`: a sentence over at least one inner
-/// column edge (see [`prose_like`]). The caller checks that it is the only run on its line.
-fn note_across<R: LineRun>(run: &R, xs: &[f32]) -> bool {
+/// Whether the runs `line` of `runs` (one line, left to right) read as one sentence over the
+/// columns of `xs` (column edges, left to right): their texts joined by a space read as
+/// a sentence (see [`prose_like`]) over at least one inner column edge between the start of
+/// the first run and the end of the last. A sentence printed over a ruled row stands across
+/// the rules whether it is one run, runs parted at a word gap on a rule, or many runs.
+pub fn sentence_across<R: LineRun>(runs: &[R], line: &[usize], xs: &[f32]) -> bool {
+    let (Some(&first), Some(&last)) = (line.first(), line.last()) else {
+        return false;
+    };
+    if xs.len() < 3 {
+        return false;
+    }
+    let (x0, x1) = (runs[first].x(), runs[last].x() + runs[last].w());
     let across = xs[1..xs.len() - 1]
         .iter()
-        .filter(|&&e| e > run.x() + SNAP && e < run.x() + run.w() - SNAP)
+        .filter(|&&e| e > x0 + SNAP && e < x1 - SNAP)
         .count();
-    across > 0 && prose_like(run.text(), across + 1)
+    let text: Vec<&str> = line.iter().map(|&i| runs[i].text()).collect();
+    across > 0 && prose_like(&text.join(" "), across + 1)
+}
+
+/// Whether `run` is a note across the columns of `xs`: a sentence over at least one inner
+/// column edge (see [`sentence_across`]). The caller checks that it is the only run on its
+/// line.
+fn note_across<R: LineRun>(run: &R, xs: &[f32]) -> bool {
+    sentence_across(std::slice::from_ref(run), &[0], xs)
 }
 
 /// Whether `run` goes on with the line of a note `note` above it: in its size and weight,
@@ -837,11 +856,11 @@ fn grid_refused<R: LineRun>(
             .filter(|(o, _)| !cells.is_open[o.0])
             .count();
     if empty as f32 > EMPTY_SHARE * counted as f32 {
-        Some("most of its cells are empty")
+        Some(EMPTY_CELLS)
     } else if 10 * spanning > 3 * all {
-        Some("its boxes do not form rows and columns")
+        Some(NO_ROWS_AND_COLUMNS)
     } else if 5 * crossing > within.len() {
-        Some("its text crosses its lines")
+        Some(CROSSES_LINES)
     } else {
         None
     }

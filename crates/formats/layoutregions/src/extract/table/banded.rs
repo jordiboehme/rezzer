@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 
 use super::caption::ByY;
 use super::{
-    CELL_GAP, CellOut, MAX_SQUARES, PROSE_LINE, PROSE_WORDS, RunRange, SHORT_CELL, TableOut,
-    middle, numeric,
+    CELL_GAP, CellOut, LONG_TEXT, MAX_SQUARES, PROSE_LINE, PROSE_WORDS, RUNS_ON, RunRange,
+    SHORT_CELL, TableOut, middle, numeric,
 };
 use crate::line::LineRun;
 use crate::segment::drawn::{Line, SNAP};
@@ -365,7 +365,7 @@ pub fn long_or_prose(texts: &[Vec<String>], short: usize) -> Option<&'static str
     lens.sort_unstable();
     let numbers = texts.iter().flatten().filter(|t| numeric(t)).count();
     if lens.is_empty() || (lens[lens.len() / 2] >= short && 2 * numbers < lens.len()) {
-        return Some("its cells hold long text");
+        return Some(LONG_TEXT);
     }
     for r in 1..texts.len() {
         for (above, below) in texts[r - 1].iter().zip(&texts[r]) {
@@ -373,7 +373,7 @@ pub fn long_or_prose(texts: &[Vec<String>], short: usize) -> Option<&'static str
             let ends = above.ends_with(['.', ':', ';', '!', '?']);
             let line = words >= PROSE_WORDS && above.chars().count() >= PROSE_LINE;
             if line && !ends && below.chars().next().is_some_and(char::is_lowercase) {
-                return Some("its text runs on from row to row like prose");
+                return Some(RUNS_ON);
             }
         }
     }
