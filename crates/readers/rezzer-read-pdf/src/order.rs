@@ -10,8 +10,12 @@ use std::rc::Rc;
 
 use unicode_bidi::{BidiClass, Level, ParagraphBidiInfo, bidi_class};
 
+use layoutregions::segment::cut;
+pub(crate) use layoutregions::segment::cut::SIZE_STEP;
+use layoutregions::segment::drawn::Line;
+use layoutregions::{Bounds, Limits};
+
 use crate::layout::{Gap, Gaps, Run};
-use crate::regions::{BASELINE_NEAR, Part, offset_baselines};
 use crate::tables::{Rule, RuleKind};
 use crate::text::{Gl, Link, Texts};
 
@@ -21,23 +25,6 @@ const WORD_GAP: f32 = 0.15;
 /// A gap wider than this many font sizes splits a line into pieces, which may stand in
 /// different columns.
 pub(crate) const PIECE_GAP: f32 = 0.8;
-
-/// A column gutter is at least this many font sizes wide.
-const GUTTER: f32 = 0.8;
-
-/// Share of the pieces of a region that may cross a column gutter (titles, notes, footers
-/// that span the columns).
-const CROSSERS: f32 = 0.15;
-
-/// The lines of a text column hold at least this many characters on median; shorter pieces
-/// side by side are a table or a form, read row by row.
-const PROSE_CHARS: usize = 15;
-
-/// Above this many pieces in a region, columns are not looked for.
-const COLUMN_PIECES: usize = 20_000;
-
-/// Deepest nesting of column splits.
-const COLUMN_DEPTH: usize = 8;
 
 /// Text that reads from right to left (Hebrew, Arabic and the like).
 fn is_rtl(c: char) -> bool {
@@ -458,20 +445,12 @@ fn pieces_in(frags: &[Frag], ids: &[usize], head: &[usize], base: usize) -> (Vec
     (out, count)
 }
 
-/// The pieces in reading order: columns one after the other, with the pieces that cross the
-/// gutter (titles, notes across the columns) splitting the columns into bands.
-/// A horizontal drawn rule in the frame of the pieces: its height and its two ends.
-pub(crate) type HRule = (f32, f32, f32);
-
-/// A rule this share of a region's width or wider, across its gutter, parts its bands.
-const WIDE_RULE: f32 = 2.0 / 3.0;
-
 /// Pieces in reading order, and where the second side of a column gutter starts.
 #[derive(Debug, Default)]
 struct Order {
     ids: Vec<usize>,
     /// The places in `ids`, ascending, where the right side of a gutter of a lone row starts
-    /// (see [`Split::Lone`]): the piece there starts a line even when it shares the row of
+    /// (see `Cut::sides`): the piece there starts a line even when it shares the row of
     /// the piece before it, which stands on the left side (a title beside the first line of
     /// a field list).
     sides: Vec<usize>,
@@ -491,395 +470,43 @@ impl Order {
     }
 }
 
-fn reading_order(pieces: &[Piece], rules: &[HRule]) -> Order {
+/// The piece as the cut sees it.
+fn cut_piece(p: &Piece) -> cut::Piece {
+    cut::Piece {
+        bounds: Bounds {
+            x0: p.x0,
+            y0: p.y0,
+            x1: p.x1,
+            y1: p.y1,
+        },
+        line: p.row as u32,
+        baseline: p.y,
+        size: p.size,
+        bold: p.bold,
+        inked: p.inked,
+        chars: p.chars,
+        boxed: p.stand,
+        rows: p.rows,
+    }
+}
+
+/// The pieces `ids` of `pieces` in reading order: columns one after the other, with the
+/// pieces that cross the gutter (titles, notes across the columns) splitting the columns into
+/// bands. The cut itself is the engine's ([`cut::xy_cut`]).
+fn reading_order(pieces: &[Piece], ids: &[usize], rules: &[Line]) -> Order {
+    let cutting: Vec<cut::Piece> = ids.iter().map(|&i| cut_piece(&pieces[i])).collect();
+    let found = cut::xy_cut(&cutting, rules, &Limits::default(), &|| false);
     let mut out = Order {
-        ids: Vec::with_capacity(pieces.len()),
+        ids: Vec::with_capacity(ids.len()),
         sides: Vec::new(),
     };
-    let all = (0..pieces.len()).collect();
-    region(pieces, all, 0, rules, &mut out);
+    for (g, group) in found.groups.iter().enumerate() {
+        if found.sides.binary_search(&g).is_ok() {
+            out.sides.push(out.ids.len());
+        }
+        out.ids.extend(group.iter().map(|&k| ids[k]));
+    }
     out
-}
-
-fn region(p: &[Piece], mut ids: Vec<usize>, depth: usize, rules: &[HRule], out: &mut Order) {
-    let deep = ids.len() > 3 && depth < COLUMN_DEPTH && ids.len() <= COLUMN_PIECES;
-    let found = if deep { gutter(p, &ids) } else { None };
-    // A gutter that only a drawn box makes is taken after the bands of white space across:
-    // text above or below the boxes is not part of their columns.
-    if let Some((_, _, Split::Boxed, _)) = found {
-        ids.sort_by(|&a, &b| p[a].row.cmp(&p[b].row).then(p[a].x0.total_cmp(&p[b].x0)));
-        if let Some(at) = widest_gap(p, &ids) {
-            let rest = ids.split_off(at);
-            region(p, ids, depth + 1, rules, out);
-            region(p, rest, depth + 1, rules, out);
-            return;
-        }
-    }
-    if let Some((g0, g1, split, slack)) = found {
-        ids.sort_by(|&a, &b| p[a].row.cmp(&p[b].row).then(p[a].x0.total_cmp(&p[b].x0)));
-        let mut band: Vec<usize> = Vec::new();
-        let flush = |band: &mut Vec<usize>, out: &mut Order| {
-            if band.is_empty() {
-                return;
-            }
-            let (left, right): (Vec<usize>, Vec<usize>) = band
-                .drain(..)
-                .partition(|&i| on_left(&p[i], (g0, g1), slack));
-            region(p, left, depth + 1, rules, out);
-            // A lone title and the line of the block whose row it shares are two lines. The
-            // pieces of a row beside other gutters stay one line, as they read: cells of a
-            // table in columns, labels of fields side by side.
-            if split == Split::Lone {
-                out.sides.push(out.ids.len());
-            }
-            region(p, right, depth + 1, rules, out);
-        };
-        // A drawn rule across the gutter and most of the region parts the bands too: the
-        // text above it is read before the text below it (a titled block before a grid).
-        let lo = ids.iter().map(|&i| p[i].x0).fold(f32::MAX, f32::min);
-        let hi = ids.iter().map(|&i| p[i].x1).fold(f32::MIN, f32::max);
-        let across: Vec<f32> = rules
-            .iter()
-            .filter(|r| r.1 < g0 && r.2 > g1 && r.2 - r.1 >= WIDE_RULE * (hi - lo))
-            .map(|r| r.0)
-            .collect();
-        let mut low = f32::MAX;
-        for id in ids {
-            let ruled = across.iter().any(|&y| y < low && y > p[id].y1);
-            if ruled {
-                flush(&mut band, out);
-                low = f32::MAX;
-            }
-            if crosses(&p[id], (g0, g1), slack) {
-                flush(&mut band, out);
-                out.ids.push(id);
-                low = f32::MAX;
-            } else {
-                band.push(id);
-                low = low.min(p[id].y0);
-            }
-        }
-        flush(&mut band, out);
-        return;
-    }
-    ids.sort_by(|&a, &b| p[a].row.cmp(&p[b].row).then(p[a].x0.total_cmp(&p[b].x0)));
-    // Without a gutter, the region is cut at its widest band of white space across, and each
-    // part is looked at again: columns may stand above or below full-width text.
-    if ids.len() > 3
-        && depth < COLUMN_DEPTH
-        && ids.len() <= COLUMN_PIECES
-        && let Some(at) = widest_gap(p, &ids)
-    {
-        let rest = ids.split_off(at);
-        region(p, ids, depth + 1, rules, out);
-        region(p, rest, depth + 1, rules, out);
-        return;
-    }
-    out.ids.extend(ids);
-}
-
-/// A piece reaches into a gutter when it reaches past its edge by more than this share of
-/// a step of the bands (see [`BAND_STEP`]): half a point at 8 points.
-const GUTTER_SLACK: f32 = 0.5 * BAND_STEP;
-
-/// Whether the piece `p` stands on the left side of the gutter from `g0` to `g1`: its end is
-/// before the gutter, within `slack`. A piece of white space only has no ink to stand by: it
-/// goes with the side its start lies on.
-fn on_left(p: &Piece, (g0, g1): (f32, f32), slack: f32) -> bool {
-    if p.inked {
-        p.x1 <= g0 + slack
-    } else {
-        p.x0 < (g0 + g1) / 2.0
-    }
-}
-
-/// Whether the piece `p` crosses the gutter from `g0` to `g1`: a piece with ink that reaches
-/// into it from both sides by more than `slack`. White space crosses nothing: a blank string
-/// that a print run draws under a row of fields is no text across the columns.
-fn crosses(p: &Piece, (g0, g1): (f32, f32), slack: f32) -> bool {
-    p.inked && p.x1 > g0 + slack && p.x0 < g1 - slack
-}
-
-/// Where to cut pieces sorted by row: after the row with the widest white space below it,
-/// when that space is at least half a line high. The index is the first piece below the cut.
-fn widest_gap(p: &[Piece], ids: &[usize]) -> Option<usize> {
-    let mut best: Option<(f32, usize)> = None;
-    let mut low = f32::MAX;
-    for k in 1..ids.len() {
-        let (prev, cur) = (&p[ids[k - 1]], &p[ids[k]]);
-        low = low.min(prev.y0);
-        if cur.row == prev.row {
-            continue;
-        }
-        // The lowest point of everything above against the top of the next row.
-        let top = ids[k..]
-            .iter()
-            .take_while(|&&i| p[i].row == cur.row)
-            .map(|&i| p[i].y1)
-            .fold(f32::MIN, f32::max);
-        let gap = low - top;
-        if gap >= 0.5 * prev.size.max(cur.size) && best.is_none_or(|(g, _)| gap > g) {
-            best = Some((gap, k));
-        }
-    }
-    best.map(|(_, k)| k)
-}
-
-/// What makes a column gutter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Split {
-    /// Prose on both sides.
-    Prose,
-    /// Blocks of lines whose baselines do not line up.
-    Offset,
-    /// A lone row beside a block of lines of one pitch, apart from them by size or weight
-    /// and baseline: a title beside a field list.
-    Lone,
-    /// Only a drawn box on one side.
-    Boxed,
-}
-
-/// A block beside a lone row has at least this many rows: a lone cell beside fewer is a row
-/// of a table, not a title.
-const LONE_BLOCK: usize = 3;
-
-/// Each step between the baselines of a block beside a lone row is within this share of
-/// their median step: the block keeps one pitch, as the lines of a field list do.
-const LONE_PITCH: f32 = 0.15;
-
-/// Two text sizes differ when the larger is at least this many times the smaller (0.5 points
-/// at 6 points): a ratio, so that it holds at every scale of the page.
-pub(crate) const SIZE_STEP: f32 = 1.08;
-
-/// A column gutter in a region: the widest vertical band of white space that only a few
-/// pieces cross, with blocks on both sides that stand side by side: prose, lines whose
-/// baselines do not line up, a lone row beside a block (see [`lone_row`]) or a drawn box; and
-/// which of them makes it. Only
-/// the best band is tried (see [`best_band`]): a band after it, where the best one fails, cuts
-/// label and value blocks and table columns apart (ruling P6-X3). Pieces of white space only
-/// are no text: they neither fill nor cross a band.
-fn gutter(p: &[Piece], ids: &[usize]) -> Option<(f32, f32, Split, f32)> {
-    let inked: Vec<usize> = ids.iter().copied().filter(|&i| p[i].inked).collect();
-    if inked.is_empty() {
-        return None;
-    }
-    let allowed = (CROSSERS * inked.len() as f32).floor() as i32;
-    let mut sizes: Vec<f32> = inked.iter().map(|&i| p[i].size).collect();
-    sizes.sort_by(f32::total_cmp);
-    let size = sizes[sizes.len() / 2];
-    let (g0, g1) = best_band(p, &inked, allowed, size)?;
-    split_at(p, ids, (g0, g1), allowed, size).map(|s| (g0, g1, s, GUTTER_SLACK * size))
-}
-
-/// The pieces' places are measured in steps of this share of their median text size (a point
-/// at 8 points): steps of the text, so that a page printed larger or smaller has the same
-/// bands.
-const BAND_STEP: f32 = 1.0 / 8.0;
-
-/// The most steps a region is measured in.
-const BAND_STEPS: usize = 20_000;
-
-/// The best band of white space between the pieces `inked` (of median text size `size`) at
-/// least [`GUTTER`] sizes wide with text on both sides: of those covered by the fewest pieces
-/// (a ragged line end next to the gutter must not widen it), up to `allowed` pieces, the
-/// widest. Places are measured in steps of [`BAND_STEP`] sizes; a piece covers the steps it
-/// starts and ends in, so pieces that touch close a band.
-fn best_band(p: &[Piece], inked: &[usize], allowed: i32, size: f32) -> Option<(f32, f32)> {
-    let min_gap = GUTTER * size;
-    let step = BAND_STEP * size;
-    let lo = inked.iter().map(|&i| p[i].x0).fold(f32::MAX, f32::min);
-    let hi = inked.iter().map(|&i| p[i].x1).fold(f32::MIN, f32::max);
-    if !(hi - lo).is_finite() || step.is_nan() || step <= 0.0 || hi - lo < 2.0 * step {
-        return None;
-    }
-    // The span from the leftmost to the rightmost ink in a whole number of steps of about
-    // `step`, so that a page printed larger or smaller has the same steps: a thousandth of a
-    // step of float noise does not add a step.
-    let width = (((hi - lo) / step - 1e-3).ceil().max(1.0) as usize).min(BAND_STEPS) + 2;
-    let scale = (hi - lo) / (width - 2) as f32;
-    let bin = |x: f32| (((x - lo) / scale) as usize).min(width - 1);
-    let mut diff = vec![0i32; width + 1];
-    for &i in inked {
-        diff[bin(p[i].x0)] += 1;
-        diff[bin(p[i].x1) + 1] -= 1;
-    }
-    let mut cover = Vec::with_capacity(width);
-    let mut c = 0;
-    for d in diff.iter().take(width) {
-        c += d;
-        cover.push(c);
-    }
-    // Only the covers some white space has make bands of their own: a level between two of
-    // them has the bands of the lower one.
-    let mut levels: Vec<i32> = cover.iter().copied().filter(|&c| c <= allowed).collect();
-    levels.sort_unstable();
-    levels.dedup();
-    for level in levels {
-        let mut best: Option<(f32, f32)> = None;
-        let mut start = None;
-        for (b, &c) in cover.iter().enumerate() {
-            match (c <= level, start) {
-                (true, None) => start = Some(b),
-                (false, Some(s)) => {
-                    let (g0, g1) = (lo + s as f32 * scale, lo + b as f32 * scale);
-                    if s > 0 && g1 - g0 >= min_gap && best.is_none_or(|(a, z)| g1 - g0 > z - a) {
-                        best = Some((g0, g1));
-                    }
-                    start = None;
-                }
-                _ => {}
-            }
-        }
-        if best.is_some() {
-            return best;
-        }
-    }
-    None
-}
-
-/// What makes the band from `g0` to `g1` a gutter of the pieces `ids`, if anything: at most
-/// `allowed` of them cross it, the blocks on its sides stand side by side and are prose, lines
-/// whose baselines do not line up, a lone row beside a block, columns in the shape of
-/// addresses or a drawn box. `size` is the median size of the pieces.
-fn split_at(
-    p: &[Piece],
-    ids: &[usize],
-    (g0, g1): (f32, f32),
-    allowed: i32,
-    size: f32,
-) -> Option<Split> {
-    let slack = GUTTER_SLACK * size;
-    let crossing = ids
-        .iter()
-        .filter(|&&i| crosses(&p[i], (g0, g1), slack))
-        .count();
-    if crossing as i32 > allowed {
-        return None;
-    }
-    let left: Vec<usize> = ids
-        .iter()
-        .copied()
-        .filter(|&i| !crosses(&p[i], (g0, g1), slack) && on_left(&p[i], (g0, g1), slack))
-        .collect();
-    let right: Vec<usize> = ids
-        .iter()
-        .copied()
-        .filter(|&i| !crosses(&p[i], (g0, g1), slack) && !on_left(&p[i], (g0, g1), slack))
-        .collect();
-    let prose = |side: &[usize]| {
-        let inked: Vec<usize> = side.iter().copied().filter(|&i| p[i].inked).collect();
-        if inked.len() < 2 {
-            return false;
-        }
-        let mut chars: Vec<usize> = inked.iter().map(|&i| p[i].chars).collect();
-        chars.sort_unstable();
-        chars[chars.len() / 2] >= PROSE_CHARS
-    };
-    // A side that holds a drawn box of two lines or more is a block of its own.
-    let boxed = |side: &[usize]| side.iter().any(|&i| p[i].stand.is_some() && p[i].rows >= 2);
-    // The baselines and sizes of a side, line by line: those of the pieces of each row.
-    let baselines = |side: &[usize]| {
-        let mut rows: Vec<(usize, f32, f32, bool)> = side
-            .iter()
-            .map(|&i| (p[i].row, p[i].y, p[i].size, p[i].inked))
-            .collect();
-        rows.sort_by_key(|r| r.0);
-        let mut out: Vec<Vec<Part>> = Vec::new();
-        let mut last = None;
-        for (row, y, size, inked) in rows {
-            match out.last_mut() {
-                Some(l) if last == Some(row) => l.push((y, size, inked)),
-                _ => out.push(vec![(y, size, inked)]),
-            }
-            last = Some(row);
-        }
-        out
-    };
-    let apart = || offset_baselines(&baselines(&left), &baselines(&right), size);
-    let split = if prose(&left) && prose(&right) {
-        Split::Prose
-    } else if apart() {
-        Split::Offset
-    } else if lone_row(p, &left, &right) || lone_row(p, &right, &left) {
-        Split::Lone
-    } else if !left.is_empty() && !right.is_empty() && (boxed(&left) || boxed(&right)) {
-        Split::Boxed
-    } else {
-        return None;
-    };
-    // The columns stand side by side: their heights overlap.
-    let span = |side: &[usize]| {
-        (
-            side.iter().map(|&i| p[i].y0).fold(f32::MAX, f32::min),
-            side.iter().map(|&i| p[i].y1).fold(f32::MIN, f32::max),
-        )
-    };
-    let (a, b) = (span(&left), span(&right));
-    let overlap = a.1.min(b.1) - a.0.max(b.0);
-    let smaller = (a.1 - a.0).min(b.1 - b.0).max(0.01);
-    (overlap / smaller >= 0.3).then_some(split)
-}
-
-/// Whether the pieces `one` are a lone row beside the block `block`, a title beside a field
-/// list: the pieces of `one` with ink all lie in one row; those of `block` lie in
-/// [`LONE_BLOCK`] rows or more whose baselines step at one pitch (see [`LONE_PITCH`]); the
-/// row is larger than the block by its median size (see [`SIZE_STEP`]), or bold beside a
-/// block that is not all bold and not smaller; and the baseline of each piece of `one` lies farther
-/// than [`BASELINE_NEAR`] of the smaller size from every baseline of `block`. A lone cell on
-/// the baseline of a row is a cell of that row, and a smaller bold term beside the lines of
-/// its definition is a cell of a glossary.
-fn lone_row(p: &[Piece], one: &[usize], block: &[usize]) -> bool {
-    let inked =
-        |side: &[usize]| -> Vec<usize> { side.iter().copied().filter(|&i| p[i].inked).collect() };
-    let (one, mut block) = (inked(one), inked(block));
-    let Some(&first) = one.first() else {
-        return false;
-    };
-    if one.iter().any(|&i| p[i].row != p[first].row) || block.len() < LONE_BLOCK {
-        return false;
-    }
-    // The baseline of each row of the block, top down: its highest one.
-    block.sort_by_key(|&i| p[i].row);
-    let mut rows: Vec<(usize, f32)> = Vec::new();
-    for &i in &block {
-        match rows.last_mut() {
-            Some(r) if r.0 == p[i].row => r.1 = r.1.max(p[i].y),
-            _ => rows.push((p[i].row, p[i].y)),
-        }
-    }
-    if rows.len() < LONE_BLOCK {
-        return false;
-    }
-    let mut steps: Vec<f32> = rows.windows(2).map(|w| w[0].1 - w[1].1).collect();
-    steps.sort_by(f32::total_cmp);
-    let pitch = steps[steps.len() / 2];
-    if pitch <= 0.0 || steps.iter().any(|s| (s - pitch).abs() > LONE_PITCH * pitch) {
-        return false;
-    }
-    let median = |side: &[usize]| {
-        let mut sizes: Vec<f32> = side.iter().map(|&i| p[i].size).collect();
-        sizes.sort_by(f32::total_cmp);
-        sizes[sizes.len() / 2]
-    };
-    let (a, b) = (median(&one), median(&block));
-    // The row stands out as a title does: larger, or bold beside lines that are not all bold
-    // (bold labels beside plain values) and not smaller than them. A smaller bold term beside
-    // the lines of its definition is a cell of a row.
-    let larger = a >= SIZE_STEP * b;
-    let bolder =
-        one.iter().all(|&i| p[i].bold) && !block.iter().all(|&i| p[i].bold) && a * SIZE_STEP > b;
-    if !larger && !bolder {
-        return false;
-    }
-    let small = a.min(b);
-    let mut ys: Vec<f32> = block.iter().map(|&i| p[i].y).collect();
-    ys.sort_by(f32::total_cmp);
-    let near = BASELINE_NEAR * small;
-    one.iter().all(|&i| {
-        let y = p[i].y;
-        let k = ys.partition_point(|b| *b < y - near);
-        ys.get(k).is_none_or(|b| *b > y + near)
-    })
 }
 
 /// Lines of fragments in reading order, as lists of fragment indices.
@@ -892,7 +519,7 @@ fn lines_of(frags: &[Frag], columns: bool) -> Vec<Vec<usize>> {
 /// one of `boxes` (in the frame of the fragments) is read with the rest of its box: the box
 /// stands as one piece among the others, ordered as they are, and its text is read whole
 /// where it stands.
-fn lines_in(frags: &[Frag], columns: bool, boxes: &[[f32; 4]], rules: &[HRule]) -> Vec<Vec<usize>> {
+fn lines_in(frags: &[Frag], columns: bool, boxes: &[[f32; 4]], rules: &[Line]) -> Vec<Vec<usize>> {
     let head = chain_heads(frags);
     let boxed = columns && frags.iter().any(|f| f.region.is_some());
     let order: Order;
@@ -901,7 +528,7 @@ fn lines_in(frags: &[Frag], columns: bool, boxes: &[[f32; 4]], rules: &[HRule]) 
         let all: Vec<usize> = (0..frags.len()).collect();
         ps = pieces_in(frags, &all, &head, 0).0;
         order = if columns {
-            reading_order(&ps, rules)
+            reading_order(&ps, &(0..ps.len()).collect::<Vec<_>>(), rules)
         } else {
             let mut o: Vec<usize> = (0..ps.len()).collect();
             o.sort_by(|&a, &b| {
@@ -944,7 +571,7 @@ fn boxed_order(
     frags: &[Frag],
     head: &[usize],
     boxes: &[[f32; 4]],
-    rules: &[HRule],
+    rules: &[Line],
 ) -> (Vec<Piece>, Order) {
     // Free text first, then the fragments of each box, in the order the boxes are first met.
     let mut group_of: Vec<Option<usize>> = vec![None; boxes.len()];
@@ -1102,8 +729,7 @@ fn boxed_order(
     let top: Vec<usize> = (0..free_end.min(first_stand))
         .chain(first_stand..ps.len())
         .collect();
-    let mut out = Order::default();
-    region(&ps, top, 0, rules, &mut out);
+    let out = reading_order(&ps, &top, rules);
     let mut order = Order {
         ids: Vec::with_capacity(ps.len()),
         sides: Vec::new(),
@@ -1114,9 +740,8 @@ fn boxed_order(
         }
         match ps[id].stand {
             Some(g) => {
-                let mut boxed = Order::default();
-                region(&ps, inner[g].clone().collect(), 0, rules, &mut boxed);
-                order.append(boxed);
+                let members: Vec<usize> = inner[g].clone().collect();
+                order.append(reading_order(&ps, &members, rules));
             }
             None => order.ids.push(id),
         }
@@ -1466,18 +1091,33 @@ pub(crate) fn runs_in(
         .collect();
     columns.sort_by(f32::total_cmp);
     // The horizontal rules in the frame of the main text, which part bands of columns.
-    let across: Vec<HRule> = rules
+    let across: Vec<Line> = rules
         .iter()
         .flat_map(|r| {
             let (a, b) = (turn.apply(r.x0, r.y0), turn.apply(r.x1, r.y1));
             let (x0, x1) = (a.0.min(b.0), a.0.max(b.0));
             match r.kind {
                 // A rectangle's top and bottom are rules across too.
-                RuleKind::Rect => vec![(a.1, x0, x1), (b.1, x0, x1)],
+                RuleKind::Rect => vec![
+                    Line {
+                        at: a.1,
+                        from: x0,
+                        to: x1,
+                    },
+                    Line {
+                        at: b.1,
+                        from: x0,
+                        to: x1,
+                    },
+                ],
                 // A line rule runs along one axis by how it is made: flat in this frame when
                 // it is wider than high.
                 RuleKind::Line if (a.1 - b.1).abs() < (a.0 - b.0).abs() => {
-                    vec![((a.1 + b.1) / 2.0, x0, x1)]
+                    vec![Line {
+                        at: (a.1 + b.1) / 2.0,
+                        from: x0,
+                        to: x1,
+                    }]
                 }
                 RuleKind::Line => Vec::new(),
             }
@@ -1580,78 +1220,6 @@ fn compose(a: Turn, b: Turn) -> Turn {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A piece of ink from `x0` to `x1` in row `row`, of 6 points.
-    fn ink_piece(x0: f32, x1: f32, row: usize) -> Piece {
-        Piece {
-            row,
-            x0,
-            x1,
-            free: x1,
-            padded: false,
-            y0: 700.0 - 10.0 * row as f32,
-            y1: 706.0 - 10.0 * row as f32,
-            y: 701.5 - 10.0 * row as f32,
-            size: 6.0,
-            chars: 4,
-            frags: Vec::new(),
-            stand: None,
-            rows: 1,
-            inked: true,
-            bold: false,
-        }
-    }
-
-    /// Which band wins does not depend on the scale: two gaps of one line, 10 and 11.6 points
-    /// wide at 8 points, are measured in steps of the text size, so the wider one wins at
-    /// every scale from 0.6 to 1.6. Measured in whole points, the two swap places at some
-    /// scales, and the line is cut at the other gap.
-    #[test]
-    fn the_same_band_wins_at_every_scale() {
-        let band = |k: f32| {
-            let ps = vec![
-                ink_piece(20.0 * k, 100.0 * k, 0),
-                ink_piece(110.0 * k, 200.0 * k, 0),
-                ink_piece(211.6 * k, 300.0 * k, 0),
-            ];
-            let ids: Vec<usize> = (0..ps.len()).collect();
-            best_band(&ps, &ids, 0, 8.0 * k)
-        };
-        for n in 0..=20 {
-            let k = 0.6 + 0.05 * n as f32;
-            let (g0, g1) = band(k).expect("a band");
-            let middle = (g0 + g1) / 2.0 / k;
-            assert!((middle - 205.8).abs() < 1.0, "{k}: {g0} {g1}");
-        }
-    }
-
-    /// Two pieces of one line that touch close the band before them, also when their ends
-    /// differ in their last bits.
-    #[test]
-    fn touching_pieces_close_a_band() {
-        let at = |noise: f32| {
-            // A line across all, a line that ends in two touching pieces, and a line with a
-            // narrow gap: the widest band of the fewest pieces runs up to where the two pieces
-            // touch.
-            let ps = vec![
-                ink_piece(0.0, 500.0, 0),
-                ink_piece(0.0, 100.0, 1),
-                ink_piece(140.0, 450.0, 1),
-                ink_piece(450.0 + noise, 500.0, 1),
-                ink_piece(0.0, 125.0, 2),
-                ink_piece(130.0, 400.0, 2),
-            ];
-            let ids: Vec<usize> = (0..ps.len()).collect();
-            best_band(&ps, &ids, 8, 12.5)
-        };
-        for noise in [0.0, 3e-5] {
-            let (a, b) = at(noise).expect("a band");
-            assert!(
-                (400.0..402.0).contains(&a) && b > 448.0 && b <= 450.0,
-                "{noise}: {a} {b}"
-            );
-        }
-    }
 
     #[test]
     fn right_to_left_line_keeps_ligature_glyphs_whole() {
@@ -2132,21 +1700,6 @@ mod tests {
                 assert_eq!(lines[at], want, "{drop}, on {at}: {lines:?}");
             }
         }
-    }
-
-    #[test]
-    fn lone_side_needs_one_pitch() {
-        // The field lines step 8, 8 and 20 points: no block of one pitch, so no gutter. (The
-        // region is then cut at the wide step, and the three lines over it are one.)
-        let frags = title_beside(9.0, true, &[703.0, 695.0, 687.0, 667.0], 0);
-        let ps = pieces(&frags);
-        let ids: Vec<usize> = (0..ps.len()).collect();
-        assert_eq!(gutter(&ps, &ids), None);
-        // At one pitch, the lone title makes the gutter.
-        let frags = title_beside(9.0, true, &[703.0, 695.0, 687.0, 679.0], 0);
-        let ps = pieces(&frags);
-        let ids: Vec<usize> = (0..ps.len()).collect();
-        assert_eq!(gutter(&ps, &ids).map(|g| g.2), Some(Split::Lone));
     }
 
     #[test]

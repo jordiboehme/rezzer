@@ -5,4 +5,6 @@
 //! The segmentation of a page: what its drawing and its text part it into. [`drawn`] finds
 //! the grids and boxes the drawn lines make, once per page.
 
+pub mod cut;
 pub mod drawn;
+pub mod style;
