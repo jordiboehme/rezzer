@@ -24,7 +24,7 @@ use crate::file::{Band, bold_led, in_text_size, plain_size};
 use crate::input::{PrimId, TextRun};
 use crate::line::{ink, text_lines};
 use crate::region::Kind;
-use crate::segment::Segment;
+use crate::segment::{Segment, Source};
 use crate::typers::table::PARAGRAPH_PROSE_CELLS;
 use crate::typers::{PageView, Typed, signal};
 
@@ -85,6 +85,8 @@ pub(crate) enum Read {
         lines: usize,
         sentences: bool,
         whole: bool,
+        /// The most pieces a line of it stands in.
+        pieces: usize,
     },
     /// A list item that joins the item before it or not, of `lines` lines.
     Item { joins: bool, lines: usize },
@@ -217,6 +219,11 @@ impl SegText {
                         whole: all[i..j]
                             .iter()
                             .all(|l| piece_count(l.runs, 0, l.runs.len()) <= 1),
+                        pieces: all[i..j]
+                            .iter()
+                            .map(|l| piece_count(l.runs, 0, l.runs.len()))
+                            .max()
+                            .unwrap_or(0),
                     })
                 }
                 TextBlock::Item { joins, .. } => {
@@ -242,6 +249,10 @@ impl SegText {
         })
     }
 }
+
+/// A line in this many pieces apart by a cell gap or more is a row of cells, never a line of a
+/// paragraph.
+const ROW_CELLS: usize = 3;
 
 /// Whether a segment that holds `seg` (its parents up to the page) reads as a table.
 fn in_a_table(view: &PageView<'_>, seg: &Segment) -> bool {
@@ -338,7 +349,20 @@ pub fn type_paragraph(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
             .iter()
             .any(|b| matches!(b, Read::Paragraph { whole: false, .. }))
             && in_a_table(view, seg);
-        if (joins_cells || row) && prose.is_none() {
+        // A line of three cells or more is a row, whatever holds it.
+        let cells = t
+            .blocks
+            .iter()
+            .any(|b| matches!(b, Read::Paragraph { pieces, .. } if *pieces >= ROW_CELLS));
+        // Lines between two rules are cells or fields: no paragraph joins them.
+        let strip = seg.source == Source::Strip
+            || seg.children.iter().any(|c| {
+                view.segs
+                    .all
+                    .get(c.0 as usize)
+                    .is_some_and(|k| k.source == Source::Strip)
+            });
+        if (joins_cells || row || cells || strip) && prose.is_none() {
             return None;
         }
         let mut signals = Vec::new();

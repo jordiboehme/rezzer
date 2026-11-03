@@ -21,6 +21,7 @@ use crate::segment::cut::{CutShort, Piece, Split, xy_cut};
 use crate::segment::drawn::{Line, SNAP};
 use crate::segment::style::style_steps;
 use crate::work;
+use std::collections::HashMap;
 
 /// A segment of a page: its index in [`Segments::all`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -54,6 +55,10 @@ pub enum Source {
     /// Drawn primitives of a segment that no drawn child holds: its rules and boxes together,
     /// or one picture, or one code. It is one leaf.
     Drawing,
+    /// The text between two drawn rules one over the other, where both reach (a strip of
+    /// fields, a band of a table's rows under its header): it is kept together before the
+    /// whitespace cut, which would part its columns (see [`strips`]). Style steps part it.
+    Strip,
     /// Lines of a text leaf that the text walk reads as one kind (a heading, paragraphs, list
     /// items), where the walk reads the leaf's lines as more than one kind (see
     /// [`crate::typers::walk_cut`]).
@@ -713,13 +718,56 @@ impl Builder<'_> {
         style_steps(&self.page.texts, &order).len() > 1
     }
 
-    /// Parts the text runs `ids` of segment `s` (at depth `d`) by the whitespace cut, then each
-    /// group by style steps.
+    /// Parts the text runs `ids` of segment `s` (at depth `d`): the strips between rules first
+    /// (see [`strips`]), each parted by style steps only, and the text outside them by the
+    /// whitespace cut, then each group by style steps.
     fn text(&mut self, s: SegId, ids: &[u32], d: usize, rules: &[Line]) {
         if ids.len() < 2 || self.halted() {
             return;
         }
         work::add(ids.len() as u64);
+        if let Some((groups, rest)) = strips(self.page, ids, rules) {
+            // The segment is one strip: it is parted by style steps only.
+            if groups.len() == 1 && rest.is_empty() {
+                self.style(s, &groups[0], d);
+                return;
+            }
+            if d >= self.max {
+                self.note(Note::Depth);
+                return;
+            }
+            let parts = groups.len() + usize::from(!rest.is_empty());
+            if !self.room(parts) {
+                return;
+            }
+            let mut made = Vec::with_capacity(parts);
+            for g in groups {
+                let mut prims: Vec<PrimId> = g.iter().map(|&t| PrimId::Text(t)).collect();
+                prims.sort_unstable();
+                made.push((
+                    self.push(Source::Strip, prims, None, Some(s), true),
+                    g,
+                    true,
+                ));
+            }
+            if !rest.is_empty() {
+                let mut prims: Vec<PrimId> = rest.iter().map(|&t| PrimId::Text(t)).collect();
+                prims.sort_unstable();
+                made.push((
+                    self.push(Source::Rest, prims, None, Some(s), true),
+                    rest,
+                    false,
+                ));
+            }
+            for (id, order, strip) in made {
+                if strip {
+                    self.style(id, &order, d + 1);
+                } else {
+                    self.text(id, &order, d + 1, rules);
+                }
+            }
+            return;
+        }
         let pieces: Vec<Piece> = ids
             .iter()
             .map(|&t| piece(&self.page.texts[t as usize]))
@@ -1005,6 +1053,88 @@ fn subtree_prims(items: &[Item], max: usize) -> Vec<Vec<PrimId>> {
         sub[i] = prims;
     }
     sub
+}
+
+/// A strip holds at most this many lines of text: more between two rules is a section of a
+/// page, not a strip of fields or a band of rows.
+const STRIP_LINES: usize = 6;
+
+/// The strips of the runs `ids` (in reading order) between the horizontal `rules`: rules at
+/// one height (within [`SNAP`]) are one level, and a piece of one level over a piece of the
+/// next level under it bounds a strip where both reach. A run stands in the first strip that
+/// holds its middle. A strip with ink on two lines to [`STRIP_LINES`] lines is a group; the runs
+/// of the other strips and outside every strip are the rest. Each group and the rest keep the
+/// order of `ids`. `None` when no strip holds ink.
+fn strips(page: &PageIn, ids: &[u32], rules: &[Line]) -> Option<(Vec<Vec<u32>>, Vec<u32>)> {
+    if rules.len() < 2 {
+        return None;
+    }
+    let mut sorted: Vec<&Line> = rules.iter().collect();
+    sorted.sort_by(|a, b| a.at.total_cmp(&b.at).then(a.from.total_cmp(&b.from)));
+    let mut levels: Vec<Vec<&Line>> = Vec::new();
+    for l in sorted {
+        match levels.last_mut() {
+            Some(level) if l.at - level[0].at <= SNAP => level.push(l),
+            _ => levels.push(vec![l]),
+        }
+    }
+    // The frames (bottom, top, x0, x1), top to bottom, then left to right.
+    let mut frames: Vec<(f32, f32, f32, f32)> = Vec::new();
+    for w in levels.windows(2) {
+        for low in &w[0] {
+            for up in &w[1] {
+                work::add(1);
+                let (a, b) = (low.from.max(up.from), low.to.min(up.to));
+                if b - a > SNAP {
+                    frames.push((low.at, up.at, a, b));
+                }
+            }
+        }
+    }
+    frames.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.2.total_cmp(&b.2)));
+    let mut at: Vec<Option<usize>> = Vec::with_capacity(ids.len());
+    for &t in ids {
+        work::add(frames.len() as u64);
+        let (cx, cy) = centre(text_bounds(&page.texts[t as usize]));
+        at.push(
+            frames
+                .iter()
+                .position(|f| cy > f.0 && cy < f.1 && cx > f.2 && cx < f.3),
+        );
+    }
+    let mut groups: Vec<Vec<u32>> = vec![Vec::new(); frames.len()];
+    let mut rest: Vec<u32> = Vec::new();
+    for (&t, f) in ids.iter().zip(&at) {
+        match f {
+            Some(f) => groups[*f].push(t),
+            None => rest.push(t),
+        }
+    }
+    let mut kept = Vec::new();
+    for g in groups {
+        let mut lines: Vec<u32> = g
+            .iter()
+            .map(|&t| &page.texts[t as usize])
+            .filter(|r| r.text.chars().any(|c| !c.is_whitespace()))
+            .map(|r| r.line)
+            .collect();
+        lines.sort_unstable();
+        lines.dedup();
+        // One line between two rules is a row (of a table with row rules, or of labels beside
+        // values): the cut reads it with the lines around it.
+        if lines.len() < 2 || lines.len() > STRIP_LINES {
+            rest.extend(g);
+        } else {
+            kept.push(g);
+        }
+    }
+    if kept.is_empty() {
+        return None;
+    }
+    // The rest in the order of `ids`.
+    let order: HashMap<u32, usize> = ids.iter().enumerate().map(|(k, &t)| (t, k)).collect();
+    rest.sort_by_key(|t| order.get(t).copied().unwrap_or(usize::MAX));
+    Some((kept, rest))
 }
 
 /// The horizontal rules among `prims`, as the cut takes them; a rectangle gives its top and

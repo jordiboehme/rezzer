@@ -87,7 +87,13 @@ pub(crate) fn text_alone(view: &PageView<'_>, seg: &Segment) -> bool {
     use crate::segment::Source;
     matches!(
         seg.source,
-        Source::Gutter | Source::Band | Source::Rule | Source::Style | Source::Rest | Source::Walk
+        Source::Gutter
+            | Source::Band
+            | Source::Rule
+            | Source::Style
+            | Source::Rest
+            | Source::Walk
+            | Source::Strip
     ) && seg.children.iter().all(|c| {
         view.segs.all.get(c.0 as usize).is_some_and(|k| {
             matches!(

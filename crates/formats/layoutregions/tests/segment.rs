@@ -1011,3 +1011,59 @@ fn each_picture_and_code_is_a_leaf_of_its_own() {
     let s = segment_page(&only, &Limits::default(), &|| false);
     assert_eq!(s.all.len(), 1);
 }
+
+/// Task 18b round 3: the lines between two rules that span them stay one strip before the
+/// whitespace cut, which would part its columns; a strip of one line is a row and is cut as
+/// text; the text outside the strips is cut as before; every primitive in one leaf.
+#[test]
+fn lines_between_two_rules_are_one_strip() {
+    for k in [0.75f32, 1.0, 1.5] {
+        let mut texts = Vec::new();
+        // A strip of two columns of fields, far apart: labels over values.
+        for (c, (label, value)) in [("Personalnummer", "00123"), ("Eintritt", "01.01.2020")]
+            .iter()
+            .enumerate()
+        {
+            let x = (72.0 + 250.0 * c as f32) * k;
+            texts.push(run(label, x, 690.0 * k, 60.0 * k, 6.0 * k, 10));
+            texts.push(run(value, x, 678.0 * k, 50.0 * k, 9.0 * k, 11));
+        }
+        // A row between rules of its own, and text under the rules.
+        texts.push(run("Muster", 72.0 * k, 655.0 * k, 40.0 * k, 9.0 * k, 12));
+        texts.push(run("12,00", 322.0 * k, 655.0 * k, 30.0 * k, 9.0 * k, 12));
+        texts.extend(column(72.0 * k, 600.0 * k, 3, 20).into_iter().map(|mut r| {
+            r.size *= k;
+            r.h *= k;
+            r.w *= k;
+            r
+        }));
+        let rules: Vec<RuleIn> = [700.0, 670.0, 645.0]
+            .iter()
+            .map(|&y| line(70.0 * k, y * k, 520.0 * k, y * k))
+            .collect();
+        let p = page([600.0 * k, 800.0 * k], texts, rules);
+        let s = segment_page(&p, &Limits::default(), &|| false);
+        check_cover(&s, &p);
+        let strips = with_source(&s, |x| *x == Source::Strip);
+        assert_eq!(strips.len(), 1, "at {k}x: {:#?}", s.all);
+        let mut lines: Vec<u32> = strips[0]
+            .prims
+            .iter()
+            .filter_map(|q| match q {
+                PrimId::Text(i) => Some(p.texts[*i as usize].line),
+                _ => None,
+            })
+            .collect();
+        lines.sort_unstable();
+        lines.dedup();
+        assert_eq!(lines, [10, 11], "at {k}x");
+        // No gutter of the cut parts the strip.
+        assert!(
+            strips[0]
+                .children
+                .iter()
+                .all(|c| seg(&s, *c).source == Source::Style),
+            "at {k}x"
+        );
+    }
+}

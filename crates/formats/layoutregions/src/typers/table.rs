@@ -703,6 +703,31 @@ fn alternating(runs: &[&TextRun], ranges: &[RunRange]) -> bool {
         && styles.windows(3).all(|w| !differ(w[0], w[2]))
 }
 
+/// Whether lines of two sizes a size step apart interleave: a line of one size between lines
+/// of the other, and back (labels between the lines of their values, values over labels with
+/// a second value line). A table's rows share one size; a header over them or a note under
+/// them changes it once and does not come back.
+fn interleaved(runs: &[&TextRun], ranges: &[RunRange]) -> bool {
+    let sizes: Vec<f32> = ranges
+        .iter()
+        .filter_map(|l| {
+            runs[l.start..l.end]
+                .iter()
+                .max_by_key(|r| crate::line::ink(&r.text))
+                .map(|r| r.size)
+        })
+        .collect();
+    let step = |a: f32, b: f32| a.min(b) > 0.0 && a.max(b) >= SIZE_STEP * a.min(b);
+    // The first line after `i` in a size a step off line `i`'s, then the first after that in
+    // line `i`'s size again: the sizes went and came back.
+    (0..sizes.len()).any(|i| {
+        let Some(j) = (i + 1..sizes.len()).find(|&j| step(sizes[i], sizes[j])) else {
+            return false;
+        };
+        (j + 1..sizes.len()).any(|k| !step(sizes[i], sizes[k]) && step(sizes[j], sizes[k]))
+    })
+}
+
 /// The reading of the lines of a segment without drawn parts (see [`grid_cells`]), after the
 /// rules that read them otherwise first: a paragraph set full, labels and values, titles over
 /// one row of values; then a figure caption next to them and what the area says. `given`: a
@@ -729,7 +754,7 @@ fn lines(view: &PageView<'_>, seg: &Segment, given: bool) -> Find {
         if super::pairs::strip_fields(view, seg).is_some() {
             return refused(Speaks::LabelValue, FIELD_STRIPS);
         }
-        if alternating(&runs, &ranges) {
+        if alternating(&runs, &ranges) || interleaved(&runs, &ranges) {
             return refused(Speaks::LabelValue, ALTERNATING);
         }
         let off = vec![false; ranges.len()];

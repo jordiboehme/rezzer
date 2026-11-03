@@ -168,81 +168,72 @@ pub(crate) fn strip_fields(view: &PageView<'_>, seg: &Segment) -> Option<StripFi
         small: small_size(view.text_sizes()).saturating_sub(1),
         labels: &[],
     };
+    let in_frame = |r: &TextRun, &(bottom, top, fx0, fx1): &(f32, f32, f32, f32)| {
+        let (mx, my) = (r.x + 0.5 * r.w, r.y + 0.5 * r.size);
+        my > bottom && my < top && mx > fx0 && mx < fx1
+    };
     let mut held = 0usize;
     let (mut count, mut colon, mut shape) = (0usize, true, true);
     let mut label_styles: Vec<TextRun> = Vec::new();
     let mut empty_labels: Vec<TextRun> = Vec::new();
-    for &(bottom, top, fx0, fx1) in &frames {
-        let ids: Vec<usize> = inked
+    for f in &frames {
+        let own: Vec<&TextRun> = inked
             .iter()
-            .copied()
-            .filter(|&k| {
-                let r = refs[k];
-                let (mx, my) = (r.x + 0.5 * r.w, r.y + 0.5 * r.size);
-                my > bottom && my < top && mx > fx0 && mx < fx1
-            })
+            .map(|&k| refs[k])
+            .filter(|r| in_frame(r, f))
             .collect();
-        if ids.is_empty() {
+        if own.is_empty() {
             continue;
         }
-        held += ids.len();
-        let frame = FieldFrame {
-            x0: fx0,
-            x1: fx1,
-            dividers: &[],
+        held += own.len();
+        let FrameRead::Clear(read) = read_frame(&own, f.2, f.3, how) else {
+            return None;
         };
-        // The runs as today's reader cuts them for fields: a run that stands across a field
-        // edge, at its word gap near the edge (see [`field_cuts`]); the pieces are this
-        // reading's own copies.
-        let own: Vec<&TextRun> = ids.iter().map(|&k| refs[k]).collect();
-        let all: Vec<usize> = (0..own.len()).collect();
-        let cuts = field_cuts(&own, &[frame], &mut |_| all.clone());
-        let mut pieces: Vec<TextRun> = Vec::with_capacity(own.len());
-        for (k, r) in own.iter().enumerate() {
-            match cuts.iter().find(|c| c.0 == k) {
-                Some((_, at)) => pieces.extend(cut_at_gaps(r, at)),
-                None => pieces.push((*r).clone()),
+        count += read.fields;
+        colon &= read.colon;
+        shape &= read.shape;
+        label_styles.extend(read.labels);
+        empty_labels.extend(read.empty);
+    }
+    // The strips stacked over and under these on the page (a rule of them their rule too):
+    // when one of them holds fields that are not clear, the stack is not clear, and none of it
+    // pairs (labels under the rule their values stand on).
+    let page_levels = {
+        let mut levels: Vec<Vec<&crate::segment::drawn::Line>> = Vec::new();
+        for l in hs
+            .iter()
+            .filter(|l| l.to >= x0 - snap && l.from <= x1 + snap)
+        {
+            match levels.last_mut() {
+                Some(level) if l.at - level[0].at <= snap => level.push(l),
+                _ => levels.push(vec![l]),
             }
         }
-        crate::work::add(pieces.len() as u64);
-        let runs: Vec<&TextRun> = pieces.iter().collect();
-        let ids: Vec<usize> = (0..runs.len()).collect();
-        let edges = field_edges(&runs, &frame, &ids);
-        let cells = cells_of(&runs, &edges, &ids);
-        if table_body(&runs, &cells) || table_rows(&runs, &ids) {
-            return None;
-        }
-        let read = strip_cells(&runs, &edges, &cells, how);
-        if !read.fits || read.unread || !read.left_out.is_empty() {
-            return None;
-        }
-        // Never a wrong pair: every piece of the strip is a label or a value, each field has
-        // a label (an empty field has no value), and a value stands on one line in one piece
-        // (a value of two lines, or of two pieces a cell gap apart, may be a field and the
-        // text of a neighbour).
-        let paired: usize = read
-            .fields
-            .iter()
-            .map(|f| f.label.len() + f.value.len())
-            .sum();
-        let whole = read.fields.iter().all(|f| {
-            !f.label.is_empty()
-                && f.value
+        levels
+    };
+    for w in page_levels.windows(2) {
+        for low in &w[0] {
+            for up in &w[1] {
+                crate::work::add(1);
+                let (a, b) = (low.from.max(up.from), low.to.min(up.to));
+                let f = (low.at, up.at, a, b);
+                let near = frames.iter().any(|g| {
+                    let shares = (g.0 - f.1).abs() <= snap || (g.1 - f.0).abs() <= snap;
+                    shares && g.2 < b && a < g.3
+                });
+                if b - a <= snap || !near || frames.contains(&f) {
+                    continue;
+                }
+                let theirs: Vec<&TextRun> = view
+                    .page
+                    .texts
                     .iter()
-                    .all(|&v| runs[v].line == runs[f.value[0]].line)
-                && one_piece(&runs, &f.value)
-        });
-        if paired != ids.len() || !whole {
-            return None;
-        }
-        for f in &read.fields {
-            count += 1;
-            colon &= words(&runs, &f.label).ends_with(':');
-            if f.value.is_empty() {
-                empty_labels.push(runs[f.label[0]].clone());
-            } else {
-                shape &= value_shape(&words(&runs, &f.value));
-                label_styles.push(runs[f.label[0]].clone());
+                    .filter(|r| !r.text.trim().is_empty() && !r.off_axis && in_frame(r, &f))
+                    .collect();
+                crate::work::add(view.page.texts.len() as u64);
+                if !theirs.is_empty() && read_frame(&theirs, a, b, how) == FrameRead::Unclear {
+                    return None;
+                }
             }
         }
     }
@@ -260,6 +251,113 @@ pub(crate) fn strip_fields(view: &PageView<'_>, seg: &Segment) -> Option<StripFi
             shape,
         },
     )
+}
+
+/// What one strip between rules reads as.
+#[derive(Debug, Clone, PartialEq)]
+enum FrameRead {
+    /// Fields read right, never a wrong pair.
+    Clear(FrameFields),
+    /// Fields, but not clear: a cell left out or not clear, a piece that is no label or value,
+    /// a value of two lines or pieces, or a line that mixes labels and another field's value.
+    Unclear,
+    /// No fields: text that is no field, a table's body or rows.
+    No,
+}
+
+/// The fields of a clear strip.
+#[derive(Debug, Clone, PartialEq)]
+struct FrameFields {
+    fields: usize,
+    colon: bool,
+    shape: bool,
+    /// The first run of the label of each field with a value, and of each empty field.
+    labels: Vec<TextRun>,
+    empty: Vec<TextRun>,
+}
+
+/// The runs `own` of a strip between rules from `x0` to `x1` read as fields (today's rule of
+/// fields between rules, one copy): the runs are cut at field edges first, as today's reader
+/// cuts them (see [`field_cuts`]), on this reading's own copies of the pieces.
+fn read_frame(own: &[&TextRun], x0: f32, x1: f32, how: Reading<'_>) -> FrameRead {
+    let frame = FieldFrame {
+        x0,
+        x1,
+        dividers: &[],
+    };
+    let all: Vec<usize> = (0..own.len()).collect();
+    let cuts = field_cuts(own, &[frame], &mut |_| all.clone());
+    let mut pieces: Vec<TextRun> = Vec::with_capacity(own.len());
+    for (k, r) in own.iter().enumerate() {
+        match cuts.iter().find(|c| c.0 == k) {
+            Some((_, at)) => pieces.extend(cut_at_gaps(r, at)),
+            None => pieces.push((*r).clone()),
+        }
+    }
+    crate::work::add(pieces.len() as u64);
+    let runs: Vec<&TextRun> = pieces.iter().collect();
+    let ids: Vec<usize> = (0..runs.len()).collect();
+    let edges = field_edges(&runs, &frame, &ids);
+    let cells = cells_of(&runs, &edges, &ids);
+    if table_body(&runs, &cells) || table_rows(&runs, &ids) {
+        return FrameRead::No;
+    }
+    let read = strip_cells(&runs, &edges, &cells, how);
+    if !read.fits || read.fields.is_empty() {
+        return FrameRead::No;
+    }
+    if read.unread || !read.left_out.is_empty() {
+        return FrameRead::Unclear;
+    }
+    // Never a wrong pair: every piece of the strip is a label or a value, each field has a
+    // label (an empty field has no value), and a value stands on one line in one piece (a
+    // value of two lines, or of two pieces a cell gap apart, may be a field and the text of a
+    // neighbour).
+    let paired: usize = read
+        .fields
+        .iter()
+        .map(|f| f.label.len() + f.value.len())
+        .sum();
+    let whole = read.fields.iter().all(|f| {
+        !f.label.is_empty()
+            && f.value
+                .iter()
+                .all(|&v| runs[v].line == runs[f.value[0]].line)
+            && one_piece(&runs, &f.value)
+    });
+    // A line that holds labels and the value of a field whose label stands on another line
+    // mixes two fields' roles (a second value line set on a label line): not clear.
+    let label_lines: Vec<u32> = read
+        .fields
+        .iter()
+        .flat_map(|f| f.label.iter().map(|&i| runs[i].line))
+        .collect();
+    let mixed = read.fields.iter().any(|f| {
+        let own = f.label.first().map(|&i| runs[i].line);
+        f.value
+            .iter()
+            .any(|&v| Some(runs[v].line) != own && label_lines.contains(&runs[v].line))
+    });
+    if paired != ids.len() || !whole || mixed {
+        return FrameRead::Unclear;
+    }
+    let mut out = FrameFields {
+        fields: read.fields.len(),
+        colon: true,
+        shape: true,
+        labels: Vec::new(),
+        empty: Vec::new(),
+    };
+    for f in &read.fields {
+        out.colon &= words(&runs, &f.label).ends_with(':');
+        if f.value.is_empty() {
+            out.empty.push(runs[f.label[0]].clone());
+        } else {
+            out.shape &= value_shape(&words(&runs, &f.value));
+            out.labels.push(runs[f.label[0]].clone());
+        }
+    }
+    FrameRead::Clear(out)
 }
 
 /// What [`strip_fields`] read: how many fields, whether every label ends with a colon, and
@@ -579,6 +677,9 @@ pub(crate) fn label_value(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
                 ));
             }
         }
+        // Lines between two rules are read as fields by the strip rule alone, which needs the
+        // labels set apart: no other pair rule reads them.
+        Source::Strip => return None,
         _ if text_alone(view, seg) => {
             let Lined {
                 runs,
