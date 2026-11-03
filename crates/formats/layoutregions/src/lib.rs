@@ -12,7 +12,9 @@
 //! page make, once per page, for every finder that looks at them. [`segment::segment_page`]
 //! nests the regions the file states, the drawn structure, the whitespace cut and style steps
 //! into one tree of candidate regions per page. The [`typers`] score each segment for each
-//! kind from named signals; the scored rule that picks among them arrives in a further step.
+//! kind from named signals; [`arbitrate()`] picks one kind per segment by score and margin, and
+//! leaves what it is unsure of `Spatial`, which [`extract::spatial::spatial`] reads line by
+//! line.
 //!
 //! ```
 //! use layoutregions::*;
@@ -53,7 +55,7 @@ pub mod segment;
 pub mod typers;
 mod work;
 
-pub use arbitrate::{Finder, InOrder, Offer, find_in_order};
+pub use arbitrate::{Decision, Finder, InOrder, Margins, Offer, arbitrate, find_in_order};
 pub use input::{
     BoxIn, CodeIn, FontKind, GapIn, GivenRegion, PageIn, PictureIn, PrimId, RuleIn, Shift, TextRun,
 };

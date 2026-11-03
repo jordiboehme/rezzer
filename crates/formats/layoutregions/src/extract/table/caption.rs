@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Captions next to a table or a figure: a line that opens with "Table 3" names a table, one
-//! that opens with "Figure 3" or "Fig. 3" a figure.
+//! that opens with "Figure 3", "Fig. 3", "Abbildung 3" or "Abb. 3" a figure.
 
 use super::{RunRange, middle};
 use crate::line::LineRun;
@@ -17,7 +17,8 @@ pub const FIGURE_NEAR: &str = "a figure caption stands next to it";
 /// The largest text size a caption search assumes for a table, in points.
 pub const MAX_CAPTION_SIZE: f32 = 36.0;
 
-/// The caption kind of a line: `Some(true)` for "Table 3", `Some(false)` for "Figure 3".
+/// The caption kind of a line: `Some(true)` for "Table 3", `Some(false)` for "Figure 3",
+/// "Fig. 3", "Abbildung 3" or "Abb. 3".
 pub fn caption(text: &str) -> Option<bool> {
     let t = text.trim_start();
     let (table, rest) = match t.strip_prefix("Table") {
@@ -25,7 +26,9 @@ pub fn caption(text: &str) -> Option<bool> {
         None => (
             false,
             t.strip_prefix("Figure")
-                .or_else(|| t.strip_prefix("Fig."))?,
+                .or_else(|| t.strip_prefix("Fig."))
+                .or_else(|| t.strip_prefix("Abbildung"))
+                .or_else(|| t.strip_prefix("Abb."))?,
         ),
     };
     let rest = rest.trim_start();

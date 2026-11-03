@@ -14,7 +14,7 @@ use layoutregions::typers::text::{
     LIST_HANGING, LIST_ITEMS, LIST_MARKER, PARAGRAPH_DEMOTED, PARAGRAPH_JOINS, PARAGRAPH_SENTENCES,
     PARAGRAPH_TEXT_SIZE, TITLE_HEADING, TITLE_TOP,
 };
-use layoutregions::typers::{FileIndex, PageView, TYPERS, Typed};
+use layoutregions::typers::{FileIndex, PageView, TYPERS, Typed, type_figure};
 use layoutregions::*;
 
 /// The margin a decision needs over the next kind (the starting margin of the arbitration).
@@ -1562,4 +1562,217 @@ fn touching_boxes_cost_the_boxes_not_their_square() {
     };
     // Four times the boxes: about four times the work, far from sixteen.
     assert!(large < 8 * small, "{small} then {large}");
+}
+
+// ---- Figures and codes (Task 18) ----
+
+fn bounds(x0: f32, y0: f32, x1: f32, y1: f32) -> Bounds {
+    Bounds { x0, y0, x1, y1 }
+}
+
+/// `tree` scaled by `k`, its pictures and codes too.
+fn scaled_all(tree: &Tree, k: f32) -> Tree {
+    let mut out = tree.scaled(k);
+    let s = |b: &Bounds| bounds(b.x0 * k, b.y0 * k, b.x1 * k, b.y1 * k);
+    out.page.pictures = tree
+        .page
+        .pictures
+        .iter()
+        .map(|p| PictureIn {
+            bounds: s(&p.bounds),
+        })
+        .collect();
+    out.page.codes = tree
+        .page
+        .codes
+        .iter()
+        .map(|c| CodeIn {
+            bounds: s(&c.bounds),
+        })
+        .collect();
+    out
+}
+
+/// The segment that holds exactly `prims`.
+fn holding(prims: Vec<PrimId>) -> impl Fn(&PageView<'_>, &Segment) -> bool {
+    move |_, s| s.prims == prims
+}
+
+/// Prose, a picture and, when `caption`, a figure caption under it.
+fn picture_page(caption: &str) -> Tree {
+    let mut texts = Vec::new();
+    if !caption.is_empty() {
+        texts.push(run(caption, 72.0, 385.0, 9.2, 50));
+    }
+    let mut page = sheet(texts, Vec::new());
+    page.pictures.push(PictureIn {
+        bounds: bounds(72.0, 400.0, 372.0, 600.0),
+    });
+    Tree { page }
+}
+
+#[test]
+fn a_picture_is_a_figure_and_its_caption_adds_to_it() {
+    for (caption, want) in [
+        (
+            "Abb. 1: Umsatz der Muster GmbH",
+            &["figure.picture", "figure.caption"][..],
+        ),
+        (
+            "Abbildung 2 Muster",
+            &["figure.picture", "figure.caption"][..],
+        ),
+        (
+            "Figure 3: Muster",
+            &["figure.picture", "figure.caption"][..],
+        ),
+        ("Die Muster GmbH zeigt hier", &["figure.picture"][..]),
+        ("", &["figure.picture"][..]),
+    ] {
+        let tree = picture_page(caption);
+        let typed = tree.typed(&holding(vec![PrimId::Picture(0)]));
+        assert_eq!(typed.len(), 1, "{caption}: {typed:#?}");
+        assert_eq!(ids(of(&typed, Kind::Figure)), want, "{caption}");
+        for k in [0.75, 0.8, 1.3, 1.5] {
+            let t = scaled_all(&tree, k).typed(&holding(vec![PrimId::Picture(0)]));
+            assert_eq!(t, typed, "{caption} at {k}x");
+        }
+    }
+}
+
+/// A drawn chart: a box of rules with no text, a figure caption under it.
+#[test]
+fn drawn_rules_with_a_figure_caption_are_a_figure() {
+    let caption = run("Abb. 4: Werte der Muster GmbH", 72.0, 385.0, 9.2, 50);
+    let mut rules = box_rules([72.0, 400.0, 372.0, 600.0]);
+    rules.push(rule(100.0, 420.0, 340.0, 580.0));
+    let tree = Tree {
+        page: sheet(vec![caption], rules),
+    };
+    let typed = tree.with(|view| {
+        let seg = view
+            .segs
+            .all
+            .iter()
+            .find(|s| s.children.is_empty() && s.prims.iter().all(|p| matches!(p, PrimId::Rule(_))))
+            .expect("a leaf of the rules");
+        all_typed(view, seg)
+    });
+    assert_eq!(ids(of(&typed, Kind::Figure)), ["figure.drawn_caption"]);
+    // Without a caption, rules are no figure.
+    let tree = Tree {
+        page: sheet(Vec::new(), box_rules([72.0, 400.0, 372.0, 600.0])),
+    };
+    tree.with(|view| {
+        for seg in &view.segs.all {
+            assert!(type_figure(view, seg).is_none(), "{seg:#?}");
+        }
+    });
+}
+
+/// A code with its value printed under it, and a picture beside it: each is its own leaf and
+/// its own kind; their parent is neither.
+fn code_page(readable: &str) -> Tree {
+    let mut texts = Vec::new();
+    if !readable.is_empty() {
+        texts.push(run(readable, 80.0, 288.0, 9.2, 50));
+    }
+    let mut page = sheet(texts, Vec::new());
+    page.codes.push(CodeIn {
+        bounds: bounds(72.0, 300.0, 222.0, 340.0),
+    });
+    page.pictures.push(PictureIn {
+        bounds: bounds(300.0, 300.0, 400.0, 340.0),
+    });
+    Tree { page }
+}
+
+#[test]
+fn a_code_and_its_readable_line() {
+    for (line, want) in [
+        (
+            "4 012345 678901",
+            &["code.symbol", "code.readable_line"][..],
+        ),
+        ("MUSTER-12345", &["code.symbol", "code.readable_line"][..]),
+        ("die Ware der Muster GmbH", &["code.symbol"][..]),
+        ("", &["code.symbol"][..]),
+    ] {
+        let tree = code_page(line);
+        let typed = tree.typed(&holding(vec![PrimId::Code(0)]));
+        assert_eq!(typed.len(), 1, "{line}: {typed:#?}");
+        assert_eq!(ids(of(&typed, Kind::Code)), want, "{line}");
+        for k in [0.75, 0.8, 1.3, 1.5] {
+            let t = scaled_all(&tree, k).typed(&holding(vec![PrimId::Code(0)]));
+            assert_eq!(t, typed, "{line} at {k}x");
+        }
+        let picture = tree.typed(&holding(vec![PrimId::Picture(0)]));
+        assert_eq!(ids(of(&picture, Kind::Figure)), ["figure.picture"]);
+    }
+    // A segment of a code and a picture is neither: it is the parent of both.
+    let mut tree = code_page("");
+    tree.page.texts.clear();
+    let typed = tree.typed(&holding(vec![PrimId::Picture(0), PrimId::Code(0)]));
+    assert!(typed.iter().all(|t| t.kind == Kind::Spatial), "{typed:#?}");
+    assert!(find(&typed, Kind::Figure).is_none(), "{typed:#?}");
+    assert!(find(&typed, Kind::Code).is_none(), "{typed:#?}");
+}
+
+/// A ruled table that lies on a picture is a chart: the refusal is the figure's evidence,
+/// ahead of every other kind by the margin. A grid of fields on a picture stays fields: the
+/// table rules refuse it for labels and values before they look at the area.
+#[test]
+fn a_grid_on_a_picture_is_a_figure() {
+    let mut tree = ruled_table(ITEM_XS, 700.0, ITEMS, true, 100);
+    tree.page.pictures.push(PictureIn {
+        bounds: bounds(60.0, 620.0, 440.0, 710.0),
+    });
+    let typed = tree.typed(&grid);
+    assert!(find(&typed, Kind::Table).is_none(), "{typed:#?}");
+    assert_eq!(ids(of(&typed, Kind::Figure)), ["figure.on_picture"]);
+    let (kind, lead) = winner(&typed);
+    assert_eq!(kind, Kind::Figure, "{typed:#?}");
+    assert!(lead >= MARGIN, "{typed:#?}");
+    let mut fields = field_grid();
+    fields.page.pictures.push(PictureIn {
+        bounds: bounds(60.0, 630.0, 530.0, 705.0),
+    });
+    let typed = fields.typed(&grid);
+    assert!(find(&typed, Kind::Figure).is_none(), "{typed:#?}");
+    assert_eq!(winner(&typed).0, Kind::LabelValue);
+}
+
+/// Figures and codes against their rivals, by the weights alone. A picture and a code never
+/// meet on one segment (each is a leaf of its own and their parent is neither), and no text
+/// kind fires where there is no text, so their own signals meet no rival: they only need the
+/// least score. A figure refusal is on a drawn grid's text and meets the text kinds there; the
+/// pairs it cannot lead by the margin (a demoted heading-size paragraph, a heading kept with its
+/// title lines, a running band, a legend or a title) are listed in the Task 18 report for 18b.
+#[test]
+fn worst_case_margins_of_figures_and_codes() {
+    use layoutregions::typers::code::{CODE_READABLE, CODE_SYMBOL};
+    use layoutregions::typers::figure::{
+        FIGURE_CAPTION, FIGURE_DRAWN_CAPTION, FIGURE_PICTURE, FIGURE_REFUSED,
+    };
+    let min = 300;
+    for least in [FIGURE_PICTURE, FIGURE_DRAWN_CAPTION, CODE_SYMBOL] {
+        assert!(least >= min && least >= MARGIN);
+    }
+    const {
+        assert!(FIGURE_PICTURE + FIGURE_CAPTION <= 1000 && CODE_SYMBOL + CODE_READABLE <= 1000);
+    }
+    let paragraph = PARAGRAPH_TEXT_SIZE + PARAGRAPH_JOINS + PARAGRAPH_SENTENCES;
+    let list = LIST_MARKER + LIST_ITEMS + LIST_HANGING;
+    let heading_in_cells = HEADING_SIZE_LARGE + HEADING_BOLD;
+    for (what, loser) in [
+        ("paragraph", paragraph),
+        ("list", list),
+        ("heading in cells", heading_in_cells),
+        ("a refused table", 0),
+    ] {
+        assert!(
+            FIGURE_REFUSED >= loser + MARGIN,
+            "figure refusal over {what}: {FIGURE_REFUSED} against {loser}"
+        );
+    }
 }

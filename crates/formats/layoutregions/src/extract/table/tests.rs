@@ -518,6 +518,10 @@ fn captions_name_tables_and_figures() {
     assert_eq!(caption("Table 3: Muster"), Some(true));
     assert_eq!(caption("Figure 2 Muster"), Some(false));
     assert_eq!(caption("Fig. A. Muster"), Some(false));
+    assert_eq!(caption("Abb. 3: Muster"), Some(false));
+    assert_eq!(caption("Abbildung 2 Muster"), Some(false));
+    assert_eq!(caption("Abbildungen der Muster GmbH"), None);
+    assert_eq!(caption("Abb Muster"), None);
     assert_eq!(caption("Tables of Muster"), None);
     assert_eq!(caption("Muster"), None);
 }

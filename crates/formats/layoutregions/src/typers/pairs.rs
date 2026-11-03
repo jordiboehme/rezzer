@@ -540,6 +540,12 @@ mod tests {
         let index = FileIndex::new(&facts);
         let structure = drawn(&page, &|_| true);
         let segs = segment_page(&page, &Limits::default(), &|| false);
+        let boxes = segs
+            .all
+            .iter()
+            .filter(|s| s.source == crate::segment::Source::Box)
+            .count();
+        assert_eq!(boxes, 2, "both boxes are segments: {:#?}", segs.all);
         let none = |_: &str| false;
         let view = PageView::new(&page, &structure, &segs, &facts, &index, &none);
         let touching = touching_boxes(&view);

@@ -748,6 +748,19 @@ pub fn refusal(view: &PageView<'_>, seg: &Segment) -> Option<Refusal> {
     })
 }
 
+/// Spatial: why the table rules refuse `seg` as a form, a frame or text that is no table
+/// (`spatial.page_frame`, `spatial.many_columns` and the other `spatial.*` reasons of
+/// [`refusal`]), each of weight 0. Spatial is the fallback of the arbitration, not a
+/// candidate: a score of 0 never decides a segment, and these signals only say why a segment
+/// the arbitration is unsure of read no table. A region the file states is decided as given.
+pub fn type_spatial(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
+    if matches!(seg.source, Source::Given(_)) {
+        return None;
+    }
+    let r = refusal(view, seg)?;
+    (r.kind == Kind::Spatial).then(|| Typed::of(Kind::Spatial, vec![r.signal]))?
+}
+
 /// The columns the table rules read in `seg`, by geometry alone for a region the file states
 /// (a tagged table), so its cells can be checked against them.
 pub fn table_columns(view: &PageView<'_>, seg: &Segment) -> Option<TableColumns> {

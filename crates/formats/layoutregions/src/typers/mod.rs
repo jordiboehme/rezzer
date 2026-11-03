@@ -14,7 +14,7 @@
 //! [`crate::file::Levels`], and the running lines and footnote legends of [`FileFacts`].
 
 use std::cell::OnceCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::extract::pairs::Style;
 use crate::extract::table::area::Area;
@@ -26,14 +26,18 @@ use crate::input::{PageIn, PrimId, TextRun};
 use crate::line::{LineRun, text_lines};
 use crate::region::{Kind, Score, Signal};
 use crate::segment::drawn::{DrawnStructure, Line};
-use crate::segment::{Segment, Segments};
+use crate::segment::{SegId, Segment, Segments};
 
+pub mod code;
+pub mod figure;
 pub mod pairs;
 pub mod table;
 pub mod text;
 
+pub use code::type_code;
+pub use figure::type_figure;
 pub use pairs::type_label_value;
-pub use table::{type_table, type_totals};
+pub use table::{type_spatial, type_table, type_totals};
 pub use text::{
     type_footer_band, type_footnote_legend, type_header_band, type_heading, type_list,
     type_paragraph, type_title_block,
@@ -141,7 +145,9 @@ pub(crate) fn lined<'r>(runs: &[&'r TextRun]) -> Lined<'r> {
 /// of the tree is walked once for all typers, a copy is walked again by each.
 pub type Typer = fn(&PageView<'_>, &Segment) -> Option<Typed>;
 
-/// Every typer, in [`Kind`] order. Spatial has none: it is what no clear evidence leaves.
+/// Every typer, in [`Kind`] order. Spatial is what no clear evidence leaves: its typer gives
+/// only signals of weight 0 that say why the table rules refused a segment (see
+/// [`type_spatial`]), never a candidate that can win.
 pub const TYPERS: &[(Kind, Typer)] = &[
     (Kind::HeaderBand, type_header_band),
     (Kind::FooterBand, type_footer_band),
@@ -152,8 +158,30 @@ pub const TYPERS: &[(Kind, Typer)] = &[
     (Kind::Table, type_table),
     (Kind::LabelValue, type_label_value),
     (Kind::Totals, type_totals),
+    (Kind::Figure, type_figure),
+    (Kind::Code, type_code),
     (Kind::FootnoteLegend, type_footnote_legend),
+    (Kind::Spatial, type_spatial),
 ];
+
+/// What every typer of [`TYPERS`] finds in each segment of the view's tree, the segments of
+/// alternative cuts included, by segment: the input of [`crate::arbitrate()`]. Each segment
+/// is passed as it stands in the tree, so its text and readings are worked out once for all
+/// typers. A segment no typer finds evidence in has an empty list.
+pub fn type_segments(view: &PageView<'_>) -> BTreeMap<SegId, Vec<Typed>> {
+    view.segs
+        .all
+        .iter()
+        .map(|seg| {
+            crate::work::add(1);
+            let typed = TYPERS
+                .iter()
+                .filter_map(|(_, typer)| typer(view, seg))
+                .collect();
+            (seg.id, typed)
+        })
+        .collect()
+}
 
 /// The file facts as the typers look them up, built once per file.
 #[derive(Debug, Clone, Default)]
@@ -219,6 +247,10 @@ pub struct PageView<'a> {
     seeds: OnceCell<Vec<Style>>,
     /// The label/value candidate of each segment, worked out once.
     pairs: Vec<OnceCell<Option<Typed>>>,
+    /// The figure candidate of each segment, worked out once.
+    figures: Vec<OnceCell<Option<Typed>>>,
+    /// The code candidate of each segment, worked out once.
+    codes: Vec<OnceCell<Option<Typed>>>,
     /// Whether each segment's lines read as sentences across a ruled table, worked out once.
     across: Vec<OnceCell<bool>>,
     /// The segments read as tables, by the bottom of their tables, lowest first.
@@ -345,6 +377,8 @@ impl<'a> PageView<'a> {
             totals: (0..n).map(|_| OnceCell::new()).collect(),
             seeds: OnceCell::new(),
             pairs: (0..n).map(|_| OnceCell::new()).collect(),
+            figures: (0..n).map(|_| OnceCell::new()).collect(),
+            codes: (0..n).map(|_| OnceCell::new()).collect(),
             across: (0..n).map(|_| OnceCell::new()).collect(),
             tables: OnceCell::new(),
             touching: OnceCell::new(),
@@ -429,6 +463,21 @@ impl<'a> PageView<'a> {
             || pairs::label_value(self, seg),
             Clone::clone,
         )
+    }
+
+    /// The figure candidate of `seg` (see [`figure::type_figure`]).
+    pub(crate) fn figure_of(&self, seg: &Segment) -> Option<Typed> {
+        self.cached(
+            &self.figures,
+            seg,
+            || figure::figure(self, seg),
+            Clone::clone,
+        )
+    }
+
+    /// The code candidate of `seg` (see [`code::type_code`]).
+    pub(crate) fn code_of(&self, seg: &Segment) -> Option<Typed> {
+        self.cached(&self.codes, seg, || code::code(self, seg), Clone::clone)
     }
 
     /// Whether the lines of `seg` read as sentences across a ruled table (see
