@@ -1211,6 +1211,11 @@ fn worst_case_margins_of_tables_pairs_and_totals() {
         // Fields in strips between rules (Task 18b, round 2).
         ("strip fields over a table", LABEL_STRIP_FIELDS, table),
         ("strip fields over paragraph", LABEL_STRIP_FIELDS, paragraph),
+        (
+            "strip fields over a large bold heading that keeps its lines",
+            LABEL_STRIP_FIELDS,
+            HEADING_SIZE_LARGE + HEADING_BOLD + HEADING_TITLE_LINES,
+        ),
         // Refused readings give nothing: a table on field cells (see
         // `field_cells_refuse_a_table`), key values or totals, and label/value pairs on totals
         // (see `amounts_under_money_columns_are_totals`).
@@ -2631,4 +2636,409 @@ fn boxes_beside_fields_keep_their_kinds() {
     assert_ne!(decided("Steuerklasse"), Some(Kind::Paragraph), "{out:#?}");
     assert_eq!(decided("Musterweg 1"), Some(Kind::Paragraph), "{out:#?}");
     assert_eq!(decided("00000"), Some(Kind::LabelValue), "{out:#?}");
+}
+
+/// `texts` and `rules` on a sheet, all scaled by `k` (the prose too).
+fn sheet_at(texts: Vec<TextRun>, rules: Vec<RuleIn>, k: f32) -> Tree {
+    Tree {
+        page: sheet(texts, rules),
+    }
+    .scaled(k)
+}
+
+/// Fix round 2 (N1): a ruled table whose header of two lines (titles over their units) stands
+/// between its top rule and its header rule stays a table by the margin: the header strip
+/// reads as nothing else.
+#[test]
+fn a_table_with_a_header_of_two_lines_between_rules_stays_a_table() {
+    let rows: [&[&str]; 5] = [
+        &["Artikel", "Menge", "Preis"],
+        &["", "Stk", "EUR"],
+        &["Schrauben", "2", "12,50"],
+        &["Muttern", "1", "3,00"],
+        &["Scheiben", "4", "8,75"],
+    ];
+    for k in [0.75f32, 1.0, 1.5] {
+        // The table alone on its page: the strip and the rows under it are one segment.
+        let mut page = page(2, rows_at(&rows, &[72.0, 220.0, 320.0], 690.0, 9.2, 100));
+        page.rules = h_rules(70.0, 420.0, &[700.0, 672.0]);
+        let tree = Tree { page }.scaled(k);
+        let typed = tree.typed(&|view, s| {
+            s.source != Source::Page
+                && text_of_lines(vec![100, 101, 102, 103, 104])(view, s)
+                && s.children
+                    .iter()
+                    .any(|c| view.segs.all[c.0 as usize].source == Source::Strip)
+        });
+        let (kind, lead) = winner(&typed);
+        assert_eq!(kind, Kind::Table, "at {k}x: {typed:#?}");
+        assert!(lead >= MARGIN, "at {k}x: {typed:#?}");
+    }
+}
+
+/// Fix round 2 (N1): a table reading over lines that take in a strip of fields between rules
+/// is refused (`spatial.strip_inside`): the strip's fields are its own reading.
+#[test]
+fn a_table_over_a_strip_of_fields_is_refused() {
+    let strips = [[
+        ("Personalnummer", "00123"),
+        ("Eintritt", "01.01.2020"),
+        ("Klasse", "3"),
+    ]];
+    let rows: [&[&str]; 3] = [
+        &["Schrauben", "2", "12,50"],
+        &["Muttern", "1", "3,00"],
+        &["Scheiben", "4", "8,75"],
+    ];
+    for k in [0.75f32, 1.0, 1.5] {
+        let mut tree = strips_page(&strips, k);
+        let under = rows_at(&rows, &[72.0, 180.0, 288.0], 666.0, 9.2, 110);
+        tree.page.texts.extend(under.into_iter().map(|r| TextRun {
+            x: r.x * k,
+            y: r.y * k,
+            w: r.w * k,
+            h: r.h * k,
+            size: r.size * k,
+            ..r
+        }));
+        tree.page.texts.sort_by_key(|r| r.line);
+        let wide = tree.with(|view| {
+            let seg = view
+                .segs
+                .all
+                .iter()
+                .filter(|s| {
+                    s.source != Source::Page
+                        && s.children
+                            .iter()
+                            .any(|c| view.segs.all[c.0 as usize].source == Source::Strip)
+                })
+                .min_by_key(|s| s.prims.len())
+                .unwrap_or_else(|| panic!("no parent of the strip: {:#?}", view.segs.all));
+            all_typed(view, seg)
+        });
+        assert!(find(&wide, Kind::Table).is_none(), "at {k}x: {wide:#?}");
+        let spatial = find(&wide, Kind::Spatial).expect("the refusal is named");
+        assert!(
+            ids(spatial).contains(&"spatial.strip_inside"),
+            "at {k}x: {wide:#?}"
+        );
+    }
+}
+
+/// Fix round 2 (N4): a grouped table, its section row of one piece in the header's size
+/// between the rows, stays a table by the margin: a section row is no turn of the sizes. A
+/// second value line of one piece among values and their labels is no section row.
+#[test]
+fn a_grouped_table_stays_a_table() {
+    let rows: [(&[&str], f32); 8] = [
+        (&["Pos", "Artikel", "Betrag"], 10.2),
+        (&["1", "Schrauben", "50,00"], 9.2),
+        (&["2", "Muttern", "40,00"], 9.2),
+        (&["Gruppe B"], 10.2),
+        (&["3", "Scheiben", "10,00"], 9.2),
+        (&["4", "Bolzen", "20,00"], 9.2),
+        (&["5", "Stifte", "5,00"], 9.2),
+        (&["", "Summe", "125,00"], 10.2),
+    ];
+    for k in [0.75f32, 1.0, 1.5] {
+        let mut texts = Vec::new();
+        for (r, (row, size)) in rows.iter().enumerate() {
+            for (c, t) in row.iter().enumerate() {
+                if !t.is_empty() {
+                    texts.push(run(
+                        t,
+                        72.0 + 150.0 * c as f32,
+                        650.0 - 13.0 * r as f32,
+                        *size,
+                        100 + r as u32,
+                    ));
+                }
+            }
+        }
+        let tree = sheet_at(texts, Vec::new(), k);
+        let lines: Vec<u32> = (100..108).collect();
+        let typed = tree.typed_holding(&lines);
+        let (kind, lead) = winner(&typed);
+        assert_eq!(kind, Kind::Table, "at {k}x: {typed:#?}");
+        assert!(lead >= MARGIN, "at {k}x: {typed:#?}");
+    }
+    // Values over their labels with a second value line of one piece: no section row, the
+    // sizes still turn too often.
+    let rows: [(&[&str], f32); 6] = [
+        (&["Erika Mustermann", "Musterstadt"], 9.2),
+        (&["Name", "Ort"], 6.2),
+        (&["Musterweg 1", "12"], 9.2),
+        (&["Hinterhaus"], 9.2),
+        (&["Strasse", "Hausnr"], 6.2),
+        (&["12345", "DE"], 9.2),
+    ];
+    let mut texts = Vec::new();
+    for (r, (row, size)) in rows.iter().enumerate() {
+        for (c, t) in row.iter().enumerate() {
+            texts.push(run(
+                t,
+                72.0 + 178.0 * c as f32,
+                650.0 - 9.0 * r as f32,
+                *size,
+                100 + r as u32,
+            ));
+        }
+    }
+    let tree = Tree {
+        page: sheet(texts, Vec::new()),
+    };
+    let lines: Vec<u32> = (100..106).collect();
+    let typed = tree.typed_holding(&lines);
+    assert!(find(&typed, Kind::Table).is_none(), "{typed:#?}");
+}
+
+/// Fix round 2 (I3): the lines of a footnote legend read no label and value, even where an
+/// entry holds a label with a colon and its value.
+#[test]
+fn a_legend_reads_no_pairs() {
+    let mut case = legend_case();
+    for r in &mut case.pages[0].texts {
+        match r.line {
+            5 => r.text = "2 Quelle: Musterstadt 2020".into(),
+            6 => r.text = "3 Stand: 01.01.2020".into(),
+            _ => {}
+        }
+    }
+    for k in [0.75f32, 1.0, 1.5] {
+        let typed = case.scaled(k).typed();
+        assert!(
+            find(&typed, Kind::LabelValue).is_none(),
+            "at {k}x: {typed:#?}"
+        );
+        assert_eq!(
+            winner(&typed).0,
+            Kind::FootnoteLegend,
+            "at {k}x: {typed:#?}"
+        );
+    }
+}
+
+/// Fix round 2 (I3): a sentence across the columns of a ruled table, set in a heading size,
+/// gives no heading candidate: its line is the paragraph's evidence.
+#[test]
+fn prose_cells_in_a_heading_size_are_no_heading() {
+    let (mut tree, sentence) = sentence_over_row(&[5, 3]);
+    for r in &mut tree.page.texts {
+        if r.line == 104 {
+            let x = if r.x > 100.0 { 223.0 } else { r.x };
+            *r = bold(run(&r.text, x, 631.0, 12.2, 104));
+        }
+    }
+    for k in [0.75f32, 1.0, 1.5] {
+        tree.scaled(k).with(|view| {
+            let seg = Segment {
+                id: SegId(u32::MAX),
+                bounds: Bounds {
+                    x0: 0.0,
+                    y0: 0.0,
+                    x1: 595.0 * k,
+                    y1: 842.0 * k,
+                },
+                prims: sentence.iter().map(|&i| PrimId::Text(i)).collect(),
+                source: Source::Rest,
+                parent: None,
+                children: Vec::new(),
+                alternatives: Vec::new(),
+            };
+            let typed = all_typed(view, &seg);
+            assert!(
+                ids(of(&typed, Kind::Paragraph)).contains(&"paragraph.prose_cells"),
+                "at {k}x: {typed:#?}"
+            );
+            assert!(find(&typed, Kind::Heading).is_none(), "at {k}x: {typed:#?}");
+        });
+    }
+}
+
+/// Fix round 2 (M5): two lines in cells that no table reads never join into a paragraph.
+#[test]
+fn lines_in_cells_join_no_paragraph() {
+    // The pieces of the second line stand off those of the first: no cells aligned.
+    let mut texts = rows_at(
+        &[&["Muster GmbH", "Beispiel AG"]],
+        &[72.0, 250.0],
+        640.0,
+        9.2,
+        100,
+    );
+    texts.extend(rows_at(
+        &[&["Musterstadt", "Probedorf"]],
+        &[110.0, 320.0],
+        628.0,
+        9.2,
+        101,
+    ));
+    for k in [0.75f32, 1.0, 1.5] {
+        let tree = sheet_at(texts.clone(), Vec::new(), k);
+        let typed = tree.typed(&text_of_lines(vec![100, 101]));
+        assert!(find(&typed, Kind::Table).is_none(), "at {k}x: {typed:#?}");
+        assert!(
+            find(&typed, Kind::Paragraph).is_none(),
+            "at {k}x: {typed:#?}"
+        );
+    }
+}
+
+/// Fix round 2 (M5): a row of a table read on its own (a segment of one line in two cells,
+/// inside a segment that reads as a table) is no paragraph.
+#[test]
+fn a_row_inside_a_table_is_no_paragraph() {
+    // The amounts stand right-aligned: the total's amount, wider, shares no left edge with
+    // the amount over it, so the total's line is no line of cells aligned with a near line.
+    let rows: [&[&str]; 5] = [
+        &["Pos", "Artikel", "Betrag"],
+        &["1", "Schrauben", "500,00"],
+        &["2", "Muttern", "400,00"],
+        &["3", "Scheiben", "100,00"],
+        &["Summe", "", "1.000,00"],
+    ];
+    let mut texts = Vec::new();
+    for (r, row) in rows.iter().enumerate() {
+        for (c, t) in row.iter().enumerate() {
+            if !t.is_empty() {
+                let mut x = 72.0 + 150.0 * c as f32;
+                let piece = run(t, x, 650.0 - 13.0 * r as f32, 9.2, 100 + r as u32);
+                if c == 2 {
+                    x = 420.0 - piece.w;
+                }
+                texts.push(TextRun { x, ..piece });
+            }
+        }
+    }
+    for k in [0.75f32, 1.0, 1.5] {
+        let tree = sheet_at(texts.clone(), Vec::new(), k);
+        let typed = tree.with(|view| {
+            let table = view
+                .segs
+                .all
+                .iter()
+                .filter(|s| text_of_lines(vec![100, 101, 102, 103, 104])(view, s))
+                .max_by_key(|s| s.prims.len())
+                .unwrap_or_else(|| panic!("no table segment: {:#?}", view.segs.all));
+            assert!(type_table(view, table).is_some(), "at {k}x");
+            // The total row, a line of two pieces, as a segment of its own under the table.
+            let prims: Vec<PrimId> = table
+                .prims
+                .iter()
+                .copied()
+                .filter(
+                    |p| matches!(*p, PrimId::Text(i) if view.page.texts[i as usize].line == 104),
+                )
+                .collect();
+            let row = Segment {
+                id: SegId(u32::MAX),
+                bounds: table.bounds,
+                prims,
+                source: Source::Rest,
+                parent: Some(table.id),
+                children: Vec::new(),
+                alternatives: Vec::new(),
+            };
+            all_typed(view, &row)
+        });
+        assert!(
+            find(&typed, Kind::Paragraph).is_none(),
+            "at {k}x: {typed:#?}"
+        );
+    }
+}
+
+/// Fix round 2 (M5): a segment that holds a strip between rules is no text alone: the line
+/// readings (key values, line pairs) never read over the strip and the lines under it, so the
+/// strip keeps its own decision.
+#[test]
+fn a_segment_over_a_strip_reads_no_pairs_of_its_own() {
+    let lines = [
+        ("Konto: 12345", 690.0, 100),
+        ("Datum: 01.02.2020", 680.0, 101),
+        ("Name: Erika Mustermann", 660.0, 110),
+        ("Ort: Musterstadt", 650.0, 111),
+    ];
+    for k in [0.75f32, 1.0, 1.5] {
+        let texts = lines
+            .iter()
+            .map(|&(t, y, l)| run(t, 72.0, y, 9.2, l))
+            .collect();
+        let mut page = page(2, texts);
+        page.rules = h_rules(70.0, 400.0, &[700.0, 672.0]);
+        let tree = Tree { page }.scaled(k);
+        let typed = tree.with(|view| {
+            view.segs
+                .all
+                .iter()
+                .filter(|s| {
+                    s.source != Source::Page
+                        && s.children
+                            .iter()
+                            .any(|c| view.segs.all[c.0 as usize].source == Source::Strip)
+                })
+                .map(|s| all_typed(view, s))
+                .collect::<Vec<_>>()
+        });
+        assert!(!typed.is_empty(), "at {k}x: no segment over the strip");
+        for t in &typed {
+            assert!(find(t, Kind::LabelValue).is_none(), "at {k}x: {t:#?}");
+        }
+    }
+}
+
+/// Fix round 2 (N2): a rule of the left column at a height between the two rules of a strip on
+/// the right does not part the strip: each rule pairs with the nearest rule above it that lies
+/// over it, and the strip reads as fields.
+#[test]
+fn a_rule_of_another_column_keeps_a_strip() {
+    let fields = [("Personalnummer", "00123"), ("Eintritt", "01.01.2020")];
+    for k in [0.75f32, 1.0, 1.5] {
+        let mut texts = Vec::new();
+        for (c, (label, value)) in fields.iter().enumerate() {
+            let x = 330.0 + 100.0 * c as f32;
+            texts.push(run(label, x, 690.0, 6.2, 100));
+            texts.push(run(value, x, 678.0, 9.2, 101));
+        }
+        let mut page = sheet(texts, Vec::new());
+        page.rules = vec![
+            rule(320.0, 700.0, 520.0, 700.0),
+            rule(320.0, 670.0, 520.0, 670.0),
+            // The left column's rule, between the heights of the strip's rules.
+            rule(70.0, 685.0, 250.0, 685.0),
+        ];
+        let tree = Tree { page }.scaled(k);
+        let typed = tree.typed_holding(&[100, 101]);
+        let pairs = of(&typed, Kind::LabelValue);
+        assert!(
+            ids(pairs).contains(&"label_value.strip_fields"),
+            "at {k}x: {typed:#?}"
+        );
+    }
+}
+
+/// Fix round 2: lines that stand in two drawn boxes or more (fields in boxes beside a box of
+/// a bold title) are no one paragraph: the box sides part them.
+#[test]
+fn lines_in_two_boxes_are_no_paragraph() {
+    let xs = [72.0, 222.0, 372.0, 522.0];
+    let texts = vec![
+        run("Personalnummer", 75.0, 683.0, 6.2, 100),
+        bold(run("Angaben zum", 225.0, 682.0, 9.2, 100)),
+        run("Eintritt", 375.0, 683.0, 6.2, 100),
+        bold(run("Betrieb", 225.0, 671.0, 9.2, 101)),
+        run("00000", 75.0, 668.0, 9.2, 102),
+        run("01.01.2020", 375.0, 668.0, 9.2, 102),
+    ];
+    let tree = Tree {
+        page: sheet(texts, grid_rules(&xs, &[692.0, 660.0])),
+    };
+    for k in [0.75f32, 1.0, 1.5] {
+        let typed = tree.scaled(k).typed(&grid);
+        assert!(
+            find(&typed, Kind::Paragraph).is_none(),
+            "at {k}x: {typed:#?}"
+        );
+    }
 }

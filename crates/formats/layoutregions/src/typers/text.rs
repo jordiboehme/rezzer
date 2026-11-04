@@ -254,12 +254,6 @@ impl SegText {
     }
 }
 
-/// A short piece of a field (a label, a value) holds at most this many words.
-const FIELD_PIECE_WORDS: usize = 6;
-
-/// A label holds at most this many words.
-const FIELD_LABEL_WORDS: usize = 4;
-
 /// Lines this many times their larger size apart or nearer stand together (a label and its
 /// value, the lines of one block).
 const PAIR_PITCH: f32 = 2.0;
@@ -304,13 +298,13 @@ fn aligned_cells(view: &PageView<'_>, seg: &Segment) -> bool {
             .iter()
             .map(|r| r.text.split_whitespace().count())
             .sum();
-        if own_words > FIELD_PIECE_WORDS {
+        if own_words > super::pairs::PAIR_VALUE_WORDS {
             return false;
         }
-        let reach = PAIR_PITCH * l.size.max(1.0);
-        // The pieces of the page's other lines near this one (within `reach` up and down)
-        // that start at its left edge: their baseline, size and words, nearest first above and
-        // below.
+        // The pieces of the page's other lines that start at its left edge, in a window of
+        // PAIR_PITCH times twice its size up and down (a line a size step larger stays in it):
+        // their baseline, size and words, nearest first above and below.
+        let reach = 2.0 * PAIR_PITCH * l.size.max(1.0);
         let lo = by_y.line_y.partition_point(|y| *y < l.y - 2.0 * reach);
         let hi = by_y.line_y.partition_point(|y| *y <= l.y + 2.0 * reach);
         crate::work::add((hi - lo) as u64);
@@ -343,13 +337,16 @@ fn aligned_cells(view: &PageView<'_>, seg: &Segment) -> bool {
         let step = |a: f32, b: f32| {
             a.min(b) > 0.0 && a.max(b) >= crate::segment::cut::SIZE_STEP * a.min(b)
         };
-        let near = |from: f32, q: &(f32, f32, usize)| (q.0 - from).abs() <= reach;
+        // Two lines stand together within PAIR_PITCH times the larger of their two sizes.
+        let near = |from: (f32, f32), q: &(f32, f32, usize)| {
+            (q.0 - from.0).abs() <= PAIR_PITCH * from.1.max(q.1).max(1.0)
+        };
         // Paired with the nearest piece on one side, a size step apart. A line in its own
         // size on the other side, or one in the paired piece's size past it, makes a column of
         // three lines or more in one style run (a name over its street and town): one block.
         // Fields stacked one under another alternate the two sizes and stay pairs.
         let pairs = |side: &[(f32, f32, usize)], other: &[(f32, f32, usize)]| {
-            let Some(q) = side.first().filter(|q| near(l.y, q)) else {
+            let Some(q) = side.first().filter(|q| near((l.y, own.size), q)) else {
                 return false;
             };
             let (label, value) = if own.size < q.1 {
@@ -358,12 +355,14 @@ fn aligned_cells(view: &PageView<'_>, seg: &Segment) -> bool {
                 (q.2, own_words)
             };
             step(own.size, q.1)
-                && label <= FIELD_LABEL_WORDS
-                && value <= FIELD_PIECE_WORDS
+                && label <= super::pairs::PAIR_LABEL_WORDS
+                && value <= super::pairs::PAIR_VALUE_WORDS
                 && !other
                     .first()
-                    .is_some_and(|o| near(l.y, o) && !step(own.size, o.1))
-                && !side.get(1).is_some_and(|o| near(q.0, o) && !step(q.1, o.1))
+                    .is_some_and(|o| near((l.y, own.size), o) && !step(own.size, o.1))
+                && !side
+                    .get(1)
+                    .is_some_and(|o| near((q.0, q.1), o) && !step(q.1, o.1))
         };
         pairs(&over, &under) || pairs(&under, &over)
     })
@@ -501,7 +500,12 @@ pub fn type_paragraph(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
                             })
                     })
                 });
-        if (joins_cells || row || cells || strip || t.aligned || field_box) && prose.is_none() {
+        // Lines that stand in two drawn boxes or more are no one paragraph: the box sides part
+        // them (fields of a row of boxes, read across by a band of the page).
+        let boxes = view.boxes_of(seg) >= 2;
+        if (joins_cells || row || cells || strip || t.aligned || field_box || boxes)
+            && prose.is_none()
+        {
             return None;
         }
         let mut signals = Vec::new();
@@ -606,7 +610,7 @@ pub fn type_heading(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
     // figure's text are those kinds' evidence: no heading claims them.
     let claimed = super::table::type_table(view, seg).is_some()
         || super::table::refusal(view, seg).is_some_and(|r| {
-            r.kind == Kind::Figure || (r.kind == Kind::Paragraph && r.signal.weight > 0)
+            matches!(r.kind, Kind::Figure | Kind::Paragraph) && r.signal.weight > 0
         })
         || view.across(seg);
     if claimed {

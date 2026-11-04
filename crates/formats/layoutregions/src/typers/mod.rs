@@ -422,8 +422,12 @@ pub struct PageView<'a> {
     strip_frames: OnceCell<Vec<pairs::StripFrame>>,
     /// The strip each run in a strip stands in, by run id.
     strip_of: OnceCell<HashMap<u32, usize>>,
+    /// The innermost box segment of each run that stands in one, by run id.
+    box_of: OnceCell<HashMap<u32, usize>>,
     /// The strip fields of each segment (see [`pairs::strip_fields`]), worked out once.
     strips: Vec<OnceCell<Option<pairs::StripFields>>>,
+    /// How many boxes the runs of each segment stand in (see [`PageView::boxes_of`]).
+    boxes: Vec<OnceCell<usize>>,
 }
 
 impl<'a> PageView<'a> {
@@ -555,7 +559,9 @@ impl<'a> PageView<'a> {
             touching: OnceCell::new(),
             strip_frames: OnceCell::new(),
             strip_of: OnceCell::new(),
+            box_of: OnceCell::new(),
             strips: (0..n).map(|_| OnceCell::new()).collect(),
+            boxes: (0..n).map(|_| OnceCell::new()).collect(),
         }
     }
 
@@ -629,10 +635,60 @@ impl<'a> PageView<'a> {
         )
     }
 
-    /// The label/value candidate of `seg` (see [`pairs::type_label_value`]).
     /// The strips between the page's rules (see [`pairs::strip_frames`]).
     pub(crate) fn strip_frames(&self) -> &[pairs::StripFrame] {
         self.strip_frames.get_or_init(|| pairs::strip_frames(self))
+    }
+
+    /// How many box segments of the view's tree the text runs of `seg` stand in: each run
+    /// counts in the innermost box that holds it (the box of most depth), a run in no box not
+    /// at all.
+    pub(crate) fn boxes_of(&self, seg: &Segment) -> usize {
+        let at = self.box_of.get_or_init(|| {
+            let all = &self.segs.all;
+            let depth = |s: &Segment| {
+                let (mut d, mut up) = (0usize, s.parent);
+                while let Some(p) = up.and_then(|p| all.get(p.0 as usize)) {
+                    crate::work::add(1);
+                    d += 1;
+                    up = p.parent;
+                }
+                d
+            };
+            let mut best: HashMap<u32, (usize, usize)> = HashMap::new();
+            for (k, b) in all.iter().enumerate() {
+                if b.source != crate::segment::Source::Box {
+                    continue;
+                }
+                let d = depth(b);
+                crate::work::add(b.prims.len() as u64);
+                for p in &b.prims {
+                    if let PrimId::Text(i) = *p
+                        && best.get(&i).is_none_or(|&(_, e)| d > e)
+                    {
+                        best.insert(i, (k, d));
+                    }
+                }
+            }
+            best.into_iter().map(|(i, (k, _))| (i, k)).collect()
+        });
+        self.cached(
+            &self.boxes,
+            seg,
+            || {
+                crate::work::add(seg.prims.len() as u64);
+                let boxes: HashSet<usize> = seg
+                    .prims
+                    .iter()
+                    .filter_map(|p| match *p {
+                        PrimId::Text(i) => at.get(&i).copied(),
+                        _ => None,
+                    })
+                    .collect();
+                boxes.len()
+            },
+            |n| *n,
+        )
     }
 
     /// The strip of each run that stands in one, by run id.
@@ -653,6 +709,7 @@ impl<'a> PageView<'a> {
         self.cached(&self.strips, seg, || pairs::strip_fields(self, seg), |t| *t)
     }
 
+    /// The label/value candidate of `seg` (see [`pairs::type_label_value`]).
     pub(crate) fn pairs_of(&self, seg: &Segment) -> Option<Typed> {
         self.cached(
             &self.pairs,

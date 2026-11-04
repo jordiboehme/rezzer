@@ -206,8 +206,7 @@ pub struct Decision {
 /// best alternative of another kind: a key/value or table reading below is never folded into a
 /// weaker reading of another kind. Nor does it replace the cut when a sure decision of its own kind
 /// stands there beside a sure decision of another kind (its reading only spreads that child's over
-/// its neighbours),
-/// or when it is a figure over a sure decision of a text kind (a figure keeps the
+/// its neighbours), or when it is a figure over a sure decision of a text kind (a figure keeps the
 /// text of its region as text). It then carries the cut's kinds as alternatives. Otherwise the cut
 /// stands and the segment's best candidate is an alternative on each of its decisions. The page
 /// root never replaces its cut: its candidates are alternatives on the decisions under it.

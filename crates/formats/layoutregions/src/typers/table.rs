@@ -86,7 +86,7 @@ const FIELD_STRIPS: &str = "its lines are fields in strips between rules";
 /// A refusal: the lines alternate between two styles (see [`alternating`]).
 const ALTERNATING: &str = "its lines alternate between labels and values";
 /// A refusal: the lines hold a strip between rules that reads no table of its own.
-const STRIP_INSIDE: &str = "its lines take in a strip between rules that is no table";
+const STRIP_INSIDE: &str = "its lines take in a strip between rules that reads as something else";
 /// A refusal: the sizes of the lines interleave (see [`interleaved`]).
 const INTERLEAVED: &str = "its lines interleave two sizes, labels between values";
 /// A refusal: the lines are blocks side by side (see [`address_columns`]).
@@ -729,14 +729,33 @@ const SIZE_TURNS: usize = 2;
 /// Whether lines of two sizes a size step apart interleave: the sizes of consecutive lines,
 /// taken as runs of one size, step more than [`SIZE_TURNS`] times between two sizes (each run
 /// a size step off the one before and in the size of the one before that). A table's rows
-/// share one size; a header and a total in a larger size step there and back once. One pass.
-fn interleaved(runs: &[&TextRun], ranges: &[RunRange]) -> bool {
+/// share one size; a header and a total in a larger size step there and back once. A section
+/// row (a line of one piece in the header's size, between rows of one size, see `pieces`) is
+/// no line of labels among values: it is left out of the count, so a table grouped by section
+/// rows in its header's size keeps its reading. One pass.
+fn interleaved(runs: &[&TextRun], ranges: &[RunRange], pieces: &[Vec<Piece>]) -> bool {
     let Some(styles) = line_styles(runs, ranges) else {
         return false;
     };
-    // The sizes of the runs of lines of one size.
+    // A section row: a line of one piece in the size of the first line (the header's), a
+    // size step off rows of one size on both sides of it.
+    let rows = |k: usize| pieces.get(k).is_some_and(|p| p.len() >= 2);
+    let section = |k: usize| {
+        k > 0
+            && k + 1 < styles.len()
+            && pieces.get(k).is_some_and(|p| p.len() == 1)
+            && rows(k - 1)
+            && rows(k + 1)
+            && !size_step(styles[k - 1].0, styles[k + 1].0)
+            && size_step(styles[k - 1].0, styles[k].0)
+            && !size_step(styles[0].0, styles[k].0)
+    };
+    // The sizes of the runs of lines of one size, section rows left out.
     let mut sizes: Vec<f32> = Vec::new();
-    for (size, _) in styles {
+    for (k, &(size, _)) in styles.iter().enumerate() {
+        if section(k) {
+            continue;
+        }
         match sizes.last() {
             Some(&last) if !size_step(last, size) => {}
             _ => sizes.push(size),
@@ -781,12 +800,16 @@ fn lines(view: &PageView<'_>, seg: &Segment, given: bool) -> Find {
         if view.strip_fields_of(seg).is_some() {
             return refused(Speaks::LabelValue, FIELD_STRIPS);
         }
-        // The lines between two rules are kept together because they are one block (fields,
-        // cells, blocks side by side): a wider reading that takes them in as rows reads a
-        // table only where the strip itself reads as one.
+        // The lines between two rules are kept together because they are one block: a wider
+        // reading does not take in a strip that reads positively as something else (fields,
+        // or a refusal of the table rules: blocks side by side, labels between values). A
+        // strip that reads nothing of its own (a header of two lines, too few rows) may be
+        // part of the table.
         let strip_no_table = seg.children.iter().any(|c| {
             view.segs.all.get(c.0 as usize).is_some_and(|k| {
-                k.source == Source::Strip && !view.reading(k, |f| matches!(f, Find::Table(_)))
+                k.source == Source::Strip
+                    && (view.strip_fields_of(k).is_some()
+                        || view.reading(k, |f| matches!(f, Find::Refused(_))))
             })
         });
         if strip_no_table {
@@ -795,7 +818,7 @@ fn lines(view: &PageView<'_>, seg: &Segment, given: bool) -> Find {
         if alternating(&runs, &ranges) {
             return refused(Speaks::Spatial, ALTERNATING);
         }
-        if interleaved(&runs, &ranges) {
+        if interleaved(&runs, &ranges, &pieces) {
             return refused(Speaks::Spatial, INTERLEAVED);
         }
         let off = vec![false; ranges.len()];

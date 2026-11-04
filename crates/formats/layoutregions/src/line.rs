@@ -275,7 +275,6 @@ pub fn apart<R: LineRun>(before: Option<&R>, r: &R, ink_end: f32) -> bool {
         && (letters(last) || letters(first))
 }
 
-/// The ink characters of `text`: white space is not counted.
 /// The run that sets the style of a line of `runs`: the one with the most ink characters, the
 /// first of those on a tie; `None` for a line without ink. The style steps of the segmenter
 /// and the table typer's checks of line styles share it.
@@ -290,6 +289,7 @@ pub fn line_style<'r>(runs: impl IntoIterator<Item = &'r TextRun>) -> Option<&'r
     best.map(|(r, _)| r)
 }
 
+/// The ink characters of `text`: white space is not counted.
 pub fn ink(text: &str) -> usize {
     text.chars().filter(|c| !c.is_whitespace()).count()
 }

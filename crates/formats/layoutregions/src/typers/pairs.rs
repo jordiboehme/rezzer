@@ -109,9 +109,9 @@ fn pairs_evidenced(runs: &[&TextRun], rows: &[crate::extract::pairs::blocks::Key
 /// by the margin.
 pub const LABEL_STRIP_FIELDS: u16 = 1000;
 
-/// One strip between two rules of the page: a piece of one rule level over a piece of the
-/// level under it, where both reach (strips side by side on the same rules are strips of
-/// their own), the runs with ink whose middle it holds (each run in the first such strip, top
+/// One strip between two rules of the page: a rule piece and the nearest piece above it that
+/// overlaps it, where both reach (strips side by side on the same rules are strips of their
+/// own), the runs with ink whose middle it holds (each run in the first such strip, top
 /// to bottom, then left to right), and what it reads as.
 #[derive(Debug, Clone)]
 pub(crate) struct StripFrame {
@@ -123,31 +123,52 @@ pub(crate) struct StripFrame {
     read: FrameRead,
 }
 
-/// The strips of the page of `view` (see [`StripFrame`]), found once: the rule levels from
-/// the page's horizontal rules (rules within SNAP of one height are one level), and the runs
-/// by one pass over them sorted by the height of their middle.
-pub(crate) fn strip_frames(view: &PageView<'_>) -> Vec<StripFrame> {
-    let snap = crate::segment::drawn::SNAP;
-    let mut levels: Vec<Vec<&crate::segment::drawn::Line>> = Vec::new();
-    for l in view.hs() {
-        match levels.last_mut() {
-            Some(level) if l.at - level[0].at <= snap => level.push(l),
-            _ => levels.push(vec![l]),
-        }
-    }
+/// The frames between horizontal `rules` (bottom, top, x0, x1), top to bottom, then left to
+/// right: each stretch of a rule piece with the nearest piece above it that overlaps that
+/// stretch in x. A rule of another column between the heights of two rules does not part them:
+/// it frames only the stretch it lies over, and the rest of the piece goes on up.
+fn rule_frames(rules: &[crate::segment::drawn::Line]) -> Vec<(f32, f32, f32, f32)> {
+    let mut sorted: Vec<&crate::segment::drawn::Line> = rules.iter().collect();
+    sorted.sort_by(|a, b| a.at.total_cmp(&b.at).then(a.from.total_cmp(&b.from)));
     let mut frames: Vec<(f32, f32, f32, f32)> = Vec::new();
-    for w in levels.windows(2) {
-        for low in &w[0] {
-            for up in &w[1] {
-                crate::work::add(1);
-                let (a, b) = (low.from.max(up.from), low.to.min(up.to));
-                if b - a > snap {
-                    frames.push((low.at, up.at, a, b));
+    for (i, low) in sorted.iter().enumerate() {
+        // The stretches of `low` that no piece above has framed yet.
+        let mut open: Vec<(f32, f32)> = vec![(low.from, low.to)];
+        for up in &sorted[i + 1..] {
+            if open.is_empty() {
+                break;
+            }
+            crate::work::add(open.len() as u64);
+            if up.at - low.at <= crate::segment::drawn::SNAP {
+                continue;
+            }
+            let mut left: Vec<(f32, f32)> = Vec::with_capacity(open.len() + 1);
+            for &(a, b) in &open {
+                let (x0, x1) = (a.max(up.from), b.min(up.to));
+                if x1 - x0 > crate::segment::drawn::SNAP {
+                    frames.push((low.at, up.at, x0, x1));
+                    if x0 - a > crate::segment::drawn::SNAP {
+                        left.push((a, x0));
+                    }
+                    if b - x1 > crate::segment::drawn::SNAP {
+                        left.push((x1, b));
+                    }
+                } else {
+                    left.push((a, b));
                 }
             }
+            open = left;
         }
     }
     frames.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.2.total_cmp(&b.2)));
+    frames
+}
+
+/// The strips of the page of `view` (see [`StripFrame`]), found once: the frames of the page's
+/// horizontal rules (see [`rule_frames`]), and the runs by one pass over them
+/// sorted by the height of their middle.
+pub(crate) fn strip_frames(view: &PageView<'_>) -> Vec<StripFrame> {
+    let frames = rule_frames(view.hs());
     if frames.is_empty() {
         return Vec::new();
     }
@@ -432,10 +453,10 @@ fn one_piece(runs: &[&TextRun], ids: &[usize]) -> bool {
 }
 
 /// A label of a line pair holds at most this many words: a label names, it does not say.
-const PAIR_LABEL_WORDS: usize = 4;
+pub(crate) const PAIR_LABEL_WORDS: usize = 4;
 /// A value of a line pair that has no shape of its own holds at most this many words and no
 /// sentence: longer text after a colon is prose (`Note: this is a sentence ...`).
-const PAIR_VALUE_WORDS: usize = 6;
+pub(crate) const PAIR_VALUE_WORDS: usize = 6;
 
 /// The label and the value of one line of `runs` (its pieces `pieces`), each pair with
 /// evidence of its own, and whether the label ends with a colon:
