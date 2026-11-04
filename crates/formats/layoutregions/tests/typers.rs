@@ -7,7 +7,7 @@
 
 use layoutregions::file::{FilePage, learn};
 use layoutregions::segment::drawn::drawn;
-use layoutregions::segment::{SegId, Segment, Source, segment_page};
+use layoutregions::segment::{SegId, Segment, Segments, Source, segment_page};
 use layoutregions::typers::table::{refusal, table_columns, type_table};
 use layoutregions::typers::text::{
     BAND_RUNNING, HEADING_BOLD, HEADING_SIZE_LARGE, HEADING_TITLE_LINES, LEGEND_ENTRIES,
@@ -1010,6 +1010,8 @@ fn eight_aligned_columns_read_as_a_table() {
         prims,
         order: 0,
         level: None,
+        role: None,
+        group: None,
     });
     let given = Tree { page };
     given.with(|view| {
@@ -2116,8 +2118,15 @@ fn a_leaf_of_mixed_text_kinds_is_cut_by_the_walk() {
     let index = FileIndex::new(&facts);
     let structure = drawn(&page, &|_| true);
     let segs = segment_page(&page, &Limits::default(), &|| false);
-    let (segs, typed) =
-        layoutregions::typers::type_page(&page, &structure, segs, &facts, &index, &no_amount);
+    let (segs, typed) = layoutregions::typers::type_page(
+        &page,
+        &structure,
+        segs,
+        &facts,
+        &index,
+        &no_amount,
+        &Limits::default(),
+    );
     let lines_of = |s: &Segment| -> Vec<u32> {
         let mut l: Vec<u32> = s
             .prims
@@ -2333,4 +2342,293 @@ fn cells_are_no_paragraph_and_no_pair() {
     };
     let typed = tree.typed(&text_of_lines(vec![101]));
     assert!(find(&typed, Kind::LabelValue).is_none(), "{typed:#?}");
+}
+
+/// Fix round 1 (I3): running lines, footnote legends and the page title keep their own kinds:
+/// a running footer of a label with a colon and its value, and a title line of one, read no
+/// label and value.
+#[test]
+fn running_lines_and_the_title_read_no_pairs() {
+    let pages = (1..=3)
+        .map(|n| {
+            let mut texts = prose(0, 500.0);
+            texts.push(run(&format!("Seite: {n} von 3"), 72.0, 30.0, 9.2, 4));
+            page(n, texts)
+        })
+        .collect();
+    let footer = Case {
+        pages,
+        at: 1,
+        lines: vec![4],
+    };
+    let typed = footer.typed();
+    assert!(find(&typed, Kind::LabelValue).is_none(), "{typed:#?}");
+    assert_eq!(winner(&typed).0, Kind::FooterBand, "{typed:#?}");
+    let mut texts = vec![run("Rechnung: 2026-0001", 72.0, 800.0, 20.2, 0)];
+    texts.extend(prose(1, 740.0));
+    let title = Case {
+        pages: vec![page(1, texts)],
+        at: 0,
+        lines: vec![0],
+    };
+    let typed = title.typed();
+    assert!(find(&typed, Kind::LabelValue).is_none(), "{typed:#?}");
+    assert_eq!(winner(&typed).0, Kind::TitleBlock, "{typed:#?}");
+}
+
+/// Fix round 1 (I3): lines the table rules read as a table are no heading, however large
+/// they are set: a borderless table in a heading size.
+#[test]
+fn a_table_in_a_heading_size_is_no_heading() {
+    let rows: [&[&str]; 4] = [
+        &["Pos", "Artikel", "Betrag"],
+        &["1", "Schrauben", "50,00"],
+        &["2", "Muttern", "40,00"],
+        &["3", "Scheiben", "10,00"],
+    ];
+    let mut texts = Vec::new();
+    for (k, row) in rows.iter().enumerate() {
+        for (c, t) in row.iter().enumerate() {
+            texts.push(bold(run(
+                t,
+                72.0 + 150.0 * c as f32,
+                650.0 - 18.0 * k as f32,
+                14.2,
+                100 + k as u32,
+            )));
+        }
+    }
+    let tree = Tree {
+        page: sheet(texts, Vec::new()),
+    };
+    let typed = tree.typed_holding(&[100, 101, 102, 103]);
+    assert!(find(&typed, Kind::Table).is_some(), "{typed:#?}");
+    assert!(find(&typed, Kind::Heading).is_none(), "{typed:#?}");
+}
+
+/// Fix round 1 (I1): a header and a total row set larger than the rows between them change
+/// the size there and back once: the lines stay a table by the margin. Lines whose sizes go
+/// and come back more often (values over their labels, a second value line on a label's line)
+/// are no table.
+#[test]
+fn a_header_and_a_total_in_one_size_keep_their_table() {
+    let rows: [(&[&str], f32); 5] = [
+        (&["Pos", "Artikel", "Betrag"], 10.2),
+        (&["1", "Schrauben", "50,00"], 9.2),
+        (&["2", "Muttern", "40,00"], 9.2),
+        (&["3", "Scheiben", "10,00"], 9.2),
+        (&["", "Summe", "100,00"], 10.2),
+    ];
+    let mut texts = Vec::new();
+    for (k, (row, size)) in rows.iter().enumerate() {
+        for (c, t) in row.iter().enumerate() {
+            if !t.is_empty() {
+                texts.push(run(
+                    t,
+                    72.0 + 150.0 * c as f32,
+                    650.0 - 13.0 * k as f32,
+                    *size,
+                    100 + k as u32,
+                ));
+            }
+        }
+    }
+    let tree = Tree {
+        page: sheet(texts, Vec::new()),
+    };
+    let typed = tree.typed_holding(&[100, 101, 102, 103, 104]);
+    let (kind, lead) = winner(&typed);
+    assert_eq!(kind, Kind::Table, "{typed:#?}");
+    assert!(lead >= MARGIN, "{typed:#?}");
+    // Values, labels, labels, values, labels, values: no strict alternation, but the sizes
+    // turn four times.
+    let rows: [(&str, &str, f32); 6] = [
+        ("Erika Mustermann", "Musterstadt", 9.2),
+        ("Name", "Ort", 6.2),
+        ("Strasse", "Hausnr", 6.2),
+        ("Musterweg 1", "12", 9.2),
+        ("PLZ", "Land", 6.2),
+        ("12345", "DE", 9.2),
+    ];
+    let mut texts = Vec::new();
+    for (k, (a, b, size)) in rows.iter().enumerate() {
+        let y = 650.0 - 9.0 * k as f32;
+        texts.push(run(a, 72.0, y, *size, 100 + k as u32));
+        texts.push(run(b, 250.0, y, *size, 100 + k as u32));
+    }
+    let tree = Tree {
+        page: sheet(texts, Vec::new()),
+    };
+    let typed = tree.typed_holding(&[100, 101, 102, 103, 104, 105]);
+    assert!(find(&typed, Kind::Table).is_none(), "{typed:#?}");
+    let spatial = find(&typed, Kind::Spatial).expect("the refusal is named");
+    assert_eq!(ids(spatial), ["spatial.interleaved"], "{typed:#?}");
+}
+
+/// The decisions of `page` by the typers and the arbitration, with its segments.
+fn decide(page: &PageIn) -> (Segments, Vec<Decision>) {
+    let file = [FilePage::of(page)];
+    let facts = learn(&file, false, &no_amount);
+    let index = FileIndex::new(&facts);
+    let structure = drawn(page, &|_| true);
+    let segs = segment_page(page, &Limits::default(), &|| false);
+    let (segs, typed) = layoutregions::typers::type_page(
+        page,
+        &structure,
+        segs,
+        &facts,
+        &index,
+        &no_amount,
+        &Limits::default(),
+    );
+    let out = arbitrate(&segs, &typed, &Margins::default());
+    (segs, out)
+}
+
+/// The kind of the decision that holds the text of `line`.
+fn kind_of_line(page: &PageIn, segs: &Segments, out: &[Decision], line: u32) -> Option<Kind> {
+    out.iter()
+        .find(|d| {
+            segs.all[d.seg.0 as usize]
+                .prims
+                .iter()
+                .any(|p| matches!(*p, PrimId::Text(i) if page.texts[i as usize].line == line))
+        })
+        .map(|d| d.kind)
+}
+
+/// Fix round 1 (I5): an address under a table in one box stays a paragraph at every scale:
+/// the box's table reading only spreads the rows over it.
+#[test]
+fn an_address_under_a_table_stays_a_paragraph() {
+    for k in [0.75f32, 1.0, 1.5] {
+        let rows: [&[&str]; 4] = [
+            &["Pos", "Artikel", "Betrag"],
+            &["1", "Schrauben", "50,00"],
+            &["2", "Muttern", "40,00"],
+            &["3", "Scheiben", "10,00"],
+        ];
+        let mut texts = Vec::new();
+        for (r, row) in rows.iter().enumerate() {
+            for (c, t) in row.iter().enumerate() {
+                let y = 650.0 - 12.0 * r as f32;
+                texts.push(run(
+                    t,
+                    (80.0 + 150.0 * c as f32) * k,
+                    y * k,
+                    9.2 * k,
+                    100 + r as u32,
+                ));
+            }
+        }
+        for (r, t) in ["Muster GmbH", "Musterweg 2", "54321 Musterdorf"]
+            .iter()
+            .enumerate()
+        {
+            let y = 580.0 - 11.0 * r as f32;
+            texts.push(run(t, 80.0 * k, y * k, 9.2 * k, 110 + r as u32));
+        }
+        let mut page = sheet(
+            texts,
+            box_rules([75.0 * k, 540.0 * k, 520.0 * k, 665.0 * k]),
+        );
+        for r in &mut page.texts {
+            if r.line < 100 || r.line >= 900 {
+                (r.x, r.y, r.size, r.w, r.h) = (r.x * k, r.y * k, r.size * k, r.w * k, r.h * k);
+            }
+        }
+        let (segs, out) = decide(&page);
+        for line in [110, 111, 112] {
+            assert_eq!(
+                kind_of_line(&page, &segs, &out, line),
+                Some(Kind::Paragraph),
+                "at {k}x: {out:#?}"
+            );
+        }
+        assert_eq!(
+            kind_of_line(&page, &segs, &out, 101),
+            Some(Kind::Table),
+            "at {k}x"
+        );
+    }
+}
+
+/// Fix round 1 (M5): a segment between two rules (a strip) is never a paragraph: its lines
+/// are cells or fields.
+#[test]
+fn a_strip_is_no_paragraph() {
+    let rows: [&[&str]; 2] = [
+        &["Muster GmbH", "Beispiel AG"],
+        &["Musterstadt", "Probedorf"],
+    ];
+    let mut page = sheet(rows_at(&rows, &[72.0, 250.0], 640.0, 9.2, 100), Vec::new());
+    page.rules = vec![
+        rule(70.0, 650.0, 400.0, 650.0),
+        rule(70.0, 620.0, 400.0, 620.0),
+    ];
+    let tree = Tree { page };
+    let typed = tree.typed(&|_, s| s.source == Source::Strip);
+    assert!(find(&typed, Kind::Paragraph).is_none(), "{typed:#?}");
+}
+
+/// Fix round 1 (I2): a label over its value read cell by cell (a label line and a value line,
+/// as segments of their own) is no paragraph, so the pairing that is not read is never lost
+/// without a word: it stays as laid out. Two words of one style one over the other are.
+#[test]
+fn a_label_over_its_value_is_no_paragraph() {
+    for k in [0.75f32, 1.0, 1.5] {
+        let texts = vec![
+            run("Folge", 72.0 * k, 650.0 * k, 6.2 * k, 100),
+            run("4/9", 72.0 * k, 641.0 * k, 9.2 * k, 101),
+        ];
+        let mut page = sheet(texts, Vec::new());
+        for r in &mut page.texts {
+            if r.line < 100 || r.line >= 900 {
+                (r.x, r.y, r.size, r.w, r.h) = (r.x * k, r.y * k, r.size * k, r.w * k, r.h * k);
+            }
+        }
+        let tree = Tree { page };
+        for line in [100, 101] {
+            let typed = tree.typed_holding(&[line]);
+            assert!(
+                find(&typed, Kind::Paragraph).is_none(),
+                "at {k}x: {typed:#?}"
+            );
+        }
+    }
+}
+
+/// Fix round 1 (I2): in a row of boxed fields a box of one label alone (an empty field) is no
+/// paragraph, and a box of a company over its address beside the fields stays a paragraph of
+/// its own: the grid's field reading leaves it out and never folds it.
+#[test]
+fn boxes_beside_fields_keep_their_kinds() {
+    let xs = [72.0, 222.0, 372.0, 522.0];
+    let mut texts = vec![
+        run("Personalnummer", 75.0, 683.0, 6.2, 100),
+        run("00000", 75.0, 668.0, 9.2, 101),
+        run("Steuerklasse", 225.0, 683.0, 6.2, 100),
+    ];
+    for (k, t) in ["Muster GmbH", "Musterweg 1", "12345 Musterstadt"]
+        .iter()
+        .enumerate()
+    {
+        texts.push(run(t, 375.0, 685.0 - 9.0 * k as f32, 7.2, 100 + k as u32));
+    }
+    texts.sort_by_key(|r| r.line);
+    let page = sheet(texts, grid_rules(&xs, &[692.0, 660.0]));
+    let (segs, out) = decide(&page);
+    let decided = |text: &str| {
+        out.iter()
+            .find(|d| {
+                segs.all[d.seg.0 as usize]
+                    .prims
+                    .iter()
+                    .any(|p| matches!(*p, PrimId::Text(i) if page.texts[i as usize].text == text))
+            })
+            .map(|d| d.kind)
+    };
+    assert_ne!(decided("Steuerklasse"), Some(Kind::Paragraph), "{out:#?}");
+    assert_eq!(decided("Musterweg 1"), Some(Kind::Paragraph), "{out:#?}");
+    assert_eq!(decided("00000"), Some(Kind::LabelValue), "{out:#?}");
 }

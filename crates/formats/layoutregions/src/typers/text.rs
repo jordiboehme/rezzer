@@ -117,6 +117,9 @@ pub(crate) struct SegText {
     pub(crate) spans: Vec<(usize, usize)>,
     /// Every line with ink is set in a text size of the page or in the body size.
     text_size: bool,
+    /// A line of it stands in cells aligned with the cells of the page line over or under it
+    /// (see [`aligned_cells`]).
+    pub(crate) aligned: bool,
 }
 
 impl SegText {
@@ -241,6 +244,7 @@ impl SegText {
             i = j;
         }
         Some(SegText {
+            aligned: aligned_cells(view, seg),
             runs: ids,
             lines,
             blocks,
@@ -250,15 +254,134 @@ impl SegText {
     }
 }
 
+/// A short piece of a field (a label, a value) holds at most this many words.
+const FIELD_PIECE_WORDS: usize = 6;
+
+/// A label holds at most this many words.
+const FIELD_LABEL_WORDS: usize = 4;
+
+/// Lines this many times their larger size apart or nearer stand together (a label and its
+/// value, the lines of one block).
+const PAIR_PITCH: f32 = 2.0;
+
+/// Whether a line of `seg` stands in cells aligned with the page line just over or under it:
+/// a line in two pieces or more (apart by a cell gap) two of whose pieces start where pieces
+/// of that page line start (within half its size), cells in columns across lines (labels over
+/// their values, a row of a grid); or a line of one short piece that pairs with one short
+/// piece of that page line at the same left edge a size step apart (a label, the smaller text,
+/// over or under its value), where those two lines are not part of a column of three lines
+/// or more at that edge (a name over its street and town is one block). A paragraph reads
+/// neither. A page line cut by a gutter is compared as it stands on the page.
+fn aligned_cells(view: &PageView<'_>, seg: &Segment) -> bool {
+    use crate::extract::table::grid::pieces_of;
+    let (refs, _) = super::seg_runs(view, seg);
+    let texts = &view.page.texts;
+    let lines = view.lines();
+    let by_y = view.by_y();
+    text_lines(&refs).iter().any(|l| {
+        let mine = pieces_of(l.runs, 0, l.runs.len());
+        let tol = 0.5 * l.size.max(1.0);
+        crate::work::add(mine.len() as u64);
+        let line = l.runs[0].line;
+        if mine.len() >= 2 {
+            let [over, under] = view.neighbours(line);
+            return [over, under].iter().flatten().any(|r| {
+                let theirs = pieces_of(texts, r.start, r.end);
+                crate::work::add(theirs.len() as u64);
+                mine.iter()
+                    .filter(|p| theirs.iter().any(|q| (p.x0 - q.x0).abs() <= tol))
+                    .count()
+                    >= 2
+            });
+        }
+        let ([p], Some(own)) = (
+            mine.as_slice(),
+            crate::line::line_style(l.runs.iter().copied()),
+        ) else {
+            return false;
+        };
+        let own_words: usize = l.runs[p.start..p.end]
+            .iter()
+            .map(|r| r.text.split_whitespace().count())
+            .sum();
+        if own_words > FIELD_PIECE_WORDS {
+            return false;
+        }
+        let reach = PAIR_PITCH * l.size.max(1.0);
+        // The pieces of the page's other lines near this one (within `reach` up and down)
+        // that start at its left edge: their baseline, size and words, nearest first above and
+        // below.
+        let lo = by_y.line_y.partition_point(|y| *y < l.y - 2.0 * reach);
+        let hi = by_y.line_y.partition_point(|y| *y <= l.y + 2.0 * reach);
+        crate::work::add((hi - lo) as u64);
+        let mut over: Vec<(f32, f32, usize)> = Vec::new();
+        let mut under: Vec<(f32, f32, usize)> = Vec::new();
+        for &k in &by_y.lines[lo..hi] {
+            let r = &lines[k];
+            if texts[r.start].line == line {
+                continue;
+            }
+            for q in pieces_of(texts, r.start, r.end) {
+                if (q.x0 - p.x0).abs() > tol {
+                    continue;
+                }
+                let run = &texts[q.start..q.end];
+                let Some(st) = crate::line::line_style(run.iter()) else {
+                    continue;
+                };
+                let w = run.iter().map(|r| r.text.split_whitespace().count()).sum();
+                let y = texts[q.start].y;
+                if y > l.y {
+                    over.push((y, st.size, w));
+                } else {
+                    under.push((y, st.size, w));
+                }
+            }
+        }
+        over.sort_by(|a, b| a.0.total_cmp(&b.0));
+        under.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let step = |a: f32, b: f32| {
+            a.min(b) > 0.0 && a.max(b) >= crate::segment::cut::SIZE_STEP * a.min(b)
+        };
+        let near = |from: f32, q: &(f32, f32, usize)| (q.0 - from).abs() <= reach;
+        // Paired with the nearest piece on one side, a size step apart. A line in its own
+        // size on the other side, or one in the paired piece's size past it, makes a column of
+        // three lines or more in one style run (a name over its street and town): one block.
+        // Fields stacked one under another alternate the two sizes and stay pairs.
+        let pairs = |side: &[(f32, f32, usize)], other: &[(f32, f32, usize)]| {
+            let Some(q) = side.first().filter(|q| near(l.y, q)) else {
+                return false;
+            };
+            let (label, value) = if own.size < q.1 {
+                (own_words, q.2)
+            } else {
+                (q.2, own_words)
+            };
+            step(own.size, q.1)
+                && label <= FIELD_LABEL_WORDS
+                && value <= FIELD_PIECE_WORDS
+                && !other
+                    .first()
+                    .is_some_and(|o| near(l.y, o) && !step(own.size, o.1))
+                && !side.get(1).is_some_and(|o| near(q.0, o) && !step(q.1, o.1))
+        };
+        pairs(&over, &under) || pairs(&under, &over)
+    })
+}
+
 /// A line in this many pieces apart by a cell gap or more is a row of cells, never a line of a
 /// paragraph.
 const ROW_CELLS: usize = 3;
 
-/// Whether a segment that holds `seg` (its parents up to the page) reads as a table.
+/// Whether a segment that holds `seg` (its parents below the page root) reads as a table.
 fn in_a_table(view: &PageView<'_>, seg: &Segment) -> bool {
     let mut up = seg.parent;
     // The readings are cached per segment: a second look does no work.
     while let Some(p) = up.and_then(|p| view.segs.all.get(p.0 as usize)) {
+        // The page root never replaces its children: its reading holds no row.
+        if p.source == Source::Page {
+            break;
+        }
         if super::table::type_table(view, p).is_some() {
             return true;
         }
@@ -274,7 +397,7 @@ const ABBREVIATION_LETTERS: usize = 4;
 /// Whether `text` is a line of titles, not a sentence: every word opens with a capital or a
 /// digit, and every stop in it closes an abbreviation (see [`ABBREVIATION_LETTERS`]):
 /// `Nr. Art Tage Std. Satz Brutto` heads columns, it says nothing.
-pub(crate) fn title_words(text: &str) -> bool {
+fn title_words(text: &str) -> bool {
     let words: Vec<&str> = text.split_whitespace().collect();
     !words.is_empty()
         && words.iter().all(|w| {
@@ -288,12 +411,12 @@ pub(crate) fn title_words(text: &str) -> bool {
         })
 }
 
-/// Paragraph: the walk reads every line as paragraphs, or as lines of a heading size that read
-/// as a paragraph; lines in cells (pieces apart by a cell gap) only one at a time and outside
-/// a segment that reads as a table, unless they read as prose across them. Signals: the lines are set in a text size of the page or the body size
-/// (`paragraph.text_size`, the least evidence), lines go on one another (`paragraph.joins`),
-/// they read as sentences (`paragraph.sentences`), and the reason a heading's lines read as a
-/// paragraph (one signal per [`Demotion`]).
+/// Paragraph: the walk reads every line as paragraphs, or as lines of a heading size that read as a
+/// paragraph; lines in cells (pieces apart by a cell gap) only one at a time and outside a segment
+/// that reads as a table, unless they read as prose across them. Signals: the lines are set in a
+/// text size of the page or the body size (`paragraph.text_size`, the least evidence), lines go on
+/// one another (`paragraph.joins`), they read as sentences (`paragraph.sentences`), and the reason
+/// a heading's lines read as a paragraph (one signal per [`Demotion`]).
 pub fn type_paragraph(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
     // Lines of titles (every word capitalised, stops only after abbreviations) are no prose
     // and no sentences, wherever they stand.
@@ -362,7 +485,23 @@ pub fn type_paragraph(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
                     .get(c.0 as usize)
                     .is_some_and(|k| k.source == Source::Strip)
             });
-        if (joins_cells || row || cells || strip) && prose.is_none() {
+        // A box of one line in a row of boxes that read as fields is a field (an empty one,
+        // a label alone), never a paragraph; a box of more lines (a company over its address)
+        // is a block of its own.
+        let field_box = seg.source == Source::Box
+            && t.lines.len() == 1
+            && seg
+                .parent
+                .and_then(|p| view.segs.all.get(p.0 as usize))
+                .is_some_and(|p| {
+                    p.children.iter().any(|c| {
+                        *c != seg.id
+                            && view.segs.all.get(c.0 as usize).is_some_and(|k| {
+                                k.source == Source::Box && view.pairs_of(k).is_some()
+                            })
+                    })
+                });
+        if (joins_cells || row || cells || strip || t.aligned || field_box) && prose.is_none() {
             return None;
         }
         let mut signals = Vec::new();
@@ -463,6 +602,16 @@ pub fn type_paragraph(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
 /// (`heading.title_lines`; lines that read as a paragraph give the paragraph its evidence
 /// instead).
 pub fn type_heading(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
+    // Lines the table rules read as a table's cells, as prose across a ruled table or as a
+    // figure's text are those kinds' evidence: no heading claims them.
+    let claimed = super::table::type_table(view, seg).is_some()
+        || super::table::refusal(view, seg).is_some_and(|r| {
+            r.kind == Kind::Figure || (r.kind == Kind::Paragraph && r.signal.weight > 0)
+        })
+        || view.across(seg);
+    if claimed {
+        return None;
+    }
     view.with_text(seg, |t| {
         let mut size = f32::MAX;
         let mut plain = false;

@@ -43,7 +43,9 @@ pub(crate) fn enabled() -> bool {
 
 /// The scored reading of `page` with the facts of its file, or `None` when the shadow is off
 /// or the segmentation stopped before it searched the drawn lines. It never stops on time:
-/// the read it shadows keeps its own budget.
+/// the read it shadows keeps its own budget. Its work is counted with `work::add` on the same
+/// counter as the reader's (`layoutregions::work_steps`), so a test that bounds the work of a
+/// read sees more with `REZZER_SHADOW` set.
 #[cfg(debug_assertions)]
 pub(crate) fn run(
     page: &layoutregions::PageIn,
@@ -72,7 +74,7 @@ pub(crate) fn run(
     let (segs, drawn) = layoutregions::segment::segment_page_drawn(page, limits, &never);
     let drawn = drawn?;
     let (segs, typed) =
-        layoutregions::typers::type_page(page, &drawn, segs, facts, index, ends_in_amount);
+        layoutregions::typers::type_page(page, &drawn, segs, facts, index, ends_in_amount, limits);
     let decisions = layoutregions::arbitrate(&segs, &typed, &layoutregions::Margins::of(limits));
     Some(Shadow {
         tagged,
@@ -491,4 +493,118 @@ pub fn records(page: &EnginePage) -> Vec<String> {
         ));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use layoutregions::segment::Segment;
+    use layoutregions::{Bounds, PageRegions, RegionId, Score};
+
+    fn bounds() -> Bounds {
+        Bounds {
+            x0: 0.0,
+            y0: 0.0,
+            x1: 1.0,
+            y1: 1.0,
+        }
+    }
+
+    fn segment(id: u32, prims: Vec<PrimId>, parent: Option<u32>, children: Vec<u32>) -> Segment {
+        Segment {
+            id: SegId(id),
+            bounds: bounds(),
+            prims,
+            source: Source::Rest,
+            parent: parent.map(SegId),
+            children: children.into_iter().map(SegId).collect(),
+            alternatives: Vec::new(),
+        }
+    }
+
+    fn decision(seg: u32, kind: Kind, certainty: Certainty) -> Decision {
+        Decision {
+            seg: SegId(seg),
+            kind,
+            certainty,
+            score: Score(500),
+            signals: Vec::new(),
+            alternatives: Vec::new(),
+        }
+    }
+
+    fn region(id: u32, kind: Kind, prims: Vec<PrimId>) -> Region {
+        Region {
+            id: RegionId(id),
+            page: 1,
+            kind,
+            bounds: bounds(),
+            prims,
+            certainty: Certainty::Rule,
+            score: Score(500),
+            signals: Vec::new(),
+            alternatives: Vec::new(),
+            parent: None,
+            unsure: Vec::new(),
+            host: id,
+        }
+    }
+
+    /// Fix round 1 (M5): a region whose runs two decisions of other kinds hold gets one line
+    /// with both kinds, the one holding most first, and the extent `split`; a region the file
+    /// states (exact) against the same kind by rule gives no line.
+    #[test]
+    fn lines_name_kinds_certainty_and_extent() {
+        let t = PrimId::Text;
+        let segs = Segments {
+            all: vec![
+                segment(0, vec![t(0), t(1), t(2), t(3)], None, vec![1, 2, 3]),
+                segment(1, vec![t(0), t(1)], Some(0), vec![]),
+                segment(2, vec![t(2)], Some(0), vec![]),
+                segment(3, vec![t(3)], Some(0), vec![]),
+            ],
+            root: SegId(0),
+            issues: Vec::new(),
+        };
+        let page = EnginePage {
+            input: layoutregions::PageIn {
+                page: 1,
+                size: [600.0, 800.0],
+                turn: 0,
+                texts: Vec::new(),
+                rules: Vec::new(),
+                boxes: Vec::new(),
+                pictures: Vec::new(),
+                codes: Vec::new(),
+                given: Vec::new(),
+            },
+            regions: PageRegions {
+                page: 1,
+                regions: vec![
+                    region(0, Kind::Paragraph, vec![t(0), t(1), t(2)]),
+                    region(1, Kind::Heading, vec![t(3)]),
+                ],
+                issues: Vec::new(),
+            },
+            anchors: vec![Some("p1:b1".into()), Some("p1:b2".into())],
+            shadow: Some(Shadow {
+                tagged: false,
+                segs,
+                typed: BTreeMap::new(),
+                decisions: vec![
+                    decision(1, Kind::Table, Certainty::Rule),
+                    decision(2, Kind::Spatial, Certainty::Unsure),
+                    decision(3, Kind::Heading, Certainty::Exact),
+                ],
+            }),
+        };
+        let got = lines(&page, false);
+        assert_eq!(got.len(), 1, "{got:?}");
+        let cols: Vec<&str> = got[0].split('\t').collect();
+        assert_eq!(
+            cols[..5],
+            ["1", "p1:b1", "paragraph", "table+spatial", "rule"]
+        );
+        assert_eq!(cols[6], "split");
+    }
 }

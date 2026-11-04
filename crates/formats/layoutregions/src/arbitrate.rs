@@ -185,36 +185,34 @@ pub struct Decision {
 
 /// The decisions of a page: the segments of `segs` that stand, in the order of the tree's cuts,
 /// each with one kind. Every primitive of the page is in exactly one of them. `typed` holds the
-/// candidates of each segment (see [`crate::typers::type_segments`]); a segment it lacks has
-/// none.
+/// candidates of each segment (see [`crate::typers::type_segments`]); a segment it lacks has none.
 ///
-/// One segment: the best candidate wins (certainty `Rule`) only with a signal, a score of at
-/// least `m.min` and a lead of at least `m.margin` over the next kind; else the segment is
-/// `Spatial` (certainty `Unsure`, score 0) with every candidate as an alternative. Candidates of
-/// kind `Spatial` (the table rules' `spatial.*` refusals, of weight 0) never win and are no
-/// alternative: their signals say why an unsure segment read no table.
+/// One segment: the best candidate wins (certainty `Rule`) only with a signal, a score of at least
+/// `m.min` and a lead of at least `m.margin` over the next kind; else the segment is `Spatial`
+/// (certainty `Unsure`, score 0) with every candidate as an alternative. Candidates of kind
+/// `Spatial` (the table rules' `spatial.*` refusals, of weight 0) never win and are no alternative:
+/// their signals say why an unsure segment read no table.
 ///
 /// A region the file states is decided as given: its kind, certainty `Exact`, score 1000.
 ///
 /// The tree, bottom up: a cut (the children, or an other cut of `alternatives`) reads as sure as
-/// its weakest decision (a `Spatial` one counts 0, a given one 1000). A leaf with no text,
-/// picture or code (rules and boxes alone) has nothing to read: it is decided `Spatial` and
-/// does not count. Among the cuts of a segment the one with the highest weakest score wins when
-/// it leads every other by the margin, else the children stand; the losing cuts' kinds are
-/// alternatives on the decisions that share primitives with them. The segment's own decision
-/// replaces the cut when it is not `Spatial`, its score is at least the cut's weakest plus the
-/// margin, and it leads by the margin every decision of the cut (grandchildren included) of
-/// another kind, for an unsure one its best alternative of another kind: a key/value or table
-/// reading below is never folded into a weaker reading of another kind. Nor does it replace
-/// the cut when a sure decision of its own kind there scores as much as it does while a sure
-/// decision of another kind stands beside it (its reading only spreads that child's over its
-/// neighbours), or when it is a figure over a sure decision of a text kind (a figure keeps the
-/// text of its region as text). It then carries the
-/// cut's kinds as alternatives. Otherwise the cut stands and the segment's best candidate is
-/// an alternative on each of its decisions. The page root never replaces its cut: its
-/// candidates are alternatives on the decisions under it. Alternatives are one per kind (the
-/// best score), never of a decision's own kind, best first, at most `m.max_alternatives`; a
-/// given region has none.
+/// its weakest decision (a `Spatial` one counts 0, a given one 1000). A leaf with no text, picture
+/// or code (rules and boxes alone) has nothing to read: it is decided `Spatial` and does not count.
+/// Among the cuts of a segment the one with the highest weakest score wins when it leads every
+/// other by the margin, else the children stand; the losing cuts' kinds are alternatives on the
+/// decisions that share primitives with them. The segment's own decision replaces the cut when it
+/// is not `Spatial`, its score is at least the cut's weakest plus the margin, and it leads by the
+/// margin every decision of the cut (grandchildren included) of another kind, for an unsure one its
+/// best alternative of another kind: a key/value or table reading below is never folded into a
+/// weaker reading of another kind. Nor does it replace the cut when a sure decision of its own kind
+/// stands there beside a sure decision of another kind (its reading only spreads that child's over
+/// its neighbours),
+/// or when it is a figure over a sure decision of a text kind (a figure keeps the
+/// text of its region as text). It then carries the cut's kinds as alternatives. Otherwise the cut
+/// stands and the segment's best candidate is an alternative on each of its decisions. The page
+/// root never replaces its cut: its candidates are alternatives on the decisions under it.
+/// Alternatives are one per kind (the best score), never of a decision's own kind, best first, at
+/// most `m.max_alternatives`; a given region has none.
 ///
 /// Each decision is made once and moved, never copied with its subtree: the decisions of a
 /// segment stand together at the end of one list while it is read.
@@ -336,12 +334,14 @@ impl Arbiter<'_> {
         let sure_other = |d: &Decision| {
             d.certainty == Certainty::Rule && d.kind != own.kind && d.kind != Kind::Spatial
         };
-        // A parent of the kind of a sure child it does not outscore only spreads that child's
-        // reading over its neighbours: no evidence for them, so it folds no sure decision of
-        // another kind (an address under a table, a company cell beside boxed fields).
-        let spreads = cut.iter().any(|d| {
-            d.certainty == Certainty::Rule && d.kind == own.kind && d.score.0 >= own.score.0
-        }) && cut.iter().any(sure_other);
+        // A parent of the kind of a sure child only spreads that child's reading over its
+        // neighbours: whatever it scores more comes from the neighbours' own lines, which is
+        // no evidence for them, so it folds no sure decision of another kind (an address
+        // under a table, a company cell beside boxed fields).
+        let spreads = cut
+            .iter()
+            .any(|d| d.certainty == Certainty::Rule && d.kind == own.kind)
+            && cut.iter().any(sure_other);
         // A figure keeps the text of its region as text: it folds no sure decision of a text
         // kind.
         let hides_text = own.kind == Kind::Figure

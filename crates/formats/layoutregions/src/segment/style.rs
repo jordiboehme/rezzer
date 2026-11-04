@@ -7,7 +7,7 @@
 //! a coloured word) are inline styles of the line.
 
 use crate::input::TextRun;
-use crate::line::ink;
+use crate::line::line_style;
 use crate::segment::cut::SIZE_STEP;
 
 /// Splits the runs `ids` (indices into `texts`, in reading order) into groups of whole lines of
@@ -61,17 +61,8 @@ pub fn style_steps(texts: &[TextRun], ids: &[u32]) -> Vec<Vec<u32>> {
     let mut before: Option<&TextRun> = None;
     let mut known: Option<[u8; 3]> = None;
     for line in lines {
-        // The run that sets the line's style: the most ink characters, the first on a tie.
-        let mut style: Option<(&TextRun, usize)> = None;
-        for &id in &line {
-            if let Some(run) = texts.get(id as usize) {
-                let n = ink(&run.text);
-                if n > 0 && style.is_none_or(|(_, m)| n > m) {
-                    style = Some((run, n));
-                }
-            }
-        }
-        let Some((run, _)) = style else {
+        // The run that sets the line's style (see [`line_style`]).
+        let Some(run) = line_style(line.iter().filter_map(|&id| texts.get(id as usize))) else {
             // A line without ink has no style to step: it joins the group before it (or starts
             // the first one, which the first ink then joins).
             match groups.last_mut() {

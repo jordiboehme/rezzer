@@ -85,6 +85,10 @@ const TITLE_LINES: &str = "its lines are titles over their values";
 const FIELD_STRIPS: &str = "its lines are fields in strips between rules";
 /// A refusal: the lines alternate between two styles (see [`alternating`]).
 const ALTERNATING: &str = "its lines alternate between labels and values";
+/// A refusal: the lines hold a strip between rules that reads no table of its own.
+const STRIP_INSIDE: &str = "its lines take in a strip between rules that is no table";
+/// A refusal: the sizes of the lines interleave (see [`interleaved`]).
+const INTERLEAVED: &str = "its lines interleave two sizes, labels between values";
 /// A refusal: the lines are blocks side by side (see [`address_columns`]).
 const SIDE_BLOCKS: &str = "its columns are blocks side by side, each a block of its own";
 /// Why lines read as totals under a table are no table of their own.
@@ -223,6 +227,9 @@ fn refused(speaks: Speaks, why: &'static str) -> Find {
         (Speaks::Spatial, CROSSES_LINES) => (Kind::Spatial, "spatial.crossed_lines", 0),
         (Speaks::Spatial, NO_ROWS_AND_COLUMNS) => (Kind::Spatial, "spatial.no_rows_and_columns", 0),
         (Speaks::Spatial, SIDE_BLOCKS) => (Kind::Spatial, "spatial.side_blocks", 0),
+        (Speaks::Spatial, ALTERNATING) => (Kind::Spatial, "spatial.alternating", 0),
+        (Speaks::Spatial, STRIP_INSIDE) => (Kind::Spatial, "spatial.strip_inside", 0),
+        (Speaks::Spatial, INTERLEAVED) => (Kind::Spatial, "spatial.interleaved", 0),
         (Speaks::Spatial, _) => (Kind::Spatial, "spatial.refused_table", 0),
         (Speaks::LabelValue, _) => (Kind::LabelValue, "label_value.refuses_table", 0),
         (Speaks::Totals, _) => (Kind::Totals, "totals.refuses_table", 0),
@@ -240,7 +247,9 @@ fn speaks_for(why: &'static str) -> Option<Speaks> {
         LONG_TEXT | RUNS_ON | SET_FULL | ADDRESS_TEXT | SENTENCE_TEXT => Some(Speaks::Paragraph),
         ON_PICTURE | TINY_TEXT | FIGURE_NEAR => Some(Speaks::Figure),
         PAGE_FRAME | MANY_COLUMNS | EMPTY_CELLS | NO_ROWS_AND_COLUMNS | CROSSES_LINES | COMB
-        | ROWS_ALIKE | CONTENTS | SIDE_BLOCKS => Some(Speaks::Spatial),
+        | ROWS_ALIKE | CONTENTS | SIDE_BLOCKS | ALTERNATING | INTERLEAVED | STRIP_INSIDE => {
+            Some(Speaks::Spatial)
+        }
         _ => None,
     }
 }
@@ -678,54 +687,72 @@ fn banded(view: &PageView<'_>, seg: &Segment, band: &Segment) -> Find {
 /// Lines a block of alternating labels and values holds at least.
 const ALTERNATING_LINES: usize = 4;
 
+/// The style of each line of `ranges` (see [`crate::line::line_style`]): its size and weight;
+/// `None` when a line has no ink.
+fn line_styles(runs: &[&TextRun], ranges: &[RunRange]) -> Option<Vec<(f32, bool)>> {
+    crate::work::add(ranges.len() as u64);
+    ranges
+        .iter()
+        .map(|l| {
+            crate::line::line_style(runs[l.start..l.end].iter().copied()).map(|r| (r.size, r.bold))
+        })
+        .collect()
+}
+
+/// Whether two sizes are a size step apart (see [`SIZE_STEP`]).
+fn size_step(a: f32, b: f32) -> bool {
+    a.min(b) > 0.0 && a.max(b) >= SIZE_STEP * a.min(b)
+}
+
 /// Whether the lines `ranges` of `runs` alternate between two styles, each line in another
-/// style than the line before it (a size step, see [`SIZE_STEP`], or another weight), the
-/// style of a line being its run with the most ink, over [`ALTERNATING_LINES`] lines or more:
-/// lines of labels between lines of their values (values over labels, labels over values),
-/// which rows of a table never are (a table's body rows share one style; a header or a total
-/// changes it once).
+/// style than the line before it (a size step, or another weight), over [`ALTERNATING_LINES`]
+/// lines or more: lines of labels between lines of their values (values over labels, labels
+/// over values), which rows of a table never are (a table's body rows share one style; a
+/// header or a total changes it).
 fn alternating(runs: &[&TextRun], ranges: &[RunRange]) -> bool {
     if ranges.len() < ALTERNATING_LINES {
         return false;
     }
-    let style = |l: &RunRange| {
-        runs[l.start..l.end]
-            .iter()
-            .max_by_key(|r| crate::line::ink(&r.text))
-            .map(|r| (r.size, r.bold))
+    let Some(styles) = line_styles(runs, ranges) else {
+        return false;
     };
-    let styles: Vec<(f32, bool)> = ranges.iter().filter_map(style).collect();
-    let differ = |a: (f32, bool), b: (f32, bool)| {
-        a.1 != b.1 || (a.0.min(b.0) > 0.0 && a.0.max(b.0) >= SIZE_STEP * a.0.min(b.0))
-    };
-    styles.len() == ranges.len()
-        && styles.windows(2).all(|w| differ(w[0], w[1]))
-        && styles.windows(3).all(|w| !differ(w[0], w[2]))
+    let differ = |a: (f32, bool), b: (f32, bool)| a.1 != b.1 || size_step(a.0, b.0);
+    styles.windows(2).all(|w| differ(w[0], w[1])) && styles.windows(3).all(|w| !differ(w[0], w[2]))
 }
 
-/// Whether lines of two sizes a size step apart interleave: a line of one size between lines
-/// of the other, and back (labels between the lines of their values, values over labels with
-/// a second value line). A table's rows share one size; a header over them or a note under
-/// them changes it once and does not come back.
+/// How often the size of the lines may step to the other size and back: a header over the
+/// rows and a total under them in the header's size step twice (there and back); lines of
+/// labels between lines of values (values over labels with a second value line) step three
+/// times or more.
+const SIZE_TURNS: usize = 2;
+
+/// Whether lines of two sizes a size step apart interleave: the sizes of consecutive lines,
+/// taken as runs of one size, step more than [`SIZE_TURNS`] times between two sizes (each run
+/// a size step off the one before and in the size of the one before that). A table's rows
+/// share one size; a header and a total in a larger size step there and back once. One pass.
 fn interleaved(runs: &[&TextRun], ranges: &[RunRange]) -> bool {
-    let sizes: Vec<f32> = ranges
-        .iter()
-        .filter_map(|l| {
-            runs[l.start..l.end]
-                .iter()
-                .max_by_key(|r| crate::line::ink(&r.text))
-                .map(|r| r.size)
-        })
-        .collect();
-    let step = |a: f32, b: f32| a.min(b) > 0.0 && a.max(b) >= SIZE_STEP * a.min(b);
-    // The first line after `i` in a size a step off line `i`'s, then the first after that in
-    // line `i`'s size again: the sizes went and came back.
-    (0..sizes.len()).any(|i| {
-        let Some(j) = (i + 1..sizes.len()).find(|&j| step(sizes[i], sizes[j])) else {
-            return false;
-        };
-        (j + 1..sizes.len()).any(|k| !step(sizes[i], sizes[k]) && step(sizes[j], sizes[k]))
-    })
+    let Some(styles) = line_styles(runs, ranges) else {
+        return false;
+    };
+    // The sizes of the runs of lines of one size.
+    let mut sizes: Vec<f32> = Vec::new();
+    for (size, _) in styles {
+        match sizes.last() {
+            Some(&last) if !size_step(last, size) => {}
+            _ => sizes.push(size),
+        }
+    }
+    // Steps between two sizes only: each run in the size of the run two before it.
+    let mut turns = 0usize;
+    for (k, w) in sizes.windows(2).enumerate() {
+        let back = k == 0 || !size_step(sizes[k - 1], w[1]);
+        if back && size_step(w[0], w[1]) {
+            turns += 1;
+        } else {
+            turns = usize::from(size_step(w[0], w[1]));
+        }
+    }
+    turns > SIZE_TURNS
 }
 
 /// The reading of the lines of a segment without drawn parts (see [`grid_cells`]), after the
@@ -751,11 +778,25 @@ fn lines(view: &PageView<'_>, seg: &Segment, given: bool) -> Find {
         if set_full(&runs, &pieces, &ranges) {
             return refused(Speaks::Paragraph, SET_FULL);
         }
-        if super::pairs::strip_fields(view, seg).is_some() {
+        if view.strip_fields_of(seg).is_some() {
             return refused(Speaks::LabelValue, FIELD_STRIPS);
         }
-        if alternating(&runs, &ranges) || interleaved(&runs, &ranges) {
-            return refused(Speaks::LabelValue, ALTERNATING);
+        // The lines between two rules are kept together because they are one block (fields,
+        // cells, blocks side by side): a wider reading that takes them in as rows reads a
+        // table only where the strip itself reads as one.
+        let strip_no_table = seg.children.iter().any(|c| {
+            view.segs.all.get(c.0 as usize).is_some_and(|k| {
+                k.source == Source::Strip && !view.reading(k, |f| matches!(f, Find::Table(_)))
+            })
+        });
+        if strip_no_table {
+            return refused(Speaks::Spatial, STRIP_INSIDE);
+        }
+        if alternating(&runs, &ranges) {
+            return refused(Speaks::Spatial, ALTERNATING);
+        }
+        if interleaved(&runs, &ranges) {
+            return refused(Speaks::Spatial, INTERLEAVED);
         }
         let off = vec![false; ranges.len()];
         if let KeyValues::Rows(_) = key_values(&runs, &ranges, 0, ranges.len(), &pieces, &off) {

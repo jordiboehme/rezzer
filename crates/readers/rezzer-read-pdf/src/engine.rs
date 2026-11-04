@@ -323,56 +323,79 @@ mod tests {
 /// The regions a page states itself, as the region engine takes them: every block of the tag
 /// tree the layout reads (`slots`, one per run of `page.texts`, in their order) and every
 /// form field box. A heading element is a `Heading` with the level its role gives, a
-/// paragraph element a `Paragraph` (a caption too), a note a `FootnoteLegend`, a list (its
-/// items with it) a `List`, a table (its cells) a `Table`; each holds the runs of its element.
-/// A form field is a `LabelValue` of its box and the runs whose centre lies in it that no tag
-/// element holds. Untagged runs belong to none. In the order of their first run; the fields
-/// after the tag elements.
-/// Only the shadow uses it until Task 19, so release builds leave it out.
+/// paragraph element a `Paragraph` (a caption with the role `caption`), a note a
+/// `FootnoteLegend`, a list item a `List` region of its own whose `group` is the order of the
+/// list's first item, a table (its cells) a `Table`; each holds the runs of its element. A
+/// form field is a `LabelValue` of its box and the runs whose centre lies in it that no tag
+/// element holds (the runs sorted by their centre once). Untagged runs belong to none. In the
+/// order of their first run; the fields after the tag elements.
 #[cfg(debug_assertions)]
 pub(crate) fn given_regions(page: &PageIn, slots: &[crate::layout::Slot]) -> Vec<GivenRegion> {
     use crate::layout::Slot;
     use std::collections::HashMap;
-    // The element of each run, its kind and level.
     let mut at: HashMap<(u8, usize), usize> = HashMap::new();
+    let mut lists: HashMap<usize, u32> = HashMap::new();
     let mut out: Vec<GivenRegion> = Vec::new();
     let mut held = vec![false; page.texts.len()];
     for (i, slot) in slots.iter().enumerate().take(page.texts.len()) {
-        let (key, kind, level) = match *slot {
-            Slot::Heading(level, e) => ((0, e), Kind::Heading, Some(level)),
-            Slot::Para(e, Some("footnote")) => ((1, e), Kind::FootnoteLegend, None),
-            Slot::Para(e, _) => ((1, e), Kind::Paragraph, None),
-            Slot::Item { list, .. } => ((2, list), Kind::List, None),
-            Slot::Cell { table, .. } => ((3, table), Kind::Table, None),
+        let (key, kind, level, role, list) = match *slot {
+            Slot::Heading(level, e) => ((0, e), Kind::Heading, Some(level), None, None),
+            Slot::Para(e, Some("footnote")) => ((1, e), Kind::FootnoteLegend, None, None, None),
+            Slot::Para(e, Some("caption")) => {
+                ((1, e), Kind::Paragraph, None, Some("caption"), None)
+            }
+            Slot::Para(e, _) => ((1, e), Kind::Paragraph, None, None, None),
+            Slot::Item { list, item } => ((2, item), Kind::List, None, None, Some(list)),
+            Slot::Cell { table, .. } => ((3, table), Kind::Table, None, None, None),
             Slot::Free | Slot::Block(_) => continue,
         };
         held[i] = true;
         let k = *at.entry(key).or_insert_with(|| {
+            let order = out.len() as u32;
+            let group = list.map(|l| *lists.entry(l).or_insert(order));
             out.push(GivenRegion {
                 kind,
                 prims: Vec::new(),
-                order: out.len() as u32,
+                order,
                 level,
+                role,
+                group,
             });
             out.len() - 1
         });
         out[k].prims.push(PrimId::Text(i as u32));
     }
+    // The free runs by the x of their centre, for the field boxes.
+    let mut by_x: Vec<(f32, f32, u32)> = page
+        .texts
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| !held[*i])
+        .map(|(i, r)| (r.x + r.w / 2.0, r.y + r.h / 2.0, i as u32))
+        .collect();
+    by_x.sort_by(|a, b| a.0.total_cmp(&b.0));
     for (b, field) in page.boxes.iter().enumerate().filter(|(_, b)| b.widget) {
         let f = field.bounds;
+        let lo = by_x.partition_point(|r| r.0 < f.x0);
+        let hi = by_x.partition_point(|r| r.0 <= f.x1);
+        let mut inside: Vec<u32> = by_x[lo..hi]
+            .iter()
+            .filter(|r| r.1 >= f.y0 && r.1 <= f.y1 && !held[r.2 as usize])
+            .map(|r| r.2)
+            .collect();
+        inside.sort_unstable();
         let mut prims = vec![PrimId::Box(b as u32)];
-        for (i, r) in page.texts.iter().enumerate() {
-            let (cx, cy) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
-            if !held[i] && cx >= f.x0 && cx <= f.x1 && cy >= f.y0 && cy <= f.y1 {
-                held[i] = true;
-                prims.push(PrimId::Text(i as u32));
-            }
+        for i in inside {
+            held[i as usize] = true;
+            prims.push(PrimId::Text(i));
         }
         out.push(GivenRegion {
             kind: Kind::LabelValue,
             prims,
             order: out.len() as u32,
             level: None,
+            role: None,
+            group: None,
         });
     }
     out
@@ -421,10 +444,11 @@ mod given_tests {
             codes: Vec::new(),
             given: Vec::new(),
         };
-        page.boxes.push(box_in(&[45.0, 575.0, 200.0, 590.0], true));
+        // A field box over the footnote's run (a tag holds it) and a free run.
+        page.boxes.push(box_in(&[45.0, 575.0, 200.0, 612.0], true));
         let slots = [
             Slot::Heading(2, 10),
-            Slot::Para(11, None),
+            Slot::Para(11, Some("caption")),
             Slot::Item { list: 12, item: 13 },
             Slot::Item { list: 12, item: 14 },
             Slot::Cell {
@@ -435,23 +459,40 @@ mod given_tests {
             Slot::Free,
         ];
         let given = given_regions(&page, &slots);
-        let got: Vec<(Kind, Option<u8>, Vec<PrimId>)> = given
+        type Got = (
+            Kind,
+            Option<u8>,
+            Option<&'static str>,
+            Option<u32>,
+            Vec<PrimId>,
+        );
+        let got: Vec<Got> = given
             .iter()
-            .map(|g| (g.kind, g.level, g.prims.clone()))
+            .map(|g| (g.kind, g.level, g.role, g.group, g.prims.clone()))
             .collect();
+        let field = vec![PrimId::Box(0), PrimId::Text(6)];
         assert_eq!(
             got,
             [
-                (Kind::Heading, Some(2), vec![PrimId::Text(0)]),
-                (Kind::Paragraph, None, vec![PrimId::Text(1)]),
-                (Kind::List, None, vec![PrimId::Text(2), PrimId::Text(3)]),
-                (Kind::Table, None, vec![PrimId::Text(4)]),
-                (Kind::FootnoteLegend, None, vec![PrimId::Text(5)]),
+                (Kind::Heading, Some(2), None, None, vec![PrimId::Text(0)]),
                 (
-                    Kind::LabelValue,
+                    Kind::Paragraph,
                     None,
-                    vec![PrimId::Box(0), PrimId::Text(6)]
+                    Some("caption"),
+                    None,
+                    vec![PrimId::Text(1)]
                 ),
+                (Kind::List, None, None, Some(2), vec![PrimId::Text(2)]),
+                (Kind::List, None, None, Some(2), vec![PrimId::Text(3)]),
+                (Kind::Table, None, None, None, vec![PrimId::Text(4)]),
+                (
+                    Kind::FootnoteLegend,
+                    None,
+                    None,
+                    None,
+                    vec![PrimId::Text(5)]
+                ),
+                (Kind::LabelValue, None, None, None, field),
             ]
         );
         assert!(given.iter().enumerate().all(|(k, g)| g.order == k as u32));

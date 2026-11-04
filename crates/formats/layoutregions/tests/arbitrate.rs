@@ -948,37 +948,35 @@ fn a_caption_line_makes_no_figure_of_the_text_around_it() {
     }
 }
 
-/// A parent of the kind of a sure child that it does not outscore only spreads that child's
-/// reading over its neighbours: it folds no sure sibling of another kind (an address under a
-/// table read as rows). A parent that outscores its child (a header row its reading adds)
-/// still folds.
+/// A parent of the kind of a sure child only spreads that child's reading over its
+/// neighbours: it folds no sure sibling of another kind (an address under a table read as
+/// rows), however much more it scores; a sibling with no sure reading folds into it.
 #[test]
 fn a_parent_that_only_spreads_a_child_folds_no_sibling() {
-    let tree = |parent: u16| {
+    let tree = |sibling: Option<u16>| {
         let mut b = Build::new();
         let p = b.add(Some(0), Source::Rest, Vec::new());
         let rows = b.add(Some(p), Source::Band, vec![text(0), text(1)]);
-        let address = b.add(Some(p), Source::Band, vec![text(2)]);
+        let other = b.add(Some(p), Source::Band, vec![text(2)]);
         let segs = b.done();
-        let typed = BTreeMap::from([
-            (SegId(p), vec![typed(Kind::Table, parent)]),
+        let mut typed = BTreeMap::from([
+            (SegId(p), vec![typed(Kind::Table, 1000)]),
             (SegId(rows), vec![typed(Kind::Table, 800)]),
-            (SegId(address), vec![typed(Kind::Paragraph, 600)]),
         ]);
-        (segs, typed, rows, address)
+        if let Some(score) = sibling {
+            typed.insert(SegId(other), vec![typed_of(Kind::Paragraph, score)]);
+        }
+        (segs, typed, rows, other)
     };
-    // 800 over 600 leads by the margin, but the table child is as strong: the cut stands.
-    let (segs, typed, rows, address) = tree(800);
+    // 1000 over 600 and over the table child: still the cut stands.
+    let (segs, typed, rows, other) = tree(Some(600));
     let out = decide_all(&segs, &typed);
     assert_eq!(
         out.iter().map(|d| (d.seg, d.kind)).collect::<Vec<_>>(),
-        [
-            (SegId(rows), Kind::Table),
-            (SegId(address), Kind::Paragraph)
-        ]
+        [(SegId(rows), Kind::Table), (SegId(other), Kind::Paragraph)]
     );
-    // A stronger parent reading (evidence the child lacks) folds them.
-    let (segs, typed, _, _) = tree(900);
+    // A sibling with no evidence (Spatial) folds into the table.
+    let (segs, typed, _, _) = tree(None);
     let out = decide_all(&segs, &typed);
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].kind, Kind::Table);

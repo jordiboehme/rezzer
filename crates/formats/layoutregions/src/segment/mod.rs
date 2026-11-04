@@ -1115,7 +1115,7 @@ fn strips(page: &PageIn, ids: &[u32], rules: &[Line]) -> Option<(Vec<Vec<u32>>, 
         let mut lines: Vec<u32> = g
             .iter()
             .map(|&t| &page.texts[t as usize])
-            .filter(|r| r.text.chars().any(|c| !c.is_whitespace()))
+            .filter(|r| crate::line::ink(&r.text) > 0)
             .map(|r| r.line)
             .collect();
         lines.sort_unstable();

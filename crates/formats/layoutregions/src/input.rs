@@ -109,6 +109,12 @@ pub struct GivenRegion {
     pub order: u32,
     /// The level the file gives a heading (1 the highest); `None` for other kinds.
     pub level: Option<u8>,
+    /// The role the file gives the region beyond its kind (`caption` for a caption read as a
+    /// paragraph), if any.
+    pub role: Option<&'static str>,
+    /// The `order` of the first region of the group it belongs to (the items of one list),
+    /// if any.
+    pub group: Option<u32>,
 }
 
 /// A primitive of a page: the index into one of the lists of [`PageIn`].

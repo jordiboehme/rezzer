@@ -229,12 +229,16 @@ fn given_regions_come_first_and_whole() {
             prims: vec![PrimId::Text(3), PrimId::Text(4), PrimId::Text(999)],
             order: 2,
             level: None,
+            role: None,
+            group: None,
         },
         GivenRegion {
             kind: Kind::Table,
             prims: vec![PrimId::Text(2), PrimId::Text(3), PrimId::Rule(0)],
             order: 1,
             level: None,
+            role: None,
+            group: None,
         },
     ];
     let s = segment_page(&p, &Limits::default(), &|| false);
@@ -575,6 +579,8 @@ fn a_grid_the_given_regions_took_is_no_segment() {
         prims,
         order: 0,
         level: None,
+        role: None,
+        group: None,
     }];
     assert_eq!(
         drawn(&p, &|_| true).grids.map(|g| g.groups.len()),
@@ -717,6 +723,8 @@ fn a_child_the_given_regions_took_is_no_depth_issue() {
         prims,
         order: 0,
         level: None,
+        role: None,
+        group: None,
     }];
     let one = Limits {
         max_cut_depth: 1,
@@ -745,6 +753,8 @@ fn given_regions_beside_an_alternative() {
         prims: vec![PrimId::Text(20)],
         order: 0,
         level: None,
+        role: None,
+        group: None,
     }];
     let s = segment_page(&p, &Limits::default(), &|| false);
     check_cover(&s, &p);
@@ -1064,6 +1074,36 @@ fn lines_between_two_rules_are_one_strip() {
                 .iter()
                 .all(|c| seg(&s, *c).source == Source::Style),
             "at {k}x"
+        );
+    }
+}
+
+/// Fix round 1 (M1): a strip holds two to six lines of text between its rules; with seven the
+/// lines between the rules are a page section, cut as text. The count is of lines, which a
+/// page printed larger or smaller keeps.
+#[test]
+fn a_strip_holds_six_lines_at_most() {
+    for (n, strips) in [(6u32, 1usize), (7, 0)] {
+        let texts: Vec<TextRun> = (0..n)
+            .map(|k| run("Zeile", 72.0, 690.0 - 10.0 * k as f32, 40.0, 8.0, 10 + k))
+            .chain([run(PROSE, 72.0, 500.0, 200.0, 8.0, 40)])
+            .collect();
+        let top = 700.0;
+        let bottom = 690.0 - 10.0 * n as f32;
+        let p = page(
+            [600.0, 800.0],
+            texts,
+            vec![
+                line(70.0, top, 520.0, top),
+                line(70.0, bottom, 520.0, bottom),
+            ],
+        );
+        let s = segment_page(&p, &Limits::default(), &|| false);
+        check_cover(&s, &p);
+        assert_eq!(
+            with_source(&s, |x| *x == Source::Strip).len(),
+            strips,
+            "{n} lines"
         );
     }
 }

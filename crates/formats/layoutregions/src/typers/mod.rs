@@ -48,7 +48,7 @@ pub const MAX_SCORE: u16 = 1000;
 
 /// How many lines of the page over and under a segment its walk looks at: the two-line look of
 /// the heading rule (see [`crate::extract::text::heading_block`]).
-pub const CONTEXT_LINES: usize = 2;
+pub(crate) const CONTEXT_LINES: usize = 2;
 
 /// What a typer found for its kind in a segment.
 #[derive(Debug, Clone, PartialEq)]
@@ -202,14 +202,16 @@ pub fn type_segments(view: &PageView<'_>) -> BTreeMap<SegId, Vec<Typed>> {
 /// text kind (a heading over its paragraph, list items and a paragraph) cut at the walk's block
 /// boundaries: one [`Source::Walk`] child per run of blocks of one kind, so each kind is typed
 /// on its own lines. Lines with no text go with the block before them. `None` when no leaf is
-/// cut. The caller types the new tree with a new view.
+/// cut. The caller types the new tree with a new view. No segment is added past
+/// `max_regions` segments: the leaves left then stand as they are, and an issue of kind
+/// `Limit` says so.
 ///
 /// [`Source::Walk`]: crate::segment::Source::Walk
-pub fn walk_cut(view: &PageView<'_>) -> Option<Segments> {
+pub(crate) fn walk_cut(view: &PageView<'_>, max_regions: usize) -> Option<Segments> {
     use crate::segment::Source;
     let mut cuts: Vec<(usize, Vec<Vec<PrimId>>)> = Vec::new();
     for (k, seg) in view.segs.all.iter().enumerate() {
-        crate::work::add(1);
+        crate::work::add(1 + seg.prims.len() as u64);
         if !seg.children.is_empty() || !seg.alternatives.is_empty() || !text_alone(view, seg) {
             continue;
         }
@@ -261,7 +263,17 @@ pub fn walk_cut(view: &PageView<'_>) -> Option<Segments> {
         return None;
     }
     let mut segs = view.segs.clone();
+    crate::work::add(segs.all.len() as u64);
     for (k, groups) in cuts {
+        if segs.all.len() + groups.len() > max_regions {
+            segs.issues.push(crate::region::Issue {
+                what: format!(
+                    "the text walk's cuts were not all made: more than {max_regions} segments"
+                ),
+                kind: crate::region::IssueKind::Limit,
+            });
+            break;
+        }
         let parent = segs.all[k].id;
         for mut prims in groups {
             prims.sort_unstable();
@@ -304,8 +316,10 @@ fn text_extent(page: &PageIn, prims: &[PrimId]) -> crate::region::Bounds {
 }
 
 /// The segments of a page and every typer's candidates on them: the tree `segs` with the text
-/// leaves that mix kinds cut by [`walk_cut`], then [`type_segments`] over that tree. The input
-/// of [`crate::arbitrate()`].
+/// leaves that mix kinds cut by [`walk_cut`] (within `limits.max_regions` segments), then
+/// [`type_segments`] over that tree. The input of [`crate::arbitrate()`]. Where the walk cuts
+/// a leaf, the page is viewed a second time for the new tree (its page-level indexes are built
+/// again).
 pub fn type_page(
     page: &PageIn,
     drawn: &DrawnStructure,
@@ -313,10 +327,11 @@ pub fn type_page(
     file: &FileFacts,
     index: &FileIndex,
     ends_in_amount: &dyn Fn(&str) -> bool,
+    limits: &crate::Limits,
 ) -> (Segments, BTreeMap<SegId, Vec<Typed>>) {
     let cut = {
         let view = PageView::new(page, drawn, &segs, file, index, ends_in_amount);
-        walk_cut(&view)
+        walk_cut(&view, limits.max_regions)
     };
     let segs = cut.unwrap_or(segs);
     let typed = {
@@ -403,6 +418,12 @@ pub struct PageView<'a> {
     /// For each segment, whether it is a box that touches another box of its parent (see
     /// [`pairs::touching_boxes`]).
     touching: OnceCell<Vec<bool>>,
+    /// The strips between the page's rules (see [`pairs::strip_frames`]), found once.
+    strip_frames: OnceCell<Vec<pairs::StripFrame>>,
+    /// The strip each run in a strip stands in, by run id.
+    strip_of: OnceCell<HashMap<u32, usize>>,
+    /// The strip fields of each segment (see [`pairs::strip_fields`]), worked out once.
+    strips: Vec<OnceCell<Option<pairs::StripFields>>>,
 }
 
 impl<'a> PageView<'a> {
@@ -532,6 +553,9 @@ impl<'a> PageView<'a> {
             across: (0..n).map(|_| OnceCell::new()).collect(),
             tables: OnceCell::new(),
             touching: OnceCell::new(),
+            strip_frames: OnceCell::new(),
+            strip_of: OnceCell::new(),
+            strips: (0..n).map(|_| OnceCell::new()).collect(),
         }
     }
 
@@ -606,6 +630,29 @@ impl<'a> PageView<'a> {
     }
 
     /// The label/value candidate of `seg` (see [`pairs::type_label_value`]).
+    /// The strips between the page's rules (see [`pairs::strip_frames`]).
+    pub(crate) fn strip_frames(&self) -> &[pairs::StripFrame] {
+        self.strip_frames.get_or_init(|| pairs::strip_frames(self))
+    }
+
+    /// The strip of each run that stands in one, by run id.
+    pub(crate) fn strip_of(&self) -> &HashMap<u32, usize> {
+        self.strip_of.get_or_init(|| {
+            let mut at = HashMap::new();
+            for (k, f) in self.strip_frames().iter().enumerate() {
+                for &r in &f.runs {
+                    at.insert(r, k);
+                }
+            }
+            at
+        })
+    }
+
+    /// The strip fields of `seg` (see [`pairs::strip_fields`]).
+    pub(crate) fn strip_fields_of(&self, seg: &Segment) -> Option<pairs::StripFields> {
+        self.cached(&self.strips, seg, || pairs::strip_fields(self, seg), |t| *t)
+    }
+
     pub(crate) fn pairs_of(&self, seg: &Segment) -> Option<Typed> {
         self.cached(
             &self.pairs,
@@ -725,6 +772,17 @@ impl<'a> PageView<'a> {
         let under = &self.lines
             [(b + 1).min(self.lines.len())..(b + 1 + CONTEXT_LINES).min(self.lines.len())];
         (over, under)
+    }
+
+    /// The page's lines (ranges of `page.texts`) just over and just under the line `line`.
+    pub(crate) fn neighbours(&self, line: u32) -> [Option<&RunRange>; 2] {
+        match self.line_at.get(&line) {
+            Some(&k) => [
+                k.checked_sub(1).and_then(|j| self.lines.get(j)),
+                self.lines.get(k + 1),
+            ],
+            None => [None, None],
+        }
     }
 
     pub(crate) fn band(&self, line: u32) -> Option<Band> {

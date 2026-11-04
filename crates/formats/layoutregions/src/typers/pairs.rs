@@ -64,15 +64,25 @@ pub const LABEL_KNOWN_STYLE: u16 = 400;
 /// margin.
 pub const LABEL_LINE_PAIRS: u16 = 850;
 
+/// Whether a text run of `seg` stands on a running header or footer line, in the page's
+/// footnote legend, or on the lines of the page title: lines the band, legend and title kinds
+/// claim, which the pair rules of lines (line pairs, strip fields) do not read.
+fn claimed_lines(view: &PageView<'_>, seg: &Segment) -> bool {
+    let title: &[u32] = view.title().map_or(&[], |t| t.lines.as_slice());
+    seg.prims.iter().any(|p| match *p {
+        crate::input::PrimId::Text(i) => view.page.texts.get(i as usize).is_some_and(|r| {
+            view.band(r.line).is_some() || view.in_legend(i) || title.contains(&r.line)
+        }),
+        _ => false,
+    })
+}
+
 /// Whether every pair of a block of labels and values has evidence of its own: a label that
 /// ends with a colon, a value shaped as a number, a date or a code, or a label in another style
 /// than its value (set apart by size, weight or face). Two names side by side in one style
 /// (an address beside an address) are no pair. A label without a value (an empty field) needs
 /// none; at least one pair has a value.
-pub(crate) fn pairs_evidenced(
-    runs: &[&TextRun],
-    rows: &[crate::extract::pairs::blocks::KeyValue],
-) -> bool {
+fn pairs_evidenced(runs: &[&TextRun], rows: &[crate::extract::pairs::blocks::KeyValue]) -> bool {
     let mut valued = 0;
     for row in rows {
         let Some((s, e)) = row.value else { continue };
@@ -95,58 +105,36 @@ pub(crate) fn pairs_evidenced(
 /// `label_value.strip_fields`: the lines stand in strips between drawn rules that span them,
 /// and each strip reads as fields, a label (the smaller text) over, beside or under its value
 /// (today's rule of fields between rules, [`strip_cells`], one copy). It leads the most a
-/// table reading (800) and a paragraph reading (750) of such lines reach by the margin.
-pub const LABEL_STRIP_FIELDS: u16 = 950;
+/// table reading (800), a paragraph reading (750) and a heading that keeps its lines (850)
+/// by the margin.
+pub const LABEL_STRIP_FIELDS: u16 = 1000;
 
-/// Rules this many times the largest text size of a segment over or under it still bound its
-/// first or last strip.
-const STRIP_REACH: f32 = 2.0;
+/// One strip between two rules of the page: a piece of one rule level over a piece of the
+/// level under it, where both reach (strips side by side on the same rules are strips of
+/// their own), the runs with ink whose middle it holds (each run in the first such strip, top
+/// to bottom, then left to right), and what it reads as.
+#[derive(Debug, Clone)]
+pub(crate) struct StripFrame {
+    pub bottom: f32,
+    pub top: f32,
+    pub x0: f32,
+    pub x1: f32,
+    pub runs: Vec<u32>,
+    read: FrameRead,
+}
 
-/// The fields of `seg` read strip by strip between the page's horizontal rules near its text:
-/// a piece of a rule over a piece of the next rule under it bounds a strip where both reach
-/// (strips side by side on the same rules are strips of their own), and each run with ink
-/// of the segment stands in one by its middle. Every strip that holds text
-/// reads as fields, fits (no text that is no field), is clear, leaves no cell out, pairs every
-/// run as a label or a value, gives each field a label and its value on one line, and is no
-/// table's body or rows (see [`table_body`], [`table_rows`]); there are two fields at least.
-/// `None` otherwise, and when no rule bounds the text.
-pub(crate) fn strip_fields(view: &PageView<'_>, seg: &Segment) -> Option<StripFields> {
-    let (refs, _) = seg_runs(view, seg);
-    let inked: Vec<usize> = (0..refs.len())
-        .filter(|&k| !refs[k].text.trim().is_empty() && !refs[k].off_axis)
-        .collect();
-    if inked.len() < 2 {
-        return None;
-    }
-    let (mut x0, mut x1, mut y0, mut y1, mut size) =
-        (f32::MAX, f32::MIN, f32::MAX, f32::MIN, 0.0f32);
-    for &k in &inked {
-        let r = refs[k];
-        x0 = x0.min(r.x);
-        x1 = x1.max(r.x + r.w);
-        y0 = y0.min(r.y);
-        y1 = y1.max(r.y + r.size);
-        size = size.max(r.size);
-    }
-    let reach = STRIP_REACH * size.max(1.0);
+/// The strips of the page of `view` (see [`StripFrame`]), found once: the rule levels from
+/// the page's horizontal rules (rules within SNAP of one height are one level), and the runs
+/// by one pass over them sorted by the height of their middle.
+pub(crate) fn strip_frames(view: &PageView<'_>) -> Vec<StripFrame> {
     let snap = crate::segment::drawn::SNAP;
-    let hs = view.hs();
-    let lo = hs.partition_point(|l| l.at < y0 - reach);
-    let hi = hs.partition_point(|l| l.at <= y1 + reach);
-    crate::work::add((hi - lo) as u64 + inked.len() as u64);
-    // The rules near the text, by height: rules at one height (within SNAP) are one level,
-    // pieces of it side by side.
     let mut levels: Vec<Vec<&crate::segment::drawn::Line>> = Vec::new();
-    for l in &hs[lo..hi] {
-        if l.to < x0 - snap || l.from > x1 + snap {
-            continue;
-        }
+    for l in view.hs() {
         match levels.last_mut() {
             Some(level) if l.at - level[0].at <= snap => level.push(l),
             _ => levels.push(vec![l]),
         }
     }
-    // The frames: a piece of one level over a piece of the level under it, where both reach.
     let mut frames: Vec<(f32, f32, f32, f32)> = Vec::new();
     for w in levels.windows(2) {
         for low in &w[0] {
@@ -159,98 +147,140 @@ pub(crate) fn strip_fields(view: &PageView<'_>, seg: &Segment) -> Option<StripFi
             }
         }
     }
+    frames.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.2.total_cmp(&b.2)));
     if frames.is_empty() {
-        return None;
+        return Vec::new();
     }
+    let texts = &view.page.texts;
+    let mut by_y: Vec<(f32, u32)> = texts
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| crate::line::ink(&r.text) > 0 && !r.off_axis)
+        .map(|(i, r)| (r.y + 0.5 * r.size, i as u32))
+        .collect();
+    by_y.sort_by(|a, b| a.0.total_cmp(&b.0));
+    crate::work::add(by_y.len() as u64);
+    let mut taken = vec![false; texts.len()];
     let how = Reading {
         one_field: false,
         smaller: true,
         small: small_size(view.text_sizes()).saturating_sub(1),
         labels: &[],
     };
-    let in_frame = |r: &TextRun, &(bottom, top, fx0, fx1): &(f32, f32, f32, f32)| {
-        let (mx, my) = (r.x + 0.5 * r.w, r.y + 0.5 * r.size);
-        my > bottom && my < top && mx > fx0 && mx < fx1
-    };
-    let mut held = 0usize;
-    let (mut count, mut colon, mut shape) = (0usize, true, true);
-    let mut label_styles: Vec<TextRun> = Vec::new();
-    let mut empty_labels: Vec<TextRun> = Vec::new();
-    for f in &frames {
-        let own: Vec<&TextRun> = inked
-            .iter()
-            .map(|&k| refs[k])
-            .filter(|r| in_frame(r, f))
-            .collect();
-        if own.is_empty() {
+    let mut out = Vec::new();
+    for (bottom, top, x0, x1) in frames {
+        let lo = by_y.partition_point(|r| r.0 <= bottom);
+        let hi = by_y.partition_point(|r| r.0 < top);
+        crate::work::add((hi - lo) as u64);
+        let mut runs = Vec::new();
+        for &(_, i) in &by_y[lo..hi] {
+            let r = &texts[i as usize];
+            let mx = r.x + 0.5 * r.w;
+            if !taken[i as usize] && mx > x0 && mx < x1 {
+                taken[i as usize] = true;
+                runs.push(i);
+            }
+        }
+        if runs.is_empty() {
             continue;
         }
-        held += own.len();
-        let FrameRead::Clear(read) = read_frame(&own, f.2, f.3, how) else {
+        runs.sort_unstable();
+        let own: Vec<&TextRun> = runs.iter().map(|&i| &texts[i as usize]).collect();
+        let read = read_frame(&own, x0, x1, how);
+        out.push(StripFrame {
+            bottom,
+            top,
+            x0,
+            x1,
+            runs,
+            read,
+        });
+    }
+    out
+}
+
+/// The fields of `seg` read strip by strip (see [`strip_frames`]): every run with ink of the
+/// segment stands in a strip, the segment holds every run of each of those strips, every one
+/// of them reads clear (see [`read_frame`]), no strip stacked on one of them (sharing a rule,
+/// side by side with it in part) holds fields that are not clear (labels under the rule their
+/// values stand on), and there are two fields at least. `None` otherwise.
+pub(crate) fn strip_fields(view: &PageView<'_>, seg: &Segment) -> Option<StripFields> {
+    let frames = view.strip_frames();
+    if frames.is_empty() {
+        return None;
+    }
+    let (_, ids) = seg_runs(view, seg);
+    let inked: Vec<u32> = ids
+        .iter()
+        .copied()
+        .filter(|&i| {
+            let r = &view.page.texts[i as usize];
+            crate::line::ink(&r.text) > 0 && !r.off_axis
+        })
+        .collect();
+    if inked.len() < 2 {
+        return None;
+    }
+    crate::work::add(inked.len() as u64);
+    let at = view.strip_of();
+    let mut mine: Vec<usize> = Vec::new();
+    for i in &inked {
+        let f = *at.get(i)?;
+        if !mine.contains(&f) {
+            mine.push(f);
+        }
+    }
+    let snap = crate::segment::drawn::SNAP;
+    let (mut count, mut colon, mut shape) = (0usize, true, true);
+    let mut label_styles: Vec<&TextRun> = Vec::new();
+    let mut empty_labels: Vec<&TextRun> = Vec::new();
+    for &f in &mine {
+        let frame = &frames[f];
+        if frame.runs.iter().any(|r| ids.binary_search(r).is_err()) {
+            return None;
+        }
+        let FrameRead::Clear(read) = &frame.read else {
             return None;
         };
         count += read.fields;
         colon &= read.colon;
         shape &= read.shape;
-        label_styles.extend(read.labels);
-        empty_labels.extend(read.empty);
-    }
-    // The strips stacked over and under these on the page (a rule of them their rule too):
-    // when one of them holds fields that are not clear, the stack is not clear, and none of it
-    // pairs (labels under the rule their values stand on).
-    let page_levels = {
-        let mut levels: Vec<Vec<&crate::segment::drawn::Line>> = Vec::new();
-        for l in hs
-            .iter()
-            .filter(|l| l.to >= x0 - snap && l.from <= x1 + snap)
-        {
-            match levels.last_mut() {
-                Some(level) if l.at - level[0].at <= snap => level.push(l),
-                _ => levels.push(vec![l]),
-            }
-        }
-        levels
-    };
-    for w in page_levels.windows(2) {
-        for low in &w[0] {
-            for up in &w[1] {
-                crate::work::add(1);
-                let (a, b) = (low.from.max(up.from), low.to.min(up.to));
-                let f = (low.at, up.at, a, b);
-                let near = frames.iter().any(|g| {
-                    let shares = (g.0 - f.1).abs() <= snap || (g.1 - f.0).abs() <= snap;
-                    shares && g.2 < b && a < g.3
-                });
-                if b - a <= snap || !near || frames.contains(&f) {
-                    continue;
-                }
-                let theirs: Vec<&TextRun> = view
-                    .page
-                    .texts
-                    .iter()
-                    .filter(|r| !r.text.trim().is_empty() && !r.off_axis && in_frame(r, &f))
-                    .collect();
-                crate::work::add(view.page.texts.len() as u64);
-                if !theirs.is_empty() && read_frame(&theirs, a, b, how) == FrameRead::Unclear {
-                    return None;
-                }
+        label_styles.extend(read.labels.iter());
+        empty_labels.extend(read.empty.iter());
+        for (k, g) in frames.iter().enumerate() {
+            crate::work::add(1);
+            let shares =
+                (g.top - frame.bottom).abs() <= snap || (g.bottom - frame.top).abs() <= snap;
+            if k != f
+                && shares
+                && g.x0 < frame.x1
+                && frame.x0 < g.x1
+                && g.read == FrameRead::Unclear
+            {
+                return None;
             }
         }
     }
-    // Every line of the segment stands in a strip, and a field is never alone (a caption
-    // over a line between rules looks like one). An empty field's label is in the style of
-    // the labels of fields with a value: text in another style alone in a field is a value
-    // without its label, not an empty field.
+    // A field is never alone (a caption over a line between rules looks like one). An empty
+    // field's label is in the style of the labels of fields with a value: text in another
+    // style alone in a field is a value without its label, not an empty field.
     let empty_ok = empty_labels
         .iter()
-        .all(|e| label_styles.iter().any(|l| same_style(l, e)));
-    (held == inked.len() && count >= 2 && !label_styles.is_empty() && empty_ok).then_some(
-        StripFields {
-            fields: count,
-            colon,
-            shape,
-        },
-    )
+        .all(|e| label_styles.iter().any(|l| same_style(*l, *e)));
+    (count >= 2 && !label_styles.is_empty() && empty_ok).then_some(StripFields {
+        fields: count,
+        colon,
+        shape,
+    })
+}
+
+/// What [`strip_fields`] read: how many fields, whether every label ends with a colon, and
+/// whether every value is shaped as a number, a date or a code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct StripFields {
+    pub fields: usize,
+    pub colon: bool,
+    pub shape: bool,
 }
 
 /// What one strip between rules reads as.
@@ -360,15 +390,6 @@ fn read_frame(own: &[&TextRun], x0: f32, x1: f32, how: Reading<'_>) -> FrameRead
     FrameRead::Clear(out)
 }
 
-/// What [`strip_fields`] read: how many fields, whether every label ends with a colon, and
-/// whether every value is shaped as a number, a date or a code.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct StripFields {
-    pub fields: usize,
-    pub colon: bool,
-    pub shape: bool,
-}
-
 /// `run` cut at its word gaps `at` (indexes into its gaps): each piece keeps its words, from
 /// the end of the ink before the gap to the start of the ink after it.
 fn cut_at_gaps(run: &TextRun, at: &[usize]) -> Vec<TextRun> {
@@ -426,7 +447,7 @@ const PAIR_VALUE_WORDS: usize = 6;
 ///   value shaped as a number, a date or a code (`Rechnungs-Nr.   2026004711`).
 ///
 /// Anything else is no pair; more pieces are a row, which the table rules read.
-pub(crate) fn line_pair(
+fn line_pair(
     runs: &[&TextRun],
     pieces: &[crate::extract::table::grid::Piece],
     lone: bool,
@@ -654,8 +675,11 @@ pub(crate) fn label_value(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
             }
         }
         Source::Grid { rows, cols } => grid_fields(view, seg, (rows, cols), &mut signals)?,
+        // Running lines, footnote legends and the page title have kinds of their own: the
+        // pair rules of lines leave them alone.
+        _ if text_alone(view, seg) && claimed_lines(view, seg) => return None,
         _ if text_alone(view, seg)
-            && let Some(read) = strip_fields(view, seg) =>
+            && let Some(read) = view.strip_fields_of(seg) =>
         {
             signals.push(signal(
                 "label_value.strip_fields",
