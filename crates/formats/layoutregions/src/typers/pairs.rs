@@ -123,42 +123,77 @@ pub(crate) struct StripFrame {
     read: FrameRead,
 }
 
+/// A key that orders `x` as [`f32::total_cmp`] does.
+fn x_key(x: f32) -> i64 {
+    let b = i64::from(x.to_bits() as i32);
+    b ^ (((b >> 63) as u64) >> 33) as i64
+}
+
 /// The frames between horizontal `rules` (bottom, top, x0, x1), top to bottom, then left to
 /// right: each stretch of a rule piece with the nearest piece above it that overlaps that
 /// stretch in x. A rule of another column between the heights of two rules does not part them:
 /// it frames only the stretch it lies over, and the rest of the piece goes on up.
+///
+/// One sweep from the top down, level by level (pieces within [`SNAP`] of the level's top):
+/// the skyline holds, for each stretch of x, the nearest piece above the levels done, as
+/// stretches that do not overlap, sorted by their left end. Each piece of a level reads the
+/// stretches it lies under, then the level's pieces replace them. Every stretch is read once
+/// before it is cut or replaced, so the work is the number of pieces times the log of the
+/// skyline, plus the frames.
+///
+/// [`SNAP`]: crate::segment::drawn::SNAP
 fn rule_frames(rules: &[crate::segment::drawn::Line]) -> Vec<(f32, f32, f32, f32)> {
+    use std::collections::BTreeMap;
+    let snap = crate::segment::drawn::SNAP;
     let mut sorted: Vec<&crate::segment::drawn::Line> = rules.iter().collect();
-    sorted.sort_by(|a, b| a.at.total_cmp(&b.at).then(a.from.total_cmp(&b.from)));
+    sorted.sort_by(|a, b| b.at.total_cmp(&a.at).then(a.from.total_cmp(&b.from)));
+    // The skyline: by the key of its left end, a stretch (x0, x1) and the height of its piece.
+    let mut sky: BTreeMap<i64, (f32, f32, f32)> = BTreeMap::new();
+    // The key of the first stretch that may reach past `x`: the last one that starts at or
+    // left of it, else the first.
+    let first = |sky: &BTreeMap<i64, (f32, f32, f32)>, x: f32| {
+        sky.range(..=x_key(x))
+            .next_back()
+            .map_or(i64::MIN, |(k, _)| *k)
+    };
     let mut frames: Vec<(f32, f32, f32, f32)> = Vec::new();
-    for (i, low) in sorted.iter().enumerate() {
-        // The stretches of `low` that no piece above has framed yet.
-        let mut open: Vec<(f32, f32)> = vec![(low.from, low.to)];
-        for up in &sorted[i + 1..] {
-            if open.is_empty() {
-                break;
-            }
-            crate::work::add(open.len() as u64);
-            if up.at - low.at <= crate::segment::drawn::SNAP {
-                continue;
-            }
-            let mut left: Vec<(f32, f32)> = Vec::with_capacity(open.len() + 1);
-            for &(a, b) in &open {
-                let (x0, x1) = (a.max(up.from), b.min(up.to));
-                if x1 - x0 > crate::segment::drawn::SNAP {
-                    frames.push((low.at, up.at, x0, x1));
-                    if x0 - a > crate::segment::drawn::SNAP {
-                        left.push((a, x0));
-                    }
-                    if b - x1 > crate::segment::drawn::SNAP {
-                        left.push((x1, b));
-                    }
-                } else {
-                    left.push((a, b));
+    let mut k = 0;
+    while k < sorted.len() {
+        let top = sorted[k].at;
+        let end = k + sorted[k..].partition_point(|l| top - l.at <= snap);
+        let level = &sorted[k..end];
+        for low in level {
+            for (_, &(a, b, at)) in sky.range(first(&sky, low.from)..) {
+                crate::work::add(1);
+                if a >= low.to {
+                    break;
+                }
+                let (x0, x1) = (a.max(low.from), b.min(low.to));
+                if x1 - x0 > snap {
+                    frames.push((low.at, at, x0, x1));
                 }
             }
-            open = left;
         }
+        for low in level {
+            let cut: Vec<(i64, (f32, f32, f32))> = sky
+                .range(first(&sky, low.from)..)
+                .take_while(|(_, s)| s.0 < low.to)
+                .filter(|(_, s)| s.1 > low.from)
+                .map(|(k, s)| (*k, *s))
+                .collect();
+            crate::work::add(1 + cut.len() as u64);
+            for (key, (a, b, at)) in cut {
+                sky.remove(&key);
+                if a < low.from {
+                    sky.insert(x_key(a), (a, low.from, at));
+                }
+                if b > low.to {
+                    sky.insert(x_key(low.to), (low.to, b, at));
+                }
+            }
+            sky.insert(x_key(low.from), (low.from, low.to, low.at));
+        }
+        k = end;
     }
     frames.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.2.total_cmp(&b.2)));
     frames
@@ -1008,6 +1043,106 @@ mod tests {
     use crate::segment::drawn::drawn;
     use crate::segment::segment_page;
     use crate::typers::FileIndex;
+
+    /// The frames by a scan over every higher piece (each open stretch of a piece with the
+    /// nearest piece above it that overlaps it): what [`rule_frames`] finds by its sweep.
+    fn frames_by_scan(rules: &[crate::segment::drawn::Line]) -> Vec<(f32, f32, f32, f32)> {
+        let snap = crate::segment::drawn::SNAP;
+        let mut sorted: Vec<&crate::segment::drawn::Line> = rules.iter().collect();
+        sorted.sort_by(|a, b| a.at.total_cmp(&b.at).then(a.from.total_cmp(&b.from)));
+        let mut frames = Vec::new();
+        for (i, low) in sorted.iter().enumerate() {
+            let mut open = vec![(low.from, low.to)];
+            for up in &sorted[i + 1..] {
+                if up.at - low.at <= snap {
+                    continue;
+                }
+                let mut left = Vec::new();
+                for &(a, b) in &open {
+                    let (x0, x1) = (a.max(up.from), b.min(up.to));
+                    if x1 - x0 > snap {
+                        frames.push((low.at, up.at, x0, x1));
+                        if x0 > a {
+                            left.push((a, x0));
+                        }
+                        if b > x1 {
+                            left.push((x1, b));
+                        }
+                    } else {
+                        left.push((a, b));
+                    }
+                }
+                open = left;
+            }
+        }
+        frames.sort_by(|a, b| {
+            b.1.total_cmp(&a.1)
+                .then(a.2.total_cmp(&b.2))
+                .then(a.0.total_cmp(&b.0))
+        });
+        frames
+    }
+
+    /// Fix round 3 (N10): the sweep finds the frames a scan over every higher piece finds, on
+    /// rules of many lengths and places, in columns and across them (pieces at one height
+    /// apart, as merged drawn lines are).
+    #[test]
+    fn the_rule_sweep_finds_the_frames_of_a_scan() {
+        let mut seed = 7u32;
+        let mut next = |m: u32| {
+            seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+            (seed >> 8) % m
+        };
+        for _ in 0..200 {
+            let n = 2 + next(30) as usize;
+            // Pieces at one height do not overlap: the drawn lines are merged.
+            let mut rules: Vec<crate::segment::drawn::Line> = Vec::new();
+            for _ in 0..n {
+                let from = 10.0 * next(50) as f32;
+                let l = crate::segment::drawn::Line {
+                    at: 10.0 * next(40) as f32,
+                    from,
+                    to: from + 10.0 * (1 + next(30)) as f32,
+                };
+                if !rules
+                    .iter()
+                    .any(|r| r.at == l.at && r.from < l.to && l.from < r.to)
+                {
+                    rules.push(l);
+                }
+            }
+            let mut swept = rule_frames(&rules);
+            swept.sort_by(|a, b| {
+                b.1.total_cmp(&a.1)
+                    .then(a.2.total_cmp(&b.2))
+                    .then(a.0.total_cmp(&b.0))
+            });
+            assert_eq!(swept, frames_by_scan(&rules), "{rules:?}");
+        }
+    }
+
+    /// Fix round 3 (N10): pieces in two columns, none over another, cost the sweep about one
+    /// step each, not one for every higher piece.
+    #[test]
+    fn rules_in_two_columns_are_swept_in_linear_work() {
+        let rules: Vec<crate::segment::drawn::Line> = (0..2000)
+            .map(|k| {
+                let left = k % 2 == 0;
+                crate::segment::drawn::Line {
+                    at: 5.0 * k as f32,
+                    from: if left { 0.0 } else { 300.0 },
+                    to: if left { 200.0 } else { 500.0 },
+                }
+            })
+            .collect();
+        let before = crate::work::work_steps();
+        let frames = rule_frames(&rules);
+        let after = crate::work::work_steps();
+        assert_eq!(frames.len(), 1998);
+        if let (Some(b), Some(a)) = (before, after) {
+            assert!(a - b < 10 * rules.len() as u64, "{} steps", a - b);
+        }
+    }
 
     /// Boxes whose runs have no size have a reach of 0: the touch search keeps finite cell
     /// keys and does not overflow them (a panic in a debug build).

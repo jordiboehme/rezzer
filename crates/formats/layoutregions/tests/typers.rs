@@ -2503,7 +2503,9 @@ fn kind_of_line(page: &PageIn, segs: &Segments, out: &[Decision], line: u32) -> 
 }
 
 /// Fix round 1 (I5): an address under a table in one box stays a paragraph at every scale:
-/// the box's table reading only spreads the rows over it.
+/// the box's table reading only spreads the rows over it. A regression test of the class: it
+/// does not fail under the old score rule of `arbitrate` (the box does not outscore its table
+/// child here); `a_parent_that_only_spreads_a_child_folds_no_sibling` pins the rule.
 #[test]
 fn an_address_under_a_table_stays_a_paragraph() {
     for k in [0.75f32, 1.0, 1.5] {
@@ -3040,5 +3042,187 @@ fn lines_in_two_boxes_are_no_paragraph() {
             find(&typed, Kind::Paragraph).is_none(),
             "at {k}x: {typed:#?}"
         );
+    }
+}
+
+/// Lines of `rows` (each its pieces and its size), 150 points a column, `step` points apart,
+/// from line 100 on, on a sheet.
+fn sized_rows(rows: &[(&[&str], f32)], step: f32) -> Tree {
+    let mut texts = Vec::new();
+    for (r, (row, size)) in rows.iter().enumerate() {
+        for (c, t) in row.iter().enumerate() {
+            if !t.is_empty() {
+                texts.push(run(
+                    t,
+                    72.0 + 150.0 * c as f32,
+                    650.0 - step * r as f32,
+                    *size,
+                    100 + r as u32,
+                ));
+            }
+        }
+    }
+    Tree {
+        page: sheet(texts, Vec::new()),
+    }
+}
+
+/// Fix round 3 (N6): values and labels whose sizes turn four times stay refused when a line
+/// in a third size follows them: the longest streak of turns counts, not the last one.
+#[test]
+fn a_line_in_a_third_size_keeps_the_interleaving_refused() {
+    let rows: [(&[&str], f32); 7] = [
+        (&["Erika Mustermann", "Musterstadt"], 9.2),
+        (&["Name", "Ort"], 6.2),
+        (&["Strasse", "Hausnr"], 6.2),
+        (&["Musterweg 1", "12"], 9.2),
+        (&["PLZ", "Land"], 6.2),
+        (&["12345", "DE"], 9.2),
+        (&["Gesamt", "100,00"], 12.2),
+    ];
+    for k in [0.75f32, 1.0, 1.5] {
+        // The lines as one segment (a block the segmenter may part by its sizes).
+        let typed = Case {
+            pages: vec![sized_rows(&rows, 10.0).page],
+            at: 0,
+            lines: (100..107).collect(),
+        }
+        .scaled(k)
+        .typed();
+        assert!(find(&typed, Kind::Table).is_none(), "at {k}x: {typed:#?}");
+        let spatial = find(&typed, Kind::Spatial).expect("the refusal is named");
+        assert_eq!(ids(spatial), ["spatial.interleaved"], "at {k}x: {typed:#?}");
+    }
+}
+
+/// Fix round 3 (N8): a line of one piece is a section row only in the header's size. Lines of
+/// one piece in a third size between the rows (a size step off the rows and off the header)
+/// are turns of the sizes: the lines are refused as interleaved, by that refusal alone.
+#[test]
+fn a_line_of_one_piece_off_the_header_size_is_no_section_row() {
+    let rows: [(&[&str], f32); 9] = [
+        (&["Pos", "Artikel", "Betrag"], 9.2),
+        (&["1", "Schrauben", "50,00"], 6.2),
+        (&["2", "Muttern", "40,00"], 6.2),
+        (&["Gruppe B"], 10.2),
+        (&["3", "Scheiben", "10,00"], 6.2),
+        (&["4", "Bolzen", "20,00"], 6.2),
+        (&["Gruppe C"], 10.2),
+        (&["5", "Stifte", "5,00"], 6.2),
+        (&["6", "Klammern", "3,00"], 6.2),
+    ];
+    for k in [0.75f32, 1.0, 1.5] {
+        // The lines as one segment (a block the segmenter may part by its sizes).
+        let typed = Case {
+            pages: vec![sized_rows(&rows, 12.0).page],
+            at: 0,
+            lines: (100..109).collect(),
+        }
+        .scaled(k)
+        .typed();
+        assert!(find(&typed, Kind::Table).is_none(), "at {k}x: {typed:#?}");
+        let spatial = find(&typed, Kind::Spatial).expect("the refusal is named");
+        assert_eq!(ids(spatial), ["spatial.interleaved"], "at {k}x: {typed:#?}");
+        assert!(
+            find(&typed, Kind::LabelValue).is_none(),
+            "at {k}x: {typed:#?}"
+        );
+    }
+}
+
+/// Fix round 2 and 3 (N7): two lines of one sentence, each in a drawn box of its own, one box
+/// over the other, are no paragraph: the box sides part them. The same lines without the
+/// boxes read as a paragraph of sentences. One piece a line, of more words than a value, in one size and
+/// weight: no rule of cells, labels or fields refuses them.
+#[test]
+fn a_sentence_over_two_boxes_is_no_paragraph() {
+    let lines = [
+        "die Ware wird nach dem Erhalt der Rechnung an den Kunden",
+        "geliefert und der Betrag wird in zehn Tagen bezahlt.",
+    ];
+    for boxed in [true, false] {
+        let mut texts = prose(0, 800.0);
+        texts.push(run(lines[0], 75.0, 690.0, 9.2, 100));
+        texts.push(run(lines[1], 75.0, 670.0, 9.2, 101));
+        texts.extend(prose(900, 120.0));
+        let mut p = page(2, texts);
+        if boxed {
+            p.rules = box_rules([72.0, 686.0, 400.0, 702.0]);
+            p.rules.extend(box_rules([72.0, 666.0, 400.0, 682.0]));
+        }
+        let case = Case {
+            pages: vec![p],
+            at: 0,
+            lines: vec![100, 101],
+        };
+        for k in [0.75f32, 1.0, 1.5] {
+            let mut scaled = case.scaled(k);
+            for r in &mut scaled.pages[0].rules {
+                (r.x0, r.y0, r.x1, r.y1) = (r.x0 * k, r.y0 * k, r.x1 * k, r.y1 * k);
+            }
+            let typed = scaled.typed();
+            if boxed {
+                assert!(
+                    find(&typed, Kind::Paragraph).is_none(),
+                    "at {k}x: {typed:#?}"
+                );
+            } else {
+                let paragraph = of(&typed, Kind::Paragraph);
+                assert!(
+                    ids(paragraph)
+                        .iter()
+                        .any(|i| *i == "paragraph.joins" || *i == "paragraph.sentences"),
+                    "at {k}x: {typed:#?}"
+                );
+            }
+        }
+    }
+}
+
+/// Fix round 3 (N9): a heading in two pieces a line next to a figure caption keeps its heading
+/// candidate: the table rule refuses its lines for the figure (`figure.caption_near`), but
+/// that refusal weighs nothing and claims no text.
+#[test]
+fn a_heading_by_a_figure_caption_stays_a_heading() {
+    let mut texts = prose(0, 800.0);
+    texts.push(bold(run("3.1", 72.0, 700.0, 14.2, 100)));
+    texts.push(bold(run("Ergebnisse", 160.0, 700.0, 14.2, 100)));
+    texts.push(bold(run("der", 72.0, 682.0, 14.2, 101)));
+    texts.push(bold(run("Messung", 160.0, 682.0, 14.2, 101)));
+    texts.push(run("Abb. 3: Verlauf der Messung", 72.0, 664.0, 9.2, 102));
+    texts.extend(prose(900, 120.0));
+    let tree = Tree {
+        page: page(2, texts),
+    };
+    for k in [0.75f32, 1.0, 1.5] {
+        tree.scaled(k).with(|view| {
+            let prims: Vec<PrimId> = view
+                .page
+                .texts
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| r.line == 100 || r.line == 101)
+                .map(|(i, _)| PrimId::Text(i as u32))
+                .collect();
+            let seg = Segment {
+                id: SegId(u32::MAX),
+                bounds: Bounds {
+                    x0: 0.0,
+                    y0: 0.0,
+                    x1: 595.0 * k,
+                    y1: 842.0 * k,
+                },
+                prims,
+                source: Source::Rest,
+                parent: None,
+                children: Vec::new(),
+                alternatives: Vec::new(),
+            };
+            let r = refusal(view, &seg).expect("the table rule refuses the lines");
+            assert_eq!(r.signal.id, "figure.caption_near", "at {k}x");
+            assert_eq!(r.signal.weight, 0, "at {k}x");
+            let typed = all_typed(view, &seg);
+            assert!(find(&typed, Kind::Heading).is_some(), "at {k}x: {typed:#?}");
+        });
     }
 }

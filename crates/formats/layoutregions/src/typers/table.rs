@@ -727,8 +727,9 @@ fn alternating(runs: &[&TextRun], ranges: &[RunRange]) -> bool {
 const SIZE_TURNS: usize = 2;
 
 /// Whether lines of two sizes a size step apart interleave: the sizes of consecutive lines,
-/// taken as runs of one size, step more than [`SIZE_TURNS`] times between two sizes (each run
-/// a size step off the one before and in the size of the one before that). A table's rows
+/// taken as runs of one size, step more than [`SIZE_TURNS`] times between two sizes in one
+/// streak (each run a size step off the one before and in the size of the one before that;
+/// the longest streak of the segment counts). A table's rows
 /// share one size; a header and a total in a larger size step there and back once. A section
 /// row (a line of one piece in the header's size, between rows of one size, see `pieces`) is
 /// no line of labels among values: it is left out of the count, so a table grouped by section
@@ -762,7 +763,9 @@ fn interleaved(runs: &[&TextRun], ranges: &[RunRange], pieces: &[Vec<Piece>]) ->
         }
     }
     // Steps between two sizes only: each run in the size of the run two before it.
-    let mut turns = 0usize;
+    // The longest streak counts: a line in a third size after the block ends a streak, it
+    // does not undo the turns before it.
+    let (mut turns, mut most) = (0usize, 0usize);
     for (k, w) in sizes.windows(2).enumerate() {
         let back = k == 0 || !size_step(sizes[k - 1], w[1]);
         if back && size_step(w[0], w[1]) {
@@ -770,8 +773,9 @@ fn interleaved(runs: &[&TextRun], ranges: &[RunRange], pieces: &[Vec<Piece>]) ->
         } else {
             turns = usize::from(size_step(w[0], w[1]));
         }
+        most = most.max(turns);
     }
-    turns > SIZE_TURNS
+    most > SIZE_TURNS
 }
 
 /// The reading of the lines of a segment without drawn parts (see [`grid_cells`]), after the
