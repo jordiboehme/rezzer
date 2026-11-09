@@ -174,7 +174,7 @@ jobs:
       # `fallback: none` fails the step rather than downloading an unpinned
       # binary. The second step is the same install and runs only after the
       # first one failed (a bad network day).
-      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+      - uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
         id: about
         continue-on-error: true
         with:
@@ -185,7 +185,7 @@ jobs:
         if: ${{ steps.about.outcome == 'failure' }}
         run: sleep 30
 
-      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+      - uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
         if: ${{ steps.about.outcome == 'failure' }}
         with:
           tool: cargo-about@0.9.3
@@ -345,7 +345,7 @@ jobs:
       # binary.
       # The second step is the same install and runs only after the first
       # one failed (a bad network day).
-      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+      - uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
         id: auditable
         continue-on-error: true
         with:
@@ -356,7 +356,7 @@ jobs:
         if: ${{ steps.auditable.outcome == 'failure' }}
         run: sleep 30
 
-      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+      - uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
         if: ${{ steps.auditable.outcome == 'failure' }}
         with:
           tool: cargo-auditable@0.7.7
@@ -694,7 +694,7 @@ jobs:
       # `fallback: none` fails the step rather than downloading an unpinned
       # binary. The second step is the same install and runs only after the
       # first one failed (a bad network day).
-      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+      - uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
         id: cyclonedx
         continue-on-error: true
         with:
@@ -705,7 +705,7 @@ jobs:
         if: ${{ steps.cyclonedx.outcome == 'failure' }}
         run: sleep 30
 
-      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+      - uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
         if: ${{ steps.cyclonedx.outcome == 'failure' }}
         with:
           tool: cargo-cyclonedx@0.5.9

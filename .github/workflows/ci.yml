@@ -256,7 +256,7 @@ jobs:
 
       # The install-action download can fail on a bad network day. The second
       # step is the same install and runs only after the first one failed.
-      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+      - uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
         id: nextest
         continue-on-error: true
         with:
@@ -267,7 +267,7 @@ jobs:
         if: ${{ steps.nextest.outcome == 'failure' }}
         run: sleep 30
 
-      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+      - uses: taiki-e/install-action@682ce6c3c696a4cd5168a05f98e51aa02b877941 # v2.89.1
         if: ${{ steps.nextest.outcome == 'failure' }}
         with:
           tool: nextest@0.9.149
@@ -358,7 +358,7 @@ jobs:
         uses: devops-actions/actionlint@ec02b36684b2f574f1d219ad0a43b082e46bf3e4 # v0.1.13
 
       - name: zizmor
-        uses: zizmorcore/zizmor-action@53290badfa369cb0bf7ad16342cb62c2fa47ac7b # v0.8.0
+        uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
         with:
           version: 1.31.1
           advanced-security: false
