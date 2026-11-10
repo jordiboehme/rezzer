@@ -69,7 +69,7 @@ base64 = "=0.23.1"
 percent-encoding = "=2.3.2"
 # NFC file names and links (ruling P5-W); already in the tree through stringprep.
 unicode-normalization = "=0.1.26"
-formualizer-parse = { version = "=4.1.0", default-features = false }
+formualizer-parse = { version = "=4.2.0", default-features = false }
 quick-xml = "=0.42.0"
 calamine = { version = "=0.38.0", default-features = false }
 lopdf = { version = "=0.46.0", default-features = false }
