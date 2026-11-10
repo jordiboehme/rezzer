@@ -28,6 +28,10 @@ pub(crate) enum Cause {
     /// (Task 19 brief step 4, cosmetic): every text stands once and in order; Task 36 wins it
     /// back.
     Spatial,
+    /// A class of break whose general fix a later task owns, named here (Task 20): the
+    /// region kinds of a generated page, held since Task 20, that the task of step 5 named
+    /// (for example `"Task 26"`) is to bring right.
+    Class(&'static str),
 }
 
 /// A pinned break.
@@ -141,9 +145,9 @@ pub(crate) const KNOWN: &[Known] = &[
             "scale 0.7, larger text, courier, turned 270, row under",
             "scale 0.75, smaller text, proportional, row under",
         ],
-        broken: &[Inv::Table],
-        cause: Cause::New,
-        why: "the table of three columns of the `row under` neighbour stands 2.4 lines under the last amount, with no rule between: the lines of both are one block of columns to the borderless detector, which refuses it with a loss (some of its text stands between its columns); the text stays paragraphs, never mixed into one table",
+        broken: &[Inv::Table, Inv::RegionKind],
+        cause: Cause::Class("Task 29"),
+        why: "the table of three columns of the `row under` neighbour stands 2.4 lines under the last amount, with no rule between: the lines of both are one block of columns to the borderless detector, which refuses it with a loss (some of its text stands between its columns); the text stays paragraphs, never mixed into one table, so the header `Art` and the last amount stand in paragraph regions, not a table region. Task 29 (item tables: gutter grids and their header rows) owns the general fix",
     },
     Known {
         shape: "address columns in the body",

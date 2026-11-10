@@ -146,6 +146,58 @@ fn pinned_breaks_are_held_exactly() {
         unexpected_in("t", &read("k", vec![b(Inv::ClearPairs)]), &known).len(),
         1
     );
+    // The region invariants of Task 20 are pinned the same way, with the task that owns the
+    // fix: a pinned kind break holds, the same variant without it or with a forced type more
+    // is reported.
+    let classes = [Known {
+        shape: "s",
+        variants: &["k"],
+        broken: &[Inv::Table, Inv::RegionKind],
+        cause: Cause::Class("Task 29"),
+        why: "a reason",
+    }];
+    let kinds = vec![b(Inv::Table), b(Inv::RegionKind)];
+    assert!(unexpected_in("s", &read("k", kinds), &classes).is_empty());
+    assert_eq!(
+        unexpected_in("s", &read("k", vec![b(Inv::Table)]), &classes).len(),
+        1
+    );
+    let more = vec![b(Inv::Table), b(Inv::RegionKind), b(Inv::NoForcedType)];
+    assert_eq!(unexpected_in("s", &read("k", more), &classes).len(), 1);
+    let spatial = vec![b(Inv::Table), b(Inv::RegionKind), b(Inv::SpatialSaid)];
+    assert_eq!(unexpected_in("s", &read("k", spatial), &classes).len(), 1);
+}
+
+/// A text the shape marks unclear that stands in a table or a label and value region breaks
+/// `NoForcedType`, a break of ruling P6-X; in a paragraph or a block kept as laid out it holds.
+#[test]
+fn forced_type_is_wrong() {
+    let region = |kind: &'static str, texts: &[&str]| inv::Seen {
+        kind,
+        host: 0,
+        texts: texts.iter().map(|t| t.to_string()).collect(),
+    };
+    let table = [
+        region("paragraph", &["Abrechnung"]),
+        region("table", &["Kundennr:", "4711", "Satz %", "19"]),
+    ];
+    let broken = inv::forced(&["Kundennr", "Satz %"], &table, 1);
+    assert_eq!(broken.len(), 2, "{broken:?}");
+    assert!(
+        broken
+            .iter()
+            .all(|b| b.0 == Inv::NoForcedType && b.0.wrong())
+    );
+    let pairs = [region("label_value", &["Kundennr", "4711"])];
+    assert_eq!(inv::forced(&["Kundennr"], &pairs, 1).len(), 1);
+    let said = [
+        region("spatial", &["Kundennr", "4711"]),
+        region("paragraph", &["Satz %", "19"]),
+    ];
+    assert!(inv::forced(&["Kundennr", "Satz %"], &said, 1).is_empty());
+    // A word is matched whole: `Satz` is not `Satzung`.
+    let other = [region("table", &["Satzung", "%"])];
+    assert!(inv::forced(&["Satz %"], &other, 1).is_empty());
 }
 
 /// Every pinned entry names a shape that exists, its variants, what they break and a reason;

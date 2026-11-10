@@ -657,7 +657,7 @@ fn drawn(
 fn f1_to_f3(v: &Variant) -> (Sheet, Option<Extent>) {
     let g = v.geo();
     let mut s = Sheet::new(page(&g, true, true));
-    s.want.headings.push("Hinweise Muster".into());
+    s.want.heading("Hinweise Muster", "heading");
     (s, None)
 }
 
@@ -842,7 +842,8 @@ fn sections(v: &Variant) -> (Sheet, Option<Extent>) {
         .collect();
     let mut s = Sheet::new(b);
     s.once = cells;
-    s.want.tables = vec![owned(&SECTION_A), owned(&SECTION_B)];
+    s.want.table(owned(&SECTION_A), "table");
+    s.want.table(owned(&SECTION_B), "table");
     let e = Extent {
         top: t,
         bottom,
@@ -889,13 +890,16 @@ fn band_table(v: &Variant, spaced: bool) -> (Sheet, Option<Extent>) {
     }
     b.address(&g);
     let mut s = Sheet::new(b);
-    s.want.tables = vec![owned(&[
-        &["Art", "Basis", "Satz", "Betrag"],
-        &["Steuer A", "1.000,00", "10 %", "100,00"],
-        &["", "", "", "20,00"],
-        &["Steuer C", "500,00", "5 %", "25,00"],
-        &["", "", "", "5,00"],
-    ])];
+    s.want.table(
+        owned(&[
+            &["Art", "Basis", "Satz", "Betrag"],
+            &["Steuer A", "1.000,00", "10 %", "100,00"],
+            &["", "", "", "20,00"],
+            &["Steuer C", "500,00", "5 %", "25,00"],
+            &["", "", "", "5,00"],
+        ]),
+        "table",
+    );
     let e = Extent {
         top: t,
         bottom: t - 3.0 * d - 4.5 * d,
@@ -952,7 +956,7 @@ pub(crate) fn shapes() -> Vec<Shape> {
             },
             draw: |v| {
                 let (mut s, e) = with_cells(v, title_box_row, 60, &[&["Angaben zum", "Betrieb"]]);
-                s.want.headings.push("Angaben zum Betrieb".into());
+                s.want.heading("Angaben zum Betrieb", "heading");
                 (s, e)
             },
         },

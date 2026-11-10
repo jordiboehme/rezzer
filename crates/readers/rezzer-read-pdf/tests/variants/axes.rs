@@ -425,6 +425,39 @@ pub(crate) struct Want {
     /// may stand in the read, nor any of their characters past ASCII (P6-X: the glyph text of
     /// a code is a wrong value).
     pub glyph_text: Vec<String>,
+    /// Texts and the region kind each must stand in (Task 20): the name of a
+    /// `layoutregions::Kind` (`table`, `label_value`, `totals`, `heading`, ...).
+    pub kinds: Vec<(String, &'static str)>,
+    /// Texts that must stand in a spatial block, kept as laid out with its loss (Task 20). No
+    /// shape has one yet: every spatial read of a generated page today is a right read kept as
+    /// laid out (Task 36 debt), not one its layout calls for.
+    pub spatial: Vec<String>,
+}
+
+impl Want {
+    /// A table to find, whose first text of its first and of its last row must stand in a
+    /// region of kind `kind` (`table`, `label_value` or `totals`: a table block is written
+    /// from each of them).
+    pub(crate) fn table(&mut self, rows: Vec<Vec<String>>, kind: &'static str) {
+        let first = |row: &Vec<String>| row.iter().find(|c| !c.trim().is_empty()).cloned();
+        for t in [rows.first(), rows.last()]
+            .into_iter()
+            .flatten()
+            .filter_map(first)
+        {
+            if !self.kinds.contains(&(t.clone(), kind)) {
+                self.kinds.push((t, kind));
+            }
+        }
+        self.tables.push(rows);
+    }
+
+    /// A heading to find, which must stand in a region of kind `kind` (`heading`, or
+    /// `title_block` for the title of the first page).
+    pub(crate) fn heading(&mut self, text: &str, kind: &'static str) {
+        self.headings.push(text.to_string());
+        self.kinds.push((text.to_string(), kind));
+    }
 }
 
 /// One page of a variant: what is drawn and what it must read as.
@@ -487,6 +520,15 @@ pub(crate) fn page_of(shape: &Shape, v: Variant) -> Page {
             }
             finish(&v, &mut sheet);
             expect_drawn(&mut sheet, n + 1);
+            // A title block is the title of the first page; the same lines on a later page
+            // are a heading.
+            if n > 0 {
+                for (_, kind) in &mut sheet.want.kinds {
+                    if *kind == "title_block" {
+                        *kind = "heading";
+                    }
+                }
+            }
             sheet
         })
         .collect();

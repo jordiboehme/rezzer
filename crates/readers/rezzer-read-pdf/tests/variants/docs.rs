@@ -104,8 +104,10 @@ fn sheet(v: &Variant, template: String, body_top: f32, span: Option<Span>) -> Sh
                         t += &show(font, 8.0 * k, *x, y, c);
                     }
                 }
-                want.tables
-                    .push(owned(&rows.iter().map(|r| &r[..]).collect::<Vec<_>>()));
+                want.table(
+                    owned(&rows.iter().map(|r| &r[..]).collect::<Vec<_>>()),
+                    "table",
+                );
             }
             Next::None | Next::Beside => {}
         }
@@ -260,13 +262,14 @@ fn items_sized(
             .iter()
             .map(|r| r.iter().map(|c| c.to_string()).collect()),
     );
-    s.want.tables.push(table);
+    s.want.table(table, "table");
     if end {
-        s.want.tables.push(
+        s.want.table(
             totals
                 .iter()
                 .map(|(l, v)| vec![l.to_string(), v.to_string()])
                 .collect(),
+            "totals",
         );
     }
     s
@@ -351,7 +354,7 @@ fn totals_drawn(v: &Variant, rows: &[TotalsRow], last: f32, under: Under) -> She
             bottom: y(low + 14.0),
         }),
     );
-    s.want.tables.push(table);
+    s.want.table(table, "totals");
     s
 }
 
@@ -636,10 +639,11 @@ fn two_lines_in_columns(v: &Variant) -> Sheet {
     }
     let bottom = top - 2.6 * size;
     let mut s = sheet(v, t, 420.0, Some(Span { top, bottom }));
-    s.want.tables.push(
+    s.want.table(
         rows.iter()
             .map(|r| r.iter().map(|c| c.to_string()).collect())
             .collect(),
+        "label_value",
     );
     s
 }
@@ -808,10 +812,11 @@ fn numbered_labels(v: &Variant) -> Sheet {
     }
     let bottom = top - 2.4 * size;
     let mut s = sheet(v, t, 420.0, Some(Span { top, bottom }));
-    s.want.tables.push(
+    s.want.table(
         rows.iter()
             .map(|r| r.iter().map(|c| c.to_string()).collect())
             .collect(),
+        "label_value",
     );
     s.want
         .no_losses
@@ -985,7 +990,7 @@ fn credit_over_total(v: &Variant) -> Sheet {
     y -= pitch;
     t += &show(plain, size, 480.0, y, "80,00");
     let mut s = sheet(v, t, 420.0, Some(Span { top, bottom: y }));
-    s.want.tables.push(table);
+    s.want.table(table, "table");
     s
 }
 
@@ -1250,10 +1255,11 @@ fn titles_over_a_stop(v: &Variant) -> Sheet {
     }
     let bottom = top - 1.3 * size;
     let mut s = sheet(v, t, 420.0, Some(Span { top, bottom }));
-    s.want.tables.push(
+    s.want.table(
         rows.iter()
             .map(|r| r.iter().map(|c| c.to_string()).collect())
             .collect(),
+        "label_value",
     );
     s
 }
@@ -1275,10 +1281,11 @@ fn two_lines_in_a_strip(v: &Variant) -> Sheet {
     let bottom = top - 1.3 * size - 0.5 * size;
     t += &rule(v, 36.0, 520.0, bottom, size);
     let mut s = sheet(v, t, 420.0, Some(Span { top, bottom }));
-    s.want.tables.push(
+    s.want.table(
         rows.iter()
             .map(|r| r.iter().map(|c| c.to_string()).collect())
             .collect(),
+        "label_value",
     );
     s
 }
@@ -1350,7 +1357,7 @@ fn period_items_of(v: &Variant, range: bool, last: bool) -> Sheet {
     }
     let mut s = sheet(v, t, 420.0, Some(Span { top, bottom: y }));
     if range {
-        s.want.tables.push(table);
+        s.want.table(table, "table");
     } else {
         s.want.apart.push(("5,00".into(), "125,00".into()));
     }
@@ -1428,7 +1435,7 @@ fn close_titles(v: &Variant) -> Sheet {
     let mut s = sheet(v, t, 420.0, Some(span));
     let mut table = owned(&[&["Pos", "Artikel", "Menge", "Einheit", "Betrag"]]);
     table.extend(owned(&rows.iter().map(|r| &r[..]).collect::<Vec<_>>()));
-    s.want.tables.push(table);
+    s.want.table(table, "table");
     s
 }
 
@@ -1459,11 +1466,12 @@ fn title_beside_fields(v: &Variant) -> Sheet {
         bottom: base(3),
     };
     let mut s = sheet(v, t, 500.0, Some(span));
-    s.want.tables.push(
+    s.want.table(
         TITLE_FIELDS
             .iter()
             .map(|f| f.iter().map(|c| c.to_string()).collect())
             .collect(),
+        "label_value",
     );
     s.want
         .apart
@@ -1724,7 +1732,7 @@ fn rows_shape(v: &Variant, what: Rows) -> Sheet {
             .extend(row.iter().filter(|c| !c.is_empty()).map(|c| c.to_string()));
     }
     match what {
-        Rows::Table | Rows::Records => s.want.tables.push(owned(rows)),
+        Rows::Table | Rows::Records => s.want.table(owned(rows), "table"),
         Rows::Labels => s.want.losses.push("labels beside values".into()),
         Rows::Headed => s.want.losses.push("under their headings".into()),
     }
@@ -1828,16 +1836,25 @@ fn two_tables_or_note(v: &Variant, second_kind: Second, inner: f32) -> Sheet {
     let mut s = sheet(v, t, 420.0, Some(span));
     if note {
         let all: Vec<&[&str]> = first.iter().chain(second).map(|r| &r[..]).collect();
-        s.want.tables.push(owned(&all));
+        s.want.table(owned(&all), "table");
         // The note row may head a table of its own (Task 15b part 2d fix round 1): said.
         s.want.losses.push("may start a table of its own".into());
     } else {
-        s.want
-            .tables
-            .push(owned(&first.iter().map(|r| &r[..]).collect::<Vec<_>>()));
-        s.want
-            .tables
-            .push(owned(&second.iter().map(|r| &r[..]).collect::<Vec<_>>()));
+        s.want.table(
+            owned(&first.iter().map(|r| &r[..]).collect::<Vec<_>>()),
+            "table",
+        );
+        // A header and one row are read as labels over their values (Task 18b: titles over
+        // one table row read as pairs).
+        let kind = if second_kind == Second::PlainOne {
+            "label_value"
+        } else {
+            "table"
+        };
+        s.want.table(
+            owned(&second.iter().map(|r| &r[..]).collect::<Vec<_>>()),
+            kind,
+        );
     }
     s
 }
@@ -1995,14 +2012,15 @@ fn prose_beside(v: &Variant, beside: Beside) -> Sheet {
         Beside::Nothing => {}
     }
     let mut s = sheet(v, t, 450.0, None);
-    s.want.headings.push("Ergebnisse der Messung".into());
+    s.want.heading("Ergebnisse der Messung", "title_block");
     s.want.title = Some("Ergebnisse der Messung".into());
     s.want.paragraphs.push(PROSE[..3].join(" "));
     s.want.paragraphs.push(PROSE[3..].join(" "));
     if beside == Beside::Table {
-        s.want
-            .tables
-            .push(owned(&rows.iter().map(|r| &r[..]).collect::<Vec<_>>()));
+        s.want.table(
+            owned(&rows.iter().map(|r| &r[..]).collect::<Vec<_>>()),
+            "table",
+        );
     }
     s
 }
