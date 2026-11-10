@@ -17,7 +17,11 @@ skipped; `cargo clippy --workspace --all-targets -- -D warnings` clean on the ho
 `x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc`; `cargo fmt --all --check` clean;
 `cargo deny --all-features --locked check` ok for advisories, bans, licenses and sources (the
 duplicate warnings are the same as on main). No snapshot or golden file changed. The fuzz crate
-builds with `cargo check`.
+builds with `cargo check`, and every crate it shares with the workspace lock has the same
+version.
+
+In the PDF area this branch changes only `crates/formats/pdfparts/tests/meta.rs` (one test
+fixture), so a merge with the PDF work in progress should not conflict.
 
 ## Release age and the dependabot cooldown
 
@@ -169,8 +173,12 @@ the page walk and the standard security handler (`decrypt_object`, `EncryptionSt
 - Breaking: none. The `#[tool]` macros and `schema_for_output` keep their API.
 - Behaviour change: `schema_for_output` now builds the output schema for the serialize contract
   (#1378): an `Option` without `skip_serializing_if` is `required`. Rezzer uses it for
-  `RezOutput` in `rezzer-mcp/src/lib.rs`. No test or snapshot changed, so the advertised schema
-  either stayed the same or is not pinned by a test. Worth a look at `tools/list` once.
+  `RezOutput` (`rezzer-mcp/src/tools.rs`, wired in `lib.rs`). Its fields `page`, `format`,
+  `sha256` and `main_file` are always written (as null when empty), so the `rez` output schema
+  in `tools/list` now lists them as required; `message` is skipped when empty and stays
+  optional. This matches what the server sends, so it does not break a client; it is a small,
+  correct change to the MCP contract. `rez_declares_an_output_schema` checks the properties,
+  not `required`, so no test changed.
 - Bugs: "don't treat `_meta` alone as a CallToolResult" (#1405), protocol error replies kept
   across cancellation (#1370). These are relevant to the stdio server but no test showed a
   difference. GHSA-c9f9-cp8h-jcj5 (unbounded response body in Streamable HTTP clients) does
@@ -191,7 +199,10 @@ No changelog and no GitHub tag for 0.9.4; read from the commit list.
   899 are treated as unknown; PDF417 handles ECI codewords 925 and 926; RSS Expanded uses the
   2023 GS1 AI table; EAN-2 add-ons are decoded from the found guard. The barcode tests all pass
   unchanged, so our test codes do not use these cases. Real QR codes with Latin-1 text or long
-  Code 128 codes would read better now.
+  Code 128 codes would read better now. Rezzer passes no `CharacterSet` hint, so QR byte mode
+  without an ECI goes through rxing's guess. The new guess (`common/string_utils.rs`) still
+  returns UTF-8 for valid UTF-8 with a multi-byte character, so codes made by phones keep
+  decoding as UTF-8; only bytes that are neither UTF-8 nor Shift_JIS now fall to ISO-8859-1.
 - Jordi's own fix for the MaxiCode detector loop on narrow images is in this release. Rezzer
   never asks for MaxiCode, so it was not reachable.
 
@@ -253,8 +264,9 @@ small. The other two breaks are easy: `Device::begin_marked_content` takes the p
 dictionary instead of an MCID (read `/MCID` from it), and `InterpreterSettings::render_annotations`
 became `render_content` (`RenderContent::PAGE`). `kurbo` stays at 0.13.
 
-What 0.9 would give us: one skrifa and one read-fonts copy (hayro-font uses skrifa 0.49, so
-skrifa 0.46.2 and read-fonts 0.43.3 drop out), character codes and the property list given to
+What 0.9 would give us: one copy fewer of skrifa and read-fonts (hayro-font uses skrifa 0.49,
+so skrifa 0.46.2 and read-fonts 0.43.3 drop out; skrifa 0.44.0 and read-fonts 0.41.0 stay in
+the lock through glifo under vello_cpu, hayro's renderer), character codes and the property list given to
 devices, better Unicode mapping of glyph names, the `Crypt` filter, text with render mode 7 as
 invisible text, and many fixes for panics and memory use on malformed files.
 
@@ -281,5 +293,9 @@ archived.
   terminal view.
 - adler2 2.0.1 and unicode-bidi 0.3.18: quiet but finished. adler2 is already in the tree
   through miniz_oxide.
-- Duplicates that stay until hayro moves: skrifa 0.46.2 and read-fonts 0.43.3 (from hayro
-  0.8), brotli-decompressor 5.0.3 (from brotli 8 under hayro-cmap).
+- Duplicates: skrifa 0.46.2 and read-fonts 0.43.3 (from hayro-interpret 0.8) go away with
+  hayro 0.9; skrifa 0.44.0 and read-fonts 0.41.0 (glifo under vello_cpu) and
+  brotli-decompressor 5.0.3 (brotli 8 under hayro-cmap) stay after that.
+- Holding hayro also leaves out 0.9's fixes for panics, stack overflows and large allocations
+  on malformed files. A stack overflow aborts the process past `catch_unwind`, and Rezzer reads
+  hostile PDFs. Bump as soon as a hayro release has `GlyphRun::font_dict()`.
