@@ -46,9 +46,8 @@ pub(crate) struct BoxTitle {
     pub text: Vec<Run>,
     /// The ids of the runs of `runs` and `text` (see [`Flow::ids`]), in the order taken.
     pub ids: Vec<u32>,
-    /// The box of the drawn box or rule the title was read by (its frame, its box, the rule
-    /// under it), in the frame of the runs. Its region reaches over it.
-    pub drawn: Option<[f32; 4]>,
+    /// The ids of the runs of `text`, in the order taken.
+    pub text_ids: Vec<u32>,
 }
 
 /// A table of two columns, a label and its value in each row, for `fields` in order; `top` is

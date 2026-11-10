@@ -9,15 +9,12 @@
 use layoutregions::segment::drawn::{Grids, Line, Unsearched};
 
 use super::*;
-use crate::layout::Slot;
 use crate::regions::{Index, regions_of};
 use crate::tables::LABEL_STEP;
 use crate::tables::banded::{Heads, heads_lines};
 use layoutregions::extract::pairs::{touch_reach, touching};
 
-/// The note before the first table of drawn boxes of a page.
-pub(super) const BOX_FOUND_BY: &str = "Found by: label and value pairs from drawn boxes; the label \
-     is the smaller text at the top of each box.";
+pub(super) use crate::found::BOX_FOUND_BY;
 
 /// What [`box_pairs`] reads: the tables and titles, the losses of the boxes read as they stand
 /// with their runs (see [`Doubts`]), and why the page was looked at only in part.
@@ -69,15 +66,6 @@ pub(crate) fn box_pairs(
     for (i, r) in regions.iter().enumerate() {
         if let Some(b) = r {
             in_box[*b as usize].push(i);
-            // The text of a box is a block of its own (see [`Slot::Block`]): a paragraph never
-            // goes on from one box into the next (boxes of fields in a column whose labels and
-            // values are of one style), nor into text outside its box. Box blocks count down
-            // from the top of the numbers, apart from the blocks of cells read one by one.
-            if let Some(slot) = flow.slots.get_mut(i)
-                && *slot == Slot::Free
-            {
-                *slot = Slot::Block(usize::MAX - *b as usize);
-            }
         }
     }
     // Framed boxes with a title over their lines, found by the frame: the frame's text is
@@ -459,7 +447,7 @@ pub(crate) fn box_pairs(
             runs: Vec::new(),
             text: Vec::new(),
             ids: Vec::new(),
-            drawn: union(f.boxes.iter().map(|&b| boxes[b])),
+            text_ids: Vec::new(),
         });
     }
     for (b, ids) in in_box.iter().enumerate() {
@@ -478,7 +466,7 @@ pub(crate) fn box_pairs(
             runs: Vec::new(),
             text: Vec::new(),
             ids: Vec::new(),
-            drawn: Some(boxes[b]),
+            text_ids: Vec::new(),
         });
     }
     // The runs of the tables and the titles leave the flow at once.
@@ -500,6 +488,7 @@ pub(crate) fn box_pairs(
             (None, Some((k, true))) => {
                 titles[k].text.push(run);
                 titles[k].ids.push(id);
+                titles[k].text_ids.push(id);
             }
             (None, None) => {}
         }

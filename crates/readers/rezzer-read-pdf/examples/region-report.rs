@@ -9,6 +9,8 @@
 //! path>.md` (rendered as the pipeline renders it) and `.json` (the `Document`). The time
 //! limit is one hour, so no note about a time limit depends on the load of the machine and two
 //! dumps of the same files are the same. The inputs are untrusted data and are only read.
+//! With `REZZER_ENGINE_DIR` set, it also writes the engine report of each file there, at the
+//! path of its `.json` (see `rezzer_read_pdf::engine_report`).
 //!
 //! `region-report counts [--per-file] [--check <file>] <set>...` reads every `.pdf` of each
 //! set (a file or a folder, as for `dump`) with the regions of its pages and prints
@@ -17,14 +19,6 @@
 //! each file and each kind it has instead. With `--check <file>` it compares the first set's
 //! column with `<file>` (lines `kind\tcount`, as the first column prints) and exits 1 on a
 //! difference, naming the old and the new line.
-//!
-//! `region-report shadow [--extent] [--records <file>] <input>...` reads every `.pdf` of the
-//! inputs with the scored reading of each page beside the in-order one (see
-//! `rezzer_read_pdf::shadow`) and prints `file\tpage\tanchor\tin-order kind\tscored
-//! kind\tcertainty\tbest signals\textent` for each region where the two differ in kind or
-//! certainty (with `--extent`, in extent too). `--records` writes the raw comparison of every
-//! page to `<file>`, each line led by the file. The shadow runs only in a debug build with
-//! `REZZER_SHADOW` set.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -33,10 +27,7 @@ use std::time::Duration;
 
 use layoutregions::Kind;
 use rezzer_limits::{Budget, Limits};
-use rezzer_model::{
-    Bytes, Confidence, Detection, FormatId, ReadOptions, ReadOutcome, Reader, Source,
-};
-use rezzer_read_pdf::PdfReader;
+use rezzer_model::{Bytes, Confidence, Detection, FormatId, ReadOptions, ReadOutcome, Source};
 use sha2::{Digest, Sha256};
 
 /// The allocator of the Rezzer binary, so the reads run as they run in it.
@@ -109,9 +100,18 @@ fn budget() -> Budget {
     })
 }
 
-/// The Markdown and the JSON of one read of `bytes`, named `name`.
-fn read(name: &str, bytes: Vec<u8>) -> (String, String) {
-    let out: ReadOutcome = PdfReader.read(&source(name, bytes), &ReadOptions::default(), &budget());
+/// With this set, `dump` also writes the engine report of each file (see
+/// [`rezzer_read_pdf::engine_report`]) to the folder it names, at the path of its JSON.
+const ENGINE_DIR: &str = "REZZER_ENGINE_DIR";
+
+/// The Markdown, the JSON and the engine report (see [`rezzer_read_pdf::engine_report`]) of
+/// one read of `bytes`, named `name`.
+fn read(name: &str, bytes: Vec<u8>) -> (String, String, String) {
+    let (out, pages): (ReadOutcome, _) = rezzer_read_pdf::read_engine_pages(
+        &source(name, bytes),
+        &ReadOptions::default(),
+        &budget(),
+    );
     let options = rezzer_render::RenderOptions {
         generated_at: GENERATED_AT.to_string(),
         rezzer_version: "dump".to_string(),
@@ -119,7 +119,7 @@ fn read(name: &str, bytes: Vec<u8>) -> (String, String) {
     };
     let markdown = rezzer_render::render(&out.document, out.completeness, &options);
     let json = serde_json::to_string_pretty(&out.document).expect("the model serializes");
-    (markdown, json)
+    (markdown, json, rezzer_read_pdf::engine_report(&pages))
 }
 
 /// Writes `text` to `<out>/<relative>`, making the folders.
@@ -167,11 +167,14 @@ fn dump(out: &Path, inputs: &[String]) -> Result<usize, String> {
                 ));
             }
             let bytes = std::fs::read(&file).map_err(|e| format!("{}: {e}", file.display()))?;
-            let (markdown, json) = read(&name_of(&file), bytes);
+            let (markdown, json, engine) = read(&name_of(&file), bytes);
             let (root, file) = (root.to_string_lossy(), file.to_string_lossy());
             let io = |e: std::io::Error| format!("{file}: {e}");
             write(out, &out_path(&root, &file, "md"), &markdown).map_err(io)?;
             write(out, &out_path(&root, &file, "json"), &json).map_err(io)?;
+            if let Some(dir) = std::env::var_os(ENGINE_DIR) {
+                write(Path::new(&dir), &out_path(&root, &file, "json"), &engine).map_err(io)?;
+            }
             count += 1;
         }
     }
@@ -268,80 +271,8 @@ impl Counts {
     }
 }
 
-/// The `shadow` mode: see the module. `Ok((lines, pages))`: the lines printed, and the pages
-/// laid out without a shadow (a stop came before the drawn search).
-fn shadow(args: &[String]) -> Result<(usize, usize), String> {
-    if !cfg!(debug_assertions) || std::env::var_os("REZZER_SHADOW").is_none() {
-        return Err("the shadow runs only in a debug build with REZZER_SHADOW set".to_string());
-    }
-    let mut extent = false;
-    let mut records: Option<String> = None;
-    let mut inputs = Vec::new();
-    let mut it = args.iter();
-    while let Some(a) = it.next() {
-        match a.as_str() {
-            "--extent" => extent = true,
-            "--records" => records = Some(it.next().ok_or("--records needs a file")?.clone()),
-            flag if flag.starts_with("--") => return Err(format!("unknown option {flag}")),
-            _ => inputs.push(a.clone()),
-        }
-    }
-    if inputs.is_empty() {
-        return Err("no input to read".to_string());
-    }
-    let mut raw = String::new();
-    let mut printed = 0;
-    let mut without = 0;
-    for input in &inputs {
-        let (root, files) = files_of(input)?;
-        for file in files {
-            let bytes = std::fs::read(&file).map_err(|e| format!("{}: {e}", file.display()))?;
-            let (_, pages) = rezzer_read_pdf::read_engine_pages(
-                &source(&name_of(&file), bytes),
-                &ReadOptions::default(),
-                &budget(),
-            );
-            let name = out_path(&root.to_string_lossy(), &file.to_string_lossy(), "")
-                .trim_end_matches('.')
-                .to_string();
-            for page in &pages {
-                without += usize::from(page.shadow.is_none());
-                for line in rezzer_read_pdf::shadow::lines(page, extent) {
-                    println!("{name}\t{line}");
-                    printed += 1;
-                }
-                if records.is_some() {
-                    for line in rezzer_read_pdf::shadow::records(page) {
-                        raw.push_str(&name);
-                        raw.push('\t');
-                        raw.push_str(&line);
-                        raw.push('\n');
-                    }
-                }
-            }
-        }
-    }
-    if let Some(file) = records {
-        std::fs::write(&file, raw).map_err(|e| format!("{file}: {e}"))?;
-    }
-    Ok((printed, without))
-}
-
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.first().is_some_and(|m| m == "shadow") {
-        match shadow(&args[1..]) {
-            Ok((n, without)) => eprintln!("{n} differences, {without} pages without a shadow"),
-            Err(e) => {
-                eprintln!(
-                    "region-report: {e}\nusage: region-report shadow [--extent] [--records \
-                     <file>] <input>..."
-                );
-                std::process::exit(2);
-            }
-        }
-        return;
-    }
     if args.first().is_some_and(|m| m == "counts") {
         let counts = match Counts::parse(&args[1..]) {
             Ok(counts) => counts,
@@ -375,8 +306,7 @@ fn main() {
         _ => {
             eprintln!(
                 "usage: region-report dump <out-dir> <input>...\n       region-report counts \
-                 [--per-file] [--check <file>] <set>...\n       region-report shadow \
-                 [--extent] [--records <file>] <input>..."
+                 [--per-file] [--check <file>] <set>..."
             );
             std::process::exit(2);
         }

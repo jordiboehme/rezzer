@@ -7069,10 +7069,12 @@ fn spatial(lines: &[&[(u32, &str)]]) -> Block {
                     .map(|(col, text)| rezzer_model::SpatialPiece {
                         col: *col,
                         text: (*text).into(),
+                        spans: Vec::new(),
                     })
                     .collect(),
             })
             .collect(),
+        links: Vec::new(),
         anchor: None,
     }
 }
@@ -7085,6 +7087,47 @@ fn spatial_renders_aligned_in_a_fence() {
     ])]);
     assert!(
         md.contains("\n```text\nName        Betrag\nMuster GmbH 1.234,56\n```\n"),
+        "{md}"
+    );
+}
+
+#[test]
+fn spatial_links_and_references_follow_the_fence() {
+    let span = |start, end, link: Option<u32>, note: Option<&str>| rezzer_model::SpatialSpan {
+        start,
+        end,
+        link,
+        footnote: note.map(str::to_string),
+        ..rezzer_model::SpatialSpan::default()
+    };
+    let piece = |col, text: &str, spans| rezzer_model::SpatialPiece {
+        col,
+        text: text.into(),
+        spans,
+    };
+    let line = |pieces| rezzer_model::SpatialLine { pieces };
+    let block = Block::Spatial {
+        lines: vec![
+            line(vec![piece(
+                0,
+                "Name1",
+                vec![span(4, 5, None, Some("p1-1"))],
+            )]),
+            line(vec![piece(0, "www.x.de", vec![span(0, 8, Some(0), None)])]),
+            line(vec![piece(0, "www.x.de", vec![span(0, 8, Some(0), None)])]),
+            line(vec![piece(0, "www.x.de", vec![span(0, 8, Some(0), None)])]),
+            line(vec![piece(0, "y", vec![span(0, 1, Some(1), None)])]),
+        ],
+        links: vec!["http://www.x.de/".into(), "https://y.org/".into()],
+        anchor: None,
+    };
+    let md = body_of(vec![block]);
+    assert!(
+        md.contains(
+            "\n```text\nName1\nwww.x.de\nwww.x.de\nwww.x.de\ny\n```\n\nLinks: \
+             [lines 2 to 4](http://www.x.de/), [line 5](https://y.org/). Footnote references: \
+             line 1[^p1-1].\n"
+        ),
         "{md}"
     );
 }

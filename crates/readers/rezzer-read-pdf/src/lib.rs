@@ -21,6 +21,7 @@ mod codes;
 mod engine;
 mod fallback;
 mod forms;
+mod found;
 mod layout;
 mod marks;
 mod meta;
@@ -31,8 +32,6 @@ mod quote;
 mod regions;
 mod render;
 mod scan;
-#[doc(hidden)]
-pub mod shadow;
 mod symbol;
 mod tables;
 mod text;
@@ -105,9 +104,147 @@ pub struct EnginePage {
     pub regions: layoutregions::PageRegions,
     /// The anchor of the block at each place a region's `host` names, if it has one.
     pub anchors: Vec<Option<String>>,
-    /// The scored reading beside the regions (see [`shadow`]); only in a debug build with
-    /// `REZZER_SHADOW` set.
-    pub shadow: Option<shadow::Shadow>,
+    /// What the block each run (by its id) was written in is (see [`block_word`]), `None` for
+    /// a run written in no block of the page.
+    pub run_blocks: Vec<Option<&'static str>>,
+    /// The place among `block_words` of the block each run (by its id) was written in, `None`
+    /// for a run written in no block of the page.
+    pub run_block_at: Vec<Option<usize>>,
+    /// The layout of the page stopped at a limit before it wrote every block.
+    pub stopped: bool,
+    /// What each block of the page is (see [`block_word`]), by its place: a region's `host`
+    /// names one of them, or a place past them for rows of a table begun on an earlier page.
+    pub block_words: Vec<&'static str>,
+}
+
+/// What a block of a page is, in one word: its type, and for a paragraph with a role of the
+/// page (`page-header`, `page-footer`, `footnote`) that role.
+#[doc(hidden)]
+pub fn block_word(block: &Block) -> &'static str {
+    match block {
+        Block::Heading { .. } => "heading",
+        Block::List { .. } => "list",
+        Block::Table { .. } => "table",
+        Block::Spatial { .. } => "spatial",
+        Block::Section { .. } => "section",
+        Block::Paragraph { role, .. } => match role.as_deref() {
+            Some("page-header") => "page-header",
+            Some("page-footer") => "page-footer",
+            Some("footnote") => "footnote",
+            _ => "paragraph",
+        },
+        _ => "other",
+    }
+}
+
+/// The pages of a read as the region engine laid them out, as JSON, for the measures over
+/// dumped reads: per page its number, whether it stopped, the runs in no region and in two,
+/// and per region its kind, its host's anchor and word (see [`block_word`]; `null` for a host
+/// that is no block of the page) and, per word, how many of its runs with text were written in
+/// such a block (`none` for no block). Not a stable interface.
+#[doc(hidden)]
+pub fn engine_report(pages: &[EnginePage]) -> String {
+    let quote = |s: &str| {
+        let mut q = String::from("\"");
+        for c in s.chars() {
+            match c {
+                '"' => q.push_str("\\\""),
+                '\\' => q.push_str("\\\\"),
+                c if (c as u32) < 0x20 => q.push_str(&format!("\\u{:04x}", c as u32)),
+                c => q.push(c),
+            }
+        }
+        q.push('"');
+        q
+    };
+    let mut out = String::from("[");
+    for (n, p) in pages.iter().enumerate() {
+        let runs = p.input.texts.len();
+        let mut count = vec![0u32; runs];
+        for r in &p.regions.regions {
+            for id in &r.prims {
+                if let layoutregions::PrimId::Text(i) = *id
+                    && let Some(c) = count.get_mut(i as usize)
+                {
+                    *c += 1;
+                }
+            }
+        }
+        let ids = |want: &dyn Fn(u32) -> bool| -> String {
+            let list: Vec<String> = count
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| want(**c))
+                .map(|(i, _)| i.to_string())
+                .collect();
+            format!("[{}]", list.join(","))
+        };
+        if n > 0 {
+            out.push(',');
+        }
+        let issues = format!(
+            "[{}]",
+            p.regions
+                .issues
+                .iter()
+                .map(|i| quote(&format!("{:?}", i.kind)))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        out.push_str(&format!(
+            "\n{{\"page\":{},\"runs\":{runs},\"stopped\":{},\"issues\":{},\"uncovered\":{},\"twice\":{},\"regions\":[",
+            p.regions.page,
+            p.stopped,
+            issues,
+            ids(&|c| c == 0),
+            ids(&|c| c > 1)
+        ));
+        for (k, r) in p.regions.regions.iter().enumerate() {
+            let mut words: std::collections::BTreeMap<&str, u32> =
+                std::collections::BTreeMap::new();
+            let mut with_text = 0u32;
+            for id in &r.prims {
+                if let layoutregions::PrimId::Text(i) = *id
+                    && let Some(t) = p.input.texts.get(i as usize)
+                    && !t.text.trim().is_empty()
+                {
+                    with_text += 1;
+                    let word = p
+                        .run_blocks
+                        .get(i as usize)
+                        .copied()
+                        .flatten()
+                        .unwrap_or("none");
+                    *words.entry(word).or_insert(0) += 1;
+                }
+            }
+            let host = p
+                .anchors
+                .get(r.host as usize)
+                .cloned()
+                .flatten()
+                .map_or_else(|| "null".to_string(), |a| quote(&a));
+            let host_word = p
+                .block_words
+                .get(r.host as usize)
+                .map_or_else(|| "null".to_string(), |w| quote(w));
+            let blocks: Vec<String> = words
+                .iter()
+                .map(|(w, c)| format!("{}:{c}", quote(w)))
+                .collect();
+            if k > 0 {
+                out.push(',');
+            }
+            out.push_str(&format!(
+                "{{\"kind\":{},\"host\":{host},\"host_word\":{host_word},\"runs\":{with_text},\"blocks\":{{{}}}}}",
+                quote(r.kind.name()),
+                blocks.join(",")
+            ));
+        }
+        out.push_str("]}");
+    }
+    out.push_str("\n]\n");
+    out
 }
 
 /// [`read_with_regions`] with the input of each page, so a test can map a region's pieces back
@@ -777,6 +914,9 @@ fn lay_out(
             for (what, why, severity) in laid.notes {
                 out.loss(format!("p{n}"), what, why, severity);
             }
+            for (at, what, why, severity) in std::mem::take(&mut laid.located) {
+                out.loss(at, what, why, severity);
+            }
             if let Some(note) = laid.found_by {
                 // The footnotes the layout found, said at the top of the page too.
                 found_by_note(
@@ -841,14 +981,29 @@ fn lay_out(
             if let Some(all) = regions.as_deref_mut()
                 && let Some(input) = laid.engine_in.take()
             {
+                let run_blocks = laid
+                    .run_blocks
+                    .iter()
+                    .map(|&b| laid.blocks.get(b as usize).map(block_word))
+                    .collect();
+                let run_block_at = laid
+                    .run_blocks
+                    .iter()
+                    .map(|&b| (b as usize) < laid.blocks.len())
+                    .zip(&laid.run_blocks)
+                    .map(|(ok, &b)| ok.then_some(b as usize))
+                    .collect();
                 all.push(EnginePage {
                     input,
                     regions: page_regions,
+                    run_block_at,
                     anchors: anchors
                         .iter()
                         .map(|a| a.as_ref().map(|a| a.0.clone()))
                         .collect(),
-                    shadow: laid.shadow.take(),
+                    run_blocks,
+                    stopped: laid.stop.is_some(),
+                    block_words: laid.blocks.iter().map(block_word).collect(),
                 });
             }
             blocks.extend(laid.blocks);

@@ -39,13 +39,92 @@ pub struct Piece {
     pub end: usize,
 }
 
+/// A line holds at least this many word gaps besides a wide one for its gaps to say whether
+/// it is justified prose.
+const PROSE_GAPS: usize = 4;
+
+/// A gap after a sentence end in a justified line is at most this many times the line's median
+/// word gap (a stretched line widens the space after a full stop more than its word spaces).
+const SENTENCE_GAP: f32 = 2.5;
+
+/// The median of the word gaps of the line of runs `start..end`: those inside its runs and those
+/// between them. None for a line with fewer than [`PROSE_GAPS`] + 1 gaps. Its work is counted.
+fn median_word_gap<R: LineRun>(runs: &[R], start: usize, end: usize) -> Option<f32> {
+    let mut gaps: Vec<f32> = Vec::new();
+    let mut last: Option<f32> = None;
+    for r in &runs[start..end] {
+        if let Some(e) = last {
+            let g = r.x() - e;
+            if g > 0.0 {
+                gaps.push(g);
+            }
+        }
+        gaps.extend(r.gaps().map(|g| g.to - g.from).filter(|g| *g > 0.0));
+        last = Some(r.x() + r.w());
+    }
+    crate::work::add(gaps.len() as u64 + (end - start) as u64);
+    if gaps.len() <= PROSE_GAPS {
+        return None;
+    }
+    gaps.sort_by(f32::total_cmp);
+    Some(gaps[gaps.len() / 2])
+}
+
+/// Whether the wide gap between `before` and `after` is the space after a sentence end in a
+/// justified line, not a gap between cells: `before` ends a sentence (a word of two letters or
+/// more and a full stop, question or exclamation mark), `after` starts with a capital letter,
+/// and the gap is at most [`SENTENCE_GAP`] times the line's median word gap (`median`, worked
+/// out once when first needed). Positive evidence only: without it the gap parts the line.
+fn sentence_gap<R: LineRun>(
+    before: &R,
+    after: &R,
+    gap: f32,
+    median: &mut dyn FnMut() -> Option<f32>,
+) -> bool {
+    let b = before.text().trim_end();
+    let Some(word) = b
+        .strip_suffix(['.', '?', '!'])
+        .and_then(|t| t.split_whitespace().last())
+    else {
+        return false;
+    };
+    if word.chars().count() < 2 || !word.chars().all(char::is_alphabetic) {
+        return false;
+    }
+    if !after
+        .text()
+        .trim_start()
+        .chars()
+        .next()
+        .is_some_and(char::is_uppercase)
+    {
+        return false;
+    }
+    median().is_some_and(|m| gap <= SENTENCE_GAP * m)
+}
+
+/// The median word gap of the line of runs `start..end`, worked out on the first call.
+fn lazy_median<R: LineRun>(
+    runs: &[R],
+    start: usize,
+    end: usize,
+) -> impl FnMut() -> Option<f32> + '_ {
+    let mut cache: Option<Option<f32>> = None;
+    move || *cache.get_or_insert_with(|| median_word_gap(runs, start, end))
+}
+
 /// How many pieces [`pieces_of`] finds in the line of runs `start..end`, without building
 /// them.
 pub fn piece_count<R: LineRun>(runs: &[R], start: usize, end: usize) -> usize {
     let mut n = 0;
     let mut last = f32::MIN;
-    for r in &runs[start..end] {
-        if n == 0 || r.x() - last > CELL_GAP * r.size().max(1.0) {
+    let mut median = lazy_median(runs, start, end);
+    for (i, r) in runs.iter().enumerate().take(end).skip(start) {
+        let gap = r.x() - last;
+        if n == 0
+            || (gap > CELL_GAP * r.size().max(1.0)
+                && !sentence_gap(&runs[i - 1], r, gap, &mut median))
+        {
             n += 1;
             last = r.x() + r.w();
         } else {
@@ -59,10 +138,14 @@ pub fn piece_count<R: LineRun>(runs: &[R], start: usize, end: usize) -> usize {
 /// are one piece.
 pub fn pieces_of<R: LineRun>(runs: &[R], start: usize, end: usize) -> Vec<Piece> {
     let mut out: Vec<Piece> = Vec::new();
+    let mut median = lazy_median(runs, start, end);
     for (i, r) in runs.iter().enumerate().take(end).skip(start) {
         let x0 = r.x();
         match out.last_mut() {
-            Some(p) if x0 - p.x1 <= CELL_GAP * r.size().max(1.0) => {
+            Some(p)
+                if x0 - p.x1 <= CELL_GAP * r.size().max(1.0)
+                    || sentence_gap(&runs[i - 1], r, x0 - p.x1, &mut median) =>
+            {
                 p.x1 = p.x1.max(r.x() + r.w());
                 p.end = i + 1;
             }

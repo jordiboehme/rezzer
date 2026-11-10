@@ -24,6 +24,36 @@ pub struct SpatialPiece {
     /// is written as a space.
     pub col: u32,
     pub text: String,
+    /// The parts of `text` that carry more than their text, left to right, none overlapping:
+    /// a link, a footnote reference, emphasis. Empty for plain text.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub spans: Vec<SpatialSpan>,
+}
+
+/// A part of the text of a [`SpatialPiece`] that carries more than its text. The text stays
+/// in the piece as laid out (a footnote marker too); the span says what it is.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct SpatialSpan {
+    /// Character offsets (Unicode scalar values) into the piece's text: from `start` up to,
+    /// not including, `end`.
+    pub start: u32,
+    pub end: u32,
+    /// The link it is: an index into the `links` of its block, so a target long or often
+    /// linked is held once per block.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<u32>,
+    /// The footnote it refers to, as [`Inline::FootnoteRef`] does: the label of the footnote
+    /// (the section anchored `fn:{label}`). The span covers the marker as printed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub footnote: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub emphasis: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub strong: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 /// Block-level content of a document body.
@@ -96,6 +126,9 @@ pub enum Block {
         /// Top to bottom.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         lines: Vec<SpatialLine>,
+        /// The link targets its spans point to, each once.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        links: Vec<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         anchor: Option<Anchor>,
     },

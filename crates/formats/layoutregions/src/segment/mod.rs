@@ -93,6 +93,32 @@ pub struct Segments {
     /// What a limit or the stop callback cut short. Nothing is dropped then: the rest is one
     /// leaf that holds every primitive of it.
     pub issues: Vec<Issue>,
+    /// The segments a limit or the stop callback left one leaf where they would have been
+    /// parted further (see the bounds of [`segment_page`]), ascending: their kind was not
+    /// looked for in full.
+    pub short: Vec<SegId>,
+}
+
+impl Segments {
+    /// For each of `runs` text runs of the page (by its id), whether it stands in a segment
+    /// of [`Segments::short`].
+    pub fn short_texts(&self, runs: usize) -> Vec<bool> {
+        let mut short = vec![false; runs];
+        for s in &self.short {
+            let Some(seg) = self.all.get(s.0 as usize) else {
+                continue;
+            };
+            work::add(seg.prims.len() as u64);
+            for p in &seg.prims {
+                if let PrimId::Text(i) = *p
+                    && let Some(slot) = short.get_mut(i as usize)
+                {
+                    *slot = true;
+                }
+            }
+        }
+        short
+    }
 }
 
 /// The segment tree of `page`, in this order of proposal:
@@ -153,18 +179,21 @@ pub struct Segments {
 /// assert!(s.issues.is_empty());
 /// ```
 pub fn segment_page(page: &PageIn, limits: &Limits, stop: &dyn Fn() -> bool) -> Segments {
-    segment_with(page, None, limits, stop).0
+    segment_with(page, None, None, limits, stop).0
 }
 
-/// [`segment_page`] with the drawn structure it found on the page (from the text the given
-/// regions leave), so a host can type the segments with the structure they were cut by;
-/// `None` when a bound or the stop came before the search.
+/// [`segment_page`] on the grids the host found on the page's rules ([`drawn::grids`] of
+/// `page.rules`, so a page's lines are searched once), with the drawn structure it found from
+/// them (its boxes from the text the given regions leave), so a host can type the segments
+/// with the structure they were cut by; `None` when a bound or the stop came before the
+/// search.
 pub fn segment_page_drawn(
     page: &PageIn,
+    grids: &Result<drawn::Grids, drawn::Unsearched>,
     limits: &Limits,
     stop: &dyn Fn() -> bool,
 ) -> (Segments, Option<drawn::DrawnStructure>) {
-    segment_with(page, None, limits, stop)
+    segment_with(page, Some(grids), None, limits, stop)
 }
 
 /// [`segment_page`] on the drawn structure a host found itself, in the frame of `page`: its
@@ -177,18 +206,20 @@ pub fn segment_drawn(
     limits: &Limits,
     stop: &dyn Fn() -> bool,
 ) -> Segments {
-    segment_with(page, Some(found), limits, stop).0
+    segment_with(page, None, Some(found), limits, stop).0
 }
 
 /// The segments of `page` and the drawn structure found for them when the host gave none.
 fn segment_with(
     page: &PageIn,
+    grids: Option<&Result<drawn::Grids, drawn::Unsearched>>,
     found: Option<&drawn::DrawnStructure>,
     limits: &Limits,
     stop: &dyn Fn() -> bool,
 ) -> (Segments, Option<drawn::DrawnStructure>) {
     let mut b = Builder {
         page,
+        grids,
         limits,
         stop,
         max: limits.max_cut_depth as usize,
@@ -197,6 +228,7 @@ fn segment_with(
         noted: [false; 5],
         stopped: false,
         given: Vec::new(),
+        short: Vec::new(),
     };
     let every = all_prims(page);
     work::add(every.len() as u64);
@@ -208,10 +240,14 @@ fn segment_with(
     };
     let root = b.push(Source::Page, every, Some(frame), None, false);
     let own = b.segment(root, found);
+    let mut short = b.short;
+    short.sort_unstable();
+    short.dedup();
     let out = Segments {
         all: b.all,
         root,
         issues: b.issues,
+        short,
     };
     debug_assert_eq!(cover_problem(&out, page), None);
     (out, own)
@@ -229,6 +265,8 @@ enum Note {
 
 struct Builder<'a> {
     page: &'a PageIn,
+    /// The grids of the page's rules when the host found them (see [`segment_page_drawn`]).
+    grids: Option<&'a Result<drawn::Grids, drawn::Unsearched>>,
     limits: &'a Limits,
     stop: &'a dyn Fn() -> bool,
     max: usize,
@@ -238,6 +276,8 @@ struct Builder<'a> {
     stopped: bool,
     /// The segments of the given regions.
     given: Vec<SegId>,
+    /// The segments a limit or the stop left one leaf (see [`Segments::short`]).
+    short: Vec<SegId>,
 }
 
 /// A grid or box of the page, or the page itself (item 0).
@@ -376,6 +416,7 @@ impl Builder<'_> {
     ) -> Option<drawn::DrawnStructure> {
         let page = self.page;
         if self.halted() {
+            self.short.push(root);
             return None;
         }
         // Given regions first; their primitives are taken out of the rest.
@@ -406,12 +447,19 @@ impl Builder<'_> {
         let mut sub = subtree_prims(&items, self.max);
         if self.max == 0 {
             let parts = regions.len() + own_parts(&items, 0, &sub, regions.len());
-            if parts > 0 || self.text_parts(&items[0].texts) {
+            let text = !regions.is_empty() || self.text_apart(&items, 0, &sub);
+            if text || parts > 0 {
                 self.note(Note::Depth);
+            }
+            if text {
+                self.short.push(root);
             }
             return own;
         }
         if !self.room(regions.len() + own_parts(&items, 0, &sub, regions.len())) {
+            if !regions.is_empty() || self.text_apart(&items, 0, &sub) {
+                self.short.push(root);
+            }
             return own;
         }
         for (kind, prims) in regions {
@@ -453,7 +501,15 @@ impl Builder<'_> {
             work::add(steps);
             found
         };
-        let found = drawn::drawn(page, &inked);
+        let found = match self.grids {
+            Some(grids) => {
+                if let Ok(g) = grids {
+                    work::add((g.hs.len() + g.vs.len()) as u64);
+                }
+                drawn::drawn_on(page, grids.clone(), &inked)
+            }
+            None => drawn::drawn(page, &inked),
+        };
         match (&found.grids, &found.boxes_note) {
             (Err(why), _) => self.issues.push(Issue {
                 what: format!("grids and boxes were not searched: {}", why.why()),
@@ -635,6 +691,7 @@ impl Builder<'_> {
         let d = it.depth;
         // The root was asked before its given regions were made.
         if i != 0 && self.halted() {
+            self.short.push(s);
             return Vec::new();
         }
         let given = if i == 0 {
@@ -643,14 +700,21 @@ impl Builder<'_> {
             Vec::new()
         };
         if d >= self.max {
-            if own_parts(items, i, sub, 0) > 0 || self.text_parts(&it.texts) {
+            let text = self.text_apart(items, i, sub);
+            if text || own_parts(items, i, sub, 0) > 0 {
                 self.note(Note::Depth);
+            }
+            if text {
+                self.short.push(s);
             }
             return Vec::new();
         }
         // The root's parts were reserved with its given regions in `segment`, in one step:
         // the root never returns here once they are made.
         if i != 0 && !self.room(own_parts(items, i, sub, 0)) {
+            if self.text_apart(items, i, sub) {
+                self.short.push(s);
+            }
             return Vec::new();
         }
         // A grid or box whose primitives the given regions took is no segment.
@@ -692,11 +756,33 @@ impl Builder<'_> {
         next
     }
 
-    /// Whether the text runs `ids` would be parted by the cut or by style steps. A stop during
-    /// the probe stops the page and says no.
-    fn text_parts(&mut self, ids: &[u32]) -> bool {
+    /// Whether the text of item `i` would be parted: some of it stands in its drawn children
+    /// (`sub`, or `held` past the depth bound), or the strips between its rules, the cut or
+    /// style steps would part it (see [`Builder::text_parts`]). A bound that leaves only
+    /// drawings or pictures unparted leaves its text as it would read.
+    fn text_apart(&mut self, items: &[Item], i: usize, sub: &[Vec<PrimId>]) -> bool {
+        let it = &items[i];
+        it.children.iter().any(|&c| {
+            work::add(1 + sub[c].len() as u64);
+            items[c].held || sub[c].iter().any(|p| matches!(p, PrimId::Text(_)))
+        }) || {
+            let rules = rules_of(self.page, &it.others);
+            self.text_parts(&it.texts, &rules)
+        }
+    }
+
+    /// Whether the text runs `ids` would be parted as [`Builder::text`] parts them: by the
+    /// strips between `rules` first (see [`strips`]; one strip alone by style steps only), else
+    /// by the cut or by style steps. A stop during the probe stops the page and says no.
+    fn text_parts(&mut self, ids: &[u32], rules: &[Line]) -> bool {
         if ids.len() < 2 {
             return false;
+        }
+        if let Some((groups, rest)) = strips(self.page, ids, rules) {
+            return match (groups.as_slice(), rest.is_empty()) {
+                ([one], true) => style_steps(&self.page.texts, one).len() > 1,
+                _ => true,
+            };
         }
         let pieces: Vec<Piece> = ids
             .iter()
@@ -708,7 +794,7 @@ impl Builder<'_> {
         };
         let found = xy_cut(&pieces, &[], &bound, self.stop);
         if found.short == Some(CutShort::Stopped) {
-            self.short(found.short);
+            self.cut_short(found.short);
             return false;
         }
         if found.groups.len() > 1 || found.short.is_some() {
@@ -722,7 +808,11 @@ impl Builder<'_> {
     /// (see [`strips`]), each parted by style steps only, and the text outside them by the
     /// whitespace cut, then each group by style steps.
     fn text(&mut self, s: SegId, ids: &[u32], d: usize, rules: &[Line]) {
-        if ids.len() < 2 || self.halted() {
+        if ids.len() < 2 {
+            return;
+        }
+        if self.halted() {
+            self.short.push(s);
             return;
         }
         work::add(ids.len() as u64);
@@ -734,10 +824,12 @@ impl Builder<'_> {
             }
             if d >= self.max {
                 self.note(Note::Depth);
+                self.short.push(s);
                 return;
             }
             let parts = groups.len() + usize::from(!rest.is_empty());
             if !self.room(parts) {
+                self.short.push(s);
                 return;
             }
             let mut made = Vec::with_capacity(parts);
@@ -777,17 +869,22 @@ impl Builder<'_> {
             ..*self.limits
         };
         let found = xy_cut(&pieces, rules, &bound, self.stop);
-        self.short(found.short);
+        self.cut_short(found.short);
         if found.groups.len() < 2 {
+            if !found.kept.is_empty() {
+                self.short.push(s);
+            }
             let order: Vec<u32> = found.groups.concat().iter().map(|&k| ids[k]).collect();
             self.style(s, &order, d);
             return;
         }
         if d >= self.max {
             self.note(Note::Depth);
+            self.short.push(s);
             return;
         }
         if !self.room(found.groups.len()) {
+            self.short.push(s);
             return;
         }
         // Every group is made before any is parted, so that the room they took stays theirs.
@@ -797,6 +894,9 @@ impl Builder<'_> {
             let mut prims: Vec<PrimId> = order.iter().map(|&t| PrimId::Text(t)).collect();
             prims.sort_unstable();
             let id = self.push(source_of(&found.splits, g), prims, None, Some(s), true);
+            if found.kept.binary_search(&g).is_ok() {
+                self.short.push(id);
+            }
             made.push((id, order));
         }
         for (id, order) in made {
@@ -805,7 +905,7 @@ impl Builder<'_> {
     }
 
     /// Turns a cut that stopped early into its issue.
-    fn short(&mut self, short: Option<CutShort>) {
+    fn cut_short(&mut self, short: Option<CutShort>) {
         match short {
             Some(CutShort::Depth) => self.note(Note::CutDepth),
             Some(CutShort::Stopped) => {
@@ -819,7 +919,11 @@ impl Builder<'_> {
     /// Parts the text runs `order` (in reading order) of segment `s`, at depth `d`, by style
     /// steps.
     fn style(&mut self, s: SegId, order: &[u32], d: usize) {
-        if order.len() < 2 || self.stopped {
+        if order.len() < 2 {
+            return;
+        }
+        if self.stopped {
+            self.short.push(s);
             return;
         }
         work::add(order.len() as u64);
@@ -829,9 +933,11 @@ impl Builder<'_> {
         }
         if d >= self.max {
             self.note(Note::Depth);
+            self.short.push(s);
             return;
         }
         if !self.room(groups.len()) {
+            self.short.push(s);
             return;
         }
         for g in groups {
@@ -908,7 +1014,7 @@ impl Builder<'_> {
         };
         let found = xy_cut(&pieces, rules, &bound, self.stop);
         if found.short == Some(CutShort::Stopped) {
-            self.short(found.short);
+            self.cut_short(found.short);
             return;
         }
         if found.groups.len() < 2 {
@@ -939,7 +1045,7 @@ impl Builder<'_> {
         if !bounded {
             return;
         }
-        self.short(found.short);
+        self.cut_short(found.short);
         if self.all[s.0 as usize].alternatives.len() >= self.limits.max_alternatives {
             self.note(Note::Alternatives);
             return;
@@ -951,7 +1057,11 @@ impl Builder<'_> {
         for (g, group) in found.groups.iter().enumerate() {
             let mut prims: Vec<PrimId> = group.iter().map(|&k| PrimId::Text(ids[k])).collect();
             prims.sort_unstable();
-            alt.push(self.push(source_of(&found.splits, g), prims, None, Some(s), false));
+            let id = self.push(source_of(&found.splits, g), prims, None, Some(s), false);
+            if found.kept.binary_search(&g).is_ok() {
+                self.short.push(id);
+            }
+            alt.push(id);
         }
         for prims in drawing_parts(&drawing) {
             alt.push(self.push(Source::Drawing, prims, None, Some(s), false));
@@ -1192,6 +1302,16 @@ fn norm(b: Bounds) -> Bounds {
         x1: b.x0.max(b.x1),
         y1: b.y0.max(b.y1),
     }
+}
+
+/// The bounds of `prims` of `page` together; none when none of them is on the page. For a
+/// host that moves primitives from one region to another after the decisions.
+pub fn bounds_of(page: &PageIn, prims: &[PrimId]) -> Option<Bounds> {
+    work::add(prims.len() as u64);
+    prims
+        .iter()
+        .filter_map(|&p| prim_bounds(page, p))
+        .reduce(union)
 }
 
 fn prim_bounds(page: &PageIn, p: PrimId) -> Option<Bounds> {

@@ -273,13 +273,49 @@ pub fn unsure_of(bytes: &[u8], text: &str) -> Vec<(&'static str, Vec<String>)> {
         .collect()
 }
 
-/// Panics unless `bytes` has a region holding a run with `text`, every such region is laid out
-/// as text (`pdf.lines`), and each says `why` among its `unsure` notes.
+/// The kind and signal ids of each region of `bytes` that holds a run whose text contains
+/// `text`.
+pub fn kinds_of(
+    bytes: &[u8],
+    text: &str,
+) -> Vec<(rezzer_read_pdf::layoutregions::Kind, Vec<&'static str>)> {
+    let (_, pages) = read_engine_pages(bytes);
+    pages
+        .iter()
+        .flat_map(|p| {
+            p.regions
+                .regions
+                .iter()
+                .filter(|r| region_texts(p, r).iter().any(|t| t.contains(text)))
+                .map(|r| (r.kind, r.signals.iter().map(|s| s.id).collect()))
+        })
+        .collect()
+}
+
+/// Panics unless `bytes` has a region holding a run with `text`, each such region is of the
+/// kind of text kept as it stands (`Spatial` when kept as laid out, `Paragraph` when its
+/// reader of today kept it as paragraphs; since Task 19 fix round 1a a region says the kind
+/// its runs were written as), and each says `why` among its `unsure` notes (the reason its
+/// readers kept its text as it stands).
 pub fn assert_kept_with_reason(bytes: &[u8], text: &str, why: &str) {
-    let found = unsure_of(bytes, text);
+    use rezzer_read_pdf::layoutregions::Kind;
+    let (_, pages) = read_engine_pages(bytes);
+    let found: Vec<(Kind, &Vec<String>)> = pages
+        .iter()
+        .flat_map(|p| {
+            p.regions
+                .regions
+                .iter()
+                .filter(|r| region_texts(p, r).iter().any(|t| t.contains(text)))
+                .map(|r| (r.kind, &r.unsure))
+        })
+        .collect();
     assert!(!found.is_empty(), "no region holds {text:?}");
-    for (id, unsure) in &found {
-        assert_eq!(*id, "pdf.lines", "{text:?}: {found:?}");
+    for (kind, unsure) in &found {
+        assert!(
+            matches!(kind, Kind::Spatial | Kind::Paragraph),
+            "{text:?}: a region of kind {kind:?} holds it: {found:?}"
+        );
         assert!(
             unsure.iter().any(|u| u.contains(why)),
             "{text:?}: {unsure:?} does not say {why:?}"
@@ -347,6 +383,14 @@ pub fn block_text(block: &Block, out: &mut String) {
                     out.push_str(&plain_text(&cell.inlines));
                     out.push('|');
                 }
+                out.push('\n');
+            }
+        }
+        // Text kept as laid out: each line its pieces left to right, a space between them.
+        Block::Spatial { lines, .. } => {
+            for line in lines {
+                let pieces: Vec<&str> = line.pieces.iter().map(|p| p.text.as_str()).collect();
+                out.push_str(&pieces.join(" "));
                 out.push('\n');
             }
         }
@@ -1993,4 +2037,14 @@ pub fn synthetic_invoice() -> Vec<u8> {
         })
         .collect();
     print_form(&pages, "", "")
+}
+
+/// The loss text `what` of a block kept as laid out without its clause on the bold or italic
+/// text a text fence cannot show (`; its bold text is marked in the JSON only`).
+#[allow(dead_code)]
+pub fn without_style_clause(what: &str) -> &str {
+    match what.rfind("; its ") {
+        Some(i) if what.ends_with("is marked in the JSON only") => &what[..i],
+        _ => what,
+    }
 }

@@ -12,7 +12,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use rezzer_model::{Block, Inline};
+use rezzer_model::{Block, Inline, SpatialLine, SpatialPiece, SpatialSpan};
 
 /// The legend of a page as the file pass finds it, by the page's runs as that pass saw them.
 pub(super) use layoutregions::file::Legend as Found;
@@ -36,6 +36,25 @@ pub(super) struct Legend {
     pub refused: Option<String>,
     /// The ids of the legend's runs (see [`Flow::ids`]).
     pub ids: Vec<u32>,
+}
+
+impl Legend {
+    /// The marker each label of the legend stands for, as printed: `2`, `*`, `3)`.
+    pub(super) fn markers(&self) -> HashMap<String, String> {
+        self.labels
+            .iter()
+            .map(|(m, l)| (l.clone(), printed(*m)))
+            .collect()
+    }
+}
+
+/// A marker as printed.
+fn printed(m: NoteMark) -> String {
+    match m {
+        NoteMark::Stars(c) => "*".repeat(usize::from(c)),
+        NoteMark::Paren(n) => format!("{n})"),
+        NoteMark::Raised(n) => n.to_string(),
+    }
 }
 
 /// `run` cut at `split`: the words before it and the words after it as a run that starts a
@@ -283,6 +302,37 @@ pub(super) fn unlink(blocks: &mut [Block], legend: &Legend, unwritten: &[&str]) 
         }
     };
     walk_inlines(blocks, &mut |i| fix(i));
+    // In text kept as laid out the marker stays as printed; only the reference goes.
+    walk_spatial(blocks, &mut |lines| {
+        for p in lines.iter_mut().flat_map(|l| &mut l.pieces) {
+            for span in &mut p.spans {
+                if span
+                    .footnote
+                    .as_deref()
+                    .is_some_and(|id| unwritten.contains(&id))
+                {
+                    span.footnote = None;
+                }
+            }
+            p.spans
+                .retain(|s| s.link.is_some() || s.footnote.is_some() || s.strong || s.emphasis);
+        }
+    });
+}
+
+/// Calls `f` with the lines of every block of `blocks` kept as laid out, also inside
+/// sections, quotes, callouts and list items.
+fn walk_spatial(blocks: &mut [Block], f: &mut dyn FnMut(&mut Vec<SpatialLine>)) {
+    for b in blocks {
+        match b {
+            Block::Spatial { lines, .. } => f(lines),
+            Block::List { items, .. } => items.iter_mut().for_each(|i| walk_spatial(i, f)),
+            Block::Section { blocks, .. }
+            | Block::Quote { blocks, .. }
+            | Block::Callout { blocks, .. } => walk_spatial(blocks, f),
+            _ => {}
+        }
+    }
 }
 
 /// Calls `f` with every list of inlines of `blocks` outside links: paragraphs, headings, list
@@ -304,8 +354,7 @@ fn walk_inlines(blocks: &mut [Block], f: &mut dyn FnMut(&mut Vec<Inline>)) {
 /// The `found-by` note of a page with `n` footnotes written, `linked` of them with their
 /// references.
 pub(super) fn note(page: u32, n: usize, linked: usize) -> Option<String> {
-    let how = "set in one size below all other text, each opening with a note marker, the \
-               first of which also stands after a word above";
+    let how = crate::found::FOOTNOTE_FOUND_BY;
     let what = match n {
         0 => return None,
         1 => format!("1 footnote at the bottom of page {page} is read from its legend, {how}"),
@@ -333,6 +382,10 @@ pub(super) fn referenced(blocks: &mut [Block]) -> HashSet<String> {
             }
         }
     });
+    walk_spatial(blocks, &mut |lines| {
+        let spans = lines.iter().flat_map(|l| &l.pieces).flat_map(|p| &p.spans);
+        found.extend(spans.filter_map(|s| s.footnote.clone()));
+    });
     found
 }
 
@@ -343,6 +396,70 @@ pub(super) fn link_words(blocks: &mut [Block], legend: &Legend) {
         return;
     }
     walk_inlines(blocks, &mut |i| link_inlines(i, legend));
+    walk_spatial(blocks, &mut |lines| {
+        for p in lines.iter_mut().flat_map(|l| &mut l.pieces) {
+            link_piece(p, legend);
+        }
+    });
+}
+
+/// [`link_words`] for one piece of text kept as laid out: the marker stays as printed and
+/// becomes a span that refers to its footnote. A marker already a reference stays one.
+fn link_piece(piece: &mut SpatialPiece, legend: &Legend) {
+    let found: Vec<(usize, usize, String)> = word_marks(&piece.text)
+        .into_iter()
+        .filter_map(|(start, word, mark, len)| {
+            let label = legend.labels.get(&mark)?;
+            let end = start + word.trim_end_matches([':', ',', '.', ';']).len();
+            Some((end - len, end, label.clone()))
+        })
+        .collect();
+    if found.is_empty() {
+        return;
+    }
+    let chars = |b: usize| u32::try_from(piece.text[..b].chars().count()).unwrap_or(u32::MAX);
+    for (from, to, label) in found {
+        let (start, end) = (chars(from), chars(to));
+        mark_span(&mut piece.spans, start, end, label);
+    }
+}
+
+/// Marks the characters `start..end` of a piece as a reference to `label`: the spans there
+/// are cut so the marker is a span of its own, with the link and style of the first span it
+/// was part of. A marker that is already a reference stays as it is.
+fn mark_span(spans: &mut Vec<SpatialSpan>, start: u32, end: u32, label: String) {
+    let over = |s: &SpatialSpan| s.start < end && start < s.end;
+    if spans.iter().any(|s| over(s) && s.footnote.is_some()) {
+        return;
+    }
+    let mut style: Option<SpatialSpan> = None;
+    let mut out = Vec::with_capacity(spans.len() + 2);
+    for s in spans.drain(..) {
+        if !over(&s) {
+            out.push(s);
+            continue;
+        }
+        if style.is_none() {
+            style = Some(s.clone());
+        }
+        if s.start < start {
+            out.push(SpatialSpan {
+                end: start,
+                ..s.clone()
+            });
+        }
+        if s.end > end {
+            out.push(SpatialSpan { start: end, ..s });
+        }
+    }
+    out.push(SpatialSpan {
+        start,
+        end,
+        footnote: Some(label),
+        ..style.unwrap_or_default()
+    });
+    out.sort_by_key(|s| s.start);
+    *spans = out;
 }
 
 /// [`link_words`] for one list of inlines. Text inside links stays as it is.

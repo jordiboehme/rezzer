@@ -11,7 +11,7 @@
 //! change of font size and where the text moves up (the next column).
 
 use std::cell::Cell as Counter;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroU32;
 use std::ops::Range;
 use std::rc::Rc;
@@ -22,24 +22,28 @@ use rezzer_model::{Anchor, Block, Cell, Inline, LossReason, SectionKind, Severit
 
 use layoutregions::GapIn;
 use layoutregions::extract::text::{
-    TextBlock, TextCx, continues, list_marker, next_block, signed_amount,
+    Demotion, TextBlock, TextCx, continues, list_marker, next_block, signed_amount,
 };
 #[cfg(doc)]
 use layoutregions::file::FileFacts;
 use layoutregions::file::{self, Band, FilePage, Levels, RunningIndex, SIZE_LEVELS};
 use layoutregions::line::{EDGE, LineRun, TextLine, apart, text_line as line, text_lines as lines};
 use layoutregions::segment::drawn::{DrawnStructure, Grids, Unsearched};
-use layoutregions::{InOrder, PageRegions, find_in_order};
+use layoutregions::{Kind, PageRegions};
 
 use crate::engine;
+use crate::found;
 use crate::tables::{self, Planned, PlannedCell, Rule, Tables, Unsure};
 
-mod finders;
+mod decide;
 mod footnotes;
 mod head;
+mod hosts;
 mod shape;
+mod today;
 
-pub(crate) use finders::PageCx;
+use decide::Class;
+use hosts::Became;
 
 pub(crate) use head::{Dates, PageDate, TITLE_FROM, document_date, page_dates};
 use shape::ends_in_amount;
@@ -222,13 +226,10 @@ pub(crate) struct Style {
     two_page: HashSet<String>,
     /// The footnote legend of each untagged page that has one, by the page's runs.
     legends: BTreeMap<u32, footnotes::Found>,
-    /// The facts as learned and as the typers look them up, for the shadow of the scored
-    /// reading (see [`crate::shadow`]).
-    #[cfg(debug_assertions)]
-    facts: (
-        layoutregions::file::FileFacts,
-        layoutregions::typers::FileIndex,
-    ),
+    /// The facts as learned, as the typers read them.
+    facts: layoutregions::file::FileFacts,
+    /// The facts as the typers look them up.
+    index: layoutregions::typers::FileIndex,
 }
 
 /// One visual line.
@@ -294,21 +295,15 @@ impl Style {
     /// `tagged` files say their footnotes themselves.
     pub(crate) fn learn(pages: &[PageText<'_>], tagged: bool) -> Style {
         let facts = file::learn(pages, tagged, &ends_in_amount);
-        #[cfg(debug_assertions)]
-        let kept = if crate::shadow::enabled() {
-            let index = layoutregions::typers::FileIndex::new(&facts);
-            (facts.clone(), index)
-        } else {
-            Default::default()
-        };
+        let index = layoutregions::typers::FileIndex::new(&facts);
         Style {
             body_size: facts.body_size,
-            heading_sizes: facts.heading_sizes,
+            heading_sizes: facts.heading_sizes.clone(),
             running: RunningIndex::new(&facts.running),
-            two_page: facts.two_page.into_iter().collect(),
-            legends: facts.legends,
-            #[cfg(debug_assertions)]
-            facts: kept,
+            two_page: facts.two_page.iter().cloned().collect(),
+            legends: facts.legends.clone(),
+            facts,
+            index,
         }
     }
 
@@ -503,6 +498,9 @@ pub(crate) struct Laid {
     pub added: Vec<(usize, usize, usize, Vec<Inline>)>,
     /// What the table detectors left undecided or found broken: words, reason, severity.
     pub notes: Vec<(String, LossReason, Severity)>,
+    /// Losses at a block of the page: its anchor, words, reason, severity (a block kept as
+    /// laid out says why).
+    pub located: Vec<(String, String, LossReason, Severity)>,
     /// For each point asked about, the anchor of the block whose runs hold it.
     pub probed: Vec<Option<Anchor>>,
     /// The page has too many points near its runs to place them all; the rest have no block.
@@ -514,18 +512,18 @@ pub(crate) struct Laid {
     /// The dates the laid out text and the pairs of page 1 give as values of labels (see
     /// [`head::laid_dates`]), on page 1 only.
     pub dates: Option<Dates>,
-    /// The regions of the page: what each detector found, the blocks laid out from the rest,
-    /// the pictures and the codes, each run in one.
+    /// The regions of the page: one per decision of the region engine, each primitive in one,
+    /// each at the block it became.
     pub regions: PageRegions,
     /// The page as the region engine took it; none for a page not laid out.
     pub engine_in: Option<layoutregions::PageIn>,
-    /// The scored reading of the page beside the in-order one (see [`crate::shadow`]); only
-    /// in a debug build with `REZZER_SHADOW` set.
-    pub shadow: Option<crate::shadow::Shadow>,
     /// The regions that became rows of a tagged table begun on an earlier page: the region's
     /// place in `regions` and the table. Their host is a block of this page near them, for
     /// when the table has no anchor.
     pub earlier: Vec<(usize, usize)>,
+    /// The block of `blocks` each run of the page (by its id) was written in, `u32::MAX` for
+    /// a run written in none.
+    pub run_blocks: Vec<u32>,
 }
 
 /// The regions of a page that was not laid out.
@@ -649,6 +647,86 @@ impl Flow {
         *self = kept;
         taken
     }
+
+    /// The flow parted by the class of each run (`class`, by index): one flow for each of
+    /// [`Class::ALL`], each in the flow's order. The runs move, nothing is copied.
+    fn parted(self, class: &[Class]) -> [Flow; 7] {
+        let mut out: [Flow; 7] = Default::default();
+        let places = self.at.into_iter().zip(self.ids);
+        for (i, ((r, s), (a, id))) in self
+            .runs
+            .into_iter()
+            .zip(self.slots)
+            .zip(places)
+            .enumerate()
+        {
+            let f = &mut out[class.get(i).copied().unwrap_or(Class::Text).index()];
+            f.runs.push(r);
+            f.slots.push(s);
+            f.at.push(a);
+            f.ids.push(id);
+        }
+        out
+    }
+
+    /// The runs of `a` and `b` together, by their places in the page's order.
+    fn merged(a: Flow, b: Flow) -> Flow {
+        Flow::all_merged(vec![a, b])
+    }
+
+    /// The runs of all `parts` together, by their places in the page's order (each part is in
+    /// that order; a place in two parts comes first from the earlier part). One pass over the
+    /// order of all places ([`layoutregions::line::by_place`], which counts its work), so a
+    /// caller collects its parts and merges them once.
+    fn all_merged(parts: Vec<Flow>) -> Flow {
+        let mut parts: Vec<Flow> = parts.into_iter().filter(|f| !f.runs.is_empty()).collect();
+        if parts.len() <= 1 {
+            return parts.pop().unwrap_or_default();
+        }
+        let order = {
+            let places: Vec<&[usize]> = parts.iter().map(|f| f.at.as_slice()).collect();
+            layoutregions::line::by_place(&places)
+        };
+        let n = order.len();
+        let mut out = Flow {
+            runs: Vec::with_capacity(n),
+            slots: Vec::with_capacity(n),
+            at: Vec::with_capacity(n),
+            ids: Vec::with_capacity(n),
+        };
+        /// A run of a flow with its slot, place and id, until it is moved out.
+        type Entry = Option<(Run, Slot, usize, u32)>;
+        let mut parts: Vec<Vec<Entry>> = parts
+            .into_iter()
+            .map(|f| {
+                f.runs
+                    .into_iter()
+                    .zip(f.slots)
+                    .zip(f.at.into_iter().zip(f.ids))
+                    .map(|((r, s), (a, id))| Some((r, s, a, id)))
+                    .collect()
+            })
+            .collect();
+        for (p, i) in order {
+            if let Some((r, s, a, id)) = parts[p][i].take() {
+                out.runs.push(r);
+                out.slots.push(s);
+                out.at.push(a);
+                out.ids.push(id);
+            }
+        }
+        out
+    }
+
+    /// A copy of the flow.
+    pub(crate) fn copied(&self) -> Flow {
+        Flow {
+            runs: self.runs.clone(),
+            slots: self.slots.clone(),
+            at: self.at.clone(),
+            ids: self.ids.clone(),
+        }
+    }
 }
 
 /// A run taken out of a [`Flow`], with its slot, its place and its id.
@@ -717,8 +795,16 @@ pub(crate) fn page_blocks_at(
     page_blocks_until(page, height, runs, drawn, cx, points, &stop)
 }
 
-/// [`page_blocks_at`] with the detectors asking `stop` before each of them: the ones after a
-/// stop do not run, their runs are laid out as text, and a limit note says so.
+/// [`page_blocks_at`] with `stop` asked by the segmentation and the extractors: what a stop
+/// leaves is said by a limit note.
+///
+/// The page is read in one pass of the region engine: the tables of the tag tree first (the
+/// file states them), then the regions the page states (its tag tree's blocks, its form
+/// fields, and the columns of totals beside ruled tables that today's rule reads, until Task
+/// 30), then segmentation, scored typing and one arbitration (see [`decide::decide`]). Each
+/// decision is read by the extractor of its kind (see [`decide::Class`]), and the parts stand
+/// in the page's order of runs, each part where its first run stands (until Task 21), running
+/// header lines too; footnotes and footers last.
 fn page_blocks_until(
     page: u32,
     height: f32,
@@ -750,7 +836,7 @@ fn page_blocks_until(
         built.stop_at(hit, cx);
         return built.laid(Vec::new(), no_regions(page));
     }
-    let flow = match cx.tree {
+    let mut flow = match cx.tree {
         Some(tree) => {
             let (runs, slots) = classified(runs, tree, cx);
             Flow::new(runs, slots)
@@ -760,10 +846,10 @@ fn page_blocks_until(
             Flow::new(runs, vec![Slot::Free; n])
         }
     };
-    // The page as the region engine takes it. `Flow::ids` holds the id of each run
-    // (`engine::run_of`). A page laid out from runs alone has its runs only.
+    // The page as the region engine takes it: `TextRun` i is run i of the flow, whose id is i
+    // (see `engine::page_in`). A page laid out from runs alone has its runs only.
     let size = [drawn.width, height];
-    let engine_in = match drawn.items {
+    let mut engine_in = match drawn.items {
         Some(items) => engine::page_in(items, &flow.runs, drawn, size),
         None => {
             let mut p =
@@ -772,153 +858,763 @@ fn page_blocks_until(
             p
         }
     };
-    // The regions the page states (its tag tree's blocks and its form fields), for the shadow
-    // of the scored reading, before the detectors take runs out of the flow.
-    #[cfg(debug_assertions)]
-    let given = if crate::shadow::enabled() {
-        engine::given_regions(&engine_in, &flow.slots)
-    } else {
-        Vec::new()
+    let slots = flow.slots.clone();
+    let mut notes: Vec<(String, LossReason, Severity)> = Vec::new();
+    let mut placed: Vec<Placed> = Vec::new();
+    // The tables of the tag tree: the file states them. They are taken before the running
+    // headers and footers are looked for: the column titles a long table repeats at the top of
+    // each page are table text.
+    let mut tag_tables: HashSet<usize> = HashSet::new();
+    // Whether today's readers ran on the drawn structure: not on a tagged page whose tag tree
+    // holds.
+    let mut geometry = cx.tree.is_none();
+    if let Some(tree) = cx.tree {
+        let (found, fallbacks) =
+            tables::tagged(page, &mut flow, tree, cx.tables, cx.in_part, &|| {
+                time_over(cx.budget).is_err()
+            });
+        for what in cx.tables.take_issues() {
+            notes.push((what, LossReason::Damaged, Severity::Warning));
+        }
+        geometry = !fallbacks.is_empty();
+        notes.extend(
+            fallbacks
+                .into_iter()
+                .map(|w| (w, LossReason::Uncertain, Severity::Info)),
+        );
+        tag_tables.extend(found.iter().filter_map(|t| t.tagged));
+        placed.extend(found.into_iter().map(Placed::Table));
+    }
+    // The drawn box each free run stands in, as today's box reader puts it (see
+    // `regions::regions_of`): the text of a box is laid out on its own, so a paragraph never goes
+    // on from one box into the next, nor into text outside its box.
+    let mut box_of: HashMap<u32, u32> = {
+        let points: Vec<(f32, f32, f32)> = flow
+            .runs
+            .iter()
+            .map(|r| {
+                if r.off_axis {
+                    (f32::NAN, f32::NAN, 0.0)
+                } else {
+                    (r.x + r.w.max(0.0) / 2.0, r.y + 0.25 * r.size, r.size)
+                }
+            })
+            .collect();
+        match crate::regions::regions_of(&points, drawn.boxes) {
+            Ok(regions) if !drawn.boxes.is_empty() => regions
+                .iter()
+                .zip(&flow.ids)
+                .zip(&flow.slots)
+                .filter_map(|((b, &id), slot)| b.filter(|_| *slot == Slot::Free).map(|b| (id, b)))
+                .collect(),
+            _ => HashMap::new(),
+        }
     };
-    let mut arb = InOrder::new(&engine_in, &rezzer_layout::pdf::engine_limits(cx.budget));
-    let mut pcx = PageCx {
+    // The regions the page states: the tag tree's blocks and tables, and the form fields.
+    let mut given = engine::given_regions(&engine_in, &slots, &|t| tag_tables.contains(&t));
+    // Today's reading of the page, once (see [`today`]): the tables of the classes kept as
+    // pre-passes are given regions of the reader's kind. Runs a given region already holds are
+    // left to it, and a table that shares one is not given.
+    let held: HashSet<u32> = given
+        .iter()
+        .flat_map(|g| g.prims.iter())
+        .filter_map(|p| match *p {
+            layoutregions::PrimId::Text(i) => Some(i),
+            _ => None,
+        })
+        .collect();
+    let reading = today::read(
         page,
         height,
-        cx,
-        drawn,
-        segment_issues: Vec::new(),
-        flow,
-        placed: Vec::new(),
-        notes: Vec::new(),
-        geometry: true,
-        text_sizes: None,
-        legend: footnotes::Legend::default(),
-        headers: Vec::new(),
-        footers: Vec::new(),
-        built,
-        repeats: Vec::new(),
-        doubts: Vec::new(),
-    };
-    // The detectors, in their order: each takes the runs it finds out of the flow, so the
-    // first claim wins (see the finders for their gates).
-    find_in_order(
+        &flow,
         &engine_in,
-        &mut [
-            &mut finders::TaggedTables,
-            &mut finders::Furniture,
-            &mut finders::Footnotes,
-            &mut finders::UnderlinedTitles,
-            &mut finders::BoxPairs,
-            &mut finders::UntaggedTables,
-        ],
-        &mut pcx,
-        &mut arb,
+        drawn,
+        cx,
+        geometry,
+        &|| time_over(cx.budget).is_err(),
+    );
+    let today::Reading {
+        tables: today_tables,
+        titles: today_titles,
+        left: today_left,
+        notes: today_notes,
+        unsure: today_unsure,
+        doubts: today_doubts,
+        issues: today_issues,
+        cells: today_cells,
+    } = reading;
+    // Each cell of a row of fields the ruled pass read apart is a block of its own, as a drawn
+    // box is (keys past the boxes' indices): no paragraph goes on from one cell into another.
+    let first_cell = u32::try_from(drawn.boxes.len()).unwrap_or(u32::MAX);
+    for (n, cell) in today_cells.iter().enumerate() {
+        let key = first_cell.saturating_add(u32::try_from(n).unwrap_or(u32::MAX));
+        for &id in cell {
+            box_of.insert(id, key);
+        }
+    }
+    // The parts of today's reading given as regions, and the part of each run: the first given
+    // region that lists a run holds it.
+    let mut pre_parts: Vec<today::Part> = Vec::new();
+    let mut pre_of_run: HashMap<u32, usize> = HashMap::new();
+    let mut give = |given: &mut Vec<layoutregions::GivenRegion>,
+                    kind: Kind,
+                    ids: &[u32],
+                    part: today::Part| {
+        let mut ids = ids.to_vec();
+        ids.sort_unstable();
+        ids.dedup();
+        let k = pre_parts.len();
+        for &i in &ids {
+            pre_of_run.entry(i).or_insert(k);
+        }
+        given.push(layoutregions::GivenRegion {
+            kind,
+            prims: ids.into_iter().map(layoutregions::PrimId::Text).collect(),
+            order: u32::try_from(given.len()).unwrap_or(u32::MAX),
+            level: None,
+            role: None,
+            group: None,
+        });
+        pre_parts.push(part);
+    };
+    let free = |ids: &[u32]| ids.iter().all(|i| !held.contains(i));
+    // In the order today's readers made them: the titles of a form page and the box pairs come
+    // before the tables without tags (`today::read`).
+    for (_, t) in today_titles {
+        if free(&t.ids) {
+            let ids = t.ids.clone();
+            give(&mut given, Kind::Heading, &ids, today::Part::Title(Some(t)));
+        }
+    }
+    for t in today_tables {
+        if free(&t.ids) {
+            let ids = t.ids.clone();
+            give(
+                &mut given,
+                t.by.region_kind(t.kind),
+                &ids,
+                today::Part::Table(Some(t)),
+            );
+        }
+    }
+    let mut pre_notes: Vec<(String, LossReason, Severity)> = Vec::new();
+    let mut pre_unsure: Vec<Unsure> = Vec::new();
+    for (_, w, why) in today_notes {
+        pre_notes.push((w, why, Severity::Info));
+    }
+    for (_, u) in today_unsure {
+        pre_unsure.push(u);
+    }
+    // The text a family kept refused: text where it stands, with why; no typer reads it.
+    let mut pre_doubts: tables::Doubts = Vec::new();
+    for (f, ids, why) in today_doubts {
+        let ids: Vec<u32> = ids.into_iter().filter(|i| !held.contains(i)).collect();
+        if !ids.is_empty() {
+            give(
+                &mut given,
+                Kind::Paragraph,
+                &ids,
+                today::Part::Refused(f, why),
+            );
+            pre_doubts.push((ids, why));
+        }
+    }
+    // The drawn box each table of today's reading was read by: its region reaches over it.
+    let pre_drawn: Vec<Option<layoutregions::Bounds>> = pre_parts
+        .iter()
+        .map(|p| match p {
+            today::Part::Table(Some(t)) => t.drawn.map(engine::bounds),
+            _ => None,
+        })
+        .collect();
+    let pre_signal = |k: usize| -> (layoutregions::Signal, bool) {
+        let (id, detail, text) = match &pre_parts[k] {
+            today::Part::Table(t) => (
+                t.as_ref().map_or("", |t| t.by.id()),
+                t.as_ref()
+                    .and_then(|t| t.found_by)
+                    .unwrap_or("read by today's reader of its class"),
+                false,
+            ),
+            today::Part::Title(_) => (
+                "pdf.underlined_title",
+                "a title over its box or bar, read by today's reader",
+                false,
+            ),
+            today::Part::Refused(f, why) => (today::refused_id(*f), *why, true),
+        };
+        (
+            layoutregions::Signal {
+                id,
+                detail: detail.to_string(),
+                weight: layoutregions::typers::MAX_SCORE,
+            },
+            text,
+        )
+    };
+    engine_in.given = given;
+    let limits = rezzer_layout::pdf::engine_limits(cx.budget);
+    let decided = decide::decide(
+        &engine_in,
+        &drawn.structure.grids,
+        (&cx.style.facts, &cx.style.index),
+        &ends_in_amount,
+        (&pre_of_run, &pre_signal),
+        &limits,
         stop,
     );
-    // A stop before the footnotes leaves the sizes to count here.
-    let text_sizes = match pcx.text_sizes.take() {
-        Some(sizes) => sizes,
-        None => finders::text_sizes(&pcx),
-    };
-    let PageCx {
-        flow,
-        placed,
-        mut notes,
-        segment_issues,
-        legend,
-        footers,
-        mut built,
-        repeats,
-        doubts,
-        ..
-    } = pcx;
-    // Each run left is its id's run or a piece of it; the runs cut in pieces, for the line
-    // pass to tell a piece of a run a detector took from a run taken twice.
-    let cut = if cfg!(debug_assertions) {
-        finders::check_ids(&engine_in, &flow);
-        finders::cut_runs(&engine_in, &flow)
+    let tagged_page = cx.tree.is_some();
+    // Each run to the extractor of its decision's kind.
+    // The footnote legend of an untagged page (see `footnotes::take`), as today's reader takes
+    // it: from the page's whole flow, before its runs go to their extractors, so a raised
+    // reference to a note is marked wherever it stands (in a table's cell too) and every line
+    // of the legend is its own (a segment may cut a raised marker off its note, or a column of
+    // the legend off the others). A tagged file says its notes. Lines of the legend it does not
+    // read stay text.
+    let legend = if tagged_page {
+        footnotes::Legend::default()
     } else {
-        HashSet::new()
+        footnotes::take(page, &mut flow, cx.style.legends.get(&page))
     };
-    // The tables and titles in reading order; `placed_at` is where each placed part went, by
-    // the place it was found at.
-    let mut sorted: Vec<(usize, Placed)> = placed.into_iter().enumerate().collect();
-    sorted.sort_by(|(_, a), (_, b)| {
+    let mut legend = legend;
+    if let Some(why) = legend.refused.take() {
+        notes.push((why, LossReason::Uncertain, Severity::Info));
+    }
+    // The link and footnote label of each run of the page that has one, by its id, for text
+    // kept as laid out from the page's runs (`engine_in` holds their text and places only).
+    let run_marks: HashMap<u32, (Option<Rc<UriTarget>>, Option<String>)> = flow
+        .runs
+        .iter()
+        .zip(&flow.ids)
+        .filter(|(r, _)| r.uri.is_some() || r.note)
+        .map(|(r, &id)| {
+            (
+                id,
+                (r.uri.clone(), r.note.then(|| r.text.trim().to_string())),
+            )
+        })
+        .collect();
+    let markers = legend.markers();
+    let classes: Vec<Class> = flow
+        .ids
+        .iter()
+        .map(|&id| decided.class_of_run(id, tagged_page))
+        .collect();
+    let [
+        text_flow,
+        header_flow,
+        footer_flow,
+        legend_flow,
+        mut table_flow,
+        spatial_flow,
+        _,
+    ] = flow.parted(&classes);
+    // The running headers, one paragraph a line, each placed by its first run in the page's
+    // flow like every other part (until Task 21): a band the engine finds may hold body text
+    // beside the page's title, which reads where the flow has it.
+    let header_lines = lines(&header_flow.runs);
+    let mut header_runs = 0;
+    for (k, l) in header_lines.iter().enumerate() {
+        placed.push(Placed::Header {
+            line: k,
+            at: header_flow.at[header_runs],
+            top: l.y,
+        });
+        header_runs += l.runs.len();
+    }
+    let text_flow = Flow::merged(text_flow, legend_flow);
+    // The text sizes of the page: all its text but its bands and its legend (the values of a
+    // form are its data lines), and a footer of a file of two pages.
+    let text_sizes = {
+        let two_page_lines = lines(&footer_flow.runs);
+        let two_page = two_page_lines
+            .iter()
+            .filter(|l| cx.style.two_page_line(l, height))
+            .flat_map(|l| l.runs.iter());
+        file::text_sizes(
+            text_flow
+                .runs
+                .iter()
+                .chain(&table_flow.runs)
+                .chain(&spatial_flow.runs)
+                .chain(two_page),
+        )
+    };
+    // The tables, pairs and totals: each decision read on its own area (its runs alone) by the
+    // reader its winning evidence names (see [`area_reader`]). A pairs reading that pairs a
+    // label with a value across a line of another region is refused: its area is kept as laid
+    // out.
+    let mut doubts: tables::Doubts = pre_doubts;
+    placed.extend(pre_unsure.into_iter().map(Placed::Unsure));
+    notes.extend(pre_notes);
+    // What a bound cut short in the segments today's readers read by is the page's too.
+    let mut segment_issues = decided.segs.issues.clone();
+    for i in today_issues {
+        if !segment_issues
+            .iter()
+            .any(|j| j.kind == i.kind && j.what == i.what)
+        {
+            segment_issues.push(i);
+        }
+    }
+    let mut refused_areas: BTreeMap<u32, (usize, f32, Vec<u32>, String)> = BTreeMap::new();
+    // What the readers left of each area, merged once after the loop.
+    let mut table_left: Vec<Flow> = Vec::new();
+    // The runs of the areas refused by the crossing rule, whole: they are kept as laid out, and
+    // the dates and facts among them are read as in any text kept so. Merged once after the
+    // loop.
+    let mut refused_text: Vec<Flow> = Vec::new();
+    let across = Across::new(&engine_in, &decided.of_run);
+    for (d, mut area) in by_decision(std::mem::take(&mut table_flow), &decided.of_run) {
+        let decision = &decided.decisions[d as usize];
+        let ids = area.ids.clone();
+        let whole = area.copied();
+        let (at, top) = (
+            area.at.first().copied().unwrap_or(0),
+            area.runs.iter().map(|r| r.y).fold(f32::MIN, f32::max),
+        );
+        let mut found: Vec<Planned> = Vec::new();
+        let mut titles: Vec<tables::BoxTitle> = Vec::new();
+        let mut unsure: Vec<Unsure> = Vec::new();
+        let mut said: Vec<(String, LossReason)> = Vec::new();
+        let pre = decided.pre[d as usize];
+        match area_reader(decision) {
+            // A table of today's reading, given before the page was typed (see [`today`]):
+            // placed as its reader made it. The pieces its reader left of a run it cut stay
+            // text, as today; the runs of the area are the table's.
+            _ if pre.is_some() => {
+                match pre.and_then(|(k, _)| pre_parts.get_mut(k)) {
+                    Some(today::Part::Table(t)) => found.extend(t.take()),
+                    Some(today::Part::Title(t)) => titles.extend(t.take()),
+                    _ => {}
+                }
+                area = Flow::default();
+            }
+            AreaReader::Boxes => {
+                let (t, b, (u, box_doubts), skipped) = tables::box_pairs(
+                    page,
+                    &mut area,
+                    drawn.boxes,
+                    drawn.grids(),
+                    &text_sizes,
+                    stop,
+                );
+                found.extend(t);
+                titles.extend(b);
+                said.extend(u.into_iter().map(|w| (w, LossReason::Uncertain)));
+                doubts.extend(box_doubts);
+                said.extend(skipped.map(|w| (w, LossReason::Limit)));
+            }
+            AreaReader::Lines => found.extend(line_pairs(&mut area)),
+            AreaReader::Tables => {
+                let f = tables::untagged(page, &mut area, drawn, &decided.segs, height, stop);
+                found.extend(f.tables);
+                unsure.extend(f.unsure);
+                doubts.extend(f.doubts);
+                for (list, why) in [
+                    (f.skipped, LossReason::Limit),
+                    (f.uncertain, LossReason::Uncertain),
+                    (refused_quietly(page, f.quiet), LossReason::Uncertain),
+                ] {
+                    said.extend(list.into_iter().map(|w| (w, why)));
+                }
+            }
+        }
+        let pairs = decision.kind == Kind::LabelValue;
+        if found
+            .iter()
+            .any(|t| (pairs || t.is_pairs()) && across.crossed(t, d))
+        {
+            refused_areas.insert(
+                d,
+                (
+                    at,
+                    top,
+                    ids,
+                    decide::unread_why(
+                        decision.kind,
+                        Some("its labels and values stand on either side of a line of another region"),
+                    ),
+                ),
+            );
+            refused_text.push(whole);
+            continue;
+        }
+        placed.extend(found.into_iter().map(Placed::Table));
+        placed.extend(titles.into_iter().map(Placed::Title));
+        placed.extend(unsure.into_iter().map(Placed::Unsure));
+        notes.extend(said.into_iter().map(|(w, why)| (w, why, Severity::Info)));
+        table_left.push(area);
+    }
+    if across.spent.get() {
+        notes.push((
+            format!(
+                "labels and values paired across a line of another region on page {page} are \
+                 looked for only in part: the page has too many lines between them; the pairs \
+                 of the tables past that are kept as read"
+            ),
+            LossReason::Limit,
+            Severity::Info,
+        ));
+    }
+    let refused_text = Flow::all_merged(refused_text);
+    let mut table_flow = Flow::all_merged(table_left);
+    // The pieces today's readers left of the runs they cut, where a pre-pass table holds the
+    // run: they are text, as today.
+    // The text today's readers refused is laid out from their copy of the flow, as today: a
+    // refused row of fields was put there cell by cell, each cell on lines of its own.
+    let refused_run = |id: u32| {
+        decided.of_run.get(id as usize).is_some_and(|&d| {
+            d != decide::NONE && matches!(decided.pre[d as usize], Some((_, true)))
+        })
+    };
+    let pre_left = {
+        let mut left = today_left;
+        let ids = left.ids.clone();
+        let cut: HashSet<u32> = placed
+            .iter()
+            .filter_map(|p| match p {
+                Placed::Table(t) => Some(t),
+                _ => None,
+            })
+            .flat_map(|t| t.ids.iter().copied())
+            .filter(|i| pre_of_run.contains_key(i))
+            .collect();
+        left.take(|i, _| !cut.contains(&ids[i]) && !refused_run(ids[i]));
+        left
+    };
+    // The refused runs the copy holds: they are laid out from it, in place of the page's own.
+    let from_copy: HashSet<u32> = pre_left
+        .ids
+        .iter()
+        .copied()
+        .filter(|&i| refused_run(i))
+        .collect();
+    let mut text_flow = text_flow;
+    let text_ids = text_flow.ids.clone();
+    text_flow.take(|i, _| from_copy.contains(&text_ids[i]));
+    let text_flow = Flow::merged(text_flow, pre_left);
+    // What the table readers left of a decision is kept as laid out, with their reason.
+    let doubt_of: HashMap<u32, &str> = doubts
+        .iter()
+        .flat_map(|(ids, why)| ids.iter().map(move |&i| (i, *why)))
+        .collect();
+    // A decision's runs kept as laid out are one part as long as no text or other part of the
+    // page stands between them in the page's flow; such a thing between them starts a new part, so each part
+    // stands where its first run stands and the text reads in the flow's order (until Task 21).
+    // A run without ink stands in the flow only, not on the page (spaces a form sets after a
+    // field): it parts nothing.
+    let mut placed_at: Vec<usize> = placed.iter().map(|p| p.at().0).collect();
+    placed_at.sort_unstable();
+    let text_at: Vec<usize> = layoutregions::line::with_ink(
+        text_flow
+            .runs
+            .iter()
+            .zip(&text_flow.at)
+            .map(|(r, &a)| (r.text.as_str(), a)),
+    );
+    let text_between = |a: usize, b: usize| {
+        [&text_at, &placed_at].into_iter().any(|at| {
+            let i = at.partition_point(|x| *x <= a);
+            at.get(i).is_some_and(|x| *x < b)
+        })
+    };
+    // The runs with ink of `spatial_flow` before each of its places.
+    let inked_before =
+        layoutregions::line::inked_before(spatial_flow.runs.iter().map(|r| r.text.as_str()));
+    let mut spatial_parts: BTreeMap<(u32, u32), SpatialPart> = BTreeMap::new();
+    // By decision: its part, the place of its last run and that run's index in `spatial_flow`
+    // (a run of another decision between them stands between them too).
+    let mut last_of: HashMap<u32, (u32, usize, usize)> = HashMap::new();
+    for (k, (&id, &at)) in spatial_flow.ids.iter().zip(&spatial_flow.at).enumerate() {
+        let d = decided.of_run[id as usize];
+        let seq = match last_of.get(&d) {
+            Some(&(seq, last, j))
+                if inked_before[k] > inked_before[j + 1] || text_between(last, at) =>
+            {
+                seq + 1
+            }
+            Some(&(seq, ..)) => seq,
+            None => 0,
+        };
+        last_of.insert(d, (seq, at, k));
+        let part = spatial_parts
+            .entry((d, seq))
+            .or_insert_with(|| SpatialPart {
+                at,
+                top: f32::MIN,
+                ids: Vec::new(),
+                pieces: Vec::new(),
+                why: if decided.untyped {
+                    "the time limit was reached before its region type was looked for".to_string()
+                } else if decided.limit[d as usize] {
+                    "a bound of the segmentation, or the time limit, left it whole before it \
+                     was parted, so its region type was not looked for in full"
+                        .to_string()
+                } else {
+                    decide::unsure_why(decided.candidates(d as usize), &decided.margins)
+                },
+                limit: decided.untyped || decided.limit[d as usize],
+            });
+        part.ids.push(id);
+        part.top = part.top.max(spatial_flow.runs[k].y);
+    }
+    for (d, (at, top, ids, why)) in refused_areas {
+        spatial_parts.insert(
+            (d, 0),
+            SpatialPart {
+                at,
+                top,
+                ids,
+                pieces: Vec::new(),
+                why,
+                limit: false,
+            },
+        );
+    }
+    // What a reader left of one decision is one part as long as no text and no other part of
+    // the page stands between its runs in the page's flow; such a thing between them starts a
+    // new part: a heading over a table and a line under it, both left by the table's reader,
+    // are written each where it stands, not as one block before the table. Unlike the runs
+    // kept as laid out above, runs kept as laid out of another decision part nothing here, on
+    // purpose: they would cut a column of amounts a totals reader left into a block a line.
+    // The parts, in the flow's order, each with its decision; by decision, the part its last
+    // piece went to and that piece's place.
+    let mut left_parts: Vec<(u32, Flow)> = Vec::new();
+    let mut last_left: HashMap<u32, (usize, usize)> = HashMap::new();
+    let table_left = std::mem::take(&mut table_flow);
+    let places = table_left.at.into_iter().zip(table_left.ids);
+    for ((r, s), (at, id)) in table_left
+        .runs
+        .into_iter()
+        .zip(table_left.slots)
+        .zip(places)
+    {
+        let d = decided.of_run[id as usize];
+        let k = match last_left.get(&d) {
+            Some(&(k, last)) if !text_between(last, at) => k,
+            _ => {
+                left_parts.push((d, Flow::default()));
+                left_parts.len() - 1
+            }
+        };
+        last_left.insert(d, (k, at));
+        let f = &mut left_parts[k].1;
+        f.runs.push(r);
+        f.slots.push(s);
+        f.at.push(at);
+        f.ids.push(id);
+    }
+    // A part a table's reader left that is one line of whole runs (no piece of a run in a
+    // table, no text the reader refused) and stands after a table of its decision in the
+    // flow is a pair when the line pair rule parts it as a lone line, as the table's reader
+    // ended the table over it (`pairs_end`): a line `Label: value` under a table is a pair of
+    // its own. A line over the table (a heading `Step 2: Pay the fee`) stays as it is.
+    let in_tables: HashSet<u32> = placed
+        .iter()
+        .filter_map(|p| match p {
+            Placed::Table(t) => Some(t.ids.iter().copied()),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    // By decision: the place of the first run of its last table.
+    let mut table_at: HashMap<u32, usize> = HashMap::new();
+    for p in &placed {
+        if let Placed::Table(t) = p
+            && let Some(d) = majority(t.ids.iter().map(|&i| decided.of_run[i as usize]))
+        {
+            let at = table_at.entry(d).or_insert(t.at);
+            *at = (*at).max(t.at);
+        }
+    }
+    // The runs of each such pair, for the region it is (see `decide::agree`).
+    let mut left_pairs: Vec<Vec<u32>> = Vec::new();
+    for (d, part) in &mut left_parts {
+        let reader = area_reader(&decided.decisions[*d as usize]);
+        let whole = part
+            .ids
+            .iter()
+            .all(|i| !in_tables.contains(i) && !doubt_of.contains_key(i));
+        let under = part
+            .at
+            .first()
+            .is_some_and(|a| table_at.get(d).is_some_and(|t| a > t));
+        if decided.pre[*d as usize].is_none()
+            && reader == AreaReader::Tables
+            && under
+            && whole
+            && one_line(part)
+            && let Some(t) = line_pairs(part)
+        {
+            left_pairs.push(t.ids.clone());
+            placed.push(Placed::Table(t));
+        }
+    }
+    // Their runs as the readers left them: a run cut at a field edge or a column line may have
+    // a piece in a table and a piece left, and only the piece left is kept here.
+    let table_rest = Flow::all_merged(left_parts.iter().map(|(_, f)| f.copied()).collect());
+    let mut first_left: HashSet<u32> = HashSet::new();
+    for (d, part) in left_parts {
+        if part.runs.is_empty() {
+            continue;
+        }
+        // The first part of a decision is its part kept as laid out; a later one is a part of
+        // its own.
+        let seq = if first_left.insert(d) {
+            0
+        } else {
+            spatial_parts
+                .range((d, 0)..=(d, u32::MAX))
+                .next_back()
+                .map_or(0, |(&(_, s), _)| s + 1)
+        };
+        for ((r, id), at) in part.runs.into_iter().zip(part.ids).zip(part.at) {
+            let sp = spatial_parts
+                .entry((d, seq))
+                .or_insert_with(|| SpatialPart {
+                    at,
+                    top: f32::MIN,
+                    ids: Vec::new(),
+                    pieces: Vec::new(),
+                    why: decide::unread_why(
+                        decided.decisions[d as usize].kind,
+                        doubt_of.get(&id).copied(),
+                    ),
+                    limit: false,
+                });
+            sp.at = sp.at.min(at);
+            sp.top = sp.top.max(r.y);
+            // The pieces of a run the readers cut share its id: the ids are made unique below.
+            sp.ids.push(id);
+            sp.pieces.push(r);
+        }
+    }
+    // Which decision each placed table stands for, for its note: the decision of most of its
+    // runs. A column of totals beside a ruled section keeps its note on the section it joins.
+    for p in &mut placed {
+        if let Placed::Table(t) = p
+            && t.tagged.is_none()
+        {
+            let by_decision = majority(t.ids.iter().map(|&i| decided.of_run[i as usize]));
+            // A table of today's reading keeps its reader's note.
+            if by_decision.is_some_and(|d| decided.pre[d as usize].is_some()) {
+                continue;
+            }
+            let from =
+                by_decision.and_then(|d| found::found_by_text(&decided.decisions[d as usize]));
+            let side = t.found_by == Some(found::SIDE_FOUND_BY);
+            t.found_by = from.or(side.then_some(found::SIDE_FOUND_BY));
+        }
+    }
+    placed.extend(
+        spatial_parts
+            .into_iter()
+            .map(|(d, mut part)| {
+                part.ids.sort_unstable();
+                part.ids.dedup();
+                (d, part)
+            })
+            .map(|(_, part)| Placed::Spatial(part)),
+    );
+    // The parts in reading order; `placed_at` is where each placed part went, by the place it
+    // was found at.
+    let mut sorted: Vec<Placed> = placed;
+    sorted.sort_by(|a, b| {
         let (la, ta) = a.at();
         let (lb, tb) = b.at();
         la.cmp(&lb).then(tb.total_cmp(&ta))
     });
-    let mut placed_at = vec![0u32; sorted.len()];
-    for (new, (old, _)) in sorted.iter().enumerate() {
-        placed_at[*old] = u32::try_from(new).unwrap_or(u32::MAX);
-    }
-    let placed: Vec<Placed> = sorted.into_iter().map(|(_, p)| p).collect();
+    let placed = sorted;
+    // The text the page reads as text, without the text kept as laid out: the title of a
+    // page is read from text the layout is sure of (a word the engine left unsure is no
+    // title, however large).
+    let title_text = Flow::merged(
+        text_flow.copied(),
+        Flow::merged(table_rest.copied(), refused_text.copied()),
+    );
+    // The text the page reads as text, the text kept as laid out among it (dates there are
+    // dates too).
+    let read_text = Flow::merged(
+        Flow::merged(text_flow.copied(), spatial_flow.copied()),
+        Flow::merged(table_rest, refused_text),
+    );
     // The title and the labelled dates of the document: the lines of page 1 as the layout
     // lays them out as text, and the pairs it read.
     let (title, dates) = match page {
         1 => {
-            let text = lines(&flow.runs);
+            let text = lines(&title_text.runs);
             let title =
                 head::page_title(&text, &cx.style.levels(&text_sizes), height).map(|t| t.text);
             // Every table of the page, its rows as the text of their cells.
             let tables: Vec<head::Table> = placed
                 .iter()
                 .filter_map(|p| match p {
-                    Placed::Table(t) => Some(head::Table {
-                        pairs: t.is_pairs(),
-                        top: t.top,
-                        rows: t
-                            .rows
-                            .iter()
-                            .map(|row| {
-                                row.iter()
-                                    .map(|c| head::Cell {
-                                        text: c.runs.iter().map(|r| r.text.as_str()).collect(),
-                                        spot: c.runs.first().map(|first| head::Spot {
-                                            y: first.y,
-                                            x0: c.runs.iter().map(|r| r.x).fold(first.x, f32::min),
-                                            x1: c
-                                                .runs
-                                                .iter()
-                                                .map(|r| r.x + r.w)
-                                                .fold(first.x, f32::max),
-                                            size: first.size,
-                                        }),
-                                    })
-                                    .collect()
-                            })
-                            .collect(),
-                    }),
+                    Placed::Table(t) => {
+                        // A table the line pairs rule read (see [`area_reader`]), or a line a
+                        // table's reader left that the rule parted, is lines of text.
+                        let lines = t.by == tables::Detector::LinePairs
+                            || majority(t.ids.iter().map(|&i| decided.of_run[i as usize]))
+                                .is_some_and(|d| {
+                                    area_reader(&decided.decisions[d as usize]) == AreaReader::Lines
+                                });
+                        Some(head_table(t, lines))
+                    }
                     _ => None,
                 })
                 .collect();
-            (title, Some(head::laid_dates(&flow.runs, &tables, height)))
+            (
+                title,
+                Some(head::laid_dates(&read_text.runs, &tables, height)),
+            )
         }
         _ => (None, None),
     };
-    let lay = |runs: &[Run], slots: &[Slot], ids: &[u32], built: &mut Built| match cx.tree {
-        Some(_) => tagged(runs, slots, Some(ids), cx, built),
-        None => untagged(runs, slots, Some(ids), &text_sizes, cx, built),
+    drop(read_text);
+    drop(title_text);
+    let kind_of = |id: u32| (decided.kind_of_run(id), box_of.get(&id).copied());
+    let lay = |flow: &Flow, range: Range<usize>, built: &mut Built| {
+        lay_text(flow, range, &kind_of, &text_sizes, cx, built);
     };
     let mut start = 0;
-    // What each placed part became, by its place in `placed` (see [`finders::Became`]).
-    let mut became: Vec<finders::Became> = Vec::with_capacity(placed.len());
+    // What each placed part became, and the runs it holds.
+    let mut became: Vec<(Became, Vec<u32>)> = Vec::with_capacity(placed.len());
+    let mut spatial_whys: Vec<(usize, String, bool)> = Vec::new();
+    // Why runs were written as they were, where the writing says it (see `decide::agree`):
+    // the reason of each block kept as laid out, by its runs.
+    let mut whys: Vec<String> = Vec::new();
+    let mut why_of: HashMap<u32, usize> = HashMap::new();
     for p in placed {
         let (at, _) = p.at();
-        let end = start + flow.at[start..].partition_point(|a| *a < at);
-        lay(
-            &flow.runs[start..end],
-            &flow.slots[start..end],
-            &flow.ids[start..end],
-            &mut built,
-        );
+        let end = start + text_flow.at[start..].partition_point(|a| *a < at);
+        lay(&text_flow, start..end, &mut built);
         start = end;
         let first = built.blocks.len();
         let earlier = match &p {
             Placed::Table(t) => t.tagged.filter(|_| t.continues),
             _ => None,
         };
+        let ids = match &p {
+            Placed::Table(t) => t.ids.clone(),
+            Placed::Title(t) => {
+                let lines: HashSet<u32> = t.text_ids.iter().copied().collect();
+                t.ids
+                    .iter()
+                    .copied()
+                    .filter(|i| !lines.contains(i))
+                    .collect()
+            }
+            Placed::Spatial(s) => s.ids.clone(),
+            Placed::Unsure(_) | Placed::Header { .. } => Vec::new(),
+        };
         match p {
+            Placed::Header { line, .. } => {
+                built.paragraph(
+                    header_lines[line].runs.iter().collect(),
+                    Some("page-header"),
+                    cx,
+                );
+            }
             Placed::Table(t) => built.table(t, cx),
             Placed::Title(t) => {
                 let mut runs: Vec<&Run> = t.runs.iter().collect();
@@ -926,10 +1622,35 @@ fn page_blocks_until(
                 built.heading(SIZE_LEVELS as u8, runs, cx);
                 // The lines of its box or bar follow it, each a paragraph: they are lines of
                 // a form (a dash that opens one is no list).
-                let mut text = t.text;
-                text.sort_by(|a, b| a.line.cmp(&b.line).then(a.x.total_cmp(&b.x)));
+                let at = built.blocks.len();
+                // The runs with their ids (`text_ids` holds the id of each run of `text`).
+                let mut text: Vec<(Run, u32)> = t.text.into_iter().zip(t.text_ids).collect();
+                text.sort_by(|a, b| a.0.line.cmp(&b.0.line).then(a.0.x.total_cmp(&b.0.x)));
+                let (text, ids): (Vec<Run>, Vec<u32>) = text.into_iter().unzip();
+                // Each line's runs became the paragraph it was written as; a line that wrote no
+                // block goes with the block before it (the first one when none was before).
+                let mut of_block: Vec<(usize, Vec<u32>)> = Vec::new();
+                let mut from = 0;
                 for l in lines(&text) {
+                    let before = built.blocks.len();
                     built.paragraph(l.runs.iter().collect(), None, cx);
+                    let own = &ids[from..from + l.runs.len()];
+                    from += l.runs.len();
+                    match of_block.last_mut() {
+                        Some(last) if built.blocks.len() == before => {
+                            last.1.extend_from_slice(own);
+                        }
+                        _ => of_block
+                            .push((built.blocks.len().saturating_sub(1).max(at), own.to_vec())),
+                    }
+                }
+                if built.blocks.len() > at && !ids.is_empty() {
+                    let k = whys.len();
+                    whys.push(decide::TITLE_LINES.to_string());
+                    why_of.extend(ids.iter().map(|&i| (i, k)));
+                    for (block, own) in of_block {
+                        became.push((hosts::Became::Block(block), own));
+                    }
                 }
             }
             Placed::Unsure(u) => {
@@ -942,15 +1663,85 @@ fn page_blocks_until(
                 built.note(&what, cx);
                 notes.push((what, LossReason::Uncertain, Severity::Info));
             }
+            Placed::Spatial(s) => {
+                // The block's link targets, each once, and the index each target got (none
+                // when the room for link targets is spent: the text stays, without its link).
+                let mut targets: Vec<String> = Vec::new();
+                let mut index: HashMap<*const UriTarget, Option<u32>> = HashMap::new();
+                let mut link = |t: &Rc<UriTarget>| -> Option<u32> {
+                    *index.entry(Rc::as_ptr(t)).or_insert_with(|| {
+                        let k = u32::try_from(targets.len()).ok()?;
+                        cx.links.take(t, page).then(|| {
+                            targets.push(t.uri.to_string());
+                            k
+                        })
+                    })
+                };
+                let lines = if s.pieces.is_empty() {
+                    let prims: Vec<layoutregions::PrimId> = s
+                        .ids
+                        .iter()
+                        .map(|&i| layoutregions::PrimId::Text(i))
+                        .collect();
+                    let marks = |id: u32| match run_marks.get(&id) {
+                        Some((uri, note)) => decide::RunMarks {
+                            uri: uri.as_ref(),
+                            note: note.as_deref(),
+                        },
+                        None => decide::RunMarks::default(),
+                    };
+                    decide::spatial_lines(&engine_in, &prims, &marks, &mut link)
+                } else {
+                    // A reference's run holds its footnote's label: the text laid out is its
+                    // marker as printed.
+                    let texts = s
+                        .pieces
+                        .iter()
+                        .map(|r| {
+                            let mut t = engine::text_run(r);
+                            if r.note
+                                && let Some(m) = markers.get(r.text.trim())
+                            {
+                                t.text.clone_from(m);
+                            }
+                            t
+                        })
+                        .collect();
+                    let marks = |i: u32| {
+                        s.pieces
+                            .get(i as usize)
+                            .map_or_else(decide::RunMarks::default, |r| decide::RunMarks {
+                                uri: r.uri.as_ref(),
+                                note: r.note.then(|| r.text.trim()),
+                            })
+                    };
+                    let own = layoutregions::PageIn {
+                        texts,
+                        page: engine_in.page,
+                        size: engine_in.size,
+                        turn: engine_in.turn,
+                        given: Vec::new(),
+                        rules: Vec::new(),
+                        boxes: Vec::new(),
+                        pictures: Vec::new(),
+                        codes: Vec::new(),
+                    };
+                    let prims: Vec<layoutregions::PrimId> = (0..s.pieces.len())
+                        .map(|i| layoutregions::PrimId::Text(i as u32))
+                        .collect();
+                    decide::spatial_lines(&own, &prims, &marks, &mut link)
+                };
+                let k = whys.len();
+                whys.push(s.why.clone());
+                why_of.extend(s.ids.iter().map(|&i| (i, k)));
+                if built.spatial(lines, targets, cx) {
+                    spatial_whys.push((built.blocks.len() - 1, s.why, s.limit));
+                }
+            }
         }
-        became.push(finders::became(&built.blocks, first, earlier));
+        became.push((hosts::became(&built.blocks, first, earlier), ids));
     }
-    lay(
-        &flow.runs[start..],
-        &flow.slots[start..],
-        &flow.ids[start..],
-        &mut built,
-    );
+    lay(&text_flow, start..text_flow.runs.len(), &mut built);
     // Markers that end a word above refer to the footnotes too. Only the footnotes written
     // are said: a stop writes none.
     footnotes::link_words(&mut built.blocks, &legend);
@@ -979,7 +1770,7 @@ fn page_blocks_until(
         .collect();
     footnotes::unlink(&mut built.blocks, &legend, &unwritten);
     // The running footer, block by block (see [`footer_blocks`]).
-    let footer_lines = lines(&footers);
+    let footer_lines = lines(&footer_flow.runs);
     for block in footer_blocks(&footer_lines) {
         let runs: Vec<&Run> = block.iter().flat_map(|l| l.runs.iter()).collect();
         let mut breaks: Vec<(u32, u32)> = block
@@ -1011,77 +1802,60 @@ fn page_blocks_until(
         }
         notes.push((what, LossReason::Limit, Severity::Info));
     }
-    // The blocks laid out from the runs no finder took, then the pictures and the codes.
     built.own_unlaid();
-    finders::offer_rest(&engine_in, &mut arb, &built.blocks, &built.block_ids, &cut);
-    let mut regions = arb.finish();
-    finders::mark_doubts(&mut regions, &doubts);
-    let stopped = regions
-        .issues
+    // Where the segmentation stopped, what it did not part is read by its decisions; the page
+    // names the stop once.
+    let stopped = segment_issues
         .iter()
         .any(|i| i.kind == layoutregions::IssueKind::Stopped);
-    // Detectors a stop skipped, on a page whose text was still laid out: its runs stand as
-    // text. Where the page stopped too (the time limit stops the blocks as well), the page's
-    // own stop loss says what is not read.
-    let time_named = stopped && built.stop.is_none() && !engine_in.texts.is_empty();
-    if time_named {
+    if stopped && built.stop.is_none() && !engine_in.texts.is_empty() {
         notes.push((
             format!(
-                "tables, running headers and footers and footnotes on page {page} are looked for \
-                 only in part: the time limit was reached; the text past that is read as it \
-                 stands"
+                "the regions of page {page} are looked for only in part: the time limit was \
+                 reached; the text past that is read as it stands"
             ),
             LossReason::Limit,
             Severity::Info,
         ));
     }
-    // Every run is in one region, unless a stop or the region limit ended the search (the
-    // rest of such a page gets its region in a later step).
-    if cfg!(debug_assertions) && regions.issues.is_empty() && built.stop.is_none() {
-        finders::check_cover(&engine_in, &regions, &repeats);
-    }
-    // What a bound of the segmentation cut short travels with the page's regions. The page
-    // says no loss for it: the ruled detector then reads every grid (see
-    // `tables::ruled_groups`) and the detector without rules reads the whole page, so no
-    // read is lost. A stop of it is the time limit the page names once.
-    for issue in segment_issues {
-        let said = issue.kind == layoutregions::IssueKind::Stopped
-            && regions.issues.iter().any(|i| i.kind == issue.kind);
-        if !said {
-            regions.issues.push(issue);
-        }
-    }
-    for r in &mut regions.regions {
-        let by = r.signals.first().map(|s| s.id);
-        if by.is_some_and(finders::placed_by) {
-            r.host = placed_at.get(r.host as usize).copied().unwrap_or(r.host);
-        }
-    }
-    // From here on a region's host is the block it became.
-    let earlier = finders::block_hosts(&mut regions, &became, &built.blocks);
+    segment_issues.dedup_by(|a, b| a.kind == b.kind);
+    // Each decision says what the page wrote of it, then stands at the block it became.
+    let mut decided = decided;
+    let demoted = std::mem::take(&mut built.demoted);
+    let run_blocks = hosts::run_blocks(&built, &became, engine_in.texts.len());
+    let written: Vec<Option<&'static str>> = run_blocks
+        .iter()
+        .map(|&b| built.blocks.get(b as usize).map(crate::block_word))
+        .collect();
+    decide::agree(
+        &mut decided,
+        &engine_in,
+        (&legend.ids, &demoted, &pre_drawn, &left_pairs),
+        &written,
+        &|i| why_of.get(&i).map(|&k| whys[k].as_str()),
+    );
+    let (hosts, earlier, unsure) = hosts::hosts(
+        &decided,
+        &engine_in,
+        &built,
+        &became,
+        &run_blocks,
+        &doubt_of,
+        tagged_page,
+    );
+    let regions = decide::regions(page, decided, &hosts, &unsure, segment_issues);
     let probe_block = std::mem::take(&mut built.probe_block);
     let probes_cut = built.probes_cut;
     let mut laid = built.laid(notes, regions);
     laid.earlier = earlier;
-    #[cfg(debug_assertions)]
-    {
-        let (facts, index) = &cx.style.facts;
-        laid.shadow = crate::shadow::run(
-            &engine_in,
-            given,
-            facts,
-            index,
-            &rezzer_layout::pdf::engine_limits(cx.budget),
-            &ends_in_amount,
-            cx.tree.is_some(),
-        );
-    }
+    laid.run_blocks = run_blocks;
     laid.engine_in = Some(engine_in);
     laid.probes_cut = probes_cut;
     laid.found_by = footnotes::note(page, footnotes_written, linked_written);
     laid.title = title;
     laid.dates = dates;
     let (mut b, mut t) = (0, 0);
+    let mut anchors: Vec<String> = Vec::with_capacity(laid.blocks.len());
     for block in &mut laid.blocks {
         let anchor = if matches!(block, Block::Table { .. }) {
             t += 1;
@@ -1090,13 +1864,368 @@ fn page_blocks_until(
             b += 1;
             format!("p{page}:b{b}")
         };
+        anchors.push(anchor.clone());
         set_anchor(block, Anchor(anchor));
+    }
+    // Each block kept as laid out says so, at its anchor, and what of its style the Markdown
+    // cannot show (a fence holds no emphasis; the JSON marks it).
+    for (k, why, limit) in spatial_whys {
+        if let Some(at) = anchors.get(k) {
+            let styled = match laid.blocks.get(k) {
+                Some(Block::Spatial { lines, .. }) => style_clause(lines),
+                _ => "",
+            };
+            laid.located.push((
+                at.clone(),
+                format!(
+                    "the region at {at} is kept as laid out, as text in its columns: {why}{styled}"
+                ),
+                if limit {
+                    LossReason::Limit
+                } else {
+                    LossReason::Uncertain
+                },
+                Severity::Info,
+            ));
+        }
     }
     laid.probed = probe_block
         .into_iter()
         .map(|k| k.and_then(|k| anchor_of(laid.blocks.get(k)?)))
         .collect();
     laid
+}
+
+/// The reader of a table, pairs or totals decision, named by its winning evidence: drawn boxes
+/// that each hold a label and its value are read by the box reader, lines that each hold a label
+/// and its value by the line pairs reader, everything else (ruled grids, header bands, strips,
+/// columns without rules, key values, totals) by the table readers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AreaReader {
+    Boxes,
+    Lines,
+    Tables,
+}
+
+fn area_reader(d: &layoutregions::Decision) -> AreaReader {
+    let has = |id: &str| d.signals.iter().any(|s| s.id == id);
+    if d.kind != Kind::LabelValue || has("label_value.strip_fields") || has("label_value.dividers")
+    {
+        return AreaReader::Tables;
+    }
+    if has("label_value.line_pairs") {
+        AreaReader::Lines
+    } else if has("label_value.fields") || has("label_value.field_cells") {
+        AreaReader::Boxes
+    } else {
+        AreaReader::Tables
+    }
+}
+
+/// The runs of `flow` by their decision (`of_run`, by run id), each part in the flow's order,
+/// the parts in the order of their first run.
+fn by_decision(flow: Flow, of_run: &[u32]) -> Vec<(u32, Flow)> {
+    let mut out: Vec<(u32, Flow)> = Vec::new();
+    let mut at: HashMap<u32, usize> = HashMap::new();
+    let places = flow.at.into_iter().zip(flow.ids);
+    for ((r, s), (a, id)) in flow.runs.into_iter().zip(flow.slots).zip(places) {
+        let d = of_run.get(id as usize).copied().unwrap_or(decide::NONE);
+        let k = *at.entry(d).or_insert_with(|| {
+            out.push((d, Flow::default()));
+            out.len() - 1
+        });
+        let f = &mut out[k].1;
+        f.runs.push(r);
+        f.slots.push(s);
+        f.at.push(a);
+        f.ids.push(id);
+    }
+    out
+}
+
+/// The runs of a page by the middle of their height, with their decision, to tell whether a
+/// line of another region stands between a label and its value.
+struct Across {
+    /// (middle, x0, x1, decision), by middle.
+    runs: Vec<(f32, f32, f32, u32)>,
+    /// Runs looked at so far on the page, against [`ACROSS_WORK`].
+    work: std::cell::Cell<usize>,
+    /// The bound was spent: the pairs of the tables checked after it were not checked.
+    spent: std::cell::Cell<bool>,
+}
+
+impl Across {
+    fn new(page: &layoutregions::PageIn, of_run: &[u32]) -> Across {
+        let mut runs: Vec<(f32, f32, f32, u32)> = page
+            .texts
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| layoutregions::line::ink(&r.text) > 0)
+            .map(|(i, r)| {
+                let d = of_run.get(i).copied().unwrap_or(decide::NONE);
+                (r.y + r.h / 3.0, r.x.min(r.x + r.w), r.x.max(r.x + r.w), d)
+            })
+            .collect();
+        runs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        Across {
+            runs,
+            work: std::cell::Cell::new(0),
+            spent: std::cell::Cell::new(false),
+        }
+    }
+
+    /// Whether a row of `t` (a table of decision `d`) has cells on two lines with a run of
+    /// another decision between them, over their width: its label and value are paired across
+    /// a line of another region. The runs looked at count against one bound for the page
+    /// ([`ACROSS_WORK`]); past it a table is taken as not crossed and [`Across::spent`] says so.
+    fn crossed(&self, t: &Planned, d: u32) -> bool {
+        if self.spent.get() {
+            return false;
+        }
+        for row in &t.rows {
+            let cells: Vec<&PlannedCell> = row.iter().filter(|c| !c.runs.is_empty()).collect();
+            for pair in cells.windows(2) {
+                let span = |c: &PlannedCell| {
+                    let ys = c.runs.iter().map(|r| r.y + r.h / 3.0);
+                    let lo = ys.clone().fold(f32::MAX, f32::min);
+                    let hi = ys.fold(f32::MIN, f32::max);
+                    let x0 = c
+                        .runs
+                        .iter()
+                        .map(|r| r.x.min(r.x + r.w))
+                        .fold(f32::MAX, f32::min);
+                    let x1 = c
+                        .runs
+                        .iter()
+                        .map(|r| r.x.max(r.x + r.w))
+                        .fold(f32::MIN, f32::max);
+                    (lo, hi, x0, x1)
+                };
+                let (a, b) = (span(pair[0]), span(pair[1]));
+                // The space between the two cells' lines, a third of a size kept off each.
+                let size = pair[0].runs[0].size.max(pair[1].runs[0].size).max(1.0);
+                let (lo, hi) = if a.0 > b.1 {
+                    (b.1, a.0)
+                } else if b.0 > a.1 {
+                    (a.1, b.0)
+                } else {
+                    continue;
+                };
+                let (lo, hi) = (lo + size / 3.0, hi - size / 3.0);
+                if hi <= lo {
+                    continue;
+                }
+                let (x0, x1) = (a.2.min(b.2), a.3.max(b.3));
+                let from = self.runs.partition_point(|r| r.0 <= lo);
+                for r in &self.runs[from..] {
+                    if r.0 >= hi {
+                        break;
+                    }
+                    self.work.set(self.work.get() + 1);
+                    if self.work.get() > ACROSS_WORK {
+                        self.spent.set(true);
+                        return false;
+                    }
+                    if r.3 != d && r.1 < x1 && r.2 > x0 {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+}
+
+/// Runs one page may look at to tell labels paired across a line of another region, over all
+/// its tables.
+const ACROSS_WORK: usize = 4_000_000;
+
+/// A table of the label and value of each line of a line pairs decision (see the typer's
+/// `label_value.line_pairs`): each line parts where the typer's line pair rule parts it
+/// ([`layoutregions::typers::pairs::line_pair_cut`]), so the pairs written are the pairs that
+/// won the region. The runs of the lines it reads leave `area`; a line the rule does not part
+/// stays, and the area reads no table when no line parts.
+fn line_pairs(area: &mut Flow) -> Option<Planned> {
+    let mut rows: Vec<Vec<PlannedCell>> = Vec::new();
+    let mut ids: Vec<u32> = Vec::new();
+    let mut taken = vec![false; area.runs.len()];
+    let cell = |runs: Vec<Run>| PlannedCell {
+        runs,
+        row_span: 1,
+        col_span: 1,
+        status: None,
+    };
+    // The only line of the area with ink is lone, as the typer reads a group of one line.
+    let lone = one_line(area);
+    let mut i = 0;
+    while i < area.runs.len() {
+        let line = area.runs[i].line;
+        let mut j = i;
+        while j < area.runs.len() && area.runs[j].line == line {
+            j += 1;
+        }
+        let runs = &area.runs[i..j];
+        if let Some((label, value)) = part_line(runs, lone) {
+            rows.push(vec![cell(label), cell(value)]);
+            ids.extend_from_slice(&area.ids[i..j]);
+            taken[i..j].iter_mut().for_each(|t| *t = true);
+        }
+        i = j;
+    }
+    if rows.is_empty() {
+        return None;
+    }
+    let first = taken.iter().position(|t| *t)?;
+    let at = area.at[first];
+    let top = area.runs[first].y;
+    area.take(|i, _| taken[i]);
+    Some(Planned {
+        at,
+        top,
+        rows,
+        trs: Vec::new(),
+        additions: Vec::new(),
+        header_rows: 0,
+        tagged: None,
+        continues: false,
+        caption: Vec::new(),
+        found_by: None,
+        kind: Kind::LabelValue,
+        ids,
+        by: tables::Detector::LinePairs,
+        drawn: None,
+    })
+}
+
+/// Whether the runs of `area` with ink stand on one line.
+fn one_line(area: &Flow) -> bool {
+    let mut inked = area
+        .runs
+        .iter()
+        .filter(|r| layoutregions::line::ink(&r.text) > 0)
+        .map(|r| r.line);
+    let first = inked.next();
+    inked.all(|l| Some(l) == first)
+}
+
+/// The label and the value of one line where the typer's line pair rule parts it: a run the
+/// cut falls in is cut in two, each piece its share of the run's width.
+fn part_line(runs: &[Run], lone: bool) -> Option<(Vec<Run>, Vec<Run>)> {
+    let cut = layoutregions::typers::pairs::line_pair_cut(runs, lone)?;
+    if cut.byte == 0 {
+        return Some((runs[..cut.run].to_vec(), runs[cut.run..].to_vec()));
+    }
+    let r = &runs[cut.run];
+    let mut before = r.clone();
+    before.text = r.text[..cut.byte].to_string();
+    let mut after = r.clone();
+    after.text = r.text[cut.byte..].to_string();
+    let chars = r.text.chars().count().max(1) as f32;
+    let share = r.text[..cut.byte].chars().count() as f32 / chars;
+    before.w = r.w * share;
+    after.x = r.x + r.w * share;
+    after.w = r.w - before.w;
+    before.gaps = Gaps::default();
+    after.gaps = Gaps::default();
+    let mut label = runs[..cut.run].to_vec();
+    label.push(before);
+    let mut value = vec![after];
+    value.extend(runs[cut.run + 1..].iter().cloned());
+    Some((label, value))
+}
+
+/// A table of the page as the head of page 1 reads it: its rows as the text of their cells,
+/// `lines` when its pairs were read from lines of text.
+fn head_table(t: &Planned, lines: bool) -> head::Table {
+    head::Table {
+        pairs: t.is_pairs(),
+        lines,
+        top: t.top,
+        rows: t
+            .rows
+            .iter()
+            .map(|row| {
+                row.iter()
+                    .map(|c| head::Cell {
+                        text: c.runs.iter().map(|r| r.text.as_str()).collect(),
+                        spot: c.runs.first().map(|first| head::Spot {
+                            y: first.y,
+                            x0: c.runs.iter().map(|r| r.x).fold(first.x, f32::min),
+                            x1: c.runs.iter().map(|r| r.x + r.w).fold(first.x, f32::max),
+                            size: first.size,
+                        }),
+                    })
+                    .collect()
+            })
+            .collect(),
+    }
+}
+
+/// The value that stands most often in `values` (the first of them on a tie), leaving out
+/// [`decide::NONE`].
+fn majority(values: impl Iterator<Item = u32>) -> Option<u32> {
+    let mut count: Vec<(u32, usize)> = Vec::new();
+    for v in values.filter(|v| *v != decide::NONE) {
+        match count.iter_mut().find(|c| c.0 == v) {
+            Some(c) => c.1 += 1,
+            None => count.push((v, 1)),
+        }
+    }
+    let most = count.iter().map(|c| c.1).max()?;
+    count.iter().find(|c| c.1 == most).map(|c| c.0)
+}
+
+/// How a run of text is laid out: by its tag (a run a tag element holds), or by the walk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TextKey {
+    Tag,
+    Free,
+}
+
+/// Lays out the runs `range` of `flow` as text: runs a tag element holds by their tags
+/// ([`tagged`]), the others by one walk ([`untagged`]) over each stretch of them, with the
+/// kind of their decision and the drawn box they stand in (`kind_of`, by run id). A block of
+/// the walk never goes from one kind or box into another (text in a drawn box never joins text
+/// outside it or in another box), but the walk reads the lines around it too: a line's
+/// measure and the column a heading size stands in are the page's, not its decision's.
+fn lay_text(
+    flow: &Flow,
+    range: Range<usize>,
+    kind_of: &dyn Fn(u32) -> (Option<Kind>, Option<u32>),
+    text_sizes: &[f32],
+    cx: &Context<'_>,
+    built: &mut Built,
+) {
+    let key = |i: usize| -> TextKey {
+        if flow.slots[i] == Slot::Free {
+            TextKey::Free
+        } else {
+            TextKey::Tag
+        }
+    };
+    let walk_key = |id: u32| -> (Option<Kind>, Option<u32>) {
+        let (kind, boxed) = kind_of(id);
+        let kind = match kind {
+            Some(Kind::Heading | Kind::TitleBlock) => Some(Kind::Heading),
+            Some(k @ (Kind::Paragraph | Kind::List)) => Some(k),
+            _ => None,
+        };
+        (kind, boxed)
+    };
+    let mut s = range.start;
+    while s < range.end && built.stop.is_none() {
+        let k = key(s);
+        let mut e = s + 1;
+        while e < range.end && key(e) == k {
+            e += 1;
+        }
+        let (runs, slots, ids) = (&flow.runs[s..e], &flow.slots[s..e], &flow.ids[s..e]);
+        match k {
+            TextKey::Tag => tagged(runs, slots, Some(ids), cx, built),
+            TextKey::Free => untagged(runs, Some(ids), text_sizes, &walk_key, cx, built),
+        }
+        s = e;
+    }
 }
 
 /// The anchor a block of a page carries, a footnote section's (`fn:<label>`) too.
@@ -1112,6 +2241,7 @@ fn anchor_of(block: &Block) -> Option<Anchor> {
         Block::Heading { anchor, .. }
         | Block::Paragraph { anchor, .. }
         | Block::List { anchor, .. }
+        | Block::Spatial { anchor, .. }
         | Block::Table { anchor, .. } => anchor.clone(),
         _ => None,
     }
@@ -1123,6 +2253,42 @@ enum Placed {
     Unsure(Unsure),
     /// The title of a box beside boxed fields, a heading of the lowest level.
     Title(tables::BoxTitle),
+    /// Runs of one decision kept as laid out.
+    Spatial(SpatialPart),
+    /// A line of the running header (its index in the page's header lines), where its first
+    /// run stands in the page's order, and its baseline.
+    Header {
+        line: usize,
+        at: usize,
+        top: f32,
+    },
+}
+
+/// What the loss of a block kept as laid out adds for its style: its bold or italic text is
+/// marked in the JSON only, as a text fence shows no emphasis.
+fn style_clause(lines: &[rezzer_model::SpatialLine]) -> &'static str {
+    let spans = || lines.iter().flat_map(|l| &l.pieces).flat_map(|p| &p.spans);
+    match (spans().any(|s| s.strong), spans().any(|s| s.emphasis)) {
+        (true, true) => "; its bold and italic text is marked in the JSON only",
+        (true, false) => "; its bold text is marked in the JSON only",
+        (false, true) => "; its italic text is marked in the JSON only",
+        (false, false) => "",
+    }
+}
+
+/// The runs of one decision kept as laid out: where it stands in the page's order, its top,
+/// the ids of its runs and why it is kept so.
+struct SpatialPart {
+    at: usize,
+    top: f32,
+    ids: Vec<u32>,
+    /// The runs of the part as the table readers left them, pieces of cut runs too; none for
+    /// a part whose runs are the page's own.
+    pieces: Vec<Run>,
+    why: String,
+    /// Kept as laid out because a limit or a stop ended the search before its kind was
+    /// looked for: its loss is a `Limit` one.
+    limit: bool,
 }
 
 impl Placed {
@@ -1132,6 +2298,8 @@ impl Placed {
             Placed::Table(t) => (t.at, t.top),
             Placed::Unsure(u) => (u.at, u.top),
             Placed::Title(t) => (t.at, t.top),
+            Placed::Spatial(s) => (s.at, s.top),
+            Placed::Header { at, top, .. } => (*at, *top),
         }
     }
 }
@@ -1141,6 +2309,7 @@ fn set_anchor(block: &mut Block, to: Anchor) {
         Block::Heading { anchor, .. }
         | Block::Paragraph { anchor, .. }
         | Block::List { anchor, .. }
+        | Block::Spatial { anchor, .. }
         | Block::Table { anchor, .. } => *anchor = Some(to),
         _ => {}
     }
@@ -1204,6 +2373,9 @@ struct Built {
     block_ids: Vec<Vec<u32>>,
     /// The ids of runs of empty lines passed over, for the next block laid out.
     unlaid: Vec<u32>,
+    /// The ids of runs of a heading decision that the walk laid out as a paragraph for their
+    /// geometry, with why (see [`untagged`]): their region is a paragraph.
+    demoted: Vec<(u32, Demotion)>,
 }
 
 /// What a page's layout is building.
@@ -1282,6 +2454,7 @@ impl Built {
             tagged: self.tagged,
             added: self.added,
             notes,
+            located: Vec::new(),
             probed: Vec::new(),
             probes_cut: false,
             found_by: None,
@@ -1289,8 +2462,8 @@ impl Built {
             dates: None,
             regions,
             engine_in: None,
-            shadow: None,
             earlier: Vec::new(),
+            run_blocks: Vec::new(),
         }
     }
 
@@ -1372,6 +2545,39 @@ impl Built {
             self.probe_block[i].get_or_insert(k);
         }
         self.probe_round += 1;
+    }
+
+    /// A block of text kept as laid out (see [`Block::Spatial`]), its text charged; whether it
+    /// was added (a block of no text is not).
+    fn spatial(
+        &mut self,
+        lines: Vec<rezzer_model::SpatialLine>,
+        links: Vec<String>,
+        cx: &Context<'_>,
+    ) -> bool {
+        if self.stop.is_some() || lines.is_empty() {
+            return false;
+        }
+        self.pending = Pending::Block;
+        let text: usize = lines
+            .iter()
+            .flat_map(|l| &l.pieces)
+            .map(|p| p.text.len())
+            .sum();
+        if let Err(hit) = time_over(cx.budget).and_then(|()| cx.budget.charge_text(text)) {
+            self.stop_at(hit, cx);
+            return false;
+        }
+        let at = self.blocks.len();
+        self.push(
+            Block::Spatial {
+                lines,
+                links,
+                anchor: None,
+            },
+            cx,
+        );
+        self.blocks.len() > at
     }
 
     /// A paragraph that says something about the page, not its text.
@@ -2241,28 +3447,40 @@ fn span(flow: &[Run], block: &[Line<'_>]) -> Range<usize> {
 /// Lays out the runs of an untagged page (`ids` their ids, if they are the page's flow) as
 /// headings, lists and paragraphs, block by block as [`next_block`] reads them: headings by
 /// size (a line in one of the page's `text_sizes`, or less than [`file::HEADING_RATIO`] times the
-/// largest of them, is no heading), lists by marker, paragraphs by gaps.
+/// largest of them, is no heading), lists by marker, paragraphs by gaps. `kind` is the kind the
+/// region engine decided the runs as, when it decided one: a heading decision makes each block
+/// a heading (at the level the walk reads, else the lowest), a paragraph decision makes each a
+/// paragraph (an item with its marker), a list decision keeps the walk's items and makes its
+/// headings paragraphs.
 fn untagged(
     flow: &[Run],
-    slots: &[Slot],
     ids: Option<&[u32]>,
     text_sizes: &[f32],
+    key_of: &dyn Fn(u32) -> (Option<Kind>, Option<u32>),
     cx: &Context<'_>,
     out: &mut Built,
 ) {
     let levels = cx.style.levels(text_sizes);
     let all = lines(flow);
-    // The block of its own a line stands in, if the table pass read one (see
-    // [`Slot::Block`]). A line's runs are a slice of `flow`, so its first run's place is
-    // where the slice starts.
-    let block: Vec<Option<usize>> = all
+    // The kind of the decision and the drawn box of each line (`key_of`, by the id of the
+    // line's first run; none without `ids`). A line goes on the line before it by the walk, and
+    // only with the same kind and box: the text of a page never holds the cells of a table its
+    // readers left (they are kept as laid out).
+    let line_keys: Vec<(Option<Kind>, Option<u32>)> = all
         .iter()
-        .map(
-            |l| match slots.get(span(flow, std::slice::from_ref(l)).start) {
-                Some(Slot::Block(b)) => Some(*b),
-                _ => None,
-            },
-        )
+        .map(|l| {
+            let at = span(flow, std::slice::from_ref(l)).start;
+            ids.and_then(|ids| ids.get(at))
+                .map_or((None, None), |&id| key_of(id))
+        })
+        .collect();
+    let mut keys: HashMap<(Option<Kind>, Option<u32>), usize> = HashMap::new();
+    let block: Vec<Option<usize>> = line_keys
+        .iter()
+        .map(|k| {
+            let n = keys.len();
+            Some(*keys.entry(*k).or_insert(n))
+        })
         .collect();
     let text = TextCx {
         levels: &levels,
@@ -2272,7 +3490,11 @@ fn untagged(
     let mut open_list: Option<Option<usize>> = None;
     while i < all.len() && out.stop.is_none() {
         let (found, j) = next_block(&all, i, open_list.is_some(), &text);
+        let kind = line_keys[i].0;
+        let heading = kind == Some(Kind::Heading);
+        let paragraph = matches!(kind, Some(Kind::Paragraph | Kind::List));
         let runs = || -> Vec<&Run> { all[i..j].iter().flat_map(|l| l.runs.iter()).collect() };
+        let lowest = || levels.level(&all[i]).unwrap_or(SIZE_LEVELS as u8);
         match found {
             TextBlock::Empty => {
                 out.pass_over(ids, span(flow, &all[i..j]));
@@ -2283,9 +3505,45 @@ fn untagged(
                 level,
                 demoted: None,
                 ..
-            } => out.heading(level, runs(), cx),
+            } if !paragraph => out.heading(level, runs(), cx),
+            // A heading decision makes a heading of lines the walk demoted for what they say
+            // (an address, sentences), not of lines it demoted for their geometry: lines apart,
+            // unwrapped or in cells keep their breaks, as the walk reads them with the lines
+            // of their column around them (a box may have cut the decision's segment off them).
+            TextBlock::Heading {
+                level,
+                demoted: Some(d),
+                ..
+            } if heading
+                && !matches!(
+                    d,
+                    Demotion::LinesApart | Demotion::Unwrapped | Demotion::Cells
+                ) =>
+            {
+                out.heading(level, runs(), cx);
+            }
+            // Lines demoted for their geometry under a heading decision: a paragraph with its
+            // breaks, and its runs said, so their region is the paragraph written.
+            TextBlock::Heading {
+                breaks,
+                demoted: Some(d),
+                ..
+            } if heading => {
+                out.broken_paragraph(runs(), &breaks, None, cx);
+                if let Some(ids) = ids
+                    && out.stop.is_none()
+                {
+                    let span = span(flow, &all[i..j]);
+                    out.demoted.extend(ids[span].iter().map(|&id| (id, d)));
+                }
+            }
+            TextBlock::Paragraph { .. } if heading => out.heading(lowest(), runs(), cx),
             TextBlock::Heading { breaks, .. } | TextBlock::Paragraph { breaks } => {
                 out.broken_paragraph(runs(), &breaks, None, cx);
+            }
+            TextBlock::Item { .. } if heading => out.heading(lowest(), runs(), cx),
+            TextBlock::Item { .. } if kind == Some(Kind::Paragraph) => {
+                out.paragraph(runs(), None, cx);
             }
             TextBlock::Item {
                 ordered,
@@ -2326,9 +3584,6 @@ pub(crate) enum Slot {
         table: usize,
         cell: usize,
     },
-    /// Untagged text the table pass read as a block of its own (a cell of a row of fields read
-    /// cell by cell): its lines go on no line of another block.
-    Block(usize),
 }
 
 /// Roles that only group blocks or mark text inside a block.
@@ -2511,7 +3766,7 @@ fn tagged(flow: &[Run], slots: &[Slot], ids: Option<&[u32]>, cx: &Context<'_>, o
                 *open = None;
                 out.paragraph(taken, role, cx);
             }
-            Slot::Free | Slot::Cell { .. } | Slot::Block(_) => {
+            Slot::Free | Slot::Cell { .. } => {
                 *open = None;
                 out.paragraph(taken, None, cx);
             }
@@ -2524,7 +3779,7 @@ fn tagged(flow: &[Run], slots: &[Slot], ids: Option<&[u32]>, cx: &Context<'_>, o
         }
         // A cell run left to the text reads like a free run.
         let slot = match slot {
-            Slot::Cell { .. } | Slot::Block(_) => Slot::Free,
+            Slot::Cell { .. } => Slot::Free,
             s => *s,
         };
         let same = slot == current_slot
@@ -3353,6 +4608,146 @@ mod tests {
         );
     }
 
+    /// A leaf the segmentation's depth bound left whole is not typed (Task 19 ruling: limit
+    /// leaves are kept as laid out with a Limit loss): 70 boxes drawn one in the other nest
+    /// deeper than the bound of 64 levels, so the box at the bound keeps the lines of the
+    /// boxes in it. Those lines read as items of a list by their dashes; they are one region
+    /// kept as laid out, no other region holds them, every line is written once, and the loss
+    /// names the bound.
+    #[test]
+    fn a_leaf_the_depth_bound_left_whole_is_kept_as_laid_out() {
+        let line = |x0: f32, y0: f32, x1: f32, y1: f32| Rule {
+            x0,
+            y0,
+            x1,
+            y1,
+            kind: crate::tables::RuleKind::Line,
+        };
+        let mut rules = Vec::new();
+        for k in 0..70 {
+            let d = 2.5 * k as f32;
+            let (x0, y0, x1, y1) = (100.0 + d, 200.0 + d, 500.0 - d, 700.0 - d);
+            rules.push(line(x0, y0, x1, y0));
+            rules.push(line(x0, y1, x1, y1));
+            rules.push(line(x0, y0, x0, y1));
+            rules.push(line(x1, y0, x1, y1));
+        }
+        let structure = crate::regions::structure_in_frame(&rules, &[]);
+        let drawn = Drawn {
+            rules: &rules,
+            structure: &structure,
+            ..NOTHING_DRAWN
+        };
+        let items = ["- one", "- two", "- six", "- ten"];
+        let runs: Vec<Run> = items
+            .iter()
+            .enumerate()
+            .map(|(k, t)| cell_run(t, 280.0, 480.0 - 14.0 * k as f32, k as u32, false))
+            .collect();
+        let laid = laid_page(runs, &drawn);
+        let short: Vec<_> = laid
+            .regions
+            .regions
+            .iter()
+            .filter(|r| r.signals.iter().any(|s| s.id == "pdf.limit.unparted"))
+            .collect();
+        assert_eq!(
+            short.len(),
+            1,
+            "{:?} {:?}",
+            laid.regions.issues,
+            laid.regions.regions
+        );
+        assert_eq!(short[0].kind, Kind::Spatial);
+        assert_eq!(short[0].alternatives[0].kind, Kind::List);
+        let texts: Vec<u32> = short[0]
+            .prims
+            .iter()
+            .filter_map(|p| match p {
+                layoutregions::PrimId::Text(i) => Some(*i),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(texts, [0, 1, 2, 3]);
+        for r in &laid.regions.regions {
+            if r.id != short[0].id {
+                assert!(
+                    !r.prims
+                        .iter()
+                        .any(|p| matches!(p, layoutregions::PrimId::Text(_))),
+                    "{r:?}"
+                );
+            }
+        }
+        let mut text = String::new();
+        for b in &laid.blocks {
+            if let Block::Spatial { lines, .. } = b {
+                for l in lines {
+                    for p in &l.pieces {
+                        text.push_str(&p.text);
+                        text.push('\n');
+                    }
+                }
+            }
+        }
+        for t in items {
+            assert_eq!(text.matches(t).count(), 1, "{t} in {text}");
+        }
+        assert!(
+            laid.located.iter().any(|l| l.2 == LossReason::Limit
+                && l.1.contains("kept as laid out")
+                && l.1.contains("bound")),
+            "{:?}",
+            laid.located
+        );
+    }
+
+    /// A drawing with a figure caption beside it is a figure region, though it holds no text
+    /// of its own: only a leaf of rules or boxes the engine left unsure is no region.
+    #[test]
+    fn a_drawn_figure_without_text_keeps_its_region() {
+        let line = |x0: f32, y0: f32, x1: f32, y1: f32| Rule {
+            x0,
+            y0,
+            x1,
+            y1,
+            kind: crate::tables::RuleKind::Line,
+        };
+        let rules = vec![
+            line(72.0, 400.0, 372.0, 400.0),
+            line(72.0, 600.0, 372.0, 600.0),
+            line(72.0, 400.0, 72.0, 600.0),
+            line(372.0, 400.0, 372.0, 600.0),
+            line(100.0, 420.0, 340.0, 580.0),
+        ];
+        let structure = crate::regions::structure_in_frame(&rules, &[]);
+        let drawn = Drawn {
+            rules: &rules,
+            structure: &structure,
+            ..NOTHING_DRAWN
+        };
+        let runs = vec![Run {
+            size: 9.2,
+            ..cell_run("Fig. 4: values of a made-up series", 72.0, 385.0, 0, false)
+        }];
+        let laid = laid_page(runs, &drawn);
+        let figures: Vec<_> = laid
+            .regions
+            .regions
+            .iter()
+            .filter(|r| r.kind == Kind::Figure)
+            .collect();
+        assert_eq!(figures.len(), 1, "{:?}", laid.regions.regions);
+        assert!(
+            figures[0]
+                .signals
+                .iter()
+                .any(|s| s.id == "figure.drawn_caption"),
+            "{:?}",
+            figures[0].signals
+        );
+    }
+
     /// A stop before the first detector runs none of them: the running footer of a file of
     /// two pages, which the furniture finder takes without the stop, is still laid out as
     /// text, every run is in a region of its own block, and a limit note says the detectors
@@ -3412,10 +4807,22 @@ mod tests {
         let laid = page_blocks_until(1, 842.0, runs, &NOTHING_DRAWN, &cx, &[], &|| true);
         assert!(laid.stop.is_none());
         let mut text = String::new();
+        // A stop before the regions are typed keeps every leaf as laid out (ruling 19a: limit and
+        // stop leaves are spatial, with a Limit loss).
         for b in &laid.blocks {
-            if let Block::Paragraph { inlines, .. } | Block::Heading { inlines, .. } = b {
-                text.push_str(&rezzer_model::plain_text(inlines));
-                text.push('\n');
+            match b {
+                Block::Paragraph { inlines, .. } | Block::Heading { inlines, .. } => {
+                    text.push_str(&rezzer_model::plain_text(inlines));
+                    text.push('\n');
+                }
+                Block::Spatial { lines, .. } => {
+                    for l in lines {
+                        let pieces: Vec<&str> = l.pieces.iter().map(|p| p.text.as_str()).collect();
+                        text.push_str(&pieces.join(" "));
+                        text.push('\n');
+                    }
+                }
+                _ => {}
             }
         }
         for t in [
@@ -3427,7 +4834,11 @@ mod tests {
         ] {
             assert!(text.contains(t), "{t} in {text}");
         }
-        assert_eq!(footer(&laid), Some(None), "the footer is text");
+        assert_ne!(
+            footer(&laid),
+            Some(Some("page-footer".to_string())),
+            "the footer is text"
+        );
         let limits: Vec<&str> = laid
             .notes
             .iter()
@@ -3762,9 +5173,16 @@ mod tests {
             ));
         }
         for (k, word) in ["first", "second"].into_iter().enumerate() {
+            // Task 19: the cells of a tag table that is not kept are free text, which the
+            // engine types; a lone word has no clear evidence and may be kept as laid out (a
+            // right read, Task 36 makes it a paragraph again). It is never a row.
             match laid[k].blocks.as_slice() {
                 [Block::Paragraph { inlines, .. }] => {
                     assert_eq!(rezzer_model::plain_text(inlines), word);
+                }
+                [Block::Spatial { lines, .. }] => {
+                    assert_eq!(lines.len(), 1);
+                    assert_eq!(lines[0].pieces[0].text, word);
                 }
                 other => panic!("page {}: {other:?}", k + 1),
             }
@@ -3897,9 +5315,15 @@ mod tests {
             &NOTHING_DRAWN,
             &cx,
         );
+        // Task 19: the cells of a tag table that does not hold are free text, which the engine
+        // types; a lone word may be kept as laid out (a right read, Task 36).
         match laid.blocks.as_slice() {
             [Block::Paragraph { inlines, .. }] => {
                 assert_eq!(rezzer_model::plain_text(inlines), "lonely")
+            }
+            [Block::Spatial { lines, .. }] => {
+                assert_eq!(lines.len(), 1);
+                assert_eq!(lines[0].pieces[0].text, "lonely");
             }
             other => panic!("{other:?}"),
         }

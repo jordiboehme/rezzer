@@ -90,10 +90,19 @@ pub fn next_block<R: LineRun>(
         (!(found.0 && digits >= 3 && mid_sentence)).then_some(found)
     };
     if let Some(level) = heading_level(l) {
-        let (j, demoted) = heading_block(lines, i, level, levels);
-        let j = (i + 1..j)
-            .find(|&k| cx.block[k] != cx.block[i])
-            .unwrap_or(j);
+        // The heading ends with its block of its own (or where its lines end); whether it is
+        // one is read with the lines of its column around it, two at most past that end as
+        // over it (see [`heading_block`]), so a walk of many blocks reads each line a bounded
+        // number of times.
+        let end = (i + 1..lines.len())
+            .find(|&k| {
+                cx.block[k] != cx.block[i]
+                    || heading_level(&lines[k]) != Some(level)
+                    || !continues(&lines[k - 1], &lines[k])
+            })
+            .unwrap_or(lines.len());
+        let (j, demoted) = heading_block(&lines[..(end + 2).min(lines.len())], i, level, levels);
+        let j = j.min(end);
         let breaks = match demoted {
             None => Vec::new(),
             Some(_) => line_breaks(lines, i, j, levels.ends_in_amount),

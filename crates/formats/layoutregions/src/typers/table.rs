@@ -74,6 +74,10 @@ const SET_FULL: &str = "its lines are a paragraph set full";
 const ADDRESS_TEXT: &str = "its lines read as an address";
 /// Why lines a little larger than the body that read as sentences are no table.
 const SENTENCE_TEXT: &str = "its lines read as sentences";
+/// Why a grid of one row of values under one title that spans all its columns is no table:
+/// the title names the row (a date in boxes under `Month Day Year`), no column has a title of
+/// its own, and one row shares no columns with another. Evidence missing, not a reading.
+const TITLE_OVER_ONE_ROW: &str = "one row under a title across all its columns";
 /// Why a grid whose cells each hold a label and its value is no table.
 const FIELD_CELLS: &str = "its cells each hold a label and its value";
 /// Why lines of labels and values are no table.
@@ -414,6 +418,14 @@ fn ruled(view: &PageView<'_>, seg: &Segment) -> Find {
             Cells::Table(t) => {
                 if let Some(why) = long_or_prose(&cell_texts(&refs, &t), SHORT_CELL) {
                     refuse(refused(Speaks::Paragraph, why));
+                    continue;
+                }
+                let cols = xs.len().saturating_sub(1);
+                if cols >= 2
+                    && t.rows.len() == 2
+                    && matches!(t.rows[0].as_slice(), [title] if title.col_span as usize >= cols)
+                {
+                    refuse(refused_for(TITLE_OVER_ONE_ROW));
                     continue;
                 }
                 let read = read_of(&refs, &|k| ids[k], &t, xs.clone(), How::Ruled);

@@ -30,30 +30,43 @@ source: crates/rezzer/tests/corpus.rs
         },
         {
           "anchor": "p1:b2",
-          "inlines": [
+          "lines": [
             {
-              "text": "First Name Last Name",
-              "type": "text"
+              "pieces": [
+                {
+                  "col": 0,
+                  "text": "First Name"
+                },
+                {
+                  "col": 29,
+                  "text": "Last Name"
+                }
+              ]
             },
             {
-              "type": "line_break"
-            },
-            {
-              "text": "Birthday",
-              "type": "text"
+              "pieces": [
+                {
+                  "col": 0,
+                  "text": "Birthday"
+                }
+              ]
             }
           ],
-          "type": "paragraph"
+          "type": "spatial"
         },
         {
           "anchor": "p1:b3",
-          "inlines": [
+          "lines": [
             {
-              "text": "Gender:",
-              "type": "text"
+              "pieces": [
+                {
+                  "col": 0,
+                  "text": "Gender:"
+                }
+              ]
             }
           ],
-          "type": "paragraph"
+          "type": "spatial"
         },
         {
           "anchor": "p1:b4",
@@ -67,13 +80,17 @@ source: crates/rezzer/tests/corpus.rs
         },
         {
           "anchor": "p1:b5",
-          "inlines": [
+          "lines": [
             {
-              "text": "Nationality:",
-              "type": "text"
+              "pieces": [
+                {
+                  "col": 0,
+                  "text": "Nationality:"
+                }
+              ]
             }
           ],
-          "type": "paragraph"
+          "type": "spatial"
         },
         {
           "anchor": "p1:b6",
@@ -213,6 +230,26 @@ source: crates/rezzer/tests/corpus.rs
       }
     ]
   },
+  "losses": [
+    {
+      "location": "p1:b2",
+      "severity": "info",
+      "what": "the region at p1:b2 is kept as laid out, as text in its columns: no region type has clear evidence for it",
+      "why": "uncertain"
+    },
+    {
+      "location": "p1:b3",
+      "severity": "info",
+      "what": "the region at p1:b3 is kept as laid out, as text in its columns: no region type has clear evidence for it",
+      "why": "uncertain"
+    },
+    {
+      "location": "p1:b5",
+      "severity": "info",
+      "what": "the region at p1:b5 is kept as laid out, as text in its columns: no region type has clear evidence for it",
+      "why": "uncertain"
+    }
+  ],
   "model_version": 1,
   "overview": {
     "facts": [
@@ -264,119 +301,245 @@ source: crates/rezzer/tests/corpus.rs
   },
   "regions": [
     {
-      "anchor": "p1:b1",
+      "anchor": "p1",
       "bounds": [
-        167.1,
-        737.56,
-        428.28,
-        774.89
+        273.35,
+        712.34,
+        357.0,
+        716.19
       ],
-      "certainty": "rule",
+      "certainty": "exact",
       "evidence": [
         {
-          "id": "pdf.lines",
+          "detail": "paragraph",
+          "id": "given.file_states",
           "kind": "rule"
         }
       ],
-      "kind": "heading",
+      "kind": "paragraph",
       "page": 1,
       "score": 1000
     },
     {
-      "anchor": "p1:b2",
+      "anchor": "p1",
       "bounds": [
-        56.7,
-        690.82,
-        268.4,
+        119.55,
+        710.39,
+        203.9,
+        718.14
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        119.7,
+        692.64,
+        232.55,
+        704.64
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        57.8,
+        649.44,
+        68.85,
+        660.49
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        114.5,
+        649.44,
+        125.55,
+        660.49
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        59.45,
+        585.89,
+        224.35,
+        603.49
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        57.8,
+        555.59,
+        68.85,
+        566.64
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        57.8,
+        539.89,
+        68.85,
+        550.94
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        77.25,
+        490.99,
+        230.8,
+        499.44
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        206.8,
+        709.99,
+        206.8,
         721.99
       ],
-      "certainty": "rule",
-      "evidence": [
-        {
-          "id": "pdf.lines",
-          "kind": "rule"
-        }
-      ],
-      "kind": "paragraph",
+      "certainty": "unsure",
+      "evidence": [],
+      "kind": "spatial",
       "page": 1,
-      "score": 1000
-    },
-    {
-      "anchor": "p1:b3",
-      "bounds": [
-        56.8,
-        660.89,
-        95.42,
-        676.89
-      ],
-      "certainty": "rule",
-      "evidence": [
-        {
-          "id": "pdf.lines",
-          "kind": "rule"
-        }
-      ],
-      "kind": "paragraph",
-      "page": 1,
-      "score": 1000
+      "score": 0
     },
     {
       "anchor": "p1:b4",
       "bounds": [
         73.3,
-        647.22,
+        650.89,
         154.44,
         661.89
       ],
       "certainty": "rule",
       "evidence": [
         {
-          "id": "pdf.lines",
+          "detail": "set in a text size of the page",
+          "id": "paragraph.text_size",
           "kind": "rule"
         }
       ],
       "kind": "paragraph",
       "page": 1,
-      "score": 1000
-    },
-    {
-      "anchor": "p1:b5",
-      "bounds": [
-        56.8,
-        618.59,
-        114.0,
-        634.59
-      ],
-      "certainty": "rule",
-      "evidence": [
-        {
-          "id": "pdf.lines",
-          "kind": "rule"
-        }
-      ],
-      "kind": "paragraph",
-      "page": 1,
-      "score": 1000
+      "score": 300
     },
     {
       "anchor": "p1:b6",
       "bounds": [
         73.3,
-        537.62,
+        541.29,
         186.28,
         567.99
       ],
       "certainty": "rule",
       "evidence": [
         {
-          "id": "pdf.lines",
+          "detail": "set in a text size of the page",
+          "id": "paragraph.text_size",
+          "kind": "rule"
+        },
+        {
+          "detail": "1 lines go on the line over them",
+          "id": "paragraph.joins",
           "kind": "rule"
         }
       ],
       "kind": "paragraph",
       "page": 1,
-      "score": 1000
-    }
+      "score": 600
+    },
+    "<4 more items>"
   ],
   "source": {
     "detection": {

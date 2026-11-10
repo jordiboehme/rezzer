@@ -146,7 +146,16 @@ pub struct DrawnStructure {
 /// assert_eq!(found.grids.map(|g| g.groups.len()), Ok(1));
 /// ```
 pub fn drawn(page: &PageIn, inked: &dyn Fn(Bounds) -> bool) -> DrawnStructure {
-    let grids = grids(&page.rules);
+    drawn_on(page, grids(&page.rules), inked)
+}
+
+/// [`drawn`] on the grids of `page.rules` a host already found ([`grids`]), so the lines are
+/// searched once per page.
+pub fn drawn_on(
+    page: &PageIn,
+    grids: Result<Grids, Unsearched>,
+    inked: &dyn Fn(Bounds) -> bool,
+) -> DrawnStructure {
     let (boxes, boxes_note) = match &grids {
         Ok(g) => {
             let widgets: Vec<[f32; 4]> = page

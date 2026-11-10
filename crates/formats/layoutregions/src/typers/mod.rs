@@ -201,8 +201,10 @@ pub fn type_segments(view: &PageView<'_>) -> BTreeMap<SegId, Vec<Typed>> {
 /// The segment tree of the view with each text leaf whose walk reads blocks of more than one
 /// text kind (a heading over its paragraph, list items and a paragraph) cut at the walk's block
 /// boundaries: one [`Source::Walk`] child per run of blocks of one kind, so each kind is typed
-/// on its own lines. Lines with no text go with the block before them. `None` when no leaf is
-/// cut. The caller types the new tree with a new view. No segment is added past
+/// on its own lines. Lines with no text go with the block before them. A page number of a leaf
+/// that stands apart from its other lines far under them is cut off too and stands last (see
+/// [`band_cut`]): a leaf of few lines is not parted by white space, so a page number far under
+/// the last line of a page shares its leaf. `None` when no leaf is cut. The caller types the new tree with a new view. No segment is added past
 /// `max_regions` segments: the leaves left then stand as they are, and an issue of kind
 /// `Limit` says so.
 ///
@@ -218,7 +220,7 @@ pub(crate) fn walk_cut(view: &PageView<'_>, max_regions: usize) -> Option<Segmen
         let Some(spans) = view.with_text(seg, |t| {
             let kinds: Vec<Kind> = t.blocks.iter().map(text::Read::kind).collect();
             let mixed = kinds.windows(2).any(|w| w[0] != w[1]);
-            mixed.then(|| (kinds, t.spans.clone()))
+            Some(mixed.then(|| (kinds, t.spans.clone())))
         }) else {
             continue;
         };
@@ -231,6 +233,18 @@ pub(crate) fn walk_cut(view: &PageView<'_>, max_regions: usize) -> Option<Segmen
                 refs.push((r, i));
             }
         }
+        let banded = band_cut(view, &refs);
+        let Some(spans) = spans else {
+            if let Some(b) = banded {
+                let body: Vec<PrimId> = refs
+                    .iter()
+                    .filter(|(_, i)| !b.contains(i))
+                    .map(|(_, i)| PrimId::Text(*i))
+                    .collect();
+                cuts.push((k, b.around(vec![body])));
+            }
+            continue;
+        };
         let mut line_of: Vec<usize> = Vec::with_capacity(refs.len());
         let mut n = 0usize;
         for (j, (r, _)) in refs.iter().enumerate() {
@@ -255,6 +269,21 @@ pub(crate) fn walk_cut(view: &PageView<'_>, max_regions: usize) -> Option<Segmen
             groups[g].push(PrimId::Text(*id));
         }
         groups.retain(|g| !g.is_empty());
+        if let Some(b) = banded {
+            // The page numbers leave the walk's groups and stand last.
+            let body = groups
+                .into_iter()
+                .map(|g| {
+                    g.into_iter()
+                        .filter(|p| match p {
+                            PrimId::Text(i) => !b.contains(i),
+                            _ => true,
+                        })
+                        .collect()
+                })
+                .collect();
+            groups = b.around(body);
+        }
         if groups.len() >= 2 {
             cuts.push((k, groups));
         }
@@ -264,15 +293,25 @@ pub(crate) fn walk_cut(view: &PageView<'_>, max_regions: usize) -> Option<Segmen
     }
     let mut segs = view.segs.clone();
     crate::work::add(segs.all.len() as u64);
+    let mut over = false;
     for (k, groups) in cuts {
-        if segs.all.len() + groups.len() > max_regions {
-            segs.issues.push(crate::region::Issue {
-                what: format!(
-                    "the text walk's cuts were not all made: more than {max_regions} segments"
-                ),
-                kind: crate::region::IssueKind::Limit,
-            });
-            break;
+        // A leaf the bound leaves whole is short of its cut.
+        if over || segs.all.len() + groups.len() > max_regions {
+            if !over {
+                segs.issues.push(crate::region::Issue {
+                    what: format!(
+                        "the text walk's cuts were not all made: more than {max_regions} \
+                         segments"
+                    ),
+                    kind: crate::region::IssueKind::Limit,
+                });
+            }
+            over = true;
+            let id = segs.all[k].id;
+            if let Err(at) = segs.short.binary_search(&id) {
+                segs.short.insert(at, id);
+            }
+            continue;
         }
         let parent = segs.all[k].id;
         for mut prims in groups {
@@ -292,6 +331,92 @@ pub(crate) fn walk_cut(view: &PageView<'_>, max_regions: usize) -> Option<Segmen
         }
     }
     Some(segs)
+}
+
+/// A page number of a leaf is cut off from the leaf's other lines when the white space between
+/// them is more than this many times its height: a page number far under the text, not a
+/// number set close under the last line of the text.
+const BAND_APART: f32 = 2.0;
+
+/// A page number holds at most this many digits.
+const PAGE_NUMBER_DIGITS: usize = 4;
+
+/// Whether a line's text is a lone short number: at most [`PAGE_NUMBER_DIGITS`] digits, maybe
+/// between dashes (`7`, `- 7 -`).
+fn page_number(text: &str) -> bool {
+    let t = text
+        .trim()
+        .trim_matches(|c: char| c == '-' || c.is_whitespace());
+    !t.is_empty() && t.len() <= PAGE_NUMBER_DIGITS && t.chars().all(|c| c.is_ascii_digit())
+}
+
+/// The runs of a leaf's page numbers that stand apart from its other lines (see [`band_cut`]).
+struct BandCut {
+    bottom: HashSet<u32>,
+}
+
+impl BandCut {
+    /// The groups of a leaf: `body` (the walk's groups without the page number runs), then the
+    /// page number runs; empty groups left out.
+    fn around(self, body: Vec<Vec<PrimId>>) -> Vec<Vec<PrimId>> {
+        let mut bottom: Vec<PrimId> = self.bottom.into_iter().map(PrimId::Text).collect();
+        bottom.sort_unstable();
+        body.into_iter()
+            .chain(std::iter::once(bottom))
+            .filter(|g| !g.is_empty())
+            .collect()
+    }
+
+    fn contains(&self, run: &u32) -> bool {
+        self.bottom.contains(run)
+    }
+}
+
+/// The page numbers of the leaf of runs `refs` that stand apart from its other lines: lines of
+/// the leaf that are a lone short number (see [`page_number`]) in the foot band of the page as
+/// a running footer of the file (see [`PageView::band`]: a running line below all other text
+/// of the page), whose gap to the lowest other line of the leaf with ink is more than
+/// [`BAND_APART`] times their own height. `None` when the leaf has no such line, or no other
+/// line with ink.
+fn band_cut(view: &PageView<'_>, refs: &[(&TextRun, u32)]) -> Option<BandCut> {
+    crate::work::add(refs.len() as u64);
+    // The text and the extent (bottom, top) of the leaf's lines with ink, by line number.
+    let mut lines: HashMap<u32, (String, f32, f32)> = HashMap::new();
+    for (r, _) in refs {
+        if crate::line::ink(&r.text) == 0 {
+            continue;
+        }
+        let (lo, hi) = (r.y.min(r.y + r.h), r.y.max(r.y + r.h));
+        let e = lines
+            .entry(r.line)
+            .or_insert((String::new(), f32::MAX, f32::MIN));
+        e.0.push_str(&r.text);
+        e.1 = e.1.min(lo);
+        e.2 = e.2.max(hi);
+    }
+    let number = |n: u32, t: &str| view.band(n) == Some(Band::Bottom) && page_number(t);
+    let body_low = lines
+        .iter()
+        .filter(|(n, (t, _, _))| !number(**n, t))
+        .map(|(_, e)| e.1)
+        .fold(f32::MAX, f32::min);
+    if body_low == f32::MAX {
+        return None;
+    }
+    let cut: HashSet<u32> = lines
+        .iter()
+        .filter(|(n, (t, lo, hi))| number(**n, t) && body_low - hi > BAND_APART * (hi - lo))
+        .map(|(n, _)| *n)
+        .collect();
+    if cut.is_empty() {
+        return None;
+    }
+    let bottom = refs
+        .iter()
+        .filter(|(r, _)| cut.contains(&r.line))
+        .map(|(_, i)| *i)
+        .collect();
+    Some(BandCut { bottom })
 }
 
 /// The box of the text runs `prims` of `page`.
@@ -329,11 +454,20 @@ pub fn type_page(
     ends_in_amount: &dyn Fn(&str) -> bool,
     limits: &crate::Limits,
 ) -> (Segments, BTreeMap<SegId, Vec<Typed>>) {
+    // A tree the walk does not cut is typed with the view the walk read it with, so the text
+    // of its segments is worked out once.
     let cut = {
         let view = PageView::new(page, drawn, &segs, file, index, ends_in_amount);
-        walk_cut(&view, limits.max_regions)
+        match walk_cut(&view, limits.max_regions) {
+            Some(cut) => cut,
+            None => {
+                let typed = type_segments(&view);
+                drop(view);
+                return (segs, typed);
+            }
+        }
     };
-    let segs = cut.unwrap_or(segs);
+    let segs = cut;
     let typed = {
         let view = PageView::new(page, drawn, &segs, file, index, ends_in_amount);
         type_segments(&view)
@@ -428,6 +562,21 @@ pub struct PageView<'a> {
     strips: Vec<OnceCell<Option<pairs::StripFields>>>,
     /// How many boxes the runs of each segment stand in (see [`PageView::boxes_of`]).
     boxes: Vec<OnceCell<usize>>,
+    /// The pieces of each of the page's lines (see [`PageView::line_pieces`]), by place in
+    /// `lines`, worked out once.
+    line_pieces: Vec<OnceCell<Vec<crate::extract::table::grid::Piece>>>,
+    /// The pieces of all the page's lines by left edge and height (see [`PageView::edges_near`]).
+    edges: OnceCell<Edges>,
+}
+
+/// The pieces of a page's lines (see [`PageView::line_pieces`]) by their left edge, in buckets
+/// half the page's smallest line size wide, and by the height of their line within a bucket:
+/// so a look for the pieces at one left edge in a band of heights reads only those buckets.
+struct Edges {
+    width: f32,
+    /// The bucket of the left edge, the line's height (`RunRange::y`), its place in the page's
+    /// lines and the place of the piece in the line's pieces.
+    keys: Vec<(i64, f32, u32, u32)>,
 }
 
 impl<'a> PageView<'a> {
@@ -529,6 +678,7 @@ impl<'a> PageView<'a> {
         for (k, l) in page_lines.iter().enumerate() {
             line_at.entry(page.texts[l.start].line).or_insert(k);
         }
+        let line_count = page_lines.len();
         PageView {
             page,
             drawn,
@@ -562,6 +712,8 @@ impl<'a> PageView<'a> {
             box_of: OnceCell::new(),
             strips: (0..n).map(|_| OnceCell::new()).collect(),
             boxes: (0..n).map(|_| OnceCell::new()).collect(),
+            line_pieces: (0..line_count).map(|_| OnceCell::new()).collect(),
+            edges: OnceCell::new(),
         }
     }
 
@@ -831,12 +983,108 @@ impl<'a> PageView<'a> {
         (over, under)
     }
 
-    /// The page's lines (ranges of `page.texts`) just over and just under the line `line`.
-    pub(crate) fn neighbours(&self, line: u32) -> [Option<&RunRange>; 2] {
+    /// The pieces of the page's line `k` (a place in [`PageView::lines`], see
+    /// [`crate::extract::table::grid::pieces_of`]), sorted by their left edge: worked out once
+    /// per line for every segment that looks at it, so a page cut into many segments reads
+    /// each of its lines once.
+    pub(crate) fn line_pieces(&self, k: usize) -> &[crate::extract::table::grid::Piece] {
+        let Some(cell) = self.line_pieces.get(k) else {
+            return &[];
+        };
+        cell.get_or_init(|| {
+            let r = &self.lines[k];
+            let mut pieces =
+                crate::extract::table::grid::pieces_of(&self.page.texts, r.start, r.end);
+            crate::work::add((r.end - r.start) as u64);
+            pieces.sort_by(|a, b| a.x0.total_cmp(&b.x0));
+            pieces
+        })
+    }
+
+    /// The pieces of the page's lines whose left edge lies within `tol` of `x0` and whose line
+    /// stands at a height from `low` to `high` (`RunRange::y`), each with the place of its line
+    /// in [`PageView::lines`], in the order of the lines by height (then by place) and of the
+    /// runs within a line. The index is built once per page, on the first look.
+    pub(crate) fn edges_near(
+        &self,
+        x0: f32,
+        tol: f32,
+        (low, high): (f32, f32),
+    ) -> Vec<(usize, &crate::extract::table::grid::Piece)> {
+        let e = self.edges.get_or_init(|| {
+            let width = 0.5
+                * self
+                    .lines
+                    .iter()
+                    .map(|r| r.size.max(1.0))
+                    .fold(f32::MAX, f32::min)
+                    .min(1.0e6);
+            let mut keys = Vec::new();
+            for (k, r) in self.lines.iter().enumerate() {
+                if !r.y.is_finite() {
+                    continue;
+                }
+                for (j, q) in self.line_pieces(k).iter().enumerate() {
+                    if q.x0.is_finite() {
+                        keys.push(((q.x0 / width).floor() as i64, r.y, k as u32, j as u32));
+                    }
+                }
+            }
+            crate::work::add(keys.len() as u64);
+            keys.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)).then(a.2.cmp(&b.2)));
+            Edges { width, keys }
+        });
+        let mut out = Vec::new();
+        if !(x0.is_finite() && tol.is_finite() && low <= high) {
+            return out;
+        }
+        let (b0, b1) = (
+            ((x0 - tol) / e.width).floor() as i64,
+            ((x0 + tol) / e.width).floor() as i64,
+        );
+        let at = |b: i64, y: f32| {
+            e.keys
+                .partition_point(|&(kb, ky, _, _)| kb < b || (kb == b && ky < y))
+        };
+        let mut i = at(b0, low);
+        let mut steps = 1u64;
+        while let Some(&(kb, ky, k, j)) = e.keys.get(i) {
+            steps += 1;
+            if kb > b1 {
+                break;
+            }
+            if ky < low {
+                i = at(kb, low);
+                continue;
+            }
+            if ky > high {
+                i = e.keys.partition_point(|&(b, _, _, _)| b <= kb);
+                continue;
+            }
+            let q = &self.line_pieces(k as usize)[j as usize];
+            if (q.x0 - x0).abs() <= tol {
+                out.push((k as usize, q));
+            }
+            i += 1;
+        }
+        crate::work::add(steps);
+        out.sort_by(|a, b| {
+            self.lines[a.0]
+                .y
+                .total_cmp(&self.lines[b.0].y)
+                .then(a.0.cmp(&b.0))
+                .then(a.1.start.cmp(&b.1.start))
+        });
+        out
+    }
+
+    /// The places in [`PageView::lines`] of the page's lines just over and just under the line
+    /// `line`.
+    pub(crate) fn neighbours_at(&self, line: u32) -> [Option<usize>; 2] {
         match self.line_at.get(&line) {
             Some(&k) => [
-                k.checked_sub(1).and_then(|j| self.lines.get(j)),
-                self.lines.get(k + 1),
+                k.checked_sub(1),
+                (k + 1 < self.lines.len()).then_some(k + 1),
             ],
             None => [None, None],
         }

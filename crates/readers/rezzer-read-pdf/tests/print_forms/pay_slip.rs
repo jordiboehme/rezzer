@@ -500,7 +500,7 @@ pub(crate) fn assert_pay_slip(out: &ReadOutcome) {
         );
     }
     assert_eq!(values_alone(out), Vec::<String>::new());
-    assert_no_loss(out);
+    assert_no_loss_but_laid_out(out, &["p1:b2"]);
     assert_grid_date(out);
 }
 

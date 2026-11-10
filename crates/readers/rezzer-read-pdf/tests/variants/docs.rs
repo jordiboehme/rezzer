@@ -665,7 +665,12 @@ fn touching(v: &Variant) -> Sheet {
             bottom: top - size,
         }),
     );
-    s.want.paragraphs.push("Name Hinterhaus".into());
+    // One line of the read, its two words apart (Task 19: the engine keeps this one line as
+    // laid out, no region type having clear evidence for it; a right read, Task 36 makes it a
+    // paragraph again).
+    s.want
+        .lines_joined
+        .push(("Name".into(), "Hinterhaus".into()));
     s
 }
 
@@ -693,7 +698,12 @@ fn overprinted(v: &Variant) -> Sheet {
             bottom: top - size,
         }),
     );
-    s.want.paragraphs.push("Name Hinterhaus".into());
+    // One line of the read, its two words apart (Task 19: the engine keeps this one line as
+    // laid out, no region type having clear evidence for it; a right read, Task 36 makes it a
+    // paragraph again).
+    s.want
+        .lines_joined
+        .push(("Name".into(), "Hinterhaus".into()));
     s
 }
 

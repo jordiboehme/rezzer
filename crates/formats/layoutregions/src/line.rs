@@ -294,6 +294,53 @@ pub fn ink(text: &str) -> usize {
     text.chars().filter(|c| !c.is_whitespace()).count()
 }
 
+/// The texts with ink (see [`ink`]) before each place of `texts`: entry `k` counts the texts
+/// with ink among the first `k`, so there is one entry more than there are texts, and text `k`
+/// has ink when entry `k + 1` is greater than entry `k`. A run without ink (spaces a form sets
+/// after a field) stands in a flow only, not on the page; a caller asks with this whether ink
+/// stands between two places. Linear in the texts, and its work is counted.
+pub fn inked_before<'a>(texts: impl IntoIterator<Item = &'a str>) -> Vec<usize> {
+    let mut out = vec![0];
+    for t in texts {
+        let n = out[out.len() - 1];
+        out.push(n + usize::from(ink(t) > 0));
+    }
+    crate::work::add(out.len() as u64 - 1);
+    out
+}
+
+/// The values of the pairs of `items` whose text has ink (see [`ink`]), in their order: the
+/// places in a flow of its runs that stand on the page. Linear in the items, and its work is
+/// counted.
+pub fn with_ink<'a, T>(items: impl IntoIterator<Item = (&'a str, T)>) -> Vec<T> {
+    let mut steps = 0u64;
+    let out = items
+        .into_iter()
+        .inspect(|_| steps += 1)
+        .filter(|(t, _)| ink(t) > 0)
+        .map(|(_, v)| v)
+        .collect();
+    crate::work::add(steps);
+    out
+}
+
+/// The order of the places of several parts of one flow taken together: for each place, by
+/// place, the part it is in and its index there. Each part holds its places in order; a place
+/// that stands in two parts comes first from the earlier part. One stable sort of all places
+/// (its runs of places in order are found, so it is near linear in them for few parts), and
+/// its work is counted.
+pub fn by_place(parts: &[&[usize]]) -> Vec<(usize, usize)> {
+    let mut out: Vec<(usize, usize)> = parts
+        .iter()
+        .enumerate()
+        .flat_map(|(p, at)| (0..at.len()).map(move |i| (p, i)))
+        .collect();
+    out.sort_by_key(|&(p, i)| parts[p][i]);
+    let n = out.len() as u64;
+    crate::work::add(n * u64::from(n.max(2).ilog2()));
+    out
+}
+
 /// Rounds a font size to half points.
 pub fn size_key(size: f32) -> i32 {
     (size * 2.0).round() as i32
@@ -356,5 +403,43 @@ mod tests {
         assert_eq!(texts, ["Eins zwei", "Drei"]);
         assert_eq!(ink(" a b "), 2);
         assert_eq!(size_key(9.26), 19);
+    }
+
+    /// The places of three parts in one order: by place, a place in two parts from the earlier
+    /// part first, and the work counted.
+    #[test]
+    fn by_place_orders_the_parts_by_their_places() {
+        let before = crate::work::work_steps();
+        let order = by_place(&[&[2, 5, 9], &[], &[1, 5, 6], &[10]]);
+        let after = crate::work::work_steps();
+        assert_eq!(
+            order,
+            [(2, 0), (0, 0), (0, 1), (2, 1), (2, 2), (0, 2), (3, 0)]
+        );
+        assert!(by_place(&[]).is_empty());
+        if let (Some(b), Some(a)) = (before, after) {
+            assert!(a - b >= 7);
+        }
+    }
+
+    /// The texts with ink before each place, one entry more than texts, and each text counted
+    /// as one step of work.
+    #[test]
+    fn inked_before_counts_the_texts_with_ink() {
+        let before = crate::work::work_steps();
+        let at = inked_before(["a", "   ", "", "b c", " "]);
+        let after = crate::work::work_steps();
+        assert_eq!(at, [0, 1, 1, 1, 2, 2]);
+        assert_eq!(inked_before([]), [0]);
+        if let (Some(b), Some(a)) = (before, after) {
+            assert_eq!(a - b, 5);
+        }
+        let before = crate::work::work_steps();
+        let at = with_ink([("a", 3), ("  ", 4), ("b", 9)]);
+        let after = crate::work::work_steps();
+        assert_eq!(at, [3, 9]);
+        if let (Some(b), Some(a)) = (before, after) {
+            assert_eq!(a - b, 3);
+        }
     }
 }

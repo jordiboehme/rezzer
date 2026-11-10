@@ -18,7 +18,7 @@
 //! reaches the least score, so a plain line of body text is a paragraph, and it never wins
 //! against another kind's evidence. The kinds today's rules decide between win by 150 or more.
 
-use crate::extract::table::grid::piece_count;
+use crate::extract::table::grid::{Piece, piece_count};
 use crate::extract::text::{Demotion, TextBlock, TextCx, next_block, sentences};
 use crate::file::{Band, bold_led, in_text_size, plain_size};
 use crate::input::{PrimId, TextRun};
@@ -254,6 +254,16 @@ impl SegText {
     }
 }
 
+/// The pieces of `sorted` (sorted by their left edge) whose left edge lies within `tol` of
+/// `x0`.
+fn at_edge(sorted: &[Piece], x0: f32, tol: f32) -> impl Iterator<Item = &Piece> {
+    let lo = sorted.partition_point(|q| q.x0 < x0 - tol);
+    sorted[lo..]
+        .iter()
+        .take_while(move |q| q.x0 <= x0 + tol)
+        .filter(move |q| (q.x0 - x0).abs() <= tol)
+}
+
 /// Lines this many times their larger size apart or nearer stand together (a label and its
 /// value, the lines of one block).
 const PAIR_PITCH: f32 = 2.0;
@@ -271,19 +281,17 @@ fn aligned_cells(view: &PageView<'_>, seg: &Segment) -> bool {
     let (refs, _) = super::seg_runs(view, seg);
     let texts = &view.page.texts;
     let lines = view.lines();
-    let by_y = view.by_y();
     text_lines(&refs).iter().any(|l| {
         let mine = pieces_of(l.runs, 0, l.runs.len());
         let tol = 0.5 * l.size.max(1.0);
         crate::work::add(mine.len() as u64);
         let line = l.runs[0].line;
         if mine.len() >= 2 {
-            let [over, under] = view.neighbours(line);
-            return [over, under].iter().flatten().any(|r| {
-                let theirs = pieces_of(texts, r.start, r.end);
-                crate::work::add(theirs.len() as u64);
+            return view.neighbours_at(line).iter().flatten().any(|&k| {
+                let theirs = view.line_pieces(k);
+                crate::work::add(mine.len() as u64);
                 mine.iter()
-                    .filter(|p| theirs.iter().any(|q| (p.x0 - q.x0).abs() <= tol))
+                    .filter(|p| at_edge(theirs, p.x0, tol).next().is_some())
                     .count()
                     >= 2
             });
@@ -305,31 +313,22 @@ fn aligned_cells(view: &PageView<'_>, seg: &Segment) -> bool {
         // PAIR_PITCH times twice its size up and down (a line a size step larger stays in it):
         // their baseline, size and words, nearest first above and below.
         let reach = 2.0 * PAIR_PITCH * l.size.max(1.0);
-        let lo = by_y.line_y.partition_point(|y| *y < l.y - 2.0 * reach);
-        let hi = by_y.line_y.partition_point(|y| *y <= l.y + 2.0 * reach);
-        crate::work::add((hi - lo) as u64);
         let mut over: Vec<(f32, f32, usize)> = Vec::new();
         let mut under: Vec<(f32, f32, usize)> = Vec::new();
-        for &k in &by_y.lines[lo..hi] {
-            let r = &lines[k];
-            if texts[r.start].line == line {
+        for (k, q) in view.edges_near(p.x0, tol, (l.y - 2.0 * reach, l.y + 2.0 * reach)) {
+            if texts[lines[k].start].line == line {
                 continue;
             }
-            for q in pieces_of(texts, r.start, r.end) {
-                if (q.x0 - p.x0).abs() > tol {
-                    continue;
-                }
-                let run = &texts[q.start..q.end];
-                let Some(st) = crate::line::line_style(run.iter()) else {
-                    continue;
-                };
-                let w = run.iter().map(|r| r.text.split_whitespace().count()).sum();
-                let y = texts[q.start].y;
-                if y > l.y {
-                    over.push((y, st.size, w));
-                } else {
-                    under.push((y, st.size, w));
-                }
+            let run = &texts[q.start..q.end];
+            let Some(st) = crate::line::line_style(run.iter()) else {
+                continue;
+            };
+            let w = run.iter().map(|r| r.text.split_whitespace().count()).sum();
+            let y = texts[q.start].y;
+            if y > l.y {
+                over.push((y, st.size, w));
+            } else {
+                under.push((y, st.size, w));
             }
         }
         over.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -383,6 +382,48 @@ fn in_a_table(view: &PageView<'_>, seg: &Segment) -> bool {
         }
         if super::table::type_table(view, p).is_some() {
             return true;
+        }
+        up = p.parent;
+    }
+    false
+}
+
+/// Whether the text of `seg` is the header row of a table: the nearest segment over it (below
+/// the page root) that reads as a table names every inked run of `seg` among its header cells
+/// (`table.header_row`). Its column titles are cells of that table, not a heading, though they
+/// stand in a style of their own (a bold header over its rows).
+fn header_of_a_table(view: &PageView<'_>, seg: &Segment) -> bool {
+    let own: Vec<PrimId> = seg
+        .prims
+        .iter()
+        .copied()
+        .filter(|p| match *p {
+            PrimId::Text(i) => view
+                .page
+                .texts
+                .get(i as usize)
+                .is_some_and(|r| crate::line::ink(&r.text) > 0),
+            _ => false,
+        })
+        .collect();
+    if own.is_empty() {
+        return false;
+    }
+    let mut up = seg.parent;
+    while let Some(p) = up.and_then(|p| view.segs.all.get(p.0 as usize)) {
+        if p.source == Source::Page {
+            break;
+        }
+        let named = view.reading(p, |f| match f {
+            super::table::Find::Table(t) if t.columns.header_rows > 0 => Some(
+                own.iter()
+                    .all(|q| t.columns.header.iter().any(|c| c.contains(q))),
+            ),
+            super::table::Find::Table(_) => Some(false),
+            _ => None,
+        });
+        if let Some(named) = named {
+            return named;
         }
         up = p.parent;
     }
@@ -612,7 +653,8 @@ pub fn type_heading(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
         || super::table::refusal(view, seg).is_some_and(|r| {
             matches!(r.kind, Kind::Figure | Kind::Paragraph) && r.signal.weight > 0
         })
-        || view.across(seg);
+        || view.across(seg)
+        || header_of_a_table(view, seg);
     if claimed {
         return None;
     }

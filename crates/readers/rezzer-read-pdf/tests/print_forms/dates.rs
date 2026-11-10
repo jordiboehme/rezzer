@@ -48,13 +48,25 @@ pub(crate) const ONE_DATE: &str =
 pub(crate) const TWO_DATES: &str =
     "2 dates stand in the head of page 1; none is marked as the document date";
 
-/// The words of the losses of `out` that are `Uncertain`.
+/// The words of the losses of `out` that are `Uncertain`, but for the loss of a region kept
+/// as laid out for its region type: these tests judge dates, and since Task 19 a region whose
+/// type is not clear, or whose reader built no table or pairs of the type it reads as, says so
+/// with a loss of its own, whose text dates are still read from (the dates of every variant
+/// hold with it; Task 36 types such regions). A region kept as laid out for another reason (a
+/// bound or the time limit) still counts.
 pub(crate) fn unsure(out: &ReadOutcome) -> Vec<&str> {
     out.document
         .losses
         .iter()
         .filter(|l| l.why == LossReason::Uncertain)
         .map(|l| l.what.as_str())
+        .filter(|w| {
+            !(w.contains("is kept as laid out, as text in its columns")
+                && (w.contains("no region type has clear evidence for it")
+                    || w.contains("about equally")
+                    || w.contains("but not clearly enough")
+                    || w.contains(": it reads as ")))
+        })
         .collect()
 }
 

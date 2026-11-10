@@ -82,6 +82,9 @@ pub struct Cut {
     /// Set when the cut stopped early. Nothing is dropped then: the pieces left stay in
     /// groups in their order. A caller that reports limits turns this into a note.
     pub short: Option<CutShort>,
+    /// The indices, ascending, of the groups the depth bound or the stop kept whole where the
+    /// cut would have looked into them further.
+    pub kept: Vec<usize>,
 }
 
 /// The pieces in reading order. `rules` are the horizontal drawn rules in the frame of the
@@ -103,6 +106,7 @@ pub fn xy_cut(pieces: &[Piece], rules: &[Line], limits: &Limits, stop: &dyn Fn()
         splits: out.splits,
         sides: out.sides,
         short: out.short,
+        kept: out.kept,
     }
 }
 
@@ -112,6 +116,7 @@ struct Out {
     splits: Vec<Split>,
     sides: Vec<usize>,
     short: Option<CutShort>,
+    kept: Vec<usize>,
     /// The cut that the next group starts after, once there is a group before it.
     pending: Option<Split>,
 }
@@ -126,6 +131,14 @@ impl Out {
             self.splits.push(pending.unwrap_or(Split::Gutter));
         }
         self.groups.push(ids);
+    }
+
+    /// A group the depth bound or the stop kept whole.
+    fn kept(&mut self, ids: Vec<usize>) {
+        if !ids.is_empty() {
+            self.kept.push(self.groups.len());
+        }
+        self.group(ids);
     }
 
     /// The next group starts after a cut of this kind; the first cut named before a group
@@ -186,7 +199,7 @@ impl Cutter<'_> {
                 .then(p[a].bounds.x0.total_cmp(&p[b].bounds.x0))
         });
         out.short.get_or_insert(CutShort::Depth);
-        out.group(ids);
+        out.kept(ids);
     }
 
     /// Cuts the pieces `ids` (indices into the pieces) into groups, `depth` levels down.
@@ -207,7 +220,7 @@ impl Cutter<'_> {
         }
         if looks && out.short == Some(CutShort::Stopped) {
             sort(&mut ids);
-            out.group(ids);
+            out.kept(ids);
             return;
         }
         // At the bound of the depth a region that would be cut stays one group instead.

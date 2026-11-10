@@ -25,7 +25,11 @@
     "contains": "R̥̄"
   },
   {
-    "pointer": "/losses",
-    "absent": true
+    "pointer": "/losses/0/severity",
+    "equals": "info"
+  },
+  {
+    "pointer": "/losses/0/why",
+    "equals": "uncertain"
   }
 ]

@@ -420,7 +420,7 @@ fn block(b: &Block, ctx: &Ctx, depth: usize, level: u8) -> String {
             None => model_table(caption.as_deref(), *header_rows, rows, alignments),
         },
         Block::Code { lang, text, .. } => fence(lang.as_deref(), text),
-        Block::Spatial { lines, .. } => spatial_fence(lines),
+        Block::Spatial { lines, links, .. } => spatial_block(lines, links),
         Block::Quote { blocks: inner, .. } => {
             let body = blocks(inner, ctx, depth + 1, level, false);
             prefix_lines(&body, ">")
@@ -681,6 +681,112 @@ pub(crate) fn fence(lang: Option<&str>, text: &str) -> String {
         format!("{fence}{info}\n{fence}")
     } else {
         format!("{fence}{info}\n{body}\n{fence}")
+    }
+}
+
+/// Text kept in its layout ([`spatial_fence`]) and, when its text holds links or footnote
+/// references, a paragraph right after the fence that says on which lines they stand
+/// ([`spatial_key`]): a fence shows no link, so the targets and references are written there,
+/// each target once.
+fn spatial_block(lines: &[rezzer_model::SpatialLine], links: &[String]) -> String {
+    let fence = spatial_fence(lines);
+    let key = spatial_key(lines, links);
+    if key.is_empty() {
+        fence
+    } else {
+        format!("{fence}\n\n{}", paragraph(&key))
+    }
+}
+
+/// The links and footnote references of a block kept in its layout, by line (counted from 1):
+/// `Links: [line 2](target), [lines 4 to 6 and 9](other). Footnote references: line 1[^a],
+/// line 3[^b].` Each target is written once, with the lines it stands on; each reference where
+/// it stands. Spans that point to no link of the block are left out.
+fn spatial_key(lines: &[rezzer_model::SpatialLine], links: &[String]) -> Vec<Inline> {
+    // Per link, the lines it stands on, in order and each once.
+    let mut on: Vec<Vec<usize>> = vec![Vec::new(); links.len()];
+    let mut refs: Vec<(usize, &str)> = Vec::new();
+    let mut first: Vec<usize> = Vec::new();
+    for (n, line) in lines.iter().enumerate() {
+        for span in line.pieces.iter().flat_map(|p| &p.spans) {
+            if let Some(k) = span.link.and_then(|k| usize::try_from(k).ok())
+                && let Some(at) = on.get_mut(k)
+                && at.last() != Some(&(n + 1))
+            {
+                if at.is_empty() {
+                    first.push(k);
+                }
+                at.push(n + 1);
+            }
+            if let Some(id) = &span.footnote {
+                refs.push((n + 1, id));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    if !first.is_empty() {
+        out.push(Inline::plain("Links: "));
+        for (i, &k) in first.iter().enumerate() {
+            if i > 0 {
+                out.push(Inline::plain(", "));
+            }
+            out.push(Inline::Link {
+                target: links[k].clone(),
+                title: None,
+                internal: false,
+                wiki: false,
+                inlines: vec![Inline::plain(line_numbers(&on[k]))],
+            });
+        }
+        out.push(Inline::plain("."));
+    }
+    if !refs.is_empty() {
+        out.push(Inline::plain(if out.is_empty() {
+            "Footnote references: "
+        } else {
+            " Footnote references: "
+        }));
+        let mut last = 0;
+        for &(n, id) in &refs {
+            if n != last {
+                if last > 0 {
+                    out.push(Inline::plain(", "));
+                }
+                out.push(Inline::plain(format!("line {n}")));
+                last = n;
+            }
+            out.push(Inline::FootnoteRef { id: id.to_string() });
+        }
+        out.push(Inline::plain("."));
+    }
+    out
+}
+
+/// `line 3`, `lines 2 and 5`, `lines 4 to 6 and 9`: ascending line numbers, runs of three or
+/// more as a range.
+fn line_numbers(ns: &[usize]) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < ns.len() {
+        let mut j = i;
+        while j + 1 < ns.len() && ns[j + 1] == ns[j] + 1 {
+            j += 1;
+        }
+        match j - i {
+            0 => parts.push(ns[i].to_string()),
+            1 => {
+                parts.push(ns[i].to_string());
+                parts.push(ns[j].to_string());
+            }
+            _ => parts.push(format!("{} to {}", ns[i], ns[j])),
+        }
+        i = j + 1;
+    }
+    let word = if ns.len() == 1 { "line" } else { "lines" };
+    match parts.split_last() {
+        None => String::new(),
+        Some((last, [])) => format!("{word} {last}"),
+        Some((last, rest)) => format!("{word} {} and {last}", rest.join(", ")),
     }
 }
 

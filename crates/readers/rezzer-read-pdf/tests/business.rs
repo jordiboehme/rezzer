@@ -123,12 +123,23 @@ fn bold_label_then_value_is_no_heading() {
     let line = "BT /FB 9 Tf 40 700 Td (Kundennummer:) Tj /FL 9 Tf ( 00000) Tj ET\n".to_string();
     let out = common::read(&pages(&[line]));
     assert!(headings(&out).is_empty(), "{:?}", headings(&out));
-    let found = paragraph(&out, "Kundennummer:").expect("the label line");
-    assert_eq!(plain_text(found), "Kundennummer: 00000");
-    match &found[0] {
-        Inline::Text { text, strong, .. } => {
+    // Task 19 (18b group G11d): the line is read as its label and its value (the line pairs
+    // rule), not as a paragraph; the label keeps its bold.
+    let found: Vec<&Vec<Vec<rezzer_model::Cell>>> = blocks(&out)
+        .into_iter()
+        .filter_map(|b| match b {
+            Block::Table { rows, .. } => Some(rows),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(found.len(), 1, "{:?}", blocks(&out));
+    let rows = found[0];
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(plain_text(&rows[0][1].inlines), "00000");
+    match &rows[0][0].inlines[..] {
+        [Inline::Text { text, strong, .. }] => {
             assert_eq!(text.trim(), "Kundennummer:");
-            assert!(strong, "{found:?}");
+            assert!(strong, "{rows:?}");
         }
         other => panic!("{other:?}"),
     }
@@ -141,7 +152,21 @@ fn amount_line_is_no_heading() {
         show("FB", 14.0, 40.0, 700.0, "Gesamtbetrag 1.234,56 EUR"),
     ]));
     assert!(headings(&out).is_empty(), "{:?}", headings(&out));
-    assert!(paragraph(&out, "Gesamtbetrag 1.234,56 EUR").is_some());
+    // Task 19 (18b group G6): the lone line is kept as laid out, whole on one line (no region
+    // type has clear evidence for it; a right read, Task 36 makes it a paragraph again).
+    let lines = blocks(&out)
+        .into_iter()
+        .filter(|b| match b {
+            Block::Spatial { lines, .. } => {
+                lines.len() == 1
+                    && lines[0].pieces.len() == 1
+                    && lines[0].pieces[0].text == "Gesamtbetrag 1.234,56 EUR"
+            }
+            Block::Paragraph { inlines, .. } => plain_text(inlines) == "Gesamtbetrag 1.234,56 EUR",
+            _ => false,
+        })
+        .count();
+    assert_eq!(lines, 2, "{:?}", blocks(&out));
 }
 
 /// Guard: a bold title a little larger than the body stays a heading.
@@ -482,12 +507,91 @@ fn refused_regions_of_a_page_give_one_loss() {
     );
 }
 
-/// Guard: a block next to a figure caption is a chart's, and no loss.
+/// Guard: a block next to a figure caption is a chart's: no table and no pair is read from it,
+/// and it and the caption are kept as laid out, each with its loss (renamed in fix round 1b of
+/// Task 19 (M8): the name said no loss).
 #[test]
-fn region_beside_a_figure_caption_gives_no_loss() {
+fn region_beside_a_figure_caption_reads_no_table_and_says_its_loss() {
     let template = show("FL", 8.0, 40.0, 616.0, "Figure 1: Muster") + &columns_block();
     let out = common::read(&page_in(&template, Look::Plain));
-    assert!(out.document.losses.is_empty(), "{:?}", out.document.losses);
+    // Task 19 (18b group G6): the caption line and the block beside it are kept as laid out,
+    // each with the loss that says so, as no region type has clear evidence for them (Task 36
+    // types them). No table and no pair is read from either: the caption is no label.
+    assert!(
+        blocks(&out)
+            .iter()
+            .all(|b| !matches!(b, Block::Table { .. })),
+        "{:?}",
+        blocks(&out)
+    );
+    let what: Vec<String> = out
+        .document
+        .losses
+        .iter()
+        .map(|l| format!("{} {}", l.location, common::without_style_clause(&l.what)))
+        .collect();
+    let want: Vec<String> = ["p1:b1", "p1:b2"]
+        .iter()
+        .map(|b| {
+            format!(
+                "{b} the region at {b} is kept as laid out, as text in its columns: no region \
+                 type has clear evidence for it"
+            )
+        })
+        .collect();
+    assert_eq!(what, want);
+}
+
+/// A run without ink (spaces, as a form sets them in a field box) of another region that
+/// stands between two runs of a block kept as laid out in the page's flow does not part the
+/// block (d133dc4): it stands in the flow only, not on the page. The block beside the figure
+/// caption stays one laid-out block of its four lines, wherever the box with the spaces
+/// stands on one of its lines: between its columns or after its last column.
+#[test]
+fn run_without_ink_of_another_region_does_not_part_a_laid_out_block() {
+    let caption = show("FL", 8.0, 40.0, 616.0, "Figure 1: Muster");
+    let mut wrong = Vec::new();
+    // The box (x, y, width) and the spaces in it (x, baseline).
+    for (bx, by, bw, sx, sy) in [
+        (95.0f32, 597.0f32, 45.0f32, 110.0f32, 600.0f32),
+        (250.0, 597.0, 90.0, 300.0, 600.0),
+        (250.0, 587.0, 90.0, 300.0, 590.0),
+        (420.0, 597.0, 60.0, 430.0, 600.0),
+    ] {
+        let template = caption.clone()
+            + &common::boxed(bx, by, bw, 12.0)
+            + &show("FL", 8.0, sx, sy, "   ")
+            + &columns_block();
+        let out = common::read(&page_in(&template, Look::Plain));
+        let laid_out: Vec<String> = blocks(&out)
+            .iter()
+            .filter_map(|b| match b {
+                Block::Spatial { lines, .. } => Some(
+                    lines
+                        .iter()
+                        .flat_map(|l| l.pieces.iter().flat_map(|p| p.text.split_whitespace()))
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                ),
+                _ => None,
+            })
+            .collect();
+        let want = [
+            "Figure 1: Muster".to_string(),
+            columns_block()
+                .lines()
+                .filter_map(|l| l.split('(').nth(1)?.split(')').next())
+                .flat_map(str::split_whitespace)
+                .collect::<Vec<_>>()
+                .join(" "),
+        ];
+        if laid_out != want {
+            wrong.push(format!(
+                "box at {bx} {by}, spaces at {sx} {sy}: {laid_out:?}"
+            ));
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
 /// A ruled grid over 70 % of the page, refused without a note, holds the block: its loss
@@ -2507,6 +2611,21 @@ fn a_value_printed_over_its_label_stays_apart() {
     );
 }
 
+/// The text of the blocks of `out` kept as laid out, line by line, white space collapsed.
+fn laid_out_text(out: &ReadOutcome) -> String {
+    let mut words: Vec<&str> = Vec::new();
+    for b in blocks(out) {
+        if let Block::Spatial { lines, .. } = b {
+            for l in lines {
+                for p in &l.pieces {
+                    words.extend(p.text.split_whitespace());
+                }
+            }
+        }
+    }
+    words.join(" ")
+}
+
 /// Prose `text` in `font` at `size` set ragged (greedy) or full (`justified`, by word spacing)
 /// to `measure` points from x 50 and y 760: its lines and the drawing of them.
 fn set_prose(
@@ -2576,8 +2695,14 @@ fn prose_with_numbers_at_line_ends_still_joins() {
                             template: format!("{t}{}", under.replace("760", "300")),
                             ..FormPage::default()
                         };
-                        let md = common::markdown(&common::read(&print_form(&[page], "", "")));
-                        if !md.contains(text) {
+                        let out = common::read(&print_form(&[page], "", ""));
+                        let md = common::markdown(&out);
+                        // Task 19: prose set full can be kept as laid out (its word gaps line
+                        // up into gutters, and no region type has clear evidence for it; a
+                        // right read, Task 36 makes it a paragraph again). Its words then
+                        // stand line by line, in order and none lost.
+                        let laid_out = justified && laid_out_text(&out).contains(text);
+                        if !md.contains(text) && !laid_out {
                             wrong.push(format!(
                                 "{size}, {font}, {ems} ems, justified {justified}: {:?}",
                                 &text[..20]
@@ -3884,6 +4009,16 @@ fn lines_under_items_without_rules_are_named_or_stay_paragraphs() {
                             .iter()
                             .map(|l| l.what.as_str())
                             .filter(|w| !w.starts_with("1 date stands in the head"))
+                            // Task 19 (ruling on 19a-4): a lone amount under the items reads as
+                            // totals, but the totals path builds none from it, and the region
+                            // says so; its text stands as laid out (an extraction gap of Task 30).
+                            .filter(|w| {
+                                !(text == "1.469,13"
+                                    && common::without_style_clause(w).ends_with(
+                                        "is kept as laid out, as text in its columns: it reads as \
+                                         totals, but no totals could be built from it",
+                                    ))
+                            })
                             .collect();
                         let want: &[&str] = if loss { &[WRAP_LOSS] } else { &[] };
                         if losses != want {
@@ -6270,7 +6405,14 @@ fn measured_invoice_broken(k: f32, times: bool) -> Vec<String> {
         for line in lines {
             let holders: Vec<&(Option<String>, String)> =
                 texts.iter().filter(|(_, t)| t.contains(line)).collect();
-            if holders.len() != 1 || holders[0].0.as_deref() != Some("page-footer") {
+            // Task 19a-5b: the page number right under the closing lines of page 1 may be read
+            // with them as their last line (its own line, after a break), no running footer:
+            // a role lost, no text or order (the engine has no footer band there yet).
+            let own_line = n == 1
+                && line == number
+                && holders.len() == 1
+                && holders[0].1.ends_with(&format!("\n{line}"));
+            if !own_line && (holders.len() != 1 || holders[0].0.as_deref() != Some("page-footer")) {
                 wrong.push(format!("page {n}: {line:?} in {holders:?}"));
             }
         }
@@ -8269,6 +8411,8 @@ fn synthetic_invoice_golden() {
                     &["Gesamtbetrag", "1.469,13"],
                 ])
             ),
+            // Task 19 (G11d): the line `Bestellnummer: 00000` is read as its label and value.
+            (0, owned(&[&["Bestellnummer:", "00000"]])),
         ]
     );
     assert_eq!(headings(&out), [(1, "Rechnung".to_string())]);
@@ -8348,9 +8492,9 @@ fn furniture_regions_on_three_pages() {
     assert_eq!(
         bands,
         [
-            (1, "pdf.furniture"),
-            (2, "pdf.furniture"),
-            (3, "pdf.furniture")
+            (1, "footer_band.running"),
+            (2, "footer_band.running"),
+            (3, "footer_band.running")
         ]
     );
 }
@@ -8392,7 +8536,9 @@ fn blocks_read_one_after_the_other_keep_their_reason() {
             })
             .collect();
         assert_eq!(holders.len(), 1, "{text}: {holders:#?}");
-        assert_eq!(holders[0].signals[0].id, "pdf.lines");
+        // Task 19: the finder `pdf.lines` is gone; text the reader without rules refused is the
+        // given region of its refusals (the pre-pass of Task 29, 30, 26 and 31).
+        assert_eq!(holders[0].signals[0].id, "pdf.borderless.refused");
         assert!(
             holders[0]
                 .unsure
@@ -8459,6 +8605,30 @@ fn regions_list_kind_bounds_and_evidence() {
             "{n:#?}"
         );
     }
+}
+
+/// A page without text, lines or pictures has no region: no region stands over nothing.
+#[test]
+fn an_empty_page_has_no_region() {
+    let bytes = common::pdf(
+        &[
+            common::Page::text("BT /F1 11 Tf 72 700 Td (Some text on the first page.) Tj ET"),
+            common::Page::text(""),
+        ],
+        "",
+    );
+    let (out, regions) = common::read_regions(&bytes);
+    assert!(markdown(&out).contains("Some text on the first page."));
+    let on = |page: u32| {
+        regions
+            .iter()
+            .filter(|p| p.page == page)
+            .map(|p| p.regions.len())
+            .sum::<usize>()
+    };
+    assert!(on(1) > 0, "{regions:#?}");
+    assert_eq!(on(2), 0, "{regions:#?}");
+    assert!(out.document.regions.iter().all(|n| n.page != 2));
 }
 
 /// The regions are in the JSON only: the Markdown of a read is the same with and without
@@ -8554,5 +8724,678 @@ fn every_region_is_at_a_block_of_its_page() {
                 if role.as_deref() == Some("page-footer") && *a == r.anchor)
         });
         assert!(footer.is_some(), "{r:#?}");
+    }
+}
+
+/// Groups of a pay roll list (as on a German list of pay types by person): a code and title
+/// at the left on its first row, a column of names after their numbers (right aligned in two
+/// places), and each name's amount alone at the right edge on its baseline; under the amounts
+/// a rule over their column, the group's total line and a double rule. Courier at `size`, a
+/// row every `size`.
+fn names_and_lone_amounts(
+    size: f32,
+    top: f32,
+    groups: usize,
+    titled: bool,
+) -> (String, Vec<(String, &'static str)>) {
+    let all: [(&str, [&str; 5]); 4] = [
+        (
+            "8906 Zuschlag",
+            ["8,60-", "40,70-", "55,91-", "12,17-", "121,74-"],
+        ),
+        (
+            "8910 Steuer",
+            ["351,66-", "959,25-", "1.258,08-", "221,41-", "2.213,50-"],
+        ),
+        (
+            "8915 Beitrag",
+            ["722,07-", "862,46-", "589,86-", "342,98-", "77,21-"],
+        ),
+        ("8920 Umlage", ["3,10-", "4,25-", "5,40-", "6,55-", "7,70-"]),
+    ];
+    let names = [
+        ("1", "Mustergehalt-RV Klaus"),
+        ("2", "Musterfrau-Frei Clara"),
+        ("3", "Mustermann-Privat Tom"),
+        ("10", "Musterling-Stunde Ingo"),
+        ("30", "Musterchef-SV Andrea"),
+    ];
+    let adv = 0.6 * size;
+    let edge = 573.0;
+    let right = |text: &str| edge - adv * text.chars().count() as f32;
+    let column = edge - 13.0 * adv;
+    let mut out = String::new();
+    let mut rows = Vec::new();
+    let mut y = top;
+    for (title, amounts) in all.iter().take(groups) {
+        if titled {
+            out += &show("FD", size, 33.0, y, &format!("{title} "));
+        }
+        for ((n, name), amount) in names.iter().zip(amounts) {
+            let x = 277.6 + adv * (2 - n.len()) as f32;
+            let line = format!("{n} {name} ");
+            out += &show("FD", size, x, y, &line);
+            out += &show("FD", size, right(amount), y, amount);
+            rows.push((line.trim().to_string(), *amount));
+            y -= size;
+        }
+        out += &common::hrule(column, edge, y + 0.1 * size);
+        y -= size;
+        out += &show("FD", size, 299.0, y, "*** ");
+        out += &show("FD", size, right("999,99-"), y, "999,99-");
+        out += &common::hrule(column, edge, y - 0.7 * size);
+        out += &common::hrule(column, edge, y - 0.85 * size);
+        y -= 3.0 * size;
+    }
+    (out, rows)
+}
+
+/// The names of a pay roll list and their lone amounts, where the amounts are a region the
+/// layout is not sure of (cut off by the rule over their column) and the names another: laid
+/// out together, row by row, so each amount stands on the line of its name, every text once.
+#[test]
+fn lone_amounts_beside_their_names_stand_on_their_lines() {
+    for size in [8.0, 10.0, 12.0] {
+        let (template, rows) = names_and_lone_amounts(size, 700.0, 2, true);
+        let page = FormPage {
+            template: format!("{template}{}", body(7.0, 300.0)),
+            ..FormPage::default()
+        };
+        let bytes = print_form(&[page], "", "");
+        let out = common::read(&bytes);
+        let md = markdown(&out);
+        // A name is written on the line of its amount, so no paragraph region holds it.
+        for (name, _) in &rows {
+            let kinds = common::kinds_of(&bytes, name);
+            assert!(
+                kinds
+                    .iter()
+                    .all(|(k, _)| *k != rezzer_read_pdf::layoutregions::Kind::Paragraph),
+                "{size} pt: {name} in {kinds:?}"
+            );
+        }
+        assert!(
+            common::kinds_of(&bytes, rows[7].0.as_str())
+                .iter()
+                .any(|(_, s)| s.contains(&"pdf.spatial.shared_rows")),
+            "{size} pt: no region says it shares the rows of its names"
+        );
+        for (name, amount) in &rows {
+            assert!(
+                md.lines()
+                    .any(|l| l.contains(name.as_str()) && l.trim_end().ends_with(amount)),
+                "{size} pt: {name} and {amount} on one line in\n{md}"
+            );
+        }
+        for (name, amount) in &rows {
+            assert_eq!(
+                md.matches(name.as_str()).count(),
+                2,
+                "{size} pt: {name} in\n{md}"
+            );
+            assert_eq!(
+                md.lines()
+                    .filter(|l| l.trim_end().ends_with(amount))
+                    .count(),
+                1,
+                "{size} pt: {amount} once in\n{md}"
+            );
+        }
+    }
+}
+
+/// Where the value of the pair under [`summary_with_pair`] stands.
+#[derive(Debug, Clone, Copy)]
+enum PairValue {
+    /// Flush left a few sizes after the label: between the label column and the amounts.
+    AfterLabel,
+    /// Flush left under the first column of amounts, flush with none of its cells.
+    UnderAmounts,
+    /// Flush right at the right end of the last column of amounts, as its cells are.
+    InLastColumn,
+}
+
+/// A summary of `k` times 8 pt text without rules: the bold header `Part`, `Spent`,
+/// `Paid`, `Open` over three rows of a name at x 40 and three amounts flush right at
+/// x 400, 470 and 540, and two rows' steps under its last row the label `Member Code:`
+/// at x 40 with its value `M-30517` where `value` puts it.
+fn summary_with_pair(k: f32, value: PairValue) -> String {
+    let size = 8.0 * k;
+    let y = |dy: f32| 600.0 - dy * k;
+    let cols = [400.0, 470.0, 540.0];
+    let mut out = show("FB", size, 40.0, y(0.0), "Part");
+    for (x, h) in cols.iter().zip(["Spent", "Paid", "Open"]) {
+        out += &right(true, size, *x, y(0.0), h);
+    }
+    let rows = [
+        ("Paper", ["1.240,00", "1.240,00", "0,00"]),
+        ("Ink", ["35,00", "0,00", "35,00"]),
+        ("Tape", ["12,50", "12,50", "0,00"]),
+    ];
+    for (n, (name, amounts)) in rows.iter().enumerate() {
+        let at = y(12.0 * (n as f32 + 1.0));
+        out += &show("FL", size, 40.0, at, name);
+        for (x, a) in cols.iter().zip(amounts) {
+            out += &right(false, size, *x, at, a);
+        }
+    }
+    let at = y(12.0 * 3.0 + 16.0);
+    let label = "Member Code:";
+    out += &show("FL", size, 40.0, at, label);
+    out += &match value {
+        PairValue::AfterLabel => show(
+            "FL",
+            size,
+            40.0 + common::helvetica_width(label, size) + 3.0 * size,
+            at,
+            "M-30517",
+        ),
+        PairValue::UnderAmounts => show("FL", size, 340.0, at, "M-30517"),
+        PairValue::InLastColumn => right(false, size, 540.0, at, "M-30517"),
+    };
+    out
+}
+
+/// Fix round 1b of Task 19 (P1): a label and its value under a table join it as a row only
+/// when the table's own columns hold them, each part flush with the cells of a column. Else
+/// the table ends over the pair, keeps its own rows and columns whole, and the pair stays a
+/// pair of its own, in every size.
+#[test]
+fn a_pair_under_a_table_joins_it_only_in_its_columns() {
+    let summary = owned(&[
+        &["Part", "Spent", "Paid", "Open"],
+        &["Paper", "1.240,00", "1.240,00", "0,00"],
+        &["Ink", "35,00", "0,00", "35,00"],
+        &["Tape", "12,50", "12,50", "0,00"],
+    ]);
+    for k in [0.75, 1.0, 1.5] {
+        for value in [PairValue::AfterLabel, PairValue::UnderAmounts] {
+            let out = common::read(&page_in(&summary_with_pair(k, value), Look::Plain));
+            let got = tables(&out);
+            let name = format!("{k}x, {value:?}");
+            assert!(got.contains(&(1, summary.clone())), "{name}: {got:?}");
+            for (_, rows) in &got {
+                if rows.iter().flatten().any(|c| c.contains("Member")) {
+                    assert_eq!(
+                        rows,
+                        &owned(&[&["Member Code:", "M-30517"]]),
+                        "{name}: {got:?}"
+                    );
+                }
+            }
+            let text = common::all_text(&out);
+            assert!(
+                common::in_order(&text, &["Tape", "Member Code:", "M-30517"]).is_ok(),
+                "{name}: {text}"
+            );
+        }
+        // Flush with the label column and the last column of amounts: a row of the table.
+        let out = common::read(&page_in(
+            &summary_with_pair(k, PairValue::InLastColumn),
+            Look::Plain,
+        ));
+        let mut joined = summary.clone();
+        joined.push(
+            ["Member Code:", "", "", "M-30517"]
+                .map(String::from)
+                .to_vec(),
+        );
+        assert_eq!(tables(&out), [(1, joined)], "{k}x");
+    }
+}
+
+/// The summary of [`summary_with_pair`] with a column of units between the names and the
+/// amounts, flush left at x 180 but for the last row's, which is centered under the others
+/// and so starts and ends where no other cell does; the pair under it as `AfterLabel` puts it.
+fn summary_with_centered_unit(k: f32) -> String {
+    let size = 8.0 * k;
+    let y = |dy: f32| 600.0 - dy * k;
+    let cols = [400.0, 470.0, 540.0];
+    let mut out = show("FB", size, 40.0, y(0.0), "Part");
+    out += &show("FB", size, 180.0, y(0.0), "Unit");
+    for (x, h) in cols.iter().zip(["Spent", "Paid", "Open"]) {
+        out += &right(true, size, *x, y(0.0), h);
+    }
+    let rows = [
+        ("Paper", "box", ["1.240,00", "1.240,00", "0,00"]),
+        ("Ink", "bottle", ["35,00", "0,00", "35,00"]),
+        ("Tape", "roll of fifty metres", ["12,50", "12,50", "0,00"]),
+    ];
+    for (n, (name, unit, amounts)) in rows.iter().enumerate() {
+        let at = y(12.0 * (n as f32 + 1.0));
+        out += &show("FL", size, 40.0, at, name);
+        let x = if n == 2 {
+            180.0 + common::helvetica_width("bottle", size) / 2.0
+                - common::helvetica_width(unit, size) / 2.0
+        } else {
+            180.0
+        };
+        out += &show("FL", size, x, at, unit);
+        for (x, a) in cols.iter().zip(amounts) {
+            out += &right(false, size, *x, at, a);
+        }
+    }
+    let at = y(12.0 * 3.0 + 16.0);
+    let label = "Member Code:";
+    out += &show("FL", size, 40.0, at, label);
+    out += &show(
+        "FL",
+        size,
+        40.0 + common::helvetica_width(label, size) + 3.0 * size,
+        at,
+        "M-30517",
+    );
+    out
+}
+
+/// Fix round 5 of Task 19 (M-A): a table of more than two columns ends over a pair under it
+/// that its columns do not hold, also when one cell of the table is centered and starts and
+/// ends where no other cell does: the pair stays a pair of its own, in every size.
+#[test]
+fn a_pair_under_a_table_with_a_centered_column_stays_apart() {
+    let summary = owned(&[
+        &["Part", "Unit", "Spent", "Paid", "Open"],
+        &["Paper", "box", "1.240,00", "1.240,00", "0,00"],
+        &["Ink", "bottle", "35,00", "0,00", "35,00"],
+        &["Tape", "roll of fifty metres", "12,50", "12,50", "0,00"],
+    ]);
+    for k in [0.75, 1.0, 1.5] {
+        let out = common::read(&page_in(&summary_with_centered_unit(k), Look::Plain));
+        let got = tables(&out);
+        assert!(got.contains(&(1, summary.clone())), "{k}x: {got:?}");
+        assert!(
+            got.iter()
+                .any(|(_, rows)| *rows == owned(&[&["Member Code:", "M-30517"]])),
+            "{k}x: {got:?}"
+        );
+    }
+}
+
+/// A summary of `k` times 8 pt text without rules, as an invoice or folio ends: the heading
+/// `Fee Summary:` at x 40, under it four rows of a label at x 40 and its amount in bold, flush
+/// right at x 300 and of different widths (`121.60`, `0.00`, `0.00`, `121.6`), and two rows'
+/// steps under the last row the label `Member Code:` at x 40 with a long value of words and
+/// digits starting at `value_x`, left of where the amounts start.
+fn amounts_flush_right_with_pair(k: f32, value_x: f32) -> String {
+    let size = 8.0 * k;
+    let y = |dy: f32| 600.0 - dy * k;
+    let mut out = show("FB", size, 40.0, y(0.0), "Fee Summary:");
+    let rows = [
+        ("Net fees", "121.60"),
+        ("Discount", "0.00"),
+        ("Shipping", "0.00"),
+        ("Total due", "121.6"),
+    ];
+    for (n, (label, amount)) in rows.iter().enumerate() {
+        let at = y(12.0 * (n as f32 + 1.0));
+        out += &show("FL", size, 40.0, at, label);
+        out += &right(true, size, 300.0, at, amount);
+    }
+    let at = y(12.0 * 4.0 + 16.0);
+    out += &show("FL", size, 40.0, at, "Member Code:");
+    out += &show("FL", size, value_x, at, "MC 4417 2093 88");
+    out
+}
+
+/// Fix round 2 of Task 19 (P1): amounts of different widths flush right in one column are one
+/// column, whatever their left edges: the summary is one table of a label and an amount in
+/// each of its four rows, and the pair under it, whose value starts left of the amounts, does
+/// not stand in the table's columns and stays a pair of its own, in every size.
+#[test]
+fn amounts_flush_right_are_one_column_and_a_pair_under_them_stays_apart() {
+    let summary = owned(&[
+        &["Net fees", "121.60"],
+        &["Discount", "0.00"],
+        &["Shipping", "0.00"],
+        &["Total due", "121.6"],
+    ]);
+    for k in [0.75, 1.0, 1.5] {
+        for value_x in [150.0, 200.0, 215.0] {
+            let out = common::read(&page_in(
+                &amounts_flush_right_with_pair(k, value_x),
+                Look::Plain,
+            ));
+            let got = tables(&out);
+            let name = format!("{k}x, value at {value_x}");
+            assert!(
+                got.iter().any(|(_, rows)| *rows == summary),
+                "{name}: {got:?}"
+            );
+            for (_, rows) in &got {
+                if rows.iter().flatten().any(|c| c.contains("Member")) {
+                    assert_eq!(
+                        rows,
+                        &owned(&[&["Member Code:", "MC 4417 2093 88"]]),
+                        "{name}: {got:?}"
+                    );
+                }
+            }
+            let text = common::all_text(&out);
+            assert!(
+                common::in_order(&text, &["Total due", "Member Code:", "MC 4417 2093 88"]).is_ok(),
+                "{name}: {text}"
+            );
+        }
+    }
+}
+
+/// A summary under a line of a bold name and an amount, as a folio ends: the line at x 234.9
+/// (10 pt) with its amount flush right at x 516.6; under it the heading `Fee Summary:` and four
+/// rows of a plain 9 pt label at x 314 and a bold amount flush right at x 516.5 (each amount
+/// with a leading space, the first row's amount longer than its label, the others shorter);
+/// under the rows a label with a colon and an 8 pt code. No rules.
+fn summary_of_mixed_rows() -> String {
+    let mut c = show("FB", 10.0, 234.9, 188.05, "Charges");
+    c += &right(false, 10.0, 516.6, 188.39, " 4.50");
+    c += &show("FL", 9.0, 314.0, 164.1, "Fee Summary:");
+    for (y, label, amount) in [
+        (151.83, "Gross", " 525.98"),
+        (141.03, "Room & Services", " 1.90"),
+        (130.23, "Taxes", " 1.34"),
+        (119.43, "Total", " 309.5"),
+    ] {
+        c += &show("FL", 9.0, 314.0, y, label);
+        c += &right(true, 9.0, 516.5, y - 0.31, amount);
+    }
+    c += &show("FL", 9.0, 314.0, 101.43, "Member Account Code:");
+    c += &show("FL", 8.0, 414.8, 102.36, " 104857312 RT 0108");
+    c
+}
+
+/// Fix round 3 of Task 19 (P1): rows of a plain label and a bold amount are one block, though
+/// the bold amount is the longer run of the first row and the plain label of the others: the
+/// summary is one table of a label and an amount in four rows, and the pair under it, whose
+/// 8 pt value is smaller than its label, stays out of it.
+#[test]
+fn rows_of_a_plain_label_and_a_bold_amount_are_one_table() {
+    let summary = owned(&[
+        &["Gross", "525.98"],
+        &["Room & Services", "1.90"],
+        &["Taxes", "1.34"],
+        &["Total", "309.5"],
+    ]);
+    let page = FormPage {
+        template: summary_of_mixed_rows(),
+        paper: (612.0, 792.0),
+        ..FormPage::default()
+    };
+    let out = common::read(&print_form(&[page], "", ""));
+    let got = tables(&out);
+    assert!(got.iter().any(|(_, rows)| *rows == summary), "{got:?}");
+    assert!(
+        got.iter().all(
+            |(_, rows)| rows.len() == 1 || !rows.iter().flatten().any(|c| c.contains("Member"))
+        ),
+        "{got:?}"
+    );
+    let text = common::all_text(&out);
+    assert!(
+        common::in_order(
+            &text,
+            &["Total", "Member Account Code:", "104857312 RT 0108"]
+        )
+        .is_ok(),
+        "{text}"
+    );
+}
+
+/// [`summary_of_mixed_rows`] in a drawn box from x 308.35 to 522.15 and y 95.46 to 174.66,
+/// its sides each drawn as two segments that meet between the first and the second row, as a
+/// folio page ends: above it a rule and over that a line of a bold name and two amounts; left
+/// of it a column of notes (a 7 pt paragraph, a bold title, short lines); under it a bold line
+/// and the terms.
+fn boxed_summary_of_mixed_rows() -> String {
+    let mut c = String::from("0.5 w\n");
+    for y in [95.46f32, 174.66] {
+        c += &format!("308.35 {y} m 522.15 {y} l S\n");
+    }
+    for x in [308.6f32, 521.9] {
+        c += &format!("{x} 95.209 m {x} 138.658 l S\n{x} 138.66 m {x} 174.909 l S\n");
+    }
+    c += "230 205 m 590 205 l S\n";
+    c += &show("FL", 9.0, 20.0, 190.0, "Guest Questions");
+    for (y, line) in [
+        (
+            170.0,
+            "A guest who has a question about the stay may call the front desk",
+        ),
+        (
+            162.0,
+            "at any time of the day or the night, and the staff will help with",
+        ),
+        (
+            154.0,
+            "rooms, parking, meals or anything else the guest may need",
+        ),
+        (146.0, "for a good stay at the hotel."),
+    ] {
+        c += &show("FL", 7.0, 20.0, y, line);
+    }
+    c += &show("FB", 10.0, 20.0, 117.0, "Notes on Your Account");
+    for (k, line) in ["Arrival Date", "Departure Date", "Room Number", "Rate Plan"]
+        .into_iter()
+        .enumerate()
+    {
+        c += &show("FL", 10.0, 20.0, 90.0 - 12.0 * k as f32, line);
+    }
+    c += &show(
+        "FB",
+        9.0,
+        310.0,
+        78.0,
+        "Thank you for your stay with us today",
+    );
+    for (y, line) in [
+        (60.0, "Payment is due within fourteen days"),
+        (
+            42.0,
+            "of this invoice without any deduction, as agreed in the terms of the booking",
+        ),
+        (33.0, "and in the house rules."),
+    ] {
+        c += &show("FL", 8.0, 235.0, y, line);
+    }
+    c += &show("FB", 10.0, 234.9, 211.92, "Lodging");
+    c += &right(false, 10.0, 516.6, 212.1, " 2,184.20");
+    c += &right(false, 10.0, 588.6, 212.1, " 2,184.20");
+    c + &summary_of_mixed_rows()
+}
+
+/// Fix round 4 of Task 19 (P6-X): the summary in its box reads in the order it is printed:
+/// the heading, then the table of the four rows, then the line under them. The heading and
+/// that line, both left by the table's reader, are no one block written before the table, nor
+/// one region. A label with a colon and its code is a pair of its own, a region of its own; a
+/// label alone there stays a line, in a region of its own.
+#[test]
+fn a_boxed_summary_reads_heading_table_then_pair() {
+    let summary = owned(&[
+        &["Gross", "525.98"],
+        &["Room & Services", "1.90"],
+        &["Taxes", "1.34"],
+        &["Total", "309.5"],
+    ]);
+    for pair in [true, false] {
+        let mut template = boxed_summary_of_mixed_rows();
+        let line = if pair {
+            "Member Account Code:"
+        } else {
+            template = template
+                .replace("Member Account Code:", "Member Account Code")
+                .replace(" 104857312 RT 0108", "");
+            "Member Account Code"
+        };
+        let page = FormPage {
+            template,
+            paper: (612.0, 792.0),
+            ..FormPage::default()
+        };
+        let (out, pages) = common::read_engine_pages(&print_form(&[page], "", ""));
+        let got = tables(&out);
+        assert!(
+            got.iter().any(|(_, rows)| *rows == summary),
+            "{line}: {got:?}"
+        );
+        let text = common::all_text(&out);
+        assert!(
+            common::in_order(&text, &["Fee Summary:", "Gross", "Total", line]).is_ok(),
+            "{line}: {text}"
+        );
+        let pairs = owned(&[&["Member Account Code:", "104857312 RT 0108"]]);
+        assert_eq!(
+            got.iter().any(|(_, rows)| *rows == pairs),
+            pair,
+            "{line}: {got:?}"
+        );
+        // The region of the line under the rows holds neither the heading nor a row.
+        let p = &pages[0];
+        let of_line: Vec<_> = p
+            .regions
+            .regions
+            .iter()
+            .filter(|r| common::region_texts(p, r).iter().any(|t| t.contains(line)))
+            .collect();
+        assert_eq!(of_line.len(), 1, "{line}");
+        let texts = common::region_texts(p, of_line[0]);
+        assert!(
+            !texts
+                .iter()
+                .any(|t| t.contains("Fee Summary") || t.contains("Gross")),
+            "{line}: {texts:?}"
+        );
+        if pair {
+            assert_eq!(
+                of_line[0].kind,
+                rezzer_read_pdf::layoutregions::Kind::LabelValue,
+                "{texts:?}"
+            );
+        }
+    }
+}
+
+/// Fix round 5 of Task 19 (M-B): a heading with a colon over the table (`Step 2: Pay the
+/// fee`) does not join the table, and the lone pair rule for what a table's reader leaves
+/// takes only a line under the table: the heading is written before the table, the rows are
+/// one table without it, and the pair under them is a pair. (The heading is typed on its own
+/// before any reader runs, as a lone line with a colon; it is no leftover of the table.)
+#[test]
+fn a_heading_with_a_colon_over_a_table_stays_over_it() {
+    let summary = owned(&[
+        &["Gross", "525.98"],
+        &["Room & Services", "1.90"],
+        &["Taxes", "1.34"],
+        &["Total", "309.5"],
+    ]);
+    let page = FormPage {
+        template: boxed_summary_of_mixed_rows().replace("Fee Summary:", "Step 2: Pay the fee"),
+        paper: (612.0, 792.0),
+        ..FormPage::default()
+    };
+    let out = common::read(&print_form(&[page], "", ""));
+    let got = tables(&out);
+    assert!(got.iter().any(|(_, rows)| *rows == summary), "{got:?}");
+    assert!(
+        got.iter()
+            .any(|(_, rows)| *rows == owned(&[&["Member Account Code:", "104857312 RT 0108"]])),
+        "{got:?}"
+    );
+    let text = common::all_text(&out);
+    assert!(
+        common::in_order(
+            &text,
+            &["Step 2:", "Pay the fee", "Gross", "Member Account Code:"]
+        )
+        .is_ok(),
+        "{text}"
+    );
+}
+
+/// A summary in a drawn box as an invoice or folio ends, at the place and size such pages set
+/// it (letter paper, 9 pt): the box's top and bottom rules, its sides each drawn as two
+/// segments that meet between the first and the second row, and a rectangle of the box that
+/// is neither filled nor stroked (`unpainted`). In it a heading, four rows of a label and a
+/// bold amount flush right at x 516.5 (each amount set with a leading space), and a label with
+/// a colon and an 8 pt code under the rows; under the box a centered bold line and prose.
+fn boxed_summary(unpainted: bool) -> String {
+    let mut c = String::from("0.5 w\n");
+    for y in [95.46f32, 174.66] {
+        c += &format!("308.35 {y} m 522.15 {y} l S\n");
+    }
+    for x in [308.6f32, 521.9] {
+        c += &format!("{x} 95.209 m {x} 138.658 l S\n{x} 138.66 m {x} 174.909 l S\n");
+    }
+    if unpainted {
+        c += "308.35 95.209 213.55 79.45 re n\n";
+    }
+    let r = |x1: f32, y: f32, text: &str| right(true, 9.0, x1, y, text);
+    c += &show("FL", 9.0, 314.0, 164.1, "Fee Summary:");
+    c += &show("FL", 9.0, 314.0, 151.8, "Gross");
+    c += &r(516.5, 151.5, " 121.60");
+    c += &show("FL", 9.0, 314.0, 141.0, "Service charges");
+    c += &r(516.5, 140.7, " 0.00");
+    c += &show("FL", 9.0, 314.0, 130.2, "Fees");
+    c += &r(516.5, 129.9, " 0.00");
+    c += &show("FL", 9.0, 314.0, 119.4, "Paid");
+    c += &r(516.5, 119.1, " 121.6");
+    c += &show("FL", 9.0, 314.0, 101.4, "Member Account Code:");
+    c += &show("FL", 8.0, 414.8, 102.4, " 104857312 RT 0108");
+    let line = "Thank you for your stay with us";
+    c += &show(
+        "FB",
+        9.0,
+        306.0 - common::helvetica_width(line, 9.0) / 2.0,
+        77.5,
+        line,
+    );
+    for (k, y) in [60.0f32, 49.0, 38.0].into_iter().enumerate() {
+        c += &show(
+            "FL",
+            8.0,
+            234.9,
+            y,
+            [
+                "Payment is due within fourteen days of the date",
+                "of this invoice without any deduction, as agreed",
+                "in the terms of the booking and the house rules",
+            ][k],
+        );
+    }
+    c
+}
+
+/// Fix round 3 of Task 19 (P1): a box whose sides are each drawn as two segments that meet
+/// between two rows is one box (the engine joins them), its rows are one table of a label and
+/// an amount, four rows, and the pair under them, whose 8 pt code is smaller than its label
+/// with a colon, stays a pair of its own.
+#[test]
+fn a_box_with_sides_in_two_segments_keeps_its_rows_one_table() {
+    let summary = owned(&[
+        &["Gross", "121.60"],
+        &["Service charges", "0.00"],
+        &["Fees", "0.00"],
+        &["Paid", "121.6"],
+    ]);
+    for unpainted in [false, true] {
+        let page = FormPage {
+            template: boxed_summary(unpainted),
+            paper: (612.0, 792.0),
+            ..FormPage::default()
+        };
+        let bytes = print_form(&[page], "", "");
+        let out = common::read(&bytes);
+        let got = tables(&out);
+        let name = format!("unpainted box {unpainted}");
+        assert!(
+            got.iter().any(|(_, rows)| *rows == summary),
+            "{name}: {got:?}"
+        );
+        for (_, rows) in &got {
+            if rows.iter().flatten().any(|c| c.contains("Member")) {
+                assert_eq!(
+                    rows,
+                    &owned(&[&["Member Account Code:", "104857312 RT 0108"]]),
+                    "{name}: {got:?}"
+                );
+            }
+        }
     }
 }

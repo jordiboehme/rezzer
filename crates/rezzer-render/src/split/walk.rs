@@ -230,12 +230,24 @@ pub(super) fn walk_inlines<'x>(list: &'x [Inline], depth: usize, f: &mut dyn FnM
 
 /// The footnote labels `list` cites.
 pub(super) fn cited_footnotes(list: &[Block], depth: usize, out: &mut HashSet<String>) {
-    walk(list, depth, &mut |node| {
-        if let Node::Inline(Inline::FootnoteRef { id }) = node
-            && !out.contains(id.as_str())
-        {
+    walk(list, depth, &mut |node| match node {
+        Node::Inline(Inline::FootnoteRef { id }) if !out.contains(id.as_str()) => {
             out.insert(id.clone());
         }
+        // A block kept in its layout cites its footnotes in its spans.
+        Node::Block(Block::Spatial { lines, .. }) => {
+            for id in lines
+                .iter()
+                .flat_map(|l| &l.pieces)
+                .flat_map(|p| &p.spans)
+                .filter_map(|s| s.footnote.as_ref())
+            {
+                if !out.contains(id.as_str()) {
+                    out.insert(id.clone());
+                }
+            }
+        }
+        _ => {}
     });
 }
 

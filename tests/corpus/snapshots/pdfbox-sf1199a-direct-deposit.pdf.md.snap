@@ -1,5 +1,6 @@
 ---
 source: crates/rezzer/tests/corpus.rs
+assertion_line: 295
 ---
 ---
 type: source
@@ -18,7 +19,7 @@ format: pdf
 detected_by: "pdf header %PDF-"
 reader: "pdf/0.1.0"
 completeness: complete
-losses: 0
+losses: 61
 pages: 4
 tagged: false
 encrypted: false
@@ -60,21 +61,17 @@ Department
 
 OMB No. 1510-0007
 
-**DIRECT DEPOSIT SIGN-UP FORM**
+```text
+DIRECT DEPOSIT SIGN-UP FORM
+```
 
 Treasury Dept. Cir. 1076
 
 DIRECTIONS
 
-To sign up for Direct Deposit, the payee is to read the back of this form
+To sign up for Direct Deposit, the payee is to read the back of this form and fill in the information requested in Sections 1 and 2. Then take or mail this form to the financial institution.  The financial institution will verify the information in Sections 1 and 2, and will complete Section 3. The completed form will be returned to the Government agency identified below.
 
-and fill in the information requested in Sections 1 and 2. Then take or
-
-mail this form to the financial institution.  The financial institution will
-
-verify the information in Sections 1 and 2, and will complete Section 3.
-
-The completed form will be returned to the Government agency
+A separate form must be completed for each type of payment to be sent by Direct Deposit.
 
 The claim number and type of payment are printed on Government
 
@@ -84,10 +81,6 @@ information is also stated on beneficiary/annuitant award letters and
 
 other documents from the Government agency.
 
-identified below.
-
-A separate form must be completed for each type of payment to be sent by Direct Deposit.
-
 Payees must keep the Government agency informed of any address changes in order to receive important information about benefits and to remain qualified for payments.
 
 ## SECTION 1 (TO BE COMPLETED BY PAYEE)
@@ -96,7 +89,9 @@ Payees must keep the Government agency informed of any address changes in order 
 
 ADDRESS (street, route, P.O. Box, APO/FPO)
 
-CITY STATE ZIP CODE
+```text
+CITY                          STATE        ZIP CODE
+```
 
 TELEPHONE NUMBER\
 AREA CODE\
@@ -104,41 +99,65 @@ AREA CODE\
 
 **C** CLAIM OR PAYROLL ID NUMBER
 
-Prefix Suffix
+```text
+Prefix                               Suffix
+```
 
 **PAYEE/JOINT PAYEE CERTIFICATION**
 
 I certify that I am entitled to the payment identified above, and that I have read and understood the back of this form. In signing this form, I authorize my payment to be sent to the financial institution named below to be deposited to the designated account.
 
-SIGNATURE DATE
+```text
+SIGNATURE                             DATE
+```
 
-SIGNATURE DATE
+```text
+SIGNATURE                             DATE
+```
 
-**D** TYPE OF DEPOSITOR ACCOUNT CHECKING SAVINGS
+```text
+D TYPE OF DEPOSITOR ACCOUNT    CHECKING     SAVINGS
+```
 
 **E** DEPOSITOR ACCOUNT NUMBER
 
-**F** TYPE OF PAYMENT (Check only one)
+Possible table on page 1 not rebuilt (reason: most of its cells are empty)
 
-Social Security Fed. Salary/Mil. Civilian Pay
+```text
+F   TYPE OF PAYMENT (Check only one)
+     Social Security                      Fed. Salary/Mil. Civilian Pay
+     Supplemental Security Income         Mil. Active
+```
 
-Supplemental Security Income Mil. Active
+```text
+Railroad Retirement                    Mil. Retire.
+```
 
-Railroad Retirement Mil. Retire.
+```text
+Civil Service Retirement (OPM)         Mil. Survivor
+```
 
-Civil Service Retirement (OPM) Mil. Survivor
+```text
+VA Compensation or Pension          Other
+```
 
-VA Compensation or Pension Other
-
-(specify) **G** THIS BOX FOR ALLOTMENT OF PAYMENT ONLY (if applicable) TYPE AMOUNT
+```text
+                                        (specify)
+G THIS BOX FOR ALLOTMENT OF PAYMENT ONLY (if applicable)
+TYPE                             AMOUNT
+```
 
 **JOINT ACCOUNT HOLDERS’ CERTIFICATION** (optional)
 
 I certify that I have read and understood the back of this form, including the SPECIAL NOTICE TO JOINT ACCOUNT HOLDERS.
 
-SIGNATURE DATE
+```text
+SIGNATURE                             DATE
+```
 
-SIGNATURE DATE
+```text
+SIGNATURE                             DATE
+```
 
 ## SECTION 2 (TO BE COMPLETED BY PAYEE OR FINANCIAL INSTITUTION)
 
@@ -158,7 +177,9 @@ PRINT OR TYPE REPRESENTATIVE’S NAME SIGNATURE OF REPRESENTATIVE TELEPHONE NUMB
 Financial institutions should refer to the GREEN BOOK for further instructions.\
 **THE FINANCIAL INSTITUTION SHOULD MAIL THE COMPLETED FORM TO THE GOVERNMENT AGENCY IDENTIFIED ABOVE.**
 
-NSN 7540-01-058-0224 **GOVERNMENT AGENCY COPY** 1199-207
+```text
+NSN 7540-01-058-0224                                            GOVERNMENT AGENCY COPY                                                                     1199-207
+```
 
 Designed using Perform Pro, WHS/DIOR, Mar 97
 
@@ -174,21 +195,17 @@ Department
 
 OMB No. 1510-0007
 
-**DIRECT DEPOSIT SIGN-UP FORM**
+```text
+DIRECT DEPOSIT SIGN-UP FORM
+```
 
 Treasury Dept. Cir. 1076
 
 DIRECTIONS
 
-To sign up for Direct Deposit, the payee is to read the back of this form
+To sign up for Direct Deposit, the payee is to read the back of this form and fill in the information requested in Sections 1 and 2. Then take or mail this form to the financial institution.  The financial institution will verify the information in Sections 1 and 2, and will complete Section 3. The completed form will be returned to the Government agency identified below.
 
-and fill in the information requested in Sections 1 and 2. Then take or
-
-mail this form to the financial institution.  The financial institution will
-
-verify the information in Sections 1 and 2, and will complete Section 3.
-
-The completed form will be returned to the Government agency
+A separate form must be completed for each type of payment to be sent by Direct Deposit.
 
 The claim number and type of payment are printed on Government
 
@@ -198,19 +215,21 @@ information is also stated on beneficiary/annuitant award letters and
 
 other documents from the Government agency.
 
-identified below.
-
-A separate form must be completed for each type of payment to be sent by Direct Deposit.
-
 Payees must keep the Government agency informed of any address changes in order to receive important information about benefits and to remain qualified for payments.
 
-## SECTION 1 (TO BE COMPLETED BY PAYEE)
+## SECTION 1
+
+```text
+(TO BE COMPLETED BY PAYEE)
+```
 
 **A** NAME OF PAYEE (last, first, middle initial)
 
 ADDRESS (street, route, P.O. Box, APO/FPO)
 
-CITY STATE ZIP CODE
+```text
+CITY                          STATE        ZIP CODE
+```
 
 TELEPHONE NUMBER\
 AREA CODE\
@@ -218,41 +237,65 @@ AREA CODE\
 
 **C** CLAIM OR PAYROLL ID NUMBER
 
-Prefix Suffix
+```text
+Prefix                               Suffix
+```
 
 **PAYEE/JOINT PAYEE CERTIFICATION**
 
 I certify that I am entitled to the payment identified above, and that I have read and understood the back of this form. In signing this form, I authorize my payment to be sent to the financial institution named below to be deposited to the designated account.
 
-SIGNATURE DATE
+```text
+SIGNATURE                             DATE
+```
 
-SIGNATURE DATE
+```text
+SIGNATURE                             DATE
+```
 
-**D** TYPE OF DEPOSITOR ACCOUNT CHECKING SAVINGS
+```text
+D TYPE OF DEPOSITOR ACCOUNT    CHECKING     SAVINGS
+```
 
 **E** DEPOSITOR ACCOUNT NUMBER
 
-**F** TYPE OF PAYMENT (Check only one)
+Possible table on page 2 not rebuilt (reason: most of its cells are empty)
 
-Social Security Fed. Salary/Mil. Civilian Pay
+```text
+F   TYPE OF PAYMENT (Check only one)
+     Social Security                      Fed. Salary/Mil. Civilian Pay
+     Supplemental Security Income         Mil. Active
+```
 
-Supplemental Security Income Mil. Active
+```text
+Railroad Retirement                    Mil. Retire.
+```
 
-Railroad Retirement Mil. Retire.
+```text
+Civil Service Retirement (OPM)         Mil. Survivor
+```
 
-Civil Service Retirement (OPM) Mil. Survivor
+```text
+VA Compensation or Pension          Other
+```
 
-VA Compensation or Pension Other
-
-(specify) **G** THIS BOX FOR ALLOTMENT OF PAYMENT ONLY (if applicable) TYPE AMOUNT
+```text
+                                        (specify)
+G THIS BOX FOR ALLOTMENT OF PAYMENT ONLY (if applicable)
+TYPE                             AMOUNT
+```
 
 **JOINT ACCOUNT HOLDERS’ CERTIFICATION** (optional)
 
 I certify that I have read and understood the back of this form, including the SPECIAL NOTICE TO JOINT ACCOUNT HOLDERS.
 
-SIGNATURE DATE
+```text
+SIGNATURE                             DATE
+```
 
-SIGNATURE DATE
+```text
+SIGNATURE                             DATE
+```
 
 ## SECTION 2 (TO BE COMPLETED BY PAYEE OR FINANCIAL INSTITUTION)
 
@@ -272,7 +315,9 @@ PRINT OR TYPE REPRESENTATIVE’S NAME SIGNATURE OF REPRESENTATIVE TELEPHONE NUMB
 Financial institutions should refer to the GREEN BOOK for further instructions.\
 **THE FINANCIAL INSTITUTION SHOULD MAIL THE COMPLETED FORM TO THE GOVERNMENT AGENCY IDENTIFIED ABOVE.**
 
-NSN 7540-01-058-0224 **FINANCIAL INSTITUTION COPY** 1199-207
+```text
+NSN 7540-01-058-0224                                            FINANCIAL INSTITUTION COPY                                                                 1199-207
+```
 
 Designed using Perform Pro, WHS/DIOR, Mar 97
 
@@ -288,21 +333,17 @@ Department
 
 OMB No. 1510-0007
 
-**DIRECT DEPOSIT SIGN-UP FORM**
+```text
+DIRECT DEPOSIT SIGN-UP FORM
+```
 
 Treasury Dept. Cir. 1076
 
 DIRECTIONS
 
-To sign up for Direct Deposit, the payee is to read the back of this form
+To sign up for Direct Deposit, the payee is to read the back of this form and fill in the information requested in Sections 1 and 2. Then take or mail this form to the financial institution.  The financial institution will verify the information in Sections 1 and 2, and will complete Section 3. The completed form will be returned to the Government agency identified below.
 
-and fill in the information requested in Sections 1 and 2. Then take or
-
-mail this form to the financial institution.  The financial institution will
-
-verify the information in Sections 1 and 2, and will complete Section 3.
-
-The completed form will be returned to the Government agency
+A separate form must be completed for each type of payment to be sent by Direct Deposit.
 
 The claim number and type of payment are printed on Government
 
@@ -312,19 +353,21 @@ information is also stated on beneficiary/annuitant award letters and
 
 other documents from the Government agency.
 
-identified below.
-
-A separate form must be completed for each type of payment to be sent by Direct Deposit.
-
 Payees must keep the Government agency informed of any address changes in order to receive important information about benefits and to remain qualified for payments.
 
-## SECTION 1 (TO BE COMPLETED BY PAYEE)
+## SECTION 1
+
+```text
+(TO BE COMPLETED BY PAYEE)
+```
 
 **A** NAME OF PAYEE (last, first, middle initial)
 
 ADDRESS (street, route, P.O. Box, APO/FPO)
 
-CITY STATE ZIP CODE
+```text
+CITY                          STATE        ZIP CODE
+```
 
 TELEPHONE NUMBER\
 AREA CODE\
@@ -332,41 +375,65 @@ AREA CODE\
 
 **C** CLAIM OR PAYROLL ID NUMBER
 
-Prefix Suffix
+```text
+Prefix                               Suffix
+```
 
 **PAYEE/JOINT PAYEE CERTIFICATION**
 
 I certify that I am entitled to the payment identified above, and that I have read and understood the back of this form. In signing this form, I authorize my payment to be sent to the financial institution named below to be deposited to the designated account.
 
-SIGNATURE DATE
+```text
+SIGNATURE                             DATE
+```
 
-SIGNATURE DATE
+```text
+SIGNATURE                             DATE
+```
 
-**D** TYPE OF DEPOSITOR ACCOUNT CHECKING SAVINGS
+```text
+D TYPE OF DEPOSITOR ACCOUNT    CHECKING     SAVINGS
+```
 
 **E** DEPOSITOR ACCOUNT NUMBER
 
-**F** TYPE OF PAYMENT (Check only one)
+Possible table on page 3 not rebuilt (reason: most of its cells are empty)
 
-Social Security Fed. Salary/Mil. Civilian Pay
+```text
+F   TYPE OF PAYMENT (Check only one)
+     Social Security                      Fed. Salary/Mil. Civilian Pay
+     Supplemental Security Income         Mil. Active
+```
 
-Supplemental Security Income Mil. Active
+```text
+Railroad Retirement                    Mil. Retire.
+```
 
-Railroad Retirement Mil. Retire.
+```text
+Civil Service Retirement (OPM)         Mil. Survivor
+```
 
-Civil Service Retirement (OPM) Mil. Survivor
+```text
+VA Compensation or Pension          Other
+```
 
-VA Compensation or Pension Other
-
-(specify) **G** THIS BOX FOR ALLOTMENT OF PAYMENT ONLY (if applicable) TYPE AMOUNT
+```text
+                                        (specify)
+G THIS BOX FOR ALLOTMENT OF PAYMENT ONLY (if applicable)
+TYPE                             AMOUNT
+```
 
 **JOINT ACCOUNT HOLDERS’ CERTIFICATION** (optional)
 
 I certify that I have read and understood the back of this form, including the SPECIAL NOTICE TO JOINT ACCOUNT HOLDERS.
 
-SIGNATURE DATE
+```text
+SIGNATURE                             DATE
+```
 
-SIGNATURE DATE
+```text
+SIGNATURE                             DATE
+```
 
 ## SECTION 2 (TO BE COMPLETED BY PAYEE OR FINANCIAL INSTITUTION)
 
@@ -386,9 +453,10 @@ PRINT OR TYPE REPRESENTATIVE’S NAME SIGNATURE OF REPRESENTATIVE TELEPHONE NUMB
 Financial institutions should refer to the GREEN BOOK for further instructions.\
 **THE FINANCIAL INSTITUTION SHOULD MAIL THE COMPLETED FORM TO THE GOVERNMENT AGENCY IDENTIFIED ABOVE.**
 
-NSN 7540-01-058-0224 **PAYEE COPY** 1199-207
-
-Designed using Perform Pro, WHS/DIOR, Mar 97
+```text
+NSN 7540-01-058-0224                                                      PAYEE COPY                                                                       1199-207
+                                                                                                                            Designed using Perform Pro, WHS/DIOR, Mar 97
+```
 
 :status[Page 4]{grey}
 
@@ -405,39 +473,80 @@ All information on this form, including the individual claim number, is required
 **INFORMATION FOUND ON CHECKS**\
 Most of the information needed to complete boxes A, C, and F in Section 1 is printed on your government check:
 
-**A** Be sure that payee’s name is written exactly as it ap-pears on the check.  Be sure current address is shown.
+```text
+A   Be sure that payee’s name is written exactly as it ap-
+    pears on the check.  Be sure current address is shown.
+```
 
-**C** Claim numbers and suffixes are printed here on checks beneath the date for the type of payment shown here. Check the Green Book for the location of prefixes and suffixes for other types of payments.
+```text
+C   Claim numbers and suffixes are printed here on checks
+    beneath the date for the type of payment shown here.
+    Check the Green Book for the location of prefixes and
+    suffixes for other types of payments.
+```
 
 **F** Type of payment is printed to the left of the amount.
 
+```text
 15-51
+```
 
 **United States Treasury** 000
 
-Month Day  Year\
-08 31 84
+```text
+Month Day  Year
+  08   31    84
+```
 
+```text
 AUSTIN, TEXAS
+```
 
-29-693-775 00 **C** 28 28\
-Pay to VA  COMP the order of JOHN DOE\
+```text
+29-693-775    00     C
+```
+
+```text
+28    28
+```
+
+Pay to
+
+```text
+VA  COMP
+```
+
+the order of JOHN DOE\
 123 BRISTOL STREET **F**\
 HAWKINS BRANCH  TX  76543
 
+```text
 Check No.
+```
 
+```text
 0000  415785
+```
 
-DOLLARS CTS
+```text
+DOLLARS    CTS
+```
 
-$\*\*\*\*100 00
+```text
+$****100
+```
+
+```text
+00
+```
 
 **A**
 
 **NOT NEGOTIABLE**
 
+```text
 ’:00000518’:  041571926"
+```
 
 **SPECIAL NOTICE TO JOINT ACCOUNT HOLDERS**\
 Joint account holders should immediately advise both the Government agency and the financial institution of the death of a beneficiary.  Funds deposited after the date of death or ineligibility, except for salary payments, are to be returned to the Government agency.  The Government agency will then make a determination regarding survivor rights, calculate survivor benefit payments, if any, and begin payments.
@@ -579,3 +688,69 @@ field Bank Rep Date keystroke (javascript), listed, not run.
 ```javascript
 AFDate_KeystrokeEx("mm/dd/yyyy");
 ```
+
+## Not read
+
+| Where | What | Why | Severity |
+| --- | --- | --- | --- |
+| p1 | Possible table on page 1 not rebuilt (reason: most of its cells are empty) | uncertain | info |
+| p1:b6 | the region at p1:b6 is kept as laid out, as text in its columns: it reads as header band or as heading about equally (900 and 850 of 1000); its bold text is marked in the JSON only | uncertain | info |
+| p1:b19 | the region at p1:b19 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p1:b22 | the region at p1:b22 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p1:b25 | the region at p1:b25 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p1:b26 | the region at p1:b26 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p1:b27 | the region at p1:b27 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
+| p1:b30 | the region at p1:b30 is kept as laid out, as text in its columns: it reads as table, but most of its cells are empty; its bold text is marked in the JSON only | uncertain | info |
+| p1:b31 | the region at p1:b31 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p1:b32 | the region at p1:b32 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p1:b33 | the region at p1:b33 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p1:b34 | the region at p1:b34 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
+| p1:b37 | the region at p1:b37 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p1:b38 | the region at p1:b38 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p1:b47 | the region at p1:b47 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
+| p2 | Possible table on page 2 not rebuilt (reason: most of its cells are empty) | uncertain | info |
+| p2:b6 | the region at p2:b6 is kept as laid out, as text in its columns: it reads as header band or as heading about equally (900 and 850 of 1000); its bold text is marked in the JSON only | uncertain | info |
+| p2:b17 | the region at p2:b17 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p2:b20 | the region at p2:b20 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p2:b23 | the region at p2:b23 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p2:b26 | the region at p2:b26 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p2:b27 | the region at p2:b27 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p2:b28 | the region at p2:b28 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
+| p2:b31 | the region at p2:b31 is kept as laid out, as text in its columns: it reads as table, but most of its cells are empty; its bold text is marked in the JSON only | uncertain | info |
+| p2:b32 | the region at p2:b32 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p2:b33 | the region at p2:b33 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p2:b34 | the region at p2:b34 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p2:b35 | the region at p2:b35 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
+| p2:b38 | the region at p2:b38 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p2:b39 | the region at p2:b39 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p2:b48 | the region at p2:b48 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
+| p3 | Possible table on page 3 not rebuilt (reason: most of its cells are empty) | uncertain | info |
+| p3:b6 | the region at p3:b6 is kept as laid out, as text in its columns: it reads as header band or as heading about equally (900 and 850 of 1000); its bold text is marked in the JSON only | uncertain | info |
+| p3:b17 | the region at p3:b17 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p3:b20 | the region at p3:b20 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p3:b23 | the region at p3:b23 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p3:b26 | the region at p3:b26 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p3:b27 | the region at p3:b27 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p3:b28 | the region at p3:b28 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
+| p3:b31 | the region at p3:b31 is kept as laid out, as text in its columns: it reads as table, but most of its cells are empty; its bold text is marked in the JSON only | uncertain | info |
+| p3:b32 | the region at p3:b32 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p3:b33 | the region at p3:b33 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p3:b34 | the region at p3:b34 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p3:b35 | the region at p3:b35 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
+| p3:b38 | the region at p3:b38 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p3:b39 | the region at p3:b39 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p3:b48 | the region at p3:b48 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
+| p4:b7 | the region at p4:b7 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
+| p4:b8 | the region at p4:b8 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
+| p4:b10 | the region at p4:b10 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p4:b12 | the region at p4:b12 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p4:b13 | the region at p4:b13 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p4:b14 | the region at p4:b14 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
+| p4:b15 | the region at p4:b15 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p4:b17 | the region at p4:b17 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p4:b19 | the region at p4:b19 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p4:b20 | the region at p4:b20 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p4:b21 | the region at p4:b21 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p4:b22 | the region at p4:b22 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p4:b23 | the region at p4:b23 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p4:b26 | the region at p4:b26 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |

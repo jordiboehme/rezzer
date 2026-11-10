@@ -587,3 +587,41 @@ fn a_line_set_full_in_pieces_is_prose() {
     let (lines, pieces) = lined(&table);
     assert!(!set_full(&table, &pieces, &lines));
 }
+
+/// Two runs of one line with a gap of 20 points (two sizes) between them: `first` ends at its
+/// last character, `second` starts after the gap.
+fn two_runs(first: &str, second: &str) -> Vec<TextRun> {
+    let a = run_at(first, 0.0, 100.0, 1);
+    let x = 6.0 * first.chars().count() as f32 + 20.0;
+    vec![a, run_at(second, x, 100.0, 1)]
+}
+
+#[test]
+fn a_wide_gap_after_a_full_stop_in_a_justified_line_parts_no_pieces() {
+    // Word gaps of 12 points: the line is stretched, the 20 after the full stop goes with them.
+    let runs = two_runs(
+        "vitae,  felis.  Curabitur  dictum  mauris.",
+        "Nam  arcu  libero,",
+    );
+    assert_eq!(pieces_of(&runs, 0, runs.len()).len(), 1);
+    assert_eq!(grid::piece_count(&runs, 0, runs.len()), 1);
+}
+
+#[test]
+fn a_wide_gap_stays_a_cell_gap_without_wide_word_gaps_or_a_sentence_end() {
+    // Word gaps of 6 points: 20 is over twice them, two cells.
+    let runs = two_runs("vitae, felis. Curabitur dictum mauris.", "Nam arcu libero,");
+    assert_eq!(pieces_of(&runs, 0, runs.len()).len(), 2);
+    // A number before the full stop is no sentence end ("Sa 1." of a calendar).
+    let runs = two_runs("Sa  1.  So  2.  Mo  3.", "Di  4.  Mi  5.");
+    assert_eq!(pieces_of(&runs, 0, runs.len()).len(), 2);
+    // A small letter after the gap starts no sentence.
+    let runs = two_runs(
+        "vitae,  felis.  Curabitur  dictum  mauris.",
+        "nam  arcu  libero,",
+    );
+    assert_eq!(grid::piece_count(&runs, 0, runs.len()), 2);
+    // Too few word gaps to judge the line by.
+    let runs = two_runs("dictum  mauris.", "Nam  arcu");
+    assert_eq!(pieces_of(&runs, 0, runs.len()).len(), 2);
+}

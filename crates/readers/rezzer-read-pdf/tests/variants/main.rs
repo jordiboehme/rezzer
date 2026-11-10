@@ -633,6 +633,9 @@ fn dump_generated_reads() {
         return;
     };
     let dir = std::path::PathBuf::from(dir);
+    // With `REZZER_ENGINE_DIR` set, the engine report of each variant goes there too, at the
+    // path of its JSON (see `rezzer_read_pdf::engine_report`).
+    let engine = std::env::var_os("REZZER_ENGINE_DIR").map(std::path::PathBuf::from);
     let options = rezzer_render::RenderOptions {
         generated_at: "2026-01-01T00:00:00Z".to_string(),
         rezzer_version: "dump".to_string(),
@@ -660,8 +663,8 @@ fn dump_generated_reads() {
                     page.name, shape.name
                 );
             }
-            let out = common::read_in(
-                &inv::file(&page),
+            let (out, pages) = rezzer_read_pdf::read_engine_pages(
+                &common::source(&inv::file(&page)),
                 &rezzer_model::ReadOptions::default(),
                 &rezzer_limits::Budget::new(limits.clone()),
             );
@@ -670,6 +673,15 @@ fn dump_generated_reads() {
             let name = file_name(&page.name);
             std::fs::write(folder.join(format!("{name}.md")), markdown).unwrap();
             std::fs::write(folder.join(format!("{name}.json")), json).unwrap();
+            if let Some(engine) = &engine {
+                let folder = engine.join(file_name(shape.name));
+                std::fs::create_dir_all(&folder).unwrap();
+                std::fs::write(
+                    folder.join(format!("{name}.json")),
+                    rezzer_read_pdf::engine_report(&pages),
+                )
+                .unwrap();
+            }
         }
     }
 }
@@ -715,60 +727,6 @@ fn generated_region_counts() {
         .collect();
     let moved = layoutregions::moved_lines(&old, &new);
     assert!(moved.is_empty(), "{}", moved.join("\n"));
-}
-
-/// The scored reading beside the in-order one over every sampled variant of every shape (see
-/// `rezzer_read_pdf::shadow`): writes `<dir>/shadow.tsv` (the lines of `region-report
-/// shadow`, each led by `shape/variant`) and `<dir>/records.tsv` (the raw comparison) for the
-/// dir in `REZZER_SHADOW_OUT`. Without the variable it does nothing; the shadow itself needs
-/// a debug build with `REZZER_SHADOW` set. `REZZER_SHADOW_SHAPES`, a comma list of shape
-/// numbers from 0, reads only those shapes.
-#[test]
-#[ignore = "writes files when REZZER_SHADOW_OUT is set"]
-fn shadow_generated_reads() {
-    let Some(dir) = std::env::var_os("REZZER_SHADOW_OUT") else {
-        return;
-    };
-    assert!(
-        std::env::var_os("REZZER_SHADOW").is_some(),
-        "set REZZER_SHADOW as well, in a debug build"
-    );
-    let only: Option<Vec<usize>> = std::env::var("REZZER_SHADOW_SHAPES")
-        .ok()
-        .map(|s| s.split(',').filter_map(|n| n.trim().parse().ok()).collect());
-    let dir = std::path::PathBuf::from(dir);
-    std::fs::create_dir_all(&dir).unwrap();
-    let limits = rezzer_limits::Limits {
-        max_time: std::time::Duration::from_secs(3600),
-        ..rezzer_limits::Limits::default()
-    };
-    let (mut lines, mut records) = (String::new(), String::new());
-    let mut shadowed = 0usize;
-    for (k, shape) in all_shapes().into_iter().enumerate() {
-        if only.as_ref().is_some_and(|o| !o.contains(&k)) {
-            continue;
-        }
-        for page in axes::variants(&shape) {
-            let (_, pages) = rezzer_read_pdf::read_engine_pages(
-                &common::source(&inv::file(&page)),
-                &rezzer_model::ReadOptions::default(),
-                &rezzer_limits::Budget::new(limits.clone()),
-            );
-            let name = format!("{}/{}", file_name(shape.name), file_name(&page.name));
-            for p in &pages {
-                shadowed += usize::from(p.shadow.is_some());
-                for line in rezzer_read_pdf::shadow::lines(p, false) {
-                    lines.push_str(&format!("{name}\t{line}\n"));
-                }
-                for line in rezzer_read_pdf::shadow::records(p) {
-                    records.push_str(&format!("{name}\t{line}\n"));
-                }
-            }
-        }
-    }
-    assert!(shadowed > 0, "no page has a shadow: is this a debug build?");
-    std::fs::write(dir.join("shadow.tsv"), lines).unwrap();
-    std::fs::write(dir.join("records.tsv"), records).unwrap();
 }
 
 /// The detector without rules names its regions by class: a shape of each class, at its first
@@ -841,4 +799,48 @@ fn a_second_table_after_a_blank_row_is_no_totals() {
             assert!(totals.is_empty(), "{}: {totals:?}", page.name);
         }
     }
+}
+
+/// A heading decision whose lines the walk writes as a paragraph for their geometry (bold lines
+/// at heading size, each a short item of one column) is a paragraph region that says why, with
+/// the heading as its alternative: the region says what is written. Every region of kind
+/// heading is written as a heading.
+#[test]
+fn a_heading_written_as_a_paragraph_is_a_paragraph_region() {
+    use layoutregions::Kind;
+    let name = "a column of bold lines at heading size with a box around the middle two";
+    let mut demoted = 0;
+    for page in axes::variants(&shape(name)) {
+        let (out, pages) = common::read_engine_pages(&inv::file(&page));
+        let md = rezzer_render::render(
+            &out.document,
+            out.completeness,
+            &rezzer_render::RenderOptions::default(),
+        );
+        let in_heading = |t: &str| {
+            md.lines()
+                .any(|l| l.starts_with('#') && l.contains(t.trim()))
+        };
+        for p in &pages {
+            for r in &p.regions.regions {
+                let texts = common::region_texts(p, r);
+                if r.kind == Kind::Heading {
+                    assert!(
+                        texts.iter().all(|t| in_heading(t)),
+                        "{name}: heading region {texts:?} not written as a heading in\n{md}"
+                    );
+                }
+                if r.signals.iter().any(|s| s.id == "pdf.walk.demoted") {
+                    demoted += 1;
+                    assert_eq!(r.kind, Kind::Paragraph);
+                    assert_eq!(r.alternatives[0].kind, Kind::Heading);
+                    assert!(
+                        texts.iter().all(|t| !in_heading(t)),
+                        "{name}: {texts:?} in\n{md}"
+                    );
+                }
+            }
+        }
+    }
+    assert!(demoted > 0, "{name}: no heading was written as a paragraph");
 }

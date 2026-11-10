@@ -40,7 +40,7 @@ pub(crate) enum Inv {
     /// Each expected paragraph stands on the page with its lines.
     Paragraph,
     /// Texts that belong to different blocks are not read into one block (P6-X: a block that
-    /// mixes them is a wrong reading order).
+    /// mixes them is a wrong reading order); in a block kept as laid out, not onto one line.
     Apart,
     /// The texts of each drawn cell stand together (and, for a cell the shape lists, in their
     /// order), and no block or table row holds texts of two cells, found by the span each
@@ -74,6 +74,13 @@ pub(crate) enum Inv {
     SameReading,
     /// A variant whose read at scale 1 in the real sizes and fonts has no loss has none.
     NoLoss,
+    /// Every run of a page is in exactly one region (a run in none only on a page whose
+    /// layout stopped, which its limit loss says).
+    Cover,
+    /// Every region's kind is the kind of the block it stands at (its host) and of the blocks
+    /// its runs with ink were written in (figures and codes aside: their media block comes
+    /// later).
+    KindWritten,
 }
 
 impl Inv {
@@ -105,9 +112,89 @@ pub(crate) fn file(page: &Page) -> Vec<u8> {
 /// Reads a variant's file. A table's caption is written as a paragraph of role `caption`
 /// right before it, so that its text is checked and compared as every other text is.
 pub(crate) fn read(page: &Page) -> ReadOutcome {
-    let mut out = crate::common::read(&file(page));
+    read_engine(page).0
+}
+
+/// [`read`] with each page as the region engine laid it out.
+pub(crate) fn read_engine(page: &Page) -> (ReadOutcome, Vec<rezzer_read_pdf::EnginePage>) {
+    let (mut out, pages) = crate::common::read_engine_pages(&file(page));
     out.document.body = hoist(std::mem::take(&mut out.document.body));
-    out
+    (out, pages)
+}
+
+/// The kind of a region whose runs were written in a block of the word `word` (see
+/// [`rezzer_read_pdf::block_word`]), if it says one; whether a region of `kind` agrees with
+/// it.
+fn agrees(kind: layoutregions::Kind, word: &str) -> Option<bool> {
+    use layoutregions::Kind as K;
+    let ok: &[&str] = match kind {
+        K::Figure | K::Code => return None,
+        K::Heading | K::TitleBlock => &["heading"],
+        K::Paragraph => &["paragraph"],
+        K::List => &["list"],
+        K::Table | K::LabelValue | K::Totals => &["table"],
+        K::Spatial => &["spatial"],
+        K::HeaderBand => &["page-header"],
+        K::FooterBand => &["page-footer"],
+        K::FootnoteLegend => &["section", "footnote"],
+    };
+    Some(ok.contains(&word))
+}
+
+/// [`Inv::Cover`] and [`Inv::KindWritten`] over the pages of a read.
+pub(crate) fn check_engine(pages: &[rezzer_read_pdf::EnginePage]) -> Vec<Broken> {
+    let mut broken = Vec::new();
+    for p in pages {
+        let n = p.regions.page;
+        let mut count = vec![0u32; p.input.texts.len()];
+        for r in &p.regions.regions {
+            let mut wrong: Vec<(&str, &str)> = Vec::new();
+            for id in &r.prims {
+                let layoutregions::PrimId::Text(i) = *id else {
+                    continue;
+                };
+                if let Some(c) = count.get_mut(i as usize) {
+                    *c += 1;
+                }
+                let text = p.input.texts[i as usize].text.as_str();
+                if text.trim().is_empty() {
+                    continue;
+                }
+                if let Some(word) = p.run_blocks.get(i as usize).copied().flatten()
+                    && agrees(r.kind, word) == Some(false)
+                {
+                    wrong.push((word, text));
+                }
+            }
+            if !wrong.is_empty() {
+                broken.push(Broken(
+                    Inv::KindWritten,
+                    format!("page {n}: a {} region written as {wrong:?}", r.kind.name()),
+                ));
+            }
+            if let Some(word) = p.block_words.get(r.host as usize)
+                && agrees(r.kind, word) == Some(false)
+            {
+                broken.push(Broken(
+                    Inv::KindWritten,
+                    format!(
+                        "page {n}: a {} region {:?} stands at a {word} block",
+                        r.kind.name(),
+                        r.signals.iter().map(|s| s.id).collect::<Vec<_>>()
+                    ),
+                ));
+            }
+        }
+        let none: Vec<usize> = (0..count.len()).filter(|&i| count[i] == 0).collect();
+        let twice: Vec<usize> = (0..count.len()).filter(|&i| count[i] > 1).collect();
+        if (!none.is_empty() && !p.stopped) || !twice.is_empty() {
+            broken.push(Broken(
+                Inv::Cover,
+                format!("page {n}: runs in no region {none:?}, in two {twice:?}"),
+            ));
+        }
+    }
+    broken
 }
 
 /// `blocks` with each table caption moved into a paragraph before its table.
@@ -384,21 +471,28 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
             ));
         }
     }
+    // A block kept as laid out holds each text where it stands: two texts on two of its
+    // lines, each in its column, are not read into one (ruling on 19a-4), so it is checked
+    // line by line; any other block as a whole.
     for (a, b) in &want.apart {
-        if let Some(bl) = blocks
+        if let Some(t) = blocks
             .iter()
             .filter(|bl| !matches!(bl, Block::Section { .. }))
-            .find(|bl| {
-                let t = block_text(bl);
-                has_words(&t, a) && has_words(&t, b)
+            .flat_map(|bl| match bl {
+                Block::Spatial { lines, .. } => lines
+                    .iter()
+                    .map(|l| {
+                        let pieces: Vec<&str> = l.pieces.iter().map(|p| p.text.as_str()).collect();
+                        collapse(&pieces.join(" "))
+                    })
+                    .collect(),
+                _ => vec![block_text(bl)],
             })
+            .find(|t| has_words(t, a) && has_words(t, b))
         {
             broken.push(Broken(
                 Inv::Apart,
-                format!(
-                    "page {p}: {a:?} and {b:?} stand in one block: {:?}",
-                    block_text(bl)
-                ),
+                format!("page {p}: {a:?} and {b:?} stand in one block: {t:?}"),
             ));
         }
     }
@@ -414,10 +508,23 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
             ));
         }
     }
+    // A line of a block kept as laid out is a line of the read too: the engine keeps a right
+    // read of one short line as laid out where no region type has clear evidence for it
+    // (Task 19, cosmetic; Task 36 makes it a paragraph again), and its words still go on in
+    // one line.
     for (a, b) in &want.lines_joined {
         let one = blocks
             .iter()
-            .flat_map(|bl| lines_of(bl))
+            .flat_map(|bl| match bl {
+                Block::Spatial { lines, .. } => lines
+                    .iter()
+                    .map(|l| {
+                        let pieces: Vec<&str> = l.pieces.iter().map(|p| p.text.as_str()).collect();
+                        collapse(&pieces.join(" "))
+                    })
+                    .collect(),
+                _ => lines_of(bl),
+            })
             .any(|l| has_words(&l, &format!("{a} {b}")));
         if !one {
             broken.push(Broken(
@@ -747,7 +854,7 @@ pub(crate) fn reads(shape: &Shape) -> Reads {
     let (mut uncompared, mut other) = (0, 0);
     let sample: Vec<Page> = variants(shape).collect();
     for page in &sample {
-        let read_out = read(page);
+        let (read_out, engine) = read_engine(page);
         // `VARIANT_DUMP="shape|variant"` prints that read, to look at a break.
         if std::env::var("VARIANT_DUMP").ok() == Some(format!("{}|{}", shape.name, page.name)) {
             eprintln!(
@@ -764,6 +871,7 @@ pub(crate) fn reads(shape: &Shape) -> Reads {
             );
         }
         let mut broken = check_read(&read_out, page);
+        broken.extend(check_engine(&engine));
         let r = page.variant.reference();
         if r != page.variant {
             let mut key = taken(&mut done, shape, &sample, r);

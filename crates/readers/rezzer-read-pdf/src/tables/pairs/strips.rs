@@ -12,10 +12,7 @@ use layoutregions::segment::drawn::{Grids, Line, Unsearched};
 
 use super::*;
 
-/// The note before the first table of fields between rules of a page.
-pub(super) const STRIP_FOUND_BY: &str = "Found by: label and value pairs from rows of fields \
-     between drawn rules; each label is the smaller text and pairs with the value beside it or \
-     under it.";
+pub(super) use crate::found::STRIP_FOUND_BY;
 
 /// Lines a strip of fields between two rules may hold; a taller one is text, not fields.
 const STRIP_LINES: usize = 40;
@@ -718,6 +715,7 @@ pub(in crate::tables) fn field_strips(
             }
         };
         let under: Vec<Field>;
+        let stack = matches!(found, Ends::Under(..));
         let list: Vec<&Field> = match found {
             Ends::Over => list,
             Ends::Under(above, below) => {
@@ -780,7 +778,14 @@ pub(in crate::tables) fn field_strips(
             read_cells(flow, by_y, &strips[k], busy, apart);
         }
         let top = strips[g[0]].top;
-        let Some(mut p) = pairs_table(flow, &list, top, (STRIP_FOUND_BY, Detector::Strips)) else {
+        // A group read with its labels under their values is a stack: a pre-pass of its own
+        // (see `layout::today`).
+        let by = if stack {
+            Detector::StripStack
+        } else {
+            Detector::Strips
+        };
+        let Some(mut p) = pairs_table(flow, &list, top, (STRIP_FOUND_BY, by)) else {
             continue;
         };
         p.drawn = union(g.iter().map(|&k| {

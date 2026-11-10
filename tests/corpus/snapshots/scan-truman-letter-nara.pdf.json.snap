@@ -1,5 +1,6 @@
 ---
 source: crates/rezzer/tests/corpus.rs
+assertion_line: 294
 ---
 {
   "assets": [
@@ -97,13 +98,14 @@ source: crates/rezzer/tests/corpus.rs
       "certainty": "rule",
       "evidence": [
         {
-          "id": "pdf.pictures",
+          "detail": "a picture",
+          "id": "figure.picture",
           "kind": "rule"
         }
       ],
       "kind": "figure",
       "page": 1,
-      "score": 1000
+      "score": 550
     }
   ],
   "source": {

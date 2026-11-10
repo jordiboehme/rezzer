@@ -18,7 +18,7 @@ format: pdf
 detected_by: "pdf header %PDF-"
 reader: "pdf/0.1.0"
 completeness: complete
-losses: 0
+losses: 3
 pages: 1
 tagged: false
 encrypted: false
@@ -51,14 +51,20 @@ title_from: "largest heading in the top third of page 1"
 
 ## Example for a Form
 
-First Name Last Name\
+```text
+First Name                   Last Name
 Birthday
+```
 
+```text
 Gender:
+```
 
 Female Male
 
+```text
 Nationality:
+```
 
 Agree to privacy policy Other
 
@@ -76,3 +82,11 @@ Agree to privacy policy Other
 | other | checkbox | input | Off |  |  |  |  |
 | First Name\_2 | text | input | Bob |  |  |  | multiline |
 | Nationality | combo | input |  |  |  |  |  |
+
+## Not read
+
+| Where | What | Why | Severity |
+| --- | --- | --- | --- |
+| p1:b2 | the region at p1:b2 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p1:b3 | the region at p1:b3 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p1:b5 | the region at p1:b5 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |

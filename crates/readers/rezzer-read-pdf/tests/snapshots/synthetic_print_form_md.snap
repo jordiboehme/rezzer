@@ -5,7 +5,7 @@ expression: md
 ---
 type: source
 title: "Entgeltabrechnung"
-description: "PDF, 2 pages, \"Entgeltabrechnung\", 2026-10-01. 8 tables."
+description: "PDF, 2 pages, \"Entgeltabrechnung\", 2026-10-01. 10 tables."
 resource: "file.pdf"
 tags: ["rezzer", "pdf"]
 generated: { by: rezzer/, at: "" }
@@ -81,7 +81,9 @@ Zahltag
 
 28\.02.2026
 
-Auszahlungsbetrag\* 1.234,56
+|  |  |
+| --- | --- |
+| Auszahlungsbetrag\* | 1.234,56 |
 
 \* nach Abzug der Steuern\
 \*\* ohne Rundung
@@ -130,7 +132,9 @@ Zahltag
 
 31\.03.2026
 
-Auszahlungsbetrag\* 2.345,67
+|  |  |
+| --- | --- |
+| Auszahlungsbetrag\* | 2.345,67 |
 
 \* nach Abzug der Steuern\
 \*\* ohne Rundung

@@ -123,6 +123,8 @@ pub(crate) enum Detector {
     Banded,
     /// Rows of fields between drawn rules.
     Strips,
+    /// Rows of fields between drawn rules whose labels stand under their values (a stack).
+    StripStack,
     /// Without rules: the totals under a table, parted from it by the rule that ends it.
     TotalsUnder,
     /// Without rules: a line of titles over one line of values.
@@ -133,22 +135,28 @@ pub(crate) enum Detector {
     KeyValues,
     /// Without rules: any other grid of white space gutters.
     Grid,
+    /// The lines of a label and its value of a line pairs decision of the region engine,
+    /// parted by the typer's line pair rule (no reader of today).
+    LinePairs,
 }
 
 impl Detector {
     /// Every detector, in the order the page runs them.
-    pub(crate) const ALL: [Detector; 11] = [
+    #[cfg(test)]
+    pub(crate) const ALL: [Detector; 13] = [
         Detector::Tagged,
         Detector::BoxPairs,
         Detector::SideTotals,
         Detector::Ruled,
         Detector::Banded,
         Detector::Strips,
+        Detector::StripStack,
         Detector::TotalsUnder,
         Detector::LabelsOverValues,
         Detector::SideBlocks,
         Detector::KeyValues,
         Detector::Grid,
+        Detector::LinePairs,
     ];
 
     /// The signal id of its regions.
@@ -160,11 +168,13 @@ impl Detector {
             Detector::Ruled => "pdf.ruled",
             Detector::Banded => "pdf.banded",
             Detector::Strips => "pdf.strips",
+            Detector::StripStack => "pdf.strip_stack",
             Detector::TotalsUnder => "pdf.borderless.totals_under",
             Detector::LabelsOverValues => "pdf.borderless.labels_over_values",
             Detector::SideBlocks => "pdf.borderless.side_blocks",
             Detector::KeyValues => "pdf.borderless.key_values",
             Detector::Grid => "pdf.borderless.grid",
+            Detector::LinePairs => "pdf.line_pairs",
         }
     }
 
@@ -174,27 +184,15 @@ impl Detector {
         use layoutregions::Kind;
         match self {
             Detector::SideTotals | Detector::TotalsUnder => Kind::Totals,
-            Detector::LabelsOverValues | Detector::SideBlocks | Detector::KeyValues => {
-                Kind::LabelValue
-            }
+            Detector::LabelsOverValues
+            | Detector::SideBlocks
+            | Detector::KeyValues
+            | Detector::LinePairs => Kind::LabelValue,
             // A ruled section a column of totals joins keeps its column titles over its rows:
             // a table, though the layout reads its rows as labels and values.
             Detector::Ruled | Detector::Banded | Detector::Grid => Kind::Table,
-            Detector::Tagged | Detector::BoxPairs | Detector::Strips => kind,
+            Detector::Tagged | Detector::BoxPairs | Detector::Strips | Detector::StripStack => kind,
         }
-    }
-
-    /// Whether it runs on the tables without rules: its tables come after those of the rules
-    /// in the page's order of detectors, but among them by their place on the page.
-    pub(crate) fn borderless(self) -> bool {
-        matches!(
-            self,
-            Detector::TotalsUnder
-                | Detector::LabelsOverValues
-                | Detector::SideBlocks
-                | Detector::KeyValues
-                | Detector::Grid
-        )
     }
 }
 
@@ -273,6 +271,10 @@ pub(crate) struct Found {
     /// ruled pass puts them so in the flow, each cell's lines together and apart from the next
     /// cell's.
     pub apart: Vec<Vec<Vec<usize>>>,
+    /// The cells of the rows of fields of `apart` as the ruled pass put them in the flow: the
+    /// ids of each cell's runs (see [`Flow::ids`]). Each cell is a block of its own: its lines
+    /// go on no line of another cell.
+    pub cells: Vec<Vec<u32>>,
     /// Grids, bands, regions, rows of fields and boxes refused with a note or a loss that
     /// keep their text as it stands: the ids of their runs (see [`Flow::ids`]) and why.
     pub doubts: Doubts,
@@ -413,11 +415,30 @@ pub(crate) fn untagged(
     height: f32,
     stop: &dyn Fn() -> bool,
 ) -> Found {
+    untagged_marked(page, flow, drawn, segments, height, stop).0
+}
+
+/// How much of each list of a [`Found`] the readers on drawn rules made: what follows is the
+/// readers' without rules.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Ruled {
+    pub unsure: usize,
+    pub skipped: usize,
+    pub uncertain: usize,
+    pub quiet: usize,
+    pub doubts: usize,
+}
+
+/// [`untagged`], with how much of each list the readers on drawn rules made.
+pub(crate) fn untagged_marked(
+    page: u32,
+    flow: &mut Flow,
+    drawn: &Drawn<'_>,
+    segments: &Segments,
+    height: f32,
+    stop: &dyn Fn() -> bool,
+) -> (Found, Ruled) {
     let mut found = Found::default();
-    // On a page with form fields, boxes and aligned labels are the form.
-    if !drawn.widgets.is_empty() {
-        return found;
-    }
     let area = Area {
         width: drawn.width,
         height,
@@ -437,8 +458,15 @@ pub(crate) fn untagged(
             &mut found,
         );
     }
+    let mark = Ruled {
+        unsure: found.unsure.len(),
+        skipped: found.skipped.len(),
+        uncertain: found.uncertain.len(),
+        quiet: found.quiet.len(),
+        doubts: found.doubts.len(),
+    };
     borderless::borderless(page, flow, &table_areas(segments), &area, stop, &mut found);
-    found
+    (found, mark)
 }
 
 /// The horizontal rules of `rules`, sorted by height: lines with their collinear pieces

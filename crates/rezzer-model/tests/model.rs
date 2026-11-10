@@ -1316,13 +1316,16 @@ fn spatial_round_trips_json() {
                 SpatialPiece {
                     col: 0,
                     text: "Name".into(),
+                    spans: Vec::new(),
                 },
                 SpatialPiece {
                     col: 12,
                     text: "Betrag".into(),
+                    spans: Vec::new(),
                 },
             ],
         }],
+        links: Vec::new(),
         anchor: None,
     };
     let v = serde_json::to_value(&block).unwrap();

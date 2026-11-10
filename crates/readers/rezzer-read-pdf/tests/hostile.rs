@@ -858,7 +858,8 @@ fn a_long_link_over_many_runs_is_bounded() {
         "{:?}",
         out.document.losses
     );
-    // The runs under the link make one link per paragraph, each with one copy of its target.
+    // The runs under the link make one link per paragraph, each with one copy of its target;
+    // a block kept as laid out holds each of its targets once.
     assert_eq!(
         out.completeness,
         Completeness::Complete,
@@ -872,6 +873,9 @@ fn a_long_link_over_many_runs_is_bounded() {
                 .iter()
                 .filter(|i| matches!(i, rezzer_model::Inline::Link { .. }))
                 .count();
+        }
+        if let Block::Spatial { links: targets, .. } = b {
+            links += targets.len();
         }
     }
     assert!((1..=2).contains(&links), "{links} links");

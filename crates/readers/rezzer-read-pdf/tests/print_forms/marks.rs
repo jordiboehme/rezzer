@@ -253,7 +253,7 @@ fn leader_dots_are_not_separators() {
         "{text}"
     );
     assert!(found_by(&out).is_empty());
-    assert_no_loss(&out);
+    assert_no_loss_but_laid_out(&out, &["p1:b1"]);
 }
 
 /// Guard: a decimal comma printed as text with a mark under it is written once.

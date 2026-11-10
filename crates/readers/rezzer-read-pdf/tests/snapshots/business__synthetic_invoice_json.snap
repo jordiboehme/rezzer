@@ -548,19 +548,34 @@ expression: json
           "anchor": "p1:b3"
         },
         {
-          "type": "paragraph",
-          "inlines": [
-            {
-              "type": "text",
-              "text": "Bestellnummer:",
-              "strong": true
-            },
-            {
-              "type": "text",
-              "text": " 00000"
-            }
+          "type": "table",
+          "header_rows": 0,
+          "rows": [
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Bestellnummer:",
+                    "strong": true
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "00000"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ]
           ],
-          "anchor": "p1:b4"
+          "anchor": "p1:t4"
         },
         {
           "type": "paragraph",
@@ -570,7 +585,7 @@ expression: json
               "text": "Lieferbedingungen: die Muster GmbH liefert die bestellte Ware frei Haus an die genannte Anschrift, sofern nichts anderes vereinbart ist. Teillieferungen sind zulaessig und werden einzeln berechnet. Die Ware bleibt bis zur vollstaendigen Bezahlung Eigentum der Muster GmbH. Zahlungsbedingungen: der Betrag ist ohne Abzug innerhalb von vierzehn Tagen nach Erhalt der Rechnung zu zahlen. Bei Zahlung innerhalb von sieben Tagen gewaehren wir zwei Prozent Skonto auf den Warenwert. Mahnungen werden mit einer Gebuehr berechnet. Bitte geben Sie bei jeder Zahlung die Rechnungsnummer an, damit wir den Betrag richtig zuordnen koennen. Fragen zur Rechnung beantwortet Ihnen gern unser Kundenservice an allen Werktagen. Es gelten unsere allgemeinen Bedingungen."
             }
           ],
-          "anchor": "p1:b5"
+          "anchor": "p1:b4"
         },
         {
           "type": "media",
@@ -599,7 +614,7 @@ expression: json
               "text": "12345 Musterstadt"
             }
           ],
-          "anchor": "p1:b6"
+          "anchor": "p1:b5"
         },
         {
           "type": "media",
@@ -628,7 +643,7 @@ expression: json
               "text": "BIC MUSTDEXXXXX"
             }
           ],
-          "anchor": "p1:b7"
+          "anchor": "p1:b6"
         },
         {
           "type": "paragraph",
@@ -652,7 +667,7 @@ expression: json
               "text": "Geschäftsführung Erika Mustermann"
             }
           ],
-          "anchor": "p1:b8"
+          "anchor": "p1:b7"
         }
       ]
     },
@@ -811,7 +826,7 @@ expression: json
       "kind": "label_value",
       "bounds": [
         360.0,
-        644.0,
+        646.0,
         470.02,
         676.0
       ],
@@ -820,7 +835,8 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.borderless.key_values"
+          "id": "pdf.borderless.key_values",
+          "detail": "read by today's reader of its class"
         }
       ]
     },
@@ -830,7 +846,7 @@ expression: json
       "kind": "table",
       "bounds": [
         40.0,
-        567.33,
+        570.0,
         540.0,
         608.0
       ],
@@ -839,7 +855,8 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.borderless.grid"
+          "id": "pdf.borderless.grid",
+          "detail": "read by today's reader of its class"
         }
       ]
     },
@@ -849,7 +866,7 @@ expression: json
       "kind": "totals",
       "bounds": [
         340.0,
-        533.33,
+        536.0,
         540.0,
         564.0
       ],
@@ -858,83 +875,8 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.borderless.totals_under"
-        }
-      ]
-    },
-    {
-      "anchor": "p1:b1",
-      "page": 1,
-      "kind": "paragraph",
-      "bounds": [
-        40.0,
-        725.0,
-        118.53,
-        759.0
-      ],
-      "certainty": "rule",
-      "score": 1000,
-      "evidence": [
-        {
-          "kind": "rule",
-          "id": "pdf.lines"
-        }
-      ]
-    },
-    {
-      "anchor": "p1:b2",
-      "page": 1,
-      "kind": "heading",
-      "bounds": [
-        40.0,
-        665.5,
-        84.0,
-        677.5
-      ],
-      "certainty": "rule",
-      "score": 1000,
-      "evidence": [
-        {
-          "kind": "rule",
-          "id": "pdf.lines"
-        }
-      ]
-    },
-    {
-      "anchor": "p1:b3",
-      "page": 1,
-      "kind": "paragraph",
-      "bounds": [
-        40.0,
-        498.0,
-        331.58,
-        521.0
-      ],
-      "certainty": "rule",
-      "score": 1000,
-      "evidence": [
-        {
-          "kind": "rule",
-          "id": "pdf.lines"
-        }
-      ]
-    },
-    {
-      "anchor": "p1:b4",
-      "page": 1,
-      "kind": "paragraph",
-      "bounds": [
-        40.0,
-        479.0,
-        135.54,
-        491.0
-      ],
-      "certainty": "rule",
-      "score": 1000,
-      "evidence": [
-        {
-          "kind": "rule",
-          "id": "pdf.lines"
+          "id": "pdf.borderless.totals_under",
+          "detail": "read by today's reader of its class"
         }
       ]
     },
@@ -944,64 +886,7 @@ expression: json
       "kind": "paragraph",
       "bounds": [
         40.0,
-        375.77,
-        297.57,
-        467.0
-      ],
-      "certainty": "rule",
-      "score": 1000,
-      "evidence": [
-        {
-          "kind": "rule",
-          "id": "pdf.lines"
-        }
-      ]
-    },
-    {
-      "anchor": "p1:b6",
-      "page": 1,
-      "kind": "paragraph",
-      "bounds": [
-        40.0,
-        82.0,
-        89.69,
-        106.0
-      ],
-      "certainty": "rule",
-      "score": 1000,
-      "evidence": [
-        {
-          "kind": "rule",
-          "id": "pdf.lines"
-        }
-      ]
-    },
-    {
-      "anchor": "p1:b7",
-      "page": 1,
-      "kind": "paragraph",
-      "bounds": [
-        230.0,
-        82.0,
-        329.07,
-        106.0
-      ],
-      "certainty": "rule",
-      "score": 1000,
-      "evidence": [
-        {
-          "kind": "rule",
-          "id": "pdf.lines"
-        }
-      ]
-    },
-    {
-      "anchor": "p1:b8",
-      "page": 1,
-      "kind": "paragraph",
-      "bounds": [
-        420.0,
-        82.0,
+        84.0,
         517.7,
         106.0
       ],
@@ -1010,7 +895,151 @@ expression: json
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.lines"
+          "id": "pdf.borderless.refused",
+          "detail": "blocks of short lines side by side are read one block after the other: their lines may be rows of a table or labels beside values"
+        }
+      ]
+    },
+    {
+      "anchor": "p1:b1",
+      "page": 1,
+      "kind": "paragraph",
+      "bounds": [
+        40.0,
+        728.0,
+        118.53,
+        759.0
+      ],
+      "certainty": "rule",
+      "score": 800,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "paragraph.lines_apart",
+          "detail": "lines of a heading size are short items or fields"
+        }
+      ],
+      "alternatives": [
+        {
+          "kind": "heading",
+          "score": 550
+        }
+      ]
+    },
+    {
+      "anchor": "p1:b2",
+      "page": 1,
+      "kind": "title_block",
+      "bounds": [
+        40.0,
+        668.5,
+        84.0,
+        677.5
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "title_block.largest_heading",
+          "detail": "the largest heading in the head of page 1"
+        },
+        {
+          "kind": "rule",
+          "id": "title_block.top_third",
+          "detail": "its top 0.20 of the page height from the top"
+        }
+      ],
+      "alternatives": [
+        {
+          "kind": "heading",
+          "score": 750
+        }
+      ]
+    },
+    {
+      "anchor": "p1:b3",
+      "page": 1,
+      "kind": "paragraph",
+      "bounds": [
+        40.0,
+        501.0,
+        331.58,
+        521.0
+      ],
+      "certainty": "rule",
+      "score": 800,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "paragraph.sentences_demoted",
+          "detail": "lines a little larger than the body read as sentences"
+        }
+      ],
+      "alternatives": [
+        {
+          "kind": "heading",
+          "score": 550
+        }
+      ]
+    },
+    {
+      "anchor": "p1:t4",
+      "page": 1,
+      "kind": "label_value",
+      "bounds": [
+        40.0,
+        482.0,
+        135.54,
+        491.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "label_value.line_pairs",
+          "detail": "1 lines of a short label and its value"
+        },
+        {
+          "kind": "rule",
+          "id": "label_value.colon",
+          "detail": "the labels end with a colon"
+        },
+        {
+          "kind": "rule",
+          "id": "label_value.value_shape",
+          "detail": "the values are numbers, dates or codes"
+        }
+      ]
+    },
+    {
+      "anchor": "p1:b4",
+      "page": 1,
+      "kind": "paragraph",
+      "bounds": [
+        40.0,
+        378.1,
+        297.57,
+        467.0
+      ],
+      "certainty": "rule",
+      "score": 750,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "paragraph.text_size",
+          "detail": "set in a text size of the page"
+        },
+        {
+          "kind": "rule",
+          "id": "paragraph.joins",
+          "detail": "9 lines go on the line over them"
+        },
+        {
+          "kind": "rule",
+          "id": "paragraph.sentences",
+          "detail": "the lines read as sentences"
         }
       ]
     },
@@ -1025,11 +1054,12 @@ expression: json
         820.0
       ],
       "certainty": "rule",
-      "score": 1000,
+      "score": 550,
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.pictures"
+          "id": "figure.picture",
+          "detail": "a picture"
         }
       ]
     },
@@ -1044,16 +1074,17 @@ expression: json
         732.0
       ],
       "certainty": "rule",
-      "score": 1000,
+      "score": 550,
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.pictures"
+          "id": "figure.picture",
+          "detail": "a picture"
         }
       ]
     },
     {
-      "anchor": "p1:b7",
+      "anchor": "p1:b6",
       "page": 1,
       "kind": "figure",
       "bounds": [
@@ -1063,16 +1094,17 @@ expression: json
         60.0
       ],
       "certainty": "rule",
-      "score": 1000,
+      "score": 550,
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.pictures"
+          "id": "figure.picture",
+          "detail": "a picture"
         }
       ]
     },
     {
-      "anchor": "p1:b6",
+      "anchor": "p1:b5",
       "page": 1,
       "kind": "code",
       "bounds": [
@@ -1082,30 +1114,12 @@ expression: json
         140.0
       ],
       "certainty": "rule",
-      "score": 1000,
+      "score": 700,
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.codes"
-        }
-      ]
-    },
-    {
-      "anchor": "p2:b1",
-      "page": 2,
-      "kind": "paragraph",
-      "bounds": [
-        40.0,
-        697.0,
-        185.09,
-        709.0
-      ],
-      "certainty": "rule",
-      "score": 1000,
-      "evidence": [
-        {
-          "kind": "rule",
-          "id": "pdf.lines"
+          "id": "code.symbol",
+          "detail": "1 codes"
         }
       ]
     },
@@ -1115,59 +1129,27 @@ expression: json
       "kind": "paragraph",
       "bounds": [
         40.0,
-        82.0,
-        89.69,
-        106.0
-      ],
-      "certainty": "rule",
-      "score": 1000,
-      "evidence": [
-        {
-          "kind": "rule",
-          "id": "pdf.lines"
-        }
-      ]
-    },
-    {
-      "anchor": "p2:b3",
-      "page": 2,
-      "kind": "paragraph",
-      "bounds": [
-        230.0,
-        82.0,
-        329.07,
-        106.0
-      ],
-      "certainty": "rule",
-      "score": 1000,
-      "evidence": [
-        {
-          "kind": "rule",
-          "id": "pdf.lines"
-        }
-      ]
-    },
-    {
-      "anchor": "p2:b4",
-      "page": 2,
-      "kind": "paragraph",
-      "bounds": [
-        420.0,
-        82.0,
+        84.0,
         517.7,
-        106.0
+        709.0
       ],
       "certainty": "rule",
-      "score": 1000,
+      "score": 450,
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.lines"
+          "id": "paragraph.joins",
+          "detail": "6 lines go on the line over them"
+        },
+        {
+          "kind": "rule",
+          "id": "paragraph.sentences",
+          "detail": "the lines read as sentences"
         }
       ]
     },
     {
-      "anchor": "p2:b1",
+      "anchor": "p2:b2",
       "page": 2,
       "kind": "figure",
       "bounds": [
@@ -1177,16 +1159,23 @@ expression: json
         820.0
       ],
       "certainty": "rule",
-      "score": 1000,
+      "score": 550,
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.pictures"
+          "id": "figure.picture",
+          "detail": "a picture"
+        }
+      ],
+      "alternatives": [
+        {
+          "kind": "paragraph",
+          "score": 450
         }
       ]
     },
     {
-      "anchor": "p2:b1",
+      "anchor": "p2:b2",
       "page": 2,
       "kind": "figure",
       "bounds": [
@@ -1196,11 +1185,18 @@ expression: json
         732.0
       ],
       "certainty": "rule",
-      "score": 1000,
+      "score": 550,
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.pictures"
+          "id": "figure.picture",
+          "detail": "a picture"
+        }
+      ],
+      "alternatives": [
+        {
+          "kind": "paragraph",
+          "score": 450
         }
       ]
     },
@@ -1215,11 +1211,18 @@ expression: json
         60.0
       ],
       "certainty": "rule",
-      "score": 1000,
+      "score": 550,
       "evidence": [
         {
           "kind": "rule",
-          "id": "pdf.pictures"
+          "id": "figure.picture",
+          "detail": "a picture"
+        }
+      ],
+      "alternatives": [
+        {
+          "kind": "paragraph",
+          "score": 450
         }
       ]
     }

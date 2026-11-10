@@ -125,6 +125,43 @@ fn prose_page_keeps_its_paragraphs(figure: &str) {
             _ => None,
         })
         .collect();
+    // Task 19a-5b: with the frame on the page the engine may keep the prose as laid out (no
+    // region type has clear evidence for it; a right read turned Spatial, Task 36): then its
+    // lines stand in order, each once, and no table or pair is read from them.
+    let laid_out: Vec<String> = blocks(&out)
+        .iter()
+        .filter_map(|b| match b {
+            Block::Spatial { lines, .. } => Some(lines.iter().map(|l| {
+                l.pieces
+                    .iter()
+                    .map(|p| p.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    if !figure.is_empty() && paragraphs.iter().all(|p| !p.contains(lines[0])) {
+        let at: Vec<usize> = lines
+            .iter()
+            .map(|l| {
+                let found: Vec<usize> =
+                    (0..laid_out.len()).filter(|&k| laid_out[k] == *l).collect();
+                assert_eq!(found.len(), 1, "{l}: {laid_out:#?}");
+                found[0]
+            })
+            .collect();
+        assert!(at.windows(2).all(|w| w[0] < w[1]), "{laid_out:#?}");
+        assert!(
+            blocks(&out)
+                .iter()
+                .all(|b| !matches!(b, Block::Table { .. })),
+            "{:#?}",
+            blocks(&out)
+        );
+        return;
+    }
     for (a, b) in [(0, 2), (3, 5)] {
         assert!(
             paragraphs
@@ -259,7 +296,8 @@ fn region_ids_name_their_runs_on_a_reordered_page() {
         page.regions
             .regions
             .iter()
-            .filter(|r| r.signals[0].id == id)
+            // A region of rules alone (no text) is spatial with no signal.
+            .filter(|r| r.signals.first().is_some_and(|s| s.id == id))
             .map(|r| common::region_texts(page, r))
             .collect()
     };
@@ -273,8 +311,17 @@ fn region_ids_name_their_runs_on_a_reordered_page() {
             "123456 78901"
         ]]
     );
+    // The text around the strip: the fields the ruled pass refused and the lines under them,
+    // each a paragraph region of its own (Task 19: by their typers, no longer `pdf.lines`).
+    let paragraphs: Vec<Vec<&str>> = page
+        .regions
+        .regions
+        .iter()
+        .filter(|r| r.kind == rezzer_read_pdf::layoutregions::Kind::Paragraph)
+        .map(|r| common::region_texts(page, r))
+        .collect();
     assert_eq!(
-        by("pdf.lines"),
+        paragraphs,
         [
             vec![" Satz", " Gr C"],
             vec!["Summe 9.876,54", "Netto 1.234,56"]
@@ -2197,4 +2244,45 @@ fn a_block_of_fields_beside_a_refused_grid_pairs_on_its_own() {
         wrong.len(),
         wrong.join("\n")
     );
+}
+
+/// Review focus 3 (Task 19): on a page with form fields, the boxes of the fields are the
+/// form's regions, given by the file. Boxed labels stand over the fields and each field shows
+/// its value, but no rule reads label and value pairs or a table over them: the page has no
+/// `label_value` region, and each value the fields show stands once in the text.
+#[test]
+fn widget_page_gets_no_geometric_pairs() {
+    let labels = ["Personalnummer", "Eintritt", "Steuerklasse"];
+    let values = ["00000", "01.01.2020", "4"];
+    let mut page = common::FormPage::default();
+    for (k, x) in [40.0f32, 160.0, 280.0].into_iter().enumerate() {
+        page.template += &common::boxed(x, 700.0, 120.0, 24.0);
+        page.template += &label(x + 3.0, 716.0, 6.0, labels[k]);
+        page.template += &draw::courier(x + 5.0, 703.0, 10.0, values[k]);
+        page.annots.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (f{k}) /V ({}) /Rect [{} 701 {} 712] >>",
+            values[k],
+            x + 2.0,
+            x + 118.0
+        ));
+    }
+    let bytes = common::print_form(
+        std::slice::from_ref(&page),
+        "",
+        "/AcroForm << /Fields [{annots}] >>",
+    );
+    let (out, pages) = common::read_regions(&bytes);
+    let pairs: Vec<_> = pages
+        .iter()
+        .flat_map(|p| &p.regions)
+        .filter(|r| r.kind == rezzer_read_pdf::layoutregions::Kind::LabelValue)
+        .collect();
+    assert!(pairs.is_empty(), "{pairs:#?}");
+    let text = all_text(&out);
+    for v in values {
+        assert_eq!(text.matches(v).count(), 1, "{v} in {text}");
+    }
+    for l in labels {
+        assert!(text.contains(l), "{l} in {text}");
+    }
 }

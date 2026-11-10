@@ -19,10 +19,7 @@ use layoutregions::extract::pairs::Field;
 /// this wide. Relative to the text, so a form printed larger or smaller reads the same.
 pub(super) const SIDE_GAP: f32 = 1.0;
 
-/// The note before the first table on a page the column of totals adds to.
-pub(super) const SIDE_FOUND_BY: &str = "Found by: a column of amounts beside a table, drawn with \
-     rules that line up with the table's rules; its amounts are read as one more column of the \
-     table, and each total label in it pairs with the amount under it.";
+pub(crate) use crate::found::SIDE_FOUND_BY;
 
 /// Rules one page may look at for columns of totals; past them none is looked for.
 pub(super) const SIDE_WORK: usize = 1_000_000;

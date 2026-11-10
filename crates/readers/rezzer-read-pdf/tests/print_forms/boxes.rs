@@ -544,6 +544,37 @@ fn framed_box_title_heads_its_lines() {
     }
 }
 
+/// Fix round 2 of Task 19 (N3): each line under a box title is a paragraph of its own, and
+/// its runs are written in that paragraph, not all in the first one after the heading.
+#[test]
+fn each_line_under_a_box_title_is_written_in_its_own_paragraph() {
+    for title_box in [false, true] {
+        let (_, pages) = common::read_engine_pages(&print_form(&[titled_box(title_box)], "", ""));
+        let p = &pages[0];
+        let block_of = |word: &str| -> Vec<Option<usize>> {
+            p.input
+                .texts
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| r.text.contains(word))
+                .map(|(i, _)| p.run_block_at[i])
+                .collect()
+        };
+        let first = block_of("Abschlag");
+        let second = block_of("Restbetrag");
+        assert!(
+            !first.is_empty() && !second.is_empty(),
+            "title box {title_box}"
+        );
+        let (Some(a), Some(b)) = (first[0], second[0]) else {
+            panic!("title box {title_box}: {first:?} {second:?}");
+        };
+        assert_eq!(p.block_words[a], "paragraph", "title box {title_box}");
+        assert_eq!(p.block_words[b], "paragraph", "title box {title_box}");
+        assert!(b > a, "title box {title_box}: {first:?} {second:?}");
+    }
+}
+
 /// A header band of four drawn cells, and under it value lines padded into its columns with
 /// one or two spaces between two fields, each line one run of the data font: each line is cut
 /// at the band's column edges where a word gap lies there, and the lines are the band's rows.

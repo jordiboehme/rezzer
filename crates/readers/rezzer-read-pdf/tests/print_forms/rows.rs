@@ -293,7 +293,7 @@ fn a_column_of_totals_joins_its_section() {
         notes[0].contains("column of amounts beside a table"),
         "{notes:?}"
     );
-    assert_no_loss(&out);
+    assert_no_loss_but_laid_out(&out, &["p1:b1"]);
 }
 
 /// Guard: a column with sides of its own is a box, not a column of the section.
@@ -426,7 +426,7 @@ fn a_column_rule_cuts_a_run_only_between_words() {
         "{found:#?}"
     );
     assert_eq!(read_header_rows(&out), [1]);
-    assert_no_loss(&out);
+    assert_no_loss_but_laid_out(&out, &["p1:b1"]);
 }
 
 /// A value line that fills two of nine fields is still the section's row: its empty fields
@@ -511,7 +511,7 @@ fn values_running_into_the_next_field_keep_the_section() {
         ["Muster", "ABCDEFGH", "", "IJKLMNOP", "Z"],
         "{found:#?}"
     );
-    assert_no_loss(&out);
+    assert_no_loss_but_laid_out(&out, &["p1:b1"]);
 }
 
 /// A note of prose across the columns under a header of hanging rules is not cut at them: it
@@ -533,7 +533,7 @@ fn a_note_across_an_open_row_stays_whole() {
     assert_eq!(found[0].last(), Some(&vec![note.to_string()]), "{found:#?}");
     // The value line of the same row keeps its columns.
     assert_eq!(found[0][1], ["Muster", "ABCD", "11", "", ""], "{found:#?}");
-    assert_no_loss(&out);
+    assert_no_loss_but_laid_out(&out, &["p1:b1"]);
 }
 
 /// A name of four words that runs on into the next field inside a word, on a line with its
@@ -562,7 +562,7 @@ fn a_long_name_beside_its_code_is_no_note() {
         ["045", "Zulage fuer Muster Bezug", "", "Z", "X", "Y"],
         "{found:#?}"
     );
-    assert_no_loss(&out);
+    assert_no_loss_but_laid_out(&out, &["p1:b1"]);
 }
 
 /// A sentence whose every crossed column rule falls in a gap between its words is cut there:
@@ -623,7 +623,7 @@ fn a_note_of_two_lines_is_one_cell() {
         ["Bitte die Hinweise auf der Rueckseite beachten und die Frist einhalten"],
         "{found:#?}"
     );
-    assert_no_loss(&out);
+    assert_no_loss_but_laid_out(&out, &["p1:b1"]);
 }
 
 /// A value alone on the line below a note does not go on the note: it is no sentence, and
@@ -652,7 +652,7 @@ fn a_value_below_a_note_stays_its_own_row() {
         "{found:#?}"
     );
     assert_eq!(found[0][3], ["Muster A", "", "", "", ""], "{found:#?}");
-    assert_no_loss(&out);
+    assert_no_loss_but_laid_out(&out, &["p1:b1"]);
 }
 
 /// The rows of fields between rules of [`super::boxes::field_rows`] are regions of labels and
@@ -665,7 +665,8 @@ fn strip_pairs_are_label_value() {
     let found: Vec<(rezzer_read_pdf::layoutregions::Kind, &str)> = pages
         .iter()
         .flat_map(|p| &p.regions)
-        .filter(|r| r.signals[0].id == "pdf.strips")
+        // A region of rules alone (no text) is spatial with no signal.
+        .filter(|r| r.signals.first().is_some_and(|s| s.id == "pdf.strips"))
         .map(|r| (r.kind, r.signals[0].detail.as_str()))
         .collect();
     // Two tables: the rows above and below the row read as text.

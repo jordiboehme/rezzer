@@ -1,5 +1,6 @@
 ---
 source: crates/rezzer/tests/corpus.rs
+assertion_line: 295
 ---
 ---
 type: source
@@ -18,7 +19,7 @@ format: pdf
 detected_by: "pdf header %PDF-"
 reader: "pdf/0.1.0"
 completeness: partial
-losses: 7
+losses: 8
 pages: 1
 tagged: true
 encrypted: false
@@ -126,13 +127,16 @@ Commerzbank
 
 Account holder:  Max Mustermann
 
+```text
 Page 1/1
+```
 
 ## Not read
 
 | Where | What | Why | Severity |
 | --- | --- | --- | --- |
 | p1 | 1 date stands in the head of page 1; it is not marked as the document date | uncertain | info |
+| p1:b30 | the region at p1:b30 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
 | structure tree | the role map has a loop at Figure | damaged | warning |
 | structure tree | the role map has a loop at Document | damaged | warning |
 | structure tree | the role map has a loop at Table | damaged | warning |

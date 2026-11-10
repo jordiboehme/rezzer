@@ -5,7 +5,7 @@ expression: md
 ---
 type: source
 title: "Rechnung"
-description: "PDF, 2 pages, \"Rechnung\", 2026-02-01. 3 tables."
+description: "PDF, 2 pages, \"Rechnung\", 2026-02-01. 4 tables."
 resource: "file.pdf"
 tags: ["rezzer", "pdf"]
 generated: { by: rezzer/, at: "" }
@@ -71,7 +71,9 @@ Picture page-1-pic-1 (image/png, logo or small picture, box 455, 692 to 555, 732
 
 **Bitte zahlen Sie den Betrag bis zum 01.03.2026 auf das Konto unten. Vielen Dank für Ihren Auftrag.**
 
-**Bestellnummer:** 00000
+|  |  |
+| --- | --- |
+| **Bestellnummer:** | 00000 |
 
 Lieferbedingungen: die Muster GmbH liefert die bestellte Ware frei Haus an die genannte Anschrift, sofern nichts anderes vereinbart ist. Teillieferungen sind zulaessig und werden einzeln berechnet. Die Ware bleibt bis zur vollstaendigen Bezahlung Eigentum der Muster GmbH. Zahlungsbedingungen: der Betrag ist ohne Abzug innerhalb von vierzehn Tagen nach Erhalt der Rechnung zu zahlen. Bei Zahlung innerhalb von sieben Tagen gewaehren wir zwei Prozent Skonto auf den Warenwert. Mahnungen werden mit einer Gebuehr berechnet. Bitte geben Sie bei jeder Zahlung die Rechnungsnummer an, damit wir den Betrag richtig zuordnen koennen. Fragen zur Rechnung beantwortet Ihnen gern unser Kundenservice an allen Werktagen. Es gelten unsere allgemeinen Bedingungen.
 

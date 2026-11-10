@@ -797,9 +797,8 @@ fn leave_flow(
 /// block beside the row, on its lines) follow them in their own order. The places stay, so the
 /// rest of the page reads as before, and what is known of each run (the table cell it goes to,
 /// a hold) moves with it. A cell's runs on a line that an earlier cell of the row also has get a
-/// line of their own, so the two cells are never read as one line, and each cell is a block of
-/// its own (see [`crate::layout::Slot::Block`]), so no paragraph joins two cells; each table
-/// whose runs moved stands where its first run now stands.
+/// line of their own, so the two cells are never read as one line; each table whose runs moved
+/// stands where its first run now stands.
 fn read_apart(flow: &mut Flow, take: &mut Taking, found: &mut Found) {
     fn permute<T: Clone>(v: &mut [T], lo: usize, order: &[usize]) {
         if v.len() < lo + order.len() {
@@ -817,7 +816,6 @@ fn read_apart(flow: &mut Flow, take: &mut Taking, found: &mut Found) {
     // Where each run of the flow as it was stands now.
     let mut now: Vec<usize> = (0..flow.runs.len()).collect();
     let mut fresh = flow.runs.iter().map(|r| r.line).max().unwrap_or(0);
-    let mut block = 0usize;
     let mut moved_tables: Vec<usize> = Vec::new();
     for cells in rows {
         let cells: Vec<Vec<usize>> = cells
@@ -888,12 +886,7 @@ fn read_apart(flow: &mut Flow, take: &mut Taking, found: &mut Found) {
         // Each cell is a block of its own: its lines go on no line of the next cell.
         let mut k = lo;
         for cell in &cells {
-            for slot in &mut flow.slots[k..k + cell.len()] {
-                if *slot == crate::layout::Slot::Free {
-                    *slot = crate::layout::Slot::Block(block);
-                }
-            }
-            block += 1;
+            found.cells.push(flow.ids[k..k + cell.len()].to_vec());
             k += cell.len();
         }
         permute(&mut take.claimed, lo, &order);

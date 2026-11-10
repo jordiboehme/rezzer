@@ -160,6 +160,12 @@ source: crates/rezzer/tests/corpus.rs
       "why": "uncertain"
     },
     {
+      "location": "p1:b30",
+      "severity": "info",
+      "what": "the region at p1:b30 is kept as laid out, as text in its columns: no region type has clear evidence for it",
+      "why": "uncertain"
+    },
+    {
       "location": "structure tree",
       "severity": "warning",
       "what": "the role map has a loop at Figure",
@@ -258,52 +264,15 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "p1:t1",
       "bounds": [
         64.3,
-        772.83,
+        776.16,
         114.43,
         786.16
       ],
       "certainty": "exact",
       "evidence": [
         {
-          "id": "pdf.tagged_table",
-          "kind": "rule"
-        }
-      ],
-      "kind": "table",
-      "page": 1,
-      "score": 1000
-    },
-    {
-      "anchor": "p1:t2",
-      "bounds": [
-        59.6,
-        348.26,
-        467.71,
-        448.16
-      ],
-      "certainty": "exact",
-      "evidence": [
-        {
-          "id": "pdf.tagged_table",
-          "kind": "rule"
-        }
-      ],
-      "kind": "table",
-      "page": 1,
-      "score": 1000
-    },
-    {
-      "anchor": "p1:t3",
-      "bounds": [
-        59.6,
-        241.86,
-        259.29,
-        304.56
-      ],
-      "certainty": "exact",
-      "evidence": [
-        {
-          "id": "pdf.tagged_table",
+          "detail": "table",
+          "id": "given.file_states",
           "kind": "rule"
         }
       ],
@@ -315,14 +284,15 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "p1:b1",
       "bounds": [
         451.1,
-        708.03,
+        711.36,
         518.8,
         721.36
       ],
-      "certainty": "rule",
+      "certainty": "exact",
       "evidence": [
         {
-          "id": "pdf.lines",
+          "detail": "paragraph",
+          "id": "given.file_states",
           "kind": "rule"
         }
       ],
@@ -334,14 +304,15 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "p1:b2",
       "bounds": [
         451.1,
-        693.86,
+        696.36,
         478.53,
         703.86
       ],
-      "certainty": "rule",
+      "certainty": "exact",
       "evidence": [
         {
-          "id": "pdf.lines",
+          "detail": "paragraph",
+          "id": "given.file_states",
           "kind": "rule"
         }
       ],
@@ -353,14 +324,15 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "p1:b3",
       "bounds": [
         451.1,
-        679.46,
+        681.96,
         516.8,
         689.46
       ],
-      "certainty": "rule",
+      "certainty": "exact",
       "evidence": [
         {
-          "id": "pdf.lines",
+          "detail": "paragraph",
+          "id": "given.file_states",
           "kind": "rule"
         }
       ],
@@ -372,14 +344,15 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "p1:b4",
       "bounds": [
         451.1,
-        665.06,
+        667.56,
         521.74,
         675.06
       ],
-      "certainty": "rule",
+      "certainty": "exact",
       "evidence": [
         {
-          "id": "pdf.lines",
+          "detail": "paragraph",
+          "id": "given.file_states",
           "kind": "rule"
         }
       ],
@@ -391,14 +364,15 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "p1:b5",
       "bounds": [
         451.1,
-        650.66,
+        653.16,
         489.64,
         660.66
       ],
-      "certainty": "rule",
+      "certainty": "exact",
       "evidence": [
         {
-          "id": "pdf.lines",
+          "detail": "paragraph",
+          "id": "given.file_states",
           "kind": "rule"
         }
       ],
@@ -410,14 +384,15 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "p1:b6",
       "bounds": [
         451.1,
-        636.26,
+        638.76,
         502.26,
         646.26
       ],
-      "certainty": "rule",
+      "certainty": "exact",
       "evidence": [
         {
-          "id": "pdf.lines",
+          "detail": "paragraph",
+          "id": "given.file_states",
           "kind": "rule"
         }
       ],
@@ -429,14 +404,15 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "p1:b7",
       "bounds": [
         451.1,
-        621.86,
+        624.36,
         495.11,
         631.86
       ],
-      "certainty": "rule",
+      "certainty": "exact",
       "evidence": [
         {
-          "id": "pdf.lines",
+          "detail": "paragraph",
+          "id": "given.file_states",
           "kind": "rule"
         }
       ],
@@ -448,14 +424,15 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "p1:b8",
       "bounds": [
         451.1,
-        607.46,
+        609.96,
         525.93,
         617.46
       ],
-      "certainty": "rule",
+      "certainty": "exact",
       "evidence": [
         {
-          "id": "pdf.lines",
+          "detail": "paragraph",
+          "id": "given.file_states",
           "kind": "rule"
         }
       ],
@@ -467,14 +444,55 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "p1:b9",
       "bounds": [
         451.1,
-        593.06,
+        595.56,
         518.54,
         603.06
       ],
-      "certainty": "rule",
+      "certainty": "exact",
       "evidence": [
         {
-          "id": "pdf.lines",
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b10",
+      "bounds": [
+        81.8,
+        680.56,
+        272.68,
+        686.56
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b11",
+      "bounds": [
+        71.0,
+        660.86,
+        147.36,
+        674.86
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
           "kind": "rule"
         }
       ],

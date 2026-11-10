@@ -199,6 +199,7 @@ pub(super) fn borderless(
         parted.extend(rule_end);
         ruled_off.extend(rule_end);
         let z = rule_end.unwrap_or(last_multi + 1);
+        let z = pairs_end(flow, &lines, (i, z), &counts);
         let mut tail = Tail {
             end: z,
             marked: false,
@@ -799,23 +800,135 @@ const REGION_STEPS: f32 = 2.0;
 /// where a piece of the region starts or ends.
 const COLUMN_ALIGN: f32 = 0.25;
 
+/// A table holds at least this many lines of more than two pieces before the pairs under it
+/// are judged by its columns.
+const PAIR_TABLE_ROWS: usize = 2;
+
+/// A table whose lines are of two pieces holds at least this many of them before the pairs
+/// under it are judged by its columns.
+const PAIR_COLUMN_ROWS: usize = 3;
+
+/// Where the region `a..z` of `lines` ends when it ends with labels and their values: lines
+/// of two pieces that read as pairs by the line pair rule
+/// ([`layoutregions::typers::pairs::line_pair_cut`]) as the typer reads them, a group of
+/// several lines as such and a single line as a lone one, under a table: at least
+/// [`PAIR_TABLE_ROWS`] lines of more than two pieces, or [`PAIR_COLUMN_ROWS`] lines of two
+/// pieces or more whose columns line up among themselves (the table's own column evidence,
+/// see [`Edges::line_up`]). Such a pair joins the table over it only when the table's columns
+/// hold it, each of its parts flush with the cells of a column (see
+/// [`in_columns`]): the first that does not ends the region over it, and it and the lines
+/// after it are left to be read on their own. `counts` holds the pieces of each line.
+fn pairs_end(flow: &Flow, lines: &[FlowLine], (a, z): (usize, usize), counts: &[usize]) -> usize {
+    let pair = |l: &FlowLine, lone: bool| {
+        layoutregions::typers::pairs::line_pair_cut(&flow.runs[l.start..l.end], lone).is_some()
+    };
+    let two = |j: usize| counts[j] == 2;
+    // A group of pair lines, as the typer reads several lines; else the last line alone.
+    let mut k = z;
+    while k > a && two(k - 1) && pair(&lines[k - 1], false) {
+        k -= 1;
+    }
+    if z - k <= 1 {
+        k = if z > a && two(z - 1) && pair(&lines[z - 1], true) {
+            z - 1
+        } else {
+            z
+        };
+    }
+    if k == z {
+        return z;
+    }
+    let table = &lines[a..k];
+    let rows: Vec<&FlowLine> = table
+        .iter()
+        .zip(&counts[a..k])
+        .filter(|(_, c)| **c >= 2)
+        .map(|(l, _)| l)
+        .collect();
+    let wide = counts[a..k].iter().filter(|&&c| c > 2).count();
+    // Lines of two pieces are pairs themselves: two of them in line may be two fields that
+    // happen to align, so a table of two columns shows its columns in more rows, lined up
+    // among themselves. Lines of more pieces show columns by their count alone: one cell
+    // flush with no other (a centered cell of its own width) does not make them no table.
+    let enough =
+        wide >= PAIR_TABLE_ROWS || (rows.len() >= PAIR_COLUMN_ROWS && Edges::line_up(flow, &rows));
+    if !enough {
+        return z;
+    }
+    let edges = Edges::of(flow, table);
+    (k..z).find(|&j| !edges.hold(flow, &lines[j])).unwrap_or(z)
+}
+
 /// Whether every piece of `line` starts or ends where a piece of `region` starts or ends (see
 /// [`COLUMN_ALIGN`]): its text stands in the region's columns, set flush left or flush right
 /// as theirs.
 fn in_columns(flow: &Flow, region: &[FlowLine], line: &FlowLine) -> bool {
-    let tol = COLUMN_ALIGN * line.size;
-    let edges: Vec<(f32, f32)> = region
-        .iter()
-        .flat_map(|l| pieces_of(flow, l))
-        .map(|p| (p.x0, p.x1))
-        .collect();
-    let own = pieces_of(flow, line);
-    !own.is_empty()
-        && own.iter().all(|p| {
-            edges
+    Edges::of(flow, region).hold(flow, line)
+}
+
+/// Where the pieces of the lines of a region start and where they end, each sorted, so a line
+/// is looked up against them by halving instead of against every piece.
+struct Edges {
+    starts: Vec<f32>,
+    ends: Vec<f32>,
+}
+
+impl Edges {
+    fn of(flow: &Flow, region: &[FlowLine]) -> Edges {
+        let (mut starts, mut ends): (Vec<f32>, Vec<f32>) = region
+            .iter()
+            .flat_map(|l| pieces_of(flow, l))
+            .map(|p| (p.x0, p.x1))
+            .unzip();
+        starts.sort_by(f32::total_cmp);
+        ends.sort_by(f32::total_cmp);
+        Edges { starts, ends }
+    }
+
+    /// Whether the lines `rows` line up in columns among themselves: each piece of each line
+    /// starts or ends where a piece of another of them does (see [`COLUMN_ALIGN`]). The
+    /// edges are sorted once with their line, and each piece looks only at the edges within
+    /// its tolerance.
+    fn line_up(flow: &Flow, rows: &[&FlowLine]) -> bool {
+        let pieces: Vec<Vec<Piece>> = rows.iter().map(|l| pieces_of(flow, l)).collect();
+        let mut starts: Vec<(f32, usize)> = Vec::new();
+        let mut ends: Vec<(f32, usize)> = Vec::new();
+        for (r, ps) in pieces.iter().enumerate() {
+            for p in ps {
+                starts.push((p.x0, r));
+                ends.push((p.x1, r));
+            }
+        }
+        starts.sort_by(|a, b| a.0.total_cmp(&b.0));
+        ends.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let other = |sorted: &[(f32, usize)], x: f32, tol: f32, own: usize| {
+            let i = sorted.partition_point(|e| e.0 < x - tol);
+            sorted[i..]
                 .iter()
-                .any(|e| (p.x0 - e.0).abs() <= tol || (p.x1 - e.1).abs() <= tol)
+                .take_while(|e| e.0 <= x + tol)
+                .any(|e| e.1 != own)
+        };
+        pieces.iter().enumerate().all(|(r, ps)| {
+            let tol = COLUMN_ALIGN * rows[r].size;
+            ps.iter()
+                .all(|p| other(&starts, p.x0, tol, r) || other(&ends, p.x1, tol, r))
         })
+    }
+
+    /// Whether every piece of `line` starts within [`COLUMN_ALIGN`] sizes of a start, or ends
+    /// within as much of an end (see [`in_columns`]).
+    fn hold(&self, flow: &Flow, line: &FlowLine) -> bool {
+        let tol = COLUMN_ALIGN * line.size;
+        let near = |sorted: &[f32], x: f32| {
+            let i = sorted.partition_point(|e| *e < x - tol);
+            sorted.get(i).is_some_and(|e| *e <= x + tol)
+        };
+        let own = pieces_of(flow, line);
+        !own.is_empty()
+            && own
+                .iter()
+                .all(|p| near(&self.starts, p.x0) || near(&self.ends, p.x1))
+    }
 }
 
 /// Whether `line` has the shape of the header of a table of its own under the lines `region`,

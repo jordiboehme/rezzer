@@ -56,6 +56,9 @@ pub(crate) struct Table {
     /// The field reader made it from drawn boxes or rows of fields: a label and its value in
     /// each row, also where column titles stand over one row of items.
     pub pairs: bool,
+    /// Its pairs were read from lines of text (a label and its value on one line, apart by a
+    /// gap or after a colon): a label marks its value only beside it, as in text.
+    pub lines: bool,
     /// The top of the table, in the frame of the runs.
     pub top: f32,
     pub rows: Vec<Vec<Cell>>,
@@ -631,7 +634,8 @@ fn ink_gap(l: &Line<'_>, end: usize, start: usize) -> f32 {
 /// `Datum` has another title beside it. A table of label and value pairs that the field
 /// reader made counts only when its top lies in the top third of the page, where the header
 /// fields of a form stand: lower down it may be one row of items under small column titles,
-/// each title read as the label of the value below it. Whether a marked date is the only date
+/// each title read as the label of the value below it. A table of pairs read from lines of
+/// text marks a date only beside its label, as text does. Whether a marked date is the only date
 /// of its column is decided once for every mark, in [`document_date`].
 pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: f32) -> Dates {
     let mut out = Dates::default();
@@ -681,6 +685,7 @@ pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: f32) -> Dates {
             .rows
             .iter()
             .filter(|row| is_date(&row[1]))
+            .filter(|row| !t.lines || cell_beside(&row[0], &row[1]))
             .filter_map(|row| whole_label(&row[0].text).map(|label| (label, &row[1])));
         if let Some((label, value)) = labelled.next()
             && labelled.next().is_none()
@@ -691,6 +696,18 @@ pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: f32) -> Dates {
         }
     }
     out
+}
+
+/// Whether the cell `value` stands beside the cell `label` on its baseline, at most
+/// [`BESIDE_SIZES`] label sizes after its end, as a value of a label in text does (see
+/// [`value_of`]).
+fn cell_beside(label: &Cell, value: &Cell) -> bool {
+    match (label.spot, value.spot) {
+        (Some(l), Some(v)) => {
+            (v.y - l.y).abs() <= l.size / 2.0 && v.x0 > l.x0 && v.x0 - l.x1 <= BESIDE_SIZES * l.size
+        }
+        _ => false,
+    }
 }
 
 /// A table whose top lies in the upper half of the page may hold the document date.

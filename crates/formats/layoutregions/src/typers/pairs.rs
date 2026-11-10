@@ -25,7 +25,9 @@ use crate::extract::pairs::{
 use crate::extract::table::grid::{Shape, titles_over_values};
 use crate::extract::table::ruled::edges;
 use crate::input::TextRun;
+use crate::line::LineRun;
 use crate::region::Kind;
+use crate::segment::cut::SIZE_STEP;
 use crate::segment::{Segment, Source};
 use crate::typers::table::group_at;
 use crate::typers::{Lined, PageView, Typed, lined, seg_runs, signal, text_alone};
@@ -141,6 +143,12 @@ fn x_key(x: f32) -> i64 {
 /// before it is cut or replaced, so the work is the number of pieces times the log of the
 /// skyline, plus the frames.
 ///
+/// A level reaches [`SNAP`] down from its top piece, not from piece to piece: in a chain of
+/// pieces each within `SNAP` of the next but more than `SNAP` from the top, the first piece past
+/// the top's reach opens the next level, and the frame between it and the level above may be
+/// thinner than `SNAP` (it holds no line of text; the scan of the tests never sees such a
+/// chain, as its pieces stand whole points apart).
+///
 /// [`SNAP`]: crate::segment::drawn::SNAP
 fn rule_frames(rules: &[crate::segment::drawn::Line]) -> Vec<(f32, f32, f32, f32)> {
     use std::collections::BTreeMap;
@@ -215,7 +223,20 @@ pub(crate) fn strip_frames(view: &PageView<'_>) -> Vec<StripFrame> {
         .map(|(i, r)| (r.y + 0.5 * r.size, i as u32))
         .collect();
     by_y.sort_by(|a, b| a.0.total_cmp(&b.0));
-    crate::work::add(by_y.len() as u64);
+    // The same runs by the middle of their width: a tall, narrow strip finds its runs by it.
+    let mut by_x: Vec<(f32, u32)> = by_y
+        .iter()
+        .map(|&(_, i)| {
+            let r = &texts[i as usize];
+            (r.x + 0.5 * r.w, i)
+        })
+        .collect();
+    by_x.sort_by(|a, b| a.0.total_cmp(&b.0));
+    crate::work::add(2 * by_y.len() as u64);
+    let middle = |i: u32| {
+        let r = &texts[i as usize];
+        (r.x + 0.5 * r.w, r.y + 0.5 * r.size)
+    };
     let mut taken = vec![false; texts.len()];
     let how = Reading {
         one_field: false,
@@ -225,14 +246,22 @@ pub(crate) fn strip_frames(view: &PageView<'_>) -> Vec<StripFrame> {
     };
     let mut out = Vec::new();
     for (bottom, top, x0, x1) in frames {
+        // The runs whose middle lies in the strip, from the shorter of the two lists: those
+        // in its height or those in its width.
         let lo = by_y.partition_point(|r| r.0 <= bottom);
         let hi = by_y.partition_point(|r| r.0 < top);
-        crate::work::add((hi - lo) as u64);
+        let left = by_x.partition_point(|r| r.0 <= x0);
+        let right = by_x.partition_point(|r| r.0 < x1);
+        let near = if right.saturating_sub(left) < hi.saturating_sub(lo) {
+            &by_x[left..right.max(left)]
+        } else {
+            &by_y[lo..hi.max(lo)]
+        };
+        crate::work::add(near.len() as u64);
         let mut runs = Vec::new();
-        for &(_, i) in &by_y[lo..hi] {
-            let r = &texts[i as usize];
-            let mx = r.x + 0.5 * r.w;
-            if !taken[i as usize] && mx > x0 && mx < x1 {
+        for &(_, i) in near {
+            let (mx, my) = middle(i);
+            if !taken[i as usize] && mx > x0 && mx < x1 && my > bottom && my < top {
                 taken[i as usize] = true;
                 runs.push(i);
             }
@@ -317,6 +346,11 @@ pub(crate) fn strip_fields(view: &PageView<'_>, seg: &Segment) -> Option<StripFi
             }
         }
     }
+    // The direction of the stack the strips stand in: labels over values only with positive
+    // evidence at both of its ends (see [`stack_reads_down`]).
+    if !stack_reads_down(view, frames, &mine, &label_styles) {
+        return None;
+    }
     // A field is never alone (a caption over a line between rules looks like one). An empty
     // field's label is in the style of the labels of fields with a value: text in another
     // style alone in a field is a value without its label, not an empty field.
@@ -328,6 +362,117 @@ pub(crate) fn strip_fields(view: &PageView<'_>, seg: &Segment) -> Option<StripFi
         colon,
         shape,
     })
+}
+
+/// The band beyond each edge rule of a stack of strips that tells its direction is this many
+/// sizes of the stack's largest text deep.
+const STACK_EDGE: f32 = 1.5;
+
+/// Whether the stack of strips the frames `mine` stand in reads as labels over values. The
+/// stack is every strip that shares a rule with one of it, side by side with it in part. On a
+/// form whose labels stand under their values, the lines between two rules are one row's
+/// labels and the next row's values, so a strip of it looks like labels over values; its edges
+/// tell: the values of its first row stand over its top rule, outside every strip, and the
+/// labels of its last row under its bottom rule. So a stack reads down (labels over values)
+/// only with positive evidence at both of its ends, in the band [`STACK_EDGE`] sizes of its
+/// largest text deep beyond its edge rule, across its width:
+/// - over its top rule, no rule and no box edge, and every run that starts where a label of the
+///   stack starts (within its size) is in the size of its labels or smaller: no value stands
+///   there;
+/// - under its bottom rule, no rule and no box edge, and every such run is a label step larger
+///   than its labels: no label stands there.
+///
+/// A band with nothing in it is such evidence: the edge row a stack of the other direction
+/// needs is looked for where it must stand and is not there. Everything else (a run in the
+/// stack's columns that may be a value over it or a label under it, a rule or a box beyond
+/// which the edge row may stand) leaves the direction not clear, and the strip rule reads no
+/// fields: the stack is spatial until Task 26 reads stacks (today's reader of labels under
+/// their values runs before, as a given region).
+fn stack_reads_down(
+    view: &PageView<'_>,
+    frames: &[StripFrame],
+    mine: &[usize],
+    labels: &[&TextRun],
+) -> bool {
+    let snap = crate::segment::drawn::SNAP;
+    let Some(label) = labels.iter().map(|l| l.size).reduce(f32::min) else {
+        return false;
+    };
+    // The stack: the strips that share a rule with one in it, side by side in part.
+    let mut stack: Vec<usize> = mine.to_vec();
+    let mut in_stack = vec![false; frames.len()];
+    for &f in mine {
+        if let Some(s) = in_stack.get_mut(f) {
+            *s = true;
+        }
+    }
+    let mut k = 0;
+    while k < stack.len() {
+        let f = &frames[stack[k]];
+        for (g, h) in frames.iter().enumerate() {
+            crate::work::add(1);
+            let shares = (h.top - f.bottom).abs() <= snap || (h.bottom - f.top).abs() <= snap;
+            if shares && h.x0 < f.x1 && f.x0 < h.x1 && !in_stack[g] {
+                in_stack[g] = true;
+                stack.push(g);
+            }
+        }
+        k += 1;
+    }
+    let texts = &view.page.texts;
+    let top = stack
+        .iter()
+        .map(|&f| frames[f].top)
+        .fold(f32::MIN, f32::max);
+    let bottom = stack
+        .iter()
+        .map(|&f| frames[f].bottom)
+        .fold(f32::MAX, f32::min);
+    let x0 = stack.iter().map(|&f| frames[f].x0).fold(f32::MAX, f32::min);
+    let x1 = stack.iter().map(|&f| frames[f].x1).fold(f32::MIN, f32::max);
+    let size = stack
+        .iter()
+        .flat_map(|&f| frames[f].runs.iter())
+        .map(|&i| texts[i as usize].size)
+        .fold(label, f32::max);
+    crate::work::add(stack.len() as u64);
+    let reach = STACK_EDGE * size;
+    let over = |y: f32| y > top + snap && y - top <= reach;
+    let under = |y: f32| y < bottom - snap && bottom - y <= reach;
+    let across = |a: f32, b: f32| a.min(b) < x1 && x0 < a.max(b);
+    // A rule or a box edge in a band: the edge row may stand beyond it.
+    for h in view.hs() {
+        crate::work::add(1);
+        if across(h.from, h.to) && (over(h.at) || under(h.at)) {
+            return false;
+        }
+    }
+    for b in &view.page.boxes {
+        crate::work::add(1);
+        let (y0, y1) = (b.bounds.y0.min(b.bounds.y1), b.bounds.y0.max(b.bounds.y1));
+        if across(b.bounds.x0, b.bounds.x1) && [y0, y1].into_iter().any(|y| over(y) || under(y)) {
+            return false;
+        }
+    }
+    let larger = label * crate::line::LABEL_STEP;
+    let in_column = |r: &TextRun| labels.iter().any(|l| (r.x - l.x).abs() <= r.size);
+    for r in texts {
+        crate::work::add(1);
+        if crate::line::ink(&r.text) == 0 || r.off_axis {
+            continue;
+        }
+        let mx = r.x + 0.5 * r.w;
+        let my = r.y + 0.5 * r.size;
+        if mx <= x0 || mx >= x1 || !in_column(r) {
+            continue;
+        }
+        // A run over the top rule that may be a value, or one under the bottom rule that may
+        // be a label.
+        if (over(my) && r.size >= larger) || (under(my) && r.size < larger) {
+            return false;
+        }
+    }
+    true
 }
 
 /// What [`strip_fields`] read: how many fields, whether every label ends with a colon, and
@@ -493,21 +638,44 @@ pub(crate) const PAIR_LABEL_WORDS: usize = 4;
 /// sentence: longer text after a colon is prose (`Note: this is a sentence ...`).
 pub(crate) const PAIR_VALUE_WORDS: usize = 6;
 
+/// Where a line parts into its label and its value by the line pair rule (see
+/// [`line_pair_cut`]): the label is the line's runs before run `run` and the first `byte`
+/// bytes of run `run`; the value is the rest. With `byte` 0 run `run` opens the value whole.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PairCut {
+    pub run: usize,
+    pub byte: usize,
+}
+
+/// A line read as a pair by [`line_pair`]: its value as text, whether the label ends with a
+/// colon, and where it parts, in the runs the rule read (`cut.run` indexes them).
+struct LinePair {
+    value: String,
+    colon: bool,
+    cut: PairCut,
+}
+
 /// The label and the value of one line of `runs` (its pieces `pieces`), each pair with
-/// evidence of its own, and whether the label ends with a colon:
+/// evidence of its own, whether the label ends with a colon, and where the line parts:
 ///
 /// - one piece that holds a colon after a short label (at most [`PAIR_LABEL_WORDS`] words with
 ///   a letter): the value after it is shaped as a number, date or code, or short (at most
-///   [`PAIR_VALUE_WORDS`] words) and no sentence;
+///   [`PAIR_VALUE_WORDS`] words) and no sentence; the line parts after the colon;
 /// - with `lone` (the only line of its group), two pieces: a short label with a letter and a
-///   value shaped as a number, a date or a code (`Rechnungs-Nr.   2026004711`).
+///   value shaped as a number, a date or a code (`Rechnungs-Nr.   2026004711`), or, after a
+///   label that ends with a colon, a short value that is no sentence and no label; the value
+///   not set a size step ([`SIZE_STEP`]) smaller than its label: a small code beside a larger
+///   name (`United States Treasury` and a `000` in two thirds of its size) is a mark printed
+///   beside it, not its value; after a label that ends with a colon a smaller value is its
+///   value; the line parts between the pieces.
 ///
+/// A line that opens as a caption ([`crate::extract::table::caption::caption`]) is none.
 /// Anything else is no pair; more pieces are a row, which the table rules read.
-fn line_pair(
-    runs: &[&TextRun],
+fn line_pair<R: LineRun>(
+    runs: &[R],
     pieces: &[crate::extract::table::grid::Piece],
     lone: bool,
-) -> Option<(String, String, bool)> {
+) -> Option<LinePair> {
     let text =
         |p: &crate::extract::table::grid::Piece| words(runs, &(p.start..p.end).collect::<Vec<_>>());
     let short_label = |l: &str| {
@@ -518,6 +686,12 @@ fn line_pair(
         let n = v.split_whitespace().count();
         n <= PAIR_VALUE_WORDS && !v.trim_end().ends_with(['.', '!', '?']) && !v.contains(". ")
     };
+    // A line that opens as a caption ("Figure 1: ...", "Abb. 3: ...") names a figure or
+    // a table: it is no label and its value.
+    let opens = pieces.first().map(text)?;
+    if crate::extract::table::caption::caption(&opens).is_some() {
+        return None;
+    }
     match pieces {
         [one] => {
             let t = text(one);
@@ -527,18 +701,97 @@ fn line_pair(
             if value.is_empty() || !short_label(label_words) {
                 return None;
             }
-            (value_shape(value) || no_sentence(value))
-                .then(|| (label.to_string(), value.to_string(), true))
+            if !(value_shape(value) || no_sentence(value)) {
+                return None;
+            }
+            Some(LinePair {
+                value: value.to_string(),
+                colon: true,
+                cut: colon_cut(runs, one.start..one.end)?,
+            })
         }
         [a, b] if lone => {
             let (label, value) = (text(a), text(b));
-            (short_label(&label) && value_shape(&value)).then(|| {
-                let colon = label.ends_with(':');
-                (label, value, colon)
+            let size = |p: &crate::extract::table::grid::Piece| {
+                runs[p.start..p.end]
+                    .iter()
+                    .map(LineRun::size)
+                    .fold(0.0f32, f32::max)
+            };
+            let smaller = size(b) > 0.0 && size(a) >= SIZE_STEP * size(b);
+            // A label that ends with a colon says it is one, as in one piece: its value may be
+            // any short text that is no sentence and no label (no word of it ends with a
+            // colon: `Bill To:   Ship To:` is two labels).
+            let colon = label.ends_with(':');
+            let no_label = !value.split_whitespace().any(|w| w.ends_with(':'));
+            let value_ok = value_shape(&value) || (colon && no_sentence(&value) && no_label);
+            (short_label(&label) && value_ok && (!smaller || colon)).then_some(LinePair {
+                value,
+                colon,
+                cut: PairCut {
+                    run: b.start,
+                    byte: 0,
+                },
             })
         }
         _ => None,
     }
+}
+
+/// Where the runs `range` of `runs` part after their first colon that ends a word with a word
+/// after it (the first `": "` of their words joined by spaces): in the run of that word, just
+/// after the colon.
+fn colon_cut<R: LineRun>(runs: &[R], range: std::ops::Range<usize>) -> Option<PairCut> {
+    let mut found: Option<PairCut> = None;
+    for k in range {
+        let t = runs[k].text();
+        for w in t.split_whitespace() {
+            // A word after the colon: the colon ends the label.
+            if found.is_some() {
+                return found;
+            }
+            if w.ends_with(':') {
+                let end = w.as_ptr() as usize - t.as_ptr() as usize + w.len();
+                found = Some(PairCut { run: k, byte: end });
+            }
+        }
+    }
+    None
+}
+
+/// Where one line of text parts into its label and its value by the rule the label and value
+/// typer reads line pairs by ([`line_pair`]), or `None` when the line is no pair. `line` holds
+/// the runs of one line in order, blank runs among them; `lone` says the line is the only one
+/// of its group. A colon inside a run cuts that run; a blank run between the label and the
+/// value goes to the side of the widest gap between the two, as the line stands. The typer
+/// and the readers that extract a line pairs region read the same pairs by it.
+pub fn line_pair_cut<R: LineRun>(line: &[R], lone: bool) -> Option<PairCut> {
+    let at: Vec<usize> = (0..line.len())
+        .filter(|&k| !line[k].text().trim().is_empty() && !line[k].off_axis())
+        .collect();
+    let inked: Vec<&R> = at.iter().map(|&k| &line[k]).collect();
+    let pieces = crate::extract::table::grid::pieces_of(&inked, 0, inked.len());
+    crate::work::add(line.len() as u64);
+    let cut = line_pair(&inked, &pieces, lone)?.cut;
+    // A cut between two inked runs: at the widest gap between them, blank runs included.
+    let between = |before: usize| -> PairCut {
+        let (from, to) = (at[before] + 1, at[before + 1]);
+        let gap = |j: usize| line[j].x() - (line[j - 1].x() + line[j - 1].w());
+        let run = (from..=to)
+            .max_by(|&a, &b| gap(a).total_cmp(&gap(b)))
+            .unwrap_or(to);
+        PairCut { run, byte: 0 }
+    };
+    if cut.byte == 0 {
+        return Some(between(cut.run.checked_sub(1)?));
+    }
+    if cut.byte >= inked[cut.run].text().len() {
+        return (cut.run + 1 < inked.len()).then(|| between(cut.run));
+    }
+    Some(PairCut {
+        run: at[cut.run],
+        byte: cut.byte,
+    })
 }
 
 /// Whether `text` is a value of a shape of its own: a number, a percent, a date, or a code
@@ -798,7 +1051,7 @@ pub(crate) fn label_value(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
                     found
                 };
                 let lone = ranges.len() == 1 && !in_grid;
-                let pairs: Option<Vec<(String, String, bool)>> =
+                let pairs: Option<Vec<LinePair>> =
                     pieces.iter().map(|p| line_pair(&runs, p, lone)).collect();
                 let pairs = pairs.filter(|p| !p.is_empty())?;
                 signals.push(signal(
@@ -806,14 +1059,14 @@ pub(crate) fn label_value(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
                     format!("{} lines of a short label and its value", pairs.len()),
                     LABEL_LINE_PAIRS,
                 ));
-                if pairs.iter().all(|p| p.2) {
+                if pairs.iter().all(|p| p.colon) {
                     signals.push(signal(
                         "label_value.colon",
                         "the labels end with a colon".into(),
                         LABEL_COLON,
                     ));
                 }
-                if pairs.iter().all(|p| value_shape(&p.1)) {
+                if pairs.iter().all(|p| value_shape(&p.value)) {
                     signals.push(signal(
                         "label_value.value_shape",
                         "the values are numbers, dates or codes".into(),
@@ -1121,6 +1374,24 @@ mod tests {
         }
     }
 
+    /// Boy scout N11 (Task 18b re-review 3): a chain of rules each 1.5 points under the one
+    /// above (within `SNAP` of the next, not of the top) is one level from its top: the piece
+    /// past the top's reach opens the next level, with a frame thinner than `SNAP` over it,
+    /// and the rule far below frames up to it.
+    #[test]
+    fn a_chain_of_close_rules_is_one_level_from_its_top() {
+        let line = |at: f32| crate::segment::drawn::Line {
+            at,
+            from: 0.0,
+            to: 100.0,
+        };
+        let frames = rule_frames(&[line(104.0), line(102.5), line(101.0), line(50.0)]);
+        assert_eq!(
+            frames,
+            [(101.0, 102.5, 0.0, 100.0), (50.0, 101.0, 0.0, 100.0)]
+        );
+    }
+
     /// Fix round 3 (N10): pieces in two columns, none over another, cost the sweep about one
     /// step each, not one for every higher piece.
     #[test]
@@ -1209,5 +1480,99 @@ mod tests {
         let view = PageView::new(&page, &structure, &segs, &facts, &index, &none);
         let touching = touching_boxes(&view);
         assert_eq!(touching.len(), segs.all.len());
+    }
+
+    /// A run of one line at `x`, 10 pt, its advance by the length of its text.
+    fn on_line(text: &str, x: f32) -> TextRun {
+        TextRun {
+            text: text.into(),
+            x,
+            y: 700.0,
+            w: 5.0 * text.chars().count() as f32,
+            h: 7.0,
+            size: 10.0,
+            font: 1,
+            font_kind: FontKind::Proportional,
+            bold: false,
+            italic: false,
+            color: None,
+            shift: Shift::Base,
+            line: 0,
+            off_axis: false,
+            gaps: Vec::new(),
+        }
+    }
+
+    /// Fix round 1b (I3): the line pair rule says where a line parts: in a run after the colon
+    /// that ends its label, after a run that ends with it, or between two pieces of a lone line,
+    /// a blank run between them on the side of the widest gap; a line it refuses parts nowhere.
+    #[test]
+    fn a_line_pair_parts_where_the_rule_reads_its_label_and_value() {
+        let one = [on_line("Invoice no: 4711", 40.0)];
+        assert_eq!(
+            line_pair_cut(&one, false),
+            Some(PairCut { run: 0, byte: 11 })
+        );
+        let two = [on_line("Date:", 40.0), on_line("2026-05-01", 67.0)];
+        assert_eq!(
+            line_pair_cut(&two, false),
+            Some(PairCut { run: 1, byte: 0 })
+        );
+        // Two pieces apart: a pair only as the lone line of its group; the blank run right
+        // after the label stays with it.
+        let apart = [
+            on_line("Order", 40.0),
+            on_line(" ", 65.0),
+            on_line("2026004711", 200.0),
+        ];
+        assert_eq!(line_pair_cut(&apart, false), None);
+        assert_eq!(
+            line_pair_cut(&apart, true),
+            Some(PairCut { run: 2, byte: 0 })
+        );
+        // Prose after a colon, a caption, and a row of three pieces are no pair.
+        let prose = [on_line(
+            "Note: this is a sentence that says much more than a value.",
+            40.0,
+        )];
+        assert_eq!(line_pair_cut(&prose, true), None);
+        let caption = [on_line("Figure 1: 2026", 40.0)];
+        assert_eq!(line_pair_cut(&caption, true), None);
+        let row = [
+            on_line("Item", 40.0),
+            on_line("12", 200.0),
+            on_line("3,50", 400.0),
+        ];
+        assert_eq!(line_pair_cut(&row, true), None);
+        // Fix round 2: after a label that ends with a colon, a lone line's value may be any
+        // short text that is no sentence; without the colon it needs a shape of its own.
+        let coded = [
+            on_line("Member Code:", 40.0),
+            on_line("MC 4417 2093 88", 200.0),
+        ];
+        assert_eq!(
+            line_pair_cut(&coded, true),
+            Some(PairCut { run: 1, byte: 0 })
+        );
+        assert_eq!(line_pair_cut(&coded, false), None);
+        let bare = [
+            on_line("Member Code", 40.0),
+            on_line("MC 4417 2093 88", 200.0),
+        ];
+        assert_eq!(line_pair_cut(&bare, true), None);
+        let labels = [on_line("Bill To:", 40.0), on_line("Ship To:", 200.0)];
+        assert_eq!(line_pair_cut(&labels, true), None);
+        // Fix round 3: a value a size step smaller than its label is a mark beside a name,
+        // unless the label ends with a colon, which says the value follows.
+        let small = |label: &str| {
+            let mut value = on_line("104857312", 200.0);
+            value.size = 8.0;
+            [on_line(label, 40.0), value]
+        };
+        assert_eq!(
+            line_pair_cut(&small("Member Code:"), true),
+            Some(PairCut { run: 1, byte: 0 })
+        );
+        assert_eq!(line_pair_cut(&small("Member Code"), true), None);
     }
 }

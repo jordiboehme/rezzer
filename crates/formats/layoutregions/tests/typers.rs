@@ -782,6 +782,37 @@ fn ruled_grid_is_table_evidence() {
     assert!(lead >= MARGIN, "{typed:#?}");
 }
 
+/// Task 19a-5b: a row of boxed values under one title across all their boxes (a date in boxes
+/// under `Month Day Year`) has no column titles and no second row: no table. With a second row
+/// of values the grid is a table.
+#[test]
+fn one_row_under_a_title_across_its_boxes_is_no_table() {
+    let xs = [300.0f32, 330.0, 360.0, 390.0];
+    for rows in [1usize, 2] {
+        let ys: Vec<f32> = (0..=rows + 1).map(|k| 600.0 - 14.0 * k as f32).collect();
+        let (b, t) = (ys[ys.len() - 1], ys[0]);
+        let mut rules: Vec<RuleIn> = ys.iter().map(|&y| rule(xs[0], y, xs[3], y)).collect();
+        rules.extend([rule(xs[0], b, xs[0], t), rule(xs[3], b, xs[3], t)]);
+        // The inner box edges stand under the title only.
+        rules.extend(xs[1..3].iter().map(|&x| rule(x, b, x, ys[1])));
+        let mut texts = vec![run("Month Day Year", xs[0] + 3.0, ys[0] - 10.2, 9.2, 100)];
+        for r in 0..rows {
+            for (c, v) in ["08", "31", "84"].iter().enumerate() {
+                texts.push(run(v, xs[c] + 3.0, ys[r + 1] - 10.2, 9.2, 101 + r as u32));
+            }
+        }
+        let tree = Tree {
+            page: sheet(texts, rules),
+        };
+        let typed = tree.typed(&grid);
+        assert_eq!(
+            find(&typed, Kind::Table).is_some(),
+            rows == 2,
+            "{rows} rows: {typed:#?}"
+        );
+    }
+}
+
 /// Long sentences in a grid of two rows and two columns: the cells hold prose.
 fn prose_grid() -> Tree {
     let rows: &[&[&str]] = &[
@@ -1970,6 +2001,27 @@ fn a_lone_line_of_a_label_and_a_shaped_value_is_a_pair() {
     assert!(find(&typed, Kind::LabelValue).is_none(), "{typed:#?}");
 }
 
+/// Task 19a-5b: a lone line of a name and a code set a size step smaller beside it (the bureau
+/// name of a sample check and its printed `000`) is no pair; the code in the label's size is.
+#[test]
+fn a_lone_name_beside_a_smaller_code_is_no_pair() {
+    let rows: [&[&str]; 1] = [&["United States Treasury", "000"]];
+    for (value_size, pair) in [(6.0f32, false), (10.0, true)] {
+        let mut texts = rows_at(&rows, &[72.0, 250.0], 600.0, 10.0, 100);
+        texts[1].size = value_size;
+        texts[1].h = value_size;
+        let tree = Tree {
+            page: sheet(texts, Vec::new()),
+        };
+        let typed = tree.typed(&text_of_lines(vec![100]));
+        assert_eq!(
+            find(&typed, Kind::LabelValue).is_some(),
+            pair,
+            "{value_size}: {typed:#?}"
+        );
+    }
+}
+
 /// Task 18b (ruling Q5): a block of two columns in one style without a colon or a shaped value
 /// on its lines (names beside names) is no block of labels and values.
 #[test]
@@ -2557,6 +2609,49 @@ fn an_address_under_a_table_stays_a_paragraph() {
             Some(Kind::Table),
             "at {k}x"
         );
+    }
+}
+
+/// Task 19a (ruling Q2): a bold header row over the rows of a table without rules is the
+/// table's header, not a heading: the parent's table reading names its line as the header row,
+/// so the heading typer gives it no candidate and the table holds it, at sizes where a bold
+/// line alone would read as a heading. The address under a table stays a paragraph (see
+/// [`an_address_under_a_table_stays_a_paragraph`]): the rule is no exception to arbitration.
+#[test]
+fn a_bold_header_over_its_rows_folds_into_the_table() {
+    for k in [1.0f32, 1.25, 1.5] {
+        let rows: [&[&str]; 4] = [
+            &["Lohnart", "Bezeichnung", "Betrag"],
+            &["1000", "Gehalt", "3.000,00"],
+            &["1010", "Zulage", "150,00"],
+            &["1020", "Fahrgeld", "45,67"],
+        ];
+        let mut texts = Vec::new();
+        for (r, row) in rows.iter().enumerate() {
+            for (c, t) in row.iter().enumerate() {
+                let y = 650.0 - 12.0 * r as f32;
+                let cell = run(t, 80.0 + 150.0 * c as f32, y, 9.2, 100 + r as u32);
+                texts.push(if r == 0 { bold(cell) } else { cell });
+            }
+        }
+        let mut page = sheet(texts, Vec::new());
+        // Scaled about the table's top left corner, so the table keeps its place between the
+        // prose over it and under it.
+        for r in &mut page.texts {
+            if r.line < 100 || r.line >= 900 {
+                continue;
+            }
+            (r.x, r.y) = (80.0 + (r.x - 80.0) * k, 650.0 + (r.y - 650.0) * k);
+            (r.size, r.w, r.h) = (r.size * k, r.w * k, r.h * k);
+        }
+        let (segs, out) = decide(&page);
+        for line in [100, 101, 103] {
+            assert_eq!(
+                kind_of_line(&page, &segs, &out, line),
+                Some(Kind::Table),
+                "line {line} at {k}x: {out:#?}"
+            );
+        }
     }
 }
 

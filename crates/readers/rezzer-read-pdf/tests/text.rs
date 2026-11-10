@@ -1640,9 +1640,47 @@ fn line_on_two_of_three_pages_is_not_furniture() {
     let out = read(&pdf(&pages, ""));
     for n in 1..=2u32 {
         let roles = roles_of(&out, n);
+        // Task 19a-5b: the lone line may be kept as laid out (no region type has clear
+        // evidence for one short line); it is body text there too, never furniture.
+        let laid_out = page(&out, n).iter().any(|b| match b {
+            Block::Spatial { lines, .. } => lines
+                .iter()
+                .any(|l| l.pieces.iter().any(|p| p.text == FIRM_LINE)),
+            _ => false,
+        });
         assert!(
-            roles.iter().any(|(r, t)| r.is_none() && t == FIRM_LINE),
+            laid_out || roles.iter().any(|(r, t)| r.is_none() && t == FIRM_LINE),
+            "page {n}: {roles:?} {:#?}",
+            page(&out, n)
+        );
+        assert!(
+            roles
+                .iter()
+                .all(|(r, _)| r.as_deref() != Some("page-footer")),
             "page {n}: {roles:?}"
+        );
+    }
+}
+
+/// A page number at the foot of every page, far under a page of few lines in the same font,
+/// is a running footer: the few lines are not parted by white space (too few to look for
+/// bands), so the number shared a leaf with the line above it and was typed with it
+/// (arxiv-2408.09869 p7, whose figures are drawn beside them). The running line, apart from
+/// the text above by its gap, is cut off.
+#[test]
+fn page_number_under_few_lines_is_furniture() {
+    let figure = "q 0.5 w 320 200 m 540 200 l S 320 300 m 540 300 l S 320 400 m 540 400 l S Q\n";
+    let pages: Vec<Page> = (1..=3)
+        .map(|n| page_with(&(show("F1", 10.0, 300.0, 40.0, &n.to_string()) + figure)))
+        .collect();
+    let out = read(&pdf(&pages, ""));
+    for n in 1..=3u32 {
+        let roles = roles_of(&out, n);
+        assert_eq!(
+            roles.last(),
+            Some(&(Some("page-footer".into()), n.to_string())),
+            "page {n}: {roles:?} {:#?}",
+            page(&out, n)
         );
     }
 }
@@ -1799,6 +1837,13 @@ fn bounds_of_a_turned_page_lie_in_its_box() {
         );
     }
     let out = read(&bytes);
+    // The two lines stand apart: never one line of text.
+    let md = common::markdown(&out);
+    assert!(
+        !md.lines()
+            .any(|l| l.contains("Body text of the page.") && l.contains("Far right")),
+        "{md}"
+    );
     for page in [1, 2] {
         let notes: Vec<&rezzer_model::RegionNote> = out
             .document
@@ -1806,7 +1851,9 @@ fn bounds_of_a_turned_page_lie_in_its_box() {
             .iter()
             .filter(|n| n.page == page)
             .collect();
-        assert!(notes.len() >= 2, "page {page}: {notes:#?}");
+        // Task 19: the engine may decide both lines one region (a finder of today gave one
+        // region a line); each region lies in the box all the same.
+        assert!(!notes.is_empty(), "page {page}: {notes:#?}");
         for n in notes {
             let [x0, y0, x1, y1] = n.bounds;
             assert!(
@@ -1833,8 +1880,18 @@ fn bounds_of_a_turned_page_lie_in_its_box() {
     ];
     for page in [1, 2] {
         for want in &lines {
+            // Task 19: the engine may decide both lines one region; then that region holds
+            // the box of each line (a finder of today gave each line its own). The engine's
+            // box of a run reaches from its baseline up by its size (no part below the
+            // baseline), so a region it bounds by its runs holds each line from the baseline up.
+            let run_box = [want[0], want[1], want[2] - 10.0 / 3.0, want[3]];
             let found = out.document.regions.iter().find(|n| {
-                n.page == page && n.bounds.iter().zip(want).all(|(a, b)| (a - b).abs() < 0.5)
+                n.page == page
+                    && (n.bounds.iter().zip(want).all(|(a, b)| (a - b).abs() < 0.5)
+                        || (n.bounds[0] <= run_box[0] + 0.5
+                            && n.bounds[1] <= run_box[1] + 0.5
+                            && n.bounds[2] >= run_box[2] - 0.5
+                            && n.bounds[3] >= run_box[3] - 0.5))
             });
             assert!(
                 found.is_some(),

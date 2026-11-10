@@ -25,7 +25,7 @@ fn cm_placed_identical_lines_are_kept() {
     let out = read(&print_form(&[page], "", ""));
     let text = all_text(&out);
     assert_eq!(text.matches("0,00").count(), 2, "{text}");
-    assert_no_loss(&out);
+    assert_no_loss_but_laid_out(&out, &["p1:b2"]);
 }
 
 /// Guard: a fill-then-stroke show (render mode 2) inside a `cm` block is still one text.

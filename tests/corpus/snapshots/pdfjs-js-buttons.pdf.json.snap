@@ -389,62 +389,246 @@ source: crates/rezzer/tests/corpus.rs
   },
   "regions": [
     {
-      "anchor": "p1:b1",
-      "bounds": [
-        74.52,
-        698.05,
-        107.32,
-        714.05
-      ],
-      "certainty": "rule",
-      "evidence": [
-        {
-          "id": "pdf.lines",
-          "kind": "rule"
-        }
-      ],
-      "kind": "paragraph",
-      "page": 1,
-      "score": 1000
-    },
-    {
-      "anchor": "p1:b2",
-      "bounds": [
-        73.73,
-        673.47,
-        131.63,
-        689.47
-      ],
-      "certainty": "rule",
-      "evidence": [
-        {
-          "id": "pdf.lines",
-          "kind": "rule"
-        }
-      ],
-      "kind": "paragraph",
-      "page": 1,
-      "score": 1000
-    },
-    {
-      "anchor": "p1:b3",
+      "anchor": "p1",
       "bounds": [
         73.33,
-        648.9,
-        162.35,
-        664.9
+        720.85,
+        369.99,
+        742.85
       ],
-      "certainty": "rule",
+      "certainty": "exact",
       "evidence": [
         {
-          "id": "pdf.lines",
+          "detail": "paragraph",
+          "id": "given.file_states",
           "kind": "rule"
         }
       ],
       "kind": "paragraph",
       "page": 1,
       "score": 1000
-    }
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        168.06,
+        695.12,
+        186.06,
+        713.12
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        192.24,
+        695.91,
+        210.24,
+        713.91
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        216.03,
+        695.91,
+        234.03,
+        713.91
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        239.41,
+        695.52,
+        257.41,
+        713.52
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        168.06,
+        671.74,
+        186.06,
+        689.74
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        192.24,
+        671.74,
+        210.24,
+        689.74
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        216.42,
+        671.74,
+        234.42,
+        689.74
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        239.81,
+        671.74,
+        257.81,
+        689.74
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        168.06,
+        647.56,
+        186.06,
+        665.56
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        192.95,
+        648.23,
+        210.95,
+        666.23
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        216.49,
+        648.48,
+        234.49,
+        666.48
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    "<6 more items>"
   ],
   "source": {
     "detection": {

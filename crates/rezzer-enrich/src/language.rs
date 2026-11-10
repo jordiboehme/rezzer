@@ -340,6 +340,7 @@ mod tests {
         let piece = |col, text: &str| SpatialPiece {
             col,
             text: text.into(),
+            spans: Vec::new(),
         };
         let body = vec![Block::Spatial {
             lines: vec![
@@ -353,6 +354,7 @@ mod tests {
                     pieces: vec![piece(0, "Überweisung an die Bank am Monatsende")],
                 },
             ],
+            links: Vec::new(),
             anchor: None,
         }];
         let text = body_text(&body);

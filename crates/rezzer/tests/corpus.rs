@@ -1918,7 +1918,8 @@ fn arxiv_tables_and_pictures() {
     );
 }
 
-/// The text of one page section of the model, its blocks joined by blank lines.
+/// The text of one page section of the model, its blocks joined by blank lines; the lines of a
+/// block kept as laid out in their order.
 fn page_text(doc: &Value, page: u32) -> String {
     fn walk(v: &Value, out: &mut String) {
         match v {
@@ -1932,9 +1933,16 @@ fn page_text(doc: &Value, page: u32) -> String {
                 if let Some(inlines) = m.get("inlines") {
                     walk(inlines, out);
                 }
-                for key in ["blocks", "items", "rows", "cells"] {
+                for key in ["blocks", "items", "rows", "cells", "lines"] {
                     if let Some(inner) = m.get(key) {
                         walk(inner, out);
+                    }
+                }
+                // A block kept as laid out: its lines in order, each piece followed by a space.
+                if let Some(Value::Array(pieces)) = m.get("pieces") {
+                    for piece in pieces {
+                        walk(piece, out);
+                        out.push(' ');
                     }
                 }
             }

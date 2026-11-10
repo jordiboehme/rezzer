@@ -359,6 +359,7 @@ impl Build {
             all: self.all,
             root: SegId(0),
             issues: Vec::new(),
+            short: Vec::new(),
         }
     }
 }

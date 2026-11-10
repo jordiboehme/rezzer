@@ -30,23 +30,31 @@ source: crates/rezzer/tests/corpus.rs
         },
         {
           "anchor": "p1:b2",
-          "inlines": [
+          "lines": [
             {
-              "text": "Your Name",
-              "type": "text"
+              "pieces": [
+                {
+                  "col": 0,
+                  "text": "Your Name"
+                }
+              ]
             }
           ],
-          "type": "paragraph"
+          "type": "spatial"
         },
         {
           "anchor": "p1:b3",
-          "inlines": [
+          "lines": [
             {
-              "text": "January 3, 2024",
-              "type": "text"
+              "pieces": [
+                {
+                  "col": 0,
+                  "text": "January 3, 2024"
+                }
+              ]
             }
           ],
-          "type": "paragraph"
+          "type": "spatial"
         },
         {
           "anchor": "p1:b4",
@@ -580,6 +588,20 @@ source: crates/rezzer/tests/corpus.rs
     }
   ],
   "facets": {},
+  "losses": [
+    {
+      "location": "p1:b2",
+      "severity": "info",
+      "what": "the region at p1:b2 is kept as laid out, as text in its columns: no region type has clear evidence for it",
+      "why": "uncertain"
+    },
+    {
+      "location": "p1:b3",
+      "severity": "info",
+      "what": "the region at p1:b3 is kept as laid out, as text in its columns: no region type has clear evidence for it",
+      "why": "uncertain"
+    }
+  ],
   "model_version": 1,
   "overview": {
     "facts": [
@@ -630,40 +652,33 @@ source: crates/rezzer/tests/corpus.rs
   },
   "regions": [
     {
-      "anchor": "p1:b9",
-      "bounds": [
-        303.13,
-        135.93,
-        308.11,
-        149.22
-      ],
-      "certainty": "rule",
-      "evidence": [
+      "alternatives": [
         {
-          "id": "pdf.furniture",
-          "kind": "rule"
+          "kind": "heading",
+          "score": 750
         }
       ],
-      "kind": "footer_band",
-      "page": 1,
-      "score": 1000
-    },
-    {
       "anchor": "p1:b1",
       "bounds": [
         155.83,
-        669.51,
+        675.25,
         455.42,
         692.46
       ],
       "certainty": "rule",
       "evidence": [
         {
-          "id": "pdf.lines",
+          "detail": "the largest heading in the head of page 1",
+          "id": "title_block.largest_heading",
+          "kind": "rule"
+        },
+        {
+          "detail": "its top 0.18 of the page height from the top",
+          "id": "title_block.top_third",
           "kind": "rule"
         }
       ],
-      "kind": "heading",
+      "kind": "title_block",
       "page": 1,
       "score": 1000
     },
@@ -671,191 +686,295 @@ source: crates/rezzer/tests/corpus.rs
       "anchor": "p1:b2",
       "bounds": [
         276.53,
-        642.37,
+        646.35,
         334.73,
         658.31
       ],
-      "certainty": "rule",
-      "evidence": [
-        {
-          "id": "pdf.lines",
-          "kind": "rule"
-        }
-      ],
-      "kind": "paragraph",
+      "certainty": "unsure",
+      "evidence": [],
+      "kind": "spatial",
       "page": 1,
-      "score": 1000
+      "score": 0
     },
     {
       "anchor": "p1:b3",
       "bounds": [
         264.9,
-        619.05,
+        623.04,
         346.35,
         635.0
       ],
-      "certainty": "rule",
-      "evidence": [
-        {
-          "id": "pdf.lines",
-          "kind": "rule"
-        }
-      ],
-      "kind": "paragraph",
+      "certainty": "unsure",
+      "evidence": [],
+      "kind": "spatial",
       "page": 1,
-      "score": 1000
+      "score": 0
     },
     {
       "anchor": "p1:b4",
       "bounds": [
         72.0,
-        581.06,
+        585.85,
         133.68,
         600.19
       ],
       "certainty": "rule",
       "evidence": [
         {
-          "id": "pdf.lines",
+          "detail": "1.44 times the body size",
+          "id": "heading.size_ratio",
+          "kind": "rule"
+        },
+        {
+          "detail": "led by bold ink",
+          "id": "heading.bold_lead",
+          "kind": "rule"
+        },
+        {
+          "detail": "its lines stay a heading",
+          "id": "heading.title_lines",
           "kind": "rule"
         }
       ],
       "kind": "heading",
       "page": 1,
-      "score": 1000
+      "score": 750
     },
     {
       "anchor": "p1:b5",
       "bounds": [
         72.0,
-        165.82,
+        169.14,
         300.65,
         573.85
       ],
       "certainty": "rule",
       "evidence": [
         {
-          "id": "pdf.lines",
+          "detail": "set in a text size of the page",
+          "id": "paragraph.text_size",
+          "kind": "rule"
+        },
+        {
+          "detail": "33 lines go on the line over them",
+          "id": "paragraph.joins",
+          "kind": "rule"
+        },
+        {
+          "detail": "the lines read as sentences",
+          "id": "paragraph.sentences",
           "kind": "rule"
         }
       ],
       "kind": "paragraph",
       "page": 1,
-      "score": 1000
+      "score": 750
     },
     {
       "anchor": "p1:b6",
       "bounds": [
         310.61,
-        451.02,
+        454.34,
         539.25,
         595.81
       ],
       "certainty": "rule",
       "evidence": [
         {
-          "id": "pdf.lines",
+          "detail": "set in a text size of the page",
+          "id": "paragraph.text_size",
+          "kind": "rule"
+        },
+        {
+          "detail": "11 lines go on the line over them",
+          "id": "paragraph.joins",
+          "kind": "rule"
+        },
+        {
+          "detail": "the lines read as sentences",
+          "id": "paragraph.sentences",
           "kind": "rule"
         }
       ],
       "kind": "paragraph",
       "page": 1,
-      "score": 1000
+      "score": 750
     },
     {
       "anchor": "p1:b7",
       "bounds": [
         310.61,
-        326.35,
+        329.67,
         539.25,
         447.23
       ],
       "certainty": "rule",
       "evidence": [
         {
-          "id": "pdf.lines",
+          "detail": "set in a text size of the page",
+          "id": "paragraph.text_size",
+          "kind": "rule"
+        },
+        {
+          "detail": "9 lines go on the line over them",
+          "id": "paragraph.joins",
+          "kind": "rule"
+        },
+        {
+          "detail": "the lines read as sentences",
+          "id": "paragraph.sentences",
           "kind": "rule"
         }
       ],
       "kind": "paragraph",
       "page": 1,
-      "score": 1000
+      "score": 750
     },
     {
       "anchor": "p1:b8",
       "bounds": [
         310.61,
-        165.82,
+        169.14,
         539.25,
         322.57
       ],
       "certainty": "rule",
       "evidence": [
         {
-          "id": "pdf.lines",
+          "detail": "set in a text size of the page",
+          "id": "paragraph.text_size",
+          "kind": "rule"
+        },
+        {
+          "detail": "12 lines go on the line over them",
+          "id": "paragraph.joins",
+          "kind": "rule"
+        },
+        {
+          "detail": "the lines read as sentences",
+          "id": "paragraph.sentences",
           "kind": "rule"
         }
       ],
       "kind": "paragraph",
       "page": 1,
-      "score": 1000
+      "score": 750
     },
     {
-      "anchor": "p2:b4",
+      "alternatives": [
+        {
+          "kind": "paragraph",
+          "score": 300
+        }
+      ],
+      "anchor": "p1:b9",
       "bounds": [
         303.13,
-        135.93,
+        139.25,
         308.11,
         149.22
       ],
       "certainty": "rule",
       "evidence": [
         {
-          "id": "pdf.furniture",
+          "detail": "1 lines repeat at the foot of the pages",
+          "id": "footer_band.running",
           "kind": "rule"
         }
       ],
       "kind": "footer_band",
-      "page": 2,
-      "score": 1000
+      "page": 1,
+      "score": 900
     },
     {
       "anchor": "p2:b1",
       "bounds": [
         72.0,
-        165.82,
+        169.14,
         300.65,
         717.09
       ],
       "certainty": "rule",
       "evidence": [
         {
-          "id": "pdf.lines",
+          "detail": "set in a text size of the page",
+          "id": "paragraph.text_size",
+          "kind": "rule"
+        },
+        {
+          "detail": "45 lines go on the line over them",
+          "id": "paragraph.joins",
+          "kind": "rule"
+        },
+        {
+          "detail": "the lines read as sentences",
+          "id": "paragraph.sentences",
           "kind": "rule"
         }
       ],
       "kind": "paragraph",
       "page": 2,
-      "score": 1000
+      "score": 750
     },
     {
       "anchor": "p2:b2",
       "bounds": [
         310.61,
-        608.16,
+        611.48,
         539.25,
         717.09
       ],
       "certainty": "rule",
       "evidence": [
         {
-          "id": "pdf.lines",
+          "detail": "set in a text size of the page",
+          "id": "paragraph.text_size",
+          "kind": "rule"
+        },
+        {
+          "detail": "8 lines go on the line over them",
+          "id": "paragraph.joins",
+          "kind": "rule"
+        },
+        {
+          "detail": "the lines read as sentences",
+          "id": "paragraph.sentences",
           "kind": "rule"
         }
       ],
       "kind": "paragraph",
       "page": 2,
-      "score": 1000
+      "score": 750
+    },
+    {
+      "anchor": "p2:b3",
+      "bounds": [
+        310.61,
+        169.14,
+        539.25,
+        298.66
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "set in a text size of the page",
+          "id": "paragraph.text_size",
+          "kind": "rule"
+        },
+        {
+          "detail": "10 lines go on the line over them",
+          "id": "paragraph.joins",
+          "kind": "rule"
+        },
+        {
+          "detail": "the lines read as sentences",
+          "id": "paragraph.sentences",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 2,
+      "score": 750
     },
     "<4 more items>"
   ],

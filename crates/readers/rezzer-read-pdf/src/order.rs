@@ -1150,9 +1150,16 @@ pub(crate) fn runs_in(
     };
     for ids in lines_in(&frags, true, &turned, &across) {
         let mut r = line_runs(page, &frags, from_first_ink(&frags, &ids), line, links);
+        // A line with a wide gap after a sentence end keeps its word gaps: they tell whether
+        // it is justified prose (see `layoutregions::extract::table::grid::pieces_of`).
+        let prose_gap = r.windows(2).any(|w| {
+            w[1].x - (w[0].x + w[0].w)
+                > layoutregions::extract::table::CELL_GAP * w[1].size.max(1.0)
+                && w[0].text.trim_end().ends_with(['.', '?', '!'])
+        });
         for run in &mut r {
             let k = columns.partition_point(|x| *x <= run.x);
-            if !columns.get(k).is_some_and(|x| *x < run.x + run.w) {
+            if !prose_gap && !columns.get(k).is_some_and(|x| *x < run.x + run.w) {
                 run.gaps = Gaps::default();
             }
         }

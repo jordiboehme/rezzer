@@ -1,5 +1,6 @@
 ---
 source: crates/rezzer/tests/corpus.rs
+assertion_line: 294
 ---
 {
   "body": [
@@ -176,6 +177,48 @@ source: crates/rezzer/tests/corpus.rs
       "tagged": false
     }
   },
+  "regions": [
+    {
+      "anchor": "p1",
+      "bounds": [
+        100.0,
+        650.0,
+        300.0,
+        670.0
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p3",
+      "bounds": [
+        100.0,
+        650.0,
+        300.0,
+        670.0
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 3,
+      "score": 1000
+    }
+  ],
   "source": {
     "detection": {
       "confidence": "certain",

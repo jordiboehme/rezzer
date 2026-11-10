@@ -625,6 +625,15 @@ fn segments_are_bounded() {
         let s = segment_page(&p, &small, &|| false);
         check_cover(&s, &p);
         assert!(s.all.len() <= cap.max(1), "{cap}: {}", s.all.len());
+        // Each segment the cap left whole is named, and only when the cap was hit.
+        let hit = limit_says(&s, "segments");
+        assert_eq!(
+            hit,
+            !s.short.is_empty(),
+            "{cap}: {:?} {:?}",
+            s.issues,
+            s.short
+        );
     }
 }
 
@@ -693,10 +702,42 @@ fn a_depth_bound_of_zero_keeps_the_page_one_leaf() {
     check_cover(&s, &p);
     assert_eq!(s.all.len(), 1);
     assert!(limit_says(&s, "nest deeper"), "{:?}", s.issues);
-    // A page of one line has nothing to part: no issue.
+    // The page is the leaf the bound left whole.
+    assert_eq!(s.short, [s.root]);
+    // A page of one line has nothing to part: no issue, nothing left short.
     let p = page([595.0, 842.0], column(50.0, 700.0, 1, 0), Vec::new());
     let s = segment_page(&p, &zero, &|| false);
     assert!(s.issues.is_empty(), "{:?}", s.issues);
+    assert!(s.short.is_empty());
+}
+
+/// Fix round 2 of Task 19 (N1): the probe of whether a bound left text whole parts the text
+/// as the walk does, strips between rules first. Three lines of one size and face, evenly
+/// apart, the first two between two rules: the whitespace cut and the style steps would not
+/// part them, the strip does, so a depth bound of zero leaves the page short.
+#[test]
+fn a_bound_that_leaves_a_strip_whole_leaves_the_page_short() {
+    let texts = vec![
+        run("Name Muster", 50.0, 700.0, 60.0, 9.0, 0),
+        run("Street Beispielweg", 50.0, 688.0, 90.0, 9.0, 1),
+        run("Further text below", 50.0, 676.0, 90.0, 9.0, 2),
+    ];
+    let rules = vec![
+        line(40.0, 711.0, 300.0, 711.0),
+        line(40.0, 684.0, 300.0, 684.0),
+    ];
+    let p = page([595.0, 842.0], texts.clone(), rules);
+    let zero = Limits {
+        max_cut_depth: 0,
+        ..Limits::default()
+    };
+    let s = segment_page(&p, &zero, &|| false);
+    check_cover(&s, &p);
+    assert_eq!(s.short, [s.root], "{:?}", s.issues);
+    // Without the rules nothing parts the three lines: nothing is left short.
+    let p = page([595.0, 842.0], texts, Vec::new());
+    let s = segment_page(&p, &zero, &|| false);
+    assert!(s.short.is_empty(), "{:?}", s.issues);
 }
 
 #[test]

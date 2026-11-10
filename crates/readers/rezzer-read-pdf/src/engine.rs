@@ -10,7 +10,6 @@ use layoutregions::segment::drawn::{DrawnStructure, Grids};
 use layoutregions::{
     Bounds, BoxIn, CodeIn, FontKind, GapIn, PageIn, PictureIn, PrimId, RuleIn, Shift, TextRun,
 };
-#[cfg(debug_assertions)]
 use layoutregions::{GivenRegion, Kind};
 
 use crate::layout::{Drawn, Run};
@@ -91,15 +90,7 @@ pub(crate) const NO_STRUCTURE: DrawnStructure = DrawnStructure {
     boxes_note: None,
 };
 
-/// The index of a text run in the page's flow, `None` for any other primitive.
-pub(crate) fn run_of(id: PrimId) -> Option<usize> {
-    match id {
-        PrimId::Text(i) => Some(i as usize),
-        _ => None,
-    }
-}
-
-fn text_run(r: &Run) -> TextRun {
+pub(crate) fn text_run(r: &Run) -> TextRun {
     TextRun {
         text: r.text.clone(),
         x: r.x,
@@ -216,8 +207,6 @@ mod tests {
         assert_eq!(page.texts[2].line, 2);
         assert_eq!(page.size, [200.0, 800.0]);
         assert_eq!(page.turn, 0);
-        assert_eq!(run_of(PrimId::Text(2)), Some(2));
-        assert_eq!(run_of(PrimId::Rule(2)), None);
     }
 
     #[test]
@@ -320,17 +309,25 @@ mod tests {
     }
 }
 
+/// The role of the given region of a form field (see [`given_regions`]).
+pub(crate) const FIELD_ROLE: &str = "form-field";
+
 /// The regions a page states itself, as the region engine takes them: every block of the tag
 /// tree the layout reads (`slots`, one per run of `page.texts`, in their order) and every
 /// form field box. A heading element is a `Heading` with the level its role gives, a
 /// paragraph element a `Paragraph` (a caption with the role `caption`), a note a
 /// `FootnoteLegend`, a list item a `List` region of its own whose `group` is the order of the
-/// list's first item, a table (its cells) a `Table`; each holds the runs of its element. A
-/// form field is a `LabelValue` of its box and the runs whose centre lies in it that no tag
-/// element holds (the runs sorted by their centre once). Untagged runs belong to none. In the
-/// order of their first run; the fields after the tag elements.
-#[cfg(debug_assertions)]
-pub(crate) fn given_regions(page: &PageIn, slots: &[crate::layout::Slot]) -> Vec<GivenRegion> {
+/// list's first item, a table (its cells) a `Table` when `table_kept` says its table is read
+/// as one (the cells of a tag table that does not hold are free text); each holds the runs of
+/// its element. A form field is the form's layer: a `Paragraph` of the role [`FIELD_ROLE`] of
+/// its box and the runs whose centre lies in it that no tag element holds (the runs sorted by
+/// their centre once), so no rule of the page reads pairs or tables over it. Untagged runs
+/// belong to none. In the order of their first run; the fields after the tag elements.
+pub(crate) fn given_regions(
+    page: &PageIn,
+    slots: &[crate::layout::Slot],
+    table_kept: &dyn Fn(usize) -> bool,
+) -> Vec<GivenRegion> {
     use crate::layout::Slot;
     use std::collections::HashMap;
     let mut at: HashMap<(u8, usize), usize> = HashMap::new();
@@ -346,8 +343,10 @@ pub(crate) fn given_regions(page: &PageIn, slots: &[crate::layout::Slot]) -> Vec
             }
             Slot::Para(e, _) => ((1, e), Kind::Paragraph, None, None, None),
             Slot::Item { list, item } => ((2, item), Kind::List, None, None, Some(list)),
-            Slot::Cell { table, .. } => ((3, table), Kind::Table, None, None, None),
-            Slot::Free | Slot::Block(_) => continue,
+            Slot::Cell { table, .. } if table_kept(table) => {
+                ((3, table), Kind::Table, None, None, None)
+            }
+            Slot::Cell { .. } | Slot::Free => continue,
         };
         held[i] = true;
         let k = *at.entry(key).or_insert_with(|| {
@@ -390,18 +389,18 @@ pub(crate) fn given_regions(page: &PageIn, slots: &[crate::layout::Slot]) -> Vec
             prims.push(PrimId::Text(i));
         }
         out.push(GivenRegion {
-            kind: Kind::LabelValue,
+            kind: Kind::Paragraph,
             prims,
             order: out.len() as u32,
             level: None,
-            role: None,
+            role: Some(FIELD_ROLE),
             group: None,
         });
     }
     out
 }
 
-#[cfg(all(test, debug_assertions))]
+#[cfg(test)]
 mod given_tests {
     use super::*;
     use crate::layout::Slot;
@@ -458,7 +457,7 @@ mod given_tests {
             Slot::Para(17, Some("footnote")),
             Slot::Free,
         ];
-        let given = given_regions(&page, &slots);
+        let given = given_regions(&page, &slots, &|_| true);
         type Got = (
             Kind,
             Option<u8>,
@@ -492,7 +491,7 @@ mod given_tests {
                     None,
                     vec![PrimId::Text(5)]
                 ),
-                (Kind::LabelValue, None, None, None, field),
+                (Kind::Paragraph, None, Some(FIELD_ROLE), None, field),
             ]
         );
         assert!(given.iter().enumerate().all(|(k, g)| g.order == k as u32));

@@ -180,6 +180,28 @@ fn tagged_span_table() -> Vec<u8> {
     b.finish(catalog)
 }
 
+/// Review focus 2 (Task 19): a table the tag tree states stays the given table. Its region
+/// is exact (the file states it, no rule typed it again), and each of its cell texts stands
+/// once in the Markdown, never also in a paragraph.
+#[test]
+fn tagged_table_stays_given_and_once() {
+    let out = read(&tagged_span_table());
+    let notes: Vec<&rezzer_model::RegionNote> = out
+        .document
+        .regions
+        .iter()
+        .filter(|r| r.anchor.0 == "p1:t1")
+        .collect();
+    assert_eq!(notes.len(), 1, "{:#?}", out.document.regions);
+    assert_eq!(notes[0].kind, rezzer_model::RegionKind::Table);
+    assert_eq!(notes[0].certainty, rezzer_model::Certainty::Exact);
+    let md = markdown(&out);
+    for cell in ["Both", "Left", "Right"] {
+        assert_eq!(md.matches(cell).count(), 1, "{cell}: {md}");
+    }
+    assert!(paragraphs(page(&out, 1)).is_empty(), "{md}");
+}
+
 #[test]
 fn tagged_cell_spans_come_from_the_attributes() {
     let out = read(&tagged_span_table());
@@ -356,7 +378,12 @@ fn a_ruled_table_region_reaches_its_rules() {
         .filter(|n| n.kind == rezzer_model::RegionKind::Paragraph)
         .map(|n| n.anchor.0.as_str())
         .collect();
-    assert_eq!(paragraphs, ["p1:b1", "p1:b2"], "{regions:#?}");
+    // Task 19: the engine may decide the text above and below the table as one paragraph
+    // region (one segment), at its first block; a finder of today gave each block its own.
+    assert!(
+        paragraphs == ["p1:b1", "p1:b2"] || paragraphs == ["p1:b1"],
+        "{regions:#?}"
+    );
 }
 
 /// A grid of drawn rules over most of the page (the page frame of plan 6) is refused: its
@@ -460,10 +487,19 @@ fn form_boxes_are_not_a_table() {
     // The direct deposit form is not tagged: its boxes and its sample check are no table.
     let sf = read_corpus("pdfbox-sf1199a-direct-deposit.pdf");
     assert_eq!(all_tables(&sf), 0);
-    assert!(
-        paragraphs(page(&sf, 4))
+    // Task 19a-5b: the check's lone line may be kept as laid out (no region type has clear
+    // evidence for it; a right read turned Spatial, Task 36): its text stays whole.
+    let laid_out = page(&sf, 4).iter().any(|b| match b {
+        Block::Spatial { lines, .. } => lines
             .iter()
-            .any(|p| p.contains("AUSTIN, TEXAS"))
+            .any(|l| l.pieces.iter().any(|p| p.text.contains("AUSTIN, TEXAS"))),
+        _ => false,
+    });
+    assert!(
+        laid_out
+            || paragraphs(page(&sf, 4))
+                .iter()
+                .any(|p| p.contains("AUSTIN, TEXAS"))
     );
 }
 
