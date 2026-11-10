@@ -11,7 +11,9 @@ use layoutregions::extract::table::ruled::{
     COLUMN_CUT_WORK, GridPart, RuledIn, boxed_field, column_cuts, edges, ruled_cells,
 };
 use layoutregions::extract::table::sections::{CUT_WORK, sections};
-use layoutregions::extract::table::{Cells, TITLE_WORK, column_across, title_over};
+use layoutregions::extract::table::{
+    Cells, SENTENCE_ACROSS, TITLE_WORK, column_across, title_over,
+};
 use layoutregions::segment::drawn::{Grids, Line, Unsearched};
 
 use super::banded::{Band, Shared, Taken, banded};
@@ -538,11 +540,8 @@ fn read_grid(sh: &Sheet<'_>, take: &mut Taking, found: &mut Found, s: GridSectio
     };
     // A figure caption next to the grid or inside it is looked at first, so a wide chart
     // gets no note; a grid of many columns is refused before its cells are worked out.
-    if figure_caption
-        || within
-            .iter()
-            .any(|&i| caption(&flow.runs[i].text) == Some(false))
-    {
+    let texts: Vec<&Run> = within.iter().map(|&i| &flow.runs[i]).collect();
+    if figure_caption || caption_inside(&texts) {
         refusal.refuse(take, FIGURE_NEAR);
         return Next::Section;
     }
@@ -602,12 +601,47 @@ fn read_grid(sh: &Sheet<'_>, take: &mut Taking, found: &mut Found, s: GridSectio
         for &(i, _) in &table.unplaced {
             take.held[i] = true;
         }
-        found.uncertain.push(format!(
-            "text in the table on page {} that starts with \"{}\" runs over the side of its \
-             cell into the text of another cell: it is read as a paragraph next to the table",
-            sh.page,
-            first_words(&flow.runs, &table)
-        ));
+        // One note for each reason the cells leave runs out (see `ruled_cells`).
+        let mut said: Vec<&str> = Vec::new();
+        for &(_, why) in &table.unplaced {
+            if said.contains(&why) {
+                continue;
+            }
+            said.push(why);
+            let what = if why == SENTENCE_ACROSS {
+                // The sentence is named by its own first words: it is the text that moved.
+                let mut runs: Vec<usize> = table
+                    .unplaced
+                    .iter()
+                    .filter(|u| u.1 == why)
+                    .map(|u| u.0)
+                    .collect();
+                runs.sort_by(|&a, &b| {
+                    let (ra, rb) = (&flow.runs[a], &flow.runs[b]);
+                    rb.y.total_cmp(&ra.y).then(ra.x.total_cmp(&rb.x))
+                });
+                let words: Vec<&str> = runs
+                    .iter()
+                    .flat_map(|&i| flow.runs[i].text.split_whitespace())
+                    .take(NAME_WORDS)
+                    .collect();
+                format!(
+                    "text over the table on page {} that starts with \"{}\" reads as a sentence \
+                     across the columns of its row: it is read as a paragraph next to the table",
+                    sh.page,
+                    words.join(" ")
+                )
+            } else {
+                format!(
+                    "text in the table on page {} that starts with \"{}\" runs over the side of \
+                     its cell into the text of another cell: it is read as a paragraph next to \
+                     the table",
+                    sh.page,
+                    first_words(&flow.runs, &table)
+                )
+            };
+            found.uncertain.push(what);
+        }
     }
     for &(r, k, cell) in &table.icons {
         take.icons.push((t, r, k, cell));

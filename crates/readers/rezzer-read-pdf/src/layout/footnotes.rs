@@ -18,7 +18,8 @@ use rezzer_model::{Block, Inline, SpatialLine, SpatialPiece, SpatialSpan};
 pub(super) use layoutregions::file::Legend as Found;
 use layoutregions::file::{NoteMark, RefPlace, Split, word_marks};
 
-use super::{EDGE, Flow, Run};
+use super::{EDGE, Flow, Run, Slot};
+use crate::tables::{MARK_RISE, MARK_SIZE, PlannedCell};
 
 /// Legend entries whose markers stand this many legend sizes apart or more are in other
 /// columns.
@@ -190,6 +191,113 @@ pub(super) fn take(page: u32, flow: &mut Flow, found: Option<&Found>) -> Legend 
             .map(|((label, runs), e)| (label, runs, e.cut))
             .collect(),
         labels,
+        refused: None,
+        ids,
+    }
+}
+
+/// The footnote legend of a tagged page (fix round 3): a list item or paragraph of the tag tree
+/// (by the runs' `slots` in `flow`) that opens with a raised number (a run at most
+/// [`MARK_SIZE`] times the size of the next run with ink, raised over its baseline by
+/// [`MARK_RISE`] to one times that size) is a footnote when a raised mark of the same number
+/// stands in a cell of a tagged table of the page (`cells`, see [`crate::tables::marks`]).
+/// Each such reference becomes a reference run to the footnote `fn:p<page>-<number>` and
+/// moves to the end of its cell, after the text it marks; the footnote's runs are taken out of
+/// `flow`. An entry no cell refers to stays text as the tags say, and a mark that no entry
+/// names stays text in its cell.
+pub(super) fn tagged_legend<'c>(
+    page: u32,
+    flow: &mut Flow,
+    cells: impl Iterator<Item = &'c mut PlannedCell>,
+) -> Legend {
+    // The runs of each element of the tag tree that may be a legend entry, in flow order.
+    let mut order: Vec<(u8, usize)> = Vec::new();
+    let mut runs_of: HashMap<(u8, usize), Vec<usize>> = HashMap::new();
+    for (i, s) in flow.slots.iter().enumerate() {
+        let key = match *s {
+            Slot::Item { item, .. } => (2, item),
+            Slot::Para(e, _) => (1, e),
+            _ => continue,
+        };
+        runs_of
+            .entry(key)
+            .or_insert_with(|| {
+                order.push(key);
+                Vec::new()
+            })
+            .push(i);
+    }
+    // Each entry that opens with a raised number: the number and its runs.
+    let mut entries: Vec<(u8, Vec<usize>)> = Vec::new();
+    for key in &order {
+        let runs = &runs_of[key];
+        let mut inked = runs
+            .iter()
+            .copied()
+            .filter(|&i| !flow.runs[i].text.trim().is_empty());
+        let (Some(first), Some(next)) = (inked.next(), inked.next()) else {
+            continue;
+        };
+        let (m, t) = (&flow.runs[first], &flow.runs[next]);
+        let rise = m.y - t.y;
+        let raised = m.size <= MARK_SIZE * t.size && rise >= MARK_RISE * t.size && rise <= t.size;
+        let Ok(n) = m.text.trim().parse::<u8>() else {
+            continue;
+        };
+        if raised && !entries.iter().any(|e| e.0 == n) {
+            entries.push((n, runs.clone()));
+        }
+    }
+    if entries.is_empty() {
+        return Legend::default();
+    }
+    // The references in the cells of the page's tagged tables.
+    let mut referred: HashSet<u8> = HashSet::new();
+    for cell in cells {
+        let refs: Vec<&Run> = cell.runs.iter().collect();
+        let marks = crate::tables::marks(&refs);
+        let mut moved: Vec<Run> = Vec::new();
+        let mut kept: Vec<Run> = Vec::with_capacity(cell.runs.len());
+        for (r, m) in std::mem::take(&mut cell.runs).into_iter().zip(marks) {
+            let n = r.text.trim().parse::<u8>().ok();
+            match n.filter(|n| m && entries.iter().any(|e| e.0 == *n)) {
+                Some(n) => {
+                    referred.insert(n);
+                    let mut r = r;
+                    r.text = format!("p{page}-{n}");
+                    r.note = true;
+                    moved.push(r);
+                }
+                None => kept.push(r),
+            }
+        }
+        kept.extend(moved);
+        cell.runs = kept;
+    }
+    entries.retain(|e| referred.contains(&e.0));
+    let mut owner: Vec<Option<usize>> = vec![None; flow.runs.len()];
+    for (k, (_, runs)) in entries.iter().enumerate() {
+        for &i in runs {
+            owner[i] = Some(k);
+        }
+    }
+    let mut runs: Vec<Vec<Run>> = vec![Vec::new(); entries.len()];
+    let taken = flow.take(|i, _| owner[i].is_some());
+    let mut ids = Vec::with_capacity(taken.len());
+    for (t, k) in taken.into_iter().zip(owner.into_iter().flatten()) {
+        runs[k].push(t.run);
+        ids.push(t.id);
+    }
+    Legend {
+        notes: entries
+            .iter()
+            .zip(runs)
+            .map(|((n, _), runs)| {
+                let cut = runs.first().map_or(0, |r| r.text.trim().len());
+                (format!("p{page}-{n}"), runs, cut)
+            })
+            .collect(),
+        labels: HashMap::new(),
         refused: None,
         ids,
     }

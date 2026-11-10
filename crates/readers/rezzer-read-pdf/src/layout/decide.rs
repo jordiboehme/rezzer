@@ -248,7 +248,15 @@ pub(super) fn decide(
             Some((seg.prims.clone(), bounds))
         })
         .collect();
-    let (limit, apart) = cut_short(page, &segs, &mut decisions, &mut pre_of, &mut own);
+    let (mut limit, mut apart) = cut_short(page, &segs, &mut decisions, &mut pre_of, &mut own);
+    part_pictures(
+        page,
+        &segs,
+        &mut decisions,
+        &mut pre_of,
+        &mut own,
+        (&mut limit, &mut apart),
+    );
     let mut of_run = vec![NONE; page.texts.len()];
     for (k, d) in decisions.iter().enumerate() {
         let prims = match &own[k] {
@@ -374,6 +382,80 @@ fn cut_short(
         apart.push(true);
     }
     (limit, apart)
+}
+
+/// The primitives and bounds of a decision whose runs differ from its segment's (see
+/// [`Decided::own`]).
+type Own = Option<(Vec<PrimId>, Bounds)>;
+
+/// The signal of a figure region of the pictures and codes a bound of the segmentation left
+/// in one region with text.
+pub(super) const PICTURES_UNPARTED: &str = "pdf.limit.pictures_unparted";
+
+/// On a page whose segmentation a bound or the stop cut short (`segs.issues`), a decision of
+/// another kind than a figure or a code that holds pictures or codes beside its text gives them
+/// to a `Figure` decision of their own (certainty `Unsure`, signal [`PICTURES_UNPARTED`]), so
+/// they are never hidden in a region of text: the bound left them unparted and their type was
+/// not looked for. The decision keeps its text and its type. Decisions the file or today's
+/// reading give (`pre`) are kept as they are. A new decision is kept apart from its neighbours
+/// and is no limit leaf (see [`cut_short`]): its pictures stand where they are drawn.
+fn part_pictures(
+    page: &PageIn,
+    segs: &Segments,
+    decisions: &mut Vec<Decision>,
+    pre: &mut Vec<Option<(usize, bool)>>,
+    own: &mut Vec<Own>,
+    (limit, apart): (&mut Vec<bool>, &mut Vec<bool>),
+) {
+    if segs.issues.is_empty() {
+        return;
+    }
+    for k in 0..decisions.len() {
+        if matches!(decisions[k].kind, Kind::Figure | Kind::Code) || pre[k].is_some() {
+            continue;
+        }
+        let Some(seg) = segs.all.get(decisions[k].seg.0 as usize) else {
+            continue;
+        };
+        if matches!(seg.source, Source::Given(_)) {
+            continue;
+        }
+        let prims = own[k].as_ref().map_or(&seg.prims, |o| &o.0);
+        let (media, rest): (Vec<PrimId>, Vec<PrimId>) = prims
+            .iter()
+            .partition(|p| matches!(p, PrimId::Picture(_) | PrimId::Code(_)));
+        if media.is_empty() || !rest.iter().any(|p| matches!(p, PrimId::Text(_))) {
+            continue;
+        }
+        let (Some(at_media), Some(at_rest)) = (
+            layoutregions::segment::bounds_of(page, &media),
+            layoutregions::segment::bounds_of(page, &rest),
+        ) else {
+            continue;
+        };
+        let count = media.len();
+        own[k] = Some((rest, at_rest));
+        apart[k] = true;
+        decisions.push(Decision {
+            seg: decisions[k].seg,
+            kind: Kind::Figure,
+            certainty: Certainty::Unsure,
+            score: Score(0),
+            signals: vec![Signal {
+                id: PICTURES_UNPARTED,
+                detail: format!(
+                    "a bound of the segmentation, or the time limit, left {count} pictures or \
+                     codes in one region with text: their region type was not looked for"
+                ),
+                weight: 0,
+            }],
+            alternatives: Vec::new(),
+        });
+        pre.push(None);
+        own.push(Some((media, at_media)));
+        limit.push(false);
+        apart.push(true);
+    }
 }
 
 /// How a neighbour laid out with an unsure decision stands: on its rows, side by side.

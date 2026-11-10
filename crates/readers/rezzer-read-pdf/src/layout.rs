@@ -876,6 +876,9 @@ fn page_blocks_until(
         for what in cx.tables.take_issues() {
             notes.push((what, LossReason::Damaged, Severity::Warning));
         }
+        for what in cx.tables.take_glued() {
+            notes.push((what, LossReason::Uncertain, Severity::Info));
+        }
         geometry = !fallbacks.is_empty();
         notes.extend(
             fallbacks
@@ -1054,7 +1057,7 @@ fn page_blocks_until(
     };
     engine_in.given = given;
     let limits = rezzer_layout::pdf::engine_limits(cx.budget);
-    let decided = decide::decide(
+    let mut decided = decide::decide(
         &engine_in,
         &drawn.structure.grids,
         (&cx.style.facts, &cx.style.index),
@@ -1063,6 +1066,44 @@ fn page_blocks_until(
         &limits,
         stop,
     );
+    // Pictures a bound left in a region of text are a figure region of their own (see
+    // `decide::part_pictures`): the page says so, without making the read partial.
+    for d in &decided.decisions {
+        if let Some(s) = d.signals.iter().find(|s| s.id == decide::PICTURES_UNPARTED) {
+            notes.push((
+                format!("on page {page}, {}", s.detail),
+                LossReason::Uncertain,
+                Severity::Info,
+            ));
+        }
+    }
+    // A tagged table whose glued columns were cut (see `tables::tagged`) is no exact reading
+    // of the tag tree: its region is the rule's, and says why.
+    if cx.tree.is_some() {
+        for k in 0..decided.decisions.len() {
+            if decided.source(k) != layoutregions::segment::Source::Given(Kind::Table) {
+                continue;
+            }
+            let table = decided.prims(k).iter().find_map(|p| match *p {
+                layoutregions::PrimId::Text(i) => match slots.get(i as usize) {
+                    Some(Slot::Cell { table, .. }) => Some(*table),
+                    _ => None,
+                },
+                _ => None,
+            });
+            if table.is_some_and(|t| cx.tables.is_cut(t)) {
+                let d = &mut decided.decisions[k];
+                d.certainty = layoutregions::Certainty::Rule;
+                d.signals.push(layoutregions::Signal {
+                    id: "pdf.tagged_table.cut",
+                    detail: "its tagged cells hold the text of several columns that line up \
+                             over its rows: they are cut into those columns"
+                        .to_string(),
+                    weight: 0,
+                });
+            }
+        }
+    }
     let tagged_page = cx.tree.is_some();
     // Each run to the extractor of its decision's kind.
     // The footnote legend of an untagged page (see `footnotes::take`), as today's reader takes
@@ -1072,7 +1113,13 @@ fn page_blocks_until(
     // the legend off the others). A tagged file says its notes. Lines of the legend it does not
     // read stay text.
     let legend = if tagged_page {
-        footnotes::Legend::default()
+        // A tagged page's legend: entries the tags give as list items or paragraphs that open
+        // with a raised number a cell of its tagged tables refers to.
+        let cells = placed.iter_mut().flat_map(|p| match p {
+            Placed::Table(t) if t.tagged.is_some() => t.rows.iter_mut().flatten().collect(),
+            _ => Vec::new(),
+        });
+        footnotes::tagged_legend(page, &mut flow, cells)
     } else {
         footnotes::take(page, &mut flow, cx.style.legends.get(&page))
     };
@@ -1820,7 +1867,6 @@ fn page_blocks_until(
     }
     segment_issues.dedup_by(|a, b| a.kind == b.kind);
     // Each decision says what the page wrote of it, then stands at the block it became.
-    let mut decided = decided;
     let demoted = std::mem::take(&mut built.demoted);
     let run_blocks = hosts::run_blocks(&built, &became, engine_in.texts.len());
     let written: Vec<Option<&'static str>> = run_blocks

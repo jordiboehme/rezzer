@@ -60,12 +60,14 @@ expression: json
         {
           "type": "media",
           "asset": "page-1-pic-1",
-          "alt": "logo or small picture, box 40, 770 to 140, 820"
+          "alt": "logo or small picture, box 40, 770 to 140, 820",
+          "anchor": "p1:m1"
         },
         {
           "type": "media",
           "asset": "page-1-pic-1",
-          "alt": "logo or small picture, box 455, 692 to 555, 732"
+          "alt": "logo or small picture, box 455, 692 to 555, 732",
+          "anchor": "p1:m2"
         },
         {
           "type": "paragraph",
@@ -590,7 +592,8 @@ expression: json
         {
           "type": "media",
           "asset": "page-1-code-1",
-          "alt": "Code 128, box 100, 120 to 172, 140"
+          "alt": "Code 128, box 100, 120 to 172, 140",
+          "anchor": "p1:m3"
         },
         {
           "type": "paragraph",
@@ -619,7 +622,8 @@ expression: json
         {
           "type": "media",
           "asset": "page-1-pic-1",
-          "alt": "logo or small picture, box 40, 30 to 100, 60"
+          "alt": "logo or small picture, box 40, 30 to 100, 60",
+          "anchor": "p1:m4"
         },
         {
           "type": "paragraph",
@@ -690,12 +694,14 @@ expression: json
         {
           "type": "media",
           "asset": "page-1-pic-1",
-          "alt": "logo or small picture, box 40, 770 to 140, 820"
+          "alt": "logo or small picture, box 40, 770 to 140, 820",
+          "anchor": "p2:m1"
         },
         {
           "type": "media",
           "asset": "page-1-pic-1",
-          "alt": "logo or small picture, box 455, 692 to 555, 732"
+          "alt": "logo or small picture, box 455, 692 to 555, 732",
+          "anchor": "p2:m2"
         },
         {
           "type": "paragraph",
@@ -734,7 +740,8 @@ expression: json
         {
           "type": "media",
           "asset": "page-1-pic-1",
-          "alt": "logo or small picture, box 40, 30 to 100, 60"
+          "alt": "logo or small picture, box 40, 30 to 100, 60",
+          "anchor": "p2:m3"
         },
         {
           "type": "paragraph",
@@ -1044,7 +1051,7 @@ expression: json
       ]
     },
     {
-      "anchor": "p1:b1",
+      "anchor": "p1:m1",
       "page": 1,
       "kind": "figure",
       "bounds": [
@@ -1064,7 +1071,7 @@ expression: json
       ]
     },
     {
-      "anchor": "p1:t1",
+      "anchor": "p1:m2",
       "page": 1,
       "kind": "figure",
       "bounds": [
@@ -1084,7 +1091,7 @@ expression: json
       ]
     },
     {
-      "anchor": "p1:b6",
+      "anchor": "p1:m4",
       "page": 1,
       "kind": "figure",
       "bounds": [
@@ -1104,7 +1111,7 @@ expression: json
       ]
     },
     {
-      "anchor": "p1:b5",
+      "anchor": "p1:m3",
       "page": 1,
       "kind": "code",
       "bounds": [
@@ -1149,7 +1156,7 @@ expression: json
       ]
     },
     {
-      "anchor": "p2:b2",
+      "anchor": "p2:m1",
       "page": 2,
       "kind": "figure",
       "bounds": [
@@ -1175,7 +1182,7 @@ expression: json
       ]
     },
     {
-      "anchor": "p2:b2",
+      "anchor": "p2:m2",
       "page": 2,
       "kind": "figure",
       "bounds": [
@@ -1201,7 +1208,7 @@ expression: json
       ]
     },
     {
-      "anchor": "p2:b3",
+      "anchor": "p2:m3",
       "page": 2,
       "kind": "figure",
       "bounds": [

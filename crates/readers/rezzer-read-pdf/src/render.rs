@@ -406,6 +406,10 @@ pub(crate) struct Small {
     pub hint: bool,
     /// It is not a picture but a region of paths that may be a code.
     pub vector: bool,
+    /// What it is among the page's primitives as the region engine takes them: the picture
+    /// `PrimId::Picture(k)` of `PageItems::images[k]`, or the code `PrimId::Code(j)` of
+    /// `PageItems::codes[j]` (see `engine::page_in`).
+    pub prim: layoutregions::PrimId,
     /// It is page furniture (a picture at one place on many pages): its asset is named once,
     /// at its first place, with its pages.
     pub furniture: Option<Furniture>,
@@ -648,8 +652,12 @@ pub(crate) fn vision(
             .filter(|&(k, _)| visible(&items.images[k]) >= SMALL_PICTURE)
             .collect()
     };
-    let mut vectors: Vec<&crate::codes::VectorCode> =
-        items.codes.iter().filter(|c| visible(&c.b) > 0.0).collect();
+    let mut vectors: Vec<(usize, &crate::codes::VectorCode)> = items
+        .codes
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| visible(&c.b) > 0.0)
+        .collect();
     if !words.is_empty() {
         // The page is rendered whole: its small pictures are named in its alt text and not
         // cut out again.
@@ -662,7 +670,7 @@ pub(crate) fn vision(
         // drawn as paths, then pictures that look like codes.
         let mut regions: Vec<Region> = vectors
             .iter()
-            .map(|c| Region {
+            .map(|&(_, c)| Region {
                 b: c.b,
                 how: modules_how(c),
             })
@@ -716,6 +724,7 @@ pub(crate) fn vision(
             // finer than the page's render.
             let how = items.images_px.get(k).map(|&(pw, ph)| How::Picture(pw, ph));
             Small {
+                prim: layoutregions::PrimId::Picture(u32::try_from(k).unwrap_or(u32::MAX)),
                 b,
                 framed,
                 id,
@@ -729,7 +738,8 @@ pub(crate) fn vision(
         })
         .collect();
     let room = cap.saturating_sub(list.len());
-    list.extend(vectors.into_iter().take(room).map(|c| Small {
+    list.extend(vectors.into_iter().take(room).map(|(j, c)| Small {
+        prim: layoutregions::PrimId::Code(u32::try_from(j).unwrap_or(u32::MAX)),
         b: c.b,
         framed: items.turn.place_box(c.b, width, height),
         id: c.id,
@@ -745,6 +755,7 @@ pub(crate) fn vision(
         let b = items.images[k];
         let id = items.images_id.get(k).copied().unwrap_or(0);
         Small {
+            prim: layoutregions::PrimId::Picture(u32::try_from(k).unwrap_or(u32::MAX)),
             b,
             framed: items.turn.place_box(b, width, height),
             id,

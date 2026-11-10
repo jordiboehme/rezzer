@@ -202,6 +202,480 @@ fn tagged_table_stays_given_and_once() {
     assert!(paragraphs(page(&out, 1)).is_empty(), "{md}");
 }
 
+/// A tagged page with a table of eight visible columns (a bold-free header and four item rows,
+/// 64 points apart) whose tags hold two cells a row: the first column, and the rest of the row
+/// in one cell (an item table as some producers tag it).
+fn tagged_glued_table() -> (Vec<u8>, Vec<Vec<String>>) {
+    let titles = [
+        "Pos", "Nr", "Text", "Menge", "Einh", "Preis", "MwSt", "Summe",
+    ];
+    let mut rows: Vec<Vec<String>> = vec![titles.iter().map(|t| t.to_string()).collect()];
+    for k in 0..4u32 {
+        rows.push(vec![
+            format!("{}", k + 1),
+            format!("A-10{k}"),
+            "Muster".to_string(),
+            format!("{}", k + 2),
+            "Stk".to_string(),
+            "12,50".to_string(),
+            "19%".to_string(),
+            "25,00".to_string(),
+        ]);
+    }
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let kid = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let mut content = String::from("BT /F1 9 Tf ");
+    let mut mcid = 0;
+    for (r, row) in rows.iter().enumerate() {
+        let y = 700.0 - 13.0 * r as f32;
+        let tag = if r == 0 { "TH" } else { "TD" };
+        // The first cell, then the rest of the row in one marked content.
+        content += &format!(
+            "/{tag} <</MCID {mcid}>> BDC 1 0 0 1 40 {y} Tm ({}) Tj EMC ",
+            row[0]
+        );
+        content += &format!("/{tag} <</MCID {}>> BDC ", mcid + 1);
+        for (c, t) in row.iter().enumerate().skip(1) {
+            content += &format!("1 0 0 1 {} {y} Tm ({t}) Tj ", 40.0 + 64.0 * c as f32);
+        }
+        content += "EMC ";
+        mcid += 2;
+    }
+    content += "ET";
+    let cs = b.stream("", content.as_bytes());
+    let root = b.reserve();
+    let table = b.reserve();
+    let trs: Vec<u32> = rows.iter().map(|_| b.reserve()).collect();
+    let mut cells = Vec::new();
+    for (r, tr) in trs.iter().enumerate() {
+        let tag = if r == 0 { "TH" } else { "TD" };
+        let a = b.add(format!(
+            "<< /Type /StructElem /S /{tag} /P {tr} 0 R /Pg {kid} 0 R /K {} >>",
+            2 * r
+        ));
+        let z = b.add(format!(
+            "<< /Type /StructElem /S /{tag} /P {tr} 0 R /Pg {kid} 0 R /K {} >>",
+            2 * r + 1
+        ));
+        b.set(
+            *tr,
+            format!("<< /Type /StructElem /S /TR /P {table} 0 R /K [{a} 0 R {z} 0 R] >>"),
+        );
+        cells.push(format!("{a} 0 R {z} 0 R"));
+    }
+    let kids: Vec<String> = trs.iter().map(|t| format!("{t} 0 R")).collect();
+    b.set(
+        table,
+        format!(
+            "<< /Type /StructElem /S /Table /P {root} 0 R /K [{}] >>",
+            kids.join(" ")
+        ),
+    );
+    b.set(
+        root,
+        format!(
+            "<< /Type /StructTreeRoot /K {table} 0 R /ParentTree << /Nums [0 [{}]] >> >>",
+            cells.join(" ")
+        ),
+    );
+    b.set(
+        kid,
+        format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] /StructParents 0 \
+             /Resources << /Font << /F1 {font} 0 R >> >> /Contents {cs} 0 R >>"
+        ),
+    );
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(
+        catalog,
+        format!(
+            "<< /Type /Catalog /Pages {tree} 0 R /MarkInfo << /Marked true >> \
+             /StructTreeRoot {root} 0 R >>"
+        ),
+    );
+    (b.finish(catalog), rows)
+}
+
+/// Task 19b (carried: tagged tables are checked against geometry): a tagged table whose tags
+/// put the rest of each row in one cell, so two tagged columns hold eight visible ones, loses
+/// its certainty: its glued cells are cut where their text stands apart, and its eight columns
+/// are a table with each value in its own cell. A note says why.
+#[test]
+fn a_tagged_table_whose_cells_cross_its_columns_is_cut_into_them() {
+    let (bytes, rows) = tagged_glued_table();
+    let out = read(&bytes);
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:?}\n{}", markdown(&out));
+    assert_eq!(found[0].1, rows, "{}", markdown(&out));
+    assert_no_exact_table(&out);
+    assert_glued_note(&out, 7, 1);
+}
+
+/// No table region of `out` is exact: the tag tree is no exact reading of a table it glues.
+fn assert_no_exact_table(out: &ReadOutcome) {
+    assert!(
+        out.document
+            .regions
+            .iter()
+            .all(|r| r.certainty != rezzer_model::Certainty::Exact
+                || r.kind != rezzer_model::RegionKind::Table),
+        "{:#?}",
+        out.document.regions
+    );
+}
+
+/// `out` says that a tagged table on page 1 holds the text of `columns` columns in `glued`
+/// of its tagged columns.
+fn assert_glued_note(out: &ReadOutcome, columns: usize, glued: usize) {
+    let want = format!(
+        "a tagged table on page 1 holds the text of {columns} columns in {glued} of its tagged \
+         columns; its cells are cut where that text lines up apart over its rows"
+    );
+    let notes: Vec<&str> = out
+        .document
+        .losses
+        .iter()
+        .map(|l| l.what.as_str())
+        .collect();
+    assert!(notes.contains(&want.as_str()), "{notes:?}");
+}
+
+/// One run of a tagged table: x, baseline, size and text.
+type TagRun = (f32, f32, f32, String);
+
+/// A tagged page with a table of two tagged cells a row, the first holding the runs left of
+/// `split`, the second all the others (header row `TH`), each run in a marked content of its
+/// own (as a producer writes text pieces of one cell), drawn with rules that agree with the
+/// tags: one column rule at `split` and a rule under each row (`bottoms`). With `legend` not
+/// empty, a tagged list of one item (`L`, `LI`, `LBody`) of those runs stands under the table.
+fn two_cell_tagged_table(
+    rows: &[Vec<TagRun>],
+    split: f32,
+    bottoms: &[f32],
+    legend: &[TagRun],
+) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let kid = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let top = rows[0].iter().map(|r| r.1).fold(f32::MIN, f32::max) + 12.0;
+    let low = bottoms.iter().copied().fold(f32::MAX, f32::min);
+    let mut content = format!("0.5 w 30 {top} m 520 {top} l S {split} {low} m {split} {top} l S ");
+    for y in bottoms {
+        content += &format!("30 {y} m 520 {y} l S ");
+    }
+    // The marked contents of each cell, by row and cell.
+    let mut mcids: Vec<[Vec<usize>; 2]> = Vec::new();
+    let mut next = 0usize;
+    for (r, row) in rows.iter().enumerate() {
+        let tag = if r == 0 { "TH" } else { "TD" };
+        let mut cells: [Vec<usize>; 2] = [Vec::new(), Vec::new()];
+        for (cell, ids) in cells.iter_mut().enumerate() {
+            for (x, y, size, t) in row.iter().filter(|r| (r.0 < split) == (cell == 0)) {
+                content += &format!(
+                    "/{tag} <</MCID {next}>> BDC BT /F1 {size} Tf 1 0 0 1 {x} {y} Tm ({t}) Tj \
+                     ET EMC "
+                );
+                ids.push(next);
+                next += 1;
+            }
+        }
+        mcids.push(cells);
+    }
+    let mut legend_ids = Vec::new();
+    for (x, y, size, t) in legend {
+        content += &format!(
+            "/LBody <</MCID {next}>> BDC BT /F1 {size} Tf 1 0 0 1 {x} {y} Tm ({t}) Tj ET EMC "
+        );
+        legend_ids.push(next);
+        next += 1;
+    }
+    let cs = b.stream("", content.as_bytes());
+    let root = b.reserve();
+    let table = b.reserve();
+    let trs: Vec<u32> = rows.iter().map(|_| b.reserve()).collect();
+    let mut parents: Vec<String> = vec![String::new(); next];
+    for (r, tr) in trs.iter().enumerate() {
+        let tag = if r == 0 { "TH" } else { "TD" };
+        let mut elems = Vec::new();
+        for ids in &mcids[r] {
+            let k: Vec<String> = ids.iter().map(|m| m.to_string()).collect();
+            let e = b.add(format!(
+                "<< /Type /StructElem /S /{tag} /P {tr} 0 R /Pg {kid} 0 R /K [{}] >>",
+                k.join(" ")
+            ));
+            for &m in ids {
+                parents[m] = format!("{e} 0 R");
+            }
+            elems.push(format!("{e} 0 R"));
+        }
+        b.set(
+            *tr,
+            format!(
+                "<< /Type /StructElem /S /TR /P {table} 0 R /K [{}] >>",
+                elems.join(" ")
+            ),
+        );
+    }
+    let mut root_kids = format!("{table} 0 R");
+    if !legend_ids.is_empty() {
+        let (list, item) = (b.reserve(), b.reserve());
+        let k: Vec<String> = legend_ids.iter().map(|m| m.to_string()).collect();
+        let body = b.add(format!(
+            "<< /Type /StructElem /S /LBody /P {item} 0 R /Pg {kid} 0 R /K [{}] >>",
+            k.join(" ")
+        ));
+        for &m in &legend_ids {
+            parents[m] = format!("{body} 0 R");
+        }
+        b.set(
+            item,
+            format!("<< /Type /StructElem /S /LI /P {list} 0 R /K [{body} 0 R] >>"),
+        );
+        b.set(
+            list,
+            format!("<< /Type /StructElem /S /L /P {root} 0 R /K [{item} 0 R] >>"),
+        );
+        root_kids += &format!(" {list} 0 R");
+    }
+    let kids: Vec<String> = trs.iter().map(|t| format!("{t} 0 R")).collect();
+    b.set(
+        table,
+        format!(
+            "<< /Type /StructElem /S /Table /P {root} 0 R /K [{}] >>",
+            kids.join(" ")
+        ),
+    );
+    b.set(
+        root,
+        format!(
+            "<< /Type /StructTreeRoot /K [{root_kids}] /ParentTree << /Nums [0 [{}]] >> >>",
+            parents.join(" ")
+        ),
+    );
+    b.set(
+        kid,
+        format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] /StructParents 0 \
+             /Resources << /Font << /F1 {font} 0 R >> >> /Contents {cs} 0 R >>"
+        ),
+    );
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(
+        catalog,
+        format!(
+            "<< /Type /Catalog /Pages {tree} 0 R /MarkInfo << /Marked true >> \
+             /StructTreeRoot {root} 0 R >>"
+        ),
+    );
+    b.finish(catalog)
+}
+
+/// Fix round 1 (F2): an item table tagged as two cells a row (a date, and everything else),
+/// with rules that agree with the tags: in the second cell the text stands in seven columns
+/// that line up over a header of two lines and every item row; descriptions wrap onto lines
+/// with nothing in the other columns, and an item without a price has no tax, net or gross.
+/// The tagged cells are cut into the columns: header and every row in eight columns, the
+/// wrapped lines in the description cell, empty cells where the free item has no amounts.
+#[test]
+fn a_tagged_item_table_glued_behind_its_first_cell_is_cut_into_its_columns() {
+    let out = read(&glued_item_table(&[]));
+    check_glued_items(&out, "1 19 %");
+}
+
+/// Fix round 3 (H1): the raised mark before each rate is a reference to a footnote when the
+/// page's tags give a list item that opens with the same raised number: the rate cell holds
+/// the rate and the reference after it, the item is the footnote, not a list item.
+#[test]
+fn a_raised_mark_in_a_tagged_cell_refers_to_the_tagged_legend() {
+    let legend = [
+        (40.0, 402.9, 5.0, "1".to_string()),
+        (44.0, 400.0, 8.0, "Muster Hinweis zum Satz".to_string()),
+    ];
+    let out = read(&glued_item_table(&legend));
+    check_glued_items(&out, "19 %");
+    // The reference stands after the rate in its cell.
+    let cell = page(&out, 1)
+        .iter()
+        .find_map(|b| match b {
+            Block::Table { rows, .. } => Some(rows[1][4].inlines.clone()),
+            _ => None,
+        })
+        .expect("a table");
+    assert!(
+        matches!(cell.last(), Some(rezzer_model::Inline::FootnoteRef { id }) if id == "p1-1"),
+        "{cell:?}"
+    );
+    let md = markdown(&out);
+    assert!(md.contains("[^p1-1]: Muster Hinweis zum Satz"), "{md}");
+    assert!(!md.contains("- 1 Muster"), "{md}");
+}
+
+/// The item table of [`a_tagged_item_table_glued_behind_its_first_cell_is_cut_into_its_columns`]
+/// with the tagged list item `legend` under it.
+fn glued_item_table(legend: &[TagRun]) -> Vec<u8> {
+    let size = 8.0f32;
+    let right = |edge: f32, t: &str| edge - helvetica_width(t, size);
+    let run = |x: f32, y: f32, t: &str| (x, y, size, t.to_string());
+    // The rate column starts a little more than a quarter size after the hyphenated title
+    // over the service dates; a raised mark of size 5 stands right before each rate, under
+    // the end of that title and well after the date.
+    let rate = 258.0 + helvetica_width("Leistungs-", size) + 2.7;
+    let mark = |y: f32| {
+        (
+            rate - 2.9 - helvetica_width("1", 5.0),
+            y + 2.9,
+            5.0,
+            "1".to_string(),
+        )
+    };
+    let header = |y: f32| {
+        vec![
+            run(40.0, y, "Datum"),
+            run(80.0, y, "Bezeichnung"),
+            run(right(250.0, "Preis"), y, "Preis"),
+            run(258.0, y, "Leistungs-"),
+            run(rate, y, "Satz"),
+            run(right(390.0, "Steuer"), y, "Steuer"),
+            run(right(440.0, "Netto"), y, "Netto"),
+            run(right(490.0, "Brutto"), y, "Brutto"),
+            run(258.0, y - 10.0, "datum"),
+            run(right(390.0, "Euro"), y - 10.0, "Euro"),
+            run(right(440.0, "Euro"), y - 10.0, "Euro"),
+            run(right(490.0, "Euro"), y - 10.0, "Euro"),
+        ]
+    };
+    let item = |y: f32, v: [&str; 8], wraps: &[&str]| {
+        let mut out = vec![
+            run(40.0, y, v[0]),
+            run(80.0, y, v[1]),
+            run(right(250.0, v[2]), y, v[2]),
+            run(258.0, y, v[3]),
+        ];
+        if !v[4].is_empty() {
+            out.push(mark(y));
+            out.push(run(rate, y, v[4]));
+            out.push(run(right(390.0, v[5]), y, v[5]));
+            out.push(run(right(440.0, v[6]), y, v[6]));
+            out.push(run(right(490.0, v[7]), y, v[7]));
+        }
+        for (k, w) in wraps.iter().enumerate() {
+            out.push(run(80.0, y - 10.0 * (k + 1) as f32, w));
+        }
+        out
+    };
+    let rows = vec![
+        header(600.0),
+        item(
+            574.0,
+            [
+                "01.02.26",
+                "Muster Teil A,",
+                "12,50",
+                "3.2.26",
+                "19 %",
+                "2,38",
+                "12,50",
+                "14,88",
+            ],
+            &["Lager Nord, Fach", "(Muster)"],
+        ),
+        item(
+            530.0,
+            [
+                "04.02.26",
+                "Muster Teil B",
+                "0,00",
+                "5.2.26",
+                "",
+                "",
+                "",
+                "",
+            ],
+            &["Lager West"],
+        ),
+        item(
+            496.0,
+            [
+                "06.02.26",
+                "Muster Teil C",
+                "8,40",
+                "7.2.26",
+                "19 %",
+                "1,60",
+                "8,40",
+                "10,00",
+            ],
+            &[],
+        ),
+    ];
+    two_cell_tagged_table(&rows, 76.0, &[586.0, 542.0, 508.0, 492.0], legend)
+}
+
+/// The cells of [`glued_item_table`] as read in `out`, the rate cells holding `rate`.
+fn check_glued_items(out: &ReadOutcome, rate: &str) {
+    let found = tables(page(out, 1));
+    assert_eq!(found.len(), 1, "{found:?}\n{}", markdown(out));
+    let want: Vec<Vec<&str>> = vec![
+        vec![
+            "Datum",
+            "Bezeichnung",
+            "Preis",
+            "Leistungs-datum",
+            "Satz",
+            "Steuer Euro",
+            "Netto Euro",
+            "Brutto Euro",
+        ],
+        vec![
+            "01.02.26",
+            "Muster Teil A, Lager Nord, Fach (Muster)",
+            "12,50",
+            // The date alone: the raised mark before the rate is no ink of the date's column; it
+            // stands with the rate, the run nearest to it (the model has no inline for a bare
+            // mark that no footnote of the page names).
+            "3.2.26",
+            rate,
+            "2,38",
+            "12,50",
+            "14,88",
+        ],
+        vec![
+            "04.02.26",
+            "Muster Teil B Lager West",
+            "0,00",
+            "5.2.26",
+            "",
+            "",
+            "",
+            "",
+        ],
+        vec![
+            "06.02.26",
+            "Muster Teil C",
+            "8,40",
+            "7.2.26",
+            rate,
+            "1,60",
+            "8,40",
+            "10,00",
+        ],
+    ];
+    assert_eq!(found[0].1, want, "{}", markdown(out));
+    assert_no_exact_table(out);
+    assert_glued_note(out, 7, 1);
+}
+
 #[test]
 fn tagged_cell_spans_come_from_the_attributes() {
     let out = read(&tagged_span_table());
@@ -816,6 +1290,78 @@ fn ruled_cells(xs: &[f32], tag: &str) -> String {
     c
 }
 
+/// Task 17 D9: a sentence printed over the last row of a ruled table, its word gap on a column
+/// rule, is no text of the table's cells: it is read as a paragraph next to the table, with a
+/// note that says why. The rows above keep their cells.
+#[test]
+fn a_sentence_over_a_ruled_row_is_a_paragraph_next_to_the_table() {
+    let xs = [50.0f32, 150.0, 250.0, 350.0];
+    let mut c = String::from("0.5 w ");
+    for k in 0..5 {
+        let y = 700.0 - 20.0 * k as f32;
+        c += &format!("{} {y} m {} {y} l S ", xs[0], xs[3]);
+    }
+    for x in xs {
+        c += &format!("{x} 620 m {x} 700 l S ");
+    }
+    let rows = [
+        ["Teil", "Menge", "Lager"],
+        ["Muster A", "2", "Nord"],
+        ["Muster B", "1", "West"],
+    ];
+    for (r, row) in rows.iter().enumerate() {
+        let y = 686.0 - 20.0 * r as f32;
+        for (k, t) in row.iter().enumerate() {
+            c += &show("F1", 8.0, xs[k] + 4.0, y, t);
+        }
+    }
+    // The sentence: its first words end right before the rule at 150, the rest starts a word
+    // gap after it and runs over the rule at 250.
+    let first = "die Ware wird nach dem";
+    let x0 = 149.0 - helvetica_width(first, 8.0);
+    c += &show("F1", 8.0, x0, 626.0, first);
+    c += &show(
+        "F1",
+        8.0,
+        151.5,
+        626.0,
+        "Erhalt der Rechnung geliefert und bezahlt",
+    );
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(
+        found[0].1,
+        [
+            ["Teil", "Menge", "Lager"],
+            ["Muster A", "2", "Nord"],
+            ["Muster B", "1", "West"],
+        ],
+        "{found:?}"
+    );
+    let paras = paragraphs(page(&out, 1));
+    assert!(
+        paras
+            .iter()
+            .any(|p| p == "die Ware wird nach dem Erhalt der Rechnung geliefert und bezahlt"),
+        "{paras:?}"
+    );
+    let notes: Vec<&str> = out
+        .document
+        .losses
+        .iter()
+        .map(|l| l.what.as_str())
+        .collect();
+    assert!(
+        notes.contains(
+            &"text over the table on page 1 that starts with \"die Ware wird nach dem \
+              Erhalt\" reads as a sentence across the columns of its row: it is read as a \
+              paragraph next to the table"
+        ),
+        "{notes:?}"
+    );
+}
+
 #[test]
 fn rules_close_together_do_not_chain() {
     // Two tables 3.6 points apart with a short tick between their positions far below: two
@@ -912,6 +1458,78 @@ fn a_grid_next_to_a_figure_caption_gets_no_note() {
             .any(|l| l.what.contains("Possible table")),
         "{:?}",
         out.document.losses
+    );
+}
+
+/// Task 19b (carried from Task 18): a ruled parts list whose drawing column holds "Abb. 3"
+/// cells is a table read by its rules. Such a cell points to a figure, it captions none; only
+/// a caption alone on its line in a grid speaks for a chart.
+#[test]
+fn a_ruled_table_with_figure_reference_cells_is_a_table() {
+    let xs = [50.0f32, 150.0, 250.0, 350.0];
+    let rows = [
+        ["Teil", "Menge", "Zeichnung"],
+        ["Muster A", "2", "Abb. 3"],
+        ["Muster B", "1", "Abb. 4"],
+        ["Muster C", "4", "Abbildung 5"],
+    ];
+    let mut c = String::from("0.5 w ");
+    for k in 0..5 {
+        let y = 700.0 - 20.0 * k as f32;
+        c += &format!("{} {y} m {} {y} l S ", xs[0], xs[3]);
+    }
+    for x in xs {
+        c += &format!("{x} 620 m {x} 700 l S ");
+    }
+    for (r, row) in rows.iter().enumerate() {
+        let y = 686.0 - 20.0 * r as f32;
+        for (k, t) in row.iter().enumerate() {
+            c += &show("F1", 8.0, xs[k] + 4.0, y, t);
+        }
+    }
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].1, rows, "{found:?}");
+    // The grid's own rules read it, not a reader without rules after a refusal.
+    let note = out
+        .document
+        .regions
+        .iter()
+        .find(|r| r.anchor.0 == "p1:t1")
+        .expect("the table's region");
+    assert!(
+        note.evidence
+            .iter()
+            .any(|e| matches!(e, rezzer_model::Evidence::Rule { id, .. } if id == "pdf.ruled")),
+        "{note:#?}"
+    );
+}
+
+/// Fix round 1 (F1): the drawing of a grid next to a figure caption is a figure with no media
+/// block of its own and no text (the grid's text is its own region): it wrote nothing on the
+/// page, so its region stands at the page. A figure or code region with text and no media block
+/// keeps the block of its text (lib.rs); no such region occurs in the three dump sets.
+#[test]
+fn a_figure_without_a_media_block_or_text_stands_at_the_page() {
+    let mut c = String::from("0.5 w ");
+    c += &ruled_cells(&[50.0, 130.0, 210.0, 290.0], "f");
+    c += &show("F1", 9.0, 50.0, 630.0, "Figure 3: A chart of the results");
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let figures: Vec<&rezzer_model::RegionNote> = out
+        .document
+        .regions
+        .iter()
+        .filter(|r| r.kind == rezzer_model::RegionKind::Figure)
+        .collect();
+    assert_eq!(figures.len(), 1, "{:#?}", out.document.regions);
+    assert_eq!(figures[0].anchor.0, "p1", "{figures:#?}");
+    assert!(
+        figures[0].evidence.iter().any(|e| matches!(
+            e,
+            rezzer_model::Evidence::Rule { id, .. } if id == "figure.drawn_caption"
+        )),
+        "{figures:#?}"
     );
 }
 

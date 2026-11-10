@@ -362,6 +362,83 @@ fn unplaced_run_is_reported() {
     assert!(!at.contains_key(&note));
 }
 
+/// Task 17 D9: a sentence printed over a ruled row, in runs parted where its word gap falls on
+/// a column rule (the rule at 100 between "wird" and "nach"), reads as a sentence across the
+/// columns (`sentence_across`): its runs are in no cell, so the reader keeps the line as a
+/// paragraph next to the table. The values of the rows above keep their cells.
+#[test]
+fn a_sentence_over_a_ruled_row_is_in_no_cell() {
+    let g = grid(vec![
+        vec![("Name", 5.0), ("Amounts", 105.0), ("Note", 305.0)],
+        vec![("Muster GmbH", 5.0), ("1.234,56", 105.0), ("12,50", 205.0)],
+        vec![
+            ("die Ware wird", 22.0),
+            ("nach dem Erhalt geliefert", 103.0),
+        ],
+    ]);
+    let Cells::Table(table) = read(&g) else {
+        panic!("a table");
+    };
+    assert_eq!(
+        table.unplaced,
+        [(6, SENTENCE_ACROSS), (7, SENTENCE_ACROSS)],
+        "{table:#?}"
+    );
+    let at = placed(&table);
+    assert_eq!(at.len() + 2, g.runs.len());
+    assert_eq!(at[&3], (1, 0));
+    assert_eq!(at[&4], (1, 1));
+    // Its row held nothing else: it is no row of the table.
+    assert_eq!(table.rows.len(), 2, "{table:#?}");
+    // Two short titles in two cells of a row of more text, close enough to read as one piece:
+    // the cells' own text, not a sentence printed over the row.
+    let mut g = grid(vec![
+        vec![("Name", 5.0), ("Amounts", 105.0), ("Note", 305.0)],
+        vec![("Gezahlte Beträge", 4.0), ("Muster", 103.0)],
+        vec![("Muster AG", 5.0), ("2.000,00", 105.0), ("3,00", 205.0)],
+    ]);
+    g.runs.push(run_at("im Jahr", 5.0, 256.0 + 14.0, 9));
+    let Cells::Table(table) = read(&g) else {
+        panic!("a table");
+    };
+    assert!(table.unplaced.is_empty(), "{table:#?}");
+    // Values in the cells of a row are no sentence, wherever a run stands.
+    let g = grid(vec![
+        vec![("Name", 5.0), ("Amounts", 105.0), ("Note", 305.0)],
+        vec![("Muster GmbH", 5.0), ("1.234,56", 105.0), ("12,50", 205.0)],
+        vec![("Muster AG", 5.0), ("2.000,00", 105.0), ("3,00", 205.0)],
+    ]);
+    let Cells::Table(table) = read(&g) else {
+        panic!("a table");
+    };
+    assert!(table.unplaced.is_empty(), "{table:#?}");
+}
+
+/// Task 19b: a figure's name and number alone in a cell beside other cells names a figure, it
+/// captions none; a caption alone on its line, or with caption words in the runs that go on
+/// from it, is one.
+#[test]
+fn a_figure_reference_in_a_cell_is_no_caption_inside() {
+    use super::caption::caption_inside;
+    let reference = [
+        run_at("Abb. 3", 5.0, 100.0, 0),
+        run_at("Muster", 105.0, 100.0, 0),
+    ];
+    assert!(!caption_inside(&reference));
+    let alone = [
+        run_at("Abb. 3", 5.0, 100.0, 0),
+        run_at("Muster", 105.0, 80.0, 1),
+    ];
+    assert!(caption_inside(&alone));
+    // "Abb. 3:" then its words in a run of their own, a word gap after it, then a cell.
+    let split = [
+        run_at("Abb. 3:", 5.0, 100.0, 0),
+        run_at("Muster Teile", 50.0, 100.0, 0),
+        run_at("4", 205.0, 100.0, 0),
+    ];
+    assert!(caption_inside(&split));
+}
+
 #[test]
 fn a_header_row_is_judged_by_its_text() {
     let cell = |text: &str, bold: bool| {

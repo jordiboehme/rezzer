@@ -127,6 +127,7 @@ pub fn block_word(block: &Block) -> &'static str {
         Block::Table { .. } => "table",
         Block::Spatial { .. } => "spatial",
         Block::Section { .. } => "section",
+        Block::Media { .. } => "media",
         Block::Paragraph { role, .. } => match role.as_deref() {
             Some("page-header") => "page-header",
             Some("page-footer") => "page-footer",
@@ -973,39 +974,53 @@ fn lay_out(
                     anchors.push(Some(Anchor(anchor.clone())));
                 }
             }
-            out.doc.regions.extend(rezzer_layout::pdf::pdf_regions(
-                std::slice::from_ref(&page_regions),
-                &|_, host| anchors.get(host as usize).cloned().flatten(),
-                &|_, b| page_box(b, &items, info.width, info.height),
-            ));
-            if let Some(all) = regions.as_deref_mut()
-                && let Some(input) = laid.engine_in.take()
-            {
-                let run_blocks = laid
-                    .run_blocks
-                    .iter()
-                    .map(|&b| laid.blocks.get(b as usize).map(block_word))
-                    .collect();
-                let run_block_at = laid
-                    .run_blocks
-                    .iter()
-                    .map(|&b| (b as usize) < laid.blocks.len())
-                    .zip(&laid.run_blocks)
-                    .map(|(ok, &b)| ok.then_some(b as usize))
-                    .collect();
-                all.push(EnginePage {
-                    input,
-                    regions: page_regions,
-                    run_block_at,
-                    anchors: anchors
+            // Whether each region holds a run with ink: a figure or a code without a media block
+            // of its own keeps the block that holds its text (see below).
+            let inked: Vec<bool> = page_regions
+                .regions
+                .iter()
+                .map(|r| {
+                    laid.engine_in.as_ref().is_some_and(|p| {
+                        r.prims.iter().any(|q| {
+                            matches!(*q, layoutregions::PrimId::Text(i)
+                                if p.texts.get(i as usize).is_some_and(|t| !t.text.trim().is_empty()))
+                        })
+                    })
+                })
+                .collect();
+            // The engine report of the page, its regions and hosts set once the media blocks
+            // are placed (see below).
+            let report = match (regions.is_some(), laid.engine_in.take()) {
+                (true, Some(input)) => {
+                    let run_blocks = laid
+                        .run_blocks
                         .iter()
-                        .map(|a| a.as_ref().map(|a| a.0.clone()))
-                        .collect(),
-                    run_blocks,
-                    stopped: laid.stop.is_some(),
-                    block_words: laid.blocks.iter().map(block_word).collect(),
-                });
-            }
+                        .map(|&b| laid.blocks.get(b as usize).map(block_word))
+                        .collect();
+                    let run_block_at = laid
+                        .run_blocks
+                        .iter()
+                        .map(|&b| (b as usize) < laid.blocks.len())
+                        .zip(&laid.run_blocks)
+                        .map(|(ok, &b)| ok.then_some(b as usize))
+                        .collect();
+                    Some(EnginePage {
+                        input,
+                        regions: layout::no_regions(n),
+                        run_block_at,
+                        anchors: Vec::new(),
+                        run_blocks,
+                        stopped: laid.stop.is_some(),
+                        block_words: laid.blocks.iter().map(block_word).collect(),
+                    })
+                }
+                _ => None,
+            };
+            let laid_blocks = laid.blocks.len();
+            // The media block of each picture and code of the page (see `Pictures::list`),
+            // and the one media block of a page rendered whole.
+            let mut media_hosts: Vec<(layoutregions::PrimId, Anchor)> = Vec::new();
+            let mut page_media: Option<Anchor> = None;
             blocks.extend(laid.blocks);
             blocks.extend(orphans);
             // Where each picture goes among the blocks: after the block of its run when the run
@@ -1052,12 +1067,15 @@ fn lay_out(
                     });
                     match charged {
                         Ok(()) => {
+                            // Every picture and code of the page is in its one media block.
+                            let anchor = Anchor(format!("p{n}:m1"));
+                            page_media = Some(anchor.clone());
                             media.push((
                                 spots.first().copied().unwrap_or(blocks.len()),
                                 Block::Media {
                                     asset: format!("page-{n}"),
                                     alt: None,
-                                    anchor: None,
+                                    anchor: Some(anchor),
                                 },
                             ));
                             needs.push(render::Need {
@@ -1093,7 +1111,7 @@ fn lay_out(
                         n,
                         (&list, &spots, here),
                         (budget, &links),
-                        (&mut media, &mut unmatched),
+                        (&mut media, &mut unmatched, &mut media_hosts),
                         out,
                     );
                     if !crops.is_empty() {
@@ -1134,6 +1152,54 @@ fn lay_out(
                     *b += at.partition_point(|&a| a <= *b);
                 }
                 blocks = render::merge(blocks, media);
+            }
+            // A figure or a code region stands at the media block of its first picture or code
+            // that has one. One whose pictures have no block on the page (page furniture past
+            // its first place, a picture not listed, a drawing) keeps the block that holds its
+            // text (see `layout::hosts`), and stands at the page when it holds no text with ink:
+            // it wrote nothing of its own there.
+            let mut media_words = 0usize;
+            for (k, region) in page_regions.regions.iter_mut().enumerate() {
+                if !matches!(
+                    region.kind,
+                    layoutregions::Kind::Figure | layoutregions::Kind::Code
+                ) {
+                    continue;
+                }
+                let found = page_media.clone().or_else(|| {
+                    region.prims.iter().find_map(|p| {
+                        media_hosts
+                            .iter()
+                            .find(|(m, _)| m == p)
+                            .map(|(_, a)| a.clone())
+                    })
+                });
+                let media = found.map(|a| {
+                    anchors.push(Some(a));
+                    media_words += 1;
+                    u32::try_from(anchors.len() - 1).unwrap_or(u32::MAX)
+                });
+                region.host =
+                    figure_host(media, inked.get(k).copied().unwrap_or(false), region.host);
+            }
+            out.doc.regions.extend(rezzer_layout::pdf::pdf_regions(
+                std::slice::from_ref(&page_regions),
+                &|_, host| anchors.get(host as usize).cloned().flatten(),
+                &|_, b| page_box(b, &items, info.width, info.height),
+            ));
+            if let (Some(all), Some(mut report)) = (regions.as_deref_mut(), report) {
+                // The hosts past the page's blocks: the rows of a table begun on an earlier
+                // page (a table), then the media blocks.
+                let media_from = anchors.len() - media_words;
+                debug_assert_eq!(report.block_words.len(), laid_blocks);
+                report.block_words.resize(media_from, "table");
+                report.block_words.resize(anchors.len(), "media");
+                report.anchors = anchors
+                    .iter()
+                    .map(|a| a.as_ref().map(|a| a.0.clone()))
+                    .collect();
+                report.regions = page_regions;
+                all.push(report);
             }
             links.free(work);
             // What a stop cuts: the page from the first part not built on, or its hidden text.
@@ -1367,7 +1433,11 @@ impl Pictures {
         n: u32,
         (list, spots, figures): (&[render::Small], &[usize], &[render::Figure]),
         (budget, room): (&Budget, &LinkRoom),
-        (media, unmatched): (&mut AtPlace<Block>, &mut AtPlace<String>),
+        (media, unmatched, hosts): (
+            &mut AtPlace<Block>,
+            &mut AtPlace<String>,
+            &mut Vec<(layoutregions::PrimId, Anchor)>,
+        ),
         out: &mut Out,
     ) -> Vec<render::Crop> {
         let mut order: Vec<usize> = (0..list.len()).collect();
@@ -1483,12 +1553,16 @@ impl Pictures {
                     how: p.how,
                 });
             }
+            // Each media block of the page has an anchor of its own, `p<N>:m<K>` in reading
+            // order, where the region of its picture or code stands.
+            let anchor = Anchor(format!("p{n}:m{}", hosts.len() + 1));
+            hosts.push((p.prim, anchor.clone()));
             media.push((
                 spots[i],
                 Block::Media {
                     asset: out.doc.assets[asset].id.clone(),
                     alt: Some(words),
-                    anchor: None,
+                    anchor: Some(anchor),
                 },
             ));
         }
@@ -2018,8 +2092,30 @@ impl Out {
     }
 }
 
+/// The host of a figure or a code region: its media block (`media`, the place of its anchor)
+/// when it has one; else the block the layout gave it (`host`, the block that holds most of its
+/// text) when it holds text with ink (`inked`); else the page (`u32::MAX`): it wrote nothing of
+/// its own there.
+fn figure_host(media: Option<u32>, inked: bool, host: u32) -> u32 {
+    match media {
+        Some(m) => m,
+        None if inked => host,
+        None => u32::MAX,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    /// Fix round 2 (G2): a figure or a code region stands at its media block; without one it
+    /// keeps the block of its text when it has text with ink, and stands at the page when not.
+    #[test]
+    fn a_figure_without_media_keeps_the_block_of_its_text() {
+        assert_eq!(super::figure_host(Some(7), true, 3), 7);
+        assert_eq!(super::figure_host(Some(7), false, 3), 7);
+        assert_eq!(super::figure_host(None, true, 3), 3);
+        assert_eq!(super::figure_host(None, false, 3), u32::MAX);
+    }
+
     use rezzer_limits::Limits;
 
     use super::*;
@@ -2112,6 +2208,7 @@ mod tests {
                 let x = (k % 100) as f32 * 5.0;
                 let b = [x, 100.0, x + 30.0, 130.0];
                 render::Small {
+                    prim: layoutregions::PrimId::Picture(k as u32),
                     b,
                     framed: b,
                     id: k,
@@ -2132,7 +2229,7 @@ mod tests {
             1,
             (&list, &spots, &[]),
             (&budget, &room),
-            (&mut media, &mut unmatched),
+            (&mut media, &mut unmatched, &mut Vec::new()),
             &mut out,
         );
         let _ = pictures.finish(&mut out);

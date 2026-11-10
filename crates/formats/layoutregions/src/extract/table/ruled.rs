@@ -10,10 +10,10 @@ use std::collections::{HashMap, HashSet};
 use super::banded::{BAND_EDGE, BODY_GAP, row_starts};
 use super::{
     CELL_GAP, CROSSES_LINES, CellOut, Cells, EMPTY_CELLS, MAX_SQUARES, NO_ROWS_AND_COLUMNS,
-    PROSE_LINE, PROSE_WORDS, RUNS_INTO_CELL, RunRange, TableOut, alone_on_line, middle, numeric,
-    run_ranges, texted_per_line,
+    PROSE_LINE, PROSE_WORDS, RUNS_INTO_CELL, RunRange, SENTENCE_ACROSS, TableOut, alone_on_line,
+    middle, numeric, run_ranges, texted_per_line,
 };
-use crate::line::{LABEL_STEP, LineRun, is_placeholder};
+use crate::line::{LABEL_STEP, LineRun, PIECE_GAP, is_placeholder};
 use crate::segment::drawn::{Line, SNAP, clustered};
 
 /// A grid whose cells are more often empty than this is a form to fill in.
@@ -494,7 +494,19 @@ pub fn ruled_cells<R: LineRun>(
         return Cells::Refused(why);
     }
     let (mut planned_rows, place) = plan_grid(&cells, &bands, &spanned, planned_count);
-    let unplaced = onto_other_cells(runs, within, &cells);
+    // Runs in no cell, sorted, with why: runs onto the text of another cell, and the runs of a
+    // sentence printed over a row.
+    let mut why: Vec<(usize, &'static str)> = onto_other_cells(runs, within, &cells)
+        .into_iter()
+        .map(|i| (i, RUNS_INTO_CELL))
+        .collect();
+    for i in sentences_over_rows(runs, within, &cells, s.per_line) {
+        if !why.iter().any(|w| w.0 == i) {
+            why.push((i, SENTENCE_ACROSS));
+        }
+    }
+    why.sort_unstable_by_key(|w| w.0);
+    let unplaced: Vec<usize> = why.iter().map(|w| w.0).collect();
     // The refusals above count an unplaced run as text of the cell of its middle, as they
     // did before the guard; the icon test below looks only at the text a cell keeps.
     let kept_text: HashSet<((usize, usize), usize)> = if unplaced.is_empty() {
@@ -540,18 +552,45 @@ pub fn ruled_cells<R: LineRun>(
             icons.push((r, k, cell));
         }
     }
+    // A header of two rows or more in a style of its own is the grid's, as are the rows over
+    // the first open row; otherwise the first row is judged by its text.
+    let header_rows = if styled {
+        head
+    } else {
+        (0..cells.is_open.iter().position(|o| *o).unwrap_or(0))
+            .map(|r| bands.subs(r))
+            .sum()
+    };
+    // A row of the body whose only text is a sentence printed over it is no row of the table:
+    // the sentence stands next to the table. Only a row of its own cells (each one row high,
+    // together as wide as the table) and with no run left in them goes.
+    let mut gone: Vec<usize> = why
+        .iter()
+        .filter(|w| w.1 == SENTENCE_ACROSS)
+        .map(|&(i, _)| {
+            let run = &runs[i];
+            let (cx, cy) = middle(run);
+            let o = cells.cell_at(cx, cy);
+            place[&(o, bands.sub_of(o.0, run))].0
+        })
+        .filter(|&p| {
+            let row = &planned_rows[p];
+            p > 0
+                && p >= header_rows
+                && row.iter().all(|c| c.row_span == 1 && c.runs.is_empty())
+                && row.iter().map(|c| c.col_span as usize).sum::<usize>() == cols
+                && icons.iter().all(|ic| ic.0 != p)
+        })
+        .collect();
+    gone.sort_unstable();
+    gone.dedup();
+    for &p in gone.iter().rev() {
+        planned_rows.remove(p);
+    }
     Cells::Table(TableOut {
         rows: planned_rows,
-        // A header of two rows or more in a style of its own is the grid's, as are the
-        // rows over the first open row; otherwise the first row is judged by its text.
-        header_rows: if styled {
-            head
-        } else {
-            (0..cells.is_open.iter().position(|o| *o).unwrap_or(0))
-                .map(|r| bands.subs(r))
-                .sum()
-        },
-        unplaced: unplaced.into_iter().map(|i| (i, RUNS_INTO_CELL)).collect(),
+        header_rows,
+        unplaced: why,
         icons,
         cuts: Vec::new(),
     })
@@ -594,6 +633,61 @@ fn onto_other_cells<R: LineRun>(runs: &[R], within: &[usize], cells: &Squares<'_
         })
         .map(|(i, _, _)| i)
         .collect()
+}
+
+/// The runs of `within` (sorted) of each line that reads as a sentence printed over a row (Task
+/// 17 D9, see [`sentence_across`]): the line is alone on its line of the page, in a row that is
+/// not open (a note over an open row is one cell across it, see `note_across`), one piece of
+/// text (no gap between its runs over [`PIECE_GAP`] sizes: values in cells stand apart), and
+/// a run of it reaches over a side of its cell, or its runs stand in two cells or more of a
+/// row that holds no other text (a sentence printed over a row of its own; the lines of cells
+/// that hold more text are those cells' own). A line that one cell holds whole (a merged cell
+/// across the row) is that cell's text.
+fn sentences_over_rows<R: LineRun>(
+    runs: &[R],
+    within: &[usize],
+    cells: &Squares<'_>,
+    per_line: &HashMap<u32, u32>,
+) -> Vec<usize> {
+    let mut by_line: HashMap<u32, Vec<usize>> = HashMap::new();
+    // The runs with text of each row.
+    let mut in_row: HashMap<usize, usize> = HashMap::new();
+    for &i in within {
+        by_line.entry(runs[i].line()).or_default().push(i);
+        *in_row.entry(cells.row_at(middle(&runs[i]).1)).or_default() += 1;
+    }
+    let mut out = Vec::new();
+    for (line, mut l) in by_line {
+        if per_line.get(&line).copied().unwrap_or(0) as usize != l.len() {
+            continue;
+        }
+        let row = cells.row_at(middle(&runs[l[0]]).1);
+        if cells.is_open[row] {
+            continue;
+        }
+        let owners: HashSet<(usize, usize)> = l
+            .iter()
+            .map(|&i| {
+                let (cx, cy) = middle(&runs[i]);
+                cells.cell_at(cx, cy)
+            })
+            .collect();
+        let over_a_side = l.iter().any(|&i| crosses(&runs[i], cells).is_some());
+        if !(over_a_side || (owners.len() >= 2 && in_row[&row] == l.len())) {
+            continue;
+        }
+        l.sort_by(|&a, &b| runs[a].x().total_cmp(&runs[b].x()));
+        // One piece of text: no gap between its runs wider than a word gap.
+        let one_piece = l.windows(2).all(|w| {
+            let (a, b) = (&runs[w[0]], &runs[w[1]]);
+            b.x() - (a.x() + a.w()) <= PIECE_GAP * a.size().max(b.size())
+        });
+        if one_piece && sentence_across(runs, &l, cells.xs) {
+            out.extend(l);
+        }
+    }
+    out.sort_unstable();
+    out
 }
 
 /// The cell of `r` (by its middle) and the cell's left and right edges, when `r` reaches over

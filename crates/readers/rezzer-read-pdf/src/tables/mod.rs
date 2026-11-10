@@ -34,11 +34,11 @@ use layoutregions::extract::table::area::{
     Area, MANY_COLUMNS, MAX_COLUMNS, ON_PICTURE, PAGE_FRAME, TINY_TEXT, dense,
 };
 use layoutregions::extract::table::caption::{
-    ByY, FIGURE_NEAR, MAX_CAPTION_SIZE, caption, captions_near,
+    ByY, FIGURE_NEAR, MAX_CAPTION_SIZE, caption_inside, captions_near,
 };
 
 pub(crate) use pairs::{BoxTitle, Frame, box_pairs, field_frames, form_drawn, underlined_titles};
-pub(crate) use tagged::{Tables, tagged};
+pub(crate) use tagged::{MARK_RISE, MARK_SIZE, Tables, marks, tagged};
 
 /// A drawn line or rectangle, in points in the visible page box like the runs, `y` upward.
 /// A line has `x0 == x1` or `y0 == y1`; a rectangle is its bounding box.

@@ -542,6 +542,61 @@ fn region_beside_a_figure_caption_reads_no_table_and_says_its_loss() {
     assert_eq!(what, want);
 }
 
+/// Task 19 (brief step 1): two blocks of short lines side by side, with no rule, no colon and
+/// no value shape (no digit, no amount, no date) give no region type clear evidence. They are
+/// one block kept as laid out, every word once and in the order of its lines, with the loss
+/// that says why.
+#[test]
+fn unsure_region_is_spatial_with_its_loss() {
+    let rows = [["Linde Nord", "Ahorn West"], ["Birke Ost", "Erle Mitte"]];
+    let mut template = String::new();
+    for (n, row) in rows.iter().enumerate() {
+        let y = 600.0 - 10.0 * n as f32;
+        template += &show("FL", 8.0, 40.0, y, row[0]);
+        template += &show("FL", 8.0, 300.0, y, row[1]);
+    }
+    let out = common::read(&page_in(&template, Look::Plain));
+    let laid_out: Vec<String> = blocks(&out)
+        .iter()
+        .filter_map(|b| match b {
+            Block::Spatial { lines, .. } => Some(
+                lines
+                    .iter()
+                    .flat_map(|l| l.pieces.iter().flat_map(|p| p.text.split_whitespace()))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            ),
+            _ => None,
+        })
+        .collect();
+    let want = rows
+        .iter()
+        .flatten()
+        .flat_map(|t| t.split_whitespace())
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert_eq!(laid_out, [want], "{:#?}", blocks(&out));
+    // Every word once in the whole text.
+    let text = common::all_text(&out);
+    for word in rows.iter().flatten().flat_map(|t| t.split_whitespace()) {
+        assert_eq!(text.matches(word).count(), 1, "{word} in {text}");
+    }
+    let what: Vec<String> = out
+        .document
+        .losses
+        .iter()
+        .map(|l| format!("{} {}", l.location, common::without_style_clause(&l.what)))
+        .collect();
+    assert_eq!(
+        what,
+        [
+            "p1:b1 the region at p1:b1 is kept as laid out, as text in its columns: no region \
+          type has clear evidence for it"
+        ],
+    );
+    assert_eq!(out.completeness, Completeness::Complete);
+}
+
 /// A run without ink (spaces, as a form sets them in a field box) of another region that
 /// stands between two runs of a block kept as laid out in the page's flow does not part the
 /// block (d133dc4): it stands in the flow only, not on the page. The block beside the figure
@@ -8662,7 +8717,8 @@ fn page_anchors(out: &ReadOutcome, n: u32) -> Vec<String> {
                 Block::Heading { anchor, .. }
                 | Block::Paragraph { anchor, .. }
                 | Block::List { anchor, .. }
-                | Block::Table { anchor, .. } => anchor,
+                | Block::Table { anchor, .. }
+                | Block::Media { anchor, .. } => anchor,
                 _ => &None,
             };
             if let Some(a) = anchor {
@@ -8686,22 +8742,58 @@ fn page_anchors(out: &ReadOutcome, n: u32) -> Vec<String> {
     found
 }
 
-/// The pictures of a page are figure regions, each at a block of its page (the media block
-/// has no anchor: the block near it), and every other region of the invoice is at a block of
-/// its page that holds its text: no region stands at the page alone.
+/// The anchors of the media blocks of page `n`.
+fn media_anchors(out: &ReadOutcome, n: u32) -> Vec<String> {
+    let want = rezzer_model::Anchor(format!("p{n}"));
+    let mut found = Vec::new();
+    for b in &out.document.body {
+        if let Block::Section {
+            anchor: Some(a),
+            blocks,
+            ..
+        } = b
+            && *a == want
+        {
+            for b in blocks {
+                if let Block::Media {
+                    anchor: Some(m), ..
+                } = b
+                {
+                    found.push(m.0.clone());
+                }
+            }
+        }
+    }
+    found
+}
+
+/// The pictures of a page are figure regions, each at its own media block (Task 19b: a media
+/// block has an anchor of its own, `p<N>:m<K>` in reading order). Every other region of the
+/// invoice is at a block of its page that holds its text: no region stands at the page alone.
 #[test]
 fn every_region_is_at_a_block_of_its_page() {
     let out = pages_logos(2);
     for n in 1..=2 {
         let anchors = page_anchors(&out, n);
-        let figures = out
+        let media = media_anchors(&out, n);
+        let figures: Vec<&rezzer_model::RegionNote> = out
             .document
             .regions
             .iter()
             .filter(|r| r.page == n && r.kind == rezzer_model::RegionKind::Figure)
-            .count();
-        assert_eq!(figures, 3, "page {n}: {:#?}", out.document.regions);
-        for r in out.document.regions.iter().filter(|r| r.page == n) {
+            .collect();
+        assert_eq!(figures.len(), 3, "page {n}: {:#?}", out.document.regions);
+        let mut at: Vec<&str> = figures.iter().map(|r| r.anchor.0.as_str()).collect();
+        let want: Vec<String> = (1..=3).map(|k| format!("p{n}:m{k}")).collect();
+        assert_eq!(media, want, "{media:?}");
+        at.sort_unstable();
+        assert_eq!(at, media, "{figures:#?}");
+        for r in out
+            .document
+            .regions
+            .iter()
+            .filter(|r| r.page == n && r.kind != rezzer_model::RegionKind::Figure)
+        {
             assert!(
                 anchors.contains(&r.anchor.0),
                 "page {n}: {r:#?} not in {anchors:?}"

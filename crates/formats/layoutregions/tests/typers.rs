@@ -1908,9 +1908,11 @@ fn two_pictures_are_two_figures() {
     }
 }
 
-/// A ruled table on a picture of the whole page (a letterhead or a scan under the text) and
-/// a ruled table with a cell that opens with "Abb. 3" are no figures: the refusal names why
-/// no table was read, but a page frame under a grid or a caption in a cell is no chart.
+/// A ruled table on a picture of the whole page (a letterhead or a scan under the text) is no
+/// figure: the refusal names why no table was read, but a page frame under a grid is no chart.
+/// A ruled table with cells that hold only "Abb. 3" beside the other cells of their rows is a
+/// table (Task 19b: such a cell points to a figure, it captions none); a grid with a caption
+/// alone on its line inside it, or with caption words, is refused for it.
 #[test]
 fn a_grid_on_a_page_picture_or_with_a_caption_cell_is_no_figure() {
     let mut tree = ruled_table(ITEM_XS, 700.0, ITEMS, true, 100);
@@ -1932,10 +1934,33 @@ fn a_grid_on_a_page_picture_or_with_a_caption_cell_is_no_figure() {
     let tree = ruled_table(ITEM_XS, 700.0, rows, true, 100);
     let typed = tree.typed(&grid);
     assert!(find(&typed, Kind::Figure).is_none(), "{typed:#?}");
+    assert_eq!(winner(&typed).0, Kind::Table, "{typed:#?}");
     tree.with(|view| {
         let g = view.segs.all.iter().find(|s| grid(view, s)).unwrap();
-        assert_eq!(refusal(view, g).unwrap().signal.id, "figure.caption_near");
+        assert!(refusal(view, g).is_none());
     });
+    // A caption alone on its line in a cell of the grid, and one with its caption words beside
+    // other text on its line.
+    for last in [
+        &["Abb. 3", "", ""][..],
+        &["Abb. 3: Muster Teile", "4", "Nord"][..],
+    ] {
+        let rows: &[&[&str]] = &[
+            &["Teil", "Menge", "Zeichnung"],
+            &["Muster A", "2", "Nord"],
+            &["Muster B", "1", "West"],
+            last,
+        ];
+        let tree = ruled_table(ITEM_XS, 700.0, rows, true, 100);
+        tree.with(|view| {
+            let g = view.segs.all.iter().find(|s| grid(view, s)).unwrap();
+            assert_eq!(
+                refusal(view, g).map(|r| r.signal.id),
+                Some("figure.caption_near"),
+                "{last:?}"
+            );
+        });
+    }
 }
 
 /// Lines of `rows` (pieces at `xs`), one line each from line `first` on, 12 points apart.

@@ -1,6 +1,5 @@
 ---
 source: crates/rezzer/tests/corpus.rs
-assertion_line: 294
 ---
 {
   "assets": [
@@ -28,6 +27,7 @@ assertion_line: 294
           "type": "paragraph"
         },
         {
+          "anchor": "p1:m1",
           "asset": "page-1",
           "type": "media"
         }
@@ -88,7 +88,7 @@ assertion_line: 294
   },
   "regions": [
     {
-      "anchor": "p1",
+      "anchor": "p1:m1",
       "bounds": [
         0.0,
         0.0,

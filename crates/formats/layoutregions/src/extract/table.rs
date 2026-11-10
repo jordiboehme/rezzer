@@ -60,8 +60,12 @@ pub const TITLE_WORK: usize = 1_000_000;
 
 /// Why a run of a ruled section is in no cell: it reaches over the side of its cell onto the
 /// text of another cell on its line.
-pub(crate) const RUNS_INTO_CELL: &str =
-    "it runs over the side of its cell into the text of another cell";
+pub const RUNS_INTO_CELL: &str = "it runs over the side of its cell into the text of another cell";
+
+/// Why the runs of a line of a ruled section are in no cell: together they read as one sentence
+/// over the column rules of their row (see `ruled::sentence_across`), printed over the table,
+/// not written in its cells.
+pub const SENTENCE_ACROSS: &str = "it reads as a sentence across the columns of its row";
 
 /// Why a line of a table without rules is in no cell: it stands between two rows and runs over
 /// the gutter between two columns (a note between rows).

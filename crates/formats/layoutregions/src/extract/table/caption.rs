@@ -6,7 +6,7 @@
 //! that opens with "Figure 3", "Fig. 3", "Abbildung 3" or "Abb. 3" a figure.
 
 use super::{RunRange, middle};
-use crate::line::LineRun;
+use crate::line::{LineRun, PIECE_GAP};
 
 /// Lines of a caption paragraph above a table looked at for its start.
 pub const CAPTION_LINES: usize = 8;
@@ -38,6 +38,40 @@ pub fn caption(text: &str) -> Option<bool> {
             && rest.len() > 1
             && rest[1..].starts_with(['.', ':', ' ', '-'])))
     .then_some(table)
+}
+
+/// Whether the runs `within` (the text of a box) hold a figure caption: a run that opens as one
+/// ("Figure 3", "Abb. 3", see [`caption`]) and says more than the figure's name and number in
+/// its piece of the line (with the runs that go on from it within [`PIECE_GAP`] sizes: caption
+/// words), or is the only run with text of its line among them. A cell that holds only "Abb.
+/// 3" next to other cells of its row points to a figure from a table (a parts list, a list of
+/// drawings); it captions nothing.
+pub fn caption_inside<R: LineRun>(within: &[R]) -> bool {
+    within.iter().enumerate().any(|(k, r)| {
+        if caption(r.text()) != Some(false) {
+            return false;
+        }
+        let mut line: Vec<&R> = within
+            .iter()
+            .enumerate()
+            .filter(|(j, o)| *j != k && o.line() == r.line() && !o.text().trim().is_empty())
+            .map(|(_, o)| o)
+            .collect();
+        if line.is_empty() {
+            return true;
+        }
+        line.sort_by(|a, b| a.x().total_cmp(&b.x()));
+        let mut words = r.text().split_whitespace().count();
+        let mut end = r.x() + r.w();
+        for o in line.into_iter().filter(|o| o.x() >= r.x()) {
+            if o.x() - end > PIECE_GAP * r.size().max(o.size()) {
+                break;
+            }
+            words += o.text().split_whitespace().count();
+            end = end.max(o.x() + o.w());
+        }
+        words > 2
+    })
 }
 
 /// The runs and lines of a page sorted by height, so a box finds what lies in it by search.

@@ -21,11 +21,13 @@ pub struct RegionNote {
     /// - `fn:<label>`: the footnote section a footnote legend became;
     /// - an anchor on an earlier page (`p<M>:t<K>`): the table whose rows it became, for a
     ///   tagged table continued from that page;
-    /// - for a picture or a code, whose media block has no anchor, and for anything that
-    ///   became no block: the block of the page nearest to it by place (the one after the
-    ///   nearest region that stands above it, else that region's), which may be a neighbour
-    ///   of the media block rather than the block right after it;
-    /// - `p<N>`: the page, when it has no block at all (a scanned page).
+    /// - `p<N>:m<K>`: for a figure or a code, the media block of its first picture or code
+    ///   that has one (the one media block of a page rendered whole); a figure or a code with
+    ///   no media block of its own stands at the block that holds most of its text;
+    /// - for anything else that became no block: the block of the page nearest to it by
+    ///   place (the one after the nearest region that stands above it, else that region's);
+    /// - `p<N>`: the page, when it has no block at all (a scanned page), and for a figure or a
+    ///   code with no media block of its own and no text.
     pub anchor: Anchor,
     /// The 1-based page.
     pub page: u32,

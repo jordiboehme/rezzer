@@ -178,6 +178,47 @@ fn labelled_date_is_document_date() {
     assert!(unsure(&out).is_empty(), "{:?}", unsure(&out));
 }
 
+/// Task 19 (carried): the dates of the page are read from its runs, so a labelled date in text
+/// that no region type has clear evidence for, kept as laid out, is still the document date.
+#[test]
+fn labelled_date_kept_as_laid_out_is_the_document_date() {
+    let head = common::show("FB", 14.0, 40.0, 780.0, "Musterbescheid")
+        + &common::show("FL", 9.0, 40.0, 740.0, "Linde Nord")
+        + &common::show("FL", 9.0, 300.0, 740.0, "Ahorn West")
+        + &common::show("FL", 9.0, 40.0, 729.0, "Datum 01.02.2026")
+        + &common::show("FL", 9.0, 300.0, 729.0, "Erle Mitte");
+    let out = read(&headed(&head, 9.0, 1.0, ""));
+    fn laid_out(blocks: &[Block], found: &mut Vec<String>) {
+        for b in blocks {
+            match b {
+                Block::Section { blocks, .. } => laid_out(blocks, found),
+                Block::Spatial { lines, .. } => found.push(
+                    lines
+                        .iter()
+                        .flat_map(|l| l.pieces.iter().map(|p| p.text.trim()))
+                        .collect::<Vec<_>>()
+                        .join(" | "),
+                ),
+                _ => {}
+            }
+        }
+    }
+    let mut spatial = Vec::new();
+    laid_out(&out.document.body, &mut spatial);
+    assert!(
+        spatial.iter().any(|t| t.contains("01.02.2026")),
+        "the date stands in a block kept as laid out: {spatial:?}"
+    );
+    let found = out
+        .document
+        .properties
+        .document_date
+        .as_ref()
+        .expect("date");
+    assert_eq!(found.date, "2026-02-01");
+    assert_eq!(found.from, "date label \"Datum\" on page 1");
+}
+
 #[test]
 fn labelled_dates_of_every_form() {
     // The label on the date's line, with or without a colon, in any case, or over its value
@@ -1757,6 +1798,12 @@ fn rereview_r10_probes_give_no_wrong_date() {
         "text in the table on page 1 that starts with \"Pos\" runs over the side of its cell \
          into the text of another cell: it is read as a paragraph next to the table",
     ]);
+    let across = Losses(&[
+        ONE_DATE,
+        "text over the table on page 1 that starts with \"die Angaben werden von der Muster\" \
+         reads as a sentence across the columns of its row: it is read as a paragraph next to \
+         the table",
+    ]);
     for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {
         for font in ["FL", "FB"] {
             let s = |x: f32, y: f32, t: &str| common::show(font, size, x, y, t);
@@ -1868,8 +1915,16 @@ fn rereview_r10_probes_give_no_wrong_date() {
                         + &ruled(items, &[40.0, 200.0, 320.0], 500.0),
                     // At 9.5 pt the `headed` prose is printed over the last item row: a cell
                     // that holds the row's position and the prose is no cell, so the prose
-                    // line stays a paragraph, said as a loss.
-                    if size == 9.5 { overprinted } else { one },
+                    // line stays a paragraph, said as a loss. At 12 pt its first line is
+                    // printed over the last row alone: it reads as a sentence across the
+                    // row's columns (Task 17 D9), so it stays a paragraph, said as a loss.
+                    if size == 9.5 {
+                        overprinted
+                    } else if size == 12.0 {
+                        across
+                    } else {
+                        one
+                    },
                 ),
             ];
             for (name, head, want) in cases {

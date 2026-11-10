@@ -4,8 +4,8 @@
 
 //! Where each decision of a page stands among its blocks: the block it became (its region's
 //! `host`), or the block near it for a decision that became no block of its own (a picture or a
-//! code, whose media block the page places later; rows of a tagged table begun on an earlier
-//! page; anything a stop left unbuilt).
+//! code, whose media block the page places later and then hosts it, see `lib.rs`; rows of a
+//! tagged table begun on an earlier page; anything a stop left unbuilt).
 
 use std::collections::{BTreeMap, HashMap};
 

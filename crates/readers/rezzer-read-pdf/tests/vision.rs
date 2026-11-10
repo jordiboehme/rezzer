@@ -1020,6 +1020,62 @@ fn a_soft_mask_many_pictures_share_is_read_once() {
     );
 }
 
+/// Task 19b (carried): a bound of the segmentation that leaves a page's 100,000 pictures in
+/// one region with its line of text does not hide them in that region: they are a figure
+/// region of their own, which says the bound left them unparted, and the text keeps its own
+/// region. The read stays complete.
+#[test]
+fn pictures_a_bound_leaves_with_text_are_a_figure_region() {
+    let bytes = copied_pages(1, 100_000, &|b, _| {
+        b.stream(
+            "/Type /XObject /Subtype /Image /Width 4 /Height 3 /ColorSpace /DeviceGray \
+             /BitsPerComponent 8",
+            &[7u8; 12],
+        )
+    });
+    let out = read(&bytes);
+    assert_eq!(
+        out.completeness,
+        Completeness::Complete,
+        "{:#?}",
+        out.document.losses
+    );
+    let regions = &out.document.regions;
+    let figures: Vec<&rezzer_model::RegionNote> = regions
+        .iter()
+        .filter(|r| r.kind == rezzer_model::RegionKind::Figure)
+        .collect();
+    assert_eq!(figures.len(), 1, "{regions:#?}");
+    assert!(
+        figures[0].evidence.iter().any(|e| matches!(
+            e,
+            rezzer_model::Evidence::Rule { id, .. } if id == "pdf.limit.pictures_unparted"
+        )),
+        "{regions:#?}"
+    );
+    assert!(
+        regions
+            .iter()
+            .any(|r| r.kind == rezzer_model::RegionKind::Paragraph),
+        "{regions:#?}"
+    );
+    // Fix round 1 (F4): an Info loss names them; the read stays complete.
+    let said: Vec<&rezzer_model::Loss> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.what.contains("pictures or codes in one region with text"))
+        .collect();
+    assert_eq!(said.len(), 1, "{:#?}", out.document.losses);
+    assert_eq!(
+        said[0].what,
+        "on page 1, a bound of the segmentation, or the time limit, left 100000 pictures or \
+         codes in one region with text: their region type was not looked for"
+    );
+    assert_eq!(said[0].why, LossReason::Uncertain);
+    assert_eq!(said[0].severity, Severity::Info);
+}
+
 #[test]
 fn an_inline_picture_with_a_named_color_space_is_its_own() {
     // An inline logo whose color space is a page resource (/CS0): its colors are not known

@@ -29,7 +29,7 @@ use crate::extract::table::banded::{
     BAND_WORK, BandCells, BodyBelow, band_cells, band_head_refused, band_titles, body_below,
     long_or_prose,
 };
-use crate::extract::table::caption::{FIGURE_NEAR, caption, captions_near};
+use crate::extract::table::caption::{FIGURE_NEAR, caption_inside, captions_near};
 use crate::extract::table::grid::{Piece, Shape, amount, grid_cells, set_full, titles_over_values};
 use crate::extract::table::ruled::{
     RuledIn, boxed_field, edges, hanging_rows, ruled_cells, sentence_across,
@@ -316,8 +316,8 @@ fn figure_near<R: LineRun>(
 ) -> (bool, bool) {
     let (table, figure) =
         captions_near(&view.page.texts, view.lines(), view.by_y(), b, sizes, skip);
-    let inside = within.into_iter().any(|r| caption(r.text()) == Some(false));
-    (table.is_some(), figure || inside)
+    let within: Vec<R> = within.collect();
+    (table.is_some(), figure || caption_inside(&within))
 }
 
 /// The reading of a Grid segment: each section of its grid (see [`sections`]) of two rows
