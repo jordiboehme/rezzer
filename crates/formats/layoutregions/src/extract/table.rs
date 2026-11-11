@@ -213,6 +213,7 @@ pub struct RunRange {
 }
 
 pub fn run_ranges<R: LineRun>(runs: &[R]) -> Vec<RunRange> {
+    crate::work::add(runs.len() as u64);
     let mut out: Vec<RunRange> = Vec::new();
     for (i, r) in runs.iter().enumerate() {
         match out.last_mut() {

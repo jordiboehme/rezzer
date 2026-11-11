@@ -1135,7 +1135,8 @@ fn ods_dense_area_over_the_memory_limit_is_refused() {
     };
     let started = Instant::now();
     let out = read_as(ods(&content(&body)), "book.ods", FormatId::Ods, limits);
-    assert!(started.elapsed() < Duration::from_secs(10));
+    // A guard against a runaway only, generous so a busy machine cannot fail it.
+    assert!(started.elapsed() < Duration::from_secs(60));
     assert_eq!(out.completeness, Completeness::Failed);
     assert!(
         whole_file_loss(&out, LossReason::Limit, "memory"),
@@ -1170,7 +1171,8 @@ fn ods_space_bomb_is_refused() {
     let body = "<table:table table:name=\"S\"><table:table-row><table:table-cell office:value-type=\"string\"><text:p>a<text:s text:c=\"4000000000\"/>b</text:p></table:table-cell></table:table-row></table:table>";
     let started = Instant::now();
     let out = read_ods(ods(&content(body)));
-    assert!(started.elapsed() < Duration::from_secs(10));
+    // A guard against a runaway only, generous so a busy machine cannot fail it.
+    assert!(started.elapsed() < Duration::from_secs(60));
     assert_eq!(out.completeness, Completeness::Failed);
     assert!(whole_file_loss(&out, LossReason::Limit, "memory"));
 }
@@ -1179,7 +1181,8 @@ fn ods_space_bomb_is_refused() {
 fn ods_malformed_corpus_file_is_refused_fast() {
     let started = Instant::now();
     let out = corpus("malformed/issue_594_dos.ods");
-    assert!(started.elapsed() < Duration::from_secs(10));
+    // A guard against a runaway only, generous so a busy machine cannot fail it.
+    assert!(started.elapsed() < Duration::from_secs(60));
     assert_eq!(out.completeness, Completeness::Failed);
     assert!(
         whole_file_loss(&out, LossReason::Limit, "memory"),

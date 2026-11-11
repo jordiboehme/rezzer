@@ -25,12 +25,16 @@ mod draw;
 #[allow(dead_code)]
 mod shapes;
 
+#[path = "../../../../formats/layoutregions/tests/meta/mod.rs"]
+mod meta;
+
 mod axes;
 mod classes;
 mod docs;
 mod forms;
 mod inv;
 mod known;
+mod metamorphic;
 mod pictures;
 
 use axes::{ALL, Shape};

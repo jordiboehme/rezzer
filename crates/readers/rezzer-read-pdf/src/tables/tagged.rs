@@ -104,6 +104,8 @@ impl Tables {
         let mut repeated = 0usize;
         for (i, tr) in trs.into_iter().enumerate() {
             let mut cells: Vec<usize> = Vec::new();
+            // The table's rows are read once, not once per page.
+            crate::work::add(elems[tr].children.len() as u64 + 1);
             for &c in &elems[tr].children {
                 if !elems
                     .get(c)
@@ -625,6 +627,8 @@ pub(crate) fn tagged(
             .filter_map(|c| index.cell_at.get(c).map(|&(r, k)| (r, k, *c)))
             .collect();
         here.sort_unstable();
+        // The page's own cells are looked at, not every cell of the rows they stand in.
+        crate::work::add(here.len() as u64);
         let mut touched: Vec<usize> = Vec::new();
         let mut additions: Vec<Addition> = Vec::new();
         // The tag tree row of each addition.
@@ -652,6 +656,7 @@ pub(crate) fn tagged(
         let mut in_header = true;
         for row in touched {
             let row_cells = &index.rows[row];
+            crate::work::add(row_cells.len() as u64);
             let built: Vec<PlannedCell> = row_cells
                 .iter()
                 .map(|c| PlannedCell {

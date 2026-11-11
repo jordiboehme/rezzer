@@ -23,7 +23,7 @@ mod sections;
 mod text;
 
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use dates::*;
 use grids::*;

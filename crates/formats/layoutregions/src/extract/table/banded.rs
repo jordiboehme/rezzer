@@ -78,6 +78,7 @@ pub fn body_below<R: LineRun>(
     let mut misfit = false;
     for &k in at.by_y.lines[..lo].iter().rev() {
         *work += 1;
+        crate::work::add(1);
         let l = &at.lines[k];
         if l.y <= at.floor {
             break;
@@ -93,6 +94,7 @@ pub fn body_below<R: LineRun>(
             })
             .collect();
         *work += l.end - l.start;
+        crate::work::add((l.end - l.start) as u64);
         if ids.is_empty() {
             continue;
         }
@@ -105,6 +107,7 @@ pub fn body_below<R: LineRun>(
         let to = at.hs.partition_point(|s| s.at < last_y);
         let tol = SNAP.max(BAND_EDGE * (b[2] - b[0]));
         *work += to.saturating_sub(from);
+        crate::work::add(to.saturating_sub(from) as u64);
         if at.hs[from..to.max(from)]
             .iter()
             .any(|s| s.from <= b[0] + tol && s.to >= b[2] - tol)

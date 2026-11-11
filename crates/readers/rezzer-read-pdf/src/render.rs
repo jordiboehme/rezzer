@@ -1059,6 +1059,7 @@ fn anchor_of(block: &Block) -> Option<&Anchor> {
 
 /// The index of the first block with each anchor.
 pub(crate) fn anchor_index(blocks: &[Block]) -> HashMap<Anchor, usize> {
+    crate::work::add(blocks.len() as u64);
     let mut out = HashMap::new();
     for (i, b) in blocks.iter().enumerate() {
         if let Some(a) = anchor_of(b) {
@@ -1087,6 +1088,7 @@ pub(crate) fn position(
 /// `blocks` with `media` put in, each before the block at its index (at the end past the
 /// last), in one pass. `media` is sorted by index; pictures at one index keep their order.
 pub(crate) fn merge(blocks: Vec<Block>, media: Vec<(usize, Block)>) -> Vec<Block> {
+    crate::work::add((blocks.len() + media.len()) as u64);
     let mut out = Vec::with_capacity(blocks.len() + media.len());
     let mut media = media.into_iter().peekable();
     for (i, b) in blocks.into_iter().enumerate() {
@@ -2131,6 +2133,9 @@ impl<'p> Pages<'p> {
                 return Err(Failed::Limit("the time limit was reached".into()));
             }
         }
+        // A step per 4,096 pixels rendered: a picture refused before it is rendered shows
+        // none.
+        crate::work::add(u64::from(px) * u64::from(py) / 4_096 + 1);
         let run = panic::catch_unwind(AssertUnwindSafe(|| {
             // A cache of its own, so nothing a page decoded stays for the next.
             let cache = RenderCache::new();
@@ -2373,6 +2378,8 @@ impl Scans {
         };
         #[cfg(test)]
         SCAN_RUNS.with(|r| r.set(r.get() + 1));
+        // A step per 4,096 pixels handed to the decoder; its calls count on this thread too.
+        crate::work::add(u64::from(p.width()) * u64::from(p.height()) / 4_096 + 1);
         self.found.entry(asset).or_default().read = true;
         let codes = match barcodes::Worker::global().decode(&scan, &limits) {
             Ok(s) => {

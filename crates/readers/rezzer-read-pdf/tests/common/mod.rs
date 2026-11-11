@@ -2048,3 +2048,94 @@ pub fn without_style_clause(what: &str) -> &str {
         _ => what,
     }
 }
+
+/// The CPU time the calling thread has used. A guard against a runaway read measures this
+/// instead of the wall clock: a busy machine does not make it grow (see [`Cpu`]).
+#[cfg(unix)]
+pub fn thread_cpu() -> std::time::Duration {
+    let mut t = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: clock_gettime fills the timespec we pass.
+    let r = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut t) };
+    assert_eq!(r, 0, "clock_gettime");
+    std::time::Duration::new(t.tv_sec as u64, t.tv_nsec as u32)
+}
+
+/// The wall clock where no thread clock is at hand.
+#[cfg(not(unix))]
+pub fn thread_cpu() -> std::time::Duration {
+    use std::sync::OnceLock;
+    static START: OnceLock<std::time::Instant> = OnceLock::new();
+    START.get_or_init(std::time::Instant::now).elapsed()
+}
+
+/// A start on the calling thread's CPU clock ([`thread_cpu`]), for the generous guards of the
+/// hostile tests: a read that runs away still fails them, a busy machine does not. The work
+/// bounds themselves are counted (see [`counted`]). Work a read does on another thread (the
+/// code decoder's) is not in this clock, and neither is waiting: a thread blocked on the
+/// decoder uses no CPU. The decoder's calls are counted in the steps; for a read that waits
+/// too long, [`Cpu::assert_no_hang`] keeps a wall clock backstop of [`HANG`].
+#[derive(Debug, Clone, Copy)]
+pub struct Cpu(std::time::Duration, std::time::Instant);
+
+/// The wall time after which a read is taken to hang, whatever the machine's load.
+pub const HANG: std::time::Duration = std::time::Duration::from_secs(600);
+
+impl Cpu {
+    pub fn now() -> Cpu {
+        Cpu(thread_cpu(), std::time::Instant::now())
+    }
+
+    /// The CPU time of this thread since the start.
+    pub fn elapsed(&self) -> std::time::Duration {
+        thread_cpu().saturating_sub(self.0)
+    }
+
+    /// Fails when more than [`HANG`] of wall time passed since the start.
+    pub fn assert_no_hang(&self) {
+        let wall = self.1.elapsed();
+        assert!(wall < HANG, "{wall:?} of wall time");
+    }
+}
+
+/// Runs `f` and gives its result and the steps of work the reader and its region engine did
+/// on this thread meanwhile ([`rezzer_read_pdf::work_steps`]; `None` in a release build,
+/// which does not count them). The count is the same on every machine for the same input.
+pub fn counted<T>(f: impl FnOnce() -> T) -> (T, Option<u64>) {
+    let before = rezzer_read_pdf::work_steps();
+    let out = f();
+    let steps = rezzer_read_pdf::work_steps()
+        .zip(before)
+        .map(|(a, b)| a - b);
+    (out, steps)
+}
+
+/// Checks that `steps` of a shape stay within `ratio` times the steps of its `twin` (the same
+/// text without what the shape adds) plus `slack`: the work grows about as the text does.
+/// Nothing to check in a release build.
+pub fn assert_steps_within(
+    what: &str,
+    steps: Option<u64>,
+    twin: Option<u64>,
+    ratio: u64,
+    slack: u64,
+) {
+    eprintln!("{what}: {steps:?} steps against a twin of {twin:?}");
+    if let (Some(s), Some(t)) = (steps, twin) {
+        assert!(
+            s <= t * ratio + slack,
+            "{what}: {s} steps against {t} of its twin (bound {ratio} times and {slack})"
+        );
+    }
+}
+
+/// Checks that `steps` stay at or under `max` (the count measured when the bound was set,
+/// with half of it again as margin). Nothing to check in a release build.
+pub fn assert_steps_under(what: &str, steps: Option<u64>, max: u64) {
+    eprintln!("{what}: {steps:?} steps (bound {max})");
+    if let Some(s) = steps {
+        assert!(s <= max, "{what}: {s} steps of work, bound {max}");
+    }
+}

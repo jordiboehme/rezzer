@@ -2445,6 +2445,8 @@ fn picture_id(
     ids: &mut Pictures,
     own: (u32, usize),
 ) -> u64 {
+    // A step per use of a picture: its data is read once per object (see `data_id`).
+    crate::work::add(1);
     let mut h = DefaultHasher::new();
     (image.width(), image.height()).hash(&mut h);
     match image {
@@ -2585,6 +2587,8 @@ fn device_space(name: &[u8]) -> bool {
 /// per object), and its size was measured by the guard; a part of it would let two pictures
 /// that differ in the part not read look the same.
 fn data_id(data: &[u8], h: &mut DefaultHasher) {
+    // A step per KiB read: reading a big picture again at each use shows here.
+    crate::work::add(data.len() as u64 / 1024 + 1);
     data.len().hash(h);
     data.hash(h);
 }

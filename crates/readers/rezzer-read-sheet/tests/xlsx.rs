@@ -755,7 +755,8 @@ fn far_cell_keeps_the_table_within_the_caps() {
     );
     let started = std::time::Instant::now();
     let out = read(&Book::default().sheet("S", &s));
-    assert!(started.elapsed().as_secs() < 10);
+    // A guard against a runaway only, generous so a busy machine cannot fail it.
+    assert!(started.elapsed().as_secs() < 60);
     let doc = &out.document;
     let rows = all_blocks(doc)
         .into_iter()

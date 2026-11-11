@@ -768,6 +768,8 @@ pub(crate) fn sentences<R: LineRun>(lines: &[TextLine<'_, R>]) -> bool {
         let chars: Vec<char> = l.text.chars().collect();
         let mut letters = 0usize;
         for (k, &c) in chars.iter().enumerate() {
+            // A step per character looked at: one pass, never a scan back from each stop.
+            crate::work::add(1);
             if c == ' ' {
                 letters = 0;
             } else if matches!(c, '.' | '!' | '?') {

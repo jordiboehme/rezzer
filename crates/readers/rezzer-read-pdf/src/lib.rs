@@ -35,6 +35,7 @@ mod scan;
 mod symbol;
 mod tables;
 mod text;
+mod work;
 
 #[cfg(test)]
 #[path = "../tests/common/mod.rs"]
@@ -79,6 +80,11 @@ impl Reader for PdfReader {
     }
 }
 
+/// The steps of work of the reads on this thread so far, the region engine's included (see
+/// `work`); `None` in a release build. For the work bound tests; not a stable interface.
+#[doc(hidden)]
+pub use work::work_steps;
+
 /// The region engine the regions of [`read_with_regions`] come from, for its callers.
 #[doc(hidden)]
 pub use layoutregions;
@@ -115,6 +121,9 @@ pub struct EnginePage {
     /// What each block of the page is (see [`block_word`]), by its place: a region's `host`
     /// names one of them, or a place past them for rows of a table begun on an earlier page.
     pub block_words: Vec<&'static str>,
+    /// The file is read by its tag tree (its footnotes are the tags'), as the facts of the
+    /// file are learned.
+    pub tagged: bool,
 }
 
 /// What a block of a page is, in one word: its type, and for a paragraph with a role of the
@@ -246,6 +255,18 @@ pub fn engine_report(pages: &[EnginePage]) -> String {
     }
     out.push_str("\n]\n");
     out
+}
+
+/// The region engine's decisions on the pages of one file (see [`EnginePage::input`]), made by
+/// the layout's own decision step: each as its kind, its primitives and what made its segment
+/// (its source and those of the segments over it, innermost first, joined by `<`). `tagged` as
+/// for the file ([`EnginePage::tagged`]). For the metamorphic tests; not a stable interface.
+#[doc(hidden)]
+pub fn engine_decisions(
+    pages: &[layoutregions::PageIn],
+    tagged: bool,
+) -> Vec<Vec<(layoutregions::Kind, Vec<layoutregions::PrimId>, String)>> {
+    layout::engine_decisions(pages, tagged)
 }
 
 /// [`read_with_regions`] with the input of each page, so a test can map a region's pieces back
@@ -1028,6 +1049,7 @@ fn lay_out(
                         run_blocks,
                         stopped: laid.stop.is_some(),
                         block_words: laid.blocks.iter().map(block_word).collect(),
+                        tagged: tree.is_some(),
                     })
                 }
                 _ => None,

@@ -1538,6 +1538,7 @@ fn drawn_inside(
     let lo = boxes.partition_point(|b| b[1] < cell[1] + SNAP);
     for b in &boxes[lo..] {
         *work += 1;
+        crate::work::add(1);
         if b[1] > cell[3] - SNAP || *work > ICON_WORK {
             return false;
         }

@@ -155,6 +155,7 @@ pub(in crate::tables) fn frames(hs: &[Line], tops: &[Top], vs: &[Line]) -> Optio
         let mut below: Option<&Line> = None;
         for s in hs[..j].iter().rev() {
             work += 1;
+            crate::work::add(1);
             if work > STRIP_WORK {
                 return None;
             }
@@ -180,6 +181,7 @@ pub(in crate::tables) fn frames(hs: &[Line], tops: &[Top], vs: &[Line]) -> Optio
         let (mut dividers, mut spans) = (Vec::new(), Vec::new());
         for v in &vs[lo..] {
             work += 1;
+            crate::work::add(1);
             if work > STRIP_WORK {
                 return None;
             }

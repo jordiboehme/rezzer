@@ -656,6 +656,7 @@ pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: f32) -> Dates {
         });
     };
     let baselines = Baselines::new(&lines);
+    crate::work::add(lines.len() as u64);
     for (k, l) in lines.iter().enumerate() {
         if let Some(label) = whole_label(&l.text)
             && let Some(v) = value_of(&lines, &baselines, k)
@@ -737,6 +738,7 @@ pub(crate) fn document_date(dates: &Dates) -> PageDate {
         let mut listed = false;
         for s in &dates.spots {
             work += 1;
+            crate::work::add(1);
             if !s.same(&m.spot) && m.spot.in_column_of(s) {
                 listed = true;
                 break;
@@ -862,8 +864,11 @@ fn date_alone(all: &[Line<'_>], baselines: &Baselines, v: &Line<'_>) -> bool {
     let reach = v.size.abs() + 1.0;
     let a = baselines.ys.partition_point(|y| *y < v.y - reach);
     let z = baselines.ys.partition_point(|y| *y <= v.y + reach);
+    crate::work::add(1);
     is_date
         && !baselines.order[a..z.max(a)].iter().any(|&k| {
+            // A step per piece looked at: those near the baseline, not every piece of the page.
+            crate::work::add(1);
             let p = &all[k];
             !std::ptr::eq(p, v) && (p.y - v.y).abs() <= v.size / 2.0
         })

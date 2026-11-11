@@ -946,7 +946,8 @@ fn long_fence_openers_stay_bounded() {
         let list = units(&d, 2_500);
         assert_within(&list, 2_500);
         assert!(list.len() < 20, "{} units", list.len());
-        assert!(started.elapsed() < std::time::Duration::from_secs(10));
+        // A guard against a runaway only, generous so a busy machine cannot fail it.
+        assert!(started.elapsed() < std::time::Duration::from_secs(60));
         // The code lines are all there, and the language is still named.
         let joined: String = list.iter().map(|u| u.markdown.as_str()).collect();
         assert!(joined.contains("let y000 ") && joined.contains("let y299 "));

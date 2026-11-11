@@ -549,6 +549,117 @@ pub(crate) struct MediaAt {
     pub near: Range<usize>,
 }
 
+/// A run of the engine's input as the file facts are learned from it: the reader's own runs
+/// say which run is a footnote reference (`note`), and `page_in` writes that as a raised run.
+struct NoteRun<'a>(&'a layoutregions::TextRun);
+
+impl LineRun for NoteRun<'_> {
+    fn text(&self) -> &str {
+        &self.0.text
+    }
+    fn x(&self) -> f32 {
+        self.0.x
+    }
+    fn y(&self) -> f32 {
+        self.0.y
+    }
+    fn w(&self) -> f32 {
+        self.0.w
+    }
+    fn h(&self) -> f32 {
+        self.0.h
+    }
+    fn size(&self) -> f32 {
+        self.0.size
+    }
+    fn bold(&self) -> bool {
+        self.0.bold
+    }
+    fn italic(&self) -> bool {
+        self.0.italic
+    }
+    fn font(&self) -> u32 {
+        self.0.font
+    }
+    fn line(&self) -> u32 {
+        self.0.line
+    }
+    fn off_axis(&self) -> bool {
+        self.0.off_axis
+    }
+    fn note(&self) -> bool {
+        self.0.shift == layoutregions::Shift::Raised
+    }
+    fn gaps(&self) -> impl Iterator<Item = GapIn> + '_ {
+        self.0.gaps.iter().copied()
+    }
+}
+
+/// The engine's decisions on each of `pages` (one file, in page order), made by the layout's
+/// own [`decide::decide`] at the default engine limits: the file's facts learned from these
+/// pages as the reader learns them (`tagged` as for the file, a raised run a footnote
+/// reference), then per page the segments, the typers, the arbitration and the layout's steps
+/// after it (a segment a bound left whole kept as laid out, pictures parted from text). Given
+/// regions of a page are decided as given, with no reading of today's readers behind them.
+/// Each decision is its kind, its primitives and what made its segment and the ones over it
+/// (innermost first, joined by `<`), in the order of the decisions. For the metamorphic tests,
+/// which compare these decisions on a page and on the same page changed in a way that keeps
+/// its meaning.
+pub(crate) fn engine_decisions(
+    pages: &[layoutregions::PageIn],
+    tagged: bool,
+) -> Vec<Vec<(Kind, Vec<layoutregions::PrimId>, String)>> {
+    let runs: Vec<Vec<NoteRun<'_>>> = pages
+        .iter()
+        .map(|p| p.texts.iter().map(NoteRun).collect())
+        .collect();
+    let file: Vec<FilePage<'_, NoteRun<'_>>> = pages
+        .iter()
+        .zip(&runs)
+        .map(|(p, r)| FilePage {
+            page: p.page,
+            height: p.size[1],
+            runs: r,
+        })
+        .collect();
+    let facts = file::learn(&file, tagged, &ends_in_amount);
+    let index = layoutregions::typers::FileIndex::new(&facts);
+    let limits = layoutregions::Limits::default();
+    let no_pre: HashMap<u32, usize> = HashMap::new();
+    let no_signal = |_: usize| -> (layoutregions::Signal, bool) {
+        unreachable!("no run is in a part of today's reading")
+    };
+    pages
+        .iter()
+        .map(|page| {
+            let grids = layoutregions::segment::drawn::grids(&page.rules);
+            let decided = decide::decide(
+                page,
+                &grids,
+                (&facts, &index),
+                &ends_in_amount,
+                (&no_pre, &no_signal),
+                &limits,
+                &|| false,
+            );
+            (0..decided.decisions.len())
+                .map(|k| {
+                    // What made the segment and each one over it, innermost first.
+                    let mut made = Vec::new();
+                    let mut at = Some(decided.decisions[k].seg);
+                    while let Some(s) = at.and_then(|s| decided.segs.all.get(s.0 as usize)) {
+                        made.push(format!("{:?}", s.source));
+                        at = s.parent;
+                    }
+                    let mut prims = decided.prims(k).to_vec();
+                    prims.sort_unstable();
+                    (decided.decisions[k].kind, prims, made.join("<"))
+                })
+                .collect()
+        })
+        .collect()
+}
+
 /// The regions of a page that was not laid out.
 pub(crate) fn no_regions(page: u32) -> PageRegions {
     PageRegions {
@@ -1160,6 +1271,8 @@ fn page_blocks_until(
     points: &[(f32, f32)],
     stop: &dyn Fn() -> bool,
 ) -> Laid {
+    // The page's text, the measure the work of its detectors is held to.
+    crate::work::add(runs.len() as u64);
     let mut probes: Vec<(f32, f32, usize)> = points
         .iter()
         .enumerate()
@@ -6443,7 +6556,15 @@ mod tests {
         assert!(laid.stop.is_none());
     }
 
+    /// The steps of work [`a_table_over_many_pages_is_walked_once`] may take: the count measured
+    /// when the bound was set (2026-11-11: 22,030,000), with half of it again as margin.
+    const WALK_STEPS: u64 = 33_000_000;
+
     #[test]
+    #[cfg_attr(
+        not(debug_assertions),
+        ignore = "work steps are counted in debug builds only"
+    )]
     fn a_table_over_many_pages_is_walked_once() {
         const ROWS: usize = 200_000;
         const PER_PAGE: usize = 100;
@@ -6461,7 +6582,7 @@ mod tests {
         let style = Style::default();
         let budget = Budget::new(rezzer_limits::Limits::default());
         let tables = Tables::default();
-        let start = std::time::Instant::now();
+        let before = crate::work::work_steps();
         let mut rows = 0;
         for page in 0..ROWS / PER_PAGE {
             let first = page * PER_PAGE;
@@ -6492,6 +6613,13 @@ mod tests {
             }
         }
         assert_eq!(rows, ROWS);
-        assert!(start.elapsed().as_secs() < 3, "{:?}", start.elapsed());
+        // The steps of work, counted in debug builds: the table's rows are read once, and
+        // each page looks at its own cells. A walk of every row per page would take about
+        // 2,000 times as many.
+        let steps = crate::work::work_steps().zip(before).map(|(a, b)| a - b);
+        eprintln!("walked once: {steps:?} steps");
+        if let Some(steps) = steps {
+            assert!(steps <= WALK_STEPS, "{steps} steps of work");
+        }
     }
 }

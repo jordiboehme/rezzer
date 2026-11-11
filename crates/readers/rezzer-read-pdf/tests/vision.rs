@@ -902,6 +902,10 @@ fn pictures_that_differ_only_after_64_kib_are_not_furniture() {
 }
 
 #[test]
+#[cfg_attr(
+    not(debug_assertions),
+    ignore = "work steps are counted in debug builds only"
+)]
 fn a_big_picture_drawn_many_times_is_known_once() {
     // One page draws a 1 MB unpacked picture 100,000 times, another a 4 by 3 one as often.
     // Knowing the picture is done once per object, so the big one takes not much longer.
@@ -919,28 +923,28 @@ fn a_big_picture_drawn_many_times_is_known_once() {
             &[7u8; 12],
         )
     });
-    let start = std::time::Instant::now();
-    let out = read(&small);
-    let small_time = start.elapsed();
+    // Counted in steps of work: a step per use of a picture and per KiB of data read to know
+    // it, so reading the big picture at every use would take 100,000 times 1,000 steps.
+    let (out, small_steps) = common::counted(|| read(&small));
     assert_eq!(
         out.completeness,
         Completeness::Complete,
         "{:#?}",
         out.document.losses
     );
-    let start = std::time::Instant::now();
-    let out = read(&big);
-    let big_time = start.elapsed();
+    let (out, big_steps) = common::counted(|| read(&big));
     assert_eq!(
         out.completeness,
         Completeness::Complete,
         "{:#?}",
         out.document.losses
     );
-    eprintln!("small {small_time:?}, big {big_time:?}");
-    assert!(
-        big_time < small_time * 2 + std::time::Duration::from_millis(300),
-        "small {small_time:?}, big {big_time:?}"
+    common::assert_steps_within(
+        "a 1 MB picture drawn 100,000 times",
+        big_steps,
+        small_steps,
+        2,
+        10_000,
     );
 }
 
@@ -989,34 +993,33 @@ fn many_pictures_page(n: usize, mask: bool) -> Vec<u8> {
 }
 
 #[test]
+#[cfg_attr(
+    not(debug_assertions),
+    ignore = "work steps are counted in debug builds only"
+)]
 fn a_soft_mask_many_pictures_share_is_read_once() {
-    // 50,000 pictures share one soft mask of 1 MB: knowing them takes not much longer than
+    // 50,000 pictures share one soft mask of 1 MB: knowing them takes about the work of
     // knowing 50,000 pictures without a mask. Reading the mask once per picture would take
-    // many times longer. Wall time on a shared machine is noisy, so each file is read three
-    // times in turn and the fastest read of each is compared, with room for the noise left.
+    // 50,000 times 1,000 steps more (a step per KiB of data read; see `common::counted`).
     let plain = many_pictures_page(50_000, false);
     let masked = many_pictures_page(50_000, true);
-    let timed = |bytes: &[u8]| {
-        let start = std::time::Instant::now();
-        let out = read(bytes);
-        let took = start.elapsed();
+    let counted = |bytes: &[u8]| {
+        let (out, steps) = common::counted(|| read(bytes));
         assert_eq!(
             out.completeness,
             Completeness::Complete,
             "{:#?}",
             out.document.losses
         );
-        took
+        steps
     };
-    let (mut plain_time, mut masked_time) = (std::time::Duration::MAX, std::time::Duration::MAX);
-    for _ in 0..3 {
-        plain_time = plain_time.min(timed(&plain));
-        masked_time = masked_time.min(timed(&masked));
-    }
-    eprintln!("plain {plain_time:?}, masked {masked_time:?}");
-    assert!(
-        masked_time < plain_time * 2 + std::time::Duration::from_millis(500),
-        "plain {plain_time:?}, masked {masked_time:?}"
+    let (plain_steps, masked_steps) = (counted(&plain), counted(&masked));
+    common::assert_steps_within(
+        "50,000 pictures sharing a soft mask",
+        masked_steps,
+        plain_steps,
+        2,
+        10_000,
     );
 }
 

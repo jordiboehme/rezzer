@@ -75,6 +75,7 @@ pub(crate) fn underlined_titles(
                     let s = g.hs[j];
                     let close = near(s.at - 2.0 * SNAP, s.at + 2.0 * SNAP);
                     work += close.len() + 1;
+                    crate::work::add(close.len() as u64 + 1);
                     if work > TITLE_WORK {
                         return (Vec::new(), Some(too_much));
                     }
@@ -97,7 +98,9 @@ pub(crate) fn underlined_titles(
     let mut halted: Option<&'static str> = None;
     // Runs between two heights, charged to the work before they are copied.
     let between = |lo: f32, hi: f32, work: &mut usize| -> Option<Vec<usize>> {
-        *work += by_y.count_between(lo, hi) + 1;
+        let n = by_y.count_between(lo, hi) + 1;
+        *work += n;
+        crate::work::add(n as u64);
         (*work <= TITLE_WORK).then(|| by_y.runs_between(lo, hi))
     };
     for (k, bar) in hs.iter().enumerate() {
@@ -196,6 +199,7 @@ pub(crate) fn underlined_titles(
             let z = ats.partition_point(|v| *v < last - SNAP);
             let lying = &by_at[a..z.max(a)];
             work += lying.len();
+            crate::work::add(lying.len() as u64);
             let ruled = lying.iter().any(|&j| {
                 let s = hs[j];
                 s.at < last - SNAP && s.at > y && s.from < bar.to && s.to > bar.from

@@ -109,6 +109,7 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
     let in_height = sh.by_y.run_y.partition_point(|y| *y < b[3])
         - sh.by_y.run_y.partition_point(|y| *y <= b[1]);
     *work += in_height;
+    crate::work::add(1 + in_height as u64);
     if *work > BAND_WORK {
         return;
     }

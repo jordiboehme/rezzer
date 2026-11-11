@@ -87,6 +87,8 @@ pub struct ByY {
 
 impl ByY {
     pub fn new<R: LineRun>(runs: &[R], lines: &[RunRange]) -> ByY {
+        // Built once per page: a builder per row or per table would show here.
+        crate::work::add((runs.len() + lines.len()) as u64);
         let mut by: Vec<(f32, usize)> = runs
             .iter()
             .enumerate()

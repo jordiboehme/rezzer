@@ -321,7 +321,7 @@ fn many_marks_are_bounded() {
     }
     let mut page = boxed_page("123456", &[4], &["Summe 9.876,54", "Netto 1.234,56"]);
     page.template += &template;
-    let start = Instant::now();
+    let start = crate::common::Cpu::now();
     let out = read(&print_form(&[page], "", ""));
     assert!(
         start.elapsed() < Duration::from_secs(30),
@@ -588,7 +588,7 @@ fn many_marks_near_digits_end_the_search_with_a_note() {
     for k in 0..41 {
         page.template += &data_line(40.0 + 0.01 * k as f32, 700.0, 9.5, &padded(20, "123456"));
     }
-    let start = Instant::now();
+    let start = crate::common::Cpu::now();
     let out = read(&print_form(&[page], "", ""));
     assert!(
         start.elapsed() < Duration::from_secs(30),
