@@ -17,7 +17,7 @@ const BODY_LINE: &str = "die Firma liefert die bestellte Ware nach den vereinbar
 
 /// The axes of a business page: no data layer, no label font, no neighbour, and rules only
 /// where the shape draws them.
-const DOC: Axes = Axes {
+pub(crate) const DOC: Axes = Axes {
     data: &[Data::CourierBold, Data::Proportional],
     labels: &[crate::axes::Labels::Helvetica],
     look: &[Look::Real],
@@ -26,14 +26,14 @@ const DOC: Axes = Axes {
 };
 
 /// The axes of a business page with its neighbours over and under it.
-const DOC_NEXT: Axes = Axes {
+pub(crate) const DOC_NEXT: Axes = Axes {
     next: &[Next::None, Next::TitleOver, Next::LineOver, Next::RowUnder],
     ..DOC
 };
 
 /// The looks of the rules of a business page: stroked lines, dashed, dotted, and bars of a
 /// point.
-const RULED: Axes = Axes {
+pub(crate) const RULED: Axes = Axes {
     look: &[Look::Real, Look::Dashed, Look::Dotted, Look::Thick],
     ..DOC_NEXT
 };
@@ -61,16 +61,16 @@ fn doc_page(v: &Variant, template: String, body_top: f32) -> Built {
 /// Where a business shape stands, for its neighbours: the baselines of its first and its last
 /// line.
 #[derive(Debug, Clone, Copy)]
-struct Span {
-    top: f32,
-    bottom: f32,
+pub(crate) struct Span {
+    pub top: f32,
+    pub bottom: f32,
 }
 
 /// The page of a business shape: `template`, the variant's neighbour next to the shape at
 /// `span` (a bold title or a line over it, a table of three columns under it; none beside, as
 /// the shapes run over the width of the page), and the body from `body_top`. Every text shown
 /// on the page is a value to find as many times as it is drawn.
-fn sheet(v: &Variant, template: String, body_top: f32, span: Option<Span>) -> Sheet {
+pub(crate) fn sheet(v: &Variant, template: String, body_top: f32, span: Option<Span>) -> Sheet {
     let k = v.k();
     let (plain, bold) = v.faces();
     let mut t = template;
@@ -122,12 +122,12 @@ fn sheet(v: &Variant, template: String, body_top: f32, span: Option<Span>) -> Sh
 }
 
 /// `text` in `font` at `size`, its right end at `x`.
-fn right(font: &str, size: f32, x: f32, y: f32, text: &str) -> String {
+pub(crate) fn right(font: &str, size: f32, x: f32, y: f32, text: &str) -> String {
     show(font, size, x - font_width(font, text, size), y, text)
 }
 
 /// A horizontal rule from `x0` to `x1` at `y` as the variant draws it; `size` sets the dashes.
-fn rule(v: &Variant, x0: f32, x1: f32, y: f32, size: f32) -> String {
+pub(crate) fn rule(v: &Variant, x0: f32, x1: f32, y: f32, size: f32) -> String {
     match v.look {
         Look::Thick => format!("{x0} {} {} 1 re f\n", y - 0.5, x1 - x0),
         Look::Dashed => {
@@ -148,7 +148,7 @@ fn rule(v: &Variant, x0: f32, x1: f32, y: f32, size: f32) -> String {
     }
 }
 
-fn owned(rows: &[&[&str]]) -> Vec<Vec<String>> {
+pub(crate) fn owned(rows: &[&[&str]]) -> Vec<Vec<String>> {
     rows.iter()
         .map(|r| r.iter().map(|c| c.to_string()).collect())
         .collect()

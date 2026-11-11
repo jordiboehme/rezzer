@@ -5119,6 +5119,40 @@ fn records_skip_empty_cells() {
 }
 
 #[test]
+fn records_keep_the_line_of_a_value() {
+    // Task 29 fix round 4: a value on the second line of its row (a platform on the arrival's
+    // line) keeps its line in the records style, as `<br>4` does in a table.
+    let mut l = lay(LayoutKind::Table, "A1:B2", Some("A2:B2"));
+    l.header_rows = vec![1];
+    l.header_paths = vec!["Halt".into(), "Gleis".into()];
+    let mut stops = at("", "A2");
+    stops.inlines = vec![
+        Inline::plain("Musterstadt Hbf"),
+        Inline::LineBreak,
+        Inline::plain("Beispielheim"),
+    ];
+    let mut platform = at("", "B2");
+    platform.inlines = vec![Inline::LineBreak, Inline::plain("4")];
+    let md = sheet_md_as(
+        vec![ltable(
+            vec![
+                vec![at("Halt", "A1"), at("Gleis", "B1")],
+                vec![stops, platform],
+            ],
+            1,
+            l,
+        )],
+        &records(),
+    );
+    assert!(
+        md.ends_with(
+            "- Row 2 (S!A2:B2)\n  - Halt: Musterstadt Hbf\\\n    Beispielheim\n  - Gleis:\\\n    4"
+        ),
+        "{md}"
+    );
+}
+
+#[test]
 fn headerless_table_stays_a_table_in_records() {
     // No header in the file: records would name each field by a column letter, so the rows
     // stay a table and the layout line says why.
@@ -7197,4 +7231,69 @@ fn spatial_empty_lines_and_nesting() {
         anchor: None,
     }]);
     assert!(md.contains("```text\n  a  b\n  ```"), "{md}");
+}
+
+#[test]
+fn a_picture_in_a_table_cell_is_written_in_its_cell_with_its_codes() {
+    // Task 29 fix round 1: a picture in a table cell stands after the cell's text, with the
+    // same words as a media block; the codes read from it stand in the cell too, at its first
+    // place only.
+    let mut d = doc();
+    d.assets = vec![Asset {
+        id: "page-1-pic-1".into(),
+        path: Some("assets/page-1-pic-1.png".into()),
+        sha256: "ff".into(),
+        mime: "image/png".into(),
+        caption: None,
+        alt: Some("small picture".into()),
+        needs_vision: false,
+        codes: Vec::new(),
+        code_unread: false,
+    }];
+    let cell = |text: &str, media: bool| {
+        let mut c = rezzer_model::Cell::new(vec![Inline::plain(text)]);
+        if media {
+            c.media.push(rezzer_model::CellMedia {
+                asset: "page-1-pic-1".into(),
+                alt: Some("small picture, box 40, 500 to 88, 548".into()),
+            });
+        }
+        c
+    };
+    d.body = vec![Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows: vec![
+            vec![cell("Artikel", false), cell("Preis", false)],
+            vec![cell("Kaffeebecher", true), cell("12,50", false)],
+            vec![cell("Teekanne", true), cell("34,56", false)],
+        ],
+        alignments: Vec::new(),
+        anchor: None,
+        layout: None,
+    }];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        md.contains(
+            "| Kaffeebecher ![small picture, box 40, 500 to 88, 548](assets/page-1-pic-1.png) | 12,50 |"
+        ),
+        "{md}"
+    );
+    assert!(!md.contains("Code 128"), "{md}");
+    d.assets[0].codes = vec![rezzer_model::Barcode {
+        symbology: "Code 128".into(),
+        text: Some("0000000001".into()),
+        base64: None,
+        bytes: 10,
+        bounds: None,
+        place: None,
+    }];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert_eq!(md.matches("Code 128: 0000000001").count(), 1, "{md}");
+    let row = md
+        .lines()
+        .find(|l| l.contains("Kaffeebecher"))
+        .unwrap_or("");
+    assert!(row.contains("Code 128: 0000000001"), "{md}");
 }

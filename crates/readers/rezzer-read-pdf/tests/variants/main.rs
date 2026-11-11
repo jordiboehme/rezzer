@@ -26,6 +26,7 @@ mod draw;
 mod shapes;
 
 mod axes;
+mod classes;
 mod docs;
 mod forms;
 mod inv;
@@ -45,6 +46,7 @@ fn all_shapes() -> Vec<Shape> {
     let mut all = forms::shapes();
     all.extend(docs::shapes());
     all.extend(pictures::shapes());
+    all.extend(classes::shapes());
     all
 }
 
@@ -418,6 +420,22 @@ shape_tests! {
     line_items_with_row_rules => "line items with row rules",
     close_column_titles => "close column titles",
     title_beside_a_field_list => "title beside a field list",
+    item_table_between_two_rules_with_a_picture_column => "item table between two rules with a picture column",
+    description_wrapping_to_four_lines => "description wrapping to four lines",
+    cells_of_several_lines_that_pair_up_line_by_line_in_a_ruled_grid => "cells of several lines that pair up line by line in a ruled grid",
+    two_line_cells_with_one_value_on_the_second_line => "two-line cells with one value on the second line",
+    cells_of_several_lines_under_a_cell_merged_over_two_rows => "cells of several lines under a cell merged over two rows",
+    wrapped_text_beside_stacked_values_in_a_ruled_grid => "wrapped text beside stacked values in a ruled grid",
+    an_item_beside_net_over_gross_amounts => "an item beside net over gross amounts under titles of two lines",
+    columns_bounded_by_breaks_in_the_rules => "columns bounded by breaks in the rules",
+    a_sentence_across_the_breaks_in_the_rules => "a sentence across the breaks in the rules",
+    a_note_where_a_detail_line_would_stand => "a note where the detail line of the last item would stand",
+    bold_item_names_over_plain_detail_lines_without_a_header => "bold item names over plain detail lines without a header",
+    a_stamp_over_an_item_table_without_rules => "a stamp over an item table without rules",
+    a_stamp_over_a_ruled_item_table => "a stamp over a ruled item table",
+    flat_pictures_across_a_column_bound_in_item_rows => "flat pictures across a column bound in item rows",
+    a_picture_over_the_gap_to_the_next_table => "a picture over the gap to the next table",
+    item_rows_with_a_picture_in_the_description_column => "item rows with a picture in the description column",
     address_columns_in_the_body => "address columns in the body",
     an_address_beside_two_banks => "an address beside two banks",
     an_address_beside_two_phone_lines => "an address beside two phone lines and a register",
@@ -896,4 +914,28 @@ fn a_heading_written_as_a_paragraph_is_a_paragraph_region() {
         }
     }
     assert!(demoted > 0, "{name}: no heading was written as a paragraph");
+}
+
+/// Task 29 fix round 1 (review Important 6): the figure region of a picture written in a table
+/// cell stands at its table: its host is the table's block, which has an anchor of its own.
+#[test]
+fn a_cell_picture_stands_at_its_table() {
+    let page = axes::page_of(
+        &shape("item table between two rules with a picture column"),
+        axes::BASE,
+    );
+    let (_, pages) = inv::read_engine(&page);
+    let p = &pages[0];
+    let hosts: Vec<Option<&String>> = p
+        .regions
+        .regions
+        .iter()
+        .filter(|r| r.kind == layoutregions::Kind::Figure)
+        .map(|r| p.anchors.get(r.host as usize).and_then(Option::as_ref))
+        .collect();
+    assert_eq!(hosts.len(), 3);
+    assert!(
+        hosts.iter().all(|h| h.is_some_and(|a| a == "p1:t1")),
+        "{hosts:?}"
+    );
 }

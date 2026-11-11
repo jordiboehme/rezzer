@@ -45,7 +45,7 @@ Table A1:B3 (data A2:B3), header row 1, found by rules: no gaps, header by type 
 
 | a | b |
 | --- | --- |
-| 1 | ha "ha" ha |
+| 1 | ha<br>"ha"<br>ha |
 | 3 | 4 |
 
 **Columns A1:B3**

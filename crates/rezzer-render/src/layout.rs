@@ -846,7 +846,21 @@ fn records(
             let path = header_path(layout, c)
                 .map(lines_joined)
                 .unwrap_or_else(|| unnamed_column(left, c, ctx.column_numbers));
-            let mut content = vec![Inline::plain(format!("{path}: "))];
+            // A value that starts with line breaks keeps them, as in the table style: it stands
+            // on a later line of its row (a platform on the arrival's line), and its name ends
+            // the first line.
+            let lead = source
+                .inlines
+                .iter()
+                .take_while(|i| matches!(i, Inline::LineBreak))
+                .count();
+            let name = if lead > 0 {
+                format!("{path}:")
+            } else {
+                format!("{path}: ")
+            };
+            let mut content = vec![Inline::plain(name)];
+            content.extend(std::iter::repeat_n(Inline::LineBreak, lead));
             content.extend_from_slice(trimmed(&source.inlines));
             if let Some(range) = grid.merged_range(k) {
                 content.push(Inline::plain(format!(" (merged {range})")));

@@ -36,6 +36,49 @@ pub fn edges(h: &[Line], v: &[Line]) -> (Vec<f32>, Vec<f32>) {
     (clustered(xs), ys)
 }
 
+/// A segment of a rule is at least this many [`SNAP`]s long for its ends to mark a column
+/// bound: the dashes of a dashed rule are shorter, and their gaps are no bounds.
+const BREAK_SEGMENT: f32 = 4.0;
+
+/// Two segments of a rule meet at a joint when the next starts at most this far after the one
+/// before ends (they touch, or overlap by up to a snap): a gap wider than that parts dashes.
+const JOINT: f32 = 0.5;
+
+/// The places where each horizontal rule of a table at the heights `ys` breaks (Task 29, S2):
+/// a segment of it (of `segs`, the page's horizontal segments as drawn, not joined) ends where
+/// the next begins (they touch, see [`JOINT`], or overlap by up to a [`SNAP`]), both segments
+/// at least [`BREAK_SEGMENT`] snaps long,
+/// inside `within` (the table's left and right end). A place every rule breaks at is a column
+/// bound the rules draw, as a vertical rule is one; sorted.
+pub fn rule_breaks(segs: &[Line], within: (f32, f32), ys: &[f32]) -> Vec<f32> {
+    let long = |s: &Line| s.to - s.from >= BREAK_SEGMENT * SNAP;
+    let at = |y: f32| -> Vec<f32> {
+        let mut row: Vec<&Line> = segs
+            .iter()
+            .filter(|s| (s.at - y).abs() <= SNAP && long(s))
+            .filter(|s| s.to > within.0 - SNAP && s.from < within.1 + SNAP)
+            .collect();
+        row.sort_by(|a, b| a.from.total_cmp(&b.from));
+        row.windows(2)
+            .filter(|w| w[1].from - w[0].to <= JOINT && w[0].to - w[1].from <= SNAP)
+            .map(|w| (w[0].to + w[1].from) / 2.0)
+            .filter(|x| *x > within.0 + SNAP && *x < within.1 - SNAP)
+            .collect()
+    };
+    let Some((&first, rest)) = ys.split_first() else {
+        return Vec::new();
+    };
+    let others: Vec<Vec<f32>> = rest.iter().map(|&y| at(y)).collect();
+    at(first)
+        .into_iter()
+        .filter(|x| {
+            others
+                .iter()
+                .all(|o| o.iter().any(|b| (b - x).abs() <= SNAP))
+        })
+        .collect()
+}
+
 /// For the rows between the row edges `ys` (from the top) and the column edges `xs`, the
 /// heights where the inner column rules of a row end when it has some, all of them hang
 /// from its top and they end at one height clear of its bottom, each with that bottom. Each
@@ -593,6 +636,7 @@ pub fn ruled_cells<R: LineRun>(
         unplaced: why,
         icons,
         cuts: Vec::new(),
+        pictures: Vec::new(),
     })
 }
 

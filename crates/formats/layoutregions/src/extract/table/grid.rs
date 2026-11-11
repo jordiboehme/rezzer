@@ -235,6 +235,7 @@ type Placement = (usize, u32, (usize, usize));
 struct GridCell {
     ranges: Vec<(usize, usize)>,
     span: u32,
+    pictures: Vec<u32>,
 }
 
 /// The cells of a region of lines without rules, each line its `pieces` of `runs`, or why it
@@ -248,8 +249,70 @@ pub fn grid_cells<R: LineRun>(
     rows_needed: usize,
     table_caption: bool,
 ) -> Result<TableOut, &'static str> {
+    grid_cells_with(runs, pieces, Around::default(), rows_needed, table_caption)
+}
+
+/// What stands around the lines of a region besides their text (Task 29): the pictures of the
+/// page near them, each with the caller's index for it and its box (x0, y0, x1, y1), and the
+/// places where a rule across them breaks (column bounds the rule draws, see
+/// `ruled::rule_breaks`).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Around<'a> {
+    pub pictures: &'a [(u32, [f32; 4])],
+    pub breaks: &'a [f32],
+}
+
+/// The column of the pictures that a piece of the header line over no text column names: two
+/// pictures or more under the piece (overlapping it in width, their tops under the header's
+/// baseline), in no text column. A picture
+/// column named by its header (`Bild` over a picture in each row).
+fn picture_column(
+    (first, baseline): (&[Piece], f32),
+    columns: &[(f32, f32)],
+    pictures: &[(u32, [f32; 4])],
+) -> Option<(f32, f32)> {
+    let free = |a: f32, b: f32| !columns.iter().any(|c| b > c.0 && a < c.1);
+    first.iter().find_map(|q| {
+        if !free(q.x0, q.x1) {
+            return None;
+        }
+        let under: Vec<&[f32; 4]> = pictures
+            .iter()
+            .map(|(_, p)| p)
+            .filter(|p| p[3] < baseline && p[2] > q.x0 && p[0] < q.x1 && free(p[0], p[2]))
+            .collect();
+        (under.len() >= 2).then(|| {
+            under
+                .iter()
+                .fold((q.x0, q.x1), |(a, b), p| (a.min(p[0]), b.max(p[2])))
+        })
+    })
+}
+
+/// [`grid_cells`] with what stands `around` the lines. A picture stands in a cell (Task 29,
+/// B1 and vision class C: a picture in each row of an item table) only when it lies inside one
+/// column's bounds (the middle of the gutters on both sides, or a break of a rule across the
+/// table in the gutter) and the baselines it holds are all lines of one row: a stamp or a logo
+/// over several rows, or a picture across a column bound, is no cell's. Pictures never make
+/// a column of text; a column of pictures is one only where a title of the header line names
+/// it (see [`picture_column`]).
+pub fn grid_cells_with<R: LineRun>(
+    runs: &[R],
+    pieces: &[Vec<Piece>],
+    around: Around<'_>,
+    rows_needed: usize,
+    table_caption: bool,
+) -> Result<TableOut, &'static str> {
     let lines = pieces.len();
-    let columns = with_sparse(columns_of(pieces), pieces);
+    let mut columns = with_sparse(columns_of(pieces), pieces);
+    let header = pieces.first().and_then(|first| {
+        let p = first.iter().find(|p| p.end > p.start)?;
+        Some((first.as_slice(), runs[p.start].y()))
+    });
+    if let Some(c) = header.and_then(|h| picture_column(h, &columns, around.pictures)) {
+        let at = columns.partition_point(|x| x.0 < c.0);
+        columns.insert(at, c);
+    }
     let cols = columns.len();
     if cols < 2 {
         return Err("no columns");
@@ -318,15 +381,8 @@ pub fn grid_cells<R: LineRun>(
     if anchors.len() < rows_needed.max(1) {
         return Err("too few rows");
     }
-    // The row each line goes to: its own when it is an anchor, else the one before it.
-    let row_of = |k: usize| {
-        let after = anchors.partition_point(|&a| a < k);
-        if anchors.get(after) == Some(&k) {
-            after
-        } else {
-            after.saturating_sub(1)
-        }
-    };
+    let row_at = rows_of_lines(runs, pieces, &anchors);
+    let row_of = |k: usize| row_at[k];
     // Close titles of the first line over two columns are cut at the gutter between them.
     // The cut that falls inside a run is made once the runs are in their cells.
     let mut inside: Vec<(usize, usize)> = Vec::new();
@@ -406,6 +462,7 @@ pub fn grid_cells<R: LineRun>(
                 .map(|_| GridCell {
                     ranges: Vec::new(),
                     span: 1,
+                    pictures: Vec::new(),
                 })
                 .collect()
         })
@@ -417,6 +474,9 @@ pub fn grid_cells<R: LineRun>(
             cell.span = cell.span.max(span);
         }
     }
+    for (pic, col, row) in cell_pictures(runs, pieces, &columns, around, &row_of) {
+        rows[row][col].pictures.push(pic);
+    }
     // A cell that spans hides the cells it covers.
     for row in &mut rows {
         let mut c = 0;
@@ -425,6 +485,8 @@ pub fn grid_cells<R: LineRun>(
             for k in c + 1..(c + span).min(row.len()) {
                 let moved = std::mem::take(&mut row[k].ranges);
                 row[c].ranges.extend(moved);
+                let moved = std::mem::take(&mut row[k].pictures);
+                row[c].pictures.extend(moved);
                 row[k].span = 0;
             }
             c += span.max(1);
@@ -522,7 +584,222 @@ pub fn grid_cells<R: LineRun>(
             .collect(),
         icons: Vec::new(),
         cuts,
+        pictures: rows
+            .iter()
+            .enumerate()
+            .flat_map(|(r, cells)| {
+                cells
+                    .iter()
+                    .enumerate()
+                    .flat_map(move |(c, cell)| cell.pictures.iter().map(move |&pic| (r, c, pic)))
+            })
+            .collect(),
     })
+}
+
+/// The pictures of `around` that stand in a cell of the grid of `columns` (see
+/// [`grid_cells_with`]): each picture's place among them, its column and its row (`row_of`
+/// gives the row of a line). A picture stands in a row when the baselines it holds are all
+/// that row's and it lies inside the row's band (see `band` below): a picture that reaches
+/// over a gap into another block is no row's.
+fn cell_pictures<R: LineRun>(
+    runs: &[R],
+    pieces: &[Vec<Piece>],
+    columns: &[(f32, f32)],
+    around: Around<'_>,
+    row_of: &dyn Fn(usize) -> usize,
+) -> Vec<(u32, usize, usize)> {
+    let cols = columns.len();
+    // The baseline of each line.
+    let base: Vec<Option<f32>> = pieces
+        .iter()
+        .map(|l| {
+            l.iter()
+                .find(|p| p.end > p.start)
+                .map(|p| runs[p.start].y())
+        })
+        .collect();
+    // The bound between columns `c` and `c + 1`: a break of a rule in their gutter, else its
+    // middle.
+    let bound = |c: usize| {
+        let (a, b) = (columns[c].1, columns[c + 1].0);
+        around
+            .breaks
+            .iter()
+            .copied()
+            .find(|x| *x >= a && *x <= b)
+            .unwrap_or((a + b) / 2.0)
+    };
+    // Each row's band: from the last baseline of the row over it (over the first row, the
+    // table's tallest row or a line and a half over its first baseline) down to the first baseline of the row under it (under
+    // the last row, the table's tallest row under its first baseline, or three lines).
+    let rows = (0..pieces.len()).map(row_of).max().map_or(0, |r| r + 1);
+    let mut firsts: Vec<Option<(f32, f32)>> = vec![None; rows];
+    let mut lasts: Vec<Option<f32>> = vec![None; rows];
+    for (l, y) in base.iter().enumerate() {
+        if let Some(y) = *y {
+            let r = row_of(l);
+            let size = pieces[l]
+                .iter()
+                .find(|p| p.end > p.start)
+                .map_or(1.0, |p| runs[p.start].size());
+            firsts[r].get_or_insert((y, size));
+            lasts[r] = Some(y);
+        }
+    }
+    let tallest = firsts
+        .windows(2)
+        .filter_map(|w| Some(w[0]?.0 - w[1]?.0))
+        .fold(0.0f32, f32::max);
+    let band = |r: usize| -> Option<(f32, f32)> {
+        let (first, size) = firsts[r]?;
+        let top = match r.checked_sub(1).and_then(|o| lasts[o]) {
+            Some(y) => y,
+            None => first + (1.5 * size).max(tallest),
+        };
+        let bottom = match firsts.get(r + 1).copied().flatten() {
+            Some((y, _)) => y,
+            None if tallest > 0.0 => first - tallest,
+            None => first - 3.0 * size,
+        };
+        Some((bottom, top))
+    };
+    let mut out = Vec::new();
+    for &(pic, ref p) in around.pictures {
+        let held: Vec<usize> = (0..pieces.len())
+            .filter(|&l| base[l].is_some_and(|y| y >= p[1] && y <= p[3]))
+            .collect();
+        let Some(&first) = held.first() else {
+            continue;
+        };
+        if held.iter().any(|&l| row_of(l) != row_of(first)) {
+            continue;
+        }
+        let inside = band(row_of(first)).is_some_and(|(bottom, top)| p[1] >= bottom && p[3] <= top);
+        if !inside {
+            continue;
+        }
+        let col = (0..cols).find(|&c| {
+            let left = if c == 0 { f32::MIN } else { bound(c - 1) };
+            let right = if c + 1 == cols { f32::MAX } else { bound(c) };
+            p[0] >= left && p[2] <= right
+        });
+        if let Some(col) = col {
+            out.push((pic, col, row_of(first)));
+        }
+    }
+    out
+}
+
+/// Two sizes of text within this share of each other are one size.
+const SAME_SIZE: f32 = 0.1;
+
+/// A blank between two lines of a row is wider than the steps around it by at least this many
+/// sizes of their text: the white space that parts two records.
+const BLANK_STEP: f32 = 0.25;
+
+/// The row of each line of a region (its `pieces` of `runs`), the rows starting at the lines
+/// `anchors` (sorted): an anchor starts its own row, a line before the first anchor joins the
+/// first row. The lines between two anchors go with the row over them, as the wrapped text of
+/// its cells, unless the evidence of their place puts some with the row under them (Task 29,
+/// B2: the other cells of a row stand on the second line of a description that wraps, so the
+/// description's first line stands over the row's anchor):
+/// - the widest step of baselines from the anchor over them, through them, to the anchor under
+///   them is a blank (see [`BLANK_STEP`]): the lines under it go with the row under it, the
+///   others with the row over it;
+/// - with no blank, lines in the plain face under a first row all in bold (a header in its own
+///   weight; an item name in bold beside plain values is none), where the first row is the
+///   anchor over them, are no text of the first row: they go with the row under them;
+/// - either way only when the lines that go down go on into the row under them: each stands in
+///   a column of the anchor under it, in its size (a detail line set apart under its own row
+///   stays with it).
+fn rows_of_lines<R: LineRun>(runs: &[R], pieces: &[Vec<Piece>], anchors: &[usize]) -> Vec<usize> {
+    let lines = pieces.len();
+    // The baseline, the size and the weight of each line, from its first piece's first run.
+    let of = |k: usize| {
+        pieces[k].iter().find(|p| p.end > p.start).map(|p| {
+            (
+                runs[p.start].y(),
+                runs[p.start].size(),
+                runs[p.start].bold(),
+            )
+        })
+    };
+    // Whether every inked run of line `k` is bold: the line is a header in its own weight.
+    let all_bold = |k: usize| {
+        let mut inked = pieces[k]
+            .iter()
+            .flat_map(|p| &runs[p.start..p.end])
+            .filter(|r| !r.text().trim().is_empty())
+            .peekable();
+        inked.peek().is_some() && inked.all(|r| r.bold())
+    };
+    let mut out: Vec<usize> = (0..lines)
+        .map(|k| {
+            let after = anchors.partition_point(|&a| a < k);
+            if anchors.get(after) == Some(&k) {
+                after
+            } else {
+                after.saturating_sub(1)
+            }
+        })
+        .collect();
+    for w in 0..anchors.len().saturating_sub(1) {
+        let (a, b) = (anchors[w], anchors[w + 1]);
+        if b <= a + 1 {
+            continue;
+        }
+        // The steps from the anchor over the lines, between them, and to the anchor under them.
+        let mut steps: Vec<(f32, f32)> = Vec::with_capacity(b - a);
+        let mut whole = true;
+        for k in a..b {
+            match (of(k), of(k + 1)) {
+                (Some((y0, s0, _)), Some((y1, s1, _))) => steps.push((y0 - y1, s0.max(s1))),
+                _ => whole = false,
+            }
+        }
+        if !whole {
+            continue;
+        }
+        let widest = (0..steps.len())
+            .max_by(|&i, &j| steps[i].0.total_cmp(&steps[j].0))
+            .unwrap_or(0);
+        let blank = (0..steps.len())
+            .filter(|&i| i != widest)
+            .all(|i| steps[widest].0 - steps[i].0 >= BLANK_STEP * steps[widest].1);
+        let first_from = if blank {
+            // Step `widest` lies between line `a + widest` and the line under it.
+            Some(a + widest + 1)
+        } else if w == 0 && all_bold(a) {
+            (a + 1..b).find(|&k| of(k).is_some_and(|l| !l.2))
+        } else {
+            None
+        };
+        // The lines that go down go on into the row under them: each stands in a column of the
+        // anchor under it (its text starts where a piece of that line starts), in its font, slant
+        // and size (a detail line in a face of its own stays with its row).
+        let goes_on = |from: usize| {
+            let Some((_, size, _)) = of(b) else {
+                return false;
+            };
+            (from..b).all(|k| {
+                pieces[k].iter().filter(|p| p.end > p.start).all(|p| {
+                    pieces[b].iter().filter(|q| q.end > q.start).any(|q| {
+                        let (a, c) = (&runs[p.start], &runs[q.start]);
+                        (q.x0 - p.x0).abs() <= TITLE_ALIGN * size
+                            && a.font() == c.font()
+                            && a.italic() == c.italic()
+                    })
+                }) && of(k).is_some_and(|l| (l.1 - size).abs() <= SAME_SIZE * size)
+            })
+        };
+        if let Some(from) = first_from.filter(|&f| goes_on(f)) {
+            for slot in out.iter_mut().take(b).skip(from) {
+                *slot = w + 1;
+            }
+        }
+    }
+    out
 }
 
 /// Whether the lines of a region (their `pieces`) are a paragraph set full (justified): every

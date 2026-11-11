@@ -88,7 +88,11 @@ pub(super) fn ruled(
             return;
         }
     };
-    let grids = grid_parts(page, hs, vs, groups, segmented, found);
+    let grids = joint_bounds(
+        flow,
+        rules,
+        grid_parts(page, hs, vs, groups, segmented, found),
+    );
     // The horizontal lines a grid takes; the others may bound a column of totals or a strip
     // of fields.
     let taken = taken_by_grids(hs.len(), groups);
@@ -331,6 +335,147 @@ fn section(
             side: side.is_some(),
         },
     )
+}
+
+/// A word gap that holds a joint of rule pieces is a column gap when it is at least this many
+/// times the word spacing of its row's text.
+const WIDE_GAP: f32 = 1.5;
+
+/// The usual white space between two words from ink to ink, as a share of the text's size, for
+/// a row with no word gap to measure: the space's advance and the side bearings of the letters
+/// next to it (as the gaps of a run are measured).
+const WORD_SPACE: f32 = 0.33;
+
+/// The column bounds that the horizontal rules of each grid of `parts` draw by joints in their
+/// segments (see [`layoutregions::extract::table::ruled::rule_breaks`]; `rules` as drawn), where
+/// no vertical rule stands, added row by row as vertical rules (Task 29, S2: a drawn cell that
+/// holds two columns, from and to), before the runs are cut at the column rules, so a run whose
+/// word gap holds a bound is cut there. A joint bounds a row's cells when:
+/// - every rule of the grid has it (a rule drawn in pieces at some x of its own bounds nothing);
+/// - no word of the row covers it; a word gap of a run may hold it only when the gap is clearly
+///   wider than the word spacing of the row's text ([`WIDE_GAP`]), so a sentence that crosses
+///   the joint at a plain word space stays whole;
+/// - the grid has text on both sides of it, between it and the column edges next to it;
+/// - the row's cell around it is bounded by inner vertical rules, or the row's text right of the
+///   joint starts near it, within a size of its text: a cell across the whole width with text
+///   far from every joint is one note, not columns.
+fn joint_bounds(flow: &Flow, rules: &[Rule], mut parts: Vec<Part>) -> Vec<Part> {
+    let segs: Vec<Line> = rules
+        .iter()
+        .filter_map(|r| {
+            let (x0, x1) = (r.x0.min(r.x1), r.x0.max(r.x1));
+            let (y0, y1) = (r.y0.min(r.y1), r.y0.max(r.y1));
+            (y1 - y0 < x1 - x0 && y1 - y0 <= SNAP).then_some(Line {
+                at: (y0 + y1) / 2.0,
+                from: x0,
+                to: x1,
+            })
+        })
+        .collect();
+    if segs.is_empty() {
+        return parts;
+    }
+    // Whether `g` holds `x`.
+    let holds = |g: &crate::layout::Gap, x: f32| g.from <= x && g.to >= x;
+    for part in &mut parts {
+        let (xs, ys) = edges(&part.h, &part.v);
+        if xs.len() < 2 || ys.len() < 3 {
+            continue;
+        }
+        let (left, right) = (xs[0], xs[xs.len() - 1]);
+        let (top, bottom) = (ys[0], ys[ys.len() - 1]);
+        let inside = |r: &Run| r.y > bottom && r.y < top && !r.text.trim().is_empty();
+        let mut added: Vec<Line> = Vec::new();
+        // The joints every rule of the grid shares.
+        let shared = layoutregions::extract::table::ruled::rule_breaks(&segs, (left, right), &ys);
+        for w in ys.windows(2) {
+            let (high, low) = (w[0], w[1]);
+            for &b in &shared {
+                if xs.iter().any(|x| (x - b).abs() <= SNAP) {
+                    continue;
+                }
+                let before = xs
+                    .iter()
+                    .copied()
+                    .filter(|x| *x < b)
+                    .fold(f32::MIN, f32::max);
+                let after = xs
+                    .iter()
+                    .copied()
+                    .filter(|x| *x > b)
+                    .fold(f32::MAX, f32::min);
+                let mid = |r: &Run| r.x + r.w / 2.0;
+                let sides = flow
+                    .runs
+                    .iter()
+                    .any(|r| inside(r) && mid(r) > before && mid(r) < b)
+                    && flow
+                        .runs
+                        .iter()
+                        .any(|r| inside(r) && mid(r) > b && mid(r) < after);
+                let row: Vec<&Run> = flow
+                    .runs
+                    .iter()
+                    .filter(|r| r.y > low && r.y < high && !r.text.trim().is_empty())
+                    .collect();
+                // The word spacing of the row's text: the median of its word gaps, those that
+                // hold a joint of the grid left out (they may be column gaps); a row with no
+                // other word gap has the usual word space of its size. A gap holds a bound only
+                // when it is clearly wider than that: a sentence across the joint is never cut
+                // at a plain word space.
+                let size = row.iter().map(|r| r.size).fold(1.0f32, f32::max);
+                let mut spaces: Vec<f32> = row
+                    .iter()
+                    .flat_map(|r| r.gaps.iter())
+                    .filter(|g| !shared.iter().any(|&j| holds(g, j)))
+                    .map(|g| g.to - g.from)
+                    .collect();
+                spaces.sort_by(f32::total_cmp);
+                let spacing = spaces
+                    .get(spaces.len() / 2)
+                    .copied()
+                    .unwrap_or(WORD_SPACE * size);
+                let wide =
+                    |g: &crate::layout::Gap| holds(g, b) && g.to - g.from >= WIDE_GAP * spacing;
+                // Whether a word of `r` covers the joint: its ink is there, in no wide gap.
+                let covers = |r: &Run| {
+                    r.x < b - SNAP / 2.0 && r.x + r.w > b + SNAP / 2.0 && !r.gaps.iter().any(wide)
+                };
+                if !sides || row.iter().any(|r| covers(r)) {
+                    continue;
+                }
+                // The row's cell around the joint: bounded by inner vertical rules over the row.
+                let reach = |x: f32| {
+                    part.v.iter().any(|v| {
+                        (v.at - x).abs() <= SNAP && v.from <= low + SNAP && v.to >= high - SNAP
+                    })
+                };
+                let inner = |x: f32| x > left + SNAP && x < right - SNAP && reach(x);
+                let bounded = inner(before) || inner(after);
+                // Where the row's text right of the joint starts: the start of a run, or of a
+                // word after a gap that holds the joint.
+                let starts = row.iter().filter_map(|r| {
+                    if r.x >= b {
+                        return Some(r.x);
+                    }
+                    r.gaps.iter().find(|g| wide(g)).map(|g| g.to)
+                });
+                let near = starts.filter(|x| *x < after).any(|x| x - b <= size);
+                if bounded || near {
+                    added.push(Line {
+                        at: b,
+                        from: low,
+                        to: high,
+                    });
+                }
+            }
+        }
+        for l in added {
+            let at = part.v.partition_point(|v| v.at < l.at);
+            part.v.insert(at, l);
+        }
+    }
+    parts
 }
 
 /// The column and row edges (from the top) of the section of segments `h` and `v`, cut at
@@ -669,6 +814,7 @@ fn read_grid(sh: &Sheet<'_>, take: &mut Taking, found: &mut Found, s: GridSectio
         ids: Vec::new(),
         by: Detector::Ruled,
         drawn: Some(b),
+        pictures: Vec::new(),
     });
     Next::Section
 }

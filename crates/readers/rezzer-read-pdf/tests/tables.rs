@@ -12,8 +12,8 @@ use std::path::PathBuf;
 use common::{Builder, Page, helvetica_width, markdown, pdf, show, sized_page};
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
-    Anchor, Block, Cell, Completeness, LossReason, ReadOptions, ReadOutcome, SectionKind, Severity,
-    plain_text,
+    Anchor, Block, Cell, Completeness, Inline, LossReason, ReadOptions, ReadOutcome, SectionKind,
+    Severity, plain_text,
 };
 
 fn corpus_path(name: &str) -> PathBuf {
@@ -1847,8 +1847,8 @@ fn invoice_table() -> String {
 const INVOICE_TABLE: &str = "\
 | ISSUING DATE | DOCUMENT NUMBER | TYPE OF SERVICE | QTY | VAT RATE | VAT AMOUNT | GROSS AMOUNT |
 | --- | --- | --- | --- | --- | --- | --- |
-| 2030-01-02 | 1000001 | Sample ticket AAA / BBB / CCC | 1 | 0.00 | 0.00 | 10.00 |
-| 2030-01-02 | 1000002 | Seat Linked to document 1000001 | 1 | 0.00 | 0.00 | 2.50 |
+| 2030-01-02 | 1000001 | Sample ticket AAA /<br>BBB / CCC | 1 | 0.00 | 0.00 | 10.00 |
+| 2030-01-02 | 1000002 | Seat Linked to<br>document 1000001 | 1 | 0.00 | 0.00 | 2.50 |
 | 2030-01-03 | 1000003 | Seat | 1 | 0.00 | 0.00 | 2.50 |
 ";
 
@@ -2297,15 +2297,15 @@ fn senate_expenditures_table_is_rebuilt() {
     assert_eq!(rows.len(), 34);
     let md = markdown(&out);
     for expected in [
-        "| **DOCUMENT NO.** | **DATE POSTED** | **PAYEE NAME** | \
-         **OBLIGATION/SERVICE DATES** **START** | **OBLIGATION/SERVICE DATES** **END** | \
+        "| **DOCUMENT NO.** | **DATE**<br>**POSTED** | **PAYEE NAME** | \
+         **OBLIGATION/SERVICE**<br>**DATES** **START** | **OBLIGATION/SERVICE**<br>**DATES** **END** | \
          **DESCRIPTION** | **AMOUNT ($)** |\n| --- | --- | --- | --- | --- | --- | --- |\n\
          |  |  | BAIN, J MATTHEW |  |  | DISTRICT DIRECTOR | 37,499.96 |\n",
         "| DHAW20190001 | 05/03/2019 | CITIBANK - TRAVEL CBA CARD | 03/04/2019 | 03/06/2019 | \
-         STAFF TRANSPORTATION AIRFARE FOR E JOHNSON KANSAS CITY TO WASHINGTON DC AND RETURN | \
+         STAFF TRANSPORTATION<br>AIRFARE FOR E JOHNSON KANSAS CITY TO WASHINGTON DC AND RETURN | \
          920.68 |\n",
         "| DHAW20190070 | 09/09/2019 | CITIBANK - TRAVEL CBA CARD | 08/12/2019 | 08/14/2019 | \
-         STAFF TRANSPORTATION AIRFARE FOR C WEIHS WASHINGTON DC TO SPRINGFIELD AND RETURN | \
+         STAFF TRANSPORTATION<br>AIRFARE FOR C WEIHS WASHINGTON DC TO SPRINGFIELD AND RETURN | \
          411.49 |\n",
     ] {
         assert!(md.contains(expected), "{expected} in {md}");
@@ -2770,5 +2770,288 @@ fn noted_refusals_keep_their_reason_in_their_paragraphs() {
             text,
             "some of its text stands between its columns",
         );
+    }
+}
+
+/// One cell of [`tagged_timetable`]: its lines, each its text (empty: no text on that line).
+type TaggedCell<'a> = &'a [&'a str];
+
+/// Private shape S1 (Task 29 fix round 1, vision class A on the given path): a tagged
+/// timetable, its table stated by the tag tree, each row a departure over an arrival in cells
+/// of two lines: the stops, a date and a time on each line, a platform on one line, a product
+/// on the first line, and a note that wraps to the table's right end. `size` is the text size
+/// (the columns scale with it), `rows` the rows of the body.
+fn tagged_timetable(size: f32, rows: &[[TaggedCell<'_>; 6]]) -> Vec<u8> {
+    let f = size / 8.33;
+    let xs = [42.52, 170.08, 209.76, 249.45, 283.46, 340.16].map(|x| x * f);
+    let titles = ["Halt", "Datum", "Zeit", "Gleis", "Produkt", "Hinweis"];
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let kid = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let bold = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
+    let root = b.reserve();
+    let table = b.reserve();
+    let mut content = String::new();
+    let mut mcid = 0u32;
+    // Each element: its role, its row and its marked content ids.
+    let mut cells: Vec<(&str, usize, Vec<u32>)> = Vec::new();
+    let top = 700.0;
+    let pitch = 1.2 * size;
+    let mut show = |font: &str, x: f32, y: f32, text: &str, role: &str, mcid: &mut u32| {
+        let t = text.replace('(', "\\(").replace(')', "\\)");
+        content.push_str(&format!(
+            "/{role} <</MCID {m}>> BDC BT /{font} {size} Tf 1 0 0 1 {x} {y} Tm ({t}) Tj ET EMC\n",
+            m = *mcid
+        ));
+        *mcid += 1;
+        *mcid - 1
+    };
+    let mut header = Vec::new();
+    for (x, t) in xs.iter().zip(titles) {
+        header.push(("TH", 0, vec![show("F2", *x, top, t, "TH", &mut mcid)]));
+    }
+    cells.extend(header);
+    for (r, row) in rows.iter().enumerate() {
+        let first = top - 1.6 * size - 2.0 * pitch * r as f32 - 0.5 * size * r as f32;
+        for (x, lines) in xs.iter().zip(row.iter()) {
+            let ids: Vec<u32> = lines
+                .iter()
+                .enumerate()
+                .filter(|(_, l)| !l.is_empty())
+                .map(|(n, l)| show("F1", *x, first - pitch * n as f32, l, "TD", &mut mcid))
+                .collect();
+            cells.push(("TD", r + 1, ids));
+        }
+    }
+    let cs = b.stream("", content.as_bytes());
+    let rows_n = rows.len() + 1;
+    let trs: Vec<u32> = (0..rows_n).map(|_| b.reserve()).collect();
+    let mut by_mcid: Vec<(u32, u32)> = Vec::new();
+    let mut tr_kids: Vec<Vec<u32>> = vec![Vec::new(); rows_n];
+    for (role, r, ids) in &cells {
+        let k = match ids.as_slice() {
+            [one] => format!("{one}"),
+            many => format!(
+                "[{}]",
+                many.iter()
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+        };
+        let el = b.add(format!(
+            "<< /Type /StructElem /S /{role} /P {} 0 R /Pg {kid} 0 R /K {k} >>",
+            trs[*r]
+        ));
+        tr_kids[*r].push(el);
+        by_mcid.extend(ids.iter().map(|&m| (m, el)));
+    }
+    for (r, kids) in tr_kids.iter().enumerate() {
+        b.set(
+            trs[r],
+            format!(
+                "<< /Type /StructElem /S /TR /P {table} 0 R /K [{}] >>",
+                kids.iter()
+                    .map(|k| format!("{k} 0 R"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+        );
+    }
+    b.set(
+        table,
+        format!(
+            "<< /Type /StructElem /S /Table /P {root} 0 R /K [{}] >>",
+            trs.iter()
+                .map(|k| format!("{k} 0 R"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
+    );
+    by_mcid.sort_unstable();
+    b.set(
+        root,
+        format!(
+            "<< /Type /StructTreeRoot /K {table} 0 R /ParentTree << /Nums [0 [{}]] >> >>",
+            by_mcid
+                .iter()
+                .map(|(_, e)| format!("{e} 0 R"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
+    );
+    b.set(
+        kid,
+        format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] /StructParents 0 \
+             /Resources << /Font << /F1 {font} 0 R /F2 {bold} 0 R >> >> /Contents {cs} 0 R >>"
+        ),
+    );
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(
+        catalog,
+        format!(
+            "<< /Type /Catalog /Pages {tree} 0 R /MarkInfo << /Marked true >> \
+             /StructTreeRoot {root} 0 R >>"
+        ),
+    );
+    b.finish(catalog)
+}
+
+/// Private shape S1, across sizes and row counts: each cell of the tagged table keeps its lines,
+/// as in a table read from rules or from lines (one shared rule): each stop on the line of its
+/// date and time, the platform after an empty first line where it stands on the arrival's line.
+/// The times stand in a column too narrow for the next word (`an` after `ab 08:15`) and open
+/// with a small letter: they stay lines because the stops beside them do. So does the note that
+/// wraps on those lines (a line break in its sentence, every word in its cell); the note whose
+/// second line is a long number keeps it on a line of its own.
+#[test]
+fn a_tagged_row_keeps_its_cell_lines() {
+    let note = [
+        "Bitte beachten Sie den Hinweis zur Fahrradmitnahme im Zug",
+        "und am Bahnsteig",
+    ];
+    // Fix round 2: a note whose first line ends in a label and whose second line is its value,
+    // a long number that would not have fit after the label: one note, never a pair with the
+    // arrival's line.
+    let numbered = [
+        "Bitte die Nummer fuer Rueckfragen bereithalten, Ref.-Nr.",
+        "123456789012",
+    ];
+    let all: [[TaggedCell<'_>; 6]; 3] = [
+        [
+            &["Musterstadt Hbf, Nordseite", "Beispielheim Bahnhof, Ost"],
+            &["01.10.", "01.10."],
+            &["ab 08:15", "an 09:40"],
+            &["", "4"],
+            &["ICE 571"],
+            &note,
+        ],
+        [
+            &["Beispielheim Bahnhof, Ost", "Probedorf Mitte"],
+            &["01.10.", "01.10."],
+            &["ab 09:52", "an 10:30"],
+            &["2", "5"],
+            &["RE 4711"],
+            &note,
+        ],
+        [
+            &["Probedorf Mitte", "Musterstadt Hbf, Nordseite"],
+            &["02.10.", "02.10."],
+            &["ab 17:05", "an 18:20"],
+            &["1", "3"],
+            &["RB 4712"],
+            &numbered,
+        ],
+    ];
+    for size in [7.5f32, 8.33] {
+        for n in [2usize, 3] {
+            let out = read(&tagged_timetable(size, &all[..n]));
+            let blocks = page(&out, 1);
+            let rows: Vec<&Vec<Cell>> = blocks
+                .iter()
+                .filter_map(|b| match b {
+                    Block::Table { rows, .. } => Some(rows),
+                    _ => None,
+                })
+                .flatten()
+                .collect();
+            assert_eq!(rows.len(), n + 1, "{size} {n}");
+            // Each cell's lines, parted at its line breaks.
+            let lines = |c: &Cell| -> Vec<String> {
+                c.inlines
+                    .split(|i| matches!(i, Inline::LineBreak))
+                    .map(|p| {
+                        plain_text(p)
+                            .split_whitespace()
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+                    .collect()
+            };
+            for (r, row) in all[..n].iter().enumerate() {
+                let have: Vec<Vec<String>> = rows[r + 1].iter().map(lines).collect();
+                let want: Vec<Vec<String>> = row
+                    .iter()
+                    .map(|cell| {
+                        let mut l: Vec<String> = cell.iter().map(|s| s.to_string()).collect();
+                        while l.last().is_some_and(String::is_empty) {
+                            l.pop();
+                        }
+                        l
+                    })
+                    .collect();
+                assert_eq!(have, want, "{size} {n} row {r}");
+            }
+        }
+    }
+}
+
+/// Task 29 fix round 4, the other direction of [`a_tagged_row_keeps_its_cell_lines`]: in a row
+/// whose other cells hold one line each, a note whose first line is full joins its second line
+/// when the text goes on, in a small letter (with a space) or after a hyphen in a word (with
+/// nothing between); a full line before a capital stays a line.
+#[test]
+fn a_tagged_cell_joins_a_full_line_that_goes_on() {
+    let notes: [([&str; 2], &[&str]); 3] = [
+        (
+            [
+                "Bitte beachten Sie den Hinweis zur Fahrradmitnahme im Zug",
+                "und am Bahnsteig",
+            ],
+            &["Bitte beachten Sie den Hinweis zur Fahrradmitnahme im Zug und am Bahnsteig"],
+        ),
+        (
+            [
+                "Bitte beachten Sie den Hinweis zur Mitnahme der Fahr-",
+                "raeder im Zug",
+            ],
+            &["Bitte beachten Sie den Hinweis zur Mitnahme der Fahr-raeder im Zug"],
+        ),
+        (
+            [
+                "Bitte beachten Sie den Hinweis zur Fahrradmitnahme im",
+                "Zug nach Beispielheim",
+            ],
+            &[
+                "Bitte beachten Sie den Hinweis zur Fahrradmitnahme im",
+                "Zug nach Beispielheim",
+            ],
+        ),
+    ];
+    for (note, want) in notes {
+        let row: [TaggedCell<'_>; 6] = [
+            &["Musterstadt Hbf"],
+            &["01.10."],
+            &["ab 08:15"],
+            &["4"],
+            &["ICE 571"],
+            &note,
+        ];
+        let out = read(&tagged_timetable(8.33, &[row]));
+        let blocks = page(&out, 1);
+        let rows: Vec<&Vec<Cell>> = blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Table { rows, .. } => Some(rows),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert_eq!(rows.len(), 2, "{note:?}");
+        let have: Vec<String> = rows[1][5]
+            .inlines
+            .split(|i| matches!(i, Inline::LineBreak))
+            .map(|p| plain_text(p).trim().to_string())
+            .collect();
+        assert_eq!(have, want, "{note:?}");
+        // The cells of one line take no empty line before them.
+        assert_eq!(plain_text(&rows[1][3].inlines), "4");
+        assert!(!matches!(rows[1][3].inlines[0], Inline::LineBreak));
     }
 }

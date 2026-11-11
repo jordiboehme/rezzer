@@ -224,6 +224,7 @@ fn one_band(sh: &Shared<'_>, band: &Band, floor: f32, take: &mut Taken<'_>, work
         ids: Vec::new(),
         by: Detector::Banded,
         drawn: Some(b),
+        pictures: Vec::new(),
     });
 }
 

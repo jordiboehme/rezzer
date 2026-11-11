@@ -105,6 +105,9 @@ pub(crate) struct Planned {
     /// The box of the drawn rules or boxes the detector read the table by, in the frame of
     /// the runs; none for a detector that reads text alone. Its region reaches over it.
     pub drawn: Option<[f32; 4]>,
+    /// The pictures in its cells (Task 29, B1): row, cell and the picture, by its place among
+    /// the page's pictures (`layoutregions::PrimId::Picture`).
+    pub pictures: Vec<(usize, usize, u32)>,
 }
 
 /// The detector, or the class of a detector, that found a table: its region's signal id and
@@ -465,7 +468,31 @@ pub(crate) fn untagged_marked(
         quiet: found.quiet.len(),
         doubts: found.doubts.len(),
     };
-    borderless::borderless(page, flow, &table_areas(segments), &area, stop, &mut found);
+    // The horizontal segments as drawn, by height: the breaks of a rule are column bounds.
+    let mut hsegs: Vec<layoutregions::segment::drawn::Line> = drawn
+        .rules
+        .iter()
+        .filter_map(|r| {
+            let (x0, x1) = (r.x0.min(r.x1), r.x0.max(r.x1));
+            let (y0, y1) = (r.y0.min(r.y1), r.y0.max(r.y1));
+            (y1 - y0 < x1 - x0 && y1 - y0 <= layoutregions::segment::drawn::SNAP).then_some(
+                layoutregions::segment::drawn::Line {
+                    at: (y0 + y1) / 2.0,
+                    from: x0,
+                    to: x1,
+                },
+            )
+        })
+        .collect();
+    hsegs.sort_by(|a, b| a.at.total_cmp(&b.at));
+    borderless::borderless(
+        page,
+        flow,
+        (&table_areas(segments), &hsegs),
+        &area,
+        stop,
+        &mut found,
+    );
     (found, mark)
 }
 
@@ -633,6 +660,7 @@ mod tests {
             ids: Vec::new(),
             by: Detector::Grid,
             drawn: None,
+            pictures: Vec::new(),
         }
     }
 

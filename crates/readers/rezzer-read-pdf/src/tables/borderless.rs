@@ -8,10 +8,12 @@ use std::collections::HashSet;
 
 use layoutregions::PrimId;
 use layoutregions::segment::Segment;
+use layoutregions::segment::drawn::{Line, SNAP};
 
 use layoutregions::extract::table::TableOut;
 use layoutregions::extract::table::grid::{
-    self, Piece, Shape, amount, columns_of, grid_cells, set_full, titles_over_values,
+    self, Piece, Shape, amount, columns_of, grid_cells, grid_cells_with, set_full,
+    titles_over_values,
 };
 
 use super::*;
@@ -75,11 +77,13 @@ fn line_areas(flow: &Flow, lines: &[FlowLine], areas: &[&Segment]) -> Vec<Option
 /// Tables without rules: regions of lines whose pieces stand in columns with white space
 /// between them, accepted only on strong evidence. `areas` are the segments of the page it
 /// reads (see `tables::table_areas`), each as the union of its runs: a region holds the
-/// lines of one area, and a line with runs of none or of two areas is in no region.
+/// lines of one area, and a line with runs of none or of two areas is in no region. `hsegs`
+/// are the page's horizontal segments as drawn, sorted by height: the breaks of a rule across
+/// a region are column bounds (see [`around_of`]).
 pub(super) fn borderless(
     page: u32,
     flow: &mut Flow,
-    areas: &[&Segment],
+    (areas, hsegs): (&[&Segment], &[Line]),
     area: &Area<'_>,
     stop: &dyn Fn() -> bool,
     found: &mut Found,
@@ -116,6 +120,8 @@ pub(super) fn borderless(
     let mut ruled_off: HashSet<usize> = HashSet::new();
     // The first runs of lines of text after a blank row over rows of their region's shape.
     let mut maybe_heads: Vec<usize> = Vec::new();
+    // The lines of regions looked at for a header without a blank row (see [`HEAD_WORK`]).
+    let mut head_work = 0usize;
     let mut i = 0;
     while i < lines.len() {
         if off[i] || counts[i] < 2 {
@@ -133,7 +139,10 @@ pub(super) fn borderless(
         while end < lines.len() && !off[end] && same_area(i, end) {
             let (prev, cur) = (&lines[end - 1], &lines[end]);
             let gap = prev.y - cur.y;
-            if gap <= 0.0 || gap > 3.0 * prev.size.max(cur.size) {
+            if gap <= 0.0
+                || (gap > 3.0 * prev.size.max(cur.size)
+                    && !pictured(flow, &lines[i..=end], area.images))
+            {
                 break;
             }
             // A gap of more than twice the steps of the lines on both sides of it parts two
@@ -161,6 +170,30 @@ pub(super) fn borderless(
                     // its table, but it may head a table of its own: that is said.
                     Head::Doubt => maybe_heads.push(cur.start),
                     Head::No => {}
+                }
+            }
+            // Without a blank row, a line in other columns than the region's that has the shape
+            // of the header of a table of its own parts the region too, when the lines over it
+            // read as a table of their own (Task 29: a table right under another, at a little
+            // more than the rows' step): its columns are not the region's, so the two never
+            // read as one block of columns. A rule between them is
+            // judged by the rule that ends a table (see [`ended`]): the lines under it may be
+            // totals under the table.
+            if !blank
+                && end - i >= 2
+                && counts[end] >= 2
+                && gap > HEADER_STEP * pitch
+                && head_work < HEAD_WORK
+                && !ruled_between(&found.ends, cur.y, prev.y)
+                && let Some(n) = lines.get(end + 1).filter(|_| next.is_some())
+            {
+                head_work += end - i;
+                if !in_columns(flow, &lines[i..end], cur)
+                    && header_line(flow, &lines[i..end], cur, n) == Head::Header
+                    && table_over(flow, &lines[i..end])
+                {
+                    parted.insert(end);
+                    break;
                 }
             }
             // A blank row the region goes on over is no step of its rows: a gap after it is
@@ -375,12 +408,18 @@ pub(super) fn borderless(
                         Detector::KeyValues
                     },
                     drawn: None,
+                    pictures: Vec::new(),
                 });
                 continue;
             }
         }
         // The lines under the region that go on in its last row join it.
-        let (joined, doubt, guessed) = joined_tail(flow, &lines[a..tail.end], &pieces, tail.marked);
+        let (joined, doubt, guessed) = joined_tail(
+            flow,
+            &lines[a..tail.end],
+            &pieces,
+            (tail.marked, &found.ends),
+        );
         pieces.extend(lines[z..z + joined].iter().map(|l| pieces_of(flow, l)));
         z += joined;
         // Two blocks side by side are judged each alone.
@@ -439,7 +478,12 @@ pub(super) fn borderless(
             } else {
                 3
             };
-            let cells = grid_cells(&flow.runs, pieces, rows_needed, table_caption);
+            let (near, breaks) = around_of(flow, &lines[a..z], area.images, hsegs);
+            let around = grid::Around {
+                pictures: &near,
+                breaks: &breaks,
+            };
+            let cells = grid_cells_with(&flow.runs, pieces, around, rows_needed, table_caption);
             let verdict = cells.and_then(|grid| {
                 if figure_caption {
                     return Err(FIGURE_NEAR);
@@ -478,6 +522,7 @@ pub(super) fn borderless(
                             Detector::Grid
                         },
                         drawn: None,
+                        pictures: grid.pictures.clone(),
                     };
                     let t = u32::try_from(claim.len()).unwrap_or(u32::MAX);
                     for (r, cells) in grid.rows.iter().enumerate() {
@@ -651,6 +696,150 @@ pub(super) fn borderless(
         found.tables.push(p);
     }
     found.tables.sort_by_key(|t| t.at);
+}
+
+/// What stands around the lines `region` (see [`grid::Around`]): the pictures of the page
+/// whose height overlaps the region's, by their place among the page's pictures, and the breaks
+/// of the rules across the region (from a little over its first line to a little under its
+/// last, at least as wide as nine tenths of its text): each a column bound the rule draws
+/// (`hsegs`, the page's horizontal segments as drawn).
+fn around_of(
+    flow: &Flow,
+    region: &[FlowLine],
+    pictures: &[[f32; 4]],
+    hsegs: &[Line],
+) -> (Vec<(u32, [f32; 4])>, Vec<f32>) {
+    let (Some(first), Some(last)) = (region.first(), region.last()) else {
+        return (Vec::new(), Vec::new());
+    };
+    let (high, low) = (first.y + 2.0 * first.size, last.y - 2.0 * last.size);
+    let near: Vec<(u32, [f32; 4])> = pictures
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| p[3] >= low && p[1] <= high)
+        .filter_map(|(k, p)| u32::try_from(k).ok().map(|k| (k, *p)))
+        .collect();
+    let (x0, x1) = region
+        .iter()
+        .flat_map(|l| flow.runs[l.start..l.end].iter())
+        .filter(|r| !r.text.trim().is_empty())
+        .fold((f32::MAX, f32::MIN), |(a, b), r| {
+            (a.min(r.x), b.max(r.x + r.w))
+        });
+    let mut breaks: Vec<f32> = Vec::new();
+    if x1 > x0 {
+        let from = hsegs.partition_point(|s| s.at < low);
+        let mut heights: Vec<f32> = hsegs[from..]
+            .iter()
+            .take_while(|s| s.at <= high)
+            .map(|s| s.at)
+            .collect();
+        heights.dedup_by(|a, b| (*a - *b).abs() <= SNAP);
+        for y in heights {
+            let span: f32 = hsegs[from..]
+                .iter()
+                .take_while(|s| s.at <= high)
+                .filter(|s| (s.at - y).abs() <= SNAP)
+                .map(|s| s.to.min(x1) - s.from.max(x0))
+                .filter(|w| *w > 0.0)
+                .sum();
+            if span >= 0.9 * (x1 - x0) {
+                breaks.extend(layoutregions::extract::table::ruled::rule_breaks(
+                    &hsegs[from..],
+                    (x0 - SNAP, x1 + SNAP),
+                    &[y],
+                ));
+            }
+        }
+    }
+    breaks.sort_by(f32::total_cmp);
+    (near, breaks)
+}
+
+/// Whether the lines `region` read as a table of their own: their cells hold as a grid of two
+/// rows or more (see [`grid_cells`]).
+fn table_over(flow: &Flow, region: &[FlowLine]) -> bool {
+    let pieces: Vec<Vec<Piece>> = region.iter().map(|l| pieces_of(flow, l)).collect();
+    grid_cells(&flow.runs, &pieces, 2, false).is_ok()
+}
+
+/// Whether a horizontal rule of `ends` (sorted by height) lies between the heights `low` and
+/// `high`.
+fn ruled_between(ends: &[HRule], low: f32, high: f32) -> bool {
+    let from = ends.partition_point(|e| e.y <= low);
+    ends.get(from).is_some_and(|e| e.y < high)
+}
+
+/// A line over a step this many times the rows' common step may head a table of its own
+/// without a blank row over it (see [`header_line`]): a step wider than the rows'.
+const HEADER_STEP: f32 = 1.25;
+
+/// The lines of regions one page looks at for such a header, in all: past them a table right
+/// under another without a blank row is not looked for (it stays one block, as before).
+const HEAD_WORK: usize = 1_000_000;
+
+/// White space between two lines that pictures do not cover is at most this many sizes of
+/// their text: about the white of a blank line of text between two rows, no more.
+const PICTURE_GAP: f32 = 1.5;
+
+/// Whether the pictures among the columns of the lines `region` (pictures that overlap the
+/// width its lines take, each with a line of the region beside it at its height) cover the
+/// step from its line before last to its last line, up to white space under [`PICTURE_GAP`]
+/// sizes: a row of the region is as tall as its picture (an item table with a picture in each
+/// row), so the step from one row's last line to the next row's first is no blank between two
+/// blocks (Task 29, B1).
+fn pictured(flow: &Flow, region: &[FlowLine], pictures: &[[f32; 4]]) -> bool {
+    let [.., prev, cur] = region else {
+        return false;
+    };
+    let size = prev.size.max(cur.size);
+    let ink = |l: &FlowLine| {
+        flow.runs[l.start..l.end]
+            .iter()
+            .filter(|r| !r.text.trim().is_empty())
+            .fold((f32::MAX, f32::MIN), |(a, b), r| {
+                (a.min(r.x), b.max(r.x + r.w))
+            })
+    };
+    let (x0, x1) = region
+        .iter()
+        .map(ink)
+        .fold((f32::MAX, f32::MIN), |(a, b), (c, d)| (a.min(c), b.max(d)));
+    // The pictures in the region's width that stand beside one of its lines, and of them those
+    // in a column of pictures: one more of them stands over or under it, beside another line.
+    // One picture alone (a stamp, a logo) bridges no gap.
+    let beside: Vec<(&[f32; 4], usize)> = pictures
+        .iter()
+        .filter(|p| p[2] > x0 && p[0] < x1)
+        .filter_map(|p| {
+            region
+                .iter()
+                .position(|l| l.y >= p[1] && l.y <= p[3])
+                .map(|l| (p, l))
+        })
+        .collect();
+    let mut held: Vec<(f32, f32)> = beside
+        .iter()
+        .filter(|(p, l)| {
+            beside
+                .iter()
+                .any(|(o, m)| m != l && o[2] > p[0] && o[0] < p[2])
+        })
+        .map(|(p, _)| (p[1], p[3]))
+        .collect();
+    held.sort_by(|a, b| b.1.total_cmp(&a.1));
+    // Walk down from the line before last to the last line through the pictures.
+    let mut at = prev.y;
+    for (bottom, top) in held {
+        if top < cur.y {
+            break;
+        }
+        if at - top > PICTURE_GAP * size {
+            return false;
+        }
+        at = at.min(bottom);
+    }
+    at - cur.y <= PICTURE_GAP * size + size
 }
 
 /// Whether the first row of `grid` is the line of titles of one frame of column titles over
@@ -1032,7 +1221,7 @@ fn joined_tail(
     flow: &Flow,
     lines: &[FlowLine],
     pieces: &[Vec<Piece>],
-    marked: bool,
+    (marked, ends): (bool, &[HRule]),
 ) -> (usize, bool, bool) {
     let core = pieces.len();
     if lines.len() <= core || core < 2 {
@@ -1106,6 +1295,44 @@ fn joined_tail(
                 .is_some_and(|from| Shape::of(from) == Some(Shape::Date))
         }) && Shape::of(text.trim()) == Some(Shape::Date);
         if close && within && same_face && cut {
+            return (1, false, false);
+        }
+        // The rows over it end the same way (Task 29, B2 and C: an item's name over a detail
+        // line of its own size): a line of one piece in the same column, at the same start, in
+        // the same face and size, at the same step under a line of two pieces or more. The last
+        // row's line like theirs is its own too, whatever its face beside the column's, unless
+        // a rule between them ends the table.
+        let face = |q: &Piece| {
+            inked(q)
+                .first()
+                .map(|r| (r.family, r.size, r.bold, r.italic))
+        };
+        let step = lines[core - 1].y - line.y;
+        let like_rows = pieces[core - 1].len() >= 2
+            && (2..core).any(|k| {
+                let [q] = pieces[k].as_slice() else {
+                    return false;
+                };
+                pieces[k - 1].len() >= 2
+                    && over(q) == [c]
+                    && (q.x0 - p.x0).abs() <= WRAP_ALIGN * size
+                    && face(q).zip(face(p)).is_some_and(|(a, b)| {
+                        a.0 == b.0
+                            && a.2 == b.2
+                            && a.3 == b.3
+                            && (a.1 - b.1).abs() <= WRAP_ALIGN * a.1
+                    })
+                    && ((lines[k - 1].y - lines[k].y) - step).abs() <= WRAP_ALIGN * size
+            });
+        // A number alone (an amount, a rate, a date) is judged below: it may be a total under
+        // the table.
+        let value = matches!(
+            Shape::of(text.trim()),
+            Some(Shape::Number | Shape::Percent | Shape::Date)
+        );
+        // A rule between the last row and the line ends the table: a note under it.
+        let ruled = ruled_between(ends, line.y, lines[core - 1].y);
+        if like_rows && !value && !ruled && !page_number(&text) {
             return (1, false, false);
         }
         let wrap =
@@ -1526,7 +1753,7 @@ mod tests {
         let read = |areas: &[&Segment]| {
             let mut flow = flow_of(runs.clone());
             let mut found = Found::default();
-            borderless(1, &mut flow, areas, &area, &|| false, &mut found);
+            borderless(1, &mut flow, (areas, &[]), &area, &|| false, &mut found);
             (table_words(&found), flow.runs.len())
         };
         // One area that holds every run: one table of all rows, as the page's union reads.
@@ -1590,7 +1817,7 @@ mod tests {
         };
         let mut found = Found::default();
         let every = area_of(0, 0..n as u32);
-        borderless(1, &mut flow, &[&every], &area, &|| false, &mut found);
+        borderless(1, &mut flow, (&[&every], &[]), &area, &|| false, &mut found);
         let left = [
             "Guest", "Sample", "Room", "101", "Arrival", "2030", "Nights", "3",
         ];

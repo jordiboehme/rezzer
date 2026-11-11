@@ -754,6 +754,7 @@ pub(crate) fn tagged(
             ids: ids.remove(&t).unwrap_or_default(),
             by: super::Detector::Tagged,
             drawn: None,
+            pictures: Vec::new(),
         });
     }
     (out, fallbacks)

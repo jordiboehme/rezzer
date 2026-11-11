@@ -142,6 +142,7 @@ fn full_document() -> Document {
                 row_span: 1,
                 col_span: 2,
                 anchor: anchor.clone(),
+                media: Vec::new(),
             }]],
             alignments: vec![Align::Right],
             anchor: Some(Anchor("table:1".into())),
@@ -1416,4 +1417,26 @@ fn region_kinds_are_snake_case() {
     ] {
         assert_eq!(serde_json::to_value(kind).unwrap(), name);
     }
+}
+
+/// Task 29: a cell's pictures go to JSON and back; a cell without one writes no `media` key.
+#[test]
+fn cell_media_round_trips() {
+    use rezzer_model::{Cell, CellMedia, Inline};
+    let mut cell = Cell::new(vec![Inline::plain("Kaffeebecher")]);
+    let plain = serde_json::to_string(&cell).unwrap();
+    assert!(!plain.contains("media"), "{plain}");
+    cell.media.push(CellMedia {
+        asset: "page-1-pic-1".into(),
+        alt: Some("small picture".into()),
+    });
+    let json = serde_json::to_string(&cell).unwrap();
+    assert!(
+        json.contains("\"media\":[{\"asset\":\"page-1-pic-1\""),
+        "{json}"
+    );
+    let back: Cell = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, cell);
+    let old: Cell = serde_json::from_str(&plain).unwrap();
+    assert!(old.media.is_empty());
 }

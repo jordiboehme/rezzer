@@ -261,6 +261,21 @@ pub struct Cell {
     pub col_span: u32,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub anchor: Option<Anchor>,
+    /// Pictures that stand in the cell, after its text: a picture in each row of an item
+    /// table. Each names its [`crate::Asset`] as [`Block::Media`] does.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub media: Vec<CellMedia>,
+}
+
+/// A picture in a table cell, by [`crate::Asset`] id.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct CellMedia {
+    pub asset: String,
+    /// What this place shows, when one asset stands at several places (see
+    /// [`Block::Media`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alt: Option<String>,
 }
 
 fn one() -> u32 {
@@ -268,13 +283,14 @@ fn one() -> u32 {
 }
 
 impl Cell {
-    /// A cell with spans of 1 and no anchor.
+    /// A cell with spans of 1, no anchor and no pictures.
     pub fn new(inlines: Vec<Inline>) -> Cell {
         Cell {
             inlines,
             row_span: 1,
             col_span: 1,
             anchor: None,
+            media: Vec::new(),
         }
     }
 }

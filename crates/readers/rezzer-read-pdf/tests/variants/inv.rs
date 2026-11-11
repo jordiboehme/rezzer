@@ -500,10 +500,27 @@ pub(crate) fn check_read(out: &ReadOutcome, page: &Page) -> Vec<Broken> {
     broken
 }
 
-/// The cells of a table block.
+/// The cells of a table block, as their text (a picture in a cell has no text: its row is
+/// checked by [`crate::axes::Want::row_media`]).
 fn cells(rows: &[Vec<rezzer_model::Cell>]) -> Vec<Vec<String>> {
     rows.iter()
-        .map(|r| r.iter().map(|c| plain_text(&c.inlines)).collect())
+        .map(|r| {
+            r.iter()
+                .map(|c| {
+                    // A cell's lines read with a space between them (their breaks are checked by
+                    // `Want::cell_lines`).
+                    let text = plain_text(&c.inlines);
+                    if c.inlines
+                        .iter()
+                        .any(|i| matches!(i, rezzer_model::Inline::LineBreak))
+                    {
+                        collapse(&text)
+                    } else {
+                        text
+                    }
+                })
+                .collect()
+        })
         .collect()
 }
 
@@ -720,6 +737,55 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
                     "page {p}: media block {k} at {m:?}, not between {a:?} at {ia:?} and {b:?} \
                      at {ib:?}"
                 ),
+            ));
+        }
+    }
+    // The table row that holds each text of `row_media` holds one picture, in its cell.
+    for (t, at) in &want.row_media {
+        let held = blocks.iter().any(|b| match b {
+            Block::Table { rows, .. } => rows.iter().any(|r| {
+                r.iter()
+                    .any(|c| has_words(&collapse(&plain_text(&c.inlines)), t))
+                    && r.iter().map(|c| c.media.len()).sum::<usize>() == 1
+                    && r.get(*at).is_some_and(|c| c.media.len() == 1)
+            }),
+            _ => false,
+        });
+        if !held {
+            broken.push(Broken(
+                Inv::MediaPlace,
+                format!("page {p}: no table row holds {t:?} with one picture in cell {at}"),
+            ));
+        }
+    }
+    for lines in &want.cell_lines {
+        let found = blocks.iter().any(|b| match b {
+            Block::Table { rows, .. } => rows.iter().flatten().any(|c| {
+                let have: Vec<String> = c
+                    .inlines
+                    .split(|i| matches!(i, rezzer_model::Inline::LineBreak))
+                    .map(|part| collapse(&plain_text(part)))
+                    .collect();
+                have == *lines
+            }),
+            _ => false,
+        });
+        if !found {
+            broken.push(Broken(
+                Inv::Table,
+                format!("page {p}: no table cell of the lines {lines:?}"),
+            ));
+        }
+    }
+    if let Some(n) = want.media_count {
+        let have = blocks
+            .iter()
+            .filter(|b| matches!(b, Block::Media { .. }))
+            .count();
+        if have != n {
+            broken.push(Broken(
+                Inv::MediaPlace,
+                format!("page {p}: {have} media blocks, wanted {n}"),
             ));
         }
     }

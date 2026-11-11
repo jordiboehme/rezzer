@@ -3300,23 +3300,30 @@ pub(crate) fn apply_codes(scans: Option<Scans>, places: Vec<(usize, Places)>, ou
         return;
     }
     fn walk(blocks: &mut [Block], places: &HashMap<String, Renamed>, seen: &mut HashSet<String>) {
+        // The words of one place of a picture, a media block or a table cell's picture.
+        let place = |asset: &String, alt: &mut Option<String>, seen: &mut HashSet<String>| {
+            if let (Some(r), Some(words)) = (places.get(asset), alt.as_mut()) {
+                let first = seen.insert(asset.clone());
+                let more = match (&r.pages, first, r.codes) {
+                    (Some(pages), true, _) => format!(", on {pages}"),
+                    (_, false, true) => {
+                        format!(
+                            ", its codes are listed at its first place on page {}",
+                            r.first
+                        )
+                    }
+                    _ => String::new(),
+                };
+                let more = format!("{}{more}", r.unconfirmed);
+                *words = reread_place(words, r.read.as_ref(), &more);
+            }
+        };
         for b in blocks.iter_mut() {
             match b {
-                Block::Media { asset, alt, .. } => {
-                    if let (Some(r), Some(words)) = (places.get(asset), alt.as_mut()) {
-                        let first = seen.insert(asset.clone());
-                        let more = match (&r.pages, first, r.codes) {
-                            (Some(pages), true, _) => format!(", on {pages}"),
-                            (_, false, true) => {
-                                format!(
-                                    ", its codes are listed at its first place on page {}",
-                                    r.first
-                                )
-                            }
-                            _ => String::new(),
-                        };
-                        let more = format!("{}{more}", r.unconfirmed);
-                        *words = reread_place(words, r.read.as_ref(), &more);
+                Block::Media { asset, alt, .. } => place(asset, alt, seen),
+                Block::Table { rows, .. } => {
+                    for m in rows.iter_mut().flatten().flat_map(|c| c.media.iter_mut()) {
+                        place(&m.asset, &mut m.alt, seen);
                     }
                 }
                 Block::Section { blocks, .. }

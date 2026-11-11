@@ -702,3 +702,124 @@ fn a_wide_gap_stays_a_cell_gap_without_wide_word_gaps_or_a_sentence_end() {
     let runs = two_runs("dictum  mauris.", "Nam  arcu");
     assert_eq!(pieces_of(&runs, 0, runs.len()).len(), 2);
 }
+
+/// The rows of `lines` (each its runs: text, x, baseline, bold) read as a grid without rules:
+/// each row's cells as text.
+fn grid_rows(lines: &[&[(&str, f32, f32, bool)]]) -> Vec<Vec<String>> {
+    let mut runs = Vec::new();
+    for (k, line) in lines.iter().enumerate() {
+        for &(t, x, y, bold) in line.iter() {
+            let mut r = run_at(t, x, y, k as u32);
+            r.bold = bold;
+            runs.push(r);
+        }
+    }
+    let mut pieces: Vec<Vec<Piece>> = Vec::new();
+    let mut start = 0;
+    while start < runs.len() {
+        let end = start
+            + runs[start..]
+                .iter()
+                .take_while(|r| r.line == runs[start].line)
+                .count();
+        pieces.push(pieces_of(&runs, start, end));
+        start = end;
+    }
+    let table = grid_cells(&runs, &pieces, 2, false).expect("a table");
+    table
+        .rows
+        .iter()
+        .map(|r| {
+            r.iter()
+                .map(|c| {
+                    let mut ids = c.runs.clone();
+                    ids.sort_unstable();
+                    ids.iter()
+                        .map(|&i| runs[i].text.trim().to_string())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// Task 29 (B2): a description whose values stand on its second line: its first line stands
+/// over the row's anchor after a blank under the bold header, so it goes with the row under it;
+/// the lines under the values stay with that row.
+#[test]
+fn a_line_over_a_rows_values_after_a_blank_goes_with_that_row() {
+    let rows = grid_rows(&[
+        &[
+            ("Pos", 40.0, 600.0, true),
+            ("Text", 70.0, 600.0, true),
+            ("Betrag", 400.0, 600.0, true),
+        ],
+        &[("Wartung der Anlage", 70.0, 582.0, false)],
+        &[
+            ("1", 40.0, 570.0, false),
+            ("im Haus", 70.0, 570.0, false),
+            ("250,00", 400.0, 570.0, false),
+        ],
+        &[("mit Anfahrt", 70.0, 558.0, false)],
+        &[
+            ("2", 40.0, 540.0, false),
+            ("Pumpe", 70.0, 540.0, false),
+            ("120,00", 400.0, 540.0, false),
+        ],
+    ]);
+    assert_eq!(
+        rows[1],
+        ["1", "Wartung der Anlage im Haus mit Anfahrt", "250,00"]
+    );
+    assert_eq!(rows[2], ["2", "Pumpe", "120,00"]);
+}
+
+/// Review Important 3 and Minor 1: without a header row, bold item names over plain detail
+/// lines keep their detail lines (the first row is no header: its values are plain); and a
+/// detail line set apart under its own row, not in a column of the row under it, stays.
+#[test]
+fn detail_lines_stay_with_their_rows() {
+    let rows = grid_rows(&[
+        &[
+            ("Becher", 40.0, 600.0, true),
+            ("2", 300.0, 600.0, false),
+            ("12,50", 400.0, 600.0, false),
+        ],
+        &[("Steingut", 40.0, 588.0, false)],
+        &[
+            ("Kanne", 40.0, 576.0, true),
+            ("1", 300.0, 576.0, false),
+            ("34,56", 400.0, 576.0, false),
+        ],
+        &[("Glas", 40.0, 564.0, false)],
+        &[
+            ("Korb", 40.0, 552.0, true),
+            ("4", 300.0, 552.0, false),
+            ("7,80", 400.0, 552.0, false),
+        ],
+    ]);
+    assert_eq!(rows[0], ["Becher Steingut", "2", "12,50"]);
+    assert_eq!(rows[1], ["Kanne Glas", "1", "34,56"]);
+    // A detail line under its row by more than the rows' step, indented past every column
+    // start of the row under it: it stays.
+    let rows = grid_rows(&[
+        &[
+            ("Becher", 40.0, 600.0, false),
+            ("2", 300.0, 600.0, false),
+            ("12,50", 400.0, 600.0, false),
+        ],
+        &[("Steingut", 60.0, 582.0, false)],
+        &[
+            ("Kanne", 40.0, 576.0, false),
+            ("1", 300.0, 576.0, false),
+            ("34,56", 400.0, 576.0, false),
+        ],
+        &[
+            ("Korb", 40.0, 564.0, false),
+            ("4", 300.0, 564.0, false),
+            ("7,80", 400.0, 564.0, false),
+        ],
+    ]);
+    assert_eq!(rows[0], ["Becher Steingut", "2", "12,50"]);
+}

@@ -395,6 +395,15 @@ pub(crate) struct Want {
     /// For the page's media blocks in order: the texts the block stands after and before
     /// (Task 22 fix round 4), each found as the first block that holds it.
     pub media_between: Vec<(String, String)>,
+    /// Texts whose table row holds a picture (Task 29, B1): the row of a table that holds the
+    /// text holds one picture, in the cell of this place.
+    pub row_media: Vec<(String, usize)>,
+    /// How many media blocks the page has (Task 29: a picture in a cell is none).
+    pub media_count: Option<usize>,
+    /// Table cells to find by their lines (Task 29, vision class A): some cell of a table holds
+    /// exactly these lines, parted by line breaks (an empty line is a line break with no text
+    /// before it).
+    pub cell_lines: Vec<Vec<String>>,
     /// Texts no block may hold together: each pair stands in different blocks.
     pub apart: Vec<(String, String)>,
     /// Texts no line of the read may hold together (part 2e-1 fix round 1): each pair stands

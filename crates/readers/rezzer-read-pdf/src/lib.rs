@@ -1049,6 +1049,16 @@ fn lay_out(
                         (m.prim, (at(m.at), at(m.near.start)..at(m.near.end)))
                     })
                     .collect();
+            // The table cell of each picture that stands in one.
+            let cell_spots: CellSpots = laid
+                .in_cells
+                .iter()
+                .filter_map(|&(prim, b, r, c)| {
+                    let block = laid.blocks.get(b)?;
+                    Some((prim, (base + b, r, c, layout::block_anchor(block))))
+                })
+                .collect();
+            let mut in_cells: Vec<CellPicture> = Vec::new();
             blocks.extend(laid.blocks);
             blocks.extend(orphans);
             // The primitive of each picture listed, by its place in `near`.
@@ -1205,6 +1215,7 @@ fn lay_out(
                         (&list, &spots, here),
                         (budget, &links),
                         (&mut media, &mut unmatched, &mut media_hosts),
+                        (&cell_spots, &mut in_cells),
                         out,
                     );
                     if !crops.is_empty() {
@@ -1229,6 +1240,52 @@ fn lay_out(
                     }
                 }
                 None => unmatched.extend(here.iter().map(|f| (blocks.len(), f.alt.clone()))),
+            }
+            // Each picture of a table cell goes into its cell; where the cell is not there (a
+            // limit cut the table), it stands as a media block at its place.
+            for ((b, r, c, prim), spot, m) in in_cells {
+                let table = cell_spots.get(&prim).and_then(|s| s.3.clone());
+                let cell = match blocks.get_mut(b) {
+                    Some(Block::Table { rows, .. }) => {
+                        rows.get_mut(r).and_then(|row| row.get_mut(c))
+                    }
+                    _ => None,
+                };
+                match cell {
+                    Some(cell) => {
+                        // Its figure region stands at the table.
+                        if let Some(table) = table {
+                            media_hosts.push((prim, table));
+                        }
+                        cell.media.push(m);
+                    }
+                    None => {
+                        // The next media anchor of the page, as each media block has one.
+                        let made = media
+                            .iter()
+                            .filter(|(_, b)| {
+                                matches!(
+                                    b,
+                                    Block::Media {
+                                        anchor: Some(_),
+                                        ..
+                                    }
+                                )
+                            })
+                            .count();
+                        let anchor = Anchor(format!("p{n}:m{}", made + 1));
+                        // Its figure region stands at the media block it became.
+                        media_hosts.push((prim, anchor.clone()));
+                        media.push((
+                            spot,
+                            Block::Media {
+                                asset: m.asset,
+                                alt: m.alt,
+                                anchor: Some(anchor),
+                            },
+                        ));
+                    }
+                }
             }
             if !unmatched.is_empty() {
                 // Before the pictures at their place, in their order.
@@ -1482,6 +1539,18 @@ const PICTURE_WORK: u64 = (std::mem::size_of::<render::Small>()
 /// Things to put among a page's blocks, each with the index of the block it goes before.
 type AtPlace<T> = Vec<(usize, T)>;
 
+/// The table cell each picture of a page stands in (see `layout::Laid::in_cells`): the table's
+/// place among the page's blocks, the row, the cell and the table's anchor.
+type CellSpots = HashMap<layoutregions::PrimId, (usize, usize, usize, Option<Anchor>)>;
+
+/// A picture written in a table cell: the table's place, row and cell, the place a media block
+/// of it would take, and the picture.
+type CellPicture = (
+    (usize, usize, usize, layoutregions::PrimId),
+    usize,
+    rezzer_model::CellMedia,
+);
+
 /// About what the words of one place take: `small picture, box 1234, 1234 to 1234, 1234`.
 const PLACE_WORDS: u64 = 64;
 
@@ -1532,8 +1601,11 @@ impl Pictures {
             &mut AtPlace<String>,
             &mut Vec<(layoutregions::PrimId, Anchor)>,
         ),
+        (cells, in_cells): (&CellSpots, &mut Vec<CellPicture>),
         out: &mut Out,
     ) -> Vec<render::Crop> {
+        // The media blocks made so far on the page: each takes the next anchor.
+        let mut made = hosts.len();
         let mut order: Vec<usize> = (0..list.len()).collect();
         // Reading order: by place among the blocks, then from the top, then from the left.
         order.sort_by(|&a, &b| {
@@ -1647,9 +1719,23 @@ impl Pictures {
                     how: p.how,
                 });
             }
+            // A picture in a table cell is written in the cell, and its region stands at the
+            // table.
+            if let Some((b, r, c, _)) = cells.get(&p.prim) {
+                in_cells.push((
+                    (*b, *r, *c, p.prim),
+                    spots[i],
+                    rezzer_model::CellMedia {
+                        asset: out.doc.assets[asset].id.clone(),
+                        alt: Some(words),
+                    },
+                ));
+                continue;
+            }
             // Each media block of the page has an anchor of its own, `p<N>:m<K>` in reading
             // order, where the region of its picture or code stands.
-            let anchor = Anchor(format!("p{n}:m{}", hosts.len() + 1));
+            made += 1;
+            let anchor = Anchor(format!("p{n}:m{made}"));
             hosts.push((p.prim, anchor.clone()));
             media.push((
                 spots[i],
@@ -2299,6 +2385,7 @@ mod tests {
             row_span: 1,
             col_span: 1,
             anchor: None,
+            media: Vec::new(),
         };
         let table = Block::Table {
             caption: None,
@@ -2401,6 +2488,7 @@ mod tests {
             (&list, &spots, &[]),
             (&budget, &room),
             (&mut media, &mut unmatched, &mut Vec::new()),
+            (&HashMap::new(), &mut Vec::new()),
             &mut out,
         );
         let _ = pictures.finish(&mut out);

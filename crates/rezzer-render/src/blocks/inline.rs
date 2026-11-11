@@ -246,13 +246,13 @@ pub(super) fn inline_into(
             strong,
             strike,
         } => styled_text(text, *emphasis, *strong, *strike, mode, dollars, out),
-        Inline::LineBreak => {
-            if mode == Mode::Block {
-                out.push_str("\\\n");
-            } else {
-                out.push(' ');
-            }
-        }
+        // A line break in a table cell is `<br>`: the lines of a cell are kept apart there (two
+        // values, a stop over a stop), and a pipe table has no other way to show them.
+        Inline::LineBreak => match mode {
+            Mode::Block => out.push_str("\\\n"),
+            Mode::Cell => out.push_str("<br>"),
+            Mode::Line => out.push(' '),
+        },
         Inline::Image { target, alt, title } => {
             if !safe_target(target) {
                 escape_with(alt, line_mode(mode), dollars, out);

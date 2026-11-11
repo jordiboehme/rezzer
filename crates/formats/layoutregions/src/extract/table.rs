@@ -29,6 +29,7 @@ pub mod area;
 pub mod banded;
 pub mod caption;
 pub mod grid;
+pub mod lines;
 pub mod ruled;
 pub mod sections;
 
@@ -122,6 +123,9 @@ pub struct TableOut {
     pub icons: Vec<(usize, usize, [f32; 4])>,
     /// Runs of close titles to cut (tables without rules).
     pub cuts: Vec<TitleCut>,
+    /// Pictures in cells: row, cell and the picture, by the index the caller gave its piece
+    /// (see [`grid::Piece::picture`]).
+    pub pictures: Vec<(usize, usize, u32)>,
 }
 
 /// What an extractor makes of the lines or the grid it is given.

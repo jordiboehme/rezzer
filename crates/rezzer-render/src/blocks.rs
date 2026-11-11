@@ -406,19 +406,22 @@ fn block(b: &Block, ctx: &Ctx, depth: usize, level: u8) -> String {
             alignments,
             layout,
             ..
-        } => match layout {
-            Some(layout) => crate::layout::layout_table(
-                layout,
-                *header_rows,
-                rows,
-                alignments,
-                true,
-                ctx,
-                depth,
-                level,
-            ),
-            None => model_table(caption.as_deref(), *header_rows, rows, alignments),
-        },
+        } => {
+            let rows = with_cell_media(rows, ctx);
+            match layout {
+                Some(layout) => crate::layout::layout_table(
+                    layout,
+                    *header_rows,
+                    &rows,
+                    alignments,
+                    true,
+                    ctx,
+                    depth,
+                    level,
+                ),
+                None => model_table(caption.as_deref(), *header_rows, &rows, alignments),
+            }
+        }
         Block::Code { lang, text, .. } => fence(lang.as_deref(), text),
         Block::Spatial { lines, links, .. } => spatial_block(lines, links),
         Block::Quote { blocks: inner, .. } => {
@@ -886,9 +889,65 @@ fn math_is_plain(body: &str) -> bool {
     })
 }
 
+/// `rows` with the pictures of each cell (see [`rezzer_model::CellMedia`]) written after its
+/// text as [`media_inlines`] writes them, a space between; borrowed when no cell has one.
+fn with_cell_media<'r>(rows: &'r [Vec<Cell>], ctx: &Ctx) -> Cow<'r, [Vec<Cell>]> {
+    if rows.iter().flatten().all(|c| c.media.is_empty()) {
+        return Cow::Borrowed(rows);
+    }
+    let rows = rows
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|c| {
+                    let mut c = c.clone();
+                    for m in std::mem::take(&mut c.media) {
+                        if !c.inlines.is_empty() {
+                            c.inlines.push(Inline::plain(" "));
+                        }
+                        c.inlines
+                            .extend(media_inlines(&m.asset, m.alt.as_deref(), ctx));
+                        // The codes read from the picture, at its first place, in its cell.
+                        let found = ctx.assets.iter().find(|a| a.id == m.asset);
+                        let first = found.is_some_and(|a| !a.codes.is_empty())
+                            && ctx.codes_shown.borrow_mut().insert(m.asset.clone());
+                        if first {
+                            for code in found.map_or(&[][..], |a| a.codes.as_slice()) {
+                                c.inlines.push(Inline::plain(" "));
+                                c.inlines.extend(code_inlines(code));
+                            }
+                        }
+                    }
+                    c
+                })
+                .collect()
+        })
+        .collect();
+    Cow::Owned(rows)
+}
+
 /// A picture by its asset `id`; `place` is what this place of it says, when it says more than
 /// the asset's alt text (one picture drawn at several places, each with its own box).
 fn media(id: &str, place: Option<&str>, ctx: &Ctx) -> String {
+    let found = ctx.assets.iter().find(|a| a.id == id);
+    let mut out = paragraph(&media_inlines(id, place, ctx));
+    let first = found.is_some_and(|a| !a.codes.is_empty())
+        && ctx.codes_shown.borrow_mut().insert(id.to_string());
+    let codes = if first {
+        found.map_or(&[][..], |a| a.codes.as_slice())
+    } else {
+        &[][..]
+    };
+    for c in codes {
+        out.push_str("\n\n");
+        out.push_str(&code_lines(c));
+    }
+    out
+}
+
+/// The inlines of a picture by its asset `id` (see [`media`]): the picture, or why it is not
+/// extracted, its caption, and whether it needs vision.
+fn media_inlines(id: &str, place: Option<&str>, ctx: &Ctx) -> Vec<Inline> {
     let mut parts: Vec<Inline> = Vec::new();
     let text = Inline::plain;
     let found = ctx.assets.iter().find(|a| a.id == id);
@@ -932,19 +991,37 @@ fn media(id: &str, place: Option<&str>, ctx: &Ctx) -> String {
             }
         }
     }
-    let mut out = paragraph(&parts);
-    let first = found.is_some_and(|a| !a.codes.is_empty())
-        && ctx.codes_shown.borrow_mut().insert(id.to_string());
-    let codes = if first {
-        found.map_or(&[][..], |a| a.codes.as_slice())
-    } else {
-        &[][..]
+    parts
+}
+
+/// One code read from a picture as the inlines of one line (for a table cell, see
+/// [`with_cell_media`]): its symbology and place, then its payload, a payload of several lines
+/// with its line ends as their symbols.
+fn code_inlines(c: &Barcode) -> Vec<Inline> {
+    let head = match &c.place {
+        Some(place) => format!("{}, {place}: ", c.symbology),
+        None => format!("{}: ", c.symbology),
     };
-    for c in codes {
-        out.push_str("\n\n");
-        out.push_str(&code_lines(c));
+    let mut parts = vec![Inline::plain(head)];
+    match (&c.text, &c.base64) {
+        (Some(t), _) if web_address(t) => parts.push(Inline::Link {
+            target: t.clone(),
+            title: None,
+            internal: false,
+            wiki: false,
+            inlines: vec![Inline::plain(t.clone())],
+        }),
+        (Some(t), _) => parts.push(Inline::plain(visible_controls(t))),
+        (None, Some(b64)) => {
+            parts.push(Inline::plain(format!("{} bytes, base64 ", c.bytes)));
+            parts.push(Inline::Code { text: b64.clone() });
+        }
+        (None, None) => parts.push(Inline::plain(format!(
+            "{} bytes, not kept: more than the reader keeps",
+            c.bytes
+        ))),
     }
-    out
+    parts
 }
 
 /// One code read from a picture: `QR Code: <payload>`, with its place on the page when it

@@ -528,6 +528,10 @@ pub(crate) struct Laid {
     /// stands in the page's reading order (see [`MediaAt`]). A picture of no such region is
     /// placed by the block of the run nearest to it.
     pub media_at: Vec<MediaAt>,
+    /// The pictures that stand in a table cell (Task 29, B1: a picture in each row of an item
+    /// table): the picture, the table's place in `blocks`, the row and the cell. Each is
+    /// written in its cell, not as a media block of its own.
+    pub in_cells: Vec<(layoutregions::PrimId, usize, usize, usize)>,
 }
 
 /// Where a picture or code of a figure or code region goes among the blocks of its page.
@@ -2542,6 +2546,7 @@ fn line_pairs(area: &mut Flow) -> Option<Planned> {
         ids,
         by: tables::Detector::LinePairs,
         drawn: None,
+        pictures: Vec::new(),
     })
 }
 
@@ -2835,6 +2840,8 @@ struct Built {
     /// The pictures and codes of the page's figure and code regions, each with its place in
     /// reading order and its decision.
     media_at: Vec<(layoutregions::PrimId, usize, usize)>,
+    /// The pictures that stand in table cells (see [`Laid::in_cells`]).
+    in_cells: Vec<(layoutregions::PrimId, usize, usize, usize)>,
 }
 
 /// What a page's layout is building.
@@ -2924,6 +2931,7 @@ impl Built {
             earlier: Vec::new(),
             run_blocks: Vec::new(),
             media_at: Vec::new(),
+            in_cells: self.in_cells,
         }
     }
 
@@ -3140,6 +3148,18 @@ impl Built {
             }
             other => other,
         };
+        // Where each column ends: the cell lines' wrap test reads it (vision class A). A table
+        // whose cells all hold one line each has no lines to keep.
+        let lined = plan
+            .rows
+            .iter()
+            .flatten()
+            .any(|c| c.runs.windows(2).any(|w| w[0].line != w[1].line));
+        let ends = if lined {
+            column_ends(&plan.rows, plan.drawn.map(|b| b[0].max(b[2])))
+        } else {
+            Vec::new()
+        };
         // What the table's cells and rows cost beyond their text is set aside at once. When it
         // does not fit, the table's text is laid out as paragraphs: the overhead of a table
         // never stops the text.
@@ -3193,8 +3213,23 @@ impl Built {
                 break;
             }
             let mut cells = Vec::with_capacity(row.len());
-            for c in row {
-                let Some(mut inlines) = self.cell_inlines(&c.runs, cx) else {
+            // Each cell's lines stay lines unless a line wraps (vision class A).
+            let lines = if !lined {
+                vec![layoutregions::extract::table::lines::CellLines::default(); row.len()]
+            } else {
+                let runs: Vec<&[Run]> = row.iter().map(|c| c.runs.as_slice()).collect();
+                let mut col = 0usize;
+                let extents: Vec<f32> = row
+                    .iter()
+                    .map(|c| {
+                        col += c.col_span.max(1) as usize;
+                        ends.get(col - 1).copied().unwrap_or(f32::MAX)
+                    })
+                    .collect();
+                layoutregions::extract::table::lines::cell_lines(&runs, &extents, &link_runs_on)
+            };
+            for (c, lines) in row.into_iter().zip(lines) {
+                let Some(mut inlines) = self.lined_inlines(&c.runs, &lines, cx) else {
                     break 'rows;
                 };
                 if let (true, Some(text)) = (inlines.is_empty(), c.status) {
@@ -3208,6 +3243,7 @@ impl Built {
                     row_span: c.row_span,
                     col_span: c.col_span,
                     anchor: None,
+                    media: Vec::new(),
                 });
             }
             self.mark = None;
@@ -3232,6 +3268,14 @@ impl Built {
             }
             None => {
                 self.tagged.push(plan.tagged);
+                // The pictures of its cells, in the rows that were built.
+                let at = self.blocks.len();
+                for &(r, c, pic) in &plan.pictures {
+                    if rows.get(r).is_some_and(|row| c < row.len()) {
+                        self.in_cells
+                            .push((layoutregions::PrimId::Picture(pic), at, r, c));
+                    }
+                }
                 let caption = title
                     .map(|t| rezzer_model::plain_text(&t).trim().to_string())
                     .filter(|t| !t.is_empty());
@@ -3291,6 +3335,40 @@ impl Built {
         self.inlines(&refs, cx)
     }
 
+    /// The inlines of the runs of a cell, with a line break before each run `lines` names and
+    /// its empty lines before the first (see
+    /// [`layoutregions::extract::table::lines::cell_lines`]), or `None` once a limit stopped the
+    /// page.
+    fn lined_inlines(
+        &mut self,
+        runs: &[Run],
+        lines: &layoutregions::extract::table::lines::CellLines,
+        cx: &Context<'_>,
+    ) -> Option<Vec<Inline>> {
+        if lines.broken.is_empty() && lines.glued.is_empty() && lines.lead == 0 {
+            return self.cell_inlines(runs, cx);
+        }
+        let charged = time_over(cx.budget).and_then(|()| cx.budget.add_elements(1));
+        if let Err(hit) = charged {
+            self.stop_at(hit, cx);
+            return None;
+        }
+        let lines_at = |at: &[usize]| {
+            let mut all: Vec<(u32, u32)> = at
+                .iter()
+                .filter_map(|&k| runs.get(k).map(|r| (r.page, r.line)))
+                .collect();
+            all.sort_unstable();
+            all.dedup();
+            all
+        };
+        let (breaks, glued) = (lines_at(&lines.broken), lines_at(&lines.glued));
+        let refs: Vec<&Run> = runs.iter().collect();
+        let mut out: Vec<Inline> = std::iter::repeat_n(Inline::LineBreak, lines.lead).collect();
+        out.extend(self.joined_inlines(&refs, &breaks, &glued, cx)?);
+        Some(out)
+    }
+
     /// The inlines of `runs`, or `None` once a limit stopped the page. Each stretch of runs
     /// under one link becomes one link with its own copy of the target, charged to the link
     /// room.
@@ -3306,6 +3384,18 @@ impl Built {
         breaks: &[(u32, u32)],
         cx: &Context<'_>,
     ) -> Option<Vec<Inline>> {
+        self.joined_inlines(runs, breaks, &[], cx)
+    }
+
+    /// [`Built::broken_inlines`] with each line `glued` names (page and line, sorted) going on
+    /// right after the line before it, with no space: an address that runs on.
+    fn joined_inlines(
+        &mut self,
+        runs: &[&Run],
+        breaks: &[(u32, u32)],
+        glued: &[(u32, u32)],
+        cx: &Context<'_>,
+    ) -> Option<Vec<Inline>> {
         if self.stop.is_some() {
             return None;
         }
@@ -3318,7 +3408,7 @@ impl Built {
             return None;
         }
         self.probe(runs);
-        match inlines(runs, breaks, cx.links, cx.budget) {
+        match inlines(runs, breaks, glued, cx.links, cx.budget) {
             Ok(mut built) => {
                 // Most blocks hold one or two inlines: the list keeps no spare room.
                 built.shrink_to_fit();
@@ -3447,13 +3537,74 @@ impl Built {
     }
 }
 
+/// Where each column of `rows` ends, for the wrap test of its cells' lines: where the text of
+/// the next column starts (its leftmost run over the table), and for the last column the
+/// table's right edge: the right end of its drawn rules or frame (`edge`), else of its widest
+/// row.
+fn column_ends(rows: &[Vec<PlannedCell>], edge: Option<f32>) -> Vec<f32> {
+    let mut starts: Vec<f32> = Vec::new();
+    let mut right = f32::MIN;
+    for row in rows {
+        let mut col = 0usize;
+        for c in row {
+            if starts.len() <= col {
+                starts.resize(col + 1, f32::MAX);
+            }
+            for r in &c.runs {
+                if !r.text.trim().is_empty() {
+                    starts[col] = starts[col].min(r.x);
+                    right = right.max(r.x + r.w);
+                }
+            }
+            col += c.col_span.max(1) as usize;
+        }
+    }
+    let right = edge.map_or(right, |e| e.max(right));
+    let n = starts.len();
+    (0..n)
+        .map(|c| {
+            starts[c + 1..]
+                .iter()
+                .copied()
+                .find(|x| *x < f32::MAX)
+                .unwrap_or(right)
+        })
+        .collect()
+}
+
+/// How a link goes on from the last run `a` of a line of a cell to the first run `b` of the
+/// next: both under one target. Its text is its address going on when the two words that meet
+/// stand in the target one after the other (`.../muster-` over `seite.pdf`).
+fn link_runs_on(a: &Run, b: &Run) -> layoutregions::extract::table::lines::RunsOn {
+    use layoutregions::extract::table::lines::RunsOn;
+    let (Some(ua), Some(ub)) = (&a.uri, &b.uri) else {
+        return RunsOn::Apart;
+    };
+    if !Rc::ptr_eq(ua, ub) && ua.uri != ub.uri {
+        return RunsOn::Apart;
+    }
+    let end = a.text.split_whitespace().next_back().unwrap_or("");
+    let start = b.text.split_whitespace().next().unwrap_or("");
+    if end.is_empty() || start.is_empty() {
+        return RunsOn::Words;
+    }
+    if ua.uri.contains(&format!("{end}{start}")) {
+        RunsOn::Address
+    } else {
+        RunsOn::Words
+    }
+}
+
 /// Inlines from runs in order. Runs on a new line are joined with a space, or without one
-/// after a hyphen that ends a word (not after a dash with white space before it); a line `breaks` names (page, line; sorted) starts after a line break.
+/// after a hyphen that ends a word (not after a dash with white space before it); a line
+/// `breaks` names (page, line; sorted) starts after a line break, and a line `glued` names goes
+/// on right after the line before it (an address that runs on).
 /// Bold, italic and URI links are kept while `links` has room for their targets; past it a
 /// link's text stays without the link.
 fn inlines(
     runs: &[&Run],
     breaks: &[(u32, u32)],
+    glued: &[(u32, u32)],
     links: &LinkRoom,
     budget: &Budget,
 ) -> Result<Vec<Inline>, LimitHit> {
@@ -3516,14 +3667,20 @@ fn inlines(
         // does after the minus of an amount before a word (`12,50-` over `gutgeschrieben`). An
         // amount's hyphen before a number is a range that goes on (`08.00-` over `18.00 Uhr`).
         let range = text.starts_with(|c: char| c.is_ascii_digit());
-        let glued = pieces.last().is_none_or(|p| {
+        let joined = pieces.last().is_none_or(|p| {
             p.text.ends_with(' ')
                 || ((range || !signed_amount(&p.text))
                     && p.text.strip_suffix('-').is_some_and(|rest| {
                         !rest.is_empty() && !rest.ends_with(char::is_whitespace)
                     }))
         });
-        if new_line && !glued && !broken {
+        // An address that runs on has nothing between its lines.
+        let address = new_line && !broken && glued.binary_search(&(r.page, r.line)).is_ok();
+        if address && let Some(p) = pieces.last_mut() {
+            let end = p.text.trim_end().len();
+            p.text.truncate(end);
+        }
+        if new_line && !joined && !broken && !address {
             text.insert(0, ' ');
         }
         if broken && let Some(p) = pieces.last_mut() {
@@ -4336,6 +4493,7 @@ mod tests {
         let built = inlines(
             &refs,
             &[],
+            &[],
             &LinkRoom::new(u64::MAX),
             &Budget::new(rezzer_limits::Limits::default()),
         )
@@ -4365,6 +4523,7 @@ mod tests {
         let built = inlines(
             &refs,
             &[],
+            &[],
             &LinkRoom::new(u64::MAX),
             &Budget::new(rezzer_limits::Limits::default()),
         )
@@ -4386,6 +4545,7 @@ mod tests {
         let built = inlines(
             &refs,
             &[],
+            &[],
             &LinkRoom::new(u64::MAX),
             &Budget::new(rezzer_limits::Limits::default()),
         )
@@ -4398,6 +4558,75 @@ mod tests {
             other => panic!("{other:?}"),
         }
         assert_eq!(rezzer_model::plain_text(&built), "see example.org now");
+    }
+
+    /// Task 29 fix round 4: an address under one link that runs on across a line end of a cell
+    /// is one link with its whole text, nothing between its parts; linked words that run on
+    /// join with a space; the line after the link stays a line.
+    #[test]
+    fn an_address_that_runs_on_in_a_cell_is_one_link() {
+        use layoutregions::extract::table::lines::{RunsOn, cell_lines};
+        let target = UriTarget::new("https://example.org/muster/seite-eins.pdf");
+        let cell = |first: &str, second: &str| -> Vec<Run> {
+            [
+                ("Siehe ", None, 0, 72.0),
+                (first, Some(&target), 0, 110.0),
+                (second, Some(&target), 1, 72.0),
+                ("Stand 2026", None, 2, 72.0),
+            ]
+            .into_iter()
+            .map(|(t, u, line, x)| Run {
+                uri: u.cloned(),
+                x,
+                w: 5.0 * t.len() as f32,
+                ..run(t, line, 700.0 - 12.0 * line as f32, 10.0)
+            })
+            .collect()
+        };
+        let read = |runs: &[Run]| {
+            let lines = cell_lines(&[runs], &[400.0], &link_runs_on);
+            let at = |k: &[usize]| -> Vec<(u32, u32)> {
+                k.iter().map(|&k| (runs[k].page, runs[k].line)).collect()
+            };
+            let refs: Vec<&Run> = runs.iter().collect();
+            inlines(
+                &refs,
+                &at(&lines[0].broken),
+                &at(&lines[0].glued),
+                &LinkRoom::new(u64::MAX),
+                &Budget::new(rezzer_limits::Limits::default()),
+            )
+            .unwrap()
+        };
+        let runs = cell("https://example.org/muster/", "seite-eins.pdf");
+        assert_eq!(link_runs_on(&runs[1], &runs[2]), RunsOn::Address);
+        assert_eq!(link_runs_on(&runs[0], &runs[1]), RunsOn::Apart);
+        let built = read(&runs);
+        assert_eq!(built.len(), 4, "{built:?}");
+        match &built[1] {
+            Inline::Link {
+                target, inlines, ..
+            } => {
+                assert_eq!(target, "https://example.org/muster/seite-eins.pdf");
+                assert_eq!(
+                    rezzer_model::plain_text(inlines),
+                    "https://example.org/muster/seite-eins.pdf"
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(built[2], Inline::LineBreak), "{built:?}");
+        // Words under one link: one link, a space between its lines.
+        let runs = cell("die Seite", "eins");
+        assert_eq!(link_runs_on(&runs[1], &runs[2]), RunsOn::Words);
+        let built = read(&runs);
+        assert_eq!(built.len(), 4, "{built:?}");
+        match &built[1] {
+            Inline::Link { inlines, .. } => {
+                assert_eq!(rezzer_model::plain_text(inlines), "die Seite eins")
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]
@@ -4418,6 +4647,7 @@ mod tests {
         let room = LinkRoom::new(2 * (a.written + LINK_COST));
         let built = inlines(
             &refs,
+            &[],
             &[],
             &room,
             &Budget::new(rezzer_limits::Limits::default()),
@@ -4534,6 +4764,7 @@ mod tests {
             ids: Vec::new(),
             by: crate::tables::Detector::Grid,
             drawn: None,
+            pictures: Vec::new(),
         };
         let mut built = Built::default();
         built.table(plan, &cx);
@@ -4651,6 +4882,7 @@ mod tests {
             ids: Vec::new(),
             by: crate::tables::Detector::Grid,
             drawn: None,
+            pictures: Vec::new(),
         };
         let mut built = Built::default();
         built.table(plan, &cx);
@@ -4706,6 +4938,7 @@ mod tests {
             ids: Vec::new(),
             by: crate::tables::Detector::Grid,
             drawn: None,
+            pictures: Vec::new(),
         };
         let mut built = Built::default();
         built.table(plan, &cx);

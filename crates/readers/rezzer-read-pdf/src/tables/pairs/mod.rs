@@ -88,6 +88,7 @@ pub(super) fn pairs_table(
         ids: Vec::new(),
         by,
         drawn: None,
+        pictures: Vec::new(),
     })
 }
 

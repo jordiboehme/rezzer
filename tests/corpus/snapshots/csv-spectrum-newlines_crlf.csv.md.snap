@@ -46,7 +46,7 @@ Table A1:C4 (data A2:C4), header row 1, found by rules: no gaps, header by type 
 | a | b | c |
 | --- | --- | --- |
 | 1 | 2 | 3 |
-| Once upon a time | 5 | 6 |
+| Once upon<br>a time | 5 | 6 |
 | 7 | 8 | 9 |
 
 **Columns A1:C4**
