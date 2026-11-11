@@ -247,6 +247,28 @@ fn head_left_then_right() {
     assert_eq!(p.ask(), [address, date, letter]);
 }
 
+/// Task 22: labels in a column beside their values in a column, and under them, further left,
+/// a pair with nothing beside it. The pair is no part of the labels' column (it stands under
+/// none of them): it reads after both columns, not between the labels and their values.
+#[test]
+fn a_lone_region_off_its_side_ends_the_columns() {
+    let mut p = Page::new();
+    let l = p.lines(300.0, 470.0, 2, 8, BODY);
+    let labels = p.region(Kind::Paragraph, l);
+    let v = p.lines(380.0, 466.0, 2, 10, BODY);
+    let values = p.region(Kind::Paragraph, v);
+    let below = p.lines(60.0, 420.0, 1, 30, BODY);
+    let pair = p.region(Kind::LabelValue, below);
+    assert_eq!(p.ask(), [labels, values, pair]);
+    // The last paragraph of a left column under the end of the right column stays in its
+    // column: it stands under the left column's paragraphs.
+    let mut p = Page::new();
+    let l1 = p.para(50.0, 760.0, 6, 44);
+    let r1 = p.para(320.0, 760.0, 4, 44);
+    let l2 = p.para(50.0, 670.0, 3, 44);
+    assert_eq!(p.ask(), [l1, l2, r1]);
+}
+
 #[test]
 fn figure_takes_its_place() {
     let mut p = Page::new();
@@ -746,4 +768,381 @@ fn work_grows_with_the_regions_not_their_square() {
         large < 8 * small,
         "{small} steps for 1000, {large} for 4000"
     );
+}
+
+/// The order and the work steps of ordering, in the source order, `n` paragraphs of two lines
+/// across the page with a picture under each: every line shares every picture's width and no
+/// region holds a picture, the most a picture's place looks at. `per` is the work for placing
+/// pictures by their column (see `with_place_work`).
+fn order_of_pictures(n: usize, per: Option<u64>) -> (Vec<RegionId>, Option<u64>) {
+    let mut p = Page::new();
+    let gap = 780.0 / n as f32;
+    let mut source = Vec::new();
+    for k in 0..n {
+        let y = 790.0 - gap * k as f32;
+        let l = p.lines(50.0, y, 2, 20000, 0.02);
+        source.push(p.region(Kind::Paragraph, l));
+        let pic = p.picture(100.0, y - 0.75 * gap, 300.0, y - 0.45 * gap);
+        p.region(Kind::Figure, vec![pic]);
+    }
+    let before = work_steps();
+    let got = match per {
+        Some(per) => with_place_work(per, || order_by_source(&p.page, &p.regions, &source)),
+        None => order_by_source(&p.page, &p.regions, &source),
+    };
+    let after = work_steps();
+    // Paragraph k, then the picture under it.
+    let want: Vec<RegionId> = (0..2 * n as u32).map(RegionId).collect();
+    assert_eq!(got, want, "{n} paragraphs");
+    (got, before.zip(after).map(|(b, a)| a - b))
+}
+
+/// Task 22 fix round 4: placing the pictures of a page in the source order grows with its
+/// pictures and lines, not with their product. Fix round 5: the pictures placed past the
+/// budget (by their height) stand where the full rule puts them.
+#[test]
+fn placing_pictures_grows_with_the_page_not_pictures_times_lines() {
+    let (bounded, small) = order_of_pictures(1000, None);
+    let (full, all) = order_of_pictures(1000, Some(u64::MAX));
+    assert_eq!(bounded, full);
+    let (_, large) = order_of_pictures(4000, None);
+    let (Some(small), Some(all), Some(large)) = (small, all, large) else {
+        // A release build does not count work.
+        return;
+    };
+    // The budget is reached: some pictures are placed by their height.
+    assert!(small < all, "{small} steps bounded, {all} without a bound");
+    assert!(
+        large < 8 * small,
+        "{small} steps for 1000, {large} for 4000"
+    );
+}
+
+/// The order and the work steps of ordering, in the source order, `n` one-line regions side by
+/// side in one row level with a picture's top (within one text size under it), right of the
+/// picture, then a paragraph under the picture in its width. Each region of the row is level
+/// with the top and looks along the rest of the row for a region of its width that reaches
+/// down; none does, so the picture stands by its height, before the paragraph. `per` is the
+/// work for placing pictures by their column (see `with_place_work`).
+fn order_of_a_row(n: usize, per: u64) -> (Vec<RegionId>, Option<u64>) {
+    let mut p = Page::new();
+    let pic = p.picture(50.0, 600.0, 150.0, 700.0);
+    let figure = p.region(Kind::Figure, vec![pic]);
+    let width = 390.0 / n as f32;
+    let mut source = Vec::new();
+    for k in 0..n {
+        let x0 = 200.0 + width * k as f32;
+        let l = p.lines(x0, 692.0, 1, 1, BODY);
+        let bounds = Bounds {
+            x0,
+            y0: 690.0,
+            x1: x0 + width,
+            y1: 698.0,
+        };
+        source.push(p.region_in(Kind::Paragraph, l, bounds));
+    }
+    let under = p.para(50.0, 580.0, 4, 20);
+    source.push(under);
+    let before = work_steps();
+    let got = with_place_work(per, || order_by_source(&p.page, &p.regions, &source));
+    let after = work_steps();
+    let mut want = source[..n].to_vec();
+    want.extend([figure, under]);
+    assert_eq!(got, want, "{n} regions in the row");
+    (got, before.zip(after).map(|(b, a)| a - b))
+}
+
+/// Task 22 fix round 5: the regions level with a picture's top each look along the others of
+/// their row; that look is in the budget too, so the work grows with the row, not with its
+/// square, and the picture past the budget stands where the full rule puts it. The work for
+/// each region is set small so that a row of a thousand regions reaches it; the bound does not
+/// depend on that number.
+#[test]
+fn a_row_level_with_a_picture_top_costs_about_its_length() {
+    let (bounded, small) = order_of_a_row(1000, 16);
+    let (full, all) = order_of_a_row(1000, u64::MAX);
+    assert_eq!(bounded, full);
+    let (_, large) = order_of_a_row(4000, 16);
+    let (Some(small), Some(all), Some(large)) = (small, all, large) else {
+        // A release build does not count work.
+        return;
+    };
+    assert!(small < all, "{small} steps bounded, {all} without a bound");
+    assert!(
+        large < 8 * small,
+        "{small} steps for 1000, {large} for 4000"
+    );
+}
+
+/// Task 22 fix round 5: a picture set into the top of a paragraph (its first lines beside the
+/// picture, the rest under it) stands before that paragraph, whether the paragraph's box
+/// starts a little above the picture's top or a little under it: a region of the picture's
+/// own width level with its top counts as one that starts above it.
+#[test]
+fn a_picture_set_into_the_top_of_a_paragraph_stands_before_it() {
+    for box_top in [700.5, 699.5, 695.0] {
+        let mut p = Page::new();
+        let pic = p.picture(50.0, 640.0, 150.0, 700.0);
+        let figure = p.region(Kind::Figure, vec![pic]);
+        let mut prims = p.lines(160.0, 690.0, 5, 70, BODY);
+        prims.extend(p.lines(50.0, 625.0, 4, 90, BODY));
+        let bounds = Bounds {
+            x0: 50.0,
+            y0: 585.0,
+            x1: 500.0,
+            y1: box_top,
+        };
+        let para = p.region_in(Kind::Paragraph, prims, bounds);
+        let regions = p.scrambled();
+        let got = order_by_source(&p.page, &regions, &[para]);
+        assert_once(&regions, &got);
+        assert_eq!(got, [figure, para], "box top {box_top}");
+    }
+}
+
+/// Task 22: in the source order, the regions read as the source has them, even across the
+/// columns a gutter would read down; a figure (no place in the source) stands before the first
+/// of them whose top is lower than its middle; furniture stays first and last.
+#[test]
+fn source_order_holds_and_places_what_it_lacks() {
+    let mut p = Page::new();
+    let l1 = p.para(50.0, 760.0, 4, 44);
+    let pic = p.picture(60.0, 600.0, 250.0, 700.0);
+    let figure = p.region(Kind::Figure, vec![pic]);
+    let l2 = p.para(50.0, 580.0, 4, 44);
+    let r = p.para(320.0, 760.0, 16, 44);
+    let f = p.lines(50.0, 40.0, 1, 20, BODY);
+    let foot = p.region(Kind::FooterBand, f);
+    // The source reads the right column between the two left paragraphs.
+    let source = [foot, l1, r, l2];
+    let regions = p.scrambled();
+    let got = order_by_source(&p.page, &regions, &source);
+    assert_once(&regions, &got);
+    assert_eq!(got, [l1, r, figure, l2, foot]);
+}
+
+/// Task 22 fix round 1: the mirror. A figure without text in the right column of a page the
+/// source reads column by column stays in the right column, between its paragraphs; it does
+/// not go into the left column at its height.
+#[test]
+fn a_loose_figure_keeps_to_its_column() {
+    let mut p = Page::new();
+    let l1 = p.para(50.0, 760.0, 4, 44);
+    let l2 = p.para(50.0, 580.0, 4, 44);
+    let r1 = p.para(320.0, 760.0, 4, 44);
+    let pic = p.picture(330.0, 600.0, 520.0, 700.0);
+    let figure = p.region(Kind::Figure, vec![pic]);
+    let r2 = p.para(320.0, 580.0, 4, 44);
+    let source = [l1, l2, r1, r2];
+    let regions = p.scrambled();
+    let got = order_by_source(&p.page, &regions, &source);
+    assert_once(&regions, &got);
+    assert_eq!(got, [l1, l2, r1, figure, r2]);
+}
+
+/// Task 22 fix round 2: a figure at the top of the right column (nothing of its width over it,
+/// the left column's text over it) stands before the right column's text, not in the left
+/// column at its height; one at the foot of the right column (its column's text over it,
+/// nothing of its width under it) stands after the right column's text, though a left
+/// paragraph starts below its middle.
+#[test]
+fn a_loose_figure_at_the_top_or_foot_of_its_column() {
+    let mut p = Page::new();
+    let l1 = p.para(50.0, 760.0, 4, 44);
+    let l2 = p.para(50.0, 580.0, 4, 44);
+    let pic = p.picture(330.0, 680.0, 520.0, 760.0);
+    let figure = p.region(Kind::Figure, vec![pic]);
+    let r1 = p.para(320.0, 660.0, 4, 44);
+    let source = [l1, l2, r1];
+    let regions = p.scrambled();
+    let got = order_by_source(&p.page, &regions, &source);
+    assert_once(&regions, &got);
+    assert_eq!(got, [l1, l2, figure, r1]);
+
+    let mut p = Page::new();
+    let l1 = p.para(50.0, 760.0, 4, 44);
+    let l2 = p.para(50.0, 580.0, 4, 44);
+    let l3 = p.para(50.0, 410.0, 4, 44);
+    let r1 = p.para(320.0, 760.0, 4, 44);
+    let r2 = p.para(320.0, 580.0, 4, 44);
+    let pic = p.picture(330.0, 380.0, 520.0, 480.0);
+    let figure = p.region(Kind::Figure, vec![pic]);
+    let source = [l1, l2, l3, r1, r2];
+    let regions = p.scrambled();
+    let got = order_by_source(&p.page, &regions, &source);
+    assert_once(&regions, &got);
+    assert_eq!(got, [l1, l2, l3, r1, r2, figure]);
+}
+
+/// Task 22 fix round 3: a figure at the top of the right column under a title across both
+/// columns stands before the right column's text: the title over it is no reading of its
+/// column, and the source reads the left column, which stands across the figure's top, first.
+#[test]
+fn a_loose_figure_under_a_band_at_the_top_of_its_column() {
+    let mut p = Page::new();
+    let t = p.lines(50.0, 790.0, 1, 100, BODY);
+    let title = p.region(Kind::Heading, t);
+    let l1 = p.para(50.0, 760.0, 4, 44);
+    let l2 = p.para(50.0, 580.0, 4, 44);
+    let pic = p.picture(330.0, 680.0, 520.0, 760.0);
+    let figure = p.region(Kind::Figure, vec![pic]);
+    let r1 = p.para(320.0, 660.0, 4, 44);
+    let source = [title, l1, l2, r1];
+    let regions = p.scrambled();
+    let got = order_by_source(&p.page, &regions, &source);
+    assert_once(&regions, &got);
+    assert_eq!(got, [title, l1, l2, figure, r1]);
+}
+
+/// Task 22 fix round 4: a figure set flush with the top of the right column stands before the
+/// right column's text, with a band over the columns and without one. Columns start level: a
+/// picture is set at its frame's edge, a line box starts at its ascender, so the figure's top
+/// stands up to a line above the top of the left column's first line. The order does not
+/// flip on a few points of that height.
+#[test]
+fn a_figure_flush_with_the_column_top_stays_in_its_column() {
+    for band in [true, false] {
+        for top in [769.0, 770.0, 772.0, 775.0, 779.0] {
+            let mut p = Page::new();
+            let title = band.then(|| {
+                let t = p.lines(50.0, 790.0, 1, 100, BODY);
+                p.region(Kind::Heading, t)
+            });
+            let l1 = p.para(50.0, 760.0, 4, 44);
+            let l2 = p.para(50.0, 580.0, 4, 44);
+            let pic = p.picture(330.0, 680.0, 520.0, top);
+            let figure = p.region(Kind::Figure, vec![pic]);
+            let r1 = p.para(320.0, 660.0, 4, 44);
+            let mut source: Vec<RegionId> = title.into_iter().collect();
+            source.extend([l1, l2, r1]);
+            let regions = p.scrambled();
+            let got = order_by_source(&p.page, &regions, &source);
+            assert_once(&regions, &got);
+            let mut want: Vec<RegionId> = title.into_iter().collect();
+            want.extend([l1, l2, figure, r1]);
+            assert_eq!(got, want, "band {band}, figure top {top}");
+        }
+    }
+}
+
+/// Task 22 fix round 4: the same when the left column opens with a one-line heading level with
+/// the figure's top: the heading is no label beside the figure, because the source reads on down
+/// its column (its first paragraph) before it reaches the figure's column.
+#[test]
+fn a_figure_flush_with_a_column_that_opens_with_a_heading() {
+    for band in [true, false] {
+        for top in [770.0, 775.0, 779.0] {
+            let mut p = Page::new();
+            let title = band.then(|| {
+                let t = p.lines(50.0, 790.0, 1, 100, BODY);
+                p.region(Kind::Heading, t)
+            });
+            let h = p.lines(50.0, 765.0, 1, 30, BODY);
+            let head = p.region(Kind::Heading, h);
+            let l1 = p.para(50.0, 745.0, 4, 44);
+            let l2 = p.para(50.0, 580.0, 4, 44);
+            let pic = p.picture(330.0, 680.0, 520.0, top);
+            let figure = p.region(Kind::Figure, vec![pic]);
+            let r1 = p.para(320.0, 660.0, 4, 44);
+            let mut source: Vec<RegionId> = title.into_iter().collect();
+            source.extend([head, l1, l2, r1]);
+            let regions = p.scrambled();
+            let got = order_by_source(&p.page, &regions, &source);
+            assert_once(&regions, &got);
+            let mut want: Vec<RegionId> = title.into_iter().collect();
+            want.extend([head, l1, l2, figure, r1]);
+            assert_eq!(got, want, "band {band}, figure top {top}");
+        }
+    }
+}
+
+/// Task 22 fix round 4: a code at the right of a page head, its top level with a one-line
+/// heading on the left. The source reads the head band by band: the left block under the
+/// heading ends above the paragraph across the page under the code, so the heading starts no
+/// column read down past the code, and the code keeps its place by its height, at the head.
+#[test]
+fn a_code_level_with_a_heading_of_a_page_head_stays_at_the_head() {
+    let mut p = Page::new();
+    let h = p.lines(50.0, 798.0, 1, 30, BODY);
+    let head = p.region(Kind::Heading, h);
+    let first = p.para(50.0, 770.0, 2, 40);
+    let second = p.para(50.0, 740.0, 3, 60);
+    let pic = p.picture(479.0, 754.0, 539.0, 808.0);
+    let code = p.region(Kind::Code, vec![pic]);
+    let across = p.para(50.0, 690.0, 4, 100);
+    let source = [head, first, second, across];
+    let regions = p.scrambled();
+    let got = order_by_source(&p.page, &regions, &source);
+    assert_once(&regions, &got);
+    assert_eq!(got, [head, code, first, second, across]);
+}
+
+/// Task 22 fix round 4: a code at the foot of its column (a link over it, nothing of its width
+/// under it), beside a column of links whose block starts a few points under the code's top. A
+/// column level with a picture's top says a column top only where the picture's column goes
+/// on under it; here the code keeps its place among the links beside it, before the first one
+/// under its middle, not after the whole page.
+#[test]
+fn a_code_at_the_foot_of_its_column_stays_beside_its_links() {
+    let mut p = Page::new();
+    let r = p.lines(466.0, 640.0, 1, 20, BODY);
+    let over = p.region(Kind::Paragraph, r);
+    let h = p.lines(322.0, 362.1, 1, 20, 9.5);
+    let head = p.region(Kind::Heading, h);
+    let a = p.lines(331.0, 348.0, 3, 20, 9.0);
+    let first = p.region(Kind::List, a);
+    let b = p.lines(331.0, 312.0, 2, 20, 9.0);
+    let second = p.region(Kind::List, b);
+    let pic = p.picture(485.0, 309.0, 537.0, 362.0);
+    let code = p.region(Kind::Code, vec![pic]);
+    let source = [over, head, first, second];
+    let regions = p.scrambled();
+    let got = order_by_source(&p.page, &regions, &source);
+    assert_once(&regions, &got);
+    assert_eq!(got, [over, head, first, code, second]);
+}
+
+/// Task 22 fix round 3: a figure across both columns between two bands of them. A source read
+/// band by band gives it its place between the bands. A source read column by column reads
+/// across it at the left column's crossing: it stands there, after the left column's upper
+/// paragraph (the first place a reader of the page meets it), not after the right one.
+#[test]
+fn a_figure_across_the_columns_between_bands() {
+    let mut p = Page::new();
+    let l1 = p.para(50.0, 760.0, 4, 44);
+    let r1 = p.para(320.0, 760.0, 4, 44);
+    let pic = p.picture(50.0, 620.0, 540.0, 700.0);
+    let figure = p.region(Kind::Figure, vec![pic]);
+    let l2 = p.para(50.0, 580.0, 4, 44);
+    let r2 = p.para(320.0, 580.0, 4, 44);
+    let regions = p.scrambled();
+    let got = order_by_source(&p.page, &regions, &[l1, r1, l2, r2]);
+    assert_once(&regions, &got);
+    assert_eq!(got, [l1, r1, figure, l2, r2]);
+    let got = order_by_source(&p.page, &regions, &[l1, l2, r1, r2]);
+    assert_eq!(got, [l1, figure, l2, r1, r2]);
+}
+
+/// Task 22 fix round 3: a logo at the top left of a page head, beside a region the segmenter
+/// made across the gutter (a short left paragraph low on the page and the right address
+/// beside the logo). That region's box reaches over and under the logo, but its content in
+/// the logo's width is the short paragraph only: it neither holds the logo nor stands over
+/// it. The logo stands by its column: after the title over it, before the address under it.
+#[test]
+fn a_region_across_the_gutter_holds_no_picture_by_its_box() {
+    let mut p = Page::new();
+    let t = p.lines(18.0, 790.0, 1, 30, BODY);
+    let title = p.region(Kind::Heading, t);
+    let pic = p.picture(18.0, 720.0, 122.0, 774.0);
+    let logo = p.region(Kind::Figure, vec![pic]);
+    let a = p.lines(18.0, 700.0, 3, 24, BODY);
+    let address = p.region(Kind::Paragraph, a);
+    let mut merged = p.lines(18.0, 560.0, 2, 30, BODY);
+    merged.extend(p.lines(300.0, 770.0, 5, 20, BODY));
+    let joined = p.region(Kind::Paragraph, merged);
+    let source = [title, address, joined];
+    let regions = p.scrambled();
+    let got = order_by_source(&p.page, &regions, &source);
+    assert_once(&regions, &got);
+    assert_eq!(got, [title, logo, address, joined]);
 }

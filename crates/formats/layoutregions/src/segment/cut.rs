@@ -170,7 +170,7 @@ enum Why {
 }
 
 /// A column gutter is at least this many font sizes wide.
-const GUTTER: f32 = 0.8;
+pub(crate) const GUTTER: f32 = 0.8;
 
 /// Share of the pieces of a region that may cross a column gutter (titles, notes, footers
 /// that span the columns).

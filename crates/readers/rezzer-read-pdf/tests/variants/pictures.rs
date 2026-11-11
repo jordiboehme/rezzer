@@ -854,6 +854,67 @@ macro_rules! twins {
     };
 }
 
+/// The axes of a shape read once, upright at scale 1 in the real sizes and fonts.
+const ONCE: Axes = Axes {
+    scale: &[Scale::S100],
+    size: &[Size::Real],
+    data: &[Data::CourierBold],
+    labels: &[Labels::Helvetica],
+    look: &[Look::Real],
+    turn: &[Turn::None],
+    next: &[Next::None],
+    pages: &[Pages::One],
+};
+
+/// Task 22 fix round 4: a page in two columns under a title across both, set in the size of
+/// the text, with a picture at the top of the right column: two paragraphs on the left, a
+/// long paragraph on the right under the picture. The picture stands after the left column,
+/// before the right column's text.
+fn picture_under_a_body_size_title(v: &Variant) -> Sheet {
+    let (plain, _) = v.faces();
+    let mut t = show(
+        plain,
+        10.0,
+        72.0,
+        750.0,
+        "A title across both columns of the page",
+    );
+    for (y, line) in [
+        (700.0, "The first left paragraph runs over"),
+        (688.0, "three lines of plain text in the"),
+        (676.0, "left column of the page."),
+        (560.0, "The second left paragraph stands"),
+        (548.0, "under the first one in the same"),
+        (536.0, "column on the left."),
+    ] {
+        t += &show(plain, 10.0, 72.0, y, line);
+    }
+    for (k, line) in [
+        "The right column is one long",
+        "paragraph that starts under the",
+        "picture and goes on down the page",
+        "line after line, as on a page set",
+        "in two columns.",
+    ]
+    .iter()
+    .enumerate()
+    {
+        t += &show(plain, 10.0, 320.0, 590.0 - 12.0 * k as f32, line);
+    }
+    t += &logo(330.0, 610.0, 85.0, 80.0);
+    let mut b = Built::new(&v.geo());
+    b.page = FormPage {
+        template: t,
+        ..FormPage::default()
+    };
+    let mut s = Sheet::new(b);
+    s.want.media_between.push((
+        "column on the left.".into(),
+        "The right column is one long".into(),
+    ));
+    s
+}
+
 /// The shapes with pictures and codes.
 pub(crate) fn shapes() -> Vec<Shape> {
     let mut all = vec![
@@ -861,6 +922,11 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "template logos",
             axes: RENDERED,
             draw: |v| (logos(v), None),
+        },
+        Shape {
+            name: "a picture at the top of the right column under a title in the body size",
+            axes: ONCE,
+            draw: |v| (picture_under_a_body_size_title(v), None),
         },
         Shape {
             name: "barcode, module 0.8, height 20",

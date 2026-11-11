@@ -10,11 +10,12 @@
 //! pieces.
 //!
 //! - A wide drawn rule across a set parts it into above and below.
-//! - A gutter at least one body em wide, from the set's top to its bottom, parts it into
-//!   columns, read left to right, each down to its end. Only a region that stands in a band of
-//!   its own may reach across the gutter (a title, a figure or a table across the columns): it
-//!   parts the columns into bands, as a piece across a gutter does in the cut. A gutter only a
-//!   drawn box makes is taken after the bands of white space across, as in the cut.
+//! - A gutter at least 0.8 body em wide (as in the cut), from the set's top to its bottom,
+//!   parts it into columns, read left to right, each down to its end. Only a region that
+//!   stands in a band of its own may reach across the gutter (a title, a figure or a table
+//!   across the columns): it parts the columns into bands, as a piece across a gutter does in
+//!   the cut. A gutter only a drawn box makes is taken after the bands of white space across,
+//!   as in the cut.
 //! - Otherwise the widest band of white space across the set parts it into above and below.
 //! - What is left is read top to bottom, then left to right.
 //!
@@ -27,6 +28,10 @@
 //! row by row because it is one `Table` region. Figures and codes are regions like the others
 //! and take their place in the same pass. Every length is measured in the body em of the page
 //! (the size most of its ink is set in), so the order is the same at every scale.
+//!
+//! [`order_by_source`] is the order for a file whose source order (the order it sets its
+//! content down in) is its reading order: the body reads in that order, and only what the
+//! source has no place for (a figure or code without text) is placed, by its column and height.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -41,8 +46,10 @@ use crate::work;
 /// (as the cut's wide rule).
 const WIDE_RULE: f32 = 2.0 / 3.0;
 
-/// A column gutter is at least this many body ems wide (P6-Y).
-const GUTTER: f32 = 1.0;
+/// A column gutter is at least this many body ems wide (P6-Y): the cut's gutter, so a gutter
+/// the cut reads between the lines of two columns parts their regions too (a column gap of
+/// one em, which the ends of the lines of a justified column narrow a little).
+const GUTTER: f32 = crate::segment::cut::GUTTER;
 
 /// The two sides of a gutter stand side by side: their heights overlap by this share of the
 /// smaller one (as in the cut).
@@ -59,6 +66,36 @@ const FLAT: f32 = 0.25;
 /// body ems.
 const FRAME: f32 = 0.5;
 
+/// Placing the regions the source lacks by their column looks at the sourced regions and
+/// their content once for each of them. On a page of many pictures and many lines that is
+/// their product; it may take at most this many steps for each region and each box of content
+/// of the set, and the regions left past that are placed by their height alone (as a page
+/// head is), so the work grows with the page, not with pictures times lines. The busiest page
+/// of the corpus, forms and generated sets (133 pictures beside 179 regions) takes about a
+/// fifth of it.
+const PLACE_WORK: u64 = 1024;
+
+thread_local! {
+    /// A test's stand-in for [`PLACE_WORK`] on this thread (see [`with_place_work`]).
+    static PLACE_WORK_SET: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+}
+
+/// Runs `f` with `per` steps of work for placing pictures by their column in place of
+/// [`PLACE_WORK`], on this thread; `u64::MAX` places every picture by its column. For the tests
+/// of the work bound only: they compare the order past the bound with the order without it,
+/// and reach the bound with a small page.
+#[doc(hidden)]
+pub fn with_place_work<T>(per: u64, f: impl FnOnce() -> T) -> T {
+    struct Restore(Option<u64>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            PLACE_WORK_SET.with(|w| w.set(self.0));
+        }
+    }
+    let _restore = Restore(PLACE_WORK_SET.with(|w| w.replace(Some(per))));
+    f()
+}
+
 /// A page with no text measures its lengths in this share of its height.
 const NO_TEXT_EM: f32 = 1.0 / 66.0;
 
@@ -71,20 +108,49 @@ const NO_TEXT_EM: f32 = 1.0 / 66.0;
 /// order. A region with no usable box (a bound that is not a number) stands after the placed
 /// regions of its group, in the order it was handed over.
 pub fn order(page: &PageIn, regions: &[Region]) -> Vec<RegionId> {
-    work::add(1 + regions.len() as u64);
+    ordered(page, regions, &[], false)
+}
+
+/// The regions of a page in their source order (`source`: the order the file sets them down
+/// in, for a PDF the order of its content), for a file whose source order is its reading
+/// order: furniture first and last as in [`order`], the body in the source order (the regions
+/// a file states too, as the source has them), with no XY cut. A region not in `source` (a
+/// figure or code without text) stands before the first of them that stands below it (see
+/// `Cx::by_source`).
+pub fn order_by_source(page: &PageIn, regions: &[Region], source: &[RegionId]) -> Vec<RegionId> {
+    ordered(page, regions, source, true)
+}
+
+/// [`order`], or [`order_by_source`] when `follow`.
+fn ordered(page: &PageIn, regions: &[Region], source: &[RegionId], follow: bool) -> Vec<RegionId> {
+    work::add(1 + regions.len() as u64 + source.len() as u64);
     let em = body_em(page);
-    let given = given_orders(page, regions);
+    // In the source order the file's order of its content holds, given regions too.
+    let given = if follow {
+        HashMap::new()
+    } else {
+        given_orders(page, regions)
+    };
     let frames = Frames::new(page, em);
     let cx = Cx {
         page,
         em,
         boxes: regions
             .iter()
-            .map(|r| Info::new(page, r, em, &given, &frames))
+            .map(|r| Info::new(page, r, em, &given, &frames, follow))
             .collect(),
         max_depth: Limits::default().max_cut_depth as usize,
         cells: RefCell::new(vec![0; regions.len()]),
         tree: RefCell::new(vec![(0, false)]),
+        follow,
+        source: {
+            let rank: HashMap<RegionId, u32> = source
+                .iter()
+                .enumerate()
+                .map(|(k, id)| (*id, u32::try_from(k).unwrap_or(u32::MAX)))
+                .collect();
+            regions.iter().map(|r| rank.get(&r.id).copied()).collect()
+        },
     };
     let at: HashMap<RegionId, usize> = regions.iter().enumerate().map(|(k, r)| (r.id, k)).collect();
     // The children of each region, and the regions without a parent among `regions`.
@@ -106,7 +172,8 @@ pub fn order(page: &PageIn, regions: &[Region]) -> Vec<RegionId> {
         }
     }
     let mut ordered = cx.place(head);
-    ordered.extend(cx.with_given(cx.place(body)));
+    let body = cx.place(body);
+    ordered.extend(if follow { body } else { cx.with_given(body) });
     ordered.extend(cx.place(legend));
     ordered.extend(cx.place(foot));
     // Each region, then its children, depth first; a region met twice stands once.
@@ -141,6 +208,9 @@ struct Info {
     drawn: bool,
     /// The order the file gives it, if any.
     given: Option<u32>,
+    /// The boxes of its content (lines, cells, rules), by their left edge; only in the source
+    /// order, where a picture's column is judged by the content in its width.
+    content: Vec<Bounds>,
 }
 
 impl Info {
@@ -150,6 +220,7 @@ impl Info {
         em: f32,
         given: &HashMap<RegionId, u32>,
         frames: &Frames,
+        follow: bool,
     ) -> Info {
         work::add(1 + r.prims.len() as u64);
         let b = r.bounds;
@@ -167,12 +238,79 @@ impl Info {
             .filter(|s| s.is_finite() && *s > 0.0)
             .collect();
         sizes.sort_by(f32::total_cmp);
+        let mut content: Vec<Bounds> = if follow {
+            r.prims
+                .iter()
+                .filter_map(|&p| crate::segment::prim_bounds(page, p))
+                .map(normal)
+                .filter(|c| [c.x0, c.y0, c.x1, c.y1].iter().all(|v| v.is_finite()))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        content.sort_by(|a, c| a.x0.total_cmp(&c.x0));
         Info {
             b,
             line: sizes.get(sizes.len() / 2).copied(),
             drawn: b.is_some_and(|b| framed(page, r, b, em) || frames.frame(b)),
             given: given.get(&r.id).copied(),
+            content,
         }
+    }
+}
+
+/// The sourced regions of a set by their height, for the height rule of `Cx::by_source`: the
+/// place before the first region (in the source order) whose top is lower than a middle; with
+/// none, just after the last one whose middle is above it; else the end. A binary search, so
+/// that a page of many pictures places each in steps of the log of its regions.
+struct Heights {
+    /// The tops, rising, with the first place in the source order among those up to each.
+    tops: Vec<(f32, usize)>,
+    /// The middles, rising, with the last place in the source order among those from each on.
+    mids: Vec<(f32, usize)>,
+    len: usize,
+}
+
+impl Heights {
+    fn new(sourced: &[usize], top: impl Fn(usize) -> f32, mid: impl Fn(usize) -> f32) -> Heights {
+        work::add(2 * sourced.len() as u64);
+        let mut tops: Vec<(f32, usize)> = sourced
+            .iter()
+            .enumerate()
+            .map(|(i, &k)| (top(k), i))
+            .collect();
+        tops.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut first = usize::MAX;
+        for t in &mut tops {
+            first = first.min(t.1);
+            t.1 = first;
+        }
+        let mut mids: Vec<(f32, usize)> = sourced
+            .iter()
+            .enumerate()
+            .map(|(i, &k)| (mid(k), i))
+            .collect();
+        mids.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut last = 0;
+        for t in mids.iter_mut().rev() {
+            last = last.max(t.1);
+            t.1 = last;
+        }
+        Heights {
+            tops,
+            mids,
+            len: sourced.len(),
+        }
+    }
+
+    /// The place in the source order a region whose middle is `m` stands before.
+    fn place(&self, m: f32) -> usize {
+        let lower = self.tops.partition_point(|t| t.0 < m);
+        if lower > 0 {
+            return self.tops[lower - 1].1;
+        }
+        let above = self.mids.partition_point(|t| t.0 <= m);
+        self.mids.get(above).map_or(self.len, |t| t.1 + 1)
     }
 }
 
@@ -385,6 +523,10 @@ struct Cx<'a> {
     /// For each cell, the cell it was cut from and whether it is a side of a gutter (a column);
     /// cell 0 is the page.
     tree: RefCell<Vec<(u32, bool)>>,
+    /// The place of each region in the source order, if it has one.
+    source: Vec<Option<u32>>,
+    /// The source order is the reading order: no cut is made where it holds.
+    follow: bool,
 }
 
 /// A column gutter of a set: the white space it spans.
@@ -555,6 +697,9 @@ impl Cx<'_> {
         if set.len() <= 1 {
             return set;
         }
+        if self.follow {
+            return self.by_source(set);
+        }
         if depth >= self.max_depth {
             return self.by_rows(set);
         }
@@ -702,8 +847,56 @@ impl Cx<'_> {
     }
 
     /// The set read in columns at the gutter `g`: band by band, each band's left side and then
-    /// its right side; a region across the gutter is a band of its own.
+    /// its right side; a region across the gutter is a band of its own. So is a region alone in
+    /// its strip whose box shares no width with the regions of its side that stand beside the
+    /// other side: it stands above or below that column, not in it (a pair further left under a
+    /// column of labels beside their values), and the columns end at it.
     fn columns(&self, mut set: Vec<usize>, g: &Gutter, depth: usize, cell: u32) -> Vec<usize> {
+        let alone = self.alone(&set);
+        // The widths the regions of each side that share a strip with another take, merged and
+        // sorted.
+        let widths = |left: bool| {
+            let mut xs: Vec<(f32, f32)> = set
+                .iter()
+                .zip(&alone)
+                .filter(|&(_, &a)| !a)
+                .map(|(&k, _)| self.b(k))
+                .filter(|b| if left { b.x1 <= g.from } else { b.x0 >= g.to })
+                .map(|b| (b.x0, b.x1))
+                .collect();
+            xs.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let mut merged: Vec<(f32, f32)> = Vec::with_capacity(xs.len());
+            for (a, b) in xs {
+                match merged.last_mut() {
+                    Some(m) if a <= m.1 => m.1 = m.1.max(b),
+                    _ => merged.push((a, b)),
+                }
+            }
+            merged
+        };
+        let (left_widths, right_widths) = (widths(true), widths(false));
+        // Whether the box from `x0` to `x1` shares width with one of `merged`.
+        let shares = |merged: &[(f32, f32)], x0: f32, x1: f32| {
+            let i = merged.partition_point(|m| m.1 <= x0);
+            merged.get(i).is_some_and(|m| m.0 < x1)
+        };
+        let mut off: Vec<usize> = set
+            .iter()
+            .zip(&alone)
+            .filter(|&(&k, &a)| {
+                let b = self.b(k);
+                a && if b.x1 <= g.from {
+                    !shares(&left_widths, b.x0, b.x1)
+                } else if b.x0 >= g.to {
+                    !shares(&right_widths, b.x0, b.x1)
+                } else {
+                    false
+                }
+            })
+            .map(|(&k, _)| k)
+            .collect();
+        off.sort_unstable();
+        work::add(2 * set.len() as u64);
         self.by_top(&mut set);
         let mut out = Vec::with_capacity(set.len());
         let (mut left, mut right) = (Vec::new(), Vec::new());
@@ -716,19 +909,244 @@ impl Cx<'_> {
         };
         for k in set {
             let b = self.b(k);
-            if b.x1 <= g.from {
+            if off.binary_search(&k).is_err() && b.x1 <= g.from {
                 left.push(k);
-            } else if b.x0 >= g.to {
+            } else if off.binary_search(&k).is_err() && b.x0 >= g.to {
                 right.push(k);
             } else {
                 flush(&mut left, &mut right, &mut out);
-                // A region across the gutter is a cell of its own: it binds to no given region
-                // of the set above or below the columns.
+                // A region across the gutter, or off its side, is a cell of its own: it binds
+                // to no given region of the set above or below the columns.
                 self.cells.borrow_mut()[k] = self.new_cell(cell, false);
                 out.push(k);
             }
         }
         flush(&mut left, &mut right, &mut out);
+        out
+    }
+
+    /// The set in the source order: the regions with a place in it in that order. Each other
+    /// one (a figure or code without text) is placed by its column: the content (lines, cells,
+    /// rules) of the sourced regions that overlaps its width by half the narrower of the two.
+    /// A region is of its column by that content, and stands over or under it by that
+    /// content's top, not by the region's box (a region the segmenter joined across a gutter
+    /// is of a column only by its content there).
+    ///
+    /// - A region holds it (its content stands in its width over its top and under its
+    ///   bottom, or at its height on its left and on its right): it stands before that region,
+    ///   which is not cut. A region whose box only reaches around it does not hold it.
+    /// - Its column's reading began over it (content of its width starts above its top): it
+    ///   stands after the last such region and before the first region under it in its column
+    ///   (the middle or the foot of a column). When the source reads, between those two, a
+    ///   region of another column that stands across its top (a column read down through its
+    ///   height), it reads column by column there: the picture stands just before the first
+    ///   region under it. Else (labels beside it, regions below it: a source read band by
+    ///   band) before the first of them below its middle. A source that reads past it in its
+    ///   column before all that is over it (a figure across the columns, the source read column
+    ///   by column) meets it at the first crossing: before the first region under it.
+    /// - Nothing of its width is over it, but text of other columns is (the top of a column):
+    ///   it stands before the first region under it in its column.
+    /// - Nothing on the page is over it (a page head), or nothing of its width is under it:
+    ///   before the first region whose top is lower than its middle; with none, just after the
+    ///   last one whose middle is above its own; else at the end, highest middle first.
+    ///
+    /// At the top of its column (text of its width under it), text of another column stands
+    /// across its top, or over it, when it starts above its top, or within one line of it (that
+    /// region's text size, else the body em) and its column is read down past the picture: it,
+    /// or a region of its width the source reads after it (a heading over the column's first
+    /// paragraph) before it reaches the picture's column, reaches lower than where the
+    /// picture's column goes on under it. Columns start level, and a line's box starts at its
+    /// ascender, lower than the frame edge a picture is set at by less than a line. A label
+    /// beside it, or a page head read band by band, ends above where its column goes on.
+    /// A region of the picture's own width counts the same way: a paragraph whose box starts
+    /// level with the picture's top runs beside it and then under it (the picture is set into
+    /// its top), and the picture stands before it, as it does when that box starts above the
+    /// top. Leaving it out only within the line would turn the place on a fraction of a point.
+    /// At the foot of its column (nothing of its width under it) only text that starts above
+    /// its top stands across it.
+    fn by_source(&self, set: Vec<usize>) -> Vec<usize> {
+        work::add(2 * set.len() as u64);
+        let (mut sourced, mut loose): (Vec<usize>, Vec<usize>) =
+            set.into_iter().partition(|&k| self.source[k].is_some());
+        sourced.sort_by_key(|&k| self.source[k]);
+        let mid = |k: usize| 0.5 * (self.b(k).y0 + self.b(k).y1);
+        loose.sort_by(|&a, &b| mid(b).total_cmp(&mid(a)).then(a.cmp(&b)));
+        // Each loose region goes before the sourced place `before[k]`, or at the end.
+        // Two spans share a column when they overlap across by half the narrower one or more
+        // (boxes that only touch at their edges stand side by side).
+        let shares = |a: Bounds, b: Bounds| {
+            let over = a.x1.min(b.x1) - a.x0.max(b.x0);
+            over > 0.0 && over >= 0.5 * (a.x1 - a.x0).min(b.x1 - b.x0)
+        };
+        let mut before: Vec<Vec<usize>> = vec![Vec::new(); sourced.len() + 1];
+        let by_height = Heights::new(&sourced, |k| self.b(k).y1, mid);
+        let content: usize = sourced.iter().map(|&k| self.boxes[k].content.len()).sum();
+        let per = PLACE_WORK_SET.with(|w| w.get()).unwrap_or(PLACE_WORK);
+        let budget = per.saturating_mul((sourced.len() + content + loose.len()) as u64);
+        // The steps spent placing by column so far.
+        let spent = std::cell::Cell::new(0u64);
+        let add = |n: u64| {
+            work::add(n);
+            spent.set(spent.get().saturating_add(n));
+        };
+        // Set when the budget runs out while a picture is placed by its column (in the scan of
+        // `level`): that picture is then placed by its height, as those after it are.
+        let out_of_work = std::cell::Cell::new(false);
+        for &l in &loose {
+            let (m, top) = (mid(l), self.b(l).y1);
+            if spent.get() > budget {
+                work::add(1 + sourced.len().max(1).ilog2() as u64);
+                before[by_height.place(m)].push(l);
+                continue;
+            }
+            add(2 * sourced.len() as u64);
+            let lb = self.b(l);
+            // The part of each sourced region in its column: the bounds of its content (lines,
+            // cells, rules) that shares the loose region's width; a region without content
+            // stands by its box. A region whose box spans the gutter but whose content in this
+            // width is one short paragraph is of this column by that paragraph only.
+            let parts: Vec<Option<Bounds>> = sourced
+                .iter()
+                .map(|&k| {
+                    let info = &self.boxes[k];
+                    if info.content.is_empty() {
+                        return shares(lb, self.b(k)).then(|| self.b(k));
+                    }
+                    let to = info.content.partition_point(|c| c.x0 < lb.x1);
+                    add(to as u64);
+                    info.content[..to]
+                        .iter()
+                        .filter(|c| shares(lb, **c))
+                        .copied()
+                        .reduce(|a, c| Bounds {
+                            x0: a.x0.min(c.x0),
+                            y0: a.y0.min(c.y0),
+                            x1: a.x1.max(c.x1),
+                            y1: a.y1.max(c.y1),
+                        })
+                })
+                .collect();
+            // Below it: a region whose top is lower than its middle.
+            let below = |k: usize| self.b(k).y1 < m;
+            // Of its column: content in its width; over it: that content starts above its top;
+            // under it: that content starts below its middle.
+            let over = |i: usize| parts[i].is_some_and(|p| p.y1 > top);
+            let under = |i: usize| parts[i].is_some_and(|p| p.y1 < m);
+            // The sourced region `i` stands at or over its top: it starts above its top, or
+            // within one line of it (that region's text size, else the body em) and its column
+            // is read down past the picture: it, or a region of its width the source reads
+            // after it and before `end` (the first region under the picture in its column),
+            // reaches lower than the top of `end`. Columns start level, and a line's box starts
+            // at its ascender, lower than the frame edge a picture is set at by less than a
+            // line, so a picture flush with the top of its column stands up to a line above the
+            // other column's first line. A label beside the picture, or a page head the source
+            // reads band by band, ends above where the picture's column goes on. `i` may be of
+            // the picture's own width (`end` itself: a paragraph the picture is set into the top
+            // of, beside it and then under it); it counts as it does when its box starts above
+            // the top.
+            let level = |i: usize, end: usize| {
+                let k = sourced[i];
+                let (b, line) = (self.b(k), self.boxes[k].line.unwrap_or(self.em));
+                if b.y1 > top {
+                    return true;
+                }
+                if b.y1 <= top - line {
+                    return false;
+                }
+                let Some(floor) = parts.get(end).copied().flatten().map(|p| p.y1) else {
+                    return false;
+                };
+                if b.y0 < floor {
+                    return true;
+                }
+                // The scan is counted in the budget too: many regions in a row level with its
+                // top each look at the rest of the row.
+                if spent.get() > budget {
+                    out_of_work.set(true);
+                    return false;
+                }
+                add(end.saturating_sub(i) as u64);
+                (i + 1..end).any(|j| {
+                    let c = self.b(sourced[j]);
+                    parts[j].is_none() && c.y0 < floor && shares(b, c)
+                })
+            };
+            let last_over = (0..sourced.len()).rev().find(|&i| over(i));
+            let first_under = |from: usize| (from..sourced.len()).find(|&i| under(i));
+            // A region holds it when its content stands around it: in its width over its top
+            // and under its bottom (a picture inside a block of text kept as laid out), or at
+            // its height on its left and on its right (a code in a row of a table, between its
+            // cells). The region is not cut, and the picture stands before it. A region whose
+            // box only reaches around it (content of two columns joined) does not hold it.
+            let row_around = |k: usize| {
+                let c = &self.boxes[k].content;
+                add(c.len() as u64);
+                let at_height = |b: &&Bounds| b.y0 < lb.y1 && b.y1 > lb.y0;
+                c.iter().filter(at_height).any(|b| b.x1 <= lb.x0)
+                    && c.iter().filter(at_height).any(|b| b.x0 >= lb.x1)
+            };
+            let holder = (0..sourced.len()).find(|&i| {
+                parts[i].is_some_and(|p| p.y1 >= lb.y1 && p.y0 <= lb.y0) || row_around(sourced[i])
+            });
+            let at = match (holder, last_over) {
+                (Some(h), _) => h,
+                // Its column's reading began over it. A source that reads on past it in its
+                // column before reaching all that is over it reads across it column by column
+                // (a figure across the columns): before the first region under it.
+                (None, Some(i)) if first_under(0).is_some_and(|u| u < i) => {
+                    first_under(0).unwrap_or(sourced.len())
+                }
+                // After the last region over it, before the first under it in its column. When
+                // the source reads, between those, a region of another column that stands across
+                // its top (over its top and under it: a column read down through its height), it
+                // reads column by column there: just before the first under it. Else (a label
+                // beside it, regions below it: a source read band by band) before the first of
+                // them below its middle.
+                (None, Some(i)) => {
+                    let from = i + 1;
+                    let next_under = first_under(from);
+                    let to = next_under.unwrap_or(sourced.len());
+                    // Level with its top counts only at the top of a column, with text of its
+                    // width under it; at the foot of its column only text over its top does.
+                    let across = |j: usize| {
+                        let b = self.b(sourced[j]);
+                        (if next_under.is_some() {
+                            level(j, to)
+                        } else {
+                            b.y1 > top
+                        }) && b.y0 < top
+                    };
+                    if (from..to).any(across) {
+                        to
+                    } else {
+                        (from..to).find(|&j| below(sourced[j])).unwrap_or(to)
+                    }
+                }
+                // The top of its column: other columns have text over it, or level with its
+                // top (or the paragraph under it starts level with its top, beside it). Before
+                // the first region under it in its column.
+                (None, None)
+                    if first_under(0)
+                        .is_some_and(|end| (0..sourced.len()).any(|i| level(i, end))) =>
+                {
+                    first_under(0).unwrap_or(sourced.len())
+                }
+                // A page head (nothing over it), or nothing of its width: by its height.
+                (None, None) => by_height.place(m),
+            };
+            let at = if out_of_work.get() {
+                by_height.place(m)
+            } else {
+                at
+            };
+            before[at].push(l);
+        }
+        let mut out = Vec::with_capacity(sourced.len() + loose.len());
+        for (i, k) in sourced.into_iter().enumerate() {
+            out.append(&mut before[i]);
+            out.push(k);
+        }
+        out.append(&mut before.last_mut().map(std::mem::take).unwrap_or_default());
         out
     }
 

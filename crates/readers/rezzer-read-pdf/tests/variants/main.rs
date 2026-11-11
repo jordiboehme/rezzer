@@ -315,6 +315,7 @@ macro_rules! shape_tests {
 }
 
 shape_tests! {
+    a_picture_under_a_body_size_title => "a picture at the top of the right column under a title in the body size",
     f1_to_f3 => "F1 to F3",
     header_grid => "header grid",
     column_of_totals => "column of totals",

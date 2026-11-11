@@ -815,16 +815,32 @@ fn lay_out(
                 None => Vec::new(),
             };
             let found: Vec<(f32, f32)> = tops.iter().flatten().copied().collect();
-            let mut nearest = quote::nearest_runs(&items.runs, &found).into_iter();
-            // For each picture: the run found and its top, and the index of its point.
+            let mut nearest = quote::nearest_run_spans(&items.runs, &found).into_iter();
+            // The middles across and the baselines of the page's runs with ink, by the middle:
+            // whether text of a picture's width stands over it and under it (see `Spans`).
+            let mut run_mids: Vec<(f32, f32)> = if found.is_empty() {
+                Vec::new()
+            } else {
+                items
+                    .runs
+                    .iter()
+                    .filter(|r| r.text.chars().any(|c| !c.is_whitespace()))
+                    .map(|r| (r.x + r.w / 2.0, r.y))
+                    .filter(|(x, y)| x.is_finite() && y.is_finite())
+                    .collect()
+            };
+            run_mids.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let run_spans = Spans::new(&run_mids);
+            // For each picture: the run found and its half width, the picture's top, and the
+            // index of its point.
             let probes_from = points.len();
             let near: Vec<Option<Near>> = tops
                 .iter()
                 .map(|top| {
                     let top = (*top)?;
-                    let at = nearest.next().flatten()?;
+                    let (at, width) = nearest.next().flatten()?;
                     points.push(at);
-                    Some((at, top, points.len() - 1))
+                    Some((at, (0.5 * (width.1 - width.0), top.1), points.len() - 1))
                 })
                 .collect();
             let (ox, oy) = items.origin;
@@ -1021,10 +1037,55 @@ fn lay_out(
             // and the one media block of a page rendered whole.
             let mut media_hosts: Vec<(layoutregions::PrimId, Anchor)> = Vec::new();
             let mut page_media: Option<Anchor> = None;
+            // Where the region engine reads each picture and code of a figure or code region:
+            // before the block of the page written after it, and the blocks of the regions
+            // read beside it (see `layout::MediaAt`).
+            let base = blocks.len();
+            let engine_spots: HashMap<layoutregions::PrimId, (usize, std::ops::Range<usize>)> =
+                laid.media_at
+                    .iter()
+                    .map(|m| {
+                        let at = |b: usize| base + b.min(laid_blocks);
+                        (m.prim, (at(m.at), at(m.near.start)..at(m.near.end)))
+                    })
+                    .collect();
             blocks.extend(laid.blocks);
             blocks.extend(orphans);
-            // Where each picture goes among the blocks: after the block of its run when the run
-            // stands above the picture's top, else before it; at the end without one.
+            // The primitive of each picture listed, by its place in `near`.
+            let prims: Vec<Option<layoutregions::PrimId>> = match &seen {
+                Some(render::Seen::Small(list, ..)) => list.iter().map(|p| Some(p.prim)).collect(),
+                _ => Vec::new(),
+            };
+            // The width each picture takes in the frame of the runs, by its place in `near`.
+            let widths: Vec<(f32, f32)> = match &seen {
+                Some(render::Seen::Small(list, ..)) => list
+                    .iter()
+                    .map(|p| (p.framed[0].min(p.framed[2]), p.framed[0].max(p.framed[2])))
+                    .collect(),
+                _ => Vec::new(),
+            };
+            // And its bottom and top.
+            let heights: Vec<(f32, f32)> = match &seen {
+                Some(render::Seen::Small(list, ..)) => list
+                    .iter()
+                    .map(|p| (p.framed[1].min(p.framed[3]), p.framed[1].max(p.framed[3])))
+                    .collect(),
+                _ => Vec::new(),
+            };
+            let engine_spot = |k: usize| {
+                prims
+                    .get(k)
+                    .copied()
+                    .flatten()
+                    .and_then(|p| engine_spots.get(&p))
+            };
+            // Where a picture goes by its run: after the block of the run nearest to its top
+            // when the run stands above the top, else before it; at the end without one. A
+            // picture of a figure or code region stands where the engine reads it, or at its
+            // run among the blocks of the regions read beside it unless text of its width
+            // stands over it and under it, or by its run when that run stands over or under it
+            // in its column (within its width): that run is its neighbour in the column's
+            // reading, wherever the engine's place is.
             let anchored = if near.iter().any(Option::is_some) {
                 render::anchor_index(&blocks)
             } else {
@@ -1032,13 +1093,45 @@ fn lay_out(
             };
             let spots: Vec<usize> = near
                 .iter()
-                .map(|found| {
-                    let Some((at, top, probe)) = found else {
-                        return blocks.len();
-                    };
-                    let anchor = laid.probed.get(*probe).and_then(Option::as_ref);
-                    let after = at.1 > top.1;
-                    render::position(&anchored, blocks.len(), anchor, after)
+                .enumerate()
+                .map(|(k, found)| {
+                    let by_run = found.map(|(at, (half, top), probe)| {
+                        let anchor = laid.probed.get(probe).and_then(Option::as_ref);
+                        let after = at.1 > top;
+                        let place = render::position(&anchored, blocks.len(), anchor, after);
+                        // The run stands over or under the picture, in its column: it overlaps
+                        // the picture's width by half the narrower of the two (a run beside the
+                        // picture, a label at its height or one that only touches its edge,
+                        // is no such neighbour).
+                        let column = widths.get(k).is_some_and(|w| {
+                            let over = (at.0 + half).min(w.1) - (at.0 - half).max(w.0);
+                            over > 0.0 && over >= 0.5 * (2.0 * half).min(w.1 - w.0)
+                        });
+                        (place, column && anchor.is_some())
+                    });
+                    // Text in the picture's width over it and under it, at any distance (a
+                    // page head line over it and a page number under it count too): then the
+                    // engine's place stands unless the run found is of its width (a run beside
+                    // it reads in another column). Where one region makes several blocks, this
+                    // looks past the neighbour blocks; the engine's place for a picture beside
+                    // a label is after the label's region anyway.
+                    let column_text = widths.get(k).zip(heights.get(k)).is_some_and(|(w, h)| {
+                        let from = run_mids.partition_point(|r| r.0 < w.0);
+                        let to = run_mids.partition_point(|r| r.0 <= w.1);
+                        run_spans
+                            .range(from, to)
+                            .is_some_and(|(low, high)| high > h.1 && low < h.0)
+                    });
+                    match (engine_spot(k), by_run) {
+                        (Some(_), Some((p, true))) => p,
+                        (Some((_, near)), Some((p, _)))
+                            if !column_text && near.start < p && p <= near.end =>
+                        {
+                            p
+                        }
+                        (Some((at, _)), _) => *at,
+                        (None, p) => p.map_or(blocks.len(), |p| p.0),
+                    }
                 })
                 .collect();
             drop(anchored);
@@ -1327,8 +1420,9 @@ type LaidOut = (
     Vec<(usize, render::Places)>,
 );
 
-/// Where a picture is placed: the middle of the run found nearest to its top, its top, and
-/// the index of the point the layout probes for the run's block.
+/// Where a picture is placed: the middle of the run found nearest to its top; that run's half
+/// width and the height of the picture's top; and the index of the point the layout probes for
+/// the run's block.
 type Near = ((f32, f32), (f32, f32), usize);
 
 /// The page text for Figure alt texts no picture took as its caption, at their places:
@@ -2092,6 +2186,60 @@ impl Out {
     }
 }
 
+/// The lowest and the highest baseline of each range of runs sorted by their middle across:
+/// a segment tree (two entries for each run, one lookup of a few steps for each picture), so
+/// that whether text of a picture's width stands over it and under it is not a walk over the
+/// runs in its width.
+struct Spans {
+    /// The runs `n..2n` are the leaves; entry `i` below `n` joins its two children `2i` and
+    /// `2i + 1`. Entry 0 is unused.
+    tree: Vec<(f32, f32)>,
+}
+
+impl Spans {
+    fn new(runs: &[(f32, f32)]) -> Spans {
+        let n = runs.len();
+        let mut tree = vec![(0.0, 0.0); 2 * n];
+        for (i, r) in runs.iter().enumerate() {
+            tree[n + i] = (r.1, r.1);
+        }
+        for i in (1..n).rev() {
+            tree[i] = join(tree[2 * i], tree[2 * i + 1]);
+        }
+        Spans { tree }
+    }
+
+    /// The lowest and the highest baseline of the runs `from..to`; none for an empty range or
+    /// one past the runs.
+    fn range(&self, from: usize, to: usize) -> Option<(f32, f32)> {
+        let n = self.tree.len() / 2;
+        if to <= from || to > n {
+            return None;
+        }
+        let (mut lo, mut hi) = (from + n, to + n);
+        let mut out: Option<(f32, f32)> = None;
+        let mut take = |e: (f32, f32)| out = Some(out.map_or(e, |o| join(o, e)));
+        while lo < hi {
+            if lo & 1 == 1 {
+                take(self.tree[lo]);
+                lo += 1;
+            }
+            if hi & 1 == 1 {
+                hi -= 1;
+                take(self.tree[hi]);
+            }
+            lo /= 2;
+            hi /= 2;
+        }
+        out
+    }
+}
+
+/// The lowest and the highest of two ranges of baselines.
+fn join(a: (f32, f32), b: (f32, f32)) -> (f32, f32) {
+    (a.0.min(b.0), a.1.max(b.1))
+}
+
 /// The host of a figure or a code region: its media block (`media`, the place of its anchor)
 /// when it has one; else the block the layout gave it (`host`, the block that holds most of its
 /// text) when it holds text with ink (`inked`); else the page (`u32::MAX`): it wrote nothing of
@@ -2106,6 +2254,29 @@ fn figure_host(media: Option<u32>, inked: bool, host: u32) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    /// Task 22 fix rounds 4 and 5: the segment tree gives the lowest and
+    /// highest baseline of every range of runs, as a walk over the range does.
+    #[test]
+    fn spans_give_the_range_of_baselines() {
+        for n in [0usize, 1, 2, 3, 7, 8, 9, 33, 64, 100] {
+            let runs: Vec<(f32, f32)> = (0..n)
+                .map(|i| (i as f32, ((i * 37 + 11) % 23) as f32))
+                .collect();
+            let spans = super::Spans::new(&runs);
+            for from in 0..=n {
+                for to in 0..=n {
+                    let walked = runs[from.min(to)..to]
+                        .iter()
+                        .map(|r| r.1)
+                        .fold(None, |m, y| {
+                            Some(m.map_or((y, y), |(a, b): (f32, f32)| (a.min(y), b.max(y))))
+                        });
+                    assert_eq!(spans.range(from, to), walked, "{n}: {from}..{to}");
+                }
+            }
+        }
+    }
+
     /// Fix round 2 (G2): a figure or a code region stands at its media block; without one it
     /// keeps the block of its text when it has text with ink, and stands at the page when not.
     #[test]

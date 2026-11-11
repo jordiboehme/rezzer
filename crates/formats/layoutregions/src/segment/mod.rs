@@ -1314,7 +1314,7 @@ pub fn bounds_of(page: &PageIn, prims: &[PrimId]) -> Option<Bounds> {
         .reduce(union)
 }
 
-fn prim_bounds(page: &PageIn, p: PrimId) -> Option<Bounds> {
+pub(crate) fn prim_bounds(page: &PageIn, p: PrimId) -> Option<Bounds> {
     Some(match p {
         PrimId::Text(i) => text_bounds(page.texts.get(i as usize)?),
         PrimId::Rule(i) => {

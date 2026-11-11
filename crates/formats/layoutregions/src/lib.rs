@@ -61,7 +61,9 @@ pub use input::{
     BoxIn, CodeIn, FontKind, GapIn, GivenRegion, PageIn, PictureIn, PrimId, RuleIn, Shift, TextRun,
 };
 pub use limits::Limits;
-pub use order::order;
+#[doc(hidden)]
+pub use order::with_place_work;
+pub use order::{order, order_by_source};
 pub use region::{
     Alternative, Bounds, Candidate, Certainty, Issue, IssueKind, Kind, PageRegions, Region,
     RegionId, Score, Signal,

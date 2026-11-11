@@ -4558,3 +4558,362 @@ fn codes_read_along_a_slanted_line_are_checked_along_it() {
         );
     }
 }
+
+/// Task 22: a picture in the left column between two paragraphs goes between them, where the
+/// region engine reads its figure, even when the run nearest to its top stands in the right
+/// column (the place found by that run would put it after the right column's text).
+#[test]
+fn pictures_are_placed_by_the_engine() {
+    let mut content = String::new();
+    let mut line = |x: u32, y: u32, text: &str| {
+        content += &format!("BT /F1 10 Tf {x} {y} Td ({text}) Tj ET\n");
+    };
+    // The left column: a paragraph, the picture (from 520 to 600), a paragraph.
+    line(72, 700, "Muster GmbH writes the first left");
+    line(72, 688, "paragraph over three lines of plain");
+    line(72, 676, "text above the picture.");
+    line(72, 480, "The second left paragraph stands");
+    line(72, 468, "under the picture in the same");
+    line(72, 456, "column as the first one.");
+    // The right column: one paragraph from the top down past the picture's top.
+    let right = [
+        "Erika Mustermann writes the right",
+        "column as one long paragraph that",
+        "goes on from the top of the page",
+        "down past the top of the picture",
+        "on the left, line after line, so",
+        "that one of its lines stands at",
+        "the height of the picture's top",
+        "and is the nearest run to it, as",
+        "on a page set in two columns.",
+    ];
+    for (k, t) in right.iter().enumerate() {
+        line(320, 700 - 12 * k as u32, t);
+    }
+    content += "q 85 0 0 80 72 520 cm /Im1 Do Q\n";
+    let out = read(&image_page(595, 842, &content, 21, 21, &[0u8; 441]));
+    let shown = lines(page(&out, 1));
+    let at = |t: &str| {
+        shown
+            .iter()
+            .position(|l| l.starts_with(t))
+            .unwrap_or_else(|| panic!("no {t} in {shown:?}"))
+    };
+    let media = at("[media page-1-pic-1]");
+    assert!(
+        at("Muster GmbH") < media && media < at("The second left"),
+        "{shown:?}"
+    );
+    assert!(at("The second left") < at("Erika"), "{shown:?}");
+}
+
+/// A page of lines (x, baseline, text) at 10 points and one picture drawn at `pic` (x, y,
+/// width, height), as content.
+fn lines_and_picture(lines: &[(u32, u32, &str)], pic: (u32, u32, u32, u32)) -> String {
+    let mut content = String::new();
+    for (x, y, text) in lines {
+        content += &format!("BT /F1 10 Tf {x} {y} Td ({text}) Tj ET\n");
+    }
+    let (x, y, w, h) = pic;
+    content += &format!("q {w} 0 0 {h} {x} {y} cm /Im1 Do Q\n");
+    content
+}
+
+/// The paragraphs and media blocks of page 1, each as its first 16 characters.
+fn shown_order(content: &str) -> Vec<String> {
+    let out = read(&image_page(595, 842, content, 21, 21, &[0u8; 441]));
+    lines(page(&out, 1))
+        .into_iter()
+        .filter(|l| l != "Page 1")
+        .map(|l| l.chars().take(16).collect())
+        .collect()
+}
+
+/// Nine lines of one paragraph, each its own text.
+const LONG_PARAGRAPH: [&str; 9] = [
+    "Erika Mustermann writes the right",
+    "column as one long paragraph that",
+    "goes on from the top of the page",
+    "down past the top of the picture",
+    "on the left, line after line, so",
+    "that one of its lines stands at",
+    "the height of the picture's top",
+    "and is the nearest run to it, as",
+    "on a page set in two columns.",
+];
+
+/// [`LONG_PARAGRAPH`] at `x` from the baseline `top` down, 12 points a line.
+fn long_paragraph(x: u32, top: u32) -> Vec<(u32, u32, &'static str)> {
+    LONG_PARAGRAPH
+        .iter()
+        .enumerate()
+        .map(|(k, t)| (x, top - 12 * k as u32, *t))
+        .collect()
+}
+
+/// Task 22 (fix round 1): the reading order of a page is set in one place. A page in two
+/// columns as the untagged text pass reads it (left column, then right): the text keeps that
+/// order, and a picture in the left column between two paragraphs stands between them,
+/// although the run nearest to its top is in the right column (that run's place, which the
+/// reader took before this task, puts it after the right column). The whole page in order.
+#[test]
+fn order_set_in_one_place() {
+    let mut text = vec![
+        (72, 700, "Muster GmbH writes the first left"),
+        (72, 688, "paragraph over three lines of plain"),
+        (72, 676, "text above the picture."),
+        (72, 480, "The second left paragraph stands"),
+        (72, 468, "under the picture in the same"),
+        (72, 456, "column as the first one."),
+    ];
+    text.extend(long_paragraph(320, 700));
+    let got = shown_order(&lines_and_picture(&text, (72, 520, 85, 80)));
+    assert_eq!(
+        got,
+        [
+            "Muster GmbH writ",
+            "[media page-1-pi",
+            "The second left ",
+            "Erika Mustermann",
+        ],
+        "{got:?}"
+    );
+}
+
+/// Task 22 (fix round 1, the mirror the review asked for): a picture in the right column whose
+/// nearest run stands over it in its own column stays in the right column, between its
+/// paragraphs, though the left column has a paragraph that starts below the picture's middle
+/// (by height alone the picture would go before that paragraph, into the left column).
+#[test]
+fn a_right_column_picture_stays_in_its_column() {
+    let mut text = vec![
+        (72, 700, "Muster GmbH writes the first left"),
+        (72, 688, "paragraph over three lines of plain"),
+        (72, 676, "text on the left."),
+        (72, 540, "The second left paragraph starts"),
+        (72, 528, "beside the picture on the right"),
+        (72, 516, "and ends on its third line."),
+    ];
+    text.extend(long_paragraph(320, 700));
+    text.extend([
+        (320, 440, "The second right paragraph stands"),
+        (320, 428, "under the picture in its column."),
+    ]);
+    let got = shown_order(&lines_and_picture(&text, (330, 520, 85, 70)));
+    assert_eq!(
+        got,
+        [
+            "Muster GmbH writ",
+            "The second left ",
+            "Erika Mustermann",
+            "[media page-1-pi",
+            "The second right",
+        ],
+        "{got:?}"
+    );
+}
+
+/// Task 22 fix round 2: a picture at the top of the right column (the left column's text over
+/// it, nothing of its column) stands before the right column's text; the run nearest to its
+/// top is a left-column line at its height, which places it in the left column.
+#[test]
+fn a_picture_at_the_top_of_the_right_column_stays_there() {
+    let mut text = vec![
+        (72, 700, "Muster GmbH writes the first left"),
+        (72, 688, "paragraph over three lines of plain"),
+        (72, 676, "text on the left."),
+        (72, 560, "The second left paragraph stands"),
+        (72, 548, "under the first one in the same"),
+        (72, 536, "column on the left."),
+    ];
+    text.extend(long_paragraph(320, 590));
+    let got = shown_order(&lines_and_picture(&text, (330, 610, 85, 80)));
+    assert_eq!(
+        got,
+        [
+            "Muster GmbH writ",
+            "The second left ",
+            "[media page-1-pi",
+            "Erika Mustermann",
+        ],
+        "{got:?}"
+    );
+}
+
+/// Task 22 fix round 2: a picture at the foot of the right column (its column's text over it,
+/// nothing of its column under it) stands after the right column's text, though a left
+/// paragraph starts below its middle; the run nearest to its top is a left-column line.
+#[test]
+fn a_picture_at_the_foot_of_the_right_column_stays_there() {
+    let mut text = vec![
+        (72, 700, "Muster GmbH writes the first left"),
+        (72, 688, "paragraph over three lines of plain"),
+        (72, 676, "text on the left."),
+        (72, 560, "The second left paragraph stands"),
+        (72, 548, "under the first one in the same"),
+        (72, 536, "column on the left."),
+        (72, 440, "The third left paragraph starts"),
+        (72, 428, "below the middle of the picture"),
+        (72, 416, "on the right."),
+    ];
+    text.extend(long_paragraph(320, 700));
+    let got = shown_order(&lines_and_picture(&text, (330, 470, 85, 80)));
+    assert_eq!(
+        got,
+        [
+            "Muster GmbH writ",
+            "The second left ",
+            "The third left p",
+            "Erika Mustermann",
+            "[media page-1-pi",
+        ],
+        "{got:?}"
+    );
+}
+
+/// Task 22 fix round 2: a short picture (an icon) at the top of the right column, the run
+/// nearest to its top the first line under it in its own column: it stands before that line's
+/// paragraph, in its column.
+#[test]
+fn a_short_picture_over_its_column_stands_before_it() {
+    let mut text = vec![
+        (72, 700, "Muster GmbH writes the first left"),
+        (72, 688, "paragraph over three lines of plain"),
+        (72, 676, "text on the left."),
+        (72, 560, "The second left paragraph stands"),
+        (72, 548, "under the first one in the same"),
+        (72, 536, "column on the left."),
+    ];
+    text.extend(long_paragraph(320, 640));
+    let got = shown_order(&lines_and_picture(&text, (330, 655, 85, 30)));
+    assert_eq!(
+        got,
+        [
+            "Muster GmbH writ",
+            "The second left ",
+            "[media page-1-pi",
+            "Erika Mustermann",
+        ],
+        "{got:?}"
+    );
+}
+
+/// The lines of a two-column page head: a title, an address and a table of pairs on the left
+/// under a logo's place, a short paragraph under them; an address of five lines, a table of
+/// five pairs and two paragraphs on the right.
+fn page_head_lines() -> Vec<(u32, u32, &'static str)> {
+    vec![
+        (18, 790, "Muster GmbH Kopfzeile"),
+        (18, 700, "Muster GmbH Musterweg 1"),
+        (18, 688, "12345 Musterstadt"),
+        (18, 676, "Zeile drei links"),
+        (18, 640, "Feld A   Wert A"),
+        (18, 628, "Feld B   Wert B"),
+        (18, 616, "Feld C   Wert C"),
+        (18, 560, "A short paragraph on the left."),
+        (18, 548, "It ends here."),
+        (300, 770, "Erika Mustermann"),
+        (300, 758, "Beispielweg 2"),
+        (300, 746, "Zeile drei rechts"),
+        (300, 734, "54321 Beispielstadt"),
+        (300, 722, "Zeile fuenf rechts"),
+        (300, 690, "Feld D   Wert D"),
+        (300, 678, "Feld E   Wert E"),
+        (300, 666, "Feld F   Wert F"),
+        (300, 654, "Feld G   Wert G"),
+        (300, 642, "Feld H   Wert H"),
+        (300, 600, "The first right paragraph says what"),
+        (300, 588, "the page is for, in two lines."),
+        (300, 540, "The second right paragraph thanks"),
+        (300, 528, "the reader for reading it."),
+    ]
+}
+
+/// Task 22 fix round 3: a logo at the top left of a page head, under the title and over the
+/// left address, stands at the head, before the left address and the right address: not
+/// after the whole left column. On this page the segmenter makes one region of all its text
+/// (title, both addresses, the pairs and the paragraphs, across the gutter). That region's
+/// content in the logo's width stands over and under the logo, so it holds the logo, and the
+/// logo stands before it: first on the page, before the title. The shape of the trace (a
+/// region joined across the gutter that holds the logo by its box only) is pinned in the
+/// engine test `a_region_across_the_gutter_holds_no_picture_by_its_box`.
+#[test]
+fn a_page_head_logo_stays_at_the_head() {
+    let got = shown_order(&lines_and_picture(&page_head_lines(), (18, 720, 104, 54)));
+    let at = |t: &str| {
+        got.iter()
+            .position(|l| l.starts_with(t))
+            .unwrap_or_else(|| panic!("no {t} in {got:?}"))
+    };
+    let logo = at("[media page-1-pi");
+    assert!(logo < at("Muster GmbH Must"), "{got:?}");
+    assert!(logo < at("Erika Mustermann"), "{got:?}");
+}
+
+/// Task 22 fix round 4: a picture set flush with the top of the right column (its top a few
+/// points above the top of the left column's first line, which starts at its ascender) stands
+/// before the right column's text, with an 18 point title over the columns and without one,
+/// whether its top is a little under or a little over the left text's top.
+#[test]
+fn a_picture_flush_with_the_top_of_the_right_column_stays_there() {
+    let text = vec![
+        (72, 700, "Muster GmbH writes the first left"),
+        (72, 688, "paragraph over three lines of plain"),
+        (72, 676, "text on the left."),
+        (72, 560, "The second left paragraph stands"),
+        (72, 548, "under the first one in the same"),
+        (72, 536, "column on the left."),
+    ];
+    let mut text = text;
+    text.extend(long_paragraph(320, 590));
+    let title = "BT /F1 18 Tf 72 750 Td (A title across both columns of the page) Tj ET\n";
+    for with_title in [true, false] {
+        for top in [695, 705, 712] {
+            let page = lines_and_picture(&text, (330, top - 80, 85, 80));
+            let page = if with_title {
+                title.to_string() + &page
+            } else {
+                page
+            };
+            let got = shown_order(&page);
+            let mut want = vec![
+                "Muster GmbH writ",
+                "The second left ",
+                "[media page-1-pi",
+                "Erika Mustermann",
+            ];
+            if with_title {
+                want.insert(0, "A title across b");
+            }
+            assert_eq!(got, want, "title {with_title}, picture top {top}: {got:?}");
+        }
+    }
+}
+
+/// Task 22 fix round 3: under a title across both columns, a picture at the top of the right
+/// column stands before the right column's text, not in the left column at its height.
+#[test]
+fn a_picture_under_a_title_at_the_top_of_the_right_column_stays_there() {
+    let mut text = vec![
+        (72, 700, "Muster GmbH writes the first left"),
+        (72, 688, "paragraph over three lines of plain"),
+        (72, 676, "text on the left."),
+        (72, 560, "The second left paragraph stands"),
+        (72, 548, "under the first one in the same"),
+        (72, 536, "column on the left."),
+    ];
+    text.extend(long_paragraph(320, 590));
+    let title = "BT /F1 18 Tf 72 750 Td (A title across both columns of the page) Tj ET\n";
+    let got = shown_order(&(title.to_string() + &lines_and_picture(&text, (330, 610, 85, 80))));
+    assert_eq!(
+        got,
+        [
+            "A title across b",
+            "Muster GmbH writ",
+            "The second left ",
+            "[media page-1-pi",
+            "Erika Mustermann",
+        ],
+        "{got:?}"
+    );
+}

@@ -524,6 +524,25 @@ pub(crate) struct Laid {
     /// The block of `blocks` each run of the page (by its id) was written in, `u32::MAX` for
     /// a run written in none.
     pub run_blocks: Vec<u32>,
+    /// The pictures and codes of the page's figure and code regions, each where its region
+    /// stands in the page's reading order (see [`MediaAt`]). A picture of no such region is
+    /// placed by the block of the run nearest to it.
+    pub media_at: Vec<MediaAt>,
+}
+
+/// Where a picture or code of a figure or code region goes among the blocks of its page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct MediaAt {
+    pub prim: layoutregions::PrimId,
+    /// The place in the page's blocks it stands before: after the blocks of the regions read
+    /// before its region.
+    pub at: usize,
+    /// The blocks of the region read just before its region and of the one read just after
+    /// it, from the first to past the last (`at` when there is none). The engine orders
+    /// regions, not the blocks inside one: where the picture stands beside a region of several
+    /// blocks, the block of the run nearest to it may say a place among them, after the first
+    /// of them and up to past the last.
+    pub near: Range<usize>,
 }
 
 /// The regions of a page that was not laid out.
@@ -726,6 +745,329 @@ impl Flow {
             at: self.at.clone(),
             ids: self.ids.clone(),
         }
+    }
+}
+
+impl Flow {
+    /// The flow with each run at its place in reading order (`places`), sorted by it; runs
+    /// at one place keep their order.
+    fn read_in(self, places: &Places) -> Flow {
+        let mut order: Vec<(usize, usize)> = self
+            .at
+            .iter()
+            .enumerate()
+            .map(|(k, &at)| (places.of(at), k))
+            .collect();
+        order.sort_by_key(|&(at, _)| at);
+        let mut runs: Vec<Option<(Run, Slot, u32)>> = self
+            .runs
+            .into_iter()
+            .zip(self.slots)
+            .zip(self.ids)
+            .map(|((r, s), id)| Some((r, s, id)))
+            .collect();
+        let mut out = Flow {
+            runs: Vec::with_capacity(order.len()),
+            slots: Vec::with_capacity(order.len()),
+            at: Vec::with_capacity(order.len()),
+            ids: Vec::with_capacity(order.len()),
+        };
+        for (at, k) in order {
+            if let Some((r, s, id)) = runs[k].take() {
+                out.runs.push(r);
+                out.slots.push(s);
+                out.at.push(at);
+                out.ids.push(id);
+            }
+        }
+        out
+    }
+}
+
+/// The reading order of a page, set in one place: the parts of the page's regions in the
+/// engine's source order ([`layoutregions::order_by_source`]). A part is a stretch of the runs
+/// of one region that the page's flow (the order the text pass gave its runs) reads without a
+/// run with ink of another region between them: a region whose text stands above and below a
+/// table, which the flow reads between, is two parts, and the table stands between them; so
+/// is a region over two drawn boxes or cells of a row of fields. The flow is the
+/// source order; the engine places what the flow has no place for (a figure or code region,
+/// which stands by its height among the parts). Text set across the page's direction reads
+/// last, as the text pass reads it. A run's place is the rank of the part of the run that
+/// began the flow at its place, then that place. Every part of the page (text, tables, text
+/// kept as laid out, the running header, pictures) stands at such a place.
+struct Places {
+    /// The rank of the part of each run of the page, by its id.
+    rank: Vec<u32>,
+    /// The rank of the first part of each decision's region.
+    of_decision: Vec<u32>,
+    /// The part of each rank (an index into the parts, see [`Places::new`]), and the
+    /// decision of each part.
+    by_rank: Vec<usize>,
+    decision_of: Vec<usize>,
+    /// The part of each run, by its id.
+    part_of: Vec<usize>,
+    /// The places of the page's flow: a place in reading order is `rank * width + place`.
+    width: usize,
+}
+
+impl Places {
+    /// The page's places from the engine's source order of the parts of its decisions (`box_of`:
+    /// the drawn box or cell of a row of fields of each run that stands in one).
+    fn new(
+        page: &layoutregions::PageIn,
+        decided: &decide::Decided,
+        box_of: &HashMap<u32, u32>,
+    ) -> Places {
+        use layoutregions::PrimId;
+        let n = decided.decisions.len();
+        let runs = decided.of_run.len();
+        // The parts: the runs of the flow (by id, which is their place in the flow as it
+        // began) from one run with ink to the next run with ink of another decision, drawn box
+        // or cell, or that reads across the page's direction where the other reads along it. A
+        // run without ink or of no decision goes with the part before it (the first ones with
+        // the first part).
+        let inked = |id: usize| {
+            page.texts
+                .get(id)
+                .is_some_and(|t| t.text.chars().any(|c| !c.is_whitespace()))
+        };
+        let mut part_of: Vec<usize> = vec![0; runs];
+        let mut decision_of: Vec<usize> = Vec::new();
+        // The parts of text set across the page's direction of reading.
+        let mut across: Vec<usize> = Vec::new();
+        // The decision, box and direction of the last run with ink.
+        let mut last: Option<(u32, Option<u32>, bool)> = None;
+        let mut current: Option<usize> = None;
+        for (id, part) in part_of.iter_mut().enumerate() {
+            let d = decided.of_run[id];
+            if d != decide::NONE && inked(id) {
+                // The drawn box or the cell of a row of fields the run stands in: a part never
+                // goes on from one into another.
+                let b = box_of.get(&u32::try_from(id).unwrap_or(u32::MAX)).copied();
+                let off = page.texts[id].off_axis;
+                let key = (d, b, off);
+                if last != Some(key) {
+                    decision_of.push(d as usize);
+                    current = Some(decision_of.len() - 1);
+                    if off {
+                        across.push(decision_of.len() - 1);
+                    }
+                }
+                last = Some(key);
+            }
+            *part = current.unwrap_or(0);
+        }
+        // The parts with runs, in the order the flow first reads them: the source order, which
+        // is the page's reading order.
+        let source: Vec<layoutregions::RegionId> = (0..decision_of.len())
+            .map(|p| layoutregions::RegionId(u32::try_from(p).unwrap_or(u32::MAX)))
+            .collect();
+        if decision_of.is_empty() && runs > 0 {
+            // No run with ink of a decision: the runs go with the first decision that holds
+            // one of them, or stand alone.
+            let d = decided.of_run.iter().find(|&&d| d != decide::NONE);
+            decision_of.push(d.map_or(n, |&d| d as usize));
+        }
+        // The parts of each decision; a decision without runs is one part.
+        let mut parts_of: Vec<Vec<usize>> = vec![Vec::new(); n];
+        for (p, &d) in decision_of.iter().enumerate() {
+            if let Some(list) = parts_of.get_mut(d) {
+                list.push(p);
+            }
+        }
+        for (d, list) in parts_of.iter_mut().enumerate() {
+            if list.is_empty() {
+                decision_of.push(d);
+                list.push(decision_of.len() - 1);
+            }
+        }
+        // The text of each part, by part.
+        let mut texts: Vec<Vec<PrimId>> = vec![Vec::new(); decision_of.len()];
+        for (id, &p) in part_of.iter().enumerate() {
+            texts[p].push(PrimId::Text(u32::try_from(id).unwrap_or(u32::MAX)));
+        }
+        let nan = layoutregions::Bounds {
+            x0: f32::NAN,
+            y0: f32::NAN,
+            x1: f32::NAN,
+            y1: f32::NAN,
+        };
+        // The order reads the parts by their boxes, the source order, and the runs of each
+        // part (where a picture stands in a column, see `layoutregions::order_by_source`): the
+        // run lists move into the regions, nothing is copied.
+        let regions: Vec<layoutregions::Region> = decision_of
+            .iter()
+            .enumerate()
+            .map(|(p, &d)| {
+                let decision = decided.decisions.get(d);
+                // A decision of one part stands where its region stands; a part of several,
+                // where its runs stand.
+                let whole = parts_of.get(d).is_some_and(|l| l.len() == 1);
+                let bounds = if whole {
+                    decided.bounds(d)
+                } else {
+                    layoutregions::segment::bounds_of(page, &texts[p])
+                };
+                layoutregions::Region {
+                    id: layoutregions::RegionId(u32::try_from(p).unwrap_or(u32::MAX)),
+                    page: page.page,
+                    // A band the engine takes for the running header may hold body text beside
+                    // the page's title: it reads where it stands, as the body does.
+                    kind: match decision.map_or(Kind::Spatial, |d| d.kind) {
+                        Kind::HeaderBand => Kind::Paragraph,
+                        k => k,
+                    },
+                    bounds: bounds.unwrap_or(nan),
+                    prims: std::mem::take(&mut texts[p]),
+                    certainty: decision.map_or(layoutregions::Certainty::Unsure, |d| d.certainty),
+                    score: decision.map_or(layoutregions::Score(0), |d| d.score),
+                    signals: Vec::new(),
+                    alternatives: Vec::new(),
+                    parent: None,
+                    unsure: Vec::new(),
+                    host: 0,
+                }
+            })
+            .collect();
+        // Text set across the page's direction of reading (a note up the margin) reads last, as
+        // the text pass reads it after the page's main text: the order takes the other parts.
+        let mut order = if across.is_empty() {
+            layoutregions::order_by_source(page, &regions, &source)
+        } else {
+            let along: Vec<layoutregions::Region> = regions
+                .iter()
+                .enumerate()
+                .filter(|(p, _)| across.binary_search(p).is_err())
+                .map(|(_, r)| r.clone())
+                .collect();
+            layoutregions::order_by_source(page, &along, &source)
+        };
+        order.extend(
+            across
+                .iter()
+                .map(|&p| layoutregions::RegionId(u32::try_from(p).unwrap_or(u32::MAX))),
+        );
+        let mut rank_of_part = vec![0u32; decision_of.len()];
+        for (rank, id) in order.iter().enumerate() {
+            if let Some(r) = rank_of_part.get_mut(id.0 as usize) {
+                *r = u32::try_from(rank).unwrap_or(u32::MAX);
+            }
+        }
+        let of_decision = parts_of
+            .iter()
+            .map(|l| l.iter().map(|&p| rank_of_part[p]).min().unwrap_or(0))
+            .collect();
+        Places {
+            width: runs + 1,
+            rank: part_of.iter().map(|&p| rank_of_part[p]).collect(),
+            of_decision,
+            by_rank: order.iter().map(|id| id.0 as usize).collect(),
+            decision_of,
+            part_of,
+        }
+    }
+
+    /// The place in reading order of place `at` of the page's flow: in the part of the run
+    /// that began the flow there (a run's place in the flow as it began is its id). A run a
+    /// reader moves keeps its place (see [`Flow::at`]), so it reads where that reader put it;
+    /// a table stands at the place its reader gave it.
+    fn of(&self, at: usize) -> usize {
+        let place = at.min(self.rank.len().saturating_sub(1));
+        self.at_rank(self.rank.get(place).copied().unwrap_or(0), at)
+    }
+
+    /// The place in reading order of `at` (a place of the page's flow) in the part of rank
+    /// `rank`.
+    fn at_rank(&self, rank: u32, at: usize) -> usize {
+        (rank as usize)
+            .saturating_mul(self.width)
+            .saturating_add(at.min(self.width - 1))
+    }
+
+    /// The first place in reading order of decision `d`'s region.
+    fn start_of(&self, d: usize) -> usize {
+        self.at_rank(self.of_decision.get(d).copied().unwrap_or(0), 0)
+    }
+
+    /// Where each picture or code of `media` (with the block it stands before and its
+    /// decision) goes, with the blocks of the parts read just before and just after the first
+    /// part of its region that hold a written run (`run_blocks`, by run id).
+    fn media_at(
+        &self,
+        media: Vec<(layoutregions::PrimId, usize, usize)>,
+        run_blocks: &[u32],
+        body_end: usize,
+    ) -> Vec<MediaAt> {
+        if media.is_empty() {
+            return Vec::new();
+        }
+        // The written runs by their place in reading order (a run's place in the flow as it
+        // began is its id), and from each on the first block any of them was written in.
+        let mut keyed: Vec<(usize, usize)> = run_blocks
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| **b != u32::MAX)
+            .map(|(id, &b)| (self.of(id), b as usize))
+            .collect();
+        keyed.sort_unstable();
+        // A page that wrote no run gives no block to stand by: its pictures keep the place of
+        // their nearest run, at the end of the page without one, as before.
+        if keyed.is_empty() {
+            return Vec::new();
+        }
+        let mut first_from = vec![body_end; keyed.len() + 1];
+        for k in (0..keyed.len()).rev() {
+            first_from[k] = first_from[k + 1].min(keyed[k].1);
+        }
+        // The block a place stands before: the first block written from it on.
+        let block_at = |at: usize| first_from[keyed.partition_point(|k| k.0 < at)];
+        // The first and past the last block of each part's written runs.
+        let mut blocks: Vec<Option<(usize, usize)>> = vec![None; self.decision_of.len()];
+        for (&p, &b) in self.part_of.iter().zip(run_blocks) {
+            if b == u32::MAX {
+                continue;
+            }
+            if let Some(slot) = blocks.get_mut(p) {
+                let b = b as usize;
+                *slot = Some(slot.map_or((b, b + 1), |(lo, hi)| (lo.min(b), hi.max(b + 1))));
+            }
+        }
+        let written: Vec<Option<(usize, usize)>> = self
+            .by_rank
+            .iter()
+            .map(|&p| blocks.get(p).copied().flatten())
+            .collect();
+        // For each rank, the blocks of the nearest rank before it and after it that has some.
+        let mut before: Vec<Option<(usize, usize)>> = vec![None; written.len()];
+        let mut after: Vec<Option<(usize, usize)>> = vec![None; written.len()];
+        for r in 1..written.len() {
+            before[r] = written[r - 1].or(before[r - 1]);
+        }
+        for r in (0..written.len().saturating_sub(1)).rev() {
+            after[r] = written[r + 1].or(after[r + 1]);
+        }
+        media
+            .into_iter()
+            .map(|(prim, at, d)| {
+                let at = block_at(at);
+                let rank = self.of_decision.get(d).copied().unwrap_or(0) as usize;
+                let before = before
+                    .get(rank)
+                    .copied()
+                    .flatten()
+                    .map_or(at, |b| b.0.min(at));
+                let after = after
+                    .get(rank)
+                    .copied()
+                    .flatten()
+                    .map_or(at, |b| b.1.max(at));
+                MediaAt {
+                    prim,
+                    at,
+                    near: before..after,
+                }
+            })
+            .collect()
     }
 }
 
@@ -1127,6 +1469,27 @@ fn page_blocks_until(
     if let Some(why) = legend.refused.take() {
         notes.push((why, LossReason::Uncertain, Severity::Info));
     }
+    // The page's reading order, set once: the engine's order of its regions (see
+    // [`Places`]). Every part found so far moves to its place in it; the parts found from
+    // here on take the places of their runs. (The legend is found by the places of the
+    // page's flow, before.)
+    let reading = Places::new(&engine_in, &decided, &box_of);
+    let flow = flow.read_in(&reading);
+    for p in &mut placed {
+        if let Placed::Table(t) = p {
+            t.at = reading.of(t.at);
+        }
+    }
+    for part in &mut pre_parts {
+        match part {
+            today::Part::Table(Some(t)) => t.at = reading.of(t.at),
+            today::Part::Title(Some(t)) => t.at = reading.of(t.at),
+            _ => {}
+        }
+    }
+    for u in &mut pre_unsure {
+        u.at = reading.of(u.at);
+    }
     // The link and footnote label of each run of the page that has one, by its id, for text
     // kept as laid out from the page's runs (`engine_in` holds their text and places only).
     let run_marks: HashMap<u32, (Option<Rc<UriTarget>>, Option<String>)> = flow
@@ -1316,7 +1679,7 @@ fn page_blocks_until(
         })
     };
     let pre_left = {
-        let mut left = today_left;
+        let mut left = today_left.read_in(&reading);
         let ids = left.ids.clone();
         let cut: HashSet<u32> = placed
             .iter()
@@ -1564,8 +1927,32 @@ fn page_blocks_until(
             })
             .map(|(_, part)| Placed::Spatial(part)),
     );
-    // The parts in reading order; `placed_at` is where each placed part went, by the place it
-    // was found at.
+    // The pictures and codes of each figure or code region, where its region starts.
+    for k in 0..decided.decisions.len() {
+        if !matches!(decided.decisions[k].kind, Kind::Figure | Kind::Code) {
+            continue;
+        }
+        let prims: Vec<layoutregions::PrimId> = decided
+            .prims(k)
+            .iter()
+            .copied()
+            .filter(|p| {
+                matches!(
+                    p,
+                    layoutregions::PrimId::Picture(_) | layoutregions::PrimId::Code(_)
+                )
+            })
+            .collect();
+        if !prims.is_empty() {
+            placed.push(Placed::Media {
+                at: reading.start_of(k),
+                decision: k,
+                prims,
+            });
+        }
+    }
+    // The parts in reading order (a picture before the text of its own region, which starts at
+    // the same place).
     let mut sorted: Vec<Placed> = placed;
     sorted.sort_by(|a, b| {
         let (la, ta) = a.at();
@@ -1633,6 +2020,17 @@ fn page_blocks_until(
     let mut why_of: HashMap<u32, usize> = HashMap::new();
     for p in placed {
         let (at, _) = p.at();
+        // A picture's place is found once the page is written (see `Places::media_at`): it
+        // parts no text, so a paragraph or list beside a figure is not cut at it.
+        if let Placed::Media {
+            prims, decision, ..
+        } = &p
+        {
+            built
+                .media_at
+                .extend(prims.iter().map(|&m| (m, at, *decision)));
+            continue;
+        }
         let end = start + text_flow.at[start..].partition_point(|a| *a < at);
         lay(&text_flow, start..end, &mut built);
         start = end;
@@ -1652,7 +2050,7 @@ fn page_blocks_until(
                     .collect()
             }
             Placed::Spatial(s) => s.ids.clone(),
-            Placed::Unsure(_) | Placed::Header { .. } => Vec::new(),
+            Placed::Unsure(_) | Placed::Header { .. } | Placed::Media { .. } => Vec::new(),
         };
         match p {
             Placed::Header { line, .. } => {
@@ -1700,6 +2098,7 @@ fn page_blocks_until(
                     }
                 }
             }
+            Placed::Media { .. } => {}
             Placed::Unsure(u) => {
                 let what = u.text.unwrap_or_else(|| {
                     format!(
@@ -1789,6 +2188,7 @@ fn page_blocks_until(
         became.push((hosts::became(&built.blocks, first, earlier), ids));
     }
     lay(&text_flow, start..text_flow.runs.len(), &mut built);
+    let body_end = built.blocks.len();
     // Markers that end a word above refer to the footnotes too. Only the footnotes written
     // are said: a stop writes none.
     footnotes::link_words(&mut built.blocks, &legend);
@@ -1869,6 +2269,7 @@ fn page_blocks_until(
     // Each decision says what the page wrote of it, then stands at the block it became.
     let demoted = std::mem::take(&mut built.demoted);
     let run_blocks = hosts::run_blocks(&built, &became, engine_in.texts.len());
+    let media_at = reading.media_at(std::mem::take(&mut built.media_at), &run_blocks, body_end);
     let written: Vec<Option<&'static str>> = run_blocks
         .iter()
         .map(|&b| built.blocks.get(b as usize).map(crate::block_word))
@@ -1895,6 +2296,7 @@ fn page_blocks_until(
     let mut laid = built.laid(notes, regions);
     laid.earlier = earlier;
     laid.run_blocks = run_blocks;
+    laid.media_at = media_at;
     laid.engine_in = Some(engine_in);
     laid.probes_cut = probes_cut;
     laid.found_by = footnotes::note(page, footnotes_written, linked_written);
@@ -2308,6 +2710,13 @@ enum Placed {
         at: usize,
         top: f32,
     },
+    /// The pictures and codes of a figure or code region, at its place in reading order: they
+    /// stand before the first block written from that place on (see [`Laid::media_at`]).
+    Media {
+        at: usize,
+        decision: usize,
+        prims: Vec<layoutregions::PrimId>,
+    },
 }
 
 /// What the loss of a block kept as laid out adds for its style: its bold or italic text is
@@ -2346,6 +2755,7 @@ impl Placed {
             Placed::Title(t) => (t.at, t.top),
             Placed::Spatial(s) => (s.at, s.top),
             Placed::Header { at, top, .. } => (*at, *top),
+            Placed::Media { at, .. } => (*at, f32::MAX),
         }
     }
 }
@@ -2422,6 +2832,9 @@ struct Built {
     /// The ids of runs of a heading decision that the walk laid out as a paragraph for their
     /// geometry, with why (see [`untagged`]): their region is a paragraph.
     demoted: Vec<(u32, Demotion)>,
+    /// The pictures and codes of the page's figure and code regions, each with its place in
+    /// reading order and its decision.
+    media_at: Vec<(layoutregions::PrimId, usize, usize)>,
 }
 
 /// What a page's layout is building.
@@ -2510,6 +2923,7 @@ impl Built {
             engine_in: None,
             earlier: Vec::new(),
             run_blocks: Vec::new(),
+            media_at: Vec::new(),
         }
     }
 
@@ -4368,6 +4782,41 @@ mod tests {
             max_time: std::time::Duration::ZERO,
             ..rezzer_limits::Limits::default()
         });
+    }
+
+    /// Task 22, a guard: a note set up the margin (text across the page's direction) that a
+    /// flow holds between the lines of a paragraph reads after the body, and the paragraph
+    /// stays whole. The untagged text pass puts such runs after the page's main text already,
+    /// so on its flows this changes nothing (no measured page changes); it holds the order of
+    /// `Places` for a flow that does not.
+    #[test]
+    fn text_across_the_page_reads_after_the_body() {
+        let runs = vec![
+            run("The first line of a paragraph that goes on", 0, 700.0, 10.0),
+            Run {
+                x: 20.0,
+                w: 10.0,
+                off_axis: true,
+                ..run("Note up the margin", 1, 400.0, 10.0)
+            },
+            run("and ends on its second line here.", 2, 688.0, 10.0),
+        ];
+        let laid = laid_page(runs, &NOTHING_DRAWN);
+        let texts: Vec<String> = laid
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Paragraph { inlines, .. } => Some(rezzer_model::plain_text(inlines)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            texts,
+            [
+                "The first line of a paragraph that goes on and ends on its second line here.",
+                "Note up the margin"
+            ]
+        );
     }
 
     #[test]

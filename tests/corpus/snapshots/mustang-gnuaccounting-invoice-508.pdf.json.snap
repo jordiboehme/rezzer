@@ -27,12 +27,6 @@ source: crates/rezzer/tests/corpus.rs
           "type": "paragraph"
         },
         {
-          "alt": "logo or small picture, box 451, 724 to 522, 795",
-          "anchor": "p1:m1",
-          "asset": "page-1-pic-1",
-          "type": "media"
-        },
-        {
           "anchor": "p1:t1",
           "header_rows": 0,
           "rows": [
@@ -54,6 +48,12 @@ source: crates/rezzer/tests/corpus.rs
             ]
           ],
           "type": "table"
+        },
+        {
+          "alt": "logo or small picture, box 451, 724 to 522, 795",
+          "anchor": "p1:m1",
+          "asset": "page-1-pic-1",
+          "type": "media"
         },
         {
           "anchor": "p1:b1",

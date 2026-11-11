@@ -437,13 +437,31 @@ pub(crate) fn quote_runs(
 /// nearest by height, and among runs as near (within [`NEAR_WINDOW`] on each side) the
 /// nearest across. `None` when the page has no runs.
 pub(crate) fn nearest_runs(runs: &[Run], points: &[(f32, f32)]) -> Vec<Option<(f32, f32)>> {
+    nearest_run_spans(runs, points)
+        .into_iter()
+        .map(|n| n.map(|(at, _)| at))
+        .collect()
+}
+
+/// A run found for a point: its middle, and the width it takes (from its left edge to its end).
+pub(crate) type RunSpan = ((f32, f32), (f32, f32));
+
+/// [`nearest_runs`], with the width each run found takes.
+pub(crate) fn nearest_run_spans(runs: &[Run], points: &[(f32, f32)]) -> Vec<Option<RunSpan>> {
     if runs.is_empty() {
         return vec![None; points.len()];
     }
-    let mut mids: Vec<(f32, f32)> = runs
+    let mut mids: Vec<(f32, f32, f32)> = runs
         .iter()
-        .map(|r| (r.y + r.h / 4.0, r.x + r.w / 2.0))
-        .filter(|(y, x)| y.is_finite() && x.is_finite())
+        .map(|r| {
+            let w = if r.w.is_finite() {
+                r.w.max(0.0) / 2.0
+            } else {
+                0.0
+            };
+            (r.y + r.h / 4.0, r.x + r.w / 2.0, w)
+        })
+        .filter(|(y, x, _)| y.is_finite() && x.is_finite())
         .collect();
     if mids.is_empty() {
         return vec![None; points.len()];
@@ -462,7 +480,7 @@ pub(crate) fn nearest_runs(runs: &[Run], points: &[(f32, f32)]) -> Vec<Option<(f
                     let db = ((b.0 - py).abs(), (b.1 - px).abs());
                     da.0.total_cmp(&db.0).then(da.1.total_cmp(&db.1))
                 })
-                .map(|&(y, x)| (x, y))
+                .map(|&(y, x, w)| ((x, y), (x - w, x + w)))
         })
         .collect()
 }

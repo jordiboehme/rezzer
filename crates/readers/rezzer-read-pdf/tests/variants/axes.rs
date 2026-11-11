@@ -392,6 +392,9 @@ pub(crate) struct Want {
     pub paragraphs: Vec<String>,
     /// Texts the page's text holds in this order.
     pub order: Vec<String>,
+    /// For the page's media blocks in order: the texts the block stands after and before
+    /// (Task 22 fix round 4), each found as the first block that holds it.
+    pub media_between: Vec<(String, String)>,
     /// Texts no block may hold together: each pair stands in different blocks.
     pub apart: Vec<(String, String)>,
     /// Texts no line of the read may hold together (part 2e-1 fix round 1): each pair stands

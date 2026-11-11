@@ -669,4 +669,11 @@ pub(crate) const KNOWN: &[Known] = &[
         cause: Cause::Spatial,
         why: "Task 19 (cosmetic, ruling on 19a-4): at this scale, size or font the engine reads a line of the shape as a paragraph where at scale 1 it keeps it as laid out with its block, or the other way round; every text stands once and in order, no value, pair or cell changes. Task 36 makes the typing hold across scales",
     },
+    Known {
+        shape: "a picture at the top of the right column under a title in the body size",
+        variants: &["base"],
+        broken: &[Inv::MediaPlace],
+        cause: Cause::Class("Task 31"),
+        why: "Task 22 fix round 4: with the title in the size of the text, the segmenter makes one region of the title and both columns, and the order has no place for the picture inside one region: it stands in the left column, between its two paragraphs, not after them and before the right column's text. With a larger title the columns are regions of their own and the picture stands right (vision test `a_picture_flush_with_the_top_of_the_right_column_stays_there`). Task 31 (segmentation across a gutter) owns the general fix",
+    },
 ];

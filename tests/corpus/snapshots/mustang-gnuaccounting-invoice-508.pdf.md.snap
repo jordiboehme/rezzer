@@ -1,6 +1,5 @@
 ---
 source: crates/rezzer/tests/corpus.rs
-assertion_line: 295
 ---
 ---
 type: source
@@ -51,11 +50,11 @@ created: "2020-11-21T18:21:23+01:00"
 
 :status[Page 1]{grey}
 
-Picture page-1-pic-1 (image/png, logo or small picture, box 451, 724 to 522, 795) is not extracted.
-
 |  |  |
 | --- | --- |
 |  | 2020-11-21 |
+
+Picture page-1-pic-1 (image/png, logo or small picture, box 451, 724 to 522, 795) is not extracted.
 
 **Bei Spiel GmbH**
 

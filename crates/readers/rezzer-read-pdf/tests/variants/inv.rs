@@ -87,6 +87,9 @@ pub(crate) enum Inv {
     /// A text the shape marks unclear (a field whose layout leaves it unclear) is never in a
     /// `table` or `label_value` region (P6-X: a type forced on it reads a wrong pair or cell).
     NoForcedType,
+    /// Each media block the shape places stands after the block of one text and before the
+    /// block of another (Task 22 fix round 4): a picture is read where its column reads it.
+    MediaPlace,
     /// A spatial region is written as a block kept as laid out, that block always has its loss,
     /// and the texts of its runs stand in it once each and in their order (P6-X: a block kept
     /// as laid out with no word of why, or with a text lost, doubled or moved).
@@ -689,6 +692,34 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
             broken.push(Broken(
                 Inv::Order,
                 format!("page {p}: {e:?} is not in its place: {page_text:?}"),
+            ));
+        }
+    }
+    // The k-th media block of the page stands between the blocks of its two texts.
+    let media: Vec<usize> = blocks
+        .iter()
+        .enumerate()
+        .filter(|(_, b)| matches!(b, Block::Media { .. }))
+        .map(|(i, _)| i)
+        .collect();
+    for (k, (a, b)) in want.media_between.iter().enumerate() {
+        let at = |t: &str| {
+            blocks.iter().position(|bl| {
+                !matches!(
+                    bl,
+                    Block::Section { .. } | Block::Quote { .. } | Block::Callout { .. }
+                ) && has_words(&block_text(bl), t)
+            })
+        };
+        let (m, ia, ib) = (media.get(k).copied(), at(a), at(b));
+        let held = matches!((m, ia, ib), (Some(m), Some(ia), Some(ib)) if ia < m && m < ib);
+        if !held {
+            broken.push(Broken(
+                Inv::MediaPlace,
+                format!(
+                    "page {p}: media block {k} at {m:?}, not between {a:?} at {ia:?} and {b:?} \
+                     at {ib:?}"
+                ),
             ));
         }
     }
