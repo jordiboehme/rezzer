@@ -29,7 +29,7 @@ fixture), so a merge with the PDF work in progress should not conflict.
 malicious version has time to be yanked. Almost every new release here is younger than that:
 zip 9.5.0 and brotli-decompressor 6.3.1 are from 2026-11-09. This branch was asked for
 explicitly and is not pushed. Do not merge it before 2026-11-16, and check crates.io for yanks
-of the new pins first.
+of the new pins first. (Changed on 2026-11-11, see "Recheck 2026-11-11" below.)
 
 ## All pinned crates
 
@@ -349,9 +349,10 @@ for the cmap and the glyph names of embedded TrueType and OpenType programs, rea
   it needs no new feature. The workspace builds and tests pass with the default features.
 - Bugs near what we use: a format 0 CFF charset lookup is now bounded to the glyph count
   (#2397), and CFF custom encodings no longer map codes to glyphs past the font (#2398).
-  Rezzer walks the charset with `charset().iter()` (glyph to string id) and never calls
-  `Encoding::map`, so these were not reachable, but they harden the same parser that reads
-  hostile PDF fonts. Also new: no overflow on an `i32::MIN` roll shift in the CFF interpreter
+  Rezzer walks the charset with `charset().iter()` (glyph to string id), which in 0.46 already
+  stops at the glyph count (`string_id` checks it), and never calls `Encoding::map`, so these
+  were not reachable. The fixes harden only Rezzer's own copy: hayro 0.8's skrifa 0.46.2 still
+  has them. Also new: no overflow on an `i32::MIN` roll shift in the CFF interpreter
   (#2393), offsets in generated code add with saturation, and malformed VARC and AAT tables
   are handled.
 - Other changes: CID-keyed Type 1 support, a fix for MIRP twilight points in hinting, classic
@@ -392,10 +393,12 @@ and CCITT), which is one more reason to bump once the pull request is released.
 
 ### Release age and merge
 
-zip 9.5.1, skrifa 0.50.0 and read-fonts 0.47.0 are one day old, brotli-decompressor 6.3.1 and
-zip 9.5.0 two days, and all new pins of this branch are younger than the 7-day dependabot
-cooldown. The owner chose to merge on 2026-11-11 without waiting for the cooldown. Just before
-the merge, every new pin of this branch was checked on crates.io and none is yanked: rmcp
-3.9.0, toml 1.2.1+spec-1.1.0, zip 9.5.1, flate2 1.1.11, formualizer-parse 4.2.0, lopdf
-0.47.0, brotli-decompressor 6.3.1, rxing 0.9.4, skrifa 0.50.0 and read-fonts 0.47.0. This
-replaces the date in "Release age and the dependabot cooldown" above.
+On 2026-11-11 zip 9.5.1, skrifa 0.50.0 and read-fonts 0.47.0 are one day old,
+brotli-decompressor 6.3.1 two days, formualizer-parse 4.2.0 and rxing 0.9.4 three days, toml
+1.2.1 and flate2 1.1.11 five days and rmcp 3.9.0 six days. Only lopdf 0.47.0 (2026-11-04) is
+past the 7-day dependabot cooldown. The owner chose to merge on 2026-11-11 without waiting for
+the cooldown. Just before the merge (2026-11-11, 07:52 UTC), every new pin of this branch was
+checked on crates.io and none is yanked: rmcp 3.9.0, toml 1.2.1+spec-1.1.0, zip 9.5.1, flate2
+1.1.11, formualizer-parse 4.2.0, lopdf 0.47.0, brotli-decompressor 6.3.1, rxing 0.9.4, skrifa
+0.50.0 and read-fonts 0.47.0. This replaces the date in "Release age and the dependabot
+cooldown" above.
