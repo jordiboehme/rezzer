@@ -1,0 +1,21 @@
+[package]
+name = "scorecard"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "A development tool: checks relational facts about a document against Rezzer's model JSON"
+
+# A development tool. Nothing depends on it but tests, and it is never linked into the
+# `rezzer` binary.
+
+[dependencies]
+rezzer-model = { path = "../../rezzer-model" }
+pdfparts = { path = "../../formats/pdfparts" }
+lopdf.workspace = true
+quick-xml.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

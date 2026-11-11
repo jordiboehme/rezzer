@@ -757,6 +757,112 @@ fn dump_generated_reads() {
     }
 }
 
+/// What a variant must read as, as facts of the scorecard (`crates/devtools/scorecard`): the
+/// rows of its tables, its headings, its paragraphs, the order of its texts, the lines of its
+/// cells and each field's label with its value. The same fact of two pages is written once.
+fn want_facts(page: &axes::Page) -> Vec<scorecard::facts::Fact> {
+    use scorecard::facts::{Fact, Term};
+    let mut facts: Vec<Fact> = Vec::new();
+    for sheet in &page.sheets {
+        let want = &sheet.want;
+        for table in &want.tables {
+            for row in table {
+                let cells: Vec<Term> = row
+                    .iter()
+                    .filter(|c| !c.trim().is_empty())
+                    .map(|c| Term::exact(c))
+                    .collect();
+                if !cells.is_empty() {
+                    facts.push(Fact::row(cells));
+                }
+            }
+        }
+        for lines in &want.cell_lines {
+            for (n, line) in lines.iter().enumerate() {
+                if !line.trim().is_empty() {
+                    facts.push(Fact::row(vec![Term::exact(line).at_line(n + 1)]));
+                }
+            }
+        }
+        for h in &want.headings {
+            facts.push(Fact::heading(h, None));
+        }
+        for p in &want.paragraphs {
+            facts.push(Fact::text(Term::contains(p)));
+        }
+        for pair in want.order.windows(2) {
+            facts.push(Fact::order(
+                Term::contains(&pair[0]),
+                Term::contains(&pair[1]),
+            ));
+        }
+        for (label, value) in &sheet.built.fields {
+            if let Ok(Some(value)) = value
+                && !label.trim().is_empty()
+                && !value.trim().is_empty()
+            {
+                facts.push(Fact::pair(Term::exact(label), Term::exact(value)));
+            }
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    facts.retain(|f| seen.insert(f.to_string()));
+    facts
+}
+
+/// Writes what every sampled variant of every shape must read as to `<dir>/<shape name>/<variant
+/// name>.facts`, for the dir in `REZZER_WANTS_DIR`: the assertion files of the generated set,
+/// beside the reads of [`dump_generated_reads`], so that the scorecard checks this set as it
+/// checks the others. A variant with no fact gets no file. Without the variable it does
+/// nothing.
+#[test]
+#[ignore = "writes files when REZZER_WANTS_DIR is set"]
+fn dump_generated_wants() {
+    let Some(dir) = std::env::var_os("REZZER_WANTS_DIR") else {
+        return;
+    };
+    let dir = std::path::PathBuf::from(dir);
+    for shape in all_shapes() {
+        let folder = dir.join(file_name(shape.name));
+        for page in axes::variants(&shape) {
+            let facts = want_facts(&page);
+            if facts.is_empty() {
+                continue;
+            }
+            let lines: Vec<String> = facts.iter().map(|f| f.to_string()).collect();
+            std::fs::create_dir_all(&folder).unwrap();
+            std::fs::write(
+                folder.join(format!("{}.facts", file_name(&page.name))),
+                format!(
+                    "# what the generated variant must read as\n{}\n",
+                    lines.join("\n")
+                ),
+            )
+            .unwrap();
+        }
+    }
+}
+
+/// The exported facts say what the variant's own checks say: on a shape that reads right
+/// today, the read holds every fact, and the facts are of more than one class.
+#[test]
+fn the_exported_wants_hold_on_a_right_read() {
+    use scorecard::facts::Class;
+    let shape = shape("boxed fields beside a bold title");
+    let page = axes::page_of(&shape, axes::BASE);
+    let facts = want_facts(&page);
+    for class in [Class::Pair, Class::Heading] {
+        assert!(facts.iter().any(|f| f.class == class), "{facts:?}");
+    }
+    let out = inv::read(&page);
+    let view = scorecard::doc::View::of(&out.document);
+    // Through the written form, as the scorecard reads them.
+    let written: Vec<String> = facts.iter().map(|f| f.to_string()).collect();
+    for w in scorecard::facts::parse(&written.join("\n")).unwrap() {
+        assert!(scorecard::check::check(&view, &w.fact).pass, "{}", w.line);
+    }
+}
+
 /// The regions of each kind over every sampled variant of every shape, against
 /// `tests/variants/region-counts.tsv`: one line `kind\tcount` per kind in `Kind` order, then
 /// `total` (as `region-report counts` prints one set). A moved count fails with its old and

@@ -1,0 +1,151 @@
+set	half	kind	regions	facts_passed	facts_total
+corpus	dev	header_band	30	0	0
+corpus	dev	footer_band	16	0	0
+corpus	dev	title_block	2	0	0
+corpus	dev	heading	29	22	22
+corpus	dev	paragraph	739	253	253
+corpus	dev	list	23	8	8
+corpus	dev	table	3	4	4
+corpus	dev	label_value	14	0	0
+corpus	dev	totals	0	0	0
+corpus	dev	figure	27	0	0
+corpus	dev	code	0	0	0
+corpus	dev	footnote_legend	1	0	0
+corpus	dev	spatial	73	0	0
+corpus	dev	(no region)	0	0	0
+corpus	dev	(not found)	0	0	0
+corpus	held	header_band	1058	0	0
+corpus	held	footer_band	467	3	3
+corpus	held	title_block	3	0	0
+corpus	held	heading	399	16	16
+corpus	held	paragraph	4736	393	393
+corpus	held	list	2007	164	164
+corpus	held	table	104	531	531
+corpus	held	label_value	0	0	0
+corpus	held	totals	0	0	0
+corpus	held	figure	501	0	0
+corpus	held	code	0	0	0
+corpus	held	footnote_legend	0	0	0
+corpus	held	spatial	528	2	2
+corpus	held	(no region)	0	221	221
+corpus	held	(not found)	0	0	0
+corpus-untagged	dev	header_band	0	0	0
+corpus-untagged	dev	footer_band	0	0	0
+corpus-untagged	dev	title_block	1	2	2
+corpus-untagged	dev	heading	9	9	10
+corpus-untagged	dev	paragraph	249	66	72
+corpus-untagged	dev	list	4	3	3
+corpus-untagged	dev	table	1	0	0
+corpus-untagged	dev	label_value	0	0	0
+corpus-untagged	dev	totals	0	0	0
+corpus-untagged	dev	figure	0	0	0
+corpus-untagged	dev	code	0	0	0
+corpus-untagged	dev	footnote_legend	0	0	0
+corpus-untagged	dev	spatial	54	184	191
+corpus-untagged	dev	(no region)	0	0	0
+corpus-untagged	dev	(not found)	0	0	9
+corpus-untagged	held	header_band	1032	0	0
+corpus-untagged	held	footer_band	472	5	5
+corpus-untagged	held	title_block	2	2	2
+corpus-untagged	held	heading	50	2	2
+corpus-untagged	held	paragraph	5301	436	500
+corpus-untagged	held	list	207	14	15
+corpus-untagged	held	table	17	18	28
+corpus-untagged	held	label_value	189	4	7
+corpus-untagged	held	totals	0	0	0
+corpus-untagged	held	figure	500	154	228
+corpus-untagged	held	code	0	0	0
+corpus-untagged	held	footnote_legend	30	0	0
+corpus-untagged	held	spatial	1793	111	288
+corpus-untagged	held	(no region)	0	36	234
+corpus-untagged	held	(not found)	0	0	21
+forms	dev	header_band	62	0	0
+forms	dev	footer_band	244	0	0
+forms	dev	title_block	6	2	2
+forms	dev	heading	1317	302	302
+forms	dev	paragraph	1618	510	511
+forms	dev	list	807	227	227
+forms	dev	table	81	192	192
+forms	dev	label_value	83	1	1
+forms	dev	totals	10	0	0
+forms	dev	figure	109	1	1
+forms	dev	code	11	0	0
+forms	dev	footnote_legend	0	0	0
+forms	dev	spatial	232	14	15
+forms	dev	(no region)	0	1	1
+forms	dev	(not found)	0	0	0
+forms	held	header_band	0	0	0
+forms	held	footer_band	41	0	0
+forms	held	title_block	7	2	2
+forms	held	heading	45	2	2
+forms	held	paragraph	1311	181	182
+forms	held	list	29	8	8
+forms	held	table	58	129	129
+forms	held	label_value	72	3	3
+forms	held	totals	0	0	0
+forms	held	figure	13	0	0
+forms	held	code	1	0	0
+forms	held	footnote_legend	0	0	0
+forms	held	spatial	168	4	5
+forms	held	(no region)	0	4	4
+forms	held	(not found)	0	0	0
+forms-untagged	dev	header_band	115	0	0
+forms-untagged	dev	footer_band	203	0	0
+forms-untagged	dev	title_block	4	5	6
+forms-untagged	dev	heading	116	21	32
+forms-untagged	dev	paragraph	1778	268	432
+forms-untagged	dev	list	720	242	244
+forms-untagged	dev	table	63	58	94
+forms-untagged	dev	label_value	127	0	0
+forms-untagged	dev	totals	1	0	0
+forms-untagged	dev	figure	92	4	7
+forms-untagged	dev	code	11	0	0
+forms-untagged	dev	footnote_legend	0	0	0
+forms-untagged	dev	spatial	353	117	148
+forms-untagged	dev	(no region)	0	93	258
+forms-untagged	dev	(not found)	0	1	21
+forms-untagged	held	header_band	0	0	0
+forms-untagged	held	footer_band	0	0	0
+forms-untagged	held	title_block	4	3	3
+forms-untagged	held	heading	21	7	7
+forms-untagged	held	paragraph	676	142	169
+forms-untagged	held	list	2	8	8
+forms-untagged	held	table	6	27	31
+forms-untagged	held	label_value	7	2	2
+forms-untagged	held	totals	1	0	0
+forms-untagged	held	figure	3	0	0
+forms-untagged	held	code	0	0	0
+forms-untagged	held	footnote_legend	0	0	0
+forms-untagged	held	spatial	79	14	15
+forms-untagged	held	(no region)	0	26	82
+forms-untagged	held	(not found)	0	1	4
+generated	dev	header_band	0	0	0
+generated	dev	footer_band	136	0	0
+generated	dev	title_block	534	33	33
+generated	dev	heading	176	0	0
+generated	dev	paragraph	5004	198	297
+generated	dev	list	0	0	0
+generated	dev	table	1174	1535	1535
+generated	dev	label_value	753	2025	2090
+generated	dev	totals	490	1247	1247
+generated	dev	figure	256	0	0
+generated	dev	code	764	0	0
+generated	dev	footnote_legend	34	0	0
+generated	dev	spatial	550	0	0
+generated	dev	(no region)	0	66	99
+generated	dev	(not found)	0	0	39
+generated	held	header_band	0	0	0
+generated	held	footer_band	270	0	0
+generated	held	title_block	653	66	66
+generated	held	heading	339	117	117
+generated	held	paragraph	6058	204	223
+generated	held	list	0	0	0
+generated	held	table	1564	3286	3301
+generated	held	label_value	1719	6227	6339
+generated	held	totals	458	1093	1093
+generated	held	figure	214	0	0
+generated	held	code	782	0	0
+generated	held	footnote_legend	68	0	0
+generated	held	spatial	727	0	0
+generated	held	(no region)	0	0	33
+generated	held	(not found)	0	0	39
