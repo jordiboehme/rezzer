@@ -4,6 +4,7 @@
 
 use std::path::PathBuf;
 
+use lopdf::xref::XrefType;
 use lopdf::{Document, Object, Stream, dictionary};
 use pdfparts::objects::{pdf_date, text_string, xmp_date};
 use pdfparts::{IssueKind, Limits, Pdf};
@@ -331,6 +332,8 @@ fn xmp_doctype_is_refused() {
 fn version_from_header_or_catalog() {
     let open = |header: &str, catalog: Option<&str>| {
         let mut doc = Document::with_version(header);
+        // A cross-reference stream would make lopdf raise a header below 1.5.
+        doc.reference_table.cross_reference_type = XrefType::CrossReferenceTable;
         let pages_id = doc.new_object_id();
         let page_id = doc.add_object(dictionary! {
             "Type" => "Page",

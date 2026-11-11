@@ -174,7 +174,7 @@ jobs:
       # `fallback: none` fails the step rather than downloading an unpinned
       # binary. The second step is the same install and runs only after the
       # first one failed (a bad network day).
-      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         id: about
         continue-on-error: true
         with:
@@ -185,7 +185,7 @@ jobs:
         if: ${{ steps.about.outcome == 'failure' }}
         run: sleep 30
 
-      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         if: ${{ steps.about.outcome == 'failure' }}
         with:
           tool: cargo-about@0.9.3
@@ -345,7 +345,7 @@ jobs:
       # binary.
       # The second step is the same install and runs only after the first
       # one failed (a bad network day).
-      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         id: auditable
         continue-on-error: true
         with:
@@ -356,7 +356,7 @@ jobs:
         if: ${{ steps.auditable.outcome == 'failure' }}
         run: sleep 30
 
-      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         if: ${{ steps.auditable.outcome == 'failure' }}
         with:
           tool: cargo-auditable@0.7.7
@@ -694,7 +694,7 @@ jobs:
       # `fallback: none` fails the step rather than downloading an unpinned
       # binary. The second step is the same install and runs only after the
       # first one failed (a bad network day).
-      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         id: cyclonedx
         continue-on-error: true
         with:
@@ -705,7 +705,7 @@ jobs:
         if: ${{ steps.cyclonedx.outcome == 'failure' }}
         run: sleep 30
 
-      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         if: ${{ steps.cyclonedx.outcome == 'failure' }}
         with:
           tool: cargo-cyclonedx@0.5.9
@@ -914,7 +914,7 @@ jobs:
 
       # The cosign install of the publish job, rehearsed, so the tag runs no
       # install for the first time. Same pins and the same retry.
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         id: cosign
         continue-on-error: true
         with:
@@ -924,7 +924,7 @@ jobs:
         if: ${{ steps.cosign.outcome == 'failure' }}
         run: sleep 30
 
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         if: ${{ steps.cosign.outcome == 'failure' }}
         with:
           cosign-release: v3.1.4
@@ -1045,7 +1045,7 @@ jobs:
           name: release-assets
           path: release
 
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         id: cosign
         continue-on-error: true
         with:
@@ -1055,7 +1055,7 @@ jobs:
         if: ${{ steps.cosign.outcome == 'failure' }}
         run: sleep 30
 
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         if: ${{ steps.cosign.outcome == 'failure' }}
         with:
           cosign-release: v3.1.4
