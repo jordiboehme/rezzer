@@ -49,6 +49,7 @@ pub mod file;
 mod input;
 mod limits;
 pub mod line;
+mod order;
 mod region;
 mod report;
 pub mod segment;
@@ -60,6 +61,7 @@ pub use input::{
     BoxIn, CodeIn, FontKind, GapIn, GivenRegion, PageIn, PictureIn, PrimId, RuleIn, Shift, TextRun,
 };
 pub use limits::Limits;
+pub use order::order;
 pub use region::{
     Alternative, Bounds, Candidate, Certainty, Issue, IssueKind, Kind, PageRegions, Region,
     RegionId, Score, Signal,
