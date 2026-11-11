@@ -299,3 +299,103 @@ archived.
 - Holding hayro also leaves out 0.9's fixes for panics, stack overflows and large allocations
   on malformed files. A stack overflow aborts the process past `catch_unwind`, and Rezzer reads
   hostile PDFs. Bump as soon as a hayro release has `GlyphRun::font_dict()`.
+
+## Recheck 2026-11-11
+
+Every exact pin was compared with the crates.io `max_stable_version` on 2026-11-11, and the
+toolchain and CI items with `gh release list` and the GitHub API, as above. Changelogs were read
+from the pin to the new version (GitHub release notes, the fontations release pull request
+#2459 and the commit lists).
+
+Summary: 3 crates bumped (zip, skrifa, read-fonts), the hayro family still held, all other
+pins current. Toolchain and CI unchanged: everything is current except cargo-cyclonedx, which
+stays held.
+
+| Crate | Old pin | New pin | Released | Notes |
+|---|---|---|---|---|
+| zip | 9.5.0 | 9.5.1 | 2026-11-10 | one write fix, see below |
+| skrifa | 0.49.0 | 0.50.0 | 2026-11-10 | Type 1 behind a feature, see below |
+| read-fonts | 0.46.0 | 0.47.0 | 2026-11-10 | with skrifa |
+| hayro, hayro-interpret, hayro-syntax | 0.8.0 | held at 0.8.0 | 0.9.0 from 2026-11-02 | `font_dict()` still not released |
+
+The fuzz lock moved with the workspace lock: zip, skrifa and read-fonts have the same versions in
+both. No other package in either lock changed.
+
+### Gate
+
+On the final tree (macOS, Apple silicon): `cargo nextest run --workspace` 3382 passed, 6
+skipped; `cargo clippy --workspace --all-targets -- -D warnings` clean on the host,
+`x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc`; `cargo fmt --all --check` clean;
+`cargo deny --all-features --locked check` ok for advisories, bans, licenses and sources, with
+the same duplicate warnings as before (skrifa and read-fonts are still two built copies each).
+No snapshot or golden file changed. The fuzz crate builds with `cargo check`.
+
+### zip 9.5.0 to 9.5.1
+
+- Breaking: none.
+- Bug: `raw_copy_file` now keeps an encrypted entry decryptable (#1288); it used to lose the
+  ZipCrypto check byte flag. Rezzer never copies raw entries (zipguard reads, tests write with
+  `ZipWriter`), so it did not affect us.
+- The other commits are CI updates.
+
+### skrifa 0.49.0 to 0.50.0, read-fonts 0.46.0 to 0.47.0
+
+Rezzer uses them only in `rezzer-read-pdf/src/text.rs` (`GlyphNames::read`): skrifa `FontRef`
+for the cmap and the glyph names of embedded TrueType and OpenType programs, read-fonts
+`CffFontRef::new_cff` for the charset of bare CFF programs, and `ps::agl` for glyph names.
+
+- Breaking: Type 1 font support is now behind a `type1` feature, off by default (#2457, about
+  62 KB of code). Rezzer does not read Type 1 programs with read-fonts (hayro handles them), so
+  it needs no new feature. The workspace builds and tests pass with the default features.
+- Bugs near what we use: a format 0 CFF charset lookup is now bounded to the glyph count
+  (#2397), and CFF custom encodings no longer map codes to glyphs past the font (#2398).
+  Rezzer walks the charset with `charset().iter()` (glyph to string id) and never calls
+  `Encoding::map`, so these were not reachable, but they harden the same parser that reads
+  hostile PDF fonts. Also new: no overflow on an `i32::MIN` roll shift in the CFF interpreter
+  (#2393), offsets in generated code add with saturation, and malformed VARC and AAT tables
+  are handled.
+- Other changes: CID-keyed Type 1 support, a fix for MIRP twilight points in hinting, classic
+  ClearType `hdmx` handling, speedups of layout closure and `IntSet`. Nothing Rezzer uses.
+- Duplicates: skrifa 0.49.0 and read-fonts 0.46.0 were only used by `rezzer-read-pdf`, so the
+  bump replaces them and adds no copy. The lock still lists three skrifa and three read-fonts
+  versions (0.44.0 and 0.41.0 from glifo under vello_cpu, 0.46.2 and 0.43.3 from
+  hayro-interpret 0.8, and now 0.50.0 and 0.47.0). Only two of each are built: `cargo tree -d`
+  and cargo-deny show 0.46.2 and 0.50.0 (0.43.3 and 0.47.0), because no enabled feature pulls
+  glifo's copy in. One change to the plan above: hayro-font 0.5
+  and hayro main both use skrifa 0.49. The hayro bump drops a copy only if Rezzer then pins
+  skrifa and read-fonts to the version hayro-font uses. The comment at the pin in `Cargo.toml`
+  says so. Staying at 0.49 today would not save a copy, so the bump costs nothing now.
+
+### hayro still held
+
+LaurenzV/hayro#1734 "Expose the font dictionary of a glyph run" is still open, with no review
+and no activity since 2026-11-03. hayro main has no public `font_dict` (only the internal
+`resolve_font(font_dict)`), and no release came after 0.9.0. The hold from above stands. hayro
+main has since added more safety work (JBIG2 memory and size limits, cancel handles for JBIG2
+and CCITT), which is one more reason to bump once the pull request is released.
+
+### Toolchain and CI
+
+| Item | Pin | Latest | Notes |
+|---|---|---|---|
+| Rust | 1.99.1 | 1.99.1 (2026-10-16) | current |
+| cargo-nextest | 0.9.151 | 0.9.151 (2026-11-03) | current |
+| cargo-cyclonedx | 0.5.9 | 0.5.10 (2026-11-10) | still held: install-action's manifest lists 0.5.9 as the newest, on v2.90.3 and on main |
+| cargo-about, cargo-auditable, cargo-fuzz, cargo-deny | 0.9.3, 0.7.7, 0.13.2, 0.20.2 | same | current |
+| taiki-e/install-action | v2.90.3 | v2.90.3 (2026-11-08) | current |
+| actions/checkout, upload-artifact, download-artifact, attest | v7.0.1, v7.0.2, v8.0.2, v4.2.2 | same | current |
+| EmbarkStudios/cargo-deny-action | v2.1.1 | v2.1.1 | current |
+| github/codeql-action | v4.39.3 | v4.39.3 (2026-11-04) | current |
+| zizmorcore/zizmor-action | v0.8.1 | v0.8.1 | current |
+| sigstore/cosign-installer | v4.1.3 | v4.1.3 | current |
+| ossf/scorecard-action, Swatinem/rust-cache, devops-actions/actionlint | v2.5.0, v2.9.3, v0.1.13 | same | current |
+
+### Release age and merge
+
+zip 9.5.1, skrifa 0.50.0 and read-fonts 0.47.0 are one day old, brotli-decompressor 6.3.1 and
+zip 9.5.0 two days, and all new pins of this branch are younger than the 7-day dependabot
+cooldown. The owner chose to merge on 2026-11-11 without waiting for the cooldown. Just before
+the merge, every new pin of this branch was checked on crates.io and none is yanked: rmcp
+3.9.0, toml 1.2.1+spec-1.1.0, zip 9.5.1, flate2 1.1.11, formualizer-parse 4.2.0, lopdf
+0.47.0, brotli-decompressor 6.3.1, rxing 0.9.4, skrifa 0.50.0 and read-fonts 0.47.0. This
+replaces the date in "Release age and the dependabot cooldown" above.
