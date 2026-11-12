@@ -986,10 +986,30 @@ fn pin_order(a: &str, b: &str) -> std::cmp::Ordering {
     key(a).cmp(&key(b))
 }
 
-const PIN_HEAD: &str = "# name\tpage\ttransform\twhat\tclass\tcount\towner";
+const PIN_HEAD: &str = "# name\tpage\ttransform\twhat\tclass\tcount\towner\tcause";
 
-/// The pinned lines of the file `path` (its comment lines left out).
+/// The fields of a pinned line that are checked: all but the cause.
+const PIN_FIELDS: usize = 7;
+
+/// The fields that name a pin: the count and what follows it say how it stands.
+const PIN_KEY: usize = 5;
+
+/// The first `n` fields of the pin line `l`.
+fn fields(l: &str, n: usize) -> String {
+    l.split('\t').take(n).collect::<Vec<_>>().join("\t")
+}
+
+/// The pinned lines of the file `path` (its comment lines left out), without the cause a
+/// line may carry as its last field.
 pub fn pinned(path: &std::path::Path) -> Vec<String> {
+    pinned_whole(path)
+        .iter()
+        .map(|l| fields(l, PIN_FIELDS))
+        .collect()
+}
+
+/// The pinned lines of the file `path` as they stand in it, with their causes.
+fn pinned_whole(path: &std::path::Path) -> Vec<String> {
     std::fs::read_to_string(path)
         .unwrap_or_default()
         .lines()
@@ -1011,7 +1031,9 @@ pub fn pinned_names(path: &std::path::Path) -> Vec<String> {
 /// Checks `lines` (see [`pin_lines`]) against the pinned file `path`, for the names in
 /// `names` only: a line that moved, came or went fails with each such line. With
 /// `REZZER_WRITE_META` set, the lines of `names` in the file are replaced by `lines` instead;
-/// the lines of every other name stay as they are.
+/// the lines of every other name stay as they are. A line may carry the traced cause of its
+/// break as a last field, written by hand: it is not checked, and a rewritten line keeps the
+/// cause of the pin of its name, page, change, kind and class.
 pub fn check_pins(path: &std::path::Path, names: &[String], lines: &[String]) {
     let write = std::env::var_os("REZZER_WRITE_META").is_some();
     check_or_write_pins(path, names, lines, write);
@@ -1032,8 +1054,18 @@ pub fn check_or_write_pins(
     };
     let old = pinned(path);
     if write {
-        let mut all: Vec<String> = old.into_iter().filter(|l| !mine(l)).collect();
-        all.extend(lines.iter().cloned());
+        let whole = pinned_whole(path);
+        let cause = |l: &String| {
+            let key = fields(l, PIN_KEY);
+            whole
+                .iter()
+                .find(|w| fields(w, PIN_KEY) == key)
+                .and_then(|w| w.split('\t').nth(PIN_FIELDS))
+                .map(|c| format!("{l}\t{c}"))
+                .unwrap_or_else(|| l.clone())
+        };
+        let mut all: Vec<String> = old.iter().filter(|l| !mine(l)).map(cause).collect();
+        all.extend(lines.iter().map(cause));
         all.sort_by(|a, b| pin_order(a, b));
         let mut text = vec![PIN_HEAD.to_string()];
         text.extend(all);

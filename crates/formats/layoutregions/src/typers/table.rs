@@ -1241,13 +1241,105 @@ pub fn type_totals(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
                 TOTALS_RULE,
             ));
         }
+        // One total alone under its table: the table extractors need two lines, so the line
+        // is read as the pair it is, a label and its amount, by the rule of the line pairs.
+        if t.lines == 1 && lone_pair(view, seg) {
+            signals.push(signal(
+                TOTALS_LINE_PAIR,
+                "its one line is a label and its amount".into(),
+                0,
+            ));
+        }
         Typed::of(Kind::Totals, signals)
     })
+}
+
+/// `totals.line_pair`: the totals are one line that parts into a label and its amount (see
+/// [`super::pairs::line_pair_cut`]); a host reads it by its line pairs extractor.
+pub const TOTALS_LINE_PAIR: &str = "totals.line_pair";
+
+/// Whether the text of `seg` with ink stands on one line that parts into a label and its
+/// value. Runs of white space only on other lines (a blank line a writer sets with one
+/// space) are no line of text: they are left out before the lines are counted, as the readers
+/// that extract the pair count the lines with ink.
+fn lone_pair(view: &PageView<'_>, seg: &Segment) -> bool {
+    let runs: Vec<&crate::input::TextRun> = seg
+        .prims
+        .iter()
+        .filter_map(|p| match p {
+            crate::PrimId::Text(i) => view.page.texts.get(*i as usize),
+            _ => None,
+        })
+        .collect();
+    lone_pair_of(runs)
+}
+
+/// [`lone_pair`] on the text runs of a segment.
+fn lone_pair_of(mut runs: Vec<&crate::input::TextRun>) -> bool {
+    crate::work::add(runs.len() as u64);
+    let Some(line) = runs
+        .iter()
+        .find(|r| crate::line::ink(&r.text) > 0)
+        .map(|r| r.line)
+    else {
+        return false;
+    };
+    if runs
+        .iter()
+        .any(|r| r.line != line && crate::line::ink(&r.text) > 0)
+    {
+        return false;
+    }
+    runs.retain(|r| r.line == line);
+    runs.sort_by(|a, b| a.x.total_cmp(&b.x));
+    super::pairs::line_pair_cut(&runs, true).is_some()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A run of 11 points on line `line`.
+    fn run_on(text: &str, x: f32, w: f32, line: u32) -> crate::input::TextRun {
+        crate::input::TextRun {
+            text: text.into(),
+            x,
+            y: 700.0 - 13.0 * line as f32,
+            w,
+            h: 0.0,
+            size: 11.0,
+            font: 1,
+            font_kind: crate::input::FontKind::Proportional,
+            bold: false,
+            italic: false,
+            color: None,
+            shift: crate::input::Shift::Base,
+            line,
+            off_axis: false,
+            gaps: Vec::new(),
+        }
+    }
+
+    /// Task 31b (N6): the totals that are one line of a label and its amount are a lone
+    /// pair, also with a blank line of one space over or under them; two lines with ink, or
+    /// one line that is no pair, are none.
+    #[test]
+    fn a_lone_total_is_a_pair_whatever_blank_lines_stand_with_it() {
+        let label = run_on("Total", 400.0, 30.0, 3);
+        let amount = run_on("55,36", 530.0, 30.0, 3);
+        let blank = run_on(" ", 30.0, 3.0, 2);
+        let under = run_on(" ", 30.0, 3.0, 4);
+        assert!(lone_pair_of(vec![&label, &amount]));
+        assert!(lone_pair_of(vec![&blank, &label, &amount, &under]));
+        // A second line with ink: the table readers read the lines.
+        let second = run_on("Tax", 400.0, 20.0, 4);
+        let tax = run_on("8,84", 536.0, 24.0, 4);
+        assert!(!lone_pair_of(vec![&label, &amount, &second, &tax]));
+        // One line of words that names no value is no pair, and white space alone is none.
+        let words = run_on("all prices in units", 400.0, 90.0, 3);
+        assert!(!lone_pair_of(vec![&blank, &words]));
+        assert!(!lone_pair_of(vec![&blank, &under]));
+    }
 
     /// An address or sentences that the walk reads refuse a table for the paragraph, with no
     /// weight of their own (the demotion is the paragraph's signal); the other prose reasons

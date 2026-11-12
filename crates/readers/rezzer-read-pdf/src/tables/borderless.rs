@@ -479,6 +479,15 @@ pub(super) fn borderless(
                 3
             };
             let (near, breaks) = around_of(flow, &lines[a..z], area.images, hsegs);
+            // A joint of a rule across the region parts the titles it stands between: only
+            // the first line, where the titles of a table stand. A cell of a row keeps its
+            // wide spaces (a code in groups, a line set full).
+            let mut cut = pieces.clone();
+            if let Some(first) = cut.first_mut() {
+                let titles = grid::cut_at_breaks(&flow.runs, std::slice::from_ref(first), &breaks);
+                *first = titles.into_iter().next().unwrap_or_default();
+            }
+            let pieces = &cut;
             let around = grid::Around {
                 pictures: &near,
                 breaks: &breaks,

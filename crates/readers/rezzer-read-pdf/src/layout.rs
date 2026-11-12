@@ -1734,7 +1734,11 @@ fn page_blocks_until(
                 doubts.extend(box_doubts);
                 said.extend(skipped.map(|w| (w, LossReason::Limit)));
             }
-            AreaReader::Lines => found.extend(line_pairs(&mut area)),
+            AreaReader::Lines => found.extend(line_pairs(&mut area).map(|mut t| {
+                // A lone total read as a pair is a row of its totals region.
+                t.kind = decision.kind;
+                t
+            })),
             AreaReader::Tables => {
                 let f = tables::untagged(page, &mut area, drawn, &decided.segs, height, stop);
                 found.extend(f.tables);
@@ -2476,6 +2480,9 @@ enum AreaReader {
 
 fn area_reader(d: &layoutregions::Decision) -> AreaReader {
     let has = |id: &str| d.signals.iter().any(|s| s.id == id);
+    if d.kind == Kind::Totals && has(layoutregions::typers::TOTALS_LINE_PAIR) {
+        return AreaReader::Lines;
+    }
     if d.kind != Kind::LabelValue || has("label_value.strip_fields") || has("label_value.dividers")
     {
         return AreaReader::Tables;

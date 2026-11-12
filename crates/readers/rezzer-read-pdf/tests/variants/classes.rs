@@ -998,6 +998,224 @@ fn picture_in_the_description(v: &Variant) -> Sheet {
     s
 }
 
+/// The items of [`item_rows_under_an_info_block`]: position, name, article code, count, price.
+const LISTED_ITEMS: [[&str; 5]; 3] = [
+    ["1", "Coffee mug", "40211AB12C / X12Y3Z4567", "2", "12,50"],
+    ["2", "Tea pot", "40212AB12C / X12Y3Z4568", "1", "34,56"],
+    ["3", "Saucer", "40213AB12C / X12Y3Z4569", "4", "7,80"],
+];
+
+/// Task 31b, class S3: the item rows of [`picture_in_the_description`] on the page of a
+/// letter. Over them stand an address on the left and a block of five short lines on the
+/// right, on baselines of their own, so the page has a gutter between the descriptions and
+/// the counts with blocks on both sides that do not line up; the lines of the paragraph run
+/// across it. The header (not bold, in the paragraph's face and pitch) stands over a rule
+/// drawn as touching pieces with joints at the column bounds; the rows of two lines end at a
+/// closing rule, with a total flush right under it. The rows between the two rules are rows
+/// of one table: each count and price reads in the row of its item, never after all items,
+/// and the header is the table's header row, each title a cell of its own.
+fn item_rows_under_an_info_block(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, bold) = v.faces();
+    let size = 11.0 * k;
+    let pitch = 12.0 * k;
+    let (x_pos, x_desc, x_pic, x_qty, x_price) = (50.0, 64.0, 342.0, 506.0, 565.0);
+    let mut t = String::new();
+    let address = ["Erika Example", "34 Mill Lane", "67890 Oakfield"];
+    for (n, l) in address.iter().enumerate() {
+        t += &show(plain, size, 30.0, 760.0 - 13.0 * k * n as f32, l);
+    }
+    let info = [
+        "Order 4521",
+        "Date 12 May 2026",
+        "Client 7788",
+        "Clerk Alex Sample",
+        "Sheet 1 of 1",
+    ];
+    for (n, l) in info.iter().enumerate() {
+        t += &right(plain, 9.0 * k, x_price, 766.0 - 10.0 * k * n as f32, l);
+    }
+    // The lines run across the page, under the block on the right too.
+    let para = [
+        "Thank you for your order. Today we send you the parts listed under these lines from our large",
+        "store in Fairhaven. The parts stay ours until the whole sum has reached us, and our terms apply",
+        "to this order as to every order before it. We send you a copy of them when you ask us for one.",
+    ];
+    let top = 640.0;
+    for (n, l) in para.iter().enumerate() {
+        t += &show(plain, size, 30.0, top - pitch * n as f32, l);
+    }
+    t += &show(plain, size, 30.0, top - pitch * 3.0, " ");
+    let head = top - pitch * 4.0 - 1.0 * k;
+    let titles = ["No.", "Article (3)", "Count", "Price"];
+    t += &show(plain, size, 32.0, head, titles[0]);
+    t += &show(plain, size, x_desc, head, titles[1]);
+    t += &right(plain, size, x_qty, head, titles[2]);
+    t += &right(plain, size, x_price, head, titles[3]);
+    let under_head = head - 4.0 * k;
+    for (a, b) in [
+        (30.0, 62.1),
+        (62.1, 468.7),
+        (468.7, x_qty),
+        (x_qty, x_price),
+    ] {
+        t += &rule(v, a, b, under_head, size);
+    }
+    let row_pitch = 35.0 * k;
+    let mut y = under_head - 13.0 * k;
+    let mut table = vec![titles.iter().map(|c| c.to_string()).collect::<Vec<_>>()];
+    for [pos, name, code, qty, price] in LISTED_ITEMS {
+        t += &right(plain, size, x_pos, y, pos);
+        t += &show(plain, size, x_desc, y, name);
+        t += &show(plain, size, x_desc, y - 11.0 * k, code);
+        t += &right(plain, size, x_qty, y, qty);
+        t += &right(plain, size, x_price, y, price);
+        t += &logo(x_pic, y - 11.0 * k - 0.3 * size, 40.5, 27.0);
+        table.push(vec![
+            pos.to_string(),
+            format!("{name} {code}"),
+            qty.to_string(),
+            price.to_string(),
+        ]);
+        y -= row_pitch;
+    }
+    let close = y + row_pitch - 11.0 * k - 11.0 * k;
+    for (a, b) in [(30.0, x_qty), (x_qty, x_price)] {
+        t += &rule(v, a, b, close, size);
+    }
+    let total = close - 13.0 * k;
+    t += &right(bold, size, x_qty, total, "Total");
+    t += &right(bold, size, x_price, total, "55,36");
+    t += &right(
+        plain,
+        size,
+        x_price,
+        total - 17.0 * k,
+        "all prices in units",
+    );
+    // The page holds the letter only: no body text under the total, whose place beside or
+    // under it would be read in another order at another text size.
+    let mut built = crate::shapes::Built::new(&v.geo());
+    built.page = crate::common::FormPage {
+        template: t,
+        ..crate::common::FormPage::default()
+    };
+    let mut s = Sheet::new(built);
+    s.once = crate::axes::shown(&s.built.page.template);
+    for item in LISTED_ITEMS {
+        s.want.row_media.push((item[1].to_string(), 1));
+    }
+    s.want.table(table, "table");
+    s.want.media_count = Some(0);
+    s.want.paragraphs.push(para.join(" "));
+    s.want
+        .order
+        .extend(["Saucer".to_string(), "Total".into(), "55,36".into()]);
+    s
+}
+
+/// Task 31b fix round 1 (C1): a totals block under one item row. The header and the item row
+/// of [`item_rows_under_an_info_block`] on the same letter page, then, between two rules
+/// drawn in the same three pieces, two lines of a label and its amount set flush right (the
+/// labels end at a joint of the rules), and under the lower rule a small note on the left
+/// beside the grand total, with a rule of one piece further down. The lines between the
+/// rules are totals, no item rows: each label keeps its amount on its line, the grand total
+/// keeps its amount, and no rule of the item rows takes the text under the lower rule.
+fn totals_between_rules_in_pieces(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let size = 11.0 * k;
+    let (x_pos, x_desc, x_qty, x_price) = (50.0, 64.0, 506.0, 565.0);
+    let mut t = String::new();
+    // A block of lines alone at the head of the page, on the right, and a date line under it.
+    t += &show(plain, size, 30.0, 690.0, "12 May 2026");
+    for (n, l) in [
+        "Order 4521",
+        "Date 12 May 2026",
+        "Client 7788",
+        "Sheet 2 of 2",
+    ]
+    .iter()
+    .enumerate()
+    {
+        t += &right(plain, 9.0 * k, x_price, 766.0 - 10.0 * k * n as f32, l);
+    }
+    let head = 640.0;
+    let titles = ["No.", "Article (3)", "Count", "Price"];
+    t += &show(plain, size, 32.0, head, titles[0]);
+    t += &show(plain, size, x_desc, head, titles[1]);
+    t += &right(plain, size, x_qty, head, titles[2]);
+    t += &right(plain, size, x_price, head, titles[3]);
+    let pieces = |t: &mut String, y: f32, ends: &[f32]| {
+        for w in ends.windows(2) {
+            *t += &rule(v, w[0], w[1], y, size);
+        }
+    };
+    pieces(&mut t, head - 4.0 * k, &[30.0, 62.1, 468.7, x_qty, x_price]);
+    let row = head - 17.0 * k;
+    t += &right(plain, size, x_pos, row, "4");
+    t += &show(plain, size, x_desc, row, "Bread box");
+    t += &show(
+        plain,
+        size,
+        x_desc,
+        row - 11.0 * k,
+        "40214AB12C / X12Y3Z4570",
+    );
+    t += &right(plain, size, x_qty, row, "1");
+    t += &right(plain, size, x_price, row, "12,50");
+    t += &logo(342.0, row - 11.0 * k - 0.3 * size, 40.5, 27.0);
+    let three = [30.0, 265.4, x_qty, x_price];
+    let upper = row - 24.0 * k;
+    pieces(&mut t, upper, &three);
+    let totals = [
+        ("Subtotal", "12,50"),
+        ("Shipping / handling of parts", "4,99"),
+    ];
+    for (n, (label, amount)) in totals.iter().enumerate() {
+        let y = upper - 13.0 * k - 17.0 * k * n as f32;
+        t += &right(plain, size, x_qty, y, label);
+        t += &right(plain, size, x_price, y, amount);
+    }
+    let lower = upper - 34.0 * k;
+    pieces(&mut t, lower, &three);
+    let note = "The sum holds a share of 19% for goods: 2,79";
+    t += &show(plain, 9.0 * k, 32.0, lower - 11.0 * k, note);
+    t += &right(plain, size, x_qty, lower - 13.0 * k, "Grand total");
+    t += &right(plain, size, x_price, lower - 13.0 * k, "17,49");
+    t += &rule(v, 30.0, x_price, lower - 80.0 * k, size);
+    t += &show(
+        plain,
+        9.0 * k,
+        30.0,
+        lower - 92.0 * k,
+        "Harbor store Fairhaven, gate four",
+    );
+    let mut built = crate::shapes::Built::new(&v.geo());
+    built.page = crate::common::FormPage {
+        template: t,
+        ..crate::common::FormPage::default()
+    };
+    let mut s = Sheet::new(built);
+    s.once = crate::axes::shown(&s.built.page.template);
+    for (label, amount) in totals.iter().chain(&[("Grand total", "17,49")]) {
+        s.want
+            .lines_joined
+            .push(((*label).to_string(), (*amount).to_string()));
+    }
+    s.want.lines_apart.push(("12,50".into(), "Shipping".into()));
+    s.want
+        .lines_apart
+        .push(("4,99".into(), "Grand total".into()));
+    s.want.order.extend([
+        "Subtotal".to_string(),
+        "Shipping".into(),
+        "Grand total".into(),
+    ]);
+    s.want.apart.push((note.into(), "Grand total".into()));
+    s
+}
+
 /// The shapes of the step 5 classes.
 pub(crate) fn shapes() -> Vec<Shape> {
     vec![
@@ -1080,6 +1298,16 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "item rows with a picture in the description column",
             axes: LISTED,
             draw: |v| (picture_in_the_description(v), None),
+        },
+        Shape {
+            name: "totals between two rules in pieces under one item row",
+            axes: LISTED,
+            draw: |v| (totals_between_rules_in_pieces(v), None),
+        },
+        Shape {
+            name: "item rows under a rule in pieces on a page with a block of lines on the right",
+            axes: LISTED,
+            draw: |v| (item_rows_under_an_info_block(v), None),
         },
     ]
 }

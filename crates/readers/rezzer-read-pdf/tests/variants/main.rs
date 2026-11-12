@@ -323,6 +323,8 @@ macro_rules! shape_tests {
 shape_tests! {
     a_picture_under_a_body_size_title => "a picture at the top of the right column under a title in the body size",
     f1_to_f3 => "F1 to F3",
+    head_line_over_fields => "head line over fields",
+    padded_period_beside_a_title_over_fields => "padded period beside a title over fields",
     header_grid => "header grid",
     column_of_totals => "column of totals",
     boxed_fields => "boxed fields",
@@ -359,6 +361,13 @@ shape_tests! {
     section_grids => "section grids",
     band_table_with_empty_cells => "band table with empty cells",
     band_table_with_spaced_header_cells => "band table with spaced header cells",
+    a_head_block_beside_a_logo_over_a_letter => "a head block beside a logo over a letter",
+    a_framed_label_and_value_column_at_a_close_pitch => "a framed label column and value column, rows 1.36 sizes apart beside a picture",
+    a_framed_label_and_value_column_at_a_wide_pitch => "a framed label column and value column, rows 1.55 sizes apart",
+    a_head_block_of_two_lines_beside_a_logo => "a head block of two lines beside a logo over a letter",
+    a_small_bold_label_over_a_rule_with_two_lines => "a small bold label over a rule with two lines",
+    two_boxes_side_by_side_each_with_its_label => "two boxes side by side, each with its label",
+    labels_on_touching_underlines_over_two_rows_of_fields => "labels on touching underlines over two rows of fields",
     letter_head => "letter head",
     letter_head_with_a_larger_name => "letter head with a larger name",
     letter_head_with_the_date_beside_the_name => "letter head with the date beside the name",
@@ -445,6 +454,8 @@ shape_tests! {
     flat_pictures_across_a_column_bound_in_item_rows => "flat pictures across a column bound in item rows",
     a_picture_over_the_gap_to_the_next_table => "a picture over the gap to the next table",
     item_rows_with_a_picture_in_the_description_column => "item rows with a picture in the description column",
+    totals_between_two_rules_in_pieces_under_one_item_row => "totals between two rules in pieces under one item row",
+    item_rows_under_a_rule_in_pieces_beside_a_block_of_lines => "item rows under a rule in pieces on a page with a block of lines on the right",
     address_columns_in_the_body => "address columns in the body",
     an_address_beside_two_banks => "an address beside two banks",
     an_address_beside_two_phone_lines => "an address beside two phone lines and a register",
@@ -465,6 +476,10 @@ shape_tests! {
     weight_only_boxes => "weight-only boxes",
     a_column_flowing_past_a_framed_figure => "a column flowing past a framed figure",
     footer_columns => "footer columns",
+    a_note_column_beside_rows_of_fields => "a note column beside rows of fields",
+    an_amount_in_its_box_before_a_note_column => "an amount in its box before a note column",
+    a_row_of_labels_over_two_blocks_of_fields => "a row of labels over two blocks of fields",
+    a_row_of_labels_in_drawn_boxes_over_two_blocks_of_fields => "a row of labels over two blocks of fields in drawn boxes",
     template_logos => "template logos",
     a_ruler_of_short_ticks => "a ruler of short ticks",
     codes_in_a_barcode_font_named_for_codes_size_10 => "codes in a barcode font named for codes, size 10, gap 5",
@@ -705,7 +720,8 @@ fn file_name(name: &str) -> String {
 /// Writes the Markdown and the JSON of every sampled variant of every shape to
 /// `<dir>/<shape name>/<variant name>.md` and `.json`, for the dir in `REZZER_DUMP_DIR`; to
 /// compare the reads of two builds byte for byte. Without the variable it does nothing. The
-/// time limit is one hour, so the dump does not depend on the load of the machine.
+/// time limit is one hour, so the dump does not depend on the load of the machine. With
+/// `REZZER_DUMP_SHAPE` set, only the shapes whose name holds its text are written.
 #[test]
 #[ignore = "writes files when REZZER_DUMP_DIR is set"]
 fn dump_generated_reads() {
@@ -725,8 +741,16 @@ fn dump_generated_reads() {
         max_time: std::time::Duration::from_secs(3600),
         ..rezzer_limits::Limits::default()
     };
+    // With `REZZER_DUMP_SHAPE` set, only the shapes whose name holds it are written.
+    let only = std::env::var("REZZER_DUMP_SHAPE").ok();
     let mut folders = std::collections::HashMap::new();
     for shape in all_shapes() {
+        if only
+            .as_ref()
+            .is_some_and(|o| !shape.name.contains(o.as_str()))
+        {
+            continue;
+        }
         let folder = dir.join(file_name(shape.name));
         if let Some(first) = folders.insert(folder.clone(), shape.name) {
             panic!(
@@ -742,6 +766,12 @@ fn dump_generated_reads() {
                     "the variants {first:?} and {:?} of {:?} share a file name",
                     page.name, shape.name
                 );
+            }
+            // With `REZZER_DUMP_PDF` set, the file of the variant is written too: to read it
+            // with another build, or to look at it.
+            if std::env::var_os("REZZER_DUMP_PDF").is_some() {
+                let name = file_name(&page.name);
+                std::fs::write(folder.join(format!("{name}.pdf")), inv::file(&page)).unwrap();
             }
             let (out, pages) = rezzer_read_pdf::read_engine_pages(
                 &common::source(&inv::file(&page)),
@@ -763,6 +793,140 @@ fn dump_generated_reads() {
                 .unwrap();
             }
         }
+    }
+}
+
+/// Prints the path of one variant through the read, for a task report: the text runs of each
+/// page, the segments of the engine's own segmentation (what made each, its bounds and its
+/// first words), the regions with their kind and evidence, and the Markdown. The shape is the
+/// one whose name is `REZZER_TRACE_SHAPE`, the variant `REZZER_TRACE_VARIANT` (default
+/// `base`); or the file at `REZZER_TRACE_FILE` (with `REZZER_TRACE_PAGE`, only that page).
+/// Without these variables it does nothing. Run with `--no-capture`.
+#[test]
+#[ignore = "prints the path of one variant when REZZER_TRACE_SHAPE is set"]
+fn trace_shape() {
+    // A file instead of a shape: `REZZER_TRACE_FILE`, and `REZZER_TRACE_PAGE` for one page.
+    let bytes = if let Ok(file) = std::env::var("REZZER_TRACE_FILE") {
+        std::fs::read(file).unwrap()
+    } else {
+        let Ok(name) = std::env::var("REZZER_TRACE_SHAPE") else {
+            return;
+        };
+        let variant = std::env::var("REZZER_TRACE_VARIANT").unwrap_or_else(|_| "base".into());
+        let shape = shape(&name);
+        let page = axes::variants(&shape)
+            .find(|p| p.name == variant)
+            .unwrap_or_else(|| panic!("no variant {variant}"));
+        inv::file(&page)
+    };
+    let only: Option<u32> = std::env::var("REZZER_TRACE_PAGE")
+        .ok()
+        .and_then(|p| p.parse().ok());
+    let (out, pages) = common::read_engine_pages(&bytes);
+    let words = |t: &str| t.chars().take(40).collect::<String>();
+    for p in &pages {
+        if only.is_some_and(|o| o != p.input.page) {
+            continue;
+        }
+        let texts = &p.input.texts;
+        println!("PAGE {} ({} runs)", p.input.page, texts.len());
+        for (i, t) in texts.iter().enumerate() {
+            println!(
+                "  run {i}: x {:.1}..{:.1} y {:.1} size {:.1} line {}{} {:?}",
+                t.x,
+                t.x + t.w,
+                t.y,
+                t.size,
+                t.line,
+                if t.bold { " bold" } else { "" },
+                words(&t.text)
+            );
+        }
+        for r in &p.input.rules {
+            println!("  rule {r:?}");
+        }
+        for b in &p.input.boxes {
+            println!("  box {b:?}");
+        }
+        for b in &p.input.pictures {
+            println!("  picture {:?}", b.bounds);
+        }
+        let first = |prims: &[layoutregions::PrimId]| {
+            let ids: Vec<usize> = prims
+                .iter()
+                .filter_map(|p| match p {
+                    layoutregions::PrimId::Text(i) => Some(*i as usize),
+                    _ => None,
+                })
+                .collect();
+            let text: Vec<&str> = ids
+                .iter()
+                .filter_map(|&i| texts.get(i))
+                .map(|t| t.text.trim())
+                .filter(|t| !t.is_empty())
+                .collect();
+            format!("{} runs {:?}", ids.len(), words(&text.join(" | ")))
+        };
+        // The engine alone: without the regions the reader's own finders gave it.
+        let mut alone = p.input.clone();
+        if !alone.given.is_empty() {
+            println!(
+                " GIVEN {} regions of the reader's finders, left out below",
+                alone.given.len()
+            );
+        }
+        alone.given.clear();
+        let segs = layoutregions::segment::segment_page(
+            &alone,
+            &layoutregions::Limits::default(),
+            &|| false,
+        );
+        fn walk(
+            segs: &layoutregions::segment::Segments,
+            id: layoutregions::segment::SegId,
+            depth: usize,
+            first: &dyn Fn(&[layoutregions::PrimId]) -> String,
+        ) {
+            let s = &segs.all[id.0 as usize];
+            let b = s.bounds;
+            println!(
+                "  {}seg {} {:?} [{:.1} {:.1} {:.1} {:.1}] {}",
+                "  ".repeat(depth),
+                id.0,
+                s.source,
+                b.x0,
+                b.y0,
+                b.x1,
+                b.y1,
+                first(&s.prims)
+            );
+            for c in &s.children {
+                walk(segs, *c, depth + 1, first);
+            }
+        }
+        println!(" SEGMENTS (the engine alone, without the reader's given regions)");
+        walk(&segs, segs.root, 0, &first);
+        println!(" REGIONS");
+        for r in &p.regions.regions {
+            let b = r.bounds;
+            let ids: Vec<&str> = r.signals.iter().map(|s| s.id).collect();
+            let alts: Vec<&str> = r.alternatives.iter().map(|a| a.kind.name()).collect();
+            println!(
+                "  {} {:?} [{:.1} {:.1} {:.1} {:.1}] {} | also {} | {}",
+                r.kind.name(),
+                r.certainty,
+                b.x0,
+                b.y0,
+                b.x1,
+                b.y1,
+                ids.join(","),
+                alts.join(","),
+                first(&r.prims)
+            );
+        }
+    }
+    if only.is_none() {
+        println!("{}", common::markdown(&out));
     }
 }
 
@@ -799,11 +963,13 @@ fn want_facts(page: &axes::Page) -> Vec<scorecard::facts::Fact> {
         for p in &want.paragraphs {
             facts.push(Fact::text(Term::contains(p)));
         }
-        for pair in want.order.windows(2) {
-            facts.push(Fact::order(
-                Term::contains(&pair[0]),
-                Term::contains(&pair[1]),
-            ));
+        for chain in std::iter::once(&want.order).chain(&want.orders) {
+            for pair in chain.windows(2) {
+                facts.push(Fact::order(
+                    Term::contains(&pair[0]),
+                    Term::contains(&pair[1]),
+                ));
+            }
         }
         for (label, value) in &sheet.built.fields {
             if let Ok(Some(value)) = value

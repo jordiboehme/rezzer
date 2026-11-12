@@ -391,3 +391,38 @@ fn an_address_under_a_line_of_prose_is_demoted_as_an_address() {
         (3, Some(Demotion::LinesApart))
     );
 }
+
+/// Review R3 of Task 31b, the path of a public form (irs-f6744 untagged page 174). A value
+/// at the right end of a row of boxes, and far left of it, 4.4 points lower at a size of
+/// 5.4, the second line of the label of the first box. Read one after the other they are
+/// lines of one paragraph for the walk, but no text of one line: the second starts after a
+/// line break. The lines of a block stand a size apart or more, and these two share no
+/// stretch of the width.
+#[test]
+fn a_line_left_of_the_line_over_it_and_closer_than_a_line_starts_after_a_break() {
+    let at = |text: &str, line: u32, x: f32, w: f32, y: f32| TextRun {
+        x,
+        w,
+        ..run(text, line, y, 5.4)
+    };
+    let breaks = |second: TextRun| {
+        let runs = [at("3", 0, 218.6, 2.0, 389.0), second];
+        let lines = text_lines(&runs);
+        assert!(continues(&lines[0], &lines[1]));
+        line_breaks(&lines, 0, 2, &no_amount)
+    };
+    assert_eq!(breaks(at("code", 1, 45.0, 12.0, 384.6)), [(0, 1)]);
+    // The step moved both ways (`LINE_STEP`, one size: 5.4 points): 0.1 points closer than
+    // a size the line stands in another column, 0.1 points farther it goes on as before.
+    assert_eq!(breaks(at("code", 1, 45.0, 12.0, 389.0 - 5.3)), [(0, 1)]);
+    assert_eq!(breaks(at("code", 1, 45.0, 12.0, 389.0 - 5.5)), []);
+    // The white space moved both ways (`BESIDE_GAP`, one size): a line that ends 5.5 points
+    // before the value starts is apart from it, one that ends 5.3 points before it is not.
+    assert_eq!(breaks(at("code", 1, 201.1, 12.0, 384.6)), [(0, 1)]);
+    assert_eq!(breaks(at("code", 1, 201.3, 12.0, 384.6)), []);
+    // The predicate alone: a line under the line over it, however close, is a line of its
+    // block (the two lines of a label set tight), and so is a line right of it.
+    assert!(other_column((218.6, 220.6), (45.0, 57.0), 4.4, 5.4));
+    assert!(!other_column((45.0, 59.0), (45.0, 61.0), 4.4, 5.4));
+    assert!(!other_column((45.0, 57.0), (218.6, 220.6), 4.4, 5.4));
+}

@@ -160,6 +160,64 @@ pub fn pieces_of<R: LineRun>(runs: &[R], start: usize, end: usize) -> Vec<Piece>
     out
 }
 
+/// White space between two runs of a piece wider than this many sizes is cut where a rule
+/// across the table breaks in it: half a cell gap, about two spaces between words.
+const JOINT_GAP: f32 = 0.5 * CELL_GAP;
+
+/// The pieces of lines, each cut where a rule across the table breaks (`breaks`, see
+/// `ruled::rule_breaks`) in the white space between two of its runs, when that white space
+/// is wider than [`JOINT_GAP`] sizes: the joint of the rule draws a column bound there, as a
+/// vertical rule would, so two titles less than a cell gap apart (`No.` and `Article` over a
+/// narrow first column) are two cells. A break at a word space cuts nothing: a sentence
+/// across the joints of a rule stays whole.
+pub fn cut_at_breaks<R: LineRun>(
+    runs: &[R],
+    pieces: &[Vec<Piece>],
+    breaks: &[f32],
+) -> Vec<Vec<Piece>> {
+    if breaks.is_empty() {
+        return pieces.to_vec();
+    }
+    pieces
+        .iter()
+        .map(|line| {
+            let mut out: Vec<Piece> = Vec::with_capacity(line.len());
+            for p in line {
+                crate::work::add((p.end - p.start) as u64 + 1);
+                // The runs of the piece that start a part of their own.
+                let mut end = f32::MIN;
+                let mut starts: Vec<usize> = Vec::new();
+                for (i, r) in runs.iter().enumerate().take(p.end).skip(p.start) {
+                    let x0 = r.x();
+                    if i > p.start
+                        && x0 - end > JOINT_GAP * r.size().max(1.0)
+                        && breaks.iter().any(|b| *b >= end && *b <= x0)
+                    {
+                        starts.push(i);
+                    }
+                    end = end.max(x0 + r.w());
+                }
+                if starts.is_empty() {
+                    out.push(p.clone());
+                    continue;
+                }
+                let bounds: Vec<usize> =
+                    [p.start].into_iter().chain(starts).chain([p.end]).collect();
+                for w in bounds.windows(2) {
+                    let part = &runs[w[0]..w[1]];
+                    out.push(Piece {
+                        x0: part.iter().map(LineRun::x).fold(f32::MAX, f32::min),
+                        x1: part.iter().map(|r| r.x() + r.w()).fold(f32::MIN, f32::max),
+                        start: w[0],
+                        end: w[1],
+                    });
+                }
+            }
+            out
+        })
+        .collect()
+}
+
 /// The text of runs `start..end`, white space collapsed.
 pub fn text_of<R: LineRun>(runs: &[R], start: usize, end: usize) -> String {
     let ids: Vec<usize> = (start..end).collect();

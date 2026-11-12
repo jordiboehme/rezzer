@@ -18,7 +18,7 @@ use crate::input::{GivenRegion, PageIn, PrimId, RuleIn, TextRun};
 use crate::limits::Limits;
 use crate::line::PIECE_GAP;
 use crate::region::{Bounds, Issue, IssueKind, Kind};
-use crate::segment::cut::{CutShort, Piece, Split, xy_cut};
+use crate::segment::cut::{CutShort, Piece, Split};
 use crate::segment::drawn::{Line, SNAP};
 use crate::segment::style::style_steps;
 use crate::work;
@@ -230,7 +230,10 @@ fn segment_with(
         stopped: false,
         given: Vec::new(),
         short: Vec::new(),
+        joined: Vec::new(),
+        joints: Vec::new(),
     };
+    (b.joined, b.joints) = page_joints(page);
     let every = all_prims(page);
     work::add(every.len() as u64);
     let frame = Bounds {
@@ -279,6 +282,10 @@ struct Builder<'a> {
     given: Vec<SegId>,
     /// The segments a limit or the stop left one leaf (see [`Segments::short`]).
     short: Vec<SegId>,
+    /// The page's rules drawn in pieces, joined, and their joints (see [`cut::joined`]): made
+    /// once for the page, for every cut of its text.
+    joined: Vec<Line>,
+    joints: Vec<(f32, f32)>,
 }
 
 /// A grid or box of the page, or the page itself (item 0).
@@ -789,7 +796,12 @@ impl Builder<'_> {
             max_cut_depth: 0,
             ..*self.limits
         };
-        let found = cut_runs(&self.page.texts, ids, &[], &bound, self.stop).0;
+        let none = cut::Ruled {
+            rules: &[],
+            joined: &[],
+            joints: &[],
+        };
+        let found = cut_runs(&self.page.texts, ids, &none, &bound, self.stop).0;
         if found.short == Some(CutShort::Stopped) {
             self.cut_short(found.short);
             return false;
@@ -861,7 +873,12 @@ impl Builder<'_> {
             max_cut_depth: (self.max - d) as u32,
             ..*self.limits
         };
-        let found = cut_runs(&self.page.texts, ids, rules, &bound, self.stop).0;
+        let ruled = cut::Ruled {
+            rules,
+            joined: &self.joined,
+            joints: &self.joints,
+        };
+        let found = cut_runs(&self.page.texts, ids, &ruled, &bound, self.stop).0;
         self.cut_short(found.short);
         if found.groups.len() < 2 {
             if !found.kept.is_empty() {
@@ -1001,7 +1018,12 @@ impl Builder<'_> {
             max_cut_depth: (self.max - d) as u32,
             ..*self.limits
         };
-        let (found, extents) = cut_runs(&self.page.texts, &ids, rules, &bound, self.stop);
+        let ruled = cut::Ruled {
+            rules,
+            joined: &self.joined,
+            joints: &self.joints,
+        };
+        let (found, extents) = cut_runs(&self.page.texts, &ids, &ruled, &bound, self.stop);
         if found.short == Some(CutShort::Stopped) {
             self.cut_short(found.short);
             return;
@@ -1334,8 +1356,12 @@ fn piece(r: &TextRun) -> Piece {
         runs: 1,
         colon: r.text.trim_end().ends_with(':'),
         value: cut::reads_as_value(&r.text),
+        number: cut::reads_as_number(&r.text),
         boxed: None,
         rows: 1,
+        // A run stands where the host says its text stands: a host that hands the advance
+        // of blanks after the text with the run has them in the extent of the piece.
+        trail: 0.0,
     }
 }
 
@@ -1384,6 +1410,7 @@ fn pieces_of(texts: &[TextRun], ids: &[u32]) -> (Vec<Piece>, Vec<Vec<usize>>) {
                 p.chars += one.chars;
                 p.colon = one.colon;
                 p.value = p.value && one.value;
+                p.number = p.number && one.number;
             }
             p.runs += 1;
             m.push(k);
@@ -1399,15 +1426,27 @@ fn pieces_of(texts: &[TextRun], ids: &[u32]) -> (Vec<Piece>, Vec<Vec<usize>>) {
 /// The whitespace cut of the runs `ids` of `texts` (see [`xy_cut`]) on their pieces (see
 /// [`pieces_of`]): its groups hold places in `ids`, and the extent of the ink of each group
 /// comes with it.
+/// The rules of `page` that are drawn in pieces, joined, and their joints (see
+/// [`cut::joined`]): from the flat rules and the tops and bottoms of its rectangles, with the
+/// upright rules and the sides of the rectangles as the lines that make a joint a corner.
+fn page_joints(page: &PageIn) -> (Vec<Line>, Vec<(f32, f32)>) {
+    let strokes = page
+        .rules
+        .iter()
+        .map(|r| ([r.x0, r.y0, r.x1, r.y1], r.rect));
+    let (flat, upright) = cut::flat_and_upright(strokes);
+    cut::joined(&flat, &upright)
+}
+
 fn cut_runs(
     texts: &[TextRun],
     ids: &[u32],
-    rules: &[Line],
+    ruled: &cut::Ruled<'_>,
     limits: &Limits,
     stop: &dyn Fn() -> bool,
 ) -> (cut::Cut, Vec<Bounds>) {
     let (pieces, members) = pieces_of(texts, ids);
-    let mut found = xy_cut(&pieces, rules, limits, stop);
+    let mut found = cut::xy_cut_ruled(&pieces, ruled, limits, stop);
     let mut extents = Vec::with_capacity(found.groups.len());
     for group in &mut found.groups {
         extents.push(

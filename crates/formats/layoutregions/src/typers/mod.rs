@@ -37,7 +37,7 @@ pub mod text;
 pub use code::type_code;
 pub use figure::type_figure;
 pub use pairs::type_label_value;
-pub use table::{type_spatial, type_table, type_totals};
+pub use table::{TOTALS_LINE_PAIR, type_spatial, type_table, type_totals};
 pub use text::{
     type_footer_band, type_footnote_legend, type_header_band, type_heading, type_list,
     type_paragraph, type_title_block,

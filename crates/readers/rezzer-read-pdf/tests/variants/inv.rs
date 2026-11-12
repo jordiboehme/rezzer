@@ -702,9 +702,12 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
             ));
         }
     }
-    if !want.order.is_empty() {
+    for chain in std::iter::once(&want.order).chain(&want.orders) {
+        if chain.is_empty() {
+            continue;
+        }
         let page_text = collapse(&text(page_blocks(out, n)));
-        let order: Vec<&str> = want.order.iter().map(String::as_str).collect();
+        let order: Vec<&str> = chain.iter().map(String::as_str).collect();
         if let Err(e) = crate::common::in_order(&page_text, &order) {
             broken.push(Broken(
                 Inv::Order,

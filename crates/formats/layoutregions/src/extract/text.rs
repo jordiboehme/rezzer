@@ -442,9 +442,12 @@ const SHORT_ROOM: f32 = 0.15;
 /// edge or a centre but not a left edge, or the
 /// paragraph is a block of short lines each of which after the first starts with a capital or
 /// a digit, none ends in a hyphen or a comma, the lines do not read as sentences, share their
-/// left edge and have the shape of an address or a list (list markers, or at most
+/// left edge or their right edge (a name over its register line set flush right at the head
+/// of a letter: two such lines are too few to show that the block is set flush right) and
+/// have the shape of an address or a list (list markers, or at most
 /// [`ADDRESS_WORDS`] words a line), or the two lines are each a label and its value in the
-/// same two faces (see [`field_line`]). How wide the block is does not matter: a long name in an
+/// same two faces (see [`field_line`]), or the line stands in another column than the line over
+/// it (see [`other_column`]). How wide the block is does not matter: a long name in an
 /// address is still a line of it. Prose that fills its measure keeps joining, also where
 /// every line starts with a capital.
 fn line_breaks<R: LineRun>(
@@ -485,7 +488,8 @@ fn line_breaks<R: LineRun>(
         .all(|l| !word_cut(&l.text) && !l.text.ends_with(','))
         && lines.windows(2).all(|w| !cuts(&w[0].text, &w[1].text))
         && !sentences(lines)
-        && edges.iter().all(|e| (e.0 - left).abs() <= edge)
+        && (edges.iter().all(|e| (e.0 - left).abs() <= edge)
+            || edges.iter().all(|e| (e.1 - right).abs() <= edge))
         && listed(&lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>());
     // Lines set flush right or centred: most pairs of lines in a row, and at least two,
     // share a right edge or a centre but not a left edge. One indented first line of
@@ -521,12 +525,36 @@ fn line_breaks<R: LineRun>(
             a.1 + 0.25 * next.size + word + room <= right && !cuts(&lines[k].text, &next.text);
         let aligned = set_aligned && aligned_pair(a, b);
         let apart = !wraps[k] || !around[i - lo + k];
-        if fits || aligned || short || apart || lines_apart(lines, k + 1, items) {
+        let column = other_column(a, b, lines[k].y - next.y, lines[k].size.max(next.size));
+        if fits || aligned || short || apart || column || lines_apart(lines, k + 1, items) {
             out.push((next.runs[0].page(), next.runs[0].line()));
         }
     }
     out.sort_unstable();
     out
+}
+
+/// Under this many sizes, baseline to baseline, a line that shares no stretch of the width
+/// with the line over it is taken for a line of another column (see [`other_column`]). Text
+/// set solid stands one size apart; tight headings stand a little closer (see `LEAST_PITCH`
+/// in the cut, 0.8 sizes), so a tight block can fall under this step. That costs only a
+/// line break between its lines, never a moved or lost value, while a lower step would miss
+/// the close rows of a form whose next label line stands 0.81 sizes under a value (review R3
+/// of Task 31b). A share of the text size: it holds at every scale of the page.
+const LINE_STEP: f32 = 1.0;
+
+/// Whether a line with the ink edges `cur`, `step` under a line with the ink edges `prev`
+/// (text of `size`), stands in another column than that line: it ends [`BESIDE_GAP`] sizes or
+/// more before the ink of the line over it starts, and stands less than [`LINE_STEP`] sizes
+/// under it. Text that wraps goes on a line lower; two lines closer than that which share
+/// no stretch of the width are lines of two columns whose baselines do not meet, read one
+/// after the other (review R3 of Task 31b: the value at the right end of a row of boxes of a
+/// form, and a little lower, far left, the next line of the label of the first box). Such a
+/// line starts after a line break: it is no text of the line before it. A line under the
+/// line over it, however close, is a line of its block.
+fn other_column(prev: (f32, f32), cur: (f32, f32), step: f32, size: f32) -> bool {
+    let size = size.max(1.0);
+    cur.1 + BESIDE_GAP * size <= prev.0 && step < LINE_STEP * size
 }
 
 /// The ends of each line's ink.

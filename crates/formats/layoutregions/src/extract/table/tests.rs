@@ -823,3 +823,35 @@ fn detail_lines_stay_with_their_rows() {
     ]);
     assert_eq!(rows[0], ["Becher Steingut", "2", "12,50"]);
 }
+
+#[test]
+fn a_joint_of_a_rule_parts_two_titles_less_than_a_cell_gap_apart() {
+    // `No.` and `Article` 7 points apart at size 10 are one piece; the joint of the rule
+    // under them at x 60 stands in that white space and parts them.
+    let runs = [
+        run_at("No.", 30.0, 100.0, 0),
+        run_at("Article", 55.0, 100.0, 0),
+        run_at("Count", 300.0, 100.0, 0),
+    ];
+    let pieces = vec![pieces_of(&runs, 0, 3)];
+    assert_eq!(pieces[0].len(), 2);
+    let cut = super::grid::cut_at_breaks(&runs, &pieces, &[51.5]);
+    let ends: Vec<(usize, usize)> = cut[0].iter().map(|p| (p.start, p.end)).collect();
+    assert_eq!(ends, [(0, 1), (1, 2), (2, 3)]);
+    assert_eq!((cut[0][0].x1, cut[0][1].x0), (48.0, 55.0));
+    // A joint at a word space, and one inside a run, part nothing.
+    let sentence = [
+        run_at("The", 30.0, 100.0, 0),
+        run_at("old lamp", 51.0, 100.0, 0),
+    ];
+    let pieces = vec![pieces_of(&sentence, 0, 2)];
+    for x in [49.5, 70.0] {
+        let cut = super::grid::cut_at_breaks(&sentence, &pieces, &[x]);
+        assert_eq!(cut[0].len(), 1, "{x}");
+    }
+    // No joints: the pieces as they are.
+    assert_eq!(
+        super::grid::cut_at_breaks(&sentence, &pieces, &[])[0].len(),
+        1
+    );
+}

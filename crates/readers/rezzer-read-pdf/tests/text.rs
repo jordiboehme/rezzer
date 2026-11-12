@@ -1510,6 +1510,42 @@ fn two_centred_lines_keep_their_break() {
 }
 
 #[test]
+fn two_lines_set_flush_right_keep_their_break() {
+    // A name over its register line at the head of a letter, set flush right: two short
+    // lines in the shape of an address are two lines. The same edges with wording that shows
+    // a wrap are one text: a line that ends in a comma, and two lines that read as a sentence.
+    let block = |lines: [&str; 2]| {
+        let mut c = String::new();
+        for (k, t) in lines.iter().enumerate() {
+            let x = 560.0 - common::helvetica_width(t, 10.0);
+            c += &show("F1", 10.0, x, 700.0 - 12.0 * k as f32, t);
+        }
+        markdown_of(&read(&pdf(&[Page::text(c)], "")))
+    };
+    let md = block(["Sample Supply Ltd", "Register Lake Town 4521"]);
+    assert!(
+        md.contains("\nSample Supply Ltd\\\nRegister Lake Town 4521\n"),
+        "{md}"
+    );
+    let md = block([
+        "The old lamp near the door,",
+        "Which nobody has lit for years",
+    ]);
+    assert!(
+        md.contains("\nThe old lamp near the door, Which nobody has lit for years\n"),
+        "{md}"
+    );
+    let md = block([
+        "Nobody has lit the lamp for",
+        "Years. The room stays dark and cold.",
+    ]);
+    assert!(
+        md.contains("\nNobody has lit the lamp for Years. The room stays dark and cold.\n"),
+        "{md}"
+    );
+}
+
+#[test]
 fn very_narrow_german_prose_keeps_joining() {
     // German prose in a column of three or four words a line, every line starting with a
     // capital: its lines hold words in small letters, an address does not, so each paragraph

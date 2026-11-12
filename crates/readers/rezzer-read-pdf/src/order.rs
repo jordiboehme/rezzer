@@ -12,7 +12,6 @@ use unicode_bidi::{BidiClass, Level, ParagraphBidiInfo, bidi_class};
 
 use layoutregions::segment::cut;
 pub(crate) use layoutregions::segment::cut::SIZE_STEP;
-use layoutregions::segment::drawn::Line;
 use layoutregions::{Bounds, Limits};
 
 use crate::layout::{Gap, Gaps, Run};
@@ -288,15 +287,22 @@ struct Piece {
     /// no ink).
     x0: f32,
     /// The end of the piece's last glyph, white space too; fragments of white space only
-    /// count only in a piece without ink.
+    /// count only in a piece without ink. Two pieces that touch by their blanks (a label
+    /// padded up to its value, a field of a print run padded up to the next one) leave no
+    /// band of white space between them.
     x1: f32,
+    /// The end of the piece's last glyph with ink: where the piece stands at a gutter is
+    /// asked of its ink, not of the blanks after it (see `cut::Piece::trail`). For a piece
+    /// without ink, `x1`.
+    ink1: f32,
     /// Where a gap to the next fragment starts to count (see [`Frag::free`]), and whether
     /// white space ends the piece.
     free: f32,
     padded: bool,
     y0: f32,
     y1: f32,
-    /// The baseline of the piece's first fragment.
+    /// The baseline of the piece's first fragment with ink (of its first fragment when it
+    /// has no ink).
     y: f32,
     size: f32,
     /// The characters of its fragments (see [`Frag::chars`]): padding is not counted.
@@ -313,6 +319,8 @@ struct Piece {
     /// [`cut::reads_as_value`]): what the cut asks of a row of labels over values.
     colon: bool,
     value: bool,
+    /// Its text is a whole number (see [`cut::reads_as_number`]).
+    number: bool,
     /// Every fragment with ink of the piece is bold (false for a piece without ink).
     bold: bool,
 }
@@ -419,11 +427,17 @@ fn pieces_in(frags: &[Frag], ids: &[usize], head: &[usize], base: usize) -> (Vec
                 if gap(p.free, p.padded, f) <= PIECE_GAP * f.size.max(p.size) {
                     // A piece stands where its ink stands: a string of white space under the
                     // text (a field a print run blanks before it writes the value) or after
-                    // it does not widen it.
+                    // it does not widen it, and white space before it does not give it its
+                    // baseline.
                     if f.inked && !p.inked {
-                        (p.x0, p.x1) = (f.x, f.pen.max(f.x));
-                    } else if f.inked || !p.inked {
+                        (p.x0, p.x1, p.ink1) = (f.x, f.pen.max(f.x), f.end.max(f.x));
+                        p.y = f.y;
+                    } else if f.inked {
                         p.x1 = p.x1.max(f.pen);
+                        p.ink1 = p.ink1.max(f.end);
+                    } else if !p.inked {
+                        p.x1 = p.x1.max(f.pen);
+                        p.ink1 = p.x1;
                     }
                     if f.inked {
                         (p.free, p.padded) = (f.free, f.padded);
@@ -438,6 +452,7 @@ fn pieces_in(frags: &[Frag], ids: &[usize], head: &[usize], base: usize) -> (Vec
                         p.bold = f.bold && (p.bold || !p.inked);
                         p.colon = f.text.trim_end().ends_with(':');
                         p.value = cut::reads_as_value(&f.text) && (p.value || !p.inked);
+                        p.number = cut::reads_as_number(&f.text) && (p.number || !p.inked);
                     }
                     p.inked |= f.inked;
                     p.frags.push(i);
@@ -449,6 +464,7 @@ fn pieces_in(frags: &[Frag], ids: &[usize], head: &[usize], base: usize) -> (Vec
                 row: base + r,
                 x0: f.x,
                 x1: f.pen.max(f.x),
+                ink1: if f.inked { f.end } else { f.pen }.max(f.x),
                 free: f.free,
                 padded: f.padded,
                 y0: lo,
@@ -463,6 +479,7 @@ fn pieces_in(frags: &[Frag], ids: &[usize], head: &[usize], base: usize) -> (Vec
                 bold: f.inked && f.bold,
                 colon: f.inked && f.text.trim_end().ends_with(':'),
                 value: f.inked && cut::reads_as_value(&f.text),
+                number: f.inked && cut::reads_as_number(&f.text),
             });
         }
         out.extend(piece);
@@ -474,10 +491,10 @@ fn pieces_in(frags: &[Frag], ids: &[usize], head: &[usize], base: usize) -> (Vec
 #[derive(Debug, Default)]
 struct Order {
     ids: Vec<usize>,
-    /// The places in `ids`, ascending, where the right side of a gutter of a lone row starts
-    /// (see `Cut::sides`): the piece there starts a line even when it shares the row of
-    /// the piece before it, which stands on the left side (a title beside the first line of
-    /// a field list).
+    /// The places in `ids`, ascending, where a piece starts a line even when it shares the
+    /// row of the piece before it (see `Cut::sides` and `Cut::breaks`): the right side of a
+    /// gutter of a lone row (a title beside the first line of a field list), a piece that
+    /// went to a side with the ink of its row.
     sides: Vec<usize>,
 }
 
@@ -514,20 +531,29 @@ fn cut_piece(p: &Piece) -> cut::Piece {
         runs: 1,
         colon: p.colon,
         value: p.value,
+        number: p.number,
         boxed: p.stand,
         rows: p.rows,
+        trail: (p.x1 - p.ink1).max(0.0),
     }
 }
+
+/// No rules on the page.
+const NO_RULES: cut::Ruled<'static> = cut::Ruled {
+    rules: &[],
+    joined: &[],
+    joints: &[],
+};
 
 /// The pieces `ids` of `pieces` in reading order: columns one after the other, with the
 /// pieces that cross the gutter (titles, notes across the columns) splitting the columns into
 /// bands. The cut itself is the engine's ([`cut::xy_cut`]).
-fn reading_order(pieces: &[Piece], ids: &[usize], rules: &[Line]) -> Order {
+fn reading_order(pieces: &[Piece], ids: &[usize], rules: &cut::Ruled<'_>) -> Order {
     let cutting: Vec<cut::Piece> = ids.iter().map(|&i| cut_piece(&pieces[i])).collect();
     // The text pass orders a page before the layout has a budget at hand; of the limits the
     // cut reads only `max_cut_depth`, which `rezzer_layout::pdf::engine_limits` keeps at its
     // default for every budget, so the defaults are the read's limits here too.
-    let found = cut::xy_cut(&cutting, rules, &Limits::default(), &|| false);
+    let found = cut::xy_cut_ruled(&cutting, rules, &Limits::default(), &|| false);
     let mut out = Order {
         ids: Vec::with_capacity(ids.len()),
         sides: Vec::new(),
@@ -536,22 +562,37 @@ fn reading_order(pieces: &[Piece], ids: &[usize], rules: &[Line]) -> Order {
         if found.sides.binary_search(&g).is_ok() {
             out.sides.push(out.ids.len());
         }
+        // A piece that is a line of its own: it starts a line, and so does the piece after
+        // it.
+        for (at, k) in group.iter().enumerate() {
+            if found.breaks.binary_search(k).is_ok() {
+                out.sides
+                    .extend([out.ids.len() + at, out.ids.len() + at + 1]);
+            }
+        }
         out.ids.extend(group.iter().map(|&k| ids[k]));
     }
+    out.sides.sort_unstable();
+    out.sides.dedup();
     out
 }
 
 /// Lines of fragments in reading order, as lists of fragment indices.
 #[cfg(test)]
 fn lines_of(frags: &[Frag], columns: bool) -> Vec<Vec<usize>> {
-    lines_in(frags, columns, &[], &[])
+    lines_in(frags, columns, &[], &NO_RULES)
 }
 
 /// Lines of fragments in reading order, as lists of fragment indices. A fragment tagged with
 /// one of `boxes` (in the frame of the fragments) is read with the rest of its box: the box
 /// stands as one piece among the others, ordered as they are, and its text is read whole
 /// where it stands.
-fn lines_in(frags: &[Frag], columns: bool, boxes: &[[f32; 4]], rules: &[Line]) -> Vec<Vec<usize>> {
+fn lines_in(
+    frags: &[Frag],
+    columns: bool,
+    boxes: &[[f32; 4]],
+    rules: &cut::Ruled<'_>,
+) -> Vec<Vec<usize>> {
     let head = chain_heads(frags);
     let boxed = columns && frags.iter().any(|f| f.region.is_some());
     let order: Order;
@@ -603,7 +644,7 @@ fn boxed_order(
     frags: &[Frag],
     head: &[usize],
     boxes: &[[f32; 4]],
-    rules: &[Line],
+    rules: &cut::Ruled<'_>,
 ) -> (Vec<Piece>, Order) {
     // Free text first, then the fragments of each box, in the order the boxes are first met.
     let mut group_of: Vec<Option<usize>> = vec![None; boxes.len()];
@@ -651,6 +692,7 @@ fn boxed_order(
             row: 0,
             x0: bx[0],
             x1: bx[2],
+            ink1: bx[2],
             free: bx[2],
             padded: false,
             // The first row's extent decides which row the stand-in shares; the box's own
@@ -667,6 +709,7 @@ fn boxed_order(
             bold: false,
             colon: false,
             value: false,
+            number: false,
         });
         ps.extend(list);
         inner.push(at..ps.len());
@@ -1124,45 +1167,29 @@ pub(crate) fn runs_in(
         .flat_map(|r| [turn.apply(r.x0, r.y0).0, turn.apply(r.x1, r.y1).0])
         .collect();
     columns.sort_by(f32::total_cmp);
-    // The horizontal rules in the frame of the main text, which part bands of columns.
-    let across: Vec<Line> = rules
-        .iter()
-        .flat_map(|r| {
-            let (a, b) = (turn.apply(r.x0, r.y0), turn.apply(r.x1, r.y1));
-            let (x0, x1) = (a.0.min(b.0), a.0.max(b.0));
-            match r.kind {
-                // A rectangle's top and bottom are rules across too.
-                RuleKind::Rect => vec![
-                    Line {
-                        at: a.1,
-                        from: x0,
-                        to: x1,
-                    },
-                    Line {
-                        at: b.1,
-                        from: x0,
-                        to: x1,
-                    },
-                ],
-                // A line rule runs along one axis by how it is made: flat in this frame when
-                // it is wider than high.
-                RuleKind::Line if (a.1 - b.1).abs() < (a.0 - b.0).abs() => {
-                    vec![Line {
-                        at: (a.1 + b.1) / 2.0,
-                        from: x0,
-                        to: x1,
-                    }]
-                }
-                RuleKind::Line => Vec::new(),
-            }
-        })
-        .collect();
+    // The rules in the frame of the main text: the flat ones (a rectangle's top and bottom
+    // too), which part bands of columns, and the upright ones (a rectangle's sides too), which
+    // make a joint of a flat rule the corner of a drawn grid. The engine sorts them, by the
+    // rule it sorts its own by: a slanted stroke is neither.
+    let (flat, uprights) = cut::flat_and_upright(rules.iter().map(|r| {
+        let (a, b) = (turn.apply(r.x0, r.y0), turn.apply(r.x1, r.y1));
+        ([a.0, a.1, b.0, b.1], matches!(r.kind, RuleKind::Rect))
+    }));
+    let across = flat;
     let unused = if turned.is_empty() {
         None
     } else {
         tag_regions(&mut frags, &turned).err()
     };
-    for ids in lines_in(&frags, true, &turned, &across) {
+    // The rules drawn in pieces, joined, and their joints, which mark the columns of the
+    // rows under such a rule: both are made once for the page.
+    let (joined, joints) = cut::joined(&across, &uprights);
+    let ruled = cut::Ruled {
+        rules: &across,
+        joined: &joined,
+        joints: &joints,
+    };
+    for ids in lines_in(&frags, true, &turned, &ruled) {
         let mut r = line_runs(page, &frags, from_first_ink(&frags, &ids), line, links);
         // A line with a wide gap after a sentence end keeps its word gaps: they tell whether
         // it is justified prose (see `layoutregions::extract::table::grid::pieces_of`).
@@ -1185,7 +1212,7 @@ pub(crate) fn runs_in(
         // position of their first glyph in the page's frame.
         let frame = compose(turn, dir);
         let frags = fragments(&list, text, frame, turn);
-        for ids in lines_in(&frags, false, &[], &[]) {
+        for ids in lines_in(&frags, false, &[], &NO_RULES) {
             let ids = from_first_ink(&frags, &ids);
             let mut r = line_runs(page, &frags, ids, line, links);
             for (run, &i) in r.iter_mut().zip(ids) {
@@ -1394,8 +1421,9 @@ mod tests {
         let value = frag("1200", 122.0, 700.0);
         let ps = pieces(&[label.clone(), value.clone()]);
         assert_eq!(ps.len(), 2, "{ps:?}");
-        // The piece of the label reaches over its padding.
-        assert_eq!(ps[0].x1, 122.0);
+        // The piece of the label reaches over its padding; its ink ends where the label
+        // ends.
+        assert_eq!((ps[0].x1, ps[0].ink1), (122.0, 92.0));
         let runs = line_runs(1, &[label, value], &[0, 1], 0, &[]);
         let text: Vec<&str> = runs.iter().map(|r| r.text.as_str()).collect();
         assert_eq!(text, ["Points: ", "1200"]);
@@ -1617,7 +1645,7 @@ mod tests {
             frags.push(r);
         }
         frags.push(frag("A line under the boxes", 40.0, 560.0));
-        let lines = lines_in(&frags, true, &boxes, &[]);
+        let lines = lines_in(&frags, true, &boxes, &NO_RULES);
         let text: Vec<String> = lines
             .iter()
             .map(|l| l.iter().map(|&i| frags[i].text.clone()).collect())
@@ -1641,7 +1669,7 @@ mod tests {
         // Text beside a box of one line stays on its line.
         let mut frags = vec![frag("Total", 50.0, 700.0), frag("10.00", 300.0, 700.0)];
         frags[1].region = Some(0);
-        let lines = lines_in(&frags, true, &[[290.0, 690.0, 400.0, 715.0]], &[]);
+        let lines = lines_in(&frags, true, &[[290.0, 690.0, 400.0, 715.0]], &NO_RULES);
         assert_eq!(lines, [vec![0, 1]]);
     }
 
@@ -1728,7 +1756,7 @@ mod tests {
         let mut frags = title_beside(9.0, true, &[703.0, 695.0, 687.0, 679.0], 0);
         frags.iter_mut().for_each(|f| f.region = Some(0));
         frags.push(frag("Muster GmbH", 40.0, 760.0));
-        let lines = lines_in(&frags, true, &[[30.0, 670.0, 560.0, 715.0]], &[]);
+        let lines = lines_in(&frags, true, &[[30.0, 670.0, 560.0, 715.0]], &NO_RULES);
         let text: Vec<String> = lines
             .iter()
             .map(|l| {

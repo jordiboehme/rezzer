@@ -11,9 +11,9 @@ use crate::axes::{ALL, Axes, Data, Extent, Look, Next, Shape, Sheet, Variant};
 use crate::common::label;
 use crate::draw::{bold, courier, mark_b};
 use crate::shapes::{
-    BLOCK_A, Built, DataFont, Geo, ROWS, Rows, THREE_ROWS, boxed_row, grids_side_by_side,
-    header_grid, label_block, lone_field, overflow_rows, page, rows_page, short_value_rows,
-    title_grid_page, total_column,
+    BLOCK_A, Built, DataFont, FieldSpec, Geo, ROWS, Rows, THREE_ROWS, boxed_row,
+    grids_side_by_side, header_grid, label_block, lone_field, overflow_rows, page, rows_page,
+    short_value_rows, title_grid_page, total_column,
 };
 
 /// Task 15b part 2c review (Important 2 and 3): a row of three boxed fields whose middle box
@@ -691,6 +691,171 @@ fn labels_under(v: &Variant) -> (Sheet, Option<Extent>) {
     (Sheet::new(b), Some(e))
 }
 
+/// The rows of fields of [`head_line_over_fields`].
+const HEAD_FIELDS: [&[FieldSpec]; 4] = [
+    &[
+        (0, 20, "Name", "Erika Example"),
+        (20, 18, "Town", "Oakfield"),
+        (38, 20, "Branch", "Harbor Road"),
+    ],
+    &[
+        (0, 20, "Street", "34 Mill Lane"),
+        (20, 18, "Unit", "12"),
+        (38, 20, "Team", "North"),
+    ],
+    &[
+        (0, 20, "Code", "67890"),
+        (20, 18, "Class", "B2"),
+        (38, 20, "Grade", "7"),
+    ],
+    &[
+        (0, 20, "Entry", "01.02.2020"),
+        (20, 18, "Hours", "160,00"),
+        (38, 20, "Rate", "23,45"),
+    ],
+];
+
+/// Task 31b fix round 4 (P1, a guard: every build since the round before reads it, the page
+/// of the finding is not reproduced): the head of a pay statement over its fields. A bold
+/// title at the left and, on its baseline, the period it is for in the data font; a code
+/// line in the data font at the right, a line higher; under them rows of fields between
+/// rules. The title and its period are one line of meaning: the period reads right after
+/// the title, on its line, before the fields (the place of the code line is free).
+fn head_line_over_fields(v: &Variant) -> (Sheet, Option<Extent>) {
+    let g = v.geo();
+    let t = top(&g);
+    let mut b = rows_page(&g, &ROWS, &HEAD_FIELDS, &[]);
+    let k = g.data / 10.0;
+    let (title, period, code) = (
+        "Statement of pay and hours",
+        "for October 2026",
+        "A1B/C2D  12345/67890/123",
+    );
+    let y = t + 3.0 * k;
+    let x = g.col(0);
+    b.page.template += &crate::common::show("FB", 14.0 * k, x, y, title);
+    let end = x + crate::common::font_width("FB", title, 14.0 * k);
+    b.page.template += &crate::draw::courier(end + 18.0 * k, y, g.data, period);
+    b.page.template += &crate::draw::courier(g.col(60), y + 11.5 * k, g.data, code);
+    b.values.extend([period.to_string(), code.to_string()]);
+    let mut sheet = Sheet::new(b);
+    sheet.want.order = vec![title.into(), period.into(), HEAD_FIELDS[0][0].2.into()];
+    sheet.want.lines_joined.push((title.into(), period.into()));
+    sheet.want.may_title.push(format!("{title} {period}"));
+    let e = Extent {
+        top: y + 12.0 * k,
+        bottom: t - 4.0 * 2.4 * g.data,
+        right: g.col(85),
+    };
+    (sheet, Some(e))
+}
+
+/// Task 31b fix round 5 (P1): the head of a pay statement as a print run sets it, over a
+/// wide grid of fields. A bold title at the left; on its row, a little lower, the period it
+/// is for in the data font, set as one data line with a date and a sheet number at the
+/// right, so the blanks of the line run from the period up to the date. Under them a row of
+/// small labels and a row of values padded to their fields across the page, then a block of
+/// address lines at the left beside lines of fields at the right on baselines of their own,
+/// which make a gutter down the page. The box of the period, blanks and all, runs over that
+/// gutter and far into the right side; its ink ends before the gutter. The title and its
+/// period are one line of meaning: the period reads right after the title, before any
+/// field.
+fn padded_period_over_fields(v: &Variant) -> (Sheet, Option<Extent>) {
+    let g = v.geo();
+    let d = g.data;
+    let mut b = Built::new(&g);
+    let (title, period) = ("Statement of pay", "for October 2026");
+    let (x0, x1) = (g.col(0) - 0.12, g.col(86));
+    // The head: the title with the line of the period a little lower.
+    let y = top(&g) + 2.6 * d;
+    b.page.template += &bold(g.col(0), y, d, title);
+    g.values(
+        &mut b,
+        y - 0.16 * d,
+        &[(30, period), (69, "31.10.2026"), (85, "1")],
+    );
+    b.values.extend([period, "31.10.2026"].map(String::from));
+    // A row of small labels and a row of padded values between rules across the page.
+    b.page.template += &g.hrule(x0, x1, y - 0.36 * d);
+    let labels: [(usize, &str); 13] = [
+        (0, "Number"),
+        (7, "Group"),
+        (13, "Class"),
+        (20, "Factor"),
+        (30, "Branch"),
+        (36, "Entry"),
+        (47, "Unit"),
+        (51, "Tier"),
+        (58, "Zone"),
+        (63, "Plan"),
+        (69, "Rate"),
+        (75, "Base"),
+        (81, "Share"),
+    ];
+    for (k, l) in labels {
+        b.page.template += &courier(g.col(k), y - 1.19 * d, g.label, l);
+        b.values.push(l.to_string());
+    }
+    let values: [(usize, &str); 7] = [
+        (0, "00123"),
+        (21, "Erika Example"),
+        (58, "B"),
+        (63, "2"),
+        (69, "7,5"),
+        (75, "100"),
+        (83, "N"),
+    ];
+    g.values(&mut b, y - 2.56 * d, &values);
+    b.values.extend(values.map(|v| v.1.to_string()));
+    b.page.template += &g.hrule(x0, x1, y - 2.74 * d);
+    // The address at the left, lines of fields at the right on baselines of their own.
+    let address = ["Erika Example", "34 Mill Lane", "Oakfield West"];
+    for (k, l) in address.iter().enumerate() {
+        b.page.template += &bold(g.col(3), y - (9.0 + 1.06 * k as f32) * d, 1.2 * d, l);
+        b.values.push(l.to_string());
+    }
+    let sender = [
+        "Harbor Works Ltd, 2 Dock Road, Oakfield West 12",
+        "Sheet for the staff file",
+    ];
+    for (k, l) in sender.iter().enumerate() {
+        b.page.template += &courier(g.col(3), y - (6.2 + 0.6 * k as f32) * d, 0.8 * d, l);
+        b.values.push(l.to_string());
+    }
+    for (k, row) in [
+        [(47, "Bank"), (58, "Account"), (70, "Paid")],
+        [(47, "Hours"), (58, "Days"), (70, "Leave")],
+    ]
+    .iter()
+    .enumerate()
+    {
+        for (c, l) in row {
+            let y = y - (4.2 + 2.4 * k as f32) * d;
+            b.page.template += &courier(g.col(*c), y, g.label, l);
+            b.values.push(l.to_string());
+        }
+    }
+    let lines: [&[(usize, &str)]; 4] = [
+        &[(47, "Oakfield Bank"), (70, "30.10.2026")],
+        &[(47, "160,00"), (58, "21"), (70, "2")],
+        &[(47, "Paid by transfer to the account"), (82, "X")],
+        &[(47, "Leave left for the year in days"), (82, "9")],
+    ];
+    for (k, parts) in lines.iter().enumerate() {
+        let at = [5.4, 7.8, 10.3, 11.5][k];
+        g.values(&mut b, y - at * d, parts);
+        b.values.extend(parts.iter().map(|v| v.1.to_string()));
+    }
+    let mut sheet = Sheet::new(b);
+    sheet.want.order = vec![title.into(), period.into(), "Number".into()];
+    let e = Extent {
+        top: y + 2.0 * d,
+        bottom: y - 13.0 * d,
+        right: g.col(86),
+    };
+    (sheet, Some(e))
+}
+
 /// The digits of a boxed field: one box a digit of the data pitch from data column `k`, its
 /// data line at `y`, and a drawn mark before each of `before`.
 /// Part 2e-1 (item 3): labels under their values with a second line of the first value set on
@@ -918,6 +1083,21 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "F1 to F3",
             axes: ALONE,
             draw: f1_to_f3,
+        },
+        Shape {
+            name: "head line over fields",
+            axes: ALONE,
+            draw: head_line_over_fields,
+        },
+        Shape {
+            name: "padded period beside a title over fields",
+            // A print run pads its lines in a monospaced face: in a proportional face the
+            // page has no blanks after the period, and is another page.
+            axes: Axes {
+                data: &[Data::CourierBold, Data::Courier],
+                ..ALONE
+            },
+            draw: padded_period_over_fields,
         },
         Shape {
             name: "header grid",

@@ -2256,9 +2256,774 @@ fn flowing_column(v: &Variant) -> Sheet {
     s
 }
 
+/// The lines of the head block of [`head_block_beside_a_logo`], set flush right.
+const HEAD_BLOCK: [&str; 5] = [
+    "Northwind Supply Ltd.",
+    "Office register Fairhaven 4521",
+    "Partners Alex Sample and Robin Example",
+    "Ref. No.: AB123456789",
+    "Member ID:  CD12EFG34567890123",
+];
+
+/// The paragraphs of the letter of [`head_block_beside_a_logo`], line by line.
+const LETTER: [&[&str]; 3] = [
+    &[
+        "Thank you for the order that reached us on Monday morning.",
+        "All parts are packed and leave our store by the end of the week.",
+    ],
+    &[
+        "The carrier brings the boxes to your door and takes the old",
+        "frames back with him at no further cost to you.",
+    ],
+    &[
+        "Please look at every part when it arrives and write to us",
+        "within ten days when something is missing or broken.",
+    ],
+];
+
+/// Task 31b, class G: the head of a letter. A logo at the top left; right of it a block of
+/// five lines at 9 points set flush right at the pitch of their size, the last two of them a
+/// label with a colon and its value; under the logo a sender line at 9 points, lines of one
+/// space each, the recipient's address of three lines set in, a date and a subject line with
+/// a small stroked box right of them (a label over it, a label and its value inside), then
+/// the letter in paragraphs with a blank line between them. The head block is read whole at
+/// the page head, before the address and the letter, each of its lines a line of its own;
+/// no line of it stands between two paragraphs of the letter. With `two` the block is its
+/// first two lines only: two lines set flush right, the shorter one first, are two lines and
+/// no line that wraps.
+fn head_block_beside_a_logo(v: &Variant, two: bool) -> Sheet {
+    let k = v.k();
+    let (plain, bold) = v.faces();
+    let (small, size) = (9.0 * k, 11.0 * k);
+    let mut t = crate::common::logo(30.0, 767.0, 88.0, 50.0);
+    let head = if two {
+        &HEAD_BLOCK[..2]
+    } else {
+        &HEAD_BLOCK[..]
+    };
+    for (n, l) in head.iter().enumerate() {
+        t += &right(plain, small, 565.0, 808.0 - small * n as f32, l);
+    }
+    t += &show(
+        plain,
+        small,
+        30.0,
+        750.0,
+        "Northwind Supply Ltd. - 12 Harbor Road - 12345 Fairhaven",
+    );
+    for y in [738.0, 726.0, 714.0, 657.0, 645.0, 633.0] {
+        t += &show(plain, size, 30.0, y, " ");
+    }
+    let address = ["Erika Example", "34 Mill Lane", "67890 Oakfield"];
+    for (n, l) in address.iter().enumerate() {
+        t += &show(plain, size, 56.91, 699.0 - 13.0 * n as f32, l);
+    }
+    t += &show(plain, size, 32.0, 622.0, "12 May 2026");
+    t += &show(bold, size, 30.0, 609.0, "Your order of last week");
+    t += &right(plain, small, 565.0, 622.0, "Quote in every reply");
+    t += "q 0.5 w 458 607 107 13 re S Q\n";
+    t += &right(plain, small, 562.0, 609.5, "Ref: 123456789");
+    let mut y = 583.0;
+    for para in LETTER {
+        for l in para {
+            t += &show(plain, size, 30.0, y, l);
+            y -= 12.0 * k;
+        }
+        t += &show(plain, size, 30.0, y, " ");
+        y -= 12.0 * k;
+    }
+    let mut s = sheet(v, t, y - 60.0, None);
+    // The block is whole and in its order; where it stands on the page is free.
+    s.want.order = vec![HEAD_BLOCK[0].into(), HEAD_BLOCK[1].into()];
+    if !two {
+        s.want.order.extend([
+            "Partners".to_string(),
+            "AB123456789".into(),
+            "CD12EFG34567890123".into(),
+        ]);
+        // Its two lines of a label and a value keep each label with its value on a line of
+        // its own.
+        s.want
+            .lines_apart
+            .push(("AB123456789".into(), "Member ID".into()));
+        s.want
+            .lines_joined
+            .push(("Ref. No.:".into(), "AB123456789".into()));
+        s.want
+            .lines_joined
+            .push(("Member ID:".into(), "CD12EFG34567890123".into()));
+    }
+    // The letter reads in its order, wherever the block stands: the address, then its
+    // paragraphs one after the other. A chain of its own, as the place of the block against
+    // the letter is free.
+    let letter = [address[0], LETTER[0][0], LETTER[1][0], LETTER[2][0]];
+    s.want.orders.push(letter.map(String::from).to_vec());
+    for w in letter.windows(2) {
+        s.want.lines_apart.push((w[0].into(), w[1].into()));
+    }
+    s.want
+        .paragraphs
+        .extend(LETTER.iter().map(|para| para.join(" ")));
+    s.want
+        .lines_apart
+        .push((HEAD_BLOCK[0].into(), HEAD_BLOCK[1].into()));
+    // No line of the block stands in a paragraph of the letter.
+    for l in head {
+        for para in LETTER {
+            s.want.apart.push(((*l).into(), para[0].into()));
+        }
+    }
+    s
+}
+
+/// The rows of [`framed_pairs`]: a label and its value.
+const FRAMED_PAIRS: [(&str, &str); 4] = [
+    ("Holder", "Alex Sample Ltd"),
+    ("Account", "AB12 3456 7890 1234 5678 90 / CDEFGHIJ123"),
+    ("Amount", "45,67"),
+    ("Reference", "123456789-987654321"),
+];
+
+/// Task 31b, class B (a guard: the cut at equal bands of Task 31a reads it): a stroked frame
+/// around four rows of a label and its value in two columns, at 11 points times the size
+/// factor, the rows `pitch` sizes apart (15 points at size 11 is 1.36, 17 points is 1.55).
+/// Over the frame stands a paragraph whose last line is one space, on the frame's top edge;
+/// the amount is followed by a space and a currency sign in a run of its own. With `beside`
+/// a picture stands right of the frame. Each label reads with its value at any row pitch a
+/// writer uses in a frame.
+fn framed_pairs(v: &Variant, pitch: f32, beside: bool) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let size = 11.0 * k;
+    let step = pitch * size;
+    let top = 640.0;
+    let para = [
+        "Please send the sum to the account named in the frame under these lines",
+        "and quote the reference, so that we can match it with your order at once.",
+    ];
+    let mut t = String::new();
+    for (n, l) in para.iter().enumerate() {
+        t += &show(plain, size, 30.0, top - 12.0 * k * n as f32, l);
+    }
+    // The frame: its top edge on the baseline of the line of one space.
+    let edge = top - 12.0 * k * 2.0 - 3.0 * k;
+    t += &show(plain, size, 30.0, edge, " ");
+    let first = edge - 15.0 * k;
+    let last = first - step * 3.0;
+    let bottom = last - 8.0 * k;
+    t += &format!(
+        "q 1 0 0 RG 0.5 w 30 {bottom} 401.25 {} re S Q\n",
+        edge - bottom
+    );
+    let x_value = 34.0 + 11.8 * size;
+    for (n, (label, value)) in FRAMED_PAIRS.iter().enumerate() {
+        let y = first - step * n as f32;
+        t += &show(plain, size, 34.0, y, label);
+        if *label == "Amount" {
+            let amount = format!("{value} ");
+            t += &show(plain, size, x_value, y, &amount);
+            t += &show(
+                plain,
+                size,
+                x_value + font_width(plain, &amount, size),
+                y,
+                "$",
+            );
+        } else {
+            t += &show(plain, size, x_value, y, value);
+        }
+    }
+    if beside {
+        t += &crate::common::logo(481.5, bottom, 55.0 * k, 55.0 * k);
+    }
+    let mut s = sheet(v, t, bottom - 60.0, None);
+    for (label, value) in FRAMED_PAIRS {
+        let value = if label == "Amount" { "45,67 $" } else { value };
+        s.built.fields.push((label, Ok(Some(value))));
+    }
+    s.want.paragraphs.push(para.join(" "));
+    s.want.order = vec![para[0].into(), "Holder".into(), "Reference".into()];
+    s
+}
+
+/// Task 31b, class C1: a notes block in the page head. A small bold label over a thin rule
+/// with two lines under it, and a paragraph lower on the page. The label names its two
+/// lines: it is no heading over the rest of the page, and the paragraph is no part of its
+/// block.
+fn labelled_block(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, bold) = v.faces();
+    let size = 9.0 * k;
+    let top = 760.0;
+    let lines = ["Bring the crates to the side door", "Ring twice before ten"];
+    let mut t = show(bold, 7.0 * k, 40.0, top, "Notes");
+    t += &format!(
+        "q 0.5 w 40 {} m 240 {} l S Q\n",
+        top - 3.0 * k,
+        top - 3.0 * k
+    );
+    for (n, l) in lines.iter().enumerate() {
+        t += &show(plain, size, 40.0, top - 13.0 * k - 11.0 * k * n as f32, l);
+    }
+    let para = [
+        "The driver of the green van takes the long road through the valley",
+        "and stops at the mill before he turns back to the yard at noon.",
+    ];
+    let y = top - 80.0;
+    for (n, l) in para.iter().enumerate() {
+        t += &show(plain, size, 40.0, y - 11.0 * k * n as f32, l);
+    }
+    let mut s = sheet(v, t, y - 80.0, None);
+    s.want.no_headings.push("Notes".into());
+    s.want.order = vec![
+        "Notes".into(),
+        lines[0].into(),
+        lines[1].into(),
+        para[0].into(),
+    ];
+    s.want.paragraphs.push(para.join(" "));
+    s.want.apart.push(("Notes".into(), para[0].into()));
+    s.want.apart.push((lines[1].into(), para[0].into()));
+    s
+}
+
+/// Task 31b, class C2: two stroked boxes side by side, each with a small bold label over a
+/// rule and two lines under it. Each label reads with its own lines, the left box first.
+fn labelled_boxes(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, bold) = v.faces();
+    let size = 9.0 * k;
+    let top = 760.0;
+    let boxes = [
+        (
+            40.0,
+            "Sender",
+            ["Harbor store, gate four", "Open from eight to five"],
+        ),
+        (
+            300.0,
+            "Carrier",
+            ["Green van of the valley line", "Leaves the yard at noon"],
+        ),
+    ];
+    let mut t = String::new();
+    for (x, label, lines) in boxes {
+        t += &format!("q 0.5 w {x} {} 240 {} re S Q\n", top - 44.0 * k, 44.0 * k);
+        t += &show(bold, 7.0 * k, x + 4.0, top - 9.0 * k, label);
+        t += &format!(
+            "q 0.5 w {x} {} m {} {} l S Q\n",
+            top - 12.0 * k,
+            x + 240.0,
+            top - 12.0 * k
+        );
+        for (n, l) in lines.iter().enumerate() {
+            t += &show(
+                plain,
+                size,
+                x + 4.0,
+                top - 23.0 * k - 11.0 * k * n as f32,
+                l,
+            );
+        }
+    }
+    let mut s = sheet(v, t, top - 120.0, None);
+    for (_, label, lines) in boxes {
+        s.want.no_headings.push(label.into());
+        s.want
+            .order
+            .extend([label.to_string(), lines[0].into(), lines[1].into()]);
+    }
+    s.want.apart.push(("Sender".into(), boxes[1].2[0].into()));
+    s.want.apart.push(("Carrier".into(), boxes[0].2[0].into()));
+    s.want
+        .apart
+        .push((boxes[0].2[1].into(), boxes[1].2[0].into()));
+    s
+}
+
+/// Task 31b fix round 2 (I8): a row of four labels sitting on underlines that touch at the
+/// bounds of the fields (a rule in four pieces, no upright lines), two rows of values under
+/// them and a closing rule, with a block of lines at the left over it and one at the right.
+/// By the evidence of a ruled block (a rule in pieces whose joints stand between the cells,
+/// rows of one geometry, titles over the rule) the labels are the header of a table and each
+/// row of values reads whole under them.
+fn fields_on_touching_underlines(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let size = 9.0 * k;
+    let mut t = String::new();
+    for (n, l) in ["Harbor store", "Gate four", "Fairhaven"]
+        .iter()
+        .enumerate()
+    {
+        t += &show(plain, size, 40.0, 740.0 - 12.0 * k * n as f32, l);
+    }
+    for (n, l) in ["Sheet 3", "Clerk Alex Sample", "Week 19", "Shift two"]
+        .iter()
+        .enumerate()
+    {
+        t += &right(plain, 8.0 * k, 540.0, 746.0 - 10.0 * k * n as f32, l);
+    }
+    let xs = [40.0, 170.0, 300.0, 420.0, 540.0];
+    let top = 660.0;
+    let rows = [
+        ["Name", "Town", "Code", "Year"],
+        ["Alex Sample", "Oakfield", "AB12", "2026"],
+        ["Robin Example", "Fairhaven", "CD34", "2025"],
+    ];
+    for (r, row) in rows.iter().enumerate() {
+        let y = if r == 0 {
+            top
+        } else {
+            top - 3.0 * k - 13.0 * k * r as f32
+        };
+        for (c, cell) in row.iter().enumerate() {
+            t += &show(plain, size, xs[c] + 2.0, y, cell);
+        }
+    }
+    for w in xs.windows(2) {
+        t += &format!(
+            "q 0.5 w {} {} m {} {} l S Q\n",
+            w[0],
+            top - 2.0 * k,
+            w[1],
+            top - 2.0 * k
+        );
+    }
+    let close = top - 3.0 * k - 26.0 * k - 5.0 * k;
+    t += &format!("q 0.5 w 40 {close} m 540 {close} l S Q\n");
+    let mut s = sheet(v, t, close - 60.0, None);
+    s.want.table(
+        owned(&rows.iter().map(|r| &r[..]).collect::<Vec<_>>()),
+        "table",
+    );
+    s
+}
+
+/// The axes of a form whose edges are measured against each other (Task 31b fix round 7):
+/// one face, so that a line set flush right starts where the shape wants it.
+const TRACED: Axes = Axes {
+    data: &[Data::CourierBold],
+    ..DOC
+};
+
+/// One text of a form in the geometry of a traced page: where it starts (flush right:
+/// where it ends), its baseline, its size, bold, flush right, and the text.
+type Placed = (f32, f32, f32, bool, bool, &'static str);
+
+/// Plain text from `x` on the baseline `y`, of 6.7 points.
+const fn at(x: f32, y: f32, text: &'static str) -> Placed {
+    (x, y, 6.7, false, false, text)
+}
+
+/// A bold value from `x` on the baseline `y`, of 7.6 points.
+const fn value(x: f32, y: f32, text: &'static str) -> Placed {
+    (x, y, 7.6, true, false, text)
+}
+
+/// Text of `size` that ends at `x` on the baseline `y`.
+const fn ends(x: f32, y: f32, size: f32, bold: bool, text: &'static str) -> Placed {
+    (x, y, size, bold, true, text)
+}
+
+/// The texts `items` drawn with the baseline `top` at 740: every place and size times the
+/// variant's size factor, from the left margin and from that baseline, so the page keeps
+/// its proportions.
+fn placed(v: &Variant, top: f32, items: &[Placed]) -> String {
+    let k = v.k();
+    let (plain, bold) = v.faces();
+    let mut t = String::new();
+    for &(x, y, size, heavy, flush, text) in items {
+        let (x, y) = (40.0 + k * (x - 40.0), 740.0 - k * (top - y));
+        let font = if heavy { bold } else { plain };
+        t += &if flush {
+            right(font, k * size, x, y, text)
+        } else {
+            show(font, k * size, x, y, text)
+        };
+    }
+    t
+}
+
+/// The lines of the note of [`note_beside_field_rows`].
+const NOTE: [&str; 11] = [
+    "This is a record of",
+    "fees and is also",
+    "sent on to the",
+    "main office. This",
+    "sheet is to be",
+    "used to fill in",
+    "Form 8863 and to",
+    "claim a study",
+    "credit. Hand it to the",
+    "adviser of your hall or",
+    "use it for the return.",
+];
+
+/// The rows of fields of [`note_beside_field_rows`], left of its note.
+const NOTE_FIELDS: [Placed; 67] = [
+    (
+        141.8,
+        369.1,
+        9.0,
+        true,
+        false,
+        "RECORDS OFFICE AND REGISTER USE ONLY SAMPLE",
+    ),
+    (262.9, 358.0, 8.0, true, false, "REVISED COPY"),
+    at(66.0, 348.0, "Maker's name"),
+    at(300.4, 348.0, "1 Fees taken in for"),
+    ends(460.2, 347.9, 6.7, false, "Ref No. 1545-1574"),
+    at(306.1, 341.3, "tested lessons and added"),
+    value(66.0, 336.0, "NORTHWIND HALL"),
+    at(306.1, 334.5, "costs"),
+    at(66.0, 324.9, "Street address"),
+    at(239.0, 324.9, "Room no."),
+    ends(391.5, 323.6, 7.6, true, "3,600"),
+    at(299.1, 323.1, "$"),
+    at(401.5, 308.5, "For the year 2026"),
+    at(300.4, 313.4, "2"),
+    value(66.0, 313.0, "10 HARBOR AVENUE"),
+    at(66.0, 301.9, "Town"),
+    at(149.1, 301.9, "Region"),
+    at(204.4, 301.9, "Land"),
+    at(239.0, 301.9, "Postal code"),
+    value(66.0, 289.9, "OAKFIELD"),
+    value(167.8, 289.9, "OW"),
+    value(260.3, 289.9, "ZIP"),
+    value(404.6, 289.7, "Form 77-T"),
+    at(300.4, 278.8, "3"),
+    at(66.0, 277.8, "Phone number:"),
+    at(66.0, 267.3, "Maker's register number"),
+    at(183.7, 267.3, "Member's number"),
+    at(300.4, 255.7, "4 Changes made for a"),
+    at(398.2, 255.7, "5 Grants or awards"),
+    value(99.2, 255.3, "37-700XXXX"),
+    value(215.1, 255.3, "605-00-XXXX"),
+    at(306.1, 247.7, "past year"),
+    at(66.0, 244.2, "Member's name"),
+    value(66.0, 232.2, "DANA REED"),
+    at(299.1, 230.8, "$"),
+    at(396.0, 230.8, "$"),
+    at(66.0, 221.1, "Street address"),
+    at(239.0, 221.1, "Flat no."),
+    at(300.4, 221.1, "6 Changes to"),
+    at(398.2, 221.1, "7 Ticked if the sum"),
+    at(404.0, 213.9, "in box 1 holds"),
+    at(306.1, 213.0, "grants or awards"),
+    value(66.0, 209.2, "160 COLLEGE DRIVE"),
+    at(404.0, 206.7, "sums for a"),
+    at(306.1, 205.0, "of an older term"),
+    at(404.0, 199.5, "study term"),
+    at(66.0, 198.1, "Town"),
+    at(149.1, 198.1, "Region"),
+    at(204.4, 198.1, "Land"),
+    at(239.0, 198.1, "Postal code"),
+    at(404.0, 192.3, "starting January to"),
+    value(66.0, 186.1, "OAKFIELD"),
+    value(167.8, 186.1, "OW"),
+    value(260.3, 186.1, "ZIP"),
+    at(404.0, 185.1, "March 2027"),
+    at(299.1, 184.7, "$"),
+    at(66.0, 175.0, "Account or file number (see notes)"),
+    at(217.3, 175.0, "8 Ticked if at"),
+    at(300.4, 175.0, "9 Ticked if a senior"),
+    ends(484.6, 175.0, 6.7, false, "10 Cover claims paid or refunded"),
+    at(383.9, 165.0, "4"),
+    at(223.1, 164.4, "least half time"),
+    at(306.1, 164.4, "member"),
+    at(396.0, 161.6, "$"),
+    at(62.2, 149.4, "Form 77-T"),
+    at(173.5, 149.5, "(keep for your files)"),
+    at(312.4, 149.5, "www.example.org/Form77T"),
+];
+
+/// Task 31b fix round 7 (the path of a public form, irs-f6744 untagged page 108): rows of
+/// fields with a narrow note column at their right, set flush right: two title lines, two
+/// lines that name the copy, and a note of eleven lines at a pitch of its own. A foot line
+/// under the fields ends where the note ends. Eight of the sixteen lines of the note column
+/// pass a row of the fields by chance, four of them lines of the note itself, whose other
+/// seven lines pass none. The note is one block: its lines follow each other, and no row
+/// of the fields holds one of them.
+fn note_beside_field_rows(v: &Variant) -> Sheet {
+    let mut t = placed(v, 369.1, &NOTE_FIELDS);
+    let mut right_column = vec![
+        ends(567.4, 323.9, 10.0, true, "Lesson"),
+        ends(567.4, 312.4, 10.0, true, "Record"),
+        ends(567.4, 277.2, 8.0, true, "Copy B"),
+        ends(567.4, 265.4, 8.0, true, "For Member"),
+        ends(
+            567.4,
+            149.5,
+            6.7,
+            false,
+            "Office of the Registrar - Member Records Service",
+        ),
+    ];
+    for (n, l) in NOTE.iter().enumerate() {
+        right_column.push(ends(567.4, 248.5 - 7.7 * n as f32, 6.7, false, l));
+    }
+    t += &placed(v, 369.1, &right_column);
+    let mut s = sheet(v, t, 740.0 - v.k() * 290.0, None);
+    s.want.may_title.push(NOTE_FIELDS[0].5.into());
+    s.want
+        .orders
+        .push(NOTE.iter().map(|l| l.to_string()).collect());
+    for field in [
+        "DANA REED",
+        "6 Changes to",
+        "160 COLLEGE DRIVE",
+        "Postal code",
+        "March 2027",
+    ] {
+        for l in NOTE {
+            s.want.apart.push((l.into(), field.into()));
+        }
+    }
+    s
+}
+
+/// The lines of the note of [`amount_before_a_note_column`], under its title lines.
+const AMOUNT_NOTE: [&str; 11] = [
+    "This is a record of",
+    "costs and is also",
+    "sent on to the main",
+    "office. If you must",
+    "file a return, a",
+    "charge or another",
+    "step may follow",
+    "for you if the",
+    "office finds that a",
+    "sum was left out",
+    "since you stated a",
+];
+
+/// Task 31b fix round 7 (the path of a public form, irs-f6744 untagged page 108, its first
+/// form): the right half of a form, boxes of fields with a note column at their right, set
+/// flush right. The amount of box 1 is set flush right in its box: it starts a little after
+/// the end of the longest line of the boxes and ends a gutter's width before the note
+/// column, with its currency sign at the left of its row and a line of the note column at
+/// the right. The amount is the value of the label over it: it reads after its label,
+/// before the lines of the note column, and on no line of that column.
+fn amount_before_a_note_column(v: &Variant) -> Sheet {
+    let label = "1 Loan interest taken in by the lender";
+    let mut items = vec![
+        at(398.1, 725.7, "Ref No. 1545-1576"),
+        ends(566.3, 710.2, 11.4, true, "Member"),
+        (401.9, 694.5, 21.0, true, false, "2026"),
+        ends(566.3, 696.4, 11.4, true, "Loan Costs"),
+        ends(566.3, 682.7, 11.4, true, "Summary"),
+        (404.8, 668.4, 9.5, true, false, "Form 88-E"),
+        at(302.5, 657.1, label),
+        ends(566.3, 656.0, 9.5, true, "Copy B"),
+        (302.0, 644.5, 9.5, false, false, "$"),
+        ends(488.0, 644.7, 7.6, true, "2,250"),
+        ends(566.3, 644.3, 8.6, true, "For Holder"),
+        at(
+            302.5,
+            554.6,
+            "2 If ticked, box 1 does not hold sign-up fees",
+        ),
+        ends(566.3, 553.4, 6.7, false, "sum for the cost of"),
+        ends(
+            467.2,
+            547.9,
+            6.7,
+            false,
+            "or interest added to loans made before the first",
+        ),
+        at(493.7, 546.3, "a loan in the year."),
+        at(308.3, 541.3, "of June 2004"),
+        at(310.0, 530.3, "www.example.org/Form88E"),
+        ends(
+            566.3,
+            530.3,
+            6.7,
+            false,
+            "Office of the Registrar - Member Records Service",
+        ),
+    ];
+    // Two lines of the note start where the note column starts, as its lines under them.
+    for (n, l) in AMOUNT_NOTE.iter().enumerate() {
+        let y = 632.0 - 7.15 * n as f32;
+        items.push(match n {
+            1 | 3 => at(494.1, y, l),
+            _ => ends(566.3, y, 6.7, false, l),
+        });
+    }
+    // The leader dots after the last line of box 2, each a piece of its own.
+    for n in 0..8 {
+        items.push(at(383.4 + 11.43 * n as f32, 541.3, "."));
+    }
+    let t = placed(v, 725.7, &items);
+    let mut s = sheet(v, t, 740.0 - v.k() * 260.0, None);
+    s.want.may_title.push("2026".into());
+    s.want
+        .orders
+        .push(vec![label.into(), "2,250".into(), "Copy B".into()]);
+    s.want
+        .lines_apart
+        .push(("2,250".into(), "For Holder".into()));
+    s
+}
+
+/// Task 31b fix round 7 (the path of a public form, irs-f6744 untagged pages 174 and 175):
+/// three labels of boxes on one row, set so close that they are one piece, from the left
+/// edge of a block of fields over the white space beside it into the first two of the four
+/// rows of the block at its right, with a value at the far right of their row. Under them,
+/// at the left, the second line of the first label and the values of the first two boxes.
+/// The row of labels reads before the second line of its first label and before its
+/// values.
+///
+/// With `boxes` (fix round 8, review R3) the boxes of the fields are drawn as on the form,
+/// in rule pieces that form no rows and columns: the reader's grid search gives the text
+/// up, and it is read as lines of paragraphs. The value at the far right of the row of
+/// labels is the value of the third box; the line that follows it in reading order, far
+/// left and a little lower, is the second line of the label of the first box. They are
+/// two lines of two boxes, never one line of one paragraph.
+fn label_row_over_two_blocks(v: &Variant, boxes: bool) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let labels = "1 Income 2 Gross income 3 Chapter mark. Enter the digit 3 or the digit 4";
+    // The row of labels runs from 40.3 to 203.5, whatever the widths of the face.
+    let size = 163.2 / font_width(plain, labels, 1.0);
+    let small = |x: f32, y: f32, text: &'static str| -> Placed { (x, y, 5.4, false, false, text) };
+    // In drawn boxes each label stands in its own box, as on the form: from its place to
+    // its end whatever the widths of the face, with a space after its last word, so close
+    // to the next that the three are one piece of their row still.
+    let boxed: [(f32, f32, f32, &'static str); 3] = [
+        (40.3, 62.7, 390.7, "1 Income "),
+        (68.1, 107.6, 390.7, "2 Gross income "),
+        (112.4, 203.5, 389.2, "3 Chapter mark. Enter digit 3 or 4"),
+    ];
+    let mut items: Vec<Placed> = if boxes {
+        boxed
+            .iter()
+            .map(|&(x0, x1, y, text)| {
+                let size = (x1 - x0) / font_width(plain, text.trim_end(), 1.0);
+                (x0, y, size, false, false, text)
+            })
+            .collect()
+    } else {
+        vec![(40.3, 390.7, size, false, false, labels)]
+    };
+    items.extend([
+        small(218.6, 389.0, "3"),
+        small(45.0, 384.6, "code"),
+        small(112.4, 379.9, "3a Waiver code"),
+        small(166.7, 380.7, "04"),
+        small(179.0, 379.9, "4a Waiver code"),
+        small(47.9, 373.7, "20"),
+        small(80.9, 374.6, "2000"),
+        small(112.4, 370.7, "3b Tax rate"),
+        small(157.2, 370.2, "0.00"),
+        small(179.0, 370.7, "4b Tax rate"),
+        small(40.3, 361.5, "5 Holding allowance"),
+        small(40.3, 352.2, "6 Net income"),
+        small(205.0, 352.6, "1800"),
+        small(40.3, 343.0, "7a State tax held"),
+    ]);
+    if boxes {
+        items.push(small(40.3, 333.8, "7b State tax paid"));
+    }
+    let mut t = placed(v, 390.7, &items);
+    if boxes {
+        // The rule pieces of the form around these fields, from one end to the other.
+        const RULES: [[f32; 4]; 34] = [
+            [37.1, 396.1, 104.0, 396.1],
+            [103.4, 396.1, 237.1, 396.1],
+            [36.9, 368.4, 65.2, 368.4],
+            [37.3, 368.2, 37.3, 396.3],
+            [64.8, 368.4, 109.5, 368.4],
+            [65.0, 368.2, 65.0, 396.3],
+            [109.2, 386.9, 237.1, 386.9],
+            [236.9, 386.7, 236.9, 396.3],
+            [109.4, 386.7, 109.4, 396.3],
+            [109.2, 377.6, 176.1, 377.6],
+            [109.4, 377.4, 109.4, 387.1],
+            [109.2, 368.4, 159.5, 368.4],
+            [109.4, 368.2, 109.4, 377.8],
+            [159.1, 368.4, 176.1, 368.4],
+            [175.7, 377.6, 237.1, 377.6],
+            [236.9, 377.4, 236.9, 387.1],
+            [175.9, 377.4, 175.9, 387.1],
+            [175.7, 368.4, 220.5, 368.4],
+            [175.9, 368.2, 175.9, 377.8],
+            [220.1, 368.4, 237.1, 368.4],
+            [236.9, 368.2, 236.9, 377.8],
+            [36.9, 359.1, 237.1, 359.1],
+            [236.9, 359.0, 236.9, 368.6],
+            [37.3, 359.0, 37.3, 368.6],
+            [36.9, 349.9, 237.1, 349.9],
+            [236.9, 349.7, 236.9, 359.3],
+            [37.3, 349.7, 37.3, 359.3],
+            [36.9, 340.7, 237.1, 340.7],
+            [236.9, 340.5, 236.9, 350.1],
+            [37.3, 340.5, 37.3, 350.1],
+            [236.9, 377.4, 236.9, 396.3],
+            [36.9, 331.5, 237.1, 331.5],
+            [236.9, 331.3, 236.9, 340.9],
+            [37.3, 331.3, 37.3, 340.9],
+        ];
+        let at = |x: f32, y: f32| (40.0 + k * (x - 40.0), 740.0 - k * (390.7 - y));
+        for [x0, y0, x1, y1] in RULES {
+            let ((x0, y0), (x1, y1)) = (at(x0, y0), at(x1, y1));
+            t += &format!("q 0.5 w {x0} {y0} m {x1} {y1} l S Q\n");
+        }
+    }
+    let mut s = sheet(v, t, 740.0 - k * 110.0, None);
+    let row: Vec<String> = if boxes {
+        boxed.iter().map(|l| l.3.trim_end().to_string()).collect()
+    } else {
+        vec![labels.into()]
+    };
+    s.want.orders.push(
+        row.into_iter()
+            .chain(["code".into(), "20".into()])
+            .collect(),
+    );
+    s.want.lines_apart.push(("3".into(), "code".into()));
+    s
+}
+
 /// The shapes of business documents.
 pub(crate) fn shapes() -> Vec<Shape> {
     vec![
+        Shape {
+            name: "labels on touching underlines over two rows of fields",
+            axes: DOC,
+            draw: |v| (fields_on_touching_underlines(v), None),
+        },
+        Shape {
+            name: "a small bold label over a rule with two lines",
+            axes: DOC,
+            draw: |v| (labelled_block(v), None),
+        },
+        Shape {
+            name: "two boxes side by side, each with its label",
+            axes: DOC,
+            draw: |v| (labelled_boxes(v), None),
+        },
+        Shape {
+            name: "a framed label column and value column, rows 1.36 sizes apart beside a picture",
+            axes: DOC,
+            draw: |v| (framed_pairs(v, 15.0 / 11.0, true), None),
+        },
+        Shape {
+            name: "a framed label column and value column, rows 1.55 sizes apart",
+            axes: DOC,
+            draw: |v| (framed_pairs(v, 17.0 / 11.0, false), None),
+        },
+        Shape {
+            name: "a head block beside a logo over a letter",
+            axes: DOC,
+            draw: |v| (head_block_beside_a_logo(v, false), None),
+        },
+        Shape {
+            name: "a head block of two lines beside a logo over a letter",
+            axes: DOC,
+            draw: |v| (head_block_beside_a_logo(v, true), None),
+        },
         Shape {
             name: "letter head",
             axes: DOC_NEXT,
@@ -2774,6 +3539,26 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "footer columns",
             axes: DOC,
             draw: |v| (footer(v), None),
+        },
+        Shape {
+            name: "a note column beside rows of fields",
+            axes: TRACED,
+            draw: |v| (note_beside_field_rows(v), None),
+        },
+        Shape {
+            name: "an amount in its box before a note column",
+            axes: TRACED,
+            draw: |v| (amount_before_a_note_column(v), None),
+        },
+        Shape {
+            name: "a row of labels over two blocks of fields",
+            axes: TRACED,
+            draw: |v| (label_row_over_two_blocks(v, false), None),
+        },
+        Shape {
+            name: "a row of labels over two blocks of fields in drawn boxes",
+            axes: TRACED,
+            draw: |v| (label_row_over_two_blocks(v, true), None),
         },
     ]
 }

@@ -1,4 +1,4 @@
-# name	page	transform	what	class	count	owner
+# name	page	transform	what	class	count	owner	cause
 arxiv-2408.09869-docling-report.pdf	1	reorder-runs	from-spatial	text	1	-
 arxiv-2408.09869-docling-report.pdf	2	reorder-runs	from-spatial	text	1	-
 arxiv-2408.09869-docling-report.pdf	2	reorder-runs	members	text	2	after 0.1.0
@@ -15,39 +15,40 @@ arxiv-2408.09869-docling-report.pdf	3	scale-75	members	text	1	31
 arxiv-2408.09869-docling-report.pdf	4	reorder-runs	to-spatial	text	1	-
 arxiv-2408.09869-docling-report.pdf	5	reorder-runs	from-spatial	text	1	-
 arxiv-2408.09869-docling-report.pdf	6	reorder-runs	from-spatial	text	1	-
+arxiv-2408.09869-docling-report.pdf	7	jitter	order	text	1	31	owner 31c. Fix round 8 of Task 31b (the R2 ruling): a line of an author block of the small copy of a page stands alone on its row in the white space between two sides. The left side stands at the limit of LONE_PITCH there (a step of 4.67 against 1.15 pitches of 4.07): as the page is, both sides break their pitch and the line is a row of its own between the bands; under jitter the left side runs on, the right one breaks, and the line heads the right side. `IBM Research` then reads at another place among the author blocks, which do not depend on each other; every text stands once. Traced with a print of the flows in rows_whole. The step of LONE_PITCH is hard
 arxiv-2408.09869-docling-report.pdf	7	reorder-drawn	order	text	1	31
-arxiv-2408.09869-docling-report.pdf	7	reorder-runs	from-spatial	text	6	-
-arxiv-2408.09869-docling-report.pdf	7	reorder-runs	members	text	54	after 0.1.0
+arxiv-2408.09869-docling-report.pdf	7	reorder-runs	from-spatial	text	7	-
+arxiv-2408.09869-docling-report.pdf	7	reorder-runs	members	text	58	after 0.1.0
 arxiv-2408.09869-docling-report.pdf	7	reorder-runs	to-spatial	text	3	-
 arxiv-2408.09869-docling-report.pdf	7	rule-as-box	from-spatial	text	15	-
-arxiv-2408.09869-docling-report.pdf	7	rule-as-box	members	text	43	after 0.1.0
+arxiv-2408.09869-docling-report.pdf	7	rule-as-box	members	text	42	after 0.1.0	class E (after 0.1.0)
 arxiv-2408.09869-docling-report.pdf	7	rule-as-box	order	text	1	after 0.1.0
 arxiv-2408.09869-docling-report.pdf	7	rule-as-box	to-spatial	pairs	1	-
 arxiv-2408.09869-docling-report.pdf	7	rule-as-box	to-spatial	text	5	-
 arxiv-2408.09869-docling-report.pdf	7	scale-150	from-spatial	text	1	-
-arxiv-2408.09869-docling-report.pdf	7	scale-150	members	text	14	31
+arxiv-2408.09869-docling-report.pdf	7	scale-150	members	text	11	31
 arxiv-2408.09869-docling-report.pdf	7	scale-150	order	text	1	31
-arxiv-2408.09869-docling-report.pdf	7	scale-150	to-spatial	text	10	-
+arxiv-2408.09869-docling-report.pdf	7	scale-150	to-spatial	text	5	-
 arxiv-2408.09869-docling-report.pdf	7	scale-200	from-spatial	text	4	-
 arxiv-2408.09869-docling-report.pdf	7	scale-200	members	pairs	2	31
-arxiv-2408.09869-docling-report.pdf	7	scale-200	members	text	16	31
+arxiv-2408.09869-docling-report.pdf	7	scale-200	members	text	13	31
 arxiv-2408.09869-docling-report.pdf	7	scale-200	order	text	1	31
-arxiv-2408.09869-docling-report.pdf	7	scale-200	to-spatial	text	10	-
-arxiv-2408.09869-docling-report.pdf	7	scale-50	from-spatial	text	13	-
-arxiv-2408.09869-docling-report.pdf	7	scale-50	members	text	21	31
+arxiv-2408.09869-docling-report.pdf	7	scale-200	to-spatial	text	5	-
+arxiv-2408.09869-docling-report.pdf	7	scale-50	from-spatial	text	13	-	owner Task 31c. As the members line of this page and change: at half scale the drawn grid of the page is found with other rows and columns (grid search, not the cut), so one more paragraph in it is typed where it is kept as laid out at scale 1. As at 2a38d4b0 (13); fix round 6 had it at 12
+arxiv-2408.09869-docling-report.pdf	7	scale-50	members	text	18	31	owner Task 31c. Traced: at half scale the drawn grid of the page is found with 20 rows and 14 columns, at scale 1 with 18 and 15 (grid search, not the cut), so the paragraphs in it have another path
 arxiv-2408.09869-docling-report.pdf	7	scale-50	order	text	1	31
 arxiv-2408.09869-docling-report.pdf	7	scale-50	to-spatial	pairs	1	-
-arxiv-2408.09869-docling-report.pdf	7	scale-50	to-spatial	text	10	-
+arxiv-2408.09869-docling-report.pdf	7	scale-50	to-spatial	text	6	-
 arxiv-2408.09869-docling-report.pdf	7	scale-75	from-spatial	text	6	-
-arxiv-2408.09869-docling-report.pdf	7	scale-75	members	text	22	31
+arxiv-2408.09869-docling-report.pdf	7	scale-75	members	text	19	31
 arxiv-2408.09869-docling-report.pdf	7	scale-75	order	text	1	31
 arxiv-2408.09869-docling-report.pdf	7	scale-75	to-spatial	pairs	1	-
-arxiv-2408.09869-docling-report.pdf	7	scale-75	to-spatial	text	10	-
+arxiv-2408.09869-docling-report.pdf	7	scale-75	to-spatial	text	5	-
 arxiv-2408.09869-docling-report.pdf	7	split-rules	from-spatial	text	1	-
 arxiv-2408.09869-docling-report.pdf	7	split-rules	members	pairs	1	31
-arxiv-2408.09869-docling-report.pdf	7	split-rules	members	text	6	31
+arxiv-2408.09869-docling-report.pdf	7	split-rules	members	text	4	31
 arxiv-2408.09869-docling-report.pdf	7	split-runs	kind	text	1	36a
-arxiv-2408.09869-docling-report.pdf	7	split-runs	members	text	14	31
+arxiv-2408.09869-docling-report.pdf	7	split-runs	members	text	12	31
 arxiv-2408.09869-docling-report.pdf	7	split-runs	to-spatial	pairs	1	-
 arxiv-2408.09869-docling-report.pdf	7	split-runs	to-spatial	text	3	-
 arxiv-2408.09869-docling-report.pdf	8	rule-as-box	members	text	9	after 0.1.0
@@ -73,30 +74,28 @@ arxiv-2408.09869-docling-report.pdf	9	split-runs	to-spatial	text	1	-
 irs-f1040-2025.pdf	1	jitter	from-spatial	table	1	-
 irs-f1040-2025.pdf	1	jitter	members	table	1	31
 irs-f1040-2025.pdf	1	jitter	members	text	2	31
-irs-f1040-2025.pdf	1	reorder-runs	from-spatial	text	10	-
+irs-f1040-2025.pdf	1	reorder-runs	from-spatial	text	8	-
 irs-f1040-2025.pdf	1	reorder-runs	kind	text	2	after 0.1.0
-irs-f1040-2025.pdf	1	reorder-runs	members	text	3	after 0.1.0
-irs-f1040-2025.pdf	1	reorder-runs	to-spatial	text	2	-
+irs-f1040-2025.pdf	1	reorder-runs	members	text	2	after 0.1.0
 irs-f1040-2025.pdf	1	rule-as-box	to-spatial	table	1	-
 irs-f1040-2025.pdf	1	rule-as-box	to-spatial	text	3	-
 irs-f1040-2025.pdf	1	scale-150	to-spatial	text	1	-
 irs-f1040-2025.pdf	1	scale-200	to-spatial	text	1	-
-irs-f1040-2025.pdf	1	scale-50	from-spatial	text	2	-
+irs-f1040-2025.pdf	1	scale-50	from-spatial	text	1	-
 irs-f1040-2025.pdf	1	scale-50	members	table	2	31
 irs-f1040-2025.pdf	1	scale-50	to-spatial	text	2	-
-irs-f1040-2025.pdf	1	scale-75	from-spatial	text	2	-
+irs-f1040-2025.pdf	1	scale-75	from-spatial	text	1	-
 irs-f1040-2025.pdf	1	scale-75	members	table	2	31
 irs-f1040-2025.pdf	1	scale-75	to-spatial	text	2	-
 irs-f1040-2025.pdf	1	split-runs	from-spatial	text	1	-
 irs-f1040-2025.pdf	1	split-runs	kind	text	1	36a
 irs-f1040-2025.pdf	1	split-runs	members	text	1	31
-irs-f1040-2025.pdf	2	jitter	to-spatial	table	1	-
-irs-f1040-2025.pdf	2	reorder-runs	from-spatial	text	12	-
+irs-f1040-2025.pdf	2	reorder-runs	from-spatial	text	10	-
+irs-f1040-2025.pdf	2	reorder-runs	kind	table	1	after 0.1.0	class E (after 0.1.0). Traced in fix round 7 with a print of the decision in `layout::engine_decisions`: the region of 14 runs `Your signature | Date | Your occupation ...` (page 2, same segment `Style<Band<Rest<Rest<Grid` both ways) is a table by table.columns and table.shared_columns (score 700) in the run order of the file and under every other change; with the runs in another order no table is found at all and it is a paragraph (paragraph.text_size, paragraph.sentences, score 450). Cause: `typers::lined` takes the runs of a segment in the order given: `run_ranges` makes a line of each stretch of runs that follow each other on one line, and `grid::pieces_of` joins a run to the one before it, so reordered runs give lines of one piece and `lines` (typers/table.rs) finds fewer than two lines of two pieces. The typers, not the cut
 irs-f1040-2025.pdf	2	reorder-runs	kind	text	1	after 0.1.0
-irs-f1040-2025.pdf	2	reorder-runs	members	table	2	after 0.1.0
 irs-f1040-2025.pdf	2	reorder-runs	members	text	2	after 0.1.0
 irs-f1040-2025.pdf	2	split-runs	from-spatial	text	1	-
-irs-f1040-2025.pdf	2	split-runs	members	text	2	31
+irs-f1040-2025.pdf	2	split-runs	members	text	4	31	owner Task 31c. Traced: a leaf of exactly three runs (`PTIN`, `Check if:`, `Self-employed`) is not looked at by the cut; split into words it has four and is cut (the three-run rule of Cutter::region)
 irs-f1040-2025.pdf	2	split-runs	to-spatial	text	1	-
 mustang-gnuaccounting-invoice-508.pdf	1	reorder-runs	from-spatial	text	1	-
 mustang-gnuaccounting-invoice-508.pdf	1	reorder-runs	members	pairs	1	after 0.1.0
@@ -2176,7 +2175,8 @@ pdfbox-sf1199a-direct-deposit.pdf	1	reorder-runs	from-spatial	text	3	-
 pdfbox-sf1199a-direct-deposit.pdf	1	reorder-runs	members	table	1	after 0.1.0
 pdfbox-sf1199a-direct-deposit.pdf	1	reorder-runs	to-spatial	text	1	-
 pdfbox-sf1199a-direct-deposit.pdf	1	rule-as-box	from-spatial	text	2	-
-pdfbox-sf1199a-direct-deposit.pdf	1	rule-as-box	members	text	11	after 0.1.0
+pdfbox-sf1199a-direct-deposit.pdf	1	rule-as-box	members	band	2	after 0.1.0	class E (after 0.1.0). Fix round 8 of Task 31b (the R2 ruling): the heading `DIRECTIONS` heads the right side only, so the lines at the head of the left side are one header band (two at fix round 7, parted at the row of the heading). With the rules as boxes the Style step parts the last line of that band from it again: two leaves where the page as it is has one; every text stands once and in order. The same line as at fix round 6
+pdfbox-sf1199a-direct-deposit.pdf	1	rule-as-box	members	text	11	after 0.1.0	class E (after 0.1.0)
 pdfbox-sf1199a-direct-deposit.pdf	1	rule-as-box	order	text	1	after 0.1.0
 pdfbox-sf1199a-direct-deposit.pdf	1	rule-as-box	to-spatial	text	1	-
 pdfbox-sf1199a-direct-deposit.pdf	1	shift	members	table	2	31
@@ -2190,7 +2190,8 @@ pdfbox-sf1199a-direct-deposit.pdf	2	reorder-runs	from-spatial	text	3	-
 pdfbox-sf1199a-direct-deposit.pdf	2	reorder-runs	members	table	1	after 0.1.0
 pdfbox-sf1199a-direct-deposit.pdf	2	reorder-runs	to-spatial	text	1	-
 pdfbox-sf1199a-direct-deposit.pdf	2	rule-as-box	from-spatial	text	2	-
-pdfbox-sf1199a-direct-deposit.pdf	2	rule-as-box	members	text	11	after 0.1.0
+pdfbox-sf1199a-direct-deposit.pdf	2	rule-as-box	members	band	2	after 0.1.0	class E (after 0.1.0). Fix round 8 of Task 31b (the R2 ruling): the heading `DIRECTIONS` heads the right side only, so the lines at the head of the left side are one header band (two at fix round 7, parted at the row of the heading). With the rules as boxes the Style step parts the last line of that band from it again: two leaves where the page as it is has one; every text stands once and in order. The same line as at fix round 6
+pdfbox-sf1199a-direct-deposit.pdf	2	rule-as-box	members	text	11	after 0.1.0	class E (after 0.1.0)
 pdfbox-sf1199a-direct-deposit.pdf	2	rule-as-box	order	text	1	after 0.1.0
 pdfbox-sf1199a-direct-deposit.pdf	2	rule-as-box	to-spatial	text	1	-
 pdfbox-sf1199a-direct-deposit.pdf	2	shift	members	table	2	31
@@ -2205,7 +2206,8 @@ pdfbox-sf1199a-direct-deposit.pdf	3	reorder-runs	members	table	1	after 0.1.0
 pdfbox-sf1199a-direct-deposit.pdf	3	reorder-runs	to-spatial	text	1	-
 pdfbox-sf1199a-direct-deposit.pdf	3	rule-as-box	from-spatial	band	1	-
 pdfbox-sf1199a-direct-deposit.pdf	3	rule-as-box	from-spatial	text	2	-
-pdfbox-sf1199a-direct-deposit.pdf	3	rule-as-box	members	text	11	after 0.1.0
+pdfbox-sf1199a-direct-deposit.pdf	3	rule-as-box	members	band	2	after 0.1.0	class E (after 0.1.0). Fix round 8 of Task 31b (the R2 ruling): the heading `DIRECTIONS` heads the right side only, so the lines at the head of the left side are one header band (two at fix round 7, parted at the row of the heading). With the rules as boxes the Style step parts the last line of that band from it again: two leaves where the page as it is has one; every text stands once and in order. The same line as at fix round 6
+pdfbox-sf1199a-direct-deposit.pdf	3	rule-as-box	members	text	11	after 0.1.0	class E (after 0.1.0)
 pdfbox-sf1199a-direct-deposit.pdf	3	rule-as-box	order	text	1	after 0.1.0
 pdfbox-sf1199a-direct-deposit.pdf	3	rule-as-box	to-spatial	text	1	-
 pdfbox-sf1199a-direct-deposit.pdf	3	shift	members	table	2	31
