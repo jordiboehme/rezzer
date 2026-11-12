@@ -570,3 +570,30 @@ fn writing_pins_keeps_the_other_names() {
     assert!(failed.is_err());
     std::fs::remove_dir_all(&dir).ok();
 }
+
+/// A move to or from spatial is pinned with its page, as a break is: the same move on another
+/// page is another line, so a move that goes on one page and comes on another shows.
+#[test]
+fn moves_are_pinned_per_page() {
+    let moved = |page: usize| meta::Finding {
+        transform: Transform::ALL[0],
+        page,
+        verdict: meta::Verdict {
+            to_spatial: vec![(Kind::Paragraph, "paragraph: a line".to_string())],
+            from_spatial: Vec::new(),
+            broken: Vec::new(),
+        },
+    };
+    let name = Transform::ALL[0].name();
+    assert_eq!(
+        meta::pin_lines("this.pdf", &[moved(0), moved(0), moved(4)]),
+        [
+            format!("this.pdf\t1\t{name}\tto-spatial\ttext\t2\t-"),
+            format!("this.pdf\t5\t{name}\tto-spatial\ttext\t1\t-"),
+        ]
+    );
+    assert_ne!(
+        meta::pin_lines("this.pdf", &[moved(0)]),
+        meta::pin_lines("this.pdf", &[moved(4)])
+    );
+}

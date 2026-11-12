@@ -52,12 +52,15 @@ const STEP_SLACK: u64 = 10_000;
 /// itself is a count of work steps (see `common::counted`).
 const CPU_SAFETY: Duration = Duration::from_secs(60);
 
-/// Fails when the read since `start` took more than twice the CPU time `twin` took and a
-/// second: the time bound these tests had on the wall clock, on the thread's CPU clock.
+/// Fails when the read since `start` took three times the CPU time `twin` took or more, on
+/// the thread's CPU clock: twice the twin's time and once more as slack. The slack is a share
+/// of the twin's time and no fixed second, so that a scan that costs a few tenths of a second
+/// on a read of a tenth shows (a walk of every run per row is many times the twin). The 50
+/// milliseconds on top are the grain of the CPU clock, for a twin of a few milliseconds.
 fn assert_cpu_within(start: Cpu, twin: Duration) {
     let took = start.elapsed();
     assert!(
-        took < twin * 2 + Duration::from_secs(1),
+        took < twin * 3 + Duration::from_millis(50),
         "{took:?} of CPU time against {twin:?}"
     );
 }

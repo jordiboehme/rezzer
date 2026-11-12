@@ -28,9 +28,11 @@ pub(crate) const BAND: f32 = 0.18;
 /// on both (see [`learn`]).
 pub(crate) const REPEATS: usize = 3;
 
-/// Lines of one header or footer sit at the same height on every page, within this many
-/// points.
-pub(crate) const Y_STEP: f32 = 4.0;
+/// Lines of one header or footer sit at the same height on every page, within this share of
+/// their text size: 4 points at 10 points. A share of the size of the line itself, so that a
+/// file printed smaller or larger keeps its running lines (Task 31a; it was 4 points at every
+/// size).
+pub(crate) const Y_STEP: f32 = 0.4;
 
 /// A line at least this many times the body size is a heading in an untagged file.
 pub const HEADING_RATIO: f32 = 1.2;
@@ -388,6 +390,9 @@ impl<'a> FilePage<'a, TextRun> {
     }
 }
 
+/// A line seen in a band of a page: its middle, its page and its text size.
+type Seen = (f32, u32, f32);
+
 /// Learns body size, heading sizes, running headers and footers and, for an untagged file
 /// (`tagged` false), the footnote legends from every page of `pages`, in order.
 /// `ends_in_amount` tells a line that ends in an amount, which is no heading.
@@ -400,7 +405,7 @@ pub fn learn<R: LineRun>(
     tagged: bool,
     ends_in_amount: &dyn Fn(&str) -> bool,
 ) -> FileFacts {
-    let mut seen: HashMap<(Band, String), Vec<(f32, u32)>> = HashMap::new();
+    let mut seen: HashMap<(Band, String), Vec<Seen>> = HashMap::new();
     // Texts that stand in the middle of some page are content, wherever else they stand.
     // A bare page number is not held against: numbers fill tables too.
     let mut body: HashSet<String> = HashSet::new();
@@ -408,7 +413,9 @@ pub fn learn<R: LineRun>(
     for p in pages {
         for l in text_lines(p.runs) {
             if let Some(key) = running_key(&l, p.height) {
-                seen.entry(key).or_default().push((l.middle(), p.page));
+                seen.entry(key)
+                    .or_default()
+                    .push((l.middle(), p.page, l.size));
             } else {
                 let key = furniture_key(&l.text);
                 let cost = key.len() + BODY_KEY_COST;
@@ -433,7 +440,7 @@ pub fn learn<R: LineRun>(
             let low = at[i].0;
             let mut j = i;
             let mut pages_at = BTreeSet::new();
-            while j < at.len() && at[j].0 - low <= Y_STEP {
+            while j < at.len() && at[j].0 - low <= Y_STEP * at[i].2.max(at[j].2) {
                 pages_at.insert(at[j].1);
                 j += 1;
             }

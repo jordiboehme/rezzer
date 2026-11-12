@@ -309,6 +309,10 @@ struct Piece {
     /// A glyph with ink is in the piece: a piece of white space only has no size to align
     /// with the cell beside it.
     inked: bool,
+    /// Its text ends with a colon, and its text reads as an amount or a date (see
+    /// [`cut::reads_as_value`]): what the cut asks of a row of labels over values.
+    colon: bool,
+    value: bool,
     /// Every fragment with ink of the piece is bold (false for a piece without ink).
     bold: bool,
 }
@@ -432,6 +436,8 @@ fn pieces_in(frags: &[Frag], ids: &[usize], head: &[usize], base: usize) -> (Vec
                     p.chars += f.chars;
                     if f.inked {
                         p.bold = f.bold && (p.bold || !p.inked);
+                        p.colon = f.text.trim_end().ends_with(':');
+                        p.value = cut::reads_as_value(&f.text) && (p.value || !p.inked);
                     }
                     p.inked |= f.inked;
                     p.frags.push(i);
@@ -455,6 +461,8 @@ fn pieces_in(frags: &[Frag], ids: &[usize], head: &[usize], base: usize) -> (Vec
                 rows: 1,
                 inked: f.inked,
                 bold: f.inked && f.bold,
+                colon: f.inked && f.text.trim_end().ends_with(':'),
+                value: f.inked && cut::reads_as_value(&f.text),
             });
         }
         out.extend(piece);
@@ -502,6 +510,10 @@ fn cut_piece(p: &Piece) -> cut::Piece {
         bold: p.bold,
         inked: p.inked,
         chars: p.chars,
+        // The text pass counts its regions in pieces.
+        runs: 1,
+        colon: p.colon,
+        value: p.value,
         boxed: p.stand,
         rows: p.rows,
     }
@@ -653,6 +665,8 @@ fn boxed_order(
             rows,
             inked: true,
             bold: false,
+            colon: false,
+            value: false,
         });
         ps.extend(list);
         inner.push(at..ps.len());

@@ -304,7 +304,7 @@ source: crates/rezzer/tests/corpus.rs
           "role": "page-header",
           "type": "paragraph"
         },
-        "<38 more items>"
+        "<37 more items>"
       ],
       "kind": "page",
       "type": "section"
@@ -457,7 +457,7 @@ source: crates/rezzer/tests/corpus.rs
           "role": "page-header",
           "type": "paragraph"
         },
-        "<37 more items>"
+        "<36 more items>"
       ],
       "kind": "page",
       "type": "section"
@@ -1055,7 +1055,7 @@ source: crates/rezzer/tests/corpus.rs
       "what": "the region at p1:b34 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only",
       "why": "uncertain"
     },
-    "<49 more items>"
+    "<47 more items>"
   ],
   "model_version": 1,
   "overview": {
@@ -1354,7 +1354,7 @@ source: crates/rezzer/tests/corpus.rs
       "page": 1,
       "score": 1000
     },
-    "<275 more items>"
+    "<272 more items>"
   ],
   "source": {
     "detection": {

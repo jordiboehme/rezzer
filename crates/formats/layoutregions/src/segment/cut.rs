@@ -5,7 +5,7 @@
 //! The whitespace cut: the pieces of a page in reading order. Columns come one after the
 //! other, and the pieces that cross a gutter (titles, notes across the columns) split the
 //! columns into bands. A region without a gutter is cut at its widest band of white space
-//! across, and each part is looked at again.
+//! across (at every band as wide as the widest), and each part is looked at again.
 //!
 //! The cut is on pieces: rows of text split where a gap is wide enough to be a column gutter.
 //! The reader makes the pieces; this module only orders them.
@@ -35,6 +35,14 @@ pub struct Piece {
     pub inked: bool,
     /// The characters of the piece, padding not counted.
     pub chars: usize,
+    /// The runs of text the piece is made of, 1 for a host that hands its own pieces: a
+    /// region is looked at for columns and bands when it holds more than three.
+    pub runs: usize,
+    /// The text of the piece ends with a colon: a label that states it is one.
+    pub colon: bool,
+    /// The text of the piece reads as an amount or a date (see [`reads_as_value`]): a value,
+    /// no label.
+    pub value: bool,
     /// The piece stands in for a drawn box (the index of the box): its text is read whole
     /// where it stands, and `rows` counts its rows.
     pub boxed: Option<usize>,
@@ -213,8 +221,14 @@ impl Cutter<'_> {
                     .then(p[a].bounds.x0.total_cmp(&p[b].bounds.x0))
             });
         };
-        // Whether columns or bands are looked for in this region at all.
-        let looks = ids.len() > 3 && depth < COLUMN_DEPTH && ids.len() <= COLUMN_PIECES;
+        // Whether columns or bands are looked for in this region at all: it holds more than
+        // three runs. Counted in words or in ink characters instead, a label of a few words
+        // and its value are looked at and parted (both measured in Task 31a), so the count
+        // stays on runs: a region
+        // of up to three runs is the one place where the cut still depends on how a line is
+        // set in runs.
+        let runs: usize = ids.iter().take(4).map(|&i| p[i].runs.max(1)).sum();
+        let looks = runs > 3 && depth < COLUMN_DEPTH && ids.len() <= COLUMN_PIECES;
         if looks && out.short.is_none() && (self.stop)() {
             out.short = Some(CutShort::Stopped);
         }
@@ -230,15 +244,12 @@ impl Cutter<'_> {
         // text above or below the boxes is not part of their columns.
         if let Some((_, _, Why::Boxed, _)) = found {
             sort(&mut ids);
-            if let Some(at) = widest_gap(p, &ids) {
+            let at = widest_gaps(p, &ids);
+            if !at.is_empty() {
                 if bound {
                     return self.keep(ids, out);
                 }
-                let rest = ids.split_off(at);
-                self.region(ids, depth + 1, out);
-                out.cut(Split::Band);
-                self.region(rest, depth + 1, out);
-                return;
+                return self.bands(ids, &at, depth, out);
             }
         }
         if let Some((g0, g1, why, slack)) = found {
@@ -301,20 +312,170 @@ impl Cutter<'_> {
             return;
         }
         sort(&mut ids);
-        // Without a gutter, the region is cut at its widest band of white space across, and
+        // Without a gutter, the region is cut at its widest bands of white space across, and
         // each part is looked at again: columns may stand above or below full-width text.
-        if looks && let Some(at) = widest_gap(p, &ids) {
+        let at = if looks {
+            widest_gaps(p, &ids)
+        } else {
+            Vec::new()
+        };
+        if !at.is_empty() {
             if bound {
                 return self.keep(ids, out);
             }
-            let rest = ids.split_off(at);
-            self.region(ids, depth + 1, out);
-            out.cut(Split::Band);
-            self.region(rest, depth + 1, out);
-            return;
+            return self.bands(ids, &at, depth, out);
         }
         out.group(ids);
     }
+
+    /// Cuts the sorted pieces `ids` before each index of `at` (ascending) into bands, and
+    /// looks at each band again.
+    fn bands(&self, ids: Vec<usize>, at: &[usize], depth: usize, out: &mut Out) {
+        let ends: Vec<usize> = at.iter().copied().chain([ids.len()]).collect();
+        let mut from = 0;
+        let mut k = 0;
+        while k < ends.len() {
+            let to = ends[k];
+            if from > 0 {
+                out.cut(Split::Band);
+            }
+            // A row of labels over the row of their values (see `labels_over_values`) is read
+            // cell by cell: each label, then the value under it.
+            let cells = ends.get(k + 1).and_then(|&next| {
+                let before = (k > 0).then(|| &ids[if k > 1 { ends[k - 2] } else { 0 }..from]);
+                let after = ends.get(k + 2).map(|&end| &ids[next..end]);
+                labels_over_values(self.p, &ids[from..to], &ids[to..next], (before, after))
+            });
+            if let Some(cells) = cells {
+                for cell in cells {
+                    out.cut(Split::Gutter);
+                    out.group(cell);
+                }
+                from = ends[k + 1];
+                k += 2;
+                continue;
+            }
+            self.region(ids[from..to].to_vec(), depth + 1, out);
+            from = to;
+            k += 1;
+        }
+    }
+}
+
+/// Whether `text` reads as an amount or a date set in figures: it holds a digit, and nothing
+/// but digits, white space, signs of amounts and dates (`. , / - + : % ( )`) and currency
+/// signs. A label holds letters (`1 Wages`, `Box 12a`); a date with its month in words is
+/// not known here.
+pub fn reads_as_value(text: &str) -> bool {
+    text.chars().any(|c| c.is_ascii_digit())
+        && text.chars().all(|c| {
+            c.is_ascii_digit()
+                || c.is_whitespace()
+                || matches!(
+                    c,
+                    '.' | ',' | '/' | '-' | '+' | ':' | '%' | '(' | ')' | '\''
+                )
+                || matches!(c, '$' | '\u{20ac}' | '\u{a3}' | '\u{a5}')
+        })
+}
+
+/// The cells of a row of labels over the row of their values, left to right, each a label and
+/// the value under it (or a label alone): `upper` and `lower` are two bands of one row each
+/// that an equal band of white space parts (as it parts every row of the region), `upper`
+/// holds two pieces or more and `lower` too (one piece under one of two small ones is a line
+/// under a line, a name under its sender line), every piece of `lower` stands under exactly one piece of
+/// `upper` (their extents overlap along the row, and under no other), no two under the same,
+/// and the pieces of `upper` are set a size step ([`SIZE_STEP`]) smaller than those of
+/// `lower`: the small labels of a form's boxes over what is filled in. No piece of `upper`
+/// reads as an amount or a date, no piece of `lower` ends with a colon, and the band `before`
+/// is no row in the size of `upper` with a piece over each of its pieces: rows of a label
+/// and its value over a larger total row are rows. The band `after` them,
+/// when there is one, is small text again: under the small header of a table come more rows
+/// in the size of the first. Read row by row, the values would follow the last label of
+/// their row, far from their own. `None` for any other two bands.
+fn labels_over_values(
+    p: &[Piece],
+    upper: &[usize],
+    lower: &[usize],
+    (before, after): (Option<&[usize]>, Option<&[usize]>),
+) -> Option<Vec<Vec<usize>>> {
+    // The pieces of a band are sorted by row: its first and last tell whether it is one row.
+    let one_row = |band: &[usize]| matches!((band.first(), band.last()), (Some(&a), Some(&b)) if p[a].line == p[b].line);
+    if !one_row(upper) || !one_row(lower) {
+        return None;
+    }
+    work::add((upper.len() + lower.len()) as u64);
+    let inked = |band: &[usize]| -> Vec<usize> {
+        let mut v: Vec<usize> = band.iter().copied().filter(|&i| p[i].inked).collect();
+        v.sort_by(|&a, &b| p[a].bounds.x0.total_cmp(&p[b].bounds.x0));
+        v
+    };
+    let (labels, values) = (inked(upper), inked(lower));
+    if labels.len() < 2 || values.len() < 2 || values.len() > labels.len() {
+        return None;
+    }
+    let largest = labels.iter().map(|&i| p[i].size).fold(f32::MIN, f32::max);
+    let smallest = values.iter().map(|&i| p[i].size).fold(f32::MAX, f32::min);
+    if smallest < SIZE_STEP * largest {
+        return None;
+    }
+    // The upper row is labels and the lower row is what stands under them: a piece of the
+    // upper row that reads as an amount or a date is a value (a row `Subtotal 120.00` over a
+    // larger `Total 127.50`), and a piece of the lower row that ends with a colon is a label
+    // (a row of a label and its value over a larger total row).
+    if labels.iter().any(|&i| p[i].value) || values.iter().any(|&i| p[i].colon) {
+        return None;
+    }
+    // The band over the labels is no row like them: a row in their size with a piece over
+    // each of them is the row before of one block of rows, whose last row is set larger.
+    let over =
+        |a: usize, b: usize| p[a].bounds.x0 < p[b].bounds.x1 && p[a].bounds.x1 > p[b].bounds.x0;
+    if before.is_some_and(|b| {
+        let row = inked(b);
+        one_row(b)
+            && row
+                .iter()
+                .all(|&i| p[i].size < SIZE_STEP * largest && largest < SIZE_STEP * p[i].size)
+            && labels.iter().all(|&l| row.iter().any(|&i| over(i, l)))
+    }) {
+        return None;
+    }
+    // The band under the values is small text again (the labels of the next boxes), or there
+    // is none: under the small header of a table come more rows in the size of the first, and
+    // its header and first row are no cells of labels over values.
+    if after.is_some_and(|a| {
+        a.iter()
+            .filter(|&&i| p[i].inked)
+            .any(|&i| SIZE_STEP * p[i].size > smallest)
+    }) {
+        return None;
+    }
+    let mut under: Vec<Option<usize>> = vec![None; labels.len()];
+    for &v in &values {
+        work::add(labels.len() as u64);
+        let mut at = labels.iter().enumerate().filter(|&(_, &l)| over(l, v));
+        let (k, _) = at.next()?;
+        if at.next().is_some() || under[k].is_some() {
+            return None;
+        }
+        under[k] = Some(v);
+    }
+    // The pieces without ink go with the row they stand in: after its last cell.
+    let blank: Vec<usize> = upper
+        .iter()
+        .chain(lower)
+        .copied()
+        .filter(|&i| !p[i].inked)
+        .collect();
+    let mut cells: Vec<Vec<usize>> = labels
+        .iter()
+        .zip(&under)
+        .map(|(&l, v)| std::iter::once(l).chain(*v).collect())
+        .collect();
+    if let Some(last) = cells.last_mut() {
+        last.extend(blank);
+    }
+    Some(cells)
 }
 
 /// A piece reaches into a gutter when it reaches past its edge by more than this share of
@@ -339,12 +500,28 @@ fn crosses(p: &Piece, (g0, g1): (f32, f32), slack: f32) -> bool {
     p.inked && p.bounds.x1 > g0 + slack && p.bounds.x0 < g1 - slack
 }
 
-/// Where to cut pieces sorted by row: after the row with the widest white space below it,
-/// when that space is at least half a line high. The index is the first piece below the cut.
-fn widest_gap(p: &[Piece], ids: &[usize]) -> Option<usize> {
+/// Bands of white space within this share of the text size of the widest one are as wide as
+/// it: paragraphs set at one spacing differ by the rounding of their baselines only, and
+/// which of them is the widest by a hair says nothing about the page.
+const TIE: f32 = 1.0 / 8.0;
+
+/// More equal bands of white space than this in one region are not cut all at once: they
+/// part the lines or paragraphs of one long flow, and a page of very many of them must not
+/// use up the regions of the page. Such a region is cut at the topmost of them only, and the
+/// rest is looked at again, so the first blocks are parted down to the depth of the column
+/// search and the rest reads in its order as one group.
+const MANY_BANDS: usize = 512;
+
+/// Where to cut pieces sorted by row: after each row with the widest white space below it,
+/// when that space is at least half a line high. Bands as wide as the widest (see [`TIE`],
+/// of the median size of the pieces) are all cut, so that the cut does not depend on which of
+/// equal bands comes first or is wider by the noise of its places. The indices, ascending,
+/// are the first pieces below each cut; the topmost alone when there are more than
+/// [`MANY_BANDS`].
+fn widest_gaps(p: &[Piece], ids: &[usize]) -> Vec<usize> {
     // Each piece is passed once, and once more as part of the row after a cut.
     work::add(2 * ids.len() as u64);
-    let mut best: Option<(f32, usize)> = None;
+    let mut gaps: Vec<(f32, usize)> = Vec::new();
     let mut low = f32::MAX;
     for k in 1..ids.len() {
         let (prev, cur) = (&p[ids[k - 1]], &p[ids[k]]);
@@ -359,12 +536,29 @@ fn widest_gap(p: &[Piece], ids: &[usize]) -> Option<usize> {
             .map(|&i| p[i].bounds.y1)
             .fold(f32::MIN, f32::max);
         let gap = low - top;
-        if gap >= 0.5 * prev.size.max(cur.size) && best.is_none_or(|(g, _)| gap > g) {
-            best = Some((gap, k));
+        if gap >= 0.5 * prev.size.max(cur.size) {
+            gaps.push((gap, k));
         }
     }
-    best.map(|(_, k)| k)
+    let Some(widest) = gaps.iter().map(|g| g.0).reduce(f32::max) else {
+        return Vec::new();
+    };
+    let mut sizes: Vec<f32> = ids.iter().map(|&i| p[i].size).collect();
+    sizes.sort_by(f32::total_cmp);
+    let tie = TIE * sizes[sizes.len() / 2];
+    let at: Vec<usize> = gaps
+        .iter()
+        .filter(|g| g.0 >= widest - tie)
+        .map(|g| g.1)
+        .collect();
+    if at.len() > MANY_BANDS {
+        // The rule of one band at a time: the topmost of them, and the rest is looked at
+        // again down to the depth of the column search.
+        return at[..1].to_vec();
+    }
+    at
 }
+
 /// A block beside a lone row has at least this many rows: a lone cell beside fewer is a row
 /// of a table, not a title.
 const LONE_BLOCK: usize = 3;
@@ -766,6 +960,9 @@ mod tests {
             bold: false,
             inked: true,
             chars: 4,
+            runs: 1,
+            colon: false,
+            value: false,
             boxed: None,
             rows: 1,
         }
@@ -905,6 +1102,9 @@ mod tests {
             bold: false,
             inked: true,
             chars,
+            runs: 1,
+            colon: false,
+            value: false,
             boxed: None,
             rows: 1,
         }
@@ -1006,6 +1206,160 @@ mod tests {
         let block = |k: usize| (4 * k..4 * k + 4).collect::<Vec<_>>();
         assert_eq!(cut.groups, vec![block(0), block(1), block(2), block(3)]);
         assert_eq!(cut.splits, vec![Split::Band; 3]);
+    }
+
+    /// Blocks at one spacing are all parted, whichever of the equal bands is the widest by
+    /// the noise of its place: a block moved by a few hundredths of a point makes the same
+    /// groups.
+    #[test]
+    fn equal_bands_are_all_cut_whatever_their_noise() {
+        let even = cut_of(&blocks(&[30.0, 30.0, 30.0, 30.0]), &[]);
+        let block = |k: usize| (4 * k..4 * k + 4).collect::<Vec<_>>();
+        assert_eq!(even.groups, (0..5).map(block).collect::<Vec<_>>());
+        assert_eq!(even.splits, vec![Split::Band; 4]);
+        for noise in [
+            [0.04, -0.03, 0.02, -0.05],
+            [-0.05, 0.05, -0.02, 0.01],
+            [0.0, 0.0, 0.0, 0.06],
+        ] {
+            let gaps: Vec<f32> = noise.iter().map(|n| 30.0 + n).collect();
+            assert_eq!(cut_of(&blocks(&gaps), &[]), even, "{noise:?}");
+        }
+        // A band wider than the others by more than the noise is cut first, and the parts
+        // are cut again: the groups are the same.
+        assert_eq!(
+            cut_of(&blocks(&[30.0, 30.0, 45.0, 30.0]), &[]).groups,
+            even.groups
+        );
+    }
+
+    /// More equal bands than [`MANY_BANDS`] are cut one at a time from the top, down to the
+    /// depth of the column search, and the rest is one group in order: no page of 20,000
+    /// regions. The edge is not gone, it lies a few bands higher: up to `MANY_BANDS` plus the
+    /// depth of the column search less one, the bands left after each cut from the top are at
+    /// most `MANY_BANDS` again and every band is cut; from one more on, the top eight are.
+    #[test]
+    fn very_many_equal_bands_are_cut_from_the_top() {
+        let ps = blocks(&vec![30.0; MANY_BANDS]);
+        assert_eq!(cut_of(&ps, &[]).groups.len(), MANY_BANDS + 1);
+        let ps = blocks(&vec![30.0; MANY_BANDS + 1]);
+        assert_eq!(cut_of(&ps, &[]).groups.len(), MANY_BANDS + 2);
+        let ps = blocks(&vec![30.0; MANY_BANDS + 100]);
+        let cut = cut_of(&ps, &[]);
+        assert_eq!(cut.groups.len(), COLUMN_DEPTH + 1);
+        assert_eq!(cut.groups[0], vec![0, 1, 2, 3]);
+        assert_eq!(cut.groups.concat(), (0..ps.len()).collect::<Vec<_>>());
+        assert_eq!(cut.short, None);
+    }
+
+    /// Fix round 1 of Task 31a (I4): boxes of a form, a small label over what is filled in,
+    /// all rows at one pitch. The equal bands part every row; a row of labels and the row of
+    /// their values are read cell by cell, each label with the value under it, not the labels
+    /// of the row and then its values. With labels in the size of the values the rows are
+    /// rows.
+    #[test]
+    fn small_labels_over_their_values_read_cell_by_cell() {
+        // A line across, a row of three labels, the row of their values, a line across: all
+        // 20 points apart. Pieces 1, 3, 5 are the labels, 2, 4, 6 the values under them.
+        let form = |label_size: f32| {
+            let mut ps = vec![text(50.0, 440.0, 0, 700.0, 10.0, 60)];
+            for x in [50.0f32, 200.0, 350.0] {
+                ps.push(text(x, x + 90.0, 1, 680.0, label_size, 20));
+                ps.push(text(x + 4.0, x + 60.0, 2, 660.0, 10.0, 9));
+            }
+            ps.push(text(50.0, 440.0, 3, 640.0, 10.0, 60));
+            ps
+        };
+        let ps = form(6.0);
+        let cut = cut_of(&ps, &[]);
+        assert_whole(&cut, ps.len());
+        assert_eq!(
+            cut.groups,
+            vec![vec![0], vec![1, 2], vec![3, 4], vec![5, 6], vec![7]]
+        );
+        // A small header over rows of a table: the row under the first row is no small text.
+        let mut table = form(6.0);
+        let last = table.len() - 1;
+        table[last] = text(54.0, 110.0, 3, 640.0, 10.0, 9);
+        assert_eq!(
+            cut_of(&table, &[]).groups[1..3],
+            [vec![1, 3, 5], vec![2, 4, 6]]
+        );
+        let rows = cut_of(&form(10.0), &[]);
+        assert_eq!(
+            rows.groups,
+            vec![vec![0], vec![1, 3, 5], vec![2, 4, 6], vec![7]]
+        );
+    }
+
+    /// A piece of text as [`text`] with the two flags of its wording: it ends with a colon,
+    /// it reads as an amount or a date.
+    fn worded(x0: f32, x1: f32, line: u32, y: f32, size: f32, colon: bool, value: bool) -> Piece {
+        Piece {
+            colon,
+            value,
+            ..text(x0, x1, line, y, size, 9)
+        }
+    }
+
+    /// Fix round 2 of Task 31a (N1): rows of a label and its value at one pitch, the last row
+    /// (a total) set larger. The larger row is no row of values under a row of labels: its
+    /// first piece ends with a colon, and the row over the two is a row like the upper one.
+    /// The rows read row by row, each label with its own value.
+    #[test]
+    fn a_larger_total_row_under_rows_of_pairs_is_a_row() {
+        // `Date: Jan`, `Order: po_123` at 10 points, `Balance: 127.50` at 11.5.
+        let rows = |colons: bool, lead: bool| {
+            let mut ps = Vec::new();
+            if lead {
+                ps.push(worded(50.0, 90.0, 0, 700.0, 10.0, colons, false));
+                ps.push(worded(200.0, 240.0, 0, 700.0, 10.0, false, false));
+            }
+            ps.push(worded(50.0, 110.0, 1, 680.0, 10.0, colons, false));
+            ps.push(worded(200.0, 250.0, 1, 680.0, 10.0, false, false));
+            ps.push(worded(50.0, 120.0, 2, 660.0, 11.5, colons, false));
+            ps.push(worded(200.0, 245.0, 2, 660.0, 11.5, false, true));
+            ps
+        };
+        // With colons and a row over them: both refusals hold.
+        let cut = cut_of(&rows(true, true), &[]);
+        assert_eq!(cut.groups, vec![vec![0, 1], vec![2, 3], vec![4, 5]]);
+        // The colon alone (no row over them), and the row over them alone (no colons).
+        let cut = cut_of(&rows(true, false), &[]);
+        assert_eq!(cut.groups, vec![vec![0, 1], vec![2, 3]]);
+        let cut = cut_of(&rows(false, true), &[]);
+        assert_eq!(cut.groups, vec![vec![0, 1], vec![2, 3], vec![4, 5]]);
+    }
+
+    /// Fix round 2 of Task 31a (N1): `Subtotal 120.00` over a larger `Total 127.50`, no colon
+    /// and no row over them. The upper row holds an amount: it is a label with its value, no
+    /// row of labels.
+    #[test]
+    fn a_row_with_an_amount_is_no_row_of_labels() {
+        let ps = vec![
+            worded(50.0, 110.0, 0, 680.0, 10.0, false, false),
+            worded(200.0, 250.0, 0, 680.0, 10.0, false, true),
+            worded(50.0, 100.0, 1, 660.0, 11.5, false, false),
+            worded(200.0, 255.0, 1, 660.0, 11.5, false, true),
+        ];
+        assert_eq!(cut_of(&ps, &[]).groups, vec![vec![0, 1], vec![2, 3]]);
+    }
+
+    /// A small header over the one row of a table reads cell by cell: each title with the
+    /// value under it, the same meaning as the two rows.
+    #[test]
+    fn a_small_header_over_one_row_reads_cell_by_cell() {
+        let mut ps = Vec::new();
+        for x in [50.0f32, 200.0, 350.0] {
+            ps.push(worded(x, x + 60.0, 0, 680.0, 8.0, false, false));
+        }
+        for x in [50.0f32, 200.0, 350.0] {
+            ps.push(worded(x, x + 50.0, 1, 660.0, 10.0, false, true));
+        }
+        assert_eq!(
+            cut_of(&ps, &[]).groups,
+            vec![vec![0, 3], vec![1, 4], vec![2, 5]]
+        );
     }
 
     #[test]

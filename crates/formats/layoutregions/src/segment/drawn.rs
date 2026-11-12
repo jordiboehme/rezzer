@@ -16,6 +16,14 @@ use crate::region::Bounds;
 use crate::work;
 
 /// Lines this close are one line, and line ends this close meet, in points.
+///
+/// Points, not a share of the text size, by a measure of Task 31a: a rule has no text size of
+/// its own, and with 0.2 of the page's median text size (2 points at 10 points) a page at
+/// half or twice its size kept its grids, but pages set in small text lost joins that their
+/// drawing needs (a ruled table whose rules miss each other by more than 1.4 points, rules
+/// drawn dash by dash 2 points apart), and today's readers measure the same lines in points.
+/// The gap between two dashes and the miss of two line ends are measures of the drawing, not
+/// of the text: a snap that follows the scale of a page needs a measure taken from its rules.
 pub const SNAP: f32 = 2.0;
 
 /// A grid or region that covers more of the page than this is the page's frame.

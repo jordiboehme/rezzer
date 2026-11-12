@@ -2026,6 +2026,56 @@ fn a_lone_line_of_a_label_and_a_shaped_value_is_a_pair() {
     assert!(find(&typed, Kind::LabelValue).is_none(), "{typed:#?}");
 }
 
+/// Fix round 1 of Task 31a (I3): items of a list that read `label: value`, each cut into a
+/// band of its own by the equal white space between them, are items of their list and no
+/// tables of one row: with a bullet set as a letter that every item opens with, or with an
+/// enumerator in brackets. The same lines without a marker are pairs, line by line.
+#[test]
+fn a_list_item_of_a_label_and_its_value_is_no_pair_of_its_own() {
+    let lines = |marks: [&str; 4]| -> Vec<TextRun> {
+        [
+            "shelf height: 120",
+            "lamp colour: green",
+            "desk width: 80",
+            "chair count: 4",
+        ]
+        .iter()
+        .zip(marks)
+        .enumerate()
+        .map(|(k, (t, m))| {
+            run(
+                &format!("{m}{t}"),
+                72.0,
+                600.0 - 18.0 * k as f32,
+                9.2,
+                100 + k as u32,
+            )
+        })
+        .collect()
+    };
+    for (marks, pair) in [
+        (["o ", "o ", "o ", "o "], false),
+        (["(a) ", "(b) ", "(c) ", "(d) "], false),
+        (["(1) ", "(2) ", "(3) ", "(4) "], false),
+        (["(i) ", "(ii) ", "(iii) ", "(iv) "], false),
+        // A short name in brackets is no enumerator (fix round 2, N5).
+        (["(EIN) ", "(GLN) ", "(GTIN) ", "(USt) "], true),
+        (["", "", "", ""], true),
+    ] {
+        let tree = Tree {
+            page: sheet(lines(marks), Vec::new()),
+        };
+        for line in [100, 101, 103] {
+            let typed = tree.typed(&text_of_lines(vec![line]));
+            assert_eq!(
+                find(&typed, Kind::LabelValue).is_some(),
+                pair,
+                "{marks:?} line {line}: {typed:#?}"
+            );
+        }
+    }
+}
+
 /// Task 19a-5b: a lone line of a name and a code set a size step smaller beside it (the bureau
 /// name of a sample check and its printed `000`) is no pair; the code in the label's size is.
 #[test]

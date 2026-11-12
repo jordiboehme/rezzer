@@ -297,8 +297,10 @@ fn word_shape(text: &str) -> Vec<bool> {
 /// Lines of labels and values one table may have at most.
 pub(crate) const MAX_KEY_VALUES: usize = MAX_SQUARES / 2;
 
-/// Labels and values line up within this many points.
-const KV_ALIGN: f32 = 1.0;
+/// Labels and values line up within this share of the text size of their line: a point at
+/// 10 points. A share of the size, so that a block printed smaller or larger lines up the
+/// same (Task 31a; it was a point at every size).
+const KV_ALIGN: f32 = 0.1;
 
 /// One row of a block of labels and values: its line, and the flow ranges of its label and
 /// value; a row without a value range has both in one run, cut after the label's colon.
@@ -353,7 +355,7 @@ pub fn key_values<R: LineRun>(
         if head.chars().count() > LABEL_CHARS || head.split_whitespace().count() > LABEL_WORDS {
             break;
         }
-        if (runs[cur.start].x() - pieces[0][0].x0).abs() > KV_ALIGN {
+        if (runs[cur.start].x() - pieces[0][0].x0).abs() > KV_ALIGN * cur.size.max(lines[a].size) {
             break;
         }
         extra.push(end);
@@ -364,10 +366,12 @@ pub fn key_values<R: LineRun>(
         return KeyValues::No;
     }
     let x0 = pieces[0][0].x0;
-    let lefts = pieces.iter().all(|p| (p[0].x0 - x0).abs() <= KV_ALIGN);
+    // The lines of the block line up within a share of their largest text size.
+    let align = KV_ALIGN * lines[a..z].iter().map(|l| l.size).fold(0.0, f32::max);
+    let lefts = pieces.iter().all(|p| (p[0].x0 - x0).abs() <= align);
     let (v0, v1) = (pieces[0][1].x0, pieces[0][1].x1);
-    let flush_left = pieces.iter().all(|p| (p[1].x0 - v0).abs() <= KV_ALIGN);
-    let flush_right = pieces.iter().all(|p| (p[1].x1 - v1).abs() <= KV_ALIGN);
+    let flush_left = pieces.iter().all(|p| (p[1].x0 - v0).abs() <= align);
+    let flush_right = pieces.iter().all(|p| (p[1].x1 - v1).abs() <= align);
     if !lefts || !(flush_left || flush_right || colons) {
         return KeyValues::No;
     }
@@ -391,7 +395,7 @@ pub fn key_values<R: LineRun>(
         let gap = last.y - next.y;
         gap > 0.0
             && gap <= 1.6 * last.size.max(next.size)
-            && (runs[next.start].x() - v0).abs() <= KV_ALIGN
+            && (runs[next.start].x() - v0).abs() <= KV_ALIGN * last.size.max(next.size)
     });
     let bold = |l: &RunRange| runs[l.start..l.end].iter().all(|r| r.bold());
     let header = bold(&lines[a]) && (a + 1..z).any(|k| !bold(&lines[k]));

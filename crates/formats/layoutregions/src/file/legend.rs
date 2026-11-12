@@ -10,7 +10,9 @@ use std::collections::HashSet;
 
 #[cfg(test)]
 use crate::line::text_lines;
-use crate::line::{EDGE, GAP_RATIO, LineRun, PIECE_GAP, SIZE_SLACK, TextLine, ink};
+use crate::line::{
+    EDGE_SIZES, GAP_RATIO, LineRun, PIECE_GAP, SIZE_SLACK_SHARE, TextLine, ink, same_size,
+};
 
 /// A run of digits opens a legend line raised when it is this many times the size of the
 /// text after it or smaller, or its baseline stands this many times that size higher.
@@ -531,10 +533,12 @@ pub(super) fn find_lines<R: LineRun>(all: &[TextLine<'_, R>], starts: &[usize]) 
             .first()
             .and_then(|piece| opening_mark(piece.1))
             .is_some_and(|m| marks.contains(&m));
+        // Not larger than the smallest so far, and nothing larger under it: one-sided tests,
+        // so the share is added and `same_size` (two-sided) is not used.
         if p > 0
             && opens
-            && l.size <= smallest + SIZE_SLACK
-            && largest_below[p + 1] <= l.size + SIZE_SLACK
+            && l.size <= smallest * (1.0 + SIZE_SLACK_SHARE)
+            && largest_below[p + 1] <= l.size * (1.0 + SIZE_SLACK_SHARE)
         {
             top = Some((l.y, l.size));
             break;
@@ -550,7 +554,7 @@ pub(super) fn find_lines<R: LineRun>(all: &[TextLine<'_, R>], starts: &[usize]) 
     // Only references that stand above the legend count.
     let raised: Vec<RaisedRef> = raised
         .into_iter()
-        .filter(|(y, _)| *y > top + EDGE)
+        .filter(|(y, _)| *y > top + EDGE_SIZES * size)
         .map(|(_, r)| r)
         .collect();
     let mut entries: Vec<LegendEntry> = Vec::new();
@@ -558,7 +562,7 @@ pub(super) fn find_lines<R: LineRun>(all: &[TextLine<'_, R>], starts: &[usize]) 
     let mut loose = 0usize;
     for &k in &order {
         let l = &all[k];
-        if l.y > top + EDGE || (l.size - size).abs() > SIZE_SLACK {
+        if l.y > top + EDGE_SIZES * size || !same_size(l.size, size) {
             continue;
         }
         for (from, piece) in pieces(l) {
@@ -583,7 +587,7 @@ pub(super) fn find_lines<R: LineRun>(all: &[TextLine<'_, R>], starts: &[usize]) 
             // The footnote of its column whose last line stands right above.
             let column = entries
                 .iter_mut()
-                .filter(|e| e.x <= x + EDGE && e.last > l.y)
+                .filter(|e| e.x <= x + EDGE_SIZES * l.size && e.last > l.y)
                 .max_by(|a, b| a.x.total_cmp(&b.x).then(b.last.total_cmp(&a.last)));
             match column {
                 Some(e) if e.last - l.y <= GAP_RATIO * e.h.max(l.h).max(1.0) => {

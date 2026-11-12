@@ -950,6 +950,139 @@ fn justified_paragraph(v: &Variant) -> Sheet {
     s
 }
 
+/// Task 31a fix round 1 (I2): three paragraphs of three lines, the last line short, and two
+/// short rules far apart, one over the first paragraph and one under the last (the edges of
+/// a mark in the margin, of a bar behind a title). The two rules bound a tall narrow frame
+/// that the full lines run through; only the short last lines have their middles in it. The
+/// frame is no strip of fields: each short line is the last line of its paragraph.
+fn paragraphs_across_a_frame(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let size = 9.0 * k;
+    let top = 640.0;
+    let pitch = 1.2 * size;
+    let step = 3.0 * pitch + size;
+    let ends = ["of the long room", "of the cold hall", "of the wide yard"];
+    let names = ["first", "second", "third"];
+    let mut t = String::new();
+    let mut joined = Vec::new();
+    let mut right = 0.0f32;
+    for (p, (end, name)) in ends.iter().zip(names).enumerate() {
+        let y = top - step * p as f32;
+        let one = format!("the {name} green lamp stands beside a wooden shelf and the small desk");
+        let two =
+            format!("under the {name} window keeps the old books of a quiet reader near the door");
+        t += &show(plain, size, 40.0, y, &one);
+        t += &show(plain, size, 40.0, y - pitch, &two);
+        t += &show(plain, size, 40.0, y - 2.0 * pitch, end);
+        right = right.max(40.0 + font_width(plain, &two, size));
+        joined.push(("desk".to_string(), "under".to_string()));
+        joined.push(("door".to_string(), "of".to_string()));
+    }
+    // The frame: around the middle of the short lines.
+    let short = font_width(plain, ends[0], size);
+    let (x0, x1) = (40.0 + 0.3 * short, 40.0 + 0.7 * short);
+    let bottom = top - 2.0 * step - 2.0 * pitch;
+    t += &rule(v, x0, x1, top + 1.5 * size, size);
+    t += &rule(v, x0, x1, bottom - 0.8 * size, size);
+    let mut s = sheet(
+        v,
+        t,
+        right,
+        Some(Span {
+            top: top + 1.5 * size,
+            bottom: bottom - 0.8 * size,
+        }),
+    );
+    s.want.lines_joined.extend(joined);
+    s
+}
+
+/// Task 31a fix round 2 (N1): rows of a label and its value at one white space from row to
+/// row, the last row (a total) set larger. The larger row is a row, no row of values under a
+/// row of labels: each label reads with its own value. `rows` are the label and the value of
+/// each row; the last one is the larger.
+fn rows_over_a_larger_row(v: &Variant, rows: &[[&str; 2]]) -> Sheet {
+    let k = v.k();
+    let (plain, bold) = v.faces();
+    let (size, large) = (10.0 * k, 11.5 * k);
+    let top = 640.0;
+    let mut t = String::new();
+    let mut order = Vec::new();
+    let mut y = top;
+    for (n, row) in rows.iter().enumerate() {
+        let last = n + 1 == rows.len();
+        let (face, s) = if last { (bold, large) } else { (plain, size) };
+        // The white space over a row is the same for every row: a larger row stands lower
+        // by what it is higher.
+        if n > 0 {
+            y -= 1.0 * size + s;
+        }
+        t += &show(face, s, 40.0, y, row[0]);
+        t += &show(face, s, 200.0, y, row[1]);
+        order.extend(row.iter().map(|c| c.to_string()));
+    }
+    let mut s = sheet(v, t, 320.0, Some(Span { top, bottom: y }));
+    s.want.order = order;
+    s
+}
+
+/// Task 31a fix round 2 (ruling on I3): the lines of a table of contents at one pitch with
+/// white space between the lines: a name and its page (a number or a range) at one edge, the
+/// lines under a title set in, a title line without a page. They read as one table of a name
+/// and a page per row. A guard: the contents page of a public payroll sample that reads as
+/// one-row tables per line (Task 26) has more on it (a second column, a small picture beside
+/// each title) and is not built here.
+fn contents_lines(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let size = 9.0 * k;
+    let top = 640.0;
+    // A line without a page is the title of the lines under it.
+    let entries = [
+        ["Opening notes", "3"],
+        ["The green lamp", "7"],
+        ["Lists for the house", ""],
+        ["A wooden shelf (part one)", "12"],
+        ["The small desk", "14-15"],
+        ["Books of a quiet reader", "21"],
+        ["Other lists (samples)", ""],
+        ["The long room", "30"],
+        ["Closing notes", "44"],
+    ];
+    let mut t = String::new();
+    for (n, e) in entries.iter().enumerate() {
+        let y = top - 1.8 * size * n as f32;
+        // The lines under a title are set in by two ems; the pages start at one edge.
+        let x = if e[1].is_empty() || n < 2 {
+            40.0
+        } else {
+            40.0 + 2.0 * size
+        };
+        t += &show(plain, size, x, y, e[0]);
+        if !e[1].is_empty() {
+            t += &show(plain, size, 300.0, y, e[1]);
+        }
+    }
+    let mut s = sheet(
+        v,
+        t,
+        400.0,
+        Some(Span {
+            top,
+            bottom: top - 1.8 * size * (entries.len() - 1) as f32,
+        }),
+    );
+    // One table: a title line is a row with an empty page cell.
+    s.want.tables = vec![
+        entries
+            .iter()
+            .map(|e| e.iter().map(|c| c.to_string()).collect())
+            .collect(),
+    ];
+    s
+}
+
 /// Part 2e-2 fix round 1 (C1): line items with amounts flush left, the last a credit with a
 /// trailing minus (`10,00-`), over a total under the amounts at the row pitch: the total is no
 /// end of the credit's cell.
@@ -2353,6 +2486,44 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "a paragraph without a stop set full in a narrow column",
             axes: DOC,
             draw: |v| (justified_paragraph(v), None),
+        },
+        Shape {
+            name: "rows of a label with a colon and its value over a larger total row",
+            axes: DOC,
+            draw: |v| {
+                let rows = [
+                    ["Date:", "12 May"],
+                    ["Order:", "po_123"],
+                    ["Balance Due:", "127.50"],
+                ];
+                (rows_over_a_larger_row(v, &rows), None)
+            },
+        },
+        Shape {
+            name: "a subtotal over a larger total without colons",
+            axes: DOC,
+            draw: |v| {
+                let rows = [["Subtotal", "120.00"], ["Total", "127.50"]];
+                (rows_over_a_larger_row(v, &rows), None)
+            },
+        },
+        Shape {
+            name: "rows of a name and a word over a larger last row",
+            axes: DOC,
+            draw: |v| {
+                let rows = [["Colour", "green"], ["Shape", "round"], ["Grade", "prime"]];
+                (rows_over_a_larger_row(v, &rows), None)
+            },
+        },
+        Shape {
+            name: "lines of a table of contents with their pages at one edge",
+            axes: DOC,
+            draw: |v| (contents_lines(v), None),
+        },
+        Shape {
+            name: "paragraphs with a short last line across a frame of two rules",
+            axes: DOC,
+            draw: |v| (paragraphs_across_a_frame(v), None),
         },
         Shape {
             name: "line items with a hanging credit minus over a total",

@@ -932,15 +932,15 @@ pub fn move_lines(name: &str, findings: &[Finding]) -> Vec<String> {
 /// \t<owner>`:
 ///
 /// - one line per page (counted from 1), change, break and class with its number of breaks;
-/// - one line per change, move (`to-spatial`, `from-spatial`) and class with its number of
-///   moves over the whole file, page `*` and owner `-`.
+/// - one line per page, change, move (`to-spatial`, `from-spatial`) and class with its number
+///   of moves on that page, owner `-`.
 ///
-/// A pinned file holds these lines: a break more or less on any page, a new break or a
-/// different number of moves moves a line.
+/// A pinned file holds these lines: a break or a move more or less on any page moves a line,
+/// so a move that goes on one page and comes on another does not cancel out.
 pub fn pin_lines(name: &str, findings: &[Finding]) -> Vec<String> {
     let mut breaks: BTreeMap<(usize, String, &'static str, &'static str), (usize, &str)> =
         BTreeMap::new();
-    let mut moves: BTreeMap<(String, &'static str, &'static str), usize> = BTreeMap::new();
+    let mut moves: BTreeMap<(usize, String, &'static str, &'static str), usize> = BTreeMap::new();
     for f in findings {
         for b in &f.verdict.broken {
             let o = owner(f.transform, b.what, b.class());
@@ -955,7 +955,7 @@ pub fn pin_lines(name: &str, findings: &[Finding]) -> Vec<String> {
         ] {
             for (k, _) in list {
                 *moves
-                    .entry((f.transform.name(), m, class_of(&[*k])))
+                    .entry((f.page + 1, f.transform.name(), m, class_of(&[*k])))
                     .or_insert(0) += 1;
             }
         }
@@ -967,12 +967,12 @@ pub fn pin_lines(name: &str, findings: &[Finding]) -> Vec<String> {
     out.extend(
         moves
             .into_iter()
-            .map(|((t, m, c), n)| format!("{name}\t*\t{t}\t{m}\t{c}\t{n}\t-")),
+            .map(|((page, t, m, c), n)| format!("{name}\t{page}\t{t}\t{m}\t{c}\t{n}\t-")),
     );
     out
 }
 
-/// The order of pin lines: by name, then page by number (`*` last), then the rest.
+/// The order of pin lines: by name, then page by number, then the rest.
 fn pin_order(a: &str, b: &str) -> std::cmp::Ordering {
     let key = |l: &str| {
         let mut f = l.splitn(3, '\t');

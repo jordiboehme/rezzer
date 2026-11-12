@@ -25,7 +25,7 @@ use crate::extract::pairs::{
 use crate::extract::table::grid::{Shape, titles_over_values};
 use crate::extract::table::ruled::edges;
 use crate::input::TextRun;
-use crate::line::LineRun;
+use crate::line::{EDGE_SIZES, LineRun, same_size};
 use crate::region::Kind;
 use crate::segment::cut::SIZE_STEP;
 use crate::segment::{Segment, Source};
@@ -655,6 +655,83 @@ struct LinePair {
     cut: PairCut,
 }
 
+/// The items of a list follow each other at most this many text sizes apart, baseline to
+/// baseline (the pitch [`key_values`] allows the lines of a block of labels and values).
+const ITEM_PITCH: f32 = 2.0;
+
+/// Whether the one line `range` of `runs` (a segment of its own) is an item of a list: it
+/// opens with a list marker, with an enumerator in brackets (`(a)`, `(12)`, `(iv)`), or with
+/// a word of one character that the page's line right over
+/// or under it opens with too, at its left edge, in its size and within [`ITEM_PITCH`] sizes
+/// (a bullet the marker rule does not know, set as a letter or a sign of its own: `o`, `>`).
+/// An item that reads `label: value` is an item of its list, not a table of one row between
+/// the other items. A line that stands alone, and lines of labels and values under each
+/// other, open with words of their own and are not held back.
+fn list_item(
+    view: &PageView<'_>,
+    runs: &[&TextRun],
+    range: &crate::extract::table::RunRange,
+) -> bool {
+    let Some(first) = runs.get(range.start) else {
+        return false;
+    };
+    let text: String = runs[range.start..range.end]
+        .iter()
+        .map(|r| r.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if crate::extract::text::list_marker(text.trim_start()).is_some() {
+        return true;
+    }
+    // An enumerator in brackets with text after it: digits (`(12)`), one letter (`(a)`) or
+    // a small roman numeral (`(iv)`), up to four characters. A short name in brackets
+    // (`(EIN)`, `(GLN)`) is none.
+    let mut words = text.split_whitespace();
+    let bracketed = words.next().is_some_and(|w| {
+        w.strip_prefix('(')
+            .and_then(|w| w.strip_suffix(')'))
+            .is_some_and(|w| {
+                let n = w.chars().count();
+                (1..=4).contains(&n)
+                    && (w.chars().all(|c| c.is_ascii_digit())
+                        || (n == 1 && w.chars().all(char::is_alphabetic))
+                        || w.chars().all(|c| matches!(c, 'i' | 'v' | 'x')))
+            })
+    });
+    if bracketed && words.next().is_some() {
+        return true;
+    }
+    // The word a line opens with, when it is one character and more text follows it.
+    let mark = |t: &str| -> Option<char> {
+        let mut words = t.split_whitespace();
+        let mut w = words.next()?.chars();
+        let c = w.next()?;
+        (w.next().is_none() && words.next().is_some()).then_some(c)
+    };
+    let (Some(own), Some(&k)) = (mark(&text), view.line_at.get(&first.line)) else {
+        return false;
+    };
+    let lines = view.lines();
+    let same_mark = |j: usize| {
+        let o = &lines[j];
+        let size = o.size.max(range.size);
+        let Some(r) = view.page.texts.get(o.start) else {
+            return false;
+        };
+        let other: String = view.page.texts[o.start..o.end.min(view.page.texts.len())]
+            .iter()
+            .map(|r| r.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        same_size(o.size, range.size)
+            && (r.x - first.x).abs() <= EDGE_SIZES * size
+            && (o.y - range.y).abs() <= ITEM_PITCH * size
+            && mark(&other) == Some(own)
+    };
+    crate::work::add(2);
+    (k > 0 && same_mark(k - 1)) || (k + 1 < lines.len() && same_mark(k + 1))
+}
+
 /// The label and the value of one line of `runs` (its pieces `pieces`), each pair with
 /// evidence of its own, whether the label ends with a colon, and where the line parts:
 ///
@@ -1051,6 +1128,10 @@ pub(crate) fn label_value(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
                     found
                 };
                 let lone = ranges.len() == 1 && !in_grid;
+                // An item of a list (see [`list_item`]) is no pair on its own.
+                if ranges.len() == 1 && list_item(view, &runs, &ranges[0]) {
+                    return None;
+                }
                 let pairs: Option<Vec<LinePair>> =
                     pieces.iter().map(|p| line_pair(&runs, p, lone)).collect();
                 let pairs = pairs.filter(|p| !p.is_empty())?;

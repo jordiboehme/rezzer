@@ -1148,3 +1148,349 @@ fn a_strip_holds_six_lines_at_most() {
         );
     }
 }
+
+/// The page with every run cut into its words: each word a run of its own, placed by its
+/// share of the characters of the run.
+fn word_by_word(p: &PageIn) -> PageIn {
+    let mut texts = Vec::new();
+    for r in &p.texts {
+        let n = r.text.chars().count().max(1) as f32;
+        let mut at = 0usize;
+        for word in r.text.split(' ') {
+            let len = word.chars().count();
+            if len > 0 {
+                texts.push(TextRun {
+                    text: word.to_string(),
+                    x: r.x + r.w * at as f32 / n,
+                    w: r.w * len as f32 / n,
+                    ..r.clone()
+                });
+            }
+            at += len + 1;
+        }
+    }
+    PageIn { texts, ..p.clone() }
+}
+
+/// The text of each leaf of the main cut with text, its runs by line and place, sorted.
+fn leaf_texts(s: &Segments, p: &PageIn) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut stack = vec![s.root];
+    while let Some(id) = stack.pop() {
+        let g = seg(s, id);
+        if !g.children.is_empty() {
+            stack.extend(g.children.iter().copied());
+            continue;
+        }
+        let mut runs: Vec<&TextRun> = texts_of(g).iter().map(|&t| &p.texts[t as usize]).collect();
+        runs.sort_by(|a, b| a.line.cmp(&b.line).then(a.x.total_cmp(&b.x)));
+        if !runs.is_empty() {
+            out.push(
+                runs.iter()
+                    .map(|r| r.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            );
+        }
+    }
+    out.sort();
+    out
+}
+
+const SENTENCE: &str = "the green lamp stands beside a wooden shelf";
+
+/// Task 31a (class B): two columns of prose under a line across them are parted the same
+/// whether each line is one run or a run per word. The column gutter needs lines of prose on
+/// both sides and few pieces across it; both count the pieces of the lines, not their runs.
+#[test]
+fn columns_are_cut_the_same_word_by_word() {
+    let mut texts = vec![run(
+        "a note across both columns of the page",
+        200.0,
+        700.0,
+        190.0,
+        9.0,
+        0,
+    )];
+    for k in 0..6u32 {
+        let y = 670.0 - 12.0 * k as f32;
+        texts.push(run(SENTENCE, 72.0, y, 200.0, 9.0, 1 + k));
+        texts.push(run(SENTENCE, 320.0, y, 200.0, 9.0, 1 + k));
+    }
+    let whole = page([600.0, 800.0], texts, Vec::new());
+    let words = word_by_word(&whole);
+    assert!(words.texts.len() > 4 * whole.texts.len());
+    let (a, b) = (
+        segment_page(&whole, &Limits::default(), &|| false),
+        segment_page(&words, &Limits::default(), &|| false),
+    );
+    check_cover(&a, &whole);
+    check_cover(&b, &words);
+    let column = [SENTENCE; 6].join(" ");
+    assert_eq!(
+        leaf_texts(&a, &whole),
+        vec![
+            "a note across both columns of the page".to_string(),
+            column.clone(),
+            column
+        ]
+    );
+    assert_eq!(leaf_texts(&b, &words), leaf_texts(&a, &whole));
+    assert_eq!(with_source(&b, |x| *x == Source::Gutter).len(), 3);
+}
+
+/// Task 31a (class B): the lines between two rules stand in their strip whole, by the middle
+/// of the line, also when the line reaches past the rules and is cut into words: the words
+/// past the end of the rules stay with their line.
+#[test]
+fn a_line_stands_in_its_strip_whole_word_by_word() {
+    let mut texts = vec![
+        run(SENTENCE, 72.0, 690.0, 258.0, 9.0, 10),
+        run(SENTENCE, 72.0, 678.0, 258.0, 9.0, 11),
+    ];
+    texts.extend(column(72.0, 600.0, 3, 20));
+    // The rules end at 240, the lines at 330: their middles lie between the rules.
+    let rules = vec![
+        line(70.0, 702.0, 240.0, 702.0),
+        line(70.0, 670.0, 240.0, 670.0),
+    ];
+    let whole = page([600.0, 800.0], texts, rules);
+    let words = word_by_word(&whole);
+    for p in [&whole, &words] {
+        let s = segment_page(p, &Limits::default(), &|| false);
+        check_cover(&s, p);
+        let strips = with_source(&s, |x| *x == Source::Strip);
+        assert_eq!(strips.len(), 1, "{:#?}", s.all);
+        let mut held: Vec<&TextRun> = texts_of(strips[0])
+            .iter()
+            .map(|&t| &p.texts[t as usize])
+            .collect();
+        held.sort_by(|a, b| a.line.cmp(&b.line).then(a.x.total_cmp(&b.x)));
+        let text: Vec<&str> = held.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(text.join(" "), [SENTENCE, SENTENCE].join(" "));
+    }
+}
+
+/// The page with every line rule drawn in three pieces that touch.
+fn rules_in_pieces(p: &PageIn) -> PageIn {
+    let mut rules = Vec::new();
+    for r in &p.rules {
+        if r.rect {
+            rules.push(r.clone());
+            continue;
+        }
+        for k in 0..3 {
+            let at = |t: f32| (r.x0 + (r.x1 - r.x0) * t, r.y0 + (r.y1 - r.y0) * t);
+            let ((x0, y0), (x1, y1)) = (at(k as f32 / 3.0), at((k + 1) as f32 / 3.0));
+            rules.push(RuleIn {
+                x0,
+                y0,
+                x1,
+                y1,
+                ..r.clone()
+            });
+        }
+    }
+    PageIn { rules, ..p.clone() }
+}
+
+/// The source and the text runs of every segment that holds text, in the order of the tree.
+fn text_tree(s: &Segments) -> Vec<(Source, Vec<u32>)> {
+    s.all
+        .iter()
+        .map(|g| (g.source, texts_of(g)))
+        .filter(|(_, t)| !t.is_empty())
+        .collect()
+}
+
+/// Task 31a (class C): a rule drawn in pieces that touch bounds the same strip and parts the
+/// same bands of two columns as the rule drawn in one: the pieces are joined before the
+/// strips and the rule cut look at them.
+#[test]
+fn rules_in_pieces_bound_the_same_strips_and_bands() {
+    // A strip of two fields between two rules, a row between rules of its own.
+    let mut texts = vec![
+        run("first label", 72.0, 690.0, 60.0, 6.0, 10),
+        run("00123", 72.0, 678.0, 50.0, 9.0, 11),
+        run("second label", 322.0, 690.0, 60.0, 6.0, 10),
+        run("00456", 322.0, 678.0, 50.0, 9.0, 11),
+    ];
+    // Two columns of prose, a rule across their gutter between the eighth and ninth line:
+    // too many lines over it for a strip.
+    for k in 0..12u32 {
+        let y = 600.0 - 12.0 * k as f32;
+        texts.push(run(SENTENCE, 72.0, y, 200.0, 9.0, 20 + k));
+        texts.push(run(SENTENCE, 320.0, y, 200.0, 9.0, 20 + k));
+    }
+    let rules: Vec<RuleIn> = [700.0, 670.0, 514.5]
+        .iter()
+        .map(|&y| line(70.0, y, 522.0, y))
+        .collect();
+    let whole = page([600.0, 800.0], texts, rules);
+    let pieces = rules_in_pieces(&whole);
+    assert_eq!(pieces.rules.len(), 9);
+    let (a, b) = (
+        segment_page(&whole, &Limits::default(), &|| false),
+        segment_page(&pieces, &Limits::default(), &|| false),
+    );
+    check_cover(&a, &whole);
+    check_cover(&b, &pieces);
+    assert_eq!(with_source(&a, |x| *x == Source::Strip).len(), 1);
+    assert!(!with_source(&a, |x| *x == Source::Rule).is_empty());
+    assert_eq!(text_tree(&b), text_tree(&a));
+}
+
+/// Fix round 1 of Task 31a (I6): white space after a label, set up to the next column (the
+/// padding of a form field), joins the label's piece and bridges nothing: the label of the
+/// next column is a piece of its own, so the gutter between the two columns of labels over
+/// values is still found, with or without the padding.
+#[test]
+fn padding_up_to_the_next_column_bridges_no_gutter() {
+    let page_of = |padded: bool| {
+        let mut texts = Vec::new();
+        for k in 0..6u32 {
+            let y = 690.0 - 12.0 * k as f32;
+            texts.push(run(SENTENCE, 72.0, y, 200.0, 9.0, k));
+            if padded {
+                // From the end of the left line to the start of the right one.
+                texts.push(run("      ", 272.0, y, 46.0, 9.0, k));
+            }
+            texts.push(run(SENTENCE, 320.0, y, 200.0, 9.0, k));
+        }
+        page([600.0, 800.0], texts, Vec::new())
+    };
+    let inked = |s: &Segments, p: &PageIn| -> Vec<String> {
+        leaf_texts(s, p)
+            .into_iter()
+            .map(|t| t.split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|t| !t.is_empty())
+            .collect()
+    };
+    let (plain, padded) = (page_of(false), page_of(true));
+    let (a, b) = (
+        segment_page(&plain, &Limits::default(), &|| false),
+        segment_page(&padded, &Limits::default(), &|| false),
+    );
+    check_cover(&b, &padded);
+    let column = [SENTENCE; 6].join(" ");
+    assert_eq!(inked(&a, &plain), vec![column.clone(), column]);
+    assert_eq!(inked(&b, &padded), inked(&a, &plain));
+}
+
+/// Paragraphs of three lines, the last one short, 12 points from line to line and 30 from
+/// paragraph to paragraph, from line `first` on.
+fn short_ended_paragraphs(n: u32, top: f32, first: u32) -> Vec<TextRun> {
+    let mut texts = Vec::new();
+    for k in 0..n {
+        let y = top - 54.0 * k as f32;
+        let wide = [SENTENCE, SENTENCE].join(" ");
+        texts.push(run(&wide, 72.0, y, 440.0, 9.0, first + 3 * k));
+        texts.push(run(&wide, 72.0, y - 12.0, 440.0, 9.0, first + 3 * k + 1));
+        texts.push(run(
+            "beside a wooden shelf",
+            72.0,
+            y - 24.0,
+            105.0,
+            9.0,
+            first + 3 * k + 2,
+        ));
+    }
+    texts
+}
+
+/// Fix round 1 of Task 31a (I2): two rules far apart, one over the other and both short (the
+/// edges of a bar, a mark in the margin), bound a tall narrow frame. Full lines of the
+/// paragraphs run through it; only the short last lines have their middles in it. The frame
+/// is no strip: the short lines stay with the lines of their paragraphs, where the strip
+/// took two of them out as one region across the paragraphs between them.
+#[test]
+fn a_frame_that_lines_of_text_run_through_is_no_strip() {
+    let rules = vec![
+        line(100.0, 712.0, 150.0, 712.0),
+        line(100.0, 540.0, 150.0, 540.0),
+    ];
+    let p = page([600.0, 800.0], short_ended_paragraphs(3, 700.0, 0), rules);
+    let s = segment_page(&p, &Limits::default(), &|| false);
+    check_cover(&s, &p);
+    assert!(
+        with_source(&s, |x| *x == Source::Strip).is_empty(),
+        "{:#?}",
+        s.all
+    );
+    // Every leaf with text holds lines that follow each other.
+    for g in s.all.iter().filter(|g| g.children.is_empty()) {
+        let mut lines: Vec<u32> = texts_of(g)
+            .iter()
+            .map(|&t| p.texts[t as usize].line)
+            .collect();
+        lines.sort_unstable();
+        lines.dedup();
+        assert!(lines.windows(2).all(|w| w[1] == w[0] + 1), "{lines:?}");
+    }
+}
+
+/// Fix round 1 of Task 31a (I2): the lines of a strip follow each other. Two lines whose
+/// middles lie in a frame, with a shorter line of the same text between them that ends left
+/// of the frame, are lines of that text, not a strip of two.
+#[test]
+fn the_lines_of_a_strip_follow_each_other() {
+    let wide = [SENTENCE, SENTENCE].join(" ");
+    let texts = vec![
+        run(&wide, 72.0, 690.0, 440.0, 9.0, 0),
+        run("a short line", 72.0, 678.0, 60.0, 9.0, 1),
+        run("another short one", 72.0, 666.0, 85.0, 9.0, 2),
+        run(&wide, 72.0, 654.0, 440.0, 9.0, 3),
+        run("the end", 72.0, 642.0, 40.0, 9.0, 4),
+    ];
+    // The frame reaches from 200 to 400: the middles of the two full lines lie in it, the
+    // short lines end left of it.
+    let rules = vec![
+        line(200.0, 702.0, 400.0, 702.0),
+        line(200.0, 636.0, 400.0, 636.0),
+    ];
+    let p = page([600.0, 800.0], texts, rules);
+    let s = segment_page(&p, &Limits::default(), &|| false);
+    check_cover(&s, &p);
+    assert!(
+        with_source(&s, |x| *x == Source::Strip).is_empty(),
+        "{:#?}",
+        s.all
+    );
+}
+
+/// Fix round 2 of Task 31a (N2): a piece whose ink touches the side of a frame by a hair (a
+/// label in the margin that ends where the rules start) runs through nothing: the lines
+/// between the two rules stay one strip.
+#[test]
+fn ink_that_touches_a_frame_by_a_hair_leaves_the_strip() {
+    let strip = |margin_end: f32| {
+        let mut texts = vec![
+            run("first label", 122.0, 690.0, 60.0, 6.0, 10),
+            run("00123", 122.0, 678.0, 50.0, 9.0, 11),
+            run("second label", 322.0, 690.0, 60.0, 6.0, 10),
+            run("00456", 322.0, 678.0, 50.0, 9.0, 11),
+            // A label in the margin at the height of the strip's second line.
+            run(
+                "a note in the margin",
+                margin_end - 90.0,
+                684.0,
+                90.0,
+                9.0,
+                12,
+            ),
+        ];
+        texts.extend(column(72.0, 600.0, 3, 20));
+        let rules = vec![
+            line(120.0, 700.0, 520.0, 700.0),
+            line(120.0, 670.0, 520.0, 670.0),
+        ];
+        let p = page([600.0, 800.0], texts, rules);
+        let s = segment_page(&p, &Limits::default(), &|| false);
+        check_cover(&s, &p);
+        with_source(&s, |x| *x == Source::Strip).len()
+    };
+    // The note ends 0.3 points inside the frame: a hair. Ending 30 points inside, with its
+    // middle outside, it runs into the frame.
+    assert_eq!(strip(120.3), 1);
+    assert_eq!(strip(150.0), 0);
+}

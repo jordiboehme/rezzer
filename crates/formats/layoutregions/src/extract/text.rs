@@ -18,7 +18,15 @@
 pub mod title;
 
 use crate::file::{Levels, data_only, plain_size};
-use crate::line::{EDGE, GAP_RATIO, LABEL_STEP, LineRun, PIECE_GAP, SIZE_SLACK, TextLine, ink};
+use crate::line::{
+    EDGE_SIZES, GAP_RATIO, LABEL_STEP, LineRun, PIECE_GAP, TextLine, ink, same_size,
+};
+
+/// A line goes on a list item when it starts more than this share of the text size right of
+/// the item's marker: half a point at 10 points (the step this rule had in points). A
+/// distance of its own, smaller than an edge ([`EDGE_SIZES`]): the smallest indent that is
+/// one.
+const INDENT_STEP: f32 = 0.05;
 
 /// What the walk over a page's lines needs besides the lines.
 pub struct TextCx<'a> {
@@ -122,7 +130,7 @@ pub fn next_block<R: LineRun>(
             && heading_level(&lines[j]).is_none()
             && marker(j).is_none()
             && goes_on(j - 1, j)
-            && lines[j].x > l.x + SIZE_SLACK
+            && lines[j].x > l.x + INDENT_STEP * l.size.max(lines[j].size)
         {
             j += 1;
         }
@@ -173,7 +181,7 @@ pub fn continues<R: LineRun>(prev: &TextLine<'_, R>, cur: &TextLine<'_, R>) -> b
     // the cut ends (`Page-` over a cell of the next row).
     let narrow = c1 - c0 <= BESIDE_WIDTH * (end - p0).max(prev.size) || cuts(&prev.text, &cur.text);
     let beside = narrow && c0 >= end + BESIDE_GAP * prev.size.max(cur.size).max(1.0);
-    gap > 0.0 && gap <= GAP_RATIO * height && (prev.size - cur.size).abs() <= SIZE_SLACK && !beside
+    gap > 0.0 && gap <= GAP_RATIO * height && same_size(prev.size, cur.size) && !beside
 }
 
 /// A line that starts this many sizes or more right of where the line over it ends goes on
@@ -375,7 +383,9 @@ pub fn heading_block<R: LineRun>(
         return (j, Some(why));
     }
     let texts: Vec<&str> = block.iter().map(|l| l.text.as_str()).collect();
-    let one_edge = block.iter().all(|b| (b.x - first.x).abs() <= EDGE);
+    let one_edge = block
+        .iter()
+        .all(|b| (b.x - first.x).abs() <= EDGE_SIZES * first.size.max(b.size));
     let demoted = if !small {
         None
     } else if address_shaped(&texts) && one_edge {
@@ -404,7 +414,7 @@ fn lines_apart<R: LineRun>(block: &[TextLine<'_, R>], k: usize, items: bool) -> 
             .map(LineRun::x)
             .fold(f32::MAX, f32::min)
     };
-    let items = items && (left(a) - left(b)).abs() <= EDGE;
+    let items = items && (left(a) - left(b)).abs() <= EDGE_SIZES * a.size.max(b.size);
     let words = |l: &TextLine<'_, R>| l.text.split_whitespace().count();
     let fields = field_line(a).is_some_and(|f| {
         field_line(b).is_some_and(|g| same_face(f[0], g[0]) && same_face(f[1], g[1]))
@@ -461,6 +471,8 @@ fn line_breaks<R: LineRun>(
     let column = &all[lo..hi];
     let around = wraps(column, &ink_edges(column), ends_in_amount);
     let edges = ink_edges(lines);
+    // One edge of the block's lines, in the largest text size among them (see [`EDGE_SIZES`]).
+    let edge = EDGE_SIZES * lines.iter().map(|l| l.size).fold(0.0, f32::max);
     let right = edges.iter().map(|e| e.1).fold(f32::MIN, f32::max);
     let left = edges.iter().map(|e| e.0).fold(f32::MAX, f32::min);
     let short = lines[1..].iter().all(|l| {
@@ -473,14 +485,14 @@ fn line_breaks<R: LineRun>(
         .all(|l| !word_cut(&l.text) && !l.text.ends_with(','))
         && lines.windows(2).all(|w| !cuts(&w[0].text, &w[1].text))
         && !sentences(lines)
-        && edges.iter().all(|e| (e.0 - left).abs() <= EDGE)
+        && edges.iter().all(|e| (e.0 - left).abs() <= edge)
         && listed(&lines.iter().map(|l| l.text.as_str()).collect::<Vec<_>>());
     // Lines set flush right or centred: most pairs of lines in a row, and at least two,
     // share a right edge or a centre but not a left edge. One indented first line of
     // justified prose is not that.
-    let same_left = |a: (f32, f32), b: (f32, f32)| (a.0 - b.0).abs() <= EDGE;
+    let same_left = |a: (f32, f32), b: (f32, f32)| (a.0 - b.0).abs() <= edge;
     let aligned_pair = |a: (f32, f32), b: (f32, f32)| {
-        ((a.1 - b.1).abs() <= EDGE || ((a.0 + a.1) / 2.0 - (b.0 + b.1) / 2.0).abs() <= EDGE)
+        ((a.1 - b.1).abs() <= edge || ((a.0 + a.1) / 2.0 - (b.0 + b.1) / 2.0).abs() <= edge)
             && !same_left(a, b)
     };
     let pairs = edges
@@ -491,7 +503,7 @@ fn line_breaks<R: LineRun>(
     // indented first line of prose shares the right edge, not the centre.
     let centred_pair = edges.len() == 2 && {
         let (a, b) = (edges[0], edges[1]);
-        ((a.0 + a.1) / 2.0 - (b.0 + b.1) / 2.0).abs() <= EDGE && (a.1 - b.1).abs() > EDGE
+        ((a.0 + a.1) / 2.0 - (b.0 + b.1) / 2.0).abs() <= edge && (a.1 - b.1).abs() > edge
     };
     let set_aligned = (pairs >= 2 && 2 * pairs >= edges.len() - 1) || centred_pair;
     let items = block_listed(lines);

@@ -18,7 +18,7 @@ use rezzer_model::{Block, Inline, SpatialLine, SpatialPiece, SpatialSpan};
 pub(super) use layoutregions::file::Legend as Found;
 use layoutregions::file::{NoteMark, RefPlace, Split, word_marks};
 
-use super::{EDGE, Flow, Run, Slot};
+use super::{EDGE_SIZES, Flow, Run, Slot};
 use crate::tables::{MARK_RISE, MARK_SIZE, PlannedCell};
 
 /// Legend entries whose markers stand this many legend sizes apart or more are in other
@@ -125,7 +125,12 @@ pub(super) fn take(page: u32, flow: &mut Flow, found: Option<&Found>) -> Legend 
             columns.push(x);
         }
     }
-    let column = |x: f32| columns.iter().rposition(|c| *c <= x + EDGE).unwrap_or(0);
+    let column = |x: f32| {
+        columns
+            .iter()
+            .rposition(|c| *c <= x + EDGE_SIZES * size)
+            .unwrap_or(0)
+    };
     entries.sort_by(|a, b| column(a.x).cmp(&column(b.x)).then(b.top.total_cmp(&a.top)));
     let mut labels: HashMap<NoteMark, String> = HashMap::new();
     let mut used: HashSet<String> = HashSet::new();

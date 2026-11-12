@@ -1,21 +1,18 @@
 # name	page	transform	what	class	count	owner
 21 barcodes beside a photo	1	reorder-drawn	order	text	1	31
+F1 to F3	1	reorder-runs	from-spatial	text	3	-
 F1 to F3	1	reorder-runs	kind	text	1	after 0.1.0
 F1 to F3	1	reorder-runs	order	pairs	1	after 0.1.0
+F1 to F3	1	rule-as-box	from-spatial	text	2	-
 F1 to F3	1	rule-as-box	members	pairs	2	after 0.1.0
 F1 to F3	1	rule-as-box	members	table	2	after 0.1.0
 F1 to F3	1	rule-as-box	members	text	2	after 0.1.0
 F1 to F3	1	rule-as-box	order	pairs	1	after 0.1.0
-F1 to F3	1	split-rules	members	pairs	1	31
-F1 to F3	1	split-rules	members	text	2	31
+F1 to F3	1	scale-200	to-spatial	text	1	-
+F1 to F3	1	split-runs	from-spatial	pairs	1	-
 F1 to F3	1	split-runs	members	text	2	31
-F1 to F3	*	reorder-runs	from-spatial	text	3	-
-F1 to F3	*	rule-as-box	from-spatial	text	2	-
-F1 to F3	*	scale-200	to-spatial	text	1	-
-F1 to F3	*	split-rules	from-spatial	text	2	-
-F1 to F3	*	split-runs	from-spatial	pairs	1	-
-F1 to F3	*	split-runs	to-spatial	pairs	1	-
-F1 to F3	*	split-runs	to-spatial	text	1	-
+F1 to F3	1	split-runs	to-spatial	pairs	1	-
+F1 to F3	1	split-runs	to-spatial	text	1	-
 a coding line in a letter font named IDAutomationOCRb	1	reorder-runs	kind	pairs	1	after 0.1.0
 a coding line in a letter font named Ocean13	1	reorder-runs	kind	pairs	1	after 0.1.0
 a column of bold field lines of 5 to 7 words at heading size, two boxed	1	reorder-runs	members	text	3	after 0.1.0
@@ -34,28 +31,22 @@ a column of lines of one face with a box around two of them	1	scale-75	members	t
 a column of one-face field lines of 5 to 7 words with a box around two of them	1	rule-as-box	members	text	1	after 0.1.0
 a column of one-face field lines of 5 to 7 words with a box around two of them	1	scale-50	members	text	2	31
 a column of one-face field lines of 5 to 7 words with a box around two of them	1	scale-75	members	text	2	31
-a column of short field lines after a sentence	*	reorder-runs	to-spatial	text	1	-
-a headerless table of records	*	reorder-runs	to-spatial	table	1	-
+a column of short field lines after a sentence	1	reorder-runs	to-spatial	text	1	-
+a headerless table of records	1	reorder-runs	to-spatial	table	1	-
 a heading over a rule beside a boxed note	1	rule-as-box	order	text	1	after 0.1.0
 a heading over a rule beside a ruled table	1	reorder-runs	members	table	1	after 0.1.0
-a heading over a rule beside a ruled table	*	rule-as-box	to-spatial	table	1	-
-a lone field in a strip beside a smaller name over its address	1	split-rules	members	text	1	31
-a lone field in a strip beside a smaller name over its address	*	reorder-runs	from-spatial	text	2	-
-a lone field in a strip beside a smaller name over its address	*	split-rules	from-spatial	text	2	-
+a heading over a rule beside a ruled table	1	rule-as-box	to-spatial	table	1	-
+a lone field in a strip beside a smaller name over its address	1	reorder-runs	from-spatial	text	2	-
 a lone field in a strip beside a value	1	rule-as-box	members	text	1	after 0.1.0
-a lone field in a strip beside a value	1	split-rules	members	text	2	31
 a note row after a blank row in a table	1	reorder-runs	kind	pairs	1	after 0.1.0
 a note row after a blank row in a table	1	reorder-runs	kind	table	2	after 0.1.0
-a note where the detail line of the last item would stand	*	reorder-runs	to-spatial	table	1	-
+a note where the detail line of the last item would stand	1	reorder-runs	to-spatial	table	1	-
 a notice band between rules	1	reorder-runs	members	text	1	after 0.1.0
-a numbered label over a line of codes in a strip	1	split-rules	members	pairs	3	31
-a numbered label over a line of codes in a strip	*	rule-as-box	to-spatial	pairs	1	-
+a numbered label over a line of codes in a strip	1	rule-as-box	members	pairs	3	after 0.1.0
 a picture over the gap to the next table	1	reorder-runs	members	table	1	after 0.1.0
-a refused strip with a value of two lines	1	split-rules	members	text	1	31
-a refused strip with a value of two lines	*	reorder-runs	from-spatial	text	2	-
-a refused strip with a value of two lines	*	split-rules	from-spatial	text	2	-
+a refused strip with a value of two lines	1	reorder-runs	from-spatial	text	2	-
 a second table of one row under a plain header after a bold total	1	reorder-runs	members	pairs	1	after 0.1.0
-a second table of one row under a plain header after a bold total	*	reorder-runs	to-spatial	pairs	1	-
+a second table of one row under a plain header after a bold total	1	reorder-runs	to-spatial	pairs	1	-
 a second table under a header of years after a bold total	1	reorder-runs	kind	pairs	1	after 0.1.0
 a second table under a header of years after a bold total	1	reorder-runs	kind	table	2	after 0.1.0
 a second table under a plain header after a bold total	1	reorder-runs	kind	pairs	1	after 0.1.0
@@ -63,117 +54,104 @@ a second table under a plain header after a bold total	1	reorder-runs	kind	table
 a second table under a plain header after a row set apart	1	reorder-runs	kind	pairs	1	after 0.1.0
 a second table under a plain header after a row set apart	1	reorder-runs	kind	table	1	after 0.1.0
 a sentence across the breaks in the rules	1	reorder-runs	members	text	1	after 0.1.0
+a sentence across the breaks in the rules	1	rule-as-box	to-spatial	text	1	-
 a sentence across the breaks in the rules	1	split-runs	members	table	1	31
-a sentence across the breaks in the rules	*	rule-as-box	to-spatial	text	1	-
 a short value after a full field	1	rule-as-box	members	pairs	3	after 0.1.0
 a small table of records under a plain header	1	reorder-runs	kind	table	1	after 0.1.0
 a stamp over a ruled item table	1	reorder-runs	members	table	1	after 0.1.0
 a stamp over a ruled item table	1	rule-as-box	order	text	1	after 0.1.0
-a stamp over a ruled item table	*	rule-as-box	to-spatial	table	1	-
+a stamp over a ruled item table	1	rule-as-box	to-spatial	table	1	-
 a stamp over an item table without rules	1	reorder-runs	kind	table	1	after 0.1.0
-a strip of a smaller label beside a smaller name over its address	*	reorder-runs	from-spatial	text	3	-
-a strip of a smaller label beside a smaller name over its address	*	split-rules	from-spatial	text	3	-
+a strip of a smaller label beside a smaller name over its address	1	reorder-runs	from-spatial	text	3	-
 a strip with dividers and no ends	1	reorder-runs	members	text	2	after 0.1.0
+a strip with dividers and no ends	1	reorder-runs	to-spatial	text	1	-
 a strip with dividers and no ends	1	rule-as-box	members	pairs	1	after 0.1.0
 a strip with dividers and no ends	1	rule-as-box	members	text	1	after 0.1.0
 a strip with dividers and no ends	1	split-rules	members	pairs	1	31
 a strip with dividers and no ends	1	split-rules	members	text	2	31
-a strip with dividers and no ends	*	reorder-runs	to-spatial	text	1	-
-a strip with dividers and no ends	*	split-rules	to-spatial	text	1	-
-a strip without dividers after a smaller name over its address	*	reorder-runs	from-spatial	text	3	-
-a strip without dividers after a smaller name over its address	*	split-rules	from-spatial	text	3	-
-a strip without dividers beside a bold title	1	split-rules	members	text	1	31
-a strip without dividers beside a bold title	*	reorder-runs	from-spatial	text	1	-
-a strip without dividers beside a bold title	*	split-rules	from-spatial	text	2	-
-a strip without dividers beside a smaller name over its address	*	reorder-runs	from-spatial	text	3	-
-a strip without dividers beside a smaller name over its address	*	split-rules	from-spatial	text	3	-
-a value printed over its label	*	reorder-runs	from-spatial	text	1	-
-a value that touches its label	*	reorder-runs	from-spatial	text	1	-
-address columns in the body	*	reorder-runs	from-spatial	text	1	-
-an address beside a bank under a colon heading	*	reorder-runs	from-spatial	text	1	-
-an address beside two banks	*	reorder-runs	from-spatial	text	1	-
+a strip with dividers and no ends	1	split-rules	to-spatial	text	1	-
+a strip without dividers after a smaller name over its address	1	reorder-runs	from-spatial	text	3	-
+a strip without dividers beside a bold title	1	reorder-runs	from-spatial	text	1	-
+a strip without dividers beside a smaller name over its address	1	reorder-runs	from-spatial	text	3	-
+a subtotal over a larger total without colons	1	reorder-runs	kind	pairs	1	after 0.1.0
+a value printed over its label	1	reorder-runs	from-spatial	text	1	-
+a value that touches its label	1	reorder-runs	from-spatial	text	1	-
+address columns in the body	1	reorder-runs	from-spatial	text	1	-
+an address beside a bank under a colon heading	1	reorder-runs	from-spatial	text	1	-
+an address beside two banks	1	reorder-runs	from-spatial	text	1	-
 an item beside net over gross amounts under titles of two lines	1	reorder-runs	members	table	1	after 0.1.0
-an item beside net over gross amounts under titles of two lines	*	rule-as-box	to-spatial	table	1	-
+an item beside net over gross amounts under titles of two lines	1	rule-as-box	to-spatial	table	1	-
 band table with empty cells	1	jitter	members	table	1	31
-band table with empty cells	*	reorder-runs	from-spatial	text	2	-
+band table with empty cells	1	reorder-runs	from-spatial	text	2	-
 band table with spaced header cells	1	jitter	members	table	1	31
-band table with spaced header cells	*	reorder-runs	from-spatial	text	2	-
-blocks side by side under their headings	*	reorder-runs	from-spatial	text	1	-
+band table with spaced header cells	1	reorder-runs	from-spatial	text	2	-
+blocks side by side under their headings	1	reorder-runs	from-spatial	text	1	-
 boxed fields	1	rule-as-box	members	pairs	2	after 0.1.0
 boxed fields beside a bold title	1	rule-as-box	members	pairs	1	after 0.1.0
 boxed fields beside a box at the value size	1	rule-as-box	members	pairs	1	after 0.1.0
-boxed fields beside a box at the value size	1	split-rules	members	text	1	31
 boxed fields beside a company in another font	1	reorder-runs	members	text	2	after 0.1.0
 boxed fields beside a company in another font	1	rule-as-box	members	pairs	1	after 0.1.0
-boxed fields beside a company in another font	1	split-rules	members	text	1	31
 boxed fields beside a company over its address	1	reorder-runs	members	text	1	after 0.1.0
 boxed fields beside a company over its address	1	rule-as-box	members	pairs	1	after 0.1.0
-boxed fields beside a company over its address	1	split-rules	members	text	1	31
 boxed fields beside a name over its department in one size but for float noise	1	reorder-runs	members	pairs	1	after 0.1.0
 boxed fields beside a name over its department in one size but for float noise	1	rule-as-box	members	pairs	1	after 0.1.0
 boxed fields beside an address	1	rule-as-box	members	pairs	2	after 0.1.0
-boxed fields beside an empty box	*	rule-as-box	to-spatial	pairs	2	-
+boxed fields beside an empty box	1	rule-as-box	to-spatial	pairs	2	-
 boxed fields beside an empty field	1	rule-as-box	members	pairs	2	after 0.1.0
 cells of several lines that pair up line by line in a ruled grid	1	reorder-runs	members	text	1	after 0.1.0
-cells of several lines that pair up line by line in a ruled grid	*	rule-as-box	to-spatial	text	1	-
+cells of several lines that pair up line by line in a ruled grid	1	rule-as-box	to-spatial	text	1	-
 cells of several lines under a cell merged over two rows	1	reorder-runs	members	table	1	after 0.1.0
-cells of several lines under a cell merged over two rows	*	rule-as-box	to-spatial	table	1	-
-close column titles	*	reorder-runs	to-spatial	table	1	-
-codes in a bar-a-glyph CFF font named BC C128 HD Wide, size 36	*	reorder-runs	to-spatial	pairs	1	-
-codes in a bar-a-glyph TrueType subset font beside a photo, size 36	*	reorder-runs	to-spatial	pairs	1	-
-codes in a bar-a-glyph TrueType subset font named BC C128 HD Wide, size 30	*	reorder-runs	to-spatial	pairs	1	-
-codes in a bar-a-glyph Type1 font known by its bars, size 30	*	reorder-runs	to-spatial	pairs	1	-
-codes in a bar-a-glyph full TrueType font known by its bars, size 24	*	reorder-runs	to-spatial	pairs	1	-
-codes in a barcode font known by its bars beside a photo, size 12, gap 5	*	reorder-runs	to-spatial	pairs	1	-
-codes in a barcode font known by its bars, size 12, gap 5	*	reorder-runs	to-spatial	pairs	1	-
-codes in a barcode font known by its bars, size 16, gap 12	*	reorder-runs	to-spatial	pairs	1	-
-codes in a barcode font named for codes beside a photo, size 10, gap 5	*	reorder-runs	to-spatial	pairs	1	-
-codes in a barcode font named for codes, size 10, gap 5	*	reorder-runs	to-spatial	pairs	1	-
-codes in a barcode font named for codes, size 16, gap 12	*	reorder-runs	to-spatial	pairs	1	-
-codes in the real shop font's glyph program known by its bars beside a photo, size 34	*	reorder-runs	to-spatial	pairs	1	-
-codes in the real shop font's glyph program named BC C128 HD Wide, size 30	*	reorder-runs	to-spatial	pairs	1	-
+cells of several lines under a cell merged over two rows	1	rule-as-box	to-spatial	table	1	-
+close column titles	1	reorder-runs	to-spatial	table	1	-
+codes in a bar-a-glyph CFF font named BC C128 HD Wide, size 36	1	reorder-runs	to-spatial	pairs	1	-
+codes in a bar-a-glyph TrueType subset font beside a photo, size 36	1	reorder-runs	to-spatial	pairs	1	-
+codes in a bar-a-glyph TrueType subset font named BC C128 HD Wide, size 30	1	reorder-runs	to-spatial	pairs	1	-
+codes in a bar-a-glyph Type1 font known by its bars, size 30	1	reorder-runs	to-spatial	pairs	1	-
+codes in a bar-a-glyph full TrueType font known by its bars, size 24	1	reorder-runs	to-spatial	pairs	1	-
+codes in a barcode font known by its bars beside a photo, size 12, gap 5	1	reorder-runs	to-spatial	pairs	1	-
+codes in a barcode font known by its bars, size 12, gap 5	1	reorder-runs	to-spatial	pairs	1	-
+codes in a barcode font known by its bars, size 16, gap 12	1	reorder-runs	to-spatial	pairs	1	-
+codes in a barcode font named for codes beside a photo, size 10, gap 5	1	reorder-runs	to-spatial	pairs	1	-
+codes in a barcode font named for codes, size 10, gap 5	1	reorder-runs	to-spatial	pairs	1	-
+codes in a barcode font named for codes, size 16, gap 12	1	reorder-runs	to-spatial	pairs	1	-
+codes in the real shop font's glyph program known by its bars beside a photo, size 34	1	reorder-runs	to-spatial	pairs	1	-
+codes in the real shop font's glyph program named BC C128 HD Wide, size 30	1	reorder-runs	to-spatial	pairs	1	-
 column of totals	1	reorder-runs	members	text	2	after 0.1.0
+column of totals	1	rule-as-box	from-spatial	pairs	1	-
 column of totals	1	rule-as-box	members	table	1	after 0.1.0
-column of totals	1	split-rules	members	table	1	31
-column of totals	1	split-rules	members	text	2	31
-column of totals	*	rule-as-box	from-spatial	pairs	1	-
+columns bounded by breaks in the rules	1	reorder-runs	from-spatial	text	1	-
+columns bounded by breaks in the rules	1	rule-as-box	to-spatial	text	2	-
 columns bounded by breaks in the rules	1	split-runs	members	table	1	31
-columns bounded by breaks in the rules	*	reorder-runs	from-spatial	text	1	-
-columns bounded by breaks in the rules	*	rule-as-box	to-spatial	text	2	-
 description wrapping to four lines	1	reorder-runs	members	text	1	after 0.1.0
-description wrapping to four lines	*	split-rules	from-spatial	text	1	-
 flat pictures across a column bound in item rows	1	reorder-drawn	order	text	1	31
 flat pictures across a column bound in item rows	1	reorder-runs	kind	table	1	after 0.1.0
+footer columns	1	reorder-runs	from-spatial	text	1	-
 footer columns	1	reorder-runs	members	text	2	after 0.1.0
-footer columns	*	reorder-runs	from-spatial	text	1	-
+grids side by side	1	reorder-runs	from-spatial	text	3	-
+grids side by side	1	reorder-runs	to-spatial	pairs	1	-
 grids side by side	1	rule-as-box	members	pairs	1	after 0.1.0
+grids side by side	1	rule-as-box	to-spatial	pairs	2	-
+grids side by side	1	scale-50	from-spatial	pairs	1	-
+grids side by side	1	scale-50	from-spatial	text	2	-
 grids side by side	1	scale-50	members	pairs	2	31
-grids side by side	1	split-rules	members	pairs	2	31
-grids side by side	*	reorder-runs	from-spatial	text	3	-
-grids side by side	*	reorder-runs	to-spatial	pairs	1	-
-grids side by side	*	rule-as-box	to-spatial	pairs	2	-
-grids side by side	*	scale-50	from-spatial	pairs	1	-
-grids side by side	*	split-rules	to-spatial	pairs	1	-
-header grid	1	split-rules	members	pairs	3	31
-header grid	*	rule-as-box	to-spatial	pairs	3	-
-header grid	*	split-rules	to-spatial	pairs	1	-
+grids side by side	1	scale-50	to-spatial	pairs	1	-
+header grid	1	rule-as-box	to-spatial	pairs	3	-
 item rows with a picture in the description column	1	reorder-runs	members	pairs	1	after 0.1.0
-item rows with a picture in the description column	*	rule-as-box	from-spatial	text	1	-
-item table between two rules with a picture column	*	jitter	to-spatial	text	1	-
-item table between two rules with a picture column	*	reorder-runs	from-spatial	pairs	2	-
-item table between two rules with a picture column	*	scale-150	to-spatial	text	1	-
-item table between two rules with a picture column	*	scale-200	to-spatial	text	1	-
-item table between two rules with a picture column	*	scale-75	to-spatial	text	1	-
-item table between two rules with a picture column	*	split-rules	from-spatial	table	1	-
+item rows with a picture in the description column	1	reorder-runs	to-spatial	table	1	-
+item rows with a picture in the description column	1	rule-as-box	kind	pairs	1	after 0.1.0
+item rows with a picture in the description column	1	rule-as-box	to-spatial	table	1	-
+item table between two rules with a picture column	1	jitter	to-spatial	text	1	-
+item table between two rules with a picture column	1	reorder-runs	from-spatial	pairs	2	-
+item table between two rules with a picture column	1	scale-150	to-spatial	text	1	-
+item table between two rules with a picture column	1	scale-200	to-spatial	text	1	-
+item table between two rules with a picture column	1	scale-75	to-spatial	text	1	-
 label block and bank row	1	reorder-runs	members	pairs	3	after 0.1.0
 label block and bank row	1	reorder-runs	members	table	5	after 0.1.0
-label block and bank row	1	split-rules	members	pairs	4	31
-label block and bank row	*	rule-as-box	to-spatial	pairs	1	-
-labels beside values with a last label alone	*	reorder-runs	from-spatial	text	1	-
-labels under values	*	reorder-runs	from-spatial	text	2	-
-labels under values	*	reorder-runs	to-spatial	pairs	1	-
-labels under values	*	split-rules	to-spatial	pairs	1	-
-labels under values with a second value line on a label's line	*	reorder-runs	from-spatial	text	2	-
+label block and bank row	1	rule-as-box	to-spatial	pairs	1	-
+labels beside values with a last label alone	1	reorder-runs	from-spatial	text	1	-
+labels under values	1	reorder-runs	from-spatial	text	2	-
+labels under values	1	reorder-runs	to-spatial	pairs	1	-
+labels under values with a second value line on a label's line	1	reorder-runs	from-spatial	text	2	-
 letter head	1	reorder-runs	kind	text	2	after 0.1.0
 letter head with a larger name	1	reorder-runs	kind	text	2	after 0.1.0
 letter head with the date beside the name	1	reorder-runs	kind	text	2	after 0.1.0
@@ -182,140 +160,104 @@ line items whose last period wraps under the table	1	reorder-runs	kind	table	1	a
 line items with a credit over a total	1	reorder-runs	members	table	1	after 0.1.0
 line items with a deduction with a minus under an amount	1	reorder-runs	kind	table	1	after 0.1.0
 line items with a larger total between rules over a note	1	reorder-runs	kind	pairs	1	after 0.1.0
+line items with a larger total between rules over a note	1	reorder-runs	to-spatial	pairs	1	-
+line items with a larger total between rules over a note	1	reorder-runs	to-spatial	table	1	-
 line items with a larger total between rules over a note	1	rule-as-box	members	table	1	after 0.1.0
-line items with a larger total between rules over a note	1	split-rules	members	pairs	1	31
-line items with a larger total between rules over a note	1	split-rules	members	table	1	31
-line items with a larger total between rules over a note	*	reorder-runs	to-spatial	pairs	1	-
-line items with a larger total between rules over a note	*	reorder-runs	to-spatial	table	1	-
 line items with a smaller first total between rules over a note	1	reorder-runs	kind	pairs	1	after 0.1.0
+line items with a smaller first total between rules over a note	1	reorder-runs	to-spatial	pairs	2	-
+line items with a smaller first total between rules over a note	1	reorder-runs	to-spatial	table	1	-
 line items with a smaller first total between rules over a note	1	rule-as-box	members	table	1	after 0.1.0
-line items with a smaller first total between rules over a note	1	split-rules	members	pairs	4	31
-line items with a smaller first total between rules over a note	1	split-rules	members	table	1	31
-line items with a smaller first total between rules over a note	*	reorder-runs	to-spatial	pairs	2	-
-line items with a smaller first total between rules over a note	*	reorder-runs	to-spatial	table	1	-
 line items with an end rule	1	reorder-runs	kind	pairs	2	after 0.1.0
+line items with an end rule	1	reorder-runs	to-spatial	table	1	-
 line items with an end rule	1	rule-as-box	members	table	1	after 0.1.0
-line items with an end rule	1	split-rules	members	table	1	31
-line items with an end rule	*	reorder-runs	to-spatial	table	1	-
 line items with row rules	1	reorder-runs	kind	table	1	after 0.1.0
 line items with totals between rules over a note	1	reorder-runs	kind	pairs	1	after 0.1.0
+line items with totals between rules over a note	1	reorder-runs	to-spatial	pairs	1	-
+line items with totals between rules over a note	1	reorder-runs	to-spatial	table	1	-
 line items with totals between rules over a note	1	rule-as-box	members	table	1	after 0.1.0
-line items with totals between rules over a note	1	split-rules	members	pairs	3	31
-line items with totals between rules over a note	1	split-rules	members	table	1	31
-line items with totals between rules over a note	*	reorder-runs	to-spatial	pairs	1	-
-line items with totals between rules over a note	*	reorder-runs	to-spatial	table	1	-
-line items with wrapped date ranges	*	reorder-runs	to-spatial	table	1	-
+line items with wrapped date ranges	1	reorder-runs	to-spatial	table	1	-
 line items without rules over an end rule	1	reorder-runs	kind	pairs	2	after 0.1.0
 line items without rules over an end rule	1	reorder-runs	kind	table	1	after 0.1.0
-lines of a label and its bold value	*	reorder-runs	to-spatial	text	1	-
+lines of a label and its bold value	1	reorder-runs	to-spatial	text	1	-
 lines of a label and its bold value, the middle two boxed	1	rule-as-box	members	text	1	after 0.1.0
 lines of a label and its bold value, the middle two boxed	1	scale-50	members	text	2	31
 lines of a label and its bold value, the middle two boxed	1	scale-75	members	text	2	31
-lines of a label and its bold value, the middle two boxed	1	split-rules	members	text	1	31
+lines of a label and its bold value, two of them boxed	1	reorder-runs	to-spatial	text	1	-
 lines of a label and its bold value, two of them boxed	1	rule-as-box	members	text	1	after 0.1.0
 lines of a label and its bold value, two of them boxed	1	scale-50	members	text	2	31
 lines of a label and its bold value, two of them boxed	1	scale-75	members	text	2	31
-lines of a label and its bold value, two of them boxed	1	split-rules	members	text	1	31
-lines of a label and its bold value, two of them boxed	*	reorder-runs	to-spatial	text	1	-
-net, tax and gross titles over their amounts between rules over a note	*	reorder-runs	to-spatial	table	1	-
-net, tax and gross titles over their amounts between rules over a note	*	rule-as-box	from-spatial	pairs	1	-
-numbered labels beside an address	*	reorder-runs	from-spatial	text	1	-
+net, tax and gross titles over their amounts between rules over a note	1	reorder-runs	to-spatial	table	1	-
+net, tax and gross titles over their amounts between rules over a note	1	rule-as-box	from-spatial	pairs	1	-
+numbered labels beside an address	1	reorder-runs	from-spatial	text	1	-
 overflow into an empty field	1	rule-as-box	members	pairs	2	after 0.1.0
-overflow into an empty field	*	rule-as-box	to-spatial	pairs	1	-
+overflow into an empty field	1	rule-as-box	to-spatial	pairs	1	-
+paragraphs with a short last line across a frame of two rules	1	reorder-runs	members	text	1	after 0.1.0
+rows of a label with a colon and its value over a larger total row	1	reorder-runs	kind	pairs	1	after 0.1.0
+rows of a label with a colon and its value over a larger total row	1	reorder-runs	to-spatial	pairs	1	-
 rows of fields	1	rule-as-box	members	pairs	1	after 0.1.0
-rows of fields	*	rule-as-box	to-spatial	pairs	2	-
-rows of fields	*	split-rules	to-spatial	pairs	3	-
-section grids	*	rule-as-box	to-spatial	table	1	-
+rows of fields	1	rule-as-box	to-spatial	pairs	2	-
+section grids	1	rule-as-box	to-spatial	table	1	-
 separator marks	1	rule-as-box	members	table	1	after 0.1.0
 stems and strokes in Times-Roman, twice as large	1	reorder-runs	members	text	13	after 0.1.0
-stems and strokes in Times-Roman, twice as large	1	scale-50	members	text	4	31
+stems and strokes in Times-Roman, twice as large	1	reorder-runs	to-spatial	text	1	-
 stems and strokes in Times-Roman, twice as large	1	shift	kind	text	1	36a
-stems and strokes in Times-Roman, twice as large	*	reorder-runs	to-spatial	text	1	-
 template logos	1	reorder-drawn	order	text	1	31
-title block over a header grid	1	split-rules	members	pairs	2	31
-title block over a header grid	*	reorder-runs	from-spatial	pairs	1	-
-title block over a header grid	*	reorder-runs	from-spatial	text	8	-
-title block over a header grid	*	reorder-runs	to-spatial	text	1	-
-title block over a header grid	*	rule-as-box	to-spatial	pairs	3	-
-title block over a header grid	*	split-rules	from-spatial	text	6	-
-title block over a header grid	*	split-rules	to-spatial	pairs	1	-
-titles over a row that ends in a stop	*	reorder-runs	to-spatial	pairs	1	-
+title block over a header grid	1	reorder-runs	from-spatial	pairs	1	-
+title block over a header grid	1	reorder-runs	from-spatial	text	8	-
+title block over a header grid	1	reorder-runs	to-spatial	text	1	-
+title block over a header grid	1	rule-as-box	to-spatial	pairs	3	-
+titles over a row that ends in a stop	1	reorder-runs	to-spatial	pairs	1	-
+totals with a currency column and a larger total between rules over a note	1	reorder-runs	from-spatial	text	1	-
 totals with a currency column and a larger total between rules over a note	1	reorder-runs	members	table	1	after 0.1.0
-totals with a currency column and a larger total between rules over a note	*	reorder-runs	from-spatial	text	1	-
-totals with a currency column and a larger total between rules over a note	*	rule-as-box	from-spatial	pairs	2	-
-totals with a currency column and a larger total between rules over a note	*	split-rules	from-spatial	pairs	1	-
-totals with a currency column and a larger total between rules over a note	*	split-rules	from-spatial	text	2	-
+totals with a currency column and a larger total between rules over a note	1	rule-as-box	from-spatial	pairs	2	-
 totals with a currency column between rules over a note	1	reorder-runs	members	table	1	after 0.1.0
-totals with a currency column between rules over a note	*	rule-as-box	from-spatial	pairs	2	-
-totals with a currency column between rules over a note	*	split-rules	from-spatial	pairs	1	-
-totals with a currency column between rules over a note	*	split-rules	from-spatial	text	1	-
+totals with a currency column between rules over a note	1	rule-as-box	from-spatial	pairs	2	-
 totals with a larger total under a rule	1	reorder-runs	kind	table	1	after 0.1.0
 totals with a larger total under a rule	1	reorder-runs	members	pairs	1	after 0.1.0
+totals with a larger total under a rule	1	rule-as-box	from-spatial	pairs	1	-
 totals with a larger total under a rule	1	rule-as-box	kind	pairs	1	after 0.1.0
-totals with a larger total under a rule	1	split-rules	members	pairs	1	31
-totals with a larger total under a rule	*	rule-as-box	from-spatial	pairs	1	-
-totals with a larger total under a rule	*	split-rules	from-spatial	text	2	-
 totals with a percent column and a larger total between rules over a note	1	reorder-runs	members	pairs	1	after 0.1.0
+totals with a percent column and a larger total between rules over a note	1	reorder-runs	to-spatial	table	1	-
+totals with a percent column and a larger total between rules over a note	1	rule-as-box	from-spatial	pairs	1	-
 totals with a percent column and a larger total between rules over a note	1	rule-as-box	kind	pairs	1	after 0.1.0
-totals with a percent column and a larger total between rules over a note	1	split-rules	members	pairs	2	31
-totals with a percent column and a larger total between rules over a note	*	reorder-runs	to-spatial	table	1	-
-totals with a percent column and a larger total between rules over a note	*	rule-as-box	from-spatial	pairs	1	-
-totals with a percent column and a larger total between rules over a note	*	split-rules	from-spatial	text	1	-
 totals with a percent column and a larger total under a rule	1	reorder-runs	kind	table	1	after 0.1.0
 totals with a percent column and a larger total under a rule	1	reorder-runs	members	pairs	1	after 0.1.0
+totals with a percent column and a larger total under a rule	1	rule-as-box	from-spatial	pairs	1	-
 totals with a percent column and a larger total under a rule	1	rule-as-box	kind	pairs	1	after 0.1.0
-totals with a percent column and a larger total under a rule	1	split-rules	members	pairs	2	31
-totals with a percent column and a larger total under a rule	*	rule-as-box	from-spatial	pairs	1	-
-totals with a percent column and a larger total under a rule	*	split-rules	from-spatial	text	1	-
+totals with a percent column between rules over a note	1	reorder-runs	to-spatial	pairs	1	-
+totals with a percent column between rules over a note	1	reorder-runs	to-spatial	table	1	-
+totals with a percent column between rules over a note	1	rule-as-box	from-spatial	pairs	1	-
 totals with a percent column between rules over a note	1	rule-as-box	kind	pairs	1	after 0.1.0
-totals with a percent column between rules over a note	1	split-rules	members	pairs	1	31
-totals with a percent column between rules over a note	*	reorder-runs	to-spatial	pairs	1	-
-totals with a percent column between rules over a note	*	reorder-runs	to-spatial	table	1	-
-totals with a percent column between rules over a note	*	rule-as-box	from-spatial	pairs	1	-
-totals with a percent column between rules over a note	*	split-rules	from-spatial	text	1	-
 totals with a percent column in one row and a larger total between rules over a note	1	reorder-runs	kind	pairs	1	after 0.1.0
 totals with a percent column in one row and a larger total between rules over a note	1	reorder-runs	kind	table	1	after 0.1.0
+totals with a percent column in one row and a larger total between rules over a note	1	rule-as-box	from-spatial	pairs	1	-
 totals with a percent column in one row and a larger total between rules over a note	1	rule-as-box	kind	pairs	1	after 0.1.0
-totals with a percent column in one row and a larger total between rules over a note	1	split-rules	members	pairs	1	31
-totals with a percent column in one row and a larger total between rules over a note	*	rule-as-box	from-spatial	pairs	1	-
-totals with a percent column in one row and a larger total between rules over a note	*	split-rules	from-spatial	text	1	-
 totals with a percent column in one row between rules over a note	1	reorder-runs	kind	table	1	after 0.1.0
+totals with a percent column in one row between rules over a note	1	reorder-runs	to-spatial	pairs	1	-
+totals with a percent column in one row between rules over a note	1	rule-as-box	from-spatial	pairs	1	-
 totals with a percent column in one row between rules over a note	1	rule-as-box	kind	pairs	1	after 0.1.0
-totals with a percent column in one row between rules over a note	*	reorder-runs	to-spatial	pairs	1	-
-totals with a percent column in one row between rules over a note	*	rule-as-box	from-spatial	pairs	1	-
-totals with a percent column in one row between rules over a note	*	split-rules	from-spatial	text	1	-
-totals with a percent column in one row between rules over a note	*	split-rules	to-spatial	pairs	1	-
 totals with the label right of its amount and a larger total between rules over a note	1	reorder-runs	members	text	1	after 0.1.0
+totals with the label right of its amount and a larger total between rules over a note	1	reorder-runs	to-spatial	table	1	-
+totals with the label right of its amount and a larger total between rules over a note	1	rule-as-box	from-spatial	pairs	1	-
 totals with the label right of its amount and a larger total between rules over a note	1	rule-as-box	kind	pairs	1	after 0.1.0
 totals with the label right of its amount and a larger total between rules over a note	1	shift-grow	kind	text	1	36a
-totals with the label right of its amount and a larger total between rules over a note	1	split-rules	members	pairs	1	31
-totals with the label right of its amount and a larger total between rules over a note	1	split-rules	members	text	1	31
-totals with the label right of its amount and a larger total between rules over a note	*	reorder-runs	to-spatial	table	1	-
-totals with the label right of its amount and a larger total between rules over a note	*	rule-as-box	from-spatial	pairs	1	-
-totals with the label right of its amount between rules over a note	*	reorder-runs	to-spatial	table	1	-
-totals with the label right of its amount between rules over a note	*	rule-as-box	from-spatial	pairs	2	-
-totals with the label right of its amount between rules over a note	*	split-rules	from-spatial	table	1	-
+totals with the label right of its amount between rules over a note	1	reorder-runs	to-spatial	table	1	-
+totals with the label right of its amount between rules over a note	1	rule-as-box	from-spatial	pairs	2	-
 totals with whole amounts and a larger total between rules over a note	1	reorder-runs	members	pairs	1	after 0.1.0
+totals with whole amounts and a larger total between rules over a note	1	reorder-runs	to-spatial	table	1	-
 totals with whole amounts and a larger total between rules over a note	1	rule-as-box	members	pairs	1	after 0.1.0
 totals with whole amounts and a larger total between rules over a note	1	shift-grow	kind	pairs	1	26
-totals with whole amounts and a larger total between rules over a note	1	split-rules	members	pairs	1	31
-totals with whole amounts and a larger total between rules over a note	*	reorder-runs	to-spatial	table	1	-
-totals with whole amounts and a larger total between rules over a note	*	split-rules	from-spatial	text	2	-
+totals with whole amounts between rules over a note	1	reorder-runs	to-spatial	pairs	1	-
+totals with whole amounts between rules over a note	1	reorder-runs	to-spatial	table	1	-
 totals with whole amounts between rules over a note	1	rule-as-box	members	pairs	1	after 0.1.0
-totals with whole amounts between rules over a note	*	reorder-runs	to-spatial	pairs	1	-
-totals with whole amounts between rules over a note	*	reorder-runs	to-spatial	table	1	-
-totals with whole amounts between rules over a note	*	split-rules	from-spatial	text	2	-
-totals with whole amounts between rules over a note	*	split-rules	to-spatial	pairs	1	-
-two lines in three columns alone in the body	*	reorder-runs	to-spatial	pairs	1	-
-two lines in three columns between two rules	*	rule-as-box	from-spatial	pairs	1	-
-two lines of three words set full	*	reorder-runs	to-spatial	text	1	-
-two named addresses between rules	1	split-rules	members	text	1	31
-two named addresses between rules	*	reorder-runs	from-spatial	text	2	-
-two named addresses between rules	*	split-rules	from-spatial	text	2	-
+two lines in three columns alone in the body	1	reorder-runs	to-spatial	pairs	1	-
+two lines in three columns between two rules	1	rule-as-box	from-spatial	pairs	1	-
+two lines of three words set full	1	reorder-runs	to-spatial	text	1	-
+two named addresses between rules	1	reorder-runs	from-spatial	text	2	-
 two-line cells with one value on the second line	1	reorder-runs	members	table	1	after 0.1.0
-two-line cells with one value on the second line	*	rule-as-box	to-spatial	table	1	-
+two-line cells with one value on the second line	1	rule-as-box	to-spatial	table	1	-
+weight-only boxes	1	reorder-runs	to-spatial	text	2	-
 weight-only boxes	1	rule-as-box	members	text	1	after 0.1.0
-weight-only boxes	*	reorder-runs	to-spatial	text	2	-
-words in two weights	*	reorder-runs	from-spatial	text	1	-
+words in two weights	1	reorder-runs	from-spatial	text	1	-
 wrapped text beside stacked values in a ruled grid	1	reorder-runs	members	table	1	after 0.1.0
-wrapped text beside stacked values in a ruled grid	*	rule-as-box	to-spatial	table	1	-
+wrapped text beside stacked values in a ruled grid	1	rule-as-box	to-spatial	table	1	-

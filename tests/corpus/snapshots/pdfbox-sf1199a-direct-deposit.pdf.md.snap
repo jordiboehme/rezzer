@@ -1,6 +1,5 @@
 ---
 source: crates/rezzer/tests/corpus.rs
-assertion_line: 295
 ---
 ---
 type: source
@@ -19,7 +18,7 @@ format: pdf
 detected_by: "pdf header %PDF-"
 reader: "pdf/0.1.0"
 completeness: complete
-losses: 61
+losses: 59
 pages: 4
 tagged: false
 encrypted: false
@@ -217,11 +216,7 @@ other documents from the Government agency.
 
 Payees must keep the Government agency informed of any address changes in order to receive important information about benefits and to remain qualified for payments.
 
-## SECTION 1
-
-```text
-(TO BE COMPLETED BY PAYEE)
-```
+## SECTION 1 (TO BE COMPLETED BY PAYEE)
 
 **A** NAME OF PAYEE (last, first, middle initial)
 
@@ -355,11 +350,7 @@ other documents from the Government agency.
 
 Payees must keep the Government agency informed of any address changes in order to receive important information about benefits and to remain qualified for payments.
 
-## SECTION 1
-
-```text
-(TO BE COMPLETED BY PAYEE)
-```
+## SECTION 1 (TO BE COMPLETED BY PAYEE)
 
 **A** NAME OF PAYEE (last, first, middle initial)
 
@@ -710,36 +701,34 @@ AFDate_KeystrokeEx("mm/dd/yyyy");
 | p1:b47 | the region at p1:b47 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
 | p2 | Possible table on page 2 not rebuilt (reason: most of its cells are empty) | uncertain | info |
 | p2:b6 | the region at p2:b6 is kept as laid out, as text in its columns: it reads as header band or as heading about equally (900 and 850 of 1000); its bold text is marked in the JSON only | uncertain | info |
-| p2:b17 | the region at p2:b17 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
-| p2:b20 | the region at p2:b20 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
-| p2:b23 | the region at p2:b23 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p2:b19 | the region at p2:b19 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p2:b22 | the region at p2:b22 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p2:b25 | the region at p2:b25 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
 | p2:b26 | the region at p2:b26 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
-| p2:b27 | the region at p2:b27 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
-| p2:b28 | the region at p2:b28 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
-| p2:b31 | the region at p2:b31 is kept as laid out, as text in its columns: it reads as table, but most of its cells are empty; its bold text is marked in the JSON only | uncertain | info |
+| p2:b27 | the region at p2:b27 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
+| p2:b30 | the region at p2:b30 is kept as laid out, as text in its columns: it reads as table, but most of its cells are empty; its bold text is marked in the JSON only | uncertain | info |
+| p2:b31 | the region at p2:b31 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
 | p2:b32 | the region at p2:b32 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
 | p2:b33 | the region at p2:b33 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
-| p2:b34 | the region at p2:b34 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
-| p2:b35 | the region at p2:b35 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
+| p2:b34 | the region at p2:b34 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
+| p2:b37 | the region at p2:b37 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
 | p2:b38 | the region at p2:b38 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
-| p2:b39 | the region at p2:b39 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
-| p2:b48 | the region at p2:b48 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
+| p2:b47 | the region at p2:b47 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
 | p3 | Possible table on page 3 not rebuilt (reason: most of its cells are empty) | uncertain | info |
 | p3:b6 | the region at p3:b6 is kept as laid out, as text in its columns: it reads as header band or as heading about equally (900 and 850 of 1000); its bold text is marked in the JSON only | uncertain | info |
-| p3:b17 | the region at p3:b17 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
-| p3:b20 | the region at p3:b20 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
-| p3:b23 | the region at p3:b23 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p3:b19 | the region at p3:b19 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p3:b22 | the region at p3:b22 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
+| p3:b25 | the region at p3:b25 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
 | p3:b26 | the region at p3:b26 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
-| p3:b27 | the region at p3:b27 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
-| p3:b28 | the region at p3:b28 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
-| p3:b31 | the region at p3:b31 is kept as laid out, as text in its columns: it reads as table, but most of its cells are empty; its bold text is marked in the JSON only | uncertain | info |
+| p3:b27 | the region at p3:b27 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
+| p3:b30 | the region at p3:b30 is kept as laid out, as text in its columns: it reads as table, but most of its cells are empty; its bold text is marked in the JSON only | uncertain | info |
+| p3:b31 | the region at p3:b31 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
 | p3:b32 | the region at p3:b32 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
 | p3:b33 | the region at p3:b33 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
-| p3:b34 | the region at p3:b34 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
-| p3:b35 | the region at p3:b35 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
+| p3:b34 | the region at p3:b34 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
+| p3:b37 | the region at p3:b37 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
 | p3:b38 | the region at p3:b38 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
-| p3:b39 | the region at p3:b39 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |
-| p3:b48 | the region at p3:b48 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
+| p3:b47 | the region at p3:b47 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
 | p4:b7 | the region at p4:b7 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
 | p4:b8 | the region at p4:b8 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only | uncertain | info |
 | p4:b10 | the region at p4:b10 is kept as laid out, as text in its columns: no region type has clear evidence for it | uncertain | info |

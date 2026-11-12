@@ -9,7 +9,7 @@ use std::ops::Range;
 use super::heading_block;
 use crate::extract::text::address_shaped;
 use crate::file::{Levels, plain_size};
-use crate::line::{EDGE, GAP_RATIO, LineRun, SIZE_SLACK, TextLine, ink, size_key};
+use crate::line::{EDGE_SIZES, GAP_RATIO, LineRun, SIZE_SLACK_SHARE, TextLine, ink, size_key};
 
 /// What `title_from` says of a title [`page_title`] found.
 pub const TITLE_FROM: &str = "largest heading in the top third of page 1";
@@ -192,7 +192,8 @@ const TITLE_ADDRESS_LINES: usize = 8;
 /// over its street and town; a longer line after the town does not hide the address.
 fn opens_address<R: LineRun>(lines: &[TextLine<'_, R>], i: usize, j: usize) -> bool {
     let first = &lines[i];
-    let at_edge = |l: &TextLine<'_, R>| (l.x - first.x).abs() <= EDGE;
+    let at_edge =
+        |l: &TextLine<'_, R>| (l.x - first.x).abs() <= EDGE_SIZES * first.size.max(l.size);
     if !lines[i..j].iter().all(at_edge) {
         return false;
     }
@@ -201,7 +202,7 @@ fn opens_address<R: LineRun>(lines: &[TextLine<'_, R>], i: usize, j: usize) -> b
         && k - i < TITLE_ADDRESS_LINES
         && at_edge(&lines[k])
         && right_below(&lines[k - 1], &lines[k])
-        && lines[k].size <= first.size + SIZE_SLACK
+        && lines[k].size <= first.size * (1.0 + SIZE_SLACK_SHARE)
     {
         k += 1;
     }

@@ -27,7 +27,9 @@ use layoutregions::extract::text::{
 #[cfg(doc)]
 use layoutregions::file::FileFacts;
 use layoutregions::file::{self, Band, FilePage, Levels, RunningIndex, SIZE_LEVELS};
-use layoutregions::line::{EDGE, LineRun, TextLine, apart, text_line as line, text_lines as lines};
+use layoutregions::line::{
+    EDGE_SIZES, LineRun, TextLine, apart, text_line as line, text_lines as lines,
+};
 use layoutregions::segment::drawn::{DrawnStructure, Grids, Unsearched};
 use layoutregions::{Kind, PageRegions};
 
@@ -4061,7 +4063,10 @@ fn stacked(lines: Vec<Line<'_>>) -> Vec<Vec<Line<'_>>> {
     let mut out: Vec<Vec<Line<'_>>> = Vec::new();
     for l in lines {
         match out.last_mut() {
-            Some(b) if continues(&b[b.len() - 1], &l) && (l.x - b[0].x).abs() <= EDGE => {
+            Some(b)
+                if continues(&b[b.len() - 1], &l)
+                    && (l.x - b[0].x).abs() <= EDGE_SIZES * l.size.max(b[0].size) =>
+            {
                 b.push(l);
             }
             _ => out.push(vec![l]),

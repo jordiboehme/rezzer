@@ -19,11 +19,21 @@ pub const LABEL_STEP: f32 = 1.04;
 /// A new paragraph starts at a gap over this many times the line height.
 pub const GAP_RATIO: f32 = 1.5;
 
-/// Font sizes closer than this are the same size.
-pub const SIZE_SLACK: f32 = 0.5;
+/// Font sizes closer than this share of the larger one are the same size: half a point at
+/// 10 points. A share of the text size, so that a page printed at half or twice its size
+/// keeps the sizes that are the same (Task 31a; it was half a point at every size).
+pub const SIZE_SLACK_SHARE: f32 = 0.05;
 
-/// Line ends this close, in points, are one edge.
-pub const EDGE: f32 = 1.0;
+/// Whether the font sizes `a` and `b` are the same size (see [`SIZE_SLACK_SHARE`]).
+pub fn same_size(a: f32, b: f32) -> bool {
+    (a - b).abs() <= SIZE_SLACK_SHARE * a.max(b)
+}
+
+/// Line ends closer than this share of the text size of the lines are one edge: a point at
+/// 10 points. A share of the size of the text that stands at the edge, so that the edges of
+/// a page printed smaller or larger are the same edges (Task 31a; it was a point at every
+/// size).
+pub const EDGE_SIZES: f32 = 0.1;
 
 /// A run that starts less than this many sizes right of where the ink of the run before it
 /// ends touches it (see [`apart`]): less than a space.
@@ -350,6 +360,18 @@ pub fn size_key(size: f32) -> i32 {
 mod tests {
     use super::*;
     use crate::input::{FontKind, Shift};
+
+    /// Two sizes are the same size at every scale of the page: half a point apart at 10
+    /// points, a quarter at 5, a point at 20. Measured in points, 5 and 5.4 points were the
+    /// same size and 20 and 20.8 were not.
+    #[test]
+    fn the_same_sizes_are_the_same_at_every_scale() {
+        for k in [0.5f32, 0.75, 1.0, 1.5, 2.0] {
+            assert!(same_size(10.0 * k, 10.4 * k), "{k}");
+            assert!(same_size(10.4 * k, 10.0 * k), "{k}");
+            assert!(!same_size(10.0 * k, 10.8 * k), "{k}");
+        }
+    }
 
     fn run(text: &str, x: f32, w: f32, size: f32, bold: bool) -> TextRun {
         TextRun {

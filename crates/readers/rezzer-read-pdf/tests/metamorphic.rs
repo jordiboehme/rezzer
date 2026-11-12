@@ -115,6 +115,29 @@ fn metamorphic_corpus_sweep_every_page() {
     meta::check_pins(&pins(), &names, &sweep_files(&names));
 }
 
+/// Every file the pin file names is a file of the corpus: one in its folder, or one the
+/// fetch list names (`tests/corpus/remote.tsv`, a large file that may not be fetched). The
+/// pins of a file that was renamed or taken out are stale, and no sweep would check them.
+#[test]
+fn metamorphic_pins_name_corpus_files_that_are_there() {
+    let remote = std::fs::read_to_string(corpus_dir().join("../remote.tsv")).unwrap_or_default();
+    let fetched: Vec<&str> = remote
+        .lines()
+        .filter_map(|l| l.split('\t').next())
+        .filter_map(|p| p.strip_prefix("pdf/"))
+        .collect();
+    let here = corpus_files();
+    let stale: Vec<String> = meta::pinned_names(&pins())
+        .into_iter()
+        .filter(|n| !here.contains(n) && !fetched.contains(&n.as_str()))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "pins of files that are gone, take them out of {}: {stale:#?}",
+        pins().display()
+    );
+}
+
 /// The decisions `engine_decisions` gives on the pages as the reader hands them to the engine
 /// (with their given regions) are those the reader reads: every region of the read is one of
 /// them, with its kind and primitives. The exception: a region the writing of the page keeps

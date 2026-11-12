@@ -16,6 +16,7 @@ pub mod style;
 
 use crate::input::{GivenRegion, PageIn, PrimId, RuleIn, TextRun};
 use crate::limits::Limits;
+use crate::line::PIECE_GAP;
 use crate::region::{Bounds, Issue, IssueKind, Kind};
 use crate::segment::cut::{CutShort, Piece, Split, xy_cut};
 use crate::segment::drawn::{Line, SNAP};
@@ -784,15 +785,11 @@ impl Builder<'_> {
                 _ => true,
             };
         }
-        let pieces: Vec<Piece> = ids
-            .iter()
-            .map(|&t| piece(&self.page.texts[t as usize]))
-            .collect();
         let bound = Limits {
             max_cut_depth: 0,
             ..*self.limits
         };
-        let found = xy_cut(&pieces, &[], &bound, self.stop);
+        let found = cut_runs(&self.page.texts, ids, &[], &bound, self.stop).0;
         if found.short == Some(CutShort::Stopped) {
             self.cut_short(found.short);
             return false;
@@ -860,15 +857,11 @@ impl Builder<'_> {
             }
             return;
         }
-        let pieces: Vec<Piece> = ids
-            .iter()
-            .map(|&t| piece(&self.page.texts[t as usize]))
-            .collect();
         let bound = Limits {
             max_cut_depth: (self.max - d) as u32,
             ..*self.limits
         };
-        let found = xy_cut(&pieces, rules, &bound, self.stop);
+        let found = cut_runs(&self.page.texts, ids, rules, &bound, self.stop).0;
         self.cut_short(found.short);
         if found.groups.len() < 2 {
             if !found.kept.is_empty() {
@@ -1004,15 +997,11 @@ impl Builder<'_> {
         {
             return;
         }
-        let pieces: Vec<Piece> = ids
-            .iter()
-            .map(|&t| piece(&self.page.texts[t as usize]))
-            .collect();
         let bound = Limits {
             max_cut_depth: (self.max - d) as u32,
             ..*self.limits
         };
-        let found = xy_cut(&pieces, rules, &bound, self.stop);
+        let (found, extents) = cut_runs(&self.page.texts, &ids, rules, &bound, self.stop);
         if found.short == Some(CutShort::Stopped) {
             self.cut_short(found.short);
             return;
@@ -1020,17 +1009,12 @@ impl Builder<'_> {
         if found.groups.len() < 2 {
             return;
         }
-        let extent = |g: &[usize]| {
-            g.iter()
-                .map(|&k| pieces[k].bounds)
-                .reduce(union)
-                .expect("a group has a piece")
-        };
+        let extent = |g: usize| extents[g];
         let bounded = found.splits.iter().enumerate().any(|(j, split)| {
             if !matches!(split, Split::Gutter | Split::Boxed) {
                 return false;
             }
-            let (a, b) = (extent(&found.groups[j]), extent(&found.groups[j + 1]));
+            let (a, b) = (extent(j), extent(j + 1));
             let (g0, g1) = (a.x1, b.x0);
             if g1 <= g0 {
                 return false;
@@ -1165,14 +1149,20 @@ fn subtree_prims(items: &[Item], max: usize) -> Vec<Vec<PrimId>> {
     sub
 }
 
+/// A piece reaches into a frame or under a strip when it reaches past the edge by more than
+/// this share of its text size (the slack the cut gives a piece at a gutter: half a point at
+/// 8 points).
+const REACH: f32 = 1.0 / 16.0;
+
 /// A strip holds at most this many lines of text: more between two rules is a section of a
 /// page, not a strip of fields or a band of rows.
 const STRIP_LINES: usize = 6;
 
 /// The strips of the runs `ids` (in reading order) between the horizontal `rules`: rules at
 /// one height (within [`SNAP`]) are one level, and a piece of one level over a piece of the
-/// next level under it bounds a strip where both reach. A run stands in the first strip that
-/// holds its middle. A strip with ink on two lines to [`STRIP_LINES`] lines is a group; the runs
+/// next level under it bounds a strip where both reach. A piece of a line (see [`pieces_of`])
+/// stands in the first strip that holds its middle, with all its runs. A strip that another
+/// line of text runs through from the side holds nothing. A strip with ink on two lines to [`STRIP_LINES`] lines is a group; the runs
 /// of the other strips and outside every strip are the rest. Each group and the rest keep the
 /// order of `ids`. `None` when no strip holds ink.
 fn strips(page: &PageIn, ids: &[u32], rules: &[Line]) -> Option<(Vec<Vec<u32>>, Vec<u32>)> {
@@ -1202,15 +1192,73 @@ fn strips(page: &PageIn, ids: &[u32], rules: &[Line]) -> Option<(Vec<Vec<u32>>, 
         }
     }
     frames.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.2.total_cmp(&b.2)));
-    let mut at: Vec<Option<usize>> = Vec::with_capacity(ids.len());
-    for &t in ids {
+    // A piece of a line stands in a strip whole, by its middle: its runs go together, however
+    // the line is cut into runs.
+    let mut at: Vec<Option<usize>> = vec![None; ids.len()];
+    let (pieces, members) = pieces_of(&page.texts, ids);
+    for (p, m) in pieces.iter().zip(&members) {
         work::add(frames.len() as u64);
-        let (cx, cy) = centre(text_bounds(&page.texts[t as usize]));
-        at.push(
-            frames
-                .iter()
-                .position(|f| cy > f.0 && cy < f.1 && cx > f.2 && cx < f.3),
-        );
+        let (cx, cy) = centre(p.bounds);
+        let f = frames
+            .iter()
+            .position(|f| cy > f.0 && cy < f.1 && cx > f.2 && cx < f.3);
+        for &k in m {
+            at[k] = f;
+        }
+    }
+    // A frame that a line of text runs through is no strip: a piece at the frame's height
+    // that reaches into it from the side and has its middle outside (a full line of a
+    // paragraph across a narrow frame) shows that the rules bound no band of this text. The
+    // few short lines whose middles do lie inside are lines of those paragraphs. And the
+    // lines of a strip follow each other: a line of other text between two of them (at a
+    // height between theirs, under or over their extent) shows that the frame picks lines
+    // out of a longer text, each of which goes on with its own neighbours. Only the frames
+    // that hold a piece are looked at: each with its bounds and the extent of its pieces.
+    let mut extent: Vec<Option<Bounds>> = vec![None; frames.len()];
+    for (p, m) in pieces.iter().zip(&members) {
+        if let (true, Some(k)) = (p.inked, at[m[0]]) {
+            extent[k] = Some(extent[k].map_or(p.bounds, |e| union(e, p.bounds)));
+        }
+    }
+    let held: Vec<(usize, Bounds)> = extent
+        .iter()
+        .enumerate()
+        .filter_map(|(k, e)| e.map(|e| (k, e)))
+        .collect();
+    let mut crossed = vec![false; frames.len()];
+    if !held.is_empty() {
+        for (p, m) in pieces.iter().zip(&members) {
+            if !p.inked {
+                continue;
+            }
+            work::add(held.len() as u64);
+            let (_, cy) = centre(p.bounds);
+            let own = at[m[0]];
+            for &(k, e) in &held {
+                if own == Some(k) {
+                    continue;
+                }
+                let f = frames[k];
+                // A piece reaches in when it reaches past the edge by more than a small share
+                // of its size (see [`REACH`]): ink that touches the start of a rule by a hair
+                // runs through nothing.
+                let reach = REACH * p.size;
+                let through =
+                    cy > f.0 && cy < f.1 && p.bounds.x0 < f.3 - reach && p.bounds.x1 > f.2 + reach;
+                let between = cy > e.y0
+                    && cy < e.y1
+                    && p.bounds.x0 < e.x1 - reach
+                    && p.bounds.x1 > e.x0 + reach;
+                if through || between {
+                    crossed[k] = true;
+                }
+            }
+        }
+    }
+    for f in at.iter_mut() {
+        if f.is_some_and(|k| crossed[k]) {
+            *f = None;
+        }
     }
     let mut groups: Vec<Vec<u32>> = vec![Vec::new(); frames.len()];
     let mut rest: Vec<u32> = Vec::new();
@@ -1247,8 +1295,10 @@ fn strips(page: &PageIn, ids: &[u32], rules: &[Line]) -> Option<(Vec<Vec<u32>>, 
     Some((kept, rest))
 }
 
-/// The horizontal rules among `prims`, as the cut takes them; a rectangle gives its top and
-/// bottom.
+/// The horizontal rules among `prims`, as the strips and the cut take them; a rectangle gives
+/// its top and bottom. Pieces of one rule that touch or overlap are one rule, joined as the
+/// grid search joins them ([`drawn::merged`]): a rule drawn in pieces (cell by cell, or
+/// dash by dash) bounds the same strips and parts the same bands as the rule drawn in one.
 fn rules_of(page: &PageIn, prims: &[PrimId]) -> Vec<Line> {
     let mut out = Vec::new();
     for p in prims {
@@ -1266,7 +1316,8 @@ fn rules_of(page: &PageIn, prims: &[PrimId]) -> Vec<Line> {
             });
         }
     }
-    out
+    work::add(out.len() as u64);
+    drawn::merged(out)
 }
 
 /// A text run as a piece of the cut.
@@ -1280,9 +1331,98 @@ fn piece(r: &TextRun) -> Piece {
         bold: inked && r.bold,
         inked,
         chars: r.text.trim().chars().count(),
+        runs: 1,
+        colon: r.text.trim_end().ends_with(':'),
+        value: cut::reads_as_value(&r.text),
         boxed: None,
         rows: 1,
     }
+}
+
+/// The pieces of the runs `ids` of `texts` as the cut takes them, each with the places in
+/// `ids` of its runs from left to right: the runs of one line that follow each other within
+/// [`PIECE_GAP`] sizes are one piece, so that a line reads the same to the cut whether its
+/// producer wrote it as one run, word by word or glyph by glyph (the share of pieces that
+/// cross a gutter and the length of a line of prose count pieces). A piece stands where its
+/// ink stands: a run of white space joins a piece without widening it and without carrying
+/// it to the next run (the gap is measured from the ink); alone it is a piece of white space. A piece knows how many runs it is made of (see [`Piece::runs`]).
+fn pieces_of(texts: &[TextRun], ids: &[u32]) -> (Vec<Piece>, Vec<Vec<usize>>) {
+    work::add(ids.len() as u64);
+    let mut order: Vec<usize> = (0..ids.len()).collect();
+    let run = |k: usize| &texts[ids[k] as usize];
+    order.sort_by(|&a, &b| {
+        let (ra, rb) = (run(a), run(b));
+        ra.line
+            .cmp(&rb.line)
+            .then(ra.x.min(ra.x + ra.w).total_cmp(&rb.x.min(rb.x + rb.w)))
+            .then(a.cmp(&b))
+    });
+    let mut pieces: Vec<Piece> = Vec::new();
+    let mut members: Vec<Vec<usize>> = Vec::new();
+    // Where the last run of the open piece ends, white space too.
+    let mut end = f32::MIN;
+    for k in order {
+        let one = piece(run(k));
+        if let (Some(p), Some(m)) = (pieces.last_mut(), members.last_mut())
+            && p.line == one.line
+            && one.bounds.x0 - end <= PIECE_GAP * p.size.max(one.size)
+        {
+            // The gap to the next run is measured from the end of the ink once the piece has
+            // ink: white space after it (padding a form sets up to the next column) joins the
+            // piece and bridges nothing, as in the reader's own pieces.
+            if one.inked || !p.inked {
+                end = end.max(one.bounds.x1);
+            }
+            if one.inked && !p.inked {
+                // The first ink of the piece: it stands where its ink stands.
+                let (chars, runs) = (p.chars + one.chars, p.runs);
+                *p = Piece { chars, runs, ..one };
+            } else if one.inked {
+                p.bounds = union(p.bounds, one.bounds);
+                p.size = p.size.max(one.size);
+                p.bold = p.bold && one.bold;
+                p.chars += one.chars;
+                p.colon = one.colon;
+                p.value = p.value && one.value;
+            }
+            p.runs += 1;
+            m.push(k);
+            continue;
+        }
+        end = one.bounds.x1;
+        pieces.push(one);
+        members.push(vec![k]);
+    }
+    (pieces, members)
+}
+
+/// The whitespace cut of the runs `ids` of `texts` (see [`xy_cut`]) on their pieces (see
+/// [`pieces_of`]): its groups hold places in `ids`, and the extent of the ink of each group
+/// comes with it.
+fn cut_runs(
+    texts: &[TextRun],
+    ids: &[u32],
+    rules: &[Line],
+    limits: &Limits,
+    stop: &dyn Fn() -> bool,
+) -> (cut::Cut, Vec<Bounds>) {
+    let (pieces, members) = pieces_of(texts, ids);
+    let mut found = xy_cut(&pieces, rules, limits, stop);
+    let mut extents = Vec::with_capacity(found.groups.len());
+    for group in &mut found.groups {
+        extents.push(
+            group
+                .iter()
+                .map(|&k| pieces[k].bounds)
+                .reduce(union)
+                .expect("a group has a piece"),
+        );
+        *group = group
+            .iter()
+            .flat_map(|&k| members[k].iter().copied())
+            .collect();
+    }
+    (found, extents)
 }
 
 /// The extent of a run: its advance, from the baseline up its rendered height.

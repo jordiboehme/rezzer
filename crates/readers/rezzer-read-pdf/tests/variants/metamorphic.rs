@@ -100,3 +100,19 @@ fn picture_sample() -> Vec<axes::Shape> {
         .step_by(PICTURE_STEP)
         .collect()
 }
+
+/// Every shape the pin file names is a shape of a family: the pins of a shape that was
+/// renamed or taken out are stale, and no sweep would ever check them.
+#[test]
+fn metamorphic_pins_name_shapes_that_are_there() {
+    let shapes: Vec<&'static str> = all_shapes().iter().map(|s| s.name).collect();
+    let stale: Vec<String> = meta::pinned_names(&pins())
+        .into_iter()
+        .filter(|n| !shapes.contains(&n.as_str()))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "pins of shapes that are gone, take them out of {}: {stale:#?}",
+        pins().display()
+    );
+}
