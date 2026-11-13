@@ -3396,3 +3396,88 @@ fn a_heading_by_a_figure_caption_stays_a_heading() {
         });
     }
 }
+
+/// A name with three lines under it, and what stands at the right of the name's line: on
+/// line 10 the name and `beside` at `x` in 8 points, on lines 11 to 13 the lines under the
+/// name in 6.6 points (a name over its address, as on the page of the public file), the
+/// middle one `middle`. Lines of text in both sizes stand elsewhere on the page, so both are
+/// text sizes of it and each line has the evidence of a paragraph by its size.
+fn name_block(beside: &str, x: f32, middle: &str, under: usize) -> Case {
+    let mut texts = Vec::new();
+    let t = "The works at the harbor send the parts on the first day of the week.";
+    // More ink in 8 points: the body size of the file, so the name is no heading.
+    for k in 0..6u32 {
+        texts.push(run(t, 40.0, 800.0 - 10.0 * k as f32, 8.0, k));
+    }
+    for k in 0..4u32 {
+        texts.push(run(t, 40.0, 500.0 - 8.0 * k as f32, 6.6, 6 + k));
+    }
+    texts.push(run("Alex Sample", 72.0, 700.0, 8.0, 10));
+    texts.push(run(beside, x, 700.0, 8.0, 10));
+    let lines = ["Oakfield Works", middle, "alex@works.example"];
+    for (k, t) in lines.iter().take(under).enumerate() {
+        texts.push(run(t, 72.0, 692.0 - 8.0 * k as f32, 6.6, 11 + k as u32));
+    }
+    Case {
+        pages: vec![page(1, texts)],
+        at: 0,
+        lines: (10..11 + under as u32).collect(),
+    }
+}
+
+/// Two blocks side by side are not joined into one line (page 7 of the public file
+/// arxiv-2408.09869, a row of two author names over the lines of the first): a second name
+/// that stands right of every line under the first is another block, and the lines are no
+/// paragraph, at every scale. The paragraph stands when a line under the name reaches under
+/// the second piece (a value over the text of its block), when one line only stands under
+/// the name, and when the second piece is a word of the line.
+#[test]
+fn a_block_beside_a_block_is_no_line_of_its_paragraph() {
+    let paragraph = |c: &Case, k: f32| find(&c.scaled(k).typed(), Kind::Paragraph).is_some();
+    for k in [0.5f32, 1.0, 2.0] {
+        // The lines under the name end at 72 + 18 * 3.3 = 131.4; the second name starts
+        // at 250.
+        let apart = name_block("Robin Example", 250.0, "Harbor Road 12", 3);
+        assert!(!paragraph(&apart, k), "{k}: {:#?}", apart.scaled(k).typed());
+        // A line under the name that reaches under the second piece: one block.
+        let long = "Harbor Road 12 in the town of Oakfield West by the river and the mill";
+        assert!(
+            paragraph(&name_block("Robin Example", 250.0, long, 3), k),
+            "{k}"
+        );
+        // The middle line ends at 72 + 52 * 3.3 = 243.6 with this text, less than a cell
+        // gap (one size of the name's line, 8 points) before the second name at 250, and at
+        // 240.3 with one letter less, more than a cell gap before it: the limit both ways.
+        let near = "Harbor Road 12 in the town of Oakfield West by river";
+        assert_eq!(near.chars().count(), 52);
+        assert!(
+            paragraph(&name_block("Robin Example", 250.0, near, 3), k),
+            "{k}"
+        );
+        assert!(
+            !paragraph(&name_block("Robin Example", 250.0, &near[..51], 3), k),
+            "{k}"
+        );
+        // One line under the name is no column, two are: lines in the name's size, each a
+        // paragraph of its own three sizes under the line before (a size step apart, a name
+        // over one line is a label over its value and no paragraph either way).
+        let spaced = |n: usize| {
+            let mut c = name_block("Robin Example", 250.0, "Harbor Road 12", 0);
+            for k in 0..n {
+                let (y, line) = (676.0 - 24.0 * k as f32, 11 + k as u32);
+                c.pages[0]
+                    .texts
+                    .push(run("Oakfield Works", 72.0, y, 8.0, line));
+                c.lines.push(line);
+            }
+            c
+        };
+        assert!(paragraph(&spaced(1), k), "{k}");
+        assert!(!paragraph(&spaced(2), k), "{k}");
+        // The next word of the line, a word space on: one line of one block.
+        assert!(
+            paragraph(&name_block("of Oakfield", 119.0, "Harbor Road 12", 3), k),
+            "{k}"
+        );
+    }
+}

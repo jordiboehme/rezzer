@@ -605,7 +605,9 @@ fn codes_among(
         .into_values()
         .filter(|g| g.len() >= MERGE_CELLS)
         .collect();
-    groups.sort_by_key(|g| std::cmp::Reverse(g.len()));
+    // Groups of one size in the order of their first cell: the map's own order differs from
+    // run to run.
+    groups.sort_by_key(|g| (std::cmp::Reverse(g.len()), g[0]));
     let what = if printed.is_some() {
         "dark parts"
     } else {
@@ -847,7 +849,11 @@ fn merge_bands(cells: &[[f32; 4]], groups: Vec<Vec<usize>>) -> Vec<Vec<usize>> {
         let r = find(&mut parent, i);
         merged.entry(r).or_default().extend(g);
     }
-    merged.into_values().collect()
+    // In the order of each group's first member, not in the map's own (which differs from
+    // run to run).
+    let mut merged: Vec<Vec<usize>> = merged.into_values().collect();
+    merged.sort_by_key(|g| g.first().copied());
+    merged
 }
 
 /// Whether no rectangle but `members` lies in box `b`: the quiet zone of a linear code.

@@ -715,6 +715,17 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
             ));
         }
     }
+    // The texts of a list follow each other with nothing of the page between them.
+    for chain in want.together.iter().filter(|c| !c.is_empty()) {
+        let page_text = collapse(&text(page_blocks(out, n)));
+        let whole = collapse(&chain.join(" "));
+        if !page_text.contains(&whole) {
+            broken.push(Broken(
+                Inv::Order,
+                format!("page {p}: {chain:?} do not follow each other: {page_text:?}"),
+            ));
+        }
+    }
     // The k-th media block of the page stands between the blocks of its two texts.
     let media: Vec<usize> = blocks
         .iter()

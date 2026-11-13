@@ -21,11 +21,11 @@ use crate::extract::table::area::Area;
 use crate::extract::table::caption::ByY;
 use crate::extract::table::{RunRange, run_ranges, texted_per_line};
 use crate::extract::text::title::page_title;
-use crate::file::{Band, FileFacts, Levels, RunningIndex, text_sizes, two_page_line};
+use crate::file::{Band, FileFacts, Legend, Levels, RunningIndex, text_sizes, two_page_line};
 use crate::input::{PageIn, PrimId, TextRun};
 use crate::line::{LineRun, text_lines};
 use crate::region::{Kind, Score, Signal};
-use crate::segment::drawn::{DrawnStructure, Line};
+use crate::segment::drawn::{DrawnStructure, Grids, Line};
 use crate::segment::{SegId, Segment, Segments};
 
 pub mod code;
@@ -341,13 +341,54 @@ const BAND_APART: f32 = 2.0;
 /// A page number holds at most this many digits.
 const PAGE_NUMBER_DIGITS: usize = 4;
 
-/// Whether a line's text is a lone short number: at most [`PAGE_NUMBER_DIGITS`] digits, maybe
-/// between dashes (`7`, `- 7 -`).
+/// A page number holds at most this many words that are no number: the word for the page and
+/// the word between the page and the count of the pages (`Page 7 of 12`).
+const PAGE_NUMBER_WORDS: usize = 2;
+
+/// Whether a line's text has the shape of a page number: the number of the page, maybe with
+/// the count of the pages after it, each of at most [`PAGE_NUMBER_DIGITS`] digits; maybe
+/// between dashes (`7`, `- 7 -`), with a slash between the two numbers (`7 / 12`, `7/12`),
+/// and with at most [`PAGE_NUMBER_WORDS`] words of letters, a stop or a colon after them
+/// (`Page 7`, `p. 7`, `Page 7 of 12`). The words are not looked up: which words a file writes
+/// there is its own. The shape alone is no proof: `Total 120` and `Amount due: 120` have it
+/// too, so [`band_cut`] asks more of a line with a word or a second number (see
+/// [`bare_number`]). A line with any other sign, a longer number, a third number or a third
+/// word is none.
 fn page_number(text: &str) -> bool {
     let t = text
         .trim()
         .trim_matches(|c: char| c == '-' || c.is_whitespace());
-    !t.is_empty() && t.len() <= PAGE_NUMBER_DIGITS && t.chars().all(|c| c.is_ascii_digit())
+    let (mut numbers, mut words, mut slashes) = (0usize, 0usize, 0usize);
+    for token in t.split_whitespace().flat_map(|w| w.split_inclusive('/')) {
+        let (token, slash) = match token.strip_suffix('/') {
+            Some(rest) => (rest, 1),
+            None => (token, 0),
+        };
+        slashes += slash;
+        // A slash stands between the two numbers only.
+        if slash == 1 && (numbers + usize::from(!token.is_empty()) != 1 || slashes > 1) {
+            return false;
+        }
+        if token.is_empty() {
+            continue;
+        }
+        let word = token.trim_end_matches(['.', ':']);
+        if token.len() <= PAGE_NUMBER_DIGITS && token.chars().all(|c| c.is_ascii_digit()) {
+            numbers += 1;
+        } else if !word.is_empty() && word.chars().all(char::is_alphabetic) {
+            words += 1;
+        } else {
+            return false;
+        }
+    }
+    (1..=2).contains(&numbers) && words <= PAGE_NUMBER_WORDS && (slashes == 0 || numbers == 2)
+}
+
+/// Whether a line in the shape of a page number ([`page_number`]) is a number alone, maybe
+/// between dashes (`7`, `- 7 -`): no word and no second number.
+fn bare_number(text: &str) -> bool {
+    let t = text.trim_matches(|c: char| c == '-' || c.is_whitespace());
+    !t.is_empty() && t.chars().all(|c| c.is_ascii_digit())
 }
 
 /// The runs of a leaf's page numbers that stand apart from its other lines (see [`band_cut`]).
@@ -373,11 +414,19 @@ impl BandCut {
 }
 
 /// The page numbers of the leaf of runs `refs` that stand apart from its other lines: lines of
-/// the leaf that are a lone short number (see [`page_number`]) in the foot band of the page as
+/// the leaf in the shape of a page number (see [`page_number`]) in the foot band of the page as
 /// a running footer of the file (see [`PageView::band`]: a running line below all other text
 /// of the page), whose gap to the lowest other line of the leaf with ink is more than
 /// [`BAND_APART`] times their own height. `None` when the leaf has no such line, or no other
 /// line with ink.
+///
+/// A line with a word or a second number (`Page 7`, `7 / 12`) is a page number only when the
+/// running line counts the pages of the file ([`crate::file::Running::counts`]: its number
+/// goes up by one from page to page, a count after it is the same on every page and not
+/// below it). A line that repeats (`Amount due: 120` on both pages, `7 / 12` under each
+/// table) or whose number changes in another way (`Total 120`, `Total 140`) is a value and
+/// stays with its leaf: a value with the role of a page footer is a wrong structure. A
+/// number alone ([`bare_number`]) keeps the rule it had.
 fn band_cut(view: &PageView<'_>, refs: &[(&TextRun, u32)]) -> Option<BandCut> {
     crate::work::add(refs.len() as u64);
     // The text and the extent (bottom, top) of the leaf's lines with ink, by line number.
@@ -394,7 +443,11 @@ fn band_cut(view: &PageView<'_>, refs: &[(&TextRun, u32)]) -> Option<BandCut> {
         e.1 = e.1.min(lo);
         e.2 = e.2.max(hi);
     }
-    let number = |n: u32, t: &str| view.band(n) == Some(Band::Bottom) && page_number(t);
+    let number = |n: u32, t: &str| {
+        view.band(n) == Some(Band::Bottom)
+            && page_number(t)
+            && (bare_number(t) || view.counts_pages(n))
+    };
     let body_low = lines
         .iter()
         .filter(|(n, (t, _, _))| !number(**n, t))
@@ -454,10 +507,24 @@ pub fn type_page(
     ends_in_amount: &dyn Fn(&str) -> bool,
     limits: &crate::Limits,
 ) -> (Segments, BTreeMap<SegId, Vec<Typed>>) {
+    let facts = PageFacts::of(file, index, page.page);
+    type_page_with(page, drawn, segs, facts, ends_in_amount, limits)
+}
+
+/// [`type_page`] with the facts of the page handed in (see [`PageFacts`]): for a host whose
+/// page names its runs by other ids than the legend its file learned.
+pub fn type_page_with(
+    page: &PageIn,
+    drawn: &DrawnStructure,
+    segs: Segments,
+    facts: PageFacts<'_>,
+    ends_in_amount: &dyn Fn(&str) -> bool,
+    limits: &crate::Limits,
+) -> (Segments, BTreeMap<SegId, Vec<Typed>>) {
     // A tree the walk does not cut is typed with the view the walk read it with, so the text
     // of its segments is worked out once.
     let cut = {
-        let view = PageView::new(page, drawn, &segs, file, index, ends_in_amount);
+        let view = PageView::with(page, drawn, &segs, facts, ends_in_amount);
         match walk_cut(&view, limits.max_regions) {
             Some(cut) => cut,
             None => {
@@ -469,10 +536,35 @@ pub fn type_page(
     };
     let segs = cut;
     let typed = {
-        let view = PageView::new(page, drawn, &segs, file, index, ends_in_amount);
+        let view = PageView::with(page, drawn, &segs, facts, ends_in_amount);
         type_segments(&view)
     };
     (segs, typed)
+}
+
+/// The facts of a file as one page is typed with them: the facts and their index, and the
+/// footnote legend of that page alone. The typers read no other page's legend, so a host
+/// that renames the legend's runs for a page (see [`crate::RunOrder::legend`]) hands only
+/// that one legend and copies no facts of the file.
+#[derive(Debug, Clone, Copy)]
+pub struct PageFacts<'a> {
+    /// What the file learned across its pages (running lines, body size, heading sizes).
+    pub file: &'a FileFacts,
+    /// The index of the file's facts by page.
+    pub index: &'a FileIndex,
+    /// The legend of the page, its runs named by the ids of the page that is typed.
+    pub legend: Option<&'a Legend>,
+}
+
+impl<'a> PageFacts<'a> {
+    /// The facts for page `page` of the file, with the legend the file learned for it.
+    pub fn of(file: &'a FileFacts, index: &'a FileIndex, page: u32) -> PageFacts<'a> {
+        PageFacts {
+            file,
+            index,
+            legend: file.legends.get(&page),
+        }
+    }
 }
 
 /// The file facts as the typers look them up, built once per file.
@@ -511,10 +603,15 @@ pub struct PageView<'a> {
     pub ends_in_amount: &'a dyn Fn(&str) -> bool,
     /// The band of each line number that is a running header or footer.
     bands: HashMap<u32, Band>,
+    /// The line numbers of the running lines that count the pages (see
+    /// [`crate::file::Running::counts`]).
+    counting: HashSet<u32>,
     /// The line numbers of the running footers of the two-page rule.
     two_page: HashSet<u32>,
     /// The runs of the page's footnote legend.
     legend: HashSet<u32>,
+    /// The page's footnote legend (see [`PageFacts::legend`]).
+    page_legend: Option<&'a Legend>,
     /// The text sizes of the page (see [`crate::file::text_sizes`]).
     text_sizes: Vec<f32>,
     /// The title of page 1 (see [`page_title`]).
@@ -567,6 +664,8 @@ pub struct PageView<'a> {
     line_pieces: Vec<OnceCell<Vec<crate::extract::table::grid::Piece>>>,
     /// The pieces of all the page's lines by left edge and height (see [`PageView::edges_near`]).
     edges: OnceCell<Edges>,
+    /// The frames of the page's groups of drawn lines (see [`table::Frames`]), found once.
+    frames: OnceCell<table::Frames>,
 }
 
 /// The pieces of a page's lines (see [`PageView::line_pieces`]) by their left edge, in buckets
@@ -593,23 +692,43 @@ impl<'a> PageView<'a> {
         index: &'a FileIndex,
         ends_in_amount: &'a dyn Fn(&str) -> bool,
     ) -> PageView<'a> {
+        let facts = PageFacts::of(file, index, page.page);
+        PageView::with(page, drawn, segs, facts, ends_in_amount)
+    }
+
+    /// [`PageView::new`] with the facts of the page handed in: the legend is `facts.legend`,
+    /// not the one the file holds for the page.
+    pub fn with(
+        page: &'a PageIn,
+        drawn: &'a DrawnStructure,
+        segs: &'a Segments,
+        facts: PageFacts<'a>,
+        ends_in_amount: &'a dyn Fn(&str) -> bool,
+    ) -> PageView<'a> {
+        let PageFacts {
+            file,
+            index,
+            legend: page_legend,
+        } = facts;
         let height = page.size[1];
         crate::work::add(page.texts.len() as u64);
         let lines = text_lines(&page.texts);
         let found = index.running.bands(&lines, height, &[]);
         let mut bands = HashMap::new();
         let mut two_page = HashSet::new();
+        let mut counting = HashSet::new();
         for (l, b) in lines.iter().zip(found) {
             let Some(b) = b else { continue };
             let number = l.runs[0].line;
             bands.insert(number, b);
+            if index.running.counts_pages(l, height) {
+                counting.insert(number);
+            }
             if two_page_line(l, height, &index.two_page) {
                 two_page.insert(number);
             }
         }
-        let legend: HashSet<u32> = file
-            .legends
-            .get(&page.page)
+        let legend: HashSet<u32> = page_legend
             .map(|l| {
                 l.entries
                     .iter()
@@ -687,8 +806,10 @@ impl<'a> PageView<'a> {
             index,
             ends_in_amount,
             bands,
+            counting,
             two_page,
             legend,
+            page_legend,
             text_sizes: sizes,
             title,
             texts: (0..n).map(|_| OnceCell::new()).collect(),
@@ -714,6 +835,7 @@ impl<'a> PageView<'a> {
             boxes: (0..n).map(|_| OnceCell::new()).collect(),
             line_pieces: (0..line_count).map(|_| OnceCell::new()).collect(),
             edges: OnceCell::new(),
+            frames: OnceCell::new(),
         }
     }
 
@@ -944,6 +1066,11 @@ impl<'a> PageView<'a> {
         }
     }
 
+    /// The frames of the groups of `g`, the grids of this page (`drawn.grids`), found once.
+    pub(crate) fn frames(&self, g: &Grids) -> &table::Frames {
+        self.frames.get_or_init(|| table::Frames::of(g))
+    }
+
     pub(crate) fn lines(&self) -> &[RunRange] {
         &self.lines
     }
@@ -1094,6 +1221,11 @@ impl<'a> PageView<'a> {
         self.bands.get(&line).copied()
     }
 
+    /// Whether the line is a running line of the file whose lines count the pages.
+    pub(crate) fn counts_pages(&self, line: u32) -> bool {
+        self.counting.contains(&line)
+    }
+
     pub(crate) fn two_page(&self, line: u32) -> bool {
         self.two_page.contains(&line)
     }
@@ -1102,7 +1234,70 @@ impl<'a> PageView<'a> {
         self.legend.contains(&run)
     }
 
+    /// The page's footnote legend, its runs named by the ids of the page.
+    pub(crate) fn legend(&self) -> Option<&Legend> {
+        self.page_legend
+    }
+
     pub(crate) fn title(&self) -> Option<&ViewTitle> {
         self.title.as_ref()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{bare_number, page_number};
+
+    /// A number alone, maybe between dashes, against a number with a word or a count.
+    #[test]
+    fn a_bare_number_has_no_word_and_no_count() {
+        for yes in ["7", "- 7 -", " 12 ", "9999"] {
+            assert!(page_number(yes) && bare_number(yes), "{yes}");
+        }
+        for no in ["Page 7", "7 / 12", "7/12", "7 12", "p. 7", "Total 120"] {
+            assert!(page_number(no) && !bare_number(no), "{no}");
+        }
+        assert!(!bare_number("") && !bare_number("- -"));
+    }
+
+    /// The shape of a page number: one or two short numbers, a slash between the two, at
+    /// most two words, dashes around; each bound moved both ways.
+    #[test]
+    fn the_shape_of_a_page_number() {
+        for yes in [
+            "7",
+            "- 7 -",
+            "Page 7",
+            "p. 7",
+            "7 / 12",
+            "7/12",
+            "Page 7 of 12",
+            "Page 7 / 12",
+            "Sheet: 7",
+            "9999",
+        ] {
+            assert!(page_number(yes), "{yes}");
+        }
+        for no in [
+            "",
+            "Page",
+            // A number of five digits, a third number, a third word.
+            "10000",
+            "7 / 12 / 3",
+            "7 12 3",
+            "Page 7 of all 12",
+            // A slash that does not stand between the two numbers.
+            "/ 7",
+            "7 /",
+            "Page/7",
+            // Other signs: an amount, a date, a code.
+            "12.5",
+            "1,234",
+            "2026-11-13",
+            "A7",
+            "(7)",
+        ] {
+            assert!(!page_number(no), "{no}");
+        }
     }
 }

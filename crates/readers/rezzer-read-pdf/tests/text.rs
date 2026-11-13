@@ -1721,6 +1721,186 @@ fn page_number_under_few_lines_is_furniture() {
     }
 }
 
+/// Task 31c: the same page with the page number written with a word, as a count of the
+/// pages, or both (`Page 2`, `2 / 3`, `Page 2 of 3`): a running line of the file below all
+/// other text, far under the few lines it shares its leaf with, and in the shape of a page
+/// number. It is cut off and is a footer, as the bare number is. A line of that place and
+/// shape that is no running line of the file (the text differs from page to page in more than
+/// its digits) stays with its text.
+#[test]
+fn a_page_number_with_a_word_or_a_count_under_few_lines_is_furniture() {
+    let figure = "q 0.5 w 320 200 m 540 200 l S 320 300 m 540 300 l S 320 400 m 540 400 l S Q\n";
+    let read_with = |foot: &dyn Fn(u32) -> String| {
+        let pages: Vec<Page> = (1..=3)
+            .map(|n| page_with(&(show("F1", 10.0, 280.0, 40.0, &foot(n)) + figure)))
+            .collect();
+        read(&pdf(&pages, ""))
+    };
+    let shapes: [&dyn Fn(u32) -> String; 4] = [
+        &|n| format!("Page {n}"),
+        &|n| format!("{n} / 3"),
+        &|n| format!("Page {n} of 3"),
+        &|n| format!("{n}/3"),
+    ];
+    for foot in shapes {
+        let out = read_with(foot);
+        for n in 1..=3u32 {
+            let roles = roles_of(&out, n);
+            assert_eq!(
+                roles.last(),
+                Some(&(Some("page-footer".into()), foot(n))),
+                "page {n}: {roles:?}"
+            );
+        }
+    }
+    let words = ["Crate", "Barrel", "Sack"];
+    let out = read_with(&|n| format!("{} {n}", words[n as usize - 1]));
+    for n in 1..=3u32 {
+        let roles = roles_of(&out, n);
+        assert!(
+            roles
+                .iter()
+                .all(|(r, _)| r.as_deref() != Some("page-footer")),
+            "page {n}: {roles:?}"
+        );
+    }
+}
+
+/// The roles and texts of each page of a file of `pages` pages like the page of
+/// [`page_number_under_few_lines_is_furniture`], with the line `foot(n)` at the foot of page
+/// `n` and `body(n)` over it.
+fn foot_roles(
+    pages: u32,
+    body: &dyn Fn(u32) -> String,
+    foot: &dyn Fn(u32) -> String,
+) -> Vec<Vec<(Option<String>, String)>> {
+    let figure = "q 0.5 w 320 200 m 540 200 l S 320 300 m 540 300 l S 320 400 m 540 400 l S Q\n";
+    let all: Vec<Page> = (1..=pages)
+        .map(|n| page_with(&(show("F1", 10.0, 280.0, 40.0, &foot(n)) + figure + &body(n))))
+        .collect();
+    let out = read(&pdf(&all, ""));
+    (1..=pages).map(|n| roles_of(&out, n)).collect()
+}
+
+/// Fix round 1 of part 2b-2 of Task 31c (I2): a line at the foot of every page with a word
+/// and a number is a value, not a page number, when its number does not follow the pages. A
+/// total of each page (`Total 120`, `Total 140`, `Total 160`), the same total on every page
+/// and an amount on both pages of a file of two (`Amount due: 120`) are running lines by
+/// their text with the digits taken out, below all other text and far under it, and have the
+/// shape of a page number: they got the role of a page footer. They stay text.
+#[test]
+fn a_value_at_the_foot_of_every_page_is_no_page_number() {
+    let cases: [(u32, &dyn Fn(u32) -> String); 6] = [
+        (3, &|n| format!("Total {}", 100 + 20 * n)),
+        (3, &|_| "Total 120".into()),
+        (2, &|_| "Amount due: 120".into()),
+        // A number that goes up by two, one that goes down, and a number over its count.
+        (3, &|n| format!("Lot {}", 2 * n)),
+        (3, &|n| format!("Step {}", 9 - n)),
+        (3, &|n| format!("{} / 3", n + 3)),
+    ];
+    for (pages, foot) in cases {
+        for (k, roles) in foot_roles(pages, &|_| String::new(), foot)
+            .iter()
+            .enumerate()
+        {
+            let n = k as u32 + 1;
+            assert!(
+                roles
+                    .iter()
+                    .all(|(r, _)| r.as_deref() != Some("page-footer")),
+                "page {n}: {roles:?}"
+            );
+            assert!(
+                roles.iter().any(|(r, t)| r.is_none() && *t == foot(n)),
+                "page {n}: {roles:?}"
+            );
+        }
+    }
+}
+
+/// The page numbers that follow the pages keep the role: from another number than 1 (a file
+/// cut out of a longer one), with a count that is the same on every page, and on both pages
+/// of a file of two.
+#[test]
+fn a_page_number_that_follows_the_pages_from_an_offset_is_furniture() {
+    let cases: [(u32, &dyn Fn(u32) -> String); 5] = [
+        (3, &|n| format!("Page {}", n + 4)),
+        (3, &|n| format!("{} / 12", n + 6)),
+        (3, &|n| format!("Page {} of 9", n + 6)),
+        (2, &|n| format!("Page {n}")),
+        (2, &|n| format!("{n} / 2")),
+    ];
+    for (pages, foot) in cases {
+        for (k, roles) in foot_roles(pages, &|_| String::new(), foot)
+            .iter()
+            .enumerate()
+        {
+            let n = k as u32 + 1;
+            assert_eq!(
+                roles.last(),
+                Some(&(Some("page-footer".into()), foot(n))),
+                "page {n}: {roles:?}"
+            );
+        }
+    }
+}
+
+/// A known limit, pinned so that a change of the evidence is seen (fix round 2 of part 2b-2
+/// of Task 31c, R3; owner after 0.1.0): a value at the foot of every page that goes up by
+/// exactly one from page to page (`Total 121`, `Total 122`, `Total 123`) has all the
+/// evidence of a page number that starts at an offset, and gets the role of a page footer.
+/// Its text is kept. Nothing on the pages tells the two apart.
+#[test]
+fn a_value_that_goes_up_by_one_with_the_pages_reads_as_a_page_number() {
+    let foot = |n: u32| format!("Total {}", 120 + n);
+    for (k, roles) in foot_roles(3, &|_| String::new(), &foot).iter().enumerate() {
+        let n = k as u32 + 1;
+        assert_eq!(
+            roles.last(),
+            Some(&(Some("page-footer".into()), foot(n))),
+            "page {n}: {roles:?}"
+        );
+    }
+}
+
+/// `7 / 12` as the last row of a table without rules at the foot of every page, under the
+/// white space of its empty rows: the same on every page, so it counts no pages and is no
+/// page number. It stays text.
+#[test]
+fn a_count_as_the_last_row_of_a_table_is_no_page_number() {
+    let names = [["Crate", "Barrel"], ["Sack", "Basket"], ["Bottle", "Drum"]];
+    let table = |n: u32| {
+        let [first, second] = names[n as usize - 1];
+        let mut rows = String::new();
+        for (k, row) in [
+            ["Item", "Units", "Share"],
+            [first, "4", "2 / 12"],
+            [second, "9", "5 / 12"],
+        ]
+        .iter()
+        .enumerate()
+        {
+            for (cell, x) in row.iter().zip([200.0, 280.0, 340.0]) {
+                rows += &show("F1", 10.0, x, 140.0 - 13.0 * k as f32, cell);
+            }
+        }
+        rows
+    };
+    for pages in [2, 3] {
+        let out = foot_roles(pages, &table, &|_| "7 / 12".into());
+        for (k, roles) in out.iter().enumerate() {
+            assert!(
+                roles
+                    .iter()
+                    .all(|(r, _)| r.as_deref() != Some("page-footer")),
+                "page {}: {roles:?}",
+                k + 1
+            );
+        }
+    }
+}
+
 /// Guard: a letterhead at the top of both pages of a file of two pages stays content: the
 /// title and the fields of an invoice repeat on its second page, and they are the reader's to
 /// read.

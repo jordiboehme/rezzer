@@ -234,6 +234,11 @@ fn segment_with(
         joints: Vec::new(),
     };
     (b.joined, b.joints) = page_joints(page);
+    // By height, once: each cut takes the stretch of its own heights (see `cut_runs`). The
+    // cut sorts what it gets the same way and keeps the order of equal heights, so it sees
+    // the rules in the order it saw them in before.
+    work::add(b.joined.len() as u64);
+    b.joined.sort_by(|a, c| a.at.total_cmp(&c.at));
     let every = all_prims(page);
     work::add(every.len() as u64);
     let frame = Bounds {
@@ -283,7 +288,7 @@ struct Builder<'a> {
     /// The segments a limit or the stop left one leaf (see [`Segments::short`]).
     short: Vec<SegId>,
     /// The page's rules drawn in pieces, joined, and their joints (see [`cut::joined`]): made
-    /// once for the page, for every cut of its text.
+    /// once for the page, for every cut of its text. The rules are sorted by height.
     joined: Vec<Line>,
     joints: Vec<(f32, f32)>,
 }
@@ -535,7 +540,6 @@ impl Builder<'_> {
     /// The grids and boxes of the page as items, nested; item 0 is the page.
     fn items(&self, found: &drawn::DrawnStructure) -> Vec<Item> {
         let page = self.page;
-        let area = |b: &Bounds| (b.x1 - b.x0).max(0.0) * (b.y1 - b.y0).max(0.0);
         let mut drawn: Vec<(Bounds, Source)> = Vec::new();
         if let Ok(g) = &found.grids {
             for group in &g.groups {
@@ -551,13 +555,7 @@ impl Builder<'_> {
             }
         }
         drawn.extend(found.boxes.iter().map(|&b| (b, Source::Box)));
-        // Larger first, so that an item can only nest in one before it.
-        drawn.sort_by(|a, b| {
-            area(&b.0)
-                .total_cmp(&area(&a.0))
-                .then(a.0.x0.total_cmp(&b.0.x0))
-                .then(b.0.y1.total_cmp(&a.0.y1))
-        });
+        drawn.sort_by(|a, b| nesting_order(&a.0, &b.0));
         let mut items = vec![Item {
             bounds: Bounds {
                 x0: 0.0,
@@ -573,18 +571,9 @@ impl Builder<'_> {
             parent: 0,
             held: false,
         }];
-        for (bounds, source) in drawn {
-            let mut node = 0;
-            'down: loop {
-                for &c in &items[node].children {
-                    work::add(1);
-                    if holds(items[c].bounds, bounds) {
-                        node = c;
-                        continue 'down;
-                    }
-                }
-                break;
-            }
+        let all: Vec<Bounds> = drawn.iter().map(|d| d.0).collect();
+        let holders = holders(&all);
+        for ((bounds, source), node) in drawn.into_iter().zip(holders) {
             let at = items.len();
             let depth = items[node].depth + 1;
             items[node].children.push(at);
@@ -1423,9 +1412,6 @@ fn pieces_of(texts: &[TextRun], ids: &[u32]) -> (Vec<Piece>, Vec<Vec<usize>>) {
     (pieces, members)
 }
 
-/// The whitespace cut of the runs `ids` of `texts` (see [`xy_cut`]) on their pieces (see
-/// [`pieces_of`]): its groups hold places in `ids`, and the extent of the ink of each group
-/// comes with it.
 /// The rules of `page` that are drawn in pieces, joined, and their joints (see
 /// [`cut::joined`]): from the flat rules and the tops and bottoms of its rectangles, with the
 /// upright rules and the sides of the rectangles as the lines that make a joint a corner.
@@ -1438,6 +1424,14 @@ fn page_joints(page: &PageIn) -> (Vec<Line>, Vec<(f32, f32)>) {
     cut::joined(&flat, &upright)
 }
 
+/// The whitespace cut of the runs `ids` of `texts` (see [`xy_cut`]) on their pieces (see
+/// [`pieces_of`]): its groups hold places in `ids`, and the extent of the ink of each group
+/// comes with it.
+///
+/// `ruled.joined` is sorted by height. The cut looks only at the rules between the lowest and
+/// the highest of its pieces, so it is handed that stretch of the page's joined rules and
+/// not all of them: it sorts what it gets on every call, and a page of many boxes is cut
+/// once for each box.
 fn cut_runs(
     texts: &[TextRun],
     ids: &[u32],
@@ -1446,6 +1440,10 @@ fn cut_runs(
     stop: &dyn Fn() -> bool,
 ) -> (cut::Cut, Vec<Bounds>) {
     let (pieces, members) = pieces_of(texts, ids);
+    let ruled = &cut::Ruled {
+        joined: cut::at_heights(ruled.joined, &pieces),
+        ..*ruled
+    };
     let mut found = cut::xy_cut_ruled(&pieces, ruled, limits, stop);
     let mut extents = Vec::with_capacity(found.groups.len());
     for group in &mut found.groups {
@@ -1537,6 +1535,55 @@ fn centre(b: Bounds) -> (f32, f32) {
     ((b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0)
 }
 
+/// The order the drawn boxes of a page are nested in: larger first, so that a box can only
+/// nest in one before it; boxes of one area from the left, then from the top.
+fn nesting_order(a: &Bounds, b: &Bounds) -> std::cmp::Ordering {
+    let area = |b: &Bounds| (b.x1 - b.x0).max(0.0) * (b.y1 - b.y0).max(0.0);
+    area(b)
+        .total_cmp(&area(a))
+        .then(a.x0.total_cmp(&b.x0))
+        .then(b.y1.total_cmp(&a.y1))
+}
+
+/// The item each of the boxes `all` (in [`nesting_order`]) nests in: 0 for the page, `c + 1`
+/// for the box `all[c]`.
+///
+/// A box nests in the first box of the page that holds it (the first in the list that
+/// nests in the page), then in the first of those nested in that one that holds it, and so
+/// on. A box that holds another holds its centre, and comes before it and after the box it
+/// nests in. So one walk over the boxes at that centre, in the order of the list, goes down
+/// the same way: each box on the walk that nests in the place reached so far and holds the
+/// new box is the next place. The boxes at a centre come from one index of all of them, so
+/// a page of many boxes side by side does not look at every box for each box.
+///
+/// The walk leans on the list alone: the boxes at a centre are met in the order of the list,
+/// and a box is looked at only after the one it nests in. A test compares it with the walk
+/// down the nested boxes it replaced, on seeded random pages.
+fn holders(all: &[Bounds]) -> Vec<usize> {
+    let index = Index::of(all);
+    let mut parent: Vec<usize> = Vec::with_capacity(all.len());
+    for (k, &bounds) in all.iter().enumerate() {
+        let mut node = 0;
+        let mut step = |c: usize| {
+            work::add(1);
+            if parent[c] == node && holds(all[c], bounds) {
+                node = c + 1;
+            }
+        };
+        match &index {
+            Some(ix) => ix
+                .at(centre(bounds))
+                .iter()
+                .map(|&c| c as usize)
+                .take_while(|&c| c < k)
+                .for_each(&mut step),
+            None => (0..k).for_each(&mut step),
+        }
+        parent.push(node);
+    }
+    parent
+}
+
 /// Whether `outer` holds `inner` whole, within [`SNAP`].
 fn holds(outer: Bounds, inner: Bounds) -> bool {
     inner.x0 >= outer.x0 - SNAP
@@ -1604,7 +1651,9 @@ struct Index {
     y0: f32,
     cw: f32,
     ch: f32,
-    n: usize,
+    /// The cells across and the cells up.
+    nx: usize,
+    ny: usize,
     cells: Vec<Vec<u32>>,
 }
 
@@ -1616,26 +1665,61 @@ impl Index {
         if kids.len() <= FEW_CHILDREN {
             return None;
         }
-        let all = kids.iter().map(|&c| items[c].bounds).reduce(union)?;
-        let n = ((kids.len() as f64).sqrt().ceil() as usize).clamp(1, 256);
-        let cw = ((all.x1 - all.x0 + 2.0 * SNAP) / n as f32).max(f32::MIN_POSITIVE);
-        let ch = ((all.y1 - all.y0 + 2.0 * SNAP) / n as f32).max(f32::MIN_POSITIVE);
+        let bounds: Vec<Bounds> = kids.iter().map(|&c| items[c].bounds).collect();
+        Index::of(&bounds)
+    }
+
+    /// The index of `bounds`; `None` for a few.
+    ///
+    /// There are about as many cells as boxes (at most 256 times 256), and they are dealt to
+    /// the two directions by how many boxes of the mean size fit along each: boxes side by
+    /// side in one row get cells side by side, a stack of rows gets cells one over the other.
+    /// A square grid of cells would put a whole row of boxes, or a whole stack, in each of
+    /// its cells there, and each look would then go over the root of the boxes.
+    fn of(bounds: &[Bounds]) -> Option<Index> {
+        if bounds.len() <= FEW_CHILDREN {
+            return None;
+        }
+        let all = bounds.iter().copied().reduce(union)?;
+        let len = bounds.len() as f64;
+        let cells = len.min(256.0 * 256.0);
+        // How many boxes of the mean extent fit along a direction: one at least, and one
+        // where the extents say nothing (no extent, or one that is not a number).
+        let fit = |extent: f32, of: fn(&Bounds) -> f32| -> f64 {
+            let mean = bounds
+                .iter()
+                .map(|b| f64::from(of(b).max(0.0)))
+                .sum::<f64>()
+                / len;
+            let fit = f64::from(extent) / mean;
+            if fit.is_finite() { fit.max(1.0) } else { 1.0 }
+        };
+        let (fx, fy) = (
+            fit(all.x1 - all.x0, |b| b.x1 - b.x0),
+            fit(all.y1 - all.y0, |b| b.y1 - b.y0),
+        );
+        work::add(2 * bounds.len() as u64);
+        let nx = (cells * fx / fy).sqrt().min(fx.ceil()).clamp(1.0, cells);
+        let ny = (cells / nx).min(fy.ceil()).max(1.0);
+        let (nx, ny) = (nx as usize, ny as usize);
+        let cw = ((all.x1 - all.x0 + 2.0 * SNAP) / nx as f32).max(f32::MIN_POSITIVE);
+        let ch = ((all.y1 - all.y0 + 2.0 * SNAP) / ny as f32).max(f32::MIN_POSITIVE);
         let mut ix = Index {
             x0: all.x0 - SNAP,
             y0: all.y0 - SNAP,
             cw,
             ch,
-            n,
-            cells: vec![Vec::new(); n * n],
+            nx,
+            ny,
+            cells: vec![Vec::new(); nx * ny],
         };
-        for (k, &c) in kids.iter().enumerate() {
-            let b = items[c].bounds;
+        for (k, b) in bounds.iter().enumerate() {
             let (a0, b0) = ix.cell(b.x0 - SNAP, b.y0 - SNAP);
             let (a1, b1) = ix.cell(b.x1 + SNAP, b.y1 + SNAP);
             for cy in b0..=b1 {
                 for cx in a0..=a1 {
                     work::add(1);
-                    ix.cells[cy * n + cx].push(k as u32);
+                    ix.cells[cy * nx + cx].push(k as u32);
                 }
             }
         }
@@ -1643,14 +1727,17 @@ impl Index {
     }
 
     fn cell(&self, x: f32, y: f32) -> (usize, usize) {
-        let f = |v: f32| (v.max(0.0) as usize).min(self.n - 1);
-        (f((x - self.x0) / self.cw), f((y - self.y0) / self.ch))
+        let f = |v: f32, n: usize| (v.max(0.0) as usize).min(n - 1);
+        (
+            f((x - self.x0) / self.cw, self.nx),
+            f((y - self.y0) / self.ch, self.ny),
+        )
     }
 
     /// The children that may hold the point, in the order of the list.
     fn at(&self, (x, y): (f32, f32)) -> &[u32] {
         let (cx, cy) = self.cell(x, y);
-        &self.cells[cy * self.n + cx]
+        &self.cells[cy * self.nx + cx]
     }
 }
 
@@ -1688,4 +1775,133 @@ fn cover_problem(s: &Segments, page: &PageIn) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The nesting as it was walked before the index: from the page down, at each place the
+    /// first of the boxes nested there, in the order they came, that holds the new box.
+    fn walked_down(all: &[Bounds]) -> Vec<usize> {
+        let mut children: Vec<Vec<usize>> = vec![Vec::new()];
+        let mut parent = Vec::with_capacity(all.len());
+        for (k, &bounds) in all.iter().enumerate() {
+            let mut node = 0;
+            while let Some(&c) = children[node].iter().find(|&&c| holds(all[c - 1], bounds)) {
+                node = c;
+            }
+            children[node].push(k + 1);
+            children.push(Vec::new());
+            parent.push(node);
+        }
+        parent
+    }
+
+    /// The same numbers on every run (xorshift64*).
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 >> 12;
+            self.0 ^= self.0 << 25;
+            self.0 ^= self.0 >> 27;
+            self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        }
+
+        fn below(&mut self, n: u64) -> f32 {
+            (self.next() % n) as f32
+        }
+    }
+
+    /// A random set of boxes on a lattice of `step` points: boxes anywhere (equal boxes,
+    /// shared edges and boxes within a snap of each other come with a small lattice), an
+    /// onion of boxes one in the other, a row of boxes side by side, and boxes set into
+    /// boxes already there.
+    fn boxes(rng: &mut Rng, step: f32) -> Vec<Bounds> {
+        let at = |x: f32, y: f32, w: f32, h: f32| Bounds {
+            x0: x * step,
+            y0: y * step,
+            x1: (x + w) * step,
+            y1: (y + h) * step,
+        };
+        let mut out: Vec<Bounds> = Vec::new();
+        for _ in 0..rng.next() % 30 {
+            let (x, y) = (rng.below(40), rng.below(40));
+            out.push(at(x, y, 1.0 + rng.below(20), 1.0 + rng.below(20)));
+        }
+        let (x, y, rings) = (rng.below(20), rng.below(20), rng.next() % 8);
+        for r in 0..rings {
+            let (r, size) = (r as f32, 2.0 * (rings - r) as f32);
+            out.push(at(x + r, y + r, size, size));
+        }
+        let (y, w) = (rng.below(40), 1.0 + rng.below(3));
+        for k in 0..rng.next() % 30 {
+            out.push(at(k as f32 * w, y, w, 2.0));
+        }
+        for _ in 0..rng.next() % 10 {
+            if out.is_empty() {
+                break;
+            }
+            let b = out[(rng.next() % out.len() as u64) as usize];
+            let (w, h) = (b.x1 - b.x0, b.y1 - b.y0);
+            let (fx, fy) = (rng.below(4) / 4.0, rng.below(4) / 4.0);
+            out.push(Bounds {
+                x0: b.x0 + fx * w / 2.0,
+                y0: b.y0 + fy * h / 2.0,
+                x1: b.x1 - rng.below(4) / 8.0 * w,
+                y1: b.y1 - rng.below(4) / 8.0 * h,
+            });
+        }
+        out
+    }
+
+    /// Fix round 1 of part 2b-2 of Task 31c (M2): the nesting by one walk over the boxes at
+    /// the centre of each box gives every box the place the walk down the nested boxes gave
+    /// it, on 600 seeded random pages on lattices of 1, 2 and 5 points (gaps of one snap,
+    /// shared edges, equal boxes, boxes one in the other, boxes side by side). A change to
+    /// the index or to the walk that moves one box fails here. A change to the order of the
+    /// list does not: both walks get the same list. The order is pinned by
+    /// [`boxes_nest_in_the_innermost_box_before_them`].
+    #[test]
+    fn the_nesting_by_the_index_is_the_nesting_by_the_walk_down() {
+        let mut rng = Rng(0xA076_1D64_78BD_642F);
+        let (mut nested, mut indexed, mut deep) = (0usize, 0usize, 0usize);
+        for round in 0..600 {
+            let step = [1.0, 2.0, 5.0][round % 3];
+            let mut all = boxes(&mut rng, step);
+            all.sort_by(nesting_order);
+            let (new, old) = (holders(&all), walked_down(&all));
+            assert_eq!(new, old, "round {round}: {all:?}");
+            nested += new.iter().filter(|&&p| p != 0).count();
+            indexed += usize::from(Index::of(&all).is_some());
+            deep += usize::from(new.iter().any(|&p| p != 0 && new[p - 1] != 0));
+        }
+        // The pages have boxes in boxes, boxes in those, and enough boxes for the index.
+        assert!(
+            nested > 5_000 && indexed > 500 && deep > 300,
+            "{nested} {indexed} {deep}"
+        );
+    }
+
+    /// Guard of the order the walk leans on, on one small page: a frame, a second frame
+    /// equal to it within a snap, two boxes of one area in it side by side, a box of the
+    /// area and the left edge of the right one set less than a snap higher, and a box in the
+    /// left one. The larger frame is first and holds the other; boxes of one area go from
+    /// the left, and those of one left edge from the top; each box nests in the innermost
+    /// box that holds it. The right box and the one set higher hold each other within a
+    /// snap: the higher one is first, so the right box nests in it.
+    #[test]
+    fn boxes_nest_in_the_innermost_box_before_them() {
+        let b = |x0: f32, y0: f32, x1: f32, y1: f32| Bounds { x0, y0, x1, y1 };
+        let (frame, twin) = (b(0.0, 0.0, 100.0, 100.0), b(1.0, 1.0, 100.0, 100.0));
+        let (left, right) = (b(10.0, 10.0, 40.0, 40.0), b(60.0, 10.0, 90.0, 40.0));
+        let raised = b(60.0, 11.0, 90.0, 41.0);
+        let small = b(15.0, 15.0, 25.0, 25.0);
+        let mut all = vec![small, right, twin, left, raised, frame];
+        all.sort_by(nesting_order);
+        assert_eq!(all, [frame, twin, left, raised, right, small]);
+        assert_eq!(holders(&all), [0, 1, 2, 2, 4, 3]);
+        assert_eq!(walked_down(&all), [0, 1, 2, 2, 4, 3]);
+    }
 }

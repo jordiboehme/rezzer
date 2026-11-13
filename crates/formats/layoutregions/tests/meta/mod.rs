@@ -8,6 +8,14 @@
 //! on the page before and after. A change may keep every decision or move a typed region to
 //! a spatial one; it may never give a different typed read, lose a run or read one twice.
 //!
+//! Order counts only where it carries meaning. Two regions that both pages read the same must
+//! keep their order when one stands over the other (one flow, see [`one_flow`]: a heading and
+//! its section, the blocks of a column, a caption under its picture), and when the page reads
+//! them one right after the other and a bond holds them together (see [`Bond`]): the foot of a
+//! column and the head of the next, a side heading and its block, a label and its value on one
+//! row, a caption beside its picture, a sentence that runs from one region into the next. The
+//! order of every other two blocks that stand side by side is free and is no break.
+//!
 //! Regions are compared by every primitive they hold (runs, rules, boxes, pictures, codes),
 //! each mapped back to the primitives of the page it came from ([`Origin`]).
 //!
@@ -566,8 +574,11 @@ pub enum Break {
     /// A typed region of the changed page holds other primitives than any typed region of the
     /// page (it took some from a typed region, or a region was cut or joined).
     Members,
-    /// The typed regions both pages read the same stand in another order. One break per page
-    /// at most: the first region found out of order is named, not every one.
+    /// Two typed regions both pages read the same, of one flow (see [`one_flow`]) or held by
+    /// a bond (see [`Bond`]), stand in another order, or a region stands inside a sentence
+    /// that ran from one region into the next. The order of regions that do not depend on
+    /// each other is free. One break per page at most: the first region found out of order
+    /// is named, not every one.
     Order,
     /// A run of the changed page is in no region.
     Lost,
@@ -621,9 +632,11 @@ impl Broken {
 /// The task that owns the breaks of change `t`, of kind `what`, in class `class` (see
 /// [`class_of`]):
 ///
-/// - runs in another order and rules drawn as filled bars are input the PDF reader never
-///   hands over (it orders the runs and turns bars into lines before the engine), so the
-///   engine's own taking of such input comes after 0.1.0;
+/// - rules drawn as filled bars are input the PDF reader never hands over (it turns bars
+///   into lines before the engine), so the engine's own taking of such input comes after
+///   0.1.0. Runs in another order are read in the order of their places
+///   (`layoutregions::RunOrder`, Task 31c): a break under that change is a break like any
+///   other;
 /// - labels and values: Task 26, but for the changes whose cause is the segmentation (rules
 ///   in pieces part the strips; absolute points in the drawn structure under a scale of 0.5
 ///   or 2), which Task 31 owns;
@@ -632,7 +645,7 @@ impl Broken {
 ///   headers and footers): Task 31.
 pub fn owner(t: Transform, what: Break, class: &str) -> &'static str {
     match (t, what, class) {
-        (Transform::ReorderRuns | Transform::RuleAsBox, _, _) => "after 0.1.0",
+        (Transform::RuleAsBox, _, _) => "after 0.1.0",
         (Transform::SplitRules | Transform::Scale(50) | Transform::Scale(200), _, "pairs") => "31",
         (_, _, "pairs") => "26",
         (_, Break::Kind, "text") => "36a",
@@ -694,6 +707,322 @@ fn members_of(prims: &[PrimId], origin: &Origin) -> Vec<PrimId> {
     ids.sort_unstable();
     ids.dedup();
     ids
+}
+
+/// Two regions are one flow when this share of the width of the narrower one, or more, stands
+/// over or under the other: a heading over its section, the paragraphs and rows of one
+/// column, a caption under its picture, a block across the page over the columns under it.
+/// Half the width: two blocks side by side whose ragged ends reach a little over each other
+/// are no flow, and a block set in a little against the one over it still is.
+pub const FLOW_SHARE: f32 = 0.5;
+
+/// Whether the regions that reach from `a[0]` to `a[1]` and from `b[0]` to `b[1]` across the
+/// page are one flow (see [`FLOW_SHARE`]): the order of the two carries meaning. Two regions
+/// that stand side by side (a head block and a date box, two side boxes, the columns of a
+/// footer, a margin note and a line of a form) do not depend on each other, and their order
+/// is free.
+pub fn one_flow(a: [f32; 2], b: [f32; 2]) -> bool {
+    let shared = a[1].min(b[1]) - a[0].max(b[0]);
+    let narrow = (a[1] - a[0]).min(b[1] - b[0]);
+    // A region without width (a mark, a rule down the page) is in the flow it stands in.
+    if narrow <= 0.0 {
+        return shared >= 0.0;
+    }
+    shared >= FLOW_SHARE * narrow
+}
+
+/// Where the region of `members` reaches from and to across `page`: by its text runs, or by
+/// all it holds when it holds no text (the rules and boxes of a region with text may reach
+/// far past its text: a rule under a title, the frame of a table).
+fn across(page: &PageIn, members: &[PrimId]) -> Option<[f32; 2]> {
+    let texts: Vec<PrimId> = members
+        .iter()
+        .copied()
+        .filter(|p| matches!(p, PrimId::Text(_)))
+        .collect();
+    let of = if texts.is_empty() { members } else { &texts };
+    layoutregions::segment::bounds_of(page, of).map(|b| [b.x0, b.x1])
+}
+
+/// Why the order of two regions that do not stand over each other carries meaning. A bond
+/// holds between a region and the next typed region the page reads (see [`bond`]). Geometry
+/// alone cannot tell two columns of one text from two blocks of an address, or a label from
+/// a name, so each bond asks for a sign of its own; without one the order is free.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Bond {
+    /// The foot of a column of running text and the head of the next column of its set,
+    /// also when that head is a heading over the text of the column
+    /// ([`heads_next_column`]).
+    Column,
+    /// A heading and the block it stands left of, on the block's rows: a side heading in the
+    /// margin of a block that is as wide as it or wider.
+    Heading,
+    /// A label and its value on one row, or a column of labels and the column of their
+    /// values, row by row. Nothing may stand between the two.
+    Field,
+    /// A picture and the caption that stands beside it. Nothing may stand between the two.
+    Caption,
+    /// A sentence that runs from the end of one region into the start of the next. Nothing
+    /// may stand between the two.
+    Sentence,
+}
+
+/// Two columns are of one set when the narrower one has this share of the width of the
+/// other or more, and a line of running text is full when it reaches this share of the width
+/// of its region. Four fifths: the columns of a set are set to one width, and a column that
+/// holds only the short end of a paragraph, or a block of short lines (an address, a list of
+/// names), is no sign of a text that runs on.
+pub const COLUMN_SHARE: f32 = 0.8;
+
+/// A block stands on the rows of another when this share of its height, or more, lies within
+/// the height of the other; two lines are one row when their baselines are apart by less
+/// than this share of the smaller text size.
+pub const ROW_SHARE: f32 = 0.5;
+
+/// What the order check knows of a typed region of the page.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Stands {
+    pub kind: Kind,
+    /// From and to across the page (by its text, as [`one_flow`] takes it).
+    pub x: [f32; 2],
+    /// Bottom and top.
+    pub y: [f32; 2],
+    /// Its lines of text from the top: baseline, left and right end, text size.
+    pub lines: Vec<[f32; 4]>,
+    /// Its text, the lines from the top joined by spaces.
+    pub text: String,
+    /// Every line of it ends in a colon: a column of labels.
+    pub labels: bool,
+}
+
+impl Stands {
+    fn width(&self) -> f32 {
+        self.x[1] - self.x[0]
+    }
+
+    /// Running text in a column: three lines or more, and more than half of the lines over
+    /// the last one are full (see [`COLUMN_SHARE`]). Two lines over the last at least: the
+    /// widest line of a block is full by itself, so one line says nothing (every block of two
+    /// lines would be prose). A block of short lines that happen to be of one length still
+    /// reads as prose: a limit of the test.
+    fn prose(&self) -> bool {
+        let Some((_, over)) = self.lines.split_last() else {
+            return false;
+        };
+        let full = over
+            .iter()
+            .filter(|l| l[2] - l[1] >= COLUMN_SHARE * self.width())
+            .count();
+        over.len() >= 2 && 2 * full > over.len()
+    }
+
+    /// Two lines or more, the last one full (see [`COLUMN_SHARE`]): the text does not end
+    /// here, its line was broken because it was full.
+    fn ends_full(&self) -> bool {
+        self.lines.len() >= 2
+            && self
+                .lines
+                .last()
+                .is_some_and(|l| l[2] - l[1] >= COLUMN_SHARE * self.width())
+    }
+
+    fn running(&self) -> bool {
+        matches!(self.kind, Kind::Paragraph | Kind::List)
+    }
+
+    /// Whether `self` stands on the rows of `other` (see [`ROW_SHARE`]).
+    fn on_rows_of(&self, other: &Stands) -> bool {
+        let shared = self.y[1].min(other.y[1]) - self.y[0].max(other.y[0]);
+        let h = self.y[1] - self.y[0];
+        h > 0.0 && shared >= ROW_SHARE * h
+    }
+
+    /// Whether `self` and `other` hold the same count of lines and each line of one shares
+    /// its baseline with the line of the other (see [`ROW_SHARE`]).
+    fn row_by_row(&self, other: &Stands) -> bool {
+        !self.lines.is_empty()
+            && self.lines.len() == other.lines.len()
+            && self
+                .lines
+                .iter()
+                .zip(&other.lines)
+                .all(|(a, b)| (a[0] - b[0]).abs() < ROW_SHARE * a[3].min(b[3]))
+    }
+}
+
+/// What `members` of `page` are to the order check; none when none of them is on the page.
+pub fn stands(page: &PageIn, kind: Kind, members: &[PrimId]) -> Option<Stands> {
+    let x = across(page, members)?;
+    let all = layoutregions::segment::bounds_of(page, members)?;
+    let mut runs: Vec<&TextRun> = members
+        .iter()
+        .filter_map(|p| match *p {
+            PrimId::Text(i) => page.texts.get(i as usize),
+            _ => None,
+        })
+        .collect();
+    // From the top, and from the left within one baseline.
+    runs.sort_by(|a, b| b.y.total_cmp(&a.y).then(a.x.total_cmp(&b.x)));
+    let mut lines: Vec<[f32; 4]> = Vec::new();
+    let mut words: Vec<Vec<(f32, &str)>> = Vec::new();
+    for r in runs {
+        match (lines.last_mut(), words.last_mut()) {
+            (Some(l), Some(w)) if (l[0] - r.y).abs() < ROW_SHARE * l[3].min(r.size) => {
+                l[1] = l[1].min(r.x);
+                l[2] = l[2].max(r.x + r.w);
+                w.push((r.x, r.text.trim()));
+            }
+            _ => {
+                lines.push([r.y, r.x, r.x + r.w, r.size]);
+                words.push(vec![(r.x, r.text.trim())]);
+            }
+        }
+    }
+    for w in &mut words {
+        w.sort_by(|a, b| a.0.total_cmp(&b.0));
+        w.retain(|(_, t)| !t.is_empty());
+    }
+    let labels = !words.is_empty()
+        && words
+            .iter()
+            .all(|w| w.last().is_some_and(|(_, t)| t.ends_with(':')));
+    let text = words
+        .iter()
+        .flat_map(|w| w.iter().map(|(_, t)| *t))
+        .collect::<Vec<_>>()
+        .join(" ");
+    Some(Stands {
+        kind,
+        x,
+        y: [all.y0, all.y1],
+        lines,
+        text,
+        labels,
+    })
+}
+
+/// Whether `text` ends in the middle of a sentence: on a letter, a digit, a comma or a
+/// hyphen, not on a mark that ends a sentence or opens what follows.
+fn runs_on(text: &str) -> bool {
+    text.chars()
+        .next_back()
+        .is_some_and(|c| c.is_alphanumeric() || matches!(c, ',' | '-'))
+}
+
+/// Whether `text` goes on a sentence: it starts with a small letter.
+fn goes_on(text: &str) -> bool {
+    text.chars().next().is_some_and(char::is_lowercase)
+}
+
+/// The bond between `a` and `b`, which the page reads one right after the other (`a`
+/// first), or none: their order is free unless one stands over the other ([`one_flow`]).
+///
+/// - [`Bond::Sentence`]: both are running text, `a` has two lines or more and ends on a
+///   full line ([`COLUMN_SHARE`]) in the middle of a sentence, and `b` starts with a small
+///   letter. The full line is the sign that the text was broken there and runs on: a line of
+///   words alone (a head line, a label, an address) over text that starts small is no
+///   sentence. `b` stands where a text goes on: under `a` in its flow, or right of it and
+///   starting above its end (the head of the next column). A block to the left under `a`
+///   goes on nothing.
+///
+/// The others hold between regions side by side only (no flow):
+///
+/// - [`Bond::Column`]: both are running text, `a` is prose with full lines, `b` stands right
+///   of it at a like width ([`COLUMN_SHARE`]) and starts above the end of `a`. A next column
+///   that starts with a heading has its sign in the text under the heading, which this pair
+///   does not show: see [`heads_next_column`].
+/// - [`Bond::Heading`]: one is a heading that stands left of the other, on its rows, and the
+///   other is as wide as the heading or wider and is not typed a label/value or totals
+///   region (a side heading never heads a field beside a title). A side heading stands in
+///   the margin of the block it heads. A title beside a narrower block (a number box, a
+///   date) heads nothing there: the two are a free pair.
+/// - [`Bond::Field`]: the two hold their lines row by row, and a sign says that the left one
+///   is a label: one of them is typed a label/value or totals region and neither is a
+///   heading (a title beside a number field is a free pair), or every line of the left one
+///   ends in a colon. The right one is never a heading: a title is no value of a label, as
+///   in the tag truth. Bands (the columns of a footer) never bond.
+/// - [`Bond::Caption`]: one is a figure, the other running text that opens as a caption
+///   does and stands on the rows of the figure.
+pub fn bond(a: &Stands, b: &Stands) -> Option<Bond> {
+    // Where a text goes on: under its end in the same flow, or at the head of a column to
+    // the right, which starts above that end.
+    let under = one_flow(a.x, b.x) && b.y[1] <= a.y[1];
+    let next_column = !one_flow(a.x, b.x) && b.x[0] > a.x[0] && b.y[1] > a.y[0];
+    if a.running()
+        && b.running()
+        && (under || next_column)
+        && a.ends_full()
+        && runs_on(&a.text)
+        && goes_on(&b.text)
+    {
+        return Some(Bond::Sentence);
+    }
+    if one_flow(a.x, b.x) {
+        return None;
+    }
+    let (left, right) = if a.x[0] <= b.x[0] { (a, b) } else { (b, a) };
+    let band = |s: &Stands| matches!(s.kind, Kind::HeaderBand | Kind::FooterBand);
+    if band(a) || band(b) {
+        return None;
+    }
+    let field = |s: &Stands| matches!(s.kind, Kind::LabelValue | Kind::Totals);
+    if left.kind == Kind::Heading
+        && right.kind != Kind::Heading
+        && !field(right)
+        && left.on_rows_of(right)
+        && right.width() >= left.width()
+    {
+        return Some(Bond::Heading);
+    }
+    let (figure, other) = if a.kind == Kind::Figure {
+        (a, b)
+    } else {
+        (b, a)
+    };
+    if figure.kind == Kind::Figure
+        && other.running()
+        && other.on_rows_of(figure)
+        && layoutregions::extract::table::caption::caption(&other.text).is_some()
+    {
+        return Some(Bond::Caption);
+    }
+    // A title is never the value of a field, by no sign, and it is no label of the field it
+    // stands beside by the type alone: only its own colon makes it a label.
+    let typed = left.kind != Kind::Heading && (field(a) || field(b));
+    if left.row_by_row(right) && right.kind != Kind::Heading && (typed || left.labels) {
+        return Some(Bond::Field);
+    }
+    let alike = a.width().min(b.width()) >= COLUMN_SHARE * a.width().max(b.width());
+    if a.running() && b.running() && std::ptr::eq(left, a) && a.prose() && alike && b.y[1] > a.y[0]
+    {
+        return Some(Bond::Column);
+    }
+    None
+}
+
+/// Whether the heading `head`, which the page reads right after `a`, opens the next column
+/// of the column set of `a`: a [`Bond::Column`] between `a` and `head`. `under` is the next
+/// region the page reads in the flow of `head`.
+///
+/// The heading opens the next part of the text that `a` ends in its column. A heading is
+/// neither running text nor of the width of a column, so the sign of the set is taken from
+/// the text it heads: `a` is prose with full lines, `under` is running text that starts
+/// under the top of `head`, right of `a` and at a like width ([`COLUMN_SHARE`]), and `head`
+/// stands right of `a` and starts above its end. A heading over a block of short lines, or
+/// over a table, is no sign of a column.
+pub fn heads_next_column(a: &Stands, head: &Stands, under: &Stands) -> bool {
+    let beside = |s: &Stands| !one_flow(a.x, s.x) && s.x[0] > a.x[0];
+    let alike = a.width().min(under.width()) >= COLUMN_SHARE * a.width().max(under.width());
+    head.kind == Kind::Heading
+        && a.running()
+        && a.prose()
+        && under.running()
+        && beside(head)
+        && beside(under)
+        && one_flow(head.x, under.x)
+        && under.y[1] <= head.y[1]
+        && alike
+        && head.y[1] > a.y[0]
 }
 
 /// A typed decision: its place among the decisions, its kind, its primitives (of the page)
@@ -831,15 +1160,76 @@ pub fn compare(
             v.to_spatial.push((x.kind, label(page, x.kind, &x.members)));
         }
     }
-    // The typed regions read the same keep their order.
+    // The typed regions read the same keep their order where it carries meaning: between two
+    // regions of one flow (see [`one_flow`]), and between a region and the next one the page
+    // reads when a bond holds them (see [`bond`]). The order of every other two blocks that
+    // stand side by side is free.
+    let places: HashMap<usize, Stands> = b
+        .iter()
+        .filter_map(|x| stands(page, x.kind, &x.members).map(|s| (x.at, s)))
+        .collect();
+    let flow = |x: usize, y: usize| match (places.get(&x), places.get(&y)) {
+        (Some(p), Some(q)) => one_flow(p.x, q.x),
+        // A region without a place on the page: its order counts, as before.
+        _ => true,
+    };
     matched.sort_by_key(|&(_, cn)| cn);
-    if let Some(w) = matched.windows(2).find(|w| w[0].0 > w[1].0) {
-        let moved = b.iter().find(|x| x.at == w[1].0);
+    let mut moved = matched.iter().enumerate().find_map(|(j, &(late, _))| {
+        matched[..j]
+            .iter()
+            .any(|&(early, _)| early > late && flow(early, late))
+            .then_some(late)
+    });
+    // The bond that was broken, and the region it held the moved one to.
+    let mut why: Option<(Bond, usize)> = None;
+    if moved.is_none() {
+        // Where each region of the page that is read the same stands among the typed
+        // regions of the changed page.
+        let now: HashMap<usize, usize> = matched
+            .iter()
+            .filter_map(|&(at, cn)| c.iter().position(|t| t.at == cn).map(|k| (at, k)))
+            .collect();
+        moved = b.windows(2).enumerate().find_map(|(k, w)| {
+            let (first, next) = (w[0].at, w[1].at);
+            let (p, q) = (places.get(&first)?, places.get(&next)?);
+            let held = bond(p, q).or_else(|| {
+                // A heading at the head of the next column: the sign is in the next region
+                // the page reads in the flow of the heading.
+                let under = b[k + 2..]
+                    .iter()
+                    .filter_map(|x| places.get(&x.at))
+                    .find(|s| one_flow(q.x, s.x))?;
+                heads_next_column(p, q, under).then_some(Bond::Column)
+            })?;
+            let (i, j) = (*now.get(&first)?, *now.get(&next)?);
+            // A sentence, a label with its value and a picture with its caption are read
+            // one right after the other: a region read between the two parts them, also
+            // when each keeps its side.
+            let apart = matches!(held, Bond::Sentence | Bond::Field | Bond::Caption) && j != i + 1;
+            (j < i || apart).then(|| {
+                why = Some((held, first));
+                next
+            })
+        });
+    }
+    if let Some(at) = moved {
+        let moved = b.iter().find(|x| x.at == at);
         v.broken.push(Broken {
             what: Break::Order,
             kinds: moved.map(|x| vec![x.kind]).unwrap_or_default(),
             detail: moved.map_or_else(String::new, |x| {
-                format!("{} moved", label(page, x.kind, &x.members))
+                let held = why.and_then(|(bond, to)| {
+                    let to = b.iter().find(|y| y.at == to)?;
+                    Some(format!(
+                        " [{bond:?} with {}]",
+                        label(page, to.kind, &to.members)
+                    ))
+                });
+                format!(
+                    "{} moved{}",
+                    label(page, x.kind, &x.members),
+                    held.unwrap_or_default()
+                )
             }),
         });
     }

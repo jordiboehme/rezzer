@@ -21,6 +21,8 @@
 //! segment's path to the root, and asks whether every line of the segment holds an amount
 //! under a money column of that table.
 
+use std::collections::HashMap;
+
 use crate::extract::pairs::blocks::{
     Columns, KeyValues, address_block, address_columns, blocks_of, key_values, postal,
 };
@@ -281,14 +283,100 @@ fn content_against(view: &PageView<'_>, seg: &Segment) -> Option<&'static str> {
     })
 }
 
-/// The group of `g` whose frame is `b` (within [`SNAP`]).
-pub(crate) fn group_at<'g>(g: &'g Grids, b: &Bounds) -> Option<&'g (Vec<usize>, Vec<usize>)> {
-    let near = |a: f32, c: f32| (a - c).abs() <= SNAP;
-    g.groups.iter().find(|grp| {
-        grid_frame(g, grp).is_some_and(|(f, _, _)| {
-            near(f.x0, b.x0) && near(f.x1, b.x1) && near(f.y0, b.y0) && near(f.y1, b.y1)
-        })
-    })
+/// The frames of a page's groups of lines ([`grid_frame`]), by the place of their lower left
+/// corner in squares of [`SNAP`]: the group at a segment's frame is found by a look at the
+/// squares around the segment's corner, not by a walk of every group. A page of many small
+/// grids asks once or more for each of them.
+#[derive(Debug, Default)]
+pub(crate) struct Frames {
+    /// The frame of each group that has one, with the group's number, by square. The groups
+    /// of a square are in the order of the page's groups.
+    at: HashMap<(i64, i64), Vec<(Bounds, u32)>>,
+}
+
+impl Frames {
+    /// The square of a place along one axis. Two places that are near as the looks ask it
+    /// (their difference in `f32` is at most [`SNAP`]) are at most two squares apart: the
+    /// difference is rounded, so the places may be up to half a step of `f32` at `SNAP` more
+    /// than a snap apart (4.0 and the number just under 2.0, 2.0 and -1e-8), which is more
+    /// than one square and less than two. Halving and rounding down are exact, and a place
+    /// too far out for the number of a square shares the last square with every place past
+    /// it.
+    fn square(at: f32) -> i64 {
+        (at / SNAP).floor() as i64
+    }
+
+    /// The frames of the groups of `g`. A frame with a corner that is no number is near no
+    /// segment and is left out.
+    pub(crate) fn of(g: &Grids) -> Frames {
+        let mut at: HashMap<(i64, i64), Vec<(Bounds, u32)>> = HashMap::new();
+        for (n, grp) in g.groups.iter().enumerate() {
+            crate::work::add((grp.0.len() + grp.1.len()) as u64);
+            let Some((f, _, _)) = grid_frame(g, grp) else {
+                continue;
+            };
+            if f.x0.is_nan() || f.y0.is_nan() {
+                continue;
+            }
+            at.entry((Frames::square(f.x0), Frames::square(f.y0)))
+                .or_default()
+                .push((f, n as u32));
+        }
+        Frames { at }
+    }
+
+    /// The first group of `g`, in the order of its groups, whose frame is `b` (within
+    /// [`SNAP`] at each edge): what a walk of all groups finds, in work about the frames near
+    /// the corner of `b`.
+    pub(crate) fn group_at<'g>(
+        &self,
+        g: &'g Grids,
+        b: &Bounds,
+    ) -> Option<&'g (Vec<usize>, Vec<usize>)> {
+        let near = |a: f32, c: f32| (a - c).abs() <= SNAP;
+        if b.x0.is_nan() || b.y0.is_nan() {
+            return None;
+        }
+        let (sx, sy) = (Frames::square(b.x0), Frames::square(b.y0));
+        let mut first: Option<u32> = None;
+        // Two squares on each side (see [`Frames::square`]), each looked at once, also where
+        // the last square has no neighbour.
+        let around = |s: i64| {
+            let mut squares: Vec<i64> = (-2..=2).map(|d: i64| s.saturating_add(d)).collect();
+            squares.dedup();
+            squares
+        };
+        for x in around(sx) {
+            for y in around(sy) {
+                crate::work::add(1);
+                let Some(frames) = self.at.get(&(x, y)) else {
+                    continue;
+                };
+                for (f, n) in frames {
+                    crate::work::add(1);
+                    if first.is_some_and(|m| m <= *n) {
+                        break;
+                    }
+                    if near(f.x0, b.x0) && near(f.x1, b.x1) && near(f.y0, b.y0) && near(f.y1, b.y1)
+                    {
+                        first = Some(*n);
+                        break;
+                    }
+                }
+            }
+        }
+        first.map(|n| &g.groups[n as usize])
+    }
+}
+
+/// The group of the page's grids `g` whose frame is `b` (within [`SNAP`]), by the view's
+/// index of the frames.
+pub(crate) fn group_at<'g>(
+    view: &PageView<'_>,
+    g: &'g Grids,
+    b: &Bounds,
+) -> Option<&'g (Vec<usize>, Vec<usize>)> {
+    view.frames(g).group_at(g, b)
 }
 
 /// The lines of the group `grp` of `g`: horizontal and vertical.
@@ -328,7 +416,7 @@ fn ruled(view: &PageView<'_>, seg: &Segment) -> Find {
     let Ok(g) = &view.drawn.grids else {
         return Find::Nothing;
     };
-    let Some(grp) = group_at(g, &seg.bounds) else {
+    let Some(grp) = group_at(view, g, &seg.bounds) else {
         return Find::Nothing;
     };
     let (h, v) = group_lines(g, grp);
@@ -630,7 +718,7 @@ fn banded(view: &PageView<'_>, seg: &Segment, band: &Segment) -> Find {
     let Ok(g) = &view.drawn.grids else {
         return Find::Nothing;
     };
-    let Some(grp) = group_at(g, &band.bounds) else {
+    let Some(grp) = group_at(view, g, &band.bounds) else {
         return Find::Nothing;
     };
     let (h, v) = group_lines(g, grp);
@@ -1298,6 +1386,224 @@ fn lone_pair_of(mut runs: Vec<&crate::input::TextRun>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The group at a frame as it was found before the index: a walk of every group, each
+    /// with its frame built, counted as the lines read. The index must find the same group.
+    fn walked<'g>(g: &'g Grids, b: &Bounds) -> Option<&'g (Vec<usize>, Vec<usize>)> {
+        let near = |a: f32, c: f32| (a - c).abs() <= SNAP;
+        g.groups.iter().find(|grp| {
+            crate::work::add((grp.0.len() + grp.1.len()) as u64);
+            grid_frame(g, grp).is_some_and(|(f, _, _)| {
+                near(f.x0, b.x0) && near(f.x1, b.x1) && near(f.y0, b.y0) && near(f.y1, b.y1)
+            })
+        })
+    }
+
+    /// The lines of a grid of two by two cells of `cell` points with its lower left corner
+    /// at (`x`, `y`), as one more group of `g`.
+    fn add_grid(g: &mut Grids, x: f32, y: f32, cell: f32) {
+        let (h0, v0) = (g.hs.len(), g.vs.len());
+        for i in 0..3 {
+            let d = cell * i as f32;
+            g.hs.push(Line {
+                at: y + d,
+                from: x,
+                to: x + 2.0 * cell,
+            });
+            g.vs.push(Line {
+                at: x + d,
+                from: y,
+                to: y + 2.0 * cell,
+            });
+        }
+        g.groups
+            .push(((h0..h0 + 3).collect(), (v0..v0 + 3).collect()));
+    }
+
+    /// The steps of work `f` takes; `None` in a release build, which does not count them.
+    fn steps(f: impl FnOnce()) -> Option<u64> {
+        let before = crate::work_steps();
+        f();
+        before.zip(crate::work_steps()).map(|(b, a)| a - b)
+    }
+
+    /// Fix round 1 of part 2b-2 of Task 31c (I1): the group of lines at a segment's frame is
+    /// one look in an index of the frames, so a row of small grids finds its groups in work
+    /// about their number (32 steps a grid: 8,000 for 250 grids, 16,000 for 500, 32,000 for
+    /// 1,000). Before, each look walked every group and built its frame, the number of the
+    /// grids squared (751,500 lines read for 500 grids and 3,003,000 for 1,000).
+    #[test]
+    fn small_grids_side_by_side_find_their_groups_in_work_about_their_number() {
+        let row = |n: usize| {
+            let mut g = Grids::default();
+            for k in 0..n {
+                add_grid(&mut g, 20.0 + 16.0 * k as f32, 400.0, 6.0);
+            }
+            let frames: Vec<Bounds> = g
+                .groups
+                .iter()
+                .map(|grp| grid_frame(&g, grp).expect("a grid").0)
+                .collect();
+            (g, frames)
+        };
+        let work = |n: usize, index: bool| {
+            let (g, frames) = row(n);
+            steps(|| {
+                let ix = index.then(|| Frames::of(&g));
+                for (k, b) in frames.iter().enumerate() {
+                    let found = match &ix {
+                        Some(ix) => ix.group_at(&g, b),
+                        None => walked(&g, b),
+                    };
+                    assert!(found.is_some_and(|f| std::ptr::eq(f, &g.groups[k])));
+                }
+            })
+        };
+        let (Some(small), Some(middle), Some(large)) =
+            (work(250, true), work(500, true), work(1_000, true))
+        else {
+            // A release build does not count work.
+            return;
+        };
+        assert!(
+            middle * 10 < 22 * small && large * 10 < 22 * middle,
+            "{small} steps for 250, {middle} for 500, {large} for 1,000"
+        );
+        // The walk it replaces, counted the same way, is what the bound is for.
+        let (old_middle, old_large) = (work(500, false).unwrap(), work(1_000, false).unwrap());
+        assert!(
+            old_large * 10 > 39 * old_middle && old_large > 50 * large,
+            "{old_middle} steps for 500, {old_large} for 1,000 by the walk"
+        );
+    }
+
+    /// The same numbers on every run (xorshift64*).
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 >> 12;
+            self.0 ^= self.0 << 25;
+            self.0 ^= self.0 >> 27;
+            self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        }
+
+        fn below(&mut self, n: u64) -> u64 {
+            self.next() % n
+        }
+
+        fn pick(&mut self, of: &[f32]) -> f32 {
+            of[self.below(of.len() as u64) as usize]
+        }
+    }
+
+    /// The index finds the group the walk finds, for every frame and for frames moved by
+    /// less than, exactly and more than a snap: grids on a lattice of one point (frames that
+    /// share a corner square, frames within a snap of each other, equal frames, so that the
+    /// first of them in the order of the groups is the answer), frames far off the page,
+    /// frames at places with no number and without an end.
+    #[test]
+    fn the_frame_index_finds_the_group_the_walk_finds() {
+        let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+        let odd = [
+            f32::NAN,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            1e20,
+            -1e20,
+            3e38,
+            -3e38,
+            16_777_216.0,
+        ];
+        // The difference of two places rounds to a snap though they are more than a snap, and
+        // more than one square, apart (fix round 2, R1): the walk says near, so the index
+        // must look two squares away.
+        for (frame, asked) in [
+            (4.0, 2.0f32.next_down()),
+            (2.0, -1e-8),
+            (2.0, -6e-8),
+            (2.0f32.next_down(), 4.0),
+            (-1e-8, 2.0),
+        ] {
+            assert_eq!((frame - asked).abs(), SNAP, "{frame} {asked}");
+            assert!((Frames::square(frame) - Frames::square(asked)).abs() == 2);
+            for along_x in [true, false] {
+                let (fx, fy, ax, ay) = if along_x {
+                    (frame, 40.0, asked, 40.0)
+                } else {
+                    (40.0, frame, 40.0, asked)
+                };
+                let mut g = Grids::default();
+                add_grid(&mut g, fx, fy, 8.0);
+                let b = Bounds {
+                    x0: ax,
+                    y0: ay,
+                    x1: fx + 16.0,
+                    y1: fy + 16.0,
+                };
+                let want = walked(&g, &b);
+                assert!(want.is_some(), "{frame} {asked}");
+                assert_eq!(
+                    want.map(std::ptr::from_ref),
+                    Frames::of(&g).group_at(&g, &b).map(std::ptr::from_ref),
+                    "{frame} {asked}"
+                );
+            }
+        }
+        // A place a little more than a snap away is near for neither.
+        let mut g = Grids::default();
+        add_grid(&mut g, 6.0, 40.0, 8.0);
+        let b = Bounds {
+            x0: 3.999_999_5,
+            y0: 40.0,
+            x1: 22.0,
+            y1: 56.0,
+        };
+        assert!(walked(&g, &b).is_none() && Frames::of(&g).group_at(&g, &b).is_none());
+        let (mut asked, mut found) = (0, 0);
+        for round in 0..400 {
+            let mut g = Grids::default();
+            for _ in 0..1 + rng.below(12) {
+                let far = round % 8 == 7 && rng.below(3) == 0;
+                let x = if far {
+                    rng.pick(&odd)
+                } else {
+                    rng.below(12) as f32
+                };
+                let y = if far && rng.below(2) == 0 {
+                    rng.pick(&odd)
+                } else {
+                    rng.below(12) as f32
+                };
+                add_grid(&mut g, x, y, 1.0 + rng.below(4) as f32);
+            }
+            let ix = Frames::of(&g);
+            for grp in &g.groups {
+                let Some((f, _, _)) = grid_frame(&g, grp) else {
+                    continue;
+                };
+                for _ in 0..6 {
+                    let by = [0.0, 0.0, 1.0, -1.0, 2.0, -2.0, 2.5, -2.5, 4.0];
+                    let b = Bounds {
+                        x0: f.x0 + rng.pick(&by),
+                        y0: f.y0 + rng.pick(&by),
+                        x1: f.x1 + rng.pick(&by),
+                        y1: f.y1 + rng.pick(&by),
+                    };
+                    let (want, got) = (walked(&g, &b), ix.group_at(&g, &b));
+                    assert_eq!(
+                        want.map(std::ptr::from_ref),
+                        got.map(std::ptr::from_ref),
+                        "round {round}, {b:?} in {g:?}"
+                    );
+                    asked += 1;
+                    found += usize::from(got.is_some());
+                }
+            }
+        }
+        // The test asks at frames that are found and at frames that are not.
+        assert!(found * 8 > asked && found < asked, "{found} of {asked}");
+    }
 
     /// A run of 11 points on line `line`.
     fn run_on(text: &str, x: f32, w: f32, line: u32) -> crate::input::TextRun {

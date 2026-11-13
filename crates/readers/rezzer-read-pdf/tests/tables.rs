@@ -761,6 +761,54 @@ fn ruled_page(rows: &[[&str; 3]]) -> Vec<u8> {
     pdf(&[Page::text(c)], "")
 }
 
+/// A page of nine ruled tables, three across and three down, of two columns each: the tables
+/// of a row start at one height and end at three.
+fn page_of_ruled_tables() -> Vec<u8> {
+    let words = [
+        "Fruit", "Count", "Apples", "3", "Pears", "12", "Plums", "7", "Figs", "9",
+    ];
+    let mut c = show("F1", 10.0, 40.0, 780.0, "A paragraph before the tables.");
+    c += "0.5 w ";
+    for t in 0..9usize {
+        let (left, top) = (
+            40.0 + 180.0 * (t % 3) as f32,
+            740.0 - 230.0 * (t / 3) as f32,
+        );
+        let rows = 3 + (t + t / 3) % 3;
+        let bottom = top - 30.0 * rows as f32;
+        for k in 0..=rows {
+            let y = top - 30.0 * k as f32;
+            c += &format!("{left} {y} m {} {y} l S ", left + 150.0);
+        }
+        for k in 0..=2 {
+            let x = left + 75.0 * k as f32;
+            c += &format!("{x} {top} m {x} {bottom} l S ");
+        }
+        for r in 0..rows {
+            for k in 0..2 {
+                let (x, y) = (left + 6.0 + 75.0 * k as f32, top - 30.0 * r as f32 - 20.0);
+                c += &show("F1", 10.0, x, y, words[(2 * r + k + t) % words.len()]);
+            }
+        }
+    }
+    pdf(&[Page::text(c)], "")
+}
+
+/// Two reads of one file are the same, byte for byte: the model JSON too, with the regions
+/// of the document in one order (which the Markdown does not show). The grids of a page were
+/// taken from a map in its own order, which differs from one read to the next, and the
+/// regions of tables side by side followed it.
+#[test]
+fn two_reads_of_one_file_give_the_same_json() {
+    let bytes = page_of_ruled_tables();
+    let json = || serde_json::to_string(&read(&bytes).document).unwrap();
+    let first = json();
+    assert_eq!(first.matches("\"kind\":\"table\"").count(), 9, "{first}");
+    for _ in 0..7 {
+        assert!(json() == first, "two reads of one page differ");
+    }
+}
+
 #[test]
 fn ruled_table_grid() {
     let out = read(&ruled_page(&[

@@ -22,15 +22,15 @@ pub(crate) enum Cause {
     BandOrder,
     /// A carry of task-15b-carry.md (part 6).
     Carry,
-    /// Found by the generator and not in the scope of a part yet: the controller plans it.
-    New,
     /// A right read the engine keeps as laid out, or keeps so at one scale and not at another
     /// (Task 19 brief step 4, cosmetic): every text stands once and in order; Task 36 wins it
     /// back.
     Spatial,
     /// A class of break whose general fix a later task owns, named here (Task 20): the
     /// region kinds of a generated page, held since Task 20, that the task of step 5 named
-    /// (for example `"Task 26"`) is to bring right.
+    /// (for example `"Task 26"`) is to bring right. `"after 0.1.0"` names the breaks that
+    /// are kept past the release, each with its traced cause in its reason (Task 31c: the
+    /// breaks the generator found that no part of plan 6 had in its scope).
     Class(&'static str),
 }
 
@@ -168,6 +168,62 @@ pub(crate) const KNOWN: &[Known] = &[
         why: "in the larger face the long lines of the paragraph reach over most rows of the block of lines on the right, so they stand across the gutter and the block reads before the paragraph; at scale 1 and in every smaller or narrower face (nine variants pinned before fix round 3 of Task 31b, released by it) they end before the block or run past the start of a row or two of it, and the block reads after the paragraph: the order of two columns. The table reads right in every variant. The order of blocks that do not depend on each other is free (ruling of 2026-11-12), so this is measured, not owed",
     },
     Known {
+        shape: "item rows under a rule in pieces and a row carried over, on a page with a block of lines on the right",
+        variants: &[
+            "larger text",
+            "larger text, proportional",
+            "scale 1.5, larger text",
+            "scale 1.5, larger text, proportional",
+            "scale 1.5, larger text, proportional, dotted, turned 90, title over, two pages",
+            "scale 1.5, larger text, proportional, thick, turned 270, line over, two pages",
+            "scale 1.5, larger text, proportional, dotted, turned 270, row under, two pages",
+        ],
+        broken: &[Inv::SameReading],
+        cause: Cause::Class("Task 26"),
+        why: "Task 31c part 2b (S3): the rows under the rule in pieces are read whole in every variant, each count and price in the row of its item, with no header asked for over the rule. At scale 1 the row carried over stands over the rule apart from the rows, and its label and its amount are two paragraphs one after the other (a label and value group, Task 26). In the larger face the page has no gutter (the cut finds none in the whole page) and the carried row is the first row of the table, its label and its amount in their columns. Every text stands once, each value in its row, the amount right after its label in both reads. This break is not new with the change: before it the base variant itself was broken (the counts and prices read after all items, 20 variants pinned by their order), so no variant was compared with it and the difference of the larger face was hidden under that wrong read. Accepted after part 2b-1 like the three `rule-as-box` pin lines of this shape; owner Task 26",
+    },
+    Known {
+        shape: "two fields of a label over a rule left of a ruled table with empty rows and the rule of a third field",
+        variants: &[
+            "base",
+            "larger text",
+            "larger text, proportional",
+            "proportional",
+            "scale 0.7",
+            "scale 0.7, larger text",
+            "scale 0.7, larger text, proportional",
+            "scale 0.7, larger text, proportional, turned 270, two pages",
+            "scale 0.7, larger text, proportional, turned 90, two pages",
+            "scale 0.7, proportional",
+            "scale 0.7, smaller text",
+            "scale 0.7, smaller text, proportional",
+            "scale 0.75",
+            "scale 0.75, larger text",
+            "scale 0.75, larger text, proportional",
+            "scale 0.75, proportional",
+            "scale 0.75, smaller text",
+            "scale 0.75, smaller text, proportional",
+            "scale 0.75, smaller text, turned 270",
+            "scale 0.75, smaller text, turned 90, two pages",
+            "scale 1.5",
+            "scale 1.5, larger text",
+            "scale 1.5, larger text, proportional",
+            "scale 1.5, proportional",
+            "scale 1.5, smaller text",
+            "scale 1.5, smaller text, proportional",
+            "scale 1.5, turned 270",
+            "scale 1.5, turned 90, two pages",
+            "smaller text",
+            "smaller text, proportional",
+            "turned 270",
+            "turned 90",
+            "two pages",
+        ],
+        broken: &[Inv::Cells],
+        cause: Cause::Class("Task 26"),
+        why: "P6-X, a risk of a wrong pair that is not accepted and is pinned until its task: class K of Task 31c mirrored, a known limit (review 1 of Task 31c, M3 and its ruling). The fields stand left of the table, so the first label comes first on the line of the header cells, and the read is `Checked by Part of the frame Count Note` with the value `A/B` on the next line. Every text stands once and each label before its value; the header cells stand between the first label and its value. The rule of class K (`layoutregions::part_lines`) cuts a line before a block of several lines and moves nothing. Here the block starts the line: a cut after the label leaves the header cells between the label and its value all the same, and to move the cells before the label needs evidence that the label and the line under it are a field. Without it a label of two lines left of a boxed value looks the same, and its value would be read before its label. That evidence is the label and value group of Task 26",
+    },
+    Known {
         shape: "item rows with a picture in the description column",
         variants: &["larger text", "scale 1.5, larger text"],
         broken: &[Inv::Table, Inv::SameReading],
@@ -293,15 +349,15 @@ pub(crate) const KNOWN: &[Known] = &[
         shape: "address columns in the body",
         variants: &["scale 0.75, smaller text, row under"],
         broken: &[Inv::Table, Inv::SameReading],
-        cause: Cause::New,
-        why: "the blocks are read one after the other, but here the reading order parts the first two blocks from the others and the `Wert` column of the `row under` neighbour from its table: that column is read apart and a loss says so; at scale 1 the order keeps the neighbour's table whole",
+        cause: Cause::Class("after 0.1.0"),
+        why: "Task 31c part 2b-2, traced with trace_shape and REZZER_DEBUG_CUT: at this size the white space between the second and the third address block lines up with the white space between the `Vorgang` and the `Wert` column of the `row under` neighbour, so the page has one gutter of blocks whose lines do not line up (the cut's `Why::Offset`: 3 of the 7 lines of the right side meet a line of the left side, fewer than half) and the `Wert` column goes to the right side with the last two address blocks; it is read apart from its table and a loss says so (a named loss, no wrong pair). A rule that reads a block of rows lining up across such a gutter alone was measured and dropped: nothing in the layout tells these rows from a side heading beside form lines (it broke `a_side_heading_beside_form_lines_between_rules_is_no_item_rows` and two more tests of that class). At scale 1 the `Wert` column stands across the gutter and the table is whole",
     },
     Known {
         shape: "label block and bank row",
         variants: &["scale 0.75, smaller text, proportional, dashed, turned 90, beside"],
         broken: &[Inv::SameReading],
-        cause: Cause::New,
-        why: "the block beside is read into the same table, and its pairs stand at another place in the order than at scale 1 in the real fonts",
+        cause: Cause::Class("after 0.1.0"),
+        why: "Task 31c part 2b-2, traced with trace_shape: the fields of the block and of the block beside it are two label/value regions with the same pairs at both scales; what differs is the place of the address under them, read before the block beside at scale 1 and after it here. The address and the block beside are independent blocks, so their order is free (ruling of 2026-11-12) and no value, pair or cell moves. `Inv::SameReading` still compares the order of all blocks of a page; the pin goes when that check counts order only where it carries meaning, as the metamorphic check does",
     },
     Known {
         shape: "label block and bank row",
@@ -312,8 +368,8 @@ pub(crate) const KNOWN: &[Known] = &[
             "scale 0.75, smaller text, proportional, dashed, row under",
         ],
         broken: &[Inv::ClearPairs],
-        cause: Cause::New,
-        why: "a row of column titles under the bank row makes the block a grid of labels under their values to the reader, which refuses it with a loss that names its fields: a loss where the fields are clear, never a wrong pair; its text is read cell by cell, each label with the value beside it",
+        cause: Cause::Class("after 0.1.0"),
+        why: "Task 31c part 2b-2, traced with trace_shape: the reader's finder for rows of fields between rules (signal `pdf.ruled.refused`) takes the row of column titles of the `row under` neighbour, right under the bank row, as one more row of the block, sees labels under their values and refuses the whole block with a loss that names its fields: a loss where the fields are clear, never a wrong pair; its text is read cell by cell, each label with the value beside it. Where a block of fields ends is a question of label/value groups as a class, which the engine takes over from this finder",
     },
     Known {
         shape: "letter head",
@@ -325,8 +381,8 @@ pub(crate) const KNOWN: &[Known] = &[
             "scale 1.5, turned 90, row under, two pages",
         ],
         broken: &[Inv::Role],
-        cause: Cause::New,
-        why: "a footnote legend at the foot of both pages of a file of two pages is taken as a running footer (Task 13 furniture), so the star's footnote is not read as one; the legend's text stays, as furniture",
+        cause: Cause::Class("after 0.1.0"),
+        why: "Task 31c part 2b-2, traced in `file::learn`: the footnote legend of a page is looked for among its lines without the running headers and footers, and a line at the foot of both pages of a file of two pages is a footer (a letter of two pages has no third page to repeat it on), so the legend that this variant repeats on both pages is taken out before the legend is looked for and the star's footnote is not read as one; the legend's text stays, as furniture. A legend whose mark stands after a word of its own page could stay a legend; that changes which lines the two-page rule and the page view take as furniture and needs its own measure",
     },
     Known {
         shape: "letter head with a larger name",
@@ -367,8 +423,8 @@ pub(crate) const KNOWN: &[Known] = &[
             "scale 1.5, line over",
         ],
         broken: &[Inv::Heading, Inv::Paragraph],
-        cause: Cause::New,
-        why: "a recipient's name in bold one size step over its two address lines is a heading: Task 7 keeps an address of three lines in one size out of the headings, but a name larger than its lines opens no address (controller ruling: the name opens the address block, one paragraph, no heading)",
+        cause: Cause::Class("Task 36a"),
+        why: "Task 31c part 2b-2, traced with trace_shape: the style step parts the name (10 pt bold) from its two address lines (8 pt), and the name alone in its leaf is typed a heading (heading.size_ratio, heading.bold_lead, heading.title_lines); the address test of the walk (`Demotion::Address`) sees lines of one size in one leaf only, so it is never asked of the name with its lines. Wanted (controller ruling): the name opens the address block, one paragraph, no heading. The evidence is there (`blocks::address_block` over the name and its lines), but it has to be asked across the style step before the leaves are typed. Owner: Task 36a, before 0.1.0 (controller ruling: a wrong heading on a real kind of letter)",
     },
     Known {
         shape: "letter head with a larger name",
@@ -380,8 +436,8 @@ pub(crate) const KNOWN: &[Known] = &[
             "scale 1.5, turned 90, row under, two pages",
         ],
         broken: &[Inv::Heading, Inv::Role, Inv::Paragraph],
-        cause: Cause::New,
-        why: "a recipient's name in bold one size step over its two address lines is a heading: Task 7 keeps an address of three lines in one size out of the headings, but a name larger than its lines opens no address (controller ruling: the name opens the address block, one paragraph, no heading); with two pages the footnote legend is furniture as in `letter head`",
+        cause: Cause::Class("Task 36a"),
+        why: "Task 31c part 2b-2: the name alone in its leaf after the style step is typed a heading, as in the entry before this one (wanted: the name opens the address block, one paragraph, no heading); with two pages the footnote legend is furniture as in `letter head` (that part stays after 0.1.0). Owner of the heading: Task 36a, before 0.1.0",
     },
     Known {
         shape: "letter head with the date beside the name",
@@ -488,8 +544,8 @@ pub(crate) const KNOWN: &[Known] = &[
             "scale 0.75, smaller text, row under",
         ],
         broken: &[Inv::Table],
-        cause: Cause::New,
-        why: "the table of three columns of the `row under` neighbour is read with two columns, `Kennung` and `Vorgang`: its third column `Wert` stands under the field list, so the reading order puts it in the field list's column and it is read apart as a paragraph after the field list; a loss says that a column beside the table on the baselines of its rows is read apart from it",
+        cause: Cause::Class("after 0.1.0"),
+        why: "Task 31c part 2b-2, traced with trace_shape and REZZER_DEBUG_CUT: the gutter between the title and the field list (the cut's `Why::Offset`: the lines of the two blocks do not line up) runs on down the page through the white space between the `Vorgang` and the `Wert` column of the `row under` neighbour, so the `Wert` column goes to the right side with the field list: the table is read with two columns and its third column apart, after the field list; a loss says that a column beside the table on the baselines of its rows is read apart from it (a named loss, no wrong pair). The same cause as the pin of `address columns in the body`, and the same rule was measured and dropped there",
     },
     Known {
         shape: "a column flowing past a framed figure",
@@ -530,7 +586,7 @@ pub(crate) const KNOWN: &[Known] = &[
         ],
         broken: &[Inv::Order],
         cause: Cause::BandOrder,
-        why: "part 4: the page is read in bands at the frame (left above, right above, left under), so the hyphenated `Liefe-` of the left column is not followed by its `rung` under the frame",
+        why: "part 4: the page is read in bands at the frame (left above, right above, left under), so the hyphenated `Liefe-` of the left column is not followed by its `rung` under the frame. Traced again in part 2b-1 of Task 31c (`REZZER_DEBUG_CUT`): the top and the bottom of the frame are rules across the region (`rules across [650.3, 730.3]`), which end the bands; the gutter of the region (261.4 to 309.7, `Prose`) parts the band over the frame into its two columns, and the band under it is read after both. A known limit, owner after 0.1.0 (ruled after part 2b-1 of Task 31c; a block inside a sentence, and the read keeps every text, none lost and none doubled): the line over the frame is the shortest of its column (124.5 against 167.5), so its place says the paragraph ends there; only its hyphen says it goes on, and the pieces of the cut carry no such sign today (a flag like `Piece::colon` would); two implementers found no general sign. The rule of class F (`flows_past`) is for a piece across the gutter, not for a frame across both columns",
     },
     Known {
         shape: "two codes in a bar-a-glyph font 3 modules apart, one show",
@@ -813,8 +869,8 @@ pub(crate) const KNOWN: &[Known] = &[
         shape: "a picture at the top of the right column under a title in the body size",
         variants: &["base"],
         broken: &[Inv::MediaPlace],
-        cause: Cause::Class("Task 31"),
-        why: "Task 22 fix round 4: with the title in the size of the text, the segmenter makes one region of the title and both columns, and the order has no place for the picture inside one region: it stands in the left column, between its two paragraphs, not after them and before the right column's text. With a larger title the columns are regions of their own and the picture stands right (vision test `a_picture_flush_with_the_top_of_the_right_column_stays_there`). Task 31 (segmentation across a gutter) owns the general fix",
+        cause: Cause::Class("after 0.1.0"),
+        why: "Task 22 fix round 4, traced again in Task 31c part 2b-2 with trace_shape and REZZER_DEBUG_CUT: with the title in the size of the text the cut does part the page (the title, the two paragraphs of the left column and the right column are four leaves at a gutter of prose), but the title line alone is a weak leaf, and the paragraph reading of their parent leads it by the margin and replaces the cut (`arbitrate`): one paragraph region over both columns, and the order has no place for the picture inside one region: it stands in the left column, between its two paragraphs, not after them and before the right column's text. With a larger title the title is a heading, the cut stands and the picture stands right (vision test `a_picture_flush_with_the_top_of_the_right_column_stays_there`). A rule that lets no paragraph replace a cut at a gutter releases this pin and was measured and dropped: the weak leaves under such cuts then stay as laid out where a paragraph read them right (10 of 33 variants of `a head block beside a logo over a letter`, the invoice golden and three more tests)",
     },
     Known {
         shape: "a note column beside rows of fields",

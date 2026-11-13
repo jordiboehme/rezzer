@@ -4483,12 +4483,34 @@ fn tall_bands_with(bands: usize, lines: usize, big: bool) -> Vec<u8> {
     two_font_page(&c, if big { w + 30_040 } else { w }, h)
 }
 
-/// The bound of the growth of the steps of a page twice as large (twice the grids or rows and
-/// twice the text): a linear read doubles them, a walk of every line per grid or row makes
-/// them four times as much. The engine's grid search, its nesting of drawn boxes and its
-/// reading order grow faster than the page up to their work bounds (2.45 to 2.56 times, see
-/// the Task M report; Task 31 owns them), so the bound is 3 until they are linear.
+/// The bound of the growth of the steps of a page twice as large (twice the rows and twice
+/// the text): a linear read doubles them, a walk of every line per row makes them four times
+/// as much. Since Task 31c the reading order looks, for a region the file gives no place,
+/// only at the content that can reach into its width, the cut takes the rules at its own
+/// heights, and the nesting of drawn boxes goes through an index (245,381,266 steps before,
+/// 33,274,696 now for the rows of field boxes). What is left over the page is the walk of
+/// the reading order along the regions in the order of the file, once for each region without
+/// a place there (`Cx::by_source`: 2.46 times for twice the rows, bounded by its work for
+/// each region), so the bound stays 3 for the rows of field boxes.
 const DOUBLE: u64 = 3;
+
+/// [`DOUBLE`] for the tall grids, in tenths: the grid search walks across the page and
+/// counts the lines that meet, and the reading order looks at the text in the width of each
+/// grid only, so twice the grids over twice the text cost about twice the steps (measured
+/// 1.87 and 1.74 times; 2.45 and 2.40 before Task 31c), with about a sixth as margin.
+const DOUBLE_GRIDS_TENTHS: u64 = 22;
+
+/// Checks that `steps` stay within [`DOUBLE_GRIDS_TENTHS`] of the steps of the page at half
+/// its size.
+fn assert_doubles_as_grids(what: &str, steps: Option<u64>, half: Option<u64>) {
+    assert_steps_within(
+        what,
+        steps.map(|s| s * 10),
+        half,
+        DOUBLE_GRIDS_TENTHS,
+        STEP_SLACK * 10,
+    );
+}
 
 #[test]
 #[cfg_attr(
@@ -4498,22 +4520,16 @@ const DOUBLE: u64 = 3;
 fn many_tall_one_row_grids_cost_about_as_much_as_their_text() {
     // 800 one-row grids of two cells, each as tall as the page, over 8,000 lines of 25 words,
     // in steps of work: against the page without grids, the ratio measured when the bound was
-    // set (2026-11-11: 259,125,129 against 11,176,098, 23.2 times; the region engine places
-    // and nests each grid's region) with half of it again as margin; against the page at half
-    // its size, [`DOUBLE`].
+    // set (2026-11-13: 43,333,852 against 12,776,098, 3.4 times; the region engine places
+    // and nests each grid's region; 23.2 times before Task 31c) with half of it again as
+    // margin; against the page at half its size, [`DOUBLE_GRIDS_TENTHS`].
     let (_, twin) = counted(|| read(&tall_bands(0, 8_000)));
     let (_, half) = counted(|| read(&tall_bands(400, 4_000)));
     let start = Cpu::now();
     let (out, steps) = counted(|| read(&tall_bands(800, 8_000)));
     assert_runaway(start);
-    assert_steps_within("800 tall one-row grids", steps, twin, 35, STEP_SLACK);
-    assert_steps_within(
-        "800 against 400 tall grids",
-        steps,
-        half,
-        DOUBLE,
-        STEP_SLACK,
-    );
+    assert_steps_within("800 tall one-row grids", steps, twin, 5, STEP_SLACK);
+    assert_doubles_as_grids("800 against 400 tall grids", steps, half);
     // Three files are read in this process, so its peak memory is not that of one read; the
     // work is the measure here.
     assert!(text(page(&out, 1)).contains('a'));
@@ -4527,9 +4543,9 @@ fn many_tall_one_row_grids_cost_about_as_much_as_their_text() {
 fn tall_one_row_grids_past_the_height_test_are_charged_first() {
     // The page of the test above with one letter of 30,000 points, so every grid passes the
     // height test: the text in each grid's height is charged before it is copied. Against
-    // the page without grids, the ratio measured when the bound was set (2026-11-11:
-    // 262,946,381 against 13,584,212, 19.4 times) with half of it again as margin; against
-    // the page at half its size, [`DOUBLE`].
+    // the page without grids, the ratio measured when the bound was set (2026-11-13:
+    // 47,206,702 against 14,784,214, 3.2 times; 19.4 times before Task 31c) with half of it
+    // again as margin; against the page at half its size, [`DOUBLE_GRIDS_TENTHS`].
     let (_, twin) = counted(|| read(&tall_bands_with(0, 8_000, true)));
     let (_, half) = counted(|| read(&tall_bands_with(400, 4_000, true)));
     let start = Cpu::now();
@@ -4539,15 +4555,13 @@ fn tall_one_row_grids_past_the_height_test_are_charged_first() {
         "800 tall one-row grids past the height test",
         steps,
         twin,
-        30,
+        5,
         STEP_SLACK,
     );
-    assert_steps_within(
+    assert_doubles_as_grids(
         "800 against 400 tall grids past the height test",
         steps,
         half,
-        DOUBLE,
-        STEP_SLACK,
     );
     assert!(text(page(&out, 1)).contains('a'));
 }
@@ -4745,16 +4759,17 @@ fn rows_of_field_boxes_n(apart: bool, rows: usize, dense: usize) -> Vec<u8> {
 fn many_rows_of_field_boxes_beside_dense_text_cost_about_what_their_text_costs() {
     // Whether a row of boxes heads lines below it is looked at with the page's lines built
     // once (they are counted where they are built), in steps of work: against the same boxes
-    // apart, which make no rows, the ratio measured when the bound was set (2026-11-11:
-    // 208,166,415 against 49,621,511, 4.2 times; the region engine nests and places the
-    // boxes of the rows) with half of it again as margin; against the page at half its size
+    // apart, which make no rows, the ratio measured when the bound was set (2026-11-13:
+    // 33,274,696 against 45,221,722, 0.74 times: the boxes apart are each placed alone by
+    // the reading order, the rows as one region each; 4.2 times before Task 31c) with half
+    // of it again as margin and rounded up to a whole; against the page at half its size
     // (750 rows over 85,000 runs), [`DOUBLE`].
     let (_, twin) = counted(|| read(&rows_of_field_boxes(true)));
     let (_, half) = counted(|| read(&rows_of_field_boxes_n(false, 750, 85_000)));
     let start = Cpu::now();
     let (out, steps) = counted(|| read(&rows_of_field_boxes(false)));
     assert_runaway(start);
-    assert_steps_within("1,500 rows of field boxes", steps, twin, 7, STEP_SLACK);
+    assert_steps_within("1,500 rows of field boxes", steps, twin, 2, STEP_SLACK);
     assert_steps_within("1,500 against 750 rows", steps, half, DOUBLE, STEP_SLACK);
     assert_heap_under_256_mib();
     let body = text(page(&out, 1));

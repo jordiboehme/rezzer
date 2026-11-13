@@ -66,13 +66,14 @@ const FLAT: f32 = 0.25;
 /// body ems.
 const FRAME: f32 = 0.5;
 
-/// Placing the regions the source lacks by their column looks at the sourced regions and
-/// their content once for each of them. On a page of many pictures and many lines that is
-/// their product; it may take at most this many steps for each region and each box of content
-/// of the set, and the regions left past that are placed by their height alone (as a page
-/// head is), so the work grows with the page, not with pictures times lines. The busiest page
-/// of the corpus, forms and generated sets (133 pictures beside 179 regions) takes about a
-/// fifth of it.
+/// Placing the regions the source lacks by their column looks at the sourced regions once for
+/// each of them, and at the content of each that can reach into its width (see `Width`). On
+/// a page of many pictures and many regions that is their product; it may take at most this
+/// many steps for each region and each box of content of the set, and the regions left past
+/// that are placed by their height alone (as a page head is), so the work grows with the
+/// page, not with pictures times regions. The busiest page of the corpus, forms and generated
+/// sets (133 pictures beside 179 regions) took about a fifth of it when every box of content
+/// left of a picture was looked at; it takes less now.
 const PLACE_WORK: u64 = 1024;
 
 thread_local! {
@@ -208,9 +209,103 @@ struct Info {
     drawn: bool,
     /// The order the file gives it, if any.
     given: Option<u32>,
-    /// The boxes of its content (lines, cells, rules), by their left edge; only in the source
-    /// order, where a picture's column is judged by the content in its width.
+    /// The boxes of its content (lines, cells, rules); only in the source order, where a
+    /// picture's column is judged by the content in its width. They stand class by class
+    /// (see `widths`), and by their left edge within a class.
     content: Vec<Bounds>,
+    /// The classes of `content` by width, each a stretch of it.
+    widths: Vec<Width>,
+    /// What all of `content` spans, for looks that can then leave the region out; `None`
+    /// without content.
+    span: Option<Span>,
+}
+
+/// The boxes of one class of width in the content of a region (see `Info::content`): those
+/// whose widths have one binary exponent, so the widest is less than twice the narrowest. A
+/// box can reach into a width only when it starts less than its own width left of it, so in
+/// each class the boxes that can are one short stretch, found by two searches. With all boxes
+/// in one list, one wide box (a rule across the page, a line set as one run) would make that
+/// stretch everything left of the width. The classes are those of the number format, at most
+/// one for each exponent, so there is no step to choose.
+#[derive(Debug, Clone, Copy)]
+struct Width {
+    /// The stretch of `Info::content`.
+    from: usize,
+    to: usize,
+    /// A width no box of the class is wider than (see [`width_over`]).
+    wide: f64,
+}
+
+/// A width that is not under the width of the box, in `f64`: the difference of its edges,
+/// one step up. The difference is exact for the coordinates of a page, but not for every
+/// pair of numbers (an edge at -1e20 and one at 1 are 1e20 apart in `f64`, which loses the
+/// 1), and a width rounded down would let [`reach`] leave out a box that reaches into a
+/// width. The step up is at most one box more to look at.
+fn width_over(c: &Bounds) -> f64 {
+    (f64::from(c.x1) - f64::from(c.x0)).next_up()
+}
+
+/// The stretch of `class` (boxes of one class of width, by their left edge, none wider than
+/// `wide`) that can reach into the width of `lb`: the boxes that start left of its right
+/// edge, without those whose left edge plus `wide` is at or left of its left edge.
+///
+/// No box outside the stretch shares the width (see [`shares`]), for every finite input: a
+/// box that shares it starts left of the right edge of `lb` and ends right of its left edge.
+/// The sum of a left edge and `wide` is not under the right edge of the box, as `wide` is
+/// not under its width; rounding the sum to `f64` keeps that, as the right edge is a number
+/// of `f64` and rounding keeps the order. So a box whose rounded sum is at or left of the
+/// left edge of `lb` ends there or before it. The rounded sum rises with the left edge, so
+/// the boxes left out are the start of the class.
+fn reach(class: &[Bounds], wide: f64, lb: &Bounds) -> (usize, usize) {
+    let from = class.partition_point(|c| f64::from(c.x0) + wide <= f64::from(lb.x0));
+    let to = class.partition_point(|c| c.x0 < lb.x1).max(from);
+    (from, to)
+}
+
+/// Whether two spans share a column: they overlap across by half the narrower one or more
+/// (boxes that only touch at their edges stand side by side).
+fn shares(a: Bounds, b: Bounds) -> bool {
+    let over = a.x1.min(b.x1) - a.x0.max(b.x0);
+    over > 0.0 && over >= 0.5 * (a.x1 - a.x0).min(b.x1 - b.x0)
+}
+
+/// The class of a box by its width: the sign and exponent bits of the width, which rise with
+/// it (the width of a box put in order is zero or more).
+fn width_class(c: &Bounds) -> u32 {
+    (c.x1 - c.x0).max(0.0).to_bits() >> 23
+}
+
+/// The part of each sourced region in a width (its left and right edge): the bounds of its
+/// content there, if any (see `Cx::by_source`).
+type Parts = ((f32, f32), Vec<Option<Bounds>>);
+
+/// What the content of a region spans (see `Info::content`).
+#[derive(Debug, Clone, Copy)]
+struct Span {
+    /// The lowest bottom and the highest top.
+    y0: f32,
+    y1: f32,
+    /// The leftmost right edge and the rightmost left edge.
+    x1_min: f32,
+    x0_max: f32,
+}
+
+impl Span {
+    fn of(content: &[Bounds]) -> Option<Span> {
+        let first = content.first()?;
+        let start = Span {
+            y0: first.y0,
+            y1: first.y1,
+            x1_min: first.x1,
+            x0_max: first.x0,
+        };
+        Some(content.iter().fold(start, |s, c| Span {
+            y0: s.y0.min(c.y0),
+            y1: s.y1.max(c.y1),
+            x1_min: s.x1_min.min(c.x1),
+            x0_max: s.x0_max.max(c.x0),
+        }))
+    }
 }
 
 impl Info {
@@ -248,8 +343,29 @@ impl Info {
         } else {
             Vec::new()
         };
-        content.sort_by(|a, c| a.x0.total_cmp(&c.x0));
+        content.sort_by(|a, c| {
+            width_class(a)
+                .cmp(&width_class(c))
+                .then(a.x0.total_cmp(&c.x0))
+        });
+        let mut widths: Vec<Width> = Vec::new();
+        for (i, c) in content.iter().enumerate() {
+            let wide = width_over(c);
+            match widths.last_mut() {
+                Some(w) if width_class(&content[w.from]) == width_class(c) => {
+                    w.to = i + 1;
+                    w.wide = w.wide.max(wide);
+                }
+                _ => widths.push(Width {
+                    from: i,
+                    to: i + 1,
+                    wide,
+                }),
+            }
+        }
         Info {
+            widths,
+            span: Span::of(&content),
             b,
             line: sizes.get(sizes.len() / 2).copied(),
             drawn: b.is_some_and(|b| framed(page, r, b, em) || frames.frame(b)),
@@ -972,12 +1088,6 @@ impl Cx<'_> {
         let mid = |k: usize| 0.5 * (self.b(k).y0 + self.b(k).y1);
         loose.sort_by(|&a, &b| mid(b).total_cmp(&mid(a)).then(a.cmp(&b)));
         // Each loose region goes before the sourced place `before[k]`, or at the end.
-        // Two spans share a column when they overlap across by half the narrower one or more
-        // (boxes that only touch at their edges stand side by side).
-        let shares = |a: Bounds, b: Bounds| {
-            let over = a.x1.min(b.x1) - a.x0.max(b.x0);
-            over > 0.0 && over >= 0.5 * (a.x1 - a.x0).min(b.x1 - b.x0)
-        };
         let mut before: Vec<Vec<usize>> = vec![Vec::new(); sourced.len() + 1];
         let by_height = Heights::new(&sourced, |k| self.b(k).y1, mid);
         let content: usize = sourced.iter().map(|&k| self.boxes[k].content.len()).sum();
@@ -992,6 +1102,10 @@ impl Cx<'_> {
         // Set when the budget runs out while a picture is placed by its column (in the scan of
         // `level`): that picture is then placed by its height, as those after it are.
         let out_of_work = std::cell::Cell::new(false);
+        // The parts of the sourced regions in the width of the loose region before, with that
+        // width: the parts depend on the width alone, and the pictures of one column, or the
+        // rows of one stack of boxes, share theirs.
+        let mut kept: Option<Parts> = None;
         for &l in &loose {
             let (m, top) = (mid(l), self.b(l).y1);
             if spent.get() > budget {
@@ -1005,27 +1119,36 @@ impl Cx<'_> {
             // cells, rules) that shares the loose region's width; a region without content
             // stands by its box. A region whose box spans the gutter but whose content in this
             // width is one short paragraph is of this column by that paragraph only.
-            let parts: Vec<Option<Bounds>> = sourced
-                .iter()
-                .map(|&k| {
-                    let info = &self.boxes[k];
-                    if info.content.is_empty() {
-                        return shares(lb, self.b(k)).then(|| self.b(k));
-                    }
-                    let to = info.content.partition_point(|c| c.x0 < lb.x1);
-                    add(to as u64);
-                    info.content[..to]
-                        .iter()
-                        .filter(|c| shares(lb, **c))
-                        .copied()
-                        .reduce(|a, c| Bounds {
-                            x0: a.x0.min(c.x0),
-                            y0: a.y0.min(c.y0),
-                            x1: a.x1.max(c.x1),
-                            y1: a.y1.max(c.y1),
-                        })
-                })
-                .collect();
+            // Only the content that can reach into its width is looked at: in each class of
+            // width, the stretch of [`reach`]. The parts of the width before are kept: they
+            // depend on the width alone.
+            let parts: Vec<Option<Bounds>> = match kept.take() {
+                Some((width, parts)) if width == (lb.x0, lb.x1) => parts,
+                _ => sourced
+                    .iter()
+                    .map(|&k| {
+                        let info = &self.boxes[k];
+                        if info.content.is_empty() {
+                            return shares(lb, self.b(k)).then(|| self.b(k));
+                        }
+                        let mut part: Option<Bounds> = None;
+                        for w in &info.widths {
+                            let class = &info.content[w.from..w.to];
+                            let (from, to) = reach(class, w.wide, &lb);
+                            add((to - from) as u64 + 2 * u64::from(class.len().ilog2()) + 1);
+                            for c in class[from..to].iter().filter(|c| shares(lb, **c)) {
+                                part = Some(part.map_or(*c, |a| Bounds {
+                                    x0: a.x0.min(c.x0),
+                                    y0: a.y0.min(c.y0),
+                                    x1: a.x1.max(c.x1),
+                                    y1: a.y1.max(c.y1),
+                                }));
+                            }
+                        }
+                        part
+                    })
+                    .collect(),
+            };
             // Below it: a region whose top is lower than its middle.
             let below = |k: usize| self.b(k).y1 < m;
             // Of its column: content in its width; over it: that content starts above its top;
@@ -1078,12 +1201,44 @@ impl Cx<'_> {
             // its height on its left and on its right (a code in a row of a table, between its
             // cells). The region is not cut, and the picture stands before it. A region whose
             // box only reaches around it (content of two columns joined) does not hold it.
+            // A region whose content does not reach its height, or stands all on one side of
+            // it, is left out by what its content spans. In the others, class by class, the
+            // content on its right is the end of the class (sorted by the left edge) and the
+            // content on its left is in the start of it, and each look ends at the first box
+            // at its height.
             let row_around = |k: usize| {
-                let c = &self.boxes[k].content;
-                add(c.len() as u64);
-                let at_height = |b: &&Bounds| b.y0 < lb.y1 && b.y1 > lb.y0;
-                c.iter().filter(at_height).any(|b| b.x1 <= lb.x0)
-                    && c.iter().filter(at_height).any(|b| b.x0 >= lb.x1)
+                add(1);
+                let info = &self.boxes[k];
+                let Some(span) = info.span else {
+                    return false;
+                };
+                if span.y0 >= lb.y1
+                    || span.y1 <= lb.y0
+                    || span.x1_min > lb.x0
+                    || span.x0_max < lb.x1
+                {
+                    return false;
+                }
+                let at_height = |b: &Bounds| b.y0 < lb.y1 && b.y1 > lb.y0;
+                let mut seen = 0u64;
+                let mut classes = info.widths.iter().map(|w| &info.content[w.from..w.to]);
+                let right = classes.clone().any(|c| {
+                    seen += 2 * u64::from(c.len().ilog2()) + 1;
+                    c[c.partition_point(|b| b.x0 < lb.x1)..]
+                        .iter()
+                        .inspect(|_| seen += 1)
+                        .any(at_height)
+                });
+                let around = right
+                    && classes.any(|c| {
+                        seen += 2 * u64::from(c.len().ilog2()) + 1;
+                        c[..c.partition_point(|b| b.x0 <= lb.x0)]
+                            .iter()
+                            .inspect(|_| seen += 1)
+                            .any(|b| at_height(b) && b.x1 <= lb.x0)
+                    });
+                add(seen);
+                around
             };
             let holder = (0..sourced.len()).find(|&i| {
                 parts[i].is_some_and(|p| p.y1 >= lb.y1 && p.y0 <= lb.y0) || row_around(sourced[i])
@@ -1140,6 +1295,7 @@ impl Cx<'_> {
                 at
             };
             before[at].push(l);
+            kept = Some(((lb.x0, lb.x1), parts));
         }
         let mut out = Vec::with_capacity(sourced.len() + loose.len());
         for (i, k) in sourced.into_iter().enumerate() {
@@ -1206,5 +1362,124 @@ impl Cx<'_> {
         }
         close(&mut row, &mut out);
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn span(x0: f32, x1: f32) -> Bounds {
+        Bounds {
+            x0,
+            y0: 0.0,
+            x1,
+            y1: 1.0,
+        }
+    }
+
+    /// The classes of `boxes` as [`Info::new`] builds them: each a stretch by left edge, with
+    /// a width none of its boxes is wider than.
+    fn classes(mut boxes: Vec<Bounds>) -> Vec<(Vec<Bounds>, f64)> {
+        boxes.sort_by(|a, c| {
+            width_class(a)
+                .cmp(&width_class(c))
+                .then(a.x0.total_cmp(&c.x0))
+        });
+        boxes
+            .chunk_by(|a, c| width_class(a) == width_class(c))
+            .map(|class| {
+                let wide = class.iter().map(width_over).fold(f64::MIN, f64::max);
+                (class.to_vec(), wide)
+            })
+            .collect()
+    }
+
+    /// Fix round 1 of part 2b-2 of Task 31c (M1): a box from -1e20 to 1 reaches into the
+    /// width from 0.5 to 0.9. Its width in `f64` is 1e20, which loses the 1, and its left
+    /// edge plus that width is 0: with the width as it was the search left the box out. The
+    /// width one step up keeps it.
+    #[test]
+    fn a_box_from_far_off_the_page_that_reaches_into_a_width_is_looked_at() {
+        let (far, lb) = (span(-1e20, 1.0), span(0.5, 0.9));
+        assert!(shares(lb, far));
+        let rounded = f64::from(far.x1) - f64::from(far.x0);
+        // Left out: the stretch starts after it.
+        assert_eq!(reach(&[far], rounded, &lb), (1, 1));
+        assert!(width_over(&far) > rounded);
+        assert_eq!(reach(&[far], width_over(&far), &lb), (0, 1));
+        // A box that ends at the left edge of the width, or starts at its right edge, only
+        // touches it; the search may look at it, the answer is the same.
+        assert!(!shares(lb, span(0.0, 0.5)) && !shares(lb, span(0.9, 2.0)));
+    }
+
+    /// The same numbers on every run (xorshift64*).
+    struct Rng(u64);
+
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            self.0 ^= self.0 >> 12;
+            self.0 ^= self.0 << 25;
+            self.0 ^= self.0 >> 27;
+            self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
+        }
+
+        /// A coordinate: mostly on a page (a lattice of half points, so that edges meet),
+        /// sometimes far off it, tiny, or huge.
+        fn place(&mut self) -> f32 {
+            let odd = [
+                1e20,
+                -1e20,
+                3e38,
+                -3e38,
+                1e-30,
+                -1e-30,
+                16_777_216.0,
+                16_777_217.0,
+                1e9,
+                -1e9,
+            ];
+            match self.next() % 8 {
+                0 => odd[(self.next() % odd.len() as u64) as usize],
+                1 => (self.next() % 2_000) as f32 * 0.37 - 100.0,
+                _ => (self.next() % 80) as f32 * 0.5,
+            }
+        }
+
+        fn span(&mut self) -> Bounds {
+            let (a, b) = (self.place(), self.place());
+            span(a.min(b), a.max(b))
+        }
+    }
+
+    /// Every box that shares a width is in the stretch the search looks at, as the walk of
+    /// every box finds it: boxes on a page, with edges that meet, and boxes with edges far
+    /// off the page, where sums and differences round.
+    #[test]
+    fn the_search_by_width_class_leaves_out_no_box_that_shares_the_width() {
+        let mut rng = Rng(0xD1B5_4A32_D192_ED03);
+        let (mut shared, mut left_out) = (0usize, 0usize);
+        for round in 0..2_000 {
+            let boxes: Vec<Bounds> = (0..1 + rng.next() % 24).map(|_| rng.span()).collect();
+            let classes = classes(boxes);
+            for _ in 0..8 {
+                let lb = rng.span();
+                for (class, wide) in &classes {
+                    let (from, to) = reach(class, *wide, &lb);
+                    assert!(from <= to && to <= class.len());
+                    for (i, c) in class.iter().enumerate() {
+                        let inside = (from..to).contains(&i);
+                        assert!(
+                            inside || !shares(lb, *c),
+                            "round {round}: {c:?} shares {lb:?}, outside {from}..{to} of {class:?}"
+                        );
+                        shared += usize::from(shares(lb, *c));
+                        left_out += usize::from(!inside);
+                    }
+                }
+            }
+        }
+        // The test has boxes that share a width, and the search leaves boxes out.
+        assert!(shared > 1_000 && left_out > 1_000, "{shared} {left_out}");
     }
 }

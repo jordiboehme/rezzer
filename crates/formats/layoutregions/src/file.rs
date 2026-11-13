@@ -14,7 +14,9 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::input::{PageIn, TextRun};
-use crate::line::{LineRun, TextLine, ink, size_key, text_lines};
+use crate::line::{
+    LineRun, TextLine, in_place_order, ink, place_order, placed_text, size_key, text_lines,
+};
 
 mod legend;
 
@@ -84,6 +86,54 @@ pub struct Running {
     pub pages: Vec<u32>,
     /// The lowest and the highest middle of its lines (see [`TextLine::middle`]).
     pub at: [f32; 2],
+    /// Whether its lines count the pages (see [`counts_pages`]): the number of each is the
+    /// number of its page plus one offset, and the count of the pages after it, when the lines
+    /// have one, is one count. A line that only repeats (`Total 120` on every page), or whose
+    /// number changes in another way (`Total 120`, `Total 140`), does not.
+    pub counts: bool,
+}
+
+/// The numbers of a line that may count the pages: its one number, or its two (the page and
+/// the count of the pages). `None` for a line without a number, with more than two, or with
+/// one too long to hold.
+fn page_numbers(text: &str) -> Option<(u32, Option<u32>)> {
+    let mut groups = text
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|g| !g.is_empty());
+    let first = groups.next()?.parse().ok()?;
+    let count = match groups.next() {
+        Some(g) => Some(g.parse().ok()?),
+        None => None,
+    };
+    groups.next().is_none().then_some((first, count))
+}
+
+/// Whether the lines of one running line, each with its page and its numbers (see
+/// [`page_numbers`]), count the pages: every line has a number; the number goes up by one
+/// from page to page, so it is the page's own number plus one offset for all of them (a file
+/// may start at another number than its first page); a second number is on every line or on
+/// none, the same on all, and not below the number of any; and the lines stand on two pages
+/// or more, as one page alone shows no step.
+///
+/// This is the evidence that a number at the foot of a page is its page number and no value:
+/// an amount that repeats, or that changes from page to page, does not follow the pages.
+fn counts_pages(lines: impl IntoIterator<Item = (u32, Option<(u32, Option<u32>)>)>) -> bool {
+    let mut offset: Option<(i64, Option<u32>)> = None;
+    let mut pages: BTreeSet<u32> = BTreeSet::new();
+    for (page, numbers) in lines {
+        let Some((number, count)) = numbers else {
+            return false;
+        };
+        if count.is_some_and(|c| c < number) {
+            return false;
+        }
+        let this = (i64::from(number) - i64::from(page), count);
+        if *offset.get_or_insert(this) != this {
+            return false;
+        }
+        pages.insert(page);
+    }
+    pages.len() >= 2
 }
 
 /// What the layout learns from the whole file before it lays out a page.
@@ -134,38 +184,67 @@ pub(crate) fn band_of<R>(line: &TextLine<'_, R>, height: f32) -> Option<Band> {
 
 /// The band and the key of a line that may be a running line on a page of `height`: it stands
 /// in a band and has text.
-pub(crate) fn running_key<R>(line: &TextLine<'_, R>, height: f32) -> Option<(Band, String)> {
+///
+/// The key is taken from the text of the line as its runs read in the order of their places
+/// ([`placed_text`]): a line is found again by its key whatever order its runs come in.
+pub(crate) fn running_key<R: LineRun>(
+    line: &TextLine<'_, R>,
+    height: f32,
+) -> Option<(Band, String)> {
     let b = band_of(line, height)?;
-    let key = furniture_key(&line.text);
+    let key = furniture_key(&placed_text(line));
     (!key.is_empty()).then_some((b, key))
 }
 
 /// Whether a line on a page of `height` is a footer of the two-page rule: in the bottom band,
 /// with a key of `two_page`.
-pub fn two_page_line<R>(line: &TextLine<'_, R>, height: f32, two_page: &HashSet<String>) -> bool {
+pub fn two_page_line<R: LineRun>(
+    line: &TextLine<'_, R>,
+    height: f32,
+    two_page: &HashSet<String>,
+) -> bool {
     running_key(line, height).is_some_and(|(b, k)| b == Band::Bottom && two_page.contains(&k))
 }
+
+/// The heights of one running line (the lowest and the highest middle of its lines), and
+/// whether its lines count the pages ([`Running::counts`]).
+type RunningAt = ([f32; 2], bool);
 
 /// The running lines by band and key, for the check of a page's lines.
 #[derive(Debug, Clone, Default)]
 pub struct RunningIndex {
-    at: HashMap<(Band, String), Vec<[f32; 2]>>,
+    at: HashMap<(Band, String), Vec<RunningAt>>,
 }
 
 impl RunningIndex {
     pub fn new(running: &[Running]) -> RunningIndex {
-        let mut at: HashMap<(Band, String), Vec<[f32; 2]>> = HashMap::new();
+        let mut at: HashMap<(Band, String), Vec<RunningAt>> = HashMap::new();
         for r in running {
-            at.entry((r.band, r.key.clone())).or_default().push(r.at);
+            at.entry((r.band, r.key.clone()))
+                .or_default()
+                .push((r.at, r.counts));
         }
         RunningIndex { at }
+    }
+
+    /// Whether `line`, on a page of `height`, is a line of a running header or footer of the
+    /// file whose lines count the pages ([`Running::counts`]).
+    pub fn counts_pages<R: LineRun>(&self, line: &TextLine<'_, R>, height: f32) -> bool {
+        let Some(key) = running_key(line, height) else {
+            return false;
+        };
+        let m = line.middle();
+        self.at.get(&key).is_some_and(|at| {
+            at.iter()
+                .any(|([low, high], counts)| *counts && m >= *low && m <= *high)
+        })
     }
 
     /// The band of each of `lines`, a page of `height`, that is a running header or footer on
     /// it. A header stands above all text of the page and a footer below it: a repeated line
     /// inside the text stays text. Lines of white space only are no text of the page.
     /// A line marked in `content` is never a header or footer; an empty `content` marks none.
-    pub fn bands<R>(
+    pub fn bands<R: LineRun>(
         &self,
         lines: &[TextLine<'_, R>],
         height: f32,
@@ -183,7 +262,7 @@ impl RunningIndex {
                 self.at
                     .get(&key)?
                     .iter()
-                    .any(|[low, high]| m >= *low && m <= *high)
+                    .any(|([low, high], _)| m >= *low && m <= *high)
                     .then_some(key.0)
             })
             .collect();
@@ -390,11 +469,45 @@ impl<'a> FilePage<'a, TextRun> {
     }
 }
 
-/// A line seen in a band of a page: its middle, its page and its text size.
-type Seen = (f32, u32, f32);
+/// A line seen in a band of a page: its middle, its page, its text size and its numbers (see
+/// [`page_numbers`]).
+type Seen = (f32, u32, f32, Option<(u32, Option<u32>)>);
+
+/// The runs of a page in the order of their places ([`place_order`]). [`learn`] reads the
+/// lines of every page in this order, so what it learns from them is the same in every order
+/// the runs are handed in: the runs of a line stand together, and its text reads from left
+/// to right. The legend is not read in this order, and the body size leaves out the legend's
+/// runs (see [`learn`]).
+fn placed<R: LineRun>(runs: &[R]) -> Vec<&R> {
+    placed_with_ids(runs).0
+}
+
+/// [`placed`] with the number each run has among `runs`.
+fn placed_with_ids<R: LineRun>(runs: &[R]) -> (Vec<&R>, Vec<u32>) {
+    let mut ids: Vec<u32> = (0..runs.len() as u32).collect();
+    if !in_place_order(runs) {
+        // A stable sort: runs equal by their places keep the order they came in.
+        ids.sort_by(|&a, &b| place_order(&runs[a as usize], &runs[b as usize]));
+    }
+    (ids.iter().map(|&i| &runs[i as usize]).collect(), ids)
+}
 
 /// Learns body size, heading sizes, running headers and footers and, for an untagged file
-/// (`tagged` false), the footnote legends from every page of `pages`, in order.
+/// (`tagged` false), the footnote legends from every page of `pages`, in order. The lines of
+/// a page are read with their runs in the order of their places (see [`placed`]), whatever
+/// order they are handed in: the running lines and the keys of the body lines are the same
+/// in every order.
+///
+/// The legend of a page is the exception, a known limit with its owner after 0.1.0: it is
+/// read from the runs in the order handed in, which must be the reader's. The cause:
+/// [`RefPlace::Above`] needs the reference number to open the next line, and only the
+/// order of the runs says that it opens it (see the comment at the legend's search). The
+/// rule that would lift the limit asks for no order (the number goes to the word whose
+/// baseline is nearest over it); it changes the legend rules and needs its own private
+/// check. The body size, and with it the heading sizes, leaves out the ink of the legend's
+/// runs, so it holds in every order only as far as the legend does: where another order
+/// loses the legend, its runs count as body ink.
+///
 /// `ends_in_amount` tells a line that ends in an amount, which is no heading.
 ///
 /// A line at the foot of both pages of a file of two is a footer: a letter or an invoice of two
@@ -411,11 +524,15 @@ pub fn learn<R: LineRun>(
     let mut body: HashSet<String> = HashSet::new();
     let mut body_bytes = 0usize;
     for p in pages {
-        for l in text_lines(p.runs) {
+        let runs = placed(p.runs);
+        for l in text_lines(&runs) {
             if let Some(key) = running_key(&l, p.height) {
-                seen.entry(key)
-                    .or_default()
-                    .push((l.middle(), p.page, l.size));
+                seen.entry(key).or_default().push((
+                    l.middle(),
+                    p.page,
+                    l.size,
+                    page_numbers(&l.text),
+                ));
             } else {
                 let key = furniture_key(&l.text);
                 let cost = key.len() + BODY_KEY_COST;
@@ -454,6 +571,7 @@ pub fn learn<R: LineRun>(
                     band,
                     pages: pages_at.into_iter().collect(),
                     at: [low, at[j - 1].0],
+                    counts: counts_pages(at[i..j].iter().map(|s| (s.1, s.3))),
                 });
             }
             i = j;
@@ -477,34 +595,33 @@ pub fn learn<R: LineRun>(
     };
     for p in pages {
         let height = p.height;
-        let all = text_lines(p.runs);
-        let bands = index.bands(&all, height, &[]);
-        for (l, b) in all.iter().zip(&bands) {
-            if b.is_some() && two_page_line(l, height, &two_page_keys) {
-                for r in l.runs {
-                    count_run(&mut chars, r.text(), r.size());
-                }
-            }
-        }
-        // The lines without running headers and footers, as the layout of the page sees
-        // them, and where each starts among the page's runs.
-        let mut lines = Vec::with_capacity(all.len());
-        let mut starts = Vec::with_capacity(all.len());
-        let mut at = 0;
-        for (l, b) in all.into_iter().zip(&bands) {
-            if b.is_none() {
-                starts.push(at);
-            }
-            at += l.runs.len();
-            if b.is_none() {
-                lines.push(l);
-            }
-        }
         // A legend of footnotes is no body text: a dense legend in a tiny size would make
         // every line a heading. A tagged file says its notes.
+        //
+        // The legend is read from the runs in the order handed in: a reference number that
+        // opens its line belongs to the last word of the line before (`RefPlace::Above`),
+        // and only the reader's order says that it opens the line. By its place alone it
+        // would follow the word left of it on its own line: a wrong pair. A known limit,
+        // owner after 0.1.0 (see the doc of `learn` for the rule that would lift it).
         let legend = if tagged {
             None
         } else {
+            let all = text_lines(p.runs);
+            let bands = index.bands(&all, height, &[]);
+            // The lines without running headers and footers, as the layout of the page sees
+            // them, and where each starts among the page's runs.
+            let mut lines = Vec::with_capacity(all.len());
+            let mut starts = Vec::with_capacity(all.len());
+            let mut at = 0;
+            for (l, b) in all.into_iter().zip(&bands) {
+                if b.is_none() {
+                    starts.push(at);
+                    at += l.runs.len();
+                    lines.push(l);
+                } else {
+                    at += l.runs.len();
+                }
+            }
             legend::find_lines(&lines, &starts)
         };
         let in_legend: HashSet<u32> = legend
@@ -516,12 +633,23 @@ pub fn learn<R: LineRun>(
                     .collect()
             })
             .unwrap_or_default();
-        for (l, first) in lines.iter().zip(&starts) {
+        // The ink of the page by size, from its lines in place order: a running line is
+        // counted only as a footer of the two-page rule, a run of the legend not at all.
+        let (runs, ids) = placed_with_ids(p.runs);
+        let all = text_lines(&runs);
+        let bands = index.bands(&all, height, &[]);
+        let mut at = 0;
+        for (l, b) in all.iter().zip(&bands) {
+            let counted = match b {
+                Some(_) => two_page_line(l, height, &two_page_keys),
+                None => true,
+            };
             for (k, r) in l.runs.iter().enumerate() {
-                if !in_legend.contains(&((first + k) as u32)) {
+                if counted && (b.is_some() || !in_legend.contains(&ids[at + k])) {
                     count_run(&mut chars, r.text(), r.size());
                 }
             }
+            at += l.runs.len();
         }
         if let Some(found) = legend {
             legends.insert(p.page, found);
@@ -541,7 +669,8 @@ pub fn learn<R: LineRun>(
         .unwrap_or(0.0);
     let mut sizes: Vec<i32> = Vec::new();
     for p in pages {
-        let all = text_lines(p.runs);
+        let runs = placed(p.runs);
+        let all = text_lines(&runs);
         let bands = index.bands(&all, p.height, &[]);
         for (l, b) in all.iter().zip(&bands) {
             if b.is_none() && may_head(l, body_size, ends_in_amount) {
@@ -563,6 +692,52 @@ pub fn learn<R: LineRun>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The numbers of a line that may count the pages, and the lines that do: each condition
+    /// moved both ways.
+    #[test]
+    fn a_running_line_counts_the_pages_when_its_number_follows_them() {
+        assert_eq!(page_numbers("Page 7"), Some((7, None)));
+        assert_eq!(page_numbers("- 7 -"), Some((7, None)));
+        assert_eq!(page_numbers("Page 7 of 12"), Some((7, Some(12))));
+        assert_eq!(page_numbers("7/12"), Some((7, Some(12))));
+        assert_eq!(page_numbers("Page"), None);
+        assert_eq!(page_numbers("7 / 12 / 3"), None);
+        assert_eq!(page_numbers("Page 99999999999"), None);
+        let counts =
+            |lines: &[(u32, &str)]| counts_pages(lines.iter().map(|(p, t)| (*p, page_numbers(t))));
+        // One step from page to page, from 1 or from another number, with pages left out.
+        assert!(counts(&[(1, "Page 1"), (2, "Page 2"), (3, "Page 3")]));
+        assert!(counts(&[(1, "Page 5"), (2, "Page 6")]));
+        assert!(counts(&[(2, "Page 2"), (5, "Page 5"), (6, "Page 6")]));
+        assert!(counts(&[(3, "Page 1"), (4, "Page 2")]));
+        // One page shows no step, also with two lines on it.
+        assert!(!counts(&[(1, "Page 1")]));
+        assert!(!counts(&[(1, "Page 1"), (1, "Page 1")]));
+        assert!(!counts(&[]));
+        // The same number, a step of two, a step down, a page left out that the number does
+        // not leave out.
+        assert!(!counts(&[(1, "Total 120"), (2, "Total 120")]));
+        assert!(!counts(&[
+            (1, "Total 120"),
+            (2, "Total 140"),
+            (3, "Total 160")
+        ]));
+        assert!(!counts(&[(1, "Lot 2"), (2, "Lot 4")]));
+        assert!(!counts(&[(1, "Step 8"), (2, "Step 7")]));
+        assert!(!counts(&[(1, "Page 1"), (3, "Page 2")]));
+        assert!(!counts(&[(1, "Page 1"), (2, "Page 2"), (3, "Page 4")]));
+        // A count: the same on every line, on every line or on none, not below the number.
+        assert!(counts(&[(1, "1 / 3"), (2, "2 / 3"), (3, "3 / 3")]));
+        assert!(counts(&[(1, "7 / 12"), (2, "8 / 12")]));
+        assert!(!counts(&[(1, "1 / 3"), (2, "2 / 4")]));
+        assert!(!counts(&[(1, "1 / 3"), (2, "2")]));
+        assert!(!counts(&[(1, "3 / 3"), (2, "4 / 3")]));
+        assert!(!counts(&[(1, "7 / 12"), (2, "7 / 12")]));
+        // A line without a number, or with three.
+        assert!(!counts(&[(1, "Page 1"), (2, "Page")]));
+        assert!(!counts(&[(1, "1 / 3 / 9"), (2, "2 / 3 / 9")]));
+    }
     use crate::input::{FontKind, Shift, TextRun};
     use crate::line::text_line;
 
@@ -865,6 +1040,44 @@ mod tests {
         // a heading, as it is 1.5 times that body.
         assert!((facts.body_size - 8.0).abs() < 1e-4, "{}", facts.body_size);
         assert_eq!(facts.heading_sizes, [13.0]);
+    }
+
+    /// Fix round 3 of part 2b-1 of Task 31c: the lines of a file are learned with their runs
+    /// in the order of their places. A footer handed over in two runs, the right one first
+    /// (as a reader hands over two pieces of one row), has the key its places give, with
+    /// its runs in every order and with the runs of the page shuffled; and a line with its
+    /// runs out of that order is found again by that key.
+    #[test]
+    fn a_running_line_is_learned_and_found_by_the_places_of_its_runs() {
+        let at = |text: &str, line: u32, x: f32, y: f32| TextRun {
+            x,
+            w: 60.0,
+            ..run(text, line, y, 10.0)
+        };
+        let texts = |order: [usize; 4]| -> Vec<TextRun> {
+            let all = [
+                at("the goods of the north works", 0, 72.0, 600.0),
+                at("and of the south works", 1, 72.0, 588.0),
+                at("Sample works", 2, 72.0, 40.0),
+                at(" yearly report", 2, 140.0, 40.0),
+            ];
+            order.iter().map(|&i| all[i].clone()).collect()
+        };
+        let file =
+            |order: [usize; 4]| -> Vec<PageIn> { (1..=3).map(|k| page(k, texts(order))).collect() };
+        let in_place = learned(&file([0, 1, 2, 3]), false);
+        let keys: Vec<&str> = in_place.running.iter().map(|r| r.key.as_str()).collect();
+        assert_eq!(keys, ["Sample works yearly report"]);
+        // The right run first, and the runs of the page in an order that parts the line.
+        for order in [[0, 1, 3, 2], [3, 0, 2, 1]] {
+            assert_eq!(learned(&file(order), false), in_place, "{order:?}");
+        }
+        // The footer with its runs the other way round is the running line of the page.
+        let flow = texts([0, 1, 3, 2]);
+        let lines = text_lines(&flow);
+        assert_eq!(lines[2].text, "yearly report Sample works");
+        let bands = RunningIndex::new(&in_place.running).bands(&lines, 842.0, &[]);
+        assert_eq!(bands, [None, None, Some(Band::Bottom)]);
     }
 
     /// A header repeated at two heights is two groups, each with its own range.

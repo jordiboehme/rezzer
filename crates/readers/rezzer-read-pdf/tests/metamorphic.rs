@@ -56,11 +56,107 @@ fn pins() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/metamorphic-corpus.tsv")
 }
 
+/// The facts of a file are the same whether they are learned from the runs in the order the
+/// reader hands them over (its flow) or in the order of their places (as `engine_decisions`
+/// learns them, so that the order of the runs changes no fact). Names what differs.
+///
+/// This compares two orders only on a page where they differ, and the reader hands nearly
+/// every page over in the order of its places (3 of the 1,010 pages of the corpus and the
+/// shapes differ, measured in Task 31c); `assert_facts_under_reorder` compares every page
+/// with its runs shuffled. The lines of a file are learned with their runs in place order,
+/// so what is learned from them holds in every order; the legend of a page is read in the
+/// order handed over. For a tagged file the read itself learns from more runs than these
+/// pages hold (those an ActualText replaces).
+fn assert_facts_in_both_orders(name: &str, pages: &[layoutregions::PageIn], tagged: bool) {
+    let [given, placed] = rezzer_read_pdf::engine_facts_by_order(pages, tagged);
+    let mut differs = Vec::new();
+    if given.body_size != placed.body_size {
+        differs.push(format!(
+            "body size {} | {}",
+            given.body_size, placed.body_size
+        ));
+    }
+    if given.heading_sizes != placed.heading_sizes {
+        differs.push(format!(
+            "heading sizes {:?} | {:?}",
+            given.heading_sizes, placed.heading_sizes
+        ));
+    }
+    if given.running != placed.running {
+        differs.push(format!(
+            "running {:?} | {:?}",
+            given.running, placed.running
+        ));
+    }
+    if given.two_page != placed.two_page {
+        differs.push(format!(
+            "two-page footers {:?} | {:?}",
+            given.two_page, placed.two_page
+        ));
+    }
+    for page in given.legends.keys().chain(placed.legends.keys()) {
+        if given.legends.get(page) != placed.legends.get(page) {
+            differs.push(format!("legend of page {page}"));
+        }
+    }
+    differs.dedup();
+    assert!(
+        differs.is_empty(),
+        "{name}: facts of the file by the order of the runs (flow | places): {differs:#?}"
+    );
+}
+
+/// The facts of a file that are learned from its lines are the same with the runs of each
+/// page in another order (the change `reorder-runs` of the sweep, each run keeps its line
+/// number): the body size, the heading sizes, the running lines and the footers of the
+/// two-page rule.
+///
+/// The legends are not compared. A known limit, owner after 0.1.0 (ruled after fix round 3
+/// of part 2b-1 of Task 31c): the footnote legend of a page is read from the runs in the
+/// order handed in, so with the runs shuffled it can be found differently or not at all.
+/// The cause: `RefPlace::Above` (a reference number set at the end of the line before)
+/// needs the number to open the next line, and only the order of the runs says that it
+/// opens it. Sorting the runs by place would pair the number with the word left of it on
+/// its own line, a wrong pair, which is worse than a read that depends on the order. A
+/// file hands its runs over in one fixed order; only a shuffle moves the legend. The rule
+/// that would lift the limit asks for no order: the number goes to the word whose baseline
+/// is nearest over it, whichever line number it has. That is a change of the legend rules
+/// and needs its own private check before it lands.
+///
+/// The body size leaves out the ink of the legend's runs (see `file::learn`), so it
+/// follows the legend: where a shuffle loses a legend, its ink counts as body ink. On the
+/// corpus and the shapes the body size holds, so it is asserted here; a file whose legend
+/// holds more ink than its body size could move it under a shuffle.
+fn assert_facts_under_reorder(name: &str, pages: &[layoutregions::PageIn], tagged: bool) {
+    let reordered: Vec<layoutregions::PageIn> = pages
+        .iter()
+        .map(|p| Transform::ReorderRuns.apply(p).0)
+        .collect();
+    let [plain, _] = rezzer_read_pdf::engine_facts_by_order(pages, tagged);
+    let [moved, _] = rezzer_read_pdf::engine_facts_by_order(&reordered, tagged);
+    let lines = |f: &layoutregions::file::FileFacts| {
+        (
+            f.body_size,
+            f.heading_sizes.clone(),
+            f.running.clone(),
+            f.two_page.clone(),
+        )
+    };
+    assert!(
+        lines(&plain) == lines(&moved),
+        "{name}: the facts of the file change with the order of its runs: {:#?} | {:#?}",
+        lines(&plain),
+        lines(&moved)
+    );
+}
+
 /// The pin lines of the corpus files `names`; each break printed (with `--no-capture`).
 fn sweep_files(names: &[String]) -> Vec<String> {
     let mut lines = Vec::new();
     for name in names {
         let (pages, tagged) = pages_of(name);
+        assert_facts_in_both_orders(name, &pages, tagged);
+        assert_facts_under_reorder(name, &pages, tagged);
         let decide = |p: &[layoutregions::PageIn]| -> Vec<Decisions> {
             rezzer_read_pdf::engine_decisions(p, tagged)
         };
@@ -171,4 +267,201 @@ fn engine_decisions_are_the_decisions_of_the_read() {
         eprintln!("{name}: {found} regions found, {spatial} kept as laid out when written");
         assert!(found > 0 && other.is_empty(), "{name}: {other:#?}");
     }
+}
+
+/// A run half its size wide for each character.
+fn run_at(text: &str, line: u32, x: f32, y: f32, size: f32) -> layoutregions::TextRun {
+    layoutregions::TextRun {
+        text: text.into(),
+        x,
+        y,
+        w: text.len() as f32 * size * 0.5,
+        h: size,
+        size,
+        font: 0,
+        font_kind: layoutregions::FontKind::Unknown,
+        bold: false,
+        italic: false,
+        color: None,
+        shift: layoutregions::Shift::Base,
+        line,
+        off_axis: false,
+        gaps: Vec::new(),
+    }
+}
+
+/// Page `n` of a file of three, built by hand: a running line at the top, lines of body text
+/// and, on page 1, a heading, a reference number raised inside a run (`unit` 2), one that
+/// opens its own line at the end of the line before (`month` 3) and the legend of the two.
+/// With `pad`, a run of white space ends each of these lines and stands left of them, as the
+/// reader hands one over on a page of nist-sp800-53r5: the order of the runs is not the
+/// order of their places, and the runs of the references and their words have other numbers
+/// in the two orders.
+fn page_with_notes(n: u32, pad: bool) -> layoutregions::PageIn {
+    fn line(texts: &mut Vec<layoutregions::TextRun>, pad: bool, runs: Vec<layoutregions::TextRun>) {
+        let (number, y) = (runs[0].line, runs[0].y);
+        texts.extend(runs);
+        if pad {
+            texts.push(run_at(" ", number, 30.0, y, 9.0));
+        }
+    }
+    let mut texts = Vec::new();
+    let top = run_at("Works report of the north plant", 0, 40.0, 770.0, 9.0);
+    line(&mut texts, pad, vec![top]);
+    if n == 1 {
+        let mut head = run_at("Review of the year", 1, 40.0, 730.0, 14.0);
+        head.bold = true;
+        line(&mut texts, pad, vec![head]);
+        let word = run_at("unit charge monthly", 2, 40.0, 700.0, 9.0);
+        line(
+            &mut texts,
+            pad,
+            vec![word, run_at("2", 2, 58.5, 702.5, 6.0)],
+        );
+        let above = run_at("the values are reported each month", 3, 40.0, 686.0, 9.0);
+        line(&mut texts, pad, vec![above]);
+        texts.push(run_at("3", 4, 193.5, 688.5, 6.0));
+    }
+    for k in 0..4 {
+        let y = 660.0 - 12.0 * k as f32;
+        let body = run_at(
+            "the plant ran on every day of the week",
+            5 + k,
+            40.0,
+            y,
+            9.0,
+        );
+        line(&mut texts, pad, vec![body]);
+    }
+    if n == 1 {
+        texts.push(run_at("2 per month", 9, 40.0, 70.0, 6.0));
+        texts.push(run_at("3 per piece", 10, 40.0, 62.0, 6.0));
+    }
+    layoutregions::PageIn {
+        page: n,
+        size: [600.0, 800.0],
+        turn: 0,
+        texts,
+        rules: Vec::new(),
+        boxes: Vec::new(),
+        pictures: Vec::new(),
+        codes: Vec::new(),
+        given: Vec::new(),
+    }
+}
+
+/// On pages whose runs do not stand in the order of their places the facts of the file are
+/// the same in both orders: the running line, the heading size, the body size and the legend
+/// with a reference inside a run and one above its line, each named by the same runs. The
+/// pages are built by hand after an order the reader was measured to hand over (a run of
+/// white space after the ink of its line and left of it), so the two orders differ on every
+/// page. The same pages without those runs stand in place order.
+#[test]
+fn the_facts_of_pages_out_of_place_order_are_the_same_in_both_orders() {
+    use layoutregions::file::RefPlace;
+    let pages: Vec<layoutregions::PageIn> = (0..3).map(|n| page_with_notes(n, true)).collect();
+    for p in &pages {
+        assert!(
+            layoutregions::RunOrder::of(p).is_some(),
+            "page {}: the runs stand in the order of their places",
+            p.page
+        );
+    }
+    let [given, placed] = rezzer_read_pdf::engine_facts_by_order(&pages, false);
+    // The facts are there: a comparison of two empty sets would say nothing.
+    assert_eq!(given.body_size, 9.0);
+    assert_eq!(given.heading_sizes, [14.0]);
+    let running: Vec<&str> = given.running.iter().map(|r| r.key.as_str()).collect();
+    assert_eq!(running, ["Works report of the north plant"]);
+    let places = |f: &layoutregions::file::FileFacts| -> Vec<(u32, Option<u32>, bool)> {
+        f.legends[&1]
+            .raised
+            .iter()
+            .map(|r| match r.place {
+                RefPlace::End => (r.run, None, false),
+                RefPlace::Inside { word, .. } => (r.run, Some(word), false),
+                RefPlace::Above { word } => (r.run, Some(word), true),
+            })
+            .collect()
+    };
+    // `2` (run 5) goes into run 4, `3` (run 9) after run 7 of the line above.
+    assert_eq!(places(&given), [(5, Some(4), false), (9, Some(7), true)]);
+    assert_eq!(given.legends[&1].entries.len(), 2);
+    assert_eq!(given, placed);
+    assert_facts_in_both_orders("pages built by hand", &pages, false);
+    // In place order (no run of white space) the pages are compared with themselves.
+    let plain: Vec<layoutregions::PageIn> = (0..3).map(|n| page_with_notes(n, false)).collect();
+    assert!(
+        plain
+            .iter()
+            .all(|p| layoutregions::RunOrder::of(p).is_none())
+    );
+    let [flow, _] = rezzer_read_pdf::engine_facts_by_order(&plain, false);
+    assert_eq!(places(&flow), [(3, Some(2), false), (5, Some(4), true)]);
+}
+
+/// Page `n` of a file of three with ink out of place order, as the reader hands over two
+/// pieces of one row on arxiv-2408.09869 page 7 (the right one first): the running line at
+/// the top and each line of body text in two runs, the right one first.
+fn page_with_ink_out_of_place(n: u32) -> layoutregions::PageIn {
+    let mut texts = vec![
+        run_at(" of the north plant", 0, 94.0, 770.0, 9.0),
+        run_at("Works report", 0, 40.0, 770.0, 9.0),
+    ];
+    for k in 0..4 {
+        let y = 660.0 - 12.0 * k as f32;
+        texts.push(run_at(" on every day of the week", 1 + k, 103.0, y, 9.0));
+        texts.push(run_at("the plant ran", 1 + k, 40.0, y, 9.0));
+    }
+    layoutregions::PageIn {
+        page: n,
+        size: [600.0, 800.0],
+        turn: 0,
+        texts,
+        rules: Vec::new(),
+        boxes: Vec::new(),
+        pictures: Vec::new(),
+        codes: Vec::new(),
+        given: Vec::new(),
+    }
+}
+
+/// The lines of a file are learned with their runs in the order of their places: a running
+/// line whose ink is handed over out of that order (fix round 3 of part 2b-1 of Task 31c)
+/// gets the key its places give, in both orders and under a shuffle of the runs. Learned in
+/// the order handed over, the key read `of the north plant Works report`.
+#[test]
+fn a_running_line_with_ink_out_of_place_order_is_learned_by_place() {
+    let pages: Vec<layoutregions::PageIn> = (0..3).map(page_with_ink_out_of_place).collect();
+    assert!(
+        pages
+            .iter()
+            .all(|p| layoutregions::RunOrder::of(p).is_some())
+    );
+    let [given, placed] = rezzer_read_pdf::engine_facts_by_order(&pages, false);
+    let running: Vec<&str> = given.running.iter().map(|r| r.key.as_str()).collect();
+    assert_eq!(running, ["Works report of the north plant"]);
+    assert_eq!(given.body_size, 9.0);
+    assert_eq!(given, placed);
+    assert_facts_in_both_orders("ink out of place order", &pages, false);
+    assert_facts_under_reorder("ink out of place order", &pages, false);
+}
+
+/// A page of the corpus the reader hands over in another order than the order of its places
+/// (runs at one left edge on one line), in the default run: its facts are the same in both
+/// orders. The other two such pages of the corpus are in files that are fetched, and only the
+/// sweep of every page reaches them.
+#[test]
+fn the_facts_of_a_corpus_page_out_of_place_order_are_the_same_in_both_orders() {
+    let name = "pdfbox-actualtext-din91379.pdf";
+    let (pages, tagged) = pages_of(name);
+    let moved = pages
+        .iter()
+        .filter(|p| layoutregions::RunOrder::of(p).is_some())
+        .count();
+    assert_eq!(
+        moved, 1,
+        "{name}: pages the reader hands over out of place order"
+    );
+    assert_facts_in_both_orders(name, &pages, tagged);
 }

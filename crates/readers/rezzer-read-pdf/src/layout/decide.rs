@@ -14,7 +14,7 @@ use layoutregions::extract::text::Demotion;
 use layoutregions::file::FileFacts;
 use layoutregions::segment::drawn::{Grids, Unsearched};
 use layoutregions::segment::{SegId, Segments, Source};
-use layoutregions::typers::{FileIndex, Typed};
+use layoutregions::typers::{FileIndex, PageFacts, Typed};
 use layoutregions::{
     Alternative, Bounds, Certainty, Decision, Issue, Kind, Limits, Margins, PageIn, PageRegions,
     PrimId, Region, RegionId, Score, Signal,
@@ -171,6 +171,27 @@ impl Decided {
         }
     }
 
+    /// The decision of the run `id`, when the engine itself decided it as text (a paragraph,
+    /// a list, a heading or a title block): the region the run is placed with (Task 31c).
+    /// Text a reader of today gave or refused has none: it is laid out as today.
+    pub(super) fn text_region_of_run(&self, id: u32) -> Option<u32> {
+        let k = *self.of_run.get(id as usize)?;
+        (k != NONE
+            && self.pre[k as usize].is_none()
+            && matches!(
+                self.decisions[k as usize].kind,
+                Kind::Paragraph | Kind::List | Kind::Heading | Kind::TitleBlock
+            ))
+        .then_some(k)
+    }
+
+    /// The given region of today's reading that holds the run `id`: the number of its table.
+    pub(super) fn given_of_run(&self, id: u32) -> Option<u32> {
+        let k = *self.of_run.get(id as usize)?;
+        let (table, _) = (*self.pre.get(k as usize)?)?;
+        u32::try_from(table).ok()
+    }
+
     /// The candidates of the segment of decision `k`.
     pub(super) fn candidates(&self, k: usize) -> &[Typed] {
         self.typed
@@ -188,10 +209,65 @@ pub(super) type Pre<'a> = (&'a HashMap<u32, usize>, &'a dyn Fn(usize) -> (Signal
 /// spatial. A given region of today's reading (`pre`: the table of each of its runs, and the
 /// signal of each table; see `today`) is decided by its reader: certainty `Rule`, the reader's
 /// signal.
+///
+/// The engine reads the runs in the order of their places ([`layoutregions::RunOrder`]): a
+/// page whose runs stand in another order is decided in that order, and the decisions name
+/// the runs by the ids of `page`. So the order of the runs handed in decides no read.
 pub(super) fn decide(
     page: &PageIn,
     grids: &Result<Grids, Unsearched>,
-    (facts, index): (&FileFacts, &FileIndex),
+    file: (&FileFacts, &FileIndex),
+    ends_in_amount: &dyn Fn(&str) -> bool,
+    pre: Pre<'_>,
+    limits: &Limits,
+    stop: &dyn Fn() -> bool,
+) -> Decided {
+    let Some(order) = layoutregions::RunOrder::of(page) else {
+        let facts = PageFacts::of(file.0, file.1, page.page);
+        return decide_in_order(page, grids, facts, ends_in_amount, pre, limits, stop);
+    };
+    let pre_of: HashMap<u32, usize> = pre
+        .0
+        .iter()
+        .filter_map(|(&run, &t)| Some((*order.to.get(run as usize)?, t)))
+        .collect();
+    // The legend of the page names its runs by the ids of `page`: the typers look them up
+    // on the page in place order. Only this page's legend is renamed and handed on; the
+    // facts of the file are not copied (a file may hold a legend on every page).
+    let legend = file.0.legends.get(&page.page).map(|l| order.legend(l));
+    let mut d = decide_in_order(
+        &order.page,
+        grids,
+        PageFacts {
+            file: file.0,
+            index: file.1,
+            legend: legend.as_ref(),
+        },
+        ends_in_amount,
+        (&pre_of, pre.1),
+        limits,
+        stop,
+    );
+    order.segments_back(&mut d.segs);
+    for (prims, _) in d.own.iter_mut().flatten() {
+        order.back(prims);
+    }
+    let mut of_run = vec![NONE; d.of_run.len()];
+    for (k, &old) in d.of_run.iter().zip(&order.back) {
+        if let Some(slot) = of_run.get_mut(old as usize) {
+            *slot = *k;
+        }
+    }
+    d.of_run = of_run;
+    d
+}
+
+/// [`decide`] on a page whose runs stand in the order of their places, with the facts of its
+/// file and the page's own legend named by the ids of `page`.
+fn decide_in_order(
+    page: &PageIn,
+    grids: &Result<Grids, Unsearched>,
+    facts: PageFacts<'_>,
     ends_in_amount: &dyn Fn(&str) -> bool,
     pre: Pre<'_>,
     limits: &Limits,
@@ -201,15 +277,9 @@ pub(super) fn decide(
     let (segs, drawn) = layoutregions::segment::segment_page_drawn(page, grids, limits, stop);
     let untyped = drawn.is_none();
     let (segs, typed) = match drawn {
-        Some(drawn) => layoutregions::typers::type_page(
-            page,
-            &drawn,
-            segs,
-            facts,
-            index,
-            ends_in_amount,
-            limits,
-        ),
+        Some(drawn) => {
+            layoutregions::typers::type_page_with(page, &drawn, segs, facts, ends_in_amount, limits)
+        }
         None => (segs, BTreeMap::new()),
     };
     let mut decisions = layoutregions::arbitrate(&segs, &typed, &margins);
@@ -1416,5 +1486,266 @@ mod tests {
             unsure_why(&[], &m),
             "no region type has clear evidence for it"
         );
+    }
+
+    fn run(text: &str, x: f32, y: f32, size: f32, line: u32) -> layoutregions::TextRun {
+        layoutregions::TextRun {
+            text: text.to_string(),
+            x,
+            y,
+            w: text.chars().count() as f32 * size * 0.5,
+            h: size,
+            size,
+            font: 0,
+            font_kind: layoutregions::FontKind::Unknown,
+            bold: false,
+            italic: false,
+            color: None,
+            shift: layoutregions::Shift::Base,
+            line,
+            off_axis: false,
+            gaps: Vec::new(),
+        }
+    }
+
+    /// A decision: its kind, its runs and its part of today's reading.
+    type Read = (Kind, Vec<u32>, Option<(usize, bool)>);
+
+    /// A page handed in with its runs in another order is decided as the page in the order
+    /// of their places, and every decision names the runs by the ids of the page handed in:
+    /// the primitives of the segments, the decision of each run and the part of today's
+    /// reading a given region stands for.
+    #[test]
+    fn a_page_is_decided_in_the_order_of_its_places_whatever_order_its_runs_have() {
+        // A title, a paragraph of four lines of two runs each, a given table of two rows and
+        // a table drawn with rules, three rows of three cells. The drawn table is the part
+        // whose read moves with the order of the runs when they are read as handed in:
+        // without `RunOrder` in `decide` the reversed order leaves a rule out of the table,
+        // a region of its own kept as laid out (review M2 of part 2b-1 of Task 31c).
+        let mut texts = vec![run("Notes on the garden wall", 60.0, 740.0, 16.0, 0)];
+        for k in 0..4u32 {
+            let y = 700.0 - 12.0 * k as f32;
+            texts.push(run("the wall was built of the stone", 60.0, y, 10.0, 1 + k));
+            texts.push(run("that came from the old quarry", 220.0, y, 10.0, 1 + k));
+        }
+        for k in 0..2u32 {
+            let y = 600.0 - 14.0 * k as f32;
+            texts.push(run("Stone", 60.0, y, 10.0, 5 + k));
+            texts.push(run("12", 300.0, y, 10.0, 5 + k));
+        }
+        let mut rules = Vec::new();
+        let rule = |x0: f32, y0: f32, x1: f32, y1: f32| layoutregions::RuleIn {
+            x0,
+            y0,
+            x1,
+            y1,
+            thick: 0.0,
+            dashed: false,
+            rect: false,
+        };
+        for (r, y) in [500.0f32, 480.0, 460.0, 440.0].into_iter().enumerate() {
+            rules.push(rule(72.0, y, 372.0, y));
+            if r < 3 {
+                let cells = [["Name", "Place", "Sum"], ["Alder", "Oakfield", "1.234,51"]];
+                for (c, x) in [76.0f32, 176.0, 276.0].into_iter().enumerate() {
+                    texts.push(run(cells[r.min(1)][c], x, y - 14.0, 9.0, 7 + r as u32));
+                }
+            }
+        }
+        for x in [72.0f32, 172.0, 272.0, 372.0] {
+            rules.push(rule(x, 440.0, x, 500.0));
+        }
+        let n = texts.len() as u32;
+        let page_of = |order: &[u32]| {
+            let at = |old: u32| order.iter().position(|&i| i == old).unwrap() as u32;
+            PageIn {
+                page: 0,
+                size: [600.0, 800.0],
+                turn: 0,
+                texts: order.iter().map(|&i| texts[i as usize].clone()).collect(),
+                rules: rules.clone(),
+                boxes: Vec::new(),
+                pictures: Vec::new(),
+                codes: Vec::new(),
+                given: vec![layoutregions::GivenRegion {
+                    kind: Kind::Table,
+                    prims: (9..13).map(|i| PrimId::Text(at(i))).collect(),
+                    order: 0,
+                    level: None,
+                    role: None,
+                    group: None,
+                }],
+            }
+        };
+        let signal = |_: usize| {
+            (
+                Signal {
+                    id: "test.table",
+                    detail: String::new(),
+                    weight: 1000,
+                },
+                false,
+            )
+        };
+        let decided = |order: &[u32]| {
+            let page = page_of(order);
+            let placed = page_of(&(0..n).collect::<Vec<_>>());
+            let file = [layoutregions::file::FilePage::of(&placed)];
+            let facts = layoutregions::file::learn(&file, false, &|_| false);
+            let index = FileIndex::new(&facts);
+            // The part of today's reading: the table, named by the ids of the page handed in.
+            let pre: HashMap<u32, usize> = (0..n)
+                .filter(|&i| (9..13).contains(&order[i as usize]))
+                .map(|i| (i, 7))
+                .collect();
+            let grids = layoutregions::segment::drawn::grids(&page.rules);
+            let d = decide(
+                &page,
+                &grids,
+                (&facts, &index),
+                &|_| false,
+                (&pre, &signal),
+                &Limits::default(),
+                &|| false,
+            );
+            // Each decision as its kind, the runs it holds (by the ids of the page in the
+            // order of its places) and its part of today's reading.
+            let mut out: Vec<Read> = Vec::new();
+            for k in 0..d.decisions.len() {
+                let mut runs: Vec<u32> = d
+                    .prims(k)
+                    .iter()
+                    .filter_map(|p| match *p {
+                        PrimId::Text(i) => Some(order[i as usize]),
+                        // The rules of the drawn table keep their ids in every order.
+                        _ => None,
+                    })
+                    .collect();
+                assert!(d.prims(k).is_sorted(), "sorted by the ids handed in");
+                for p in d.prims(k) {
+                    let PrimId::Text(i) = *p else { continue };
+                    assert_eq!(d.of_run[i as usize], k as u32, "run {i} of {order:?}");
+                }
+                runs.sort_unstable();
+                out.push((d.decisions[k].kind, runs, d.pre[k]));
+            }
+            out
+        };
+        let in_order: Vec<u32> = (0..n).collect();
+        let base = decided(&in_order);
+        assert!(
+            base.iter().any(|(k, runs, pre)| *k == Kind::Table
+                && *runs == [9, 10, 11, 12]
+                && *pre == Some((7, false))),
+            "{base:?}"
+        );
+        assert!(
+            base.iter()
+                .any(|(k, runs, _)| *k == Kind::Paragraph && runs.len() == 8),
+            "{base:?}"
+        );
+        assert!(
+            base.iter()
+                .any(|(k, runs, pre)| *k == Kind::Table && runs.len() == 9 && pre.is_none()),
+            "{base:?}"
+        );
+        let reversed: Vec<u32> = (0..n).rev().collect();
+        let mixed: Vec<u32> = (0..n).map(|i| (i * 5 + 3) % n).collect();
+        for order in [reversed, mixed] {
+            assert_eq!(decided(&order), base, "order {order:?}");
+        }
+    }
+
+    /// Page `n` of a file whose every page has a footnote legend and runs out of the order
+    /// of their places: a line with a raised number, four body lines in two runs each with
+    /// the right run first, and the legend of one footnote. The words differ by page, so no
+    /// line is a running line.
+    fn page_with_legend(n: u32) -> PageIn {
+        const PARTS: [&str; 8] = ["bar", "den", "fol", "gim", "hul", "jor", "kes", "lim"];
+        let word = |k: u32| {
+            let at = |d: u32| PARTS[((n * 5 + k) / 8u32.pow(d) % 8) as usize];
+            format!("{}{}{}", at(0), at(1), at(2))
+        };
+        let mut texts = vec![
+            run(&format!("the {} charge", word(0)), 40.0, 720.0, 9.0, 0),
+            run(" 2", 112.0, 724.0, 6.0, 0),
+        ];
+        for k in 0..4u32 {
+            let y = 690.0 - 12.0 * k as f32;
+            texts.push(run("on every day of the week", 240.0, y, 9.0, 1 + k));
+            let left = format!("the {} mill ran", word(1 + k));
+            texts.push(run(&left, 40.0, y, 9.0, 1 + k));
+        }
+        texts.push(run(&format!("2 per {}", word(5)), 40.0, 70.0, 6.0, 5));
+        PageIn {
+            page: n,
+            size: [600.0, 800.0],
+            turn: 0,
+            texts,
+            rules: Vec::new(),
+            boxes: Vec::new(),
+            pictures: Vec::new(),
+            codes: Vec::new(),
+            given: Vec::new(),
+        }
+    }
+
+    /// The steps of work [`decide`] takes for a file of `pages` pages of
+    /// [`page_with_legend`]; `None` in a release build.
+    fn legend_pages_steps(pages: u32) -> Option<u64> {
+        let ins: Vec<PageIn> = (1..=pages).map(page_with_legend).collect();
+        let file: Vec<_> = ins.iter().map(layoutregions::file::FilePage::of).collect();
+        let facts = layoutregions::file::learn(&file, false, &|_| false);
+        assert_eq!(
+            facts.legends.len(),
+            pages as usize,
+            "a legend on every page"
+        );
+        let index = FileIndex::new(&facts);
+        let pre = HashMap::new();
+        let signal = |_: usize| -> (Signal, bool) { unreachable!("no given region") };
+        let before = crate::work::work_steps();
+        for page in &ins {
+            assert!(layoutregions::RunOrder::of(page).is_some(), "out of order");
+            let grids = layoutregions::segment::drawn::grids(&page.rules);
+            let d = decide(
+                page,
+                &grids,
+                (&facts, &index),
+                &|_| false,
+                (&pre, &signal),
+                &Limits::default(),
+                &|| false,
+            );
+            // The legend is found by its renamed runs: the last run handed in.
+            let last = page.texts.len() as u32 - 1;
+            let k = d.of_run[last as usize] as usize;
+            assert_eq!(
+                d.decisions[k].kind,
+                Kind::FootnoteLegend,
+                "page {}",
+                page.page
+            );
+            assert_eq!(d.prims(k), [PrimId::Text(last)]);
+        }
+        crate::work::work_steps().zip(before).map(|(a, b)| a - b)
+    }
+
+    /// A page out of the order of its places with a footnote legend gets its own legend
+    /// renamed, and no other page's: the work of a file of such pages grows with its pages,
+    /// not with their square (review L2 of part 2b-1 of Task 31c: every such page copied the
+    /// legends of the whole file). The renaming counts its steps (`RunOrder::legend`).
+    #[test]
+    fn pages_out_of_place_order_with_a_legend_each_take_work_in_line_with_the_pages() {
+        let (few, many) = (legend_pages_steps(8), legend_pages_steps(128));
+        eprintln!("legend pages: 8 pages {few:?} steps, 128 pages {many:?} steps");
+        if let Some((few, many)) = few.zip(many) {
+            // 16 times the pages: 16 times the steps, with an eighth of the small file's
+            // steps of room. A copy of every legend per page would add 128 * 128 legends.
+            assert!(
+                many <= 16 * few + few / 8,
+                "{few} steps for 8, {many} for 128"
+            );
+        }
     }
 }

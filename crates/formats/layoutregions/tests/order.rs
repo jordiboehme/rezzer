@@ -799,22 +799,82 @@ fn order_of_pictures(n: usize, per: Option<u64>) -> (Vec<RegionId>, Option<u64>)
 
 /// Task 22 fix round 4: placing the pictures of a page in the source order grows with its
 /// pictures and lines, not with their product. Fix round 5: the pictures placed past the
-/// budget (by their height) stand where the full rule puts them.
+/// budget (by their height) stand where the full rule puts them. The work for each region is
+/// set small so that a page of a thousand pictures reaches it (Task 31c: a picture looks only
+/// at the content that can reach into its width, so the page no longer reaches the work the
+/// engine gives it); the bound does not depend on that number.
 #[test]
 fn placing_pictures_grows_with_the_page_not_pictures_times_lines() {
-    let (bounded, small) = order_of_pictures(1000, None);
+    let (bounded, small) = order_of_pictures(1000, Some(16));
     let (full, all) = order_of_pictures(1000, Some(u64::MAX));
     assert_eq!(bounded, full);
-    let (_, large) = order_of_pictures(4000, None);
+    let (_, large) = order_of_pictures(4000, Some(16));
     let (Some(small), Some(all), Some(large)) = (small, all, large) else {
         // A release build does not count work.
         return;
     };
     // The budget is reached: some pictures are placed by their height.
     assert!(small < all, "{small} steps bounded, {all} without a bound");
+    // Measured 92,805 steps for 1000 and 379,765 for 4000 (4.1 times): the bound was 8.
     assert!(
-        large < 8 * small,
+        large < 5 * small,
         "{small} steps for 1000, {large} for 4000"
+    );
+}
+
+/// The work steps of ordering, in the source order, 50 paragraphs of two lines, each line set
+/// as `runs` short runs side by side across the page, and a rule across the page with each
+/// paragraph, and with `pictures` a narrow picture at the right edge under each paragraph.
+/// Each picture stands after its paragraph.
+fn work_beside_runs(runs: usize, pictures: bool) -> Option<u64> {
+    let mut p = Page::new();
+    let mut source = Vec::new();
+    let mut want = Vec::new();
+    for k in 0..50 {
+        let y = 790.0 - 15.0 * k as f32;
+        let mut prims = Vec::new();
+        for line in 0..2 {
+            for r in 0..runs {
+                let x = 50.0 + 480.0 * r as f32 / runs as f32;
+                prims.extend(p.lines(x, y - 3.0 * line as f32, 1, 1, 2.0));
+            }
+        }
+        prims.push(p.rule(50.0, 560.0, y - 5.0));
+        let para = p.region(Kind::Paragraph, prims);
+        source.push(para);
+        want.push(para);
+        if pictures {
+            let pic = p.picture(535.0, y - 12.0, 545.0, y - 7.0);
+            want.push(p.region(Kind::Figure, vec![pic]));
+        }
+    }
+    let before = work_steps();
+    let got = with_place_work(u64::MAX, || order_by_source(&p.page, &p.regions, &source));
+    let after = work_steps();
+    assert_eq!(got, want, "{runs} runs a line");
+    before.zip(after).map(|(b, a)| a - b)
+}
+
+/// Task 31c: a picture is placed by the content in its width, and only the content that can
+/// reach into its width is looked at: four times the runs left of the pictures add little to
+/// the work of placing them (the work with the pictures less the work without), which before
+/// went over every run left of each picture's right edge for each picture. The rule across
+/// the page in each paragraph is of another class of width than the runs, so it does not
+/// make every run one that could reach.
+#[test]
+fn a_picture_looks_at_the_content_in_its_width_only() {
+    let placing = |runs: usize| {
+        let with = work_beside_runs(runs, true)?;
+        Some(with - work_beside_runs(runs, false)?)
+    };
+    let (Some(small), Some(large)) = (placing(100), placing(400)) else {
+        // A release build does not count work.
+        return;
+    };
+    eprintln!("beside runs: {small} steps for 100 runs a line, {large} for 400");
+    assert!(
+        large < 2 * small,
+        "{small} steps for 100 runs a line, {large} for 400"
     );
 }
 

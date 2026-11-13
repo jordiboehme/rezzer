@@ -2986,6 +2986,295 @@ fn label_row_over_two_blocks(v: &Variant, boxes: bool) -> Sheet {
     s
 }
 
+/// Class K of Task 31 (masked geometry of an owner's page): a ruled table of three bold header
+/// cells over five empty rows, every cell side a stroke of its own, and right of it, outside
+/// the table's frame, two fields: a label on an underline with its value under it. The first
+/// label stands on the baseline of the header cells. The header row stands apart from the
+/// fields, and each label stands with its value.
+///
+/// `third` draws the underline of a third field farther right, at a height between the two
+/// underlines. The strips between rules are searched level by level, so with it the two
+/// underlines bound no strip, and the shape runs through the path of the owner's page (which
+/// holds more rules): the header cells a paragraph of a grid read as no table, each label a
+/// paragraph with its value, and the first label on the line of the header cells in the text
+/// pass. Without it the two underlines bound a strip that holds the first value and the
+/// second label.
+fn side_fields_beside_an_empty_table(v: &Variant, third: bool) -> Sheet {
+    side_fields_beside_a_table(v, third, false, false)
+}
+
+/// The rows of the table of [`side_fields_beside_a_table`] when it is filled.
+const FRAME_ROWS: [[&str; 3]; 5] = [
+    ["Left rail", "2", "sound"],
+    ["Right rail", "2", "sound"],
+    ["Cross bar", "4", "one bent"],
+    ["Corner plate", "8", "sound"],
+    ["Foot", "4", "two worn"],
+];
+
+/// [`side_fields_beside_an_empty_table`] in its other layouts (review 1 of Task 31c, M3).
+/// With `mirror` the two fields stand left of the table, so the first label comes first on
+/// the line of the header cells. With `filled` the five rows of the table hold text
+/// ([`FRAME_ROWS`]), so the rows under the header row are no empty lines.
+fn side_fields_beside_a_table(v: &Variant, third: bool, mirror: bool, filled: bool) -> Sheet {
+    let k = v.k();
+    let (plain, bold) = v.faces();
+    let top = 707.5;
+    // The fields start 6 points after the table, or the table 6 points after the longer
+    // underline.
+    let (xs, at) = if mirror {
+        ([117.0, 312.0, 383.0, 454.0], 31.0)
+    } else {
+        ([31.0, 226.0, 297.0, 368.0], 374.0)
+    };
+    let row = 10.0 * k;
+    let mut t = String::new();
+    // Each cell's four sides, every one a stroke of its own.
+    for r in 0..6 {
+        let (y1, y0) = (top - row * r as f32, top - row * (r + 1) as f32);
+        for c in xs.windows(2) {
+            let (x0, x1) = (c[0], c[1]);
+            t += &format!(
+                "q 1 w {} {y1} m {} {y1} l S {} {y0} m {} {y0} l S Q\n",
+                x0 - 0.5,
+                x1 + 0.5,
+                x0 - 0.5,
+                x1 + 0.5
+            );
+            t += &format!(
+                "q 1.25 w {x0} {} m {x0} {} l S {x1} {} m {x1} {} l S Q\n",
+                y0 - 0.63,
+                y1 + 0.63,
+                y0 - 0.63,
+                y1 + 0.63
+            );
+        }
+    }
+    let titles = ["Part of the frame", "Count", "Note"];
+    for (c, title) in titles.iter().enumerate() {
+        t += &show(bold, 8.0 * k, xs[c] + 3.0, top - 7.5 * k, title);
+    }
+    // The underlines are as long as on the owner's page (47 and 79 points), not as the labels.
+    let fields = [
+        ("Checked by", "A/B", 0.0, 47.45),
+        ("Passed on to", "C/D", 24.14, 79.33),
+    ];
+    if filled {
+        for (r, cells) in FRAME_ROWS.iter().enumerate() {
+            for (c, cell) in cells.iter().enumerate() {
+                let y = top - row * (r + 1) as f32 - 7.5 * k;
+                t += &show(plain, 8.0 * k, xs[c] + 3.0, y, cell);
+            }
+        }
+    }
+    for (label, value, down, rule) in fields {
+        let y = top - 6.57 * k - down * k;
+        t += &show(plain, 7.0 * k, at, y, label);
+        t += &format!(
+            "q 0.5 w {at} {} m {} {} l S Q\n",
+            y - 0.58,
+            at + rule,
+            y - 0.58
+        );
+        t += &show(plain, 7.0 * k, at, y - 8.05 * k, value);
+    }
+    if third {
+        t += &format!(
+            "q 0.5 w 480 {} m 540 {} l S Q\n",
+            top - 20.0 * k,
+            top - 20.0 * k
+        );
+    }
+    // The page holds the table and the fields only: no body text makes a column beside them.
+    let mut built = Built::new(&v.geo());
+    built.page = FormPage {
+        template: t,
+        ..FormPage::default()
+    };
+    let mut s = Sheet::new(built);
+    s.once = crate::axes::shown(&s.built.page.template);
+    s.want
+        .orders
+        .push(titles.iter().map(|t| t.to_string()).collect());
+    for (label, value, ..) in fields {
+        // The label stands with its value, apart from the header row.
+        s.want
+            .orders
+            .push(vec![label.to_string(), value.to_string()]);
+        for title in titles {
+            s.want.lines_apart.push((title.into(), label.into()));
+            s.want.lines_apart.push((title.into(), value.into()));
+        }
+    }
+    s.want
+        .lines_apart
+        .push((fields[0].1.into(), fields[1].0.into()));
+    if filled {
+        // The table with its rows, apart from the fields.
+        let rows = std::iter::once(titles).chain(FRAME_ROWS);
+        s.want
+            .tables
+            .push(rows.map(|r| r.map(String::from).to_vec()).collect());
+    }
+    s
+}
+
+/// The paragraph of [`letter_past_a_box`]: a short line, a longer one, a line of the full
+/// width and a short last line, each filled from these words up to its measure.
+const PAST_A_BOX: [(&str, f32); 4] = [
+    ("The parts you asked for are here,", 140.0),
+    (
+        "and the carrier brings all six boxes to your door on the first day of the week,",
+        339.0,
+    ),
+    (
+        "where he also takes the old frames back with him at no further cost to you, so please keep them near the gate until he comes",
+        535.0,
+    ),
+    ("and sign the list he hands you.", 201.0),
+];
+
+/// Task 31c, class F (masked geometry of an owner's page): the head of a letter as in
+/// [`head_block_beside_a_logo`], and a paragraph whose first lines are short and stand left
+/// of the box of the head, while its third line runs the full width under the box. Under it
+/// a label on the right and a line on the left, then a paragraph of full width. The
+/// paragraph beside the box reads in one piece: the column flows past the block on its
+/// right, and the head block and the box read before or after it.
+fn letter_past_a_box(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, bold) = v.faces();
+    let (small, size) = (9.0 * k, 11.0 * k);
+    let mut t = crate::common::logo(30.0, 767.0, 88.0, 50.0);
+    for (n, l) in HEAD_BLOCK.iter().enumerate() {
+        t += &right(plain, small, 565.0, 808.0 - small * n as f32, l);
+    }
+    t += &show(
+        plain,
+        small,
+        30.0,
+        750.0,
+        "Northwind Supply Ltd. - 12 Harbor Road - 12345 Fairhaven",
+    );
+    for y in [738.0, 726.0, 714.0, 657.0, 645.0, 633.0] {
+        t += &show(plain, size, 30.0, y, " ");
+    }
+    let address = ["Erika Example", "34 Mill Lane", "67890 Oakfield"];
+    for (n, l) in address.iter().enumerate() {
+        t += &show(plain, size, 56.91, 699.0 - 13.0 * n as f32, l);
+    }
+    t += &show(plain, size, 32.0, 622.0, "12 May 2026");
+    t += &show(bold, size, 32.0, 609.0, "Your order of last week");
+    t += &right(plain, size, 563.0, 622.0, "Quote in every reply");
+    t += "q 0.5 w 458 607 107 13 re S Q\n";
+    t += &right(plain, size, 563.0, 609.5, "Ref: 123456789");
+    let step = 12.0 * k;
+    let mut y = 583.0;
+    t += &show(plain, size, 30.0, y, "Dear Ms Example,");
+    t += &show(plain, size, 30.0, y - step, " ");
+    y -= 2.0 * step;
+    // Each line holds the words that fit its measure: the same places in every face.
+    let lines: Vec<String> = PAST_A_BOX
+        .iter()
+        .map(|(words, measure)| wrapped(words, plain, size, *measure).swap_remove(0))
+        .collect();
+    for l in &lines {
+        t += &show(plain, size, 30.0, y, l);
+        y -= step;
+    }
+    // A label on the right and a line on the left under the paragraph, then full lines.
+    t += &right(plain, size, 554.0, y - 5.0 * k, "Scan to pay");
+    t += &show(
+        plain,
+        size,
+        32.0,
+        y - 15.0 * k,
+        "The account for the sum stands on the next sheet.",
+    );
+    y -= 15.0 * k + 74.0;
+    let close = wrapped(
+        "Please look at every part when it arrives and write to us within ten days when something is missing or broken, so that we can send a new part with the next van that leaves our yard for your town and the towns around it.",
+        plain,
+        size,
+        530.0,
+    );
+    for l in &close {
+        t += &show(plain, size, 30.0, y, l);
+        y -= step;
+    }
+    let mut s = sheet(v, t, y - 60.0, None);
+    let head = [
+        HEAD_BLOCK[0],
+        HEAD_BLOCK[1],
+        "Partners",
+        "AB123456789",
+        "CD12EFG34567890123",
+    ];
+    s.want.orders.push(head.map(String::from).to_vec());
+    // The paragraph beside and under the box is one block, in its order.
+    s.want.orders.push(lines.clone());
+    s.want.together.push(lines.clone());
+    s.want.paragraphs.push(close.join(" "));
+    for l in &lines {
+        for other in ["Quote in every reply", "Ref: 123456789", HEAD_BLOCK[0]] {
+            s.want.apart.push((l.clone(), other.into()));
+        }
+    }
+    s
+}
+
+/// The words of the two columns of [`full_width_under_two_columns`].
+const COLUMN_WORDS: &str = "The yard opens at seven each morning and the first van leaves soon after with the parts that were packed the evening before, so an order that reaches us by noon is on its way the next day. A second van follows at ten and takes the larger frames, which two people must lift, to the towns along the river and back. Whoever waits for a part can ask the driver for the list of the day, where every box stands with its number, its weight and the name of the one who packed it, and can sign for it at the door when it comes. A box that nobody takes in goes back to the yard with the last van and waits there on the shelf by the gate for three more days before we write to ask what shall be done with it.";
+
+/// Review 1 of Task 31c, M6: two columns of prose on the same baselines, the right one a
+/// line shorter, and right under them, at their pitch, left edge and size, a paragraph of
+/// the full width that ends in a short line. The text flows from the left column into the
+/// right one; the paragraph follows both. Its full lines stand across the gutter between
+/// the last line of the left column and its own short last line, which looks like a column
+/// that flows past a block on its right (class F), but the lines over them stand beside the
+/// right column: the paragraph is not read between the two columns.
+fn full_width_under_two_columns(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let size = 10.0 * k;
+    let step = 12.0 * k;
+    let lines = wrapped(COLUMN_WORDS, plain, size, 235.0);
+    assert!(lines.len() >= 11, "{}", lines.len());
+    let (left, right) = (&lines[..6], &lines[6..11]);
+    let mut t = String::new();
+    for (n, l) in left.iter().enumerate() {
+        t += &show(plain, size, 40.0, 700.0 - step * n as f32, l);
+    }
+    for (n, l) in right.iter().enumerate() {
+        t += &show(plain, size, 315.0, 700.0 - step * n as f32, l);
+    }
+    let mut full = wrapped(
+        "Please look at every part when it arrives and write to us within ten days when something is missing or broken, so that we can send a new part with the next van that leaves our yard for your town and the towns around it, at no cost to you and with no further form to fill in for the driver or for the office of the yard",
+        plain,
+        size,
+        510.0,
+    );
+    full.truncate(2);
+    full.push("and close the gate behind you.".into());
+    let mut y = 700.0 - step * 6.0;
+    for l in &full {
+        t += &show(plain, size, 40.0, y, l);
+        y -= step;
+    }
+    let mut s = sheet(v, t, y - 60.0, None);
+    // The columns in their order, the right one right after the left one; then the paragraph.
+    let columns: Vec<String> = left.iter().chain(right).cloned().collect();
+    s.want.orders.push(columns.clone());
+    s.want.together.push(columns);
+    s.want.orders.push(
+        [right[4].clone()]
+            .into_iter()
+            .chain(full.iter().cloned())
+            .collect(),
+    );
+    s.want.together.push(full);
+    s
+}
+
 /// The shapes of business documents.
 pub(crate) fn shapes() -> Vec<Shape> {
     vec![
@@ -3005,6 +3294,31 @@ pub(crate) fn shapes() -> Vec<Shape> {
             draw: |v| (labelled_boxes(v), None),
         },
         Shape {
+            name: "two fields of a label over a rule beside a ruled table with empty rows",
+            axes: DOC,
+            draw: |v| (side_fields_beside_an_empty_table(v, false), None),
+        },
+        Shape {
+            name: "two fields of a label over a rule beside a ruled table with empty rows and the rule of a third field",
+            axes: DOC,
+            draw: |v| (side_fields_beside_an_empty_table(v, true), None),
+        },
+        Shape {
+            name: "a paragraph of full width under two columns of prose, the right one a line shorter",
+            axes: DOC,
+            draw: |v| (full_width_under_two_columns(v), None),
+        },
+        Shape {
+            name: "two fields of a label over a rule left of a ruled table with empty rows and the rule of a third field",
+            axes: DOC,
+            draw: |v| (side_fields_beside_a_table(v, true, true, false), None),
+        },
+        Shape {
+            name: "two fields of a label over a rule beside a ruled table with filled rows and the rule of a third field",
+            axes: DOC,
+            draw: |v| (side_fields_beside_a_table(v, true, false, true), None),
+        },
+        Shape {
             name: "a framed label column and value column, rows 1.36 sizes apart beside a picture",
             axes: DOC,
             draw: |v| (framed_pairs(v, 15.0 / 11.0, true), None),
@@ -3018,6 +3332,11 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "a head block beside a logo over a letter",
             axes: DOC,
             draw: |v| (head_block_beside_a_logo(v, false), None),
+        },
+        Shape {
+            name: "a letter paragraph that runs on under a box on its right",
+            axes: DOC,
+            draw: |v| (letter_past_a_box(v), None),
         },
         Shape {
             name: "a head block of two lines beside a logo over a letter",

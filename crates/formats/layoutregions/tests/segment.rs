@@ -686,10 +686,112 @@ fn nested_boxes_around_deep_text_are_cut_in_bounded_work() {
 }
 
 /// Work steps of `segment_page` on the staircase page (70 boxes, 5,000 lines apart):
-/// 11,230,144 measured, about ten in a hundred more allowed. The cut
+/// 12,862,944 measured, about seven in a hundred more allowed (11,230,144 before Task 31c:
+/// the cut now looks once more over the pieces of each gutter for a piece that stands
+/// between two lines of a column, one step a piece, see `between_lines`, and each cut
+/// takes the joined rules at the heights of its pieces, one step a piece, see
+/// `cut::at_heights`). The cut
 /// looks for bands only a few levels deep, so each level of boxes cuts its text in work in
 /// proportion to it.
-const STAIRCASE_BOUND: u64 = 12_500_000;
+const STAIRCASE_BOUND: u64 = 13_800_000;
+
+/// `n` boxes side by side, each 6 points wide and as tall as the page, with an upright line
+/// down its middle (a grid of one row and two cells) and one run in its left cell.
+fn boxes_side_by_side(n: usize) -> PageIn {
+    let mut rules = Vec::new();
+    let mut texts = Vec::new();
+    for k in 0..n {
+        let x = 10.0 + 12.0 * k as f32;
+        rules.push(rect(x, 100.0, x + 6.0, 700.0));
+        rules.push(line(x + 3.0, 100.0, x + 3.0, 700.0));
+        texts.push(run("a", x + 0.5, 400.0, 2.0, 4.0, 0));
+    }
+    page([12.0 * n as f32 + 20.0, 800.0], texts, rules)
+}
+
+/// Task 31c: the grid search walks across the page and counts the lines that meet, so grids
+/// side by side whose lines share their heights cost about their lines. Before, each upright
+/// line was tested against every flat line in its height: 400 grids took 960,000 steps and
+/// 800 took 3,840,000, four times as many.
+#[test]
+fn grids_side_by_side_are_searched_in_work_about_their_lines() {
+    let work = |n: usize| {
+        let p = boxes_side_by_side(n);
+        let before = work_steps();
+        let found = layoutregions::segment::drawn::grids(&p.rules).expect("searched");
+        let after = work_steps();
+        assert_eq!(found.groups.len(), n);
+        assert!(
+            found
+                .groups
+                .iter()
+                .all(|(h, v)| h.len() == 2 && v.len() == 3)
+        );
+        before.zip(after).map(|(b, a)| a - b)
+    };
+    let (Some(small), Some(large)) = (work(400), work(800)) else {
+        // A release build does not count work.
+        return;
+    };
+    assert!(
+        large * 10 < 22 * small,
+        "{small} steps for 400, {large} for 800"
+    );
+    assert!(large < 200_000, "{large} steps for 800");
+}
+
+/// The lines that meet are found whatever their order, and lines that only come near are
+/// not: a flat line that ends more than a snap before an upright one, and one that lies more
+/// than a snap over its top, stay out of its grid.
+#[test]
+fn the_grid_walk_finds_the_lines_that_meet_and_no_others() {
+    let rules = vec![
+        // A frame of four lines, given from right to left and top to bottom.
+        line(100.0, 0.0, 100.0, 50.0),
+        line(0.0, 50.0, 100.0, 50.0),
+        line(0.0, 0.0, 100.0, 0.0),
+        line(0.0, 0.0, 0.0, 50.0),
+        // Ends 3 points before the right side, at its height: meets the left side only.
+        line(-20.0, 25.0, 97.0, 25.0),
+        // 3 points over the top of the frame: meets nothing.
+        line(0.0, 53.0, 100.0, 53.0),
+        // An upright line of its own, away from all.
+        line(200.0, 0.0, 200.0, 50.0),
+    ];
+    let found = layoutregions::segment::drawn::grids(&rules).expect("searched");
+    assert_eq!(found.groups.len(), 1);
+    let (h, v) = &found.groups[0];
+    let heights: Vec<f32> = h.iter().map(|&j| found.hs[j].at).collect();
+    let places: Vec<f32> = v.iter().map(|&k| found.vs[k].at).collect();
+    assert_eq!(heights, [0.0, 25.0, 50.0]);
+    assert_eq!(places, [0.0, 100.0]);
+}
+
+/// Task 31c: a box nests in the boxes at its own place, found through an index of all boxes,
+/// so boxes side by side are nested in work about their number. Before, each box was tested
+/// against every box before it at its depth.
+#[test]
+fn boxes_side_by_side_are_nested_in_work_about_their_number() {
+    let work = |n: usize| {
+        let p = boxes_side_by_side(n);
+        let before = work_steps();
+        let s = segment_page(&p, &Limits::default(), &|| false);
+        let after = work_steps();
+        check_cover(&s, &p);
+        let grids = with_source(&s, |x| matches!(x, Source::Grid { .. }));
+        assert_eq!(grids.len(), n);
+        before.zip(after).map(|(b, a)| a - b)
+    };
+    let (Some(small), Some(large)) = (work(400), work(800)) else {
+        // A release build does not count work.
+        return;
+    };
+    eprintln!("side by side: {small} steps for 400, {large} for 800");
+    assert!(
+        large * 10 < 22 * small,
+        "{small} steps for 400, {large} for 800"
+    );
+}
 
 #[test]
 fn a_depth_bound_of_zero_keeps_the_page_one_leaf() {

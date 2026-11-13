@@ -1247,7 +1247,7 @@ pub(crate) fn cell_fields<'a>(view: &PageView<'a>, seg: &Segment) -> Option<Cell
     let Ok(g) = &view.drawn.grids else {
         return None;
     };
-    let grp = group_at(g, &seg.bounds)?;
+    let grp = group_at(view, g, &seg.bounds)?;
     let h: Vec<_> = grp.0.iter().map(|&j| g.hs[j]).collect();
     let v: Vec<_> = grp.1.iter().map(|&k| g.vs[k]).collect();
     let (xs, ys) = edges(&h, &v);
@@ -1324,7 +1324,7 @@ fn grid_fields(
     let Ok(g) = &view.drawn.grids else {
         return None;
     };
-    let grp = group_at(g, &seg.bounds)?;
+    let grp = group_at(view, g, &seg.bounds)?;
     let h: Vec<_> = grp.0.iter().map(|&j| g.hs[j]).collect();
     let v: Vec<_> = grp.1.iter().map(|&k| g.vs[k]).collect();
     let (xs, _) = edges(&h, &v);

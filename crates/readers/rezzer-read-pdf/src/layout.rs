@@ -604,16 +604,42 @@ impl LineRun for NoteRun<'_> {
 /// after it (a segment a bound left whole kept as laid out, pictures parted from text). Given
 /// regions of a page are decided as given, with no reading of today's readers behind them.
 /// Each decision is its kind, its primitives and what made its segment and the ones over it
-/// (innermost first, joined by `<`), in the order of the decisions. For the metamorphic tests,
+/// (innermost first, joined by `<`), in the order of the decisions. The runs are read in the
+/// order of their places, whatever order the pages hold them in. For the metamorphic tests,
 /// which compare these decisions on a page and on the same page changed in a way that keeps
 /// its meaning.
 pub(crate) fn engine_decisions(
     pages: &[layoutregions::PageIn],
     tagged: bool,
 ) -> Vec<Vec<(Kind, Vec<layoutregions::PrimId>, String)>> {
+    engine_decisions_why(pages, tagged)
+        .into_iter()
+        .map(|page| page.into_iter().map(|(k, p, m, _)| (k, p, m)).collect())
+        .collect()
+}
+
+/// The facts of the file of `pages` as [`engine_decisions_why`] learns them: with `placed`
+/// from the runs of each page in the order of their places ([`layoutregions::RunOrder`]),
+/// else in the order they have on the page. With them, per page, the id each run of the
+/// order learned in has on the page handed in (`None`: the same ids). The runs of a legend
+/// are named by the order learned in. [`file::learn`] reads the lines in place order itself;
+/// `placed` is kept for the legends and for the test that compares the two.
+fn engine_facts(
+    pages: &[layoutregions::PageIn],
+    tagged: bool,
+    placed: bool,
+) -> (file::FileFacts, Vec<Option<Vec<u32>>>) {
+    let ordered: Vec<Option<layoutregions::RunOrder>> = pages
+        .iter()
+        .map(|p| placed.then(|| layoutregions::RunOrder::of(p)).flatten())
+        .collect();
     let runs: Vec<Vec<NoteRun<'_>>> = pages
         .iter()
-        .map(|p| p.texts.iter().map(NoteRun).collect())
+        .zip(&ordered)
+        .map(|(p, o)| {
+            let texts = o.as_ref().map_or(&p.texts, |o| &o.page.texts);
+            texts.iter().map(NoteRun).collect()
+        })
         .collect();
     let file: Vec<FilePage<'_, NoteRun<'_>>> = pages
         .iter()
@@ -625,6 +651,75 @@ pub(crate) fn engine_decisions(
         })
         .collect();
     let facts = file::learn(&file, tagged, &ends_in_amount);
+    drop(file);
+    drop(runs);
+    (
+        facts,
+        ordered.into_iter().map(|o| o.map(|o| o.back)).collect(),
+    )
+}
+
+/// The facts of the file of `pages` learned from the runs in the order they have on each
+/// page (the reader's flow) and in the order of their places (as [`engine_decisions_why`]
+/// learns them), the runs of the legends named by the ids of `pages` in both: the runs of
+/// each footnote, each raised reference and the word it goes after or into. For the tests
+/// that compare the facts of the two orders.
+///
+/// The first of the two is what the read learns for an untagged file. For a tagged file the
+/// read learns from the reader's runs before a run that an ActualText replaces is dropped and
+/// the first one rewritten, and the engine pages hold the runs after that step: there the
+/// set of runs differs, not only their order.
+pub(crate) fn engine_facts_by_order(
+    pages: &[layoutregions::PageIn],
+    tagged: bool,
+) -> [file::FileFacts; 2] {
+    let given = engine_facts(pages, tagged, false).0;
+    let (mut by_place, back) = engine_facts(pages, tagged, true);
+    for (page, back) in pages.iter().zip(&back) {
+        let (Some(back), Some(legend)) = (back, by_place.legends.get_mut(&page.page)) else {
+            continue;
+        };
+        let old = |run: &mut u32| *run = back.get(*run as usize).copied().unwrap_or(*run);
+        for e in &mut legend.entries {
+            e.runs.iter_mut().for_each(old);
+        }
+        for r in &mut legend.raised {
+            old(&mut r.run);
+            match &mut r.place {
+                file::RefPlace::End => {}
+                file::RefPlace::Inside { word, .. } | file::RefPlace::Above { word } => old(word),
+            }
+        }
+    }
+    [given, by_place]
+}
+
+/// One decision of [`engine_decisions_why`]: its kind, its primitives, what made its segment
+/// and its reasons in words.
+pub(crate) type DecisionWhy = (Kind, Vec<layoutregions::PrimId>, String, String);
+
+/// [`engine_decisions`] with the reasons of each decision in words: its certainty and score,
+/// the ids of its signals, and each candidate of its segment with its score and signals (the
+/// kinds that claimed it, the winner among them). For the path trace of a metamorphic pin.
+pub(crate) fn engine_decisions_why(
+    pages: &[layoutregions::PageIn],
+    tagged: bool,
+) -> Vec<Vec<DecisionWhy>> {
+    // The lines of a file are learned with their runs in the order of their places,
+    // whatever order they are handed in (`file::learn` sorts them), on this path and on the
+    // read's (`Style::learn` in `lay_out`): the body size, the heading sizes and the running
+    // lines do not change with the order of the runs. The legend of a page is the exception:
+    // it is read in the order handed in, because only the reader's order says that a
+    // reference number opens its line, and it names its runs by the ids of the page handed
+    // in (`decide` renames them for the page in place order). For a tagged file the read
+    // learns before the runs an ActualText replaces are dropped, so there the set of runs
+    // differs. The metamorphic tests compare the facts of the two orders
+    // (`engine_facts_by_order`), and the facts of the lines also with the runs shuffled.
+    //
+    // This path has no reader's order to keep: its pages may come with their runs shuffled.
+    // So it reads the legends from the pages in place order, which is the reader's order on
+    // nearly every page.
+    let [_, facts] = engine_facts_by_order(pages, tagged);
     let index = layoutregions::typers::FileIndex::new(&facts);
     let limits = layoutregions::Limits::default();
     let no_pre: HashMap<u32, usize> = HashMap::new();
@@ -655,7 +750,29 @@ pub(crate) fn engine_decisions(
                     }
                     let mut prims = decided.prims(k).to_vec();
                     prims.sort_unstable();
-                    (decided.decisions[k].kind, prims, made.join("<"))
+                    let d = &decided.decisions[k];
+                    let ids = |s: &[layoutregions::Signal]| {
+                        s.iter().map(|s| s.id).collect::<Vec<_>>().join(",")
+                    };
+                    let claims: Vec<String> = decided
+                        .typed
+                        .get(&d.seg)
+                        .map(|t| {
+                            t.iter()
+                                .map(|t| {
+                                    format!("{} {} {}", t.kind.name(), t.score.0, ids(&t.signals))
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    let why = format!(
+                        "{:?} {} [{}] claims [{}]",
+                        d.certainty,
+                        d.score.0,
+                        ids(&d.signals),
+                        claims.join(" | ")
+                    );
+                    (d.kind, prims, made.join("<"), why)
                 })
                 .collect()
         })
@@ -2129,9 +2246,28 @@ fn page_blocks_until(
     };
     drop(read_text);
     drop(title_text);
-    let kind_of = |id: u32| (decided.kind_of_run(id), box_of.get(&id).copied());
+    // The text regions with ink on more than one line of the page's text: the blocks of
+    // several lines the engine kept whole (see `layoutregions::part_lines`).
+    let mut first_line: HashMap<u32, u32> = HashMap::new();
+    let mut several: HashSet<u32> = HashSet::new();
+    for (r, &id) in text_flow.runs.iter().zip(&text_flow.ids) {
+        if r.text.trim().is_empty() {
+            continue;
+        }
+        if let Some(k) = decided.text_region_of_run(id)
+            && *first_line.entry(k).or_insert(r.line) != r.line
+        {
+            several.insert(k);
+        }
+    }
+    let keys = RunKeys {
+        kind_of: &|id| (decided.kind_of_run(id), box_of.get(&id).copied()),
+        region_of: &|id| decided.text_region_of_run(id),
+        grid_of: &|id| decided.given_of_run(id),
+        several: &|k| several.contains(&k),
+    };
     let lay = |flow: &Flow, range: Range<usize>, built: &mut Built| {
-        lay_text(flow, range, &kind_of, &text_sizes, cx, built);
+        lay_text(flow, range, &keys, &text_sizes, cx, built);
     };
     let mut start = 0;
     // What each placed part became, and the runs it holds.
@@ -2750,6 +2886,24 @@ fn majority(values: impl Iterator<Item = u32>) -> Option<u32> {
     count.iter().find(|c| c.1 == most).map(|c| c.0)
 }
 
+/// What a block of the walk never goes across: the kind of the decision of a line, the drawn
+/// box it stands in, and its region when the region is placed whole (see [`lay_text`]).
+type WalkKey = (Option<Kind>, Option<u32>, Option<u32>);
+
+/// What the laying of text asks about a run, by its id.
+struct RunKeys<'a> {
+    /// The kind of the run's decision and the drawn box it stands in.
+    kind_of: &'a dyn Fn(u32) -> (Option<Kind>, Option<u32>),
+    /// The region the engine itself decided the run as text (see
+    /// `decide::Decided::text_region_of_run`).
+    region_of: &'a dyn Fn(u32) -> Option<u32>,
+    /// The drawn grid the run stands in, when a reader of today gave or refused its text as
+    /// one region.
+    grid_of: &'a dyn Fn(u32) -> Option<u32>,
+    /// Whether a region has ink on more than one line of the page's text.
+    several: &'a dyn Fn(u32) -> bool,
+}
+
 /// How a run of text is laid out: by its tag (a run a tag element holds), or by the walk.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TextKey {
@@ -2759,14 +2913,14 @@ enum TextKey {
 
 /// Lays out the runs `range` of `flow` as text: runs a tag element holds by their tags
 /// ([`tagged`]), the others by one walk ([`untagged`]) over each stretch of them, with the
-/// kind of their decision and the drawn box they stand in (`kind_of`, by run id). A block of
+/// kind of their decision and the drawn box they stand in (`keys`, by run id). A block of
 /// the walk never goes from one kind or box into another (text in a drawn box never joins text
 /// outside it or in another box), but the walk reads the lines around it too: a line's
 /// measure and the column a heading size stands in are the page's, not its decision's.
 fn lay_text(
     flow: &Flow,
     range: Range<usize>,
-    kind_of: &dyn Fn(u32) -> (Option<Kind>, Option<u32>),
+    keys: &RunKeys<'_>,
     text_sizes: &[f32],
     cx: &Context<'_>,
     built: &mut Built,
@@ -2778,14 +2932,14 @@ fn lay_text(
             TextKey::Tag
         }
     };
-    let walk_key = |id: u32| -> (Option<Kind>, Option<u32>) {
-        let (kind, boxed) = kind_of(id);
+    let walk_key = |id: u32| -> WalkKey {
+        let (kind, boxed) = (keys.kind_of)(id);
         let kind = match kind {
             Some(Kind::Heading | Kind::TitleBlock) => Some(Kind::Heading),
             Some(k @ (Kind::Paragraph | Kind::List)) => Some(k),
             _ => None,
         };
-        (kind, boxed)
+        (kind, boxed, None)
     };
     let mut s = range.start;
     while s < range.end && built.stop.is_none() {
@@ -2797,7 +2951,48 @@ fn lay_text(
         let (runs, slots, ids) = (&flow.runs[s..e], &flow.slots[s..e], &flow.ids[s..e]);
         match k {
             TextKey::Tag => tagged(runs, slots, Some(ids), cx, built),
-            TextKey::Free => untagged(runs, Some(ids), text_sizes, &walk_key, cx, built),
+            TextKey::Free => {
+                // A region the engine keeps whole is placed whole (Task 31c, class K): a line
+                // of the text pass is parted where a block of several lines starts beside the
+                // text of a drawn grid (see `layoutregions::part_lines`). The edge is the
+                // grid's only: a drawn box around a word (a part number, a mark, a bracket at
+                // a box's edge) parts headings and values from their labels, measured on the
+                // public sets. The walk then never takes a block from such a region into
+                // other text: the region is part of the key of its lines.
+                let (region, boxed): (Vec<Option<u32>>, Vec<Option<u32>>) = ids
+                    .iter()
+                    .map(|&id| ((keys.region_of)(id), (keys.grid_of)(id)))
+                    .unzip();
+                let line: Vec<u32> = runs.iter().map(|r| r.line).collect();
+                let inked: Vec<bool> = runs.iter().map(|r| !r.text.trim().is_empty()).collect();
+                let extent: Vec<(f32, f32, f32)> =
+                    runs.iter().map(|r| (r.x, r.x + r.w, r.size)).collect();
+                let parted = layoutregions::part_lines(
+                    &line,
+                    &region,
+                    &boxed,
+                    &inked,
+                    &extent,
+                    keys.several,
+                );
+                match parted {
+                    None => untagged(runs, Some(ids), text_sizes, &walk_key, cx, built),
+                    Some(parted) => {
+                        let cut: Vec<Run> = runs
+                            .iter()
+                            .zip(&parted.lines)
+                            .map(|(r, &line)| Run { line, ..r.clone() })
+                            .collect();
+                        let key = |id: u32| -> WalkKey {
+                            let (kind, boxed, _) = walk_key(id);
+                            let whole = (keys.region_of)(id)
+                                .filter(|r| parted.whole.binary_search(r).is_ok());
+                            (kind, boxed, whole)
+                        };
+                        untagged(&cut, Some(ids), text_sizes, &key, cx, built);
+                    }
+                }
+            }
         }
         s = e;
     }
@@ -4198,7 +4393,7 @@ fn untagged(
     flow: &[Run],
     ids: Option<&[u32]>,
     text_sizes: &[f32],
-    key_of: &dyn Fn(u32) -> (Option<Kind>, Option<u32>),
+    key_of: &dyn Fn(u32) -> WalkKey,
     cx: &Context<'_>,
     out: &mut Built,
 ) {
@@ -4208,15 +4403,15 @@ fn untagged(
     // line's first run; none without `ids`). A line goes on the line before it by the walk, and
     // only with the same kind and box: the text of a page never holds the cells of a table its
     // readers left (they are kept as laid out).
-    let line_keys: Vec<(Option<Kind>, Option<u32>)> = all
+    let line_keys: Vec<WalkKey> = all
         .iter()
         .map(|l| {
             let at = span(flow, std::slice::from_ref(l)).start;
             ids.and_then(|ids| ids.get(at))
-                .map_or((None, None), |&id| key_of(id))
+                .map_or((None, None, None), |&id| key_of(id))
         })
         .collect();
-    let mut keys: HashMap<(Option<Kind>, Option<u32>), usize> = HashMap::new();
+    let mut keys: HashMap<WalkKey, usize> = HashMap::new();
     let block: Vec<Option<usize>> = line_keys
         .iter()
         .map(|k| {

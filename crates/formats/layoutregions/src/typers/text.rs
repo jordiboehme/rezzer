@@ -18,7 +18,9 @@
 //! reaches the least score, so a plain line of body text is a paragraph, and it never wins
 //! against another kind's evidence. The kinds today's rules decide between win by 150 or more.
 
-use crate::extract::table::grid::{Piece, piece_count};
+use std::collections::BTreeMap;
+
+use crate::extract::table::grid::{Piece, piece_count, pieces_of};
 use crate::extract::text::{Demotion, TextBlock, TextCx, next_block, sentences};
 use crate::file::{Band, bold_led, in_text_size, plain_size};
 use crate::input::{PrimId, TextRun};
@@ -120,6 +122,80 @@ pub(crate) struct SegText {
     /// A line of it stands in cells aligned with the cells of the page line over or under it
     /// (see [`aligned_cells`]).
     pub(crate) aligned: bool,
+}
+
+/// A block of lines is a column for a piece beside it when it has this many lines or more
+/// besides the line of the piece: one line under a line says nothing of a column (a short
+/// second line under a label and its value), two that both end before the piece do.
+const BESIDE_LINES: usize = 2;
+
+/// Whether a line of `seg` holds a piece that is another block beside the block of the line:
+/// the piece stands apart from the piece before it by a cell gap, the first piece of the
+/// line stands over or under the other lines of the segment, and every other line of the
+/// segment, at least [`BESIDE_LINES`] of them, ends more than a cell gap before the piece
+/// starts (a line that ends right at the piece runs on under it by a hair more ink). Two
+/// names side by side, the first over the lines of its address, are two blocks: read as one
+/// paragraph, the second name would be a word of the first block's first line. A label with
+/// its value far right is not meant: where rows of such lines follow each other, the values
+/// stand over each other. A line alone in its segment (a head line with a page number at
+/// its end, a name parted from the lines under it by a style step) has no lines to stand
+/// beside and is read as before. Near linear in the runs of the segment.
+fn block_beside(view: &PageView<'_>, seg: &Segment) -> bool {
+    // The inked runs of each line of the segment, by line number and from left to right: the
+    // answer does not depend on the order the runs are handed in.
+    let mut lines: BTreeMap<u32, Vec<&TextRun>> = BTreeMap::new();
+    for p in &seg.prims {
+        if let PrimId::Text(i) = *p
+            && let Some(r) = view.page.texts.get(i as usize)
+            && ink(&r.text) > 0
+        {
+            lines.entry(r.line).or_default().push(r);
+        }
+    }
+    let n = seg.prims.len() as u64;
+    crate::work::add(n * u64::from(n.max(2).ilog2()));
+    if lines.len() <= BESIDE_LINES {
+        return false;
+    }
+    for runs in lines.values_mut() {
+        runs.sort_by(|a, b| a.x.total_cmp(&b.x));
+    }
+    // Where each line reaches from and to.
+    let reach: Vec<(u32, f32, f32)> = lines
+        .iter()
+        .map(|(line, runs)| {
+            let end = runs.iter().map(|r| r.x + r.w).fold(f32::MIN, f32::max);
+            (*line, runs[0].x, end)
+        })
+        .collect();
+    // The two rightmost ends and the two rightmost starts of the lines, and the two leftmost
+    // ends, each with its line: what the other lines of a line reach is the first of them
+    // that is not the line's own, so each line is asked once.
+    let top = |key: &dyn Fn(&(u32, f32, f32)) -> f32| {
+        let mut all: Vec<(f32, u32)> = reach.iter().map(|l| (key(l), l.0)).collect();
+        all.sort_by(|a, b| b.0.total_cmp(&a.0));
+        all.truncate(2);
+        all
+    };
+    let (ends, starts, least_ends) = (top(&|l| l.2), top(&|l| l.1), top(&|l| -l.2));
+    let of_others =
+        |two: &[(f32, u32)], line: u32| two.iter().find(|t| t.1 != line).map_or(f32::MIN, |t| t.0);
+    lines.iter().any(|(&line, runs)| {
+        let pieces = pieces_of(runs, 0, runs.len());
+        let Some(first) = pieces.first() else {
+            return false;
+        };
+        // The white space that parts two cells of the line parts the piece from the block.
+        let size = runs.iter().map(|r| r.size).fold(1.0, f32::max);
+        let gap = crate::extract::table::CELL_GAP * size;
+        // Every other line starts before the end of the first piece and ends after its
+        // start, and ends a cell gap before a later piece starts.
+        let (last_end, last_start) = (of_others(&ends, line), of_others(&starts, line));
+        let first_end = -of_others(&least_ends, line);
+        last_start < first.x1
+            && first.x0 < first_end
+            && pieces[1..].iter().any(|piece| piece.x0 - last_end > gap)
+    })
 }
 
 impl SegText {
@@ -549,6 +625,16 @@ pub fn type_paragraph(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
         {
             return None;
         }
+        // A line with a piece that is another block beside its block is no line of a
+        // paragraph: the two blocks stay apart (see [`block_beside`]). Asked last, of the
+        // segments that would read as a paragraph only.
+        let cells_once = t
+            .blocks
+            .iter()
+            .any(|b| matches!(b, Read::Paragraph { whole: false, .. }));
+        if cells_once && prose.is_none() && block_beside(view, seg) {
+            return None;
+        }
         let mut signals = Vec::new();
         let paragraphs = t
             .blocks
@@ -801,7 +887,7 @@ pub fn type_footnote_legend(view: &PageView<'_>, seg: &Segment) -> Option<Typed>
         if !t.runs.iter().all(|&r| view.in_legend(r)) {
             return None;
         }
-        let legend = view.file.legends.get(&view.page.page)?;
+        let legend = view.legend()?;
         let entries = legend
             .entries
             .iter()

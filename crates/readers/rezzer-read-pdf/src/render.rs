@@ -310,13 +310,24 @@ impl SpotPages {
     }
 }
 
+/// `pages` by page number (see [`furniture`]).
+fn in_page_order<'a>(pages: impl Iterator<Item = &'a PageItems>) -> Vec<&'a PageItems> {
+    let mut pages: Vec<&PageItems> = pages.collect();
+    pages.sort_by_key(|p| p.page);
+    pages
+}
+
 /// The same picture drawn at the same place (within [`SAME_SPOT`]) on at least three pages
 /// and on at least half of the pages read. When they are small, they are page furniture (a
 /// logo in the margin, a strip along the edge), like a running header, and do not make a page
 /// need vision.
+///
+/// The pages are taken in page order, whatever order they are handed in: a spot is the place
+/// of the first picture found there, and later ones are compared with it, so the spots of a
+/// picture that moves a little from page to page depend on the page looked at first.
 pub(crate) fn furniture<'a>(pages: impl Iterator<Item = &'a PageItems>) -> Spots {
     let mut spots = SpotPages::default();
-    for items in pages {
+    for items in in_page_order(pages) {
         spots.add(items);
     }
     spots.only(|n, read| n >= 3 && n * 2 >= read)
@@ -345,7 +356,7 @@ pub(crate) fn on_every_page<'a>(
     let mut spots = SpotPages::default();
     let mut read = 0usize;
     let mut found: Option<HashSet<u64>> = None;
-    for items in pages {
+    for items in in_page_order(pages) {
         read += 1;
         if count == 2 {
             spots.add(items);
@@ -3456,6 +3467,39 @@ mod tests {
             ..PageItems::default()
         };
         assert!(vision(&info, &bare, &none, &every, 0).is_none());
+    }
+
+    /// The furniture of a file does not depend on the order its pages are handed in (the
+    /// reader keeps them in a map). A picture that moves 1.5 points from page to page: from
+    /// page 1 the pages 1 and 2 are one spot and 3 and 4 another, each on two pages, and
+    /// none is furniture. Taken from page 2 first, the pages 1 to 3 would be one spot on
+    /// three pages.
+    #[test]
+    fn furniture_does_not_depend_on_the_order_of_the_pages() {
+        let page = |n: u32| PageItems {
+            page: n,
+            images: vec![[40.0 + 1.5 * n as f32, 700.0, 70.0 + 1.5 * n as f32, 730.0]],
+            images_id: vec![7],
+            ..PageItems::default()
+        };
+        let read: Vec<PageItems> = (1..=4).map(page).collect();
+        let found = |order: [usize; 4]| -> Vec<bool> {
+            let spots = furniture(order.iter().map(|&k| &read[k]));
+            read.iter()
+                .map(|p| spots.holds(&p.images[0], p.images_id[0]))
+                .collect()
+        };
+        let in_order = found([0, 1, 2, 3]);
+        assert_eq!(in_order, [false; 4]);
+        for order in [[1, 0, 2, 3], [3, 2, 1, 0], [2, 0, 3, 1]] {
+            assert_eq!(found(order), in_order, "{order:?}");
+        }
+        // The pictures of both pages of a file of two: the same in either order.
+        let two = |order: [usize; 2]| {
+            let all = on_every_page(order.iter().map(|&k| &read[k]), 2);
+            (all.spots.boxes.clone(), all.ids.len())
+        };
+        assert_eq!(two([0, 1]), two([1, 0]));
     }
 
     #[test]

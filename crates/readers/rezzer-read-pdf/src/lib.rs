@@ -269,6 +269,31 @@ pub fn engine_decisions(
     layout::engine_decisions(pages, tagged)
 }
 
+/// The facts of the file of `pages` learned from the runs in the order they have on each page
+/// (the reader's flow) and in the order of their places (as [`engine_decisions`] learns
+/// them), the runs of the legends named by the ids of `pages` in both. The first is what the
+/// read learns for an untagged file; for a tagged file the read learns from more runs (those
+/// an ActualText replaces are dropped before the engine pages are made). For the metamorphic
+/// tests, which compare the two; not a stable interface.
+#[doc(hidden)]
+pub fn engine_facts_by_order(
+    pages: &[layoutregions::PageIn],
+    tagged: bool,
+) -> [layoutregions::file::FileFacts; 2] {
+    layout::engine_facts_by_order(pages, tagged)
+}
+
+/// [`engine_decisions`] with the reasons of each decision in words (its certainty, score and
+/// signals, and the candidates of its segment). For the path trace of a metamorphic pin; not a
+/// stable interface.
+#[doc(hidden)]
+pub fn engine_decisions_why(
+    pages: &[layoutregions::PageIn],
+    tagged: bool,
+) -> Vec<Vec<layout::DecisionWhy>> {
+    layout::engine_decisions_why(pages, tagged)
+}
+
 /// [`read_with_regions`] with the input of each page, so a test can map a region's pieces back
 /// to their text and count the page's runs. Not a stable interface.
 #[doc(hidden)]

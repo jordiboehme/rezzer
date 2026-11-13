@@ -1,28 +1,17 @@
 # name	page	transform	what	class	count	owner	cause
 21 barcodes beside a photo	1	reorder-drawn	order	text	1	31
-F1 to F3	1	reorder-runs	from-spatial	text	1	-
-F1 to F3	1	reorder-runs	kind	text	1	after 0.1.0
-F1 to F3	1	reorder-runs	members	text	1	after 0.1.0	class E (after 0.1.0): the same Style cut of the strip, under another order of its runs
-F1 to F3	1	reorder-runs	order	pairs	1	after 0.1.0
 F1 to F3	1	rule-as-box	members	pairs	2	after 0.1.0
 F1 to F3	1	rule-as-box	members	table	2	after 0.1.0
 F1 to F3	1	rule-as-box	members	text	2	after 0.1.0
-F1 to F3	1	rule-as-box	order	text	1	after 0.1.0	class E (after 0.1.0): rules as boxes
-F1 to F3	1	scale-200	to-spatial	text	2	-	owner Task 31c. Sweep print: at twice the size the leaves `Feld A Feld B` (the label line the Style step parts from its strip) and `Muster-Bezuege Hinweise Muster` are kept as laid out where they are paragraphs at scale 1. Both are leaves of two short runs; the type of such a leaf turns in the typers at that scale, the cut is the same. Not traced into the typer
-F1 to F3	1	split-runs	members	pairs	1	26	owner Task 31c. Traced (segment tree): the strip `Feld A, Feld B, 12345678X012 Muster Kasse` (8 runs) is parted by the Style step into a label line and a value line, the value line being one run of two values; with the runs split into words it stays one Strip leaf typed label_value. The style step parts by runs (segment/style.rs), not the cut at a gutter. The read of the page is right in all variants
+F1 to F3	1	scale-200	to-spatial	text	2	-	owner after 0.1.0, kept. Traced in part 2a of 31c with a print in `SegText::of`: both leaves lose `paragraph.text_size`, their only signal. `file::text_sizes` counts ink per size in bins of half a point (`line::size_key`): the label sizes 6.6, 6.65 and 6.666 share bin 13 and reach the share of a text size (text sizes 6.5 and 9.5); at twice the size 13.2 falls in bin 26, 13.3 and 13.332 in bin 27, neither bin reaches the share (text sizes 19.0 only). The cut is the same. Sizes in half-point bins are an absolute measure (class D); they also carry the body size, the heading sizes and `small_size`, so the fix is one relative size cluster for all of them, not a step here. Tried: `in_text_size` by `same_size` alone; this pin stayed, three public files and five other pins moved; dropped. Measured in part 2b-1 of 31c: `text_sizes` with the sizes of a page in clusters of one size (`same_size`, 0.05 of the larger, from the smallest size up), each cluster named by its half point with the most ink, and `in_text_size` by the half point or `same_size`. This pin and 12 other shape pins went, but a corpus pin went up (arxiv page 9 scale-150 from-spatial 11 to 12: a drop letter `C` typed a paragraph alone in a grid the fixed snap draws with two more rows) and on irs-f6744 page 93 a name and the number beside it are joined in one line (`CAROL WILLIAMS 417-00-XXXX`), a block beside a block. Returning every half point of a cluster in place of one raised 8 pins. Not cheap: owner after 0.1.0, with the size bins of the body and heading sizes
+F1 to F3	1	split-runs	members	pairs	1	26	owner Task 26 (named 31c before). Traced in part 2a of 31c (test `trace_change`): the strip `Feld A, Feld B, 12345678X012 Muster Kasse` is a label_value region by `label_value.strip_fields` (score 1000) when its runs are split into words, and wins over its style children; as the page is, the value line is one run that holds two values apart by a wide gap, the frame read of `typers::pairs::strip_fields` takes a run as one cell, is unclear, and the style children stand (a label line as a paragraph, the value line kept as laid out). The style step parts the lines the same way both times. The fix is to read a run with a cell gap inside as two cells in the frame read: label/value groups. The read of the page is right in all variants
 F1 to F3	1	split-runs	members	text	2	31
 F1 to F3	1	split-runs	to-spatial	pairs	1	-
 F1 to F3	1	split-runs	to-spatial	text	1	-
-a coding line in a letter font named IDAutomationOCRb	1	reorder-runs	kind	pairs	1	after 0.1.0
-a coding line in a letter font named Ocean13	1	reorder-runs	kind	pairs	1	after 0.1.0
-a column of bold field lines of 5 to 7 words at heading size, two boxed	1	reorder-runs	members	text	3	after 0.1.0
 a column of bold field lines of 5 to 7 words at heading size, two boxed	1	rule-as-box	members	text	1	after 0.1.0
-a column of bold lines at heading size with a box around the middle two	1	reorder-runs	kind	text	1	after 0.1.0
-a column of bold lines at heading size with a box around the middle two	1	reorder-runs	members	text	1	after 0.1.0
 a column of bold lines at heading size with a box around the middle two	1	rule-as-box	members	text	1	after 0.1.0
 a column of bold lines at heading size with a box around the middle two	1	scale-50	kind	text	1	36a
 a column of bold lines at heading size with a box around the middle two	1	scale-50	members	text	2	31
-a column of bold lines at heading size with a box around two of them	1	reorder-runs	members	text	4	after 0.1.0
 a column of bold lines at heading size with a box around two of them	1	rule-as-box	members	text	1	after 0.1.0
 a column of boxes of one style	1	rule-as-box	members	text	1	after 0.1.0
 a column of lines of one face with a box around two of them	1	rule-as-box	members	text	1	after 0.1.0
@@ -31,277 +20,123 @@ a column of lines of one face with a box around two of them	1	scale-75	members	t
 a column of one-face field lines of 5 to 7 words with a box around two of them	1	rule-as-box	members	text	1	after 0.1.0
 a column of one-face field lines of 5 to 7 words with a box around two of them	1	scale-50	members	text	2	31
 a column of one-face field lines of 5 to 7 words with a box around two of them	1	scale-75	members	text	2	31
-a column of short field lines after a sentence	1	reorder-runs	to-spatial	text	1	-
-a framed label column and value column, rows 1.36 sizes apart beside a picture	1	reorder-runs	from-spatial	text	1	-
 a framed label column and value column, rows 1.36 sizes apart beside a picture	1	rule-as-box	members	text	2	after 0.1.0
-a framed label column and value column, rows 1.55 sizes apart	1	reorder-runs	from-spatial	text	1	-
 a framed label column and value column, rows 1.55 sizes apart	1	rule-as-box	from-spatial	pairs	1	-
 a framed label column and value column, rows 1.55 sizes apart	1	rule-as-box	members	text	1	after 0.1.0
 a head block beside a logo over a letter	1	rule-as-box	members	pairs	1	after 0.1.0
-a head block of two lines beside a logo over a letter	1	reorder-runs	members	text	3	after 0.1.0
 a head block of two lines beside a logo over a letter	1	rule-as-box	members	pairs	1	after 0.1.0
-a headerless table of records	1	reorder-runs	to-spatial	table	1	-
 a heading over a rule beside a boxed note	1	rule-as-box	order	text	1	after 0.1.0
-a heading over a rule beside a ruled table	1	reorder-runs	members	table	1	after 0.1.0
 a heading over a rule beside a ruled table	1	rule-as-box	to-spatial	table	1	-
-a lone field in a strip beside a smaller name over its address	1	reorder-runs	from-spatial	text	2	-
-a lone field in a strip beside a value	1	rule-as-box	members	text	1	after 0.1.0
-a note column beside rows of fields	1	reorder-runs	from-spatial	text	1	-	owner Task 31c. A shape of Task 31b fix round 7. Sweep print: with the runs in another order the two box labels `4 Changes made for a` and `5 Grants or awards` with their second lines are a paragraph where they are kept as laid out; the style step parts the leaf by runs (`segment/style.rs`, as the `F1 to F3` line), not the cut at the gutter
-a note column beside rows of fields	1	reorder-runs	kind	text	2	after 0.1.0	class E (after 0.1.0). Sweep print: the head line is a heading where it is a title block, the two title lines of the note column a heading where they are a paragraph; same segments (`Gutter<Page`), the typers read the runs in the order given
-a note column beside rows of fields	1	reorder-runs	members	text	1	after 0.1.0	class E (after 0.1.0). Sweep print: the lines of box 1 with the reference number are one `Gutter` leaf where `Style` parted them
-a note column beside rows of fields	1	reorder-runs	to-spatial	text	1	-	owner Task 31c. As the from-spatial line of this shape: the two lines that name the copy are kept as laid out in another run order
+a letter paragraph that runs on under a box on its right	1	rule-as-box	members	pairs	1	after 0.1.0
 a note column beside rows of fields	1	scale-75	from-spatial	text	8	-	owner Task 36. A shape of Task 31b fix round 7: eight leaves of one short line (values, the amount, the form number) are kept as laid out at scale 1 and are paragraphs at scale 0.75: the typing of a short leaf by its text size (rule paragraph.text_size at 5 points), traced with trace_shape at both scales (see the entry of this shape in known.rs); the cut is the same. Task 36 makes the typing hold across scales
-a note row after a blank row in a table	1	reorder-runs	kind	pairs	1	after 0.1.0
-a note row after a blank row in a table	1	reorder-runs	kind	table	2	after 0.1.0
-a note where the detail line of the last item would stand	1	reorder-runs	to-spatial	table	1	-
-a notice band between rules	1	reorder-runs	members	text	1	after 0.1.0
 a numbered label over a line of codes in a strip	1	rule-as-box	members	pairs	3	after 0.1.0
-a picture over the gap to the next table	1	reorder-runs	members	table	1	after 0.1.0
-a refused strip with a value of two lines	1	reorder-runs	from-spatial	text	2	-
-a row of labels over two blocks of fields in drawn boxes	1	reorder-runs	from-spatial	text	1	-	owner Task 36. A shape of Task 31b fix round 8 (review R3): with the runs in another order the line of the labels of the refused grid is kept as laid out, where the page as it is reads it as a paragraph, or the other way round (what the sweep prints: `1 Income 2 Gross income 3 Chapter mark.`; the readers take the runs of a segment in the order given, class E). A move to or from spatial, the class of Task 19
 a row of labels over two blocks of fields in drawn boxes	1	split-runs	from-spatial	text	1	-	owner Task 36. A shape of Task 31b fix round 8 (review R3): its drawn boxes are refused as a table (4 of 11 cells span, the limit is 3 in 10) and its text reads as lines of paragraphs. With each label in runs of one word the words stand in their own boxes and the block `1 Income 2 Gross income code` is kept as laid out, where the page as it is reads it as a paragraph, or the other way round (what the sweep prints, not traced into the grid search). A move to or from spatial, the class of Task 19
-a second table of one row under a plain header after a bold total	1	reorder-runs	members	pairs	1	after 0.1.0
-a second table of one row under a plain header after a bold total	1	reorder-runs	to-spatial	pairs	1	-
-a second table under a header of years after a bold total	1	reorder-runs	kind	pairs	1	after 0.1.0
-a second table under a header of years after a bold total	1	reorder-runs	kind	table	2	after 0.1.0
-a second table under a plain header after a bold total	1	reorder-runs	kind	pairs	1	after 0.1.0
-a second table under a plain header after a bold total	1	reorder-runs	kind	table	2	after 0.1.0
-a second table under a plain header after a row set apart	1	reorder-runs	kind	pairs	1	after 0.1.0
-a second table under a plain header after a row set apart	1	reorder-runs	kind	table	1	after 0.1.0
-a sentence across the breaks in the rules	1	reorder-runs	members	text	1	after 0.1.0
 a sentence across the breaks in the rules	1	rule-as-box	to-spatial	text	1	-
 a sentence across the breaks in the rules	1	split-runs	members	table	1	31
 a short value after a full field	1	rule-as-box	members	pairs	3	after 0.1.0
-a small table of records under a plain header	1	reorder-runs	kind	table	1	after 0.1.0
-a stamp over a ruled item table	1	reorder-runs	members	table	1	after 0.1.0
 a stamp over a ruled item table	1	rule-as-box	order	text	1	after 0.1.0
 a stamp over a ruled item table	1	rule-as-box	to-spatial	table	1	-
-a stamp over an item table without rules	1	reorder-runs	kind	table	1	after 0.1.0
-a strip of a smaller label beside a smaller name over its address	1	reorder-runs	from-spatial	text	3	-
-a strip with dividers and no ends	1	reorder-runs	members	text	2	after 0.1.0
-a strip with dividers and no ends	1	reorder-runs	to-spatial	text	1	-
 a strip with dividers and no ends	1	rule-as-box	members	pairs	1	after 0.1.0
 a strip with dividers and no ends	1	rule-as-box	members	text	1	after 0.1.0
 a strip with dividers and no ends	1	split-rules	members	pairs	1	31
 a strip with dividers and no ends	1	split-rules	members	text	2	31
 a strip with dividers and no ends	1	split-rules	to-spatial	text	1	-
-a strip without dividers after a smaller name over its address	1	reorder-runs	from-spatial	text	3	-
-a strip without dividers beside a bold title	1	reorder-runs	from-spatial	text	1	-
-a strip without dividers beside a smaller name over its address	1	reorder-runs	from-spatial	text	3	-
-a subtotal over a larger total without colons	1	reorder-runs	kind	pairs	1	after 0.1.0
-a value printed over its label	1	reorder-runs	from-spatial	text	1	-
-a value that touches its label	1	reorder-runs	from-spatial	text	1	-
-address columns in the body	1	reorder-runs	from-spatial	text	1	-
-an address beside a bank under a colon heading	1	reorder-runs	from-spatial	text	1	-
-an address beside two banks	1	reorder-runs	from-spatial	text	1	-
 an amount in its box before a note column	1	scale-75	from-spatial	text	1	-	owner Task 36. A shape of Task 31b fix round 7: the amount with its currency sign is a paragraph at scale 0.75 and kept as laid out at scale 1: the typing of a short leaf by its text size (rule paragraph.text_size at 5 points), traced with trace_shape at both scales (see the entry of this shape in known.rs); the cut is the same. Task 36 makes the typing hold across scales
 an amount in its box before a note column	1	scale-75	to-spatial	text	1	-	owner Task 36. A shape of Task 31b fix round 7: the line that names the holder is a heading at scale 1 (heading.size_ratio, heading.bold_lead) and kept as laid out at scale 0.75; traced with trace_shape at both scales (see the entry of this shape in known.rs), the typing of a short leaf, not the cut
-an item beside net over gross amounts under titles of two lines	1	reorder-runs	members	table	1	after 0.1.0
 an item beside net over gross amounts under titles of two lines	1	rule-as-box	to-spatial	table	1	-
 band table with empty cells	1	jitter	members	table	1	31
-band table with empty cells	1	reorder-runs	from-spatial	text	2	-
 band table with spaced header cells	1	jitter	members	table	1	31
-band table with spaced header cells	1	reorder-runs	from-spatial	text	2	-
-blocks side by side under their headings	1	reorder-runs	from-spatial	text	1	-
 boxed fields	1	rule-as-box	members	pairs	2	after 0.1.0
 boxed fields beside a bold title	1	rule-as-box	members	pairs	1	after 0.1.0
 boxed fields beside a box at the value size	1	rule-as-box	members	pairs	1	after 0.1.0
-boxed fields beside a company in another font	1	reorder-runs	members	text	2	after 0.1.0
 boxed fields beside a company in another font	1	rule-as-box	members	pairs	1	after 0.1.0
-boxed fields beside a company over its address	1	reorder-runs	members	text	1	after 0.1.0
 boxed fields beside a company over its address	1	rule-as-box	members	pairs	1	after 0.1.0
-boxed fields beside a name over its department in one size but for float noise	1	reorder-runs	members	pairs	1	after 0.1.0
 boxed fields beside a name over its department in one size but for float noise	1	rule-as-box	members	pairs	1	after 0.1.0
 boxed fields beside an address	1	rule-as-box	members	pairs	2	after 0.1.0
 boxed fields beside an empty box	1	rule-as-box	to-spatial	pairs	2	-
 boxed fields beside an empty field	1	rule-as-box	members	pairs	2	after 0.1.0
-cells of several lines that pair up line by line in a ruled grid	1	reorder-runs	members	text	1	after 0.1.0
 cells of several lines that pair up line by line in a ruled grid	1	rule-as-box	to-spatial	text	1	-
-cells of several lines under a cell merged over two rows	1	reorder-runs	members	table	1	after 0.1.0
 cells of several lines under a cell merged over two rows	1	rule-as-box	to-spatial	table	1	-
-close column titles	1	reorder-runs	to-spatial	table	1	-
-codes in a bar-a-glyph CFF font named BC C128 HD Wide, size 36	1	reorder-runs	to-spatial	pairs	1	-
-codes in a bar-a-glyph TrueType subset font beside a photo, size 36	1	reorder-runs	to-spatial	pairs	1	-
-codes in a bar-a-glyph TrueType subset font named BC C128 HD Wide, size 30	1	reorder-runs	to-spatial	pairs	1	-
-codes in a bar-a-glyph Type1 font known by its bars, size 30	1	reorder-runs	to-spatial	pairs	1	-
-codes in a bar-a-glyph full TrueType font known by its bars, size 24	1	reorder-runs	to-spatial	pairs	1	-
-codes in a barcode font known by its bars beside a photo, size 12, gap 5	1	reorder-runs	to-spatial	pairs	1	-
-codes in a barcode font known by its bars, size 12, gap 5	1	reorder-runs	to-spatial	pairs	1	-
-codes in a barcode font known by its bars, size 16, gap 12	1	reorder-runs	to-spatial	pairs	1	-
-codes in a barcode font named for codes beside a photo, size 10, gap 5	1	reorder-runs	to-spatial	pairs	1	-
-codes in a barcode font named for codes, size 10, gap 5	1	reorder-runs	to-spatial	pairs	1	-
-codes in a barcode font named for codes, size 16, gap 12	1	reorder-runs	to-spatial	pairs	1	-
-codes in the real shop font's glyph program known by its bars beside a photo, size 34	1	reorder-runs	to-spatial	pairs	1	-
-codes in the real shop font's glyph program named BC C128 HD Wide, size 30	1	reorder-runs	to-spatial	pairs	1	-
-column of totals	1	reorder-runs	members	text	2	after 0.1.0
 column of totals	1	rule-as-box	from-spatial	pairs	1	-
 column of totals	1	rule-as-box	members	table	1	after 0.1.0
-columns bounded by breaks in the rules	1	reorder-runs	from-spatial	text	1	-
 columns bounded by breaks in the rules	1	rule-as-box	to-spatial	text	2	-
 columns bounded by breaks in the rules	1	split-runs	members	table	1	31
-description wrapping to four lines	1	reorder-runs	members	text	1	after 0.1.0
 flat pictures across a column bound in item rows	1	reorder-drawn	order	text	1	31
-flat pictures across a column bound in item rows	1	reorder-runs	kind	table	1	after 0.1.0
-footer columns	1	reorder-runs	from-spatial	text	1	-
-footer columns	1	reorder-runs	members	text	2	after 0.1.0
-grids side by side	1	reorder-runs	from-spatial	text	3	-
-grids side by side	1	reorder-runs	to-spatial	pairs	1	-
 grids side by side	1	rule-as-box	members	pairs	1	after 0.1.0
 grids side by side	1	rule-as-box	to-spatial	pairs	2	-
 grids side by side	1	scale-50	from-spatial	pairs	1	-
 grids side by side	1	scale-50	from-spatial	text	2	-
 grids side by side	1	scale-50	members	pairs	2	31
 grids side by side	1	scale-50	to-spatial	pairs	1	-
-head line over fields	1	reorder-runs	from-spatial	text	2	-	owner Task 31c. A shape of Task 31b: its head is a leaf of three runs, which the cut does not look at; another order or count of the runs changes that
-head line over fields	1	reorder-runs	to-spatial	text	1	-	owner Task 31c. As the from-spatial line of this shape
-head line over fields	1	split-runs	members	text	1	31	owner Task 31c. The head of three runs reads as one region when split into words (the three-run rule of Cutter::region)
+head line over fields	1	split-runs	members	text	1	31	owner Task 31c, kept. Traced (test `trace_change`): the head of three runs (a code line and a title of two lines) is not looked at by the cut (`Cutter::region` looks for bands in more than three runs); split into words it is more runs, is looked at, and reads as one paragraph with the block under it. The count stays on runs: counted in words or ink, a label of a few words and its value are parted (measured in Task 31a, see the comment in `Cutter::region`)
 header grid	1	rule-as-box	to-spatial	pairs	3	-
-item rows under a rule in pieces on a page with a block of lines on the right	1	jitter	from-spatial	text	2	-	owner Task 31c. Traced in fix round 7 with a print in `offset_baselines`: without jitter the head region is asked with the block on the right as the lines at 766, 746 and 726 and the header row, 2 of 4 lines met, and is apart by the paragraph rule of round 7; under jitter no call is made with the moved baselines of this region, so the band search asks another band there (two lines of the block start 6 points before the end of the longest line of the letter: the knife of P7, `best_band`; not traced further). The letter and the block are two paragraphs under jitter and kept as laid out without it; every text stands once and in order both ways. The pin is 0 with the paragraph rule switched off, and was 1 at 107ac750
-item rows under a rule in pieces on a page with a block of lines on the right	1	jitter	to-spatial	text	1	-	owner Task 31c. As the from-spatial line of this shape and change: the title `Price` of the item rows is kept as laid out under jitter
-item rows under a rule in pieces on a page with a block of lines on the right	1	reorder-runs	from-spatial	text	1	-	owner Task 31c. As at f093abd7 (1): the item rows kept as laid out are typed under another run order
-item rows under a rule in pieces on a page with a block of lines on the right	1	reorder-runs	kind	pairs	1	after 0.1.0
-item rows under a rule in pieces on a page with a block of lines on the right	1	reorder-runs	to-spatial	table	1	-
+item rows under a rule in pieces and a row carried over, on a page with a block of lines on the right	1	rule-as-box	kind	pairs	1	after 0.1.0	class E (after 0.1.0). New in part 2b-1 of Task 31c, the same lines as the shape without the carried row: with the rules as bars no rule in pieces bounds the rows (`strips` takes line rules), so `between_rules` sees no rule over them and the gutter parts them, each count and price after all items. Before part 2b-1 the page read so at scale 1 too (the S3 known break, P6-X), so the change gave no break; now the page reads the rows whole, and the change shows the class E break
+item rows under a rule in pieces and a row carried over, on a page with a block of lines on the right	1	rule-as-box	members	table	3	after 0.1.0	class E (after 0.1.0). New in part 2b-1 of Task 31c, the same lines as the shape without the carried row: with the rules as bars no rule in pieces bounds the rows (`strips` takes line rules), so `between_rules` sees no rule over them and the gutter parts them, each count and price after all items. Before part 2b-1 the page read so at scale 1 too (the S3 known break, P6-X), so the change gave no break; now the page reads the rows whole, and the change shows the class E break
+item rows under a rule in pieces and a row carried over, on a page with a block of lines on the right	1	rule-as-box	members	text	2	after 0.1.0	class E (after 0.1.0). New in part 2b-1 of Task 31c, the same lines as the shape without the carried row: with the rules as bars no rule in pieces bounds the rows (`strips` takes line rules), so `between_rules` sees no rule over them and the gutter parts them, each count and price after all items. Before part 2b-1 the page read so at scale 1 too (the S3 known break, P6-X), so the change gave no break; now the page reads the rows whole, and the change shows the class E break
+item rows under a rule in pieces on a page with a block of lines on the right	1	jitter	from-spatial	text	2	-	owner Task 31c, kept. Traced in part 2a of 31c with the cut's prints (`REZZER_DEBUG_CUT`, test `trace_change`): the region of 16 pieces (the address, the letter, the block on the right, the header row) has 10.46 points of white (0.95 text sizes) between the end of the title `Count` at 506.0 and the block's lines at 516.5. `best_band` measures white in whole steps of 1/8 text size counted from the leftmost ink of the region: as the page is, the band is 7 steps (9.6 points) and passes `GUTTER` (0.8 sizes, 8.8 points), a gutter by offset baselines, and the title `Price` is cut from its row; under jitter the leftmost ink moves by 0.1 points, the band is 6 steps (8.25 points) and no gutter is found. The knife is the phase of the steps at the limit of `GUTTER`. Not changed: the ruling of 31b (P2/P3) allows no new measure at the binned edge. Every text stands once and in order both ways
+item rows under a rule in pieces on a page with a block of lines on the right	1	jitter	to-spatial	text	1	-	owner Task 31c, kept. As the from-spatial line of this shape and change: with the gutter the title `Price` is a paragraph of its own; without it the header row is whole and kept as laid out
 item rows under a rule in pieces on a page with a block of lines on the right	1	rule-as-box	from-spatial	text	2	-
 item rows under a rule in pieces on a page with a block of lines on the right	1	rule-as-box	kind	pairs	1	after 0.1.0
 item rows under a rule in pieces on a page with a block of lines on the right	1	rule-as-box	members	table	3	after 0.1.0
 item rows under a rule in pieces on a page with a block of lines on the right	1	rule-as-box	members	text	1	after 0.1.0	class E (after 0.1.0). Sweep print: with the rules as boxes the paragraph `Thank you for your order ...` is one leaf `Band<Rest<Page` where the Style step parted it (`Style<Band<Rest<Rest<Page`)
-item rows with a picture in the description column	1	reorder-runs	members	pairs	1	after 0.1.0
-item rows with a picture in the description column	1	reorder-runs	to-spatial	table	1	-
 item rows with a picture in the description column	1	rule-as-box	kind	pairs	1	after 0.1.0
 item rows with a picture in the description column	1	rule-as-box	to-spatial	table	1	-
 item table between two rules with a picture column	1	jitter	to-spatial	text	1	-
-item table between two rules with a picture column	1	reorder-runs	from-spatial	pairs	2	-
 item table between two rules with a picture column	1	scale-150	to-spatial	text	1	-
 item table between two rules with a picture column	1	scale-200	to-spatial	text	1	-
 item table between two rules with a picture column	1	scale-75	to-spatial	text	1	-
-label block and bank row	1	reorder-runs	members	pairs	3	after 0.1.0
-label block and bank row	1	reorder-runs	members	table	5	after 0.1.0
 label block and bank row	1	rule-as-box	to-spatial	pairs	1	-
-labels beside values with a last label alone	1	reorder-runs	from-spatial	text	1	-
-labels on touching underlines over two rows of fields	1	reorder-runs	to-spatial	text	2	-
 labels on touching underlines over two rows of fields	1	rule-as-box	from-spatial	text	1	-	class E (after 0.1.0). Sweep print: with the rules as boxes the two years `Year 2026 2025` are a paragraph where they are kept as laid out. Up with the paragraph rule of `offset_baselines` of fix round 7 of Task 31b (the pin is 0 with that rule switched off); not traced further
-labels on touching underlines over two rows of fields	1	rule-as-box	order	text	1	after 0.1.0	class E (after 0.1.0). Sweep print: with the rules as boxes the head line `Sheet 3 Clerk Alex Sample Week 19 Shift ...` moves against the fields; as the from-spatial line of this shape and change
-labels under values	1	reorder-runs	from-spatial	text	2	-
-labels under values	1	reorder-runs	to-spatial	pairs	1	-
-labels under values with a second value line on a label's line	1	reorder-runs	from-spatial	text	2	-
-letter head	1	reorder-runs	kind	text	2	after 0.1.0
-letter head with a larger name	1	reorder-runs	kind	text	2	after 0.1.0
-letter head with the date beside the name	1	reorder-runs	kind	text	2	after 0.1.0
-line items over two amounts alone in two columns	1	reorder-runs	members	table	1	after 0.1.0
-line items whose last period wraps under the table	1	reorder-runs	kind	table	1	after 0.1.0
-line items with a credit over a total	1	reorder-runs	members	table	1	after 0.1.0
-line items with a deduction with a minus under an amount	1	reorder-runs	kind	table	1	after 0.1.0
-line items with a larger total between rules over a note	1	reorder-runs	kind	pairs	1	after 0.1.0
-line items with a larger total between rules over a note	1	reorder-runs	to-spatial	pairs	1	-
-line items with a larger total between rules over a note	1	reorder-runs	to-spatial	table	1	-
 line items with a larger total between rules over a note	1	rule-as-box	members	table	1	after 0.1.0
-line items with a smaller first total between rules over a note	1	reorder-runs	kind	pairs	1	after 0.1.0
-line items with a smaller first total between rules over a note	1	reorder-runs	to-spatial	pairs	2	-
-line items with a smaller first total between rules over a note	1	reorder-runs	to-spatial	table	1	-
 line items with a smaller first total between rules over a note	1	rule-as-box	members	table	1	after 0.1.0
-line items with an end rule	1	reorder-runs	kind	pairs	2	after 0.1.0
-line items with an end rule	1	reorder-runs	to-spatial	table	1	-
 line items with an end rule	1	rule-as-box	members	table	1	after 0.1.0
-line items with row rules	1	reorder-runs	kind	table	1	after 0.1.0
-line items with totals between rules over a note	1	reorder-runs	kind	pairs	1	after 0.1.0
-line items with totals between rules over a note	1	reorder-runs	to-spatial	pairs	1	-
-line items with totals between rules over a note	1	reorder-runs	to-spatial	table	1	-
 line items with totals between rules over a note	1	rule-as-box	members	table	1	after 0.1.0
-line items with wrapped date ranges	1	reorder-runs	to-spatial	table	1	-
-line items without rules over an end rule	1	reorder-runs	kind	pairs	2	after 0.1.0
-line items without rules over an end rule	1	reorder-runs	kind	table	1	after 0.1.0
-lines of a label and its bold value	1	reorder-runs	to-spatial	text	1	-
 lines of a label and its bold value, the middle two boxed	1	rule-as-box	members	text	1	after 0.1.0
 lines of a label and its bold value, the middle two boxed	1	scale-50	members	text	2	31
 lines of a label and its bold value, the middle two boxed	1	scale-75	members	text	2	31
-lines of a label and its bold value, two of them boxed	1	reorder-runs	to-spatial	text	1	-
 lines of a label and its bold value, two of them boxed	1	rule-as-box	members	text	1	after 0.1.0
 lines of a label and its bold value, two of them boxed	1	scale-50	members	text	2	31
 lines of a label and its bold value, two of them boxed	1	scale-75	members	text	2	31
-net, tax and gross titles over their amounts between rules over a note	1	reorder-runs	to-spatial	table	1	-
 net, tax and gross titles over their amounts between rules over a note	1	rule-as-box	from-spatial	pairs	1	-
-numbered labels beside an address	1	reorder-runs	from-spatial	text	1	-
 overflow into an empty field	1	rule-as-box	members	pairs	2	after 0.1.0
 overflow into an empty field	1	rule-as-box	to-spatial	pairs	1	-
-padded period beside a title over fields	1	reorder-runs	from-spatial	text	4	-	owner Task 31c. A shape of Task 31b: its padded data lines are one run each; in another order the rows kept as laid out are typed
-padded period beside a title over fields	1	reorder-runs	kind	text	1	after 0.1.0	class E (after 0.1.0)
-padded period beside a title over fields	1	reorder-runs	members	pairs	2	after 0.1.0	class E (after 0.1.0)
-padded period beside a title over fields	1	reorder-runs	members	text	1	after 0.1.0	class E (after 0.1.0)
-padded period beside a title over fields	1	rule-as-box	from-spatial	text	1	-	owner Task 31c. With the two rules as boxes one row kept as laid out is typed
-paragraphs with a short last line across a frame of two rules	1	reorder-runs	members	text	1	after 0.1.0
-rows of a label with a colon and its value over a larger total row	1	reorder-runs	kind	pairs	1	after 0.1.0
-rows of a label with a colon and its value over a larger total row	1	reorder-runs	to-spatial	pairs	1	-
+padded period beside a title over fields	1	rule-as-box	from-spatial	text	1	-	owner Task 31c, kept, class E. Traced (test `trace_change`): with the two rules as bars they bound no strip (`strips` takes line rules only), so the title row is cut at a gutter and not kept whole between the rules; its cell `31.10.2026 1` is a paragraph by `paragraph.text_size`
 rows of fields	1	rule-as-box	members	pairs	1	after 0.1.0
 rows of fields	1	rule-as-box	to-spatial	pairs	2	-
 section grids	1	rule-as-box	to-spatial	table	1	-
 separator marks	1	rule-as-box	members	table	1	after 0.1.0
-stems and strokes in Times-Roman, twice as large	1	reorder-runs	members	text	13	after 0.1.0
-stems and strokes in Times-Roman, twice as large	1	reorder-runs	to-spatial	text	1	-
 stems and strokes in Times-Roman, twice as large	1	shift	kind	text	1	36a
-template logos	1	reorder-drawn	order	text	1	31
-title block over a header grid	1	reorder-runs	from-spatial	pairs	1	-
-title block over a header grid	1	reorder-runs	from-spatial	text	8	-
-title block over a header grid	1	reorder-runs	to-spatial	text	1	-
 title block over a header grid	1	rule-as-box	to-spatial	pairs	3	-
-titles over a row that ends in a stop	1	reorder-runs	to-spatial	pairs	1	-
-totals between two rules in pieces under one item row	1	reorder-runs	members	pairs	2	after 0.1.0
-totals between two rules in pieces under one item row	1	reorder-runs	members	text	1	after 0.1.0
 totals between two rules in pieces under one item row	1	rule-as-box	from-spatial	text	2	-
 totals between two rules in pieces under one item row	1	rule-as-box	members	pairs	1	after 0.1.0
 totals between two rules in pieces under one item row	1	rule-as-box	order	text	1	after 0.1.0
-totals with a currency column and a larger total between rules over a note	1	reorder-runs	from-spatial	text	1	-
-totals with a currency column and a larger total between rules over a note	1	reorder-runs	members	table	1	after 0.1.0
 totals with a currency column and a larger total between rules over a note	1	rule-as-box	from-spatial	pairs	2	-
-totals with a currency column between rules over a note	1	reorder-runs	members	table	1	after 0.1.0
 totals with a currency column between rules over a note	1	rule-as-box	from-spatial	pairs	2	-
-totals with a larger total under a rule	1	reorder-runs	kind	table	1	after 0.1.0
-totals with a larger total under a rule	1	reorder-runs	members	pairs	1	after 0.1.0
 totals with a larger total under a rule	1	rule-as-box	from-spatial	pairs	1	-
 totals with a larger total under a rule	1	rule-as-box	kind	pairs	1	after 0.1.0
-totals with a percent column and a larger total between rules over a note	1	reorder-runs	members	pairs	1	after 0.1.0
-totals with a percent column and a larger total between rules over a note	1	reorder-runs	to-spatial	table	1	-
 totals with a percent column and a larger total between rules over a note	1	rule-as-box	from-spatial	pairs	1	-
 totals with a percent column and a larger total between rules over a note	1	rule-as-box	kind	pairs	1	after 0.1.0
-totals with a percent column and a larger total under a rule	1	reorder-runs	kind	table	1	after 0.1.0
-totals with a percent column and a larger total under a rule	1	reorder-runs	members	pairs	1	after 0.1.0
 totals with a percent column and a larger total under a rule	1	rule-as-box	from-spatial	pairs	1	-
 totals with a percent column and a larger total under a rule	1	rule-as-box	kind	pairs	1	after 0.1.0
-totals with a percent column between rules over a note	1	reorder-runs	to-spatial	pairs	1	-
-totals with a percent column between rules over a note	1	reorder-runs	to-spatial	table	1	-
 totals with a percent column between rules over a note	1	rule-as-box	from-spatial	pairs	1	-
 totals with a percent column between rules over a note	1	rule-as-box	kind	pairs	1	after 0.1.0
-totals with a percent column in one row and a larger total between rules over a note	1	reorder-runs	kind	pairs	1	after 0.1.0
-totals with a percent column in one row and a larger total between rules over a note	1	reorder-runs	kind	table	1	after 0.1.0
 totals with a percent column in one row and a larger total between rules over a note	1	rule-as-box	from-spatial	pairs	1	-
 totals with a percent column in one row and a larger total between rules over a note	1	rule-as-box	kind	pairs	1	after 0.1.0
-totals with a percent column in one row between rules over a note	1	reorder-runs	kind	table	1	after 0.1.0
-totals with a percent column in one row between rules over a note	1	reorder-runs	to-spatial	pairs	1	-
 totals with a percent column in one row between rules over a note	1	rule-as-box	from-spatial	pairs	1	-
 totals with a percent column in one row between rules over a note	1	rule-as-box	kind	pairs	1	after 0.1.0
-totals with the label right of its amount and a larger total between rules over a note	1	reorder-runs	members	text	1	after 0.1.0
-totals with the label right of its amount and a larger total between rules over a note	1	reorder-runs	to-spatial	table	1	-
 totals with the label right of its amount and a larger total between rules over a note	1	rule-as-box	from-spatial	pairs	1	-
 totals with the label right of its amount and a larger total between rules over a note	1	rule-as-box	kind	pairs	1	after 0.1.0
 totals with the label right of its amount and a larger total between rules over a note	1	shift-grow	kind	text	1	36a
-totals with the label right of its amount between rules over a note	1	reorder-runs	to-spatial	table	1	-
 totals with the label right of its amount between rules over a note	1	rule-as-box	from-spatial	pairs	2	-
-totals with whole amounts and a larger total between rules over a note	1	reorder-runs	members	pairs	1	after 0.1.0
-totals with whole amounts and a larger total between rules over a note	1	reorder-runs	to-spatial	table	1	-
 totals with whole amounts and a larger total between rules over a note	1	rule-as-box	members	pairs	1	after 0.1.0
 totals with whole amounts and a larger total between rules over a note	1	shift-grow	kind	pairs	1	26
-totals with whole amounts between rules over a note	1	reorder-runs	to-spatial	pairs	1	-
-totals with whole amounts between rules over a note	1	reorder-runs	to-spatial	table	1	-
 totals with whole amounts between rules over a note	1	rule-as-box	members	pairs	1	after 0.1.0
-two boxes side by side, each with its label	1	reorder-runs	to-spatial	text	1	-
-two boxes side by side, each with its label	1	rule-as-box	order	text	1	after 0.1.0
-two lines in three columns alone in the body	1	reorder-runs	to-spatial	pairs	1	-
+two fields of a label over a rule beside a ruled table with empty rows	1	rule-as-box	from-spatial	text	1	-	owner Task 31c, kept, class E. A shape of Task 31c (class K). Traced (test `trace_change`): with the two underlines as bars they bound no strip (`strips` takes line rules only), so the value `A/B`, kept as laid out in the strip with the second label, is a paragraph with its own label (the rule-as-box members line of this shape)
+two fields of a label over a rule beside a ruled table with empty rows	1	rule-as-box	members	text	1	after 0.1.0
+two fields of a label over a rule beside a ruled table with empty rows and the rule of a third field	1	rule-as-box	members	text	1	after 0.1.0
+two fields of a label over a rule beside a ruled table with filled rows and the rule of a third field	1	rule-as-box	members	table	1	after 0.1.0	class E (after 0.1.0). A shape of Task 31c (review 1, M3), as the lines of the class K shapes it is drawn from. Traced in fix round 1 of part 2a (test `trace_change`). Here the grid search finds no grid of 6 by 3 when the rules are bars (`drawn::grids` gets line rules only), so no segment `Grid<Page` parts the table from the fields: the changed page is one table of 22 runs from `Rest<Page` (table.columns, table.shared_columns, table.header_row) that holds the header cells, the rows and both fields, where the page reads a paragraph of the header cells, a table of 15 runs and a paragraph per field
+two fields of a label over a rule left of a ruled table with empty rows and the rule of a third field	1	rule-as-box	members	text	1	after 0.1.0	class E (after 0.1.0). A shape of Task 31c (review 1, M3), as the lines of the class K shapes it is drawn from. Traced in fix round 1 of part 2a (test `trace_change`). Here the grid search finds no grid of 6 by 3 when the rules are bars, so the page is cut by bands alone: `Checked by` stands with the header cells in one block kept as laid out (`Style<Band<Rest<Page`, 4 runs) and `A/B` alone is a paragraph (paragraph.text_size), where the page reads the paragraph `Checked by | A/B` from `Band<Rest<Page` (paragraph.text_size, paragraph.joins)
 two lines in three columns between two rules	1	rule-as-box	from-spatial	pairs	1	-
-two lines of three words set full	1	reorder-runs	to-spatial	text	1	-
-two named addresses between rules	1	reorder-runs	from-spatial	text	2	-
-two-line cells with one value on the second line	1	reorder-runs	members	table	1	after 0.1.0
 two-line cells with one value on the second line	1	rule-as-box	to-spatial	table	1	-
-weight-only boxes	1	reorder-runs	to-spatial	text	2	-
 weight-only boxes	1	rule-as-box	members	text	1	after 0.1.0
-words in two weights	1	reorder-runs	from-spatial	text	1	-
-wrapped text beside stacked values in a ruled grid	1	reorder-runs	members	table	1	after 0.1.0
 wrapped text beside stacked values in a ruled grid	1	rule-as-box	to-spatial	table	1	-

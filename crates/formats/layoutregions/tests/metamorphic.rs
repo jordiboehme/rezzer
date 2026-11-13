@@ -89,22 +89,33 @@ fn rule(x0: f32, y0: f32, x1: f32, y1: f32) -> RuleIn {
 }
 
 /// The engine's decisions on the pages of one file, as the PDF reader's layout makes them
-/// (facts from every page, the segments on the page's grids, typed and arbitrated), with no
-/// amount test.
+/// (the runs in the order of their places, facts from every page, the segments on the page's
+/// grids, typed and arbitrated), with no amount test. The decisions name the runs by the ids
+/// of the pages handed in.
 fn decide(pages: &[PageIn]) -> Vec<Decisions> {
     let none = |_: &str| false;
-    let file: Vec<FilePage<'_, TextRun>> = pages.iter().map(FilePage::of).collect();
+    let ordered: Vec<Option<RunOrder>> = pages.iter().map(RunOrder::of).collect();
+    let placed: Vec<&PageIn> = pages
+        .iter()
+        .zip(&ordered)
+        .map(|(p, o)| o.as_ref().map_or(p, |o| &o.page))
+        .collect();
+    let file: Vec<FilePage<'_, TextRun>> = placed.iter().map(|p| FilePage::of(p)).collect();
     let facts = learn(&file, false, &none);
     let index = FileIndex::new(&facts);
     let limits = Limits::default();
-    pages
+    placed
         .iter()
-        .map(|p| {
+        .zip(&ordered)
+        .map(|(p, order)| {
             let (segs, drawn) = segment_page_drawn(p, &grids(&p.rules), &limits, &|| false);
-            let (segs, typed) = match drawn {
+            let (mut segs, typed) = match drawn {
                 Some(d) => type_page(p, &d, segs, &facts, &index, &none, &limits),
                 None => (segs, BTreeMap::new()),
             };
+            if let Some(order) = order {
+                order.segments_back(&mut segs);
+            }
             arbitrate(&segs, &typed, &Margins::of(&limits))
                 .into_iter()
                 .map(|d| {
@@ -380,6 +391,23 @@ fn the_comparison_names_what_a_change_must_not_do() {
         (Kind::Table, &[1, 2, 3]),
     ]);
     assert_eq!(whats(&o), [Break::Order]);
+    // The order of two regions side by side is free: the same decisions on a page whose
+    // last two lines stand right of the others, in any order, break nothing.
+    let mut side = p.clone();
+    for t in &mut side.texts[4..] {
+        t.x += 300.0;
+    }
+    assert!(meta::compare(&side, &base, 6, &o, &same).broken.is_empty());
+    // A heading over those two lines is of their flow: read after them, the order is broken.
+    side.texts[0].x += 300.0;
+    assert_eq!(
+        meta::compare(&side, &base, 6, &o, &same)
+            .broken
+            .iter()
+            .map(|b| b.what)
+            .collect::<Vec<_>>(),
+        [Break::Order]
+    );
     let lost = ds(&[
         (Kind::Heading, &[0]),
         (Kind::Table, &[1, 2, 3]),
@@ -422,10 +450,7 @@ fn the_comparison_names_what_a_change_must_not_do() {
 #[test]
 fn the_owner_of_a_break_follows_its_class() {
     use meta::owner;
-    assert_eq!(
-        owner(Transform::ReorderRuns, Break::Members, "table"),
-        "after 0.1.0"
-    );
+    assert_eq!(owner(Transform::ReorderRuns, Break::Members, "table"), "31");
     assert_eq!(
         owner(Transform::RuleAsBox, Break::Kind, "pairs"),
         "after 0.1.0"
@@ -492,10 +517,9 @@ fn a_page_of_prose_and_a_ruled_table_reads_the_same_under_every_change_but_known
         .filter(|f| !f.verdict.broken.is_empty())
         .map(|f| format!("{} {}", f.transform.name(), f.page + 1))
         .collect();
-    // Pinned: with the runs in another order (input the PDF reader never hands over, after
-    // 0.1.0) the table holds a rule more than on the page, which reads it among the drawing.
-    let pinned = ["reorder-runs 1", "reorder-runs 2"];
-    assert_eq!(broken, pinned, "{:#?}", findings);
+    // Nothing is pinned. With the runs in another order the page read the table with a rule
+    // more, until the runs were read in the order of their places (`RunOrder`, Task 31c).
+    assert_eq!(broken, [""; 0], "{:#?}", findings);
 }
 
 /// Regions without text are compared too, by their pictures, rules and boxes through the
@@ -596,4 +620,636 @@ fn moves_are_pinned_per_page() {
         meta::pin_lines("this.pdf", &[moved(0)]),
         meta::pin_lines("this.pdf", &[moved(4)])
     );
+}
+
+/// One flow is half the width of the narrower region or more over the other: moved both ways
+/// at the limit, with a region without width and regions that only touch.
+#[test]
+fn one_flow_is_half_the_narrower_width_over_the_other() {
+    // A column of 100 and a block of 40 that stands 20.5 and 19.5 points over it.
+    assert!(meta::one_flow([0.0, 100.0], [79.5, 119.5]));
+    assert!(!meta::one_flow([0.0, 100.0], [80.5, 120.5]));
+    // The same at twice the size: a share, not points.
+    assert!(meta::one_flow([0.0, 200.0], [159.0, 239.0]));
+    assert!(!meta::one_flow([0.0, 200.0], [161.0, 241.0]));
+    // A block inside the width of another, and a block across both columns.
+    assert!(meta::one_flow([0.0, 100.0], [30.0, 60.0]));
+    assert!(meta::one_flow([0.0, 500.0], [300.0, 500.0]));
+    // Side by side, with a gutter or touching.
+    assert!(!meta::one_flow([0.0, 100.0], [120.0, 220.0]));
+    assert!(!meta::one_flow([0.0, 100.0], [100.0, 200.0]));
+    // A region without width is in the flow it stands in, and in no flow beside it.
+    assert!(meta::one_flow([0.0, 100.0], [50.0, 50.0]));
+    assert!(!meta::one_flow([0.0, 100.0], [150.0, 150.0]));
+    assert_eq!(meta::FLOW_SHARE, 0.5);
+}
+
+/// Whether `changed` breaks the order of `base` on `p`.
+fn order_breaks(p: &PageIn, base: &Decisions, changed: &Decisions) -> bool {
+    let runs = p.texts.len();
+    let v = meta::compare(p, base, runs, changed, &meta::Origin::same(p));
+    assert!(
+        v.broken.iter().all(|b| b.what == Break::Order),
+        "{:?}",
+        v.broken
+    );
+    !v.broken.is_empty()
+}
+
+/// `base` with its decisions in the order `to` (places in `base`).
+fn reordered(base: &Decisions, to: &[usize]) -> Decisions {
+    to.iter().map(|&k| base[k].clone()).collect()
+}
+
+/// A line of `chars` letters that ends in a full stop: 5 points a letter at size 10.
+fn line_of(chars: usize, x: f32, y: f32, line: u32) -> TextRun {
+    run(&format!("{}.", "m".repeat(chars - 1)), x, y, 10.0, line)
+}
+
+/// Relation (a) across a column break: the foot of a column of prose and the head of the
+/// next column of its set keep their order, so two columns read by rows break. The shares
+/// that make a column (a full line, a like width) are moved both ways, and two blocks of
+/// short lines side by side (an address beside an address) are free.
+#[test]
+fn the_foot_of_a_column_and_the_head_of_the_next_keep_their_order() {
+    // `second` letters in the second line of the left column, `right` in the lines of the
+    // right one. Left: two paragraphs of 40 letters a line (200 points); right: two.
+    let columns = |second: usize, right: usize| {
+        page(
+            vec![
+                line_of(40, 50.0, 700.0, 0),
+                line_of(second, 50.0, 688.0, 1),
+                line_of(20, 50.0, 676.0, 2),
+                line_of(40, 50.0, 652.0, 3),
+                line_of(second, 50.0, 640.0, 4),
+                line_of(20, 50.0, 628.0, 5),
+                line_of(right, 300.0, 700.0, 6),
+                line_of(20, 300.0, 688.0, 7),
+                line_of(right, 300.0, 664.0, 8),
+                line_of(20, 300.0, 652.0, 9),
+            ],
+            Vec::new(),
+        )
+    };
+    let base = ds(&[
+        (Kind::Paragraph, &[0, 1, 2]),
+        (Kind::Paragraph, &[3, 4, 5]),
+        (Kind::Paragraph, &[6, 7]),
+        (Kind::Paragraph, &[8, 9]),
+    ]);
+    let p = columns(40, 40);
+    assert!(!order_breaks(&p, &base, &base));
+    // Read by rows, and the right column first.
+    assert!(order_breaks(&p, &base, &reordered(&base, &[0, 2, 1, 3])));
+    assert!(order_breaks(&p, &base, &reordered(&base, &[2, 3, 0, 1])));
+    // The right column a little narrower: 33 of 40 letters is of the set, 31 is not.
+    assert!(order_breaks(
+        &columns(40, 33),
+        &base,
+        &reordered(&base, &[0, 2, 1, 3])
+    ));
+    assert!(!order_breaks(
+        &columns(40, 31),
+        &base,
+        &reordered(&base, &[0, 2, 1, 3])
+    ));
+    // The second line of the left paragraphs: at 33 letters both lines over the last are
+    // full, at 31 one of two is, and the block is no prose.
+    assert!(order_breaks(
+        &columns(33, 40),
+        &base,
+        &reordered(&base, &[0, 2, 1, 3])
+    ));
+    assert!(!order_breaks(
+        &columns(31, 40),
+        &base,
+        &reordered(&base, &[0, 2, 1, 3])
+    ));
+    assert_eq!(meta::COLUMN_SHARE, 0.8);
+    // A known limit of the check (owner: after 0.1.0; a limit of the check, it changes no read): a
+    // foot of two lines has one line over its last, which is the widest by itself and says nothing.
+    // Such a column is not seen as prose. When the sign is taken from the column and not from its
+    // foot block, this assertion turns. Part 2b-1 of Task 31c found no such sign in the check: it
+    // compares regions, and the lines of the column over the foot are in other regions or in none.
+    let short = ds(&[
+        (Kind::Paragraph, &[0, 1, 2]),
+        (Kind::Paragraph, &[3, 4]),
+        (Kind::Spatial, &[5]),
+        (Kind::Paragraph, &[6, 7]),
+        (Kind::Paragraph, &[8, 9]),
+    ]);
+    assert!(!order_breaks(
+        &p,
+        &short,
+        &reordered(&short, &[0, 3, 1, 2, 4])
+    ));
+    // A column that starts under the end of the left one is no next column.
+    let mut low = columns(40, 40);
+    for t in &mut low.texts[6..] {
+        t.y -= 200.0;
+    }
+    assert!(!order_breaks(&low, &base, &reordered(&base, &[0, 2, 1, 3])));
+}
+
+/// Relation (a) when the next column starts with a heading: the heading opens the next part
+/// of the same flow, so the foot of the left column is read before it. The sign of a column
+/// set (a like width) is taken from the text under the heading, and is moved both ways. A
+/// heading over a block of short lines, and one under the end of the left column, are free.
+#[test]
+fn a_column_headed_by_a_heading_is_the_next_column() {
+    // `right` letters in the full lines under the heading.
+    let columns = |right: usize| {
+        page(
+            vec![
+                line_of(40, 50.0, 700.0, 0),
+                line_of(40, 50.0, 688.0, 1),
+                line_of(20, 50.0, 676.0, 2),
+                line_of(40, 50.0, 652.0, 3),
+                line_of(40, 50.0, 640.0, 4),
+                line_of(20, 50.0, 628.0, 5),
+                run("Results", 300.0, 700.0, 12.0, 6),
+                line_of(right, 300.0, 684.0, 7),
+                line_of(right, 300.0, 672.0, 8),
+                line_of(20, 300.0, 660.0, 9),
+            ],
+            Vec::new(),
+        )
+    };
+    let base = ds(&[
+        (Kind::Paragraph, &[0, 1, 2]),
+        (Kind::Paragraph, &[3, 4, 5]),
+        (Kind::Heading, &[6]),
+        (Kind::Paragraph, &[7, 8, 9]),
+    ]);
+    let p = columns(40);
+    assert!(!order_breaks(&p, &base, &base));
+    // The right column before the foot of the left one, and the columns read by rows.
+    let right_first = reordered(&base, &[0, 2, 3, 1]);
+    let by_rows = reordered(&base, &[0, 2, 1, 3]);
+    assert!(order_breaks(&p, &base, &right_first));
+    assert!(order_breaks(&p, &base, &by_rows));
+    // The text under the heading a little narrower: 33 of 40 letters is of the set, 31 is
+    // not, and a block of short lines under a heading is no column of the text at the left.
+    assert!(order_breaks(&columns(33), &base, &by_rows));
+    assert!(!order_breaks(&columns(31), &base, &by_rows));
+    assert!(!order_breaks(&columns(20), &base, &right_first));
+    // The heading alone, with no text under it that the page reads: nothing says that it
+    // heads a column.
+    let alone = ds(&[
+        (Kind::Paragraph, &[0, 1, 2]),
+        (Kind::Paragraph, &[3, 4, 5]),
+        (Kind::Heading, &[6]),
+        (Kind::Spatial, &[7, 8, 9]),
+    ]);
+    assert!(!order_breaks(&p, &alone, &reordered(&alone, &[0, 2, 1, 3])));
+    // What stands under the heading is a table: no running text, no column.
+    let table = ds(&[
+        (Kind::Paragraph, &[0, 1, 2]),
+        (Kind::Paragraph, &[3, 4, 5]),
+        (Kind::Heading, &[6]),
+        (Kind::Table, &[7, 8, 9]),
+    ]);
+    assert!(!order_breaks(&p, &table, &reordered(&table, &[0, 2, 1, 3])));
+    // A heading that starts under the end of the left column opens no next column.
+    let mut low = columns(40);
+    for t in &mut low.texts[6..] {
+        t.y -= 200.0;
+    }
+    assert!(!order_breaks(&low, &base, &by_rows));
+}
+
+/// Relation (b): a heading left of its block, on the block's rows, is read before it. A
+/// block of text that is no heading in the same place (a head block against a date box) is
+/// free. The share of the heading's height on the rows is moved both ways.
+#[test]
+fn a_side_heading_and_its_block_keep_their_order() {
+    let side = |y: f32| {
+        page(
+            vec![
+                run("Sum due", 50.0, y, 10.0, 0),
+                run("Take the sum of the lines.", 200.0, 700.0, 10.0, 1),
+                run("Write it in the last box.", 200.0, 688.0, 10.0, 2),
+                run("Send the sheet on.", 200.0, 676.0, 10.0, 3),
+            ],
+            Vec::new(),
+        )
+    };
+    let base = ds(&[(Kind::Heading, &[0]), (Kind::Paragraph, &[1, 2, 3])]);
+    let swapped = reordered(&base, &[1, 0]);
+    for y in [700.0, 688.0, 676.0] {
+        assert!(order_breaks(&side(y), &base, &swapped), "{y}");
+    }
+    // The block reaches up to 710: a heading from 705 to 715 has half its height on the
+    // rows, one from 706 has less.
+    assert!(order_breaks(&side(705.0), &base, &swapped));
+    assert!(!order_breaks(&side(706.0), &base, &swapped));
+    assert_eq!(meta::ROW_SHARE, 0.5);
+    // The same two blocks, neither a heading: free.
+    let plain = ds(&[(Kind::Paragraph, &[0]), (Kind::Paragraph, &[1, 2, 3])]);
+    assert!(!order_breaks(
+        &side(700.0),
+        &plain,
+        &reordered(&plain, &[1, 0])
+    ));
+    // A heading right of the block heads nothing left of it.
+    let mut right = side(700.0);
+    right.texts[0].x = 450.0;
+    assert!(!order_breaks(&right, &base, &swapped));
+    // A title beside a number box heads nothing: the box is narrower than the title, and the
+    // two are a free pair. A side heading stands in the margin of a block that is as wide as
+    // it or wider: a block of 7 letters beside a heading of 7 is headed, one of 6 is not.
+    let beside = |title: &str, text: &str| {
+        page(
+            vec![
+                run(title, 50.0, 700.0, 10.0, 0),
+                run(text, 300.0, 700.0, 10.0, 0),
+            ],
+            Vec::new(),
+        )
+    };
+    let pair = ds(&[(Kind::Heading, &[0]), (Kind::Paragraph, &[1])]);
+    let turned = reordered(&pair, &[1, 0]);
+    assert!(!order_breaks(
+        &beside("Sample Works Parts Return", "Sheet No. 4411"),
+        &pair,
+        &turned
+    ));
+    assert!(order_breaks(&beside("Sum due", "Take it"), &pair, &turned));
+    assert!(!order_breaks(&beside("Sum due", "Take 4"), &pair, &turned));
+    // The box typed a field or a table: the title is no label of it. A heading that ends in
+    // a colon is one.
+    for kind in [Kind::LabelValue, Kind::Totals, Kind::Table] {
+        let boxed = ds(&[(Kind::Heading, &[0]), (kind, &[1])]);
+        let turned = reordered(&boxed, &[1, 0]);
+        let title = beside("Sample Works Parts Return", "Sheet No. 4411");
+        assert!(!order_breaks(&title, &boxed, &turned), "{kind:?}");
+        let label = beside("Sample Works Parts Return:", "Sheet No. 4411");
+        assert!(order_breaks(&label, &boxed, &turned), "{kind:?}");
+    }
+    // A short title beside a wider box typed a field: the width says side heading, the type
+    // says box, and a side heading never heads a field beside a title.
+    let wide = beside("Invoice", "Sheet No. 4411-0074");
+    for kind in [Kind::LabelValue, Kind::Totals] {
+        let boxed = ds(&[(Kind::Heading, &[0]), (kind, &[1])]);
+        assert!(
+            !order_breaks(&wide, &boxed, &reordered(&boxed, &[1, 0])),
+            "{kind:?}"
+        );
+    }
+    // A known limit of the check (owner: after 0.1.0; a limit of the check, it changes no read): the
+    // same wider box typed a paragraph. A heading beside a wider block of one line on its row is
+    // the shape of a side heading, and geometry cannot tell a number line from a block of one line,
+    // so the pair is held though it is free. When a sign tells the two apart, this assertion turns.
+    // Part 2b-1 of Task 31c found none: a box or a number field is a sign of the engine's read
+    // (label and value groups, Task 26), not of the geometry the check has.
+    assert!(order_breaks(&wide, &pair, &turned));
+    // A box typed a field left of a title: the title is no value of it either. A field left
+    // of a paragraph on its row is still read first.
+    let left_box = beside("Sheet No. 4411", "Sample Works Parts Return");
+    for kind in [Kind::LabelValue, Kind::Totals] {
+        let boxed = ds(&[(kind, &[0]), (Kind::Heading, &[1])]);
+        assert!(
+            !order_breaks(&left_box, &boxed, &reordered(&boxed, &[1, 0])),
+            "{kind:?}"
+        );
+        let field = ds(&[(kind, &[0]), (Kind::Paragraph, &[1])]);
+        assert!(
+            order_breaks(&left_box, &field, &reordered(&field, &[1, 0])),
+            "{kind:?}"
+        );
+    }
+}
+
+/// Relation (c): a label and its value on one row, and a column of labels beside the column
+/// of their values, are read label first. The sign of a label is a colon at the end of each
+/// line or a region typed label/value or totals; two blocks without one (two names side by
+/// side) are free, as are the columns of a footer band. The row test is moved both ways.
+#[test]
+fn a_label_and_its_value_keep_their_order() {
+    let fields = |labels: [&str; 2], down: f32| {
+        page(
+            vec![
+                run(labels[0], 50.0, 700.0, 10.0, 0),
+                run(labels[1], 50.0, 688.0, 10.0, 1),
+                run("Sample part", 200.0, 700.0 - down, 10.0, 0),
+                run("12", 200.0, 688.0 - down, 10.0, 1),
+            ],
+            Vec::new(),
+        )
+    };
+    let two = |a: Kind, b: Kind| ds(&[(a, &[0, 1]), (b, &[2, 3])]);
+    let base = two(Kind::Paragraph, Kind::Paragraph);
+    let swapped = reordered(&base, &[1, 0]);
+    let colons = ["Name:", "Count:"];
+    assert!(order_breaks(&fields(colons, 0.0), &base, &swapped));
+    // No sign of a label: free. Typed as fields: the order counts again.
+    let plain = ["Name", "Count"];
+    assert!(!order_breaks(&fields(plain, 0.0), &base, &swapped));
+    for (a, b) in [
+        (Kind::LabelValue, Kind::Paragraph),
+        (Kind::Paragraph, Kind::LabelValue),
+        (Kind::Totals, Kind::Paragraph),
+    ] {
+        let typed = two(a, b);
+        assert!(order_breaks(
+            &fields(plain, 0.0),
+            &typed,
+            &reordered(&typed, &[1, 0])
+        ));
+    }
+    // The values 4.9 points under the labels are on their rows, 5.1 points are not.
+    assert!(order_breaks(&fields(colons, 4.9), &base, &swapped));
+    assert!(!order_breaks(&fields(colons, 5.1), &base, &swapped));
+    // One row each.
+    let one = ds(&[
+        (Kind::Paragraph, &[0]),
+        (Kind::Paragraph, &[2]),
+        (Kind::Spatial, &[1, 3]),
+    ]);
+    assert!(order_breaks(
+        &fields(colons, 0.0),
+        &one,
+        &reordered(&one, &[1, 0, 2])
+    ));
+    // Two labels against one value: not row by row.
+    let uneven = ds(&[
+        (Kind::Paragraph, &[0, 1]),
+        (Kind::Paragraph, &[2]),
+        (Kind::Spatial, &[3]),
+    ]);
+    assert!(!order_breaks(
+        &fields(colons, 0.0),
+        &uneven,
+        &reordered(&uneven, &[1, 0, 2])
+    ));
+    // A label with a colon left of a title on its row: a title is no value, whatever the
+    // label is typed. The same label left of a paragraph is read before it.
+    let subject = page(
+        vec![
+            run("Subject:", 50.0, 700.0, 10.0, 0),
+            run("Sample Works Report", 300.0, 700.0, 10.0, 0),
+        ],
+        Vec::new(),
+    );
+    for label in [Kind::Paragraph, Kind::LabelValue, Kind::Totals] {
+        let title = ds(&[(label, &[0]), (Kind::Heading, &[1])]);
+        assert!(
+            !order_breaks(&subject, &title, &reordered(&title, &[1, 0])),
+            "{label:?}"
+        );
+        let value = ds(&[(label, &[0]), (Kind::Paragraph, &[1])]);
+        assert!(
+            order_breaks(&subject, &value, &reordered(&value, &[1, 0])),
+            "{label:?}"
+        );
+    }
+    // The columns of a footer band.
+    let band = two(Kind::FooterBand, Kind::FooterBand);
+    assert!(!order_breaks(
+        &fields(colons, 0.0),
+        &band,
+        &reordered(&band, &[1, 0])
+    ));
+}
+
+/// Relation (c) when each label and each value is a region of its own: a value is read
+/// right after its label. All labels first and all values after keeps every label before its
+/// value and still parts each pair, so it is a break. Without the sign of a label the four
+/// blocks are free.
+#[test]
+fn a_label_and_its_value_are_not_parted() {
+    let fields = |labels: [&str; 2]| {
+        page(
+            vec![
+                run(labels[0], 50.0, 700.0, 10.0, 0),
+                run(labels[1], 50.0, 688.0, 10.0, 1),
+                run("Sample part", 200.0, 700.0, 10.0, 0),
+                run("12", 200.0, 688.0, 10.0, 1),
+            ],
+            Vec::new(),
+        )
+    };
+    let rows = |label: Kind| {
+        ds(&[
+            (label, &[0]),
+            (Kind::Paragraph, &[2]),
+            (label, &[1]),
+            (Kind::Paragraph, &[3]),
+        ])
+    };
+    let base = rows(Kind::Paragraph);
+    let colons = fields(["Name:", "Count:"]);
+    let plain = fields(["Name", "Count"]);
+    assert!(!order_breaks(&colons, &base, &base));
+    // All labels, then all values.
+    let parted = [0, 2, 1, 3];
+    assert!(order_breaks(&colons, &base, &reordered(&base, &parted)));
+    // The same with typed labels and no colon.
+    let typed = rows(Kind::LabelValue);
+    assert!(order_breaks(&plain, &typed, &reordered(&typed, &parted)));
+    // One pair whole, the label of the other read first on the page and its value last.
+    assert!(order_breaks(
+        &colons,
+        &base,
+        &reordered(&base, &[2, 0, 1, 3])
+    ));
+    // The rows in the other order: each value still right after its label, and the rows
+    // are of one flow, so this breaks by the flow and not by the bond. Two names side by
+    // side on each row, with no sign of a label, are free to be read by columns.
+    assert!(order_breaks(
+        &colons,
+        &base,
+        &reordered(&base, &[2, 3, 0, 1])
+    ));
+    assert!(!order_breaks(&plain, &base, &reordered(&base, &parted)));
+}
+
+/// Relation (d): a caption beside its picture stays with it in the order the page has. Text
+/// beside a picture that does not open as a caption is free. The share of the caption's
+/// height on the rows of the picture is moved both ways.
+#[test]
+fn a_caption_and_its_picture_keep_their_order() {
+    let beside = |text: &str, y: f32| {
+        let mut p = page(vec![run(text, 300.0, y, 10.0, 0)], Vec::new());
+        p.pictures.push(PictureIn {
+            bounds: Bounds {
+                x0: 50.0,
+                y0: 500.0,
+                x1: 250.0,
+                y1: 700.0,
+            },
+        });
+        p
+    };
+    let base: Decisions = vec![
+        (Kind::Figure, vec![PrimId::Picture(0)], String::new()),
+        (Kind::Paragraph, vec![PrimId::Text(0)], String::new()),
+    ];
+    let swapped = reordered(&base, &[1, 0]);
+    let caption = "Figure 3 shows the part";
+    assert!(order_breaks(&beside(caption, 600.0), &base, &swapped));
+    // The caption first on the page: that order is kept too.
+    assert!(order_breaks(&beside(caption, 600.0), &swapped, &base));
+    assert!(!order_breaks(
+        &beside("The part is shown here", 600.0),
+        &base,
+        &swapped
+    ));
+    // The picture ends at 700: a caption from 695 to 705 is on its rows, one from 696 not.
+    assert!(order_breaks(&beside(caption, 695.0), &base, &swapped));
+    assert!(!order_breaks(&beside(caption, 696.0), &base, &swapped));
+}
+
+/// Relation (d) with two pictures, each with its caption beside it: a caption is read right
+/// after its picture. All pictures first and all captions after keeps every caption behind
+/// its picture and still parts each pair, so it is a break. The same texts without a caption
+/// word are free to be read by columns.
+#[test]
+fn a_caption_and_its_picture_are_not_parted() {
+    let beside = |texts: [&str; 2]| {
+        let mut p = page(
+            vec![
+                run(texts[0], 300.0, 600.0, 10.0, 0),
+                run(texts[1], 300.0, 300.0, 10.0, 1),
+            ],
+            Vec::new(),
+        );
+        for (y0, y1) in [(500.0, 700.0), (200.0, 400.0)] {
+            p.pictures.push(PictureIn {
+                bounds: Bounds {
+                    x0: 50.0,
+                    y0,
+                    x1: 250.0,
+                    y1,
+                },
+            });
+        }
+        p
+    };
+    let base: Decisions = vec![
+        (Kind::Figure, vec![PrimId::Picture(0)], String::new()),
+        (Kind::Paragraph, vec![PrimId::Text(0)], String::new()),
+        (Kind::Figure, vec![PrimId::Picture(1)], String::new()),
+        (Kind::Paragraph, vec![PrimId::Text(1)], String::new()),
+    ];
+    let captions = beside(["Figure 1 shows the part", "Figure 2 shows the cover"]);
+    assert!(!order_breaks(&captions, &base, &base));
+    // All pictures, then all captions.
+    let parted = reordered(&base, &[0, 2, 1, 3]);
+    assert!(order_breaks(&captions, &base, &parted));
+    // No caption word: the texts beside the pictures are free.
+    let plain = beside(["The part is shown here", "The cover is shown here"]);
+    assert!(!order_breaks(&plain, &base, &parted));
+}
+
+/// Relation (e): a sentence that runs from one region into the next. The second region is
+/// read right after the first: a block read between the two stands inside the sentence, even
+/// when it stands beside both. When the first region ends its sentence the block is free.
+#[test]
+fn nothing_stands_inside_a_sentence_that_runs_on() {
+    let text = |end: &str, start: &str| {
+        page(
+            vec![
+                run("The cover is held by four", 50.0, 700.0, 10.0, 0),
+                run(end, 50.0, 688.0, 10.0, 1),
+                run(start, 50.0, 664.0, 10.0, 2),
+                run("Side note", 400.0, 690.0, 10.0, 3),
+            ],
+            Vec::new(),
+        )
+    };
+    let base = ds(&[
+        (Kind::Paragraph, &[0, 1]),
+        (Kind::Paragraph, &[2]),
+        (Kind::Paragraph, &[3]),
+    ]);
+    let between = reordered(&base, &[0, 2, 1]);
+    let first = reordered(&base, &[2, 0, 1]);
+    let p = text("screws, and each of them", "takes a washer.");
+    assert!(order_breaks(&p, &base, &between));
+    // The block before both parts or after both: inside nothing.
+    assert!(!order_breaks(&p, &base, &first));
+    // The sentence ends in the first region, or the next region opens a new one: free.
+    assert!(!order_breaks(
+        &text("screws of one size.", "takes a washer."),
+        &base,
+        &between
+    ));
+    assert!(!order_breaks(
+        &text("screws, and each of them", "Each takes a washer."),
+        &base,
+        &between
+    ));
+    // A last line that is not full ends the text (19 of 25 letters; 20 are four fifths), and
+    // so does a line alone.
+    assert!(order_breaks(
+        &text("screws, and each one", "takes a washer."),
+        &base,
+        &between
+    ));
+    assert!(!order_breaks(
+        &text("screws, and each on", "takes a washer."),
+        &base,
+        &between
+    ));
+    let alone = ds(&[
+        (Kind::Spatial, &[0]),
+        (Kind::Paragraph, &[1]),
+        (Kind::Paragraph, &[2]),
+        (Kind::Paragraph, &[3]),
+    ]);
+    assert!(!order_breaks(&p, &alone, &reordered(&alone, &[0, 1, 3, 2])));
+    // The second part at the head of another column, short lines, no prose: still held.
+    let mut over = text("screws, and each of them", "takes a washer.");
+    over.texts[2].x = 220.0;
+    over.texts[2].y = 700.0;
+    let two = ds(&[
+        (Kind::Paragraph, &[0, 1]),
+        (Kind::Paragraph, &[2]),
+        (Kind::Spatial, &[3]),
+    ]);
+    assert!(order_breaks(&over, &two, &reordered(&two, &[1, 0, 2])));
+    // A block to the left under the first part goes on nothing: the pair is free.
+    over.texts[2].x = 50.0;
+    over.texts[2].y = 664.0;
+    for t in &mut over.texts[..2] {
+        t.x = 300.0;
+    }
+    over.texts[3].y = 500.0;
+    assert!(!order_breaks(&over, &two, &reordered(&two, &[1, 0, 2])));
+}
+
+/// The free case: blocks that do not depend on each other. A head block against a date box,
+/// two boxes of short lines side by side and a note beside a paragraph may be read in any
+/// order, and no order of them is a break.
+#[test]
+fn independent_blocks_side_by_side_are_free() {
+    let p = page(
+        vec![
+            // A head block at the left, three lines.
+            run("Sample Works and Sons", 50.0, 760.0, 10.0, 0),
+            run("4 Mill Lane.", 50.0, 748.0, 10.0, 1),
+            run("Lowtown.", 50.0, 736.0, 10.0, 2),
+            // A date box at the right, two lines.
+            run("Sheet 4", 420.0, 760.0, 10.0, 0),
+            run("Third of May.", 420.0, 748.0, 10.0, 1),
+            // Two boxes of like width side by side, short lines.
+            run("Sent to the north store.", 50.0, 600.0, 10.0, 3),
+            run("Dock 2.", 50.0, 588.0, 10.0, 4),
+            run("Sent to the south store.", 300.0, 600.0, 10.0, 3),
+            run("Dock 7.", 300.0, 588.0, 10.0, 4),
+        ],
+        Vec::new(),
+    );
+    let base = ds(&[
+        (Kind::Paragraph, &[0, 1, 2]),
+        (Kind::Paragraph, &[3, 4]),
+        (Kind::Paragraph, &[5, 6]),
+        (Kind::Paragraph, &[7, 8]),
+    ]);
+    for to in [[1, 0, 2, 3], [0, 1, 3, 2], [1, 0, 3, 2]] {
+        assert!(!order_breaks(&p, &base, &reordered(&base, &to)), "{to:?}");
+    }
+    // The boxes under the head block are of its flow: read before it, the order is broken.
+    assert!(order_breaks(&p, &base, &reordered(&base, &[2, 0, 1, 3])));
 }

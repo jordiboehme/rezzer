@@ -553,6 +553,13 @@ fn reading_order(pieces: &[Piece], ids: &[usize], rules: &cut::Ruled<'_>) -> Ord
     // The text pass orders a page before the layout has a budget at hand; of the limits the
     // cut reads only `max_cut_depth`, which `rezzer_layout::pdf::engine_limits` keeps at its
     // default for every budget, so the defaults are the read's limits here too.
+    // The rules are sorted by height (see `runs_in`), and a page with boxes is cut once for
+    // each box: each cut gets the rules at its own heights.
+    let rules = &cut::Ruled {
+        rules: cut::at_heights(rules.rules, &cutting),
+        joined: cut::at_heights(rules.joined, &cutting),
+        joints: rules.joints,
+    };
     let found = cut::xy_cut_ruled(&cutting, rules, &Limits::default(), &|| false);
     let mut out = Order {
         ids: Vec::with_capacity(ids.len()),
@@ -1175,7 +1182,11 @@ pub(crate) fn runs_in(
         let (a, b) = (turn.apply(r.x0, r.y0), turn.apply(r.x1, r.y1));
         ([a.0, a.1, b.0, b.1], matches!(r.kind, RuleKind::Rect))
     }));
-    let across = flat;
+    // By height, once for the page: each cut of a part of it takes the rules at its own
+    // heights (see `reading_order`). The cut sorts the same way and keeps the order of rules
+    // at one height.
+    let mut across = flat;
+    across.sort_by(|a, b| a.at.total_cmp(&b.at));
     let unused = if turned.is_empty() {
         None
     } else {
@@ -1183,7 +1194,9 @@ pub(crate) fn runs_in(
     };
     // The rules drawn in pieces, joined, and their joints, which mark the columns of the
     // rows under such a rule: both are made once for the page.
-    let (joined, joints) = cut::joined(&across, &uprights);
+    let (mut joined, joints) = cut::joined(&across, &uprights);
+    joined.sort_by(|a, b| a.at.total_cmp(&b.at));
+    crate::work::add((across.len() + joined.len()) as u64);
     let ruled = cut::Ruled {
         rules: &across,
         joined: &joined,

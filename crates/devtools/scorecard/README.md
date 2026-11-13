@@ -153,6 +153,21 @@ for a value that stands once in its table.
   from Rezzer's read of the file with its tags, and only facts that read holds are kept. So
   a set read with tags holds 100 % on the day its truth is made. A lower number later shows
   that the tagged read moved. It is no evidence that a read is right.
+- **Tagged order facts stand within one flow.** An `order` fact is written for a block and
+  the next block of its page that stands over or under it: half the width of the narrower
+  one or more is shared. Two blocks side by side that the tags name one after the other
+  give a fact only when a sign holds them together: the foot of a column and the head of
+  the next column of a like width, which starts above that foot, a heading left of its block
+  on the block's rows, a label that ends in a colon and its value on one row, or a sentence
+  that runs on into a block that starts with a small letter. A next column may start with a
+  heading: the like width is then that of the text under the heading. A heading left of a
+  block heads it only when the block is as wide as the heading or wider. Other blocks side
+  by side give no fact. A margin note and a line of a form, a head block and a date box, a
+  title and a number box or the columns of a footer do not depend on each other. A reader may read either first. The tags' own sign
+  of a flow, the structure parent of a block, is not in the read, so these tests stand in
+  for it. A caption beside its picture gives no fact: a picture has no text to name. The
+  last block of a page and the first of the next page give a fact too. The model does not say how a page is turned, so a page whose text is read
+  in a turned frame gives no facts of a flow.
 - **Untagged rows are a lower bound.** The same file is read with its tags taken out and
   scored against that truth. Text extraction is shared with the truth, and tag conventions
   that the layout does not show count as failures. The number is a lower bound on

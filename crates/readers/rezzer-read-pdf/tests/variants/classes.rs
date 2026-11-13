@@ -1015,6 +1015,21 @@ const LISTED_ITEMS: [[&str; 5]; 3] = [
 /// of one table: each count and price reads in the row of its item, never after all items,
 /// and the header is the table's header row, each title a cell of its own.
 fn item_rows_under_an_info_block(v: &Variant) -> Sheet {
+    item_rows_on_a_letter_page(v, false)
+}
+
+/// Task 31c: the page of [`item_rows_under_an_info_block`] as a second sheet of its list.
+/// Over the rule in pieces stands no row of titles but a row carried over from the sheet
+/// before: a label and an amount. The joints of the rule and the rows under it are the same.
+/// The rows are still rows: each count and price is read with its item, never after all
+/// items.
+fn item_rows_under_a_carried_row(v: &Variant) -> Sheet {
+    item_rows_on_a_letter_page(v, true)
+}
+
+/// The page of [`item_rows_under_an_info_block`]; with `carried`, the row over the rule in
+/// pieces holds a label and an amount (see [`item_rows_under_a_carried_row`]) and no titles.
+fn item_rows_on_a_letter_page(v: &Variant, carried: bool) -> Sheet {
     let k = v.k();
     let (plain, bold) = v.faces();
     let size = 11.0 * k;
@@ -1048,10 +1063,16 @@ fn item_rows_under_an_info_block(v: &Variant) -> Sheet {
     t += &show(plain, size, 30.0, top - pitch * 3.0, " ");
     let head = top - pitch * 4.0 - 1.0 * k;
     let titles = ["No.", "Article (3)", "Count", "Price"];
-    t += &show(plain, size, 32.0, head, titles[0]);
-    t += &show(plain, size, x_desc, head, titles[1]);
-    t += &right(plain, size, x_qty, head, titles[2]);
-    t += &right(plain, size, x_price, head, titles[3]);
+    let over = ["Carried over from sheet 1", "88,20"];
+    if carried {
+        t += &show(plain, size, x_desc, head, over[0]);
+        t += &right(plain, size, x_price, head, over[1]);
+    } else {
+        t += &show(plain, size, 32.0, head, titles[0]);
+        t += &show(plain, size, x_desc, head, titles[1]);
+        t += &right(plain, size, x_qty, head, titles[2]);
+        t += &right(plain, size, x_price, head, titles[3]);
+    }
     let under_head = head - 4.0 * k;
     for (a, b) in [
         (30.0, 62.1),
@@ -1102,6 +1123,21 @@ fn item_rows_under_an_info_block(v: &Variant) -> Sheet {
     };
     let mut s = Sheet::new(built);
     s.once = crate::axes::shown(&s.built.page.template);
+    if carried {
+        // The rows in order, each item before its own price and before the next item: a
+        // table is not asked for (no titles), a read by columns is refused. The row carried
+        // over is not in the chain: its label and its amount stand on the two sides of the
+        // page's gutter, a label and its value apart (label/value groups, Task 26).
+        let mut rows = Vec::new();
+        for item in LISTED_ITEMS {
+            rows.extend([item[1].to_string(), item[4].to_string()]);
+        }
+        s.want.orders.push(rows);
+        s.want
+            .order
+            .extend(["Saucer".to_string(), "Total".into(), "55,36".into()]);
+        return s;
+    }
     for item in LISTED_ITEMS {
         s.want.row_media.push((item[1].to_string(), 1));
     }
@@ -1308,6 +1344,11 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "item rows under a rule in pieces on a page with a block of lines on the right",
             axes: LISTED,
             draw: |v| (item_rows_under_an_info_block(v), None),
+        },
+        Shape {
+            name: "item rows under a rule in pieces and a row carried over, on a page with a block of lines on the right",
+            axes: LISTED,
+            draw: |v| (item_rows_under_a_carried_row(v), None),
         },
     ]
 }

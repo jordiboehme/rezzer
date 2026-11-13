@@ -24,6 +24,14 @@ use crate::work;
 /// drawn dash by dash 2 points apart), and today's readers measure the same lines in points.
 /// The gap between two dashes and the miss of two line ends are measures of the drawing, not
 /// of the text: a snap that follows the scale of a page needs a measure taken from its rules.
+///
+/// Measured again in Task 31c with the snap handed in from the file's body size (0.2 sizes)
+/// and the runs in the order of their places: the half-scale copy of a page kept the grids of
+/// the page, but small-text pages lost the joins of their grids at their own size (a ruled
+/// table of 4 by 7 read as a box of 2 by 1), and nine metamorphic pin counts on four pages
+/// went up.
+/// With the page's median text size 43 went up; with the larger of 2 points and 0.2 sizes a
+/// date label joined its year at one and a half times the size.
 pub const SNAP: f32 = 2.0;
 
 /// A grid or region that covers more of the page than this is the page's frame.
@@ -33,8 +41,9 @@ pub const PAGE_SHARE: f32 = 0.6;
 /// and says so.
 pub const MAX_SEGMENTS: usize = 20_000;
 
-/// Pairs of segments the grid search tests on one page; past them it gives up on the page and
-/// says so.
+/// Meetings of an upright and a flat segment the grid search follows on one page (a flat
+/// segment that reaches across the place of an upright one, in its height); past them it
+/// gives up on the page and says so.
 pub const GRID_WORK: usize = 4_000_000;
 
 /// Joined lines a group of segments keeps open for joining at once; past them the oldest is
@@ -84,7 +93,7 @@ pub enum Unsearched {
     /// More straight segments than [`MAX_SEGMENTS`]: `lines` is how many the page draws (a
     /// rectangle counts its four sides).
     TooMany { lines: usize },
-    /// More pairs of segments to test than [`GRID_WORK`].
+    /// More meetings of segments than [`GRID_WORK`].
     Work,
 }
 
@@ -383,22 +392,60 @@ pub fn grids(rules: &[RuleIn]) -> Result<Grids, Unsearched> {
     // Segments that meet are one grid. Horizontal ones are sorted by y.
     let n = hs.len();
     let mut parent: Vec<usize> = (0..n + vs.len()).collect();
+    // A walk across the page, from left to right over the vertical lines, with the horizontal
+    // lines that reach across the place of the walk at hand, by their height: each vertical
+    // line then looks only at the horizontal lines it meets, not at every one in its
+    // height. So the steps are the meetings, and a page of many small grids side by side,
+    // whose lines share their heights, costs about its lines.
     let mut steps = 0usize;
-    for (k, v) in vs.iter().enumerate() {
-        let lo = hs.partition_point(|h| h.at < v.from - SNAP);
-        for (j, h) in hs.iter().enumerate().skip(lo) {
-            if h.at > v.to + SNAP {
-                break;
+    let by = |key: fn(&Line) -> f32, of: &[Line]| {
+        let mut ids: Vec<usize> = (0..of.len()).filter(|&i| !key(&of[i]).is_nan()).collect();
+        ids.sort_by(|&a, &b| key(&of[a]).total_cmp(&key(&of[b])).then(a.cmp(&b)));
+        ids
+    };
+    // A line with a place or an end that is no number meets none.
+    let whole = |l: &Line| !(l.at.is_nan() || l.from.is_nan() || l.to.is_nan());
+    let (starts, ends, walk) = (by(|h| h.from, &hs), by(|h| h.to, &hs), by(|v| v.at, &vs));
+    work::add(2 * (starts.len() + ends.len() + walk.len()) as u64);
+    // The horizontal lines at hand, each as the bits of its height (in the order of
+    // `f32::total_cmp`, with the two zeros as one) and its number.
+    let key = |at: f32| {
+        let bits = (at + 0.0).to_bits();
+        if bits >> 31 == 0 {
+            bits | 1 << 31
+        } else {
+            !bits
+        }
+    };
+    let mut at_hand: std::collections::BTreeSet<(u32, usize)> = std::collections::BTreeSet::new();
+    let (mut next_start, mut next_end) = (0, 0);
+    for &k in &walk {
+        let v = vs[k];
+        while let Some(&j) = starts
+            .get(next_start)
+            .filter(|&&j| hs[j].from - SNAP <= v.at)
+        {
+            next_start += 1;
+            if whole(&hs[j]) {
+                at_hand.insert((key(hs[j].at), j));
             }
+        }
+        while let Some(&j) = ends.get(next_end).filter(|&&j| hs[j].to + SNAP < v.at) {
+            next_end += 1;
+            at_hand.remove(&(key(hs[j].at), j));
+        }
+        let (low, high) = (v.from - SNAP, v.to + SNAP);
+        if !whole(&v) || low > high {
+            continue;
+        }
+        for &(_, j) in at_hand.range((key(low), 0)..=(key(high), usize::MAX)) {
             steps += 1;
             if steps > GRID_WORK {
                 work::add(steps as u64);
                 return Err(Unsearched::Work);
             }
-            if v.at >= h.from - SNAP && v.at <= h.to + SNAP {
-                let (a, b) = (find(&mut parent, j), find(&mut parent, n + k));
-                parent[a] = b;
-            }
+            let (a, b) = (find(&mut parent, j), find(&mut parent, n + k));
+            parent[a] = b;
         }
     }
     work::add(steps as u64);
@@ -411,10 +458,13 @@ pub fn grids(rules: &[RuleIn]) -> Result<Grids, Unsearched> {
         let root = find(&mut parent, n + k);
         groups.entry(root).or_default().1.push(k);
     }
-    let groups = groups
+    // In the order of each group's first line across: the map gives its groups in an order
+    // that differs from run to run, and the regions of a page follow the order of the grids.
+    let mut groups: Vec<(Vec<usize>, Vec<usize>)> = groups
         .into_values()
         .filter(|(h, v)| h.len() >= 2 && v.len() >= 2)
         .collect();
+    groups.sort_unstable_by_key(|(h, _)| h[0]);
     Ok(Grids { hs, vs, groups })
 }
 
@@ -795,6 +845,26 @@ mod tests {
     /// Rectangles drawn side by side that share their sides are one group of lines: their
     /// shared sides are one line, and the group is a grid of one row with a cell per
     /// rectangle. Rectangles a gap apart stay groups of their own.
+    /// The groups stand in the order of their first line across, on every search: a page of
+    /// many grids gives the same groups in the same order each time (a map's own order differs
+    /// from one map to the next).
+    #[test]
+    fn the_groups_of_a_page_stand_in_one_order_on_every_search() {
+        let rules: Vec<RuleIn> = (0..24)
+            .map(|k| {
+                let (x, y) = (40.0 + 130.0 * (k % 4) as f32, 60.0 + 110.0 * (k / 4) as f32);
+                rect(x, y, x + 90.0, y + 70.0)
+            })
+            .collect();
+        let first = grids(&rules).expect("searched");
+        assert_eq!(first.groups.len(), 24);
+        let firsts: Vec<usize> = first.groups.iter().map(|g| g.0[0]).collect();
+        assert!(firsts.is_sorted(), "{firsts:?}");
+        for _ in 0..8 {
+            assert_eq!(grids(&rules).expect("searched"), first);
+        }
+    }
+
     #[test]
     fn abutting_rectangles_are_one_group() {
         let rules = vec![

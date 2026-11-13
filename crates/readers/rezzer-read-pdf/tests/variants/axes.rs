@@ -396,6 +396,10 @@ pub(crate) struct Want {
     /// the order inside a chain carries meaning (the lines of one block, the paragraphs of
     /// one letter), the place of one chain against another is free.
     pub orders: Vec<Vec<String>>,
+    /// Texts that follow each other in the page's text with no other text of the page
+    /// between them (Task 31c, class F): the lines of one paragraph that a block beside it
+    /// must not part. Each list for itself.
+    pub together: Vec<Vec<String>>,
     /// For the page's media blocks in order: the texts the block stands after and before
     /// (Task 22 fix round 4), each found as the first block that holds it.
     pub media_between: Vec<(String, String)>,

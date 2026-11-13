@@ -5,6 +5,9 @@
 //! Visual lines of text runs and the text of a line: the one place where runs become a line,
 //! for the engine and for a reader that keeps runs of its own (see [`LineRun`]).
 
+use std::borrow::Cow;
+use std::cmp::Ordering;
+
 use crate::input::{GapIn, TextRun};
 
 /// A gap wider than this many font sizes splits a line into pieces, which may stand in
@@ -182,6 +185,39 @@ impl<R> TextLine<'_, R> {
     pub fn middle(&self) -> f32 {
         self.y + self.h / 2.0
     }
+}
+
+/// The order of two runs by their places: the line, then the left edge, then the baseline
+/// (the higher one first), then the width, the size and the text. Runs that are equal by all
+/// of these stand in one place with one text: which of them comes first changes no read.
+pub fn place_order<R: LineRun>(a: &R, b: &R) -> Ordering {
+    a.line()
+        .cmp(&b.line())
+        .then(a.x().total_cmp(&b.x()))
+        .then(b.y().total_cmp(&a.y()))
+        .then(a.w().total_cmp(&b.w()))
+        .then(a.size().total_cmp(&b.size()))
+        .then_with(|| a.text().cmp(b.text()))
+}
+
+/// Whether `runs` stand in the order of their places (see [`place_order`]).
+pub fn in_place_order<R: LineRun>(runs: &[R]) -> bool {
+    runs.windows(2)
+        .all(|w| place_order(&w[0], &w[1]) != Ordering::Greater)
+}
+
+/// The text of `line` as its runs read in the order of their places: its own text when they
+/// stand in that order, as the runs of nearly every line do. What a file learns from the text
+/// of a line and looks up by it again (the key of a running line) is taken from this text, so
+/// that it is the same in every order the runs of the line are handed in.
+pub fn placed_text<'t, R: LineRun>(line: &'t TextLine<'_, R>) -> Cow<'t, str> {
+    if in_place_order(line.runs) {
+        return Cow::Borrowed(&line.text);
+    }
+    let mut runs: Vec<&R> = line.runs.iter().collect();
+    // A stable sort: runs equal by their places keep the order they came in.
+    runs.sort_by(|a, b| place_order(*a, *b));
+    Cow::Owned(text_line(&runs).text)
 }
 
 /// The lines of `runs`, in order: runs of one line number (and page) next to each other.
