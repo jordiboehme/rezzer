@@ -502,9 +502,12 @@ fn date_text(v: &Value) -> Option<String> {
 /// body: how many places, and how many distinct pictures (assets, and image inlines by their
 /// target).
 fn images(doc: &Document) -> (usize, usize) {
+    // A picture that shows a block of the text (a region kept as laid out) is no image of
+    // the file.
     let mime: HashMap<&str, &str> = doc
         .assets
         .iter()
+        .filter(|a| a.shows.is_none())
         .map(|a| (a.id.as_str(), a.mime.as_str()))
         .collect();
     let mut n = 0;

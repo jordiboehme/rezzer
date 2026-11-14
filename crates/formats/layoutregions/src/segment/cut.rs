@@ -45,6 +45,9 @@ pub struct Piece {
     /// The text of the piece reads as an amount or a date (see [`reads_as_value`]): a value,
     /// no label.
     pub value: bool,
+    /// The text of the piece reads as a date set in figures (see [`reads_as_date`]): a value
+    /// of another kind than an amount. Never set without `value`.
+    pub date: bool,
     /// The whole number the text of the piece is (see [`whole_number`]): a value that may
     /// also name a column (a year, a number of a column).
     pub number: Option<u64>,
@@ -552,7 +555,7 @@ impl Cutter<'_> {
             }
             sort(&mut ids);
             // Where each piece goes: to a side, alone across, or with its whole row.
-            let (goes, _, breaks, _) = rows_whole(p, &ids, &sides);
+            let (mut goes, _, breaks, _) = rows_whole(p, &ids, &sides);
             out.breaks.extend(breaks);
             // The pieces of the band that is open, sorted by row, each with where it goes:
             // to a side, or with its whole row.
@@ -750,18 +753,24 @@ impl Cutter<'_> {
             // (the rows of a table between the rule under its header and its closing rule):
             // it is looked at alone, so that only columns of its own part it, not the gutter
             // that the blocks over and under it make. Any rule of the page closes it.
-            let between = if self.joints.is_empty() {
-                Vec::new()
+            let (between, over) = if self.joints.is_empty() {
+                (Vec::new(), Vec::new())
             } else {
                 let pieced = wide(&self.joined);
                 let closing = within(&self.closing, |&y| y, (bottom, top));
                 work::add(closing.len() as u64);
                 between_rules(p, &ids, (&pieced, closing), self.joints, &sides)
             };
+            // A row of values right over the rule of such a block, in the columns of its
+            // rows, is read whole at its height: no side of the gutter takes a part of it.
+            for &(a, z) in &over {
+                goes[a..z].fill(Goes::Row);
+            }
             if debug_cut() {
                 eprintln!(
-                    "CUT   rules across {across:?} blocks between rules {between:?} (indices \
-                     into the pieces of this region, sorted by line)"
+                    "CUT   rules across {across:?} blocks between rules {between:?} rows of \
+                     values over their rules {over:?} (indices into the pieces of this region, \
+                     sorted by line)"
                 );
                 eprintln!(
                     "CUT   ink of the sides ends and starts at {:?}, rows left {} right {}",
@@ -1062,6 +1071,7 @@ pub fn reads_as_currency(text: &str) -> bool {
 ///   decides (`CHF` and `Total` is no value).
 /// - The word of a currency after the figures goes on with the amount before it.
 /// - A whole number goes on with its next digits (see [`number_goes_on`]).
+/// - A date goes on with its next figures (see [`reads_as_date`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Reading {
     /// The text reads as an amount or a date (see [`reads_as_value`]).
@@ -1070,6 +1080,8 @@ pub struct Reading {
     pub number: Option<u64>,
     /// The ink so far is one word or sign of a currency alone.
     currency: bool,
+    /// The figures and signs so far, as far as they may be a date.
+    shape: DateShape,
 }
 
 impl Reading {
@@ -1080,7 +1092,14 @@ impl Reading {
             value,
             number: whole_number(text),
             currency: reads_as_currency(text),
+            shape: DateShape::default().with(text),
         }
+    }
+
+    /// Whether the text reads as a date set in figures (see [`reads_as_date`]): a value of
+    /// another kind than an amount.
+    pub fn date(self) -> bool {
+        self.value && self.shape.is_date()
     }
 
     /// The reading of the piece with its next run with ink, `text`, which alone reads as
@@ -1093,13 +1112,75 @@ impl Reading {
                 value,
                 number: None,
                 currency: false,
+                shape: DateShape::default().with(text),
             };
         }
         Reading {
             value: self.value && (value || reads_as_currency(text)),
             number: number_goes_on(self.number, text),
             currency: false,
+            shape: self.shape.with(text),
         }
+    }
+}
+
+/// Whether `text` reads as a date set in figures: three groups of digits parted by one sign
+/// (`.`, `/` or `-`, the same both times), a day and a month of one or two digits before a
+/// year of two or four (`12.05.2026`, `5/12/26`), or a year of four digits before them
+/// (`2026-05-12`). White space is passed over. An amount has no such shape: its groups of
+/// thousands hold three digits (`1.234.567`), and its sign for the decimals differs from
+/// the one for the thousands (`1.234,56`). A date with its month in words is not known
+/// here, as in [`reads_as_value`].
+pub fn reads_as_date(text: &str) -> bool {
+    DateShape::default().with(text).is_date()
+}
+
+/// The figures of a text read so far, as far as they may be a date (see [`reads_as_date`]):
+/// taken run by run, so that a date reads the same in one run and in several.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct DateShape {
+    /// The digits of each group so far.
+    groups: [u8; 3],
+    /// The group that is open or comes next.
+    at: u8,
+    /// The sign between the groups.
+    sign: Option<char>,
+    /// A digit stands after the last sign.
+    open: bool,
+    /// The text holds what a date does not.
+    other: bool,
+}
+
+impl DateShape {
+    /// The shape with the next run of the text, `text`.
+    fn with(mut self, text: &str) -> DateShape {
+        for c in text.chars().filter(|c| !c.is_whitespace()) {
+            let at = usize::from(self.at);
+            if c.is_ascii_digit() && at < 3 {
+                self.groups[at] = self.groups[at].saturating_add(1);
+                self.open = true;
+            } else if matches!(c, '.' | '/' | '-')
+                && self.open
+                && at < 2
+                && self.sign.is_none_or(|s| s == c)
+            {
+                self.sign = Some(c);
+                self.at += 1;
+                self.open = false;
+            } else {
+                self.other = true;
+            }
+        }
+        self
+    }
+
+    fn is_date(self) -> bool {
+        let short = |n: u8| (1..=2).contains(&n);
+        let [a, b, c] = self.groups;
+        !self.other
+            && self.open
+            && self.at == 2
+            && ((short(a) && short(b) && (c == 2 || c == 4)) || (a == 4 && short(b) && short(c)))
     }
 }
 
@@ -2353,6 +2434,9 @@ fn flow_at(ys: &[f32], pitch: Option<f32>, y: f32) -> Flow {
     }
 }
 
+/// A stretch of the sorted pieces of a region: the range of their indices.
+type Stretch = (usize, usize);
+
 /// The stretches of the sorted pieces `ids` that stand between two rules, one over the
 /// other: each as the range of its indices. The upper rule is one of `upper` (the heights of
 /// the rules drawn in pieces that reach across the gutter), the lower one of `closing` (the
@@ -2379,6 +2463,11 @@ fn flow_at(ys: &[f32], pitch: Option<f32>, y: f32) -> Flow {
 /// without titles, or under a line of a label and its amount (totals under a table), are read
 /// whole, each value in its row (Task 31c, S3).
 ///
+/// The second part of the answer is the rows of values right over the rule of such a block
+/// (see [`values_over_rule`]), each as the range of its indices: a row carried over from the
+/// sheet before, a label and its amount in the columns of the rows under the rule. It stays
+/// over the rule, and it is read whole.
+///
 /// A side heading beside the lines of a form (irs-f1040 page 2, `Amount You Owe`) has rows on
 /// both sides of the gutter too. On that page they are not of one geometry (the line beside
 /// the heading's second line has no number at the left). When they are (two numbered lines
@@ -2397,10 +2486,10 @@ fn between_rules(
     (upper, closing): (&[f32], &[f32]),
     joints: &[(f32, f32)],
     sides: &Sides,
-) -> Vec<(usize, usize)> {
+) -> (Vec<Stretch>, Vec<Stretch>) {
     let slack = sides.slack;
     if upper.is_empty() || joints.is_empty() {
-        return Vec::new();
+        return (Vec::new(), Vec::new());
     }
     // How many pieces the rows of one geometry with text on both sides of the gutter have,
     // when the stretch holds enough of them: rows of as many pieces, each piece at the left
@@ -2563,7 +2652,8 @@ fn between_rules(
         // underlines it.
         low = low.min(p[i].baseline + BASELINE_NEAR * p[i].size);
     }
-    starts
+    let mut over: Vec<Stretch> = Vec::new();
+    let blocks = starts
         .windows(2)
         .filter_map(|w| {
             let ((a, y), (z, _)) = (w[0], w[1]);
@@ -2580,11 +2670,118 @@ fn between_rules(
                 .map(|(head, _)| head);
             match head {
                 Some(head) => Some((head, z)),
-                None => cells_of_rule(a, z, y).then_some((a, z)),
+                None if cells_of_rule(a, z, y) => {
+                    over.extend(values_over_rule(p, ids, (a, z), y, sides));
+                    Some((a, z))
+                }
+                None => None,
             }
         })
         .filter(|&(a, z)| z - a < ids.len())
-        .collect()
+        .collect();
+    (blocks, over)
+}
+
+/// The row of values right over the rule at the height `rule`, over the rows `a..z` of the
+/// sorted pieces `ids` that are a block under that rule: the range of its indices. A row
+/// carried over from the sheet before, or the sum of the rows before, stands where the
+/// titles of the rows would stand, a label and its amount in the columns of the rows under
+/// the rule. The gutter of the page takes its label to the left side and its amount to the
+/// right side, and the lines of the right side then stand between the two. It is such a row
+/// when all of this holds:
+///
+/// - its baselines stand on the rule or over it and close to it, as those of a header (see
+///   [`HEADER_OVER_RULE`]);
+/// - it has ink on both sides of the gutter, and a piece of it reads as an amount or a date
+///   (a row of titles is a header, see [`header_row`]);
+/// - each of its pieces stands at an edge of a column of the rows: its left or its right
+///   end is that of a piece in [`RULED_ROWS`] rows of the stretch or more (see
+///   [`ROW_EDGE`]). The last line of a paragraph on the left and the last line of a block on
+///   the right, on one baseline over the rule by chance, stand at the edges of the page's
+///   blocks, not at those of the columns under the rule;
+/// - it is set as the rows are: the pieces that give a piece of it its edge are in its face
+///   (bold or not) and in its size (under a [`SIZE_STEP`] apart). A heading over the rows
+///   is set in bold or larger, and a heading with a date beside it stands at edges of the
+///   columns as well;
+/// - each value of it is of the kind its column holds: the pieces that give an amount its
+///   edge are amounts, those that give a date its edge are dates (see [`Piece::date`]). A
+///   date over a column of prices is not their value (the date of a heading set flush right),
+///   and an amount over a column of words is none of theirs.
+///
+///   The last two are asked with the edge, as one count of rows: "two rows or more hold a
+///   piece at this edge, set as this one and of its kind". A row carried over in bold over
+///   plain rows is then parted by the gutter, as it was before this row was read;
+/// - it stands nearer to the first row under the rule than to the text over it (baseline to
+///   baseline), or nothing stands over it. The total of a table above stands a row step
+///   under that table's last row, right over the rule of the next table and often in its
+///   columns: it is a row of the table above and is read as the rows above it are, not
+///   with the rows under the rule. Each distance is measured in the text size of its own
+///   two lines, the larger of them (lines of a larger text stand farther apart in points
+///   and belong together all the same; the row and the rows under it are of one size, see
+///   above). Two distances that differ by no more than what makes two baselines one
+///   ([`BASELINE_NEAR`] sizes) are the same distance, and at the same distance the row
+///   stays with the text above: a row a hair nearer to the rows under it does not turn
+///   the read. The two distances are the page's own, so no cutoff of its own is set: a
+///   row carried over that stands closer under a paragraph than over its rows is parted
+///   by the gutter, as it was before this row was read.
+///
+/// The row is not said to be a row of the block: it stays over the rule.
+fn values_over_rule(
+    p: &[Piece],
+    ids: &[usize],
+    (a, z): (usize, usize),
+    rule: f32,
+    sides: &Sides,
+) -> Option<Stretch> {
+    let last = ids[..a].iter().rposition(|&i| p[i].inked)?;
+    let line = p[ids[last]].line;
+    let first = ids[..=last]
+        .iter()
+        .rposition(|&i| p[i].line != line)
+        .map_or(0, |k| k + 1);
+    let row = || ids[first..=last].iter().map(|&i| &p[i]).filter(|q| q.inked);
+    let on = |side: Place| row().any(|q| sides.place(q) == side);
+    let close = row().all(|q| {
+        let over = q.baseline - rule;
+        (-BASELINE_NEAR * q.size..=HEADER_OVER_RULE * q.size).contains(&over)
+    });
+    if !(close && on(Place::Left) && on(Place::Right) && row().any(|q| q.value)) {
+        return None;
+    }
+    // Nearer to the first row under the rule than to the text over it: each distance in
+    // the text size of its two lines, and two distances that near are the same.
+    let at = row().map(|q| q.baseline).fold(f32::MAX, f32::min);
+    let size = row().map(|q| q.size).fold(0.0f32, f32::max);
+    let under = ids[a..z].iter().map(|&i| &p[i]).find(|q| q.inked)?;
+    let above = ids[..first].iter().rev().map(|&i| &p[i]).find(|q| q.inked);
+    let sizes = |step: f32, other: &Piece| step / size.max(other.size).max(f32::MIN_POSITIVE);
+    let down = sizes(at - under.baseline, under);
+    if above.is_some_and(|q| sizes(q.baseline - at, q) - down <= BASELINE_NEAR) {
+        return None;
+    }
+    work::add((row().count() * (z - a)) as u64);
+    let in_columns = row().all(|q| {
+        let mut rows: Vec<u32> = ids[a..z]
+            .iter()
+            .map(|&i| &p[i])
+            .filter(|r| {
+                let near = ROW_EDGE * q.size.max(r.size);
+                // Set as the piece is, and a value of its kind where it is a value.
+                let set_alike =
+                    r.bold == q.bold && q.size < SIZE_STEP * r.size && r.size < SIZE_STEP * q.size;
+                let of_its_kind = !q.value || (r.value && r.date == q.date);
+                r.inked
+                    && set_alike
+                    && of_its_kind
+                    && ((q.bounds.x0 - r.bounds.x0).abs() <= near
+                        || (q.bounds.x1 - r.bounds.x1).abs() <= near)
+            })
+            .map(|r| r.line)
+            .collect();
+        rows.dedup();
+        rows.len() >= RULED_ROWS
+    });
+    in_columns.then_some((first, a))
 }
 
 /// The text between two rules is a block of rows when it holds at least this many rows of
@@ -3381,6 +3578,7 @@ mod tests {
             runs: 1,
             colon: false,
             value: false,
+            date: false,
             number: None,
             boxed: None,
             rows: 1,
@@ -3762,6 +3960,7 @@ mod tests {
             runs: 1,
             colon: false,
             value: false,
+            date: false,
             number: None,
             boxed: None,
             rows: 1,
@@ -4110,6 +4309,328 @@ mod tests {
             cut.groups
         );
         assert!(rows_read_whole(&cut, &firsts[1..]), "{:?}", cut.groups);
+    }
+
+    /// Task 36a part 2 (the row carried over): over the rule in pieces stands a label in the
+    /// second column and its amount in the last one, where the titles of the rows would
+    /// stand. The gutter of the page lies between the two, and the lines of the right side
+    /// stood between the label and its amount. The row is read whole, the amount right after
+    /// its label, and it stays over the rule.
+    #[test]
+    fn a_label_and_its_amount_right_over_the_rule_read_as_one_row() {
+        let (mut ps, rules, firsts) = rows_between_rules();
+        let (joints, joined) = ruled_rows(&rules);
+        let ruled = Ruled {
+            rules: &rules,
+            joined: &joined,
+            joints: &joints,
+        };
+        // The row over the rule: the label alone on the left, the amount alone on the right.
+        ps.remove(firsts[0] + 2);
+        ps.remove(firsts[0]);
+        let (label, amount) = (firsts[0], firsts[0] + 1);
+        let rows: Vec<usize> = firsts[1..].iter().map(|&f| f - 2).collect();
+        let rows = &rows[..];
+        ps[amount].value = true;
+        // The last cells of the rows are amounts, as the amount over them.
+        for &f in rows {
+            ps[f + 3].value = true;
+        }
+        let whole = |ps: &[Piece]| {
+            let cut = xy_cut_ruled(ps, &ruled, &Limits::default(), &|| false);
+            assert_whole(&cut, ps.len());
+            assert!(rows_read_whole(&cut, rows), "{:?}", cut.groups);
+            assert!(parted_by_the_rule(&cut, label, rows[0]), "{:?}", cut.groups);
+            let order = cut.groups.concat();
+            let at = |i: usize| order.iter().position(|&o| o == i).unwrap();
+            at(amount) == at(label) + 1
+        };
+        assert!(whole(&ps));
+        // The amount set flush right in its column, a little shorter: still at the column's
+        // right edge.
+        let mut short = ps.clone();
+        short[amount].bounds.x0 += 8.0;
+        assert!(whole(&short));
+        // Each part of the evidence the other way. No piece of the row is an amount (two
+        // lines of words on one baseline, no titles of the rows either);
+        let mut words = ps.clone();
+        words[amount].value = false;
+        assert!(!whole(&words));
+        // the amount at no edge of a column of the rows, by more than `ROW_EDGE` sizes at
+        // both ends (2.6 points at a size of 10), and by less;
+        let moved = |by: f32| {
+            let mut m = ps.clone();
+            m[amount].bounds.x0 += by;
+            m[amount].bounds.x1 += by;
+            m
+        };
+        assert!(!whole(&moved(-2.6)));
+        assert!(whole(&moved(-2.4)));
+        // the label at no edge of a column;
+        let mut inset = ps.clone();
+        inset[label].bounds.x0 += 6.0;
+        inset[label].bounds.x1 -= 6.0;
+        assert!(!whole(&inset));
+        // the row farther over the rule than a header stands (more than `HEADER_OVER_RULE`
+        // sizes), and just within;
+        let lifted = |by: f32| {
+            let mut l = ps.clone();
+            for i in [label, amount] {
+                l[i].baseline += by;
+                l[i].bounds.y0 += by;
+                l[i].bounds.y1 += by;
+            }
+            l
+        };
+        assert!(!whole(&lifted(6.5)));
+        assert!(whole(&lifted(5.5)));
+        // an edge that one row of the block alone has, and one that two have (`RULED_ROWS`
+        // is 2): the label over the second lines of the first cells, set in from the first.
+        let detailed = |lines: usize| {
+            let mut d = ps.clone();
+            d.iter_mut().for_each(|q| q.line *= 2);
+            d[label].bounds.x0 = 80.0;
+            d[label].bounds.x1 = 140.0;
+            for &f in &rows[..lines] {
+                let (line, y) = (d[f].line + 1, d[f].baseline - 9.0);
+                d.push(text(80.0, 120.0, line, y, 10.0, 6));
+            }
+            d
+        };
+        assert!(!whole(&detailed(0)));
+        assert!(!whole(&detailed(1)));
+        assert!(whole(&detailed(2)));
+    }
+
+    /// Task 36a fix round 3 (re-review 2, I1): a heading with a date right over the rule in
+    /// pieces looks like a row carried over (a piece on each side of the gutter, a value,
+    /// each at an edge of a column of the rows). It is no row of the rows under the rule:
+    /// a row carried over is set as the rows are, in their face and size, and its amount
+    /// stands over amounts. A piece counts an edge of a column as its own only where the
+    /// pieces at that edge are set as it is and, for a value, are values of its kind.
+    #[test]
+    fn a_heading_or_a_date_right_over_the_rule_is_no_row_of_the_rows_under_it() {
+        let (mut ps, rules, firsts) = rows_between_rules();
+        let (joints, joined) = ruled_rows(&rules);
+        let ruled = Ruled {
+            rules: &rules,
+            joined: &joined,
+            joints: &joints,
+        };
+        ps.remove(firsts[0] + 2);
+        ps.remove(firsts[0]);
+        let (label, amount) = (firsts[0], firsts[0] + 1);
+        let rows: Vec<usize> = firsts[1..].iter().map(|&f| f - 2).collect();
+        ps[amount].value = true;
+        for &f in &rows {
+            ps[f + 3].value = true;
+        }
+        let whole = |ps: &[Piece]| {
+            let cut = xy_cut_ruled(ps, &ruled, &Limits::default(), &|| false);
+            assert_whole(&cut, ps.len());
+            let order = cut.groups.concat();
+            let at = |i: usize| order.iter().position(|&o| o == i).unwrap();
+            at(amount) == at(label) + 1
+        };
+        assert!(whole(&ps));
+        // The label in bold over names that are not: a heading. Over bold names (in two
+        // rows, `RULED_ROWS`; in one row) it is set as they are.
+        let bold = |names: usize| {
+            let mut b = ps.clone();
+            b[label].bold = true;
+            for &f in &rows[..names] {
+                b[f + 1].bold = true;
+            }
+            b
+        };
+        assert!(!whole(&bold(0)));
+        assert!(!whole(&bold(1)));
+        assert!(whole(&bold(2)));
+        // The label a size step larger than the names (`SIZE_STEP`, 1.08), and under a
+        // step.
+        let sized = |size: f32| {
+            let mut s = ps.clone();
+            s[label].size = size;
+            s
+        };
+        assert!(!whole(&sized(10.9)));
+        assert!(whole(&sized(10.7)));
+        assert!(!whole(&sized(9.2)));
+        assert!(whole(&sized(9.3)));
+        // A date over the amounts is not their value; over dates it is, and an amount over
+        // dates is not.
+        let dated = |over: bool, under: bool| {
+            let mut d = ps.clone();
+            d[amount].date = over;
+            for &f in &rows {
+                d[f + 3].date = under;
+            }
+            d
+        };
+        assert!(!whole(&dated(true, false)));
+        assert!(whole(&dated(true, true)));
+        assert!(!whole(&dated(false, true)));
+        // An amount over a column of words is not of their kind.
+        let mut words = ps.clone();
+        for &f in &rows {
+            words[f + 3].value = false;
+        }
+        assert!(!whole(&words));
+    }
+
+    /// A date set in figures reads as a date in one run and in several, and an amount does
+    /// not (see [`reads_as_date`]).
+    #[test]
+    fn dates_in_figures_are_told_from_amounts() {
+        for date in [
+            "12.05.2026",
+            "5/12/26",
+            "2026-05-12",
+            "1.1.26",
+            " 12. 05. 2026 ",
+        ] {
+            assert!(reads_as_date(date), "{date}");
+        }
+        for other in [
+            "88,20",
+            "1.234,56",
+            "1.234.567",
+            "12.05.",
+            "12.05",
+            "12.05.2026.",
+            "12.05/2026",
+            "12.05.202",
+            "2026-5-123",
+            "12.05.2026 h",
+            "",
+        ] {
+            assert!(!reads_as_date(other), "{other}");
+        }
+        // Run by run, as one run; no date without the value.
+        let split = Reading::of("12.", true)
+            .goes_on("05.", true)
+            .goes_on("2026", true);
+        assert!(split.date());
+        assert!(Reading::of("12.05.2026", true).date());
+        assert!(!Reading::of("12.05.2026", false).date());
+        assert!(!Reading::of("88,", true).goes_on("20", true).date());
+    }
+
+    /// Task 36a fix round 2 (ruling on concern 4 of part 2): the row over the rule joins the
+    /// rows under it only when it stands nearer to their first row than to the text over
+    /// it. A total of the table above stands a row step under that table's last row, right
+    /// over the rule of the next table and in its columns: it is a row of the table above
+    /// and is not read as a row of the block under the rule.
+    #[test]
+    fn a_row_over_the_rule_nearer_to_the_text_above_is_not_joined_to_the_rows_under_it() {
+        // A line of prose over the row carried over, `up` points over it; the first row
+        // under the rule stands 20 points under it.
+        let carried_under = |up: Option<f32>, size: f32| {
+            let (mut ps, rules, firsts) = rows_between_rules();
+            ps.remove(firsts[0] + 2);
+            ps.remove(firsts[0]);
+            let (label, amount) = (firsts[0], firsts[0] + 1);
+            ps[amount].value = true;
+            for &f in &firsts[1..] {
+                ps[f - 2 + 3].value = true;
+            }
+            match up {
+                // Nothing stands over the row.
+                None => {
+                    ps.drain(..firsts[0]);
+                }
+                Some(up) => {
+                    for q in ps[..firsts[0]].iter_mut() {
+                        let by = 700.0 + up - 740.0;
+                        q.baseline += by;
+                        q.bounds.y0 += by;
+                        q.bounds.y1 += by;
+                    }
+                    // The last line over the row, in `size`.
+                    for q in ps[firsts[0] - 2..firsts[0]].iter_mut() {
+                        q.size = size;
+                    }
+                }
+            }
+            let (label, amount) = match up {
+                None => (0, 1),
+                Some(_) => (label, amount),
+            };
+            let (joints, joined) = ruled_rows(&rules);
+            let ruled = Ruled {
+                rules: &rules,
+                joined: &joined,
+                joints: &joints,
+            };
+            let cut = xy_cut_ruled(&ps, &ruled, &Limits::default(), &|| false);
+            assert_whole(&cut, ps.len());
+            let order = cut.groups.concat();
+            let at = |i: usize| order.iter().position(|&o| o == i).unwrap();
+            at(amount) == at(label) + 1
+        };
+        let carried = |up: Option<f32>| carried_under(up, 10.0);
+        assert!(carried(None));
+        assert!(carried(Some(40.0)));
+        assert!(!carried(Some(20.0)));
+        assert!(!carried(Some(19.0)));
+        // Fix round 3 (re-review 2, M2): two distances that differ by less than what makes
+        // two baselines one (`BASELINE_NEAR`, 0.15 sizes: 1.5 points at 10 points) are the
+        // same distance, and the row stays where it stands. A row a hair nearer to the rows
+        // under it does not turn the read.
+        assert!(!carried(Some(20.01)));
+        assert!(!carried(Some(21.0)));
+        assert!(!carried(Some(21.4)));
+        assert!(carried(Some(21.6)));
+        // Each distance is measured in the text size of its own two lines, the larger of
+        // them. Under a line of 16 points the row stands 26 points lower: farther in points
+        // than its first row (20), nearer in sizes (1.63 against 2), so it stays with the
+        // text over it. At 34 points (2.13 sizes) the two are the same distance still, at
+        // 36 (2.25) the row is nearer to its rows.
+        assert!(!carried_under(Some(26.0), 16.0));
+        assert!(!carried_under(Some(34.0), 16.0));
+        assert!(carried_under(Some(36.0), 16.0));
+        // A smaller line over it is measured in the row's size: as a line of the row's size.
+        assert!(!carried_under(Some(21.0), 6.0));
+        assert!(carried_under(Some(22.0), 6.0));
+
+        // The total of a table above: two rows of four cells at the edges of the rows
+        // under the rule, the lower of them `up` points over the row over the rule, which
+        // holds a label in the second column and an amount in the last. The rows of the
+        // table above stand under no rule in pieces, so the gutter of the page parts
+        // them; the total nearer to them is read as they are (its label with their left
+        // cells, its amount with their right cells), and the row nearer to the rows under
+        // the rule is read whole, as a row carried over.
+        let total = |up: f32| {
+            let (mut ps, rules, firsts) =
+                rows_between_rules_at(&[700.0 + up + 20.0, 700.0 + up, 700.0, 680.0, 660.0]);
+            ps.remove(firsts[2] + 2);
+            ps.remove(firsts[2]);
+            let (label, amount) = (firsts[2], firsts[2] + 1);
+            ps[amount].value = true;
+            for &f in &firsts[3..] {
+                ps[f - 2 + 3].value = true;
+            }
+            let (joints, joined) = ruled_rows(&rules);
+            let ruled = Ruled {
+                rules: &rules,
+                joined: &joined,
+                joints: &joints,
+            };
+            let cut = xy_cut_ruled(&ps, &ruled, &Limits::default(), &|| false);
+            assert_whole(&cut, ps.len());
+            let group = |i: usize| cut.groups.iter().position(|g| g.contains(&i)).unwrap();
+            let order = cut.groups.concat();
+            let at = |i: usize| order.iter().position(|&o| o == i).unwrap();
+            let whole = at(amount) == at(label) + 1;
+            // With the table above: in the groups of the cells of its last row.
+            let above =
+                group(label) == group(firsts[1] + 1) && group(amount) == group(firsts[1] + 3);
+            (whole, above)
+        };
+        assert_eq!(total(18.0), (false, true));
+        assert_eq!(total(22.0), (true, false));
+        // At the same distance from both it is not read with the rows under the rule.
+        assert!(!total(20.0).0);
     }
 
     #[test]

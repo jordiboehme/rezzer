@@ -34,7 +34,7 @@ arxiv-2408.09869-docling-report.pdf	7	scale-75	to-spatial	text	5	-
 arxiv-2408.09869-docling-report.pdf	7	split-rules	from-spatial	text	1	-
 arxiv-2408.09869-docling-report.pdf	7	split-rules	members	pairs	1	31
 arxiv-2408.09869-docling-report.pdf	7	split-rules	members	text	4	31
-arxiv-2408.09869-docling-report.pdf	7	split-runs	kind	text	1	36a
+arxiv-2408.09869-docling-report.pdf	7	split-runs	kind	text	1	after 0.1.0	owner after 0.1.0, kept. Traced with `trace_change`: the page is a figure of many small page pictures; the numbered item `1. There are two objectives. ...` in one of them is a region with the same members in both reads, a list on the page (`list.marker`, `list.items`, `list.hanging`) and a paragraph with each word a run of its own. The same class as the split-runs pins of nist-sp800-53r5 (the marker of an item read by its run; the gap after the marker was not measured here). The other moves of the page under this change are members breaks with their own pins. The text and its order are the same; no label is parted from its value
 arxiv-2408.09869-docling-report.pdf	7	split-runs	members	text	12	31
 arxiv-2408.09869-docling-report.pdf	7	split-runs	to-spatial	pairs	1	-
 arxiv-2408.09869-docling-report.pdf	7	split-runs	to-spatial	text	3	-
@@ -69,7 +69,7 @@ irs-f1040-2025.pdf	1	scale-75	from-spatial	text	1	-
 irs-f1040-2025.pdf	1	scale-75	members	table	2	31
 irs-f1040-2025.pdf	1	scale-75	to-spatial	text	2	-
 irs-f1040-2025.pdf	1	split-runs	from-spatial	text	1	-
-irs-f1040-2025.pdf	1	split-runs	kind	text	1	36a
+irs-f1040-2025.pdf	1	split-runs	kind	text	1	after 0.1.0	owner after 0.1.0, kept. Traced with `trace_change`: on the page the form's title line (`U.S. Individual Income Tax Return`, `OMB No. 1545-0074`, `IRS Use Only ...`, three runs) is claimed by no typer and kept as laid out, and `Filing Status` is the title block (`title_block.largest_heading`, `title_block.top_third`). With each word a run of its own the title line is typed the title block (from spatial, an allowed move) and `Filing Status` is a heading (`heading.size_ratio`, `heading.bold_lead`, `heading.title_lines`): the better read, and the kind of `Filing Status` follows from it. Why no typer claims the three runs of the title line is the family of the kept pin of page 2 (a line set in few runs is read otherwise than the same line in many); not traced further. The file is tagged, so the reader takes its headings from the tags. `Filing Status` heads the same lines in both reads; no heading leaves its section
 irs-f1040-2025.pdf	1	split-runs	members	text	1	31
 irs-f1040-2025.pdf	2	split-runs	from-spatial	text	1	-
 irs-f1040-2025.pdf	2	split-runs	members	text	4	31c	owner Task 31c, kept. Traced: a leaf of exactly three runs (`PTIN`, `Check if:`, `Self-employed`) is not looked at by the cut; split into words it has four and is cut (`Cutter::region` looks for bands in more than three runs). The count stays on runs: counted in words or ink, a label of a few words and its value are parted (measured in Task 31a, see the comment in `Cutter::region`)
@@ -121,9 +121,9 @@ nist-sp800-53r5.pdf	51	jitter	members	text	1	31
 nist-sp800-53r5.pdf	63	split-runs	to-spatial	text	1	-
 nist-sp800-53r5.pdf	65	jitter	members	text	1	31
 nist-sp800-53r5.pdf	66	split-runs	to-spatial	text	2	-
-nist-sp800-53r5.pdf	67	split-runs	kind	text	1	36a
+nist-sp800-53r5.pdf	67	split-runs	kind	text	1	after 0.1.0	owner after 0.1.0, kept. Traced with `trace_change` (the runs printed for page 68): a numbered item whose marker stands more than a piece gap before its text (`3.` ends at 151.6 and `Include` starts at 162.0, 1.03 sizes; `PIECE_GAP` is 0.8) is one run on the page and reads as a list item (`list.marker`). With each word a run of its own the marker is a piece alone before its text, and the same line reads as a paragraph line (the other items of its list are then kept as laid out, an allowed move). A gap inside a run is no piece gap, the same gap between two runs is one: the read of the line depends on how it is set in runs. The text, its members and its order are the same, and no label is parted from its value. The file is tagged: the reader takes its lists from the tags, not from this typer. The fix is to read the marker of an item by its word, not by its run (not traced further into the walk's list reading)
 nist-sp800-53r5.pdf	67	split-runs	to-spatial	text	7	-
-nist-sp800-53r5.pdf	68	split-runs	kind	text	1	36a
+nist-sp800-53r5.pdf	68	split-runs	kind	text	1	after 0.1.0	owner after 0.1.0, kept. Traced with `trace_change` (the runs printed for page 68): a numbered item whose marker stands more than a piece gap before its text (`3.` ends at 151.6 and `Include` starts at 162.0, 1.03 sizes; `PIECE_GAP` is 0.8) is one run on the page and reads as a list item (`list.marker`). With each word a run of its own the marker is a piece alone before its text, and the same line reads as a paragraph line (the other items of its list are then kept as laid out, an allowed move). A gap inside a run is no piece gap, the same gap between two runs is one: the read of the line depends on how it is set in runs. The text, its members and its order are the same, and no label is parted from its value. The file is tagged: the reader takes its lists from the tags, not from this typer. The fix is to read the marker of an item by its word, not by its run (not traced further into the walk's list reading)
 nist-sp800-53r5.pdf	69	jitter	members	text	1	31
 nist-sp800-53r5.pdf	69	split-runs	to-spatial	text	2	-
 nist-sp800-53r5.pdf	71	split-runs	to-spatial	text	3	-
@@ -138,7 +138,7 @@ nist-sp800-53r5.pdf	82	split-runs	to-spatial	text	2	-
 nist-sp800-53r5.pdf	83	split-runs	to-spatial	text	3	-
 nist-sp800-53r5.pdf	86	split-runs	to-spatial	text	6	-
 nist-sp800-53r5.pdf	87	split-runs	to-spatial	text	5	-
-nist-sp800-53r5.pdf	89	split-runs	kind	text	1	36a
+nist-sp800-53r5.pdf	89	split-runs	kind	text	1	after 0.1.0	owner after 0.1.0, kept. Traced with `trace_change` (the runs printed for page 68): a numbered item whose marker stands more than a piece gap before its text (`3.` ends at 151.6 and `Include` starts at 162.0, 1.03 sizes; `PIECE_GAP` is 0.8) is one run on the page and reads as a list item (`list.marker`). With each word a run of its own the marker is a piece alone before its text, and the same line reads as a paragraph line (the other items of its list are then kept as laid out, an allowed move). A gap inside a run is no piece gap, the same gap between two runs is one: the read of the line depends on how it is set in runs. The text, its members and its order are the same, and no label is parted from its value. The file is tagged: the reader takes its lists from the tags, not from this typer. The fix is to read the marker of an item by its word, not by its run (not traced further into the walk's list reading)
 nist-sp800-53r5.pdf	89	split-runs	to-spatial	text	3	-
 nist-sp800-53r5.pdf	91	split-runs	to-spatial	text	1	-
 nist-sp800-53r5.pdf	92	split-runs	to-spatial	text	6	-
@@ -189,9 +189,9 @@ nist-sp800-53r5.pdf	139	split-runs	to-spatial	text	2	-
 nist-sp800-53r5.pdf	140	split-runs	to-spatial	text	2	-
 nist-sp800-53r5.pdf	142	split-runs	to-spatial	text	6	-
 nist-sp800-53r5.pdf	143	split-runs	to-spatial	text	12	-
-nist-sp800-53r5.pdf	145	split-runs	kind	text	1	36a
+nist-sp800-53r5.pdf	145	split-runs	kind	text	1	after 0.1.0	owner after 0.1.0, kept. Traced with `trace_change` (the runs printed for page 68): a numbered item whose marker stands more than a piece gap before its text (`3.` ends at 151.6 and `Include` starts at 162.0, 1.03 sizes; `PIECE_GAP` is 0.8) is one run on the page and reads as a list item (`list.marker`). With each word a run of its own the marker is a piece alone before its text, and the same line reads as a paragraph line (the other items of its list are then kept as laid out, an allowed move). A gap inside a run is no piece gap, the same gap between two runs is one: the read of the line depends on how it is set in runs. The text, its members and its order are the same, and no label is parted from its value. The file is tagged: the reader takes its lists from the tags, not from this typer. The fix is to read the marker of an item by its word, not by its run (not traced further into the walk's list reading)
 nist-sp800-53r5.pdf	145	split-runs	to-spatial	text	2	-
-nist-sp800-53r5.pdf	146	split-runs	kind	text	1	36a
+nist-sp800-53r5.pdf	146	split-runs	kind	text	1	after 0.1.0	owner after 0.1.0, kept. Traced with `trace_change` (the runs printed for page 68): a numbered item whose marker stands more than a piece gap before its text (`3.` ends at 151.6 and `Include` starts at 162.0, 1.03 sizes; `PIECE_GAP` is 0.8) is one run on the page and reads as a list item (`list.marker`). With each word a run of its own the marker is a piece alone before its text, and the same line reads as a paragraph line (the other items of its list are then kept as laid out, an allowed move). A gap inside a run is no piece gap, the same gap between two runs is one: the read of the line depends on how it is set in runs. The text, its members and its order are the same, and no label is parted from its value. The file is tagged: the reader takes its lists from the tags, not from this typer. The fix is to read the marker of an item by its word, not by its run (not traced further into the walk's list reading)
 nist-sp800-53r5.pdf	146	split-runs	to-spatial	text	2	-
 nist-sp800-53r5.pdf	148	split-runs	to-spatial	text	2	-
 nist-sp800-53r5.pdf	149	split-runs	to-spatial	text	2	-
@@ -209,9 +209,9 @@ nist-sp800-53r5.pdf	179	split-runs	to-spatial	text	3	-
 nist-sp800-53r5.pdf	180	jitter	members	text	1	31
 nist-sp800-53r5.pdf	184	jitter	members	text	1	31
 nist-sp800-53r5.pdf	184	split-runs	to-spatial	text	1	-
-nist-sp800-53r5.pdf	185	split-runs	kind	text	1	36a
+nist-sp800-53r5.pdf	185	split-runs	kind	text	1	after 0.1.0	owner after 0.1.0, kept. Traced with `trace_change` (the runs printed for page 68): a numbered item whose marker stands more than a piece gap before its text (`3.` ends at 151.6 and `Include` starts at 162.0, 1.03 sizes; `PIECE_GAP` is 0.8) is one run on the page and reads as a list item (`list.marker`). With each word a run of its own the marker is a piece alone before its text, and the same line reads as a paragraph line (the other items of its list are then kept as laid out, an allowed move). A gap inside a run is no piece gap, the same gap between two runs is one: the read of the line depends on how it is set in runs. The text, its members and its order are the same, and no label is parted from its value. The file is tagged: the reader takes its lists from the tags, not from this typer. The fix is to read the marker of an item by its word, not by its run (not traced further into the walk's list reading)
 nist-sp800-53r5.pdf	185	split-runs	to-spatial	text	4	-
-nist-sp800-53r5.pdf	186	split-runs	kind	text	1	36a
+nist-sp800-53r5.pdf	186	split-runs	kind	text	1	after 0.1.0	owner after 0.1.0, kept. Traced with `trace_change` (the runs printed for page 68): a numbered item whose marker stands more than a piece gap before its text (`3.` ends at 151.6 and `Include` starts at 162.0, 1.03 sizes; `PIECE_GAP` is 0.8) is one run on the page and reads as a list item (`list.marker`). With each word a run of its own the marker is a piece alone before its text, and the same line reads as a paragraph line (the other items of its list are then kept as laid out, an allowed move). A gap inside a run is no piece gap, the same gap between two runs is one: the read of the line depends on how it is set in runs. The text, its members and its order are the same, and no label is parted from its value. The file is tagged: the reader takes its lists from the tags, not from this typer. The fix is to read the marker of an item by its word, not by its run (not traced further into the walk's list reading)
 nist-sp800-53r5.pdf	186	split-runs	to-spatial	text	7	-
 nist-sp800-53r5.pdf	187	split-runs	to-spatial	text	3	-
 nist-sp800-53r5.pdf	189	split-runs	to-spatial	text	6	-
@@ -239,14 +239,14 @@ nist-sp800-53r5.pdf	218	split-runs	members	text	2	31
 nist-sp800-53r5.pdf	218	split-runs	to-spatial	text	4	-
 nist-sp800-53r5.pdf	220	split-runs	to-spatial	text	2	-
 nist-sp800-53r5.pdf	221	split-runs	to-spatial	text	6	-
-nist-sp800-53r5.pdf	222	split-runs	kind	text	6	36a
+nist-sp800-53r5.pdf	222	split-runs	kind	text	6	after 0.1.0	owner after 0.1.0, kept. Traced with `trace_change` (the runs printed for page 68): a numbered item whose marker stands more than a piece gap before its text (`3.` ends at 151.6 and `Include` starts at 162.0, 1.03 sizes; `PIECE_GAP` is 0.8) is one run on the page and reads as a list item (`list.marker`). With each word a run of its own the marker is a piece alone before its text, and the same line reads as a paragraph line (the other items of its list are then kept as laid out, an allowed move). A gap inside a run is no piece gap, the same gap between two runs is one: the read of the line depends on how it is set in runs. The text, its members and its order are the same, and no label is parted from its value. The file is tagged: the reader takes its lists from the tags, not from this typer. The fix is to read the marker of an item by its word, not by its run (not traced further into the walk's list reading)
 nist-sp800-53r5.pdf	222	split-runs	to-spatial	text	12	-
 nist-sp800-53r5.pdf	224	split-runs	to-spatial	text	4	-
-nist-sp800-53r5.pdf	225	split-runs	kind	text	1	36a
+nist-sp800-53r5.pdf	225	split-runs	kind	text	1	after 0.1.0	owner after 0.1.0, kept. Traced with `trace_change` (the runs printed for page 68): a numbered item whose marker stands more than a piece gap before its text (`3.` ends at 151.6 and `Include` starts at 162.0, 1.03 sizes; `PIECE_GAP` is 0.8) is one run on the page and reads as a list item (`list.marker`). With each word a run of its own the marker is a piece alone before its text, and the same line reads as a paragraph line (the other items of its list are then kept as laid out, an allowed move). A gap inside a run is no piece gap, the same gap between two runs is one: the read of the line depends on how it is set in runs. The text, its members and its order are the same, and no label is parted from its value. The file is tagged: the reader takes its lists from the tags, not from this typer. The fix is to read the marker of an item by its word, not by its run (not traced further into the walk's list reading)
 nist-sp800-53r5.pdf	225	split-runs	to-spatial	text	5	-
 nist-sp800-53r5.pdf	230	scale-50	members	text	1	31
 nist-sp800-53r5.pdf	230	split-runs	to-spatial	text	5	-
-nist-sp800-53r5.pdf	232	split-runs	kind	text	1	36a
+nist-sp800-53r5.pdf	232	split-runs	kind	text	1	after 0.1.0	owner after 0.1.0, kept. Traced with `trace_change` (the runs printed for page 68): a numbered item whose marker stands more than a piece gap before its text (`3.` ends at 151.6 and `Include` starts at 162.0, 1.03 sizes; `PIECE_GAP` is 0.8) is one run on the page and reads as a list item (`list.marker`). With each word a run of its own the marker is a piece alone before its text, and the same line reads as a paragraph line (the other items of its list are then kept as laid out, an allowed move). A gap inside a run is no piece gap, the same gap between two runs is one: the read of the line depends on how it is set in runs. The text, its members and its order are the same, and no label is parted from its value. The file is tagged: the reader takes its lists from the tags, not from this typer. The fix is to read the marker of an item by its word, not by its run (not traced further into the walk's list reading)
 nist-sp800-53r5.pdf	232	split-runs	to-spatial	text	6	-
 nist-sp800-53r5.pdf	234	split-runs	to-spatial	text	3	-
 nist-sp800-53r5.pdf	235	split-runs	to-spatial	text	4	-
@@ -322,7 +322,7 @@ nist-sp800-53r5.pdf	359	split-runs	to-spatial	text	6	-
 nist-sp800-53r5.pdf	360	split-runs	to-spatial	text	2	-
 nist-sp800-53r5.pdf	361	split-runs	to-spatial	text	4	-
 nist-sp800-53r5.pdf	362	split-runs	to-spatial	text	1	-
-nist-sp800-53r5.pdf	364	split-runs	kind	text	1	36a
+nist-sp800-53r5.pdf	364	split-runs	kind	text	1	after 0.1.0	owner after 0.1.0, kept. Traced with `trace_change` (the runs printed for page 68): a numbered item whose marker stands more than a piece gap before its text (`3.` ends at 151.6 and `Include` starts at 162.0, 1.03 sizes; `PIECE_GAP` is 0.8) is one run on the page and reads as a list item (`list.marker`). With each word a run of its own the marker is a piece alone before its text, and the same line reads as a paragraph line (the other items of its list are then kept as laid out, an allowed move). A gap inside a run is no piece gap, the same gap between two runs is one: the read of the line depends on how it is set in runs. The text, its members and its order are the same, and no label is parted from its value. The file is tagged: the reader takes its lists from the tags, not from this typer. The fix is to read the marker of an item by its word, not by its run (not traced further into the walk's list reading)
 nist-sp800-53r5.pdf	364	split-runs	to-spatial	text	6	-
 nist-sp800-53r5.pdf	370	split-runs	to-spatial	text	3	-
 nist-sp800-53r5.pdf	371	split-runs	to-spatial	text	3	-

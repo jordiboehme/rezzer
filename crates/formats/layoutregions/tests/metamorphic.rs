@@ -459,8 +459,11 @@ fn the_owner_of_a_break_follows_its_class() {
     assert_eq!(owner(Transform::Scale(50), Break::Order, "band"), "31");
     assert_eq!(owner(Transform::SplitRules, Break::Members, "pairs"), "31");
     assert_eq!(owner(Transform::Scale(200), Break::Members, "pairs"), "31");
-    assert_eq!(owner(Transform::Jitter, Break::Members, "pairs"), "36a");
-    assert_eq!(owner(Transform::Jitter, Break::Kind, "text"), "36a");
+    assert_eq!(
+        owner(Transform::Jitter, Break::Members, "pairs"),
+        "after 0.1.0"
+    );
+    assert_eq!(owner(Transform::Jitter, Break::Kind, "text"), "after 0.1.0");
     assert_eq!(owner(Transform::Scale(50), Break::Members, "text"), "31");
     assert_eq!(owner(Transform::SplitRuns, Break::Members, "table"), "31");
 }
@@ -572,7 +575,7 @@ fn writing_pins_keeps_the_other_names() {
     let path = dir.join("pins.tsv");
     std::fs::write(
         &path,
-        "# head\nother.pdf\t3\tjitter\tmembers\ttext\t2\t31\nthis.pdf\t1\tjitter\tkind\ttext\t1\t36a\n",
+        "# head\nother.pdf\t3\tjitter\tmembers\ttext\t2\t31\nthis.pdf\t1\tjitter\tkind\ttext\t1\t36b\n",
     )
     .unwrap();
     let lines = vec!["this.pdf\t2\tjitter\tmembers\ttext\t1\t31".to_string()];
@@ -600,7 +603,7 @@ fn writing_pins_keeps_the_other_names() {
 /// when they are written. A cause that names none leaves the column as computed.
 #[test]
 fn a_traced_cause_names_the_owner_of_its_pin() {
-    assert_eq!(meta::traced_owner("owner Task 36a. Traced: x"), Some("36a"));
+    assert_eq!(meta::traced_owner("owner Task 36b. Traced: x"), Some("36b"));
     assert_eq!(
         meta::traced_owner("owner after 0.1.0. Traced"),
         Some("after 0.1.0")
@@ -620,7 +623,7 @@ fn a_traced_cause_names_the_owner_of_its_pin() {
     let path = dir.join("pins.tsv");
     std::fs::write(
         &path,
-        "# head\nthis.pdf\t1\tjitter\tmembers\ttext\t1\t36a\towner Task 36a. Traced: a cause\n\
+        "# head\nthis.pdf\t1\tjitter\tmembers\ttext\t1\t36b\towner Task 36b. Traced: a cause\n\
          this.pdf\t2\tjitter\tmembers\ttext\t1\t31\tTraced: a cause with no owner\n",
     )
     .unwrap();
@@ -635,7 +638,7 @@ fn a_traced_cause_names_the_owner_of_its_pin() {
     // another owner than its cause is set right.
     std::fs::write(
         &path,
-        "# head\nthis.pdf\t1\tjitter\tmembers\ttext\t1\t31\towner Task 36a. Traced: a cause\n",
+        "# head\nthis.pdf\t1\tjitter\tmembers\ttext\t1\t31\towner Task 36b. Traced: a cause\n",
     )
     .unwrap();
     let wrong = std::panic::catch_unwind(|| {
@@ -645,7 +648,7 @@ fn a_traced_cause_names_the_owner_of_its_pin() {
     meta::check_or_write_pins(&path, &names, &found[..1], true);
     assert_eq!(
         meta::pinned(&path),
-        ["this.pdf\t1\tjitter\tmembers\ttext\t1\t36a"]
+        ["this.pdf\t1\tjitter\tmembers\ttext\t1\t36b"]
     );
     std::fs::remove_dir_all(&dir).ok();
 }

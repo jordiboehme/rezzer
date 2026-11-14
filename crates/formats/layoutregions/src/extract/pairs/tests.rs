@@ -1265,3 +1265,474 @@ fn a_row_of_small_labels_over_larger_values_is_told_from_table_rows() {
         line([("20481", 43.0), ("03.04.2026", 420.0)], 689.0, 10.0)
     ));
 }
+
+/// The runs of a footer of three columns at 10 points for [`paragraph_columns`]: the starts
+/// 50, 250 and 450; a title line, then in the middle column a paragraph of names over three
+/// lines whose first line ends 8 points before the name of the third column and whose second
+/// reaches half a point past the start of that column, where it is empty. Each run has the
+/// width given.
+fn footer_columns() -> Vec<TextRun> {
+    let cell = |text: &str, x: f32, w: f32, line: u32| {
+        let mut r = run_on(text, x, 700.0 - 12.0 * line as f32, 10.0, line);
+        r.w = w;
+        r.gaps.clear();
+        r
+    };
+    vec![
+        cell("Sample Works", 50.0, 72.0, 0),
+        cell("Managers", 250.0, 48.0, 0),
+        cell("Board", 450.0, 30.0, 0),
+        cell("Mill Lane 4", 50.0, 66.0, 1),
+        cell("Dr. Robin Sample (Chair), Ann Specimen", 250.0, 192.0, 1),
+        cell("Morgan Sample", 450.0, 78.0, 1),
+        cell("20481 Oldtown", 50.0, 78.0, 2),
+        cell(
+            "(Sales), Alex Other (Staff), Max Sampleton",
+            250.0,
+            200.5,
+            2,
+        ),
+        cell("Northland", 50.0, 54.0, 3),
+        cell("(Works)", 250.0, 42.0, 3),
+    ]
+}
+
+/// The columns [`paragraph_columns`] reads `runs` as: the texts of each column, top down.
+fn read_columns(runs: &[TextRun]) -> Option<Vec<Vec<String>>> {
+    let lines: Vec<RunRange> = run_ranges(runs);
+    let pieces: Vec<_> = lines
+        .iter()
+        .map(|l| pieces_of(runs, l.start, l.end))
+        .collect();
+    let cells = blocks::paragraph_columns(runs, &pieces)?;
+    Some(
+        cells
+            .iter()
+            .map(|column| {
+                column
+                    .iter()
+                    .filter(|c| !c.is_empty())
+                    .map(|c| texts(runs, c).join(" "))
+                    .collect()
+            })
+            .collect(),
+    )
+}
+
+/// Task 36a part 1 (class D): three columns at one pitch under a title line, the middle one
+/// a paragraph wrapped over every line under its title, are blocks side by side: read column
+/// by column, the name of the third column with its title and not after the names of the
+/// second. Each piece of the evidence is asked both ways.
+#[test]
+fn columns_with_a_wrapped_paragraph_read_column_by_column() {
+    let base = footer_columns();
+    // Read by the gaps alone, the name of the third column is a word of the second.
+    let lines: Vec<RunRange> = run_ranges(&base);
+    assert_eq!(pieces_of(&base, lines[1].start, lines[1].end).len(), 2);
+    let columns = read_columns(&base).expect("columns");
+    assert_eq!(
+        columns,
+        [
+            vec!["Sample Works", "Mill Lane 4", "20481 Oldtown", "Northland"],
+            vec![
+                "Managers",
+                "Dr. Robin Sample (Chair), Ann Specimen",
+                "(Sales), Alex Other (Staff), Max Sampleton",
+                "(Works)"
+            ],
+            vec!["Board", "Morgan Sample"],
+        ]
+    );
+    // The same at half and at twice the size.
+    for k in [0.5f32, 2.0] {
+        let mut runs = base.clone();
+        for r in &mut runs {
+            (r.x, r.y, r.w, r.h, r.size) = (r.x * k, r.y * k, r.w * k, r.h * k, r.size * k);
+        }
+        assert_eq!(read_columns(&runs).as_ref(), Some(&columns), "{k}");
+    }
+    let with = |change: &dyn Fn(&mut Vec<TextRun>)| {
+        let mut runs = base.clone();
+        change(&mut runs);
+        read_columns(&runs).is_some()
+    };
+    // Two columns have a distance and no pitch (`PITCH_COLUMNS`, three): nothing is shown.
+    // The paragraph of names beside the board alone has all the other evidence (it is the
+    // first of the two columns, wrapped to the last row, the board ends after two lines)
+    // and would read as columns with two starts. The company beside the names is none
+    // either way: its paragraph would be the last column.
+    assert!(!with(&|r| r.retain(|r| r.x > 240.0)));
+    assert!(!with(&|r| r.retain(|r| r.x < 440.0)));
+    // The pitch is even within an edge (0.1 sizes, a point): the third column a point
+    // farther holds, a point and a half does not.
+    let third = |dx: f32| {
+        with(&|r| {
+            for r in r.iter_mut().filter(|r| r.x >= 440.0) {
+                r.x += dx;
+            }
+        })
+    };
+    assert!(third(1.0) && !third(1.5));
+    // A line reaches an edge past the start of the next column at most.
+    assert!(with(&|r| r[7].w = 201.0) && !with(&|r| r[7].w = 201.5));
+    // The name of the third column opens its cell more than the white space of a joint
+    // (half a size, 5 points) after the line of the second: nearer, it is a word of that
+    // line, which then stands across the column start.
+    assert!(with(&|r| r[4].w = 194.5) && !with(&|r| r[4].w = 195.5));
+    // A later line shares the start of the third column: with the title alone there, the
+    // start is one line's.
+    assert!(!with(&|r| {
+        r.remove(5);
+    }));
+    // The lines of the paragraph are full: the first word of the next line does not fit
+    // before the next column. `(Sales),` is 8 of 42 characters of 200.5 points, 38.19 wide.
+    // By a ramp over the white space of a joint (5 points) and a count over the lines
+    // (`FULL_LACK`, half a line): with 2.3 points of room after that word the first line
+    // lacks 0.46 of its proof and the read holds, with 2.6 points it lacks 0.52.
+    let room = |room: f32| with(&|r| r[4].w = 450.0 - 38.19 - room - 250.0);
+    assert!(room(-0.3) && room(1.0) && room(2.3) && !room(2.6));
+    // The lines count together: two lines that lack 0.2 each hold, two that lack 0.3 each
+    // do not, though each of them alone would. (The second line of names 157 points wide:
+    // `(Sales),` is then 29.9 wide, and `(Works)`, 42 wide, has `second` points of room.)
+    let rooms = |first: f32, second: f32| {
+        with(&|r| {
+            r[7].w = 450.0 - 42.0 - second - 250.0;
+            r[4].w = 450.0 - r[7].w * 8.0 / 42.0 - first - 250.0;
+        })
+    };
+    assert!(rooms(1.0, 1.0) && !rooms(1.5, 1.5) && rooms(1.5, 0.0) && rooms(0.0, 1.5));
+    // And the next line goes on: it opens with a bracket before a letter or a small letter,
+    // or the line over it ends in a hyphen after a letter. A line that opens with a capital
+    // or with an amount in brackets is an item of its own.
+    let opens = |text: &'static str| with(&|r| r[7].text = text.into());
+    assert!(opens("and Alex Other (Staff), Max Sampleton too"));
+    assert!(!opens("Sales: Alex Other (Staff), Max Sampleton"));
+    assert!(!opens("(12,50) Alex Other (Staff), Max Sampleton"));
+    assert!(with(&|r| {
+        r[4].text = "Dr. Robin Sample (Chair), Ann Speci-".into();
+        r[7].text = "Men: Alex Other (Staff), Max Sampleton too".into();
+    }));
+    // Each column is one block from the first row: a row left empty in a column is none.
+    assert!(!with(&|r| {
+        r.remove(6);
+    }));
+    // The paragraph holds every row under the first: a column that goes on under it leaves
+    // rows the paragraph does not show to be one text.
+    assert!(!with(&|r| {
+        let mut more = r[8].clone();
+        (more.y, more.line) = (more.y - 12.0, 4);
+        r.push(more);
+    }));
+    // A line that starts at no column start.
+    assert!(!with(&|r| r[3].x = 60.0));
+}
+
+/// Task 36a fix round 1 (review M1): white space before the first ink of a line stands with
+/// the cell that ink opens, not with the first column: a line that starts in the second
+/// column, after a run of blanks, gives the first column no line on its row.
+#[test]
+fn white_space_before_a_line_goes_to_the_column_of_its_ink() {
+    let mut runs = footer_columns();
+    // The first column ends after its second line; the third and fourth lines start in
+    // the second column, each after a run of blanks at the left edge. The third column
+    // goes on to the last row (one other column must reach it), beside a second line of
+    // names that ends before it.
+    runs.retain(|r| r.x > 240.0 || r.line < 2);
+    runs[6].w = 192.0;
+    for (text, line) in [("Robin Other", 2u32), ("Kim Example", 3)] {
+        let mut more = runs[5].clone();
+        (more.text, more.y, more.line) = (text.into(), 700.0 - 12.0 * line as f32, line);
+        let at = runs.iter().rposition(|r| r.line == line).unwrap();
+        runs.insert(at + 1, more);
+    }
+    for line in [2u32, 3] {
+        let at = runs.iter().position(|r| r.line == line).unwrap();
+        let mut blank = runs[at].clone();
+        (blank.text, blank.x, blank.w) = ("   ".into(), 50.0, 9.0);
+        runs.insert(at, blank);
+    }
+    let lines: Vec<RunRange> = run_ranges(&runs);
+    let pieces: Vec<_> = lines
+        .iter()
+        .map(|l| pieces_of(&runs, l.start, l.end))
+        .collect();
+    let cells = blocks::paragraph_columns(&runs, &pieces).expect("columns");
+    let cell = |c: usize, row: usize| texts(&runs, &cells[c][row]);
+    assert!(
+        cells[0][2].is_empty() && cells[0][3].is_empty(),
+        "{cells:?}"
+    );
+    assert_eq!(
+        cell(1, 2),
+        ["   ", "(Sales), Alex Other (Staff), Max Sampleton"]
+    );
+    assert_eq!(cell(1, 3), ["   ", "(Works)"]);
+    // Every run stands in one cell.
+    let mut all: Vec<usize> = cells.iter().flatten().flatten().copied().collect();
+    all.sort_unstable();
+    assert!(all.iter().copied().eq(0..runs.len()));
+}
+
+/// The runs of a table without rules at 10 points for [`paragraph_columns`]: three columns
+/// that start at 50, 200 and 350, a header over rows of an item, its description (as wide
+/// as given) and a third cell. A row with an empty first and third cell is the wrapped end
+/// of the description over it.
+fn item_table(rows: &[(&str, &str, f32, &str)]) -> Vec<TextRun> {
+    let cell = |text: &str, x: f32, w: f32, line: u32| {
+        let mut r = run_on(text, x, 700.0 - 12.0 * line as f32, 10.0, line);
+        r.w = w;
+        r.gaps.clear();
+        r
+    };
+    let mut out = Vec::new();
+    for (k, (a, b, wb, c)) in rows.iter().enumerate() {
+        let line = k as u32;
+        for (text, x, w) in [
+            (a, 50.0, 6.0 * a.len() as f32),
+            (b, 200.0, *wb),
+            (c, 350.0, 6.0 * c.len() as f32),
+        ] {
+            if !text.is_empty() {
+                out.push(cell(text, x, w, line));
+            }
+        }
+    }
+    out
+}
+
+/// Task 36a fix round 1 (review I1): the rows of a table without rules are no blocks side by
+/// side, though its columns start at one pitch, its descriptions are full lines that open
+/// with a small letter and the last of them wraps. Each row is an item of its own: read
+/// column by column, the descriptions of all items would be one text and no price would
+/// stand with its item. The counter-evidence is the rows: no other column reaches the last
+/// row of the "paragraph" (fix round 2, re-review N1: the cells of the other columns end with
+/// the last item, whatever cell is left empty), or every other column has a line on each of
+/// its rows but the last, or a column holds nothing but numbers under its title.
+#[test]
+fn rows_of_a_table_with_a_wrapped_cell_are_no_columns() {
+    let rows = |third: [&'static str; 4]| {
+        item_table(&[
+            ("Item", "Description", 66.0, third[0]),
+            (
+                "Bolt",
+                "steel bolt for the frame, zinc plated",
+                142.0,
+                third[1],
+            ),
+            (
+                "Nut",
+                "nut for the bolt, zinc plated, size M8",
+                141.0,
+                third[2],
+            ),
+            (
+                "Washer",
+                "washer for the nut and the bolt, set",
+                140.0,
+                third[3],
+            ),
+            ("", "twelve pieces", 60.0, ""),
+        ])
+    };
+    // A column of prices and a column of words.
+    assert_eq!(read_columns(&rows(["Price", "1.20", "0.40", "0.10"])), None);
+    assert_eq!(
+        read_columns(&rows(["Source", "Mill", "Forge", "Yard"])),
+        None
+    );
+    // One row whose description wraps once, in English and in German.
+    assert_eq!(
+        read_columns(&item_table(&[
+            ("Item", "Description", 66.0, "Source"),
+            (
+                "Bolt",
+                "steel bolt for the frame, zinc plated",
+                142.0,
+                "Mill"
+            ),
+            ("", "and painted grey", 70.0, ""),
+        ])),
+        None
+    );
+    assert_eq!(
+        read_columns(&item_table(&[
+            ("Artikel", "Beschreibung", 66.0, "Preis"),
+            (
+                "Bolzen",
+                "Stahlbolzen fuer den Rahmen, verzinkt",
+                142.0,
+                "1,20"
+            ),
+            ("", "und grau lackiert", 70.0, ""),
+        ])),
+        None
+    );
+    // The description of the last item wrapped over two lines: no other column reaches the
+    // last row.
+    assert_eq!(
+        read_columns(&item_table(&[
+            ("Item", "Description", 66.0, "Source"),
+            (
+                "Bolt",
+                "steel bolt for the frame, zinc plated",
+                142.0,
+                "Mill"
+            ),
+            (
+                "Nut",
+                "nut for the bolt, zinc plated, size M8",
+                141.0,
+                "Forge"
+            ),
+            ("", "and a washer for the nut and the bolt,", 140.0, ""),
+            ("", "twelve pieces", 60.0, ""),
+        ])),
+        None
+    );
+    // Fix round 2 (re-review N1): a cell left empty at the end of a column of words. The
+    // other columns then end on different rows, as blocks of their own lengths do, but
+    // none of them reaches the last row of the description: rows. Probe A (the last item
+    // has no source), C (two items), D (a note on the first item only) and probe 16 (the
+    // last description wrapped over two lines, each line under a full one).
+    let items = |sources: [&'static str; 3]| {
+        item_table(&[
+            ("Item", "Description", 66.0, "Source"),
+            (
+                "Bolt",
+                "steel bolt for the frame, zinc plated",
+                142.0,
+                sources[0],
+            ),
+            (
+                "Nut",
+                "nut for the bolt, zinc plated, size M8",
+                141.0,
+                sources[1],
+            ),
+            (
+                "Washer",
+                "washer for the nut and the bolt, set",
+                140.0,
+                sources[2],
+            ),
+            ("", "twelve pieces", 60.0, ""),
+        ])
+    };
+    assert_eq!(read_columns(&items(["Mill", "Forge", ""])), None);
+    assert_eq!(read_columns(&items(["Mill", "", ""])), None);
+    assert_eq!(
+        read_columns(&item_table(&[
+            ("Item", "Description", 66.0, "Source"),
+            (
+                "Bolt",
+                "steel bolt for the frame, zinc plated",
+                142.0,
+                "Mill"
+            ),
+            ("Nut", "nut for the bolt, zinc plated, size M8", 141.0, ""),
+            ("", "twelve pieces", 60.0, ""),
+        ])),
+        None
+    );
+    assert_eq!(
+        read_columns(&item_table(&[
+            ("Item", "Description", 66.0, "Source"),
+            (
+                "Bolt",
+                "steel bolt for the frame, zinc plated",
+                142.0,
+                "Mill"
+            ),
+            (
+                "Nut",
+                "nut for the bolt, zinc plated, size M8",
+                141.0,
+                "Forge"
+            ),
+            ("Washer", "washer for the nut and the bolt, set", 142.0, ""),
+            ("", "twelve pieces, zinc plated, in a paper", 142.0, ""),
+            ("", "bag", 18.0, ""),
+        ])),
+        None
+    );
+
+    // The same counter-evidence on the footer, each piece both ways.
+    let base = footer_columns();
+    let with = |change: &dyn Fn(&mut Vec<TextRun>)| {
+        let mut runs = base.clone();
+        change(&mut runs);
+        read_columns(&runs).is_some()
+    };
+    // The third column ends after its second line, where the paragraph goes on for two
+    // more: columns. With a third line it has a line on every row but the paragraph's
+    // last, as the first column has: rows. (The second line of names ends before the
+    // third column here, so that a line of that column can stand beside it.)
+    assert!(with(&|r| r[7].w = 192.0));
+    assert!(!with(&|r| {
+        r[7].w = 192.0;
+        let mut more = r[5].clone();
+        (more.text, more.y, more.line) = ("Robin Other".into(), r[7].y, 2);
+        r.insert(8, more);
+    }));
+    // A footer of five rows: the paragraph of the middle column over four lines, the first
+    // and the third column with the lines given under their titles.
+    let five = |first: &[&str], third: &[&str]| {
+        let cell = |text: &str, x: f32, w: f32, line: usize| {
+            let mut r = run_on(text, x, 700.0 - 12.0 * line as f32, 10.0, line as u32);
+            r.w = w;
+            r.gaps.clear();
+            r
+        };
+        let names = [
+            "Managers",
+            "Dr. Robin Sample (Chair), Ann Specimen",
+            "(Sales), Alex Other (Staff), Max Sampleton",
+            "(Plant), Kim Sample (Stock), Robin Otherton",
+            "(Works)",
+        ];
+        let mut runs = Vec::new();
+        for (line, name) in names.iter().enumerate() {
+            let side = |lines: &[&str], title: &'static str| match line {
+                0 => Some(title.to_string()),
+                n => lines.get(n - 1).map(|t| t.to_string()),
+            };
+            if let Some(t) = side(first, "Sample Works") {
+                runs.push(cell(&t, 50.0, 6.0 * t.len() as f32, line));
+            }
+            let w = if (1..4).contains(&line) { 192.0 } else { 48.0 };
+            runs.push(cell(name, 250.0, w, line));
+            if let Some(t) = side(third, "Board") {
+                runs.push(cell(&t, 450.0, 6.0 * t.len() as f32, line));
+            }
+        }
+        read_columns(&runs).is_some()
+    };
+    // Fix round 2 (design ruling on re-review N1): blocks side by side read as columns
+    // only when one other column reaches the last row of the paragraph. A column that ends
+    // over it looks as the item column of a table does over the wrapped end of its last
+    // description, so a footer whose blocks are all shorter than its paragraph reads row
+    // by row, as it did before the columns were read. The first three cases were columns
+    // before that ruling.
+    let (company, board) = (
+        ["Mill Lane 4", "20481 Oldtown", "Northland", "Open daily"],
+        ["Morgan Sample", "Robin Other", "Kim Example", "Ann Other"],
+    );
+    assert!(!five(&company[..1], &board[..1]));
+    assert!(!five(&company[..2], &board[..1]));
+    assert!(!five(&company[..3], &board[..2]));
+    assert!(!five(&company[..2], &board[..2]));
+    assert!(!five(&company[..3], &board[..3]));
+    // One block beside the paragraph down to its last row, the other shorter: columns,
+    // whichever side the long block stands on.
+    assert!(five(&company, &board[..1]));
+    assert!(five(&company, &board[..2]));
+    assert!(five(&company[..1], &board));
+    assert!(five(&company[..2], &board));
+    // And with a line on each row of the paragraph but its last in every other column:
+    // rows that open a line in every column are rows.
+    assert!(!five(&company, &board[..3]));
+    assert!(!five(&company, &board));
+    // A column of nothing but numbers under its title is a column of a table.
+    assert!(with(&|r| r[5].text = "Morgan 12".into()));
+    assert!(!with(&|r| r[5].text = "1.250,00".into()));
+}

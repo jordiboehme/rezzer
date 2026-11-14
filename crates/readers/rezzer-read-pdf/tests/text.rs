@@ -2015,6 +2015,215 @@ fn tagged_heading_on_top_is_the_title() {
     }
 }
 
+/// The columns of [`tagged_footer`]: a company, its managers under a title (one paragraph of
+/// names wrapped over three lines), the chair of its board under a title.
+const TAGGED_FOOTER: [&[&str]; 3] = [
+    &[
+        "Oakfield Rail Ltd",
+        "Head office in Oldtown",
+        "Registered at Oldtown HRB 12 345",
+        "Tax-No. DE123456789",
+    ],
+    &[
+        "Managers",
+        "Dr. Robin Sample (Chair), Ann Specimen",
+        "(Sales), Alex Other (Staff), Max Sampleton",
+        "(Works)",
+    ],
+    &["Chair of the supervisory board", "Morgan Example"],
+];
+
+/// Task 36a part 1b (class D on the tagged path): `pages` tagged pages, each a title and
+/// three body paragraphs across the page (in 10 points times `k`) over a footer of three columns without rules
+/// at 7 points times `k`, the columns at an even pitch from x 85, the lines 1.2 sizes apart
+/// from the baseline 64.85. The pitch is the width of the second line of names less a fifth
+/// of a point (that line reaches that little past the start of the third column, where that
+/// column is empty). The structure tree holds one paragraph element per line, row by row
+/// across the columns, and the page number one line under the footer as the last element.
+fn tagged_footer(pages: usize, k: f32) -> Vec<u8> {
+    let size = 7.0 * k;
+    let step = 1.2 * size;
+    // The width with the brackets as the font sets them (333 units; `helvetica_width` counts
+    // them as 278).
+    let width = |text: &str| {
+        let brackets = text.chars().filter(|c| matches!(c, '(' | ')')).count() as f32;
+        common::helvetica_width(text, size) + brackets * 55.0 * size / 1000.0
+    };
+    let pitch = width(TAGGED_FOOTER[1][2]) - 0.2;
+    let numbers: Vec<String> = (1..=pages)
+        .map(|n| format!("Sheet {n} / {pages}"))
+        .collect();
+    let sheets: Vec<Vec<common::TaggedLine<'_>>> = numbers
+        .iter()
+        .map(|number| {
+            let mut lines: Vec<common::TaggedLine<'_>> = vec![
+                (85.0, 760.0, 14.0 * k, true, "Carriage report"),
+                (85.0, 730.0, 10.0 * k, false, BODY[0]),
+                (85.0, 730.0 - 14.0 * k, 10.0 * k, false, BODY[1]),
+                (85.0, 730.0 - 28.0 * k, 10.0 * k, false, BODY[2]),
+            ];
+            for row in 0..4 {
+                for (c, column) in TAGGED_FOOTER.iter().enumerate() {
+                    if let Some(text) = column.get(row) {
+                        let x = 85.0 + pitch * c as f32;
+                        lines.push((x, 64.85 - step * row as f32, size, false, text));
+                    }
+                }
+            }
+            lines.push((521.3, 64.85 - step * 4.0, size, false, number));
+            lines
+        })
+        .collect();
+    common::tagged_paragraphs(&sheets)
+}
+
+/// The body paragraphs of [`tagged_footer`], each one line across the page.
+const BODY: [&str; 3] = [
+    "The wagons of the morning run were checked and found in good order.",
+    "Two axles were marked for service and one brake hose was changed.",
+    "The run left on time and reached the harbour siding without a stop.",
+];
+
+/// The texts of the paragraphs and headings of `out` in reading order.
+fn block_texts(out: &ReadOutcome) -> Vec<String> {
+    fn walk(blocks: &[Block], texts: &mut Vec<String>) {
+        for b in blocks {
+            match b {
+                Block::Section { blocks, .. } => walk(blocks, texts),
+                b => {
+                    let mut t = String::new();
+                    common::block_text(b, &mut t);
+                    texts.push(t.trim().to_string());
+                }
+            }
+        }
+    }
+    let mut texts = Vec::new();
+    walk(&out.document.body, &mut texts);
+    texts
+}
+
+/// Task 36a part 1b (class D on the tagged path): the tags of a footer of three columns give
+/// one paragraph per line, row by row across the columns. Where the page shows the columns
+/// (starts shared by the title line and later lines at an even pitch) the paragraphs are
+/// placed column by column, each column top to bottom: a line of one column between the
+/// lines of another breaks what the column says. The elements stay as the tags give them,
+/// one paragraph each.
+#[test]
+fn tagged_paragraphs_of_columns_read_column_by_column() {
+    // The scales the page holds: at 1.25 the third column ends near the right edge.
+    for (pages, k) in [(1, 1.0f32), (2, 1.0), (1, 0.5), (1, 1.25)] {
+        let out = read(&tagged_footer(pages, k));
+        assert_eq!(out.document.properties.facts.tagged, Some(true));
+        let texts = block_texts(&out);
+        let at = |t: &str| {
+            texts
+                .iter()
+                .position(|b| b == t)
+                .unwrap_or_else(|| panic!("{pages} pages, scale {k}: no block {t:?} in {texts:#?}"))
+        };
+        for column in TAGGED_FOOTER {
+            let first = at(column[0]);
+            for (n, line) in column.iter().enumerate() {
+                assert_eq!(
+                    at(line),
+                    first + n,
+                    "{pages} pages, scale {k}: {line:?} in {texts:#?}"
+                );
+            }
+        }
+        // The body keeps its order, before the footer, and the page number stands last.
+        let body: Vec<usize> = BODY.iter().map(|t| at(t)).collect();
+        assert!(
+            body.is_sorted() && body[2] < at(TAGGED_FOOTER[0][0]),
+            "{texts:#?}"
+        );
+        assert!(texts.last().is_some_and(|t| t.starts_with("Sheet ")));
+    }
+}
+
+/// The other way (Task 36a part 1b): an ordinary tagged page keeps the order of its tags.
+/// Paragraphs across the full width, and rows of three short paragraphs side by side at an
+/// even pitch with no paragraph wrapped in a column (rows of a list of parts, tagged as
+/// paragraphs): nothing shows that the rows are one text, so they read row by row.
+#[test]
+fn tagged_paragraphs_keep_the_order_of_their_tags() {
+    let rows = [
+        ["Part", "Shelf", "Count"],
+        ["Brake hose", "North bay", "12"],
+        ["Axle box", "South bay", "4"],
+        ["Buffer", "Yard store", "9"],
+    ];
+    let mut lines: Vec<common::TaggedLine<'_>> = vec![
+        (85.0, 760.0, 14.0, true, "Carriage report"),
+        (85.0, 730.0, 10.0, false, BODY[0]),
+        (85.0, 716.0, 10.0, false, BODY[1]),
+        (85.0, 702.0, 10.0, false, BODY[2]),
+    ];
+    for (n, row) in rows.iter().enumerate() {
+        for (c, text) in row.iter().enumerate() {
+            let (x, y) = (85.0 + 170.0 * c as f32, 64.85 - 8.4 * n as f32);
+            lines.push((x, y, 7.0, false, text));
+        }
+    }
+    let out = read(&common::tagged_paragraphs(&[lines.clone()]));
+    let texts = block_texts(&out);
+    let given: Vec<&str> = lines.iter().map(|l| l.4).collect();
+    let read: Vec<&str> = texts.iter().skip(1).map(String::as_str).collect();
+    assert_eq!(read, given);
+}
+
+/// Task 36a fix round 3 (re-review 2, I2, on the tagged path): the rows of a table without
+/// rules, tagged one paragraph per cell line, whose last item has a second line of its name
+/// beside the wrapped end of its description, while only the first item has a source. The
+/// lines show all that blocks side by side with a wrapped paragraph show, so they are read
+/// column by column. The elements stay as the tags give them: each line is a block of its
+/// own, and no block holds the descriptions of two items.
+#[test]
+fn tagged_cells_read_as_columns_stay_blocks_of_their_own() {
+    let rows = [
+        ["Item", "Description", "Source"],
+        [
+            "Bolt",
+            "steel bolt for the frame, zinc plated, size M8",
+            "Mill",
+        ],
+        ["Nut", "nut for the bolt, zinc plated, size M8, hex", ""],
+        [
+            "Washer",
+            "washer for the nut and the bolt, flat, set of",
+            "",
+        ],
+        ["DIN 125", "twelve pieces", ""],
+    ];
+    let mut lines: Vec<common::TaggedLine<'_>> = vec![
+        (40.0, 760.0, 14.0, true, "Carriage report"),
+        (40.0, 730.0, 10.0, false, BODY[0]),
+    ];
+    for (n, row) in rows.iter().enumerate() {
+        for (c, text) in row.iter().enumerate().filter(|(_, t)| !t.is_empty()) {
+            let (x, y) = (40.0 + 161.0 * c as f32, 640.0 - 9.6 * n as f32);
+            lines.push((x, y, 8.0, false, text));
+        }
+    }
+    let out = read(&common::tagged_paragraphs(&[lines]));
+    let texts = block_texts(&out);
+    let at = |t: &str| {
+        texts
+            .iter()
+            .position(|b| b == t)
+            .unwrap_or_else(|| panic!("no block {t:?} in {texts:#?}"))
+    };
+    // Through the path: the columns were read, the names before the descriptions.
+    assert!(at("DIN 125") < at("Description"), "{texts:#?}");
+    // Each cell line is a block of its own, the descriptions in their order.
+    let described: Vec<usize> = rows[1..].iter().map(|r| at(r[1])).collect();
+    assert!(described.is_sorted(), "{texts:#?}");
+    for cell in rows.iter().flatten().filter(|t| !t.is_empty()) {
+        at(cell);
+    }
+}
+
 /// The bounds of the regions of a turned page lie in the page box the reader reports (the
 /// visible box, `/Rotate` not applied), not in the turned frame the layout read the page in:
 /// a page with `/Rotate 90` whose text is drawn upward, and a page without `/Rotate` whose

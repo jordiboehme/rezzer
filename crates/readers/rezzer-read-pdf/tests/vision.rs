@@ -2080,8 +2080,9 @@ fn qr_in_invoice_corner_is_decoded_not_logo() {
         "{md}"
     );
     assert!(!md.contains("logo or small picture"), "{md}");
-    assert!(!md.contains("Needs vision"), "{md}");
-    assert!(!md.contains("Pictures that need vision"), "{md}");
+    // No picture of the file needs vision; the lines of the invoice kept as laid out have
+    // pictures of their own.
+    assert!(needing(&out).is_empty(), "{md}");
 }
 
 #[test]
@@ -2239,7 +2240,7 @@ fn url_payload_is_link_and_escaped() {
     let out = read(&code_page(&content, &pictures));
     let md = markdown(&out);
     assert!(
-        md.contains(r"QR Code: [https://example.org/a\_b?c=\*d\*](https://example.org/a_b?c=*d*)"),
+        md.contains(r"QR Code: [https://example.org/a_b?c=\*d\*](https://example.org/a_b?c=*d*)"),
         "{md}"
     );
     assert!(
@@ -2561,7 +2562,10 @@ fn dense_vector_codes_are_found() {
     for (m, module) in [(&v4, 0.5), (&v10, 1.0)] {
         let content = format!("{INVOICE}{}", vector_code(m, 300.0, 300.0, module));
         let out = read(&code_page(&content, &[]));
-        let found: Vec<usize> = out.document.assets.iter().map(|a| a.codes.len()).collect();
+        let found: Vec<usize> = common::pictures(&out)
+            .iter()
+            .map(|a| a.codes.len())
+            .collect();
         assert_eq!(
             found,
             [1],
@@ -2706,7 +2710,7 @@ fn drawings_that_are_not_codes_are_not_listed() {
     for (name, content) in cases {
         let out = read(&drawing_page(&content));
         assert!(
-            out.document.assets.is_empty(),
+            common::pictures(&out).is_empty(),
             "{name}: {:#?}",
             out.document.assets
         );
@@ -4919,4 +4923,526 @@ fn a_picture_under_a_title_at_the_top_of_the_right_column_stays_there() {
         ],
         "{got:?}"
     );
+}
+
+/// A page of `rows` lines of two short texts side by side at `top`: no rule, no colon and no
+/// value shape, so no region type has clear evidence and the block is kept as laid out.
+fn unsure_rows(top: f32, rows: &[[&str; 2]]) -> String {
+    let mut c = String::new();
+    for (n, row) in rows.iter().enumerate() {
+        let y = top - 10.0 * n as f32;
+        c += &common::show("F1", 8.0, 40.0, y, row[0]);
+        c += &common::show("F1", 8.0, 300.0, y, row[1]);
+    }
+    c
+}
+
+const UNSURE: [[&str; 2]; 2] = [["Linde Nord", "Ahorn West"], ["Birke Ost", "Erle Mitte"]];
+
+#[test]
+fn a_region_kept_as_laid_out_gets_a_picture_of_its_area() {
+    let file = common::pdf(&[common::Page::text(unsure_rows(600.0, &UNSURE))], "");
+    // Without files the picture is listed with its page and box, and no page is rendered.
+    let plain = read_opts(&file, false, Limits::default());
+    let listed = asset(&plain, "page-1-region-1");
+    assert!(listed.needs_vision, "{listed:?}");
+    // The picture names the block it shows.
+    assert_eq!(listed.shows, Some(Anchor("p1:b1".into())), "{listed:?}");
+    assert!(listed.sha256.is_empty() && plain.blobs.is_empty());
+    let alt = listed.alt.clone().expect("its words");
+    // Its words name the block and the box: they tie the picture to its block in the list
+    // of pictures, also without a file.
+    assert!(
+        alt.starts_with("text kept as laid out at p1:b1, box 40, "),
+        "{alt}"
+    );
+    // The media block stands right after the block, with the page's next media anchor.
+    let blocks = page(&plain, 1);
+    let at = blocks
+        .iter()
+        .position(|b| matches!(b, Block::Spatial { .. }))
+        .expect("a block kept as laid out");
+    assert!(
+        matches!(
+            &blocks[at + 1],
+            Block::Media { asset, alt: Some(a), anchor: Some(Anchor(m)) }
+                if asset == "page-1-region-1" && *a == alt && m == "p1:m1"
+        ),
+        "{:#?}",
+        &blocks[at..]
+    );
+    let md = markdown(&plain);
+    assert!(
+        md.contains(&format!(
+            "Linde Nord   Ahorn West\\\nBirke Ost   Erle Mitte\n\n\
+             Picture page-1-region-1 (image/png, {alt}) is not extracted. \
+             :status[Needs vision]{{yellow}}\n"
+        )),
+        "{md}"
+    );
+    assert_eq!(plain.completeness, Completeness::Complete);
+    // With files the area of the block is cut out of the page's render at 144 dpi, with the
+    // margin of a small picture.
+    let out = read_opts(&file, true, Limits::default());
+    let blob = out
+        .blobs
+        .iter()
+        .find(|b| b.asset == "page-1-region-1")
+        .expect("the picture of the region");
+    assert!(blob.bytes.starts_with(PNG_SIGNATURE));
+    let (w, h) = png_size(&blob.bytes);
+    // Two lines of 8 points 10 apart, from x 40 to the end of the right text.
+    assert!((560..=700).contains(&w), "{w} by {h}");
+    assert!((40..=80).contains(&h), "{w} by {h}");
+    assert!(!asset(&out, "page-1-region-1").sha256.is_empty());
+    assert_eq!(
+        out.completeness,
+        Completeness::Complete,
+        "{:?}",
+        out.document.losses
+    );
+    // Only the region is a picture: the page as a whole needs no vision.
+    assert!(needing(&out).is_empty(), "{:?}", out.document.assets);
+    assert_eq!(common::region_pictures(&out), ["page-1-region-1"]);
+}
+
+#[test]
+fn lines_kept_as_laid_out_in_the_same_columns_are_one_aligned_block_with_one_picture() {
+    // Review 3, I-1: a line of small labels over the line of their values, where the first
+    // value reaches under two labels, is cut into two regions of one line each. Which value
+    // stands under which label is meaning: the run is written as one block aligned in
+    // columns and gets one picture of the box around both lines, after its last block.
+    let content = common::show("F1", 7.5, 40.0, 640.0, "Bank")
+        + &common::show("F1", 7.5, 68.0, 640.0, "Account")
+        + &common::show("F1", 7.5, 205.0, 640.0, "Paid")
+        + &common::show("F1", 9.0, 42.7, 629.2, "Oakfield Bank")
+        + &common::show("F1", 9.0, 207.7, 629.2, "30.10.2026")
+        + &common::show(
+            "F1",
+            9.0,
+            40.0,
+            559.2,
+            "The firm ships the ordered goods as agreed with the buyer of the goods.",
+        );
+    let file = common::pdf(&[common::Page::text(content)], "");
+    let plain = read_opts(&file, false, Limits::default());
+    let blocks = page(&plain, 1);
+    let at = blocks
+        .iter()
+        .position(|b| matches!(b, Block::Spatial { .. }))
+        .expect("a block kept as laid out");
+    let alt = match &blocks[at..] {
+        [
+            Block::Spatial { lines: a, .. },
+            Block::Spatial { lines: b, .. },
+            Block::Media {
+                asset,
+                alt: Some(alt),
+                anchor: Some(Anchor(m)),
+            },
+            ..,
+        ] if a.len() == 1 && b.len() == 1 && asset == "page-1-region-1" && m == "p1:m1" => alt,
+        other => panic!("{other:#?}"),
+    };
+    assert_eq!(common::region_pictures(&plain), ["page-1-region-1"]);
+    assert!(
+        alt.starts_with("text kept as laid out at p1:b1 to p1:b2, box 40, "),
+        "{alt}"
+    );
+    // The picture names the first block of the run.
+    let listed = asset(&plain, "page-1-region-1");
+    assert_eq!(listed.shows, Some(Anchor("p1:b1".into())), "{listed:?}");
+    let md = markdown(&plain);
+    let fence = md
+        .split("```text\n")
+        .nth(1)
+        .and_then(|rest| rest.split("\n```").next())
+        .unwrap_or_else(|| panic!("{md}"));
+    let lines: Vec<&str> = fence.lines().collect();
+    assert_eq!(lines.len(), 2, "{md}");
+    assert!(
+        lines[0].starts_with("Bank")
+            && lines[0].contains(" Account ")
+            && lines[0].ends_with(" Paid"),
+        "{md}"
+    );
+    assert!(
+        lines[1].trim_start().starts_with("Oakfield Bank  ") && lines[1].ends_with(" 30.10.2026"),
+        "{md}"
+    );
+    // Both lines stand on one grid: the date starts in the column of its label, or one
+    // column beside it (it stands 2.7 points right of the label on the page), and the
+    // values start less than a column right of the labels.
+    let at = |line: &str, word: &str| line.find(word).unwrap_or_else(|| panic!("{md}"));
+    assert!(
+        at(lines[1], "30.10.2026").abs_diff(at(lines[0], "Paid")) <= 1,
+        "{md}"
+    );
+    assert!(at(lines[1], "Oakfield") <= 1, "{md}");
+    assert!(
+        md.contains(&format!(
+            "\n```\n\nPicture page-1-region-1 (image/png, {alt}) is not extracted."
+        )),
+        "{md}"
+    );
+    // Both blocks say that they are written as text in its columns.
+    for at in ["p1:b1", "p1:b2"] {
+        assert!(
+            plain.document.losses.iter().any(|l| l.location == at
+                && l.what
+                    .contains("is kept as laid out, as text in its columns")),
+            "{at}: {:#?}",
+            plain.document.losses
+        );
+    }
+    // With files the picture holds both lines: 20 points high at 144 dpi with the margin.
+    let out = read_opts(&file, true, Limits::default());
+    let blob = out
+        .blobs
+        .iter()
+        .find(|b| b.asset == "page-1-region-1")
+        .expect("the picture of the run");
+    let (w, h) = png_size(&blob.bytes);
+    assert!((48..=80).contains(&h) && w > 400, "{w} by {h}");
+    assert_eq!(out.completeness, Completeness::Complete);
+}
+
+/// The lines of the `text` fences of `md`, one list per fence.
+fn fences(md: &str) -> Vec<Vec<&str>> {
+    md.split("```text\n")
+        .skip(1)
+        .filter_map(|rest| rest.split("\n```").next())
+        .map(|f| f.lines().collect())
+        .collect()
+}
+
+#[test]
+fn a_line_kept_as_laid_out_that_starts_further_right_is_not_moved_under_the_first_column() {
+    // Re-review 3, N1: a line of four small labels and under it a line of two values that
+    // starts under the third label. Each is a region of its own, and each region counts its
+    // columns from its own left edge: written as one aligned block, the first value stood
+    // at the left edge, under the first label. Lines with different left edges on the page
+    // are no run: each reads alone, line by line.
+    let content = common::show("F1", 7.5, 40.0, 640.0, "Bank")
+        + &common::show("F1", 7.5, 68.0, 640.0, "Account")
+        + &common::show("F1", 7.5, 205.0, 640.0, "Paid")
+        + &common::show("F1", 7.5, 300.0, 640.0, "Due")
+        + &common::show("F1", 9.0, 207.7, 629.2, "30.10.2026")
+        + &common::show("F1", 9.0, 302.7, 629.2, "12.11.2026")
+        + &common::show(
+            "F1",
+            9.0,
+            40.0,
+            559.2,
+            "The firm ships the ordered goods as agreed with the buyer of the goods.",
+        );
+    let file = common::pdf(&[common::Page::text(content)], "");
+    let plain = read_opts(&file, false, Limits::default());
+    let blocks = page(&plain, 1);
+    let spatial: Vec<&Block> = blocks
+        .iter()
+        .filter(|b| matches!(b, Block::Spatial { .. }))
+        .collect();
+    assert_eq!(spatial.len(), 2, "{blocks:#?}");
+    let md = markdown(&plain);
+    assert!(fences(&md).is_empty(), "{md}");
+    assert!(md.contains("30.10.2026   12.11.2026"), "{md}");
+    // One line alone reads as it stands: no picture.
+    assert!(common::region_pictures(&plain).is_empty());
+    // The place of each block on the page grid is in the model: the values start 42 columns
+    // right of the labels, and neither joins the other.
+    let grids: Vec<rezzer_model::SpatialGrid> = spatial
+        .iter()
+        .filter_map(|b| match b {
+            Block::Spatial { grid, .. } => *grid,
+            _ => None,
+        })
+        .collect();
+    assert!(
+        matches!(grids.as_slice(), [a, b] if a.col == 0 && b.col > 30 && !a.joins && !b.joins),
+        "{grids:?}"
+    );
+    for at in ["p1:b1", "p1:b2"] {
+        assert!(
+            plain
+                .document
+                .losses
+                .iter()
+                .any(|l| l.location == at && l.what.contains("is kept as laid out, line by line")),
+            "{at}: {:#?}",
+            plain.document.losses
+        );
+    }
+}
+
+#[test]
+fn lines_kept_as_laid_out_far_under_one_another_are_no_aligned_block() {
+    // Re-review 3, N1 (the vertical part): the labels and values of the run above, the values
+    // seven lines further down. Lines that far apart are no rows of one small table: each
+    // reads alone, and no picture spans the white space between them. One line pitch lower
+    // than two pitches they are a run again.
+    let shape = |down: f32| {
+        let content = common::show("F1", 7.5, 40.0, 640.0, "Bank")
+            + &common::show("F1", 7.5, 68.0, 640.0, "Account")
+            + &common::show("F1", 7.5, 205.0, 640.0, "Paid")
+            + &common::show("F1", 7.5, 300.0, 640.0, "Due")
+            + &common::show("F1", 9.0, 42.7, 640.0 - down, "Oakfield Bank")
+            + &common::show("F1", 9.0, 207.7, 640.0 - down, "30.10.2026")
+            + &common::show("F1", 9.0, 302.7, 640.0 - down, "12.11.2026")
+            + &common::show(
+                "F1",
+                9.0,
+                40.0,
+                459.2,
+                "The firm ships the ordered goods as agreed with the buyer of the goods.",
+            );
+        let file = common::pdf(&[common::Page::text(content)], "");
+        read_opts(&file, false, Limits::default())
+    };
+    let far = shape(75.6);
+    let blocks = page(&far, 1);
+    let spatial = blocks
+        .iter()
+        .filter(|b| matches!(b, Block::Spatial { .. }))
+        .count();
+    assert_eq!(spatial, 2, "{blocks:#?}");
+    let md = markdown(&far);
+    assert!(fences(&md).is_empty(), "{md}");
+    assert!(common::region_pictures(&far).is_empty());
+    // Two lines of the values' size lower (21.6 points at 1.2 sizes a line): still a run.
+    let near = shape(21.6);
+    let md = markdown(&near);
+    assert_eq!(fences(&md).len(), 1, "{md}");
+    // Three lines lower: no run.
+    let md = markdown(&shape(32.4));
+    assert!(fences(&md).is_empty(), "{md}");
+}
+
+#[test]
+fn time_that_runs_out_on_pages_of_region_pictures_only_keeps_the_read_complete() {
+    // Review 3, I-3: three pages that are rendered only for the picture of a region kept as
+    // laid out. The time is counted in readings of the clock, so the test does not depend on
+    // the machine: the limit ends one reading earlier each turn, among them the readings
+    // before a render and before a crop. A region that gets no file keeps its lines and
+    // stays listed: one Info loss says how many got none, in words of their own, and the
+    // read stays complete.
+    use rezzer_limits::{CancelToken, Clock};
+    use std::time::Duration;
+    let list: Vec<common::Page> = (0..3)
+        .map(|_| common::Page::text(unsure_rows(600.0, &UNSURE)))
+        .collect();
+    let file = common::pdf(&list, "");
+    let opts = ReadOptions {
+        extract_assets: true,
+        ..ReadOptions::default()
+    };
+    let step = Duration::from_millis(1);
+    let read = |max_time: Duration| {
+        let clock = Clock::steps(step);
+        let limits = Limits {
+            max_time,
+            ..Limits::default()
+        };
+        let budget = Budget::with_clock(limits, CancelToken::default(), clock.clone());
+        (common::read_in(&file, &opts, &budget), clock.reads())
+    };
+    let (whole, reads) = read(Duration::from_secs(3600));
+    assert_eq!(whole.blobs.len(), 3, "{:#?}", whole.document.losses);
+    let mut cut = Vec::new();
+    for early in 1..=16u32 {
+        let (out, _) = read(step * (u32::try_from(reads).expect("few readings") - early));
+        if common::region_pictures(&out).len() < 3 {
+            // The time ran out before the pages were laid out: not the case of this test.
+            break;
+        }
+        let without = 3 - out.blobs.len();
+        if without == 0 {
+            continue;
+        }
+        cut.push(without);
+        let losses = &out.document.losses;
+        assert_eq!(out.completeness, Completeness::Complete, "{losses:#?}");
+        assert!(
+            losses.iter().all(|l| l.severity == Severity::Info),
+            "{losses:#?}"
+        );
+        let said: Vec<&rezzer_model::Loss> = losses
+            .iter()
+            .filter(|l| l.what.contains("no picture file"))
+            .collect();
+        let want = if without == 1 {
+            "1 region kept as laid out gets no picture file, on page 3: time limit".to_string()
+        } else {
+            format!(
+                "{without} regions kept as laid out get no picture file, from page {} on: \
+                 time limit",
+                4 - without
+            )
+        };
+        assert!(
+            matches!(said.as_slice(), [l] if l.what.starts_with(&want) && l.why == LossReason::Limit),
+            "{want}: {losses:#?}"
+        );
+        assert!(
+            !losses.iter().any(|l| l.what.contains("small picture")),
+            "{losses:#?}"
+        );
+    }
+    // The limit ran out at a page and at a later one.
+    assert!(cut.len() >= 2 && cut.iter().any(|&n| n > 1), "{cut:?}");
+}
+
+#[test]
+fn the_pictures_of_the_file_are_written_before_the_pictures_of_regions() {
+    // Review 3, I-3: a region kept as laid out on page 1, a small picture of the file on
+    // page 2. The region's lines are read, so its picture must not take time or room from a
+    // picture that holds what the text does not: the file's own pictures are cut first.
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let mark = b.stream(
+        "/Type /XObject /Subtype /Image /Width 24 /Height 24 /ImageMask true \
+         /BitsPerComponent 1",
+        &(0..72u32).map(|i| (i * 7) as u8).collect::<Vec<u8>>(),
+    );
+    let mut kids = String::new();
+    for content in [
+        unsure_rows(600.0, &UNSURE),
+        "BT /F1 11 Tf 72 700 Td (The mark of the hall.) Tj ET\n\
+         q 85 0 0 85 400 500 cm /P0 Do Q\n"
+            .to_string(),
+    ] {
+        let cs = b.stream("", content.as_bytes());
+        let kid = b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] /Resources << /Font << \
+             /F1 {font} 0 R >> /XObject << /P0 {mark} 0 R >> >> /Contents {cs} 0 R >>"
+        ));
+        kids.push_str(&format!("{kid} 0 R "));
+    }
+    b.set(tree, format!("<< /Type /Pages /Kids [{kids}] /Count 2 >>"));
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let out = read_opts(&b.finish(catalog), true, Limits::default());
+    let blobs: Vec<&str> = out.blobs.iter().map(|b| b.asset.as_str()).collect();
+    assert_eq!(
+        blobs,
+        ["page-2-pic-1", "page-1-region-1"],
+        "{:#?}",
+        out.document.losses
+    );
+    assert_eq!(out.completeness, Completeness::Complete);
+}
+
+#[test]
+fn a_line_kept_as_laid_out_that_reads_as_it_stands_gets_no_picture() {
+    // One line alone: the Markdown writes all its layout says, so a picture would show
+    // nothing more. The line is still kept as laid out, with its loss.
+    let content = "BT /F1 16 Tf 72 780 Td (Linde Nord 2026-114) Tj ET\n\
+                   BT /F1 11 Tf 72 740 Td (Two chairs for the hall of Birke Ost.) Tj ET\n";
+    let out = read_opts(
+        &common::pdf(&[common::Page::text(content)], ""),
+        true,
+        Limits::default(),
+    );
+    let kept: Vec<&Block> = page(&out, 1)
+        .iter()
+        .filter(|b| matches!(b, Block::Spatial { .. }))
+        .collect();
+    assert!(
+        matches!(kept.as_slice(), [Block::Spatial { lines, .. }] if lines.len() == 1),
+        "{:#?}",
+        page(&out, 1)
+    );
+    assert!(out.document.assets.is_empty(), "{:#?}", out.document.assets);
+    assert!(out.blobs.is_empty());
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("is kept as laid out, line by line")),
+        "{:#?}",
+        out.document.losses
+    );
+}
+
+#[test]
+fn regions_kept_as_laid_out_get_pictures_up_to_the_cap_of_the_file() {
+    // One region on each page. At the cap every region has its picture and nothing is said;
+    // one page more and the last region keeps its lines and its loss, and one loss says it
+    // got no picture.
+    for (pages, past) in [(50usize, 0usize), (51, 1), (53, 3)] {
+        let list: Vec<common::Page> = (0..pages)
+            .map(|_| common::Page::text(unsure_rows(600.0, &UNSURE)))
+            .collect();
+        let out = read_opts(&common::pdf(&list, ""), false, Limits::default());
+        let regions = out
+            .document
+            .assets
+            .iter()
+            .filter(|a| a.id.contains("-region-"))
+            .count();
+        assert_eq!(regions, pages - past, "{pages} pages");
+        // The cap cuts nothing of the read: no loss says that something is not read.
+        assert!(
+            !out.document
+                .losses
+                .iter()
+                .any(rezzer_model::Loss::is_not_read),
+            "{pages} pages: {:#?}",
+            out.document.losses
+        );
+        let said: Vec<&str> = out
+            .document
+            .losses
+            .iter()
+            .map(|l| l.what.as_str())
+            .filter(|w| w.contains("no picture"))
+            .collect();
+        let want: Vec<String> = match past {
+            0 => Vec::new(),
+            1 => vec![
+                "1 more region kept as laid out gets no picture, from page 51 on: a file gets \
+                 at most 50 such pictures"
+                    .to_string(),
+            ],
+            n => vec![format!(
+                "{n} more regions kept as laid out get no picture, from page 51 on: a file \
+                 gets at most 50 such pictures"
+            )],
+        };
+        assert_eq!(said, want, "{pages} pages");
+        // The loss of each region stays, with or without a picture.
+        let kept = out
+            .document
+            .losses
+            .iter()
+            .filter(|l| l.what.contains("is kept as laid out, line by line"))
+            .count();
+        assert_eq!(kept, pages, "{pages} pages");
+        assert_eq!(out.completeness, Completeness::Complete, "{pages} pages");
+    }
+}
+
+#[test]
+fn a_page_listed_whole_is_the_picture_of_its_regions() {
+    // A page with a large picture needs vision as a whole: its render shows the region too,
+    // so the region gets no picture of its own.
+    let content = format!(
+        "{}q 451 0 0 421 72 100 cm /Im1 Do Q\n",
+        unsure_rows(700.0, &UNSURE)
+    );
+    let out = read_opts(
+        &image_page(595, 842, &content, 40, 40, &[128u8; 1600]),
+        true,
+        Limits::default(),
+    );
+    assert!(
+        page(&out, 1)
+            .iter()
+            .any(|b| matches!(b, Block::Spatial { .. })),
+        "{:#?}",
+        page(&out, 1)
+    );
+    assert_eq!(needing(&out), ["page-1"]);
+    assert!(common::region_pictures(&out).is_empty());
 }

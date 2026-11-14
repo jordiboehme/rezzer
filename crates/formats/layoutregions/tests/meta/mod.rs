@@ -637,20 +637,22 @@ impl Broken {
 ///   0.1.0. Runs in another order are read in the order of their places
 ///   (`layoutregions::RunOrder`, Task 31c): a break under that change is a break like any
 ///   other;
-/// - labels and values: Task 36a, the next task that types the leaves a break of this class
-///   leaves behind (Task 26, label and value groups, is closed: each pin it owned is fixed or
-///   carries its traced cause and owner), but for the changes whose cause is the segmentation
-///   (rules in pieces part the strips; absolute points in the drawn structure under a scale
-///   of 0.5 or 2), which Task 31 owns;
-/// - a text region read as another text kind (heading, list, paragraph, legend): Task 36a;
+/// - labels and values: after 0.1.0. The tasks that typed these leaves are closed (label
+///   and value groups, then label order: each pin they owned is fixed or carries its traced
+///   cause), so a new break of this class is traced and either fixed or kept with its
+///   cause; no task before the release is its owner by default. The changes
+///   whose cause is the segmentation (rules in pieces part the strips; absolute points in
+///   the drawn structure under a scale of 0.5 or 2) stay with Task 31;
+/// - a text region read as another text kind (heading, list, paragraph, legend): after
+///   0.1.0, for the same reason;
 /// - every other cut, join or order of regions (the segmentation, the bands of running
 ///   headers and footers): Task 31.
 pub fn owner(t: Transform, what: Break, class: &str) -> &'static str {
     match (t, what, class) {
         (Transform::RuleAsBox, _, _) => "after 0.1.0",
         (Transform::SplitRules | Transform::Scale(50) | Transform::Scale(200), _, "pairs") => "31",
-        (_, _, "pairs") => "36a",
-        (_, Break::Kind, "text") => "36a",
+        (_, _, "pairs") => "after 0.1.0",
+        (_, Break::Kind, "text") => "after 0.1.0",
         _ => "31",
     }
 }
@@ -1401,7 +1403,7 @@ pub fn pinned(path: &std::path::Path) -> Vec<String> {
 }
 
 /// The open owner a traced cause names: a cause written by hand may start with `owner <who>`
-/// (`owner Task 36a. Traced ...`, `owner after 0.1.0, kept. ...`), where `<who>` is
+/// (`owner Task 37. Traced ...`, `owner after 0.1.0, kept. ...`), where `<who>` is
 /// `after 0.1.0` or the name of a task (one word of letters and digits). `None` for a cause
 /// that names no owner.
 pub fn traced_owner(cause: &str) -> Option<&str> {

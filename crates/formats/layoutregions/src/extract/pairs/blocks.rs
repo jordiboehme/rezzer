@@ -9,11 +9,12 @@
 //! [`address_block`]) are here too: the reader's headings and lists read them as well.
 
 use super::{ADDRESS_LINES, LABEL_CHARS, LABEL_WORDS, VALUE_CHARS};
-use crate::extract::table::grid::{Piece, columns_of, text_of};
+use crate::extract::pairs::words;
+use crate::extract::table::grid::{JOINT_GAP, Piece, columns_of, text_of};
 use crate::extract::table::{MAX_SQUARES, RunRange};
 use crate::extract::text::{ADDRESS_WORDS, address_shaped, word_count};
 use crate::file::data_only;
-use crate::line::LineRun;
+use crate::line::{EDGE_SIZES, LineRun};
 use crate::segment::cut::SIZE_STEP;
 
 /// Whether two lines one under the other are an address: each a few words (at most
@@ -312,7 +313,7 @@ const KV_PITCH: f32 = 2.0;
 /// far under any step a writer sets on purpose (a tenth of a size). It is not meant to
 /// cover a file that rounds its places to hundredths of a point: at text under 2.6 points
 /// the slack is less than such a hundredth.
-const PITCH_ROUNDING: f32 = 1.0 / 256.0;
+pub(crate) const PITCH_ROUNDING: f32 = 1.0 / 256.0;
 
 /// Whether two lines `gap` apart, the upper over the lower, in the text size `size` (the
 /// larger of the two) follow each other in a block of labels and values (see [`KV_PITCH`],
@@ -679,6 +680,220 @@ pub fn labels_with_values<R: LineRun>(runs: &[R]) -> Option<Vec<Under>> {
         out[k].value = ids;
     }
     Some(out)
+}
+
+/// Columns of blocks side by side are shown by this many column starts or more at one pitch
+/// (see [`paragraph_columns`]): two starts have a distance, three have a pitch.
+const PITCH_COLUMNS: usize = 3;
+
+/// The lines of a wrapped paragraph may lack this much of one line's proof of being full,
+/// all of them together (see [`paragraph_columns`]). A line is full when the first word of
+/// the line under it does not fit before the start of the next column; it is not when that
+/// word fits with the white space of a joint (see `grid::JOINT_GAP`) to spare, where it
+/// would have stood as a word of the line; between the two the proof falls evenly. Half a
+/// line: one line whose next word fits with a word space but no room for a gutter is the
+/// edge, and so are two lines each half as short. A count over the lines and no cutoff for
+/// each: a column start a point farther lowers the proof of a line a little and turns the
+/// read only where the lines together were at the edge already. No share of the text size:
+/// it is a share of a line.
+const FULL_LACK: f32 = 0.5;
+
+/// The runs of a region by column and row (for each column, the runs of its cell on each
+/// row, none where it has no line; a line's runs stay in their order), when its lines are
+/// blocks side by side that a wrapped paragraph shows: a footer of a company beside its managers
+/// beside its board, with no rule and no clear gutter between two of them. `pieces` are the
+/// lines of the region, top down, each in its pieces (see `grid::pieces_of`); the runs of a
+/// line stand left to right. `None` for anything else: the lines are read as before.
+///
+/// Read row by row, the lines of a paragraph of one column would stand between the lines of
+/// the columns beside it, and a line of the next column that starts less than a cell gap
+/// after a full line would be glued to it. The evidence, all of it from the lines:
+///
+/// - the first line stands in [`PITCH_COLUMNS`] pieces or more, whose left edges are the
+///   column starts, at one pitch (each step within an edge of the first, see
+///   [`EDGE_SIZES`]);
+/// - a later line shares each column start after the first: a run of it starts at that edge.
+///   Every line starts at a column start. A run of it opens the cell of a later column
+///   when it starts at that column's start, more than the white space of a joint (see
+///   `grid::JOINT_GAP`, about two word spaces) after the run before it. No run stands across
+///   a column start by more than an edge: a line of a column may reach that little past the
+///   start of the next column, where the next column is empty on its row;
+/// - each column is one block: its lines one under the other from the first row, with no row
+///   left empty between them;
+/// - one column, not the last, holds a paragraph wrapped over every row under the first: each
+///   of its lines but the last is full (the first word of the line under it does not fit
+///   before the start of the next column) and the line under it goes on (it opens with a
+///   small letter or with a bracket before a letter, or the line over it ends in a hyphen
+///   after a letter). A line is full by a ramp, and the lines are counted together (see
+///   [`FULL_LACK`]): one line a little short of full among full ones does not turn the
+///   read. These rows are then no rows of a table: they are one text. What is left is a
+///   first line over one block per column, which reads the same column by column.
+///
+/// Against that stands what the rows of a table without rules show, whose descriptions fill
+/// their column, open with a small letter and wrap in the last row. Each of its rows is an
+/// item of its own, and read column by column the descriptions of all items would be one
+/// text. So the lines are no such blocks when:
+///
+/// - no other column reaches the last row of the paragraph: the other cells of a table end
+///   with its last item, over the wrapped end of its description, whatever cell is left
+///   empty in them. Columns that all end over the paragraph's last row look the same as
+///   those, so blocks side by side are read as columns only when one of them stands beside
+///   the paragraph down to its last row. The cost: a footer whose other blocks are all
+///   shorter than its paragraph reads row by row;
+/// - every other column has a line on each row of the paragraph but its last: rows that
+///   open a line in every column are rows, and the last line is a cell that wraps;
+/// - a column holds nothing but numbers under its first line (see [`data_only`]): a column
+///   of amounts under its title, as [`address_columns`] reads it.
+pub fn paragraph_columns<R: LineRun>(
+    runs: &[R],
+    pieces: &[Vec<Piece>],
+) -> Option<Vec<Vec<Vec<usize>>>> {
+    let rows = pieces.len();
+    let first = pieces.first()?;
+    if first.len() < PITCH_COLUMNS || rows < 3 {
+        return None;
+    }
+    crate::work::add(pieces.iter().map(|l| 1 + l.len() as u64).sum());
+    let inked = |i: usize| !runs[i].text().trim().is_empty();
+    let size = pieces
+        .iter()
+        .flatten()
+        .flat_map(|p| p.start..p.end)
+        .filter(|&i| inked(i))
+        .map(|i| runs[i].size())
+        .fold(0.0f32, f32::max);
+    let edge = EDGE_SIZES * size;
+    // Where the ink of a run ends: without the blanks it ends with (their share of the run's
+    // width by its characters).
+    let ink_end = |r: &R| {
+        let chars = r.text().chars().count().max(1) as f32;
+        r.x() + r.w() * r.text().trim_end().chars().count() as f32 / chars
+    };
+    let starts: Vec<f32> = first.iter().map(|p| p.x0).collect();
+    let pitch = starts[1] - starts[0];
+    if pitch <= 0.0
+        || starts
+            .windows(2)
+            .any(|w| (w[1] - w[0] - pitch).abs() > edge)
+    {
+        return None;
+    }
+    // The cells: for each column and row, the runs of the line that stand in the column.
+    let mut cells: Vec<Vec<Vec<usize>>> = vec![vec![Vec::new(); rows]; starts.len()];
+    let mut shared = vec![false; starts.len()];
+    for (row, line) in pieces.iter().enumerate() {
+        let (Some(a), Some(z)) = (line.first(), line.last()) else {
+            return None;
+        };
+        // The column of the cell that is open, and where its ink ends.
+        let mut open: Option<(usize, f32)> = None;
+        // White space before the first ink of the line: it goes to the cell that ink opens.
+        let mut blank: Vec<usize> = Vec::new();
+        for (i, r) in runs.iter().enumerate().take(z.end).skip(a.start) {
+            if !inked(i) {
+                // White space stands with the cell before it.
+                match open {
+                    Some((c, _)) => cells[c][row].push(i),
+                    None => blank.push(i),
+                }
+                continue;
+            }
+            // A run opens a cell at a column start when it is the first of its line or
+            // stands more than the white space of a joint after the run before it: a word
+            // of a line that starts at a column start by chance goes on its line.
+            let apart = open.is_none_or(|(_, end)| r.x() - end > JOINT_GAP * size);
+            let at = starts
+                .iter()
+                .position(|s| apart && (r.x() - s).abs() <= edge);
+            let c = match (at, open) {
+                (Some(c), _) => c,
+                (None, Some((c, _))) => c,
+                (None, None) => return None,
+            };
+            if open.is_some_and(|(before, _)| c < before) {
+                return None;
+            }
+            // Its ink ends before the start of the next column, or an edge past it.
+            let end = ink_end(r);
+            if starts.get(c + 1).is_some_and(|next| end > next + edge) {
+                return None;
+            }
+            if at.is_some() && row > 0 {
+                shared[c] = true;
+            }
+            cells[c][row].append(&mut blank);
+            cells[c][row].push(i);
+            open = Some((c, open.map_or(end, |o| o.1.max(end))));
+        }
+        // A line of white space alone is no line of a column: its runs stay in the first.
+        cells[0][row].append(&mut blank);
+    }
+    if shared[1..].iter().any(|s| !s) {
+        return None;
+    }
+    // Each column one block from the first row down.
+    let filled = |c: usize, row: usize| cells[c][row].iter().any(|&i| inked(i));
+    let lines: Vec<usize> = (0..starts.len())
+        .map(|c| (0..rows).take_while(|&row| filled(c, row)).count())
+        .collect();
+    if (0..starts.len()).any(|c| lines[c] == 0 || (lines[c]..rows).any(|row| filled(c, row))) {
+        return None;
+    }
+    // A column of nothing but numbers under its first line is a column of a table.
+    let text = |c: usize, row: usize| words(runs, &cells[c][row]);
+    if (0..starts.len()).any(|c| lines[c] > 1 && (1..lines[c]).all(|row| data_only(&text(c, row))))
+    {
+        return None;
+    }
+    // The rows of a table: no other column reaches the last row of the paragraph, or they
+    // all have a line on each of its rows but the last.
+    let table = |c: usize| {
+        let others = (0..starts.len()).filter(|&o| o != c).map(|o| lines[o]);
+        let (least, most) = others.fold((rows, 0), |(a, z), n| (a.min(n), z.max(n)));
+        most < rows || least + 1 >= rows
+    };
+    // The paragraph: a column whose lines under the first are full and go on, to the last
+    // row of the region.
+    let wrapped = (0..starts.len() - 1).any(|c| {
+        let mut lack = 0.0f32;
+        lines[c] == rows
+            && !table(c)
+            && (1..rows - 1).all(|row| {
+                let (over, under) = (text(c, row), text(c, row + 1));
+                let end = cells[c][row]
+                    .iter()
+                    .filter(|&&i| inked(i))
+                    .map(|&i| ink_end(&runs[i]))
+                    .fold(f32::MIN, f32::max);
+                // The width of the first word of the line under it, by its share of the
+                // characters of its run.
+                let Some(&lead) = cells[c][row + 1].iter().find(|&&i| inked(i)) else {
+                    return false;
+                };
+                let r = &runs[lead];
+                let chars = r.text().chars().count().max(1) as f32;
+                let word = r
+                    .text()
+                    .split_whitespace()
+                    .next()
+                    .map_or(0, |w| w.chars().count());
+                // The room left before the next column with that word on the line, as
+                // the share of a joint's white space: none is a full line.
+                let room = starts[c + 1] - (end + r.w() * word as f32 / chars);
+                lack += (room / (JOINT_GAP * size)).clamp(0.0, 1.0);
+                let mut opens = under.chars();
+                // And the line under it goes on.
+                let opened = match opens.next() {
+                    Some(c) if c.is_lowercase() => true,
+                    Some('(' | '[') => opens.next().is_some_and(char::is_alphabetic),
+                    _ => false,
+                };
+                let mut ends = over.chars().rev();
+                opened || (ends.next() == Some('-') && ends.next().is_some_and(char::is_alphabetic))
+            })
+            && lack < FULL_LACK
+    });
+    wrapped.then_some(cells)
 }
 
 /// The lines of a region by column (see [`columns_of`]), each column's line on each row, and

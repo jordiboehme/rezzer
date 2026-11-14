@@ -19,7 +19,7 @@
     "contains": "| Inventory | A1:C5 | Item, Type, Quantity |"
   },
   {
-    "contains": "| Sales\\_Bob | A7:B11 | Item, Units |"
+    "contains": "| Sales_Bob | A7:B11 | Item, Units |"
   },
   {
     "pointer": "/body/2/blocks/1/layout/key",

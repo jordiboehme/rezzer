@@ -398,6 +398,7 @@ fn full_document() -> Document {
         needs_vision: true,
         codes: Vec::new(),
         code_unread: false,
+        shows: None,
     });
     doc.losses.push(Loss {
         location: "Costs!D1".into(),
@@ -1327,6 +1328,7 @@ fn spatial_round_trips_json() {
             ],
         }],
         links: Vec::new(),
+        grid: None,
         anchor: None,
     };
     let v = serde_json::to_value(&block).unwrap();
@@ -1439,4 +1441,57 @@ fn cell_media_round_trips() {
     assert_eq!(back, cell);
     let old: Cell = serde_json::from_str(&plain).unwrap();
     assert!(old.media.is_empty());
+}
+
+#[test]
+fn spatial_runs_are_blocks_in_a_row_that_join_at_one_column_of_the_page_grid() {
+    use rezzer_model::{SpatialGrid, SpatialLine, SpatialPiece, spatial_runs};
+    // A block of one line of two pieces: at the grid column `col`, joining the block before
+    // it or not; `None` for a block whose place on the page is not known.
+    let spatial = |grid: Option<(u32, bool)>| Block::Spatial {
+        lines: vec![SpatialLine {
+            pieces: [(0, "a"), (10, "b")]
+                .iter()
+                .map(|(col, text)| SpatialPiece {
+                    col: *col,
+                    text: (*text).into(),
+                    spans: Vec::new(),
+                })
+                .collect(),
+        }],
+        links: Vec::new(),
+        grid: grid.map(|(col, joins)| SpatialGrid { col, joins }),
+        anchor: None,
+    };
+    let media = || Block::Media {
+        asset: "a".into(),
+        alt: None,
+        anchor: None,
+    };
+    let text = || Block::paragraph(vec![Inline::plain("text")]);
+    let blocks = vec![
+        // 0, 2 and 3 are a run: each joins the one before it at one column, media aside.
+        spatial(Some((4, false))),
+        media(),
+        spatial(Some((4, true))),
+        spatial(Some((4, true))),
+        // The same column, but it does not join: a block alone is no run.
+        spatial(Some((4, false))),
+        text(),
+        // The same piece columns without a grid: the place is not known, so no run. A block
+        // that says it joins a block without a grid starts a run of its own.
+        spatial(None),
+        spatial(None),
+        spatial(Some((4, true))),
+        // It joins, but at another column of the page: no run.
+        spatial(Some((9, true))),
+        text(),
+        // Another block between ends a run; the first block of a run may say that it joins.
+        spatial(Some((0, true))),
+        text(),
+        spatial(Some((0, true))),
+        spatial(Some((0, true))),
+    ];
+    assert_eq!(spatial_runs(&blocks), vec![vec![0, 2, 3], vec![13, 14]]);
+    assert!(spatial_runs(&[]).is_empty());
 }

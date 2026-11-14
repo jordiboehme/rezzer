@@ -98,18 +98,17 @@ fn assert_no_loss_but_laid_out(out: &ReadOutcome, at: &[&str]) {
         "{:?}",
         out.document.losses
     );
-    // The clause on bold or italic text a fence cannot show is not this helper's matter.
     let got: Vec<(&str, &str)> = out
         .document
         .losses
         .iter()
-        .map(|l| (l.location.as_str(), common::without_style_clause(&l.what)))
+        .map(|l| (l.location.as_str(), l.what.as_str()))
         .collect();
     let want: Vec<String> = at
         .iter()
         .map(|b| {
             format!(
-                "the region at {b} is kept as laid out, as text in its columns: no region type \
+                "the region at {b} is kept as laid out, line by line: no region type \
                  has clear evidence for it"
             )
         })

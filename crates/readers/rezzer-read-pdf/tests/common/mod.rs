@@ -709,12 +709,40 @@ pub fn logo(x: f32, y: f32, w: f32, h: f32) -> String {
     format!("q {w} 0 0 {h} {x} {y} cm /Logo Do Q\n")
 }
 
-/// The ids of the assets that need vision.
-pub fn needing(out: &ReadOutcome) -> Vec<&str> {
+/// Whether `a` is the picture of a region of text kept as laid out (`page-N-region-K`): it
+/// names the block it shows.
+#[allow(dead_code)]
+pub fn is_region_picture(a: &rezzer_model::Asset) -> bool {
+    a.shows.is_some()
+}
+
+/// The pictures, pages and codes a read lists: its assets but the pictures of regions of text
+/// kept as laid out, which say nothing about the pictures of the file.
+#[allow(dead_code)]
+pub fn pictures(out: &ReadOutcome) -> Vec<&rezzer_model::Asset> {
     out.document
         .assets
         .iter()
+        .filter(|a| !is_region_picture(a))
+        .collect()
+}
+
+/// The ids of the pictures and pages that need vision (see [`pictures`]).
+pub fn needing(out: &ReadOutcome) -> Vec<&str> {
+    pictures(out)
+        .into_iter()
         .filter(|a| a.needs_vision)
+        .map(|a| a.id.as_str())
+        .collect()
+}
+
+/// The ids of the pictures of regions of text kept as laid out, which all need vision.
+#[allow(dead_code)]
+pub fn region_pictures(out: &ReadOutcome) -> Vec<&str> {
+    out.document
+        .assets
+        .iter()
+        .filter(|a| is_region_picture(a) && a.needs_vision)
         .map(|a| a.id.as_str())
         .collect()
 }
@@ -961,6 +989,77 @@ pub fn tagged_lines(n: usize, kind: &str, uri: Option<&str>) -> Vec<u8> {
     b.set(
         tree,
         format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(
+        catalog,
+        format!(
+            "<< /Type /Catalog /Pages {tree} 0 R /MarkInfo << /Marked true >> \
+             /StructTreeRoot {root} 0 R >>"
+        ),
+    );
+    b.finish(catalog)
+}
+
+/// A piece of text of [`tagged_paragraphs`]: where it starts on its baseline, its size,
+/// whether it is bold, and the text.
+pub type TaggedLine<'a> = (f32, f32, f32, bool, &'a str);
+
+/// A tagged file whose structure tree holds one paragraph element (`P`) per piece of text,
+/// in the order given, which is also the order the content draws them in: `pages` holds the
+/// pieces of each page (A4, Helvetica and Helvetica-Bold).
+pub fn tagged_paragraphs(pages: &[Vec<TaggedLine<'_>>]) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let bold = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
+    let root = b.reserve();
+    let doc = b.reserve();
+    let refs = |ids: &[u32]| -> String { ids.iter().map(|r| format!("{r} 0 R ")).collect() };
+    let mut kids = Vec::new();
+    let mut elems = Vec::new();
+    let mut nums = String::new();
+    for (n, lines) in pages.iter().enumerate() {
+        let kid = b.reserve();
+        let mut c = String::new();
+        let mut own = Vec::with_capacity(lines.len());
+        for (i, (x, y, size, heavy, text)) in lines.iter().enumerate() {
+            let f = if *heavy { "F2" } else { "F1" };
+            c += &format!("/P <</MCID {i}>> BDC BT /{f} {size} Tf {x} {y} Td ({text}) Tj ET EMC\n");
+            own.push(b.add(format!(
+                "<< /Type /StructElem /S /P /P {doc} 0 R /Pg {kid} 0 R /K {i} >>"
+            )));
+        }
+        let cs = b.stream("", c.as_bytes());
+        b.set(
+            kid,
+            format!(
+                "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] /StructParents {n} \
+                 /Resources << /Font << /F1 {font} 0 R /F2 {bold} 0 R >> >> /Contents {cs} 0 R >>"
+            ),
+        );
+        nums += &format!("{n} [{}] ", refs(&own));
+        elems.extend(own);
+        kids.push(kid);
+    }
+    b.set(
+        doc,
+        format!(
+            "<< /Type /StructElem /S /Document /P {root} 0 R /K [{}] >>",
+            refs(&elems)
+        ),
+    );
+    b.set(
+        root,
+        format!("<< /Type /StructTreeRoot /K {doc} 0 R /ParentTree << /Nums [{nums}] >> >>"),
+    );
+    b.set(
+        tree,
+        format!(
+            "<< /Type /Pages /Kids [{}] /Count {} >>",
+            refs(&kids),
+            kids.len()
+        ),
     );
     b.set(
         catalog,
@@ -2037,16 +2136,6 @@ pub fn synthetic_invoice() -> Vec<u8> {
         })
         .collect();
     print_form(&pages, "", "")
-}
-
-/// The loss text `what` of a block kept as laid out without its clause on the bold or italic
-/// text a text fence cannot show (`; its bold text is marked in the JSON only`).
-#[allow(dead_code)]
-pub fn without_style_clause(what: &str) -> &str {
-    match what.rfind("; its ") {
-        Some(i) if what.ends_with("is marked in the JSON only") => &what[..i],
-        _ => what,
-    }
 }
 
 /// The CPU time the calling thread has used. A guard against a runaway read measures this

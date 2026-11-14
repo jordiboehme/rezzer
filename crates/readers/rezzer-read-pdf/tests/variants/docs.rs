@@ -1661,6 +1661,37 @@ fn letter_head(v: &Variant, larger_name: bool, date_beside: bool) -> Sheet {
     s
 }
 
+/// Task 36a fix round 1 (review I2): the label of an address in bold at 10 points over a
+/// complete address at 8 (a name, a street, a town), at the lines' own pitch, as an invoice
+/// sets `Delivery address`. The address has its own name line, so the bold line is a
+/// heading over it and no first line of it. Under it a bold title (which the read may take
+/// as the document's) and a line of an amount.
+fn heading_over_a_named_address(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, bold) = v.faces();
+    let s8 = 8.0 * k;
+    let step = s8 * 1.3;
+    let mut t = show(bold, 10.0 * k, 40.0, 720.0, "Delivery address");
+    for (n, line) in ["Sample Trading", "Mill Lane 4", "20481 Oldtown"]
+        .iter()
+        .enumerate()
+    {
+        t += &show(plain, s8, 40.0, 720.0 - step * (n + 1) as f32, line);
+    }
+    t += &show(bold, 9.0 * k, 40.0, 640.0, "Rechnung");
+    t += &show(plain, 9.0 * k, 40.0, 580.0, "Betrag 1.234,56");
+    let mut s = sheet(v, t, 500.0, None);
+    s.want.headings.push("Delivery address".into());
+    s.want.may_title.push("Rechnung".into());
+    s.want.order = vec![
+        "Delivery address".into(),
+        "Sample Trading".into(),
+        "Mill Lane 4".into(),
+        "20481 Oldtown".into(),
+    ];
+    s
+}
+
 /// The columns of [`footer`]: address, bank, register and contact under a bold shop name.
 const FOOTER: [&[&str]; 4] = [
     &[
@@ -1718,6 +1749,266 @@ fn footer(v: &Variant) -> Sheet {
             for l in left.iter() {
                 for r in right.iter() {
                     s.want.apart.push((l.to_string(), r.to_string()));
+                }
+            }
+        }
+    }
+    s
+}
+
+/// The rows of [`foot_table_with_a_wrapped_row`]: titles, three items each with its
+/// description and its price, and the wrapped end of the last description.
+const FOOT_TABLE: [[&str; 3]; 5] = [
+    ["Item", "Description", "Price"],
+    [
+        "Bolt",
+        "steel bolt for the frame, zinc plated, size M8",
+        "1.20",
+    ],
+    ["Nut", "nut for the bolt, zinc plated, size M8, hex", "0.40"],
+    [
+        "Washer",
+        "washer for the nut and the bolt, flat, set of",
+        "0.10",
+    ],
+    ["", "twelve pieces", ""],
+];
+
+/// The rows of the table with a column of words whose last cell is empty: the last item has
+/// no source, so the other columns end on different rows (Task 36a fix round 2, re-review
+/// N1, probe 10).
+const FOOT_TABLE_EMPTY_CELL: [[&str; 3]; 5] = [
+    ["Item", "Description", "Source"],
+    [
+        "Bolt",
+        "steel bolt for the frame, zinc plated, size M8",
+        "Mill",
+    ],
+    [
+        "Nut",
+        "nut for the bolt, zinc plated, size M8, hex",
+        "Forge",
+    ],
+    [
+        "Washer",
+        "washer for the nut and the bolt, flat, set of",
+        "",
+    ],
+    ["", "twelve pieces", ""],
+];
+
+/// The same with the last description wrapped over two more lines (probe 16).
+const FOOT_TABLE_TWO_LINES: [[&str; 3]; 6] = [
+    ["Item", "Description", "Source"],
+    [
+        "Bolt",
+        "steel bolt for the frame, zinc plated, size M8",
+        "Mill",
+    ],
+    [
+        "Nut",
+        "nut for the bolt, zinc plated, size M8, hex",
+        "Forge",
+    ],
+    [
+        "Washer",
+        "washer for the nut and the bolt, flat, set of",
+        "",
+    ],
+    ["", "twelve pieces, zinc plated, packed in a paper", ""],
+    ["", "bag", ""],
+];
+
+/// Task 36a fix round 1 (review I1): a table of three columns without rules at the foot of
+/// the page, at 8 points times the size factor, its columns left aligned at an even pitch of
+/// 161 points from x 40. The descriptions open with a small letter and nearly fill their
+/// column, and the last one wraps: all a wrapped paragraph in a footer of columns shows. But
+/// each row is an item of its own: its description and its price stay with it, and no line
+/// of the read holds the descriptions of two items. On two pages the table is a running
+/// footer.
+///
+/// Fix round 2 (re-review N1): the same holds with a cell left empty at the end of a column
+/// of words, and with the last description over two more lines: no other column reaches
+/// the last row of the description, so nothing shows blocks side by side. `rows` are the
+/// rows of the table, the first its titles, a row with an empty first cell the wrapped end
+/// of the description over it. With a column of words the rows read as one paragraph in row
+/// order, as they did before the columns of a footer were read (each item with its
+/// description and its source, in order): `apart` says whether the descriptions of two
+/// items are asked to stand on lines of their own, as they do with a column of prices.
+fn foot_table_with_a_wrapped_row(v: &Variant, rows: &[[&str; 3]], apart: bool) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let size = 8.0 * k;
+    let mut t = String::new();
+    for (n, row) in rows.iter().enumerate() {
+        for (c, cell) in row.iter().enumerate().filter(|(_, c)| !c.is_empty()) {
+            let (x, y) = (40.0 + 161.0 * k * c as f32, 78.0 - 1.2 * size * n as f32);
+            t += &show(plain, size, x, y, cell);
+        }
+    }
+    let mut s = sheet(v, t, 500.0, None);
+    let items: Vec<&[&str; 3]> = rows[1..].iter().filter(|r| !r[0].is_empty()).collect();
+    for row in &items {
+        let cells = row.iter().filter(|c| !c.is_empty());
+        s.want.together.push(cells.map(|c| c.to_string()).collect());
+    }
+    for (a, upper) in items.iter().enumerate() {
+        for lower in items[a + 1..].iter().filter(|_| apart) {
+            s.want
+                .lines_apart
+                .push((upper[1].to_string(), lower[1].to_string()));
+        }
+    }
+    s
+}
+
+/// The rows of [`table_whose_item_wraps`]: the titles, three items, and under the last item
+/// the second line of its name (a norm) beside the wrapped end of its description. Only the
+/// first item has a source.
+const ITEM_WRAPS: [[&str; 3]; 5] = [
+    ["Item", "Description", "Source"],
+    [
+        "Bolt",
+        "steel bolt for the frame, zinc plated, size M8",
+        "Mill",
+    ],
+    ["Nut", "nut for the bolt, zinc plated, size M8, hex", ""],
+    [
+        "Washer",
+        "washer for the nut and the bolt, flat, set of",
+        "",
+    ],
+    ["DIN 125", "twelve pieces", ""],
+];
+
+/// Task 36a fix round 3 (re-review 2, I2, probe 2): a table of three columns without rules,
+/// its first baseline at `top` (in the body, or at the foot of the page, where it is a
+/// running footer on two pages), at 8 points times the size factor, left aligned at a pitch
+/// of 161 points from x 40. The name of the last item has a second line beside the wrapped end of its description,
+/// so the item column stands beside the descriptions down to their last row, and the column
+/// of sources ends after its first row: all that blocks side by side with a wrapped paragraph
+/// in the middle one show. Nothing in the lines tells the two apart, so the read may take
+/// the columns for blocks. What it may never do is join the descriptions of two items into
+/// one text: each line of a column stays a line of its own (the ruling of fix round 3: a
+/// wrong read as blocks loses the order of the rows, never where an item ends).
+fn table_whose_item_wraps(v: &Variant, top: f32) -> Sheet {
+    let k = v.k();
+    let (plain, bold) = v.faces();
+    let size = 8.0 * k;
+    let mut t = String::new();
+    for (n, row) in ITEM_WRAPS.iter().enumerate() {
+        for (c, cell) in row.iter().enumerate().filter(|(_, c)| !c.is_empty()) {
+            let (x, y) = (40.0 + 161.0 * k * c as f32, top - 1.2 * size * n as f32);
+            t += &show(plain, size, x, y, cell);
+        }
+    }
+    t += &show(bold, 9.0 * k, 40.0, 640.0, "Receipt");
+    t += &show(plain, 9.0 * k, 40.0, 580.0, "Sum 1.234,56");
+    let mut s = sheet(v, t, 500.0, None);
+    s.want.title = Some("Receipt".into());
+    // The first line of the description of each item.
+    let texts: Vec<&str> = ITEM_WRAPS[1..4].iter().map(|r| r[1]).collect();
+    for (a, upper) in texts.iter().enumerate() {
+        for lower in &texts[a + 1..] {
+            s.want
+                .lines_apart
+                .push((upper.to_string(), lower.to_string()));
+        }
+    }
+    s
+}
+
+/// Task 36a fix round 3 (re-review 2, M1, probes 21 to 23 and probe 12): a page title in bold
+/// at 14 points times the size factor under a small kicker line, and at the right on the
+/// same two baselines a small label over a form number in the title's size and face. The
+/// title stands like a value under its label; it is the largest text of the top of the
+/// page, and it is the page's title however few words it has.
+fn title_under_a_kicker(v: &Variant, title: &str) -> Sheet {
+    let k = v.k();
+    let (plain, bold) = v.faces();
+    let t = show(plain, 7.0 * k, 40.0, 760.0, "Department of Samples")
+        + &show(plain, 7.0 * k, 400.0, 760.0, "Form")
+        + &show(bold, 14.0 * k, 40.0, 744.0, title)
+        + &show(bold, 14.0 * k, 400.0, 744.0, "12")
+        + &show(bold, 9.0 * k, 40.0, 640.0, "Receipt")
+        + &show(plain, 9.0 * k, 40.0, 580.0, "Sum 1.234,56");
+    let mut s = sheet(v, t, 500.0, None);
+    s.want.title = Some(title.into());
+    s
+}
+
+/// The columns of [`footer_with_a_wrapped_column`]: the company, its managers under a title
+/// (one paragraph of names, each with its office in brackets, wrapped over three lines), the
+/// chair of its board under a title.
+const WRAPPED_FOOTER: [&[&str]; 3] = [
+    &[
+        "Oakfield Rail Ltd",
+        "Head office in Oldtown",
+        "Registered at Oldtown HRB 12 345",
+        "Tax-No. DE123456789",
+    ],
+    &[
+        "Managers",
+        "Dr. Robin Sample (Chair), Ann Specimen",
+        "(Sales), Alex Other (Staff), Max Sampleton",
+        "(Works)",
+    ],
+    &["Chair of the supervisory board", "Morgan Example"],
+];
+
+/// Task 36a part 1 (class D): a footer of three columns without rules at 7 points times the
+/// size factor, top aligned at the baseline 64.85 and 1.2 sizes apart, the columns at an even
+/// pitch from x 85. The middle column is a title over one paragraph of names wrapped over
+/// three lines. The pitch is the width of its second line of names less a fifth of a point:
+/// that line reaches 0.2 points past the left edge of the third column, where that column
+/// is empty, and the first line of names ends 4.5 points (under a cell gap) before the name
+/// of the third column, which starts at the left edge of its title. A page number stands one
+/// line under the footer at the right. Each column reads top to bottom as one block, line by
+/// line; the order of the columns is free.
+fn footer_with_a_wrapped_column(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let size = 7.0 * k;
+    let step = 1.2 * size;
+    // The width with the brackets as the fonts set them (333 units in both; `font_width`
+    // counts them as a space).
+    let width = |text: &str| {
+        let space = font_width(plain, " ", 1000.0);
+        let brackets = text.chars().filter(|c| matches!(c, '(' | ')')).count() as f32;
+        font_width(plain, text, size) + brackets * (333.0 - space) * size / 1000.0
+    };
+    let pitch = width(WRAPPED_FOOTER[1][2]) - 0.2 * k;
+    let mut t = String::new();
+    for (c, lines) in WRAPPED_FOOTER.iter().enumerate() {
+        for (n, line) in lines.iter().enumerate() {
+            let x = 85.0 + pitch * c as f32;
+            t += &show(plain, size, x, 64.85 - step * n as f32, line);
+        }
+    }
+    let number = format!("Sheet {} / 2", crate::axes::sheet_no() + 1);
+    t += &show(plain, size, 521.3, 64.85 - step * 4.0, &number);
+    let mut s = sheet(v, t, 500.0, None);
+    for lines in WRAPPED_FOOTER {
+        if v.pages == Pages::Two {
+            s.want.roles.push(("page-footer".into(), lines.join(" ")));
+        }
+        let chain: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+        s.want.orders.push(chain.clone());
+        s.want.together.push(chain);
+        // Each line of a column stays a line of its own, the wrapped lines of the names
+        // too (the ruling of fix round 3): what shows the columns the rows of a table can
+        // show as well, and lines kept apart never join the texts of two items.
+        for pair in lines.windows(2) {
+            s.want
+                .lines_apart
+                .push((pair[0].to_string(), pair[1].to_string()));
+        }
+    }
+    for (a, left) in WRAPPED_FOOTER.iter().enumerate() {
+        for right in &WRAPPED_FOOTER[a + 1..] {
+            for l in left.iter() {
+                for r in right.iter() {
+                    s.want.lines_apart.push((l.to_string(), r.to_string()));
                 }
             }
         }
@@ -3418,6 +3709,11 @@ pub(crate) fn shapes() -> Vec<Shape> {
             draw: |v| (letter_head(v, false, false), None),
         },
         Shape {
+            name: "a heading over an address with its own name",
+            axes: DOC,
+            draw: |v| (heading_over_a_named_address(v), None),
+        },
+        Shape {
             name: "letter head with a larger name",
             axes: DOC_NEXT,
             draw: |v| (letter_head(v, true, false), None),
@@ -3927,6 +4223,71 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "footer columns",
             axes: DOC,
             draw: |v| (footer(v), None),
+        },
+        Shape {
+            name: "a footer of three columns with a wrapped paragraph in the middle one",
+            axes: DOC,
+            draw: |v| (footer_with_a_wrapped_column(v), None),
+        },
+        Shape {
+            name: "a table without rules at the foot whose last row wraps",
+            axes: DOC,
+            draw: |v| (foot_table_with_a_wrapped_row(v, &FOOT_TABLE, true), None),
+        },
+        Shape {
+            name: "a table without rules at the foot with an empty last cell whose last row wraps",
+            axes: DOC,
+            draw: |v| {
+                (
+                    foot_table_with_a_wrapped_row(v, &FOOT_TABLE_EMPTY_CELL, false),
+                    None,
+                )
+            },
+        },
+        Shape {
+            name: "a table without rules at the foot with an empty last cell whose last row wraps twice",
+            axes: DOC,
+            draw: |v| {
+                (
+                    foot_table_with_a_wrapped_row(v, &FOOT_TABLE_TWO_LINES, false),
+                    None,
+                )
+            },
+        },
+        Shape {
+            name: "a table without rules whose item wraps on the last row",
+            axes: DOC,
+            draw: |v| (table_whose_item_wraps(v, 720.0), None),
+        },
+        Shape {
+            name: "a table without rules at the foot whose item wraps on the last row",
+            axes: DOC,
+            draw: |v| (table_whose_item_wraps(v, 78.0), None),
+        },
+        Shape {
+            name: "a page title under a kicker beside a form number: Sample Leave Request",
+            axes: DOC,
+            draw: |v| (title_under_a_kicker(v, "Sample Leave Request"), None),
+        },
+        Shape {
+            name: "a page title under a kicker beside a form number: Annual Report",
+            axes: DOC,
+            draw: |v| (title_under_a_kicker(v, "Annual Report"), None),
+        },
+        Shape {
+            name: "a page title under a kicker beside a form number: Request for Sample Leave",
+            axes: DOC,
+            draw: |v| (title_under_a_kicker(v, "Request for Sample Leave"), None),
+        },
+        Shape {
+            name: "a page title under a kicker beside a form number: Request for Sample Leave 2026",
+            axes: DOC,
+            draw: |v| {
+                (
+                    title_under_a_kicker(v, "Request for Sample Leave 2026"),
+                    None,
+                )
+            },
         },
         Shape {
             name: "a note column beside rows of fields",

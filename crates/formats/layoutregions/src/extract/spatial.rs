@@ -8,6 +8,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::extract::pairs::blocks::PITCH_ROUNDING;
 use crate::input::{PageIn, PrimId, TextRun};
 
 /// One line of a spatial reading: its pieces left to right, each with its column (in
@@ -55,8 +56,7 @@ pub fn spatial(page: &PageIn, prims: &[PrimId]) -> Vec<SpatialLineOut> {
     let run = |i: u32| -> &TextRun { &page.texts[i as usize] };
     let left = |r: &TextRun| r.x.min(r.x + r.w);
     let right = |r: &TextRun| r.x.max(r.x + r.w);
-    let adv = advance(ids.iter().map(|&i| run(i)));
-    let x0 = ids.iter().map(|&i| left(run(i))).fold(f32::MAX, f32::min);
+    let (x0, adv) = origin(ids.iter().map(|&i| run(i)));
     ids.sort_by(|&a, &b| {
         let (ra, rb) = (run(a), run(b));
         ra.line
@@ -87,6 +87,215 @@ pub fn spatial(page: &PageIn, prims: &[PrimId]) -> Vec<SpatialLineOut> {
         out.push(SpatialLineOut { pieces });
     }
     out
+}
+
+/// The left edge the columns of a spatial reading are counted from (the least left edge of
+/// `runs`) and the width of one column (their [`advance`]).
+fn origin<'a>(runs: impl Iterator<Item = &'a TextRun> + Clone) -> (f32, f32) {
+    let x0 = runs
+        .clone()
+        .map(|r| r.x.min(r.x + r.w))
+        .fold(f32::MAX, f32::min);
+    (x0, advance(runs))
+}
+
+/// Where a spatial reading stands on its page: what [`spatial`] counts its columns from and
+/// in, and the baselines of its lines. Two readings are told to be rows of one small table
+/// by it ([`SpatialFrame::under`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpatialFrame {
+    /// The left edge column 0 stands at.
+    pub x0: f32,
+    /// The width of one column.
+    pub adv: f32,
+    /// The baseline of its first line.
+    pub first: f32,
+    /// The baseline of its last line.
+    pub last: f32,
+    /// Its text size (the median of its runs), 0 when no run has one.
+    pub size: f32,
+    /// The pitch of its lines: the median step between their baselines, the lower one of
+    /// two. A reading of one line has none.
+    pub pitch: Option<f32>,
+}
+
+/// The frame of the spatial reading of the text runs `prims` of `page` (see [`spatial`]:
+/// the same runs, the same left edge and advance). None without a text run.
+pub fn frame(page: &PageIn, prims: &[PrimId]) -> Option<SpatialFrame> {
+    let mut runs: Vec<&TextRun> = prims
+        .iter()
+        .filter_map(|p| match *p {
+            PrimId::Text(i) => page.texts.get(i as usize),
+            _ => None,
+        })
+        .collect();
+    crate::work::add(1 + runs.len() as u64);
+    if runs.is_empty() {
+        return None;
+    }
+    let (x0, adv) = origin(runs.iter().copied());
+    // The baseline of a line: that of its leftmost run on the baseline with ink, else of
+    // its leftmost run.
+    let rank = |r: &TextRun| {
+        (
+            r.line,
+            r.shift != crate::input::Shift::Base || r.text.trim().is_empty(),
+        )
+    };
+    runs.sort_by(|a, b| {
+        rank(a)
+            .cmp(&rank(b))
+            .then(a.x.min(a.x + a.w).total_cmp(&b.x.min(b.x + b.w)))
+    });
+    let mut lines: Vec<f32> = Vec::new();
+    let mut last_line = None;
+    for r in &runs {
+        if last_line != Some(r.line) {
+            lines.push(r.y);
+            last_line = Some(r.line);
+        }
+    }
+    let mut steps: Vec<f32> = lines.windows(2).map(|w| (w[0] - w[1]).abs()).collect();
+    steps.sort_by(f32::total_cmp);
+    let pitch = (!steps.is_empty()).then(|| steps[(steps.len() - 1) / 2]);
+    let mut sizes: Vec<f32> = runs
+        .iter()
+        .map(|r| r.size)
+        .filter(|s| s.is_finite() && *s > 0.0)
+        .collect();
+    sizes.sort_by(f32::total_cmp);
+    Some(SpatialFrame {
+        x0,
+        adv,
+        first: *lines.first()?,
+        last: *lines.last()?,
+        size: sizes.get(sizes.len() / 2).copied().unwrap_or(0.0),
+        pitch,
+    })
+}
+
+/// The grid of a page, in the page's own text: what the spatial readings of a page are
+/// compared on.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PageGrid {
+    /// The left edge of the page's text: column 0.
+    pub left: f32,
+    /// The width of one column: the median advance per character of the page's text runs.
+    pub unit: f32,
+    /// The line pitch the page shows ([`line_pitch`]), when it shows one.
+    pub pitch: Option<f32>,
+}
+
+/// The grid of `page`. None for a page without text.
+pub fn page_grid(page: &PageIn) -> Option<PageGrid> {
+    crate::work::add(1 + page.texts.len() as u64);
+    if page.texts.is_empty() {
+        return None;
+    }
+    let (left, unit) = origin(page.texts.iter());
+    Some(PageGrid {
+        left,
+        unit,
+        pitch: line_pitch(page),
+    })
+}
+
+/// A page shows a line pitch when this many steps between its rows or more are that step:
+/// one step alone is no pitch, and two equal steps are three lines, which a page of a few
+/// lone lines shows by chance. With three, four rows stand at one pitch.
+pub const PITCH_STEPS: usize = 3;
+
+/// The line pitch `page` shows: the median step between the baselines of its rows (the
+/// lower one of two), when more than half of the steps, and at least [`PITCH_STEPS`], are
+/// that step. The rows are the baselines of the runs with ink on the line's axis and on the
+/// baseline; baselines within [`ROW_BASELINE`] of the page's text size (the median of those
+/// runs) are one row, and steps that differ by no more are one step. A listing set on the
+/// lines of a printer shows its pitch this way (text of 7 points every 12 points); a page
+/// of lone lines, or of columns whose lines do not meet, shows none.
+pub fn line_pitch(page: &PageIn) -> Option<f32> {
+    let inked = || {
+        page.texts.iter().filter(|r| {
+            !r.off_axis && r.shift == crate::input::Shift::Base && !r.text.trim().is_empty()
+        })
+    };
+    let mut sizes: Vec<f32> = inked()
+        .map(|r| r.size)
+        .filter(|s| s.is_finite() && *s > 0.0)
+        .collect();
+    sizes.sort_by(f32::total_cmp);
+    let near = ROW_BASELINE * sizes.get(sizes.len() / 2).copied()?;
+    let mut ys: Vec<f32> = inked().map(|r| r.y).filter(|y| y.is_finite()).collect();
+    crate::work::add(1 + 2 * ys.len() as u64);
+    ys.sort_by(f32::total_cmp);
+    // One baseline for each row: the first of those within `near` of it.
+    ys.dedup_by(|y, row| *y - *row <= near);
+    let mut steps: Vec<f32> = ys.windows(2).map(|w| w[1] - w[0]).collect();
+    if steps.len() < PITCH_STEPS {
+        return None;
+    }
+    steps.sort_by(f32::total_cmp);
+    let pitch = steps[(steps.len() - 1) / 2];
+    let alike = steps.iter().filter(|s| (*s - pitch).abs() <= near).count();
+    (alike >= PITCH_STEPS && 2 * alike > steps.len()).then_some(pitch)
+}
+
+/// Two spatial readings start in the same column of the page grid when their left edges
+/// are less than this many columns of it apart: a column is one character wide, so edges
+/// closer than that can stand in one column, and edges a column or more apart never do. In
+/// columns of the page's text, so it holds at every scale.
+pub const SAME_COLUMN: f32 = 1.0;
+
+/// Rows of one small table follow each other at most this many line pitches apart,
+/// baseline to baseline: a row right under the other, or one empty row between them
+/// (a row of labels, a blank line, the row of values). Further down a line is not a row of
+/// the lines over it: it belongs to what stands around it there.
+pub const RUN_PITCHES: f32 = 2.0;
+
+/// The pitch of a reading of one line, which has none of its own, in text sizes: what one
+/// line of text steps down by. Where the page shows a wider line pitch ([`line_pitch`]),
+/// that is the pitch of the line.
+pub const RUN_LEADING: f32 = crate::extract::text::LEADING;
+
+impl SpatialFrame {
+    /// Whether this reading stands right under `above` as a further row in the columns of a
+    /// run of readings whose first starts at the left edge `edge`: its left edge is in the
+    /// same column of the grid of the page ([`SAME_COLUMN`] columns of `page`), and its
+    /// first baseline is under the last one of `above` (more than [`ROW_BASELINE`] sizes, so
+    /// it is no piece of the same row) by at most [`RUN_PITCHES`] line pitches (with the
+    /// slack of a pitch read from two baselines, `PITCH_ROUNDING` of the size). The pitch is
+    /// the larger one of the two readings: each its own, or for one line the pitch the page
+    /// shows, at least [`RUN_LEADING`] of its text size. The size is the larger of the two.
+    /// Positive evidence only: without a size or a column width it is false.
+    pub fn under(&self, above: &SpatialFrame, edge: f32, page: &PageGrid) -> bool {
+        let size = self.size.max(above.size);
+        let unit = page.unit;
+        if !(size > 0.0 && unit > 0.0 && unit.is_finite()) {
+            return false;
+        }
+        if (self.x0 - edge).abs() >= SAME_COLUMN * unit {
+            return false;
+        }
+        let shown = page.pitch.filter(|p| p.is_finite()).unwrap_or(0.0);
+        let own = |f: &SpatialFrame| f.pitch.unwrap_or((RUN_LEADING * f.size).max(shown));
+        let pitch = own(self).max(own(above));
+        let gap = above.last - self.first;
+        gap > ROW_BASELINE * size && gap <= RUN_PITCHES * pitch + PITCH_ROUNDING * size
+    }
+
+    /// The column of this reading's column `col` on a grid that starts at the left edge
+    /// `x0` with columns `adv` wide: the grid of a run of readings (the least left edge and
+    /// the least column width among them, so no reading has less room on it than on its
+    /// own), on which the pieces of all of them stand in common columns. A place left of
+    /// `x0` is column 0.
+    pub fn column_on(&self, col: u32, x0: f32, adv: f32) -> u32 {
+        let x = self.x0 + col as f32 * self.adv;
+        let c = ((x - x0) / adv).round();
+        if c.is_finite() && c > 0.0 {
+            c.min(u32::MAX as f32) as u32
+        } else {
+            0
+        }
+    }
 }
 
 /// Two regions share a row when their runs on it stand on baselines at most this many text
@@ -288,6 +497,238 @@ mod tests {
 
     fn text(i: u32) -> PrimId {
         PrimId::Text(i)
+    }
+
+    /// A run of `text` at `x` on the baseline `y`, in the size `size`, half a size per
+    /// character.
+    fn sized(text: &str, x: f32, y: f32, size: f32, line: u32) -> TextRun {
+        TextRun {
+            y,
+            w: size / 2.0 * text.chars().count() as f32,
+            h: size,
+            size,
+            ..run(text, x, line)
+        }
+    }
+
+    #[test]
+    fn frame_is_what_the_reading_counts_its_columns_in() {
+        // Two lines 12 points apart and a third 30 under them: the pitch is the lower step.
+        // The left edge and the advance are those of the reading itself.
+        let p = page(vec![
+            run("Name:", 72.0, 0),
+            run("Ort:", 272.0, 0),
+            run("  ", 60.0, 1),
+            run("Erika", 72.0, 1),
+            TextRun {
+                y: 646.0,
+                ..run("Summe", 72.0, 2)
+            },
+        ]);
+        let prims: Vec<PrimId> = (0..5).map(text).collect();
+        let f = frame(&p, &prims).unwrap();
+        assert_eq!((f.x0, f.adv, f.size), (60.0, 5.0, 10.0));
+        assert_eq!((f.first, f.last, f.pitch), (700.0, 646.0, Some(12.0)));
+        // The columns of the reading are counted from that edge in that advance.
+        let lines = spatial(&p, &prims);
+        assert_eq!(
+            lines[0].pieces[1].0,
+            ((272.0 - f.x0) / f.adv).round() as u32
+        );
+        // One line has no pitch; no text run, no frame.
+        let one = frame(&p, &[text(0), text(1)]).unwrap();
+        assert_eq!((one.first, one.last, one.pitch), (700.0, 700.0, None));
+        assert_eq!(frame(&p, &[]), None);
+        assert_eq!(frame(&p, &[PrimId::Text(99)]), None);
+        // The grid of the page: its leftmost text and the advance of all its text. Three
+        // rows show no pitch.
+        assert_eq!(
+            page_grid(&p),
+            Some(PageGrid {
+                left: 60.0,
+                unit: 5.0,
+                pitch: None
+            })
+        );
+        assert_eq!(page_grid(&page(Vec::new())), None);
+    }
+
+    /// A page of one run of 7 points on each of the baselines `ys`.
+    fn rows_at(ys: &[f32]) -> PageIn {
+        page(
+            ys.iter()
+                .enumerate()
+                .map(|(i, &y)| sized("Row", 72.0, y, 7.0, i as u32))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn a_page_shows_a_line_pitch_when_most_of_its_rows_step_by_it() {
+        // A listing: text of 7 points every 12 points, with an empty line here and there.
+        let listing = rows_at(&[700.0, 688.0, 676.0, 652.0, 640.0, 628.0, 604.0]);
+        assert_eq!(line_pitch(&listing), Some(12.0));
+        assert_eq!(page_grid(&listing).unwrap().pitch, Some(12.0));
+        // PITCH_STEPS, both ways: three equal steps are a pitch, two are not.
+        assert_eq!(
+            line_pitch(&rows_at(&[700.0, 688.0, 676.0, 664.0])),
+            Some(12.0)
+        );
+        assert_eq!(line_pitch(&rows_at(&[700.0, 688.0, 676.0])), None);
+        // More than half of the steps, both ways: 4 of 6 steps of 12 points are the pitch,
+        // 3 of 6 are not.
+        assert_eq!(
+            line_pitch(&rows_at(&[700.0, 688.0, 676.0, 664.0, 652.0, 600.0, 500.0])),
+            Some(12.0)
+        );
+        assert_eq!(
+            line_pitch(&rows_at(&[700.0, 688.0, 676.0, 664.0, 630.0, 580.0, 500.0])),
+            None
+        );
+        // Lone lines far apart at steps of their own show none.
+        assert_eq!(
+            line_pitch(&rows_at(&[700.0, 640.0, 564.0, 459.0, 300.0])),
+            None
+        );
+        // ROW_BASELINE, both ways: runs on one row (1.5 points apart at 7 points) are one
+        // baseline and steps that near are one step; 2 points apart they are rows of their
+        // own, and the steps of 2 and 10 points are no pitch.
+        assert_eq!(
+            line_pitch(&rows_at(&[700.0, 698.5, 688.0, 676.0, 662.5])),
+            Some(12.0)
+        );
+        assert_eq!(
+            line_pitch(&rows_at(&[700.0, 698.0, 688.0, 686.0, 676.0])),
+            None
+        );
+        // Text off the baseline or without ink is no row.
+        let mut raised = rows_at(&[700.0, 688.0, 676.0, 664.0]);
+        raised.texts.push(TextRun {
+            shift: Shift::Raised,
+            ..sized("2", 90.0, 694.0, 5.0, 9)
+        });
+        raised.texts.push(sized("  ", 90.0, 682.0, 7.0, 10));
+        assert_eq!(line_pitch(&raised), Some(12.0));
+        assert_eq!(line_pitch(&page(Vec::new())), None);
+    }
+
+    /// The frame of one line of two pieces at `x` on the baseline `y` in the size `size`.
+    fn row(x: f32, y: f32, size: f32) -> SpatialFrame {
+        let p = page(vec![
+            sized("Label", x, y, size, 0),
+            sized("Value", x + 20.0 * size, y, size, 0),
+        ]);
+        frame(&p, &[text(0), text(1)]).unwrap()
+    }
+
+    #[test]
+    fn a_row_is_under_another_in_one_column_and_within_two_pitches() {
+        // Columns of the page 5 points wide; rows in 10 points, so a line pitch of one line
+        // is 12 points (RUN_LEADING).
+        let unit = 5.0;
+        let grid = |unit: f32| PageGrid {
+            left: 40.0,
+            unit,
+            pitch: None,
+        };
+        let top = row(72.0, 700.0, 10.0);
+        let under = |x: f32, y: f32| row(x, y, 10.0).under(&top, top.x0, &grid(unit));
+        // Right under it, and with one empty row between (two pitches).
+        assert!(under(72.0, 688.0));
+        assert!(under(72.0, 676.0));
+        // SAME_COLUMN, both ways: less than a column of the page beside the edge of the run
+        // it is the same column, a column or more it is another one.
+        assert!(under(72.0 + 0.9 * unit, 688.0));
+        assert!(under(72.0 - 0.9 * unit, 688.0));
+        assert!(!under(72.0 + 1.0 * unit, 688.0));
+        assert!(!under(72.0 - 1.1 * unit, 688.0));
+        assert!(!under(272.0, 688.0));
+        // The column is the page's: in a page of wider characters the same edges are one.
+        assert!(row(78.0, 688.0, 10.0).under(&top, top.x0, &grid(7.0)));
+        // The edge is that of the run's first block, not of the block above.
+        assert!(!row(72.0, 688.0, 10.0).under(&top, 80.0, &grid(unit)));
+        // RUN_PITCHES, both ways: two pitches (24 points) are a row of the run, more is not.
+        assert!(under(72.0, 700.0 - RUN_PITCHES * RUN_LEADING * 10.0));
+        assert!(!under(72.0, 700.0 - RUN_PITCHES * RUN_LEADING * 10.0 - 0.5));
+        assert!(!under(72.0, 700.0 - 3.0 * RUN_LEADING * 10.0));
+        assert!(!under(72.0, 470.0));
+        // ROW_BASELINE, both ways: on the same baseline, or over it, it is no row under it.
+        assert!(!under(72.0, 700.0));
+        assert!(!under(72.0, 700.0 - ROW_BASELINE * 10.0));
+        assert!(under(72.0, 700.0 - ROW_BASELINE * 10.0 - 0.1));
+        assert!(!under(72.0, 712.0));
+        // The same page at twice the size reads alike: sizes, places and the unit double.
+        let big = row(144.0, 1400.0, 20.0);
+        assert!(row(144.0 + 1.8 * unit, 1352.0, 20.0).under(&big, big.x0, &grid(2.0 * unit)));
+        assert!(!row(144.0 + 2.0 * unit, 1352.0, 20.0).under(&big, big.x0, &grid(2.0 * unit)));
+        assert!(!row(144.0, 1351.0, 20.0).under(&big, big.x0, &grid(2.0 * unit)));
+        // The larger size of the two counts: small labels over larger values.
+        assert!(row(72.0, 700.0 - 24.0, 10.0).under(&row(72.0, 700.0, 7.5), 72.0, &grid(unit)));
+        // A block of lines at a wide pitch of its own: two of its pitches.
+        let p = page(vec![
+            sized("Label", 72.0, 700.0, 10.0, 0),
+            sized("Value", 272.0, 700.0, 10.0, 0),
+            sized("Label", 72.0, 680.0, 10.0, 1),
+        ]);
+        let wide = frame(&p, &[text(0), text(1), text(2)]).unwrap();
+        assert_eq!(wide.pitch, Some(20.0));
+        assert!(row(72.0, 640.0, 10.0).under(&wide, wide.x0, &grid(unit)));
+        assert!(!row(72.0, 639.0, 10.0).under(&wide, wide.x0, &grid(unit)));
+        // No size or no column width: no evidence.
+        assert!(!row(72.0, 688.0, 10.0).under(&top, top.x0, &grid(0.0)));
+        assert!(!row(72.0, 688.0, 10.0).under(&top, top.x0, &grid(f32::NAN)));
+        let none = SpatialFrame { size: 0.0, ..top };
+        let sizeless = SpatialFrame {
+            size: 0.0,
+            ..row(72.0, 688.0, 10.0)
+        };
+        assert!(!sizeless.under(&none, 72.0, &grid(unit)));
+        // The pitch the page shows, both ways: text of 7 points on lines 12 points apart.
+        // A row with one empty line over it (24 points) is a row of the run on that page,
+        // and none on a page that shows no pitch (two lines of 7 points are 16.8 points);
+        // three lines further down it is none on either.
+        let listing = PageGrid {
+            pitch: Some(12.0),
+            ..grid(4.2)
+        };
+        let small = row(72.0, 700.0, 7.0);
+        assert!(row(72.0, 676.0, 7.0).under(&small, 72.0, &listing));
+        assert!(!row(72.0, 676.0, 7.0).under(&small, 72.0, &grid(4.2)));
+        assert!(!row(72.0, 664.0, 7.0).under(&small, 72.0, &listing));
+        // A pitch of the page tighter than a line of the text does not narrow the bound.
+        let tight = PageGrid {
+            pitch: Some(4.0),
+            ..grid(4.2)
+        };
+        assert!(row(72.0, 684.0, 7.0).under(&small, 72.0, &tight));
+    }
+
+    #[test]
+    fn columns_of_a_run_are_counted_on_one_grid() {
+        // Labels in 7.5 points from 40 and values in 9 points from 42.7: the value that
+        // stands under the third label is in its column on the grid of the run (from the
+        // least edge, in the least advance), not in the column it has on its own grid.
+        let labels = SpatialFrame {
+            x0: 40.0,
+            adv: 3.75,
+            ..row(40.0, 640.0, 7.5)
+        };
+        let values = SpatialFrame {
+            x0: 42.7,
+            adv: 4.5,
+            ..row(42.7, 629.2, 9.0)
+        };
+        let (x0, adv) = (40.0, 3.75);
+        // The third label at 205 is column 44 of the labels; the value at 207.7 is column
+        // 37 of the values' own grid.
+        let label = ((205.0_f32 - 40.0) / 3.75).round() as u32;
+        let value = ((207.7_f32 - 42.7) / 4.5).round() as u32;
+        assert_eq!((label, value), (44, 37));
+        assert_eq!(labels.column_on(label, x0, adv), 44);
+        assert_eq!(values.column_on(value, x0, adv), 45);
+        assert_eq!(values.column_on(0, x0, adv), 1);
+        // Left of the grid's edge is column 0.
+        assert_eq!(labels.column_on(0, 60.0, adv), 0);
     }
 
     #[test]

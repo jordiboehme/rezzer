@@ -36,7 +36,7 @@ language: "en"
 | --- | --- |
 | category | Customize and configure a repository |
 | intro | You can add a README file to your repository to tell other people why your project is useful, what they can do with your project, and how they can use it. |
-| redirect\_from | /articles/section-links-on-readmes-and-blob-pages, /articles/relative-links-in-readmes, /articles/about-readmes, /github/creating-cloning-and-archiving-repositories/about-readmes, /github/creating-cloning-and-archiving-repositories/creating-a-repository-on-github/about-readmes |
+| redirect_from | /articles/section-links-on-readmes-and-blob-pages, /articles/relative-links-in-readmes, /articles/about-readmes, /github/creating-cloning-and-archiving-repositories/about-readmes, /github/creating-cloning-and-archiving-repositories/creating-a-repository-on-github/about-readmes |
 | shortTitle | About READMEs |
 | versions.fpt | \* |
 | versions.ghec | \* |
@@ -85,7 +85,7 @@ A README should only contain information necessary for developers to get started
 ## Further reading
 
 - [AUTOTITLE](/repositories/working-with-files/managing-files/adding-a-file-to-a-repository)
-- [5 tips for making your {% data variables.product.company\_short %} profile page accessible](https://github.blog/2023-10-26-5-tips-for-making-your-github-profile-page-accessible/) in the {% data variables.product.company\_short %} blog {%- ifversion fpt or ghec %}
+- [5 tips for making your {% data variables.product.company_short %} profile page accessible](https://github.blog/2023-10-26-5-tips-for-making-your-github-profile-page-accessible/) in the {% data variables.product.company_short %} blog {%- ifversion fpt or ghec %}
 - [AUTOTITLE](/codespaces/setting-up-your-project-for-codespaces/setting-up-your-repository/facilitating-quick-creation-and-resumption-of-codespaces) {%- endif %}
 
 ## Logic

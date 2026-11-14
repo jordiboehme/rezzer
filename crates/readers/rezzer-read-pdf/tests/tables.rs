@@ -196,8 +196,14 @@ fn tagged_table_stays_given_and_once() {
     assert_eq!(notes[0].kind, rezzer_model::RegionKind::Table);
     assert_eq!(notes[0].certainty, rezzer_model::Certainty::Exact);
     let md = markdown(&out);
+    // Each cell stands once in the table; the note under it names the merged cell again.
+    let table = md.split("Merged cells:").next().unwrap_or_default();
+    assert!(
+        md.contains("Merged cells: `Both` (row 1 column 1) over 2 columns. Each has"),
+        "{md}"
+    );
     for cell in ["Both", "Left", "Right"] {
-        assert_eq!(md.matches(cell).count(), 1, "{cell}: {md}");
+        assert_eq!(table.matches(cell).count(), 1, "{cell}: {md}");
     }
     assert!(paragraphs(page(&out, 1)).is_empty(), "{md}");
 }
@@ -1264,14 +1270,21 @@ fn ticket_box_next_to_table() {
     let md = markdown(&out);
     assert!(
         md.contains(
-            "| Reserved seats only | \u{2190} | \u{2190} | \u{2190} | \u{2190} | \u{2190} |\n\
-             | Ticket 1000001 | \u{2190} | \u{2190} | Price 10.00 | \u{2190} | \u{2190} |\n"
+            "| Reserved seats only |  |  |  |  |  |\n\
+             | Ticket 1000001 |  |  | Price 10.00 |  |  |\n"
         ),
         "{md}"
     );
-    assert_eq!(md.matches("Reserved seats only").count(), 1, "{md}");
+    // The text stands once in the table; the note names the merged cell by it.
+    let table = md.split("Merged cells:").next().unwrap_or_default();
+    assert_eq!(table.matches("Reserved seats only").count(), 1, "{md}");
     assert!(
-        md.contains("\n\nMerged cells: \u{3003} same as above, \u{2190} same as left.\n"),
+        md.contains(
+            "\n\nMerged cells: `Reserved seats only` (row 3 column 1) over 6 columns, \
+             `Ticket 1000001` (row 4 column 1) over 3 columns, `Price 10.00` (row 4 column 4) \
+             over 3 columns. Each has its text in its first cell, the cells it covers are \
+             empty.\n"
+        ),
         "{md}"
     );
 }
@@ -2270,34 +2283,66 @@ fn header_icons_count_as_header_cells() {
     let out = read(&pdf(&[Page::text(c.clone())], ""));
     assert_eq!(tables(page(&out, 1))[0].0, 0);
     // The same grid with an icon and titles in the first row, times below.
-    let mut c = String::from("0.5 w ");
-    for k in 0..4 {
-        let y = 700.0 - 20.0 * k as f32;
-        c += &format!("50 {y} m 290 {y} l S ");
-    }
-    for x in [50.0, 130.0, 210.0, 290.0] {
-        c += &format!("{x} 640 m {x} 700 l S ");
-    }
-    c += "84 684 m 96 684 l S 84 692 m 96 692 l S 84 684 m 84 694 l S 96 684 m 96 694 l S ";
-    c += &show("F1", 8.0, 134.0, 686.0, "Time");
-    c += &show("F1", 8.0, 214.0, 686.0, "Train");
-    for (r, (d, t, n)) in [
-        ("2030-01-02", "10:15", "IC 101"),
-        ("2030-01-03", "11:20", "IC 205"),
-    ]
-    .iter()
-    .enumerate()
-    {
-        let y = 666.0 - 20.0 * r as f32;
-        c += &show("F1", 8.0, 54.0, y, d);
-        c += &show("F1", 8.0, 134.0, y, t);
-        c += &show("F1", 8.0, 214.0, y, n);
-    }
-    let out = read(&pdf(&[Page::text(c)], ""));
+    let with_icon = |title: &str| {
+        let mut c = String::from("0.5 w ");
+        for k in 0..4 {
+            let y = 700.0 - 20.0 * k as f32;
+            c += &format!("50 {y} m 290 {y} l S ");
+        }
+        for x in [50.0, 130.0, 210.0, 290.0] {
+            c += &format!("{x} 640 m {x} 700 l S ");
+        }
+        c += "84 684 m 96 684 l S 84 692 m 96 692 l S 84 684 m 84 694 l S 96 684 m 96 694 l S ";
+        c += &show("F1", 8.0, 134.0, 686.0, title);
+        c += &show("F1", 8.0, 214.0, 686.0, "Train");
+        for (r, (d, t, n)) in [
+            ("2030-01-02", "10:15", "IC 101"),
+            ("2030-01-03", "11:20", "IC 205"),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let y = 666.0 - 20.0 * r as f32;
+            c += &show("F1", 8.0, 54.0, y, d);
+            c += &show("F1", 8.0, 134.0, y, t);
+            c += &show("F1", 8.0, 214.0, y, n);
+        }
+        read(&pdf(&[Page::text(c)], ""))
+    };
+    // Re-review 3 of task 36a, N4: the first words are quoted as they are. The loss is
+    // plain text, so a quote mark in them gets no backslash.
+    let quoted = with_icon("5\" pipe");
+    assert!(
+        quoted.document.losses.iter().any(|l| l
+            .what
+            .starts_with("the table on page 1 that starts with \"5\" pipe\" has a drawing")),
+        "{:?}",
+        quoted.document.losses
+    );
+    let out = with_icon("Time");
     let found = tables(page(&out, 1));
     assert_eq!(found.len(), 1, "{found:?}");
     assert_eq!(found[0].0, 1, "{found:?}");
-    assert_eq!(found[0].1[0], ["(icon)", "Time", "Train"], "{found:?}");
+    // The cell of the icon stays empty: Rezzer writes no text the file does not hold. The
+    // loss says which title is a drawing.
+    assert_eq!(found[0].1[0], ["", "Time", "Train"], "{found:?}");
+    let said: Vec<&str> = out
+        .document
+        .losses
+        .iter()
+        .map(|l| l.what.as_str())
+        .filter(|w| w.contains("icon"))
+        .collect();
+    // The loss names the table by its first words: a page may hold several tables.
+    assert_eq!(
+        said,
+        [
+            "the table on page 1 that starts with \"Time\" has a drawing (an icon) and no text \
+             in the cell 1 of its first row: it is left empty"
+        ],
+        "{:?}",
+        out.document.losses
+    );
 }
 
 #[test]
@@ -2528,7 +2573,7 @@ fn a_cell_over_three_rows_makes_no_header() {
     assert!(found[0].0 <= 1, "{found:?}");
     let md = markdown(&out);
     assert!(
-        md.contains("| \u{3003} | 09:00 | Art |\n| \u{3003} | 10:00 | Music |\n"),
+        md.contains("|  | 09:00 | Art |\n|  | 10:00 | Music |\n"),
         "{md}"
     );
     assert!(md.contains("| Monday | 08:00 | Math |"), "{md}");
@@ -3102,4 +3147,96 @@ fn a_tagged_cell_joins_a_full_line_that_goes_on() {
         assert_eq!(plain_text(&rows[1][3].inlines), "4");
         assert!(!matches!(rows[1][3].inlines[0], Inline::LineBreak));
     }
+}
+
+/// A label over a line of its own with its value under it, left of a grid with a row of bold
+/// header cells over empty rows; the label on the baseline of the header cells. `rule` is the
+/// line under the label (from, to, height), `titles` the header cells. A second such field
+/// stands under the first, and the line of a third farther right at a height between the two
+/// (one field alone with a line as long as its label is a pair by that line, and two lines
+/// alone bound a strip).
+fn field_left_of_a_header_row(rule: Option<(f32, f32, f32)>, titles: &[&str]) -> Vec<String> {
+    let xs = [117.0, 312.0, 383.0, 454.0];
+    let mut c = String::from("1 w\n");
+    for r in 0..7 {
+        let y = 707.5 - 10.0 * r as f32;
+        c += &format!("{} {y} m {} {y} l S\n", xs[0], xs[3]);
+    }
+    for x in xs {
+        c += &format!("{x} 707.5 m {x} 647.5 l S\n");
+    }
+    for (title, x) in titles.iter().zip(xs) {
+        c += &format!("BT /F2 8 Tf {} 700 Td ({title}) Tj ET\n", x + 3.0);
+    }
+    c += "BT /F1 7 Tf 31 700.9 Td (Checked by) Tj ET\n";
+    c += "BT /F1 7 Tf 31 692.9 Td (A/B) Tj ET\n";
+    c += "BT /F1 7 Tf 31 676.8 Td (Passed on to) Tj ET\n";
+    c += "0.5 w 31 676.2 m 110.3 676.2 l S\n";
+    c += "BT /F1 7 Tf 31 668.7 Td (C/D) Tj ET\n";
+    c += "0.5 w 480 687.5 m 540 687.5 l S\n";
+    if let Some((x0, x1, y)) = rule {
+        c += &format!("0.5 w {x0} {y} m {x1} {y} l S\n");
+    }
+    let out = common::read(&common::pdf(&[Page::text(c)], ""));
+    // The paragraphs and the rows of the tables of labels and values, in their order.
+    page(&out, 1)
+        .iter()
+        .flat_map(|b| match b {
+            Block::Paragraph { inlines, role, .. } if role.as_deref() != Some("page") => {
+                vec![plain_text(inlines)]
+            }
+            Block::Table { rows, .. } => texts(rows).iter().map(|r| r.join(" ")).collect(),
+            _ => Vec::new(),
+        })
+        .collect()
+}
+
+/// Task 36a part 2 (the mirror of class K): a label that starts the line of a table's header
+/// cells, over a drawn line of its own with its value under it. The header cells are read
+/// before the label, so the label stands with its value. Each part of the evidence moved the
+/// other way keeps the line of the text pass: without the line under the label the page looks
+/// like a column of row labels beside a grid whose first row alone is filled, where each
+/// label reads with the cells of its row.
+#[test]
+fn header_cells_after_a_field_over_its_own_line_are_read_before_it() {
+    let titles = ["Part of the frame", "Count", "Note"];
+    let moved = [
+        "Part of the frame Count Note",
+        "Checked by A/B",
+        "Passed on to C/D",
+    ];
+    let kept = [
+        "Checked by Part of the frame Count Note",
+        "A/B",
+        "Passed on to C/D",
+    ];
+    let read = |rule| {
+        field_left_of_a_header_row(rule, &titles)
+            .iter()
+            .map(|p| p.split_whitespace().collect::<Vec<_>>().join(" "))
+            // A line that reaches the grid makes its note a paragraph: no text of the page.
+            .filter(|p| !p.starts_with("Possible table"))
+            .collect::<Vec<_>>()
+    };
+    // The line of a field: under the label, as long as a field, ending before the grid.
+    assert_eq!(read(Some((31.0, 78.45, 700.35))), moved);
+    // From the middle of the label on. (A line as long as the label's words makes the field a
+    // pair, which is placed by another path.)
+    assert_eq!(read(Some((50.0, 110.0, 700.35))), moved);
+    // At the baseline, and right over the value's baseline.
+    assert_eq!(read(Some((31.0, 78.45, 700.9))), moved);
+    assert_eq!(read(Some((31.0, 78.45, 693.0))), moved);
+    // No line.
+    assert_eq!(read(None), kept);
+    // A line over the label's baseline (through the label or over it), and one under the
+    // value.
+    assert_eq!(read(Some((31.0, 78.45, 701.0))), kept);
+    assert_eq!(read(Some((31.0, 78.45, 692.8))), kept);
+    // A line that starts after the label, and one that goes on to the text of the grid.
+    assert_eq!(read(Some((69.0, 110.0, 700.35))), kept);
+    assert_eq!(read(Some((31.0, 121.0, 700.35))), kept);
+    // One cell after the label may be its value: it stays on the label's line.
+    let one = field_left_of_a_header_row(Some((31.0, 78.45, 700.35)), &titles[..1]);
+    assert_eq!(one.len(), 3, "{one:?}");
+    assert!(one[0].starts_with("Checked by"), "{one:?}");
 }

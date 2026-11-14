@@ -5,7 +5,9 @@
 //! Pages that need vision: a page without a text layer, or whose pictures cover a part of
 //! it, gets an asset `page-<N>` the calling agent should look at, and a `Media` block at the
 //! reading position of its first picture. With `extract_assets` the page is rendered to PNG
-//! with hayro from pdfparts' canonical bytes, one page at a time.
+//! with hayro from pdfparts' canonical bytes, one page at a time. A small picture, and a
+//! region of text kept as laid out, is an asset of its own that is cut out of the render of
+//! its page.
 //!
 //! A render is bounded before it starts, because hayro cannot be stopped inside one, and an
 //! allocation that fails inside it ends the process:
@@ -21,7 +23,8 @@
 //!   quarter of the memory limit) is not rendered, and neither is one that reaches a stencil
 //!   mask whose size cannot be known;
 //! - the time is checked before each render, and a file renders at most [`MAX_RENDERS`]
-//!   pages.
+//!   pages, and after them at most [`MAX_REGION_PICTURES`] pages for the pictures of regions
+//!   of text kept as laid out.
 //!
 //! One render can still run past the time limit: it cannot stop in the middle of a page.
 
@@ -1145,7 +1148,7 @@ pub(crate) struct Need {
 /// The most pictures a page may draw to be rendered only to be read for codes.
 pub(crate) const SCAN_PICTURES: usize = 1_000;
 
-/// A small picture to cut out of its page's render.
+/// A small picture, or a region of text kept as laid out, to cut out of its page's render.
 pub(crate) struct Crop {
     /// The index of its asset in the document.
     pub asset: usize,
@@ -1153,6 +1156,43 @@ pub(crate) struct Crop {
     pub b: [f32; 4],
     /// How it is rendered again when its crop gives no code (`Small::how`).
     pub how: Option<How>,
+    /// A region of text kept as laid out ([`region_asset`]): cut out to be looked at with
+    /// files, never read for codes (its text is read, and a code in it is a picture or a
+    /// drawing of its own). Without files no page is rendered for it.
+    pub text: bool,
+}
+
+/// The most regions of text kept as laid out one file gets a picture of. Each is a picture
+/// the calling agent is asked to look at and a PNG in the output, and each page that holds
+/// one is rendered: fifty keep that to the pictures of a few busy pages. Past them the
+/// regions keep their lines and their loss, and one loss says how many got no picture.
+pub(crate) const MAX_REGION_PICTURES: usize = 50;
+
+/// The asset of the `k`-th region of text kept as laid out on page `n` (from 1), the block
+/// anchored `block` (the first block of a run), with the words `alt` ([`region_alt`]): listed
+/// as needing vision, without a file until its page is rendered.
+pub(crate) fn region_asset(n: u32, k: usize, block: Option<Anchor>, alt: String) -> Asset {
+    Asset {
+        shows: block,
+        ..picture_asset(format!("page-{n}-region-{k}"), alt, None, true)
+    }
+}
+
+/// The words of the picture of a region of text kept as laid out: the block it shows and its
+/// box in the frame of the page's text, `text kept as laid out at p3:b41, box 40, 500 to
+/// 300, 560`. A picture of a run of blocks names the first and the `last`: `at p2:b7 to
+/// p2:b8`. The anchor ties a row of the list of pictures to its block also without a file.
+pub(crate) fn region_alt(
+    first: Option<&Anchor>,
+    last: Option<&Anchor>,
+    framed: &[f32; 4],
+) -> String {
+    let at = match (first, last) {
+        (Some(first), Some(last)) => format!(" at {} to {}", first.0, last.0),
+        (Some(first), None) => format!(" at {}", first.0),
+        (None, _) => String::new(),
+    };
+    format!("text kept as laid out{at}, {}", box_words(framed))
 }
 
 /// The asset of page `n`, listed without a file until it is rendered.
@@ -1177,6 +1217,7 @@ pub(crate) fn picture_asset(
         needs_vision,
         codes: Vec::new(),
         code_unread: false,
+        shows: None,
     }
 }
 
@@ -1264,7 +1305,9 @@ fn not_done(files: bool) -> &'static str {
 }
 
 /// The small pictures of `need` not handled on an earlier page and not counted in a loss: an
-/// asset shared with earlier pages is cut from the first page that renders.
+/// asset shared with earlier pages is cut from the first page that renders. A region of text
+/// kept as laid out is none of them: it is cut out after every picture of the file
+/// ([`region_pictures`]).
 fn pending<'n>(
     need: &'n Need,
     counted: &HashSet<usize>,
@@ -1272,8 +1315,123 @@ fn pending<'n>(
 ) -> Vec<&'n Crop> {
     need.crops
         .iter()
+        .filter(|c| !c.text)
         .filter(|c| !handled.contains(&c.asset) && !counted.contains(&c.asset))
         .collect()
+}
+
+/// The regions of text kept as laid out that got no picture file because the time or the
+/// room for extracted pictures ran out: the page of the first, how many, and why. They keep
+/// their lines and stay listed, so nothing of the file is unread.
+struct RegionsOut {
+    first: u32,
+    regions: usize,
+    why: String,
+}
+
+impl RegionsOut {
+    fn words(&self) -> String {
+        let (n, why) = (self.first, &self.why);
+        match self.regions {
+            1 => format!("1 region kept as laid out gets no picture file, on page {n}: {why}"),
+            k => {
+                format!("{k} regions kept as laid out get no picture file, from page {n} on: {why}")
+            }
+        }
+    }
+}
+
+/// Cuts the pictures of the regions of text kept as laid out out of renders of their pages,
+/// with files only and after every page and small picture of the file: a region's lines are
+/// read, so its picture never takes time or room from a picture that holds what the text
+/// does not. These renders do not count against [`MAX_RENDERS`]: a file lists at most
+/// [`MAX_REGION_PICTURES`] regions. A page that already said why it is not rendered
+/// (`failed`) says nothing again; a page not rendered here says so as Info, and so does the
+/// one loss for the regions the time or the blob room left without a file. None of that
+/// makes the read partial.
+fn region_pictures(
+    needs: &[Need],
+    pages: &mut Pages<'_>,
+    scans: &mut Scans,
+    failed: &HashMap<u32, LossReason>,
+    out: &mut Out,
+) {
+    let mut left_out: Option<RegionsOut> = None;
+    let mut handled: HashSet<usize> = HashSet::new();
+    for need in needs.iter().filter(|n| n.whole.is_none()) {
+        let n = need.page;
+        let todo: Vec<&Crop> = need.crops.iter().filter(|c| c.text).collect();
+        if todo.is_empty() {
+            continue;
+        }
+        if let Some(left) = &mut left_out {
+            left.regions += todo.len();
+            continue;
+        }
+        if failed.contains_key(&n) {
+            continue;
+        }
+        let not_rendered = |why: LossReason, what: String, out: &mut Out| {
+            let what = format!("page {n} {}: {what}", not_done(true));
+            out.loss_info(format!("p{n}"), what, why, Severity::Info);
+        };
+        if need.fallback {
+            not_rendered(
+                LossReason::Unsupported,
+                "its text was read with the fallback parser, and the renderer reads only the \
+                 object layer's copy, where its content is missing"
+                    .into(),
+                out,
+            );
+            continue;
+        }
+        if need.cut {
+            not_rendered(
+                LossReason::Limit,
+                "a limit cut its text, so its content is more than a render may take".into(),
+                out,
+            );
+            continue;
+        }
+        let page = match pages.page(n) {
+            Ok(page) => page,
+            Err(Failed::Limit(why)) => {
+                left_out = Some(RegionsOut {
+                    first: n,
+                    regions: todo.len(),
+                    why,
+                });
+                continue;
+            }
+            Err(Failed::Room(why)) => {
+                not_rendered(LossReason::Limit, why, out);
+                continue;
+            }
+            Err(Failed::Damaged(why)) => {
+                not_rendered(LossReason::Damaged, why, out);
+                continue;
+            }
+        };
+        let mut cut = Cut {
+            need,
+            todo: &todo,
+            files: true,
+            handled: &mut handled,
+        };
+        left_out = cut.run(page, pages, scans, out).map(|left| RegionsOut {
+            first: n,
+            regions: left.pictures,
+            why: left.why,
+        });
+    }
+    if let Some(left) = left_out {
+        out.loss_info(
+            format!("p{}", left.first),
+            left.words(),
+            LossReason::Limit,
+            Severity::Info,
+        );
+    }
 }
 
 /// Renders the pages of `needs`: a page that needs vision into a blob of its asset (with
@@ -1406,12 +1564,8 @@ pub(crate) fn render_pages(
             }
         }
         let mut fail = |why: LossReason, what: String, out: &mut Out| {
-            note(
-                out,
-                format!("p{n}"),
-                format!("page {n} {}: {what}", not_done(files)),
-                why,
-            );
+            let what = format!("page {n} {}: {what}", not_done(files));
+            note(out, format!("p{n}"), what, why);
             failed.insert(n, why);
         };
         if let Some(left) = &mut left_out {
@@ -1545,6 +1699,9 @@ pub(crate) fn render_pages(
             LossReason::Limit,
         );
     }
+    if files {
+        region_pictures(needs, &mut pages, &mut scans, &failed, out);
+    }
     if let Some(&first) = heavy.first() {
         let what = if heavy.len() == 1 {
             format!("page {first} is")
@@ -1586,7 +1743,9 @@ fn unwritten(
     let mut lost: Vec<(usize, Vec<u32>, LossReason)> = Vec::new();
     let mut at: HashMap<usize, usize> = HashMap::new();
     for need in needs.iter().filter(|n| n.whole.is_none()) {
-        for c in &need.crops {
+        // A region of text kept as laid out is no small picture: its lines are read, and
+        // its page says why it is not rendered.
+        for c in need.crops.iter().filter(|c| !c.text) {
             if !out.doc.assets[c.asset].sha256.is_empty() || counted.contains(&c.asset) {
                 continue;
             }
@@ -1686,7 +1845,7 @@ struct Cut<'c> {
 impl Cut<'_> {
     /// Cuts the small pictures out of `page`, one at a time: each crop is read for codes,
     /// rendered again at a finer scale when it gives none and may be a code, and written as a
-    /// blob of its asset with files. On a page rendered coarser than 144 dpi (a very large
+    /// blob of its asset with files. A region of text is only cut out and written. On a page rendered coarser than 144 dpi (a very large
     /// page) the crop is rendered again at 144 dpi. A crop takes its pixels and its PNG next
     /// to the render, which must fit the render room the page was checked against. A picture
     /// not cut here stays for a later page. Returns what is left out when the time or the
@@ -1717,30 +1876,36 @@ impl Cut<'_> {
                 c.b[2] + need.origin.0,
                 c.b[3] + need.origin.1,
             ];
+            // A region of text that gets no picture keeps its lines: nothing is unread.
+            let not_cut = |out: &mut Out, what: String, why: LossReason| {
+                if c.text {
+                    out.loss_info(format!("p{n}"), what, why, Severity::Info);
+                } else {
+                    out.loss(format!("p{n}"), what, why, Severity::Warning);
+                }
+            };
             let Some(rect) = crop_rect(&page, user, CROP_MARGIN) else {
-                out.loss(
-                    format!("p{n}"),
+                not_cut(
+                    out,
                     format!(
                         "picture {id} is not cut out of page {n}: its box lies outside the \
                          rendered page"
                     ),
                     LossReason::Damaged,
-                    Severity::Warning,
                 );
                 continue;
             };
             // The render's pixels, the crop's and its PNG (twice its pixels).
             let takes = held + rect.pixels() * cost::PNG_BYTES;
             if takes > room {
-                out.loss(
-                    format!("p{n}"),
+                not_cut(
+                    out,
                     format!(
                         "picture {id} is not cut out of page {n}: that would take {takes} bytes, \
                          more than the {room} bytes a render may take (a quarter of the memory \
                          limit)"
                     ),
                     LossReason::Limit,
-                    Severity::Warning,
                 );
                 continue;
             }
@@ -1750,7 +1915,7 @@ impl Cut<'_> {
                     * page.transform,
                 scale: page.scale,
             };
-            if coarse {
+            if coarse && !c.text {
                 let at = Region {
                     b: c.b,
                     how: How::Picture(0, 0),
@@ -1786,7 +1951,7 @@ impl Cut<'_> {
                     Err(false) => {}
                 }
             }
-            let found = if fine_first {
+            let found = if fine_first || c.text {
                 None
             } else {
                 scans.read(n, c.asset, &picture, None, budget, false)
@@ -1817,11 +1982,10 @@ impl Cut<'_> {
                     }
                     self.handled.insert(c.asset);
                 }
-                Err(why) => out.loss(
-                    format!("p{n}"),
+                Err(why) => not_cut(
+                    out,
                     format!("picture {id} is not cut out of page {n}: {why}"),
                     LossReason::Damaged,
-                    Severity::Warning,
                 ),
             }
         }

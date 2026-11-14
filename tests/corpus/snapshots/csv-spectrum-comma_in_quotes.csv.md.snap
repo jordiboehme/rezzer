@@ -22,13 +22,13 @@ completeness: complete
 losses: 0
 ---
 
-# csv-spectrum-comma\_in\_quotes.csv
+# csv-spectrum-comma_in_quotes.csv
 
 ## Overview
 
 | Part | Kind | Size | Role | Reads from |
 | --- | --- | --- | --- | --- |
-| csv-spectrum-comma\_in\_quotes | sheet | 1 row x 5 columns |  |  |
+| csv-spectrum-comma_in_quotes | sheet | 1 row x 5 columns |  |  |
 
 ## Properties
 
@@ -36,10 +36,10 @@ losses: 0
 | --- | --- |
 | columns | 5 |
 | delimiter | , |
-| has\_header | true |
+| has_header | true |
 | rows | 1 |
 
-## csv-spectrum-comma\_in\_quotes
+## csv-spectrum-comma_in_quotes
 
 Table A1:E2 (data A2:E2), header row 1, row labels in columns 1 to 3, found by rules: no gaps, header by type change.
 

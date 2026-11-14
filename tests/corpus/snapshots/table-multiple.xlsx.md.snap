@@ -42,9 +42,9 @@ modified: "2025-07-08T23:00:40Z"
 | Key | Value |
 | --- | --- |
 | application | Microsoft Excel |
-| calc\_mode | auto |
-| iterative\_calculation | false |
-| last\_modified\_by | John |
+| calc_mode | auto |
+| iterative_calculation | false |
+| last_modified_by | John |
 
 ## Sheet1
 
@@ -82,9 +82,9 @@ Table A1:B5 (data A2:B5), header row 1, found by: Excel table Pricing.
 
 ## Sheet3
 
-### Sales\_Alice
+### Sales_Alice
 
-Table A1:B5 (data A2:B5), header row 1, found by: Excel table Sales\_Alice.
+Table A1:B5 (data A2:B5), header row 1, found by: Excel table Sales_Alice.
 
 | Item | Units |
 | --- | --- |
@@ -93,9 +93,9 @@ Table A1:B5 (data A2:B5), header row 1, found by: Excel table Sales\_Alice.
 | 3 | 200 |
 | 4 | 50 |
 
-### Sales\_Bob
+### Sales_Bob
 
-Table A7:B11 (data A8:B11), header row 7, found by: Excel table Sales\_Bob.
+Table A7:B11 (data A8:B11), header row 7, found by: Excel table Sales_Bob.
 
 | Item | Units |
 | --- | --- |
@@ -108,5 +108,5 @@ Table A7:B11 (data A8:B11), header row 7, found by: Excel table Sales\_Bob.
 
 | Table | Range | Columns |
 | --- | --- | --- |
-| Sales\_Bob | A7:B11 | Item, Units |
-| Sales\_Alice | A1:B5 | Item, Units |
+| Sales_Bob | A7:B11 | Item, Units |
+| Sales_Alice | A1:B5 | Item, Units |

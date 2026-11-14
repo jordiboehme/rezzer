@@ -355,6 +355,7 @@ mod tests {
                 },
             ],
             links: Vec::new(),
+            grid: None,
             anchor: None,
         }];
         let text = body_text(&body);

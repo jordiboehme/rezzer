@@ -37,7 +37,7 @@ language: "en"
 | --- | --- |
 | columns | 7 |
 | delimiter | , |
-| has\_header | true |
+| has_header | true |
 | rows | 506 |
 
 ## csv-pandas-fdic-banklist

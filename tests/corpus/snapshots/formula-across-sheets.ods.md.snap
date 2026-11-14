@@ -60,8 +60,8 @@ flowchart LR
 | Info 2 |  |
 | Info 3 |  |
 | Info 4 |  |
-| application | LibreOffice/4.1.4.2\$Linux\_X86\_64 LibreOffice\_project/410m0$Build-2 |
-| last\_modified\_by | Laurent Balland-Poirier |
+| application | LibreOffice/4.1.4.2\$Linux_X86_64 LibreOffice_project/410m0$Build-2 |
+| last_modified_by | Laurent Balland-Poirier |
 
 ## indiceOrga
 
@@ -145,7 +145,7 @@ A row with a count above 1 stands for one formula copied over its cells. It show
 | B7 | 1 | `=B9*(1+B6)` | B9, B6 | intermediate | 12.077586207 | $`\mathrm{B9} \cdot (1+\mathrm{B6})`$ |
 | C7 | 1 | `=B9*(1+C6)` | B9, C6 | intermediate | 10.271260997 | $`\mathrm{B9} \cdot (1+\mathrm{C6})`$ |
 | E7 | 1 | `=Data!D4` | Data!D4 | intermediate | 10 |  |
-| B9, D9 | 2 | `=L_nb/(1+Xnb)` | name:L\_nb, name:Xnb | intermediate, result | 9.602467443 | $`\frac{\mathrm{L\_nb}}{1+\mathrm{Xnb}}`$ |
+| B9, D9 | 2 | `=L_nb/(1+Xnb)` | name:L_nb, name:Xnb | intermediate, result | 9.602467443 | $`\frac{\mathrm{L\_nb}}{1+\mathrm{Xnb}}`$ |
 
 #### Results
 
@@ -190,35 +190,35 @@ For formulas copied over several cells the first cell is shown.
 
 | Name | Scope | Kind | Refers to | Value | Read by | Note |
 | --- | --- | --- | --- | --- | --- | --- |
-| A\_ab | workbook | name | `Calculation!$B$9` |  |  |  |
-| A\_ab\_2 | workbook | name | `#REF!` |  |  |  |
-| B\_a | workbook | name | `#REF!` |  |  |  |
-| B\_ab | workbook | name | `#REF!` |  |  |  |
-| B\_b | workbook | name | `#REF!` |  |  |  |
-| L\_nb | workbook | name | `Calculation!$E$7` |  |  |  |
-| L\_nb\_2 | workbook | name | `#REF!` |  |  |  |
-| M\_A | workbook | name | `#REF!` |  |  |  |
-| M\_B | workbook | name | `#REF!` |  |  |  |
-| M\_C | workbook | name | `#REF!` |  |  |  |
-| V\_1a | workbook | name | `#REF!` |  |  |  |
-| V\_1a\_2 | workbook | name | `#REF!` |  |  |  |
-| V\_1b | workbook | name | `#REF!` |  |  |  |
+| A_ab | workbook | name | `Calculation!$B$9` |  |  |  |
+| A_ab_2 | workbook | name | `#REF!` |  |  |  |
+| B_a | workbook | name | `#REF!` |  |  |  |
+| B_ab | workbook | name | `#REF!` |  |  |  |
+| B_b | workbook | name | `#REF!` |  |  |  |
+| L_nb | workbook | name | `Calculation!$E$7` |  |  |  |
+| L_nb_2 | workbook | name | `#REF!` |  |  |  |
+| M_A | workbook | name | `#REF!` |  |  |  |
+| M_B | workbook | name | `#REF!` |  |  |  |
+| M_C | workbook | name | `#REF!` |  |  |  |
+| V_1a | workbook | name | `#REF!` |  |  |  |
+| V_1a_2 | workbook | name | `#REF!` |  |  |  |
+| V_1b | workbook | name | `#REF!` |  |  |  |
 | X1a | workbook | name | `Calculation!$B$6` |  |  |  |
-| X1a\_2 | workbook | name | `#REF!` |  |  |  |
+| X1a_2 | workbook | name | `#REF!` |  |  |  |
 | X1b | workbook | name | `Calculation!$D$6` |  |  |  |
-| X1b\_2 | workbook | name | `#REF!` |  |  |  |
+| X1b_2 | workbook | name | `#REF!` |  |  |  |
 | Xna | workbook | name | `Calculation!$C$6` |  |  |  |
-| Xna\_2 | workbook | name | `#REF!` |  |  |  |
+| Xna_2 | workbook | name | `#REF!` |  |  |  |
 | Xnb | workbook | name | `Calculation!$E$6` |  |  |  |
-| Xnb\_2 | workbook | name | `#REF!` |  |  |  |
+| Xnb_2 | workbook | name | `#REF!` |  |  |  |
 | Y1a | workbook | name | `#REF!` |  |  |  |
-| Y1a\_2 | workbook | name | `#REF!` |  |  |  |
+| Y1a_2 | workbook | name | `#REF!` |  |  |  |
 | Y1b | workbook | name | `#REF!` |  |  |  |
-| Y1b\_2 | workbook | name | `#REF!` |  |  |  |
+| Y1b_2 | workbook | name | `#REF!` |  |  |  |
 | Yna | workbook | name | `#REF!` |  |  |  |
-| Yna\_2 | workbook | name | `#REF!` |  |  |  |
+| Yna_2 | workbook | name | `#REF!` |  |  |  |
 | Ynb | workbook | name | `#REF!` |  |  |  |
-| Ynb\_2 | workbook | name | `#REF!` |  |  |  |
+| Ynb_2 | workbook | name | `#REF!` |  |  |  |
 
 ### Dependencies
 

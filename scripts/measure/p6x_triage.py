@@ -26,7 +26,7 @@ P6X = BUCKETS[:6]
 B_NAMES = {"bold_label_then_value_is_no_heading", "amount_line_is_no_heading",
            "labels_without_colons_still_pair"}
 
-SPATIAL_LOSS = r"is kept as laid out, as text in its columns"
+SPATIAL_LOSS = r"is kept as laid out, (line by line|as text in its columns)"
 
 # Failing tests the ledger rules no P6-X, by name, each with the signature of its ruled failure
 # (a regex on the message) and its reason (Task 19a-5a). A failure of the same test with

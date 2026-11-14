@@ -67,6 +67,7 @@ fn units_with_their_part_overhead_stay_within_the_part_size() {
             needs_vision: false,
             codes: Vec::new(),
             code_unread: false,
+            shows: None,
         });
     }
     for c in 0..8 {

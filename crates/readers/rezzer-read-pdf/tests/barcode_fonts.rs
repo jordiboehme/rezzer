@@ -227,7 +227,7 @@ fn fonts_whose_names_say_codes_but_draw_letters_keep_their_text() {
             all_text(&out).contains("Konto 1234567890 Betrag 12,50 EUR"),
             "{name}: {md}"
         );
-        assert!(out.document.assets.is_empty(), "{name}: {md}");
+        assert!(common::pictures(&out).is_empty(), "{name}: {md}");
         assert!(!md.contains("barcode font"), "{name}: {md}");
     }
 }
@@ -359,7 +359,7 @@ fn equal_bars_in_a_font_known_only_by_its_bars_stay_text() {
         "{}",
         all_text(&out)
     );
-    assert!(out.document.assets.is_empty());
+    assert!(common::pictures(&out).is_empty());
 }
 
 /// The bar and space widths of the dark modules `dark`, from the first dark one to the last.
@@ -404,7 +404,11 @@ fn odd_characters_in_a_text_font_stay_text() {
         "{}",
         all_text(&out)
     );
-    assert!(out.document.assets.is_empty(), "{:?}", out.document.assets);
+    assert!(
+        common::pictures(&out).is_empty(),
+        "{:?}",
+        out.document.assets
+    );
 }
 
 #[test]
@@ -437,7 +441,7 @@ fn text_fonts_whose_glyphs_look_like_bars_stay_text() {
             all_text(&out)
         );
         assert!(
-            out.document.assets.is_empty(),
+            common::pictures(&out).is_empty(),
             "{name}: {:?}",
             out.document.assets
         );
@@ -696,7 +700,11 @@ fn the_widths_of_a_font_alone_are_no_evidence() {
         "{}",
         all_text(&out)
     );
-    assert!(out.document.assets.is_empty(), "{:?}", out.document.assets);
+    assert!(
+        common::pictures(&out).is_empty(),
+        "{:?}",
+        out.document.assets
+    );
 }
 
 #[test]

@@ -17,6 +17,7 @@
 
 pub mod title;
 
+use crate::extract::pairs::blocks::{address_block, postal};
 use crate::file::{Levels, data_only, plain_size};
 use crate::line::{
     EDGE_SIZES, GAP_RATIO, LABEL_STEP, LineRun, PIECE_GAP, TextLine, ink, same_size,
@@ -36,6 +37,13 @@ pub struct TextCx<'a> {
     /// fields read cell by cell), one per line of the lines walked: a line goes on the line
     /// before it only in the same block.
     pub block: &'a [Option<usize>],
+    /// The lines that stay lines of their own, one per line of the lines walked or none at
+    /// all: a line of blocks side by side that the reader read as columns (see
+    /// `pairs::blocks::paragraph_columns`). Such a line starts after a line break and is
+    /// never joined to the line over it. The evidence for the columns is of line counts
+    /// only, and the rows of a table can show all of it; kept as lines, a column of a table
+    /// read as a block loses the order of the rows, but never where an item ends.
+    pub own: &'a [bool],
 }
 
 /// The block that a line opens.
@@ -111,9 +119,21 @@ pub fn next_block<R: LineRun>(
             .unwrap_or(lines.len());
         let (j, demoted) = heading_block(&lines[..(end + 2).min(lines.len())], i, level, levels);
         let j = j.min(end);
+        // A name a little larger than the body over the smaller lines of its address is the
+        // first line of that address (see [`name_over_address`]): the block goes on past the
+        // lines of its level, to the last line of the address in its block of its own.
+        let look = (j + NAME_ADDRESS_LINES).min(lines.len());
+        let address = (demoted.is_none() && plain_size(l.size, levels.body_size))
+            .then(|| name_over_address(&lines[..look], i, j))
+            .flatten()
+            .filter(|&k| (j..k).all(|n| cx.block[n] == cx.block[i]));
+        let (j, demoted) = match address {
+            Some(k) => (k, Some(Demotion::Address)),
+            None => (j, demoted),
+        };
         let breaks = match demoted {
             None => Vec::new(),
-            Some(_) => line_breaks(lines, i, j, levels.ends_in_amount),
+            Some(_) => line_breaks(lines, i, j, cx.own, levels.ends_in_amount),
         };
         return (
             TextBlock::Heading {
@@ -154,7 +174,7 @@ pub fn next_block<R: LineRun>(
     {
         j += 1;
     }
-    let breaks = line_breaks(lines, i, j, levels.ends_in_amount);
+    let breaks = line_breaks(lines, i, j, cx.own, levels.ends_in_amount);
     (TextBlock::Paragraph { breaks }, j)
 }
 
@@ -198,7 +218,7 @@ const TITLE_STEP: f32 = 1.1;
 
 /// Line heights one line of text steps down by, for a block of one line that has no pitch of
 /// its own.
-const LEADING: f32 = 1.2;
+pub(crate) const LEADING: f32 = 1.2;
 
 /// Whether the last of `lines` is a title under the block of the others: all its ink is bold,
 /// none of theirs is, and it stands farther under them than [`TITLE_STEP`] times their pitch
@@ -398,6 +418,76 @@ pub fn heading_block<R: LineRun>(
     (j, demoted)
 }
 
+/// The lines a name opens an address with, its own counted, are at most this many (see
+/// [`name_over_address`]): a name, a second name line, a care-of line, a street, a town, a
+/// country and a line or two of contact.
+pub const NAME_ADDRESS_LINES: usize = 8;
+
+/// Where the address ends that the lines `i..j` of `lines` open as its name: a name set
+/// larger than the lines of its address (`Erika Mustermann` in bold at 10 points over her
+/// street and town at 8) is the first line of the address, no heading over it. `None` when
+/// the lines open no address. The evidence, all of it from the lines:
+///
+/// - the name and the lines under it share one left edge (see [`EDGE_SIZES`]);
+/// - the lines under the name are set in one size, smaller than the name's (a line of the
+///   name's own size goes on the name by the walk, and is asked as its block);
+/// - they follow each other at one pitch (two lines or more, so there is one), and the name
+///   stands over the first of them at that pitch, measured in its own size: at most
+///   [`TITLE_STEP`] times as many sizes as the lines stand apart. A heading over an address
+///   stands farther from it than the lines of the address from each other;
+/// - the name and the lines under it, three or more and at most [`NAME_ADDRESS_LINES`], are a
+///   block of an address (see [`address_block`]: short lines, a number on a line after the
+///   first, not all of one shape) that holds a postal address (see [`postal`]: a street with
+///   its number and a postcode with its town). The shape of the lines alone is not enough: a
+///   heading over rows of short fields with numbers, or over a short note that wraps, has
+///   it too (both seen on public forms). The longest such run is the address: prose after
+///   the town is no line of it;
+/// - the lines under the name are no complete address of their own: they do not open with a
+///   line without a digit (a name) over a postal address. An address has one name, so a
+///   bold line over an address that has its name is a heading over it (`Delivery address`
+///   over a company, its street and its town). A name over a second name line or a care-of
+///   line keeps its heading by the same cue: the two cannot be told apart, and the heading
+///   is the read without this rule. A label over an address without a name line reads as
+///   its first line (by ruling: the geometry cannot tell it from a name; no value and no
+///   order moves).
+pub fn name_over_address<R: LineRun>(
+    lines: &[TextLine<'_, R>],
+    i: usize,
+    j: usize,
+) -> Option<usize> {
+    let (first, last) = (lines.get(i)?, lines.get(j.checked_sub(1)?)?);
+    let under = lines.get(j)?;
+    let at_edge =
+        |l: &TextLine<'_, R>| (l.x - first.x).abs() <= EDGE_SIZES * first.size.max(l.size);
+    if !lines[i..j].iter().all(at_edge) || under.size >= first.size || under.size <= 0.0 {
+        return None;
+    }
+    let pitch = under.y - lines.get(j + 1)?.y;
+    let lead = last.y - under.y;
+    if pitch <= 0.0 || lead <= 0.0 || lead / last.size > TITLE_STEP * pitch / under.size {
+        return None;
+    }
+    let mut k = j;
+    while k < lines.len()
+        && k - i < NAME_ADDRESS_LINES
+        && at_edge(&lines[k])
+        && same_size(lines[k].size, under.size)
+        && (k == j || {
+            let step = lines[k - 1].y - lines[k].y;
+            step <= TITLE_STEP * pitch && pitch <= TITLE_STEP * step
+        })
+    {
+        k += 1;
+    }
+    let texts: Vec<&str> = lines[i..k].iter().map(|l| l.text.as_str()).collect();
+    let named = !under.text.chars().any(|c| c.is_ascii_digit());
+    (3..=texts.len())
+        .rev()
+        .find(|&n| n > j - i && address_block(&texts[..n]) && postal(&texts[..n]))
+        .filter(|&n| !(named && postal(&texts[j - i..n])))
+        .map(|n| i + n)
+}
+
 /// Whether the line `k` of `block` (a paragraph or a heading) starts after a line break
 /// whatever the width of the block, as no wrapped text is made of it and the line over it:
 /// the block's lines are short items (an address, a column of labels, of values, or of fields
@@ -447,13 +537,14 @@ const SHORT_ROOM: f32 = 0.15;
 /// have the shape of an address or a list (list markers, or at most
 /// [`ADDRESS_WORDS`] words a line), or the two lines are each a label and its value in the
 /// same two faces (see [`field_line`]), or the line stands in another column than the line over
-/// it (see [`other_column`]). How wide the block is does not matter: a long name in an
+/// it (see [`other_column`]), or the line is one of `own` (see [`TextCx::own`]). How wide the block is does not matter: a long name in an
 /// address is still a line of it. Prose that fills its measure keeps joining, also where
 /// every line starts with a capital.
 fn line_breaks<R: LineRun>(
     all: &[TextLine<'_, R>],
     i: usize,
     j: usize,
+    own: &[bool],
     ends_in_amount: &dyn Fn(&str) -> bool,
 ) -> Vec<(u32, u32)> {
     let lines = &all[i..j];
@@ -526,7 +617,8 @@ fn line_breaks<R: LineRun>(
         let aligned = set_aligned && aligned_pair(a, b);
         let apart = !wraps[k] || !around[i - lo + k];
         let column = other_column(a, b, lines[k].y - next.y, lines[k].size.max(next.size));
-        if fits || aligned || short || apart || column || lines_apart(lines, k + 1, items) {
+        let own = own.get(i + k + 1).is_some_and(|&o| o);
+        if own || fits || aligned || short || apart || column || lines_apart(lines, k + 1, items) {
             out.push((next.runs[0].page(), next.runs[0].line()));
         }
     }

@@ -394,6 +394,7 @@ shape_tests! {
     two_fields_beside_a_ruled_table_with_filled_rows => "two fields of a label over a rule beside a ruled table with filled rows and the rule of a third field",
     labels_on_touching_underlines_over_two_rows_of_fields => "labels on touching underlines over two rows of fields",
     letter_head => "letter head",
+    a_heading_over_an_address_with_its_own_name => "a heading over an address with its own name",
     letter_head_with_a_larger_name => "letter head with a larger name",
     letter_head_with_the_date_beside_the_name => "letter head with the date beside the name",
     line_items_with_a_larger_total_between_rules => "line items with a larger total between rules over a note",
@@ -482,6 +483,8 @@ shape_tests! {
     totals_between_two_rules_in_pieces_under_one_item_row => "totals between two rules in pieces under one item row",
     item_rows_under_a_rule_in_pieces_beside_a_block_of_lines => "item rows under a rule in pieces on a page with a block of lines on the right",
     item_rows_under_a_rule_in_pieces_and_a_row_carried_over => "item rows under a rule in pieces and a row carried over, on a page with a block of lines on the right",
+    a_heading_from_the_margin_with_a_date_over_the_rule_in_pieces => "a heading from the margin with a date right over the rule in pieces of item rows",
+    a_heading_over_the_names_with_a_date_over_the_rule_in_pieces => "a heading over the names with a date right over the rule in pieces of item rows",
     address_columns_in_the_body => "address columns in the body",
     an_address_beside_two_banks => "an address beside two banks",
     an_address_beside_two_phone_lines => "an address beside two phone lines and a register",
@@ -502,6 +505,16 @@ shape_tests! {
     weight_only_boxes => "weight-only boxes",
     a_column_flowing_past_a_framed_figure => "a column flowing past a framed figure",
     footer_columns => "footer columns",
+    a_footer_with_a_wrapped_column => "a footer of three columns with a wrapped paragraph in the middle one",
+    a_table_without_rules_at_the_foot_whose_last_row_wraps => "a table without rules at the foot whose last row wraps",
+    a_foot_table_with_an_empty_last_cell_whose_last_row_wraps => "a table without rules at the foot with an empty last cell whose last row wraps",
+    a_foot_table_with_an_empty_last_cell_whose_last_row_wraps_twice => "a table without rules at the foot with an empty last cell whose last row wraps twice",
+    a_table_whose_item_wraps_on_the_last_row => "a table without rules whose item wraps on the last row",
+    a_foot_table_whose_item_wraps_on_the_last_row => "a table without rules at the foot whose item wraps on the last row",
+    a_page_title_of_three_words_under_a_kicker => "a page title under a kicker beside a form number: Sample Leave Request",
+    a_page_title_of_two_words_under_a_kicker => "a page title under a kicker beside a form number: Annual Report",
+    a_page_title_of_four_words_under_a_kicker => "a page title under a kicker beside a form number: Request for Sample Leave",
+    a_page_title_of_with_a_year_under_a_kicker => "a page title under a kicker beside a form number: Request for Sample Leave 2026",
     a_note_column_beside_rows_of_fields => "a note column beside rows of fields",
     an_amount_in_its_box_before_a_note_column => "an amount in its box before a note column",
     a_row_of_labels_over_two_blocks_of_fields => "a row of labels over two blocks of fields",
@@ -1221,6 +1234,36 @@ fn a_heading_written_as_a_paragraph_is_a_paragraph_region() {
         }
     }
     assert!(demoted > 0, "{name}: no heading was written as a paragraph");
+}
+
+/// Task 36a fix round 3 (re-review 2, M1): a page title under a small kicker line, beside a
+/// label over a form number on the same two baselines, is the title block of the engine in
+/// every variant, with as many words as the kicker has, with fewer, with more and with a
+/// year: it is the largest text of the top of the page, and no count of its words keeps it
+/// out of the title search.
+#[test]
+fn a_page_title_under_a_kicker_is_the_title_block() {
+    use layoutregions::Kind;
+    for title in [
+        "Sample Leave Request",
+        "Annual Report",
+        "Request for Sample Leave",
+        "Request for Sample Leave 2026",
+    ] {
+        let name = format!("a page title under a kicker beside a form number: {title}");
+        for page in axes::variants(&shape(&name)) {
+            let (_, pages) = common::read_engine_pages(&inv::file(&page));
+            let p = &pages[0];
+            let kinds: Vec<Kind> = p
+                .regions
+                .regions
+                .iter()
+                .filter(|r| common::region_texts(p, r).iter().any(|t| t.contains(title)))
+                .map(|r| r.kind)
+                .collect();
+            assert_eq!(kinds, [Kind::TitleBlock], "{name} | {}", page.name);
+        }
+    }
 }
 
 /// Task 29 fix round 1 (review Important 6): the figure region of a picture written in a table

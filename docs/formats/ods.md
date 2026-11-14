@@ -68,7 +68,7 @@ A row with a count above 1 stands for one formula copied over its cells. It show
 | B4, C4, E4 | 3 | `=Data!A3` | Data!A3 | intermediate | 1.4666 |  |
 | B5, C5, E5 | 3 | `=(B4-$G$1)/$G$2` | B4, G1, G2 | intermediate | 20.493488691 % | $`\frac{\mathrm{B4}-\mathrm{G1}}{\mathrm{G2}}`$ |
 | B6:E6 | 4 | `=B5/(1-B5)` | B5 | intermediate, result | 25.775862069 % | $`\frac{\mathrm{B5}}{1-\mathrm{B5}}`$ |
-| B9, D9 | 2 | `=L_nb/(1+Xnb)` | name:L\_nb, name:Xnb | intermediate, result | 9.602467443 | $`\frac{\mathrm{L\_nb}}{1+\mathrm{Xnb}}`$ |
+| B9, D9 | 2 | `=L_nb/(1+Xnb)` | name:L_nb, name:Xnb | intermediate, result | 9.602467443 | $`\frac{\mathrm{L\_nb}}{1+\mathrm{Xnb}}`$ |
 ```
 
 ## Known limitations

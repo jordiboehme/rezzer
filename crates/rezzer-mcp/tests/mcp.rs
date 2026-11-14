@@ -726,7 +726,12 @@ impl Reader for Pictures {
     }
     fn read(&self, src: &Source, _opts: &ReadOptions, _budget: &Budget) -> ReadOutcome {
         let mut document = Document::new(source_info(src));
-        for (id, needs_vision) in [("page-1", true), ("page-2", false)] {
+        for (id, needs_vision, shows) in [
+            ("page-1", true, None),
+            ("page-2", false, None),
+            // A picture of a region of text kept as laid out: no picture of the file.
+            ("page-2-region-1", true, Some("p2:b1")),
+        ] {
             document.assets.push(rezzer_model::Asset {
                 id: id.into(),
                 path: None,
@@ -737,6 +742,7 @@ impl Reader for Pictures {
                 needs_vision,
                 codes: Vec::new(),
                 code_unread: false,
+                shows: shows.map(|at| rezzer_model::Anchor(at.into())),
             });
         }
         ReadOutcome {
@@ -756,8 +762,14 @@ async fn rez_reports_needs_vision_ids() {
     let client = connect_to(Pipeline::new(config(), registry)).await;
     let result = call(&client, "rez", json!({ "path": path })).await;
     let s = structured(&result);
+    // The pictures of the file: the picture of a region of text is not one of them, but
+    // it is listed to be looked at.
     assert_eq!(s["assets"], 2, "{s}");
-    assert_eq!(s["needs_vision"], json!(["page-1"]), "{s}");
+    assert_eq!(
+        s["needs_vision"],
+        json!(["page-1", "page-2-region-1"]),
+        "{s}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

@@ -38,7 +38,7 @@ losses: 0
 | --- | --- |
 | columns | 8 |
 | delimiter | , |
-| has\_header | true |
+| has_header | true |
 | rows | 275 |
 
 ## csv-datahub-co2-fossil-global

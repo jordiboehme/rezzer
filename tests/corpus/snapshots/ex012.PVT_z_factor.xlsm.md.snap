@@ -25,7 +25,7 @@ created: "2020-04-28T06:34:49Z"
 modified: "2025-02-28T05:19:13Z"
 ---
 
-# ex012.PVT\_z\_factor.xlsm
+# ex012.PVT_z_factor.xlsm
 
 ## Overview
 
@@ -48,9 +48,9 @@ modified: "2025-02-28T05:19:13Z"
 | Key | Value |
 | --- | --- |
 | application | Microsoft Excel |
-| calc\_mode | auto |
-| iterative\_calculation | false |
-| last\_modified\_by | rnt |
+| calc_mode | auto |
+| iterative_calculation | false |
+| last_modified_by | rnt |
 
 ## z
 
@@ -88,13 +88,13 @@ Table E35:AK36, row labels in E, found by rules: empty-row gaps, apart from a bl
 | E | F | G | H | I | J | K | L | M | N | O | P | Q | R | S | T | U | V | W | X | Y | Z | AA | AB | AC | AD | AE | AF | AG | AH | AI | AJ | AK |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | P | 1 | 10 | 19 | 28 | 37 | 46 | 55 | 64 | 73 | 82 | 91 | 100 | 109 | 118 | 127 | 136 | 145 | 154 | 163 | 172 | 181 | 190 | 199 | 208 | 217 | 226 | 235 | 244 | 253 | 262 | 271 | 280 |
-| P\_Mpa | 0.1 | 1 | 1.9 | 2.8 | 3.7 | 4.6 | 5.5 | 6.4 | 7.3 | 8.2 | 9.1 | 10 | 10.9 | 11.8 | 12.7 | 13.6 | 14.5 | 15.4 | 16.3 | 17.2 | 18.1 | 19 | 19.9 | 20.8 | 21.7 | 22.6 | 23.5 | 24.4 | 25.3 | 26.2 | 27.1 | 28 |
+| P_Mpa | 0.1 | 1 | 1.9 | 2.8 | 3.7 | 4.6 | 5.5 | 6.4 | 7.3 | 8.2 | 9.1 | 10 | 10.9 | 11.8 | 12.7 | 13.6 | 14.5 | 15.4 | 16.3 | 17.2 | 18.1 | 19 | 19.9 | 20.8 | 21.7 | 22.6 | 23.5 | 24.4 | 25.3 | 26.2 | 27.1 | 28 |
 
 ### Table C37:AK58
 
 Table C37:AK58 (data C38:AK58), header row 37, 33 columns without a header: E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z, AA, AB, AC, AD, AE, AF, AG, AH, AI, AJ, AK, found by rules: empty-row gaps, apart from a block it touches only at a corner, header by type change.
 
-| T | T\_K | Column E | Column F | Column G | Column H | Column I | Column J | Column K | Column L | Column M | Column N | Column O | Column P | Column Q | Column R | Column S | Column T | Column U | Column V | Column W | Column X | Column Y | Column Z | Column AA | Column AB | Column AC | Column AD | Column AE | Column AF | Column AG | Column AH | Column AI | Column AJ | Column AK |
+| T | T_K | Column E | Column F | Column G | Column H | Column I | Column J | Column K | Column L | Column M | Column N | Column O | Column P | Column Q | Column R | Column S | Column T | Column U | Column V | Column W | Column X | Column Y | Column Z | Column AA | Column AB | Column AC | Column AD | Column AE | Column AF | Column AG | Column AH | Column AI | Column AJ | Column AK |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 0 | 273 | t=0 C | 1.00 | 0.96 | 0.92 | 0.88 | 0.83 | 0.78 | 0.73 | 0.68 | 0.64 | 0.60 | 0.58 | 0.56 | 0.55 | 0.55 | 0.55 | 0.55 | 0.56 | 0.57 | 0.58 | 0.59 | 0.61 | 0.63 | 0.64 | 0.66 | 0.68 | 0.70 | 0.72 | 0.73 | 0.75 | 0.77 | 0.79 | 0.81 |
 | 10 | 283 | t=10 C | 1.00 | 0.96 | 0.93 | 0.89 | 0.85 | 0.81 | 0.76 | 0.72 | 0.69 | 0.65 | 0.63 | 0.61 | 0.60 | 0.59 | 0.59 | 0.59 | 0.60 | 0.60 | 0.61 | 0.63 | 0.64 | 0.65 | 0.67 | 0.68 | 0.70 | 0.72 | 0.73 | 0.75 | 0.77 | 0.78 | 0.80 | 0.82 |
@@ -296,13 +296,13 @@ flowchart LR
 
 | What | Where | Detail |
 | --- | --- | --- |
-| user function | `[1]!unf_version` | file:///D:\\unifloc\\unifloc\_vba\\UniflocVBA\_7.xlam, used in 1 formula |
-| user function | `[1]!unf_pvt_Zgas_d` | file:///D:\\unifloc\\unifloc\_vba\\UniflocVBA\_7.xlam, used in 671 formulas |
-| user function | `[2]!unf_pvt_Zgas_d` | /projects/unifloc\_vba/UniflocVBA\_7.xlam, used in 1 formula |
-| user function | `[1]!unf_pvt_dZdt` | file:///D:\\unifloc\\unifloc\_vba\\UniflocVBA\_7.xlam, used in 672 formulas |
-| user function | `[1]!unf_pvt_dZdp` | file:///D:\\unifloc\\unifloc\_vba\\UniflocVBA\_7.xlam, used in 672 formulas |
-| add-in | UniflocVBA\_7.xlam | \[1\] in formulas, never opened `file:///D:\unifloc\unifloc_vba\UniflocVBA_7.xlam` |
-| add-in | UniflocVBA\_7.xlam | \[2\] in formulas, never opened `/projects/unifloc_vba/UniflocVBA_7.xlam` |
+| user function | `[1]!unf_version` | file:///D:\\unifloc\\unifloc_vba\\UniflocVBA_7.xlam, used in 1 formula |
+| user function | `[1]!unf_pvt_Zgas_d` | file:///D:\\unifloc\\unifloc_vba\\UniflocVBA_7.xlam, used in 671 formulas |
+| user function | `[2]!unf_pvt_Zgas_d` | /projects/unifloc_vba/UniflocVBA_7.xlam, used in 1 formula |
+| user function | `[1]!unf_pvt_dZdt` | file:///D:\\unifloc\\unifloc_vba\\UniflocVBA_7.xlam, used in 672 formulas |
+| user function | `[1]!unf_pvt_dZdp` | file:///D:\\unifloc\\unifloc_vba\\UniflocVBA_7.xlam, used in 672 formulas |
+| add-in | UniflocVBA_7.xlam | \[1\] in formulas, never opened `file:///D:\unifloc\unifloc_vba\UniflocVBA_7.xlam` |
+| add-in | UniflocVBA_7.xlam | \[2\] in formulas, never opened `/projects/unifloc_vba/UniflocVBA_7.xlam` |
 | VBA module | Module1 | VBA module, never run |
 | VBA module | Лист1 | VBA module, never run |
 | VBA module | ЭтаКнига | VBA module, never run |
@@ -315,13 +315,13 @@ flowchart LR
 | macro | Module1 | VBA module, never run |  |
 | macro | Лист1 | VBA module, never run |  |
 | macro | ЭтаКнига | VBA module, never run |  |
-| add-in | UniflocVBA\_7.xlam | \[1\] in formulas, never opened | `file:///D:\unifloc\unifloc_vba\UniflocVBA_7.xlam` |
-| add-in | UniflocVBA\_7.xlam | \[2\] in formulas, never opened | `/projects/unifloc_vba/UniflocVBA_7.xlam` |
-| user-function | \[1\]!unf\_version | file:///D:\\unifloc\\unifloc\_vba\\UniflocVBA\_7.xlam |  |
-| user-function | \[1\]!unf\_pvt\_Zgas\_d | file:///D:\\unifloc\\unifloc\_vba\\UniflocVBA\_7.xlam |  |
-| user-function | \[2\]!unf\_pvt\_Zgas\_d | /projects/unifloc\_vba/UniflocVBA\_7.xlam |  |
-| user-function | \[1\]!unf\_pvt\_dZdt | file:///D:\\unifloc\\unifloc\_vba\\UniflocVBA\_7.xlam |  |
-| user-function | \[1\]!unf\_pvt\_dZdp | file:///D:\\unifloc\\unifloc\_vba\\UniflocVBA\_7.xlam |  |
+| add-in | UniflocVBA_7.xlam | \[1\] in formulas, never opened | `file:///D:\unifloc\unifloc_vba\UniflocVBA_7.xlam` |
+| add-in | UniflocVBA_7.xlam | \[2\] in formulas, never opened | `/projects/unifloc_vba/UniflocVBA_7.xlam` |
+| user-function | \[1\]!unf_version | file:///D:\\unifloc\\unifloc_vba\\UniflocVBA_7.xlam |  |
+| user-function | \[1\]!unf_pvt_Zgas_d | file:///D:\\unifloc\\unifloc_vba\\UniflocVBA_7.xlam |  |
+| user-function | \[2\]!unf_pvt_Zgas_d | /projects/unifloc_vba/UniflocVBA_7.xlam |  |
+| user-function | \[1\]!unf_pvt_dZdt | file:///D:\\unifloc\\unifloc_vba\\UniflocVBA_7.xlam |  |
+| user-function | \[1\]!unf_pvt_dZdp | file:///D:\\unifloc\\unifloc_vba\\UniflocVBA_7.xlam |  |
 
 ## Not read
 

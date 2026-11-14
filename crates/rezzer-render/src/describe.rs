@@ -107,8 +107,11 @@ pub(crate) struct Counts {
     /// The revisions the file says it has.
     pub(crate) revisions: usize,
     pub(crate) annotations: usize,
-    /// Pictures (assets) that need a look by the calling agent.
+    /// Pictures of the file (assets) that need a look by the calling agent.
     pub(crate) vision: usize,
+    /// Pictures of regions of text kept as laid out ([`rezzer_model::Asset::shows`]): the
+    /// text is read, the picture shows how it stands.
+    pub(crate) regions: usize,
     /// Losses that say something was not read: every loss but an uncertain one.
     pub(crate) not_read: usize,
 }
@@ -124,7 +127,16 @@ pub(crate) fn counts(doc: &Document) -> Counts {
         signatures: doc.facets.signatures.len(),
         annotations: doc.facets.annotations.len(),
         outlines: usize::from(!doc.facets.outline.is_empty()),
-        vision: doc.assets.iter().filter(|a| a.needs_vision).count(),
+        vision: doc
+            .assets
+            .iter()
+            .filter(|a| a.needs_vision && a.shows.is_none())
+            .count(),
+        regions: doc
+            .assets
+            .iter()
+            .filter(|a| a.needs_vision && a.shows.is_some())
+            .count(),
         not_read: doc.losses.iter().filter(|l| l.is_not_read()).count(),
         ..Counts::default()
     };
@@ -254,6 +266,7 @@ pub(crate) fn description(doc: &Document) -> String {
             "picture that needs vision",
             "pictures that need vision",
         ),
+        (c.regions, "region to look at", "regions to look at"),
         (c.not_read, "part not read", "parts not read"),
     ]
     .into_iter()

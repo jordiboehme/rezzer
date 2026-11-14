@@ -11,6 +11,7 @@ use crate::block::Block;
 use crate::facet::{Facets, FileFacts, Role};
 use crate::format::FormatId;
 use crate::geometry::Geometry;
+use crate::inline::Anchor;
 use crate::loss::Loss;
 use crate::region::RegionNote;
 use crate::value::Value;
@@ -186,6 +187,11 @@ pub struct Asset {
     /// was read from it there.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub code_unread: bool,
+    /// The block this picture shows, when it is no picture of the file but a render of a part
+    /// of a page: the anchor of a region of text kept as laid out. The calling agent looks at
+    /// it to read what the lines of that block cannot say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shows: Option<Anchor>,
 }
 
 /// A barcode or QR code read from a picture. Its payload is data from the file: it is never

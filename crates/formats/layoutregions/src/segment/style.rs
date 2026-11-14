@@ -6,8 +6,9 @@
 //! new group. A line is never parted: its runs in other styles (a bold label, small capitals,
 //! a coloured word) are inline styles of the line.
 
+use crate::extract::text::{NAME_ADDRESS_LINES, name_over_address};
 use crate::input::TextRun;
-use crate::line::line_style;
+use crate::line::{TextLine, ink, line_style, text_line};
 use crate::segment::cut::SIZE_STEP;
 use crate::work;
 
@@ -71,7 +72,10 @@ pub fn style_steps(texts: &[TextRun], ids: &[u32]) -> Vec<Vec<u32>> {
     let mut before_mixed = false;
     let mut before_sizes: Option<(f32, f32)> = None;
     let mut known: Option<[u8; 3]> = None;
-    for line in lines {
+    // The lines with ink of the group that is open, and where the first of them stands in
+    // `lines`: alone in its group it is the line a name over its address would be.
+    let (mut inked_lines, mut first_inked) = (0usize, 0usize);
+    for (at, line) in lines.iter().enumerate() {
         // Whether the line is a row of cells of both weights: its runs with ink are of both
         // weights (a bold label and its plain value, a plain name and its bold amount) and
         // stand apart by a cell gap somewhere, not bold words inline in running text.
@@ -127,8 +131,8 @@ pub fn style_steps(texts: &[TextRun], ids: &[u32]) -> Vec<Vec<u32>> {
             // A line without ink has no style to step: it joins the group before it (or starts
             // the first one, which the first ink then joins).
             match groups.last_mut() {
-                Some(g) => g.extend(line),
-                None => groups.push(line),
+                Some(g) => g.extend(line.iter().copied()),
+                None => groups.push(line.clone()),
             }
             continue;
         };
@@ -151,16 +155,51 @@ pub fn style_steps(texts: &[TextRun], ids: &[u32]) -> Vec<Vec<u32>> {
                 || (run.bold != b.bold && !(mixed && before_mixed))
                 || matches!((run.color, known), (Some(x), Some(y)) if x != y)
         });
+        // A name over the smaller lines of its address is the first line of the address: no
+        // step parts it from them (see [`name_over_address`]). The name's size has no bound
+        // here, on purpose: the steps know no body size. The walk decides by the size
+        // (`plain_size` in `extract::text::next_block`): a name much larger than the body
+        // (a company's name as the head of a letter) keeps its heading or title there, with
+        // the lines of its address as their own paragraph, in one group or in two.
+        let starts = starts && !(inked_lines == 1 && opens_address(texts, &lines[first_inked..]));
         known = run.color.or(known);
         match groups.last_mut() {
-            Some(g) if !starts => g.extend(line),
-            _ => groups.push(line),
+            Some(g) if !starts => {
+                g.extend(line.iter().copied());
+                if inked_lines == 0 {
+                    first_inked = at;
+                }
+                inked_lines += 1;
+            }
+            _ => {
+                groups.push(line.clone());
+                (inked_lines, first_inked) = (1, at);
+            }
         }
         before = Some(run);
         before_mixed = mixed;
         before_sizes = sizes;
     }
     groups
+}
+
+/// Whether the first of `lines` (each the ids of one line, a line without ink among them
+/// skipped) is a name over the lines of its address, as [`name_over_address`] reads them: at
+/// most [`NAME_ADDRESS_LINES`] lines are looked at, so a step asks a bounded number of runs.
+fn opens_address(texts: &[TextRun], lines: &[Vec<u32>]) -> bool {
+    let runs: Vec<Vec<&TextRun>> = lines
+        .iter()
+        .map(|l| {
+            l.iter()
+                .filter_map(|&id| texts.get(id as usize))
+                .collect::<Vec<&TextRun>>()
+        })
+        .filter(|l| l.iter().any(|r| ink(&r.text) > 0))
+        .take(NAME_ADDRESS_LINES)
+        .collect();
+    work::add(runs.iter().map(|l| l.len() as u64).sum());
+    let lines: Vec<TextLine<'_, &TextRun>> = runs.iter().map(|l| text_line(l)).collect();
+    name_over_address(&lines, 0, 1).is_some()
 }
 
 #[cfg(test)]
@@ -466,6 +505,63 @@ mod tests {
                 vec![vec![0, 1, 2, 3], vec![4]]
             );
         }
+    }
+
+    /// Task 36a part 1: a bold name over the smaller lines of its address is not parted
+    /// from them (see `name_over_address`); a heading that stands farther over them, a name
+    /// under other lines of its group, and a title over lines that are no address are.
+    #[test]
+    fn a_name_stays_with_the_lines_of_its_address() {
+        let line = |text: &str, size: f32, bold: bool, n: u32, y: f32| TextRun {
+            text: text.to_string(),
+            y,
+            ..run(size, bold, None, n)
+        };
+        let page = |name: &str, lead: f32| {
+            vec![
+                line(name, 10.0, true, 0, 700.0),
+                line("Mill Lane 4", 8.0, false, 1, 700.0 - lead),
+                line("20481 Oldtown", 8.0, false, 2, 700.0 - lead - 10.4),
+            ]
+        };
+        let groups = |texts: &[TextRun]| style_steps(texts, &ids(texts.len()));
+        assert_eq!(groups(&page("Sample Trading", 10.4)), vec![vec![0, 1, 2]]);
+        // The same at half and at twice the size.
+        for k in [0.5f32, 2.0] {
+            let mut texts = page("Sample Trading", 10.4);
+            for t in &mut texts {
+                t.size *= k;
+                t.y *= k;
+            }
+            assert_eq!(groups(&texts), vec![vec![0, 1, 2]], "{k}");
+        }
+        // A heading two lines over the address, and a title over lines of one shape.
+        assert_eq!(groups(&page("Sample Trading", 20.8)).len(), 2);
+        let mut fields = page("Chapter 1", 10.4);
+        fields[1].text = "Part 2".into();
+        fields[2].text = "Annex 3".into();
+        assert_eq!(groups(&fields).len(), 2);
+        // A bold line over a complete address that has its own name line is a heading over
+        // it (fix round 1, review I2): the step stays.
+        let mut headed = page("Delivery address", 10.4);
+        headed[1].text = "Sample Trading".into();
+        headed[2].text = "Mill Lane 4".into();
+        headed.push(line("20481 Oldtown", 8.0, false, 3, 700.0 - 31.2));
+        assert_eq!(groups(&headed), vec![vec![0], vec![1, 2, 3]]);
+        // A bold line over the name in its group: the lines over the address are no name.
+        let mut under = vec![line("Sender", 10.0, true, 0, 712.0)];
+        for mut t in page("Sample Trading", 10.4) {
+            t.line += 1;
+            under.push(t);
+        }
+        assert_eq!(groups(&under), vec![vec![0, 1], vec![2, 3]]);
+        // White space before the name is of its group and hides nothing.
+        let mut spaced = vec![line(" ", 10.0, false, 0, 712.0)];
+        for mut t in page("Sample Trading", 10.4) {
+            t.line += 1;
+            spaced.push(t);
+        }
+        assert_eq!(groups(&spaced), vec![vec![0, 1, 2, 3]]);
     }
 
     #[test]

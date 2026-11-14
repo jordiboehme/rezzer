@@ -39,7 +39,7 @@ language: "en"
 | --- | --- |
 | columns | 9 |
 | delimiter | , |
-| has\_header | true |
+| has_header | true |
 | rows | 9 |
 
 ## csv-broken-derived-banklist

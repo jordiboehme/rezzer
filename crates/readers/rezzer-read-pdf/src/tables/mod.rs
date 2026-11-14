@@ -281,6 +281,10 @@ pub(crate) struct Found {
     /// Grids, bands, regions, rows of fields and boxes refused with a note or a loss that
     /// keep their text as it stands: the ids of their runs (see [`Flow::ids`]) and why.
     pub doubts: Doubts,
+    /// The runs of blocks side by side that a paragraph wrapped in one of them shows (see
+    /// `paragraph_columns`), by their ids (see [`Flow::ids`]): each line of such a block
+    /// stays a line of its own, never joined to the line over it. Sorted when read.
+    pub own_lines: Vec<u32>,
 }
 
 /// Text a detector refused with a note or a loss and keeps as it stands: for each refusal, the

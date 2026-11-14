@@ -744,6 +744,7 @@ fn extract(
         needs_vision: false,
         codes: Vec::new(),
         code_unread: false,
+        shows: None,
     });
     out.blobs.push(Blob { asset: id, bytes });
     Ok(())

@@ -163,7 +163,7 @@ source: crates/rezzer/tests/corpus.rs
     {
       "location": "p1:b30",
       "severity": "info",
-      "what": "the region at p1:b30 is kept as laid out, as text in its columns: no region type has clear evidence for it",
+      "what": "the region at p1:b30 is kept as laid out, line by line: no region type has clear evidence for it",
       "why": "uncertain"
     },
     {

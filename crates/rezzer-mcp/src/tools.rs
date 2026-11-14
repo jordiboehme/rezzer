@@ -425,8 +425,9 @@ pub struct RezOutput {
     pub losses: usize,
     /// How many pictures the file has (extracted or not).
     pub assets: usize,
-    /// Ids of the pictures Rezzer cannot interpret, for the calling agent to look at. With
-    /// `output_dir` they are files in the bundle.
+    /// Ids of the pictures Rezzer cannot interpret, for the calling agent to look at, and of
+    /// the pictures of text it kept as laid out (`page-N-region-K`). With `output_dir` they
+    /// are files in the bundle.
     pub needs_vision: Vec<String>,
     /// Why the call failed or what went wrong, in one line.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -494,7 +495,7 @@ fn rez_answer(result: RunResult, output: OutputKind, page: usize) -> Answer {
             format: Some(rezzer_render::format_name(document.source.format)),
             sha256: Some(document.source.sha256.clone()),
             losses: document.losses.len(),
-            assets: document.assets.len(),
+            assets: pictures(document),
             needs_vision: needs_vision(document),
             message: Some(message.clone()),
             parts,
@@ -525,7 +526,7 @@ fn rez_answer(result: RunResult, output: OutputKind, page: usize) -> Answer {
         format: Some(rezzer_render::format_name(document.source.format)),
         sha256: Some(document.source.sha256.clone()),
         losses: document.losses.len(),
-        assets: document.assets.len(),
+        assets: pictures(document),
         needs_vision: needs_vision(document),
         message: result.message.clone(),
         parts,
@@ -591,6 +592,12 @@ fn rez_failed(message: String) -> Answer {
         text: message,
         failed: true,
     }
+}
+
+/// How many pictures the file has: a picture that shows a block of the text (a region kept
+/// as laid out) is none of the file's.
+fn pictures(document: &rezzer_model::Document) -> usize {
+    document.assets.iter().filter(|a| a.shows.is_none()).count()
 }
 
 fn needs_vision(document: &rezzer_model::Document) -> Vec<String> {

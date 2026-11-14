@@ -1104,6 +1104,7 @@ impl Reader for Pictures {
                 needs_vision: true,
                 codes: Vec::new(),
                 code_unread: false,
+                shows: None,
             });
             blobs.push(Blob {
                 asset: id.to_string(),
@@ -1675,6 +1676,7 @@ impl Reader for Chapters {
                     needs_vision: true,
                     codes: Vec::new(),
                     code_unread: false,
+                    shows: None,
                 });
                 blobs.push(Blob {
                     asset: id,

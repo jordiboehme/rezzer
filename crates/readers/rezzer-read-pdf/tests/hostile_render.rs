@@ -1352,6 +1352,78 @@ fn shared_picture_pages(bomb: &[bool]) -> Vec<u8> {
 }
 
 #[test]
+fn a_region_kept_as_laid_out_on_a_page_that_is_not_rendered_keeps_the_read_complete() {
+    // Two lines of two short texts side by side are kept as laid out, and the page is not
+    // rendered (a picture too small to be listed says it is 15,000 pixels wide). The region
+    // stays listed without a file, the page says why, and nothing is unread: the lines are
+    // in the text.
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let jpeg = b.stream(
+        "/Type /XObject /Subtype /Image /Width 15000 /Height 15000 /ColorSpace /DeviceRGB \
+         /BitsPerComponent 8 /Filter /DCTDecode",
+        &jpeg_head(15_000, 15_000),
+    );
+    let mut c = String::new();
+    for (n, row) in [["Linde Nord", "Ahorn West"], ["Birke Ost", "Erle Mitte"]]
+        .iter()
+        .enumerate()
+    {
+        let y = 600 - 10 * n;
+        c += &format!("BT /F1 8 Tf 40 {y} Td ({}) Tj ET\n", row[0]);
+        c += &format!("BT /F1 8 Tf 300 {y} Td ({}) Tj ET\n", row[1]);
+    }
+    let with = |bomb: bool, b: &mut Builder| {
+        let mut c = c.clone();
+        if bomb {
+            c.push_str("q 10 0 0 10 300 200 cm /B Do Q\n");
+        }
+        let cs = b.stream("", c.as_bytes());
+        b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F1 {font} 0 R >> /XObject << /B {jpeg} 0 R >> >> \
+             /Contents {cs} 0 R >>"
+        ))
+    };
+    let (bad, good) = (with(true, &mut b), with(false, &mut b));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{bad} 0 R {good} 0 R] /Count 2 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let out = read_with(&b.finish(catalog), true);
+    let ids: Vec<&str> = out.document.assets.iter().map(|a| a.id.as_str()).collect();
+    assert_eq!(ids, ["page-1-region-1", "page-2-region-1"]);
+    // The control: the same lines on a page that renders get their file.
+    let blobs: Vec<&str> = out.blobs.iter().map(|b| b.asset.as_str()).collect();
+    assert_eq!(blobs, ["page-2-region-1"], "{:#?}", out.document.losses);
+    let said: Vec<&Loss> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.what.contains("not rendered") || l.what.contains("no file"))
+        .collect();
+    assert!(
+        matches!(
+            said.as_slice(),
+            [l] if l.location == "p1"
+                && l.what.starts_with("page 1 is not rendered")
+                && l.severity == Severity::Info
+        ),
+        "{:#?}",
+        out.document.losses
+    );
+    assert_eq!(
+        out.completeness,
+        Completeness::Complete,
+        "{:#?}",
+        out.document.losses
+    );
+}
+
+#[test]
 fn a_shared_picture_is_cut_at_the_next_page_that_renders() {
     // Page 1 is not rendered; page 2, with the same picture, is: the crop comes from page 2.
     let out = read_with(&shared_picture_pages(&[true, false, false]), true);

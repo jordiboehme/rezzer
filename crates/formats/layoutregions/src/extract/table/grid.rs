@@ -172,7 +172,7 @@ pub fn pieces_of<R: LineRun>(runs: &[R], start: usize, end: usize) -> Vec<Piece>
 
 /// White space between two runs of a piece wider than this many sizes is cut where a rule
 /// across the table breaks in it: half a cell gap, about two spaces between words.
-const JOINT_GAP: f32 = 0.5 * CELL_GAP;
+pub(crate) const JOINT_GAP: f32 = 0.5 * CELL_GAP;
 
 /// The pieces of lines, each cut where a rule across the table breaks (`breaks`, see
 /// `ruled::rule_breaks`) in the white space between two of its runs, when that white space

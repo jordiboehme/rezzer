@@ -1744,6 +1744,7 @@ fn piece(r: &TextRun) -> Piece {
         runs: 1,
         colon: r.text.trim_end().ends_with(':'),
         value: cut::reads_as_value(&r.text),
+        date: cut::reads_as_value(&r.text) && cut::reads_as_date(&r.text),
         number: cut::whole_number(&r.text),
         boxed: None,
         rows: 1,
@@ -1806,7 +1807,7 @@ fn pieces_of(texts: &[TextRun], ids: &[u32]) -> (Vec<Piece>, Vec<Vec<usize>>) {
                 let r = reading.map_or(cut::Reading::of(text, one.value), |r| {
                     r.goes_on(text, one.value)
                 });
-                (p.value, p.number) = (r.value, r.number);
+                (p.value, p.number, p.date) = (r.value, r.number, r.date());
                 reading = Some(r);
             }
             p.runs += 1;

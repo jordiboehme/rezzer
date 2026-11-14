@@ -388,7 +388,7 @@ pub(crate) fn assert_pay_slip(out: &ReadOutcome) {
     // Each section's label row is its table's header row; the pairs have none.
     assert_eq!(
         read_header_rows(out),
-        [0, 1, 0, 1, 1, 0, 1, 0, 0, 1],
+        [0, 1, 0, 1, 1, 0, 0, 1, 0, 1],
         "{found:#?}"
     );
     // The header field grid, row by row, with the date of its right part.
@@ -443,10 +443,11 @@ pub(crate) fn assert_pay_slip(out: &ReadOutcome) {
     );
     // The total in the band of L's titles, with its label.
     assert_eq!(found[5], [["Ln", "8.765,43"]], "{found:#?}");
-    // L: the right middle Le | Lf | Lg over four rows.
-    assert_eq!(header(&found[6]), "Le|Lf|Lg", "{found:#?}");
+    // L: the right middle Le | Lf | Lg over four rows. It stands after L's left block, whose
+    // title is the first on the line of the two titles.
+    assert_eq!(header(&found[7]), "Le|Lf|Lg", "{found:#?}");
     assert_eq!(
-        body(&found[6]),
+        body(&found[7]),
         [
             "9001|Muster A|11,11",
             "9002|Muster B|22,22-",
@@ -456,7 +457,7 @@ pub(crate) fn assert_pay_slip(out: &ReadOutcome) {
     );
     // L's left block: its two columns of labels, each with the value on its line, column by
     // column; the fields with only their marks are empty.
-    let left = pairs(&found[7]);
+    let left = pairs(&found[6]);
     assert_eq!(left.len(), 16, "{found:#?}");
     assert_eq!(
         left[..4],
@@ -488,7 +489,11 @@ pub(crate) fn assert_pay_slip(out: &ReadOutcome) {
     let mut captions = vec![None; 10];
     captions[1] = Some("Bezuege A".to_string());
     captions[3] = Some("Abzuege B".to_string());
-    captions[6] = Some("La Lb".to_string());
+    // L's two titles stand on one line, each over its own rule (Task 36a part 1b, class F):
+    // the caption of the table is the title over its own rule only, and the title over the
+    // other rule heads the block of labels under that rule, before its rows.
+    captions[6] = Some("La".to_string());
+    captions[7] = Some("Lb".to_string());
     assert_eq!(read_captions(out), captions);
     // Each rule that pairs is said once, before the first table it found.
     let notes = found_by(out);

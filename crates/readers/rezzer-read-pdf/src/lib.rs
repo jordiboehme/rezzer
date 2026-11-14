@@ -583,6 +583,221 @@ fn very_small_note(n: u32, count: usize, budget: &Budget, out: &mut Out) -> Opti
     }
 }
 
+/// Whether the lines of a block kept as laid out hold layout that its plain lines do not
+/// say: how the pieces of one line stand to those of another. That takes two lines with
+/// text, and among them a line with two pieces or more (pieces side by side: which of them
+/// stand in one column is not written) or lines that start at different columns (an indent,
+/// a block beside another). One line alone reads in the Markdown as it stands on the page,
+/// its pieces apart marked by the gap, and so does a block of lines of one piece each that
+/// all start at one column: a picture would show nothing more. Pieces without text do not
+/// count.
+fn keeps_layout(lines: &[rezzer_model::SpatialLine]) -> bool {
+    let mut start: Option<u32> = None;
+    let (mut with_text, mut apart) = (0, false);
+    for line in lines {
+        let mut pieces = line.pieces.iter().filter(|p| !p.text.trim().is_empty());
+        let Some(first) = pieces.next() else {
+            continue;
+        };
+        with_text += 1;
+        apart |= pieces.next().is_some() || start.is_some_and(|s| s != first.col);
+        start = Some(first.col);
+    }
+    with_text > 1 && apart
+}
+
+/// The pictures of the regions of text kept as laid out, over the whole file: a region no
+/// type had clear evidence for is listed as a picture that needs vision, cut from the render
+/// of its page, so the calling agent can look at what the lines cannot say.
+#[derive(Default)]
+struct RegionPictures {
+    /// The pictures listed so far.
+    made: usize,
+    /// The regions past [`render::MAX_REGION_PICTURES`], and the page of the first.
+    past: usize,
+    first_past: u32,
+    /// A budget of the read was hit while a picture was listed: no later region of the file
+    /// gets one, and the loss that said so is not said again.
+    stopped: bool,
+}
+
+impl RegionPictures {
+    /// Lists a picture for each block kept as laid out among `blocks`, the blocks of page `n`
+    /// (they start at `base` in the page's section), whose lines hold more than the Markdown
+    /// writes ([`keeps_layout`]), and one for each run of such blocks in the same columns
+    /// ([`rezzer_model::spatial_runs`]; the Markdown writes a run as one aligned block): an
+    /// asset that needs vision, a media block right after the block (the last block of a
+    /// run) with the next media anchor of the page, and the crop of its area. The area is
+    /// the box of the regions whose host the block or a block of the run is (`regions`, in
+    /// the frame of the page's text; `to_page` gives a box in the visible page box). A block
+    /// without such a region, or with an empty box, gets none. Past the cap of the file the
+    /// regions that would have got a picture are counted for one loss: a block without a
+    /// region is not among them. The boxes are one map for the page, built once.
+    fn list(
+        &mut self,
+        n: u32,
+        (blocks, base): (&[Block], usize),
+        (regions, to_page): (
+            &[layoutregions::Region],
+            &dyn Fn(layoutregions::Bounds) -> [f32; 4],
+        ),
+        budget: &Budget,
+        media: &mut AtPlace<Block>,
+        out: &mut Out,
+    ) -> Vec<render::Crop> {
+        let mut crops = Vec::new();
+        if self.stopped {
+            return crops;
+        }
+        let mut made = media
+            .iter()
+            .filter(|(_, b)| {
+                matches!(
+                    b,
+                    Block::Media {
+                        anchor: Some(_),
+                        ..
+                    }
+                )
+            })
+            .count();
+        let mut on_page = 0;
+        // Blocks in the same columns that follow one another are one picture: the last
+        // block of such a run stands for all of them.
+        let runs = rezzer_model::spatial_runs(blocks);
+        let run_of: HashMap<usize, &[usize]> = runs
+            .iter()
+            .flat_map(|run| run.iter().map(move |&k| (k, run.as_slice())))
+            .collect();
+        // The box of the regions of each host block, built once for the page when its first
+        // picture asks for it.
+        let mut boxes: Option<HashMap<usize, layoutregions::Bounds>> = None;
+        let join = |a: layoutregions::Bounds, b: layoutregions::Bounds| layoutregions::Bounds {
+            x0: a.x0.min(b.x0),
+            y0: a.y0.min(b.y0),
+            x1: a.x1.max(b.x1),
+            y1: a.y1.max(b.y1),
+        };
+        for (k, block) in blocks.iter().enumerate() {
+            let Block::Spatial { lines, .. } = block else {
+                continue;
+            };
+            let shown: &[usize] = match run_of.get(&k) {
+                Some(run) if run.last() != Some(&k) => continue,
+                Some(run) => run,
+                None if keeps_layout(lines) => std::slice::from_ref(&k),
+                None => continue,
+            };
+            // The picture names the first block it shows: a block without an anchor gets
+            // none.
+            let at = match &blocks[shown[0]] {
+                Block::Spatial { anchor, .. } => anchor,
+                _ => &None,
+            };
+            if at.is_none() {
+                continue;
+            }
+            let boxes = boxes.get_or_insert_with(|| {
+                let mut boxes: HashMap<usize, layoutregions::Bounds> = HashMap::new();
+                for r in regions {
+                    boxes
+                        .entry(r.host as usize)
+                        .and_modify(|a| *a = join(*a, r.bounds))
+                        .or_insert(r.bounds);
+                }
+                boxes
+            });
+            let area = shown
+                .iter()
+                .filter_map(|host| boxes.get(host).copied())
+                .reduce(join);
+            let Some(area) = area.filter(|a| a.x1 > a.x0 && a.y1 > a.y0) else {
+                continue;
+            };
+            // Past the cap a region that would have got a picture is only counted: the
+            // look-up in the page's map is all that is worked out for it.
+            if self.made >= render::MAX_REGION_PICTURES {
+                if self.past == 0 {
+                    self.first_past = n;
+                }
+                self.past += 1;
+                continue;
+            }
+            let framed = [area.x0, area.y0, area.x1, area.y1];
+            // The blocks the picture shows, by anchor: one block, or the first and the last
+            // of a run.
+            let last = match &blocks[k] {
+                Block::Spatial { anchor, .. } if shown.len() > 1 => anchor.as_ref(),
+                _ => None,
+            };
+            let words = render::region_alt(at.as_ref(), last, &framed);
+            // The alt text stands in the asset and in the media block.
+            let charged = budget
+                .add_elements(1)
+                .and_then(|()| budget.charge_text(2 * words.len()));
+            if let Err(hit) = charged {
+                let at = at.as_ref().map_or_else(|| format!("p{n}"), |a| a.0.clone());
+                // The regions keep their lines and their own losses: nothing is unread, so
+                // this is said once for the file and does not make the read partial.
+                out.loss_info(
+                    at.clone(),
+                    format!("the regions kept as laid out get no picture from {at} on: {hit}"),
+                    LossReason::Limit,
+                    Severity::Info,
+                );
+                self.stopped = true;
+                break;
+            }
+            self.made += 1;
+            on_page += 1;
+            made += 1;
+            let asset = out.doc.assets.len();
+            let listed = render::region_asset(n, on_page, at.clone(), words.clone());
+            media.push((
+                base + k + 1,
+                Block::Media {
+                    asset: listed.id.clone(),
+                    alt: Some(words),
+                    anchor: Some(Anchor(format!("p{n}:m{made}"))),
+                },
+            ));
+            out.doc.assets.push(listed);
+            crops.push(render::Crop {
+                asset,
+                b: to_page(area),
+                how: None,
+                text: true,
+            });
+        }
+        crops
+    }
+
+    /// Says in one loss how many regions kept as laid out got no picture for the cap.
+    fn finish(self, out: &mut Out) {
+        if self.past == 0 {
+            return;
+        }
+        let what = if self.past == 1 {
+            "1 more region kept as laid out gets no picture".to_string()
+        } else {
+            format!("{} more regions kept as laid out get no picture", self.past)
+        };
+        // The regions keep their lines and their own losses: nothing is hidden and nothing
+        // is unread. So the reason is the regions' own, not a limit that cut the read: a
+        // loss with a limit counts as a part not read in the description.
+        out.loss_info(
+            format!("p{}", self.first_past),
+            format!(
+                "{what}, from page {} on: a file gets at most {} such pictures",
+                self.first_past,
+                render::MAX_REGION_PICTURES
+            ),
+            LossReason::Uncertain,
+            Severity::Info,
+        );
+    }
+}
+
 /// Reads the separators drawn as marks on `pages` with the style the file's visible text
 /// shows (each line of runs scanned whole), before the pages are laid out. A number whose
 /// separators are not read is a Warning loss and makes the read partial: it may be off by a
@@ -734,6 +949,7 @@ fn lay_out(
     let everywhere = render::on_every_page(read.values(), count);
     // Small pictures by what they are: equal pictures share one asset.
     let mut pictures = Pictures::default();
+    let mut region_pictures = RegionPictures::default();
     let mut needs: Vec<render::Need> = Vec::new();
     let tables = Tables::default();
     // The model's link targets share what is left of the bytes the pages could keep.
@@ -1334,6 +1550,43 @@ fn lay_out(
                     }
                 }
             }
+            // Each region of text kept as laid out gets a picture of its area, right after it.
+            // On a page listed whole that page is its picture.
+            if page_media.is_none() {
+                let crops = region_pictures.list(
+                    n,
+                    (&blocks[base..base + laid_blocks], base),
+                    (&page_regions.regions, &|b| {
+                        page_box(b, &items, info.width, info.height)
+                    }),
+                    budget,
+                    &mut media,
+                    out,
+                );
+                if !crops.is_empty() {
+                    match needs.last_mut().filter(|need| need.page == n) {
+                        Some(need) => need.crops.extend(crops),
+                        None => needs.push(render::Need {
+                            page: n,
+                            whole: None,
+                            crops,
+                            origin: items.origin,
+                            cut: items.in_part,
+                            fallback: items.fallback,
+                            regions: Vec::new(),
+                            past: 0,
+                            turn: items.turn,
+                            size: (info.width, info.height),
+                            light: items.images.len() <= render::SCAN_PICTURES,
+                            glyphs: items
+                                .codes
+                                .iter()
+                                .filter_map(render::glyph_values)
+                                .collect(),
+                        }),
+                    }
+                }
+            }
             if !unmatched.is_empty() {
                 // Before the pictures at their place, in their order.
                 let texts = figure_texts(n, unmatched, (budget, &links), out);
@@ -1462,6 +1715,7 @@ fn lay_out(
     }
     symbol_loss(symbols, out);
     let places = pictures.finish(out);
+    region_pictures.finish(out);
     quote::losses(&unquoted, quotes_cut, quote_visits, out);
     if let Some((count, first, last)) = links.cut() {
         let (s, them) = if count == 1 {
@@ -1764,6 +2018,7 @@ impl Pictures {
                     asset,
                     b: p.b,
                     how: p.how,
+                    text: false,
                 });
             }
             // A picture in a table cell is written in the cell, and its region stands at the
@@ -2424,6 +2679,135 @@ mod tests {
 
     use super::*;
     use crate::fixtures::{Page, pdf, show};
+
+    #[test]
+    fn past_the_cap_only_regions_that_would_get_a_picture_are_counted() {
+        // Re-review 3, N3: two blocks kept as laid out past the cap of the file. One hosts
+        // a region, one hosts none and one hosts a region with an empty box: the last two
+        // would get no picture under the cap either, so the loss counts one region.
+        let block = |k: usize| Block::Spatial {
+            lines: (0..2)
+                .map(|_| rezzer_model::SpatialLine {
+                    pieces: vec![
+                        rezzer_model::SpatialPiece {
+                            col: 0,
+                            text: "Linde".into(),
+                            spans: Vec::new(),
+                        },
+                        rezzer_model::SpatialPiece {
+                            col: 12,
+                            text: "Nord".into(),
+                            spans: Vec::new(),
+                        },
+                    ],
+                })
+                .collect(),
+            links: Vec::new(),
+            grid: None,
+            anchor: Some(Anchor(format!("p1:b{}", k + 1))),
+        };
+        let region = |host: u32, x1: f32| layoutregions::Region {
+            id: layoutregions::RegionId(host),
+            page: 1,
+            kind: layoutregions::Kind::Spatial,
+            bounds: layoutregions::Bounds {
+                x0: 40.0,
+                y0: 600.0 - 40.0 * host as f32,
+                x1,
+                y1: 620.0 - 40.0 * host as f32,
+            },
+            prims: Vec::new(),
+            certainty: layoutregions::Certainty::Unsure,
+            score: layoutregions::Score(0),
+            signals: Vec::new(),
+            alternatives: Vec::new(),
+            parent: None,
+            unsure: Vec::new(),
+            host,
+        };
+        let blocks = [block(0), block(1), block(2)];
+        let regions = [region(0, 200.0), region(2, 40.0)];
+        let count = |made: usize| {
+            let mut pictures = RegionPictures {
+                made,
+                ..RegionPictures::default()
+            };
+            let mut out = Out::new(Document::new(source_info(&fixtures::source(&[]))));
+            let mut media = Vec::new();
+            let crops = pictures.list(
+                1,
+                (&blocks, 0),
+                (&regions, &|b| [b.x0, b.y0, b.x1, b.y1]),
+                &Budget::new(Limits::default()),
+                &mut media,
+                &mut out,
+            );
+            (crops.len(), pictures.past, pictures.first_past)
+        };
+        // Under the cap the one region gets its picture; past it, it is the one counted.
+        assert_eq!(count(0), (1, 0, 0));
+        assert_eq!(count(render::MAX_REGION_PICTURES), (0, 1, 1));
+    }
+
+    #[test]
+    fn a_block_kept_as_laid_out_holds_layout_with_pieces_side_by_side_or_other_starts() {
+        let lines = |list: &[&[(u32, &str)]]| -> Vec<rezzer_model::SpatialLine> {
+            list.iter()
+                .map(|l| rezzer_model::SpatialLine {
+                    pieces: l
+                        .iter()
+                        .map(|&(col, text)| rezzer_model::SpatialPiece {
+                            col,
+                            text: text.into(),
+                            spans: Vec::new(),
+                        })
+                        .collect(),
+                })
+                .collect()
+        };
+        // Lines of one piece each from one column read as they stand: nothing to show.
+        assert!(!keeps_layout(&lines(&[])));
+        assert!(!keeps_layout(&lines(&[&[(4, "Linde Nord")]])));
+        assert!(!keeps_layout(&lines(&[
+            &[(4, "Linde Nord")],
+            &[],
+            &[(4, "Birke Ost")]
+        ])));
+        // A piece without text is no piece beside another, and starts no line.
+        assert!(!keeps_layout(&lines(&[
+            &[(4, "Linde Nord"), (30, "  ")],
+            &[(9, " ")],
+            &[(4, "Birke Ost")],
+        ])));
+        // One line alone reads as it stands, with one piece or more.
+        assert!(!keeps_layout(&lines(&[&[
+            (4, "Linde Nord"),
+            (30, "Ahorn West")
+        ]])));
+        assert!(!keeps_layout(&lines(&[
+            &[(4, "Linde Nord"), (30, "Ahorn West")],
+            &[(30, " ")],
+        ])));
+        // Two lines, one with two pieces, or one that starts at another column.
+        assert!(keeps_layout(&lines(&[
+            &[(4, "Linde Nord"), (30, "Ahorn West")],
+            &[(4, "Birke Ost")],
+        ])));
+        assert!(keeps_layout(&lines(&[
+            &[(4, "Birke Ost")],
+            &[],
+            &[(4, "Linde Nord"), (30, "Ahorn West")],
+        ])));
+        assert!(keeps_layout(&lines(&[
+            &[(4, "Linde Nord")],
+            &[(5, "Birke Ost")]
+        ])));
+        assert!(keeps_layout(&lines(&[
+            &[(4, "Linde Nord")],
+            &[(4, "Birke Ost")],
+            &[(0, "Erle Mitte")],
+        ])));
+    }
 
     #[test]
     fn rows_for_a_table_not_placed_are_kept_as_paragraphs() {

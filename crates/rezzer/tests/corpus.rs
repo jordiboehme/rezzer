@@ -949,7 +949,7 @@ fn pvt_z_factor_folds_into_patterns() {
         .nth(1)
         .expect("a Hidden logic section");
     assert!(
-        hidden.contains("| add-in | UniflocVBA\\_7.xlam |"),
+        hidden.contains("| add-in | UniflocVBA_7.xlam |"),
         "{hidden}"
     );
 }

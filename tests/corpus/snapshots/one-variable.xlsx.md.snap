@@ -43,9 +43,9 @@ modified: "2013-11-01T13:48:39Z"
 | Key | Value |
 | --- | --- |
 | application | Microsoft Excel |
-| calc\_mode | auto |
-| iterative\_calculation | false |
-| last\_modified\_by | Kohei Yoshida |
+| calc_mode | auto |
+| iterative_calculation | false |
+| last_modified_by | Kohei Yoshida |
 
 ## One-Var
 

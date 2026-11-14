@@ -528,13 +528,13 @@ fn region_beside_a_figure_caption_reads_no_table_and_says_its_loss() {
         .document
         .losses
         .iter()
-        .map(|l| format!("{} {}", l.location, common::without_style_clause(&l.what)))
+        .map(|l| format!("{} {}", l.location, l.what.as_str()))
         .collect();
     let want: Vec<String> = ["p1:b1", "p1:b2"]
         .iter()
         .map(|b| {
             format!(
-                "{b} the region at {b} is kept as laid out, as text in its columns: no region \
+                "{b} the region at {b} is kept as laid out, line by line: no region \
                  type has clear evidence for it"
             )
         })
@@ -585,12 +585,12 @@ fn unsure_region_is_spatial_with_its_loss() {
         .document
         .losses
         .iter()
-        .map(|l| format!("{} {}", l.location, common::without_style_clause(&l.what)))
+        .map(|l| format!("{} {}", l.location, l.what.as_str()))
         .collect();
     assert_eq!(
         what,
         [
-            "p1:b1 the region at p1:b1 is kept as laid out, as text in its columns: no region \
+            "p1:b1 the region at p1:b1 is kept as laid out, line by line: no region \
           type has clear evidence for it"
         ],
     );
@@ -4069,8 +4069,8 @@ fn lines_under_items_without_rules_are_named_or_stay_paragraphs() {
                             // says so; its text stands as laid out (an extraction gap of Task 30).
                             .filter(|w| {
                                 !(text == "1.469,13"
-                                    && common::without_style_clause(w).ends_with(
-                                        "is kept as laid out, as text in its columns: it reads as \
+                                    && w.ends_with(
+                                        "is kept as laid out, line by line: it reads as \
                                          totals, but no totals could be built from it",
                                     ))
                             })
@@ -4950,7 +4950,11 @@ fn first_title_line_broken(
     t += &show(font, size, xs.1, y, "Einzel");
     let out = common::read(&page_in(&t, look));
     let mut b = columns_broken(&out, &columns);
-    let texts = texts_of(&out);
+    // The picture of a line kept as laid out, right after it, is no text between the two.
+    let texts: Vec<String> = texts_of(&out)
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect();
     let line = texts
         .iter()
         .position(|s| s.contains("Anzahl") && s.contains("Einzel") && !s.contains('|'));
@@ -8914,8 +8918,9 @@ fn lone_amounts_beside_their_names_stand_on_their_lines() {
         );
         for (name, amount) in &rows {
             assert!(
-                md.lines()
-                    .any(|l| l.contains(name.as_str()) && l.trim_end().ends_with(amount)),
+                // A line of a region kept as laid out ends with the mark of its line break.
+                md.lines().any(|l| l.contains(name.as_str())
+                    && l.trim_end().trim_end_matches('\\').ends_with(amount)),
                 "{size} pt: {name} and {amount} on one line in\n{md}"
             );
         }
@@ -8927,7 +8932,7 @@ fn lone_amounts_beside_their_names_stand_on_their_lines() {
             );
             assert_eq!(
                 md.lines()
-                    .filter(|l| l.trim_end().ends_with(amount))
+                    .filter(|l| l.trim_end().trim_end_matches('\\').ends_with(amount))
                     .count(),
                 1,
                 "{size} pt: {amount} once in\n{md}"

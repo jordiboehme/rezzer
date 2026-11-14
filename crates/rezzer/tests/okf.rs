@@ -54,8 +54,11 @@ const NAMED_COPIES: [(&str, &str); 5] = [
     ("office/XLOOKUP.xlsx", "日本.xlsx"),
 ];
 
-/// A corpus file read from bytes under the name a data: URI gives (`;name=../../x.pdf`).
-const DATA_URI_COPY: (&str, &str) = ("pdf/pdfbox-sf1199a-direct-deposit.pdf", "../../x.pdf");
+/// A corpus file read from bytes under the name a data: URI gives (`;name=../../x.pdf`). Its
+/// pictures are the pictures of the corpus file itself, and an import keeps equal pictures
+/// once, under the note it took first: the links of the copy then point there, longer than
+/// Rezzer can know when it sizes the document. So the copy is a file without pictures.
+const DATA_URI_COPY: (&str, &str) = ("pdf/irs-f1040-2025.pdf", "../../x.pdf");
 
 /// Each Crystalline call ends after this long.
 const CALL_TIMEOUT: Duration = Duration::from_secs(300);

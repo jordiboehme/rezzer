@@ -223,6 +223,7 @@ impl View {
                 lines: laid,
                 links,
                 anchor,
+                ..
             } => {
                 let chain = View::chain(anchor.as_ref(), around);
                 let texts = laid

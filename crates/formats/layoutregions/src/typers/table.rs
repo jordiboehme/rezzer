@@ -24,7 +24,8 @@
 use std::collections::HashMap;
 
 use crate::extract::pairs::blocks::{
-    Columns, KeyValues, address_block, address_columns, blocks_of, key_values, postal,
+    Columns, KeyValues, address_block, address_columns, blocks_of, key_values, paragraph_columns,
+    postal,
 };
 use crate::extract::table::area::{MANY_COLUMNS, MAX_COLUMNS, ON_PICTURE, PAGE_FRAME, TINY_TEXT};
 use crate::extract::table::banded::{
@@ -942,7 +943,11 @@ fn lines(view: &PageView<'_>, seg: &Segment, given: bool) -> Find {
             let lines: Vec<&str> = c.iter().flatten().map(|l| l.text.as_str()).collect();
             address_block(&lines) && postal(&lines)
         });
-        if address_down || matches!(address_columns(&columns), Columns::Blocks | Columns::Headed) {
+        // So are blocks that a paragraph wrapped in one of them shows.
+        if address_down
+            || matches!(address_columns(&columns), Columns::Blocks | Columns::Headed)
+            || paragraph_columns(&runs, &pieces).is_some()
+        {
             return refused(Speaks::Spatial, SIDE_BLOCKS);
         }
     }

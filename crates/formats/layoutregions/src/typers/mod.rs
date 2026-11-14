@@ -23,7 +23,7 @@ use crate::extract::table::{RunRange, run_ranges, texted_per_line};
 use crate::extract::text::title::page_title;
 use crate::file::{Band, FileFacts, Legend, Levels, RunningIndex, text_sizes, two_page_line};
 use crate::input::{PageIn, PrimId, TextRun};
-use crate::line::{LineRun, text_lines};
+use crate::line::{LineRun, size_key, text_lines};
 use crate::region::{Kind, Score, Signal};
 use crate::segment::drawn::{DrawnStructure, Grids, Line};
 use crate::segment::{SegId, Segment, Segments};
@@ -84,6 +84,11 @@ pub(crate) fn signal(id: &'static str, detail: String, weight: u16) -> Signal {
 /// a segment's text, with no drawn part (grid, box, drawing) or given region under it. Style
 /// steps part labels from values, so such a group need not be a leaf.
 pub(crate) fn text_alone(view: &PageView<'_>, seg: &Segment) -> bool {
+    text_alone_in(view.segs, seg)
+}
+
+/// [`text_alone`] for a segment of `segs`, before there is a view of the page.
+fn text_alone_in(segs: &Segments, seg: &Segment) -> bool {
     use crate::segment::Source;
     matches!(
         seg.source,
@@ -97,7 +102,7 @@ pub(crate) fn text_alone(view: &PageView<'_>, seg: &Segment) -> bool {
             | Source::Strip
             | Source::Cell
     ) && seg.children.iter().all(|c| {
-        view.segs.all.get(c.0 as usize).is_some_and(|k| {
+        segs.all.get(c.0 as usize).is_some_and(|k| {
             matches!(
                 k.source,
                 Source::Gutter
@@ -111,6 +116,98 @@ pub(crate) fn text_alone(view: &PageView<'_>, seg: &Segment) -> bool {
             )
         })
     })
+}
+
+/// The runs of `page` that are values in a row of fields: in a row of labels over their
+/// values as the whitespace cut found it ([`crate::segment::Source::Cell`]: labels side by
+/// side, each a size step smaller than the value under it, or a row set like such a row),
+/// the runs that stand under a label (see
+/// [`crate::extract::pairs::blocks::labels_with_values`]). What is filled into a field is no
+/// title of the page, however large and bold the form prints it: the title is looked for
+/// among the other lines. Linear in the runs of the cells.
+///
+/// Text that is mostly digits and signs (more of them than letters: a number, an amount, a
+/// date, a code) is a value wherever it stands. A value of words is one too, with one
+/// exception: the largest text of the top of the page is never kept out of the title
+/// search. The row is found by its geometry alone, and a page title under a small kicker
+/// line stands the same way when a label over its value stands beside the two (`Department
+/// of Samples` over `Annual Report`, `Form` over `12` at the right). What tells the two
+/// apart is the page's own: a title is the one text set largest in the top of the page
+/// (the top third, where [`page_title`] looks for it, see `title::HEAD_SHARE`), and the
+/// values of a form's fields are several texts in one size. So a value of words stays in
+/// the title search when it stands in the top of the page and no other text there is set
+/// as large or larger (`body` names the runs the title is looked for in; sizes by
+/// [`size_key`]; values of digits and signs are not counted, they are no title in any
+/// size: the form number beside the title is set as large as it). No constant of its own,
+/// and no count of words: a count let short titles through or long ones, never both.
+fn field_values(
+    page: &PageIn,
+    segs: &Segments,
+    height: f32,
+    body: &dyn Fn(u32) -> bool,
+) -> HashSet<u32> {
+    // The values of the rows of fields: the runs of each, and whether it is digits and signs.
+    let mut found: Vec<(Vec<u32>, bool)> = Vec::new();
+    for seg in &segs.all {
+        crate::work::add(1);
+        if seg.source != crate::segment::Source::Cell || !text_alone_in(segs, seg) {
+            continue;
+        }
+        let ids: Vec<u32> = seg
+            .prims
+            .iter()
+            .filter_map(|p| match *p {
+                PrimId::Text(i) if (i as usize) < page.texts.len() => Some(i),
+                _ => None,
+            })
+            .collect();
+        let refs: Vec<&TextRun> = ids.iter().map(|&i| &page.texts[i as usize]).collect();
+        let Some(under) = crate::extract::pairs::blocks::labels_with_values(&refs) else {
+            continue;
+        };
+        for u in &under {
+            let value = crate::extract::pairs::words(&refs, &u.value);
+            let inked = || value.chars().filter(|c| !c.is_whitespace());
+            let letters = inked().filter(|c| c.is_alphabetic()).count();
+            let data = inked().count() > 2 * letters;
+            found.push((u.value.iter().map(|&k| ids[k]).collect(), data));
+        }
+    }
+    let mut values: HashSet<u32> = found
+        .iter()
+        .filter(|f| f.1)
+        .flat_map(|f| f.0.iter().copied())
+        .collect();
+    // The text of the top of the page, values of digits and signs aside, with its size.
+    crate::work::add(page.texts.len() as u64);
+    let key = |i: u32| size_key(page.texts[i as usize].size);
+    let top: HashSet<u32> = (0..page.texts.len() as u32)
+        .filter(|&i| {
+            let r = &page.texts[i as usize];
+            body(i)
+                && !values.contains(&i)
+                && !r.text.trim().is_empty()
+                && r.y + r.h >= height * crate::extract::text::title::HEAD_SHARE
+        })
+        .collect();
+    let largest = top.iter().map(|&i| key(i)).max();
+    let set_largest = |i: &u32| top.contains(i) && Some(key(*i)) == largest;
+    let runs_largest = top.iter().filter(|i| set_largest(i)).count();
+    for (ids, _) in found.iter().filter(|f| !f.1) {
+        let inked: Vec<&u32> = ids
+            .iter()
+            .filter(|&&i| !page.texts[i as usize].text.trim().is_empty())
+            .collect();
+        // The largest text of the top of the page: every run of it stands there in the
+        // largest size, and no other text there is as large.
+        let title = !inked.is_empty()
+            && inked.iter().all(|i| set_largest(i))
+            && inked.len() == runs_largest;
+        if !title {
+            values.extend(ids.iter().copied());
+        }
+    }
+    values
 }
 
 /// The text runs of `seg` on the page of `view`, borrowed, in the order of their ids, and
@@ -769,11 +866,15 @@ impl<'a> PageView<'a> {
                 .map(|(_, r)| r),
         );
         let title = if page.page == 1 {
+            let values = field_values(page, segs, height, &|i| {
+                body(&(i as usize, &page.texts[i as usize]))
+            });
             let runs: Vec<&TextRun> = page
                 .texts
                 .iter()
                 .enumerate()
                 .filter(body)
+                .filter(|(i, _)| !values.contains(&(*i as u32)))
                 .map(|(_, r)| r)
                 .collect();
             let lines = text_lines(&runs);

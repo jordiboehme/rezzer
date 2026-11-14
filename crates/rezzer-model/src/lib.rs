@@ -24,8 +24,8 @@ mod value;
 mod work;
 
 pub use block::{
-    Align, Block, CalloutKind, Cell, CellMedia, SectionKind, SpatialLine, SpatialPiece,
-    SpatialSpan, TaskState, column_letter,
+    Align, Block, CalloutKind, Cell, CellMedia, SectionKind, SpatialGrid, SpatialLine,
+    SpatialPiece, SpatialSpan, TaskState, column_letter, spatial_runs,
 };
 pub use document::{
     Asset, Barcode, Confidence, Detection, Document, FoundDate, MODEL_VERSION, Overview,

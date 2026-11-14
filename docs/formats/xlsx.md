@@ -100,12 +100,12 @@ Each part gets a heading: its title when it has one, else the name of its Excel 
 Table A1:F68 (data A5:F62), header rows 3 to 4, row labels in A, found by: defined name \_NST01, print titles; rules: empty-row gaps, caption rows 1 to 2, header by type change, bold header.
 ```
 
-A merged cell keeps its text once. `〃` marks a cell merged from above and `←` a cell merged from the left, with a note that lists the merged ranges. Group, subtotal and total rows are named in a line under the table, and so is the grand total column of a pivot table: `Total column: D (pivot table grand total).` No cell text is changed.
+A merged cell keeps its text once, in its first cell. The cells it covers stay empty, and a note under the table lists the merged ranges. Group, subtotal and total rows are named in a line under the table, and so is the grand total column of a pivot table: `Total column: D (pivot table grand total).` No cell text is changed.
 
 With `--table-style records` (MCP `table_style: "records"`, or `table_style = "records"` under `[read]` in the config file) every table row becomes one list item, with the header path of each value:
 
 ```markdown
-- Row 18 (Table\_1\_01!A18:P18), group: Year 2024
+- Row 18 (Table_1_01!A18:P18), group: Year 2024
   - Period: February
   - Generation at Utility Scale Facilities / Coal: 44,137
   - Generation at Utility Scale Facilities / Petroleum Liquids: 740

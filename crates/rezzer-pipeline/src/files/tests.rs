@@ -209,6 +209,7 @@ fn a_swap_between_pictures_and_cleaning_is_caught() {
         needs_vision: true,
         codes: Vec::new(),
         code_unread: false,
+        shows: None,
     });
     let blobs = vec![Blob {
         asset: "page-1".into(),

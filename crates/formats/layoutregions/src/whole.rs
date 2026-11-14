@@ -8,7 +8,8 @@
 //! before the regions are found: text on one baseline is one line there. A line can so hold the
 //! text of two regions: the header cells of a table and, right of the table, a label that
 //! stands over its value. [`part_lines`] parts such a line where a block of several lines
-//! starts.
+//! starts. Where the block starts the line and the cells of a grid follow it (the mirror), the
+//! cells are placed before the block, so that the block's lines follow each other.
 
 use crate::extract::table::CELL_GAP;
 use crate::work;
@@ -21,6 +22,10 @@ pub struct Parted {
     /// The regions that start at a cut, sorted: a block of text never goes from one of them
     /// into other text.
     pub whole: Vec<u32>,
+    /// The runs in the order they are read: `lines[k]` is the line of run `order[k]`. The
+    /// order they came in, but for the cells of a grid placed before the block that starts
+    /// their line.
+    pub order: Vec<usize>,
 }
 
 /// Parts the lines of a stretch of runs where a block of several lines starts in the middle of
@@ -54,8 +59,26 @@ pub struct Parted {
 ///   left edge, the right edge and the text size of each run): the gap of two cells of a line,
 ///   not that of two words. A bracket that closes a word of a table's cell touches it.
 ///
-/// Nothing is moved: the block starts on a line of its own, where it stood. `None` when no
-/// line is cut.
+/// Nothing is moved there: the block starts on a line of its own, where it stood.
+///
+/// The mirror (Task 36a): the block starts the line and other text follows it, so a cut alone
+/// would leave that text between the block's first line and its next. The text after the
+/// block is placed on a line of its own before the block when all of this holds:
+///
+/// - the line starts with runs of a region that has ink on another line too, and the whole
+///   next line is of that region;
+/// - all the ink after them on the line stands in one drawn grid the block does not stand
+///   in, more than [`CELL_GAP`] text sizes after the block, and in two cells or more of it
+///   (white space of more than [`CELL_GAP`] text sizes between two of its runs): a row of
+///   cells. One cell alone may be the value of the block's first line and stays with it;
+/// - `own_rule` says so of the last run of the block on the line, the first run with ink of
+///   the next line and the first run of the cells: a drawn line of the block's own stands
+///   between the block's two lines and ends before the cells. A column of row labels left of
+///   a grid whose first row alone is filled looks the same but for that line (the lines
+///   between row labels, if any, are the grid's), and there each label reads with the cells
+///   of its row: without the line nothing is moved.
+///
+/// `None` when no line is cut and nothing is moved.
 pub fn part_lines(
     line: &[u32],
     region: &[Option<u32>],
@@ -63,6 +86,7 @@ pub fn part_lines(
     inked: &[bool],
     extent: &[(f32, f32, f32)],
     several: &dyn Fn(u32) -> bool,
+    own_rule: &dyn Fn(usize, usize, usize) -> bool,
 ) -> Option<Parted> {
     let n = line.len();
     debug_assert!(region.len() == n && boxed.len() == n && inked.len() == n && extent.len() == n);
@@ -106,17 +130,60 @@ pub fn part_lines(
         let mut inked_runs = (a..b).filter(|&i| inked[i]).peekable();
         inked_runs.peek().is_some() && inked_runs.all(|i| region[i] == Some(r))
     };
+    // White space of more than a cell's gap lies between the runs `p` and `i`.
+    let apart =
+        |p: usize, i: usize| extent[i].0 - extent[p].1 > CELL_GAP * extent[p].2.max(extent[i].2);
+    // The first run of the cells a block at the start of the line `a..b` is placed after
+    // (the mirror, see above).
+    let cells_after_block = |a: usize, b: usize, next_end: Option<usize>| {
+        let end = next_end?;
+        let mut ink = (a..b).filter(|&i| inked[i]);
+        let first = ink.next()?;
+        let r = region[first]?;
+        let mut last = first;
+        let cell = ink.find(|&i| {
+            let of_block = region[i] == Some(r);
+            if of_block {
+                last = i;
+            }
+            !of_block
+        })?;
+        let grid = boxed[cell]?;
+        let rest = || (cell..b).filter(|&i| inked[i]);
+        let in_grid = rest().all(|i| boxed[i] == Some(grid) && region[i] != Some(r));
+        let block_out = (a..cell)
+            .filter(|&i| inked[i])
+            .all(|i| boxed[i] != Some(grid));
+        let row = rest().zip(rest().skip(1)).any(|(p, i)| apart(p, i));
+        let under = (end > b).then(|| (b..end).find(|&i| inked[i])).flatten()?;
+        (in_grid
+            && block_out
+            && row
+            && apart(last, cell)
+            && lines_of(r)
+            && all_of(b, end, r)
+            && own_rule(last, under, cell))
+        .then_some((cell, r))
+    };
     let mut cuts: Vec<usize> = Vec::new();
+    // The lines with cells placed before their block: the line's start, the first run of the
+    // cells and the line's end.
+    let mut moved: Vec<(usize, usize, usize)> = Vec::new();
     let mut whole: Vec<u32> = Vec::new();
     for l in 0..starts.len() - 1 {
         let (a, b) = (starts[l], starts[l + 1]);
         let next_end = starts.get(l + 2).copied();
+        if let Some((cell, r)) = cells_after_block(a, b, next_end) {
+            moved.push((a, cell, b));
+            whole.push(r);
+            continue;
+        }
         let mut before: Option<usize> = None;
         for i in (a..b).filter(|&i| inked[i]) {
             if let (Some(p), Some(r)) = (before, region[i])
                 && region[p] != Some(r)
                 && boxed[p] != boxed[i]
-                && extent[i].0 - extent[p].1 > CELL_GAP * extent[p].2.max(extent[i].2)
+                && apart(p, i)
                 && lines_of(r)
                 && all_of(i, b, r)
                 && next_end.map_or_else(|| several(r), |end| all_of(b, end, r))
@@ -128,21 +195,38 @@ pub fn part_lines(
             before = Some(i);
         }
     }
-    if cuts.is_empty() {
+    if cuts.is_empty() && moved.is_empty() {
         return None;
     }
     whole.sort_unstable();
     whole.dedup();
+    // The order the runs are read in, and the runs a line starts at besides the first of
+    // each line of the text pass: a run a line is cut before, and the block the cells of its
+    // line are placed before.
+    let mut order: Vec<usize> = Vec::with_capacity(n);
+    let mut at = 0;
+    for &(a, cell, b) in &moved {
+        order.extend(at..a);
+        order.extend(cell..b);
+        order.extend(a..cell);
+        at = b;
+    }
+    order.extend(at..n);
     let mut lines = Vec::with_capacity(n);
     let mut at = 0u32;
-    for i in 0..n {
-        if i > 0 && (line[i] != line[i - 1] || cuts.binary_search(&i).is_ok()) {
+    for (k, &i) in order.iter().enumerate() {
+        let block = moved.binary_search_by_key(&i, |m| m.0).is_ok();
+        if k > 0 && (line[i] != line[order[k - 1]] || block || cuts.binary_search(&i).is_ok()) {
             at += 1;
         }
         lines.push(at);
     }
-    work::add(n as u64);
-    Some(Parted { lines, whole })
+    work::add(2 * n as u64);
+    Some(Parted {
+        lines,
+        whole,
+        order,
+    })
 }
 
 #[cfg(test)]
@@ -158,6 +242,7 @@ mod tests {
             &vec![true; line.len()],
             &far(line.len()),
             &|_| false,
+            &|_, _, _| false,
         )
     }
 
@@ -197,7 +282,15 @@ mod tests {
         let gap = |g: f32, size: f32| {
             let mut e = far(7);
             e[3] = (e[2].1 + g, e[2].1 + g + 40.0, size);
-            part_lines(&line, &region, &boxed, &[true; 7], &e, &|_| false)
+            part_lines(
+                &line,
+                &region,
+                &boxed,
+                &[true; 7],
+                &e,
+                &|_| false,
+                &|_, _, _| false,
+            )
         };
         assert!(gap(10.1, 10.0).is_some());
         assert_eq!(gap(9.9, 10.0), None);
@@ -208,6 +301,106 @@ mod tests {
             part(&line, &region, &two).unwrap().lines,
             [0, 0, 0, 1, 2, 3, 4]
         );
+    }
+
+    /// The mirror (Task 36a): a label starts the line of a table's header cells, its value
+    /// alone on the next line, and a drawn line of the label's own stands between the two.
+    /// The cells are placed on a line of their own before the label, so the label's lines
+    /// follow each other; the label's region is kept whole.
+    #[test]
+    fn header_cells_after_a_label_over_its_value_are_placed_before_it() {
+        let line = [0, 0, 0, 0, 1, 2, 3];
+        let region = [Some(5), None, None, None, Some(5), Some(6), Some(6)];
+        let boxed = [None, Some(1), Some(1), Some(1), None, None, None];
+        let own = |a: usize, b: usize, c: usize| (a, b, c) == (0, 4, 1);
+        let mirror = |line: &[u32], region: &[Option<u32>], boxed: &[Option<u32>]| {
+            let n = line.len();
+            part_lines(
+                line,
+                region,
+                boxed,
+                &vec![true; n],
+                &far(n),
+                &|_| false,
+                &own,
+            )
+        };
+        let p = mirror(&line, &region, &boxed).unwrap();
+        assert_eq!(p.order, [1, 2, 3, 0, 4, 5, 6]);
+        assert_eq!(p.lines, [0, 0, 0, 1, 2, 3, 4]);
+        assert_eq!(p.whole, [5]);
+        // A second such line farther down, after a line of other text.
+        let (line2, n2) = ([0, 0, 0, 1, 2, 3, 3, 3, 4], 9);
+        let region2 = [
+            Some(5),
+            None,
+            None,
+            Some(5),
+            Some(6),
+            Some(7),
+            None,
+            None,
+            Some(7),
+        ];
+        let mut boxed2 = [None; 9];
+        for i in [1, 2, 6, 7] {
+            boxed2[i] = Some(1);
+        }
+        let two = part_lines(
+            &line2,
+            &region2,
+            &boxed2,
+            &[true; 9],
+            &far(n2),
+            &|_| false,
+            &|_, _, _| true,
+        )
+        .unwrap();
+        assert_eq!(two.order, [1, 2, 0, 3, 4, 6, 7, 5, 8]);
+        assert_eq!(two.lines, [0, 0, 1, 2, 3, 4, 4, 5, 6]);
+        assert_eq!(two.whole, [5, 7]);
+        // Each condition alone, the other way: no line of the label's own (a column of row
+        // labels beside a grid whose first row alone is filled);
+        assert_eq!(part(&line, &region, &boxed), None);
+        // one cell after the label (it may be the label's value);
+        let one = mirror(
+            &[0, 0, 1, 2],
+            &[Some(5), None, Some(5), Some(6)],
+            &[None, Some(1), None, None],
+        );
+        assert_eq!(one, None);
+        // the cells a word gap apart (one cell of several runs);
+        let near = |g: f32| {
+            let mut e = far(7);
+            e[2] = (e[1].1 + g, e[1].1 + g + 40.0, 10.0);
+            e[3] = (e[2].1 + g, e[2].1 + g + 40.0, 10.0);
+            part_lines(&line, &region, &boxed, &[true; 7], &e, &|_| false, &own)
+        };
+        assert!(near(10.1).is_some());
+        assert_eq!(near(9.9), None);
+        // the first cell a word gap after the label;
+        let mut e = far(7);
+        e[0] = (e[1].0 - 49.9, e[1].0 - 9.9, 10.0);
+        let touching = part_lines(&line, &region, &boxed, &[true; 7], &e, &|_| false, &own);
+        assert_eq!(touching, None);
+        // no drawn grid around the cells, or the label in it too, or the cells in two grids;
+        assert_eq!(mirror(&line, &region, &[None; 7]), None);
+        let inside = [Some(1), Some(1), Some(1), Some(1), None, None, None];
+        assert_eq!(mirror(&line, &region, &inside), None);
+        let grids = [None, Some(1), Some(1), Some(2), None, None, None];
+        assert_eq!(mirror(&line, &region, &grids), None);
+        // the label's region has this one line;
+        let lone = [Some(5), None, None, None, Some(7), Some(6), Some(6)];
+        assert_eq!(mirror(&line, &lone, &boxed), None);
+        // the next line holds other text too (rows);
+        let rows = [0, 0, 0, 0, 1, 1, 3];
+        let both = [Some(5), None, None, None, Some(5), None, Some(6)];
+        assert_eq!(mirror(&rows, &both, &boxed), None);
+        // there is no next line;
+        assert_eq!(mirror(&line[..4], &region[..4], &boxed[..4]), None);
+        // text of the label's region after the cells too (the cells stand inside the block).
+        let around = [Some(5), None, None, Some(5), Some(5), Some(6), Some(6)];
+        assert_eq!(mirror(&line, &around, &boxed), None);
     }
 
     /// A column of labels and a column of values are two regions of several lines, and each
@@ -241,7 +434,16 @@ mod tests {
         let region = [None, Some(4)];
         let boxed = [Some(1), None];
         assert_eq!(part(&line, &region, &boxed), None);
-        let got = part_lines(&line, &region, &boxed, &[true; 2], &far(2), &|r| r == 4).unwrap();
+        let got = part_lines(
+            &line,
+            &region,
+            &boxed,
+            &[true; 2],
+            &far(2),
+            &|r| r == 4,
+            &|_, _, _| false,
+        )
+        .unwrap();
         assert_eq!((got.lines, got.whole), (vec![0, 1], vec![4]));
         // Review 1 of Task 31c, M4: on the last line of the stretch the caller is asked,
         // and it says `several` of a region with ink on more than one line anywhere, the
@@ -251,7 +453,16 @@ mod tests {
         let line = [0, 1, 1];
         let region = [Some(4), None, Some(4)];
         let boxed = [None, Some(1), None];
-        let got = part_lines(&line, &region, &boxed, &[true; 3], &far(3), &|r| r == 4).unwrap();
+        let got = part_lines(
+            &line,
+            &region,
+            &boxed,
+            &[true; 3],
+            &far(3),
+            &|r| r == 4,
+            &|_, _, _| false,
+        )
+        .unwrap();
         assert_eq!((got.lines, got.whole), (vec![0, 1, 2], vec![4]));
         // The other way: a caller that says it of no region cuts no last line.
         assert_eq!(part(&line, &region, &boxed), None);
@@ -264,12 +475,29 @@ mod tests {
         let region = [None, Some(9), Some(2), Some(2)];
         let boxed = [Some(1), None, None, None];
         let inked = [true, false, true, true];
-        let p = part_lines(&line, &region, &boxed, &inked, &far(4), &|_| false).unwrap();
+        let p = part_lines(
+            &line,
+            &region,
+            &boxed,
+            &inked,
+            &far(4),
+            &|_| false,
+            &|_, _, _| false,
+        )
+        .unwrap();
         assert_eq!(p.lines, [0, 0, 1, 2]);
         // A blank run between two runs of one region is no change of region.
         let region = [Some(2), None, Some(2), Some(2)];
         assert_eq!(
-            part_lines(&line, &region, &boxed, &inked, &far(4), &|_| false),
+            part_lines(
+                &line,
+                &region,
+                &boxed,
+                &inked,
+                &far(4),
+                &|_| false,
+                &|_, _, _| false
+            ),
             None
         );
     }

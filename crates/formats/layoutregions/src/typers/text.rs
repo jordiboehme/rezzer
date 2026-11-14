@@ -263,6 +263,7 @@ impl SegText {
         let cx = TextCx {
             levels: &levels,
             block: &block,
+            own: &[],
         };
         crate::work::add((ext.len() + all.len()) as u64);
         let body = [view.file.body_size];

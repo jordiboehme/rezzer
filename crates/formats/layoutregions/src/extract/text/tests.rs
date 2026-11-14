@@ -185,6 +185,7 @@ fn a_list_between_paragraphs() {
     let cx = TextCx {
         levels: &levels(&[]),
         block: &block,
+        own: &[],
     };
     assert_eq!(
         walk(&lines, &cx),
@@ -232,6 +233,7 @@ fn extractors_return_every_prim_once() {
     let cx = TextCx {
         levels: &levels(&[16.0]),
         block: &block,
+        own: &[],
     };
     let blocks = walk(&lines, &cx);
     let mut seen = vec![0; lines.len()];
@@ -286,6 +288,7 @@ fn blocks_of(runs: &[TextRun]) -> Vec<(TextBlock, Range<usize>)> {
     let cx = TextCx {
         levels: &levels(&[16.0, 12.0]),
         block: &block,
+        own: &[],
     };
     walk(&lines, &cx)
 }
@@ -409,7 +412,7 @@ fn a_line_left_of_the_line_over_it_and_closer_than_a_line_starts_after_a_break()
         let runs = [at("3", 0, 218.6, 2.0, 389.0), second];
         let lines = text_lines(&runs);
         assert!(continues(&lines[0], &lines[1]));
-        line_breaks(&lines, 0, 2, &no_amount)
+        line_breaks(&lines, 0, 2, &[], &no_amount)
     };
     assert_eq!(breaks(at("code", 1, 45.0, 12.0, 384.6)), [(0, 1)]);
     // The step moved both ways (`LINE_STEP`, one size: 5.4 points): 0.1 points closer than
@@ -425,4 +428,185 @@ fn a_line_left_of_the_line_over_it_and_closer_than_a_line_starts_after_a_break()
     assert!(other_column((218.6, 220.6), (45.0, 57.0), 4.4, 5.4));
     assert!(!other_column((45.0, 59.0), (45.0, 61.0), 4.4, 5.4));
     assert!(!other_column((45.0, 57.0), (218.6, 220.6), 4.4, 5.4));
+}
+
+/// Task 36a part 1 (the letter head with a larger name): a bold name a little larger than the
+/// body over the smaller lines of its address at the address's own pitch is the first line of
+/// the address, a paragraph and no heading. A heading that stands farther over the lines than
+/// they stand from each other, lines of one shape, lines at another edge, one line under the
+/// name or lines without a number keep the heading.
+#[test]
+fn a_name_over_its_smaller_address_lines_opens_the_address() {
+    // The name at `size` and `x`, its first address line `lead` under it, the address lines
+    // at 8 points and `pitch` apart.
+    let page = |texts: &[&str], size: f32, x: f32, lead: f32, pitch: f32| -> Vec<TextRun> {
+        let mut runs = vec![TextRun {
+            bold: true,
+            x,
+            ..run(texts[0], 0, 700.0, size)
+        }];
+        for (k, t) in texts[1..].iter().enumerate() {
+            runs.push(run(t, 1 + k as u32, 700.0 - lead - pitch * k as f32, 8.0));
+        }
+        runs
+    };
+    let levels = levels(&[12.0]);
+    let read = |runs: &[TextRun]| {
+        let lines = text_lines(runs);
+        let block = vec![None; lines.len()];
+        let cx = TextCx {
+            levels: &levels,
+            block: &block,
+            own: &[],
+        };
+        match next_block(&lines, 0, false, &cx) {
+            (
+                TextBlock::Heading {
+                    demoted, breaks, ..
+                },
+                j,
+            ) => (j, demoted, breaks.len()),
+            other => panic!("{other:?}"),
+        }
+    };
+    let address = ["Sample Trading", "Mill Lane 4", "20481 Oldtown"];
+    // The name is a heading by its own style, and the three lines are one address with a
+    // break before each line under the name.
+    assert_eq!(
+        read(&page(&address, 12.0, 72.0, 10.4, 10.4)),
+        (3, Some(Demotion::Address), 2)
+    );
+    // The pitch of the lines against the lead of the name, each in its own size: the lead
+    // may be `TITLE_STEP` (1.1) times the pitch. 10.4 / 8 = 1.3 sizes, so 1.43 sizes of 12
+    // is the bound: 17.1 points holds, 17.2 is a heading over the address.
+    assert_eq!(
+        read(&page(&address, 12.0, 72.0, 17.1, 10.4)).1,
+        Some(Demotion::Address)
+    );
+    assert_eq!(read(&page(&address, 12.0, 72.0, 17.2, 10.4)), (1, None, 0));
+    // The name at another left edge than its lines (an edge is 0.1 sizes: 1.2 points).
+    assert_eq!(read(&page(&address, 12.0, 73.1, 10.4, 10.4)).0, 3);
+    assert_eq!(read(&page(&address, 12.0, 73.3, 10.4, 10.4)), (1, None, 0));
+    // One line under the name shows no pitch and no address.
+    assert_eq!(
+        read(&page(&address[..2], 12.0, 72.0, 10.4, 10.4)),
+        (1, None, 0)
+    );
+    // Lines without a number, and lines of one shape (a title over fields set alike).
+    let plain = ["Sample Trading", "Mill Lane", "Oldtown"];
+    assert_eq!(read(&page(&plain, 12.0, 72.0, 10.4, 10.4)), (1, None, 0));
+    let fields = ["Chapter 1", "Part 2", "Annex 3"];
+    assert_eq!(read(&page(&fields, 12.0, 72.0, 10.4, 10.4)), (1, None, 0));
+    // The shape of an address without a street and a town: a heading over rows of short
+    // fields with numbers, and over a short note that wraps, keeps its heading.
+    let rows = [
+        "Staff and office",
+        "Number: 20481 Born: 01.01.1990",
+        "Class: 1 Rate: 0.0",
+    ];
+    assert_eq!(read(&page(&rows, 12.0, 72.0, 10.4, 10.4)), (1, None, 0));
+    let note = ["Income", "Attach Form A-2", "here. Also", "attach Forms"];
+    assert_eq!(read(&page(&note, 12.0, 72.0, 10.4, 10.4)), (1, None, 0));
+    // Fix round 1 (review I2): a bold line over a complete address, one that has its own
+    // name line (a line without a digit over its street), is a heading over it: an address
+    // has one name. The label of an invoice (`Delivery address`) keeps its heading.
+    let headed = [
+        "Delivery address",
+        "Sample Trading",
+        "Mill Lane 4",
+        "20481 Oldtown",
+    ];
+    assert_eq!(read(&page(&headed, 12.0, 72.0, 10.4, 10.4)), (1, None, 0));
+    // The same label over an address without a name line reads as the first line of the
+    // address, by ruling (controller, fix round 1): the geometry cannot tell such a label
+    // from a name (both are short lines without a digit at the address's edge and pitch).
+    // One block with the bold first line kept bold: no value and no order moves, and the
+    // heading lost is the accepted cost (recorded for after 0.1.0).
+    let label = ["Delivery address", "Mill Lane 4", "20481 Oldtown"];
+    assert_eq!(
+        read(&page(&label, 12.0, 72.0, 10.4, 10.4)),
+        (3, Some(Demotion::Address), 2)
+    );
+    // The longest run of lines that is an address: prose after the town is no line of it,
+    // and a country under the town is.
+    let longer = [
+        "Sample Trading",
+        "Mill Lane 4",
+        "20481 Oldtown",
+        "Northland",
+        "we send the goods as agreed in the order of the first of the month",
+    ];
+    assert_eq!(read(&page(&longer, 12.0, 72.0, 10.4, 10.4)).0, 4);
+    // A line under the address at another pitch is no line of it.
+    let mut apart = page(&longer[..4], 12.0, 72.0, 10.4, 10.4);
+    apart[3].y -= 2.0;
+    assert_eq!(read(&apart).0, 3);
+    // At most `NAME_ADDRESS_LINES` (8) lines, the name counted.
+    let many = [
+        "Sample Trading",
+        "Hall 1",
+        "Gate 2",
+        "Dock 3",
+        "Mill Lane 4",
+        "20481 Oldtown",
+        "Room 6",
+        "Desk 7",
+        "Tray 8",
+    ];
+    assert_eq!(
+        read(&page(&many, 12.0, 72.0, 10.4, 10.4)).0,
+        NAME_ADDRESS_LINES
+    );
+    // A name much larger than the body (1.5 times the body of 10 and over) keeps its
+    // heading: a company's name set large over its address is the head of the letter.
+    assert_eq!(
+        read(&page(&address, 14.9, 72.0, 10.4, 10.4)).1,
+        Some(Demotion::Address)
+    );
+    assert_eq!(read(&page(&address, 15.0, 72.0, 10.4, 10.4)), (1, None, 0));
+    // The address in another block of its own than the name (a box between them): the name
+    // stays what it was.
+    let runs = page(&address, 12.0, 72.0, 10.4, 10.4);
+    let lines = text_lines(&runs);
+    let block = [Some(0), Some(1), Some(1)];
+    let cx = TextCx {
+        levels: &levels,
+        block: &block,
+        own: &[],
+    };
+    assert!(matches!(
+        next_block(&lines, 0, false, &cx),
+        (TextBlock::Heading { demoted: None, .. }, 1)
+    ));
+}
+
+/// A line the reader names as a line of its own (a line of blocks side by side read as
+/// columns, see [`TextCx::own`]) starts after a line break, though it goes on the sentence of
+/// the line over it; the lines stay one paragraph. Without the name the sentence is joined,
+/// and a name for the first line alone breaks nothing.
+#[test]
+fn a_line_of_its_own_is_never_joined_to_the_line_over_it() {
+    let runs = vec![
+        run("washer for the nut and the bolt, flat, set", 0, 730.0, 10.0),
+        run("of twelve pieces, zinc plated, in a paper", 1, 718.0, 10.0),
+        run("bag of the mill", 2, 706.0, 10.0),
+    ];
+    let lines = text_lines(&runs);
+    let block = vec![None; lines.len()];
+    let breaks = |own: &[bool]| {
+        let cx = TextCx {
+            levels: &levels(&[]),
+            block: &block,
+            own,
+        };
+        match walk(&lines, &cx).as_slice() {
+            [(TextBlock::Paragraph { breaks }, range)] if *range == (0..3) => breaks.clone(),
+            other => panic!("{other:?}"),
+        }
+    };
+    assert_eq!(breaks(&[]), []);
+    assert_eq!(breaks(&[false, false, false]), []);
+    assert_eq!(breaks(&[true, false, false]), []);
+    assert_eq!(breaks(&[false, true, false]), [(0, 1)]);
+    assert_eq!(breaks(&[true, true, true]), [(0, 1), (0, 2)]);
 }

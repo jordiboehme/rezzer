@@ -190,6 +190,10 @@ struct Taking {
     /// below, by its grid, has them as its caption once it is a table.
     titles: Vec<bool>,
     pending: HashMap<usize, Vec<usize>>,
+    /// Runs of a title line that stand over the rule of another block than the section they
+    /// were taken for, each with that rule: the title of the block under that rule (see
+    /// [`over_other_rule`] and [`head_blocks`]).
+    beside: Vec<(usize, Line)>,
     title_work: usize,
     bands: Vec<Band>,
     /// Cells drawn as icons, the page's rule boxes sorted by their bottom once needed, and
@@ -213,6 +217,7 @@ impl Taking {
             quietly: vec![false; n],
             titles: vec![false; n],
             pending: HashMap::new(),
+            beside: Vec::new(),
             title_work: 0,
             bands: Vec::new(),
             icons: Vec::new(),
@@ -264,6 +269,16 @@ fn section(
     } = part;
     let (mut xs, mut ys) = section_edges(sh, &h, &v, cut_above);
     let mut title = take.pending.remove(&id).unwrap_or_default();
+    // The title is only the text over the section's own columns: a title on the same line
+    // over the rule of another block heads that block.
+    if let (Some(&top), Some(&left), Some(&right)) = (ys.first(), xs.first(), xs.last()) {
+        let other = over_other_rule(&sh.flow.runs, sh.hs, &title, top, (left, right));
+        for &(i, _) in &other {
+            take.titles[i] = false;
+        }
+        title.retain(|i| !other.iter().any(|o| o.0 == *i));
+        take.beside.extend(other);
+    }
     if xs.len() >= 2 && ys.len() >= 2 {
         let mut place = TitlePlace {
             flow: sh.flow,
@@ -850,8 +865,10 @@ fn bands_and_strips(sh: &Sheet<'_>, take: &mut Taking, found: &mut Found) -> usi
     );
     // Rows of fields between rules no grid takes, in the text no table took.
     let strips_from = take.tables.len();
+    // A title that waits for the block under its rule is no field of a row.
+    let waits = |i: usize| take.beside.iter().any(|b| b.0 == i);
     let busy: Vec<bool> = (0..sh.flow.runs.len())
-        .map(|i| take.claimed[i].is_some() || take.held[i] || take.titles[i])
+        .map(|i| take.claimed[i].is_some() || take.held[i] || take.titles[i] || waits(i))
         .collect();
     let tabled: Vec<bool> = take.claimed.iter().map(Option::is_some).collect();
     let table_rules: Vec<Line> = sh
@@ -874,12 +891,14 @@ fn bands_and_strips(sh: &Sheet<'_>, take: &mut Taking, found: &mut Found) -> usi
         &mut take.tables,
         found,
     );
+    head_blocks(sh.flow, take);
     strips_from
 }
 
 /// The runs of all tables of `take` leave the flow at once, each to its cell; the runs held
-/// stay where they are. Then the icons go to their cells, and the first row of each table but
-/// those of totals and of strips (`pairs..strips_from`) is judged as a header by its text.
+/// stay where they are. Then the first row of each table but those of totals and of strips
+/// (`pairs..strips_from`) is judged as a header by its text, a title drawn as an icon counted
+/// as a title; the icons are said as a loss ([`icon_losses`]) and their cells stay empty.
 fn leave_flow(
     page: u32,
     flow: &mut Flow,
@@ -942,14 +961,17 @@ fn leave_flow(
         .map(|c| c.map(|(t, r, k)| (t as u32, r as u32, k as u32)))
         .collect();
     fill(&mut tables, flow, &target);
-    if let Some(template) = tables
+    // A title drawn as an icon counts as a header cell while the first row is judged: it
+    // stands for its text there. It is no text of the file, so it leaves its cell again, and
+    // the table says once which of its titles are drawings.
+    let template = tables
         .iter()
         .flat_map(|t| &t.rows)
         .flatten()
         .find_map(|c| c.runs.first())
-        .cloned()
-    {
-        for (t, r, k, cell) in icons {
+        .cloned();
+    if let Some(template) = &template {
+        for &(t, r, k, cell) in &icons {
             let size = template.size;
             tables[t].rows[r][k].runs.push(Run {
                 text: ICON.into(),
@@ -964,12 +986,78 @@ fn leave_flow(
             });
         }
     }
-    for (k, mut t) in tables.into_iter().enumerate() {
+    for (k, t) in tables.iter_mut().enumerate() {
         if t.header_rows == 0 && k >= pairs && k < strips_from {
             t.header_rows = header_of(&t.rows);
         }
-        found.tables.push(t);
     }
+    if template.is_some() {
+        for &(t, r, k, _) in &icons {
+            tables[t].rows[r][k].runs.pop();
+        }
+    }
+    // The words that name each table with an icon: the first of its text, row by row.
+    let named = |t: usize| -> String {
+        tables[t]
+            .rows
+            .iter()
+            .flatten()
+            .map(|c| {
+                c.runs
+                    .iter()
+                    .flat_map(|r| r.text.split_whitespace())
+                    .take(NAME_WORDS)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .find(|w| !w.is_empty())
+            .unwrap_or_default()
+    };
+    found.uncertain.extend(icon_losses(page, &icons, &named));
+    found.tables.extend(tables);
+}
+
+/// The losses of the titles drawn as icons (`icons`: table, row, cell and box of each), one
+/// for each table: `the table on page 2 that starts with "Time" has a drawing (an icon) and
+/// no text in the cells 1 and 3 of its first row: they are left empty`. `named` gives the
+/// first words of a table, which tell it from another table of the page (its anchor is not
+/// known here); a table without text is `a table on page 2`. The cells are counted from 1 as
+/// the row holds them.
+fn icon_losses(
+    page: u32,
+    icons: &[(usize, usize, usize, [f32; 4])],
+    named: &dyn Fn(usize) -> String,
+) -> Vec<String> {
+    let mut by_table: Vec<(usize, Vec<usize>)> = Vec::new();
+    for &(t, _, k, _) in icons {
+        match by_table.iter_mut().find(|(at, _)| *at == t) {
+            Some((_, cells)) => cells.push(k + 1),
+            None => by_table.push((t, vec![k + 1])),
+        }
+    }
+    by_table
+        .into_iter()
+        .map(|(t, mut cells)| {
+            cells.sort_unstable();
+            let names: Vec<String> = cells.iter().map(usize::to_string).collect();
+            let (which, left) = match names.split_last() {
+                Some((last, [])) => (format!("cell {last}"), "it is left empty"),
+                Some((last, rest)) => (
+                    format!("cells {} and {last}", rest.join(", ")),
+                    "they are left empty",
+                ),
+                None => (String::new(), ""),
+            };
+            let table = match named(t) {
+                words if words.is_empty() => format!("a table on page {page}"),
+                words => format!("the table on page {page} that starts with \"{words}\""),
+            };
+            format!(
+                "{table} has a drawing (an icon) and no text in the {which} of its first row: \
+                 {left}"
+            )
+        })
+        .collect()
 }
 
 /// Puts the runs of each row of fields of `found.apart` in the flow in the order to read them,
@@ -1305,6 +1393,69 @@ fn own_left(h: &[Line], hs: &[Line], top: f32, (left, right): (f32, f32)) -> f32
     if other { from } else { left }
 }
 
+/// The runs of `title` (the line right over a section's top rule at height `top`) that are
+/// not the section's, each with the rule it stands over: a run whose whole extent (its ink,
+/// without the blanks drawn before and after it, within a snap) stands over a rule of another block at that height (among the page's `hs`,
+/// sorted by height) that lies outside the section's columns (`left` to `right`). Two blocks
+/// side by side, each under its own rule, have their titles on one line: the caption of a
+/// table is the title over its own rule, and the title over the other rule heads the other
+/// block. A title that only reaches past its table's side, with no other rule under it
+/// there, stays whole. So does a run that reaches over both rules (both titles in one show,
+/// with no column rule between them to cut it): no part of it is handed to a block it does
+/// not stand over as a whole, and it stays the line over the section it was taken for.
+fn over_other_rule(
+    runs: &[Run],
+    hs: &[Line],
+    title: &[usize],
+    top: f32,
+    (left, right): (f32, f32),
+) -> Vec<(usize, Line)> {
+    let lo = hs.partition_point(|s| s.at < top - SNAP);
+    let beside: Vec<&Line> = hs[lo..]
+        .iter()
+        .take_while(|s| s.at <= top + SNAP)
+        .filter(|s| s.to <= left + SNAP || s.from >= right - SNAP)
+        .collect();
+    title
+        .iter()
+        .filter_map(|&i| {
+            let r = &runs[i];
+            // Where its ink stands: without the blanks it starts and ends with (their share
+            // of the run's width by its characters).
+            let chars = r.text.chars().count().max(1) as f32;
+            let lead = (r.text.chars().count() - r.text.trim_start().chars().count()) as f32;
+            let end = r.text.trim_end().chars().count() as f32;
+            let (x0, x1) = (r.x + r.w * lead / chars, r.x + r.w * end / chars);
+            let over = beside
+                .iter()
+                .find(|s| s.from <= x0 + SNAP && x1 <= s.to + SNAP)?;
+            Some((i, **over))
+        })
+        .collect()
+}
+
+/// Gives each title over the rule of another block (see [`over_other_rule`]) that no table
+/// took since to the table read under that rule, as its caption: the table whose drawn box
+/// has its top at the rule and lies within the rule's stretch. The table then stands where
+/// its title stands, so the title heads its own block and not the block beside it. A title
+/// with no such table stays text where it stands.
+fn head_blocks(flow: &Flow, take: &mut Taking) {
+    for (i, rule) in std::mem::take(&mut take.beside) {
+        if take.claimed[i].is_some() || take.titles[i] {
+            continue;
+        }
+        let under = take.tables.iter().position(|t| {
+            t.drawn.is_some_and(|b| {
+                (b[3] - rule.at).abs() <= SNAP && b[0] >= rule.from - SNAP && b[2] <= rule.to + SNAP
+            })
+        });
+        if let Some(t) = under {
+            take.claimed[i] = Some((t, CAPTION_ROW as usize, 0));
+            take.tables[t].at = take.tables[t].at.min(flow.at[i]);
+        }
+    }
+}
+
 /// The column of totals of `sides` that stands beside the section of column edges `xs` and
 /// row edges `ys` (from the top) with a strip that joins it: a strip that starts within the
 /// section.
@@ -1506,7 +1657,8 @@ fn first_words(runs: &[Run], table: &TableOut) -> String {
         .replace('"', "\\\"")
 }
 
-/// What a title drawn as an icon is written as.
+/// What stands for a title drawn as an icon while the first row is judged as a header: a
+/// word like any title. It is never written.
 const ICON: &str = "(icon)";
 
 /// Steps one page may take to look for icons in the cells of its tables.
@@ -1613,6 +1765,76 @@ mod tests {
     fn flow_of(runs: Vec<Run>) -> Flow {
         let n = runs.len();
         Flow::new(runs, vec![crate::layout::Slot::Free; n])
+    }
+
+    /// Task 36a part 1b (class F): two titles on one line, each over the rule of its own
+    /// block. The title over the other block's rule is not the caption of the table under
+    /// the section's own rule; a title over the table's own rule stays, however far it
+    /// reaches, and so does a title with no other rule under it.
+    #[test]
+    fn a_title_over_another_rule_is_not_the_caption() {
+        let runs = [spaced("Staff", 42.0), spaced("Wages", 282.0)];
+        let own = seg(96.0, 282.0, 458.0);
+        let other = seg(96.0, 42.0, 270.0);
+        let ask = |hs: &[Line], cols: (f32, f32)| -> Vec<usize> {
+            over_other_rule(&runs, hs, &[0, 1], 96.0, cols)
+                .iter()
+                .map(|o| o.0)
+                .collect()
+        };
+        // The left title stands over the other rule: it leaves, with that rule.
+        let found = over_other_rule(&runs, &[other, own], &[0, 1], 96.0, (282.0, 458.0));
+        assert_eq!(found, [(0, other)]);
+        // The same from the other side: the section left, the other rule right of it.
+        assert_eq!(ask(&[other, own], (42.0, 270.0)), [1]);
+        // One rule across both titles, the section as wide as it: the whole line stays.
+        assert_eq!(ask(&[seg(96.0, 42.0, 458.0)], (42.0, 458.0)), [0usize; 0]);
+        // No rule under the left title: it only reaches past the table's side and stays.
+        assert_eq!(ask(&[own], (282.0, 458.0)), [0usize; 0]);
+        // The other rule at another height is no rule of that line.
+        for (at, leaves) in [(96.0 + SNAP, true), (96.0 + SNAP + 0.5, false)] {
+            let hs = [own, seg(at, 42.0, 270.0)];
+            assert_eq!(ask(&hs, (282.0, 458.0)) == [0], leaves, "{at}");
+        }
+        // The other rule ends before the title does (42 to 72), by more than a snap: the
+        // title does not stand over it with its whole extent and stays where it is.
+        for (to, leaves) in [(72.0 - SNAP, true), (71.5 - SNAP, false)] {
+            let hs = [seg(96.0, 30.0, to), own];
+            assert_eq!(ask(&hs, (282.0, 458.0)) == [0], leaves, "{to}");
+        }
+        // And it starts after the title does.
+        for (from, leaves) in [(42.0 + SNAP, true), (42.5 + SNAP, false)] {
+            let hs = [seg(96.0, from, 270.0), own];
+            assert_eq!(ask(&hs, (282.0, 458.0)) == [0], leaves, "{from}");
+        }
+        // Fix round 2 (re-review N3): both titles in one run (one show with blanks between
+        // them, 42 to 312). Its middle stands over the other rule, but the run reaches over
+        // both rules and no column rule cuts it: it is handed to no other block and stays
+        // the line over the section, from either side.
+        let joined = [spaced(&format!("Staff{}Wages", " ".repeat(35)), 42.0)];
+        for cols in [(282.0, 458.0), (42.0, 270.0)] {
+            let found = over_other_rule(&joined, &[other, own], &[0], 96.0, cols);
+            assert_eq!(found, [], "{cols:?}");
+        }
+        // Fix round 3 (re-review 2, M3): a blank drawn before the title is no ink. The title
+        // whose show string starts with a blank (6 wide, drawn from 36) has its ink from 42
+        // and stands over the other rule from end to end; so does one with two blanks from
+        // 30. With its ink from 39 (the blank from 33) it starts more than a snap before the
+        // rule and stays.
+        for (x, text, leaves) in [
+            (36.0, " Staff", true),
+            (30.0, "  Staff", true),
+            (33.0, " Staff", false),
+        ] {
+            let runs = [spaced(text, x), spaced("Wages", 282.0)];
+            let found = over_other_rule(&runs, &[other, own], &[0, 1], 96.0, (282.0, 458.0));
+            assert_eq!(found == [(0, other)], leaves, "{x} {text:?}");
+        }
+        // A rule that lies within the section's columns is the section's own.
+        assert_eq!(
+            ask(&[seg(96.0, 42.0, 300.0), own], (282.0, 458.0)),
+            [0usize; 0]
+        );
     }
 
     /// The engine says where a column rule cuts a run (see `table::ruled::column_cuts`); the

@@ -658,7 +658,6 @@ fn table(
     // marks and merges of the body are named.
     let head = header_rows.min(grid.spots.len());
     let ranges = grid.ranges_from(head);
-    let legend = grid.marked(head) || !ranges.is_empty();
     let width = grid
         .width
         .max(layout.header_paths.len())
@@ -674,9 +673,7 @@ fn table(
         .iter()
         .filter_map(|n| Some((n.row, n.parent?)))
         .collect();
-    let mut body: Vec<Vec<String>> = (head..grid.spots.len())
-        .map(|r| grid.line(r, legend))
-        .collect();
+    let mut body: Vec<Vec<String>> = (head..grid.spots.len()).map(|r| grid.line(r)).collect();
     let aligns = if parents.is_empty() {
         aligns.to_vec()
     } else {
@@ -687,7 +684,7 @@ fn table(
         let label = |row: u32| -> String {
             at.get(&row)
                 .and_then(|&r| grid.spots[r].first().copied().flatten())
-                .map(|spot| grid.own(spot.cell(), legend))
+                .map(|spot| grid.own(spot.cell()))
                 .unwrap_or_default()
         };
         header.insert(0, "Parent".into());
@@ -702,7 +699,7 @@ fn table(
         shifted(aligns)
     };
     let mut notes: Vec<String> = Vec::new();
-    notes.extend(grid.merge_note(legend, &ranges));
+    notes.extend(grid.merge_note(head, (head, usize::from(!parents.is_empty())), &ranges));
     notes.extend(kinds_line(layout));
     notes.extend(grid.cut_notes());
     assemble(line, pipe_table(&header, &aligns, &body), notes)
@@ -718,20 +715,18 @@ fn grid(layout: &TableLayout, rows: &[Vec<Cell>], aligns: &[Align]) -> String {
         return line;
     }
     let ranges = grid.ranges();
-    let legend = grid.marked(0) || !ranges.is_empty();
     let header: Vec<String> = std::iter::once(String::new())
         .chain((0..grid.width.max(1)).map(|c| letter(left, c)))
         .collect();
     let body: Vec<Vec<String>> = (0..grid.spots.len())
         .map(|r| {
             let number = grid.sheet_row(r).map(|n| n.to_string()).unwrap_or_default();
-            std::iter::once(number)
-                .chain(grid.line(r, legend))
-                .collect()
+            std::iter::once(number).chain(grid.line(r)).collect()
         })
         .collect();
     let mut notes: Vec<String> = Vec::new();
-    notes.extend(grid.merge_note(legend, &ranges));
+    // The header line holds the column letters, the first column the row numbers.
+    notes.extend(grid.merge_note(0, (0, 1), &ranges));
     notes.extend(grid.cut_notes());
     assemble(line, pipe_table(&header, &shifted(aligns), &body), notes)
 }

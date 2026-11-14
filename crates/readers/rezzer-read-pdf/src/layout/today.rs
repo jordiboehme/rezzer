@@ -77,6 +77,9 @@ pub(super) struct Reading {
     /// The cells of rows of fields the ruled pass read apart: the ids of each cell's runs
     /// (see `tables::Found::cells`).
     pub cells: Vec<Vec<u32>>,
+    /// The runs whose lines stay lines of their own, by their ids (see
+    /// `tables::Found::own_lines`).
+    pub own_lines: Vec<u32>,
 }
 
 /// Today's reading of the page whose flow (the tables of its tag tree taken out) is `flow`:
@@ -201,6 +204,7 @@ pub(super) fn read(
     };
     out.tables.extend(found.tables);
     out.cells = found.cells;
+    out.own_lines = found.own_lines;
     out.unsure.extend(
         found
             .unsure

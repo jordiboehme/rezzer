@@ -486,6 +486,7 @@ fn links_follow_their_targets_across_parts() {
         needs_vision: false,
         codes: Vec::new(),
         code_unread: false,
+        shows: None,
     });
     d.body.push(heading(2, "Alpha"));
     d.body.push(para(&words(5_000)));
@@ -595,6 +596,7 @@ fn asset_rule_counts_import_length() {
             needs_vision: false,
             codes: Vec::new(),
             code_unread: false,
+            shows: None,
         });
         d.body.push(Block::Media {
             asset: id,
@@ -624,6 +626,65 @@ fn asset_rule_counts_import_length() {
                 .count(),
     )));
     assert_eq!(split(&plain, &opts(), 2_500, "b"), None);
+}
+
+#[test]
+fn known_limit_pictures_kept_under_another_note_pass_the_part_size() {
+    // Known limit (task 36a review 3, I-4; on the list of work after 0.1.0). An import keeps
+    // pictures that are equal byte for byte once, under the note it took first. A file read
+    // twice under two names (two copies of one form, the same form sent each month) then
+    // has the picture links of its second note rewritten into the folder of the first
+    // note, whose path Rezzer cannot know: the size counts each link at the note's own
+    // path. Here 400 pictures in the note `b`, split at 2,500 tokens: every part is within
+    // the part size as Rezzer counts it, and a part passes it once its links point into the
+    // folder of a note with a longer path. When this test fails the limit is closed: take
+    // its entry off the list.
+    let mut d = doc(FormatId::Markdown);
+    for i in 0..400 {
+        let id = format!("a{i:03}");
+        d.assets.push(Asset {
+            id: id.clone(),
+            path: Some(format!("b.assets/{id}.png")),
+            sha256: "00".into(),
+            mime: "image/png".into(),
+            caption: None,
+            alt: Some("p".into()),
+            needs_vision: false,
+            codes: Vec::new(),
+            code_unread: false,
+            shows: None,
+        });
+        d.body.push(Block::Media {
+            asset: id,
+            alt: None,
+            anchor: None,
+        });
+    }
+    let list = units(&d, 2_500);
+    assert_within(&list, 2_500);
+    // The first note of the same file, as the import root sees it: a longer name in a
+    // folder, 100 characters where the size counted the note `b` and its part.
+    let first = "archive/forms/first-copy-of-the-form-as-it-came-in-with-the-post-of-that-month-from-the-office.pdf/a";
+    assert_eq!(first.len(), 100);
+    let after_import = |markdown: &str| {
+        let mut chars = markdown.chars().count();
+        let mut rest = markdown;
+        while let Some(at) = rest.find("](") {
+            rest = &rest[at + 2..];
+            let dest = &rest[..rest.find(')').unwrap_or(rest.len())];
+            if let Some(name) = dest.rsplit('/').next().filter(|n| n.ends_with(".png")) {
+                let rewritten = "assets/".len() + first.len() + 1 + name.len();
+                chars = chars + rewritten - dest.len().min(rewritten);
+            }
+        }
+        chars / 4
+    };
+    let over: Vec<usize> = list
+        .iter()
+        .map(|u| after_import(&u.markdown))
+        .filter(|&tokens| tokens > 2_500)
+        .collect();
+    assert!(!over.is_empty(), "no part passes the part size any more");
 }
 
 #[test]
@@ -1576,7 +1637,7 @@ fn wikilinks_in_code_stay_and_in_text_are_escaped() {
     let md = render(&d, Completeness::Complete, &opts());
     assert!(md.contains("A `[[x]]` b."), "{md}");
     assert!(md.contains("\n[[y]]\n"), "{md}");
-    assert!(md.contains(r"See \[\[z\]\] and \[\[p\_q\|R\]\]."), "{md}");
+    assert!(md.contains(r"See \[\[z\]\] and \[\[p_q\|R\]\]."), "{md}");
 }
 
 fn titles(list: &[Unit]) -> Vec<&str> {
@@ -1799,6 +1860,7 @@ fn counted_doc(n: usize, formulas: usize) -> Document {
             needs_vision: true,
             codes: Vec::new(),
             code_unread: false,
+            shows: None,
         });
         d.losses.push(loss(&format!("thing {i}")));
     }

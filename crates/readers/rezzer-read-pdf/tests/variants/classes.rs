@@ -508,7 +508,7 @@ fn wrapped_text_beside_stacked_values(v: &Variant) -> Sheet {
 /// each a net over a gross amount under a title of two lines: one record a drawn row, each cell
 /// its two lines. Every line fills the band, so the ruled reader's band rule from before Task 29
 /// cuts each drawn row in two rows (the article number with the gross amounts): a known class
-/// (`known.rs`, Task 36a), not the wanted reading.
+/// (`known.rs`, kept after 0.1.0), not the wanted reading.
 fn item_beside_net_over_gross(v: &Variant) -> Sheet {
     let rows: [&[&[&str]]; 2] = [
         &[
@@ -703,7 +703,7 @@ fn a_sentence_across_rule_breaks(v: &Variant) -> Sheet {
 /// Review Minor 2, open: an item table without rules whose rows are a line of values over a
 /// detail line, and a note of one piece under the last row, where its detail line would stand,
 /// in the same face. The note is no part of the last row. Nothing on the page tells it from a
-/// detail line, so it reads as one today: a known class (`known.rs`, Task 36a).
+/// detail line, so it reads as one today: a known class (`known.rs`, kept after 0.1.0).
 fn a_note_where_a_detail_line_would_stand(v: &Variant) -> Sheet {
     let k = v.k();
     let (plain, _) = v.faces();
@@ -1015,7 +1015,7 @@ const LISTED_ITEMS: [[&str; 5]; 3] = [
 /// of one table: each count and price reads in the row of its item, never after all items,
 /// and the header is the table's header row, each title a cell of its own.
 fn item_rows_under_an_info_block(v: &Variant) -> Sheet {
-    item_rows_on_a_letter_page(v, false)
+    item_rows_on_a_letter_page(v, Over::Titles)
 }
 
 /// Task 31c: the page of [`item_rows_under_an_info_block`] as a second sheet of its list.
@@ -1024,12 +1024,39 @@ fn item_rows_under_an_info_block(v: &Variant) -> Sheet {
 /// The rows are still rows: each count and price is read with its item, never after all
 /// items.
 fn item_rows_under_a_carried_row(v: &Variant) -> Sheet {
-    item_rows_on_a_letter_page(v, true)
+    item_rows_on_a_letter_page(v, Over::Carried)
 }
 
-/// The page of [`item_rows_under_an_info_block`]; with `carried`, the row over the rule in
-/// pieces holds a label and an amount (see [`item_rows_under_a_carried_row`]) and no titles.
-fn item_rows_on_a_letter_page(v: &Variant, carried: bool) -> Sheet {
+/// What stands right over the rule in pieces of [`item_rows_on_a_letter_page`].
+#[derive(Clone, Copy, PartialEq)]
+enum Over {
+    /// The titles of the rows.
+    Titles,
+    /// A row carried over: a label over the names and its amount over the prices, in the
+    /// face and size of the rows.
+    Carried,
+    /// A heading in bold, two points larger than the rows, with a date in the rows' face
+    /// flush right at the edge of the prices. The heading starts at the page margin, where
+    /// the position numbers of the rows then start too (`true`), or over the names.
+    Heading(bool),
+}
+
+/// Task 36a fix round 3 (re-review 2, I1): the page of [`item_rows_under_a_carried_row`]
+/// with a heading where the row carried over stood: a bold line and, flush right at the edge
+/// of the prices, a date, on one baseline right over the rule in pieces. Each
+/// stands at an edge that the rows under the rule share, and one reads as a value: all that
+/// a row carried over shows. But a heading is set in another face than the rows, and a date
+/// is no value of a column of prices. The line is no row of the items: the heading stands
+/// in no block with an item, and the date in none with a price.
+fn item_rows_under_a_heading(v: &Variant, over: Over) -> Sheet {
+    item_rows_on_a_letter_page(v, over)
+}
+
+/// The page of [`item_rows_under_an_info_block`] with `over` right over the rule in pieces
+/// in the place of the titles (see [`item_rows_under_a_carried_row`] and
+/// [`item_rows_under_a_heading`]).
+fn item_rows_on_a_letter_page(v: &Variant, over: Over) -> Sheet {
+    let carried = over != Over::Titles;
     let k = v.k();
     let (plain, bold) = v.faces();
     let size = 11.0 * k;
@@ -1063,9 +1090,18 @@ fn item_rows_on_a_letter_page(v: &Variant, carried: bool) -> Sheet {
     t += &show(plain, size, 30.0, top - pitch * 3.0, " ");
     let head = top - pitch * 4.0 - 1.0 * k;
     let titles = ["No.", "Article (3)", "Count", "Price"];
-    let over = ["Carried over from sheet 1", "88,20"];
+    let kind = over;
+    let over = match kind {
+        Over::Heading(_) => ["Order items", "12.05.2026"],
+        _ => ["Carried over from sheet 1", "88,20"],
+    };
+    let margin = kind == Over::Heading(true);
     if carried {
-        t += &show(plain, size, x_desc, head, over[0]);
+        let (face, at, x) = match kind {
+            Over::Heading(margin) => (bold, 13.0 * k, if margin { 30.0 } else { x_desc }),
+            _ => (plain, size, x_desc),
+        };
+        t += &show(face, at, x, head, over[0]);
         t += &right(plain, size, x_price, head, over[1]);
     } else {
         t += &show(plain, size, 32.0, head, titles[0]);
@@ -1086,7 +1122,11 @@ fn item_rows_on_a_letter_page(v: &Variant, carried: bool) -> Sheet {
     let mut y = under_head - 13.0 * k;
     let mut table = vec![titles.iter().map(|c| c.to_string()).collect::<Vec<_>>()];
     for [pos, name, code, qty, price] in LISTED_ITEMS {
-        t += &right(plain, size, x_pos, y, pos);
+        if margin {
+            t += &show(plain, size, 30.0, y, pos);
+        } else {
+            t += &right(plain, size, x_pos, y, pos);
+        }
         t += &show(plain, size, x_desc, y, name);
         t += &show(plain, size, x_desc, y - 11.0 * k, code);
         t += &right(plain, size, x_qty, y, qty);
@@ -1123,13 +1163,33 @@ fn item_rows_on_a_letter_page(v: &Variant, carried: bool) -> Sheet {
     };
     let mut s = Sheet::new(built);
     s.once = crate::axes::shown(&s.built.page.template);
+    if matches!(kind, Over::Heading(_)) {
+        // The heading before the items and in no block with one; its date in no block with
+        // a price. The rows in order, each item before its own price.
+        let mut rows = vec![over[0].to_string()];
+        for item in LISTED_ITEMS {
+            s.want
+                .apart
+                .push((over[0].to_string(), item[1].to_string()));
+            s.want
+                .apart
+                .push((over[1].to_string(), item[4].to_string()));
+            rows.extend([item[1].to_string(), item[4].to_string()]);
+        }
+        s.want.orders.push(rows);
+        s.want
+            .order
+            .extend(["Saucer".to_string(), "Total".into(), "55,36".into()]);
+        return s;
+    }
     if carried {
         // The rows in order, each item before its own price and before the next item: a
         // table is not asked for (no titles), a read by columns is refused. The row carried
-        // over is not in the chain: its label and its amount stand on the two sides of the
-        // page's gutter, two lines of the text pass (see the pin of the larger face in
-        // known.rs, owner Task 36a).
-        let mut rows = Vec::new();
+        // over stands before them, its amount right after its label (the row over the rule is read whole: the
+        // two stand on the two sides of the page's gutter, and the block on the right stood
+        // between them).
+        s.want.together.push(over.map(String::from).to_vec());
+        let mut rows: Vec<String> = over.map(String::from).to_vec();
         for item in LISTED_ITEMS {
             rows.extend([item[1].to_string(), item[4].to_string()]);
         }
@@ -2041,6 +2101,16 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "item rows under a rule in pieces and a row carried over, on a page with a block of lines on the right",
             axes: LISTED,
             draw: |v| (item_rows_under_a_carried_row(v), None),
+        },
+        Shape {
+            name: "a heading from the margin with a date right over the rule in pieces of item rows",
+            axes: LISTED,
+            draw: |v| (item_rows_under_a_heading(v, Over::Heading(true)), None),
+        },
+        Shape {
+            name: "a heading over the names with a date right over the rule in pieces of item rows",
+            axes: LISTED,
+            draw: |v| (item_rows_under_a_heading(v, Over::Heading(false)), None),
         },
     ]
 }

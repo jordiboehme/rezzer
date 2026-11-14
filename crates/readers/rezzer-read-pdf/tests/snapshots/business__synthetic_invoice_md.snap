@@ -36,7 +36,7 @@ document_date_from: "date label \"Datum\" on page 1"
 
 | Key | Value |
 | --- | --- |
-| pdf\_version | 1.7 |
+| pdf_version | 1.7 |
 
 :status[Page 1]{grey}
 

@@ -727,11 +727,13 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
             ));
         }
     }
-    // The texts of a list follow each other with nothing of the page between them.
+    // The texts of a list follow each other with nothing of the page between them. The
+    // bounds of the cells of a table row are no text: a label and its amount in two cells of
+    // one row, with an empty cell between them, follow each other.
     for chain in want.together.iter().filter(|c| !c.is_empty()) {
         let page_text = collapse(&text(page_blocks(out, n)));
         let whole = collapse(&chain.join(" "));
-        if !page_text.contains(&whole) {
+        if !page_text.contains(&whole) && !collapse(&page_text.replace('|', " ")).contains(&whole) {
             broken.push(Broken(
                 Inv::Order,
                 format!("page {p}: {chain:?} do not follow each other: {page_text:?}"),

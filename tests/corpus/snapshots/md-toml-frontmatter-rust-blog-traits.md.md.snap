@@ -51,7 +51,7 @@ One of the mantras of C++, one of the qualities that make it a good fit for syst
 
 > C++ implementations obey the zero-overhead principle: What you don't use, you don't pay for \[Stroustrup, 1994\]. And further: What you do use, you couldn't hand code any better.
 >
-> \-- Stroustrup
+> -- Stroustrup
 
 This mantra did not always apply to Rust, which for example used to have mandatory garbage collection. But over time Rust's ambitions have gotten ever lower-level, and zero-cost abstraction is now a core principle.
 

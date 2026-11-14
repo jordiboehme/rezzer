@@ -2,6 +2,16 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 {
+  "assets": [
+    {
+      "alt": "text kept as laid out at p1:b2, box 57, 694 to 268, 722",
+      "id": "page-1-region-1",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": "",
+      "shows": "p1:b2"
+    }
+  ],
   "body": [
     {
       "anchor": "p1",
@@ -30,6 +40,9 @@ source: crates/rezzer/tests/corpus.rs
         },
         {
           "anchor": "p1:b2",
+          "grid": {
+            "col": 0
+          },
           "lines": [
             {
               "pieces": [
@@ -55,7 +68,16 @@ source: crates/rezzer/tests/corpus.rs
           "type": "spatial"
         },
         {
+          "alt": "text kept as laid out at p1:b2, box 57, 694 to 268, 722",
+          "anchor": "p1:m1",
+          "asset": "page-1-region-1",
+          "type": "media"
+        },
+        {
           "anchor": "p1:b3",
+          "grid": {
+            "col": 0
+          },
           "lines": [
             {
               "pieces": [
@@ -80,6 +102,9 @@ source: crates/rezzer/tests/corpus.rs
         },
         {
           "anchor": "p1:b5",
+          "grid": {
+            "col": 0
+          },
           "lines": [
             {
               "pieces": [
@@ -234,19 +259,19 @@ source: crates/rezzer/tests/corpus.rs
     {
       "location": "p1:b2",
       "severity": "info",
-      "what": "the region at p1:b2 is kept as laid out, as text in its columns: no region type has clear evidence for it",
+      "what": "the region at p1:b2 is kept as laid out, line by line: no region type has clear evidence for it",
       "why": "uncertain"
     },
     {
       "location": "p1:b3",
       "severity": "info",
-      "what": "the region at p1:b3 is kept as laid out, as text in its columns: no region type has clear evidence for it",
+      "what": "the region at p1:b3 is kept as laid out, line by line: no region type has clear evidence for it",
       "why": "uncertain"
     },
     {
       "location": "p1:b5",
       "severity": "info",
-      "what": "the region at p1:b5 is kept as laid out, as text in its columns: no region type has clear evidence for it",
+      "what": "the region at p1:b5 is kept as laid out, line by line: no region type has clear evidence for it",
       "why": "uncertain"
     }
   ],

@@ -61,7 +61,7 @@ pub(crate) fn unsure(out: &ReadOutcome) -> Vec<&str> {
         .filter(|l| l.why == LossReason::Uncertain)
         .map(|l| l.what.as_str())
         .filter(|w| {
-            !(w.contains("is kept as laid out, as text in its columns")
+            !(w.contains("is kept as laid out, ")
                 && (w.contains("no region type has clear evidence for it")
                     || w.contains("about equally")
                     || w.contains("but not clearly enough")

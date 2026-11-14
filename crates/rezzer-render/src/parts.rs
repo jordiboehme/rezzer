@@ -653,6 +653,7 @@ fn stats(c: &Counts) -> Option<String> {
             "picture that needs vision",
             "pictures that need vision",
         ),
+        (c.regions, "region to look at", "regions to look at"),
         (c.not_read, "part not read", "parts not read"),
     ]
     .into_iter()

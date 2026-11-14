@@ -2,6 +2,105 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 {
+  "assets": [
+    {
+      "alt": "text kept as laid out at p1:b30, box 310, 511 to 539, 542",
+      "id": "page-1-region-1",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": "",
+      "shows": "p1:b30"
+    },
+    {
+      "alt": "text kept as laid out at p1:b31 to p1:b33, box 326, 480 to 490, 507",
+      "id": "page-1-region-2",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": "",
+      "shows": "p1:b31"
+    },
+    {
+      "alt": "text kept as laid out at p1:b34, box 310, 448 to 559, 480",
+      "id": "page-1-region-3",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": "",
+      "shows": "p1:b34"
+    },
+    {
+      "alt": "text kept as laid out at p2:b30, box 310, 511 to 539, 542",
+      "id": "page-2-region-1",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": "",
+      "shows": "p2:b30"
+    },
+    {
+      "alt": "text kept as laid out at p2:b31 to p2:b33, box 326, 480 to 490, 507",
+      "id": "page-2-region-2",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": "",
+      "shows": "p2:b31"
+    },
+    {
+      "alt": "text kept as laid out at p2:b34, box 310, 448 to 559, 480",
+      "id": "page-2-region-3",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": "",
+      "shows": "p2:b34"
+    },
+    {
+      "alt": "text kept as laid out at p3:b30, box 310, 511 to 539, 542",
+      "id": "page-3-region-1",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": "",
+      "shows": "p3:b30"
+    },
+    {
+      "alt": "text kept as laid out at p3:b31 to p3:b33, box 326, 480 to 490, 507",
+      "id": "page-3-region-2",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": "",
+      "shows": "p3:b31"
+    },
+    {
+      "alt": "text kept as laid out at p3:b34, box 310, 448 to 559, 480",
+      "id": "page-3-region-3",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": "",
+      "shows": "p3:b34"
+    },
+    {
+      "alt": "text kept as laid out at p3:b47, box 40, 29 to 576, 48",
+      "id": "page-3-region-4",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": "",
+      "shows": "p3:b47"
+    },
+    {
+      "alt": "text kept as laid out at p4:b7, box 56, 496 to 282, 514",
+      "id": "page-4-region-1",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": "",
+      "shows": "p4:b7"
+    },
+    {
+      "alt": "text kept as laid out at p4:b8, box 56, 455 to 282, 489",
+      "id": "page-4-region-2",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": "",
+      "shows": "p4:b8"
+    },
+    "<1 more items>"
+  ],
   "body": [
     {
       "anchor": "p1",
@@ -79,6 +178,9 @@ source: crates/rezzer/tests/corpus.rs
         },
         {
           "anchor": "p1:b6",
+          "grid": {
+            "col": 36
+          },
           "lines": [
             {
               "pieces": [
@@ -151,7 +253,7 @@ source: crates/rezzer/tests/corpus.rs
           "role": "page-header",
           "type": "paragraph"
         },
-        "<37 more items>"
+        "<40 more items>"
       ],
       "kind": "page",
       "type": "section"
@@ -232,6 +334,9 @@ source: crates/rezzer/tests/corpus.rs
         },
         {
           "anchor": "p2:b6",
+          "grid": {
+            "col": 36
+          },
           "lines": [
             {
               "pieces": [
@@ -304,7 +409,7 @@ source: crates/rezzer/tests/corpus.rs
           "role": "page-header",
           "type": "paragraph"
         },
-        "<37 more items>"
+        "<40 more items>"
       ],
       "kind": "page",
       "type": "section"
@@ -385,6 +490,9 @@ source: crates/rezzer/tests/corpus.rs
         },
         {
           "anchor": "p3:b6",
+          "grid": {
+            "col": 36
+          },
           "lines": [
             {
               "pieces": [
@@ -457,7 +565,7 @@ source: crates/rezzer/tests/corpus.rs
           "role": "page-header",
           "type": "paragraph"
         },
-        "<36 more items>"
+        "<40 more items>"
       ],
       "kind": "page",
       "type": "section"
@@ -548,6 +656,9 @@ source: crates/rezzer/tests/corpus.rs
         },
         {
           "anchor": "p4:b7",
+          "grid": {
+            "col": 5
+          },
           "lines": [
             {
               "pieces": [
@@ -580,7 +691,16 @@ source: crates/rezzer/tests/corpus.rs
           "type": "spatial"
         },
         {
+          "alt": "text kept as laid out at p4:b7, box 56, 496 to 282, 514",
+          "anchor": "p4:m1",
+          "asset": "page-4-region-1",
+          "type": "media"
+        },
+        {
           "anchor": "p4:b8",
+          "grid": {
+            "col": 5
+          },
           "lines": [
             {
               "pieces": [
@@ -629,6 +749,12 @@ source: crates/rezzer/tests/corpus.rs
           "type": "spatial"
         },
         {
+          "alt": "text kept as laid out at p4:b8, box 56, 455 to 282, 489",
+          "anchor": "p4:m2",
+          "asset": "page-4-region-2",
+          "type": "media"
+        },
+        {
           "anchor": "p4:b9",
           "inlines": [
             {
@@ -643,36 +769,7 @@ source: crates/rezzer/tests/corpus.rs
           ],
           "type": "paragraph"
         },
-        {
-          "anchor": "p4:b10",
-          "lines": [
-            {
-              "pieces": [
-                {
-                  "col": 0,
-                  "text": "15-51"
-                }
-              ]
-            }
-          ],
-          "type": "spatial"
-        },
-        {
-          "anchor": "p4:b11",
-          "inlines": [
-            {
-              "strong": true,
-              "text": "United States Treasury",
-              "type": "text"
-            },
-            {
-              "text": " 000",
-              "type": "text"
-            }
-          ],
-          "type": "paragraph"
-        },
-        "<19 more items>"
+        "<22 more items>"
       ],
       "kind": "page",
       "type": "section"
@@ -992,43 +1089,43 @@ source: crates/rezzer/tests/corpus.rs
     {
       "location": "p1:b6",
       "severity": "info",
-      "what": "the region at p1:b6 is kept as laid out, as text in its columns: it reads as header band or as heading about equally (900 and 850 of 1000); its bold text is marked in the JSON only",
+      "what": "the region at p1:b6 is kept as laid out, line by line: it reads as header band or as heading about equally (900 and 850 of 1000)",
       "why": "uncertain"
     },
     {
       "location": "p1:b19",
       "severity": "info",
-      "what": "the region at p1:b19 is kept as laid out, as text in its columns: no region type has clear evidence for it",
+      "what": "the region at p1:b19 is kept as laid out, line by line: no region type has clear evidence for it",
       "why": "uncertain"
     },
     {
       "location": "p1:b22",
       "severity": "info",
-      "what": "the region at p1:b22 is kept as laid out, as text in its columns: no region type has clear evidence for it",
+      "what": "the region at p1:b22 is kept as laid out, line by line: no region type has clear evidence for it",
       "why": "uncertain"
     },
     {
       "location": "p1:b25",
       "severity": "info",
-      "what": "the region at p1:b25 is kept as laid out, as text in its columns: no region type has clear evidence for it",
+      "what": "the region at p1:b25 is kept as laid out, line by line: no region type has clear evidence for it",
       "why": "uncertain"
     },
     {
       "location": "p1:b26",
       "severity": "info",
-      "what": "the region at p1:b26 is kept as laid out, as text in its columns: no region type has clear evidence for it",
+      "what": "the region at p1:b26 is kept as laid out, line by line: no region type has clear evidence for it",
       "why": "uncertain"
     },
     {
       "location": "p1:b27",
       "severity": "info",
-      "what": "the region at p1:b27 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only",
+      "what": "the region at p1:b27 is kept as laid out, line by line: no region type has clear evidence for it",
       "why": "uncertain"
     },
     {
       "location": "p1:b30",
       "severity": "info",
-      "what": "the region at p1:b30 is kept as laid out, as text in its columns: it reads as table, but most of its cells are empty; its bold text is marked in the JSON only",
+      "what": "the region at p1:b30 is kept as laid out, line by line: it reads as table, but most of its cells are empty",
       "why": "uncertain"
     },
     {
@@ -1052,7 +1149,7 @@ source: crates/rezzer/tests/corpus.rs
     {
       "location": "p1:b34",
       "severity": "info",
-      "what": "the region at p1:b34 is kept as laid out, as text in its columns: no region type has clear evidence for it; its bold text is marked in the JSON only",
+      "what": "the region at p1:b34 is kept as laid out, line by line: no region type has clear evidence for it",
       "why": "uncertain"
     },
     "<47 more items>"

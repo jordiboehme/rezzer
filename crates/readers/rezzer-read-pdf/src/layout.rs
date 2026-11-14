@@ -21,6 +21,7 @@ use rezzer_limits::{Budget, LimitHit};
 use rezzer_model::{Anchor, Block, Cell, Inline, LossReason, SectionKind, Severity, StatusColor};
 
 use layoutregions::GapIn;
+use layoutregions::extract::spatial::SpatialFrame;
 use layoutregions::extract::text::{
     Demotion, TextBlock, TextCx, continues, list_marker, next_block, signed_amount,
 };
@@ -50,7 +51,7 @@ use hosts::Became;
 pub(crate) use head::{Dates, PageDate, TITLE_FROM, document_date, page_dates};
 use shape::ends_in_amount;
 
-use layoutregions::extract::pairs::blocks::address_block;
+use layoutregions::extract::pairs::blocks::{address_block, paragraph_columns};
 
 /// A piece of text in one style on one line. The text parser and the fallback parser fill it,
 /// in the order and with the line numbers and word spaces [`crate::text::PageItems`] states.
@@ -1416,7 +1417,8 @@ fn page_blocks_until(
     }
     let mut flow = match cx.tree {
         Some(tree) => {
-            let (runs, slots) = classified(runs, tree, cx);
+            let (mut runs, mut slots) = classified(runs, tree, cx);
+            tagged_columns(&mut runs, &mut slots);
             Flow::new(runs, slots)
         }
         None => {
@@ -1523,7 +1525,10 @@ fn page_blocks_until(
         doubts: today_doubts,
         issues: today_issues,
         cells: today_cells,
+        own_lines: today_own_lines,
     } = reading;
+    // The runs of blocks side by side that a wrapped paragraph shows: their lines stay lines.
+    let mut own_lines: HashSet<u32> = today_own_lines.into_iter().collect();
     // Each cell of a row of fields the ruled pass read apart is a block of its own, as a drawn
     // box is (keys past the boxes' indices): no paragraph goes on from one cell into another.
     let first_cell = u32::try_from(drawn.boxes.len()).unwrap_or(u32::MAX);
@@ -1862,6 +1867,7 @@ fn page_blocks_until(
                 found.extend(f.tables);
                 unsure.extend(f.unsure);
                 doubts.extend(f.doubts);
+                own_lines.extend(f.own_lines);
                 for (list, why) in [
                     (f.skipped, LossReason::Limit),
                     (f.uncertain, LossReason::Uncertain),
@@ -2266,6 +2272,8 @@ fn page_blocks_until(
         region_of: &|id| decided.text_region_of_run(id),
         grid_of: &|id| decided.given_of_run(id),
         several: &|k| several.contains(&k),
+        own_line: &|id| own_lines.contains(&id),
+        rules: &engine_in.rules,
     };
     let lay = |flow: &Flow, range: Range<usize>, built: &mut Built| {
         lay_text(flow, range, &keys, &text_sizes, cx, built);
@@ -2274,6 +2282,8 @@ fn page_blocks_until(
     // What each placed part became, and the runs it holds.
     let mut became: Vec<(Became, Vec<u32>)> = Vec::with_capacity(placed.len());
     let mut spatial_whys: Vec<(usize, String, bool)> = Vec::new();
+    // Where each block kept as laid out stands on the page, by its place in the blocks.
+    let mut spatial_frames: Vec<(usize, SpatialFrame)> = Vec::new();
     // Why runs were written as they were, where the writing says it (see `decide::agree`):
     // the reason of each block kept as laid out, by its runs.
     let mut whys: Vec<String> = Vec::new();
@@ -2383,12 +2393,14 @@ fn page_blocks_until(
                         })
                     })
                 };
+                let frame;
                 let lines = if s.pieces.is_empty() {
                     let prims: Vec<layoutregions::PrimId> = s
                         .ids
                         .iter()
                         .map(|&i| layoutregions::PrimId::Text(i))
                         .collect();
+                    frame = layoutregions::extract::spatial::frame(&engine_in, &prims);
                     let marks = |id: u32| match run_marks.get(&id) {
                         Some((uri, note)) => decide::RunMarks {
                             uri: uri.as_ref(),
@@ -2435,13 +2447,16 @@ fn page_blocks_until(
                     let prims: Vec<layoutregions::PrimId> = (0..s.pieces.len())
                         .map(|i| layoutregions::PrimId::Text(i as u32))
                         .collect();
+                    frame = layoutregions::extract::spatial::frame(&own, &prims);
                     decide::spatial_lines(&own, &prims, &marks, &mut link)
                 };
                 let k = whys.len();
                 whys.push(s.why.clone());
                 why_of.extend(s.ids.iter().map(|&i| (i, k)));
                 if built.spatial(lines, targets, cx) {
-                    spatial_whys.push((built.blocks.len() - 1, s.why, s.limit));
+                    let at = built.blocks.len() - 1;
+                    spatial_whys.push((at, s.why, s.limit));
+                    spatial_frames.extend(frame.map(|f| (at, f)));
                 }
             }
         }
@@ -2478,11 +2493,14 @@ fn page_blocks_until(
     footnotes::unlink(&mut built.blocks, &legend, &unwritten);
     // The running footer, block by block (see [`footer_blocks`]).
     let footer_lines = lines(&footer_flow.runs);
-    for block in footer_blocks(&footer_lines) {
+    let (footer, own_lines) = footer_blocks(&footer_lines);
+    for (n, block) in footer.iter().enumerate() {
         let runs: Vec<&Run> = block.iter().flat_map(|l| l.runs.iter()).collect();
+        // A line of columns that a wrapped paragraph shows stays a line of its own.
+        let own = own_lines.contains(&n);
         let mut breaks: Vec<(u32, u32)> = block
             .windows(2)
-            .filter(|w| !footer_wrap(&w[0], &w[1]))
+            .filter(|w| own || !footer_wrap(&w[0], &w[1]))
             .map(|w| (w[1].runs[0].page, w[1].runs[0].line))
             .collect();
         breaks.sort_unstable();
@@ -2557,6 +2575,20 @@ fn page_blocks_until(
     laid.earlier = earlier;
     laid.run_blocks = run_blocks;
     laid.media_at = media_at;
+    // A block kept as laid out that hosts a region of the engine gets its place on the page
+    // grid; rows of one small table cut into regions are joined on one grid.
+    let hosting: HashSet<usize> = laid
+        .regions
+        .regions
+        .iter()
+        .map(|r| r.host as usize)
+        .collect();
+    spatial_frames.retain(|(k, _)| hosting.contains(k));
+    place_spatial(
+        &mut laid.blocks,
+        &spatial_frames,
+        layoutregions::extract::spatial::page_grid(&engine_in),
+    );
     laid.engine_in = Some(engine_in);
     laid.probes_cut = probes_cut;
     laid.found_by = footnotes::note(page, footnotes_written, linked_written);
@@ -2575,19 +2607,27 @@ fn page_blocks_until(
         anchors.push(anchor.clone());
         set_anchor(block, Anchor(anchor));
     }
-    // Each block kept as laid out says so, at its anchor, and what of its style the Markdown
-    // cannot show (a fence holds no emphasis; the JSON marks it).
+    // Each block kept as laid out says so, at its anchor, and how the Markdown writes it:
+    // line by line, or, for blocks in the same columns that follow one another, as text in
+    // its columns. That form is a fence, which shows no emphasis (the JSON marks it).
+    let aligned: HashSet<usize> = rezzer_model::spatial_runs(&laid.blocks)
+        .into_iter()
+        .flatten()
+        .collect();
     for (k, why, limit) in spatial_whys {
         if let Some(at) = anchors.get(k) {
+            let how = if aligned.contains(&k) {
+                "as text in its columns"
+            } else {
+                "line by line"
+            };
             let styled = match laid.blocks.get(k) {
-                Some(Block::Spatial { lines, .. }) => style_clause(lines),
+                Some(Block::Spatial { lines, .. }) if aligned.contains(&k) => style_clause(lines),
                 _ => "",
             };
             laid.located.push((
                 at.clone(),
-                format!(
-                    "the region at {at} is kept as laid out, as text in its columns: {why}{styled}"
-                ),
+                format!("the region at {at} is kept as laid out, {how}: {why}{styled}"),
                 if limit {
                     LossReason::Limit
                 } else {
@@ -3404,6 +3444,32 @@ struct RunKeys<'a> {
     grid_of: &'a dyn Fn(u32) -> Option<u32>,
     /// Whether a region has ink on more than one line of the page's text.
     several: &'a dyn Fn(u32) -> bool,
+    /// Whether the run stands in blocks side by side read as columns, whose lines stay lines
+    /// of their own (see `tables::Found::own_lines`).
+    own_line: &'a dyn Fn(u32) -> bool,
+    /// The drawn lines of the page, in the frame of the runs.
+    rules: &'a [layoutregions::RuleIn],
+}
+
+/// A drawn line of a block's own stands between two of its lines (the mirror of
+/// `layoutregions::part_lines`): a line across the page's reading direction that lies at
+/// or under the baseline of `over` (a run of the block's upper line) and over the baseline of
+/// `under` (a run of its next line), stands under `over` with a part of its length, and ends
+/// before `beside`, the text that follows `over` on its line. A rule of a grid beside the
+/// block that goes on under the block does not end before the grid's text.
+fn own_rule(rules: &[layoutregions::RuleIn], over: &Run, under: &Run, beside: &Run) -> bool {
+    crate::work::add(rules.len() as u64);
+    rules.iter().any(|r| {
+        let (x0, x1) = (r.x0.min(r.x1), r.x0.max(r.x1));
+        let (y0, y1) = (r.y0.min(r.y1), r.y0.max(r.y1));
+        !r.rect
+            && y1 - y0 < x1 - x0
+            && y1 <= over.y
+            && y0 > under.y
+            && x0 < over.x + over.w
+            && x1 > over.x
+            && x1 < beside.x
+    })
 }
 
 /// How a run of text is laid out: by its tag (a run a tag element holds), or by the walk.
@@ -3461,6 +3527,10 @@ fn lay_text(
                 // a box's edge) parts headings and values from their labels, measured on the
                 // public sets. The walk then never takes a block from such a region into
                 // other text: the region is part of the key of its lines.
+                // The mirror (Task 36a): where the block starts the line and a row of the
+                // grid's cells follows it, the cells are read before the block when a drawn
+                // line of the block's own stands between its two lines (`own_rule`), so the
+                // label stands with its value.
                 let (region, boxed): (Vec<Option<u32>>, Vec<Option<u32>>) = ids
                     .iter()
                     .map(|&id| ((keys.region_of)(id), (keys.grid_of)(id)))
@@ -3476,22 +3546,37 @@ fn lay_text(
                     &inked,
                     &extent,
                     keys.several,
+                    &|over, under, beside| {
+                        own_rule(keys.rules, &runs[over], &runs[under], &runs[beside])
+                    },
                 );
                 match parted {
-                    None => untagged(runs, Some(ids), text_sizes, &walk_key, cx, built),
+                    None => {
+                        let keys = (&walk_key as &dyn Fn(u32) -> WalkKey, keys.own_line);
+                        untagged(runs, Some(ids), text_sizes, keys, cx, built);
+                    }
                     Some(parted) => {
-                        let cut: Vec<Run> = runs
+                        // The runs in the order the parting reads them: the cells of a grid
+                        // before the block that starts their line.
+                        let cut: Vec<Run> = parted
+                            .order
                             .iter()
                             .zip(&parted.lines)
-                            .map(|(r, &line)| Run { line, ..r.clone() })
+                            .map(|(&i, &line)| Run {
+                                line,
+                                ..runs[i].clone()
+                            })
                             .collect();
+                        let ids: Vec<u32> = parted.order.iter().map(|&i| ids[i]).collect();
+                        let ids = &ids[..];
                         let key = |id: u32| -> WalkKey {
                             let (kind, boxed, _) = walk_key(id);
                             let whole = (keys.region_of)(id)
                                 .filter(|r| parted.whole.binary_search(r).is_ok());
                             (kind, boxed, whole)
                         };
-                        untagged(&cut, Some(ids), text_sizes, &key, cx, built);
+                        let keys = (&key as &dyn Fn(u32) -> WalkKey, keys.own_line);
+                        untagged(&cut, Some(ids), text_sizes, keys, cx, built);
                     }
                 }
             }
@@ -3543,8 +3628,93 @@ enum Placed {
     },
 }
 
-/// What the loss of a block kept as laid out adds for its style: its bold or italic text is
-/// marked in the JSON only, as a text fence shows no emphasis.
+/// Gives each block of `blocks` kept as laid out whose place on the page is known (`frames`:
+/// its place in `blocks`, ascending, and its frame) its column on the grid of the page
+/// (`page`, see [`layoutregions::extract::spatial::page_grid`]), and joins rows of one small table that
+/// the engine cut into regions: a block joins the block kept as laid out before it (pictures
+/// between them aside) when both hold a line of two pieces or more and it stands right under
+/// that block in the column of the first block of the run ([`SpatialFrame::under`]). The
+/// columns of the pieces of a run are then counted on one grid, from the least left edge of
+/// its blocks in the least character width among them ([`SpatialFrame::column_on`]), so the
+/// Markdown can write the run as one block aligned in columns without moving a piece under
+/// a column it does not stand under. A block that does not join reads alone, as do blocks
+/// without a frame.
+///
+/// The columns of a block are counted from its own left edge in its own character width
+/// (re-review 3, N1): they say nothing about another block until both stand on one grid.
+fn place_spatial(
+    blocks: &mut [Block],
+    frames: &[(usize, SpatialFrame)],
+    page: Option<layoutregions::extract::spatial::PageGrid>,
+) {
+    let Some(page) = page.filter(|p| p.left.is_finite() && p.unit.is_finite() && p.unit > 0.0)
+    else {
+        return;
+    };
+    let (left, unit) = (page.left, page.unit);
+    // A line of two pieces or more: the block has columns.
+    let columns = |block: &Block| match block {
+        Block::Spatial { lines, .. } => lines.iter().any(|l| {
+            l.pieces
+                .iter()
+                .filter(|p| !p.text.trim().is_empty())
+                .nth(1)
+                .is_some()
+        }),
+        _ => false,
+    };
+    // The runs, a block alone too: the place and the frame of each block.
+    let mut runs: Vec<Vec<(usize, SpatialFrame)>> = Vec::new();
+    for &(k, frame) in frames {
+        if !matches!(blocks.get(k), Some(Block::Spatial { .. })) {
+            continue;
+        }
+        let joins = runs.last().is_some_and(|run| {
+            let (&(first, start), &(last, above)) = (&run[0], &run[run.len() - 1]);
+            // Only pictures stand between the last block of the run and this one.
+            last < k
+                && blocks[last + 1..k]
+                    .iter()
+                    .all(|b| matches!(b, Block::Media { .. }))
+                && columns(&blocks[first])
+                && columns(&blocks[k])
+                && frame.under(&above, start.x0, &page)
+        });
+        match runs.last_mut() {
+            Some(run) if joins => run.push((k, frame)),
+            _ => runs.push(vec![(k, frame)]),
+        }
+    }
+    for run in runs {
+        let x0 = run.iter().map(|(_, f)| f.x0).fold(f32::MAX, f32::min);
+        let adv = run.iter().map(|(_, f)| f.adv).fold(f32::MAX, f32::min);
+        let c = ((x0 - left) / unit).round();
+        let col = if c.is_finite() && c > 0.0 {
+            c.min(u32::MAX as f32) as u32
+        } else {
+            0
+        };
+        let one_grid = run.len() > 1 && adv.is_finite() && adv > 0.0;
+        for (n, (k, frame)) in run.into_iter().enumerate() {
+            let Some(Block::Spatial { lines, grid, .. }) = blocks.get_mut(k) else {
+                continue;
+            };
+            *grid = Some(rezzer_model::SpatialGrid {
+                col,
+                joins: one_grid && n > 0,
+            });
+            if one_grid {
+                for p in lines.iter_mut().flat_map(|l| &mut l.pieces) {
+                    p.col = frame.column_on(p.col, x0, adv);
+                }
+            }
+        }
+    }
+}
+
+/// What the loss of a block kept as laid out and written as text in its columns adds for its
+/// style: its bold or italic text is marked in the JSON only, as a text fence shows no
+/// emphasis.
 fn style_clause(lines: &[rezzer_model::SpatialLine]) -> &'static str {
     let spans = || lines.iter().flat_map(|l| &l.pieces).flat_map(|p| &p.spans);
     match (spans().any(|s| s.strong), spans().any(|s| s.emphasis)) {
@@ -3860,6 +4030,7 @@ impl Built {
             Block::Spatial {
                 lines,
                 links,
+                grid: None,
                 anchor: None,
             },
             cx,
@@ -4656,8 +4827,30 @@ fn inlines(
 /// a block is a line of its own: a footer lists facts (`USt-IdNr. DE000000000`,
 /// `www.muster.example`), it is no prose to join; only a sentence that wraps goes on (see
 /// [`footer_wrap`]).
-fn footer_blocks<'a>(all: &[Line<'a>]) -> Vec<Vec<Line<'a>>> {
-    let whole = || stacked(all.iter().map(|l| line(l.runs)).collect());
+///
+/// With the blocks, which of them are columns that a paragraph wrapped in one of them shows
+/// (see [`paragraph_columns`]): in those no line goes on, not even a sentence that wraps.
+/// What shows such columns the rows of a table can show too, and with its lines kept a
+/// column of a table read as a block loses the order of the rows only, never where an item
+/// ends.
+fn footer_blocks<'a>(all: &[Line<'a>]) -> (Vec<Vec<Line<'a>>>, Range<usize>) {
+    let whole = || (stacked(all.iter().map(|l| line(l.runs)).collect()), 0..0);
+    // A footer in columns that a paragraph wrapped in one of them shows is read column by
+    // column, whatever its blocks hold: the lines of that paragraph are no rows. The lines
+    // before and after the columns (a page number under them) are read as they are.
+    let mut at = 0;
+    for b in whole().0 {
+        let (from, to) = (at, at + b.len());
+        at = to;
+        if let Some(columns) = wrapped_columns(&all[from..to]) {
+            let stack = |lines: &[Line<'a>]| stacked(lines.iter().map(|l| line(l.runs)).collect());
+            let mut out = stack(&all[..from]);
+            let own = out.len()..out.len() + columns.len();
+            out.extend(columns);
+            out.extend(stack(&all[to..]));
+            return (out, own);
+        }
+    }
     let ink = |l: &Line<'a>| -> Vec<(f32, f32)> {
         l.runs
             .iter()
@@ -4759,7 +4952,39 @@ fn footer_blocks<'a>(all: &[Line<'a>]) -> Vec<Vec<Line<'a>>> {
     let mut out = alone(0..first);
     out.extend(blocks);
     out.extend(alone(first..all.len()));
-    out
+    (out, 0..0)
+}
+
+/// The lines of a footer column by column, each column's lines top down, when they are blocks
+/// side by side that a paragraph wrapped in one of them shows (see [`paragraph_columns`]).
+fn wrapped_columns<'a>(lines: &[Line<'a>]) -> Option<Vec<Vec<Line<'a>>>> {
+    let mut runs: Vec<&Run> = Vec::new();
+    let mut starts = Vec::with_capacity(lines.len());
+    let mut pieces = Vec::with_capacity(lines.len());
+    for l in lines {
+        let start = runs.len();
+        runs.extend(l.runs.iter());
+        pieces.push(layoutregions::extract::table::grid::pieces_of(
+            &runs,
+            start,
+            runs.len(),
+        ));
+        starts.push(start);
+    }
+    let cells = paragraph_columns(&runs, &pieces)?;
+    let column = |cells: Vec<Vec<usize>>| -> Vec<Line<'a>> {
+        cells
+            .iter()
+            .enumerate()
+            .filter_map(|(row, cell)| {
+                let (first, last) = (*cell.first()?, *cell.last()?);
+                Some(line(
+                    &lines[row].runs[first - starts[row]..last + 1 - starts[row]],
+                ))
+            })
+            .collect()
+    };
+    Some(cells.into_iter().map(column).collect())
 }
 
 /// Lines in reading order cut into blocks of lines that go on one another at one left edge.
@@ -4890,12 +5115,13 @@ fn span(flow: &[Run], block: &[Line<'_>]) -> Range<usize> {
 /// region engine decided the runs as, when it decided one: a heading decision makes each block
 /// a heading (at the level the walk reads, else the lowest), a paragraph decision makes each a
 /// paragraph (an item with its marker), a list decision keeps the walk's items and makes its
-/// headings paragraphs.
+/// headings paragraphs. `own_line` says whether a run stands in blocks side by side read as
+/// columns: a line of such a block stays a line of its own (see `tables::Found::own_lines`).
 fn untagged(
     flow: &[Run],
     ids: Option<&[u32]>,
     text_sizes: &[f32],
-    key_of: &dyn Fn(u32) -> WalkKey,
+    (key_of, own_line): (&dyn Fn(u32) -> WalkKey, &dyn Fn(u32) -> bool),
     cx: &Context<'_>,
     out: &mut Built,
 ) {
@@ -4921,9 +5147,19 @@ fn untagged(
             Some(*keys.entry(*k).or_insert(n))
         })
         .collect();
+    // The lines of blocks side by side read as columns: each stays a line of its own.
+    let own: Vec<bool> = all
+        .iter()
+        .map(|l| {
+            let at = span(flow, std::slice::from_ref(l)).start;
+            ids.and_then(|ids| ids.get(at))
+                .is_some_and(|&id| own_line(id))
+        })
+        .collect();
     let text = TextCx {
         levels: &levels,
         block: &block,
+        own: &own,
     };
     let mut i = 0;
     let mut open_list: Option<Option<usize>> = None;
@@ -5159,6 +5395,190 @@ fn classified(runs: Vec<Run>, tree: &StructTree, cx: &Context<'_>) -> (Vec<Run>,
     (kept, slots)
 }
 
+/// Places the paragraph elements of a tagged page that stand in columns the page shows in
+/// column order: each column top to bottom, the columns left to right. The tags of such a
+/// block (a footer of a company beside its managers beside its board) often give one
+/// paragraph per line, row by row across the columns; read in that order a line of one column
+/// stands between the lines of another, which breaks what each column says.
+///
+/// The columns are the page's own evidence, asked of the shared rule the untagged path asks
+/// (see [`paragraph_columns`]: a first line whose pieces start at one pitch, later lines that
+/// share those starts, each column one block, one of them a paragraph wrapped over every row
+/// with another block beside it down to its last row, so the rows are no rows of a table;
+/// without that the order of the tags stays). The lines asked are rows by their baselines, whatever
+/// order the runs came in (the page's order may have read one of the columns apart already):
+/// a first row and the rows under it at the step of the first two (within an edge, see
+/// [`EDGE_SIZES`]) that start at one of its starts, among runs that follow each other and are
+/// plain paragraph elements.
+///
+/// What the tags state stays: no element is joined or split, only the order of the elements
+/// changes. A block is left as it is when an element of it holds runs of two columns, or
+/// runs outside the block, or would not stay in one piece, or when other runs stand between
+/// its runs in the page's order. Each cell of the block becomes a line of its own in the new
+/// order, and the lines are numbered on from there, as the lines of columns are numbered on
+/// an untagged page.
+fn tagged_columns(runs: &mut Vec<Run>, slots: &mut Vec<Slot>) {
+    let plain = |i: usize| matches!(slots[i], Slot::Para(_, None)) && !runs[i].off_axis;
+    let element = |i: usize| match slots[i] {
+        Slot::Para(e, _) => Some(e),
+        _ => None,
+    };
+    // How often each paragraph element stands on the page: an element of a block must
+    // stand in the block with all its runs.
+    let mut count: HashMap<usize, usize> = HashMap::new();
+    for e in (0..runs.len()).filter_map(element) {
+        *count.entry(e).or_default() += 1;
+    }
+    crate::work::add(runs.len() as u64);
+    // The blocks to move: where each starts in the page's order, and its runs cell by cell.
+    let mut blocks: Vec<(usize, Vec<Vec<usize>>)> = Vec::new();
+    let mut from = 0;
+    while from < runs.len() {
+        // Plain paragraph runs of one page that follow each other.
+        let mut to = from;
+        while to < runs.len() && plain(to) && runs[to].page == runs[from].page {
+            to += 1;
+        }
+        if to == from {
+            from += 1;
+            continue;
+        }
+        // Their rows, top down: runs on one baseline (within an edge), left to right.
+        let mut by_place: Vec<usize> = (from..to).collect();
+        by_place.sort_by(|&a, &b| {
+            runs[b]
+                .y
+                .total_cmp(&runs[a].y)
+                .then(runs[a].x.total_cmp(&runs[b].x))
+        });
+        let mut rows: Vec<Vec<usize>> = Vec::new();
+        for i in by_place {
+            match rows.last_mut() {
+                Some(row) if runs[row[0]].y - runs[i].y <= EDGE_SIZES * runs[i].size => row.push(i),
+                _ => rows.push(vec![i]),
+            }
+        }
+        crate::work::add((to - from) as u64);
+        let mut at = 0;
+        while at < rows.len() {
+            let end = column_block(runs, &rows, at);
+            if end - at < 3 {
+                at += 1;
+                continue;
+            }
+            let ids: Vec<usize> = rows[at..end].iter().flatten().copied().collect();
+            let refs: Vec<&Run> = ids.iter().map(|&i| &runs[i]).collect();
+            let mut start = 0;
+            let pieces: Vec<Vec<_>> = rows[at..end]
+                .iter()
+                .map(|row| {
+                    let (a, z) = (start, start + row.len());
+                    start = z;
+                    layoutregions::extract::table::grid::pieces_of(&refs, a, z)
+                })
+                .collect();
+            let (first, last) = ids
+                .iter()
+                .fold((usize::MAX, 0), |(a, z), &i| (a.min(i), z.max(i)));
+            let together = last + 1 - first == ids.len();
+            let cells = paragraph_columns(&refs, &pieces).filter(|cells| {
+                // Each element in one column, with all its runs, in one piece.
+                let mut seen: HashMap<usize, (usize, usize)> = HashMap::new();
+                let mut before = None;
+                together
+                    && cells.iter().enumerate().all(|(c, column)| {
+                        column.iter().flatten().all(|&i| {
+                            let Some(e) = element(ids[i]) else {
+                                return false;
+                            };
+                            let (column_of, n) = seen.entry(e).or_insert((c, 0));
+                            *n += 1;
+                            let whole = *column_of == c && (*n == 1 || before == Some(e));
+                            before = Some(e);
+                            whole
+                        })
+                    })
+                    && seen.iter().all(|(e, (_, n))| count.get(e) == Some(n))
+            });
+            if let Some(cells) = cells {
+                let cells = cells
+                    .into_iter()
+                    .flatten()
+                    .filter(|cell| !cell.is_empty())
+                    .map(|cell| cell.into_iter().map(|i| ids[i]).collect())
+                    .collect();
+                blocks.push((first, cells));
+            }
+            at = end;
+        }
+        from = to;
+    }
+    if blocks.is_empty() {
+        return;
+    }
+    blocks.sort_by_key(|b| b.0);
+    // The new order: each run with a mark that is new where a line starts.
+    let mut order: Vec<(usize, (u32, u32))> = Vec::with_capacity(runs.len());
+    let mut blocks = blocks.into_iter().peekable();
+    let mut i = 0;
+    while i < runs.len() {
+        match blocks.next_if(|b| b.0 == i) {
+            Some((_, cells)) => {
+                for (n, cell) in cells.iter().enumerate() {
+                    order.extend(cell.iter().map(|&k| (k, (1, n as u32))));
+                }
+                i += cells.iter().map(Vec::len).sum::<usize>();
+            }
+            None => {
+                order.push((i, (0, runs[i].line)));
+                i += 1;
+            }
+        }
+    }
+    let mut old: Vec<Option<(Run, Slot)>> = std::mem::take(runs)
+        .into_iter()
+        .zip(std::mem::take(slots))
+        .map(Some)
+        .collect();
+    let first = old.iter().flatten().map(|(r, _)| r.line).min().unwrap_or(0);
+    let mut line = first;
+    let mut last = None;
+    for (i, mark) in order {
+        if let Some((mut r, slot)) = old[i].take() {
+            if last.is_some_and(|l| l != mark) {
+                line += 1;
+            }
+            last = Some(mark);
+            r.line = line;
+            runs.push(r);
+            slots.push(slot);
+        }
+    }
+}
+
+/// Where the block of rows that may be columns under row `at` ends (see
+/// [`tagged_columns`]): the rows under it at the step of its first two (within an edge) that
+/// start at the start of one of its pieces. `rows` hold the runs of each row, left to right.
+fn column_block(runs: &[Run], rows: &[Vec<usize>], at: usize) -> usize {
+    let head = |row: usize| &runs[rows[row][0]];
+    let mut end = at + 1;
+    if end >= rows.len() {
+        return end;
+    }
+    let edge = EDGE_SIZES * head(at).size;
+    let step = head(at).y - head(end).y;
+    let refs: Vec<&Run> = rows[at].iter().map(|&i| &runs[i]).collect();
+    let starts = layoutregions::extract::table::grid::pieces_of(&refs, 0, refs.len());
+    while end < rows.len()
+        && (head(end - 1).y - head(end).y - step).abs() <= edge
+        && starts.iter().any(|p| (head(end).x - p.x0).abs() <= edge)
+    {
+        end += 1;
+    }
+    crate::work::add((refs.len() + end - at) as u64);
+    end
+}
+
 /// Lays out runs of a tagged page with their slots (`ids` their ids, if they are the page's
 /// flow): runs of one element form one block, in reading order. Table cells are laid out as
 /// tables before; a cell run left here is text.
@@ -5284,6 +5704,256 @@ mod tests {
             note: false,
             gaps: Gaps::default(),
         }
+    }
+
+    /// A block of three columns at the starts 100, 200 and 300 in 10 points, the lines 12
+    /// points apart: a title line over a first column of three lines, a middle column of one
+    /// paragraph wrapped over three lines (each full, the next opens with a small letter) and
+    /// a last column of one line. Each cell is one run; the runs stand row by row.
+    fn column_runs() -> Vec<Run> {
+        let rows: [&[(&str, f32, f32)]; 4] = [
+            &[
+                ("One", 100.0, 30.0),
+                ("Two", 200.0, 30.0),
+                ("Three", 300.0, 30.0),
+            ],
+            &[
+                ("first", 100.0, 30.0),
+                ("Alpha beta gamma", 200.0, 90.0),
+                ("last", 300.0, 30.0),
+            ],
+            &[("second", 100.0, 30.0), ("delta epsilon", 200.0, 98.0)],
+            &[("third", 100.0, 30.0), ("zeta", 200.0, 20.0)],
+        ];
+        let mut out = Vec::new();
+        for (n, row) in rows.iter().enumerate() {
+            for (text, x, w) in row.iter() {
+                out.push(Run {
+                    x: *x,
+                    w: *w,
+                    ..run(text, n as u32, 700.0 - 12.0 * n as f32, 10.0)
+                });
+            }
+        }
+        out
+    }
+
+    /// The texts of `runs` with their lines after [`tagged_columns`] with `slots`.
+    fn column_order(mut runs: Vec<Run>, mut slots: Vec<Slot>) -> Vec<(String, u32)> {
+        tagged_columns(&mut runs, &mut slots);
+        assert_eq!(runs.len(), slots.len());
+        runs.into_iter().map(|r| (r.text, r.line)).collect()
+    }
+
+    /// Task 36a part 1b (class D on the tagged path): paragraph elements in columns the page
+    /// shows are placed column by column, and only then.
+    #[test]
+    fn tagged_paragraphs_in_columns_are_placed_column_by_column() {
+        let runs = column_runs();
+        let rows: Vec<(String, u32)> = runs.iter().map(|r| (r.text.clone(), r.line)).collect();
+        let each: Vec<Slot> = (0..runs.len()).map(|e| Slot::Para(e, None)).collect();
+        let texts = |order: &[(String, u32)]| -> Vec<String> {
+            order.iter().map(|(t, _)| t.clone()).collect()
+        };
+        // One element per cell: column by column, each cell a line of its own.
+        let moved = column_order(runs.clone(), each.clone());
+        assert_eq!(
+            texts(&moved),
+            [
+                "One",
+                "first",
+                "second",
+                "third",
+                "Two",
+                "Alpha beta gamma",
+                "delta epsilon",
+                "zeta",
+                "Three",
+                "last"
+            ]
+        );
+        let lines: Vec<u32> = moved.iter().map(|(_, l)| *l).collect();
+        assert_eq!(lines, (0..10).collect::<Vec<u32>>());
+        // A line after the block (at no column start) stays after it, numbered on.
+        let mut more = runs.clone();
+        more.push(Run {
+            x: 400.0,
+            w: 30.0,
+            ..run("Sheet 1", 4, 652.0, 10.0)
+        });
+        let mut slots = each.clone();
+        slots.push(Slot::Para(99, None));
+        let moved = column_order(more, slots);
+        assert_eq!(moved.last(), Some(&("Sheet 1".to_string(), 10)));
+        assert_eq!(moved[1].0, "first");
+        // The page's order read the first column apart already (its four lines, then the
+        // rows of the other two): the rows are found by their baselines, the same order.
+        let mut cut: Vec<Run> = [0, 3, 6, 8, 1, 2, 4, 5, 7, 9]
+            .iter()
+            .map(|&i| runs[i].clone())
+            .collect();
+        for (r, line) in cut.iter_mut().zip([0, 1, 2, 3, 4, 4, 5, 5, 6, 7]) {
+            r.line = line;
+        }
+        let slots: Vec<Slot> = (0..cut.len()).map(|e| Slot::Para(e, None)).collect();
+        assert_eq!(
+            column_order(cut, slots),
+            column_order(runs.clone(), each.clone())
+        );
+        // One element per column (its lines one paragraph): the same order, no element cut.
+        let by_column = [0, 1, 2, 0, 1, 2, 0, 1, 0, 1].map(|e| Slot::Para(e, None));
+        assert_eq!(
+            texts(&column_order(runs.clone(), by_column.to_vec()))[1],
+            "first"
+        );
+        // The tags state rows (one element per line across the columns): left as given.
+        let by_row = [0, 0, 0, 1, 1, 1, 2, 2, 3, 3].map(|e| Slot::Para(e, None));
+        assert_eq!(column_order(runs.clone(), by_row.to_vec()), rows);
+        // An element of the block holds a run outside it: left as given.
+        let mut over = vec![Run {
+            x: 100.0,
+            w: 300.0,
+            ..run("A line over the block.", 0, 740.0, 10.0)
+        }];
+        over.extend(runs.iter().cloned().map(|r| Run {
+            line: r.line + 1,
+            ..r
+        }));
+        let mut slots = vec![Slot::Para(3, None)];
+        slots.extend(each.iter().copied());
+        let given: Vec<(String, u32)> = over.iter().map(|r| (r.text.clone(), r.line)).collect();
+        assert_eq!(column_order(over.clone(), slots.clone()), given);
+        // The same line as an element of its own: the block under it moves.
+        slots[0] = Slot::Para(98, None);
+        assert_eq!(column_order(over, slots)[2].0, "first");
+        // A heading, a list item, a note or an untagged run in the block: left as given.
+        for other in [
+            Slot::Heading(2, 4),
+            Slot::Item { list: 50, item: 4 },
+            Slot::Para(4, Some("footnote")),
+            Slot::Free,
+        ] {
+            let mut slots = each.clone();
+            slots[4] = other;
+            assert_eq!(column_order(runs.clone(), slots), rows, "{other:?}");
+        }
+        // No paragraph wrapped in a column (the middle lines are short): rows, left as given.
+        let mut short = runs.clone();
+        short[7].w = 40.0;
+        assert_eq!(column_order(short, each.clone()), rows);
+        // The lines under the first at another step are no lines of the block.
+        let mut loose = runs.clone();
+        for r in loose.iter_mut().filter(|r| r.line >= 2) {
+            r.y -= 6.0;
+        }
+        let given: Vec<(String, u32)> = loose.iter().map(|r| (r.text.clone(), r.line)).collect();
+        assert_eq!(column_order(loose, each.clone()), given);
+        // A step within an edge of the first (1 point at 10 points) is the same step.
+        for (drop, moves) in [(0.9, true), (1.1, false)] {
+            let mut near = runs.clone();
+            for r in near.iter_mut().filter(|r| r.line >= 2) {
+                r.y -= drop;
+            }
+            let read = column_order(near, each.clone());
+            assert_eq!(read[1].0 == "first", moves, "{drop}");
+        }
+    }
+
+    /// Task 36a fix round 2 (re-review N1): a table without rules tagged as one paragraph
+    /// per cell, row by row. Its columns start at one pitch (50, 200, 350), its descriptions
+    /// fill their column and open with a small letter, and the last one wraps. The order of
+    /// the tags is the meaning (each item with its description and its source) and stays,
+    /// also with a cell left empty at the end of the word column: no other column reaches
+    /// the last row of the "paragraph". A block that does reach it is the other way.
+    #[test]
+    fn tagged_cells_of_a_table_keep_the_order_of_their_tags() {
+        let table = |rows: &[(&str, &str, f32, &str)]| {
+            let mut out = Vec::new();
+            for (n, (a, b, wb, c)) in rows.iter().enumerate() {
+                for (text, x, w) in [
+                    (*a, 50.0f32, 6.0 * a.len() as f32),
+                    (*b, 200.0, *wb),
+                    (*c, 350.0, 6.0 * c.len() as f32),
+                ] {
+                    if !text.is_empty() {
+                        out.push(Run {
+                            x,
+                            w,
+                            ..run(text, n as u32, 700.0 - 12.0 * n as f32, 10.0)
+                        });
+                    }
+                }
+            }
+            out
+        };
+        let moved = |runs: Vec<Run>| {
+            let slots: Vec<Slot> = (0..runs.len()).map(|e| Slot::Para(e, None)).collect();
+            let given: Vec<String> = runs.iter().map(|r| r.text.clone()).collect();
+            let read: Vec<String> = column_order(runs, slots)
+                .into_iter()
+                .map(|(t, _)| t)
+                .collect();
+            read != given
+        };
+        let head = ("Item", "Description", 66.0, "Source");
+        let bolt = |source| {
+            (
+                "Bolt",
+                "steel bolt for the frame, zinc plated",
+                142.0,
+                source,
+            )
+        };
+        let nut = |source| {
+            (
+                "Nut",
+                "nut for the bolt, zinc plated, size M8",
+                141.0,
+                source,
+            )
+        };
+        let washer = |source| {
+            (
+                "Washer",
+                "washer for the nut and the bolt, set",
+                142.0,
+                source,
+            )
+        };
+        let end = ("", "twelve pieces", 60.0, "");
+        // Every cell filled; the last source empty (probe A); two items (C); a source on
+        // the first item only (D); the last description over two more lines (probe 16).
+        for (name, rows) in [
+            (
+                "full",
+                vec![head, bolt("Mill"), nut("Forge"), washer("Yard"), end],
+            ),
+            ("A", vec![head, bolt("Mill"), nut("Forge"), washer(""), end]),
+            ("C", vec![head, bolt("Mill"), nut(""), end]),
+            ("D", vec![head, bolt("Mill"), nut(""), washer(""), end]),
+            (
+                "16",
+                vec![
+                    head,
+                    bolt("Mill"),
+                    nut("Forge"),
+                    washer(""),
+                    ("", "twelve pieces, zinc plated, in a paper", 142.0, ""),
+                    ("", "bag", 18.0, ""),
+                ],
+            ),
+        ] {
+            assert!(!moved(table(&rows)), "{name}");
+        }
+        // The other way: the first column goes on beside the text to its last row, the
+        // third ends early. These are blocks side by side and read column by column.
+        assert!(moved(table(&[
+            head,
+            bolt("Mill"),
+            nut(""),
+            ("Washer", "washer for the nut and the bolt, set", 142.0, ""),
+            ("Spring", "twelve pieces", 60.0, ""),
+        ])));
     }
 
     #[test]
@@ -7595,6 +8265,171 @@ mod tests {
         assert_eq!(
             joined_steps(&[step(None), first, step(None), second, step(None)]),
             [true, false, true, false, true]
+        );
+    }
+
+    /// A block kept as laid out of `lines`, each a list of pieces (column, text).
+    fn laid_out(lines: &[&[(u32, &str)]]) -> Block {
+        Block::Spatial {
+            lines: lines
+                .iter()
+                .map(|l| rezzer_model::SpatialLine {
+                    pieces: l
+                        .iter()
+                        .map(|&(col, text)| rezzer_model::SpatialPiece {
+                            col,
+                            text: text.into(),
+                            spans: Vec::new(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+            links: Vec::new(),
+            grid: None,
+            anchor: None,
+        }
+    }
+
+    /// The grid of a block kept as laid out (its column and whether it joins) and the
+    /// columns of its pieces.
+    type Gridded = (Option<(u32, bool)>, Vec<u32>);
+
+    /// The grid and the piece columns of the blocks kept as laid out among `blocks`.
+    fn grids(blocks: &[Block]) -> Vec<Gridded> {
+        blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Spatial { lines, grid, .. } => Some((
+                    grid.map(|g| (g.col, g.joins)),
+                    lines
+                        .iter()
+                        .flat_map(|l| l.pieces.iter().map(|p| p.col))
+                        .collect(),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Re-review 3 of task 36a, N1: a block kept as laid out joins the one before it only
+    /// on one grid of the page, and the columns of a run are counted on that grid.
+    #[test]
+    fn blocks_kept_as_laid_out_join_only_on_one_grid_of_the_page() {
+        // A frame of one line at `x0` on the baseline `y`, columns `adv` wide, in 10 points.
+        let frame = |x0: f32, y: f32, adv: f32| SpatialFrame {
+            x0,
+            adv,
+            first: y,
+            last: y,
+            size: 10.0,
+            pitch: None,
+        };
+        let labels = || laid_out(&[&[(0, "Bank"), (20, "Paid"), (40, "Due")]]);
+        let values = || laid_out(&[&[(0, "Oakfield"), (20, "30.10.2026")]]);
+        let media = || Block::Media {
+            asset: "a".into(),
+            alt: None,
+            anchor: None,
+        };
+        // The page: text from 40, columns 5 points wide, no line pitch shown.
+        let page = Some(layoutregions::extract::spatial::PageGrid {
+            left: 40.0,
+            unit: 5.0,
+            pitch: None,
+        });
+        // Right under one another from one edge, a picture between them: one run. Both
+        // count their columns in 5 points from 90, so no column moves.
+        let mut blocks = vec![labels(), media(), values()];
+        place_spatial(
+            &mut blocks,
+            &[(0, frame(90.0, 700.0, 5.0)), (2, frame(90.0, 688.0, 5.0))],
+            page,
+        );
+        assert_eq!(
+            grids(&blocks),
+            [
+                (Some((10, false)), vec![0, 20, 40]),
+                (Some((10, true)), vec![0, 20])
+            ]
+        );
+        assert_eq!(rezzer_model::spatial_runs(&blocks), [vec![0, 2]]);
+        // The values start under the second label (100 points right): another column of
+        // the page, no run, and each keeps its own columns.
+        let mut blocks = vec![labels(), values()];
+        place_spatial(
+            &mut blocks,
+            &[(0, frame(90.0, 700.0, 5.0)), (1, frame(190.0, 688.0, 5.0))],
+            page,
+        );
+        assert_eq!(
+            grids(&blocks),
+            [
+                (Some((10, false)), vec![0, 20, 40]),
+                (Some((30, false)), vec![0, 20])
+            ]
+        );
+        assert!(rezzer_model::spatial_runs(&blocks).is_empty());
+        // Seven lines further down: no run.
+        let mut blocks = vec![labels(), values()];
+        place_spatial(
+            &mut blocks,
+            &[(0, frame(90.0, 700.0, 5.0)), (1, frame(90.0, 616.0, 5.0))],
+            page,
+        );
+        assert!(rezzer_model::spatial_runs(&blocks).is_empty());
+        // Another block between them, a block of one piece, or a block whose place is not
+        // known (it hosts no region): no run.
+        let mut blocks = vec![labels(), Block::paragraph(Vec::new()), values()];
+        place_spatial(
+            &mut blocks,
+            &[(0, frame(90.0, 700.0, 5.0)), (2, frame(90.0, 688.0, 5.0))],
+            page,
+        );
+        assert!(rezzer_model::spatial_runs(&blocks).is_empty());
+        let mut blocks = vec![labels(), laid_out(&[&[(0, "Oakfield")]])];
+        place_spatial(
+            &mut blocks,
+            &[(0, frame(90.0, 700.0, 5.0)), (1, frame(90.0, 688.0, 5.0))],
+            page,
+        );
+        assert!(rezzer_model::spatial_runs(&blocks).is_empty());
+        let mut blocks = vec![labels(), values()];
+        place_spatial(&mut blocks, &[(0, frame(90.0, 700.0, 5.0))], page);
+        assert_eq!(
+            grids(&blocks),
+            [(Some((10, false)), vec![0, 20, 40]), (None, vec![0, 20])]
+        );
+        assert!(rezzer_model::spatial_runs(&blocks).is_empty());
+        // Labels in a smaller face (4 points a character) over values in a larger one (5
+        // points) that start 3 points further right: one run on the finer grid from the
+        // labels' edge. The value at column 20 of its own grid stands 103 points from that
+        // edge, at the label of column 25 (100 points), not under the one at column 20.
+        let mut blocks = vec![
+            laid_out(&[&[(0, "Bank"), (20, "Paid"), (25, "Due")]]),
+            values(),
+        ];
+        place_spatial(
+            &mut blocks,
+            &[(0, frame(90.0, 700.0, 4.0)), (1, frame(93.0, 688.0, 5.0))],
+            page,
+        );
+        assert_eq!(
+            grids(&blocks),
+            [
+                (Some((10, false)), vec![0, 20, 25]),
+                (Some((10, true)), vec![1, 26])
+            ]
+        );
+        // A page without text has no grid: nothing is placed.
+        let mut blocks = vec![labels(), values()];
+        place_spatial(
+            &mut blocks,
+            &[(0, frame(90.0, 700.0, 5.0)), (1, frame(90.0, 688.0, 5.0))],
+            None,
+        );
+        assert_eq!(
+            grids(&blocks),
+            [(None, vec![0, 20, 40]), (None, vec![0, 20])]
         );
     }
 

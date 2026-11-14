@@ -319,6 +319,8 @@ struct Piece {
     /// [`cut::reads_as_value`]): what the cut asks of a row of labels over values.
     colon: bool,
     value: bool,
+    /// Its text reads as a date set in figures (see [`cut::reads_as_date`]).
+    date: bool,
     /// The whole number its text is (see [`cut::whole_number`]).
     number: Option<u64>,
     /// Every fragment with ink of the piece is bold (false for a piece without ink).
@@ -461,7 +463,7 @@ fn pieces_in(frags: &[Frag], ids: &[usize], head: &[usize], base: usize) -> (Vec
                         let r = reading.map_or(cut::Reading::of(&f.text, value), |r| {
                             r.goes_on(&f.text, value)
                         });
-                        (p.value, p.number) = (r.value, r.number);
+                        (p.value, p.number, p.date) = (r.value, r.number, r.date());
                         reading = Some(r);
                     }
                     p.inked |= f.inked;
@@ -492,6 +494,7 @@ fn pieces_in(frags: &[Frag], ids: &[usize], head: &[usize], base: usize) -> (Vec
                 bold: f.inked && f.bold,
                 colon: f.inked && f.text.trim_end().ends_with(':'),
                 value: f.inked && reads_as_value(&f.text),
+                date: reading.is_some_and(cut::Reading::date),
                 number: f.inked.then(|| cut::whole_number(&f.text)).flatten(),
             });
         }
@@ -556,6 +559,7 @@ fn cut_piece(p: &Piece) -> cut::Piece {
         runs: 1,
         colon: p.colon,
         value: p.value,
+        date: p.date,
         number: p.number,
         boxed: p.stand,
         rows: p.rows,
@@ -748,6 +752,8 @@ fn boxed_order(
                     .iter()
                     .filter(|p| p.inked)
                     .all(|p| p.value || p.number.is_some()),
+            // The digits of a box are not read as one text here: no date is known.
+            date: false,
             number: None,
         });
         ps.extend(list);

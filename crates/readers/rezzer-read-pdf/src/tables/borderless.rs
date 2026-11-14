@@ -19,6 +19,7 @@ use layoutregions::extract::table::grid::{
 use super::*;
 use layoutregions::extract::pairs::blocks::{
     Columns, KeyValues, address_columns, blocks_of, key_values, label_row_over_values,
+    paragraph_columns,
 };
 
 use crate::layout::{Gaps, Slot};
@@ -368,7 +369,7 @@ pub(super) fn borderless(
         // read block by block. Rows were possible too, so that is said. Under a header row of
         // their headings, they are read as the table they make, with the doubt said.
         let mut headed = false;
-        if let Some((s, order, verdict)) =
+        if let Some((s, order, verdict, wrapped)) =
             side_blocks(flow, &lines, (a, z, tail.end.max(z)), &pieces, &body_of)
         {
             if verdict == Columns::Headed {
@@ -392,6 +393,9 @@ pub(super) fn borderless(
                      the other, as blocks of their own: if their lines are rows of a table or \
                      labels beside values, those rows are not kept"
                 ));
+                if wrapped {
+                    found.own_lines.extend(order.iter().map(|&i| flow.ids[i]));
+                }
                 apart.push((s, order));
                 continue;
             }
@@ -1654,7 +1658,9 @@ fn side_by_side(flow: &Flow, lines: &[FlowLine], pieces: &[Vec<Piece>]) -> Optio
 /// Whether the lines `a..z` of a region (their `pieces`) are blocks side by side (see
 /// [`address_columns`]), with the lines of one piece under them up to `y` that end a longer
 /// block, or without those: where their runs start in the flow, the runs in the order to read
-/// them, block by block, and the verdict. Lines a frame of column titles over items holds are
+/// them, block by block, the verdict, and whether the blocks are those a paragraph wrapped in
+/// one of them shows (see [`paragraph_columns`]: each of their lines then stays a line of its
+/// own). Lines a frame of column titles over items holds are
 /// no such blocks.
 fn side_blocks(
     flow: &Flow,
@@ -1662,7 +1668,7 @@ fn side_blocks(
     (a, z, y): (usize, usize, usize),
     pieces: &[Vec<Piece>],
     body_of: &dyn Fn(usize) -> Option<u32>,
-) -> Option<(usize, Vec<usize>, Columns)> {
+) -> Option<(usize, Vec<usize>, Columns, bool)> {
     let ends = if y > z { vec![y, z] } else { vec![z] };
     let mut doubt: Option<(usize, Vec<usize>)> = None;
     for end in ends {
@@ -1672,19 +1678,30 @@ fn side_blocks(
         }
         let mut all = pieces.to_vec();
         all.extend(lines[z..end].iter().map(|l| pieces_of(flow, l)));
-        let (columns, order) = blocks_of(&flow.runs, &all);
+        // Blocks that a paragraph wrapped in one of them shows (a company beside its
+        // managers beside its board, with no clear gutter between two of them), else blocks
+        // of facts.
+        let shown = paragraph_columns(&flow.runs, &all);
+        let wrapped = shown.is_some();
+        let (columns, order) = match shown {
+            Some(cells) => (Vec::new(), cells.into_iter().flatten().flatten().collect()),
+            None => blocks_of(&flow.runs, &all),
+        };
         let mut sorted = order.clone();
         sorted.sort_unstable();
         if !sorted.iter().copied().eq(s..e) {
             continue;
         }
+        if wrapped {
+            return Some((s, order, Columns::Blocks, true));
+        }
         match address_columns(&columns) {
             Columns::Rows => {}
             Columns::Doubt => doubt = doubt.or(Some((s, order))),
-            verdict => return Some((s, order, verdict)),
+            verdict => return Some((s, order, verdict, false)),
         }
     }
-    doubt.map(|(s, order)| (s, order, Columns::Doubt))
+    doubt.map(|(s, order)| (s, order, Columns::Doubt, false))
 }
 
 #[cfg(test)]
@@ -1902,6 +1919,83 @@ mod tests {
             assert!(
                 l == 0 || l == words.len(),
                 "a table mixes both lists: {words:?}"
+            );
+        }
+    }
+
+    /// Task 36a fix round 1 (review I1): a table without rules whose columns start at one
+    /// pitch, with lowercase descriptions that fill their column and a last row that wraps,
+    /// is not read block by block: its rows are rows, and each item keeps its description
+    /// and its third cell.
+    #[test]
+    fn rows_of_a_table_with_a_wrapped_last_row_are_not_read_block_by_block() {
+        // Fix round 2 (re-review N1): the same with the last cell of the word column left
+        // empty (the other columns end on different rows), and with the last description
+        // wrapped over two lines then.
+        for (third, more) in [
+            (["Source", "Mill", "Forge", "Yard"], false),
+            (["Price", "1.20", "0.40", "0.10"], false),
+            (["Source", "Mill", "Forge", ""], false),
+            (["Source", "Mill", "Forge", ""], true),
+        ] {
+            let mut rows = vec![
+                ("Item", "Description", 50.0, third[0]),
+                (
+                    "Bolt",
+                    "steel bolt for the frame, zinc plated",
+                    142.0,
+                    third[1],
+                ),
+                (
+                    "Nut",
+                    "nut for the bolt, zinc plated, size M8",
+                    141.0,
+                    third[2],
+                ),
+                (
+                    "Washer",
+                    "washer for the nut and the bolt, set",
+                    140.0,
+                    third[3],
+                ),
+                ("", "twelve pieces", 60.0, ""),
+            ];
+            if more {
+                rows[3].2 = 142.0;
+                rows[4] = ("", "twelve pieces, zinc plated, in a paper", 142.0, "");
+                rows.push(("", "bag", 18.0, ""));
+            }
+            let mut runs = Vec::new();
+            for (k, (a, b, wb, c)) in rows.iter().enumerate() {
+                let line = k as u32;
+                for (text, x, w) in [
+                    (a, 50.0, 5.0 * a.len() as f32),
+                    (b, 200.0, *wb),
+                    (c, 350.0, 5.0 * c.len() as f32),
+                ] {
+                    if !text.is_empty() {
+                        let mut r = run(text, x, 650.0 - 11.0 * line as f32, line);
+                        r.w = w;
+                        runs.push(r);
+                    }
+                }
+            }
+            let n = runs.len();
+            let mut flow = Flow::new(runs, vec![Slot::Free; n]);
+            let area = Area {
+                width: 595.0,
+                height: 842.0,
+                images: &[],
+                body_size: 8.0,
+            };
+            let mut found = Found::default();
+            let every = area_of(0, 0..n as u32);
+            borderless(1, &mut flow, (&[&every], &[]), &area, &|| false, &mut found);
+            assert!(
+                found.doubts.iter().all(|d| d.1 != BLOCK_BY_BLOCK),
+                "{}: {:?}",
+                third[0],
+                found.uncertain
             );
         }
     }

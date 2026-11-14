@@ -240,7 +240,7 @@ QR Code: [https://example.org/t/dNuKThV1](https://example.org/t/dNuKThV1)
 - Scripts are listed, never run. When a script builds field names at run time, the dependency is marked "unknown, see script"
 - Tables marked only by a rule at the top and at the bottom (as in many scientific papers) stay paragraphs. A note says "Possible table on page N not rebuilt" with the reason
 - A header row of several lines is found by bold text or font size, not by its fill color alone
-- Header icons drawn with curves are not marked
+- A column title drawn as an icon is not read. Its cell stays empty and a note under "Not read" names the cell. An icon drawn with curves is not found, so nothing is said about it
 - Some line breaks are joined: lines of verse with five words or more, two-line blocks that are aligned right, label pairs and lines like "Suite 200 of the / Old Mill Building". No text is lost
 - Tables on pages with form fields and tables inside pictures are not rebuilt
 - Scans without a text layer need OCR. OCR is a separate, optional part of Rezzer. Until then the page is rendered and listed as needing vision

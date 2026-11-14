@@ -22,13 +22,13 @@ completeness: complete
 losses: 0
 ---
 
-# csv-spectrum-newlines\_crlf.csv
+# csv-spectrum-newlines_crlf.csv
 
 ## Overview
 
 | Part | Kind | Size | Role | Reads from |
 | --- | --- | --- | --- | --- |
-| csv-spectrum-newlines\_crlf | sheet | 3 rows x 3 columns |  |  |
+| csv-spectrum-newlines_crlf | sheet | 3 rows x 3 columns |  |  |
 
 ## Properties
 
@@ -36,10 +36,10 @@ losses: 0
 | --- | --- |
 | columns | 3 |
 | delimiter | , |
-| has\_header | true |
+| has_header | true |
 | rows | 3 |
 
-## csv-spectrum-newlines\_crlf
+## csv-spectrum-newlines_crlf
 
 Table A1:C4 (data A2:C4), header row 1, found by rules: no gaps, header by type change.
 

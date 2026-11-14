@@ -2517,6 +2517,7 @@ fn an_address_in_small_print_is_a_paragraph_with_its_breaks() {
         let cx = TextCx {
             levels: &levels,
             block: &block,
+            own: &[],
         };
         match next_block(&lines, 0, false, &cx) {
             (TextBlock::Paragraph { breaks }, 3) => breaks,
@@ -4332,4 +4333,264 @@ fn a_strip_with_a_label_start_in_a_number_in_digit_groups_claims_no_pair() {
     }
     let out = read(["No", "Qty"], 60.0, "12 34,5", 4.6);
     assert_eq!(out, [Kind::LabelValue], "{out:?}");
+}
+
+/// Task 36a part 1: a value in a row of fields is no title of the page. Two small labels side
+/// by side, each over its value in bold print larger than the body: the value that is no
+/// number alone (`03.04.2026 / 10:30`) is a heading by its style, and was the title of the
+/// page, so its row was no row of pairs. The cut finds the row of labels over values, and the
+/// title is looked for among the other lines. The same line alone, with no row of fields
+/// around it, is the title, as before.
+#[test]
+fn a_value_in_a_row_of_fields_is_no_title() {
+    let fields = |labels: bool| {
+        let mut texts = Vec::new();
+        if labels {
+            texts.push(run("Staff number", 324.6, 744.9, 8.0, 0));
+            texts.push(run("Office and time", 406.1, 744.9, 8.0, 1));
+            texts.push(bold(run("20481", 327.7, 732.0, 12.0, 2)));
+        }
+        texts.push(bold(run("03.04.2026 / 10:30", 409.2, 732.0, 12.0, 3)));
+        // A line across both fields under them: no gutter parts the two fields.
+        texts.push(run(
+            "Member of a pension scheme [see note 4]",
+            324.6,
+            706.0,
+            8.0,
+            4,
+        ));
+        texts.extend(prose(5, 600.0));
+        Tree {
+            page: page(1, texts),
+        }
+    };
+    let value = |view: &PageView<'_>, s: &Segment| {
+        s.children.is_empty()
+            && s.prims.iter().any(|p| {
+                matches!(*p, PrimId::Text(i) if view.page.texts[i as usize].text.starts_with("03.04"))
+            })
+    };
+    let row = |_: &PageView<'_>, s: &Segment| s.source == Source::Cell;
+    for k in [0.5f32, 1.0, 2.0] {
+        let with = fields(true).scaled(k);
+        let typed = with.typed(&row);
+        let pairs = of(&typed, Kind::LabelValue);
+        assert!(
+            ids(pairs).contains(&"label_value.label_over_value"),
+            "{k}: {typed:#?}"
+        );
+        assert_eq!(winner(&typed).0, Kind::LabelValue, "{k}");
+        let leaf = with.typed(&value);
+        assert!(
+            leaf.iter().all(|t| t.kind != Kind::TitleBlock),
+            "{k}: {leaf:#?}"
+        );
+        let alone = fields(false).scaled(k).typed(&value);
+        assert_eq!(winner(&alone).0, Kind::TitleBlock, "{k}: {alone:#?}");
+    }
+
+    // Fix round 1 (review I3): only what looks like a field's value is kept out of the title
+    // search. A page title under a small kicker line stands like a value under its label
+    // when a small label over its value stands at the right on the same two baselines; it
+    // holds no digit and is much wider than the kicker over it, so it stays the title. With
+    // the value at the right in bold of the title's size, in plain print of another size,
+    // and with a line of prose under the row.
+    let leaf_of = |text: &'static str| {
+        move |view: &PageView<'_>, s: &Segment| {
+            s.children.is_empty()
+                && s.prims.iter().any(|p| {
+                    matches!(*p, PrimId::Text(i) if view.page.texts[i as usize].text.starts_with(text))
+                })
+        }
+    };
+    let kicker = |title: &str, label: &str, value: TextRun, note: bool| {
+        let mut texts = vec![
+            run("Department of Samples", 50.0, 790.0, 8.0, 0),
+            run(label, 420.0, 790.0, 8.0, 1),
+            bold(run(title, 50.0, 776.0, 16.0, 2)),
+            value,
+        ];
+        if note {
+            texts.push(run(
+                "Please fill in this form in block letters and send it to the office",
+                50.0,
+                757.0,
+                8.0,
+                4,
+            ));
+        }
+        texts.extend(prose(5, 600.0));
+        Tree {
+            page: page(1, texts),
+        }
+    };
+    for k in [0.5f32, 1.0, 2.0] {
+        for (label, value, note) in [
+            ("Form", bold(run("12", 420.0, 776.0, 16.0, 3)), false),
+            ("Form number", run("SL-12", 420.0, 776.0, 10.0, 3), false),
+            ("Form number", run("SL-12", 420.0, 776.0, 10.0, 3), true),
+        ] {
+            // Fix round 2 (re-review N2): a title that holds a year or a number is a title
+            // all the same: it is mostly words, and more words than the kicker over it.
+            // Fix round 3 (re-review 2, M1): and so is a title of as many words as the
+            // kicker has, or of fewer: it is the largest text of the top of the page.
+            for title in [
+                "Request for Sample Leave",
+                "Request for Sample Leave 2026",
+                "Form 1040 Request for Leave",
+                "Sample Leave Request",
+                "Annual Report",
+            ] {
+                let typed = kicker(title, label, value.clone(), note)
+                    .scaled(k)
+                    .typed(&leaf_of(&title[..6]));
+                assert_eq!(
+                    winner(&typed).0,
+                    Kind::TitleBlock,
+                    "{k} {title} {label} {note}: {typed:#?}"
+                );
+            }
+        }
+    }
+    // Mostly digits and signs (more of them than letters) is a field's value, however many
+    // words: `Leave 2026 12 34` under the kicker of three words has 5 letters and 8 digits
+    // and is no title. `Leaves 2026 12` (6 letters, 6 digits) is not mostly digits: it is
+    // the largest text of the top of the page and may be the title, with as many words as
+    // the kicker has (fix round 3, re-review 2 M1: the count of words is no cue).
+    let titled = |title: &'static str| {
+        let value = bold(run("12", 420.0, 776.0, 16.0, 3));
+        let typed = kicker(title, "Form", value, false).typed(&leaf_of(&title[..5]));
+        winner(&typed).0 == Kind::TitleBlock
+    };
+    assert!(!titled("Leave 2026 12 34"));
+    assert!(titled("Leaves 2026 12"));
+    assert!(titled("Leaves of 2026 12"));
+    // A value of words is kept out of the title search unless it is the largest text of the
+    // top of the page (fix round 3, re-review 2 M1: the design ruling; the count of words
+    // against the label was the measure before, and the width of the ink before that).
+    // `other` is another line of the page, its size and baseline. With no other line as
+    // large in the top of the page the value may be the title, however few words it has.
+    // With a line of its size there (sizes by half points: 11.8 is 12, 11.7 is not), or a
+    // larger one, it is a value among the texts of a form and no title. A line as large in
+    // the lower part of the page (the page is 842 high, its top third ends at 561) is not
+    // counted.
+    let wordy = |text: &'static str, other: Option<(f32, f32)>| {
+        let mut texts = vec![
+            run("Staff number", 324.6, 744.9, 8.0, 0),
+            run("Office and time", 406.1, 744.9, 8.0, 1),
+            bold(run("20481", 327.7, 732.0, 12.0, 2)),
+            bold(run(text, 406.1, 732.0, 12.0, 3)),
+            run(
+                "Member of a pension scheme [see note 4]",
+                324.6,
+                706.0,
+                8.0,
+                4,
+            ),
+        ];
+        if let Some((size, y)) = other {
+            texts.push(bold(run("Leave of the staff", 50.0, y, size, 5)));
+        }
+        texts.extend(prose(6, 600.0));
+        let tree = Tree {
+            page: page(1, texts),
+        };
+        tree.typed(&leaf_of(text))
+            .iter()
+            .any(|t| t.kind == Kind::TitleBlock)
+    };
+    for text in ["Sales room", "Sales room north", "Sales room north wing"] {
+        assert!(wordy(text, None), "{text}");
+        assert!(!wordy(text, Some((12.0, 680.0))), "{text}");
+        assert!(!wordy(text, Some((11.8, 680.0))), "{text}");
+        assert!(wordy(text, Some((11.7, 680.0))), "{text}");
+        assert!(!wordy(text, Some((14.0, 680.0))), "{text}");
+        assert!(wordy(text, Some((12.0, 300.0))), "{text}");
+    }
+}
+
+/// Task 36a fix round 1 (review I1): a table without rules whose columns start at one pitch,
+/// with lowercase descriptions that fill their column and a last row that wraps, is not
+/// refused as blocks side by side: its rows are rows (every other column has a line on each
+/// row but the wrapped one). With a column of words and with a column of prices.
+#[test]
+fn rows_of_a_table_with_a_wrapped_last_row_are_no_side_blocks() {
+    let cell = |text: &str, x: f32, w: f32, line: u32| {
+        let mut r = run(text, x, 700.0 - 11.0 * (line - 100) as f32, 9.2, line);
+        r.w = w;
+        if line == 100 { bold(r) } else { r }
+    };
+    // Fix round 2 (re-review N1): the same with the last cell of the word column left
+    // empty (the other columns end on different rows), and with the last description
+    // wrapped over two lines then.
+    for (third, more) in [
+        (["Source", "Mill", "Forge", "Yard"], false),
+        (["Price", "1.20", "0.40", "0.10"], false),
+        (["Source", "Mill", "Forge", ""], false),
+        (["Source", "Mill", "Forge", ""], true),
+    ] {
+        let mut rows = vec![
+            ("Item", "Description", 50.0, third[0]),
+            (
+                "Bolt",
+                "steel bolt for the frame, zinc plated",
+                142.0,
+                third[1],
+            ),
+            (
+                "Nut",
+                "nut for the bolt, zinc plated, size M8",
+                141.0,
+                third[2],
+            ),
+            (
+                "Washer",
+                "washer for the nut and the bolt, set",
+                140.0,
+                third[3],
+            ),
+            ("", "twelve pieces", 60.0, ""),
+        ];
+        if more {
+            rows[3].2 = 142.0;
+            rows[4] = ("", "twelve pieces, zinc plated, in a paper", 142.0, "");
+            rows.push(("", "bag", 18.0, ""));
+        }
+        let mut texts = Vec::new();
+        for (k, (a, b, wb, c)) in rows.iter().enumerate() {
+            let line = 100 + k as u32;
+            for (text, x, w) in [
+                (a, 50.0, 5.0 * a.len() as f32),
+                (b, 200.0, *wb),
+                (c, 350.0, 5.0 * c.len() as f32),
+            ] {
+                if !text.is_empty() {
+                    texts.push(cell(text, x, w, line));
+                }
+            }
+        }
+        let tree = Tree {
+            page: sheet(texts, Vec::new()),
+        };
+        let mut seen = 0;
+        tree.with(|view| {
+            for s in &view.segs.all {
+                let table = s.prims.iter().any(|p| {
+                    matches!(*p, PrimId::Text(i) if (100..=105).contains(&view.page.texts[i as usize].line))
+                });
+                if !table {
+                    continue;
+                }
+                seen += 1;
+                for t in all_typed(view, s) {
+                    assert!(
+                        !ids(&t).contains(&"spatial.side_blocks"),
+                        "{}: {t:#?}",
+                        third[0]
+                    );
+                }
+            }
+        });
+        assert!(seen > 0);
+    }
 }
