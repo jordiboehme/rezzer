@@ -29,6 +29,16 @@ const TITLE_ALIGN: f32 = 0.25;
 /// column's end.
 const COVER_END: f32 = 0.5;
 
+/// A label and its value a word space apart are cut where the value starts within this share
+/// of the text size of the left edge the other values of the column share: a point at 10
+/// points, the share lines of labels and values line up within (`KV_ALIGN` of the pair
+/// rules). A share of the size, so that a block printed smaller or larger is cut the same.
+/// Wider, a word of a line of text that runs over both columns starts at the edge by chance
+/// more often; narrower, the float noise of a scaled page hides the edge. A reader that keeps
+/// the word spaces of its runs only where a rule asks for them keeps those within this share
+/// of the start of another run too, so that the cut finds them.
+pub const VALUE_EDGE: f32 = 0.1;
+
 /// A run of text of one line, apart from its neighbours by a gap: one cell's text.
 #[derive(Debug, Clone)]
 pub struct Piece {
@@ -287,6 +297,111 @@ fn with_sparse(columns: Vec<(f32, f32)>, pieces: &[Vec<Piece>]) -> Vec<(f32, f32
     out
 }
 
+/// The left edge of the ink of the runs `range`: where their first run with ink starts.
+pub(crate) fn ink_start<R: LineRun>(runs: &[R], (start, end): (usize, usize)) -> Option<f32> {
+    runs[start..end]
+        .iter()
+        .find(|r| !r.text().trim().is_empty())
+        .map(|r| r.x())
+}
+
+/// Where the runs `range` of one line, a piece over a column of labels and the column of
+/// their values, part into a label and its value (Task 26, class A1): at the word that starts
+/// at the left edge the values of the other lines share. The gap before that word is a word
+/// space (else the line had two pieces), so the gap says nothing; the shared edge does:
+///
+/// - `labels` and `values` are the left edges of the text the other lines have in the two
+///   columns alone. The piece starts within [`VALUE_EDGE`] sizes of the edge of two labels or
+///   more, and a word of it starts within that share of the edge of two values or more, more
+///   than half of them, with no value starting left of it (it is the column's left edge:
+///   values set flush right share no left edge, and nothing is cut by them);
+/// - the text from that word on is shaped as a number, a date or a code, or the text before it
+///   ends with a colon: a line of text over both columns whose word starts at the edge by
+///   chance is no label and its value.
+///
+/// Gives the run the cut starts in and its byte, byte 0 between two runs (as [`title_cut`]).
+/// A word space inside a run is where the glyphs say, else where the run's width shared out by
+/// its characters puts it. `None` leaves the piece one cell over both columns.
+pub(crate) fn value_cut<R: LineRun>(
+    runs: &[R],
+    (start, end): (usize, usize),
+    labels: &[f32],
+    values: &[f32],
+) -> Option<(usize, usize)> {
+    let size = runs[start..end]
+        .iter()
+        .map(|r| r.size())
+        .fold(1.0f32, f32::max);
+    let tol = VALUE_EDGE * size;
+    crate::work::add((end - start + labels.len() + values.len()) as u64);
+    let x0 = ink_start(runs, (start, end))?;
+    if labels.iter().filter(|&&l| (l - x0).abs() <= tol).count() < 2 {
+        return None;
+    }
+    // The left edge of the value column: where a word may start a value.
+    let edge = |x: f32| {
+        let at = values.iter().filter(|&&v| (v - x).abs() <= tol).count();
+        at >= 2 && 2 * at > values.len() && values.iter().all(|&v| v >= x - tol)
+    };
+    let fits = |before: &str, after: &str| {
+        let (before, after) = (before.trim(), after.trim());
+        !before.is_empty()
+            && !after.is_empty()
+            && (before.ends_with(':') || crate::typers::pairs::value_shape(after))
+    };
+    let rest = |i: usize, byte: usize| {
+        let mut t = runs[i].text()[byte..].to_string();
+        for r in &runs[i + 1..end] {
+            t.push(' ');
+            t += r.text();
+        }
+        t
+    };
+    let head = |i: usize, byte: usize| {
+        let mut t = String::new();
+        for r in &runs[start..i] {
+            t += r.text();
+            t.push(' ');
+        }
+        t + &runs[i].text()[..byte]
+    };
+    for (i, r) in runs.iter().enumerate().take(end).skip(start) {
+        if r.text().trim().is_empty() {
+            continue;
+        }
+        if i > start && edge(r.x()) && fits(&head(i, 0), &rest(i, 0)) {
+            return Some((i, 0));
+        }
+        // The word starts of the run's text after its first word, by bytes and characters.
+        let text = r.text();
+        let mut starts: Vec<(usize, usize)> = Vec::new();
+        let (mut seen, mut space) = (false, false);
+        for (n, (b, ch)) in text.char_indices().enumerate() {
+            if ch.is_whitespace() {
+                space = seen;
+            } else {
+                if std::mem::take(&mut space) {
+                    starts.push((b, n));
+                }
+                seen = true;
+            }
+        }
+        let chars = text.chars().count().max(1) as f32;
+        let no_gaps = r.gaps().next().is_none();
+        for (w, &(byte, to)) in starts.iter().enumerate() {
+            let x = match r.gaps().find(|g| g.words == w as u32 + 1) {
+                Some(g) => g.to,
+                None if no_gaps => r.x() + r.w() * to as f32 / chars,
+                None => continue,
+            };
+            if edge(x) && fits(&head(i, byte), &rest(i, byte)) {
+                return Some((i, byte));
+            }
+        }
+    }
+    None
+}
+
 /// Where a piece of a line goes in a grid: its column, its column span and its range of runs.
 type Placement = (usize, u32, (usize, usize));
 
@@ -407,6 +522,55 @@ pub fn grid_cells_with<R: LineRun>(
         }
         placed.push(row);
     }
+    // A piece over two columns that goes on into the second at the left edge its values
+    // share is a label and its value a word space apart (see [`value_cut`]): it is cut at
+    // that edge, and its line is clean when nothing else of it crosses a gutter. The cut
+    // that falls inside a run is made once the runs are in their cells. The first line is
+    // cut after its titles (below).
+    let mut inside: Vec<(usize, usize, usize)> = Vec::new();
+    let cut_values = |k: usize,
+                      placed: &mut Vec<Vec<Placement>>,
+                      inside: &mut Vec<(usize, usize, usize)>|
+     -> bool {
+        let row = std::mem::take(&mut placed[k]);
+        let mut cut_any = false;
+        for &(c, span, (start, end)) in &row {
+            let cut = (span == 2)
+                .then(|| {
+                    let starts = |col: usize| -> Vec<f32> {
+                        (0..lines)
+                            .filter(|&j| j != k)
+                            .flat_map(|j| placed[j].iter().filter(move |x| x.0 == col && x.1 == 1))
+                            .filter_map(|x| ink_start(runs, x.2))
+                            .collect()
+                    };
+                    value_cut(runs, (start, end), &starts(c), &starts(c + 1))
+                })
+                .flatten();
+            cut_any |= cut.is_some();
+            let row = &mut placed[k];
+            match cut {
+                Some((run, 0)) => {
+                    row.push((c, 1, (start, run)));
+                    row.push((c + 1, 1, (run, end)));
+                }
+                Some((run, byte)) => {
+                    row.push((c, 1, (start, run + 1)));
+                    if run + 1 < end {
+                        row.push((c + 1, 1, (run + 1, end)));
+                    }
+                    inside.push((k, run, byte));
+                }
+                None => row.push((c, span, (start, end))),
+            }
+        }
+        cut_any && placed[k].iter().all(|x| x.1 == 1)
+    };
+    for k in 1..lines {
+        if cut_values(k, &mut placed, &mut inside) {
+            clean += 1;
+        }
+    }
     if (clean as f32) < CLEAN_ROWS * lines as f32 {
         return Err("its columns are not clean");
     }
@@ -443,7 +607,6 @@ pub fn grid_cells_with<R: LineRun>(
     let row_of = |k: usize| row_at[k];
     // Close titles of the first line over two columns are cut at the gutter between them.
     // The cut that falls inside a run is made once the runs are in their cells.
-    let mut inside: Vec<(usize, usize)> = Vec::new();
     let first = std::mem::take(&mut placed[0]);
     for (k, &(c, span, (start, end))) in first.iter().enumerate() {
         // Both columns hold text of their own in two lines below or more, and no other line
@@ -486,11 +649,13 @@ pub fn grid_cells_with<R: LineRun>(
                 if run + 1 < end {
                     row.push((c + 1, 1, (run + 1, end)));
                 }
-                inside.push((run, byte));
+                inside.push((0, run, byte));
             }
             None => row.push((c, span, (start, end))),
         }
     }
+    // The first line too, where its titles were not cut.
+    cut_values(0, &mut placed, &mut inside);
     // A line under the first that would join the row of another and has a piece over a gutter,
     // or one that runs past the middle of a gutter (a note between rows), is no text of the
     // cells: it would make one cell of two columns, or put the note in a cell. It stays out of
@@ -553,10 +718,10 @@ pub fn grid_cells_with<R: LineRun>(
     }
     // Each cut inside a run: the cell that holds the run, and the run's place among the runs
     // of the cell, which go to it in their order.
-    let r0 = row_of(0);
     let cuts: Vec<TitleCut> = inside
         .into_iter()
-        .filter_map(|(run, byte)| {
+        .filter_map(|(line, run, byte)| {
+            let r0 = row_of(line);
             let cell = rows[r0]
                 .iter()
                 .position(|c| c.ranges.iter().any(|&(s, e)| (s..e).contains(&run)))?;

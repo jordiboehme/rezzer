@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use super::grid::{Piece, Shape, grid_cells, pieces_of, title_cut};
+use super::grid::{Piece, Shape, VALUE_EDGE, grid_cells, pieces_of, title_cut, value_cut};
 use super::ruled::{GridPart, RuledIn, column_cuts, ruled_cells};
 use super::*;
 use crate::input::{FontKind, GapIn, Shift, TextRun};
@@ -854,4 +854,72 @@ fn a_joint_of_a_rule_parts_two_titles_less_than_a_cell_gap_apart() {
         super::grid::cut_at_breaks(&sentence, &pieces, &[])[0].len(),
         1
     );
+}
+
+/// Task 26 (A1): a label and its value a word space apart are cut where the value starts at
+/// the left edge the values of the other lines share, never by the gap.
+#[test]
+fn a_value_a_word_space_after_its_label_is_cut_at_the_shared_edge() {
+    // Runs of size 10, 6 points a character, with their glyph gaps.
+    let one = [run_at("Customer reference 20481", 40.0, 600.0, 1)];
+    // `20481` starts at 40 + 19 * 6 = 154.
+    let (labels, values) = ([40.0f32, 40.0, 40.0], [154.0f32, 154.0, 154.0]);
+    assert_eq!(value_cut(&one, (0, 1), &labels, &values), Some((0, 19)));
+    // Two runs: between them.
+    let two = [
+        run_at("Customer reference", 40.0, 600.0, 1),
+        run_at("20481", 154.0, 600.0, 1),
+    ];
+    assert_eq!(value_cut(&two, (0, 2), &labels, &values), Some((1, 0)));
+    // The edge moved both ways: within the share of the size it is the edge, past it not.
+    let near = VALUE_EDGE * 10.0;
+    for (off, cut) in [(0.9 * near, true), (-0.9 * near, true), (1.2 * near, false)] {
+        let values = [154.0 + off; 3];
+        // A value starting left of the edge by more than the share is no edge either.
+        assert_eq!(
+            value_cut(&one, (0, 1), &labels, &values).is_some(),
+            cut,
+            "off {off}"
+        );
+    }
+    // One other value at the edge is no shared edge; nor are values set flush right, whose
+    // left edges differ; nor an edge the labels of the other lines do not start at.
+    assert_eq!(value_cut(&one, (0, 1), &labels, &[154.0]), None);
+    assert_eq!(
+        value_cut(&one, (0, 1), &labels, &[154.0, 148.0, 142.0]),
+        None
+    );
+    assert_eq!(value_cut(&one, (0, 1), &[52.0, 52.0], &values), None);
+    // A line of text over both columns whose word starts at the edge by chance is no label
+    // and its value: the word is no number, date or code, and no colon stands before it.
+    let prose = [run_at("Customer reference hereby", 40.0, 600.0, 1)];
+    assert_eq!(value_cut(&prose, (0, 1), &labels, &values), None);
+    let colon = [run_at("Customer reference: hereby", 40.0, 600.0, 1)];
+    assert_eq!(
+        value_cut(&colon, (0, 1), &labels, &[160.0, 160.0, 160.0]),
+        Some((0, 20))
+    );
+}
+
+/// The lines of [`a_value_a_word_space_after_its_label_is_cut_at_the_shared_edge`] as a grid:
+/// the glued line is a row of two cells, cut inside its run.
+#[test]
+fn a_grid_cuts_a_glued_label_and_value_at_the_value_column() {
+    let runs = vec![
+        run_at("Order", 40.0, 640.0, 0),
+        run_at("4711", 154.0, 640.0, 0),
+        run_at("Customer reference 20481", 40.0, 628.0, 1),
+        run_at("Depot", 40.0, 616.0, 2),
+        run_at("D-17", 154.0, 616.0, 2),
+        run_at("Parcels", 40.0, 604.0, 3),
+        run_at("12", 154.0, 604.0, 3),
+    ];
+    let lines = [(0, 2), (2, 3), (3, 5), (5, 7)];
+    let pieces: Vec<Vec<Piece>> = lines.iter().map(|&(a, z)| pieces_of(&runs, a, z)).collect();
+    assert_eq!(pieces[1].len(), 1, "the glued line is one piece");
+    let grid = grid_cells(&runs, &pieces, 2, false).expect("a grid");
+    assert_eq!(grid.rows.len(), 4);
+    assert!(grid.rows.iter().all(|r| r.len() == 2), "two cells a row");
+    // The cut inside the run of row 1: its cell 0, its first run, at the byte of `20481`.
+    assert_eq!(grid.cuts, vec![(1, 0, 0, 19)]);
 }

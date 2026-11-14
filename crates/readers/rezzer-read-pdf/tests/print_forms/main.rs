@@ -150,10 +150,9 @@ fn every_run_is_in_one_region() {
 /// snapshots, so a later change of the reader shows in them. The facts next to them hold
 /// whatever the snapshots say; [`read`] also checks that no placeholder reaches either.
 ///
-/// Known wrong order, pinned on purpose until the region engine reads it: the labels over the
-/// boxed amount and the boxed date in one column come before both values
-/// (`Betrag`, `Zahltag`, `9876,54`, `28.02.2026`). Wanted: each label with its own value,
-/// `Betrag` 9876,54 then `Zahltag` 28.02.2026. The snapshot changes when that is fixed.
+/// The labels over the boxed amount and the boxed date in one column are read each with its
+/// own value: `Betrag` 9876,54, then `Zahltag` 28.02.2026 (Task 26; shape `labels over boxed
+/// values in one column`).
 #[test]
 fn synthetic_print_form_golden() {
     let out = read(&common::synthetic_print_form());

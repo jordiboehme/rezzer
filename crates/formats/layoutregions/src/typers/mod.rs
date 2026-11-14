@@ -93,7 +93,9 @@ pub(crate) fn text_alone(view: &PageView<'_>, seg: &Segment) -> bool {
             | Source::Style
             | Source::Rest
             | Source::Walk
+            | Source::Line
             | Source::Strip
+            | Source::Cell
     ) && seg.children.iter().all(|c| {
         view.segs.all.get(c.0 as usize).is_some_and(|k| {
             matches!(
@@ -104,6 +106,8 @@ pub(crate) fn text_alone(view: &PageView<'_>, seg: &Segment) -> bool {
                     | Source::Style
                     | Source::Rest
                     | Source::Walk
+                    | Source::Line
+                    | Source::Cell
             )
         })
     })
@@ -529,17 +533,32 @@ pub fn type_page_with(
             Some(cut) => cut,
             None => {
                 let typed = type_segments(&view);
+                let unparted = view.strips_unparted();
                 drop(view);
+                let mut segs = segs;
+                say_unparted(&mut segs, unparted);
                 return (segs, typed);
             }
         }
     };
-    let segs = cut;
-    let typed = {
+    let mut segs = cut;
+    let (typed, unparted) = {
         let view = PageView::with(page, drawn, &segs, facts, ends_in_amount);
-        type_segments(&view)
+        (type_segments(&view), view.strips_unparted())
     };
+    say_unparted(&mut segs, unparted);
     (segs, typed)
+}
+
+/// Says in the issues of `segs` that the page's strips were read without their dividers
+/// (see [`pairs::Strips::unparted`]), when they were.
+fn say_unparted(segs: &mut Segments, unparted: bool) {
+    if unparted {
+        segs.issues.push(crate::region::Issue {
+            what: pairs::DIVIDERS_UNSEARCHED.to_string(),
+            kind: crate::region::IssueKind::Limit,
+        });
+    }
 }
 
 /// The facts of a file as one page is typed with them: the facts and their index, and the
@@ -650,7 +669,7 @@ pub struct PageView<'a> {
     /// [`pairs::touching_boxes`]).
     touching: OnceCell<Vec<bool>>,
     /// The strips between the page's rules (see [`pairs::strip_frames`]), found once.
-    strip_frames: OnceCell<Vec<pairs::StripFrame>>,
+    strip_frames: OnceCell<pairs::Strips>,
     /// The strip each run in a strip stands in, by run id.
     strip_of: OnceCell<HashMap<u32, usize>>,
     /// The innermost box segment of each run that stands in one, by run id.
@@ -911,7 +930,16 @@ impl<'a> PageView<'a> {
 
     /// The strips between the page's rules (see [`pairs::strip_frames`]).
     pub(crate) fn strip_frames(&self) -> &[pairs::StripFrame] {
-        self.strip_frames.get_or_init(|| pairs::strip_frames(self))
+        &self
+            .strip_frames
+            .get_or_init(|| pairs::strip_frames(self))
+            .frames
+    }
+
+    /// Whether the strips of the page were looked for and are read without their dividers,
+    /// as the search for them went past its bound (see [`pairs::Strips::unparted`]).
+    fn strips_unparted(&self) -> bool {
+        self.strip_frames.get().is_some_and(|s| s.unparted)
     }
 
     /// How many box segments of the view's tree the text runs of `seg` stand in: each run

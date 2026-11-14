@@ -1976,6 +1976,297 @@ fn rows_at(rows: &[&[&str]], xs: &[f32], top: f32, size: f32, first: u32) -> Vec
     texts
 }
 
+/// Task 26 fix round 2 (I2) and part 3b: lines of a label that ends with a colon and its value
+/// a cell gap after it read as pairs among other lines, in the rest of a drawn grid of two
+/// columns or more too (the colon says the first piece is a label), but not right under a row
+/// of smaller labels (the row of the values of those labels). The size of that row is moved
+/// both ways around the size step. A line of two pieces without a colon label, a pair alone
+/// by the shape of its value, is cells in such a grid.
+#[test]
+fn colon_lines_pair_in_a_grid_but_not_under_smaller_labels() {
+    let rows: [&[&str]; 2] = [&["Sheet:", "03.04.2026"], &["Pages:", "4"]];
+    let block_of = |rows: &[&[&str]]| rows_at(rows, &[72.0, 160.0], 600.0, 10.0, 100);
+    let block = || block_of(&rows);
+    // What the typers say of the two lines as a segment under `parent`.
+    let typed = |page: PageIn, in_grid: bool| {
+        Tree { page }.with(|view| {
+            let parent = view
+                .segs
+                .all
+                .iter()
+                .find(|s| matches!(s.source, Source::Grid { cols, .. } if cols >= 2))
+                .map(|s| s.id);
+            assert_eq!(parent.is_some(), in_grid, "{:#?}", view.segs.all);
+            let prims: Vec<PrimId> = (0..view.page.texts.len())
+                .filter(|&i| matches!(view.page.texts[i].line, 100 | 101))
+                .map(|i| PrimId::Text(i as u32))
+                .collect();
+            let seg = Segment {
+                id: SegId(u32::MAX),
+                bounds: Bounds {
+                    x0: 72.0,
+                    y0: 580.0,
+                    x1: 220.0,
+                    y1: 612.0,
+                },
+                prims,
+                source: Source::Rest,
+                parent,
+                children: Vec::new(),
+                alternatives: Vec::new(),
+            };
+            all_typed(view, &seg)
+        })
+    };
+    let plain = typed(sheet(block(), Vec::new()), false);
+    let pairs = of(&plain, Kind::LabelValue);
+    assert!(ids(pairs).contains(&"label_value.line_pairs"), "{plain:#?}");
+    assert!(ids(pairs).contains(&"label_value.colon"), "{plain:#?}");
+    // The same lines as a leaf in a drawn grid of two columns (drawn lower on the page).
+    let mut texts = block();
+    texts.extend(rows_at(
+        &[&["Parcels", "12"], &["Crates", "7"]],
+        &[76.0, 206.0],
+        410.0,
+        10.0,
+        200,
+    ));
+    let below = texts.split_off(block().len());
+    let grid = || grid_rules(&[72.0, 200.0, 330.0], &[422.0, 406.0, 392.0]);
+    let in_grid = |rows: &[&[&str]]| {
+        let mut texts = block_of(rows);
+        texts.extend(below.iter().cloned());
+        typed(sheet(texts, grid()), true)
+    };
+    let held = in_grid(&rows);
+    let pairs = of(&held, Kind::LabelValue);
+    assert!(ids(pairs).contains(&"label_value.line_pairs"), "{held:#?}");
+    assert!(ids(pairs).contains(&"label_value.colon"), "{held:#?}");
+    // A lone line with a colon label pairs there, the same line without the colon does
+    // not, though it pairs on a page without the grid (a label and a number).
+    let lone = in_grid(&[&["Sheet:", "4711"]]);
+    assert!(find(&lone, Kind::LabelValue).is_some(), "{lone:#?}");
+    let bare: [&[&str]; 1] = [&["Sheet", "4711"]];
+    let cells = in_grid(&bare);
+    assert!(find(&cells, Kind::LabelValue).is_none(), "{cells:#?}");
+    let free = typed(sheet(block_of(&bare), Vec::new()), false);
+    assert!(find(&free, Kind::LabelValue).is_some(), "{free:#?}");
+    // Right under a row of smaller labels: 9.2 under 10 is a size step (1.08), 9.3 is none.
+    let under = |size: f32| {
+        let mut texts = block();
+        texts.extend(rows_at(
+            &[&["Kind", "Issued"]],
+            &[72.0, 160.0],
+            611.0,
+            size,
+            99,
+        ));
+        typed(sheet(texts, Vec::new()), false)
+    };
+    assert!(find(&under(9.2), Kind::LabelValue).is_none());
+    assert!(find(&under(9.3), Kind::LabelValue).is_some());
+}
+
+/// Task 26 part 3b (class A5): two lines alone in one size, the upper one with an underline
+/// of its own, are a label over its value. The underline is the evidence: it lies at most a
+/// quarter of the size under the baseline and is as long as the words (each end within half
+/// a size). Each bound is moved both ways; a longer rule (a line to fill in), an underline
+/// under both lines, a net address, a sentence, a smaller lower line and a lower line from
+/// another edge give no pair.
+#[test]
+fn a_label_with_its_own_underline_over_a_line_is_a_pair() {
+    // `Checked by` at 72..122 on 600 in size 10, the value on 588.
+    let typed = |label: &str, value: (&str, f32, f32), rules: Vec<RuleIn>| {
+        let texts = vec![
+            run(label, 72.0, 600.0, 10.0, 100),
+            run(value.0, value.1, 588.0, value.2, 101),
+        ];
+        let end = 72.0 + 5.0 * label.chars().count() as f32;
+        Tree {
+            page: sheet(texts, rules),
+        }
+        .with(|view| {
+            let prims: Vec<PrimId> = (0..view.page.texts.len())
+                .filter(|&i| matches!(view.page.texts[i].line, 100 | 101))
+                .map(|i| PrimId::Text(i as u32))
+                .collect();
+            let seg = Segment {
+                id: SegId(u32::MAX),
+                bounds: Bounds {
+                    x0: 72.0,
+                    y0: 586.0,
+                    x1: end,
+                    y1: 610.0,
+                },
+                prims,
+                source: Source::Rest,
+                parent: None,
+                children: Vec::new(),
+                alternatives: Vec::new(),
+            };
+            all_typed(view, &seg)
+        })
+    };
+    let pairs = |t: &[Typed]| {
+        find(t, Kind::LabelValue).is_some_and(|p| ids(p) == ["label_value.underlined_label"])
+    };
+    let value = ("Rowan/Birch", 72.0, 10.0);
+    let under = |y: f32, x0: f32, x1: f32| vec![rule(x0, y, x1, y)];
+    let own = typed("Checked by", value, under(599.0, 72.0, 122.0));
+    assert!(pairs(&own), "{own:#?}");
+    let (kind, lead) = winner(&own);
+    assert_eq!(kind, Kind::LabelValue, "{own:#?}");
+    assert!(lead >= MARGIN, "{own:#?}");
+    // No rule: two lines.
+    assert!(!pairs(&typed("Checked by", value, Vec::new())));
+    // The drop: 2.4 under the baseline of text of 10 is an underline, 2.6 is none; a rule
+    // over the baseline is none.
+    assert!(pairs(&typed(
+        "Checked by",
+        value,
+        under(597.6, 72.0, 122.0)
+    )));
+    assert!(!pairs(&typed(
+        "Checked by",
+        value,
+        under(597.4, 72.0, 122.0)
+    )));
+    assert!(!pairs(&typed(
+        "Checked by",
+        value,
+        under(600.5, 72.0, 122.0)
+    )));
+    // The ends: 4.9 past the words on either side is their underline, 5.1 is a longer rule.
+    assert!(pairs(&typed(
+        "Checked by",
+        value,
+        under(599.0, 72.0, 126.9)
+    )));
+    assert!(!pairs(&typed(
+        "Checked by",
+        value,
+        under(599.0, 72.0, 127.1)
+    )));
+    assert!(pairs(&typed(
+        "Checked by",
+        value,
+        under(599.0, 67.1, 122.0)
+    )));
+    assert!(!pairs(&typed(
+        "Checked by",
+        value,
+        under(599.0, 66.9, 122.0)
+    )));
+    assert!(!pairs(&typed(
+        "Checked by",
+        value,
+        under(599.0, 72.0, 116.9)
+    )));
+    // An underline under both lines says nothing about which is the label.
+    let mut both = under(599.0, 72.0, 122.0);
+    both.extend(under(587.0, 72.0, 127.0));
+    assert!(!pairs(&typed("Checked by", value, both)));
+    // The label is plain words: a net address or a code with an underline is none.
+    let link = "www.sample.net";
+    assert!(!pairs(&typed(link, value, under(599.0, 72.0, 142.0))));
+    assert!(!pairs(&typed("AB-2048", value, under(599.0, 72.0, 107.0))));
+    assert!(pairs(&typed("Order no.", value, under(599.0, 72.0, 117.0))));
+    // The value: no sentence, no label, at most six words.
+    let rule_of = || under(599.0, 72.0, 122.0);
+    for (text, pair) in [
+        ("the crate was sound.", false),
+        ("Passed on:", false),
+        ("lot 1 lot 2 lot 3", true),
+        ("lot 1 lot 2 lot 3 lot 4", false),
+        // The value reads as one: at least half of its words hold a digit, a slash or an
+        // at sign, or the line is a number, a date or a code. Plain words under an
+        // underlined line say nothing about which of the two is the label (M2), and one
+        // number among plain words is text under a heading (fix round 3b).
+        ("call back Monday", false),
+        ("call back 12 May", false),
+        ("back 12 May", false),
+        ("12 May", true),
+        ("Room 12", true),
+        ("Budget 2026 review", false),
+        ("Budget 2026", true),
+        ("shelf 3 lamp 4", true),
+        ("shelf 3 lamp green desk", false),
+        ("shelf 3 lamp 4 desk", false),
+        ("shelf 3 lamp 4 desk 5", true),
+        ("A/B", true),
+        ("N/A", true),
+        ("N/A or A/B", true),
+        ("see N/A below", false),
+        ("03.04.2026", true),
+        ("Rowan Birch", false),
+        ("rowan@sample.net", true),
+        ("write to rowan@sample.net", false),
+    ] {
+        let t = typed("Checked by", (text, 72.0, 10.0), rule_of());
+        assert_eq!(pairs(&t), pair, "{text}: {t:#?}");
+    }
+    // Review 3 (I1): an underline as long as its words stands under a filled value, a
+    // name, a link and a heading as well. With plain words under it the two lines are no
+    // pair, on a segment made by hand and on the one the cut makes; with a value under
+    // the same upper line they are one.
+    let cut = |label: &str, value: &str| {
+        let end = 72.0 + 5.0 * label.chars().count() as f32;
+        let texts = vec![
+            run(label, 72.0, 600.0, 10.0, 100),
+            run(value, 72.0, 588.0, 10.0, 101),
+        ];
+        Tree {
+            page: sheet(texts, vec![rule(72.0, 599.0, end, 599.0)]),
+        }
+        .typed_holding(&[100, 101])
+    };
+    for (label, value) in [
+        ("Alex Sample", "Signature"),
+        ("Alex Sample", "Name of the holder"),
+        ("Rowan Birch", "Head of Sales"),
+        ("Unsubscribe", "Sent by Sample Ltd"),
+        ("Background", "The frame and its parts"),
+        ("Agenda", "Budget review and staffing"),
+    ] {
+        let end = 72.0 + 5.0 * label.chars().count() as f32;
+        let by_hand = |value: &str| typed(label, (value, 72.0, 10.0), under(599.0, 72.0, end));
+        let t = by_hand(value);
+        assert!(!pairs(&t), "{label} over {value}: {t:#?}");
+        let t = cut(label, value);
+        assert!(!pairs(&t), "{label} over {value}, cut: {t:#?}");
+        for filled in ["N/A", "A/B", "Room 12"] {
+            assert!(pairs(&by_hand(filled)), "{label} over {filled}");
+            assert!(pairs(&cut(label, filled)), "{label} over {filled}, cut");
+        }
+        // One number among plain words is still text under the upper line.
+        let text = "Budget 2026 review";
+        assert!(!pairs(&by_hand(text)), "{label} over {text}");
+        assert!(!pairs(&cut(label, text)), "{label} over {text}, cut");
+    }
+    // A lower line a size step smaller is a note under a title (9.2 under 10; 9.3 is none).
+    assert!(!pairs(&typed(
+        "Checked by",
+        ("Rowan/Birch", 72.0, 9.2),
+        rule_of()
+    )));
+    assert!(pairs(&typed(
+        "Checked by",
+        ("Rowan/Birch", 72.0, 9.3),
+        rule_of()
+    )));
+    // The value starts at the label's left edge (a tenth of the size: 1 at 10).
+    assert!(pairs(&typed(
+        "Checked by",
+        ("Rowan/Birch", 72.9, 10.0),
+        rule_of()
+    )));
+    assert!(!pairs(&typed(
+        "Checked by",
+        ("Rowan/Birch", 73.1, 10.0),
+        rule_of()
+    )));
+}
+
 /// Task 18b (ruling Q2): a short label with a colon and its value in one run reads as a pair,
 /// line by line, at every scale; prose after a colon does not.
 #[test]
@@ -3190,6 +3481,76 @@ fn a_rule_of_another_column_keeps_a_strip() {
     }
 }
 
+/// A strip of fields whose value line is set in runs that stand across its fields: small
+/// labels over one line of values between two rules, with a divider of `share` of the strip's
+/// height at each field edge, rising from the lower rule. The labels are more words than one
+/// label holds (`LABEL_WORDS`), so without dividers nothing shows the line of labels to be
+/// fields before the value line is cut.
+fn padded_strip(share: f32) -> Tree {
+    let (top, bottom) = (700.0, 676.0);
+    let mut texts: Vec<TextRun> = [
+        ("Sheet", 44.0),
+        ("Depot name", 118.0),
+        ("Rate %", 289.0),
+        ("Gr C", 323.0),
+        ("Gr D", 346.0),
+        ("Days", 373.0),
+    ]
+    .iter()
+    .map(|(t, x)| run(t, *x, 692.0, 6.6, 100))
+    .collect();
+    // A print run sets the line in a monospaced face, 5.7 points a character.
+    let value = |text: &str, x: f32, gaps: &[(u32, usize, usize)]| TextRun {
+        w: 5.7 * text.chars().count() as f32,
+        gaps: gaps
+            .iter()
+            .map(|&(words, from, to)| GapIn {
+                words,
+                from: x + 5.7 * from as f32,
+                to: x + 5.7 * to as f32,
+            })
+            .collect(),
+        ..run(text, x, 679.0, 9.5, 101)
+    };
+    texts.push(value(
+        "12345678X012 Tall Crate",
+        42.5,
+        &[(1, 12, 13), (2, 17, 18)],
+    ));
+    texts.push(value(
+        "12,34 567 8901 30",
+        287.6,
+        &[(1, 5, 6), (2, 9, 10), (3, 14, 15)],
+    ));
+    let mut rules = h_rules(40.0, 400.0, &[top, bottom]);
+    for x in [114.0, 285.0, 319.0, 342.0, 370.0] {
+        rules.push(rule(x, bottom, x, bottom + share * (top - bottom)));
+    }
+    Tree {
+        page: sheet(texts, rules),
+    }
+}
+
+/// Task 26 part 3c-2 (the carried pin of `F1 to F3` under split runs): the dividers a page
+/// draws in a strip between rules part its fields. A value line in runs that stand across
+/// the fields is cut at the dividers and each piece is the value of the label over it, as
+/// the same line reads when each word is a run of its own. A mark shorter than
+/// `DIVIDER` of the strip's height is no divider: the strip reads as it does without one.
+#[test]
+fn drawn_dividers_part_the_fields_of_a_strip() {
+    use layoutregions::extract::pairs::strips::DIVIDER;
+    let fields = |tree: &Tree| {
+        let typed = tree.typed_holding(&[100, 101]);
+        find(&typed, Kind::LabelValue).is_some_and(|t| ids(t).contains(&"label_value.strip_fields"))
+    };
+    for share in [0.75, 0.5, DIVIDER + 0.01] {
+        assert!(fields(&padded_strip(share)), "dividers of {share}");
+    }
+    for share in [DIVIDER - 0.01, 0.1] {
+        assert!(!fields(&padded_strip(share)), "marks of {share}");
+    }
+}
+
 /// Fix round 2: lines that stand in two drawn boxes or more (fields in boxes beside a box of
 /// a bold title) are no one paragraph: the box sides part them.
 #[test]
@@ -3480,4 +3841,495 @@ fn a_block_beside_a_block_is_no_line_of_its_paragraph() {
             "{k}"
         );
     }
+}
+
+/// Task 26 fix round 4 (concern 5 of part 3c-1): a colon that opens the second piece of a
+/// line as a word of its own (`Currency` and `: EUR`) is the colon of the label only when
+/// another line of the block has a colon in that column: a listing in a fixed-width face
+/// pads its labels up to a column of colons, and one colon before a cell is chance. The
+/// other line may be padded too, or have its colon inside its one run, as a word or at the
+/// end of its label. Without the column the line is a pair only as a lone line whose value
+/// is shaped as a number, a date or a code, and then not by its colon.
+#[test]
+fn a_colon_that_opens_the_value_needs_a_column_of_colons() {
+    /// One run: its text, its left edge, its baseline and its line. Text of 10 points, 5
+    /// points a character.
+    type Part = (&'static str, f32, f32, u32);
+    // The signals of the label and value typer for the leaf that holds line 1.
+    let read = |parts: &[Part]| -> Option<Vec<&'static str>> {
+        let mut texts: Vec<TextRun> = parts
+            .iter()
+            .map(|&(t, x, y, line)| run(t, x, y, 10.0, line))
+            .collect();
+        texts.extend(prose(20, 500.0));
+        let tree = Tree {
+            page: page(1, texts),
+        };
+        tree.with(|view| {
+            let seg = view
+                .segs
+                .all
+                .iter()
+                .find(|s| {
+                    s.children.is_empty()
+                        && s.prims.iter().any(
+                            |p| matches!(p, PrimId::Text(i) if view.page.texts[*i as usize].line == 1),
+                        )
+                })
+                .expect("a leaf with line 1");
+            find(&all_typed(view, seg), Kind::LabelValue).map(ids)
+        })
+    };
+    let colon = |signals: Option<Vec<&'static str>>| {
+        signals.is_some_and(|s| s.contains(&"label_value.colon"))
+    };
+    // The line: its colon at 115.
+    let (label, value): (Part, Part) = (("Currency ", 40.0, 700.0, 1), (": EUR", 115.0, 700.0, 1));
+    // Alone on the page: one colon is chance, and `EUR` no value by its shape.
+    assert_eq!(read(&[label, value]), None);
+    // With a number it is a pair as a lone line, by the shape of the value and no colon.
+    let number = read(&[label, (": 549910", 115.0, 700.0, 1)]).expect("a lone pair");
+    assert!(number.contains(&"label_value.value_shape"), "{number:?}");
+    assert!(!number.contains(&"label_value.colon"), "{number:?}");
+    // Another padded line with its colon in the column: under it and over it.
+    let other = |x: f32, y: f32| -> [Part; 2] { [("Region ", 40.0, y, 2), (": north", x, y, 2)] };
+    for y in [688.0, 712.0] {
+        let [a, b] = other(115.0, y);
+        assert!(colon(read(&[label, value, a, b])), "{y}");
+        assert!(colon(read(&[a, b, label, value])), "{y}");
+    }
+    // A line in one run with its colon there: a word of its own (15 characters before
+    // it), or at the end of its label.
+    assert!(colon(read(&[
+        label,
+        value,
+        ("Profile in use : basic", 40.0, 688.0, 2)
+    ])));
+    assert!(colon(read(&[
+        label,
+        value,
+        ("Profile in use: basic", 45.0, 688.0, 2)
+    ])));
+    // A colon inside a word there (a time) is no colon of a label; nor is a line with no
+    // colon, with which the line is one of several and no pair at all.
+    assert_eq!(
+        read(&[label, value, ("Opens at nine or 10:30", 20.0, 688.0, 2)]),
+        None
+    );
+    assert_eq!(
+        read(&[label, value, ("Region north", 40.0, 688.0, 2)]),
+        None
+    );
+    // The column: within `EDGE_SIZES` of the text size (1 point at 10).
+    let [a, b] = other(115.9, 688.0);
+    assert!(colon(read(&[label, value, a, b])));
+    let [a, b] = other(116.1, 688.0);
+    assert_eq!(read(&[label, value, a, b]), None);
+    let [a, b] = other(113.9, 688.0);
+    assert_eq!(read(&[label, value, a, b]), None);
+    // The block: a line at most `ITEM_PITCH` sizes (20 points) off.
+    let [a, b] = other(115.0, 680.1);
+    assert!(colon(read(&[label, value, a, b])));
+    let [a, b] = other(115.0, 679.9);
+    assert_eq!(read(&[label, value, a, b]), None);
+}
+
+/// The decisions of the engine on a page of `parts` (each its text, left edge, baseline,
+/// size and line) over a block of prose, as the PDF reader's layout makes them: the kind of
+/// each region that holds a part, with its parts in the order of the region. Every part
+/// stands in exactly one region.
+fn decided(parts: &[(&'static str, f32, f32, f32, u32)]) -> Vec<(Kind, Vec<&'static str>)> {
+    let texts = parts
+        .iter()
+        .map(|&(t, x, y, size, line)| run(t, x, y, size, line))
+        .collect();
+    decided_on(texts, Vec::new())
+        .into_iter()
+        .map(|(kind, ids)| (kind, ids.into_iter().map(|t| parts[t].0).collect()))
+        .collect()
+}
+
+/// The decisions of the engine on a page of the runs `own` and the `rules` over a block of
+/// prose (see [`decided`]): the kind of each region that holds a run of `own`, with the
+/// places of its runs in `own` in the order of the region. Every run of `own` stands in
+/// exactly one region.
+fn decided_on(own: Vec<TextRun>, rules: Vec<RuleIn>) -> Vec<(Kind, Vec<usize>)> {
+    use layoutregions::segment::drawn::grids;
+    use layoutregions::segment::segment_page_drawn;
+    use layoutregions::typers::type_page;
+    let n = own.len();
+    let mut texts = own;
+    // Prose far under the parts: they are a group of the page, not the page.
+    texts.extend(prose(50, 500.0));
+    let mut p = page(1, texts);
+    p.rules = rules;
+    let file = [FilePage::of(&p)];
+    let facts = learn(&file, false, &no_amount);
+    let index = FileIndex::new(&facts);
+    let limits = Limits::default();
+    let (segs, drawn) = segment_page_drawn(&p, &grids(&p.rules), &limits, &|| false);
+    let drawn = drawn.expect("no stop");
+    let (segs, typed) = type_page(&p, &drawn, segs, &facts, &index, &no_amount, &limits);
+    let mut seen = vec![0; n];
+    let out: Vec<(Kind, Vec<usize>)> = arbitrate(&segs, &typed, &Margins::of(&limits))
+        .into_iter()
+        .map(|d| {
+            let texts = segs.all[d.seg.0 as usize]
+                .prims
+                .iter()
+                .filter_map(|p| match *p {
+                    PrimId::Text(t) if (t as usize) < n => Some(t as usize),
+                    _ => None,
+                })
+                .inspect(|&t| seen[t] += 1)
+                .collect();
+            (d.kind, texts)
+        })
+        .filter(|d: &(Kind, Vec<usize>)| !d.1.is_empty())
+        .collect();
+    assert!(seen.iter().all(|&n| n == 1), "{seen:?} in {out:?}");
+    out
+}
+
+/// Asserts that no region of `read` is a label with its value, and that `label` stands
+/// right before `after` in one region.
+#[track_caller]
+fn plain_line(read: &[(Kind, Vec<&str>)], label: &str, after: &str) {
+    assert!(read.iter().all(|r| r.0 != Kind::LabelValue), "{read:?}");
+    let together = read
+        .iter()
+        .any(|r| r.1.windows(2).any(|w| w == [label, after]));
+    assert!(together, "{label} {after} in {read:?}");
+}
+
+/// Task 26 fix round 5 (R5 of re-review 4): a small colon label on a data line whose own
+/// value stands under it, a little farther than a line pitch. The text after the label on
+/// its line was read as its value (`Staff no.: | Page 1`, the wrong value). Now no pair is
+/// claimed: the label and the text after it are one plain line, at every drop of the value
+/// under the label.
+#[test]
+fn a_label_on_a_data_line_with_its_value_under_it_claims_no_pair() {
+    for drop in [11.0f32, 14.0, 15.5, 16.0, 18.0, 20.0] {
+        let read = decided(&[
+            ("Ledger sheet", 50.0, 700.0, 10.0, 0),
+            ("Staff no.:", 260.0, 700.0, 7.0, 0),
+            ("Page 1", 310.0, 700.0, 10.0, 0),
+            ("4711", 260.0, 700.0 - drop, 10.0, 1),
+        ]);
+        plain_line(&read, "Staff no.:", "Page 1");
+        // The number under the label is in no region with the label.
+        assert!(
+            read.iter()
+                .all(|r| !(r.1.contains(&"4711") && r.1.contains(&"Staff no.:"))),
+            "{drop}: {read:?}"
+        );
+        let read = decided(&[
+            ("AB 12", 50.0, 700.0, 10.0, 0),
+            ("Amount:", 200.0, 700.0, 7.0, 0),
+            ("4711/0815", 232.0, 700.0, 10.0, 0),
+            ("03.04.2026", 50.0, 700.0 - drop, 10.0, 1),
+            ("12,50", 200.0, 700.0 - drop, 10.0, 1),
+        ]);
+        plain_line(&read, "Amount:", "4711/0815");
+        // A head of two stretches (a title or a code, then a date): no pair of them either.
+        for head in ["Ledger", "AB 12"] {
+            let read = decided(&[
+                (head, 50.0, 700.0, 10.0, 0),
+                ("03.04.2026", 120.0, 700.0, 10.0, 0),
+                ("Staff no.:", 260.0, 700.0, 7.0, 0),
+                ("Page 1", 310.0, 700.0, 10.0, 0),
+                ("4711", 260.0, 700.0 - drop, 10.0, 1),
+            ]);
+            plain_line(&read, "Staff no.:", "Page 1");
+            plain_line(&read, head, "03.04.2026");
+        }
+    }
+}
+
+/// Task 26 fix round 5 (R6 of re-review 4) and fix round 6: rows of a table with a blank
+/// labelled field before the amount column. The amount of each row stands under the column
+/// title, and was read as the value of the label (`Part no.: | 12,50`). No pair is claimed,
+/// and the row is not parted at its label either: with a second row in its leaf, a line
+/// that shares its columns, each row stays one row, its cells in their order in one region,
+/// with and without the row of titles. A row alone in its leaf, with nothing there that
+/// shows its columns, is a data line: the label and the amount are one plain line.
+#[test]
+fn a_blank_labelled_field_in_a_table_row_claims_no_pair_and_parts_no_row() {
+    type Part = (&'static str, f32, f32, f32, u32);
+    let titles: [Part; 3] = [
+        ("Pos", 50.0, 714.0, 10.0, 0),
+        ("Description", 90.0, 714.0, 10.0, 0),
+        ("Amount", 300.0, 714.0, 10.0, 0),
+    ];
+    let row = |pos: &'static str, what: &'static str, amount: &'static str, y: f32, line| {
+        let row: [Part; 4] = [
+            (pos, 50.0, y, 10.0, line),
+            (what, 90.0, y, 10.0, line),
+            ("Part no.:", 250.0, y, 7.0, line),
+            (amount, 300.0, y, 10.0, line),
+        ];
+        row
+    };
+    // The cells of a row stand in their order in one region.
+    #[track_caller]
+    fn one_row(read: &[(Kind, Vec<&str>)], row: &[(&'static str, f32, f32, f32, u32); 4]) {
+        let cells = row.map(|c| c.0);
+        assert!(read.iter().all(|r| r.0 != Kind::LabelValue), "{read:?}");
+        let whole = read.iter().any(|r| r.1.windows(4).any(|w| w == cells));
+        assert!(whole, "{cells:?} in {read:?}");
+    }
+    let first = row("1", "Widget", "12,50", 700.0, 1);
+    let second = row("2", "Gadget", "8,00", 686.0, 2);
+    // The row alone.
+    let read = decided(&first);
+    plain_line(&read, "Part no.:", "12,50");
+    assert!(
+        read.iter()
+            .all(|r| !(r.1.contains(&"Widget") && r.1.contains(&"Part no.:"))),
+        "{read:?}"
+    );
+    // Over a second row, with their titles and without.
+    let mut parts: Vec<Part> = titles.to_vec();
+    parts.extend(first);
+    // One row under its titles: the cut makes the titles a leaf of their own, so the row is
+    // alone in its leaf and is a data line as the row alone is.
+    plain_line(&decided(&parts), "Part no.:", "12,50");
+    parts.extend(second);
+    let read = decided(&parts);
+    one_row(&read, &first);
+    one_row(&read, &second);
+    let rows: Vec<Part> = first.into_iter().chain(second).collect();
+    let read = decided(&rows);
+    one_row(&read, &first);
+    one_row(&read, &second);
+    // A line over the row that shares one column with it (the amount's) shows no table: a
+    // line of codes over a data line ends where the data line ends.
+    let mut parts: Vec<Part> = vec![("AB/12 345", 280.0, 714.0, 10.0, 0)];
+    parts.extend(first);
+    let read = decided(&parts);
+    plain_line(&read, "Part no.:", "12,50");
+    assert!(
+        read.iter()
+            .all(|r| !(r.1.contains(&"Widget") && r.1.contains(&"Part no.:"))),
+        "{read:?}"
+    );
+}
+
+/// Task 26 fix round 5 (R7 of re-review 4): two small colon labels that touch, the first
+/// field blank, before one number. The number was read into the value of the first label
+/// (`Sheet: | Page: 2`). Now no pair is claimed: the two labels and the number are one
+/// plain line in their order. With the labels far apart, each a stretch of its own, the
+/// last label stands with the number and claims no pair either.
+#[test]
+fn two_labels_before_one_number_on_a_data_line_claim_no_pair() {
+    let read = decided(&[
+        ("03.04.2026", 50.0, 700.0, 10.0, 0),
+        ("Sheet:", 270.0, 700.0, 7.0, 0),
+        ("Page:", 294.0, 700.0, 7.0, 0),
+        ("2", 316.0, 700.0, 10.0, 0),
+    ]);
+    plain_line(&read, "Sheet:", "Page:");
+    plain_line(&read, "Page:", "2");
+    let read = decided(&[
+        ("03.04.2026", 50.0, 700.0, 10.0, 0),
+        ("Sheet:", 200.0, 700.0, 7.0, 0),
+        ("Page:", 294.0, 700.0, 7.0, 0),
+        ("2", 316.0, 700.0, 10.0, 0),
+    ]);
+    plain_line(&read, "Page:", "2");
+    // A head of two stretches (a title or a code, then a date) before the labels: the date
+    // is no value of the title or of the code.
+    for head in ["Ledger", "AB 12"] {
+        for sheet in [270.0, 200.0] {
+            let read = decided(&[
+                (head, 50.0, 700.0, 10.0, 0),
+                ("03.04.2026", 110.0, 700.0, 10.0, 0),
+                ("Sheet:", sheet, 700.0, 7.0, 0),
+                ("Page:", 294.0, 700.0, 7.0, 0),
+                ("2", 316.0, 700.0, 10.0, 0),
+            ]);
+            plain_line(&read, "Page:", "2");
+            plain_line(&read, head, "03.04.2026");
+        }
+    }
+}
+
+/// Task 26 fix round 7 (N2 of re-review 5): the head of a data line that is parted at a
+/// small colon label claims no pair either. A title or a code and then a date before the
+/// label were read as a label with its value (`Ledger | 03.04.2026`, `AB 12 | 03.04.2026`):
+/// the date is no value of the title. Now the head stands alone as a plain line, its
+/// stretches in their order, on every page of the kind: with text beside the line, with a
+/// value under the label at each drop, with two labels before one number and with a line of
+/// codes over the data line.
+#[test]
+fn the_head_of_a_parted_data_line_claims_no_pair() {
+    type Part = (&'static str, f32, f32, f32, u32);
+    #[track_caller]
+    fn head_alone(parts: &[Part], head: [&str; 2]) {
+        let read = decided(parts);
+        assert!(read.iter().all(|r| r.0 != Kind::LabelValue), "{read:?}");
+        let together = read.iter().any(|r| r.1.windows(2).any(|w| w == head));
+        assert!(together, "{head:?} in {read:?}");
+    }
+    let date: Part = ("03.04.2026", 110.0, 700.0, 10.0, 0);
+    let code: Part = ("AB 12", 50.0, 700.0, 10.0, 0);
+    let title: Part = ("Ledger", 50.0, 700.0, 10.0, 0);
+    let sheet: [Part; 2] = [
+        ("Sheet:", 270.0, 700.0, 7.0, 0),
+        ("1", 300.0, 700.0, 10.0, 0),
+    ];
+    let staff: [Part; 2] = [
+        ("Staff no.:", 260.0, 700.0, 7.0, 0),
+        ("Page 1", 310.0, 700.0, 10.0, 0),
+    ];
+    // E1: text beside the line on its baseline, another line of the host.
+    let mut e1 = vec![code, date];
+    e1.extend(sheet);
+    e1.push(("Page", 500.0, 700.0, 10.0, 1));
+    head_alone(&e1, ["AB 12", "03.04.2026"]);
+    // E2 and E3: a value under the label.
+    let mut e2 = vec![title, date];
+    e2.extend(sheet);
+    e2.push(("4", 270.0, 688.0, 10.0, 1));
+    head_alone(&e2, ["Ledger", "03.04.2026"]);
+    let mut e3 = vec![code, date];
+    e3.extend(staff);
+    e3.push(("4711", 260.0, 688.0, 10.0, 1));
+    head_alone(&e3, ["AB 12", "03.04.2026"]);
+    // D1: the value under the label at each drop.
+    for drop in [12.0f32, 14.0, 16.0] {
+        let mut d1 = vec![title, ("03.04.2026", 120.0, 700.0, 10.0, 0)];
+        d1.extend(staff);
+        d1.push(("4711", 260.0, 700.0 - drop, 10.0, 1));
+        head_alone(&d1, ["Ledger", "03.04.2026"]);
+    }
+    // E4: two labels that touch before one number.
+    for head in [title, code] {
+        head_alone(
+            &[
+                head,
+                date,
+                ("Sheet:", 270.0, 700.0, 7.0, 0),
+                ("Page:", 294.0, 700.0, 7.0, 0),
+                ("2", 316.0, 700.0, 10.0, 0),
+            ],
+            [head.0, "03.04.2026"],
+        );
+    }
+    // C6: a line of codes over the data line, which shares one column with it.
+    let mut c6 = vec![("CD/34 567", 280.0, 714.0, 10.0, 0)];
+    c6.extend([
+        ("AB 12", 50.0, 700.0, 10.0, 1),
+        ("03.04.2026", 110.0, 700.0, 10.0, 1),
+        ("Sheet:", 270.0, 700.0, 7.0, 1),
+        ("1", 300.0, 700.0, 10.0, 1),
+    ]);
+    head_alone(&c6, ["AB 12", "03.04.2026"]);
+}
+
+/// Task 26 fix round 7b (N1): a strip between rules with a drawn divider in the digit group
+/// gap of a number claims no pair: the digits say one number and the divider says two fields.
+/// Every run stands in one region, and none is a label with its value. With the divider out
+/// of reach of the gap the strip reads as fields, the amount whole.
+#[test]
+fn a_strip_with_a_divider_in_a_digit_group_gap_claims_no_pair() {
+    // Small labels over one value line between two rules from 40 to 220, parted by a divider;
+    // the number starts at 130, its group gap 1.6 wide after its first group.
+    let read = |number: &str, divider: f32, count: Option<&str>| {
+        let sized = |text: &str, x: f32, y: f32, size: f32, line: u32| TextRun {
+            w: 0.6 * size * text.chars().count() as f32,
+            font_kind: FontKind::Monospace,
+            ..run(text, x, y, size, line)
+        };
+        let first = number.chars().take_while(char::is_ascii_digit).count() as f32;
+        let mut amount = sized(number, 130.0, 679.0, 9.5, 1);
+        amount.w -= 4.1;
+        amount.gaps = vec![GapIn {
+            words: 1,
+            from: 130.0 + 5.7 * first,
+            to: 130.0 + 5.7 * first + 1.6,
+        }];
+        let mut texts = vec![
+            sized("Count", 44.0, 692.0, 6.6, 0),
+            sized("Amount", divider + 12.0, 692.0, 6.6, 0),
+        ];
+        texts.extend(count.map(|c| sized(c, 44.0, 679.0, 9.5, 1)));
+        texts.push(amount);
+        let mut rules = h_rules(40.0, 220.0, &[700.0, 675.0]);
+        rules.push(rule(divider, 675.0, divider, 700.0));
+        let names: Vec<String> = texts.iter().map(|t| t.text.clone()).collect();
+        let out: Vec<(Kind, Vec<String>)> = decided_on(texts, rules)
+            .into_iter()
+            .map(|(kind, ids)| (kind, ids.iter().map(|&t| names[t].clone()).collect()))
+            .collect();
+        out
+    };
+    let amount = "1\u{2009}234,56";
+    for count in [None, Some("7")] {
+        for divider in [135.0, 136.0] {
+            let out = read(amount, divider, count);
+            assert!(
+                out.iter().all(|r| r.0 != Kind::LabelValue),
+                "divider at {divider}: {out:?}"
+            );
+        }
+        let out = read("123\u{2009}456", 148.0, count);
+        assert!(out.iter().all(|r| r.0 != Kind::LabelValue), "{out:?}");
+    }
+    // Out of reach of the gap, with a value in both fields: fields, the amount whole.
+    let out = read(amount, 133.0, Some("7"));
+    let pairs: Vec<&Vec<String>> = out
+        .iter()
+        .filter(|r| r.0 == Kind::LabelValue)
+        .map(|r| &r.1)
+        .collect();
+    assert_eq!(pairs.len(), 1, "{out:?}");
+    assert!(pairs[0].iter().any(|t| t == amount), "{out:?}");
+    assert_eq!(pairs[0].len(), 4, "{out:?}");
+}
+
+/// Task 26 fix round 7c (I1): a strip between rules with no divider, whose second label
+/// starts over the digit group gap of a number or over the number, claims no pair: the digits
+/// say one number and the labels say two fields. Every run stands in one region. The other
+/// way: with no group after the gap the strip reads as two fields.
+#[test]
+fn a_strip_with_a_label_start_in_a_number_in_digit_groups_claims_no_pair() {
+    // Two small labels on one line, one value run from 44 with one gap after its first word,
+    // its second word under the second label.
+    let read = |labels: [&str; 2], second: f32, text: &str, gap: f32| {
+        let sized = |text: &str, x: f32, y: f32, size: f32, line: u32| TextRun {
+            w: 0.6 * size * text.chars().count() as f32,
+            font_kind: FontKind::Monospace,
+            ..run(text, x, y, size, line)
+        };
+        let first = text.chars().take_while(|c| *c != ' ').count() as f32;
+        let mut value = sized(text, 44.0, 679.0, 9.5, 1);
+        value.w += gap - 5.7;
+        value.gaps = vec![GapIn {
+            words: 1,
+            from: 44.0 + 5.7 * first,
+            to: 44.0 + 5.7 * first + gap,
+        }];
+        let texts = vec![
+            sized(labels[0], 44.0, 692.0, 6.6, 0),
+            sized(labels[1], second, 692.0, 6.6, 0),
+            value,
+        ];
+        let rules = h_rules(40.0, 220.0, &[700.0, 675.0]);
+        let kinds: Vec<Kind> = decided_on(texts, rules).into_iter().map(|r| r.0).collect();
+        kinds
+    };
+    for (labels, second, text, gap) in [
+        (["A", "B"], 58.0, "12 345", 2.6),
+        (["A", "B"], 56.0, "7 500,00", 6.3),
+        (["No", "Qty"], 60.0, "12 345", 4.6),
+        // The label start over the middle of "345", away from the group gap.
+        (["A", "B"], 68.0, "12 345", 2.6),
+        (["No", "Qty"], 68.0, "12 345", 4.6),
+    ] {
+        let out = read(labels, second, text, gap);
+        assert!(!out.contains(&Kind::LabelValue), "{text}: {out:?}");
+    }
+    let out = read(["No", "Qty"], 60.0, "12 34,5", 4.6);
+    assert_eq!(out, [Kind::LabelValue], "{out:?}");
 }

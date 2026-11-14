@@ -1856,6 +1856,7 @@ fn page_blocks_until(
                 t.kind = decision.kind;
                 t
             })),
+            AreaReader::Cell => found.extend(label_over_value(&mut area)),
             AreaReader::Tables => {
                 let f = tables::untagged(page, &mut area, drawn, &decided.segs, height, stop);
                 found.extend(f.tables);
@@ -2199,7 +2200,7 @@ fn page_blocks_until(
         let (lb, tb) = b.at();
         la.cmp(&lb).then(tb.total_cmp(&ta))
     });
-    let placed = sorted;
+    let placed = join_pair_rows(sorted, &text_flow, drawn);
     // The text the page reads as text, without the text kept as laid out: the title of a
     // page is read from text the layout is sure of (a word the engine left unsure is no
     // title, however large).
@@ -2611,6 +2612,9 @@ fn page_blocks_until(
 enum AreaReader {
     Boxes,
     Lines,
+    /// A row of labels over the row of their values, or a label with an underline of its
+    /// own over its value: each label with the value under it (see [`label_over_value`]).
+    Cell,
     Tables,
 }
 
@@ -2623,7 +2627,11 @@ fn area_reader(d: &layoutregions::Decision) -> AreaReader {
     {
         return AreaReader::Tables;
     }
-    if has("label_value.line_pairs") {
+    if has(layoutregions::typers::pairs::LABEL_OVER_VALUE_ID)
+        || has(layoutregions::typers::pairs::LABEL_UNDERLINED_ID)
+    {
+        AreaReader::Cell
+    } else if has("label_value.line_pairs") {
         AreaReader::Lines
     } else if has("label_value.fields") || has("label_value.field_cells") {
         AreaReader::Boxes
@@ -2806,6 +2814,500 @@ fn line_pairs(area: &mut Flow) -> Option<Planned> {
         drawn: None,
         pictures: Vec::new(),
     })
+}
+
+/// A table of the labels of a row of labels over their values (the typer's
+/// `label_value.label_over_value`), each a row of the label and the value under it, as the
+/// typer's rule pairs them ([`layoutregions::extract::pairs::blocks::labels_with_values`]); a
+/// label with nothing under it has an empty value. Every run of `area` leaves it. It reads no
+/// table when the rule pairs nothing.
+fn label_over_value(area: &mut Flow) -> Option<Planned> {
+    let under = layoutregions::extract::pairs::blocks::labels_with_values(&area.runs)?;
+    let cell = |ids: &[usize], status: Option<&'static str>| PlannedCell {
+        runs: ids.iter().map(|&i| area.runs[i].clone()).collect(),
+        row_span: 1,
+        col_span: 1,
+        status,
+    };
+    let rows: Vec<Vec<PlannedCell>> = under
+        .iter()
+        .map(|u| {
+            vec![
+                cell(&u.label, None),
+                // A label with nothing under it is a field left empty, as an empty box is.
+                cell(&u.value, u.value.is_empty().then_some("empty")),
+            ]
+        })
+        .collect();
+    let first = *under.first()?.label.first()?;
+    let (at, top) = (
+        area.at.iter().copied().min().unwrap_or(area.at[first]),
+        area.runs[first].y,
+    );
+    let ids = area.ids.clone();
+    area.take(|_, _| true);
+    Some(Planned {
+        at,
+        top,
+        rows,
+        trs: Vec::new(),
+        additions: Vec::new(),
+        header_rows: 0,
+        tagged: None,
+        continues: false,
+        caption: Vec::new(),
+        found_by: None,
+        kind: Kind::LabelValue,
+        ids,
+        by: tables::Detector::LinePairs,
+        drawn: None,
+        pictures: Vec::new(),
+    })
+}
+
+/// Whether `t` is rows of a label and its value that the line pair rule or the cells of
+/// labels over values gave (see [`line_pairs`] and [`label_over_value`]): two cells a row, no
+/// header row, nothing else to it.
+fn pair_rows(t: &Planned) -> bool {
+    t.by == tables::Detector::LinePairs
+        && t.kind == Kind::LabelValue
+        && t.header_rows == 0
+        && t.tagged.is_none()
+        && !t.continues
+        && t.caption.is_empty()
+        && t.found_by.is_none()
+        && t.drawn.is_none()
+        && t.pictures.is_empty()
+        && t.additions.is_empty()
+        && t.trs.is_empty()
+        && t.rows.iter().all(|r| r.len() == 2)
+}
+
+/// Where a table of pair rows (see [`pair_rows`]) stands, for [`join_pair_rows`]: its highest
+/// and lowest baseline, the pitch of its rows where they stand under each other (the first and
+/// the last step between the baselines of two labels), the left edge of its labels and of its
+/// values, its width and its largest text size.
+#[derive(Debug, Clone, Copy)]
+struct PairPlace {
+    top: f32,
+    bottom: f32,
+    first_step: Option<f32>,
+    last_step: Option<f32>,
+    labels: f32,
+    values: Option<f32>,
+    x0: f32,
+    x1: f32,
+    size: f32,
+}
+
+impl PairPlace {
+    fn of(t: &Planned) -> Option<PairPlace> {
+        let runs = || t.rows.iter().flatten().flat_map(|c| &c.runs);
+        let edge = |cell: usize| {
+            t.rows
+                .iter()
+                .filter_map(|r| r.get(cell))
+                .flat_map(|c| &c.runs)
+                .map(|r| r.x.min(r.x + r.w))
+                .min_by(f32::total_cmp)
+        };
+        let size = runs().map(|r| r.size).max_by(f32::total_cmp)?;
+        // The baselines of the labels, from the top down: rows under each other have one each.
+        let mut ys: Vec<f32> = t
+            .rows
+            .iter()
+            .filter_map(|r| r.first()?.runs.first())
+            .map(|r| r.y)
+            .collect();
+        ys.sort_by(|a, b| b.total_cmp(a));
+        ys.dedup_by(|a, b| (*a - *b).abs() <= layoutregions::segment::cut::BASELINE_NEAR * size);
+        let step = |w: Option<&[f32]>| w.map(|w| w[0] - w[1]);
+        Some(PairPlace {
+            top: runs().map(|r| r.y).max_by(f32::total_cmp)?,
+            bottom: runs().map(|r| r.y).min_by(f32::total_cmp)?,
+            first_step: step(ys.windows(2).next()),
+            last_step: step(ys.windows(2).next_back()),
+            labels: edge(0)?,
+            values: edge(1),
+            x0: runs().map(|r| r.x.min(r.x + r.w)).min_by(f32::total_cmp)?,
+            x1: runs().map(|r| r.x.max(r.x + r.w)).max_by(f32::total_cmp)?,
+            size,
+        })
+    }
+}
+
+/// A drawn line that runs along the lines of text, for [`pair_step`]: a rule, or the upper
+/// or the lower edge of a rectangle or of a drawn box. `other` is the height of the far edge
+/// of what draws it (the other side of a rule's own thickness, or the far side of a box).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Edge {
+    y: f32,
+    x0: f32,
+    x1: f32,
+    other: f32,
+}
+
+/// The one drawn line between two rows of pairs (see [`pair_step`]): its height and its
+/// extent.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct RowRule {
+    y: f32,
+    x0: f32,
+    x1: f32,
+    /// The lowest and the highest far side of the edges of drawn boxes it is made of (an
+    /// edge whose far side lies off its own height); `None` for a line of thin rules only.
+    far: Option<(f32, f32)>,
+}
+
+impl RowRule {
+    /// Notes the far side `other` of an edge of the line at height `y`, when it is the
+    /// edge of a box (its far side farther than `near` from it).
+    fn edge_of_box(&mut self, y: f32, other: f32, near: f32) {
+        if (other - y).abs() > near {
+            let (lo, hi) = self.far.unwrap_or((other, other));
+            self.far = Some((lo.min(other), hi.max(other)));
+        }
+    }
+
+    /// Whether this line and `other` are the two sides of one drawn box, each within
+    /// `near` of where the box edges of the other end: every box edge of one of them has
+    /// its far side at the other. The box of one row has its upper and its lower side one
+    /// row apart, as the lines of a ruled block are, but it is one frame around one row
+    /// and no line that comes again. Boxes of one row each that touch have, at each line
+    /// between two rows, the lower side of the box over it and the upper side of the box
+    /// under it: far sides both ways, so those lines do come again.
+    fn sides_of_one_box(&self, other: &RowRule, near: f32) -> bool {
+        let at = |a: &RowRule, b: &RowRule| {
+            a.far
+                .is_some_and(|(lo, hi)| (lo - b.y).abs() <= near && (hi - b.y).abs() <= near)
+        };
+        at(self, other) || at(other, self)
+    }
+}
+
+/// How two tables of pair rows that follow each other stand to each other: `step` is how far
+/// the first baseline of the lower one stands under the last baseline of the upper one, and
+/// `size` the larger text size of the two.
+#[derive(Debug, Clone, Copy)]
+struct PairStep {
+    step: f32,
+    size: f32,
+    /// The pitch of the rows of either table, where it has rows under each other.
+    own: [Option<f32>; 2],
+    /// The one drawn line between the two tables, when there is one.
+    ruled: Option<RowRule>,
+}
+
+impl PairStep {
+    /// Whether two steps are the same pitch: within [`BASELINE_NEAR`] of the text size, as
+    /// two baselines are one line.
+    ///
+    /// [`BASELINE_NEAR`]: layoutregions::segment::cut::BASELINE_NEAR
+    fn like(&self, other: f32) -> bool {
+        (self.step - other).abs() <= layoutregions::segment::cut::BASELINE_NEAR * self.size
+    }
+
+    /// Whether the two tables stand at the pitch of one block: as near as the lines of a
+    /// block of labels and values ([`ITEM_PITCH`] text sizes), at the pitch of the rows of
+    /// one of them, or at the pitch the tables before or after them follow each other by
+    /// (`around`: the document shows the pitch of the block twice).
+    ///
+    /// [`ITEM_PITCH`]: layoutregions::typers::pairs::ITEM_PITCH
+    fn of_one_block(&self, around: [Option<f32>; 2]) -> bool {
+        self.step <= layoutregions::typers::pairs::ITEM_PITCH * self.size
+            || self
+                .own
+                .iter()
+                .chain(&around)
+                .flatten()
+                .any(|&p| self.like(p))
+    }
+
+    /// Whether the drawn line of this step comes again in the step `next` right after it:
+    /// the same line, of one extent (both ends within [`EDGE_SIZES`] text sizes), one row
+    /// pitch lower (the lines as far apart as the rows, and both steps the same pitch).
+    ///
+    /// [`EDGE_SIZES`]: layoutregions::line::EDGE_SIZES
+    fn comes_again(&self, next: &PairStep) -> bool {
+        let (Some(line), Some(other)) = (self.ruled, next.ruled) else {
+            return false;
+        };
+        let near = |a: f32, b: f32| (a - b).abs() <= layoutregions::line::EDGE_SIZES * self.size;
+        near(line.x0, other.x0)
+            && near(line.x1, other.x1)
+            && self.like(next.step)
+            && self.like((line.y - other.y).abs())
+    }
+
+    /// Whether the drawn lines of this step and of `next` are the two sides of one drawn
+    /// box (see [`RowRule::sides_of_one_box`], within [`BASELINE_NEAR`] of the text size).
+    ///
+    /// [`BASELINE_NEAR`]: layoutregions::segment::cut::BASELINE_NEAR
+    fn frames_a_row(&self, next: &PairStep) -> bool {
+        let near = layoutregions::segment::cut::BASELINE_NEAR * self.size;
+        matches!((self.ruled, next.ruled), (Some(a), Some(b)) if a.sides_of_one_box(&b, near))
+    }
+}
+
+/// For each step of `steps` (the steps between the parts of a page that follow each other,
+/// see [`pair_step`]), whether its drawn line parts nothing. A step with no line has none
+/// that parts. A drawn line is the ruling of the rows' own block only when the same line
+/// stands between every two rows of the run: the run is the steps that follow each other at
+/// one pitch (within [`BASELINE_NEAR`] of the text size), and in it every step has the line,
+/// each the line of the step before again ([`PairStep::comes_again`]), two steps or more, and
+/// no table has rows of its own under each other (which have no line between them). Two
+/// lines alone that are the upper and the lower side of one drawn box
+/// ([`PairStep::frames_a_row`]) are one frame around one row, no line that comes again;
+/// with a third line at the pitch (a band behind every other row) the lines do. So a
+/// lone line, a line of another extent or off the pitch, the two sides of the box of one
+/// row, and lines that stop while the rows go on at their pitch (a boxed row among plain
+/// rows, a ruled block with plain rows after it) are borders: each parts its two rows.
+///
+/// [`BASELINE_NEAR`]: layoutregions::segment::cut::BASELINE_NEAR
+fn own_rulings(steps: &[Option<PairStep>]) -> Vec<bool> {
+    let mut own: Vec<bool> = steps
+        .iter()
+        .map(|s| s.is_some_and(|s| s.ruled.is_none()))
+        .collect();
+    crate::work::add(2 * steps.len() as u64);
+    let mut from = 0;
+    while from < steps.len() {
+        // The run from `from`: the steps after it, each at the pitch of the one before.
+        let mut to = from + 1;
+        while let (Some(Some(before)), Some(Some(next))) = (steps.get(to - 1), steps.get(to))
+            && before.like(next.step)
+        {
+            to += 1;
+        }
+        let run: Vec<PairStep> = steps[from..to].iter().flatten().copied().collect();
+        if run.len() >= 2
+            && run
+                .iter()
+                .all(|s| s.ruled.is_some() && s.own.iter().all(Option::is_none))
+            && run.windows(2).all(|w| w[0].comes_again(&w[1]))
+            && (run.len() > 2 || !run[0].frames_a_row(&run[1]))
+        {
+            own[from..to].iter_mut().for_each(|o| *o = true);
+        }
+        from = to;
+    }
+    own
+}
+
+/// For each step of `steps`, whether its two tables are rows of one block: its drawn line,
+/// when it has one, is the block's own ruling ([`own_rulings`]), and the step is at the
+/// pitch of one block ([`PairStep::of_one_block`]). The steps before and after show their
+/// pitch to it only when they are steps inside a block themselves: a step whose line is a
+/// border stands between two blocks, and how far those are apart is no pitch of rows. The
+/// pitch is then shown by the nearest step past the border that is one inside a block (the
+/// rows over a rule stand at the pitch of the rows under it), with no other part between.
+/// The look goes past one border only: a second border step ends it, as a part that is no
+/// row of pairs does (rows three borders away are rows of a block far off, not the next one).
+fn joined_steps(steps: &[Option<PairStep>]) -> Vec<bool> {
+    let own = own_rulings(steps);
+    crate::work::add(steps.len() as u64);
+    // For each step, the pitch of the nearest step inside a block before it and after it,
+    // past one step across a border, up to a part that is no row of pairs.
+    let mut before: Vec<Option<f32>> = vec![None; steps.len()];
+    let mut after = before.clone();
+    // The pitch seen last and the border steps passed since; the next step in the look.
+    let mut seen: (Option<f32>, u32) = (None, 0);
+    let pass = |k: usize, seen: &mut (Option<f32>, u32)| match steps[k] {
+        Some(s) if own[k] => *seen = (Some(s.step), 0),
+        Some(_) if seen.1 == 0 => seen.1 = 1,
+        _ => *seen = (None, 0),
+    };
+    for (k, b) in before.iter_mut().enumerate() {
+        *b = seen.0;
+        pass(k, &mut seen);
+    }
+    seen = (None, 0);
+    for (k, a) in after.iter_mut().enumerate().rev() {
+        *a = seen.0;
+        pass(k, &mut seen);
+    }
+    (0..steps.len())
+        .map(|j| steps[j].is_some_and(|s| own[j] && s.of_one_block([before[j], after[j]])))
+        .collect()
+}
+
+/// The step from table `a` to table `b` (the next part in reading order) when they may be
+/// rows of one block: `b` stands under `a`, their labels or their values start at one left
+/// edge (within [`EDGE_SIZES`] text sizes), and no edge of a drawn box and at most one drawn
+/// line lies between them over their width (`edges`, sorted by height). One line is kept in
+/// the step ([`PairStep::ruled`]; whether it parts the two is asked of the steps of its run,
+/// see [`own_rulings`]): every edge between the two baselines is drawn by something
+/// no higher than one row (a rule with its thickness, a hairline rectangle, the box of one
+/// row of a ruled block: its far side at most the step of the two rows away, within
+/// [`BASELINE_NEAR`] text sizes), and they all lie within [`BASELINE_NEAR`] text sizes of
+/// one height, as two baselines are one line. An edge whose far side is farther away is the
+/// side of a box around more than a row, and edges at two heights are two lines: both part
+/// the tables. The extent of the line is that of
+/// its pieces over the tables and of the pieces that go on from them (a rule drawn in pieces
+/// is one rule): pieces no higher than one row too, by the same bound. The upper side of a
+/// tall box that starts where the rule ends is no piece of the rule.
+///
+/// [`EDGE_SIZES`]: layoutregions::line::EDGE_SIZES
+/// [`BASELINE_NEAR`]: layoutregions::segment::cut::BASELINE_NEAR
+fn pair_step(a: &PairPlace, b: &PairPlace, edges: &[Edge]) -> Option<PairStep> {
+    let size = a.size.max(b.size);
+    let step = a.bottom - b.top;
+    if step <= layoutregions::segment::cut::BASELINE_NEAR * size {
+        return None;
+    }
+    let near = |x: f32, y: f32| (x - y).abs() <= layoutregions::line::EDGE_SIZES * size;
+    let values = matches!((a.values, b.values), (Some(x), Some(y)) if near(x, y));
+    if !near(a.labels, b.labels) && !values {
+        return None;
+    }
+    let (x0, x1) = (a.x0.min(b.x0), a.x1.max(b.x1));
+    let from = edges.partition_point(|e| e.y <= b.top);
+    let to = from + edges[from..].partition_point(|e| e.y < a.bottom);
+    let between = &edges[from..to];
+    crate::work::add(between.len() as u64);
+    let near_y = layoutregions::segment::cut::BASELINE_NEAR * size;
+    // No higher than one row: the far side at most the step of the two rows away.
+    let of_a_row = |e: &Edge| (e.other - e.y).abs() <= step + near_y;
+    let mut ruled: Option<RowRule> = None;
+    for e in between.iter().filter(|e| e.x0 < x1 && e.x1 > x0) {
+        if !of_a_row(e) {
+            return None;
+        }
+        let line = ruled.get_or_insert(RowRule {
+            y: e.y,
+            x0: e.x0,
+            x1: e.x1,
+            far: None,
+        });
+        if (e.y - line.y).abs() > near_y {
+            return None;
+        }
+        (line.x0, line.x1) = (line.x0.min(e.x0), line.x1.max(e.x1));
+        line.edge_of_box(e.y, e.other, near_y);
+    }
+    if let Some(line) = &mut ruled {
+        // The pieces of the line that go on beside the tables, left and right, each from
+        // where the one before ends.
+        let mut on: Vec<&Edge> = between
+            .iter()
+            .filter(|e| (e.y - line.y).abs() <= near_y && of_a_row(e))
+            .collect();
+        on.sort_by(|p, q| p.x0.total_cmp(&q.x0));
+        for e in &on {
+            if e.x0 <= line.x1 + layoutregions::line::EDGE_SIZES * size && e.x1 > line.x1 {
+                line.x1 = e.x1;
+            }
+        }
+        on.sort_by(|p, q| q.x1.total_cmp(&p.x1));
+        for e in &on {
+            if e.x1 >= line.x0 - layoutregions::line::EDGE_SIZES * size && e.x0 < line.x0 {
+                line.x0 = e.x0;
+            }
+        }
+    }
+    Some(PairStep {
+        step,
+        size,
+        own: [a.last_step, b.first_step],
+        ruled,
+    })
+}
+
+/// The parts `placed` of a page (in reading order), with each run of tables of pair rows
+/// (see [`pair_rows`]) of one block written as one table. Two tables that follow each other
+/// are rows of one block when no other part and no text with ink of `text` (the page's text
+/// in reading order) stands between them, the lower one stands under the upper one at the
+/// pitch of the block, from the same left edge of the labels or of the values, and no box
+/// edge of `drawn` and no drawn rule but the block's own ruling lies between them (see
+/// [`pair_step`], [`own_rulings`] and [`PairStep::of_one_block`]). Lines of a label and its value under each other, and the
+/// cells of a row of labels over their values, are regions of their own to the engine, one
+/// pair each; to a reader the rows of one block are one list of pairs, and two blocks of the
+/// page are two lists.
+fn join_pair_rows(placed: Vec<Placed>, text: &Flow, drawn: &Drawn<'_>) -> Vec<Placed> {
+    let inked: Vec<usize> = text
+        .runs
+        .iter()
+        .zip(&text.at)
+        .filter(|(r, _)| layoutregions::line::ink(&r.text) > 0)
+        .map(|(_, &a)| a)
+        .collect();
+    crate::work::add((placed.len() + text.runs.len()) as u64);
+    let between = |a: usize, b: usize| {
+        let i = inked.partition_point(|x| *x <= a);
+        inked.get(i).is_some_and(|x| *x < b)
+    };
+    let places: Vec<Option<(usize, PairPlace)>> = placed
+        .iter()
+        .map(|p| match p {
+            Placed::Table(t) if pair_rows(t) => PairPlace::of(t).map(|at| (t.at, at)),
+            _ => None,
+        })
+        .collect();
+    // No table of pair rows follows another: nothing to join, and the page's rules are not
+    // looked at.
+    if !places.windows(2).any(|w| w[0].is_some() && w[1].is_some()) {
+        return placed;
+    }
+    // The drawn lines that part two rows: each rule that runs along the lines, and the upper
+    // and the lower edge of each rectangle and box.
+    let mut edges: Vec<Edge> = Vec::new();
+    let mut sides = |y0: f32, y1: f32, x0: f32, x1: f32| {
+        edges.push(Edge {
+            y: y0,
+            x0,
+            x1,
+            other: y1,
+        });
+        edges.push(Edge {
+            y: y1,
+            x0,
+            x1,
+            other: y0,
+        });
+    };
+    for r in drawn.rules {
+        let (x0, x1) = (r.x0.min(r.x1), r.x0.max(r.x1));
+        let (y0, y1) = (r.y0.min(r.y1), r.y0.max(r.y1));
+        if x1 - x0 > y1 - y0 || r.kind == tables::RuleKind::Rect {
+            sides(y0, y1, x0, x1);
+        }
+    }
+    for b in drawn.boxes {
+        sides(
+            b[1].min(b[3]),
+            b[1].max(b[3]),
+            b[0].min(b[2]),
+            b[0].max(b[2]),
+        );
+    }
+    edges.sort_by(|a, b| a.y.total_cmp(&b.y));
+    crate::work::add((drawn.rules.len() + drawn.boxes.len()) as u64);
+    // For each part, how it stands to the part after it, when both are rows of pairs that
+    // may be of one block.
+    let steps: Vec<Option<PairStep>> = places
+        .windows(2)
+        .map(|w| {
+            let ((a_at, a), (b_at, b)) = (w[0]?, w[1]?);
+            if between(a_at, b_at) {
+                return None;
+            }
+            pair_step(&a, &b, &edges)
+        })
+        .collect();
+    let joined = joined_steps(&steps);
+    let mut out: Vec<Placed> = Vec::with_capacity(placed.len());
+    for (k, p) in placed.into_iter().enumerate() {
+        // Whether the part before and this one are rows of one block.
+        let joins = k.checked_sub(1).is_some_and(|j| joined[j]);
+        match (p, out.last_mut()) {
+            (Placed::Table(next), Some(Placed::Table(last))) if joins => {
+                last.rows.extend(next.rows);
+                last.ids.extend(next.ids);
+            }
+            (p, _) => out.push(p),
+        }
+    }
+    out
 }
 
 /// Whether the runs of `area` with ink stand on one line.
@@ -6828,5 +7330,300 @@ mod tests {
         if let Some(steps) = steps {
             assert!(steps <= WALK_STEPS, "{steps} steps of work");
         }
+    }
+    /// A table of pair rows on one line, for [`pair_step`]: its baseline and the left edge of
+    /// its label, in text of size 10 with the value 60 points after the label.
+    fn pair_line(y: f32, x: f32) -> PairPlace {
+        PairPlace {
+            top: y,
+            bottom: y,
+            first_step: None,
+            last_step: None,
+            labels: x,
+            values: Some(x + 60.0),
+            x0: x,
+            x1: x + 100.0,
+            size: 10.0,
+        }
+    }
+
+    /// Task 26 fix round 1 (I1): two tables of pair rows are rows of one block only from one
+    /// left edge, the lower under the upper, with no drawn line between them; the bound of
+    /// the edge and each sign move the answer both ways.
+    #[test]
+    fn rows_of_pairs_are_of_one_block_only_from_one_edge_with_no_rule_between() {
+        let a = pair_line(700.0, 40.0);
+        // The same left edge, within `EDGE_SIZES` of the text size and past it.
+        assert!(pair_step(&a, &pair_line(688.0, 40.9), &[]).is_some());
+        assert!(pair_step(&a, &pair_line(688.0, 41.1), &[]).is_none());
+        // Labels set flush right share no left edge, but their values do.
+        let mut right = pair_line(688.0, 30.0);
+        right.values = a.values;
+        assert!(pair_step(&a, &right, &[]).is_some());
+        // Another column, and a table beside or over the first one.
+        assert!(pair_step(&a, &pair_line(688.0, 300.0), &[]).is_none());
+        assert!(pair_step(&a, &pair_line(700.0, 40.0), &[]).is_none());
+        assert!(pair_step(&a, &pair_line(712.0, 40.0), &[]).is_none());
+        // An edge of a box between the two baselines over their width parts them (its far
+        // side is more than a row away); one beside them, or over the upper row, does not.
+        // The box of one row (as high as the step of the rows, 12, within `BASELINE_NEAR`)
+        // is kept as a line.
+        let b = pair_line(688.0, 40.0);
+        let edge = |y: f32, x0: f32, x1: f32, other: f32| Edge { y, x0, x1, other };
+        assert!(pair_step(&a, &b, &[edge(694.0, 30.0, 200.0, 650.0)]).is_none());
+        assert!(pair_step(&a, &b, &[edge(694.0, 300.0, 500.0, 650.0)]).is_some());
+        assert!(pair_step(&a, &b, &[edge(710.0, 30.0, 200.0, 650.0)]).is_some());
+        assert_eq!(pair_step(&a, &b, &[]).map(|s| s.step), Some(12.0));
+        assert!(pair_step(&a, &b, &[edge(694.0, 30.0, 200.0, 680.6)]).is_some());
+        assert!(pair_step(&a, &b, &[edge(694.0, 30.0, 200.0, 680.4)]).is_none());
+        // A rule that lies between them as a whole is kept in the step, with the pieces
+        // that go on from it; a second line at another height parts them.
+        let thin = [
+            edge(694.0, 30.0, 200.0, 694.5),
+            edge(694.0, 200.5, 400.0, 694.5),
+            edge(694.0, 420.0, 500.0, 694.5),
+            edge(694.5, 30.0, 200.0, 694.0),
+        ];
+        let kept = pair_step(&a, &b, &thin).expect("one line between");
+        let line = kept.ruled.expect("the line");
+        assert_eq!((line.x0, line.x1), (30.0, 400.0));
+        assert_eq!(line.far, None, "thin rules are no sides of a box");
+        // Fix round 2 (M4): a piece that goes on from the line is a piece of it only when
+        // it is no higher than one row, as the pieces over the tables are: the far side
+        // within the step of the rows (12) and `BASELINE_NEAR` of the text size (1.5). The
+        // upper side of a tall box that starts where the rule ends is none.
+        let beside = |other: f32| {
+            let edges = [thin[0], edge(694.0, 200.5, 400.0, other)];
+            let line = pair_step(&a, &b, &edges)
+                .and_then(|s| s.ruled)
+                .expect("the line");
+            (line.x0, line.x1)
+        };
+        assert_eq!(beside(680.6), (30.0, 400.0));
+        assert_eq!(beside(680.4), (30.0, 200.0));
+        // The far sides of the edges of boxes over the tables are kept with the line.
+        let boxed = [
+            edge(694.0, 30.0, 200.0, 706.0),
+            edge(694.0, 30.0, 200.0, 682.0),
+        ];
+        let line = pair_step(&a, &b, &boxed)
+            .and_then(|s| s.ruled)
+            .expect("the line");
+        assert_eq!(line.far, Some((682.0, 706.0)));
+        let near = layoutregions::segment::cut::BASELINE_NEAR * 10.0;
+        let two = |dy: f32| [thin[0], edge(694.0 + dy, 30.0, 200.0, 694.2 + dy)];
+        assert!(pair_step(&a, &b, &two(near - 0.1)).is_some());
+        assert!(pair_step(&a, &b, &two(near + 0.1)).is_none());
+    }
+
+    /// Task 26 part 2 (ruling on concern 2) and fix round 2 (M3): a drawn line between two
+    /// rows of pairs is the block's own ruling when the same line stands between every two
+    /// rows of the run: one extent, at the pitch of the rows, in every step of the run. A
+    /// lone line, a line of another extent, a line off the pitch, a line beside a table with
+    /// rows of its own, the two sides of the box of one row, and lines that stop while the
+    /// rows go on at their pitch all part the rows.
+    #[test]
+    fn a_line_between_every_two_rows_of_a_run_parts_nothing() {
+        let line = |y: f32, x0: f32, x1: f32| RowRule {
+            y,
+            x0,
+            x1,
+            far: None,
+        };
+        let step = |ruled: Option<RowRule>| PairStep {
+            step: 12.0,
+            size: 10.0,
+            own: [None, None],
+            ruled,
+        };
+        let plain = Some(step(None));
+        let this = Some(step(Some(line(694.0, 30.0, 200.0))));
+        let same = |y: f32, x0: f32, x1: f32| Some(step(Some(line(y, x0, x1))));
+        // No line: nothing parts. A lone line parts, alone and between two parts that are
+        // no rows of pairs.
+        assert_eq!(own_rulings(&[plain]), [true]);
+        assert_eq!(own_rulings(&[this]), [false]);
+        assert_eq!(own_rulings(&[None, this, None]), [false, false, false]);
+        // The same line one pitch lower: the two steps of three rows.
+        let next = same(682.0, 30.0, 200.0);
+        assert_eq!(own_rulings(&[this, next]), [true, true]);
+        assert_eq!(
+            own_rulings(&[this, None, next]),
+            [false; 3],
+            "another part between"
+        );
+        // Another extent: the ends within `EDGE_SIZES` of the text size, and past it.
+        assert_eq!(own_rulings(&[this, same(682.0, 30.9, 200.0)]), [true; 2]);
+        assert_eq!(own_rulings(&[this, same(682.0, 31.1, 200.0)]), [false; 2]);
+        assert_eq!(own_rulings(&[this, same(682.0, 30.0, 300.0)]), [false; 2]);
+        // Off the pitch of the rows: within `BASELINE_NEAR` of the text size, and past it.
+        assert_eq!(own_rulings(&[this, same(683.4, 30.0, 200.0)]), [true; 2]);
+        assert_eq!(own_rulings(&[this, same(683.6, 30.0, 200.0)]), [false; 2]);
+        let wide = PairStep {
+            step: 20.0,
+            ..step(Some(line(678.0, 30.0, 200.0)))
+        };
+        assert_eq!(own_rulings(&[this, Some(wide)]), [false; 2]);
+        // A table with rows of its own under each other has no line between them.
+        let own = this.map(|s| PairStep {
+            own: [Some(12.0), None],
+            ..s
+        });
+        assert_eq!(own_rulings(&[own, next]), [false; 2]);
+        // M3: the line stands between every two rows of the run. Rows that go on at the
+        // pitch with no line (a boxed row among plain rows: the lines over and under it)
+        // make the lines borders; the plain steps part nothing. Rows at another pitch are
+        // no rows of the run.
+        assert_eq!(
+            own_rulings(&[plain, this, next, plain]),
+            [true, false, false, true]
+        );
+        assert_eq!(own_rulings(&[this, next, plain]), [false, false, true]);
+        let far = Some(PairStep {
+            step: 30.0,
+            ..step(None)
+        });
+        assert_eq!(own_rulings(&[this, next, far]), [true, true, true]);
+        let just = |step_: f32| {
+            Some(PairStep {
+                step: step_,
+                ..step(None)
+            })
+        };
+        assert_eq!(own_rulings(&[this, next, just(13.4)]), [false, false, true]);
+        assert_eq!(own_rulings(&[this, next, just(13.6)]), [true, true, true]);
+        // M3: the two sides of the box of one row are one frame, no line that comes again:
+        // the upper line is the upper side of a box whose lower side is the lower line.
+        // Within `BASELINE_NEAR` of the text size (1.5), and past it.
+        let side = |y: f32, far: (f32, f32)| {
+            Some(step(Some(RowRule {
+                far: Some(far),
+                ..line(y, 30.0, 200.0)
+            })))
+        };
+        let (upper, lower) = (side(694.0, (682.0, 682.0)), side(682.0, (694.0, 694.0)));
+        assert_eq!(own_rulings(&[upper, lower]), [false; 2]);
+        assert_eq!(own_rulings(&[upper, next]), [false; 2], "one side says so");
+        assert_eq!(
+            own_rulings(&[side(694.0, (683.4, 683.4)), next]),
+            [false; 2]
+        );
+        assert_eq!(own_rulings(&[side(694.0, (683.6, 683.6)), next]), [true; 2]);
+        // A third line at the pitch: a band behind every other row has its two sides and
+        // the upper side of the next band, lines between every two rows of four.
+        let third = side(670.0, (658.0, 658.0));
+        assert_eq!(own_rulings(&[upper, lower, third]), [true; 3]);
+        // Boxes of one row each that touch: each line is the lower side of the box over
+        // it and the upper side of the box under it, far sides both ways.
+        let (upper, lower) = (side(694.0, (682.0, 706.0)), side(682.0, (670.0, 694.0)));
+        assert_eq!(own_rulings(&[upper, lower]), [true; 2]);
+    }
+
+    /// Task 26 fix round 2 (M2): a step whose drawn line is a border lends its pitch to no
+    /// step beside it: how far two blocks are apart is no pitch of rows. A step with no
+    /// line, or with the block's own ruling, shows the pitch.
+    #[test]
+    fn a_step_across_a_border_lends_no_pitch() {
+        let step = |ruled: Option<RowRule>| {
+            Some(PairStep {
+                step: 26.0,
+                size: 10.0,
+                own: [None, None],
+                ruled,
+            })
+        };
+        let line = |y: f32, x1: f32| {
+            Some(RowRule {
+                y,
+                x0: 30.0,
+                x1,
+                far: None,
+            })
+        };
+        // Rows 26 apart (wider than `ITEM_PITCH`, 20): two steps show the pitch twice.
+        assert_eq!(joined_steps(&[step(None)]), [false]);
+        assert_eq!(joined_steps(&[step(None), step(None)]), [true, true]);
+        // A lone line before two rows at that pitch: a border, and the rows after it have
+        // their pitch only once.
+        assert_eq!(
+            joined_steps(&[step(line(687.0, 200.0)), step(None)]),
+            [false, false]
+        );
+        // The block's own ruling shows its pitch to the steps of its run.
+        assert_eq!(
+            joined_steps(&[step(line(687.0, 200.0)), step(line(661.0, 200.0))]),
+            [true, true]
+        );
+        // Two lines of two extents are two borders: no step joins, none lends.
+        assert_eq!(
+            joined_steps(&[
+                step(line(687.0, 200.0)),
+                step(line(661.0, 300.0)),
+                step(None)
+            ]),
+            [false, false, false]
+        );
+        // Rows over a lone line at the pitch of the rows under it: the border lends
+        // nothing, the step past it shows the pitch. A part between that is no row of
+        // pairs ends the look.
+        assert_eq!(
+            joined_steps(&[step(None), step(line(661.0, 200.0)), step(None)]),
+            [true, false, true]
+        );
+        assert_eq!(
+            joined_steps(&[step(None), step(line(661.0, 200.0)), None, step(None)]),
+            [false, false, false, false]
+        );
+        // Fix round 3 (N3): the look goes past one border, not two. Rows, a rule, a row, a
+        // rule of another extent, rows: the rows before the first border do not take their
+        // pitch from the rows after the second one (nor after a third).
+        let (first, second) = (step(line(661.0, 200.0)), step(line(635.0, 300.0)));
+        assert_eq!(
+            joined_steps(&[step(None), first, second, step(None)]),
+            [false, false, false, false]
+        );
+        assert_eq!(
+            joined_steps(&[step(None), first, second, first, step(None)]),
+            [false; 5]
+        );
+        // After the second border the look starts again: the rows there show their pitch
+        // to each other, and to a step one border before them.
+        assert_eq!(
+            joined_steps(&[step(None), first, second, step(None), step(None)]),
+            [false, false, false, true, true]
+        );
+        assert_eq!(
+            joined_steps(&[step(None), first, step(None), second, step(None)]),
+            [true, false, true, false, true]
+        );
+    }
+
+    /// Task 26 fix round 1 (I1): rows of pairs stand at the pitch of one block when they
+    /// are as near as the lines of a block (`ITEM_PITCH`, moved both ways), or at a pitch
+    /// the document shows a second time: the rows of one of the tables, or the step to the
+    /// table before or after.
+    #[test]
+    fn rows_of_pairs_are_of_one_block_at_its_pitch() {
+        let step = |step: f32| PairStep {
+            step,
+            size: 10.0,
+            own: [None, None],
+            ruled: None,
+        };
+        let pitch = layoutregions::typers::pairs::ITEM_PITCH * 10.0;
+        assert!(step(pitch).of_one_block([None, None]));
+        assert!(!step(pitch + 0.1).of_one_block([None, None]));
+        // A wider pitch, shown again by the step before or after, within `BASELINE_NEAR`.
+        assert!(step(26.0).of_one_block([Some(26.0), None]));
+        assert!(step(26.0).of_one_block([None, Some(27.4)]));
+        assert!(!step(26.0).of_one_block([Some(28.0), Some(23.0)]));
+        // The rows of one of the two tables stand at that pitch.
+        let own = PairStep {
+            own: [None, Some(26.5)],
+            ..step(26.0)
+        };
+        assert!(own.of_one_block([None, None]));
+        // Two blocks 82 points apart with nothing like it around them stay two.
+        assert!(!step(82.0).of_one_block([None, None]));
     }
 }

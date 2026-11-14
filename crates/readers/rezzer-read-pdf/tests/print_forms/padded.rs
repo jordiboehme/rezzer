@@ -148,8 +148,8 @@ pub(crate) fn pad_to(x: f32) -> usize {
     ((x - 40.0) / 5.7).round() as usize
 }
 
-/// A header grid read row by row: the labels of a grid row, then its values, left to right;
-/// `one_line` prints the values of a grid row as one data line, else one line per field.
+/// A header grid read row by row, each label of a grid row with the value under it, left to
+/// right (a pair each: small labels over their larger values, without rules); `one_line` prints the values of a grid row as one data line, else one line per field.
 pub(crate) fn header_grid(one_line: bool) {
     let mut template = String::new();
     let mut lines = Vec::new();
@@ -179,17 +179,21 @@ pub(crate) fn header_grid(one_line: bool) {
         ..FormPage::default()
     };
     let out = read(&print_form(&[page], "", ""));
+    // Task 26: each label reads with the value under it, grid row by grid row.
     let order: Vec<&str> = HEADER_FIELDS
         .iter()
-        .flat_map(|row| {
-            row.iter()
-                .map(|f| f.1)
-                .chain(row.iter().map(|f| f.2))
-                .collect::<Vec<_>>()
-        })
+        .flat_map(|row| row.iter().flat_map(|f| [f.1, f.2]))
         .collect();
     if let Err(e) = in_order(&all_text(&out), &order) {
         panic!("{e}");
+    }
+    let md = crate::common::markdown(&out);
+    for (_, l, v) in HEADER_FIELDS.iter().flatten() {
+        let row = format!("| {l} | {v} |").replace('.', "\\.");
+        assert!(
+            md.contains(&row) || md.contains(&format!("| {l} | {v} |")),
+            "{row} in {md}"
+        );
     }
 }
 

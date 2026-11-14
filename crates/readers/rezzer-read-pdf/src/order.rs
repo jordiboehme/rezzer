@@ -319,8 +319,8 @@ struct Piece {
     /// [`cut::reads_as_value`]): what the cut asks of a row of labels over values.
     colon: bool,
     value: bool,
-    /// Its text is a whole number (see [`cut::reads_as_number`]).
-    number: bool,
+    /// The whole number its text is (see [`cut::whole_number`]).
+    number: Option<u64>,
     /// Every fragment with ink of the piece is bold (false for a piece without ink).
     bold: bool,
 }
@@ -420,6 +420,8 @@ fn pieces_in(frags: &[Frag], ids: &[usize], head: &[usize], base: usize) -> (Vec
                 .then(a.cmp(&b))
         });
         let mut piece: Option<Piece> = None;
+        // How the ink of the open piece reads so far.
+        let mut reading: Option<cut::Reading> = None;
         for i in kept {
             let f = &frags[i];
             let (lo, hi) = extent(f);
@@ -451,8 +453,16 @@ fn pieces_in(frags: &[Frag], ids: &[usize], head: &[usize], base: usize) -> (Vec
                     if f.inked {
                         p.bold = f.bold && (p.bold || !p.inked);
                         p.colon = f.text.trim_end().ends_with(':');
-                        p.value = cut::reads_as_value(&f.text) && (p.value || !p.inked);
-                        p.number = cut::reads_as_number(&f.text) && (p.number || !p.inked);
+                        // The piece reads the same in one fragment and in several, by
+                        // the reading the engine's own pieces have: a currency and its
+                        // figures in two fragments are an amount, a number goes on with
+                        // its digits.
+                        let value = reads_as_value(&f.text);
+                        let r = reading.map_or(cut::Reading::of(&f.text, value), |r| {
+                            r.goes_on(&f.text, value)
+                        });
+                        (p.value, p.number) = (r.value, r.number);
+                        reading = Some(r);
                     }
                     p.inked |= f.inked;
                     p.frags.push(i);
@@ -460,6 +470,9 @@ fn pieces_in(frags: &[Frag], ids: &[usize], head: &[usize], base: usize) -> (Vec
                 }
                 out.push(piece.take().expect("a piece"));
             }
+            reading = f
+                .inked
+                .then(|| cut::Reading::of(&f.text, reads_as_value(&f.text)));
             piece = Some(Piece {
                 row: base + r,
                 x0: f.x,
@@ -478,8 +491,8 @@ fn pieces_in(frags: &[Frag], ids: &[usize], head: &[usize], base: usize) -> (Vec
                 inked: f.inked,
                 bold: f.inked && f.bold,
                 colon: f.inked && f.text.trim_end().ends_with(':'),
-                value: f.inked && cut::reads_as_value(&f.text),
-                number: f.inked && cut::reads_as_number(&f.text),
+                value: f.inked && reads_as_value(&f.text),
+                number: f.inked.then(|| cut::whole_number(&f.text)).flatten(),
             });
         }
         out.extend(piece);
@@ -509,6 +522,18 @@ impl Order {
         let at = self.ids.len();
         self.sides.extend(other.sides.iter().map(|k| k + at));
         self.ids.extend(other.ids);
+    }
+}
+
+/// Whether the text of a fragment reads as an amount or a date (see
+/// [`cut::reads_as_value`]). A separator a drawn mark puts between two digits (the decimal
+/// mark of a boxed amount, the dots of a boxed date: [`crate::marks::SEP`]) is a sign of the
+/// value as a typed one is; a mark that is not read as a separator is none.
+fn reads_as_value(text: &str) -> bool {
+    if text.contains(crate::marks::SEP) {
+        cut::reads_as_value(&text.replace(crate::marks::SEP, "."))
+    } else {
+        cut::reads_as_value(text)
     }
 }
 
@@ -715,8 +740,15 @@ fn boxed_order(
             inked: true,
             bold: false,
             colon: false,
-            value: false,
-            number: false,
+            // A box of one row whose pieces all read as values stands in for a value: the
+            // digits of an amount or a date set one by one in the boxes of a field.
+            value: rows == 1
+                && list.iter().any(|p| p.inked)
+                && list
+                    .iter()
+                    .filter(|p| p.inked)
+                    .all(|p| p.value || p.number.is_some()),
+            number: None,
         });
         ps.extend(list);
         inner.push(at..ps.len());
@@ -1050,6 +1082,41 @@ fn logical_indices(units: &[&str]) -> Vec<usize> {
         .collect()
 }
 
+/// Of the word gaps of the runs `sparse` of `runs` (runs with gaps that no rule crosses and
+/// that stand on no line with a sentence gap), keeps those that end where two other runs of
+/// the page or more start, within the share of the text size a label and its value are cut
+/// by (`layoutregions::extract::table::grid::VALUE_EDGE`): a word that starts at the left
+/// edge of a column of other lines may be a value a word space after its label, and the cut,
+/// which asks for two values at that edge, needs the place of that word from the glyphs.
+/// Every other gap of these runs is dropped, as before: the kept text of a file stays
+/// bounded by its runs, and no reader of gaps sees more of them than the cut asks for.
+fn keep_gaps_at_starts(runs: &mut [Run], sparse: &[usize]) {
+    if sparse.is_empty() {
+        return;
+    }
+    let mut starts: Vec<f32> = runs
+        .iter()
+        .filter(|r| !r.text.trim().is_empty())
+        .map(|r| r.x)
+        .collect();
+    starts.sort_by(f32::total_cmp);
+    crate::work::add((runs.len() + sparse.len()) as u64);
+    for &i in sparse {
+        let tol = layoutregions::extract::table::grid::VALUE_EDGE * runs[i].size.max(1.0);
+        let kept: Vec<Gap> = runs[i]
+            .gaps
+            .iter()
+            .copied()
+            .filter(|g| {
+                let k = starts.partition_point(|x| *x < g.to - tol);
+                starts.get(k + 1).is_some_and(|x| *x <= g.to + tol)
+            })
+            .collect();
+        crate::work::add(runs[i].gaps.len() as u64);
+        runs[i].gaps = Gaps::new(kept);
+    }
+}
+
 /// Vertical writing: one run per column, glyphs top to bottom, columns from right to left.
 fn vertical_runs(
     page: u32,
@@ -1202,8 +1269,11 @@ pub(crate) fn runs_in(
         joined: &joined,
         joints: &joints,
     };
+    // The runs no rule crosses that have word gaps: they keep only the gaps that end where
+    // another run starts (see `keep_gaps_at_starts`).
+    let mut sparse: Vec<usize> = Vec::new();
     for ids in lines_in(&frags, true, &turned, &ruled) {
-        let mut r = line_runs(page, &frags, from_first_ink(&frags, &ids), line, links);
+        let r = line_runs(page, &frags, from_first_ink(&frags, &ids), line, links);
         // A line with a wide gap after a sentence end keeps its word gaps: they tell whether
         // it is justified prose (see `layoutregions::extract::table::grid::pieces_of`).
         let prose_gap = r.windows(2).any(|w| {
@@ -1211,15 +1281,19 @@ pub(crate) fn runs_in(
                 > layoutregions::extract::table::CELL_GAP * w[1].size.max(1.0)
                 && w[0].text.trim_end().ends_with(['.', '?', '!'])
         });
-        for run in &mut r {
+        for (n, run) in r.iter().enumerate() {
             let k = columns.partition_point(|x| *x <= run.x);
-            if !prose_gap && !columns.get(k).is_some_and(|x| *x < run.x + run.w) {
-                run.gaps = Gaps::default();
+            if !prose_gap
+                && !columns.get(k).is_some_and(|x| *x < run.x + run.w)
+                && !run.gaps.is_empty()
+            {
+                sparse.push(runs.len() + n);
             }
         }
         runs.extend(r);
         line += 1;
     }
+    keep_gaps_at_starts(&mut runs, &sparse);
     for (dir, list) in others {
         // Lines are found in the frame where this text reads along +x; the runs keep the
         // position of their first glyph in the page's frame.
@@ -1353,6 +1427,46 @@ mod tests {
             units: vec![0],
             gaps: Vec::new(),
         }
+    }
+
+    /// Task 26 fix round 4 (review 4 I1, M1): the reader's pieces read as the engine's do
+    /// ([`cut::Reading`]), the same in one fragment and in several: a currency before its
+    /// figures in a fragment of its own says nothing yet and the next fragment decides, a
+    /// whole number goes on with its next digits.
+    #[test]
+    fn a_piece_reads_the_same_in_one_fragment_and_in_several() {
+        // The one piece of `texts`, one fragment after the other with 3 points between
+        // them (`touch`: with none): whether it reads as a value, and its whole number.
+        let read = |texts: &[&str], touch: bool| {
+            let mut x = 40.0;
+            let frags: Vec<Frag> = texts
+                .iter()
+                .map(|t| {
+                    let f = frag(t, x, 700.0);
+                    x = f.end + if touch { 0.0 } else { 3.0 };
+                    f
+                })
+                .collect();
+            let ps = pieces(&frags);
+            assert_eq!(ps.len(), 1, "{texts:?}");
+            (ps[0].value, ps[0].number)
+        };
+        for (texts, one, value) in [
+            (&["CHF", "80"][..], "CHF 80", true),
+            (&["$", "80"], "$ 80", true),
+            (&["80", "CHF"], "80 CHF", true),
+            (&["CHF", "Total"], "CHF Total", false),
+            (&["TEUR", "80"], "TEUR 80", false),
+            (&["Total", "80"], "Total 80", false),
+        ] {
+            assert_eq!(read(texts, false), (value, None), "{texts:?}");
+            assert_eq!(read(&[one], false), (value, None), "{one}");
+        }
+        // M1: the digits of a whole number in two fragments.
+        assert_eq!(read(&["20", "24"], true), (true, Some(2024)));
+        assert_eq!(read(&["2024"], true), (true, Some(2024)));
+        assert_eq!(read(&["20", "2a"], true), (false, None));
+        assert_eq!(read(&["$", "2024"], true), (true, None));
     }
 
     #[test]

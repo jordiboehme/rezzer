@@ -537,8 +537,11 @@ pub fn small_size(text_sizes: &[f32]) -> i32 {
 /// box `consumed` by a framed title is not read): a box whose text is a label at its top or
 /// left in one style and a value in another, or a label alone smaller than the largest of the
 /// page's `text_sizes` (an empty field). Boxes whose label and value differ in weight, slant
-/// or font only are read again knowing the styles of the labels alone in empty fields. Gives
-/// each box's field, and the boxes not clear with why.
+/// or font only are read again knowing the styles of the labels of the page's fields that
+/// have evidence of their own: a label that ends with a colon, or a value shaped as a number,
+/// a date or a code. A label alone in an empty field seeds no style (it is a label by its
+/// size alone), as in the typers' seeds (`typers::pairs::seeds`). Gives each box's field, and
+/// the boxes not clear with why.
 pub fn box_fields<R: LineRun>(
     runs: &[R],
     in_box: &[Vec<usize>],
@@ -563,12 +566,16 @@ pub fn box_fields<R: LineRun>(
             _ => {}
         }
     }
-    // The style of the text alone in an empty boxed field is a label's: boxes whose label and
-    // value differ in weight, slant or font only are read again knowing it.
+    // The style of the label of a field with evidence of its own is a label's: boxes whose
+    // label and value differ in weight, slant or font only are read again knowing it.
     let mut known: Vec<Style> = fields
         .iter()
         .flatten()
-        .filter(|f| f.value.is_empty())
+        .filter(|f| {
+            !f.value.is_empty()
+                && (words(runs, &f.label).ends_with(':')
+                    || crate::typers::pairs::value_shape(&words(runs, &f.value)))
+        })
         .filter_map(|f| f.label.first().map(|&i| style_of(&runs[i])))
         .collect();
     known.sort_unstable();

@@ -1650,6 +1650,216 @@ mod tests {
         assert_eq!(texts, ["AA", " BB", "AA", " BB", "AA  BB"]);
     }
 
+    /// A run of `text` at `x` on the baseline `y` in `size`, 0.6 of the size a character, with
+    /// no gaps.
+    fn sized(text: &str, x: f32, y: f32, size: f32, line: u32) -> Run {
+        Run {
+            y,
+            w: 0.6 * size * text.chars().count() as f32,
+            h: size,
+            size,
+            line,
+            gaps: crate::layout::Gaps::default(),
+            ..spaced(text, x)
+        }
+    }
+
+    /// A value run of `text` from `x` on the value line of [`fields_row`], with one gap `gap`
+    /// wide after its first `chars` characters (its first group, with what leads it).
+    fn grouped(text: &str, x: f32, chars: usize, gap: f32) -> Run {
+        let mut r = sized(text, x, 100.0, 9.5, 1);
+        r.w += gap - 5.7;
+        let from = x + 5.7 * chars as f32;
+        r.gaps = crate::layout::Gaps::new(vec![crate::layout::Gap {
+            words: text[..text.char_indices().nth(chars).map_or(0, |c| c.0)]
+                .split_whitespace()
+                .count() as u32,
+            from,
+            to: from + gap,
+        }]);
+        r
+    }
+
+    /// One row of fields between the rules at 96 and 121 from 40 to 220 with the drawn
+    /// `dividers`: small `labels` (text and start) on one line over the `values`, through
+    /// the pass that cuts the runs and the pass that reads the rows. Whether a run was cut,
+    /// the tables found, the losses that say [`IN_NUMBER`], whether every run is kept as
+    /// text with that doubt, and all the losses.
+    fn fields_row(
+        labels: &[(&str, f32)],
+        values: Vec<Run>,
+        dividers: &[f32],
+    ) -> (bool, usize, usize, bool, usize) {
+        use layoutregions::extract::pairs::strips::IN_NUMBER;
+        let mut runs: Vec<Run> = labels
+            .iter()
+            .map(|&(text, x)| sized(text, x, 113.0, 6.6, 0))
+            .collect();
+        runs.extend(values);
+        let mut flow = flow_of(runs);
+        let frames = [Frame {
+            x0: 40.0,
+            x1: 220.0,
+            bottom: 96.0,
+            top: 121.0,
+            dividers: dividers.to_vec(),
+            spans: vec![(96.0, 121.0)],
+            under_grid: false,
+        }];
+        // The pass before the rows are read: where the runs are cut.
+        let cuts = field_cuts(&flow, &frames);
+        let cut = !cuts.is_empty();
+        apply_cuts(&mut flow, cuts);
+        let lines = flow_lines(&flow);
+        let by_y = ByY::new(&flow.runs, &lines);
+        let hs = [seg(96.0, 40.0, 220.0), seg(121.0, 40.0, 220.0)];
+        let none = vec![false; flow.runs.len()];
+        let mut claimed = vec![None; flow.runs.len()];
+        let mut held = vec![false; flow.runs.len()];
+        let mut tables = Vec::new();
+        let mut found = Found::default();
+        strip_tables(
+            1,
+            &flow,
+            &by_y,
+            &frames,
+            (&hs, &[]),
+            &none,
+            &none,
+            &mut claimed,
+            &mut held,
+            &mut tables,
+            &mut found,
+        );
+        let said = found
+            .uncertain
+            .iter()
+            .filter(|u| u.contains(IN_NUMBER))
+            .count();
+        let kept = held.iter().all(|&h| h) && found.doubts.iter().any(|d| d.1 == IN_NUMBER);
+        (cut, tables.len(), said, kept, found.uncertain.len())
+    }
+
+    /// No run cut, no table, one loss that says the edge in the number, every run kept.
+    const KEPT_AS_TEXT: (bool, usize, usize, bool, usize) = (false, 0, 1, true, 1);
+
+    /// Task 26 fix rounds 7b and 7c (N1, I1): a row of fields between rules with a drawn
+    /// divider in the digit group gap of a number, or inside the number, is neither cut at the
+    /// gap nor read with the number in one field: the digits say one number and the divider
+    /// says two fields. No run of it is cut, no table takes it, and its text is kept as it
+    /// stands, which is said. With the divider less than a character into the number, out of
+    /// reach of the gap, the row is read as fields, the amount whole.
+    #[test]
+    fn a_row_of_fields_with_a_divider_in_a_digit_group_gap_is_kept_as_text() {
+        // The number starts at 130, its group gap 1.6 wide after its first group.
+        let read = |number: &str, divider: f32, count: Option<&str>| {
+            let first = number.chars().take_while(char::is_ascii_digit).count();
+            let mut values: Vec<Run> = count
+                .map(|c| sized(c, 44.0, 100.0, 9.5, 1))
+                .into_iter()
+                .collect();
+            values.push(grouped(number, 130.0, first, 1.6));
+            fields_row(
+                &[("Count", 44.0), ("Amount", divider + 12.0)],
+                values,
+                &[divider],
+            )
+        };
+        let amount = "1\u{2009}234,56";
+        for count in [None, Some("7")] {
+            for divider in [135.0, 136.0, 140.0] {
+                assert_eq!(
+                    read(amount, divider, count),
+                    KEPT_AS_TEXT,
+                    "divider at {divider}"
+                );
+            }
+            assert_eq!(read("123\u{2009}456", 148.0, count), KEPT_AS_TEXT);
+        }
+        // Out of reach of the gap: a row of two fields, nothing said.
+        assert_eq!(read(amount, 133.0, Some("7")), (false, 1, 0, false, 0));
+    }
+
+    /// Task 26 fix round 7c (M1): a number led by a sign (`-`, `+`, U+2212), an opening
+    /// bracket, a currency sign or a currency code, with a drawn divider in its digit group
+    /// gap, is kept as text and said: no table holds the sign and the first group as the
+    /// value of the field before the divider. The other way: letters before the first digit
+    /// that are no currency code make a code, cut at the divider as before.
+    #[test]
+    fn a_row_of_fields_with_a_divider_in_the_group_gap_of_a_signed_number_is_kept_as_text() {
+        // The value run starts at 130, the divider 0.8 into its gap of 1.6.
+        let read = |text: &str, chars: usize| {
+            let divider = 130.0 + 5.7 * chars as f32 + 0.8;
+            let mut value = grouped(text, 130.0, chars, 1.6);
+            value.w -= 4.1;
+            fields_row(
+                &[("Count", 44.0), ("Amount", divider + 12.0)],
+                vec![value],
+                &[divider],
+            )
+        };
+        for (text, chars) in [
+            ("\u{2212}1 234,56", 2),
+            ("(1 234,56)", 2),
+            ("[1 234]", 2),
+            ("\u{20ac}1 234,56", 2),
+            ("$12 345.00", 3),
+            ("EUR1 234,56", 4),
+            ("-\u{20ac}1 234,56", 3),
+            ("\u{20ac} 1 234,56", 3),
+            ("EUR 1 234,56", 5),
+            ("AB 1 234", 4),
+        ] {
+            assert_eq!(read(text, chars), KEPT_AS_TEXT, "{text}");
+        }
+        for (text, chars) in [("AB1 234,56", 3), ("Nr1 234", 3), ("#1 234,56", 2)] {
+            assert_eq!(read(text, chars), (true, 1, 0, false, 0), "{text}");
+        }
+    }
+
+    /// Task 26 fix round 7c (I1): a field edge from the start of a label (no drawn divider)
+    /// in the digit group gap of a number or inside the number leaves the row as text, as a
+    /// drawn divider there does, and says so. The other way: a value line with no group after
+    /// its gap is cut at the label's start and read as a row of two fields.
+    #[test]
+    fn a_row_of_fields_with_a_label_start_in_a_number_is_kept_as_text() {
+        // The value line starts at 44, its second word under the second label.
+        let read = |labels: [&str; 2], second: f32, text: &str, gap: f32| {
+            let first = text.chars().take_while(|c| *c != ' ').count();
+            fields_row(
+                &[(labels[0], 44.0), (labels[1], second)],
+                vec![grouped(text, 44.0, first, gap)],
+                &[],
+            )
+        };
+        for (labels, second, text, gap) in [
+            (["A", "B"], 58.0, "12 345", 2.6),
+            (["A", "B"], 56.0, "7 500", 6.3),
+            (["A", "B"], 56.0, "7 500,00", 6.3),
+            (["No", "Qty"], 60.0, "12 345", 4.6),
+            (["No", "Qty"], 62.0, "12 345", 6.6),
+            // The label start over the middle of "345", away from the group gap.
+            (["A", "B"], 68.0, "12 345", 2.6),
+            (["No", "Qty"], 68.0, "12 345", 4.6),
+        ] {
+            assert_eq!(
+                read(labels, second, text, gap),
+                KEPT_AS_TEXT,
+                "{text} under {second}"
+            );
+        }
+        for (labels, second, text, gap) in [
+            (["A", "B"], 58.0, "12 3456", 2.6),
+            (["No", "Qty"], 60.0, "12 34,5", 4.6),
+        ] {
+            assert_eq!(
+                read(labels, second, text, gap),
+                (true, 1, 0, false, 0),
+                "{text} under {second}"
+            );
+        }
+    }
+
     /// A backslash and a quote in the first words that name a table in a loss are escaped: the
     /// name stands between quotes in the loss.
     #[test]

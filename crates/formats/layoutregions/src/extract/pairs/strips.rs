@@ -13,7 +13,7 @@ use super::*;
 use crate::extract::table::{CELL_GAP, middle};
 use crate::input::GapIn;
 use crate::line::{LABEL_STEP, LineRun};
-use crate::segment::drawn::SNAP;
+use crate::segment::drawn::{Line, SNAP};
 
 /// Steps the search for fields between rules may take on one page.
 pub const STRIP_WORK: usize = 1_000_000;
@@ -27,11 +27,123 @@ pub struct FieldFrame<'a> {
     pub dividers: &'a [f32],
 }
 
+/// A divider of a strip is at least this share of the strip's height long: it parts the
+/// fields over much of the row, where a drawn separator mark is a small share of it.
+pub const DIVIDER: f32 = 0.25;
+
+/// The dividers of the strip between the rules at `bottom` and `top` from `x0` to `x1`, among
+/// the vertical lines `vs` sorted by place: each line inside the strip that reaches its top or
+/// its bottom rule and is [`DIVIDER`] of its height long or more, with its low and high end,
+/// left to right. `step` is called once for each line looked at; when it says `false` the
+/// search stops and gives `None`.
+///
+/// A column rule of a grid over the strip that runs on through its top rule and ends in the
+/// strip hangs from its top; one of a grid under it that runs on through its bottom rule rises
+/// from its bottom.
+pub fn dividers_of(
+    vs: &[Line],
+    (bottom, top): (f32, f32),
+    (x0, x1): (f32, f32),
+    step: &mut dyn FnMut() -> bool,
+) -> Option<Vec<(f32, (f32, f32))>> {
+    let lo = vs.partition_point(|v| v.at <= x0 + SNAP);
+    let mut out = Vec::new();
+    for v in &vs[lo..] {
+        if !step() {
+            return None;
+        }
+        if v.at >= x1 - SNAP {
+            break;
+        }
+        let through = |at: f32| v.from < at - SNAP && v.to > at + SNAP;
+        let to = if through(top) { top } else { v.to };
+        let from = if through(bottom) { bottom } else { v.from };
+        let reaches = (to - top).abs() <= SNAP || (from - bottom).abs() <= SNAP;
+        if reaches
+            && to - from >= DIVIDER * (top - bottom)
+            && from >= bottom - SNAP
+            && to <= top + SNAP
+        {
+            out.push((v.at, (from, to)));
+        }
+    }
+    Some(out)
+}
+
+/// Which of `n` horizontal lines the grids of `groups` take.
+pub fn taken_by_grids(n: usize, groups: &[(Vec<usize>, Vec<usize>)]) -> Vec<bool> {
+    let mut taken = vec![false; n];
+    for (gh, _) in groups {
+        for &j in gh {
+            taken[j] = true;
+        }
+    }
+    taken
+}
+
+/// What a horizontal line may be to a frame of fields under it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Top {
+    /// No top: a grid takes it.
+    No,
+    /// A rule no grid takes.
+    Free,
+    /// The lowest rule of a grid: a box drawn over a row of fields (a section's title cells)
+    /// takes the row's top rule into its grid, and the row under it is still a row of fields
+    /// when its text holds fields with a value (the reader asks that of it).
+    Grid,
+}
+
+/// What each of the horizontal lines `hs` may be to a frame of fields under it (see [`Top`]):
+/// with `lowest`, the lowest line of each grid of `groups` may top one too. A grid of two
+/// rules and dividers between them (`vs`), none at their ends and none running on over or
+/// under them (a row of fields open at both ends), is no grid to its top rule: the frame under
+/// it is a row of fields with dividers.
+pub fn frame_tops(
+    hs: &[Line],
+    vs: &[Line],
+    groups: &[(Vec<usize>, Vec<usize>)],
+    lowest: bool,
+) -> Vec<Top> {
+    let mut tops: Vec<Top> = taken_by_grids(hs.len(), groups)
+        .into_iter()
+        .map(|t| if t { Top::No } else { Top::Free })
+        .collect();
+    for (gh, gv) in groups {
+        let [a, b] = gh[..] else {
+            continue;
+        };
+        let (x0, x1) = (hs[a].from.min(hs[b].from), hs[a].to.max(hs[b].to));
+        let (y0, y1) = (hs[a].at.min(hs[b].at), hs[a].at.max(hs[b].at));
+        let inner = !gv.is_empty()
+            && gv.iter().all(|&k| {
+                let v = &vs[k];
+                v.at > x0 + SNAP && v.at < x1 - SNAP && v.from >= y0 - SNAP && v.to <= y1 + SNAP
+            });
+        if inner {
+            let top = if hs[a].at > hs[b].at { a } else { b };
+            tops[top] = Top::Free;
+        }
+    }
+    if lowest {
+        for (gh, _) in groups {
+            if let Some(&low) = gh.iter().min_by(|&&a, &&b| hs[a].at.total_cmp(&hs[b].at)) {
+                tops[low] = Top::Grid;
+            }
+        }
+    }
+    tops
+}
+
 /// Where to cut the runs of the page's `frames` of fields (`ids_of` gives the runs of a frame
 /// by its place in `frames`, asked once for each frame in order until the work bound is
 /// spent): a run that stands across a field edge (see `field_edges`) is cut at its word gap
-/// nearest the edge, when that gap lies at most `NEAR_EDGE` characters from it. Each run
-/// with the indexes of its gaps (see [`LineRun::gaps`]), in the order of the runs.
+/// nearest the edge, when that gap lies at most `NEAR_EDGE` characters from it, and a run with
+/// a word gap at a drawn divider is cut there however little of it stands past the divider
+/// (see [`divider_gap`]). A gap between the digit groups of a number is no word gap for
+/// either cut (see [`group_gap`]). A frame with a field edge in a number in digit groups is
+/// not decided (see [`undecided`]): none of its runs is cut. Each run with the indexes of its
+/// gaps (see [`LineRun::gaps`]), in the order of the runs.
 pub fn field_cuts<R: LineRun>(
     runs: &[R],
     frames: &[FieldFrame<'_>],
@@ -53,8 +165,17 @@ pub fn field_cuts<R: LineRun>(
         if !holds_fields(runs, fr, &ids, inner) {
             continue;
         }
+        // Its fields are not decided: its lines stay as they stand.
+        if edge_in_number(runs, &ids, inner) {
+            continue;
+        }
         for &i in &ids {
             let r = &runs[i];
+            for &d in fr.dividers {
+                if let Some(k) = divider_gap(r, d) {
+                    at.entry(i).or_default().push(k);
+                }
+            }
             for &e in inner.iter().filter(|&&e| across(r, e)) {
                 let distance = |g: &GapIn| {
                     if e < g.from {
@@ -65,9 +186,11 @@ pub fn field_cuts<R: LineRun>(
                         0.0
                     }
                 };
+                // A gap between the digit groups of a number is no field edge.
                 let near = r
                     .gaps()
                     .enumerate()
+                    .filter(|(_, g)| !group_gap(r.text(), g.words))
                     .min_by(|a, b| distance(&a.1).total_cmp(&distance(&b.1)));
                 if let Some((k, g)) = near
                     && distance(&g) <= NEAR_EDGE * CHAR * r.size().max(1.0)
@@ -113,6 +236,9 @@ pub(crate) const ACROSS: &str = "a value stands across two fields";
 
 pub(crate) const UNDER_NONE: &str =
     "a value stands under none of the labels of its field or under two";
+
+/// Why the fields of a frame are not decided (see [`undecided`]).
+pub const IN_NUMBER: &str = "a field edge stands in a number set in digit groups";
 
 pub const NOT_FIELDS: &str = "its labels do not all stand over or beside their values";
 
@@ -327,6 +453,159 @@ pub fn across<R: LineRun>(r: &R, e: f32) -> bool {
     let c = CHAR * r.size().max(1.0);
     e - r.x() > c && r.x() + r.w() - e > c
 }
+
+/// Whether the white space after the first `words` words of `text` (as `split_whitespace`
+/// counts them, see [`GapIn::words`]) stands between two digit groups of one number: one to
+/// three digits before it (see [`first_group`] for what may lead them), exactly three digits
+/// after it, and then the end of the word, a decimal mark or a closing bracket. A number set
+/// in groups of three is one value, so this gap is no field edge, whatever is drawn in it:
+/// it is told by the digits, not by its width or by how near a divider stands. `70 3`,
+/// `00123 456` and `AB1 234` hold no such gap.
+pub fn group_gap(text: &str, words: u32) -> bool {
+    let Some(before) = (words as usize).checked_sub(1) else {
+        return false;
+    };
+    let mut it = text.split_whitespace().skip(before);
+    let (Some(a), Some(b)) = (it.next(), it.next()) else {
+        return false;
+    };
+    let a = first_group(a);
+    let digits = |w: &str| w.bytes().take_while(u8::is_ascii_digit).count();
+    (1..=3).contains(&a.len())
+        && digits(a) == a.len()
+        && digits(b) == 3
+        && matches!(b.as_bytes().get(3), None | Some(b',' | b'.' | b')' | b']'))
+}
+
+/// The word `word` without what may lead the first digit group of a number: a sign (`-`,
+/// `+`, the minus U+2212), an opening bracket (an amount owed is set in brackets), a
+/// currency sign and a currency code of three capital letters, in any order around the
+/// code. Other letters before the digits make a code or a name, not an amount: `AB1` and
+/// `Nr1` keep their letters, so they are no digit group.
+fn first_group(word: &str) -> &str {
+    let lead = |c: char| matches!(c, '-' | '+' | '\u{2212}' | '(' | '[') || currency_sign(c);
+    let rest = word.trim_start_matches(lead);
+    let code = rest
+        .as_bytes()
+        .get(..3)
+        .filter(|code| code.iter().all(u8::is_ascii_uppercase))
+        .map_or(rest, |_| &rest[3..]);
+    code.trim_start_matches(lead)
+}
+
+/// Whether `c` is a currency sign: the dollar, the signs of Latin-1 (cent, pound, currency,
+/// yen), the baht and the Unicode block of currency symbols (the euro among them).
+fn currency_sign(c: char) -> bool {
+    matches!(c, '$' | '\u{a2}'..='\u{a5}' | '\u{e3f}' | '\u{20a0}'..='\u{20cf}')
+}
+
+/// From where to where the number in digit groups reaches that the place `e` of the run `r`
+/// lies in (see [`group_gap`]), by the run's gaps: from the end of the gap before its first
+/// group to the start of the gap after its last one, or the run's ends. None when `e` lies in
+/// no such number, or when a group of it is not bounded by a gap the run knows (a run need
+/// not have a gap at each of its spaces).
+fn number_at<R: LineRun>(r: &R, e: f32) -> Option<(f32, f32)> {
+    let gaps: Vec<GapIn> = r.gaps().collect();
+    let last = r.text().split_whitespace().count() as u32;
+    let mut k = 0;
+    while k < gaps.len() {
+        if !group_gap(r.text(), gaps[k].words) {
+            k += 1;
+            continue;
+        }
+        let first = k;
+        while k + 1 < gaps.len()
+            && gaps[k + 1].words == gaps[k].words + 1
+            && group_gap(r.text(), gaps[k + 1].words)
+        {
+            k += 1;
+        }
+        let from = match first.checked_sub(1).map(|p| gaps[p]) {
+            Some(p) if p.words + 1 == gaps[first].words => Some(p.to),
+            None if gaps[first].words == 1 => Some(r.x()),
+            _ => None,
+        };
+        let to = match gaps.get(k + 1) {
+            Some(n) if n.words == gaps[k].words + 1 => Some(n.from),
+            None if gaps[k].words + 1 == last => Some(r.x() + r.w()),
+            _ => None,
+        };
+        if let (Some(from), Some(to)) = (from, to)
+            && from <= e
+            && e <= to
+        {
+            return Some((from, to));
+        }
+        k += 1;
+    }
+    None
+}
+
+/// The word gap of the run `r` the drawn divider at `d` stands in, by its place among the
+/// run's gaps: a divider in a word gap is drawn evidence of a field edge, so the words on its
+/// two sides are values of two fields however short the one after it is (a last value of one
+/// character reaches less than a character past its divider, which [`across`] does not
+/// count). A form may set the divider a hair inside the box of the character beside it: the
+/// gap is taken up to [`SNAP`] wider on each side (the reach of drawn lines, which does not
+/// grow with the text), but never by half a character or more, where the divider stands in
+/// the word and not at its edge. Of two such gaps, the nearer one. A gap between the digit
+/// groups of a number is no word gap (see [`group_gap`]): a divider there cuts nothing, and
+/// leaves the fields of its frame not decided (see [`undecided`]).
+pub fn divider_gap<R: LineRun>(r: &R, d: f32) -> Option<usize> {
+    let reach = SNAP.min(DIVIDER_IN_WORD * CHAR * r.size().max(1.0));
+    let distance = |g: &GapIn| (g.from - d).max(d - g.to).max(0.0);
+    r.gaps()
+        .enumerate()
+        .filter(|(_, g)| !group_gap(r.text(), g.words))
+        .map(|(k, g)| (k, distance(&g)))
+        .filter(|&(_, far)| far < reach)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(k, _)| k)
+}
+
+/// Whether a field edge of `edges` (a drawn divider or the start of a label, see
+/// [`field_edges`]) stands in a number in digit groups of one of the runs `ids`: in a gap
+/// between its groups (see [`group_gap`]), with the reach a divider has to a word gap (see
+/// [`divider_gap`]), or inside the number (see [`number_at`]) with more than a character of
+/// it on each side, as [`across`] counts a run over an edge. The digits say one number, the
+/// edge says two fields: the two disagree, so neither is evidence enough. A number that
+/// reaches less than a character over an edge is a value of the field of its middle, as any
+/// run is.
+pub fn edge_in_number<R: LineRun>(runs: &[R], ids: &[usize], edges: &[f32]) -> bool {
+    ids.iter().any(|&i| {
+        let r = &runs[i];
+        let c = CHAR * r.size().max(1.0);
+        let reach = SNAP.min(DIVIDER_IN_WORD * c);
+        let in_gap = r.gaps().any(|g| {
+            group_gap(r.text(), g.words)
+                && edges
+                    .iter()
+                    .any(|&e| (g.from - e).max(e - g.to).max(0.0) < reach)
+        });
+        in_gap
+            || edges
+                .iter()
+                .any(|&e| number_at(r, e).is_some_and(|(from, to)| e - from > c && to - e > c))
+    })
+}
+
+/// Whether the fields of the frame `fr` with the runs `ids` (not cut yet) are not decided: it
+/// holds fields (see `holds_fields`), and one of its field edges stands in a number in digit
+/// groups (see [`edge_in_number`]). `1 234,56` may be one amount that reaches over the edge,
+/// and `123 456` may be the values of two fields: such a frame is neither cut at the gap nor
+/// read with the number in one field, and the edge is never moved to the number's end. It is
+/// read as fields that are not clear, its lines kept as they stand, which is said with
+/// [`IN_NUMBER`]. One function for the reader's rows of fields and the engine's strips.
+pub fn undecided<R: LineRun>(runs: &[R], fr: &FieldFrame, ids: &[usize]) -> bool {
+    let edges = field_edges(runs, fr, ids);
+    let inner = &edges[1..edges.len() - 1];
+    edge_in_number(runs, ids, inner) && holds_fields(runs, fr, ids, inner)
+}
+
+/// A divider this share of a character inside a word, or more, parts no words (see
+/// [`divider_gap`]): from the middle of a character on it is no nearer to the gap before the
+/// character than to the one after it.
+pub const DIVIDER_IN_WORD: f32 = 0.5;
 
 /// Whether the frame `fr` with the runs `ids` holds fields, judged before its runs are cut at
 /// its field edges `inner`: its cells between dividers, without the runs that stand across an

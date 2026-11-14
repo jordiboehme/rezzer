@@ -11,9 +11,9 @@ use crate::axes::{ALL, Axes, Data, Extent, Look, Next, Shape, Sheet, Variant};
 use crate::common::label;
 use crate::draw::{bold, courier, mark_b};
 use crate::shapes::{
-    BLOCK_A, Built, DataFont, FieldSpec, Geo, ROWS, Rows, THREE_ROWS, boxed_row,
+    BLOCK_A, Built, DataFont, FieldSpec, Geo, ROWS, Rows, THREE_ROWS, TitleBlock, boxed_row,
     grids_side_by_side, header_grid, label_block, lone_field, overflow_rows, page, rows_page,
-    short_value_rows, title_grid_page, total_column,
+    short_value_rows, title_grid, title_grid_page, total_column,
 };
 
 /// Task 15b part 2c review (Important 2 and 3): a row of three boxed fields whose middle box
@@ -571,6 +571,33 @@ fn numbered_label_strip(g: &Geo, b: &mut Built, top: f32) -> f32 {
     top - h
 }
 
+/// Task 26 fix round 6 (I1): a strip of three fields between two rules with drawn dividers,
+/// its values one padded data line. The value of the last field is one character that ends
+/// the line. Each divider stands a hair inside the box of the character after it, as a form
+/// sets it, so the line reaches less than one character past the last one: the divider still
+/// parts the two values, each the value of the label over it.
+fn one_character_after_a_divider(g: &Geo, b: &mut Built, top: f32) -> f32 {
+    let h = 2.4 * g.data;
+    b.page.template += &g.hrule(g.col(0) - 0.12, g.col(22), top);
+    b.page.template += &g.hrule(g.col(0) - 0.12, g.col(22), top - h);
+    let fields = [
+        (0usize, "Number", "00123"),
+        (6, "Born", "01.02.70"),
+        (15, "Class", "3"),
+    ];
+    for (n, &(k, l, v)) in fields.iter().enumerate() {
+        if n > 0 {
+            b.page.template += &g.divider(g.col(k) + 0.08 * g.pitch(), top, top - h);
+        }
+        b.page.template += &label(g.col(k) + 0.3 * g.label, top - 0.86 * g.data, g.label, l);
+        b.values.push(v.to_string());
+        b.fields.push((l, Ok(Some(v))));
+    }
+    let parts: Vec<(usize, &str)> = fields.iter().map(|&(k, _, v)| (k, v)).collect();
+    g.values(b, top - 2.23 * g.data, &parts);
+    top - h
+}
+
 /// [`open_strip`] with `middle` as a shape: no block holds a text of the middle field with a
 /// label or a value of the fields beside it.
 fn open_strip_shape(
@@ -649,6 +676,49 @@ fn drawn(
         right: g.col(right),
     };
     (Sheet::new(b), Some(e))
+}
+
+/// H3 as a print run draws it (Task 26 fix 3a): the title line over a header grid. One data
+/// line holds the tail of the title, a date and, after a blank, the number of the sheet; the
+/// label of that number is a small template label that ends with a colon and stands in the
+/// blank right before it, its baseline a little higher; a bold title stands left on the line,
+/// and the rules of the grid under it. The label and the number read as one plain line of
+/// their own, the label right before the number (Task 26 fix round 5: no pair is claimed,
+/// nothing on the line says that the number is the value of the label and not a cell of
+/// another column); the date stands apart from it, no label of anything and no value of the
+/// label.
+///
+/// With `code`, a line of codes in the data face stands over the data line, from the right
+/// part of the grid on (Task 26 fix round 2, as the owner's form has it): the cut then keeps
+/// the two lines in one leaf, and the label and its number are still a line of their own.
+fn small_label_before_a_value_on_a_data_line(v: &Variant, code: bool) -> Sheet {
+    let g = v.geo();
+    let mut b = Built::new(&g);
+    let over = TitleBlock {
+        blatt: None,
+        code,
+        ..BLOCK_A
+    };
+    let top = 760.0 + g.dy;
+    title_grid(&g, &mut b, top, over);
+    // The label of the sheet number, where the form sets it: a quarter of a data column
+    // into column 81, 0.3 data sizes over the rule (the data line stands 0.17 over it).
+    b.page.template += &label(
+        g.col(81) + 0.25 * g.pitch(),
+        top + 0.30 * g.data,
+        g.label,
+        "Sheet:",
+    );
+    b.address(&g);
+    let mut s = Sheet::new(b);
+    s.want.paragraphs.push("Sheet: 1".into());
+    s.want.lines_joined.push(("Sheet:".into(), "1".into()));
+    s.want.apart.push(("12.34.56".into(), "Sheet:".into()));
+    s.want.no_pairs.push(("Sheet:".into(), "1".into()));
+    for other in ["Sheet:", "1"] {
+        s.want.no_pairs.push(("12.34.56".into(), other.into()));
+    }
+    s
 }
 
 /// F1 to F3 of the pay slip: a strip of seven fields with a rate over its divider and drawn
@@ -938,6 +1008,50 @@ fn separators(v: &Variant) -> (Sheet, Option<Extent>) {
     (s, Some(e))
 }
 
+/// Task 26 (the print form golden): two labels in one column, each over the upper left of
+/// its value: an amount and a date in boxes of their digits, set lower and to the right of
+/// the labels, with drawn decimal and date marks. The baselines of the labels and of the
+/// values do not line up, and white space parts the two columns; they are rows of a label
+/// and its value all the same, so each label is read with its own value and never both
+/// labels before both values. The digits of a value are one string of the print run.
+fn labels_over_boxed_values(v: &Variant) -> (Sheet, Option<Extent>) {
+    let g = v.geo();
+    let mut b = Built::new(&g);
+    let t = top(&g);
+    let d = g.data;
+    // A value 1.05 data sizes under its label, the next label 2.1 sizes under the value.
+    let fields = [
+        ("Betrag", "987654", &[4usize][..]),
+        ("Zahltag", "28022026", &[2, 4]),
+    ];
+    for (n, (name, digits, before)) in fields.into_iter().enumerate() {
+        let y = t - 0.86 * d - 3.15 * d * n as f32;
+        b.page.template += &label(g.col(0), y, g.label, name);
+        let y = y - 1.05 * d;
+        boxed_digits(&g, &mut b, 14, y, digits, before);
+        g.values(&mut b, y, &[(14, digits)]);
+    }
+    let lines = ["Summe 9.876,54", "Netto 1.234,56", "Stand 15.03.2026"];
+    for (k, l) in lines.iter().enumerate() {
+        g.values(&mut b, t - 8.0 * d - 1.4 * d * k as f32, &[(0, l)]);
+        b.values.push(l.to_string());
+    }
+    b.values.extend(["9876,54".into(), "28.02.2026".into()]);
+    let mut s = Sheet::new(b);
+    s.want.order = vec![
+        "Betrag".into(),
+        "9876,54".into(),
+        "Zahltag".into(),
+        "28.02.2026".into(),
+    ];
+    let e = Extent {
+        top: t,
+        bottom: t - 8.0 * d - 2.8 * d - 0.3 * d,
+        right: g.col(28),
+    };
+    (s, Some(e))
+}
+
 /// One ruled section of `rows` rows of the data size between the column edges `edges` (data
 /// columns) from `top`: the first row of labels, the others of values. Returns its bottom.
 fn section(g: &Geo, b: &mut Built, top: f32, edges: &[usize], rows: &[&[&str]]) -> f32 {
@@ -1088,6 +1202,11 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "head line over fields",
             axes: ALONE,
             draw: head_line_over_fields,
+        },
+        Shape {
+            name: "a one-character value right after a divider in a strip",
+            axes: ALONE,
+            draw: |v| drawn(v, one_character_after_a_divider, 22),
         },
         Shape {
             name: "padded period beside a title over fields",
@@ -1433,6 +1552,16 @@ pub(crate) fn shapes() -> Vec<Shape> {
             draw: |v| (Sheet::new(title_grid_page(&v.geo(), BLOCK_A)), None),
         },
         Shape {
+            name: "a small colon label before a value on a data line",
+            axes: ALONE,
+            draw: |v| (small_label_before_a_value_on_a_data_line(v, false), None),
+        },
+        Shape {
+            name: "a small colon label before a value on a data line under a code line",
+            axes: ALONE,
+            draw: |v| (small_label_before_a_value_on_a_data_line(v, true), None),
+        },
+        Shape {
             name: "grids side by side",
             axes: ALONE,
             draw: |v| (Sheet::new(grids_side_by_side(&v.geo(), true)), None),
@@ -1455,6 +1584,18 @@ pub(crate) fn shapes() -> Vec<Shape> {
                 }
                 (s, e)
             },
+        },
+        Shape {
+            name: "labels over boxed values in one column",
+            // The digits of a value are one string of a print run, as in the golden form.
+            // Digits set one by one in their boxes (the proportional data font) are left:
+            // see the report of Task 26.
+            axes: Axes {
+                look: &[Look::Real],
+                data: &[Data::CourierBold, Data::Courier],
+                ..ALL
+            },
+            draw: labels_over_boxed_values,
         },
         Shape {
             name: "separator marks",

@@ -445,6 +445,9 @@ pub(crate) struct Want {
     /// may stand in the read, nor any of their characters past ASCII (P6-X: the glyph text of
     /// a code is a wrong value).
     pub glyph_text: Vec<String>,
+    /// Texts no table row may hold as its label and its value (Task 26 fix round 1): two
+    /// texts of one line that are no pair (P6-X: a wrong pair).
+    pub no_pairs: Vec<(String, String)>,
     /// Texts and the region kind each must stand in (Task 20): the name of a
     /// `layoutregions::Kind` (`table`, `label_value`, `totals`, `heading`, ...).
     pub kinds: Vec<(String, &'static str)>,
@@ -529,12 +532,26 @@ pub fn variants(shape: &Shape) -> impl Iterator<Item = Page> + '_ {
     shape.axes.sample().into_iter().map(|v| page_of(shape, v))
 }
 
+thread_local! {
+    /// Which page of its file a shape is drawing, from 0 (see [`sheet_no`]).
+    static SHEET_NO: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Which page of its file the shape is drawing now, from 0: for a shape whose pages differ
+/// (a box drawn in another width on the second page). Set by [`page_of`] around each call
+/// of [`Shape::draw`].
+pub(crate) fn sheet_no() -> usize {
+    SHEET_NO.with(std::cell::Cell::get)
+}
+
 /// The page of `shape` in variant `v`.
 pub(crate) fn page_of(shape: &Shape, v: Variant) -> Page {
     let count = if v.pages == Pages::Two { 2 } else { 1 };
     let sheets = (0..count)
         .map(|n| {
+            SHEET_NO.with(|s| s.set(n));
             let (mut sheet, extent) = (shape.draw)(&v);
+            SHEET_NO.with(|s| s.set(0));
             if let Some(e) = extent {
                 neighbour(&v, &mut sheet, e);
             }

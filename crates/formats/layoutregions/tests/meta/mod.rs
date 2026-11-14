@@ -637,9 +637,11 @@ impl Broken {
 ///   0.1.0. Runs in another order are read in the order of their places
 ///   (`layoutregions::RunOrder`, Task 31c): a break under that change is a break like any
 ///   other;
-/// - labels and values: Task 26, but for the changes whose cause is the segmentation (rules
-///   in pieces part the strips; absolute points in the drawn structure under a scale of 0.5
-///   or 2), which Task 31 owns;
+/// - labels and values: Task 36a, the next task that types the leaves a break of this class
+///   leaves behind (Task 26, label and value groups, is closed: each pin it owned is fixed or
+///   carries its traced cause and owner), but for the changes whose cause is the segmentation
+///   (rules in pieces part the strips; absolute points in the drawn structure under a scale
+///   of 0.5 or 2), which Task 31 owns;
 /// - a text region read as another text kind (heading, list, paragraph, legend): Task 36a;
 /// - every other cut, join or order of regions (the segmentation, the bands of running
 ///   headers and footers): Task 31.
@@ -647,7 +649,7 @@ pub fn owner(t: Transform, what: Break, class: &str) -> &'static str {
     match (t, what, class) {
         (Transform::RuleAsBox, _, _) => "after 0.1.0",
         (Transform::SplitRules | Transform::Scale(50) | Transform::Scale(200), _, "pairs") => "31",
-        (_, _, "pairs") => "26",
+        (_, _, "pairs") => "36a",
         (_, Break::Kind, "text") => "36a",
         _ => "31",
     }
@@ -1398,6 +1400,44 @@ pub fn pinned(path: &std::path::Path) -> Vec<String> {
         .collect()
 }
 
+/// The open owner a traced cause names: a cause written by hand may start with `owner <who>`
+/// (`owner Task 36a. Traced ...`, `owner after 0.1.0, kept. ...`), where `<who>` is
+/// `after 0.1.0` or the name of a task (one word of letters and digits). `None` for a cause
+/// that names no owner.
+pub fn traced_owner(cause: &str) -> Option<&str> {
+    const LATER: &str = "after 0.1.0";
+    let who = cause.strip_prefix("owner ")?;
+    if who.starts_with(LATER) {
+        return Some(&who[..LATER.len()]);
+    }
+    let who = who.strip_prefix("Task ").unwrap_or(who);
+    let end = who
+        .find(|c: char| !c.is_ascii_alphanumeric())
+        .unwrap_or(who.len());
+    (end > 0).then_some(&who[..end])
+}
+
+/// The found pin line `l` with the owner its pin names: when the pin of its name, page,
+/// change, kind and class in `whole` (the pinned lines with their causes) carries a cause
+/// that names an open owner (see [`traced_owner`]), that owner stands in the owner column
+/// instead of the computed one (see [`owner`]: it knows the class of a break, not its traced
+/// cause). A move to or from spatial is no break and keeps its `-`.
+fn with_traced_owner(l: &str, whole: &[String]) -> String {
+    if l.split('\t').nth(PIN_FIELDS - 1) == Some("-") {
+        return l.to_string();
+    }
+    let key = fields(l, PIN_KEY);
+    let traced = whole
+        .iter()
+        .find(|w| fields(w, PIN_KEY) == key)
+        .and_then(|w| w.split('\t').nth(PIN_FIELDS))
+        .and_then(traced_owner);
+    match traced {
+        Some(who) => format!("{}\t{who}", fields(l, PIN_FIELDS - 1)),
+        None => l.to_string(),
+    }
+}
+
 /// The pinned lines of the file `path` as they stand in it, with their causes.
 fn pinned_whole(path: &std::path::Path) -> Vec<String> {
     std::fs::read_to_string(path)
@@ -1423,7 +1463,9 @@ pub fn pinned_names(path: &std::path::Path) -> Vec<String> {
 /// `REZZER_WRITE_META` set, the lines of `names` in the file are replaced by `lines` instead;
 /// the lines of every other name stay as they are. A line may carry the traced cause of its
 /// break as a last field, written by hand: it is not checked, and a rewritten line keeps the
-/// cause of the pin of its name, page, change, kind and class.
+/// cause of the pin of its name, page, change, kind and class. A cause that names an open
+/// owner sets the owner column of its line (see [`traced_owner`]), so the column never names
+/// another owner than the cause does.
 pub fn check_pins(path: &std::path::Path, names: &[String], lines: &[String]) {
     let write = std::env::var_os("REZZER_WRITE_META").is_some();
     check_or_write_pins(path, names, lines, write);
@@ -1443,8 +1485,11 @@ pub fn check_or_write_pins(
             .any(|n| l.split('\t').next() == Some(n.as_str()))
     };
     let old = pinned(path);
+    let whole = pinned_whole(path);
+    let lines: Vec<String> = lines.iter().map(|l| with_traced_owner(l, &whole)).collect();
+    let lines = &lines;
     if write {
-        let whole = pinned_whole(path);
+        let old: Vec<String> = old.iter().map(|l| with_traced_owner(l, &whole)).collect();
         let cause = |l: &String| {
             let key = fields(l, PIN_KEY);
             whole

@@ -297,17 +297,44 @@ fn word_shape(text: &str) -> Vec<bool> {
 /// Lines of labels and values one table may have at most.
 pub(crate) const MAX_KEY_VALUES: usize = MAX_SQUARES / 2;
 
+/// The lines of a block of labels and values follow each other at most this many text sizes
+/// apart, baseline to baseline: two line heights.
+const KV_PITCH: f32 = 2.0;
+
+/// A step between two baselines is at a bound of sizes still when it is over it by at most
+/// this share of the text size. The step is the difference of two places on the page, and
+/// both are f32: lines set at the bound itself land a hair over or under it by where they
+/// stand (traced: 448.0 and 435.4 at 6.3 points are 12.600006 apart, against a bound of
+/// 12.6000004). That error is a few millionths of a point and grows with the place on the
+/// page, not with the text size. The slack is a share of the size all the same, so that a
+/// block reads alike at every scale, and a generous bound for the error: 0.04 points at 10
+/// points and 0.008 at 2 points, thousands of times the rounding of an f32 on a page, and
+/// far under any step a writer sets on purpose (a tenth of a size). It is not meant to
+/// cover a file that rounds its places to hundredths of a point: at text under 2.6 points
+/// the slack is less than such a hundredth.
+const PITCH_ROUNDING: f32 = 1.0 / 256.0;
+
+/// Whether two lines `gap` apart, the upper over the lower, in the text size `size` (the
+/// larger of the two) follow each other in a block of labels and values (see [`KV_PITCH`],
+/// with [`PITCH_ROUNDING`]).
+fn at_pitch(gap: f32, size: f32) -> bool {
+    gap > 0.0 && gap <= (KV_PITCH + PITCH_ROUNDING) * size
+}
+
 /// Labels and values line up within this share of the text size of their line: a point at
 /// 10 points. A share of the size, so that a block printed smaller or larger lines up the
 /// same (Task 31a; it was a point at every size).
 const KV_ALIGN: f32 = 0.1;
 
 /// One row of a block of labels and values: its line, and the flow ranges of its label and
-/// value; a row without a value range has both in one run, cut after the label's colon.
+/// value. A row without a value range has both in one run: cut at `cut` when it is given (the
+/// run and the byte the value starts at; runs after that run are the value's, in `value`),
+/// else after the label's colon.
 pub struct KeyValue {
     pub line: usize,
     pub label: (usize, usize),
     pub value: Option<(usize, usize)>,
+    pub cut: Option<(usize, usize)>,
 }
 
 /// What [`key_values`] makes of lines of a region.
@@ -318,11 +345,91 @@ pub enum KeyValues {
     Rows(Vec<KeyValue>),
 }
 
+/// One line of a block of labels and values as [`key_values`] reads it: the texts and the
+/// ends of its label and its value, and its row.
+struct KvLine {
+    label: String,
+    value: String,
+    /// The left edge of the label, and the left and right edge of the value. A value cut out
+    /// of the label's piece starts at the left edge the values share, by the cut's own rule.
+    x0: f32,
+    v0: Option<f32>,
+    v1: f32,
+    row: KeyValue,
+}
+
+/// The lines of [`key_values`], each with its label and its value: a line of two pieces, or
+/// a line of one piece that goes on from the labels' left edge into the value column and is
+/// cut at the left edge the values of the other lines share
+/// ([`crate::extract::table::grid::value_cut`], Task 26 class A1: a label that ends a word
+/// space before its value). `None` when a line is neither.
+fn kv_lines<R: LineRun>(runs: &[R], a: usize, pieces: &[Vec<Piece>]) -> Option<Vec<KvLine>> {
+    use crate::extract::table::grid::{ink_start, value_cut};
+    let edges = |k: usize| -> Vec<f32> {
+        pieces
+            .iter()
+            .filter(|p| p.len() == 2)
+            .filter_map(|p| ink_start(runs, (p[k].start, p[k].end)))
+            .collect()
+    };
+    let (labels, values) = (edges(0), edges(1));
+    crate::work::add(pieces.len() as u64);
+    pieces
+        .iter()
+        .enumerate()
+        .map(|(k, p)| match p.as_slice() {
+            [l, v] => Some(KvLine {
+                label: text_of(runs, l.start, l.end),
+                value: text_of(runs, v.start, v.end),
+                x0: l.x0,
+                v0: Some(v.x0),
+                v1: v.x1,
+                row: KeyValue {
+                    line: a + k,
+                    label: (l.start, l.end),
+                    value: Some((v.start, v.end)),
+                    cut: None,
+                },
+            }),
+            [one] => {
+                let (run, byte) = value_cut(runs, (one.start, one.end), &labels, &values)?;
+                // The label ends in the run the cut falls in, or before the run it stands
+                // before.
+                let inside = byte > 0;
+                let label_end = if inside { run + 1 } else { run };
+                let mut label = text_of(runs, one.start, run);
+                let mut value = text_of(runs, label_end, one.end);
+                if inside {
+                    let text = runs[run].text();
+                    label = format!("{label} {}", &text[..byte]).trim().to_string();
+                    value = format!("{} {value}", &text[byte..]).trim().to_string();
+                }
+                Some(KvLine {
+                    label,
+                    value,
+                    x0: one.x0,
+                    v0: None,
+                    v1: one.x1,
+                    row: KeyValue {
+                        line: a + k,
+                        label: (one.start, label_end),
+                        value: (label_end < one.end).then_some((label_end, one.end)),
+                        cut: inside.then_some((run, byte)),
+                    },
+                })
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 /// The block of labels and values the lines `a..z` of a region are, when they are one: at
 /// least three lines in a row of exactly two pieces, the labels flush left, the values flush
 /// left or right or the labels ending in a colon, no label or value wrapping, short pieces,
-/// and no bold first line over plain ones (a header). A line right after the block whose one
-/// piece starts with a short label and a colon joins it, cut after the colon.
+/// and no bold first line over plain ones (a header). A line whose label ends a word space
+/// before its value is one piece: it is a line of the block when it is cut at the left edge
+/// the values of the other lines share (see [`kv_lines`]). A line right after the block whose
+/// one piece starts with a short label and a colon joins it, cut after the colon.
 pub fn key_values<R: LineRun>(
     runs: &[R],
     lines: &[RunRange],
@@ -331,22 +438,27 @@ pub fn key_values<R: LineRun>(
     pieces: &[Vec<Piece>],
     off: &[bool],
 ) -> KeyValues {
-    if pieces.iter().any(|p| p.len() != 2) || z - a < 2 {
+    if pieces.iter().any(|p| p.is_empty() || p.len() > 2) || z - a < 2 {
         return KeyValues::No;
     }
     if z - a > MAX_KEY_VALUES {
         return KeyValues::TooMany(z - a);
     }
-    let label = |p: &Piece| text_of(runs, p.start, p.end);
-    let labels: Vec<String> = pieces.iter().map(|p| label(&p[0])).collect();
-    let colons = labels.iter().all(|l| l.ends_with(':'));
+    let Some(kv) = kv_lines(runs, a, pieces) else {
+        return KeyValues::No;
+    };
+    // The first line of two pieces says where the values stand.
+    let Some((v0, v1)) = kv.iter().find_map(|l| l.v0.map(|v0| (v0, l.v1))) else {
+        return KeyValues::No;
+    };
+    let colons = kv.iter().all(|l| l.label.ends_with(':'));
     // Lines after the region whose one run starts with a short label and a colon.
     let mut extra: Vec<usize> = Vec::new();
     let mut end = z;
     while colons && end < lines.len() && !off[end] && extra.len() < MAX_KEY_VALUES {
         let (prev, cur) = (&lines[end - 1], &lines[end]);
         let gap = prev.y - cur.y;
-        if gap <= 0.0 || gap > 2.0 * prev.size.max(cur.size) || cur.end - cur.start != 1 {
+        if !at_pitch(gap, prev.size.max(cur.size)) || cur.end - cur.start != 1 {
             break;
         }
         let text = runs[cur.start].text().trim();
@@ -365,29 +477,31 @@ pub fn key_values<R: LineRun>(
     if n < 3 {
         return KeyValues::No;
     }
-    let x0 = pieces[0][0].x0;
+    let x0 = kv[0].x0;
     // The lines of the block line up within a share of their largest text size.
     let align = KV_ALIGN * lines[a..z].iter().map(|l| l.size).fold(0.0, f32::max);
-    let lefts = pieces.iter().all(|p| (p[0].x0 - x0).abs() <= align);
-    let (v0, v1) = (pieces[0][1].x0, pieces[0][1].x1);
-    let flush_left = pieces.iter().all(|p| (p[1].x0 - v0).abs() <= align);
-    let flush_right = pieces.iter().all(|p| (p[1].x1 - v1).abs() <= align);
+    let lefts = kv.iter().all(|l| (l.x0 - x0).abs() <= align);
+    let flush_left = kv
+        .iter()
+        .all(|l| l.v0.is_none_or(|v| (v - v0).abs() <= align));
+    let flush_right = kv.iter().all(|l| (l.v1 - v1).abs() <= align);
     if !lefts || !(flush_left || flush_right || colons) {
         return KeyValues::No;
     }
-    let short = labels
-        .iter()
-        .all(|l| l.chars().count() <= LABEL_CHARS && l.split_whitespace().count() <= LABEL_WORDS)
-        && pieces
-            .iter()
-            .all(|p| text_of(runs, p[1].start, p[1].end).chars().count() <= VALUE_CHARS);
+    let short = kv.iter().all(|l| {
+        l.label.chars().count() <= LABEL_CHARS
+            && l.label.split_whitespace().count() <= LABEL_WORDS
+            && l.value.chars().count() <= VALUE_CHARS
+    });
     if !short {
         return KeyValues::No;
     }
     // Lines of the block follow each other at most two line heights apart.
     let spaced = (a + 1..z).all(|k| {
-        let gap = lines[k - 1].y - lines[k].y;
-        gap > 0.0 && gap <= 2.0 * lines[k - 1].size.max(lines[k].size)
+        at_pitch(
+            lines[k - 1].y - lines[k].y,
+            lines[k - 1].size.max(lines[k].size),
+        )
     });
     // A line right after the block that starts under the values goes on a value.
     let wraps = lines.get(end).is_some_and(|next| {
@@ -402,21 +516,169 @@ pub fn key_values<R: LineRun>(
     if !spaced || wraps || header {
         return KeyValues::No;
     }
-    let mut rows: Vec<KeyValue> = pieces
-        .iter()
-        .enumerate()
-        .map(|(k, p)| KeyValue {
-            line: a + k,
-            label: (p[0].start, p[0].end),
-            value: Some((p[1].start, p[1].end)),
-        })
-        .collect();
+    let mut rows: Vec<KeyValue> = kv.into_iter().map(|l| l.row).collect();
     rows.extend(extra.into_iter().map(|k| KeyValue {
         line: k,
         label: (lines[k].start, lines[k].end),
         value: None,
+        cut: None,
     }));
     KeyValues::Rows(rows)
+}
+
+/// Whether the pieces `lower` of one line are the values of the labels `upper` of the line
+/// over it, as the whitespace cut reads a row of labels over the row of their values
+/// (`segment::cut`, its `labels_over_values`, by the same signs): two labels or more and two
+/// values or more, no more values than labels, every label set a size step
+/// ([`crate::segment::cut::SIZE_STEP`]) smaller than every value, no label that reads as an
+/// amount or a date, no value that ends with a colon, and each value under exactly one label
+/// (their ink overlaps along the line), no two under the same. A reader of tables without
+/// rules leaves such lines to the cut: read as rows of one table, the labels of the next row
+/// of fields would be values under the labels of the first.
+pub fn label_row_over_values<R: LineRun>(runs: &[R], upper: &[Piece], lower: &[Piece]) -> bool {
+    use crate::segment::cut::{SIZE_STEP, reads_as_value};
+    crate::work::add((upper.len() + lower.len()) as u64);
+    if upper.len() < 2 || lower.len() < 2 || lower.len() > upper.len() {
+        return false;
+    }
+    let inked = |p: &Piece| {
+        runs[p.start..p.end]
+            .iter()
+            .filter(|r| crate::extract::pairs::inked(*r))
+    };
+    let size = |p: &Piece, largest: bool| {
+        let sizes = inked(p).map(|r| r.size());
+        if largest {
+            sizes.fold(f32::MIN, f32::max)
+        } else {
+            sizes.fold(f32::MAX, f32::min)
+        }
+    };
+    // The ink of a piece: to the end of its last run with ink, less the blanks it ends with
+    // (their share of the run's width by its characters, exact for the monospaced face a
+    // print run pads with).
+    let ink = |p: &Piece| -> Option<(f32, f32)> {
+        let first = inked(p).next()?;
+        let last = inked(p).last()?;
+        let chars = last.text().chars().count().max(1) as f32;
+        let kept = last.text().trim_end().chars().count() as f32;
+        Some((first.x(), last.x() + last.w() * kept / chars))
+    };
+    let largest = upper.iter().map(|p| size(p, true)).fold(f32::MIN, f32::max);
+    let smallest = lower
+        .iter()
+        .map(|p| size(p, false))
+        .fold(f32::MAX, f32::min);
+    if smallest < SIZE_STEP * largest {
+        return false;
+    }
+    let text = |p: &Piece| text_of(runs, p.start, p.end);
+    if upper.iter().any(|p| reads_as_value(&text(p)))
+        || lower.iter().any(|p| text(p).trim_end().ends_with(':'))
+    {
+        return false;
+    }
+    let mut under = vec![false; upper.len()];
+    for v in lower {
+        let Some((v0, v1)) = ink(v) else {
+            return false;
+        };
+        let mut at = upper
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| ink(l).is_some_and(|(l0, l1)| l0 < v1 && l1 > v0));
+        let Some((k, _)) = at.next() else {
+            return false;
+        };
+        if at.next().is_some() || under[k] {
+            return false;
+        }
+        under[k] = true;
+    }
+    true
+}
+
+/// One label of a row of labels over their values and the value under it, as places in the
+/// runs handed to [`labels_with_values`]; a label with nothing under it has no value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Under {
+    pub label: Vec<usize>,
+    pub value: Vec<usize>,
+}
+
+/// The labels of `runs`, a row of labels over the row of their values as the whitespace cut
+/// hands it over (`Source::Cell`), each with the value under it, left to right. The runs with
+/// ink stand on two baselines (one when within `segment::cut::BASELINE_NEAR` of their size):
+/// the upper one holds the labels, the lower one the values; on one baseline they are labels
+/// whose values are empty. The runs of a row whose ink stands a cell gap apart or less are
+/// one cell, and a value goes to the one label its ink stands under. `None` when a run stands on a third baseline,
+/// or a value stands under no label, under two, or under a label that has one: the cut found
+/// no such row, and nothing is paired by guessing. The typer and the readers that extract
+/// such a region read the same pairs by it.
+pub fn labels_with_values<R: LineRun>(runs: &[R]) -> Option<Vec<Under>> {
+    use crate::segment::cut::BASELINE_NEAR;
+    crate::work::add(runs.len() as u64);
+    let inked: Vec<usize> = (0..runs.len())
+        .filter(|&i| crate::extract::pairs::inked(&runs[i]) && !runs[i].off_axis())
+        .collect();
+    let on = |i: usize, y: f32| (runs[i].y() - y).abs() <= BASELINE_NEAR * runs[i].size();
+    let top = inked.iter().map(|&i| runs[i].y()).reduce(f32::max)?;
+    let low = inked.iter().map(|&i| runs[i].y()).reduce(f32::min)?;
+    let row = |y: f32| {
+        let mut row: Vec<usize> = inked.iter().copied().filter(|&i| on(i, y)).collect();
+        row.sort_by(|&a, &b| runs[a].x().total_cmp(&runs[b].x()));
+        row
+    };
+    let upper = row(top);
+    let lower: Vec<usize> = if upper.iter().any(|&i| on(i, low)) {
+        Vec::new()
+    } else {
+        row(low)
+    };
+    if upper.len() + lower.len() != inked.len() {
+        return None;
+    }
+    // The cells of a row: its runs left to right, each with the extent of its ink (less the
+    // blanks it ends with: their share of the run's width by its characters, exact for the
+    // monospaced face a print run pads with), runs whose ink stands a cell gap apart or less
+    // one cell. By the ink: a value padded with blanks as far as the next one is a cell of
+    // its own.
+    let cells = |row: &[usize]| -> Vec<(Vec<usize>, f32, f32)> {
+        let mut out: Vec<(Vec<usize>, f32, f32)> = Vec::new();
+        for &i in row {
+            let r = &runs[i];
+            let chars = r.text().chars().count().max(1) as f32;
+            let kept = r.text().trim_end().chars().count() as f32;
+            let (x0, x1) = (r.x(), r.x() + r.w() * kept / chars);
+            match out.last_mut() {
+                Some(cell)
+                    if x0 - cell.2 <= crate::extract::table::CELL_GAP * r.size().max(1.0) =>
+                {
+                    cell.0.push(i);
+                    cell.2 = cell.2.max(x1);
+                }
+                _ => out.push((vec![i], x0, x1)),
+            }
+        }
+        out
+    };
+    let labels = cells(&upper);
+    let mut out: Vec<Under> = labels
+        .iter()
+        .map(|(ids, ..)| Under {
+            label: ids.clone(),
+            value: Vec::new(),
+        })
+        .collect();
+    for (ids, v0, v1) in cells(&lower) {
+        let mut at = (0..labels.len()).filter(|&k| labels[k].1 < v1 && labels[k].2 > v0);
+        let k = at.next()?;
+        if at.next().is_some() || !out[k].value.is_empty() {
+            return None;
+        }
+        out[k].value = ids;
+    }
+    Some(out)
 }
 
 /// The lines of a region by column (see [`columns_of`]), each column's line on each row, and

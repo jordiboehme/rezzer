@@ -60,10 +60,18 @@ pub enum Source {
     /// fields, a band of a table's rows under its header): it is kept together before the
     /// whitespace cut, which would part its columns (see [`strips`]). Style steps part it.
     Strip,
+    /// A row of labels over the row of their values, as the whitespace cut found them (see
+    /// `cut::Cut::cells`): each label with the value under it, or a label alone.
+    Cell,
     /// Lines of a text leaf that the text walk reads as one kind (a heading, paragraphs, list
     /// items), where the walk reads the leaf's lines as more than one kind (see
     /// [`crate::typers::walk_cut`]).
     Walk,
+    /// A part of a data line that a small colon label is set into (see
+    /// `Builder::labels_before_values`): the label with the text after it on that line, or
+    /// what stands before the label. One line of text, kept as it is laid out. No typer
+    /// reads it as a label and its value. It is one leaf.
+    Line,
 }
 
 /// A candidate region: the primitives it holds and what parted it from the rest.
@@ -249,6 +257,9 @@ fn segment_with(
     };
     let root = b.push(Source::Page, every, Some(frame), None, false);
     let own = b.segment(root, found);
+    b.labels_by_fields();
+    b.values_beside_pairs();
+    b.labels_before_values();
     let mut short = b.short;
     short.sort_unstable();
     short.dedup();
@@ -336,6 +347,284 @@ impl Builder<'_> {
             self.all[p.0 as usize].children.push(id);
         }
         id
+    }
+
+    /// Parts a leaf of label lines whose values stand in drawn fields beside it into its
+    /// lines. A print form sets a label over the upper left of its field: the boxes of the
+    /// digits of an amount, lower and to the right. The fields are drawn structure and are
+    /// taken out of the text before it is cut, so the labels of two such fields under each
+    /// other are left as one block of two lines, and the text of each field stands between
+    /// those lines. Where the labels and the fields are rows of a label and its value (see
+    /// [`cut::labels_beside_values`]: one label and one field a row, two rows or more set
+    /// alike, each field a value), each label is a segment of its own ([`Source::Band`]), to
+    /// be read with its field.
+    fn labels_by_fields(&mut self) {
+        let page = self.page;
+        let texts = |prims: &[PrimId]| -> Option<Vec<u32>> {
+            prims
+                .iter()
+                .map(|p| match *p {
+                    PrimId::Text(t) => Some(t),
+                    _ => None,
+                })
+                .collect()
+        };
+        // The fields: the drawn grids of one row that hold text, by their baseline.
+        let mut fields: Vec<(f32, Vec<u32>)> = Vec::new();
+        for seg in &self.all {
+            if !matches!(seg.source, Source::Grid { rows: 1, .. }) {
+                continue;
+            }
+            work::add(seg.prims.len() as u64);
+            let runs: Vec<u32> = seg
+                .prims
+                .iter()
+                .filter_map(|p| match *p {
+                    PrimId::Text(t) => Some(t),
+                    _ => None,
+                })
+                .collect();
+            if let Some(&first) = runs.first() {
+                fields.push((page.texts[first as usize].y, runs));
+            }
+        }
+        if fields.len() < 2 {
+            return;
+        }
+        fields.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let mut parted: Vec<(SegId, Vec<u32>)> = Vec::new();
+        for seg in &self.all {
+            let leaf = seg.children.is_empty()
+                && seg.alternatives.is_empty()
+                && matches!(
+                    seg.source,
+                    Source::Gutter | Source::Band | Source::Rest | Source::Style
+                )
+                && (2..=fields.len()).contains(&seg.prims.len());
+            if !leaf {
+                continue;
+            }
+            let Some(labels) = texts(&seg.prims) else {
+                continue;
+            };
+            work::add(labels.len() as u64);
+            let ys = || labels.iter().map(|&t| page.texts[t as usize].y);
+            let (low, high) = (ys().fold(f32::MAX, f32::min), ys().fold(f32::MIN, f32::max));
+            // The fields from one step of the labels under the lowest label up to the
+            // highest one, right of the labels.
+            let step = (high - low) / (labels.len() - 1) as f32;
+            let right = seg.bounds.x1;
+            let from = fields.partition_point(|f| f.0 <= low - step);
+            let mut pieces: Vec<Piece> = labels
+                .iter()
+                .map(|&t| piece(&page.texts[t as usize]))
+                .collect();
+            let left: Vec<usize> = (0..pieces.len()).collect();
+            for f in fields[from..].iter().take_while(|f| f.0 < high) {
+                work::add(f.1.len() as u64);
+                if f.1.iter().all(|&t| page.texts[t as usize].x >= right) {
+                    pieces.extend(f.1.iter().map(|&t| piece(&page.texts[t as usize])));
+                }
+            }
+            let values: Vec<usize> = (left.len()..pieces.len()).collect();
+            if cut::labels_beside_values(&pieces, &left, &values) {
+                parted.push((seg.id, labels));
+            }
+        }
+        for (s, labels) in parted {
+            for t in labels {
+                self.push(Source::Band, vec![PrimId::Text(t)], None, Some(s), true);
+            }
+        }
+    }
+
+    /// Parts a leaf of one line that is a value and, a cell gap right of it, a label with
+    /// its own value into the two: a print run sets a date, a wide blank and `Sheet:  4` in
+    /// one line. The first run reads as an amount or a date ([`cut::reads_as_value`]), so
+    /// it is no label of anything, and the second run alone reads as a short label, its
+    /// colon and its value ([`crate::typers::pairs::line_pair_cut`]). Each is a segment of
+    /// its own ([`Source::Band`]): the label is read with its value, the first run for
+    /// itself. A leaf of any other two runs stays whole.
+    fn values_beside_pairs(&mut self) {
+        let page = self.page;
+        let mut parted: Vec<(SegId, [u32; 2])> = Vec::new();
+        for seg in &self.all {
+            let leaf = seg.children.is_empty()
+                && seg.alternatives.is_empty()
+                && matches!(
+                    seg.source,
+                    Source::Gutter | Source::Band | Source::Rest | Source::Style
+                );
+            let [PrimId::Text(a), PrimId::Text(b)] = seg.prims[..] else {
+                continue;
+            };
+            let (Some(ra), Some(rb)) = (page.texts.get(a as usize), page.texts.get(b as usize))
+            else {
+                continue;
+            };
+            work::add(2);
+            // Left to right, as they stand.
+            let ((a, ra), (b, rb)) = if ra.x <= rb.x {
+                ((a, ra), (b, rb))
+            } else {
+                ((b, rb), (a, ra))
+            };
+            let size = ra.size.max(rb.size);
+            let one_line = (ra.y - rb.y).abs() <= cut::BASELINE_NEAR * size;
+            let apart = rb.x - (ra.x + ra.w) >= crate::extract::table::CELL_GAP * size.max(1.0);
+            if leaf
+                && one_line
+                && apart
+                && !ra.off_axis
+                && !rb.off_axis
+                && cut::reads_as_value(ra.text.trim())
+                && crate::typers::pairs::line_pair_cut(std::slice::from_ref(rb), true).is_some()
+            {
+                parted.push((seg.id, [a, b]));
+            }
+        }
+        for (s, runs) in parted {
+            for t in runs {
+                self.push(Source::Band, vec![PrimId::Text(t)], None, Some(s), true);
+            }
+        }
+    }
+
+    /// Parts a leaf at a small label that ends with a colon and is set into a data line right
+    /// before the last text of that line: a form sets `Sheet:` in its small label face into
+    /// the blank of a data line, before the number the print run puts there at the end of
+    /// the line, and the same line holds a title and a date. The label and the text after
+    /// it are a segment of their own, what stands before them on the line another one
+    /// (both [`Source::Line`]): the date is no part of `Sheet: 1`, and no value of the
+    /// title before it.
+    ///
+    /// The rule parts the line and claims no pair. The line `Sheet: 1` is kept as one
+    /// plain line in reading order, the label right before the text after it: whether that
+    /// text is the value of the label, the layout of one line does not say (the value may
+    /// stand under the label, or the text may be the cell of a column), and a plain line
+    /// states nothing that can be wrong.
+    ///
+    /// A line is looked at stretch by stretch: runs in one size (no size step,
+    /// [`cut::SIZE_STEP`], between them) that follow each other within [`PIECE_GAP`] sizes
+    /// are one stretch, however the producer cut its words into runs. The line is parted
+    /// when, by where the text stands and never by the order of the runs:
+    ///
+    /// - the stretch before the last one ends with a colon and is set a size step smaller
+    ///   than the last one, on one baseline with it (within [`cut::BASELINE_NEAR`] of the
+    ///   size of the larger face);
+    /// - the label is set into a data line: a stretch of the larger face stands before it
+    ///   on that baseline, farther from it than the text after it is.
+    ///
+    /// A line is the runs of one line number of the host. A leaf may hold more lines (a
+    /// line of codes over the data line, which the cut keeps with it): each line is looked
+    /// at for itself, and the lines that are not parted stay together, those before the
+    /// line a segment and those after it. Among other lines the text after the label must
+    /// read as an amount, a date or a number ([`cut::reads_as_value`]), what a print run
+    /// fills in: a block of lines may be running text, which is not parted at a small word
+    /// with a colon.
+    ///
+    /// A row of a table or of a grid is not parted (Task 26 fix round 6): parted, the row
+    /// would be two lines and its label would stand before the cell of another column. A
+    /// line is such a row when the line right over it or right under it in the leaf shares
+    /// its columns (see [`shares_columns`]); it stays whole, with the lines around it.
+    fn labels_before_values(&mut self) {
+        let page = self.page;
+        // The new segments, in their order: the leaf each is a part of, what it is and
+        // its runs.
+        let mut parted: Vec<(SegId, Source, Vec<u32>)> = Vec::new();
+        for seg in &self.all {
+            let leaf = seg.children.is_empty()
+                && seg.alternatives.is_empty()
+                && matches!(
+                    seg.source,
+                    Source::Gutter | Source::Band | Source::Rest | Source::Style
+                )
+                && seg.prims.len() >= 3;
+            if !leaf {
+                continue;
+            }
+            let runs: Option<Vec<(u32, &TextRun)>> = seg
+                .prims
+                .iter()
+                .map(|p| match *p {
+                    PrimId::Text(t) => page.texts.get(t as usize).map(|r| (t, r)),
+                    _ => None,
+                })
+                .collect();
+            let Some(runs) = runs else {
+                continue;
+            };
+            work::add(3 * runs.len() as u64);
+            // Runs with ink along the page.
+            if runs
+                .iter()
+                .any(|(_, r)| r.off_axis || r.text.trim().is_empty())
+            {
+                continue;
+            }
+            // The lines of the leaf, as the host numbers them, in the order of the leaf: a
+            // title beside a data line stands a little higher than the label does, and is
+            // on the line all the same.
+            // Each line with the place of its first run in the leaf.
+            let mut lines: Vec<(usize, Vec<(u32, &TextRun)>)> = Vec::new();
+            let mut by_line: Vec<usize> = (0..runs.len()).collect();
+            by_line.sort_by_key(|&k| (runs[k].1.line, k));
+            for &k in &by_line {
+                match lines.last_mut() {
+                    Some((_, l)) if l[0].1.line == runs[k].1.line => l.push(runs[k]),
+                    _ => lines.push((k, vec![runs[k]])),
+                }
+            }
+            lines.sort_by_key(|l| l.0);
+            let alone = lines.len() == 1;
+            let mut groups: Vec<(Source, Vec<u32>)> = Vec::new();
+            // The lines that are not parted so far: one segment.
+            let mut kept: Vec<u32> = Vec::new();
+            for (_, line) in &mut lines {
+                line.sort_by(|a, b| a.1.x.total_cmp(&b.1.x));
+            }
+            // The lines from the top of the leaf down, and the place of each among them.
+            let mut down: Vec<usize> = (0..lines.len()).collect();
+            down.sort_by(|&a, &b| lines[b].1[0].1.y.total_cmp(&lines[a].1[0].1.y));
+            let mut place = vec![0usize; lines.len()];
+            for (p, &l) in down.iter().enumerate() {
+                place[l] = p;
+            }
+            for (k, (_, line)) in lines.iter().enumerate() {
+                let parts = label_parts(line, alone).filter(|_| {
+                    // A row among the rows of a table stays whole.
+                    let beside = [place[k].checked_sub(1), Some(place[k] + 1)];
+                    !beside
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|p| down.get(p))
+                        .any(|&o| shares_columns(line, &lines[o].1))
+                });
+                let Some([before, labelled]) = parts else {
+                    kept.extend(line.iter().map(|r| r.0));
+                    continue;
+                };
+                if !kept.is_empty() {
+                    groups.push((Source::Band, std::mem::take(&mut kept)));
+                }
+                // The head of the line claims no pair either: its last stretch (a date after
+                // a title or a code) is no value of the stretch before it.
+                groups.push((Source::Line, before));
+                groups.push((Source::Line, labelled));
+            }
+            // No line was parted: the leaf stays as it is.
+            if groups.is_empty() {
+                continue;
+            }
+            if !kept.is_empty() {
+                groups.push((Source::Band, kept));
+            }
+            parted.extend(groups.into_iter().map(|g| (seg.id, g.0, g.1)));
+        }
+        for (s, source, runs) in parted {
+            let prims = runs.into_iter().map(PrimId::Text).collect();
+            self.push(source, prims, None, Some(s), true);
+        }
     }
 
     fn extent(&self, prims: &[PrimId]) -> Bounds {
@@ -892,7 +1181,7 @@ impl Builder<'_> {
             let order: Vec<u32> = group.iter().map(|&k| ids[k]).collect();
             let mut prims: Vec<PrimId> = order.iter().map(|&t| PrimId::Text(t)).collect();
             prims.sort_unstable();
-            let id = self.push(source_of(&found.splits, g), prims, None, Some(s), true);
+            let id = self.push(source_of(&found, g), prims, None, Some(s), true);
             if found.kept.binary_search(&g).is_ok() {
                 self.short.push(id);
             }
@@ -1052,7 +1341,7 @@ impl Builder<'_> {
         for (g, group) in found.groups.iter().enumerate() {
             let mut prims: Vec<PrimId> = group.iter().map(|&k| PrimId::Text(ids[k])).collect();
             prims.sort_unstable();
-            let id = self.push(source_of(&found.splits, g), prims, None, Some(s), false);
+            let id = self.push(source_of(&found, g), prims, None, Some(s), false);
             if found.kept.binary_search(&g).is_ok() {
                 self.short.push(id);
             }
@@ -1123,9 +1412,13 @@ fn drawing_parts(others: &[PrimId]) -> Vec<Vec<PrimId>> {
     out
 }
 
-/// The source of group `g` of a cut with `splits`: the split before it; the first group
-/// takes the split after it.
-fn source_of(splits: &[Split], g: usize) -> Source {
+/// The source of group `g` of the cut `found`: a cell of labels over values, else the split
+/// before it; the first group takes the split after it.
+fn source_of(found: &cut::Cut, g: usize) -> Source {
+    if found.cells.binary_search(&g).is_ok() {
+        return Source::Cell;
+    }
+    let splits = &found.splits;
     let split = if g == 0 {
         splits.first()
     } else {
@@ -1331,6 +1624,112 @@ fn rules_of(page: &PageIn, prims: &[PrimId]) -> Vec<Line> {
     drawn::merged(out)
 }
 
+/// The stretches of one line `runs` (its runs with ink, left to right), each the places of
+/// its runs in `runs`: runs in one size (no size step, [`cut::SIZE_STEP`], between them) that
+/// follow each other within [`PIECE_GAP`] sizes are one stretch.
+fn stretches_of(runs: &[(u32, &TextRun)]) -> Vec<std::ops::Range<usize>> {
+    let mut stretches: Vec<std::ops::Range<usize>> = Vec::new();
+    for k in 0..runs.len() {
+        let r = runs[k].1;
+        let goes_on = stretches.last().is_some_and(|s| {
+            let (head, last) = (runs[s.start].1, runs[k - 1].1);
+            r.size < cut::SIZE_STEP * head.size
+                && head.size < cut::SIZE_STEP * r.size
+                && r.x - (last.x + last.w) <= PIECE_GAP * head.size.max(r.size)
+        });
+        match stretches.last_mut() {
+            Some(s) if goes_on => s.end = k + 1,
+            _ => stretches.push(k..k + 1),
+        }
+    }
+    work::add(runs.len() as u64);
+    stretches
+}
+
+/// The two parts of one line `runs` (its runs with ink, left to right) at a small label that
+/// ends with a colon and is set into the line right before its last stretch (see
+/// `labels_before_values`): the run ids of what stands before the label, and those of the
+/// label with the stretch after it; `None` when the line holds no such label. With `alone`
+/// the line is the only one of its leaf; else the last stretch must read as an amount, a
+/// date or a number.
+fn label_parts(runs: &[(u32, &TextRun)], alone: bool) -> Option<[Vec<u32>; 2]> {
+    let stretches = stretches_of(runs);
+    if stretches.len() < 3 {
+        return None;
+    }
+    // The one place a label can have: before the last stretch, after another one.
+    let n = stretches.len() - 2;
+    let (label, last) = (&stretches[n], &stretches[n + 1]);
+    let (small, large) = (runs[label.start].1, runs[last.start].1);
+    // The white space between stretch `k` and the next one.
+    let gap = |k: usize| {
+        let end = runs[stretches[k].end - 1].1;
+        runs[stretches[k + 1].start].1.x - (end.x + end.w)
+    };
+    let near = cut::BASELINE_NEAR * large.size;
+    let step = cut::SIZE_STEP * small.size;
+    // The words after the label read as an amount, a date or a number.
+    let filled = || {
+        let text: Vec<&str> = runs[last.clone()].iter().map(|r| r.1.text.trim()).collect();
+        cut::reads_as_value(&text.join(" "))
+    };
+    // A stretch of a larger face than the label before it on the baseline of the last one.
+    let on_data_line = || {
+        stretches[..n].iter().any(|s| {
+            let head = runs[s.start].1;
+            head.size >= step && (head.y - large.y).abs() <= near
+        })
+    };
+    let parts = (small.y - large.y).abs() <= near
+        && runs[label.end - 1].1.text.trim_end().ends_with(':')
+        && large.size >= step
+        && gap(n) < gap(n - 1)
+        && on_data_line()
+        && (alone || filled());
+    let ids = |from: usize, to: usize| -> Vec<u32> {
+        runs[stretches[from].start..stretches[to - 1].end]
+            .iter()
+            .map(|r| r.0)
+            .collect()
+    };
+    parts.then(|| [ids(0, n), ids(n, n + 2)])
+}
+
+/// Whether the line `other` shares the columns of the line `line` that holds a small label
+/// before its last stretch (see [`label_parts`]; both are the runs with ink of one line, left
+/// to right): `other` has text in the column of the stretch after the label and in the column
+/// of a stretch before it, so `line` is a row of a table or of a grid whose rows or titles
+/// `other` is one of. Two stretches stand in one column when their left or their right ends
+/// are within [`cut::ROW_EDGE`] of the size of the stretch of `line`. One shared column is no
+/// table: a line of codes over a data line ends where the data line ends.
+fn shares_columns(line: &[(u32, &TextRun)], other: &[(u32, &TextRun)]) -> bool {
+    let mine = stretches_of(line);
+    if mine.len() < 3 {
+        return false;
+    }
+    let ends = |runs: &[(u32, &TextRun)], s: &std::ops::Range<usize>| {
+        let (first, last) = (runs[s.start].1, runs[s.end - 1].1);
+        (first.x, last.x + last.w)
+    };
+    let (mut lefts, mut rights): (Vec<f32>, Vec<f32>) =
+        stretches_of(other).iter().map(|s| ends(other, s)).unzip();
+    lefts.sort_by(f32::total_cmp);
+    rights.sort_by(f32::total_cmp);
+    work::add((line.len() + other.len()) as u64);
+    // Whether one of the sorted ends `at` stands within `near` of `x`.
+    let has = |at: &[f32], x: f32, near: f32| {
+        let k = at.partition_point(|e| *e < x - near);
+        at.get(k).is_some_and(|e| *e <= x + near)
+    };
+    let shared = |s: &std::ops::Range<usize>| {
+        let (left, right) = ends(line, s);
+        let near = cut::ROW_EDGE * line[s.start].1.size;
+        has(&lefts, left, near) || has(&rights, right, near)
+    };
+    let label = mine.len() - 2;
+    shared(&mine[label + 1]) && mine[..label].iter().any(shared)
+}
+
 /// A text run as a piece of the cut.
 fn piece(r: &TextRun) -> Piece {
     let inked = r.text.chars().any(|c| !c.is_whitespace());
@@ -1345,7 +1744,7 @@ fn piece(r: &TextRun) -> Piece {
         runs: 1,
         colon: r.text.trim_end().ends_with(':'),
         value: cut::reads_as_value(&r.text),
-        number: cut::reads_as_number(&r.text),
+        number: cut::whole_number(&r.text),
         boxed: None,
         rows: 1,
         // A run stands where the host says its text stands: a host that hands the advance
@@ -1376,8 +1775,11 @@ fn pieces_of(texts: &[TextRun], ids: &[u32]) -> (Vec<Piece>, Vec<Vec<usize>>) {
     let mut members: Vec<Vec<usize>> = Vec::new();
     // Where the last run of the open piece ends, white space too.
     let mut end = f32::MIN;
+    // How the ink of the open piece reads so far.
+    let mut reading = None;
     for k in order {
         let one = piece(run(k));
+        let text = &run(k).text;
         if let (Some(p), Some(m)) = (pieces.last_mut(), members.last_mut())
             && p.line == one.line
             && one.bounds.x0 - end <= PIECE_GAP * p.size.max(one.size)
@@ -1392,20 +1794,27 @@ fn pieces_of(texts: &[TextRun], ids: &[u32]) -> (Vec<Piece>, Vec<Vec<usize>>) {
                 // The first ink of the piece: it stands where its ink stands.
                 let (chars, runs) = (p.chars + one.chars, p.runs);
                 *p = Piece { chars, runs, ..one };
+                reading = Some(cut::Reading::of(text, one.value));
             } else if one.inked {
                 p.bounds = union(p.bounds, one.bounds);
                 p.size = p.size.max(one.size);
                 p.bold = p.bold && one.bold;
                 p.chars += one.chars;
                 p.colon = one.colon;
-                p.value = p.value && one.value;
-                p.number = p.number && one.number;
+                // The piece reads the same in one run and in several: a currency and its
+                // figures in two runs are an amount, a number goes on with its digits.
+                let r = reading.map_or(cut::Reading::of(text, one.value), |r| {
+                    r.goes_on(text, one.value)
+                });
+                (p.value, p.number) = (r.value, r.number);
+                reading = Some(r);
             }
             p.runs += 1;
             m.push(k);
             continue;
         }
         end = one.bounds.x1;
+        reading = one.inked.then(|| cut::Reading::of(text, one.value));
         pieces.push(one);
         members.push(vec![k]);
     }
@@ -1781,6 +2190,79 @@ fn cover_problem(s: &Segments, page: &PageIn) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// Task 26 fix round 6: a line with a small colon label before its last stretch is a row
+    /// of a table when another line has text in the column of the stretch after the label
+    /// and in a column of a stretch before it, by their left or their right ends within
+    /// `ROW_EDGE` of the text size. One shared column, on either side of the label, is no
+    /// table, and a line of codes that ends where a data line ends shares one.
+    #[test]
+    fn a_line_shares_the_columns_of_a_row_by_a_column_on_each_side_of_its_label() {
+        let run = |text: &str, x: f32, size: f32| TextRun {
+            text: text.into(),
+            x,
+            y: 700.0,
+            w: 0.6 * size * text.chars().count() as f32,
+            h: size,
+            size,
+            font: 0,
+            font_kind: crate::input::FontKind::Unknown,
+            bold: false,
+            italic: false,
+            color: None,
+            shift: crate::input::Shift::Base,
+            line: 0,
+            off_axis: false,
+            gaps: Vec::new(),
+        };
+        let line = |parts: &[(&str, f32, f32)]| -> Vec<TextRun> {
+            parts.iter().map(|&(t, x, size)| run(t, x, size)).collect()
+        };
+        let shares = |a: &[TextRun], b: &[TextRun]| {
+            let a: Vec<(u32, &TextRun)> = (0u32..).zip(a).collect();
+            let b: Vec<(u32, &TextRun)> = (0u32..).zip(b).collect();
+            shares_columns(&a, &b)
+        };
+        // The amount `12,50` stands from 300 to 330.
+        let row = line(&[
+            ("1", 50.0, 10.0),
+            ("Widget", 90.0, 10.0),
+            ("Part no.:", 250.0, 7.0),
+            ("12,50", 300.0, 10.0),
+        ]);
+        // A second row, its amount set to the right end of the column; a row of titles.
+        let amount = |x: f32| line(&[("2", 50.0, 10.0), ("Gadget", 90.0, 10.0), ("8,00", x, 10.0)]);
+        assert!(shares(&row, &amount(306.0)));
+        assert!(shares(
+            &row,
+            &line(&[
+                ("Pos", 50.0, 10.0),
+                ("Description", 90.0, 10.0),
+                ("Amount", 300.0, 10.0)
+            ])
+        ));
+        // `ROW_EDGE` of the size of 10 is 2.5: an amount that ends 2.4 off is in the column,
+        // one that ends 2.6 off (and starts elsewhere) is not.
+        assert!(shares(&row, &amount(306.0 + 2.4)));
+        assert!(!shares(&row, &amount(306.0 + 2.6)));
+        assert!(shares(&row, &amount(306.0 - 2.4)));
+        assert!(!shares(&row, &amount(306.0 - 2.6)));
+        // One column on one side of the label: the amount's alone (a line of codes that ends
+        // where the row ends), or the columns before the label alone.
+        assert!(!shares(&row, &line(&[("AB/12 345", 276.0, 10.0)])));
+        assert!(!shares(
+            &row,
+            &line(&[("2", 50.0, 10.0), ("Gadget", 90.0, 10.0)])
+        ));
+        // The label's own column does not count: a line with text under the label and under
+        // the amount shares one column.
+        assert!(!shares(
+            &row,
+            &line(&[("4711", 250.0, 10.0), ("8,00", 306.0, 10.0)])
+        ));
+        // A line of two stretches holds no label set into it.
+        assert!(!shares(&row[2..], &amount(306.0)));
+    }
+
     /// The nesting as it was walked before the index: from the page down, at each place the
     /// first of the boxes nested there, in the order they came, that holds the new box.
     fn walked_down(all: &[Bounds]) -> Vec<usize> {
@@ -1903,5 +2385,69 @@ mod tests {
         assert_eq!(all, [frame, twin, left, raised, right, small]);
         assert_eq!(holders(&all), [0, 1, 2, 2, 4, 3]);
         assert_eq!(walked_down(&all), [0, 1, 2, 2, 4, 3]);
+    }
+
+    /// Task 26 fix round 4 (review 4 I1, M1): a piece reads the same in one run and in
+    /// several. The word or sign of a currency before the figures, in a run of its own,
+    /// says nothing yet and the next run decides; after the figures it goes on with the
+    /// amount; a whole number goes on with its next digits.
+    #[test]
+    fn a_piece_reads_the_same_in_one_run_and_in_several() {
+        // The one piece of `runs`, set one after the other with a blank between them
+        // (`touch`: with none): whether it reads as a value, and its whole number.
+        let read = |runs: &[&str], touch: bool| {
+            let mut x = 40.0;
+            let texts: Vec<TextRun> = runs
+                .iter()
+                .map(|t| {
+                    let w = 6.0 * t.chars().count() as f32;
+                    let run = TextRun {
+                        text: t.to_string(),
+                        x,
+                        y: 700.0,
+                        w,
+                        h: 10.0,
+                        size: 10.0,
+                        font: 1,
+                        font_kind: crate::FontKind::Proportional,
+                        bold: false,
+                        italic: false,
+                        color: None,
+                        shift: crate::Shift::Base,
+                        line: 0,
+                        off_axis: false,
+                        gaps: Vec::new(),
+                    };
+                    x += w + if touch { 0.0 } else { 3.0 };
+                    run
+                })
+                .collect();
+            let ids: Vec<u32> = (0..texts.len() as u32).collect();
+            let (pieces, _) = pieces_of(&texts, &ids);
+            assert_eq!(pieces.len(), 1, "{runs:?}");
+            (pieces[0].value, pieces[0].number)
+        };
+        for (runs, one, value) in [
+            (&["CHF", "80"][..], "CHF 80", true),
+            (&["$", "80"], "$ 80", true),
+            (&["CHF", "1.200,50"], "CHF 1.200,50", true),
+            (&["80", "CHF"], "80 CHF", true),
+            (&["CHF", "Total"], "CHF Total", false),
+            (&["TEUR", "80"], "TEUR 80", false),
+            (&["CHF", "CHF"], "CHF CHF", false),
+            (&["Total", "80"], "Total 80", false),
+        ] {
+            assert_eq!(read(runs, false), (value, None), "{runs:?}");
+            assert_eq!(read(&[one], false), (value, None), "{one}");
+        }
+        // A blank run between the currency and its figures is no ink and decides nothing.
+        assert_eq!(read(&["CHF", " ", "80"], true), (true, None));
+        assert_eq!(read(&["CHF", " ", "net"], true), (false, None));
+        // M1: a whole number in two runs is the number of its digits in a row; a currency
+        // before it makes it an amount, which is no whole number.
+        assert_eq!(read(&["20", "24"], true), (true, Some(2024)));
+        assert_eq!(read(&["2024"], true), (true, Some(2024)));
+        assert_eq!(read(&["20", "2a"], true), (false, None));
+        assert_eq!(read(&["$", "2024"], true), (true, None));
     }
 }

@@ -6,7 +6,7 @@
 //! of its own on a business page, named by its class. All text and values are invented.
 
 use crate::axes::{Axes, Look, Scale, Shape, Sheet, Variant};
-use crate::common::{logo, show};
+use crate::common::{font_width, logo, show};
 use crate::docs::{DOC_NEXT, RULED, Span, right, rule, sheet};
 
 /// The looks of [`RULED`] whose rules show where their segments break: a dashed rule is all
@@ -1127,7 +1127,8 @@ fn item_rows_on_a_letter_page(v: &Variant, carried: bool) -> Sheet {
         // The rows in order, each item before its own price and before the next item: a
         // table is not asked for (no titles), a read by columns is refused. The row carried
         // over is not in the chain: its label and its amount stand on the two sides of the
-        // page's gutter, a label and its value apart (label/value groups, Task 26).
+        // page's gutter, two lines of the text pass (see the pin of the larger face in
+        // known.rs, owner Task 36a).
         let mut rows = Vec::new();
         for item in LISTED_ITEMS {
             rows.extend([item[1].to_string(), item[4].to_string()]);
@@ -1252,9 +1253,700 @@ fn totals_between_rules_in_pieces(v: &Variant) -> Sheet {
     s
 }
 
+/// The rows of [`labels_with_a_shared_value_column`]: a label and its value.
+const VALUE_COLUMN: [(&str, &str); 5] = [
+    ("Order", "4711"),
+    ("Customer reference", "20481"),
+    ("Depot", "D-17"),
+    ("Ticket", "QX-2026-0042"),
+    ("Parcels", "12"),
+];
+
+/// A1 (Task 26): five lines of a label and its value, the values at one left edge. One label
+/// is wider than the others and ends a word space before the value column, so its line has no
+/// gap that parts it: the value column's shared left edge parts it, never the gap. Each label
+/// reads with its own value.
+fn labels_with_a_shared_value_column(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let size = 9.0 * k;
+    let pitch = 1.3 * size;
+    let (x0, top) = (40.0, 640.0);
+    let widest = VALUE_COLUMN
+        .iter()
+        .map(|(l, _)| font_width(plain, l, size))
+        .fold(0.0f32, f32::max);
+    let x_value = x0 + widest + font_width(plain, " ", size);
+    let mut t = String::new();
+    for (n, (label, value)) in VALUE_COLUMN.iter().enumerate() {
+        let y = top - pitch * n as f32;
+        t += &show(plain, size, x0, y, label);
+        t += &show(plain, size, x_value, y, value);
+    }
+    let bottom = top - pitch * (VALUE_COLUMN.len() - 1) as f32;
+    let mut s = sheet(v, t, bottom - 70.0, Some(Span { top, bottom }));
+    for (label, value) in VALUE_COLUMN {
+        s.built.fields.push((label, Ok(Some(value))));
+    }
+    // The lines are a block of labels and values: each row a label and its value, the line
+    // of the widest label cut at the left edge the values share.
+    s.want.kinds.push(("Order".into(), "label_value"));
+    s.want.kinds.push(("Parcels".into(), "label_value"));
+    s.want.tables.push(
+        VALUE_COLUMN
+            .iter()
+            .map(|(l, v)| vec![l.to_string(), v.to_string()])
+            .collect(),
+    );
+    s
+}
+
+/// A2 (Task 26): two lines of small labels, each over the line of its values, with no rules.
+/// The values start under their labels, a little indented; the last label has no value under
+/// it. A value belongs to the label it stands under (their widths overlap), and the label
+/// with nothing under it keeps an empty value: no value moves to it.
+fn two_labels_over_their_values(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let (small, size) = (7.5 * k, 9.0 * k);
+    let (x0, x1, top) = (40.0, 200.0, 640.0);
+    let indent = 0.3 * size;
+    // The baselines: a value 1.2 sizes under its labels, the next labels 1.7 sizes lower.
+    let ys = [top, top - 1.2 * size, top - 2.9 * size, top - 4.1 * size];
+    let t = show(plain, small, x0, ys[0], "Member code")
+        + &show(plain, small, x1, ys[0], "Issued on / at")
+        + &show(plain, size, x0 + indent, ys[1], "20481")
+        + &show(plain, size, x1 + indent, ys[1], "03.04.2026 / 10:30")
+        + &show(plain, small, x0, ys[2], "Policy number")
+        + &show(plain, small, x1, ys[2], "Earlier name")
+        + &show(plain, size, x0 + indent, ys[3], "12345678A012");
+    let bottom = ys[3];
+    let mut s = sheet(v, t, bottom - 70.0, Some(Span { top, bottom }));
+    for (label, value) in [
+        ("Member code", Some("20481")),
+        ("Issued on / at", Some("03.04.2026 / 10:30")),
+        ("Policy number", Some("12345678A012")),
+        ("Earlier name", None),
+    ] {
+        s.built.fields.push((label, Ok(value)));
+    }
+    s.want.kinds.push(("Member code".into(), "label_value"));
+    s.want.kinds.push(("Earlier name".into(), "label_value"));
+    s
+}
+
+/// H1 (Task 26 part 3a): a column of field rows in the right half of a letter page, with no
+/// rules. Small labels in a proportional face stand over values in a larger monospaced face,
+/// the values indented a little. The first value is padded with blanks as far as the second
+/// value, so its piece reaches under the second label, but its ink does not. The second row
+/// has one value under two labels, three long labels follow with no value under them, and one
+/// more label with its value stands alone further down the column.
+fn padded_values_under_labels_in_a_column(v: &Variant) -> Sheet {
+    /// The two values of the first row as a print run sets them: one string, the first value
+    /// padded with blanks to the place of the second.
+    const PADDED_ROW: &str = "20481         03.04.2026 / 10:30";
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let (small, size) = (8.6 * k, 9.7 * k);
+    // The monospaced face: every glyph 0.6 sizes wide.
+    let glyph = 0.6 * size;
+    let (x0, top) = (324.6, 700.0);
+    let indent = 0.32 * size;
+    // A row of labels every 2.7 sizes, its values 1.12 sizes under it.
+    let (row, drop) = (2.7 * size, 1.12 * size);
+    let y = |n: usize| top - row * n as f32;
+    // The second value starts 14 glyphs right of the first, the second label a little left of
+    // it; the first value is five digits and nine blanks.
+    let x1 = x0 + indent + 14.0 * glyph;
+    let t = show(plain, small, x0, y(0), "Staff-No.")
+        + &show(
+            plain,
+            small,
+            x1 - indent,
+            y(0),
+            "Department-/Registration number",
+        )
+        + &show("FD", size, x0 + indent, y(0) - drop, PADDED_ROW)
+        + &show(plain, small, x0, y(1), "Membership number")
+        + &show(plain, small, x0 + 14.4 * size, y(1), "Earlier name")
+        + &show("FD", size, x0 + indent, y(1) - drop, "12345678A012")
+        + &show(
+            plain,
+            small,
+            x0,
+            y(2),
+            "Member of a pension scheme [see note 4]",
+        )
+        + &show(
+            plain,
+            small,
+            x0,
+            y(3),
+            "Paid by another office [see note 5]",
+        )
+        + &show(plain, small, x0, y(4), "Leave without pay [see note 6]")
+        + &show(plain, small, x0, y(7), "Contribution group")
+        + &show("FD", size, x0 + indent, y(7) - drop, "11110000");
+    let bottom = y(7) - drop;
+    let mut s = sheet(v, t, bottom - 70.0, Some(Span { top, bottom }));
+    // The padded line is drawn as one string and read as its two values.
+    s.once.retain(|t| t != PADDED_ROW);
+    s.once.extend(
+        PADDED_ROW
+            .split("  ")
+            .filter(|t| !t.is_empty())
+            .map(|t| t.trim().to_string()),
+    );
+    for (label, value) in [
+        ("Staff-No.", Some("20481")),
+        (
+            "Department-/Registration number",
+            Some("03.04.2026 / 10:30"),
+        ),
+        ("Membership number", Some("12345678A012")),
+        ("Earlier name", None),
+        ("Contribution group", Some("11110000")),
+    ] {
+        s.built.fields.push((label, Ok(value)));
+    }
+    s.want.kinds.push(("Staff-No.".into(), "label_value"));
+    s.want.kinds.push(("Earlier name".into(), "label_value"));
+    s.want
+        .kinds
+        .push(("Contribution group".into(), "label_value"));
+    // No long label takes the value of another row.
+    for long in ["Member of a pension scheme", "Leave without pay"] {
+        for value in ["12345678A012", "11110000"] {
+            s.want.no_pairs.push((long.into(), value.into()));
+        }
+    }
+    s
+}
+
+/// H2 (Task 26 part 3a): the head block at the top right of a letter page, three lines set
+/// close under each other (0.9 sizes apart) and flush right. The first is one padded string
+/// in the monospaced face (a reference, blanks, a number), kept as a line: the number is
+/// another cell, not more of the reference. The second and the third are a
+/// small label that ends in a colon with its value in the monospaced face to the right of it;
+/// the last value is one digit at the right edge, far from its label. A column of field rows
+/// (as in [`padded_values_under_labels_in_a_column`]) starts under the block.
+fn colon_labels_in_a_head_block(v: &Variant) -> Sheet {
+    const HEAD: &str = "REF: ABC/XYZ   20481/55012/77310";
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let (small, size) = (8.6 * k, 9.7 * k);
+    let glyph = 0.6 * size;
+    // The right edge of the block, and the left edge of its two labels: where the number of
+    // the first line starts, less a third of a size.
+    let end = 548.9;
+    let labels = end - 17.0 * glyph - 0.32 * size;
+    let top = 760.0;
+    let line = 0.9 * size;
+    let mono = |text: &str, y: f32| show("FD", size, end - glyph * text.len() as f32, y, text);
+    let (x0, indent) = (324.6, 0.32 * size);
+    // The field rows under the block: 3.4 sizes under its last line.
+    let row = top - 2.0 * line - 3.4 * size;
+    let drop = 1.12 * size;
+    let t = mono(HEAD, top)
+        + &show(plain, small, labels, top - line, "Sheet:")
+        + &mono("03.04.2026", top - line)
+        + &show(plain, small, labels, top - 2.0 * line, "Pages:")
+        + &mono("4", top - 2.0 * line)
+        + &show(plain, small, x0, row, "Staff-No.")
+        + &show(plain, small, x0 + 14.0 * glyph, row, "Department number")
+        + &show("FD", size, x0 + indent, row - drop, "66120")
+        + &show(
+            "FD",
+            size,
+            x0 + indent + 14.0 * glyph,
+            row - drop,
+            "17.08.2026",
+        )
+        + &show(plain, small, x0, row - 2.7 * size, "Membership number")
+        + &show(
+            "FD",
+            size,
+            x0 + indent,
+            row - 2.7 * size - drop,
+            "12345678A012",
+        );
+    let bottom = row - 2.7 * size - drop;
+    let mut s = sheet(v, t, bottom - 70.0, Some(Span { top, bottom }));
+    s.once.retain(|t| t != HEAD);
+    s.once
+        .extend(["REF:", "ABC/XYZ", "20481/55012/77310"].map(String::from));
+    for (label, value) in [
+        ("Staff-No.", "66120"),
+        ("Department number", "17.08.2026"),
+        ("Membership number", "12345678A012"),
+    ] {
+        s.built.fields.push((label, Ok(Some(value))));
+    }
+    // The two lines of a label and its value are one list of pairs, each label with the
+    // value of its own line. The first line is kept as a line: its first piece is a label
+    // with a value already, and the number after the gap is another cell, which is no more
+    // of that value and no value of a label under it.
+    s.want.table(
+        rows_of(&[["Sheet:", "03.04.2026"], ["Pages:", "4"]]),
+        "label_value",
+    );
+    for label in ["REF:", "Sheet:", "Pages:"] {
+        s.want
+            .no_pairs
+            .push((label.into(), "20481/55012/77310".into()));
+    }
+    s.want
+        .no_pairs
+        .push(("REF:".into(), "ABC/XYZ 20481/55012/77310".into()));
+    s.want.no_pairs.push(("Sheet:".into(), "4".into()));
+    s.want.no_pairs.push(("Pages:".into(), "03.04.2026".into()));
+    s.want.no_pairs.push(("Pages:".into(), "66120".into()));
+    s
+}
+
+/// H3 (Task 26 part 3a): one line of a print run in the monospaced face: a date, a wide
+/// blank, then a label that ends with a colon and its value two blanks after it. The label
+/// reads with its value; the date is no label of anything and stands for itself.
+fn a_date_beside_a_colon_label_on_one_line(v: &Variant) -> Sheet {
+    const LINE: &str = "03.04.2026                         Sheet:  4";
+    let size = 9.7 * v.k();
+    let top = 640.0;
+    let t = show("FD", size, 40.0, top, LINE);
+    // The line stands alone: what follows it starts four sizes lower. (Right over a table
+    // without rules, 2.4 sizes from its titles, the line is taken for a row of it and the
+    // table is lost to paragraphs, with and without the rule of this shape: another class.)
+    let bottom = top - 4.0 * size;
+    let mut s = sheet(v, t, bottom - 70.0, Some(Span { top, bottom }));
+    s.once.retain(|t| t != LINE);
+    s.once
+        .extend(["03.04.2026", "Sheet:", "4"].map(String::from));
+    s.built.fields.push(("Sheet:", Ok(Some("4"))));
+    s.want.kinds.push(("Sheet:".into(), "label_value"));
+    s.want.no_pairs.push(("03.04.2026".into(), "Sheet:".into()));
+    s.want.no_pairs.push(("03.04.2026".into(), "4".into()));
+    s
+}
+
+/// Task 26 part 3c-1 (the carried fixed-width blocks): lines of a listing in the monospaced
+/// face, each a label, blanks up to a column, a colon and the value. The writer sets a line
+/// whose label is padded in two runs, the label with one blank and then the colon with the
+/// value (`Currency ` and `: EUR`), and a line whose label fills the column in one run
+/// (`Profile in use : basic-2017`, `Global number: 4000001123452 (GLN)`). The colon that
+/// opens the second run says the first is a label as a colon at its end does when the line
+/// next to it has its colon in the same column, as the lines of a block of the listing have
+/// (fix round 4): every line of the two blocks reads as a label and its value. The last
+/// line is alone, with no line to share its column of colons: it is a pair by its value, a
+/// date.
+fn fixed_width_colon_lines(v: &Variant) -> Sheet {
+    let size = 9.75 * v.k();
+    let pitch = 11.25 * v.k();
+    // The advance of a character of the monospaced face.
+    let step = 0.6 * size;
+    let top = 640.0;
+    let mut t = String::new();
+    // Each line: its label, the column of its colon in characters when the label is padded,
+    // and the value.
+    let blocks: [&[(&str, Option<usize>, &str)]; 3] = [
+        &[
+            ("Profile in use :", None, "basic-2017"),
+            ("Currency", Some(15), "EUR"),
+        ],
+        &[
+            ("Number", Some(13), "549910"),
+            ("Global number:", None, "4000001123452 (GLN)"),
+        ],
+        &[("Delivery date", Some(30), "05.03.2018")],
+    ];
+    let mut y = top;
+    let mut table: Vec<Vec<String>> = Vec::new();
+    for block in blocks {
+        for &(label, column, value) in block {
+            if let Some(column) = column {
+                let x = 40.0 + step * column as f32;
+                t += &show("FD", size, 40.0, y, &format!("{label} "));
+                t += &show("FD", size, x, y, &format!(": {value}"));
+                table.push(vec![format!("{label} :"), value.to_string()]);
+            } else {
+                t += &show("FD", size, 40.0, y, &format!("{label} {value}"));
+                table.push(vec![label.to_string(), value.to_string()]);
+            }
+            y -= pitch;
+        }
+        y -= pitch;
+    }
+    let bottom = y - 2.0 * size;
+    let mut s = sheet(v, t, bottom - 70.0, Some(Span { top, bottom }));
+    // One list of pairs: the blocks stand a blank line apart at one left edge.
+    s.want.table(table, "label_value");
+    s
+}
+
+/// Shows each of `parts` as a text object of its own, one after the other from `(x, y)`: the
+/// touching runs a form template sets a label in, word by word.
+fn show_parts(font: &str, size: f32, x: f32, y: f32, parts: &[&str]) -> String {
+    let mut out = String::new();
+    let mut at = x;
+    for part in parts {
+        out += &show(font, size, at, y, part);
+        at += font_width(font, part, size);
+    }
+    out
+}
+
+/// The words of `text`, each with the blank after it: the parts [`show_parts`] sets a label in.
+fn word_parts(text: &str) -> Vec<&str> {
+    text.split_inclusive(' ').collect()
+}
+
+/// H1 as a print run draws it (Task 26 fix 3a): the field rows of
+/// [`padded_values_under_labels_in_a_column`], but every line of values is one bold monospaced
+/// run that starts at the left margin of the page with blanks as far as the column, each label
+/// is set word by word in runs that touch, and an address block in the monospaced face stands
+/// left of the column under a small sender line. Four long labels with no value stand between
+/// the rows and the last field, which stands alone in the next row.
+///
+/// With `larger` the values are set as the owner's form sets them, in 9.7 points bold over a
+/// body of 7 (Task 26 fix round 2, a pin): the bold value line is then a heading to the
+/// levels of the page.
+fn value_lines_from_the_page_margin(v: &Variant, larger: bool) -> Sheet {
+    /// The blanks from the first value to the second one.
+    const SECOND: usize = 14;
+    // The blanks from the margin to the column of values: the column starts at the same
+    // place at both sizes (49 blanks of 9.7 points, as on the owner's form, 67 of 7).
+    let lead: usize = if larger { 49 } else { 67 };
+    const LABELS: [&str; 9] = [
+        "Staff-No.",
+        "Department-/Registration number",
+        "Membership number",
+        "Earlier name",
+        "Member of a pension scheme [see note 4]",
+        "Paid by another office [see note 5]",
+        "Leave without pay [see note 6]",
+        "Second job at another place [see note 7]",
+        "Rates Category Of Fund",
+    ];
+    let (plain, _) = v.faces();
+    // The values in the size of the letter's body (7 points at 1), the labels 8.6 to their
+    // 9.7. Set larger than the body (`larger`: 9.7 over 7), a bold value is a heading to the
+    // levels of the page and the title of a page with no other: another class, pinned.
+    let size = if larger { 9.7 } else { 7.0 } * v.k();
+    let small = size * 8.6 / 9.7;
+    // The monospaced face: every glyph 0.6 sizes wide.
+    let glyph = 0.6 * size;
+    let (margin, top) = (42.52, 744.9);
+    // The values stand 0.32 sizes right of their labels.
+    let ink = margin + lead as f32 * glyph;
+    let x0 = ink - 0.32 * size;
+    let x1 = ink + SECOND as f32 * glyph - 0.32 * size;
+    // A row of labels every 2.7 sizes, its values 1.12 sizes under it.
+    let (row, drop) = (2.7 * size, 1.12 * size);
+    let y = |n: usize| top - row * n as f32;
+    let label = |x: f32, n: usize, text: &str| show_parts(plain, small, x, y(n), &word_parts(text));
+    let line = |values: &[(usize, &str)]| {
+        let mut text = String::new();
+        for (at, value) in values {
+            text += &" ".repeat(lead + at - text.chars().count());
+            text += value;
+        }
+        text
+    };
+    let rows = [
+        line(&[(0, "20481"), (SECOND, "03.04.2026 / 10:30")]),
+        line(&[(0, "12345678A012")]),
+        line(&[(0, "11110000")]),
+    ];
+    let mut t = label(x0, 0, LABELS[0])
+        + &label(x1, 0, LABELS[1])
+        + &show("FDB", size, margin, y(0) - drop, &rows[0])
+        + &label(x0, 1, LABELS[2])
+        + &label(x0 + 14.4 * size, 1, LABELS[3])
+        + &show("FDB", size, margin, y(1) - drop, &rows[1]);
+    for n in 2..6 {
+        t += &label(x0, n, LABELS[n + 2]);
+    }
+    t += &label(x0, 6, LABELS[8]);
+    t += &show("FDB", size, margin, y(6) - drop, &rows[2]);
+    // Left of the column: a sender line in a very small face on the baseline of the first long
+    // label, and under it the address, its first line smaller than the others.
+    let (tiny, lesser, larger) = (0.5 * size, 0.8 * size, 1.2 * size);
+    let sender = "Oakfield Fund, Mill Lane 3, 12345 Sampletown";
+    let address = ["Mr", "Robin Sample", "Harbour Road 12", "12345 Sampletown"];
+    t += &show("FD", tiny, 60.0, y(2), sender);
+    let first = y(2) - 1.9 * size;
+    t += &show("FDB", lesser, 60.0, first, address[0]);
+    for (n, text) in address.iter().enumerate().skip(1) {
+        t += &show("FDB", larger, 60.0, first - 1.1 * larger * n as f32, text);
+    }
+    let bottom = y(6) - drop;
+    let mut s = sheet(v, t, bottom - 70.0, Some(Span { top, bottom }));
+    // The labels are drawn word by word and the lines of values with their blanks: each is
+    // read as its label and its values.
+    s.once = LABELS.iter().map(|l| (*l).to_string()).collect();
+    s.once
+        .extend(["20481", "03.04.2026 / 10:30", "12345678A012", "11110000"].map(String::from));
+    s.once.push(sender.to_string());
+    s.once.extend(address.map(String::from));
+    for (label, value) in [
+        (LABELS[0], Some("20481")),
+        (LABELS[1], Some("03.04.2026 / 10:30")),
+        (LABELS[2], Some("12345678A012")),
+        (LABELS[3], None),
+        (LABELS[8], Some("11110000")),
+    ] {
+        s.built.fields.push((label, Ok(value)));
+    }
+    for at in [0, 3, 8] {
+        s.want.kinds.push((LABELS[at].into(), "label_value"));
+    }
+    // No long label takes the value of another row, and no line of the address a value.
+    for long in &LABELS[4..8] {
+        for value in ["12345678A012", "11110000"] {
+            s.want.no_pairs.push(((*long).into(), value.into()));
+        }
+    }
+    for line in address {
+        s.want.no_pairs.push((line.into(), "11110000".into()));
+    }
+    s
+}
+
+/// Task 26 fix round 1 (I1, the reviewer's probe P8): two rows of small labels over their
+/// values, the second one far under the first and in another column, with no box around
+/// either. They are two blocks of the page: each reads as its own pairs, never as one list.
+fn fields_in_two_blocks(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let (small, size) = (7.5 * k, 9.0 * k);
+    let top = 640.0;
+    let indent = 0.3 * size;
+    // The second block: 82 points lower at scale 1 (over nine text sizes), from another left
+    // edge.
+    let low = top - 1.2 * size - 8.0 * size;
+    let blocks = [
+        (
+            40.0,
+            top,
+            [("Member code", "20481"), ("Issued on", "03.04.2026")],
+        ),
+        (
+            300.0,
+            low,
+            [("Carrier", "Northwind"), ("Parcel no", "55012")],
+        ),
+    ];
+    let mut t = String::new();
+    for (x, y, fields) in &blocks {
+        for (n, (label, value)) in fields.iter().enumerate() {
+            let x = x + 130.0 * n as f32;
+            t += &show(plain, small, x, *y, label);
+            t += &show(plain, size, x + indent, y - 1.2 * size, value);
+        }
+    }
+    let bottom = low - 1.2 * size;
+    let mut s = sheet(v, t, bottom - 70.0, Some(Span { top, bottom }));
+    for (_, _, fields) in &blocks {
+        for (label, value) in fields {
+            s.built.fields.push((label, Ok(Some(value))));
+        }
+        s.want.tables.push(
+            fields
+                .iter()
+                .map(|(l, v)| vec![l.to_string(), v.to_string()])
+                .collect(),
+        );
+    }
+    s.want.kinds.push(("Member code".into(), "label_value"));
+    s.want.kinds.push(("Carrier".into(), "label_value"));
+    s
+}
+
+/// The lines of [`a_run_of_pair_lines`].
+const PAIR_LINES: [(&str, &str); 5] = [
+    ("Invoice no:", "20481"),
+    ("Issued on:", "03.04.2026"),
+    ("Carrier:", "Northwind"),
+    ("Parcels:", "3"),
+    ("Weight:", "12,5 kg"),
+];
+
+/// Task 26 fix round 1 (I1; the carried run of one-row pairs): lines of a label and its
+/// value set far apart (2.2 text sizes, wider than the lines of a block of text), the labels
+/// from one left edge and each value after its label. Each line is a region of its own to the engine; they stand at
+/// one pitch from one edge with nothing between them, so they read as one list of pairs.
+fn a_run_of_pair_lines(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let size = 9.0 * k;
+    let pitch = 2.2 * size;
+    let (x0, top) = (40.0, 640.0);
+    let mut t = String::new();
+    for (n, (label, value)) in PAIR_LINES.iter().enumerate() {
+        let y = top - pitch * n as f32;
+        // Each value a word space after its own label: the values share no left edge.
+        t += &show(plain, size, x0, y, &format!("{label} {value}"));
+    }
+    let bottom = top - pitch * (PAIR_LINES.len() - 1) as f32;
+    let mut s = sheet(v, t, bottom - 70.0, Some(Span { top, bottom }));
+    for (label, value) in PAIR_LINES {
+        s.built.fields.push((label, Ok(Some(value))));
+    }
+    s.want.tables.push(
+        PAIR_LINES
+            .iter()
+            .map(|(l, v)| vec![l.to_string(), v.to_string()])
+            .collect(),
+    );
+    s.want.kinds.push(("Invoice no:".into(), "label_value"));
+    s.want.kinds.push(("Weight:".into(), "label_value"));
+    s
+}
+
+/// Which rules [`ruled_pair_lines`] draws between its lines.
+#[derive(Clone, Copy, PartialEq)]
+enum RowRules {
+    /// The same rule between every two lines.
+    Every,
+    /// One rule, between the second and the third line.
+    Lone,
+}
+
+/// Task 26 part 2 (the ruling on a block's own ruling): the lines of [`a_run_of_pair_lines`]
+/// at the pitch of a block of fields, with drawn rules of one extent half way between the
+/// baselines. The same rule between every two lines is the block's own ruling and parts
+/// nothing: one list of five pairs. One rule alone is a border: the lines over it and the
+/// lines under it are two lists.
+fn ruled_pair_lines(v: &Variant, rules: RowRules) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let size = 9.0 * k;
+    let pitch = 2.2 * size;
+    let (x0, x1, top) = (40.0, 300.0, 640.0);
+    let mut t = String::new();
+    for (n, (label, value)) in PAIR_LINES.iter().enumerate() {
+        let y = top - pitch * n as f32;
+        t += &show(plain, size, x0, y, &format!("{label} {value}"));
+        let last = n + 1 == PAIR_LINES.len();
+        if !last && (rules == RowRules::Every || n == 1) {
+            t += &rule(v, x0 - 2.0, x1, y - 0.6 * pitch, size);
+        }
+    }
+    let bottom = top - pitch * (PAIR_LINES.len() - 1) as f32;
+    let mut s = sheet(v, t, bottom - 70.0, Some(Span { top, bottom }));
+    for (label, value) in PAIR_LINES {
+        s.built.fields.push((label, Ok(Some(value))));
+    }
+    let rows = |lines: &[(&str, &str)]| -> Vec<Vec<String>> {
+        lines
+            .iter()
+            .map(|(l, v)| vec![l.to_string(), v.to_string()])
+            .collect()
+    };
+    match rules {
+        RowRules::Every => s.want.tables.push(rows(&PAIR_LINES)),
+        RowRules::Lone => {
+            s.want.tables.push(rows(&PAIR_LINES[..2]));
+            s.want.tables.push(rows(&PAIR_LINES[2..]));
+        }
+    }
+    s
+}
+
+/// Task 26 fix round 1 (M1): a line of small labels over the line of their values, where the
+/// first value reaches under two labels (`Oakfield Bank` under `Bank` and `Account`), so no
+/// value can be given to one label. The line of the values reads as words and a date; it is
+/// no label and its value (`Oakfield Bank | 30.10.2026` is a wrong pair): the rows stay as
+/// laid out.
+fn a_value_under_two_labels_beside_a_date(v: &Variant) -> Sheet {
+    let k = v.k();
+    let (plain, _) = v.faces();
+    let (small, size) = (7.5 * k, 9.0 * k);
+    let (x0, top) = (40.0, 640.0);
+    let indent = 0.3 * size;
+    // The second label starts half way under the first value, the third far right of it.
+    let wide = font_width(plain, "Oakfield Bank", size);
+    let (x1, x2) = (x0 + 0.5 * wide, x0 + wide + 12.0 * size);
+    let bottom = top - 1.2 * size;
+    let t = show(plain, small, x0, top, "Bank")
+        + &show(plain, small, x1, top, "Account")
+        + &show(plain, small, x2, top, "Paid")
+        + &show(plain, size, x0 + indent, bottom, "Oakfield Bank")
+        + &show(plain, size, x2 + indent, bottom, "30.10.2026");
+    let mut s = sheet(v, t, bottom - 70.0, Some(Span { top, bottom }));
+    s.want
+        .no_pairs
+        .push(("Oakfield Bank".into(), "30.10.2026".into()));
+    s.want.order = vec!["Bank".into(), "Oakfield Bank".into(), "30.10.2026".into()];
+    s
+}
+
 /// The shapes of the step 5 classes.
 pub(crate) fn shapes() -> Vec<Shape> {
     vec![
+        Shape {
+            name: "labels with a shared value column",
+            axes: DOC_NEXT,
+            draw: |v| (labels_with_a_shared_value_column(v), None),
+        },
+        Shape {
+            name: "two labels side by side over their values",
+            axes: DOC_NEXT,
+            draw: |v| (two_labels_over_their_values(v), None),
+        },
+        Shape {
+            name: "padded values under labels in a column of field rows",
+            axes: DOC_NEXT,
+            draw: |v| (padded_values_under_labels_in_a_column(v), None),
+        },
+        Shape {
+            name: "lines of values from the page margin in a column of field rows",
+            axes: DOC_NEXT,
+            draw: |v| (value_lines_from_the_page_margin(v, false), None),
+        },
+        Shape {
+            name: "lines of bold values larger than the body in a column of field rows",
+            axes: DOC_NEXT,
+            draw: |v| (value_lines_from_the_page_margin(v, true), None),
+        },
+        Shape {
+            name: "colon labels in a head block over field rows",
+            axes: DOC_NEXT,
+            draw: |v| (colon_labels_in_a_head_block(v), None),
+        },
+        Shape {
+            name: "fixed-width lines of a label, a colon column and a value",
+            axes: DOC_NEXT,
+            draw: |v| (fixed_width_colon_lines(v), None),
+        },
+        Shape {
+            name: "a date beside a colon label on one line",
+            axes: DOC_NEXT,
+            draw: |v| (a_date_beside_a_colon_label_on_one_line(v), None),
+        },
+        Shape {
+            name: "rows of fields in two blocks",
+            axes: DOC_NEXT,
+            draw: |v| (fields_in_two_blocks(v), None),
+        },
+        Shape {
+            name: "a run of lines of a label and its value",
+            axes: DOC_NEXT,
+            draw: |v| (a_run_of_pair_lines(v), None),
+        },
+        Shape {
+            name: "a ruled run of lines of a label and its value",
+            axes: RULED,
+            draw: |v| (ruled_pair_lines(v, RowRules::Every), None),
+        },
+        Shape {
+            name: "a run of lines of a label and its value with one rule",
+            axes: RULED,
+            draw: |v| (ruled_pair_lines(v, RowRules::Lone), None),
+        },
+        Shape {
+            name: "a value under two labels beside a date",
+            axes: DOC_NEXT,
+            draw: |v| (a_value_under_two_labels_beside_a_date(v), None),
+        },
         Shape {
             name: "item table between two rules with a picture column",
             axes: RULED,

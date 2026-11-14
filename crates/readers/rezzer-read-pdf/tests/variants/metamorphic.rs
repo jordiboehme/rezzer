@@ -18,9 +18,20 @@ use crate::{all_shapes, axes, inv};
 const PICTURE_STEP: usize = 4;
 
 /// The engine's input of each page of `shape` in the base variant, before any given region,
-/// and whether the file is read by its tags.
+/// and whether the file is read by its tags. A shape whose axes draw files of two pages only
+/// (a box in another width on the second page) is read with both pages: the base variant
+/// with the first page count of the shape's own axes.
 fn pages_of(shape: &axes::Shape) -> (Vec<layoutregions::PageIn>, bool) {
-    let page = axes::page_of(shape, axes::BASE);
+    let base = axes::Variant {
+        pages: shape
+            .axes
+            .pages
+            .first()
+            .copied()
+            .unwrap_or(axes::BASE.pages),
+        ..axes::BASE
+    };
+    let page = axes::page_of(shape, base);
     let (_, pages) = inv::read_engine(&page);
     let tagged = pages.first().is_some_and(|p| p.tagged);
     let inputs = pages

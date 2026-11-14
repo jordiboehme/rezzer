@@ -2392,6 +2392,34 @@ const FRAMED_PAIRS: [(&str, &str); 4] = [
 /// a picture stands right of the frame. Each label reads with its value at any row pitch a
 /// writer uses in a frame.
 fn framed_pairs(v: &Variant, pitch: f32, beside: bool) -> Sheet {
+    framed_pairs_in(v, pitch, beside, 401.25)
+}
+
+/// The axes of [`a_payment_box_of_two_widths`]: a file of two pages in every variant.
+const TWO_PAGES: Axes = Axes {
+    pages: &[crate::axes::Pages::Two],
+    ..DOC
+};
+
+/// The widths of the frame of [`a_payment_box_of_two_widths`] on its first and second page.
+const PAYMENT_BOX_WIDTHS: [f32; 2] = [401.25, 505.0];
+
+/// Task 26, class B6: a payment box whose width differs between pages. The frame of
+/// [`framed_pairs`] around its four rows of a label and its value, on two pages: the text of
+/// the rows stands at the same places on both, the frame is a quarter wider on the second
+/// (as a box that is drawn to the width of the block around it). The four labels read with
+/// their values on each page alike: the width of the frame is no evidence of anything.
+fn a_payment_box_of_two_widths(v: &Variant) -> Sheet {
+    let width = PAYMENT_BOX_WIDTHS[crate::axes::sheet_no().min(1)];
+    let mut s = framed_pairs_in(v, 15.0 / 11.0, false, width);
+    for (label, _) in FRAMED_PAIRS {
+        s.want.kinds.push((label.into(), "label_value"));
+    }
+    s
+}
+
+/// [`framed_pairs`] with the frame `width` points wide.
+fn framed_pairs_in(v: &Variant, pitch: f32, beside: bool, width: f32) -> Sheet {
     let k = v.k();
     let (plain, _) = v.faces();
     let size = 11.0 * k;
@@ -2412,7 +2440,7 @@ fn framed_pairs(v: &Variant, pitch: f32, beside: bool) -> Sheet {
     let last = first - step * 3.0;
     let bottom = last - 8.0 * k;
     t += &format!(
-        "q 1 0 0 RG 0.5 w 30 {bottom} 401.25 {} re S Q\n",
+        "q 1 0 0 RG 0.5 w 30 {bottom} {width} {} re S Q\n",
         edge - bottom
     );
     let x_value = 34.0 + 11.8 * size;
@@ -3000,7 +3028,18 @@ fn label_row_over_two_blocks(v: &Variant, boxes: bool) -> Sheet {
 /// pass. Without it the two underlines bound a strip that holds the first value and the
 /// second label.
 fn side_fields_beside_an_empty_table(v: &Variant, third: bool) -> Sheet {
-    side_fields_beside_a_table(v, third, false, false)
+    side_fields_beside_a_table(v, third, false, false, 2)
+}
+
+/// Task 26, class A5: an underlined label with its value under it beside an empty ruled
+/// grid, the label's baseline inside the grid's header band. The table of
+/// [`side_fields_beside_an_empty_table`] with the first of its fields only, its underline as
+/// long as the label's words: one underline bounds no strip, so the label and its value are
+/// two lines of text in one size, and the underline of the label is what says which of them
+/// is the label. The label reads as a pair with its value; the header cells of the grid
+/// stand apart from it.
+fn an_underlined_label_beside_an_empty_grid(v: &Variant) -> Sheet {
+    side_fields_beside_a_table(v, false, false, false, 1)
 }
 
 /// The rows of the table of [`side_fields_beside_a_table`] when it is filled.
@@ -3016,7 +3055,15 @@ const FRAME_ROWS: [[&str; 3]; 5] = [
 /// With `mirror` the two fields stand left of the table, so the first label comes first on
 /// the line of the header cells. With `filled` the five rows of the table hold text
 /// ([`FRAME_ROWS`]), so the rows under the header row are no empty lines.
-fn side_fields_beside_a_table(v: &Variant, third: bool, mirror: bool, filled: bool) -> Sheet {
+/// `count` is how many of the two fields are drawn; a field alone is wanted as a pair of
+/// its label and its value.
+fn side_fields_beside_a_table(
+    v: &Variant,
+    third: bool,
+    mirror: bool,
+    filled: bool,
+    count: usize,
+) -> Sheet {
     let k = v.k();
     let (plain, bold) = v.faces();
     let top = 707.5;
@@ -3059,6 +3106,7 @@ fn side_fields_beside_a_table(v: &Variant, third: bool, mirror: bool, filled: bo
         ("Checked by", "A/B", 0.0, 47.45),
         ("Passed on to", "C/D", 24.14, 79.33),
     ];
+    let fields = &fields[..count];
     if filled {
         for (r, cells) in FRAME_ROWS.iter().enumerate() {
             for (c, cell) in cells.iter().enumerate() {
@@ -3067,7 +3115,13 @@ fn side_fields_beside_a_table(v: &Variant, third: bool, mirror: bool, filled: bo
             }
         }
     }
-    for (label, value, down, rule) in fields {
+    for &(label, value, down, rule) in fields {
+        // A field alone has the underline of its label: as long as the label's words.
+        let rule = if count == 1 {
+            font_width(plain, label, 7.0 * k)
+        } else {
+            rule
+        };
         let y = top - 6.57 * k - down * k;
         t += &show(plain, 7.0 * k, at, y, label);
         t += &format!(
@@ -3096,7 +3150,7 @@ fn side_fields_beside_a_table(v: &Variant, third: bool, mirror: bool, filled: bo
     s.want
         .orders
         .push(titles.iter().map(|t| t.to_string()).collect());
-    for (label, value, ..) in fields {
+    for &(label, value, ..) in fields {
         // The label stands with its value, apart from the header row.
         s.want
             .orders
@@ -3106,9 +3160,14 @@ fn side_fields_beside_a_table(v: &Variant, third: bool, mirror: bool, filled: bo
             s.want.lines_apart.push((title.into(), value.into()));
         }
     }
-    s.want
-        .lines_apart
-        .push((fields[0].1.into(), fields[1].0.into()));
+    if let [first, second] = fields {
+        s.want.lines_apart.push((first.1.into(), second.0.into()));
+    } else {
+        for &(label, value, ..) in fields {
+            s.built.fields.push((label, Ok(Some(value))));
+            s.want.kinds.push((label.into(), "label_value"));
+        }
+    }
     if filled {
         // The table with its rows, apart from the fields.
         let rows = std::iter::once(titles).chain(FRAME_ROWS);
@@ -3311,12 +3370,17 @@ pub(crate) fn shapes() -> Vec<Shape> {
         Shape {
             name: "two fields of a label over a rule left of a ruled table with empty rows and the rule of a third field",
             axes: DOC,
-            draw: |v| (side_fields_beside_a_table(v, true, true, false), None),
+            draw: |v| (side_fields_beside_a_table(v, true, true, false, 2), None),
         },
         Shape {
             name: "two fields of a label over a rule beside a ruled table with filled rows and the rule of a third field",
             axes: DOC,
-            draw: |v| (side_fields_beside_a_table(v, true, false, true), None),
+            draw: |v| (side_fields_beside_a_table(v, true, false, true, 2), None),
+        },
+        Shape {
+            name: "an underlined label beside an empty ruled grid",
+            axes: DOC,
+            draw: |v| (an_underlined_label_beside_an_empty_grid(v), None),
         },
         Shape {
             name: "a framed label column and value column, rows 1.36 sizes apart beside a picture",
@@ -3327,6 +3391,11 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "a framed label column and value column, rows 1.55 sizes apart",
             axes: DOC,
             draw: |v| (framed_pairs(v, 17.0 / 11.0, false), None),
+        },
+        Shape {
+            name: "a payment box whose width differs between pages",
+            axes: TWO_PAGES,
+            draw: |v| (a_payment_box_of_two_widths(v), None),
         },
         Shape {
             name: "a head block beside a logo over a letter",

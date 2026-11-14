@@ -656,6 +656,18 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
             ));
         }
     }
+    for (label, value) in &want.no_pairs {
+        let paired = blocks.iter().any(|b| {
+            matches!(b, Block::Table { rows, .. }
+                if cells(rows).iter().any(|r| r.len() == 2 && r[0] == *label && r[1] == *value))
+        });
+        if paired {
+            broken.push(Broken(
+                Inv::RightPair,
+                format!("page {p}: wrong pair {label:?}: {value:?}"),
+            ));
+        }
+    }
     let headings: Vec<String> = blocks
         .iter()
         .filter_map(|b| match b {

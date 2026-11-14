@@ -18,7 +18,7 @@ use layoutregions::extract::table::grid::{
 
 use super::*;
 use layoutregions::extract::pairs::blocks::{
-    Columns, KeyValues, address_columns, blocks_of, key_values,
+    Columns, KeyValues, address_columns, blocks_of, key_values, label_row_over_values,
 };
 
 use crate::layout::{Gaps, Slot};
@@ -275,6 +275,9 @@ pub(super) fn borderless(
     // Tables of labels and values, and their rows whose one run holds label and value.
     let mut kv: Vec<usize> = Vec::new();
     let mut splits: Vec<(usize, usize)> = Vec::new();
+    // Rows of a block of labels and values cut inside a run of the label's cell (table, row,
+    // the run among the cell's runs and its byte).
+    let mut value_cuts: Vec<(usize, usize, usize, usize)> = Vec::new();
     // Tables whose first row is the line of titles of a frame of column titles over items.
     let mut titled: Vec<usize> = Vec::new();
     // Tables with close titles to cut, and where (see [`Grid`]).
@@ -310,6 +313,54 @@ pub(super) fn borderless(
         // A paragraph set full (justified) in a narrow column, whose word gaps are wide enough
         // to part its words into pieces, is prose: no columns.
         if set_full(&flow.runs, &pieces, &lines[a..z]) {
+            continue;
+        }
+        // A row of small labels over the row of their values, with no row in the values' size
+        // under it (the rows of a table under its small header), is no row of a table: the
+        // whitespace cut reads it cell by cell, each label with the value under it (see
+        // `label_row_over_values`). The region is left to it.
+        let value_size = |k: usize| {
+            flow.runs[lines[a + k].start..lines[a + k].end]
+                .iter()
+                .filter(|r| !r.text.trim().is_empty())
+                .map(|r| r.size)
+                .fold(f32::MAX, f32::min)
+        };
+        // Nor is a row over the labels in their size with a piece over each of them: rows of
+        // a label and its value over a larger last row are rows (the cut's own two bounds).
+        let size_of = |k: usize, largest: bool| {
+            let sizes = flow.runs[lines[a + k].start..lines[a + k].end]
+                .iter()
+                .filter(|r| !r.text.trim().is_empty())
+                .map(|r| r.size);
+            if largest {
+                sizes.fold(f32::MIN, f32::max)
+            } else {
+                sizes.fold(f32::MAX, f32::min)
+            }
+        };
+        let step = layoutregions::segment::cut::SIZE_STEP;
+        let row_before = |k: usize| {
+            k >= 2
+                && size_of(k - 2, true) < step * size_of(k - 1, false)
+                && size_of(k - 1, true) < step * size_of(k - 2, false)
+                && pieces[k - 1]
+                    .iter()
+                    .all(|l| pieces[k - 2].iter().any(|q| q.x0 < l.x1 && q.x1 > l.x0))
+        };
+        let fields = (1..pieces.len()).any(|k| {
+            label_row_over_values(&flow.runs, &pieces[k - 1], &pieces[k])
+                && !row_before(k)
+                // The next line of the region, if it has one, is small text again.
+                && pieces.get(k + 1).is_none_or(|_| {
+                    let next = &lines[a + k + 1];
+                    flow.runs[next.start..next.end]
+                        .iter()
+                        .filter(|r| !r.text.trim().is_empty())
+                        .all(|r| step * r.size <= value_size(k))
+                })
+        });
+        if fields {
             continue;
         }
         let aligned = titles_over_values(&flow.runs, &lines[a..z], &pieces);
@@ -367,13 +418,19 @@ pub(super) fn borderless(
                     for slot in &mut target[row.label.0..row.label.1] {
                         *slot = Some((t, k as u32, 0));
                     }
-                    match row.value {
-                        Some((s, e)) => {
-                            for slot in &mut target[s..e] {
-                                *slot = Some((t, k as u32, 1));
-                            }
+                    if let Some((s, e)) = row.value {
+                        for slot in &mut target[s..e] {
+                            *slot = Some((t, k as u32, 1));
                         }
-                        None => splits.push((claim.len(), k)),
+                    }
+                    match row.cut {
+                        // A label that ends a word space before its value, in one run: cut
+                        // where the value column starts.
+                        Some((run, byte)) => {
+                            value_cuts.push((claim.len(), k, run - row.label.0, byte));
+                        }
+                        None if row.value.is_none() => splits.push((claim.len(), k)),
+                        None => {}
                     }
                 }
                 kv.push(claim.len());
@@ -690,6 +747,9 @@ pub(super) fn borderless(
     fill(&mut planned, flow, &target);
     for (t, k) in splits {
         split_label(&mut planned[t].rows[k]);
+    }
+    for (t, k, run, byte) in value_cuts {
+        split_title(&mut planned[t].rows[k], 0, run, byte);
     }
     for (t, cuts) in title_cuts {
         for (r, cell, run, byte) in cuts {
@@ -1485,8 +1545,9 @@ fn cut_run(run: &mut Run, at: usize) -> Run {
     rest
 }
 
-/// Cuts the cell `cell` of `row` (a header row) at byte `byte` of its run `run`: the text
-/// after the cut goes first into the next cell, the cell of the next column.
+/// Cuts the cell `cell` of `row` (a title of a header row, or a label with its value in one
+/// run) at byte `byte` of its run `run`: the text after the cut goes first into the next
+/// cell, the cell of the next column.
 fn split_title(row: &mut [PlannedCell], cell: usize, run: usize, byte: usize) {
     let Some(r) = row.get_mut(cell).and_then(|c| c.runs.get_mut(run)) else {
         return;

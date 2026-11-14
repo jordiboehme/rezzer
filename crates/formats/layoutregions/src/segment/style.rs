@@ -19,7 +19,12 @@ use crate::work;
 /// - its size differs by a size step: the larger of the two sizes is at least [`SIZE_STEP`]
 ///   times the smaller, the ratio the cut uses for a title beside a field list, so that a page
 ///   printed larger or smaller has the same steps and both agree. Small steps in a chain (each
-///   under the ratio against its neighbour) do not add up: a slow drift is no step;
+///   under the ratio against its neighbour) do not add up: a slow drift is no step. Two
+///   lines that are both a small label that ends with a colon and its larger value a cell
+///   gap after it, in the same two sizes, do not step either: which of the two cells holds
+///   more characters (`Sheet: 03.04.2026` over `Pages: 4`) says nothing about the line.
+///   Against a line set in one size such a row is set in the size of its label, for the same
+///   reason: a line in the size of the values over the rows is no row of theirs;
 /// - its weight differs (bold against not bold), unless both lines are rows of cells of both
 ///   weights apart by a cell gap (a bold label and a plain value, or a plain name and a bold
 ///   amount): which of its runs is the longer is no step between such rows, while bold words
@@ -64,6 +69,7 @@ pub fn style_steps(texts: &[TextRun], ids: &[u32]) -> Vec<Vec<u32>> {
     let mut groups: Vec<Vec<u32>> = Vec::new();
     let mut before: Option<&TextRun> = None;
     let mut before_mixed = false;
+    let mut before_sizes: Option<(f32, f32)> = None;
     let mut known: Option<[u8; 3]> = None;
     for line in lines {
         // Whether the line is a row of cells of both weights: its runs with ink are of both
@@ -81,7 +87,41 @@ pub fn style_steps(texts: &[TextRun], ids: &[u32]) -> Vec<Vec<u32>> {
                 w[1].x - (w[0].x + w[0].w) >= crate::extract::table::CELL_GAP * w[1].size.max(1.0)
             })
         };
-        work::add(line.len() as u64);
+        // The two sizes of a line that is a row of cells of both: its runs with ink are of
+        // two sizes a size step apart, a small label and its larger value.
+        let sizes = {
+            let mut inked: Vec<&TextRun> = line
+                .iter()
+                .filter_map(|&id| texts.get(id as usize))
+                .filter(|r| r.text.chars().any(|c| !c.is_whitespace()))
+                .collect();
+            inked.sort_by(|a, b| a.x.total_cmp(&b.x));
+            let small = inked.iter().map(|r| r.size).fold(f32::MAX, f32::min);
+            let large = inked.iter().map(|r| r.size).fold(f32::MIN, f32::max);
+            // The label says it is one: the small run ends with a colon, and the larger
+            // run follows it across the gap. Small text beside larger text alone is
+            // anything (a side note beside the lines of a form).
+            (small > 0.0
+                && large >= SIZE_STEP * small
+                && inked.windows(2).any(|w| {
+                    w[0].text.trim_end().ends_with(':')
+                        && w[0].size < SIZE_STEP * small
+                        && w[1].size >= SIZE_STEP * small
+                        && w[1].x - (w[0].x + w[0].w)
+                            >= crate::extract::table::CELL_GAP * w[1].size.max(1.0)
+                }))
+            .then_some((small, large))
+        };
+        // Two such rows are set alike when their small sizes are a size and their large
+        // sizes too (no size step between them).
+        let alike = match (sizes, before_sizes) {
+            (Some(a), Some(b)) => {
+                let same = |x: f32, y: f32| x.max(y) < SIZE_STEP * x.min(y);
+                same(a.0, b.0) && same(a.1, b.1)
+            }
+            _ => false,
+        };
+        work::add(2 * line.len() as u64);
         // The run that sets the line's style (see [`line_style`]).
         let Some(run) = line_style(line.iter().filter_map(|&id| texts.get(id as usize))) else {
             // A line without ink has no style to step: it joins the group before it (or starts
@@ -92,8 +132,22 @@ pub fn style_steps(texts: &[TextRun], ids: &[u32]) -> Vec<Vec<u32>> {
             }
             continue;
         };
+        // Against a line set in one size, a row of a small label and its larger value is
+        // also set in the size of its label: the label is the print of the form, the value
+        // what is filled in, and which of the two holds more characters says nothing. A line
+        // in the size of the values over such rows (`REF: ABC/XYZ   20481` over
+        // `Sheet: 03.04.2026`) is no row of theirs. This only adds steps: a line starts a
+        // group when its longest run steps against the one of the line before, or when the
+        // label size does. A caption in the size of the labels over rows with longer values
+        // stays a group of its own.
+        let (own, other) = match (sizes, before_sizes) {
+            (Some(a), None) => (a.0, before.map_or(0.0, |b| b.size)),
+            (None, Some(b)) => (run.size, b.0),
+            _ => (run.size, before.map_or(0.0, |b| b.size)),
+        };
+        let steps = |x: f32, y: f32| x.min(y) > 0.0 && x.max(y) >= SIZE_STEP * x.min(y);
         let starts = before.map_or(groups.is_empty(), |b| {
-            (run.size.min(b.size) > 0.0 && run.size.max(b.size) >= SIZE_STEP * run.size.min(b.size))
+            ((steps(run.size, b.size) || steps(own, other)) && !alike)
                 || (run.bold != b.bold && !(mixed && before_mixed))
                 || matches!((run.color, known), (Some(x), Some(y)) if x != y)
         });
@@ -104,6 +158,7 @@ pub fn style_steps(texts: &[TextRun], ids: &[u32]) -> Vec<Vec<u32>> {
         }
         before = Some(run);
         before_mixed = mixed;
+        before_sizes = sizes;
     }
     groups
 }
@@ -135,6 +190,136 @@ mod tests {
 
     fn ids(n: usize) -> Vec<u32> {
         (0..n as u32).collect()
+    }
+
+    /// Task 26 part 3a (H2): lines of a small label that ends with a colon and its larger
+    /// value a cell gap after it are one group, whichever of the two cells holds more
+    /// characters (`Sheet: 03.04.2026` over `Pages: 4`: by its longest run the first line is
+    /// set in the size of the values and the second in the size of the labels). Without the
+    /// colon, with the value a word space after its label, or with labels of another size,
+    /// the step stands.
+    #[test]
+    fn rows_of_a_small_colon_label_and_a_larger_value_do_not_step() {
+        let cell = |text: &str, x: f32, size: f32, line: u32| TextRun {
+            text: text.to_string(),
+            x,
+            w: 0.5 * size * text.chars().count() as f32,
+            ..run(size, false, None, line)
+        };
+        let lines = |first: &str, second: &str, gap: f32, small: f32| {
+            let value = |line: u32, x: f32, text: &str| cell(text, x + gap, 10.0, line);
+            let a = cell(first, 50.0, 8.0, 0);
+            let b = cell(second, 50.0, small, 1);
+            let (ax, bx) = (a.x + a.w, b.x + b.w);
+            vec![a, value(0, ax, "03.04.2026"), b, value(1, bx, "4")]
+        };
+        let groups = |texts: &[TextRun]| style_steps(texts, &ids(texts.len())).len();
+        assert_eq!(groups(&lines("Sheet:", "Pages:", 20.0, 8.0)), 1);
+        assert_eq!(groups(&lines("Sheet", "Pages", 20.0, 8.0)), 2, "no colon");
+        // The cell gap is one text size of the value (`CELL_GAP`).
+        assert_eq!(groups(&lines("Sheet:", "Pages:", 10.5, 8.0)), 1);
+        assert_eq!(
+            groups(&lines("Sheet:", "Pages:", 9.5, 8.0)),
+            2,
+            "a word space"
+        );
+        // The labels of the two lines are of one size: under the size step (1.08), not at it.
+        assert_eq!(groups(&lines("Sheet:", "Pages:", 20.0, 7.5)), 1);
+        assert_eq!(
+            groups(&lines("Sheet:", "Pages:", 20.0, 7.0)),
+            2,
+            "other labels"
+        );
+        // The values of the two lines are of one size too (M5): 10.7 beside 10 is under
+        // the size step (10.8), 10.9 is past it. The second line is set by its label (its
+        // longer run), the first by its value, so the step between them stands then.
+        let values = |second: f32| {
+            let mut texts = lines("Sheet:", "Pages:", 20.0, 8.0);
+            texts[3].size = second;
+            style_steps(&texts, &ids(texts.len())).len()
+        };
+        assert_eq!((values(10.7), values(10.9)), (1, 2));
+        // Task 26 fix round 2 (I1) and 3 (N2): against a line set in one size the rows are
+        // also set in the size of their labels (8). A line in the size of the values (10)
+        // over them is a group of its own, whichever cell of the row under it is the
+        // longer. The rule only adds steps: a line in the size of the labels joins rows set
+        // by their label (the longer run), and stays apart from a row set by its value, as
+        // by the longest runs alone. The step is `SIZE_STEP` (1.08) over 8.
+        let rows = |first: (&str, &str), second: (&str, &str)| {
+            let mut out = Vec::new();
+            for (line, (label, value)) in [first, second].into_iter().enumerate() {
+                let l = cell(label, 50.0, 8.0, line as u32);
+                let x = l.x + l.w + 20.0;
+                out.extend([l, cell(value, x, 10.0, line as u32)]);
+            }
+            out
+        };
+        let (short, long) = (("Sheet:", "03.04.2026"), ("Sheets in all:", "4"));
+        // A line of one size over the rows (`first` the row under it) and after them.
+        let under = |size: f32, first: (&str, &str)| {
+            let mut texts = vec![cell("Ref: AB/CD 20481", 50.0, size, 0)];
+            for mut r in rows(first, ("Pages:", "4")) {
+                r.line += 1;
+                texts.push(r);
+            }
+            style_steps(&texts, &ids(texts.len()))
+        };
+        let over = |size: f32, last: (&str, &str)| {
+            let mut texts = rows(("Pages:", "4"), last);
+            texts.push(cell("Ref: AB/CD 20481", 50.0, size, 2));
+            style_steps(&texts, &ids(texts.len())).len()
+        };
+        for row in [short, long] {
+            assert_eq!(under(10.0, row), vec![vec![0], vec![1, 2, 3, 4]]);
+            assert_eq!(over(10.0, row), 2);
+        }
+        // The row beside the line is set by its label: the line joins up to the step.
+        assert_eq!(under(8.0, long).len(), 1);
+        assert_eq!((under(8.6, long).len(), under(8.7, long).len()), (1, 2));
+        assert_eq!(
+            (over(8.0, long), over(8.6, long), over(8.7, long)),
+            (1, 1, 2)
+        );
+        // The row beside the line is set by its value (the longer run): a caption or a note
+        // in the size of the labels is a group of its own, as before the rule.
+        assert_eq!(under(8.0, short), vec![vec![0], vec![1, 2, 3, 4]]);
+        assert_eq!(over(8.0, short), 2);
+        // A line a little under the size of the values (10) joins such a row by its longest
+        // run, and the label size parts them all the same: no join the rule takes away.
+        assert_eq!((under(9.3, short).len(), over(9.3, short)), (2, 2));
+    }
+
+    /// Task 26 fix round 3 (N2): a caption in the size of the labels, without a colon, over
+    /// rows of a small colon label and a larger value. Where the values are the longer runs
+    /// the caption is a group of its own and the rows stay rows of pairs; so is a note in
+    /// that size after them. Where the labels are the longer runs the rows are set in the
+    /// size of the caption and it is of their group.
+    #[test]
+    fn a_caption_in_the_label_size_stays_apart_from_rows_with_longer_values() {
+        let cell = |text: &str, x: f32, size: f32, line: u32| TextRun {
+            text: text.to_string(),
+            x,
+            w: 0.5 * size * text.chars().count() as f32,
+            ..run(size, false, None, line)
+        };
+        let groups = |rows: [(&str, &str); 2]| {
+            let mut texts = vec![cell("Details of the holder", 50.0, 8.0, 0)];
+            for (k, (label, value)) in rows.into_iter().enumerate() {
+                let l = cell(label, 50.0, 8.0, 1 + k as u32);
+                let x = l.x + l.w + 20.0;
+                texts.extend([l, cell(value, x, 10.0, 1 + k as u32)]);
+            }
+            texts.push(cell("see the notes overleaf", 50.0, 8.0, 3));
+            style_steps(&texts, &ids(texts.len()))
+        };
+        assert_eq!(
+            groups([("Name:", "Sample"), ("Date:", "03.04.2026")]),
+            vec![vec![0], vec![1, 2, 3, 4], vec![5]]
+        );
+        assert_eq!(
+            groups([("Name of the holder:", "Sample"), ("Date of issue:", "4")]),
+            vec![vec![0, 1, 2, 3, 4, 5]]
+        );
     }
 
     #[test]

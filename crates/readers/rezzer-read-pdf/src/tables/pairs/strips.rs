@@ -8,6 +8,9 @@
 
 use std::collections::{HashMap, HashSet};
 
+pub(in crate::tables) use layoutregions::extract::pairs::strips::{
+    Top, frame_tops, taken_by_grids,
+};
 use layoutregions::segment::drawn::{Grids, Line, Unsearched};
 
 use super::*;
@@ -16,10 +19,6 @@ pub(super) use crate::found::STRIP_FOUND_BY;
 
 /// Lines a strip of fields between two rules may hold; a taller one is text, not fields.
 const STRIP_LINES: usize = 40;
-
-/// A divider of a strip is at least this share of the strip's height long: it parts the
-/// fields over much of the row, where a drawn separator mark is a small share of it.
-const DIVIDER: f32 = 0.25;
 
 /// Where fields between rules may stand: a rule no grid takes and the nearest rule below it
 /// bound the strip, over all of the upper rule when the lower one covers it, over the lower
@@ -73,74 +72,6 @@ pub(crate) fn form_drawn(grids: Result<&Grids, Unsearched>, boxes: &[[f32; 4]]) 
             .is_some_and(|f| f.iter().any(|f| !f.dividers.is_empty()))
 }
 
-/// Which of `n` horizontal lines the grids of `groups` take.
-pub(in crate::tables) fn taken_by_grids(
-    n: usize,
-    groups: &[(Vec<usize>, Vec<usize>)],
-) -> Vec<bool> {
-    let mut taken = vec![false; n];
-    for (gh, _) in groups {
-        for &j in gh {
-            taken[j] = true;
-        }
-    }
-    taken
-}
-
-/// What a horizontal line may be to a frame of fields under it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::tables) enum Top {
-    /// No top: a grid takes it.
-    No,
-    /// A rule no grid takes.
-    Free,
-    /// The lowest rule of a grid: a box drawn over a row of fields (a section's title cells)
-    /// takes the row's top rule into its grid, and the row under it is still a row of fields
-    /// when its text holds fields with a value (see [`holds_values`]).
-    Grid,
-}
-
-/// What each of the horizontal lines `hs` may be to a frame of fields under it (see [`Top`]):
-/// with `lowest`, the lowest line of each grid of `groups` may top one too. A grid of two
-/// rules and dividers between them (`vs`), none at their ends and none running on over or
-/// under them (a row of fields open at both ends), is no grid to its top rule: the frame under
-/// it is a row of fields with dividers.
-pub(in crate::tables) fn frame_tops(
-    hs: &[Line],
-    vs: &[Line],
-    groups: &[(Vec<usize>, Vec<usize>)],
-    lowest: bool,
-) -> Vec<Top> {
-    let mut tops: Vec<Top> = taken_by_grids(hs.len(), groups)
-        .into_iter()
-        .map(|t| if t { Top::No } else { Top::Free })
-        .collect();
-    for (gh, gv) in groups {
-        let [a, b] = gh[..] else {
-            continue;
-        };
-        let (x0, x1) = (hs[a].from.min(hs[b].from), hs[a].to.max(hs[b].to));
-        let (y0, y1) = (hs[a].at.min(hs[b].at), hs[a].at.max(hs[b].at));
-        let inner = !gv.is_empty()
-            && gv.iter().all(|&k| {
-                let v = &vs[k];
-                v.at > x0 + SNAP && v.at < x1 - SNAP && v.from >= y0 - SNAP && v.to <= y1 + SNAP
-            });
-        if inner {
-            let top = if hs[a].at > hs[b].at { a } else { b };
-            tops[top] = Top::Free;
-        }
-    }
-    if lowest {
-        for (gh, _) in groups {
-            if let Some(&low) = gh.iter().min_by(|&&a, &&b| hs[a].at.total_cmp(&hs[b].at)) {
-                tops[low] = Top::Grid;
-            }
-        }
-    }
-    tops
-}
-
 /// The frames under the page's horizontal lines `hs` (sorted by height) that `tops` names
 /// (see [`frame_tops`]), with the dividers among the vertical lines `vs` (sorted by place);
 /// `None` past [`STRIP_WORK`] steps.
@@ -177,33 +108,18 @@ pub(in crate::tables) fn frames(hs: &[Line], tops: &[Top], vs: &[Line]) -> Optio
             continue;
         };
         let (bottom, top) = (low.at, up.at);
-        let lo = vs.partition_point(|v| v.at <= x0 + SNAP);
-        let (mut dividers, mut spans) = (Vec::new(), Vec::new());
-        for v in &vs[lo..] {
-            work += 1;
-            crate::work::add(1);
-            if work > STRIP_WORK {
-                return None;
-            }
-            if v.at >= x1 - SNAP {
-                break;
-            }
-            // A column rule of a grid over the frame that runs on through its top rule (the
-            // grid's lowest, see [`frame_tops`]) and ends in the frame hangs from its top; one
-            // of a grid under it that runs on through its bottom rule rises from its bottom.
-            let through = |at: f32| v.from < at - SNAP && v.to > at + SNAP;
-            let to = if through(top) { top } else { v.to };
-            let from = if through(bottom) { bottom } else { v.from };
-            let reaches = (to - top).abs() <= SNAP || (from - bottom).abs() <= SNAP;
-            if reaches
-                && to - from >= DIVIDER * (top - bottom)
-                && from >= bottom - SNAP
-                && to <= top + SNAP
-            {
-                dividers.push(v.at);
-                spans.push((from, to));
-            }
-        }
+        // Its dividers (see [`layoutregions::extract::pairs::strips::dividers_of`]).
+        let found = layoutregions::extract::pairs::strips::dividers_of(
+            vs,
+            (bottom, top),
+            (x0, x1),
+            &mut || {
+                work += 1;
+                crate::work::add(1);
+                work <= STRIP_WORK
+            },
+        )?;
+        let (dividers, spans): (Vec<f32>, Vec<(f32, f32)>) = found.into_iter().unzip();
         out.push(Frame {
             x0,
             x1,
@@ -294,7 +210,9 @@ pub(in crate::tables) fn holds_values(flow: &Flow, by_y: &ByY, fr: &Frame) -> bo
 /// the strip is a row of fields. A cell a run stands across (a value line the dividers could
 /// not cut at a word gap) or a value under no label of its own leaves its fields as text, and
 /// a strip whose labels do not all stand over or beside their values leaves all of them as
-/// text; a loss in `unsure` names them. Strips joined by their rules (see [`connected`]) make
+/// text, and so does a strip with a field edge (a drawn divider or the start of a label) in
+/// a number in digit groups (see [`layoutregions::extract::pairs::strips::undecided`]); a
+/// loss in `unsure` names them. Strips joined by their rules (see [`connected`]) make
 /// one table, when it has two fields or more and one of them a value; one field alone with a
 /// value is named in a loss. Text just beyond such a group, at both its ends, can show that
 /// its labels stand under the rule their values stand on (see [`ends`]; only text no row of
@@ -391,6 +309,39 @@ pub(in crate::tables) fn field_strips(
         // row of fields, whatever pairs their sizes make: their text is free for the table pass
         // as it stands.
         if !address && table_rows(&flow.runs, &ids) {
+            continue;
+        }
+        // A field edge (a drawn divider or a label's start) in a number in digit groups: the
+        // digits say one number and the edge says two fields, so the row's fields are not
+        // decided. Its runs were not cut (see `field_cuts`), and its text is read as it
+        // stands, cell by cell, which is said.
+        let frame = FieldFrame {
+            x0: fr.x0,
+            x1: fr.x1,
+            dividers: &fr.dividers,
+        };
+        if layoutregions::extract::pairs::strips::undecided(&flow.runs, &frame, &ids) {
+            let names: Vec<String> = cells
+                .iter()
+                .flat_map(|c| label_names(&flow.runs, c))
+                .collect();
+            say(
+                unsure,
+                doubts,
+                &names,
+                layoutregions::extract::pairs::strips::IN_NUMBER,
+                &ids,
+            );
+            for &i in &ids {
+                kept[i] = true;
+            }
+            apart.extend(cell_order(
+                flow,
+                by_y,
+                (fr.top, fr.bottom, fr.x0, fr.x1),
+                &fr.dividers,
+                busy,
+            ));
             continue;
         }
         // Text that is not fields makes the strip no row of fields; labels and values in the

@@ -11,6 +11,7 @@
 //! The reader makes the pieces; this module only orders them.
 
 use crate::extract::table::ruled::rule_breaks;
+use crate::file::CURRENCIES;
 use crate::limits::Limits;
 use crate::region::Bounds;
 use crate::segment::drawn::{Line, SNAP, merged};
@@ -44,9 +45,9 @@ pub struct Piece {
     /// The text of the piece reads as an amount or a date (see [`reads_as_value`]): a value,
     /// no label.
     pub value: bool,
-    /// The text of the piece is a whole number (see [`reads_as_number`]): a value that may
+    /// The whole number the text of the piece is (see [`whole_number`]): a value that may
     /// also name a column (a year, a number of a column).
-    pub number: bool,
+    pub number: Option<u64>,
     /// The piece stands in for a drawn box (the index of the box): its text is read whole
     /// where it stands, and `rows` counts its rows.
     pub boxed: Option<usize>,
@@ -118,6 +119,10 @@ pub struct Cut {
     /// `rows_whole`). It reads at its place in its row and is not said to be one line with
     /// the text beside it.
     pub breaks: Vec<usize>,
+    /// The indices, ascending, of the groups that are a row of labels over the row of their
+    /// values (see `labels_over_values`), cell by cell: each label, then the value under it;
+    /// a label with nothing under it has an empty value.
+    pub cells: Vec<usize>,
 }
 
 /// The joints of the rules `rules`, sorted by height then place: the height and the place
@@ -280,7 +285,7 @@ pub fn xy_cut_ruled(
     let mut closing: Vec<f32> = rules.iter().chain(&joined).map(|r| r.at).collect();
     closing.sort_by(f32::total_cmp);
     work::add(2 * closing.len() as u64);
-    let cutter = Cutter {
+    let mut cutter = Cutter {
         p: pieces,
         rules,
         joined,
@@ -288,9 +293,33 @@ pub fn xy_cut_ruled(
         joints: ruled.joints,
         max_depth: limits.max_cut_depth as usize,
         stop,
+        page_shown: Vec::new(),
+        seen: std::cell::RefCell::new(Seen::default()),
     };
     let mut out = Out::default();
     cutter.region((0..pieces.len()).collect(), 0, &mut out);
+    // A row of one field that the page shows how to set elsewhere (a field alone further
+    // down the column of a form, see [`Seen`]): the cut is made once more with the rows the
+    // first cut found, whatever the order it came by them. Only then; a page without such a
+    // row is cut once. The first cut is a finished read: it is never given up for a second
+    // one that is cut short.
+    let seen = cutter.seen.take();
+    work::add((seen.shown.len() * seen.wanting.len()) as u64);
+    if out.short.is_none()
+        && seen
+            .wanting
+            .iter()
+            .any(|w| seen.shown.iter().any(|s| w.set_like(s)))
+    {
+        cutter.page_shown = seen.shown;
+        // The second cut is taken only when it comes to its end: when the page is stopped
+        // in it, the first cut stands, a whole read without those rows.
+        let mut again = Out::default();
+        cutter.region((0..pieces.len()).collect(), 0, &mut again);
+        if again.short.is_none() {
+            out = again;
+        }
+    }
     out.breaks.sort_unstable();
     out.breaks.dedup();
     Cut {
@@ -300,6 +329,7 @@ pub fn xy_cut_ruled(
         short: out.short,
         kept: out.kept,
         breaks: out.breaks,
+        cells: out.cells,
     }
 }
 
@@ -339,6 +369,7 @@ struct Out {
     breaks: Vec<usize>,
     /// The cut that the next group starts after, once there is a group before it.
     pending: Option<Split>,
+    cells: Vec<usize>,
 }
 
 impl Out {
@@ -351,6 +382,15 @@ impl Out {
             self.splits.push(pending.unwrap_or(Split::Gutter));
         }
         self.groups.push(ids);
+    }
+
+    /// A group that is a row of labels over the row of their values, cell by cell.
+    fn cell(&mut self, ids: Vec<usize>) {
+        if !ids.is_empty() {
+            self.cells.push(self.groups.len());
+        }
+        self.cut(Split::Gutter);
+        self.group(ids);
     }
 
     /// A group the depth bound or the stop kept whole.
@@ -380,6 +420,36 @@ struct Cutter<'a> {
     joints: &'a [(f32, f32)],
     max_depth: usize,
     stop: &'a dyn Fn() -> bool,
+    /// The ways the page sets a row of labels over their values, as an earlier cut of the
+    /// same pieces found them (see [`Seen`]); empty in the first cut.
+    page_shown: Vec<Shown>,
+    /// What this cut finds about rows of labels over their values.
+    seen: std::cell::RefCell<Seen>,
+}
+
+/// What one cut of a page finds about its rows of labels over their values: the ways such a
+/// row is set where it is one on its own evidence (`shown`, each way once), and how each
+/// band of a small row over a larger one is set that was not read as one for want of a row
+/// that shows it in its own run of bands (`wanting`, each way once, and only bands that a
+/// shown row would make a row). A form sets its fields alike all over
+/// the page, and the cut looks at a run of bands at a time: a field alone further down the
+/// column stands in another run than the rows that show how a field is set.
+#[derive(Default)]
+struct Seen {
+    shown: Vec<Shown>,
+    wanting: Vec<Shown>,
+}
+
+impl Seen {
+    /// Notes a band set as `own` that wants a shown row, each way once: a form sets its
+    /// fields alike, so the ways are few however many such bands the page has, and the
+    /// cut comes by a band once in every region that holds it.
+    fn want(&mut self, own: Shown) {
+        work::add(self.wanting.len() as u64);
+        if !self.wanting.iter().any(|w| w.set_like(&own)) {
+            self.wanting.push(own);
+        }
+    }
 }
 
 /// What makes a column gutter.
@@ -778,6 +848,87 @@ impl Cutter<'_> {
     /// looks at each band again.
     fn bands(&self, ids: Vec<usize>, at: &[usize], depth: usize, out: &mut Out) {
         let ends: Vec<usize> = at.iter().copied().chain([ids.len()]).collect();
+        // The bands of two rows that are a row of labels over the row of their values on
+        // their own evidence: what a band beside them may be read like.
+        let band = |k: usize| &ids[if k == 0 { 0 } else { ends[k - 1] }..ends[k]];
+        // What stands around band `k` for the rule of labels over values: the band over it,
+        // and the top row of the band under it when that row goes on the columns of `lower`
+        // (a piece of it under each piece of `lower`: the next row of a table, where the
+        // rule asks for small text again). Any other band under it is something else: the
+        // labels of the next fields over their values, or the text after the fields.
+        let around = |k: usize, lower: &[usize]| -> (Option<&[usize]>, Option<Vec<usize>>) {
+            let p = self.p;
+            let under = (k + 1 < ends.len())
+                .then(|| {
+                    let next = band(k + 1);
+                    let top = next.iter().map(|&i| p[i].baseline).reduce(f32::max)?;
+                    let row: Vec<usize> = next
+                        .iter()
+                        .copied()
+                        .filter(|&i| (p[i].baseline - top).abs() <= BASELINE_NEAR * p[i].size)
+                        .collect();
+                    work::add((next.len() + lower.len() * row.len()) as u64);
+                    lower
+                        .iter()
+                        .filter(|&&v| p[v].inked)
+                        .all(|&v| {
+                            row.iter().any(|&i| {
+                                p[i].inked
+                                    && p[i].bounds.x0 < p[v].ink_end()
+                                    && p[i].ink_end() > p[v].bounds.x0
+                            })
+                        })
+                        .then_some(row)
+                })
+                .flatten();
+            ((k > 0).then(|| band(k - 1)), under)
+        };
+        // Two rows with a rule between their baselines over one of their pieces are no row of
+        // labels over their values to the cut: the drawn structure (a box around a value, a
+        // rule under a label) parts them, and the typers of drawn structure read them. Such
+        // rows show no other row how its fields are set either.
+        let ruled_apart = |upper: &[usize], lower: &[usize]| {
+            let p = self.p;
+            let (Some(&u), Some(&l)) = (upper.first(), lower.first()) else {
+                return false;
+            };
+            let (high, low) = (p[u].baseline, p[l].baseline);
+            work::add((self.rules.len() + upper.len() + lower.len()) as u64);
+            self.rules.iter().any(|r| {
+                r.at > low
+                    && r.at < high
+                    && upper
+                        .iter()
+                        .chain(lower)
+                        .any(|&i| p[i].inked && r.from < p[i].ink_end() && r.to > p[i].bounds.x0)
+            })
+        };
+        // The ways the region sets a row of labels over their values, each once: a form
+        // sets its rows alike, so they are few however many rows it has.
+        let mut shown: Vec<Shown> = Vec::new();
+        for k in 0..ends.len() {
+            let Some((upper, lower)) =
+                two_rows(self.p, band(k)).filter(|(upper, lower)| !ruled_apart(upper, lower))
+            else {
+                continue;
+            };
+            let (over, under) = around(k, &lower);
+            if labels_over_values(self.p, &upper, &lower, (over, under.as_deref()), None).is_none()
+            {
+                continue;
+            }
+            work::add(shown.len() as u64);
+            if let Some(s) = Shown::of(self.p, &upper, &lower)
+                && !shown.iter().any(|o| o.like(&s))
+            {
+                shown.push(s);
+                let seen = &mut self.seen.borrow_mut().shown;
+                work::add(seen.len() as u64);
+                if !seen.iter().any(|o| o.set_like(&s)) {
+                    seen.push(s);
+                }
+            }
+        }
         let mut from = 0;
         let mut k = 0;
         while k < ends.len() {
@@ -785,18 +936,63 @@ impl Cutter<'_> {
             if from > 0 {
                 out.cut(Split::Band);
             }
+            // A band of two rows that is a row of labels over the row of their values (see
+            // `labels_over_values`), on its own evidence or like such a band of this region,
+            // is read cell by cell too, unless a drawn rule parts its rows.
+            let rows = two_rows(self.p, &ids[from..to])
+                .filter(|(upper, lower)| !ruled_apart(upper, lower));
+            let cells = rows.and_then(|(upper, lower)| {
+                let (over, under) = around(k, &lower);
+                let around = (over, under.as_deref());
+                labels_over_values(self.p, &upper, &lower, around, None).or_else(|| {
+                    // The shown row this one is set like, found before the rule is asked
+                    // again: one more look at the rows, not one for each shown row.
+                    // A row of this run of bands first, then a row from elsewhere on the
+                    // page, which must also set its values as far under its labels.
+                    work::add((shown.len() + self.page_shown.len()) as u64);
+                    let own = Shown::of(self.p, &upper, &lower)?;
+                    let like = shown
+                        .iter()
+                        .find(|s| own.like(s))
+                        .or_else(|| self.page_shown.iter().find(|s| own.set_like(s)));
+                    let Some(like) = like else {
+                        // Small text over larger text, as the rule asks: any other two
+                        // rows want nothing. Nor does a band that a shown row would not
+                        // make a row either (a value that ends with a colon, larger text
+                        // after it, a row before it): asked with the band's own setting
+                        // for the shown row, which a row set like it stands in for.
+                        if own.value.0 >= SIZE_STEP * own.label.0
+                            && labels_over_values(self.p, &upper, &lower, around, Some(&own))
+                                .is_some()
+                        {
+                            self.seen.borrow_mut().want(own);
+                        }
+                        return None;
+                    };
+                    labels_over_values(self.p, &upper, &lower, around, Some(like))
+                })
+            });
+            if let Some(cells) = cells {
+                out.cell(cells.concat());
+                from = to;
+                k += 1;
+                continue;
+            }
             // A row of labels over the row of their values (see `labels_over_values`) is read
             // cell by cell: each label, then the value under it.
             let cells = ends.get(k + 1).and_then(|&next| {
                 let before = (k > 0).then(|| &ids[if k > 1 { ends[k - 2] } else { 0 }..from]);
                 let after = ends.get(k + 2).map(|&end| &ids[next..end]);
-                labels_over_values(self.p, &ids[from..to], &ids[to..next], (before, after))
+                labels_over_values(
+                    self.p,
+                    &ids[from..to],
+                    &ids[to..next],
+                    (before, after),
+                    None,
+                )
             });
             if let Some(cells) = cells {
-                for cell in cells {
-                    out.cut(Split::Gutter);
-                    out.group(cell);
-                }
+                out.cell(cells.concat());
                 from = ends[k + 1];
                 k += 2;
                 continue;
@@ -810,9 +1006,11 @@ impl Cutter<'_> {
 
 /// Whether `text` reads as an amount or a date set in figures: it holds a digit, and nothing
 /// but digits, white space, signs of amounts and dates (`. , / - + : % ( )`) and currency
-/// signs. A label holds letters (`1 Wages`, `Box 12a`); a date with its month in words is
-/// not known here.
+/// signs, with the word of a currency before or after it as a word of its own (`1.200 EUR`,
+/// `CHF 80`, see [`without_currency`]). A label holds letters (`1 Wages`, `Box 12a`); a
+/// date with its month in words is not known here.
 pub fn reads_as_value(text: &str) -> bool {
+    let text = without_currency(text);
     text.chars().any(|c| c.is_ascii_digit())
         && text.chars().all(|c| {
             c.is_ascii_digit()
@@ -825,6 +1023,86 @@ pub fn reads_as_value(text: &str) -> bool {
         })
 }
 
+/// `text` without the word of a currency ([`CURRENCIES`], those in letters) at its start or
+/// at its end, white space at the ends aside. The word is a word of its own, parted from the
+/// rest by white space: `TEUR` is no `EUR`, and `EUR` alone stays as it is. A whole number
+/// with its currency is an amount and no year or number of a column.
+fn without_currency(text: &str) -> &str {
+    let t = text.trim();
+    for c in CURRENCIES
+        .iter()
+        .filter(|c| c.chars().all(char::is_alphabetic))
+    {
+        if let Some(rest) = t.strip_suffix(c)
+            && rest.ends_with(char::is_whitespace)
+        {
+            return rest.trim_end();
+        }
+        if let Some(rest) = t.strip_prefix(c)
+            && rest.starts_with(char::is_whitespace)
+        {
+            return rest.trim_start();
+        }
+    }
+    t
+}
+
+/// Whether `text` is the word or the sign of a currency alone ([`CURRENCIES`]): the run
+/// after or before the figures of an amount that is set in two runs.
+pub fn reads_as_currency(text: &str) -> bool {
+    CURRENCIES.contains(&text.trim())
+}
+
+/// How the text of a piece reads, taken run by run from the left, so that a piece reads the
+/// same whether its producer set it in one run or in several: the engine's pieces and a
+/// host's own pieces both read by it.
+///
+/// - The word or sign of a currency before the figures (`CHF` and `80`, `$` and `80`): a
+///   piece whose ink so far is only that says nothing yet, and its next run with ink
+///   decides (`CHF` and `Total` is no value).
+/// - The word of a currency after the figures goes on with the amount before it.
+/// - A whole number goes on with its next digits (see [`number_goes_on`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Reading {
+    /// The text reads as an amount or a date (see [`reads_as_value`]).
+    pub value: bool,
+    /// The whole number the text is (see [`whole_number`]).
+    pub number: Option<u64>,
+    /// The ink so far is one word or sign of a currency alone.
+    currency: bool,
+}
+
+impl Reading {
+    /// The reading of the first run with ink of a piece, `text`; `value` is how the host
+    /// reads that run alone ([`reads_as_value`], or the host's own reading of its marks).
+    pub fn of(text: &str, value: bool) -> Reading {
+        Reading {
+            value,
+            number: whole_number(text),
+            currency: reads_as_currency(text),
+        }
+    }
+
+    /// The reading of the piece with its next run with ink, `text`, which alone reads as
+    /// `value`.
+    pub fn goes_on(self, text: &str, value: bool) -> Reading {
+        if self.currency {
+            // The figures after their currency: an amount with the currency before it is
+            // no whole number (`CHF 80` in one run is none either).
+            return Reading {
+                value,
+                number: None,
+                currency: false,
+            };
+        }
+        Reading {
+            value: self.value && (value || reads_as_currency(text)),
+            number: number_goes_on(self.number, text),
+            currency: false,
+        }
+    }
+}
+
 /// The cells of a row of labels over the row of their values, left to right, each a label and
 /// the value under it (or a label alone): `upper` and `lower` are two bands of one row each
 /// that an equal band of white space parts (as it parts every row of the region), `upper`
@@ -835,18 +1113,36 @@ pub fn reads_as_value(text: &str) -> bool {
 /// `lower`: the small labels of a form's boxes over what is filled in. No piece of `upper`
 /// reads as an amount or a date, no piece of `lower` ends with a colon, and the band `before`
 /// is no row in the size of `upper` with a piece over each of its pieces: rows of a label
-/// and its value over a larger total row are rows. The band `after` them,
+/// and its value over a larger total row are rows. (With `like`, a row before that is a
+/// field with nothing filled in is none of those: see below.) The band `after` them,
 /// when there is one, is small text again: under the small header of a table come more rows
 /// in the size of the first. Read row by row, the values would follow the last label of
 /// their row, far from their own. `None` for any other two bands.
+///
+/// With `like` (a row of labels over their values that the region shows on its own evidence,
+/// see [`Shown`]), one label or more and one value or more are enough, when the two rows are
+/// set like the shown ones: the labels in the shown labels' size from their left edge, the
+/// values in the shown values' size from theirs. A form sets every row of its fields alike,
+/// and a row with one field filled in, or with one field only, is a row of them.
+/// A band `before` that is a label of the form with no value (set from the shown labels'
+/// left edge, with the room of the line of its value under it, at the shown step, above
+/// `upper`) does not make the two rows the last of a block of rows.
 fn labels_over_values(
     p: &[Piece],
     upper: &[usize],
     lower: &[usize],
     (before, after): (Option<&[usize]>, Option<&[usize]>),
+    like: Option<&Shown>,
 ) -> Option<Vec<Vec<usize>>> {
     // The pieces of a band are sorted by row: its first and last tell whether it is one row.
-    let one_row = |band: &[usize]| matches!((band.first(), band.last()), (Some(&a), Some(&b)) if p[a].line == p[b].line);
+    // Or all on one baseline (see [`two_rows`]).
+    let one_row = |band: &[usize]| {
+        matches!((band.first(), band.last()), (Some(&a), Some(&b)) if p[a].line == p[b].line)
+            || band.first().is_some_and(|&a| {
+                band.iter()
+                    .all(|&i| (p[i].baseline - p[a].baseline).abs() <= BASELINE_NEAR * p[i].size)
+            })
+    };
     if !one_row(upper) || !one_row(lower) {
         return None;
     }
@@ -857,7 +1153,18 @@ fn labels_over_values(
         v
     };
     let (labels, values) = (inked(upper), inked(lower));
-    if labels.len() < 2 || values.len() < 2 || values.len() > labels.len() {
+    // A piece that stands in for a drawn box is read with its box: the drawn structure
+    // says what its text is, and the typers of boxes and grids read it.
+    if labels.iter().chain(&values).any(|&i| p[i].boxed.is_some()) {
+        return None;
+    }
+    let least = if like.is_some() { 1 } else { 2 };
+    if labels.len() < least || values.len() < least || values.len() > labels.len() {
+        return None;
+    }
+    if let Some(s) = like
+        && Shown::of(p, upper, lower).is_none_or(|own| !own.like(s))
+    {
         return None;
     }
     let largest = labels.iter().map(|&i| p[i].size).fold(f32::MIN, f32::max);
@@ -874,8 +1181,26 @@ fn labels_over_values(
     }
     // The band over the labels is no row like them: a row in their size with a piece over
     // each of them is the row before of one block of rows, whose last row is set larger.
+    // By their ink: the blanks a print run pads a value with reach under the next label.
     let over =
-        |a: usize, b: usize| p[a].bounds.x0 < p[b].bounds.x1 && p[a].bounds.x1 > p[b].bounds.x0;
+        |a: usize, b: usize| p[a].bounds.x0 < p[b].ink_end() && p[a].ink_end() > p[b].bounds.x0;
+    // Unless that row is a field of the form with nothing filled in, which only a shown row
+    // can say: it starts from the left edge of the shown labels, and the line of its value,
+    // as far under it as the shown values stand under their labels, is free above the
+    // labels of this row (their baseline and their size over it, the height of their line).
+    // The rows of one block follow each other with no such room.
+    let top = labels
+        .iter()
+        .map(|&i| p[i].baseline + p[i].size)
+        .fold(f32::MIN, f32::max);
+    let empty_field = |row: &[usize]| {
+        like.is_some_and(|s| {
+            row.first().is_some_and(|&i| {
+                (p[i].bounds.x0 - s.label.1).abs()
+                    <= crate::line::EDGE_SIZES * p[i].size.max(s.label.0)
+            }) && row.iter().all(|&i| p[i].baseline - s.drop >= top)
+        })
+    };
     if before.is_some_and(|b| {
         let row = inked(b);
         one_row(b)
@@ -883,6 +1208,7 @@ fn labels_over_values(
                 .iter()
                 .all(|&i| p[i].size < SIZE_STEP * largest && largest < SIZE_STEP * p[i].size)
             && labels.iter().all(|&l| row.iter().any(|&i| over(i, l)))
+            && !empty_field(&row)
     }) {
         return None;
     }
@@ -924,12 +1250,123 @@ fn labels_over_values(
     Some(cells)
 }
 
+/// How a row of labels over the row of their values is set: the size and the left edge of
+/// its labels and of its values, from the first label and the first value with ink.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Shown {
+    label: (f32, f32),
+    value: (f32, f32),
+    /// How far the baseline of the values lies under that of the labels.
+    drop: f32,
+}
+
+impl Shown {
+    /// How the rows `upper` and `lower` are set; `None` when one of them has no ink.
+    fn of(p: &[Piece], upper: &[usize], lower: &[usize]) -> Option<Shown> {
+        let first = |band: &[usize]| {
+            band.iter()
+                .filter(|&&i| p[i].inked)
+                .min_by(|&&a, &&b| p[a].bounds.x0.total_cmp(&p[b].bounds.x0))
+                .map(|&i| ((p[i].size, p[i].bounds.x0), p[i].baseline))
+        };
+        let ((label, high), (value, low)) = (first(upper)?, first(lower)?);
+        Some(Shown {
+            label,
+            value,
+            drop: high - low,
+        })
+    }
+
+    /// Whether two rows set like `self` are set like `other` in every way a row of another
+    /// part of the page is asked for: [`Shown::like`], and the values as far under their
+    /// labels (the two steps within [`BASELINE_NEAR`] of the size of the values). Rows of
+    /// one run of bands stand between the same bands of white space; a row from elsewhere
+    /// has only how it is set itself to say that it is a field of the same form (a small
+    /// sender line over a name starts from one left edge with a form's fields often, but is
+    /// not set at their step).
+    fn set_like(&self, other: &Shown) -> bool {
+        self.like(other)
+            && (self.drop - other.drop).abs() <= BASELINE_NEAR * self.value.0.max(other.value.0)
+    }
+
+    /// Whether two rows set like `self` are set like `other`: the labels in one size (no size
+    /// step, [`SIZE_STEP`], between them) from one left edge (within
+    /// [`crate::line::EDGE_SIZES`] of their size), and the values too.
+    fn like(&self, other: &Shown) -> bool {
+        let same = |a: (f32, f32), b: (f32, f32)| {
+            a.0 < SIZE_STEP * b.0
+                && b.0 < SIZE_STEP * a.0
+                && (a.1 - b.1).abs() <= crate::line::EDGE_SIZES * a.0.max(b.0)
+        };
+        same(self.label, other.label) && same(self.value, other.value)
+    }
+}
+
+/// The two rows of `band`, when it holds exactly two: its pieces on its highest baseline and
+/// its pieces on its lowest one, each left to right. Rows are told by their baselines (one
+/// when within [`BASELINE_NEAR`] of the piece's size), not by their line: a host that reads
+/// labels over values cell by cell numbers the two pieces of a row as two lines.
+fn two_rows(p: &[Piece], band: &[usize]) -> Option<(Vec<usize>, Vec<usize>)> {
+    let on = |i: usize, y: f32| (p[i].baseline - y).abs() <= BASELINE_NEAR * p[i].size;
+    // The baselines of the two rows as they come: a piece on a third one ends the look, so
+    // a band of many rows costs what its first rows cost.
+    let (mut first, mut second): (Option<f32>, Option<f32>) = (None, None);
+    let mut seen = 0u64;
+    let mut two = true;
+    for &i in band {
+        seen += 1;
+        match (first, second) {
+            (None, _) => first = Some(p[i].baseline),
+            (Some(a), _) if on(i, a) => {}
+            (Some(_), None) => second = Some(p[i].baseline),
+            (Some(_), Some(b)) if on(i, b) => {}
+            _ => {
+                two = false;
+                break;
+            }
+        }
+    }
+    work::add(seen);
+    let (a, b) = (first?, second.filter(|_| two)?);
+    let (top, low) = (a.max(b), a.min(b));
+    work::add(2 * band.len() as u64);
+    let row = |y: f32| {
+        let mut row: Vec<usize> = band.iter().copied().filter(|&i| on(i, y)).collect();
+        row.sort_by(|&a, &b| p[a].bounds.x0.total_cmp(&p[b].bounds.x0));
+        row
+    };
+    let (upper, lower) = (row(top), row(low));
+    (upper.len() + lower.len() == band.len() && !upper.iter().any(|&i| on(i, low)))
+        .then_some((upper, lower))
+}
+
 /// Whether `text` is a whole number: digits only, white space at its ends aside. A year over
 /// a column of amounts or the number of a column is one; an amount with a decimal mark, a
 /// share or a date is not.
 pub fn reads_as_number(text: &str) -> bool {
     let t = text.trim();
     !t.is_empty() && t.chars().all(|c| c.is_ascii_digit())
+}
+
+/// The whole number `text` is (see [`reads_as_number`]), when it fits: a number of more
+/// digits than a count has names no column.
+pub fn whole_number(text: &str) -> Option<u64> {
+    reads_as_number(text)
+        .then(|| text.trim().parse().ok())
+        .flatten()
+}
+
+/// The whole number of a piece that is `number` so far and goes on with the run `text`: the
+/// digits of both in a row (`20` and `24` are `2024`), when the run is digits only and
+/// starts with one.
+pub fn number_goes_on(number: Option<u64>, text: &str) -> Option<u64> {
+    let (head, more) = (number?, whole_number(text)?);
+    if !text.starts_with(|c: char| c.is_ascii_digit()) {
+        return None;
+    }
+    let digits = u32::try_from(text.trim().len()).ok()?;
+    head.checked_mul(10u64.checked_pow(digits)?)?
+        .checked_add(more)
 }
 
 /// A piece reaches into a gutter when it reaches past its edge by more than this share of
@@ -2156,7 +2593,7 @@ const RULED_ROWS: usize = 2;
 
 /// Two pieces stand at one edge of a column when their left or their right ends are within
 /// this share of their text size.
-const ROW_EDGE: f32 = 0.25;
+pub(crate) const ROW_EDGE: f32 = 0.25;
 
 /// The baseline of a header stands at most this many of its sizes over the rule under it. A
 /// label that sits on its rule (a title on an underline, a field of a form on its line) has
@@ -2165,25 +2602,40 @@ const ROW_EDGE: f32 = 0.25;
 const HEADER_OVER_RULE: f32 = 1.0;
 
 /// Whole numbers in a row over a rule are titles when the row holds at least this many of
-/// them: one number says nothing (it is the amount of the label beside it as well as a
-/// year), two or more side by side are a run of years or of column numbers.
-///
-/// Known gap (review Q6 of Task 31b, owner Task 26, which reads the amounts of labels and
-/// values): two whole-number amounts side by side (`Total 12 340`: two counts, or amounts
-/// in a currency without decimals) are titles by this count too, and their row is taken
-/// for the header of the rows under the rule. A whole number alone does not say whether
-/// it is an amount or a year. The gap is pinned in
-/// `two_whole_amounts_over_the_rule_are_titles_still`.
+/// them and they count (see [`counting`]): one number says nothing (it is the amount of the
+/// label beside it as well as a year), two or more side by side that go up or down by one
+/// are a run of years or of column numbers.
 const TITLE_NUMBERS: usize = 2;
+
+/// Whether the whole numbers of a row, from left to right, count: there are
+/// [`TITLE_NUMBERS`] or more, and each is one more than the one before it, or each one
+/// less (`2024 2025`, `2025 2024 2023`, `1 2 3`). The step of one is what a run of years and
+/// the numbers of columns have, and what two sums side by side have by chance only (`Total
+/// 12 340`: two counts, or amounts in a currency without decimals, review Q6 of Task 31b).
+/// Nothing else in a whole number tells a title from an amount, so numbers that do not
+/// count are amounts: titles that skip (`2020 2024`) then stay over the rule as a row of
+/// their own, an honest read, where sums read as titles would be a wrong header.
+fn counting(numbers: &[u64]) -> bool {
+    let steps = |up: bool| {
+        numbers.windows(2).all(|w| {
+            if up {
+                w[0].checked_add(1) == Some(w[1])
+            } else {
+                w[1].checked_add(1) == Some(w[0])
+            }
+        })
+    };
+    numbers.len() >= TITLE_NUMBERS && (steps(true) || steps(false))
+}
 
 /// Where the header row of the stretch `a..z` of the sorted pieces `ids` starts, under a rule
 /// at the height `rule`, and how many titles it has: the index of the first piece of the row
 /// right over the rule, when that row is tied to the rows under the rule. Its baselines stand
 /// on the rule or over it and close to it (see [`HEADER_OVER_RULE`]), it has two pieces with ink
-/// or more, none of them reads as an amount or a date (a title is words, or one of
-/// [`TITLE_NUMBERS`] whole numbers or more in the row, see [`reads_as_number`]: a line of a
-/// label and its amount over the rule is a row of totals, no header, also when the amount
-/// is a whole number), and each of them stands over
+/// or more, none of them reads as an amount or a date (a title is words, or one of the whole
+/// numbers of the row when they count, see [`counting`]: a line of a label and its amount
+/// over the rule is a row of totals, no header, also when the amount is a whole number or
+/// there are two of them), and each of them stands over
 /// text of the stretch (their widths overlap) but over no two pieces of one row of it: titles
 /// over their columns. A line of prose over the rule is one piece, and a title across two
 /// columns is not taken: such a row stays with the text over the rule.
@@ -2205,11 +2657,18 @@ fn header_row(
         .filter(|&i| p[i].inked)
         .collect();
     work::add((row.len() * (z - a)) as u64);
-    // A whole number is a title only among others like it: years over their columns, the
-    // numbers of the columns. One whole number beside a label is the amount of that label
-    // (`Total 250`: a count, or an amount in a currency without decimals).
-    let numbers = row.iter().filter(|&&i| p[i].number).count();
-    let amount = |q: &Piece| q.value && !(q.number && numbers >= TITLE_NUMBERS);
+    // A whole number is a title only among others that count with it: years over their
+    // columns, the numbers of the columns. One whole number beside a label is the amount of
+    // that label (`Total 250`: a count, or an amount in a currency without decimals), and
+    // two that do not count are two sums.
+    let mut numbers: Vec<(f32, u64)> = row
+        .iter()
+        .filter_map(|&i| p[i].number.map(|n| (p[i].bounds.x0, n)))
+        .collect();
+    numbers.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let numbers: Vec<u64> = numbers.iter().map(|n| n.1).collect();
+    let titles = counting(&numbers);
+    let amount = |q: &Piece| q.value && !(q.number.is_some() && titles);
     if row.len() < 2 || row.iter().any(|&i| amount(&p[i])) {
         return None;
     }
@@ -2468,6 +2927,10 @@ fn split_at(p: &[Piece], ids: &[usize], sides: &Sides, allowed: i32, size: f32) 
     let split = if prose(&left) && prose(&right) {
         Why::Prose
     } else if apart() {
+        // Labels with their values set lower beside them are rows, no two blocks.
+        if labels_beside_values(p, &left, &right) {
+            return None;
+        }
         Why::Offset
     } else if lone_row(p, &left, &right) || lone_row(p, &right, &left) {
         Why::Lone
@@ -2491,6 +2954,100 @@ fn split_at(p: &[Piece], ids: &[usize], sides: &Sides, allowed: i32, size: f32) 
     let overlap = a.1.min(b.1) - a.0.max(b.0);
     let smaller = (a.1 - a.0).min(b.1 - b.0).max(0.01);
     (overlap / smaller >= 0.3).then_some(split)
+}
+
+/// Whether the side `left` is a column of small labels and the side `right` the column of
+/// their values, each value set lower beside its label (a print form's label over the upper
+/// left corner of its field: `Amount`, then lower and to the right the boxed digits): the
+/// two sides are rows of a label and its value, read row by row, and no two blocks side by
+/// side. Baselines that do not line up are no sign of two blocks here; they are how such a
+/// form sets a label by its field.
+///
+/// Every sign is asked, and the document shows the way a row is set twice or more:
+///
+/// - each side holds the same number of rows, two or more, and nothing without ink; a label
+///   is one piece alone on its baseline, a value may be set in pieces (digit by digit).
+///   What the side of the labels holds under the last value is not asked: it is read after
+///   the rows either way;
+/// - the labels stand in one size from one left edge (within [`crate::line::EDGE_SIZES`]),
+///   and so do the values; the values are larger by a size step ([`SIZE_STEP`]);
+/// - every piece of a value reads as an amount, a date or a whole number, and no label does;
+/// - from the top down a label, its value, the next label: each value stands under its
+///   label by one step that all rows share (within [`BASELINE_NEAR`] of the value's size),
+///   nearer to its label than to the label after it.
+pub(crate) fn labels_beside_values(p: &[Piece], left: &[usize], right: &[usize]) -> bool {
+    /// A row of a side: its baseline, its left edge, its size, the number of its pieces,
+    /// and whether every piece of it reads as a value.
+    type Row = (f32, f32, f32, usize, bool);
+    work::add((left.len() + right.len()) as u64);
+    if left.len() < 2 || right.len() < 2 {
+        return false;
+    }
+    // The rows of a side from the top down.
+    let rows = |side: &[usize]| -> Option<Vec<Row>> {
+        if side.iter().any(|&i| !p[i].inked) {
+            return None;
+        }
+        let mut col = side.to_vec();
+        col.sort_by(|&a, &b| p[b].baseline.total_cmp(&p[a].baseline));
+        let mut out: Vec<Row> = Vec::new();
+        for &i in &col {
+            let q = &p[i];
+            let value = q.value || q.number.is_some();
+            match out.last_mut() {
+                Some(r) if (r.0 - q.baseline).abs() <= BASELINE_NEAR * q.size => {
+                    *r = (
+                        r.0,
+                        r.1.min(q.bounds.x0),
+                        r.2.max(q.size),
+                        r.3 + 1,
+                        r.4 && value,
+                    );
+                }
+                _ => out.push((q.baseline, q.bounds.x0, q.size, 1, value)),
+            }
+        }
+        let first = out[0];
+        out.iter()
+            .all(|r| {
+                r.2 < SIZE_STEP * first.2
+                    && first.2 < SIZE_STEP * r.2
+                    && (r.1 - first.1).abs() <= crate::line::EDGE_SIZES * r.2.max(first.2)
+            })
+            .then_some(out)
+    };
+    // The side of the labels may go on under the last value (the text that follows the
+    // fields): only what stands over that value is asked to be labels.
+    let last = right
+        .iter()
+        .map(|&i| p[i].baseline)
+        .fold(f32::MAX, f32::min);
+    let over: Vec<usize> = left
+        .iter()
+        .copied()
+        .filter(|&i| p[i].baseline > last)
+        .collect();
+    if over.len() < 2 {
+        return false;
+    }
+    let (Some(labels), Some(values)) = (rows(&over), rows(right)) else {
+        return false;
+    };
+    let (small, large) = (labels[0].2, values[0].2);
+    if labels.len() != values.len()
+        || large < SIZE_STEP * small
+        || labels.iter().any(|r| r.3 != 1 || r.4)
+        || values.iter().any(|r| !r.4)
+    {
+        return false;
+    }
+    let step = labels[0].0 - values[0].0;
+    let near = BASELINE_NEAR * large;
+    (0..labels.len()).all(|k| {
+        let down = labels[k].0 - values[k].0;
+        let next = labels.get(k + 1).map(|n| values[k].0 - n.0);
+        down > near && (down - step).abs() <= near && next.is_none_or(|n| n > down)
+    })
 }
 
 /// The pieces `ids` in the order of their rows, with where each goes at the gutter of
@@ -2824,7 +3381,7 @@ mod tests {
             runs: 1,
             colon: false,
             value: false,
-            number: false,
+            number: None,
             boxed: None,
             rows: 1,
             trail: 0.0,
@@ -3088,6 +3645,106 @@ mod tests {
     }
 
     /// A piece of text on the baseline `y`, with the extent of its size.
+    /// Task 26 (the print form golden): two labels, each over the upper left of its value
+    /// (lower and to the right of it), are rows and no two blocks side by side. Each sign
+    /// moves the answer: the count of the rows, the size step, the values' reading, the
+    /// shared edges, the shared step down, and a value nearer to the next label than to
+    /// its own. Text of the label side under the last value is not asked.
+    #[test]
+    fn labels_with_values_set_lower_beside_them_are_rows() {
+        let label = |y: f32| text(300.0, 320.0, 0, y, 6.0, 6);
+        let value = |y: f32| Piece {
+            value: true,
+            ..text(382.0, 416.0, 0, y, 9.5, 7)
+        };
+        let ask = |ps: &[Piece], labels: usize| {
+            let left: Vec<usize> = (0..labels).collect();
+            let right: Vec<usize> = (labels..ps.len()).collect();
+            labels_beside_values(ps, &left, &right)
+        };
+        let form = [label(470.0), label(440.0), value(460.0), value(430.0)];
+        assert!(ask(&form, 2));
+        // One row shows nothing; three rows set alike are rows.
+        assert!(!ask(&[label(470.0), value(460.0)], 1));
+        let three = [
+            label(470.0),
+            label(440.0),
+            label(410.0),
+            value(460.0),
+            value(430.0),
+            value(400.0),
+        ];
+        assert!(ask(&three, 3));
+        // A label between the rows with no value of its own: the counts differ. A last
+        // label with none stands under the last value and is read after the rows.
+        let gap = [
+            three[0].clone(),
+            three[1].clone(),
+            three[2].clone(),
+            three[3].clone(),
+            three[5].clone(),
+        ];
+        assert!(!ask(&gap, 3));
+        assert!(ask(&three[..5], 3));
+        // The values larger by a size step, and not.
+        let sized = |size: f32| {
+            let mut ps = form.clone();
+            (ps[2].size, ps[3].size) = (size, size);
+            ps
+        };
+        assert!(ask(&sized(6.0 * SIZE_STEP + 0.01), 2));
+        assert!(!ask(&sized(6.0 * SIZE_STEP - 0.01), 2));
+        // A value that reads as no amount or date, and a label that reads as one.
+        let mut words = form.clone();
+        words[3].value = false;
+        assert!(!ask(&words, 2));
+        let mut figures = form.clone();
+        figures[0].value = true;
+        assert!(!ask(&figures, 2));
+        // The values from one left edge: within `EDGE_SIZES` of the size, and past it.
+        let edge = |dx: f32| {
+            let mut ps = form.clone();
+            ps[3].bounds.x0 += dx;
+            ps
+        };
+        assert!(ask(&edge(crate::line::EDGE_SIZES * 9.5 - 0.05), 2));
+        assert!(!ask(&edge(crate::line::EDGE_SIZES * 9.5 + 0.05), 2));
+        // One step down for every row: within `BASELINE_NEAR` of the size, and past it.
+        let down = |dy: f32| [label(470.0), label(440.0), value(460.0), value(430.0 - dy)];
+        assert!(ask(&down(BASELINE_NEAR * 9.5 - 0.05), 2));
+        assert!(!ask(&down(BASELINE_NEAR * 9.5 + 0.05), 2));
+        // A value nearer to the label after it than to its own belongs to neither by place.
+        assert!(!ask(
+            &[label(470.0), label(440.0), value(452.0), value(422.0)],
+            2
+        ));
+        // A value on the baseline of its label is a row the cut reads already.
+        assert!(!ask(
+            &[label(470.0), label(440.0), value(470.0), value(440.0)],
+            2
+        ));
+        // Text of the label side under the last value is read after the rows either way.
+        let mut more = vec![
+            label(470.0),
+            label(440.0),
+            text(300.0, 420.0, 0, 400.0, 9.5, 30),
+        ];
+        more.extend([value(460.0), value(430.0)]);
+        assert!(ask(&more, 3));
+        // A value set digit by digit is one row of pieces.
+        let digits = [
+            label(470.0),
+            label(440.0),
+            value(460.0),
+            Piece {
+                number: Some(4),
+                ..text(420.0, 426.0, 0, 460.0, 9.5, 1)
+            },
+            value(430.0),
+        ];
+        assert!(ask(&digits, 2));
+    }
+
     fn text(x0: f32, x1: f32, line: u32, y: f32, size: f32, chars: usize) -> Piece {
         Piece {
             bounds: Bounds {
@@ -3105,7 +3762,7 @@ mod tests {
             runs: 1,
             colon: false,
             value: false,
-            number: false,
+            number: None,
             boxed: None,
             rows: 1,
             trail: 0.0,
@@ -3334,38 +3991,91 @@ mod tests {
             assert!(rows_read_whole(&cut, &firsts[1..]), "{:?}", cut.groups);
             !parted_by_the_rule(&cut, firsts[0], firsts[1])
         };
-        for c in 2..4 {
-            ps[firsts[0] + c].value = true;
-            ps[firsts[0] + c].number = true;
-        }
+        let set = |ps: &mut [Piece], c: usize, n: Option<u64>| {
+            ps[firsts[0] + c].value = n.is_some();
+            ps[firsts[0] + c].number = n;
+        };
+        set(&mut ps, 2, Some(2024));
+        set(&mut ps, 3, Some(2025));
         assert!(header(&ps));
-        ps[firsts[0] + 3].number = false;
+        // One of them an amount with a decimal mark: a value and no number.
+        ps[firsts[0] + 3].number = None;
         assert!(!header(&ps));
         // Review P4 of Task 31b. One whole number in the row is the amount of the label
-        // beside it (`Total 250`), no title: a row of values, no header. Two are titles.
-        for c in 2..4 {
-            ps[firsts[0] + c].value = c == 3;
-            ps[firsts[0] + c].number = c == 3;
-        }
+        // beside it (`Total 250`), no title: a row of values, no header.
+        set(&mut ps, 2, None);
+        set(&mut ps, 3, Some(250));
         assert!(!header(&ps));
-        ps[firsts[0] + 2].value = true;
-        ps[firsts[0] + 2].number = true;
-        assert!(header(&ps));
+        // Two that count are titles, up or down, years or the numbers of columns; two that
+        // do not count are two sums (review Q6 of Task 31b), and so are two alike.
+        for (a, b, titles) in [
+            (2025, 2024, true),
+            (3, 4, true),
+            (12, 340, false),
+            (2020, 2024, false),
+            (250, 250, false),
+            (u64::MAX - 1, u64::MAX, true),
+            (u64::MAX, 0, false),
+        ] {
+            set(&mut ps, 2, Some(a));
+            set(&mut ps, 3, Some(b));
+            assert_eq!(header(&ps), titles, "{a} {b}");
+        }
         assert!(reads_as_number(" 2025 ") && reads_as_number("3"));
         assert!(!reads_as_number("12,50") && !reads_as_number("Q1") && !reads_as_number(" "));
+        assert_eq!(whole_number(" 2025 "), Some(2025));
+        assert_eq!(whole_number("12,50"), None);
+        assert_eq!(whole_number("123456789012345678901234567890"), None);
+        // A number in two runs is the number of its digits in a row.
+        assert_eq!(number_goes_on(Some(20), "24"), Some(2024));
+        assert_eq!(number_goes_on(Some(20), "05 "), Some(2005));
+        assert_eq!(number_goes_on(Some(20), " 24"), None);
+        assert_eq!(number_goes_on(Some(20), "a"), None);
+        assert_eq!(number_goes_on(None, "24"), None);
+        assert_eq!(number_goes_on(Some(u64::MAX), "24"), None);
+        assert!(counting(&[1, 2, 3]) && counting(&[3, 2, 1]));
+        assert!(!counting(&[1, 2, 4]) && !counting(&[1, 2, 1]) && !counting(&[7]));
     }
 
     #[test]
-    fn two_whole_amounts_over_the_rule_are_titles_still() {
-        // A pin of a known gap, not of a wanted read (review Q6 of Task 31b, owner Task
-        // 26). The row right over the rule in pieces is a row of sums, `Total` and two
-        // whole-number amounts in the columns of the rows under the rule (two counts, or
-        // amounts in a currency without decimals). The cut sees two whole numbers side by
-        // side, which are titles as two years are (see `TITLE_NUMBERS`), and takes the row
-        // for the header of the rows under the rule: the sums leave their block and stand
-        // as titles over the columns. Nothing in a whole number tells an amount from a
-        // year. Task 26 reads the amounts of labels and values; when it tells this row
-        // from a row of titles, the row stays over the rule, and this pin is changed.
+    fn an_amount_with_the_word_of_its_currency_is_a_value() {
+        // Q6 of Task 31b, the amounts of the shape `totals with whole amounts`: a whole
+        // number with its currency in letters is an amount.
+        for t in [
+            "1.200 EUR",
+            " 228 EUR",
+            "EUR 228",
+            "CHF 80,50",
+            "12 USD ",
+            "228 \u{20ac}",
+        ] {
+            assert!(reads_as_value(t), "{t}");
+            assert!(!reads_as_number(t), "{t}");
+        }
+        // The word alone, a word that ends like one, a word glued to the figures, a label.
+        for t in [
+            "EUR",
+            "12 TEUR",
+            "TEUR 12",
+            "228EUR",
+            "Box 12",
+            "EUR EUR",
+            "12 EUR net",
+        ] {
+            assert!(!reads_as_value(t), "{t}");
+        }
+        assert!(reads_as_currency(" EUR ") && reads_as_currency("$"));
+        assert!(!reads_as_currency("TEUR") && !reads_as_currency("EUR 1"));
+    }
+
+    #[test]
+    fn two_whole_amounts_over_the_rule_are_no_titles() {
+        // Review Q6 of Task 31b, a pin of a known gap until Task 26 part 3c-1. The row
+        // right over the rule in pieces is a row of sums, `Total` and two whole-number
+        // amounts in the columns of the rows under the rule (two counts, or amounts in a
+        // currency without decimals). Two whole numbers side by side are titles only when
+        // they count as two years do (see `counting`): these do not, so the row is a row of
+        // values and stays over the rule, and the rows under it read whole.
         let (mut ps, rules, firsts) = rows_between_rules();
         let (joints, joined) = ruled_rows(&rules);
         let ruled = Ruled {
@@ -3373,18 +4083,26 @@ mod tests {
             joined: &joined,
             joints: &joints,
         };
-        for c in 2..4 {
+        for (c, n) in [(2, 12), (3, 340)] {
             ps[firsts[0] + c].value = true;
-            ps[firsts[0] + c].number = true;
+            ps[firsts[0] + c].number = Some(n);
         }
         let cut = xy_cut_ruled(&ps, &ruled, &Limits::default(), &|| false);
         assert!(
-            !parted_by_the_rule(&cut, firsts[0], firsts[1]),
-            "the known gap is closed: turn this pin"
+            parted_by_the_rule(&cut, firsts[0], firsts[1]),
+            "{:?}",
+            cut.groups
         );
-        // With a decimal amount among them the row is a row of values already: it stays
-        // over the rule, and the rows under it read whole (part 2b of Task 31c).
-        ps[firsts[0] + 3].number = false;
+        assert!(rows_read_whole(&cut, &firsts[1..]), "{:?}", cut.groups);
+        // The same two as years are the titles of the rows.
+        for (c, n) in [(2, 2024), (3, 2025)] {
+            ps[firsts[0] + c].number = Some(n);
+        }
+        let cut = xy_cut_ruled(&ps, &ruled, &Limits::default(), &|| false);
+        assert!(!parted_by_the_rule(&cut, firsts[0], firsts[1]));
+        // With a decimal amount among them the row is a row of values: it stays over the
+        // rule, and the rows under it read whole (part 2b of Task 31c).
+        ps[firsts[0] + 3].number = None;
         let cut = xy_cut_ruled(&ps, &ruled, &Limits::default(), &|| false);
         assert!(
             parted_by_the_rule(&cut, firsts[0], firsts[1]),
@@ -3446,10 +4164,10 @@ mod tests {
         assert!(parted_by_the_rule(&cut, firsts[0], firsts[1]));
         // The same when the amount is a whole number (a count, an amount in a currency
         // without decimals): one number beside labels is no title.
-        ps[firsts[0] + 3].number = true;
+        ps[firsts[0] + 3].number = Some(250);
         let cut = read(&ps, &firsts[1..]);
         assert!(parted_by_the_rule(&cut, firsts[0], firsts[1]));
-        ps[firsts[0] + 3].number = false;
+        ps[firsts[0] + 3].number = None;
         ps[firsts[0] + 3].value = false;
         let cut = read(&ps, &firsts[1..]);
         assert!(!parted_by_the_rule(&cut, firsts[0], firsts[1]));
@@ -6122,10 +6840,336 @@ mod tests {
         for x in [50.0f32, 200.0, 350.0] {
             ps.push(worded(x, x + 50.0, 1, 660.0, 10.0, false, true));
         }
+        let cut = cut_of(&ps, &[]);
+        assert_eq!(cut.groups, vec![vec![0, 3, 1, 4, 2, 5]]);
+        // The group is marked as a row of labels over their values.
+        assert_eq!(cut.cells, vec![0]);
+    }
+
+    /// Task 26 (A2, H1): rows of fields without rules, small labels a tenth of a size over
+    /// their larger values, the rows a wider band apart. The first row shows the rule on
+    /// its own evidence (two labels, two values); the second has one value under its first
+    /// label, and the third one label over one value: each is set like the first (sizes and
+    /// left edges) and reads cell by cell too. A lone label over a value that is set from
+    /// another left edge is not read like it, nor is any of them without the first row.
+    #[test]
+    fn rows_of_fields_set_like_a_shown_row_read_cell_by_cell() {
+        let label = |x: f32, line: u32, y: f32| worded(x, x + 60.0, line, y, 8.0, false, false);
+        let value = |x: f32, line: u32, y: f32| worded(x, x + 50.0, line, y, 10.0, false, true);
+        let rows = |shift: f32| {
+            vec![
+                label(50.0, 0, 700.0),
+                label(200.0, 0, 700.0),
+                value(53.0, 1, 689.0),
+                value(203.0, 1, 689.0),
+                label(50.0, 2, 670.0),
+                label(200.0, 2, 670.0),
+                value(53.0, 3, 659.0),
+                label(50.0 + shift, 4, 640.0),
+                value(53.0 + shift, 5, 629.0),
+            ]
+        };
+        let cut = cut_of(&rows(0.0), &[]);
         assert_eq!(
-            cut_of(&ps, &[]).groups,
-            vec![vec![0, 3], vec![1, 4], vec![2, 5]]
+            cut.groups,
+            vec![vec![0, 2, 1, 3], vec![4, 6, 5], vec![7, 8]]
         );
+        assert_eq!(cut.cells, vec![0, 1, 2]);
+        // Set from another left edge (three sizes off), the lone pair is two lines.
+        let cut = cut_of(&rows(30.0), &[]);
+        assert_eq!(cut.cells, vec![0, 1]);
+        // Without the row that shows the rule, nothing is read like it.
+        let alone: Vec<Piece> = rows(0.0)[4..].to_vec();
+        assert_eq!(cut_of(&alone, &[]).cells, Vec::<usize>::new());
+        // Fix round 1 (M4): with a drawn rule between the labels and the values of the row
+        // that shows the rule, that row is the drawn typers' business and shows nothing:
+        // no row is read like it. A rule over the row parts nothing.
+        let rule = |at: f32| Line {
+            at,
+            from: 40.0,
+            to: 300.0,
+        };
+        assert_eq!(
+            cut_of(&rows(0.0), &[rule(695.0)]).cells,
+            Vec::<usize>::new()
+        );
+        assert_eq!(cut_of(&rows(0.0), &[rule(715.0)]).cells, vec![0, 1, 2]);
+    }
+
+    /// Task 26 part 3a (H1): a field alone, far from the rows that show how the page sets a
+    /// row of labels over their values, with other text between them, so that it stands in
+    /// another run of bands: it is read cell by cell when it is set like such a row, the same
+    /// sizes from the same left edges and the value as far under its label. It is whether
+    /// it stands under those rows or over them. Set from another left edge or at another
+    /// step it stays two lines, as it does on a page that shows no such row.
+    #[test]
+    fn a_field_alone_is_read_like_the_rows_of_fields_elsewhere_on_the_page() {
+        let label = |x: f32, line: u32, y: f32| worded(x, x + 60.0, line, y, 8.0, false, false);
+        let value = |x: f32, line: u32, y: f32| worded(x, x + 50.0, line, y, 10.0, false, true);
+        let prose = |line: u32, y: f32| worded(50.0, 400.0, line, y, 8.0, false, false);
+        // The rows that show the rule (two labels over two values), a long line, a wide
+        // band, then the field alone: `shift` moves it sideways, `drop` sets its value
+        // lower.
+        let page = |shown: bool, shift: f32, drop: f32, over: bool| {
+            let at = if over { 900.0 } else { 500.0 };
+            let mut ps = vec![];
+            if shown {
+                ps.extend([
+                    label(50.0, 0, 700.0),
+                    label(200.0, 0, 700.0),
+                    value(53.0, 1, 689.0),
+                    value(203.0, 1, 689.0),
+                ]);
+            }
+            ps.extend([
+                prose(2, 650.0),
+                label(50.0 + shift, 3, at),
+                value(53.0 + shift, 4, at - drop),
+            ]);
+            // The rows are numbered from the top of the page.
+            if over {
+                for q in &mut ps {
+                    q.line = (q.line + 2) % 5;
+                }
+            }
+            ps
+        };
+        let field = |ps: &[Piece]| {
+            let cut = cut_of(ps, &[]);
+            let (l, v) = (ps.len() - 2, ps.len() - 1);
+            cut.cells.iter().any(|&g| cut.groups[g] == [l, v])
+        };
+        assert!(field(&page(true, 0.0, 11.0, false)));
+        assert!(field(&page(true, 0.0, 11.0, true)), "over the rows");
+        assert!(!field(&page(false, 0.0, 11.0, false)), "no row shows it");
+        // The left edges: within a tenth of the text size (`EDGE_SIZES`: 0.8 for the labels
+        // of 8), not past it.
+        assert!(field(&page(true, 0.75, 11.0, false)));
+        assert!(!field(&page(true, 0.85, 11.0, false)), "another edge");
+        // The step: within `BASELINE_NEAR` of the size of the values (1.5 over the shown
+        // 11), not past it.
+        assert!(field(&page(true, 0.0, 12.45, false)));
+        assert!(!field(&page(true, 0.0, 12.55, false)), "another step");
+    }
+
+    /// Task 26 fix round 2 (M1): the page is cut a second time only for a band that a shown
+    /// row can make a row. A field alone whose value ends with a colon is refused with a
+    /// shown row too: set like the shown rows or from another edge, the cut asks `stop` as
+    /// often and does about the same work, where the field that reads costs a second cut.
+    /// And the ways bands want a row are kept once each.
+    #[test]
+    fn a_band_no_shown_row_can_change_costs_no_second_cut() {
+        let label = |x: f32, line: u32, y: f32| worded(x, x + 60.0, line, y, 8.0, false, false);
+        let value = |x: f32, colon: bool| worded(x, x + 50.0, 4, 489.0, 10.0, colon, !colon);
+        let page = |shift: f32, colon: bool| {
+            vec![
+                label(50.0, 0, 700.0),
+                label(200.0, 0, 700.0),
+                worded(53.0, 103.0, 1, 689.0, 10.0, false, true),
+                worded(203.0, 253.0, 1, 689.0, 10.0, false, true),
+                worded(50.0, 400.0, 2, 650.0, 8.0, false, false),
+                label(50.0 + shift, 3, 500.0),
+                value(53.0 + shift, colon),
+            ]
+        };
+        // How often the cut asks `stop`, its work steps, and whether the field is a cell.
+        let cost = |ps: &[Piece]| {
+            let asked = std::cell::Cell::new(0usize);
+            let before = work::work_steps();
+            let cut = xy_cut(ps, &[], &Limits::default(), &|| {
+                asked.set(asked.get() + 1);
+                false
+            });
+            let steps = work::work_steps().zip(before).map(|(a, b)| a - b);
+            let field = cut.cells.iter().any(|&g| cut.groups[g] == [5, 6]);
+            (asked.get(), steps, field)
+        };
+        let (read, read_steps, is_cell) = cost(&page(0.0, false));
+        assert!(is_cell);
+        let (refused, refused_steps, is_cell) = cost(&page(0.0, true));
+        assert!(!is_cell);
+        let (apart, apart_steps, _) = cost(&page(5.0, true));
+        assert_eq!(refused, apart, "one cut for both");
+        assert_eq!(read, 2 * refused, "two cuts for the field that reads");
+        // Counted in debug builds only: within a tenth of the page cut once, where the
+        // second cut is as much again.
+        if let (Some(read), Some(refused), Some(apart)) = (read_steps, refused_steps, apart_steps) {
+            assert!(10 * refused < 11 * apart, "{refused} against {apart}");
+            assert!(10 * read > 15 * apart, "{read} against {apart}");
+        }
+        // Each way once.
+        let way = |edge: f32| Shown {
+            label: (8.0, edge),
+            value: (10.0, edge + 3.0),
+            drop: 11.0,
+        };
+        let mut seen = Seen::default();
+        for edge in [50.0, 50.0, 50.4, 90.0, 50.0] {
+            seen.want(way(edge));
+        }
+        assert_eq!(seen.wanting, vec![way(50.0), way(90.0)]);
+    }
+
+    /// Task 26 fix round 2 (I3): the second cut of a page (for a field alone that is set like
+    /// the shown rows) never costs the first one. The cut asks `stop` once for each region it
+    /// looks at; stopped from its n-th question on, for every n, the page ends cut short
+    /// (stopped in the first cut) or with a whole read: the first cut, with the shown rows
+    /// and without the field, when the stop falls in the second cut, and the second cut
+    /// when it never falls. Before, a stop in the second cut left the page cut short.
+    #[test]
+    fn a_stop_in_the_second_cut_keeps_the_first_cut() {
+        let label = |x: f32, line: u32, y: f32| worded(x, x + 60.0, line, y, 8.0, false, false);
+        let value = |x: f32, line: u32, y: f32| worded(x, x + 50.0, line, y, 10.0, false, true);
+        let ps = vec![
+            label(50.0, 0, 700.0),
+            label(200.0, 0, 700.0),
+            value(53.0, 1, 689.0),
+            value(203.0, 1, 689.0),
+            worded(50.0, 400.0, 2, 650.0, 8.0, false, false),
+            label(50.0, 3, 500.0),
+            value(53.0, 4, 489.0),
+        ];
+        let asked = std::cell::Cell::new(0usize);
+        let cut_until = |n: usize| {
+            asked.set(0);
+            xy_cut(&ps, &[], &Limits::default(), &|| {
+                asked.set(asked.get() + 1);
+                asked.get() >= n
+            })
+        };
+        let cells = |cut: &Cut| -> Vec<Vec<usize>> {
+            cut.cells.iter().map(|&g| cut.groups[g].clone()).collect()
+        };
+        let whole = cut_until(usize::MAX);
+        let total = asked.get();
+        assert_eq!(whole.short, None);
+        assert!(cells(&whole).contains(&vec![5, 6]), "{whole:?}");
+        let mut first = 0;
+        for n in 1..=total {
+            let cut = cut_until(n);
+            assert_whole(&cut, ps.len());
+            if cut.short.is_none() {
+                // The first cut: the shown rows cell by cell, the field alone two lines.
+                assert!(!cells(&cut).contains(&vec![5, 6]), "at {n}: {cut:?}");
+                assert_eq!(cells(&cut).len(), cells(&whole).len() - 1, "at {n}");
+                first += 1;
+            } else {
+                assert_eq!(cut.short, Some(CutShort::Stopped), "at {n}");
+            }
+        }
+        // Both ways: some stops fall in the first cut, some in the second.
+        assert!(first > 0 && first < total, "{first} of {total}");
+        // One more question than the page asks is no stop at all.
+        assert_eq!(cells(&cut_until(total + 1)), cells(&whole));
+    }
+
+    /// Task 26 fix 3a (H1): a field alone right under a label of the form that has no value,
+    /// in the next row of the form. The label over it is a row in the size of its own label
+    /// with a piece over it, as the row before the last rows of a block of rows is. It is a
+    /// field with nothing filled in when it starts from the left edge of the shown labels
+    /// and leaves the line of its value free, at the shown step: then the field under it
+    /// is read like the shown rows. A row before that leaves no such room, or starts from
+    /// another edge, keeps the two lines as they are; so does a page that shows no row.
+    #[test]
+    fn a_field_under_a_label_with_no_value_is_read_like_the_shown_rows() {
+        let label = |x: f32, line: u32, y: f32| worded(x, x + 60.0, line, y, 8.0, false, false);
+        let value = |x: f32, line: u32, y: f32| worded(x, x + 50.0, line, y, 10.0, false, true);
+        // Rows `step` apart, the values `drop` under their labels: a shown row of two
+        // fields, two long labels with no value (the second from `edge`), the field alone.
+        let page = |shown: bool, edge: f32, step: f32, drop: f32| {
+            let y = |row: u32| 648.0 + step * (3 - row) as f32;
+            let mut ps = vec![];
+            if shown {
+                ps.extend([
+                    label(50.0, 0, y(0)),
+                    label(200.0, 0, y(0)),
+                    value(53.0, 1, y(0) - drop),
+                    value(203.0, 1, y(0) - drop),
+                ]);
+            }
+            ps.extend([
+                worded(50.0, 220.0, 2, y(1), 8.0, false, false),
+                worded(edge, 220.0, 3, y(2), 8.0, false, false),
+                label(50.0, 4, y(3)),
+                value(53.0, 5, y(3) - drop),
+            ]);
+            ps
+        };
+        let field = |ps: &[Piece]| {
+            let cut = cut_of(ps, &[]);
+            let (l, v) = (ps.len() - 2, ps.len() - 1);
+            cut.cells.iter().any(|&g| cut.groups[g] == [l, v])
+        };
+        assert!(field(&page(true, 50.0, 26.0, 11.0)));
+        assert!(!field(&page(false, 50.0, 26.0, 11.0)), "no row shows it");
+        // The left edge of the shown labels, within a tenth of the text size (`EDGE_SIZES`).
+        // 0.8 at labels of 8: an edge 0.75 off is theirs, one 0.85 off is another.
+        assert!(field(&page(true, 50.75, 26.0, 11.0)));
+        assert!(!field(&page(true, 50.85, 26.0, 11.0)), "another edge");
+        // The room of the line of a value. A label of two runs stands `step` over the
+        // label of the field, off the pitch of the rows: the baseline of its value, 11
+        // under it, lies the size of the labels (8) over their baseline from a step of 19
+        // on. Nearer, the three lines follow each other as the last rows of a block do.
+        let near = |step: f32| {
+            vec![
+                label(50.0, 0, 760.0),
+                label(200.0, 0, 760.0),
+                value(53.0, 1, 749.0),
+                value(203.0, 1, 749.0),
+                worded(50.0, 220.0, 2, 708.0, 8.0, false, false),
+                Piece {
+                    runs: 2,
+                    ..worded(50.0, 220.0, 3, 648.0 + step, 8.0, false, false)
+                },
+                label(50.0, 4, 648.0),
+                value(53.0, 5, 637.0),
+            ]
+        };
+        assert!(field(&near(19.5)));
+        assert!(!field(&near(18.5)), "no room for a value");
+    }
+
+    /// Fix round 1 (M5): a region of many rows of fields set alike keeps one way a row is
+    /// set, not one for each row, so a row set like none of them is asked once, not once for
+    /// each row that shows the rule: the work of the cut grows with the rows, not with their
+    /// square.
+    #[test]
+    fn rows_of_fields_set_alike_show_one_way_to_set_a_row() {
+        let label = |x: f32, line: u32, y: f32| worded(x, x + 60.0, line, y, 8.0, false, false);
+        let value = |x: f32, line: u32, y: f32| worded(x, x + 50.0, line, y, 10.0, false, true);
+        // Each row: two labels over two values, or (every other row) one label over one
+        // value from another left edge, which is set like no row before it.
+        let rows = |n: u32| {
+            let mut ps = Vec::new();
+            for k in 0..n {
+                let y = 5000.0 - 30.0 * k as f32;
+                if k % 2 == 0 {
+                    ps.push(label(50.0, 2 * k, y));
+                    ps.push(label(200.0, 2 * k, y));
+                    ps.push(value(53.0, 2 * k + 1, y - 11.0));
+                    ps.push(value(203.0, 2 * k + 1, y - 11.0));
+                } else {
+                    ps.push(label(90.0, 2 * k, y));
+                    ps.push(value(93.0, 2 * k + 1, y - 11.0));
+                }
+            }
+            ps
+        };
+        let steps = |n: u32| {
+            let ps = rows(n);
+            let before = work::work_steps();
+            let cut = cut_of(&ps, &[]);
+            assert_eq!(cut.cells.len(), n as usize / 2, "the rows of two fields");
+            work::work_steps().zip(before).map(|(a, b)| a - b)
+        };
+        // Counted in debug builds only. Four times the rows: 3.7 times the steps with one
+        // way kept, 5.9 times with one for each row.
+        if let (Some(small), Some(large)) = (steps(40), steps(160)) {
+            assert!(
+                large < 5 * small,
+                "{small} steps for 40 rows, {large} for 160"
+            );
+        }
     }
 
     #[test]

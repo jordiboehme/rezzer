@@ -16,7 +16,7 @@
 use crate::extract::pairs::blocks::{KeyValues, key_values};
 use crate::extract::pairs::strips::{
     FieldFrame, Kind as ValueKind, cells_of, field_cuts, field_edges, kind_of, strip_cells,
-    table_body, table_rows,
+    table_body, table_rows, undecided,
 };
 use crate::extract::pairs::{
     Field, Parsed, Reading, Style, WEIGHT_ONLY, parse, same_style, small_size, style_of,
@@ -66,6 +66,19 @@ pub const LABEL_KNOWN_STYLE: u16 = 400;
 /// margin.
 pub const LABEL_LINE_PAIRS: u16 = 850;
 
+/// `label_value.label_over_value`: the segment is a row of labels over the row of their
+/// values, as the whitespace cut found them ([`Source::Cell`]: two labels or more side by
+/// side, each set a size step smaller than the value under it, each value under one label
+/// only; or a row set like such a row of its region), and each value stands under one label
+/// ([`crate::extract::pairs::blocks::labels_with_values`]). A label with nothing under it has
+/// an empty value. It leads the most a paragraph reading of its two lines (750) and a heading
+/// that keeps its lines (850) reach.
+pub const LABEL_OVER_VALUE: u16 = 900;
+
+/// The id of the signal of [`LABEL_OVER_VALUE`]: the readers that extract such a cell read
+/// the same pair by it.
+pub const LABEL_OVER_VALUE_ID: &str = "label_value.label_over_value";
+
 /// Whether a text run of `seg` stands on a running header or footer line, in the page's
 /// footnote legend, or on the lines of the page title: lines the band, legend and title kinds
 /// claim, which the pair rules of lines (line pairs, strip fields) do not read.
@@ -83,10 +96,17 @@ fn claimed_lines(view: &PageView<'_>, seg: &Segment) -> bool {
 /// ends with a colon, a value shaped as a number, a date or a code, or a label in another style
 /// than its value (set apart by size, weight or face). Two names side by side in one style
 /// (an address beside an address) are no pair. A label without a value (an empty field) needs
-/// none; at least one pair has a value.
+/// none; at least one pair has a value. A row cut inside a run (`KeyValue::cut`) has a value
+/// and its evidence already: the cut is made only at a colon or before a value of such a shape
+/// (see `value_cut`), and its label range holds the whole cut run, the start of the value
+/// with it, so the ranges are not asked again.
 fn pairs_evidenced(runs: &[&TextRun], rows: &[crate::extract::pairs::blocks::KeyValue]) -> bool {
     let mut valued = 0;
     for row in rows {
+        if row.cut.is_some() {
+            valued += 1;
+            continue;
+        }
         let Some((s, e)) = row.value else { continue };
         valued += 1;
         let label: Vec<usize> = (row.label.0..row.label.1).collect();
@@ -133,7 +153,7 @@ fn x_key(x: f32) -> i64 {
 
 /// The frames between horizontal `rules` (bottom, top, x0, x1), top to bottom, then left to
 /// right: each stretch of a rule piece with the nearest piece above it that overlaps that
-/// stretch in x. A rule of another column between the heights of two rules does not part them:
+/// stretch in x, with the place in `rules` of that piece above it, its top. A rule of another column between the heights of two rules does not part them:
 /// it frames only the stretch it lies over, and the rest of the piece goes on up.
 ///
 /// One sweep from the top down, level by level (pieces within [`SNAP`] of the level's top):
@@ -150,71 +170,186 @@ fn x_key(x: f32) -> i64 {
 /// chain, as its pieces stand whole points apart).
 ///
 /// [`SNAP`]: crate::segment::drawn::SNAP
-fn rule_frames(rules: &[crate::segment::drawn::Line]) -> Vec<(f32, f32, f32, f32)> {
+fn rule_frames_under(rules: &[crate::segment::drawn::Line]) -> Vec<(Place, usize)> {
     use std::collections::BTreeMap;
     let snap = crate::segment::drawn::SNAP;
-    let mut sorted: Vec<&crate::segment::drawn::Line> = rules.iter().collect();
-    sorted.sort_by(|a, b| b.at.total_cmp(&a.at).then(a.from.total_cmp(&b.from)));
-    // The skyline: by the key of its left end, a stretch (x0, x1) and the height of its piece.
-    let mut sky: BTreeMap<i64, (f32, f32, f32)> = BTreeMap::new();
+    let mut sorted: Vec<(usize, &crate::segment::drawn::Line)> = rules.iter().enumerate().collect();
+    sorted.sort_by(|(_, a), (_, b)| b.at.total_cmp(&a.at).then(a.from.total_cmp(&b.from)));
+    // The skyline: by the key of its left end, a stretch (x0, x1), the height of its piece
+    // and the place of that piece in `rules`.
+    type Stretch = (f32, f32, f32, usize);
+    let mut sky: BTreeMap<i64, Stretch> = BTreeMap::new();
     // The key of the first stretch that may reach past `x`: the last one that starts at or
     // left of it, else the first.
-    let first = |sky: &BTreeMap<i64, (f32, f32, f32)>, x: f32| {
+    let first = |sky: &BTreeMap<i64, Stretch>, x: f32| {
         sky.range(..=x_key(x))
             .next_back()
             .map_or(i64::MIN, |(k, _)| *k)
     };
-    let mut frames: Vec<(f32, f32, f32, f32)> = Vec::new();
+    let mut frames: Vec<(Place, usize)> = Vec::new();
     let mut k = 0;
     while k < sorted.len() {
-        let top = sorted[k].at;
-        let end = k + sorted[k..].partition_point(|l| top - l.at <= snap);
+        let top = sorted[k].1.at;
+        let end = k + sorted[k..].partition_point(|l| top - l.1.at <= snap);
         let level = &sorted[k..end];
-        for low in level {
-            for (_, &(a, b, at)) in sky.range(first(&sky, low.from)..) {
+        for (_, low) in level {
+            for (_, &(a, b, at, piece)) in sky.range(first(&sky, low.from)..) {
                 crate::work::add(1);
                 if a >= low.to {
                     break;
                 }
                 let (x0, x1) = (a.max(low.from), b.min(low.to));
                 if x1 - x0 > snap {
-                    frames.push((low.at, at, x0, x1));
+                    frames.push(((low.at, at, x0, x1), piece));
                 }
             }
         }
-        for low in level {
-            let cut: Vec<(i64, (f32, f32, f32))> = sky
+        for &(piece, low) in level {
+            let cut: Vec<(i64, Stretch)> = sky
                 .range(first(&sky, low.from)..)
                 .take_while(|(_, s)| s.0 < low.to)
                 .filter(|(_, s)| s.1 > low.from)
                 .map(|(k, s)| (*k, *s))
                 .collect();
             crate::work::add(1 + cut.len() as u64);
-            for (key, (a, b, at)) in cut {
+            for (key, (a, b, at, over)) in cut {
                 sky.remove(&key);
                 if a < low.from {
-                    sky.insert(x_key(a), (a, low.from, at));
+                    sky.insert(x_key(a), (a, low.from, at, over));
                 }
                 if b > low.to {
-                    sky.insert(x_key(low.to), (low.to, b, at));
+                    sky.insert(x_key(low.to), (low.to, b, at, over));
                 }
             }
-            sky.insert(x_key(low.from), (low.from, low.to, low.at));
+            sky.insert(x_key(low.from), (low.from, low.to, low.at, piece));
         }
         k = end;
     }
-    frames.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.2.total_cmp(&b.2)));
+    frames.sort_by(|(a, _), (b, _)| b.1.total_cmp(&a.1).then(a.2.total_cmp(&b.2)));
     frames
 }
 
-/// The strips of the page of `view` (see [`StripFrame`]), found once: the frames of the page's
-/// horizontal rules (see [`rule_frames`]), and the runs by one pass over them
-/// sorted by the height of their middle.
-pub(crate) fn strip_frames(view: &PageView<'_>) -> Vec<StripFrame> {
-    let frames = rule_frames(view.hs());
-    if frames.is_empty() {
-        return Vec::new();
+/// The strips of a page (see [`strip_frames`]).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Strips {
+    pub frames: Vec<StripFrame>,
+    /// The search for the dividers of the strips went past
+    /// [`STRIP_WORK`](crate::extract::pairs::strips::STRIP_WORK) steps: every strip is read
+    /// without dividers, which the page's issues say (see [`DIVIDERS_UNSEARCHED`]).
+    pub unparted: bool,
+}
+
+/// What the issue of a page says whose strips are read without their dividers.
+pub(crate) const DIVIDERS_UNSEARCHED: &str = "the dividers of the rows of fields between rules \
+     were not looked for: the page has too many lines";
+
+/// Where a strip stands: the heights of its bottom and top rules and its left and right ends.
+type Place = (f32, f32, f32, f32);
+
+/// A place that holds nothing: no line stands at its rules between its ends.
+const EMPTY_PLACE: Place = (0.0, 0.0, 1.0, 0.0);
+
+/// For each of `frames` (bottom, top, x0, x1), the lines of `vs` (vertical, sorted by place)
+/// that stand at its top or at its bottom rule between its ends, by their places in `vs`, in
+/// order: every divider of the frame is one of them (a divider reaches one of the two rules or
+/// runs on through it, see [`crate::extract::pairs::strips::dividers_of`]), and a line at
+/// another height is none of them, however many of those the page draws.
+///
+/// One sweep up the page: a line is at hand from [`SNAP`](crate::segment::drawn::SNAP) under
+/// its low end to as much over its high end, sorted by its place, and each frame reads the
+/// lines at hand between its ends at the height of each of its two rules. `work` counts a step
+/// for each line, each frame and each line read; past
+/// [`STRIP_WORK`](crate::extract::pairs::strips::STRIP_WORK) the sweep stops with `None`.
+fn lines_at_rules(
+    frames: &[Place],
+    vs: &[crate::segment::drawn::Line],
+    work: &mut usize,
+) -> Option<Vec<Vec<u32>>> {
+    use crate::extract::pairs::strips::STRIP_WORK;
+    use std::collections::BTreeSet;
+    let snap = crate::segment::drawn::SNAP;
+    // At one height a line comes to hand before a frame reads there, and goes after it.
+    #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+    enum What {
+        Come,
+        Read,
+        Go,
     }
+    let mut events: Vec<(f32, What, u32)> = Vec::with_capacity(2 * (vs.len() + frames.len()));
+    for (k, v) in vs.iter().enumerate() {
+        events.push((v.from - snap, What::Come, k as u32));
+        events.push((v.to + snap, What::Go, k as u32));
+    }
+    for (f, &(bottom, top, _, _)) in frames.iter().enumerate() {
+        events.push((bottom, What::Read, f as u32));
+        events.push((top, What::Read, f as u32));
+    }
+    *work += events.len();
+    crate::work::add(events.len() as u64);
+    if *work > STRIP_WORK {
+        return None;
+    }
+    events.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+    let mut at_hand: BTreeSet<(i64, u32)> = BTreeSet::new();
+    let mut out: Vec<Vec<u32>> = vec![Vec::new(); frames.len()];
+    for (_, what, k) in events {
+        match what {
+            What::Come => {
+                at_hand.insert((x_key(vs[k as usize].at), k));
+            }
+            What::Go => {
+                at_hand.remove(&(x_key(vs[k as usize].at), k));
+            }
+            What::Read => {
+                let (_, _, x0, x1) = frames[k as usize];
+                if x0 > x1 {
+                    continue;
+                }
+                for &(_, v) in at_hand.range((x_key(x0), 0)..=(x_key(x1), u32::MAX)) {
+                    *work += 1;
+                    crate::work::add(1);
+                    if *work > STRIP_WORK {
+                        return None;
+                    }
+                    out[k as usize].push(v);
+                }
+            }
+        }
+    }
+    // A line at both rules of a frame was read twice; `vs` is sorted by place, so are these.
+    for lines in &mut out {
+        lines.sort_unstable();
+        lines.dedup();
+    }
+    Some(out)
+}
+
+/// The strips of the page of `view` (see [`StripFrame`]), found once: the frames of the page's
+/// horizontal rules (see [`rule_frames_under`]), and the runs by one pass over them
+/// sorted by the height of their middle. A strip inside a grid (its top rule is a rule of the
+/// grid, see [`crate::extract::pairs::strips::frame_tops`]) is a row of the grid and reads as
+/// no fields: it is the table typer's, as the reader leaves it, and the column rules of a
+/// table never part its row into fields. Each other strip is read with the dividers the page
+/// draws
+/// in it (see [`crate::extract::pairs::strips::dividers_of`]), looked for among the lines
+/// that stand at its rules (see [`lines_at_rules`]) within
+/// [`STRIP_WORK`](crate::extract::pairs::strips::STRIP_WORK) steps for the page, as the
+/// reader's search for fields between rules; past them no strip has dividers
+/// ([`Strips::unparted`]).
+pub(crate) fn strip_frames(view: &PageView<'_>) -> Strips {
+    use crate::extract::pairs::strips::{STRIP_WORK, Top, dividers_of, frame_tops};
+    let Ok(grids) = view.drawn.grids.as_ref() else {
+        return Strips::default();
+    };
+    let frames = rule_frames_under(&grids.hs);
+    if frames.is_empty() {
+        return Strips::default();
+    }
+    // A rule a grid takes tops a row of the grid, which is the table typer's to read; the
+    // lowest rule of a grid, and the upper rule of a row of fields open at both ends, top a
+    // strip (see [`frame_tops`]).
+    let tops = frame_tops(&grids.hs, &grids.vs, &grids.groups, true);
+    crate::work::add(grids.hs.len() as u64);
     let texts = &view.page.texts;
     let mut by_y: Vec<(f32, u32)> = texts
         .iter()
@@ -244,8 +379,10 @@ pub(crate) fn strip_frames(view: &PageView<'_>) -> Vec<StripFrame> {
         small: small_size(view.text_sizes()).saturating_sub(1),
         labels: &[],
     };
-    let mut out = Vec::new();
-    for (bottom, top, x0, x1) in frames {
+    // The frames that hold runs, each with its runs and whether it stands in a grid.
+    let mut held: Vec<(Place, Vec<u32>)> = Vec::new();
+    let mut in_grid: Vec<bool> = Vec::new();
+    for ((bottom, top, x0, x1), piece) in frames {
         // The runs whose middle lies in the strip, from the shorter of the two lists: those
         // in its height or those in its width.
         let lo = by_y.partition_point(|r| r.0 <= bottom);
@@ -270,8 +407,44 @@ pub(crate) fn strip_frames(view: &PageView<'_>) -> Vec<StripFrame> {
             continue;
         }
         runs.sort_unstable();
+        held.push(((bottom, top, x0, x1), runs));
+        in_grid.push(tops[piece] == Top::No);
+    }
+    // The dividers the page draws in each strip part its fields, as its labels do. A row of
+    // a grid is not read, so its column rules are not looked for.
+    let mut vs: Vec<crate::segment::drawn::Line> = grids.vs.clone();
+    vs.sort_by(|a, b| a.at.total_cmp(&b.at));
+    crate::work::add(vs.len() as u64);
+    let places: Vec<Place> = held
+        .iter()
+        .zip(&in_grid)
+        .map(|(h, &inside)| if inside { EMPTY_PLACE } else { h.0 })
+        .collect();
+    let mut work = 0usize;
+    let dividers: Option<Vec<Vec<f32>>> = lines_at_rules(&places, &vs, &mut work).and_then(|at| {
+        let mut all = Vec::with_capacity(at.len());
+        for (lines, &(bottom, top, x0, x1)) in at.iter().zip(&places) {
+            let near: Vec<crate::segment::drawn::Line> =
+                lines.iter().map(|&k| vs[k as usize]).collect();
+            let found = dividers_of(&near, (bottom, top), (x0, x1), &mut || {
+                work += 1;
+                crate::work::add(1);
+                work <= STRIP_WORK
+            })?;
+            all.push(found.into_iter().map(|d| d.0).collect());
+        }
+        Some(all)
+    });
+    let unparted = dividers.is_none();
+    let mut out = Vec::with_capacity(held.len());
+    for (k, ((bottom, top, x0, x1), runs)) in held.into_iter().enumerate() {
         let own: Vec<&TextRun> = runs.iter().map(|&i| &texts[i as usize]).collect();
-        let read = read_frame(&own, x0, x1, how);
+        let parted: &[f32] = dividers.as_ref().map_or(&[], |d| &d[k]);
+        let read = if in_grid[k] {
+            FrameRead::No
+        } else {
+            read_frame(&own, x0, x1, parted, how)
+        };
         out.push(StripFrame {
             bottom,
             top,
@@ -281,7 +454,10 @@ pub(crate) fn strip_frames(view: &PageView<'_>) -> Vec<StripFrame> {
             read,
         });
     }
-    out
+    Strips {
+        frames: out,
+        unparted,
+    }
 }
 
 /// The fields of `seg` read strip by strip (see [`strip_frames`]): every run with ink of the
@@ -386,8 +562,8 @@ const STACK_EDGE: f32 = 1.5;
 /// needs is looked for where it must stand and is not there. Everything else (a run in the
 /// stack's columns that may be a value over it or a label under it, a rule or a box beyond
 /// which the edge row may stand) leaves the direction not clear, and the strip rule reads no
-/// fields: the stack is spatial until Task 26 reads stacks (today's reader of labels under
-/// their values runs before, as a given region).
+/// fields: the stack is spatial until the engine reads stacks (today's reader of labels under
+/// their values runs before, as a given region; its move into the engine comes after 0.1.0).
 fn stack_reads_down(
     view: &PageView<'_>,
     frames: &[StripFrame],
@@ -490,7 +666,8 @@ enum FrameRead {
     /// Fields read right, never a wrong pair.
     Clear(FrameFields),
     /// Fields, but not clear: a cell left out or not clear, a piece that is no label or value,
-    /// a value of two lines or pieces, or a line that mixes labels and another field's value.
+    /// a value of two lines or pieces, a line that mixes labels and another field's value, or
+    /// a field edge in a number in digit groups (see `strips::undecided`).
     Unclear,
     /// No fields: text that is no field, a table's body or rows.
     No,
@@ -507,16 +684,15 @@ struct FrameFields {
     empty: Vec<TextRun>,
 }
 
-/// The runs `own` of a strip between rules from `x0` to `x1` read as fields (today's rule of
+/// The runs `own` of a strip between rules from `x0` to `x1`, parted by its drawn `dividers`
+/// (see [`crate::extract::pairs::strips::dividers_of`]), read as fields (today's rule of
 /// fields between rules, one copy): the runs are cut at field edges first, as today's reader
 /// cuts them (see [`field_cuts`]), on this reading's own copies of the pieces.
-fn read_frame(own: &[&TextRun], x0: f32, x1: f32, how: Reading<'_>) -> FrameRead {
-    let frame = FieldFrame {
-        x0,
-        x1,
-        dividers: &[],
-    };
+fn read_frame(own: &[&TextRun], x0: f32, x1: f32, dividers: &[f32], how: Reading<'_>) -> FrameRead {
+    let frame = FieldFrame { x0, x1, dividers };
     let all: Vec<usize> = (0..own.len()).collect();
+    // A field edge in a number in digit groups: the fields are not decided.
+    let undecided = undecided(own, &frame, &all);
     let cuts = field_cuts(own, &[frame], &mut |_| all.clone());
     let mut pieces: Vec<TextRun> = Vec::with_capacity(own.len());
     for (k, r) in own.iter().enumerate() {
@@ -532,6 +708,9 @@ fn read_frame(own: &[&TextRun], x0: f32, x1: f32, how: Reading<'_>) -> FrameRead
     let cells = cells_of(&runs, &edges, &ids);
     if table_body(&runs, &cells) || table_rows(&runs, &ids) {
         return FrameRead::No;
+    }
+    if undecided {
+        return FrameRead::Unclear;
     }
     let read = strip_cells(&runs, &edges, &cells, how);
     if !read.fits || read.fields.is_empty() {
@@ -657,7 +836,7 @@ struct LinePair {
 
 /// The items of a list follow each other at most this many text sizes apart, baseline to
 /// baseline (the pitch [`key_values`] allows the lines of a block of labels and values).
-const ITEM_PITCH: f32 = 2.0;
+pub const ITEM_PITCH: f32 = 2.0;
 
 /// Whether the one line `range` of `runs` (a segment of its own) is an item of a list: it
 /// opens with a list marker, with an enumerator in brackets (`(a)`, `(12)`, `(iv)`), or with
@@ -732,27 +911,307 @@ fn list_item(
     (k > 0 && same_mark(k - 1)) || (k + 1 < lines.len() && same_mark(k + 1))
 }
 
+/// Whether the one line `range` of `runs` stands right under a row of smaller text: the
+/// nearest row of the page over it that overlaps it along the line stands within
+/// [`ITEM_PITCH`] sizes, is set a size step ([`SIZE_STEP`]) smaller and holds no run that
+/// reads as an amount or a date (the cut's reading, [`reads_as_value`], which knows an
+/// amount with the word of its currency too: the engine's own, so every host gets the same
+/// answer). The row is found by its place (the page's lines by their
+/// baselines, every line on the baseline of the nearest one, within [`BASELINE_NEAR`]), not
+/// by the order the reader numbers its lines in: labels that are each a line of their own, or
+/// that the reader lists after their values, are that row too. Small labels over the row of
+/// their values look so (`Bank   Account   Paid` over `Oakfield Bank   30.10.2026`): the
+/// row of values is no label and its value, though its first piece is words and its second
+/// a date. When the cut pairs such rows they are a region of their own; when it cannot (a
+/// value under two labels), the values stay a line.
+///
+/// [`BASELINE_NEAR`]: crate::segment::cut::BASELINE_NEAR
+/// [`reads_as_value`]: crate::segment::cut::reads_as_value
+fn under_smaller_line(
+    view: &PageView<'_>,
+    runs: &[&TextRun],
+    range: &crate::extract::table::RunRange,
+) -> bool {
+    let (Some(first), Some(last)) = (runs.get(range.start), runs.get(range.end.wrapping_sub(1)))
+    else {
+        return false;
+    };
+    let near = crate::segment::cut::BASELINE_NEAR * range.size;
+    let (by, lines, texts) = (view.by_y(), view.lines(), &view.page.texts);
+    let runs_of = |k: usize| {
+        let l = &lines[k];
+        &texts[l.start.min(texts.len())..l.end.min(texts.len())]
+    };
+    let (x0, x1) = (first.x, last.x + last.w);
+    // The lines over this one, the nearest first: past its own baseline (a line beside it
+    // on a baseline a hair higher is its own row) up to the pitch of a block.
+    let from = by.line_y.partition_point(|y| *y <= range.y + near);
+    let to = by
+        .line_y
+        .partition_point(|y| *y <= range.y + ITEM_PITCH * range.size);
+    let window = from..to.max(from);
+    crate::work::add(1 + window.len() as u64);
+    let overlaps = |k: usize| {
+        let over = runs_of(k);
+        crate::work::add(over.len() as u64);
+        over.iter().any(|r| r.x < x1 && r.x + r.w > x0)
+    };
+    let Some(at) = window.clone().find(|&i| overlaps(by.lines[i])) else {
+        return false;
+    };
+    // Every line of that row: the lines of the window on its baseline.
+    let row: Vec<usize> = window
+        .filter(|&i| (by.line_y[i] - by.line_y[at]).abs() <= near)
+        .map(|i| by.lines[i])
+        .collect();
+    // Labels hold no amount and no date: a smaller row with one (`Subtotal 120.00` over a
+    // larger `Total 127.50`) is a row of its own, and the line under it is one too.
+    // An amount with its currency in letters is one too (`1.200 EUR`).
+    let labels = !row
+        .iter()
+        .flat_map(|&k| runs_of(k))
+        .any(|r| crate::segment::cut::reads_as_value(&r.text));
+    let size = row.iter().map(|&k| lines[k].size).fold(0.0f32, f32::max);
+    labels && SIZE_STEP * size <= range.size
+}
+
+/// `label_value.underlined_label`: two lines alone, the upper one a short label with an
+/// underline of its own and the lower one its value (see [`underlined_label`]). The readers
+/// that extract such a region read the pair as they read a row of labels over their values
+/// ([`crate::extract::pairs::blocks::labels_with_values`]); it weighs what such a row does
+/// ([`LABEL_OVER_VALUE`]).
+pub const LABEL_UNDERLINED_ID: &str = "label_value.underlined_label";
+
+/// The underline of a line of text lies at most this share of its text size under its
+/// baseline. The faces set their underline about a tenth of the size under the baseline
+/// (0.075 to 0.1 in the standard faces), and a line drawn by a writer stays over the end of
+/// the descenders, a fifth to a quarter of the size. A rule farther down is a rule between
+/// two rows (half way to the next baseline at any pitch of a block, 0.5 sizes or more).
+const UNDERLINE_DROP: f32 = 0.25;
+
+/// Each end of the underline of a line of text stands within this share of the text size of
+/// the end of the text: about the width of a letter, so an underline drawn with the blank
+/// before or after its words is one. A rule that goes on farther is as long as a field or a
+/// column, not as the words over it: a line to fill in, on which a value may stand as well
+/// as a label, so it says nothing about which of two lines is the label.
+const UNDERLINE_ENDS: f32 = 0.5;
+
+/// The share of the words of the line under an underlined label that hold a digit, a slash
+/// or an at sign, from which the line reads as a value. A share of the line's own words, no
+/// count: one such word makes `Room 12` or `N/A` a value, but not a line of plain words
+/// around one number (`Budget 2026 review`), which is text under a heading. Half, because a
+/// value of two words is as often a word with its number as two marked words; below half
+/// the plain words are the larger part and the line reads as text.
+const VALUE_WORDS_SHARE: f32 = 0.5;
+
+/// Whether the two lines `ranges` of `runs` (one piece each, `pieces`) are a label with an
+/// underline of its own over its value:
+///
+/// - a rule of the page lies under the baseline of the upper line, at most
+///   [`UNDERLINE_DROP`] of its size, and each of its ends stands within [`UNDERLINE_ENDS`]
+///   of the size of an end of the line's ink: the rule is as long as the words, their
+///   underline. The underline is what sets the upper line apart as the label; a longer rule
+///   is a line of a field, which a value may stand on with its label under it, and gives no
+///   pair;
+/// - the lower line has no such underline (two underlined lines are a list of links or of
+///   titles) and starts at the left edge of the upper one (within [`EDGE_SIZES`]);
+/// - the upper line is a short label (at most [`PAIR_LABEL_WORDS`] words) of plain words:
+///   letters, a hyphen or an apostrophe inside a word, a dot or a colon only at its end. A
+///   net address, a number or a code with an underline is a link or a value, no label;
+/// - the lower line is short (at most [`PAIR_VALUE_WORDS`] words), no sentence, no label
+///   itself (no word of it ends with a colon), and not set a size step ([`SIZE_STEP`])
+///   smaller than the upper one (a small line under an underlined larger one is a note
+///   under a title);
+/// - the lower line reads as a value: a number, a date or a code ([`value_shape`]), or at
+///   least [`VALUE_WORDS_SHARE`] of its words hold a digit, a slash or an at sign (`N/A`,
+///   `A/B`, `Room 12`, a net address). The underline alone shows that the upper line is
+///   set apart, not that it is a label: a writer underlines a filled value over its label
+///   (`Alex Sample` over `Signature`), a name over its role, a link and a heading over a
+///   line of text just so. With plain words under it, or words with one number among them
+///   (`Budget 2026 review` under a heading), the two lines stay lines.
+///
+/// Anything else is no pair: the two lines stay lines.
+fn underlined_label(
+    view: &PageView<'_>,
+    runs: &[&TextRun],
+    ranges: &[crate::extract::table::RunRange],
+    pieces: &[Vec<crate::extract::table::grid::Piece>],
+) -> bool {
+    let ([a, b], [pa, pb]) = (ranges, pieces) else {
+        return false;
+    };
+    if pa.len() != 1 || pb.len() != 1 {
+        return false;
+    }
+    // The upper line first, by place.
+    let (up, low) = if a.y >= b.y { (a, b) } else { (b, a) };
+    if up.y - low.y <= crate::segment::cut::BASELINE_NEAR * up.size {
+        return false;
+    }
+    // The extent of the ink of a line: without the blanks its last run ends with (their
+    // share of the run's width by its characters).
+    let ink = |l: &crate::extract::table::RunRange| {
+        let (first, last) = (runs[l.start], runs[l.end - 1]);
+        let chars = last.text.chars().count().max(1) as f32;
+        let kept = last.text.trim_end().chars().count() as f32;
+        (first.x, last.x + last.w * kept / chars)
+    };
+    let underlined = |l: &crate::extract::table::RunRange| {
+        let (x0, x1) = ink(l);
+        let hs = view.hs();
+        let from = hs.partition_point(|h| h.at < l.y - UNDERLINE_DROP * l.size);
+        let to = hs.partition_point(|h| h.at < l.y);
+        crate::work::add(1 + to.saturating_sub(from) as u64);
+        let ends = UNDERLINE_ENDS * l.size;
+        hs[from..to.max(from)]
+            .iter()
+            .any(|h| (h.from - x0).abs() <= ends && (h.to - x1).abs() <= ends)
+    };
+    if !underlined(up) || underlined(low) {
+        return false;
+    }
+    if (ink(up).0 - ink(low).0).abs() > EDGE_SIZES * up.size.max(low.size) {
+        return false;
+    }
+    if up.size >= SIZE_STEP * low.size {
+        return false;
+    }
+    let text =
+        |l: &crate::extract::table::RunRange| words(runs, &(l.start..l.end).collect::<Vec<_>>());
+    let (label, value) = (text(up), text(low));
+    let plain = |w: &str| {
+        let w = w.trim_end_matches(['.', ':']);
+        w.chars().any(char::is_alphabetic)
+            && w.chars()
+                .all(|c| c.is_alphabetic() || matches!(c, '-' | '\''))
+    };
+    let label_words = label.split_whitespace().count();
+    let value_words = value.split_whitespace().count();
+    (1..=PAIR_LABEL_WORDS).contains(&label_words)
+        && label.split_whitespace().all(plain)
+        && (1..=PAIR_VALUE_WORDS).contains(&value_words)
+        && !value.trim_end().ends_with(['.', '!', '?'])
+        && !value.contains(". ")
+        && !value.split_whitespace().any(|w| w.ends_with(':'))
+        && (value_shape(&value) || {
+            let marked = value
+                .split_whitespace()
+                .filter(|w| {
+                    w.chars()
+                        .any(|c| c.is_ascii_digit() || matches!(c, '/' | '@'))
+                })
+                .count();
+            marked as f32 >= VALUE_WORDS_SHARE * value_words as f32
+        })
+}
+
+/// The colons of `run` that end a word or are a word of their own (white space or the end of
+/// the text after them), each with its byte in the text and its place along the line: the
+/// share of the run's width that the characters before it have of the text without the
+/// blanks at its end. That is the place of the colon in a fixed-width face, whose listings
+/// have columns of colons; in another face it is the place only of a colon that opens the
+/// run.
+fn colons<R: LineRun>(run: &R) -> impl Iterator<Item = (usize, f32)> + '_ {
+    let text = run.text().trim_end();
+    let chars = text.chars().count().max(1) as f32;
+    text.char_indices()
+        .enumerate()
+        .filter(move |&(_, (at, c))| {
+            c == ':'
+                && text[at + 1..]
+                    .chars()
+                    .next()
+                    .is_none_or(char::is_whitespace)
+        })
+        .map(move |(n, (at, _))| (at, run.x() + run.w() * n as f32 / chars))
+}
+
+/// Whether another line of the block of the line `range` has a colon at `x` along the line,
+/// within [`EDGE_SIZES`] of the text size: a line of the page whose baseline is at most
+/// [`ITEM_PITCH`] sizes over or under this one (the pitch of the lines of a block of labels
+/// and values; a line on this baseline is the line itself), with a colon that ends a word
+/// or is a word of its own there (see [`colons`]). The lines are found by their place on
+/// the page, in whatever segments the cut put them: a listing whose lines the cut parted
+/// has its column of colons all the same.
+///
+/// [`EDGE_SIZES`]: crate::line::EDGE_SIZES
+fn colon_column(view: &PageView<'_>, range: &crate::extract::table::RunRange, x: f32) -> bool {
+    let near = crate::segment::cut::BASELINE_NEAR * range.size;
+    let reach = ITEM_PITCH * range.size;
+    let (by, lines, texts) = (view.by_y(), view.lines(), &view.page.texts);
+    let from = by.line_y.partition_point(|y| *y < range.y - reach);
+    let to = by.line_y.partition_point(|y| *y <= range.y + reach);
+    crate::work::add(1 + to.saturating_sub(from) as u64);
+    (from..to)
+        .filter(|&i| (by.line_y[i] - range.y).abs() > near)
+        .any(|i| {
+            let l = &lines[by.lines[i]];
+            let runs = &texts[l.start.min(texts.len())..l.end.min(texts.len())];
+            crate::work::add(runs.iter().map(|r| r.text.len() as u64).sum());
+            runs.iter()
+                .filter(|r| !r.off_axis)
+                .flat_map(colons)
+                .any(|c| (c.1 - x).abs() <= crate::line::EDGE_SIZES * range.size)
+        })
+}
+
+/// How a line stands in its group, to the rule of line pairs ([`line_pair`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Stand {
+    /// The only line of its group.
+    Lone,
+    /// One of several lines of its group.
+    Among,
+    /// A line whose two pieces are cells whatever they read as: it stands in a drawn grid
+    /// of two columns or more and its first piece ends with no colon, or right under a row
+    /// of smaller labels (the row of their values, see [`under_smaller_line`]). Two pieces
+    /// of it are never a label and its value.
+    Cells,
+}
+
 /// The label and the value of one line of `runs` (its pieces `pieces`), each pair with
 /// evidence of its own, whether the label ends with a colon, and where the line parts:
 ///
 /// - one piece that holds a colon after a short label (at most [`PAIR_LABEL_WORDS`] words with
 ///   a letter): the value after it is shaped as a number, date or code, or short (at most
 ///   [`PAIR_VALUE_WORDS`] words) and no sentence; the line parts after the colon;
-/// - with `lone` (the only line of its group), two pieces: a short label with a letter and a
+/// - as the only line of its group ([`Stand::Lone`]), two pieces: a short label with a letter and a
 ///   value shaped as a number, a date or a code (`Rechnungs-Nr.   2026004711`), or, after a
 ///   label that ends with a colon, a short value that is no sentence and no label; the value
 ///   not set a size step ([`SIZE_STEP`]) smaller than its label: a small code beside a larger
 ///   name (`United States Treasury` and a `000` in two thirds of its size) is a mark printed
 ///   beside it, not its value; after a label that ends with a colon a smaller value is its
-///   value; the line parts between the pieces.
+///   value; the line parts between the pieces;
+/// - two pieces, the first of which is a short label that ends with a colon (`Sheet:` and
+///   `03.04.2026`, in the head block of a letter), alone or among other lines
+///   ([`Stand::Among`]): the second piece is its value by the rule of the lone line. The
+///   colon says the first piece is a label, which among other lines a value shape alone
+///   does not (a name and an amount are a row of a table). The line parts between the
+///   pieces;
+/// - two pieces, the second of which opens with a colon as a word of its own (`Currency`
+///   and `: EUR`, a listing in a fixed-width face that pads its labels up to a column of
+///   colons): the line parts after the colon. The colon is the label's, and the line is
+///   read as the one before, only when `column` says for the place of the colon along the
+///   line that another line of the block has a colon there (see [`colon_column`]): two
+///   lines that share the column are a listing, one colon before a cell is chance. Without
+///   that the colon says nothing, and the line is a pair only as a lone line with a value
+///   shaped as a number, a date or a code;
+/// - two pieces, the first of which holds a colon with words after it (`Phone: 12` and
+///   `Fax 34`, or `Ref: AB/CD` and a number): no pair. The first piece is a label and its
+///   value already, and the gap says the second piece is another cell: it never joins that
+///   value, whatever it reads as.
+///
+/// Two pieces of a line that stands as cells ([`Stand::Cells`]) are no pair by any of these.
 ///
 /// A line that opens as a caption ([`crate::extract::table::caption::caption`]) is none.
 /// Anything else is no pair; more pieces are a row, which the table rules read.
 fn line_pair<R: LineRun>(
     runs: &[R],
     pieces: &[crate::extract::table::grid::Piece],
-    lone: bool,
+    stand: Stand,
+    column: &dyn Fn(f32) -> bool,
 ) -> Option<LinePair> {
+    let lone = stand == Stand::Lone;
     let text =
         |p: &crate::extract::table::grid::Piece| words(runs, &(p.start..p.end).collect::<Vec<_>>());
     let short_label = |l: &str| {
@@ -787,8 +1246,29 @@ fn line_pair<R: LineRun>(
                 cut: colon_cut(runs, one.start..one.end)?,
             })
         }
-        [a, b] if lone => {
-            let (label, value) = (text(a), text(b));
+        [a, b] => {
+            let (mut label, mut value) = (text(a), text(b));
+            // A colon that opens the second piece as a word of its own, after a label
+            // without one: the colon of the label, set at a column of its own (a listing
+            // in a fixed-width face pads its labels up to the colon), and the line parts
+            // after it. It says the first piece is a label as a colon at its end does when
+            // another line of the block has a colon in that column; one such colon alone
+            // may stand before a cell by chance and says nothing.
+            let mut cut = PairCut {
+                run: b.start,
+                byte: 0,
+            };
+            let mut chance = false;
+            if !label.ends_with(':')
+                && let Some(rest) = value.strip_prefix(':')
+                && rest.starts_with(char::is_whitespace)
+                && let Some(at) = colons(&runs[b.start]).next()
+            {
+                label.push_str(" :");
+                value = rest.trim().to_string();
+                cut.byte = at.0 + 1;
+                chance = !column(at.1);
+            }
             let size = |p: &crate::extract::table::grid::Piece| {
                 runs[p.start..p.end]
                     .iter()
@@ -799,17 +1279,25 @@ fn line_pair<R: LineRun>(
             // A label that ends with a colon says it is one, as in one piece: its value may be
             // any short text that is no sentence and no label (no word of it ends with a
             // colon: `Bill To:   Ship To:` is two labels).
-            let colon = label.ends_with(':');
-            let no_label = !value.split_whitespace().any(|w| w.ends_with(':'));
-            let value_ok = value_shape(&value) || (colon && no_sentence(&value) && no_label);
-            (short_label(&label) && value_ok && (!smaller || colon)).then_some(LinePair {
-                value,
-                colon,
-                cut: PairCut {
-                    run: b.start,
-                    byte: 0,
-                },
-            })
+            let colon = label.ends_with(':') && !chance;
+            let no_label = |v: &str| !v.split_whitespace().any(|w| w.ends_with(':'));
+            let value_ok =
+                value_shape(&value) || (colon && no_sentence(&value) && no_label(&value));
+            // The first piece holds a colon with words after it: it is a label and its value
+            // already, and the piece after the gap is another cell, never more of that value
+            // (`Phone: 12   Fax 34`, `Date: 03.04.2026   Page 1 of 2`). The line stays a line.
+            if label.contains(": ") {
+                return None;
+            }
+            // Alone, or among other lines after a label that ends with a colon: the two
+            // pieces are the label and its value, the whole line.
+            // The words of the label are counted without its colon, as in one piece: a
+            // colon set apart from a padded label (`Name of the seller :`) is no word.
+            let pair = (lone || (colon && stand == Stand::Among))
+                && short_label(label.trim_end_matches(':'))
+                && value_ok
+                && (!smaller || colon);
+            pair.then_some(LinePair { value, colon, cut })
         }
         _ => None,
     }
@@ -849,7 +1337,9 @@ pub fn line_pair_cut<R: LineRun>(line: &[R], lone: bool) -> Option<PairCut> {
     let inked: Vec<&R> = at.iter().map(|&k| &line[k]).collect();
     let pieces = crate::extract::table::grid::pieces_of(&inked, 0, inked.len());
     crate::work::add(line.len() as u64);
-    let cut = line_pair(&inked, &pieces, lone)?.cut;
+    let stand = if lone { Stand::Lone } else { Stand::Among };
+    // The readers ask for a line the typer read as a pair: its colon has its column.
+    let cut = line_pair(&inked, &pieces, stand, &|_| true)?.cut;
     // A cut between two inked runs: at the widest gap between them, blank runs included.
     let between = |before: usize| -> PairCut {
         let (from, to) = (at[before] + 1, at[before + 1]);
@@ -1009,7 +1499,8 @@ fn frame(s: &Segment) -> [f32; 4] {
 /// (`label_value.boxes_touch`); every cell of a grid read as a field
 /// (`label_value.field_cells`), between rules with dividers (`label_value.dividers`); lines
 /// read as a block of labels and values or as titles over their values
-/// (`label_value.key_values`, `label_value.labels_over_values`); labels with a colon
+/// (`label_value.key_values`, `label_value.labels_over_values`); a label with an underline of
+/// its own over its value (`label_value.underlined_label`); labels with a colon
 /// (`label_value.colon`), values of their own shape (`label_value.value_shape`), a weight-only
 /// pair read by a seeded style (`label_value.known_style`). Lines read as totals under a table
 /// are none.
@@ -1061,6 +1552,12 @@ pub(crate) fn label_value(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
             }
         }
         Source::Grid { rows, cols } => grid_fields(view, seg, (rows, cols), &mut signals)?,
+        // A small colon label set into a data line, kept with the text after it as one
+        // plain line, and the head of that line before the label: the cut parted the line
+        // and claimed no pair, and no pair rule reads one into a part of it (the text after
+        // the label may be a cell of a column, or the value may stand under the label; a
+        // date after a title in the head is no value of the title).
+        Source::Line => return None,
         // Running lines, footnote legends and the page title have kinds of their own: the
         // pair rules of lines leave them alone.
         _ if text_alone(view, seg) && claimed_lines(view, seg) => return None,
@@ -1080,6 +1577,40 @@ pub(crate) fn label_value(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
                 ));
             }
             if read.shape {
+                signals.push(signal(
+                    "label_value.value_shape",
+                    "the values are numbers, dates or codes".into(),
+                    LABEL_VALUE_SHAPE,
+                ));
+            }
+        }
+        // A row of labels over their values between two rules is a strip of fields: the
+        // strip rule above reads it with the strips around it. Any other such row is read
+        // by the pairs the cut found.
+        Source::Cell if text_alone(view, seg) => {
+            let under = crate::extract::pairs::blocks::labels_with_values(&refs)?;
+            let filled = under.iter().filter(|u| !u.value.is_empty()).count();
+            signals.push(signal(
+                LABEL_OVER_VALUE_ID,
+                format!(
+                    "{} labels side by side, {filled} with a value under it",
+                    under.len()
+                ),
+                LABEL_OVER_VALUE,
+            ));
+            if under.iter().all(|u| words(&refs, &u.label).ends_with(':')) {
+                signals.push(signal(
+                    "label_value.colon",
+                    "the labels end with a colon".into(),
+                    LABEL_COLON,
+                ));
+            }
+            if filled > 0
+                && under
+                    .iter()
+                    .filter(|u| !u.value.is_empty())
+                    .all(|u| value_shape(&words(&refs, &u.value)))
+            {
                 signals.push(signal(
                     "label_value.value_shape",
                     "the values are numbers, dates or codes".into(),
@@ -1113,6 +1644,12 @@ pub(crate) fn label_value(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
                     "a line of titles over a line of their values".into(),
                     LABEL_KEY_VALUES,
                 ));
+            } else if underlined_label(view, &runs, &ranges, &pieces) {
+                signals.push(signal(
+                    LABEL_UNDERLINED_ID,
+                    "a label with an underline of its own over its value".into(),
+                    LABEL_OVER_VALUE,
+                ));
             } else {
                 // Pieces in the cells of a drawn grid are cells, not a label and its value.
                 let in_grid = {
@@ -1127,13 +1664,42 @@ pub(crate) fn label_value(view: &PageView<'_>, seg: &Segment) -> Option<Typed> {
                     }
                     found
                 };
-                let lone = ranges.len() == 1 && !in_grid;
+                // A first piece that ends with a colon says it is a label, in a grid too
+                // (`Total:` and an amount in the rest of a ruled sheet): the grid makes
+                // cells only of a line without one, whose pair would rest on the shape of
+                // its value alone.
+                let colon_label = |k: usize| {
+                    let first = &pieces[k][0];
+                    let ids: Vec<usize> = (first.start..first.end).collect();
+                    words(&runs, &ids).ends_with(':')
+                };
+                // Nor is a line right under a line of smaller text a label and its value on
+                // its own: it is the row of the values of those labels (see
+                // [`under_smaller_line`]), whatever its first piece reads as. Both hold for
+                // the only line of a group and for each line among others; a line of one
+                // piece is read by its colon wherever it stands, so only lines of two
+                // pieces are asked.
+                let cells = |k: usize| {
+                    pieces[k].len() == 2
+                        && ((in_grid && !colon_label(k))
+                            || under_smaller_line(view, &runs, &ranges[k]))
+                };
                 // An item of a list (see [`list_item`]) is no pair on its own.
                 if ranges.len() == 1 && list_item(view, &runs, &ranges[0]) {
                     return None;
                 }
-                let pairs: Option<Vec<LinePair>> =
-                    pieces.iter().map(|p| line_pair(&runs, p, lone)).collect();
+                let pairs: Option<Vec<LinePair>> = pieces
+                    .iter()
+                    .enumerate()
+                    .map(|(k, p)| {
+                        let stand = match ranges.len() {
+                            _ if cells(k) => Stand::Cells,
+                            1 => Stand::Lone,
+                            _ => Stand::Among,
+                        };
+                        line_pair(&runs, p, stand, &|x| colon_column(view, &ranges[k], x))
+                    })
+                    .collect();
                 let pairs = pairs.filter(|p| !p.is_empty())?;
                 signals.push(signal(
                     "label_value.line_pairs",
@@ -1378,8 +1944,13 @@ mod tests {
     use crate::segment::segment_page;
     use crate::typers::FileIndex;
 
+    /// The frames of [`rule_frames_under`] without their top pieces.
+    fn rule_frames(rules: &[crate::segment::drawn::Line]) -> Vec<Place> {
+        rule_frames_under(rules).into_iter().map(|f| f.0).collect()
+    }
+
     /// The frames by a scan over every higher piece (each open stretch of a piece with the
-    /// nearest piece above it that overlaps it): what [`rule_frames`] finds by its sweep.
+    /// nearest piece above it that overlaps it): what [`rule_frames_under`] finds by its sweep.
     fn frames_by_scan(rules: &[crate::segment::drawn::Line]) -> Vec<(f32, f32, f32, f32)> {
         let snap = crate::segment::drawn::SNAP;
         let mut sorted: Vec<&crate::segment::drawn::Line> = rules.iter().collect();
@@ -1496,6 +2067,214 @@ mod tests {
         }
     }
 
+    /// Task 26 fix round 6 (M1): the dividers of a strip are looked for among the lines that
+    /// stand at its rules, not among every line between its ends. Many strips over many
+    /// short lines at other heights cost about a step for each strip and each line, and the
+    /// lines found hold every divider a scan of all lines finds.
+    #[test]
+    fn the_dividers_of_many_strips_are_looked_for_at_their_rules_in_linear_work() {
+        use crate::extract::pairs::strips::dividers_of;
+        use crate::segment::drawn::Line;
+        let page = |n: usize| {
+            // Strips 4 points high, one on another, each with a divider of its own in its
+            // middle; and as many short lines far over them, between their ends.
+            let frames: Vec<(f32, f32, f32, f32)> = (0..n)
+                .map(|k| (4.0 * k as f32, 4.0 * k as f32 + 4.0, 0.0, 200.0))
+                .collect();
+            let mut vs: Vec<Line> = (0..n)
+                .map(|k| Line {
+                    at: 100.0,
+                    from: 4.0 * k as f32,
+                    to: 4.0 * k as f32 + 4.0,
+                })
+                .collect();
+            vs.extend((0..n).map(|k| Line {
+                at: 1.0 + 198.0 * k as f32 / n as f32,
+                from: 4.0 * n as f32 + 100.0,
+                to: 4.0 * n as f32 + 103.0,
+            }));
+            vs.sort_by(|a, b| a.at.total_cmp(&b.at));
+            (frames, vs)
+        };
+        let steps = |n: usize| {
+            let (frames, vs) = page(n);
+            let mut work = 0usize;
+            let at = lines_at_rules(&frames, &vs, &mut work).expect("within the bound");
+            (frames, vs, at, work)
+        };
+        let (frames, vs, at, work) = steps(1000);
+        for (lines, &(bottom, top, x0, x1)) in at.iter().zip(&frames) {
+            // The strip's own divider and those of the strips that share a rule with it.
+            assert!(lines.len() <= 3, "{lines:?}");
+            let near: Vec<Line> = lines.iter().map(|&k| vs[k as usize]).collect();
+            let found = dividers_of(&near, (bottom, top), (x0, x1), &mut || true);
+            let scanned = dividers_of(&vs, (bottom, top), (x0, x1), &mut || true);
+            assert_eq!(found, scanned);
+            assert_eq!(found.map(|d| d.len()), Some(1));
+        }
+        // 1,000 strips against 2,000 lines: a scan of the lines between the ends of each
+        // strip is two million steps.
+        assert!(work < 12 * 1000, "{work} steps");
+        let (.., double) = steps(2000);
+        assert!(double < 3 * work, "{double} steps after {work}");
+    }
+
+    /// Task 26 fix round 6 (M1): the search for dividers takes the bound of the reader's
+    /// search for fields between rules. Lines that stand at the rules of many strips cost a
+    /// step for each strip they stand in; past `STRIP_WORK` steps the search gives up.
+    #[test]
+    fn the_search_for_dividers_stops_at_the_bound_of_the_strip_search() {
+        use crate::extract::pairs::strips::STRIP_WORK;
+        use crate::segment::drawn::Line;
+        let sweep = |strips: usize| {
+            let frames: Vec<(f32, f32, f32, f32)> = (0..strips)
+                .map(|k| (4.0 * k as f32, 4.0 * k as f32 + 4.0, 0.0, 2000.0))
+                .collect();
+            // A thousand lines down all the strips.
+            let vs: Vec<Line> = (0..1000)
+                .map(|k| Line {
+                    at: 1.0 + 1.5 * k as f32,
+                    from: 0.0,
+                    to: 4.0 * strips as f32,
+                })
+                .collect();
+            let mut work = 0usize;
+            let found = lines_at_rules(&frames, &vs, &mut work);
+            (found.map(|f| f.len()), work)
+        };
+        // Each strip reads the thousand lines at its two rules.
+        let (found, work) = sweep(STRIP_WORK / 2000 - 2);
+        assert_eq!(found, Some(STRIP_WORK / 2000 - 2));
+        assert!(work <= STRIP_WORK);
+        let (found, work) = sweep(STRIP_WORK / 2000 + 1);
+        assert_eq!(found, None);
+        assert_eq!(work, STRIP_WORK + 1);
+    }
+
+    /// Task 26 fix round 6 (M3): a strip inside a grid is left to the table typer, as the
+    /// reader leaves it: a row of a table of rates between its row rules, with its column
+    /// rules, is no row of fields (its small values would read as the labels of empty
+    /// fields). The same row between two rules of its own, with dividers that hang from the
+    /// upper one, stands in no grid and is read; so is the strip under the lowest rule of a
+    /// grid.
+    #[test]
+    fn a_table_row_between_the_rules_of_a_grid_is_no_strip_of_fields() {
+        let line = |x0: f32, y0: f32, x1: f32, y1: f32| RuleIn {
+            x0,
+            y0,
+            x1,
+            y1,
+            thick: 0.5,
+            dashed: false,
+            rect: false,
+        };
+        let sized = |text: &str, x: f32, y: f32, size: f32, line: u32| TextRun {
+            y,
+            w: 0.5 * size * text.chars().count() as f32,
+            h: size,
+            size,
+            line,
+            ..on_line(text, x)
+        };
+        let xs = [72.0, 222.0, 372.0, 522.0];
+        let cells = |row: [&str; 3], y: f32, line: u32| -> Vec<TextRun> {
+            row.iter()
+                .zip(xs)
+                .map(|(t, x)| sized(t, x + 4.0, y, 7.0, line))
+                .collect()
+        };
+        // The reads of the strips of a page of `rules` that hold the row of rates at 664,
+        // and of the strip of small labels under 640, with text in a larger size elsewhere.
+        let reads = |rules: Vec<RuleIn>| {
+            let mut texts: Vec<TextRun> = (0..3)
+                .map(|k| {
+                    let y = 780.0 - 14.0 * k as f32;
+                    sized(
+                        "Tall crates stand in the depot by the gate",
+                        72.0,
+                        y,
+                        10.0,
+                        k,
+                    )
+                })
+                .collect();
+            texts.extend(cells(["Rate", "Net", "Tax"], 684.0, 3));
+            texts.extend(cells(["7%", "160.00", "11.20"], 664.0, 4));
+            texts.extend(cells(["19%", "200.00", "38.00"], 644.0, 5));
+            texts.extend(cells(["Sheet", "Depot", "Days"], 630.0, 6));
+            let page = PageIn {
+                page: 1,
+                size: [595.0, 842.0],
+                turn: 0,
+                texts,
+                rules,
+                boxes: Vec::new(),
+                pictures: Vec::new(),
+                codes: Vec::new(),
+                given: Vec::new(),
+            };
+            let facts = FileFacts::default();
+            let index = FileIndex::new(&facts);
+            let structure = drawn(&page, &|_| true);
+            let segs = segment_page(&page, &Limits::default(), &|| false);
+            let none = |_: &str| false;
+            let view = PageView::new(&page, &structure, &segs, &facts, &index, &none);
+            let strips = strip_frames(&view);
+            let read_at = |y: f32| {
+                strips
+                    .frames
+                    .iter()
+                    .find(|f| f.bottom < y && y < f.top)
+                    .map(|f| f.read.clone())
+            };
+            (read_at(666.0), read_at(632.0))
+        };
+        let clear = |r: &Option<FrameRead>| matches!(r, Some(FrameRead::Clear(_)));
+        let ys = [700.0, 680.0, 660.0, 640.0, 620.0];
+        // A grid of three rows with its column rules, and a rule under it.
+        let mut grid: Vec<RuleIn> = ys.iter().map(|&y| line(72.0, y, 522.0, y)).collect();
+        grid.extend(xs.iter().map(|&x| line(x, 640.0, x, 700.0)));
+        let (row, under) = reads(grid);
+        assert_eq!(row, Some(FrameRead::No));
+        assert!(clear(&under), "{under:?}");
+        // Rules alone, with dividers that hang from each rule over half of the row under it.
+        let mut open: Vec<RuleIn> = ys.iter().map(|&y| line(72.0, y, 522.0, y)).collect();
+        for &y in &ys[..4] {
+            open.extend(xs[1..3].iter().map(|&x| line(x, y - 10.0, x, y)));
+        }
+        let (row, under) = reads(open);
+        assert!(clear(&row), "{row:?}");
+        assert!(clear(&under), "{under:?}");
+    }
+
+    /// Task 26 fix round 6 (M1): a page whose strips were read without their dividers says so
+    /// in its issues, as a limit; another page says nothing.
+    #[test]
+    fn strips_read_without_their_dividers_are_an_issue_of_the_page() {
+        let page = PageIn {
+            page: 1,
+            size: [595.0, 842.0],
+            turn: 0,
+            texts: vec![on_line("Depot", 72.0)],
+            rules: Vec::new(),
+            boxes: Vec::new(),
+            pictures: Vec::new(),
+            codes: Vec::new(),
+            given: Vec::new(),
+        };
+        let mut segs = segment_page(&page, &Limits::default(), &|| false);
+        crate::typers::say_unparted(&mut segs, false);
+        assert!(segs.issues.is_empty());
+        crate::typers::say_unparted(&mut segs, true);
+        assert_eq!(
+            segs.issues,
+            [crate::region::Issue {
+                what: DIVIDERS_UNSEARCHED.to_string(),
+                kind: crate::region::IssueKind::Limit,
+            }]
+        );
+    }
+
     /// Boxes whose runs have no size have a reach of 0: the touch search keeps finite cell
     /// keys and does not overflow them (a panic in a debug build).
     #[test]
@@ -1563,6 +2342,86 @@ mod tests {
         assert_eq!(touching.len(), segs.all.len());
     }
 
+    /// Task 26 fix round 1 (M1): the row over a line is found by its place, not by the
+    /// order of the reader's lines. The values `Oakfield Bank   30.10.2026` come first in
+    /// the reader's order and each small label over them is a line of its own after them:
+    /// the values still stand under a row of smaller text. A row with an amount over them, a
+    /// row in their own size, a row too far over them or beside them is no such row.
+    #[test]
+    fn the_row_over_a_line_is_found_by_place_in_any_line_order() {
+        let run = |text: &str, x: f32, y: f32, size: f32, line: u32| TextRun {
+            y,
+            size,
+            h: 0.7 * size,
+            w: 0.5 * size * text.chars().count() as f32,
+            line,
+            ..on_line(text, x)
+        };
+        let under = |labels: &[(&str, f32, f32, f32)]| {
+            let mut texts = vec![
+                run("Oakfield Bank", 43.0, 700.0, 10.0, 0),
+                run("30.10.2026", 203.0, 700.0, 10.0, 0),
+            ];
+            for (n, &(text, x, y, size)) in labels.iter().enumerate() {
+                texts.push(run(text, x, y, size, 1 + n as u32));
+            }
+            let page = PageIn {
+                page: 1,
+                size: [595.0, 842.0],
+                turn: 0,
+                texts,
+                rules: Vec::new(),
+                boxes: Vec::new(),
+                pictures: Vec::new(),
+                codes: Vec::new(),
+                given: Vec::new(),
+            };
+            let facts = FileFacts::default();
+            let index = FileIndex::new(&facts);
+            let structure = drawn(&page, &|_| true);
+            let segs = segment_page(&page, &Limits::default(), &|| false);
+            // No reading of amounts by the host: the row is read by the engine alone.
+            let amount = |_: &str| false;
+            let view = PageView::new(&page, &structure, &segs, &facts, &index, &amount);
+            let runs: Vec<&TextRun> = page.texts.iter().collect();
+            let range = crate::extract::table::run_ranges(&page.texts)[0];
+            under_smaller_line(&view, &runs, &range)
+        };
+        let labels = [
+            ("Bank", 40.0, 712.0, 8.0),
+            ("Account", 80.0, 712.0, 8.0),
+            ("Paid", 200.0, 712.0, 8.0),
+        ];
+        assert!(under(&labels));
+        // One label alone over the line, and a baseline a hair off the others.
+        assert!(under(&labels[..1]));
+        let mut jitter = labels;
+        jitter[1].2 = 712.5;
+        assert!(under(&jitter));
+        // An amount among them: a row of its own values, no labels.
+        let mut amount = labels;
+        amount[2].0 = "120.00";
+        assert!(!under(&amount));
+        // So is a whole number with its currency in letters (Q6 of Task 31b); the number
+        // alone may be a label (a year), and a word that ends like a currency is none.
+        amount[2].0 = "120 EUR";
+        assert!(!under(&amount));
+        amount[2].0 = "2026";
+        assert!(!under(&amount));
+        amount[2].0 = "120 TEUR";
+        assert!(under(&amount));
+        // The size step moved both ways: 8 under 10 is a step, 9.5 is none.
+        assert!(!under(&labels.map(|l| (l.0, l.1, l.2, 9.5))));
+        // The pitch moved both ways: two sizes over the line, and past them.
+        assert!(under(&labels.map(|l| (l.0, l.1, 720.0, l.3))));
+        assert!(!under(&labels.map(|l| (l.0, l.1, 720.5, l.3))));
+        // A small line beside the values, not over them, and no line at all.
+        assert!(!under(&[("Bank", 400.0, 712.0, 8.0)]));
+        assert!(!under(&[]));
+        // A line beside the values on their own row is not over them.
+        assert!(!under(&[("Paid", 400.0, 701.0, 8.0)]));
+    }
+
     /// A run of one line at `x`, 10 pt, its advance by the length of its text.
     fn on_line(text: &str, x: f32) -> TextRun {
         TextRun {
@@ -1581,6 +2440,285 @@ mod tests {
             line: 0,
             off_axis: false,
             gaps: Vec::new(),
+        }
+    }
+
+    /// Task 26 fix round 6 (I1): a strip whose value line ends with a value of one character
+    /// right after a drawn divider reads that character as the value of its own field, not
+    /// glued to the value before it: the strip is clear, three fields with a value and the
+    /// last one empty.
+    #[test]
+    fn a_one_character_value_after_a_divider_is_its_own_field() {
+        let ch = 5.7;
+        let sized = |text: &str, x: f32, y: f32, size: f32, line: u32| TextRun {
+            y,
+            w: 0.6 * size * text.chars().count() as f32,
+            h: size,
+            size,
+            line,
+            font_kind: FontKind::Monospace,
+            ..on_line(text, x)
+        };
+        // The dividers stand a hair inside the box of the character after them.
+        let dividers = [42.0 + 6.0 * ch + 0.46, 42.0 + 15.0 * ch + 0.46, 170.0];
+        let mut value = sized("00123 01.02.70 3", 42.0, 679.0, 9.5, 1);
+        value.gaps = [(1, 5), (2, 14)]
+            .iter()
+            .map(|&(words, k)| crate::input::GapIn {
+                words,
+                from: 42.0 + ch * k as f32,
+                to: 42.0 + ch * (k + 1) as f32,
+            })
+            .collect();
+        let runs = [
+            sized("Number", 44.0, 692.0, 6.6, 0),
+            sized("Born", dividers[0] + 2.0, 692.0, 6.6, 0),
+            sized("Class", dividers[1] + 2.0, 692.0, 6.6, 0),
+            sized("Factor", dividers[2] + 2.0, 692.0, 6.6, 0),
+            value,
+        ];
+        let own: Vec<&TextRun> = runs.iter().collect();
+        let how = Reading {
+            one_field: false,
+            smaller: true,
+            small: small_size(&[6.6, 9.5]).saturating_sub(1),
+            labels: &[],
+        };
+        let texts =
+            |runs: &[TextRun]| -> Vec<String> { runs.iter().map(|r| r.text.clone()).collect() };
+        match read_frame(&own, 40.0, 220.0, &dividers, how) {
+            FrameRead::Clear(f) => {
+                assert_eq!(texts(&f.labels), ["Number", "Born", "Class"]);
+                assert_eq!(texts(&f.empty), ["Factor"]);
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// Task 26 fix rounds 7, 7b and 7c (N1, I1): the gap between the digit groups of a number
+    /// is no field edge, and a drawn divider in it (or within its reach of it) or inside the
+    /// number is no evidence of one number either: the strip reads as fields that are not
+    /// clear, neither cut at the gap nor with the number in one field. So does `123 456`
+    /// with a divider in its gap or in a group. With the divider less than a character into
+    /// the leading digit, out of reach of the gap, the amount does not stand across it: it
+    /// stays whole in its own field and the field before it keeps its own value or stays
+    /// empty.
+    #[test]
+    fn a_divider_in_the_group_gap_of_an_amount_reads_unclear() {
+        let sized = |text: &str, x: f32, y: f32, size: f32, line: u32| TextRun {
+            y,
+            w: 0.6 * size * text.chars().count() as f32,
+            h: size,
+            size,
+            line,
+            font_kind: FontKind::Monospace,
+            ..on_line(text, x)
+        };
+        // The gap after the first group of `text`, which starts at 130.
+        let read = |text: &str, divider: f32, count: Option<&str>| {
+            let first = text.chars().take_while(char::is_ascii_digit).count() as f32;
+            let mut amount = sized(text, 130.0, 679.0, 9.5, 1);
+            amount.w -= 4.1;
+            amount.gaps = vec![crate::input::GapIn {
+                words: 1,
+                from: 130.0 + 5.7 * first,
+                to: 130.0 + 5.7 * first + 1.6,
+            }];
+            let mut runs = vec![
+                sized("Count", 44.0, 692.0, 6.6, 0),
+                sized("Amount", divider + 12.0, 692.0, 6.6, 0),
+            ];
+            runs.extend(count.map(|c| sized(c, 44.0, 679.0, 9.5, 1)));
+            runs.push(amount);
+            let own: Vec<&TextRun> = runs.iter().collect();
+            let how = Reading {
+                one_field: false,
+                smaller: true,
+                small: small_size(&[6.6, 9.5]).saturating_sub(1),
+                labels: &[],
+            };
+            let texts =
+                |runs: &[TextRun]| -> Vec<String> { runs.iter().map(|r| r.text.clone()).collect() };
+            match read_frame(&own, 40.0, 220.0, &[divider], how) {
+                FrameRead::Clear(f) => Some((texts(&f.labels), texts(&f.empty))),
+                FrameRead::Unclear => None,
+                FrameRead::No => panic!("divider at {divider}: no fields"),
+            }
+        };
+        let amount = "1\u{2009}234,56";
+        let none: [&str; 0] = [];
+        // In the leading digit, out of reach of the gap: clear, the amount whole.
+        let (labels, empty) = read(amount, 133.0, None).expect("clear");
+        assert_eq!(
+            (labels, empty),
+            (vec!["Amount".into()], vec!["Count".into()])
+        );
+        let (labels, empty) = read(amount, 133.0, Some("7")).expect("clear");
+        assert_eq!(labels, ["Count", "Amount"]);
+        assert_eq!(empty, none);
+        // A hair before the group gap, in it and a hair past it: not clear.
+        for divider in [135.0, 136.0, 137.5] {
+            assert_eq!(read(amount, divider, None), None, "divider at {divider}");
+            assert_eq!(
+                read(amount, divider, Some("7")),
+                None,
+                "divider at {divider}"
+            );
+        }
+        // Inside the second group, more than a character from the number's ends: not clear.
+        assert_eq!(read(amount, 140.0, None), None);
+        assert_eq!(read(amount, 140.0, Some("7")), None);
+        // Two groups of three: two values or one number, at the gap and in a group.
+        for count in [None, Some("7")] {
+            assert_eq!(read("123\u{2009}456", 148.0, count), None);
+            assert_eq!(read("123\u{2009}456", 144.0, count), None);
+        }
+    }
+
+    /// Task 26 fix round 7c (M1): a number led by a sign (`-`, `+`, U+2212), an opening
+    /// bracket, a currency sign or a currency code, with a drawn divider in its digit group
+    /// gap, reads as fields that are not clear: the sign and the first group are not the
+    /// value of the field before the divider. The other way: letters before the first digit
+    /// that are no currency code make a code, cut at the divider as before.
+    #[test]
+    fn a_divider_in_the_group_gap_of_a_number_with_a_sign_reads_unclear() {
+        let sized = |text: &str, x: f32, y: f32, size: f32, line: u32| TextRun {
+            y,
+            w: 0.6 * size * text.chars().count() as f32,
+            h: size,
+            size,
+            line,
+            font_kind: FontKind::Monospace,
+            ..on_line(text, x)
+        };
+        // The value run starts at 130 with one gap of 1.6 after its first `chars`
+        // characters, the divider 0.8 into that gap; `Count` has no value of its own.
+        let read = |text: &str, chars: usize| {
+            let from = 130.0 + 5.7 * chars as f32;
+            let before: String = text.chars().take(chars).collect();
+            let mut value = sized(text, 130.0, 679.0, 9.5, 1);
+            value.w -= 4.1;
+            value.gaps = vec![crate::input::GapIn {
+                words: before.split_whitespace().count() as u32,
+                from,
+                to: from + 1.6,
+            }];
+            let divider = from + 0.8;
+            let runs = [
+                sized("Count", 44.0, 692.0, 6.6, 0),
+                sized("Amount", divider + 12.0, 692.0, 6.6, 0),
+                value,
+            ];
+            let own: Vec<&TextRun> = runs.iter().collect();
+            let how = Reading {
+                one_field: false,
+                smaller: true,
+                small: small_size(&[6.6, 9.5]).saturating_sub(1),
+                labels: &[],
+            };
+            let texts =
+                |runs: &[TextRun]| -> Vec<String> { runs.iter().map(|r| r.text.clone()).collect() };
+            match read_frame(&own, 40.0, 220.0, &[divider], how) {
+                FrameRead::Clear(f) => Some((texts(&f.labels), texts(&f.empty))),
+                FrameRead::Unclear => None,
+                FrameRead::No => panic!("{text}: no fields"),
+            }
+        };
+        for (text, chars) in [
+            ("\u{2212}1 234,56", 2),
+            ("(1 234,56)", 2),
+            ("[1 234]", 2),
+            ("\u{20ac}1 234,56", 2),
+            ("$12 345.00", 3),
+            ("EUR1 234,56", 4),
+            ("-\u{20ac}1 234,56", 3),
+            ("\u{20ac} 1 234,56", 3),
+            ("EUR 1 234,56", 5),
+            ("AB 1 234", 4),
+        ] {
+            assert_eq!(read(text, chars), None, "{text}");
+        }
+        let none: [&str; 0] = [];
+        for (text, chars) in [("AB1 234,56", 3), ("Nr1 234", 3), ("#1 234,56", 2)] {
+            let (labels, empty) = read(text, chars).expect("clear");
+            assert_eq!(labels, ["Count", "Amount"], "{text}");
+            assert_eq!(empty, none, "{text}");
+        }
+    }
+
+    /// Task 26 fix round 7c (I1): a field edge taken from the start of a label (no drawn
+    /// divider) that falls in the digit group gap of a number, or inside the number, leaves
+    /// the strip not clear as a drawn divider does: the digits say one number and the labels
+    /// say two fields. The number is never read whole into one field with the other empty.
+    /// The other way: a value line whose gap is no group gap is cut at the label's start.
+    #[test]
+    fn a_label_start_in_a_number_in_digit_groups_reads_unclear() {
+        let sized = |text: &str, x: f32, y: f32, size: f32, line: u32| TextRun {
+            y,
+            w: 0.6 * size * text.chars().count() as f32,
+            h: size,
+            size,
+            line,
+            font_kind: FontKind::Monospace,
+            ..on_line(text, x)
+        };
+        // Two small labels on one line, the second at `second`, and no divider; the value
+        // line is one run from 44 with one gap `gap` wide after its first word, so that its
+        // second word starts under the second label.
+        let read = |labels: [&str; 2], second: f32, text: &str, gap: f32| {
+            let first = text.chars().take_while(|c| *c != ' ').count() as f32;
+            let mut value = sized(text, 44.0, 679.0, 9.5, 1);
+            value.w += gap - 5.7;
+            value.gaps = vec![crate::input::GapIn {
+                words: 1,
+                from: 44.0 + 5.7 * first,
+                to: 44.0 + 5.7 * first + gap,
+            }];
+            let runs = [
+                sized(labels[0], 44.0, 692.0, 6.6, 0),
+                sized(labels[1], second, 692.0, 6.6, 0),
+                value,
+            ];
+            let own: Vec<&TextRun> = runs.iter().collect();
+            let how = Reading {
+                one_field: false,
+                smaller: true,
+                small: small_size(&[6.6, 9.5]).saturating_sub(1),
+                labels: &[],
+            };
+            let texts =
+                |runs: &[TextRun]| -> Vec<String> { runs.iter().map(|r| r.text.clone()).collect() };
+            match read_frame(&own, 40.0, 220.0, &[], how) {
+                FrameRead::Clear(f) => Some((texts(&f.labels), texts(&f.empty))),
+                FrameRead::Unclear => None,
+                FrameRead::No => panic!("{text}: no fields"),
+            }
+        };
+        for (labels, second, text, gap) in [
+            (["A", "B"], 58.0, "12 345", 2.6),
+            (["A", "B"], 56.0, "7 500", 6.3),
+            (["A", "B"], 56.0, "7 500,00", 6.3),
+            (["No", "Qty"], 60.0, "12 345", 4.6),
+            (["No", "Qty"], 62.0, "12 345", 6.6),
+            // The label start over the middle of "345", away from the group gap.
+            (["A", "B"], 68.0, "12 345", 2.6),
+            (["No", "Qty"], 68.0, "12 345", 4.6),
+        ] {
+            assert_eq!(
+                read(labels, second, text, gap),
+                None,
+                "{text} under {second}"
+            );
+        }
+        // No group after the gap: two values, each under its label.
+        let none: [&str; 0] = [];
+        for (labels, second, text, gap) in [
+            (["A", "B"], 58.0, "12 3456", 2.6),
+            (["No", "Qty"], 60.0, "12 34,5", 4.6),
+        ] {
+            let (found, empty) = read(labels, second, text, gap).expect("clear");
+            assert_eq!(found, labels, "{text}");
+            assert_eq!(empty, none, "{text}");
         }
     }
 
@@ -1635,7 +2773,103 @@ mod tests {
             line_pair_cut(&coded, true),
             Some(PairCut { run: 1, byte: 0 })
         );
-        assert_eq!(line_pair_cut(&coded, false), None);
+        // Task 26 part 3a (H2): the colon says so among other lines too. The line parts at
+        // the gap after the colon, as a line of one piece parts after it.
+        assert_eq!(
+            line_pair_cut(&coded, false),
+            Some(PairCut { run: 1, byte: 0 })
+        );
+        // Task 26 part 3c-1: a colon that opens the second piece as a word of its own is the
+        // colon of the label (a listing in a fixed-width face pads its labels up to a
+        // column of colons). The line parts after the colon, alone and among other lines,
+        // whatever short text the value is.
+        for value in [
+            ": EUR",
+            ": 549910",
+            ": basic-2017",
+            " : EUR",
+            ":  two words",
+        ] {
+            let line = [on_line("Currency ", 40.0), on_line(value, 200.0)];
+            let byte = value.find(':').map(|at| at + 1).unwrap_or(0);
+            for lone in [true, false] {
+                assert_eq!(
+                    line_pair_cut(&line, lone),
+                    Some(PairCut { run: 1, byte }),
+                    "{value}"
+                );
+            }
+        }
+        // Fix round 4 (review 4 M4): the colon of a padded label is no word of it. A label
+        // of four words (`PAIR_LABEL_WORDS`) pairs as it does in one run, one of five does
+        // not, in one run or in two.
+        for (label, pairs) in [
+            ("Name of the seller", true),
+            ("Name of the first seller", false),
+        ] {
+            let padded = [
+                on_line(&format!("{label} "), 40.0),
+                on_line(": Rowan", 300.0),
+            ];
+            let glued = [on_line(&format!("{label}: Rowan"), 40.0)];
+            assert_eq!(line_pair_cut(&padded, false).is_some(), pairs, "{label}");
+            assert_eq!(line_pair_cut(&glued, false).is_some(), pairs, "{label}");
+        }
+        // The colon in a run of its own: the line parts after that run.
+        let apart = [
+            on_line("Currency ", 40.0),
+            on_line(":", 200.0),
+            on_line(" EUR", 206.0),
+        ];
+        assert_eq!(
+            line_pair_cut(&apart, false),
+            Some(PairCut { run: 2, byte: 0 })
+        );
+        // No colon of the label: a colon glued to what follows it (a time, a mark), a colon
+        // alone with no value, a sentence after it, a label that has its colon already
+        // (the second piece is another cell) and a first piece that is no short label.
+        for (label, value) in [
+            ("Currency ", ":EUR"),
+            ("Opens ", ":30 past nine"),
+            ("Currency ", ":"),
+            (
+                "Note ",
+                ": this is a sentence that says much more than a value.",
+            ),
+            ("Currency: EUR ", ": USD"),
+            ("12 ", ": 34"),
+            ("one two three four five six seven ", ": EUR"),
+        ] {
+            let line = [on_line(label, 40.0), on_line(value, 300.0)];
+            assert_eq!(line_pair_cut(&line, false), None, "{label}{value}");
+        }
+        // Task 26 fix round 2 (I1): a first piece that holds a label, its colon and a value
+        // is a pair of its own, and the piece after the gap is another cell. It never joins
+        // the value, whatever it reads as: a number (`Ref: AB/CD` is not `20481/55012` too),
+        // words, or a word and a number. The line stays a line, alone or among other lines.
+        for (first, second) in [
+            ("Ref: AB/CD", "20481/55012"),
+            ("Phone: 030 123456", "Fax 030 123457"),
+            ("Date: 03.04.2026", "Page 1 of 2"),
+            ("Name: Smith", "Apples"),
+            ("Order: 4711", "03.04.2026"),
+        ] {
+            let line = [on_line(first, 40.0), on_line(second, 200.0)];
+            for lone in [true, false] {
+                assert_eq!(line_pair_cut(&line, lone), None, "{first} | {second}");
+            }
+            // The first piece alone is the pair it says it is.
+            let alone = [on_line(first, 40.0)];
+            assert!(line_pair_cut(&alone, false).is_some(), "{first}");
+        }
+        // Two labels with their values on one line are no pair, nor is a second piece among
+        // other lines after a first piece without a colon (a row of a table).
+        let two = [on_line("Phone: 12", 40.0), on_line("Fax: 34", 200.0)];
+        let row = [on_line("Parcels", 40.0), on_line("12", 200.0)];
+        for lone in [true, false] {
+            assert_eq!(line_pair_cut(&two, lone), None);
+        }
+        assert_eq!(line_pair_cut(&row, false), None);
         let bare = [
             on_line("Member Code", 40.0),
             on_line("MC 4417 2093 88", 200.0),
@@ -1655,5 +2889,47 @@ mod tests {
             Some(PairCut { run: 1, byte: 0 })
         );
         assert_eq!(line_pair_cut(&small("Member Code"), true), None);
+    }
+
+    /// Task 26 part 2 (N1 of the re-review): a row cut inside a run carries the evidence of
+    /// its cut. Its label range holds the whole cut run, so read by its ranges the label
+    /// `Customer reference: 20481` ends with no colon and the run after it (`north`) has no
+    /// shape: the block was refused. The same ranges without the cut are still refused.
+    #[test]
+    fn a_row_cut_inside_a_run_is_evidenced_by_its_cut() {
+        use crate::extract::pairs::blocks::KeyValue;
+        let texts = [
+            on_line("Order:", 40.0),
+            on_line("4711", 140.0),
+            on_line("Customer reference: 20481", 40.0),
+            on_line("north", 190.0),
+        ];
+        let runs: Vec<&TextRun> = texts.iter().collect();
+        let rows = |cut: Option<(usize, usize)>| {
+            vec![
+                KeyValue {
+                    line: 0,
+                    label: (0, 1),
+                    value: Some((1, 2)),
+                    cut: None,
+                },
+                KeyValue {
+                    line: 1,
+                    label: (2, 3),
+                    value: Some((3, 4)),
+                    cut,
+                },
+            ]
+        };
+        assert!(pairs_evidenced(&runs, &rows(Some((2, 20)))));
+        assert!(!pairs_evidenced(&runs, &rows(None)));
+        // A cut row alone is a pair with a value.
+        let lone = vec![KeyValue {
+            line: 1,
+            label: (2, 3),
+            value: None,
+            cut: Some((2, 20)),
+        }];
+        assert!(pairs_evidenced(&runs, &lone));
     }
 }

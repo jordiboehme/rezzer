@@ -657,7 +657,7 @@ expression: json
           "inlines": [
             {
               "type": "text",
-              "text": "Zahltag"
+              "text": "9876,54"
             }
           ],
           "anchor": "p1:b6"
@@ -667,7 +667,7 @@ expression: json
           "inlines": [
             {
               "type": "text",
-              "text": "9876,54"
+              "text": "Zahltag"
             }
           ],
           "anchor": "p1:b7"
@@ -1401,7 +1401,7 @@ expression: json
           "inlines": [
             {
               "type": "text",
-              "text": "Zahltag"
+              "text": "8765,43"
             }
           ],
           "anchor": "p2:b6"
@@ -1411,7 +1411,7 @@ expression: json
           "inlines": [
             {
               "type": "text",
-              "text": "8765,43"
+              "text": "Zahltag"
             }
           ],
           "anchor": "p2:b7"
@@ -1559,7 +1559,7 @@ expression: json
       ]
     },
     {
-      "anchor": "p1:b7",
+      "anchor": "p1:b6",
       "page": 1,
       "kind": "paragraph",
       "bounds": [
@@ -1680,9 +1680,29 @@ expression: json
       "kind": "paragraph",
       "bounds": [
         300.0,
-        440.0,
+        470.0,
         320.22,
         476.0
+      ],
+      "certainty": "rule",
+      "score": 300,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "paragraph.text_size",
+          "detail": "set in a text size of the page"
+        }
+      ]
+    },
+    {
+      "anchor": "p1:b7",
+      "page": 1,
+      "kind": "paragraph",
+      "bounds": [
+        300.0,
+        440.0,
+        318.12,
+        446.0
       ],
       "certainty": "rule",
       "score": 300,
@@ -1862,7 +1882,7 @@ expression: json
       ]
     },
     {
-      "anchor": "p2:b7",
+      "anchor": "p2:b6",
       "page": 2,
       "kind": "paragraph",
       "bounds": [
@@ -1982,9 +2002,29 @@ expression: json
       "kind": "paragraph",
       "bounds": [
         300.0,
-        440.0,
+        470.0,
         320.22,
         476.0
+      ],
+      "certainty": "rule",
+      "score": 300,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "paragraph.text_size",
+          "detail": "set in a text size of the page"
+        }
+      ]
+    },
+    {
+      "anchor": "p2:b7",
+      "page": 2,
+      "kind": "paragraph",
+      "bounds": [
+        300.0,
+        440.0,
+        318.12,
+        446.0
       ],
       "certainty": "rule",
       "score": 300,

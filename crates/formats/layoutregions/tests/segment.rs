@@ -1596,3 +1596,478 @@ fn ink_that_touches_a_frame_by_a_hair_leaves_the_strip() {
     assert_eq!(strip(120.3), 1);
     assert_eq!(strip(150.0), 0);
 }
+
+/// Task 26 part 3a (H3): one line of a date and, a cell gap right of it, a label with its
+/// colon and its value is two segments, the date for itself and the label with its value.
+/// A first run that is words (a label of its own), a second run that is no label with a
+/// value, and a second run a word space after the first stay one segment with the first.
+#[test]
+fn a_value_beside_a_label_with_its_value_is_parted_from_it() {
+    let leaves = |first: &str, second: &str, gap: f32| {
+        let size = 10.0;
+        let w = |t: &str| 0.6 * size * t.chars().count() as f32;
+        let mut texts = vec![
+            run(first, 40.0, 700.0, w(first), size, 0),
+            run(second, 40.0 + w(first) + gap, 700.0, w(second), size, 0),
+        ];
+        // A column of prose far under the line: the line is a band of the page.
+        texts.extend(column(40.0, 500.0, 4, 1));
+        let p = page([595.0, 842.0], texts, Vec::new());
+        let s = segment_page(&p, &Limits::default(), &|| false);
+        check_cover(&s, &p);
+        // The leaves that hold a run of the line, by their number of runs.
+        s.all
+            .iter()
+            .filter(|g| g.children.is_empty())
+            .filter(|g| {
+                g.prims
+                    .iter()
+                    .any(|p| matches!(p, PrimId::Text(t) if *t < 2))
+            })
+            .map(|g| g.prims.len())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(leaves("03.04.2026", "Sheet:  4", 150.0), [1, 1]);
+    assert_eq!(leaves("127,50", "Sheet:  4", 150.0), [1, 1]);
+    assert_eq!(leaves("Ledger", "Sheet:  4", 150.0), [2], "words");
+    assert_eq!(leaves("03.04.2026", "Sheet", 150.0), [2], "no pair");
+    // The cell gap is one text size (`CELL_GAP`).
+    assert_eq!(leaves("03.04.2026", "Sheet:  4", 10.5), [1, 1]);
+    assert_eq!(leaves("03.04.2026", "Sheet:  4", 9.5), [2], "a word space");
+}
+
+/// Task 26 fix round 2 (M5): two labels of a print form, each over the upper left of its
+/// field (a drawn row of digit boxes, lower and to the right), are parted into a segment
+/// each, to be read with their fields. The fields are asked from one step of the labels
+/// under the lowest label up to the highest one, right of the labels: a field at the step
+/// under the lowest label, a field at the height of the highest label and a field that
+/// starts left of the labels' right edge are no fields of these labels, and with them
+/// left out the rows do not match.
+#[test]
+fn labels_beside_drawn_fields_are_parted_into_their_lines() {
+    // A field: three digit boxes in a row from `x`, with a digit in each, on baseline `y`.
+    let field = |x: f32, y: f32, line: u32| {
+        let rules: Vec<RuleIn> = (0..3)
+            .map(|k| {
+                let x0 = x + 12.0 * k as f32;
+                rect(x0, y - 3.0, x0 + 12.0, y + 9.0)
+            })
+            .collect();
+        let texts: Vec<TextRun> = (0..3)
+            .map(|k| run("7", x + 3.0 + 12.0 * k as f32, y, 5.5, 9.5, line))
+            .collect();
+        (texts, rules)
+    };
+    // The labels at 470 and 440 (a step of 30, their right edge at 320), their fields on
+    // the baselines 460 and 430 from 382, and one more field at (`x`, `y`) when given.
+    let leaves = |third: Option<(f32, f32)>| {
+        let mut texts = vec![
+            run("Amount", 300.0, 470.0, 20.0, 6.0, 0),
+            run("Due on", 300.0, 440.0, 20.0, 6.0, 1),
+        ];
+        let mut rules = Vec::new();
+        let at = [Some((382.0, 460.0)), Some((382.0, 430.0)), third];
+        for (k, (x, y)) in at.into_iter().flatten().enumerate() {
+            let (t, r) = field(x, y, 2 + k as u32);
+            texts.extend(t);
+            rules.extend(r);
+        }
+        texts.extend(column(40.0, 300.0, 4, 10));
+        let p = page([595.0, 842.0], texts, rules);
+        let s = segment_page(&p, &Limits::default(), &|| false);
+        check_cover(&s, &p);
+        // The leaves of the main cut that hold a label, by their labels.
+        let mut found: Vec<Vec<u32>> = Vec::new();
+        let mut stack = vec![s.root];
+        while let Some(id) = stack.pop() {
+            let g = seg(&s, id);
+            stack.extend(g.children.iter().copied());
+            let labels: Vec<u32> = texts_of(g).into_iter().filter(|&t| t < 2).collect();
+            if g.children.is_empty() && !labels.is_empty() {
+                found.push(labels);
+            }
+        }
+        found.sort();
+        found
+    };
+    let (apart, whole) = (vec![vec![0], vec![1]], vec![vec![0, 1]]);
+    assert_eq!(leaves(None), apart);
+    // One step of the labels (30) under the lowest label (440): a field on 410 or lower
+    // is the field of another label, one just over it is asked and has no label here.
+    assert_eq!(leaves(Some((382.0, 410.0))), apart);
+    assert_eq!(leaves(Some((382.0, 410.1))), whole);
+    // A field on the baseline of the highest label (470) or over it is none of theirs.
+    assert_eq!(leaves(Some((450.0, 470.0))), apart);
+    assert_eq!(leaves(Some((450.0, 469.9))), whole);
+    // A field whose first digit starts left of the labels' right edge (320) is none.
+    assert_eq!(leaves(Some((316.9, 452.0))), apart);
+    assert_eq!(leaves(Some((317.1, 452.0))), whole);
+}
+
+/// Task 26 fix 3a (H3) and fix round 5: a data line of a date and a number, with a small
+/// label that ends with a colon set into the blank right before the number, a little over
+/// the baseline: the label and the number are a segment of their own, one plain line
+/// ([`Source::Line`], no pair is claimed), and the date stays for itself, with a title left
+/// of it when there is one. Each sign is needed: the colon, the smaller size of the label,
+/// one baseline, the label nearer to the number than to the date, text of the larger face
+/// before the label on the baseline, and the number the last of the line.
+#[test]
+fn a_small_colon_label_on_a_data_line_is_parted_from_what_stands_before_it() {
+    /// One run of the line: its text, its left edge, its size and its baseline.
+    type Part = (&'static str, f32, f32, f32);
+    let leaves = |parts: &[Part]| {
+        let mut texts: Vec<TextRun> = parts
+            .iter()
+            .map(|&(t, x, size, y)| run(t, x, y, 0.6 * size * t.chars().count() as f32, size, 0))
+            .collect();
+        // A column of prose far under the line: the line is a band of the page.
+        texts.extend(column(40.0, 500.0, 4, 1));
+        let p = page([595.0, 842.0], texts, Vec::new());
+        let s = segment_page(&p, &Limits::default(), &|| false);
+        check_cover(&s, &p);
+        // The parts of the line are its plain lines (fix round 7: the head claims no pair
+        // either): the head from the first run of the line on, and the label with the text
+        // after it, a leaf that ends with the last run of the line, the label right before
+        // that run's stretch.
+        let mut plain: Vec<Vec<u32>> = Vec::new();
+        for g in s.all.iter().filter(|g| g.source == Source::Line) {
+            let own = texts_of(g);
+            assert!(g.children.is_empty(), "{own:?}");
+            assert!(own.windows(2).all(|w| w[0] + 1 == w[1]), "{own:?}");
+            plain.push(own);
+        }
+        plain.sort();
+        if let [head, labelled] = &plain[..] {
+            assert_eq!(head[0], 0, "{plain:?}");
+            assert_eq!(head.last().map(|t| t + 1), Some(labelled[0]), "{plain:?}");
+            assert!(labelled.len() >= 2, "{plain:?}");
+            assert_eq!(
+                labelled.last(),
+                Some(&(parts.len() as u32 - 1)),
+                "{plain:?}"
+            );
+        }
+        let lines = plain.len();
+        // The leaves that hold a run of the line, by their runs, left to right.
+        let mut found: Vec<Vec<u32>> = s
+            .all
+            .iter()
+            .filter(|g| g.children.is_empty())
+            .map(|g| {
+                g.prims
+                    .iter()
+                    .filter_map(|p| match p {
+                        PrimId::Text(t) if (*t as usize) < parts.len() => Some(*t),
+                        _ => None,
+                    })
+                    .collect::<Vec<u32>>()
+            })
+            .filter(|g| !g.is_empty())
+            .collect();
+        found.sort();
+        assert_eq!(lines, 2 * usize::from(found.len() > 1), "{found:?}");
+        found
+    };
+    let date: Part = ("03.04.2026", 300.0, 10.0, 700.0);
+    // The label ends at 424.2, six points before the number at 430.
+    let label: Part = ("Sheet:", 399.0, 7.0, 701.2);
+    let value: Part = ("4", 430.0, 10.0, 700.0);
+    let whole = vec![vec![0, 1, 2]];
+    assert_eq!(leaves(&[date, label, value]), [vec![0], vec![1, 2]]);
+    // With a title left of the date, a little higher than the label.
+    let title: Part = ("Ledger of the month", 40.0, 10.0, 701.5);
+    assert_eq!(
+        leaves(&[title, date, label, value]),
+        [vec![0, 1], vec![2, 3]]
+    );
+    // No colon; a label in the size of the number.
+    assert_eq!(leaves(&[date, ("Sheet", 399.0, 7.0, 701.2), value]), whole);
+    assert_eq!(
+        leaves(&[date, ("Sheet:", 390.0, 10.0, 700.0), value]),
+        whole
+    );
+    // What stands after the label is not asked what it is (fix round 5: the line is only
+    // parted, no pair is claimed): a second label after it stays on its line too.
+    assert_eq!(
+        leaves(&[date, label, ("No:", 430.0, 10.0, 700.0)]),
+        [vec![0], vec![1, 2]]
+    );
+    // The size step (`SIZE_STEP`, 1.08): a label of 9.2 is smaller, one of 9.4 is not.
+    assert_eq!(
+        leaves(&[date, ("Sheet:", 390.0, 9.2, 700.0), value]),
+        [vec![0], vec![1, 2]]
+    );
+    assert_eq!(leaves(&[date, ("Sheet:", 390.0, 9.4, 700.0), value]), whole);
+    // One baseline, within `BASELINE_NEAR` of the size of the number (1.5).
+    assert_eq!(
+        leaves(&[date, ("Sheet:", 399.0, 7.0, 701.4), value]),
+        [vec![0], vec![1, 2]]
+    );
+    assert_eq!(leaves(&[date, ("Sheet:", 399.0, 7.0, 701.6), value]), whole);
+    // The date ends at 360. A label that ends 5 points before the number and starts 6
+    // after the date is the number's; one that starts 4 after the date is nearer to it.
+    assert_eq!(
+        leaves(&[
+            date,
+            ("Sheet:", 366.0, 7.0, 701.2),
+            ("4", 396.2, 10.0, 700.0)
+        ]),
+        [vec![0], vec![1, 2]]
+    );
+    assert_eq!(
+        leaves(&[
+            date,
+            ("Sheet:", 364.0, 7.0, 701.2),
+            ("4", 394.2, 10.0, 700.0)
+        ]),
+        whole
+    );
+    // What follows the number in its size: within `PIECE_GAP` sizes (8 points) the number
+    // goes on in it. Farther off it is something else, and the number is the label's when
+    // it stands nearer to the label than to that: the label ends 9.8 before a number at
+    // 434 that ends at 440, so with what follows 11 after it, not with it 9 after it.
+    let more = |x: f32| -> Part { ("of 9", x, 10.0, 700.0) };
+    assert_eq!(
+        leaves(&[date, label, value, more(441.0)]),
+        [vec![0], vec![1, 2, 3]]
+    );
+    // Farther off it is something else, and the number does not end the line: the line
+    // is kept whole (fix round 4).
+    let far: Part = ("4", 434.0, 10.0, 700.0);
+    assert_eq!(
+        leaves(&[date, label, far, more(451.0)]),
+        vec![vec![0, 1, 2, 3]]
+    );
+    assert_eq!(
+        leaves(&[date, label, far, more(449.0)]),
+        vec![vec![0, 1, 2, 3]]
+    );
+    // However the words are cut into runs: a title and a label of two runs each.
+    assert_eq!(
+        leaves(&[
+            ("Ledger of", 40.0, 10.0, 701.5),
+            ("the month", 100.0, 10.0, 701.5),
+            date,
+            ("Sheet ", 386.4, 7.0, 701.2),
+            ("no:", 411.6, 7.0, 701.2),
+            value
+        ]),
+        [vec![0, 1, 2], vec![3, 4, 5]]
+    );
+    // Fix round 3 (N1): a label that heads a row of values takes none of them. The label
+    // ends 8 points before the first amount, the amounts stand 14 and more apart.
+    let total: Part = ("Total:", 312.0, 6.6, 700.0);
+    let first: Part = ("1.234,56", 344.0, 9.5, 700.0);
+    let second: Part = ("567,89", 404.0, 9.5, 700.0);
+    assert_eq!(leaves(&[total, first, second]), whole);
+    assert_eq!(
+        leaves(&[total, first, second, ("2.000,00", 464.0, 9.5, 700.0)]),
+        vec![vec![0, 1, 2, 3]]
+    );
+    // Fix round 4: nor with a word after the one amount: the label opens its line and
+    // the amount does not end it, so it is not set into a data line.
+    assert_eq!(leaves(&[total, first, ("net", 404.0, 9.5, 700.0)]), whole);
+    // The data line (fix round 4). What stands before the label is of the larger face:
+    // at a label of 7 a word of 7.6 is (`SIZE_STEP`), one of 7.5 is the label's own face.
+    let before = |size: f32, y: f32| -> Part { ("Ledger", 300.0, size, y) };
+    assert_eq!(
+        leaves(&[before(7.6, 700.0), label, value]),
+        [vec![0], vec![1, 2]]
+    );
+    assert_eq!(leaves(&[before(7.5, 700.0), label, value]), whole);
+    // And it stands on the baseline of the number (within `BASELINE_NEAR` of its size,
+    // 1.5): a title 1.6 higher alone is no data before the label.
+    assert_eq!(
+        leaves(&[before(10.0, 701.4), label, value]),
+        [vec![0], vec![1, 2]]
+    );
+    assert_eq!(leaves(&[before(10.0, 701.6), label, value]), whole);
+}
+
+/// Task 26 fix round 2 (H3): the data line with the small label shares its leaf with a line
+/// of codes over it, as a form's title block has it. The label and its number are still a
+/// segment of their own (one plain line, no pair); the line of codes and the rest of the
+/// data line stay as they are. Among other lines the text after the label must be what a
+/// print run fills in (an amount, a date, a number): a word after the label keeps the leaf
+/// whole, where a line alone is parted.
+#[test]
+fn a_small_colon_label_before_a_number_is_parted_under_another_line() {
+    /// One run: its text, its left edge, its size, its baseline and its line.
+    type Part = (&'static str, f32, f32, f32, u32);
+    let leaves = |parts: &[Part]| {
+        let mut texts: Vec<TextRun> = parts
+            .iter()
+            .map(|&(t, x, size, y, line)| {
+                run(t, x, y, 0.6 * size * t.chars().count() as f32, size, line)
+            })
+            .collect();
+        texts.extend(column(40.0, 500.0, 4, 5));
+        let p = page([595.0, 842.0], texts, Vec::new());
+        let s = segment_page(&p, &Limits::default(), &|| false);
+        check_cover(&s, &p);
+        let mut found: Vec<Vec<u32>> = Vec::new();
+        let mut stack = vec![s.root];
+        while let Some(id) = stack.pop() {
+            let g = seg(&s, id);
+            stack.extend(g.children.iter().copied());
+            let own: Vec<u32> = texts_of(g)
+                .into_iter()
+                .filter(|&t| (t as usize) < parts.len())
+                .collect();
+            if g.children.is_empty() && !own.is_empty() {
+                found.push(own);
+            }
+        }
+        found.sort();
+        found
+    };
+    // The line of codes 11 over the data line, over its right part.
+    let code: Part = ("00A/00B  00000/00000", 340.0, 10.0, 711.0, 0);
+    let title: Part = ("Ledger of the month", 40.0, 10.0, 701.5, 1);
+    let date: Part = ("03.04.2026", 300.0, 10.0, 700.0, 1);
+    let label: Part = ("Sheet:", 399.0, 7.0, 701.2, 1);
+    let value: Part = ("4", 430.0, 10.0, 700.0, 1);
+    // Without the rule the two lines are one leaf: that is the leaf the rule reads.
+    assert_eq!(
+        leaves(&[code, title, date, ("Sheet", 399.0, 7.0, 701.2, 1), value]),
+        [vec![0, 1, 2, 3, 4]],
+        "no colon"
+    );
+    assert_eq!(
+        leaves(&[code, title, date, label, value]),
+        [vec![0], vec![1, 2], vec![3, 4]]
+    );
+    // The runs of the leaf in another order: the line of codes handed last.
+    assert_eq!(
+        leaves(&[title, date, label, value, code]),
+        [vec![0, 1], vec![2, 3], vec![4]]
+    );
+    // A word after the label: among other lines the leaf is whole, a line alone is parted.
+    let word: Part = ("Draft", 430.0, 10.0, 700.0, 1);
+    assert_eq!(
+        leaves(&[code, title, date, label, word]),
+        [vec![0, 1, 2, 3, 4]]
+    );
+    assert_eq!(
+        leaves(&[title, date, label, word]),
+        [vec![0, 1], vec![2, 3]]
+    );
+    // An amount after the label is a value too; a label of the same size is none.
+    let day: Part = ("12,50", 430.0, 10.0, 700.0, 1);
+    assert_eq!(
+        leaves(&[code, title, date, label, day]),
+        [vec![0], vec![1, 2], vec![3, 4]]
+    );
+    assert_eq!(
+        leaves(&[code, title, date, ("Sheet:", 390.0, 10.0, 700.0, 1), value]),
+        [vec![0, 1, 2, 3, 4]]
+    );
+    // Fix round 3 (N1): a label that heads a row of values takes none of them, under
+    // another line as on a line alone; nor with a word after the first amount (fix round
+    // 4: the label opens its line and the amount does not end it).
+    let total: Part = ("Total:", 312.0, 6.6, 700.0, 1);
+    let first: Part = ("1.234,56", 344.0, 9.5, 700.0, 1);
+    assert_eq!(
+        leaves(&[code, total, first, ("567,89", 404.0, 9.5, 700.0, 1)]),
+        [vec![0, 1, 2, 3]]
+    );
+    assert_eq!(
+        leaves(&[code, total, first, ("net", 404.0, 9.5, 700.0, 1)]),
+        [vec![0, 1, 2, 3]]
+    );
+}
+
+/// Task 26 fix round 5: the parting of a data line at its small colon label does not look
+/// at the rest of the page, because it claims no pair. A value under the label (N1 of fix
+/// round 3, R1 and R5 of the re-reviews) or text after the last stretch on another line of
+/// the host changes nothing: the label and the text after it are one plain line
+/// ([`Source::Line`]) either way, and a line of labels over their values is never parted.
+#[test]
+fn the_parting_at_a_small_colon_label_asks_nothing_of_the_page() {
+    /// One run: its text, its left edge, its size, its baseline and its line.
+    type Part = (&'static str, f32, f32, f32, u32);
+    // The texts of the plain lines among `parts` that hold a label: the labelled parts of
+    // the parted lines (the head of each is a plain line too, fix round 7).
+    let lines = |parts: &[Part]| {
+        let mut texts: Vec<TextRun> = parts
+            .iter()
+            .map(|&(t, x, size, y, line)| {
+                run(t, x, y, 0.6 * size * t.chars().count() as f32, size, line)
+            })
+            .collect();
+        texts.extend(column(40.0, 500.0, 4, 5));
+        let p = page([595.0, 842.0], texts, Vec::new());
+        let s = segment_page(&p, &Limits::default(), &|| false);
+        check_cover(&s, &p);
+        let found: Vec<Vec<&str>> = s
+            .all
+            .iter()
+            .filter(|g| g.source == Source::Line)
+            .map(|g| {
+                assert!(g.children.is_empty());
+                texts_of(g)
+                    .into_iter()
+                    .map(|t| parts[t as usize].0)
+                    .collect()
+            })
+            .collect();
+        // Each parted line gives its head and its labelled part.
+        let labelled = |l: &Vec<&str>| l.iter().any(|t| t.ends_with(':'));
+        assert_eq!(
+            found.len(),
+            2 * found.iter().filter(|l| labelled(l)).count()
+        );
+        found.into_iter().filter(labelled).collect::<Vec<_>>()
+    };
+    let none: Vec<Vec<&str>> = Vec::new();
+    // Labels over their values, a number after the labels: the label line opens with a
+    // label, so no larger text stands before `Amount:` on its line. Nothing is parted,
+    // wherever the amount stands and in whatever order the runs are handed.
+    let day: Part = ("Date:", 50.0, 7.0, 700.0, 0);
+    let sum: Part = ("Amount:", 200.0, 7.0, 700.0, 0);
+    let number: Part = ("4711/0815/2200", 238.4, 10.0, 700.0, 0);
+    let date: Part = ("03.04.2026", 50.0, 10.0, 689.0, 1);
+    assert_eq!(
+        lines(&[
+            day,
+            sum,
+            ("4711", 350.0, 10.0, 700.0, 0),
+            date,
+            ("12,50", 200.0, 10.0, 689.0, 1)
+        ]),
+        none
+    );
+    for y in [688.0, 689.0, 690.0, 686.0] {
+        let amount: Part = ("12,50", 200.0, 10.0, y, 2);
+        for parts in [
+            [day, sum, number, date, amount],
+            [day, sum, number, amount, date],
+            [amount, date, day, sum, number],
+        ] {
+            assert_eq!(lines(&parts), none, "{y}");
+        }
+    }
+    // The label on a data line: a code of the larger face before it, the number the last
+    // of the line. One plain line, with an amount under the label at any drop (R5: 11,
+    // 14.9, 15.1, 16 and 20 under the line), left or right of it, over the line, and with
+    // text after the number on another line of the host. In either order of the runs.
+    let code: Part = ("AB 12", 50.0, 10.0, 700.0, 0);
+    let line = vec![vec!["Amount:", "4711/0815/2200"]];
+    assert_eq!(lines(&[code, sum, number]), line);
+    let amount = |x: f32, y: f32| -> Part { ("12,50", x, 10.0, y, 1) };
+    for other in [
+        amount(200.0, 689.0),
+        amount(200.0, 685.1),
+        amount(200.0, 684.9),
+        amount(200.0, 684.0),
+        amount(200.0, 680.0),
+        amount(120.0, 689.0),
+        amount(260.0, 689.0),
+        amount(200.0, 711.0),
+        ("77,00", 480.0, 10.0, 700.0, 3),
+        ("77,00", 480.0, 10.0, 718.0, 3),
+    ] {
+        assert_eq!(lines(&[code, sum, number, other]), line, "{other:?}");
+        assert_eq!(lines(&[other, code, sum, number]), line, "{other:?}");
+    }
+}

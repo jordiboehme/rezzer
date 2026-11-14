@@ -459,7 +459,7 @@ fn the_owner_of_a_break_follows_its_class() {
     assert_eq!(owner(Transform::Scale(50), Break::Order, "band"), "31");
     assert_eq!(owner(Transform::SplitRules, Break::Members, "pairs"), "31");
     assert_eq!(owner(Transform::Scale(200), Break::Members, "pairs"), "31");
-    assert_eq!(owner(Transform::Jitter, Break::Members, "pairs"), "26");
+    assert_eq!(owner(Transform::Jitter, Break::Members, "pairs"), "36a");
     assert_eq!(owner(Transform::Jitter, Break::Kind, "text"), "36a");
     assert_eq!(owner(Transform::Scale(50), Break::Members, "text"), "31");
     assert_eq!(owner(Transform::SplitRuns, Break::Members, "table"), "31");
@@ -592,6 +592,61 @@ fn writing_pins_keeps_the_other_names() {
         meta::check_or_write_pins(&path, &["this.pdf".to_string()], &moved, false)
     });
     assert!(failed.is_err());
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// A cause that names an open owner sets the owner column of its line: the computed owner
+/// (by the class of the break) gives way to the traced one, when the pins are checked and
+/// when they are written. A cause that names none leaves the column as computed.
+#[test]
+fn a_traced_cause_names_the_owner_of_its_pin() {
+    assert_eq!(meta::traced_owner("owner Task 36a. Traced: x"), Some("36a"));
+    assert_eq!(
+        meta::traced_owner("owner after 0.1.0. Traced"),
+        Some("after 0.1.0")
+    );
+    assert_eq!(
+        meta::traced_owner("owner after 0.1.0, kept. Traced"),
+        Some("after 0.1.0")
+    );
+    assert_eq!(meta::traced_owner("owner Task 31c, kept"), Some("31c"));
+    assert_eq!(
+        meta::traced_owner("owner Task 37 (named 31c before)"),
+        Some("37")
+    );
+    assert_eq!(meta::traced_owner("Traced: the owner is Task 31"), None);
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("meta-owner");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("pins.tsv");
+    std::fs::write(
+        &path,
+        "# head\nthis.pdf\t1\tjitter\tmembers\ttext\t1\t36a\towner Task 36a. Traced: a cause\n\
+         this.pdf\t2\tjitter\tmembers\ttext\t1\t31\tTraced: a cause with no owner\n",
+    )
+    .unwrap();
+    let names = ["this.pdf".to_string()];
+    // The lines as they are found, with the computed owner 31.
+    let found = vec![
+        "this.pdf\t1\tjitter\tmembers\ttext\t1\t31".to_string(),
+        "this.pdf\t2\tjitter\tmembers\ttext\t1\t31".to_string(),
+    ];
+    meta::check_or_write_pins(&path, &names, &found, false);
+    // Written again, the line keeps the owner of its cause, and a pin whose column names
+    // another owner than its cause is set right.
+    std::fs::write(
+        &path,
+        "# head\nthis.pdf\t1\tjitter\tmembers\ttext\t1\t31\towner Task 36a. Traced: a cause\n",
+    )
+    .unwrap();
+    let wrong = std::panic::catch_unwind(|| {
+        meta::check_or_write_pins(&path, &["this.pdf".to_string()], &found[..1], false)
+    });
+    assert!(wrong.is_err());
+    meta::check_or_write_pins(&path, &names, &found[..1], true);
+    assert_eq!(
+        meta::pinned(&path),
+        ["this.pdf\t1\tjitter\tmembers\ttext\t1\t36a"]
+    );
     std::fs::remove_dir_all(&dir).ok();
 }
 
@@ -901,7 +956,7 @@ fn a_side_heading_and_its_block_keep_their_order() {
     // the shape of a side heading, and geometry cannot tell a number line from a block of one line,
     // so the pair is held though it is free. When a sign tells the two apart, this assertion turns.
     // Part 2b-1 of Task 31c found none: a box or a number field is a sign of the engine's read
-    // (label and value groups, Task 26), not of the geometry the check has.
+    // (its label and value groups), not of the geometry the check has.
     assert!(order_breaks(&wide, &pair, &turned));
     // A box typed a field left of a title: the title is no value of it either. A field left
     // of a paragraph on its row is still read first.
