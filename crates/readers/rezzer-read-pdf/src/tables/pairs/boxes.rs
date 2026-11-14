@@ -6,7 +6,7 @@
 //! another style, boxes of fields next to each other in a row or a column, and the titles of
 //! boxes beside them and of framed boxes over their lines.
 
-use layoutregions::segment::drawn::{Grids, Line, Unsearched};
+use layoutregions::segment::drawn::{Grids, Line, LinesAt, Unsearched};
 
 use super::*;
 use crate::regions::{Index, regions_of};
@@ -154,15 +154,9 @@ pub(crate) fn box_pairs(
     order.sort_by(|&a, &b| boxes[a][0].total_cmp(&boxes[b][0]));
     // A box with no field joins the fields on both sides of it: one at an end of its row
     // joins nothing, so it is no part of the row (the lines under a title there are its own).
-    let chains = |order: &[usize], next: &dyn Fn(usize, usize) -> bool| {
-        let mut out: Vec<Vec<usize>> = Vec::new();
-        for &b in order {
-            match out.iter_mut().find(|c| next(*c.last().expect("a box"), b)) {
-                Some(c) => c.push(b),
-                None => out.push(vec![b]),
-            }
-        }
-        out.into_iter()
+    let with_fields = |chains: Vec<Vec<usize>>| {
+        chains
+            .into_iter()
             .filter_map(|c| {
                 let first = c.iter().position(|&b| fields[b].is_some())?;
                 let last = c.iter().rposition(|&b| fields[b].is_some())?;
@@ -170,6 +164,12 @@ pub(crate) fn box_pairs(
             })
             .collect::<Vec<_>>()
     };
+    // The widest touch of two boxes, and the largest width and height of a box: what the
+    // search for the chain of a box looks at (see `chain_boxes`).
+    let reach = touch.iter().copied().fold(0.0f32, f32::max);
+    let longest =
+        |from: usize, to: usize| boxes.iter().map(|b| b[to] - b[from]).fold(0.0f32, f32::max);
+    let (widest, tallest) = (longest(0, 2), longest(1, 3));
     let has_value = |c: &[usize]| {
         c.iter()
             .any(|&b| fields[b].as_ref().is_some_and(|f| !f.value.is_empty()))
@@ -181,25 +181,10 @@ pub(crate) fn box_pairs(
         Ok(g) => (&g.hs, &g.vs),
         Err(_) => (&[], &[]),
     };
-    // Whether lines `segs` at `at` (within `t`) cover the stretch `lo..hi`.
-    let covered = |segs: &[Line], at: f32, lo: f32, hi: f32, t: f32| {
-        let mut end = lo;
-        let tol = t.max(SNAP);
-        let from = segs.partition_point(|s| s.at < at - tol);
-        let mut parts: Vec<&Line> = segs[from..]
-            .iter()
-            .take_while(|s| s.at <= at + tol)
-            .filter(|s| s.to > lo && s.from < hi)
-            .collect();
-        parts.sort_by(|a, b| a.from.total_cmp(&b.from));
-        for s in parts {
-            if s.from > end + t.max(SNAP) {
-                return false;
-            }
-            end = end.max(s.to);
-        }
-        end >= hi - t.max(SNAP)
-    };
+    // Whether the flat lines, or the upright ones, at `at` (within `t`) cover the stretch
+    // `lo..hi`.
+    let (flat, upright) = (Cover::new(hs), Cover::new(vs));
+    let covered = |segs: &Cover<'_>, at: f32, lo: f32, hi: f32, t: f32| segs.covers(at, lo, hi, t);
     // Two boxes of a row with an empty drawn box between them: its top and bottom drawn across
     // the gap. Two of a column: its sides drawn down the gap.
     // The gap is at most as wide as twice the wider box: an empty box beside boxes like it.
@@ -208,14 +193,14 @@ pub(crate) fn box_pairs(
         if gap <= t || gap > 2.0 * (a[2] - a[0]).max(b[2] - b[0]) {
             return false;
         }
-        covered(hs, a[3], a[2], b[0], t) && covered(hs, a[1].max(b[1]), a[2], b[0], t)
+        covered(&flat, a[3], a[2], b[0], t) && covered(&flat, a[1].max(b[1]), a[2], b[0], t)
     };
     let empty_column = |a: [f32; 4], b: [f32; 4], t: f32| {
         let gap = a[1] - b[3];
         if gap <= t || gap > 2.0 * (a[3] - a[1]).max(b[3] - b[1]) {
             return false;
         }
-        covered(vs, a[0], b[3], a[1], t) && covered(vs, a[2], b[3], a[1], t)
+        covered(&upright, a[0], b[3], a[1], t) && covered(&upright, a[2], b[3], a[1], t)
     };
     // The page's lines, built once for every row, and the work they take for the page.
     let mut heads: Option<Heads> = None;
@@ -223,10 +208,20 @@ pub(crate) fn box_pairs(
     let mut spent: Option<&str> = None;
     let mut groups: Vec<Vec<usize>> = Vec::new();
     let mut used = vec![false; boxes.len()];
-    for c in chains(&order, &|p, q| {
-        let (a, b, t) = (boxes[p], boxes[q], touch[p].max(touch[q]));
-        (a[3] - b[3]).abs() <= t && ((a[2] - b[0]).abs() <= t || empty_row(a, b, t))
-    }) {
+    // Rows: boxes with their tops at one height, each starting where the one before it ends
+    // or past an empty drawn box, which is at most twice as wide as the wider of the two.
+    let rows = chain_boxes(
+        &order,
+        &|b| boxes[b][3],
+        reach,
+        &|p, q| boxes[q][0] - boxes[p][2],
+        &|p| reach.max(2.0 * (boxes[p][2] - boxes[p][0]).max(widest)),
+        &|p, q| {
+            let (a, b, t) = (boxes[p], boxes[q], touch[p].max(touch[q]));
+            (a[3] - b[3]).abs() <= t && ((a[2] - b[0]).abs() <= t || empty_row(a, b, t))
+        },
+    );
+    for c in with_fields(rows) {
         if !two_fields(&c) || !has_value(&c) {
             continue;
         }
@@ -264,10 +259,21 @@ pub(crate) fn box_pairs(
     });
     let mut rest: Vec<usize> = order.into_iter().filter(|&b| !used[b]).collect();
     rest.sort_by(|&a, &b| boxes[b][3].total_cmp(&boxes[a][3]));
-    for c in chains(&rest, &|p, q| {
-        let (a, b, t) = (boxes[p], boxes[q], touch[p].max(touch[q]));
-        (a[0] - b[0]).abs() <= t && ((a[1] - b[3]).abs() <= t || empty_column(a, b, t))
-    }) {
+    // Columns: boxes with their left edges at one place, each starting where the one over it
+    // ends or under an empty drawn box, which is at most twice as tall as the taller of the
+    // two.
+    let columns = chain_boxes(
+        &rest,
+        &|b| boxes[b][0],
+        reach,
+        &|p, q| boxes[p][1] - boxes[q][3],
+        &|p| reach.max(2.0 * (boxes[p][3] - boxes[p][1]).max(tallest)),
+        &|p, q| {
+            let (a, b, t) = (boxes[p], boxes[q], touch[p].max(touch[q]));
+            (a[0] - b[0]).abs() <= t && ((a[1] - b[3]).abs() <= t || empty_column(a, b, t))
+        },
+    );
+    for c in with_fields(columns) {
         if two_fields(&c) && has_value(&c) {
             groups.push(c);
         }
@@ -496,6 +502,141 @@ pub(crate) fn box_pairs(
     (planned, titles, (said, doubts), skipped)
 }
 
+/// The lines of a page in one direction, by their place and then their start, to ask
+/// whether those at one place cover a stretch.
+struct Cover<'a> {
+    segs: &'a [Line],
+    /// The lines for the search, made when the first stretch is asked for.
+    lines: std::cell::OnceCell<LinesAt<'a>>,
+}
+
+impl<'a> Cover<'a> {
+    fn new(segs: &'a [Line]) -> Cover<'a> {
+        Cover {
+            segs,
+            lines: std::cell::OnceCell::new(),
+        }
+    }
+
+    /// Whether the lines at `at` (within `t`, at least [`SNAP`]) cover the stretch `lo..hi`:
+    /// those that reach into it, by their start, leave no gap wider than that at its start,
+    /// between them or at its end. Only the lines that reach into the stretch are looked at
+    /// (see [`LinesAt`]): a column of some thousand boxes has as many lines at one place,
+    /// and each pair of boxes asked for all of them.
+    fn covers(&self, at: f32, lo: f32, hi: f32, t: f32) -> bool {
+        let tol = t.max(SNAP);
+        let lines = self.lines.get_or_init(|| LinesAt::new(self.segs));
+        let mut parts: Vec<&Line> = Vec::new();
+        let segs = self.segs;
+        lines.reaching((at - tol, at + tol), (lo, hi), |k, _| parts.push(&segs[k]));
+        parts.sort_by(|a, b| a.from.total_cmp(&b.from));
+        let mut end = lo;
+        for s in parts {
+            if s.from > end + tol {
+                return false;
+            }
+            end = end.max(s.to);
+        }
+        end >= hi - tol
+    }
+}
+
+/// Puts the boxes of `order` on chains, in that order: each goes on the first chain made
+/// whose last box `next` joins it to, else it starts a chain. The chains come in the order
+/// they were started.
+///
+/// So that a box is not tested against the end of every chain (a page of some thousand boxes
+/// in rows or columns, read once for each of its regions, took billions of tests), the ends
+/// are kept by their place across the chain (`key`: the top of a row, the left edge of a
+/// column) and a box looks only at the ends near its own. What the caller states of `next`:
+/// it joins only two boxes whose keys are at most `reach` apart; `gap(p, q)` is how far `q`
+/// starts past the end of `p` along the chain, which only grows for one `p` over the boxes
+/// of `order` after it; and `next` joins nothing to `p` past a gap of `far(p)`. An end past
+/// its `far` is dropped from the search for good. A key, a gap or a bound that is no
+/// number never drops or hides an end: such a box is tested as before.
+fn chain_boxes(
+    order: &[usize],
+    key: &dyn Fn(usize) -> f32,
+    reach: f32,
+    gap: &dyn Fn(usize, usize) -> f32,
+    far: &dyn Fn(usize) -> f32,
+    next: &dyn Fn(usize, usize) -> bool,
+) -> Vec<Vec<usize>> {
+    // The cells of the keys are at least a snap wide, so keys within `reach` of each other
+    // stand at most one cell apart; one more cell on each side covers the rounding of the
+    // division. A reach that is no number makes one cell of all.
+    let width = if reach.is_finite() {
+        reach.max(SNAP)
+    } else {
+        f32::INFINITY
+    };
+    // Ends with a key that is no number are looked at by every box.
+    const LOOSE: i64 = i64::MIN;
+    let cell = |b: usize| -> i64 {
+        let k = key(b);
+        if k.is_finite() {
+            ((k / width).floor() as i64).clamp(i64::MIN + 3, i64::MAX - 2)
+        } else {
+            LOOSE
+        }
+    };
+    let mut out: Vec<Vec<usize>> = Vec::new();
+    // The chains that may still grow, by the cell of their last box.
+    let mut ends: HashMap<i64, Vec<usize>> = HashMap::new();
+    for &b in order {
+        crate::work::add(1);
+        let at = cell(b);
+        let mut best: Option<usize> = None;
+        let mut look = |cells: &mut HashMap<i64, Vec<usize>>, c: i64| {
+            let Some(list) = cells.get_mut(&c) else {
+                return;
+            };
+            list.retain(|&chain| {
+                crate::work::add(1);
+                let last = *out[chain].last().expect("a box");
+                if gap(last, b) > far(last) {
+                    return false;
+                }
+                if best.is_none_or(|o| chain < o) && next(last, b) {
+                    best = Some(chain);
+                }
+                true
+            });
+            if list.is_empty() {
+                cells.remove(&c);
+            }
+        };
+        if at == LOOSE {
+            let all: Vec<i64> = ends.keys().copied().collect();
+            for c in all {
+                look(&mut ends, c);
+            }
+        } else {
+            for c in at - 2..=at + 2 {
+                look(&mut ends, c);
+            }
+            look(&mut ends, LOOSE);
+        }
+        match best {
+            Some(chain) => {
+                let from = cell(*out[chain].last().expect("a box"));
+                if from != at {
+                    if let Some(list) = ends.get_mut(&from) {
+                        list.retain(|&c| c != chain);
+                    }
+                    ends.entry(at).or_default().push(chain);
+                }
+                out[chain].push(b);
+            }
+            None => {
+                ends.entry(at).or_default().push(out.len());
+                out.push(vec![b]);
+            }
+        }
+    }
+    out
+}
+
 /// A framed box read as a title over its lines: the boxes it takes (the frame and a title
 /// box in it), the runs of its title and of its text, and the frame's top.
 struct Framed {
@@ -627,4 +768,199 @@ fn framed_titles(
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Numbers that repeat for one seed, in `0..n`.
+    struct Dice(u64);
+
+    impl Dice {
+        fn roll(&mut self, n: u32) -> f32 {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            ((self.0 >> 33) % u64::from(n)) as f32
+        }
+    }
+
+    /// The chains as they were made before Task 37: each box tested against the end of
+    /// every chain.
+    fn chains_one_by_one(order: &[usize], next: &dyn Fn(usize, usize) -> bool) -> Vec<Vec<usize>> {
+        let mut out: Vec<Vec<usize>> = Vec::new();
+        for &b in order {
+            match out.iter_mut().find(|c| next(*c.last().expect("a box"), b)) {
+                Some(c) => c.push(b),
+                None => out.push(vec![b]),
+            }
+        }
+        out
+    }
+
+    /// Whether lines cover a stretch, as it was asked before Task 37: every line at the
+    /// place looked at.
+    fn covered_one_by_one(segs: &[Line], at: f32, lo: f32, hi: f32, t: f32) -> bool {
+        let mut end = lo;
+        let tol = t.max(SNAP);
+        let from = segs.partition_point(|s| s.at < at - tol);
+        let mut parts: Vec<&Line> = segs[from..]
+            .iter()
+            .take_while(|s| s.at <= at + tol)
+            .filter(|s| s.to > lo && s.from < hi)
+            .collect();
+        parts.sort_by(|a, b| a.from.total_cmp(&b.from));
+        for s in parts {
+            if s.from > end + tol {
+                return false;
+            }
+            end = end.max(s.to);
+        }
+        end >= hi - tol
+    }
+
+    /// Task 37: the search by the ends near a box makes the chains the test of every end
+    /// made, for rows and for columns, on boxes that touch, overlap, stand apart and stand
+    /// in each other, with a touch of nothing, of a little and of much.
+    #[test]
+    fn chains_by_near_ends_are_the_chains_of_every_end() {
+        for seed in 0..40u64 {
+            let mut dice = Dice(seed);
+            let n = 60 + seed as usize;
+            let boxes: Vec<[f32; 4]> = (0..n)
+                .map(|_| {
+                    let (x, y) = (10.0 * dice.roll(12), 10.0 * dice.roll(12));
+                    let (w, h) = (10.0 * (1.0 + dice.roll(3)), 10.0 * (1.0 + dice.roll(3)));
+                    // Some boxes a little off the grid, within a touch or just past it.
+                    let off = 0.5 * dice.roll(5);
+                    [x + off, y, x + off + w, y + h]
+                })
+                .collect();
+            let touch: Vec<f32> = (0..n)
+                .map(|_| [0.0, 1.0, 2.5][dice.roll(3) as usize])
+                .collect();
+            let reach = touch.iter().copied().fold(0.0f32, f32::max);
+            let widest = boxes.iter().map(|b| b[2] - b[0]).fold(0.0f32, f32::max);
+            let tallest = boxes.iter().map(|b| b[3] - b[1]).fold(0.0f32, f32::max);
+            // A gap up to twice the wider box joins when the dice say a line is drawn over
+            // it: by the two boxes alone, as the lines of a page are.
+            let drawn = |p: usize, q: usize| (p * 31 + q * 17 + seed as usize).is_multiple_of(3);
+            let row = |p: usize, q: usize| {
+                let (a, b, t) = (boxes[p], boxes[q], touch[p].max(touch[q]));
+                let gap = b[0] - a[2];
+                let over = gap > t && gap <= 2.0 * (a[2] - a[0]).max(b[2] - b[0]) && drawn(p, q);
+                (a[3] - b[3]).abs() <= t && ((a[2] - b[0]).abs() <= t || over)
+            };
+            let column = |p: usize, q: usize| {
+                let (a, b, t) = (boxes[p], boxes[q], touch[p].max(touch[q]));
+                let gap = a[1] - b[3];
+                let over = gap > t && gap <= 2.0 * (a[3] - a[1]).max(b[3] - b[1]) && drawn(p, q);
+                (a[0] - b[0]).abs() <= t && ((a[1] - b[3]).abs() <= t || over)
+            };
+            let mut across: Vec<usize> = (0..n).collect();
+            across.sort_by(|&a, &b| boxes[a][0].total_cmp(&boxes[b][0]));
+            let rows = chain_boxes(
+                &across,
+                &|b| boxes[b][3],
+                reach,
+                &|p, q| boxes[q][0] - boxes[p][2],
+                &|p| reach.max(2.0 * (boxes[p][2] - boxes[p][0]).max(widest)),
+                &row,
+            );
+            assert_eq!(rows, chains_one_by_one(&across, &row), "rows, seed {seed}");
+            let mut down: Vec<usize> = (0..n).collect();
+            down.sort_by(|&a, &b| boxes[b][3].total_cmp(&boxes[a][3]));
+            let columns = chain_boxes(
+                &down,
+                &|b| boxes[b][0],
+                reach,
+                &|p, q| boxes[p][1] - boxes[q][3],
+                &|p| reach.max(2.0 * (boxes[p][3] - boxes[p][1]).max(tallest)),
+                &column,
+            );
+            assert_eq!(
+                columns,
+                chains_one_by_one(&down, &column),
+                "columns, seed {seed}"
+            );
+            assert!(rows.iter().chain(&columns).any(|c| c.len() > 1));
+        }
+    }
+
+    /// Task 37: the lines that reach into a stretch, found by their order, say the same as
+    /// every line at the place, for lines apart, lines that overlap and one long line among
+    /// short ones, at places within the tolerance of each other.
+    #[test]
+    fn a_stretch_is_covered_as_every_line_at_its_place_says() {
+        let (mut yes, mut no) = (0, 0);
+        for seed in 0..40u64 {
+            let mut dice = Dice(seed + 100);
+            let mut segs: Vec<Line> = (0..80)
+                .map(|_| {
+                    let from = 5.0 * dice.roll(40);
+                    Line {
+                        at: 0.5 * dice.roll(8),
+                        from,
+                        to: from + 5.0 * (1.0 + dice.roll(4)),
+                    }
+                })
+                .collect();
+            if seed % 2 == 0 {
+                segs.push(Line {
+                    at: 1.0,
+                    from: 0.0,
+                    to: 150.0,
+                });
+            }
+            segs.sort_by(|a, b| a.at.total_cmp(&b.at).then(a.from.total_cmp(&b.from)));
+            let cover = Cover::new(&segs);
+            for _ in 0..200 {
+                let at = 0.5 * dice.roll(8);
+                let lo = 5.0 * dice.roll(40);
+                let hi = lo + 5.0 * (1.0 + dice.roll(6));
+                let t = [0.0, 0.6, 2.0][dice.roll(3) as usize];
+                let want = covered_one_by_one(&segs, at, lo, hi, t);
+                assert_eq!(cover.covers(at, lo, hi, t), want, "seed {seed}");
+                if want {
+                    yes += 1;
+                } else {
+                    no += 1;
+                }
+            }
+        }
+        assert!(yes > 100 && no > 100, "{yes} covered, {no} not");
+    }
+
+    /// A line with a start that is no number has no order to search in: every line at the
+    /// place is looked at, as before.
+    #[test]
+    fn lines_that_are_no_numbers_are_looked_at_one_by_one() {
+        let segs = [
+            Line {
+                at: 1.0,
+                from: f32::NAN,
+                to: 30.0,
+            },
+            Line {
+                at: 1.0,
+                from: 0.0,
+                to: 20.0,
+            },
+            Line {
+                at: 1.0,
+                from: 20.0,
+                to: 40.0,
+            },
+        ];
+        let cover = Cover::new(&segs);
+        for (lo, hi) in [(0.0, 40.0), (5.0, 35.0), (0.0, 50.0)] {
+            assert_eq!(
+                cover.covers(1.0, lo, hi, 0.5),
+                covered_one_by_one(&segs, 1.0, lo, hi, 0.5),
+                "{lo}..{hi}"
+            );
+        }
+    }
 }

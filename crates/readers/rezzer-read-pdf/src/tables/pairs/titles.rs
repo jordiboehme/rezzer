@@ -5,7 +5,7 @@
 //! Titles over a drawn bar: a line of bold text alone over a horizontal rule no grid takes,
 //! with the lines under the rule as its text.
 
-use layoutregions::segment::drawn::{Grids, Line, Unsearched};
+use layoutregions::segment::drawn::{Grids, Line, LinesAt, Unsearched};
 
 use super::*;
 use crate::tables::LABEL_STEP;
@@ -58,32 +58,31 @@ pub(crate) fn underlined_titles(
     let mut by_at: Vec<usize> = (0..hs.len()).filter(|&k| !hs[k].at.is_nan()).collect();
     by_at.sort_by(|&a, &b| hs[a].at.total_cmp(&hs[b].at));
     let ats: Vec<f32> = by_at.iter().map(|&k| hs[k].at).collect();
-    // The bars whose height lies within `lo..hi` at most (a superset: the caller tests each).
-    let near = |lo: f32, hi: f32| {
-        let a = ats.partition_point(|v| *v < lo);
-        let z = ats.partition_point(|v| *v <= hi);
-        &by_at[a..z.max(a)]
-    };
     let mut work = 0usize;
     let too_much = "the page has too many bars and too much text over them";
     // The rules of grids are a table's or a section's, not a title's.
     let taken: Vec<bool> = match grids {
         Ok(g) if !g.hs.is_empty() => {
             let mut t = vec![false; hs.len()];
+            // Only the bars that reach into the width of a grid's rule are looked at: a row
+            // of small grids has as many bars at one height as it has grids.
+            let bars = LinesAt::new(&hs);
             for (gh, _) in &g.groups {
                 for &j in gh {
                     let s = g.hs[j];
-                    let close = near(s.at - 2.0 * SNAP, s.at + 2.0 * SNAP);
-                    work += close.len() + 1;
-                    crate::work::add(close.len() as u64 + 1);
+                    let looked = bars.reaching(
+                        (s.at - 2.0 * SNAP, s.at + 2.0 * SNAP),
+                        (s.from, s.to),
+                        |k, h| {
+                            if (h.at - s.at).abs() <= SNAP {
+                                t[k] = true;
+                            }
+                        },
+                    );
+                    work += usize::try_from(looked).unwrap_or(usize::MAX) + 1;
+                    crate::work::add(1);
                     if work > TITLE_WORK {
                         return (Vec::new(), Some(too_much));
-                    }
-                    for &k in close {
-                        let h = hs[k];
-                        if (h.at - s.at).abs() <= SNAP && h.from < s.to && h.to > s.from {
-                            t[k] = true;
-                        }
                     }
                 }
             }

@@ -45,6 +45,7 @@ mod fixtures;
 extern crate self as rezzer_read_pdf;
 
 use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 
 use pdfparts::{Annot, PageInfo, Pdf};
 use rezzer_limits::Budget;
@@ -314,15 +315,22 @@ fn read_timed(
     budget: &Budget,
     regions: Option<&mut Vec<EnginePage>>,
 ) -> ReadOutcome {
-    // The text is read for three quarters of the time limit at most: the pages read must
-    // still be laid out, or their text would be lost with the rest.
-    // A stop there is a time stop of the read, as one at the limit itself is.
-    let text_time = budget.limits().max_time * 3 / 4;
+    // The text is read as long as the time limit leaves the time to write what was read:
+    // the time to lay the pages out (see `layout_time`), and the time to write as plain
+    // lines those the layout does not get to (see `plain_time`), so no page read is dropped.
+    // Both are shares of the time the text took so far, counted from the first time it
+    // asks, before its first page. A stop there is a time stop of the read, as one at the
+    // limit itself is.
+    let max_time = budget.limits().max_time;
+    let from: std::cell::Cell<Option<Duration>> = std::cell::Cell::new(None);
     let text_stop = || {
         if budget.check_time().is_err() {
             return true;
         }
-        let near = budget.elapsed() > text_time;
+        let now = budget.elapsed();
+        let start = from.get().unwrap_or(now);
+        from.set(Some(start));
+        let near = text_time_is_up(now, start, max_time);
         if near {
             budget.note_time_stop();
         }
@@ -380,12 +388,14 @@ fn read_pdf_in(
     let annots = pdf.annotations();
     let marked = quote::marked(&annots);
     let read = Read { src, opts, budget };
+    let before = budget.elapsed();
     let extracted = extract(&pdf, &pages, &links, &marked, &read, &mut out, text_stop);
+    let text_time = budget.elapsed().saturating_sub(before);
     drop(marked);
     let (room, placed, needs, places) = lay_out(
         Some(&pdf),
         &pages,
-        extracted,
+        (extracted, text_time),
         &annots,
         budget,
         &mut out,
@@ -900,7 +910,7 @@ fn frame_height(page: &PageInfo, items: Option<&PageItems>) -> f32 {
 fn lay_out(
     pdf: Option<&Pdf>,
     pages: &[PageInfo],
-    extracted: Extracted,
+    (extracted, text_time): (Extracted, Duration),
     annots: &[Annot],
     budget: &Budget,
     out: &mut Out,
@@ -937,9 +947,49 @@ fn lay_out(
         Some(pdf) if pdf.tagged() => pdf.struct_tree(),
         _ => None,
     };
-    // The layout reads a page by its tags only with a structure tree.
-    let style = Style::learn(&texts, tree.is_some());
+    // The layout leaves the time to write as plain lines every page it has not laid out
+    // yet: before each page the budget keeps that time back, by the share of the file's runs
+    // on that page and the pages after it (see `plain_time`).
+    // The hidden runs of a page count too: they are written into its callout.
+    let runs_of = |p: &PageItems| {
+        let hidden: usize = p.hidden_layers.iter().map(|l| l.1.len()).sum();
+        (p.runs.len() + p.invisible.len() + hidden) as u64
+    };
+    let runs_total: u64 = read.iter().map(runs_of).sum();
+    let mut runs_from: Vec<(u32, u64)> = read.iter().map(|p| (p.page, runs_of(p))).collect();
+    runs_from.sort_unstable_by_key(|p| std::cmp::Reverse(p.0));
+    let mut left = 0u64;
+    let runs_from: HashMap<u32, u64> = runs_from
+        .into_iter()
+        .map(|(page, runs)| {
+            left += runs;
+            (page, left)
+        })
+        .collect();
+    let keep = |n: u32| {
+        let left = runs_from.get(&n).copied().unwrap_or(0);
+        plain_time(text_time).mul_f64(left as f64 / runs_total.max(1) as f64)
+    };
+    budget.keep_time(plain_time(text_time));
+    // The layout reads a page by its tags only with a structure tree. With no time left for
+    // any layout the facts of the file are not learned (that takes about an eighth of the
+    // time of the text). Facts learned from a part of the file only are not used: the time
+    // is over then. Either way every page is written as plain lines.
+    let late = layout::time_over(budget).is_err();
+    let (style, unlearned) = if late {
+        (Style::learn(&[], tree.is_some(), &|| false).0, true)
+    } else {
+        Style::learn(&texts, tree.is_some(), &|| {
+            layout::time_over(budget).is_err()
+        })
+    };
     drop(texts);
+    // Set once the time the layout may take is over: the pages from there on are written as
+    // plain lines (`plain_lines`), the first and the last of them kept for their one loss.
+    let mut plain = unlearned;
+    let mut plain_pages: Option<(u32, u32)> = None;
+    // The pages written as plain lines so far (see `PLAIN_CHECK`).
+    let mut plain_written = 0u32;
     let mut read: HashMap<u32, PageItems> = read.into_iter().map(|p| (p.page, p)).collect();
     // The pages whose text was laid out.
     let mut read_pages: HashSet<u32> = HashSet::new();
@@ -987,61 +1037,80 @@ fn lay_out(
             anchor: None,
         }];
         if let (false, Some(mut items)) = (halted, read.remove(&n)) {
-            if let Some(note) = found_by.remove(&n) {
-                // The separators drawn as marks that were written, said at the top of the page.
-                found_by_note(
-                    &mut blocks,
-                    note,
-                    &format!("which separators on page {n} are drawn marks"),
-                    n,
-                    budget,
-                    out,
-                );
-            }
-            let roles = |mcid: u32| pdf.and_then(|pdf| pdf.role_of(n, mcid));
-            let cx = Context {
-                style: &style,
-                tree,
-                roles: &roles,
-                budget,
-                tables: &tables,
-                in_part: items.in_part,
-                links: &links,
+            budget.keep_time(keep(n));
+            plain = plain || layout::time_over(budget).is_err();
+            // The lines of the page as they stand: what it is written from when it is not
+            // laid out, or when the time stops its layout.
+            let lines = plain_text_lines(&items.runs);
+            let tried = !plain;
+            // The separators drawn as marks that were written, said at the top of the page,
+            // on a page written as plain lines too: its lines hold them.
+            let separators = found_by.remove(&n);
+            let separators_note = |blocks: &mut Vec<Block>, out: &mut Out| {
+                if let Some(note) = &separators {
+                    found_by_note(
+                        blocks,
+                        note.clone(),
+                        &format!("which separators on page {n} are drawn marks"),
+                        n,
+                        budget,
+                        out,
+                    );
+                }
             };
-            if items.links_cut {
-                out.loss(
-                    format!("p{n}"),
-                    "some URI links are not attached to their text: the page has too many \
-                     links to match",
-                    LossReason::Limit,
-                    Severity::Warning,
-                );
-            }
-            notes(n, &items, out);
-            links.free(items.kept);
-            let height = frame_height(info, Some(&items));
-            read_pages.insert(n);
+            // What the page has charged before anything of it is written: a layout the time
+            // stops gives back every element of the page.
+            let elements = budget.elements();
             let here = on_page.get(&n).map_or(&[][..], Vec::as_slice);
-            let mut points = annotation_points(n, &mut items, annots, here, &mut spots, out);
-            // Each picture's block is looked for at the run nearest to its top, after the
-            // annotations' points, in the frame of the runs.
-            // The work for each small picture while the page is laid out is charged against
-            // the kept bytes, and given back after the page.
-            // The cap leaves room for the places themselves (their block and words).
-            let cap =
-                usize::try_from(links.available() / (PICTURE_WORK + PLACE_COST + PLACE_WORDS))
-                    .unwrap_or(usize::MAX);
-            let seen = render::vision(info, &items, &furniture, &everywhere, cap);
-            let mut work = 0;
-            if let Some(render::Seen::Small(list, more, unread)) = &seen {
-                if *unread > 0 {
-                    // Drawings past the most a page reads: not read, not listed.
-                    let (what, verb, it) = if *unread == 1 {
-                        ("drawing", "looks", "it is")
-                    } else {
-                        ("drawings", "look", "they are")
+            // Lays the page out; true when the time stopped that.
+            let stopped = plain
+                || 'laid: {
+                    separators_note(&mut blocks, out);
+                    let roles = |mcid: u32| pdf.and_then(|pdf| pdf.role_of(n, mcid));
+                    let cx = Context {
+                        style: &style,
+                        tree,
+                        roles: &roles,
+                        budget,
+                        tables: &tables,
+                        in_part: items.in_part,
+                        links: &links,
                     };
-                    out.loss(
+                    if items.links_cut {
+                        out.loss(
+                            format!("p{n}"),
+                            "some URI links are not attached to their text: the page has too many \
+                     links to match",
+                            LossReason::Limit,
+                            Severity::Warning,
+                        );
+                    }
+                    notes(n, &items, out);
+                    links.free(items.kept);
+                    let height = frame_height(info, Some(&items));
+                    read_pages.insert(n);
+                    let mut points =
+                        annotation_points(n, &mut items, annots, here, &mut spots, out);
+                    // Each picture's block is looked for at the run nearest to its top, after the
+                    // annotations' points, in the frame of the runs.
+                    // The work for each small picture while the page is laid out is charged against
+                    // the kept bytes, and given back after the page.
+                    // The cap leaves room for the places themselves (their block and words).
+                    let cap = usize::try_from(
+                        links.available() / (PICTURE_WORK + PLACE_COST + PLACE_WORDS),
+                    )
+                    .unwrap_or(usize::MAX);
+                    let seen = render::vision(info, &items, &furniture, &everywhere, cap);
+                    let mut work = 0;
+                    if let Some(render::Seen::Small(list, more, unread)) = &seen {
+                        if *unread > 0 {
+                            // Drawings past the most a page reads: not read, not listed.
+                            let (what, verb, it) = if *unread == 1 {
+                                ("drawing", "looks", "it is")
+                            } else {
+                                ("drawings", "look", "they are")
+                            };
+                            out.loss(
                         format!("p{n}"),
                         format!(
                             "page {n} has {unread} more {what} that {verb} like a barcode or QR \
@@ -1051,176 +1120,188 @@ fn lay_out(
                         LossReason::Limit,
                         Severity::Warning,
                     );
-                }
-                work = list.len() as u64 * PICTURE_WORK;
-                if links.take_bytes(work).is_err() {
-                    work = 0;
-                }
-                if *more > 0 {
-                    let hit = rezzer_limits::LimitHit {
-                        limit: "kept text",
-                        value: (list.len() + more) as u64 * PICTURE_WORK,
-                        max: work,
-                        unit: "bytes",
+                        }
+                        work = list.len() as u64 * PICTURE_WORK;
+                        if links.take_bytes(work).is_err() {
+                            work = 0;
+                        }
+                        if *more > 0 {
+                            let hit = rezzer_limits::LimitHit {
+                                limit: "kept text",
+                                value: (list.len() + more) as u64 * PICTURE_WORK,
+                                max: work,
+                                unit: "bytes",
+                            };
+                            pictures.unlist(*more, n, hit.to_string());
+                        }
+                    }
+                    let tops: Vec<Option<(f32, f32)>> = match &seen {
+                        Some(render::Seen::Page(v)) => {
+                            vec![render::picture_top(v, items.turn, info.width, info.height)]
+                        }
+                        Some(render::Seen::Small(list, ..)) => list
+                            .iter()
+                            .map(|p| Some(((p.framed[0] + p.framed[2]) / 2.0, p.framed[3])))
+                            .collect(),
+                        None => Vec::new(),
                     };
-                    pictures.unlist(*more, n, hit.to_string());
-                }
-            }
-            let tops: Vec<Option<(f32, f32)>> = match &seen {
-                Some(render::Seen::Page(v)) => {
-                    vec![render::picture_top(v, items.turn, info.width, info.height)]
-                }
-                Some(render::Seen::Small(list, ..)) => list
-                    .iter()
-                    .map(|p| Some(((p.framed[0] + p.framed[2]) / 2.0, p.framed[3])))
-                    .collect(),
-                None => Vec::new(),
-            };
-            let found: Vec<(f32, f32)> = tops.iter().flatten().copied().collect();
-            let mut nearest = quote::nearest_run_spans(&items.runs, &found).into_iter();
-            // The middles across and the baselines of the page's runs with ink, by the middle:
-            // whether text of a picture's width stands over it and under it (see `Spans`).
-            let mut run_mids: Vec<(f32, f32)> = if found.is_empty() {
-                Vec::new()
-            } else {
-                items
-                    .runs
-                    .iter()
-                    .filter(|r| r.text.chars().any(|c| !c.is_whitespace()))
-                    .map(|r| (r.x + r.w / 2.0, r.y))
-                    .filter(|(x, y)| x.is_finite() && y.is_finite())
-                    .collect()
-            };
-            run_mids.sort_by(|a, b| a.0.total_cmp(&b.0));
-            let run_spans = Spans::new(&run_mids);
-            // For each picture: the run found and its half width, the picture's top, and the
-            // index of its point.
-            let probes_from = points.len();
-            let near: Vec<Option<Near>> = tops
-                .iter()
-                .map(|top| {
-                    let top = (*top)?;
-                    let (at, width) = nearest.next().flatten()?;
-                    points.push(at);
-                    Some((at, (0.5 * (width.1 - width.0), top.1), points.len() - 1))
-                })
-                .collect();
-            let (ox, oy) = items.origin;
-            let fields: Vec<[f32; 4]> = widgets
-                .get(&n)
-                .map(|boxes| {
-                    boxes
+                    let found: Vec<(f32, f32)> = tops.iter().flatten().copied().collect();
+                    let mut nearest = quote::nearest_run_spans(&items.runs, &found).into_iter();
+                    // The middles across and the baselines of the page's runs with ink, by the middle:
+                    // whether text of a picture's width stands over it and under it (see `Spans`).
+                    let mut run_mids: Vec<(f32, f32)> = if found.is_empty() {
+                        Vec::new()
+                    } else {
+                        items
+                            .runs
+                            .iter()
+                            .filter(|r| r.text.chars().any(|c| !c.is_whitespace()))
+                            .map(|r| (r.x + r.w / 2.0, r.y))
+                            .filter(|(x, y)| x.is_finite() && y.is_finite())
+                            .collect()
+                    };
+                    run_mids.sort_by(|a, b| a.0.total_cmp(&b.0));
+                    let run_spans = Spans::new(&run_mids);
+                    // For each picture: the run found and its half width, the picture's top, and the
+                    // index of its point.
+                    let probes_from = points.len();
+                    let near: Vec<Option<Near>> = tops
                         .iter()
-                        .map(|b| [b[0] - ox, b[1] - oy, b[2] - ox, b[3] - oy])
-                        .collect()
-                })
-                .unwrap_or_default();
-            // Pictures and form fields go into the frame of the runs, which may be turned.
-            let (width, _) = frame_size(info, Some(&items));
-            let place = |b: &[f32; 4]| items.turn.place_box(*b, info.width, info.height);
-            let images: Vec<[f32; 4]> = if items.turned {
-                items.images.iter().map(place).collect()
-            } else {
-                Vec::new()
-            };
-            let fields: Vec<[f32; 4]> = if items.turned {
-                fields.iter().map(place).collect()
-            } else {
-                fields
-            };
-            // The dates of page 1's lines are gathered before the layout takes its runs.
-            let mut dates = (n == 1).then(|| layout::page_dates(&items.runs, height));
-            let runs = std::mem::take(&mut items.runs);
-            // The grids of the page's rules, found once in the frame of its runs for every
-            // detector of the layout.
-            let structure = crate::regions::structure_in_frame(&items.rules, &items.boxes);
-            let drawn = Drawn {
-                rules: &items.rules,
-                structure: &structure,
-                images: if items.turned { &images } else { &items.images },
-                widgets: &fields,
-                boxes: &items.boxes,
-                items: Some(&items),
-                lines_unsearched: items.lines_unsearched,
-                width,
-                body_size: style.body_size,
-            };
-            symbols += items.symbol;
-            let mut laid = layout::page_blocks_at(n, height, runs, &drawn, &cx, &points);
-            if let Some(dates) = &mut dates {
-                if let Some(more) = laid.dates.take() {
-                    dates.merge(more);
-                }
-                page_date(dates, budget, out);
-            }
-            if let Some(title) = laid.title.take() {
-                match budget.charge_text(title.len()) {
-                    Ok(()) => out.found_title = Some(title),
-                    Err(hit) => out.loss(
-                        "p1",
-                        format!("{hit}: the title found on page 1 is not kept"),
-                        LossReason::Limit,
-                        Severity::Warning,
-                    ),
-                }
-            }
-            let annot_probes = &laid.probed[..probes_from.min(laid.probed.len())];
-            for (&i, two) in here.iter().zip(annot_probes.chunks(2)) {
-                spots[i].anchor = two.iter().flatten().next().cloned();
-            }
-            if laid.probes_cut && here.iter().any(|&i| spots[i].anchor.is_none()) {
-                out.loss(
+                        .map(|top| {
+                            let top = (*top)?;
+                            let (at, width) = nearest.next().flatten()?;
+                            points.push(at);
+                            Some((at, (0.5 * (width.1 - width.0), top.1), points.len() - 1))
+                        })
+                        .collect();
+                    let (ox, oy) = items.origin;
+                    let fields: Vec<[f32; 4]> = widgets
+                        .get(&n)
+                        .map(|boxes| {
+                            boxes
+                                .iter()
+                                .map(|b| [b[0] - ox, b[1] - oy, b[2] - ox, b[3] - oy])
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    // Pictures and form fields go into the frame of the runs, which may be turned.
+                    let (width, _) = frame_size(info, Some(&items));
+                    let place = |b: &[f32; 4]| items.turn.place_box(*b, info.width, info.height);
+                    let images: Vec<[f32; 4]> = if items.turned {
+                        items.images.iter().map(place).collect()
+                    } else {
+                        Vec::new()
+                    };
+                    let fields: Vec<[f32; 4]> = if items.turned {
+                        fields.iter().map(place).collect()
+                    } else {
+                        fields
+                    };
+                    // The dates of page 1's lines are gathered before the layout takes its runs.
+                    let mut dates = (n == 1).then(|| layout::page_dates(&items.runs, height));
+                    let runs = std::mem::take(&mut items.runs);
+                    // The grids of the page's rules, found once in the frame of its runs for every
+                    // detector of the layout.
+                    let structure = crate::regions::structure_in_frame(&items.rules, &items.boxes);
+                    let drawn = Drawn {
+                        rules: &items.rules,
+                        structure: &structure,
+                        images: if items.turned { &images } else { &items.images },
+                        widgets: &fields,
+                        boxes: &items.boxes,
+                        items: Some(&items),
+                        lines_unsearched: items.lines_unsearched,
+                        width,
+                        body_size: style.body_size,
+                    };
+                    symbols += items.symbol;
+                    let mut laid = layout::page_blocks_at(n, height, runs, &drawn, &cx, &points);
+                    if laid.stop.as_ref().is_some_and(|hit| hit.limit == "time") {
+                        // The time stopped the layout in the page: what it built of the page is
+                        // dropped, and the whole page is written from its lines, so no line stands
+                        // twice and none is lost. The elements of the blocks dropped go back; their
+                        // text stays charged. The text of the page was read, and the quotes of
+                        // its annotations are taken: the page stays among the pages read.
+                        budget.release_elements(budget.elements().saturating_sub(elements));
+                        links.free(work);
+                        blocks.truncate(1);
+                        break 'laid true;
+                    }
+                    if let Some(dates) = &mut dates {
+                        if let Some(more) = laid.dates.take() {
+                            dates.merge(more);
+                        }
+                        page_date(dates, budget, out);
+                    }
+                    if let Some(title) = laid.title.take() {
+                        match budget.charge_text(title.len()) {
+                            Ok(()) => out.found_title = Some(title),
+                            Err(hit) => out.loss(
+                                "p1",
+                                format!("{hit}: the title found on page 1 is not kept"),
+                                LossReason::Limit,
+                                Severity::Warning,
+                            ),
+                        }
+                    }
+                    let annot_probes = &laid.probed[..probes_from.min(laid.probed.len())];
+                    for (&i, two) in here.iter().zip(annot_probes.chunks(2)) {
+                        spots[i].anchor = two.iter().flatten().next().cloned();
+                    }
+                    if laid.probes_cut && here.iter().any(|&i| spots[i].anchor.is_none()) {
+                        out.loss(
                     format!("p{n}"),
                     "some annotations stand at the page, not at their block: the page has too \
                      many annotations near its text to place",
                     LossReason::Limit,
                     Severity::Warning,
                 );
-            }
-            // A marked passage whose text was not read in full may be what is missing.
-            let partial = items.in_part
-                || items.notes.iter().any(|n| matches!(n, Note::Damaged(_)))
-                || laid.stop.is_some();
-            for &i in here {
-                if !annots[i].quads.is_empty()
-                    && spots[i].quoted.is_none()
-                    && !spots[i].cut
-                    && partial
-                {
-                    unquoted.add(n);
-                }
-            }
-            for (what, why, severity) in laid.notes {
-                out.loss(format!("p{n}"), what, why, severity);
-            }
-            for (at, what, why, severity) in std::mem::take(&mut laid.located) {
-                out.loss(at, what, why, severity);
-            }
-            if let Some(note) = laid.found_by {
-                // The footnotes the layout found, said at the top of the page too.
-                found_by_note(
-                    &mut blocks,
-                    note,
-                    &format!("which paragraphs on page {n} are footnotes"),
-                    n,
-                    budget,
-                    out,
-                );
-            }
-            let section = out.doc.body.len();
-            let first_table = blocks.len();
-            let nothing =
-                laid.blocks.is_empty() && laid.continued.is_empty() && laid.added.is_empty();
-            let (orphans, orphaned) =
-                attach(&mut out.doc.body, &placed, laid.continued, laid.added);
-            // The layout builds rows only for tables it placed: a tagged table kept as
-            // paragraphs stays text on its later pages.
-            debug_assert!(
-                orphaned.is_none(),
-                "rows for a table not kept: {orphaned:?}"
-            );
-            if let Some(table) = orphaned {
-                out.loss(
+                    }
+                    // A marked passage whose text was not read in full may be what is missing.
+                    let partial = items.in_part
+                        || items.notes.iter().any(|n| matches!(n, Note::Damaged(_)))
+                        || laid.stop.is_some();
+                    for &i in here {
+                        if !annots[i].quads.is_empty()
+                            && spots[i].quoted.is_none()
+                            && !spots[i].cut
+                            && partial
+                        {
+                            unquoted.add(n);
+                        }
+                    }
+                    for (what, why, severity) in laid.notes {
+                        out.loss(format!("p{n}"), what, why, severity);
+                    }
+                    for (at, what, why, severity) in std::mem::take(&mut laid.located) {
+                        out.loss(at, what, why, severity);
+                    }
+                    if let Some(note) = laid.found_by {
+                        // The footnotes the layout found, said at the top of the page too.
+                        found_by_note(
+                            &mut blocks,
+                            note,
+                            &format!("which paragraphs on page {n} are footnotes"),
+                            n,
+                            budget,
+                            out,
+                        );
+                    }
+                    let section = out.doc.body.len();
+                    let first_table = blocks.len();
+                    let nothing = laid.blocks.is_empty()
+                        && laid.continued.is_empty()
+                        && laid.added.is_empty();
+                    let (orphans, orphaned) =
+                        attach(&mut out.doc.body, &placed, laid.continued, laid.added);
+                    // The layout builds rows only for tables it placed: a tagged table kept as
+                    // paragraphs stays text on its later pages.
+                    debug_assert!(
+                        orphaned.is_none(),
+                        "rows for a table not kept: {orphaned:?}"
+                    );
+                    if let Some(table) = orphaned {
+                        out.loss(
                     format!("p{n}"),
                     format!(
                         "text page {n} adds to {table} is kept as paragraphs at the end of the \
@@ -1229,32 +1310,33 @@ fn lay_out(
                     LossReason::Damaged,
                     Severity::Warning,
                 );
-            }
-            let mut tagged = laid.tagged.into_iter();
-            for (k, block) in laid.blocks.iter().enumerate() {
-                if let Block::Table { anchor, .. } = block
-                    && let Some(table) = tagged.next().flatten()
-                {
-                    let anchor = anchor.as_ref().map_or_else(String::new, |a| a.0.clone());
-                    placed.insert(table, (section, first_table + k, anchor));
-                }
-            }
-            // The page's regions, each at the block it became (its host), rows of a tagged
-            // table begun on an earlier page at that table, in the page box.
-            let mut page_regions = std::mem::replace(&mut laid.regions, layout::no_regions(n));
-            let mut anchors: Vec<Option<Anchor>> =
-                laid.blocks.iter().map(layout::block_anchor).collect();
-            for &(r, table) in &laid.earlier {
-                if let Some((_, _, anchor)) = placed.get(&table).filter(|t| !t.2.is_empty())
-                    && let Some(region) = page_regions.regions.get_mut(r)
-                {
-                    region.host = u32::try_from(anchors.len()).unwrap_or(u32::MAX);
-                    anchors.push(Some(Anchor(anchor.clone())));
-                }
-            }
-            // Whether each region holds a run with ink: a figure or a code without a media block
-            // of its own keeps the block that holds its text (see below).
-            let inked: Vec<bool> = page_regions
+                    }
+                    let mut tagged = laid.tagged.into_iter();
+                    for (k, block) in laid.blocks.iter().enumerate() {
+                        if let Block::Table { anchor, .. } = block
+                            && let Some(table) = tagged.next().flatten()
+                        {
+                            let anchor = anchor.as_ref().map_or_else(String::new, |a| a.0.clone());
+                            placed.insert(table, (section, first_table + k, anchor));
+                        }
+                    }
+                    // The page's regions, each at the block it became (its host), rows of a tagged
+                    // table begun on an earlier page at that table, in the page box.
+                    let mut page_regions =
+                        std::mem::replace(&mut laid.regions, layout::no_regions(n));
+                    let mut anchors: Vec<Option<Anchor>> =
+                        laid.blocks.iter().map(layout::block_anchor).collect();
+                    for &(r, table) in &laid.earlier {
+                        if let Some((_, _, anchor)) = placed.get(&table).filter(|t| !t.2.is_empty())
+                            && let Some(region) = page_regions.regions.get_mut(r)
+                        {
+                            region.host = u32::try_from(anchors.len()).unwrap_or(u32::MAX);
+                            anchors.push(Some(Anchor(anchor.clone())));
+                        }
+                    }
+                    // Whether each region holds a run with ink: a figure or a code without a media block
+                    // of its own keeps the block that holds its text (see below).
+                    let inked: Vec<bool> = page_regions
                 .regions
                 .iter()
                 .map(|r| {
@@ -1266,435 +1348,509 @@ fn lay_out(
                     })
                 })
                 .collect();
-            // The engine report of the page, its regions and hosts set once the media blocks
-            // are placed (see below).
-            let report = match (regions.is_some(), laid.engine_in.take()) {
-                (true, Some(input)) => {
-                    let run_blocks = laid
-                        .run_blocks
-                        .iter()
-                        .map(|&b| laid.blocks.get(b as usize).map(block_word))
-                        .collect();
-                    let run_block_at = laid
-                        .run_blocks
-                        .iter()
-                        .map(|&b| (b as usize) < laid.blocks.len())
-                        .zip(&laid.run_blocks)
-                        .map(|(ok, &b)| ok.then_some(b as usize))
-                        .collect();
-                    Some(EnginePage {
-                        input,
-                        regions: layout::no_regions(n),
-                        run_block_at,
-                        anchors: Vec::new(),
-                        run_blocks,
-                        stopped: laid.stop.is_some(),
-                        block_words: laid.blocks.iter().map(block_word).collect(),
-                        tagged: tree.is_some(),
-                    })
-                }
-                _ => None,
-            };
-            let laid_blocks = laid.blocks.len();
-            // The media block of each picture and code of the page (see `Pictures::list`),
-            // and the one media block of a page rendered whole.
-            let mut media_hosts: Vec<(layoutregions::PrimId, Anchor)> = Vec::new();
-            let mut page_media: Option<Anchor> = None;
-            // Where the region engine reads each picture and code of a figure or code region:
-            // before the block of the page written after it, and the blocks of the regions
-            // read beside it (see `layout::MediaAt`).
-            let base = blocks.len();
-            let engine_spots: HashMap<layoutregions::PrimId, (usize, std::ops::Range<usize>)> =
-                laid.media_at
-                    .iter()
-                    .map(|m| {
-                        let at = |b: usize| base + b.min(laid_blocks);
-                        (m.prim, (at(m.at), at(m.near.start)..at(m.near.end)))
-                    })
-                    .collect();
-            // The table cell of each picture that stands in one.
-            let cell_spots: CellSpots = laid
-                .in_cells
-                .iter()
-                .filter_map(|&(prim, b, r, c)| {
-                    let block = laid.blocks.get(b)?;
-                    Some((prim, (base + b, r, c, layout::block_anchor(block))))
-                })
-                .collect();
-            let mut in_cells: Vec<CellPicture> = Vec::new();
-            blocks.extend(laid.blocks);
-            blocks.extend(orphans);
-            // The primitive of each picture listed, by its place in `near`.
-            let prims: Vec<Option<layoutregions::PrimId>> = match &seen {
-                Some(render::Seen::Small(list, ..)) => list.iter().map(|p| Some(p.prim)).collect(),
-                _ => Vec::new(),
-            };
-            // The width each picture takes in the frame of the runs, by its place in `near`.
-            let widths: Vec<(f32, f32)> = match &seen {
-                Some(render::Seen::Small(list, ..)) => list
-                    .iter()
-                    .map(|p| (p.framed[0].min(p.framed[2]), p.framed[0].max(p.framed[2])))
-                    .collect(),
-                _ => Vec::new(),
-            };
-            // And its bottom and top.
-            let heights: Vec<(f32, f32)> = match &seen {
-                Some(render::Seen::Small(list, ..)) => list
-                    .iter()
-                    .map(|p| (p.framed[1].min(p.framed[3]), p.framed[1].max(p.framed[3])))
-                    .collect(),
-                _ => Vec::new(),
-            };
-            let engine_spot = |k: usize| {
-                prims
-                    .get(k)
-                    .copied()
-                    .flatten()
-                    .and_then(|p| engine_spots.get(&p))
-            };
-            // Where a picture goes by its run: after the block of the run nearest to its top
-            // when the run stands above the top, else before it; at the end without one. A
-            // picture of a figure or code region stands where the engine reads it, or at its
-            // run among the blocks of the regions read beside it unless text of its width
-            // stands over it and under it, or by its run when that run stands over or under it
-            // in its column (within its width): that run is its neighbour in the column's
-            // reading, wherever the engine's place is.
-            let anchored = if near.iter().any(Option::is_some) {
-                render::anchor_index(&blocks)
-            } else {
-                HashMap::new()
-            };
-            let spots: Vec<usize> = near
-                .iter()
-                .enumerate()
-                .map(|(k, found)| {
-                    let by_run = found.map(|(at, (half, top), probe)| {
-                        let anchor = laid.probed.get(probe).and_then(Option::as_ref);
-                        let after = at.1 > top;
-                        let place = render::position(&anchored, blocks.len(), anchor, after);
-                        // The run stands over or under the picture, in its column: it overlaps
-                        // the picture's width by half the narrower of the two (a run beside the
-                        // picture, a label at its height or one that only touches its edge,
-                        // is no such neighbour).
-                        let column = widths.get(k).is_some_and(|w| {
-                            let over = (at.0 + half).min(w.1) - (at.0 - half).max(w.0);
-                            over > 0.0 && over >= 0.5 * (2.0 * half).min(w.1 - w.0)
-                        });
-                        (place, column && anchor.is_some())
-                    });
-                    // Text in the picture's width over it and under it, at any distance (a
-                    // page head line over it and a page number under it count too): then the
-                    // engine's place stands unless the run found is of its width (a run beside
-                    // it reads in another column). Where one region makes several blocks, this
-                    // looks past the neighbour blocks; the engine's place for a picture beside
-                    // a label is after the label's region anyway.
-                    let column_text = widths.get(k).zip(heights.get(k)).is_some_and(|(w, h)| {
-                        let from = run_mids.partition_point(|r| r.0 < w.0);
-                        let to = run_mids.partition_point(|r| r.0 <= w.1);
-                        run_spans
-                            .range(from, to)
-                            .is_some_and(|(low, high)| high > h.1 && low < h.0)
-                    });
-                    match (engine_spot(k), by_run) {
-                        (Some(_), Some((p, true))) => p,
-                        (Some((_, near)), Some((p, _)))
-                            if !column_text && near.start < p && p <= near.end =>
-                        {
-                            p
-                        }
-                        (Some((at, _)), _) => *at,
-                        (None, p) => p.map_or(blocks.len(), |p| p.0),
-                    }
-                })
-                .collect();
-            drop(anchored);
-            let mut media: Vec<(usize, Block)> = Vec::new();
-            // Pictures too small to be listed on a page that is not rendered whole are
-            // counted, at the end of the page.
-            if !matches!(seen, Some(render::Seen::Page(_))) {
-                let tiny = render::very_small(info, &items);
-                if let Some(note) = very_small_note(n, tiny, budget, out) {
-                    media.push((blocks.len(), note));
-                }
-            }
-            let here = figures.get(&n).map_or(&[][..], Vec::as_slice);
-            // The Figure alt texts no picture took as its caption, with where they go.
-            let mut unmatched: Vec<(usize, String)> = Vec::new();
-            match seen {
-                Some(render::Seen::Page(mut v)) => {
-                    // The page's first Figure is the page picture's caption; the others stay
-                    // as page text at the picture.
-                    let caption = here.first().map(|f| f.alt.clone());
-                    let regions = std::mem::take(&mut v.regions);
-                    let spot = spots.first().copied().unwrap_or(blocks.len());
-                    unmatched.extend(here.iter().skip(1).map(|f| (spot, f.alt.clone())));
-                    let charged = budget.add_elements(1).and_then(|()| {
-                        budget.charge_text(v.alt.len() + caption.as_ref().map_or(0, String::len))
-                    });
-                    match charged {
-                        Ok(()) => {
-                            // Every picture and code of the page is in its one media block.
-                            let anchor = Anchor(format!("p{n}:m1"));
-                            page_media = Some(anchor.clone());
-                            media.push((
-                                spots.first().copied().unwrap_or(blocks.len()),
-                                Block::Media {
-                                    asset: format!("page-{n}"),
-                                    alt: None,
-                                    anchor: Some(anchor),
-                                },
-                            ));
-                            needs.push(render::Need {
-                                page: n,
-                                whole: Some(out.doc.assets.len()),
-                                crops: Vec::new(),
-                                origin: items.origin,
-                                cut: items.in_part,
-                                fallback: items.fallback,
-                                regions,
-                                past: v.past,
-                                turn: items.turn,
-                                size: (info.width, info.height),
-                                light: items.images.len() <= render::SCAN_PICTURES,
-                                glyphs: items
-                                    .codes
-                                    .iter()
-                                    .filter_map(render::glyph_values)
-                                    .collect(),
-                            });
-                            out.doc.assets.push(render::asset(n, v.alt, caption));
-                        }
-                        Err(hit) => out.loss(
-                            format!("p{n}"),
-                            format!("page {n} needs vision but is not listed: {hit}"),
-                            LossReason::Limit,
-                            Severity::Warning,
-                        ),
-                    }
-                }
-                Some(render::Seen::Small(list, ..)) => {
-                    let crops = pictures.list(
-                        n,
-                        (&list, &spots, here),
-                        (budget, &links),
-                        (&mut media, &mut unmatched, &mut media_hosts),
-                        (&cell_spots, &mut in_cells),
-                        out,
-                    );
-                    if !crops.is_empty() {
-                        needs.push(render::Need {
-                            page: n,
-                            whole: None,
-                            crops,
-                            origin: items.origin,
-                            cut: items.in_part,
-                            fallback: items.fallback,
-                            regions: Vec::new(),
-                            past: 0,
-                            turn: items.turn,
-                            size: (info.width, info.height),
-                            light: items.images.len() <= render::SCAN_PICTURES,
-                            glyphs: items
-                                .codes
+                    // The engine report of the page, its regions and hosts set once the media blocks
+                    // are placed (see below).
+                    let report = match (regions.is_some(), laid.engine_in.take()) {
+                        (true, Some(input)) => {
+                            let run_blocks = laid
+                                .run_blocks
                                 .iter()
-                                .filter_map(render::glyph_values)
-                                .collect(),
-                        });
-                    }
-                }
-                None => unmatched.extend(here.iter().map(|f| (blocks.len(), f.alt.clone()))),
-            }
-            // Each picture of a table cell goes into its cell; where the cell is not there (a
-            // limit cut the table), it stands as a media block at its place.
-            for ((b, r, c, prim), spot, m) in in_cells {
-                let table = cell_spots.get(&prim).and_then(|s| s.3.clone());
-                let cell = match blocks.get_mut(b) {
-                    Some(Block::Table { rows, .. }) => {
-                        rows.get_mut(r).and_then(|row| row.get_mut(c))
-                    }
-                    _ => None,
-                };
-                match cell {
-                    Some(cell) => {
-                        // Its figure region stands at the table.
-                        if let Some(table) = table {
-                            media_hosts.push((prim, table));
-                        }
-                        cell.media.push(m);
-                    }
-                    None => {
-                        // The next media anchor of the page, as each media block has one.
-                        let made = media
-                            .iter()
-                            .filter(|(_, b)| {
-                                matches!(
-                                    b,
-                                    Block::Media {
-                                        anchor: Some(_),
-                                        ..
-                                    }
-                                )
+                                .map(|&b| laid.blocks.get(b as usize).map(block_word))
+                                .collect();
+                            let run_block_at = laid
+                                .run_blocks
+                                .iter()
+                                .map(|&b| (b as usize) < laid.blocks.len())
+                                .zip(&laid.run_blocks)
+                                .map(|(ok, &b)| ok.then_some(b as usize))
+                                .collect();
+                            Some(EnginePage {
+                                input,
+                                regions: layout::no_regions(n),
+                                run_block_at,
+                                anchors: Vec::new(),
+                                run_blocks,
+                                stopped: laid.stop.is_some(),
+                                block_words: laid.blocks.iter().map(block_word).collect(),
+                                tagged: tree.is_some(),
                             })
-                            .count();
-                        let anchor = Anchor(format!("p{n}:m{}", made + 1));
-                        // Its figure region stands at the media block it became.
-                        media_hosts.push((prim, anchor.clone()));
-                        media.push((
-                            spot,
-                            Block::Media {
-                                asset: m.asset,
-                                alt: m.alt,
-                                anchor: Some(anchor),
-                            },
-                        ));
-                    }
-                }
-            }
-            // Each region of text kept as laid out gets a picture of its area, right after it.
-            // On a page listed whole that page is its picture.
-            if page_media.is_none() {
-                let crops = region_pictures.list(
-                    n,
-                    (&blocks[base..base + laid_blocks], base),
-                    (&page_regions.regions, &|b| {
-                        page_box(b, &items, info.width, info.height)
-                    }),
-                    budget,
-                    &mut media,
-                    out,
-                );
-                if !crops.is_empty() {
-                    match needs.last_mut().filter(|need| need.page == n) {
-                        Some(need) => need.crops.extend(crops),
-                        None => needs.push(render::Need {
-                            page: n,
-                            whole: None,
-                            crops,
-                            origin: items.origin,
-                            cut: items.in_part,
-                            fallback: items.fallback,
-                            regions: Vec::new(),
-                            past: 0,
-                            turn: items.turn,
-                            size: (info.width, info.height),
-                            light: items.images.len() <= render::SCAN_PICTURES,
-                            glyphs: items
-                                .codes
-                                .iter()
-                                .filter_map(render::glyph_values)
-                                .collect(),
-                        }),
-                    }
-                }
-            }
-            if !unmatched.is_empty() {
-                // Before the pictures at their place, in their order.
-                let texts = figure_texts(n, unmatched, (budget, &links), out);
-                media = texts.into_iter().chain(media).collect();
-            }
-            if !media.is_empty() {
-                // One pass: the pictures go between the blocks, and each table of this page
-                // moves on by the pictures before it.
-                // A stable sort: the Figure texts stay before the pictures at their place.
-                media.sort_by_key(|(at, _)| *at);
-                let at: Vec<usize> = media.iter().map(|(at, _)| *at).collect();
-                for (_, b, _) in placed.values_mut().filter(|t| t.0 == section) {
-                    *b += at.partition_point(|&a| a <= *b);
-                }
-                blocks = render::merge(blocks, media);
-            }
-            // A figure or a code region stands at the media block of its first picture or code
-            // that has one. One whose pictures have no block on the page (page furniture past
-            // its first place, a picture not listed, a drawing) keeps the block that holds its
-            // text (see `layout::hosts`), and stands at the page when it holds no text with ink:
-            // it wrote nothing of its own there.
-            let mut media_words = 0usize;
-            for (k, region) in page_regions.regions.iter_mut().enumerate() {
-                if !matches!(
-                    region.kind,
-                    layoutregions::Kind::Figure | layoutregions::Kind::Code
-                ) {
-                    continue;
-                }
-                let found = page_media.clone().or_else(|| {
-                    region.prims.iter().find_map(|p| {
-                        media_hosts
+                        }
+                        _ => None,
+                    };
+                    let laid_blocks = laid.blocks.len();
+                    // The media block of each picture and code of the page (see `Pictures::list`),
+                    // and the one media block of a page rendered whole.
+                    let mut media_hosts: Vec<(layoutregions::PrimId, Anchor)> = Vec::new();
+                    let mut page_media: Option<Anchor> = None;
+                    // Where the region engine reads each picture and code of a figure or code region:
+                    // before the block of the page written after it, and the blocks of the regions
+                    // read beside it (see `layout::MediaAt`).
+                    let base = blocks.len();
+                    let engine_spots: HashMap<
+                        layoutregions::PrimId,
+                        (usize, std::ops::Range<usize>),
+                    > = laid
+                        .media_at
+                        .iter()
+                        .map(|m| {
+                            let at = |b: usize| base + b.min(laid_blocks);
+                            (m.prim, (at(m.at), at(m.near.start)..at(m.near.end)))
+                        })
+                        .collect();
+                    // The table cell of each picture that stands in one.
+                    let cell_spots: CellSpots = laid
+                        .in_cells
+                        .iter()
+                        .filter_map(|&(prim, b, r, c)| {
+                            let block = laid.blocks.get(b)?;
+                            Some((prim, (base + b, r, c, layout::block_anchor(block))))
+                        })
+                        .collect();
+                    let mut in_cells: Vec<CellPicture> = Vec::new();
+                    blocks.extend(laid.blocks);
+                    blocks.extend(orphans);
+                    // The primitive of each picture listed, by its place in `near`.
+                    let prims: Vec<Option<layoutregions::PrimId>> = match &seen {
+                        Some(render::Seen::Small(list, ..)) => {
+                            list.iter().map(|p| Some(p.prim)).collect()
+                        }
+                        _ => Vec::new(),
+                    };
+                    // The width each picture takes in the frame of the runs, by its place in `near`.
+                    let widths: Vec<(f32, f32)> = match &seen {
+                        Some(render::Seen::Small(list, ..)) => list
                             .iter()
-                            .find(|(m, _)| m == p)
-                            .map(|(_, a)| a.clone())
-                    })
-                });
-                let media = found.map(|a| {
-                    anchors.push(Some(a));
-                    media_words += 1;
-                    u32::try_from(anchors.len() - 1).unwrap_or(u32::MAX)
-                });
-                region.host =
-                    figure_host(media, inked.get(k).copied().unwrap_or(false), region.host);
-            }
-            out.doc.regions.extend(rezzer_layout::pdf::pdf_regions(
-                std::slice::from_ref(&page_regions),
-                &|_, host| anchors.get(host as usize).cloned().flatten(),
-                &|_, b| page_box(b, &items, info.width, info.height),
-            ));
-            if let (Some(all), Some(mut report)) = (regions.as_deref_mut(), report) {
-                // The hosts past the page's blocks: the rows of a table begun on an earlier
-                // page (a table), then the media blocks.
-                let media_from = anchors.len() - media_words;
-                debug_assert_eq!(report.block_words.len(), laid_blocks);
-                report.block_words.resize(media_from, "table");
-                report.block_words.resize(anchors.len(), "media");
-                report.anchors = anchors
-                    .iter()
-                    .map(|a| a.as_ref().map(|a| a.0.clone()))
-                    .collect();
-                report.regions = page_regions;
-                all.push(report);
-            }
-            links.free(work);
-            // What a stop cuts: the page from the first part not built on, or its hidden text.
-            let mut stop = laid.stop.map(|hit| {
-                let rows_of = |s: usize, b: usize| match out.doc.body.get(s) {
-                    Some(Block::Section { blocks, .. }) => match blocks.get(b) {
-                        Some(Block::Table { rows, .. }) => rows.len(),
-                        _ => 0,
-                    },
-                    _ => 0,
-                };
-                let from = (!nothing)
-                    .then(|| cut_from(n, laid.cut.unwrap_or(Cut::Block(1)), &placed, &rows_of));
-                let what = match (from, pages_after(n, last)) {
-                    (None, _) => format!("{} not read", pages_from(n, last)),
-                    (Some(from), None) => format!("page {n} from {from} is not read"),
-                    (Some(from), Some(later)) => {
-                        format!("page {n} from {from} and {later} not read")
+                            .map(|p| (p.framed[0].min(p.framed[2]), p.framed[0].max(p.framed[2])))
+                            .collect(),
+                        _ => Vec::new(),
+                    };
+                    // And its bottom and top.
+                    let heights: Vec<(f32, f32)> = match &seen {
+                        Some(render::Seen::Small(list, ..)) => list
+                            .iter()
+                            .map(|p| (p.framed[1].min(p.framed[3]), p.framed[1].max(p.framed[3])))
+                            .collect(),
+                        _ => Vec::new(),
+                    };
+                    let engine_spot = |k: usize| {
+                        prims
+                            .get(k)
+                            .copied()
+                            .flatten()
+                            .and_then(|p| engine_spots.get(&p))
+                    };
+                    // Where a picture goes by its run: after the block of the run nearest to its top
+                    // when the run stands above the top, else before it; at the end without one. A
+                    // picture of a figure or code region stands where the engine reads it, or at its
+                    // run among the blocks of the regions read beside it unless text of its width
+                    // stands over it and under it, or by its run when that run stands over or under it
+                    // in its column (within its width): that run is its neighbour in the column's
+                    // reading, wherever the engine's place is.
+                    let anchored = if near.iter().any(Option::is_some) {
+                        render::anchor_index(&blocks)
+                    } else {
+                        HashMap::new()
+                    };
+                    let spots: Vec<usize> = near
+                        .iter()
+                        .enumerate()
+                        .map(|(k, found)| {
+                            let by_run = found.map(|(at, (half, top), probe)| {
+                                let anchor = laid.probed.get(probe).and_then(Option::as_ref);
+                                let after = at.1 > top;
+                                let place =
+                                    render::position(&anchored, blocks.len(), anchor, after);
+                                // The run stands over or under the picture, in its column: it overlaps
+                                // the picture's width by half the narrower of the two (a run beside the
+                                // picture, a label at its height or one that only touches its edge,
+                                // is no such neighbour).
+                                let column = widths.get(k).is_some_and(|w| {
+                                    let over = (at.0 + half).min(w.1) - (at.0 - half).max(w.0);
+                                    over > 0.0 && over >= 0.5 * (2.0 * half).min(w.1 - w.0)
+                                });
+                                (place, column && anchor.is_some())
+                            });
+                            // Text in the picture's width over it and under it, at any distance (a
+                            // page head line over it and a page number under it count too): then the
+                            // engine's place stands unless the run found is of its width (a run beside
+                            // it reads in another column). Where one region makes several blocks, this
+                            // looks past the neighbour blocks; the engine's place for a picture beside
+                            // a label is after the label's region anyway.
+                            let column_text =
+                                widths.get(k).zip(heights.get(k)).is_some_and(|(w, h)| {
+                                    let from = run_mids.partition_point(|r| r.0 < w.0);
+                                    let to = run_mids.partition_point(|r| r.0 <= w.1);
+                                    run_spans
+                                        .range(from, to)
+                                        .is_some_and(|(low, high)| high > h.1 && low < h.0)
+                                });
+                            match (engine_spot(k), by_run) {
+                                (Some(_), Some((p, true))) => p,
+                                (Some((_, near)), Some((p, _)))
+                                    if !column_text && near.start < p && p <= near.end =>
+                                {
+                                    p
+                                }
+                                (Some((at, _)), _) => *at,
+                                (None, p) => p.map_or(blocks.len(), |p| p.0),
+                            }
+                        })
+                        .collect();
+                    drop(anchored);
+                    let mut media: Vec<(usize, Block)> = Vec::new();
+                    // Pictures too small to be listed on a page that is not rendered whole are
+                    // counted, at the end of the page.
+                    if !matches!(seen, Some(render::Seen::Page(_))) {
+                        let tiny = render::very_small(info, &items);
+                        if let Some(note) = very_small_note(n, tiny, budget, out) {
+                            media.push((blocks.len(), note));
+                        }
                     }
-                };
-                (hit, what)
-            });
-            if stop.is_none() {
-                match invisible(n, &items, budget, out) {
-                    Ok(Some(callout)) => blocks.push(callout),
-                    Ok(None) => {}
-                    Err(hit) => {
-                        let what = match pages_after(n, last) {
-                            None => format!("the hidden text of page {n} is not read"),
-                            Some(later) => {
-                                format!("the hidden text of page {n} and {later} not read")
+                    let here = figures.get(&n).map_or(&[][..], Vec::as_slice);
+                    // The Figure alt texts no picture took as its caption, with where they go.
+                    let mut unmatched: Vec<(usize, String)> = Vec::new();
+                    match seen {
+                        Some(render::Seen::Page(mut v)) => {
+                            // The page's first Figure is the page picture's caption; the others stay
+                            // as page text at the picture.
+                            let caption = here.first().map(|f| f.alt.clone());
+                            let regions = std::mem::take(&mut v.regions);
+                            let spot = spots.first().copied().unwrap_or(blocks.len());
+                            unmatched.extend(here.iter().skip(1).map(|f| (spot, f.alt.clone())));
+                            let charged = budget.add_elements(1).and_then(|()| {
+                                budget.charge_text(
+                                    v.alt.len() + caption.as_ref().map_or(0, String::len),
+                                )
+                            });
+                            match charged {
+                                Ok(()) => {
+                                    // Every picture and code of the page is in its one media block.
+                                    let anchor = Anchor(format!("p{n}:m1"));
+                                    page_media = Some(anchor.clone());
+                                    media.push((
+                                        spots.first().copied().unwrap_or(blocks.len()),
+                                        Block::Media {
+                                            asset: format!("page-{n}"),
+                                            alt: None,
+                                            anchor: Some(anchor),
+                                        },
+                                    ));
+                                    needs.push(render::Need {
+                                        page: n,
+                                        whole: Some(out.doc.assets.len()),
+                                        crops: Vec::new(),
+                                        origin: items.origin,
+                                        cut: items.in_part,
+                                        fallback: items.fallback,
+                                        regions,
+                                        past: v.past,
+                                        turn: items.turn,
+                                        size: (info.width, info.height),
+                                        light: items.images.len() <= render::SCAN_PICTURES,
+                                        glyphs: items
+                                            .codes
+                                            .iter()
+                                            .filter_map(render::glyph_values)
+                                            .collect(),
+                                    });
+                                    out.doc.assets.push(render::asset(n, v.alt, caption));
+                                }
+                                Err(hit) => out.loss(
+                                    format!("p{n}"),
+                                    format!("page {n} needs vision but is not listed: {hit}"),
+                                    LossReason::Limit,
+                                    Severity::Warning,
+                                ),
+                            }
+                        }
+                        Some(render::Seen::Small(list, ..)) => {
+                            let crops = pictures.list(
+                                n,
+                                (&list, &spots, here),
+                                (budget, &links),
+                                (&mut media, &mut unmatched, &mut media_hosts),
+                                (&cell_spots, &mut in_cells),
+                                out,
+                            );
+                            if !crops.is_empty() {
+                                needs.push(render::Need {
+                                    page: n,
+                                    whole: None,
+                                    crops,
+                                    origin: items.origin,
+                                    cut: items.in_part,
+                                    fallback: items.fallback,
+                                    regions: Vec::new(),
+                                    past: 0,
+                                    turn: items.turn,
+                                    size: (info.width, info.height),
+                                    light: items.images.len() <= render::SCAN_PICTURES,
+                                    glyphs: items
+                                        .codes
+                                        .iter()
+                                        .filter_map(render::glyph_values)
+                                        .collect(),
+                                });
+                            }
+                        }
+                        None => {
+                            unmatched.extend(here.iter().map(|f| (blocks.len(), f.alt.clone())))
+                        }
+                    }
+                    // Each picture of a table cell goes into its cell; where the cell is not there (a
+                    // limit cut the table), it stands as a media block at its place.
+                    for ((b, r, c, prim), spot, m) in in_cells {
+                        let table = cell_spots.get(&prim).and_then(|s| s.3.clone());
+                        let cell = match blocks.get_mut(b) {
+                            Some(Block::Table { rows, .. }) => {
+                                rows.get_mut(r).and_then(|row| row.get_mut(c))
+                            }
+                            _ => None,
+                        };
+                        match cell {
+                            Some(cell) => {
+                                // Its figure region stands at the table.
+                                if let Some(table) = table {
+                                    media_hosts.push((prim, table));
+                                }
+                                cell.media.push(m);
+                            }
+                            None => {
+                                // The next media anchor of the page, as each media block has one.
+                                let made = media
+                                    .iter()
+                                    .filter(|(_, b)| {
+                                        matches!(
+                                            b,
+                                            Block::Media {
+                                                anchor: Some(_),
+                                                ..
+                                            }
+                                        )
+                                    })
+                                    .count();
+                                let anchor = Anchor(format!("p{n}:m{}", made + 1));
+                                // Its figure region stands at the media block it became.
+                                media_hosts.push((prim, anchor.clone()));
+                                media.push((
+                                    spot,
+                                    Block::Media {
+                                        asset: m.asset,
+                                        alt: m.alt,
+                                        anchor: Some(anchor),
+                                    },
+                                ));
+                            }
+                        }
+                    }
+                    // Each region of text kept as laid out gets a picture of its area, right after it.
+                    // On a page listed whole that page is its picture.
+                    if page_media.is_none() {
+                        let crops = region_pictures.list(
+                            n,
+                            (&blocks[base..base + laid_blocks], base),
+                            (&page_regions.regions, &|b| {
+                                page_box(b, &items, info.width, info.height)
+                            }),
+                            budget,
+                            &mut media,
+                            out,
+                        );
+                        if !crops.is_empty() {
+                            match needs.last_mut().filter(|need| need.page == n) {
+                                Some(need) => need.crops.extend(crops),
+                                None => needs.push(render::Need {
+                                    page: n,
+                                    whole: None,
+                                    crops,
+                                    origin: items.origin,
+                                    cut: items.in_part,
+                                    fallback: items.fallback,
+                                    regions: Vec::new(),
+                                    past: 0,
+                                    turn: items.turn,
+                                    size: (info.width, info.height),
+                                    light: items.images.len() <= render::SCAN_PICTURES,
+                                    glyphs: items
+                                        .codes
+                                        .iter()
+                                        .filter_map(render::glyph_values)
+                                        .collect(),
+                                }),
+                            }
+                        }
+                    }
+                    if !unmatched.is_empty() {
+                        // Before the pictures at their place, in their order.
+                        let texts = figure_texts(n, unmatched, (budget, &links), out);
+                        media = texts.into_iter().chain(media).collect();
+                    }
+                    if !media.is_empty() {
+                        // One pass: the pictures go between the blocks, and each table of this page
+                        // moves on by the pictures before it.
+                        // A stable sort: the Figure texts stay before the pictures at their place.
+                        media.sort_by_key(|(at, _)| *at);
+                        let at: Vec<usize> = media.iter().map(|(at, _)| *at).collect();
+                        for (_, b, _) in placed.values_mut().filter(|t| t.0 == section) {
+                            *b += at.partition_point(|&a| a <= *b);
+                        }
+                        blocks = render::merge(blocks, media);
+                    }
+                    // A figure or a code region stands at the media block of its first picture or code
+                    // that has one. One whose pictures have no block on the page (page furniture past
+                    // its first place, a picture not listed, a drawing) keeps the block that holds its
+                    // text (see `layout::hosts`), and stands at the page when it holds no text with ink:
+                    // it wrote nothing of its own there.
+                    let mut media_words = 0usize;
+                    for (k, region) in page_regions.regions.iter_mut().enumerate() {
+                        if !matches!(
+                            region.kind,
+                            layoutregions::Kind::Figure | layoutregions::Kind::Code
+                        ) {
+                            continue;
+                        }
+                        let found = page_media.clone().or_else(|| {
+                            region.prims.iter().find_map(|p| {
+                                media_hosts
+                                    .iter()
+                                    .find(|(m, _)| m == p)
+                                    .map(|(_, a)| a.clone())
+                            })
+                        });
+                        let media = found.map(|a| {
+                            anchors.push(Some(a));
+                            media_words += 1;
+                            u32::try_from(anchors.len() - 1).unwrap_or(u32::MAX)
+                        });
+                        region.host =
+                            figure_host(media, inked.get(k).copied().unwrap_or(false), region.host);
+                    }
+                    out.doc.regions.extend(rezzer_layout::pdf::pdf_regions(
+                        std::slice::from_ref(&page_regions),
+                        &|_, host| anchors.get(host as usize).cloned().flatten(),
+                        &|_, b| page_box(b, &items, info.width, info.height),
+                    ));
+                    if let (Some(all), Some(mut report)) = (regions.as_deref_mut(), report) {
+                        // The hosts past the page's blocks: the rows of a table begun on an earlier
+                        // page (a table), then the media blocks.
+                        let media_from = anchors.len() - media_words;
+                        debug_assert_eq!(report.block_words.len(), laid_blocks);
+                        report.block_words.resize(media_from, "table");
+                        report.block_words.resize(anchors.len(), "media");
+                        report.anchors = anchors
+                            .iter()
+                            .map(|a| a.as_ref().map(|a| a.0.clone()))
+                            .collect();
+                        report.regions = page_regions;
+                        all.push(report);
+                    }
+                    links.free(work);
+                    // What a stop cuts: the page from the first part not built on, or its hidden text.
+                    let mut stop = laid.stop.map(|hit| {
+                        let rows_of = |s: usize, b: usize| match out.doc.body.get(s) {
+                            Some(Block::Section { blocks, .. }) => match blocks.get(b) {
+                                Some(Block::Table { rows, .. }) => rows.len(),
+                                _ => 0,
+                            },
+                            _ => 0,
+                        };
+                        let from = (!nothing).then(|| {
+                            cut_from(n, laid.cut.unwrap_or(Cut::Block(1)), &placed, &rows_of)
+                        });
+                        let what = match (from, pages_after(n, last)) {
+                            (None, _) => format!("{} not read", pages_from(n, last)),
+                            (Some(from), None) => format!("page {n} from {from} is not read"),
+                            (Some(from), Some(later)) => {
+                                format!("page {n} from {from} and {later} not read")
                             }
                         };
-                        stop = Some((hit, what));
+                        (hit, what)
+                    });
+                    if stop.is_none() {
+                        match invisible(n, &items, budget, out) {
+                            Ok(Some(callout)) => blocks.push(callout),
+                            Ok(None) => {}
+                            Err(hit) => {
+                                let what = match pages_after(n, last) {
+                                    None => format!("the hidden text of page {n} is not read"),
+                                    Some(later) => {
+                                        format!("the hidden text of page {n} and {later} not read")
+                                    }
+                                };
+                                stop = Some((hit, what));
+                            }
+                        }
+                    }
+                    if let Some((hit, what)) = stop {
+                        out.loss(
+                            format!("p{n}"),
+                            format!("{hit}: {what}"),
+                            LossReason::Limit,
+                            Severity::Warning,
+                        );
+                        halted = true;
+                    }
+                    false
+                };
+            // The plain lines read no clock for a page; after every [`PLAIN_CHECK`] pages they
+            // ask whether the limit itself is over (or the read cancelled). Past it the pages
+            // left are named as not read: the read ends, as every step past the limit does.
+            // The first pages are written without a look: a layout that ran a little past
+            // its time still has its page written.
+            let every = PLAIN_CHECK_SET.with(|c| c.get()).unwrap_or(PLAIN_CHECK);
+            let over = if stopped && plain_written > 0 && plain_written.is_multiple_of(every) {
+                budget.check_time().err()
+            } else {
+                None
+            };
+            if stopped {
+                plain = true;
+                plain_written += 1;
+                if !tried {
+                    notes(n, &items, out);
+                    links.free(items.kept);
+                    symbols += items.symbol;
+                    // The quotes of the page's annotations are taken as on a page laid out:
+                    // its text was read.
+                    read_pages.insert(n);
+                    annotation_points(n, &mut items, annots, here, &mut spots, out);
+                }
+                // A marked passage whose text was not read in full may be what is missing.
+                let partial =
+                    items.in_part || items.notes.iter().any(|n| matches!(n, Note::Damaged(_)));
+                for &i in here {
+                    if !annots[i].quads.is_empty()
+                        && spots[i].quoted.is_none()
+                        && !spots[i].cut
+                        && partial
+                    {
+                        unquoted.add(n);
                     }
                 }
-            }
-            if let Some((hit, what)) = stop {
-                out.loss(
-                    format!("p{n}"),
-                    format!("{hit}: {what}"),
-                    LossReason::Limit,
-                    Severity::Warning,
-                );
-                halted = true;
+                let written = match over {
+                    Some(hit) => Err(hit),
+                    None => {
+                        separators_note(&mut blocks, out);
+                        plain_lines(n, lines, budget)
+                            .and_then(|text| Ok((text, invisible(n, &items, budget, out)?)))
+                    }
+                };
+                match written {
+                    Ok((text, hidden)) => {
+                        blocks.extend(text);
+                        blocks.extend(hidden);
+                        plain_pages = Some((plain_pages.map_or(n, |p| p.0), n));
+                    }
+                    Err(hit) => {
+                        out.loss(
+                            format!("p{n}"),
+                            format!("{hit}: {} not read", pages_from(n, last)),
+                            LossReason::Limit,
+                            Severity::Warning,
+                        );
+                        halted = true;
+                    }
+                }
             }
         }
         out.doc.body.push(Block::Section {
@@ -1712,6 +1868,20 @@ fn lay_out(
                 .anchor
                 .get_or_insert_with(|| Anchor(format!("p{n}")));
         }
+    }
+    budget.keep_time(Duration::ZERO);
+    if let Some((first, last)) = plain_pages {
+        out.loss(
+            format!("p{first}"),
+            format!(
+                "{} written as plain lines, not laid out: the time limit was near; headings, \
+                 lists, tables and columns are not looked for there, pictures are not listed \
+                 and links are not attached",
+                pages_from(first, last)
+            ),
+            LossReason::Limit,
+            Severity::Warning,
+        );
     }
     symbol_loss(symbols, out);
     let places = pictures.finish(out);
@@ -1746,7 +1916,7 @@ fn lay_out(
         let last = pages.last().map_or(first, |p| p.number);
         let why = match budget.check_time() {
             Err(hit) if hit.limit == "cancelled" => "the read was cancelled",
-            _ => "the time limit was near, and the pages read before are laid out in the time left",
+            _ => "the time limit was near, and the pages read before are written in the time left",
         };
         out.loss(
             format!("p{first}"),
@@ -2389,6 +2559,127 @@ fn symbol_loss(n: u64, out: &mut Out) {
     }
 }
 
+/// Whether the text, read from `start` to `now`, must stop under the time limit `max`: the
+/// time left is less than the time kept for what was read so far ([`layout_time`] and
+/// [`plain_time`] of the time the text took).
+fn text_time_is_up(now: Duration, start: Duration, max: Duration) -> bool {
+    let text = now.saturating_sub(start);
+    let after = layout_time(text).saturating_add(plain_time(text));
+    now.saturating_add(after) > max
+}
+
+/// The time kept for laying out pages whose text took `text` to read: one part in
+/// [`LAYOUT_SHARE`] of it.
+fn layout_time(text: Duration) -> Duration {
+    text / LAYOUT_SHARE
+}
+
+/// The layout of the pages read gets one part in this many of the time their text took,
+/// kept back while the text is read. Measured 2026-11-14 (release build, the time of
+/// `lay_out` against the time of the text): 0.46 times over the public corpus (40 files)
+/// and 0.67 times over the public forms (30 files), the median file 0.62 and 0.74, the
+/// slowest 1.5 and 1.9. So half the text time lays out the pages of the corpus as a whole,
+/// and a file that needs more has its last pages written as plain lines, not dropped. A
+/// larger share would cut the text of a file that does not fit its time earlier: text
+/// first. It is a share of the time measured for this file on this machine, not a time.
+const LAYOUT_SHARE: u32 = 2;
+
+/// The time kept for writing pages as plain lines ([`plain_lines`]) whose text took `text`
+/// to read: one part in [`PLAIN_SHARE`] of it.
+fn plain_time(text: Duration) -> Duration {
+    text / PLAIN_SHARE
+}
+
+/// Writing a page as plain lines takes at most one part in this many of the time its text
+/// took to read: reading the text parses the content stream, maps each glyph through its
+/// font and places it; the plain lines join the runs of each line, one step a run. Measured
+/// 2026-11-14 (release build): one part in 110 on a file of 20,000 pages of 40 lines (56 ms
+/// against 6.2 s) and one part in 32 on one page of 50,000 runs (3.8 ms against 122 ms,
+/// with the passes over the file before its first page). 8 leaves four times that for a
+/// file whose text is cheap to read and for a busy machine. It is a share of the time
+/// measured for this file on this machine, not a time.
+const PLAIN_SHARE: u32 = 8;
+
+/// The plain lines look at the clock after this many pages. The looks must take less than
+/// the time kept for the plain lines (an eighth of the time of the text, see
+/// [`PLAIN_SHARE`]), or the pass itself runs into the limit and pages it could have written
+/// are named as not read. Measured on a clock that moves one step with each look (600 pages,
+/// the limit at a third of the looks of the whole read; see
+/// `the_look_at_the_clock_of_the_plain_lines_moves_where_the_read_ends`): with a look after
+/// every page the read ends at page 170, after every 2 pages at page 313, after every 4 at
+/// page 599; after every 16 or more every page is written. 64 is four times that: one look
+/// for 64 pages is a sixty-fourth of a look a page, under the eighth of the looks of any
+/// text that looks at the clock once a page or more. On the wall clock 64 pages of plain
+/// lines take about 0.2 ms (56 ms for 20,000 pages), so the pass ends that soon after the
+/// limit at the latest. It is a count of pages, not a time.
+const PLAIN_CHECK: u32 = 64;
+
+thread_local! {
+    /// A test's stand-in for [`PLAIN_CHECK`] on this thread (see [`with_plain_check`]).
+    static PLAIN_CHECK_SET: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
+}
+
+/// Runs `f` with a look at the clock after every `pages` pages written as plain lines, in
+/// place of [`PLAIN_CHECK`], on this thread. For the test that moves the constant both
+/// ways only; not a stable interface.
+#[doc(hidden)]
+pub fn with_plain_check<T>(pages: u32, f: impl FnOnce() -> T) -> T {
+    struct Restore(Option<u32>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            PLAIN_CHECK_SET.with(|c| c.set(self.0));
+        }
+    }
+    let _restore = Restore(PLAIN_CHECK_SET.with(|c| c.replace(Some(pages.max(1)))));
+    f()
+}
+
+/// The lines of a page for [`plain_lines`]: the runs of each line joined as the layout
+/// joins them ([`layoutregions::line::text_lines`]), so a run printed over the run before
+/// it, or a value set against its label in another face, stays a text of its own (an
+/// amount over the `0,00` of its field is not read as one number).
+fn plain_text_lines(runs: &[Run]) -> Vec<String> {
+    layoutregions::line::text_lines(runs)
+        .into_iter()
+        .map(|l| l.text)
+        .collect()
+}
+
+/// The text of page `n` as plain lines, when the time does not allow its layout: one
+/// paragraph of its `lines` (the runs of each line joined, in the order the page gives its
+/// lines), a line break between two, charged as one element and by its text. `None` for a
+/// page without text. The cost is one step a run and has no time check: it is what a read
+/// near its time limit still does for every page it read.
+fn plain_lines(
+    n: u32,
+    lines: Vec<String>,
+    budget: &Budget,
+) -> Result<Option<Block>, rezzer_limits::LimitHit> {
+    let mut inlines = Vec::new();
+    let mut bytes = 0;
+    for line in &lines {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        if !inlines.is_empty() {
+            inlines.push(Inline::LineBreak);
+        }
+        bytes += line.len();
+        inlines.push(Inline::plain(line));
+    }
+    if inlines.is_empty() {
+        return Ok(None);
+    }
+    budget.add_elements(1)?;
+    budget.charge_text(bytes)?;
+    Ok(Some(Block::Paragraph {
+        inlines,
+        role: Some("plain-lines".into()),
+        anchor: Some(Anchor(format!("p{n}:b1"))),
+    }))
+}
+
 /// The lines of runs: the runs of one line joined.
 fn run_lines(runs: &[Run]) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
@@ -2642,6 +2933,27 @@ fn figure_host(media: Option<u32>, inked: bool, host: u32) -> u32 {
 
 #[cfg(test)]
 mod tests {
+
+    /// Fix round 1 of Task 37, M3: the two shares of the text stop, each moved both ways.
+    /// With the text read from 0, the text stops when its time and the time kept for it
+    /// (a half for the layout, an eighth for the plain lines) pass the limit: 800 ms of text
+    /// keep 400 and 100 and end at 1,300 exactly, so they go on; 808 ms keep 404 and 101 and
+    /// are over. A larger layout share (a third of the text less) would go on at 808, a
+    /// smaller one (all of the text) would stop at 800; a plain share of a ninth would go
+    /// on at 801 (801 + 400 + 89), one of a seventh would stop at 800 (800 + 400 + 114).
+    #[test]
+    fn the_text_stops_when_the_time_kept_for_what_it_read_is_all_that_is_left() {
+        let ms = Duration::from_millis;
+        assert_eq!(layout_time(ms(800)), ms(400));
+        assert_eq!(plain_time(ms(800)), ms(100));
+        assert!(!text_time_is_up(ms(800), ms(0), ms(1_300)));
+        assert!(text_time_is_up(ms(808), ms(0), ms(1_300)));
+        assert!(text_time_is_up(ms(801), ms(0), ms(1_300)));
+        // The shares are of the time the text took, not of the time since the read began:
+        // after 1,000 ms of listing the pages, 800 ms of text still go on under 2,300 ms.
+        assert!(!text_time_is_up(ms(1_800), ms(1_000), ms(2_300)));
+        assert!(text_time_is_up(ms(1_808), ms(1_000), ms(2_300)));
+    }
     /// Task 22 fix rounds 4 and 5: the segment tree gives the lowest and
     /// highest baseline of every range of runs, as a walk over the range does.
     #[test]

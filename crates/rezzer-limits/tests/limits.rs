@@ -291,3 +291,32 @@ fn elements_given_back_count_again_until_the_limit_was_hit() {
     c.release_elements(5);
     assert_eq!(c.elements(), 0);
 }
+
+#[test]
+fn time_kept_back_ends_a_step_early_and_leaves_the_limit_as_it_is() {
+    // A clock of 10 ms a reading under a limit of 100 ms, with 40 ms kept back: a step that
+    // looks ahead ends after 60 ms, the limit itself after 100 ms. Without time kept back
+    // the two checks agree.
+    let limits = Limits {
+        max_time: Duration::from_millis(100),
+        ..Limits::default()
+    };
+    let budget = Budget::with_clock(
+        limits,
+        CancelToken::default(),
+        Clock::steps(Duration::from_millis(10)),
+    );
+    budget.keep_time(Duration::from_millis(40));
+    assert_eq!(budget.kept_time(), Duration::from_millis(40));
+    for _ in 0..6 {
+        assert!(budget.check_time_ahead().is_ok());
+    }
+    let hit = budget.check_time_ahead().expect_err("70 ms of 60");
+    assert_eq!((hit.limit, hit.value, hit.max), ("time", 70, 60));
+    assert!(budget.time_stopped());
+    assert!(budget.check_time().is_ok(), "80 ms of 100");
+    // Less kept back: the same step goes on.
+    budget.keep_time(Duration::from_millis(10));
+    assert!(budget.check_time_ahead().is_ok(), "90 ms of 90");
+    assert!(budget.check_time_ahead().is_err(), "100 ms of 90");
+}

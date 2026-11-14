@@ -87,6 +87,98 @@ pub struct Line {
     pub to: f32,
 }
 
+/// Lines by their place and then their start (as [`merged`] gives them), to visit those
+/// near a place that reach into a stretch without a look at every line near the place: a
+/// column of some thousand boxes, or a row of as many small grids, has that many lines at
+/// one place.
+#[derive(Debug, Clone)]
+pub struct LinesAt<'a> {
+    segs: &'a [Line],
+    /// For each line the farthest end of the lines at its own place up to it: the lines
+    /// before a line that all end before a stretch are passed over at once. `None` when a
+    /// line has a place, a start or an end that is no finite number: such lines have no
+    /// order to search in, and every line is looked at.
+    ends: Option<Vec<f32>>,
+}
+
+impl<'a> LinesAt<'a> {
+    /// `segs` by place and then start; one step of work a line.
+    pub fn new(segs: &'a [Line]) -> LinesAt<'a> {
+        crate::work::add(segs.len() as u64);
+        let mut ends: Vec<f32> = Vec::with_capacity(segs.len());
+        for (k, s) in segs.iter().enumerate() {
+            if !(s.at.is_finite() && s.from.is_finite() && s.to.is_finite()) {
+                return LinesAt { segs, ends: None };
+            }
+            let end = match k.checked_sub(1) {
+                Some(j) if segs[j].at.to_bits() == s.at.to_bits() => ends[j].max(s.to),
+                _ => s.to,
+            };
+            ends.push(end);
+        }
+        LinesAt {
+            segs,
+            ends: Some(ends),
+        }
+    }
+
+    /// Whether every line has a finite place, start and end, so the lines stand in an order
+    /// to search in.
+    pub fn ordered(&self) -> bool {
+        self.ends.is_some()
+    }
+
+    /// Calls `f` with each line (its index and the line) whose place lies in `low..=high`
+    /// and that reaches into the stretch `from..to`: it ends after `from` and starts before
+    /// `to`. The lines come in no stated order. Returns the steps it took, which are counted
+    /// as work too: one for each place with lines in `low..=high` and one for each line
+    /// looked at.
+    pub fn reaching(
+        &self,
+        (low, high): (f32, f32),
+        (from, to): (f32, f32),
+        mut f: impl FnMut(usize, &Line),
+    ) -> u64 {
+        let segs = self.segs;
+        let mut steps = 0u64;
+        match &self.ends {
+            Some(ends) => {
+                let mut at = segs.partition_point(|s| s.at < low);
+                while at < segs.len() && segs[at].at <= high {
+                    // The lines at one place, by their start: those that start before the
+                    // end of the stretch, back to the last one no line before which
+                    // reaches into it.
+                    let place = segs[at].at;
+                    let end = at
+                        + segs[at..]
+                            .partition_point(|s| s.at.total_cmp(&place).is_le())
+                            .max(1);
+                    let mut k = at + segs[at..end].partition_point(|s| s.from < to);
+                    steps += 1;
+                    while k > at && ends[k - 1] > from {
+                        k -= 1;
+                        steps += 1;
+                        if segs[k].to > from {
+                            f(k, &segs[k]);
+                        }
+                    }
+                    at = end;
+                }
+            }
+            None => {
+                for (k, s) in segs.iter().enumerate() {
+                    steps += 1;
+                    if s.at >= low && s.at <= high && s.to > from && s.from < to {
+                        f(k, s);
+                    }
+                }
+            }
+        }
+        crate::work::add(steps);
+        steps
+    }
+}
+
 /// Why the lines of a page were not searched for grids.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Unsearched {
@@ -612,6 +704,62 @@ fn boxes(
 
 #[cfg(test)]
 mod tests {
+    /// Fix round 1 of Task 37, M4: the lines found by the search are the lines a look at
+    /// every line finds (the look the title bars, the strips and the cover of a gap between
+    /// boxes took before Task 37): lines apart, lines that overlap and one long line among
+    /// short ones, at places near each other, asked for 8,000 stretches.
+    #[test]
+    fn the_lines_that_reach_a_stretch_are_those_a_look_at_every_line_finds() {
+        let mut seed = 11u64;
+        let mut roll = |n: u32| {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            ((seed >> 33) % u64::from(n)) as f32
+        };
+        let mut some = 0;
+        for round in 0..40 {
+            let mut segs: Vec<Line> = (0..80)
+                .map(|_| {
+                    let from = 5.0 * roll(40);
+                    Line {
+                        at: 0.5 * roll(8),
+                        from,
+                        to: from + 5.0 * (1.0 + roll(4)),
+                    }
+                })
+                .collect();
+            if round % 2 == 0 {
+                segs.push(Line {
+                    at: 1.0,
+                    from: 0.0,
+                    to: 150.0,
+                });
+            }
+            segs.sort_by(|a, b| a.at.total_cmp(&b.at).then(a.from.total_cmp(&b.from)));
+            let lines = LinesAt::new(&segs);
+            assert!(lines.ordered());
+            for _ in 0..200 {
+                let low = 0.5 * roll(8) - 0.25 * roll(3);
+                let high = low + 0.25 * roll(5);
+                let from = 5.0 * roll(40);
+                let to = from + 5.0 * roll(6);
+                let want: Vec<usize> = (0..segs.len())
+                    .filter(|&k| {
+                        let s = &segs[k];
+                        s.at >= low && s.at <= high && s.to > from && s.from < to
+                    })
+                    .collect();
+                let mut got = Vec::new();
+                lines.reaching((low, high), (from, to), |k, _| got.push(k));
+                got.sort_unstable();
+                assert_eq!(got, want, "{low}..={high}, {from}..{to}");
+                some += usize::from(!want.is_empty());
+            }
+        }
+        assert!(some > 1_000, "{some} stretches with lines");
+    }
+
     use super::*;
     use crate::input::BoxIn;
 

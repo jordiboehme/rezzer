@@ -384,6 +384,7 @@ pub(crate) fn read_file(
         0,
     );
     let wanted: Vec<u32> = pages.iter().map(|p| p.number).collect();
+    let before = budget.elapsed();
     let extracted = text::pages_of(
         Origin::Fallback(&raw),
         &wanted,
@@ -393,7 +394,16 @@ pub(crate) fn read_file(
         caps,
         text_stop,
     );
-    let (_, _, needs, places) = lay_out(None, &pages, extracted, &[], budget, &mut out, regions);
+    let text_time = budget.elapsed().saturating_sub(before);
+    let (_, _, needs, places) = lay_out(
+        None,
+        &pages,
+        (extracted, text_time),
+        &[],
+        budget,
+        &mut out,
+        regions,
+    );
     // Nothing is rendered, so nothing is read for codes.
     crate::render::apply_codes(None, places, &mut out);
     // The renderer reads only pdfparts' canonical copy, and there is none.

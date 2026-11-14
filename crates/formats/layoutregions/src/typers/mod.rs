@@ -782,6 +782,8 @@ pub struct PageView<'a> {
     edges: OnceCell<Edges>,
     /// The frames of the page's groups of drawn lines (see [`table::Frames`]), found once.
     frames: OnceCell<table::Frames>,
+    /// The grid segments of the tree by their left edge (see [`table::GridsAcross`]).
+    grids_across: OnceCell<table::GridsAcross>,
 }
 
 /// The pieces of a page's lines (see [`PageView::line_pieces`]) by their left edge, in buckets
@@ -956,6 +958,7 @@ impl<'a> PageView<'a> {
             line_pieces: (0..line_count).map(|_| OnceCell::new()).collect(),
             edges: OnceCell::new(),
             frames: OnceCell::new(),
+            grids_across: OnceCell::new(),
         }
     }
 
@@ -1193,6 +1196,12 @@ impl<'a> PageView<'a> {
             images: &self.images,
             body_size: self.file.body_size,
         }
+    }
+
+    /// The grid segments of the view's tree by their left edge, found once.
+    pub(crate) fn grids_across(&self) -> &table::GridsAcross {
+        self.grids_across
+            .get_or_init(|| table::GridsAcross::of(self.segs))
     }
 
     /// The frames of the groups of `g`, the grids of this page (`drawn.grids`), found once.

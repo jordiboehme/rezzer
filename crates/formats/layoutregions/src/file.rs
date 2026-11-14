@@ -518,12 +518,39 @@ pub fn learn<R: LineRun>(
     tagged: bool,
     ends_in_amount: &dyn Fn(&str) -> bool,
 ) -> FileFacts {
+    learn_until(pages, tagged, ends_in_amount, &|| false).0
+}
+
+/// [`learn`] with `stop` asked before each page of each of its three passes over the file
+/// (the running lines, the body size and the legends, the heading sizes). Once it says
+/// stop, no further page is read: the passes left learn nothing more, and the facts are
+/// those of the pages read by then (running lines of the pages of the first pass, a body
+/// size from the ink counted, heading sizes of the pages of the last pass). The second
+/// value tells that it stopped: the facts are then no facts of the whole file, and the
+/// caller says so or does not use them.
+pub fn learn_until<R: LineRun>(
+    pages: &[FilePage<'_, R>],
+    tagged: bool,
+    ends_in_amount: &dyn Fn(&str) -> bool,
+    stop: &dyn Fn() -> bool,
+) -> (FileFacts, bool) {
+    let stopped = std::cell::Cell::new(false);
+    // Asked before each page; once it said stop it is not asked again.
+    let stop = || {
+        if !stopped.get() && stop() {
+            stopped.set(true);
+        }
+        stopped.get()
+    };
     let mut seen: HashMap<(Band, String), Vec<Seen>> = HashMap::new();
     // Texts that stand in the middle of some page are content, wherever else they stand.
     // A bare page number is not held against: numbers fill tables too.
     let mut body: HashSet<String> = HashSet::new();
     let mut body_bytes = 0usize;
     for p in pages {
+        if stop() {
+            break;
+        }
         let runs = placed(p.runs);
         for l in text_lines(&runs) {
             if let Some(key) = running_key(&l, p.height) {
@@ -594,6 +621,9 @@ pub fn learn<R: LineRun>(
         e.1 += n as f64 * f64::from(size);
     };
     for p in pages {
+        if stop() {
+            break;
+        }
         let height = p.height;
         // A legend of footnotes is no body text: a dense legend in a tiny size would make
         // every line a heading. A tagged file says its notes.
@@ -669,6 +699,9 @@ pub fn learn<R: LineRun>(
         .unwrap_or(0.0);
     let mut sizes: Vec<i32> = Vec::new();
     for p in pages {
+        if stop() {
+            break;
+        }
         let runs = placed(p.runs);
         let all = text_lines(&runs);
         let bands = index.bands(&all, p.height, &[]);
@@ -680,13 +713,14 @@ pub fn learn<R: LineRun>(
     }
     sizes.sort_unstable_by(|a, b| b.cmp(a));
     sizes.dedup();
-    FileFacts {
+    let facts = FileFacts {
         body_size,
         heading_sizes: sizes.into_iter().map(|s| s as f32 / 2.0).collect(),
         running,
         two_page: two_page.into_iter().collect(),
         legends,
-    }
+    };
+    (facts, stopped.get())
 }
 
 #[cfg(test)]
@@ -782,6 +816,57 @@ mod tests {
     fn learned(pages: &[PageIn], tagged: bool) -> FileFacts {
         let pages: Vec<FilePage<'_, TextRun>> = pages.iter().map(FilePage::of).collect();
         learn(&pages, tagged, &no_amount)
+    }
+
+    /// Task 37: the learner asks `stop` before each page of each of its three passes, and
+    /// never again once it said stop. With no stop the facts are those of [`learn`]; a stop
+    /// in the first pass leaves the running lines of the pages read by then, and the second
+    /// value says that it stopped.
+    #[test]
+    fn learning_asks_to_stop_before_each_page_of_each_pass() {
+        let pages: Vec<PageIn> = (1..=4)
+            .map(|n| {
+                page(
+                    n,
+                    vec![
+                        run("Muster GmbH", 0, 800.0, 8.0),
+                        run("Erika Mustermann wohnt in Musterstadt", 1, 500.0, 10.0),
+                    ],
+                )
+            })
+            .collect();
+        let file: Vec<FilePage<'_, TextRun>> = pages.iter().map(FilePage::of).collect();
+        let asked = std::cell::Cell::new(0u32);
+        let never = || {
+            asked.set(asked.get() + 1);
+            false
+        };
+        let (facts, stopped) = learn_until(&file, false, &no_amount, &never);
+        assert!(!stopped);
+        assert_eq!(asked.get(), 12, "four pages in three passes");
+        assert_eq!(facts, learn(&file, false, &no_amount));
+        assert_eq!(facts.running.len(), 1, "{:?}", facts.running);
+        assert_eq!(facts.running[0].pages, [1, 2, 3, 4]);
+        // Stop before the fourth page: the head line runs on three pages, and no page is
+        // asked for after the stop.
+        asked.set(0);
+        let at_four = || {
+            asked.set(asked.get() + 1);
+            asked.get() == 4
+        };
+        let (facts, stopped) = learn_until(&file, false, &no_amount, &at_four);
+        assert!(stopped);
+        assert_eq!(asked.get(), 4);
+        assert_eq!(facts.running[0].pages, [1, 2, 3]);
+        // Stop before the third page: two pages are too few for a running line.
+        asked.set(0);
+        let at_three = || {
+            asked.set(asked.get() + 1);
+            asked.get() == 3
+        };
+        let (facts, stopped) = learn_until(&file, false, &no_amount, &at_three);
+        assert!(stopped);
+        assert!(facts.running.is_empty(), "{:?}", facts.running);
     }
 
     #[test]

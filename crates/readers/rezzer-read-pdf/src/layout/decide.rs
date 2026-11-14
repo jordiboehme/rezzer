@@ -568,22 +568,48 @@ fn join_rows(
     let mut took = vec![false; decisions.len()];
     let mut work = 0usize;
     let mut pairs = Vec::new();
+    // The decisions that can be laid out with another, by what both tests ask of each side
+    // (see `Ink`), found once: a decision is then weighed only against those that share its
+    // lines (for `shares_rows`) or whose ink overlaps its ink across (for `interleaves`),
+    // not against every decision of the page.
+    let ink: Vec<Option<Ink>> = (0..decisions.len())
+        .map(|k| {
+            let kind = decisions[k].kind;
+            if !matches!(kind, Kind::Paragraph | Kind::Spatial) {
+                return None;
+            }
+            let s = seg(k)?;
+            work += 1 + s.prims.len();
+            Ink::of(page, &s.prims)
+        })
+        .collect();
+    if work > JOIN_WORK {
+        return pairs;
+    }
+    let unsure: Vec<bool> = decisions.iter().map(|d| d.kind == Kind::Spatial).collect();
+    let near = Near::new(&ink, &unsure);
+    let mut found: Vec<usize> = Vec::new();
     for d in 0..decisions.len() {
         if decisions[d].kind != Kind::Spatial || joined[d] {
             continue;
         }
         let Some(a) = seg(d) else { continue };
-        for k in 0..decisions.len() {
+        let Some(own) = ink[d].as_ref() else { continue };
+        found.clear();
+        work += near.of(own, &mut found);
+        if work > JOIN_WORK {
+            return pairs;
+        }
+        // In the order of the decisions, as when every decision was looked at.
+        found.sort_unstable();
+        found.dedup();
+        for &k in &found {
             // Every pair looked at counts, the pairs apart in height too.
             work += 1;
             if work > JOIN_WORK {
                 return pairs;
             }
-            if k == d
-                || joined[k]
-                || took[k]
-                || !matches!(decisions[k].kind, Kind::Paragraph | Kind::Spatial)
-            {
+            if k == d || joined[k] || took[k] {
                 continue;
             }
             let Some(b) = seg(k) else { continue };
@@ -619,6 +645,121 @@ fn join_rows(
         }
     }
     pairs
+}
+
+/// What [`join_rows`] needs of the text of a decision to tell which others it can be laid
+/// out with: the lines of its runs with ink, sorted, and how far that ink reaches across.
+/// `None` for a decision the two tests refuse with every other: no run with ink, a run off
+/// the line's axis, or a run the page does not have.
+struct Ink {
+    lines: Vec<u32>,
+    x0: f32,
+    x1: f32,
+}
+
+impl Ink {
+    fn of(page: &PageIn, prims: &[PrimId]) -> Option<Ink> {
+        let mut lines = Vec::new();
+        let (mut x0, mut x1) = (f32::MAX, f32::MIN);
+        for p in prims {
+            if let PrimId::Text(i) = *p {
+                let r = page.texts.get(i as usize)?;
+                if r.off_axis {
+                    return None;
+                }
+                if !r.text.trim().is_empty() {
+                    lines.push(r.line);
+                    x0 = x0.min(r.x.min(r.x + r.w));
+                    x1 = x1.max(r.x.max(r.x + r.w));
+                }
+            }
+        }
+        lines.sort_unstable();
+        lines.dedup();
+        (!lines.is_empty()).then_some(Ink { lines, x0, x1 })
+    }
+}
+
+/// The decisions with ink by what [`join_rows`] can join them on: those of the same lines
+/// ([`layoutregions::extract::spatial::shares_rows`] asks that the rows of the two are the
+/// same rows), and the unsure ones by where their ink starts across
+/// ([`layoutregions::extract::spatial::interleaves`] asks that the ink of the two overlaps).
+struct Near<'a> {
+    ink: &'a [Option<Ink>],
+    /// The decisions of each set of lines.
+    same: HashMap<&'a [u32], Vec<usize>>,
+    /// The unsure decisions whose ink has finite ends, by its left end, and the widest of
+    /// them: ink that overlaps a stretch starts less than that left of it.
+    by_left: Vec<(f32, usize)>,
+    widest: f32,
+    /// The unsure decisions whose ink has an end that is no finite number: weighed with all.
+    loose: Vec<usize>,
+}
+
+impl<'a> Near<'a> {
+    /// `unsure` tells which decisions are unsure areas (`Spatial`).
+    fn new(ink: &'a [Option<Ink>], unsure: &[bool]) -> Near<'a> {
+        let mut same: HashMap<&[u32], Vec<usize>> = HashMap::new();
+        let (mut by_left, mut loose) = (Vec::new(), Vec::new());
+        let mut widest = 0.0f32;
+        for (k, i) in ink.iter().enumerate() {
+            let Some(i) = i else { continue };
+            same.entry(i.lines.as_slice()).or_default().push(k);
+            if !unsure[k] {
+                continue;
+            }
+            if i.x0.is_finite() && i.x1.is_finite() {
+                by_left.push((i.x0, k));
+                widest = widest.max(i.x1 - i.x0);
+            } else {
+                loose.push(k);
+            }
+        }
+        by_left.sort_by(|a, b| a.0.total_cmp(&b.0));
+        Near {
+            ink,
+            same,
+            by_left,
+            widest,
+            loose,
+        }
+    }
+
+    /// Adds to `found` the decisions an unsure decision with the ink `own` may be laid
+    /// out with: every one of its lines, and every unsure one whose ink overlaps its ink
+    /// across (all unsure ones when its own ends are no finite numbers). A superset of those
+    /// the two tests accept; the decision itself is among them. Returns the steps it took.
+    fn of(&self, own: &Ink, found: &mut Vec<usize>) -> usize {
+        let mut steps = 1;
+        if let Some(list) = self.same.get(own.lines.as_slice()) {
+            steps += list.len();
+            found.extend(list);
+        }
+        found.extend(&self.loose);
+        steps += self.loose.len();
+        if !(own.x0.is_finite() && own.x1.is_finite() && self.widest.is_finite()) {
+            steps += self.by_left.len();
+            found.extend(self.by_left.iter().map(|e| e.1));
+            return steps;
+        }
+        // Ink that overlaps `own` starts left of its right end, and not more than the
+        // widest ink left of its left end. The search starts a little further left than
+        // that (a ten-thousandth of the numbers at hand), so that no rounding of the widths
+        // leaves one out: each one found is tested below.
+        let left = own.x0 - self.widest;
+        let left = left - 1e-4 * (left.abs() + self.widest + 1.0);
+        let from = self.by_left.partition_point(|e| e.0 < left);
+        for &(_, k) in self.by_left[from..].iter().take_while(|e| e.0 <= own.x1) {
+            steps += 1;
+            if self.ink[k]
+                .as_ref()
+                .is_some_and(|i| i.x1 > own.x0 && i.x0 < own.x1)
+            {
+                found.push(k);
+            }
+        }
+        steps
+    }
 }
 
 /// Why the walk laid out the lines of a heading decision as a paragraph, in words.
@@ -1450,6 +1591,98 @@ pub(super) fn regions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Fix round 1 of Task 37, M4: the regions an unsure region is weighed against hold
+    /// every region the two tests accept with it (`join_rows` before Task 37 weighed it
+    /// against every region of the page). 60 seeded pages of regions of one to three lines,
+    /// some sharing their lines side by side, some with lines between each other's lines in
+    /// one column; every pair is asked both ways.
+    #[test]
+    fn the_regions_weighed_for_a_join_hold_every_pair_the_tests_accept() {
+        use layoutregions::extract::spatial::{interleaves, shares_rows};
+        let mut seed = 17u64;
+        let mut roll = |n: u32| {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (seed >> 33) % u64::from(n)
+        };
+        let (mut shared, mut between) = (0, 0);
+        for _ in 0..60 {
+            let mut texts = Vec::new();
+            let mut regions: Vec<Vec<PrimId>> = Vec::new();
+            for _ in 0..24 {
+                // A region of a few lines out of eight, at one of six places across.
+                let first = roll(6) as u32;
+                let step = 1 + roll(2) as u32;
+                let lines = 1 + roll(3) as u32;
+                let x = 60.0 * roll(6) as f32 + 5.0 * roll(3) as f32;
+                let mut prims = Vec::new();
+                for l in 0..lines {
+                    let line = first + l * step;
+                    texts.push(layoutregions::TextRun {
+                        text: if roll(12) == 0 {
+                            " ".into()
+                        } else {
+                            "Muster".into()
+                        },
+                        x,
+                        y: 700.0 - 12.0 * line as f32,
+                        w: 30.0 + 10.0 * roll(4) as f32,
+                        h: 9.0,
+                        size: 9.0,
+                        font: 1,
+                        font_kind: layoutregions::FontKind::Proportional,
+                        bold: false,
+                        italic: false,
+                        color: None,
+                        shift: layoutregions::Shift::Base,
+                        line,
+                        off_axis: roll(40) == 0,
+                        gaps: Vec::new(),
+                    });
+                    prims.push(PrimId::Text(texts.len() as u32 - 1));
+                }
+                regions.push(prims);
+            }
+            let page = PageIn {
+                page: 1,
+                size: [612.0, 792.0],
+                turn: 0,
+                texts,
+                rules: Vec::new(),
+                boxes: Vec::new(),
+                pictures: Vec::new(),
+                codes: Vec::new(),
+                given: Vec::new(),
+            };
+            let unsure: Vec<bool> = (0..regions.len()).map(|_| roll(3) != 0).collect();
+            let ink: Vec<Option<Ink>> = regions.iter().map(|p| Ink::of(&page, p)).collect();
+            let near = Near::new(&ink, &unsure);
+            for d in 0..regions.len() {
+                let mut found = Vec::new();
+                if let Some(own) = &ink[d] {
+                    near.of(own, &mut found);
+                }
+                for k in 0..regions.len() {
+                    if k == d {
+                        continue;
+                    }
+                    let rows = shares_rows(&page, &regions[d], &regions[k]);
+                    let lines = unsure[k] && interleaves(&page, &regions[d], &regions[k]);
+                    if rows || lines {
+                        assert!(found.contains(&k), "region {k} for region {d}");
+                    }
+                    shared += usize::from(rows);
+                    between += usize::from(lines);
+                }
+            }
+        }
+        assert!(
+            shared > 20 && between > 20,
+            "{shared} share rows, {between} interleave"
+        );
+    }
 
     fn typed(kind: Kind, score: u16) -> Typed {
         Typed {

@@ -11,7 +11,7 @@ use std::collections::{HashMap, HashSet};
 pub(in crate::tables) use layoutregions::extract::pairs::strips::{
     Top, frame_tops, taken_by_grids,
 };
-use layoutregions::segment::drawn::{Grids, Line, Unsearched};
+use layoutregions::segment::drawn::{Grids, Line, LinesAt, Unsearched};
 
 use super::*;
 
@@ -72,29 +72,71 @@ pub(crate) fn form_drawn(grids: Result<&Grids, Unsearched>, boxes: &[[f32; 4]]) 
             .is_some_and(|f| f.iter().any(|f| !f.dividers.is_empty()))
 }
 
+/// The rule under the rule `j` of `hs` (the page's horizontal lines, by height and then
+/// start; `lines` the same lines for the search): the last of the rules before it that lies
+/// more than a snap lower and reaches under it by more than a snap at both ends, as a walk
+/// back from `j` meets it. With it the steps taken; past `most` steps the walk ends with
+/// none (the caller then gives up the page).
+///
+/// The rules are looked at height by height from the top one down, at each height only
+/// those that reach under the rule (a row of small grids has as many rules at one height as
+/// it has grids). Lines that are no finite numbers are walked one by one, as before.
+fn rule_below(hs: &[Line], lines: &LinesAt<'_>, j: usize, most: usize) -> (Option<usize>, usize) {
+    let up = &hs[j];
+    let mut work = 0usize;
+    if !lines.ordered() {
+        for (k, s) in hs[..j].iter().enumerate().rev() {
+            work += 1;
+            crate::work::add(1);
+            if work > most {
+                return (None, work);
+            }
+            if s.at < up.at - SNAP && s.to > up.from + SNAP && s.from < up.to - SNAP {
+                return (Some(k), work);
+            }
+        }
+        return (None, work);
+    }
+    let mut end = hs[..j].partition_point(|s| s.at < up.at - SNAP);
+    while end > 0 {
+        let at = hs[end - 1].at;
+        let mut last: Option<usize> = None;
+        let looked = lines.reaching((at, at), (up.from + SNAP, up.to - SNAP), |k, _| {
+            if k < end {
+                last = Some(last.map_or(k, |l| l.max(k)));
+            }
+        });
+        work += usize::try_from(looked).unwrap_or(usize::MAX) + 1;
+        crate::work::add(1);
+        if work > most || last.is_some() {
+            return (last.filter(|_| work <= most), work);
+        }
+        end = hs[..end].partition_point(|s| s.at.total_cmp(&at).is_lt());
+    }
+    (None, work)
+}
+
 /// The frames under the page's horizontal lines `hs` (sorted by height) that `tops` names
 /// (see [`frame_tops`]), with the dividers among the vertical lines `vs` (sorted by place);
 /// `None` past [`STRIP_WORK`] steps.
 pub(in crate::tables) fn frames(hs: &[Line], tops: &[Top], vs: &[Line]) -> Option<Vec<Frame>> {
     let mut work = 0usize;
     let mut out = Vec::new();
+    // The rules by their height and then their start, to find the rule under a top by the
+    // heights below it: at each height only the rules that reach under the top are looked
+    // at (a row of small grids has as many rules at one height as it has grids).
+    let lines = LinesAt::new(hs);
     for (j, up) in hs.iter().enumerate() {
         if tops[j] == Top::No {
             continue;
         }
         // The nearest rule below that reaches under it, and it must cover it.
-        let mut below: Option<&Line> = None;
-        for s in hs[..j].iter().rev() {
-            work += 1;
-            crate::work::add(1);
-            if work > STRIP_WORK {
-                return None;
-            }
-            if s.at < up.at - SNAP && s.to > up.from + SNAP && s.from < up.to - SNAP {
-                below = Some(s);
-                break;
-            }
+        let (below, looked) = rule_below(hs, &lines, j, STRIP_WORK.saturating_sub(work));
+        work += looked;
+        if work > STRIP_WORK {
+            return None;
         }
+        let below = below.map(|k| &hs[k]);
         let Some(low) = below else {
             continue;
         };
@@ -1349,6 +1391,52 @@ fn ends(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Fix round 1 of Task 37, M4: the rule under a top found height by height is the rule
+    /// the walk back over every rule met (`frames` before Task 37): on 40 seeded pages of
+    /// rules on a few heights, joined as the page's lines are, for every rule as the top.
+    #[test]
+    fn the_rule_under_a_top_is_the_one_the_walk_back_meets() {
+        let mut seed = 3u64;
+        let mut roll = |n: u32| {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            ((seed >> 33) % u64::from(n)) as f32
+        };
+        let (mut found, mut none) = (0, 0);
+        for _ in 0..40 {
+            let segs: Vec<Line> = (0..60)
+                .map(|_| {
+                    let from = 10.0 * roll(30);
+                    Line {
+                        at: 12.0 * roll(6) + 0.4 * roll(3),
+                        from,
+                        to: from + 10.0 * (1.0 + roll(5)),
+                    }
+                })
+                .collect();
+            let hs = layoutregions::segment::drawn::merged(segs);
+            let lines = LinesAt::new(&hs);
+            for j in 0..hs.len() {
+                let up = &hs[j];
+                let want = (0..j).rev().find(|&k| {
+                    let s = &hs[k];
+                    s.at < up.at - SNAP && s.to > up.from + SNAP && s.from < up.to - SNAP
+                });
+                let (got, _) = rule_below(&hs, &lines, j, usize::MAX);
+                assert_eq!(got, want, "under rule {j} of {hs:?}");
+                match want {
+                    Some(_) => found += 1,
+                    None => none += 1,
+                }
+            }
+        }
+        assert!(
+            found > 200 && none > 50,
+            "{found} with a rule under them, {none} without"
+        );
+    }
 
     /// Two parts of one row of fields whose top rules, each the mean of its dashes, differ
     /// by float noise read left to right, as the row under them; a row a rule pitch lower

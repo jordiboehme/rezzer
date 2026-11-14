@@ -288,18 +288,24 @@ impl LineRun for Run {
 }
 
 impl Style {
-    /// [`Style::learn`] for an untagged file.
+    /// [`Style::learn`] for an untagged file, with nothing stopping it.
     #[cfg(test)]
     pub(crate) fn new(pages: &[PageText<'_>]) -> Style {
-        Style::learn(pages, false)
+        Style::learn(pages, false, &|| false).0
     }
 
-    /// Learns the facts of the file from every page (see [`layoutregions::file::learn`]);
-    /// `tagged` files say their footnotes themselves.
-    pub(crate) fn learn(pages: &[PageText<'_>], tagged: bool) -> Style {
-        let facts = file::learn(pages, tagged, &ends_in_amount);
+    /// Learns the facts of the file from every page (see
+    /// [`layoutregions::file::learn_until`]); `tagged` files say their footnotes themselves.
+    /// `stop` is asked before each page of each pass; once it says stop the facts are those
+    /// of the pages read by then, and the second value says so.
+    pub(crate) fn learn(
+        pages: &[PageText<'_>],
+        tagged: bool,
+        stop: &dyn Fn() -> bool,
+    ) -> (Style, bool) {
+        let (facts, stopped) = file::learn_until(pages, tagged, &ends_in_amount, stop);
         let index = layoutregions::typers::FileIndex::new(&facts);
-        Style {
+        let style = Style {
             body_size: facts.body_size,
             heading_sizes: facts.heading_sizes.clone(),
             running: RunningIndex::new(&facts.running),
@@ -307,7 +313,8 @@ impl Style {
             legends: facts.legends.clone(),
             facts,
             index,
-        }
+        };
+        (style, stopped)
     }
 
     /// The band of each line that is a running header or footer on its page (see
@@ -3771,10 +3778,12 @@ const PROBE_WORK: usize = 16_000_000;
 /// How many runs or pieces of one block go by between two looks at the clock.
 const CHECK_EVERY: usize = 1024;
 
-/// Fails once the time limit is over. A cancel is not looked at here: the walk answers it, and
+/// Fails once the time the layout may take is over: the time limit less the time kept back
+/// for writing as plain lines the pages not laid out yet (see [`Budget::keep_time`]; the
+/// read sets it before each page). A cancel is not looked at here: the walk answers it, and
 /// the pages it read are still laid out.
-fn time_over(budget: &Budget) -> Result<(), LimitHit> {
-    match budget.check_time() {
+pub(crate) fn time_over(budget: &Budget) -> Result<(), LimitHit> {
+    match budget.check_time_ahead() {
         Err(hit) if hit.limit == "time" => Err(hit),
         _ => Ok(()),
     }

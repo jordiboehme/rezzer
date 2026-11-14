@@ -5287,9 +5287,56 @@ fn time_that_runs_out_on_pages_of_region_pictures_only_keeps_the_read_complete()
             !losses.iter().any(|l| l.what.contains("small picture")),
             "{losses:#?}"
         );
+        // Task 37: the regions without a picture file keep their lines.
+        let body = common::all_text(&out);
+        for word in UNSURE.iter().flatten() {
+            assert_eq!(body.matches(word).count(), 3, "{word} in {body}");
+        }
     }
     // The limit ran out at a page and at a later one.
     assert!(cut.len() >= 2 && cut.iter().any(|&n| n > 1), "{cut:?}");
+}
+
+#[test]
+fn the_region_pictures_of_a_file_of_many_unsure_regions_stay_in_the_time_budget() {
+    // Task 37: 60 pages, each with a region kept as laid out. A file renders pages for at
+    // most 50 such pictures, so the read ends well inside the default time limit: 50 files,
+    // one Info loss for the 10 regions past the cap, the read complete and every line kept.
+    let list: Vec<common::Page> = (0..60)
+        .map(|_| common::Page::text(unsure_rows(600.0, &UNSURE)))
+        .collect();
+    let file = common::pdf(&list, "");
+    let opts = ReadOptions {
+        extract_assets: true,
+        ..ReadOptions::default()
+    };
+    let budget = Budget::new(Limits::default());
+    let wall = std::time::Instant::now();
+    let out = common::read_in(&file, &opts, &budget);
+    let took = wall.elapsed();
+    eprintln!("60 pages of region pictures: {took:?}");
+    let losses = &out.document.losses;
+    assert!(took < budget.limits().max_time / 4, "{took:?}");
+    assert!(budget.check_time().is_ok());
+    assert_eq!(common::region_pictures(&out).len(), 50);
+    assert_eq!(out.blobs.len(), 50, "{losses:#?}");
+    assert_eq!(out.completeness, Completeness::Complete, "{losses:#?}");
+    let past: Vec<&rezzer_model::Loss> = losses
+        .iter()
+        .filter(|l| l.what.contains("get no picture"))
+        .collect();
+    assert!(
+        matches!(
+            past.as_slice(),
+            [l] if l.severity == Severity::Info
+                && l.what.starts_with("10 more regions kept as laid out get no picture, from page 51 on")
+        ),
+        "{losses:#?}"
+    );
+    let body = common::all_text(&out);
+    for word in UNSURE.iter().flatten() {
+        assert_eq!(body.matches(word).count(), 60, "{word}");
+    }
 }
 
 #[test]

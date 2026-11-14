@@ -256,7 +256,7 @@ fn width_over(c: &Bounds) -> f64 {
 /// of `f64` and rounding keeps the order. So a box whose rounded sum is at or left of the
 /// left edge of `lb` ends there or before it. The rounded sum rises with the left edge, so
 /// the boxes left out are the start of the class.
-fn reach(class: &[Bounds], wide: f64, lb: &Bounds) -> (usize, usize) {
+fn reach_of(class: &[Bounds], wide: f64, lb: &Bounds) -> (usize, usize) {
     let from = class.partition_point(|c| f64::from(c.x0) + wide <= f64::from(lb.x0));
     let to = class.partition_point(|c| c.x0 < lb.x1).max(from);
     (from, to)
@@ -275,9 +275,75 @@ fn width_class(c: &Bounds) -> u32 {
     (c.x1 - c.x0).max(0.0).to_bits() >> 23
 }
 
-/// The part of each sourced region in a width (its left and right edge): the bounds of its
-/// content there, if any (see `Cx::by_source`).
-type Parts = ((f32, f32), Vec<Option<Bounds>>);
+/// The sourced regions of a set by where they start across, to find those that reach a
+/// width (see `Cx::by_source`).
+struct Reach {
+    /// The left edge and the place among the sourced regions of each whose edges are finite
+    /// numbers, by the left edge.
+    by_left: Vec<(f32, usize)>,
+    /// The right edge of each of those, by its place among the sourced regions.
+    right: Vec<f32>,
+    /// The widest of them.
+    widest: f32,
+    /// The regions with an edge that is no finite number: they reach every width.
+    loose: Vec<usize>,
+}
+
+impl Reach {
+    /// `spans` gives the left and the right edge of each sourced region, in their order.
+    fn new(spans: impl Iterator<Item = (f32, f32)>) -> Reach {
+        let mut out = Reach {
+            by_left: Vec::new(),
+            right: Vec::new(),
+            widest: 0.0,
+            loose: Vec::new(),
+        };
+        for (i, (x0, x1)) in spans.enumerate() {
+            out.right.push(x1);
+            if x0.is_finite() && x1.is_finite() {
+                out.by_left.push((x0, i));
+                out.widest = out.widest.max(x1 - x0);
+            } else {
+                out.loose.push(i);
+            }
+        }
+        out.by_left.sort_by(|a, b| a.0.total_cmp(&b.0));
+        out
+    }
+
+    /// Puts into `near` (empty) the places of the sourced regions that reach the width
+    /// `x0..x1`, in their order: every region that starts at or left of `x1` and ends at
+    /// or right of `x0` (one that only touches the width counts, so no region with content
+    /// in the width or on both sides of it is left out). A region that reaches the width
+    /// starts no more than the widest region left of it; the search starts a little
+    /// further left (a ten-thousandth of the numbers at hand), so no rounding of the widths
+    /// leaves one out. A width with an edge that is no finite number is reached by all.
+    /// Returns the steps it took.
+    fn over(&self, x0: f32, x1: f32, near: &mut Vec<usize>) -> u64 {
+        let all = !(x0.is_finite() && x1.is_finite() && self.widest.is_finite());
+        let left = x0 - self.widest;
+        let left = left - 1e-4 * (left.abs() + self.widest + 1.0);
+        let from = if all {
+            0
+        } else {
+            self.by_left.partition_point(|r| r.0 < left)
+        };
+        let mut steps = 1 + u64::from(self.by_left.len().max(1).ilog2());
+        for &(left, i) in &self.by_left[from..] {
+            if !all && left > x1 {
+                break;
+            }
+            steps += 1;
+            if all || self.right[i] >= x0 {
+                near.push(i);
+            }
+        }
+        near.extend(&self.loose);
+        steps += self.loose.len() as u64;
+        near.sort_unstable();
+        steps
+    }
+}
 
 /// What the content of a region spans (see `Info::content`).
 #[derive(Debug, Clone, Copy)]
@@ -477,14 +543,63 @@ fn framed(page: &PageIn, r: &Region, b: Bounds, em: f32) -> bool {
 /// a region is looked up in a few steps (as the cut decides a boxed piece by the page's boxes,
 /// not by who holds them).
 struct Frames {
-    /// The drawn boxes and rectangles, by their top.
+    /// The drawn boxes and rectangles, by their top and then their left edge.
     boxes: Vec<Bounds>,
-    /// The horizontal rules as (height, from, to), by height.
-    flat: Vec<(f32, f32, f32)>,
-    /// The vertical rules as (place, from, to), by place.
-    upright: Vec<(f32, f32, f32)>,
+    /// The horizontal rules, by height.
+    flat: Rules,
+    /// The vertical rules, by place.
+    upright: Rules,
     /// How far an edge of a frame may lie from the edge of a region's box.
     near: f32,
+}
+
+/// The rules of a page in one direction as (place, from, to), by their place and then their
+/// start, to ask whether one of those near a place spans a stretch. A row of small grids has
+/// as many rules at one height as it has grids, and each region asked for all of them.
+struct Rules {
+    list: Vec<(f32, f32, f32)>,
+    /// For each rule the farthest end of the rules at its own place up to it: the rules at
+    /// a place that start at or before a point span a stretch when the farthest end among
+    /// them reaches its end.
+    ends: Vec<f32>,
+}
+
+impl Rules {
+    /// `list` holds finite numbers only.
+    fn new(mut list: Vec<(f32, f32, f32)>) -> Rules {
+        list.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+        let mut ends: Vec<f32> = Vec::with_capacity(list.len());
+        for (k, r) in list.iter().enumerate() {
+            let end = match k.checked_sub(1) {
+                Some(j) if list[j].0.to_bits() == r.0.to_bits() => ends[j].max(r.2),
+                _ => r.2,
+            };
+            ends.push(end);
+        }
+        Rules { list, ends }
+    }
+
+    /// Whether a rule within `near` of `place` spans `from` to `to`: it starts at or before
+    /// `from + near` and ends at or after `to - near`. One search for each place with rules
+    /// near `place`.
+    fn spans(&self, place: f32, from: f32, to: f32, near: f32) -> bool {
+        let list = &self.list;
+        let mut at = list.partition_point(|r| r.0 < place - near);
+        while at < list.len() && list[at].0 <= place + near {
+            work::add(1);
+            let here = list[at].0;
+            let end = at
+                + list[at..]
+                    .partition_point(|r| r.0.total_cmp(&here).is_le())
+                    .max(1);
+            let starts = at + list[at..end].partition_point(|r| r.1 <= from + near);
+            if starts > at && self.ends[starts - 1] >= to - near {
+                return true;
+            }
+            at = end;
+        }
+        false
+    }
 }
 
 impl Frames {
@@ -513,13 +628,11 @@ impl Frames {
             }
         }
         boxes.retain(finite);
-        boxes.sort_by(|a, b| a.y1.total_cmp(&b.y1));
-        flat.sort_by(|a, b| a.0.total_cmp(&b.0));
-        upright.sort_by(|a, b| a.0.total_cmp(&b.0));
+        boxes.sort_by(|a, b| a.y1.total_cmp(&b.y1).then(a.x0.total_cmp(&b.x0)));
         Frames {
             boxes,
-            flat,
-            upright,
+            flat: Rules::new(flat),
+            upright: Rules::new(upright),
             near: FRAME * em,
         }
     }
@@ -529,28 +642,33 @@ impl Frames {
     fn frame(&self, b: Bounds) -> bool {
         let near = self.near;
         let at = |v: f32, w: f32| (v - w).abs() <= near;
-        let lo = self.boxes.partition_point(|x| x.y1 < b.y1 - near);
-        let boxed = self.boxes[lo..]
-            .iter()
-            .take_while(|x| x.y1 <= b.y1 + near)
-            .inspect(|_| work::add(1))
-            .any(|x| at(x.x0, b.x0) && at(x.x1, b.x1) && at(x.y0, b.y0));
-        if boxed {
-            return true;
-        }
-        // A rule at `place` within reach that spans `from` to `to`.
-        let spans = |list: &[(f32, f32, f32)], place: f32, from: f32, to: f32| {
-            let lo = list.partition_point(|r| r.0 < place - near);
-            list[lo..]
+        // The boxes with their top near its top, top by top (they stand by their left edge
+        // at each top): those whose left edge is near its left edge. The stretch searched
+        // is twice as wide as `near`, so no rounding leaves a box out; each is tested.
+        let boxes = &self.boxes;
+        let mut lo = boxes.partition_point(|x| x.y1 < b.y1 - near);
+        while lo < boxes.len() && boxes[lo].y1 <= b.y1 + near {
+            work::add(1);
+            let top = boxes[lo].y1;
+            let end = lo
+                + boxes[lo..]
+                    .partition_point(|x| x.y1.total_cmp(&top).is_le())
+                    .max(1);
+            let from = lo + boxes[lo..end].partition_point(|x| x.x0 < b.x0 - 2.0 * near);
+            let boxed = boxes[from..end]
                 .iter()
-                .take_while(|r| r.0 <= place + near)
+                .take_while(|x| x.x0 <= b.x0 + 2.0 * near)
                 .inspect(|_| work::add(1))
-                .any(|r| r.1 <= from + near && r.2 >= to - near)
-        };
-        spans(&self.flat, b.y1, b.x0, b.x1)
-            && spans(&self.flat, b.y0, b.x0, b.x1)
-            && spans(&self.upright, b.x0, b.y0, b.y1)
-            && spans(&self.upright, b.x1, b.y0, b.y1)
+                .any(|x| at(x.x0, b.x0) && at(x.x1, b.x1) && at(x.y0, b.y0));
+            if boxed {
+                return true;
+            }
+            lo = end;
+        }
+        self.flat.spans(b.y1, b.x0, b.x1, near)
+            && self.flat.spans(b.y0, b.x0, b.x1, near)
+            && self.upright.spans(b.x0, b.y0, b.y1, near)
+            && self.upright.spans(b.x1, b.y0, b.y1, near)
     }
 }
 
@@ -1102,10 +1220,33 @@ impl Cx<'_> {
         // Set when the budget runs out while a picture is placed by its column (in the scan of
         // `level`): that picture is then placed by its height, as those after it are.
         let out_of_work = std::cell::Cell::new(false);
+        // The sourced regions by where their content starts across (the region's box for
+        // one without content), with the widest of them: only those that reach the width of
+        // a loose region can be of its column, hold it or stand around it, so each loose
+        // region looks at those and not at every sourced region (a row of small grids has a
+        // picture and a region for each grid). A region whose content has an edge that is
+        // no finite number is looked at by all.
+        let reach = Reach::new(sourced.iter().map(|&k| {
+            let info = &self.boxes[k];
+            if info.content.is_empty() {
+                let b = self.b(k);
+                (b.x0, b.x1)
+            } else {
+                info.content
+                    .iter()
+                    .fold((f32::INFINITY, f32::NEG_INFINITY), |(x0, x1), c| {
+                        (x0.min(c.x0), x1.max(c.x1))
+                    })
+            }
+        }));
+        work::add((sourced.len() + content) as u64);
         // The parts of the sourced regions in the width of the loose region before, with that
-        // width: the parts depend on the width alone, and the pictures of one column, or the
-        // rows of one stack of boxes, share theirs.
-        let mut kept: Option<Parts> = None;
+        // width and the regions that reach it: the parts depend on the width alone, and the
+        // pictures of one column, or the rows of one stack of boxes, share theirs. Every
+        // region that does not reach the width has no part.
+        let mut parts: Vec<Option<Bounds>> = vec![None; sourced.len()];
+        let mut near: Vec<usize> = Vec::new();
+        let mut kept: Option<(f32, f32)> = None;
         for &l in &loose {
             let (m, top) = (mid(l), self.b(l).y1);
             if spent.get() > budget {
@@ -1113,8 +1254,15 @@ impl Cx<'_> {
                 before[by_height.place(m)].push(l);
                 continue;
             }
-            add(2 * sourced.len() as u64);
             let lb = self.b(l);
+            if kept != Some((lb.x0, lb.x1)) {
+                for &i in &near {
+                    parts[i] = None;
+                }
+                near.clear();
+                add(reach.over(lb.x0, lb.x1, &mut near));
+            }
+            add(1 + near.len() as u64);
             // The part of each sourced region in its column: the bounds of its content (lines,
             // cells, rules) that shares the loose region's width; a region without content
             // stands by its box. A region whose box spans the gutter but whose content in this
@@ -1122,33 +1270,33 @@ impl Cx<'_> {
             // Only the content that can reach into its width is looked at: in each class of
             // width, the stretch of [`reach`]. The parts of the width before are kept: they
             // depend on the width alone.
-            let parts: Vec<Option<Bounds>> = match kept.take() {
-                Some((width, parts)) if width == (lb.x0, lb.x1) => parts,
-                _ => sourced
-                    .iter()
-                    .map(|&k| {
-                        let info = &self.boxes[k];
-                        if info.content.is_empty() {
-                            return shares(lb, self.b(k)).then(|| self.b(k));
+            if kept != Some((lb.x0, lb.x1)) {
+                for &i in &near {
+                    let k = sourced[i];
+                    let info = &self.boxes[k];
+                    if info.content.is_empty() {
+                        parts[i] = shares(lb, self.b(k)).then(|| self.b(k));
+                        continue;
+                    }
+                    let mut part: Option<Bounds> = None;
+                    for w in &info.widths {
+                        let class = &info.content[w.from..w.to];
+                        let (from, to) = reach_of(class, w.wide, &lb);
+                        add((to - from) as u64 + 2 * u64::from(class.len().ilog2()) + 1);
+                        for c in class[from..to].iter().filter(|c| shares(lb, **c)) {
+                            part = Some(part.map_or(*c, |a| Bounds {
+                                x0: a.x0.min(c.x0),
+                                y0: a.y0.min(c.y0),
+                                x1: a.x1.max(c.x1),
+                                y1: a.y1.max(c.y1),
+                            }));
                         }
-                        let mut part: Option<Bounds> = None;
-                        for w in &info.widths {
-                            let class = &info.content[w.from..w.to];
-                            let (from, to) = reach(class, w.wide, &lb);
-                            add((to - from) as u64 + 2 * u64::from(class.len().ilog2()) + 1);
-                            for c in class[from..to].iter().filter(|c| shares(lb, **c)) {
-                                part = Some(part.map_or(*c, |a| Bounds {
-                                    x0: a.x0.min(c.x0),
-                                    y0: a.y0.min(c.y0),
-                                    x1: a.x1.max(c.x1),
-                                    y1: a.y1.max(c.y1),
-                                }));
-                            }
-                        }
-                        part
-                    })
-                    .collect(),
-            };
+                    }
+                    parts[i] = part;
+                }
+                kept = Some((lb.x0, lb.x1));
+            }
+            let (parts, near) = (&parts, &near);
             // Below it: a region whose top is lower than its middle.
             let below = |k: usize| self.b(k).y1 < m;
             // Of its column: content in its width; over it: that content starts above its top;
@@ -1194,8 +1342,14 @@ impl Cx<'_> {
                     parts[j].is_none() && c.y0 < floor && shares(b, c)
                 })
             };
-            let last_over = (0..sourced.len()).rev().find(|&i| over(i));
-            let first_under = |from: usize| (from..sourced.len()).find(|&i| under(i));
+            // Only a region that reaches its width has a part there.
+            let last_over = near.iter().rev().copied().find(|&i| over(i));
+            let first_under = |from: usize| {
+                near[near.partition_point(|&i| i < from)..]
+                    .iter()
+                    .copied()
+                    .find(|&i| under(i))
+            };
             // A region holds it when its content stands around it: in its width over its top
             // and under its bottom (a picture inside a block of text kept as laid out), or at
             // its height on its left and on its right (a code in a row of a table, between its
@@ -1240,7 +1394,8 @@ impl Cx<'_> {
                 add(seen);
                 around
             };
-            let holder = (0..sourced.len()).find(|&i| {
+            // A region with content on its left and on its right reaches its width too.
+            let holder = near.iter().copied().find(|&i| {
                 parts[i].is_some_and(|p| p.y1 >= lb.y1 && p.y0 <= lb.y0) || row_around(sourced[i])
             });
             let at = match (holder, last_over) {
@@ -1271,6 +1426,8 @@ impl Cx<'_> {
                             b.y1 > top
                         }) && b.y0 < top
                     };
+                    // The regions the source reads between the two are looked at one by one.
+                    add(to.saturating_sub(from) as u64);
                     if (from..to).any(across) {
                         to
                     } else {
@@ -1281,8 +1438,17 @@ impl Cx<'_> {
                 // top (or the paragraph under it starts level with its top, beside it). Before
                 // the first region under it in its column.
                 (None, None)
-                    if first_under(0)
-                        .is_some_and(|end| (0..sourced.len()).any(|i| level(i, end))) =>
+                    if first_under(0).is_some_and(|end| {
+                        // Any sourced region may stand level with its top: they are looked
+                        // at one by one, up to the first that does.
+                        let mut looked = 0u64;
+                        let level_with = (0..sourced.len()).any(|i| {
+                            looked += 1;
+                            level(i, end)
+                        });
+                        add(looked);
+                        level_with
+                    }) =>
                 {
                     first_under(0).unwrap_or(sourced.len())
                 }
@@ -1295,7 +1461,6 @@ impl Cx<'_> {
                 at
             };
             before[at].push(l);
-            kept = Some(((lb.x0, lb.x1), parts));
         }
         let mut out = Vec::with_capacity(sourced.len() + loose.len());
         for (i, k) in sourced.into_iter().enumerate() {
@@ -1369,6 +1534,150 @@ impl Cx<'_> {
 mod tests {
     use super::*;
 
+    /// Whether a drawn box, or four rules, frame `b`, as it was asked before Task 37: every
+    /// box and every rule near an edge looked at.
+    fn frame_one_by_one(
+        boxes: &[Bounds],
+        flat: &[(f32, f32, f32)],
+        upright: &[(f32, f32, f32)],
+        near: f32,
+        b: Bounds,
+    ) -> bool {
+        let at = |v: f32, w: f32| (v - w).abs() <= near;
+        let boxed = boxes.iter().any(|x| {
+            x.y1 >= b.y1 - near
+                && x.y1 <= b.y1 + near
+                && at(x.x0, b.x0)
+                && at(x.x1, b.x1)
+                && at(x.y0, b.y0)
+        });
+        let spans = |list: &[(f32, f32, f32)], place: f32, from: f32, to: f32| {
+            list.iter().any(|r| {
+                r.0 >= place - near && r.0 <= place + near && r.1 <= from + near && r.2 >= to - near
+            })
+        };
+        boxed
+            || (spans(flat, b.y1, b.x0, b.x1)
+                && spans(flat, b.y0, b.x0, b.x1)
+                && spans(upright, b.x0, b.y0, b.y1)
+                && spans(upright, b.x1, b.y0, b.y1))
+    }
+
+    /// Task 37: the frame of a region found by a search among the boxes and rules at its
+    /// edges is the frame every box and rule gives: on pages of boxes and rules on a grid
+    /// of 10 points, some a little off it (within the reach of a frame, at it and past it),
+    /// asked for boxes on the same grid.
+    #[test]
+    fn a_frame_found_by_search_is_the_frame_every_box_and_rule_gives() {
+        fn roll(seed: &mut u64, n: u32) -> f32 {
+            *seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            ((*seed >> 33) % u64::from(n)) as f32
+        }
+        // A place on the grid moved by -1, 0, 1 or 1.5 points: the reach of a frame is 2.
+        fn off(seed: &mut u64, v: f32) -> f32 {
+            v + [0.0, 0.0, 1.0, 2.0, 2.5][roll(seed, 5) as usize] - 1.0
+        }
+        fn place(seed: &mut u64) -> (f32, f32, f32, f32) {
+            let (x, y) = (10.0 * roll(seed, 8), 10.0 * roll(seed, 8));
+            (
+                x,
+                y,
+                x + 10.0 * (1.0 + roll(seed, 3)),
+                y + 10.0 * (1.0 + roll(seed, 3)),
+            )
+        }
+        let seed = &mut 7u64;
+        let (mut yes, mut no) = (0, 0);
+        for _ in 0..30 {
+            let em = 4.0;
+            let near = FRAME * em;
+            let mut page = PageIn {
+                page: 1,
+                size: [200.0, 200.0],
+                turn: 0,
+                texts: Vec::new(),
+                rules: Vec::new(),
+                boxes: Vec::new(),
+                pictures: Vec::new(),
+                codes: Vec::new(),
+                given: Vec::new(),
+            };
+            for _ in 0..12 {
+                let (x0, y0, x1, y1) = place(seed);
+                page.boxes.push(crate::BoxIn {
+                    bounds: Bounds {
+                        x0: off(seed, x0),
+                        y0: off(seed, y0),
+                        x1: off(seed, x1),
+                        y1: off(seed, y1),
+                    },
+                    filled: false,
+                    stroked: true,
+                    widget: false,
+                });
+            }
+            for k in 0..60 {
+                let (x0, y0, x1, y1) = place(seed);
+                // Flat rules along a top or a bottom, upright ones along a side.
+                let (x0, y0, x1, y1) = match k % 4 {
+                    0 => {
+                        let y = off(seed, y1);
+                        (x0, y, x1, y)
+                    }
+                    1 => {
+                        let y = off(seed, y0);
+                        (x0, y, x1, y)
+                    }
+                    2 => {
+                        let x = off(seed, x0);
+                        (x, y0, x, y1)
+                    }
+                    _ => {
+                        let x = off(seed, x1);
+                        (x, y0, x, y1)
+                    }
+                };
+                page.rules.push(crate::RuleIn {
+                    x0,
+                    y0,
+                    x1,
+                    y1,
+                    thick: 0.5,
+                    dashed: false,
+                    rect: false,
+                });
+            }
+            let frames = Frames::new(&page, em);
+            let boxes: Vec<Bounds> = page.boxes.iter().map(|x| normal(x.bounds)).collect();
+            let flat: Vec<(f32, f32, f32)> = page
+                .rules
+                .iter()
+                .filter(|r| r.y0 == r.y1)
+                .map(|r| (r.y0, r.x0, r.x1))
+                .collect();
+            let upright: Vec<(f32, f32, f32)> = page
+                .rules
+                .iter()
+                .filter(|r| r.x0 == r.x1)
+                .map(|r| (r.x0, r.y0, r.y1))
+                .collect();
+            for _ in 0..300 {
+                let (x0, y0, x1, y1) = place(seed);
+                let b = Bounds { x0, y0, x1, y1 };
+                let want = frame_one_by_one(&boxes, &flat, &upright, near, b);
+                assert_eq!(frames.frame(b), want, "{b:?}");
+                if want {
+                    yes += 1;
+                } else {
+                    no += 1;
+                }
+            }
+        }
+        assert!(yes > 30 && no > 30, "{yes} framed, {no} not");
+    }
+
     fn span(x0: f32, x1: f32) -> Bounds {
         Bounds {
             x0,
@@ -1405,9 +1714,9 @@ mod tests {
         assert!(shares(lb, far));
         let rounded = f64::from(far.x1) - f64::from(far.x0);
         // Left out: the stretch starts after it.
-        assert_eq!(reach(&[far], rounded, &lb), (1, 1));
+        assert_eq!(reach_of(&[far], rounded, &lb), (1, 1));
         assert!(width_over(&far) > rounded);
-        assert_eq!(reach(&[far], width_over(&far), &lb), (0, 1));
+        assert_eq!(reach_of(&[far], width_over(&far), &lb), (0, 1));
         // A box that ends at the left edge of the width, or starts at its right edge, only
         // touches it; the search may look at it, the answer is the same.
         assert!(!shares(lb, span(0.0, 0.5)) && !shares(lb, span(0.9, 2.0)));
@@ -1465,7 +1774,7 @@ mod tests {
             for _ in 0..8 {
                 let lb = rng.span();
                 for (class, wide) in &classes {
-                    let (from, to) = reach(class, *wide, &lb);
+                    let (from, to) = reach_of(class, *wide, &lb);
                     assert!(from <= to && to <= class.len());
                     for (i, c) in class.iter().enumerate() {
                         let inside = (from..to).contains(&i);

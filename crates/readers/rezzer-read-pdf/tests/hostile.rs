@@ -4771,6 +4771,22 @@ fn many_rows_of_field_boxes_beside_dense_text_cost_about_what_their_text_costs()
     assert_runaway(start);
     assert_steps_within("1,500 rows of field boxes", steps, twin, 2, STEP_SLACK);
     assert_steps_within("1,500 against 750 rows", steps, half, DOUBLE, STEP_SLACK);
+    // Task 37: the boxes apart are each a region of their own, and each tested every box of
+    // the page against the end of every row and column of boxes found so far, and every pair
+    // of boxes against every line at their edge. That work was not counted:
+    // 15,785,201,608 steps for 1,500 rows once it was, about 40 s of the 43 s this test
+    // took. Now a box looks at the ends near its own and a pair at the lines that reach
+    // between them (98,173,608 steps against 43,619,732 for 750 rows, 2.25 times; this test
+    // takes about 7 s). What is left for each region is one pass over the page's boxes and
+    // lines, at most 4,096 boxes a page.
+    let (_, twin_half) = counted(|| read(&rows_of_field_boxes_n(true, 750, 85_000)));
+    assert_steps_within(
+        "1,500 against 750 rows of boxes apart",
+        twin,
+        twin_half,
+        DOUBLE,
+        STEP_SLACK,
+    );
     assert_heap_under_256_mib();
     let body = text(page(&out, 1));
     assert!(body.contains("l0000") && body.contains("r1499"));
@@ -4974,3 +4990,539 @@ fn glyphs_of_many_bars_in_many_fonts_are_charged_and_bounded() {
     let peak = heap_peak_bytes();
     assert!(peak < 220 << 20, "heap peak {} MiB", peak >> 20);
 }
+
+/// The page of Task 8 as a file: `boxes` boxes inside each other, 10 points apart, on a page
+/// of 10,000 points; one run in the top strip of each ring and the rest of `runs` in the
+/// innermost box, 224 to a line, 16 points apart; and `rules` short flat lines between the
+/// lines of the inner runs, 44 to a line. Run `i` shows the word `w<i>`, so each run's text
+/// can be counted.
+fn nested_boxes_page(boxes: usize, runs: usize, rules: usize) -> Vec<u8> {
+    let side = 10_000.0f32;
+    let lo = 1_150.0f32;
+    let mut c = b"0.5 w\n".to_vec();
+    for k in 0..boxes {
+        let a = lo + 10.0 * k as f32;
+        let s = side - 2.0 * a;
+        c.extend(format!("{a} {a} {s} {s} re S\n").as_bytes());
+        c.extend(
+            format!(
+                "BT /F1 4 Tf {} {} Td (w{k}) Tj ET\n",
+                a + 20.0,
+                side - a - 8.0
+            )
+            .as_bytes(),
+        );
+    }
+    let inner = lo + 10.0 * (boxes - 1) as f32;
+    let cols = 224usize;
+    for i in 0..runs - boxes {
+        let (r, col) = (i / cols, i % cols);
+        c.extend(
+            format!(
+                "BT /F1 4 Tf {} {} Td (w{}) Tj ET\n",
+                inner + 20.0 + 16.0 * col as f32,
+                side - inner - 20.0 - 16.0 * r as f32,
+                boxes + i
+            )
+            .as_bytes(),
+        );
+    }
+    for i in 0..rules {
+        let (r, j) = (i / 44, i % 44);
+        let x = inner + 20.0 + 80.0 * j as f32;
+        let y = side - inner - 26.0 - 16.0 * r as f32;
+        c.extend(format!("{x} {y} m {} {y} l S\n", x + 60.0).as_bytes());
+    }
+    sized_page(&c, 10_000, 10_000)
+}
+
+/// How often each word `w<i>` for `i` under `n` stands in `text`: a word ends at the first
+/// character that is no digit.
+fn word_counts(text: &str, n: usize) -> Vec<u32> {
+    let mut seen = vec![0u32; n];
+    let bytes = text.as_bytes();
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] != b'w' {
+            at += 1;
+            continue;
+        }
+        let digits = bytes[at + 1..]
+            .iter()
+            .take_while(|b| b.is_ascii_digit())
+            .count();
+        if let Some(i) = std::str::from_utf8(&bytes[at + 1..at + 1 + digits])
+            .ok()
+            .and_then(|d| d.parse::<usize>().ok())
+            .filter(|&i| i < n)
+        {
+            seen[i] += 1;
+        }
+        at += 1 + digits;
+    }
+    seen
+}
+
+/// Task 37: the page of Task 8 through the whole read, under the default limits: 50,000
+/// runs, 10,000 rules (200 of them boxes inside each other). The read ends inside the time
+/// and the element budget, the boxes past the depth the engine nests are kept as laid out
+/// with one Limit loss, and the text of every run stands in the page exactly once.
+#[test]
+fn huge_page_stays_in_its_budget() {
+    let start = Cpu::now();
+    let wall = std::time::Instant::now();
+    let (runs, rules, boxes) = (50_000usize, 10_000usize, 200usize);
+    let file = nested_boxes_page(boxes, runs, rules - boxes);
+    let budget = Budget::new(Limits::default());
+    let (out, steps) = counted(|| read_with(&file, &budget));
+    let took = wall.elapsed();
+    eprintln!(
+        "huge page: {steps:?} steps, {took:?} wall, {:?} CPU, {} elements",
+        start.elapsed(),
+        budget.elements()
+    );
+    assert!(took < budget.limits().max_time, "{took:?}");
+    assert!(budget.check_time().is_ok());
+    assert!(budget.elements() <= budget.limits().max_elements);
+    let seen = word_counts(&text(page(&out, 1)), runs);
+    let off: Vec<(usize, u32)> = seen
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| **n != 1)
+        .map(|(i, n)| (i, *n))
+        .take(8)
+        .collect();
+    assert!(off.is_empty(), "words not exactly once: {off:?}");
+    // The boxes past the depth bound are one block kept as laid out, said in the one Limit
+    // loss of the read.
+    let limits: Vec<&Loss> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.why == LossReason::Limit)
+        .collect();
+    assert_eq!(limits.len(), 1, "{:?}", out.document.losses);
+    assert!(
+        limits[0].what.contains("is kept as laid out")
+            && limits[0].what.contains("a bound of the segmentation"),
+        "{:?}",
+        limits[0]
+    );
+    let spatial = page(&out, 1)
+        .iter()
+        .filter(|b| matches!(b, Block::Spatial { .. }))
+        .count();
+    assert_eq!(spatial, 1);
+    // 46,503,775 steps measured (2026-11-14), about ten in a hundred more allowed: under
+    // 1,000 steps a run.
+    assert_steps_under("huge page", steps, 51_000_000);
+    assert_runaway(start);
+    assert_heap_under_256_mib();
+}
+
+/// Task 37: wherever the time stops the layout of a page (before it, while its regions are
+/// looked for, while its blocks are built), the page is written whole: laid out, or as plain
+/// lines with one loss that says so. No word is dropped and none stands twice. Before, the
+/// text past the stop was dropped. The time is counted in readings of the clock, so the test
+/// does not depend on the machine: the limit ends at 24 places from the end of the text to
+/// the end of the read.
+#[test]
+fn a_time_stop_at_any_place_of_a_page_keeps_every_word_once() {
+    use rezzer_limits::{CancelToken, Clock};
+    let (runs, rules, boxes) = (3_000usize, 400usize, 20usize);
+    let file = nested_boxes_page(boxes, runs, rules - boxes);
+    let step = Duration::from_millis(1);
+    let read = |max_time: Duration| {
+        let clock = Clock::steps(step);
+        let limits = Limits {
+            max_time,
+            ..Limits::default()
+        };
+        let budget = Budget::with_clock(limits, CancelToken::default(), clock.clone());
+        (read_with(&file, &budget), clock.reads())
+    };
+    let plain = |out: &ReadOutcome| {
+        out.document
+            .losses
+            .iter()
+            .filter(|l| l.what.contains("written as plain lines"))
+            .count()
+    };
+    let (whole, reads) = read(Duration::from_secs(360_000));
+    assert_eq!(plain(&whole), 0, "{:?}", whole.document.losses);
+    assert!(reads > 48, "{reads} readings");
+    let (mut laid, mut written) = (0, 0);
+    for k in 1..=24u32 {
+        let at = u32::try_from(reads).expect("few readings") * k / 24;
+        let (out, _) = read(step * at);
+        let Some(Block::Section { blocks, .. }) = out.document.body.first() else {
+            // The time ended before the pages were listed.
+            continue;
+        };
+        if blocks.len() < 2 {
+            // The time ended before the text of the page was read: a loss says so.
+            assert!(
+                out.document
+                    .losses
+                    .iter()
+                    .any(|l| l.why == LossReason::Limit),
+                "limit {at}: {:?}",
+                out.document.losses
+            );
+            continue;
+        }
+        let seen = word_counts(&text(blocks), runs);
+        let off: Vec<(usize, u32)> = seen
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| **n != 1)
+            .map(|(i, n)| (i, *n))
+            .take(8)
+            .collect();
+        assert!(
+            off.is_empty(),
+            "limit {at}: words not exactly once: {off:?}"
+        );
+        match plain(&out) {
+            0 => laid += 1,
+            1 => {
+                written += 1;
+                assert_eq!(out.completeness, Completeness::Partial);
+                // The page is its marker and one paragraph of its lines.
+                assert!(
+                    matches!(
+                        blocks.as_slice(),
+                        [_, Block::Paragraph { role: Some(r), anchor: Some(a), .. }]
+                            if r == "plain-lines" && a.0 == "p1:b1"
+                    ),
+                    "limit {at}: {} blocks",
+                    blocks.len()
+                );
+            }
+            n => panic!("limit {at}: {n} losses of plain lines"),
+        }
+    }
+    eprintln!("{reads} readings: {laid} limits laid the page out, {written} wrote plain lines");
+    // The layout keeps time back for the plain lines, so it ends before the limit: 1,300
+    // readings were measured for the whole read, nearly all of them of the layout, and
+    // every limit up to that wrote plain lines. With time to spare the page is laid out.
+    assert!(written >= 12, "{laid} laid out, {written} plain");
+    let (spare, _) = read(step * u32::try_from(reads).expect("few readings") * 4);
+    assert_eq!(plain(&spare), 0, "{:?}", spare.document.losses);
+    assert_eq!(body_text(page(&spare, 1)), body_text(page(&whole, 1)));
+}
+
+/// Task 37: the picture of a region kept as laid out is cut from a render of its page. The
+/// huge page (10,000 points a side, 50,000 runs) would take more than a render may take, so
+/// it is not rendered: the region is listed as a picture that needs vision, an Info loss
+/// says why it has no file, the read ends in about a second, and the text of every run
+/// still stands once. (A page that is rendered for such pictures when the time ends is the
+/// case of `time_that_runs_out_on_pages_of_region_pictures_only_keeps_the_read_complete`.)
+#[test]
+fn the_region_picture_of_a_huge_page_stays_in_the_time_budget() {
+    let (runs, rules, boxes) = (50_000usize, 10_000usize, 200usize);
+    let file = nested_boxes_page(boxes, runs, rules - boxes);
+    let opts = ReadOptions {
+        extract_assets: true,
+        ..ReadOptions::default()
+    };
+    let start = Cpu::now();
+    let wall = std::time::Instant::now();
+    let budget = Budget::new(Limits::default());
+    let out = common::read_in(&file, &opts, &budget);
+    let took = wall.elapsed();
+    eprintln!("huge page with its region picture: {took:?}");
+    assert!(took < budget.limits().max_time, "{took:?}");
+    assert!(budget.check_time().is_ok());
+    assert_runaway(start);
+    let seen = word_counts(&text(page(&out, 1)), runs);
+    let off: Vec<usize> = (0..runs).filter(|&i| seen[i] != 1).take(8).collect();
+    assert!(off.is_empty(), "words not exactly once: {off:?}");
+    assert_eq!(common::region_pictures(&out), ["page-1-region-1"]);
+    assert!(out.blobs.is_empty(), "{} files", out.blobs.len());
+    let unrendered: Vec<&Loss> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.what.contains("page 1 is not rendered"))
+        .collect();
+    assert!(
+        matches!(
+            unrendered.as_slice(),
+            [l] if l.severity == Severity::Info
+                && l.why == LossReason::Limit
+                && l.what.contains("more than the")
+                && l.what.contains("a render may take")
+        ),
+        "{:?}",
+        out.document.losses
+    );
+}
+
+/// A page of `n` small grids of two by two cells of 6 points in one row, 16 points apart,
+/// with a letter in each cell.
+fn small_grids(n: usize) -> Vec<u8> {
+    let w = (n * 16 + 40).max(612);
+    let mut c = b"0.2 w ".to_vec();
+    for k in 0..n {
+        let x = 20 + k * 16;
+        for i in 0..3 {
+            let d = 6 * i;
+            c.extend(
+                format!(
+                    "{x} {} m {} {} l S {} 400 m {} 412 l S ",
+                    400 + d,
+                    x + 12,
+                    400 + d,
+                    x + d,
+                    x + d
+                )
+                .as_bytes(),
+            );
+        }
+        for (dx, dy) in [(1, 7), (7, 7), (1, 1), (7, 1)] {
+            c.extend(format!("BT /F1 4 Tf {} {} Td (x) Tj ET ", x + dx, 400 + dy).as_bytes());
+        }
+        c.push(b'\n');
+    }
+    sized_page(&c, w, 842)
+}
+
+/// Task 37 (carried from Task 31c): a row of small grids through the whole read, in steps
+/// of work. Each grid was weighed against every other grid in six walks, so the steps grew
+/// about 3.7 times for twice the grids (926,246 for 125 grids, 3,336,998 for 250,
+/// 12,611,625 for 500; 23,464,214 for 1,000, where the work bounds of the walks cut in):
+/// the regions laid out row by row (`join_rows`: every pair of regions at one height), the
+/// frame of each region and the title bars (every rule at one height), the sentence test
+/// (every grid for each line), the strips (every rule under a top) and the reading order
+/// (`by_source`: every region of the source for each picture). Now each looks at the
+/// regions, rules and grids near its own, and the row costs 224,621, 512,123, 1,274,875
+/// and 3,407,069 steps: 2.3, 2.5 and 2.7 times for twice the grids.
+///
+/// What is left over twice is one walk of the reading order: a picture at the top of its
+/// column asks whether a region of another column stands level with its top, region by
+/// region, and in a row of grids every region does (`level` in `by_source`, about one step
+/// for each pair of a picture and a region, within the work bound of the reading order).
+/// So the growth is pinned at three times, not at [`DOUBLE_GRIDS_TENTHS`], and the steps
+/// themselves with about a tenth of margin: both may only go down.
+#[test]
+#[cfg_attr(
+    not(debug_assertions),
+    ignore = "work steps are counted in debug builds only"
+)]
+fn a_row_of_small_grids_costs_about_as_much_as_its_grids() {
+    let work = |n: usize, most: u64| {
+        let (out, steps) = counted(|| read(&small_grids(n)));
+        let letters = text(page(&out, 1)).matches('x').count();
+        assert_eq!(letters, 4 * n, "every letter of {n} grids once");
+        assert_steps_under(&format!("{n} small grids"), steps, most);
+        steps
+    };
+    let quarter = work(125, 250_000);
+    let half = work(250, 565_000);
+    let whole = work(500, 1_400_000);
+    let double = work(1_000, 3_750_000);
+    for (what, steps, of) in [
+        ("250 against 125 small grids", half, quarter),
+        ("500 against 250 small grids", whole, half),
+        ("1,000 against 500 small grids", double, whole),
+    ] {
+        assert_steps_within(what, steps, of, 3, STEP_SLACK);
+    }
+}
+
+/// The text of the lines of page 1 written as plain lines: the pieces of its one paragraph
+/// of the role `plain-lines`, a line each.
+fn plain_line_texts(out: &ReadOutcome) -> Vec<String> {
+    let blocks = match out.document.body.first() {
+        Some(Block::Section { blocks, .. }) => blocks.as_slice(),
+        _ => &[],
+    };
+    blocks
+        .iter()
+        .find_map(|b| match b {
+            Block::Paragraph {
+                inlines,
+                role: Some(r),
+                ..
+            } if r == "plain-lines" => Some(
+                inlines
+                    .iter()
+                    .filter(|i| !matches!(i, Inline::LineBreak))
+                    .map(|i| plain_text(std::slice::from_ref(i)))
+                    .collect(),
+            ),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+/// Reads `file` on a clock of one millisecond a reading under `max_time`, and gives the
+/// read and the readings it took.
+fn read_on_steps(file: &[u8], max_time: Duration) -> (ReadOutcome, u64) {
+    use rezzer_limits::{CancelToken, Clock};
+    let clock = Clock::steps(Duration::from_millis(1));
+    let limits = Limits {
+        max_time,
+        ..Limits::default()
+    };
+    let budget = Budget::with_clock(limits, CancelToken::default(), clock.clone());
+    (read_with(file, &budget), clock.reads())
+}
+
+/// Fix round 1 of Task 37, I1: a page written as plain lines parts the runs of a line as
+/// the layout does (`layoutregions::line::text_lines`). An amount printed over the `0,00`
+/// of its field and a bold label that touches its value are two texts each: joined without
+/// a space they read as one wrong number and one wrong word (`0,001.234,56`,
+/// `Summe1.234,56`). The time ends before the layout, so the page is written as plain
+/// lines.
+#[test]
+fn plain_lines_keep_texts_apart_that_the_layout_keeps_apart() {
+    let mut c = Vec::new();
+    // An amount over the printed zero of its field, both from the left edge of the field.
+    c.extend(b"BT /F1 10 Tf 1 0 0 1 100 700 Tm (0,00) Tj ET\n");
+    c.extend(b"BT /F1 10 Tf 1 0 0 1 100 700 Tm (1.234,56) Tj ET\n");
+    // A bold label and its value in the plain face, set against it.
+    c.extend(b"BT /F2 10 Tf 1 0 0 1 100 650 Tm (Summe) Tj /F1 10 Tf (1.234,56) Tj ET\n");
+    // Words of one face in two runs with a gap stay as the reader spaced them.
+    c.extend(b"BT /F1 10 Tf 1 0 0 1 100 600 Tm (Erika) Tj 1 0 0 1 130 600 Tm (Mustermann) Tj ET\n");
+    let file = two_font_page(&c, 595, 842);
+    let (whole, reads) = read_on_steps(&file, Duration::from_secs(360_000));
+    let laid = body_text(page(&whole, 1));
+    assert!(laid.contains("0,00 1.234,56"), "{laid}");
+    assert!(laid.contains("Summe 1.234,56"), "{laid}");
+    assert!(plain_line_texts(&whole).is_empty());
+    let mut seen = 0;
+    for k in 1..=8u32 {
+        let at = u32::try_from(reads).expect("few readings") * k / 8;
+        let (out, _) = read_on_steps(&file, Duration::from_millis(1) * at);
+        let lines = plain_line_texts(&out);
+        if lines.is_empty() {
+            continue;
+        }
+        seen += 1;
+        assert_eq!(
+            lines,
+            ["0,00 1.234,56", "Summe 1.234,56", "Erika Mustermann"],
+            "limit {at}"
+        );
+    }
+    assert!(seen >= 1, "no limit wrote the page as plain lines");
+}
+
+/// Fix round 1 of Task 37, M2: a highlight on a page written as plain lines is quoted as on
+/// a page laid out (its text was read), wherever the time ended, and no loss says that it
+/// is not quoted.
+#[test]
+fn a_highlight_on_a_page_written_as_plain_lines_keeps_its_quote() {
+    let file = annotated(600, 100, &mut |b| {
+        vec![b.add(
+            "<< /Type /Annot /Subtype /Highlight /Rect [0 8380 400 8410] \
+             /QuadPoints [0 8410 400 8410 0 8380 400 8380] >>",
+        )]
+    });
+    let (whole, reads) = read_on_steps(&file, Duration::from_secs(360_000));
+    let quote = |out: &ReadOutcome| {
+        out.document
+            .facets
+            .annotations
+            .first()
+            .and_then(|a| a.quoted.clone())
+    };
+    let want = quote(&whole).expect("the highlight is quoted");
+    assert!(want.starts_with("wwwwwwwwww"), "{want}");
+    let (mut seen, mut kept) = (0, 0);
+    for at in 1..=u32::try_from(reads).expect("few readings") {
+        let (out, _) = read_on_steps(&file, Duration::from_millis(1) * at);
+        if plain_line_texts(&out).is_empty() {
+            continue;
+        }
+        seen += 1;
+        let losses = &out.document.losses;
+        assert!(
+            !losses.iter().any(|l| l.what.contains("not quoted")),
+            "limit {at}: {losses:?}"
+        );
+        match quote(&out) {
+            Some(q) => {
+                kept += 1;
+                assert_eq!(q, want, "limit {at}");
+            }
+            // The time ended before the annotations were written: a loss says so.
+            None => assert!(
+                losses
+                    .iter()
+                    .any(|l| l.what.contains("annotation 1 is not kept: time limit")),
+                "limit {at}: {losses:?}"
+            ),
+        }
+    }
+    eprintln!("{reads} readings: {seen} limits wrote plain lines, {kept} kept the quote");
+    assert!(
+        seen >= 1 && kept >= 1,
+        "{seen} plain, {kept} with the quote"
+    );
+}
+
+/// The first page named as not read because the time limit itself was reached.
+fn first_page_past_the_limit(out: &ReadOutcome) -> Option<u32> {
+    out.document.losses.iter().find_map(|l| {
+        let rest = l.what.strip_prefix("time limit reached")?;
+        let from = rest.split_once("): pages ")?.1;
+        from.split(' ').next()?.parse().ok()
+    })
+}
+
+/// Fix round 2 of Task 37: `PLAIN_CHECK` moved both ways, through the plain pass itself. 600
+/// pages on a clock that moves one millisecond with each look, under a limit of a third of
+/// the looks of the whole read: the text of all pages is read, 26 are laid out and the rest
+/// are written as plain lines in the time kept for that. Each look of the plain pass uses
+/// up a millisecond of it. With a look after every page the limit is reached at page 170
+/// and the pages from there on are named as not read; with one after every 2 pages at page
+/// 313; after every 4 at page 599; after every 16, or every 64 as the constant has it, the
+/// time kept is enough and every page is written. So a smaller count ends the read
+/// earlier and a larger one later.
+#[test]
+fn the_look_at_the_clock_of_the_plain_lines_moves_where_the_read_ends() {
+    let pages = 600u32;
+    let file = many_pages(pages as usize, 20, 0);
+    let (_, reads) = read_on_steps(&file, Duration::from_secs(360_000));
+    let limit = Duration::from_millis(1) * u32::try_from(reads / 3).expect("few readings");
+    let ends_at = |every: Option<u32>| {
+        let (out, _) = match every {
+            Some(n) => rezzer_read_pdf::with_plain_check(n, || read_on_steps(&file, limit)),
+            None => read_on_steps(&file, limit),
+        };
+        // The pages before the end keep their text, laid out or as plain lines.
+        let end = first_page_past_the_limit(&out);
+        let with_text = out
+            .document
+            .body
+            .iter()
+            .filter(|b| matches!(b, Block::Section { blocks, .. } if blocks.len() > 1))
+            .count() as u32;
+        assert_eq!(with_text, end.map_or(pages, |p| p - 1), "every {every:?}");
+        assert!(
+            out.document
+                .losses
+                .iter()
+                .any(|l| l.what.contains("written as plain lines")),
+            "every {every:?}: {:?}",
+            out.document.losses
+        );
+        end
+    };
+    let (one, two, four) = (ends_at(Some(1)), ends_at(Some(2)), ends_at(Some(4)));
+    eprintln!("the read ends at {one:?}, {two:?}, {four:?} with a look every 1, 2, 4 pages");
+    let (Some(one), Some(two), Some(four)) = (one, two, four) else {
+        panic!("a look every 1, 2 and 4 pages reaches the limit: {one:?}, {two:?}, {four:?}");
+    };
+    assert!(one < two && two < four, "{one}, {two}, {four}");
+    assert_eq!(ends_at(Some(16)), None);
+    assert_eq!(ends_at(Some(PLAIN_CHECK_PAGES)), None);
+    // The read as it ships looks after every 64 pages.
+    assert_eq!(ends_at(None), None);
+}
+
+/// The value of `PLAIN_CHECK` in the reader.
+const PLAIN_CHECK_PAGES: u32 = 64;

@@ -1041,12 +1041,7 @@ pub(crate) fn sentences_across(view: &PageView<'_>, seg: &Segment) -> bool {
         return false;
     }
     runs.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.total_cmp(&b.1)));
-    let grids: Vec<&Segment> = view
-        .segs
-        .all
-        .iter()
-        .filter(|s| matches!(s.source, Source::Grid { rows, cols } if rows >= 2 && cols >= 2))
-        .collect();
+    let grids = view.grids_across();
     runs.chunk_by(|a, b| a.0 == b.0).all(|l| {
         let line: Vec<usize> = l.iter().map(|x| x.2).collect();
         let r = refs[line[0]];
@@ -1055,7 +1050,7 @@ pub(crate) fn sentences_across(view: &PageView<'_>, seg: &Segment) -> bool {
             r.x,
             refs[line[line.len() - 1]].x + refs[line[line.len() - 1]].w,
         );
-        grids.iter().any(|g| {
+        let holds = |g: &Segment| {
             crate::work::add(1);
             let b = &g.bounds;
             cy > b.y0
@@ -1068,8 +1063,65 @@ pub(crate) fn sentences_across(view: &PageView<'_>, seg: &Segment) -> bool {
                     }
                     _ => false,
                 })
-        })
+        };
+        grids.over(x0, x1).any(|i| holds(&view.segs.all[i]))
     })
+}
+
+/// The grid segments of a page of two rows and two columns or more, by their left edge, to
+/// find those a line reaches into without a look at every grid: a row of small grids has
+/// as many of them as the line of each cell would look at.
+#[derive(Debug, Default)]
+pub(crate) struct GridsAcross {
+    /// The left edge and the segment of each grid whose box has finite edges, by the edge.
+    by_left: Vec<(f32, usize)>,
+    /// The widest of those.
+    widest: f32,
+    /// The grids whose box has an edge that is no finite number: every line looks at them.
+    loose: Vec<usize>,
+}
+
+impl GridsAcross {
+    pub(crate) fn of(segs: &crate::segment::Segments) -> GridsAcross {
+        crate::work::add(segs.all.len() as u64);
+        let mut out = GridsAcross::default();
+        for (i, s) in segs.all.iter().enumerate() {
+            if !matches!(s.source, Source::Grid { rows, cols } if rows >= 2 && cols >= 2) {
+                continue;
+            }
+            let b = &s.bounds;
+            if b.x0.is_finite() && b.x1.is_finite() {
+                out.by_left.push((b.x0, i));
+                out.widest = out.widest.max(b.x1 - b.x0);
+            } else {
+                out.loose.push(i);
+            }
+        }
+        out.by_left.sort_by(|a, b| a.0.total_cmp(&b.0));
+        out
+    }
+
+    /// The grids that may reach into the stretch `x0..x1` across: every grid whose box
+    /// starts left of `x1` and ends right of `x0` is among them (the caller tests each). A
+    /// grid that reaches into the stretch starts less than the widest grid left of it; the
+    /// search starts a little further left (a ten-thousandth of the numbers at hand), so no
+    /// rounding of the widths leaves one out. A stretch with an end that is no finite number
+    /// looks at every grid.
+    fn over(&self, x0: f32, x1: f32) -> impl Iterator<Item = usize> + '_ {
+        let all = !(x0.is_finite() && x1.is_finite() && self.widest.is_finite());
+        let left = x0 - self.widest;
+        let left = left - 1e-4 * (left.abs() + self.widest + 1.0);
+        let from = if all {
+            0
+        } else {
+            self.by_left.partition_point(|g| g.0 < left)
+        };
+        self.by_left[from..]
+            .iter()
+            .take_while(move |g| all || g.0 < x1)
+            .map(|g| g.1)
+            .chain(self.loose.iter().copied())
+    }
 }
 
 /// Table: the rule for its source reads the segment as a table (`table.drawn_cells`,
@@ -1390,6 +1442,76 @@ fn lone_pair_of(mut runs: Vec<&crate::input::TextRun>) -> bool {
 
 #[cfg(test)]
 mod tests {
+    /// Fix round 1 of Task 37, M4: the grids a line is tested against are all the grids the
+    /// test of every grid accepted by their place across (`sentences_across` before Task
+    /// 37 looked at every grid of two rows and two columns): 60 seeded pages of grids of
+    /// many widths, one wide grid among narrow ones, and segments that are no such grid.
+    #[test]
+    fn the_grids_over_a_stretch_hold_every_grid_that_reaches_into_it() {
+        use crate::segment::{SegId, Segment, Segments};
+        let mut seed = 5u64;
+        let mut roll = |n: u32| {
+            seed = seed
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            ((seed >> 33) % u64::from(n)) as f32
+        };
+        let mut reached = 0;
+        for round in 0..60 {
+            let mut all = Vec::new();
+            for k in 0..40u32 {
+                let x0 = 3.0 * roll(100);
+                let wide = round % 3 == 0 && k == 7;
+                let w = if wide { 250.0 } else { 3.0 * (1.0 + roll(6)) };
+                let source = match roll(4) as u32 {
+                    0 => Source::Box,
+                    1 => Source::Grid { rows: 1, cols: 4 },
+                    _ => Source::Grid { rows: 2, cols: 2 },
+                };
+                all.push(Segment {
+                    id: SegId(k),
+                    bounds: Bounds {
+                        x0,
+                        y0: 0.0,
+                        x1: x0 + w,
+                        y1: 10.0,
+                    },
+                    prims: Vec::new(),
+                    source,
+                    parent: None,
+                    children: Vec::new(),
+                    alternatives: Vec::new(),
+                });
+            }
+            let segs = Segments {
+                all,
+                root: SegId(0),
+                issues: Vec::new(),
+                short: Vec::new(),
+            };
+            let grids = GridsAcross::of(&segs);
+            for _ in 0..100 {
+                let x0 = 3.0 * roll(110) - 10.0;
+                let x1 = x0 + 0.5 * roll(40);
+                let got: Vec<usize> = grids.over(x0, x1).collect();
+                for (i, s) in segs.all.iter().enumerate() {
+                    let grid =
+                        matches!(s.source, Source::Grid { rows, cols } if rows >= 2 && cols >= 2);
+                    if grid && x0 < s.bounds.x1 && x1 > s.bounds.x0 {
+                        reached += 1;
+                        assert!(got.contains(&i), "grid {i} over {x0}..{x1}");
+                    }
+                }
+                // No segment that is no such grid is looked at.
+                assert!(got.iter().all(|&i| matches!(
+                    segs.all[i].source,
+                    Source::Grid { rows, cols } if rows >= 2 && cols >= 2
+                )));
+            }
+        }
+        assert!(reached > 2_000, "{reached} grids reached");
+    }
+
     use super::*;
 
     /// The group at a frame as it was found before the index: a walk of every group, each

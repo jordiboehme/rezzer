@@ -263,6 +263,7 @@ QR Code: [https://example.org/t/dNuKThV1](https://example.org/t/dNuKThV1)
 - A legend of footnotes that stands at the foot of both pages of a two-page form is taken as a running footer. Its text is kept, but the markers above stay text and do not link to the footnotes
 - A label over a boxed amount and a label over a boxed date in the same column are read first, before both values. The values keep their separators
 - On a form page, a block of two text columns can be read in bands across both columns, with each printed line as its own paragraph (the directions on the front of the SF 1199A form)
+- When a file is too large for its time limit, Rezzer stops reading text early enough to write what it has read. Pages it has no time to lay out are written as plain lines, one line of the page per line. Headings, lists, tables and columns are not found there, pictures are not listed and links are not attached. A note under "Not read" names these pages
 - When the object layer cannot be read, Rezzer falls back to hayro for the text and says so in the output. Annotations, forms, scripts and signatures are then not read
 - Revision diffs count the first save of a linearized file as one save
 - No public test file was found for annotation replies, `AFSimple_Calculate`, `AFPercent_Format`, a field with the required flag or table header scope. These parts follow the format specification but are not proven on a real file

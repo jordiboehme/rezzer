@@ -230,6 +230,8 @@ pub struct Budget {
     cancelled: CancelToken,
     /// Set once a time stop cut the work short. It stays set.
     time_stopped: AtomicBool,
+    /// Nanoseconds of the time limit kept back (see [`Budget::keep_time`]).
+    kept_time: AtomicU64,
 }
 
 impl Budget {
@@ -254,6 +256,7 @@ impl Budget {
             elements: AtomicU64::new(0),
             cancelled: cancel,
             time_stopped: AtomicBool::new(false),
+            kept_time: AtomicU64::new(0),
         }
     }
 
@@ -282,6 +285,43 @@ impl Budget {
             limit,
             value: millis(elapsed),
             max: millis(self.limits.max_time),
+            unit: "ms",
+        })
+    }
+
+    /// Keeps `reserve` of the time limit back for work that must still run after the step
+    /// at hand: a cheap way to write what that step does not finish. Until it is set again,
+    /// [`Budget::check_time_ahead`] fails that much before the limit. [`Budget::check_time`]
+    /// does not change.
+    pub fn keep_time(&self, reserve: Duration) {
+        let nanos = u64::try_from(reserve.as_nanos()).unwrap_or(u64::MAX);
+        self.kept_time.store(nanos, Ordering::Relaxed);
+    }
+
+    /// The time kept back with [`Budget::keep_time`].
+    pub fn kept_time(&self) -> Duration {
+        Duration::from_nanos(self.kept_time.load(Ordering::Relaxed))
+    }
+
+    /// [`Budget::check_time`] for a step that must leave the time kept back
+    /// ([`Budget::keep_time`]) to what follows it: fails when the budget was cancelled, the
+    /// time limit is over, or less than the time kept back is left of it. One reading of the
+    /// clock. In the error, `max` is the limit less the time kept back.
+    pub fn check_time_ahead(&self) -> Result<(), LimitHit> {
+        let elapsed = self.elapsed();
+        let max = self.limits.max_time.saturating_sub(self.kept_time());
+        let limit = if self.is_cancelled() {
+            "cancelled"
+        } else if elapsed > max {
+            "time"
+        } else {
+            return Ok(());
+        };
+        self.note_time_stop();
+        Err(LimitHit {
+            limit,
+            value: millis(elapsed),
+            max: millis(max),
             unit: "ms",
         })
     }
