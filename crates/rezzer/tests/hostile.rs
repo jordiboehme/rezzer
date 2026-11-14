@@ -1659,17 +1659,17 @@ fn hundred_thousand_pages_stop_in_time() {
     many_pages(&path, PAGES, false);
     // READS and READ: measured once with this step, printed below (2026-11-14, macOS,
     // debug). Listing the pages takes 200,255 readings; the text stops when the time left
-    // is the time kept for writing what was read (five eighths of the time the text took so
-    // far, see `layout_time` and `plain_time` in the PDF reader). A longer limit reads more
-    // pages, and their memory takes the max RSS toward its 512 MiB bound (479 MiB at 2,022
+    // is the time kept for what follows it (eleven sixteenths of the time the text took so
+    // far, see `layout_time`, `plain_time` and `end_time` in the PDF reader). A longer limit reads more
+    // pages, and their memory takes the max RSS toward its 512 MiB bound (472 MiB at 1,948
     // pages, 493 at 3,025, 524 at 4,060: the plain lines take few readings, so more of the
     // object layer of the 100,000 pages is read after them than before Task 37), so the step
     // keeps the pages read near 2,000. On a step clock the layout looks at
     // the clock far more often for a page than the text does, so the time kept for it ends
     // while the facts of the file are learned and the pages read are written as plain lines.
     const STEP: Duration = Duration::from_nanos(9_670);
-    const READS: u64 = 206_353;
-    const READ: usize = 2_022;
+    const READS: u64 = 206_127;
+    const READ: usize = 1_948;
     let limit = Duration::from_secs(2);
     let clock = Clock::steps(STEP);
     let p = pipeline_with_clock(limit, clock.clone());
@@ -1788,8 +1788,9 @@ fn plain_lines_loss(first: usize, last: usize) -> String {
 #[test]
 fn a_text_cut_near_the_time_limit_is_not_cached() {
     // The PDF reader stops its text before the budget's own time is over: it keeps the time
-    // to lay out the pages read (half the time their text took) and to write as plain lines
-    // those the layout does not get to (an eighth of it). That cut depends on the machine's
+    // to lay out the pages read (half the time their text took), to write as plain lines
+    // those the layout does not get to (an eighth of it) and to end the read (a sixteenth
+    // of it). That cut depends on the machine's
     // load, so it is not cached.
     //
     // The time runs on a step clock, so the work decides the outcome, not the machine. A
@@ -1800,10 +1801,10 @@ fn a_text_cut_near_the_time_limit_is_not_cached() {
     //
     // READS: measured once with this step (2026-11-14, macOS, debug), as
     // [`read_near_the_limit`] prints them. Listing the 20,000 pages takes 40,000 readings and
-    // the text about 2 a page. The text stops after 4,307 pages, and the read ends at 53,046
+    // the text about 2 a page. The text stops after 4,147 pages, and the read ends at 52,565
     // readings; the time limit is at 54,054.
     const STEP: Duration = Duration::from_nanos(18_500);
-    const READS: u64 = 53_046;
+    const READS: u64 = 52_565;
     const PAGES: usize = 20_000;
     let (result, reads, cached) = read_near_the_limit("text cut near the limit", PAGES, STEP);
     assert_readings(reads, READS);

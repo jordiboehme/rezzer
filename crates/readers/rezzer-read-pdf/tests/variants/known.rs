@@ -153,6 +153,21 @@ pub(crate) const KNOWN: &[Known] = &[
         why: "the blocks of the page stand in another order than at scale 1 in the real size: each label keeps its amount and the grand total keeps its amount in every variant. The order of blocks that do not depend on each other is free (ruling of 2026-11-12), so this is measured, not owed",
     },
     Known {
+        shape: "totals between two rules in pieces under one item row",
+        variants: &[
+            "smaller text",
+            "smaller text, proportional",
+            "scale 1.5, smaller text",
+            "scale 1.5, smaller text, proportional",
+            "smaller text, dotted, turned 90, line over, two pages",
+            "smaller text, thick, turned 90, row under",
+            "smaller text, turned 270, title over",
+        ],
+        broken: &[Inv::SameReading],
+        cause: Cause::Class("after 0.1.0"),
+        why: "since Task 38b the header row and the item row read whole and in order in every variant (before, every variant read them parted by the gutter of the page, alike, so the readings were the same). The small picture of the item row stands after the row's position in the smaller text and after its price at scale 1: a picture goes beside the run nearest to its top, and which cell of its row that is depends on the text size. It stays inside its row in both, so no value, pair or order of text moves",
+    },
+    Known {
         shape: "item rows under a rule in pieces on a page with a block of lines on the right",
         variants: &[
             "larger text",

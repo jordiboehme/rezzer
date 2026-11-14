@@ -63,11 +63,14 @@ fn page_note(page: u32, refusals: &[(usize, f32, &'static str)]) -> Option<Unsur
 /// section of each grid top to bottom (see [`section`]), the header bands it left (see
 /// [`banded`]) and the rows of fields between rules no grid takes (see [`strip_tables`]);
 /// last the runs of all tables leave the flow (see [`leave_flow`]). `rules` are the page's
-/// drawn rules and `grids` the grids they make.
+/// drawn rules and `grids` the grids they make; `shapes` are the boxes of what the page draws
+/// besides rules (see `PageItems::shapes`), and whether the page draws more of them than it
+/// keeps: a table that looked for icons in its cells then says so.
 pub(super) fn ruled(
     page: u32,
     flow: &mut Flow,
     (rules, grids, segmented): (&[Rule], Result<&Grids, Unsearched>, &[bool]),
+    (shapes, shapes_cut): (&[[f32; 4]], bool),
     area: &Area<'_>,
     stop: &dyn Fn() -> bool,
     found: &mut Found,
@@ -112,6 +115,7 @@ pub(super) fn ruled(
         by_y: &by_y,
         area,
         rules,
+        shapes,
         hs,
         vs,
         frames: &frames,
@@ -152,6 +156,15 @@ pub(super) fn ruled(
         ));
     }
     let strips_from = bands_and_strips(&sh, &mut take, found);
+    // Said only where a table looked for an icon in a cell (the boxes are built at the first
+    // look): a page of many drawings and no such cell has nothing to say about them.
+    if shapes_cut && take.strokes.is_some() {
+        found.skipped.push(format!(
+            "drawings on page {page} past the first {} paths are not looked at: a cell of a \
+             table that holds only such a drawing is not said to hold one",
+            crate::text::MAX_SHAPES
+        ));
+    }
     leave_flow(page, flow, take, (pairs, strips_from), found);
 }
 
@@ -164,6 +177,8 @@ struct Sheet<'a> {
     by_y: &'a ByY,
     area: &'a Area<'a>,
     rules: &'a [Rule],
+    /// The boxes of what the page draws besides rules: an icon in a cell is made of them.
+    shapes: &'a [[f32; 4]],
     /// The page's horizontal and vertical lines, joined.
     hs: &'a [Line],
     vs: &'a [Line],
@@ -725,7 +740,14 @@ fn read_grid(sh: &Sheet<'_>, take: &mut Taking, found: &mut Found, s: GridSectio
         },
         sh.stop,
         &|| sh.area.refuses(b, &sizes),
-        &mut |cell| drawn_inside(&mut take.strokes, sh.rules, cell, &mut take.icon_work),
+        &mut |cell| {
+            drawn_inside(
+                &mut take.strokes,
+                (sh.rules, sh.shapes),
+                cell,
+                &mut take.icon_work,
+            )
+        },
     );
     let table = match cells {
         Cells::Table(table) => table,
@@ -1018,8 +1040,10 @@ fn leave_flow(
 }
 
 /// The losses of the titles drawn as icons (`icons`: table, row, cell and box of each), one
-/// for each table: `the table on page 2 that starts with "Time" has a drawing (an icon) and
-/// no text in the cells 1 and 3 of its first row: they are left empty`. `named` gives the
+/// for each table: `the table on page 2 that starts with "Time" has a drawing (an icon or a
+/// mark) and no text in the cells 1 and 3 of its first row: they are left empty` (a cell
+/// struck out with a cross holds a mark, which cannot be told from a small icon). `named`
+/// gives the
 /// first words of a table, which tell it from another table of the page (its anchor is not
 /// known here); a table without text is `a table on page 2`. The cells are counted from 1 as
 /// the row holds them.
@@ -1053,7 +1077,7 @@ fn icon_losses(
                 words => format!("the table on page {page} that starts with \"{words}\""),
             };
             format!(
-                "{table} has a drawing (an icon) and no text in the {which} of its first row: \
+                "{table} has a drawing (an icon or a mark) and no text in the {which} of its first row: \
                  {left}"
             )
         })
@@ -1664,11 +1688,12 @@ const ICON: &str = "(icon)";
 /// Steps one page may take to look for icons in the cells of its tables.
 const ICON_WORK: usize = 1_000_000;
 
-/// Whether drawn strokes lie inside `cell` (x0, y0, x1, y1), off its sides. `strokes` are the
-/// boxes of `rules` sorted by their bottom, built at the first look.
+/// Whether something drawn lies inside `cell` (x0, y0, x1, y1), off its sides. `strokes` are
+/// the boxes of `rules` and the `shapes` (what the page draws in curves and slanted lines: an
+/// icon of filled curves has no rule in it) sorted by their bottom, built at the first look.
 fn drawn_inside(
     strokes: &mut Option<Vec<[f32; 4]>>,
-    rules: &[Rule],
+    (rules, shapes): (&[Rule], &[[f32; 4]]),
     cell: [f32; 4],
     work: &mut usize,
 ) -> bool {
@@ -1683,6 +1708,7 @@ fn drawn_inside(
                     r.y0.max(r.y1),
                 ]
             })
+            .chain(shapes.iter().copied())
             .collect();
         b.sort_by(|a, b| a[1].total_cmp(&b[1]));
         b

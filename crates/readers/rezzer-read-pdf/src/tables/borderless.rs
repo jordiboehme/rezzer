@@ -484,7 +484,7 @@ pub(super) fn borderless(
         pieces.extend(lines[z..z + joined].iter().map(|l| pieces_of(flow, l)));
         z += joined;
         // Two blocks side by side are judged each alone.
-        let sets: Vec<Vec<Vec<Piece>>> = match side_by_side(flow, &lines[a..z], &pieces) {
+        let sets: Vec<Vec<Vec<Piece>>> = match side_by_side(flow, &lines[a..z], &pieces, hsegs) {
             Some(x) => vec![
                 pieces
                     .iter()
@@ -1567,6 +1567,52 @@ fn split_title(row: &mut [PlannedCell], cell: usize, run: usize, byte: usize) {
     }
 }
 
+/// Whether a rule is drawn across the gutter from `g0` to `g1` between the lines of a region
+/// (their `pieces`): the segments of `hsegs` (sorted by height) at one height, under the
+/// baseline of the highest line and over that of the lowest, cover the gutter from side to
+/// side.
+fn ruled_across(flow: &Flow, pieces: &[Vec<Piece>], hsegs: &[Line], (g0, g1): (f32, f32)) -> bool {
+    let ys = || {
+        pieces
+            .iter()
+            .flatten()
+            .flat_map(|p| flow.runs[p.start..p.end].iter().map(|r| r.y))
+    };
+    let (low, high) = (ys().fold(f32::MAX, f32::min), ys().fold(f32::MIN, f32::max));
+    let from = hsegs.partition_point(|s| s.at <= low);
+    let inside = &hsegs[from..];
+    let inside = &inside[..inside.partition_point(|s| s.at < high)];
+    crate::work::add(inside.len() as u64);
+    // The segments are sorted by height: those of one height (within a snap) stand together.
+    // What they cover of the gutter is the union of their stretches: a rule drawn twice
+    // (a fill and a stroke) covers its stretch once.
+    let mut k = 0;
+    while k < inside.len() {
+        let y = inside[k].at;
+        let mut spans: Vec<(f32, f32)> = Vec::new();
+        while k < inside.len() && inside[k].at - y <= SNAP {
+            let (from, to) = (inside[k].from.max(g0), inside[k].to.min(g1));
+            if to > from {
+                spans.push((from, to));
+            }
+            k += 1;
+        }
+        spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+        // Covered from `g0` on without a hole wider than a snap.
+        let mut end = g0;
+        for (from, to) in spans {
+            if from > end + SNAP {
+                break;
+            }
+            end = end.max(to);
+        }
+        if end >= g1 - SNAP {
+            return true;
+        }
+    }
+    false
+}
+
 /// Why a region of two blocks side by side is no table.
 const SIDE_BY_SIDE: &str = "two blocks stand side by side";
 
@@ -1579,8 +1625,19 @@ const BLOCK_GUTTER_RATIO: f32 = 3.0;
 /// columns, when no line crosses it, the white space all lines leave there is at least
 /// [`BLOCK_GUTTER`] font sizes wide and [`BLOCK_GUTTER_RATIO`] times the median gutter, and
 /// either the region begins or ends with two lines or more on one side only, or the baselines
-/// of its sides do not line up.
-fn side_by_side(flow: &Flow, lines: &[FlowLine], pieces: &[Vec<Piece>]) -> Option<f32> {
+/// of its sides do not line up. The baselines alone do not part the sides when a rule is
+/// drawn across that gutter between the lines of the region (`hsegs`, the page's horizontal
+/// segments by height; the pieces of a rule at one height count together): the rule under a
+/// header row runs under the titles of both sides, and the rows under it are rows of one
+/// table also when the cells of one side stand a little lower than those of the other. A
+/// list that starts earlier or ends later than the one beside it stays a block of its own,
+/// with or without a rule.
+fn side_by_side(
+    flow: &Flow,
+    lines: &[FlowLine],
+    pieces: &[Vec<Piece>],
+    hsegs: &[Line],
+) -> Option<f32> {
     let columns = columns_of(pieces);
     if columns.len() < 3 {
         return None;
@@ -1652,7 +1709,10 @@ fn side_by_side(flow: &Flow, lines: &[FlowLine], pieces: &[Vec<Piece>]) -> Optio
             .filter(|l| !l.is_empty())
             .collect()
     };
-    offset_baselines(&side(true), &side(false), size).then_some(mid)
+    // Baselines that do not line up part the sides only where no rule ties them.
+    (offset_baselines(&side(true), &side(false), size)
+        && !ruled_across(flow, pieces, hsegs, (g0, g1)))
+    .then_some(mid)
 }
 
 /// Whether the lines `a..z` of a region (their `pieces`) are blocks side by side (see
@@ -1921,6 +1981,148 @@ mod tests {
                 "a table mixes both lists: {words:?}"
             );
         }
+    }
+
+    /// Fix round 2 of Task 38b (review I1): two lists side by side under one shared rule, the
+    /// left one two lines longer. A rule across the gutter says nothing against a list that
+    /// ends later than the one beside it: the lists stay two, and no table mixes them. The
+    /// rule is drawn in one piece, in two pieces that meet in the gutter, and twice over in
+    /// halves that do not reach across (a fill and a stroke of one half count once).
+    #[test]
+    fn lists_of_unequal_length_under_one_rule_stay_two() {
+        let rows = [
+            ("Guest", "Sample", "Folio", "1000"),
+            ("Room", "101", "Copy", "Original"),
+            ("Arrival", "2030", "Cashier", "77"),
+            ("Nights", "3", "Desk", "Front"),
+            ("Rate", "80", "", ""),
+            ("Board", "Half", "", ""),
+        ];
+        let seg = |from: f32, to: f32| Line {
+            at: 642.0,
+            from,
+            to,
+        };
+        for rule in [
+            vec![seg(18.0, 500.0)],
+            vec![seg(18.0, 250.0), seg(250.0, 500.0)],
+            vec![seg(18.0, 250.0), seg(18.0, 250.0)],
+        ] {
+            let mut runs = Vec::new();
+            for (k, (a, b, c, d)) in rows.iter().enumerate() {
+                let y = 650.0 - 16.0 * k as f32;
+                let line = k as u32;
+                runs.push(run(a, 18.0, y, line));
+                runs.push(run(b, 70.0, y, line));
+                if !c.is_empty() {
+                    runs.push(run(c, 400.0, y, line));
+                    runs.push(run(d, 450.0, y, line));
+                }
+            }
+            let n = runs.len();
+            let mut flow = Flow::new(runs, vec![Slot::Free; n]);
+            let area = Area {
+                width: 595.0,
+                height: 842.0,
+                images: &[],
+                body_size: 8.0,
+            };
+            let mut found = Found::default();
+            let every = area_of(0, 0..n as u32);
+            borderless(
+                1,
+                &mut flow,
+                (&[&every], &rule),
+                &area,
+                &|| false,
+                &mut found,
+            );
+            let left = [
+                "Guest", "Sample", "Room", "101", "Arrival", "2030", "Nights", "3", "Rate", "80",
+                "Board", "Half",
+            ];
+            for t in &found.tables {
+                let words: Vec<&str> = t
+                    .rows
+                    .iter()
+                    .flatten()
+                    .flat_map(|c| c.runs.iter().map(|r| r.text.as_str()))
+                    .collect();
+                let l = words.iter().filter(|w| left.contains(w)).count();
+                assert!(
+                    l == 0 || l == words.len(),
+                    "a table mixes both lists under {rule:?}: {words:?}"
+                );
+            }
+        }
+    }
+
+    /// Fix round 2 of Task 38b (review M2): the side-by-side lists of
+    /// `side_by_side_blocks_are_refused` (the right one 4 points lower) with half a rule
+    /// between their first two lines, drawn twice (a fill and a stroke). The two copies cover
+    /// the left half of the gutter once, not the gutter: the lists stay two. With the other
+    /// half of the rule drawn too, the rule ties the sides and they are judged as one region.
+    #[test]
+    fn a_rule_drawn_twice_covers_its_stretch_once() {
+        let rows = [
+            ("Guest", "Sample", "Folio", "1000"),
+            ("Room", "101", "Copy", "Original"),
+            ("Arrival", "2030", "Cashier", "77"),
+            ("Nights", "3", "Desk", "Front"),
+        ];
+        let seg = |from: f32, to: f32| Line {
+            at: 641.0,
+            from,
+            to,
+        };
+        let mixed = |rule: &[Line]| -> bool {
+            let mut runs = Vec::new();
+            for (k, (a, b, c, d)) in rows.iter().enumerate() {
+                let y = 650.0 - 16.0 * k as f32;
+                let line = k as u32;
+                runs.push(run(a, 18.0, y, line));
+                runs.push(run(b, 70.0, y, line));
+                runs.push(run(c, 400.0, y - 4.0, line));
+                runs.push(run(d, 450.0, y - 4.0, line));
+            }
+            let n = runs.len();
+            let mut flow = Flow::new(runs, vec![Slot::Free; n]);
+            let area = Area {
+                width: 595.0,
+                height: 842.0,
+                images: &[],
+                body_size: 8.0,
+            };
+            let mut found = Found::default();
+            let every = area_of(0, 0..n as u32);
+            borderless(
+                1,
+                &mut flow,
+                (&[&every], rule),
+                &area,
+                &|| false,
+                &mut found,
+            );
+            let left = [
+                "Guest", "Sample", "Room", "101", "Arrival", "2030", "Nights", "3",
+            ];
+            found.tables.iter().any(|t| {
+                let words: Vec<&str> = t
+                    .rows
+                    .iter()
+                    .flatten()
+                    .flat_map(|c| c.runs.iter().map(|r| r.text.as_str()))
+                    .collect();
+                let l = words.iter().filter(|w| left.contains(w)).count();
+                l != 0 && l != words.len()
+            })
+        };
+        assert!(!mixed(&[seg(18.0, 250.0), seg(18.0, 250.0)]));
+        assert!(mixed(&[
+            seg(18.0, 250.0),
+            seg(18.0, 250.0),
+            seg(250.0, 500.0)
+        ]));
     }
 
     /// Task 36a fix round 1 (review I1): a table without rules whose columns start at one

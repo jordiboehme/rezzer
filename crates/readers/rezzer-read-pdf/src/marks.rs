@@ -753,6 +753,7 @@ pub(crate) fn insert(
             x,
             y,
             adv: Some(0.0),
+            head: false,
             ..glyphs[i]
         };
     }
@@ -859,6 +860,7 @@ pub(crate) fn cut_at_dividers(glyphs: &mut Vec<Gl>, text: &mut String, rules: &[
             x,
             y,
             adv: Some(0.0),
+            head: false,
             ..glyphs[k]
         };
     }
@@ -1392,6 +1394,7 @@ mod tests {
             layer: None,
             vertical,
             joined: false,
+            head: false,
             actual: None,
             link: None,
         }

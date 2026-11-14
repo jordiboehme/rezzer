@@ -25,6 +25,110 @@ const WORD_GAP: f32 = 0.15;
 /// different columns (see `layoutregions::line::PIECE_GAP`).
 pub(crate) use layoutregions::line::PIECE_GAP;
 
+/// A blank glyph is covered by the glyph drawn after it when that glyph starts left of this
+/// share of the blank's own advance (see [`covered_blanks`]): its middle. Past the middle
+/// more of the blank is white than printed over, and it reads as a blank. A share of the
+/// blank's advance, so a kerning step into a blank (a small part of it at every size and in
+/// every font) never takes it.
+const COVERED: f32 = 0.5;
+
+/// A row of text shows is set back over its blanks when it has at least this many places
+/// where a show follows a blank, and at every one of them the show is printed over the blank
+/// (see [`covered_blanks`]). One such place is one measurement: a line number kerned against
+/// its text, or dot leaders set flush right that happen to start in a blank. Two that agree
+/// with none against are how the row was written.
+const SET_BACK: usize = 2;
+
+/// The blanks of `glyphs` that are no gap on the page, as one flag per glyph (empty when
+/// there is none): `fragments` leaves them out.
+///
+/// A file may show a line show by show, each ending in a blank and the next one set back by
+/// that blank: the next glyph is printed where the blank is, and the page shows no gap there
+/// (`<1234>ABCD*EF` shown as `<1234>ABCD ` and `*EF`). A blank is printed over when the first
+/// glyph of the next show starts left of its middle ([`COVERED`]) and what is left of it is no
+/// wider than a word gap ([`WORD_GAP`]: a wide blank printed over in part still parts two
+/// words, and without the blank the two join as one word), from the last blank of a show back
+/// to the first one that stays. A show that starts over the ink before the blanks, further
+/// left than a word gap, is printed over that text and takes no blank; a blank without an
+/// advance is one the reader put in.
+///
+/// One show printed over a blank proves nothing: tight lines are set with words that start
+/// inside the blank before them, and their gaps are small but there. So the blanks go only in
+/// a row (glyphs that follow each other on one baseline in one style, without a piece gap,
+/// in whatever marked-content parts they stand) where every show that follows a blank is
+/// printed over it, at [`SET_BACK`] places or more. Glyphs inside one show follow the pen and
+/// are never looked at, so word and character spacing take no blank.
+fn covered_blanks(glyphs: &[Gl], text: &Texts<'_>, turn: Turn) -> Vec<bool> {
+    let is_blank = |g: &Gl| {
+        let t = text.of(g);
+        !t.is_empty() && t.chars().all(is_pad)
+    };
+    let mut flags: Vec<bool> = Vec::new();
+    // The row being walked: the shows after a blank, how many of them are printed over it,
+    // and the blanks they cover; where the last ink of the row ends.
+    let (mut places, mut over) = (0usize, 0usize);
+    let mut blanks: Vec<usize> = Vec::new();
+    let mut ink_end: Option<f32> = None;
+    let mut close = |places: usize, over: usize, blanks: &mut Vec<usize>| {
+        if places >= SET_BACK && over == places {
+            if flags.is_empty() {
+                flags = vec![false; glyphs.len()];
+            }
+            for &b in blanks.iter() {
+                flags[b] = true;
+            }
+        }
+        blanks.clear();
+    };
+    for (i, g) in glyphs.iter().enumerate() {
+        let (x, y) = turn.apply(g.x, g.y);
+        let size = g.size.max(0.1);
+        let blank = is_blank(g);
+        let follows = i.checked_sub(1).is_some_and(|p| {
+            let p = &glyphs[p];
+            let (px, py) = turn.apply(p.x, p.y);
+            let gap = x - (px + p.adv.unwrap_or(p.size * 0.5));
+            // A new marked-content part ends no row: a tagged file writes every show as a
+            // part of its own, and the page prints them as one line all the same.
+            p.bold == g.bold
+                && p.italic == g.italic
+                && p.link == g.link
+                && (p.size - size).abs() <= 0.05 * p.size.max(size)
+                && (y - py).abs() <= 0.25 * p.size.max(size)
+                && gap >= -0.5 * size
+                && gap <= PIECE_GAP * size
+        });
+        if !follows {
+            close(places, over, &mut blanks);
+            (places, over, ink_end) = (0, 0, None);
+        }
+        if blank {
+            continue;
+        }
+        if let (true, true, Some(end)) = (follows, g.head, ink_end)
+            && is_blank(&glyphs[i - 1])
+        {
+            places += 1;
+            let before = blanks.len();
+            let mut b = i;
+            while x >= end - WORD_GAP * size && b > 0 && is_blank(&glyphs[b - 1]) {
+                let p = &glyphs[b - 1];
+                let from = turn.apply(p.x, p.y).0;
+                let adv = p.adv.unwrap_or(0.0);
+                if adv <= 0.0 || x >= from + COVERED * adv || x - from > WORD_GAP * size {
+                    break;
+                }
+                blanks.push(b - 1);
+                b -= 1;
+            }
+            over += usize::from(blanks.len() > before);
+        }
+        ink_end = Some(x + g.adv.unwrap_or(size * 0.5));
+    }
+    close(places, over, &mut blanks);
+    flags
+}
+
 /// Text that reads from right to left (Hebrew, Arabic and the like).
 fn is_rtl(c: char) -> bool {
     matches!(bidi_class(c), BidiClass::R | BidiClass::AL)
@@ -189,7 +293,12 @@ fn fragments(glyphs: &[Gl], text: &Texts<'_>, turn: Turn, page: Turn) -> Vec<Fra
     // Sized once: a list grown step by step leaves blocks the allocator does not hand out
     // again for the next page.
     let mut out: Vec<Frag> = Vec::with_capacity(glyphs.len());
-    for g in glyphs {
+    // Blanks the next show is printed over are no gap and no text.
+    let covered = covered_blanks(glyphs, text, turn);
+    for (i, g) in glyphs.iter().enumerate() {
+        if covered.get(i) == Some(&true) {
+            continue;
+        }
         let (x, y) = turn.apply(g.x, g.y);
         let t = text.of(g);
         let size = g.size.max(0.1);
@@ -1633,6 +1742,7 @@ mod tests {
                     layer: None,
                     vertical: false,
                     joined: false,
+                    head: false,
                     actual: None,
                     link: None,
                 });

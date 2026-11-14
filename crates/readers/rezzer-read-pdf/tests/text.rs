@@ -751,6 +751,32 @@ fn invisible_text_is_reported_not_mixed() {
     );
 }
 
+/// Two hidden texts that touch stay two texts, as on the page: an amount written over the
+/// `0,00` of its field is not read as one number. Words of one text with a gap keep the
+/// space the reader gave them.
+#[test]
+fn hidden_texts_that_touch_stay_apart() {
+    let hidden = Page::text(format!(
+        "{}BT 3 Tr /F1 10 Tf 1 0 0 1 100 650 Tm (0,00) Tj ET\n\
+         BT 3 Tr /F1 10 Tf 1 0 0 1 100 650 Tm (1.234,56) Tj ET\n\
+         BT 3 Tr /F1 10 Tf 1 0 0 1 100 600 Tm (Erika) Tj 1 0 0 1 130 600 Tm (Mustermann) Tj ET\n",
+        show("F1", 12.0, 72.0, 700.0, "Visible words on page one."),
+    ));
+    let out = read(&pdf(&[hidden], ""));
+    let lines: Vec<String> = match page(&out, 1).last() {
+        Some(Block::Callout {
+            kind: CalloutKind::Details,
+            blocks,
+            ..
+        }) => blocks
+            .iter()
+            .map(|b| text(std::slice::from_ref(b)).trim().to_string())
+            .collect(),
+        other => panic!("no invisible text callout: {other:?}"),
+    };
+    assert_eq!(lines, ["0,00 1.234,56", "Erika Mustermann"]);
+}
+
 #[test]
 fn refused_page_is_skipped_with_loss() {
     // Page 2's font reads a CMap that unpacks to 16 MiB, over the 8 MiB stream limit.
@@ -2325,4 +2351,259 @@ fn bounds_of_a_turned_page_lie_in_its_box() {
             );
         }
     }
+}
+
+/// The width of `text` (as a PDF string: a backslash is not shown) in Helvetica-Bold at
+/// `size`, with the signs of a code.
+fn bold_width(text: &str, size: f32) -> f32 {
+    text.chars()
+        .map(|c| match c {
+            '\\' => 0.0,
+            '<' | '>' => 584.0,
+            '*' => 389.0,
+            '(' | ')' | ':' => 333.0,
+            '/' | ' ' => 278.0,
+            c => common::font_width("FB", c.encode_utf8(&mut [0; 4]), 1000.0),
+        })
+        .sum::<f32>()
+        * size
+        / 1000.0
+}
+
+/// The runs of a code line: a label with two blanks after it and a code in runs that each
+/// end in a blank.
+const CODE_PARTS: [&str; 9] = [
+    "Via:  ",
+    "<1234>ABCD ",
+    "*EF ",
+    "*GH ",
+    "*\\(JK ",
+    "*LMN/OP ",
+    "*Q ",
+    "*RS\\) ",
+    "*TU",
+];
+
+/// The text of the middle row of a list of `Label value` rows in Helvetica-Bold of 10
+/// points. The row is shown in the runs `parts`, each in a text object of its own with
+/// `spacing` (text state operators) before it. Run `i + 1` starts `backs[i]` blank widths
+/// left of where run `i` ends (`backs` is taken round again when it is shorter). `mono` shows
+/// the row in Courier-Bold (every advance 6 points, so a wide blank) instead.
+fn row_in_runs(parts: &[&str], backs: &[f32], spacing: &str, mono: bool) -> String {
+    row_in_shows(parts, backs, spacing, mono, (false, ""))
+}
+
+/// [`row_in_runs`]; with `marked`, each run of the row is a marked-content part of its own
+/// (`/Span` with an MCID, as a tagged file writes each show), after a lone blank in the
+/// plain face far to the left on the same baseline, a part of its own too. `annots` are the
+/// annotation dictionaries of the page, written inline.
+fn row_in_shows(
+    parts: &[&str],
+    backs: &[f32],
+    spacing: &str,
+    mono: bool,
+    (marked, annots): (bool, &str),
+) -> String {
+    let width = |t: &str| match mono {
+        true => 6.0 * t.chars().filter(|c| *c != '\\').count() as f32,
+        false => bold_width(t, 10.0),
+    };
+    let font = if mono { "F3" } else { "F2" };
+    let mut content = show("F2", 10.0, 116.5, 667.27, "Start: Musterstadt Nord");
+    let mut x = 116.5;
+    if marked {
+        content += "/Span <</MCID 28>> BDC BT /F1 10 Tf 1 0 0 1 45.64 655.27 Tm ( ) Tj ET EMC\n";
+    }
+    for (i, part) in parts.iter().enumerate() {
+        let shown = format!("BT /{font} 10 Tf {spacing} 1 0 0 1 {x:.2} 655.27 Tm ({part}) Tj ET");
+        content += &match marked {
+            true => format!("/Span <</MCID {}>> BDC {shown} EMC\n", 29 + i),
+            false => format!("{shown}\n"),
+        };
+        x += width(part) - backs[i % backs.len()] * width(" ");
+    }
+    content += &show("F2", 10.0, 116.5, 643.27, "Class: 2");
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let fonts: Vec<String> = ["Helvetica", "Helvetica-Bold", "Courier-Bold"]
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let f = b.add(format!(
+                "<< /Type /Font /Subtype /Type1 /BaseFont /{name} >>"
+            ));
+            format!("/F{} {f} 0 R", i + 1)
+        })
+        .collect();
+    let c = b.stream("", content.as_bytes());
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+         /Resources << /Font << {} >> >> /Contents {c} 0 R /Annots [{annots}] >>",
+        fonts.join(" ")
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let out = read(&b.finish(catalog));
+    // The three rows are one block; the row stands between the other two.
+    let all = text(page(&out, 1));
+    let row = all
+        .split_once("Start: Musterstadt Nord")
+        .and_then(|(_, rest)| rest.split_once("Class: 2"))
+        .map(|(row, _)| row);
+    let row = row.unwrap_or_else(|| panic!("no middle row in {all:?}"));
+    // One blank parts the rows on each side; the blanks of the row itself are kept.
+    row.strip_prefix(' ')
+        .and_then(|r| r.strip_suffix(' '))
+        .unwrap_or_else(|| panic!("the rows are not parted in {all:?}"))
+        .to_string()
+}
+
+/// A line shown run by run, each run ending in a blank and the next one set back so that its
+/// first glyph is printed over that blank: the page shows no gap there, so the code reads as
+/// printed, with the one blank after the label that nothing is printed over. The next run
+/// covers the whole blank or most of it.
+#[test]
+fn a_blank_the_next_run_is_printed_over_is_no_gap() {
+    for back in [1.0, 0.8] {
+        assert_eq!(
+            row_in_runs(&CODE_PARTS, &[back], "", false),
+            "Via: <1234>ABCD*EF*GH*(JK*LMN/OP*Q*RS)*TU",
+            "set back by {back} blanks"
+        );
+    }
+}
+
+/// Fix round 1 of Task 38b: the same line in a tagged file, where every show is a marked
+/// content part of its own. A change of the part ends no row of shows and parts no word:
+/// the code reads as printed, with one blank after the label.
+#[test]
+fn a_blank_printed_over_by_the_show_of_another_marked_part_is_no_gap() {
+    for back in [1.0, 0.8] {
+        assert_eq!(
+            row_in_shows(&CODE_PARTS, &[back], "", false, (true, "")),
+            "Via: <1234>ABCD*EF*GH*(JK*LMN/OP*Q*RS)*TU",
+            "set back by {back} blanks"
+        );
+    }
+    // Blanks nothing is printed over stay, part by part.
+    assert_eq!(
+        row_in_shows(&CODE_PARTS, &[0.0], "", false, (true, "")),
+        "Via:  <1234>ABCD *EF *GH *(JK *LMN/OP *Q *RS) *TU"
+    );
+}
+
+/// Fix round 2 of Task 38b (review M5): a change of link ends a row of shows. The code line
+/// with a link over its runs from `*(JK` on is two rows, each with two places or more where
+/// every show is printed over the blank before it: their blanks go. The show that starts the
+/// link belongs to neither row with the show before it, so the blank between them stays.
+#[test]
+fn a_change_of_link_ends_a_row_of_shows() {
+    let blank = bold_width(" ", 10.0);
+    let x: f32 = 116.5
+        + CODE_PARTS[..4]
+            .iter()
+            .map(|p| bold_width(p, 10.0) - blank)
+            .sum::<f32>();
+    let link = format!(
+        "<< /Type /Annot /Subtype /Link /Rect [{:.2} 652 400 667] /Border [0 0 0] \
+         /A << /S /URI /URI (https://example.org/) >> >>",
+        x - 0.2
+    );
+    assert_eq!(
+        row_in_shows(&CODE_PARTS, &[1.0], "", false, (false, &link)),
+        "Via: <1234>ABCD*EF*GH *(JK*LMN/OP*Q*RS)*TU"
+    );
+}
+
+/// A blank that the next run is not printed over is a gap, and so is one it covers less than
+/// half of (`COVERED`, from both sides: 0.47 of the blank stays, 0.6 goes). At 0.47 what is
+/// left of the blank is under a word gap, so only the half keeps it.
+#[test]
+fn a_blank_the_next_run_leaves_white_stays() {
+    let spaced = "Via:  <1234>ABCD *EF *GH *(JK *LMN/OP *Q *RS) *TU";
+    for back in [0.0, 0.2, 0.47] {
+        assert_eq!(
+            row_in_runs(&CODE_PARTS, &[back], "", false),
+            spaced,
+            "set back by {back} blanks"
+        );
+    }
+    assert_eq!(
+        row_in_runs(&CODE_PARTS, &[0.6], "", false),
+        "Via: <1234>ABCD*EF*GH*(JK*LMN/OP*Q*RS)*TU"
+    );
+}
+
+/// A wide blank (6 points in Courier of 10 points) that the next run covers by more than
+/// half still shows white wider than a word gap: the two words stay apart (0.6 of the blank
+/// leaves 2.4 points). Covered by 0.8, 1.2 points are left, less than a word gap: no gap.
+#[test]
+fn a_wide_blank_printed_over_in_part_still_parts_two_words() {
+    let parts = ["Erika ", "Mustermann ", "Musterstadt"];
+    assert_eq!(
+        row_in_runs(&parts, &[0.6], "", true),
+        "Erika Mustermann Musterstadt"
+    );
+    assert_eq!(
+        row_in_runs(&parts, &[0.8], "", true),
+        "ErikaMustermannMusterstadt"
+    );
+}
+
+/// One run printed over a blank is one measurement, not how the row was written
+/// (`SET_BACK`, from both sides): a line number kerned against its text keeps its blank; two
+/// runs set back with none against lose theirs.
+#[test]
+fn one_run_printed_over_a_blank_keeps_the_blank() {
+    assert_eq!(
+        row_in_runs(&["Nr 1 ", "a Total"], &[1.0], "", false),
+        "Nr 1 a Total"
+    );
+    assert_eq!(
+        row_in_runs(&["Nr 1 ", "a ", "Total"], &[1.0], "", false),
+        "Nr 1aTotal"
+    );
+}
+
+/// A tight line: some words start inside the blank before them by more than half of it,
+/// others by less. The gaps are small but there, so every word keeps its blank. The same
+/// holds when one run of the row starts over the letters before its blank.
+#[test]
+fn a_row_with_a_run_that_leaves_its_blank_keeps_every_blank() {
+    let parts = ["Erika ", "Mustermann ", "wohnt ", "hier ", "gern"];
+    assert_eq!(
+        row_in_runs(&parts, &[0.6, 0.3, 0.7, 0.6], "", false),
+        "Erika Mustermann wohnt hier gern"
+    );
+    // 1.7 blanks back: the run starts over the last letter before the blank.
+    assert_eq!(
+        row_in_runs(&["Nord ", "*EF ", "*GH"], &[1.7, 1.0], "", false),
+        "Nord *EF *GH"
+    );
+}
+
+/// Text the rule must not touch: a word shown in two runs stays one word, tight word spacing
+/// inside a run keeps the words, and kerning into a blank keeps it.
+#[test]
+fn words_keep_their_blanks_and_split_words_stay_joined() {
+    assert_eq!(
+        row_in_runs(&["Muster", "stadt ", "Nord"], &[0.0], "", false),
+        "Musterstadt Nord"
+    );
+    // Each word starts 2 points inside the blank of 2.78 before it: the pen moved there.
+    assert_eq!(
+        row_in_runs(&["Erika Mustermann wohnt hier"], &[0.0], "-2 Tw", false),
+        "Erika Mustermann wohnt hier"
+    );
+    let kerned = "BT /F2 10 Tf 1 0 0 1 116.5 655.27 Tm \
+                  [(Erika ) 90 (Mustermann ) 60 (wohnt) 40 ( hier)] TJ ET\n";
+    let out = read(&pdf(&[Page::text(kerned)], ""));
+    assert_eq!(
+        text(page(&out, 1)).lines().last().map(str::trim),
+        Some("Erika Mustermann wohnt hier")
+    );
 }

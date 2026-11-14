@@ -9496,3 +9496,151 @@ fn a_box_with_sides_in_two_segments_keeps_its_rows_one_table() {
         }
     }
 }
+
+/// A horizontal rule at `y` drawn in pieces from `xs[0]` to the last of `xs`, as a table
+/// writes the border under each of its cells.
+fn pieced_rule(xs: &[f32], y: f32) -> String {
+    xs.windows(2)
+        .map(|w| common::hrule(w[0], w[1], y))
+        .collect()
+}
+
+/// A page of an invoice for prints, in 11 pt text: a head (a date line and a bold number
+/// line on the left, a bold line and a boxed `Job:` value on the right), a header row over a
+/// rule in pieces, `items` item rows (a position, a description of two lines, a small
+/// picture, a count and a price), a rule, two totals, a rule, and under it a 9 pt note on the
+/// left on nearly the baseline of the bold total on the right.
+fn print_invoice(items: usize) -> String {
+    let euro = |v: &str| format!("{v} \u{20ac}");
+    let mut t = show("FL", 11.0, 32.0, 612.0, "Sample Town, 2026-02-01")
+        + &show("FB", 11.0, 32.0, 596.0, "Invoice 2026-0042")
+        + &show("FB", 11.0, 470.0, 612.0, "Sample Studio")
+        + &common::boxed(468.0, 590.0, 97.0, 16.0)
+        + &show("FL", 11.0, 472.0, 594.5, "Job: 4711");
+    t += &show("FL", 11.0, 32.0, 565.0, "Pos.");
+    t += &show("FL", 11.0, 64.1, 565.0, "Series Mi (3)");
+    t += &right(false, 11.0, 504.15, 565.0, "Count");
+    t += &right(false, 11.0, 563.0, 565.0, "Price");
+    t += &pieced_rule(&[30.0, 62.1, 468.7, 506.15, 565.0], 561.0);
+    let rows = [
+        [
+            "4",
+            "1 Sampleprint ca. 10x15",
+            "12345abc12d / e12f3g456h",
+            "1",
+            "5,00",
+        ],
+        [
+            "5",
+            "2 Sampleprint ca. 13x18",
+            "12345abc12d / e12f3g789k",
+            "2",
+            "3,00",
+        ],
+        [
+            "6",
+            "1 Sampleposter ca. 30x45",
+            "12345abc12d / e12f3g012m",
+            "1",
+            "2,00",
+        ],
+    ];
+    let mut y = 550.0;
+    for row in rows.iter().take(items) {
+        t += &right(false, 11.0, 48.84, y, row[0]);
+        t += &show("FL", 11.0, 64.1, y, row[1]);
+        t += &show("FL", 11.0, 64.1, y - 11.0, row[2]);
+        t += &logo(342.3, y - 18.0, 40.5, 27.0);
+        t += &right(false, 11.0, 506.15, y - 2.0, row[3]);
+        t += &right(false, 11.0, 565.0, y - 2.0, &euro(row[4]));
+        y -= 30.0;
+    }
+    // `y` is now 30 under the last item's baseline; the first rule stands 6 over it.
+    t += &pieced_rule(&[30.0, 265.4, 506.15, 565.0], y + 6.0);
+    t += &right(false, 11.0, 506.15, y - 7.0, "Subtotal");
+    t += &right(false, 11.0, 565.0, y - 7.0, &euro("10,00"));
+    t += &right(false, 11.0, 506.15, y - 24.0, "Shipping / Handling charge");
+    t += &right(false, 11.0, 565.0, y - 24.0, &euro("0,00"));
+    t += &pieced_rule(&[30.0, 265.4, 506.15, 565.0], y - 28.0);
+    t += &show(
+        "FL",
+        9.0,
+        32.0,
+        y - 39.0,
+        &format!("The amount holds 19% VAT.: {}", euro("1,60")),
+    );
+    t += &right(true, 11.0, 506.15, y - 41.0, "Total amount");
+    t += &right(true, 11.0, 565.0, y - 41.0, &euro("10,00"));
+    t
+}
+
+/// The text of the page of [`print_invoice`] with `items` rows as it is read, its white
+/// space as single blanks.
+fn print_invoice_text(items: usize) -> String {
+    let page = FormPage {
+        template: print_invoice(items),
+        ..FormPage::default()
+    };
+    let out = common::read(&print_form(&[page], "", ""));
+    let text = common::body_text(&out.document.body);
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Task 38b, B2: an item table with one item. The gutter of the page (the white space
+/// between the descriptions and the counts, from the head down to the totals) parted the
+/// header row and the item row: the left half of each was read with the left blocks of the
+/// page and the right half with the right ones, so the head stood inside the header row and
+/// a note from under the totals between the item and its count and price. The header over
+/// its columns and the rule in pieces as the cells of the row prove the one row: the header
+/// row reads whole and before the row, the row reads whole and in order, the note after it.
+#[test]
+fn a_one_row_item_table_reads_its_header_and_its_row_whole() {
+    let text = print_invoice_text(1);
+    let header = "Pos. Series Mi (3) Count Price";
+    let row = "4 1 Sampleprint ca. 10x15 12345abc12d / e12f3g456h 1 5,00 \u{20ac}";
+    assert!(text.contains(header), "{text}");
+    assert!(text.contains(row), "{text}");
+    let note = "The amount holds 19% VAT.: 1,60 \u{20ac}";
+    common::in_order(&text, &[header, row, note]).unwrap();
+    // The head stands before the header row, each block of it whole.
+    common::in_order(&text, &["Sample Studio", header]).unwrap();
+    common::in_order(&text, &["Job:|4711|", header]).unwrap();
+    common::in_order(&text, &["Invoice 2026-0042", header]).unwrap();
+    // The totals under the row keep each label with its amount.
+    for total in [
+        "Subtotal 10,00 \u{20ac}",
+        "Shipping / Handling charge 0,00 \u{20ac}",
+        "Total amount|10,00 \u{20ac}|",
+    ] {
+        common::in_order(&text, &[row, total]).unwrap();
+    }
+}
+
+/// Fix round 1 of Task 38b: the same table with three items, the count and the price of
+/// each 2 points lower than its position and description (cells set in the middle of a row
+/// whose description has two lines). Inside the block of rows the cut found a gutter again,
+/// by the baselines of the two sides that do not meet, and the items read as two tables:
+/// positions and descriptions in one, counts and prices in the other. A block of rows
+/// between rules is proven rows: every item keeps its count and price, in order, under the
+/// whole header row.
+#[test]
+fn item_rows_with_lower_counts_and_prices_stay_rows() {
+    let text = print_invoice_text(3);
+    common::in_order(
+        &text,
+        &[
+            "Pos.",
+            "Series Mi (3)",
+            "Count",
+            "Price",
+            "1 Sampleprint ca. 10x15",
+            "5,00 \u{20ac}",
+            "2 Sampleprint ca. 13x18",
+            "3,00 \u{20ac}",
+            "1 Sampleposter ca. 30x45",
+            "2,00 \u{20ac}",
+            "Subtotal",
+        ],
+    )
+    .unwrap_or_else(|e| panic!("{e}"));
+}

@@ -503,7 +503,19 @@ impl Cutter<'_> {
     }
 
     /// Cuts the pieces `ids` (indices into the pieces) into groups, `depth` levels down.
-    fn region(&self, mut ids: Vec<usize>, depth: usize, out: &mut Out) {
+    fn region(&self, ids: Vec<usize>, depth: usize, out: &mut Out) {
+        self.region_of(ids, depth, false, out);
+    }
+
+    /// [`Cutter::region`]; `rows` says that the pieces are a block of rows between two rules
+    /// (see [`between_rules`]): its lines are proven rows of one table, each with cells on
+    /// both sides. Baselines of the two sides that do not meet are no reason for a gutter
+    /// there (cells set in the middle of a row whose first cell has two lines stand a little
+    /// lower than its first line); the other reasons are asked as in any region (see
+    /// [`split_at`]): prose on both sides, a lone row beside a block, a drawn box. The bands
+    /// of the block are rows of it still; the sides of a gutter in it are looked at as any
+    /// region.
+    fn region_of(&self, mut ids: Vec<usize>, depth: usize, rows: bool, out: &mut Out) {
         work::add(1 + ids.len() as u64);
         let p = self.p;
         let sort = |ids: &mut Vec<usize>| {
@@ -531,7 +543,7 @@ impl Cutter<'_> {
         }
         // At the bound of the depth a region that would be cut stays one group instead.
         let bound = depth >= self.max_depth;
-        let found = if looks { gutter(p, &ids) } else { None };
+        let found = if looks { gutter(p, &ids, rows) } else { None };
         if debug_cut() {
             let found = found.as_ref().map(|(s, why)| (s.g0, s.g1, *why));
             debug_region(p, &ids, depth, found);
@@ -545,7 +557,7 @@ impl Cutter<'_> {
                 if bound {
                     return self.keep(ids, out);
                 }
-                return self.bands(ids, &at, depth, out);
+                return self.bands(ids, &at, (depth, rows), out);
             }
         }
         if let Some((sides, why)) = found {
@@ -808,7 +820,7 @@ impl Cutter<'_> {
                     flush(&mut band, out);
                     out.cut(Split::Rule);
                     block.extend_from_slice(&ids[at..end]);
-                    self.region(block, depth + 1, out);
+                    self.region_of(block, depth + 1, true, out);
                     low = f32::MAX;
                     at = end;
                     continue;
@@ -848,14 +860,14 @@ impl Cutter<'_> {
             if bound {
                 return self.keep(ids, out);
             }
-            return self.bands(ids, &at, depth, out);
+            return self.bands(ids, &at, (depth, rows), out);
         }
         out.group(ids);
     }
 
     /// Cuts the sorted pieces `ids` before each index of `at` (ascending) into bands, and
     /// looks at each band again.
-    fn bands(&self, ids: Vec<usize>, at: &[usize], depth: usize, out: &mut Out) {
+    fn bands(&self, ids: Vec<usize>, at: &[usize], (depth, of_rows): (usize, bool), out: &mut Out) {
         let ends: Vec<usize> = at.iter().copied().chain([ids.len()]).collect();
         // The bands of two rows that are a row of labels over the row of their values on
         // their own evidence: what a band beside them may be read like.
@@ -1006,7 +1018,8 @@ impl Cutter<'_> {
                 k += 2;
                 continue;
             }
-            self.region(ids[from..to].to_vec(), depth + 1, out);
+            // The bands of a block of rows are rows of that block still.
+            self.region_of(ids[from..to].to_vec(), depth + 1, of_rows, out);
             from = to;
             k += 1;
         }
@@ -2451,6 +2464,11 @@ type Stretch = (usize, usize);
 ///   joint, sorted) lies in white space of all its rows: the pieces of the rule are the
 ///   columns of the rows;
 ///
+/// One row alone with text on both sides has no second row to show the geometry of the
+/// rows. It is a block only with both of the proofs below at once: the header over its
+/// columns and the pieces of the rule as its cells (Task 38b: an item table with one item,
+/// whose header row and item row the gutter of the page parted).
+///
 /// When the row right over the upper rule is the header of its rows (see [`header_row`]:
 /// titles over their columns, as many as the rows have pieces, or one less, a title over two
 /// columns), it starts the stretch. Without such a header the stretch is a block only when
@@ -2494,7 +2512,7 @@ fn between_rules(
     // How many pieces the rows of one geometry with text on both sides of the gutter have,
     // when the stretch holds enough of them: rows of as many pieces, each piece at the left
     // or the right edge of the piece of its place in the first such row.
-    let rows = |a: usize, z: usize| -> Option<usize> {
+    let rows = |a: usize, z: usize| -> Option<(usize, bool)> {
         work::add((z - a) as u64);
         // The first row of each number of pieces, and how many rows are like it.
         let mut like: Vec<(Vec<usize>, usize)> = Vec::new();
@@ -2532,7 +2550,14 @@ fn between_rules(
                 None => like.push((row, 1)),
             }
         }
-        like.iter().find(|l| l.1 >= RULED_ROWS).map(|l| l.0.len())
+        match like.iter().find(|l| l.1 >= RULED_ROWS) {
+            Some(l) => Some((l.0.len(), false)),
+            // One row with text on both sides, and no other: see `lone` below.
+            None => match &like[..] {
+                [(row, 1)] => Some((row.len(), true)),
+                _ => None,
+            },
+        }
     };
     // Whether the joints of the rule at `y` mark columns of the stretch: one or more of
     // them stand over it, each in white space of all its rows. The ink of the stretch is
@@ -2658,7 +2683,7 @@ fn between_rules(
         .filter_map(|w| {
             let ((a, y), (z, _)) = (w[0], w[1]);
             let y = y?;
-            let cells = rows(a, z)?;
+            let (cells, lone) = rows(a, z)?;
             if !marked(a, z, y) {
                 return None;
             }
@@ -2668,6 +2693,12 @@ fn between_rules(
             let head = header_row(p, ids, (a, z), y)
                 .filter(|&(_, titles)| titles == cells || titles + 1 == cells)
                 .map(|(head, _)| head);
+            // One row has no second row to show its geometry (see `RULED_ROWS`): it is a
+            // block only with both of the other proofs, the header over its columns and the
+            // pieces of the rule as its cells.
+            if lone && !(head.is_some() && cells_of_rule(a, z, y)) {
+                return None;
+            }
             match head {
                 Some(head) => Some((head, z)),
                 None if cells_of_rule(a, z, y) => {
@@ -2970,7 +3001,7 @@ pub const SIZE_STEP: f32 = 1.08;
 /// the best band is tried (see [`best_band`]): a band after it, where the best one fails, cuts
 /// label and value blocks and table columns apart (ruling P6-X3). Pieces of white space only
 /// are no text: they neither fill nor cross a band.
-fn gutter(p: &[Piece], ids: &[usize]) -> Option<(Sides, Why)> {
+fn gutter(p: &[Piece], ids: &[usize], rows: bool) -> Option<(Sides, Why)> {
     let inked: Vec<usize> = ids.iter().copied().filter(|&i| p[i].inked).collect();
     if inked.is_empty() {
         return None;
@@ -2981,7 +3012,7 @@ fn gutter(p: &[Piece], ids: &[usize]) -> Option<(Sides, Why)> {
     let size = sizes[sizes.len() / 2];
     let (g0, g1) = best_band(p, &inked, allowed, size)?;
     let sides = Sides::new(p, ids, (g0, g1), GUTTER_SLACK * size);
-    let why = split_at(p, ids, &sides, allowed, size);
+    let why = split_at(p, ids, &sides, (allowed, rows), size);
     if debug_cut() && why.is_none() {
         eprintln!("CUT   band {g0:.1}..{g1:.1} is no gutter (allowed {allowed})");
         for q in ids
@@ -3080,8 +3111,16 @@ fn best_band(p: &[Piece], inked: &[usize], allowed: i32, size: f32) -> Option<(f
 /// `allowed` of them stand between the bands of its sides (see [`rows_whole`]), the blocks
 /// on its sides stand side by side and are prose, lines
 /// whose baselines do not line up, a lone row beside a block, columns in the shape of
-/// addresses or a drawn box. `size` is the median size of the pieces.
-fn split_at(p: &[Piece], ids: &[usize], sides: &Sides, allowed: i32, size: f32) -> Option<Why> {
+/// addresses or a drawn box. `size` is the median size of the pieces. With `rows` the pieces
+/// are a block of rows between two rules (see [`Cutter::region_of`]): baselines that do not
+/// line up are no reason there, and the other reasons are asked as ever.
+fn split_at(
+    p: &[Piece],
+    ids: &[usize],
+    sides: &Sides,
+    (allowed, rows): (i32, bool),
+    size: f32,
+) -> Option<Why> {
     // The two sides and the tests of the sides pass the pieces a few times.
     work::add(3 * ids.len() as u64);
     // The pieces between the bands of the sides (across, or unsure in a row kept whole)
@@ -3123,7 +3162,7 @@ fn split_at(p: &[Piece], ids: &[usize], sides: &Sides, allowed: i32, size: f32) 
     let apart = || offset_baselines(&baselines(&left), &baselines(&right), size);
     let split = if prose(&left) && prose(&right) {
         Why::Prose
-    } else if apart() {
+    } else if !rows && apart() {
         // Labels with their values set lower beside them are rows, no two blocks.
         if labels_beside_values(p, &left, &right) {
             return None;
@@ -4077,6 +4116,97 @@ mod tests {
         };
         let cut = xy_cut_ruled(&ps, &ruled, &Limits::default(), &|| false);
         assert_eq!(cut.groups, plain.groups);
+    }
+
+    /// One row under its header between two rules (Task 38b, B2: an item table with one
+    /// item). No second row shows the geometry of the rows, so the row is a block only with
+    /// both other proofs: the titles over its columns, and the pieces of the rule as its
+    /// cells. Then the header and the row read whole; the gutter of the page parted both.
+    #[test]
+    fn one_row_under_its_header_and_a_rule_in_pieces_reads_whole() {
+        let (ps, rules, firsts) = rows_between_rules_at(&[700.0, 680.0]);
+        let plain = cut_of(&ps, &rules);
+        assert_whole(&plain, ps.len());
+        assert!(!rows_read_whole(&plain, &firsts), "{:?}", plain.groups);
+        let (joints, joined) = ruled_rows(&rules);
+        let ruled = Ruled {
+            rules: &rules,
+            joined: &joined,
+            joints: &joints,
+        };
+        let cut = xy_cut_ruled(&ps, &ruled, &Limits::default(), &|| false);
+        assert_whole(&cut, ps.len());
+        assert!(rows_read_whole(&cut, &firsts), "{:?}", cut.groups);
+        // The header reads right before its row.
+        let order = cut.groups.concat();
+        let at = |i: usize| order.iter().position(|&o| o == i).unwrap();
+        assert_eq!(at(firsts[1]), at(firsts[0]) + 4, "{:?}", cut.groups);
+    }
+
+    /// Fix round 1 of Task 38b: the rows of a block between rules whose right cells stand 2
+    /// points lower than the left ones (cells set in the middle of a row beside a first cell
+    /// of two lines). The block is proven rows, so the baselines of its sides that do not
+    /// meet make no gutter in it: every row reads whole. Before, the block was parted again
+    /// inside, left cells before right cells.
+    #[test]
+    fn rows_of_a_block_with_lower_cells_on_one_side_read_whole() {
+        let (mut ps, rules, firsts) = rows_between_rules_at(&[700.0, 680.0, 660.0, 640.0]);
+        for &f in &firsts[1..] {
+            for c in 2..4 {
+                ps[f + c].baseline -= 2.0;
+                ps[f + c].bounds.y0 -= 2.0;
+                ps[f + c].bounds.y1 -= 2.0;
+            }
+        }
+        let (joints, joined) = ruled_rows(&rules);
+        let ruled = Ruled {
+            rules: &rules,
+            joined: &joined,
+            joints: &joints,
+        };
+        let cut = xy_cut_ruled(&ps, &ruled, &Limits::default(), &|| false);
+        assert_whole(&cut, ps.len());
+        assert!(rows_read_whole(&cut, &firsts), "{:?}", cut.groups);
+    }
+
+    /// One row is no block on one proof alone. Without titles over it, the joints between
+    /// its cells are all there is: the gutter parts it as before. With titles, but a rule
+    /// whose pieces are not its cells (no joint in the white space between the second and
+    /// the third cell), the same. Two rows of one geometry under the same titles and the
+    /// same rule are a block, as before: the second row is the proof the one row lacks.
+    #[test]
+    fn one_row_with_one_proof_alone_is_parted_by_the_gutter() {
+        let (joints, joined) = ruled_rows(&[Line {
+            at: 696.0,
+            from: 30.0,
+            to: 560.0,
+        }]);
+        let cut_with = |ps: &[Piece], rules: &[Line], joints: &[(f32, f32)]| {
+            let ruled = Ruled {
+                rules,
+                joined: &joined,
+                joints,
+            };
+            xy_cut_ruled(ps, &ruled, &Limits::default(), &|| false)
+        };
+        // No titles: the line over the rule is prose.
+        let (mut ps, rules, firsts) = rows_between_rules_at(&[700.0, 680.0]);
+        for c in (0..4).rev() {
+            ps.remove(firsts[0] + c);
+        }
+        let cut = cut_with(&ps, &rules, &joints);
+        assert_whole(&cut, ps.len());
+        assert_eq!(cut.groups, cut_of(&ps, &rules).groups);
+        // Titles, but no joint between the second and the third cell.
+        let few = [(696.0, 57.0), (696.0, 518.0)];
+        let (ps, rules, firsts) = rows_between_rules_at(&[700.0, 680.0]);
+        let cut = cut_with(&ps, &rules, &few);
+        assert_whole(&cut, ps.len());
+        assert!(!rows_read_whole(&cut, &firsts), "{:?}", cut.groups);
+        assert_eq!(cut.groups, cut_of(&ps, &rules).groups);
+        let (ps, rules, firsts) = rows_between_rules_at(&[700.0, 680.0, 660.0]);
+        let cut = cut_with(&ps, &rules, &few);
+        assert!(rows_read_whole(&cut, &firsts), "{:?}", cut.groups);
     }
 
     /// The joints of the upper rule of [`rows_between_rules`] between the cells, and the rules
@@ -5259,7 +5389,7 @@ mod tests {
     /// The gutter of `ps` with its sides, as the cut finds it.
     fn gutter_of(ps: &[Piece]) -> (Sides, Why) {
         let ids: Vec<usize> = (0..ps.len()).collect();
-        gutter(ps, &ids).expect("a gutter")
+        gutter(ps, &ids, false).expect("a gutter")
     }
 
     /// The piece of row `line` of `ps` that reaches furthest.
@@ -6984,7 +7114,7 @@ mod tests {
         // the white space, more than may: no band is left for a gutter.
         let ps = paragraph_beside_a_block(&[560.0, 560.0, 560.0], 440.0);
         let ids: Vec<usize> = (0..ps.len()).collect();
-        assert!(gutter(&ps, &ids).is_none());
+        assert!(gutter(&ps, &ids, false).is_none());
         // Two such lines are within the share: they part the bands of the gutter.
         let ps = paragraph_beside_a_block(&[560.0, 560.0], 440.0);
         let (sides, _) = gutter_of(&ps);
@@ -7021,11 +7151,11 @@ mod tests {
         let sides = Sides::new(&ps, &ids, band, GUTTER_SLACK * 10.0);
         let across = ps.iter().filter(|p| sides.place(p) == Place::Across);
         assert_eq!(across.count(), 3);
-        assert!(gutter(&ps, &ids).is_none());
+        assert!(gutter(&ps, &ids, false).is_none());
         // The other way: without the third piece across the gutter stands.
         let ps = page(false);
         let ids: Vec<usize> = (0..ps.len()).collect();
-        assert!(gutter(&ps, &ids).is_some());
+        assert!(gutter(&ps, &ids, false).is_some());
     }
 
     #[test]
@@ -7691,6 +7821,41 @@ mod tests {
                 "{small} steps for 40 rows, {large} for 160"
             );
         }
+    }
+
+    /// Fix round 2 of Task 38b (review I2): a drawn box of two lines beside rows whose
+    /// baselines do not meet its lines. In any region the baselines are the reason of the
+    /// gutter and the box is not asked. In a block of rows between rules the baselines are
+    /// no reason, and the box still is one: its text is parted from the rows.
+    #[test]
+    fn a_box_beside_the_rows_of_a_block_still_parts_them() {
+        let boxed = |line: u32, y: f32| {
+            let mut stand = text(40.0, 250.0, line, y, 8.0, 6);
+            stand.boxed = Some(0);
+            stand.rows = 2;
+            stand
+        };
+        let ps = vec![
+            boxed(0, 688.0),
+            boxed(1, 668.0),
+            text(300.0, 500.0, 0, 690.0, 8.0, 6),
+            text(300.0, 500.0, 1, 670.0, 8.0, 6),
+            text(300.0, 500.0, 2, 650.0, 8.0, 6),
+        ];
+        let ids: Vec<usize> = (0..ps.len()).collect();
+        let why = |rows: bool| gutter(&ps, &ids, rows).map(|(_, why)| why);
+        assert_eq!(why(false), Some(Why::Offset));
+        assert_eq!(why(true), Some(Why::Boxed));
+        // Without the box the same lines are no gutter in a block of rows.
+        let mut plain = ps.clone();
+        for q in &mut plain[..2] {
+            (q.boxed, q.rows) = (None, 1);
+        }
+        assert_eq!(
+            gutter(&plain, &ids, false).map(|(_, why)| why),
+            Some(Why::Offset)
+        );
+        assert_eq!(gutter(&plain, &ids, true).map(|(_, why)| why), None);
     }
 
     #[test]

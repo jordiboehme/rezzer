@@ -460,6 +460,9 @@ pub(crate) fn untagged_marked(
             page,
             flow,
             (drawn.rules, grids, &segmented),
+            drawn
+                .items
+                .map_or((&[], false), |i| (&i.shapes, i.shapes_cut)),
             &area,
             stop,
             &mut found,

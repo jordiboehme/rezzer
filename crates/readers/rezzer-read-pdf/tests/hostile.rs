@@ -5432,7 +5432,10 @@ fn a_highlight_on_a_page_written_as_plain_lines_keeps_its_quote() {
     let want = quote(&whole).expect("the highlight is quoted");
     assert!(want.starts_with("wwwwwwwwww"), "{want}");
     let (mut seen, mut kept) = (0, 0);
-    for at in 1..=u32::try_from(reads).expect("few readings") {
+    // Up to twice the readings of the whole read: under a limit the text goes on only while
+    // the time kept for what follows it is left, so a limit of just the readings of the
+    // whole read stops the text of the page.
+    for at in 1..=2 * u32::try_from(reads).expect("few readings") {
         let (out, _) = read_on_steps(&file, Duration::from_millis(1) * at);
         if plain_line_texts(&out).is_empty() {
             continue;
@@ -5477,9 +5480,9 @@ fn first_page_past_the_limit(out: &ReadOutcome) -> Option<u32> {
 /// pages on a clock that moves one millisecond with each look, under a limit of a third of
 /// the looks of the whole read: the text of all pages is read, 26 are laid out and the rest
 /// are written as plain lines in the time kept for that. Each look of the plain pass uses
-/// up a millisecond of it. With a look after every page the limit is reached at page 170
+/// up a millisecond of it. With a look after every page the limit is reached at page 166
 /// and the pages from there on are named as not read; with one after every 2 pages at page
-/// 313; after every 4 at page 599; after every 16, or every 64 as the constant has it, the
+/// 310; after every 4 at page 598; after every 16, or every 64 as the constant has it, the
 /// time kept is enough and every page is written. So a smaller count ends the read
 /// earlier and a larger one later.
 #[test]

@@ -318,9 +318,10 @@ fn read_timed(
     // The text is read as long as the time limit leaves the time to write what was read:
     // the time to lay the pages out (see `layout_time`), and the time to write as plain
     // lines those the layout does not get to (see `plain_time`), so no page read is dropped.
-    // Both are shares of the time the text took so far, counted from the first time it
-    // asks, before its first page. A stop there is a time stop of the read, as one at the
-    // limit itself is.
+    // A third share is kept for what follows the pages (see `end_time`), so the read ends
+    // inside its limit. All are shares of the time the text took so far, counted from the
+    // first time it asks, before its first page. A stop there is a time stop of the read,
+    // as one at the limit itself is.
     let max_time = budget.limits().max_time;
     let from: std::cell::Cell<Option<Duration>> = std::cell::Cell::new(None);
     let text_stop = || {
@@ -968,9 +969,11 @@ fn lay_out(
         .collect();
     let keep = |n: u32| {
         let left = runs_from.get(&n).copied().unwrap_or(0);
-        plain_time(text_time).mul_f64(left as f64 / runs_total.max(1) as f64)
+        plain_time(text_time)
+            .mul_f64(left as f64 / runs_total.max(1) as f64)
+            .saturating_add(end_time(text_time))
     };
-    budget.keep_time(plain_time(text_time));
+    budget.keep_time(plain_time(text_time).saturating_add(end_time(text_time)));
     // The layout reads a page by its tags only with a structure tree. With no time left for
     // any layout the facts of the file are not learned (that takes about an eighth of the
     // time of the text). Facts learned from a part of the file only are not used: the time
@@ -1793,13 +1796,15 @@ fn lay_out(
                     false
                 };
             // The plain lines read no clock for a page; after every [`PLAIN_CHECK`] pages they
-            // ask whether the limit itself is over (or the read cancelled). Past it the pages
-            // left are named as not read: the read ends, as every step past the limit does.
-            // The first pages are written without a look: a layout that ran a little past
-            // its time still has its page written.
+            // ask whether the limit is over, less the time kept for the end of the read (see
+            // `end_time`), or the read cancelled. Past it the pages left are named as not
+            // read: the read ends, as every step past the limit does. The first pages are
+            // written without a look: a layout that ran a little past its time still has its
+            // page written.
             let every = PLAIN_CHECK_SET.with(|c| c.get()).unwrap_or(PLAIN_CHECK);
             let over = if stopped && plain_written > 0 && plain_written.is_multiple_of(every) {
-                budget.check_time().err()
+                budget.keep_time(end_time(text_time));
+                budget.check_time_ahead().err()
             } else {
                 None
             };
@@ -2561,12 +2566,32 @@ fn symbol_loss(n: u64, out: &mut Out) {
 
 /// Whether the text, read from `start` to `now`, must stop under the time limit `max`: the
 /// time left is less than the time kept for what was read so far ([`layout_time`] and
-/// [`plain_time`] of the time the text took).
+/// [`plain_time`] of the time the text took) and for the end of the read ([`end_time`]).
 fn text_time_is_up(now: Duration, start: Duration, max: Duration) -> bool {
     let text = now.saturating_sub(start);
-    let after = layout_time(text).saturating_add(plain_time(text));
+    let after = layout_time(text)
+        .saturating_add(plain_time(text))
+        .saturating_add(end_time(text));
     now.saturating_add(after) > max
 }
+
+/// The time kept for what follows the pages of a file whose text took `text` to read (the
+/// annotations, the object layer, giving back what the read held): one part in
+/// [`END_SHARE`] of it.
+fn end_time(text: Duration) -> Duration {
+    text / END_SHARE
+}
+
+/// What follows the pages gets one part in this many of the time the text took, kept back
+/// while the text is read and while the pages are laid out. Without it a read that used its
+/// time to the end for its pages ran past the limit by what follows them. Measured
+/// 2026-11-14 (release build) on 100,000 pages under a limit of 2 s: the pages were written
+/// at 1.995 s, the object layer took 22 ms and giving back the memory 10 ms, so the read
+/// ended at 2.03 s; the text had taken 1.15 s, 36 times those 32 ms. 16 leaves twice that
+/// and takes a twenty-seventh of the text of a file that does not fit its time (the text
+/// then stops at 16 parts in 27 of the time it has, not at 16 in 26). It is a share of the
+/// time measured for this file on this machine, not a time.
+const END_SHARE: u32 = 16;
 
 /// The time kept for laying out pages whose text took `text` to read: one part in
 /// [`LAYOUT_SHARE`] of it.
@@ -2606,8 +2631,8 @@ const PLAIN_SHARE: u32 = 8;
 /// are named as not read. Measured on a clock that moves one step with each look (600 pages,
 /// the limit at a third of the looks of the whole read; see
 /// `the_look_at_the_clock_of_the_plain_lines_moves_where_the_read_ends`): with a look after
-/// every page the read ends at page 170, after every 2 pages at page 313, after every 4 at
-/// page 599; after every 16 or more every page is written. 64 is four times that: one look
+/// every page the read ends at page 166, after every 2 pages at page 310, after every 4 at
+/// page 598; after every 16 or more every page is written. 64 is four times that: one look
 /// for 64 pages is a sixty-fourth of a look a page, under the eighth of the looks of any
 /// text that looks at the clock once a page or more. On the wall clock 64 pages of plain
 /// lines take about 0.2 ms (56 ms for 20,000 pages), so the pass ends that soon after the
@@ -2680,21 +2705,15 @@ fn plain_lines(
     }))
 }
 
-/// The lines of runs: the runs of one line joined.
-fn run_lines(runs: &[Run]) -> Vec<String> {
-    let mut lines: Vec<String> = Vec::new();
-    let mut last = None;
-    for r in runs {
-        if last == Some(r.line) {
-            if let Some(l) = lines.last_mut() {
-                l.push_str(&r.text);
-            }
-        } else {
-            lines.push(r.text.trim_start().to_string());
-        }
-        last = Some(r.line);
-    }
-    lines
+/// The lines of hidden runs for [`invisible`]: the runs of each line joined as the layout
+/// joins them ([`layoutregions::line::text_lines`], as [`plain_text_lines`]), without the
+/// padding before the first. Two hidden texts that touch (one written over the other, or
+/// set against it in another face) stay two texts, so they do not read as one value.
+fn hidden_lines(runs: &[Run]) -> Vec<String> {
+    layoutregions::line::text_lines(runs)
+        .into_iter()
+        .map(|l| l.text.trim_start().to_string())
+        .collect()
 }
 
 /// The folded callout with the text that puts no glyphs on the page and the text of
@@ -2709,11 +2728,11 @@ fn invisible(
     if runs.is_empty() && layer.is_empty() && items.hidden_layers.is_empty() {
         return Ok(None);
     }
-    let mut lines = run_lines(runs);
+    let mut lines = hidden_lines(runs);
     lines.extend(layer.iter().cloned());
     for (name, layer_runs) in &items.hidden_layers {
         lines.push(format!("Hidden layer {name}:"));
-        lines.extend(run_lines(layer_runs));
+        lines.extend(hidden_lines(layer_runs));
     }
     budget.add_elements(1 + 2 * lines.len() as u64)?;
     let mut blocks = Vec::with_capacity(lines.len());
@@ -2934,25 +2953,33 @@ fn figure_host(media: Option<u32>, inked: bool, host: u32) -> u32 {
 #[cfg(test)]
 mod tests {
 
-    /// Fix round 1 of Task 37, M3: the two shares of the text stop, each moved both ways.
-    /// With the text read from 0, the text stops when its time and the time kept for it
-    /// (a half for the layout, an eighth for the plain lines) pass the limit: 800 ms of text
-    /// keep 400 and 100 and end at 1,300 exactly, so they go on; 808 ms keep 404 and 101 and
-    /// are over. A larger layout share (a third of the text less) would go on at 808, a
-    /// smaller one (all of the text) would stop at 800; a plain share of a ninth would go
-    /// on at 801 (801 + 400 + 89), one of a seventh would stop at 800 (800 + 400 + 114).
+    /// Fix round 1 of Task 37, M3, and Task 38b: the shares of the text stop, each moved
+    /// both ways. With the text read from 0, the text stops when its time and the time kept
+    /// for it (a half for the layout, an eighth for the plain lines, a sixteenth for the end
+    /// of the read) pass the limit: 800 ms of text keep 400, 100 and 50 and end at 1,350
+    /// exactly, so they go on; 808 ms keep 404, 101 and 50.5 and are over. A larger layout
+    /// share (a third of the text less) would go on at 808, a smaller one (all of the text)
+    /// would stop at 800; a plain share of a ninth would go on at 801 (801 + 400 + 89 + 50),
+    /// one of a seventh would stop at 800 (800 + 400 + 114 + 50). The end share is moved in
+    /// the asserts themselves.
     #[test]
     fn the_text_stops_when_the_time_kept_for_what_it_read_is_all_that_is_left() {
         let ms = Duration::from_millis;
         assert_eq!(layout_time(ms(800)), ms(400));
         assert_eq!(plain_time(ms(800)), ms(100));
-        assert!(!text_time_is_up(ms(800), ms(0), ms(1_300)));
-        assert!(text_time_is_up(ms(808), ms(0), ms(1_300)));
-        assert!(text_time_is_up(ms(801), ms(0), ms(1_300)));
+        assert_eq!(end_time(ms(800)), ms(50));
+        assert!(!text_time_is_up(ms(800), ms(0), ms(1_350)));
+        assert!(text_time_is_up(ms(808), ms(0), ms(1_350)));
+        assert!(text_time_is_up(ms(801), ms(0), ms(1_350)));
+        // The share kept for the end of the read, both ways: an end share of a
+        // seventeenth would go on at 801 under 1,350 ms (801 + 400 + 100 + 47), one of a
+        // fifteenth would stop at 800 (800 + 400 + 100 + 53).
+        assert!(ms(801) + ms(400) + ms(100) + ms(801) / 17 <= ms(1_350));
+        assert!(ms(800) + ms(400) + ms(100) + ms(800) / 15 > ms(1_350));
         // The shares are of the time the text took, not of the time since the read began:
-        // after 1,000 ms of listing the pages, 800 ms of text still go on under 2,300 ms.
-        assert!(!text_time_is_up(ms(1_800), ms(1_000), ms(2_300)));
-        assert!(text_time_is_up(ms(1_808), ms(1_000), ms(2_300)));
+        // after 1,000 ms of listing the pages, 800 ms of text still go on under 2,350 ms.
+        assert!(!text_time_is_up(ms(1_800), ms(1_000), ms(2_350)));
+        assert!(text_time_is_up(ms(1_808), ms(1_000), ms(2_350)));
     }
     /// Task 22 fix rounds 4 and 5: the segment tree gives the lowest and
     /// highest baseline of every range of runs, as a walk over the range does.

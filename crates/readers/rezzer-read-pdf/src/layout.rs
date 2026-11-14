@@ -1875,8 +1875,19 @@ fn page_blocks_until(
                 unsure.extend(f.unsure);
                 doubts.extend(f.doubts);
                 own_lines.extend(f.own_lines);
+                // A limit of the page as a whole (the shapes it keeps) is said once, however
+                // many table areas of the page say it. What a table says of itself is kept
+                // for each table, also in the same words: two tables that start alike with
+                // icons in the same cells have a loss each.
+                for w in f.skipped {
+                    if !said
+                        .iter()
+                        .any(|(s, why)| *why == LossReason::Limit && *s == w)
+                    {
+                        said.push((w, LossReason::Limit));
+                    }
+                }
                 for (list, why) in [
-                    (f.skipped, LossReason::Limit),
                     (f.uncertain, LossReason::Uncertain),
                     (refused_quietly(page, f.quiet), LossReason::Uncertain),
                 ] {

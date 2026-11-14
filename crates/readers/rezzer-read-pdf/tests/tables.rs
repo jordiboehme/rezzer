@@ -2337,7 +2337,7 @@ fn header_icons_count_as_header_cells() {
     assert_eq!(
         said,
         [
-            "the table on page 1 that starts with \"Time\" has a drawing (an icon) and no text \
+            "the table on page 1 that starts with \"Time\" has a drawing (an icon or a mark) and no text \
              in the cell 1 of its first row: it is left empty"
         ],
         "{:?}",
@@ -3239,4 +3239,366 @@ fn header_cells_after_a_field_over_its_own_line_are_read_before_it() {
     let one = field_left_of_a_header_row(Some((31.0, 78.45, 700.35)), &titles[..1]);
     assert_eq!(one.len(), 3, "{one:?}");
     assert!(one[0].starts_with("Checked by"), "{one:?}");
+}
+
+/// A filled circle of radius `r` around (`cx`, `cy`) as a subpath of four curves.
+fn circle(cx: f32, cy: f32, r: f32) -> String {
+    let k = 0.5523 * r;
+    format!(
+        "{} {cy} m {} {} {} {} {cx} {} c {} {} {} {} {} {cy} c {} {} {} {} {cx} {} c \
+         {} {} {} {} {} {cy} c h ",
+        cx + r,
+        cx + r,
+        cy + k,
+        cx + k,
+        cy + r,
+        cy + r,
+        cx - k,
+        cy + r,
+        cx - r,
+        cy + k,
+        cx - r,
+        cx - r,
+        cy - k,
+        cx - k,
+        cy - r,
+        cy - r,
+        cx + k,
+        cy - r,
+        cx + r,
+        cy - k,
+        cx + r,
+    )
+}
+
+/// A clock icon of filled curves only, 22.4 points wide before the scale of 0.75, its lower
+/// left corner at (`x`, `y`): a ring, a dot in its middle and two hands, each a thin shape
+/// of two curves. No line and no rectangle is in it.
+fn clock_icon(x: f32, y: f32) -> String {
+    let hand = |x1: f32, y1: f32| {
+        format!(
+            "11.2 11.2 m 11.7 11.7 {} {} {x1} {y1} c {} {} 10.7 10.7 11.2 11.2 c f ",
+            x1 + 0.5,
+            y1 - 0.5,
+            x1 - 0.5,
+            y1 + 0.5
+        )
+    };
+    format!(
+        "q 0.75 0 0 0.75 {x} {y} cm {}{}f* {}f {}{}Q\n",
+        circle(11.2, 11.2, 11.2),
+        circle(11.2, 11.2, 9.6),
+        circle(11.2, 11.2, 1.2),
+        hand(11.2, 19.0),
+        hand(17.0, 11.2),
+    )
+}
+
+/// A calendar icon at (`x`, `y`), scaled 0.75: an outline of lines and corner curves, two
+/// tabs, a bar and eleven filled squares.
+fn calendar_icon(x: f32, y: f32) -> String {
+    let mut c = format!("q 0.75 0 0 0.75 {x} {y} cm 0.8 w ");
+    c += "2 0 m 18 0 l 19.1 0 20 0.9 20 2 c 20 17 l 20 18.1 19.1 19 18 19 c 2 19 l \
+          0.9 19 0 18.1 0 17 c 0 2 l 0 0.9 0.9 0 2 0 c h S ";
+    c += "4 18 1.5 3 re f 14.5 18 1.5 3 re f 0 13.5 20 1.5 re f ";
+    for k in 0..11 {
+        let (col, row) = (k % 4, k / 4);
+        c += &format!(
+            "{} {} 1.77 1.77 re f ",
+            3.0 + 4.0 * col as f32,
+            9.5 - 3.5 * row as f32
+        );
+    }
+    c + "Q\n"
+}
+
+/// The losses of `out` that name an icon.
+fn icon_losses(out: &rezzer_model::ReadOutcome) -> Vec<&str> {
+    out.document
+        .losses
+        .iter()
+        .map(|l| l.what.as_str())
+        .filter(|w| w.contains("icon"))
+        .collect()
+}
+
+/// A ruled table of thin filled rules whose first row holds a calendar icon in cells 1 and
+/// 6, a clock icon in cells 2 and 7, titles in cells 3, 4 and 8 and nothing in cell 5, over
+/// two rows of text. `icons` leaves the icons out when false.
+fn timetable(icons: bool) -> String {
+    let xs = [
+        56.25, 105.2, 143.02, 247.27, 301.84, 413.7, 461.9, 500.46, 539.03,
+    ];
+    let ys = [672.2, 641.5, 620.0, 598.5];
+    let mut c = String::new();
+    for y in ys {
+        c += &format!("{} {} {} 0.5 re f ", xs[0], y - 0.25, xs[8] - xs[0]);
+    }
+    for x in xs {
+        c += &format!("{} {} 0.5 {} re f ", x - 0.25, ys[3], ys[0] - ys[3]);
+    }
+    if icons {
+        for k in [0, 5] {
+            c += &calendar_icon((xs[k] + xs[k + 1]) / 2.0 - 7.5, 650.3);
+        }
+        for k in [1, 6] {
+            c += &clock_icon((xs[k] + xs[k + 1]) / 2.0 - 8.4, 649.0);
+        }
+    }
+    for (k, title) in [(2, "Station"), (3, "Track"), (7, "Train")] {
+        c += &show("F1", 8.0, xs[k] + 4.0, 654.0, title);
+    }
+    let rows = [
+        [
+            "02.01.",
+            "10:15",
+            "Musterstadt Nord",
+            "4",
+            "Change here",
+            "02.01.",
+            "11:20",
+            "IC 101",
+        ],
+        [
+            "03.01.",
+            "11:20",
+            "Musterstadt Ost",
+            "2",
+            "Ends here",
+            "03.01.",
+            "12:05",
+            "IC 205",
+        ],
+    ];
+    for (r, row) in rows.iter().enumerate() {
+        for (k, cell) in row.iter().enumerate() {
+            c += &show("F1", 8.0, xs[k] + 4.0, ys[r + 1] - 14.0, cell);
+        }
+    }
+    c
+}
+
+/// Task 38b, B3: an icon of filled curves only (a clock: a ring and two hands) in a cell of
+/// the first row is a drawing in that cell as much as an icon of lines and rectangles (a
+/// calendar). The loss named the calendar cells only, so the clock cells were empty without
+/// a word. Every cell with a drawing and no text is named; a cell that holds nothing is not.
+#[test]
+fn icons_of_curves_only_are_named_in_the_icon_loss() {
+    let out = read(&pdf(&[Page::text(timetable(true))], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(
+        found[0].1[0],
+        ["", "", "Station", "Track", "", "", "", "Train"],
+        "{found:?}"
+    );
+    assert_eq!(
+        icon_losses(&out),
+        [
+            "the table on page 1 that starts with \"Station\" has a drawing (an icon or a mark) and no \
+             text in the cells 1, 2, 6 and 7 of its first row: they are left empty"
+        ],
+        "{:?}",
+        out.document.losses
+    );
+    // The same table without the drawings: empty cells are no icons.
+    let out = read(&pdf(&[Page::text(timetable(false))], ""));
+    assert_eq!(icon_losses(&out), [""; 0], "{:?}", out.document.losses);
+}
+
+/// A page keeps the boxes of `MAX_SHAPES` drawn paths (8,192), the limit pinned exactly. The
+/// icons of the table hold 8 paths that are no rule (4 for each clock: its ring, its dot and
+/// its two hands; the outline of a calendar is a box with round corners, a rule). With 8,184
+/// paths before the table the last hand is the 8,192nd path: all are kept and nothing is
+/// said. With one more that hand is not kept, and the table says that it looked at the
+/// drawings only in part. With the whole room used up before the table the icons of curves
+/// are not found.
+#[test]
+fn drawings_past_the_shape_limit_are_said() {
+    let said = |out: &rezzer_model::ReadOutcome| {
+        out.document.losses.iter().any(|l| {
+            l.what
+                .contains("drawings on page 1 past the first 8192 paths")
+        })
+    };
+    // Exactly at the limit all are kept and nothing is said.
+    let out = read(&pdf(&[Page::text(chart(8_192 - 8) + &timetable(true))], ""));
+    assert!(!said(&out), "{:?}", out.document.losses);
+    assert!(
+        icon_losses(&out)
+            .iter()
+            .any(|l| l.contains("cells 1, 2, 6 and 7")),
+        "{:?}",
+        out.document.losses
+    );
+    // One path more: the last path of the page (a hand of the second clock) is not kept,
+    // and the table says that it looked at the drawings in part.
+    let out = read(&pdf(&[Page::text(chart(8_192 - 7) + &timetable(true))], ""));
+    assert!(said(&out), "{:?}", out.document.losses);
+    // The whole room used up before the table: the icons of curves are not found.
+    let out = read(&pdf(&[Page::text(chart(8_192) + &timetable(true))], ""));
+    assert!(said(&out), "{:?}", out.document.losses);
+    assert!(
+        icon_losses(&out)
+            .iter()
+            .all(|l| l.contains("cells 1 and 6")),
+        "{:?}",
+        out.document.losses
+    );
+}
+
+/// `n` small filled circles in a grid under the table: a drawing of `n` paths of curves.
+fn chart(n: usize) -> String {
+    (0..n)
+        .map(|k| {
+            let (x, y) = (
+                60.0 + (k % 128) as f32 * 3.0,
+                100.0 + (k / 128) as f32 * 3.0,
+            );
+            format!("{}f ", circle(x, y, 1.0))
+        })
+        .collect()
+}
+
+/// Fix round 2 of Task 38b (review M3): a page with more drawn paths than it keeps and no
+/// table that looks for icons says nothing about its drawings: a map or a chart is no loss
+/// of a table. The same drawing over a ruled table whose first row is all text says nothing
+/// either: no cell was looked at for an icon.
+#[test]
+fn many_drawn_paths_without_an_icon_cell_write_no_note() {
+    let noted = |c: String| {
+        let out = read(&pdf(&[Page::text(c)], ""));
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("drawings on page 1"))
+    };
+    let words = show(
+        "F1",
+        10.0,
+        72.0,
+        760.0,
+        "A map of Musterstadt in many small circles.",
+    );
+    assert!(!noted(chart(9_000) + &words));
+    let mut table = String::from("0.5 w ");
+    table += &ruled_cells(&[50.0, 130.0, 210.0, 290.0], "c");
+    assert!(!noted(chart(9_000) + &table));
+}
+
+/// Fix round 2 of Task 38b (review M6): an empty cell of the first row that is struck out
+/// with a cross of two slanted lines (as forms mark a field that does not apply) holds a
+/// drawing and no text, as a cell with an icon does. The page shows something there that
+/// Rezzer does not read, so the cell is named: saying nothing would hide a mark of the page,
+/// and Rezzer cannot tell a cross from a small icon. The cell stays empty.
+#[test]
+fn an_empty_cell_struck_out_with_a_cross_is_named_as_a_drawing() {
+    let (x0, x1) = (301.84 + 6.0, 413.7 - 6.0);
+    let cross = format!("0.5 w {x0} 646 m {x1} 668 l S {x0} 668 m {x1} 646 l S\n");
+    let out = read(&pdf(&[Page::text(timetable(false) + &cross)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found[0].1[0][4], "", "{found:?}");
+    assert_eq!(
+        icon_losses(&out),
+        [
+            "the table on page 1 that starts with \"Station\" has a drawing (an icon or a mark) and no \
+             text in the cell 5 of its first row: it is left empty"
+        ],
+        "{:?}",
+        out.document.losses
+    );
+}
+
+/// Fix round 2 of Task 38b (review M9): a path that puts no ink on the page is no drawing.
+/// The clock icons stroked or filled in pure white leave their cells unnamed, and so does a
+/// fill with no opacity; in black they are named.
+#[test]
+fn white_or_transparent_paths_are_no_icons() {
+    let clocks = |paint: &str| {
+        let xs = [56.25, 105.2];
+        let icon = clock_icon((xs[0] + xs[1]) / 2.0 - 8.4, 649.0);
+        format!("{}q {paint} {icon} Q\n", timetable(false))
+    };
+    let named = |c: String, extra: &str| {
+        let out = read(&with_gstate(&c, extra));
+        !icon_losses(&out).is_empty()
+    };
+    assert!(named(clocks("0 g"), ""));
+    assert!(!named(clocks("1 g"), ""));
+    assert!(!named(clocks("1 1 1 rg"), ""));
+    // The same icon as strokes (`f` and `f*` of the icon are `S`; the table is as it was):
+    // in black it is named, in white it is not.
+    let stroked = |paint: &str| {
+        let xs = [56.25, 105.2];
+        let icon = clock_icon((xs[0] + xs[1]) / 2.0 - 8.4, 649.0)
+            .replace("f* ", "S ")
+            .replace("f ", "S ");
+        format!("{}q 0.5 w {paint} {icon} Q\n", timetable(false))
+    };
+    assert!(named(stroked("0 0 0 RG"), ""));
+    assert!(!named(stroked("1 1 1 RG"), ""));
+    // A black fill with no opacity at all.
+    assert!(!named(
+        clocks("0 g /T0 gs"),
+        "/ExtGState << /T0 << /ca 0 /CA 0 >> >>"
+    ));
+    assert!(named(
+        clocks("0 g /T1 gs"),
+        "/ExtGState << /T1 << /ca 0.5 >> >>"
+    ));
+}
+
+/// A page with `content`, the fonts of [`pdf`] and `resources` more in its resources.
+fn with_gstate(content: &str, resources: &str) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let c = b.stream("", content.as_bytes());
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+         /Resources << /Font << /F1 {font} 0 R >> {resources} >> /Contents {c} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+/// Fix round 3 of Task 38b: two tables on one page that both looked for icons, on a page
+/// that draws more paths than it keeps. The page says once that its drawings were looked at
+/// only in part.
+#[test]
+fn the_shape_limit_is_said_once_for_a_page_of_two_tables() {
+    let second = format!("q 1 0 0 1 0 -300 cm {} Q\n", timetable(true));
+    let out = read(&pdf(
+        &[Page::text(chart(8_192) + &timetable(true) + &second)],
+        "",
+    ));
+    assert_eq!(tables(page(&out, 1)).len(), 2);
+    let said = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| {
+            l.what
+                .contains("drawings on page 1 past the first 8192 paths")
+        })
+        .count();
+    assert_eq!(said, 1, "{:?}", out.document.losses);
+}
+
+/// Fix round 4 of Task 38b: two tables on one page that start with the same words and hold
+/// icons in the same cells give the same words in their icon losses. Each table has its
+/// loss: only a note of the page as a whole is said once.
+#[test]
+fn two_tables_with_the_same_icon_cells_each_have_their_loss() {
+    let second = format!("q 1 0 0 1 0 -300 cm {} Q\n", timetable(true));
+    let out = read(&pdf(&[Page::text(timetable(true) + &second)], ""));
+    assert_eq!(tables(page(&out, 1)).len(), 2);
+    let losses = icon_losses(&out);
+    assert_eq!(losses.len(), 2, "{:?}", out.document.losses);
+    assert_eq!(losses[0], losses[1]);
 }
