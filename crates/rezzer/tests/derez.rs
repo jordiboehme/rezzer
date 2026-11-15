@@ -174,3 +174,85 @@ fn every_format_gives_its_own_grid() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// A two-page PDF written here: object `n` is `objects[n - 1]`, the cross-reference table is
+/// computed. Page 1 has a heading line in a large font and a ruled grid of 3 columns and 2
+/// rows. Page 2 has one rectangle.
+fn two_page_pdf() -> Vec<u8> {
+    let mut first = String::from("BT /F1 28 Tf 72 760 Td (Garden Notes) Tj ET\n0.5 w\n");
+    for k in 0..=2 {
+        let y = 700 - 40 * k;
+        first += &format!("72 {y} m 372 {y} l S\n");
+    }
+    for k in 0..=3 {
+        let x = 72 + 100 * k;
+        first += &format!("{x} 700 m {x} 620 l S\n");
+    }
+    for (r, row) in [["Fruit", "Count", "Note"], ["Apples", "3", "red"]]
+        .iter()
+        .enumerate()
+    {
+        for (c, text) in row.iter().enumerate() {
+            let (x, y) = (78 + 100 * c, 675 - 40 * r);
+            first += &format!("BT /F1 12 Tf {x} {y} Td ({text}) Tj ET\n");
+        }
+    }
+    let second = "100 500 200 120 re S\n";
+    let streams = [first.as_str(), second];
+    // 1 catalog, 2 pages, 3 font, then a page and its stream per page.
+    let mut objects: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        "<< /Type /Pages /Kids [4 0 R 6 0 R] /Count 2 >>".into(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),
+    ];
+    for (k, content) in streams.iter().enumerate() {
+        objects.push(format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents {} 0 R >>",
+            5 + 2 * k
+        ));
+        objects.push(format!(
+            "<< /Length {} >>\nstream\n{content}endstream",
+            content.len()
+        ));
+    }
+    let mut out = b"%PDF-1.4\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, body) in objects.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend(format!("{} 0 obj\n{body}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = out.len();
+    out.extend(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+    for o in offsets {
+        out.extend(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            objects.len() + 1
+        )
+        .as_bytes(),
+    );
+    out
+}
+
+#[test]
+fn built_pdf_gives_page_plans() {
+    let request = Request {
+        generated_at: Some(GENERATED_AT.to_string()),
+        geometry: true,
+        ..Request::default()
+    };
+    let result = pipeline().run_bytes("notes.pdf", two_page_pdf(), None, &request);
+    let doc = result
+        .document
+        .as_ref()
+        .unwrap_or_else(|| panic!("not read: {:?}", result.message));
+    let r = rounds("notes.pdf", Some(doc), None);
+    assert_eq!(r.note, None);
+    let labels: Vec<&str> = r.plans.iter().map(|p| p.label.as_str()).collect();
+    assert_eq!(labels, ["page 1 of 2", "page 2 of 2"]);
+    for plan in &r.plans {
+        assert!(fit(plan, 80, 40).is_ok(), "{}: no fit at 80x40", plan.label);
+    }
+}
