@@ -3248,7 +3248,7 @@ fn is_used(used: &[[f32; 4]], b: &[f32; 4]) -> bool {
 }
 
 /// A filled rectangle at most this many points thick is a rule, not a shaded area.
-const THIN: f32 = 2.0;
+pub(crate) const THIN: f32 = 2.0;
 
 /// Straight segments shorter than this many points are not rules.
 const SHORTEST: f32 = 1.0;
