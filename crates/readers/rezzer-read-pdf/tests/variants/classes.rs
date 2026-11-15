@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! The layout classes of step 5 of plan 7 (appendix A of the region engine spec), each a shape
+//! The layout classes of the region engine, each a shape
 //! of its own on a business page, named by its class. All text and values are invented.
 
 use crate::axes::{Axes, Look, Scale, Shape, Sheet, Variant};
@@ -38,7 +38,7 @@ const PICTURE_ITEMS: [[&str; 4]; 3] = [
     ["Untersetzer", "Art.-Nr. 1003", "4", "7,80"],
 ];
 
-/// B1 and vision class C: an item table between two rules, one above the header and one under
+/// An item table between two rules, one above the header and one under
 /// the rows, none between them. Each row holds a picture at the left, the item's name over a
 /// smaller detail line, and the quantity and the price flush right on the name's line. Each row
 /// is a table row (its name and detail one cell, its values in their cells), the picture is in
@@ -303,7 +303,7 @@ fn first_words(s: &mut Sheet) {
 /// B3: a timetable in a grid of drawn rules, each connection a drawn row of two lines, the
 /// departure over the arrival, a time on each line, the date and the train on the first line and
 /// the platform on one line only. The first drawn row's lines each fill half the band's cells,
-/// and the ruled reader's band rule from before Task 29 cuts it in two rows (the platform in the
+/// and the band rule of the older ruled reader cuts it in two rows (the platform in the
 /// arrival's row); the second row's cells keep their lines (no line wraps into the next), so each
 /// stop stays on the line of its time and the platform stands on the departure's line.
 fn two_line_cells(v: &Variant) -> Sheet {
@@ -338,8 +338,8 @@ fn two_line_cells(v: &Variant) -> Sheet {
         },
     );
     let _ = table;
-    // The first drawn row is cut in two rows by the ruled reader's band rule from before Task 29
-    // (both its lines fill at least half of the band's cells), which the class A ruling keeps;
+    // The first drawn row is cut in two rows by the band rule of the older ruled reader
+    // (both its lines fill at least half of the band's cells), which the class keeps;
     // the second keeps its cells' lines, the platform on the departure's line.
     s.want.table(
         rows_of(&[
@@ -366,7 +366,7 @@ fn two_line_cells(v: &Variant) -> Sheet {
     s
 }
 
-/// Vision class A: a timetable in a grid of drawn rules, each connection a drawn row whose stop
+/// A timetable in a grid of drawn rules, each connection a drawn row whose stop
 /// cell lists its stops one under the other beside a time on the line of each stop, and a date,
 /// a platform and a train on the first line. Each cell keeps its lines, so each stop stays on
 /// the line of its time; the cells of one line are read as they stand.
@@ -424,7 +424,7 @@ fn paired_lines_in_a_grid(v: &Variant) -> Sheet {
     s
 }
 
-/// Review Important 1: the timetable of [`paired_lines_in_a_grid`] with a date cell drawn over
+/// The timetable of [`paired_lines_in_a_grid`] with a date cell drawn over
 /// its first two rows. The second row has no date cell of its own (the cell over it covers it):
 /// parting its lines into rows would move its cells one column to the left, so both rows stay
 /// one row each, their cells read as one text.
@@ -464,7 +464,7 @@ fn paired_lines_under_a_merged_cell(v: &Variant) -> Sheet {
     s
 }
 
-/// Review Important 2: a ruled item table whose rows wrap: a label of two lines beside a start
+/// A ruled item table whose rows wrap: a label of two lines beside a start
 /// date over an end date under a title of two lines (`Beginn` over `Ende`), and a description of
 /// two lines beside a price over its discount, among cells of one line. Stacked values under a
 /// stacked title are one record's attributes: each drawn row stays one row.
@@ -504,9 +504,9 @@ fn wrapped_text_beside_stacked_values(v: &Variant) -> Sheet {
     s
 }
 
-/// Re-review 1 (new Important): an item over its article number beside a unit price and a total,
+/// An item over its article number beside a unit price and a total,
 /// each a net over a gross amount under a title of two lines: one record a drawn row, each cell
-/// its two lines. Every line fills the band, so the ruled reader's band rule from before Task 29
+/// its two lines. Every line fills the band, so the band rule of the older ruled reader
 /// cuts each drawn row in two rows (the article number with the gross amounts): a known class
 /// (`known.rs`, kept after 0.1.0), not the wanted reading.
 fn item_beside_net_over_gross(v: &Variant) -> Sheet {
@@ -548,7 +548,7 @@ fn item_beside_net_over_gross(v: &Variant) -> Sheet {
     s
 }
 
-/// Private shape S2 (vision class A on the ruled path): a ruled table one of whose drawn cells
+/// A private shape: a ruled table one of whose drawn cells
 /// holds two columns, bounded only by joints in the segments of every horizontal rule: from and
 /// to, with an arrow in another font between their titles. The segments touch at the joints,
 /// and the joints of the rules under the second body row stand 0.4 points off those above. Two
@@ -652,7 +652,7 @@ fn columns_bounded_by_rule_breaks(v: &Variant) -> Sheet {
     s
 }
 
-/// Re-review 3 (new Important 2): the grid of [`columns_bounded_by_rule_breaks`] with a last row
+/// The grid of [`columns_bounded_by_rule_breaks`] with a last row
 /// of one cell whose sentence runs across both joints of the rules, its words a plain word
 /// space apart. A word space is no column gap: the sentence stays one cell, wherever the joints
 /// fall in it.
@@ -700,7 +700,7 @@ fn a_sentence_across_rule_breaks(v: &Variant) -> Sheet {
     s
 }
 
-/// Review Minor 2, open: an item table without rules whose rows are a line of values over a
+/// An item table without rules whose rows are a line of values over a
 /// detail line, and a note of one piece under the last row, where its detail line would stand,
 /// in the same face. The note is no part of the last row. Nothing on the page tells it from a
 /// detail line, so it reads as one today: a known class (`known.rs`, kept after 0.1.0).
@@ -741,7 +741,7 @@ fn a_note_where_a_detail_line_would_stand(v: &Variant) -> Sheet {
     s
 }
 
-/// Review Important 3: an item table without a header row whose names are bold over plain
+/// An item table without a header row whose names are bold over plain
 /// detail lines, the rows a line apart (no blank between them): each detail line stays with the
 /// name over it.
 fn bold_names_over_detail_lines(v: &Variant) -> Sheet {
@@ -804,7 +804,7 @@ fn plain_items(v: &Variant, top: f32) -> (String, Vec<Vec<String>>) {
     (t, rows_of(&rows))
 }
 
-/// Review Important 4 (a): a stamp drawn over the rows of an item table without rules, over
+/// A stamp drawn over the rows of an item table without rules, over
 /// more than one row and across its columns. It is no row's picture: the table keeps its
 /// cells, and the stamp is a picture of its own.
 fn a_stamp_over_an_item_table(v: &Variant) -> Sheet {
@@ -821,7 +821,7 @@ fn a_stamp_over_an_item_table(v: &Variant) -> Sheet {
     s
 }
 
-/// Review Important 4 (a), ruled: the stamp over the rows of a table in a grid of drawn rules.
+/// The stamp over the rows of a table in a grid of drawn rules.
 fn a_stamp_over_a_ruled_table(v: &Variant) -> Sheet {
     let rows: [&[&[&str]]; 3] = [
         &[&["1"], &["Beratung"], &["2"], &["1.000,00"]],
@@ -850,7 +850,7 @@ fn a_stamp_over_a_ruled_table(v: &Variant) -> Sheet {
     s
 }
 
-/// Review Important 4 (b): a flat picture in each row of an item table without rules, across
+/// A flat picture in each row of an item table without rules, across
 /// the bound between the article and the quantity columns. In no one column, it is no cell's
 /// picture: the table keeps its cells, the pictures stand apart.
 fn pictures_across_a_column_bound(v: &Variant) -> Sheet {
@@ -869,7 +869,7 @@ fn pictures_across_a_column_bound(v: &Variant) -> Sheet {
     s
 }
 
-/// Review Important 4 (c): a picture from the last row of an item table down to a table of
+/// A picture from the last row of an item table down to a table of
 /// other columns under it, past a gap wider than a blank row. One picture bridges no gap: both
 /// tables keep their cells, and the picture stands apart.
 fn a_picture_over_the_gap_to_the_next_table(v: &Variant) -> Sheet {
@@ -910,7 +910,7 @@ const CODED_ITEMS: [[&str; 5]; 3] = [
     ["3", "Untersetzer", "40213AB12C / X12Y3Z4569", "4", "7,80"],
 ];
 
-/// Private shape S3 (vision class C): a paragraph of three lines, a blank line, then the header
+/// A private shape: a paragraph of three lines, a blank line, then the header
 /// of an item table in the paragraph's face, size and pitch (not bold), a rule under the header
 /// drawn as touching segments with joints at the column bounds, item rows of two lines (a name
 /// over an article code) with a picture inside the description column over both lines, a
@@ -1005,7 +1005,7 @@ const LISTED_ITEMS: [[&str; 5]; 3] = [
     ["3", "Saucer", "40213AB12C / X12Y3Z4569", "4", "7,80"],
 ];
 
-/// Task 31b, class S3: the item rows of [`picture_in_the_description`] on the page of a
+/// The item rows of [`picture_in_the_description`] on the page of a
 /// letter. Over them stand an address on the left and a block of five short lines on the
 /// right, on baselines of their own, so the page has a gutter between the descriptions and
 /// the counts with blocks on both sides that do not line up; the lines of the paragraph run
@@ -1018,7 +1018,7 @@ fn item_rows_under_an_info_block(v: &Variant) -> Sheet {
     item_rows_on_a_letter_page(v, Over::Titles)
 }
 
-/// Task 31c: the page of [`item_rows_under_an_info_block`] as a second sheet of its list.
+/// The page of [`item_rows_under_an_info_block`] as a second sheet of its list.
 /// Over the rule in pieces stands no row of titles but a row carried over from the sheet
 /// before: a label and an amount. The joints of the rule and the rows under it are the same.
 /// The rows are still rows: each count and price is read with its item, never after all
@@ -1041,7 +1041,7 @@ enum Over {
     Heading(bool),
 }
 
-/// Task 36a fix round 3 (re-review 2, I1): the page of [`item_rows_under_a_carried_row`]
+/// The page of [`item_rows_under_a_carried_row`]
 /// with a heading where the row carried over stood: a bold line and, flush right at the edge
 /// of the prices, a date, on one baseline right over the rule in pieces. Each
 /// stands at an edge that the rows under the rule share, and one reads as a value: all that
@@ -1211,7 +1211,7 @@ fn item_rows_on_a_letter_page(v: &Variant, over: Over) -> Sheet {
     s
 }
 
-/// Task 31b fix round 1 (C1): a totals block under one item row. The header and the item row
+/// A totals block under one item row. The header and the item row
 /// of [`item_rows_under_an_info_block`] on the same letter page, then, between two rules
 /// drawn in the same three pieces, two lines of a label and its amount set flush right (the
 /// labels end at a joint of the rules), and under the lower rule a small note on the left
@@ -1322,7 +1322,7 @@ const VALUE_COLUMN: [(&str, &str); 5] = [
     ("Parcels", "12"),
 ];
 
-/// A1 (Task 26): five lines of a label and its value, the values at one left edge. One label
+/// A1: five lines of a label and its value, the values at one left edge. One label
 /// is wider than the others and ends a word space before the value column, so its line has no
 /// gap that parts it: the value column's shared left edge parts it, never the gap. Each label
 /// reads with its own value.
@@ -1361,7 +1361,7 @@ fn labels_with_a_shared_value_column(v: &Variant) -> Sheet {
     s
 }
 
-/// A2 (Task 26): two lines of small labels, each over the line of its values, with no rules.
+/// A2: two lines of small labels, each over the line of its values, with no rules.
 /// The values start under their labels, a little indented; the last label has no value under
 /// it. A value belongs to the label it stands under (their widths overlap), and the label
 /// with nothing under it keeps an empty value: no value moves to it.
@@ -1395,7 +1395,7 @@ fn two_labels_over_their_values(v: &Variant) -> Sheet {
     s
 }
 
-/// H1 (Task 26 part 3a): a column of field rows in the right half of a letter page, with no
+/// H1: a column of field rows in the right half of a letter page, with no
 /// rules. Small labels in a proportional face stand over values in a larger monospaced face,
 /// the values indented a little. The first value is padded with blanks as far as the second
 /// value, so its piece reaches under the second label, but its ink does not. The second row
@@ -1483,7 +1483,7 @@ fn padded_values_under_labels_in_a_column(v: &Variant) -> Sheet {
     s
 }
 
-/// H2 (Task 26 part 3a): the head block at the top right of a letter page, three lines set
+/// H2: the head block at the top right of a letter page, three lines set
 /// close under each other (0.9 sizes apart) and flush right. The first is one padded string
 /// in the monospaced face (a reference, blanks, a number), kept as a line: the number is
 /// another cell, not more of the reference. The second and the third are a
@@ -1564,7 +1564,7 @@ fn colon_labels_in_a_head_block(v: &Variant) -> Sheet {
     s
 }
 
-/// H3 (Task 26 part 3a): one line of a print run in the monospaced face: a date, a wide
+/// H3: one line of a print run in the monospaced face: a date, a wide
 /// blank, then a label that ends with a colon and its value two blanks after it. The label
 /// reads with its value; the date is no label of anything and stands for itself.
 fn a_date_beside_a_colon_label_on_one_line(v: &Variant) -> Sheet {
@@ -1587,14 +1587,14 @@ fn a_date_beside_a_colon_label_on_one_line(v: &Variant) -> Sheet {
     s
 }
 
-/// Task 26 part 3c-1 (the carried fixed-width blocks): lines of a listing in the monospaced
+/// Lines of a listing in the monospaced
 /// face, each a label, blanks up to a column, a colon and the value. The writer sets a line
 /// whose label is padded in two runs, the label with one blank and then the colon with the
 /// value (`Currency ` and `: EUR`), and a line whose label fills the column in one run
 /// (`Profile in use : basic-2017`, `Global number: 4000001123452 (GLN)`). The colon that
 /// opens the second run says the first is a label as a colon at its end does when the line
 /// next to it has its colon in the same column, as the lines of a block of the listing have
-/// (fix round 4): every line of the two blocks reads as a label and its value. The last
+/// every line of the two blocks reads as a label and its value. The last
 /// line is alone, with no line to share its column of colons: it is a pair by its value, a
 /// date.
 fn fixed_width_colon_lines(v: &Variant) -> Sheet {
@@ -1658,7 +1658,7 @@ fn word_parts(text: &str) -> Vec<&str> {
     text.split_inclusive(' ').collect()
 }
 
-/// H1 as a print run draws it (Task 26 fix 3a): the field rows of
+/// H1 as a print run draws it: the field rows of
 /// [`padded_values_under_labels_in_a_column`], but every line of values is one bold monospaced
 /// run that starts at the left margin of the page with blanks as far as the column, each label
 /// is set word by word in runs that touch, and an address block in the monospaced face stands
@@ -1666,7 +1666,7 @@ fn word_parts(text: &str) -> Vec<&str> {
 /// the rows and the last field, which stands alone in the next row.
 ///
 /// With `larger` the values are set as the owner's form sets them, in 9.7 points bold over a
-/// body of 7 (Task 26 fix round 2, a pin): the bold value line is then a heading to the
+/// body of 7: the bold value line is then a heading to the
 /// levels of the page.
 fn value_lines_from_the_page_margin(v: &Variant, larger: bool) -> Sheet {
     /// The blanks from the first value to the second one.
@@ -1770,7 +1770,7 @@ fn value_lines_from_the_page_margin(v: &Variant, larger: bool) -> Sheet {
     s
 }
 
-/// Task 26 fix round 1 (I1, the reviewer's probe P8): two rows of small labels over their
+/// Two rows of small labels over their
 /// values, the second one far under the first and in another column, with no box around
 /// either. They are two blocks of the page: each reads as its own pairs, never as one list.
 fn fields_in_two_blocks(v: &Variant) -> Sheet {
@@ -1829,7 +1829,7 @@ const PAIR_LINES: [(&str, &str); 5] = [
     ("Weight:", "12,5 kg"),
 ];
 
-/// Task 26 fix round 1 (I1; the carried run of one-row pairs): lines of a label and its
+/// Lines of a label and its
 /// value set far apart (2.2 text sizes, wider than the lines of a block of text), the labels
 /// from one left edge and each value after its label. Each line is a region of its own to the engine; they stand at
 /// one pitch from one edge with nothing between them, so they read as one list of pairs.
@@ -1870,7 +1870,7 @@ enum RowRules {
     Lone,
 }
 
-/// Task 26 part 2 (the ruling on a block's own ruling): the lines of [`a_run_of_pair_lines`]
+/// The lines of [`a_run_of_pair_lines`]
 /// at the pitch of a block of fields, with drawn rules of one extent half way between the
 /// baselines. The same rule between every two lines is the block's own ruling and parts
 /// nothing: one list of five pairs. One rule alone is a border: the lines over it and the
@@ -1911,7 +1911,7 @@ fn ruled_pair_lines(v: &Variant, rules: RowRules) -> Sheet {
     s
 }
 
-/// Task 26 fix round 1 (M1): a line of small labels over the line of their values, where the
+/// A line of small labels over the line of their values, where the
 /// first value reaches under two labels (`Oakfield Bank` under `Bank` and `Account`), so no
 /// value can be given to one label. The line of the values reads as words and a date; it is
 /// no label and its value (`Oakfield Bank | 30.10.2026` is a wrong pair): the rows stay as
@@ -1939,7 +1939,7 @@ fn a_value_under_two_labels_beside_a_date(v: &Variant) -> Sheet {
     s
 }
 
-/// The shapes of the step 5 classes.
+/// The shapes of the layout classes.
 pub(crate) fn shapes() -> Vec<Shape> {
     vec![
         Shape {

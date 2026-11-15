@@ -370,13 +370,13 @@ pub(crate) fn values_alone(out: &ReadOutcome) -> Vec<String> {
     found
 }
 
-/// The tables of the pay slip: its header field grid as label and value pairs (ruling P6-H);
+/// The tables of the pay slip: its header field grid as label and value pairs;
 /// its sections E, T, S, the right middle and the bottom of L, each a header over its lines;
 /// no section is lost and none gives a loss. Each value of a value line stands in the column
 /// of its label, also where only one or two spaces part it from the next value across a
 /// column rule, and an empty field is an empty cell. The column of totals on the right joins
 /// each section beside it (its amounts in the section's rows), and each total label in it
-/// pairs with the amount under it (ruling P6-O). The block of labels with their values left
+/// pairs with the amount under it. The block of labels with their values left
 /// in L and the bank row under it are label and value pairs, an empty field marked empty.
 /// No amount stands alone.
 pub(crate) fn assert_pay_slip(out: &ReadOutcome) {
@@ -485,11 +485,11 @@ pub(crate) fn assert_pay_slip(out: &ReadOutcome) {
     assert_eq!(body(&found[9]), ["1.234,56|||9.876,54"], "{found:#?}");
     // The title right above a section's top rule is that table's caption, never a row of
     // the table above (the rows of E and S above show none): T's in E's band, L's in the
-    // band under S, and E's over the grid, as the grid is cut (ruling P6-Q).
+    // band under S, and E's over the grid, as the grid is cut.
     let mut captions = vec![None; 10];
     captions[1] = Some("Bezuege A".to_string());
     captions[3] = Some("Abzuege B".to_string());
-    // L's two titles stand on one line, each over its own rule (Task 36a part 1b, class F):
+    // L's two titles stand on one line, each over its own rule:
     // the caption of the table is the title over its own rule only, and the title over the
     // other rule heads the block of labels under that rule, before its rows.
     captions[6] = Some("La".to_string());
@@ -524,7 +524,7 @@ fn pay_slip_with_filled_marks_reads_the_same() {
     assert_pay_slip(&out);
 }
 
-/// The pay slip printed smaller or larger as a whole (ruling P6-Y: no bound of this task is a
+/// The pay slip printed smaller or larger as a whole (no bound of this task is a
 /// number of points measured on one form) reads the same. At 1.5 the drawn marks are 3.24
 /// points long: a mark is measured by the size of the digits it stands between, so they are
 /// still marks.

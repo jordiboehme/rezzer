@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! The typers of text regions: each kind from named signals, positive evidence only, the
-//! same scores at every scale, and today's decisions ahead of their rivals by the margin.
+//! same scores at every scale, and the current decisions ahead of their rivals by the margin.
 
 use layoutregions::file::{FilePage, learn};
 use layoutregions::segment::drawn::drawn;
@@ -499,7 +499,7 @@ fn a_score_is_the_sum_of_its_signals() {
     }
 }
 
-/// The worst cases of the kinds today's rules decide between, by the weights alone: each
+/// The worst cases of the kinds the current rules decide between, by the weights alone: each
 /// winner's least score is ahead of the loser's best by the margin.
 #[test]
 fn worst_case_margins_hold_by_the_weights() {
@@ -571,7 +571,7 @@ fn a_segment_of_the_tree_is_walked_once() {
     assert!(all(&segs.all[segs.root.0 as usize]).is_empty());
 }
 
-// ---- Tables, totals and label/value groups (Task 17) ----
+// ---- Tables, totals and label/value groups ----
 
 /// A rule from (x0, y0) to (x1, y1).
 fn rule(x0: f32, y0: f32, x1: f32, y1: f32) -> RuleIn {
@@ -782,7 +782,7 @@ fn ruled_grid_is_table_evidence() {
     assert!(lead >= MARGIN, "{typed:#?}");
 }
 
-/// Task 19a-5b: a row of boxed values under one title across all their boxes (a date in boxes
+/// A row of boxed values under one title across all their boxes (a date in boxes
 /// under `Month Day Year`) has no column titles and no second row: no table. With a second row
 /// of values the grid is a table.
 #[test]
@@ -1222,7 +1222,7 @@ fn worst_case_margins_of_tables_pairs_and_totals() {
             paragraph,
         ),
         ("totals over paragraph", TOTALS_UNDER, paragraph),
-        // Line pairs carry a colon or a shaped value on every line (Task 18b, ruling Q2).
+        // Line pairs carry a colon or a shaped value on every line.
         (
             "line pairs over paragraph",
             LABEL_LINE_PAIRS + LABEL_COLON.min(LABEL_VALUE_SHAPE),
@@ -1239,7 +1239,7 @@ fn worst_case_margins_of_tables_pairs_and_totals() {
             LABEL_FIELDS + LABEL_STYLE + LABEL_KNOWN_STYLE,
             paragraph,
         ),
-        // Fields in strips between rules (Task 18b, round 2).
+        // Fields in strips between rules.
         ("strip fields over a table", LABEL_STRIP_FIELDS, table),
         ("strip fields over paragraph", LABEL_STRIP_FIELDS, paragraph),
         (
@@ -1662,7 +1662,7 @@ fn touching_boxes_cost_the_boxes_not_their_square() {
     assert!(large < 8 * small, "{small} then {large}");
 }
 
-// ---- Figures and codes (Task 18) ----
+// ---- Figures and codes ----
 
 fn bounds(x0: f32, y0: f32, x1: f32, y1: f32) -> Bounds {
     Bounds { x0, y0, x1, y1 }
@@ -1857,7 +1857,7 @@ fn a_grid_on_a_picture_is_a_figure() {
 /// kind fires where there is no text, so their own signals meet no rival: they only need the
 /// least score. A figure refusal is on a drawn grid's text and meets the text kinds there; the
 /// pairs it cannot lead by the margin (a demoted heading-size paragraph, a heading kept with its
-/// title lines, a running band, a legend or a title) are listed in the Task 18 report for 18b.
+/// title lines, a running band, a legend or a title) are left to the later typers.
 #[test]
 fn worst_case_margins_of_figures_and_codes() {
     use layoutregions::typers::code::{CODE_READABLE, CODE_SYMBOL};
@@ -1911,7 +1911,7 @@ fn two_pictures_are_two_figures() {
 /// A ruled table on a picture of the whole page (a letterhead or a scan under the text) is no
 /// figure: the refusal names why no table was read, but a page frame under a grid is no chart.
 /// A ruled table with cells that hold only "Abb. 3" beside the other cells of their rows is a
-/// table (Task 19b: such a cell points to a figure, it captions none); a grid with a caption
+/// table (such a cell points to a figure, it captions none); a grid with a caption
 /// alone on its line inside it, or with caption words, is refused for it.
 #[test]
 fn a_grid_on_a_page_picture_or_with_a_caption_cell_is_no_figure() {
@@ -1976,7 +1976,7 @@ fn rows_at(rows: &[&[&str]], xs: &[f32], top: f32, size: f32, first: u32) -> Vec
     texts
 }
 
-/// Task 26 fix round 2 (I2) and part 3b: lines of a label that ends with a colon and its value
+/// Lines of a label that ends with a colon and its value
 /// a cell gap after it read as pairs among other lines, in the rest of a drawn grid of two
 /// columns or more too (the colon says the first piece is a label), but not right under a row
 /// of smaller labels (the row of the values of those labels). The size of that row is moved
@@ -2067,7 +2067,7 @@ fn colon_lines_pair_in_a_grid_but_not_under_smaller_labels() {
     assert!(find(&under(9.3), Kind::LabelValue).is_some());
 }
 
-/// Task 26 part 3b (class A5): two lines alone in one size, the upper one with an underline
+/// Two lines alone in one size, the upper one with an underline
 /// of its own, are a label over its value. The underline is the evidence: it lies at most a
 /// quarter of the size under the baseline and is as long as the words (each end within half
 /// a size). Each bound is moved both ways; a longer rule (a line to fill in), an underline
@@ -2181,7 +2181,7 @@ fn a_label_with_its_own_underline_over_a_line_is_a_pair() {
         // The value reads as one: at least half of its words hold a digit, a slash or an
         // at sign, or the line is a number, a date or a code. Plain words under an
         // underlined line say nothing about which of the two is the label (M2), and one
-        // number among plain words is text under a heading (fix round 3b).
+        // number among plain words is text under a heading.
         ("call back Monday", false),
         ("call back 12 May", false),
         ("back 12 May", false),
@@ -2205,7 +2205,7 @@ fn a_label_with_its_own_underline_over_a_line_is_a_pair() {
         let t = typed("Checked by", (text, 72.0, 10.0), rule_of());
         assert_eq!(pairs(&t), pair, "{text}: {t:#?}");
     }
-    // Review 3 (I1): an underline as long as its words stands under a filled value, a
+    // An underline as long as its words stands under a filled value, a
     // name, a link and a heading as well. With plain words under it the two lines are no
     // pair, on a segment made by hand and on the one the cut makes; with a value under
     // the same upper line they are one.
@@ -2267,7 +2267,7 @@ fn a_label_with_its_own_underline_over_a_line_is_a_pair() {
     )));
 }
 
-/// Task 18b (ruling Q2): a short label with a colon and its value in one run reads as a pair,
+/// A short label with a colon and its value in one run reads as a pair,
 /// line by line, at every scale; prose after a colon does not.
 #[test]
 fn a_colon_label_and_its_value_in_one_run_is_a_pair() {
@@ -2297,7 +2297,7 @@ fn a_colon_label_and_its_value_in_one_run_is_a_pair() {
     assert!(find(&typed, Kind::LabelValue).is_none(), "{typed:#?}");
 }
 
-/// Task 18b (ruling Q2): a lone line of a short label and a value shaped as a code or a
+/// A lone line of a short label and a value shaped as a code or a
 /// number, apart by a gap, is a pair; a lone line of two words is none.
 #[test]
 fn a_lone_line_of_a_label_and_a_shaped_value_is_a_pair() {
@@ -2317,7 +2317,7 @@ fn a_lone_line_of_a_label_and_a_shaped_value_is_a_pair() {
     assert!(find(&typed, Kind::LabelValue).is_none(), "{typed:#?}");
 }
 
-/// Fix round 1 of Task 31a (I3): items of a list that read `label: value`, each cut into a
+/// Items of a list that read `label: value`, each cut into a
 /// band of its own by the equal white space between them, are items of their list and no
 /// tables of one row: with a bullet set as a letter that every item opens with, or with an
 /// enumerator in brackets. The same lines without a marker are pairs, line by line.
@@ -2349,7 +2349,7 @@ fn a_list_item_of_a_label_and_its_value_is_no_pair_of_its_own() {
         (["(a) ", "(b) ", "(c) ", "(d) "], false),
         (["(1) ", "(2) ", "(3) ", "(4) "], false),
         (["(i) ", "(ii) ", "(iii) ", "(iv) "], false),
-        // A short name in brackets is no enumerator (fix round 2, N5).
+        // A short name in brackets is no enumerator.
         (["(EIN) ", "(GLN) ", "(GTIN) ", "(USt) "], true),
         (["", "", "", ""], true),
     ] {
@@ -2367,7 +2367,7 @@ fn a_list_item_of_a_label_and_its_value_is_no_pair_of_its_own() {
     }
 }
 
-/// Task 19a-5b: a lone line of a name and a code set a size step smaller beside it (the bureau
+/// A lone line of a name and a code set a size step smaller beside it (the bureau
 /// name of a sample check and its printed `000`) is no pair; the code in the label's size is.
 #[test]
 fn a_lone_name_beside_a_smaller_code_is_no_pair() {
@@ -2388,7 +2388,7 @@ fn a_lone_name_beside_a_smaller_code_is_no_pair() {
     }
 }
 
-/// Task 18b (ruling Q5): a block of two columns in one style without a colon or a shaped value
+/// A block of two columns in one style without a colon or a shaped value
 /// on its lines (names beside names) is no block of labels and values.
 #[test]
 fn key_values_need_evidence_on_every_pair() {
@@ -2404,7 +2404,7 @@ fn key_values_need_evidence_on_every_pair() {
     assert!(find(&typed, Kind::LabelValue).is_none(), "{typed:#?}");
 }
 
-/// Task 18b (ruling Q5): blocks side by side that share no column structure are no table: an
+/// Blocks side by side that share no column structure are no table: an
 /// address down one column beside a field, an address beside a bank. Rows of numbers in
 /// columns (lines the detectors without rules left as text) stay a table.
 #[test]
@@ -2452,7 +2452,7 @@ fn blocks_side_by_side_are_no_table() {
     assert!(lead >= MARGIN, "{typed:#?}");
 }
 
-/// Task 18b (ruling Q7): a line of titles (every word capitalised, stops only after
+/// A line of titles (every word capitalised, stops only after
 /// abbreviations) reads as no sentence and no prose.
 #[test]
 fn a_line_of_titles_is_no_sentence() {
@@ -2479,7 +2479,7 @@ fn a_line_of_titles_is_no_sentence() {
     assert!(ids(of(&typed, Kind::Paragraph)).contains(&"paragraph.sentences"));
 }
 
-/// Task 18b (ruling Q3): an address in a size that is no text size of the page reads as a
+/// An address in a size that is no text size of the page reads as a
 /// paragraph by its joined lines alone, and the walk keeps a line break before each of its
 /// lines.
 #[test]
@@ -2527,7 +2527,7 @@ fn an_address_in_small_print_is_a_paragraph_with_its_breaks() {
     assert_eq!(breaks.len(), 2, "{breaks:?}");
 }
 
-/// Task 18b (ruling Q6): a text leaf whose walk reads list items and a paragraph is cut at the
+/// A text leaf whose walk reads list items and a paragraph is cut at the
 /// walk's block boundaries, so each part gets its own kind.
 #[test]
 fn a_leaf_of_mixed_text_kinds_is_cut_by_the_walk() {
@@ -2585,7 +2585,7 @@ fn a_leaf_of_mixed_text_kinds_is_cut_by_the_walk() {
     assert_eq!(got, segs.all[segs.root.0 as usize].prims, "the cover");
 }
 
-/// Task 18b (ruling Q7): the walk of a segment looks at the page's lines just under it, as the
+/// The walk of a segment looks at the page's lines just under it, as the
 /// walk over the page does: a bold line at a heading size over more such lines of fields
 /// (a box cuts it off them) is no heading but lines apart.
 #[test]
@@ -2655,7 +2655,7 @@ fn strips_page(strips: &[[(&str, &str); 3]], k: f32) -> Tree {
     Tree { page }
 }
 
-/// Task 18b round 2: strips of small labels over their values between rules, without
+/// Strips of small labels over their values between rules, without
 /// dividers, read as fields, ahead of a table and a paragraph by the margin, at every scale;
 /// an empty field keeps its label. A value with no label in its strip reads no fields.
 #[test]
@@ -2706,7 +2706,7 @@ fn fields_in_strips_between_rules_are_label_value() {
     );
 }
 
-/// Task 18b round 2: lines that alternate between values and their smaller labels (values
+/// Lines that alternate between values and their smaller labels (values
 /// over labels) are no rows of a table.
 #[test]
 fn alternating_labels_and_values_are_no_table() {
@@ -2729,7 +2729,7 @@ fn alternating_labels_and_values_are_no_table() {
     assert!(find(&typed, Kind::Table).is_none(), "{typed:#?}");
 }
 
-/// Task 18b round 2: lines in cells never join into a paragraph, and the pieces of a row in a
+/// Lines in cells never join into a paragraph, and the pieces of a row in a
 /// ruled grid are cells, not a label and its value: the grid reads as a table.
 #[test]
 fn cells_are_no_paragraph_and_no_pair() {
@@ -2768,7 +2768,7 @@ fn cells_are_no_paragraph_and_no_pair() {
     assert!(find(&typed, Kind::LabelValue).is_none(), "{typed:#?}");
 }
 
-/// Fix round 1 (I3): running lines, footnote legends and the page title keep their own kinds:
+/// Running lines, footnote legends and the page title keep their own kinds:
 /// a running footer of a label with a colon and its value, and a title line of one, read no
 /// label and value.
 #[test]
@@ -2800,7 +2800,7 @@ fn running_lines_and_the_title_read_no_pairs() {
     assert_eq!(winner(&typed).0, Kind::TitleBlock, "{typed:#?}");
 }
 
-/// Fix round 1 (I3): lines the table rules read as a table are no heading, however large
+/// Lines the table rules read as a table are no heading, however large
 /// they are set: a borderless table in a heading size.
 #[test]
 fn a_table_in_a_heading_size_is_no_heading() {
@@ -2830,7 +2830,7 @@ fn a_table_in_a_heading_size_is_no_heading() {
     assert!(find(&typed, Kind::Heading).is_none(), "{typed:#?}");
 }
 
-/// Fix round 1 (I1): a header and a total row set larger than the rows between them change
+/// A header and a total row set larger than the rows between them change
 /// the size there and back once: the lines stay a table by the margin. Lines whose sizes go
 /// and come back more often (values over their labels, a second value line on a label's line)
 /// are no table.
@@ -2921,7 +2921,7 @@ fn kind_of_line(page: &PageIn, segs: &Segments, out: &[Decision], line: u32) -> 
         .map(|d| d.kind)
 }
 
-/// Fix round 1 (I5): an address under a table in one box stays a paragraph at every scale:
+/// An address under a table in one box stays a paragraph at every scale:
 /// the box's table reading only spreads the rows over it. A regression test of the class: it
 /// does not fail under the old score rule of `arbitrate` (the box does not outscore its table
 /// child here); `a_parent_that_only_spreads_a_child_folds_no_sibling` pins the rule.
@@ -2979,7 +2979,7 @@ fn an_address_under_a_table_stays_a_paragraph() {
     }
 }
 
-/// Task 19a (ruling Q2): a bold header row over the rows of a table without rules is the
+/// A bold header row over the rows of a table without rules is the
 /// table's header, not a heading: the parent's table reading names its line as the header row,
 /// so the heading typer gives it no candidate and the table holds it, at sizes where a bold
 /// line alone would read as a heading. The address under a table stays a paragraph (see
@@ -3022,7 +3022,7 @@ fn a_bold_header_over_its_rows_folds_into_the_table() {
     }
 }
 
-/// Fix round 1 (M5): a segment between two rules (a strip) is never a paragraph: its lines
+/// A segment between two rules (a strip) is never a paragraph: its lines
 /// are cells or fields.
 #[test]
 fn a_strip_is_no_paragraph() {
@@ -3040,7 +3040,7 @@ fn a_strip_is_no_paragraph() {
     assert!(find(&typed, Kind::Paragraph).is_none(), "{typed:#?}");
 }
 
-/// Fix round 1 (I2): a label over its value read cell by cell (a label line and a value line,
+/// A label over its value read cell by cell (a label line and a value line,
 /// as segments of their own) is no paragraph, so the pairing that is not read is never lost
 /// without a word: it stays as laid out. Two words of one style one over the other are.
 #[test]
@@ -3067,7 +3067,7 @@ fn a_label_over_its_value_is_no_paragraph() {
     }
 }
 
-/// Fix round 1 (I2): in a row of boxed fields a box of one label alone (an empty field) is no
+/// In a row of boxed fields a box of one label alone (an empty field) is no
 /// paragraph, and a box of a company over its address beside the fields stays a paragraph of
 /// its own: the grid's field reading leaves it out and never folds it.
 #[test]
@@ -3110,7 +3110,7 @@ fn sheet_at(texts: Vec<TextRun>, rules: Vec<RuleIn>, k: f32) -> Tree {
     .scaled(k)
 }
 
-/// Fix round 2 (N1): a ruled table whose header of two lines (titles over their units) stands
+/// A ruled table whose header of two lines (titles over their units) stands
 /// between its top rule and its header rule stays a table by the margin: the header strip
 /// reads as nothing else.
 #[test]
@@ -3140,7 +3140,7 @@ fn a_table_with_a_header_of_two_lines_between_rules_stays_a_table() {
     }
 }
 
-/// Fix round 2 (N1): a table reading over lines that take in a strip of fields between rules
+/// A table reading over lines that take in a strip of fields between rules
 /// is refused (`spatial.strip_inside`): the strip's fields are its own reading.
 #[test]
 fn a_table_over_a_strip_of_fields_is_refused() {
@@ -3190,7 +3190,7 @@ fn a_table_over_a_strip_of_fields_is_refused() {
     }
 }
 
-/// Fix round 2 (N4): a grouped table, its section row of one piece in the header's size
+/// A grouped table, its section row of one piece in the header's size
 /// between the rows, stays a table by the margin: a section row is no turn of the sizes. A
 /// second value line of one piece among values and their labels is no section row.
 #[test]
@@ -3257,7 +3257,7 @@ fn a_grouped_table_stays_a_table() {
     assert!(find(&typed, Kind::Table).is_none(), "{typed:#?}");
 }
 
-/// Fix round 2 (I3): the lines of a footnote legend read no label and value, even where an
+/// The lines of a footnote legend read no label and value, even where an
 /// entry holds a label with a colon and its value.
 #[test]
 fn a_legend_reads_no_pairs() {
@@ -3283,7 +3283,7 @@ fn a_legend_reads_no_pairs() {
     }
 }
 
-/// Fix round 2 (I3): a sentence across the columns of a ruled table, set in a heading size,
+/// A sentence across the columns of a ruled table, set in a heading size,
 /// gives no heading candidate: its line is the paragraph's evidence.
 #[test]
 fn prose_cells_in_a_heading_size_are_no_heading() {
@@ -3320,7 +3320,7 @@ fn prose_cells_in_a_heading_size_are_no_heading() {
     }
 }
 
-/// Fix round 2 (M5): two lines in cells that no table reads never join into a paragraph.
+/// Two lines in cells that no table reads never join into a paragraph.
 #[test]
 fn lines_in_cells_join_no_paragraph() {
     // The pieces of the second line stand off those of the first: no cells aligned.
@@ -3349,7 +3349,7 @@ fn lines_in_cells_join_no_paragraph() {
     }
 }
 
-/// Fix round 2 (M5): a row of a table read on its own (a segment of one line in two cells,
+/// A row of a table read on its own (a segment of one line in two cells,
 /// inside a segment that reads as a table) is no paragraph.
 #[test]
 fn a_row_inside_a_table_is_no_paragraph() {
@@ -3413,7 +3413,7 @@ fn a_row_inside_a_table_is_no_paragraph() {
     }
 }
 
-/// Fix round 2 (M5): a segment that holds a strip between rules is no text alone: the line
+/// A segment that holds a strip between rules is no text alone: the line
 /// readings (key values, line pairs) never read over the strip and the lines under it, so the
 /// strip keeps its own decision.
 #[test]
@@ -3452,7 +3452,7 @@ fn a_segment_over_a_strip_reads_no_pairs_of_its_own() {
     }
 }
 
-/// Fix round 2 (N2): a rule of the left column at a height between the two rules of a strip on
+/// A rule of the left column at a height between the two rules of a strip on
 /// the right does not part the strip: each rule pairs with the nearest rule above it that lies
 /// over it, and the strip reads as fields.
 #[test]
@@ -3532,7 +3532,7 @@ fn padded_strip(share: f32) -> Tree {
     }
 }
 
-/// Task 26 part 3c-2 (the carried pin of `F1 to F3` under split runs): the dividers a page
+/// The dividers a page
 /// draws in a strip between rules part its fields. A value line in runs that stand across
 /// the fields is cut at the dividers and each piece is the value of the label over it, as
 /// the same line reads when each word is a run of its own. A mark shorter than
@@ -3552,7 +3552,7 @@ fn drawn_dividers_part_the_fields_of_a_strip() {
     }
 }
 
-/// Fix round 2: lines that stand in two drawn boxes or more (fields in boxes beside a box of
+/// Lines that stand in two drawn boxes or more (fields in boxes beside a box of
 /// a bold title) are no one paragraph: the box sides part them.
 #[test]
 fn lines_in_two_boxes_are_no_paragraph() {
@@ -3599,7 +3599,7 @@ fn sized_rows(rows: &[(&[&str], f32)], step: f32) -> Tree {
     }
 }
 
-/// Fix round 3 (N6): values and labels whose sizes turn four times stay refused when a line
+/// Values and labels whose sizes turn four times stay refused when a line
 /// in a third size follows them: the longest streak of turns counts, not the last one.
 #[test]
 fn a_line_in_a_third_size_keeps_the_interleaving_refused() {
@@ -3627,7 +3627,7 @@ fn a_line_in_a_third_size_keeps_the_interleaving_refused() {
     }
 }
 
-/// Fix round 3 (N8): a line of one piece is a section row only in the header's size. Lines of
+/// A line of one piece is a section row only in the header's size. Lines of
 /// one piece in a third size between the rows (a size step off the rows and off the header)
 /// are turns of the sizes: the lines are refused as interleaved, by that refusal alone.
 #[test]
@@ -3662,7 +3662,7 @@ fn a_line_of_one_piece_off_the_header_size_is_no_section_row() {
     }
 }
 
-/// Fix round 2 and 3 (N7): two lines of one sentence, each in a drawn box of its own, one box
+/// Two lines of one sentence, each in a drawn box of its own, one box
 /// over the other, are no paragraph: the box sides part them. The same lines without the
 /// boxes read as a paragraph of sentences. One piece a line, of more words than a value, in one size and
 /// weight: no rule of cells, labels or fields refuses them.
@@ -3711,7 +3711,7 @@ fn a_sentence_over_two_boxes_is_no_paragraph() {
     }
 }
 
-/// Fix round 3 (N9): a heading in two pieces a line next to a figure caption keeps its heading
+/// A heading in two pieces a line next to a figure caption keeps its heading
 /// candidate: the table rule refuses its lines for the figure (`figure.caption_near`), but
 /// that refusal weighs nothing and claims no text.
 #[test]
@@ -3844,7 +3844,7 @@ fn a_block_beside_a_block_is_no_line_of_its_paragraph() {
     }
 }
 
-/// Task 26 fix round 4 (concern 5 of part 3c-1): a colon that opens the second piece of a
+/// A colon that opens the second piece of a
 /// line as a word of its own (`Currency` and `: EUR`) is the colon of the label only when
 /// another line of the block has a colon in that column: a listing in a fixed-width face
 /// pads its labels up to a column of colons, and one colon before a cell is chance. The
@@ -4003,7 +4003,7 @@ fn plain_line(read: &[(Kind, Vec<&str>)], label: &str, after: &str) {
     assert!(together, "{label} {after} in {read:?}");
 }
 
-/// Task 26 fix round 5 (R5 of re-review 4): a small colon label on a data line whose own
+/// A small colon label on a data line whose own
 /// value stands under it, a little farther than a line pitch. The text after the label on
 /// its line was read as its value (`Staff no.: | Page 1`, the wrong value). Now no pair is
 /// claimed: the label and the text after it are one plain line, at every drop of the value
@@ -4047,7 +4047,7 @@ fn a_label_on_a_data_line_with_its_value_under_it_claims_no_pair() {
     }
 }
 
-/// Task 26 fix round 5 (R6 of re-review 4) and fix round 6: rows of a table with a blank
+/// Rows of a table with a blank
 /// labelled field before the amount column. The amount of each row stands under the column
 /// title, and was read as the value of the label (`Part no.: | 12,50`). No pair is claimed,
 /// and the row is not parted at its label either: with a second row in its leaf, a line
@@ -4116,7 +4116,7 @@ fn a_blank_labelled_field_in_a_table_row_claims_no_pair_and_parts_no_row() {
     );
 }
 
-/// Task 26 fix round 5 (R7 of re-review 4): two small colon labels that touch, the first
+/// Two small colon labels that touch, the first
 /// field blank, before one number. The number was read into the value of the first label
 /// (`Sheet: | Page: 2`). Now no pair is claimed: the two labels and the number are one
 /// plain line in their order. With the labels far apart, each a stretch of its own, the
@@ -4155,7 +4155,7 @@ fn two_labels_before_one_number_on_a_data_line_claim_no_pair() {
     }
 }
 
-/// Task 26 fix round 7 (N2 of re-review 5): the head of a data line that is parted at a
+/// The head of a data line that is parted at a
 /// small colon label claims no pair either. A title or a code and then a date before the
 /// label were read as a label with its value (`Ledger | 03.04.2026`, `AB 12 | 03.04.2026`):
 /// the date is no value of the title. Now the head stands alone as a plain line, its
@@ -4228,7 +4228,7 @@ fn the_head_of_a_parted_data_line_claims_no_pair() {
     head_alone(&c6, ["AB 12", "03.04.2026"]);
 }
 
-/// Task 26 fix round 7b (N1): a strip between rules with a drawn divider in the digit group
+/// A strip between rules with a drawn divider in the digit group
 /// gap of a number claims no pair: the digits say one number and the divider says two fields.
 /// Every run stands in one region, and none is a label with its value. With the divider out
 /// of reach of the gap the strip reads as fields, the amount whole.
@@ -4289,7 +4289,7 @@ fn a_strip_with_a_divider_in_a_digit_group_gap_claims_no_pair() {
     assert_eq!(pairs[0].len(), 4, "{out:?}");
 }
 
-/// Task 26 fix round 7c (I1): a strip between rules with no divider, whose second label
+/// A strip between rules with no divider, whose second label
 /// starts over the digit group gap of a number or over the number, claims no pair: the digits
 /// say one number and the labels say two fields. Every run stands in one region. The other
 /// way: with no group after the gap the strip reads as two fields.
@@ -4335,7 +4335,7 @@ fn a_strip_with_a_label_start_in_a_number_in_digit_groups_claims_no_pair() {
     assert_eq!(out, [Kind::LabelValue], "{out:?}");
 }
 
-/// Task 36a part 1: a value in a row of fields is no title of the page. Two small labels side
+/// A value in a row of fields is no title of the page. Two small labels side
 /// by side, each over its value in bold print larger than the body: the value that is no
 /// number alone (`03.04.2026 / 10:30`) is a heading by its style, and was the title of the
 /// page, so its row was no row of pairs. The cut finds the row of labels over values, and the
@@ -4389,7 +4389,7 @@ fn a_value_in_a_row_of_fields_is_no_title() {
         assert_eq!(winner(&alone).0, Kind::TitleBlock, "{k}: {alone:#?}");
     }
 
-    // Fix round 1 (review I3): only what looks like a field's value is kept out of the title
+    // Only what looks like a field's value is kept out of the title
     // search. A page title under a small kicker line stands like a value under its label
     // when a small label over its value stands at the right on the same two baselines; it
     // holds no digit and is much wider than the kicker over it, so it stays the title. With
@@ -4430,9 +4430,9 @@ fn a_value_in_a_row_of_fields_is_no_title() {
             ("Form number", run("SL-12", 420.0, 776.0, 10.0, 3), false),
             ("Form number", run("SL-12", 420.0, 776.0, 10.0, 3), true),
         ] {
-            // Fix round 2 (re-review N2): a title that holds a year or a number is a title
+            // A title that holds a year or a number is a title
             // all the same: it is mostly words, and more words than the kicker over it.
-            // Fix round 3 (re-review 2, M1): and so is a title of as many words as the
+            // And so is a title of as many words as the
             // kicker has, or of fewer: it is the largest text of the top of the page.
             for title in [
                 "Request for Sample Leave",
@@ -4456,7 +4456,7 @@ fn a_value_in_a_row_of_fields_is_no_title() {
     // words: `Leave 2026 12 34` under the kicker of three words has 5 letters and 8 digits
     // and is no title. `Leaves 2026 12` (6 letters, 6 digits) is not mostly digits: it is
     // the largest text of the top of the page and may be the title, with as many words as
-    // the kicker has (fix round 3, re-review 2 M1: the count of words is no cue).
+    // the kicker has (the count of words is no cue).
     let titled = |title: &'static str| {
         let value = bold(run("12", 420.0, 776.0, 16.0, 3));
         let typed = kicker(title, "Form", value, false).typed(&leaf_of(&title[..5]));
@@ -4466,7 +4466,7 @@ fn a_value_in_a_row_of_fields_is_no_title() {
     assert!(titled("Leaves 2026 12"));
     assert!(titled("Leaves of 2026 12"));
     // A value of words is kept out of the title search unless it is the largest text of the
-    // top of the page (fix round 3, re-review 2 M1: the design ruling; the count of words
+    // top of the page (the count of words
     // against the label was the measure before, and the width of the ink before that).
     // `other` is another line of the page, its size and baseline. With no other line as
     // large in the top of the page the value may be the title, however few words it has.
@@ -4509,7 +4509,7 @@ fn a_value_in_a_row_of_fields_is_no_title() {
     }
 }
 
-/// Task 36a fix round 1 (review I1): a table without rules whose columns start at one pitch,
+/// A table without rules whose columns start at one pitch,
 /// with lowercase descriptions that fill their column and a last row that wraps, is not
 /// refused as blocks side by side: its rows are rows (every other column has a line on each
 /// row but the wrapped one). With a column of words and with a column of prices.
@@ -4520,7 +4520,7 @@ fn rows_of_a_table_with_a_wrapped_last_row_are_no_side_blocks() {
         r.w = w;
         if line == 100 { bold(r) } else { r }
     };
-    // Fix round 2 (re-review N1): the same with the last cell of the word column left
+    // The same with the last cell of the word column left
     // empty (the other columns end on different rows), and with the last description
     // wrapped over two lines then.
     for (third, more) in [

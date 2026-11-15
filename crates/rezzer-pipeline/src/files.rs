@@ -7,17 +7,17 @@
 //! For a source named `<name>`:
 //! - `<dir>/<main name>.md`, the main document (or the whole document when it fits);
 //! - `<dir>/<main name>.json` with the model JSON;
-//! - `<dir>/<stem>.parts/` with the parts of a split document (ruling P5-AA);
+//! - `<dir>/<stem>.parts/` with the parts of a split document;
 //! - `<dir>/<stem>.assets/` with the pictures.
 //!
 //! The suffixes keep both folders off the source's own name, so a source can be written into
 //! its own folder (`notes.txt` next to `notes.txt.md`, `notes.txt.parts/` and
 //! `notes.txt.assets/`).
 //!
-//! Every name comes from the last path component of the source name in Unicode NFC (ruling
-//! P5-W), so a name that macOS gives in NFD gets the same files and links as its NFC form.
+//! Every name comes from the last path component of the source name in Unicode NFC,
+//! so a name that macOS gives in NFD gets the same files and links as its NFC form.
 //! The name hash is the first 8 hex of the SHA-256 of that NFC name, not of the content, so
-//! an edited file keeps its addresses. No name starts with `.` (ruling P5-Z): Crystalline
+//! an edited file keeps its addresses. No name starts with `.`: Crystalline
 //! skips hidden files.
 //!
 //! On Windows the main name and the folder stem are made legal there ([`legal_name`], Jordi,
@@ -27,19 +27,19 @@
 //! the original name, so `a:b.txt` and `a?b.txt` never share a file. On Unix and macOS the
 //! names stay as they are. The frontmatter's `resource` keeps the original name either way.
 //!
-//! Rezzer replaces a Markdown file or JSON only when it wrote it for the same source (ruling
-//! P5-AG): its frontmatter has `generated: { by: rezzer/` (a part also its `part:` key), or
+//! Rezzer replaces a Markdown file or JSON only when it wrote it for the same source:
+//! its frontmatter has `generated: { by: rezzer/` (a part also its `part:` key), or
 //! the JSON starts with `model_version`; and it names the same source. The same source is the
 //! same `resource`, the same canonical path (symlinks, `..` and letter case resolved by
 //! `fs::canonicalize`), or the same `source_sha256` (a moved folder, unchanged content). A
 //! main document, JSON or part path held by anything else, a file of the user's or the
 //! output of another source with other content (`a/report.pdf` and `b/report.pdf`, or
 //! `Note.md` and `note.md` on a file system that ignores case), fails the run before a file
-//! of it is written (rulings P5-AB and P5-AG). The message names the file and, for another
+//! of it is written. The message names the file and, for another
 //! source, both sources.
 //!
 //! Files an earlier run left that this run does not write are removed, but only files
-//! Rezzer names itself (rulings P5-Y, P5-AC and P5-AK): in the assets folder regular files
+//! Rezzer names itself: in the assets folder regular files
 //! named as Rezzer names pictures and attachments ([`is_asset_name`]), in the parts folder
 //! Markdown parts that Rezzer wrote for this source ([`holder`]). A file a user put there
 //! stays. An empty parts folder is removed, also one Rezzer did not make. Symlinks and
@@ -276,7 +276,7 @@ fn safe_asset_id(id: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
-/// The media types whose files Rezzer writes under their own extension (ruling P5-AJ), each
+/// The media types whose files Rezzer writes under their own extension, each
 /// one Crystalline 0.29.1 copies on import (its `attachment_mime` list). Any other picture
 /// or attachment is written as [`OTHER_EXTENSION`].
 const ASSET_TYPES: [(&str, &str); 13] = [
@@ -307,7 +307,7 @@ const ASSET_TYPES: [(&str, &str); 13] = [
 /// The extension of a picture or attachment whose type its bytes do not confirm.
 const OTHER_EXTENSION: &str = "bin";
 
-/// Whether `name` is a name Rezzer gives a picture or attachment (ruling P5-AK): an id of a
+/// Whether `name` is a name Rezzer gives a picture or attachment: an id of a
 /// shape the readers make, `page-<n>`, `page-<n>-pic-<m>`, `page-<n>-code-<m>` or
 /// `attachment-<n>`, then `.` and an extension [`asset_extension`] gives. Only such files are
 /// removed as stale, so a user's `logo.png` in the folder stays.
@@ -335,7 +335,7 @@ fn is_asset_name(name: &str) -> bool {
     })
 }
 
-/// The extension of a picture or attachment, from what its bytes confirm (ruling P5-AJ):
+/// The extension of a picture or attachment, from what its bytes confirm:
 /// a PNG attachment named `image.png` gets `png`, a file named `x.png` with other bytes
 /// gets `bin`. Neither the name nor the declared type counts.
 fn asset_extension(bytes: &[u8]) -> &'static str {
@@ -402,7 +402,7 @@ pub(crate) fn write_assets(
     let assets = dir.sub(&format!("{stem}.assets"), true);
     for p in planned {
         let result = match &assets {
-            // Pictures are replaced by name (ruling P5-AC).
+            // Pictures are replaced by name.
             Ok(assets) => write_new(assets, &p.file, &p.bytes, true),
             Err(e) => Err(std::io::Error::new(e.kind(), e.to_string())),
         };
@@ -571,7 +571,7 @@ pub(crate) fn write_files(dir: &Folder, files: &Files<'_>) -> Result<(), String>
     Ok(())
 }
 
-/// Checks every path of a run before anything is written (rulings P5-AB and P5-AG): the
+/// Checks every path of a run before anything is written: the
 /// main document, the JSON when the run writes one, the parts folder (missing or a plain
 /// directory) and each part path. Each must be missing or a file Rezzer wrote for this
 /// source. `dir` is `None` when the output folder is missing: then every path is free.
@@ -680,7 +680,7 @@ enum Stale<'a> {
 /// generous; it only bounds a hostile file.
 const HEAD_MAX: u64 = 16 * 1024 * 1024;
 
-/// What tells one source from another in a file Rezzer wrote (ruling P5-AG).
+/// What tells one source from another in a file Rezzer wrote.
 #[derive(Debug)]
 pub(crate) struct SourceId {
     /// The quoted `resource` value, as the frontmatter writes it.

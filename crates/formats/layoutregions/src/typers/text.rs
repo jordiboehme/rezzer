@@ -16,7 +16,7 @@
 //! lead of 150 over the next kind. The first signal of every kind but paragraph alone reaches
 //! 450 or more. A paragraph's signals are smaller and add up: [`PARAGRAPH_TEXT_SIZE`] alone
 //! reaches the least score, so a plain line of body text is a paragraph, and it never wins
-//! against another kind's evidence. The kinds today's rules decide between win by 150 or more.
+//! against another kind's evidence. The kinds the current rules decide between win by 150 or more.
 
 use std::collections::BTreeMap;
 
@@ -38,7 +38,7 @@ pub const HEADING_SIZE_LARGE: u16 = 550;
 pub const HEADING_BOLD: u16 = 100;
 /// `heading.title_lines`: [`crate::extract::text::heading_block`] keeps the block a heading:
 /// none of its [`Demotion`]s applies. For one line this is the absence of the paragraph's
-/// evidence rather than evidence of its own (Task 18b weighs it).
+/// evidence rather than evidence of its own.
 pub const HEADING_TITLE_LINES: u16 = 200;
 /// `paragraph.text_size`: the lines are set in a text size of the page or the body size.
 pub const PARAGRAPH_TEXT_SIZE: u16 = 300;

@@ -2,17 +2,16 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Today's reading of a page (the readers of the base before the switch), run once per page
-//! before it is segmented, as given-region pre-passes (ruling of 2026-11-04, "pre-passes per
-//! class"). Each class of reader whose reading by area loses content keeps today's reader until
-//! the plan task that owns the class moves it into the engine: its tables are given regions of
-//! the reader's kind, certainty `Rule`, with the reader's own signal and found-by note. Every
-//! class of today's untagged readers is such a pre-pass, and every family keeps its refusals
-//! with it (text it refused stays where it stands, with its notes, and no typer reads it); the
-//! owner task of a class takes its call out of [`read`] when it moves the class into the
-//! engine (see the ledger's "Pre-pass" lines).
+//! The pre-pass reading of a page (the readers that read a page before the region engine
+//! did), run once per page before it is segmented, as given-region pre-passes. Each class of
+//! reader whose reading by area loses content stays a pre-pass until it moves into the
+//! engine: its tables are given regions of the reader's kind, certainty `Rule`, with the
+//! reader's own signal and found-by note. Every class of the untagged readers is such a
+//! pre-pass, and every family keeps its refusals with it (text it refused stays where it
+//! stands, with its notes, and no typer reads it); a class that moves into the engine has
+//! its call taken out of [`read`].
 //!
-//! The readers run in today's order on one copy of the page's flow, so they see the lines they
+//! The readers run in a fixed order on one copy of the page's flow, so they see the lines they
 //! saw before and veto each other as before: the running headers and footers and the footnote
 //! legend are taken out first, then the underlined titles of a form page, the box pairs, and
 //! the tables without tags (the columns of totals beside ruled sections, ruled grids, header
@@ -26,7 +25,7 @@ use rezzer_model::LossReason;
 use super::{Context, Drawn, Flow, Run, Slot, footnotes, lines};
 use crate::tables::{self, BoxTitle, Planned, Unsure};
 
-/// The families of today's readers by the call that runs them: their refusals (the text they
+/// The families of the pre-pass readers by the call that runs them: their refusals (the text they
 /// refused, with why, and their notes) cannot be told apart below a family.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Family {
@@ -51,7 +50,7 @@ pub(super) fn refused_id(f: Family) -> &'static str {
     }
 }
 
-/// A part of today's reading given as a region: a table or a title (placed as its reader made
+/// A part of the pre-pass reading given as a region: a table or a title (placed as its reader made
 /// it, taken once), or text a family refused, with why.
 pub(super) enum Part {
     Table(Option<Planned>),
@@ -59,7 +58,7 @@ pub(super) enum Part {
     Refused(Family, &'static str),
 }
 
-/// What today's readers found on a page: its tables in the order the readers made them, the
+/// What the pre-pass readers found on a page: its tables in the order the readers made them, the
 /// titles of boxes and bars, and the copy of the flow they left (a run cut at a field edge or
 /// a column line may have left a piece in it). Each refusal and note with its family.
 #[derive(Default)]
@@ -83,7 +82,7 @@ pub(super) struct Reading {
 }
 
 /// Today's reading of the page whose flow (the tables of its tag tree taken out) is `flow`:
-/// `geometry` is false on a tagged page whose tag tree holds, where no reader of today ran on
+/// `geometry` is false on a tagged page whose tag tree holds, where no pre-pass reader ran on
 /// the drawn structure. `page_in` is the page as the region engine takes it.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn read(
@@ -180,7 +179,7 @@ pub(super) fn read(
             .extend(doubts.into_iter().map(|(ids, why)| (b, ids, why)));
         out.notes.extend(skipped.map(|w| (b, w, LossReason::Limit)));
     }
-    // On a page with form fields, boxes and aligned labels are the form: today's table
+    // On a page with form fields, boxes and aligned labels are the form: the pre-pass table
     // readers read no table there (as before the switch); the fields are the form layer's.
     if !drawn.widgets.is_empty() {
         out.left = copy;

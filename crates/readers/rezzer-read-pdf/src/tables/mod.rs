@@ -105,7 +105,7 @@ pub(crate) struct Planned {
     /// The box of the drawn rules or boxes the detector read the table by, in the frame of
     /// the runs; none for a detector that reads text alone. Its region reaches over it.
     pub drawn: Option<[f32; 4]>,
-    /// The pictures in its cells (Task 29, B1): row, cell and the picture, by its place among
+    /// The pictures in its cells: row, cell and the picture, by its place among
     /// the page's pictures (`layoutregions::PrimId::Picture`).
     pub pictures: Vec<(usize, usize, u32)>,
 }
@@ -139,7 +139,7 @@ pub(crate) enum Detector {
     /// Without rules: any other grid of white space gutters.
     Grid,
     /// The lines of a label and its value of a line pairs decision of the region engine,
-    /// parted by the typer's line pair rule (no reader of today).
+    /// parted by the typer's line pair rule (no pre-pass reader).
     LinePairs,
 }
 

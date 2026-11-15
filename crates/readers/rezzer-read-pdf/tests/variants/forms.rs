@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! The shapes of print-run forms (Tasks 4, 5, 6 and 9): the pay slip shapes of
+//! The shapes of print-run forms: the pay slip shapes of
 //! `form_fields/shapes.rs` in every variant, and separator marks, section grids and a band
 //! table with empty cells, each in the geometry of the variant (every height relative to the
 //! data size, every x to the data pitch). All text and values are invented.
@@ -16,7 +16,7 @@ use crate::shapes::{
     short_value_rows, title_grid, title_grid_page, total_column,
 };
 
-/// Task 15b part 2c review (Important 2 and 3): a row of three boxed fields whose middle box
+/// A row of three boxed fields whose middle box
 /// holds an address, a street in the label font over its postcode and town in the data font:
 /// it is left out of the row and a loss says so; the fields beside it pair.
 fn address_box_row(g: &Geo, b: &mut Built, top: f32) -> f32 {
@@ -52,7 +52,7 @@ fn address_box_row(g: &Geo, b: &mut Built, top: f32) -> f32 {
     top - h
 }
 
-/// Task 15b part 2e-5 fix round 1 (review I1, ruling P6-X): a strip between two rules with no
+/// A strip between two rules with no
 /// dividers, three labels over their values all in the data face, the labels 3 % smaller than
 /// the values: less than a size step (`LABEL_STEP`), so no label style is set apart and the
 /// fields do not pair, but the strip is read cell by cell, never line by line across its
@@ -86,7 +86,7 @@ fn under_step_strip(g: &Geo, b: &mut Built, top: f32) -> f32 {
     top - h
 }
 
-/// Task 15b part 2e-5 (list line 7, `style_of` half-point key, ruling P6-X): a row of three
+/// A row of three
 /// boxed fields whose middle box holds a name over its department in the plain data font, of
 /// one size but for float noise: on the printed page (after the variant's scale) the two lines
 /// stand 0.002 points on both sides of a half-point edge of the style key, the name the
@@ -140,7 +140,7 @@ fn noise_box_row(g: &Geo, b: &mut Built, top: f32) -> f32 {
     top - h
 }
 
-/// Task 15b part 2c concern 3 ruling: a row of three boxed fields whose middle box holds a
+/// A row of three boxed fields whose middle box holds a
 /// company name, in another size than the labels beside it and without a colon, over a street
 /// and a postcode with its town in the data font: nothing shows the name to be a label, so it
 /// pairs with nothing and a loss names it; the fields beside it pair.
@@ -148,7 +148,7 @@ fn company_box_row(g: &Geo, b: &mut Built, top: f32) -> f32 {
     company_row(g, b, top, |g, x, y, l| label(x, y, 0.8 * g.data, l))
 }
 
-/// Task 15b part 2d item 4: [`company_box_row`] with the company name at the labels' size in
+/// [`company_box_row`] with the company name at the labels' size in
 /// Courier, another font family than the labels' (Helvetica or Times): its style is not the
 /// labels', so it pairs with nothing and a loss names it.
 fn company_in_another_font_row(g: &Geo, b: &mut Built, top: f32) -> f32 {
@@ -198,7 +198,7 @@ fn company_row(g: &Geo, b: &mut Built, top: f32, name: fn(&Geo, f32, f32, &str) 
     top - h
 }
 
-/// Task 15b part 2d item 1: a row of three boxed fields whose middle box holds a bold title of
+/// A row of three boxed fields whose middle box holds a bold title of
 /// two lines, at the data size: the title is a heading of its own, and the fields on both
 /// sides of it pair.
 fn title_box_row(g: &Geo, b: &mut Built, top: f32) -> f32 {
@@ -232,7 +232,7 @@ fn title_box_row(g: &Geo, b: &mut Built, top: f32) -> f32 {
     top - h
 }
 
-/// Task 15b part 2d item 2: a row of three boxed fields whose middle box holds a company name
+/// A row of three boxed fields whose middle box holds a company name
 /// at the data size in the data font, over its street and its postcode with the town: the box
 /// has no label, so it pairs with nothing and a loss names it; the fields beside it pair.
 fn value_box_row(g: &Geo, b: &mut Built, top: f32) -> f32 {
@@ -274,7 +274,7 @@ fn value_box_row(g: &Geo, b: &mut Built, top: f32) -> f32 {
     top - h
 }
 
-/// Task 15b part 2d item 3: a strip of three fields between two rules with no rule between
+/// A strip of three fields between two rules with no rule between
 /// them, the values on padded data lines; the middle field is drawn by `middle` from the top
 /// of its cell, and says whether an address goes under it. The fields on both sides pair.
 fn open_strip(
@@ -347,7 +347,7 @@ fn with_cells(
     (s, e)
 }
 
-/// Task 15b part 2d fix round 2 (I6, M1): a row of three boxed fields whose middle box is
+/// A row of three boxed fields whose middle box is
 /// `middle`: with no text (an empty box), or with a label alone (an empty field). The fields
 /// beside it pair, and an empty field is one.
 fn gap_box_row(g: &Geo, b: &mut Built, top: f32, middle: Option<&'static str>) -> f32 {
@@ -384,7 +384,7 @@ fn gap_box_row(g: &Geo, b: &mut Built, top: f32, middle: Option<&'static str>) -
     top - h
 }
 
-/// Task 15b part 2d fix round 4: a strip between two rules with no rule between its cells,
+/// A strip between two rules with no rule between its cells,
 /// `Personalnummer` over a value of two lines, `Eintritt` over its date, and a value under no
 /// label on the data line: no field is read (a value stands under no label), a loss names the
 /// fields, and the strip is read cell by cell.
@@ -411,7 +411,7 @@ fn two_line_strip(g: &Geo, b: &mut Built, top: f32) -> f32 {
     top - h
 }
 
-/// Part 2e-1 (item 2, part 2d review M2): a column of three boxes, each a line over a line in
+/// A column of three boxes, each a line over a line in
 /// one style (Courier at the data size): no field, as no label is set apart from a value, and
 /// each box is read whole and alone, never the last line of one box with the first of the next.
 fn one_style_box_column(g: &Geo, b: &mut Built, top: f32) -> f32 {
@@ -437,7 +437,7 @@ fn one_style_box_column(g: &Geo, b: &mut Built, top: f32) -> f32 {
     y
 }
 
-/// Part 2e-1 (item 2, part 2d review M2): three fields between two rules with dividers
+/// Three fields between two rules with dividers
 /// between them and none at the rules' ends, labels over their values: a row of fields like
 /// a strip with its ends drawn; every field pairs.
 fn divided_strip(g: &Geo, b: &mut Built, top: f32) -> f32 {
@@ -468,7 +468,7 @@ fn divided_strip(g: &Geo, b: &mut Built, top: f32) -> f32 {
     top - h
 }
 
-/// Task 15b part 2d fix round 4: two named addresses side by side between two rules, a name at
+/// Two named addresses side by side between two rules, a name at
 /// the labels' size over a street and a town each: neither is a label (no colon), both are left
 /// out with a loss, and the strip is read cell by cell.
 fn two_addresses(g: &Geo, b: &mut Built, top: f32) -> f32 {
@@ -504,7 +504,7 @@ fn two_addresses(g: &Geo, b: &mut Built, top: f32) -> f32 {
     top - h
 }
 
-/// Task 15b part 2d fix round 2: a strip of two cells between two rules with no rule between
+/// A strip of two cells between two rules with no rule between
 /// them, `Personalnummer` over its value beside a value alone on the same data line: the field
 /// is one field alone between its rules, refused, and the strip is read cell by cell.
 fn lone_beside_a_value(g: &Geo, b: &mut Built, top: f32) -> f32 {
@@ -526,7 +526,7 @@ fn lone_beside_a_value(g: &Geo, b: &mut Built, top: f32) -> f32 {
     top - h
 }
 
-/// Task 15b part 2d fix round 1 (rulings on concerns 1 and 3): a strip of two cells between two
+/// A strip of two cells between two
 /// rules with no rule between them, `Personalnummer` over its value beside a company name a
 /// little smaller than it over its address. The name is left out, so the field is one field
 /// alone between its rules with no sign of a label: it pairs with nothing and a loss names it;
@@ -547,7 +547,7 @@ fn lone_strip(g: &Geo, b: &mut Built, top: f32) -> f32 {
     top - h
 }
 
-/// Part 2e-4 (item 9, list line 9): a strip of three fields between two rules with no rule
+/// A strip of three fields between two rules with no rule
 /// between them, the middle one a numbered label over a line of codes (`Konto 1` over `DE00
 /// 1234 5678`): no address (the line under it holds no word), so all three fields pair.
 fn numbered_label_strip(g: &Geo, b: &mut Built, top: f32) -> f32 {
@@ -571,7 +571,7 @@ fn numbered_label_strip(g: &Geo, b: &mut Built, top: f32) -> f32 {
     top - h
 }
 
-/// Task 26 fix round 6 (I1): a strip of three fields between two rules with drawn dividers,
+/// A strip of three fields between two rules with drawn dividers,
 /// its values one padded data line. The value of the last field is one character that ends
 /// the line. Each divider stands a hair inside the box of the character after it, as a form
 /// sets it, so the line reaches less than one character past the last one: the divider still
@@ -678,18 +678,18 @@ fn drawn(
     (Sheet::new(b), Some(e))
 }
 
-/// H3 as a print run draws it (Task 26 fix 3a): the title line over a header grid. One data
+/// H3 as a print run draws it: the title line over a header grid. One data
 /// line holds the tail of the title, a date and, after a blank, the number of the sheet; the
 /// label of that number is a small template label that ends with a colon and stands in the
 /// blank right before it, its baseline a little higher; a bold title stands left on the line,
 /// and the rules of the grid under it. The label and the number read as one plain line of
-/// their own, the label right before the number (Task 26 fix round 5: no pair is claimed,
+/// their own, the label right before the number (no pair is claimed,
 /// nothing on the line says that the number is the value of the label and not a cell of
 /// another column); the date stands apart from it, no label of anything and no value of the
 /// label.
 ///
 /// With `code`, a line of codes in the data face stands over the data line, from the right
-/// part of the grid on (Task 26 fix round 2, as the owner's form has it): the cut then keeps
+/// part of the grid on (as the owner's form has it): the cut then keeps
 /// the two lines in one leaf, and the label and its number are still a line of their own.
 fn small_label_before_a_value_on_a_data_line(v: &Variant, code: bool) -> Sheet {
     let g = v.geo();
@@ -785,7 +785,7 @@ const HEAD_FIELDS: [&[FieldSpec]; 4] = [
     ],
 ];
 
-/// Task 31b fix round 4 (P1, a guard: every build since the round before reads it, the page
+/// A guard (every build since the first fix reads it, the page
 /// of the finding is not reproduced): the head of a pay statement over its fields. A bold
 /// title at the left and, on its baseline, the period it is for in the data font; a code
 /// line in the data font at the right, a line higher; under them rows of fields between
@@ -820,7 +820,7 @@ fn head_line_over_fields(v: &Variant) -> (Sheet, Option<Extent>) {
     (sheet, Some(e))
 }
 
-/// Task 31b fix round 5 (P1): the head of a pay statement as a print run sets it, over a
+/// The head of a pay statement as a print run sets it, over a
 /// wide grid of fields. A bold title at the left; on its row, a little lower, the period it
 /// is for in the data font, set as one data line with a date and a sheet number at the
 /// right, so the blanks of the line run from the period up to the date. Under them a row of
@@ -928,7 +928,7 @@ fn padded_period_over_fields(v: &Variant) -> (Sheet, Option<Extent>) {
 
 /// The digits of a boxed field: one box a digit of the data pitch from data column `k`, its
 /// data line at `y`, and a drawn mark before each of `before`.
-/// Part 2e-1 (item 3): labels under their values with a second line of the first value set on
+/// Labels under their values with a second line of the first value set on
 /// the line of the label `Name` over it: the grid is not clear (refused with a loss) and is read
 /// cell by cell; the value line is a text of its own, never glued to the label.
 fn labels_under_two_lines(v: &Variant) -> (Sheet, Option<Extent>) {
@@ -969,7 +969,7 @@ fn boxed_digits(g: &Geo, b: &mut Built, k: usize, y: f32, digits: &str, before: 
     }
 }
 
-/// Task 4: an amount and a date in boxes of their digits with drawn decimal and date marks,
+/// An amount and a date in boxes of their digits with drawn decimal and date marks,
 /// and amounts and a date written as text elsewhere, which set the style. On a turned page
 /// the digits still read in the direction of the page's text, so the marks are read.
 fn separators(v: &Variant) -> (Sheet, Option<Extent>) {
@@ -1008,7 +1008,7 @@ fn separators(v: &Variant) -> (Sheet, Option<Extent>) {
     (s, Some(e))
 }
 
-/// Task 26 (the print form golden): two labels in one column, each over the upper left of
+/// Two labels in one column, each over the upper left of
 /// its value: an amount and a date in boxes of their digits, set lower and to the right of
 /// the labels, with drawn decimal and date marks. The baselines of the labels and of the
 /// values do not line up, and white space parts the two columns; they are rows of a label
@@ -1105,7 +1105,7 @@ fn owned(rows: &[&[&str]]) -> Vec<Vec<String>> {
         .collect()
 }
 
-/// Task 5: one drawn grid of two sections, 4 columns over 6 that share only some edges:
+/// One drawn grid of two sections, 4 columns over 6 that share only some edges:
 /// each section is a table of its own.
 fn sections(v: &Variant) -> (Sheet, Option<Extent>) {
     let g = v.geo();
@@ -1139,7 +1139,7 @@ const BAND_LINES: [&[(usize, &str)]; 4] = [
     &[(3, "5,00")],
 ];
 
-/// Task 6: a header band of four grey cells over lines without rules, two of them with an
+/// A header band of four grey cells over lines without rules, two of them with an
 /// amount only: each line is a row, its empty cells stay empty. The cells touch, or with
 /// `spaced` stand a data pitch apart.
 fn band_table(v: &Variant, spaced: bool) -> (Sheet, Option<Extent>) {
@@ -1382,7 +1382,7 @@ pub(crate) fn shapes() -> Vec<Shape> {
                         &["Klasse", "1"],
                     ],
                 );
-                // Part 2e-2 (item 2): read box by box, and that is said.
+                // Read box by box, and that is said.
                 s.want
                     .losses
                     .push("the drawn boxes Personal, Eintritt, Klasse on page".into());
@@ -1518,7 +1518,7 @@ pub(crate) fn shapes() -> Vec<Shape> {
                         }
                     }
                     // The value runs on into the next field: the two fields read as one cell
-                    // (Task 15b part 2d fix round 2), their labels over the value.
+                    // their labels over the value.
                     s.want
                         .cells
                         .push(vec!["Name".into(), "Nr".into(), "Erika Mustermann".into()]);
@@ -1588,8 +1588,7 @@ pub(crate) fn shapes() -> Vec<Shape> {
         Shape {
             name: "labels over boxed values in one column",
             // The digits of a value are one string of a print run, as in the golden form.
-            // Digits set one by one in their boxes (the proportional data font) are left:
-            // see the report of Task 26.
+            // Digits set one by one in their boxes (the proportional data font) are left.
             axes: Axes {
                 look: &[Look::Real],
                 data: &[Data::CourierBold, Data::Courier],

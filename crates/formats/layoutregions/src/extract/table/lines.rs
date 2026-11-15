@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! The lines of the cells of one table row (Task 29, vision class A). A cell's lines stay lines
+//! The lines of the cells of one table row. A cell's lines stay lines
 //! of their own unless there is positive evidence that a line wraps into the next: then they are
 //! joined, as one text. A timetable's stop cell lists the departure's stop over the arrival's,
 //! beside a time cell with the departure's time over the arrival's: read with spaces, the two

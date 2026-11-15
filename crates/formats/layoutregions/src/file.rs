@@ -32,8 +32,7 @@ pub(crate) const REPEATS: usize = 3;
 
 /// Lines of one header or footer sit at the same height on every page, within this share of
 /// their text size: 4 points at 10 points. A share of the size of the line itself, so that a
-/// file printed smaller or larger keeps its running lines (Task 31a; it was 4 points at every
-/// size).
+/// file printed smaller or larger keeps its running lines.
 pub(crate) const Y_STEP: f32 = 0.4;
 
 /// A line at least this many times the body size is a heading in an untagged file.
@@ -818,7 +817,7 @@ mod tests {
         learn(&pages, tagged, &no_amount)
     }
 
-    /// Task 37: the learner asks `stop` before each page of each of its three passes, and
+    /// The learner asks `stop` before each page of each of its three passes, and
     /// never again once it said stop. With no stop the facts are those of [`learn`]; a stop
     /// in the first pass leaves the running lines of the pages read by then, and the second
     /// value says that it stopped.
@@ -1127,7 +1126,7 @@ mod tests {
         assert_eq!(facts.heading_sizes, [13.0]);
     }
 
-    /// Fix round 3 of part 2b-1 of Task 31c: the lines of a file are learned with their runs
+    /// The lines of a file are learned with their runs
     /// in the order of their places. A footer handed over in two runs, the right one first
     /// (as a reader hands over two pieces of one row), has the key its places give, with
     /// its runs in every order and with the runs of the page shuffled; and a line with its
@@ -1237,7 +1236,7 @@ mod tests {
         assert_eq!(text_sizes(&runs), [10.0]);
     }
 
-    /// Fix round 2 of Task 13, item 2: a heading whose size the file pass did not see as a
+    /// A heading whose size the file pass did not see as a
     /// heading size (its line there held a smaller cell beside it) gets the level of its size
     /// among the heading sizes, not the deepest level: a title larger than all but one heading
     /// size is level 2.

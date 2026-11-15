@@ -1243,7 +1243,7 @@ pub enum BottomEnd {
     Own,
 }
 
-/// The way a group of strips reads by its ends (ruling P6-Z2).
+/// The way a group of strips reads by its ends.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Way {
     /// Labels over (or beside) their values.

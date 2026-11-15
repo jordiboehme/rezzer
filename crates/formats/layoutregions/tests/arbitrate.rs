@@ -261,7 +261,7 @@ fn a_moved_line_names_its_old_and_new_line() {
     assert_eq!(moved_lines(&old[..1], &old), ["old: (none)\nnew: total\t2"]);
 }
 
-// ---- Scored arbitration (Task 18) ----
+// ---- Scored arbitration ----
 
 use std::collections::BTreeMap;
 
@@ -654,7 +654,7 @@ fn cut_tree(main: [u16; 2], other: [u16; 2]) -> Vec<Decision> {
     decide_all(&segs, &typed)
 }
 
-/// The probe of the review: a parent paragraph 550 over a caption line (paragraph 300), lines
+/// A parent paragraph 550 over a caption line (paragraph 300), lines
 /// of labels and values (900) and prose (550). The weakest check passes (550 >= 300 + 150),
 /// but the label/value child of another kind blocks the fold; so does a label/value
 /// grandchild under a child that kept its own children, and an unsure child whose best

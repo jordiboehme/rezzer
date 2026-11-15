@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! The "Found by:" notes of a page: what a region was read by, said in words before the first
-//! block of its kind on the page (ruling P6-W: one note per kind and page). The words come from
+//! block of its kind on the page (one note per kind and page). The words come from
 //! the evidence of the region's decision (see [`found_by_text`]); the notes of footnotes and of
 //! decimal separators drawn as marks count what they found and are written where they are
 //! counted (`layout::footnotes::note`, `marks`), with the fixed words of the footnote note here.
@@ -27,7 +27,7 @@ pub(crate) const FOOTNOTE_FOUND_BY: &str = rezzer_model::FOOTNOTE_FOUND_BY;
 /// grid of boxes that each hold a label and its value), pairs from rows of fields between drawn
 /// rules (fields in strips, or fields between the dividers of a ruled row), or a footnote legend
 /// (the fixed words of its note). `None` for every other region: it is said by its block alone.
-/// A region of today's reading (a column of totals beside a ruled table, a stack of strips, see
+/// A region of the pre-pass reading (a column of totals beside a ruled table, a stack of strips, see
 /// `layout::today`) keeps the note of its reader.
 pub(crate) fn found_by_text(decision: &Decision) -> Option<&'static str> {
     let has = |id: &str| decision.signals.iter().any(|s| s.id == id);
@@ -71,7 +71,7 @@ mod tests {
 
     /// Each note kind comes from the evidence of its region: boxes, strips and a footnote
     /// legend; a table, a pair of lines or a paragraph says nothing, nor does a region of
-    /// today's reading (its reader's note stands, see `layout::today`).
+    /// the pre-pass reading (its reader's note stands, see `layout::today`).
     #[test]
     fn found_by_notes_come_from_evidence() {
         let box_cell = decision(

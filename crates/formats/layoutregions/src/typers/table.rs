@@ -11,7 +11,7 @@
 //! gives the table nothing, and no weight is taken away anywhere: the reason is evidence for
 //! the kind it speaks for (see [`refusal`]): prose for a paragraph, a caption, a picture or
 //! tiny text for a figure, a page frame or a form for the spatial fallback, labels and values
-//! or totals for theirs. Where today's rules read a place one way first, that reading refuses
+//! or totals for theirs. Where the current rules read a place one way first, that reading refuses
 //! the other: lines [`key_values`] reads, two lines of titles over values (see
 //! [`titles_over_values`]), a grid whose cells all read as fields and lines read as totals
 //! under a table are no table's. Lines the walk of the text reads as an address or as
@@ -108,8 +108,8 @@ const COMB: &str = "its boxes hold one digit each, a field to fill in";
 const TOTALS_GAP: f32 = 3.0;
 
 /// The columns a table reading finds: its column edges left to right (one more than its
-/// columns), the primitives of its header cells by column, its rows and header rows. Task 19
-/// compares them with the cells a tagged table gives.
+/// columns), the primitives of its header cells by column, its rows and header rows.
+/// The check against the tag tree compares them with the cells a tagged table gives.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableColumns {
     pub edges: Vec<f32>,
@@ -935,7 +935,7 @@ fn lines(view: &PageView<'_>, seg: &Segment, given: bool) -> Find {
         }
         // Blocks side by side on shared baselines, each a block of facts of its own (an
         // address beside a bank or a register): their lines share no column structure, so
-        // they are no rows of one table (today's rule of the lines without rules, one copy).
+        // they are no rows of one table (the current rule of the lines without rules, one copy).
         // So are columns of which one holds a postal address down its lines: a table of
         // addresses holds one address a row, never one down a column.
         let (columns, _) = blocks_of(&runs, &pieces);
@@ -1442,9 +1442,9 @@ fn lone_pair_of(mut runs: Vec<&crate::input::TextRun>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    /// Fix round 1 of Task 37, M4: the grids a line is tested against are all the grids the
-    /// test of every grid accepted by their place across (`sentences_across` before Task
-    /// 37 looked at every grid of two rows and two columns): 60 seeded pages of grids of
+    /// The grids a line is tested against are all the grids the
+    /// test of every grid accepted by their place across (`sentences_across` before the
+    /// indexed search looked at every grid of two rows and two columns): 60 seeded pages of grids of
     /// many widths, one wide grid among narrow ones, and segments that are no such grid.
     #[test]
     fn the_grids_over_a_stretch_hold_every_grid_that_reaches_into_it() {
@@ -1554,7 +1554,7 @@ mod tests {
         before.zip(crate::work_steps()).map(|(b, a)| a - b)
     }
 
-    /// Fix round 1 of part 2b-2 of Task 31c (I1): the group of lines at a segment's frame is
+    /// The group of lines at a segment's frame is
     /// one look in an index of the frames, so a row of small grids finds its groups in work
     /// about their number (32 steps a grid: 8,000 for 250 grids, 16,000 for 500, 32,000 for
     /// 1,000). Before, each look walked every group and built its frame, the number of the
@@ -1643,7 +1643,7 @@ mod tests {
             16_777_216.0,
         ];
         // The difference of two places rounds to a snap though they are more than a snap, and
-        // more than one square, apart (fix round 2, R1): the walk says near, so the index
+        // more than one square, apart: the walk says near, so the index
         // must look two squares away.
         for (frame, asked) in [
             (4.0, 2.0f32.next_down()),
@@ -1753,7 +1753,7 @@ mod tests {
         }
     }
 
-    /// Task 31b (N6): the totals that are one line of a label and its amount are a lone
+    /// The totals that are one line of a label and its amount are a lone
     /// pair, also with a blank line of one space over or under them; two lines with ink, or
     /// one line that is no pair, are none.
     #[test]

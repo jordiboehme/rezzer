@@ -686,7 +686,7 @@ fn nested_boxes_around_deep_text_are_cut_in_bounded_work() {
 }
 
 /// Work steps of `segment_page` on the staircase page (70 boxes, 5,000 lines apart):
-/// 12,862,944 measured, about seven in a hundred more allowed (11,230,144 before Task 31c:
+/// 12,862,944 measured, about seven in a hundred more allowed (11,230,144 before the cut looked at the pieces of a gutter:
 /// the cut now looks once more over the pieces of each gutter for a piece that stands
 /// between two lines of a column, one step a piece, see `between_lines`, and each cut
 /// takes the joined rules at the heights of its pieces, one step a piece, see
@@ -709,7 +709,7 @@ fn boxes_side_by_side(n: usize) -> PageIn {
     page([12.0 * n as f32 + 20.0, 800.0], texts, rules)
 }
 
-/// Task 31c: the grid search walks across the page and counts the lines that meet, so grids
+/// The grid search walks across the page and counts the lines that meet, so grids
 /// side by side whose lines share their heights cost about their lines. Before, each upright
 /// line was tested against every flat line in its height: 400 grids took 960,000 steps and
 /// 800 took 3,840,000, four times as many.
@@ -767,7 +767,7 @@ fn the_grid_walk_finds_the_lines_that_meet_and_no_others() {
     assert_eq!(places, [0.0, 100.0]);
 }
 
-/// Task 31c: a box nests in the boxes at its own place, found through an index of all boxes,
+/// A box nests in the boxes at its own place, found through an index of all boxes,
 /// so boxes side by side are nested in work about their number. Before, each box was tested
 /// against every box before it at its depth.
 #[test]
@@ -813,7 +813,7 @@ fn a_depth_bound_of_zero_keeps_the_page_one_leaf() {
     assert!(s.short.is_empty());
 }
 
-/// Fix round 2 of Task 19 (N1): the probe of whether a bound left text whole parts the text
+/// The probe of whether a bound left text whole parts the text
 /// as the walk does, strips between rules first. Three lines of one size and face, evenly
 /// apart, the first two between two rules: the whitespace cut and the style steps would not
 /// part them, the strip does, so a depth bound of zero leaves the page short.
@@ -1165,7 +1165,7 @@ fn each_picture_and_code_is_a_leaf_of_its_own() {
     assert_eq!(s.all.len(), 1);
 }
 
-/// Task 18b round 3: the lines between two rules that span them stay one strip before the
+/// The lines between two rules that span them stay one strip before the
 /// whitespace cut, which would part its columns; a strip of one line is a row and is cut as
 /// text; the text outside the strips is cut as before; every primitive in one leaf.
 #[test]
@@ -1221,7 +1221,7 @@ fn lines_between_two_rules_are_one_strip() {
     }
 }
 
-/// Fix round 1 (M1): a strip holds two to six lines of text between its rules; with seven the
+/// A strip holds two to six lines of text between its rules; with seven the
 /// lines between the rules are a page section, cut as text. The count is of lines, which a
 /// page printed larger or smaller keeps.
 #[test]
@@ -1301,7 +1301,7 @@ fn leaf_texts(s: &Segments, p: &PageIn) -> Vec<String> {
 
 const SENTENCE: &str = "the green lamp stands beside a wooden shelf";
 
-/// Task 31a (class B): two columns of prose under a line across them are parted the same
+/// Two columns of prose under a line across them are parted the same
 /// whether each line is one run or a run per word. The column gutter needs lines of prose on
 /// both sides and few pieces across it; both count the pieces of the lines, not their runs.
 #[test]
@@ -1341,7 +1341,7 @@ fn columns_are_cut_the_same_word_by_word() {
     assert_eq!(with_source(&b, |x| *x == Source::Gutter).len(), 3);
 }
 
-/// Task 31a (class B): the lines between two rules stand in their strip whole, by the middle
+/// The lines between two rules stand in their strip whole, by the middle
 /// of the line, also when the line reaches past the rules and is cut into words: the words
 /// past the end of the rules stay with their line.
 #[test]
@@ -1405,7 +1405,7 @@ fn text_tree(s: &Segments) -> Vec<(Source, Vec<u32>)> {
         .collect()
 }
 
-/// Task 31a (class C): a rule drawn in pieces that touch bounds the same strip and parts the
+/// A rule drawn in pieces that touch bounds the same strip and parts the
 /// same bands of two columns as the rule drawn in one: the pieces are joined before the
 /// strips and the rule cut look at them.
 #[test]
@@ -1442,7 +1442,7 @@ fn rules_in_pieces_bound_the_same_strips_and_bands() {
     assert_eq!(text_tree(&b), text_tree(&a));
 }
 
-/// Fix round 1 of Task 31a (I6): white space after a label, set up to the next column (the
+/// White space after a label, set up to the next column (the
 /// padding of a form field), joins the label's piece and bridges nothing: the label of the
 /// next column is a piece of its own, so the gutter between the two columns of labels over
 /// values is still found, with or without the padding.
@@ -1500,7 +1500,7 @@ fn short_ended_paragraphs(n: u32, top: f32, first: u32) -> Vec<TextRun> {
     texts
 }
 
-/// Fix round 1 of Task 31a (I2): two rules far apart, one over the other and both short (the
+/// Two rules far apart, one over the other and both short (the
 /// edges of a bar, a mark in the margin), bound a tall narrow frame. Full lines of the
 /// paragraphs run through it; only the short last lines have their middles in it. The frame
 /// is no strip: the short lines stay with the lines of their paragraphs, where the strip
@@ -1531,7 +1531,7 @@ fn a_frame_that_lines_of_text_run_through_is_no_strip() {
     }
 }
 
-/// Fix round 1 of Task 31a (I2): the lines of a strip follow each other. Two lines whose
+/// The lines of a strip follow each other. Two lines whose
 /// middles lie in a frame, with a shorter line of the same text between them that ends left
 /// of the frame, are lines of that text, not a strip of two.
 #[test]
@@ -1560,7 +1560,7 @@ fn the_lines_of_a_strip_follow_each_other() {
     );
 }
 
-/// Fix round 2 of Task 31a (N2): a piece whose ink touches the side of a frame by a hair (a
+/// A piece whose ink touches the side of a frame by a hair (a
 /// label in the margin that ends where the rules start) runs through nothing: the lines
 /// between the two rules stay one strip.
 #[test]
@@ -1597,7 +1597,7 @@ fn ink_that_touches_a_frame_by_a_hair_leaves_the_strip() {
     assert_eq!(strip(150.0), 0);
 }
 
-/// Task 26 part 3a (H3): one line of a date and, a cell gap right of it, a label with its
+/// One line of a date and, a cell gap right of it, a label with its
 /// colon and its value is two segments, the date for itself and the label with its value.
 /// A first run that is words (a label of its own), a second run that is no label with a
 /// value, and a second run a word space after the first stay one segment with the first.
@@ -1636,7 +1636,7 @@ fn a_value_beside_a_label_with_its_value_is_parted_from_it() {
     assert_eq!(leaves("03.04.2026", "Sheet:  4", 9.5), [2], "a word space");
 }
 
-/// Task 26 fix round 2 (M5): two labels of a print form, each over the upper left of its
+/// Two labels of a print form, each over the upper left of its
 /// field (a drawn row of digit boxes, lower and to the right), are parted into a segment
 /// each, to be read with their fields. The fields are asked from one step of the labels
 /// under the lowest label up to the highest one, right of the labels: a field at the step
@@ -1704,7 +1704,7 @@ fn labels_beside_drawn_fields_are_parted_into_their_lines() {
     assert_eq!(leaves(Some((317.1, 452.0))), whole);
 }
 
-/// Task 26 fix 3a (H3) and fix round 5: a data line of a date and a number, with a small
+/// A data line of a date and a number, with a small
 /// label that ends with a colon set into the blank right before the number, a little over
 /// the baseline: the label and the number are a segment of their own, one plain line
 /// ([`Source::Line`], no pair is claimed), and the date stays for itself, with a title left
@@ -1725,7 +1725,7 @@ fn a_small_colon_label_on_a_data_line_is_parted_from_what_stands_before_it() {
         let p = page([595.0, 842.0], texts, Vec::new());
         let s = segment_page(&p, &Limits::default(), &|| false);
         check_cover(&s, &p);
-        // The parts of the line are its plain lines (fix round 7: the head claims no pair
+        // The parts of the line are its plain lines (the head claims no pair
         // either): the head from the first run of the line on, and the label with the text
         // after it, a leaf that ends with the last run of the line, the label right before
         // that run's stretch.
@@ -1786,7 +1786,7 @@ fn a_small_colon_label_on_a_data_line_is_parted_from_what_stands_before_it() {
         leaves(&[date, ("Sheet:", 390.0, 10.0, 700.0), value]),
         whole
     );
-    // What stands after the label is not asked what it is (fix round 5: the line is only
+    // What stands after the label is not asked what it is (the line is only
     // parted, no pair is claimed): a second label after it stays on its line too.
     assert_eq!(
         leaves(&[date, label, ("No:", 430.0, 10.0, 700.0)]),
@@ -1832,7 +1832,7 @@ fn a_small_colon_label_on_a_data_line_is_parted_from_what_stands_before_it() {
         [vec![0], vec![1, 2, 3]]
     );
     // Farther off it is something else, and the number does not end the line: the line
-    // is kept whole (fix round 4).
+    // is kept whole.
     let far: Part = ("4", 434.0, 10.0, 700.0);
     assert_eq!(
         leaves(&[date, label, far, more(451.0)]),
@@ -1854,7 +1854,7 @@ fn a_small_colon_label_on_a_data_line_is_parted_from_what_stands_before_it() {
         ]),
         [vec![0, 1, 2], vec![3, 4, 5]]
     );
-    // Fix round 3 (N1): a label that heads a row of values takes none of them. The label
+    // A label that heads a row of values takes none of them. The label
     // ends 8 points before the first amount, the amounts stand 14 and more apart.
     let total: Part = ("Total:", 312.0, 6.6, 700.0);
     let first: Part = ("1.234,56", 344.0, 9.5, 700.0);
@@ -1864,10 +1864,10 @@ fn a_small_colon_label_on_a_data_line_is_parted_from_what_stands_before_it() {
         leaves(&[total, first, second, ("2.000,00", 464.0, 9.5, 700.0)]),
         vec![vec![0, 1, 2, 3]]
     );
-    // Fix round 4: nor with a word after the one amount: the label opens its line and
+    // Nor with a word after the one amount: the label opens its line and
     // the amount does not end it, so it is not set into a data line.
     assert_eq!(leaves(&[total, first, ("net", 404.0, 9.5, 700.0)]), whole);
-    // The data line (fix round 4). What stands before the label is of the larger face:
+    // The data line. What stands before the label is of the larger face:
     // at a label of 7 a word of 7.6 is (`SIZE_STEP`), one of 7.5 is the label's own face.
     let before = |size: f32, y: f32| -> Part { ("Ledger", 300.0, size, y) };
     assert_eq!(
@@ -1884,7 +1884,7 @@ fn a_small_colon_label_on_a_data_line_is_parted_from_what_stands_before_it() {
     assert_eq!(leaves(&[before(10.0, 701.6), label, value]), whole);
 }
 
-/// Task 26 fix round 2 (H3): the data line with the small label shares its leaf with a line
+/// The data line with the small label shares its leaf with a line
 /// of codes over it, as a form's title block has it. The label and its number are still a
 /// segment of their own (one plain line, no pair); the line of codes and the rest of the
 /// data line stay as they are. Among other lines the text after the label must be what a
@@ -1962,9 +1962,9 @@ fn a_small_colon_label_before_a_number_is_parted_under_another_line() {
         leaves(&[code, title, date, ("Sheet:", 390.0, 10.0, 700.0, 1), value]),
         [vec![0, 1, 2, 3, 4]]
     );
-    // Fix round 3 (N1): a label that heads a row of values takes none of them, under
-    // another line as on a line alone; nor with a word after the first amount (fix round
-    // 4: the label opens its line and the amount does not end it).
+    // A label that heads a row of values takes none of them, under
+    // another line as on a line alone; nor with a word after the first amount
+    // (the label opens its line and the amount does not end it).
     let total: Part = ("Total:", 312.0, 6.6, 700.0, 1);
     let first: Part = ("1.234,56", 344.0, 9.5, 700.0, 1);
     assert_eq!(
@@ -1977,9 +1977,9 @@ fn a_small_colon_label_before_a_number_is_parted_under_another_line() {
     );
 }
 
-/// Task 26 fix round 5: the parting of a data line at its small colon label does not look
-/// at the rest of the page, because it claims no pair. A value under the label (N1 of fix
-/// round 3, R1 and R5 of the re-reviews) or text after the last stretch on another line of
+/// The parting of a data line at its small colon label does not look
+/// at the rest of the page, because it claims no pair. A value under the label
+/// or text after the last stretch on another line of
 /// the host changes nothing: the label and the text after it are one plain line
 /// ([`Source::Line`]) either way, and a line of labels over their values is never parted.
 #[test]
@@ -1987,7 +1987,7 @@ fn the_parting_at_a_small_colon_label_asks_nothing_of_the_page() {
     /// One run: its text, its left edge, its size, its baseline and its line.
     type Part = (&'static str, f32, f32, f32, u32);
     // The texts of the plain lines among `parts` that hold a label: the labelled parts of
-    // the parted lines (the head of each is a plain line too, fix round 7).
+    // the parted lines (the head of each is a plain line too).
     let lines = |parts: &[Part]| {
         let mut texts: Vec<TextRun> = parts
             .iter()

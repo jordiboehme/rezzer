@@ -41,10 +41,10 @@ use serde_json::Value;
 #[global_allocator]
 static ALLOCATOR: rezzer_limits::Allocator = rezzer_limits::Allocator;
 
-/// The NFD name of the invented source (ruling P5-W): `Ä` as `A` and a combining diaeresis.
+/// The NFD name of the invented source: `Ä` as `A` and a combining diaeresis.
 const NFD_NAME: &str = "Bericht A\u{0308}nderung.md";
 
-/// Copies of corpus files under the names of Review Focus 1, read from a path. The U+3000
+/// Copies of corpus files under odd names, read from a path. The U+3000
 /// name gives a part link with U+3000 in a bare destination.
 const NAMED_COPIES: [(&str, &str); 5] = [
     ("pdf/irs-f1040-2025.pdf", "Q3 report (final) #2 100%.pdf"),
@@ -93,7 +93,7 @@ fn write_corpus(dir: &Path, part_size: usize) -> Vec<PathBuf> {
     let empty = sources.path().join("empty.txt");
     std::fs::write(&empty, b"").unwrap();
     paths.push(empty);
-    // Wikilinks whose targets Rezzer cannot know (ruling P5-AD): none may be a live link.
+    // Wikilinks whose targets Rezzer cannot know: none may be a live link.
     let wiki = sources.path().join("wikilinks.md");
     std::fs::write(
         &wiki,
@@ -1249,7 +1249,7 @@ fn crystalline_imports_without_errors() {
     }
 
     // Every relative link of an imported engram leads to a file in the domain: the import
-    // copied each picture and attachment it links (ruling P5-AJ), and rewrote the links.
+    // copied each picture and attachment it links, and rewrote the links.
     let mut attachments = 0;
     for file in files_under(&dom) {
         if file.extension().is_none_or(|e| e != "md") || file.ends_with("MANIFEST.md") {

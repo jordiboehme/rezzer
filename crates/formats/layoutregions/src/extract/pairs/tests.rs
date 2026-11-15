@@ -113,7 +113,7 @@ fn box_pairs_empty_field_stays_empty() {
 /// a colon, or its value is shaped as a number, a date or a code), the style of that label
 /// marks the label, and the box is read again as a field. A label alone in an empty field
 /// seeds nothing (its role is told by its size alone), nor does a clear field without such
-/// evidence: only pairs with independent evidence seed a style (Task 17, D7; the typers'
+/// evidence: only pairs with independent evidence seed a style (the typers'
 /// `seeds` hold the same rule).
 #[test]
 fn box_pairs_weight_only_is_read_again_with_a_known_label_style() {
@@ -193,7 +193,7 @@ fn one_character_strip(size: f32, inside: f32) -> ([f32; 3], Vec<TextRun>) {
     (dividers, runs)
 }
 
-/// Task 26 fix round 6 (I1): a drawn divider in a word gap of a run is drawn evidence of a
+/// A drawn divider in a word gap of a run is drawn evidence of a
 /// field edge. The run is cut there even when less than a character of it stands past the
 /// divider (a last value of one character), with the divider a hair inside the character's
 /// box. A divider half a character or more inside a word parts no words, at any text size,
@@ -235,7 +235,7 @@ fn a_run_is_cut_at_a_divider_in_its_word_gap_whatever_stands_past_it() {
     assert_eq!(divider_gap(&runs[4], dividers[1] - 4.0 * ch), None);
 }
 
-/// Task 26 fix round 7 (N1): a gap between the digit groups of a number is no field edge: one
+/// A gap between the digit groups of a number is no field edge: one
 /// to three digits, the gap, exactly three digits, then the end, a decimal mark or another
 /// group. Both ways: a group of another length, a word that is no group and a date are none.
 #[test]
@@ -250,7 +250,7 @@ fn a_gap_between_digit_groups_is_told_by_its_digits() {
         ("-7 500", 1),
         ("Sum 1\u{2009}234,56 net", 2),
         // A sign, an opening bracket, a currency sign or a currency code may lead the first
-        // group (fix round 7c, M1), and a closing bracket may end the last one.
+        // group, and a closing bracket may end the last one.
         ("+7 500", 1),
         ("\u{2212}1 234,56", 1),
         ("(1 234,56)", 1),
@@ -299,7 +299,7 @@ fn a_gap_between_digit_groups_is_told_by_its_digits() {
     }
 }
 
-/// Task 26 fix round 7c (M1): a number led by a sign (`-`, `+`, U+2212), an opening bracket,
+/// A number led by a sign (`-`, `+`, U+2212), an opening bracket,
 /// a currency sign or a currency code is a number in digit groups too: a drawn divider in
 /// its group gap leaves the fields not decided and cuts nothing. The other way: letters
 /// before the first digit that are no currency code make a code, which is cut at the
@@ -355,7 +355,7 @@ fn a_divider_in_the_group_gap_of_a_number_with_a_sign_decides_no_fields() {
     }
 }
 
-/// Task 26 fix round 7c (I1): a field edge from a label's start that falls in the digit group
+/// A field edge from a label's start that falls in the digit group
 /// gap of a number or inside the number leaves the fields of the frame not decided, on the
 /// one function both paths ask: no run is cut, and the edge is not moved to the number's end.
 /// The other way: with no group after the gap the run is cut at the label's start.
@@ -416,7 +416,7 @@ fn a_label_start_in_a_number_in_digit_groups_decides_no_fields() {
     }
 }
 
-/// Task 26 fix rounds 7, 7b and 7c (N1, I1): a run is never cut at a gap between digit
+/// A run is never cut at a gap between digit
 /// groups, by a divider or by a field edge the run stands across. A drawn divider in that
 /// gap, within its reach of it (see `divider_gap`) or inside the number with more than a
 /// character of it on each side leaves the fields of the frame not decided: the digits say
@@ -712,7 +712,7 @@ fn key_values_are_rows_of_a_label_and_its_value() {
     );
 }
 
-/// Task 26 part 3c-1 (the colon rows at scale 0.7 in smaller text): lines set two text sizes
+/// Lines set two text sizes
 /// apart are at the bound of the pitch of a block. Where the lines stand on the page, the
 /// step between two baselines is a hair over or under two sizes by the rounding of the
 /// coordinates alone (448.0 and 435.4 at 6.3 points are 12.600006 apart), and the block must
@@ -763,7 +763,7 @@ fn key_values_two_sizes_apart_hold_at_every_place_on_the_page() {
     }
 }
 
-/// Task 26 fix round 4 (review 4 M3): the colon lines after a block follow it at the same
+/// The colon lines after a block follow it at the same
 /// bound with the same slack (`PITCH_ROUNDING`). Two lines of a colon label and its value
 /// are no block alone; a line in one run with a short colon label two sizes under them makes
 /// three, also where the f32 places land a hair over two sizes (448.0, 435.4 and 422.8 at
@@ -810,7 +810,7 @@ fn a_colon_line_two_sizes_after_a_block_holds_at_every_place_on_the_page() {
     }
 }
 
-/// Task 26 (M6 of review 1, class A1): a line whose label ends a word space before the value
+/// A line whose label ends a word space before the value
 /// column is one piece. It is a line of the block when a word of it starts at the left edge
 /// the values of the other lines share and reads as a value: the row says where its run is
 /// cut. A word that starts beside that edge, or text that is no value, is no line of a block.
@@ -1190,7 +1190,7 @@ fn numbered_labels_are_words_and_a_short_index() {
     assert!(!blocks::indexed("Str. / 1"));
 }
 
-/// Task 26 (A2, H1): the labels of a row of labels over their values, each with the value
+/// The labels of a row of labels over their values, each with the value
 /// its ink stands under. A value padded with blanks as far as the next label is under its
 /// own label only; a label with nothing under it has no value; a value under two labels,
 /// or a run on a third baseline, pairs nothing.
@@ -1229,7 +1229,7 @@ fn labels_with_values_pair_by_the_ink_under_each_label() {
     assert_eq!(labels_with_values(&third), None);
 }
 
-/// Task 26: what the reader of tables without rules leaves to the cut. A row of two small
+/// What the reader of tables without rules leaves to the cut. A row of two small
 /// labels over two larger values is one; rows in one size, a label row that holds an amount,
 /// a value row that ends with a colon and a value under no label are none.
 #[test]
@@ -1319,7 +1319,7 @@ fn read_columns(runs: &[TextRun]) -> Option<Vec<Vec<String>>> {
     )
 }
 
-/// Task 36a part 1 (class D): three columns at one pitch under a title line, the middle one
+/// Three columns at one pitch under a title line, the middle one
 /// a paragraph wrapped over every line under its title, are blocks side by side: read column
 /// by column, the name of the third column with its title and not after the names of the
 /// second. Each piece of the evidence is asked both ways.
@@ -1427,7 +1427,7 @@ fn columns_with_a_wrapped_paragraph_read_column_by_column() {
     assert!(!with(&|r| r[3].x = 60.0));
 }
 
-/// Task 36a fix round 1 (review M1): white space before the first ink of a line stands with
+/// White space before the first ink of a line stands with
 /// the cell that ink opens, not with the first column: a line that starts in the second
 /// column, after a run of blanks, gives the first column no line on its row.
 #[test]
@@ -1500,12 +1500,12 @@ fn item_table(rows: &[(&str, &str, f32, &str)]) -> Vec<TextRun> {
     out
 }
 
-/// Task 36a fix round 1 (review I1): the rows of a table without rules are no blocks side by
+/// The rows of a table without rules are no blocks side by
 /// side, though its columns start at one pitch, its descriptions are full lines that open
 /// with a small letter and the last of them wraps. Each row is an item of its own: read
 /// column by column, the descriptions of all items would be one text and no price would
 /// stand with its item. The counter-evidence is the rows: no other column reaches the last
-/// row of the "paragraph" (fix round 2, re-review N1: the cells of the other columns end with
+/// row of the "paragraph" (the cells of the other columns end with
 /// the last item, whatever cell is left empty), or every other column has a line on each of
 /// its rows but the last, or a column holds nothing but numbers under its title.
 #[test]
@@ -1589,10 +1589,10 @@ fn rows_of_a_table_with_a_wrapped_cell_are_no_columns() {
         ])),
         None
     );
-    // Fix round 2 (re-review N1): a cell left empty at the end of a column of words. The
+    // A cell left empty at the end of a column of words. The
     // other columns then end on different rows, as blocks of their own lengths do, but
-    // none of them reaches the last row of the description: rows. Probe A (the last item
-    // has no source), C (two items), D (a note on the first item only) and probe 16 (the
+    // none of them reaches the last row of the description: rows: the last item
+    // has no source, two items, a note on the first item only and the
     // last description wrapped over two lines, each line under a full one).
     let items = |sources: [&'static str; 3]| {
         item_table(&[
@@ -1707,12 +1707,12 @@ fn rows_of_a_table_with_a_wrapped_cell_are_no_columns() {
         }
         read_columns(&runs).is_some()
     };
-    // Fix round 2 (design ruling on re-review N1): blocks side by side read as columns
+    // Blocks side by side read as columns
     // only when one other column reaches the last row of the paragraph. A column that ends
     // over it looks as the item column of a table does over the wrapped end of its last
     // description, so a footer whose blocks are all shorter than its paragraph reads row
     // by row, as it did before the columns were read. The first three cases were columns
-    // before that ruling.
+    // before the columns were read as one.
     let (company, board) = (
         ["Mill Lane 4", "20481 Oldtown", "Northland", "Open daily"],
         ["Morgan Sample", "Robin Other", "Kim Example", "Ann Other"],

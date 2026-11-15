@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Fix round 1 of Task 37, M4: the source order against the order it gave before Task 37,
+//! The source order against the order it gave before the indexed search,
 //! when each loose region looked at every sourced region one by one (`Cx::by_source` at
 //! 6601ca13). 4,000 seeded pages of 2 to 31 regions in 1 to 4 columns, with loose pictures
 //! and codes, text regions of pieces side by side and rules, and a source order as made or

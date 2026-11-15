@@ -521,7 +521,7 @@ fn a_page_of_prose_and_a_ruled_table_reads_the_same_under_every_change_but_known
         .map(|f| format!("{} {}", f.transform.name(), f.page + 1))
         .collect();
     // Nothing is pinned. With the runs in another order the page read the table with a rule
-    // more, until the runs were read in the order of their places (`RunOrder`, Task 31c).
+    // more, until the runs were read in the order of their places (`RunOrder`).
     assert_eq!(broken, [""; 0], "{:#?}", findings);
 }
 
@@ -787,7 +787,7 @@ fn the_foot_of_a_column_and_the_head_of_the_next_keep_their_order() {
     // A known limit of the check (owner: after 0.1.0; a limit of the check, it changes no read): a
     // foot of two lines has one line over its last, which is the widest by itself and says nothing.
     // Such a column is not seen as prose. When the sign is taken from the column and not from its
-    // foot block, this assertion turns. Part 2b-1 of Task 31c found no such sign in the check: it
+    // foot block, this assertion turns. No such sign was found in the check: it
     // compares regions, and the lines of the column over the foot are in other regions or in none.
     let short = ds(&[
         (Kind::Paragraph, &[0, 1, 2]),
@@ -958,7 +958,7 @@ fn a_side_heading_and_its_block_keep_their_order() {
     // same wider box typed a paragraph. A heading beside a wider block of one line on its row is
     // the shape of a side heading, and geometry cannot tell a number line from a block of one line,
     // so the pair is held though it is free. When a sign tells the two apart, this assertion turns.
-    // Part 2b-1 of Task 31c found none: a box or a number field is a sign of the engine's read
+    // A box or a number field is a sign of the engine's read
     // (its label and value groups), not of the geometry the check has.
     assert!(order_breaks(&wide, &pair, &turned));
     // A box typed a field left of a title: the title is no value of it either. A field left

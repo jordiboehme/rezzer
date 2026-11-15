@@ -611,7 +611,7 @@ fn block_noise_gives_no_linear_code() {
 }
 
 // ---------------------------------------------------------------------------------------
-// Fix round 1
+// Pictures turned by an angle.
 
 /// `gray` of `w` by `h` turned by `deg` degrees around its middle on a white picture large
 /// enough to hold it (nearest pixel).

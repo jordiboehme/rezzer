@@ -425,7 +425,7 @@ mod given_tests {
         }
     }
 
-    /// Task 18b (ruling Q1): every tag block the layout reads is a region the page states, a
+    /// Every tag block the layout reads is a region the page states, a
     /// heading with its level, a list with its items, a table with its cells; a form field box
     /// with the runs in it that no tag holds; untagged runs are in none.
     #[test]

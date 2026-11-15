@@ -780,7 +780,7 @@ fn pre_r13_dwg_versions() {
     assert_eq!(detect("x", b"AC1.2 is a part number.\n").0, FormatId::Text);
 }
 
-// ---- Review fix round: container-first PDF, CAD formats, text order, bounded ZIP listing ----
+// ---- Container-first PDF, CAD formats, text order, bounded ZIP listing ----
 
 fn fixture(name: &str) -> Vec<u8> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -1235,7 +1235,7 @@ fn spike_corpus_sweep() {
     assert!(bad.is_empty(), "{}", bad.join("\n"));
 }
 
-// ---- Fix round 3: non-blocking open, OLE cap, stricter Excellon, Inventor assemblies ----
+// ---- Non-blocking open, OLE cap, stricter Excellon, Inventor assemblies ----
 
 #[test]
 fn cnc_program_with_g90_and_bare_coordinates_is_gcode() {
@@ -1356,7 +1356,7 @@ fn inventor_assembly_vs_part() {
     assert!(d.evidence.contains("part"), "{}", d.evidence);
 }
 
-// ---- Fix round 4: own bounded ZIP directory walk, stricter binary PDF prefix ----
+// ---- Own bounded ZIP directory walk, stricter binary PDF prefix ----
 
 /// Appends a decoy end record: one entry, a 46-byte directory at an offset past the file.
 fn with_decoy_eocd(mut zip: Vec<u8>) -> Vec<u8> {
@@ -1523,7 +1523,7 @@ fn max_rss_bytes() -> u64 {
     }
 }
 
-// ---- Re-review 2: bounded stored markers, zip64 shift order, markdown after frontmatter ----
+// ---- Bounded stored markers, zip64 shift order, markdown after frontmatter ----
 
 /// A ZIP of stored entries written by hand: `(name, data, comment)`. `between` is put
 /// between the central directory and the ZIP64 records (if `zip64`) or the end record.

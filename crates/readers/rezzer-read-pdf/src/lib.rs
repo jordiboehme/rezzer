@@ -2963,7 +2963,7 @@ fn figure_host(media: Option<u32>, inked: bool, host: u32) -> u32 {
 #[cfg(test)]
 mod tests {
 
-    /// Fix round 1 of Task 37, M3, and Task 38b: the shares of the text stop, each moved
+    /// The shares of the text stop, each moved
     /// both ways. With the text read from 0, the text stops when its time and the time kept
     /// for it (a half for the layout, an eighth for the plain lines, a sixteenth for the end
     /// of the read) pass the limit: 800 ms of text keep 400, 100 and 50 and end at 1,350
@@ -2991,7 +2991,7 @@ mod tests {
         assert!(!text_time_is_up(ms(1_800), ms(1_000), ms(2_350)));
         assert!(text_time_is_up(ms(1_808), ms(1_000), ms(2_350)));
     }
-    /// Task 22 fix rounds 4 and 5: the segment tree gives the lowest and
+    /// The segment tree gives the lowest and
     /// highest baseline of every range of runs, as a walk over the range does.
     #[test]
     fn spans_give_the_range_of_baselines() {
@@ -3014,7 +3014,7 @@ mod tests {
         }
     }
 
-    /// Fix round 2 (G2): a figure or a code region stands at its media block; without one it
+    /// A figure or a code region stands at its media block; without one it
     /// keeps the block of its text when it has text with ink, and stands at the page when not.
     #[test]
     fn a_figure_without_media_keeps_the_block_of_its_text() {
@@ -3031,7 +3031,7 @@ mod tests {
 
     #[test]
     fn past_the_cap_only_regions_that_would_get_a_picture_are_counted() {
-        // Re-review 3, N3: two blocks kept as laid out past the cap of the file. One hosts
+        // Two blocks kept as laid out past the cap of the file. One hosts
         // a region, one hosts none and one hosts a region with an empty box: the last two
         // would get no picture under the cap either, so the loss counts one region.
         let block = |k: usize| Block::Spatial {
@@ -3524,8 +3524,8 @@ mod tests {
     /// (the text pass does not keep its grids until the page is laid out, see
     /// `regions::structure_in_frame`). Before, each detector searched them on its own. A page
     /// read turned is searched the same twice. The count is taken in the engine's grid search
-    /// itself, so any path to it counts. `tables::field_frames` keeps a search of its own by
-    /// ruling (it runs before the page's structure is found, see there); the page here draws
+    /// itself, so any path to it counts. `tables::field_frames` keeps a search of its own
+    /// (it runs before the page's structure is found, see there); the page here draws
     /// no separator marks, so it does not run.
     #[test]
     fn grids_are_found_once_per_page() {

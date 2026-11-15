@@ -324,7 +324,7 @@ fn at_pitch(gap: f32, size: f32) -> bool {
 
 /// Labels and values line up within this share of the text size of their line: a point at
 /// 10 points. A share of the size, so that a block printed smaller or larger lines up the
-/// same (Task 31a; it was a point at every size).
+/// same.
 const KV_ALIGN: f32 = 0.1;
 
 /// One row of a block of labels and values: its line, and the flow ranges of its label and
@@ -362,7 +362,7 @@ struct KvLine {
 /// The lines of [`key_values`], each with its label and its value: a line of two pieces, or
 /// a line of one piece that goes on from the labels' left edge into the value column and is
 /// cut at the left edge the values of the other lines share
-/// ([`crate::extract::table::grid::value_cut`], Task 26 class A1: a label that ends a word
+/// ([`crate::extract::table::grid::value_cut`]: a label that ends a word
 /// space before its value). `None` when a line is neither.
 fn kv_lines<R: LineRun>(runs: &[R], a: usize, pieces: &[Vec<Piece>]) -> Option<Vec<KvLine>> {
     use crate::extract::table::grid::{ink_start, value_cut};

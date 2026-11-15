@@ -74,8 +74,8 @@ fn markers() {
     // Padding after a star or a dash: a mark set into a form field, no bullet.
     assert_eq!(list_marker("*     Betrag"), None);
     assert_eq!(list_marker("-  keine"), None);
-    // A star closed by a lone star on its line encloses an item, no bullet (part 2e-4,
-    // item 6); a star bullet over text with a star in a word still is one.
+    // A star closed by a lone star on its line encloses an item, no bullet;
+    // a star bullet over text with a star in a word still is one.
     assert_eq!(list_marker("* A123456B * x/y"), None);
     assert_eq!(list_marker("* Erste Position"), Some((false, 2)));
     assert_eq!(list_marker("* Rabatt 5* auf alles"), Some((false, 2)));
@@ -84,7 +84,7 @@ fn markers() {
 }
 
 /// The minus after an amount with cents ends the amount; a hyphen after a word or a whole
-/// number cuts a word or a range (part 2e-4, item 3). Text of other scripts is read char by
+/// number cuts a word or a range. Text of other scripts is read char by
 /// char, never cut inside a char.
 #[test]
 fn a_minus_after_an_amount_is_no_word_cut() {
@@ -395,7 +395,7 @@ fn an_address_under_a_line_of_prose_is_demoted_as_an_address() {
     );
 }
 
-/// Review R3 of Task 31b, the path of a public form (irs-f6744 untagged page 174). A value
+/// The path of a public form (irs-f6744 untagged page 174). A value
 /// at the right end of a row of boxes, and far left of it, 4.4 points lower at a size of
 /// 5.4, the second line of the label of the first box. Read one after the other they are
 /// lines of one paragraph for the walk, but no text of one line: the second starts after a
@@ -430,7 +430,7 @@ fn a_line_left_of_the_line_over_it_and_closer_than_a_line_starts_after_a_break()
     assert!(!other_column((45.0, 57.0), (218.6, 220.6), 4.4, 5.4));
 }
 
-/// Task 36a part 1 (the letter head with a larger name): a bold name a little larger than the
+/// A bold name a little larger than the
 /// body over the smaller lines of its address at the address's own pitch is the first line of
 /// the address, a paragraph and no heading. A heading that stands farther over the lines than
 /// they stand from each other, lines of one shape, lines at another edge, one line under the
@@ -507,7 +507,7 @@ fn a_name_over_its_smaller_address_lines_opens_the_address() {
     assert_eq!(read(&page(&rows, 12.0, 72.0, 10.4, 10.4)), (1, None, 0));
     let note = ["Income", "Attach Form A-2", "here. Also", "attach Forms"];
     assert_eq!(read(&page(&note, 12.0, 72.0, 10.4, 10.4)), (1, None, 0));
-    // Fix round 1 (review I2): a bold line over a complete address, one that has its own
+    // A bold line over a complete address, one that has its own
     // name line (a line without a digit over its street), is a heading over it: an address
     // has one name. The label of an invoice (`Delivery address`) keeps its heading.
     let headed = [
@@ -518,7 +518,7 @@ fn a_name_over_its_smaller_address_lines_opens_the_address() {
     ];
     assert_eq!(read(&page(&headed, 12.0, 72.0, 10.4, 10.4)), (1, None, 0));
     // The same label over an address without a name line reads as the first line of the
-    // address, by ruling (controller, fix round 1): the geometry cannot tell such a label
+    // address, by design: the geometry cannot tell such a label
     // from a name (both are short lines without a digit at the address's edge and pitch).
     // One block with the bold first line kept bold: no value and no order moves, and the
     // heading lost is the accepted cost (recorded for after 0.1.0).

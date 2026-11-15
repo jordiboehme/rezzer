@@ -49,10 +49,10 @@ pub(crate) const TWO_DATES: &str =
     "2 dates stand in the head of page 1; none is marked as the document date";
 
 /// The words of the losses of `out` that are `Uncertain`, but for the loss of a region kept
-/// as laid out for its region type: these tests judge dates, and since Task 19 a region whose
+/// as laid out for its region type: these tests judge dates, and a region whose
 /// type is not clear, or whose reader built no table or pairs of the type it reads as, says so
 /// with a loss of its own, whose text dates are still read from (the dates of every variant
-/// hold with it; Task 36 types such regions). A region kept as laid out for another reason (a
+/// hold with it). A region kept as laid out for another reason (a
 /// bound or the time limit) still counts.
 pub(crate) fn unsure(out: &ReadOutcome) -> Vec<&str> {
     out.document
@@ -178,7 +178,7 @@ fn labelled_date_is_document_date() {
     assert!(unsure(&out).is_empty(), "{:?}", unsure(&out));
 }
 
-/// Task 19 (carried): the dates of the page are read from its runs, so a labelled date in text
+/// The dates of the page are read from its runs, so a labelled date in text
 /// that no region type has clear evidence for, kept as laid out, is still the document date.
 #[test]
 fn labelled_date_kept_as_laid_out_is_the_document_date() {
@@ -879,7 +879,7 @@ fn head_layouts_with_one_other_date() {
 
 #[test]
 fn rereview_probes_give_no_wrong_date() {
-    // The probes of the round 3 re-review as a test: the labelled date, or a loss.
+    // Earlier probes as a test: the labelled date, or a loss.
     use HeadWant::*;
     let one = Lost(ONE_DATE);
     let two = Lost(TWO_DATES);
@@ -1054,7 +1054,7 @@ fn place_and_den_before_the_date_mark_nothing() {
 
 #[test]
 fn rereview_r4_probes_give_no_wrong_date() {
-    // The probes W1 to W5 of the round 4 re-review: each gave a wrong date once. Now nothing
+    // Earlier probes: each gave a wrong date once. Now nothing
     // marks their dates, so each gives the loss for the dates of the head.
     use HeadWant::*;
     let three = "3 dates stand in the head of page 1; none is marked as the document date";
@@ -1312,7 +1312,7 @@ pub(crate) fn ruled_rows(rows: &[&[&str]], xs: &[f32], top: f32, size: f32, font
 
 #[test]
 fn rereview_r6_probes_give_no_wrong_date() {
-    // The probes of the round 6 re-review (X1 to X4 and the checks beside them) as a test.
+    // Earlier probes (and the checks beside them) as a test.
     // Tables at y 750 stand in the head, at y 250 in the body under the prose. Never a wrong
     // date.
     use HeadWant::*;
@@ -1509,7 +1509,7 @@ fn rereview_r6_probes_give_no_wrong_date() {
 
 #[test]
 fn rereview_r8_probes_give_no_wrong_date() {
-    // The probes of the round 8 re-review (Y1, Y2 and the checks beside them) as a test. A
+    // Earlier probes (and the checks beside them) as a test. A
     // label over a column of lone dates marks none of them; a label cell marks the date cell
     // beside it only in a table of two columns. Never a wrong date.
     use HeadWant::*;
@@ -1631,7 +1631,7 @@ fn rereview_r8_probes_give_no_wrong_date() {
 
 #[test]
 fn rereview_r9_probes_give_no_wrong_date() {
-    // The probes of the round 9 re-review (Y1b with V1 to V3, Y3 with V12, and the checks
+    // Earlier probes (and the checks
     // beside them) as a test, with lists of dates beside a label too. A label marks a date
     // only when it governs one date: no other date below the label in its column, no
     // continuation rows in a two-column table, no dates under a date beside its label. Never
@@ -1785,7 +1785,7 @@ fn rereview_r9_probes_give_no_wrong_date() {
 
 #[test]
 fn rereview_r10_probes_give_no_wrong_date() {
-    // The probes of the round 10 re-review (G1 to G5, U1 to U10) as a test, and the shape of a
+    // Earlier probes as a test, and the shape of a
     // header field table over an item table whose date column lies under the header's value
     // column. A marked date must be the only date in its column on page 1, above or below it.
     // Never a wrong date. Body cases stand at y 250, under the `headed` prose.
@@ -1917,7 +1917,7 @@ fn rereview_r10_probes_give_no_wrong_date() {
                     // that holds the row's position and the prose is no cell, so the prose
                     // line stays a paragraph, said as a loss. At 12 pt its first line is
                     // printed over the last row alone: it reads as a sentence across the
-                    // row's columns (Task 17 D9), so it stays a paragraph, said as a loss.
+                    // row's columns, so it stays a paragraph, said as a loss.
                     if size == 9.5 {
                         overprinted
                     } else if size == 12.0 {
@@ -1939,7 +1939,7 @@ fn rereview_r10_probes_give_no_wrong_date() {
 
 #[test]
 fn rereview_r11_probes_give_no_wrong_date() {
-    // The probes of the round 11 re-review (finding S, S1 to S7) as a test: a list whose other
+    // Earlier probes as a test: a list whose other
     // entries are dates in a short or long form (a two-digit year, a month name, no year, a
     // Polish form) still makes the first entry one of a list; the CJK forms are unit tests, as
     // the test fonts hold no CJK glyphs. Never a wrong date.
@@ -2042,7 +2042,7 @@ fn rereview_r11_probes_give_no_wrong_date() {
 
 #[test]
 fn rereview_r12_probe_gives_no_wrong_date() {
-    // The probe of the round 12 re-review (R4): the rest of the list writes its dates as a
+    // An earlier probe: the rest of the list writes its dates as a
     // day, a month name and a year joined by a sign (`16-Jan-2026`). The first entry is one of a
     // list, not the document date. Never a wrong date.
     for (size, scale) in [(7.0f32, 0.8f32), (9.5, 1.0), (12.0, 1.25)] {

@@ -362,7 +362,7 @@ fn unplaced_run_is_reported() {
     assert!(!at.contains_key(&note));
 }
 
-/// Task 17 D9: a sentence printed over a ruled row, in runs parted where its word gap falls on
+/// A sentence printed over a ruled row, in runs parted where its word gap falls on
 /// a column rule (the rule at 100 between "wird" and "nach"), reads as a sentence across the
 /// columns (`sentence_across`): its runs are in no cell, so the reader keeps the line as a
 /// paragraph next to the table. The values of the rows above keep their cells.
@@ -414,7 +414,7 @@ fn a_sentence_over_a_ruled_row_is_in_no_cell() {
     assert!(table.unplaced.is_empty(), "{table:#?}");
 }
 
-/// Task 19b: a figure's name and number alone in a cell beside other cells names a figure, it
+/// A figure's name and number alone in a cell beside other cells names a figure, it
 /// captions none; a caption alone on its line, or with caption words in the runs that go on
 /// from it, is one.
 #[test]
@@ -1011,7 +1011,7 @@ fn a_thin_line_without_clear_evidence_stays_a_line_of_the_row_above() {
     assert_eq!(n, 2);
 }
 
-/// Task 29 (B2): a description whose values stand on its second line: its first line stands
+/// A description whose values stand on its second line: its first line stands
 /// over the row's anchor after a blank under the bold header, so it goes with the row under it;
 /// the lines under the values stay with that row.
 #[test]
@@ -1042,7 +1042,7 @@ fn a_line_over_a_rows_values_after_a_blank_goes_with_that_row() {
     assert_eq!(rows[2], ["2", "Pumpe", "120,00"]);
 }
 
-/// Review Important 3 and Minor 1: without a header row, bold item names over plain detail
+/// Without a header row, bold item names over plain detail
 /// lines keep their detail lines (the first row is no header: its values are plain); and a
 /// detail line set apart under its own row, not in a column of the row under it, stays.
 #[test]
@@ -1123,7 +1123,7 @@ fn a_joint_of_a_rule_parts_two_titles_less_than_a_cell_gap_apart() {
     );
 }
 
-/// Task 26 (A1): a label and its value a word space apart are cut where the value starts at
+/// A label and its value a word space apart are cut where the value starts at
 /// the left edge the values of the other lines share, never by the gap.
 #[test]
 fn a_value_a_word_space_after_its_label_is_cut_at_the_shared_edge() {

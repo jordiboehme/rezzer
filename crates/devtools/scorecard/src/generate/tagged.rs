@@ -569,8 +569,8 @@ mod tests {
         // A known limit (owner: after 0.1.0; a limit of the truth, it changes no read): a short title
         // beside a wider box of one line on its row. The tags give no kinds here, and geometry
         // cannot tell a number line from a block of one line, so the pair is held though it is
-        // free. When a sign tells the two apart, this assertion turns. Part 2b-1 of Task 31c found
-        // none in the tags.
+        // free. When a sign tells the two apart, this assertion turns. No sign was found
+        // in the tags.
         let short = block(1, [100.0, 135.0], [748.0, 760.0], true, "Invoice");
         let wide = block(
             1,

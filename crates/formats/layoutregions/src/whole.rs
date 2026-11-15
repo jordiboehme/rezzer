@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! A region the engine keeps whole is placed whole (Task 31c, class K).
+//! A region the engine keeps whole is placed whole.
 //!
 //! A reader hands its text to a walk line by line, and its lines come from a pass that runs
 //! before the regions are found: text on one baseline is one line there. A line can so hold the
@@ -61,7 +61,7 @@ pub struct Parted {
 ///
 /// Nothing is moved there: the block starts on a line of its own, where it stood.
 ///
-/// The mirror (Task 36a): the block starts the line and other text follows it, so a cut alone
+/// The mirror: the block starts the line and other text follows it, so a cut alone
 /// would leave that text between the block's first line and its next. The text after the
 /// block is placed on a line of its own before the block when all of this holds:
 ///
@@ -303,7 +303,7 @@ mod tests {
         );
     }
 
-    /// The mirror (Task 36a): a label starts the line of a table's header cells, its value
+    /// The mirror: a label starts the line of a table's header cells, its value
     /// alone on the next line, and a drawn line of the label's own stands between the two.
     /// The cells are placed on a line of their own before the label, so the label's lines
     /// follow each other; the label's region is kept whole.
@@ -445,7 +445,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!((got.lines, got.whole), (vec![0, 1], vec![4]));
-        // Review 1 of Task 31c, M4: on the last line of the stretch the caller is asked,
+        // On the last line of the stretch the caller is asked,
         // and it says `several` of a region with ink on more than one line anywhere, the
         // stretch included (so the PDF reader). A block whose first line stands over this
         // one in the stretch is such a region: its last line is cut off the text of the
@@ -504,7 +504,7 @@ mod tests {
 
     /// The work is linear in the runs: twice the lines take at most a little over twice the
     /// steps, with one region on all lines and with a region of its own on every two lines
-    /// (review 1 of Task 31c, M8: the lines of the regions are sorted once, and counted).
+    /// (the lines of the regions are sorted once, and counted).
     #[test]
     fn the_work_grows_with_the_runs() {
         let steps = |rows: u32, per_region: u32| {

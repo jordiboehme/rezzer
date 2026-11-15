@@ -541,7 +541,7 @@ pub(crate) struct Laid {
     /// stands in the page's reading order (see [`MediaAt`]). A picture of no such region is
     /// placed by the block of the run nearest to it.
     pub media_at: Vec<MediaAt>,
-    /// The pictures that stand in a table cell (Task 29, B1: a picture in each row of an item
+    /// The pictures that stand in a table cell (a picture in each row of an item
     /// table): the picture, the table's place in `blocks`, the row and the cell. Each is
     /// written in its cell, not as a media block of its own.
     pub in_cells: Vec<(layoutregions::PrimId, usize, usize, usize)>,
@@ -613,7 +613,7 @@ impl LineRun for NoteRun<'_> {
 /// pages as the reader learns them (`tagged` as for the file, a raised run a footnote
 /// reference), then per page the segments, the typers, the arbitration and the layout's steps
 /// after it (a segment a bound left whole kept as laid out, pictures parted from text). Given
-/// regions of a page are decided as given, with no reading of today's readers behind them.
+/// regions of a page are decided as given, with no reading of the pre-pass readers behind them.
 /// Each decision is its kind, its primitives and what made its segment and the ones over it
 /// (innermost first, joined by `<`), in the order of the decisions. The runs are read in the
 /// order of their places, whatever order the pages hold them in. For the metamorphic tests,
@@ -1387,10 +1387,10 @@ pub(crate) fn page_blocks_at(
 ///
 /// The page is read in one pass of the region engine: the tables of the tag tree first (the
 /// file states them), then the regions the page states (its tag tree's blocks, its form
-/// fields, and the columns of totals beside ruled tables that today's rule reads, until Task
-/// 30), then segmentation, scored typing and one arbitration (see [`decide::decide`]). Each
+/// fields, and the columns of totals beside ruled tables that the pre-pass rule reads),
+/// then segmentation, scored typing and one arbitration (see [`decide::decide`]). Each
 /// decision is read by the extractor of its kind (see [`decide::Class`]), and the parts stand
-/// in the page's order of runs, each part where its first run stands (until Task 21), running
+/// in the page's order of runs, each part where its first run stands, running
 /// header lines too; footnotes and footers last.
 fn page_blocks_until(
     page: u32,
@@ -1455,7 +1455,7 @@ fn page_blocks_until(
     // headers and footers are looked for: the column titles a long table repeats at the top of
     // each page are table text.
     let mut tag_tables: HashSet<usize> = HashSet::new();
-    // Whether today's readers ran on the drawn structure: not on a tagged page whose tag tree
+    // Whether the pre-pass readers ran on the drawn structure: not on a tagged page whose tag tree
     // holds.
     let mut geometry = cx.tree.is_none();
     if let Some(tree) = cx.tree {
@@ -1478,7 +1478,7 @@ fn page_blocks_until(
         tag_tables.extend(found.iter().filter_map(|t| t.tagged));
         placed.extend(found.into_iter().map(Placed::Table));
     }
-    // The drawn box each free run stands in, as today's box reader puts it (see
+    // The drawn box each free run stands in, as the pre-pass box reader puts it (see
     // `regions::regions_of`): the text of a box is laid out on its own, so a paragraph never goes
     // on from one box into the next, nor into text outside its box.
     let mut box_of: HashMap<u32, u32> = {
@@ -1505,7 +1505,7 @@ fn page_blocks_until(
     };
     // The regions the page states: the tag tree's blocks and tables, and the form fields.
     let mut given = engine::given_regions(&engine_in, &slots, &|t| tag_tables.contains(&t));
-    // Today's reading of the page, once (see [`today`]): the tables of the classes kept as
+    // The pre-pass reading of the page, once (see [`today`]): the tables of the classes kept as
     // pre-passes are given regions of the reader's kind. Runs a given region already holds are
     // left to it, and a table that shares one is not given.
     let held: HashSet<u32> = given
@@ -1548,7 +1548,7 @@ fn page_blocks_until(
             box_of.insert(id, key);
         }
     }
-    // The parts of today's reading given as regions, and the part of each run: the first given
+    // The parts of the pre-pass reading given as regions, and the part of each run: the first given
     // region that lists a run holds it.
     let mut pre_parts: Vec<today::Part> = Vec::new();
     let mut pre_of_run: HashMap<u32, usize> = HashMap::new();
@@ -1574,7 +1574,7 @@ fn page_blocks_until(
         pre_parts.push(part);
     };
     let free = |ids: &[u32]| ids.iter().all(|i| !held.contains(i));
-    // In the order today's readers made them: the titles of a form page and the box pairs come
+    // In the order the pre-pass readers made them: the titles of a form page and the box pairs come
     // before the tables without tags (`today::read`).
     for (_, t) in today_titles {
         if free(&t.ids) {
@@ -1616,7 +1616,7 @@ fn page_blocks_until(
             pre_doubts.push((ids, why));
         }
     }
-    // The drawn box each table of today's reading was read by: its region reaches over it.
+    // The drawn box each table of the pre-pass reading was read by: its region reaches over it.
     let pre_drawn: Vec<Option<layoutregions::Bounds>> = pre_parts
         .iter()
         .map(|p| match p {
@@ -1704,7 +1704,7 @@ fn page_blocks_until(
     }
     let tagged_page = cx.tree.is_some();
     // Each run to the extractor of its decision's kind.
-    // The footnote legend of an untagged page (see `footnotes::take`), as today's reader takes
+    // The footnote legend of an untagged page (see `footnotes::take`), as the pre-pass reader takes
     // it: from the page's whole flow, before its runs go to their extractors, so a raised
     // reference to a note is marked wherever it stands (in a table's cell too) and every line
     // of the legend is its own (a segment may cut a raised marker off its note, or a column of
@@ -1776,7 +1776,7 @@ fn page_blocks_until(
         _,
     ] = flow.parted(&classes);
     // The running headers, one paragraph a line, each placed by its first run in the page's
-    // flow like every other part (until Task 21): a band the engine finds may hold body text
+    // flow like every other part: a band the engine finds may hold body text
     // beside the page's title, which reads where the flow has it.
     let header_lines = lines(&header_flow.runs);
     let mut header_runs = 0;
@@ -1813,7 +1813,7 @@ fn page_blocks_until(
     let mut doubts: tables::Doubts = pre_doubts;
     placed.extend(pre_unsure.into_iter().map(Placed::Unsure));
     notes.extend(pre_notes);
-    // What a bound cut short in the segments today's readers read by is the page's too.
+    // What a bound cut short in the segments the pre-pass readers read by is the page's too.
     let mut segment_issues = decided.segs.issues.clone();
     for i in today_issues {
         if !segment_issues
@@ -1845,7 +1845,7 @@ fn page_blocks_until(
         let mut said: Vec<(String, LossReason)> = Vec::new();
         let pre = decided.pre[d as usize];
         match area_reader(decision) {
-            // A table of today's reading, given before the page was typed (see [`today`]):
+            // A table of the pre-pass reading, given before the page was typed (see [`today`]):
             // placed as its reader made it. The pieces its reader left of a run it cut stay
             // text, as today; the runs of the area are the table's.
             _ if pre.is_some() => {
@@ -1942,9 +1942,9 @@ fn page_blocks_until(
     }
     let refused_text = Flow::all_merged(refused_text);
     let mut table_flow = Flow::all_merged(table_left);
-    // The pieces today's readers left of the runs they cut, where a pre-pass table holds the
-    // run: they are text, as today.
-    // The text today's readers refused is laid out from their copy of the flow, as today: a
+    // The pieces the pre-pass readers left of the runs they cut, where a pre-pass table holds the
+    // run: they are text, as before.
+    // The text the pre-pass readers refused is laid out from their copy of the flow: a
     // refused row of fields was put there cell by cell, each cell on lines of its own.
     let refused_run = |id: u32| {
         decided.of_run.get(id as usize).is_some_and(|&d| {
@@ -1984,7 +1984,7 @@ fn page_blocks_until(
         .collect();
     // A decision's runs kept as laid out are one part as long as no text or other part of the
     // page stands between them in the page's flow; such a thing between them starts a new part, so each part
-    // stands where its first run stands and the text reads in the flow's order (until Task 21).
+    // stands where its first run stands and the text reads in the flow's order.
     // A run without ink stands in the flow only, not on the page (spaces a form sets after a
     // field): it parts nothing.
     let mut placed_at: Vec<usize> = placed.iter().map(|p| p.at().0).collect();
@@ -2180,7 +2180,7 @@ fn page_blocks_until(
             && t.tagged.is_none()
         {
             let by_decision = majority(t.ids.iter().map(|&i| decided.of_run[i as usize]));
-            // A table of today's reading keeps its reader's note.
+            // A table of the pre-pass reading keeps its reader's note.
             if by_decision.is_some_and(|d| decided.pre[d as usize].is_some()) {
                 continue;
             }
@@ -3489,7 +3489,7 @@ struct RunKeys<'a> {
     /// The region the engine itself decided the run as text (see
     /// `decide::Decided::text_region_of_run`).
     region_of: &'a dyn Fn(u32) -> Option<u32>,
-    /// The drawn grid the run stands in, when a reader of today gave or refused its text as
+    /// The drawn grid the run stands in, when a pre-pass reader gave or refused its text as
     /// one region.
     grid_of: &'a dyn Fn(u32) -> Option<u32>,
     /// Whether a region has ink on more than one line of the page's text.
@@ -3570,14 +3570,14 @@ fn lay_text(
         match k {
             TextKey::Tag => tagged(runs, slots, Some(ids), cx, built),
             TextKey::Free => {
-                // A region the engine keeps whole is placed whole (Task 31c, class K): a line
+                // A region the engine keeps whole is placed whole: a line
                 // of the text pass is parted where a block of several lines starts beside the
                 // text of a drawn grid (see `layoutregions::part_lines`). The edge is the
                 // grid's only: a drawn box around a word (a part number, a mark, a bracket at
                 // a box's edge) parts headings and values from their labels, measured on the
                 // public sets. The walk then never takes a block from such a region into
                 // other text: the region is part of the key of its lines.
-                // The mirror (Task 36a): where the block starts the line and a row of the
+                // The mirror: where the block starts the line and a row of the
                 // grid's cells follows it, the cells are read before the block when a drawn
                 // line of the block's own stands between its two lines (`own_rule`), so the
                 // label stands with its value.
@@ -3691,7 +3691,7 @@ enum Placed {
 /// without a frame.
 ///
 /// The columns of a block are counted from its own left edge in its own character width
-/// (re-review 3, N1): they say nothing about another block until both stand on one grid.
+/// They say nothing about another block until both stand on one grid.
 fn place_spatial(
     blocks: &mut [Block],
     frames: &[(usize, SpatialFrame)],
@@ -4190,7 +4190,7 @@ impl Built {
             }
             other => other,
         };
-        // Where each column ends: the cell lines' wrap test reads it (vision class A). A table
+        // Where each column ends: the cell lines' wrap test reads it. A table
         // whose cells all hold one line each has no lines to keep.
         let lined = plan
             .rows
@@ -4255,7 +4255,7 @@ impl Built {
                 break;
             }
             let mut cells = Vec::with_capacity(row.len());
-            // Each cell's lines stay lines unless a line wraps (vision class A).
+            // Each cell's lines stay lines unless a line wraps.
             let lines = if !lined {
                 vec![layoutregions::extract::table::lines::CellLines::default(); row.len()]
             } else {
@@ -4869,7 +4869,7 @@ fn inlines(
 
 /// The blocks of a running footer, in reading order. Footer lines that go on one another at
 /// one left edge are one block. A footer set in columns (an address, a bank, a register entry,
-/// a contact) is read column by column (ruling P6-X5: on furniture lines only): the ink of its
+/// a contact) is read column by column (on furniture lines only): the ink of its
 /// lines falls into columns apart by white space, and the parts of the lines in each column
 /// are blocks of their own, when every block of three lines or more is an [`address_block`]
 /// and one is. A line of its own in one piece (a page number centred over or under the
@@ -5797,7 +5797,7 @@ mod tests {
         runs.into_iter().map(|r| (r.text, r.line)).collect()
     }
 
-    /// Task 36a part 1b (class D on the tagged path): paragraph elements in columns the page
+    /// Paragraph elements in columns the page
     /// shows are placed column by column, and only then.
     #[test]
     fn tagged_paragraphs_in_columns_are_placed_column_by_column() {
@@ -5911,7 +5911,7 @@ mod tests {
         }
     }
 
-    /// Task 36a fix round 2 (re-review N1): a table without rules tagged as one paragraph
+    /// A table without rules tagged as one paragraph
     /// per cell, row by row. Its columns start at one pitch (50, 200, 350), its descriptions
     /// fill their column and open with a small letter, and the last one wraps. The order of
     /// the tags is the meaning (each item with its description and its source) and stays,
@@ -5973,8 +5973,8 @@ mod tests {
             )
         };
         let end = ("", "twelve pieces", 60.0, "");
-        // Every cell filled; the last source empty (probe A); two items (C); a source on
-        // the first item only (D); the last description over two more lines (probe 16).
+        // Every cell filled; the last source empty; two items; a source on
+        // the first item only; the last description over two more lines.
         for (name, rows) in [
             (
                 "full",
@@ -6104,7 +6104,7 @@ mod tests {
         assert_eq!(rezzer_model::plain_text(&built), "see example.org now");
     }
 
-    /// Task 29 fix round 4: an address under one link that runs on across a line end of a cell
+    /// An address under one link that runs on across a line end of a cell
     /// is one link with its whole text, nothing between its parts; linked words that run on
     /// join with a space; the line after the link stays a line.
     #[test]
@@ -6561,7 +6561,7 @@ mod tests {
         });
     }
 
-    /// Task 22, a guard: a note set up the margin (text across the page's direction) that a
+    /// A note set up the margin (text across the page's direction) that a
     /// flow holds between the lines of a paragraph reads after the body, and the paragraph
     /// stays whole. The untagged text pass puts such runs after the page's main text already,
     /// so on its flows this changes nothing (no measured page changes); it holds the order of
@@ -6880,7 +6880,7 @@ mod tests {
         );
     }
 
-    /// A leaf the segmentation's depth bound left whole is not typed (Task 19 ruling: limit
+    /// A leaf the segmentation's depth bound left whole is not typed (limit
     /// leaves are kept as laid out with a Limit loss): 70 boxes drawn one in the other nest
     /// deeper than the bound of 64 levels, so the box at the bound keeps the lines of the
     /// boxes in it. Those lines read as items of a list by their dashes; they are one region
@@ -7079,7 +7079,7 @@ mod tests {
         let laid = page_blocks_until(1, 842.0, runs, &NOTHING_DRAWN, &cx, &[], &|| true);
         assert!(laid.stop.is_none());
         let mut text = String::new();
-        // A stop before the regions are typed keeps every leaf as laid out (ruling 19a: limit and
+        // A stop before the regions are typed keeps every leaf as laid out (limit and
         // stop leaves are spatial, with a Limit loss).
         for b in &laid.blocks {
             match b {
@@ -7445,9 +7445,9 @@ mod tests {
             ));
         }
         for (k, word) in ["first", "second"].into_iter().enumerate() {
-            // Task 19: the cells of a tag table that is not kept are free text, which the
+            // The cells of a tag table that is not kept are free text, which the
             // engine types; a lone word has no clear evidence and may be kept as laid out (a
-            // right read, Task 36 makes it a paragraph again). It is never a row.
+            // right read makes it a paragraph again). It is never a row.
             match laid[k].blocks.as_slice() {
                 [Block::Paragraph { inlines, .. }] => {
                     assert_eq!(rezzer_model::plain_text(inlines), word);
@@ -7587,8 +7587,8 @@ mod tests {
             &NOTHING_DRAWN,
             &cx,
         );
-        // Task 19: the cells of a tag table that does not hold are free text, which the engine
-        // types; a lone word may be kept as laid out (a right read, Task 36).
+        // The cells of a tag table that does not hold are free text, which the engine
+        // types; a lone word may be kept as laid out (a right read).
         match laid.blocks.as_slice() {
             [Block::Paragraph { inlines, .. }] => {
                 assert_eq!(rezzer_model::plain_text(inlines), "lonely")
@@ -8069,7 +8069,7 @@ mod tests {
         }
     }
 
-    /// Task 26 fix round 1 (I1): two tables of pair rows are rows of one block only from one
+    /// Two tables of pair rows are rows of one block only from one
     /// left edge, the lower under the upper, with no drawn line between them; the bound of
     /// the edge and each sign move the answer both ways.
     #[test]
@@ -8110,7 +8110,7 @@ mod tests {
         let line = kept.ruled.expect("the line");
         assert_eq!((line.x0, line.x1), (30.0, 400.0));
         assert_eq!(line.far, None, "thin rules are no sides of a box");
-        // Fix round 2 (M4): a piece that goes on from the line is a piece of it only when
+        // A piece that goes on from the line is a piece of it only when
         // it is no higher than one row, as the pieces over the tables are: the far side
         // within the step of the rows (12) and `BASELINE_NEAR` of the text size (1.5). The
         // upper side of a tall box that starts where the rule ends is none.
@@ -8138,7 +8138,7 @@ mod tests {
         assert!(pair_step(&a, &b, &two(near + 0.1)).is_none());
     }
 
-    /// Task 26 part 2 (ruling on concern 2) and fix round 2 (M3): a drawn line between two
+    /// A drawn line between two
     /// rows of pairs is the block's own ruling when the same line stands between every two
     /// rows of the run: one extent, at the pitch of the rows, in every step of the run. A
     /// lone line, a line of another extent, a line off the pitch, a line beside a table with
@@ -8241,7 +8241,7 @@ mod tests {
         assert_eq!(own_rulings(&[upper, lower]), [true; 2]);
     }
 
-    /// Task 26 fix round 2 (M2): a step whose drawn line is a border lends its pitch to no
+    /// A step whose drawn line is a border lends its pitch to no
     /// step beside it: how far two blocks are apart is no pitch of rows. A step with no
     /// line, or with the block's own ruling, shows the pitch.
     #[test]
@@ -8296,7 +8296,7 @@ mod tests {
             joined_steps(&[step(None), step(line(661.0, 200.0)), None, step(None)]),
             [false, false, false, false]
         );
-        // Fix round 3 (N3): the look goes past one border, not two. Rows, a rule, a row, a
+        // The look goes past one border, not two. Rows, a rule, a row, a
         // rule of another extent, rows: the rows before the first border do not take their
         // pitch from the rows after the second one (nor after a third).
         let (first, second) = (step(line(661.0, 200.0)), step(line(635.0, 300.0)));
@@ -8363,7 +8363,7 @@ mod tests {
             .collect()
     }
 
-    /// Re-review 3 of task 36a, N1: a block kept as laid out joins the one before it only
+    /// A block kept as laid out joins the one before it only
     /// on one grid of the page, and the columns of a run are counted on that grid.
     #[test]
     fn blocks_kept_as_laid_out_join_only_on_one_grid_of_the_page() {
@@ -8485,7 +8485,7 @@ mod tests {
         );
     }
 
-    /// Task 26 fix round 1 (I1): rows of pairs stand at the pitch of one block when they
+    /// Rows of pairs stand at the pitch of one block when they
     /// are as near as the lines of a block (`ITEM_PITCH`, moved both ways), or at a pitch
     /// the document shows a second time: the rows of one of the tables, or the step to the
     /// table before or after.

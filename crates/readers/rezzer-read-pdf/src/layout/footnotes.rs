@@ -201,7 +201,7 @@ pub(super) fn take(page: u32, flow: &mut Flow, found: Option<&Found>) -> Legend 
     }
 }
 
-/// The footnote legend of a tagged page (fix round 3): a list item or paragraph of the tag tree
+/// The footnote legend of a tagged page: a list item or paragraph of the tag tree
 /// (by the runs' `slots` in `flow`) that opens with a raised number (a run at most
 /// [`MARK_SIZE`] times the size of the next run with ink, raised over its baseline by
 /// [`MARK_RISE`] to one times that size) is a footnote when a raised mark of the same number
@@ -657,7 +657,7 @@ mod tests {
     }
 
     /// A legend the style pass found whose runs the page's text no longer holds is not used,
-    /// and says so (Task 7 carry: no silent refusal).
+    /// and says so (no silent refusal).
     #[test]
     fn a_legend_not_found_again_is_refused_with_a_note() {
         let runs = vec![

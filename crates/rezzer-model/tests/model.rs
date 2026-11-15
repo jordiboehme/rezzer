@@ -1421,7 +1421,7 @@ fn region_kinds_are_snake_case() {
     }
 }
 
-/// Task 29: a cell's pictures go to JSON and back; a cell without one writes no `media` key.
+/// A cell's pictures go to JSON and back; a cell without one writes no `media` key.
 #[test]
 fn cell_media_round_trips() {
     use rezzer_model::{Cell, CellMedia, Inline};

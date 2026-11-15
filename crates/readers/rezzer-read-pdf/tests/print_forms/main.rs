@@ -183,7 +183,7 @@ fn every_run_is_in_one_region() {
 /// whatever the snapshots say; [`read`] also checks that no placeholder reaches either.
 ///
 /// The labels over the boxed amount and the boxed date in one column are read each with its
-/// own value: `Betrag` 9876,54, then `Zahltag` 28.02.2026 (Task 26; shape `labels over boxed
+/// own value: `Betrag` 9876,54, then `Zahltag` 28.02.2026 (shape `labels over boxed
 /// values in one column`).
 #[test]
 fn synthetic_print_form_golden() {

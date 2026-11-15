@@ -787,7 +787,7 @@ mod tests {
         }
     }
 
-    /// The chains as they were made before Task 37: each box tested against the end of
+    /// The chains as they were made by a plain scan: each box tested against the end of
     /// every chain.
     fn chains_one_by_one(order: &[usize], next: &dyn Fn(usize, usize) -> bool) -> Vec<Vec<usize>> {
         let mut out: Vec<Vec<usize>> = Vec::new();
@@ -800,7 +800,7 @@ mod tests {
         out
     }
 
-    /// Whether lines cover a stretch, as it was asked before Task 37: every line at the
+    /// Whether lines cover a stretch, as it was asked by a plain scan: every line at the
     /// place looked at.
     fn covered_one_by_one(segs: &[Line], at: f32, lo: f32, hi: f32, t: f32) -> bool {
         let mut end = lo;
@@ -821,7 +821,7 @@ mod tests {
         end >= hi - tol
     }
 
-    /// Task 37: the search by the ends near a box makes the chains the test of every end
+    /// The search by the ends near a box makes the chains the test of every end
     /// made, for rows and for columns, on boxes that touch, overlap, stand apart and stand
     /// in each other, with a touch of nothing, of a little and of much.
     #[test]
@@ -889,7 +889,7 @@ mod tests {
         }
     }
 
-    /// Task 37: the lines that reach into a stretch, found by their order, say the same as
+    /// The lines that reach into a stretch, found by their order, say the same as
     /// every line at the place, for lines apart, lines that overlap and one long line among
     /// short ones, at places within the tolerance of each other.
     #[test]

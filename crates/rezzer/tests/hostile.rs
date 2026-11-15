@@ -1453,7 +1453,7 @@ fn objstm_bomb_is_bounded() {
         losses(&result)
     );
     // The readings were measured once (2026-10-27). They come from the PDF reader: measure
-    // them again after plan 6 merges.
+    // them again when the PDF reader changes.
     assert_readings(reads, 68);
     assert!(took < SAFETY, "took {took:?}");
     assert_rss_bounded("objstm_bomb_is_bounded");
@@ -1503,7 +1503,7 @@ fn content_stream_bomb_is_bounded() {
     );
     assert!(result.markdown_pages.join("").contains("The plain page."));
     // The readings were measured once (2026-10-27). They come from the PDF reader: measure
-    // them again after plan 6 merges.
+    // them again when the PDF reader changes.
     assert_readings(reads, 122);
     assert!(took < SAFETY, "took {took:?}");
     assert_rss_bounded("content_stream_bomb_is_bounded");
@@ -1555,7 +1555,7 @@ fn page_tree_cycle_is_partial() {
         losses(&result)
     );
     // The readings were measured once (2026-10-27). They come from the PDF reader: measure
-    // them again after plan 6 merges.
+    // them again when the PDF reader changes.
     assert_readings(reads, 13);
     assert!(took < SAFETY, "took {took:?}");
     assert_rss_bounded("page_tree_cycle_is_partial");
@@ -1663,7 +1663,7 @@ fn hundred_thousand_pages_stop_in_time() {
     // far, see `layout_time`, `plain_time` and `end_time` in the PDF reader). A longer limit reads more
     // pages, and their memory takes the max RSS toward its 512 MiB bound (472 MiB at 1,948
     // pages, 493 at 3,025, 524 at 4,060: the plain lines take few readings, so more of the
-    // object layer of the 100,000 pages is read after them than before Task 37), so the step
+    // object layer of the 100,000 pages is read after them than the layout was once faster), so the step
     // keeps the pages read near 2,000. On a step clock the layout looks at
     // the clock far more often for a page than the text does, so the time kept for it ends
     // while the facts of the file are learned and the pages read are written as plain lines.
@@ -1836,7 +1836,7 @@ fn a_text_cut_near_the_time_limit_is_not_cached() {
 fn a_layout_stopped_by_the_time_limit_writes_the_other_pages_as_plain_lines() {
     // The text of all 2,000 pages is read, and their layout takes more than the time left:
     // it stops before a page, with the time kept to write the other pages as plain lines.
-    // Every page keeps its text (before Task 37 the pages past the stop were dropped: 4,972
+    // Every page keeps its text (once the pages past the stop were dropped: 4,972
     // pages read, the layout stopped at page 1,282), one loss names the pages written as
     // plain lines, and the result is not cached. This is what a busy machine does to a file
     // that would fit its time.
@@ -2012,7 +2012,7 @@ fn image_pixel_bomb_skips_render() {
     let written = std::fs::read_dir(&bundle).map(|d| d.count()).unwrap_or(0);
     assert_eq!(written, 0, "no render is written");
     // The readings were measured once (2026-10-27). They come from the PDF reader: measure
-    // them again after plan 6 merges.
+    // them again when the PDF reader changes.
     assert_readings(reads, 20);
     assert!(took < SAFETY, "took {took:?}");
     assert_rss_bounded("image_pixel_bomb_skips_render");
@@ -2049,7 +2049,7 @@ fn deep_array_nesting_stops_at_depth() {
     // The page does not depend on the deep object and is read.
     assert!(result.markdown_pages.join("").contains("Before the bomb."));
     // The readings were measured once (2026-10-27). They come from the PDF reader: measure
-    // them again after plan 6 merges.
+    // them again when the PDF reader changes.
     assert_readings(reads, 18);
     assert!(took < SAFETY, "took {took:?}");
     assert_rss_bounded("deep_array_nesting_stops_at_depth");
@@ -2117,7 +2117,7 @@ fn huge_script_is_bounded() {
     assert!(md.contains("Before the bomb."));
     assert!(!md.contains("app.alert("));
     // The readings were measured once (2026-10-27). They come from the PDF reader: measure
-    // them again after plan 6 merges.
+    // them again when the PDF reader changes.
     assert_readings(reads, 123);
     assert!(took < SAFETY, "took {took:?}");
     assert_rss_bounded("huge_script_is_bounded");

@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! List items that Crystalline would read as its own syntax (ruling P5-S).
+//! List items that Crystalline would read as its own syntax.
 //!
 //! Crystalline (0.29.1 or later) reads a bullet that starts a line with `- ` (no indent) as
 //! an observation when its text opens with `[category]` (a category that opens with `^` is
@@ -54,7 +54,7 @@ pub(crate) fn guard(md: &str) -> Cow<'_, str> {
         return Cow::Borrowed(md);
     }
     // Every item of a list with a flagged item gets the new marker, so the list stays one
-    // list (P5-X). Nested lists are indented and keep their own markers.
+    // list. Nested lists are indented and keep their own markers.
     let mut marker: Vec<Option<&str>> = vec![None; lines.len()];
     let mut flagged = flagged.into_iter().peekable();
     while let Some(&at) = flagged.peek() {

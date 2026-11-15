@@ -378,7 +378,7 @@ const WORD_SPACE: f32 = 0.33;
 
 /// The column bounds that the horizontal rules of each grid of `parts` draw by joints in their
 /// segments (see [`layoutregions::extract::table::ruled::rule_breaks`]; `rules` as drawn), where
-/// no vertical rule stands, added row by row as vertical rules (Task 29, S2: a drawn cell that
+/// no vertical rule stands, added row by row as vertical rules (a drawn cell that
 /// holds two columns, from and to), before the runs are cut at the column rules, so a run whose
 /// word gap holds a bound is cut there. A joint bounds a row's cells when:
 /// - every rule of the grid has it (a rule drawn in pieces at some x of its own bounds nothing);
@@ -1793,7 +1793,7 @@ mod tests {
         Flow::new(runs, vec![crate::layout::Slot::Free; n])
     }
 
-    /// Task 36a part 1b (class F): two titles on one line, each over the rule of its own
+    /// Two titles on one line, each over the rule of its own
     /// block. The title over the other block's rule is not the caption of the table under
     /// the section's own rule; a title over the table's own rule stays, however far it
     /// reaches, and so does a title with no other rule under it.
@@ -1833,7 +1833,7 @@ mod tests {
             let hs = [seg(96.0, from, 270.0), own];
             assert_eq!(ask(&hs, (282.0, 458.0)) == [0], leaves, "{from}");
         }
-        // Fix round 2 (re-review N3): both titles in one run (one show with blanks between
+        // Both titles in one run (one show with blanks between
         // them, 42 to 312). Its middle stands over the other rule, but the run reaches over
         // both rules and no column rule cuts it: it is handed to no other block and stays
         // the line over the section, from either side.
@@ -1842,7 +1842,7 @@ mod tests {
             let found = over_other_rule(&joined, &[other, own], &[0], 96.0, cols);
             assert_eq!(found, [], "{cols:?}");
         }
-        // Fix round 3 (re-review 2, M3): a blank drawn before the title is no ink. The title
+        // A blank drawn before the title is no ink. The title
         // whose show string starts with a blank (6 wide, drawn from 36) has its ink from 42
         // and stands over the other rule from end to end; so does one with two blanks from
         // 30. With its ink from 39 (the blank from 33) it starts more than a snap before the
@@ -1991,7 +1991,7 @@ mod tests {
     /// No run cut, no table, one loss that says the edge in the number, every run kept.
     const KEPT_AS_TEXT: (bool, usize, usize, bool, usize) = (false, 0, 1, true, 1);
 
-    /// Task 26 fix rounds 7b and 7c (N1, I1): a row of fields between rules with a drawn
+    /// A row of fields between rules with a drawn
     /// divider in the digit group gap of a number, or inside the number, is neither cut at the
     /// gap nor read with the number in one field: the digits say one number and the divider
     /// says two fields. No run of it is cut, no table takes it, and its text is kept as it
@@ -2028,7 +2028,7 @@ mod tests {
         assert_eq!(read(amount, 133.0, Some("7")), (false, 1, 0, false, 0));
     }
 
-    /// Task 26 fix round 7c (M1): a number led by a sign (`-`, `+`, U+2212), an opening
+    /// A number led by a sign (`-`, `+`, U+2212), an opening
     /// bracket, a currency sign or a currency code, with a drawn divider in its digit group
     /// gap, is kept as text and said: no table holds the sign and the first group as the
     /// value of the field before the divider. The other way: letters before the first digit
@@ -2065,7 +2065,7 @@ mod tests {
         }
     }
 
-    /// Task 26 fix round 7c (I1): a field edge from the start of a label (no drawn divider)
+    /// A field edge from the start of a label (no drawn divider)
     /// in the digit group gap of a number or inside the number leaves the row as text, as a
     /// drawn divider there does, and says so. The other way: a value line with no group after
     /// its gap is cut at the label's start and read as a row of two fields.

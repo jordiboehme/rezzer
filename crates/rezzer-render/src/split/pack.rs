@@ -24,7 +24,7 @@ impl<'a> Splitter<'a> {
                 .all(|b| self.moved.contains(&std::ptr::from_ref(b)))
     }
 
-    /// The final packing (plan Task 5: units packed greedily while they fit): neighbouring
+    /// The final packing (units packed greedily while they fit): neighbouring
     /// units of one top-level unit, inside the same sections, are joined in document order
     /// while the part stays within the limit, whatever level made them. So a heading's piece
     /// goes with the rows after it, a table's last rows with the notes after them, and a
@@ -59,8 +59,7 @@ impl<'a> Splitter<'a> {
     /// `a` and `b` as one unit, `None` when they lie in different top-level units. Inside
     /// the sections both lie in, each keeps the sections only it lies in, written around its
     /// blocks. A table's rows keep their name when the other one is a piece of the unit that
-    /// holds the table (its heading, its notes); else the part names every unit it holds
-    /// (ruling P5-AH).
+    /// holds the table (its heading, its notes); else the part names every unit it holds.
     fn join(&self, a: &Spec<'a>, b: &Spec<'a>) -> Option<Spec<'a>> {
         let (x, y) = (&a.item, &b.item);
         if x.top != y.top {

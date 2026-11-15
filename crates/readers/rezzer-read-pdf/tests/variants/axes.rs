@@ -9,7 +9,7 @@ use crate::draw::{Stroke, bold};
 use crate::shapes::{Built, DataFont, Geo, REAL};
 
 /// The page scale: the whole page printed this many times as large. 0.7 and 1.5 are the
-/// scale looks of Task 9, 0.75 and 1.5 the scales of ruling P6-Y.
+/// scale looks of the first set of variants, 0.75 and 1.5 the scales of the scale rule.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Scale {
     S070,
@@ -54,7 +54,7 @@ pub(crate) enum Labels {
     Times,
 }
 
-/// How the rules are drawn (with the scales, the six looks of Task 9): filled bars as on the
+/// How the rules are drawn (with the scales, the six looks): filled bars as on the
 /// real form, dashed, dotted, dividers rising from the rule under a row, or thick bars.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Look {
@@ -392,32 +392,32 @@ pub(crate) struct Want {
     pub paragraphs: Vec<String>,
     /// Texts the page's text holds in this order.
     pub order: Vec<String>,
-    /// More chains of texts the page's text holds in order, each for itself (Task 31b, N3):
+    /// More chains of texts the page's text holds in order, each for itself:
     /// the order inside a chain carries meaning (the lines of one block, the paragraphs of
     /// one letter), the place of one chain against another is free.
     pub orders: Vec<Vec<String>>,
     /// Texts that follow each other in the page's text with no other text of the page
-    /// between them (Task 31c, class F): the lines of one paragraph that a block beside it
+    /// between them: the lines of one paragraph that a block beside it
     /// must not part. Each list for itself.
     pub together: Vec<Vec<String>>,
     /// For the page's media blocks in order: the texts the block stands after and before
-    /// (Task 22 fix round 4), each found as the first block that holds it.
+    /// each found as the first block that holds it.
     pub media_between: Vec<(String, String)>,
-    /// Texts whose table row holds a picture (Task 29, B1): the row of a table that holds the
+    /// Texts whose table row holds a picture: the row of a table that holds the
     /// text holds one picture, in the cell of this place.
     pub row_media: Vec<(String, usize)>,
-    /// How many media blocks the page has (Task 29: a picture in a cell is none).
+    /// How many media blocks the page has (a picture in a cell is none).
     pub media_count: Option<usize>,
-    /// Table cells to find by their lines (Task 29, vision class A): some cell of a table holds
+    /// Table cells to find by their lines: some cell of a table holds
     /// exactly these lines, parted by line breaks (an empty line is a line break with no text
     /// before it).
     pub cell_lines: Vec<Vec<String>>,
     /// Texts no block may hold together: each pair stands in different blocks.
     pub apart: Vec<(String, String)>,
-    /// Texts no line of the read may hold together (part 2e-1 fix round 1): each pair stands
+    /// Texts no line of the read may hold together: each pair stands
     /// in different blocks, or apart by a line break in one block.
     pub lines_apart: Vec<(String, String)>,
-    /// Texts one line of the read must hold together (part 2e-2 fix round 1): two lines of
+    /// Texts one line of the read must hold together: two lines of
     /// wrapped prose go on in one line of text, with no break between them.
     pub lines_joined: Vec<(String, String)>,
     /// The document title the read must find (on the first page only).
@@ -437,23 +437,23 @@ pub(crate) struct Want {
     pub losses: Vec<String>,
     /// Parts of the text of losses the page must not have (noise where nothing is lost).
     pub no_losses: Vec<String>,
-    /// The texts drawn in one cell each, in the order to read them (Task 15b part 2d fix
-    /// round 2): besides the fields' own cells (a label and its value), cells whose texts the
+    /// The texts drawn in one cell each, in the order to read them:
+    /// besides the fields' own cells (a label and its value), cells whose texts the
     /// fields do not list, an address under a name, a title.
     pub cells: Vec<Vec<String>>,
-    /// The texts of the glyphs of codes printed with a barcode font (Task 15b part 2f-1): none
-    /// may stand in the read, nor any of their characters past ASCII (P6-X: the glyph text of
+    /// The texts of the glyphs of codes printed with a barcode font: none
+    /// may stand in the read, nor any of their characters past ASCII (the glyph text of
     /// a code is a wrong value).
     pub glyph_text: Vec<String>,
-    /// Texts no table row may hold as its label and its value (Task 26 fix round 1): two
-    /// texts of one line that are no pair (P6-X: a wrong pair).
+    /// Texts no table row may hold as its label and its value: two
+    /// texts of one line that are no pair (a wrong pair).
     pub no_pairs: Vec<(String, String)>,
-    /// Texts and the region kind each must stand in (Task 20): the name of a
+    /// Texts and the region kind each must stand in: the name of a
     /// `layoutregions::Kind` (`table`, `label_value`, `totals`, `heading`, ...).
     pub kinds: Vec<(String, &'static str)>,
-    /// Texts that must stand in a spatial block, kept as laid out with its loss (Task 20). No
+    /// Texts that must stand in a spatial block, kept as laid out with its loss. No
     /// shape has one yet: every spatial read of a generated page today is a right read kept as
-    /// laid out (Task 36 debt), not one its layout calls for.
+    /// laid out, not one its layout calls for.
     pub spatial: Vec<String>,
 }
 

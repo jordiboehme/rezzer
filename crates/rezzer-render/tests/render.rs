@@ -539,7 +539,7 @@ fn sheet_tables_keep_a1_merge_notes() {
 #[test]
 fn merge_note_uses_sheet_addresses() {
     // A table that starts at B2: the ranges come from each merged cell's own anchor, not
-    // from its place in the table (P4-B).
+    // from its place in the table.
     let cell = |text: &str, at: &str| {
         let mut c = Cell::new(vec![txt(text)]);
         c.anchor = Some(Anchor(format!("'My!Sheet'!{at}")));
@@ -1754,7 +1754,7 @@ fn inline_code_keeps_tabs() {
 
 #[test]
 fn merge_note_names_the_spans_of_the_model_when_rows_are_cut() {
-    // Review 3 of task 36a, M-4: 300 rows of which 200 are shown. The note names what a
+    // 300 rows of which 200 are shown. The note names what a
     // merged cell covers as the model has it, also past the last shown row (a line under
     // the note says how many rows are not shown). A cell over rows that starts in the last
     // shown row was named `over 1 columns`.
@@ -1933,7 +1933,7 @@ fn render_inline(inline: Inline) -> String {
     body.trim().replace("# ", "").to_string()
 }
 
-/// Ruling P5-AD: a wikilink of the source is written as escaped text, never as a live
+/// A wikilink of the source is written as escaped text, never as a live
 /// wikilink (its target's output name is unknown, so it would be broken on every import).
 /// Crystalline reads `[[` also after a backslash, so every bracket is escaped.
 #[test]
@@ -3412,7 +3412,7 @@ fn sheet_annotations_unchanged() {
 #[test]
 fn sheet_blocks_take_no_inline_notes() {
     // A caption paragraph and a one-cell table anchored at a commented cell stand inside a
-    // sheet: the comments stay in the list (P4-D). The same paragraph in a chapter takes
+    // sheet: the comments stay in the list. The same paragraph in a chapter takes
     // its note, so the skip is the sheet's own.
     let caption = Block::Paragraph {
         inlines: vec![txt("Sales by region")],
@@ -4022,7 +4022,7 @@ fn sheet_md(blocks: Vec<Block>) -> String {
 fn markdown_and_pdf_tables_unchanged() {
     // A table without sheet anchors (Markdown, PDF): bold caption, several header rows
     // joined with a space, and the merged cell named by its row and column in the table, as
-    // it has no sheet address (P4-B).
+    // it has no sheet address.
     let md = body_of(vec![Block::Table {
         caption: Some("Costs".into()),
         header_rows: 2,
@@ -4574,7 +4574,7 @@ fn leading_dash_in_key_value_is_escaped() {
 
 #[test]
 fn row_under_merge_from_above_renders() {
-    // Row 4 holds no cell of its own: A2 and B3 cover it from above (Task 9).
+    // Row 4 holds no cell of its own: A2 and B3 cover it from above.
     let rows = || {
         vec![
             vec![at("a", "A1"), at("b", "B1")],
@@ -4716,7 +4716,7 @@ fn name_caption_heading_shows_no_address() {
 
 #[test]
 fn notes_range_renders_without_a_table() {
-    // Task 7: when the notes do not fit with the table, split_rows gives them a range of
+    // When the notes do not fit with the table, split_rows gives them a range of
     // their own with table None; it renders as the lead and the notes, no header band.
     let mut l = lay(LayoutKind::Table, "A1:B9", Some("A2:B3"));
     l.header_rows = vec![1];
@@ -4748,7 +4748,7 @@ fn notes_range_renders_without_a_table() {
 
 #[test]
 fn generated_heading_drops_the_same_lead_line() {
-    // P4-AS: a generated heading (no anchor) that says the lead's kind and range stands for
+    // A generated heading (no anchor) that says the lead's kind and range stands for
     // the lead line.
     let text = |range: &str, data: Option<&str>| {
         ltable(
@@ -4822,7 +4822,7 @@ fn generated_heading_drops_the_same_lead_line() {
 
 #[test]
 fn layout_line_details_do_not_repeat_the_line() {
-    // P4-AU: header rows and row labels stand once; a detail keeps what it adds.
+    // Header rows and row labels stand once; a detail keeps what it adds.
     let mut l = lay(LayoutKind::Table, "A3:C5", Some("A5:C5"));
     l.header_rows = vec![3, 4];
     l.header_paths = vec!["a".into(), "b".into(), "c".into()];
@@ -5132,7 +5132,7 @@ fn records_skip_empty_cells() {
 
 #[test]
 fn records_keep_the_line_of_a_value() {
-    // Task 29 fix round 4: a value on the second line of its row (a platform on the arrival's
+    // A value on the second line of its row (a platform on the arrival's
     // line) keeps its line in the records style, as `<br>4` does in a table.
     let mut l = lay(LayoutKind::Table, "A1:B2", Some("A2:B2"));
     l.header_rows = vec![1];
@@ -6821,7 +6821,7 @@ fn description_template_counts_in_order_and_singular() {
             "\"PDF, 1 page. 1 table, 1 formula, 1 form field, 1 signature, 1 annotation, 1 picture that needs vision, 1 part not read.\""
         )
     );
-    // Review 3 of task 36a, M-1: a picture that shows a block of the text (a region kept as
+    // A picture that shows a block of the text (a region kept as
     // laid out) is no picture of the file. It is counted apart, in words of its own.
     let region = |id: &str| Asset {
         shows: Some(Anchor("p1:b1".into())),
@@ -7195,7 +7195,7 @@ fn spatial_pieces_apart_get_the_same_gap_at_any_distance() {
 
 #[test]
 fn spatial_lines_keep_their_indent_against_the_leftmost_line() {
-    // Review 3 of task 36a, M-3: in a listing the indent carries meaning. A line that
+    // In a listing the indent carries meaning. A line that
     // starts right of the leftmost line of its block is written with its indent, counted
     // from that line, as no-break spaces: they stay in a paragraph where spaces would not.
     let md = body_of(vec![spatial(&[
@@ -7431,7 +7431,7 @@ fn spatial_empty_lines_and_nesting() {
 
 #[test]
 fn a_merged_cell_is_named_by_its_text_and_its_row_as_the_table_shows_it() {
-    // Review 3, I-2: the note names a merged cell by its text and its place, the rows
+    // The note names a merged cell by its text and its place, the rows
     // counted as the pipe table shows them: the header line is row 1, also when it is empty
     // (no header row) or holds several header rows.
     let cell = |t: &str| Cell::new(vec![txt(t)]);
@@ -7532,7 +7532,7 @@ fn a_merged_cell_is_named_by_its_text_and_its_row_as_the_table_shows_it() {
 
 #[test]
 fn text_is_escaped_only_where_it_would_open_a_block_or_emphasis() {
-    // Review 3 of task 36a, M-2: a marker at a line start is escaped only when it opens a
+    // A marker at a line start is escaped only when it opens a
     // block (a list marker needs a space or the line end after it), and an underscore
     // between letters or digits never makes emphasis. What needs no escape is written as
     // it is: an agent reads the raw Markdown.
@@ -7637,7 +7637,7 @@ fn stays_text(text: &str, want: &str) {
     );
 }
 
-// Re-review 3 of task 36a, N2: a line that CommonMark reads as a thematic break or as the
+// A line that CommonMark reads as a thematic break or as the
 // underline of a setext heading is escaped, so it stays the text it is. One test per form.
 
 #[test]
@@ -7698,7 +7698,7 @@ fn a_line_of_dashes_in_two_pieces_kept_as_laid_out_is_no_rule() {
 
 #[test]
 fn spatial_blocks_in_the_same_columns_are_one_aligned_fence() {
-    // Review 3, I-1: the engine may cut a small table into regions of one line each. Blocks
+    // The engine may cut a small table into regions of one line each. Blocks
     // kept as laid out that the reader places as rows under one another at one column of the
     // page grid are written as one fence, each piece at its column: which value stands
     // under which label is meaning, and plain lines with one gap do not say it.
@@ -7745,7 +7745,7 @@ fn spatial_blocks_in_the_same_columns_are_one_aligned_fence() {
 
 #[test]
 fn spatial_blocks_that_are_no_rows_on_one_grid_stay_plain_lines() {
-    // Re-review 3, N1: the columns of a block are counted from its own left edge, so equal
+    // The columns of a block are counted from its own left edge, so equal
     // columns of two blocks say nothing about the page. Both ways: no place on the page
     // known, another column of the page grid (the second block starts further right), a
     // block that does not join (too far under the first), another block between, one block
@@ -7865,7 +7865,7 @@ fn spatial_fence_keeps_text_at_overlaps_and_huge_columns() {
 
 #[test]
 fn a_picture_in_a_table_cell_is_written_in_its_cell_with_its_codes() {
-    // Task 29 fix round 1: a picture in a table cell stands after the cell's text, with the
+    // A picture in a table cell stands after the cell's text, with the
     // same words as a media block; the codes read from it stand in the cell too, at its first
     // place only.
     let mut d = doc();

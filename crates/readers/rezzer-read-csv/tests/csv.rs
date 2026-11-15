@@ -839,7 +839,7 @@ fn csv_header_from_layout_with_csvsniff_signal() {
     assert!(!kinds.is_empty());
 }
 
-/// The corpus files of the plan 2 CSV reader.
+/// The corpus files of the CSV reader.
 fn corpus(name: &str) -> Vec<u8> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../tests/corpus/web-text")

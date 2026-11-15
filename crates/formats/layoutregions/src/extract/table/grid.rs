@@ -306,7 +306,7 @@ pub(crate) fn ink_start<R: LineRun>(runs: &[R], (start, end): (usize, usize)) ->
 }
 
 /// Where the runs `range` of one line, a piece over a column of labels and the column of
-/// their values, part into a label and its value (Task 26, class A1): at the word that starts
+/// their values, part into a label and its value: at the word that starts
 /// at the left edge the values of the other lines share. The gap before that word is a word
 /// space (else the line had two pieces), so the gap says nothing; the shared edge does:
 ///
@@ -538,7 +538,7 @@ pub fn grid_cells<R: LineRun>(
     grid_cells_with(runs, pieces, Around::default(), rows_needed, table_caption)
 }
 
-/// What stands around the lines of a region besides their text (Task 29): the pictures of the
+/// What stands around the lines of a region besides their text: the pictures of the
 /// page near them, each with the caller's index for it and its box (x0, y0, x1, y1), and the
 /// places where a rule across them breaks (column bounds the rule draws, see
 /// `ruled::rule_breaks`).
@@ -575,8 +575,8 @@ fn picture_column(
     })
 }
 
-/// [`grid_cells`] with what stands `around` the lines. A picture stands in a cell (Task 29,
-/// B1 and vision class C: a picture in each row of an item table) only when it lies inside one
+/// [`grid_cells`] with what stands `around` the lines. A picture stands in a cell
+/// (a picture in each row of an item table) only when it lies inside one
 /// column's bounds (the middle of the gutters on both sides, or a break of a rule across the
 /// table in the gutter) and the baselines it holds are all lines of one row: a stamp or a logo
 /// over several rows, or a picture across a column bound, is no cell's. Pictures never make
@@ -1053,8 +1053,8 @@ const BLANK_STEP: f32 = 0.25;
 /// The row of each line of a region (its `pieces` of `runs`), the rows starting at the lines
 /// `anchors` (sorted): an anchor starts its own row, a line before the first anchor joins the
 /// first row. The lines between two anchors go with the row over them, as the wrapped text of
-/// its cells, unless the evidence of their place puts some with the row under them (Task 29,
-/// B2: the other cells of a row stand on the second line of a description that wraps, so the
+/// its cells, unless the evidence of their place puts some with the row under them
+/// (the other cells of a row stand on the second line of a description that wraps, so the
 /// description's first line stands over the row's anchor):
 /// - the widest step of baselines from the anchor over them, through them, to the anchor under
 ///   them is a blank (see [`BLANK_STEP`]): the lines under it go with the row under it, the
@@ -1437,7 +1437,7 @@ pub fn amount(text: &str) -> bool {
 /// shared out by its characters puts it.
 ///
 /// One title over both columns has word spaces over the gutter too, so a cut also needs
-/// (ruling P6-X2 for the first):
+/// (for the first):
 /// - the two columns hold values of different shapes (see [`Shape`]): two close titles head
 ///   different kinds of values (a quantity and a tax rate), a title over both stands over
 ///   values of one kind (`Gesamt Preis` over two columns of numbers, `Date Range` over two

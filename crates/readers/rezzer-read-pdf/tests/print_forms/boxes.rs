@@ -189,7 +189,7 @@ fn box_with_its_label_below_is_not_paired() {
 
 /// Boxes whose bold value stands over a regular label of the same size: weight alone does not
 /// tell which line is the label, so no box pairs (the value is never read as the label of the
-/// label, ruling P6-X), and a loss says why.
+/// label, never a wrong pair), and a loss says why.
 #[test]
 fn bold_value_over_a_regular_label_of_its_size_is_not_paired() {
     let mut t = String::new();
@@ -291,8 +291,7 @@ fn widget_box_is_not_paired() {
 
 /// The header field grid of a pay slip (label rows over value rows, dividers that hang from
 /// the rule above, a raised footnote marker in a label, a date line in a part of its own to
-/// the right) reads as label and value pairs, row by row; an empty field is marked empty
-/// (ruling P6-H).
+/// the right) reads as label and value pairs, row by row; an empty field is marked empty.
 #[test]
 fn header_field_grid_reads_as_pairs() {
     let (template, lines) = header_field_grid();
@@ -338,7 +337,7 @@ fn header_field_grid_reads_as_pairs() {
     assert_grid_date(&out);
 }
 
-/// Rows of fields as a print run fills them (ruling P6-X): each row a rule over 6.6 point
+/// Rows of fields as a print run fills them: each row a rule over 6.6 point
 /// labels and one data line, dividers that hang 11.53 points from the rule above and end over
 /// the value line. Row 1: three short values one or two spaces apart, each in its own field;
 /// row 2: an ID and a name in two fields; row 3: a value that runs over the divider without a
@@ -414,8 +413,8 @@ pub(crate) fn field_rows() -> FormPage {
 
 /// A value line over several fields is cut at the word gap nearest each divider, each value
 /// paired with the field it stands in; a row whose value runs over a divider is not paired,
-/// and a loss names it; labels alone part the fields of a row without dividers (ruling P6-X:
-/// never a wrong pair).
+/// and a loss names it; labels alone part the fields of a row without dividers
+/// (never a wrong pair).
 #[test]
 fn values_over_several_fields_pair_with_their_own_fields() {
     let out = read(&print_form(&[field_rows()], "", ""));
@@ -566,7 +565,7 @@ fn framed_box_title_heads_its_lines() {
     }
 }
 
-/// Fix round 2 of Task 19 (N3): each line under a box title is a paragraph of its own, and
+/// Each line under a box title is a paragraph of its own, and
 /// its runs are written in that paragraph, not all in the first one after the heading.
 #[test]
 fn each_line_under_a_box_title_is_written_in_its_own_paragraph() {

@@ -168,7 +168,7 @@ fn long_heading(b: &Block, ctx: &Ctx) -> Option<String> {
 // Regions
 
 /// A table with a sheet layout, by its kind.
-/// `lead` is false where a generated heading above stands for the lead line (P4-AS).
+/// `lead` is false where a generated heading above stands for the lead line.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn layout_table(
     layout: &TableLayout,
@@ -364,7 +364,7 @@ fn lead_line(layout: &TableLayout) -> Option<String> {
 }
 
 /// A generated heading (it has no anchor) right above a label and value or text region that
-/// says what its lead line says: the heading stands for the lead (P4-AS). Returns the
+/// says what its lead line says: the heading stands for the lead. Returns the
 /// heading and the region without its lead.
 fn heading_with_list(pair: &[Block], ctx: &Ctx, depth: usize, level: u8) -> Option<String> {
     let [

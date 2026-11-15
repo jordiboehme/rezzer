@@ -456,7 +456,7 @@ impl Pipeline {
                     files::write_files(output, &files)
                 };
             // A path held by anything but Rezzer's output for this source fails the run
-            // before a picture is written (rulings P5-AB and P5-AG).
+            // before a picture is written.
             let check = files::Files {
                 source: &source,
                 sha256: &sha256,
@@ -467,7 +467,7 @@ impl Pipeline {
                 json: (req.output == OutputKind::Json).then_some(""),
             };
             // One handle of the output folder for the whole run: opened before the check and
-            // made after it when missing, so a failed check makes no folder (ruling P5-AB).
+            // made after it when missing, so a failed check makes no folder.
             let cannot = |e: std::io::Error| {
                 format!(
                     "cannot write {}: {}",

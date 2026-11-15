@@ -121,7 +121,7 @@ fn layout(band: Vec<u32>, paths: Vec<String>, rows: Vec<RowNote>) -> TableLayout
 
 #[test]
 fn wide_band_does_not_multiply_ranges() {
-    // The review's shape, with a band above the part size: 200 columns by 3 band rows over
+    // A shape with a band above the part size: 200 columns by 3 band rows over
     // 5,000 one-cell data rows (5,600 input cells). One range per row would clone the band
     // 5,000 times (3,000,000 cells); with half the part for the data it takes 29 ranges.
     let cols = 200usize;
@@ -162,7 +162,7 @@ fn wide_band_does_not_multiply_ranges() {
 
 #[test]
 fn band_just_below_the_part_does_not_multiply_ranges() {
-    // The re-review's shape: a one-row band of 237 columns just below the part size (each
+    // A one-row band of 237 columns just below the part size (each
     // cell 26 path chars, 10 text chars and 6: ceil((10 + 237 * 42) / 4) = 2,491 tokens)
     // over 5,000 data rows of 11 tokens. With the fixed part counted in full that was one
     // range per row (1,190,000 cloned cells); with half the part for the data, 113 rows fit

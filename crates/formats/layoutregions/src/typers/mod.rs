@@ -6,7 +6,7 @@
 //! test can ask why a region got its type. A typer gives `None` when it finds no evidence for
 //! its kind (positive evidence only, never the absence of evidence for another kind). Its score
 //! is the sum of its signals' weights, at most [`MAX_SCORE`]; the signals fire on rules stated
-//! relative to the segment's own sizes (ruling P6-Y), so a page printed at another scale gets
+//! relative to the segment's own sizes, so a page printed at another scale gets
 //! the same scores. The arbitration picks among the kinds of a segment.
 //!
 //! The typers reuse the engine's rules, one copy each: the text typers read the walk of

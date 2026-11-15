@@ -123,7 +123,7 @@ fn bold_label_then_value_is_no_heading() {
     let line = "BT /FB 9 Tf 40 700 Td (Kundennummer:) Tj /FL 9 Tf ( 00000) Tj ET\n".to_string();
     let out = common::read(&pages(&[line]));
     assert!(headings(&out).is_empty(), "{:?}", headings(&out));
-    // Task 19 (18b group G11d): the line is read as its label and its value (the line pairs
+    // The line is read as its label and its value (the line pairs
     // rule), not as a paragraph; the label keeps its bold.
     let found: Vec<&Vec<Vec<rezzer_model::Cell>>> = blocks(&out)
         .into_iter()
@@ -152,8 +152,8 @@ fn amount_line_is_no_heading() {
         show("FB", 14.0, 40.0, 700.0, "Gesamtbetrag 1.234,56 EUR"),
     ]));
     assert!(headings(&out).is_empty(), "{:?}", headings(&out));
-    // Task 19 (18b group G6): the lone line is kept as laid out, whole on one line (no region
-    // type has clear evidence for it; a right read, Task 36 makes it a paragraph again).
+    // The lone line is kept as laid out, whole on one line (no region
+    // type has clear evidence for it; a right read makes it a paragraph again).
     let lines = blocks(&out)
         .into_iter()
         .filter(|b| match b {
@@ -596,7 +596,7 @@ fn a_lone_line_of_one_piece_kept_as_laid_out_gets_no_note() {
     assert!(common::all_text(&out).contains("vii"));
 }
 
-/// Task 19 (brief step 1): two blocks of short lines side by side, with no rule, no colon and
+/// Two blocks of short lines side by side, with no rule, no colon and
 /// no value shape (no digit, no amount, no date) give no region type clear evidence. They are
 /// one block kept as laid out, every word once and in the order of its lines, with the loss
 /// that says why.
@@ -774,7 +774,7 @@ fn items_of(n: usize) -> Vec<Vec<String>> {
     rows
 }
 
-/// The reviewer's probe R3: line items under small plain column titles between a rule over
+/// Line items under small plain column titles between a rule over
 /// the titles and one under the items, no upright rule on the page: one table of five columns,
 /// header and rows, in three sizes.
 #[test]
@@ -789,7 +789,7 @@ fn items_between_horizontal_rules_alone_are_a_table() {
     }
 }
 
-/// The reviewer's probe R3b: as R3 with a lone upright rule far from the items.
+/// As the line items above, with a lone upright rule far from the items.
 #[test]
 fn items_between_horizontal_rules_with_an_upright_rule_elsewhere_are_a_table() {
     let out = common::read(&page_in(
@@ -1017,7 +1017,7 @@ fn field_rows() -> Vec<(&'static str, Vec<&'static [&'static str]>)> {
                 &["30 Tage", "netto"],
             ],
         ),
-        // The reviewer's layouts of round 3 (`rr_probe_round3_h1_more`).
+        // More layouts of the same shape.
         (
             "4-2-2",
             vec![
@@ -1135,7 +1135,7 @@ fn fields_broken_in(
     broken
 }
 
-/// The reviewer's finding R3-M3: the check of a row of fields finds a value line in the cell
+/// The check of a row of fields finds a value line in the cell
 /// of another field (`Musterstadt` of `Lieferanschrift` is no part of `12345 Musterstadt`),
 /// and a value line in the column of another title.
 #[test]
@@ -1445,7 +1445,7 @@ enum Close {
     /// starts well before its values and ends a little after them.
     Inside,
     /// As `Inside` with `Anzahl` over a second column of whole numbers: two columns of one
-    /// shape, so a title over both (ruling P6-X2).
+    /// shape, so a title over both.
     SameShape,
 }
 
@@ -1735,7 +1735,7 @@ fn one_word_title_over_two_columns_stays_spanned() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// The review's finding K1: a title of two words or more over two columns of dates, set from
+/// A title of two words or more over two columns of dates, set from
 /// the first column's start or centered over both, is one title: it is not cut at a word
 /// space over the gutter. In every size, font and weight and with 2 to 5 rows its cell keeps
 /// its span of two columns, and the dates of each row stand under it.
@@ -1988,7 +1988,7 @@ fn field_lines(size: f32, fonts: (&str, &str), boxed: Option<(usize, usize)>) ->
     t
 }
 
-/// Task 15b part 2e-1 fix round 1 (the private notice; ruling P6-X): a block of lines that are
+/// A block of lines that are
 /// each a label and its bold value, at one left edge, with no box, in a box, and with a box
 /// around two of its lines: no two lines are ever one line of text (a field of one line read
 /// on into the next), whether the block reads as one paragraph with a break after each line or
@@ -2061,7 +2061,7 @@ fn one_face_column(
     t
 }
 
-/// Task 15b part 2e-1 fix round 2 (review M1): a short line (`Hinweis:`) over a long line that
+/// A short line (`Hinweis:`) over a long line that
 /// starts right of where it ends (an indented continuation) are one paragraph: only a line not
 /// much wider than the short line over it is a cell of another column. Sizes 6 to 12, both
 /// fonts.
@@ -2099,7 +2099,7 @@ fn a_short_line_over_an_indented_continuation_joins() {
     );
 }
 
-/// Task 15b part 2e-1 fix round 2 (review R1 and R2; ruling P6-X): a column of short lines of
+/// A column of short lines of
 /// one face at one left edge (labels alone, values alone, short value words, an address, fields
 /// whose label and value share the face, item lines of a label and an amount), whole, in a box,
 /// and cut by a box around two of its lines: no two lines are one line of text or one heading
@@ -2261,7 +2261,7 @@ fn column_variants() -> Vec<ColumnVariant> {
     out
 }
 
-/// Task 15b part 2e-2 (item 4, O2 of the part 2e-1 re-review r2; ruling P6-X): a column of
+/// A column of
 /// field lines of one face of five to seven words each (`Zahlbar bis zum 31.10.2026 ohne Abzug`
 /// over `Bearbeiter Frau Erika Beispiel`), whole and cut by a box: no two lines are one line of
 /// text or one heading. A line joins the next only when it was broken because its measure was
@@ -2277,7 +2277,7 @@ fn field_lines_of_five_words_or_more_never_join() {
             &["Unser Zeichen", "AB 12 vom 01.10.2026"],
             &["Seite", "1 von 2"],
         ],
-        // Fix round 1 (I2): short lines after a line that ends a sentence.
+        // Short lines after a line that ends a sentence.
         &[
             &["Zahlbar sofort."],
             &["Lieferung frei Haus"],
@@ -2320,7 +2320,7 @@ fn field_lines_of_five_words_or_more_never_join() {
     );
 }
 
-/// Task 15b part 2e-2 (item 4, O1 of the part 2e-1 re-review r2): lines that each end in an
+/// Lines that each end in an
 /// exclamation mark (slogans under an invoice) are sentences of their own, of 8 to 12 words, in
 /// one face or with the last word bold or a point larger: no two of them are one line.
 #[test]
@@ -2381,7 +2381,7 @@ fn lines_that_each_end_in_an_exclamation_mark_never_join() {
     );
 }
 
-/// Task 15b part 2e-2 (item 4), guard: prose of five lines that fills its measure beside a
+/// Prose of five lines that fills its measure beside a
 /// letter address, whole and in a box, joins line by line at every size and face, also where a
 /// line starts with a capital (a noun) or holds a sentence end; cut by a box, its lines go on in
 /// each part where they hold words in small letters or a sentence.
@@ -2429,11 +2429,11 @@ fn wrapped_prose_in_a_column_still_joins() {
     );
 }
 
-/// Task 15b part 2e-2 (item 5, O3 of the part 2e-1 re-review r2): bold lines of starred items
+/// Bold lines of starred items
 /// (`* A123456B * x/y`, `*Abc.-Nr. 12345* 12a`, `*Abc.-Nr. ab*`) at 6 to 14 points, plain and
 /// bold Helvetica and Times: a star that closes an item a star opens on its line is no note
 /// marker, and a line that opens and ends with a star is no footnote: no footnote is read, the
-/// stars stay in the text, and each line is a line of its own. Part 2e-4 (item 6): the first
+/// stars stay in the text, and each line is a line of its own. The first
 /// line too, at every size from 6 to 14: its star, closed by a lone star on its line, is no
 /// bullet (it was read as a list item at 6 to 10 points).
 #[test]
@@ -2453,7 +2453,7 @@ fn starred_items_are_no_footnotes() {
                 wrong.push(format!("{at}: a footnote"));
             }
             let text = md.replace("**", "").replace('\\', "");
-            // Part 2e-4 (item 6): the first line's star opens an item that a star closes on its
+            // The first line's star opens an item that a star closes on its
             // line: no bullet, and no list.
             if text.lines().any(|l| l.trim_start().starts_with("- ")) {
                 wrong.push(format!("{at}: a list item"));
@@ -2473,8 +2473,7 @@ fn starred_items_are_no_footnotes() {
     );
 }
 
-/// Task 15b part 2e-2 (item 6, the docling report's glues of part 2e-1 fix round 2; ruling
-/// P6-X): in rows of a table read as text, a row label cut by a hyphen (`Page-`) over a line
+/// Rows of a table read as text with glued words: a row label cut by a hyphen (`Page-`) over a line
 /// that starts right of where the cut ends (the cells of the next row) is no word going on
 /// (`Page-70878`); and a row whose last cell is a number range (`70-85`) over a line of prose
 /// in the same face that opens with a capital is no line of that prose. Sizes 6 to 14, both
@@ -2532,7 +2531,7 @@ fn a_cut_row_label_and_a_row_of_numbers_stay_apart_from_the_next_line() {
     );
 }
 
-/// Task 15b part 2e-4 (item 4; P6-X): titles over one row whose last cell ends with the stop of
+/// Titles over one row whose last cell ends with the stop of
 /// an abbreviation (`12 Stk.`, `Muster Co. KG.`, `9,99 EUR.`) are a table of a header and one
 /// row, alone in the body or between two rules, as a row without the stop is: the stop is no
 /// end of a sentence where the row is not set full to the titles' measure. They were read as
@@ -2589,7 +2588,7 @@ fn titles_over_a_row_that_ends_in_a_stop_are_a_table() {
     );
 }
 
-/// Task 15b part 2e-2 (item 2, part 2e-1 concern 2; ruling P6-X): two lines whose pieces stand
+/// Two lines whose pieces stand
 /// in the same three columns, titles without a digit over a row with one (`Name Ort Nr` over
 /// `Beispiel Musterstadt 4711`), alone in the body or between two rules with no dividers, are a
 /// table of a header and one row (or, refused, that is said), and the two lines are never one
@@ -2686,7 +2685,7 @@ fn two_lines_in_three_columns_alone_are_a_table() {
     );
 }
 
-/// Task 15b part 2e-2 (item 3, part 2e-1 concern 5; ruling P6-X): a value printed over the
+/// A value printed over the
 /// label of its line (it starts well inside the label's ink, a little higher), outside any
 /// grid, is another text: `Name Hinterhaus`, never the one word `NameHinterhaus`. Sizes 6 to
 /// 14, the value in Courier, Helvetica or Helvetica-Bold, the label at 0.7 of its size.
@@ -2774,11 +2773,11 @@ fn set_prose(
     (lines, t)
 }
 
-/// Task 15b part 2e-2 fix round 1 (I1; review scenario A and B): wrapped prose of sentences
+/// Wrapped prose of sentences
 /// whose lines end in a number over a noun (`mit 2` over `Prozent Skonto`, `due by 31` over
 /// `October 2026`), and a paragraph whose last line ends in no stop, goes on line by line: no
 /// line break inside it. Sizes 6 to 14, Helvetica and Times, 14 to 50 ems, ragged and set
-/// full. Part 2e-4 (item 2, P6-X): every size from 6 to 14, and no case left out: the paragraph
+/// full. Every size from 6 to 14, and no case left out: the paragraph
 /// without a stop, set full at 14 ems in Helvetica, was read as a table without rules of three
 /// columns at every size.
 #[test]
@@ -2806,9 +2805,9 @@ fn prose_with_numbers_at_line_ends_still_joins() {
                         };
                         let out = common::read(&print_form(&[page], "", ""));
                         let md = common::markdown(&out);
-                        // Task 19: prose set full can be kept as laid out (its word gaps line
+                        // Prose set full can be kept as laid out (its word gaps line
                         // up into gutters, and no region type has clear evidence for it; a
-                        // right read, Task 36 makes it a paragraph again). Its words then
+                        // right read makes it a paragraph again). Its words then
                         // stand line by line, in order and none lost.
                         let laid_out = justified && laid_out_text(&out).contains(text);
                         if !md.contains(text) && !laid_out {
@@ -2830,7 +2829,7 @@ fn prose_with_numbers_at_line_ends_still_joins() {
     );
 }
 
-/// Task 15b part 2e-4 (item 2, P6-X): paragraphs set full (justified) in a narrow column of 10
+/// Paragraphs set full (justified) in a narrow column of 10
 /// to 22 ems, whose word gaps are wide enough to part the words into pieces, are prose: no
 /// table of their words, and no loss of a block of text in columns. Four texts (German and
 /// English, with and without numbers and a final stop), sizes 6 to 14, Helvetica and Times.
@@ -2878,12 +2877,12 @@ fn paragraphs_set_full_in_a_narrow_column_are_no_tables() {
     );
 }
 
-/// Task 15b part 2e-4 (item 8, guard): `line_breaks` takes evidence from up to two lines over
+/// `line_breaks` takes evidence from up to two lines over
 /// and under a block (the column it stands in). Prose of sentences set right under a column of
 /// field lines in its face, at its pitch and left edge, still goes on line by line, and the
 /// field lines, and the last one over the prose, keep their breaks. (Prose right over field
 /// lines lets the first field line go on its last sentence at some measures, older: no layout
-/// tells it from a last sentence without a stop, see the part 2e-4 report.) Sizes 6 to 14,
+/// tells it from a last sentence without a stop.) Sizes 6 to 14,
 /// Helvetica and Times, measures of 30 and 40 ems.
 #[test]
 fn prose_under_field_lines_in_one_column_still_joins() {
@@ -2932,7 +2931,7 @@ fn prose_under_field_lines_in_one_column_still_joins() {
     );
 }
 
-/// Task 15b part 2e-2 fix round 1 (C2; ruling P6-X): two lines of three words set full in a
+/// Two lines of three words set full in a
 /// narrow column (12 to 18 ems), the second with a digit (`Unsere Lieferung erfolgt` over `in 2
 /// Teilen.`), are prose: no table makes the first line a header over the second. Sizes 6 to
 /// 14, both fonts.
@@ -2983,7 +2982,7 @@ fn two_lines_set_full_are_no_table() {
     );
 }
 
-/// Task 15b part 2e-4 (item 7): a label and its value that only touch, the value larger or in
+/// A label and its value that only touch, the value larger or in
 /// another weight (overlap under half a size, or none: `Name` and `Hinterhaus` drawn with no
 /// space between them), are two texts: never one word (`NameHinterhaus`). A word whose part in
 /// a smaller size is raised after it (`21st`, an ordinal) and a word drawn in pieces of one
@@ -3019,7 +3018,7 @@ fn a_value_that_touches_its_label_stays_apart() {
         let n = common::font_width("FL", "21", size);
         t += &show("FL", size, 40.0, 680.0, "21");
         t += &show("FL", 0.6 * size, 40.0 + n, 680.0 + 0.35 * size, "st");
-        // Fix round 1 (I1): words in two weights or sizes, the second part touching the first
+        // Words in two weights or sizes, the second part touching the first
         // and opening with a small letter, stay one word.
         let mut y = 660.0;
         for (a, fa, sa, b, fb) in [
@@ -3055,10 +3054,10 @@ fn a_value_that_touches_its_label_stays_apart() {
     );
 }
 
-/// Task 15b part 2e-2 fix round 1 (C1; ruling P6-X): line items whose last amount is a credit
+/// Line items whose last amount is a credit
 /// with a trailing minus (`10,00-`), the amounts flush left, over a total under the amounts at
 /// the row pitch: the total is no end of the credit's cell (`10,00-80,00`), and it stays a text
-/// of its own. Sizes 6 to 14, Helvetica and Times. Part 2e-4 (item 3, P6-X): the same with the
+/// of its own. Sizes 6 to 14, Helvetica and Times. The same with the
 /// amounts flush right and the minus hanging after them, which at small sizes reads as lines
 /// of text (no table): the minus after an amount is no hyphen of a cut word, and a line of an
 /// amount alone under it is a line of its own, never `10,00-80,00` nor one line with it.
@@ -3080,7 +3079,7 @@ fn a_credit_in_the_last_row_takes_no_total_under_the_table() {
                     t += &show(bold, size, x, y, h);
                 }
                 // With `hang`, the amounts stand flush right at x 540 and the minus hangs after
-                // them (part 2e-4, item 3).
+                // them.
                 let amount = |y: f32, a: &str| {
                     if hang {
                         let digits = a.trim_end_matches('-');
@@ -3132,7 +3131,7 @@ fn a_credit_in_the_last_row_takes_no_total_under_the_table() {
     );
 }
 
-/// Task 15b part 2e-4 fix round 1 (I2, P6-X): a range of two numbers with decimals in prose
+/// A range of two numbers with decimals in prose
 /// whose line ends right after the range's hyphen (`von 08.00-` over `18.00 Uhr ...`) goes on
 /// with no space inside the range: the hyphen is no minus of an amount when a number follows it
 /// on the next line. Four texts (times, prices, sections, fees), sizes 6 to 14, Helvetica and
@@ -3192,7 +3191,7 @@ fn a_range_wrapped_after_its_hyphen_stays_whole() {
     );
 }
 
-/// Task 15b part 2e-4 (item 3, list line 9): an amount with a minus after it (`12,50-`, a
+/// An amount with a minus after it (`12,50-`, a
 /// deduction) on a line of its own under an amount of the row over it is a row of its own, as
 /// an amount without a sign is: never one cell with the amount over it (`2.500,00 12,50-`).
 /// Sizes 6 to 14, Helvetica and Times, amounts flush right, with and without thousands marks.
@@ -3252,7 +3251,7 @@ fn a_deduction_with_a_minus_under_an_amount_is_a_row_of_its_own() {
     );
 }
 
-/// Task 15b part 2e-2 fix round 1 (I3): an accent drawn as a run of its own over a letter of
+/// An accent drawn as a run of its own over a letter of
 /// its word (before or after the word's runs) stays in its word: it is no text printed over
 /// another. Sizes 6 to 14, Helvetica and Times.
 #[test]
@@ -3289,7 +3288,7 @@ fn an_accent_drawn_on_its_own_stays_in_its_word() {
     );
 }
 
-/// Task 15b part 2e-1 (item 6, part 2b re-review r1; ruling P6-X): a table of taxes without
+/// A table of taxes without
 /// rules, an amount alone under an amount of its column (a row of its own), then two lines of
 /// one amount each in two other columns under the last row (`5,00` under the base, `125,00`
 /// under the amount): the two amounts are never one paragraph or one cell (`5,00 125,00`).
@@ -3369,9 +3368,9 @@ fn lone_amounts_in_two_columns_stay_apart() {
 /// Items without rules whose period wraps a date range into a second line (`01.10.2026 -`
 /// over `31.10.2026`), in every size and font: the second line is never a row of its own
 /// (only an amount under an amount is one); between two rows it goes on in its cell, and the
-/// dash keeps the space after it (`01.10.2026 - 31.10.2026`; part 2e-1, item 7: it was joined
-/// as after a hyphen). The last row's range goes on in its cell under the table too (part 2e-2,
-/// item 3: `31.12.2026` was read as a paragraph after it). Sizes 6 to 14 in both fonts. All
+/// dash keeps the space after it (`01.10.2026 - 31.10.2026`: it was joined
+/// as after a hyphen). The last row's range goes on in its cell under the table too
+/// (`31.12.2026` was read as a paragraph after it). Sizes 6 to 14 in both fonts. All
 /// values are invented.
 #[test]
 fn a_wrapped_date_range_stays_in_its_cell() {
@@ -3421,13 +3420,13 @@ fn a_wrapped_date_range_stays_in_its_cell() {
             if alone {
                 wrong.push(format!("{k}x, {fonts:?}: a date is a row: {found:?}"));
             }
-            // Part 2e-2 (item 3): the last row's range goes on under the table too.
+            // The last row's range goes on under the table too.
             for (_, from, to, _, _) in &rows {
                 let cell: String = format!("{from}{to}").split_whitespace().collect();
                 if !cells.contains(&cell) {
                     wrong.push(format!("{k}x, {fonts:?}: no cell {from} {to}: {found:?}"));
                 }
-                // The dash keeps the space after it (part 2e-1, item 7).
+                // The dash keeps the space after it.
                 let spaced = format!("{from} {to}");
                 let exact = found
                     .iter()
@@ -3506,7 +3505,7 @@ fn a_blank_row_keeps_one_table() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// Task 15b group 20: line items with a dashed rule under the header and an end rule over the
+/// Line items with a dashed rule under the header and an end rule over the
 /// totals, each dash a fifth of the text size long and half a point thick (thin both ways at
 /// small sizes), the page upright or turned a quarter either way: the items and the totals
 /// are two tables, as upright. Sizes 6 to 14 in both fonts.
@@ -3594,7 +3593,7 @@ fn dashed_end_rules_part_tables_on_a_turned_page() {
     );
 }
 
-/// Task 15b part 2c re-review r1 (Minor 1): a row of text only after a blank row, over rows of
+/// A row of text only after a blank row, over rows of
 /// the first table's own shape (`Hinweis | siehe Anlage | Seite` over `3000 | Bonus | 500,00`),
 /// is no header of a second table: it is a row of the first table or text of its own, never a
 /// table's header row. Sizes 6 to 14, both fonts.
@@ -3647,7 +3646,7 @@ fn a_note_row_after_a_blank_row_heads_no_table() {
     );
 }
 
-/// Task 15b part 2e-1 (item 1, part 2d review I4; ruling P6-X): a table without rules, then a
+/// A table without rules, then a
 /// blank row of 2.2 or 2.4 pitches and a header of its own over one row (`Kennung Vorgang Wert`
 /// over `A-1 Fahrgeld 45,67`), plain or bold, the first table's header 1.0 or 1.6 pitches over
 /// its rows: the two lines are a table of a header and one row, not one paragraph of both lines
@@ -3713,13 +3712,13 @@ fn a_header_and_one_row_after_a_table_are_a_table_of_their_own() {
     );
 }
 
-/// Task 15b part 2b re-review (probe C) and part 2c review (Important 4, Minors 1 and 2; ruling
-/// P6-X): a second table under the first after a blank row (2.2 pitches), no rule between,
+/// A second table
+/// under the first after a blank row (2.2 pitches), no rule between,
 /// whose middle column ends where the first table's middle title ends, so that its lines stand
 /// in the first table's columns: its header line starts a table of its own, and no header
 /// becomes a row of the first, whether the header is bold, plain, a size step larger, bold
-/// after a bold total row, holds years, or has two cells over two columns. Task 15b part 2d
-/// item 5: so does it when a row of the first table stands 1.5 pitches under the row over it,
+/// after a bold total row, holds years, or has two cells over two columns. The same holds
+/// when a row of the first table stands 1.5 pitches under the row over it,
 /// and the header 2.2 or 2.4 pitches under the first table's last row: the pitch of the rows is
 /// their common step, not their widest. Sizes 6 to 14 in both fonts.
 #[test]
@@ -4039,7 +4038,7 @@ enum Set {
 }
 
 /// Lines right under line items without rules, at row pitch, in every size, font and weight
-/// and with 2 to 5 rows (the review's finding K2 and its ruling): none joins the table, and
+/// and with 2 to 5 rows: none joins the table, and
 /// each stays text out of it.
 /// - A line that starts at a text column's start, in the column's font family and size, may go
 ///   on in the last row, whatever its first letter: a capitalized wrap `Frei Haus`, a small
@@ -4118,9 +4117,9 @@ fn lines_under_items_without_rules_are_named_or_stay_paragraphs() {
                             .iter()
                             .map(|l| l.what.as_str())
                             .filter(|w| !w.starts_with("1 date stands in the head"))
-                            // Task 19 (ruling on 19a-4): a lone amount under the items reads as
+                            // A lone amount under the items reads as
                             // totals, but the totals path builds none from it, and the region
-                            // says so; its text stands as laid out (an extraction gap of Task 30).
+                            // says so; its text stands as laid out (an extraction gap of the totals path).
                             .filter(|w| {
                                 !(text == "1.469,13"
                                     && w.ends_with(
@@ -4202,7 +4201,7 @@ fn framed_items(
     (t, columns)
 }
 
-/// The reviewer's probe R3-M1: a note under the last item, over the rule under the items,
+/// A note under the last item, over the rule under the items,
 /// that runs over the gutter between `Pos` and `Artikel` (from x 40, one row or two under the
 /// last item) or between `Artikel` and `Menge` (a long one from x 80 or from x 40), in every
 /// size, look, font and weight and with 2 to 5 rows:
@@ -4263,7 +4262,7 @@ fn a_note_across_a_gutter_in_a_frame_of_items_joins_no_cell() {
     );
 }
 
-/// The reviewer's finding R3-M4: a row of fields read as a table whose first row holds the
+/// A row of fields read as a table whose first row holds the
 /// labels has them as its header row, also when no column under them holds numbers (three
 /// lines a field), in every size, look, font and weight, alone and with an upright rule
 /// elsewhere.
@@ -4412,7 +4411,7 @@ fn items_with_note(
     (t, columns)
 }
 
-/// The review's finding K3: a note between two rows of items that runs over a gutter (from
+/// A note between two rows of items that runs over a gutter (from
 /// x 40 over `Pos` and `Artikel`, from x 80 over `Artikel` and `Menge`, from x 300 over `Menge`
 /// and `Preis`), with no frame and in a frame of plain or dashed rules, in every size, font and
 /// weight and with 3 to 5 rows: the note joins no row (no cell holds the values of two
@@ -4561,7 +4560,7 @@ fn narrow_spanned(
     (t, columns)
 }
 
-/// The re-review's finding (ruling P6-X2): a title of two capitalized words over two narrow
+/// A title of two capitalized words over two narrow
 /// columns of values of one shape (small whole numbers), centered over both or set from the
 /// first column's start, with no line under it, is one title: in every size, font and weight,
 /// with 2 to 5 rows, values flush right or flush left and the columns 1.4 or 2 sizes apart,
@@ -4610,7 +4609,7 @@ fn capitalized_titles_over_two_columns_of_one_shape_stay_spanned() {
     );
 }
 
-/// Ruling P6-X2: close titles set as on the real invoice (`Close::Inside`) over two columns
+/// Close titles set as on the real invoice (`Close::Inside`) over two columns
 /// of one shape, a quantity and a count, without and in a frame of every look, in every size,
 /// font and weight and with 2 to 5 rows, are one title: the header holds `Menge Anzahl` in one
 /// cell over both columns, and the two numbers of each row stand under it.
@@ -4662,11 +4661,11 @@ fn close_titles_over_two_columns_of_one_shape_stay_merged() {
     );
 }
 
-/// Two columns of values of one kind, as the shape of a column may be misread (the
-/// re-review's sets of round 4, ruling of fix round 5): a tie of numbers, whole numbers with
+/// Two columns of values of one kind, as the shape of a column may be misread:
+/// a tie of numbers, whole numbers with
 /// thousands marks, amounts with the euro sign after and before, negative amounts, whole
 /// and decimal numbers, percentages with and without a space, dates, large numbers with
-/// thousands marks, empty cells, a mix of text and numbers, and (round 5) amounts and numbers
+/// thousands marks, empty cells, a mix of text and numbers, and amounts and numbers
 /// in forms the shapes do not know, against plain amounts or numbers.
 const SHAPE_SETS: [(&str, [&str; 4], [&str; 4]); 16] = [
     (
@@ -4828,7 +4827,7 @@ fn shaped_spanned(
     (t, columns)
 }
 
-/// The re-review's finding of round 4 (ruling of fix round 5): a title of two capitalized
+/// A title of two capitalized
 /// words over two columns of values of one kind ([`SHAPE_SETS`]) is never cut, however the
 /// shapes of the columns may be misread: centered, from the first column's start or flush
 /// right with the second column's end, values flush right or flush left, the columns 1.4 or
@@ -5025,7 +5024,7 @@ fn first_title_line_broken(
     b
 }
 
-/// The finding M1 of the Task 12 review: column titles of two lines over line items between
+/// Column titles of two lines over line items between
 /// rules (see [`framed_items`]) whose first lines, in the titles' size and font, stand `3 k`
 /// over the top rule, `Anzahl` flush left at x 300 over `Menge` and `Einzel` flush right at
 /// x 420 over `Preis`. The first line stays a paragraph right before the table, and every
@@ -5033,8 +5032,8 @@ fn first_title_line_broken(
 /// the first line to its titles is lost. Joining it would need a bound that tells it from a
 /// short line set over the rule, and none does (see
 /// [`a_short_line_over_the_top_rule_joins_no_title`]): a wrong header cell is worse than the
-/// lost link (ruling P6-X). In every size, look, font and weight, with 2 to 5 rows; also the
-/// reviewer's layout, `Einzel` at x 380, at 1x in Helvetica.
+/// lost link. In every size, look, font and weight, with 2 to 5 rows; also the
+/// layout of a real page, `Einzel` at x 380, at 1x in Helvetica.
 #[test]
 fn the_first_line_of_two_line_titles_over_the_top_rule_stays_a_paragraph_before_the_table() {
     let mut wrong = Vec::new();
@@ -5083,7 +5082,7 @@ fn the_first_line_of_two_line_titles_over_the_top_rule_stays_a_paragraph_before_
     );
 }
 
-/// Short lines over the top rule of a frame of line items in the review of fix round 1 (I1),
+/// Short lines over the top rule of a frame of line items,
 /// each as its left piece and x, and its right piece and the x it ends at (flush right).
 const SHORT_OVER: [(&str, f32, &str, f32); 4] = [
     ("Nr.", 40.0, "Datum", 540.0),
@@ -5092,7 +5091,7 @@ const SHORT_OVER: [(&str, f32, &str, f32); 4] = [
     ("Nr.", 43.0, "Datum", 537.0),
 ];
 
-/// The review's guard I1 of fix round 1: a short line of two pieces over the top rule of a
+/// A short line of two pieces over the top rule of a
 /// frame of line items (see [`framed_items`]), in the titles' size and font and lined up with
 /// two of them (see [`SHORT_OVER`]), `d k` over the titles' baseline for d from 9.5 to 18: no
 /// header cell holds its words, every title heads the column of its values, and the line is
@@ -5227,7 +5226,7 @@ fn words(s: &str) -> impl Iterator<Item = &str> {
 /// little off theirs, stands apart: no block or row holds the title and a field line, the
 /// fields are one table of label and value, and no line is lost; in every size, font, look
 /// of the title, with 3 to 6 field lines and the title on the first, a middle and the last
-/// line's row (ruling P6-Y).
+/// line's row.
 #[test]
 fn title_beside_field_list() {
     let mut wrong = Vec::new();
@@ -5427,7 +5426,7 @@ fn group_label_rows(k: f32, fonts: (&str, &str), group: Group, titled: bool) -> 
     t
 }
 
-/// The finding M2 of the Task 12 review: a group label beside three rows of a table without
+/// A group label beside three rows of a table without
 /// rules, larger or bold and centred on them, is read once and before its rows, never between
 /// them or in a cell; the rows are one table of their cells (under their titles when there
 /// are titles); in every size, font, look and place of the label, with and without titles.
@@ -5551,7 +5550,7 @@ const BLANK_COLUMNS: [(f32, [&str; 3]); 3] = [
 /// row drawn over a string of 150 spaces from x 40 that reaches past the first gutter (as a
 /// print run blanks its field first): each column is read as one paragraph of three lines, the
 /// columns one after the other. The footer stands on both pages of a file of two, so it is a
-/// running footer: by ruling P6-X5 address columns part only on furniture lines (on a file of
+/// running footer: address columns part only on furniture lines (on a file of
 /// one page the footer is body text and reads as at b9c878e).
 #[test]
 fn blank_strings_do_not_block_columns() {
@@ -5836,7 +5835,7 @@ fn footed_pages(extra: &str, count: usize, k: f32, wide: bool) -> Vec<u8> {
     print_form(&vec![page; count], "", "")
 }
 
-/// Carried from Task 10 (an invoice of two pages, its shape only): a footer of 7 pt text in
+/// A footer of 7 pt text in
 /// four columns of uneven length, the address, the bank, the register entry and the contact
 /// under a bold shop name, at the foot of both pages. Each column is one block, in column
 /// order, a running footer on both pages, and the file has no loss.
@@ -5877,7 +5876,7 @@ fn footer_sets() -> Vec<(String, Vec<Vec<&'static str>>)> {
     out
 }
 
-/// Finding B5 under rulings P6-Y and P6-X5: a footer of two to four address-shaped columns, in
+/// A footer of two to four address-shaped columns, in
 /// every size and font, set flush to the top or centred, with no bold line, a bold first line
 /// of its last column or a bold second line of its first, on one, two or three pages. On files
 /// of two and three pages, where it is a running footer: no block holds lines of two columns,
@@ -6029,7 +6028,7 @@ fn a_wide_address_line_keeps_its_line_breaks() {
     }
 }
 
-/// Guards of finding B5 under rulings P6-Y and P6-X5: the footer columns of
+/// Guards: the footer columns of
 /// [`footer_columns_read_apart_in_every_size_and_font`] on pages 1 and 2 of a file of three
 /// pages, and the same columns at the top of both pages of a file of two, are content: no
 /// running footer or header, every line read once as body text, in every size, font and column
@@ -6096,7 +6095,7 @@ const NOTICE_FIELDS: [(&str, &str); 12] = [
     ("Noch zu zahlen", "123,45"),
 ];
 
-/// Ruling P6-X3: a block of `n` label and value lines of a notice, the labels plain at x 40
+/// A block of `n` label and value lines of a notice, the labels plain at x 40
 /// and the values bold flush right at x 400 on the same baselines, some values empty, in every
 /// size and font: each value is read after its own label and before the next label, never as
 /// a column of its own after a column of labels.
@@ -6155,7 +6154,7 @@ fn contact_columns() -> Vec<Vec<&'static str>> {
     ]
 }
 
-/// Fix round 2, item 1: the columns of a footer of two pages, a running footer on both, keep a
+/// The columns of a footer of two pages, a running footer on both, keep a
 /// line break between each two of their lines, also where lines start with a web or mail
 /// address in small letters, in every size and font: a column of a footer is lines, not prose.
 #[test]
@@ -6194,7 +6193,7 @@ fn footer_columns_keep_a_line_break_between_their_lines() {
     );
 }
 
-/// A page of an invented invoice of the shape of fix round 2, item 3: the sender line, the bold
+/// A page of an invented invoice of one shape: the sender line, the bold
 /// recipient address, the bold title beside a field list, the body and the footer of
 /// [`contact_columns`] with a bold shop name. The sender and the recipient hold none of the
 /// footer's lines.
@@ -6222,7 +6221,7 @@ fn invoice_page(fonts: (&str, &str)) -> String {
     t + &footer(fonts, &contact_columns(), Some((3, 0)), Stack::Top)
 }
 
-/// Fix round 2, item 3: on both pages of an invoice of two pages, every line of the footer
+/// On both pages of an invoice of two pages, every line of the footer
 /// columns is a running footer, each column one block, in every size and font; the title and
 /// the field list stay content.
 #[test]
@@ -6315,7 +6314,7 @@ fn measured_footer() -> Vec<Vec<Measured>> {
     ]
 }
 
-/// Page `n` of the reduced invoice model of fix round 3: a letter with a sender line, a
+/// Page `n` of the reduced invoice model: a letter with a sender line, a
 /// recipient, a bold title beside a field list, line items and closing lines on page 1, one
 /// line on page 2, the page number `Seite n von 2` over the footer, and the footer of
 /// [`measured_footer`] with its two blank lines.
@@ -6463,13 +6462,13 @@ fn measured_invoice_page(n: u32) -> String {
     t
 }
 
-/// Fix round 3: the reduced model of an invoice of two pages (a real footer shape, no source
+/// The reduced model of an invoice of two pages (a real footer shape, no source
 /// named). On both pages every line
 /// of the footer and the page number are running footers, the three text columns are one
 /// block each with a line break between their lines, and the 11 pt shop name of the footer is
 /// no heading: the bold title of the page is the only heading, at level 1. Two lines of white
 /// space only under the second column are no body text that the footer must stand below. In
-/// Helvetica and Times, at page scales 0.75, 1 and 1.5 (ruling P6-Y).
+/// Helvetica and Times, at page scales 0.75, 1 and 1.5.
 #[test]
 fn the_measured_invoice_footer_is_furniture_with_its_line_breaks() {
     let mut wrong = Vec::new();
@@ -6518,7 +6517,7 @@ fn measured_invoice_broken(k: f32, times: bool) -> Vec<String> {
         for line in lines {
             let holders: Vec<&(Option<String>, String)> =
                 texts.iter().filter(|(_, t)| t.contains(line)).collect();
-            // Task 19a-5b: the page number right under the closing lines of page 1 may be read
+            // The page number right under the closing lines of page 1 may be read
             // with them as their last line (its own line, after a break), no running footer:
             // a role lost, no text or order (the engine has no footer band there yet).
             let own_line = n == 1
@@ -6548,7 +6547,7 @@ fn measured_invoice_broken(k: f32, times: bool) -> Vec<String> {
     wrong
 }
 
-/// The two-column tables of the Task 13 review (finding I-1), each a header and its rows.
+/// The two-column tables, each a header and its rows.
 const BODY_TABLES: [[[&str; 2]; 4]; 3] = [
     [
         ["Artikel", "Menge"],
@@ -6570,7 +6569,7 @@ const BODY_TABLES: [[[&str; 2]; 4]; 3] = [
     ],
 ];
 
-/// The looks of the review's probes: page scales and fonts (ruling P6-Y).
+/// The looks of the probes: page scales and fonts.
 fn probe_looks() -> Vec<(f32, (&'static str, &'static str))> {
     [0.75, 1.0, 1.5]
         .into_iter()
@@ -6578,7 +6577,7 @@ fn probe_looks() -> Vec<(f32, (&'static str, &'static str))> {
         .collect()
 }
 
-/// The looks of the review's probes with the first baseline of the block: in the body (700),
+/// The looks of the probes with the first baseline of the block: in the body (700),
 /// wholly in the top band (780) and wholly in the bottom band (140) of the page.
 fn probe_places() -> Vec<(f32, (&'static str, &'static str), f32)> {
     probe_looks()
@@ -6587,7 +6586,7 @@ fn probe_places() -> Vec<(f32, (&'static str, &'static str), f32)> {
         .collect()
 }
 
-/// Rulings P6-X4 and P6-X5 (review findings I-1 and M-6): a two-column table in the body or
+/// A two-column table in the body or
 /// wholly in a page band that is no running header or footer, with a header row and
 /// cells of text and numbers stays a table, its values set flush left at x 200 or flush right
 /// at x 260, in every size and font. Address-shaped columns are a matter of the page bands
@@ -6634,7 +6633,7 @@ fn two_column_body_tables_with_a_header_stay_tables() {
     );
 }
 
-/// The headerless notice block of the Task 13 review: plain labels, some with a digit, beside
+/// A headerless notice block: plain labels, some with a digit, beside
 /// values with letters, one value empty.
 const NOTICE_PAIRS: [(&str, &str); 6] = [
     ("Name", "Erika Mustermann"),
@@ -6672,7 +6671,7 @@ const SIDE_BLOCKS: [&[&str]; 4] = [
     ],
 ];
 
-/// Carries C-5 and C-3 (ruling P6-X: a block that mixes two columns is a wrong reading order):
+/// A block that mixes two columns is a wrong reading order:
 /// blocks of an address, a bank, a register entry and a contact side by side on shared
 /// baselines, top aligned, three sizes apart, in the body at the top of a page or at its foot
 /// on a file of one page (no running footer), the first 2, 3 or 4 of them, cut to their first
@@ -6754,7 +6753,7 @@ fn small_rows(rows: &[&[&str]], size: f32, fonts: (&str, &str), bold: bool) -> S
     t
 }
 
-/// Task 15b part 2c review (Critical 1, ruling P6-X): small tables whose columns list records
+/// Small tables whose columns list records
 /// of one kind, with a plain header, a bold one or none, and line items with amounts, are
 /// read as tables, row by row, as at f13f512, never block by block. Sizes 6 to 14, both fonts.
 #[test]
@@ -6830,7 +6829,7 @@ fn small_tables_keep_their_rows() {
     );
 }
 
-/// Task 15b part 2e-4 (item 9, list line 9; guard of part 2b's region end rule): a gap of more
+/// A gap of more
 /// than `REGION_STEPS` times the steps on both sides of it ends a region without rules, where
 /// "both sides" is the region's steps so far and the step of the next two lines. A header of
 /// two tight lines (`Pos Artikel Betrag` over `Nr. Bezeichnung in EUR`) over rows set wide
@@ -6893,7 +6892,7 @@ fn a_tight_header_over_wide_rows_is_one_table() {
     );
 }
 
-/// Task 15b part 2e-4 (item 9, list line 9): labels with a short index (`Kundennr. 1`, `Vertrag
+/// Labels with a short index (`Kundennr. 1`, `Vertrag
 /// 7`, `Tarif A2`) beside the lines of an address are rows of labels and values: the table is
 /// read and no loss doubts it (the doubt that blocks may stand side by side was noise there).
 /// Lines of a phone number beside an address may be a block of their own: that doubt stays.
@@ -6951,7 +6950,7 @@ fn numbered_labels_beside_an_address_raise_no_doubt() {
     );
 }
 
-/// Task 15b part 2c review (Important 1, ruling P6-X): labels beside values whose columns are
+/// Labels beside values whose columns are
 /// of uneven height (a last label without a value, a value of two address lines) or full keep
 /// each value with its label, or a loss says that labels beside values are read apart; never
 /// silently apart. Sizes 6 to 14, both fonts.
@@ -7025,7 +7024,7 @@ fn label_blocks_keep_their_pairs_or_say_so() {
     );
 }
 
-/// Task 15b part 2c review (Strengths, Minor 5) and re-review r1 (Important 1): blocks side by
+/// Blocks side by
 /// side one line lower, bottom aligned, with a PO box, a c/o line, under bold headings, with a
 /// colon heading, with lines of one kind (two phones, two banks), a repeated word or an amount,
 /// or two addresses, in the body or at the foot of a page, are read block by block, or a loss
@@ -7214,7 +7213,7 @@ fn side_blocks_offset_or_headed_are_apart_or_said() {
     );
 }
 
-/// Rulings P6-X4 and P6-X5 (review findings I-1 and M-6): the notice block in the body or wholly
+/// The notice block in the body or wholly
 /// in a page band that is no running header or footer, the labels plain at x 40
 /// and the values bold flush right at x 300 or plain at x 160, on shared baselines: each
 /// value is read with its label, before the next label, in every size and font.
@@ -7261,7 +7260,7 @@ fn a_headerless_notice_block_in_the_body_keeps_its_pairs() {
     );
 }
 
-/// Review finding M-1: a sentence of a footer that wraps at one edge reads as one line, and a
+/// A sentence of a footer that wraps at one edge reads as one line, and a
 /// line that starts a new item keeps its line break. The two lines of `lines` at x 40, 8 points
 /// apart, as the footer of both pages of a file of two, in every size and font; the result is
 /// the number of line breaks in their `page-footer` paragraph.
@@ -7325,7 +7324,7 @@ fn a_wrapped_footer_sentence_joins_and_footer_items_keep_their_breaks() {
     );
 }
 
-/// Review carry C-6: the footer of [`FOOTER`] at 7 pt in columns at x 40, 180, 330 and 460 from
+/// The footer of [`FOOTER`] at 7 pt in columns at x 40, 180, 330 and 460 from
 /// the baseline 100 down, 8.4 apart, and the page number `Seite n von N` centred at x 290,
 /// 20 points over the first row (`above`) or 40 points under the last row.
 fn footer_with_page_number(fonts: (&str, &str), n: usize, pages: usize, above: bool) -> String {
@@ -7345,7 +7344,7 @@ fn footer_with_page_number(fonts: (&str, &str), n: usize, pages: usize, above: b
     t + &show(fonts.0, 7.0, 290.0, y, &format!("Seite {n} von {pages}"))
 }
 
-/// Review carry C-6 (fix round 6): a page number centred over or under a running footer of
+/// A page number centred over or under a running footer of
 /// four columns takes no part in finding its columns. Each column is one block in column
 /// order, no block holds lines of two columns, and the page number is a running footer of its
 /// own, in every size and font, on files of two and three pages.
@@ -7857,15 +7856,15 @@ fn recipient_name_over_a_longer_line_is_not_the_title() {
     }
 }
 
-/// Task 15b part 2d fix round 1 (the private invoice): totals under line items, a label at the
+/// Totals under line items, a label at the
 /// left and its amount flush right on each row (net amount, two tax rows whose percent ends the
 /// label, a bold total), between the rule under the items and a rule under a smaller note: the
 /// totals read as one table of their four rows, as at 926b275, and no loss calls them a row of
 /// fields. Sizes 6 to 14, both fonts, the totals 1.5 or 2 rows under the items, the total row
-/// one or 1.5 rows under the tax rows, the labels at three places. Fix round 3 (C1): so do totals
+/// one or 1.5 rows under the tax rows, the labels at three places. So do totals
 /// whose rows are not of one size (the total 1.15 or 1.25 times larger, a bold first row with a
 /// larger total, a first row at 0.85); no loss calls them three styles (the older `UNDER_NONE`
-/// loss that names the note is part 2e's).
+/// loss that names the note is another case).
 #[test]
 fn totals_between_rules_under_line_items_stay_one_table() {
     let totals = [
@@ -7972,9 +7971,9 @@ fn totals_between_rules_under_line_items_stay_one_table() {
     );
 }
 
-/// Task 15b part 2d fix round 1 (ruling on concern 2): a plain line of text after a gap in a
+/// A plain line of text after a gap in a
 /// table without rules, over rows of the first table's own shape (`Kennung | Vorgang | Wert`
-/// over `7001 | Fahrgeld | 45,67`, the part 2c re-review probe), stays a row of the table, and
+/// over `7001 | Fahrgeld | 45,67`), stays a row of the table, and
 /// an Uncertain loss says it may start a table of its own; so does the note row `Hinweis | siehe
 /// Anlage | Seite`. A gap of 1.5 rows inside the table changes nothing. Sizes 6 to 14, both
 /// fonts.
@@ -8054,7 +8053,7 @@ fn a_text_line_over_rows_of_the_tables_shape_is_a_row_and_said() {
     );
 }
 
-/// Task 15b part 2d fix round 3 (the private notice's loss): a notice band between two rules, a
+/// A notice band between two rules, a
 /// bold slogan 1.15 or 1.25 times the size beside a reference or a date, over one long line 1.1
 /// times the size, holds no field: no loss calls it a row of fields. Sizes 8 to 10, both fonts.
 #[test]
@@ -8107,7 +8106,7 @@ fn a_notice_band_between_rules_is_no_row_of_fields() {
     );
 }
 
-/// Task 15b part 2d fix round 5 (R1, the part 2d re-review r4 probe): totals in other common
+/// Totals in other common
 /// shapes between the rule under the items and a rule under a note, or under a rule only: a
 /// percent column in one row or in all, amounts without decimals, a currency column, the label
 /// right of its amount, two plain columns, a euro sign, a minus amount, and net, tax and gross
@@ -8116,12 +8115,12 @@ fn a_notice_band_between_rules_is_no_row_of_fields() {
 /// by the spans of the drawn texts), as at d925e37. Sizes 6 to 14, both fonts. Each row: its
 /// cells (text, x as a share of the width, flush right), bold, size.
 ///
-/// Part 2e-1 (item 5) adds the shapes that read mixed or as a turned table before: a percent
+/// A percent
 /// column in one row only (all rows were one paragraph), a larger total under a rule only (a
 /// table of the labels over the amounts) and the net, tax and gross titles over their amounts
 /// (two mixed lines). The titles over amounts a size step larger are labels over their values:
 /// they may also read as those pairs, each title with its amount. No loss names the note under
-/// the totals as a field (part 2d review M2): the totals are no row of fields.
+/// the totals as a field: the totals are no row of fields.
 #[test]
 fn totals_of_other_shapes_keep_their_rows() {
     let mut wrong = Vec::new();
@@ -8524,7 +8523,7 @@ fn synthetic_invoice_golden() {
                     &["Gesamtbetrag", "1.469,13"],
                 ])
             ),
-            // Task 19 (G11d): the line `Bestellnummer: 00000` is read as its label and value.
+            // The line `Bestellnummer: 00000` is read as its label and value.
             (0, owned(&[&["Bestellnummer:", "00000"]])),
         ]
     );
@@ -8649,8 +8648,8 @@ fn blocks_read_one_after_the_other_keep_their_reason() {
             })
             .collect();
         assert_eq!(holders.len(), 1, "{text}: {holders:#?}");
-        // Task 19: the finder `pdf.lines` is gone; text the reader without rules refused is the
-        // given region of its refusals (the pre-pass of Task 29, 30, 26 and 31).
+        // The finder `pdf.lines` is gone; text the reader without rules refused is the
+        // given region of its refusals (the pre-pass readers).
         assert_eq!(holders[0].signals[0].id, "pdf.borderless.refused");
         assert!(
             holders[0]
@@ -8825,7 +8824,7 @@ fn media_anchors(out: &ReadOutcome, n: u32) -> Vec<String> {
     found
 }
 
-/// The pictures of a page are figure regions, each at its own media block (Task 19b: a media
+/// The pictures of a page are figure regions, each at its own media block (a media
 /// block has an anchor of its own, `p<N>:m<K>` in reading order). Every other region of the
 /// invoice is at a block of its page that holds its text: no region stands at the page alone.
 #[test]
@@ -9047,7 +9046,7 @@ fn summary_with_pair(k: f32, value: PairValue) -> String {
     out
 }
 
-/// Fix round 1b of Task 19 (P1): a label and its value under a table join it as a row only
+/// A label and its value under a table join it as a row only
 /// when the table's own columns hold them, each part flush with the cells of a column. Else
 /// the table ends over the pair, keeps its own rows and columns whole, and the pair stays a
 /// pair of its own, in every size.
@@ -9139,7 +9138,7 @@ fn summary_with_centered_unit(k: f32) -> String {
     out
 }
 
-/// Fix round 5 of Task 19 (M-A): a table of more than two columns ends over a pair under it
+/// A table of more than two columns ends over a pair under it
 /// that its columns do not hold, also when one cell of the table is centered and starts and
 /// ends where no other cell does: the pair stays a pair of its own, in every size.
 #[test]
@@ -9188,7 +9187,7 @@ fn amounts_flush_right_with_pair(k: f32, value_x: f32) -> String {
     out
 }
 
-/// Fix round 2 of Task 19 (P1): amounts of different widths flush right in one column are one
+/// Amounts of different widths flush right in one column are one
 /// column, whatever their left edges: the summary is one table of a label and an amount in
 /// each of its four rows, and the pair under it, whose value starts left of the amounts, does
 /// not stand in the table's columns and stays a pair of its own, in every size.
@@ -9253,7 +9252,7 @@ fn summary_of_mixed_rows() -> String {
     c
 }
 
-/// Fix round 3 of Task 19 (P1): rows of a plain label and a bold amount are one block, though
+/// Rows of a plain label and a bold amount are one block, though
 /// the bold amount is the longer run of the first row and the plain label of the others: the
 /// summary is one table of a label and an amount in four rows, and the pair under it, whose
 /// 8 pt value is smaller than its label, stays out of it.
@@ -9352,7 +9351,7 @@ fn boxed_summary_of_mixed_rows() -> String {
     c + &summary_of_mixed_rows()
 }
 
-/// Fix round 4 of Task 19 (P6-X): the summary in its box reads in the order it is printed:
+/// The summary in its box reads in the order it is printed:
 /// the heading, then the table of the four rows, then the line under them. The heading and
 /// that line, both left by the table's reader, are no one block written before the table, nor
 /// one region. A label with a colon and its code is a pair of its own, a region of its own; a
@@ -9423,7 +9422,7 @@ fn a_boxed_summary_reads_heading_table_then_pair() {
     }
 }
 
-/// Fix round 5 of Task 19 (M-B): a heading with a colon over the table (`Step 2: Pay the
+/// A heading with a colon over the table (`Step 2: Pay the
 /// fee`) does not join the table, and the lone pair rule for what a table's reader leaves
 /// takes only a line under the table: the heading is written before the table, the rows are
 /// one table without it, and the pair under them is a pair. (The heading is typed on its own
@@ -9513,7 +9512,7 @@ fn boxed_summary(unpainted: bool) -> String {
     c
 }
 
-/// Fix round 3 of Task 19 (P1): a box whose sides are each drawn as two segments that meet
+/// A box whose sides are each drawn as two segments that meet
 /// between two rows is one box (the engine joins them), its rows are one table of a label and
 /// an amount, four rows, and the pair under them, whose 8 pt code is smaller than its label
 /// with a colon, stays a pair of its own.
@@ -9640,7 +9639,7 @@ fn print_invoice_text(items: usize) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Task 38b, B2: an item table with one item. The gutter of the page (the white space
+/// An item table with one item. The gutter of the page (the white space
 /// between the descriptions and the counts, from the head down to the totals) parted the
 /// header row and the item row: the left half of each was read with the left blocks of the
 /// page and the right half with the right ones, so the head stood inside the header row and
@@ -9670,7 +9669,7 @@ fn a_one_row_item_table_reads_its_header_and_its_row_whole() {
     }
 }
 
-/// Fix round 1 of Task 38b: the same table with three items, the count and the price of
+/// The same table with three items, the count and the price of
 /// each 2 points lower than its position and description (cells set in the middle of a row
 /// whose description has two lines). Inside the block of rows the cut found a gutter again,
 /// by the baselines of the two sides that do not meet, and the items read as two tables:

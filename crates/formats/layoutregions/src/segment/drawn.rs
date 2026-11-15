@@ -17,15 +17,15 @@ use crate::work;
 
 /// Lines this close are one line, and line ends this close meet, in points.
 ///
-/// Points, not a share of the text size, by a measure of Task 31a: a rule has no text size of
+/// Points, not a share of the text size, by measure: a rule has no text size of
 /// its own, and with 0.2 of the page's median text size (2 points at 10 points) a page at
 /// half or twice its size kept its grids, but pages set in small text lost joins that their
 /// drawing needs (a ruled table whose rules miss each other by more than 1.4 points, rules
-/// drawn dash by dash 2 points apart), and today's readers measure the same lines in points.
+/// drawn dash by dash 2 points apart), and the older readers measure the same lines in points.
 /// The gap between two dashes and the miss of two line ends are measures of the drawing, not
 /// of the text: a snap that follows the scale of a page needs a measure taken from its rules.
 ///
-/// Measured again in Task 31c with the snap handed in from the file's body size (0.2 sizes)
+/// Measured with the snap handed in from the file's body size (0.2 sizes)
 /// and the runs in the order of their places: the half-scale copy of a page kept the grids of
 /// the page, but small-text pages lost the joins of their grids at their own size (a ruled
 /// table of 4 by 7 read as a box of 2 by 1), and nine metamorphic pin counts on four pages
@@ -704,9 +704,9 @@ fn boxes(
 
 #[cfg(test)]
 mod tests {
-    /// Fix round 1 of Task 37, M4: the lines found by the search are the lines a look at
+    /// The lines found by the search are the lines a look at
     /// every line finds (the look the title bars, the strips and the cover of a gap between
-    /// boxes took before Task 37): lines apart, lines that overlap and one long line among
+    /// boxes took in a plain scan): lines apart, lines that overlap and one long line among
     /// short ones, at places near each other, asked for 8,000 stretches.
     #[test]
     fn the_lines_that_reach_a_stretch_are_those_a_look_at_every_line_finds() {

@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! The splitter: a document over the part size is cut into units at its own borders, each
-//! within the limit (plan 5 Task 5, spec 5, decisions 9, 10 and 12).
+//! within the limit.
 
 use std::collections::BTreeMap;
 
@@ -630,7 +630,7 @@ fn asset_rule_counts_import_length() {
 
 #[test]
 fn known_limit_pictures_kept_under_another_note_pass_the_part_size() {
-    // Known limit (task 36a review 3, I-4; on the list of work after 0.1.0). An import keeps
+    // Known limit (on the list of work after 0.1.0). An import keeps
     // pictures that are equal byte for byte once, under the note it took first. A file read
     // twice under two names (two copies of one form, the same form sent each month) then
     // has the picture links of its second note rewritten into the folder of the first
@@ -1050,7 +1050,7 @@ fn a_heading_never_stands_alone() {
     );
 }
 
-/// Ruling P5-AH: a part names every sheet whose Logic it holds.
+/// A part names every sheet whose Logic it holds.
 #[test]
 fn packed_logic_parts_name_every_sheet() {
     let mut d = doc(FormatId::Xlsx);
@@ -1103,7 +1103,7 @@ fn long_formula(sheet: &str, row: usize) -> Formula {
     }
 }
 
-/// Ruling P5-AH: an invented workbook of two sheets. The Logic of the first is cut into
+/// An invented workbook of two sheets. The Logic of the first is cut into
 /// pieces, and the Logic of the second shares the last piece: its title names both.
 #[test]
 fn a_logic_piece_names_every_sheet_it_holds() {
@@ -1459,12 +1459,12 @@ fn a_table_without_layout_is_cut_again_with_its_own_row_numbers() {
 }
 
 // ---------------------------------------------------------------------------------------
-// The main document and the part files (plan 5 Task 6, spec 5 and 7, decisions 10 and 13).
+// The main document and the part files.
 
 use rezzer_model::{FieldAction, FormField, Loss, LossReason, OverviewPart, Severity, Signature};
 use rezzer_render::{Output, PartFile, render_output};
 
-/// Ruling P5-AF: a source chapter named `Contents` keeps its name (Rezzer's own list parts
+/// A source chapter named `Contents` keeps its name (Rezzer's own list parts
 /// are `List of parts`), and its pieces are numbered as one unit.
 #[test]
 fn a_source_contents_chapter_keeps_its_name() {
@@ -1480,7 +1480,7 @@ fn a_source_contents_chapter_keeps_its_name() {
     assert!(all.contains(&"Chapter 1"), "{all:?}");
 }
 
-/// Ruling P5-AF: units that share a title get their location in words.
+/// Units that share a title get their location in words.
 #[test]
 fn chapters_sharing_a_title_get_their_pages() {
     let mut d = doc(FormatId::Pdf);
@@ -1502,7 +1502,7 @@ fn chapters_sharing_a_title_get_their_pages() {
     );
 }
 
-/// Ruling P5-AF: units that share title and location get ` (2)`, not `, part 2`.
+/// Units that share title and location get ` (2)`, not `, part 2`.
 #[test]
 fn units_at_one_place_get_a_number() {
     let mut d = doc(FormatId::Markdown);
@@ -1571,7 +1571,7 @@ fn a_lone_source_outline_chapter_keeps_its_title() {
     }
 }
 
-/// Ruling P5-AF: a source chapter `Overview` gets a word only when the main document writes
+/// A source chapter `Overview` gets a word only when the main document writes
 /// its own `Overview` part.
 #[test]
 fn a_source_overview_chapter_gets_a_word_only_beside_an_overview_part() {
@@ -1607,7 +1607,7 @@ fn a_source_overview_chapter_gets_a_word_only_beside_an_overview_part() {
     assert!(!all.iter().any(|t| t.contains("(section)")), "{all:?}");
 }
 
-/// Ruling P5-AF: a lone source chapter titled like one of Rezzer's trailing parts keeps its
+/// A lone source chapter titled like one of Rezzer's trailing parts keeps its
 /// title when the document has no such part, and gets a word when it has one.
 #[test]
 fn a_source_properties_chapter_gets_a_word_only_beside_a_properties_part() {
@@ -1629,7 +1629,7 @@ fn a_source_properties_chapter_gets_a_word_only_beside_a_properties_part() {
     );
 }
 
-/// Ruling P5-AD with the Markdown reader: a wikilink in the text becomes escaped text, one in
+/// A wikilink in the text becomes escaped text, one in
 /// a code span or a fence stays as it is.
 #[test]
 fn wikilinks_in_code_stay_and_in_text_are_escaped() {
@@ -2560,7 +2560,7 @@ fn relation_lines_parse_like_crystalline() {
         previous = Some(file);
     }
     // List items from the file that look like Crystalline's syntax but that it reads as
-    // text (P5-S): a link to a heading in another part becomes a link to that part's file
+    // text: a link to a heading in another part becomes a link to that part's file
     // after a capitalized word, and a footnote opens an item. They keep the `- ` bullet.
     let out = output(&list_items_doc(), 2_500, "r.md", "r");
     let first = &out.parts[0].markdown;
@@ -3172,7 +3172,7 @@ fn heading_rows_and_footnote_of_a_table_pack_together() {
     let last = rows.last().expect("rows");
     assert!(last.markdown.contains("34 The references cited"));
     assert!(last.markdown.contains("page 5 footer text"));
-    // The ranges cover every row once, in order, and keep their names (ruling P5-AH).
+    // The ranges cover every row once, in order, and keep their names.
     let mut next = 2;
     for u in &rows {
         let range = u
@@ -3214,7 +3214,7 @@ fn heading_rows_and_footnote_of_a_table_pack_together() {
 #[test]
 fn units_of_different_titles_pack_under_both_names() {
     // "Alpha" is cut into pieces; its small last piece and the small "Beta" after it share
-    // one part, named by both (ruling P5-AH) and by the first unit's file name.
+    // one part, named by both and by the first unit's file name.
     let mut d = doc(FormatId::Markdown);
     d.body.push(heading(1, "Top"));
     d.body.push(heading(2, "Alpha"));

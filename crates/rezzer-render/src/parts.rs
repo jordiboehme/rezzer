@@ -15,7 +15,7 @@
 //! 10, then 5 again. As a last resort the other lists are left out and a line says so, and
 //! the title and the description are cut.
 //!
-//! Nothing the main document shortens is in no file (P5-V): when `## Overview` drops rows,
+//! Nothing the main document shortens is in no file: when `## Overview` drops rows,
 //! facts or arrows, cuts a text, or is left out, it links the `overview` part, which holds
 //! the whole overview; when `## Not read` drops losses or cuts a text, it links the
 //! `not-read` part, which holds the whole list. These parts and the `contents` parts are
@@ -230,7 +230,7 @@ impl Writer<'_> {
     }
 
     /// The main document for `shape` and the parts that follow the content's: `overview`
-    /// and `not-read` when the main document shortens them (P5-V), `contents` when the list
+    /// and `not-read` when the main document shortens them, `contents` when the list
     /// of the parts moves there.
     fn layout(
         &self,
@@ -353,7 +353,7 @@ impl Writer<'_> {
                 md.push('\n');
                 md.push_str(&blocks::heading_line(1, &label(&e.title, false)));
                 md.push_str("\n\n");
-                // Every body follows P5-S and P5-X; the relations below stay `- ` bullets.
+                // Every body is guarded as a list item; the relations below stay `- ` bullets.
                 md.push_str(&bullets::guard(&e.markdown));
                 md.push_str("\n\n## Relations\n\n");
                 md.push_str(&part_of);
@@ -570,7 +570,7 @@ impl Writer<'_> {
 
     /// `## Not read` for `shape`, and whether it is shortened: losses past the cap, a text
     /// cut, or the list at the last resort. A shortened list links the `not-read` part, which
-    /// holds it whole (P5-V).
+    /// holds it whole.
     fn not_read_section(&self, shape: Shape) -> Option<(String, bool)> {
         if !self.want(OutputSection::NotRead) {
             return None;

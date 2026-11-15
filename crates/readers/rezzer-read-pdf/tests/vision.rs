@@ -400,7 +400,7 @@ fn damaged_stream_is_partial() {
 
 #[test]
 fn a_broken_content_stream_names_its_page() {
-    // Task 11's carry: a FlateDecode content stream that does not unpack in full (a copy from
+    // A FlateDecode content stream that does not unpack in full (a copy from
     // before the start of the data, after some text).
     let mut d = common::Deflate::zlib();
     d.fixed_block(true);
@@ -1023,7 +1023,7 @@ fn a_soft_mask_many_pictures_share_is_read_once() {
     );
 }
 
-/// Task 19b (carried): a bound of the segmentation that leaves a page's 100,000 pictures in
+/// A bound of the segmentation that leaves a page's 100,000 pictures in
 /// one region with its line of text does not hide them in that region: they are a figure
 /// region of their own, which says the bound left them unparted, and the text keeps its own
 /// region. The read stays complete.
@@ -1062,7 +1062,7 @@ fn pictures_a_bound_leaves_with_text_are_a_figure_region() {
             .any(|r| r.kind == rezzer_model::RegionKind::Paragraph),
         "{regions:#?}"
     );
-    // Fix round 1 (F4): an Info loss names them; the read stays complete.
+    // An Info loss names them; the read stays complete.
     let said: Vec<&rezzer_model::Loss> = out
         .document
         .losses
@@ -2088,7 +2088,7 @@ fn qr_in_invoice_corner_is_decoded_not_logo() {
 #[test]
 fn grey_qr_logo_place_becomes_code() {
     // An 8-bit gray QR code of one pixel a module, no quiet zone, in the bottom right corner:
-    // Task 14d took it for a logo.
+    // an older read took it for a logo.
     let m = modules(Symbology::QrCode, "EPC QR test 4711");
     let (dict, data) = code_picture(&m, 1, 0);
     let side = m.width as f32 * 2.0;
@@ -2577,7 +2577,7 @@ fn dense_vector_codes_are_found() {
 }
 
 // ---------------------------------------------------------------------------------------
-// Fix round 1
+// Codes with damaged modules.
 
 /// `m` with its data modules flipped in a band through the middle (the finders kept): it
 /// keeps the look of a code and no longer decodes.
@@ -2990,7 +2990,7 @@ fn qr_modules_are_not_marks() {
 }
 
 // ---------------------------------------------------------------------------------------
-// Task 15b part 6: codes
+// Codes
 
 #[test]
 fn drawn_codes_of_every_module_and_height_are_listed_once_at_their_bars() {
@@ -4566,7 +4566,7 @@ fn codes_read_along_a_slanted_line_are_checked_along_it() {
     }
 }
 
-/// Task 22: a picture in the left column between two paragraphs goes between them, where the
+/// A picture in the left column between two paragraphs goes between them, where the
 /// region engine reads its figure, even when the run nearest to its top stands in the right
 /// column (the place found by that run would put it after the right column's text).
 #[test]
@@ -4658,7 +4658,7 @@ fn long_paragraph(x: u32, top: u32) -> Vec<(u32, u32, &'static str)> {
         .collect()
 }
 
-/// Task 22 (fix round 1): the reading order of a page is set in one place. A page in two
+/// The reading order of a page is set in one place. A page in two
 /// columns as the untagged text pass reads it (left column, then right): the text keeps that
 /// order, and a picture in the left column between two paragraphs stands between them,
 /// although the run nearest to its top is in the right column (that run's place, which the
@@ -4687,7 +4687,7 @@ fn order_set_in_one_place() {
     );
 }
 
-/// Task 22 (fix round 1, the mirror the review asked for): a picture in the right column whose
+/// A picture in the right column whose
 /// nearest run stands over it in its own column stays in the right column, between its
 /// paragraphs, though the left column has a paragraph that starts below the picture's middle
 /// (by height alone the picture would go before that paragraph, into the left column).
@@ -4720,7 +4720,7 @@ fn a_right_column_picture_stays_in_its_column() {
     );
 }
 
-/// Task 22 fix round 2: a picture at the top of the right column (the left column's text over
+/// A picture at the top of the right column (the left column's text over
 /// it, nothing of its column) stands before the right column's text; the run nearest to its
 /// top is a left-column line at its height, which places it in the left column.
 #[test]
@@ -4747,7 +4747,7 @@ fn a_picture_at_the_top_of_the_right_column_stays_there() {
     );
 }
 
-/// Task 22 fix round 2: a picture at the foot of the right column (its column's text over it,
+/// A picture at the foot of the right column (its column's text over it,
 /// nothing of its column under it) stands after the right column's text, though a left
 /// paragraph starts below its middle; the run nearest to its top is a left-column line.
 #[test]
@@ -4778,7 +4778,7 @@ fn a_picture_at_the_foot_of_the_right_column_stays_there() {
     );
 }
 
-/// Task 22 fix round 2: a short picture (an icon) at the top of the right column, the run
+/// A short picture (an icon) at the top of the right column, the run
 /// nearest to its top the first line under it in its own column: it stands before that line's
 /// paragraph, in its column.
 #[test]
@@ -4836,7 +4836,7 @@ fn page_head_lines() -> Vec<(u32, u32, &'static str)> {
     ]
 }
 
-/// Task 22 fix round 3: a logo at the top left of a page head, under the title and over the
+/// A logo at the top left of a page head, under the title and over the
 /// left address, stands at the head, before the left address and the right address: not
 /// after the whole left column. On this page the segmenter makes one region of all its text
 /// (title, both addresses, the pairs and the paragraphs, across the gutter). That region's
@@ -4857,7 +4857,7 @@ fn a_page_head_logo_stays_at_the_head() {
     assert!(logo < at("Erika Mustermann"), "{got:?}");
 }
 
-/// Task 22 fix round 4: a picture set flush with the top of the right column (its top a few
+/// A picture set flush with the top of the right column (its top a few
 /// points above the top of the left column's first line, which starts at its ascender) stands
 /// before the right column's text, with an 18 point title over the columns and without one,
 /// whether its top is a little under or a little over the left text's top.
@@ -4897,7 +4897,7 @@ fn a_picture_flush_with_the_top_of_the_right_column_stays_there() {
     }
 }
 
-/// Task 22 fix round 3: under a title across both columns, a picture at the top of the right
+/// Under a title across both columns, a picture at the top of the right
 /// column stands before the right column's text, not in the left column at its height.
 #[test]
 fn a_picture_under_a_title_at_the_top_of_the_right_column_stays_there() {
@@ -5008,7 +5008,7 @@ fn a_region_kept_as_laid_out_gets_a_picture_of_its_area() {
 
 #[test]
 fn lines_kept_as_laid_out_in_the_same_columns_are_one_aligned_block_with_one_picture() {
-    // Review 3, I-1: a line of small labels over the line of their values, where the first
+    // A line of small labels over the line of their values, where the first
     // value reaches under two labels, is cut into two regions of one line each. Which value
     // stands under which label is meaning: the run is written as one block aligned in
     // columns and gets one picture of the box around both lines, after its last block.
@@ -5118,7 +5118,7 @@ fn fences(md: &str) -> Vec<Vec<&str>> {
 
 #[test]
 fn a_line_kept_as_laid_out_that_starts_further_right_is_not_moved_under_the_first_column() {
-    // Re-review 3, N1: a line of four small labels and under it a line of two values that
+    // A line of four small labels and under it a line of two values that
     // starts under the third label. Each is a region of its own, and each region counts its
     // columns from its own left edge: written as one aligned block, the first value stood
     // at the left edge, under the first label. Lines with different left edges on the page
@@ -5177,7 +5177,7 @@ fn a_line_kept_as_laid_out_that_starts_further_right_is_not_moved_under_the_firs
 
 #[test]
 fn lines_kept_as_laid_out_far_under_one_another_are_no_aligned_block() {
-    // Re-review 3, N1 (the vertical part): the labels and values of the run above, the values
+    // The labels and values of the run above, the values
     // seven lines further down. Lines that far apart are no rows of one small table: each
     // reads alone, and no picture spans the white space between them. One line pitch lower
     // than two pitches they are a run again.
@@ -5220,7 +5220,7 @@ fn lines_kept_as_laid_out_far_under_one_another_are_no_aligned_block() {
 
 #[test]
 fn time_that_runs_out_on_pages_of_region_pictures_only_keeps_the_read_complete() {
-    // Review 3, I-3: three pages that are rendered only for the picture of a region kept as
+    // Three pages that are rendered only for the picture of a region kept as
     // laid out. The time is counted in readings of the clock, so the test does not depend on
     // the machine: the limit ends one reading earlier each turn, among them the readings
     // before a render and before a crop. A region that gets no file keeps its lines and
@@ -5287,7 +5287,7 @@ fn time_that_runs_out_on_pages_of_region_pictures_only_keeps_the_read_complete()
             !losses.iter().any(|l| l.what.contains("small picture")),
             "{losses:#?}"
         );
-        // Task 37: the regions without a picture file keep their lines.
+        // The regions without a picture file keep their lines.
         let body = common::all_text(&out);
         for word in UNSURE.iter().flatten() {
             assert_eq!(body.matches(word).count(), 3, "{word} in {body}");
@@ -5299,7 +5299,7 @@ fn time_that_runs_out_on_pages_of_region_pictures_only_keeps_the_read_complete()
 
 #[test]
 fn the_region_pictures_of_a_file_of_many_unsure_regions_stay_in_the_time_budget() {
-    // Task 37: 60 pages, each with a region kept as laid out. A file renders pages for at
+    // 60 pages, each with a region kept as laid out. A file renders pages for at
     // most 50 such pictures, so the read ends well inside the default time limit: 50 files,
     // one Info loss for the 10 regions past the cap, the read complete and every line kept.
     let list: Vec<common::Page> = (0..60)
@@ -5341,7 +5341,7 @@ fn the_region_pictures_of_a_file_of_many_unsure_regions_stay_in_the_time_budget(
 
 #[test]
 fn the_pictures_of_the_file_are_written_before_the_pictures_of_regions() {
-    // Review 3, I-3: a region kept as laid out on page 1, a small picture of the file on
+    // A region kept as laid out on page 1, a small picture of the file on
     // page 2. The region's lines are read, so its picture must not take time or room from a
     // picture that holds what the text does not: the file's own pictures are cut first.
     let mut b = Builder::default();

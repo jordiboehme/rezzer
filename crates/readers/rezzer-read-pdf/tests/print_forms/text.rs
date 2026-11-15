@@ -62,8 +62,8 @@ fn fake_bold_line_reads_once() {
 }
 
 /// One data line drawn twice 0.3 points apart (a fake bold) whose copies have their middles
-/// on the two sides of a box's edge is read once, in the box of the first copy (Task 4
-/// carry): the box ends between the middles of the two copies.
+/// on the two sides of a box's edge is read once, in the box of the first copy:
+/// the box ends between the middles of the two copies.
 #[test]
 fn fake_bold_across_a_box_edge_reads_once() {
     let line = "Auszahlung";

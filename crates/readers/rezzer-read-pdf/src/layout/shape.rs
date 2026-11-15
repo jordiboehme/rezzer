@@ -68,7 +68,7 @@ mod tests {
         assert!(!ends_in_amount("Bericht 2025"));
         assert!(!ends_in_amount("Betrag 3,50 TEUR"));
         assert!(!ends_in_amount("1,50 und mehr"));
-        // A number without decimals with its currency (Q6 of Task 31b, Task 26 part 3c-1).
+        // A number without decimals with its currency.
         assert!(ends_in_amount("Gesamt 1.428 EUR"));
         assert!(ends_in_amount("zzgl. USt. 19 % 228 EUR"));
         assert!(ends_in_amount("Total 80 $"));

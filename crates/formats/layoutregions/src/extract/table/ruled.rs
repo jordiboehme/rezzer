@@ -44,7 +44,7 @@ const BREAK_SEGMENT: f32 = 4.0;
 /// before ends (they touch, or overlap by up to a snap): a gap wider than that parts dashes.
 const JOINT: f32 = 0.5;
 
-/// The places where each horizontal rule of a table at the heights `ys` breaks (Task 29, S2):
+/// The places where each horizontal rule of a table at the heights `ys` breaks:
 /// a segment of it (of `segs`, the page's horizontal segments as drawn, not joined) ends where
 /// the next begins (they touch, see [`JOINT`], or overlap by up to a [`SNAP`]), both segments
 /// at least [`BREAK_SEGMENT`] snaps long,
@@ -680,8 +680,8 @@ fn onto_other_cells<R: LineRun>(runs: &[R], within: &[usize], cells: &Squares<'_
         .collect()
 }
 
-/// The runs of `within` (sorted) of each line that reads as a sentence printed over a row (Task
-/// 17 D9, see [`sentence_across`]): the line is alone on its line of the page, in a row that is
+/// The runs of `within` (sorted) of each line that reads as a sentence printed over a row (see
+/// [`sentence_across`]): the line is alone on its line of the page, in a row that is
 /// not open (a note over an open row is one cell across it, see `note_across`), one piece of
 /// text (no gap between its runs over [`PIECE_GAP`] sizes: values in cells stand apart), and
 /// a run of it reaches over a side of its cell, or its runs stand in two cells or more of a

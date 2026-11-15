@@ -1360,7 +1360,7 @@ fn attachments_get_the_extension_their_bytes_confirm() {
         ..request()
     };
     let assets = out.path().join("scan.txt.assets");
-    // The declared type says PNG; only the bytes count (ruling P5-AJ).
+    // The declared type says PNG; only the bytes count.
     let (registry, _) = pictures_of(&["attachment-1"], b"\0\x01 not a picture, named x.png");
     let res =
         Pipeline::new(config(None), registry).run_bytes("scan.txt", b"x".to_vec(), None, &req);
@@ -2438,7 +2438,7 @@ fn all_names(dir: &Path) -> Vec<String> {
 
 #[test]
 fn a_source_writes_into_its_own_folder() {
-    // Ruling P5-AA: the parts and assets folders never take the source's own name.
+    // The parts and assets folders never take the source's own name.
     for name in ["notes.txt", "book.markdown", "README"] {
         let src = tempfile::tempdir().unwrap();
         let file = src.path().join(name);
@@ -2480,7 +2480,7 @@ fn a_source_writes_into_its_own_folder() {
 
 #[test]
 fn a_file_at_a_part_path_that_is_not_ours_fails_the_run() {
-    // Ruling P5-AB: never overwrite a file Rezzer did not write.
+    // Never overwrite a file Rezzer did not write.
     let probe = tempfile::tempdir().unwrap();
     let pipeline = chapters_pipeline(config(None));
     let parts = pipeline
@@ -2539,7 +2539,7 @@ fn a_file_at_a_part_path_that_is_not_ours_fails_the_run() {
 
 #[test]
 fn dot_names_are_not_hidden() {
-    // Ruling P5-Z: Crystalline skips hidden files, so no name starts with a dot.
+    // Crystalline skips hidden files, so no name starts with a dot.
     for name in [".env.md", ".env", "..."] {
         let out = tempfile::tempdir().unwrap();
         let res = chapters_pipeline(config(None)).run_bytes(
@@ -2601,7 +2601,7 @@ fn a_symlinked_parts_folder_is_never_followed() {
 
 #[test]
 fn the_main_document_never_replaces_a_file_rezzer_did_not_write() {
-    // Ruling P5-AG: a hand-written file, a symlink or a folder at the main document's path
+    // A hand-written file, a symlink or a folder at the main document's path
     // stops the run before anything is written, and stays as it is.
     let root = tempfile::tempdir().unwrap();
     let victim = root.path().join("victim");
@@ -2676,7 +2676,7 @@ fn a_rerun_of_the_same_source_replaces_its_files() {
 
 #[test]
 fn output_of_another_source_stops_the_run() {
-    // Ruling P5-AG: `Note.txt` and then `note.txt` with other content into one folder on a
+    // `Note.txt` and then `note.txt` with other content into one folder on a
     // file system that ignores case. The clash is made with a file that has another
     // `resource`, so the test runs on any file system.
     let pipeline = chapters_pipeline(config(None));
@@ -2748,7 +2748,7 @@ fn relative_to_cwd(path: &Path) -> PathBuf {
 
 #[test]
 fn one_file_by_any_path_or_a_copy_is_the_same_source() {
-    // Ruling P5-AG refined: the same canonical path or the same content is the same source.
+    // The same canonical path or the same content is the same source.
     let root = tempfile::tempdir().unwrap();
     // The form Rezzer writes: canonical, without the Windows verbatim prefix.
     let real = rezzer_pipeline::strip_verbatim(std::fs::canonicalize(root.path()).unwrap());
@@ -2976,7 +2976,7 @@ fn a_write_error_keeps_the_old_pictures() {
 
 #[test]
 fn the_assets_cleanup_keeps_files_a_user_put_there() {
-    // Rulings P5-AC and P5-AK: only names Rezzer gives pictures and attachments are removed.
+    // Only names Rezzer gives pictures and attachments are removed.
     let out = tempfile::tempdir().unwrap();
     let assets = out.path().join("scan.txt.assets");
     std::fs::create_dir_all(&assets).unwrap();
@@ -3066,7 +3066,7 @@ fn a_failed_read_keeps_the_old_pictures() {
 
 #[test]
 fn a_failed_check_creates_no_folder() {
-    // A run that cannot use its output folder makes none (ruling P5-AB): here the folder is
+    // A run that cannot use its output folder makes none: here the folder is
     // missing and its parent is a file of the user's, so it is not taken for a missing folder.
     let root = tempfile::tempdir().unwrap();
     let user_file = root.path().join("notes");

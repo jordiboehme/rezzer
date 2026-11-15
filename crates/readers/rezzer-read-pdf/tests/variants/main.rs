@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Variants of every print form shape of plan 6 (ruling P6-Y: Rezzer reads similar forms as
+//! Variants of every print form shape (Rezzer reads similar forms as
 //! well as the one sample). Each shape is drawn along the axes of [`axes`]: the page scale, the
 //! text sizes, the data font (monospaced or proportional), the label font, the look of the
 //! rules, the turn of the page, a neighbour over, under or beside it, and one or two pages.
@@ -152,7 +152,7 @@ fn pinned_breaks_are_held_exactly() {
         unexpected_in("t", &read("k", vec![b(Inv::ClearPairs)]), &known).len(),
         1
     );
-    // The region invariants of Task 20 are pinned the same way, with the task that owns the
+    // The region invariants are pinned the same way, with the work that owns the
     // fix: a pinned kind break holds, the same variant without it or with a forced type more
     // is reported.
     let classes = [Known {
@@ -175,7 +175,7 @@ fn pinned_breaks_are_held_exactly() {
 }
 
 /// A text the shape marks unclear that stands in a table or a label and value region breaks
-/// `NoForcedType`, a break of ruling P6-X; in a paragraph or a block kept as laid out it holds.
+/// `NoForcedType`, a break of a wrong value or order; in a paragraph or a block kept as laid out it holds.
 #[test]
 fn forced_type_is_wrong() {
     let region = |kind: &'static str, texts: &[&str]| inv::Seen {
@@ -207,7 +207,7 @@ fn forced_type_is_wrong() {
 }
 
 /// Every pinned entry names a shape that exists, its variants, what they break and a reason;
-/// a break of ruling P6-X says so in its reason, and no variant is pinned twice.
+/// a break of a wrong value or order says so in its reason, and no variant is pinned twice.
 #[test]
 fn every_pinned_entry_names_a_shape_and_a_reason() {
     let names: Vec<&str> = all_shapes().iter().map(|s| s.name).collect();
@@ -725,7 +725,7 @@ shape_tests! {
     printed_qr_cut => "a printed QR code cut in half by the edge of the page",
 }
 
-/// Task 15b part 2d fix round 3 (M1): the cell check counts the texts it leaves out, and a list
+/// The cell check counts the texts it leaves out, and a list
 /// of cells whose every text is left out (drawn twice, or inside another text) is caught, so the
 /// check never passes empty; a glued value is still found.
 #[test]
@@ -1236,7 +1236,7 @@ fn a_heading_written_as_a_paragraph_is_a_paragraph_region() {
     assert!(demoted > 0, "{name}: no heading was written as a paragraph");
 }
 
-/// Task 36a fix round 3 (re-review 2, M1): a page title under a small kicker line, beside a
+/// A page title under a small kicker line, beside a
 /// label over a form number on the same two baselines, is the title block of the engine in
 /// every variant, with as many words as the kicker has, with fewer, with more and with a
 /// year: it is the largest text of the top of the page, and no count of its words keeps it
@@ -1266,7 +1266,7 @@ fn a_page_title_under_a_kicker_is_the_title_block() {
     }
 }
 
-/// Task 29 fix round 1 (review Important 6): the figure region of a picture written in a table
+/// The figure region of a picture written in a table
 /// cell stands at its table: its host is the table's block, which has an anchor of its own.
 #[test]
 fn a_cell_picture_stands_at_its_table() {

@@ -294,7 +294,7 @@ pub fn kinds_of(
 
 /// Panics unless `bytes` has a region holding a run with `text`, each such region is of the
 /// kind of text kept as it stands (`Spatial` when kept as laid out, `Paragraph` when its
-/// reader of today kept it as paragraphs; since Task 19 fix round 1a a region says the kind
+/// pre-pass reader kept it as paragraphs; a region now says the kind
 /// its runs were written as), and each says `why` among its `unsure` notes (the reason its
 /// readers kept its text as it stands).
 pub fn assert_kept_with_reason(bytes: &[u8], text: &str, why: &str) {

@@ -46,7 +46,7 @@ use crate::work;
 /// (as the cut's wide rule).
 const WIDE_RULE: f32 = 2.0 / 3.0;
 
-/// A column gutter is at least this many body ems wide (P6-Y): the cut's gutter, so a gutter
+/// A column gutter is at least this many body ems wide: the cut's gutter, so a gutter
 /// the cut reads between the lines of two columns parts their regions too (a column gap of
 /// one em, which the ends of the lines of a justified column narrow a little).
 const GUTTER: f32 = crate::segment::cut::GUTTER;
@@ -1053,7 +1053,7 @@ impl Cx<'_> {
             reach = reach.max(b);
         }
         // Only the widest gap is tried, as in the cut: a gap after it, where the widest one
-        // fails, cuts blocks apart that read together (ruling P6-X3).
+        // fails, cuts blocks apart that read together.
         let (g0, g1) = gaps
             .into_iter()
             .reduce(|best, g| if g.1 - g.0 > best.1 - best.0 { g } else { best })?;
@@ -1534,7 +1534,7 @@ impl Cx<'_> {
 mod tests {
     use super::*;
 
-    /// Whether a drawn box, or four rules, frame `b`, as it was asked before Task 37: every
+    /// Whether a drawn box, or four rules, frame `b`, as it was asked by a plain scan: every
     /// box and every rule near an edge looked at.
     fn frame_one_by_one(
         boxes: &[Bounds],
@@ -1563,7 +1563,7 @@ mod tests {
                 && spans(upright, b.x1, b.y0, b.y1))
     }
 
-    /// Task 37: the frame of a region found by a search among the boxes and rules at its
+    /// The frame of a region found by a search among the boxes and rules at its
     /// edges is the frame every box and rule gives: on pages of boxes and rules on a grid
     /// of 10 points, some a little off it (within the reach of a frame, at it and past it),
     /// asked for boxes on the same grid.
@@ -1704,7 +1704,7 @@ mod tests {
             .collect()
     }
 
-    /// Fix round 1 of part 2b-2 of Task 31c (M1): a box from -1e20 to 1 reaches into the
+    /// A box from -1e20 to 1 reaches into the
     /// width from 0.5 to 0.9. Its width in `f64` is 1e20, which loses the 1, and its left
     /// edge plus that width is 0: with the width as it was the search left the box out. The
     /// width one step up keeps it.

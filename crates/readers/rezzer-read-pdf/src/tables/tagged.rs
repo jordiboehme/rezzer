@@ -43,7 +43,7 @@ type Cuts = Vec<(usize, Vec<f32>)>;
 
 /// A gap between the ink of two columns in one tagged cell is wider than this many text sizes.
 ///
-/// Measured margins (fix round 2, G3): the narrowest column gap of the masked private item
+/// Measured margins: the narrowest column gap of the masked private item
 /// table is 2.73 points between two bold header titles of about 9 points, 0.30 sizes (0.33
 /// against the size the gap is measured with in `column_cuts`, the run's own). A word space is
 /// about 0.25 to 0.28 sizes (Helvetica 0.278). So the margin is small on both sides, which is

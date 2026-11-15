@@ -10,7 +10,7 @@
 //! item, a list item joins the one before it, and line breaks look at the lines around a
 //! block. [`next_block`] is one step of that walk; the reader keeps the loop (and its stop
 //! check) and builds the blocks' text from its own runs. The typers of text regions
-//! read the walk of a segment's lines; Task 19 decides whether the extractors split it.
+//! read the walk of a segment's lines.
 //!
 //! Every function works on the lines of the reader's own runs (see [`LineRun`]), borrowed,
 //! and returns line indexes into the slice it is given.
@@ -448,7 +448,7 @@ pub const NAME_ADDRESS_LINES: usize = 8;
 ///   over a company, its street and its town). A name over a second name line or a care-of
 ///   line keeps its heading by the same cue: the two cannot be told apart, and the heading
 ///   is the read without this rule. A label over an address without a name line reads as
-///   its first line (by ruling: the geometry cannot tell it from a name; no value and no
+///   its first line (by design: the geometry cannot tell it from a name; no value and no
 ///   order moves).
 pub fn name_over_address<R: LineRun>(
     lines: &[TextLine<'_, R>],
@@ -631,8 +631,8 @@ fn line_breaks<R: LineRun>(
 /// set solid stands one size apart; tight headings stand a little closer (see `LEAST_PITCH`
 /// in the cut, 0.8 sizes), so a tight block can fall under this step. That costs only a
 /// line break between its lines, never a moved or lost value, while a lower step would miss
-/// the close rows of a form whose next label line stands 0.81 sizes under a value (review R3
-/// of Task 31b). A share of the text size: it holds at every scale of the page.
+/// the close rows of a form whose next label line stands 0.81 sizes under a value.
+/// A share of the text size: it holds at every scale of the page.
 const LINE_STEP: f32 = 1.0;
 
 /// Whether a line with the ink edges `cur`, `step` under a line with the ink edges `prev`
@@ -640,7 +640,7 @@ const LINE_STEP: f32 = 1.0;
 /// more before the ink of the line over it starts, and stands less than [`LINE_STEP`] sizes
 /// under it. Text that wraps goes on a line lower; two lines closer than that which share
 /// no stretch of the width are lines of two columns whose baselines do not meet, read one
-/// after the other (review R3 of Task 31b: the value at the right end of a row of boxes of a
+/// after the other (the value at the right end of a row of boxes of a
 /// form, and a little lower, far left, the next line of the label of the first box). Such a
 /// line starts after a line break: it is no text of the line before it. A line under the
 /// line over it, however close, is a line of its block.
@@ -728,7 +728,7 @@ fn first_word<R: LineRun>(line: &TextLine<'_, R>) -> f32 {
 
 /// For each line of `lines` but the last (with the ends `edges` of their ink), whether it may
 /// go on in the next line as wrapped text: the positive evidence that a line was broken where
-/// it is only because its measure was full (Task 15b part 2e-2, ruling P6-X: a line of its own
+/// it is only because its measure was full (a line of its own
 /// read as wrapped text mixes two fields). A line that ends in a hyphen or a comma, or whose
 /// next line starts with a small letter or holds punctuation alone, goes on. Otherwise no line goes on when
 /// - the lines each end with an exclamation or a question mark: sentences of their own (a
@@ -884,7 +884,7 @@ fn field_line<'a, R: LineRun>(l: &TextLine<'a, R>) -> Option<[&'a R; 2]> {
 }
 
 /// Whether two runs are set in one face: weight, slant and family, and sizes less than
-/// [`LABEL_STEP`] apart (relative to the size, ruling P6-Y).
+/// [`LABEL_STEP`] apart (relative to the size).
 fn same_face<R: LineRun>(a: &R, b: &R) -> bool {
     let (lo, hi) = (a.size().min(b.size()), a.size().max(b.size()));
     (a.bold(), a.italic(), a.font()) == (b.bold(), b.italic(), b.font())

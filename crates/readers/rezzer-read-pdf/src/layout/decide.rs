@@ -80,7 +80,7 @@ pub(super) struct Decided {
     /// The segmentation stopped before it searched the drawn lines: nothing was typed, every
     /// leaf is spatial.
     pub untyped: bool,
-    /// For each decision, the part of today's reading it is given for (see `today`), if any,
+    /// For each decision, the part of the pre-pass reading it is given for (see `today`), if any,
     /// and whether that part is text where it stands (a refusal) rather than a table or title.
     pub pre: Vec<Option<(usize, bool)>>,
     /// The unsure decisions laid out together with a neighbour ([`join_rows`]): the unsure
@@ -164,7 +164,7 @@ impl Decided {
     /// The kind of the decision of the run `id`, if a decision holds it.
     pub(super) fn kind_of_run(&self, id: u32) -> Option<Kind> {
         match self.of_run.get(id as usize) {
-            // Text a reader of today refused is laid out as today: the walk decides.
+            // Text a pre-pass reader refused is laid out as before: the walk decides.
             Some(&k) if k != NONE && matches!(self.pre[k as usize], Some((_, true))) => None,
             Some(&k) if k != NONE => Some(self.decisions[k as usize].kind),
             _ => None,
@@ -172,8 +172,8 @@ impl Decided {
     }
 
     /// The decision of the run `id`, when the engine itself decided it as text (a paragraph,
-    /// a list, a heading or a title block): the region the run is placed with (Task 31c).
-    /// Text a reader of today gave or refused has none: it is laid out as today.
+    /// a list, a heading or a title block): the region the run is placed with.
+    /// Text a pre-pass reader gave or refused has none: it is laid out as before.
     pub(super) fn text_region_of_run(&self, id: u32) -> Option<u32> {
         let k = *self.of_run.get(id as usize)?;
         (k != NONE
@@ -185,7 +185,7 @@ impl Decided {
         .then_some(k)
     }
 
-    /// The given region of today's reading that holds the run `id`: the number of its table.
+    /// The given region of the pre-pass reading that holds the run `id`: the number of its table.
     pub(super) fn given_of_run(&self, id: u32) -> Option<u32> {
         let k = *self.of_run.get(id as usize)?;
         let (table, _) = (*self.pre.get(k as usize)?)?;
@@ -200,13 +200,13 @@ impl Decided {
     }
 }
 
-/// The given regions of today's reading (see [`decide`]): the table of each of its runs, and
+/// The given regions of the pre-pass reading (see [`decide`]): the table of each of its runs, and
 /// the signal of each table with whether it is text a reader refused.
 pub(super) type Pre<'a> = (&'a HashMap<u32, usize>, &'a dyn Fn(usize) -> (Signal, bool));
 
 /// Segments, types and arbitrates `page` (with its given regions) with the facts of its file.
 /// A segmentation stopped before it searched the drawn lines types nothing: every leaf of it is
-/// spatial. A given region of today's reading (`pre`: the table of each of its runs, and the
+/// spatial. A given region of the pre-pass reading (`pre`: the table of each of its runs, and the
 /// signal of each table; see `today`) is decided by its reader: certainty `Rule`, the reader's
 /// signal. Text a reader refused is `Unsure` with the refusal as its signal.
 ///
@@ -283,7 +283,7 @@ fn decide_in_order(
         None => (segs, BTreeMap::new()),
     };
     let mut decisions = layoutregions::arbitrate(&segs, &typed, &margins);
-    // A given region of today's reading is decided by its reader: certainty `Rule`, with the
+    // A given region of the pre-pass reading is decided by its reader: certainty `Rule`, with the
     // reader's signal. Its first run names its table (the first given region that lists a run
     // holds it).
     let mut pre_of = vec![None; decisions.len()];
@@ -377,7 +377,7 @@ const CUT_SHORT: &str = "pdf.limit.unparted";
 /// in full, so no reading of it is sure. A decision whose text runs all stand in such a
 /// segment becomes `Spatial` (certainty `Unsure`, its kind an alternative); one that holds some
 /// of them gives those runs to a `Spatial` decision of their own (`own`). Decisions the file
-/// or today's reading give (`pre`) are kept. Gives, for each decision, whether it is such a
+/// or the pre-pass reading give (`pre`) are kept. Gives, for each decision, whether it is such a
 /// spatial one, and whether it holds other runs than its segment's (such a spatial one, or one
 /// that gave runs away), which no neighbour is laid out with ([`join_rows`]).
 fn cut_short(
@@ -556,7 +556,7 @@ const JOIN_WORK: usize = 4_000_000;
 /// ([`layoutregions::extract::spatial::interleaves`]): read one after the other, a line would
 /// come after lines it stands below. Gives each pair (the unsure decision, the neighbour, how
 /// they stand); once the page is written the neighbour is folded into
-/// the unsure one ([`agree`]). Decisions given by the file or by today's reading (`pre`) are
+/// the unsure one ([`agree`]). Decisions given by the file or by the pre-pass reading (`pre`) are
 /// neither. Each decision is laid out with at most one other, and one that took others is
 /// laid with none.
 fn join_rows(
@@ -800,12 +800,12 @@ pub(super) type Done<'a> = (
 /// - runs of a heading decision that the walk wrote as a paragraph for their geometry
 ///   (`demoted`, by run id) are a paragraph decision with that reason (the heading its
 ///   alternative): the whole decision when all its runs are, else a decision of its own;
-/// - the runs of the page's footnote legend (`legend`, taken by today's reader from the
+/// - the runs of the page's footnote legend (`legend`, taken by the pre-pass reader from the
 ///   page's whole flow) are one footnote legend decision: an engine legend decision that holds
 ///   only legend runs takes the others, else a decision of its own; the regions they came
 ///   from are named in its signal, and a region left with no primitive is gone;
-/// - a table of today's reading reaches over the drawn box it was read by (`drawn`, by the
-///   part of today's reading), past the box of its runs;
+/// - a table of the pre-pass reading reaches over the drawn box it was read by (`drawn`, by the
+///   part of the pre-pass reading), past the box of its runs;
 /// - each line a table's reader left that the line pair rule read as a pair (`pairs`, its
 ///   runs) is a pairs decision of its own, its decision's kind an alternative;
 /// - last, every decision's kind is the kind of the blocks its runs were written in
@@ -1607,8 +1607,8 @@ pub(super) fn regions(
 mod tests {
     use super::*;
 
-    /// Fix round 1 of Task 37, M4: the regions an unsure region is weighed against hold
-    /// every region the two tests accept with it (`join_rows` before Task 37 weighed it
+    /// The regions an unsure region is weighed against hold
+    /// every region the two tests accept with it (`join_rows` once weighed it
     /// against every region of the page). 60 seeded pages of regions of one to three lines,
     /// some sharing their lines side by side, some with lines between each other's lines in
     /// one column; every pair is asked both ways.
@@ -1724,7 +1724,7 @@ mod tests {
             unsure_why(&[typed(Kind::Paragraph, 250)], &m),
             "no region type has clear evidence for it"
         );
-        // Fix round 1b of Task 19 (M10): the best kind reaches the least score, the second
+        // The best kind reaches the least score, the second
         // does not, and the lead is under the margin, so arbitration left it spatial.
         assert_eq!(
             unsure_why(&[typed(Kind::Table, 350), typed(Kind::Paragraph, 250)], &m),
@@ -1756,7 +1756,7 @@ mod tests {
         }
     }
 
-    /// A decision: its kind, its runs and its part of today's reading.
+    /// A decision: its kind, its runs and its part of the pre-pass reading.
     type Read = (Kind, Vec<u32>, Option<(usize, bool)>);
 
     /// A page handed in with its runs in another order is decided as the page in the order
@@ -1769,7 +1769,7 @@ mod tests {
         // a table drawn with rules, three rows of three cells. The drawn table is the part
         // whose read moves with the order of the runs when they are read as handed in:
         // without `RunOrder` in `decide` the reversed order leaves a rule out of the table,
-        // a region of its own kept as laid out (review M2 of part 2b-1 of Task 31c).
+        // a region of its own kept as laid out.
         let mut texts = vec![run("Notes on the garden wall", 60.0, 740.0, 16.0, 0)];
         for k in 0..4u32 {
             let y = 700.0 - 12.0 * k as f32;
@@ -1841,7 +1841,7 @@ mod tests {
             let file = [layoutregions::file::FilePage::of(&placed)];
             let facts = layoutregions::file::learn(&file, false, &|_| false);
             let index = FileIndex::new(&facts);
-            // The part of today's reading: the table, named by the ids of the page handed in.
+            // The part of the pre-pass reading: the table, named by the ids of the page handed in.
             let pre: HashMap<u32, usize> = (0..n)
                 .filter(|&i| (9..13).contains(&order[i as usize]))
                 .map(|i| (i, 7))
@@ -1857,7 +1857,7 @@ mod tests {
                 &|| false,
             );
             // Each decision as its kind, the runs it holds (by the ids of the page in the
-            // order of its places) and its part of today's reading.
+            // order of its places) and its part of the pre-pass reading.
             let mut out: Vec<Read> = Vec::new();
             for k in 0..d.decisions.len() {
                 let mut runs: Vec<u32> = d
@@ -1981,7 +1981,7 @@ mod tests {
 
     /// A page out of the order of its places with a footnote legend gets its own legend
     /// renamed, and no other page's: the work of a file of such pages grows with its pages,
-    /// not with their square (review L2 of part 2b-1 of Task 31c: every such page copied the
+    /// not with their square (every such page copied the
     /// legends of the whole file). The renaming counts its steps (`RunOrder::legend`).
     #[test]
     fn pages_out_of_place_order_with_a_legend_each_take_work_in_line_with_the_pages() {

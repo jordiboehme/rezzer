@@ -1074,7 +1074,7 @@ fn random_sheets_detect_every_cell_once() {
     }
 }
 
-// Fix round 1.
+// Tall title merges.
 
 #[test]
 fn tall_title_merge_leaves_the_header() {
@@ -1101,8 +1101,8 @@ fn tall_title_merge_leaves_the_header() {
         assert_eq!(header(r), [3], "styled {styled}");
         assert_eq!(r.header_paths, ["Region", "Q1", "Q2", "Q3"]);
         assert_eq!(r.data, Some(rect("A4:D5")));
-        // Row 2 holds only the caption's own merge: it belongs to the caption line (ruling
-        // P4-AQ), so the body starts at the header row.
+        // Row 2 holds only the caption's own merge: it belongs to the caption line,
+        // so the body starts at the header row.
         assert_eq!(r.body, Some(rect("A3:D5")));
     }
     // Print titles on row 3 set the band.
@@ -1413,7 +1413,7 @@ fn surviving_mutants_of_the_review() {
     assert!(rule_detail(&r, "H2").contains("win"), "{:?}", r.evidence);
 }
 
-// Fix round 2.
+// Merges anchored outside a fact.
 
 #[test]
 fn merge_anchored_outside_a_fact_keeps_its_header() {
@@ -1491,7 +1491,7 @@ fn stopped_pivot_keeps_every_cell_once() {
     assert_eq!(r.data, Some(rect("A1:C3")));
 }
 
-// Fix round 2: what stops a caption line that a merge carries down (ruling P4-AQ).
+// What stops a caption line that a merge carries down.
 
 /// The region that holds A1.
 fn region_at_a1(layout: &Layout) -> &Region {
@@ -1571,7 +1571,7 @@ fn header_rule_details_name_their_rows_in_fixed_words() {
     );
 }
 
-// Final review fixes.
+// Cases found late.
 
 #[test]
 fn pivot_grand_total_column_is_marked() {

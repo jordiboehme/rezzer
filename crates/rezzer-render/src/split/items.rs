@@ -82,7 +82,7 @@ pub(super) struct Item<'a> {
     /// Rows of a table: the title of the unit that holds the table. Its lead and tail pieces
     /// carry that title, so a part that packs them with the rows is named by the rows.
     pub(super) table: Option<String>,
-    /// The units it holds when packed in the final pass, by title (ruling P5-AH); empty for
+    /// The units it holds when packed in the final pass, by title; empty for
     /// one unit.
     pub(super) held: Vec<String>,
 }
@@ -269,7 +269,7 @@ pub(super) fn merge<'a>(group: &[Item<'a>]) -> Item<'a> {
     {
         item.title = first.title.clone();
     } else {
-        // Every packed item by name (ruling P5-AH).
+        // Every packed item by name.
         let titles: Vec<String> = group.iter().map(|g| g.title.clone()).collect();
         item.title = capped(&listed(&titles), TITLE_CAP);
     }

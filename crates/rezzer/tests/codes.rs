@@ -295,7 +295,7 @@ fn a_code_scan_cut_by_its_time_is_not_cached() {
     //
     // READS was measured once (2026-10-27): listing the 30 pages takes 426 readings, their
     // text 59, and starting the scan 1, so the scan stops at reading 486 and nothing after it
-    // reads the clock. Measure again when the PDF reader changes (plan 6).
+    // reads the clock. Measure again when the PDF reader changes.
     use rezzer_model::{Completeness, LossReason, Registry, Severity};
     use rezzer_pipeline::{Clock, Config, OutputKind, Pipeline, Request};
     use std::time::{Duration, Instant};

@@ -191,7 +191,7 @@ fn a_two_line_title_is_one_caption() {
     assert_no_loss(&out);
 }
 
-/// Guard: a bold line right over a grid that is not cut stays a paragraph (ruling P6-Q is
+/// Guard: a bold line right over a grid that is not cut stays a paragraph (this is
 /// for cut grids only).
 #[test]
 fn a_line_over_a_grid_that_is_not_cut_stays_a_paragraph() {
@@ -268,7 +268,7 @@ pub(crate) fn section_with_totals(rules: &[f32], sides: bool) -> FormPage {
 
 /// A column drawn with horizontal rules only whose rules line up with a section's rules
 /// joins the section: its title heads one more column and its amount stands in the row; a
-/// total label in it pairs with the amount under it (ruling P6-O). One note says so.
+/// total label in it pairs with the amount under it. One note says so.
 #[test]
 fn a_column_of_totals_joins_its_section() {
     let page = section_with_totals(&[700.0, 660.0, 630.0], false);
@@ -379,7 +379,7 @@ fn a_strip_beside_a_single_box_joins_it() {
     let out = read(&print_form(&[page], "", ""));
     // The band of the box and the strip (two titles) heads no table of its own, and the
     // lines under it are no table across it: they stay text as they read before the
-    // segmentation (Task 9 fix round 1). Whether they are a table of the band is for typing.
+    // segmentation. Whether they are a table of the band is for typing.
     assert_eq!(read_tables(&out), Vec::<Vec<Vec<String>>>::new());
     let text = all_text(&out);
     for t in ["Text", "Betrag", "Gehalt", "1.111,11", "Zulage", "22,22"] {

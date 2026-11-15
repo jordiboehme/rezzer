@@ -878,7 +878,7 @@ mod tests {
         assert!(!interleaves(&turned, &cut, &reasons), "off its axis");
     }
 
-    /// Fix round 1b of Task 19 (M7): two regions whose lines stand between each other's lines
+    /// Two regions whose lines stand between each other's lines
     /// are one column cut apart only when their ink overlaps across most of the narrower one;
     /// an edge of one under the edge of the other is two columns side by side.
     #[test]

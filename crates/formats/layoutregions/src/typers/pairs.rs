@@ -39,7 +39,7 @@ pub const LABEL_FIELDS: u16 = 450;
 /// the most a paragraph reading of their text reaches (750) by the margin.
 pub const LABEL_FIELD_CELLS: u16 = 900;
 /// `label_value.key_values` and `label_value.labels_over_values`: the lines are a block of
-/// labels and values, or two lines of titles over their values (today's first readings). Such
+/// labels and values, or two lines of titles over their values (the first readings of the pdf reader). Such
 /// lines stand in two pieces or more, so a heading's reading of them is demoted as cells (at
 /// most 650), and a list's reading reaches 750 at most.
 pub const LABEL_KEY_VALUES: u16 = 900;
@@ -126,7 +126,7 @@ fn pairs_evidenced(runs: &[&TextRun], rows: &[crate::extract::pairs::blocks::Key
 
 /// `label_value.strip_fields`: the lines stand in strips between drawn rules that span them,
 /// and each strip reads as fields, a label (the smaller text) over, beside or under its value
-/// (today's rule of fields between rules, [`strip_cells`], one copy). It leads the most a
+/// (the current rule of fields between rules, [`strip_cells`], one copy). It leads the most a
 /// table reading (800), a paragraph reading (750) and a heading that keeps its lines (850)
 /// by the margin.
 pub const LABEL_STRIP_FIELDS: u16 = 1000;
@@ -562,7 +562,7 @@ const STACK_EDGE: f32 = 1.5;
 /// needs is looked for where it must stand and is not there. Everything else (a run in the
 /// stack's columns that may be a value over it or a label under it, a rule or a box beyond
 /// which the edge row may stand) leaves the direction not clear, and the strip rule reads no
-/// fields: the stack is spatial until the engine reads stacks (today's reader of labels under
+/// fields: the stack is spatial until the engine reads stacks (the older reader of labels under
 /// their values runs before, as a given region; its move into the engine comes after 0.1.0).
 fn stack_reads_down(
     view: &PageView<'_>,
@@ -685,8 +685,8 @@ struct FrameFields {
 }
 
 /// The runs `own` of a strip between rules from `x0` to `x1`, parted by its drawn `dividers`
-/// (see [`crate::extract::pairs::strips::dividers_of`]), read as fields (today's rule of
-/// fields between rules, one copy): the runs are cut at field edges first, as today's reader
+/// (see [`crate::extract::pairs::strips::dividers_of`]), read as fields (the older rule of
+/// fields between rules, one copy): the runs are cut at field edges first, as the older reader
 /// cuts them (see [`field_cuts`]), on this reading's own copies of the pieces.
 fn read_frame(own: &[&TextRun], x0: f32, x1: f32, dividers: &[f32], how: Reading<'_>) -> FrameRead {
     let frame = FieldFrame { x0, x1, dividers };
@@ -1988,7 +1988,7 @@ mod tests {
         frames
     }
 
-    /// Fix round 3 (N10): the sweep finds the frames a scan over every higher piece finds, on
+    /// The sweep finds the frames a scan over every higher piece finds, on
     /// rules of many lengths and places, in columns and across them (pieces at one height
     /// apart, as merged drawn lines are).
     #[test]
@@ -2026,7 +2026,7 @@ mod tests {
         }
     }
 
-    /// Boy scout N11 (Task 18b re-review 3): a chain of rules each 1.5 points under the one
+    /// A chain of rules each 1.5 points under the one
     /// above (within `SNAP` of the next, not of the top) is one level from its top: the piece
     /// past the top's reach opens the next level, with a frame thinner than `SNAP` over it,
     /// and the rule far below frames up to it.
@@ -2044,7 +2044,7 @@ mod tests {
         );
     }
 
-    /// Fix round 3 (N10): pieces in two columns, none over another, cost the sweep about one
+    /// Pieces in two columns, none over another, cost the sweep about one
     /// step each, not one for every higher piece.
     #[test]
     fn rules_in_two_columns_are_swept_in_linear_work() {
@@ -2067,7 +2067,7 @@ mod tests {
         }
     }
 
-    /// Task 26 fix round 6 (M1): the dividers of a strip are looked for among the lines that
+    /// The dividers of a strip are looked for among the lines that
     /// stand at its rules, not among every line between its ends. Many strips over many
     /// short lines at other heights cost about a step for each strip and each line, and the
     /// lines found hold every divider a scan of all lines finds.
@@ -2119,7 +2119,7 @@ mod tests {
         assert!(double < 3 * work, "{double} steps after {work}");
     }
 
-    /// Task 26 fix round 6 (M1): the search for dividers takes the bound of the reader's
+    /// The search for dividers takes the bound of the reader's
     /// search for fields between rules. Lines that stand at the rules of many strips cost a
     /// step for each strip they stand in; past `STRIP_WORK` steps the search gives up.
     #[test]
@@ -2151,7 +2151,7 @@ mod tests {
         assert_eq!(work, STRIP_WORK + 1);
     }
 
-    /// Task 26 fix round 6 (M3): a strip inside a grid is left to the table typer, as the
+    /// A strip inside a grid is left to the table typer, as the
     /// reader leaves it: a row of a table of rates between its row rules, with its column
     /// rules, is no row of fields (its small values would read as the labels of empty
     /// fields). The same row between two rules of its own, with dividers that hang from the
@@ -2247,7 +2247,7 @@ mod tests {
         assert!(clear(&under), "{under:?}");
     }
 
-    /// Task 26 fix round 6 (M1): a page whose strips were read without their dividers says so
+    /// A page whose strips were read without their dividers says so
     /// in its issues, as a limit; another page says nothing.
     #[test]
     fn strips_read_without_their_dividers_are_an_issue_of_the_page() {
@@ -2342,7 +2342,7 @@ mod tests {
         assert_eq!(touching.len(), segs.all.len());
     }
 
-    /// Task 26 fix round 1 (M1): the row over a line is found by its place, not by the
+    /// The row over a line is found by its place, not by the
     /// order of the reader's lines. The values `Oakfield Bank   30.10.2026` come first in
     /// the reader's order and each small label over them is a line of its own after them:
     /// the values still stand under a row of smaller text. A row with an amount over them, a
@@ -2402,7 +2402,7 @@ mod tests {
         let mut amount = labels;
         amount[2].0 = "120.00";
         assert!(!under(&amount));
-        // So is a whole number with its currency in letters (Q6 of Task 31b); the number
+        // So is a whole number with its currency in letters; the number
         // alone may be a label (a year), and a word that ends like a currency is none.
         amount[2].0 = "120 EUR";
         assert!(!under(&amount));
@@ -2443,7 +2443,7 @@ mod tests {
         }
     }
 
-    /// Task 26 fix round 6 (I1): a strip whose value line ends with a value of one character
+    /// A strip whose value line ends with a value of one character
     /// right after a drawn divider reads that character as the value of its own field, not
     /// glued to the value before it: the strip is clear, three fields with a value and the
     /// last one empty.
@@ -2495,7 +2495,7 @@ mod tests {
         }
     }
 
-    /// Task 26 fix rounds 7, 7b and 7c (N1, I1): the gap between the digit groups of a number
+    /// The gap between the digit groups of a number
     /// is no field edge, and a drawn divider in it (or within its reach of it) or inside the
     /// number is no evidence of one number either: the strip reads as fields that are not
     /// clear, neither cut at the gap nor with the number in one field. So does `123 456`
@@ -2575,7 +2575,7 @@ mod tests {
         }
     }
 
-    /// Task 26 fix round 7c (M1): a number led by a sign (`-`, `+`, U+2212), an opening
+    /// A number led by a sign (`-`, `+`, U+2212), an opening
     /// bracket, a currency sign or a currency code, with a drawn divider in its digit group
     /// gap, reads as fields that are not clear: the sign and the first group are not the
     /// value of the field before the divider. The other way: letters before the first digit
@@ -2646,7 +2646,7 @@ mod tests {
         }
     }
 
-    /// Task 26 fix round 7c (I1): a field edge taken from the start of a label (no drawn
+    /// A field edge taken from the start of a label (no drawn
     /// divider) that falls in the digit group gap of a number, or inside the number, leaves
     /// the strip not clear as a drawn divider does: the digits say one number and the labels
     /// say two fields. The number is never read whole into one field with the other empty.
@@ -2722,7 +2722,7 @@ mod tests {
         }
     }
 
-    /// Fix round 1b (I3): the line pair rule says where a line parts: in a run after the colon
+    /// The line pair rule says where a line parts: in a run after the colon
     /// that ends its label, after a run that ends with it, or between two pieces of a lone line,
     /// a blank run between them on the side of the widest gap; a line it refuses parts nowhere.
     #[test]
@@ -2763,7 +2763,7 @@ mod tests {
             on_line("3,50", 400.0),
         ];
         assert_eq!(line_pair_cut(&row, true), None);
-        // Fix round 2: after a label that ends with a colon, a lone line's value may be any
+        // After a label that ends with a colon, a lone line's value may be any
         // short text that is no sentence; without the colon it needs a shape of its own.
         let coded = [
             on_line("Member Code:", 40.0),
@@ -2773,13 +2773,13 @@ mod tests {
             line_pair_cut(&coded, true),
             Some(PairCut { run: 1, byte: 0 })
         );
-        // Task 26 part 3a (H2): the colon says so among other lines too. The line parts at
+        // The colon says so among other lines too. The line parts at
         // the gap after the colon, as a line of one piece parts after it.
         assert_eq!(
             line_pair_cut(&coded, false),
             Some(PairCut { run: 1, byte: 0 })
         );
-        // Task 26 part 3c-1: a colon that opens the second piece as a word of its own is the
+        // A colon that opens the second piece as a word of its own is the
         // colon of the label (a listing in a fixed-width face pads its labels up to a
         // column of colons). The line parts after the colon, alone and among other lines,
         // whatever short text the value is.
@@ -2800,7 +2800,7 @@ mod tests {
                 );
             }
         }
-        // Fix round 4 (review 4 M4): the colon of a padded label is no word of it. A label
+        // The colon of a padded label is no word of it. A label
         // of four words (`PAIR_LABEL_WORDS`) pairs as it does in one run, one of five does
         // not, in one run or in two.
         for (label, pairs) in [
@@ -2843,7 +2843,7 @@ mod tests {
             let line = [on_line(label, 40.0), on_line(value, 300.0)];
             assert_eq!(line_pair_cut(&line, false), None, "{label}{value}");
         }
-        // Task 26 fix round 2 (I1): a first piece that holds a label, its colon and a value
+        // A first piece that holds a label, its colon and a value
         // is a pair of its own, and the piece after the gap is another cell. It never joins
         // the value, whatever it reads as: a number (`Ref: AB/CD` is not `20481/55012` too),
         // words, or a word and a number. The line stays a line, alone or among other lines.
@@ -2877,7 +2877,7 @@ mod tests {
         assert_eq!(line_pair_cut(&bare, true), None);
         let labels = [on_line("Bill To:", 40.0), on_line("Ship To:", 200.0)];
         assert_eq!(line_pair_cut(&labels, true), None);
-        // Fix round 3: a value a size step smaller than its label is a mark beside a name,
+        // A value a size step smaller than its label is a mark beside a name,
         // unless the label ends with a colon, which says the value follows.
         let small = |label: &str| {
             let mut value = on_line("104857312", 200.0);
@@ -2891,7 +2891,7 @@ mod tests {
         assert_eq!(line_pair_cut(&small("Member Code"), true), None);
     }
 
-    /// Task 26 part 2 (N1 of the re-review): a row cut inside a run carries the evidence of
+    /// A row cut inside a run carries the evidence of
     /// its cut. Its label range holds the whole cut run, so read by its ranges the label
     /// `Customer reference: 20481` ends with no colon and the run after it (`north`) has no
     /// shape: the block was refused. The same ranges without the cut are still refused.

@@ -823,7 +823,7 @@ fn stray_cell_beside_a_tall_region_follows_reading_order() {
     assert_eq!(cells_of(&m), expected_cells(&s));
 }
 
-/// Ruling P4-AQ: positions under a merged area cost no cells; a vertical merge shows one
+/// Positions under a merged area cost no cells; a vertical merge shows one
 /// cell with spans and the rows below it show only their other columns.
 #[test]
 fn cells_left_counts_shown_positions_only() {
@@ -880,7 +880,7 @@ fn merge_anchored_above_the_table_is_clipped() {
 
 #[test]
 fn section_piece_heading_sits_below_its_section_heading() {
-    // Task 8 review m5: an R1 section heading (level 4) is followed by the heading of the
+    // An R1 section heading (level 4) is followed by the heading of the
     // region piece under it; that heading is one level deeper, never shallower.
     let s = Sheet::new().styled().rows(
         "A1",

@@ -10,7 +10,7 @@ impl<'a> Splitter<'a> {
     /// Names the units, renders them with their links and adds the trailing sections.
     pub(super) fn write(&self, specs: Vec<Spec<'a>>) -> Vec<Unit> {
         let mut names = Names::new();
-        // Every piece the plan expects is named up front, in document order (P5-T): the
+        // Every piece the plan expects is named up front, in document order: the
         // anchors lead to a unit's first piece, and the pieces of one unit are numbered in
         // order. A piece more than planned gets the next free name when it is written; a
         // piece fewer leaves its name unused.
@@ -217,7 +217,7 @@ impl<'a> Splitter<'a> {
             } else {
                 logic_part(&piece)
             };
-            // A piece names every `###` part it holds (ruling P5-AH): the one it starts in,
+            // A piece names every `###` part it holds: the one it starts in,
             // then each one that begins in it.
             let here = |start: &str| {
                 let mut held = vec![start.to_string()];
@@ -292,7 +292,7 @@ fn begun_logic_parts(piece: &str) -> Vec<String> {
         .collect()
 }
 
-/// Names held by one part, as its title shows them (ruling P5-AH): repeats next to each
+/// Names held by one part, as its title shows them: repeats next to each
 /// other once, then `A`, `A and B`, `A, B and C`, or the first three and `and <n> more`.
 pub(super) fn listed(names: &[String]) -> String {
     let mut held: Vec<&str> = Vec::new();

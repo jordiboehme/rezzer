@@ -114,7 +114,7 @@ fn boxed_amount_gets_its_decimal_comma() {
     assert_eq!(out.completeness, Completeness::Complete);
 }
 
-/// Fix round 1 of Task 37, M1: a page written as plain lines (the time ends before its
+/// A page written as plain lines (the time ends before its
 /// layout) holds the separators read from drawn marks, so it says which they are in the
 /// same note at its top, and the note's element is charged once.
 #[test]

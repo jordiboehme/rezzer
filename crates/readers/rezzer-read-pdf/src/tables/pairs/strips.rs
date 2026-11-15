@@ -1351,8 +1351,8 @@ fn ends(
         // With the runs other groups hold (`open`), evidence in part at both ends that runs
         // joined to the group by its rules (`neighbour`) make at each end is not clear: a grid
         // parted by double rules with fields left empty at its inner ends, or a grid whose
-        // ends lie in the cells of ruled tables that share its top and bottom rule (rulings
-        // P6-Z3, P6-Z4). Evidence in part from other text (a loose line, column titles under
+        // ends lie in the cells of ruled tables that share its top and bottom rule.
+        // Evidence in part from other text (a loose line, column titles under
         // a rule of their own) keeps labels over values.
         Way::Over
             if open.is_some()
@@ -1392,8 +1392,8 @@ fn ends(
 mod tests {
     use super::*;
 
-    /// Fix round 1 of Task 37, M4: the rule under a top found height by height is the rule
-    /// the walk back over every rule met (`frames` before Task 37): on 40 seeded pages of
+    /// The rule under a top found height by height is the rule
+    /// the walk back over every rule met (`frames` once): on 40 seeded pages of
     /// rules on a few heights, joined as the page's lines are, for every rule as the top.
     #[test]
     fn the_rule_under_a_top_is_the_one_the_walk_back_meets() {

@@ -392,7 +392,7 @@ fn output_dir_writes_main_and_parts() {
 
 #[test]
 fn output_dir_can_be_the_source_folder() {
-    // The parts and pictures folders never take the source's own name (ruling P5-AA).
+    // The parts and pictures folders never take the source's own name.
     let env = Env::new();
     let book = env.file("book.markdown", long_markdown().as_bytes());
     for _ in 0..2 {

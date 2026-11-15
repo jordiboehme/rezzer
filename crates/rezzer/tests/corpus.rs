@@ -775,7 +775,7 @@ fn without_label_and_path(list: &Value) -> Value {
     list
 }
 
-/// For every corpus workbook the parameters equal the baseline of Task 1 in anchor, name,
+/// For every corpus workbook the parameters equal the first baseline in anchor, name,
 /// value, unit, unit source and read count, in the same order: only `label` and `path`
 /// may differ (spec 8.7, D2). A label is the path joined with " / ".
 #[test]
@@ -2055,7 +2055,7 @@ fn sf1199a_back_page_reads_as_prose() {
     );
 }
 
-/// Ruling P6-X3: on the sample check of the form, the city of issue and the titles of the date
+/// On the sample check of the form, the city of issue and the titles of the date
 /// fields are two blocks: no paragraph holds both.
 #[test]
 fn sf1199a_check_city_stays_apart_from_the_date_titles() {

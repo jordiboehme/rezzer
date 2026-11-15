@@ -1104,7 +1104,7 @@ fn ods_merges_are_read() {
         );
     }
 
-    // Large merges: each merged text is a title over its merge (ruling P4-AQ): no table rows,
+    // Large merges: each merged text is a title over its merge: no table rows,
     // no unsure or limit loss, the heading anchored at the merge's top-left cell.
     let out = corpus("merged.ods");
     let doc = &out.document;
@@ -1273,7 +1273,7 @@ fn ods_looks_mark_the_header() {
 
 /// A tall merged title (A1 over A1:Z10000) and a table of 6 rows starting `gap` empty rows
 /// below it: every row of the table is shown, nothing is cut at the cell cap, and the
-/// covered positions cost no cells and no elements (ruling P4-AQ).
+/// covered positions cost no cells and no elements.
 fn assert_tall_title(doc: &Document, sheet: &str, table_top: u32, near: bool) {
     let q = sheet;
     let held = held(doc, sheet);

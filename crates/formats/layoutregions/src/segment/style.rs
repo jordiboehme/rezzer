@@ -231,7 +231,7 @@ mod tests {
         (0..n as u32).collect()
     }
 
-    /// Task 26 part 3a (H2): lines of a small label that ends with a colon and its larger
+    /// Lines of a small label that ends with a colon and its larger
     /// value a cell gap after it are one group, whichever of the two cells holds more
     /// characters (`Sheet: 03.04.2026` over `Pages: 4`: by its longest run the first line is
     /// set in the size of the values and the second in the size of the labels). Without the
@@ -278,7 +278,7 @@ mod tests {
             style_steps(&texts, &ids(texts.len())).len()
         };
         assert_eq!((values(10.7), values(10.9)), (1, 2));
-        // Task 26 fix round 2 (I1) and 3 (N2): against a line set in one size the rows are
+        // Against a line set in one size the rows are
         // also set in the size of their labels (8). A line in the size of the values (10)
         // over them is a group of its own, whichever cell of the row under it is the
         // longer. The rule only adds steps: a line in the size of the labels joins rows set
@@ -328,7 +328,7 @@ mod tests {
         assert_eq!((under(9.3, short).len(), over(9.3, short)), (2, 2));
     }
 
-    /// Task 26 fix round 3 (N2): a caption in the size of the labels, without a colon, over
+    /// A caption in the size of the labels, without a colon, over
     /// rows of a small colon label and a larger value. Where the values are the longer runs
     /// the caption is a group of its own and the rows stay rows of pairs; so is a note in
     /// that size after them. Where the labels are the longer runs the rows are set in the
@@ -383,7 +383,7 @@ mod tests {
         assert_eq!(style_steps(&texts, &ids(2)), vec![vec![0], vec![1]]);
     }
 
-    /// Fix round 3 of Task 19: rows of a plain label and a bold amount apart by a cell gap are
+    /// Rows of a plain label and a bold amount apart by a cell gap are
     /// one group, whichever of the two is the longer run of a row; a plain line over them still
     /// steps, and so do lines whose bold words stand inline in their text.
     #[test]
@@ -507,7 +507,7 @@ mod tests {
         }
     }
 
-    /// Task 36a part 1: a bold name over the smaller lines of its address is not parted
+    /// A bold name over the smaller lines of its address is not parted
     /// from them (see `name_over_address`); a heading that stands farther over them, a name
     /// under other lines of its group, and a title over lines that are no address are.
     #[test]
@@ -542,7 +542,7 @@ mod tests {
         fields[2].text = "Annex 3".into();
         assert_eq!(groups(&fields).len(), 2);
         // A bold line over a complete address that has its own name line is a heading over
-        // it (fix round 1, review I2): the step stays.
+        // it: the step stays.
         let mut headed = page("Delivery address", 10.4);
         headed[1].text = "Sample Trading".into();
         headed[2].text = "Mill Lane 4".into();

@@ -3,34 +3,34 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! The variants that break an invariant today, pinned: each entry names its shape, its
-//! variants, exactly the invariants they break, the cause and the part of Task 15b that is to
+//! variants, exactly the invariants they break, the cause and the part of the work that is to
 //! fix it. A pinned variant that starts to hold, or breaks another invariant, fails the test,
-//! so an entry is taken out with its fix. Breaks of ruling P6-X (a wrong pair, a value lost or
+//! so an entry is taken out with its fix. Breaks of a wrong value or order (a wrong pair, a value lost or
 //! doubled, a wrong title, date or code) are pinned here too, but only until their part:
 //! they are listed apart in the report, and none of them is accepted.
 
 use crate::inv::Inv;
 
-/// The cause of a pinned break, and the part of Task 15b that is to fix it.
+/// The cause of a pinned break, and the part of the work that is to fix it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Cause {
-    /// An absolute threshold (part 2).
+    /// An absolute threshold.
     Threshold,
-    /// Form evidence and weight-only boxes (part 3).
+    /// Form evidence and weight-only boxes.
     FormEvidence,
-    /// Band order at drawn rules (part 4).
+    /// Band order at drawn rules.
     BandOrder,
-    /// A carry of task-15b-carry.md (part 6).
+    /// A case carried over from an earlier set of variants.
     Carry,
     /// A right read the engine keeps as laid out, or keeps so at one scale and not at another
-    /// (Task 19 brief step 4, cosmetic): every text stands once and in order; Task 36 wins it
+    /// (cosmetic): every text stands once and in order; a later typer is to win it
     /// back.
     Spatial,
-    /// A class of break whose general fix a later task owns, named here (Task 20): the
-    /// region kinds of a generated page, held since Task 20, that the task of step 5 named
-    /// (for example `"Task 31c"`) is to bring right. `"after 0.1.0"` names the breaks that
-    /// are kept past the release, each with its traced cause in its reason (Task 31c: the
-    /// breaks the generator found that no part of plan 6 had in its scope).
+    /// A class of break whose general fix a later piece of work owns, named by the label
+    /// in the string: the region kinds of a generated page that the named work is to bring
+    /// right. `"after 0.1.0"` names the breaks that are kept past the release, each with its
+    /// traced cause in its reason (the breaks the generator found that no planned work had in
+    /// its scope).
     Class(&'static str),
 }
 

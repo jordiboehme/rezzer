@@ -175,7 +175,7 @@ pub(super) fn borderless(
             }
             // Without a blank row, a line in other columns than the region's that has the shape
             // of the header of a table of its own parts the region too, when the lines over it
-            // read as a table of their own (Task 29: a table right under another, at a little
+            // read as a table of their own (a table right under another, at a little
             // more than the rows' step): its columns are not the region's, so the two never
             // read as one block of columns. A rule between them is
             // judged by the rule that ends a table (see [`ended`]): the lines under it may be
@@ -874,7 +874,7 @@ const PICTURE_GAP: f32 = 1.5;
 /// step from its line before last to its last line, up to white space under [`PICTURE_GAP`]
 /// sizes: a row of the region is as tall as its picture (an item table with a picture in each
 /// row), so the step from one row's last line to the next row's first is no blank between two
-/// blocks (Task 29, B1).
+/// blocks.
 fn pictured(flow: &Flow, region: &[FlowLine], pictures: &[[f32; 4]]) -> bool {
     let [.., prev, cur] = region else {
         return false;
@@ -1384,7 +1384,7 @@ fn joined_tail(
         if close && within && same_face && cut {
             return (1, false, false);
         }
-        // The rows over it end the same way (Task 29, B2 and C: an item's name over a detail
+        // The rows over it end the same way (an item's name over a detail
         // line of its own size): a line of one piece in the same column, at the same start, in
         // the same face and size, at the same step under a line of two pieces or more. The last
         // row's line like theirs is its own too, whatever its face beside the column's, unless
@@ -1997,7 +1997,7 @@ mod tests {
         }
     }
 
-    /// Fix round 2 of Task 38b (review I1): two lists side by side under one shared rule, the
+    /// Two lists side by side under one shared rule, the
     /// left one two lines longer. A rule across the gutter says nothing against a list that
     /// ends later than the one beside it: the lists stay two, and no table mixes them. The
     /// rule is drawn in one piece, in two pieces that meet in the gutter, and twice over in
@@ -2071,7 +2071,7 @@ mod tests {
         }
     }
 
-    /// Fix round 2 of Task 38b (review M2): the side-by-side lists of
+    /// The side-by-side lists of
     /// `side_by_side_blocks_are_refused` (the right one 4 points lower) with half a rule
     /// between their first two lines, drawn twice (a fill and a stroke). The two copies cover
     /// the left half of the gutter once, not the gutter: the lists stay two. With the other
@@ -2139,13 +2139,13 @@ mod tests {
         ]));
     }
 
-    /// Task 36a fix round 1 (review I1): a table without rules whose columns start at one
+    /// A table without rules whose columns start at one
     /// pitch, with lowercase descriptions that fill their column and a last row that wraps,
     /// is not read block by block: its rows are rows, and each item keeps its description
     /// and its third cell.
     #[test]
     fn rows_of_a_table_with_a_wrapped_last_row_are_not_read_block_by_block() {
-        // Fix round 2 (re-review N1): the same with the last cell of the word column left
+        // The same with the last cell of the word column left
         // empty (the other columns end on different rows), and with the last description
         // wrapped over two lines then.
         for (third, more) in [

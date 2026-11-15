@@ -167,7 +167,7 @@ fn assert_every_run_once(p: &PageIn, read: &Read) {
 /// with about ten in a hundred more allowed (see the test).
 const ENGINE_BOUND: u64 = 69_000_000;
 
-/// Task 37: the page of Task 8 (50,000 runs in 200 nested boxes) through the whole engine,
+/// The page of 50,000 runs in 200 nested boxes through the whole engine,
 /// not the segmentation alone. The depth bound leaves the boxes past it whole with a `Limit`
 /// issue, every run stands in one decision, and the work of all steps together is pinned.
 #[test]

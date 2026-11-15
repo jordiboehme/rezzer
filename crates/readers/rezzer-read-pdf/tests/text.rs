@@ -1702,7 +1702,7 @@ fn line_on_two_of_three_pages_is_not_furniture() {
     let out = read(&pdf(&pages, ""));
     for n in 1..=2u32 {
         let roles = roles_of(&out, n);
-        // Task 19a-5b: the lone line may be kept as laid out (no region type has clear
+        // The lone line may be kept as laid out (no region type has clear
         // evidence for one short line); it is body text there too, never furniture.
         let laid_out = page(&out, n).iter().any(|b| match b {
             Block::Spatial { lines, .. } => lines
@@ -1747,7 +1747,7 @@ fn page_number_under_few_lines_is_furniture() {
     }
 }
 
-/// Task 31c: the same page with the page number written with a word, as a count of the
+/// The same page with the page number written with a word, as a count of the
 /// pages, or both (`Page 2`, `2 / 3`, `Page 2 of 3`): a running line of the file below all
 /// other text, far under the few lines it shares its leaf with, and in the shape of a page
 /// number. It is cut off and is a footer, as the bare number is. A line of that place and
@@ -1808,7 +1808,7 @@ fn foot_roles(
     (1..=pages).map(|n| roles_of(&out, n)).collect()
 }
 
-/// Fix round 1 of part 2b-2 of Task 31c (I2): a line at the foot of every page with a word
+/// A line at the foot of every page with a word
 /// and a number is a value, not a page number, when its number does not follow the pages. A
 /// total of each page (`Total 120`, `Total 140`, `Total 160`), the same total on every page
 /// and an amount on both pages of a file of two (`Amount due: 120`) are running lines by
@@ -1872,8 +1872,8 @@ fn a_page_number_that_follows_the_pages_from_an_offset_is_furniture() {
     }
 }
 
-/// A known limit, pinned so that a change of the evidence is seen (fix round 2 of part 2b-2
-/// of Task 31c, R3; owner after 0.1.0): a value at the foot of every page that goes up by
+/// A known limit, pinned so that a change of the evidence is seen
+/// (owner after 0.1.0): a value at the foot of every page that goes up by
 /// exactly one from page to page (`Total 121`, `Total 122`, `Total 123`) has all the
 /// evidence of a page number that starts at an offset, and gets the role of a page footer.
 /// Its text is kept. Nothing on the pages tells the two apart.
@@ -2059,7 +2059,7 @@ const TAGGED_FOOTER: [&[&str]; 3] = [
     &["Chair of the supervisory board", "Morgan Example"],
 ];
 
-/// Task 36a part 1b (class D on the tagged path): `pages` tagged pages, each a title and
+/// `pages` tagged pages, each a title and
 /// three body paragraphs across the page (in 10 points times `k`) over a footer of three columns without rules
 /// at 7 points times `k`, the columns at an even pitch from x 85, the lines 1.2 sizes apart
 /// from the baseline 64.85. The pitch is the width of the second line of names less a fifth
@@ -2129,7 +2129,7 @@ fn block_texts(out: &ReadOutcome) -> Vec<String> {
     texts
 }
 
-/// Task 36a part 1b (class D on the tagged path): the tags of a footer of three columns give
+/// The tags of a footer of three columns give
 /// one paragraph per line, row by row across the columns. Where the page shows the columns
 /// (starts shared by the title line and later lines at an even pitch) the paragraphs are
 /// placed column by column, each column top to bottom: a line of one column between the
@@ -2168,7 +2168,7 @@ fn tagged_paragraphs_of_columns_read_column_by_column() {
     }
 }
 
-/// The other way (Task 36a part 1b): an ordinary tagged page keeps the order of its tags.
+/// The other way: an ordinary tagged page keeps the order of its tags.
 /// Paragraphs across the full width, and rows of three short paragraphs side by side at an
 /// even pitch with no paragraph wrapped in a column (rows of a list of parts, tagged as
 /// paragraphs): nothing shows that the rows are one text, so they read row by row.
@@ -2199,7 +2199,7 @@ fn tagged_paragraphs_keep_the_order_of_their_tags() {
     assert_eq!(read, given);
 }
 
-/// Task 36a fix round 3 (re-review 2, I2, on the tagged path): the rows of a table without
+/// The rows of a table without
 /// rules, tagged one paragraph per cell line, whose last item has a second line of its name
 /// beside the wrapped end of its description, while only the first item has a source. The
 /// lines show all that blocks side by side with a wrapped paragraph show, so they are read
@@ -2302,7 +2302,7 @@ fn bounds_of_a_turned_page_lie_in_its_box() {
             .iter()
             .filter(|n| n.page == page)
             .collect();
-        // Task 19: the engine may decide both lines one region (a finder of today gave one
+        // The engine may decide both lines one region (a pre-pass finder gave one
         // region a line); each region lies in the box all the same.
         assert!(!notes.is_empty(), "page {page}: {notes:#?}");
         for n in notes {
@@ -2331,8 +2331,8 @@ fn bounds_of_a_turned_page_lie_in_its_box() {
     ];
     for page in [1, 2] {
         for want in &lines {
-            // Task 19: the engine may decide both lines one region; then that region holds
-            // the box of each line (a finder of today gave each line its own). The engine's
+            // The engine may decide both lines one region; then that region holds
+            // the box of each line (a pre-pass finder gave each line its own). The engine's
             // box of a run reaches from its baseline up by its size (no part below the
             // baseline), so a region it bounds by its runs holds each line from the baseline up.
             let run_box = [want[0], want[1], want[2] - 10.0 / 3.0, want[3]];

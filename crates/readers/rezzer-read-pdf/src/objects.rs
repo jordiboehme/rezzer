@@ -370,7 +370,7 @@ fn outline(pdf: &Pdf, pages: &[PageInfo], kept: &Kept<'_>, out: &mut Out) {
             })
             .collect();
         // The item, its paragraph and its inlines, and the entry. The entry's title is a
-        // copy of the paragraph's text and shares its charge (P5-L), so the outline keeps as
+        // copy of the paragraph's text and shares its charge, so the outline keeps as
         // many items as the section alone would.
         if let Err(why) = kept.take(3 + inlines.len() as u64, &texts) {
             cut = Some((k + 1, why));

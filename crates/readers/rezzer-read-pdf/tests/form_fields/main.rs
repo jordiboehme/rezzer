@@ -125,8 +125,8 @@ fn prose_page_keeps_its_paragraphs(figure: &str) {
             _ => None,
         })
         .collect();
-    // Task 19a-5b: with the frame on the page the engine may keep the prose as laid out (no
-    // region type has clear evidence for it; a right read turned Spatial, Task 36): then its
+    // With the frame on the page the engine may keep the prose as laid out (no
+    // region type has clear evidence for it; a right read turned Spatial): then its
     // lines stand in order, each once, and no table or pair is read from them.
     let laid_out: Vec<String> = blocks(&out)
         .iter()
@@ -312,7 +312,7 @@ fn region_ids_name_their_runs_on_a_reordered_page() {
         ]]
     );
     // The text around the strip: the fields the ruled pass refused and the lines under them,
-    // each a paragraph region of its own (Task 19: by their typers, no longer `pdf.lines`).
+    // each a paragraph region of its own (by their typers, no longer `pdf.lines`).
     let paragraphs: Vec<Vec<&str>> = page
         .regions
         .regions
@@ -368,7 +368,7 @@ fn a_marked_label_pairs_as_its_text_with_its_reference() {
 
 /// Labels printed under the rule their value stands on (a signature line) pair with the
 /// value over the same rule, never with the value of the next row, which stands under them
-/// between the same two rules (ruling P6-X).
+/// between the same two rules.
 #[test]
 fn labels_under_their_values_pair_across_the_rule() {
     for dividers in [true, false] {
@@ -709,7 +709,7 @@ fn grids_with_an_empty_last_row_or_one_field_a_row_never_pair_shifted() {
 }
 
 /// Labels under the rule their values stand on, one field a row, the first value empty and
-/// nothing over the top rule (the reviewer's probe E): the last label under the bottom rule is
+/// nothing over the top rule: the last label under the bottom rule is
 /// one complete end, which a column of labels over values with a column title under it has as
 /// well. Neither reading is clear: no field pairs (never a label with the value of the row
 /// under it), and a loss names them all.
@@ -736,7 +736,7 @@ fn a_column_of_labels_under_values_with_an_empty_first_value_gives_a_loss() {
 }
 
 /// Labels under the rule their values stand on, two fields a row, every row full, one value
-/// of two lines (the reviewer's probe P1): both ends are complete, but the strip of the
+/// of two lines: both ends are complete, but the strip of the
 /// two-line value is no line of labels over one line of values, which is how labels under
 /// values are paired. So no field pairs (never a label with the value of the row under it),
 /// and a loss names them all.
@@ -763,7 +763,7 @@ fn labels_under_values_with_a_value_of_two_lines_give_a_loss() {
 
 /// Labels under the rule their values stand on, every row full, under a section rule one row
 /// pitch over the top rule with a bold title in the frame it makes over the first row's values
-/// (the reviewer's probe P2), with and without a rule one pitch under the last labels. The
+/// with and without a rule one pitch under the last labels. The
 /// title makes that frame a row refused with a loss; its values are still the top end. With
 /// the rule under the last labels (an own bottom) one end is complete: no field pairs and a
 /// loss names them all. Without it both ends are complete: the fields pair labels under values.
@@ -803,7 +803,7 @@ fn labels_under_values_under_a_titled_section_rule_never_pair_shifted() {
 
 /// Labels under the rule their values stand on, every row full, with a second rule 3 or 4
 /// points under the second rule (a double rule, farther apart than one rule drawn in pieces)
-/// and with or without a rule one pitch under the last labels (the reviewer's probe P3). The
+/// and with or without a rule one pitch under the last labels. The
 /// double rule parts the grid into two groups; the values over the lower group's top rule are
 /// held by the upper group. Neither group may pair shifted: each gives a loss that names its
 /// fields.
@@ -834,7 +834,7 @@ fn labels_under_values_split_by_a_double_rule_give_a_loss() {
 
 /// Labels under the rule their values stand on, every row full, under a section rule one row
 /// pitch over the top rule, with upright lines boxing that frame into two cells whose divider
-/// is not in line with the grid's (the reviewer's probe P5), with and without a rule one pitch
+/// is not in line with the grid's, with and without a rule one pitch
 /// under the last labels. The box holds the first row's values, and the grid's first row is a
 /// row of fields under the box's lowest rule. With the rule under the last labels (an own
 /// bottom) one end is complete: no field pairs and a loss names them all. Without it both ends
@@ -868,7 +868,7 @@ fn labels_under_values_under_a_boxed_section_never_pair_shifted() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// The reviewer's probe P4: as [`labels_under_values_under_a_boxed_section_never_pair_shifted`],
+/// As [`labels_under_values_under_a_boxed_section_never_pair_shifted`],
 /// with the box's divider in line with the grid's, so that the box and the grid's first row
 /// make one grid of drawn rules, its cells holding the first row's values over its labels.
 /// The box's grid ends at its lowest rule: the grid's first row is a row of fields under it,
@@ -907,7 +907,7 @@ fn labels_under_values_under_a_box_in_line_with_their_divider_never_pair_shifted
 /// Labels under the rule their values stand on, four rows of two fields, parted into three
 /// groups by two double rules (a second rule 3 points under the second and the third rule),
 /// the middle group holding a value of two lines (`Hinterhof` over `12345`), with some values
-/// empty (the reviewer's probe P7). The middle group's ends are partial and held by the
+/// empty. The middle group's ends are partial and held by the
 /// groups beside it: it is not clear, and no group pairs shifted. Every value stands once,
 /// and each field with a value pairs right or a loss names it.
 #[test]
@@ -964,7 +964,7 @@ fn labels_under_values_in_three_groups_with_a_value_of_two_lines_never_pair_shif
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// The reviewer's probe P7 without its value of two lines: labels under the rule their values
+/// Labels under the rule their values
 /// stand on, four rows of two fields, parted into three groups by two double rules, with
 /// some values empty. The middle group's ends lie in the groups beside it: with `Hausnr` and
 /// `Land` empty both are partial, which with the runs those groups hold is not clear. No
@@ -1029,7 +1029,7 @@ enum EndIn {
     Caption,
 }
 
-/// The reviewer's probe for the ruled `tabled` exclusion: labels under the rule their values
+/// Labels under the rule their values
 /// stand on, every row full, the second row's first value of two lines (`Hinterhof` over
 /// `Musterweg 1`), its ends in boxes of drawn rules (their divider in line with the grid's, or
 /// not), in ruled tables of two rows, one end free, or the last labels right over a ruled grid
@@ -1422,10 +1422,10 @@ fn an_empty_row_over_a_table_made_by_a_rising_divider_is_no_row_of_it() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// The reviewer's probe R1: labels under values, no value of two lines, both ends in ruled
+/// Labels under values, no value of two lines, both ends in ruled
 /// tables, the first row's or the last row's second value empty. The evidence at both ends lies
 /// in the cells of tables whose rules are the grid's own: in part at both ends, that is not
-/// clear (ruling P6-Z4). No field pairs with the value of another row.
+/// clear. No field pairs with the value of another row.
 #[test]
 fn labels_under_values_with_partial_ends_in_tables_never_pair_shifted() {
     let mut reads = Vec::new();
@@ -1645,7 +1645,7 @@ const NARROW: [&[FieldSpec]; 2] = [
 
 /// Labels set in the middle of their fields or at their right end, over values at the
 /// fields' left ends, without dividers: a value under no label has no certain field, so the
-/// fields it may belong to stay text with a loss (ruling P6-X); a value under its label
+/// fields it may belong to stay text with a loss; a value under its label
 /// pairs.
 #[test]
 fn labels_away_from_their_values_never_pair_wrongly() {
@@ -2066,7 +2066,7 @@ fn generated_shapes_hold_the_invariants() {
 }
 
 /// A form of two pages, each of several shapes: every page holds the invariants on its own,
-/// each note of a kind once on each page (ruling P6-W).
+/// each note of a kind once on each page.
 #[test]
 fn a_form_of_two_pages_holds_the_invariants_on_each() {
     let first = page(&REAL, true, true);
@@ -2108,11 +2108,11 @@ fn turned_forms_never_pair_wrongly() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// Task 15b part 2d fix round 2 (I2, ruling on concern 1): a grid of fields whose labels stand
+/// A grid of fields whose labels stand
 /// under the rule their values stand on, not clear (a value of two lines, or an empty first
 /// value), is refused with a loss and read cell by cell, each line of a cell a block of its
 /// own: no block holds a value of one field and a label or value of another, in every look,
-/// with and without dividers. Found by the spans of the drawn texts. Part 2e-1 (item 3): the
+/// with and without dividers. Found by the spans of the drawn texts. The
 /// second value line `Hinterhaus`, set on the line of the label `Name` over it, is a text of
 /// its own too, not glued to the label (`NameHinterhaus`).
 #[test]
@@ -2171,7 +2171,7 @@ fn a_refused_grid_of_labels_under_values_reads_cell_by_cell() {
     );
 }
 
-/// Task 15b part 2e-2 (item 1, ruling P6-X): a block of three fields, each a label over its
+/// A block of three fields, each a label over its
 /// value between rules, beside a grid whose labels stand under the rule their values stand on
 /// and that is not clear (a value of two lines). The block stands on the grid's rules and has a
 /// row of its own under them: it is a grid of its own, its fields pair, and its last label
@@ -2246,7 +2246,7 @@ fn a_block_of_fields_beside_a_refused_grid_pairs_on_its_own() {
     );
 }
 
-/// Review focus 3 (Task 19): on a page with form fields, the boxes of the fields are the
+/// On a page with form fields, the boxes of the fields are the
 /// form's regions, given by the file. Boxed labels stand over the fields and each field shows
 /// its value, but no rule reads label and value pairs or a table over them: the page has no
 /// `label_value` region, and each value the fields show stands once in the text.

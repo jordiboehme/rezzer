@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! The shapes of business documents (Tasks 7, 8 and 10 to 13): a letter head with a title, a
+//! The shapes of business documents: a letter head with a title, a
 //! date, an address and a footnote, line items with an end rule and with a rule under every
 //! row, close column titles, a title beside a field list, and footer columns. Each page has a
 //! body of at least 600 ink characters of plain text at 7 points times the variant's size
@@ -161,11 +161,11 @@ const ITEMS: [[&str; 5]; 3] = [
     ["3", "Versand", "1", "34,56", "34,56"],
 ];
 
-/// Task 10: line items at 8 points times the size factor, the bold header `Pos`, `Artikel`,
+/// Line items at 8 points times the size factor, the bold header `Pos`, `Artikel`,
 /// `Menge` at x 40, 80 and 300 and `Preis` and `Betrag` flush right at x 420 and 540, a rule
 /// under the header (unless `header_rule` is false), and with `end` a rule under the last
 /// item over three totals (labels at x 340, values flush right at 540), else a rule under
-/// every item but the last. With `note` (Task 15b part 2d fix round 1, the private invoice) a
+/// every item but the last. With `note` a
 /// smaller note stands under the totals over a rule of its own, so the totals stand between two
 /// rules in three styles. The items are one table, and the totals another.
 fn items(v: &Variant, end: bool, header_rule: bool, note: bool) -> Sheet {
@@ -173,7 +173,7 @@ fn items(v: &Variant, end: bool, header_rule: bool, note: bool) -> Sheet {
 }
 
 /// [`items`] with the first totals row and the last one `first` and `last` times the size of
-/// the others (Task 15b part 2d fix round 3, C1: totals not of one size between rules).
+/// the others (totals not of one size between rules).
 fn items_sized(
     v: &Variant,
     end: bool,
@@ -278,14 +278,14 @@ fn items_sized(
 /// A row of totals of [`totals_shape`]: its cells (text, x, flush right), empty cells left out.
 type TotalsRow = &'static [(&'static str, f32, bool)];
 
-/// Task 15b part 2d fix round 5 (R1): line items over totals of another shape between the rule
+/// Line items over totals of another shape between the rule
 /// under the items and a rule under a smaller note: `rows`, the last one (the total) bold and
 /// `last` times the size. The totals are one table of their rows.
 fn totals_shape(v: &Variant, rows: &[TotalsRow], last: f32) -> Sheet {
     totals_drawn(v, rows, last, Under::Note)
 }
 
-/// What stands under the totals of [`totals_drawn`] (part 2e-1, item 5).
+/// What stands under the totals of [`totals_drawn`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Under {
     /// A smaller note over a rule of its own.
@@ -408,7 +408,7 @@ const PERCENT_TOTALS: [TotalsRow; 3] = [
     ],
 ];
 
-/// Part 2e-1 (item 5): plain totals of a label and an amount with its currency.
+/// Plain totals of a label and an amount with its currency.
 const PLAIN_TOTALS: [TotalsRow; 3] = [
     &[("Nettobetrag", 300.0, false), ("1.234,56 EUR", 540.0, true)],
     &[
@@ -417,7 +417,7 @@ const PLAIN_TOTALS: [TotalsRow; 3] = [
     ],
     &[("Gesamt", 300.0, false), ("1.469,13 EUR", 540.0, true)],
 ];
-/// Part 2e-1 (item 5): a percent column in one row only.
+/// A percent column in one row only.
 const PERCENT_ONE_ROW_TOTALS: [TotalsRow; 3] = [
     &[
         ("Nettobetrag", 300.0, false),
@@ -435,7 +435,7 @@ const PERCENT_ONE_ROW_TOTALS: [TotalsRow; 3] = [
         ("1.469,13", 540.0, true),
     ],
 ];
-/// Part 2e-1 (item 5): the net, tax and gross titles over their amounts.
+/// The net, tax and gross titles over their amounts.
 const NET_TAX_GROSS_TOTALS: [TotalsRow; 2] = [
     &[
         ("Netto", 300.0, false),
@@ -449,7 +449,7 @@ const NET_TAX_GROSS_TOTALS: [TotalsRow; 2] = [
     ],
 ];
 
-/// Part 2e-1 fix round 1 (the private notice): a block of five lines at one left edge beside
+/// A block of five lines at one left edge beside
 /// a letter address, each a label at 8 points times the size factor and its bold value after
 /// it, with a box around the lines `boxed` (none: no box). No line of the read holds the value
 /// of one line and the label of the next: each line is a field of its own.
@@ -499,7 +499,7 @@ fn field_lines(v: &Variant, boxed: Option<(usize, usize)>) -> Sheet {
     s
 }
 
-/// Part 2e-1 fix round 2 (review R1 and R2): a column of five short lines of one face at one
+/// A column of five short lines of one face at one
 /// left edge beside a letter address, at `size` points times the size factor in the bold face
 /// (`bold`) or the plain one, with a box around the lines `boxed` (none: no box). No line of
 /// the read, and no heading, holds two of them.
@@ -517,7 +517,7 @@ fn one_face_column(v: &Variant, size: f32, bold: bool, boxed: Option<(usize, usi
     s
 }
 
-/// Part 2e-2 (item 4, O2): field lines of one face of five to seven words each.
+/// Field lines of one face of five to seven words each.
 const LONG_FIELD_LINES: [&str; 5] = [
     "Zahlbar bis zum 31.10.2026 ohne Abzug",
     "Bearbeiter Frau Erika Beispiel",
@@ -526,7 +526,7 @@ const LONG_FIELD_LINES: [&str; 5] = [
     "Seite 1 von 2",
 ];
 
-/// Part 2e-2 (item 4, O1): slogan lines, each a sentence of 8 to 10 words ending in an
+/// Slogan lines, each a sentence of 8 to 10 words ending in an
 /// exclamation mark.
 const SLOGAN_LINES: [&str; 3] = [
     "Jetzt umsteigen und bei jeder Fahrt bares Geld sparen!",
@@ -534,7 +534,7 @@ const SLOGAN_LINES: [&str; 3] = [
     "Wir sind auch am Wochenende gerne für Sie da!",
 ];
 
-/// Part 2e-2 (item 5, O3): lines of starred items.
+/// Lines of starred items.
 const STARRED_LINES: [&str; 3] = ["* A123456B * x/y", "*Abc.-Nr. 12345* 12a", "*Abc.-Nr. ab*"];
 
 /// The lines `lines` of one face as a column at one left edge beside a letter address (see
@@ -578,7 +578,7 @@ fn column_of(
     s
 }
 
-/// Part 2e-2 (item 6, the docling report's glues): rows of a table read as text, a row label
+/// Rows of a table read as text, a row label
 /// cut by a hyphen (`Page-`) over the cells of the next row, which start right of the cut, and
 /// a row whose last cell is a number range over a line of prose, all in the body's size: no
 /// line of the read holds the cut label and the next row, or the range and the prose.
@@ -623,7 +623,7 @@ fn cut_rows(v: &Variant) -> Sheet {
     s
 }
 
-/// Part 2e-2 (item 2): two lines in three columns alone in the body, titles over one row of
+/// Two lines in three columns alone in the body, titles over one row of
 /// values, at 8 points times the size factor: a table of a header and one row.
 fn two_lines_in_columns(v: &Variant) -> Sheet {
     let k = v.k();
@@ -648,7 +648,7 @@ fn two_lines_in_columns(v: &Variant) -> Sheet {
     s
 }
 
-/// Part 2e-4 (item 7): a smaller label and its bold value set against it with no space,
+/// A smaller label and its bold value set against it with no space,
 /// the value starting a fifth of a size inside the label's last letter: two texts, never one
 /// word.
 fn touching(v: &Variant) -> Sheet {
@@ -669,8 +669,8 @@ fn touching(v: &Variant) -> Sheet {
             bottom: top - size,
         }),
     );
-    // One line of the read, its two words apart (Task 19: the engine keeps this one line as
-    // laid out, no region type having clear evidence for it; a right read, Task 36 makes it a
+    // One line of the read, its two words apart (the engine keeps this one line as
+    // laid out, no region type having clear evidence for it; a right read makes it a
     // paragraph again).
     s.want
         .lines_joined
@@ -678,7 +678,7 @@ fn touching(v: &Variant) -> Sheet {
     s
 }
 
-/// Part 2e-2 (item 3): a value printed over the label of its line, at 9 points times the size
+/// A value printed over the label of its line, at 9 points times the size
 /// factor, the label at 0.7 of it: two texts, never one word.
 fn overprinted(v: &Variant) -> Sheet {
     let k = v.k();
@@ -702,8 +702,8 @@ fn overprinted(v: &Variant) -> Sheet {
             bottom: top - size,
         }),
     );
-    // One line of the read, its two words apart (Task 19: the engine keeps this one line as
-    // laid out, no region type having clear evidence for it; a right read, Task 36 makes it a
+    // One line of the read, its two words apart (the engine keeps this one line as
+    // laid out, no region type having clear evidence for it; a right read makes it a
     // paragraph again).
     s.want
         .lines_joined
@@ -711,7 +711,7 @@ fn overprinted(v: &Variant) -> Sheet {
     s
 }
 
-/// Part 2e-2 fix round 1 (I1): prose of sentences at 8 points times the size factor whose
+/// Prose of sentences at 8 points times the size factor whose
 /// lines end in a number over a noun (`mit 2` over `Prozent Skonto`), and a two-line paragraph
 /// with no stop at its end: every line goes on in the next.
 fn number_prose(v: &Variant) -> Sheet {
@@ -757,7 +757,7 @@ fn number_prose(v: &Variant) -> Sheet {
     s
 }
 
-/// Part 2e-2 fix round 1 (C2): two lines of three words set full in a narrow column (12 ems),
+/// Two lines of three words set full in a narrow column (12 ems),
 /// the second with a digit: prose, no header over a row.
 fn justified_pair(v: &Variant) -> Sheet {
     let k = v.k();
@@ -792,7 +792,7 @@ fn justified_pair(v: &Variant) -> Sheet {
     s
 }
 
-/// Part 2e-4 (item 9): labels with a short index (`Kundennr. 1`) beside the lines of an
+/// Labels with a short index (`Kundennr. 1`) beside the lines of an
 /// address: a table of labels and values, with no doubt that blocks stand side by side.
 fn numbered_labels(v: &Variant) -> Sheet {
     let k = v.k();
@@ -844,7 +844,7 @@ fn wrapped(text: &str, font: &str, size: f32, measure: f32) -> Vec<String> {
     lines
 }
 
-/// Part 2e-4 (item 8): prose of two sentences right over, and right under, a column of field
+/// Prose of two sentences right over, and right under, a column of field
 /// lines in its face, at its pitch and left edge (`line_breaks` takes evidence from the lines
 /// over and under a block): the prose goes on line by line, the field lines keep their breaks,
 /// and no field line goes on the prose.
@@ -889,7 +889,7 @@ fn prose_by_fields(v: &Variant, under: bool) -> Sheet {
     s
 }
 
-/// Part 2e-4 (item 2): a paragraph without a stop set full (justified) in a column of 14 ems,
+/// A paragraph without a stop set full (justified) in a column of 14 ems,
 /// three words or so a line, its word gaps wide enough to part the words into pieces: prose, no
 /// table of three columns; each line goes on in the next.
 fn justified_paragraph(v: &Variant) -> Sheet {
@@ -950,7 +950,7 @@ fn justified_paragraph(v: &Variant) -> Sheet {
     s
 }
 
-/// Task 31a fix round 1 (I2): three paragraphs of three lines, the last line short, and two
+/// Three paragraphs of three lines, the last line short, and two
 /// short rules far apart, one over the first paragraph and one under the last (the edges of
 /// a mark in the margin, of a bar behind a title). The two rules bound a tall narrow frame
 /// that the full lines run through; only the short last lines have their middles in it. The
@@ -998,7 +998,7 @@ fn paragraphs_across_a_frame(v: &Variant) -> Sheet {
     s
 }
 
-/// Task 31a fix round 2 (N1): rows of a label and its value at one white space from row to
+/// Rows of a label and its value at one white space from row to
 /// row, the last row (a total) set larger. The larger row is a row, no row of values under a
 /// row of labels: each label reads with its own value. `rows` are the label and the value of
 /// each row; the last one is the larger.
@@ -1027,11 +1027,11 @@ fn rows_over_a_larger_row(v: &Variant, rows: &[[&str; 2]]) -> Sheet {
     s
 }
 
-/// Task 31a fix round 2 (ruling on I3): the lines of a table of contents at one pitch with
+/// The lines of a table of contents at one pitch with
 /// white space between the lines: a name and its page (a number or a range) at one edge, the
 /// lines under a title set in, a title line without a page. They read as one table of a name
 /// and a page per row. A guard: the contents page of a public payroll sample that reads as
-/// one-row tables per line (Task 26) has more on it (a second column, a small picture beside
+/// one-row tables per line has more on it (a second column, a small picture beside
 /// each title) and is not built here.
 fn contents_lines(v: &Variant) -> Sheet {
     let k = v.k();
@@ -1083,7 +1083,7 @@ fn contents_lines(v: &Variant) -> Sheet {
     s
 }
 
-/// Part 2e-2 fix round 1 (C1): line items with amounts flush left, the last a credit with a
+/// Line items with amounts flush left, the last a credit with a
 /// trailing minus (`10,00-`), over a total under the amounts at the row pitch: the total is no
 /// end of the credit's cell.
 fn credit_over_total(v: &Variant) -> Sheet {
@@ -1127,7 +1127,7 @@ fn credit_over_total(v: &Variant) -> Sheet {
     s
 }
 
-/// Part 2e-4 (item 3): line items with the amounts flush right at x 540 and the minus of the
+/// Line items with the amounts flush right at x 540 and the minus of the
 /// last one, a credit, hanging after them (`10,00` and `-`), over a total flush right under
 /// them: the total stays apart from the credit, on a line of its own, never glued
 /// (`10,00-80,00`).
@@ -1170,7 +1170,7 @@ fn hanging_credit(v: &Variant) -> Sheet {
     s
 }
 
-/// Part 2e-4 (item 3, list line 9): line items with the amounts flush right, a deduction with a
+/// Line items with the amounts flush right, a deduction with a
 /// minus after it (`12,50-`) on a line of its own under the first amount: a row of its own,
 /// never one cell with the amount over it.
 fn stacked_deduction(v: &Variant) -> Sheet {
@@ -1208,7 +1208,7 @@ fn stacked_deduction(v: &Variant) -> Sheet {
     s
 }
 
-/// Part 2e-2 fix round 1 (I3): an accent drawn as a run of its own over the first letter of
+/// An accent drawn as a run of its own over the first letter of
 /// its word, after the word (`Uber`, the dieresis, ` den Vertrag`): it stays in its word.
 fn lone_accent(v: &Variant) -> Sheet {
     let k = v.k();
@@ -1231,9 +1231,9 @@ fn lone_accent(v: &Variant) -> Sheet {
     s
 }
 
-/// Part 2e-2 fix round 1 (M4, item 3): a row between rules with dividers whose cells hold two
+/// A row between rules with dividers whose cells hold two
 /// lines with no label each (a street over its town beside a firm over its street), lines
-/// that line up by chance: no rows of totals; each cell is read whole. Part 2e-4 (item 1): with
+/// that line up by chance: no rows of totals; each cell is read whole. With
 /// `divided` false the row has no divider, and the cells are still read whole.
 fn cells_by_chance(v: &Variant, divided: bool) -> Sheet {
     let cells = [
@@ -1249,9 +1249,9 @@ fn cells_by_chance(v: &Variant, divided: bool) -> Sheet {
     s
 }
 
-/// Part 2e-4 (item 1): a row between rules with no divider whose `cells` of two lines show no
-/// sign that their lines go together (a name over a firm beside a firm over its street; fix
-/// round 1, C1: labels beside a street and its town, two rows of items): rows or cells, so the
+/// A row between rules with no divider whose `cells` of two lines show no
+/// sign that their lines go together (a name over a firm beside a firm over its street,
+/// labels beside a street and its town, two rows of items): rows or cells, so the
 /// two lines read line by line and a loss says the doubt.
 fn cells_or_rows(v: &Variant, cells: &[[&str; 2]]) -> Sheet {
     let mut s = two_cells(v, false, cells);
@@ -1268,7 +1268,7 @@ fn cells_or_rows(v: &Variant, cells: &[[&str; 2]]) -> Sheet {
     s
 }
 
-/// Fix round 1 (I1): words drawn in two weights, the second part touching the first and opening
+/// Words drawn in two weights, the second part touching the first and opening
 /// with a small letter (`Rechnungs` bold and `nummer 4711`, `Muster` and `mann GmbH` bold): one
 /// word each.
 fn two_weights(v: &Variant) -> Sheet {
@@ -1310,7 +1310,7 @@ fn two_weights(v: &Variant) -> Sheet {
     s
 }
 
-/// Fix round 1 (I2): prose whose line ends in the first half of a range (`von 08.00-` over
+/// Prose whose line ends in the first half of a range (`von 08.00-` over
 /// `18.00 Uhr ...`): the range goes on with no space inside it.
 fn wrapped_range(v: &Variant) -> Sheet {
     let k = v.k();
@@ -1372,7 +1372,7 @@ fn two_cells(v: &Variant, divided: bool, cells: &[[&str; 2]]) -> Sheet {
     )
 }
 
-/// Part 2e-4 (item 4): titles over one row whose last cell ends with the stop of an
+/// Titles over one row whose last cell ends with the stop of an
 /// abbreviation (`Stk.`), alone in the body: a table of a header and one row.
 fn titles_over_a_stop(v: &Variant) -> Sheet {
     let k = v.k();
@@ -1397,7 +1397,7 @@ fn titles_over_a_stop(v: &Variant) -> Sheet {
     s
 }
 
-/// Part 2e-2 fix round 1 (M4, item 2): two lines in three columns of one style between two
+/// Two lines in three columns of one style between two
 /// rules with no dividers, titles over one row of values: a table of a header and one row.
 fn two_lines_in_a_strip(v: &Variant) -> Sheet {
     let k = v.k();
@@ -1423,7 +1423,7 @@ fn two_lines_in_a_strip(v: &Variant) -> Sheet {
     s
 }
 
-/// Part 2e-1 (items 6 and 7): line items without rules at 8 points times the size factor, a
+/// Line items without rules at 8 points times the size factor, a
 /// bold header `Pos`, `Zeitraum`, `Basis` and `Betrag`; with `range` the first two periods
 /// wrap after their dash (`01.10.2026 -` over `31.10.2026`) and the cell keeps the space after
 /// the dash; else the last row is followed by an amount alone under the base and one alone
@@ -1433,7 +1433,7 @@ fn period_items(v: &Variant, range: bool) -> Sheet {
 }
 
 /// [`period_items`], with `last` the last period a range that wraps too (`01.12.2026 -` over
-/// `31.12.2026`, part 2e-2 item 3): its second line, under the table, ends its cell.
+/// `31.12.2026`): its second line, under the table, ends its cell.
 fn period_items_of(v: &Variant, range: bool, last: bool) -> Sheet {
     let k = v.k();
     let (plain, bold) = v.faces();
@@ -1497,7 +1497,7 @@ fn period_items_of(v: &Variant, range: bool, last: bool) -> Sheet {
     s
 }
 
-/// Task 15b part 2d fix round 3: a notice band between two rules, a bold slogan 1.25 times
+/// A notice band between two rules, a bold slogan 1.25 times
 /// the size beside a reference at the size, over one long line of text 1.1 times the size (three
 /// styles). It holds no field: no loss may call it a row of fields.
 fn notice_band(v: &Variant) -> Sheet {
@@ -1536,7 +1536,7 @@ fn notice_band(v: &Variant) -> Sheet {
     s
 }
 
-/// Task 11: line items whose two close titles `Menge Einheit` are one show over the
+/// Line items whose two close titles `Menge Einheit` are one show over the
 /// quantities and the units: the title is cut at the gutter of its two columns.
 fn close_titles(v: &Variant) -> Sheet {
     let k = v.k();
@@ -1580,7 +1580,7 @@ const TITLE_FIELDS: [[&str; 2]; 4] = [
     ["Seite", "1 von 1"],
 ];
 
-/// Tasks 8 and 12: the bold title `Rechnung` at 9 points times the size factor at x 40,
+/// The bold title `Rechnung` at 9 points times the size factor at x 40,
 /// beside four field lines of 6 points at x 360 (labels) and 80 points further (values), its
 /// baseline 1.5 points under that of the first: the title stands apart, the fields are one
 /// table, the title is the document's and the `Datum` field gives its date.
@@ -1619,7 +1619,7 @@ fn title_beside_fields(v: &Variant) -> Sheet {
     s
 }
 
-/// Tasks 7 and 8: a letter head. The recipient's address in bold at 9 points, three lines
+/// A letter head. The recipient's address in bold at 9 points, three lines
 /// (one paragraph, no heading, no title), or with `larger_name` the name at 10 points over
 /// two plain lines at 8; the date line `Datum 01.02.2026` at the right over the name, or with
 /// `date_beside` on the name's baseline; the bold title `Rechnung` at 9 (the document's
@@ -1661,7 +1661,7 @@ fn letter_head(v: &Variant, larger_name: bool, date_beside: bool) -> Sheet {
     s
 }
 
-/// Task 36a fix round 1 (review I2): the label of an address in bold at 10 points over a
+/// The label of an address in bold at 10 points over a
 /// complete address at 8 (a name, a street, a town), at the lines' own pitch, as an invoice
 /// sets `Delivery address`. The address has its own name line, so the bold line is a
 /// heading over it and no first line of it. Under it a bold title (which the read may take
@@ -1718,7 +1718,7 @@ const FOOTER: [&[&str]; 4] = [
     ],
 ];
 
-/// Task 13: a footer of four columns at 7 points times the size factor, from the baseline 70
+/// A footer of four columns at 7 points times the size factor, from the baseline 70
 /// down at 1.2 sizes, each column three sizes right of the widest line of the one before. On
 /// two pages each column is one running footer block in column order; on one page they are
 /// content, and no block holds lines of two columns.
@@ -1775,8 +1775,7 @@ const FOOT_TABLE: [[&str; 3]; 5] = [
 ];
 
 /// The rows of the table with a column of words whose last cell is empty: the last item has
-/// no source, so the other columns end on different rows (Task 36a fix round 2, re-review
-/// N1, probe 10).
+/// no source, so the other columns end on different rows.
 const FOOT_TABLE_EMPTY_CELL: [[&str; 3]; 5] = [
     ["Item", "Description", "Source"],
     [
@@ -1797,7 +1796,7 @@ const FOOT_TABLE_EMPTY_CELL: [[&str; 3]; 5] = [
     ["", "twelve pieces", ""],
 ];
 
-/// The same with the last description wrapped over two more lines (probe 16).
+/// The same with the last description wrapped over two more lines.
 const FOOT_TABLE_TWO_LINES: [[&str; 3]; 6] = [
     ["Item", "Description", "Source"],
     [
@@ -1819,7 +1818,7 @@ const FOOT_TABLE_TWO_LINES: [[&str; 3]; 6] = [
     ["", "bag", ""],
 ];
 
-/// Task 36a fix round 1 (review I1): a table of three columns without rules at the foot of
+/// A table of three columns without rules at the foot of
 /// the page, at 8 points times the size factor, its columns left aligned at an even pitch of
 /// 161 points from x 40. The descriptions open with a small letter and nearly fill their
 /// column, and the last one wraps: all a wrapped paragraph in a footer of columns shows. But
@@ -1827,7 +1826,7 @@ const FOOT_TABLE_TWO_LINES: [[&str; 3]; 6] = [
 /// of the read holds the descriptions of two items. On two pages the table is a running
 /// footer.
 ///
-/// Fix round 2 (re-review N1): the same holds with a cell left empty at the end of a column
+/// The same holds with a cell left empty at the end of a column
 /// of words, and with the last description over two more lines: no other column reaches
 /// the last row of the description, so nothing shows blocks side by side. `rows` are the
 /// rows of the table, the first its titles, a row with an empty first cell the wrapped end
@@ -1881,7 +1880,7 @@ const ITEM_WRAPS: [[&str; 3]; 5] = [
     ["DIN 125", "twelve pieces", ""],
 ];
 
-/// Task 36a fix round 3 (re-review 2, I2, probe 2): a table of three columns without rules,
+/// A table of three columns without rules,
 /// its first baseline at `top` (in the body, or at the foot of the page, where it is a
 /// running footer on two pages), at 8 points times the size factor, left aligned at a pitch
 /// of 161 points from x 40. The name of the last item has a second line beside the wrapped end of its description,
@@ -1889,7 +1888,7 @@ const ITEM_WRAPS: [[&str; 3]; 5] = [
 /// of sources ends after its first row: all that blocks side by side with a wrapped paragraph
 /// in the middle one show. Nothing in the lines tells the two apart, so the read may take
 /// the columns for blocks. What it may never do is join the descriptions of two items into
-/// one text: each line of a column stays a line of its own (the ruling of fix round 3: a
+/// one text: each line of a column stays a line of its own (a
 /// wrong read as blocks loses the order of the rows, never where an item ends).
 fn table_whose_item_wraps(v: &Variant, top: f32) -> Sheet {
     let k = v.k();
@@ -1918,7 +1917,7 @@ fn table_whose_item_wraps(v: &Variant, top: f32) -> Sheet {
     s
 }
 
-/// Task 36a fix round 3 (re-review 2, M1, probes 21 to 23 and probe 12): a page title in bold
+/// A page title in bold
 /// at 14 points times the size factor under a small kicker line, and at the right on the
 /// same two baselines a small label over a form number in the title's size and face. The
 /// title stands like a value under its label; it is the largest text of the top of the
@@ -1956,7 +1955,7 @@ const WRAPPED_FOOTER: [&[&str]; 3] = [
     &["Chair of the supervisory board", "Morgan Example"],
 ];
 
-/// Task 36a part 1 (class D): a footer of three columns without rules at 7 points times the
+/// A footer of three columns without rules at 7 points times the
 /// size factor, top aligned at the baseline 64.85 and 1.2 sizes apart, the columns at an even
 /// pitch from x 85. The middle column is a title over one paragraph of names wrapped over
 /// three lines. The pitch is the width of its second line of names less a fifth of a point:
@@ -1996,7 +1995,7 @@ fn footer_with_a_wrapped_column(v: &Variant) -> Sheet {
         s.want.orders.push(chain.clone());
         s.want.together.push(chain);
         // Each line of a column stays a line of its own, the wrapped lines of the names
-        // too (the ruling of fix round 3): what shows the columns the rows of a table can
+        // too: what shows the columns the rows of a table can
         // show as well, and lines kept apart never join the texts of two items.
         for pair in lines.windows(2) {
             s.want
@@ -2036,7 +2035,7 @@ const COLUMNS: [&[&str]; 4] = [
     ],
 ];
 
-/// Task 13 (carry C-5): address, bank, register and contact columns of three lines at 7
+/// Address, bank, register and contact columns of three lines at 7
 /// points times the size factor in the body, top aligned at x 40, 180, 330 and 460, the first
 /// baseline 650 and 1.2 sizes apart: no block holds lines of two columns (any line of one
 /// with any line of another).
@@ -2120,7 +2119,7 @@ enum Rows {
     Headed,
 }
 
-/// Task 15b part 2c review (Critical 1, Important 1, Minor 5): rows of 7 points times the size
+/// Rows of 7 points times the size
 /// factor at x 40, 180 and 330, 1.2 sizes apart from the baseline 650, as `what` says.
 fn rows_shape(v: &Variant, what: Rows) -> Sheet {
     let k = v.k();
@@ -2163,7 +2162,7 @@ fn rows_shape(v: &Variant, what: Rows) -> Sheet {
     s
 }
 
-/// Task 15b part 2c review (Important 4, Minor 1): line items over a bold total, a blank row,
+/// Line items over a bold total, a blank row,
 /// then a second table whose middle column ends where the first one's middle title ends. With
 /// `plain` the second header is plain, else bold with years. At 8 points times the size
 /// factor, the columns at x 40, 112 and flush right at 400 times the factor. Two tables.
@@ -2176,7 +2175,7 @@ fn two_tables(v: &Variant, plain: bool) -> Sheet {
 enum Second {
     /// A second table under a plain header.
     Plain,
-    /// A second table of one row under a plain header (part 2e-1, item 1: the two lines are
+    /// A second table of one row under a plain header (the two lines are
     /// a table of a header and one row).
     PlainOne,
     /// A second table under a bold header of years.
@@ -2187,8 +2186,8 @@ enum Second {
 }
 
 /// [`two_tables`], or with [`Second::Note`] a note row and two more rows of the first table;
-/// the third row of the first table stands `inner` pitches under the row over it (Task 15b
-/// part 2d item 5: a row set a little apart does not raise the pitch of the rows).
+/// the third row of the first table stands `inner` pitches under the row over it
+/// (a row set a little apart does not raise the pitch of the rows).
 fn two_tables_or_note(v: &Variant, second_kind: Second, inner: f32) -> Sheet {
     let plain = second_kind != Second::Years;
     let k = v.k();
@@ -2261,14 +2260,14 @@ fn two_tables_or_note(v: &Variant, second_kind: Second, inner: f32) -> Sheet {
     if note {
         let all: Vec<&[&str]> = first.iter().chain(second).map(|r| &r[..]).collect();
         s.want.table(owned(&all), "table");
-        // The note row may head a table of its own (Task 15b part 2d fix round 1): said.
+        // The note row may head a table of its own: said.
         s.want.losses.push("may start a table of its own".into());
     } else {
         s.want.table(
             owned(&first.iter().map(|r| &r[..]).collect::<Vec<_>>()),
             "table",
         );
-        // A header and one row are read as labels over their values (Task 18b: titles over
+        // A header and one row are read as labels over their values (titles over
         // one table row read as pairs).
         let kind = if second_kind == Second::PlainOne {
             "label_value"
@@ -2322,7 +2321,7 @@ const COLON_HEADING: [&[&str]; 2] = [
     ],
 ];
 
-/// Task 15b part 2c re-review r1 (Important 1): `blocks` side by side at 7 points times the
+/// `blocks` side by side at 7 points times the
 /// size factor from the baseline 650, 1.2 sizes apart, each three sizes right of the widest
 /// line of the one before: no block holds lines of two of them, and the loss of blocks side
 /// by side is said.
@@ -2371,7 +2370,7 @@ const PROSE: [&str; 6] = [
     "geblieben ist und die Methode nicht geaendert wurde.",
 ];
 
-/// Part 3 (`form_drawn`): a bold heading a size step larger over a rule and two paragraphs of
+/// A bold heading a size step larger over a rule and two paragraphs of
 /// prose at 9 points times the size factor, and lower on the page `beside`: nothing (the
 /// control), a ruled table of three columns (`Table`) or a boxed note of two lines (`Note`). Neither is a form: the heading stays a
 /// heading followed by its two paragraphs, and the table is a table.
@@ -2457,7 +2456,7 @@ enum Beside {
     Note,
 }
 
-/// Part 3 (weight-only boxes): three drawn boxes in a row, each a bold label at its top and a
+/// Three drawn boxes in a row, each a bold label at its top and a
 /// plain value of the same size under it, and a fourth box with its bold label only. The page
 /// shows one label style (the bold of the lone label), so every box pairs.
 fn weight_only_boxes(v: &Variant) -> Sheet {
@@ -2512,7 +2511,7 @@ const FLOW: [[&[&str]; 2]; 2] = [
     ],
 ];
 
-/// Part 4 (band order at drawn rules): two columns of 9 point prose times the size factor
+/// Two columns of 9 point prose times the size factor
 /// with a framed figure across both in the middle; the last line of the left column above the
 /// frame ends in a hyphen and goes on under it. The page is read in column order: the left
 /// column above and under the frame, then the right column.
@@ -2572,7 +2571,7 @@ const LETTER: [&[&str]; 3] = [
     ],
 ];
 
-/// Task 31b, class G: the head of a letter. A logo at the top left; right of it a block of
+/// The head of a letter. A logo at the top left; right of it a block of
 /// five lines at 9 points set flush right at the pitch of their size, the last two of them a
 /// label with a colon and its value; under the logo a sender line at 9 points, lines of one
 /// space each, the recipient's address of three lines set in, a date and a subject line with
@@ -2675,7 +2674,7 @@ const FRAMED_PAIRS: [(&str, &str); 4] = [
     ("Reference", "123456789-987654321"),
 ];
 
-/// Task 31b, class B (a guard: the cut at equal bands of Task 31a reads it): a stroked frame
+/// A stroked frame
 /// around four rows of a label and its value in two columns, at 11 points times the size
 /// factor, the rows `pitch` sizes apart (15 points at size 11 is 1.36, 17 points is 1.55).
 /// Over the frame stands a paragraph whose last line is one space, on the frame's top edge;
@@ -2695,7 +2694,7 @@ const TWO_PAGES: Axes = Axes {
 /// The widths of the frame of [`a_payment_box_of_two_widths`] on its first and second page.
 const PAYMENT_BOX_WIDTHS: [f32; 2] = [401.25, 505.0];
 
-/// Task 26, class B6: a payment box whose width differs between pages. The frame of
+/// A payment box whose width differs between pages. The frame of
 /// [`framed_pairs`] around its four rows of a label and its value, on two pages: the text of
 /// the rows stands at the same places on both, the frame is a quarter wider on the second
 /// (as a box that is drawn to the width of the block around it). The four labels read with
@@ -2765,7 +2764,7 @@ fn framed_pairs_in(v: &Variant, pitch: f32, beside: bool, width: f32) -> Sheet {
     s
 }
 
-/// Task 31b, class C1: a notes block in the page head. A small bold label over a thin rule
+/// A notes block in the page head. A small bold label over a thin rule
 /// with two lines under it, and a paragraph lower on the page. The label names its two
 /// lines: it is no heading over the rest of the page, and the paragraph is no part of its
 /// block.
@@ -2806,7 +2805,7 @@ fn labelled_block(v: &Variant) -> Sheet {
     s
 }
 
-/// Task 31b, class C2: two stroked boxes side by side, each with a small bold label over a
+/// Two stroked boxes side by side, each with a small bold label over a
 /// rule and two lines under it. Each label reads with its own lines, the left box first.
 fn labelled_boxes(v: &Variant) -> Sheet {
     let k = v.k();
@@ -2860,7 +2859,7 @@ fn labelled_boxes(v: &Variant) -> Sheet {
     s
 }
 
-/// Task 31b fix round 2 (I8): a row of four labels sitting on underlines that touch at the
+/// A row of four labels sitting on underlines that touch at the
 /// bounds of the fields (a rule in four pieces, no upright lines), two rows of values under
 /// them and a closing rule, with a block of lines at the left over it and one at the right.
 /// By the evidence of a ruled block (a rule in pieces whose joints stand between the cells,
@@ -2919,7 +2918,7 @@ fn fields_on_touching_underlines(v: &Variant) -> Sheet {
     s
 }
 
-/// The axes of a form whose edges are measured against each other (Task 31b fix round 7):
+/// The axes of a form whose edges are measured against each other:
 /// one face, so that a line set flush right starts where the shape wants it.
 const TRACED: Axes = Axes {
     data: &[Data::CourierBold],
@@ -3057,7 +3056,7 @@ const NOTE_FIELDS: [Placed; 67] = [
     at(312.4, 149.5, "www.example.org/Form77T"),
 ];
 
-/// Task 31b fix round 7 (the path of a public form, irs-f6744 untagged page 108): rows of
+/// Rows of
 /// fields with a narrow note column at their right, set flush right: two title lines, two
 /// lines that name the copy, and a note of eleven lines at a pitch of its own. A foot line
 /// under the fields ends where the note ends. Eight of the sixteen lines of the note column
@@ -3117,7 +3116,7 @@ const AMOUNT_NOTE: [&str; 11] = [
     "since you stated a",
 ];
 
-/// Task 31b fix round 7 (the path of a public form, irs-f6744 untagged page 108, its first
+/// The path of a public form (irs-f6744 untagged page 108, its first
 /// form): the right half of a form, boxes of fields with a note column at their right, set
 /// flush right. The amount of box 1 is set flush right in its box: it starts a little after
 /// the end of the longest line of the boxes and ends a gutter's width before the note
@@ -3186,7 +3185,7 @@ fn amount_before_a_note_column(v: &Variant) -> Sheet {
     s
 }
 
-/// Task 31b fix round 7 (the path of a public form, irs-f6744 untagged pages 174 and 175):
+/// The path of a public form (irs-f6744 untagged pages 174 and 175):
 /// three labels of boxes on one row, set so close that they are one piece, from the left
 /// edge of a block of fields over the white space beside it into the first two of the four
 /// rows of the block at its right, with a value at the far right of their row. Under them,
@@ -3194,7 +3193,7 @@ fn amount_before_a_note_column(v: &Variant) -> Sheet {
 /// The row of labels reads before the second line of its first label and before its
 /// values.
 ///
-/// With `boxes` (fix round 8, review R3) the boxes of the fields are drawn as on the form,
+/// With `boxes` the boxes of the fields are drawn as on the form,
 /// in rule pieces that form no rows and columns: the reader's grid search gives the text
 /// up, and it is read as lines of paragraphs. The value at the far right of the row of
 /// labels is the value of the third box; the line that follows it in reading order, far
@@ -3305,7 +3304,7 @@ fn label_row_over_two_blocks(v: &Variant, boxes: bool) -> Sheet {
     s
 }
 
-/// Class K of Task 31 (masked geometry of an owner's page): a ruled table of three bold header
+/// A ruled table of three bold header
 /// cells over five empty rows, every cell side a stroke of its own, and right of it, outside
 /// the table's frame, two fields: a label on an underline with its value under it. The first
 /// label stands on the baseline of the header cells. The header row stands apart from the
@@ -3322,7 +3321,7 @@ fn side_fields_beside_an_empty_table(v: &Variant, third: bool) -> Sheet {
     side_fields_beside_a_table(v, third, false, false, 2)
 }
 
-/// Task 26, class A5: an underlined label with its value under it beside an empty ruled
+/// An underlined label with its value under it beside an empty ruled
 /// grid, the label's baseline inside the grid's header band. The table of
 /// [`side_fields_beside_an_empty_table`] with the first of its fields only, its underline as
 /// long as the label's words: one underline bounds no strip, so the label and its value are
@@ -3342,7 +3341,7 @@ const FRAME_ROWS: [[&str; 3]; 5] = [
     ["Foot", "4", "two worn"],
 ];
 
-/// [`side_fields_beside_an_empty_table`] in its other layouts (review 1 of Task 31c, M3).
+/// [`side_fields_beside_an_empty_table`] in its other layouts.
 /// With `mirror` the two fields stand left of the table, so the first label comes first on
 /// the line of the header cells. With `filled` the five rows of the table hold text
 /// ([`FRAME_ROWS`]), so the rows under the header row are no empty lines.
@@ -3484,7 +3483,7 @@ const PAST_A_BOX: [(&str, f32); 4] = [
     ("and sign the list he hands you.", 201.0),
 ];
 
-/// Task 31c, class F (masked geometry of an owner's page): the head of a letter as in
+/// The head of a letter as in
 /// [`head_block_beside_a_logo`], and a paragraph whose first lines are short and stand left
 /// of the box of the head, while its third line runs the full width under the box. Under it
 /// a label on the right and a line on the left, then a paragraph of full width. The
@@ -3575,7 +3574,7 @@ fn letter_past_a_box(v: &Variant) -> Sheet {
 /// The words of the two columns of [`full_width_under_two_columns`].
 const COLUMN_WORDS: &str = "The yard opens at seven each morning and the first van leaves soon after with the parts that were packed the evening before, so an order that reaches us by noon is on its way the next day. A second van follows at ten and takes the larger frames, which two people must lift, to the towns along the river and back. Whoever waits for a part can ask the driver for the list of the day, where every box stands with its number, its weight and the name of the one who packed it, and can sign for it at the door when it comes. A box that nobody takes in goes back to the yard with the last van and waits there on the shelf by the gate for three more days before we write to ask what shall be done with it.";
 
-/// Review 1 of Task 31c, M6: two columns of prose on the same baselines, the right one a
+/// Two columns of prose on the same baselines, the right one a
 /// line shorter, and right under them, at their pitch, left edge and size, a paragraph of
 /// the full width that ends in a short line. The text flows from the left column into the
 /// right one; the paragraph follows both. Its full lines stand across the gutter between

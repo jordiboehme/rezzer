@@ -62,7 +62,7 @@ fn pins() -> PathBuf {
 ///
 /// This compares two orders only on a page where they differ, and the reader hands nearly
 /// every page over in the order of its places (3 of the 1,010 pages of the corpus and the
-/// shapes differ, measured in Task 31c); `assert_facts_under_reorder` compares every page
+/// shapes differ); `assert_facts_under_reorder` compares every page
 /// with its runs shuffled. The lines of a file are learned with their runs in place order,
 /// so what is learned from them holds in every order; the legend of a page is read in the
 /// order handed over. For a tagged file the read itself learns from more runs than these
@@ -111,8 +111,7 @@ fn assert_facts_in_both_orders(name: &str, pages: &[layoutregions::PageIn], tagg
 /// number): the body size, the heading sizes, the running lines and the footers of the
 /// two-page rule.
 ///
-/// The legends are not compared. A known limit, owner after 0.1.0 (ruled after fix round 3
-/// of part 2b-1 of Task 31c): the footnote legend of a page is read from the runs in the
+/// The legends are not compared. A known limit, owner after 0.1.0: the footnote legend of a page is read from the runs in the
 /// order handed in, so with the runs shuffled it can be found differently or not at all.
 /// The cause: `RefPlace::Above` (a reference number set at the end of the line before)
 /// needs the number to open the next line, and only the order of the runs says that it
@@ -427,7 +426,7 @@ fn page_with_ink_out_of_place(n: u32) -> layoutregions::PageIn {
 }
 
 /// The lines of a file are learned with their runs in the order of their places: a running
-/// line whose ink is handed over out of that order (fix round 3 of part 2b-1 of Task 31c)
+/// line whose ink is handed over out of that order
 /// gets the key its places give, in both orders and under a shuffle of the runs. Learned in
 /// the order handed over, the key read `of the north plant Works report`.
 #[test]

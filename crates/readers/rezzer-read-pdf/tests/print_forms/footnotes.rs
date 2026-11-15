@@ -56,7 +56,7 @@ fn footnotes_form_a_legend() {
 
 /// A legend on pages with a running header and a running footer (three pages, so both
 /// repeat): the furniture lines are taken out of the page's text before the legend's lines
-/// are found again, and each reference still links to its footnote (Task 7 carry: the place
+/// are found again, and each reference still links to its footnote (the place
 /// of each run is mapped across the lines taken out).
 #[test]
 fn legend_under_running_header_and_footer_is_linked() {
@@ -137,7 +137,7 @@ fn legend_under_running_header_and_footer_is_linked() {
 }
 
 /// Guard: a title at 1.5 times the body size or more stays a level-1 heading, also when it is
-/// not bold (Task 8 takes the document title from it).
+/// not bold.
 #[test]
 fn form_title_stays_a_heading() {
     let template = common::show("FL", 14.0, 40.0, 780.0, "Musterformular")

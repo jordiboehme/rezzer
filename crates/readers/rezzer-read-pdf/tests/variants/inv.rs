@@ -17,11 +17,11 @@ use crate::known::{KNOWN, Known};
 /// An invariant of a variant's read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Inv {
-    /// Every pair is a right pair (ruling P6-X).
+    /// Every pair is a right pair.
     RightPair,
-    /// Every value stands once in the page's text (P6-X).
+    /// Every value stands once in the page's text.
     ValueOnce,
-    /// A found title, date or code is never another one than the page shows (P6-X).
+    /// A found title, date or code is never another one than the page shows.
     WrongValue,
     /// A field the layout makes clear pairs; a column of totals joins its section.
     ClearPairs,
@@ -39,12 +39,12 @@ pub(crate) enum Inv {
     Role,
     /// Each expected paragraph stands on the page with its lines.
     Paragraph,
-    /// Texts that belong to different blocks are not read into one block (P6-X: a block that
+    /// Texts that belong to different blocks are not read into one block (a block that
     /// mixes them is a wrong reading order); in a block kept as laid out, not onto one line.
     Apart,
     /// The texts of each drawn cell stand together (and, for a cell the shape lists, in their
     /// order), and no block or table row holds texts of two cells, found by the span each
-    /// drawn text produced (P6-X: a wrong reading order).
+    /// drawn text produced (a wrong reading order).
     Cells,
     /// The page's text holds the expected texts in their reading order.
     Order,
@@ -55,7 +55,7 @@ pub(crate) enum Inv {
     /// Each code is found as many times as it is drawn.
     Code,
     /// A code is never found more often than it is drawn, and a page with a code not found
-    /// says that a code there is not decoded (P6-X: never a value doubled or lost silently).
+    /// says that a code there is not decoded (never a value doubled or lost silently).
     CodeSaid,
     /// A code found with a box is boxed by the bars of a code drawn: within a point at scale
     /// 1, more on a larger page.
@@ -82,24 +82,24 @@ pub(crate) enum Inv {
     /// later).
     KindWritten,
     /// Each text of [`crate::axes::Want::kinds`] stands in a region of its kind, and each text
-    /// of [`crate::axes::Want::spatial`] in a spatial region (Task 20).
+    /// of [`crate::axes::Want::spatial`] in a spatial region.
     RegionKind,
     /// A text the shape marks unclear (a field whose layout leaves it unclear) is never in a
-    /// `table` or `label_value` region (P6-X: a type forced on it reads a wrong pair or cell).
+    /// `table` or `label_value` region (a type forced on it reads a wrong pair or cell).
     NoForcedType,
     /// Each media block the shape places stands after the block of one text and before the
-    /// block of another (Task 22 fix round 4): a picture is read where its column reads it.
+    /// block of another: a picture is read where its column reads it.
     MediaPlace,
     /// A spatial region is written as a block kept as laid out, that block has its loss
     /// unless it is one line of one piece (which reads as it stands and has no loss that
     /// names no kind), and the texts of its runs stand in it once each and in their order
-    /// (P6-X: a block kept as laid out with no word of why, or with a text lost, doubled or
+    /// (a block kept as laid out with no word of why, or with a text lost, doubled or
     /// moved).
     SpatialSaid,
 }
 
 impl Inv {
-    /// The invariants of ruling P6-X: a break is a wrong value or a wrong reading order,
+    /// The invariants of a break: a break is a wrong value or a wrong reading order,
     /// never only a lost one.
     pub(crate) fn wrong(self) -> bool {
         matches!(
@@ -842,7 +842,7 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
         }
     }
     // A block kept as laid out holds each text where it stands: two texts on two of its
-    // lines, each in its column, are not read into one (ruling on 19a-4), so it is checked
+    // lines, each in its column, are not read into one, so it is checked
     // line by line; any other block as a whole.
     for (a, b) in &want.apart {
         if let Some(t) = blocks
@@ -880,7 +880,7 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
     }
     // A line of a block kept as laid out is a line of the read too: the engine keeps a right
     // read of one short line as laid out where no region type has clear evidence for it
-    // (Task 19, cosmetic; Task 36 makes it a paragraph again), and its words still go on in
+    // (cosmetic: a paragraph is the right kind), and its words still go on in
     // one line.
     for (a, b) in &want.lines_joined {
         let one = blocks
@@ -1158,7 +1158,7 @@ fn out_text(out: &ReadOutcome) -> Vec<Vec<String>> {
 }
 
 /// A reference read: the read, what its variant is held to, and whether it breaks nothing
-/// or, when it breaks something, only invariants of ruling P6-X.
+/// or, when it breaks something, only the invariants of a wrong value or order.
 struct Reference {
     out: ReadOutcome,
     print: String,
@@ -1214,9 +1214,9 @@ pub(crate) struct Reads {
 /// invariants of its own page, and against the read of its reference (the same variant at
 /// scale 1 in the real sizes and fonts), when both are held to the same things and the
 /// reference holds its own invariants, the same reading (blocks and losses), and no loss when
-/// the reference has none. When the reference breaks only invariants of ruling P6-X (pinned),
+/// the reference has none. When the reference breaks only the invariants of a wrong value or order (pinned),
 /// the variant is compared with the fallback reference instead: the reference in the real look
-/// and not turned, which must read the same (ruling P6-Y), when that one holds. Else the
+/// and not turned, which must read the same, when that one holds. Else the
 /// variant is not compared, and counted.
 pub(crate) fn reads(shape: &Shape) -> Reads {
     let mut done: HashMap<String, Reference> = HashMap::new();

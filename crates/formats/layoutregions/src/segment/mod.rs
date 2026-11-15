@@ -304,7 +304,7 @@ struct Builder<'a> {
     joints: Vec<(f32, f32)>,
 }
 
-/// A grid or box of the page, or the page itself (item 0).
+/// A grid or box of the page, or the page itself.
 struct Item {
     bounds: Bounds,
     source: Source,
@@ -523,7 +523,7 @@ impl Builder<'_> {
     /// fills in: a block of lines may be running text, which is not parted at a small word
     /// with a colon.
     ///
-    /// A row of a table or of a grid is not parted (Task 26 fix round 6): parted, the row
+    /// A row of a table or of a grid is not parted: parted, the row
     /// would be two lines and its label would stand before the cell of another column. A
     /// line is such a row when the line right over it or right under it in the leaf shares
     /// its columns (see [`shares_columns`]); it stays whole, with the lines around it.
@@ -2191,7 +2191,7 @@ fn cover_problem(s: &Segments, page: &PageIn) -> Option<String> {
 mod tests {
     use super::*;
 
-    /// Task 26 fix round 6: a line with a small colon label before its last stretch is a row
+    /// A line with a small colon label before its last stretch is a row
     /// of a table when another line has text in the column of the stretch after the label
     /// and in a column of a stretch before it, by their left or their right ends within
     /// `ROW_EDGE` of the text size. One shared column, on either side of the label, is no
@@ -2339,7 +2339,7 @@ mod tests {
         out
     }
 
-    /// Fix round 1 of part 2b-2 of Task 31c (M2): the nesting by one walk over the boxes at
+    /// The nesting by one walk over the boxes at
     /// the centre of each box gives every box the place the walk down the nested boxes gave
     /// it, on 600 seeded random pages on lattices of 1, 2 and 5 points (gaps of one snap,
     /// shared edges, equal boxes, boxes one in the other, boxes side by side). A change to
@@ -2388,7 +2388,7 @@ mod tests {
         assert_eq!(walked_down(&all), [0, 1, 2, 2, 4, 3]);
     }
 
-    /// Task 26 fix round 4 (review 4 I1, M1): a piece reads the same in one run and in
+    /// A piece reads the same in one run and in
     /// several. The word or sign of a currency before the figures, in a run of its own,
     /// says nothing yet and the next run decides; after the figures it goes on with the
     /// amount; a whole number goes on with its next digits.

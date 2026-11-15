@@ -527,7 +527,7 @@ impl Cutter<'_> {
         };
         // Whether columns or bands are looked for in this region at all: it holds more than
         // three runs. Counted in words or in ink characters instead, a label of a few words
-        // and its value are looked at and parted (both measured in Task 31a), so the count
+        // and its value are looked at and parted, so the count
         // stays on runs: a region
         // of up to three runs is the one place where the cut still depends on how a line is
         // set in runs.
@@ -752,9 +752,9 @@ impl Cutter<'_> {
                     .collect()
             };
             // The bands are parted by the rules as the caller has them, not by the rules
-            // joined from their pieces (review M4 of Task 31b): a rule drawn in pieces parts
+            // joined from their pieces: a rule drawn in pieces parts
             // the bands only where one piece alone is wide enough. Parting them by the joined
-            // rules too was measured alone in fix round 2 and moved 9 public files, one of
+            // rules too was measured alone and moved 9 public files, one of
             // them for the worse (a table of dates and events of the arxiv report kept as
             // laid out in parts). So a rule in one piece and the same rule in pieces may part
             // the bands of a page differently: a known break of the `split-rules` kind, kept
@@ -1762,7 +1762,7 @@ impl Sides {
     /// the ink of the sides is the end of the longest row of the one and the start of the
     /// first row of the other, one row each, and says nothing of a piece alone on a row
     /// of its own. A mark or a short word between two lines of a column, close to its
-    /// ragged edge, is no line of that column by this (review R1 of Task 31b); the rows
+    /// ragged edge, is no line of that column by this; the rows
     /// of the sides over and under it decide (see [`rows_whole`]).
     ///
     /// The width asked is a share of the text size, not of the page. It is a step: a
@@ -1931,8 +1931,8 @@ type Whole = (Vec<Goes>, usize, Vec<usize>, Vec<Place>);
 ///   its pitch at the piece and the other runs on (a heading over a paragraph of one
 ///   column, beside a sentence of the other that goes on), the piece goes with the side
 ///   that breaks: it reads alone between the parts of that side over and under it, before
-///   what it heads, and the running side stays one flow, never parted (design ruling of
-///   fix round 8 of Task 31b; if the piece is no heading of that side, it reads one side
+///   what it heads, and the running side stays one flow, never parted (a design decision:
+///   if the piece is no heading of that side, it reads one side
 ///   early or late against a block that does not depend on it, which is free). Where both
 ///   sides break their pitch at the piece (a heading between two bands of columns, a
 ///   label over the two halves of a form), or a side says nothing (it ends there, or has
@@ -2150,7 +2150,7 @@ fn rows_whole(p: &[Piece], ids: &[usize], sides: &Sides) -> Whole {
 }
 
 /// The pieces that stand on a side by geometry alone, between two lines of one paragraph
-/// of that side: their indices in `ids` (Task 31c, the placing rule P). A piece in the
+/// of that side: their indices in `ids` (the placing rule P). A piece in the
 /// white space beside a column, short of the gutter, is a piece of that side only because
 /// the band of white space was found past it. When it is the only ink of its side on its
 /// baseline, nothing says that it is a line of the column, and read in the order of the
@@ -2275,7 +2275,7 @@ struct FlowLine {
 }
 
 /// The pieces across the gutter that are lines of the left side: a column that flows past a
-/// block on its right (Task 31c, class F). The lines of a column beside a block are short;
+/// block on its right. The lines of a column beside a block are short;
 /// under the block they run the full width, and the first of them stands across the gutter
 /// that the block made. It is a line of the column, and the block on the right is read
 /// before or after the column, never inside it (a paragraph of a letter beside a box of its
@@ -2308,7 +2308,7 @@ struct FlowLine {
 ///   side has a row beside one of those lines, both sides run into the stretch (two columns
 ///   of prose over a paragraph of full width, the right one shorter by a line or two: the
 ///   short last line of that paragraph is no line of the left column), and it stands
-///   across, after both (review 1 of Task 31c, M6).
+///   across, after both.
 ///
 /// The last condition is a step, not a ramp: a box whose last line stands on the baseline
 /// of the first line of the paragraph (within `near`) is beside it, one that ends higher
@@ -2466,7 +2466,7 @@ type Stretch = (usize, usize);
 ///
 /// One row alone with text on both sides has no second row to show the geometry of the
 /// rows. It is a block only with both of the proofs below at once: the header over its
-/// columns and the pieces of the rule as its cells (Task 38b: an item table with one item,
+/// columns and the pieces of the rule as its cells (an item table with one item,
 /// whose header row and item row the gutter of the page parted).
 ///
 /// When the row right over the upper rule is the header of its rows (see [`header_row`]:
@@ -2479,7 +2479,7 @@ type Stretch = (usize, usize);
 /// cell, says nothing). Then the stretch starts at the
 /// first row under the rule, and the row over it stays with the text over the rule: rows
 /// without titles, or under a line of a label and its amount (totals under a table), are read
-/// whole, each value in its row (Task 31c, S3).
+/// whole, each value in its row.
 ///
 /// The second part of the answer is the rows of values right over the rule of such a block
 /// (see [`values_over_rule`]), each as the range of its indices: a row carried over from the
@@ -2492,7 +2492,7 @@ type Stretch = (usize, usize);
 /// beside the two lines of the heading), the rule over them has a joint in the gutter and one
 /// before the outer numbers, but none between a number and its text or between the dots: the
 /// pieces of the rule are not the cells of those rows, and without a header nothing else says
-/// they are rows of one table (review I1 of part 2b-1). A known limit, owner after 0.1.0: a
+/// they are rows of one table. A known limit, owner after 0.1.0: a
 /// side heading beside form lines whose rule has a joint in every white space of the rows
 /// (no dots, the number in one piece with its text) is read as rows, and no general sign
 /// that parts it from a table was found (see the test
@@ -2839,7 +2839,7 @@ const TITLE_NUMBERS: usize = 2;
 /// [`TITLE_NUMBERS`] or more, and each is one more than the one before it, or each one
 /// less (`2024 2025`, `2025 2024 2023`, `1 2 3`). The step of one is what a run of years and
 /// the numbers of columns have, and what two sums side by side have by chance only (`Total
-/// 12 340`: two counts, or amounts in a currency without decimals, review Q6 of Task 31b).
+/// 12 340`: two counts, or amounts in a currency without decimals).
 /// Nothing else in a whole number tells a title from an amount, so numbers that do not
 /// count are amounts: titles that skip (`2020 2024`) then stay over the rule as a row of
 /// their own, an honest read, where sums read as titles would be a wrong header.
@@ -2999,7 +2999,7 @@ pub const SIZE_STEP: f32 = 1.08;
 /// baselines do not line up, a lone row beside a block (see [`lone_row`]) or a drawn box; and
 /// which of them makes it. Only
 /// the best band is tried (see [`best_band`]): a band after it, where the best one fails, cuts
-/// label and value blocks and table columns apart (ruling P6-X3). Pieces of white space only
+/// label and value blocks and table columns apart. Pieces of white space only
 /// are no text: they neither fill nor cross a band.
 fn gutter(p: &[Piece], ids: &[usize], rows: bool) -> Option<(Sides, Why)> {
     let inked: Vec<usize> = ids.iter().copied().filter(|&i| p[i].inked).collect();
@@ -3531,9 +3531,9 @@ pub fn offset_baselines(left: &[Vec<Part>], right: &[Vec<Part>], size: f32) -> b
     }
     // The meets are asked for the support of their paragraphs wherever the count alone
     // does not say apart, not only one line from its limit. A step at the limit was kept
-    // in fix round 8 of Task 31b because the model JSON of a public form moved without
+    // because the model JSON of a public form moved without
     // it; that move was the order of the page's grids, which differed from run to run
-    // (see `drawn::grids`). Measured again in Task 31c with that order fixed: no dump and
+    // (see `drawn::grids`). With that order fixed no dump and
     // no pin of the public sets moves without the step, so the rule holds at every count
     // and a line more or less that meets by chance does not switch it off.
     let heads = |side: &[Vec<Part>]| -> Vec<f32> { side.iter().map(|l| head(l).0).collect() };
@@ -3812,7 +3812,7 @@ mod tests {
         // less would not turn the count (8 of 16 is not fewer than half). Seven of the
         // eleven lines of the note still meet none: its four meets are chance at this
         // count as at the last, and the column is a block of its own. (A step at the
-        // limit stood here until Task 31c; a row more beside the titles switched the
+        // limit stood here once; a row more beside the titles switched the
         // rule off.)
         let mut far = fields.to_vec();
         far.push(265.4);
@@ -3856,7 +3856,7 @@ mod tests {
         let mut met = vec![true, false, false];
         unsupported(&[700.0, 692.0, 683.0], &mut met);
         assert_eq!(met, [false, false, false]);
-        // Two paragraphs share the line between them (review R4 of Task 31b): three
+        // Two paragraphs share the line between them: three
         // lines at a pitch of 8, then from the third on four lines at a pitch of 12. Of
         // the first only the shared line meets a row (1 of 3: not supported), of the
         // second the shared line and one more (2 of 4, half: supported). Each is judged
@@ -3882,7 +3882,7 @@ mod tests {
     }
 
     /// A piece of text on the baseline `y`, with the extent of its size.
-    /// Task 26 (the print form golden): two labels, each over the upper left of its value
+    /// Two labels, each over the upper left of its value
     /// (lower and to the right of it), are rows and no two blocks side by side. Each sign
     /// moves the answer: the count of the rows, the size step, the values' reading, the
     /// shared edges, the shared step down, and a value nearer to the next label than to
@@ -4118,7 +4118,7 @@ mod tests {
         assert_eq!(cut.groups, plain.groups);
     }
 
-    /// One row under its header between two rules (Task 38b, B2: an item table with one
+    /// One row under its header between two rules (an item table with one
     /// item). No second row shows the geometry of the rows, so the row is a block only with
     /// both other proofs: the titles over its columns, and the pieces of the rule as its
     /// cells. Then the header and the row read whole; the gutter of the page parted both.
@@ -4143,7 +4143,7 @@ mod tests {
         assert_eq!(at(firsts[1]), at(firsts[0]) + 4, "{:?}", cut.groups);
     }
 
-    /// Fix round 1 of Task 38b: the rows of a block between rules whose right cells stand 2
+    /// The rows of a block between rules whose right cells stand 2
     /// points lower than the left ones (cells set in the middle of a row beside a first cell
     /// of two lines). The block is proven rows, so the baselines of its sides that do not
     /// meet make no gutter in it: every row reads whole. Before, the block was parted again
@@ -4238,8 +4238,8 @@ mod tests {
     #[test]
     fn rows_without_titles_over_the_rule_read_whole() {
         // The same rows with a line of prose over the upper rule and no row of titles. The
-        // header: the line over the rule stays out of the block. The rows (part 2b of Task
-        // 31c, S3): rows of one geometry on both sides of the gutter whose columns the joints
+        // header: the line over the rule stays out of the block.
+        // Rows of one geometry on both sides of the gutter whose columns the joints
         // of the upper rule mark are read whole, each count and price in its row, with no
         // header over them; the gutter parted them before.
         let (mut ps, rules, firsts) = rows_between_rules();
@@ -4264,7 +4264,7 @@ mod tests {
 
     #[test]
     fn a_header_with_its_baseline_on_the_rule_is_a_header() {
-        // Review N4 of Task 31b. The titles sit on the rule (baseline 700): the middle of
+        // The titles sit on the rule (baseline 700): the middle of
         // the rule a tenth of the size over the baseline is on it still (a title on its
         // underline, rounded or jittered); three tenths over the baseline it runs through
         // the titles, and they are no header over it.
@@ -4293,7 +4293,7 @@ mod tests {
         // The header: through the titles the rule makes no header of them.
         let cut = cut_at(703.0);
         assert!(!rows_read_whole(&cut, &firsts[..1]), "{:?}", cut.groups);
-        // A known limit, owner after 0.1.0 (ruled after part 2b-1 of Task 31c; rows in
+        // A known limit, owner after 0.1.0 (rows in
         // order): the rows under that rule are parted by the gutter too, each count after
         // all items. The read keeps every text, none lost and none doubled. Cause: a rule
         // that runs through the text over it is no upper rule of the rows under it (`low`
@@ -4304,10 +4304,9 @@ mod tests {
 
     #[test]
     fn years_and_numbers_over_the_rule_are_titles() {
-        // Review N5 of Task 31b. Titles that are whole numbers (years over columns of
+        // Titles that are whole numbers (years over columns of
         // amounts, the numbers of columns) are a header; one amount among them is a row of
-        // values, no header: it stays over the rule, and the rows under it read whole (part
-        // 2b of Task 31c).
+        // values, no header: it stays over the rule, and the rows under it read whole.
         let (mut ps, rules, firsts) = rows_between_rules();
         let (joints, joined) = ruled_rows(&rules);
         let ruled = Ruled {
@@ -4330,13 +4329,13 @@ mod tests {
         // One of them an amount with a decimal mark: a value and no number.
         ps[firsts[0] + 3].number = None;
         assert!(!header(&ps));
-        // Review P4 of Task 31b. One whole number in the row is the amount of the label
+        // One whole number in the row is the amount of the label
         // beside it (`Total 250`), no title: a row of values, no header.
         set(&mut ps, 2, None);
         set(&mut ps, 3, Some(250));
         assert!(!header(&ps));
         // Two that count are titles, up or down, years or the numbers of columns; two that
-        // do not count are two sums (review Q6 of Task 31b), and so are two alike.
+        // do not count are two sums, and so are two alike.
         for (a, b, titles) in [
             (2025, 2024, true),
             (3, 4, true),
@@ -4368,7 +4367,7 @@ mod tests {
 
     #[test]
     fn an_amount_with_the_word_of_its_currency_is_a_value() {
-        // Q6 of Task 31b, the amounts of the shape `totals with whole amounts`: a whole
+        // The amounts of the shape `totals with whole amounts`: a whole
         // number with its currency in letters is an amount.
         for t in [
             "1.200 EUR",
@@ -4399,7 +4398,7 @@ mod tests {
 
     #[test]
     fn two_whole_amounts_over_the_rule_are_no_titles() {
-        // Review Q6 of Task 31b, a pin of a known gap until Task 26 part 3c-1. The row
+        // A pin of a known gap. The row
         // right over the rule in pieces is a row of sums, `Total` and two whole-number
         // amounts in the columns of the rows under the rule (two counts, or amounts in a
         // currency without decimals). Two whole numbers side by side are titles only when
@@ -4430,7 +4429,7 @@ mod tests {
         let cut = xy_cut_ruled(&ps, &ruled, &Limits::default(), &|| false);
         assert!(!parted_by_the_rule(&cut, firsts[0], firsts[1]));
         // With a decimal amount among them the row is a row of values: it stays over the
-        // rule, and the rows under it read whole (part 2b of Task 31c).
+        // rule, and the rows under it read whole.
         ps[firsts[0] + 3].number = None;
         let cut = xy_cut_ruled(&ps, &ruled, &Limits::default(), &|| false);
         assert!(
@@ -4441,7 +4440,7 @@ mod tests {
         assert!(rows_read_whole(&cut, &firsts[1..]), "{:?}", cut.groups);
     }
 
-    /// Task 36a part 2 (the row carried over): over the rule in pieces stands a label in the
+    /// Over the rule in pieces stands a label in the
     /// second column and its amount in the last one, where the titles of the rows would
     /// stand. The gutter of the page lies between the two, and the lines of the right side
     /// stood between the label and its amount. The row is read whole, the amount right after
@@ -4532,7 +4531,7 @@ mod tests {
         assert!(whole(&detailed(2)));
     }
 
-    /// Task 36a fix round 3 (re-review 2, I1): a heading with a date right over the rule in
+    /// A heading with a date right over the rule in
     /// pieces looks like a row carried over (a piece on each side of the gutter, a value,
     /// each at an edge of a column of the rows). It is no row of the rows under the rule:
     /// a row carried over is set as the rows are, in their face and size, and its amount
@@ -4646,7 +4645,7 @@ mod tests {
         assert!(!Reading::of("88,", true).goes_on("20", true).date());
     }
 
-    /// Task 36a fix round 2 (ruling on concern 4 of part 2): the row over the rule joins the
+    /// The row over the rule joins the
     /// rows under it only when it stands nearer to their first row than to the text over
     /// it. A total of the table above stands a row step under that table's last row, right
     /// over the rule of the next table and in its columns: it is a row of the table above
@@ -4703,7 +4702,7 @@ mod tests {
         assert!(carried(Some(40.0)));
         assert!(!carried(Some(20.0)));
         assert!(!carried(Some(19.0)));
-        // Fix round 3 (re-review 2, M2): two distances that differ by less than what makes
+        // Two distances that differ by less than what makes
         // two baselines one (`BASELINE_NEAR`, 0.15 sizes: 1.5 points at 10 points) are the
         // same distance, and the row stays where it stands. A row a hair nearer to the rows
         // under it does not turn the read.
@@ -4766,7 +4765,7 @@ mod tests {
     #[test]
     fn a_line_of_prose_right_over_the_rule_is_no_header() {
         // One piece of prose close over the upper rule, where the titles stood: no header,
-        // so it stays over the rule; the rows under it read whole (part 2b of Task 31c).
+        // so it stays over the rule; the rows under it read whole.
         let (mut ps, rules, firsts) = rows_between_rules();
         for c in (1..4).rev() {
             ps.remove(firsts[0] + c);
@@ -4795,7 +4794,7 @@ mod tests {
     fn a_line_of_a_label_and_its_amount_over_the_rule_is_no_header() {
         // Totals under a table: the line over the upper rule holds an amount, so it is no
         // row of titles and stays over the rule; the lines under the rule read whole, each
-        // label with its amount (part 2b of Task 31c). The same holds for a row of titles
+        // label with its amount. The same holds for a row of titles
         // with fewer pieces than the rows need.
         let (mut ps, rules, firsts) = rows_between_rules();
         let (joints, joined) = ruled_rows(&rules);
@@ -4848,7 +4847,7 @@ mod tests {
     /// again in one of two columns at the right. Rules across the page at 312, 252, 216 and
     /// 180, drawn in pieces with joints in the gutter and before the outer numbers. Between
     /// 252 and 216 the heading of `lines` lines (2 as on the form, or 3) stands beside line
-    /// 37, the end of its sentence and line 38. With `numbered` (review I1 of part 2b-1) line
+    /// 37, the end of its sentence and line 38. With `numbered` line
     /// 37 is one line (its text, the dots, the amount and the outer number), and beside the
     /// second line of the heading stands a numbered line like it at that baseline: two rows
     /// of one geometry with text on both sides of the gutter.
@@ -5091,7 +5090,7 @@ mod tests {
 
     #[test]
     fn a_side_heading_beside_form_lines_between_rules_is_no_item_rows() {
-        // Task 31c part 2b (M-3 and S3): the path of the public form irs-f1040 page 2. The
+        // The path of the public form irs-f1040 page 2. The
         // region has a gutter between the headings and the lines of the form by baselines
         // that do not line up (`Why::Offset`), and its rows with text on both sides of the
         // gutter between the rules at 252 and 216 are not rows of one geometry: the second
@@ -5128,7 +5127,7 @@ mod tests {
 
     #[test]
     fn a_side_heading_beside_numbered_form_lines_between_rules_is_no_item_rows() {
-        // Review I1 of part 2b-1 of Task 31c. The page of the test before with line 37 on one
+        // The page of the test before with line 37 on one
         // line and a numbered line beside the second line of the heading: two rows of one
         // geometry with text on both sides of the gutter, under a rule in pieces whose joints
         // (in the gutter, before the outer numbers) stand in white space of every row. No
@@ -5166,7 +5165,7 @@ mod tests {
         }
     }
 
-    /// A known limit, owner after 0.1.0 (re-review N1 of part 2b-1 of Task 31c): a side
+    /// A known limit, owner after 0.1.0: a side
     /// heading beside form lines whose rule has a joint in every white space of the rows.
     /// The page of the test before, but the lines of the form beside the heading have no
     /// dots and their number stands in one piece with their text (or they have none), and
@@ -5238,7 +5237,7 @@ mod tests {
 
     #[test]
     fn rows_without_titles_are_rows_when_the_pieces_of_the_rule_are_their_cells() {
-        // Review I1 of part 2b-1 of Task 31c: without a header the rows under a rule in
+        // Without a header the rows under a rule in
         // pieces are a block only when the white spaces between their cells hold the joints
         // of the rule, counted over the rows. Four rows of four cells under a line of prose;
         // in `split` of them the second cell is set in two pieces, with a white space
@@ -5443,7 +5442,7 @@ mod tests {
         assert!(!head_whole(&across));
     }
 
-    /// Class F of Task 31c, in the places of the real page: the paragraph of the letter in
+    /// The paragraph of the letter in
     /// rows 20 to 23 stands left of the box of the head (rows 15 and 16 on the right), and
     /// its third line (row 22) runs the full width under the box. It goes on from row 21 at
     /// the pitch of the letter and starts where row 21 starts: a line of the left side. The
@@ -5521,7 +5520,7 @@ mod tests {
             all.iter().position(|&o| o == 16).unwrap(),
         );
         assert!(right < long, "{all:?}");
-        // Review 1 of Task 31c, M5 to M7: the conditions on the right side, each alone.
+        // The conditions on the right side, each alone.
         // The page with one more row of the right side on a baseline of its own, right
         // under row `after`; whether the paragraph (the pieces that start at 30 on the
         // baselines 559 to 523) still reads in one piece.
@@ -5600,7 +5599,7 @@ mod tests {
         }
     }
 
-    /// Review 1 of Task 31c, M6, on the lines of a flow alone: two columns of prose on the
+    /// On the lines of a flow alone: two columns of prose on the
     /// same baselines, the right one a line shorter, over a paragraph of full width at
     /// their pitch and edge whose last line is short. The last line of the left column has
     /// no ink of the right side, the lines across follow it at the pitch, and the short
@@ -5653,7 +5652,7 @@ mod tests {
         assert_eq!(flows_past(&free, &beside, 1.5), Vec::<usize>::new());
     }
 
-    /// Review 2 of Task 31c, M-1: a known limit of `flows_past`, held as it reads today.
+    /// A known limit of `flows_past`, held as it reads today.
     /// The left one of two columns ends in a line alone after a paragraph gap, right over a
     /// paragraph of full width at the pitch of that line; the right column ended above
     /// the line. Wanted: nothing flows, the paragraph is read after both columns. Read
@@ -5666,7 +5665,7 @@ mod tests {
     /// last line of a letter paragraph beside a box looks (class F). The rows over the
     /// gap, which stand beside the right column, are not asked.
     ///
-    /// A known limit, owner after 0.1.0 (ruled after part 2b-1 of Task 31c): a paragraph
+    /// A known limit, owner after 0.1.0: a paragraph
     /// read between the foot of a column and the next column. The read keeps every text, none
     /// lost and none doubled. A rule needs to tell a block on the right from a column of text
     /// at the pitch and size of the left side, and two implementers found no general sign
@@ -5832,7 +5831,7 @@ mod tests {
 
     #[test]
     fn a_piece_that_no_row_supports_is_unsure() {
-        // Design ruling of fix round 5 of Task 31b. The ink of the sides ends at 310 (one
+        // The ink of the sides ends at 310 (one
         // long row; the others end at 250) and starts at 480. A piece that reaches into
         // the gutter with no edge of a row next to it, and without the rows of one side
         // alone under it, has no proven place: a heading centred in the white space or
@@ -5943,7 +5942,7 @@ mod tests {
         assert_eq!(stands_beside(318.0, 400.0, &sign), Place::Unsure);
         assert_eq!(stands_beside(318.0, 472.0, &sign), Place::Unsure);
         assert_eq!(stands_beside(313.0, 474.0, &sign), Place::Unsure);
-        // The width is a step at 0.8 sizes (review R6 of Task 31b), moved both ways by a
+        // The width is a step at 0.8 sizes, moved both ways by a
         // tenth of a point, about 1 % of the size. Before the right side: 7.3 points free
         // is a gutter, 7.1 points is none (free on neither side). After the left side:
         // 7.1 points is less than a gutter, 7.3 points is one (free on both sides).
@@ -5951,7 +5950,7 @@ mod tests {
         assert_eq!(stands_beside(313.0, 472.9, &sign), Place::Unsure);
         assert_eq!(stands_beside(317.1, 400.0, &sign), Place::Left);
         assert_eq!(stands_beside(317.3, 400.0, &sign), Place::Unsure);
-        // The other way (review R1 of Task 31b): the same pieces alone on their row. The
+        // The other way: the same pieces alone on their row. The
         // ink of the sides is one row each and says nothing of a row of its own: near a
         // side or not, the place is unsure, and the rows over and under the piece decide
         // (see `a_lone_piece_in_the_gutter_reads_after_both_columns`). Other ink without
@@ -5968,7 +5967,7 @@ mod tests {
 
     #[test]
     fn a_heading_centred_on_the_page_over_unequal_columns_stands_across() {
-        // Review P6 of Task 31b, the geometry of a public form: a heading from 189.4 to
+        // The geometry of a public form: a heading from 189.4 to
         // 422.6 on a page 612 points wide, over a wide left block and a narrow right one
         // with the gutter from 359.5 to 405.5.
         let page = |heading: (f32, f32)| {
@@ -6003,7 +6002,7 @@ mod tests {
         assert_eq!(sides.place(&ps[2]), Place::Left);
     }
 
-    /// The page of review P2 of Task 31b: a left column of eight lines from 30 to 250 at 10
+    /// A page with a left column of eight lines from 30 to 250 at 10
     /// points, a ninth line between them from 100 to `x1`, a right block of nine short
     /// lines from 480 to 565 at 9 points on baselines of their own, and with `margin` a
     /// short piece that starts there, lower on the page.
@@ -6023,7 +6022,7 @@ mod tests {
 
     #[test]
     fn a_line_that_ends_where_the_other_side_starts_stands_alike_at_any_edge() {
-        // Review P2 of Task 31b. The line ends a tenth of a point before or after the start
+        // The line ends a tenth of a point before or after the start
         // of the right block, where the edge of the gutter lies: the edge is an edge of the
         // steps the band is measured in and is not asked. The line reaches into no row of
         // the right block: a line of the left side, and both columns read whole.
@@ -6050,7 +6049,7 @@ mod tests {
         let ps = line_to_the_right_block(500.0, None);
         let (sides, _) = gutter_of(&ps);
         assert_eq!(sides.place(&ps[8]), Place::Across);
-        // Where the step is (review Q2 of the third re-review): all rows
+        // Where the step is: all rows
         // of the right block start at one edge, so the line is over all of them or none.
         // It reaches into a row by more than the slack, half a step of the band measure
         // (0.6 points here): less is the rounding of two places, not ink in a row. The
@@ -6082,7 +6081,7 @@ mod tests {
 
     #[test]
     fn marks_in_a_gutter_cross_nothing() {
-        // Review P3 of Task 31b. The number of a box, a check mark or a bullet in the white
+        // The number of a box, a check mark or a bullet in the white
         // space between two columns is no piece across: it parts no band, it does not count
         // against the gutter, and it stays with the line of its row. Both columns read
         // whole, the left one first, whatever the number of marks. Each mark leaves a
@@ -6139,7 +6138,7 @@ mod tests {
         // The mark near the right column stands on the row of a line of the left column:
         // no row of the right side shares its baseline, and it lies between two lines of
         // the right column, before their ink. It is read after both columns, not between
-        // those lines (the placing rule P of Task 31c).
+        // those lines (the placing rule P).
         assert_eq!(
             [went(marks[0]), went(marks[1]), went(marks[2])],
             [Goes::Left, Goes::Left, Goes::After]
@@ -6292,7 +6291,7 @@ mod tests {
 
     #[test]
     fn a_title_keeps_the_period_on_its_row() {
-        // The private finding P1 of Task 31b in small. The period starts before the gutter
+        // A private form in small. The period starts before the gutter
         // (250 to 300) and its ink ends at 320, after the start of the right block: it
         // reaches into all rows of the right side and into the three long rows of the left
         // one, with an edge of none. With the title left of it and the date right of it
@@ -6386,7 +6385,7 @@ mod tests {
 
     #[test]
     fn a_lone_piece_in_the_gutter_reads_after_both_columns() {
-        // Review Q1 of Task 31b and its corrected ruling. Two columns of prose of ten rows
+        // Two columns of prose of ten rows
         // at 10 points (30 to 250 and 280 to 565), the right one on baselines of its own or
         // on those of the left one, and one piece on a baseline of its own in the white
         // space between rows 4 and 5: a mark of 6 points or a short word of 10. It is the
@@ -6422,7 +6421,7 @@ mod tests {
         // the bands, after rows 0 to 4 of both columns and before rows 5 to 9 (a heading
         // of what follows it), and it counts against the gutter.
         //
-        // Design ruling of fix round 8 (review R2 of Task 31b): with the white space on
+        // A design decision: with the white space on
         // one side only, that side breaks its pitch and the other runs on, most likely
         // through a sentence. The running column is not parted: it reads whole. The piece
         // goes with the side that breaks, alone between rows 0 to 4 and rows 5 to 9 of
@@ -6471,7 +6470,7 @@ mod tests {
         }
     }
 
-    /// The placing rule P of Task 31c, the probe of the reviews of Task 31b: a short word
+    /// The placing rule P: a short word
     /// in the white space right of the left column, alone on a baseline between rows 4 and
     /// 5 of that column. The band of white space is found past the word, so it is a piece
     /// of the left side by geometry alone, and in the order of the rows it stood between
@@ -6538,7 +6537,7 @@ mod tests {
             let goes = rows_whole(&ps, &ids, &sides).0[at];
             assert_eq!(goes == Goes::After, beside, "{x0}: {goes:?}");
         }
-        // Review 1 of Task 31c, M7: the other conditions, each alone. Where the word
+        // The other conditions, each alone. Where the word
         // goes on the page `cols` (the columns of `prose_columns`, changed).
         let goes_on = |cols: Vec<Piece>, word: Piece| -> Goes {
             let (at, _, _, ps) = with_lone(cols, word);
@@ -6592,7 +6591,7 @@ mod tests {
         assert_eq!(last, Goes::After);
     }
 
-    /// Review 1 of Task 31c, M1: the rows of a gutter are asked of the pieces in the
+    /// The rows of a gutter are asked of the pieces in the
     /// order of their rows, whatever order the host hands them in. The probe of the placing
     /// rule P with its pieces from the last to the first: the word is still read after
     /// both columns (in the order given, the rows over and under it were not its
@@ -6629,7 +6628,7 @@ mod tests {
         }
     }
 
-    /// Review 1 of Task 31c, M2: the rules P and F change the order a piece is read in,
+    /// The rules P and F change the order a piece is read in,
     /// not what the sides of the gutter are made of.
     #[test]
     fn a_piece_read_out_of_its_row_is_evidence_where_it_stands() {
@@ -6677,7 +6676,7 @@ mod tests {
 
     #[test]
     fn a_lone_piece_near_one_column_is_no_line_of_it() {
-        // Review R1 of Task 31b. A short word 2 points after the ragged end of the left
+        // A short word 2 points after the ragged end of the left
         // column and 18 points before the right one, alone on its row between rows 4 and
         // 5 of the left column. A mark on row 1 of the left column, 6 points before the
         // right column, crosses the rest of the white space, so the gutter is the whole
@@ -6713,7 +6712,7 @@ mod tests {
         assert_eq!(cut.groups.last(), Some(&vec![at]));
         // The mark is the only ink of the right side on its baseline, between two lines
         // of the right column and before their ink: it reads after that column, not
-        // between its lines (the placing rule P of Task 31c).
+        // between its lines (the placing rule P).
         let between: Vec<usize> = cut.groups[1..cut.groups.len() - 1].concat();
         let mut rest = right.clone();
         rest.push(mark);
@@ -6748,12 +6747,12 @@ mod tests {
 
     #[test]
     fn a_lone_piece_beside_a_side_that_says_nothing_is_a_row_of_its_own() {
-        // The other way of the design ruling of fix round 8 (review R2 of Task 31b):
+        // The other way of the design decision:
         // which side breaks must be shown. The left column runs on through the piece at
         // its pitch. The right column says nothing at its height: it ends over the piece
         // (rows 0 to 4 only), or starts under it (rows 5 to 9 only), or it has two rows,
         // one over and one under the piece, and so no pitch that could break. The piece
-        // is a row of its own between the bands, as before the ruling.
+        // is a row of its own between the bands.
         let page = |keep: &dyn Fn(usize) -> bool| {
             let ps: Vec<Piece> = prose_columns(5.0, (0.0, 0.0))
                 .into_iter()
@@ -6928,7 +6927,7 @@ mod tests {
         let (goes, between, breaks, _) = rows_whole(&ps, &by_line, &sides);
         assert_eq!((goes[0], goes[1], between), (Goes::Right, Goes::Right, 0));
         assert_eq!(breaks, vec![0]);
-        // The mirror (review R5 of Task 31b): the same page turned left to right. The
+        // The mirror: the same page turned left to right. The
         // row of labels runs from inside the left block to the outer edge of the right
         // one, where most of the rows of the right block end, with the value at the left
         // of its row, a piece of the left side: the piece runs the whole width of the
@@ -6963,7 +6962,7 @@ mod tests {
 
     #[test]
     fn the_rows_a_piece_spans_are_counted_by_a_search() {
-        // Review R5 of Task 31b: a form of many rows, each a label from the left edge of
+        // A form of many rows, each a label from the left edge of
         // the left block over the white space into the right block (into the ink of every
         // fourth line of that block: no place is proven), with a value of the right block
         // on its row and a short line of the left block under it, set in a little. Each
@@ -7091,7 +7090,7 @@ mod tests {
 
     #[test]
     fn lines_that_reach_into_a_gutter_do_not_count_against_it() {
-        // Reviews N10 and P5 of Task 31b. Two lines of the paragraph end in the white space
+        // Two lines of the paragraph end in the white space
         // before the block (at 437 and 431) and the first line of the block starts in it
         // (at 433): three pieces reach into the gutter, which is found from the ends of
         // the other lines (380) to the block (440), and two pieces of seventeen may cross
@@ -7123,7 +7122,7 @@ mod tests {
 
     #[test]
     fn pieces_across_count_against_a_gutter() {
-        // Review P5 of Task 31b: a shape where the count of the pieces across is the reason.
+        // A shape where the count of the pieces across is the reason.
         // Two blocks of six lines on baselines of their own, a line across both under them,
         // a shorter line under it from its left edge (the last line of its paragraph) and
         // one that ends at its right edge. The short lines leave four points of the white
@@ -7234,7 +7233,7 @@ mod tests {
 
     #[test]
     fn the_work_of_ruled_blocks_grows_with_the_page() {
-        // Review I4 and N9 of Task 31b: the cut of a page with rules in pieces, joints and
+        // The cut of a page with rules in pieces, joints and
         // blocks between rules, measured as a whole (the joints, the rules of each region,
         // the rows and the joints over each block). Twice the page (twice the pieces, the
         // rules and the joints) takes at most twice the steps and a tenth more: the regions
@@ -7387,7 +7386,7 @@ mod tests {
         assert_eq!(cut.short, None);
     }
 
-    /// Fix round 1 of Task 31a (I4): boxes of a form, a small label over what is filled in,
+    /// Boxes of a form, a small label over what is filled in,
     /// all rows at one pitch. The equal bands part every row; a row of labels and the row of
     /// their values are read cell by cell, each label with the value under it, not the labels
     /// of the row and then its values. With labels in the size of the values the rows are
@@ -7437,7 +7436,7 @@ mod tests {
         }
     }
 
-    /// Fix round 2 of Task 31a (N1): rows of a label and its value at one pitch, the last row
+    /// Rows of a label and its value at one pitch, the last row
     /// (a total) set larger. The larger row is no row of values under a row of labels: its
     /// first piece ends with a colon, and the row over the two is a row like the upper one.
     /// The rows read row by row, each label with its own value.
@@ -7466,7 +7465,7 @@ mod tests {
         assert_eq!(cut.groups, vec![vec![0, 1], vec![2, 3], vec![4, 5]]);
     }
 
-    /// Fix round 2 of Task 31a (N1): `Subtotal 120.00` over a larger `Total 127.50`, no colon
+    /// `Subtotal 120.00` over a larger `Total 127.50`, no colon
     /// and no row over them. The upper row holds an amount: it is a label with its value, no
     /// row of labels.
     #[test]
@@ -7497,7 +7496,7 @@ mod tests {
         assert_eq!(cut.cells, vec![0]);
     }
 
-    /// Task 26 (A2, H1): rows of fields without rules, small labels a tenth of a size over
+    /// Rows of fields without rules, small labels a tenth of a size over
     /// their larger values, the rows a wider band apart. The first row shows the rule on
     /// its own evidence (two labels, two values); the second has one value under its first
     /// label, and the third one label over one value: each is set like the first (sizes and
@@ -7532,7 +7531,7 @@ mod tests {
         // Without the row that shows the rule, nothing is read like it.
         let alone: Vec<Piece> = rows(0.0)[4..].to_vec();
         assert_eq!(cut_of(&alone, &[]).cells, Vec::<usize>::new());
-        // Fix round 1 (M4): with a drawn rule between the labels and the values of the row
+        // With a drawn rule between the labels and the values of the row
         // that shows the rule, that row is the drawn typers' business and shows nothing:
         // no row is read like it. A rule over the row parts nothing.
         let rule = |at: f32| Line {
@@ -7547,7 +7546,7 @@ mod tests {
         assert_eq!(cut_of(&rows(0.0), &[rule(715.0)]).cells, vec![0, 1, 2]);
     }
 
-    /// Task 26 part 3a (H1): a field alone, far from the rows that show how the page sets a
+    /// A field alone, far from the rows that show how the page sets a
     /// row of labels over their values, with other text between them, so that it stands in
     /// another run of bands: it is read cell by cell when it is set like such a row, the same
     /// sizes from the same left edges and the value as far under its label. It is whether
@@ -7603,7 +7602,7 @@ mod tests {
         assert!(!field(&page(true, 0.0, 12.55, false)), "another step");
     }
 
-    /// Task 26 fix round 2 (M1): the page is cut a second time only for a band that a shown
+    /// The page is cut a second time only for a band that a shown
     /// row can make a row. A field alone whose value ends with a colon is refused with a
     /// shown row too: set like the shown rows or from another edge, the cut asks `stop` as
     /// often and does about the same work, where the field that reads costs a second cut.
@@ -7661,7 +7660,7 @@ mod tests {
         assert_eq!(seen.wanting, vec![way(50.0), way(90.0)]);
     }
 
-    /// Task 26 fix round 2 (I3): the second cut of a page (for a field alone that is set like
+    /// The second cut of a page (for a field alone that is set like
     /// the shown rows) never costs the first one. The cut asks `stop` once for each region it
     /// looks at; stopped from its n-th question on, for every n, the page ends cut short
     /// (stopped in the first cut) or with a whole read: the first cut, with the shown rows
@@ -7714,7 +7713,7 @@ mod tests {
         assert_eq!(cells(&cut_until(total + 1)), cells(&whole));
     }
 
-    /// Task 26 fix 3a (H1): a field alone right under a label of the form that has no value,
+    /// A field alone right under a label of the form that has no value,
     /// in the next row of the form. The label over it is a row in the size of its own label
     /// with a piece over it, as the row before the last rows of a block of rows is. It is a
     /// field with nothing filled in when it starts from the left edge of the shown labels
@@ -7780,7 +7779,7 @@ mod tests {
         assert!(!field(&near(18.5)), "no room for a value");
     }
 
-    /// Fix round 1 (M5): a region of many rows of fields set alike keeps one way a row is
+    /// A region of many rows of fields set alike keeps one way a row is
     /// set, not one for each row, so a row set like none of them is asked once, not once for
     /// each row that shows the rule: the work of the cut grows with the rows, not with their
     /// square.
@@ -7823,7 +7822,7 @@ mod tests {
         }
     }
 
-    /// Fix round 2 of Task 38b (review I2): a drawn box of two lines beside rows whose
+    /// A drawn box of two lines beside rows whose
     /// baselines do not meet its lines. In any region the baselines are the reason of the
     /// gutter and the box is not asked. In a block of rows between rules the baselines are
     /// no reason, and the box still is one: its text is parted from the rows.

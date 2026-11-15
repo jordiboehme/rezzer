@@ -19,7 +19,7 @@
 //! Regions are compared by every primitive they hold (runs, rules, boxes, pictures, codes),
 //! each mapped back to the primitives of the page it came from ([`Origin`]).
 //!
-//! Ruling on spatial to typed: a typed region of the changed page whose primitives were all
+//! Spatial to typed: a typed region of the changed page whose primitives were all
 //! spatial on the page is allowed and listed, not a break. The two pages are the same page,
 //! so either may be the one a file brings: seen from the changed page, the page is a move of
 //! that region to spatial, which the brief allows. The moves both ways are counted and pinned
@@ -635,18 +635,18 @@ impl Broken {
 /// - rules drawn as filled bars are input the PDF reader never hands over (it turns bars
 ///   into lines before the engine), so the engine's own taking of such input comes after
 ///   0.1.0. Runs in another order are read in the order of their places
-///   (`layoutregions::RunOrder`, Task 31c): a break under that change is a break like any
+///   (`layoutregions::RunOrder`): a break under that change is a break like any
 ///   other;
 /// - labels and values: after 0.1.0. The tasks that typed these leaves are closed (label
 ///   and value groups, then label order: each pin they owned is fixed or carries its traced
 ///   cause), so a new break of this class is traced and either fixed or kept with its
 ///   cause; no task before the release is its owner by default. The changes
 ///   whose cause is the segmentation (rules in pieces part the strips; absolute points in
-///   the drawn structure under a scale of 0.5 or 2) stay with Task 31;
+///   the drawn structure under a scale of 0.5 or 2) stay with the segmentation;
 /// - a text region read as another text kind (heading, list, paragraph, legend): after
 ///   0.1.0, for the same reason;
 /// - every other cut, join or order of regions (the segmentation, the bands of running
-///   headers and footers): Task 31.
+///   headers and footers): the segmentation.
 pub fn owner(t: Transform, what: Break, class: &str) -> &'static str {
     match (t, what, class) {
         (Transform::RuleAsBox, _, _) => "after 0.1.0",
@@ -663,7 +663,7 @@ pub struct Verdict {
     /// Typed regions that became spatial (allowed): the kind they had, and `kind: first words`.
     pub to_spatial: Vec<(Kind, String)>,
     /// Typed regions of the changed page whose primitives were all spatial on the page
-    /// (allowed by the ruling in the module doc): their kind, and `kind: first words`.
+    /// (allowed, see the module doc): their kind, and `kind: first words`.
     pub from_spatial: Vec<(Kind, String)>,
     /// What the change must not do.
     pub broken: Vec<Broken>,
@@ -1403,8 +1403,8 @@ pub fn pinned(path: &std::path::Path) -> Vec<String> {
 }
 
 /// The open owner a traced cause names: a cause written by hand may start with `owner <who>`
-/// (`owner Task 37. Traced ...`, `owner after 0.1.0, kept. ...`), where `<who>` is
-/// `after 0.1.0` or the name of a task (one word of letters and digits). `None` for a cause
+/// (`owner <name>. Traced ...`, `owner after 0.1.0, kept. ...`), where `<who>` is
+/// `after 0.1.0` or the name of an owner (one word of letters and digits). `None` for a cause
 /// that names no owner.
 pub fn traced_owner(cause: &str) -> Option<&str> {
     const LATER: &str = "after 0.1.0";

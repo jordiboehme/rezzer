@@ -1368,8 +1368,8 @@ fn visible_controls(t: &str) -> String {
 // Tables
 
 /// The text `[[target]]` or `[[target|text]]` for a link that came from a wikilink, with
-/// every bracket, `|` and other Markdown character escaped and line breaks as spaces (ruling
-/// P5-AD): Rezzer cannot know the name the target is written under,
+/// every bracket, `|` and other Markdown character escaped and line breaks as spaces:
+/// Rezzer cannot know the name the target is written under,
 /// so a live link to it would be broken on every import. This holds for every wikilink, also
 /// one with `_`, `:`, a path or formatting. Crystalline reads a wikilink wherever `[[`
 /// stands, also after a backslash, so each bracket is escaped. The link itself stays in the

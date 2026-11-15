@@ -1557,7 +1557,7 @@ mod tests {
         }
     }
 
-    /// Task 26 fix round 4 (review 4 I1, M1): the reader's pieces read as the engine's do
+    /// The reader's pieces read as the engine's do
     /// ([`cut::Reading`]), the same in one fragment and in several: a currency before its
     /// figures in a fragment of its own says nothing yet and the next fragment decides, a
     /// whole number goes on with its next digits.

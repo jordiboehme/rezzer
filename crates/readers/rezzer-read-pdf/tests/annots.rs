@@ -99,8 +99,8 @@ fn strikeout_and_underline_quotes() {
 }
 
 /// The highlight over two lines quotes them and anchors to their paragraph. The line `Not
-/// highlighted` under them stands in a drawn box, so it is a paragraph of its own (Task 15b
-/// part 2e-1: the text of a box is a block of its own).
+/// highlighted` under them stands in a drawn box, so it is a paragraph of its own:
+/// the text of a box is a block of its own.
 #[test]
 fn pypdf_highlight_spans_two_lines() {
     let out = read(&corpus("pypdf-annotated.pdf"));

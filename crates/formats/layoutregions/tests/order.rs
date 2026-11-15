@@ -247,7 +247,7 @@ fn head_left_then_right() {
     assert_eq!(p.ask(), [address, date, letter]);
 }
 
-/// Task 22: labels in a column beside their values in a column, and under them, further left,
+/// Labels in a column beside their values in a column, and under them, further left,
 /// a pair with nothing beside it. The pair is no part of the labels' column (it stands under
 /// none of them): it reads after both columns, not between the labels and their values.
 #[test]
@@ -797,10 +797,10 @@ fn order_of_pictures(n: usize, per: Option<u64>) -> (Vec<RegionId>, Option<u64>)
     (got, before.zip(after).map(|(b, a)| a - b))
 }
 
-/// Task 22 fix round 4: placing the pictures of a page in the source order grows with its
-/// pictures and lines, not with their product. Fix round 5: the pictures placed past the
+/// Placing the pictures of a page in the source order grows with its
+/// pictures and lines, not with their product. The pictures placed past the
 /// budget (by their height) stand where the full rule puts them. The work for each region is
-/// set small so that a page of a thousand pictures reaches it (Task 31c: a picture looks only
+/// set small so that a page of a thousand pictures reaches it (a picture looks only
 /// at the content that can reach into its width, so the page no longer reaches the work the
 /// engine gives it); the bound does not depend on that number.
 #[test]
@@ -855,7 +855,7 @@ fn work_beside_runs(runs: usize, pictures: bool) -> Option<u64> {
     before.zip(after).map(|(b, a)| a - b)
 }
 
-/// Task 31c: a picture is placed by the content in its width, and only the content that can
+/// A picture is placed by the content in its width, and only the content that can
 /// reach into its width is looked at: four times the runs left of the pictures add little to
 /// the work of placing them (the work with the pictures less the work without), which before
 /// went over every run left of each picture's right edge for each picture. The rule across
@@ -912,7 +912,7 @@ fn order_of_a_row(n: usize, per: u64) -> (Vec<RegionId>, Option<u64>) {
     (got, before.zip(after).map(|(b, a)| a - b))
 }
 
-/// Task 22 fix round 5: the regions level with a picture's top each look along the others of
+/// The regions level with a picture's top each look along the others of
 /// their row; that look is in the budget too, so the work grows with the row, not with its
 /// square, and the picture past the budget stands where the full rule puts it. The work for
 /// each region is set small so that a row of a thousand regions reaches it; the bound does not
@@ -934,7 +934,7 @@ fn a_row_level_with_a_picture_top_costs_about_its_length() {
     );
 }
 
-/// Task 22 fix round 5: a picture set into the top of a paragraph (its first lines beside the
+/// A picture set into the top of a paragraph (its first lines beside the
 /// picture, the rest under it) stands before that paragraph, whether the paragraph's box
 /// starts a little above the picture's top or a little under it: a region of the picture's
 /// own width level with its top counts as one that starts above it.
@@ -960,7 +960,7 @@ fn a_picture_set_into_the_top_of_a_paragraph_stands_before_it() {
     }
 }
 
-/// Task 22: in the source order, the regions read as the source has them, even across the
+/// In the source order, the regions read as the source has them, even across the
 /// columns a gutter would read down; a figure (no place in the source) stands before the first
 /// of them whose top is lower than its middle; furniture stays first and last.
 #[test]
@@ -981,7 +981,7 @@ fn source_order_holds_and_places_what_it_lacks() {
     assert_eq!(got, [l1, r, figure, l2, foot]);
 }
 
-/// Task 22 fix round 1: the mirror. A figure without text in the right column of a page the
+/// The mirror. A figure without text in the right column of a page the
 /// source reads column by column stays in the right column, between its paragraphs; it does
 /// not go into the left column at its height.
 #[test]
@@ -1000,7 +1000,7 @@ fn a_loose_figure_keeps_to_its_column() {
     assert_eq!(got, [l1, l2, r1, figure, r2]);
 }
 
-/// Task 22 fix round 2: a figure at the top of the right column (nothing of its width over it,
+/// A figure at the top of the right column (nothing of its width over it,
 /// the left column's text over it) stands before the right column's text, not in the left
 /// column at its height; one at the foot of the right column (its column's text over it,
 /// nothing of its width under it) stands after the right column's text, though a left
@@ -1034,7 +1034,7 @@ fn a_loose_figure_at_the_top_or_foot_of_its_column() {
     assert_eq!(got, [l1, l2, l3, r1, r2, figure]);
 }
 
-/// Task 22 fix round 3: a figure at the top of the right column under a title across both
+/// A figure at the top of the right column under a title across both
 /// columns stands before the right column's text: the title over it is no reading of its
 /// column, and the source reads the left column, which stands across the figure's top, first.
 #[test]
@@ -1054,7 +1054,7 @@ fn a_loose_figure_under_a_band_at_the_top_of_its_column() {
     assert_eq!(got, [title, l1, l2, figure, r1]);
 }
 
-/// Task 22 fix round 4: a figure set flush with the top of the right column stands before the
+/// A figure set flush with the top of the right column stands before the
 /// right column's text, with a band over the columns and without one. Columns start level: a
 /// picture is set at its frame's edge, a line box starts at its ascender, so the figure's top
 /// stands up to a line above the top of the left column's first line. The order does not
@@ -1085,7 +1085,7 @@ fn a_figure_flush_with_the_column_top_stays_in_its_column() {
     }
 }
 
-/// Task 22 fix round 4: the same when the left column opens with a one-line heading level with
+/// The same when the left column opens with a one-line heading level with
 /// the figure's top: the heading is no label beside the figure, because the source reads on down
 /// its column (its first paragraph) before it reaches the figure's column.
 #[test]
@@ -1116,7 +1116,7 @@ fn a_figure_flush_with_a_column_that_opens_with_a_heading() {
     }
 }
 
-/// Task 22 fix round 4: a code at the right of a page head, its top level with a one-line
+/// A code at the right of a page head, its top level with a one-line
 /// heading on the left. The source reads the head band by band: the left block under the
 /// heading ends above the paragraph across the page under the code, so the heading starts no
 /// column read down past the code, and the code keeps its place by its height, at the head.
@@ -1137,7 +1137,7 @@ fn a_code_level_with_a_heading_of_a_page_head_stays_at_the_head() {
     assert_eq!(got, [head, code, first, second, across]);
 }
 
-/// Task 22 fix round 4: a code at the foot of its column (a link over it, nothing of its width
+/// A code at the foot of its column (a link over it, nothing of its width
 /// under it), beside a column of links whose block starts a few points under the code's top. A
 /// column level with a picture's top says a column top only where the picture's column goes
 /// on under it; here the code keeps its place among the links beside it, before the first one
@@ -1162,7 +1162,7 @@ fn a_code_at_the_foot_of_its_column_stays_beside_its_links() {
     assert_eq!(got, [over, head, first, code, second]);
 }
 
-/// Task 22 fix round 3: a figure across both columns between two bands of them. A source read
+/// A figure across both columns between two bands of them. A source read
 /// band by band gives it its place between the bands. A source read column by column reads
 /// across it at the left column's crossing: it stands there, after the left column's upper
 /// paragraph (the first place a reader of the page meets it), not after the right one.
@@ -1183,7 +1183,7 @@ fn a_figure_across_the_columns_between_bands() {
     assert_eq!(got, [l1, figure, l2, r1, r2]);
 }
 
-/// Task 22 fix round 3: a logo at the top left of a page head, beside a region the segmenter
+/// A logo at the top left of a page head, beside a region the segmenter
 /// made across the gutter (a short left paragraph low on the page and the right address
 /// beside the logo). That region's box reaches over and under the logo, but its content in
 /// the logo's width is the short paragraph only: it neither holds the logo nor stands over

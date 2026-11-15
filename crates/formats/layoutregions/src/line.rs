@@ -24,7 +24,7 @@ pub const GAP_RATIO: f32 = 1.5;
 
 /// Font sizes closer than this share of the larger one are the same size: half a point at
 /// 10 points. A share of the text size, so that a page printed at half or twice its size
-/// keeps the sizes that are the same (Task 31a; it was half a point at every size).
+/// keeps the sizes that are the same.
 pub const SIZE_SLACK_SHARE: f32 = 0.05;
 
 /// Whether the font sizes `a` and `b` are the same size (see [`SIZE_SLACK_SHARE`]).
@@ -34,8 +34,7 @@ pub fn same_size(a: f32, b: f32) -> bool {
 
 /// Line ends closer than this share of the text size of the lines are one edge: a point at
 /// 10 points. A share of the size of the text that stands at the edge, so that the edges of
-/// a page printed smaller or larger are the same edges (Task 31a; it was a point at every
-/// size).
+/// a page printed smaller or larger are the same edges.
 pub const EDGE_SIZES: f32 = 0.1;
 
 /// A run that starts less than this many sizes right of where the ink of the run before it

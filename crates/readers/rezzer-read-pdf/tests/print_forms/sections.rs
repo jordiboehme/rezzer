@@ -257,7 +257,7 @@ fn stroked_marks_without_sections() {
 }
 
 /// Guard: a boxed amount of one row of digit boxes alone is a header band candidate that
-/// holds no words: no table and no loss (this was so before Task 5 too).
+/// holds no words: no table and no loss.
 #[test]
 fn boxed_amount_alone_gives_no_loss() {
     let page = boxed_page("123456", &[4], &["Summe 9.876,54", "Netto 1.234,56"]);

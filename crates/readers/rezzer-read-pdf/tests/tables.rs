@@ -180,7 +180,7 @@ fn tagged_span_table() -> Vec<u8> {
     b.finish(catalog)
 }
 
-/// Review focus 2 (Task 19): a table the tag tree states stays the given table. Its region
+/// A table the tag tree states stays the given table. Its region
 /// is exact (the file states it, no rule typed it again), and each of its cell texts stands
 /// once in the Markdown, never also in a paragraph.
 #[test]
@@ -308,7 +308,7 @@ fn tagged_glued_table() -> (Vec<u8>, Vec<Vec<String>>) {
     (b.finish(catalog), rows)
 }
 
-/// Task 19b (carried: tagged tables are checked against geometry): a tagged table whose tags
+/// A tagged table whose tags
 /// put the rest of each row in one cell, so two tagged columns hold eight visible ones, loses
 /// its certainty: its glued cells are cut where their text stands apart, and its eight columns
 /// are a table with each value in its own cell. A note says why.
@@ -487,7 +487,7 @@ fn two_cell_tagged_table(
     b.finish(catalog)
 }
 
-/// Fix round 1 (F2): an item table tagged as two cells a row (a date, and everything else),
+/// An item table tagged as two cells a row (a date, and everything else),
 /// with rules that agree with the tags: in the second cell the text stands in seven columns
 /// that line up over a header of two lines and every item row; descriptions wrap onto lines
 /// with nothing in the other columns, and an item without a price has no tax, net or gross.
@@ -499,7 +499,7 @@ fn a_tagged_item_table_glued_behind_its_first_cell_is_cut_into_its_columns() {
     check_glued_items(&out, "1 19 %");
 }
 
-/// Fix round 3 (H1): the raised mark before each rate is a reference to a footnote when the
+/// The raised mark before each rate is a reference to a footnote when the
 /// page's tags give a list item that opens with the same raised number: the rate cell holds
 /// the rate and the reference after it, the item is the footnote, not a list item.
 #[test]
@@ -906,15 +906,15 @@ fn a_ruled_table_region_reaches_its_rules() {
         .filter(|n| n.kind == rezzer_model::RegionKind::Paragraph)
         .map(|n| n.anchor.0.as_str())
         .collect();
-    // Task 19: the engine may decide the text above and below the table as one paragraph
-    // region (one segment), at its first block; a finder of today gave each block its own.
+    // The engine may decide the text above and below the table as one paragraph
+    // region (one segment), at its first block; a pre-pass finder gave each block its own.
     assert!(
         paragraphs == ["p1:b1", "p1:b2"] || paragraphs == ["p1:b1"],
         "{regions:#?}"
     );
 }
 
-/// A grid of drawn rules over most of the page (the page frame of plan 6) is refused: its
+/// A grid of drawn rules over most of the page (the page frame) is refused: its
 /// runs stay paragraphs, each in a paragraph region that says why the grid is no table.
 #[test]
 fn refused_grid_keeps_its_text_in_paragraph_regions_with_the_reason() {
@@ -1015,8 +1015,8 @@ fn form_boxes_are_not_a_table() {
     // The direct deposit form is not tagged: its boxes and its sample check are no table.
     let sf = read_corpus("pdfbox-sf1199a-direct-deposit.pdf");
     assert_eq!(all_tables(&sf), 0);
-    // Task 19a-5b: the check's lone line may be kept as laid out (no region type has clear
-    // evidence for it; a right read turned Spatial, Task 36): its text stays whole.
+    // The check's lone line may be kept as laid out (no region type has clear
+    // evidence for it; a right read turned Spatial): its text stays whole.
     let laid_out = page(&sf, 4).iter().any(|b| match b {
         Block::Spatial { lines, .. } => lines
             .iter()
@@ -1351,7 +1351,7 @@ fn ruled_cells(xs: &[f32], tag: &str) -> String {
     c
 }
 
-/// Task 17 D9: a sentence printed over the last row of a ruled table, its word gap on a column
+/// A sentence printed over the last row of a ruled table, its word gap on a column
 /// rule, is no text of the table's cells: it is read as a paragraph next to the table, with a
 /// note that says why. The rows above keep their cells.
 #[test]
@@ -1522,7 +1522,7 @@ fn a_grid_next_to_a_figure_caption_gets_no_note() {
     );
 }
 
-/// Task 19b (carried from Task 18): a ruled parts list whose drawing column holds "Abb. 3"
+/// A ruled parts list whose drawing column holds "Abb. 3"
 /// cells is a table read by its rules. Such a cell points to a figure, it captions none; only
 /// a caption alone on its line in a grid speaks for a chart.
 #[test]
@@ -1567,7 +1567,7 @@ fn a_ruled_table_with_figure_reference_cells_is_a_table() {
     );
 }
 
-/// Fix round 1 (F1): the drawing of a grid next to a figure caption is a figure with no media
+/// The drawing of a grid next to a figure caption is a figure with no media
 /// block of its own and no text (the grid's text is its own region): it wrote nothing on the
 /// page, so its region stands at the page. A figure or code region with text and no media block
 /// keeps the block of its text (lib.rs); no such region occurs in the three dump sets.
@@ -2309,7 +2309,7 @@ fn header_icons_count_as_header_cells() {
         }
         read(&pdf(&[Page::text(c)], ""))
     };
-    // Re-review 3 of task 36a, N4: the first words are quoted as they are. The loss is
+    // The first words are quoted as they are. The loss is
     // plain text, so a quote mark in them gets no backslash.
     let quoted = with_icon("5\" pipe");
     assert!(
@@ -3276,7 +3276,7 @@ fn a_date_that_ends_a_wrapped_text_stays_in_its_record() {
 /// One cell of [`tagged_timetable`]: its lines, each its text (empty: no text on that line).
 type TaggedCell<'a> = &'a [&'a str];
 
-/// Private shape S1 (Task 29 fix round 1, vision class A on the given path): a tagged
+/// A tagged
 /// timetable, its table stated by the tag tree, each row a departure over an arrival in cells
 /// of two lines: the stops, a date and a time on each line, a platform on one line, a product
 /// on the first line, and a note that wraps to the table's right end. `size` is the text size
@@ -3416,7 +3416,7 @@ fn a_tagged_row_keeps_its_cell_lines() {
         "Bitte beachten Sie den Hinweis zur Fahrradmitnahme im Zug",
         "und am Bahnsteig",
     ];
-    // Fix round 2: a note whose first line ends in a label and whose second line is its value,
+    // A note whose first line ends in a label and whose second line is its value,
     // a long number that would not have fit after the label: one note, never a pair with the
     // arrival's line.
     let numbered = [
@@ -3492,7 +3492,7 @@ fn a_tagged_row_keeps_its_cell_lines() {
     }
 }
 
-/// Task 29 fix round 4, the other direction of [`a_tagged_row_keeps_its_cell_lines`]: in a row
+/// In a row
 /// whose other cells hold one line each, a note whose first line is full joins its second line
 /// when the text goes on, in a small letter (with a space) or after a hyphen in a word (with
 /// nothing between); a full line before a capital stays a line.
@@ -3598,7 +3598,7 @@ fn field_left_of_a_header_row(rule: Option<(f32, f32, f32)>, titles: &[&str]) ->
         .collect()
 }
 
-/// Task 36a part 2 (the mirror of class K): a label that starts the line of a table's header
+/// A label that starts the line of a table's header
 /// cells, over a drawn line of its own with its value under it. The header cells are read
 /// before the label, so the label stands with its value. Each part of the evidence moved the
 /// other way keeps the line of the text pass: without the line under the label the page looks
@@ -3785,7 +3785,7 @@ fn timetable(icons: bool) -> String {
     c
 }
 
-/// Task 38b, B3: an icon of filled curves only (a clock: a ring and two hands) in a cell of
+/// An icon of filled curves only (a clock: a ring and two hands) in a cell of
 /// the first row is a drawing in that cell as much as an icon of lines and rectangles (a
 /// calendar). The loss named the calendar cells only, so the clock cells were empty without
 /// a word. Every cell with a drawing and no text is named; a cell that holds nothing is not.
@@ -3867,7 +3867,7 @@ fn chart(n: usize) -> String {
         .collect()
 }
 
-/// Fix round 2 of Task 38b (review M3): a page with more drawn paths than it keeps and no
+/// A page with more drawn paths than it keeps and no
 /// table that looks for icons says nothing about its drawings: a map or a chart is no loss
 /// of a table. The same drawing over a ruled table whose first row is all text says nothing
 /// either: no cell was looked at for an icon.
@@ -3893,7 +3893,7 @@ fn many_drawn_paths_without_an_icon_cell_write_no_note() {
     assert!(!noted(chart(9_000) + &table));
 }
 
-/// Fix round 2 of Task 38b (review M6): an empty cell of the first row that is struck out
+/// An empty cell of the first row that is struck out
 /// with a cross of two slanted lines (as forms mark a field that does not apply) holds a
 /// drawing and no text, as a cell with an icon does. The page shows something there that
 /// Rezzer does not read, so the cell is named: saying nothing would hide a mark of the page,
@@ -3916,7 +3916,7 @@ fn an_empty_cell_struck_out_with_a_cross_is_named_as_a_drawing() {
     );
 }
 
-/// Fix round 2 of Task 38b (review M9): a path that puts no ink on the page is no drawing.
+/// A path that puts no ink on the page is no drawing.
 /// The clock icons stroked or filled in pure white leave their cells unnamed, and so does a
 /// fill with no opacity; in black they are named.
 #[test]
@@ -3974,7 +3974,7 @@ fn with_gstate(content: &str, resources: &str) -> Vec<u8> {
     b.finish(catalog)
 }
 
-/// Fix round 3 of Task 38b: two tables on one page that both looked for icons, on a page
+/// Two tables on one page that both looked for icons, on a page
 /// that draws more paths than it keeps. The page says once that its drawings were looked at
 /// only in part.
 #[test]
@@ -3997,7 +3997,7 @@ fn the_shape_limit_is_said_once_for_a_page_of_two_tables() {
     assert_eq!(said, 1, "{:?}", out.document.losses);
 }
 
-/// Fix round 4 of Task 38b: two tables on one page that start with the same words and hold
+/// Two tables on one page that start with the same words and hold
 /// icons in the same cells give the same words in their icon losses. Each table has its
 /// loss: only a note of the page as a whole is said once.
 #[test]
