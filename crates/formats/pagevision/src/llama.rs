@@ -28,7 +28,7 @@ use crate::prepare::{Prepared, expected_image_tokens};
 use crate::types::{Fingerprint, Stats};
 
 /// The pinned `llama-cpp-2` version; keep equal to the workspace pin.
-pub const LLAMA_CPP_2_VERSION: &str = "0.1.158";
+pub const LLAMA_CPP_2_VERSION: &str = "0.1.161";
 
 /// Context size cap, prompt plus output.
 const MAX_CTX: u32 = 16384;
@@ -249,7 +249,7 @@ impl VisionModel {
             .map_err(|e| engine_err("creating llama context", e))?;
         #[allow(clippy::cast_possible_wrap)] // N_BATCH is a small constant
         let mut n_past = chunks
-            .eval_chunks(&self.mtmd, &ctx, 0, 0, N_BATCH as i32, true)
+            .eval_chunks(&mut self.mtmd, &mut ctx, 0, 0, N_BATCH as i32, true)
             .map_err(|e| engine_err("evaluating prompt", e))?;
         let encode_ms = millis(encode_start);
 
