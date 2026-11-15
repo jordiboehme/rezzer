@@ -28,7 +28,7 @@
           "truncated": false,
           "prompt_tokens": 3189,
           "output_tokens": 132,
-          "ms": 13979
+          "ms": 28991
         },
         {
           "id": "test2",
@@ -47,7 +47,7 @@
           "truncated": false,
           "prompt_tokens": 3189,
           "output_tokens": 352,
-          "ms": 20249
+          "ms": 42705
         },
         {
           "id": "diag1",
@@ -66,7 +66,7 @@
           "truncated": false,
           "prompt_tokens": 3189,
           "output_tokens": 357,
-          "ms": 20975
+          "ms": 42522
         },
         {
           "id": "diag2",
@@ -74,7 +74,7 @@
           "edges": {
             "truth": 4,
             "predicted": 4,
-            "correct": 3
+            "correct": 4
           },
           "boxes": {
             "ink_coverage": 0.9767950649164335,
@@ -85,7 +85,7 @@
           "truncated": false,
           "prompt_tokens": 3189,
           "output_tokens": 226,
-          "ms": 17187
+          "ms": 33145
         },
         {
           "id": "diag3",
@@ -104,7 +104,7 @@
           "truncated": false,
           "prompt_tokens": 3189,
           "output_tokens": 332,
-          "ms": 20784
+          "ms": 40408
         }
       ],
       "private": {
