@@ -131,11 +131,11 @@ Handwritten test pages for `pagevision-eval`, with their ground truth (`*.txt`, 
 
 | File | Source | License | SHA-256 |
 |---|---|---|---|
-| vision/test1.png | own handwriting on a Supernote, rendered by notedown | MPL-2.0 | aa1f6d8647d907ae0a4bb826381723fb78b5d99475115fbf055a77ee2478621e |
-| vision/test2.png | own handwriting on a Supernote, rendered by notedown | MPL-2.0 | 6d405cc65df706e28d4af161202bdc0a872fde04ca932fe7cecb8b6a39ab72bc |
-| vision/diag1.png | own handwriting on a Supernote, rendered by notedown | MPL-2.0 | ecf8b7388b450bf0167a2dfc4ee376265b5cd282248689e5a72dfaa77a626b3d |
-| vision/diag2.png | own handwriting on a Supernote, rendered by notedown | MPL-2.0 | 490311642cf7c9444ba16c89adcaa3e9b0cc2d90a23a21fd55b126a705502a96 |
-| vision/diag3.png | own handwriting on a Supernote, rendered by notedown | MPL-2.0 | ec00929363e08b61a53c0b62f8e2eb19fe8b636231b31d01294da811a7ebbbdc |
+| vision/test1.png | made for https://github.com/jordiboehme/rezzer : own handwriting on a Supernote, rendered by notedown | MPL-2.0 | aa1f6d8647d907ae0a4bb826381723fb78b5d99475115fbf055a77ee2478621e |
+| vision/test2.png | made for https://github.com/jordiboehme/rezzer : own handwriting on a Supernote, rendered by notedown | MPL-2.0 | 6d405cc65df706e28d4af161202bdc0a872fde04ca932fe7cecb8b6a39ab72bc |
+| vision/diag1.png | made for https://github.com/jordiboehme/rezzer : own handwriting on a Supernote, rendered by notedown | MPL-2.0 | ecf8b7388b450bf0167a2dfc4ee376265b5cd282248689e5a72dfaa77a626b3d |
+| vision/diag2.png | made for https://github.com/jordiboehme/rezzer : own handwriting on a Supernote, rendered by notedown | MPL-2.0 | 490311642cf7c9444ba16c89adcaa3e9b0cc2d90a23a21fd55b126a705502a96 |
+| vision/diag3.png | made for https://github.com/jordiboehme/rezzer : own handwriting on a Supernote, rendered by notedown | MPL-2.0 | ec00929363e08b61a53c0b62f8e2eb19fe8b636231b31d01294da811a7ebbbdc |
 
 ## Scorecard assertion files (`../scorecard/corpus/`)
 
