@@ -125,6 +125,18 @@ The PDF files are downloaded unchanged from the pinned commit of their source (t
 | pdf/nics-background-checks-2015-11.pdf | https://github.com/jsvine/pdfplumber/blob/4c64b92d5caccd71c645e98e0fabb0c4dba7ff45/tests/pdfs/nics-background-checks-2015-11.pdf (downloaded 2026-10-21) | FBI NICS firearm checks statistics (November 2015), work of the US government, public domain; distributed in the pdfplumber repository, whose MIT license does not cover its sample files | 4f0ae6e017b0e97de211da8fd97316e55bd927af5740d6ce95e1b7b1539f9407 |
 | pdf/mustang-gnuaccounting-invoice-508.pdf | https://github.com/ZUGFeRD/mustangproject/blob/c83a73af4e57b45a8bb396ce97003f0fca05f5a9/library/src/test/resources/MustangGnuaccountingBeispielRE-20201121_508blanko.pdf (downloaded 2026-10-21) | Apache-2.0 (Mustang repository; a sample invoice with made-up data and a logo top right) | 6fd91b9e3b47193c4a7d6ea4bc30b80d1fd3f9e2cf74f3300f66f16303157dc1 |
 
+## Vision test pages (`vision/`)
+
+Handwritten test pages for `pagevision-eval`, with their ground truth (`*.txt`, `*.edges`) and `manifest.toml`. The pages are the author's own handwriting; the truth was written by hand. Private pages are not in this repository.
+
+| File | Source | License | SHA-256 |
+|---|---|---|---|
+| vision/test1.png | own handwriting on a Supernote, rendered by notedown | MPL-2.0 | aa1f6d8647d907ae0a4bb826381723fb78b5d99475115fbf055a77ee2478621e |
+| vision/test2.png | own handwriting on a Supernote, rendered by notedown | MPL-2.0 | 6d405cc65df706e28d4af161202bdc0a872fde04ca932fe7cecb8b6a39ab72bc |
+| vision/diag1.png | own handwriting on a Supernote, rendered by notedown | MPL-2.0 | ecf8b7388b450bf0167a2dfc4ee376265b5cd282248689e5a72dfaa77a626b3d |
+| vision/diag2.png | own handwriting on a Supernote, rendered by notedown | MPL-2.0 | 490311642cf7c9444ba16c89adcaa3e9b0cc2d90a23a21fd55b126a705502a96 |
+| vision/diag3.png | own handwriting on a Supernote, rendered by notedown | MPL-2.0 | ec00929363e08b61a53c0b62f8e2eb19fe8b636231b31d01294da811a7ebbbdc |
+
 ## Scorecard assertion files (`../scorecard/corpus/`)
 
 `tests/scorecard/corpus/<file>.pdf.facts` holds relational facts about the corpus file `pdf/<file>.pdf`: rows of its tables, its headings, the order of its paragraphs, label and value pairs and link targets. They are written by `scripts/measure/truth.sh` from the file itself (its tags, its invoice XML, its filled form fields) and hold short excerpts of its text. Each assertion file is derived from its PDF file and keeps the license of that file, as listed above. Assertion files exist only for files of this manifest. The two files of `remote.tsv` are US government work (NIST) and CC BY 4.0 (arXiv); only the NIST file has an assertion file.

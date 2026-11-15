@@ -495,18 +495,24 @@ fn canon(label: &str, keys: &BTreeSet<String>, node_labels: Option<&[String]>) -
         return best_dice(label, nodes.iter()).map_or_else(|| label.to_string(), Clone::clone);
     }
     let padded = format!(" {label} ");
-    let whole_word = keys
+    let squashed = label.replace(' ', "");
+    let contained = keys
         .iter()
-        .filter(|k| !k.is_empty() && padded.contains(&format!(" {k} ")))
+        .filter(|k| {
+            !k.is_empty()
+                && (padded.contains(&format!(" {k} "))
+                    || (k.chars().count() > 3 && squashed.contains(&k.replace(' ', ""))))
+        })
         .max_by(|a, b| a.len().cmp(&b.len()).then_with(|| b.cmp(a)));
-    whole_word
+    contained
         .or_else(|| best_dice(label, keys.iter()))
         .map_or_else(|| label.to_string(), Clone::clone)
 }
 
 /// Scores predicted edges against a truth. An edge is correct with the same ends and the same
-/// direction, counted once. A predicted label maps to a truth label (whole word first, then
-/// Dice of at least 0.5), and an arrow label drawn as its own node counts as the arrow.
+/// direction, counted once. A predicted label maps to a truth label (whole word, or a squashed
+/// substring for a truth label longer than 3 characters, longest first, then Dice of at least
+/// 0.5), and an arrow label drawn as its own node counts as the arrow.
 pub fn score_edges(predicted: &[Edge], truth: &TruthEdges) -> EdgeScore {
     let mut keys: BTreeSet<String> = BTreeSet::new();
     for e in &truth.edges {
@@ -655,6 +661,17 @@ mod tests {
         let edges = mermaid_edges(&fenced("graph LR\n  A[Notedown] --> B[OCR model (qwen)]"));
         assert_eq!(edges, vec![e("notedown", "ocr model qwen", Dir::Directed)]);
         assert_eq!(score_edges(&edges, &truth).correct, 1);
+    }
+
+    #[test]
+    fn squashed_label_matches_longer_truth_labels_only() {
+        let truth = parse_truth("notedown <--> supernote\n");
+        let edges = mermaid_edges(&fenced("graph LR\n  A[Notedown] <--> B[Super Note]"));
+        assert_eq!(score_edges(&edges, &truth).correct, 1);
+        // "ocr" has 3 characters: no squashing inside an unrelated word
+        let truth = parse_truth("notedown --> ocr\n");
+        let edges = mermaid_edges(&fenced("graph LR\n  A[Notedown] --> B[Soc Rate]"));
+        assert_eq!(score_edges(&edges, &truth).correct, 0);
     }
 
     #[test]

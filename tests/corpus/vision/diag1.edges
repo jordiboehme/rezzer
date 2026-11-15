@@ -1,0 +1,5 @@
+notedown <--> supernote
+notedown --> ocr model
+ocr model --> md
+md -->|mcp| claude ai agent
+claude ai agent <--> crystalline

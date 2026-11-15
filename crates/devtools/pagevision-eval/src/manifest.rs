@@ -96,4 +96,22 @@ known_fail = true
         let err = load_manifest(Path::new("/nonexistent/manifest.toml")).unwrap_err();
         assert!(matches!(err, EvalError::Io { .. }));
     }
+
+    #[test]
+    fn public_vision_manifest_loads() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../tests/corpus/vision/manifest.toml");
+        let m = load_manifest(&path).unwrap();
+        assert_eq!(m.set, "public");
+        let ids: Vec<&str> = m.pages.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, ["test1", "test2", "diag1", "diag2", "diag3"]);
+        for page in &m.pages {
+            assert!(page.image.is_file(), "{}", page.image.display());
+            for f in [&page.text, &page.edges].into_iter().flatten() {
+                assert!(f.is_file(), "{}", f.display());
+            }
+        }
+        assert!(m.pages[4].known_fail);
+        assert_eq!(m.pages.iter().map(|p| p.diagrams).sum::<u32>(), 6);
+    }
 }

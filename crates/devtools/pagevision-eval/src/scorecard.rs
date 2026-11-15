@@ -539,9 +539,8 @@ mod tests {
     fn scorecard_matches_build() {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
         let card_path = root.join("crates/formats/pagevision/eval/scorecard.json");
-        let Ok(raw) = std::fs::read_to_string(&card_path) else {
-            return; // not written yet
-        };
+        let raw = std::fs::read_to_string(&card_path)
+            .unwrap_or_else(|e| panic!("{}: {e}", card_path.display()));
         let card: Scorecard = serde_json::from_str(&raw).unwrap();
         let lock = std::fs::read_to_string(root.join("Cargo.lock")).unwrap();
         if let Err(errors) = check_fingerprints(&card, &lock) {

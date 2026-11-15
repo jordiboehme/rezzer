@@ -24,7 +24,7 @@ fn test2() -> Prepared {
     let path = std::env::var_os("PAGEVISION_TEST2")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/corpus/vision/test2.png")
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../tests/corpus/vision/test2.png")
         });
     let png = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
     prepare(&png, &QWEN35_4B.image).unwrap()
