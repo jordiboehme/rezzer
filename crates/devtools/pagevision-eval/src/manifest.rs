@@ -27,6 +27,9 @@ pub struct PageEntry {
     pub text: Option<PathBuf>,
     /// Ground truth edges of the diagrams.
     pub edges: Option<PathBuf>,
+    /// Node map (`ID<TAB>label`) for a truth whose edges use ids.
+    #[serde(default)]
+    pub nodes: Option<PathBuf>,
     /// Number of diagrams drawn on the page.
     #[serde(default)]
     pub diagrams: u32,
@@ -45,6 +48,7 @@ pub fn load_manifest(path: &Path) -> Result<Manifest, EvalError> {
         page.image = base.join(&page.image);
         page.text = page.text.take().map(|p| base.join(p));
         page.edges = page.edges.take().map(|p| base.join(p));
+        page.nodes = page.nodes.take().map(|p| base.join(p));
     }
     Ok(manifest)
 }

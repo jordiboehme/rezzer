@@ -21,7 +21,7 @@ pub fn ink_mask(rgb: &[u8], width: u32, height: u32) -> Vec<bool> {
         .collect()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct BoxScore {
     /// Share of ink pixels inside at least one block box. A page without ink scores 1.0.
     pub ink_coverage: f64,

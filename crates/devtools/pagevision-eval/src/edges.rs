@@ -51,7 +51,7 @@ pub struct TruthEdges {
 }
 
 /// The score of the edges of one page.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct EdgeScore {
     pub truth: u32,
     pub predicted: u32,
