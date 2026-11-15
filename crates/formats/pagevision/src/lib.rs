@@ -5,6 +5,8 @@
 //! Page OCR with vision models.
 
 mod error;
+#[cfg(feature = "llama")]
+pub mod llama;
 pub mod model;
 pub mod prepare;
 mod types;
