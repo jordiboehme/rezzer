@@ -9,7 +9,9 @@ mod common;
 
 use common::barfont::page_with_photo;
 use common::{Page, markdown, pdf, read, read_in, show};
-use rezzer_limits::{Budget, Limits};
+use std::time::Duration;
+
+use rezzer_limits::{Budget, CancelToken, Clock, Limits};
 use rezzer_model::{
     Anchor, Block, BoxKind, Geometry, MAX_BOXES_PER_PAGE, PlacedBox, ReadOptions, ReadOutcome,
 };
@@ -62,7 +64,7 @@ fn page(out: &ReadOutcome, n: u32) -> &[Block] {
 }
 
 /// Whether `got` lies within half a point of `want` on every side.
-fn near(got: [f32; 4], want: [f32; 4]) -> bool {
+fn near<const N: usize>(got: [f32; N], want: [f32; N]) -> bool {
     got.iter().zip(want).all(|(g, w)| (g - w).abs() <= 0.5)
 }
 
@@ -74,8 +76,19 @@ fn inside(inner: [f32; 4], outer: [f32; 4]) -> bool {
 /// A ruled table of `rows` rows of two cells, 30 points high and 120 wide each, with every
 /// line of the grid drawn, between two paragraphs.
 fn ruled_page(rows: &[[&str; 2]]) -> String {
-    let (left, top) = (72.0, 700.0);
-    let mut c = show("F1", 10.0, 72.0, 760.0, "A paragraph before the table.");
+    ruled_at(rows, 0.0)
+}
+
+/// [`ruled_page`] moved `down` points down.
+fn ruled_at(rows: &[[&str; 2]], down: f32) -> String {
+    let (left, top) = (72.0, 700.0 - down);
+    let mut c = show(
+        "F1",
+        10.0,
+        72.0,
+        760.0 - down,
+        "A paragraph before the table.",
+    );
     c += "0.5 w ";
     let height = 30.0 * rows.len() as f32;
     for k in 0..=rows.len() {
@@ -93,7 +106,13 @@ fn ruled_page(rows: &[[&str; 2]]) -> String {
             c += &show("F1", 10.0, x, y, text);
         }
     }
-    c += &show("F1", 10.0, 72.0, 520.0, "A paragraph after the table.");
+    c += &show(
+        "F1",
+        10.0,
+        72.0,
+        520.0 - down,
+        "A paragraph after the table.",
+    );
     c
 }
 
@@ -193,6 +212,16 @@ fn ruled_table_gives_table_and_cells() {
         cells.iter().all(|c| inside(c.bounds, found.bounds)),
         "{all:?}"
     );
+    // Each cell is the box of its text: from where its run starts, from the baseline up the
+    // size of the text, row by row and left to right.
+    for (k, cell) in cells.iter().enumerate() {
+        let (r, c) = (k / 2, k % 2);
+        let (x, y) = (78.0 + 120.0 * c as f32, 680.0 - 30.0 * r as f32);
+        let b = cell.bounds;
+        assert!(near([b[0], b[1]], [x, y]), "cell {k}: {b:?}");
+        assert!((b[3] - b[1] - 10.0).abs() <= 0.5, "cell {k}: {b:?}");
+        assert!(b[2] > b[0] && b[2] < x + 114.0, "cell {k}: {b:?}");
+    }
 }
 
 #[test]
@@ -277,4 +306,126 @@ fn markdown_same_with_and_without_geometry() {
             serde_json::to_string(&plain.document).unwrap()
         );
     }
+}
+
+/// A ruled table drawn in a frame turned a quarter onto the page: its text reads upward, so
+/// the page is read in a turned frame, 842 points wide and 595 high. The size and the boxes
+/// are in that frame, and the cells stand where the table is drawn in it.
+#[test]
+fn a_turned_page_gives_its_boxes_in_the_frame_of_its_text() {
+    let mut c = String::from("q 0 1 -1 0 595 0 cm\n");
+    c += &ruled_at(
+        &[["Fruit", "Count"], ["Apples", "3"], ["Pears", "12"]],
+        200.0,
+    );
+    c += "Q\n";
+    let out = read_geometry(&pdf(&[Page::text(c)], ""));
+    let g = geometry(&out);
+    assert_eq!(g.pages[0].size, [842.0, 595.0]);
+    let all = boxes(&out, 1);
+    let tables = of_kind(all, BoxKind::Table);
+    assert_eq!(tables.len(), 1, "{all:?}");
+    let cells = of_kind(all, BoxKind::Cell);
+    assert_eq!(cells.len(), 6, "{all:?}");
+    for b in all {
+        let [x0, y0, x1, y1] = b.bounds;
+        assert!(
+            x0 >= -0.5 && y0 >= -0.5 && x1 <= 842.5 && y1 <= 595.5,
+            "{b:?}"
+        );
+    }
+    for (k, cell) in cells.iter().enumerate() {
+        let (r, c) = (k / 2, k % 2);
+        let (x, y) = (78.0 + 120.0 * c as f32, 480.0 - 30.0 * r as f32);
+        assert!(
+            near([cell.bounds[0], cell.bounds[1]], [x, y]),
+            "cell {k}: {cell:?}"
+        );
+    }
+    assert!(!of_kind(all, BoxKind::Text).is_empty(), "{all:?}");
+}
+
+/// `pages` pages, each of a line of text and a drawn rule.
+fn pages_with_a_rule(pages: usize) -> Vec<u8> {
+    let page = |k: usize| {
+        let mut c = show(
+            "F1",
+            10.0,
+            72.0,
+            760.0,
+            &format!("Page number {k} of the file."),
+        );
+        for line in 0..20 {
+            let y = 700.0 - 14.0 * line as f32;
+            c += &show(
+                "F1",
+                10.0,
+                72.0,
+                y,
+                "Some quiet words of the body text here.",
+            );
+        }
+        c += "0.5 w 72 300 m 300 300 l S\n";
+        Page::text(c)
+    };
+    let all: Vec<Page> = (1..=pages).map(page).collect();
+    pdf(&all, "")
+}
+
+/// Reads `bytes` with page geometry on a clock of one millisecond a reading under
+/// `max_time`, with a look at the clock after each page written as plain lines; gives the
+/// read and the readings it took.
+fn read_on_steps(bytes: &[u8], max_time: Duration) -> (ReadOutcome, u64) {
+    let clock = Clock::steps(Duration::from_millis(1));
+    let limits = Limits {
+        max_time,
+        ..Limits::default()
+    };
+    let budget = Budget::with_clock(limits, CancelToken::default(), clock.clone());
+    let opts = ReadOptions {
+        geometry: true,
+        ..ReadOptions::default()
+    };
+    let out = rezzer_read_pdf::with_plain_check(1, || read_in(bytes, &opts, &budget));
+    (out, clock.reads())
+}
+
+/// A page the time limit names as not read gives no geometry: each page with geometry has
+/// its text written, laid out or as plain lines.
+#[test]
+fn a_page_the_time_stops_gives_no_geometry() {
+    let bytes = pages_with_a_rule(120);
+    let (_, reads) = read_on_steps(&bytes, Duration::from_secs(360_000));
+    let mut halted = 0;
+    for k in 1..=12u64 {
+        let limit = Duration::from_millis(reads * k / 16);
+        let (out, _) = read_on_steps(&bytes, limit);
+        let Some(g) = out.document.geometry.as_deref() else {
+            continue;
+        };
+        let written: Vec<u32> = out
+            .document
+            .body
+            .iter()
+            .filter_map(|b| match b {
+                Block::Section {
+                    anchor: Some(a),
+                    blocks,
+                    ..
+                } if blocks.len() > 1 => a.0.strip_prefix('p')?.parse().ok(),
+                _ => None,
+            })
+            .collect();
+        if written.len() < 120 {
+            halted += 1;
+        }
+        for p in &g.pages {
+            assert!(
+                written.contains(&p.page),
+                "limit {limit:?}: page {} has geometry but no text",
+                p.page
+            );
+        }
+    }
+    assert!(halted > 0, "no limit stopped the read");
 }

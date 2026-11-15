@@ -550,7 +550,9 @@ pub(crate) struct Laid {
     pub in_cells: Vec<(layoutregions::PrimId, usize, usize, usize)>,
     /// For a read that asks for page geometry: each table of `blocks` by its place there,
     /// with the box of each of its cells that holds runs (the union of the runs' boxes, see
-    /// [`crate::geometry::run_box`]), row by row, in the frame of the runs.
+    /// [`crate::geometry::run_box`]), row by row, in the frame of the runs. Rows that go on
+    /// a table of an earlier page (`continued`) give no boxes: no block of this page holds
+    /// them.
     pub cells: Vec<(usize, Vec<[f32; 4]>)>,
 }
 

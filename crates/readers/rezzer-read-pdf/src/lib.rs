@@ -1823,12 +1823,6 @@ fn lay_out(
             if stopped {
                 plain = true;
                 plain_written += 1;
-                // A page written as plain lines has no blocks with boxes: it gives what it
-                // draws.
-                if let Some(g) = out.doc.geometry.as_deref_mut() {
-                    let (w, h) = frame_size(info, Some(&items));
-                    geometry::page_geometry(g, n, [w, h], &items, None);
-                }
                 if !tried {
                     notes(n, &items, out);
                     links.free(items.kept);
@@ -1863,6 +1857,13 @@ fn lay_out(
                         blocks.extend(text);
                         blocks.extend(hidden);
                         plain_pages = Some((plain_pages.map_or(n, |p| p.0), n));
+                        // A page written as plain lines has no blocks with boxes: it gives
+                        // what it draws. A page the time stops here is not read and gives
+                        // none.
+                        if let Some(g) = out.doc.geometry.as_deref_mut() {
+                            let (w, h) = frame_size(info, Some(&items));
+                            geometry::page_geometry(g, n, [w, h], &items, None);
+                        }
                     }
                     Err(hit) => {
                         out.loss(

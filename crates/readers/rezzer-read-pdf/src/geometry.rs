@@ -7,7 +7,7 @@
 //! part of the output: a box the caps cut is left out without a loss, and nothing here
 //! charges the budget, so the Markdown and the JSON of a read stay the same.
 
-use rezzer_model::{Anchor, Block, BoxKind, Geometry, MAX_BOXES_PER_PAGE, PlacedBox};
+use rezzer_model::{Block, BoxKind, Geometry, MAX_BOXES_PER_PAGE, PlacedBox};
 
 use crate::layout::{self, Laid, Run};
 use crate::tables::RuleKind;
@@ -51,69 +51,73 @@ pub(crate) fn page_geometry(
     if !geometry.add_page(page, size) {
         return;
     }
-    // Whether the page holds as many boxes as it may: then nothing more is tried.
-    let full = |g: &Geometry| {
-        g.pages
-            .last()
-            .is_none_or(|p| p.page != page || p.boxes.len() >= MAX_BOXES_PER_PAGE)
-    };
-    let mut put = |g: &mut Geometry, kind: BoxKind, bounds: [f32; 4], anchor: Option<Anchor>| {
-        if full(g) {
-            return false;
-        }
-        g.push(
-            page,
-            PlacedBox {
-                kind,
-                bounds,
-                anchor,
-            },
-        );
-        true
-    };
-    if let Some(laid) = laid {
-        blocks(geometry, laid, &mut put);
+    if let Some(laid) = laid
+        && !blocks(geometry, page, laid)
+    {
+        return;
     }
     // The pictures are in the visible page box; on a page read turned they go into the frame
     // of the runs, as the layout takes them. Turning the size back is turning it again.
     let (w, h) = items.turn.size(size[0], size[1]);
-    for b in &items.images {
+    let pictures = items.images.iter().filter_map(|b| {
         let b = if items.turned {
             items.turn.place_box(*b, w, h)
         } else {
             *b
         };
-        let Some(b) = ordered(b) else { continue };
-        if !put(geometry, BoxKind::Picture, b, None) {
-            return;
-        }
-    }
-    for r in &items.rules {
-        let Some(b) = ordered([r.x0, r.y0, r.x1, r.y1]) else {
-            continue;
-        };
-        // The text pass writes a filled bar this thin as a line already (see `bounds_rule`);
-        // a rectangle from any other source is held to the same edge.
+        Some((BoxKind::Picture, ordered(b)?))
+    });
+    let rules = items.rules.iter().filter_map(|r| {
+        let b = ordered([r.x0, r.y0, r.x1, r.y1])?;
+        // The text pass writes a filled bar this thin as a line already (see `bounds_rule`),
+        // so a rectangle of exactly `THIN` points is a rule, as there; a rectangle from any
+        // other source is held to the same edge.
         let thin = (b[2] - b[0]).min(b[3] - b[1]) <= THIN;
         let kind = match r.kind {
             RuleKind::Rect if !thin => BoxKind::Drawn,
             _ => BoxKind::Rule,
         };
-        if !put(geometry, kind, b, None) {
-            return;
-        }
-    }
+        Some((kind, b))
+    });
+    put_all(geometry, page, &mut pictures.chain(rules));
+}
+
+/// Adds a box to `page`, the last page of `geometry`; false when a cap refuses it (the bounds
+/// are finite and in order, so a refusal is a cap): then the page takes no more.
+fn put(geometry: &mut Geometry, page: u32, b: PlacedBox) -> bool {
+    // The page's own cap is checked here first: the cheap answer for the usual case.
+    let full = geometry
+        .pages
+        .last()
+        .is_none_or(|p| p.page != page || p.boxes.len() >= MAX_BOXES_PER_PAGE);
+    !full && geometry.push(page, b)
+}
+
+/// Adds the boxes of `boxes` without anchors to `page` up to the first one a cap refuses;
+/// false then.
+fn put_all(
+    geometry: &mut Geometry,
+    page: u32,
+    boxes: &mut impl Iterator<Item = (BoxKind, [f32; 4])>,
+) -> bool {
+    boxes.all(|(kind, bounds)| {
+        put(
+            geometry,
+            page,
+            PlacedBox {
+                kind,
+                bounds,
+                anchor: None,
+            },
+        )
+    })
 }
 
 /// The boxes of the blocks of a laid out page: each block the union of the runs written in
-/// it, a table also the boxes of its cells.
-fn blocks(
-    geometry: &mut Geometry,
-    laid: &Laid,
-    put: &mut impl FnMut(&mut Geometry, BoxKind, [f32; 4], Option<Anchor>) -> bool,
-) {
+/// it, a table also the boxes of its cells. False when a cap stopped them.
+fn blocks(geometry: &mut Geometry, page: u32, laid: &Laid) -> bool {
     let Some(input) = laid.engine_in.as_ref() else {
-        return;
+        return true;
     };
     let mut found: Vec<Option<[f32; 4]>> = vec![None; laid.blocks.len()];
     for (t, &b) in input.texts.iter().zip(&laid.run_blocks) {
@@ -140,17 +144,21 @@ fn blocks(
             .copied()
             .fold(found[k], |acc, c| Some(acc.map_or(c, |a| union(a, c))));
         let Some(bounds) = bounds else { continue };
-        if !put(geometry, kind, bounds, layout::block_anchor(block)) {
-            return;
+        let b = PlacedBox {
+            kind,
+            bounds,
+            anchor: layout::block_anchor(block),
+        };
+        if !put(geometry, page, b) {
+            return false;
         }
-        if kind == BoxKind::Table {
-            for &c in own {
-                if !put(geometry, BoxKind::Cell, c, None) {
-                    return;
-                }
-            }
+        if kind == BoxKind::Table
+            && !put_all(geometry, page, &mut own.iter().map(|&c| (BoxKind::Cell, c)))
+        {
+            return false;
         }
     }
+    true
 }
 
 /// `b` with its sides in order; `None` when a side is not finite.
@@ -234,6 +242,47 @@ mod tests {
         let want = crate::order::Turn::Up.place_box([100.0, 200.0, 150.0, 260.0], 595.0, 842.0);
         assert_eq!(g.pages[0].boxes[0].bounds, want);
         assert!(want.iter().all(|v| (0.0..=842.0).contains(v)), "{want:?}");
+    }
+
+    /// Once the file holds [`rezzer_model::MAX_BOXES`] boxes, a new page adds none, and its
+    /// walk stops at the first box refused.
+    #[test]
+    fn the_file_cap_stops_the_walk() {
+        let mut g = Geometry::default();
+        let mut page = 0;
+        'fill: loop {
+            page += 1;
+            assert!(g.add_page(page, [595.0, 842.0]));
+            for _ in 0..MAX_BOXES_PER_PAGE {
+                let b = PlacedBox {
+                    kind: BoxKind::Rule,
+                    bounds: [0.0, 0.0, 1.0, 1.0],
+                    anchor: None,
+                };
+                if !g.push(page, b) {
+                    break 'fill;
+                }
+            }
+        }
+        assert_eq!(g.len(), rezzer_model::MAX_BOXES);
+        let tried = std::cell::Cell::new(0usize);
+        let mut boxes = (0..100).map(|k| {
+            tried.set(tried.get() + 1);
+            (BoxKind::Rule, [0.0, k as f32, 10.0, k as f32])
+        });
+        let mut g2 = g.clone();
+        assert!(g2.add_page(page + 1, [595.0, 842.0]));
+        assert!(!put_all(&mut g2, page + 1, &mut boxes));
+        assert_eq!(tried.get(), 1);
+        let items = PageItems {
+            rules: vec![rect(10.0, 10.0, 200.0, 100.0); 100],
+            ..PageItems::default()
+        };
+        page_geometry(&mut g, page + 1, [595.0, 842.0], &items, None);
+        assert_eq!(
+            g.pages.last().map(|p| (p.page, p.boxes.len())),
+            Some((page + 1, 0))
+        );
     }
 
     /// A page added before gives no boxes again.
