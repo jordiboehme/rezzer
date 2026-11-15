@@ -4,10 +4,15 @@
 
 //! Evaluation of OCR runs: manifests of test pages, the results format and the text score.
 
+pub mod edges;
 pub mod manifest;
 pub mod results;
 pub mod text;
 
+pub use edges::{
+    Dir, Edge, EdgeScore, TruthEdges, mermaid_edges, parse_truth, parse_truth_with_nodes,
+    score_edges,
+};
 pub use manifest::{Manifest, PageEntry, load_manifest};
 pub use results::{Fingerprint, PageRun, ResultsFile, RunBlock, load_results};
 pub use text::line_cer;
