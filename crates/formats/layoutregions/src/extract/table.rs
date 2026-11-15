@@ -126,6 +126,10 @@ pub struct TableOut {
     /// Pictures in cells: row, cell and the picture, by the index the caller gave its piece
     /// (see [`grid::Piece::picture`]).
     pub pictures: Vec<(usize, usize, u32)>,
+    /// Lines of a table without rules kept as lines of the row above them though nothing
+    /// shows that they go on it (see `grid::grid_cells`): each may be a row of its own. The
+    /// reader says so with the table.
+    pub unsure_lines: usize,
 }
 
 /// What an extractor makes of the lines or the grid it is given.

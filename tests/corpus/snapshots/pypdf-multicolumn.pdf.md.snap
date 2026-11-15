@@ -18,7 +18,7 @@ format: pdf
 detected_by: "pdf header %PDF-"
 reader: "pdf/0.1.0"
 completeness: complete
-losses: 2
+losses: 0
 pages: 3
 tagged: false
 encrypted: false
@@ -95,10 +95,3 @@ Table 1: EU Countries Information
 | Finland | 5.5 | 338,424 | Helsinki | Finnish, Swedish |
 
 3
-
-## Not read
-
-| Where | What | Why | Severity |
-| --- | --- | --- | --- |
-| p1:b2 | the region at p1:b2 is kept as laid out, line by line: no region type has clear evidence for it | uncertain | info |
-| p1:b3 | the region at p1:b3 is kept as laid out, line by line: no region type has clear evidence for it | uncertain | info |

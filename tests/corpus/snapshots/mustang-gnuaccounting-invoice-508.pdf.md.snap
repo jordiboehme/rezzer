@@ -18,7 +18,7 @@ format: pdf
 detected_by: "pdf header %PDF-"
 reader: "pdf/0.1.0"
 completeness: partial
-losses: 8
+losses: 7
 pages: 1
 tagged: true
 encrypted: false
@@ -133,7 +133,6 @@ Page 1/1
 | Where | What | Why | Severity |
 | --- | --- | --- | --- |
 | p1 | 1 date stands in the head of page 1; it is not marked as the document date | uncertain | info |
-| p1:b30 | the region at p1:b30 is kept as laid out, line by line: no region type has clear evidence for it | uncertain | info |
 | structure tree | the role map has a loop at Figure | damaged | warning |
 | structure tree | the role map has a loop at Document | damaged | warning |
 | structure tree | the role map has a loop at Table | damaged | warning |

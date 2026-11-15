@@ -208,7 +208,7 @@ pub(super) type Pre<'a> = (&'a HashMap<u32, usize>, &'a dyn Fn(usize) -> (Signal
 /// A segmentation stopped before it searched the drawn lines types nothing: every leaf of it is
 /// spatial. A given region of today's reading (`pre`: the table of each of its runs, and the
 /// signal of each table; see `today`) is decided by its reader: certainty `Rule`, the reader's
-/// signal.
+/// signal. Text a reader refused is `Unsure` with the refusal as its signal.
 ///
 /// The engine reads the runs in the order of their places ([`layoutregions::RunOrder`]): a
 /// page whose runs stand in another order is decided in that order, and the decisions name
@@ -300,7 +300,15 @@ fn decide_in_order(
         });
         if let Some(t) = first.and_then(|i| pre.0.get(&i).copied()) {
             let (signal, text) = (pre.1)(t);
-            d.certainty = Certainty::Rule;
+            if text {
+                // Text its reader refused: the refusal speaks against a table or pairs and
+                // for no other type, so the region is unsure and has no score. Its text is
+                // still written by the walk.
+                d.certainty = Certainty::Unsure;
+                d.score = Score(0);
+            } else {
+                d.certainty = Certainty::Rule;
+            }
             d.signals = vec![signal];
             pre_of[k] = Some((t, text));
         }
@@ -1041,8 +1049,8 @@ fn legend_decision(
         .filter(|&&k| Some(k) != own_legend)
         .map(|k| k.to_string())
         .collect();
-    let mut detail = "the footnote legend of the page, read by today's reader from the page's \
-                      whole flow"
+    let mut detail = "the footnote legend of the page: lines at its foot that open with the \
+                      markers the text refers to"
         .to_string();
     if !others.is_empty() {
         detail.push_str(&format!("; its lines were in region {}", others.join(", ")));
@@ -1194,6 +1202,7 @@ fn agree_written<'w>(
             continue;
         }
         let d = decided.decisions[k].clone();
+        let refused = matches!(decided.pre[k], Some((_, true)));
         let made = |kind: Kind, first: u32| -> Decision {
             let reason = why(first).map_or_else(|| written_why(was, kind), str::to_string);
             let mut alternatives = vec![Alternative {
@@ -1209,6 +1218,8 @@ fn agree_written<'w>(
             );
             let certainty = match (kind, d.certainty) {
                 (Kind::Spatial, _) => Certainty::Unsure,
+                // Text a finder refused stays unsure whatever the walk wrote it as.
+                _ if refused => Certainty::Unsure,
                 (_, Certainty::Exact | Certainty::Unsure) => Certainty::Rule,
                 (_, c) => c,
             };
@@ -1279,9 +1290,13 @@ pub(super) fn unsure_why(candidates: &[Typed], m: &Margins) -> String {
             words(a.kind),
             a.score.0
         ),
-        _ => "no region type has clear evidence for it".to_string(),
+        _ => NO_EVIDENCE.to_string(),
     }
 }
+
+/// Why a spatial decision is kept as laid out when no kind reaches the least score (see
+/// [`unsure_why`]): the one reason that names no kind.
+pub(super) const NO_EVIDENCE: &str = "no region type has clear evidence for it";
 
 /// Why runs of a decision of `kind` that its extractor read no table, pairs or totals from are
 /// kept as laid out: the extractor's own reason when it gave one.

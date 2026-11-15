@@ -610,6 +610,20 @@ pub(super) fn borderless(
                              columns: it is read as a paragraph after the table"
                         ));
                     }
+                    // Lines the grid keeps in the row above them for want of evidence.
+                    match grid.unsure_lines {
+                        0 => {}
+                        1 => found.uncertain.push(format!(
+                            "1 line of a table on page {page} is kept as a line of the row \
+                             above it: the page does not show whether it goes on that row or \
+                             is a row of its own"
+                        )),
+                        n => found.uncertain.push(format!(
+                            "{n} lines of a table on page {page} are kept as lines of the \
+                             rows above them: the page does not show whether they go on those \
+                             rows or are rows of their own"
+                        )),
+                    }
                     if goes_on_beside(flow, &lines[a..z], &by_y, b, &in_region) {
                         found.uncertain.push(format!(
                             "a table on page {page} may go on in a column beside it, on the \

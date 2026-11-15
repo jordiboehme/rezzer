@@ -703,9 +703,8 @@ fn a_wide_gap_stays_a_cell_gap_without_wide_word_gaps_or_a_sentence_end() {
     assert_eq!(pieces_of(&runs, 0, runs.len()).len(), 2);
 }
 
-/// The rows of `lines` (each its runs: text, x, baseline, bold) read as a grid without rules:
-/// each row's cells as text.
-fn grid_rows(lines: &[&[(&str, f32, f32, bool)]]) -> Vec<Vec<String>> {
+/// The runs of `lines` (each its runs: text, x, baseline, bold) and the pieces of each line.
+fn grid_input(lines: &[&[(&str, f32, f32, bool)]]) -> (Vec<TextRun>, Vec<Vec<Piece>>) {
     let mut runs = Vec::new();
     for (k, line) in lines.iter().enumerate() {
         for &(t, x, y, bold) in line.iter() {
@@ -725,8 +724,16 @@ fn grid_rows(lines: &[&[(&str, f32, f32, bool)]]) -> Vec<Vec<String>> {
         pieces.push(pieces_of(&runs, start, end));
         start = end;
     }
+    (runs, pieces)
+}
+
+/// The rows of `lines` (each its runs: text, x, baseline, bold) read as a grid without rules:
+/// each row's cells as text, and how many of its lines stay lines of the row above them
+/// without clear evidence.
+fn grid_table(lines: &[&[(&str, f32, f32, bool)]]) -> (Vec<Vec<String>>, usize) {
+    let (runs, pieces) = grid_input(lines);
     let table = grid_cells(&runs, &pieces, 2, false).expect("a table");
-    table
+    let rows = table
         .rows
         .iter()
         .map(|r| {
@@ -741,7 +748,267 @@ fn grid_rows(lines: &[&[(&str, f32, f32, bool)]]) -> Vec<Vec<String>> {
                 })
                 .collect()
         })
-        .collect()
+        .collect();
+    (rows, table.unsure_lines)
+}
+
+/// The rows of [`grid_table`].
+fn grid_rows(lines: &[&[(&str, f32, f32, bool)]]) -> Vec<Vec<String>> {
+    grid_table(lines).0
+}
+
+/// The columns of the sparse tables of amounts below: a name and four amounts.
+const SPARSE_XS: [f32; 5] = [40.0, 200.0, 280.0, 360.0, 440.0];
+
+/// A line of a sparse table at the baseline `y`: its name at `x` and its amounts in their
+/// columns.
+fn sparse_line<'a>(
+    name: &'a str,
+    x: f32,
+    y: f32,
+    amounts: [&'a str; 4],
+) -> Vec<(&'a str, f32, f32, bool)> {
+    let mut line = Vec::new();
+    if !name.is_empty() {
+        line.push((name, x, y, false));
+    }
+    for (k, a) in amounts.iter().enumerate() {
+        if !a.is_empty() {
+            line.push((*a, SPARSE_XS[k + 1], y, false));
+        }
+    }
+    line
+}
+
+/// A sparse table of amounts with rows 14 points apart: a line of titles, two full rows, a
+/// thin line `step` under the second (its name at `x`, its amounts `thin`), and two more
+/// full rows at the pitch under it. Gives its rows and the lines kept without clear
+/// evidence.
+fn sparse_table(name: &str, x: f32, step: f32, thin: [&str; 4]) -> (Vec<Vec<String>>, usize) {
+    let y = 572.0 - step;
+    let lines = [
+        sparse_line("Type", 40.0, 600.0, ["Hours", "Rate", "Amount", "Year"]),
+        sparse_line("Salary", 40.0, 586.0, ["", "", "3.000,00", "36.000,00"]),
+        sparse_line("Overtime", 40.0, 572.0, ["10,00", "25,00", "250,00", ""]),
+        sparse_line(name, x, y, thin),
+        sparse_line("Tax", 40.0, y - 14.0, ["", "", "650,00", "7.800,00"]),
+        sparse_line("Rent", 40.0, y - 28.0, ["", "", "400,00", "4.800,00"]),
+    ];
+    let lines: Vec<&[(&str, f32, f32, bool)]> = lines.iter().map(Vec::as_slice).collect();
+    grid_table(&lines)
+}
+
+/// A thin line of a sparse table (fewer than half of its columns hold text) is never a row
+/// of its own, also when it starts at the edge of the first column a row step under the
+/// line above with an amount in the column of its kind: the page cannot tell such a row
+/// from the second line of the record above. It stays a line of that row, and the table
+/// counts it for its note.
+#[test]
+fn a_thin_line_in_the_first_column_at_the_row_pitch_stays_a_line_and_is_counted() {
+    let (rows, unsure) = sparse_table("Bonus", 40.0, 14.0, ["", "", "", "1.000,00"]);
+    assert_eq!(rows.len(), 5, "{rows:?}");
+    assert_eq!(
+        rows[2],
+        ["Overtime Bonus", "10,00", "25,00", "250,00", "1.000,00"]
+    );
+    assert_eq!(unsure, 1);
+    // The first line under the titles too: it joins the line over it and is counted.
+    let lines = [
+        sparse_line("Type", 40.0, 600.0, ["Hours", "Rate", "Amount", "Year"]),
+        sparse_line("Bonus", 40.0, 580.0, ["", "", "", "1.000,00"]),
+        sparse_line("Salary", 40.0, 566.0, ["", "", "3.000,00", "36.000,00"]),
+        sparse_line("Overtime", 40.0, 552.0, ["10,00", "25,00", "250,00", ""]),
+        sparse_line("Tax", 40.0, 538.0, ["", "", "650,00", "7.800,00"]),
+    ];
+    let lines: Vec<&[(&str, f32, f32, bool)]> = lines.iter().map(Vec::as_slice).collect();
+    let (rows, unsure) = grid_table(&lines);
+    assert_eq!(rows.len(), 4, "{rows:?}");
+    assert_eq!(unsure, 1);
+}
+
+/// A record whose name and whose text both wrap, in a table set at the leading of its
+/// text: the second line starts at the edge of the first column a row step under the
+/// first and has text in another column. Whatever that text is (words, a second article
+/// number under the article numbers, the end of a range under the dates, an amount under
+/// the amounts), the line stays a line of the row above, and the table says so. (The
+/// cells under the record open with a capital: words that go on in a small letter under
+/// it would read as prose, and the lines would be no table at all, as before.)
+#[test]
+fn a_wrapped_name_and_text_at_the_row_pitch_stay_in_their_record() {
+    let xs = [40.0f32, 140.0, 300.0, 360.0, 440.0];
+    let table = |second: [&'static str; 5]| {
+        let line = |y: f32, cells: [&'static str; 5]| -> Vec<(&'static str, f32, f32, bool)> {
+            cells
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| !t.is_empty())
+                .map(|(k, t)| (*t, xs[k], y, false))
+                .collect()
+        };
+        let lines = [
+            line(600.0, ["Item", "Text", "Qty", "Price", "Total"]),
+            line(588.0, ["Paper", "White", "2", "3,00", "6,00"]),
+            line(
+                576.0,
+                ["Folders for", "Sheets of plain", "4", "90,00", "360,00"],
+            ),
+            line(564.0, second),
+            line(552.0, ["Ink", "Black", "1", "5,00", "5,00"]),
+            line(540.0, ["Tape", "Clear", "9", "0,10", "0,90"]),
+        ];
+        let lines: Vec<&[(&str, f32, f32, bool)]> = lines.iter().map(Vec::as_slice).collect();
+        grid_table(&lines)
+    };
+    let (rows, unsure) = table(["the desk", "white stock", "", "", ""]);
+    assert_eq!(rows.len(), 5, "{rows:?}");
+    assert_eq!(
+        rows[2],
+        [
+            "Folders for the desk",
+            "Sheets of plain white stock",
+            "4",
+            "90,00",
+            "360,00"
+        ]
+    );
+    assert_eq!(unsure, 1);
+    // A value on the line changes nothing, in the column of its kind or out of it: a second
+    // number under the whole numbers (two article numbers of one record), an amount under
+    // the amounts, a number or a year under the words.
+    for second in [
+        ["the desk", "", "", "", "45,00"],
+        ["the desk", "", "2", "", ""],
+        ["the desk", "2", "", "", ""],
+        ["the desk", "2024", "", "", ""],
+        ["the desk", "45,00", "", "", ""],
+        ["the desk", "", "45,00", "", ""],
+    ] {
+        let (rows, unsure) = table(second);
+        assert_eq!(rows.len(), 5, "{second:?}: {rows:?}");
+        assert!(rows[2][0].ends_with("the desk"), "{second:?}: {rows:?}");
+        assert_eq!(unsure, 1, "{second:?}");
+    }
+    // The same with a column of dates and a column of rates: the end of a range under the
+    // dates and a rate under the rates stay lines of the record above, as they do under
+    // the words.
+    let wide = [40.0f32, 140.0, 270.0, 360.0, 440.0];
+    let dated = |second: [&'static str; 5]| {
+        let line = |y: f32, cells: [&'static str; 5]| -> Vec<(&'static str, f32, f32, bool)> {
+            cells
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| !t.is_empty())
+                .map(|(k, t)| (*t, wide[k], y, false))
+                .collect()
+        };
+        let lines = [
+            line(600.0, ["Item", "Text", "Day", "Rate", "Total"]),
+            line(588.0, ["Paper", "White", "05.01.2026", "19 %", "6,00"]),
+            line(
+                576.0,
+                [
+                    "Folders for",
+                    "Sheets of plain",
+                    "06.01.2026",
+                    "7 %",
+                    "360,00",
+                ],
+            ),
+            line(564.0, second),
+            line(552.0, ["Ink", "Black", "07.01.2026", "19 %", "5,00"]),
+            line(540.0, ["Tape", "Clear", "08.01.2026", "7 %", "0,90"]),
+        ];
+        let lines: Vec<&[(&str, f32, f32, bool)]> = lines.iter().map(Vec::as_slice).collect();
+        grid_table(&lines)
+    };
+    for second in [
+        ["the desk", "", "09.01.2026", "", ""],
+        ["the desk", "", "", "7 %", ""],
+        ["the desk", "09.01.2026", "", "", ""],
+        ["the desk", "7 %", "", "", ""],
+        ["the desk", "", "7 %", "", ""],
+    ] {
+        let (rows, unsure) = dated(second);
+        assert_eq!(rows.len(), 5, "{second:?}: {rows:?}");
+        assert_eq!(unsure, 1, "{second:?}");
+    }
+}
+
+/// Thin lines make no table: the rows that show a table fill its columns. Two full rows and
+/// thin lines at the row pitch are fewer than the three rows a table without a caption
+/// needs.
+#[test]
+fn thin_lines_do_not_count_as_the_rows_a_table_needs() {
+    let lines = [
+        sparse_line("Bonus", 40.0, 600.0, ["", "", "", "1.000,00"]),
+        sparse_line("Meal", 40.0, 586.0, ["", "3,50", "", ""]),
+        sparse_line(
+            "Overtime",
+            40.0,
+            572.0,
+            ["10,00", "25,00", "250,00", "900,00"],
+        ),
+        sparse_line("Shift", 40.0, 558.0, ["12,00", "20,00", "240,00", "800,00"]),
+        sparse_line("Rent", 40.0, 544.0, ["", "", "", "4.800,00"]),
+    ];
+    let lines: Vec<&[(&str, f32, f32, bool)]> = lines.iter().map(Vec::as_slice).collect();
+    let (runs, pieces) = grid_input(&lines);
+    assert_eq!(
+        grid_cells(&runs, &pieces, 3, false).err(),
+        Some("too few rows")
+    );
+    let table = grid_cells(&runs, &pieces, 2, false).expect("a table");
+    assert_eq!(table.rows.len(), 2);
+    assert_eq!(table.unsure_lines, 2);
+}
+
+/// A thin line always stays a line of the row above it. The table counts it for its note
+/// unless the page shows that it goes on that row: it stands closer than the rows do
+/// (`CLOSER`), it is indented against the first column (`TITLE_ALIGN`), or it has no text in
+/// the first column.
+#[test]
+fn a_thin_line_is_counted_unless_the_page_shows_that_it_goes_on() {
+    let joined = ["Overtime Bonus", "10,00", "25,00", "250,00", "1.000,00"];
+    let thin = ["", "", "", "1.000,00"];
+    // The step of the line against the row pitch of 14 points: under 0.9 of it the line is
+    // closer and is not counted.
+    for (step, unsure) in [(12.5, 0), (12.7, 1), (13.2, 1), (13.4, 1), (14.0, 1)] {
+        let (rows, n) = sparse_table("Bonus", 40.0, step, thin);
+        assert_eq!(rows[2], joined, "a step of {step}: {rows:?}");
+        assert_eq!((rows.len(), n), (5, unsure), "a step of {step}");
+    }
+    // Indented by more than a quarter of the size (2.5 points at size 10): not counted.
+    for (x, unsure) in [(42.0, 1), (43.0, 0)] {
+        let (rows, n) = sparse_table("Bonus", x, 14.0, thin);
+        assert_eq!(rows[2], joined, "at {x}: {rows:?}");
+        assert_eq!((rows.len(), n), (5, unsure), "at {x}");
+    }
+    // No text in the first column: a word under the row's values goes on, not counted.
+    let (rows, n) = sparse_table("", 40.0, 14.0, ["", "net", "", ""]);
+    assert_eq!(rows[2], ["Overtime", "10,00", "25,00 net", "250,00", ""]);
+    assert_eq!((rows.len(), n), (5, 0));
+}
+
+/// A thin line that holds a name alone at the row pitch may be the second line of the name
+/// above or a row without amounts: it stays a line of the row above, and the table says so.
+/// So do thin lines with an amount in a table that shows no row pitch (no two full rows
+/// follow each other).
+#[test]
+fn a_thin_line_without_clear_evidence_stays_a_line_of_the_row_above() {
+    let (rows, n) = sparse_table("Bonus", 40.0, 14.0, ["", "", "", ""]);
+    assert_eq!(rows[2], ["Overtime Bonus", "10,00", "25,00", "250,00", ""]);
+    assert_eq!((rows.len(), n), (5, 1));
+    let lines = [
+        sparse_line("Type", 40.0, 600.0, ["Hours", "Rate", "Amount", "Year"]),
+        sparse_line("Bonus", 40.0, 586.0, ["", "", "", "1.000,00"]),
+        sparse_line("Overtime", 40.0, 572.0, ["10,00", "25,00", "250,00", ""]),
+        sparse_line("Meal", 40.0, 558.0, ["", "3,50", "", ""]),
+        sparse_line("Tax", 40.0, 544.0, ["", "", "650,00", "7.800,00"]),
+    ];
+    let lines: Vec<&[(&str, f32, f32, bool)]> = lines.iter().map(Vec::as_slice).collect();
+    let (rows, n) = grid_table(&lines);
+    assert_eq!(rows.len(), 3, "{rows:?}");
+    assert_eq!(n, 2);
 }
 
 /// Task 29 (B2): a description whose values stand on its second line: its first line stands

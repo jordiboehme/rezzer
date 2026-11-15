@@ -181,6 +181,32 @@ impl Detector {
         }
     }
 
+    /// What found its regions, in words: the evidence of a region that names no finding of
+    /// its own.
+    pub(crate) const fn found_from(self) -> &'static str {
+        match self {
+            Detector::Tagged => "a table of the tag tree",
+            Detector::BoxPairs => "drawn boxes that each hold a label over its value",
+            Detector::SideTotals => "a column of totals beside the sections of a ruled grid",
+            Detector::Ruled => "a grid of drawn rules, read by its cells",
+            Detector::Banded => {
+                "a header band of drawn cells with the lines under it in its columns"
+            }
+            Detector::Strips => "rows of fields between drawn rules",
+            Detector::StripStack => {
+                "rows of fields between drawn rules, each label under its value"
+            }
+            Detector::TotalsUnder => {
+                "the totals under a table without rules, after the rule that ends it"
+            }
+            Detector::LabelsOverValues => "a line of titles over a line of values, without rules",
+            Detector::SideBlocks => "blocks side by side under a row of their headings",
+            Detector::KeyValues => "lines of a label and its value, without rules",
+            Detector::Grid => "a table without rules, found from its columns",
+            Detector::LinePairs => "lines of a label and its value",
+        }
+    }
+
     /// What a table it found of the kind `kind` (see [`Planned::kind`]) is as a region: the
     /// detectors whose tables are of one kind say it; the others keep the table's own.
     pub(crate) fn region_kind(self, kind: layoutregions::Kind) -> layoutregions::Kind {

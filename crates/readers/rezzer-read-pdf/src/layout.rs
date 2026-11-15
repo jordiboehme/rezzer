@@ -1598,7 +1598,8 @@ fn page_blocks_until(
     for (_, u) in today_unsure {
         pre_unsure.push(u);
     }
-    // The text a family kept refused: text where it stands, with why; no typer reads it.
+    // The text a family kept refused: text where it stands, with why; no typer reads it. It is
+    // given as a paragraph so that the walk writes it, and decided unsure (`decide::decide`).
     let mut pre_doubts: tables::Doubts = Vec::new();
     for (f, ids, why) in today_doubts {
         let ids: Vec<u32> = ids.into_iter().filter(|i| !held.contains(i)).collect();
@@ -1625,13 +1626,12 @@ fn page_blocks_until(
             today::Part::Table(t) => (
                 t.as_ref().map_or("", |t| t.by.id()),
                 t.as_ref()
-                    .and_then(|t| t.found_by)
-                    .unwrap_or("read by today's reader of its class"),
+                    .map_or("", |t| t.found_by.unwrap_or(t.by.found_from())),
                 false,
             ),
             today::Part::Title(_) => (
                 "pdf.underlined_title",
-                "a title over its box or bar, read by today's reader",
+                "a title over the box or the bar it names",
                 false,
             ),
             today::Part::Refused(f, why) => (today::refused_id(*f), *why, true),
@@ -1640,7 +1640,12 @@ fn page_blocks_until(
             layoutregions::Signal {
                 id,
                 detail: detail.to_string(),
-                weight: layoutregions::typers::MAX_SCORE,
+                // A refusal weighs nothing: its region is unsure.
+                weight: if text {
+                    0
+                } else {
+                    layoutregions::typers::MAX_SCORE
+                },
             },
             text,
         )
@@ -2633,6 +2638,19 @@ fn page_blocks_until(
         .flatten()
         .collect();
     for (k, why, limit) in spatial_whys {
+        // A block of one line with one piece has no layout its text does not say: it reads
+        // as it stands, so the note that no type has clear evidence for it would name
+        // nothing. Its region still says spatial and unsure. A note that names a kind the
+        // block reads as (two kinds about equally, a kind whose reader built nothing) says
+        // a doubt about what the line is, and stays. A block a limit left unread in part
+        // keeps its note too, and so does a block written with others in their columns.
+        let lone = match laid.blocks.get(k) {
+            Some(Block::Spatial { lines, .. }) => one_piece(lines),
+            _ => false,
+        };
+        if lone && !limit && !aligned.contains(&k) && why == decide::NO_EVIDENCE {
+            continue;
+        }
         if let Some(at) = anchors.get(k) {
             let how = if aligned.contains(&k) {
                 "as text in its columns"
@@ -2660,6 +2678,17 @@ fn page_blocks_until(
         .map(|k| k.and_then(|k| anchor_of(laid.blocks.get(k)?)))
         .collect();
     laid
+}
+
+/// Whether the lines of a block kept as laid out are one line of one piece: all its text is
+/// one piece, so nothing stands beside or under anything. Lines and pieces without text do
+/// not count.
+fn one_piece(lines: &[rezzer_model::SpatialLine]) -> bool {
+    let mut pieces = lines
+        .iter()
+        .flat_map(|l| &l.pieces)
+        .filter(|p| !p.text.trim().is_empty());
+    pieces.next().is_some() && pieces.next().is_none()
 }
 
 /// The reader of a table, pairs or totals decision, named by its winning evidence: drawn boxes

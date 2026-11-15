@@ -1043,7 +1043,11 @@ fn lay_out(
             budget.keep_time(keep(n));
             plain = plain || layout::time_over(budget).is_err();
             // The lines of the page as they stand: what it is written from when it is not
-            // laid out, or when the time stops its layout.
+            // laid out, or when the time stops its layout. They are built for every page,
+            // before the layout takes the runs: a layout the time stops does not give the
+            // runs back, and a copy of them kept for that case costs what the lines cost.
+            // Leaving them out for the pages laid out saves no time that can be measured
+            // (492 pages in 1.25 s with them, 1.24 s without) and no memory.
             let lines = plain_text_lines(&items.runs);
             let tried = !plain;
             // The separators drawn as marks that were written, said at the top of the page,
@@ -1876,12 +1880,18 @@ fn lay_out(
     }
     budget.keep_time(Duration::ZERO);
     if let Some((first, last)) = plain_pages {
+        // The title and the date of the file are found on page 1 as it is laid out.
+        let head = if first == 1 {
+            "; the title and the date of page 1 are not looked for either"
+        } else {
+            ""
+        };
         out.loss(
             format!("p{first}"),
             format!(
                 "{} written as plain lines, not laid out: the time limit was near; headings, \
                  lists, tables and columns are not looked for there, pictures are not listed \
-                 and links are not attached",
+                 and links are not attached{head}",
                 pages_from(first, last)
             ),
             LossReason::Limit,

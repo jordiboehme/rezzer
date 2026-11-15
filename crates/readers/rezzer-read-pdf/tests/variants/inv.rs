@@ -90,9 +90,11 @@ pub(crate) enum Inv {
     /// Each media block the shape places stands after the block of one text and before the
     /// block of another (Task 22 fix round 4): a picture is read where its column reads it.
     MediaPlace,
-    /// A spatial region is written as a block kept as laid out, that block always has its loss,
-    /// and the texts of its runs stand in it once each and in their order (P6-X: a block kept
-    /// as laid out with no word of why, or with a text lost, doubled or moved).
+    /// A spatial region is written as a block kept as laid out, that block has its loss
+    /// unless it is one line of one piece (which reads as it stands and has no loss that
+    /// names no kind), and the texts of its runs stand in it once each and in their order
+    /// (P6-X: a block kept as laid out with no word of why, or with a text lost, doubled or
+    /// moved).
     SpatialSaid,
 }
 
@@ -344,7 +346,8 @@ pub(crate) fn check_regions(
     broken
 }
 
-/// [`Inv::SpatialSaid`] on page `n` (from 0): every block kept as laid out has its loss, and
+/// [`Inv::SpatialSaid`] on page `n` (from 0): every block kept as laid out has its loss
+/// (a block of one line with one piece needs none, and has none that names no kind), and
 /// the spatial regions that stand at one are written in it, every text of their runs once
 /// and in its order.
 fn spatial_said(
@@ -365,7 +368,28 @@ fn spatial_said(
     for b in &blocks {
         if let Block::Spatial { lines, anchor, .. } = b {
             let at = anchor.as_ref().map(|a| a.0.as_str()).unwrap_or_default();
-            if !said(at) {
+            let pieces = lines
+                .iter()
+                .flat_map(|l| &l.pieces)
+                .filter(|p| !p.text.trim().is_empty())
+                .count();
+            // One piece: no note that no type has clear evidence; a note that names a kind
+            // may stand.
+            let bare = out.document.losses.iter().any(|l| {
+                l.location == at
+                    && l.what.contains("kept as laid out")
+                    && l.what.contains("no region type has clear evidence")
+            });
+            if pieces == 1 && bare {
+                broken.push(Broken(
+                    Inv::SpatialSaid,
+                    format!(
+                        "page {p}: the block at {at:?} is one piece and has a loss: {:?}",
+                        spatial_text(lines)
+                    ),
+                ));
+            }
+            if pieces != 1 && !said(at) {
                 broken.push(Broken(
                     Inv::SpatialSaid,
                     format!(

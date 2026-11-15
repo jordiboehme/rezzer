@@ -1776,12 +1776,18 @@ fn time_losses(result: &RunResult) -> Vec<String> {
         .collect()
 }
 
-/// The loss of the pages `first` to `last` that the time left no layout for.
+/// The loss of the pages `first` to `last` that the time left no layout for. With page 1
+/// among them it names the title and the date, which are found on page 1 as it is laid out.
 fn plain_lines_loss(first: usize, last: usize) -> String {
+    let head = if first == 1 {
+        "; the title and the date of page 1 are not looked for either"
+    } else {
+        ""
+    };
     format!(
         "Limit p{first} pages {first} to {last} are written as plain lines, not laid out: the \
          time limit was near; headings, lists, tables and columns are not looked for there, \
-         pictures are not listed and links are not attached"
+         pictures are not listed and links are not attached{head}"
     )
 }
 

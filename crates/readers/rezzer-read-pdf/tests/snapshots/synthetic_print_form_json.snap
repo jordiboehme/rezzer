@@ -1514,7 +1514,7 @@ expression: json
         {
           "kind": "rule",
           "id": "pdf.ruled",
-          "detail": "read by today's reader of its class"
+          "detail": "a grid of drawn rules, read by its cells"
         }
       ]
     },
@@ -1534,7 +1534,7 @@ expression: json
         {
           "kind": "rule",
           "id": "pdf.ruled",
-          "detail": "read by today's reader of its class"
+          "detail": "a grid of drawn rules, read by its cells"
         }
       ]
     },
@@ -1554,7 +1554,7 @@ expression: json
         {
           "kind": "rule",
           "id": "pdf.banded",
-          "detail": "read by today's reader of its class"
+          "detail": "a header band of drawn cells with the lines under it in its columns"
         }
       ]
     },
@@ -1837,7 +1837,7 @@ expression: json
         {
           "kind": "rule",
           "id": "pdf.ruled",
-          "detail": "read by today's reader of its class"
+          "detail": "a grid of drawn rules, read by its cells"
         }
       ]
     },
@@ -1857,7 +1857,7 @@ expression: json
         {
           "kind": "rule",
           "id": "pdf.ruled",
-          "detail": "read by today's reader of its class"
+          "detail": "a grid of drawn rules, read by its cells"
         }
       ]
     },
@@ -1877,7 +1877,7 @@ expression: json
         {
           "kind": "rule",
           "id": "pdf.banded",
-          "detail": "read by today's reader of its class"
+          "detail": "a header band of drawn cells with the lines under it in its columns"
         }
       ]
     },

@@ -5383,7 +5383,7 @@ fn the_pictures_of_the_file_are_written_before_the_pictures_of_regions() {
 #[test]
 fn a_line_kept_as_laid_out_that_reads_as_it_stands_gets_no_picture() {
     // One line alone: the Markdown writes all its layout says, so a picture would show
-    // nothing more. The line is still kept as laid out, with its loss.
+    // nothing more and a note would name nothing. The line is still kept as laid out.
     let content = "BT /F1 16 Tf 72 780 Td (Linde Nord 2026-114) Tj ET\n\
                    BT /F1 11 Tf 72 740 Td (Two chairs for the hall of Birke Ost.) Tj ET\n";
     let out = read_opts(
@@ -5403,10 +5403,10 @@ fn a_line_kept_as_laid_out_that_reads_as_it_stands_gets_no_picture() {
     assert!(out.document.assets.is_empty(), "{:#?}", out.document.assets);
     assert!(out.blobs.is_empty());
     assert!(
-        out.document
+        !out.document
             .losses
             .iter()
-            .any(|l| l.what.contains("is kept as laid out, line by line")),
+            .any(|l| l.what.contains("is kept as laid out")),
         "{:#?}",
         out.document.losses
     );

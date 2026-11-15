@@ -594,20 +594,6 @@ source: crates/rezzer/tests/corpus.rs
     }
   ],
   "facets": {},
-  "losses": [
-    {
-      "location": "p1:b2",
-      "severity": "info",
-      "what": "the region at p1:b2 is kept as laid out, line by line: no region type has clear evidence for it",
-      "why": "uncertain"
-    },
-    {
-      "location": "p1:b3",
-      "severity": "info",
-      "what": "the region at p1:b3 is kept as laid out, line by line: no region type has clear evidence for it",
-      "why": "uncertain"
-    }
-  ],
   "model_version": 1,
   "overview": {
     "facts": [

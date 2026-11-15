@@ -7234,6 +7234,59 @@ fn spatial_lines_keep_their_indent_against_the_leftmost_line() {
 }
 
 #[test]
+fn spatial_indents_of_a_wide_block_are_scaled_down() {
+    // The indent of a line shows that it is indented and how far against the other lines
+    // of its block. On a wide page a line may start hundreds of columns in: written out, the
+    // no-break spaces would be most of the Markdown. A block whose widest indent is over 32
+    // columns has its indents scaled so that the widest is 32; their order stays.
+    let nb = |n: usize| "\u{a0}".repeat(n);
+    let md = body_of(vec![spatial(&[
+        &[(0, "left")],
+        &[(100, "middle")],
+        &[(400, "right")],
+        &[(1, "near")],
+    ])]);
+    assert!(
+        md.contains(&format!(
+            "\nleft\\\n{}middle\\\n{}right\\\n{}near\n",
+            nb(8),
+            nb(32),
+            nb(1)
+        )),
+        "{md}"
+    );
+    // The bound from both sides: a widest indent of 32 is written as it is, one of 33 is
+    // scaled (the line at 3 of 33 columns stands at 3 of 32).
+    let md = body_of(vec![spatial(&[&[(0, "a")], &[(16, "b")], &[(32, "c")]])]);
+    assert!(
+        md.contains(&format!("\na\\\n{}b\\\n{}c\n", nb(16), nb(32))),
+        "{md}"
+    );
+    let md = body_of(vec![spatial(&[&[(0, "a")], &[(11, "b")], &[(33, "c")]])]);
+    assert!(
+        md.contains(&format!("\na\\\n{}b\\\n{}c\n", nb(11), nb(32))),
+        "{md}"
+    );
+    let md = body_of(vec![spatial(&[&[(0, "a")], &[(11, "b")], &[(66, "c")]])]);
+    assert!(
+        md.contains(&format!("\na\\\n{}b\\\n{}c\n", nb(6), nb(32))),
+        "{md}"
+    );
+    // Many lines far in: the indents are a small share of the text, not most of it.
+    let texts: Vec<String> = (0..2000).map(|k| format!("line {k}")).collect();
+    let rows: Vec<Vec<(u32, &str)>> = texts
+        .iter()
+        .enumerate()
+        .map(|(k, t)| vec![((k % 1000) as u32, t.as_str())])
+        .collect();
+    let rows: Vec<&[(u32, &str)]> = rows.iter().map(Vec::as_slice).collect();
+    let md = body_of(vec![spatial(&rows)]);
+    let pad = md.chars().filter(|c| *c == '\u{a0}').count();
+    assert!(pad <= 32 * 2000, "{pad}");
+    assert!(md.contains("line 1999"));
+}
+
+#[test]
 fn spatial_links_references_and_marks_are_written_in_the_lines() {
     let span = |start, end, link: Option<u32>, note: Option<&str>| rezzer_model::SpatialSpan {
         start,

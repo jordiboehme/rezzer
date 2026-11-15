@@ -25,12 +25,16 @@ const WORD_GAP: f32 = 0.15;
 /// different columns (see `layoutregions::line::PIECE_GAP`).
 pub(crate) use layoutregions::line::PIECE_GAP;
 
-/// A blank glyph is covered by the glyph drawn after it when that glyph starts left of this
-/// share of the blank's own advance (see [`covered_blanks`]): its middle. Past the middle
-/// more of the blank is white than printed over, and it reads as a blank. A share of the
-/// blank's advance, so a kerning step into a blank (a small part of it at every size and in
-/// every font) never takes it.
-const COVERED: f32 = 0.5;
+/// A show is printed over a blank when its first glyph starts where the blank starts, within
+/// this share of the blank's own advance to either side (see [`covered_blanks`]). A file
+/// that sets a show back over a blank moves the pen back by the blank's advance, so the two
+/// starts are the same number; what is left between them is the rounding of the positions
+/// and of the widths summed along the show (a few hundredths of a blank). A tenth holds
+/// that with room and stays far from every start that leaves white: a show that starts a
+/// fifth into the blank shows a gap on the page, and the blank parts two words or two
+/// amounts. A share of the blank's advance, so the bound is the same at every size and in
+/// every font.
+const AT_START: f32 = 0.1;
 
 /// A row of text shows is set back over its blanks when it has at least this many places
 /// where a show follows a blank, and at every one of them the show is printed over the blank
@@ -45,12 +49,12 @@ const SET_BACK: usize = 2;
 /// A file may show a line show by show, each ending in a blank and the next one set back by
 /// that blank: the next glyph is printed where the blank is, and the page shows no gap there
 /// (`<1234>ABCD*EF` shown as `<1234>ABCD ` and `*EF`). A blank is printed over when the first
-/// glyph of the next show starts left of its middle ([`COVERED`]) and what is left of it is no
-/// wider than a word gap ([`WORD_GAP`]: a wide blank printed over in part still parts two
-/// words, and without the blank the two join as one word), from the last blank of a show back
-/// to the first one that stays. A show that starts over the ink before the blanks, further
-/// left than a word gap, is printed over that text and takes no blank; a blank without an
-/// advance is one the reader put in.
+/// glyph of the next show starts where that blank starts ([`AT_START`]), and with it the
+/// blanks of the show after it; the blanks before it stay. A show that starts inside a
+/// blank leaves white before it, however little, and takes no blank: a tight row of amounts
+/// keeps every amount apart. Neither does a show that starts over the ink before the
+/// blanks, which is printed over that text. A blank without an advance is one the reader
+/// put in.
 ///
 /// One show printed over a blank proves nothing: tight lines are set with words that start
 /// inside the blank before them, and their gaps are small but there. So the blanks go only in
@@ -65,10 +69,10 @@ fn covered_blanks(glyphs: &[Gl], text: &Texts<'_>, turn: Turn) -> Vec<bool> {
     };
     let mut flags: Vec<bool> = Vec::new();
     // The row being walked: the shows after a blank, how many of them are printed over it,
-    // and the blanks they cover; where the last ink of the row ends.
+    // and the blanks they cover; whether the row has ink yet.
     let (mut places, mut over) = (0usize, 0usize);
     let mut blanks: Vec<usize> = Vec::new();
-    let mut ink_end: Option<f32> = None;
+    let mut inked = false;
     let mut close = |places: usize, over: usize, blanks: &mut Vec<usize>| {
         if places >= SET_BACK && over == places {
             if flags.is_empty() {
@@ -100,30 +104,39 @@ fn covered_blanks(glyphs: &[Gl], text: &Texts<'_>, turn: Turn) -> Vec<bool> {
         });
         if !follows {
             close(places, over, &mut blanks);
-            (places, over, ink_end) = (0, 0, None);
+            (places, over, inked) = (0, 0, false);
         }
         if blank {
             continue;
         }
-        if let (true, true, Some(end)) = (follows, g.head, ink_end)
-            && is_blank(&glyphs[i - 1])
-        {
+        if follows && g.head && inked && is_blank(&glyphs[i - 1]) {
             places += 1;
+            // The blanks the row ends in so far, from the last one back to the one the
+            // show starts at. Without such a blank the show takes none.
             let before = blanks.len();
+            let mut at_start = false;
             let mut b = i;
-            while x >= end - WORD_GAP * size && b > 0 && is_blank(&glyphs[b - 1]) {
+            while b > 0 && is_blank(&glyphs[b - 1]) {
                 let p = &glyphs[b - 1];
                 let from = turn.apply(p.x, p.y).0;
                 let adv = p.adv.unwrap_or(0.0);
-                if adv <= 0.0 || x >= from + COVERED * adv || x - from > WORD_GAP * size {
+                if adv <= 0.0 || x > from + AT_START * adv {
                     break;
                 }
                 blanks.push(b - 1);
+                if x >= from - AT_START * adv {
+                    at_start = true;
+                    break;
+                }
                 b -= 1;
             }
-            over += usize::from(blanks.len() > before);
+            if at_start {
+                over += 1;
+            } else {
+                blanks.truncate(before);
+            }
         }
-        ink_end = Some(x + g.adv.unwrap_or(size * 0.5));
+        inked = true;
     }
     close(places, over, &mut blanks);
     flags

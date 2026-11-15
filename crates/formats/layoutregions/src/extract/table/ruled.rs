@@ -637,6 +637,7 @@ pub fn ruled_cells<R: LineRun>(
         icons,
         cuts: Vec::new(),
         pictures: Vec::new(),
+        unsure_lines: 0,
     })
 }
 

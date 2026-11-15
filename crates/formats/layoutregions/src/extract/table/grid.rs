@@ -405,6 +405,119 @@ pub(crate) fn value_cut<R: LineRun>(
 /// Where a piece of a line goes in a grid: its column, its column span and its range of runs.
 type Placement = (usize, u32, (usize, usize));
 
+/// A step from the line above that is under this share of the row pitch is closer than the
+/// rows are (see [`Rhythm::thin_line`]): the second line of a cell is set at the leading of
+/// its text, a row at that leading and the white space that parts two rows. Less than a
+/// tenth of the pitch of such white space is not seen as apart, so a line nearer the pitch
+/// than that is not shown to go on.
+const CLOSER: f32 = 0.9;
+
+/// What a thin line of a table without rules is (fewer than half of the columns hold text
+/// on it). It is never a row of its own: the page cannot tell a sparse row from the second
+/// line of the record above it (a second article number, the end of a range, a name and a
+/// text that both wrap), so the line stays in the row above and the table says which
+/// lines may be rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Thin {
+    /// A line of the row above it, as the page shows.
+    Joins,
+    /// A line of the row above it that may be a row of its own: the table counts it for
+    /// its note.
+    Unsure,
+}
+
+/// What the full rows of a table without rules show of its rows: how far apart they stand
+/// and where the text of their first column starts.
+struct Rhythm {
+    /// The row pitch: the smaller middle one of the steps between two full rows that follow
+    /// each other. A wider step is a blank over a group or under the titles, so the middle is
+    /// taken from below. None without two such rows.
+    pitch: Option<f32>,
+    /// Where the text of the first column starts in the full rows under the first line (the
+    /// middle one of their starts): the edge of the key column, which names the row. None
+    /// when no full row under the first line has text there.
+    edge: Option<f32>,
+}
+
+impl Rhythm {
+    fn of<R: LineRun>(
+        runs: &[R],
+        pieces: &[Vec<Piece>],
+        placed: &[Vec<Placement>],
+        full: &[bool],
+    ) -> Rhythm {
+        let mut steps: Vec<f32> = (1..placed.len())
+            .filter(|&k| full[k - 1] && full[k])
+            .filter_map(|k| Some(baseline(runs, &pieces[k - 1])? - baseline(runs, &pieces[k])?))
+            .filter(|s| *s > 0.0)
+            .collect();
+        steps.sort_by(f32::total_cmp);
+        let mut starts: Vec<f32> = (1..placed.len())
+            .filter(|&k| full[k])
+            .filter_map(|k| key_start(runs, &placed[k]))
+            .collect();
+        starts.sort_by(f32::total_cmp);
+        Rhythm {
+            pitch: steps.get(steps.len().saturating_sub(1) / 2).copied(),
+            edge: starts.get(starts.len().saturating_sub(1) / 2).copied(),
+        }
+    }
+
+    /// What the thin line `k` (its pieces placed as `row`) is. The page shows that it goes
+    /// on the row above it when it has no text in the first column (a row is named there),
+    /// when its text there is indented against the edge of that column by more than
+    /// [`TITLE_ALIGN`] sizes, or when it stands closer to the line above it than the rows
+    /// stand to each other ([`CLOSER`]). Every other thin line may be a row of its own,
+    /// whatever it holds: it stays a line of the row above and is counted.
+    fn thin_line<R: LineRun>(
+        &self,
+        runs: &[R],
+        pieces: &[Vec<Piece>],
+        k: usize,
+        row: &[Placement],
+    ) -> Thin {
+        let Some(start) = key_start(runs, row) else {
+            return Thin::Joins;
+        };
+        let size = row
+            .iter()
+            .find(|x| x.2.1 > x.2.0)
+            .map_or(1.0, |x| runs[x.2.0].size());
+        let Some(edge) = self.edge else {
+            return Thin::Unsure;
+        };
+        if start - edge > TITLE_ALIGN * size {
+            return Thin::Joins;
+        }
+        let step = match (baseline(runs, &pieces[k - 1]), baseline(runs, &pieces[k])) {
+            (Some(over), Some(own)) => over - own,
+            _ => return Thin::Unsure,
+        };
+        let Some(pitch) = self.pitch else {
+            return Thin::Unsure;
+        };
+        if step < CLOSER * pitch {
+            return Thin::Joins;
+        }
+        Thin::Unsure
+    }
+}
+
+/// The baseline of a line: of the first run of its first piece with runs.
+fn baseline<R: LineRun>(runs: &[R], line: &[Piece]) -> Option<f32> {
+    line.iter()
+        .find(|p| p.end > p.start)
+        .map(|p| runs[p.start].y())
+}
+
+/// Where the ink of a line's text in the first column starts, if it has text there.
+fn key_start<R: LineRun>(runs: &[R], row: &[Placement]) -> Option<f32> {
+    row.iter()
+        .filter(|x| x.0 == 0)
+        .filter_map(|x| ink_start(runs, x.2))
+        .min_by(f32::total_cmp)
+}
+
 struct GridCell {
     ranges: Vec<(usize, usize)>,
     span: u32,
@@ -574,13 +687,32 @@ pub fn grid_cells_with<R: LineRun>(
     if (clean as f32) < CLEAN_ROWS * lines as f32 {
         return Err("its columns are not clean");
     }
-    // Rows: lines that fill at least half the columns; other lines join the row of the
-    // nearest one above them (lines above the first join the first).
+    // Rows: lines that fill at least half the columns. A thinner line joins the row of the
+    // nearest one above it (lines above the first join the first), and is counted when it
+    // may be a row of its own (see [`Rhythm::thin_line`]).
     let filled = |row: &Vec<Placement>| {
         let mut c: Vec<usize> = row.iter().map(|x| x.0).collect();
         c.dedup();
         c.len()
     };
+    let full: Vec<bool> = placed.iter().map(|row| 2 * filled(row) >= cols).collect();
+    // A line under the first that would join the row of another and has a piece over a gutter,
+    // or one that runs past the middle of a gutter (a note between rows), is no text of the
+    // cells: it would make one cell of two columns, or put the note in a cell. It stays out of
+    // the grid, its text read as it stands.
+    let runs_over = |&(col, span, (s, e)): &Placement| {
+        let rs = &runs[s..e];
+        let x0 = rs.iter().map(|r| r.x()).fold(f32::MAX, f32::min);
+        let x1 = rs.iter().map(|r| r.x() + r.w()).fold(f32::MIN, f32::max);
+        let before = col
+            .checked_sub(1)
+            .is_some_and(|c| x0 < (columns[c].1 + columns[col].0) / 2.0);
+        let after = columns
+            .get(col + 1)
+            .is_some_and(|n| x1 > (columns[col].1 + n.0) / 2.0);
+        span > 1 || before || after
+    };
+    let rhythm = Rhythm::of(runs, pieces, &placed, &full);
     // A line of amounts only (see [`amount`]), each under an amount of the row above in its
     // column, is a row of its own too: two amounts in one cell are never one cell's (the rule of
     // a header band's body, see `banded::row_starts`). A date or a range under a date, a whole
@@ -589,17 +721,27 @@ pub fn grid_cells_with<R: LineRun>(
     let mut anchors: Vec<usize> = Vec::new();
     // The columns of the row being built that hold an amount.
     let mut above: Vec<usize> = Vec::new();
+    // The lines kept as lines of the row above them without clear evidence.
+    let mut unsure_lines = 0usize;
     for (k, row) in placed.iter().enumerate() {
         let number = |&(_, span, (s, e)): &Placement| span == 1 && amount(&text_of(runs, s, e));
         let stacked = !anchors.is_empty()
             && !row.is_empty()
             && row.iter().all(|x| number(x) && above.contains(&x.0));
-        if 2 * filled(row) >= cols || stacked {
+        // A thin line that runs over the columns is no line of the cells (a note).
+        let thin = if full[k] || stacked || k == 0 || row.iter().any(runs_over) {
+            None
+        } else {
+            Some(rhythm.thin_line(runs, pieces, k, row))
+        };
+        unsure_lines += usize::from(thin == Some(Thin::Unsure));
+        if full[k] || stacked {
             anchors.push(k);
             above.clear();
         }
         above.extend(row.iter().filter(|x| number(x)).map(|x| x.0));
     }
+    // The rows are the lines that fill the columns: a thin line is none and makes no table.
     if anchors.len() < rows_needed.max(1) {
         return Err("too few rows");
     }
@@ -656,22 +798,8 @@ pub fn grid_cells_with<R: LineRun>(
     }
     // The first line too, where its titles were not cut.
     cut_values(0, &mut placed, &mut inside);
-    // A line under the first that would join the row of another and has a piece over a gutter,
-    // or one that runs past the middle of a gutter (a note between rows), is no text of the
-    // cells: it would make one cell of two columns, or put the note in a cell. It stays out of
-    // the grid, its text read as it stands.
-    let runs_over = |&(col, span, (s, e)): &Placement| {
-        let rs = &runs[s..e];
-        let x0 = rs.iter().map(|r| r.x()).fold(f32::MAX, f32::min);
-        let x1 = rs.iter().map(|r| r.x() + r.w()).fold(f32::MIN, f32::max);
-        let before = col
-            .checked_sub(1)
-            .is_some_and(|c| x0 < (columns[c].1 + columns[col].0) / 2.0);
-        let after = columns
-            .get(col + 1)
-            .is_some_and(|n| x1 > (columns[col].1 + n.0) / 2.0);
-        span > 1 || before || after
-    };
+    // The lines under the first that run over the columns and are no row stay out of the
+    // grid, their text read as it stands.
     let mut left: Vec<(usize, usize)> = Vec::new();
     for (k, row) in placed.iter_mut().enumerate().skip(1) {
         if anchors.binary_search(&k).is_err() && row.iter().any(runs_over) {
@@ -817,6 +945,7 @@ pub fn grid_cells_with<R: LineRun>(
                     .flat_map(move |(c, cell)| cell.pictures.iter().map(move |&pic| (r, c, pic)))
             })
             .collect(),
+        unsure_lines,
     })
 }
 

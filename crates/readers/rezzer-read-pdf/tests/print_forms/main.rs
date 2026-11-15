@@ -88,9 +88,10 @@ fn assert_no_loss(out: &ReadOutcome) {
     assert!(out.document.losses.is_empty(), "{:?}", out.document.losses);
 }
 
-/// The read is complete and names no loss but that the regions at `at` are kept as laid out,
-/// no region type having clear evidence for them (Task 19: a region the engine is not sure of
-/// says so; its text stands as laid out, a right read Task 36 types again).
+/// The read is complete, the blocks at `at` are kept as laid out (no region type has clear
+/// evidence for them; their text stands as laid out), and no other loss is named than the
+/// note of each such block that holds more than one piece of text: one line of one piece
+/// reads as it stands and gets no note.
 fn assert_no_loss_but_laid_out(out: &ReadOutcome, at: &[&str]) {
     assert_eq!(
         out.completeness,
@@ -104,7 +105,39 @@ fn assert_no_loss_but_laid_out(out: &ReadOutcome, at: &[&str]) {
         .iter()
         .map(|l| (l.location.as_str(), l.what.as_str()))
         .collect();
-    let want: Vec<String> = at
+    // The pieces with text of the block kept as laid out at each anchor.
+    let pieces = |anchor: &str| -> Option<usize> {
+        out.document
+            .body
+            .iter()
+            .flat_map(|s| match s {
+                Block::Section { blocks, .. } => blocks.as_slice(),
+                _ => &[],
+            })
+            .find_map(|b| match b {
+                Block::Spatial {
+                    lines,
+                    anchor: Some(a),
+                    ..
+                } if a.0 == anchor => Some(
+                    lines
+                        .iter()
+                        .flat_map(|l| &l.pieces)
+                        .filter(|p| !p.text.trim().is_empty())
+                        .count(),
+                ),
+                _ => None,
+            })
+    };
+    let mut noted: Vec<&str> = Vec::new();
+    for b in at {
+        match pieces(b) {
+            Some(1) => {}
+            Some(_) => noted.push(b),
+            None => panic!("no block kept as laid out at {b}: {:?}", out.document.body),
+        }
+    }
+    let want: Vec<String> = noted
         .iter()
         .map(|b| {
             format!(
@@ -113,7 +146,7 @@ fn assert_no_loss_but_laid_out(out: &ReadOutcome, at: &[&str]) {
             )
         })
         .collect();
-    let want: Vec<(&str, &str)> = at
+    let want: Vec<(&str, &str)> = noted
         .iter()
         .copied()
         .zip(want.iter().map(String::as_str))

@@ -1152,7 +1152,7 @@ source: crates/rezzer/tests/corpus.rs
       "what": "the region at p1:b34 is kept as laid out, line by line: no region type has clear evidence for it",
       "why": "uncertain"
     },
-    "<47 more items>"
+    "<39 more items>"
   ],
   "model_version": 1,
   "overview": {

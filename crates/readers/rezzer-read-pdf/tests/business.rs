@@ -508,15 +508,15 @@ fn refused_regions_of_a_page_give_one_loss() {
 }
 
 /// Guard: a block next to a figure caption is a chart's: no table and no pair is read from it,
-/// and it and the caption are kept as laid out, each with its loss (renamed in fix round 1b of
-/// Task 19 (M8): the name said no loss).
+/// and it and the caption are kept as laid out. The block says so with its loss; the caption
+/// is one line of one piece, which reads as it stands and gets none.
 #[test]
 fn region_beside_a_figure_caption_reads_no_table_and_says_its_loss() {
     let template = show("FL", 8.0, 40.0, 616.0, "Figure 1: Muster") + &columns_block();
     let out = common::read(&page_in(&template, Look::Plain));
-    // Task 19 (18b group G6): the caption line and the block beside it are kept as laid out,
-    // each with the loss that says so, as no region type has clear evidence for them (Task 36
-    // types them). No table and no pair is read from either: the caption is no label.
+    // The caption line and the block beside it are kept as laid out, as no region type has
+    // clear evidence for them. No table and no pair is read from either: the caption is no
+    // label.
     assert!(
         blocks(&out)
             .iter()
@@ -530,7 +530,7 @@ fn region_beside_a_figure_caption_reads_no_table_and_says_its_loss() {
         .iter()
         .map(|l| format!("{} {}", l.location, l.what.as_str()))
         .collect();
-    let want: Vec<String> = ["p1:b1", "p1:b2"]
+    let want: Vec<String> = ["p1:b2"]
         .iter()
         .map(|b| {
             format!(
@@ -540,6 +540,60 @@ fn region_beside_a_figure_caption_reads_no_table_and_says_its_loss() {
         })
         .collect();
     assert_eq!(what, want);
+}
+
+/// A page of prose with a line turned along its side margin and a page number in small
+/// roman digits at its foot.
+fn page_with_margin_line_and_number() -> Vec<u8> {
+    let mut c = String::new();
+    for k in 0..6 {
+        c += &show(
+            "F1",
+            10.0,
+            72.0,
+            700.0 - 12.0 * k as f32,
+            "The report sets out what the office found in the year and what it asks for next.",
+        );
+    }
+    c += "q 0 1 -1 0 30 200 cm BT /F1 8 Tf 0 0 Td \
+          (This paper is free of charge from the Muster office.) Tj ET Q\n";
+    c += &show("F1", 10.0, 294.0, 40.0, "vii");
+    common::pdf(&[common::Page::text(c)], "")
+}
+
+/// An unsure region of one line with one piece has no layout to lose: its text reads as it
+/// stands. So it gets no note and no picture; its region still says that it is kept as laid
+/// out and unsure. A line along the side margin is such a region.
+#[test]
+fn a_lone_line_of_one_piece_kept_as_laid_out_gets_no_note() {
+    use rezzer_read_pdf::layoutregions::{Certainty, Kind};
+    let bytes = page_with_margin_line_and_number();
+    let out = common::read(&bytes);
+    let (_, pages) = common::read_engine_pages(&bytes);
+    let page = &pages[0];
+    // The shape holds such regions: the note is left out, the regions are there.
+    let lone: Vec<&str> = page
+        .regions
+        .regions
+        .iter()
+        .filter(|r| r.kind == Kind::Spatial && r.certainty == Certainty::Unsure)
+        .flat_map(|r| common::region_texts(page, r))
+        .collect();
+    assert!(
+        lone.iter().any(|t| t.starts_with("This paper is free")),
+        "{lone:?}"
+    );
+    let notes: Vec<&str> = out
+        .document
+        .losses
+        .iter()
+        .map(|l| l.what.as_str())
+        .filter(|w| w.contains("kept as laid out"))
+        .collect();
+    assert!(notes.is_empty(), "{notes:?}");
+    assert!(common::region_pictures(&out).is_empty());
+    // Its text is in the page as it stands.
+    assert!(common::all_text(&out).contains("vii"));
 }
 
 /// Task 19 (brief step 1): two blocks of short lines side by side, with no rule, no colon and

@@ -41,6 +41,7 @@ Built on (versions as used in the development version):
 - Where a column line crosses a run of text in the space between two words (a value line padded into its fields), the text is cut there. A line inside a word cuts nothing
 - A grid with more than 15 columns or with more than 60 % empty cells is read as a form or a chart. Rows of narrow boxes with one digit each (a boxed number field) are read as text, not as a table
 - In a table without lines at least 80 % of the rows must stay inside the columns. The cells must be short (under 40 characters on median, unless most are numbers). A table that fails a check stays text, with a note that names the check
+- In a table without lines a line that fills fewer than half of the columns is never a row of its own. It stays in the row above, each of its texts on a line of its own in its cell. When such a line starts in the first column and stands about a row step or more under the line above it, it may be a row of its own, and a note under "Not read" says so. The note is also given when the table does not show its row step. Such lines never make a table: the table needs enough rows that fill its columns
 - Running headers and footers are marked in the JSON model; the Markdown keeps them as text. Text that is invisible on the page is listed apart, with its render mode
 - Outline (bookmarks) with level, title and target page
 - Page labels (i, ii, iii, then 1, 2, 3 and so on)
@@ -69,12 +70,12 @@ Reading order:
 - The rows of a table stay in order, a heading stands before its section and a caption stays with its picture
 - The order of blocks that do not depend on each other has no meaning: an address beside a date box, boxes at the side, the columns of a footer. It can differ from the order you would read them in
 
-A region Rezzer is unsure about:
+A region that no kind is clear for:
 
 - When no kind is clear, Rezzer doesn't guess. The region is kept as laid out
-- Its text is written as plain lines in reading order, one line of the page per line. Pieces that stand apart on a line get a wider gap
+- Its text is written as plain lines in reading order, one line of the page per line. Pieces that stand apart on a line get a wider gap. A line that starts further right than the leftmost line of its region keeps its indent. Where the widest indent of a region is over 32 characters, its indents are scaled down to that. The JSON keeps the true columns
 - Regions that follow one another and line up in the same columns (a row of labels over a row of values) are written as one `text` block, each piece in its column. There the place of a piece is its meaning. A `text` block shows no bold or italic; the JSON keeps them
-- A note under "Not read" names each such region and says why, for example: `the region at p1:b30 is kept as laid out, line by line: no region type has clear evidence for it` (`p1:b30` is block 30 of page 1)
+- A note under "Not read" names each such region and says why, for example: `the region at p1:b30 is kept as laid out, line by line: no region type has clear evidence for it` (`p1:b30` is block 30 of page 1). A region that is one line with one piece of text gets no such note: it reads as it stands. The JSON still lists it as `spatial` and `unsure`. It keeps its note in three cases: a limit left it whole, it is written in columns with other blocks, or the note names a kind it reads as (for example `it reads as header band or as heading about equally`)
 - When the layout says more than the plain lines do (two lines or more, with pieces side by side or with different indents), the area of the region is listed as a picture that needs vision, like `text kept as laid out at p1:b30, box 310, 511 to 539, 542`. With an output directory Rezzer cuts it out of the page render and writes it as `page-<N>-region-<K>.png`, so an agent that can see pictures can look at it
 - A file gets at most 50 such pictures. A note says how many regions got none. They keep their lines
 - No text is lost and no text stands twice
@@ -95,8 +96,10 @@ Regions in the JSON:
 - `kind`: `header_band`, `footer_band`, `title_block`, `heading`, `paragraph`, `list`, `table`, `label_value`, `totals`, `figure`, `code`, `footnote_legend` or `spatial` (a region kept as laid out)
 - `page` and `anchor`: the page and the block or table the region became, like `p1:b30` or `p1:t2`
 - `bounds`: the box of the region on the page in points, as `x0, y0, x1, y1` from the lower left corner
-- `certainty`: `exact` (the file states it), `rule` (found from the layout) or `unsure`
+- `certainty`: `exact` (the file states it), `rule` (found from the layout) or `unsure`. A region that is `unsure` with the kind `spatial` is kept as laid out. Text that a table finder did not read is `unsure` too, but it keeps its kind and is written as usual
 - `score` and `evidence`: the score from 0 to 1000 and the signs that gave the kind, each with an id and its words, like `heading.size_ratio` with `1.27 times the body size`
+- A table, a group of pairs or a row of fields that one of Rezzer's own finders found has the score 1000 and names the finder in its evidence, like `pdf.borderless.grid` with `a table without rules, found from its columns`. The score is no measure there
+- Text that such a finder looked at and did not read stays the paragraphs, headings or lists it reads as. Its region is marked `unsure` and has the score 0. Its evidence says why the finder did not read it, like `pdf.borderless.refused` with `some of its text stands between its columns`
 - `alternatives`: the kinds that also fit and lost, with their scores
 - A region kept as laid out is a block of type `spatial` in the body. Its `lines` hold `pieces`, each with its text and the character column `col` where it starts. Bold, italic, links and footnote references are in the `spans` of a piece
 - `grid` says where such a block stands on the page. `col` is the column of its left edge, counted from the leftmost text of the page in character widths. `joins` marks a block that goes on in the columns of the block before it
@@ -302,7 +305,7 @@ QR Code: [https://example.org/t/dNuKThV1](https://example.org/t/dNuKThV1)
 - A header row of several lines is found by bold text or font size, not by its fill color alone
 - A column title drawn as an icon is not read. Its cell stays empty and a note under "Not read" names the cell. On a page that draws more than 8,192 curved or slanted shapes the icons past them are not found. The table then notes that the drawings were looked at only in part. An empty cell of the first row that is struck out with a cross is named in the same way
 - An item table with one row is read as lines: the header row in one line, then the position, the description, the quantity and the price of the row in order. It is not rebuilt as a table
-- A word space is left out where a file prints a line in pieces and sets each piece back over the space before it, in two places of the line or more. A line with only one such place keeps the space, also when no gap is printed there
+- A word space is left out where a file prints a line in pieces and starts each piece where the space before it starts, in two places of the line or more. A piece that starts inside the space keeps it. A line with only one such place keeps the space, also when no gap is printed there
 - Some line breaks are joined: lines of verse with five words or more, two-line blocks that are aligned right, label pairs and lines like "Suite 200 of the / Old Mill Building". No text is lost
 - Tables on pages with form fields and tables inside pictures are not rebuilt
 - Scans without a text layer need OCR. OCR is a separate, optional part of Rezzer. Until then the page is rendered and listed as needing vision
@@ -325,8 +328,9 @@ QR Code: [https://example.org/t/dNuKThV1](https://example.org/t/dNuKThV1)
 - A legend of footnotes that stands at the foot of both pages of a two-page form is taken as a running footer. Its text is kept, but the markers above stay text and do not link to the footnotes
 - A label over a boxed amount and a label over a boxed date in the same column are read first, before both values. The values keep their separators
 - On a form page, a block of two text columns can be read in bands across both columns, with each printed line as its own paragraph (the directions on the front of the SF 1199A form)
-- When a file is too large for its time limit, the pages Rezzer has no time to lay out are written as plain lines. Headings, lists, tables and columns are not found there, pictures are not listed and links are not attached. A note under "Not read" names these pages
-- A region Rezzer is unsure about is kept as plain lines, not read as a table or as pairs. The note under "Not read" names each one
+- When a file is too large for its time limit, the pages Rezzer has no time to lay out are written as plain lines. Headings, lists, tables and columns are not found there, pictures are not listed and links are not attached. When page 1 is among them, the title and the date of the file are not looked for on it. A note under "Not read" names these pages and says so
+- A block in columns that a table finder looks at and does not read as a table stays the paragraphs, headings or lists it reads as. The lines of a paragraph are joined as in any paragraph and it gets no picture. A note under "Not read" says why it is no table, and the JSON marks its region `unsure`
+- A region that no kind is clear for is kept as plain lines, not read as a table or as pairs. The note under "Not read" names each one that holds more than one piece of text
 - Rows of a small table that stand far apart can be cut into regions of one line each. They are then written as one `text` block in their columns, not as a table
 - In such a `text` block a value set larger than its label can end out of line with it. The start of each piece is in its true column
 - A value on two lines under one label, in a row of labels over their values, can be cut: when its second line stands lower than the rows, that line is a paragraph after the table

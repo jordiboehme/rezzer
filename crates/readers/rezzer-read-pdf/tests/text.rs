@@ -2465,38 +2465,36 @@ fn row_in_shows(
 /// A line shown run by run, each run ending in a blank and the next one set back so that its
 /// first glyph is printed over that blank: the page shows no gap there, so the code reads as
 /// printed, with the one blank after the label that nothing is printed over. The next run
-/// covers the whole blank or most of it.
+/// starts where the blank starts.
 #[test]
 fn a_blank_the_next_run_is_printed_over_is_no_gap() {
-    for back in [1.0, 0.8] {
-        assert_eq!(
-            row_in_runs(&CODE_PARTS, &[back], "", false),
-            "Via: <1234>ABCD*EF*GH*(JK*LMN/OP*Q*RS)*TU",
-            "set back by {back} blanks"
-        );
-    }
-}
-
-/// Fix round 1 of Task 38b: the same line in a tagged file, where every show is a marked
-/// content part of its own. A change of the part ends no row of shows and parts no word:
-/// the code reads as printed, with one blank after the label.
-#[test]
-fn a_blank_printed_over_by_the_show_of_another_marked_part_is_no_gap() {
-    for back in [1.0, 0.8] {
-        assert_eq!(
-            row_in_shows(&CODE_PARTS, &[back], "", false, (true, "")),
-            "Via: <1234>ABCD*EF*GH*(JK*LMN/OP*Q*RS)*TU",
-            "set back by {back} blanks"
-        );
-    }
-    // Blanks nothing is printed over stay, part by part.
     assert_eq!(
-        row_in_shows(&CODE_PARTS, &[0.0], "", false, (true, "")),
-        "Via:  <1234>ABCD *EF *GH *(JK *LMN/OP *Q *RS) *TU"
+        row_in_runs(&CODE_PARTS, &[1.0], "", false),
+        "Via: <1234>ABCD*EF*GH*(JK*LMN/OP*Q*RS)*TU"
     );
 }
 
-/// Fix round 2 of Task 38b (review M5): a change of link ends a row of shows. The code line
+/// The same line in a tagged file, where every show is a marked content part of its own. A
+/// change of the part ends no row of shows and parts no word: the code reads as printed,
+/// with one blank after the label.
+#[test]
+fn a_blank_printed_over_by_the_show_of_another_marked_part_is_no_gap() {
+    assert_eq!(
+        row_in_shows(&CODE_PARTS, &[1.0], "", false, (true, "")),
+        "Via: <1234>ABCD*EF*GH*(JK*LMN/OP*Q*RS)*TU"
+    );
+    // Blanks nothing is printed over stay, part by part, and so do blanks printed over in
+    // part.
+    for back in [0.0, 0.8] {
+        assert_eq!(
+            row_in_shows(&CODE_PARTS, &[back], "", false, (true, "")),
+            "Via:  <1234>ABCD *EF *GH *(JK *LMN/OP *Q *RS) *TU",
+            "set back by {back} blanks"
+        );
+    }
+}
+
+/// A change of link ends a row of shows. The code line
 /// with a link over its runs from `*(JK` on is two rows, each with two places or more where
 /// every show is printed over the blank before it: their blanks go. The show that starts the
 /// link belongs to neither row with the show before it, so the blank between them stays.
@@ -2519,39 +2517,51 @@ fn a_change_of_link_ends_a_row_of_shows() {
     );
 }
 
-/// A blank that the next run is not printed over is a gap, and so is one it covers less than
-/// half of (`COVERED`, from both sides: 0.47 of the blank stays, 0.6 goes). At 0.47 what is
-/// left of the blank is under a word gap, so only the half keeps it.
+/// A blank that the next run is not printed over is a gap, and so is one the next run starts
+/// inside of: white shows before the run, however little. The run must start where the
+/// blank starts, within a tenth of the blank (`AT_START`, from both sides and on both sides
+/// of the blank's start: 0.92 and 1.08 blanks back go, 0.88 and 1.12 stay).
 #[test]
 fn a_blank_the_next_run_leaves_white_stays() {
     let spaced = "Via:  <1234>ABCD *EF *GH *(JK *LMN/OP *Q *RS) *TU";
-    for back in [0.0, 0.2, 0.47] {
+    for back in [0.0, 0.2, 0.47, 0.6, 0.8, 0.88, 1.12] {
         assert_eq!(
             row_in_runs(&CODE_PARTS, &[back], "", false),
             spaced,
             "set back by {back} blanks"
         );
     }
-    assert_eq!(
-        row_in_runs(&CODE_PARTS, &[0.6], "", false),
-        "Via: <1234>ABCD*EF*GH*(JK*LMN/OP*Q*RS)*TU"
-    );
+    for back in [0.92, 1.08] {
+        assert_eq!(
+            row_in_runs(&CODE_PARTS, &[back], "", false),
+            "Via: <1234>ABCD*EF*GH*(JK*LMN/OP*Q*RS)*TU",
+            "set back by {back} blanks"
+        );
+    }
 }
 
-/// A wide blank (6 points in Courier of 10 points) that the next run covers by more than
-/// half still shows white wider than a word gap: the two words stay apart (0.6 of the blank
-/// leaves 2.4 points). Covered by 0.8, 1.2 points are left, less than a word gap: no gap.
+/// A tight row of amounts in a face of one width (a blank of 6 points in Courier of 10
+/// points), each amount a show of its own that ends in a blank, the next one set 1.2 points
+/// after the ink before it (0.8 of the blank back): white shows between the amounts, so
+/// every blank stays and no two amounts read as one. The same holds for a name.
 #[test]
 fn a_wide_blank_printed_over_in_part_still_parts_two_words() {
+    let amounts = ["Total ", "1.200,00 ", "350,00 ", "75,00"];
+    for back in [0.0, 0.6, 0.8] {
+        assert_eq!(
+            row_in_runs(&amounts, &[back], "", true),
+            "Total 1.200,00 350,00 75,00",
+            "set back by {back} blanks"
+        );
+    }
     let parts = ["Erika ", "Mustermann ", "Musterstadt"];
-    assert_eq!(
-        row_in_runs(&parts, &[0.6], "", true),
-        "Erika Mustermann Musterstadt"
-    );
-    assert_eq!(
-        row_in_runs(&parts, &[0.8], "", true),
-        "ErikaMustermannMusterstadt"
-    );
+    for back in [0.6, 0.8] {
+        assert_eq!(
+            row_in_runs(&parts, &[back], "", true),
+            "Erika Mustermann Musterstadt",
+            "set back by {back} blanks"
+        );
+    }
 }
 
 /// One run printed over a blank is one measurement, not how the row was written

@@ -906,14 +906,24 @@ fn line_numbers(ns: &[usize]) -> String {
 /// aligned in columns.
 const PIECE_GAP: &str = "   ";
 
+/// The widest indent the plain lines of a block kept as laid out are written with, in
+/// characters. The indent of a line shows that the line is indented and how far against the
+/// other lines of its block: eight levels of a listing set four columns a level fit in it as
+/// they stand. A block with a wider indent (a line far to the right on a wide page) has all
+/// its indents scaled down so that the widest is this one. Written out, such indents can be
+/// most of the Markdown, and they are text the limits of a read never counted. The columns
+/// themselves stay in the JSON.
+const MAX_LINE_INDENT: u64 = 32;
+
 /// Text of a region no type had clear evidence for: its lines top to bottom as one paragraph,
 /// each line of the layout a line of its own (a hard break), the pieces of a line left to
 /// right. Nothing is aligned: the columns of the pieces stay in the JSON. Only the indent of
 /// a line against the leftmost line of the block is written, as no-break spaces (a listing
-/// reads by its indent); one further than [`MAX_SPATIAL_PAD`] is left out. Bold, italic, links
-/// and footnote references are written as in any paragraph, and the text is escaped. A line
-/// without text is left out; a line break inside a piece is written as a space (a piece is
-/// one line).
+/// reads by its indent); one further than [`MAX_SPATIAL_PAD`] is left out, and the indents of
+/// a block whose widest is over [`MAX_LINE_INDENT`] are scaled down to it, in their order.
+/// Bold, italic, links and footnote references are written as in any paragraph, and the
+/// text is escaped. A line without text is left out; a line break inside a piece is written
+/// as a space (a piece is one line).
 fn spatial_block(lines: &[rezzer_model::SpatialLine], links: &[String]) -> String {
     let written = |p: &&rezzer_model::SpatialPiece| !p.text.trim().is_empty();
     // The column the leftmost line starts at: the indent of a line is counted from it.
@@ -923,6 +933,23 @@ fn spatial_block(lines: &[rezzer_model::SpatialLine], links: &[String]) -> Strin
         .map(|p| u64::from(p.col))
         .min()
         .unwrap_or(0);
+    // The widest indent written: a wider one sets the scale of all.
+    let widest = lines
+        .iter()
+        .filter_map(|l| l.pieces.iter().find(written))
+        .map(|p| u64::from(p.col) - left)
+        .filter(|i| *i <= MAX_SPATIAL_PAD)
+        .max()
+        .unwrap_or(0);
+    // An indent as written: as it stands, or its share of the widest one (never none for a
+    // line that is indented).
+    let scaled = |indent: u64| {
+        if widest <= MAX_LINE_INDENT {
+            indent
+        } else {
+            (indent * MAX_LINE_INDENT).div_ceil(widest)
+        }
+    };
     let mut out: Vec<Inline> = Vec::new();
     for line in lines {
         let mut row: Vec<Inline> = Vec::new();
@@ -934,7 +961,7 @@ fn spatial_block(lines: &[rezzer_model::SpatialLine], links: &[String]) -> Strin
                 // and stays at the start of a line of a paragraph.
                 let indent = u64::from(piece.col).saturating_sub(left);
                 if (1..=MAX_SPATIAL_PAD).contains(&indent) {
-                    row.push(Inline::plain("\u{a0}".repeat(indent as usize)));
+                    row.push(Inline::plain("\u{a0}".repeat(scaled(indent) as usize)));
                 }
             } else {
                 let apart = u64::from(piece.col) > at + 1;

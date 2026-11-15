@@ -5476,6 +5476,44 @@ fn first_page_past_the_limit(out: &ReadOutcome) -> Option<u32> {
     })
 }
 
+/// The title and the date of a file are looked for on page 1 as it is laid out. When the time
+/// stops before that and page 1 is written as plain lines, they are not looked for, and the
+/// note of the plain pages says so. When page 1 is laid out and only later pages are plain,
+/// the note does not name them.
+#[test]
+fn a_plain_page_1_says_that_its_title_and_date_were_not_looked_for() {
+    let note = |out: &ReadOutcome| -> Option<String> {
+        out.document
+            .losses
+            .iter()
+            .find(|l| l.what.contains("written as plain lines"))
+            .map(|l| format!("{} {}", l.location, l.what))
+    };
+    let said = "the title and the date of page 1 are not looked for either";
+    // One page, the limit at 24 places of the read: where the page is written as plain
+    // lines, the note names the title and the date.
+    let file = nested_boxes_page(20, 3_000, 380);
+    let (_, reads) = read_on_steps(&file, Duration::from_secs(360_000));
+    let mut plain = 0;
+    for k in 1..=24u32 {
+        let at = u32::try_from(reads).expect("few readings") * k / 24;
+        let (out, _) = read_on_steps(&file, Duration::from_millis(1) * at);
+        if let Some(note) = note(&out) {
+            plain += 1;
+            assert!(note.starts_with("p1 ") && note.contains(said), "{note}");
+        }
+    }
+    assert!(plain > 0, "no limit wrote page 1 as plain lines");
+    // 600 pages under a third of the looks of the whole read: the first pages are laid out,
+    // the plain pages start later, and the title and the date were looked for.
+    let file = many_pages(600, 20, 0);
+    let (_, reads) = read_on_steps(&file, Duration::from_secs(360_000));
+    let limit = Duration::from_millis(1) * u32::try_from(reads / 3).expect("few readings");
+    let (out, _) = read_on_steps(&file, limit);
+    let note = note(&out).expect("plain pages");
+    assert!(!note.starts_with("p1 ") && !note.contains(said), "{note}");
+}
+
 /// Fix round 2 of Task 37: `PLAIN_CHECK` moved both ways, through the plain pass itself. 600
 /// pages on a clock that moves one millisecond with each look, under a limit of a third of
 /// the looks of the whole read: the text of all pages is read, 26 are laid out and the rest

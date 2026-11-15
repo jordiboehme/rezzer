@@ -2866,6 +2866,389 @@ fn noted_refusals_keep_their_reason_in_their_paragraphs() {
     }
 }
 
+/// A table without rules of a name and four columns of amounts set flush right, its rows 14
+/// points apart: `rows` are its lines under the titles, each a name and its amounts.
+fn sparse_amounts_page(rows: &[(&str, [&str; 4])]) -> Vec<u8> {
+    let xs = [300.0, 370.0, 450.0, 530.0];
+    let mut c = show("F1", 10.0, 72.0, 760.0, "Type");
+    for (x, t) in xs.iter().zip(["Hours", "Rate", "Amount", "Year"]) {
+        c += &show("F1", 10.0, x - helvetica_width(t, 10.0), 760.0, t);
+    }
+    for (k, (name, amounts)) in rows.iter().enumerate() {
+        let y = 745.0 - 14.0 * k as f32;
+        c += &show("F1", 10.0, 72.0, y, name);
+        for (x, a) in xs.iter().zip(amounts) {
+            if !a.is_empty() {
+                c += &show("F1", 10.0, x - helvetica_width(a, 10.0), y, a);
+            }
+        }
+    }
+    pdf(&[Page::text(c)], "")
+}
+
+/// A sparse table of amounts: a line with one amount only fills fewer than half of the
+/// columns. The page cannot tell such a row from the second line of the record above it,
+/// so it stays a line of the row above, in its own column, and a note says that it may be
+/// a row of its own. Nothing is silent.
+#[test]
+fn a_sparse_line_of_amounts_stays_in_the_row_above_with_a_note() {
+    let out = read(&sparse_amounts_page(&[
+        ("Salary", ["", "", "3.000,00", "36.000,00"]),
+        ("Overtime", ["10,00", "25,00", "250,00", ""]),
+        ("Bonus", ["", "", "", "1.000,00"]),
+        ("Tax", ["", "", "-650,00", "-7.800,00"]),
+        ("Meal", ["", "3,50", "", ""]),
+    ]));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    let rows: Vec<Vec<String>> = found[0]
+        .1
+        .iter()
+        .map(|r| r.iter().map(|c| c.trim().to_string()).collect())
+        .collect();
+    assert_eq!(
+        rows,
+        owned(&[
+            &["Type", "Hours", "Rate", "Amount", "Year"],
+            &["Salary", "", "", "3.000,00", "36.000,00"],
+            &["Overtime Bonus", "10,00", "25,00", "250,00", "1.000,00"],
+            &["Tax Meal", "", "3,50", "-650,00", "-7.800,00"],
+        ])
+    );
+    // Each line of a cell is a line of its own: the name and the amount of the thin line
+    // are never glued to the text over them.
+    let md = markdown(&out);
+    assert!(
+        md.contains("| Overtime<br>Bonus | 10,00 | 25,00 | 250,00 | <br>1.000,00 |"),
+        "{md}"
+    );
+    assert!(
+        md.contains("| Tax<br>Meal |  | <br>3,50 | -650,00 | -7.800,00 |"),
+        "{md}"
+    );
+    let notes: Vec<&str> = out
+        .document
+        .losses
+        .iter()
+        .map(|l| l.what.as_str())
+        .filter(|w| w.contains("kept as lines of the rows above them"))
+        .collect();
+    assert_eq!(
+        notes,
+        [
+            "2 lines of a table on page 1 are kept as lines of the rows above them: the page \
+          does not show whether they go on those rows or are rows of their own"
+        ]
+    );
+}
+
+/// A name alone on a line of such a table, at the row pitch, may be the second line of the
+/// name above it or a row without amounts: it stays a line of the row above, and a note
+/// says so.
+#[test]
+fn a_name_alone_at_the_row_pitch_stays_in_the_row_above_with_a_note() {
+    let out = read(&sparse_amounts_page(&[
+        ("Salary", ["", "", "3.000,00", "36.000,00"]),
+        ("Overtime", ["10,00", "25,00", "250,00", ""]),
+        ("Weekend", ["", "", "", ""]),
+        ("Tax", ["", "", "-650,00", "-7.800,00"]),
+        ("Rent", ["", "", "-400,00", "-4.800,00"]),
+    ]));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    assert_eq!(found[0].1.len(), 5, "{found:#?}");
+    assert_eq!(found[0].1[2][0], "Overtime Weekend", "{found:#?}");
+    let notes: Vec<&str> = out
+        .document
+        .losses
+        .iter()
+        .map(|l| l.what.as_str())
+        .filter(|w| w.contains("kept as a line of the row above it"))
+        .collect();
+    assert_eq!(
+        notes,
+        [
+            "1 line of a table on page 1 is kept as a line of the row above it: the page does \
+          not show whether it goes on that row or is a row of its own"
+        ]
+    );
+}
+
+/// The evidence of a region the reader's own finder found says what found it, in words a
+/// reader of the JSON knows: no name of a plan or of a step of the code.
+#[test]
+fn the_evidence_of_a_found_table_names_its_finder_in_plain_words() {
+    let bytes = sparse_amounts_page(&[
+        ("Salary", ["", "", "3.000,00", "36.000,00"]),
+        ("Overtime", ["10,00", "25,00", "250,00", ""]),
+        ("Tax", ["", "", "-650,00", "-7.800,00"]),
+    ]);
+    let (_, pages) = common::read_engine_pages(&bytes);
+    let table: Vec<_> = pages[0]
+        .regions
+        .regions
+        .iter()
+        .filter(|r| r.kind == rezzer_read_pdf::layoutregions::Kind::Table)
+        .collect();
+    assert_eq!(table.len(), 1, "{:#?}", pages[0].regions.regions);
+    assert_eq!(table[0].signals[0].id, "pdf.borderless.grid");
+    assert_eq!(
+        table[0].signals[0].detail,
+        "a table without rules, found from its columns"
+    );
+    assert_eq!(table[0].score.0, 1000);
+    for r in &pages[0].regions.regions {
+        for s in &r.signals {
+            assert!(!s.detail.contains("today"), "{s:?}");
+        }
+    }
+}
+
+/// Text a table finder of the reader refuses stays the paragraph it was: a refusal is no
+/// evidence for a paragraph, so its region says `unsure` with the score 0, and its evidence
+/// names the refusal. Nothing else follows from that: no block kept as laid out, no note
+/// of one, no picture.
+#[test]
+fn text_a_table_finder_refuses_is_a_paragraph_marked_unsure() {
+    use rezzer_read_pdf::layoutregions::{Certainty, Kind};
+    let mut c = show("F2", 16.0, 72.0, 780.0, "Delivery note");
+    c += &show(
+        "F1",
+        10.0,
+        72.0,
+        740.0,
+        "Some opening sentence that is long enough to be read as prose by every reader.",
+    );
+    for (x, y, text) in [
+        (72.0, 700.0, "Ref"),
+        (190.0, 700.0, "Date"),
+        (330.0, 700.0, "Clerk"),
+        (450.0, 700.0, "Depot"),
+        (84.0, 688.0, "A-1"),
+        (215.0, 688.0, "05.01.2026"),
+        (470.0, 688.0, "North"),
+        (72.0, 676.0, "see back"),
+        (300.0, 676.0, "x"),
+        (410.0, 676.0, "7"),
+    ] {
+        c += &show("F1", 10.0, x, y, text);
+    }
+    c += &show(
+        "F1",
+        10.0,
+        72.0,
+        600.0,
+        "A closing sentence of the note that is also long enough to be read as plain prose.",
+    );
+    let bytes = pdf(&[Page::text(c)], "");
+    common::assert_every_run_in_one_region(&bytes);
+    let (out, pages) = common::read_engine_pages(&bytes);
+    let page1 = &pages[0];
+    let holders: Vec<_> = page1
+        .regions
+        .regions
+        .iter()
+        .filter(|r| {
+            common::region_texts(page1, r)
+                .iter()
+                .any(|t| t.contains("Clerk"))
+        })
+        .collect();
+    assert_eq!(holders.len(), 1, "{holders:#?}");
+    let r = holders[0];
+    assert_eq!(
+        (r.kind, r.certainty, r.score.0),
+        (Kind::Paragraph, Certainty::Unsure, 0),
+        "{r:#?}"
+    );
+    assert_eq!(r.signals[0].id, "pdf.borderless.refused");
+    assert_eq!(
+        r.signals[0].detail,
+        "some of its text stands between its columns"
+    );
+    // The Markdown is what it was: one paragraph, the note of the refusal, nothing more.
+    let paras = paragraphs(page(&out, 1));
+    assert!(
+        paras.contains(&"Ref Date Clerk Depot A-1 05.01.2026 North see back x 7".to_string()),
+        "{paras:?}"
+    );
+    assert!(
+        !page(&out, 1)
+            .iter()
+            .any(|b| matches!(b, Block::Spatial { .. }))
+    );
+    assert!(common::region_pictures(&out).is_empty());
+    let losses: Vec<&str> = out
+        .document
+        .losses
+        .iter()
+        .map(|l| l.what.as_str())
+        .collect();
+    assert!(
+        !losses.iter().any(|w| w.contains("kept as laid out")),
+        "{losses:?}"
+    );
+    assert!(
+        losses.iter().any(|w| w.contains("is not read as a table")),
+        "{losses:?}"
+    );
+}
+
+/// An item table set at the leading of its text, one record with its name and its text on
+/// two lines: the second line holds words only, so nothing shows a row. The record stays one
+/// row with both lines in its cells, and a note says that the line may be a row of its own.
+#[test]
+fn a_record_whose_name_and_text_wrap_stays_one_row_with_a_note() {
+    let xs = [72.0, 180.0, 340.0, 400.0, 480.0];
+    let rows: [(f32, [&str; 5]); 7] = [
+        (760.0, ["Item", "Text", "Qty", "Price", "Total"]),
+        (746.0, ["Paper", "White", "2", "3,00", "6,00"]),
+        (
+            732.0,
+            ["Folders for", "Sheets of plain", "4", "90,00", "360,00"],
+        ),
+        (718.0, ["the desk", "white stock", "", "", ""]),
+        (704.0, ["Ink", "Black", "1", "5,00", "5,00"]),
+        (690.0, ["Tape", "Clear", "9", "0,10", "0,90"]),
+        (676.0, ["Glue", "Solid", "3", "0,20", "0,60"]),
+    ];
+    let mut c = String::new();
+    for (y, cells) in rows {
+        for (x, t) in xs.iter().zip(cells) {
+            if !t.is_empty() {
+                c += &show("F1", 10.0, *x, y, t);
+            }
+        }
+    }
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    let rows = &found[0].1;
+    assert_eq!(rows.len(), 6, "{rows:#?}");
+    assert_eq!(
+        rows[2],
+        [
+            "Folders for the desk",
+            "Sheets of plain white stock",
+            "4",
+            "90,00",
+            "360,00"
+        ],
+        "{rows:#?}"
+    );
+    assert!(
+        out.document.losses.iter().any(|l| l
+            .what
+            .starts_with("1 line of a table on page 1 is kept as a line")),
+        "{:?}",
+        out.document.losses
+    );
+}
+
+/// A block of one piece kept as laid out keeps its note when the note names a kind the
+/// region reads as: that is a doubt about what the line is, not about its layout. Only the
+/// note that no type has clear evidence is left out for one piece. The direct deposit form
+/// has lines that read as a running header or as a heading about equally.
+#[test]
+fn a_one_piece_block_keeps_a_note_that_names_a_kind() {
+    let out = read_corpus("pdfbox-sf1199a-direct-deposit.pdf");
+    // The blocks of one piece kept as laid out, by their anchors.
+    let lone: Vec<&str> = out
+        .document
+        .body
+        .iter()
+        .flat_map(|s| match s {
+            Block::Section { blocks, .. } => blocks.as_slice(),
+            _ => &[],
+        })
+        .filter_map(|b| match b {
+            Block::Spatial {
+                lines,
+                anchor: Some(a),
+                ..
+            } if lines
+                .iter()
+                .flat_map(|l| &l.pieces)
+                .filter(|p| !p.text.trim().is_empty())
+                .count()
+                == 1 =>
+            {
+                Some(a.0.as_str())
+            }
+            _ => None,
+        })
+        .collect();
+    let noted: Vec<(&str, &str)> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| lone.contains(&l.location.as_str()) && l.what.contains("kept as laid out"))
+        .map(|l| (l.location.as_str(), l.what.as_str()))
+        .collect();
+    assert!(
+        noted
+            .iter()
+            .any(|(_, w)| w.contains("it reads as header band or as heading about equally")),
+        "{noted:?}"
+    );
+    assert!(
+        !noted
+            .iter()
+            .any(|(_, w)| w.contains("no region type has clear evidence")),
+        "{noted:?}"
+    );
+    assert!(lone.len() > noted.len(), "{} lone, {noted:?}", lone.len());
+}
+
+/// An item table set at the leading of its text, one record with its name and its text on
+/// two lines, the text ending in a date on the second line. The column holds words in every
+/// full row, so the date proves no row: the record stays one row, and a note says that the
+/// line may be a row of its own.
+#[test]
+fn a_date_that_ends_a_wrapped_text_stays_in_its_record() {
+    let xs = [72.0, 180.0, 340.0, 400.0, 480.0];
+    let rows: [(f32, [&str; 5]); 7] = [
+        (760.0, ["Item", "Text", "Qty", "Price", "Total"]),
+        (746.0, ["Paper", "White", "2", "3,00", "6,00"]),
+        (
+            732.0,
+            [
+                "Folders for",
+                "Kept in the hall until",
+                "4",
+                "90,00",
+                "360,00",
+            ],
+        ),
+        (718.0, ["the desk", "12.03.2026", "", "", ""]),
+        (704.0, ["Ink", "Black", "1", "5,00", "5,00"]),
+        (690.0, ["Tape", "Clear", "9", "0,10", "0,90"]),
+        (676.0, ["Glue", "Solid", "3", "0,20", "0,60"]),
+    ];
+    let mut c = String::new();
+    for (y, cells) in rows {
+        for (x, t) in xs.iter().zip(cells) {
+            if !t.is_empty() {
+                c += &show("F1", 10.0, *x, y, t);
+            }
+        }
+    }
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    let rows = &found[0].1;
+    assert_eq!(rows.len(), 6, "{rows:#?}");
+    assert_eq!(rows[2][0], "Folders for the desk", "{rows:#?}");
+    assert_eq!(rows[2][1], "Kept in the hall until 12.03.2026", "{rows:#?}");
+    assert!(
+        out.document.losses.iter().any(|l| l
+            .what
+            .starts_with("1 line of a table on page 1 is kept as a line")),
+        "{:?}",
+        out.document.losses
+    );
+}
+
 /// One cell of [`tagged_timetable`]: its lines, each its text (empty: no text on that line).
 type TaggedCell<'a> = &'a [&'a str];
 

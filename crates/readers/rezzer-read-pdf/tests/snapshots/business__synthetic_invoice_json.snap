@@ -843,7 +843,7 @@ expression: json
         {
           "kind": "rule",
           "id": "pdf.borderless.key_values",
-          "detail": "read by today's reader of its class"
+          "detail": "lines of a label and its value, without rules"
         }
       ]
     },
@@ -863,7 +863,7 @@ expression: json
         {
           "kind": "rule",
           "id": "pdf.borderless.grid",
-          "detail": "read by today's reader of its class"
+          "detail": "a table without rules, found from its columns"
         }
       ]
     },
@@ -883,7 +883,7 @@ expression: json
         {
           "kind": "rule",
           "id": "pdf.borderless.totals_under",
-          "detail": "read by today's reader of its class"
+          "detail": "the totals under a table without rules, after the rule that ends it"
         }
       ]
     },
@@ -897,8 +897,8 @@ expression: json
         517.7,
         106.0
       ],
-      "certainty": "rule",
-      "score": 1000,
+      "certainty": "unsure",
+      "score": 0,
       "evidence": [
         {
           "kind": "rule",

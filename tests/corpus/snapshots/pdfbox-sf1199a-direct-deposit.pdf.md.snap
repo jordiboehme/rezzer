@@ -18,7 +18,7 @@ format: pdf
 detected_by: "pdf header %PDF-"
 reader: "pdf/0.1.0"
 completeness: complete
-losses: 59
+losses: 51
 pages: 4
 tagged: false
 encrypted: false
@@ -124,7 +124,7 @@ VA Compensation or Pension             Other
 
 Picture page-1-region-2 (image/png, text kept as laid out at p1:b31 to p1:b33, box 326, 480 to 490, 507) is not extracted. :status[Needs vision]{yellow}
 
-                                        (specify)\
+                                (specify)\
 **G** THIS BOX FOR ALLOTMENT OF PAYMENT ONLY (if applicable)\
 TYPE   AMOUNT
 
@@ -236,7 +236,7 @@ VA Compensation or Pension             Other
 
 Picture page-2-region-2 (image/png, text kept as laid out at p2:b31 to p2:b33, box 326, 480 to 490, 507) is not extracted. :status[Needs vision]{yellow}
 
-                                        (specify)\
+                                (specify)\
 **G** THIS BOX FOR ALLOTMENT OF PAYMENT ONLY (if applicable)\
 TYPE   AMOUNT
 
@@ -348,7 +348,7 @@ VA Compensation or Pension             Other
 
 Picture page-3-region-2 (image/png, text kept as laid out at p3:b31 to p3:b33, box 326, 480 to 490, 507) is not extracted. :status[Needs vision]{yellow}
 
-                                        (specify)\
+                                (specify)\
 **G** THIS BOX FOR ALLOTMENT OF PAYMENT ONLY (if applicable)\
 TYPE   AMOUNT
 
@@ -381,7 +381,7 @@ Financial institutions should refer to the GREEN BOOK for further instructions.\
 **THE FINANCIAL INSTITUTION SHOULD MAIL THE COMPLETED FORM TO THE GOVERNMENT AGENCY IDENTIFIED ABOVE.**
 
 NSN 7540-01-058-0224   **PAYEE COPY**   1199-207\
-                                                                                                                            Designed using Perform Pro, WHS/DIOR, Mar 97
+                                Designed using Perform Pro, WHS/DIOR, Mar 97
 
 Picture page-3-region-4 (image/png, text kept as laid out at p3:b47, box 40, 29 to 576, 48) is not extracted. :status[Needs vision]{yellow}
 
@@ -663,15 +663,7 @@ AFDate_KeystrokeEx("mm/dd/yyyy");
 | p3:b47 | the region at p3:b47 is kept as laid out, line by line: no region type has clear evidence for it | uncertain | info |
 | p4:b7 | the region at p4:b7 is kept as laid out, line by line: no region type has clear evidence for it | uncertain | info |
 | p4:b8 | the region at p4:b8 is kept as laid out, line by line: no region type has clear evidence for it | uncertain | info |
-| p4:b10 | the region at p4:b10 is kept as laid out, line by line: no region type has clear evidence for it | uncertain | info |
 | p4:b12 | the region at p4:b12 is kept as laid out, line by line: no region type has clear evidence for it | uncertain | info |
-| p4:b13 | the region at p4:b13 is kept as laid out, line by line: no region type has clear evidence for it | uncertain | info |
 | p4:b14 | the region at p4:b14 is kept as laid out, line by line: no region type has clear evidence for it | uncertain | info |
 | p4:b15 | the region at p4:b15 is kept as laid out, line by line: no region type has clear evidence for it | uncertain | info |
-| p4:b17 | the region at p4:b17 is kept as laid out, line by line: no region type has clear evidence for it | uncertain | info |
-| p4:b19 | the region at p4:b19 is kept as laid out, line by line: no region type has clear evidence for it | uncertain | info |
-| p4:b20 | the region at p4:b20 is kept as laid out, line by line: no region type has clear evidence for it | uncertain | info |
 | p4:b21 | the region at p4:b21 is kept as laid out, line by line: no region type has clear evidence for it | uncertain | info |
-| p4:b22 | the region at p4:b22 is kept as laid out, line by line: no region type has clear evidence for it | uncertain | info |
-| p4:b23 | the region at p4:b23 is kept as laid out, line by line: no region type has clear evidence for it | uncertain | info |
-| p4:b26 | the region at p4:b26 is kept as laid out, line by line: no region type has clear evidence for it | uncertain | info |
