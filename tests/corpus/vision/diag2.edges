@@ -1,0 +1,4 @@
+ui --> notedown cli
+notedown cli --> notedown server
+notedown server --> ocr
+notedown server --> filesystem files

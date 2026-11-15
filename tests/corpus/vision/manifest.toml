@@ -1,0 +1,32 @@
+set = "public"
+
+[[pages]]
+id = "test1"
+image = "test1.png"
+text = "test1.txt"
+
+[[pages]]
+id = "test2"
+image = "test2.png"
+text = "test2.txt"
+edges = "test2.edges"
+diagrams = 2
+
+[[pages]]
+id = "diag1"
+image = "diag1.png"
+edges = "diag1.edges"
+diagrams = 1
+
+[[pages]]
+id = "diag2"
+image = "diag2.png"
+edges = "diag2.edges"
+diagrams = 1
+
+[[pages]]
+id = "diag3"
+image = "diag3.png"
+edges = "diag3.edges"
+diagrams = 2
+known_fail = true

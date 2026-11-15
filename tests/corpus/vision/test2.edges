@@ -1,0 +1,5 @@
+search --> Learn
+Learn --> teach
+teach --> search
+App --> DB
+MCP <--> DB
