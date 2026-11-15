@@ -1805,6 +1805,7 @@ dependencies = [
 name = "pagevision-eval"
 version = "0.1.0"
 dependencies = [
+ "image",
  "pagevision",
  "serde",
  "serde_json",

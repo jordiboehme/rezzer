@@ -4,11 +4,13 @@
 
 //! Evaluation of OCR runs: manifests of test pages, the results format and the text score.
 
+pub mod boxes;
 pub mod edges;
 pub mod manifest;
 pub mod results;
 pub mod text;
 
+pub use boxes::{BoxScore, ink_mask, score_boxes};
 pub use edges::{
     Dir, Edge, EdgeScore, TruthEdges, mermaid_edges, parse_truth, parse_truth_with_nodes,
     score_edges,
@@ -31,4 +33,6 @@ pub enum EvalError {
     Json(#[from] serde_json::Error),
     #[error("unknown results format {found:?}, expected \"pagevision-results/1\"")]
     UnknownFormat { found: String },
+    #[error("cannot decode the page image: {0}")]
+    Page(#[from] pagevision::PageError),
 }

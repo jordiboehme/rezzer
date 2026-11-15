@@ -35,13 +35,14 @@ fn round_side(side: u32, multiple: u32) -> u32 {
     (steps * multiple).max(multiple)
 }
 
-/// Decode a PNG, composite alpha onto white and resize to the grid size.
-pub fn prepare(png: &[u8], rule: &ImageRule) -> Result<Prepared, PageError> {
+/// Decode a PNG and composite alpha onto white, at the source size.
+/// Returns packed RGB8 with the width and height.
+pub fn decode_on_white(png: &[u8]) -> Result<(Vec<u8>, u32, u32), PageError> {
     let decoded = image::load_from_memory_with_format(png, image::ImageFormat::Png)
         .map_err(|e| PageError::Image(e.to_string()))?;
-    let (source_width, source_height) = (decoded.width(), decoded.height());
+    let (width, height) = (decoded.width(), decoded.height());
     let rgba = decoded.to_rgba8();
-    let mut rgb = image::RgbImage::new(source_width, source_height);
+    let mut rgb = image::RgbImage::new(width, height);
     for (src, dst) in rgba.pixels().zip(rgb.pixels_mut()) {
         let a = u32::from(src[3]);
         for c in 0..3 {
@@ -49,6 +50,14 @@ pub fn prepare(png: &[u8], rule: &ImageRule) -> Result<Prepared, PageError> {
             dst[c] = v as u8;
         }
     }
+    Ok((rgb.into_raw(), width, height))
+}
+
+/// Decode a PNG, composite alpha onto white and resize to the grid size.
+pub fn prepare(png: &[u8], rule: &ImageRule) -> Result<Prepared, PageError> {
+    let (raw, source_width, source_height) = decode_on_white(png)?;
+    let rgb = image::RgbImage::from_raw(source_width, source_height, raw)
+        .expect("decode_on_white returns width * height * 3 bytes");
     let (width, height) = target_size(source_width, source_height, rule);
     let rgb = if (width, height) == (source_width, source_height) {
         rgb
