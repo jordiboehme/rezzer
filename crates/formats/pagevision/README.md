@@ -12,7 +12,7 @@ The crate is standalone. It depends on no other rezzer crate.
 - `llama`: the llama.cpp backend. This is native code and is off by default. It uses `mtmd` with
   `metal` on macOS and `mtmd` with `openmp` on other systems.
 
-Default features build the types, the error and the model description only.
+Default features build the types, the error, the model description and the image preparation (`prepare`).
 
 ## Models
 

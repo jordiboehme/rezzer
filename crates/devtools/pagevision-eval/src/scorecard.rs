@@ -170,6 +170,12 @@ pub fn score(
     results: &ResultsFile,
     baseline: bool,
 ) -> Result<EngineScore, EvalError> {
+    if baseline && let Some(problem) = baseline_problem(&results.fingerprint) {
+        return Err(EvalError::Scoring(format!(
+            "{} cannot be a baseline: it {problem}",
+            results.engine
+        )));
+    }
     let mut public = Vec::new();
     let mut private = Vec::new();
     for manifest in manifests {
@@ -205,11 +211,12 @@ pub fn score(
     })
 }
 
-/// The version of the `llama-cpp-2` package in a `Cargo.lock` text.
-fn locked_llama_version(cargo_lock: &str) -> Option<String> {
+/// The version of the package `name` in a `Cargo.lock` text.
+fn locked_version(cargo_lock: &str, name: &str) -> Option<String> {
+    let header = format!("name = \"{name}\"");
     let mut lines = cargo_lock.lines();
     while let Some(line) = lines.next() {
-        if line.trim() == "name = \"llama-cpp-2\"" {
+        if line.trim() == header {
             let version = lines.next()?.trim().strip_prefix("version = \"")?;
             return Some(version.strip_suffix('"')?.to_string());
         }
@@ -220,15 +227,23 @@ fn locked_llama_version(cargo_lock: &str) -> Option<String> {
 /// Checks every non-baseline engine against the build: the crate version (the workspace
 /// version, as `pagevision::llama` writes it with `CARGO_PKG_VERSION`), the llama-cpp-2 version
 /// in `cargo_lock`, the model SHA-256s of QWEN35_4B (model, then mmproj) and PREPROCESS_VERSION.
-/// Baselines are skipped. Each error names the expected and the found value.
+/// Baselines are skipped, except that one using the QWEN35_4B hashes or a preprocess other than
+/// "none" is an error. Each error names the expected and the found value.
 pub fn check_fingerprints(card: &Scorecard, cargo_lock: &str) -> Result<(), Vec<String>> {
-    let locked = locked_llama_version(cargo_lock);
+    let locked = locked_version(cargo_lock, "llama-cpp-2");
+    let locked_sys = locked_version(cargo_lock, "llama-cpp-sys-2");
     let crate_version = env!("CARGO_PKG_VERSION");
     let preprocess = PREPROCESS_VERSION.to_string();
     let hashes = [QWEN35_4B.model.sha256, QWEN35_4B.mmproj.sha256];
     let mut errors = Vec::new();
-    for engine in card.engines.iter().filter(|e| !e.baseline) {
+    for engine in &card.engines {
         let (name, f) = (&engine.engine, &engine.fingerprint);
+        if engine.baseline {
+            if let Some(problem) = baseline_problem(f) {
+                errors.push(format!("{name}: a baseline entry {problem}"));
+            }
+            continue;
+        }
         if f.crate_version != crate_version {
             errors.push(format!(
                 "{name}: crate version is {} but the build is {crate_version}",
@@ -243,6 +258,18 @@ pub fn check_fingerprints(card: &Scorecard, cargo_lock: &str) -> Result<(), Vec<
             )),
             None => errors.push(format!(
                 "{name}: llama-cpp-2 is {} but Cargo.lock has no llama-cpp-2 entry",
+                f.llama_cpp_2
+            )),
+        }
+        // llama-cpp-sys-2 holds the native llama.cpp; it must be locked to the same version.
+        match &locked_sys {
+            Some(v) if *v == f.llama_cpp_2 => {}
+            Some(v) => errors.push(format!(
+                "{name}: llama-cpp-2 is {} but Cargo.lock has llama-cpp-sys-2 {v}",
+                f.llama_cpp_2
+            )),
+            None => errors.push(format!(
+                "{name}: llama-cpp-2 is {} but Cargo.lock has no llama-cpp-sys-2 entry",
                 f.llama_cpp_2
             )),
         }
@@ -263,6 +290,18 @@ pub fn check_fingerprints(card: &Scorecard, cargo_lock: &str) -> Result<(), Vec<
         Ok(())
     } else {
         Err(errors)
+    }
+}
+
+/// Why an entry cannot be a baseline: a baseline is skipped by `check_fingerprints`, so it must
+/// not be a pagevision run (the Qwen model hashes, or a numeric preprocess version).
+fn baseline_problem(f: &Fingerprint) -> Option<String> {
+    if f.model_sha256 == [QWEN35_4B.model.sha256, QWEN35_4B.mmproj.sha256] {
+        Some("uses the QWEN35_4B model hashes".to_string())
+    } else if f.preprocess != "none" {
+        Some(format!("has preprocess {:?}, not \"none\"", f.preprocess))
+    } else {
+        None
     }
 }
 
@@ -323,7 +362,7 @@ mod tests {
     use crate::RunBlock;
     use std::path::Path;
 
-    const LOCK: &str = "[[package]]\nname = \"other\"\nversion = \"1.0.0\"\n\n[[package]]\nname = \"llama-cpp-2\"\nversion = \"0.1.158\"\n";
+    const LOCK: &str = "[[package]]\nname = \"other\"\nversion = \"1.0.0\"\n\n[[package]]\nname = \"llama-cpp-2\"\nversion = \"0.1.158\"\n\n[[package]]\nname = \"llama-cpp-sys-2\"\nversion = \"0.1.158\"\n";
 
     fn fingerprint(llama: &str) -> Fingerprint {
         Fingerprint {
@@ -484,7 +523,10 @@ mod tests {
             set: "public".into(),
             pages: vec![page(dir.path(), "bad", true)],
         };
-        let s = score(&[m], &results(&["bad"]), true).unwrap();
+        let mut r = results(&["bad"]);
+        r.fingerprint.model_sha256 = vec!["x".into()];
+        r.fingerprint.preprocess = "none".into();
+        let s = score(&[m], &r, true).unwrap();
         assert_eq!(s.public.len(), 1);
         assert!(s.public[0].known_fail);
         assert!(s.baseline);
@@ -511,8 +553,12 @@ mod tests {
             engines: vec![engine("qwen", false, fingerprint("0.1.150"))],
         };
         let errs = check_fingerprints(&card, LOCK).unwrap_err();
-        assert_eq!(errs.len(), 1);
-        assert!(errs[0].contains("0.1.150") && errs[0].contains("0.1.158"));
+        // llama-cpp-2 and llama-cpp-sys-2 both differ from the fingerprint.
+        assert_eq!(errs.len(), 2);
+        assert!(
+            errs.iter()
+                .all(|e| e.contains("0.1.150") && e.contains("0.1.158"))
+        );
         let mut f = fingerprint("0.1.158");
         f.preprocess = "0".into();
         f.model_sha256 = vec!["abc".into()];
@@ -524,6 +570,49 @@ mod tests {
         assert_eq!(errs.len(), 2);
         assert!(errs.iter().any(|e| e.contains("abc")));
         assert!(errs.iter().any(|e| e.contains("preprocess")));
+    }
+
+    #[test]
+    fn drifted_sys_crate_fails() {
+        let lock = LOCK.replace(
+            "name = \"llama-cpp-sys-2\"\nversion = \"0.1.158\"",
+            "name = \"llama-cpp-sys-2\"\nversion = \"0.1.161\"",
+        );
+        let card = Scorecard {
+            format: FORMAT.into(),
+            engines: vec![engine("qwen", false, fingerprint("0.1.158"))],
+        };
+        let errs = check_fingerprints(&card, &lock).unwrap_err();
+        assert_eq!(errs.len(), 1);
+        assert!(errs[0].contains("llama-cpp-sys-2") && errs[0].contains("0.1.161"));
+        let no_sys = LOCK
+            .split("[[package]]\nname = \"llama-cpp-sys-2\"")
+            .next()
+            .unwrap();
+        assert!(check_fingerprints(&card, no_sys).is_err());
+    }
+
+    #[test]
+    fn qwen_run_cannot_be_a_baseline() {
+        let card = Scorecard {
+            format: FORMAT.into(),
+            engines: vec![engine("qwen", true, fingerprint("0.1.158"))],
+        };
+        assert!(check_fingerprints(&card, LOCK).is_err());
+        let mut f = fingerprint("0.1.158");
+        f.model_sha256 = vec!["x".into()];
+        let card = Scorecard {
+            format: FORMAT.into(),
+            engines: vec![engine("chandra", true, f.clone())],
+        };
+        assert!(check_fingerprints(&card, LOCK).is_err());
+        f.preprocess = "none".into();
+        let mut r = results(&[]);
+        r.fingerprint = f;
+        assert!(score(&[], &r, true).is_ok());
+        r.fingerprint = fingerprint("0.1.158");
+        assert!(score(&[], &r, true).is_err());
+        assert!(score(&[], &r, false).is_ok());
     }
 
     #[test]

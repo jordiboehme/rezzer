@@ -33,7 +33,9 @@ pub enum EvalError {
     Toml(#[from] toml::de::Error),
     #[error("invalid results file: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("unknown results format {found:?}, expected \"pagevision-results/1\"")]
+    #[error(
+        "unknown format {found:?}, expected \"pagevision-results/1\" (results) or \"pagevision-scorecard/1\" (scorecard)"
+    )]
     UnknownFormat { found: String },
     #[error("cannot decode the page image: {0}")]
     Page(#[from] pagevision::PageError),

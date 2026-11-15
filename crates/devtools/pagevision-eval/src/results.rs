@@ -14,6 +14,11 @@ pub const FORMAT: &str = "pagevision-results/1";
 
 /// A serde mirror of the run fingerprint. `preprocess` is a string because baselines write
 /// "none".
+///
+/// The `crate` field of a pagevision engine is the bare workspace version (for example
+/// "0.1.0"), exactly as `pagevision::llama` writes it, because `check_fingerprints` compares it
+/// with the build's version. A baseline engine may write any text there (the Chandra baseline
+/// uses "notedown-ocr 0.1.0"); baselines are skipped by that check.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Fingerprint {
     #[serde(rename = "crate")]
@@ -22,6 +27,64 @@ pub struct Fingerprint {
     pub model_sha256: Vec<String>,
     pub prompt_sha256: String,
     pub preprocess: String,
+}
+
+impl From<&pagevision::Fingerprint> for Fingerprint {
+    fn from(f: &pagevision::Fingerprint) -> Self {
+        Self {
+            crate_version: f.crate_version.clone(),
+            llama_cpp_2: f.llama_cpp_2.clone(),
+            model_sha256: f.model_sha256.clone(),
+            prompt_sha256: f.prompt_sha256.clone(),
+            preprocess: f.preprocess.to_string(),
+        }
+    }
+}
+
+/// The lowercase kind string of the results format ("diagram" is the one `score_boxes` counts).
+pub fn kind_str(kind: pagevision::BlockKind) -> &'static str {
+    use pagevision::BlockKind;
+    match kind {
+        BlockKind::Paragraph => "paragraph",
+        BlockKind::Heading => "heading",
+        BlockKind::List => "list",
+        BlockKind::Diagram => "diagram",
+        BlockKind::Table => "table",
+        BlockKind::Picture => "picture",
+        _ => "text",
+    }
+}
+
+impl From<&pagevision::Block> for RunBlock {
+    fn from(b: &pagevision::Block) -> Self {
+        Self {
+            kind: kind_str(b.kind()).to_string(),
+            label: None,
+            bbox: Some([
+                u32::from(b.bbox.x0),
+                u32::from(b.bbox.y0),
+                u32::from(b.bbox.x1),
+                u32::from(b.bbox.y1),
+            ]),
+            markdown: b.markdown.clone(),
+        }
+    }
+}
+
+impl PageRun {
+    /// The run of one page as pagevision returned it, under the page id of the manifest.
+    pub fn from_result(id: &str, result: &pagevision::PageResult) -> Self {
+        Self {
+            id: id.to_string(),
+            markdown: result.markdown.clone(),
+            truncated: result.truncated,
+            prompt_tokens: result.stats.prompt_tokens,
+            output_tokens: result.stats.output_tokens,
+            encode_ms: result.stats.encode_ms,
+            decode_ms: result.stats.decode_ms,
+            blocks: result.blocks.iter().map(RunBlock::from).collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -123,5 +186,89 @@ mod tests {
         let b: RunBlock = serde_json::from_str(json).unwrap();
         assert_eq!(b.bbox, None);
         assert_eq!(b.label, None);
+    }
+
+    /// Builds a pagevision result, converts it, writes it, reads it with the eval parser and
+    /// scores it: the whole seam between the crate and the harness.
+    #[test]
+    fn pagevision_output_crosses_the_seam() {
+        use crate::{Manifest, PageEntry, check_fingerprints, score};
+        use pagevision::model::{PREPROCESS_VERSION, QWEN35_4B};
+        use pagevision::{BBox, Block, Content, PageResult, Stats};
+
+        let fingerprint = pagevision::Fingerprint {
+            crate_version: env!("CARGO_PKG_VERSION").to_string(),
+            llama_cpp_2: "0.1.158".to_string(),
+            model_sha256: vec![
+                QWEN35_4B.model.sha256.to_string(),
+                QWEN35_4B.mmproj.sha256.to_string(),
+            ],
+            prompt_sha256: "p".to_string(),
+            preprocess: PREPROCESS_VERSION,
+        };
+        let result = PageResult {
+            width_px: 40,
+            height_px: 40,
+            blocks: vec![Block {
+                bbox: BBox {
+                    x0: 0,
+                    y0: 0,
+                    x1: 1000,
+                    y1: 1000,
+                },
+                certainty: 1.0,
+                content: Content::Diagram {
+                    mermaid: "graph TD\n  A --> B".to_string(),
+                    description: String::new(),
+                },
+                markdown: "```mermaid\ngraph TD\n  A --> B\n```".to_string(),
+            }],
+            markdown: "```mermaid\ngraph TD\n  A --> B\n```".to_string(),
+            truncated: false,
+            stats: Stats::default(),
+            fingerprint: fingerprint.clone(),
+            raw: None,
+        };
+        let file = ResultsFile {
+            format: FORMAT.to_string(),
+            engine: "qwen".to_string(),
+            fingerprint: Fingerprint::from(&result.fingerprint),
+            pages: vec![PageRun::from_result("p1", &result)],
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("r.json");
+        std::fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
+        let loaded = load_results(&path).unwrap();
+        assert_eq!(loaded, file);
+        assert_eq!(loaded.pages[0].blocks[0].kind, "diagram");
+
+        let image = dir.path().join("p1.png");
+        let mut img = image::RgbImage::from_pixel(40, 40, image::Rgb([255, 255, 255]));
+        for x in 5..35 {
+            img.put_pixel(x, 20, image::Rgb([0, 0, 0]));
+        }
+        img.save(&image).unwrap();
+        let manifest = Manifest {
+            set: "public".into(),
+            pages: vec![PageEntry {
+                id: "p1".into(),
+                image,
+                text: None,
+                edges: None,
+                nodes: None,
+                diagrams: 0,
+                known_fail: false,
+            }],
+        };
+        let entry = score(&[manifest], &loaded, false).unwrap();
+        assert_eq!(entry.public[0].boxes.unwrap().split_diagrams, 1);
+
+        // The converted fingerprint passes the CI check against a matching lock.
+        let lock = "[[package]]\nname = \"llama-cpp-2\"\nversion = \"0.1.158\"\n\n[[package]]\nname = \"llama-cpp-sys-2\"\nversion = \"0.1.158\"\n";
+        let card = crate::Scorecard {
+            format: crate::scorecard::FORMAT.into(),
+            engines: vec![entry],
+        };
+        assert_eq!(check_fingerprints(&card, lock), Ok(()));
     }
 }
