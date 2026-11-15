@@ -164,7 +164,14 @@ fn rewrite_text_arrows(line: &str) -> String {
             if let Some(end) = after.find("-->") {
                 let text = &after[..end];
                 let t = text.trim();
-                if !t.is_empty() && !text.contains(['-', '>', '|', '[', ']']) {
+                let after_dash = rest[..i].ends_with('-');
+                if !after_dash
+                    && !t.is_empty()
+                    && !t.starts_with('-')
+                    && !t.ends_with('-')
+                    && !text.contains("--")
+                    && !text.contains(['>', '|', '[', ']'])
+                {
                     out.push_str(&rest[..i]);
                     out.push_str("-->|");
                     out.push_str(t);
@@ -360,14 +367,18 @@ fn parse_sequence(src: &str) -> BTreeSet<Edge> {
         ) {
             continue;
         }
-        let Some(dash) = line.find('-') else { continue };
+        let found = line.match_indices('-').find_map(|(d, _)| {
+            let left = &line[..d];
+            if left.trim().is_empty() || left.contains(['<', '>', ':']) {
+                return None;
+            }
+            SEQ_ARROWS
+                .iter()
+                .find(|a| line[d..].starts_with(**a))
+                .map(|a| (d, *a))
+        });
+        let Some((dash, arrow)) = found else { continue };
         let left = &line[..dash];
-        if left.trim().is_empty() || left.contains(['<', '>', ':']) {
-            continue;
-        }
-        let Some(arrow) = SEQ_ARROWS.iter().find(|a| line[dash..].starts_with(**a)) else {
-            continue;
-        };
         let mut right = line[dash + arrow.len()..].trim_start();
         right = right.strip_prefix(['+', '-']).unwrap_or(right).trim_start();
         let right = right.split(':').next().unwrap_or("").trim();
@@ -644,6 +655,23 @@ mod tests {
         let edges = mermaid_edges(&fenced("graph LR\n  A[Notedown] --> B[OCR model (qwen)]"));
         assert_eq!(edges, vec![e("notedown", "ocr model qwen", Dir::Directed)]);
         assert_eq!(score_edges(&edges, &truth).correct, 1);
+    }
+
+    #[test]
+    fn mixed_arrow_chain_keeps_both_edges() {
+        let edges = mermaid_edges(&fenced("graph TD; A --- B --> C"));
+        assert_eq!(
+            edges,
+            vec![e("a", "b", Dir::Undirected), e("b", "c", Dir::Directed)]
+        );
+    }
+
+    #[test]
+    fn hyphens_in_text_arrow_and_participant() {
+        let edges = mermaid_edges(&fenced("graph LR\n  A -- e-mail --> B"));
+        assert_eq!(edges, vec![e("a", "b", Dir::Directed)]);
+        let edges = mermaid_edges(&fenced("sequenceDiagram\n  Web-Server->>DB: query"));
+        assert_eq!(edges, vec![e("webserver", "db", Dir::Directed)]);
     }
 
     #[test]
