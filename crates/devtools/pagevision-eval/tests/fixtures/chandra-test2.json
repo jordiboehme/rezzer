@@ -1,0 +1,60 @@
+{
+  "format": "pagevision-results/1",
+  "engine": "chandra-ocr-2",
+  "fingerprint": {
+    "crate": "notedown-ocr 0.1.0",
+    "llama_cpp_2": "0.1.158",
+    "model_sha256": [
+      "bde0505fda04eb1a89e122b2112e60b10c8c9697db5ca90a2e03635984f3a07d",
+      "709be8aeda77c5732e58e957367439eae14ebb73b4f4a78b558013d000948bc3"
+    ],
+    "prompt_sha256": "025935f3e1de1acdfadd4c7d581ab17eb82e8caaffef7b64962621c80b7ca9a8",
+    "preprocess": "none"
+  },
+  "pages": [
+    {
+      "id": "test2",
+      "markdown": "This note is without\\\nreal-time recognition.\n\n```mermaid\ngraph TD\n    search --> Learn\n    Learn --> teach\n    teach --> search\n```\n\n> A cyclic diagram with three nodes: \"search\", \"Learn\", and \"teach\". The nodes are arranged in a triangle. An arrow points from \"search\" to \"Learn\", from \"Learn\" to \"teach\", and from \"teach\" back to \"search\". Each node has a small curved arrow pointing clockwise around its top edge.\n\n```mermaid\ngraph LR\n    App --> DB\n    DB <--> MCP\n```\n\n> A diagram showing the interaction between three components: \"MCP\", \"DB\", and \"App\". \"App\" is represented by a circle on the right. An arrow points from \"App\" to \"DB\", which is represented by a cylinder in the middle. \"DB\" and \"MCP\" are connected by a double-headed arrow. \"MCP\" is represented by a rectangle on the left with a small arrow pointing down at its bottom-left corner.\n",
+      "truncated": false,
+      "prompt_tokens": 3189,
+      "output_tokens": 352,
+      "encode_ms": 10585,
+      "decode_ms": 10106,
+      "blocks": [
+        {
+          "kind": "paragraph",
+          "label": "Text",
+          "bbox": [
+            98,
+            113,
+            742,
+            250
+          ],
+          "markdown": "This note is without\\\nreal-time recognition."
+        },
+        {
+          "kind": "diagram",
+          "label": "Diagram",
+          "bbox": [
+            96,
+            292,
+            658,
+            566
+          ],
+          "markdown": "```mermaid\ngraph TD\n    search --> Learn\n    Learn --> teach\n    teach --> search\n```\n\n> A cyclic diagram with three nodes: \"search\", \"Learn\", and \"teach\". The nodes are arranged in a triangle. An arrow points from \"search\" to \"Learn\", from \"Learn\" to \"teach\", and from \"teach\" back to \"search\". Each node has a small curved arrow pointing clockwise around its top edge."
+        },
+        {
+          "kind": "diagram",
+          "label": "Diagram",
+          "bbox": [
+            195,
+            651,
+            829,
+            784
+          ],
+          "markdown": "```mermaid\ngraph LR\n    App --> DB\n    DB <--> MCP\n```\n\n> A diagram showing the interaction between three components: \"MCP\", \"DB\", and \"App\". \"App\" is represented by a circle on the right. An arrow points from \"App\" to \"DB\", which is represented by a cylinder in the middle. \"DB\" and \"MCP\" are connected by a double-headed arrow. \"MCP\" is represented by a rectangle on the left with a small arrow pointing down at its bottom-left corner."
+        }
+      ]
+    }
+  ]
+}

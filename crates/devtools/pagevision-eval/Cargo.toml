@@ -1,0 +1,21 @@
+[package]
+name = "pagevision-eval"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "A development tool: scores pagevision and baseline OCR runs against ground truth"
+
+# A development tool. Nothing depends on it but tests, and it is never linked into the
+# `rezzer` binary.
+
+[dependencies]
+pagevision = { path = "../../formats/pagevision", features = ["serde"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+thiserror.workspace = true
+toml.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
