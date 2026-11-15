@@ -1,0 +1,28 @@
+[package]
+name = "pagevision"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Page OCR with vision models: preprocessing, a llama.cpp backend and typed page results"
+repository = "https://github.com/jordiboehme/rezzer"
+readme = "README.md"
+keywords = ["ocr", "vision", "llama-cpp", "document", "markdown"]
+categories = ["multimedia::images", "text-processing"]
+
+[features]
+default = []
+serde = ["dep:serde"]
+# The llama.cpp backend. Native code: off by default, and CI never builds it.
+llama = ["dep:llama-cpp-2"]
+
+[dependencies]
+serde = { workspace = true, optional = true, features = ["derive"] }
+sha2.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+llama-cpp-2 = { workspace = true, optional = true, features = ["mtmd", "metal"] }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+llama-cpp-2 = { workspace = true, optional = true, features = ["mtmd", "openmp"] }
