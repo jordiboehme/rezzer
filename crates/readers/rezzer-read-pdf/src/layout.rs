@@ -358,6 +358,9 @@ pub(crate) struct Context<'a> {
     pub in_part: bool,
     /// The bytes the link targets in the model may take, shared by all pages of the file.
     pub links: &'a LinkRoom,
+    /// The read asks for page geometry: the box of each table cell is kept
+    /// ([`Laid::cells`]).
+    pub geometry: bool,
 }
 
 /// The bytes the copies of link targets in the model may still take. Each link in the model
@@ -545,6 +548,12 @@ pub(crate) struct Laid {
     /// table): the picture, the table's place in `blocks`, the row and the cell. Each is
     /// written in its cell, not as a media block of its own.
     pub in_cells: Vec<(layoutregions::PrimId, usize, usize, usize)>,
+    /// For a read that asks for page geometry: each table of `blocks` by its place there,
+    /// with the box of each of its cells that holds runs (the union of the runs' boxes, see
+    /// [`crate::geometry::run_box`]), row by row, in the frame of the runs. Rows that go on
+    /// a table of an earlier page (`continued`) give no boxes: no block of this page holds
+    /// them.
+    pub cells: Vec<(usize, Vec<[f32; 4]>)>,
 }
 
 /// Where a picture or code of a figure or code region goes among the blocks of its page.
@@ -3883,6 +3892,8 @@ struct Built {
     media_at: Vec<(layoutregions::PrimId, usize, usize)>,
     /// The pictures that stand in table cells (see [`Laid::in_cells`]).
     in_cells: Vec<(layoutregions::PrimId, usize, usize, usize)>,
+    /// The boxes of the cells of each table (see [`Laid::cells`]).
+    cells: Vec<(usize, Vec<[f32; 4]>)>,
 }
 
 /// What a page's layout is building.
@@ -3973,6 +3984,7 @@ impl Built {
             run_blocks: Vec::new(),
             media_at: Vec::new(),
             in_cells: self.in_cells,
+            cells: self.cells,
         }
     }
 
@@ -4245,6 +4257,8 @@ impl Built {
             }
         };
         let mut rows: Vec<Vec<Cell>> = Vec::with_capacity(plan.rows.len());
+        // The boxes of the cells of the rows built, for a read that asks for page geometry.
+        let mut cell_boxes: Vec<[f32; 4]> = Vec::new();
         'rows: for (r, row) in plan.rows.into_iter().enumerate() {
             self.pending = Pending::Row(table, r + 1);
             if self.mark.is_none() {
@@ -4255,6 +4269,7 @@ impl Built {
                 break;
             }
             let mut cells = Vec::with_capacity(row.len());
+            let mut row_boxes: Vec<[f32; 4]> = Vec::new();
             // Each cell's lines stay lines unless a line wraps.
             let lines = if !lined {
                 vec![layoutregions::extract::table::lines::CellLines::default(); row.len()]
@@ -4271,6 +4286,11 @@ impl Built {
                 layoutregions::extract::table::lines::cell_lines(&runs, &extents, &link_runs_on)
             };
             for (c, lines) in row.into_iter().zip(lines) {
+                if cx.geometry
+                    && let Some(b) = crate::geometry::runs_box(&c.runs)
+                {
+                    row_boxes.push(b);
+                }
                 let Some(mut inlines) = self.lined_inlines(&c.runs, &lines, cx) else {
                     break 'rows;
                 };
@@ -4293,6 +4313,7 @@ impl Built {
                 cx.tables.row_built(t, *tr);
             }
             rows.push(cells);
+            cell_boxes.append(&mut row_boxes);
         }
         self.mark = None;
         if rows.is_empty() {
@@ -4317,6 +4338,9 @@ impl Built {
                         self.in_cells
                             .push((layoutregions::PrimId::Picture(pic), at, r, c));
                     }
+                }
+                if cx.geometry {
+                    self.cells.push((at, cell_boxes));
                 }
                 let caption = title
                     .map(|t| rezzer_model::plain_text(&t).trim().to_string())
@@ -6252,6 +6276,7 @@ mod tests {
             tables: &Tables::default(),
             in_part: false,
             links: &room,
+            geometry: false,
         };
         let mut built = Built::default();
         built.paragraph(runs.iter().collect(), None, &cx);
@@ -6279,6 +6304,7 @@ mod tests {
             tables: &tables,
             in_part: false,
             links: &links,
+            geometry: false,
         };
         let title = Run {
             uri: uri.then(|| UriTarget::new("https://example.org/titel")),
@@ -6401,6 +6427,7 @@ mod tests {
             tables: &tables,
             in_part: false,
             links: &links,
+            geometry: false,
         };
         let before = (links.left.get(), links.freed.get());
         let plan = Planned {
@@ -6458,6 +6485,7 @@ mod tests {
             tables: &tables,
             in_part: false,
             links: &links,
+            geometry: false,
         };
         let plan = Planned {
             at: 0,
@@ -6532,6 +6560,7 @@ mod tests {
             tables: &Tables::default(),
             in_part: false,
             links: &room,
+            geometry: false,
         };
         // The first cell, as the cell before a stop is built: its cut is counted.
         let mut built = Built {
@@ -6622,6 +6651,7 @@ mod tests {
             tables: &Tables::default(),
             in_part: false,
             links: &LinkRoom::new(u64::MAX),
+            geometry: false,
         };
         let laid = page_blocks(1, 842.0, runs, &NOTHING_DRAWN, &cx);
         let texts: Vec<String> = laid
@@ -6693,6 +6723,7 @@ mod tests {
             tables: &Tables::default(),
             in_part: false,
             links: &LinkRoom::new(u64::MAX),
+            geometry: false,
         };
         page_blocks_until(1, 842.0, runs, drawn, &cx, &[], &|| false)
     }
@@ -7061,6 +7092,7 @@ mod tests {
             tables: &Tables::default(),
             in_part: false,
             links: &LinkRoom::new(u64::MAX),
+            geometry: false,
         };
         let footer = |laid: &Laid| {
             laid.blocks.iter().find_map(|b| match b {
@@ -7226,6 +7258,7 @@ mod tests {
                 tables: &tables,
                 in_part: false,
                 links: &links,
+                geometry: false,
             };
             laid.push(page_blocks(
                 k as u32 + 1,
@@ -7299,6 +7332,7 @@ mod tests {
                 tables: &tables,
                 in_part: false,
                 links: &links,
+                geometry: false,
             };
             let laid = page_blocks(k as u32 + 1, 842.0, runs.clone(), &NOTHING_DRAWN, &cx);
             let header = laid.blocks.iter().any(|b| {
@@ -7336,6 +7370,7 @@ mod tests {
             tables: &tables,
             in_part: false,
             links: &links,
+            geometry: false,
         };
         let first = page_blocks(
             1,
@@ -7385,6 +7420,7 @@ mod tests {
             tables: &tables,
             in_part: false,
             links: &links,
+            geometry: false,
         };
         let first = page_blocks(1, 842.0, tagged_runs(&["a"], 700.0), &NOTHING_DRAWN, &cx);
         assert_eq!(first.blocks.len(), 1);
@@ -7435,6 +7471,7 @@ mod tests {
                 tables: &tables,
                 in_part: false,
                 links: &links,
+                geometry: false,
             };
             laid.push(page_blocks(
                 k as u32 + 1,
@@ -7493,6 +7530,7 @@ mod tests {
             tables: &Tables::default(),
             in_part: false,
             links: &LinkRoom::new(u64::MAX),
+            geometry: false,
         };
         let laid = page_blocks(
             1,
@@ -7534,6 +7572,7 @@ mod tests {
             tables: &Tables::default(),
             in_part: false,
             links: &LinkRoom::new(u64::MAX),
+            geometry: false,
         };
         let laid = page_blocks(
             1,
@@ -7579,6 +7618,7 @@ mod tests {
             tables: &Tables::default(),
             in_part: false,
             links: &LinkRoom::new(u64::MAX),
+            geometry: false,
         };
         let laid = page_blocks(
             1,
@@ -7630,6 +7670,7 @@ mod tests {
             tables: &Tables::default(),
             in_part: false,
             links: &LinkRoom::new(u64::MAX),
+            geometry: false,
         };
         let laid = page_blocks(1, 842.0, runs, &NOTHING_DRAWN, &cx);
         match laid.blocks.as_slice() {
@@ -7682,6 +7723,7 @@ mod tests {
                 tables: &Tables::default(),
                 in_part: false,
                 links: &LinkRoom::new(u64::MAX),
+                geometry: false,
             };
             let mut laid = page_blocks(1, 842.0, runs.clone(), &NOTHING_DRAWN, &cx);
             let notes: Vec<String> = laid
@@ -7725,6 +7767,7 @@ mod tests {
             tables: &Tables::default(),
             in_part: false,
             links: &LinkRoom::new(u64::MAX),
+            geometry: false,
         };
         let laid = page_blocks(
             1,
@@ -7791,6 +7834,7 @@ mod tests {
             tables: &tables,
             in_part: false,
             links: &LinkRoom::new(u64::MAX),
+            geometry: false,
         };
         let laid = page_blocks_until(1, 842.0, runs, &drawn, &cx, &[], &|| false);
         let text: Vec<String> = laid
@@ -7855,6 +7899,7 @@ mod tests {
             tables: &tables,
             in_part: false,
             links: &LinkRoom::new(u64::MAX),
+            geometry: false,
         };
         let (kept, slots) = classified(runs, &tree, &cx);
         let flow = Flow::new(kept, slots);
@@ -7933,6 +7978,7 @@ mod tests {
             tables: &tables,
             in_part: false,
             links: &LinkRoom::new(u64::MAX),
+            geometry: false,
         };
         let laid = page_blocks(1, 842.0, runs, &NOTHING_DRAWN, &cx);
         let text = |inlines: &[Inline]| rezzer_model::plain_text(inlines);
@@ -8034,6 +8080,7 @@ mod tests {
                 tables: &tables,
                 in_part: false,
                 links: &LinkRoom::new(u64::MAX),
+                geometry: false,
             };
             let laid = page_blocks(page as u32 + 1, 842.0, runs, &NOTHING_DRAWN, &cx);
             // The table starts on page 1; later pages add rows to it.

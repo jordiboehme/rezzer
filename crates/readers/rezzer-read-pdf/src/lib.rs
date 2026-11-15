@@ -22,6 +22,7 @@ mod engine;
 mod fallback;
 mod forms;
 mod found;
+mod geometry;
 mod layout;
 mod marks;
 mod meta;
@@ -372,6 +373,8 @@ fn read_pdf_in(
     });
     let mut out = Out::new(Document::new(info));
     out.blob_room = blob_room;
+    // Filled page by page as the pages are laid out (see `geometry::page_geometry`).
+    out.doc.geometry = opts.geometry.then(Box::default);
     let (pdf, mut out) = match open::open(src.bytes(), opts.password.as_deref(), budget, out) {
         Ok(opened) => opened,
         Err(open::Refused::Done(outcome)) => return *outcome,
@@ -1082,6 +1085,7 @@ fn lay_out(
                         tables: &tables,
                         in_part: items.in_part,
                         links: &links,
+                        geometry: out.doc.geometry.is_some(),
                     };
                     if items.links_cut {
                         out.loss(
@@ -1233,6 +1237,10 @@ fn lay_out(
                         links.free(work);
                         blocks.truncate(1);
                         break 'laid true;
+                    }
+                    if let Some(g) = out.doc.geometry.as_deref_mut() {
+                        let (w, h) = frame_size(info, Some(&items));
+                        geometry::page_geometry(g, n, [w, h], &items, Some(&laid));
                     }
                     if let Some(dates) = &mut dates {
                         if let Some(more) = laid.dates.take() {
@@ -1849,6 +1857,13 @@ fn lay_out(
                         blocks.extend(text);
                         blocks.extend(hidden);
                         plain_pages = Some((plain_pages.map_or(n, |p| p.0), n));
+                        // A page written as plain lines has no blocks with boxes: it gives
+                        // what it draws. A page the time stops here is not read and gives
+                        // none.
+                        if let Some(g) = out.doc.geometry.as_deref_mut() {
+                            let (w, h) = frame_size(info, Some(&items));
+                            geometry::page_geometry(g, n, [w, h], &items, None);
+                        }
                     }
                     Err(hit) => {
                         out.loss(

@@ -30,7 +30,7 @@ use std::path::{Path, PathBuf};
 use common::{
     GENERATED_AT, PIPELINE_FOLDERS, corpus_dir, corpus_files, pipeline, relative, remote_rows,
 };
-use rezzer_model::{Block, Document, plain_text};
+use rezzer_model::{Block, Document, MAX_BOXES, MAX_BOXES_PER_PAGE, plain_text};
 #[cfg(unix)]
 use rezzer_pipeline::Config;
 use rezzer_pipeline::{NoteLevel, OutputKind, Pipeline, Request};
@@ -499,6 +499,58 @@ fn pdf_corpus_matches_manifest() {
             problems.push(format!("{name}: not in remote.tsv"));
         }
     }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// A read of a PDF with page geometry asked for changes neither the Markdown nor the model
+/// JSON, and its boxes stay under the caps.
+#[test]
+fn geometry_read_changes_no_output() {
+    let pipeline = pipeline();
+    let mut problems = Vec::new();
+    let mut read = 0;
+    for file in corpus_files()
+        .into_iter()
+        .filter(|f| f.extension().is_some_and(|e| e == "pdf"))
+    {
+        let rel = relative(&file);
+        let plain = pipeline.run_path(&file, &request());
+        let with = pipeline.run_path(
+            &file,
+            &Request {
+                geometry: true,
+                ..request()
+            },
+        );
+        if plain.markdown_pages != with.markdown_pages {
+            problems.push(format!("{rel}: Markdown differs with geometry"));
+        }
+        if plain.json != with.json {
+            problems.push(format!("{rel}: model JSON differs with geometry"));
+        }
+        let Some(doc) = &with.document else {
+            continue;
+        };
+        read += 1;
+        let Some(geometry) = &doc.geometry else {
+            problems.push(format!("{rel}: no geometry"));
+            continue;
+        };
+        let total: usize = geometry.pages.iter().map(|p| p.boxes.len()).sum();
+        if total > MAX_BOXES {
+            problems.push(format!("{rel}: {total} boxes, over {MAX_BOXES}"));
+        }
+        for page in &geometry.pages {
+            if page.boxes.len() > MAX_BOXES_PER_PAGE {
+                problems.push(format!(
+                    "{rel}: page {} has {} boxes, over {MAX_BOXES_PER_PAGE}",
+                    page.page,
+                    page.boxes.len()
+                ));
+            }
+        }
+    }
+    assert!(read > 0, "no corpus PDF was read");
     assert!(problems.is_empty(), "{}", problems.join("\n"));
 }
 
