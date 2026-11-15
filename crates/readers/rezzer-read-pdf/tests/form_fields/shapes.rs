@@ -5,8 +5,8 @@
 //! The shapes of a real pay slip (measured by structure only; all text and values invented),
 //! drawn in a geometry that can be shifted, scaled and varied: F1 to F3 (a strip of seven
 //! fields with a rate over its divider, a row under a longer rule, an underlined title), rows
-//! of fields in any direction and alignment, the header field grid (P6-H), the column of totals
-//! beside a section (P6-O), boxed fields, and the block of labels with their values beside them
+//! of fields in any direction and alignment, the header field grid, the column of totals
+//! beside a section, boxed fields, and the block of labels with their values beside them
 //! over the bank row. Every height is relative to the data size and every x to the data font's
 //! character pitch.
 
@@ -576,7 +576,7 @@ const HEADER: [&[(usize, &str, &str)]; 3] = [
     ],
 ];
 
-/// P6-H: the header field grid, three rows of label rows over value rows between rules over
+/// The header field grid, three rows of label rows over value rows between rules over
 /// the left part (data columns 0 to 40), a raised marker after one label, and a right part
 /// (columns 44 to 60) on the same rules with a date in its first row only.
 pub(crate) fn header_grid(g: &Geo, b: &mut Built, top: f32) -> f32 {
@@ -621,7 +621,7 @@ pub(crate) fn header_grid(g: &Geo, b: &mut Built, top: f32) -> f32 {
     top - h * HEADER.len() as f32
 }
 
-/// P6-O: a ruled section of two columns (data columns 0 to 20 and 20 to 46) with a header row
+/// A ruled section of two columns (data columns 0 to 20 and 20 to 46) with a header row
 /// and three value lines, and right of it, a gutter of about half a character away, a column
 /// drawn with horizontal rules only at the section's top, two lines over its bottom and at its
 /// bottom: its upper strip heads its amounts on the baseline of the section's column titles

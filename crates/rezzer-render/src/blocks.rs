@@ -65,6 +65,8 @@ pub(crate) struct Ctx<'a> {
     /// A table column without a header is named by its number (`Column 4`, CSV and TSV),
     /// else by its sheet column letter (`Column D`).
     pub column_numbers: bool,
+    /// Which notes the content shows.
+    pub level: crate::NoteLevel,
 }
 
 /// The annotations of a document by the anchor they stand at, and which of them the content
@@ -144,6 +146,7 @@ fn passage_anchor(b: &Block) -> Option<&str> {
         | Block::List { anchor, .. }
         | Block::Table { anchor, .. }
         | Block::Code { anchor, .. }
+        | Block::Spatial { anchor, .. }
         | Block::Quote { anchor, .. }
         | Block::Math { anchor, .. }
         | Block::Media { anchor, .. }
@@ -193,7 +196,8 @@ pub(crate) fn status_color(color: StatusColor) -> &'static str {
 
 /// Makes a rendered paragraph safe line by line: blank lines go (they would end the
 /// paragraph), the first line loses its indent (it would become code) and every line that
-/// starts with a block marker gets it escaped.
+/// starts with a block marker gets it escaped. A no-break space at a line start is no indent
+/// to Markdown and stays: a line kept as laid out is indented with it.
 pub(crate) fn finish_lines(text: &str) -> String {
     let mut out = String::with_capacity(text.len() + 8);
     let mut first = true;
@@ -204,34 +208,52 @@ pub(crate) fn finish_lines(text: &str) -> String {
         if !first {
             out.push('\n');
         }
-        let line = if first { line.trim_start() } else { line };
+        // A no-break space is the indent a line kept as laid out is written with.
+        let blank = |c: char| c.is_whitespace() && c != '\u{a0}';
+        let line = if first {
+            line.trim_start_matches(blank)
+        } else {
+            line
+        };
         first = false;
-        let indent = line.len() - line.trim_start().len();
+        let indent = line.len() - line.trim_start_matches(blank).len();
         out.push_str(&line[..indent]);
         escape_line_start(&line[indent..], &mut out);
     }
     out
 }
 
-/// Writes `line`, a block marker at its start escaped (`#`, `>`, `-`, `+`, `=`, `1.`).
+/// Writes `line`, a block marker at its start escaped where it would open a block: `#`, `>`
+/// and `=` always (a heading or a tag, a quote, the underline of a heading); `-` and `+`
+/// before a space or the line end (a list item) and a line of nothing but `-`, spaces and
+/// tabs (the underline of a heading, or a rule: three hyphens or more are a thematic break
+/// with blanks between them too, `-- -` and `-----   -----`); digits with `.` or `)` before
+/// a space or the line end (a numbered item). `-414`, `-- x`, `03.04.2026` and `3.1 Scope`
+/// open nothing and stay as they are. A rule of `*` or `_` needs no rule here: those are
+/// escaped wherever they stand outside a word.
 pub(crate) fn escape_line_start(line: &str, out: &mut String) {
-    match line.chars().next() {
-        Some('#' | '>' | '-' | '+' | '=') => {
-            out.push('\\');
-            out.push_str(line);
+    // A list marker opens an item only before white space or at the line end.
+    let opens = |rest: &str| rest.chars().next().is_none_or(|c| c == ' ' || c == '\t');
+    let escaped = match line.chars().next() {
+        Some('#' | '>' | '=') => Some(0),
+        Some('-') => {
+            (opens(&line[1..]) || line.chars().all(|c| matches!(c, '-' | ' ' | '\t'))).then_some(0)
         }
+        Some('+') => opens(&line[1..]).then_some(0),
         Some(c) if c.is_ascii_digit() => {
             let digits = line.chars().take_while(char::is_ascii_digit).count();
-            match line[digits..].chars().next() {
-                Some('.' | ')') => {
-                    out.push_str(&line[..digits]);
-                    out.push('\\');
-                    out.push_str(&line[digits..]);
-                }
-                _ => out.push_str(line),
-            }
+            let marker = line[digits..].starts_with(['.', ')']);
+            (marker && opens(&line[digits + 1..])).then_some(digits)
         }
-        _ => out.push_str(line),
+        _ => None,
+    };
+    match escaped {
+        Some(at) => {
+            out.push_str(&line[..at]);
+            out.push('\\');
+            out.push_str(&line[at..]);
+        }
+        None => out.push_str(line),
     }
 }
 
@@ -281,8 +303,35 @@ pub(crate) fn blocks(list: &[Block], ctx: &Ctx, depth: usize, level: u8, tight: 
         task: false,
         tight_lead: false,
     };
-    for item in list {
+    // Blocks kept as laid out that stand in the same columns are written once, as one
+    // aligned block where the first of them stands.
+    let runs = rezzer_model::spatial_runs(list);
+    let mut in_run: HashMap<usize, Option<&[usize]>> = HashMap::new();
+    for run in &runs {
+        for (i, &k) in run.iter().enumerate() {
+            in_run.insert(k, (i == 0).then_some(run.as_slice()));
+        }
+    }
+    for (k, item) in list.iter().enumerate() {
         let (text, now) = match item {
+            Block::Spatial { .. } if in_run.contains_key(&k) => {
+                let Some(Some(run)) = in_run.get(&k) else {
+                    continue;
+                };
+                let mut text = spatial_run(list, run);
+                for &member in *run {
+                    text = with_notes(text, passage_anchor(&list[member]), ctx, depth, level);
+                }
+                (
+                    text,
+                    Prev {
+                        kind: PrevKind::Other,
+                        alt: false,
+                        task: false,
+                        tight_lead: false,
+                    },
+                )
+            }
             Block::Task { state, inlines, .. } => {
                 let alt = if prev.task {
                     prev.alt
@@ -395,6 +444,15 @@ fn block(b: &Block, ctx: &Ctx, depth: usize, level: u8) -> String {
             heading_line(l, inlines(content, Mode::Line).trim())
         }
         Block::Paragraph {
+            inlines: content,
+            role: Some(role),
+            ..
+        } if role == rezzer_model::FOUND_BY_ROLE
+            && !crate::levels::found_by_shown(&plain_text(content), ctx.level) =>
+        {
+            String::new()
+        }
+        Block::Paragraph {
             inlines: content, ..
         } => paragraph(content),
         Block::List { ordered, items, .. } => list_block(*ordered, items, false, ctx, depth, level),
@@ -405,20 +463,30 @@ fn block(b: &Block, ctx: &Ctx, depth: usize, level: u8) -> String {
             alignments,
             layout,
             ..
-        } => match layout {
-            Some(layout) => crate::layout::layout_table(
-                layout,
-                *header_rows,
-                rows,
-                alignments,
-                true,
-                ctx,
-                depth,
-                level,
-            ),
-            None => model_table(caption.as_deref(), *header_rows, rows, alignments),
-        },
+        } => {
+            let rows = with_cell_media(rows, ctx);
+            match layout {
+                Some(layout) => crate::layout::layout_table(
+                    layout,
+                    *header_rows,
+                    &rows,
+                    alignments,
+                    true,
+                    ctx,
+                    depth,
+                    level,
+                ),
+                None => model_table(
+                    caption.as_deref(),
+                    *header_rows,
+                    &rows,
+                    alignments,
+                    ctx.level,
+                ),
+            }
+        }
         Block::Code { lang, text, .. } => fence(lang.as_deref(), text),
+        Block::Spatial { lines, links, .. } => spatial_block(lines, links),
         Block::Quote { blocks: inner, .. } => {
             let body = blocks(inner, ctx, depth + 1, level, false);
             prefix_lines(&body, ">")
@@ -678,6 +746,334 @@ pub(crate) fn fence(lang: Option<&str>, text: &str) -> String {
     }
 }
 
+/// The widest gap a fence of blocks kept as laid out pads before a piece, in characters. A
+/// piece further from the end of the one before it (or from the left edge of the fence) is
+/// written after one space, like an overlapping piece: a column of the file bounds no line.
+const MAX_SPATIAL_PAD: u64 = 1024;
+
+/// A run of blocks kept as laid out in the same columns ([`rezzer_model::spatial_runs`];
+/// `run` holds their indices in `list`): one `text` fence over the lines of all of them, each
+/// piece at its character column, counted from the smallest column of the run. The reader
+/// that joined the blocks counted the columns of all of them on one grid of the page
+/// ([`rezzer_model::SpatialGrid`]), so a piece is written under what it stands under. Here
+/// the place of a piece is meaning (a value under its label), so the aligned form is the
+/// honest one. A piece that starts before the end of the one before it, or further than
+/// [`MAX_SPATIAL_PAD`], gets one space: no text is lost, only the alignment. A line without
+/// text is left out, a line break inside a piece is a space, the text is verbatim and a line
+/// has no trailing spaces. A fence shows no link: when the text holds links or footnote
+/// references, a paragraph right after the fence says on which lines they stand
+/// ([`spatial_key`]).
+fn spatial_run(list: &[Block], run: &[usize]) -> String {
+    let parts = || {
+        run.iter().filter_map(|&k| match &list[k] {
+            Block::Spatial { lines, links, .. } => Some((lines.as_slice(), links.as_slice())),
+            _ => None,
+        })
+    };
+    let written = |p: &&rezzer_model::SpatialPiece| !p.text.trim().is_empty();
+    let left = parts()
+        .flat_map(|(lines, _)| lines)
+        .flat_map(|l| l.pieces.iter().filter(written))
+        .map(|p| u64::from(p.col))
+        .min()
+        .unwrap_or(0);
+    let mut body = String::new();
+    // The lines of the fence, each with the links of its block.
+    let mut rows: Vec<(&rezzer_model::SpatialLine, &[String])> = Vec::new();
+    for (lines, links) in parts() {
+        for line in lines {
+            if !line.pieces.iter().any(|p| written(&p)) {
+                continue;
+            }
+            if !rows.is_empty() {
+                body.push('\n');
+            }
+            rows.push((line, links));
+            // The column after the last piece written, in the fence.
+            let mut at = 0u64;
+            for (n, piece) in line.pieces.iter().filter(written).enumerate() {
+                let col = u64::from(piece.col) - left;
+                let pad = if col > at && col - at <= MAX_SPATIAL_PAD {
+                    col - at
+                } else {
+                    u64::from(n > 0)
+                };
+                body.extend(std::iter::repeat_n(' ', pad as usize));
+                let text = piece.text.trim_end();
+                body.extend(text.chars().map(|c| {
+                    if matches!(
+                        c,
+                        '\n' | '\r' | '\u{b}' | '\u{c}' | '\u{85}' | '\u{2028}' | '\u{2029}'
+                    ) {
+                        ' '
+                    } else {
+                        c
+                    }
+                }));
+                at += pad + text.chars().count() as u64;
+            }
+        }
+    }
+    let fenced = fence(Some("text"), &body);
+    let key = spatial_key(&rows);
+    if key.is_empty() {
+        fenced
+    } else {
+        format!("{fenced}\n\n{}", paragraph(&key))
+    }
+}
+
+/// The links and footnote references of a fence of blocks kept as laid out, by line of the
+/// fence (counted from 1): `Links: [line 2](target), [lines 4 to 6 and 9](other). Footnote
+/// references: line 1[^a], line 3[^b].` Each target is written once, with the lines it
+/// stands on; each reference where it stands. A span that points to no link of its block is
+/// left out (its text stands in the fence).
+fn spatial_key(rows: &[(&rezzer_model::SpatialLine, &[String])]) -> Vec<Inline> {
+    // Per target, in the order they first stand, the lines it stands on, each once.
+    let mut on: Vec<(&str, Vec<usize>)> = Vec::new();
+    let mut refs: Vec<(usize, &str)> = Vec::new();
+    for (n, (line, links)) in rows.iter().enumerate() {
+        for span in line.pieces.iter().flat_map(|p| &p.spans) {
+            if let Some(target) = span
+                .link
+                .and_then(|k| usize::try_from(k).ok())
+                .and_then(|k| links.get(k))
+            {
+                match on.iter_mut().find(|(t, _)| *t == target.as_str()) {
+                    Some((_, at)) if at.last() == Some(&(n + 1)) => {}
+                    Some((_, at)) => at.push(n + 1),
+                    None => on.push((target.as_str(), vec![n + 1])),
+                }
+            }
+            if let Some(id) = &span.footnote {
+                refs.push((n + 1, id));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    if !on.is_empty() {
+        out.push(Inline::plain("Links: "));
+        for (i, (target, lines)) in on.iter().enumerate() {
+            if i > 0 {
+                out.push(Inline::plain(", "));
+            }
+            out.push(Inline::Link {
+                target: (*target).to_string(),
+                title: None,
+                internal: false,
+                wiki: false,
+                inlines: vec![Inline::plain(line_numbers(lines))],
+            });
+        }
+        out.push(Inline::plain("."));
+    }
+    if !refs.is_empty() {
+        out.push(Inline::plain(if out.is_empty() {
+            "Footnote references: "
+        } else {
+            " Footnote references: "
+        }));
+        let mut last = 0;
+        for &(n, id) in &refs {
+            if n != last {
+                if last > 0 {
+                    out.push(Inline::plain(", "));
+                }
+                out.push(Inline::plain(format!("line {n}")));
+                last = n;
+            }
+            out.push(Inline::FootnoteRef { id: id.to_string() });
+        }
+        out.push(Inline::plain("."));
+    }
+    out
+}
+
+/// `line 3`, `lines 2 and 5`, `lines 4 to 6 and 9`: ascending line numbers, runs of three or
+/// more as a range.
+fn line_numbers(ns: &[usize]) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < ns.len() {
+        let mut j = i;
+        while j + 1 < ns.len() && ns[j + 1] == ns[j] + 1 {
+            j += 1;
+        }
+        match j - i {
+            0 => parts.push(ns[i].to_string()),
+            1 => {
+                parts.push(ns[i].to_string());
+                parts.push(ns[j].to_string());
+            }
+            _ => parts.push(format!("{} to {}", ns[i], ns[j])),
+        }
+        i = j + 1;
+    }
+    let word = if ns.len() == 1 { "line" } else { "lines" };
+    match parts.split_last() {
+        None => String::new(),
+        Some((last, [])) => format!("{word} {last}"),
+        Some((last, rest)) => format!("{word} {} and {last}", rest.join(", ")),
+    }
+}
+
+/// The space between two pieces of a line that stand apart in the layout. Pieces that touch
+/// get one space. The gap is wider than a space between words, so a reader of the Markdown
+/// sees where one piece ends, and it is the same for every distance: the lines are not
+/// aligned in columns.
+const PIECE_GAP: &str = "   ";
+
+/// The widest indent the plain lines of a block kept as laid out are written with, in
+/// characters. The indent of a line shows that the line is indented and how far against the
+/// other lines of its block: eight levels of a listing set four columns a level fit in it as
+/// they stand. A block with a wider indent (a line far to the right on a wide page) has all
+/// its indents scaled down so that the widest is this one. Written out, such indents can be
+/// most of the Markdown, and they are text the limits of a read never counted. The columns
+/// themselves stay in the JSON.
+const MAX_LINE_INDENT: u64 = 32;
+
+/// Text of a region no type had clear evidence for: its lines top to bottom as one paragraph,
+/// each line of the layout a line of its own (a hard break), the pieces of a line left to
+/// right. Nothing is aligned: the columns of the pieces stay in the JSON. Only the indent of
+/// a line against the leftmost line of the block is written, as no-break spaces (a listing
+/// reads by its indent); one further than [`MAX_SPATIAL_PAD`] is left out, and the indents of
+/// a block whose widest is over [`MAX_LINE_INDENT`] are scaled down to it, in their order.
+/// Bold, italic, links and footnote references are written as in any paragraph, and the
+/// text is escaped. A line without text is left out; a line break inside a piece is written
+/// as a space (a piece is one line).
+fn spatial_block(lines: &[rezzer_model::SpatialLine], links: &[String]) -> String {
+    let written = |p: &&rezzer_model::SpatialPiece| !p.text.trim().is_empty();
+    // The column the leftmost line starts at: the indent of a line is counted from it.
+    let left = lines
+        .iter()
+        .filter_map(|l| l.pieces.iter().find(written))
+        .map(|p| u64::from(p.col))
+        .min()
+        .unwrap_or(0);
+    // The widest indent written: a wider one sets the scale of all.
+    let widest = lines
+        .iter()
+        .filter_map(|l| l.pieces.iter().find(written))
+        .map(|p| u64::from(p.col) - left)
+        .filter(|i| *i <= MAX_SPATIAL_PAD)
+        .max()
+        .unwrap_or(0);
+    // An indent as written: as it stands, or its share of the widest one (never none for a
+    // line that is indented).
+    let scaled = |indent: u64| {
+        if widest <= MAX_LINE_INDENT {
+            indent
+        } else {
+            (indent * MAX_LINE_INDENT).div_ceil(widest)
+        }
+    };
+    let mut out: Vec<Inline> = Vec::new();
+    for line in lines {
+        let mut row: Vec<Inline> = Vec::new();
+        // The column after the last piece written, as the layout counts it.
+        let mut at = 0u64;
+        for piece in line.pieces.iter().filter(written) {
+            if row.is_empty() {
+                // A no-break space is no indent to Markdown (no code block, no list level)
+                // and stays at the start of a line of a paragraph.
+                let indent = u64::from(piece.col).saturating_sub(left);
+                if (1..=MAX_SPATIAL_PAD).contains(&indent) {
+                    row.push(Inline::plain("\u{a0}".repeat(scaled(indent) as usize)));
+                }
+            } else {
+                let apart = u64::from(piece.col) > at + 1;
+                row.push(Inline::plain(if apart { PIECE_GAP } else { " " }));
+            }
+            spatial_piece(piece, links, &mut row);
+            at = u64::from(piece.col) + piece.text.chars().count() as u64;
+        }
+        if row.is_empty() {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push(Inline::LineBreak);
+        }
+        out.append(&mut row);
+    }
+    paragraph(&out)
+}
+
+/// The inlines of one piece of a spatial line: its text without the white space around it,
+/// each span as what it is. A span that is a footnote reference is written as the reference
+/// in place of the marker as printed; spans of one link that follow one another are one link.
+/// A span that reaches past the text, starts before the end of the one before it or points
+/// to no link of the block is cut or written as plain text: no text is lost.
+fn spatial_piece(piece: &rezzer_model::SpatialPiece, links: &[String], out: &mut Vec<Inline>) {
+    let chars: Vec<char> = piece
+        .text
+        .chars()
+        .map(|c| {
+            if matches!(
+                c,
+                '\n' | '\r' | '\u{b}' | '\u{c}' | '\u{85}' | '\u{2028}' | '\u{2029}'
+            ) {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect();
+    let text = |from: usize, to: usize| chars[from..to].iter().collect::<String>();
+    // The white space around the piece is its place on the line, which the gap before it
+    // says: only what stands between is written.
+    let blank = |c: &char| c.is_whitespace();
+    let last = chars.len() - chars.iter().rev().take_while(|c| blank(c)).count();
+    let mut at = chars.iter().take_while(|c| blank(c)).count().min(last);
+    // The link the span before this one wrote, and where it ended: a span that goes on with
+    // the same link right there (another style in the link's text) joins it.
+    let mut linked: Option<(u32, usize)> = None;
+    for span in &piece.spans {
+        let start = (span.start as usize).clamp(at, last);
+        let end = (span.end as usize).clamp(start, last);
+        if start > at {
+            out.push(Inline::plain(text(at, start)));
+            at = start;
+        }
+        if end == start {
+            continue;
+        }
+        at = end;
+        if let Some(id) = &span.footnote {
+            out.push(Inline::FootnoteRef { id: id.clone() });
+            linked = None;
+            continue;
+        }
+        let inner = Inline::Text {
+            text: text(start, end),
+            emphasis: span.emphasis,
+            strong: span.strong,
+            strike: false,
+        };
+        let link = span
+            .link
+            .filter(|&k| usize::try_from(k).is_ok_and(|k| k < links.len()));
+        let Some(k) = link else {
+            out.push(inner);
+            linked = None;
+            continue;
+        };
+        match out.last_mut() {
+            Some(Inline::Link { inlines, .. }) if linked == Some((k, start)) => inlines.push(inner),
+            _ => out.push(Inline::Link {
+                target: links[k as usize].clone(),
+                title: None,
+                internal: false,
+                wiki: false,
+                inlines: vec![inner],
+            }),
+        }
+        linked = Some((k, end));
+    }
+    if at < last {
+        out.push(Inline::plain(text(at, last)));
+    }
+}
+
 fn math_block(latex: &str) -> String {
     let body = latex.trim_matches('\n');
     if body.trim().is_empty() {
@@ -729,9 +1125,65 @@ fn math_is_plain(body: &str) -> bool {
     })
 }
 
+/// `rows` with the pictures of each cell (see [`rezzer_model::CellMedia`]) written after its
+/// text as [`media_inlines`] writes them, a space between; borrowed when no cell has one.
+fn with_cell_media<'r>(rows: &'r [Vec<Cell>], ctx: &Ctx) -> Cow<'r, [Vec<Cell>]> {
+    if rows.iter().flatten().all(|c| c.media.is_empty()) {
+        return Cow::Borrowed(rows);
+    }
+    let rows = rows
+        .iter()
+        .map(|row| {
+            row.iter()
+                .map(|c| {
+                    let mut c = c.clone();
+                    for m in std::mem::take(&mut c.media) {
+                        if !c.inlines.is_empty() {
+                            c.inlines.push(Inline::plain(" "));
+                        }
+                        c.inlines
+                            .extend(media_inlines(&m.asset, m.alt.as_deref(), ctx));
+                        // The codes read from the picture, at its first place, in its cell.
+                        let found = ctx.assets.iter().find(|a| a.id == m.asset);
+                        let first = found.is_some_and(|a| !a.codes.is_empty())
+                            && ctx.codes_shown.borrow_mut().insert(m.asset.clone());
+                        if first {
+                            for code in found.map_or(&[][..], |a| a.codes.as_slice()) {
+                                c.inlines.push(Inline::plain(" "));
+                                c.inlines.extend(code_inlines(code));
+                            }
+                        }
+                    }
+                    c
+                })
+                .collect()
+        })
+        .collect();
+    Cow::Owned(rows)
+}
+
 /// A picture by its asset `id`; `place` is what this place of it says, when it says more than
 /// the asset's alt text (one picture drawn at several places, each with its own box).
 fn media(id: &str, place: Option<&str>, ctx: &Ctx) -> String {
+    let found = ctx.assets.iter().find(|a| a.id == id);
+    let mut out = paragraph(&media_inlines(id, place, ctx));
+    let first = found.is_some_and(|a| !a.codes.is_empty())
+        && ctx.codes_shown.borrow_mut().insert(id.to_string());
+    let codes = if first {
+        found.map_or(&[][..], |a| a.codes.as_slice())
+    } else {
+        &[][..]
+    };
+    for c in codes {
+        out.push_str("\n\n");
+        out.push_str(&code_lines(c));
+    }
+    out
+}
+
+/// The inlines of a picture by its asset `id` (see [`media`]): the picture, or why it is not
+/// extracted, its caption, and whether it needs vision.
+fn media_inlines(id: &str, place: Option<&str>, ctx: &Ctx) -> Vec<Inline> {
     let mut parts: Vec<Inline> = Vec::new();
     let text = Inline::plain;
     let found = ctx.assets.iter().find(|a| a.id == id);
@@ -775,19 +1227,37 @@ fn media(id: &str, place: Option<&str>, ctx: &Ctx) -> String {
             }
         }
     }
-    let mut out = paragraph(&parts);
-    let first = found.is_some_and(|a| !a.codes.is_empty())
-        && ctx.codes_shown.borrow_mut().insert(id.to_string());
-    let codes = if first {
-        found.map_or(&[][..], |a| a.codes.as_slice())
-    } else {
-        &[][..]
+    parts
+}
+
+/// One code read from a picture as the inlines of one line (for a table cell, see
+/// [`with_cell_media`]): its symbology and place, then its payload, a payload of several lines
+/// with its line ends as their symbols.
+fn code_inlines(c: &Barcode) -> Vec<Inline> {
+    let head = match &c.place {
+        Some(place) => format!("{}, {place}: ", c.symbology),
+        None => format!("{}: ", c.symbology),
     };
-    for c in codes {
-        out.push_str("\n\n");
-        out.push_str(&code_lines(c));
+    let mut parts = vec![Inline::plain(head)];
+    match (&c.text, &c.base64) {
+        (Some(t), _) if web_address(t) => parts.push(Inline::Link {
+            target: t.clone(),
+            title: None,
+            internal: false,
+            wiki: false,
+            inlines: vec![Inline::plain(t.clone())],
+        }),
+        (Some(t), _) => parts.push(Inline::plain(visible_controls(t))),
+        (None, Some(b64)) => {
+            parts.push(Inline::plain(format!("{} bytes, base64 ", c.bytes)));
+            parts.push(Inline::Code { text: b64.clone() });
+        }
+        (None, None) => parts.push(Inline::plain(format!(
+            "{} bytes, not kept: more than the reader keeps",
+            c.bytes
+        ))),
     }
-    out
+    parts
 }
 
 /// One code read from a picture: `QR Code: <payload>`, with its place on the page when it
@@ -898,8 +1368,8 @@ fn visible_controls(t: &str) -> String {
 // Tables
 
 /// The text `[[target]]` or `[[target|text]]` for a link that came from a wikilink, with
-/// every bracket, `|` and other Markdown character escaped and line breaks as spaces (ruling
-/// P5-AD): Rezzer cannot know the name the target is written under,
+/// every bracket, `|` and other Markdown character escaped and line breaks as spaces:
+/// Rezzer cannot know the name the target is written under,
 /// so a live link to it would be broken on every import. This holds for every wikilink, also
 /// one with `_`, `:`, a path or formatting. Crystalline reads a wikilink wherever `[[`
 /// stands, also after a backslash, so each bracket is escaped. The link itself stays in the

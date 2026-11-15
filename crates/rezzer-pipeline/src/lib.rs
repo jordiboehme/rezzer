@@ -37,7 +37,7 @@ pub use config::{
 };
 pub use files::{bundle_name, folder_stem, main_name, parts_folder};
 pub use rezzer_limits::{CancelToken, Clock, check_part_size};
-pub use rezzer_render::{OutputSection, TableStyle};
+pub use rezzer_render::{NoteLevel, OutputSection, TableStyle};
 
 use crate::cache::Cache;
 use crate::config::one_line;
@@ -100,6 +100,9 @@ pub struct Request {
     /// How sheet tables are written; `None` takes the config's `[read] table_style`. Only
     /// changes rendering, so it is not part of the cache key.
     pub table_style: Option<TableStyle>,
+    /// Which notes the Markdown shows; `None` takes the config's `[read] notes`. Only
+    /// changes rendering, so it is not part of the cache key.
+    pub notes: Option<NoteLevel>,
     /// The sheets to write, by name or `#n` (1-based position); empty writes all. Only
     /// changes rendering, so it is not part of the cache key.
     pub sheets: Vec<String>,
@@ -120,6 +123,7 @@ impl Default for Request {
             generated_at: None,
             cancel: CancelToken::default(),
             table_style: None,
+            notes: None,
             sheets: Vec::new(),
             geometry: false,
         }
@@ -138,6 +142,7 @@ impl fmt::Debug for Request {
             .field("generated_at", &self.generated_at)
             .field("cancelled", &self.cancel.is_cancelled())
             .field("table_style", &self.table_style)
+            .field("notes", &self.notes)
             .field("sheets", &self.sheets)
             .field("geometry", &self.geometry)
             .finish()
@@ -375,6 +380,7 @@ impl Pipeline {
             archive_ref: None,
             math: req.math,
             table_style: req.table_style.unwrap_or(self.config.read.table_style),
+            notes: req.notes.unwrap_or(self.config.read.notes),
             sheets,
             part: None,
             parts: None,
@@ -450,7 +456,7 @@ impl Pipeline {
                     files::write_files(output, &files)
                 };
             // A path held by anything but Rezzer's output for this source fails the run
-            // before a picture is written (rulings P5-AB and P5-AG).
+            // before a picture is written.
             let check = files::Files {
                 source: &source,
                 sha256: &sha256,
@@ -461,7 +467,7 @@ impl Pipeline {
                 json: (req.output == OutputKind::Json).then_some(""),
             };
             // One handle of the output folder for the whole run: opened before the check and
-            // made after it when missing, so a failed check makes no folder (ruling P5-AB).
+            // made after it when missing, so a failed check makes no folder.
             let cannot = |e: std::io::Error| {
                 format!(
                     "cannot write {}: {}",

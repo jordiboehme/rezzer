@@ -27,11 +27,11 @@ use rezzer_model::{
     a1_position, column_letter, plain_text, sheet_cell,
 };
 
-use crate::TableStyle;
 use crate::blocks::{
     self, Ctx, Grid, MAX_COLUMNS, MAX_DEPTH, Spot, cell_text, heading_line, line_text, list_block,
     paragraph, pipe_table,
 };
+use crate::{NoteLevel, TableStyle};
 
 /// A heading in a sheet is cut after this many characters.
 const MAX_HEADING_CHARS: usize = 120;
@@ -168,7 +168,7 @@ fn long_heading(b: &Block, ctx: &Ctx) -> Option<String> {
 // Regions
 
 /// A table with a sheet layout, by its kind.
-/// `lead` is false where a generated heading above stands for the lead line (P4-AS).
+/// `lead` is false where a generated heading above stands for the lead line.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn layout_table(
     layout: &TableLayout,
@@ -214,7 +214,7 @@ pub(crate) fn layout_table(
                 level,
             )
         }
-        LayoutKind::Grid => grid(layout, rows, aligns),
+        LayoutKind::Grid => grid(layout, rows, aligns, ctx.level),
         LayoutKind::Table
             if ctx.table_style == TableStyle::Records
                 && layout.certainty != Certainty::Unsure
@@ -224,8 +224,50 @@ pub(crate) fn layout_table(
         }
         LayoutKind::Table => {
             let kept = ctx.table_style == TableStyle::Records && headerless(layout);
-            table(layout, header_rows, rows, aligns, ctx.column_numbers, kept)
+            table(
+                layout,
+                header_rows,
+                rows,
+                aligns,
+                ctx.column_numbers,
+                kept,
+                ctx.level,
+            )
         }
+    }
+}
+
+/// Whether [`layout_table`] writes the note on merged cells for a region with these rows in
+/// `style`: the same choice it makes (a table or a grid; records, pairs and text have none),
+/// without writing anything.
+pub(crate) fn layout_merge_note(
+    layout: &TableLayout,
+    header_rows: usize,
+    rows: &[Vec<Cell>],
+    style: TableStyle,
+) -> bool {
+    if rows.is_empty() {
+        return false;
+    }
+    match layout.kind {
+        LayoutKind::Grid => {
+            let grid = Grid::new(rows);
+            grid.merge_note(0, (0, 1), &grid.ranges()).is_some()
+        }
+        LayoutKind::Table
+            if style == TableStyle::Records
+                && layout.certainty != Certainty::Unsure
+                && !headerless(layout) =>
+        {
+            false
+        }
+        LayoutKind::Table => {
+            let grid = Grid::new(rows);
+            let head = header_rows.min(grid.spots.len());
+            grid.merge_note(head, (head, 0), &grid.ranges_from(head))
+                .is_some()
+        }
+        _ => false,
     }
 }
 
@@ -322,7 +364,7 @@ fn lead_line(layout: &TableLayout) -> Option<String> {
 }
 
 /// A generated heading (it has no anchor) right above a label and value or text region that
-/// says what its lead line says: the heading stands for the lead (P4-AS). Returns the
+/// says what its lead line says: the heading stands for the lead. Returns the
 /// heading and the region without its lead.
 fn heading_with_list(pair: &[Block], ctx: &Ctx, depth: usize, level: u8) -> Option<String> {
     let [
@@ -412,7 +454,16 @@ fn kept_as_table(line: String) -> String {
 /// The line that says where a table or grid region is and how it was found (spec 7.2). For
 /// records it says that empty cells are left out of them. `numbers` names the label columns
 /// and the columns without a header by number, as their header does (CSV and TSV).
-fn layout_line(layout: &TableLayout, left: u32, records: bool, numbers: bool) -> String {
+/// `level` decides which rule words stay (see [`crate::levels::rule_shown`]); a header that
+/// was not found is said by the line itself when its rule words are left out. The facts that
+/// found the region are facts of the file and stay at every level.
+fn layout_line(
+    layout: &TableLayout,
+    left: u32,
+    records: bool,
+    numbers: bool,
+    level: NoteLevel,
+) -> String {
     let grid = layout.kind == LayoutKind::Grid;
     let mut line = format!(
         "{} {}",
@@ -426,7 +477,11 @@ fn layout_line(layout: &TableLayout, left: u32, records: bool, numbers: bool) ->
         .found_by
         .iter()
         .filter_map(|e| match e {
-            Evidence::Rule { detail, .. } if !detail.trim().is_empty() => Some(detail.trim()),
+            Evidence::Rule { id, detail }
+                if !detail.trim().is_empty() && crate::levels::rule_shown(id, detail, level) =>
+            {
+                Some(detail.trim())
+            }
             _ => None,
         })
         .collect();
@@ -644,10 +699,11 @@ fn table(
     aligns: &[Align],
     numbers: bool,
     kept: bool,
+    level: NoteLevel,
 ) -> String {
     let grid = Grid::new(rows);
     let left = left_column(layout, &grid);
-    let mut line = layout_line(layout, left, false, numbers);
+    let mut line = layout_line(layout, left, false, numbers, level);
     if kept {
         line = kept_as_table(line);
     }
@@ -658,7 +714,6 @@ fn table(
     // marks and merges of the body are named.
     let head = header_rows.min(grid.spots.len());
     let ranges = grid.ranges_from(head);
-    let legend = grid.marked(head) || !ranges.is_empty();
     let width = grid
         .width
         .max(layout.header_paths.len())
@@ -674,9 +729,7 @@ fn table(
         .iter()
         .filter_map(|n| Some((n.row, n.parent?)))
         .collect();
-    let mut body: Vec<Vec<String>> = (head..grid.spots.len())
-        .map(|r| grid.line(r, legend))
-        .collect();
+    let mut body: Vec<Vec<String>> = (head..grid.spots.len()).map(|r| grid.line(r)).collect();
     let aligns = if parents.is_empty() {
         aligns.to_vec()
     } else {
@@ -687,7 +740,7 @@ fn table(
         let label = |row: u32| -> String {
             at.get(&row)
                 .and_then(|&r| grid.spots[r].first().copied().flatten())
-                .map(|spot| grid.own(spot.cell(), legend))
+                .map(|spot| grid.own(spot.cell()))
                 .unwrap_or_default()
         };
         header.insert(0, "Parent".into());
@@ -702,7 +755,9 @@ fn table(
         shifted(aligns)
     };
     let mut notes: Vec<String> = Vec::new();
-    notes.extend(grid.merge_note(legend, &ranges));
+    if crate::levels::merge_note_shown(level) {
+        notes.extend(grid.merge_note(head, (head, usize::from(!parents.is_empty())), &ranges));
+    }
     notes.extend(kinds_line(layout));
     notes.extend(grid.cut_notes());
     assemble(line, pipe_table(&header, &aligns, &body), notes)
@@ -710,28 +765,28 @@ fn table(
 
 /// A `grid` region (unsure): every row as it is, the sheet column letters as the header and
 /// the sheet row numbers as the first column (spec 6.8).
-fn grid(layout: &TableLayout, rows: &[Vec<Cell>], aligns: &[Align]) -> String {
+fn grid(layout: &TableLayout, rows: &[Vec<Cell>], aligns: &[Align], level: NoteLevel) -> String {
     let grid = Grid::new(rows);
     let left = left_column(layout, &grid);
-    let line = layout_line(layout, left, false, false);
+    let line = layout_line(layout, left, false, false, level);
     if rows.is_empty() {
         return line;
     }
     let ranges = grid.ranges();
-    let legend = grid.marked(0) || !ranges.is_empty();
     let header: Vec<String> = std::iter::once(String::new())
         .chain((0..grid.width.max(1)).map(|c| letter(left, c)))
         .collect();
     let body: Vec<Vec<String>> = (0..grid.spots.len())
         .map(|r| {
             let number = grid.sheet_row(r).map(|n| n.to_string()).unwrap_or_default();
-            std::iter::once(number)
-                .chain(grid.line(r, legend))
-                .collect()
+            std::iter::once(number).chain(grid.line(r)).collect()
         })
         .collect();
     let mut notes: Vec<String> = Vec::new();
-    notes.extend(grid.merge_note(legend, &ranges));
+    // The header line holds the column letters, the first column the row numbers.
+    if crate::levels::merge_note_shown(level) {
+        notes.extend(grid.merge_note(0, (0, 1), &ranges));
+    }
     notes.extend(grid.cut_notes());
     assemble(line, pipe_table(&header, &shifted(aligns), &body), notes)
 }
@@ -780,7 +835,7 @@ fn records(
 ) -> String {
     let grid = Grid::new(rows);
     let left = left_column(layout, &grid);
-    let line = layout_line(layout, left, true, ctx.column_numbers);
+    let line = layout_line(layout, left, true, ctx.column_numbers, ctx.level);
     if rows.is_empty() {
         return line;
     }
@@ -846,7 +901,21 @@ fn records(
             let path = header_path(layout, c)
                 .map(lines_joined)
                 .unwrap_or_else(|| unnamed_column(left, c, ctx.column_numbers));
-            let mut content = vec![Inline::plain(format!("{path}: "))];
+            // A value that starts with line breaks keeps them, as in the table style: it stands
+            // on a later line of its row (a platform on the arrival's line), and its name ends
+            // the first line.
+            let lead = source
+                .inlines
+                .iter()
+                .take_while(|i| matches!(i, Inline::LineBreak))
+                .count();
+            let name = if lead > 0 {
+                format!("{path}:")
+            } else {
+                format!("{path}: ")
+            };
+            let mut content = vec![Inline::plain(name)];
+            content.extend(std::iter::repeat_n(Inline::LineBreak, lead));
             content.extend_from_slice(trimmed(&source.inlines));
             if let Some(range) = grid.merged_range(k) {
                 content.push(Inline::plain(format!(" (merged {range})")));

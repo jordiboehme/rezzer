@@ -16,6 +16,7 @@ members = [
     "crates/formats/formulakit",
     "crates/formats/sheetparts",
     "crates/formats/sheetlayout",
+    "crates/formats/layoutregions",
     "crates/formats/pdfparts",
     "crates/formats/barcodes",
     "crates/formats/fileattrs",
@@ -25,6 +26,7 @@ members = [
     "crates/readers/rezzer-read-sheet",
     "crates/readers/rezzer-read-pdf",
     "crates/rezzer-derez",
+    "crates/devtools/scorecard",
     "crates/rezzer",
 ]
 # The fuzz targets are their own cargo-fuzz project (nightly only).

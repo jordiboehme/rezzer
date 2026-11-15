@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! The evidence at both ends of a grid of fields, cell by cell (ruling P6-Z2): for every pair
+//! The evidence at both ends of a grid of fields, cell by cell: for every pair
 //! of ends a grid of labels over values and a grid of labels under values that have them,
 //! with one and with two fields a row, the first or the last row empty or full, in every look.
 //! Each read holds the invariants and the reading the table of ends gives: the fields pair,
@@ -43,7 +43,7 @@ enum Outcome {
     Unclear,
 }
 
-/// The table of ends (ruling P6-Z2), as the reader keeps it: two fields a row or more read
+/// The table of ends, as the reader keeps it: two fields a row or more read
 /// labels under values with both ends complete, are not clear with one complete end (an own
 /// row of labels counts only with a complete top), and read labels over values with none;
 /// one field a row never reads labels under values, and is not clear with any complete end.

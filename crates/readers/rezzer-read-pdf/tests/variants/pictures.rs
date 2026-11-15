@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! The shapes with pictures and codes (Tasks 14 and 15): template logos in the logo places
+//! The shapes with pictures and codes: template logos in the logo places
 //! of a business page, and a Code 128 drawn as bars, its module and its height varied on
 //! their own (one shape for each pair), on a business page and beside a photo that makes the
 //! page need vision, and two equal codes closer than their quiet zone. The controls are read
@@ -47,7 +47,7 @@ fn page_of(v: &Variant, template: String) -> Built {
     b
 }
 
-/// Task 14: three template logos, 100 by 50 at the top left, 100 by 40 at the right just
+/// Three template logos, 100 by 50 at the top left, 100 by 40 at the right just
 /// under the top band, and 60 by 30 at the foot: together over 2 % of the page, each under
 /// it. No page needs vision.
 fn logos(v: &Variant) -> Sheet {
@@ -125,7 +125,7 @@ fn codes_page(
     s
 }
 
-/// Task 15b part 2e-3: `n` different Code 128s of module 1 and 30 points high, three a row
+/// `n` different Code 128s of module 1 and 30 points high, three a row
 /// under the body of a page beside a photo (more than the 8 parts a page renders again and the
 /// 10 more it names): each is found once, and with all found nothing says a code is unread.
 fn many_codes(v: &Variant, n: usize) -> Sheet {
@@ -155,7 +155,7 @@ fn many_codes(v: &Variant, n: usize) -> Sheet {
     s
 }
 
-/// Task 15b part 2e-3: a printed picture over the body of a page beside a photo, its soft
+/// A printed picture over the body of a page beside a photo, its soft
 /// shades (waves across it) as a halftone of round dots on a lattice turned 45 degrees,
 /// [`SCREEN`] pixels apart at one pixel a point (an inline picture): no code, and nothing said
 /// of one.
@@ -198,7 +198,7 @@ enum Screen {
 /// tiles each.
 const SWEEP_PITCHES: [f32; 7] = [2.0, 3.0, 3.5, 4.2, 5.0, 6.0, 8.0];
 
-/// Task 15b part 2e-3 fix round 2: a scanned page (one inline picture over all of it, `res`
+/// A scanned page (one inline picture over all of it, `res`
 /// pixels a point, under the page's text) printed as halftone screens of `screen`, soft shades
 /// in waves, in 7 by 7 tiles: each row of tiles one pitch of [`SWEEP_PITCHES`], each column
 /// one angle from 0 to 90 degrees in steps of 15. The tiles touch (`band` false: one screen
@@ -237,7 +237,7 @@ fn halftone_sweep(v: &Variant, screen: Screen, res: u32, blur: u32, band: bool) 
     Sheet::new(page_of(v, t))
 }
 
-/// Task 15b part 2e-3 fix round 2: a scanned page of 1 pixel a point (one inline picture over
+/// A scanned page of 1 pixel a point (one inline picture over
 /// all of it, under the page's text) printed as one halftone screen of `screen`, `pitch`
 /// pixels apart, turned `angle` degrees, over the whole page or (`band`) a band from a third
 /// to a half of its height, soft shades in waves, blurred `blur` times. No code, and nothing
@@ -322,8 +322,7 @@ fn inline_gray(g: &mut [u8], (w, h): (u32, u32), blur: u32, at: [f32; 4]) -> Str
     )
 }
 
-/// What a scanned page the decoder read a false code from is printed with (Task 15b part
-/// 2e-6), soft shades in waves on paper.
+/// What a scanned page the decoder read a false code from is printed with soft shades in waves on paper.
 #[derive(Clone, Copy)]
 enum Print {
     /// Lines standing up, `pitch` pixels apart, at 1 pixel a point.
@@ -333,7 +332,7 @@ enum Print {
     Dots(f32, u32, u32),
 }
 
-/// Task 15b part 2e-6: a scanned page (one inline picture over all of it, under the page's
+/// A scanned page (one inline picture over all of it, under the page's
 /// text) printed with `print`, as pages the decoder read an EAN-13, a UPC-A or empty QR codes
 /// from. No code, and nothing said of one.
 fn false_reads(v: &Variant, print: Print) -> Sheet {
@@ -384,7 +383,7 @@ const LETTERS: [&str; 6] = [
     "mmmmmm nnnnnn uuuuuu hhhhhh iiiiii jjjjjj ffff tttt rrrr",
 ];
 
-/// Task 15b part 2e-6: a page beside a photo, drawn twice as large, with lines of stems and
+/// A page beside a photo, drawn twice as large, with lines of stems and
 /// strokes in the face `face` at 5 to 36 points (as on a page the decoder read an EAN-13 from
 /// in Times-Roman). No code, and nothing said of one.
 fn letters(v: &Variant, face: &str) -> Sheet {
@@ -414,7 +413,7 @@ fn letters(v: &Variant, face: &str) -> Sheet {
     s
 }
 
-/// Task 15b part 2e-6: a printed Code 128 of [`CODE`] (a picture of 2 pixels a point, 3 pixels a
+/// A printed Code 128 of [`CODE`] (a picture of 2 pixels a point, 3 pixels a
 /// module, bars 80 pixels long) beside a photo, crossed by a dark line `rule` pixels wide past
 /// both its ends (`lying`: the code turned a quarter). It is found once; the page says a dark
 /// line runs across its bars, as two equal codes one over the other with a dark line between
@@ -450,7 +449,7 @@ fn ruled_code(v: &Variant, rule: u32, lying: bool) -> Sheet {
     s
 }
 
-/// Task 15b part 2e-6: a scanned page (one inline picture over all of it, 1 pixel a point,
+/// A scanned page (one inline picture over all of it, 1 pixel a point,
 /// under the page's text) with a printed Code 128 of [`CODE`], 3 pixels a module, its bars
 /// `bar` modules long, blurred `blur` times: whole, 40 points from the left, or (`keep`) cut by
 /// the right edge of the page to that many of its modules. The decoder does not read it; the
@@ -480,7 +479,7 @@ fn printed_code(v: &Variant, bar: u32, keep: Option<u32>, blur: u32) -> Sheet {
 /// The text of the QR codes of these shapes.
 const QR: &str = "https://example.org/t/0000000001";
 
-/// Task 15b part 2e-6: a scanned page (one inline picture over all of it, 1 pixel a point,
+/// A scanned page (one inline picture over all of it, 1 pixel a point,
 /// above the page's text) with printed QR codes of [`QR`], 3 pixels a module: two side by
 /// side `gap` modules apart (`Some`), or one cut in half by the right edge of the page. The
 /// decoder reads fewer than are there; the page says a part of it looks like a code, on the
@@ -563,7 +562,7 @@ macro_rules! sweep {
     };
 }
 
-/// Task 15b: a ruler of 100 ticks, 3 points long, 2 points apart, every fifth 1 point wide and
+/// A ruler of 100 ticks, 3 points long, 2 points apart, every fifth 1 point wide and
 /// the others half a point, at the head of a page `on`: no code, and nothing said of one.
 fn ruler(v: &Variant, on: On) -> Sheet {
     let mut t = String::from("q 0 g\n");
@@ -583,7 +582,7 @@ fn ruler(v: &Variant, on: On) -> Sheet {
     s
 }
 
-/// Task 15b part 2f-1: the info box of an online-shop invoice at the right of the head of a
+/// The info box of an online-shop invoice at the right of the head of a
 /// business page under the title `Rechnung`, two Code 128s printed in a barcode font at `size` (`/FC`, named for codes,
 /// or `/FN`, known by its bars only): one under the invoice number row, its baseline the
 /// order number row's, between the labels and the values (which start `gap` points after
@@ -654,7 +653,7 @@ fn font_codes(v: &Variant, font: &str, size: f32, gap: f32, photo: bool) -> Shee
     s
 }
 
-/// Task 15b part 2f-1 fix round 4: two Code 128 in the one-bar-a-glyph font known by its bars
+/// Two Code 128 in the one-bar-a-glyph font known by its bars
 /// (`FS`) at 24 points on one baseline, `gap` modules of paper between them, in one show (the
 /// gap of white glyphs) or two: both are found, or (a gap the decoder cannot read past) named;
 /// no glyph text stays.
@@ -699,7 +698,7 @@ fn two_font_codes(v: &Variant, gap: u8, one_show: bool) -> Sheet {
     s
 }
 
-/// Task 15b part 2f-1 fix round 2: the coding line of a payment slip set in a letter font
+/// The coding line of a payment slip set in a letter font
 /// whose name looks like a code's (`font`, see `BAR_FONTS`): its text stays, and no code is
 /// claimed (a name never takes a run).
 fn coding_line(v: &Variant, font: &str) -> Sheet {
@@ -720,7 +719,7 @@ fn coding_line(v: &Variant, font: &str) -> Sheet {
     s
 }
 
-/// Task 15b part 2f-1 fix round 2: a code of `sym` with `text` in the bar font `font` at
+/// A code of `sym` with `text` in the bar font `font` at
 /// `size` beside `Menge 2` and under `Artikel-Nr. A-0042`, each glyph its own show with
 /// `per_glyph`. A one-bar-a-glyph font (`FP` to `FS`) prints any symbology from its elements;
 /// a Code 128 font prints Code 128. It is found with its value, and its glyph text stands
@@ -782,7 +781,7 @@ fn font_code_of(
     s
 }
 
-/// Task 15b part 2f-1 fix round 2: an EAN-13 of `text` drawn as paths, one rectangle a bar,
+/// An EAN-13 of `text` drawn as paths, one rectangle a bar,
 /// `module` points a module, its first bar at `x`, on a page beside a photo with `photo`. It
 /// is found with its value (a UPC-A as the EAN-13 with a leading 0 counts), or named; never
 /// listed with other digits.
@@ -809,7 +808,7 @@ fn drawn_ean(v: &Variant, text: &str, module: f32, x: f32, photo: bool) -> Sheet
     s
 }
 
-/// Task 15: a Code 128 of `module` points a module and `height` points high, drawn as bars at
+/// A Code 128 of `module` points a module and `height` points high, drawn as bars at
 /// the right of the head of a business page. It is found once, with its text.
 fn barcode(v: &Variant, module: f32, height: f32) -> Sheet {
     codes_page(v, On::Business, (module, height), 0, 0.0, true)
@@ -854,6 +853,67 @@ macro_rules! twins {
     };
 }
 
+/// The axes of a shape read once, upright at scale 1 in the real sizes and fonts.
+const ONCE: Axes = Axes {
+    scale: &[Scale::S100],
+    size: &[Size::Real],
+    data: &[Data::CourierBold],
+    labels: &[Labels::Helvetica],
+    look: &[Look::Real],
+    turn: &[Turn::None],
+    next: &[Next::None],
+    pages: &[Pages::One],
+};
+
+/// A page in two columns under a title across both, set in the size of
+/// the text, with a picture at the top of the right column: two paragraphs on the left, a
+/// long paragraph on the right under the picture. The picture stands after the left column,
+/// before the right column's text.
+fn picture_under_a_body_size_title(v: &Variant) -> Sheet {
+    let (plain, _) = v.faces();
+    let mut t = show(
+        plain,
+        10.0,
+        72.0,
+        750.0,
+        "A title across both columns of the page",
+    );
+    for (y, line) in [
+        (700.0, "The first left paragraph runs over"),
+        (688.0, "three lines of plain text in the"),
+        (676.0, "left column of the page."),
+        (560.0, "The second left paragraph stands"),
+        (548.0, "under the first one in the same"),
+        (536.0, "column on the left."),
+    ] {
+        t += &show(plain, 10.0, 72.0, y, line);
+    }
+    for (k, line) in [
+        "The right column is one long",
+        "paragraph that starts under the",
+        "picture and goes on down the page",
+        "line after line, as on a page set",
+        "in two columns.",
+    ]
+    .iter()
+    .enumerate()
+    {
+        t += &show(plain, 10.0, 320.0, 590.0 - 12.0 * k as f32, line);
+    }
+    t += &logo(330.0, 610.0, 85.0, 80.0);
+    let mut b = Built::new(&v.geo());
+    b.page = FormPage {
+        template: t,
+        ..FormPage::default()
+    };
+    let mut s = Sheet::new(b);
+    s.want.media_between.push((
+        "column on the left.".into(),
+        "The right column is one long".into(),
+    ));
+    s
+}
+
 /// The shapes with pictures and codes.
 pub(crate) fn shapes() -> Vec<Shape> {
     let mut all = vec![
@@ -861,6 +921,11 @@ pub(crate) fn shapes() -> Vec<Shape> {
             name: "template logos",
             axes: RENDERED,
             draw: |v| (logos(v), None),
+        },
+        Shape {
+            name: "a picture at the top of the right column under a title in the body size",
+            axes: ONCE,
+            draw: |v| (picture_under_a_body_size_title(v), None),
         },
         Shape {
             name: "barcode, module 0.8, height 20",
@@ -916,7 +981,7 @@ pub(crate) fn shapes() -> Vec<Shape> {
             },
         },
     ];
-    // Task 15b: the module and the height varied on their own, on both kinds of page (the
+    // The module and the height varied on their own, on both kinds of page (the
     // pairs the controls above read along every axis are left out of the business grid).
     all.extend(grid! {
         "barcode, module 0.5, height 3" => (On::Business, 0.5, 3.0),
@@ -962,7 +1027,7 @@ pub(crate) fn shapes() -> Vec<Shape> {
         "barcode beside a photo, module 1.2, height 80" => (On::Photo, 1.2, 80.0),
         "barcode beside a photo, module 1.2, height 150" => (On::Photo, 1.2, 150.0),
     });
-    // Task 15b part 2f-1: codes printed in a barcode font, known by its name or by its bars,
+    // Codes printed in a barcode font, known by its name or by its bars,
     // at three sizes (module 0.6 to 0.96 points) and two gaps to the values after them.
     all.extend([
         Shape {
@@ -995,7 +1060,7 @@ pub(crate) fn shapes() -> Vec<Shape> {
             axes: RENDERED,
             draw: |v| (font_codes(v, "FC", 10.0, 5.0, true), None),
         },
-        // Fix round 1: one bar and its space a glyph, as a real shop's font draws them, in
+        // One bar and its space a glyph, as a real shop's font draws them, in
         // each font structure, named with a short form (`BC C128 HD Wide`) or not.
         Shape {
             name: "codes in a bar-a-glyph TrueType subset font named BC C128 HD Wide, size 30",
@@ -1017,10 +1082,10 @@ pub(crate) fn shapes() -> Vec<Shape> {
             axes: RENDERED,
             draw: |v| (font_codes(v, "FS", 24.0, 8.0, false), None),
         },
-        // Fix round 2: letter fonts with code-like names keep their text; a human-readable
+        // Letter fonts with code-like names keep their text; a human-readable
         // bar font is taken by its bars; Code 39 and ITF in a font known only by its bars;
         // a code shown a glyph at a time; EAN-13 drawn as paths at fine modules.
-        // Fix round 3: the glyph program of a real shop's font (2048 units an em, bars a
+        // The glyph program of a real shop's font (2048 units an em, bars a
         // little wider than whole modules, a white glyph, a quiet zone and a glyph of two bars
         // after the code in the same show).
         Shape {
@@ -1033,7 +1098,7 @@ pub(crate) fn shapes() -> Vec<Shape> {
             axes: RENDERED,
             draw: |v| (font_codes(v, "FY", 34.0, 8.0, true), None),
         },
-        // Fix round 4: two codes side by side, 3 to 12 modules apart, in one show and two.
+        // Two codes side by side, 3 to 12 modules apart, in one show and two.
         Shape {
             name: "two codes in a bar-a-glyph font 3 modules apart, one show",
             axes: RENDERED,

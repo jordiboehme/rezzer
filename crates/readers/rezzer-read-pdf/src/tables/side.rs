@@ -8,9 +8,10 @@
 //! titles, the strip is one more column of that section's table; where it holds a total
 //! label alone on its line over an amount, the two are a pair.
 
-use super::pairs::Field;
+use layoutregions::segment::drawn::Line;
+
 use super::*;
-use crate::regions::Seg;
+use layoutregions::extract::pairs::Field;
 
 /// A column stands beside a grid when it starts at most this many times the size of its text
 /// right of the grid's right edge (and more than [`SNAP`], or the two would be one rule): a
@@ -18,10 +19,7 @@ use crate::regions::Seg;
 /// this wide. Relative to the text, so a form printed larger or smaller reads the same.
 pub(super) const SIDE_GAP: f32 = 1.0;
 
-/// The note before the first table on a page the column of totals adds to.
-pub(super) const SIDE_FOUND_BY: &str = "Found by: a column of amounts beside a table, drawn with \
-     rules that line up with the table's rules; its amounts are read as one more column of the \
-     table, and each total label in it pairs with the amount under it.";
+pub(crate) use crate::found::SIDE_FOUND_BY;
 
 /// Rules one page may look at for columns of totals; past them none is looked for.
 pub(super) const SIDE_WORK: usize = 1_000_000;
@@ -71,13 +69,13 @@ pub(super) struct Beside<'a> {
 pub(super) fn side_columns(
     flow: &Flow,
     by_y: &ByY,
-    hs: &[Seg],
-    vs: &[Seg],
+    hs: &[Line],
+    vs: &[Line],
     taken: &[bool],
     parts: &[Beside<'_>],
     work: &mut usize,
 ) -> Vec<Side> {
-    let mut free: Vec<Seg> = hs
+    let mut free: Vec<Line> = hs
         .iter()
         .zip(taken)
         .filter(|(_, t)| !**t)
@@ -190,18 +188,18 @@ fn strip_kind(
             !r.off_axis && cx > x0 && cx < x1 && !r.text.trim().is_empty()
         })
         .collect();
-    let mut lines = super::ruled::lines_up(flow, &runs);
+    let mut lines = table::lines_up(&flow.runs, &runs);
     lines.reverse();
     let Some(first) = lines.first() else {
         return StripKind::Other;
     };
-    let text = |l: &super::ruled::TextLine| -> String {
+    let text = |l: &table::RunLine| -> String {
         let mut runs = l.runs.clone();
         runs.sort_by(|&a, &b| flow.runs[a].x.total_cmp(&flow.runs[b].x));
         runs.iter().map(|&i| flow.runs[i].text.as_str()).collect()
     };
     // Text beside the column on the baseline of `l`, within the sections beside it.
-    let beside = |l: &super::ruled::TextLine| {
+    let beside = |l: &table::RunLine| {
         let tol = 0.3 * l.size.max(1.0);
         by_y.runs_between(l.y - l.size, l.y + 2.0 * l.size)
             .into_iter()

@@ -493,10 +493,11 @@ fn table_alignment_merged_cells_and_pipes() {
     let expected = "**Costs**\n\n\
 | A | B | C |\n\
 | :--- | :---: | ---: |\n\
-| x \\| y | wide | \u{2190} |\n\
+| x \\| y | wide |  |\n\
 | `a\\|b` | -5 |  |\n\
 \n\
-Merged cells: \u{3003} same as above, \u{2190} same as left.\n";
+Merged cells: `wide` (row 2 column 2) over 2 columns. Each has its text in its first cell, the \
+cells it covers are empty.\n";
     assert!(md.contains(expected), "{md}");
 }
 
@@ -527,8 +528,9 @@ fn sheet_tables_keep_a1_merge_notes() {
     }]);
     assert!(
         md.contains(
-            "| x | wide | \u{2190} |\n| y | \u{3003} | \u{3003} |\n\n\
-             Merged cells: \u{3003} same as above, \u{2190} same as left. Ranges: B2:C3\n"
+            "| x | wide |  |\n| y |  |  |\n\n\
+             Merged cells: B2:C3. Each has its text in its first cell, the cells it covers \
+             are empty.\n"
         ),
         "{md}"
     );
@@ -537,7 +539,7 @@ fn sheet_tables_keep_a1_merge_notes() {
 #[test]
 fn merge_note_uses_sheet_addresses() {
     // A table that starts at B2: the ranges come from each merged cell's own anchor, not
-    // from its place in the table (P4-B).
+    // from its place in the table.
     let cell = |text: &str, at: &str| {
         let mut c = Cell::new(vec![txt(text)]);
         c.anchor = Some(Anchor(format!("'My!Sheet'!{at}")));
@@ -547,8 +549,8 @@ fn merge_note_uses_sheet_addresses() {
     wide.col_span = 2;
     let mut tall = cell("tall", "D3");
     tall.row_span = 2;
-    // A merged cell without a sheet anchor is not named: its place in the table is no sheet
-    // address.
+    // A merged cell without a sheet anchor is named by its place in the table, which is no
+    // sheet address.
     let mut bare = Cell::new(vec![txt("bare")]);
     bare.col_span = 2;
     let md = body_of(vec![Block::Table {
@@ -571,7 +573,8 @@ fn merge_note_uses_sheet_addresses() {
     }]);
     assert!(
         md.contains(
-            "Merged cells: \u{3003} same as above, \u{2190} same as left. Ranges: B3:C3, D3:D4\n"
+            "Merged cells: B3:C3, D3:D4, `bare` (table row 3 column 1) over 2 columns. Each \
+             has its text in its first cell, the cells it covers are empty.\n"
         ),
         "{md}"
     );
@@ -893,6 +896,7 @@ fn rich_document() -> Document {
         needs_vision: true,
         codes: Vec::new(),
         code_unread: false,
+        shows: None,
     }];
     d.facets.formulas = vec![formula("Sheet 1!B2", "=A2*2", &["Sheet 1!A2"], None)];
     d.facets.annotations = vec![Annotation {
@@ -1179,12 +1183,12 @@ fn hostile_spans_stay_bounded() {
         layout: None,
     }]);
     assert!(
-        md.contains("| h | \u{2190} |") && md.contains("| \u{3003} | \u{3003} |"),
+        md.contains("| h |  |") && md.contains("\n|  |  |"),
         "{}",
         &md[..300]
     );
     assert!(
-        md.contains("Merged cells: \u{3003} same as above, \u{2190} same as left."),
+        md.contains("Merged cells: `h` (row 2 column 1) over 2 rows and 2 columns. Each has"),
         "{}",
         &md[..300]
     );
@@ -1749,7 +1753,11 @@ fn inline_code_keeps_tabs() {
 }
 
 #[test]
-fn merge_note_names_only_shown_rows() {
+fn merge_note_names_the_spans_of_the_model_when_rows_are_cut() {
+    // 300 rows of which 200 are shown. The note names what a
+    // merged cell covers as the model has it, also past the last shown row (a line under
+    // the note says how many rows are not shown). A cell over rows that starts in the last
+    // shown row was named `over 1 columns`.
     let row = |n: usize| -> Vec<Cell> {
         (0..n)
             .map(|i| Cell::new(vec![txt(&i.to_string())]))
@@ -1757,6 +1765,7 @@ fn merge_note_names_only_shown_rows() {
     };
     let mut rows: Vec<Vec<Cell>> = (0..300).map(|_| row(1000)).collect();
     rows[0][0].row_span = 300;
+    rows[199][1].row_span = 50;
     let md = body_of(vec![Block::Table {
         caption: None,
         header_rows: 1,
@@ -1766,17 +1775,16 @@ fn merge_note_names_only_shown_rows() {
         anchor: None,
         layout: None,
     }]);
-    // The cell merged down stands in the header; each shown row below says "same as above".
-    assert_eq!(
-        md.matches("\n| \u{3003} | 0 |").count(),
-        199,
-        "{}",
-        &md[..300]
-    );
+    // The cell merged down stands in the header; its place in each shown row below is empty.
+    assert_eq!(md.matches("\n|  | 0 |").count(), 199, "{}", &md[..300]);
     assert!(
-        md.contains("Merged cells: \u{3003} same as above, \u{2190} same as left.\n"),
+        md.contains(
+            "Merged cells: `0` (row 1 column 1) over 300 rows, `1` (row 200 column 3) over 50 \
+             rows. Each has its text in its first cell, the cells it covers are empty.\n\
+             100 more rows not shown (see the model JSON).\n"
+        ),
         "{}",
-        &md[md.len() - 200..]
+        &md[md.len() - 300..]
     );
 }
 
@@ -1803,7 +1811,8 @@ fn anchored_merge_note_names_only_shown_rows() {
     }]);
     assert!(
         md.contains(
-            "Merged cells: \u{3003} same as above, \u{2190} same as left. Ranges: C5:C204\n"
+            "Merged cells: C5:C204. Each has its text in its first cell, the cells it covers \
+             are empty.\n"
         ),
         "{}",
         &md[md.len() - 200..]
@@ -1924,7 +1933,7 @@ fn render_inline(inline: Inline) -> String {
     body.trim().replace("# ", "").to_string()
 }
 
-/// Ruling P5-AD: a wikilink of the source is written as escaped text, never as a live
+/// A wikilink of the source is written as escaped text, never as a live
 /// wikilink (its target's output name is unknown, so it would be broken on every import).
 /// Crystalline reads `[[` also after a backslash, so every bracket is escaped.
 #[test]
@@ -2928,6 +2937,7 @@ fn a_picture_not_extracted_says_why_it_needs_a_look() {
             needs_vision: true,
             codes: Vec::new(),
             code_unread: false,
+            shows: None,
         },
         Asset {
             id: "img2".into(),
@@ -2939,6 +2949,7 @@ fn a_picture_not_extracted_says_why_it_needs_a_look() {
             needs_vision: false,
             codes: Vec::new(),
             code_unread: false,
+            shows: None,
         },
     ];
     let md = render(&d, Completeness::Complete, &opts());
@@ -3031,6 +3042,7 @@ fn asset(id: &str, path: Option<&str>, mime: &str, needs_vision: bool) -> Asset 
         needs_vision,
         codes: Vec::new(),
         code_unread: false,
+        shows: None,
     }
 }
 
@@ -3400,7 +3412,7 @@ fn sheet_annotations_unchanged() {
 #[test]
 fn sheet_blocks_take_no_inline_notes() {
     // A caption paragraph and a one-cell table anchored at a commented cell stand inside a
-    // sheet: the comments stay in the list (P4-D). The same paragraph in a chapter takes
+    // sheet: the comments stay in the list. The same paragraph in a chapter takes
     // its note, so the skip is the sheet's own.
     let caption = Block::Paragraph {
         inlines: vec![txt("Sales by region")],
@@ -3634,9 +3646,10 @@ fn a_note_too_deep_for_its_passage_stays_in_the_list() {
 }
 
 #[test]
-fn merged_cells_are_marked_once_and_real_marks_are_escaped_where_marks_stand() {
-    // A block of two by two cells: its text once, the first row's other cell "same as left",
-    // the cells below "same as above". A real cell that holds only a mark is escaped.
+fn merged_cells_are_said_once_and_an_arrow_of_the_file_stays() {
+    // A block of two by two cells: its text once, the cells it covers empty, and the note
+    // under the table names it. A cell whose own text is an arrow or a ditto mark keeps it
+    // as it is: Rezzer writes no such mark itself.
     let mut block = Cell::new(vec![txt("both")]);
     block.col_span = 2;
     block.row_span = 2;
@@ -3660,9 +3673,10 @@ fn merged_cells_are_marked_once_and_real_marks_are_escaped_where_marks_stand() {
     assert!(
         md.contains(
             "| A | B | C |\n| --- | --- | --- |\n\
-             | both | \u{2190} | \\\u{3003} |\n\
-             | \u{3003} | \u{3003} | \\\u{2190} |\n\n\
-             Merged cells: \u{3003} same as above, \u{2190} same as left.\n"
+             | both |  | \u{3003} |\n\
+             |  |  | \u{2190} |\n\n\
+             Merged cells: `both` (row 2 column 1) over 2 rows and 2 columns. Each has its \
+             text in its first cell, the cells it covers are empty.\n"
         ),
         "{md}"
     );
@@ -3744,6 +3758,7 @@ fn coded(texts: &[&str], places: usize) -> String {
             })
             .collect(),
         code_unread: false,
+        shows: None,
     }];
     d.body = (0..places)
         .map(|k| Block::Media {
@@ -3777,6 +3792,7 @@ fn code_place_in_words() {
             place: Some("top left of the page".into()),
         }],
         code_unread: false,
+        shows: None,
     }];
     d.body = vec![Block::Media {
         asset: "page-1".into(),
@@ -4005,7 +4021,8 @@ fn sheet_md(blocks: Vec<Block>) -> String {
 #[test]
 fn markdown_and_pdf_tables_unchanged() {
     // A table without sheet anchors (Markdown, PDF): bold caption, several header rows
-    // joined with a space, and the merge legend without "Ranges:" (P4-B).
+    // joined with a space, and the merged cell named by its row and column in the table, as
+    // it has no sheet address.
     let md = body_of(vec![Block::Table {
         caption: Some("Costs".into()),
         header_rows: 2,
@@ -4035,11 +4052,11 @@ fn markdown_and_pdf_tables_unchanged() {
 | Name | Sales 2024 | Sales 2025 |\n\
 | --- | --- | --- |\n\
 | x | 1 | 2 |\n\
-| y | \u{3003} | 3 |\n\
+| y |  | 3 |\n\
 \n\
-Merged cells: \u{3003} same as above, \u{2190} same as left.\n";
+Merged cells: `1` (row 2 column 2) over 2 rows. Each has its text in its first cell, the cells \
+it covers are empty.\n";
     assert!(md.contains(expected), "{md}");
-    assert!(!md.contains("Ranges:"), "{md}");
 }
 
 #[test]
@@ -4063,8 +4080,8 @@ fn layout_merge_note_uses_sheet_addresses_beside_a_parent_column() {
     assert!(
         md.contains(
             "| Parent | Region | Q1 | Q2 |\n| --- | --- | --- | --- |\n\
-             |  | North | \u{2190} | 5 |\n| North | Oslo | 1 | 2 |\n\n\
-             Merged cells: \u{3003} same as above, \u{2190} same as left. Ranges: B3:C3"
+             |  | North |  | 5 |\n| North | Oslo | 1 | 2 |\n\n\
+             Merged cells: B3:C3. Each has"
         ),
         "{md}"
     );
@@ -4145,7 +4162,7 @@ fn group_row_text_written_once() {
         l,
     )]);
     assert_eq!(md.matches("Year 2024").count(), 1, "{md}");
-    assert!(md.contains("| Year 2024 | \u{2190} | \u{2190} |"), "{md}");
+    assert!(md.contains("| Year 2024 |  |  |"), "{md}");
     assert!(
         md.contains("Group row: 2 (one merged area across the table)."),
         "{md}"
@@ -4557,7 +4574,7 @@ fn leading_dash_in_key_value_is_escaped() {
 
 #[test]
 fn row_under_merge_from_above_renders() {
-    // Row 4 holds no cell of its own: A2 and B3 cover it from above (Task 9).
+    // Row 4 holds no cell of its own: A2 and B3 cover it from above.
     let rows = || {
         vec![
             vec![at("a", "A1"), at("b", "B1")],
@@ -4570,18 +4587,12 @@ fn row_under_merge_from_above_renders() {
     l.header_rows = vec![1];
     l.header_paths = vec!["a".into(), "b".into()];
     let md = sheet_md(vec![ltable(rows(), 1, l)]);
-    assert!(
-        md.contains("| x | 1 |\n| \u{3003} | 2 |\n| \u{3003} | \u{3003} |\n\n"),
-        "{md}"
-    );
-    assert!(md.contains("Ranges: A2:A4, B3:B4"), "{md}");
+    assert!(md.contains("| x | 1 |\n|  | 2 |\n|  |  |\n\n"), "{md}");
+    assert!(md.contains("Merged cells: A2:A4, B3:B4. Each has"), "{md}");
     let mut g = lay(LayoutKind::Grid, "A1:B4", None);
     g.certainty = Certainty::Unsure;
     let md = sheet_md(vec![ltable(rows(), 0, g)]);
-    assert!(
-        md.contains("| 3 | \u{3003} | 2 |\n| 4 | \u{3003} | \u{3003} |"),
-        "{md}"
-    );
+    assert!(md.contains("| 3 |  | 2 |\n| 4 |  |  |"), "{md}");
 }
 
 #[test]
@@ -4705,7 +4716,7 @@ fn name_caption_heading_shows_no_address() {
 
 #[test]
 fn notes_range_renders_without_a_table() {
-    // Task 7: when the notes do not fit with the table, split_rows gives them a range of
+    // When the notes do not fit with the table, split_rows gives them a range of
     // their own with table None; it renders as the lead and the notes, no header band.
     let mut l = lay(LayoutKind::Table, "A1:B9", Some("A2:B3"));
     l.header_rows = vec![1];
@@ -4737,7 +4748,7 @@ fn notes_range_renders_without_a_table() {
 
 #[test]
 fn generated_heading_drops_the_same_lead_line() {
-    // P4-AS: a generated heading (no anchor) that says the lead's kind and range stands for
+    // A generated heading (no anchor) that says the lead's kind and range stands for
     // the lead line.
     let text = |range: &str, data: Option<&str>| {
         ltable(
@@ -4811,7 +4822,7 @@ fn generated_heading_drops_the_same_lead_line() {
 
 #[test]
 fn layout_line_details_do_not_repeat_the_line() {
-    // P4-AU: header rows and row labels stand once; a detail keeps what it adds.
+    // Header rows and row labels stand once; a detail keeps what it adds.
     let mut l = lay(LayoutKind::Table, "A3:C5", Some("A5:C5"));
     l.header_rows = vec![3, 4];
     l.header_paths = vec!["a".into(), "b".into(), "c".into()];
@@ -4876,8 +4887,9 @@ fn merge_note_only_for_merges_in_the_body() {
     )]);
     assert!(
         md.ends_with(
-            "| \u{3003} | 3 | 4 |\n\n\
-             Merged cells: \u{3003} same as above, \u{2190} same as left. Ranges: A3:A4"
+            "|  | 3 | 4 |\n\n\
+             Merged cells: A3:A4. Each has its text in its first cell, the cells it covers \
+             are empty."
         ),
         "{md}"
     );
@@ -5069,7 +5081,7 @@ fn records_repeat_header_paths() {
         md.contains(
             "Table A15:N18 (data A17:N18), header rows 15 to 16, row labels in A, \
              empty cells are left out of records, found by rules: empty-row gaps.\n\n\
-             - Row 18 (Table\\_1\\_01!A18:N18), group: Year 2024\n\
+             - Row 18 (Table_1_01!A18:N18), group: Year 2024\n\
              \x20 - Period: February\n\
              \x20 - Generation at Utility Scale Facilities / Coal: 44,137\n\
              \x20 - Generation at Utility Scale Facilities / Petroleum Liquids: 740\n"
@@ -5115,6 +5127,40 @@ fn records_skip_empty_cells() {
          found by rules: empty-row gaps.\n\n\
          - Row 2 (S!A2:C2)\n  - Name: a\n  - Note: fine\n\
          - Row 3 (S!A3:C3)\n  - Name: b\n  - Qty: 2"
+    );
+}
+
+#[test]
+fn records_keep_the_line_of_a_value() {
+    // A value on the second line of its row (a platform on the arrival's
+    // line) keeps its line in the records style, as `<br>4` does in a table.
+    let mut l = lay(LayoutKind::Table, "A1:B2", Some("A2:B2"));
+    l.header_rows = vec![1];
+    l.header_paths = vec!["Halt".into(), "Gleis".into()];
+    let mut stops = at("", "A2");
+    stops.inlines = vec![
+        Inline::plain("Musterstadt Hbf"),
+        Inline::LineBreak,
+        Inline::plain("Beispielheim"),
+    ];
+    let mut platform = at("", "B2");
+    platform.inlines = vec![Inline::LineBreak, Inline::plain("4")];
+    let md = sheet_md_as(
+        vec![ltable(
+            vec![
+                vec![at("Halt", "A1"), at("Gleis", "B1")],
+                vec![stops, platform],
+            ],
+            1,
+            l,
+        )],
+        &records(),
+    );
+    assert!(
+        md.ends_with(
+            "- Row 2 (S!A2:B2)\n  - Halt: Musterstadt Hbf\\\n    Beispielheim\n  - Gleis:\\\n    4"
+        ),
+        "{md}"
     );
 }
 
@@ -6390,6 +6436,7 @@ fn vision_asset(id: &str) -> Asset {
         needs_vision: true,
         codes: Vec::new(),
         code_unread: false,
+        shows: None,
     }
 }
 
@@ -6774,6 +6821,36 @@ fn description_template_counts_in_order_and_singular() {
             "\"PDF, 1 page. 1 table, 1 formula, 1 form field, 1 signature, 1 annotation, 1 picture that needs vision, 1 part not read.\""
         )
     );
+    // A picture that shows a block of the text (a region kept as
+    // laid out) is no picture of the file. It is counted apart, in words of its own.
+    let region = |id: &str| Asset {
+        shows: Some(Anchor("p1:b1".into())),
+        ..vision_asset(id)
+    };
+    for (regions, want) in [
+        (
+            1,
+            "1 picture that needs vision, 1 region to look at, 1 part not read.",
+        ),
+        (
+            2,
+            "1 picture that needs vision, 2 regions to look at, 1 part not read.",
+        ),
+    ] {
+        d.assets = vec![vision_asset("a")];
+        d.assets
+            .extend((0..regions).map(|k| region(&format!("r{k}"))));
+        let md = render(&d, Completeness::Complete, &opts());
+        let line = fm_line(&md, "description").expect("a description");
+        assert!(line.ends_with(&format!("1 annotation, {want}\"")), "{line}");
+    }
+    d.assets = vec![region("r")];
+    let md = render(&d, Completeness::Complete, &opts());
+    let line = fm_line(&md, "description").expect("a description");
+    assert!(
+        line.ends_with("1 annotation, 1 region to look at, 1 part not read.\""),
+        "{line}"
+    );
 }
 
 #[test]
@@ -6851,7 +6928,7 @@ fn short_body_gets_description() {
     let body = after_frontmatter(&md);
     assert_eq!(
         body,
-        "\n# report.md\n\n\\# Not a heading\n\\- part\\_of \\[x\\](y.md)\n\nOnly line.\n"
+        "\n# report.md\n\n\\# Not a heading\n\\- part_of \\[x\\](y.md)\n\nOnly line.\n"
     );
     assert_eq!(content_lines(&md), 4);
     // Lines inside a fence do not count.
@@ -7057,4 +7134,797 @@ fn geometry_does_not_change_markdown() {
             );
         }
     }
+}
+
+fn spatial(lines: &[&[(u32, &str)]]) -> Block {
+    Block::Spatial {
+        lines: lines
+            .iter()
+            .map(|l| rezzer_model::SpatialLine {
+                pieces: l
+                    .iter()
+                    .map(|(col, text)| rezzer_model::SpatialPiece {
+                        col: *col,
+                        text: (*text).into(),
+                        spans: Vec::new(),
+                    })
+                    .collect(),
+            })
+            .collect(),
+        links: Vec::new(),
+        grid: None,
+        anchor: None,
+    }
+}
+
+/// `block` (kept as laid out) at the column `col` of its page's grid, as a further row of
+/// the block before it or not.
+fn on_grid(mut block: Block, col: u32, joins: bool) -> Block {
+    if let Block::Spatial { grid, .. } = &mut block {
+        *grid = Some(rezzer_model::SpatialGrid { col, joins });
+    }
+    block
+}
+
+#[test]
+fn spatial_renders_as_plain_lines_without_a_fence() {
+    // Each line of the layout is a line of its own; nothing is aligned in columns.
+    let md = body_of(vec![spatial(&[
+        &[(0, "Name"), (12, "Betrag")],
+        &[(0, "Muster GmbH"), (12, "1.234,56")],
+    ])]);
+    assert!(
+        md.contains("\nName   Betrag\\\nMuster GmbH 1.234,56\n"),
+        "{md}"
+    );
+    assert!(!md.contains("```"), "{md}");
+}
+
+#[test]
+fn spatial_pieces_apart_get_the_same_gap_at_any_distance() {
+    // A piece that stands apart from the one before it gets the gap, however far: the gap
+    // says where a piece ends, not where its column is. A piece that touches gets one space.
+    for (col, want) in [(5, "\nabcd x\n"), (6, "\nabcd   x\n"), (40, "\nabcd   x\n")] {
+        let md = body_of(vec![spatial(&[&[(0, "abcd"), (col, "x")]])]);
+        assert!(md.contains(want), "{col}: {md}");
+    }
+    // The first piece of a line starts the line, whatever the column the lines start at.
+    let md = body_of(vec![spatial(&[&[(30, "abcd")], &[(30, "x")]])]);
+    assert!(md.contains("\nabcd\\\nx\n"), "{md}");
+}
+
+#[test]
+fn spatial_lines_keep_their_indent_against_the_leftmost_line() {
+    // In a listing the indent carries meaning. A line that
+    // starts right of the leftmost line of its block is written with its indent, counted
+    // from that line, as no-break spaces: they stay in a paragraph where spaces would not.
+    let md = body_of(vec![spatial(&[
+        &[(6, "def scale(x):")],
+        &[(10, "y = x * 2")],
+        &[(10, "return y"), (30, "# twice")],
+        &[(6, "print(scale(4))")],
+    ])]);
+    let nb = "\u{a0}".repeat(4);
+    assert!(
+        md.contains(&format!(
+            "\ndef scale(x):\\\n{nb}y = x \\* 2\\\n{nb}return y   # twice\\\nprint(scale(4))\n"
+        )),
+        "{md}"
+    );
+    // Also on the first line, and a marker after an indent opens no block.
+    let md = body_of(vec![spatial(&[&[(3, "- a")], &[(1, "b")]])]);
+    assert!(md.contains("\n\u{a0}\u{a0}- a\\\nb\n"), "{md}");
+    let mut read = String::new();
+    let text = "\u{a0}\u{a0}- a\\\nb";
+    for event in Parser::new_ext(text, Options::empty()) {
+        match event {
+            Event::Start(Tag::Paragraph) | Event::End(TagEnd::Paragraph) => {}
+            Event::Text(t) => read.push_str(&t),
+            Event::HardBreak => read.push('\n'),
+            other => panic!("{other:?}"),
+        }
+    }
+    assert_eq!(read, "\u{a0}\u{a0}- a\nb");
+    // Other white space at the start of a paragraph still goes, as before.
+    let md = body_of(vec![Block::paragraph(vec![txt("\u{3000} \tfirst")])]);
+    assert!(md.contains("\n\nfirst\n"), "{md}");
+    // An indent too far to pad is not written; the text stays.
+    let md = body_of(vec![spatial(&[&[(0, "a")], &[(u32::MAX, "late")]])]);
+    assert!(md.contains("\na\\\nlate\n"), "{md}");
+}
+
+#[test]
+fn spatial_indents_of_a_wide_block_are_scaled_down() {
+    // The indent of a line shows that it is indented and how far against the other lines
+    // of its block. On a wide page a line may start hundreds of columns in: written out, the
+    // no-break spaces would be most of the Markdown. A block whose widest indent is over 32
+    // columns has its indents scaled so that the widest is 32; their order stays.
+    let nb = |n: usize| "\u{a0}".repeat(n);
+    let md = body_of(vec![spatial(&[
+        &[(0, "left")],
+        &[(100, "middle")],
+        &[(400, "right")],
+        &[(1, "near")],
+    ])]);
+    assert!(
+        md.contains(&format!(
+            "\nleft\\\n{}middle\\\n{}right\\\n{}near\n",
+            nb(8),
+            nb(32),
+            nb(1)
+        )),
+        "{md}"
+    );
+    // The bound from both sides: a widest indent of 32 is written as it is, one of 33 is
+    // scaled (the line at 3 of 33 columns stands at 3 of 32).
+    let md = body_of(vec![spatial(&[&[(0, "a")], &[(16, "b")], &[(32, "c")]])]);
+    assert!(
+        md.contains(&format!("\na\\\n{}b\\\n{}c\n", nb(16), nb(32))),
+        "{md}"
+    );
+    let md = body_of(vec![spatial(&[&[(0, "a")], &[(11, "b")], &[(33, "c")]])]);
+    assert!(
+        md.contains(&format!("\na\\\n{}b\\\n{}c\n", nb(11), nb(32))),
+        "{md}"
+    );
+    let md = body_of(vec![spatial(&[&[(0, "a")], &[(11, "b")], &[(66, "c")]])]);
+    assert!(
+        md.contains(&format!("\na\\\n{}b\\\n{}c\n", nb(6), nb(32))),
+        "{md}"
+    );
+    // Many lines far in: the indents are a small share of the text, not most of it.
+    let texts: Vec<String> = (0..2000).map(|k| format!("line {k}")).collect();
+    let rows: Vec<Vec<(u32, &str)>> = texts
+        .iter()
+        .enumerate()
+        .map(|(k, t)| vec![((k % 1000) as u32, t.as_str())])
+        .collect();
+    let rows: Vec<&[(u32, &str)]> = rows.iter().map(Vec::as_slice).collect();
+    let md = body_of(vec![spatial(&rows)]);
+    let pad = md.chars().filter(|c| *c == '\u{a0}').count();
+    assert!(pad <= 32 * 2000, "{pad}");
+    assert!(md.contains("line 1999"));
+}
+
+#[test]
+fn spatial_links_references_and_marks_are_written_in_the_lines() {
+    let span = |start, end, link: Option<u32>, note: Option<&str>| rezzer_model::SpatialSpan {
+        start,
+        end,
+        link,
+        footnote: note.map(str::to_string),
+        ..rezzer_model::SpatialSpan::default()
+    };
+    let piece = |col, text: &str, spans| rezzer_model::SpatialPiece {
+        col,
+        text: text.into(),
+        spans,
+    };
+    let line = |pieces| rezzer_model::SpatialLine { pieces };
+    let strong = rezzer_model::SpatialSpan {
+        start: 0,
+        end: 5,
+        strong: true,
+        ..rezzer_model::SpatialSpan::default()
+    };
+    let emphasis = rezzer_model::SpatialSpan {
+        start: 6,
+        end: 10,
+        emphasis: true,
+        ..rezzer_model::SpatialSpan::default()
+    };
+    let block = Block::Spatial {
+        lines: vec![
+            line(vec![piece(
+                0,
+                "Name1",
+                vec![span(4, 5, None, Some("p1-1"))],
+            )]),
+            line(vec![piece(0, "www.x.de", vec![span(0, 8, Some(0), None)])]),
+            line(vec![piece(
+                0,
+                "see y here",
+                vec![span(4, 5, Some(1), None)],
+            )]),
+            line(vec![piece(0, "Total gross now", vec![strong, emphasis])]),
+            // A span that points to no link of the block keeps its text.
+            line(vec![piece(0, "lost", vec![span(0, 4, Some(9), None)])]),
+            // A span past the end of the text is cut; one before the last is plain text.
+            line(vec![piece(
+                0,
+                "abcdef",
+                vec![span(2, 40, Some(1), None), span(1, 3, Some(0), None)],
+            )]),
+            // Two spans of one link that follow one another are one link (a bold bracket
+            // alone cannot be marked, so the renderer marks the word with it); the same
+            // link after other text is a link of its own.
+            line(vec![piece(
+                0,
+                "see x.de) or x.de",
+                vec![
+                    span(4, 8, Some(0), None),
+                    rezzer_model::SpatialSpan {
+                        start: 8,
+                        end: 9,
+                        link: Some(0),
+                        strong: true,
+                        ..rezzer_model::SpatialSpan::default()
+                    },
+                    span(13, 17, Some(0), None),
+                ],
+            )]),
+            // The white space around a piece is not written, inside a span or not.
+            line(vec![
+                piece(0, "  left ", Vec::new()),
+                piece(20, " right  ", vec![span(0, 8, Some(1), None)]),
+            ]),
+        ],
+        links: vec!["http://www.x.de/".into(), "https://y.org/".into()],
+        grid: None,
+        anchor: None,
+    };
+    let md = body_of(vec![block]);
+    assert!(
+        md.contains(
+            "\nName[^p1-1]\\\n[www.x.de](http://www.x.de/)\\\nsee [y](https://y.org/) here\\\n\
+             **Total** *gros*s now\\\nlost\\\nab[cdef](https://y.org/)\\\n\
+             see [**x.de)**](http://www.x.de/) or [x.de](http://www.x.de/)\\\n\
+             left   [right](https://y.org/)\n"
+        ),
+        "{md}"
+    );
+    assert!(!md.contains("Links:"), "{md}");
+}
+
+#[test]
+fn spatial_text_is_escaped() {
+    // The text is the file's own: what would be Markdown is escaped, also at a line start.
+    let md = body_of(vec![spatial(&[
+        &[(0, "*a* [b](c)"), (20, "")],
+        &[],
+        &[(0, "# no heading")],
+        &[(0, "1. no list"), (14, "a ``` b")],
+    ])]);
+    assert!(
+        md.contains("\n\\*a\\* \\[b\\](c)\\\n\\# no heading\\\n1\\. no list   a \\`\\`\\` b\n"),
+        "{md}"
+    );
+}
+
+#[test]
+fn spatial_huge_column_keeps_text_and_stays_short() {
+    for line in [
+        &[(u32::MAX, "late"), (0, "x")][..],
+        &[(0, "a"), (u32::MAX, "late"), (u32::MAX, "end")][..],
+    ] {
+        let md = body_of(vec![spatial(&[line])]);
+        let at = md.find("late").unwrap();
+        assert!(md[at..].len() < 200, "{md}");
+    }
+    let md = body_of(vec![spatial(&[&[(0, "a"), (u32::MAX, "late")]])]);
+    assert!(md.contains("\na   late\n"), "{md}");
+}
+
+#[test]
+fn spatial_line_break_in_a_piece_is_a_space() {
+    let md = body_of(vec![spatial(&[&[(0, "a\nb\r\nc"), (10, "d")]])]);
+    assert!(md.contains("\na b  c   d\n"), "{md}");
+}
+
+#[test]
+fn spatial_empty_lines_and_nesting() {
+    // A line without text is no line of the Markdown: a blank line would end the paragraph.
+    let md = body_of(vec![spatial(&[&[(0, "a")], &[], &[(4, " ")], &[(0, "b")]])]);
+    assert!(md.contains("\na\\\nb\n"), "{md}");
+    let md = body_of(vec![Block::Quote {
+        blocks: vec![spatial(&[&[(0, "a"), (3, "b")], &[(0, "c")]])],
+        anchor: None,
+    }]);
+    assert!(md.contains("> a   b\\\n> c"), "{md}");
+    let md = body_of(vec![Block::List {
+        ordered: false,
+        items: vec![vec![spatial(&[&[(0, "a"), (3, "b")], &[(0, "c")]])]],
+        anchor: None,
+    }]);
+    assert!(md.contains("- a   b\\\n  c"), "{md}");
+}
+
+#[test]
+fn a_merged_cell_is_named_by_its_text_and_its_row_as_the_table_shows_it() {
+    // The note names a merged cell by its text and its place, the rows
+    // counted as the pipe table shows them: the header line is row 1, also when it is empty
+    // (no header row) or holds several header rows.
+    let cell = |t: &str| Cell::new(vec![txt(t)]);
+    let wide = |t: &str| {
+        let mut c = cell(t);
+        c.col_span = 2;
+        c
+    };
+    let table = |header_rows: usize, rows: Vec<Vec<Cell>>| {
+        body_of(vec![Block::Table {
+            caption: None,
+            header_rows,
+            role: None,
+            rows,
+            alignments: Vec::new(),
+            anchor: None,
+            layout: None,
+        }])
+    };
+    // No header row: the empty header line is row 1, the first row of the model row 2.
+    let md = table(
+        0,
+        vec![
+            vec![cell("Net"), cell("19%"), cell("84,00")],
+            vec![wide("Tax total:"), cell("15,96")],
+        ],
+    );
+    assert!(
+        md.contains(
+            "|  |  |  |\n| --- | --- | --- |\n| Net | 19% | 84,00 |\n| Tax total: |  | 15,96 |\n\n\
+             Merged cells: `Tax total:` (row 3 column 1) over 2 columns. Each has"
+        ),
+        "{md}"
+    );
+    // One header row: it is row 1 as before.
+    let md = table(
+        1,
+        vec![
+            vec![cell("a"), cell("b")],
+            vec![cell("c"), cell("d")],
+            vec![wide("both")],
+        ],
+    );
+    assert!(
+        md.contains("Merged cells: `both` (row 3 column 1) over 2 columns. Each has"),
+        "{md}"
+    );
+    // Two header rows are one header line: the first body row is row 2.
+    let md = table(
+        2,
+        vec![
+            vec![cell("a"), cell("b")],
+            vec![cell("c"), cell("d")],
+            vec![cell("e"), cell("f")],
+            vec![wide("both")],
+        ],
+    );
+    assert!(
+        md.contains(
+            "| a c | b d |\n| --- | --- |\n| e | f |\n| both |  |\n\n\
+             Merged cells: `both` (row 3 column 1) over 2 columns. Each has"
+        ),
+        "{md}"
+    );
+    // A merged cell without text is named by its place alone; a long text by its start,
+    // 40 characters at most; markup and a backtick of the text are kept out of the name.
+    let long = "a ` b ".repeat(10);
+    let mut strong = Cell::new(vec![Inline::Text {
+        text: "Sum".into(),
+        emphasis: false,
+        strong: true,
+        strike: false,
+    }]);
+    strong.col_span = 2;
+    let md = table(
+        1,
+        vec![
+            vec![cell("a"), cell("b")],
+            vec![wide("")],
+            vec![wide(&long)],
+            vec![wide(&"x".repeat(40))],
+            vec![wide(&"x".repeat(41))],
+            vec![strong],
+        ],
+    );
+    assert!(
+        md.contains(&format!(
+            "Merged cells: an empty cell (row 2 column 1) over 2 columns, \
+             ``a ` b a ` b a ` b a ` b a ` b a ` b a `...`` (row 3 column 1) over 2 columns, \
+             `{}` (row 4 column 1) over 2 columns, `{}...` (row 5 column 1) over 2 columns, \
+             `Sum` (row 6 column 1) over 2 columns. Each has",
+            "x".repeat(40),
+            "x".repeat(40)
+        )),
+        "{md}"
+    );
+}
+
+#[test]
+fn text_is_escaped_only_where_it_would_open_a_block_or_emphasis() {
+    // A marker at a line start is escaped only when it opens a
+    // block (a list marker needs a space or the line end after it), and an underscore
+    // between letters or digits never makes emphasis. What needs no escape is written as
+    // it is: an agent reads the raw Markdown.
+    let lines = [
+        // As they are.
+        ("3.1 Text backends", "3.1 Text backends"),
+        ("03.04.2026", "03.04.2026"),
+        ("12)x", "12)x"),
+        ("-414", "-414"),
+        ("+49 30 1234", "+49 30 1234"),
+        ("convert_single and a_1_b", "convert_single and a_1_b"),
+        // Escaped: these would open a list, a heading, a rule or emphasis.
+        ("1. item", "1\\. item"),
+        ("2) item", "2\\) item"),
+        ("7.", "7\\."),
+        ("- item", "\\- item"),
+        ("-", "\\-"),
+        ("---", "\\---"),
+        ("- - -", "\\- - -"),
+        ("+ item", "\\+ item"),
+        ("+", "\\+"),
+        ("# title", "\\# title"),
+        ("=", "\\="),
+        ("> quote", "\\> quote"),
+        ("_a_ and a_ b and a__b", "\\_a\\_ and a\\_ b and a\\_\\_b"),
+        ("_start and end_", "\\_start and end\\_"),
+    ];
+    // Each line is a paragraph of its own: a marker stands at a line start and at its end.
+    let md = body_of(
+        lines
+            .iter()
+            .map(|(text, _)| Block::paragraph(vec![txt(text)]))
+            .collect(),
+    );
+    let want: Vec<&str> = lines.iter().map(|(_, want)| *want).collect();
+    let want = want.join("\n\n");
+    assert!(md.contains(&format!("\n\n{want}\n")), "{md}");
+    // Read back, each is a paragraph of the same text and nothing else.
+    let mut read = Vec::new();
+    // Every extension but the one that rewrites the text's own hyphens and quotes.
+    let all = Options::all() - Options::ENABLE_SMART_PUNCTUATION;
+    for event in Parser::new_ext(&want, all) {
+        match event {
+            Event::Start(Tag::Paragraph) => read.push(String::new()),
+            Event::End(TagEnd::Paragraph) => {}
+            Event::Text(t) => read.last_mut().expect("a paragraph").push_str(&t),
+            other => panic!("{other:?} in {want}"),
+        }
+    }
+    let plain: Vec<&str> = lines.iter().map(|(text, _)| *text).collect();
+    assert_eq!(read, plain);
+    // Before a line break of the paragraph a marker opens nothing: the break follows it.
+    let md = body_of(vec![Block::paragraph(vec![
+        txt("7."),
+        Inline::LineBreak,
+        txt("-"),
+        Inline::LineBreak,
+        txt("end"),
+    ])]);
+    assert!(md.contains("\n\n7.\\\n-\\\nend\n"), "{md}");
+}
+
+/// The paragraphs `md` reads as (their text, a soft or hard break as a line feed); any other
+/// block (a rule, a heading, a list) fails.
+fn read_paragraphs(md: &str) -> Vec<String> {
+    let all = Options::all() - Options::ENABLE_SMART_PUNCTUATION;
+    let mut read = Vec::new();
+    for event in Parser::new_ext(md, all) {
+        match event {
+            Event::Start(Tag::Paragraph) => read.push(String::new()),
+            Event::End(TagEnd::Paragraph) => {}
+            Event::Text(t) => read.last_mut().expect("a paragraph").push_str(&t),
+            Event::SoftBreak | Event::HardBreak => {
+                read.last_mut().expect("a paragraph").push('\n');
+            }
+            other => panic!("{other:?} in {md}"),
+        }
+    }
+    read
+}
+
+/// Renders `text` as a paragraph of its own and as the last line of a paragraph under a
+/// line of words, and checks the Markdown line it is written as and that both read back as
+/// paragraphs of the same text.
+fn stays_text(text: &str, want: &str) {
+    let alone = body_of(vec![Block::paragraph(vec![txt(text)])]);
+    assert!(alone.contains(&format!("\n\n{want}\n")), "{alone}");
+    let under = body_of(vec![Block::paragraph(vec![
+        txt("Sum of the month"),
+        Inline::LineBreak,
+        txt(text),
+    ])]);
+    assert!(
+        under.contains(&format!("\n\nSum of the month\\\n{want}\n")),
+        "{under}"
+    );
+    let md = format!("{want}\n\nSum of the month\\\n{want}\n");
+    assert_eq!(
+        read_paragraphs(&md),
+        [text.to_string(), format!("Sum of the month\n{text}")],
+        "{md}"
+    );
+}
+
+// A line that CommonMark reads as a thematic break or as the
+// underline of a setext heading is escaped, so it stays the text it is. One test per form.
+
+#[test]
+fn hyphens_with_a_blank_between_them_are_no_rule() {
+    // Three hyphens or more with blanks between them are a thematic break.
+    stays_text("-- -", "\\-- -");
+}
+
+#[test]
+fn two_groups_of_hyphens_are_no_rule() {
+    // A sum underline printed as text in two columns.
+    stays_text("-----   -----", "\\-----   -----");
+    stays_text("--\t-", "\\--\t-");
+    // Hyphens before a word open nothing and stay.
+    stays_text("-- x", "-- x");
+    stays_text("--x --", "--x --");
+}
+
+#[test]
+fn stars_with_blanks_between_them_are_no_rule() {
+    stays_text("* * *", "\\* \\* \\*");
+}
+
+#[test]
+fn a_line_of_underscores_is_no_rule() {
+    stays_text("___", "\\_\\_\\_");
+}
+
+#[test]
+fn a_line_of_equal_signs_is_no_underline_of_a_heading() {
+    stays_text("===", "\\===");
+}
+
+#[test]
+fn a_line_of_hyphens_is_no_rule_and_no_underline_of_a_heading() {
+    stays_text("---", "\\---");
+}
+
+#[test]
+fn a_line_of_dashes_in_two_pieces_kept_as_laid_out_is_no_rule() {
+    // The failure of the finding through its path: a block kept as laid out whose last line
+    // holds two pieces of hyphens, written with the gap between pieces.
+    let md = body_of(vec![spatial(&[
+        &[(0, "12,00"), (10, "34,00")],
+        &[(0, "-----"), (10, "-----")],
+    ])]);
+    assert!(
+        md.contains("\n\n12,00   34,00\\\n\\-----   -----\n"),
+        "{md}"
+    );
+    let from = md.find("12,00").unwrap();
+    let to = md[from..].find("\n\n").map_or(md.len(), |n| from + n);
+    assert_eq!(
+        read_paragraphs(&md[from..to]),
+        ["12,00   34,00\n-----   -----"]
+    );
+}
+
+#[test]
+fn spatial_blocks_in_the_same_columns_are_one_aligned_fence() {
+    // The engine may cut a small table into regions of one line each. Blocks
+    // kept as laid out that the reader places as rows under one another at one column of the
+    // page grid are written as one fence, each piece at its column: which value stands
+    // under which label is meaning, and plain lines with one gap do not say it.
+    let md = body_of(vec![
+        on_grid(
+            spatial(&[&[(4, "Kind Goods Base"), (30, "Rate"), (40, "Tax")]]),
+            7,
+            false,
+        ),
+        on_grid(
+            spatial(&[&[(4, "Std"), (22, "252,10"), (40, "19"), (50, "47,90")]]),
+            7,
+            true,
+        ),
+    ]);
+    assert!(
+        md.contains(
+            "\n```text\nKind Goods Base           Rate      Tax\n\
+             Std               252,10            19        47,90\n```\n"
+        ),
+        "{md}"
+    );
+    // A whole run, not pairs: each block joins the one before it. A picture between two
+    // blocks does not end the run and is written after the fence.
+    let md = body_of(vec![
+        on_grid(spatial(&[&[(0, "a"), (10, "b")]]), 0, false),
+        Block::Media {
+            asset: "gone".into(),
+            alt: Some("mark".into()),
+            anchor: None,
+        },
+        on_grid(spatial(&[&[(0, "c"), (12, "d")]]), 0, true),
+        on_grid(spatial(&[&[(3, "e"), (12, "f")], &[(0, "g")]]), 0, true),
+    ]);
+    assert!(
+        md.contains("\n```text\na         b\nc           d\n   e        f\ng\n```\n"),
+        "{md}"
+    );
+    assert!(
+        md.find("g\n```\n").unwrap() < md.find("Picture gone").unwrap(),
+        "{md}"
+    );
+}
+
+#[test]
+fn spatial_blocks_that_are_no_rows_on_one_grid_stay_plain_lines() {
+    // The columns of a block are counted from its own left edge, so equal
+    // columns of two blocks say nothing about the page. Both ways: no place on the page
+    // known, another column of the page grid (the second block starts further right), a
+    // block that does not join (too far under the first), another block between, one block
+    // alone.
+    let a = || spatial(&[&[(0, "a"), (10, "b")]]);
+    let c = || spatial(&[&[(0, "c"), (10, "d")]]);
+    for list in [
+        vec![a(), c()],
+        vec![on_grid(a(), 0, false), c()],
+        vec![a(), on_grid(c(), 0, true)],
+        vec![on_grid(a(), 0, false), on_grid(c(), 30, true)],
+        vec![on_grid(a(), 0, false), on_grid(c(), 0, false)],
+        vec![
+            on_grid(a(), 0, false),
+            Block::Paragraph {
+                inlines: vec![Inline::plain("between")],
+                role: None,
+                anchor: None,
+            },
+            on_grid(c(), 0, true),
+        ],
+        vec![on_grid(
+            spatial(&[&[(0, "a"), (10, "b")], &[(0, "c"), (10, "d")]]),
+            0,
+            false,
+        )],
+    ] {
+        let md = body_of(list);
+        assert!(!md.contains("```"), "{md}");
+        assert!(md.contains("a   b"), "{md}");
+        assert!(md.contains("c   d"), "{md}");
+    }
+    // The same two blocks as rows on one grid are one fence.
+    let md = body_of(vec![on_grid(a(), 0, false), on_grid(c(), 0, true)]);
+    assert!(
+        md.contains("\n```text\na         b\nc         d\n```\n"),
+        "{md}"
+    );
+}
+
+#[test]
+fn spatial_fence_names_links_and_references_by_line_and_outgrows_backticks() {
+    // A fence shows no link: the targets and references of a run are written right after
+    // it, by line of the fence. The text is verbatim, the fence longer than its backticks.
+    let span = |start, end, link: Option<u32>, note: Option<&str>| rezzer_model::SpatialSpan {
+        start,
+        end,
+        link,
+        footnote: note.map(str::to_string),
+        ..rezzer_model::SpatialSpan::default()
+    };
+    let piece = |col, text: &str, spans| rezzer_model::SpatialPiece {
+        col,
+        text: text.into(),
+        spans,
+    };
+    let mut first = true;
+    let mut block = |pieces, links: &[&str]| Block::Spatial {
+        lines: vec![rezzer_model::SpatialLine { pieces }],
+        links: links.iter().map(|l| (*l).to_string()).collect(),
+        grid: Some(rezzer_model::SpatialGrid {
+            col: 0,
+            joins: !std::mem::take(&mut first),
+        }),
+        anchor: None,
+    };
+    let md = body_of(vec![
+        block(
+            vec![
+                piece(0, "Name1", vec![span(4, 5, None, Some("p1-1"))]),
+                piece(10, "*a* ``` b", Vec::new()),
+            ],
+            &[],
+        ),
+        block(
+            vec![
+                piece(0, "www.x.de", vec![span(0, 8, Some(0), None)]),
+                piece(10, "y", vec![span(0, 1, Some(1), None)]),
+            ],
+            &["http://www.x.de/", "https://y.org/"],
+        ),
+        block(
+            vec![
+                piece(0, "x.de", vec![span(0, 4, Some(0), None)]),
+                piece(10, "z", Vec::new()),
+            ],
+            &["http://www.x.de/"],
+        ),
+    ]);
+    assert!(
+        md.contains(
+            "\n````text\nName1     *a* ``` b\nwww.x.de  y\nx.de      z\n````\n\n\
+             Links: [lines 2 and 3](http://www.x.de/), [line 2](https://y.org/). Footnote \
+             references: line 1[^p1-1].\n"
+        ),
+        "{md}"
+    );
+}
+
+#[test]
+fn spatial_fence_keeps_text_at_overlaps_and_huge_columns() {
+    // A piece that starts before the end of the one before it, or at a column too far to
+    // pad, gets one space: no text is lost, only the alignment. Columns count characters.
+    let md = body_of(vec![
+        on_grid(spatial(&[&[(2, "Größe"), (10, "Preis")]]), 3, false),
+        on_grid(
+            spatial(&[&[(2, "Maß"), (10, "1,00"), (11, "x"), (u32::MAX, "late")]]),
+            3,
+            true,
+        ),
+    ]);
+    assert!(
+        md.contains("\n```text\nGröße   Preis\nMaß     1,00 x late\n```\n"),
+        "{md}"
+    );
+}
+
+#[test]
+fn a_picture_in_a_table_cell_is_written_in_its_cell_with_its_codes() {
+    // A picture in a table cell stands after the cell's text, with the
+    // same words as a media block; the codes read from it stand in the cell too, at its first
+    // place only.
+    let mut d = doc();
+    d.assets = vec![Asset {
+        id: "page-1-pic-1".into(),
+        path: Some("assets/page-1-pic-1.png".into()),
+        sha256: "ff".into(),
+        mime: "image/png".into(),
+        caption: None,
+        alt: Some("small picture".into()),
+        needs_vision: false,
+        codes: Vec::new(),
+        code_unread: false,
+        shows: None,
+    }];
+    let cell = |text: &str, media: bool| {
+        let mut c = rezzer_model::Cell::new(vec![Inline::plain(text)]);
+        if media {
+            c.media.push(rezzer_model::CellMedia {
+                asset: "page-1-pic-1".into(),
+                alt: Some("small picture, box 40, 500 to 88, 548".into()),
+            });
+        }
+        c
+    };
+    d.body = vec![Block::Table {
+        caption: None,
+        header_rows: 1,
+        role: None,
+        rows: vec![
+            vec![cell("Artikel", false), cell("Preis", false)],
+            vec![cell("Kaffeebecher", true), cell("12,50", false)],
+            vec![cell("Teekanne", true), cell("34,56", false)],
+        ],
+        alignments: Vec::new(),
+        anchor: None,
+        layout: None,
+    }];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert!(
+        md.contains(
+            "| Kaffeebecher ![small picture, box 40, 500 to 88, 548](assets/page-1-pic-1.png) | 12,50 |"
+        ),
+        "{md}"
+    );
+    assert!(!md.contains("Code 128"), "{md}");
+    d.assets[0].codes = vec![rezzer_model::Barcode {
+        symbology: "Code 128".into(),
+        text: Some("0000000001".into()),
+        base64: None,
+        bytes: 10,
+        bounds: None,
+        place: None,
+    }];
+    let md = render(&d, Completeness::Complete, &opts());
+    assert_eq!(md.matches("Code 128: 0000000001").count(), 1, "{md}");
+    let row = md
+        .lines()
+        .find(|l| l.contains("Kaffeebecher"))
+        .unwrap_or("");
+    assert!(row.contains("Code 128: 0000000001"), "{md}");
 }

@@ -377,7 +377,7 @@ pub(crate) fn code_parts(glyphs: &[(u32, Affine, &Outline)], named: bool) -> Vec
             parts.push((seg, fits(seg)));
         }
     }
-    // By the ruling of fix round 4, a run taken as bars (one part of it fits a code) leaves
+    // A run taken as bars (one part of it fits a code) leaves
     // no glyph text: its other parts of a few bars or more are regions too, named as not
     // decoded when the decoder reads nothing there.
     if !parts.iter().any(|(_, f)| *f) {

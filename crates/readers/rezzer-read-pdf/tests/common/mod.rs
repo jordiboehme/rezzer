@@ -216,6 +216,153 @@ pub fn read(bytes: &[u8]) -> ReadOutcome {
     )
 }
 
+/// `bytes` read with the default options and limits, with the regions of each page.
+pub fn read_regions(
+    bytes: &[u8],
+) -> (
+    ReadOutcome,
+    Vec<rezzer_read_pdf::layoutregions::PageRegions>,
+) {
+    rezzer_read_pdf::read_with_regions(
+        &source(bytes),
+        &ReadOptions::default(),
+        &Budget::new(Limits::default()),
+    )
+}
+
+/// `bytes` read with the default options and limits, with each page as the region engine took
+/// it and its regions.
+pub fn read_engine_pages(bytes: &[u8]) -> (ReadOutcome, Vec<rezzer_read_pdf::EnginePage>) {
+    rezzer_read_pdf::read_engine_pages(
+        &source(bytes),
+        &ReadOptions::default(),
+        &Budget::new(Limits::default()),
+    )
+}
+
+/// The texts of the runs a region holds, by its pieces, in id order.
+pub fn region_texts<'a>(
+    page: &'a rezzer_read_pdf::EnginePage,
+    region: &rezzer_read_pdf::layoutregions::Region,
+) -> Vec<&'a str> {
+    region
+        .prims
+        .iter()
+        .filter_map(|p| match p {
+            rezzer_read_pdf::layoutregions::PrimId::Text(i) => {
+                Some(page.input.texts[*i as usize].text.as_str())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The signal id and the `unsure` notes of each region of `bytes` that holds a run whose text
+/// contains `text`.
+pub fn unsure_of(bytes: &[u8], text: &str) -> Vec<(&'static str, Vec<String>)> {
+    let (_, pages) = read_engine_pages(bytes);
+    pages
+        .iter()
+        .flat_map(|p| {
+            p.regions
+                .regions
+                .iter()
+                .filter(|r| region_texts(p, r).iter().any(|t| t.contains(text)))
+                .map(|r| (r.signals[0].id, r.unsure.clone()))
+        })
+        .collect()
+}
+
+/// The kind and signal ids of each region of `bytes` that holds a run whose text contains
+/// `text`.
+pub fn kinds_of(
+    bytes: &[u8],
+    text: &str,
+) -> Vec<(rezzer_read_pdf::layoutregions::Kind, Vec<&'static str>)> {
+    let (_, pages) = read_engine_pages(bytes);
+    pages
+        .iter()
+        .flat_map(|p| {
+            p.regions
+                .regions
+                .iter()
+                .filter(|r| region_texts(p, r).iter().any(|t| t.contains(text)))
+                .map(|r| (r.kind, r.signals.iter().map(|s| s.id).collect()))
+        })
+        .collect()
+}
+
+/// Panics unless `bytes` has a region holding a run with `text`, each such region is of the
+/// kind of text kept as it stands (`Spatial` when kept as laid out, `Paragraph` when its
+/// pre-pass reader kept it as paragraphs; a region now says the kind
+/// its runs were written as), and each says `why` among its `unsure` notes (the reason its
+/// readers kept its text as it stands).
+pub fn assert_kept_with_reason(bytes: &[u8], text: &str, why: &str) {
+    use rezzer_read_pdf::layoutregions::Kind;
+    let (_, pages) = read_engine_pages(bytes);
+    let found: Vec<(Kind, &Vec<String>)> = pages
+        .iter()
+        .flat_map(|p| {
+            p.regions
+                .regions
+                .iter()
+                .filter(|r| region_texts(p, r).iter().any(|t| t.contains(text)))
+                .map(|r| (r.kind, &r.unsure))
+        })
+        .collect();
+    assert!(!found.is_empty(), "no region holds {text:?}");
+    for (kind, unsure) in &found {
+        assert!(
+            matches!(kind, Kind::Spatial | Kind::Paragraph),
+            "{text:?}: a region of kind {kind:?} holds it: {found:?}"
+        );
+        assert!(
+            unsure.iter().any(|u| u.contains(why)),
+            "{text:?}: {unsure:?} does not say {why:?}"
+        );
+    }
+}
+
+/// The text runs of each page of `bytes` are each in exactly one region: the text ids of the
+/// regions of a page are 0 up to the page's runs, each once (a refused offer stops a debug
+/// build first). No page has an issue, and every page read has its regions.
+pub fn assert_every_run_in_one_region(bytes: &[u8]) {
+    let (out, pages) = read_engine_pages(bytes);
+    let read = out
+        .document
+        .body
+        .iter()
+        .filter(|b| matches!(b, Block::Section { .. }))
+        .count();
+    assert_eq!(pages.len(), read, "pages with regions");
+    for p in &pages {
+        let regions = &p.regions;
+        assert!(
+            regions.issues.is_empty(),
+            "page {}: {:?}",
+            regions.page,
+            regions.issues
+        );
+        let mut ids: Vec<u32> = regions
+            .regions
+            .iter()
+            .flat_map(|r| &r.prims)
+            .filter_map(|id| match id {
+                rezzer_read_pdf::layoutregions::PrimId::Text(i) => Some(*i),
+                _ => None,
+            })
+            .collect();
+        ids.sort_unstable();
+        assert!(
+            !ids.is_empty(),
+            "page {} has no text in a region",
+            regions.page
+        );
+        let want: Vec<u32> = (0..p.input.texts.len() as u32).collect();
+        assert_eq!(ids, want, "page {}: text ids of its regions", regions.page);
+    }
+}
+
 /// The text of a block and the blocks inside it: one line per heading, paragraph or task, and
 /// one line per table row with each cell followed by `|`.
 pub fn block_text(block: &Block, out: &mut String) {
@@ -236,6 +383,14 @@ pub fn block_text(block: &Block, out: &mut String) {
                     out.push_str(&plain_text(&cell.inlines));
                     out.push('|');
                 }
+                out.push('\n');
+            }
+        }
+        // Text kept as laid out: each line its pieces left to right, a space between them.
+        Block::Spatial { lines, .. } => {
+            for line in lines {
+                let pieces: Vec<&str> = line.pieces.iter().map(|p| p.text.as_str()).collect();
+                out.push_str(&pieces.join(" "));
                 out.push('\n');
             }
         }
@@ -554,12 +709,40 @@ pub fn logo(x: f32, y: f32, w: f32, h: f32) -> String {
     format!("q {w} 0 0 {h} {x} {y} cm /Logo Do Q\n")
 }
 
-/// The ids of the assets that need vision.
-pub fn needing(out: &ReadOutcome) -> Vec<&str> {
+/// Whether `a` is the picture of a region of text kept as laid out (`page-N-region-K`): it
+/// names the block it shows.
+#[allow(dead_code)]
+pub fn is_region_picture(a: &rezzer_model::Asset) -> bool {
+    a.shows.is_some()
+}
+
+/// The pictures, pages and codes a read lists: its assets but the pictures of regions of text
+/// kept as laid out, which say nothing about the pictures of the file.
+#[allow(dead_code)]
+pub fn pictures(out: &ReadOutcome) -> Vec<&rezzer_model::Asset> {
     out.document
         .assets
         .iter()
+        .filter(|a| !is_region_picture(a))
+        .collect()
+}
+
+/// The ids of the pictures and pages that need vision (see [`pictures`]).
+pub fn needing(out: &ReadOutcome) -> Vec<&str> {
+    pictures(out)
+        .into_iter()
         .filter(|a| a.needs_vision)
+        .map(|a| a.id.as_str())
+        .collect()
+}
+
+/// The ids of the pictures of regions of text kept as laid out, which all need vision.
+#[allow(dead_code)]
+pub fn region_pictures(out: &ReadOutcome) -> Vec<&str> {
+    out.document
+        .assets
+        .iter()
+        .filter(|a| is_region_picture(a) && a.needs_vision)
         .map(|a| a.id.as_str())
         .collect()
 }
@@ -570,6 +753,19 @@ pub fn markdown(out: &ReadOutcome) -> String {
         &out.document,
         out.completeness,
         &rezzer_render::RenderOptions::default(),
+    )
+}
+
+/// The Markdown of `out` at the note level `notes`.
+#[allow(dead_code)]
+pub fn markdown_at(out: &ReadOutcome, notes: rezzer_render::NoteLevel) -> String {
+    rezzer_render::render(
+        &out.document,
+        out.completeness,
+        &rezzer_render::RenderOptions {
+            notes,
+            ..rezzer_render::RenderOptions::default()
+        },
     )
 }
 
@@ -806,6 +1002,77 @@ pub fn tagged_lines(n: usize, kind: &str, uri: Option<&str>) -> Vec<u8> {
     b.set(
         tree,
         format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(
+        catalog,
+        format!(
+            "<< /Type /Catalog /Pages {tree} 0 R /MarkInfo << /Marked true >> \
+             /StructTreeRoot {root} 0 R >>"
+        ),
+    );
+    b.finish(catalog)
+}
+
+/// A piece of text of [`tagged_paragraphs`]: where it starts on its baseline, its size,
+/// whether it is bold, and the text.
+pub type TaggedLine<'a> = (f32, f32, f32, bool, &'a str);
+
+/// A tagged file whose structure tree holds one paragraph element (`P`) per piece of text,
+/// in the order given, which is also the order the content draws them in: `pages` holds the
+/// pieces of each page (A4, Helvetica and Helvetica-Bold).
+pub fn tagged_paragraphs(pages: &[Vec<TaggedLine<'_>>]) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let bold = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
+    let root = b.reserve();
+    let doc = b.reserve();
+    let refs = |ids: &[u32]| -> String { ids.iter().map(|r| format!("{r} 0 R ")).collect() };
+    let mut kids = Vec::new();
+    let mut elems = Vec::new();
+    let mut nums = String::new();
+    for (n, lines) in pages.iter().enumerate() {
+        let kid = b.reserve();
+        let mut c = String::new();
+        let mut own = Vec::with_capacity(lines.len());
+        for (i, (x, y, size, heavy, text)) in lines.iter().enumerate() {
+            let f = if *heavy { "F2" } else { "F1" };
+            c += &format!("/P <</MCID {i}>> BDC BT /{f} {size} Tf {x} {y} Td ({text}) Tj ET EMC\n");
+            own.push(b.add(format!(
+                "<< /Type /StructElem /S /P /P {doc} 0 R /Pg {kid} 0 R /K {i} >>"
+            )));
+        }
+        let cs = b.stream("", c.as_bytes());
+        b.set(
+            kid,
+            format!(
+                "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] /StructParents {n} \
+                 /Resources << /Font << /F1 {font} 0 R /F2 {bold} 0 R >> >> /Contents {cs} 0 R >>"
+            ),
+        );
+        nums += &format!("{n} [{}] ", refs(&own));
+        elems.extend(own);
+        kids.push(kid);
+    }
+    b.set(
+        doc,
+        format!(
+            "<< /Type /StructElem /S /Document /P {root} 0 R /K [{}] >>",
+            refs(&elems)
+        ),
+    );
+    b.set(
+        root,
+        format!("<< /Type /StructTreeRoot /K {doc} 0 R /ParentTree << /Nums [{nums}] >> >>"),
+    );
+    b.set(
+        tree,
+        format!(
+            "<< /Type /Pages /Kids [{}] /Count {} >>",
+            refs(&kids),
+            kids.len()
+        ),
     );
     b.set(
         catalog,
@@ -1882,4 +2149,95 @@ pub fn synthetic_invoice() -> Vec<u8> {
         })
         .collect();
     print_form(&pages, "", "")
+}
+
+/// The CPU time the calling thread has used. A guard against a runaway read measures this
+/// instead of the wall clock: a busy machine does not make it grow (see [`Cpu`]).
+#[cfg(unix)]
+pub fn thread_cpu() -> std::time::Duration {
+    let mut t = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: clock_gettime fills the timespec we pass.
+    let r = unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut t) };
+    assert_eq!(r, 0, "clock_gettime");
+    std::time::Duration::new(t.tv_sec as u64, t.tv_nsec as u32)
+}
+
+/// The wall clock where no thread clock is at hand.
+#[cfg(not(unix))]
+pub fn thread_cpu() -> std::time::Duration {
+    use std::sync::OnceLock;
+    static START: OnceLock<std::time::Instant> = OnceLock::new();
+    START.get_or_init(std::time::Instant::now).elapsed()
+}
+
+/// A start on the calling thread's CPU clock ([`thread_cpu`]), for the generous guards of the
+/// hostile tests: a read that runs away still fails them, a busy machine does not. The work
+/// bounds themselves are counted (see [`counted`]). Work a read does on another thread (the
+/// code decoder's) is not in this clock, and neither is waiting: a thread blocked on the
+/// decoder uses no CPU. The decoder's calls are counted in the steps; for a read that waits
+/// too long, [`Cpu::assert_no_hang`] keeps a wall clock backstop of [`HANG`].
+#[derive(Debug, Clone, Copy)]
+pub struct Cpu(std::time::Duration, std::time::Instant);
+
+/// The wall time after which a read is taken to hang, whatever the machine's load.
+pub const HANG: std::time::Duration = std::time::Duration::from_secs(600);
+
+impl Cpu {
+    pub fn now() -> Cpu {
+        Cpu(thread_cpu(), std::time::Instant::now())
+    }
+
+    /// The CPU time of this thread since the start.
+    pub fn elapsed(&self) -> std::time::Duration {
+        thread_cpu().saturating_sub(self.0)
+    }
+
+    /// Fails when more than [`HANG`] of wall time passed since the start.
+    pub fn assert_no_hang(&self) {
+        let wall = self.1.elapsed();
+        assert!(wall < HANG, "{wall:?} of wall time");
+    }
+}
+
+/// Runs `f` and gives its result and the steps of work the reader and its region engine did
+/// on this thread meanwhile ([`rezzer_read_pdf::work_steps`]; `None` in a release build,
+/// which does not count them). The count is the same on every machine for the same input.
+pub fn counted<T>(f: impl FnOnce() -> T) -> (T, Option<u64>) {
+    let before = rezzer_read_pdf::work_steps();
+    let out = f();
+    let steps = rezzer_read_pdf::work_steps()
+        .zip(before)
+        .map(|(a, b)| a - b);
+    (out, steps)
+}
+
+/// Checks that `steps` of a shape stay within `ratio` times the steps of its `twin` (the same
+/// text without what the shape adds) plus `slack`: the work grows about as the text does.
+/// Nothing to check in a release build.
+pub fn assert_steps_within(
+    what: &str,
+    steps: Option<u64>,
+    twin: Option<u64>,
+    ratio: u64,
+    slack: u64,
+) {
+    eprintln!("{what}: {steps:?} steps against a twin of {twin:?}");
+    if let (Some(s), Some(t)) = (steps, twin) {
+        assert!(
+            s <= t * ratio + slack,
+            "{what}: {s} steps against {t} of its twin (bound {ratio} times and {slack})"
+        );
+    }
+}
+
+/// Checks that `steps` stay at or under `max` (the count measured when the bound was set,
+/// with half of it again as margin). Nothing to check in a release build.
+pub fn assert_steps_under(what: &str, steps: Option<u64>, max: u64) {
+    eprintln!("{what}: {steps:?} steps (bound {max})");
+    if let Some(s) = steps {
+        assert!(s <= max, "{what}: {s} steps of work, bound {max}");
+    }
 }

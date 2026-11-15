@@ -21,7 +21,7 @@ use std::process::ExitCode;
 use clap::error::{ContextKind, ContextValue, ErrorKind};
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use rezzer_model::Registry;
-use rezzer_pipeline::{Config, OutputSection, TableStyle};
+use rezzer_pipeline::{Config, NoteLevel, OutputSection, TableStyle};
 
 /// What `-V` and `--version` print: the version, the copyright with the license and the
 /// source link, in the same three lines as Crystalline. clap puts the program name in front
@@ -124,6 +124,14 @@ struct ReadArgs {
     /// It changes only the Markdown: --json prints the full model.
     #[arg(long, value_name = "table|records")]
     table_style: Option<TableStyle>,
+    /// Which notes the Markdown shows. Notes cost tokens, and many only say how something
+    /// was read. full shows all notes. brief leaves those out and keeps the notes that touch
+    /// a value or say that something is missing. Where it leaves out rows of "Not read", one
+    /// line there says how many. none shows no notes and says so in one line where it leaves
+    /// something out. Default from the config file, else brief. It changes only the
+    /// Markdown: --json prints the full model.
+    #[arg(long, value_name = "full|brief|none")]
+    notes: Option<NoteLevel>,
     /// Only this sheet, by name or by position as #1, #2 and so on. Give it more than once
     /// for more sheets. It changes only the Markdown: --json prints all sheets.
     #[arg(long = "sheet", value_name = "SELECTOR")]

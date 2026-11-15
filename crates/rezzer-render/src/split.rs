@@ -301,6 +301,7 @@ impl<'a> Splitter<'a> {
             in_sheet: Default::default(),
             table_style: self.opts.table_style,
             column_numbers: self.column_numbers,
+            level: self.opts.notes,
         }
     }
 

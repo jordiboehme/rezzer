@@ -387,6 +387,249 @@ source: crates/rezzer/tests/corpus.rs
       "value": "2021-01-08T06:22:14-08:00"
     }
   },
+  "regions": [
+    {
+      "anchor": "p1",
+      "bounds": [
+        73.33,
+        720.85,
+        369.99,
+        742.85
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        168.06,
+        695.12,
+        186.06,
+        713.12
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        192.24,
+        695.91,
+        210.24,
+        713.91
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        216.03,
+        695.91,
+        234.03,
+        713.91
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        239.41,
+        695.52,
+        257.41,
+        713.52
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        168.06,
+        671.74,
+        186.06,
+        689.74
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        192.24,
+        671.74,
+        210.24,
+        689.74
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        216.42,
+        671.74,
+        234.42,
+        689.74
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        239.81,
+        671.74,
+        257.81,
+        689.74
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        168.06,
+        647.56,
+        186.06,
+        665.56
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        192.95,
+        648.23,
+        210.95,
+        666.23
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        216.49,
+        648.48,
+        234.49,
+        666.48
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    "<6 more items>"
+  ],
   "source": {
     "detection": {
       "confidence": "certain",

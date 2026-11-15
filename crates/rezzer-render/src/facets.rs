@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 
+use crate::NoteLevel;
 use rezzer_model::{
     Annotation, Block, Document, Formula, Inline, Loss, LossReason, Role, Severity, StatusColor,
     Value,
@@ -522,9 +523,27 @@ fn severity(s: Severity) -> &'static str {
     }
 }
 
-/// `## Not read`: every loss with where, what, why and how bad.
-pub(crate) fn not_read(doc: &Document) -> Option<String> {
-    (!doc.losses.is_empty()).then(|| not_read_list(&doc.losses))
+/// `## Not read`: every loss `filter` shows, with where, what, why and how bad, and the line
+/// on the `left_out` notes (see [`crate::levels`]).
+pub(crate) fn not_read(
+    doc: &Document,
+    filter: &crate::levels::LossFilter,
+    level: NoteLevel,
+    left_out: usize,
+) -> Option<String> {
+    let shown = filter.shown(&doc.losses);
+    not_read_with(&shown, crate::levels::left_out_line(level, left_out))
+}
+
+/// `## Not read` with the losses in `shown` and the `line` on the notes left out under them;
+/// `None` when there is neither.
+pub(crate) fn not_read_with(shown: &[Loss], line: Option<String>) -> Option<String> {
+    match (shown.is_empty(), line) {
+        (true, None) => None,
+        (true, Some(line)) => Some(format!("## Not read\n\n{line}")),
+        (false, None) => Some(not_read_list(shown)),
+        (false, Some(line)) => Some(format!("{}\n\n{line}", not_read_list(shown))),
+    }
 }
 
 /// `## Not read` with the losses in `list`, as a table.

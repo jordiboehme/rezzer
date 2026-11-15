@@ -25,14 +25,14 @@ created: "2026-08-24T17:20:00Z"
 modified: "2026-08-24T17:24:13Z"
 ---
 
-# tunnel\_design\_calculations.xlsx
+# tunnel_design_calculations.xlsx
 
 ## Overview
 
 | Part | Kind | Size | Role | Reads from |
 | --- | --- | --- | --- | --- |
-| Design\_Basis | sheet | 5 regions |  |  |
-| Structural\_Lining | sheet | 24 rows x 2 columns, 7 regions | result |  |
+| Design_Basis | sheet | 5 regions |  |  |
+| Structural_Lining | sheet | 24 rows x 2 columns, 7 regions | result |  |
 | Ventilation | sheet | 6 regions | result |  |
 | Drainage | sheet | 10 rows x 2 columns, 7 regions | result |  |
 
@@ -48,11 +48,11 @@ modified: "2026-08-24T17:24:13Z"
 | Key | Value |
 | --- | --- |
 | application | Microsoft Excel |
-| calc\_mode | auto |
-| iterative\_calculation | false |
-| last\_modified\_by | HP |
+| calc_mode | auto |
+| iterative_calculation | false |
+| last_modified_by | HP |
 
-## Design\_Basis
+## Design_Basis
 
 ### UNDERGROUND TUNNEL STRUCTURAL ANALYSIS
 
@@ -95,12 +95,12 @@ Text A19:A25:
 Text A28:A32:
 
 - \- Yellow cells are EDITABLE inputs. All other cells are LIVE FORMULAS - change an input and results recalculate. (A28)
-- \- Sheet 'Structural\_Lining' - Terzaghi loosening pressure, ring thrust/moment, RCC lining stress \& FOS check. (A29)
+- \- Sheet 'Structural_Lining' - Terzaghi loosening pressure, ring thrust/moment, RCC lining stress \& FOS check. (A29)
 - \- Sheet 'Ventilation' - CO-dilution fresh-air demand, critical velocity for smoke control, jet fan count. (A30)
 - \- Sheet 'Drainage' - groundwater seepage, portal rainfall runoff (Rational Method), pipe sizing, sump/pump. (A31)
 - \- These mirror the Python scripts in /python (same method \& formulas) for cross-verification. (A32)
 
-## Structural\_Lining
+## Structural_Lining
 
 ### STRUCTURAL STABILITY - TUNNEL LINING CHECK
 
@@ -137,14 +137,14 @@ Label and value pairs A16:C23:
 
 Label and value pairs A26:C33:
 
-- Mean pressure, p\_mean: 145.62 kPa (B26)
-- Deviatoric pressure, p\_dev: 48.54 kPa (B27)
+- Mean pressure, p_mean: 145.62 kPa (B26)
+- Deviatoric pressure, p_dev: 48.54 kPa (B27)
 - Thrust at crown, N(0): 485.38 kN/m (B28)
 - Thrust at springline, N(90): 970.77 kN/m (B29)
-- Max ring thrust, N\_max: 970.77 kN/m (B30)
+- Max ring thrust, N_max: 970.77 kN/m (B30)
 - Moment at crown, M(0): 606.73 kNm/m (B31)
 - Moment at springline, M(90): 606.73 kNm/m (B32)
-- Max ring moment, M\_max: 606.73 kNm/m (B33)
+- Max ring moment, M_max: 606.73 kNm/m (B33)
 
 ### RCC LINING SECTION CHECK (1 m wide strip)
 
@@ -152,8 +152,8 @@ Label and value pairs A36:C45:
 
 - Section area, A = 1 x t: 0.350 m2 (B36)
 - Section modulus, Z = 1 x t^2/6: 0.020 m3 (B37)
-- Axial stress = N\_max/A /1000: 2.77 MPa (B38)
-- Bending stress = M\_max/Z /1000: 29.72 MPa (B39)
+- Axial stress = N_max/A /1000: 2.77 MPa (B38)
+- Bending stress = M_max/Z /1000: 29.72 MPa (B39)
 - Combined max compressive stress: 32.49 MPa (B40)
 - Combined stress, opposite fibre: -26.94 MPa (B41)
 - Permissible stress = 0.33 fck: 9.90 MPa (B42)
@@ -331,7 +331,7 @@ Label and value pairs A43:C45:
 
 ## Logic
 
-### Structural\_Lining
+### Structural_Lining
 
 #### Parameters
 

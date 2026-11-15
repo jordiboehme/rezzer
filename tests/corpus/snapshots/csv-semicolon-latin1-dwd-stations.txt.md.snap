@@ -37,14 +37,14 @@ language: "de"
 | --- | --- |
 | columns | 7 |
 | delimiter | ; |
-| has\_header | true |
+| has_header | true |
 | rows | 1091 |
 
 ## csv-semicolon-latin1-dwd-stations
 
 Table A1:F1092 (data A2:F1092), header row 1, found by rules: no gaps, header by type change.
 
-| Stations\_id | Stationsname | geogr. Breite | geogr. Laenge | Stationshoehe | Bundesland |
+| Stations_id | Stationsname | geogr. Breite | geogr. Laenge | Stationshoehe | Bundesland |
 | --- | --- | --- | --- | --- | --- |
 | 1 | Aach | 47.841299 | 8.849299 | 478 | Baden-Württemberg |
 | 3 | Aachen | 50.782659 | 6.094087 | 202 | Nordrhein-Westfalen |
@@ -1142,7 +1142,7 @@ Table A1:F1092 (data A2:F1092), header row 1, found by rules: no gaps, header by
 
 | Column | Type | Unit | Missing | Unique | Key |
 | --- | --- | --- | --- | --- | --- |
-| Stations\_id | integer |  | 0 | yes | yes |
+| Stations_id | integer |  | 0 | yes | yes |
 | Stationsname | text |  | 0 | yes | yes |
 | geogr. Breite | decimal (6 places) |  | 0 | no | no |
 | geogr. Laenge | decimal (6 places) |  | 0 | no | no |

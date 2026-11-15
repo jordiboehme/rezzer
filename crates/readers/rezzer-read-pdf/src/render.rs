@@ -5,7 +5,9 @@
 //! Pages that need vision: a page without a text layer, or whose pictures cover a part of
 //! it, gets an asset `page-<N>` the calling agent should look at, and a `Media` block at the
 //! reading position of its first picture. With `extract_assets` the page is rendered to PNG
-//! with hayro from pdfparts' canonical bytes, one page at a time.
+//! with hayro from pdfparts' canonical bytes, one page at a time. A small picture, and a
+//! region of text kept as laid out, is an asset of its own that is cut out of the render of
+//! its page.
 //!
 //! A render is bounded before it starts, because hayro cannot be stopped inside one, and an
 //! allocation that fails inside it ends the process:
@@ -21,7 +23,8 @@
 //!   quarter of the memory limit) is not rendered, and neither is one that reaches a stencil
 //!   mask whose size cannot be known;
 //! - the time is checked before each render, and a file renders at most [`MAX_RENDERS`]
-//!   pages.
+//!   pages, and after them at most [`MAX_REGION_PICTURES`] pages for the pictures of regions
+//!   of text kept as laid out.
 //!
 //! One render can still run past the time limit: it cannot stop in the middle of a page.
 
@@ -310,13 +313,24 @@ impl SpotPages {
     }
 }
 
+/// `pages` by page number (see [`furniture`]).
+fn in_page_order<'a>(pages: impl Iterator<Item = &'a PageItems>) -> Vec<&'a PageItems> {
+    let mut pages: Vec<&PageItems> = pages.collect();
+    pages.sort_by_key(|p| p.page);
+    pages
+}
+
 /// The same picture drawn at the same place (within [`SAME_SPOT`]) on at least three pages
 /// and on at least half of the pages read. When they are small, they are page furniture (a
 /// logo in the margin, a strip along the edge), like a running header, and do not make a page
 /// need vision.
+///
+/// The pages are taken in page order, whatever order they are handed in: a spot is the place
+/// of the first picture found there, and later ones are compared with it, so the spots of a
+/// picture that moves a little from page to page depend on the page looked at first.
 pub(crate) fn furniture<'a>(pages: impl Iterator<Item = &'a PageItems>) -> Spots {
     let mut spots = SpotPages::default();
-    for items in pages {
+    for items in in_page_order(pages) {
         spots.add(items);
     }
     spots.only(|n, read| n >= 3 && n * 2 >= read)
@@ -345,7 +359,7 @@ pub(crate) fn on_every_page<'a>(
     let mut spots = SpotPages::default();
     let mut read = 0usize;
     let mut found: Option<HashSet<u64>> = None;
-    for items in pages {
+    for items in in_page_order(pages) {
         read += 1;
         if count == 2 {
             spots.add(items);
@@ -406,6 +420,10 @@ pub(crate) struct Small {
     pub hint: bool,
     /// It is not a picture but a region of paths that may be a code.
     pub vector: bool,
+    /// What it is among the page's primitives as the region engine takes them: the picture
+    /// `PrimId::Picture(k)` of `PageItems::images[k]`, or the code `PrimId::Code(j)` of
+    /// `PageItems::codes[j]` (see `engine::page_in`).
+    pub prim: layoutregions::PrimId,
     /// It is page furniture (a picture at one place on many pages): its asset is named once,
     /// at its first place, with its pages.
     pub furniture: Option<Furniture>,
@@ -648,8 +666,12 @@ pub(crate) fn vision(
             .filter(|&(k, _)| visible(&items.images[k]) >= SMALL_PICTURE)
             .collect()
     };
-    let mut vectors: Vec<&crate::codes::VectorCode> =
-        items.codes.iter().filter(|c| visible(&c.b) > 0.0).collect();
+    let mut vectors: Vec<(usize, &crate::codes::VectorCode)> = items
+        .codes
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| visible(&c.b) > 0.0)
+        .collect();
     if !words.is_empty() {
         // The page is rendered whole: its small pictures are named in its alt text and not
         // cut out again.
@@ -662,7 +684,7 @@ pub(crate) fn vision(
         // drawn as paths, then pictures that look like codes.
         let mut regions: Vec<Region> = vectors
             .iter()
-            .map(|c| Region {
+            .map(|&(_, c)| Region {
                 b: c.b,
                 how: modules_how(c),
             })
@@ -716,6 +738,7 @@ pub(crate) fn vision(
             // finer than the page's render.
             let how = items.images_px.get(k).map(|&(pw, ph)| How::Picture(pw, ph));
             Small {
+                prim: layoutregions::PrimId::Picture(u32::try_from(k).unwrap_or(u32::MAX)),
                 b,
                 framed,
                 id,
@@ -729,7 +752,8 @@ pub(crate) fn vision(
         })
         .collect();
     let room = cap.saturating_sub(list.len());
-    list.extend(vectors.into_iter().take(room).map(|c| Small {
+    list.extend(vectors.into_iter().take(room).map(|(j, c)| Small {
+        prim: layoutregions::PrimId::Code(u32::try_from(j).unwrap_or(u32::MAX)),
         b: c.b,
         framed: items.turn.place_box(c.b, width, height),
         id: c.id,
@@ -745,6 +769,7 @@ pub(crate) fn vision(
         let b = items.images[k];
         let id = items.images_id.get(k).copied().unwrap_or(0);
         Small {
+            prim: layoutregions::PrimId::Picture(u32::try_from(k).unwrap_or(u32::MAX)),
             b,
             framed: items.turn.place_box(b, width, height),
             id,
@@ -1036,6 +1061,7 @@ fn anchor_of(block: &Block) -> Option<&Anchor> {
         | Block::List { anchor, .. }
         | Block::Table { anchor, .. }
         | Block::Code { anchor, .. }
+        | Block::Spatial { anchor, .. }
         | Block::Quote { anchor, .. }
         | Block::Math { anchor, .. }
         | Block::Media { anchor, .. }
@@ -1047,6 +1073,7 @@ fn anchor_of(block: &Block) -> Option<&Anchor> {
 
 /// The index of the first block with each anchor.
 pub(crate) fn anchor_index(blocks: &[Block]) -> HashMap<Anchor, usize> {
+    crate::work::add(blocks.len() as u64);
     let mut out = HashMap::new();
     for (i, b) in blocks.iter().enumerate() {
         if let Some(a) = anchor_of(b) {
@@ -1075,6 +1102,7 @@ pub(crate) fn position(
 /// `blocks` with `media` put in, each before the block at its index (at the end past the
 /// last), in one pass. `media` is sorted by index; pictures at one index keep their order.
 pub(crate) fn merge(blocks: Vec<Block>, media: Vec<(usize, Block)>) -> Vec<Block> {
+    crate::work::add((blocks.len() + media.len()) as u64);
     let mut out = Vec::with_capacity(blocks.len() + media.len());
     let mut media = media.into_iter().peekable();
     for (i, b) in blocks.into_iter().enumerate() {
@@ -1120,7 +1148,7 @@ pub(crate) struct Need {
 /// The most pictures a page may draw to be rendered only to be read for codes.
 pub(crate) const SCAN_PICTURES: usize = 1_000;
 
-/// A small picture to cut out of its page's render.
+/// A small picture, or a region of text kept as laid out, to cut out of its page's render.
 pub(crate) struct Crop {
     /// The index of its asset in the document.
     pub asset: usize,
@@ -1128,6 +1156,43 @@ pub(crate) struct Crop {
     pub b: [f32; 4],
     /// How it is rendered again when its crop gives no code (`Small::how`).
     pub how: Option<How>,
+    /// A region of text kept as laid out ([`region_asset`]): cut out to be looked at with
+    /// files, never read for codes (its text is read, and a code in it is a picture or a
+    /// drawing of its own). Without files no page is rendered for it.
+    pub text: bool,
+}
+
+/// The most regions of text kept as laid out one file gets a picture of. Each is a picture
+/// the calling agent is asked to look at and a PNG in the output, and each page that holds
+/// one is rendered: fifty keep that to the pictures of a few busy pages. Past them the
+/// regions keep their lines and their loss, and one loss says how many got no picture.
+pub(crate) const MAX_REGION_PICTURES: usize = 50;
+
+/// The asset of the `k`-th region of text kept as laid out on page `n` (from 1), the block
+/// anchored `block` (the first block of a run), with the words `alt` ([`region_alt`]): listed
+/// as needing vision, without a file until its page is rendered.
+pub(crate) fn region_asset(n: u32, k: usize, block: Option<Anchor>, alt: String) -> Asset {
+    Asset {
+        shows: block,
+        ..picture_asset(format!("page-{n}-region-{k}"), alt, None, true)
+    }
+}
+
+/// The words of the picture of a region of text kept as laid out: the block it shows and its
+/// box in the frame of the page's text, `text kept as laid out at p3:b41, box 40, 500 to
+/// 300, 560`. A picture of a run of blocks names the first and the `last`: `at p2:b7 to
+/// p2:b8`. The anchor ties a row of the list of pictures to its block also without a file.
+pub(crate) fn region_alt(
+    first: Option<&Anchor>,
+    last: Option<&Anchor>,
+    framed: &[f32; 4],
+) -> String {
+    let at = match (first, last) {
+        (Some(first), Some(last)) => format!(" at {} to {}", first.0, last.0),
+        (Some(first), None) => format!(" at {}", first.0),
+        (None, _) => String::new(),
+    };
+    format!("text kept as laid out{at}, {}", box_words(framed))
 }
 
 /// The asset of page `n`, listed without a file until it is rendered.
@@ -1152,6 +1217,7 @@ pub(crate) fn picture_asset(
         needs_vision,
         codes: Vec::new(),
         code_unread: false,
+        shows: None,
     }
 }
 
@@ -1239,7 +1305,9 @@ fn not_done(files: bool) -> &'static str {
 }
 
 /// The small pictures of `need` not handled on an earlier page and not counted in a loss: an
-/// asset shared with earlier pages is cut from the first page that renders.
+/// asset shared with earlier pages is cut from the first page that renders. A region of text
+/// kept as laid out is none of them: it is cut out after every picture of the file
+/// ([`region_pictures`]).
 fn pending<'n>(
     need: &'n Need,
     counted: &HashSet<usize>,
@@ -1247,8 +1315,123 @@ fn pending<'n>(
 ) -> Vec<&'n Crop> {
     need.crops
         .iter()
+        .filter(|c| !c.text)
         .filter(|c| !handled.contains(&c.asset) && !counted.contains(&c.asset))
         .collect()
+}
+
+/// The regions of text kept as laid out that got no picture file because the time or the
+/// room for extracted pictures ran out: the page of the first, how many, and why. They keep
+/// their lines and stay listed, so nothing of the file is unread.
+struct RegionsOut {
+    first: u32,
+    regions: usize,
+    why: String,
+}
+
+impl RegionsOut {
+    fn words(&self) -> String {
+        let (n, why) = (self.first, &self.why);
+        match self.regions {
+            1 => format!("1 region kept as laid out gets no picture file, on page {n}: {why}"),
+            k => {
+                format!("{k} regions kept as laid out get no picture file, from page {n} on: {why}")
+            }
+        }
+    }
+}
+
+/// Cuts the pictures of the regions of text kept as laid out out of renders of their pages,
+/// with files only and after every page and small picture of the file: a region's lines are
+/// read, so its picture never takes time or room from a picture that holds what the text
+/// does not. These renders do not count against [`MAX_RENDERS`]: a file lists at most
+/// [`MAX_REGION_PICTURES`] regions. A page that already said why it is not rendered
+/// (`failed`) says nothing again; a page not rendered here says so as Info, and so does the
+/// one loss for the regions the time or the blob room left without a file. None of that
+/// makes the read partial.
+fn region_pictures(
+    needs: &[Need],
+    pages: &mut Pages<'_>,
+    scans: &mut Scans,
+    failed: &HashMap<u32, LossReason>,
+    out: &mut Out,
+) {
+    let mut left_out: Option<RegionsOut> = None;
+    let mut handled: HashSet<usize> = HashSet::new();
+    for need in needs.iter().filter(|n| n.whole.is_none()) {
+        let n = need.page;
+        let todo: Vec<&Crop> = need.crops.iter().filter(|c| c.text).collect();
+        if todo.is_empty() {
+            continue;
+        }
+        if let Some(left) = &mut left_out {
+            left.regions += todo.len();
+            continue;
+        }
+        if failed.contains_key(&n) {
+            continue;
+        }
+        let not_rendered = |why: LossReason, what: String, out: &mut Out| {
+            let what = format!("page {n} {}: {what}", not_done(true));
+            out.loss_info(format!("p{n}"), what, why, Severity::Info);
+        };
+        if need.fallback {
+            not_rendered(
+                LossReason::Unsupported,
+                "its text was read with the fallback parser, and the renderer reads only the \
+                 object layer's copy, where its content is missing"
+                    .into(),
+                out,
+            );
+            continue;
+        }
+        if need.cut {
+            not_rendered(
+                LossReason::Limit,
+                "a limit cut its text, so its content is more than a render may take".into(),
+                out,
+            );
+            continue;
+        }
+        let page = match pages.page(n) {
+            Ok(page) => page,
+            Err(Failed::Limit(why)) => {
+                left_out = Some(RegionsOut {
+                    first: n,
+                    regions: todo.len(),
+                    why,
+                });
+                continue;
+            }
+            Err(Failed::Room(why)) => {
+                not_rendered(LossReason::Limit, why, out);
+                continue;
+            }
+            Err(Failed::Damaged(why)) => {
+                not_rendered(LossReason::Damaged, why, out);
+                continue;
+            }
+        };
+        let mut cut = Cut {
+            need,
+            todo: &todo,
+            files: true,
+            handled: &mut handled,
+        };
+        left_out = cut.run(page, pages, scans, out).map(|left| RegionsOut {
+            first: n,
+            regions: left.pictures,
+            why: left.why,
+        });
+    }
+    if let Some(left) = left_out {
+        out.loss_info(
+            format!("p{}", left.first),
+            left.words(),
+            LossReason::Limit,
+            Severity::Info,
+        );
+    }
 }
 
 /// Renders the pages of `needs`: a page that needs vision into a blob of its asset (with
@@ -1381,12 +1564,8 @@ pub(crate) fn render_pages(
             }
         }
         let mut fail = |why: LossReason, what: String, out: &mut Out| {
-            note(
-                out,
-                format!("p{n}"),
-                format!("page {n} {}: {what}", not_done(files)),
-                why,
-            );
+            let what = format!("page {n} {}: {what}", not_done(files));
+            note(out, format!("p{n}"), what, why);
             failed.insert(n, why);
         };
         if let Some(left) = &mut left_out {
@@ -1520,6 +1699,9 @@ pub(crate) fn render_pages(
             LossReason::Limit,
         );
     }
+    if files {
+        region_pictures(needs, &mut pages, &mut scans, &failed, out);
+    }
     if let Some(&first) = heavy.first() {
         let what = if heavy.len() == 1 {
             format!("page {first} is")
@@ -1561,7 +1743,9 @@ fn unwritten(
     let mut lost: Vec<(usize, Vec<u32>, LossReason)> = Vec::new();
     let mut at: HashMap<usize, usize> = HashMap::new();
     for need in needs.iter().filter(|n| n.whole.is_none()) {
-        for c in &need.crops {
+        // A region of text kept as laid out is no small picture: its lines are read, and
+        // its page says why it is not rendered.
+        for c in need.crops.iter().filter(|c| !c.text) {
             if !out.doc.assets[c.asset].sha256.is_empty() || counted.contains(&c.asset) {
                 continue;
             }
@@ -1661,7 +1845,7 @@ struct Cut<'c> {
 impl Cut<'_> {
     /// Cuts the small pictures out of `page`, one at a time: each crop is read for codes,
     /// rendered again at a finer scale when it gives none and may be a code, and written as a
-    /// blob of its asset with files. On a page rendered coarser than 144 dpi (a very large
+    /// blob of its asset with files. A region of text is only cut out and written. On a page rendered coarser than 144 dpi (a very large
     /// page) the crop is rendered again at 144 dpi. A crop takes its pixels and its PNG next
     /// to the render, which must fit the render room the page was checked against. A picture
     /// not cut here stays for a later page. Returns what is left out when the time or the
@@ -1692,30 +1876,36 @@ impl Cut<'_> {
                 c.b[2] + need.origin.0,
                 c.b[3] + need.origin.1,
             ];
+            // A region of text that gets no picture keeps its lines: nothing is unread.
+            let not_cut = |out: &mut Out, what: String, why: LossReason| {
+                if c.text {
+                    out.loss_info(format!("p{n}"), what, why, Severity::Info);
+                } else {
+                    out.loss(format!("p{n}"), what, why, Severity::Warning);
+                }
+            };
             let Some(rect) = crop_rect(&page, user, CROP_MARGIN) else {
-                out.loss(
-                    format!("p{n}"),
+                not_cut(
+                    out,
                     format!(
                         "picture {id} is not cut out of page {n}: its box lies outside the \
                          rendered page"
                     ),
                     LossReason::Damaged,
-                    Severity::Warning,
                 );
                 continue;
             };
             // The render's pixels, the crop's and its PNG (twice its pixels).
             let takes = held + rect.pixels() * cost::PNG_BYTES;
             if takes > room {
-                out.loss(
-                    format!("p{n}"),
+                not_cut(
+                    out,
                     format!(
                         "picture {id} is not cut out of page {n}: that would take {takes} bytes, \
                          more than the {room} bytes a render may take (a quarter of the memory \
                          limit)"
                     ),
                     LossReason::Limit,
-                    Severity::Warning,
                 );
                 continue;
             }
@@ -1725,7 +1915,7 @@ impl Cut<'_> {
                     * page.transform,
                 scale: page.scale,
             };
-            if coarse {
+            if coarse && !c.text {
                 let at = Region {
                     b: c.b,
                     how: How::Picture(0, 0),
@@ -1761,7 +1951,7 @@ impl Cut<'_> {
                     Err(false) => {}
                 }
             }
-            let found = if fine_first {
+            let found = if fine_first || c.text {
                 None
             } else {
                 scans.read(n, c.asset, &picture, None, budget, false)
@@ -1792,11 +1982,10 @@ impl Cut<'_> {
                     }
                     self.handled.insert(c.asset);
                 }
-                Err(why) => out.loss(
-                    format!("p{n}"),
+                Err(why) => not_cut(
+                    out,
                     format!("picture {id} is not cut out of page {n}: {why}"),
                     LossReason::Damaged,
-                    Severity::Warning,
                 ),
             }
         }
@@ -2119,6 +2308,9 @@ impl<'p> Pages<'p> {
                 return Err(Failed::Limit("the time limit was reached".into()));
             }
         }
+        // A step per 4,096 pixels rendered: a picture refused before it is rendered shows
+        // none.
+        crate::work::add(u64::from(px) * u64::from(py) / 4_096 + 1);
         let run = panic::catch_unwind(AssertUnwindSafe(|| {
             // A cache of its own, so nothing a page decoded stays for the next.
             let cache = RenderCache::new();
@@ -2361,6 +2553,8 @@ impl Scans {
         };
         #[cfg(test)]
         SCAN_RUNS.with(|r| r.set(r.get() + 1));
+        // A step per 4,096 pixels handed to the decoder; its calls count on this thread too.
+        crate::work::add(u64::from(p.width()) * u64::from(p.height()) / 4_096 + 1);
         self.found.entry(asset).or_default().read = true;
         let codes = match barcodes::Worker::global().decode(&scan, &limits) {
             Ok(s) => {
@@ -3288,23 +3482,30 @@ pub(crate) fn apply_codes(scans: Option<Scans>, places: Vec<(usize, Places)>, ou
         return;
     }
     fn walk(blocks: &mut [Block], places: &HashMap<String, Renamed>, seen: &mut HashSet<String>) {
+        // The words of one place of a picture, a media block or a table cell's picture.
+        let place = |asset: &String, alt: &mut Option<String>, seen: &mut HashSet<String>| {
+            if let (Some(r), Some(words)) = (places.get(asset), alt.as_mut()) {
+                let first = seen.insert(asset.clone());
+                let more = match (&r.pages, first, r.codes) {
+                    (Some(pages), true, _) => format!(", on {pages}"),
+                    (_, false, true) => {
+                        format!(
+                            ", its codes are listed at its first place on page {}",
+                            r.first
+                        )
+                    }
+                    _ => String::new(),
+                };
+                let more = format!("{}{more}", r.unconfirmed);
+                *words = reread_place(words, r.read.as_ref(), &more);
+            }
+        };
         for b in blocks.iter_mut() {
             match b {
-                Block::Media { asset, alt, .. } => {
-                    if let (Some(r), Some(words)) = (places.get(asset), alt.as_mut()) {
-                        let first = seen.insert(asset.clone());
-                        let more = match (&r.pages, first, r.codes) {
-                            (Some(pages), true, _) => format!(", on {pages}"),
-                            (_, false, true) => {
-                                format!(
-                                    ", its codes are listed at its first place on page {}",
-                                    r.first
-                                )
-                            }
-                            _ => String::new(),
-                        };
-                        let more = format!("{}{more}", r.unconfirmed);
-                        *words = reread_place(words, r.read.as_ref(), &more);
+                Block::Media { asset, alt, .. } => place(asset, alt, seen),
+                Block::Table { rows, .. } => {
+                    for m in rows.iter_mut().flatten().flat_map(|c| c.media.iter_mut()) {
+                        place(&m.asset, &mut m.alt, seen);
                     }
                 }
                 Block::Section { blocks, .. }
@@ -3430,6 +3631,39 @@ mod tests {
             ..PageItems::default()
         };
         assert!(vision(&info, &bare, &none, &every, 0).is_none());
+    }
+
+    /// The furniture of a file does not depend on the order its pages are handed in (the
+    /// reader keeps them in a map). A picture that moves 1.5 points from page to page: from
+    /// page 1 the pages 1 and 2 are one spot and 3 and 4 another, each on two pages, and
+    /// none is furniture. Taken from page 2 first, the pages 1 to 3 would be one spot on
+    /// three pages.
+    #[test]
+    fn furniture_does_not_depend_on_the_order_of_the_pages() {
+        let page = |n: u32| PageItems {
+            page: n,
+            images: vec![[40.0 + 1.5 * n as f32, 700.0, 70.0 + 1.5 * n as f32, 730.0]],
+            images_id: vec![7],
+            ..PageItems::default()
+        };
+        let read: Vec<PageItems> = (1..=4).map(page).collect();
+        let found = |order: [usize; 4]| -> Vec<bool> {
+            let spots = furniture(order.iter().map(|&k| &read[k]));
+            read.iter()
+                .map(|p| spots.holds(&p.images[0], p.images_id[0]))
+                .collect()
+        };
+        let in_order = found([0, 1, 2, 3]);
+        assert_eq!(in_order, [false; 4]);
+        for order in [[1, 0, 2, 3], [3, 2, 1, 0], [2, 0, 3, 1]] {
+            assert_eq!(found(order), in_order, "{order:?}");
+        }
+        // The pictures of both pages of a file of two: the same in either order.
+        let two = |order: [usize; 2]| {
+            let all = on_every_page(order.iter().map(|&k| &read[k]), 2);
+            (all.spots.boxes.clone(), all.ids.len())
+        };
+        assert_eq!(two([0, 1]), two([1, 0]));
     }
 
     #[test]

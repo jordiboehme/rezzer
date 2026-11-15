@@ -142,6 +142,7 @@ fn full_document() -> Document {
                 row_span: 1,
                 col_span: 2,
                 anchor: anchor.clone(),
+                media: Vec::new(),
             }]],
             alignments: vec![Align::Right],
             anchor: Some(Anchor("table:1".into())),
@@ -397,6 +398,7 @@ fn full_document() -> Document {
         needs_vision: true,
         codes: Vec::new(),
         code_unread: false,
+        shows: None,
     });
     doc.losses.push(Loss {
         location: "Costs!D1".into(),
@@ -1305,4 +1307,191 @@ fn many_pages_fill_fast() {
         assert_eq!(after, None);
     }
     assert!(start.elapsed() < std::time::Duration::from_secs(60));
+}
+
+#[test]
+fn spatial_round_trips_json() {
+    use rezzer_model::{SpatialLine, SpatialPiece};
+    let block = Block::Spatial {
+        lines: vec![SpatialLine {
+            pieces: vec![
+                SpatialPiece {
+                    col: 0,
+                    text: "Name".into(),
+                    spans: Vec::new(),
+                },
+                SpatialPiece {
+                    col: 12,
+                    text: "Betrag".into(),
+                    spans: Vec::new(),
+                },
+            ],
+        }],
+        links: Vec::new(),
+        grid: None,
+        anchor: None,
+    };
+    let v = serde_json::to_value(&block).unwrap();
+    assert_eq!(
+        v,
+        serde_json::json!({"type": "spatial", "lines": [{"pieces": [
+            {"col": 0, "text": "Name"}, {"col": 12, "text": "Betrag"}]}]})
+    );
+    let back: Block = serde_json::from_value(v).unwrap();
+    assert_eq!(back, block);
+}
+
+#[test]
+fn schema_has_spatial() {
+    let schema = schemars::schema_for!(Document);
+    let text = serde_json::to_string(&schema).unwrap();
+    assert!(text.contains("\"spatial\""));
+    assert!(text.contains("SpatialPiece"));
+}
+
+#[test]
+fn region_note_round_trips() {
+    use rezzer_model::{RegionAlternative, RegionKind, RegionNote};
+    let note = RegionNote {
+        anchor: Anchor("p1:t1".into()),
+        page: 1,
+        kind: RegionKind::Totals,
+        bounds: [72.0, 100.25, 523.5, 180.0],
+        certainty: Certainty::Rule,
+        score: 1000,
+        evidence: vec![Evidence::Rule {
+            id: "pdf.borderless.totals_under".into(),
+            detail: String::new(),
+        }],
+        alternatives: vec![RegionAlternative {
+            kind: RegionKind::LabelValue,
+            score: 400,
+        }],
+    };
+    let plain = RegionNote {
+        anchor: Anchor("p1:b2".into()),
+        kind: RegionKind::Paragraph,
+        alternatives: Vec::new(),
+        ..note.clone()
+    };
+    let mut doc = Document::new(src());
+    doc.regions = vec![note.clone(), plain.clone()];
+    let v = serde_json::to_value(&doc).unwrap();
+    assert_eq!(
+        v["regions"][0],
+        serde_json::json!({
+            "anchor": "p1:t1", "page": 1, "kind": "totals",
+            "bounds": [72.0, 100.25, 523.5, 180.0], "certainty": "rule", "score": 1000,
+            "evidence": [{"kind": "rule", "id": "pdf.borderless.totals_under"}],
+            "alternatives": [{"kind": "label_value", "score": 400}]
+        })
+    );
+    // Words of a rule are written; a rule without words writes no `detail`.
+    let worded = Evidence::Rule {
+        id: "pdf.ruled".into(),
+        detail: "Found by: grid".into(),
+    };
+    assert_eq!(
+        serde_json::to_value(&worded).unwrap()["detail"],
+        "Found by: grid"
+    );
+    // No alternatives: the key is left out.
+    assert!(v["regions"][1].get("alternatives").is_none(), "{v}");
+    let back: Document = serde_json::from_value(v).unwrap();
+    assert_eq!(back.regions, vec![note, plain]);
+    // A document without regions writes no key, and a model without the key reads as empty.
+    let empty = serde_json::to_string(&Document::new(src())).unwrap();
+    assert!(!empty.contains("regions"), "{empty}");
+    let back: Document = serde_json::from_str(&empty).unwrap();
+    assert!(back.regions.is_empty());
+    let schema = serde_json::to_string(&schemars::schema_for!(Document)).unwrap();
+    assert!(schema.contains("RegionNote"), "{schema}");
+}
+
+#[test]
+fn region_kinds_are_snake_case() {
+    use rezzer_model::RegionKind;
+    for (kind, name) in [
+        (RegionKind::HeaderBand, "header_band"),
+        (RegionKind::FootnoteLegend, "footnote_legend"),
+        (RegionKind::LabelValue, "label_value"),
+        (RegionKind::Spatial, "spatial"),
+    ] {
+        assert_eq!(serde_json::to_value(kind).unwrap(), name);
+    }
+}
+
+/// A cell's pictures go to JSON and back; a cell without one writes no `media` key.
+#[test]
+fn cell_media_round_trips() {
+    use rezzer_model::{Cell, CellMedia, Inline};
+    let mut cell = Cell::new(vec![Inline::plain("Kaffeebecher")]);
+    let plain = serde_json::to_string(&cell).unwrap();
+    assert!(!plain.contains("media"), "{plain}");
+    cell.media.push(CellMedia {
+        asset: "page-1-pic-1".into(),
+        alt: Some("small picture".into()),
+    });
+    let json = serde_json::to_string(&cell).unwrap();
+    assert!(
+        json.contains("\"media\":[{\"asset\":\"page-1-pic-1\""),
+        "{json}"
+    );
+    let back: Cell = serde_json::from_str(&json).unwrap();
+    assert_eq!(back, cell);
+    let old: Cell = serde_json::from_str(&plain).unwrap();
+    assert!(old.media.is_empty());
+}
+
+#[test]
+fn spatial_runs_are_blocks_in_a_row_that_join_at_one_column_of_the_page_grid() {
+    use rezzer_model::{SpatialGrid, SpatialLine, SpatialPiece, spatial_runs};
+    // A block of one line of two pieces: at the grid column `col`, joining the block before
+    // it or not; `None` for a block whose place on the page is not known.
+    let spatial = |grid: Option<(u32, bool)>| Block::Spatial {
+        lines: vec![SpatialLine {
+            pieces: [(0, "a"), (10, "b")]
+                .iter()
+                .map(|(col, text)| SpatialPiece {
+                    col: *col,
+                    text: (*text).into(),
+                    spans: Vec::new(),
+                })
+                .collect(),
+        }],
+        links: Vec::new(),
+        grid: grid.map(|(col, joins)| SpatialGrid { col, joins }),
+        anchor: None,
+    };
+    let media = || Block::Media {
+        asset: "a".into(),
+        alt: None,
+        anchor: None,
+    };
+    let text = || Block::paragraph(vec![Inline::plain("text")]);
+    let blocks = vec![
+        // 0, 2 and 3 are a run: each joins the one before it at one column, media aside.
+        spatial(Some((4, false))),
+        media(),
+        spatial(Some((4, true))),
+        spatial(Some((4, true))),
+        // The same column, but it does not join: a block alone is no run.
+        spatial(Some((4, false))),
+        text(),
+        // The same piece columns without a grid: the place is not known, so no run. A block
+        // that says it joins a block without a grid starts a run of its own.
+        spatial(None),
+        spatial(None),
+        spatial(Some((4, true))),
+        // It joins, but at another column of the page: no run.
+        spatial(Some((9, true))),
+        text(),
+        // Another block between ends a run; the first block of a run may say that it joins.
+        spatial(Some((0, true))),
+        text(),
+        spatial(Some((0, true))),
+        spatial(Some((0, true))),
+    ];
+    assert_eq!(spatial_runs(&blocks), vec![vec![0, 2, 3], vec![13, 14]]);
+    assert!(spatial_runs(&[]).is_empty());
 }

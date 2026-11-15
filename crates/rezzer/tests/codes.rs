@@ -113,7 +113,13 @@ fn codes_are_read_with_and_without_an_output_directory() {
         facts.contains(&("Codes".to_string(), "2 (Code 128 1, QR Code 1)".to_string())),
         "{facts:?}"
     );
-    assert!(doc.assets.iter().all(|a| !a.needs_vision));
+    // No picture needs vision. The picture of a region of text kept as laid out does: it is
+    // no picture of the file.
+    assert!(
+        doc.assets
+            .iter()
+            .all(|a| !a.needs_vision || a.shows.is_some())
+    );
     // With one: the crops are written, and the Markdown links them with the codes below.
     let o = dir.path().join("out");
     let run = cargo_bin_cmd!("rezzer")
@@ -137,7 +143,13 @@ fn codes_are_read_with_and_without_an_output_directory() {
     );
     assert!(md.contains("Code 128: RZ-2026-114"), "{md}");
     assert!(o.join("invoice.pdf.assets/page-1-code-1.png").is_file());
-    assert!(!md.contains("Needs vision"), "{md}");
+    // Only the pictures of the lines kept as laid out need vision.
+    assert!(
+        md.lines()
+            .filter(|l| l.contains("Needs vision"))
+            .all(|l| l.contains("-region-")),
+        "{md}"
+    );
 }
 
 /// `n` A4 pages, each a text-like scan at 300 dpi of its own.
@@ -283,7 +295,7 @@ fn a_code_scan_cut_by_its_time_is_not_cached() {
     //
     // READS was measured once (2026-10-27): listing the 30 pages takes 426 readings, their
     // text 59, and starting the scan 1, so the scan stops at reading 486 and nothing after it
-    // reads the clock. Measure again when the PDF reader changes (plan 6).
+    // reads the clock. Measure again when the PDF reader changes.
     use rezzer_model::{Completeness, LossReason, Registry, Severity};
     use rezzer_pipeline::{Clock, Config, OutputKind, Pipeline, Request};
     use std::time::{Duration, Instant};

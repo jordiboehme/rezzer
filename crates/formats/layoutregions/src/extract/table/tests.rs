@@ -1,0 +1,1192 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use std::collections::HashMap;
+
+use super::grid::{Piece, Shape, VALUE_EDGE, grid_cells, pieces_of, title_cut, value_cut};
+use super::ruled::{GridPart, RuledIn, column_cuts, ruled_cells};
+use super::*;
+use crate::input::{FontKind, GapIn, Shift, TextRun};
+use crate::segment::drawn::Line;
+
+fn seg(at: f32, from: f32, to: f32) -> Line {
+    Line { at, from, to }
+}
+
+/// A run of `text` at `x` on the baseline `y` in the size 10, 6 points a character, on line
+/// `line`, with a gap at each stretch of spaces.
+fn run_at(text: &str, x: f32, y: f32, line: u32) -> TextRun {
+    let mut gaps = Vec::new();
+    let mut words = 0u32;
+    let mut prev = ' ';
+    for (k, c) in text.char_indices() {
+        if c != ' ' && prev == ' ' && k > 0 {
+            gaps.push(GapIn {
+                words,
+                from: x + 6.0 * (text[..k].trim_end().chars().count()) as f32,
+                to: x + 6.0 * k as f32,
+            });
+        }
+        if c != ' ' && prev == ' ' {
+            words += 1;
+        }
+        prev = c;
+    }
+    TextRun {
+        text: text.into(),
+        x,
+        y,
+        w: 6.0 * text.chars().count() as f32,
+        h: 10.0,
+        size: 10.0,
+        font: 0,
+        font_kind: FontKind::Unknown,
+        bold: false,
+        italic: false,
+        color: None,
+        shift: Shift::Base,
+        line,
+        off_axis: false,
+        gaps,
+    }
+}
+
+/// A run of `text` on the baseline 100 at `x`, on line 0.
+fn spaced(text: &str, x: f32) -> TextRun {
+    run_at(text, x, 100.0, 0)
+}
+
+/// A grid of one row from 90 to 120 over the column edges `xs`, its rules drawn the full
+/// height.
+fn one_row(xs: &[f32]) -> (Vec<Line>, Vec<Line>) {
+    let (left, right) = (xs[0], xs[xs.len() - 1]);
+    (
+        vec![seg(90.0, left, right), seg(120.0, left, right)],
+        xs.iter().map(|&x| seg(x, 90.0, 120.0)).collect(),
+    )
+}
+
+/// The cuts [`column_cuts`] finds in `runs` for the grid of one row over `xs`, within
+/// `budget` steps.
+fn cuts_of(runs: &[TextRun], xs: &[f32], budget: usize) -> (Vec<(usize, Vec<usize>)>, bool) {
+    let (h, v) = one_row(xs);
+    let parts = [GridPart {
+        h: &h,
+        v: &v,
+        cut: false,
+    }];
+    column_cuts(runs, &parts, &[], budget)
+}
+
+#[test]
+fn a_run_is_alone_on_its_line_wherever_the_others_stand() {
+    // The runs of line 0 stand apart in the list, with a run of line 1 between them.
+    let mut runs = vec![spaced("AA", 0.0), spaced("BB", 50.0), spaced("CC", 100.0)];
+    runs[1].line = 1;
+    let per_line = texted_per_line(&runs);
+    assert!(!alone_on_line(&per_line, &runs[0]));
+    assert!(alone_on_line(&per_line, &runs[1]));
+    assert!(!alone_on_line(&per_line, &runs[2]));
+}
+
+#[test]
+fn a_column_rule_cuts_a_run_between_two_words() {
+    // "AA  BB CC" from 0: AA ends at 12, BB starts at 24; the rule at 20 lies in the gap,
+    // the first gap of the run.
+    let (cuts, done) = cuts_of(&[spaced("AA  BB CC", 0.0)], &[-10.0, 20.0, 100.0], 100);
+    assert!(done);
+    assert_eq!(cuts, [(0, vec![0])]);
+}
+
+#[test]
+fn a_column_rule_inside_a_word_cuts_nothing() {
+    let (cuts, done) = cuts_of(&[spaced("AAAA BB", 0.0)], &[-10.0, 9.0, 100.0], 100);
+    assert!(done);
+    assert!(cuts.is_empty());
+}
+
+#[test]
+fn a_column_rule_cuts_only_at_its_heights() {
+    let mut run = spaced("AA  BB", 0.0);
+    run.y = 200.0;
+    let (cuts, done) = cuts_of(&[run], &[-10.0, 20.0, 100.0], 100);
+    assert!(done);
+    assert!(cuts.is_empty());
+}
+
+/// A row of three drawn cells cuts the lines under it at its inner edges, as far as its
+/// body reaches: a line more than [`BODY_GAP`] line heights under the one over it is not
+/// its body.
+#[test]
+fn a_band_cuts_only_the_lines_of_its_body() {
+    for (y, cut) in [(80.0, true), (20.0, false)] {
+        let mut run = spaced("AA  BB", 0.0);
+        run.y = y;
+        let (cuts, done) = cuts_of(&[run], &[-10.0, 20.0, 60.0, 100.0], 100);
+        assert!(done);
+        assert_eq!(!cuts.is_empty(), cut, "{y}");
+    }
+}
+
+#[test]
+fn cuts_past_the_budget_are_left_out() {
+    let runs: Vec<TextRun> = (0..3).map(|_| spaced("AA  BB", 0.0)).collect();
+    let (cuts, done) = cuts_of(&runs, &[-10.0, 20.0, 100.0], 2);
+    assert!(!done);
+    // The first two runs are cut, the third stays whole.
+    assert_eq!(cuts, [(0, vec![0]), (1, vec![0])]);
+}
+
+#[test]
+fn column_rules_across_a_title_are_looked_for_within_a_budget() {
+    let vs = [seg(100.0, 0.0, 50.0), seg(200.0, 60.0, 90.0)];
+    let mut work = 0;
+    assert!(column_across(&vs, (50.0, 300.0), (10.0, 20.0), &mut work));
+    assert!(!column_across(&vs, (50.0, 300.0), (52.0, 58.0), &mut work));
+    assert!(!column_across(&vs, (150.0, 300.0), (10.0, 20.0), &mut work));
+    // Out of steps: the answer is yes, so no line is taken as a title.
+    let mut work = TITLE_WORK;
+    assert!(column_across(&vs, (50.0, 300.0), (52.0, 58.0), &mut work));
+    assert!(work > TITLE_WORK);
+}
+
+/// A drawn grid of three rows and four columns: column edges 0, 100, 200, 300, 400, row edges
+/// 300, 280, 260, 240 from the top. The header row draws no rule at 200, so its second cell
+/// spans two columns. The rules come with the grid's runs: a header, two rows of items and
+/// an empty last cell in the first row of items.
+struct Grid {
+    h: Vec<Line>,
+    v: Vec<Line>,
+    xs: Vec<f32>,
+    ys: Vec<f32>,
+    runs: Vec<TextRun>,
+}
+
+fn grid(rows: Vec<Vec<(&str, f32)>>) -> Grid {
+    let xs = vec![0.0, 100.0, 200.0, 300.0, 400.0];
+    let ys = vec![300.0, 280.0, 260.0, 240.0];
+    let h = ys.iter().map(|&y| seg(y, 0.0, 400.0)).collect();
+    let mut v: Vec<Line> = xs
+        .iter()
+        .filter(|&&x| x != 200.0)
+        .map(|&x| seg(x, 240.0, 300.0))
+        .collect();
+    v.push(seg(200.0, 240.0, 280.0));
+    let mut runs = Vec::new();
+    for (r, row) in rows.into_iter().enumerate() {
+        let y = ys[r] - 14.0;
+        for (text, x) in row {
+            runs.push(run_at(text, x, y, r as u32));
+        }
+    }
+    Grid { h, v, xs, ys, runs }
+}
+
+/// The header and the two rows of items of the grid, the second item's name at `name_x`
+/// with the text `name`.
+fn items(name: &'static str) -> Grid {
+    grid(vec![
+        vec![("Name", 5.0), ("Amounts", 105.0), ("Note", 305.0)],
+        vec![("Muster GmbH", 5.0), ("1.234,56", 105.0), ("12,50", 205.0)],
+        vec![
+            (name, 5.0),
+            ("2.000,00", 140.0),
+            ("3,00", 205.0),
+            ("ok", 305.0),
+        ],
+    ])
+}
+
+/// The cells of the grid `g`, every run of it in the section.
+fn read(g: &Grid) -> Cells {
+    let all: Vec<usize> = (0..g.runs.len()).collect();
+    let per_line = texted_per_line(&g.runs);
+    ruled_cells(
+        &g.runs,
+        &RuledIn {
+            h: &g.h,
+            v: &g.v,
+            xs: &g.xs,
+            ys: &g.ys,
+            open: &[],
+            mine: &all,
+            within: &all,
+            per_line: &per_line,
+        },
+        &|| false,
+        &|| None,
+        &mut |_| false,
+    )
+}
+
+/// Each run of `table` by the cell it is in: (row, cell).
+fn placed(table: &TableOut) -> HashMap<usize, (usize, usize)> {
+    let mut out = HashMap::new();
+    for (r, row) in table.rows.iter().enumerate() {
+        for (c, cell) in row.iter().enumerate() {
+            for &i in &cell.runs {
+                assert!(out.insert(i, (r, c)).is_none(), "run {i} twice");
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn every_prim_of_a_table_once() {
+    let g = items("Erika Mustermann");
+    let Cells::Table(table) = read(&g) else {
+        panic!("a table");
+    };
+    let at = placed(&table);
+    // Every run once, in the cell it stands in, none left out.
+    assert!(table.unplaced.is_empty());
+    assert_eq!(at.len(), g.runs.len());
+    let spans: Vec<Vec<(u32, u32)>> = table
+        .rows
+        .iter()
+        .map(|r| r.iter().map(|c| (c.row_span, c.col_span)).collect())
+        .collect();
+    assert_eq!(
+        spans,
+        [
+            vec![(1, 1), (1, 2), (1, 1)],
+            vec![(1, 1), (1, 1), (1, 1), (1, 1)],
+            vec![(1, 1), (1, 1), (1, 1), (1, 1)],
+        ]
+    );
+    let texts: Vec<Vec<String>> = table
+        .rows
+        .iter()
+        .map(|r| {
+            r.iter()
+                .map(|c| c.runs.iter().map(|&i| g.runs[i].text.as_str()).collect())
+                .collect()
+        })
+        .collect();
+    assert_eq!(
+        texts,
+        [
+            vec!["Name", "Amounts", "Note"],
+            vec!["Muster GmbH", "1.234,56", "12,50", ""],
+            vec!["Erika Mustermann", "2.000,00", "3,00", "ok"],
+        ]
+    );
+    // The header row is judged by its text once the cells are filled: no rule makes it one.
+    assert_eq!(table.header_rows, 0);
+    assert!(table.icons.is_empty());
+}
+
+#[test]
+fn a_run_over_its_cell_side_into_white_space_goes_by_its_middle() {
+    // The name runs from 5 to 119, over the rule at 100 inside a word (no cut there), into
+    // white space: the amount of its row starts at 140.
+    let g = items("Erika Mustermannsta");
+    let Cells::Table(table) = read(&g) else {
+        panic!("a table");
+    };
+    assert!(table.unplaced.is_empty());
+    assert_eq!(placed(&table)[&6], (2, 0));
+}
+
+#[test]
+fn unplaced_run_is_reported() {
+    // Ruled: the name runs from 5 to 155, over the rule at 100 inside a word (where no rule
+    // cuts it) and onto the amount at 140 on its line. It is in no cell, and the amount keeps
+    // its own.
+    let g = items("Erika Mustermannstadtteil");
+    let part = GridPart {
+        h: &g.h,
+        v: &g.v,
+        cut: false,
+    };
+    let (cuts, _) = column_cuts(&g.runs, &[part], &[], 1000);
+    assert!(
+        cuts.iter().all(|c| c.0 != 6),
+        "no rule cuts the name: {cuts:?}"
+    );
+    let Cells::Table(table) = read(&g) else {
+        panic!("a table");
+    };
+    assert_eq!(table.unplaced, [(6, RUNS_INTO_CELL)]);
+    let at = placed(&table);
+    assert!(!at.contains_key(&6));
+    assert_eq!(at[&7], (2, 1));
+    assert_eq!(at.len() + 1, g.runs.len());
+
+    // Without rules: a line between two rows that runs over the gutter between two columns
+    // is in no cell.
+    let mut runs = Vec::new();
+    let rows = [
+        ["Name", "Qty", "Amount"],
+        ["Muster GmbH", "2", "1.234,56"],
+        ["Erika Mustermann", "1", "12,50"],
+        ["Musterstadt", "3", "3,00"],
+        ["Muster AG", "4", "2.000,00"],
+    ];
+    let mut line = 0u32;
+    for (k, row) in rows.iter().enumerate() {
+        let y = 700.0 - 20.0 * k as f32;
+        for (text, x) in row.iter().zip([40.0, 200.0, 300.0]) {
+            runs.push(run_at(text, x, y, line));
+        }
+        line += 1;
+        if k == 2 {
+            // A note under the second item, from the first column into the second.
+            runs.push(run_at(
+                "see the note below for the terms",
+                40.0,
+                y - 10.0,
+                line,
+            ));
+            line += 1;
+        }
+    }
+    let note = runs.iter().position(|r| r.text.starts_with("see")).unwrap();
+    let mut pieces: Vec<Vec<Piece>> = Vec::new();
+    let mut start = 0;
+    while start < runs.len() {
+        let end = start
+            + runs[start..]
+                .iter()
+                .take_while(|r| r.line == runs[start].line)
+                .count();
+        pieces.push(pieces_of(&runs, start, end));
+        start = end;
+    }
+    let table = grid_cells(&runs, &pieces, 3, false).expect("a table");
+    assert_eq!(table.unplaced, [(note, RUNS_OVER_COLUMNS)]);
+    let at = placed(&table);
+    assert_eq!(at.len() + 1, runs.len());
+    assert!(!at.contains_key(&note));
+}
+
+/// A sentence printed over a ruled row, in runs parted where its word gap falls on
+/// a column rule (the rule at 100 between "wird" and "nach"), reads as a sentence across the
+/// columns (`sentence_across`): its runs are in no cell, so the reader keeps the line as a
+/// paragraph next to the table. The values of the rows above keep their cells.
+#[test]
+fn a_sentence_over_a_ruled_row_is_in_no_cell() {
+    let g = grid(vec![
+        vec![("Name", 5.0), ("Amounts", 105.0), ("Note", 305.0)],
+        vec![("Muster GmbH", 5.0), ("1.234,56", 105.0), ("12,50", 205.0)],
+        vec![
+            ("die Ware wird", 22.0),
+            ("nach dem Erhalt geliefert", 103.0),
+        ],
+    ]);
+    let Cells::Table(table) = read(&g) else {
+        panic!("a table");
+    };
+    assert_eq!(
+        table.unplaced,
+        [(6, SENTENCE_ACROSS), (7, SENTENCE_ACROSS)],
+        "{table:#?}"
+    );
+    let at = placed(&table);
+    assert_eq!(at.len() + 2, g.runs.len());
+    assert_eq!(at[&3], (1, 0));
+    assert_eq!(at[&4], (1, 1));
+    // Its row held nothing else: it is no row of the table.
+    assert_eq!(table.rows.len(), 2, "{table:#?}");
+    // Two short titles in two cells of a row of more text, close enough to read as one piece:
+    // the cells' own text, not a sentence printed over the row.
+    let mut g = grid(vec![
+        vec![("Name", 5.0), ("Amounts", 105.0), ("Note", 305.0)],
+        vec![("Gezahlte Beträge", 4.0), ("Muster", 103.0)],
+        vec![("Muster AG", 5.0), ("2.000,00", 105.0), ("3,00", 205.0)],
+    ]);
+    g.runs.push(run_at("im Jahr", 5.0, 256.0 + 14.0, 9));
+    let Cells::Table(table) = read(&g) else {
+        panic!("a table");
+    };
+    assert!(table.unplaced.is_empty(), "{table:#?}");
+    // Values in the cells of a row are no sentence, wherever a run stands.
+    let g = grid(vec![
+        vec![("Name", 5.0), ("Amounts", 105.0), ("Note", 305.0)],
+        vec![("Muster GmbH", 5.0), ("1.234,56", 105.0), ("12,50", 205.0)],
+        vec![("Muster AG", 5.0), ("2.000,00", 105.0), ("3,00", 205.0)],
+    ]);
+    let Cells::Table(table) = read(&g) else {
+        panic!("a table");
+    };
+    assert!(table.unplaced.is_empty(), "{table:#?}");
+}
+
+/// A figure's name and number alone in a cell beside other cells names a figure, it
+/// captions none; a caption alone on its line, or with caption words in the runs that go on
+/// from it, is one.
+#[test]
+fn a_figure_reference_in_a_cell_is_no_caption_inside() {
+    use super::caption::caption_inside;
+    let reference = [
+        run_at("Abb. 3", 5.0, 100.0, 0),
+        run_at("Muster", 105.0, 100.0, 0),
+    ];
+    assert!(!caption_inside(&reference));
+    let alone = [
+        run_at("Abb. 3", 5.0, 100.0, 0),
+        run_at("Muster", 105.0, 80.0, 1),
+    ];
+    assert!(caption_inside(&alone));
+    // "Abb. 3:" then its words in a run of their own, a word gap after it, then a cell.
+    let split = [
+        run_at("Abb. 3:", 5.0, 100.0, 0),
+        run_at("Muster Teile", 50.0, 100.0, 0),
+        run_at("4", 205.0, 100.0, 0),
+    ];
+    assert!(caption_inside(&split));
+}
+
+#[test]
+fn a_header_row_is_judged_by_its_text() {
+    let cell = |text: &str, bold: bool| {
+        let mut r = spaced(text, 0.0);
+        r.bold = bold;
+        vec![r]
+    };
+    // A word over numbers.
+    let rows = [
+        vec![cell("Qty", false), cell("Name", false)],
+        vec![cell("12", false), cell("Muster GmbH", false)],
+    ];
+    let view: Vec<Vec<&[TextRun]>> = rows
+        .iter()
+        .map(|r| r.iter().map(Vec::as_slice).collect())
+        .collect();
+    assert_eq!(header_of(&view), 1);
+    // Words over words, the first row bold and the rest not.
+    let rows = [
+        vec![cell("Name", true), cell("Town", true)],
+        vec![cell("Muster GmbH", false), cell("Musterstadt", false)],
+    ];
+    let view: Vec<Vec<&[TextRun]>> = rows
+        .iter()
+        .map(|r| r.iter().map(Vec::as_slice).collect())
+        .collect();
+    assert_eq!(header_of(&view), 1);
+    // Words over words in one weight: no header.
+    let rows = [
+        vec![cell("Name", false), cell("Town", false)],
+        vec![cell("Muster GmbH", false), cell("Musterstadt", false)],
+    ];
+    let view: Vec<Vec<&[TextRun]>> = rows
+        .iter()
+        .map(|r| r.iter().map(Vec::as_slice).collect())
+        .collect();
+    assert_eq!(header_of(&view), 0);
+}
+
+#[test]
+fn close_titles_are_cut_between_runs_and_by_characters() {
+    // Runs of size 8, 5 points a character, without glyph gaps.
+    let run = |text: &str, x: f32| {
+        let mut r = run_at(text, x, 600.0, 0);
+        r.w = 5.0 * text.chars().count() as f32;
+        (r.h, r.size, r.gaps) = (8.0, 8.0, Vec::new());
+        r
+    };
+    let (left, right) = ((300.0, 305.0), (330.0, 345.0));
+    let piece = |runs: &[TextRun]| Piece {
+        x0: runs[0].x,
+        x1: runs.iter().map(|r| r.x + r.w).fold(f32::MIN, f32::max),
+        start: 0,
+        end: runs.len(),
+    };
+    // Two runs: between them, from the end of the first to the start of the second.
+    let two = [run("Menge", 300.0), run("Einheit", 328.0)];
+    assert_eq!(
+        title_cut(&two, &piece(&two), (left, right), true),
+        Some((1, 0))
+    );
+    // One run without glyph gaps: its 13 characters share its width of 65, so the space
+    // lies from 325 to 330, over the gutter.
+    let one = [run("Menge Einheit", 300.0)];
+    assert_eq!(
+        title_cut(&one, &piece(&one), (left, right), true),
+        Some((0, 6))
+    );
+    // A space that lies over the left column (the words after it start in it) is none.
+    assert_eq!(
+        title_cut(&one, &piece(&one), ((300.0, 331.0), (335.0, 345.0)), true),
+        None
+    );
+    // Columns of one shape allow no cut.
+    assert_eq!(title_cut(&one, &piece(&one), (left, right), false), None);
+}
+
+#[test]
+fn values_have_shapes() {
+    use Shape::{Date, Number, Percent, Text};
+    for (text, shape) in [
+        // Numbers: whole, decimal, amounts, thousands marks, signs and currencies.
+        ("2", Some(Number)),
+        ("-12", Some(Number)),
+        ("+5", Some(Number)),
+        ("-6,98", Some(Number)),
+        ("3.50", Some(Number)),
+        ("1.234,56", Some(Number)),
+        ("1,234.56", Some(Number)),
+        ("1.200", Some(Number)),
+        ("1,200", Some(Number)),
+        ("1 200", Some(Number)),
+        ("1.234.567", Some(Number)),
+        ("12,50 EUR", Some(Number)),
+        ("12,50 \u{20ac}", Some(Number)),
+        ("\u{20ac} 12,50", Some(Number)),
+        ("EUR 12,50", Some(Number)),
+        ("$3.50", Some(Number)),
+        // Percentages.
+        ("19%", Some(Percent)),
+        ("19 %", Some(Percent)),
+        // Dates: a year of four digits, or of two after a day and a month of two.
+        ("01.01.2026", Some(Date)),
+        ("31.01.26", Some(Date)),
+        ("2026-01-01", Some(Date)),
+        ("1/31/2026", Some(Date)),
+        ("31/12/2026", Some(Date)),
+        // Text: letters and no digits.
+        ("Stk", Some(Text)),
+        ("Std", Some(Text)),
+        // No shape: digits in a form no shape knows, or neither digits nor letters.
+        ("12,-", None),
+        ("6,98-", None),
+        ("(6,98)", None),
+        ("8:00", None),
+        ("50 ct", None),
+        ("1.2.24", None),
+        ("32.01.2026", None),
+        ("01.13.2026", None),
+        ("1..2", None),
+        ("12.34.56", None),
+        ("Jan 26", None),
+        ("-", None),
+        ("", None),
+        // Currencies are stripped once each, in the order of `file::CURRENCIES` (codes before
+        // signs): a sign before a code at the end is stripped, a sign before a code at the
+        // start is not.
+        ("12 \u{20ac} EUR", Some(Number)),
+        ("\u{20ac} EUR 12", None),
+    ] {
+        assert_eq!(Shape::of(text), shape, "{text:?}");
+    }
+    let (n, t) = (Some(Number), Some(Text));
+    assert_eq!(Shape::most(&[n, t, n]), Some(Number));
+    assert_eq!(Shape::most(&[n, t, n, t]), None, "a tie");
+    assert_eq!(Shape::most(&[n, t, Some(Percent)]), None, "no majority");
+    assert_eq!(Shape::most(&[None, None, n]), None, "most have no shape");
+    assert_eq!(Shape::most(&[]), None);
+}
+
+/// The pieces and lines of `runs` (one line each by line number, in order).
+fn lined(runs: &[TextRun]) -> (Vec<RunRange>, Vec<Vec<Piece>>) {
+    let lines = run_ranges(runs);
+    let pieces = lines
+        .iter()
+        .map(|l| pieces_of(runs, l.start, l.end))
+        .collect();
+    (lines, pieces)
+}
+
+#[test]
+fn captions_name_tables_and_figures() {
+    use super::caption::caption;
+    assert_eq!(caption("Table 3: Muster"), Some(true));
+    assert_eq!(caption("Figure 2 Muster"), Some(false));
+    assert_eq!(caption("Fig. A. Muster"), Some(false));
+    assert_eq!(caption("Abb. 3: Muster"), Some(false));
+    assert_eq!(caption("Abbildung 2 Muster"), Some(false));
+    assert_eq!(caption("Abbildungen der Muster GmbH"), None);
+    assert_eq!(caption("Abb Muster"), None);
+    assert_eq!(caption("Tables of Muster"), None);
+    assert_eq!(caption("Muster"), None);
+}
+
+#[test]
+fn titles_over_values_need_titles_over_a_row_with_a_digit() {
+    use super::grid::titles_over_values;
+    let runs = vec![
+        run_at("Pos", 100.0, 200.0, 0),
+        run_at("Datum", 200.0, 200.0, 0),
+        run_at("Betrag", 320.0, 200.0, 0),
+        run_at("1", 100.0, 186.0, 1),
+        run_at("15.01.2026", 200.0, 186.0, 1),
+        run_at("9,99", 320.0, 186.0, 1),
+    ];
+    let (lines, pieces) = lined(&runs);
+    assert!(titles_over_values(&runs, &lines, &pieces));
+    // Words over words are no titles over values.
+    let words = vec![
+        run_at("Pos", 100.0, 200.0, 0),
+        run_at("Datum", 200.0, 200.0, 0),
+        run_at("Betrag", 320.0, 200.0, 0),
+        run_at("Eins", 100.0, 186.0, 1),
+        run_at("Zwei", 200.0, 186.0, 1),
+        run_at("Drei", 320.0, 186.0, 1),
+    ];
+    let (lines, pieces) = lined(&words);
+    assert!(!titles_over_values(&words, &lines, &pieces));
+}
+
+#[test]
+fn a_line_set_full_in_pieces_is_prose() {
+    use super::grid::set_full;
+    // Three lines of four words set to one measure from 100 to 400: even gaps on each line,
+    // wider on the first, words in small letters.
+    let line = |words: &[&str], y: f32, line: u32| -> Vec<TextRun> {
+        let width: f32 = words.iter().map(|w| 6.0 * w.chars().count() as f32).sum();
+        let gap = (300.0 - width) / (words.len() - 1) as f32;
+        let mut x = 100.0;
+        words
+            .iter()
+            .map(|w| {
+                let r = run_at(w, x, y, line);
+                x += r.w + gap;
+                r
+            })
+            .collect()
+    };
+    let mut runs = line(&["die", "Ware", "geht", "an"], 200.0, 0);
+    runs.extend(line(&["den", "Kunden", "noch", "heute"], 186.0, 1));
+    runs.extend(line(&["und", "wird", "dort", "bezahlt"], 172.0, 2));
+    let (lines, pieces) = lined(&runs);
+    assert!(set_full(&runs, &pieces, &lines));
+    // Rows of a table: no line ends where the others do.
+    let table = vec![
+        run_at("Muster", 100.0, 200.0, 0),
+        run_at("2", 200.0, 200.0, 0),
+        run_at("12,50", 300.0, 200.0, 0),
+        run_at("Beispiel", 100.0, 186.0, 1),
+        run_at("10", 200.0, 186.0, 1),
+        run_at("3,00", 306.0, 186.0, 1),
+    ];
+    let (lines, pieces) = lined(&table);
+    assert!(!set_full(&table, &pieces, &lines));
+}
+
+/// Two runs of one line with a gap of 20 points (two sizes) between them: `first` ends at its
+/// last character, `second` starts after the gap.
+fn two_runs(first: &str, second: &str) -> Vec<TextRun> {
+    let a = run_at(first, 0.0, 100.0, 1);
+    let x = 6.0 * first.chars().count() as f32 + 20.0;
+    vec![a, run_at(second, x, 100.0, 1)]
+}
+
+#[test]
+fn a_wide_gap_after_a_full_stop_in_a_justified_line_parts_no_pieces() {
+    // Word gaps of 12 points: the line is stretched, the 20 after the full stop goes with them.
+    let runs = two_runs(
+        "vitae,  felis.  Curabitur  dictum  mauris.",
+        "Nam  arcu  libero,",
+    );
+    assert_eq!(pieces_of(&runs, 0, runs.len()).len(), 1);
+    assert_eq!(grid::piece_count(&runs, 0, runs.len()), 1);
+}
+
+#[test]
+fn a_wide_gap_stays_a_cell_gap_without_wide_word_gaps_or_a_sentence_end() {
+    // Word gaps of 6 points: 20 is over twice them, two cells.
+    let runs = two_runs("vitae, felis. Curabitur dictum mauris.", "Nam arcu libero,");
+    assert_eq!(pieces_of(&runs, 0, runs.len()).len(), 2);
+    // A number before the full stop is no sentence end ("Sa 1." of a calendar).
+    let runs = two_runs("Sa  1.  So  2.  Mo  3.", "Di  4.  Mi  5.");
+    assert_eq!(pieces_of(&runs, 0, runs.len()).len(), 2);
+    // A small letter after the gap starts no sentence.
+    let runs = two_runs(
+        "vitae,  felis.  Curabitur  dictum  mauris.",
+        "nam  arcu  libero,",
+    );
+    assert_eq!(grid::piece_count(&runs, 0, runs.len()), 2);
+    // Too few word gaps to judge the line by.
+    let runs = two_runs("dictum  mauris.", "Nam  arcu");
+    assert_eq!(pieces_of(&runs, 0, runs.len()).len(), 2);
+}
+
+/// The runs of `lines` (each its runs: text, x, baseline, bold) and the pieces of each line.
+fn grid_input(lines: &[&[(&str, f32, f32, bool)]]) -> (Vec<TextRun>, Vec<Vec<Piece>>) {
+    let mut runs = Vec::new();
+    for (k, line) in lines.iter().enumerate() {
+        for &(t, x, y, bold) in line.iter() {
+            let mut r = run_at(t, x, y, k as u32);
+            r.bold = bold;
+            runs.push(r);
+        }
+    }
+    let mut pieces: Vec<Vec<Piece>> = Vec::new();
+    let mut start = 0;
+    while start < runs.len() {
+        let end = start
+            + runs[start..]
+                .iter()
+                .take_while(|r| r.line == runs[start].line)
+                .count();
+        pieces.push(pieces_of(&runs, start, end));
+        start = end;
+    }
+    (runs, pieces)
+}
+
+/// The rows of `lines` (each its runs: text, x, baseline, bold) read as a grid without rules:
+/// each row's cells as text, and how many of its lines stay lines of the row above them
+/// without clear evidence.
+fn grid_table(lines: &[&[(&str, f32, f32, bool)]]) -> (Vec<Vec<String>>, usize) {
+    let (runs, pieces) = grid_input(lines);
+    let table = grid_cells(&runs, &pieces, 2, false).expect("a table");
+    let rows = table
+        .rows
+        .iter()
+        .map(|r| {
+            r.iter()
+                .map(|c| {
+                    let mut ids = c.runs.clone();
+                    ids.sort_unstable();
+                    ids.iter()
+                        .map(|&i| runs[i].text.trim().to_string())
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .collect()
+        })
+        .collect();
+    (rows, table.unsure_lines)
+}
+
+/// The rows of [`grid_table`].
+fn grid_rows(lines: &[&[(&str, f32, f32, bool)]]) -> Vec<Vec<String>> {
+    grid_table(lines).0
+}
+
+/// The columns of the sparse tables of amounts below: a name and four amounts.
+const SPARSE_XS: [f32; 5] = [40.0, 200.0, 280.0, 360.0, 440.0];
+
+/// A line of a sparse table at the baseline `y`: its name at `x` and its amounts in their
+/// columns.
+fn sparse_line<'a>(
+    name: &'a str,
+    x: f32,
+    y: f32,
+    amounts: [&'a str; 4],
+) -> Vec<(&'a str, f32, f32, bool)> {
+    let mut line = Vec::new();
+    if !name.is_empty() {
+        line.push((name, x, y, false));
+    }
+    for (k, a) in amounts.iter().enumerate() {
+        if !a.is_empty() {
+            line.push((*a, SPARSE_XS[k + 1], y, false));
+        }
+    }
+    line
+}
+
+/// A sparse table of amounts with rows 14 points apart: a line of titles, two full rows, a
+/// thin line `step` under the second (its name at `x`, its amounts `thin`), and two more
+/// full rows at the pitch under it. Gives its rows and the lines kept without clear
+/// evidence.
+fn sparse_table(name: &str, x: f32, step: f32, thin: [&str; 4]) -> (Vec<Vec<String>>, usize) {
+    let y = 572.0 - step;
+    let lines = [
+        sparse_line("Type", 40.0, 600.0, ["Hours", "Rate", "Amount", "Year"]),
+        sparse_line("Salary", 40.0, 586.0, ["", "", "3.000,00", "36.000,00"]),
+        sparse_line("Overtime", 40.0, 572.0, ["10,00", "25,00", "250,00", ""]),
+        sparse_line(name, x, y, thin),
+        sparse_line("Tax", 40.0, y - 14.0, ["", "", "650,00", "7.800,00"]),
+        sparse_line("Rent", 40.0, y - 28.0, ["", "", "400,00", "4.800,00"]),
+    ];
+    let lines: Vec<&[(&str, f32, f32, bool)]> = lines.iter().map(Vec::as_slice).collect();
+    grid_table(&lines)
+}
+
+/// A thin line of a sparse table (fewer than half of its columns hold text) is never a row
+/// of its own, also when it starts at the edge of the first column a row step under the
+/// line above with an amount in the column of its kind: the page cannot tell such a row
+/// from the second line of the record above. It stays a line of that row, and the table
+/// counts it for its note.
+#[test]
+fn a_thin_line_in_the_first_column_at_the_row_pitch_stays_a_line_and_is_counted() {
+    let (rows, unsure) = sparse_table("Bonus", 40.0, 14.0, ["", "", "", "1.000,00"]);
+    assert_eq!(rows.len(), 5, "{rows:?}");
+    assert_eq!(
+        rows[2],
+        ["Overtime Bonus", "10,00", "25,00", "250,00", "1.000,00"]
+    );
+    assert_eq!(unsure, 1);
+    // The first line under the titles too: it joins the line over it and is counted.
+    let lines = [
+        sparse_line("Type", 40.0, 600.0, ["Hours", "Rate", "Amount", "Year"]),
+        sparse_line("Bonus", 40.0, 580.0, ["", "", "", "1.000,00"]),
+        sparse_line("Salary", 40.0, 566.0, ["", "", "3.000,00", "36.000,00"]),
+        sparse_line("Overtime", 40.0, 552.0, ["10,00", "25,00", "250,00", ""]),
+        sparse_line("Tax", 40.0, 538.0, ["", "", "650,00", "7.800,00"]),
+    ];
+    let lines: Vec<&[(&str, f32, f32, bool)]> = lines.iter().map(Vec::as_slice).collect();
+    let (rows, unsure) = grid_table(&lines);
+    assert_eq!(rows.len(), 4, "{rows:?}");
+    assert_eq!(unsure, 1);
+}
+
+/// A record whose name and whose text both wrap, in a table set at the leading of its
+/// text: the second line starts at the edge of the first column a row step under the
+/// first and has text in another column. Whatever that text is (words, a second article
+/// number under the article numbers, the end of a range under the dates, an amount under
+/// the amounts), the line stays a line of the row above, and the table says so. (The
+/// cells under the record open with a capital: words that go on in a small letter under
+/// it would read as prose, and the lines would be no table at all, as before.)
+#[test]
+fn a_wrapped_name_and_text_at_the_row_pitch_stay_in_their_record() {
+    let xs = [40.0f32, 140.0, 300.0, 360.0, 440.0];
+    let table = |second: [&'static str; 5]| {
+        let line = |y: f32, cells: [&'static str; 5]| -> Vec<(&'static str, f32, f32, bool)> {
+            cells
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| !t.is_empty())
+                .map(|(k, t)| (*t, xs[k], y, false))
+                .collect()
+        };
+        let lines = [
+            line(600.0, ["Item", "Text", "Qty", "Price", "Total"]),
+            line(588.0, ["Paper", "White", "2", "3,00", "6,00"]),
+            line(
+                576.0,
+                ["Folders for", "Sheets of plain", "4", "90,00", "360,00"],
+            ),
+            line(564.0, second),
+            line(552.0, ["Ink", "Black", "1", "5,00", "5,00"]),
+            line(540.0, ["Tape", "Clear", "9", "0,10", "0,90"]),
+        ];
+        let lines: Vec<&[(&str, f32, f32, bool)]> = lines.iter().map(Vec::as_slice).collect();
+        grid_table(&lines)
+    };
+    let (rows, unsure) = table(["the desk", "white stock", "", "", ""]);
+    assert_eq!(rows.len(), 5, "{rows:?}");
+    assert_eq!(
+        rows[2],
+        [
+            "Folders for the desk",
+            "Sheets of plain white stock",
+            "4",
+            "90,00",
+            "360,00"
+        ]
+    );
+    assert_eq!(unsure, 1);
+    // A value on the line changes nothing, in the column of its kind or out of it: a second
+    // number under the whole numbers (two article numbers of one record), an amount under
+    // the amounts, a number or a year under the words.
+    for second in [
+        ["the desk", "", "", "", "45,00"],
+        ["the desk", "", "2", "", ""],
+        ["the desk", "2", "", "", ""],
+        ["the desk", "2024", "", "", ""],
+        ["the desk", "45,00", "", "", ""],
+        ["the desk", "", "45,00", "", ""],
+    ] {
+        let (rows, unsure) = table(second);
+        assert_eq!(rows.len(), 5, "{second:?}: {rows:?}");
+        assert!(rows[2][0].ends_with("the desk"), "{second:?}: {rows:?}");
+        assert_eq!(unsure, 1, "{second:?}");
+    }
+    // The same with a column of dates and a column of rates: the end of a range under the
+    // dates and a rate under the rates stay lines of the record above, as they do under
+    // the words.
+    let wide = [40.0f32, 140.0, 270.0, 360.0, 440.0];
+    let dated = |second: [&'static str; 5]| {
+        let line = |y: f32, cells: [&'static str; 5]| -> Vec<(&'static str, f32, f32, bool)> {
+            cells
+                .iter()
+                .enumerate()
+                .filter(|(_, t)| !t.is_empty())
+                .map(|(k, t)| (*t, wide[k], y, false))
+                .collect()
+        };
+        let lines = [
+            line(600.0, ["Item", "Text", "Day", "Rate", "Total"]),
+            line(588.0, ["Paper", "White", "05.01.2026", "19 %", "6,00"]),
+            line(
+                576.0,
+                [
+                    "Folders for",
+                    "Sheets of plain",
+                    "06.01.2026",
+                    "7 %",
+                    "360,00",
+                ],
+            ),
+            line(564.0, second),
+            line(552.0, ["Ink", "Black", "07.01.2026", "19 %", "5,00"]),
+            line(540.0, ["Tape", "Clear", "08.01.2026", "7 %", "0,90"]),
+        ];
+        let lines: Vec<&[(&str, f32, f32, bool)]> = lines.iter().map(Vec::as_slice).collect();
+        grid_table(&lines)
+    };
+    for second in [
+        ["the desk", "", "09.01.2026", "", ""],
+        ["the desk", "", "", "7 %", ""],
+        ["the desk", "09.01.2026", "", "", ""],
+        ["the desk", "7 %", "", "", ""],
+        ["the desk", "", "7 %", "", ""],
+    ] {
+        let (rows, unsure) = dated(second);
+        assert_eq!(rows.len(), 5, "{second:?}: {rows:?}");
+        assert_eq!(unsure, 1, "{second:?}");
+    }
+}
+
+/// Thin lines make no table: the rows that show a table fill its columns. Two full rows and
+/// thin lines at the row pitch are fewer than the three rows a table without a caption
+/// needs.
+#[test]
+fn thin_lines_do_not_count_as_the_rows_a_table_needs() {
+    let lines = [
+        sparse_line("Bonus", 40.0, 600.0, ["", "", "", "1.000,00"]),
+        sparse_line("Meal", 40.0, 586.0, ["", "3,50", "", ""]),
+        sparse_line(
+            "Overtime",
+            40.0,
+            572.0,
+            ["10,00", "25,00", "250,00", "900,00"],
+        ),
+        sparse_line("Shift", 40.0, 558.0, ["12,00", "20,00", "240,00", "800,00"]),
+        sparse_line("Rent", 40.0, 544.0, ["", "", "", "4.800,00"]),
+    ];
+    let lines: Vec<&[(&str, f32, f32, bool)]> = lines.iter().map(Vec::as_slice).collect();
+    let (runs, pieces) = grid_input(&lines);
+    assert_eq!(
+        grid_cells(&runs, &pieces, 3, false).err(),
+        Some("too few rows")
+    );
+    let table = grid_cells(&runs, &pieces, 2, false).expect("a table");
+    assert_eq!(table.rows.len(), 2);
+    assert_eq!(table.unsure_lines, 2);
+}
+
+/// A thin line always stays a line of the row above it. The table counts it for its note
+/// unless the page shows that it goes on that row: it stands closer than the rows do
+/// (`CLOSER`), it is indented against the first column (`TITLE_ALIGN`), or it has no text in
+/// the first column.
+#[test]
+fn a_thin_line_is_counted_unless_the_page_shows_that_it_goes_on() {
+    let joined = ["Overtime Bonus", "10,00", "25,00", "250,00", "1.000,00"];
+    let thin = ["", "", "", "1.000,00"];
+    // The step of the line against the row pitch of 14 points: under 0.9 of it the line is
+    // closer and is not counted.
+    for (step, unsure) in [(12.5, 0), (12.7, 1), (13.2, 1), (13.4, 1), (14.0, 1)] {
+        let (rows, n) = sparse_table("Bonus", 40.0, step, thin);
+        assert_eq!(rows[2], joined, "a step of {step}: {rows:?}");
+        assert_eq!((rows.len(), n), (5, unsure), "a step of {step}");
+    }
+    // Indented by more than a quarter of the size (2.5 points at size 10): not counted.
+    for (x, unsure) in [(42.0, 1), (43.0, 0)] {
+        let (rows, n) = sparse_table("Bonus", x, 14.0, thin);
+        assert_eq!(rows[2], joined, "at {x}: {rows:?}");
+        assert_eq!((rows.len(), n), (5, unsure), "at {x}");
+    }
+    // No text in the first column: a word under the row's values goes on, not counted.
+    let (rows, n) = sparse_table("", 40.0, 14.0, ["", "net", "", ""]);
+    assert_eq!(rows[2], ["Overtime", "10,00", "25,00 net", "250,00", ""]);
+    assert_eq!((rows.len(), n), (5, 0));
+}
+
+/// A thin line that holds a name alone at the row pitch may be the second line of the name
+/// above or a row without amounts: it stays a line of the row above, and the table says so.
+/// So do thin lines with an amount in a table that shows no row pitch (no two full rows
+/// follow each other).
+#[test]
+fn a_thin_line_without_clear_evidence_stays_a_line_of_the_row_above() {
+    let (rows, n) = sparse_table("Bonus", 40.0, 14.0, ["", "", "", ""]);
+    assert_eq!(rows[2], ["Overtime Bonus", "10,00", "25,00", "250,00", ""]);
+    assert_eq!((rows.len(), n), (5, 1));
+    let lines = [
+        sparse_line("Type", 40.0, 600.0, ["Hours", "Rate", "Amount", "Year"]),
+        sparse_line("Bonus", 40.0, 586.0, ["", "", "", "1.000,00"]),
+        sparse_line("Overtime", 40.0, 572.0, ["10,00", "25,00", "250,00", ""]),
+        sparse_line("Meal", 40.0, 558.0, ["", "3,50", "", ""]),
+        sparse_line("Tax", 40.0, 544.0, ["", "", "650,00", "7.800,00"]),
+    ];
+    let lines: Vec<&[(&str, f32, f32, bool)]> = lines.iter().map(Vec::as_slice).collect();
+    let (rows, n) = grid_table(&lines);
+    assert_eq!(rows.len(), 3, "{rows:?}");
+    assert_eq!(n, 2);
+}
+
+/// A description whose values stand on its second line: its first line stands
+/// over the row's anchor after a blank under the bold header, so it goes with the row under it;
+/// the lines under the values stay with that row.
+#[test]
+fn a_line_over_a_rows_values_after_a_blank_goes_with_that_row() {
+    let rows = grid_rows(&[
+        &[
+            ("Pos", 40.0, 600.0, true),
+            ("Text", 70.0, 600.0, true),
+            ("Betrag", 400.0, 600.0, true),
+        ],
+        &[("Wartung der Anlage", 70.0, 582.0, false)],
+        &[
+            ("1", 40.0, 570.0, false),
+            ("im Haus", 70.0, 570.0, false),
+            ("250,00", 400.0, 570.0, false),
+        ],
+        &[("mit Anfahrt", 70.0, 558.0, false)],
+        &[
+            ("2", 40.0, 540.0, false),
+            ("Pumpe", 70.0, 540.0, false),
+            ("120,00", 400.0, 540.0, false),
+        ],
+    ]);
+    assert_eq!(
+        rows[1],
+        ["1", "Wartung der Anlage im Haus mit Anfahrt", "250,00"]
+    );
+    assert_eq!(rows[2], ["2", "Pumpe", "120,00"]);
+}
+
+/// Without a header row, bold item names over plain detail
+/// lines keep their detail lines (the first row is no header: its values are plain); and a
+/// detail line set apart under its own row, not in a column of the row under it, stays.
+#[test]
+fn detail_lines_stay_with_their_rows() {
+    let rows = grid_rows(&[
+        &[
+            ("Becher", 40.0, 600.0, true),
+            ("2", 300.0, 600.0, false),
+            ("12,50", 400.0, 600.0, false),
+        ],
+        &[("Steingut", 40.0, 588.0, false)],
+        &[
+            ("Kanne", 40.0, 576.0, true),
+            ("1", 300.0, 576.0, false),
+            ("34,56", 400.0, 576.0, false),
+        ],
+        &[("Glas", 40.0, 564.0, false)],
+        &[
+            ("Korb", 40.0, 552.0, true),
+            ("4", 300.0, 552.0, false),
+            ("7,80", 400.0, 552.0, false),
+        ],
+    ]);
+    assert_eq!(rows[0], ["Becher Steingut", "2", "12,50"]);
+    assert_eq!(rows[1], ["Kanne Glas", "1", "34,56"]);
+    // A detail line under its row by more than the rows' step, indented past every column
+    // start of the row under it: it stays.
+    let rows = grid_rows(&[
+        &[
+            ("Becher", 40.0, 600.0, false),
+            ("2", 300.0, 600.0, false),
+            ("12,50", 400.0, 600.0, false),
+        ],
+        &[("Steingut", 60.0, 582.0, false)],
+        &[
+            ("Kanne", 40.0, 576.0, false),
+            ("1", 300.0, 576.0, false),
+            ("34,56", 400.0, 576.0, false),
+        ],
+        &[
+            ("Korb", 40.0, 564.0, false),
+            ("4", 300.0, 564.0, false),
+            ("7,80", 400.0, 564.0, false),
+        ],
+    ]);
+    assert_eq!(rows[0], ["Becher Steingut", "2", "12,50"]);
+}
+
+#[test]
+fn a_joint_of_a_rule_parts_two_titles_less_than_a_cell_gap_apart() {
+    // `No.` and `Article` 7 points apart at size 10 are one piece; the joint of the rule
+    // under them at x 60 stands in that white space and parts them.
+    let runs = [
+        run_at("No.", 30.0, 100.0, 0),
+        run_at("Article", 55.0, 100.0, 0),
+        run_at("Count", 300.0, 100.0, 0),
+    ];
+    let pieces = vec![pieces_of(&runs, 0, 3)];
+    assert_eq!(pieces[0].len(), 2);
+    let cut = super::grid::cut_at_breaks(&runs, &pieces, &[51.5]);
+    let ends: Vec<(usize, usize)> = cut[0].iter().map(|p| (p.start, p.end)).collect();
+    assert_eq!(ends, [(0, 1), (1, 2), (2, 3)]);
+    assert_eq!((cut[0][0].x1, cut[0][1].x0), (48.0, 55.0));
+    // A joint at a word space, and one inside a run, part nothing.
+    let sentence = [
+        run_at("The", 30.0, 100.0, 0),
+        run_at("old lamp", 51.0, 100.0, 0),
+    ];
+    let pieces = vec![pieces_of(&sentence, 0, 2)];
+    for x in [49.5, 70.0] {
+        let cut = super::grid::cut_at_breaks(&sentence, &pieces, &[x]);
+        assert_eq!(cut[0].len(), 1, "{x}");
+    }
+    // No joints: the pieces as they are.
+    assert_eq!(
+        super::grid::cut_at_breaks(&sentence, &pieces, &[])[0].len(),
+        1
+    );
+}
+
+/// A label and its value a word space apart are cut where the value starts at
+/// the left edge the values of the other lines share, never by the gap.
+#[test]
+fn a_value_a_word_space_after_its_label_is_cut_at_the_shared_edge() {
+    // Runs of size 10, 6 points a character, with their glyph gaps.
+    let one = [run_at("Customer reference 20481", 40.0, 600.0, 1)];
+    // `20481` starts at 40 + 19 * 6 = 154.
+    let (labels, values) = ([40.0f32, 40.0, 40.0], [154.0f32, 154.0, 154.0]);
+    assert_eq!(value_cut(&one, (0, 1), &labels, &values), Some((0, 19)));
+    // Two runs: between them.
+    let two = [
+        run_at("Customer reference", 40.0, 600.0, 1),
+        run_at("20481", 154.0, 600.0, 1),
+    ];
+    assert_eq!(value_cut(&two, (0, 2), &labels, &values), Some((1, 0)));
+    // The edge moved both ways: within the share of the size it is the edge, past it not.
+    let near = VALUE_EDGE * 10.0;
+    for (off, cut) in [(0.9 * near, true), (-0.9 * near, true), (1.2 * near, false)] {
+        let values = [154.0 + off; 3];
+        // A value starting left of the edge by more than the share is no edge either.
+        assert_eq!(
+            value_cut(&one, (0, 1), &labels, &values).is_some(),
+            cut,
+            "off {off}"
+        );
+    }
+    // One other value at the edge is no shared edge; nor are values set flush right, whose
+    // left edges differ; nor an edge the labels of the other lines do not start at.
+    assert_eq!(value_cut(&one, (0, 1), &labels, &[154.0]), None);
+    assert_eq!(
+        value_cut(&one, (0, 1), &labels, &[154.0, 148.0, 142.0]),
+        None
+    );
+    assert_eq!(value_cut(&one, (0, 1), &[52.0, 52.0], &values), None);
+    // A line of text over both columns whose word starts at the edge by chance is no label
+    // and its value: the word is no number, date or code, and no colon stands before it.
+    let prose = [run_at("Customer reference hereby", 40.0, 600.0, 1)];
+    assert_eq!(value_cut(&prose, (0, 1), &labels, &values), None);
+    let colon = [run_at("Customer reference: hereby", 40.0, 600.0, 1)];
+    assert_eq!(
+        value_cut(&colon, (0, 1), &labels, &[160.0, 160.0, 160.0]),
+        Some((0, 20))
+    );
+}
+
+/// The lines of [`a_value_a_word_space_after_its_label_is_cut_at_the_shared_edge`] as a grid:
+/// the glued line is a row of two cells, cut inside its run.
+#[test]
+fn a_grid_cuts_a_glued_label_and_value_at_the_value_column() {
+    let runs = vec![
+        run_at("Order", 40.0, 640.0, 0),
+        run_at("4711", 154.0, 640.0, 0),
+        run_at("Customer reference 20481", 40.0, 628.0, 1),
+        run_at("Depot", 40.0, 616.0, 2),
+        run_at("D-17", 154.0, 616.0, 2),
+        run_at("Parcels", 40.0, 604.0, 3),
+        run_at("12", 154.0, 604.0, 3),
+    ];
+    let lines = [(0, 2), (2, 3), (3, 5), (5, 7)];
+    let pieces: Vec<Vec<Piece>> = lines.iter().map(|&(a, z)| pieces_of(&runs, a, z)).collect();
+    assert_eq!(pieces[1].len(), 1, "the glued line is one piece");
+    let grid = grid_cells(&runs, &pieces, 2, false).expect("a grid");
+    assert_eq!(grid.rows.len(), 4);
+    assert!(grid.rows.iter().all(|r| r.len() == 2), "two cells a row");
+    // The cut inside the run of row 1: its cell 0, its first run, at the byte of `20481`.
+    assert_eq!(grid.cuts, vec![(1, 0, 0, 19)]);
+}

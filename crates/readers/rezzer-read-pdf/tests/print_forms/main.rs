@@ -23,7 +23,7 @@ mod sections;
 mod text;
 
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use dates::*;
 use grids::*;
@@ -88,6 +88,72 @@ fn assert_no_loss(out: &ReadOutcome) {
     assert!(out.document.losses.is_empty(), "{:?}", out.document.losses);
 }
 
+/// The read is complete, the blocks at `at` are kept as laid out (no region type has clear
+/// evidence for them; their text stands as laid out), and no other loss is named than the
+/// note of each such block that holds more than one piece of text: one line of one piece
+/// reads as it stands and gets no note.
+fn assert_no_loss_but_laid_out(out: &ReadOutcome, at: &[&str]) {
+    assert_eq!(
+        out.completeness,
+        Completeness::Complete,
+        "{:?}",
+        out.document.losses
+    );
+    let got: Vec<(&str, &str)> = out
+        .document
+        .losses
+        .iter()
+        .map(|l| (l.location.as_str(), l.what.as_str()))
+        .collect();
+    // The pieces with text of the block kept as laid out at each anchor.
+    let pieces = |anchor: &str| -> Option<usize> {
+        out.document
+            .body
+            .iter()
+            .flat_map(|s| match s {
+                Block::Section { blocks, .. } => blocks.as_slice(),
+                _ => &[],
+            })
+            .find_map(|b| match b {
+                Block::Spatial {
+                    lines,
+                    anchor: Some(a),
+                    ..
+                } if a.0 == anchor => Some(
+                    lines
+                        .iter()
+                        .flat_map(|l| &l.pieces)
+                        .filter(|p| !p.text.trim().is_empty())
+                        .count(),
+                ),
+                _ => None,
+            })
+    };
+    let mut noted: Vec<&str> = Vec::new();
+    for b in at {
+        match pieces(b) {
+            Some(1) => {}
+            Some(_) => noted.push(b),
+            None => panic!("no block kept as laid out at {b}: {:?}", out.document.body),
+        }
+    }
+    let want: Vec<String> = noted
+        .iter()
+        .map(|b| {
+            format!(
+                "the region at {b} is kept as laid out, line by line: no region type \
+                 has clear evidence for it"
+            )
+        })
+        .collect();
+    let want: Vec<(&str, &str)> = noted
+        .iter()
+        .copied()
+        .zip(want.iter().map(String::as_str))
+        .collect();
+    assert_eq!(got, want, "{:?}", out.document.losses);
+}
+
 /// The read is complete and names no loss but the one for the date in the head that nothing
 /// marks as the document date (the `Eintritt` field of the boxed fields).
 fn assert_no_loss_but_the_head_date(out: &ReadOutcome) {
@@ -106,14 +172,19 @@ fn assert_no_loss_but_the_head_date(out: &ReadOutcome) {
     assert_eq!(what, [ONE_DATE], "{:?}", out.document.losses);
 }
 
+/// Every text run of the synthetic print-run form is in exactly one region of its page.
+#[test]
+fn every_run_is_in_one_region() {
+    common::assert_every_run_in_one_region(&common::synthetic_print_form());
+}
+
 /// The golden file of the synthetic print-run form: its Markdown and its JSON are kept as
 /// snapshots, so a later change of the reader shows in them. The facts next to them hold
 /// whatever the snapshots say; [`read`] also checks that no placeholder reaches either.
 ///
-/// Known wrong order, pinned on purpose until the region engine reads it: the labels over the
-/// boxed amount and the boxed date in one column come before both values
-/// (`Betrag`, `Zahltag`, `9876,54`, `28.02.2026`). Wanted: each label with its own value,
-/// `Betrag` 9876,54 then `Zahltag` 28.02.2026. The snapshot changes when that is fixed.
+/// The labels over the boxed amount and the boxed date in one column are read each with its
+/// own value: `Betrag` 9876,54, then `Zahltag` 28.02.2026 (shape `labels over boxed
+/// values in one column`).
 #[test]
 fn synthetic_print_form_golden() {
     let out = read(&common::synthetic_print_form());

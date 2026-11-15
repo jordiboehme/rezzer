@@ -251,7 +251,7 @@ fn no_math_drops_the_math_column() {
     // The second run renders the cached model: math is no part of the cache key.
     let without = logic(&["--no-math"]);
     assert_eq!(env.cache_entries(), 1);
-    assert!(without.contains("### Structural\\_Lining"), "{without}");
+    assert!(without.contains("### Structural_Lining"), "{without}");
     assert!(!without.contains("Math"), "{without}");
     assert!(!without.contains("$`"), "{without}");
 }
@@ -392,7 +392,7 @@ fn output_dir_writes_main_and_parts() {
 
 #[test]
 fn output_dir_can_be_the_source_folder() {
-    // The parts and pictures folders never take the source's own name (ruling P5-AA).
+    // The parts and pictures folders never take the source's own name.
     let env = Env::new();
     let book = env.file("book.markdown", long_markdown().as_bytes());
     for _ in 0..2 {
@@ -549,6 +549,52 @@ fn help_mentions_part_size() {
          next to it, <file name>.parts.",
     );
     assert!(help.contains(&sentence), "{help}");
+}
+
+/// `rezzer read --help` names `--notes` with its levels, its default and why it helps.
+#[test]
+fn help_describes_the_notes_option() {
+    let env = Env::new();
+    let out = env.cmd().args(["read", "--help"]).output().expect("help");
+    assert!(out.status.success());
+    let join = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let help = join(&String::from_utf8_lossy(&out.stdout));
+    assert!(help.contains("--notes <full|brief|none>"), "{help}");
+    for sentence in [
+        "Notes cost tokens, and many only say how something was read.",
+        "Default from the config file, else brief.",
+        "Where it leaves out rows of \"Not read\", one line there says how many.",
+        "none shows no notes and says so in one line where it leaves something out.",
+        "It changes only the Markdown: --json prints the full model",
+    ] {
+        assert!(help.contains(sentence), "{sentence}: {help}");
+    }
+}
+
+#[test]
+fn notes_flag_sets_the_level() {
+    let env = Env::new();
+    let book = env.file("book.xlsx", &corpus("DataValidations-49244.xlsx"));
+    let read = |level: &str| {
+        let out = env
+            .cmd()
+            .args(["read", "--notes", level])
+            .arg(&book)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0), "{out:?}");
+        stdout_of(&out)
+    };
+    assert!(read("full").contains("found by rules: empty-row gaps"));
+    let brief = read("BRIEF");
+    assert!(!brief.contains("empty-row gaps"), "{brief}");
+    assert!(brief.contains("`--notes full` shows them."), "{brief}");
+    env.cmd()
+        .args(["read", "--notes", "some"])
+        .arg(&book)
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("full, brief or none"));
 }
 
 #[test]

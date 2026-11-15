@@ -1340,6 +1340,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "layoutregions"
+version = "0.1.0"
+
+[[package]]
 name = "libc"
 version = "0.2.191"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2168,8 +2172,10 @@ dependencies = [
 name = "rezzer-layout"
 version = "0.1.0"
 dependencies = [
+ "layoutregions",
  "rezzer-limits",
  "rezzer-model",
+ "serde_json",
  "sheetlayout",
 ]
 
@@ -2285,12 +2291,15 @@ dependencies = [
  "hayro-syntax",
  "insta",
  "kurbo",
+ "layoutregions",
  "libc",
  "pdfparts",
  "read-fonts 0.47.0",
+ "rezzer-layout",
  "rezzer-limits",
  "rezzer-model",
  "rezzer-render",
+ "scorecard",
  "serde_json",
  "sha2",
  "skrifa 0.50.0",
@@ -2483,6 +2492,18 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+
+[[package]]
+name = "scorecard"
+version = "0.1.0"
+dependencies = [
+ "lopdf",
+ "pdfparts",
+ "quick-xml",
+ "rezzer-model",
+ "serde_json",
+ "tempfile",
+]
 
 [[package]]
 name = "semver"

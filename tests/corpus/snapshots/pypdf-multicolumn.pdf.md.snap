@@ -43,7 +43,7 @@ title_from: "largest heading in the top third of page 1"
 | Key | Value |
 | --- | --- |
 | creator | TeX |
-| pdf\_version | 1.5 |
+| pdf_version | 1.5 |
 | producer | pdfTeX-1.40.21 |
 
 :status[Page 1]{grey}

@@ -11,13 +11,14 @@ Built on (versions as used in the development version):
 - Rezzer's own crate pdfparts for the object layer. It has its own bounded parser for the file and uses [lopdf](https://crates.io/crates/lopdf) 0.46.0 only on a clean copy it writes itself. It reads metadata, page labels, outline, links, annotations, the tag tree, attachments, layers, threads, forms, scripts, signatures and revisions
 - [hayro](https://crates.io/crates/hayro) 0.8.0 (with hayro-interpret and hayro-syntax) for the text with its position on the page, the exact glyph boxes under an annotation, page renders and as a fallback parser for broken files
 - Rezzer's own crate barcodes for barcodes and QR codes. It uses [rxing](https://crates.io/crates/rxing) 0.9.3 (Apache-2.0) with bounds of its own
-- Rezzer's own reader for the interpretation: reading order, headings, tables, the form logic, field formats in words and revision diffs
+- Rezzer's own crate layoutregions for the layout of a page: its regions, the kind of each region with the evidence for it and the reading order
+- Rezzer's own reader for the interpretation: headings, tables, the form logic, field formats in words and revision diffs
 
 ## What Rezzer reads
 
 ### Structure
 
-- Text in reading order, also on two-column pages. Every page starts with a marker that names its label and its number in the file
+- Text in reading order, also in columns and in sections side by side (see "The layout of a page" below). Every page starts with a marker that names its label and its number in the file
 - Headings, lists and tables come from the tag tree when the PDF is tagged. Untagged PDFs get headings from the font size:
   - Bold is read from the font, also from the names of TeX fonts (`cmbx` and similar), whose files do not say their weight.
   - Sizes are counted by the characters with ink, so the padding of a form's data lines does not count.
@@ -31,7 +32,7 @@ Built on (versions as used in the development version):
   - The footnote text starts after its marker, because the label already names it.
   - A raised number that the legend does not explain stays text, set apart from its word.
   - A legend entry that no marker above points to stays a paragraph with its marker, because Markdown viewers hide a footnote that nothing refers to.
-  - A legend line is never counted for the body size of the page. A note at the top of the page says how the footnotes were found.
+  - A legend line is never counted for the body size of the page. With `--notes full`, a note at the top of the page says how the footnotes were found.
   - A legend set in columns is cut into its footnotes, and an entry that wraps onto the next line stays whole
 - Tables as cells. A tagged PDF gives its tables from the tag tree. On untagged pages Rezzer rebuilds a table from a grid of drawn lines, or from text in columns with white space between them
 - A form often draws one grid over several sections with columns of their own. Rezzer cuts such a grid at a line across its width where the columns above and below differ, or where a header row starts whose column lines hang from its top. Each section is judged as a grid of its own. A section with text that is refused is named as a loss
@@ -40,6 +41,7 @@ Built on (versions as used in the development version):
 - Where a column line crosses a run of text in the space between two words (a value line padded into its fields), the text is cut there. A line inside a word cuts nothing
 - A grid with more than 15 columns or with more than 60 % empty cells is read as a form or a chart. Rows of narrow boxes with one digit each (a boxed number field) are read as text, not as a table
 - In a table without lines at least 80 % of the rows must stay inside the columns. The cells must be short (under 40 characters on median, unless most are numbers). A table that fails a check stays text, with a note that names the check
+- In a table without lines a line that fills fewer than half of the columns is never a row of its own. It stays in the row above, each of its texts on a line of its own in its cell. When such a line starts in the first column and stands about a row step or more under the line above it, it may be a row of its own, and a note under "Not read" says so. The note is also given when the table does not show its row step. Such lines never make a table: the table needs enough rows that fill its columns
 - Running headers and footers are marked in the JSON model; the Markdown keeps them as text. Text that is invisible on the page is listed apart, with its render mode
 - Outline (bookmarks) with level, title and target page
 - Page labels (i, ii, iii, then 1, 2, 3 and so on)
@@ -47,6 +49,74 @@ Built on (versions as used in the development version):
 - Article threads (reading paths across pages)
 - Arabic text and vertical Japanese text in logical order
 - A large PDF written with `-o` becomes `<file name>.md` plus parts in `<file name>.parts/`: one part per chapter of the outline with its pages, like `pages 53 to 61`, and long tables cut into row ranges
+
+### The layout of a page
+
+A PDF page has no paragraphs and no tables. It has pieces of text at places, drawn lines and pictures. Rezzer reads this layout to find what the page means. It does not copy the layout.
+
+Regions:
+
+- Rezzer cuts each page into regions. It cuts at the boxes and grids the page draws, at the white space between columns and blocks and where the style of the text changes. Every piece of text ends in exactly one region
+- Each region gets one kind: paragraph, heading, list, table, label and value pairs, totals, picture, barcode, footnotes, running header or running footer. The title on page 1 is a kind of its own
+- A kind needs evidence. Each kind looks for its own signs in the region. For a table these are drawn cells, a header row and columns that the rows share. The signs add up to a score from 0 to 1000. A kind wins only when its score is high enough and clearly ahead of the next kind
+- Where it can, Rezzer measures against the file itself, not against fixed numbers: its body text size, its heading sizes, the gaps between its lines. So a page set larger or smaller is read by the same rules
+- In a tagged PDF a region that the tags state keeps the kind the tags give it
+
+Reading order:
+
+- Columns are read one after the other, each from top to bottom. A title, a picture or a table across the columns parts them into bands
+- Sections side by side are read one after the other, not line by line across both
+- A label stays with its value. Rezzer pairs them in drawn boxes, in rows of fields between rules, on `Label: value` lines, for a label over its value and for a row of labels over the row of their values. The pairs become a table of label and value pairs
+- The rows of a table stay in order, a heading stands before its section and a caption stays with its picture
+- The order of blocks that do not depend on each other has no meaning: an address beside a date box, boxes at the side, the columns of a footer. It can differ from the order you would read them in
+
+A region that no kind is clear for:
+
+- When no kind is clear, Rezzer doesn't guess. The region is kept as laid out
+- Its text is written as plain lines in reading order, one line of the page per line. Pieces that stand apart on a line get a wider gap. A line that starts further right than the leftmost line of its region keeps its indent. Where the widest indent of a region is over 32 characters, its indents are scaled down to that. The JSON keeps the true columns
+- Regions that follow one another and line up in the same columns (a row of labels over a row of values) are written as one `text` block, each piece in its column. There the place of a piece is its meaning. A `text` block shows no bold or italic; the JSON keeps them
+- With `--notes full`, a note under "Not read" names each such region and says why, for example: `the region at p1:b30 is kept as laid out, line by line: no region type has clear evidence for it` (`p1:b30` is block 30 of page 1). A region that is one line with one piece of text gets no such note: it reads as it stands. The JSON still lists it as `spatial` and `unsure`. It keeps its note in three cases: a limit left it whole, it is written in columns with other blocks, or the note names a kind it reads as (for example `it reads as header band or as heading about equally`)
+- When the layout says more than the plain lines do (two lines or more, with pieces side by side or with different indents), the area of the region is listed as a picture that needs vision, like `text kept as laid out at p1:b30, box 310, 511 to 539, 542`. With an output directory Rezzer cuts it out of the page render and writes it as `page-<N>-region-<K>.png`, so an agent that can see pictures can look at it
+- A file gets at most 50 such pictures. A note says how many regions got none. They keep their lines
+- No text is lost and no text stands twice
+
+Merged cells:
+
+- A merged cell has its text in its first cell. The cells it covers stay empty
+- One note under the table names the merged cells by their text and place, for example: ``Merged cells: `VAT total:` (row 5 column 1) over 2 columns. Each has its text in its first cell, the cells it covers are empty.`` It names at most 20 cells and then says how many more there are
+
+Found-by notes:
+
+- Where Rezzer read pairs, a column of totals, footnotes or drawn separators from the layout alone, a note that starts with `Found by:` says how. For example: `Found by: label and value pairs from drawn boxes; the label is the smaller text at the top of each box.` The default `--notes brief` keeps only the note on separators, as it says that Rezzer wrote a character into values. `--notes full` shows all of them
+- The note stands before the first block of its kind on the page (the notes for footnotes and separators at the top of the page). Each kind of note stands once on each page where it applies
+
+How many notes you get:
+
+- Notes cost an agent tokens, and many of them only say how a page was read. So the default `--notes brief` leaves those out: the note on a region kept as laid out because no kind is clear for it (also when two kinds read about equally, or one not clearly enough), the `Found by:` notes on pairs and on a column of totals, and the note on footnotes when all of them are linked to their markers
+- `brief` keeps every note that touches a value or says that something is missing, where it stands: merged cells, a table line that may be a row of its own, a possible table not rebuilt, pages written as plain lines because the time ran out, hidden text, the note on separators drawn as marks, a region that reads as a table or as pairs that could not be built, a region whose bold or italic text is marked in the JSON only, footnotes not linked to a marker, pictures that need vision and every limit, warning and error
+- One line under "Not read" says how many of its rows were left out. A `Found by:` note is no gap, so it goes without a line. `--notes full` shows all notes, as before. `--notes none` shows no notes and says so in one line where it leaves something out. Pictures stay listed with their need of vision at every level
+- The JSON and the `losses` count in the frontmatter are the same at every level
+
+Regions in the JSON:
+
+- The JSON model lists the regions of every page in `regions`. The Markdown does not show this list
+- `kind`: `header_band`, `footer_band`, `title_block`, `heading`, `paragraph`, `list`, `table`, `label_value`, `totals`, `figure`, `code`, `footnote_legend` or `spatial` (a region kept as laid out)
+- `page` and `anchor`: the page and the block or table the region became, like `p1:b30` or `p1:t2`
+- `bounds`: the box of the region on the page in points, as `x0, y0, x1, y1` from the lower left corner
+- `certainty`: `exact` (the file states it), `rule` (found from the layout) or `unsure`. A region that is `unsure` with the kind `spatial` is kept as laid out. Text that a table finder did not read is `unsure` too, but it keeps its kind and is written as usual
+- `score` and `evidence`: the score from 0 to 1000 and the signs that gave the kind, each with an id and its words, like `heading.size_ratio` with `1.27 times the body size`
+- A table, a group of pairs or a row of fields that one of Rezzer's own finders found has the score 1000 and names the finder in its evidence, like `pdf.borderless.grid` with `a table without rules, found from its columns`. The score is no measure there
+- Text that such a finder looked at and did not read stays the paragraphs, headings or lists it reads as. Its region is marked `unsure` and has the score 0. Its evidence says why the finder did not read it, like `pdf.borderless.refused` with `some of its text stands between its columns`
+- `alternatives`: the kinds that also fit and lost, with their scores
+- A region kept as laid out is a block of type `spatial` in the body. Its `lines` hold `pieces`, each with its text and the character column `col` where it starts. Bold, italic, links and footnote references are in the `spans` of a piece
+- `grid` says where such a block stands on the page. `col` is the column of its left edge, counted from the leftmost text of the page in character widths. `joins` marks a block that goes on in the columns of the block before it
+
+Large files and the time limit:
+
+- The work on one page is bounded, also on a page with tens of thousands of pieces. A part that a bound leaves uncut is kept as laid out, and its note says that a bound left it whole
+- When a file is too large for its time limit, Rezzer stops reading text early enough to write what it has read
+- Pages it has no time to lay out are written as plain lines, one line of the page per line. Headings, lists, tables and columns are not looked for there. One note names these pages
+- A second note names the pages whose text was not read. Nothing is dropped without a word
 
 ### Metadata
 
@@ -66,9 +136,9 @@ Pay slips, tax notices and similar forms are often printed in two layers: a temp
 
 - Each line of the data layer is read, also when it is moved into place on its own. The padding is no text: a value starts where its ink starts, and spaces are not counted for the size of the text
 - A label in the template and a value padded onto the same line read as one line, label first, like `Auszahlungsbetrag 1.234,56`
-- Boxed fields: a drawn box with a small label at its top and a value under it is a field. Fields in a row or in a column of boxes become one table of label and value pairs. A box with only its label is an empty field, shown as a grey `empty` mark. A note before the table says: `Found by: label and value pairs from drawn boxes; the label is the smaller text at the top of each box.`
-- Rows of fields between rules: a header grid whose column lines hang from the rule above, or a block of labels with their values on the same lines, is read the same way. Each label is smaller than its value and pairs with the value beside it or under it. The note says: `Found by: label and value pairs from rows of fields between drawn rules; each label is the smaller text and pairs with the value beside it or under it.`
-- A column of totals: a narrow column drawn with horizontal rules only, beside a grid whose rules line up with it, joins that grid as one more column. Each total label in it pairs with the amount under it. The note says that the amounts of the column are read as one more column of the table
+- Boxed fields: a drawn box with a small label at its top and a value under it is a field. Fields in a row or in a column of boxes become one table of label and value pairs. A box with only its label is an empty field, shown as a grey `empty` mark. With `--notes full`, a note before the table says: `Found by: label and value pairs from drawn boxes; the label is the smaller text at the top of each box.`
+- Rows of fields between rules: a header grid whose column lines hang from the rule above, or a block of labels with their values on the same lines, is read the same way. Each label is smaller than its value and pairs with the value beside it or under it. With `--notes full` the note says: `Found by: label and value pairs from rows of fields between drawn rules; each label is the smaller text and pairs with the value beside it or under it.`
+- A column of totals: a narrow column drawn with horizontal rules only, beside a grid whose rules line up with it, joins that grid as one more column. Each total label in it pairs with the amount under it. With `--notes full` a note says that the amounts of the column are read as one more column of the table
 - A header band of drawn cells over value lines: each value line is cut at the column edges of the band, and the lines are the rows of the table. An empty field stays an empty cell in its column
 - One grid over several sections with columns of their own is cut into one table for each section
 - Separators drawn as marks: some forms print an amount or a date in a row of boxes, one digit a box, and draw the decimal comma or the date points as small marks between the boxes. Rezzer puts the separator back into the number, written as the file writes amounts and dates as text elsewhere. A note at the top of the page says how many separators were found this way and how they are written, for example: `Found by: 1 decimal separator and 2 date separators on this page are drawn marks, not text; they are written as "," and "." as in 15 amounts and 2 dates written as text in this file.`
@@ -240,7 +310,9 @@ QR Code: [https://example.org/t/dNuKThV1](https://example.org/t/dNuKThV1)
 - Scripts are listed, never run. When a script builds field names at run time, the dependency is marked "unknown, see script"
 - Tables marked only by a rule at the top and at the bottom (as in many scientific papers) stay paragraphs. A note says "Possible table on page N not rebuilt" with the reason
 - A header row of several lines is found by bold text or font size, not by its fill color alone
-- Header icons drawn with curves are not marked
+- A column title drawn as an icon is not read. Its cell stays empty and a note under "Not read" names the cell. On a page that draws more than 8,192 curved or slanted shapes the icons past them are not found. The table then notes that the drawings were looked at only in part. An empty cell of the first row that is struck out with a cross is named in the same way
+- An item table with one row is read as lines: the header row in one line, then the position, the description, the quantity and the price of the row in order. It is not rebuilt as a table
+- A word space is left out where a file prints a line in pieces and starts each piece where the space before it starts, in two places of the line or more. A piece that starts inside the space keeps it. A line with only one such place keeps the space, also when no gap is printed there
 - Some line breaks are joined: lines of verse with five words or more, two-line blocks that are aligned right, label pairs and lines like "Suite 200 of the / Old Mill Building". No text is lost
 - Tables on pages with form fields and tables inside pictures are not rebuilt
 - Scans without a text layer need OCR. OCR is a separate, optional part of Rezzer. Until then the page is rendered and listed as needing vision
@@ -263,6 +335,21 @@ QR Code: [https://example.org/t/dNuKThV1](https://example.org/t/dNuKThV1)
 - A legend of footnotes that stands at the foot of both pages of a two-page form is taken as a running footer. Its text is kept, but the markers above stay text and do not link to the footnotes
 - A label over a boxed amount and a label over a boxed date in the same column are read first, before both values. The values keep their separators
 - On a form page, a block of two text columns can be read in bands across both columns, with each printed line as its own paragraph (the directions on the front of the SF 1199A form)
+- When a file is too large for its time limit, the pages Rezzer has no time to lay out are written as plain lines. Headings, lists, tables and columns are not found there, pictures are not listed and links are not attached. When page 1 is among them, the title and the date of the file are not looked for on it. A note under "Not read" names these pages and says so
+- A block in columns that a table finder looks at and does not read as a table stays the paragraphs, headings or lists it reads as. The lines of a paragraph are joined as in any paragraph and it gets no picture. A note under "Not read" says why it is no table, and the JSON marks its region `unsure`
+- A region that no kind is clear for is kept as plain lines, not read as a table or as pairs. With `--notes full`, the note under "Not read" names each one that holds more than one piece of text
+- Rows of a small table that stand far apart can be cut into regions of one line each. They are then written as one `text` block in their columns, not as a table
+- In such a `text` block a value set larger than its label can end out of line with it. The start of each piece is in its true column
+- A value on two lines under one label, in a row of labels over their values, can be cut: when its second line stands lower than the rows, that line is a paragraph after the table
+- Column titles that are whole numbers but do not count by one (`2020 2024`) are read as a row of values, not as a header
+- An amount with its currency as a word is known for EUR, USD, CHF and GBP only
+- Drawn rows that each hold two full lines are read as two rows each
+- A note under the last row of a table of items without rules, where a second line of that row would stand, reads as part of the first cell of that row
+- A table without rules whose columns hold words can read as one paragraph in row order
+- A footer of blocks side by side reads row by row when all its other blocks are shorter than a paragraph that wraps beside them
+- A bold label over an address without a name line (`Delivery address` over a street and a town) reads as the first line of the address. It stays bold, but it is no heading
+- A word set in two styles with a capital inside can get a space (`Mc Donald` when the second part is larger)
+- The overview counts paragraphs only. A region kept as laid out is not in that count
 - When the object layer cannot be read, Rezzer falls back to hayro for the text and says so in the output. Annotations, forms, scripts and signatures are then not read
 - Revision diffs count the first save of a linearized file as one save
 - No public test file was found for annotation replies, `AFSimple_Calculate`, `AFPercent_Format`, a field with the required flag or table header scope. These parts follow the format specification but are not proven on a real file
@@ -271,12 +358,12 @@ QR Code: [https://example.org/t/dNuKThV1](https://example.org/t/dNuKThV1)
 
 The corpus has 41 public PDF files. Most come from the test suites of pdf.js, qpdf, PDFBox, py-pdf, pdfplumber and Mustang. The others come from the IRS, the National Archives, NIST and arXiv. 39 of them are in the repository. The two large ones (NIST and arXiv) are fetched by a script.
 
-Extreme cases that were held, at the default limits unless a limit is named. Figures from the release build, measured as below:
+Extreme cases that were held, at the default limits unless a limit is named. Figures from the release build. The case of 100,000 pages is measured as the speed below. The other cases were measured on 2026-10-21 with the development version before the layout engine:
 
 - A content stream of 1 MB that unpacks to 1 GiB: the page is not read, the other page is, peak memory 9 MiB
 - An object stream of 1 MB that unpacks to 1 GiB: the file is refused, peak memory 73 MiB
 - A picture of 40,000 by 40,000 pixels on a page that needs vision: not rendered, peak memory 7 MiB
-- 100,000 pages that share one content stream of 40 lines, with a time limit of 2 seconds: the read stops after 1.8 seconds, keeps the text of the 4,746 pages it read and names the first page it did not read, peak memory 433 MiB
+- 100,000 pages that share one content stream of 40 lines, with a time limit of 2 seconds: the read ends after 1.96 seconds, the whole run with its output after 2.0 seconds. It keeps the text of the 3,378 pages it read (2,981 laid out, 397 as plain lines) and names the first page it did not read, peak memory 465 MiB
 - A script of 64 MiB: listed without its text, peak memory 124 MiB
 
-Speed: the NIST report SP 800-53 revision 5 (6.1 MB, 492 pages) reads in 0.81 seconds with a peak memory of 206 MiB. Median of 3 runs with `--no-cache`, on an Apple M5 (Mac17,3, 32 GB, load average 3.2), release build (cargo profile release) of Rezzer 0.1.0 at commit 958df97, 2026-10-21.
+Speed: the NIST report SP 800-53 revision 5 (6.1 MB, 492 pages) reads in 1.25 seconds with a peak memory of 247 MiB. Median of 3 runs with `--no-cache`, on an Apple M5 (Mac17,3, 32 GB, load average 3), release build (cargo profile release) of Rezzer 0.1.0, 2026-11-14.

@@ -47,14 +47,14 @@ pub(crate) const MAX_COLUMNS: usize = 1_000;
 /// A table's rendered grid (rows times width) holds at most this many cells.
 const MAX_CELLS: usize = 200_000;
 
-/// The mark for a grid position a cell merged from above covers (U+3003, ditto mark).
-const SAME_AS_ABOVE: &str = "\u{3003}";
+/// The merged cells a table without sheet anchors names by row and column in its note; past
+/// them the note says how many more there are. A note is one line under its table: twenty
+/// places are about four lines of a terminal, and the model JSON holds every span.
+const MERGED_NAMED: usize = 20;
 
-/// The mark for a grid position a cell merged from the left covers.
-const SAME_AS_LEFT: &str = "\u{2190}";
-
-/// What a grid position of a rendered table shows: the cell that starts there, or a mark for
-/// a position a merged cell covers. Each names the cell by its place in the table's texts.
+/// What a grid position of a rendered table shows: the cell that starts there, or that a
+/// merged cell covers it (written as an empty cell). Each names the cell by its place in the
+/// table's texts.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Spot {
     Own(usize),
@@ -74,9 +74,29 @@ impl Spot {
 /// sheet (row, column) of its anchor when it has a sheet anchor.
 struct Merged {
     r: usize,
+    c: usize,
     cs: usize,
     rs: usize,
     at: Option<(u32, u32)>,
+    /// The start of the cell's plain text, as the note names it ([`merged_name`]).
+    name: String,
+}
+
+/// The longest text the note under a table names a merged cell by, in characters. A name is
+/// there to find the cell in the table: 40 characters are about six words, enough to tell a
+/// label from the others of its table, and a note of [`MERGED_NAMED`] names stays a few
+/// lines. A longer text is cut there and ends in `...`.
+const MERGED_TEXT: usize = 40;
+
+/// The plain text of a merged cell on one line, as the note names it: at most
+/// [`MERGED_TEXT`] characters, then `...`.
+fn merged_name(cell: &Cell) -> String {
+    let plain = rezzer_model::plain_text(&cell.inlines);
+    let line = plain.split_whitespace().collect::<Vec<_>>().join(" ");
+    match line.char_indices().nth(MERGED_TEXT) {
+        None => line,
+        Some((cut, _)) => format!("{}...", line[..cut].trim_end()),
+    }
 }
 
 /// Where a cell of a rendered table stands: its first grid row and column, and the 0-based
@@ -100,9 +120,9 @@ fn sheet_position(cell: &Cell) -> Option<(u32, u32)> {
 }
 
 /// A table's cells placed on a grid, the one grid every table is written from. A merged
-/// cell's text stands once, in its first position; the other positions of its first row say
-/// "same as left", every position below its first row "same as above". Rows stop once the
-/// grid would pass MAX_CELLS; the first row is always shown.
+/// cell's text stands once, in its first position; the other positions it covers are empty,
+/// and the note under the table names the merged cells ([`Grid::merge_note`]). Rows stop once
+/// the grid would pass MAX_CELLS; the first row is always shown.
 pub(crate) struct Grid {
     /// The escaped one-line text of each cell, in reading order.
     texts: Vec<String>,
@@ -191,7 +211,14 @@ impl Grid {
                     }
                 }
                 if rs > 1 || cs > 1 {
-                    merged.push(Merged { r, cs, rs, at });
+                    merged.push(Merged {
+                        r,
+                        c,
+                        cs,
+                        rs,
+                        at,
+                        name: merged_name(cell),
+                    });
                 }
                 c += cs;
                 wanted = wanted.max(c);
@@ -273,35 +300,18 @@ impl Grid {
         self.range_text(p.at?, p.r, p.rs, p.cs)
     }
 
-    /// True when a shown row from `from` on holds a mark.
-    pub(crate) fn marked(&self, from: usize) -> bool {
-        self.spots.iter().skip(from).any(|row| {
-            row.iter()
-                .any(|s| matches!(s, Some(Spot::Above(_) | Spot::Left(_))))
-        })
+    /// The text of cell `k`, as it is.
+    pub(crate) fn own(&self, k: usize) -> String {
+        self.texts[k].clone()
     }
 
-    /// The text of cell `k`. A real cell whose whole text is a mark is escaped where the
-    /// table carries marks (`legend`), so it is never read as one; elsewhere it is written as
-    /// it is.
-    pub(crate) fn own(&self, k: usize, legend: bool) -> String {
-        let t = &self.texts[k];
-        if legend && (t == SAME_AS_ABOVE || t == SAME_AS_LEFT) {
-            format!("\\{t}")
-        } else {
-            t.clone()
-        }
-    }
-
-    /// The cells of shown row `r` as written.
-    pub(crate) fn line(&self, r: usize, legend: bool) -> Vec<String> {
+    /// The cells of shown row `r` as written: a position a merged cell covers is empty.
+    pub(crate) fn line(&self, r: usize) -> Vec<String> {
         self.spots[r]
             .iter()
             .map(|spot| match spot {
-                None => String::new(),
-                Some(Spot::Own(k)) => self.own(*k, legend),
-                Some(Spot::Above(_)) => SAME_AS_ABOVE.to_string(),
-                Some(Spot::Left(_)) => SAME_AS_LEFT.to_string(),
+                Some(Spot::Own(k)) => self.own(*k),
+                None | Some(Spot::Above(_) | Spot::Left(_)) => String::new(),
             })
             .collect()
     }
@@ -326,17 +336,61 @@ impl Grid {
         })
     }
 
-    /// The legend of the marks, with the merged ranges when there are any.
-    pub(crate) fn merge_note(&self, legend: bool, ranges: &[String]) -> Option<String> {
-        if !legend {
+    /// The note on the merged cells that reach shown row `from` or a row after it, said once
+    /// for the table: the sheet `ranges` of those that have one, the others by their text and
+    /// their place with what they cover (the spans of the model, also where rows are not
+    /// shown), at most [`MERGED_NAMED`] of them. The place is the
+    /// row and column as the pipe table shows them, from 1: the header line is row 1 (also
+    /// an empty one, and one that holds several header rows), so the first of the rows after
+    /// the `head` header rows is row 2, and the table writes `left` columns before the
+    /// grid's first. `None` when there is none.
+    pub(crate) fn merge_note(
+        &self,
+        from: usize,
+        (head, left): (usize, usize),
+        ranges: &[String],
+    ) -> Option<String> {
+        let shown = self.spots.len();
+        let placed: Vec<&Merged> = self
+            .merged
+            .iter()
+            .filter(|m| m.r < shown && m.r + m.rs > from)
+            .filter(|m| !self.sheet || m.at.is_none())
+            .collect();
+        if ranges.is_empty() && placed.is_empty() {
             return None;
         }
-        let mut note =
-            format!("Merged cells: {SAME_AS_ABOVE} same as above, {SAME_AS_LEFT} same as left.");
-        if !ranges.is_empty() {
-            note.push_str(&format!(" Ranges: {}", ranges.join(", ")));
-        }
-        Some(note)
+        let mut names: Vec<String> = ranges.to_vec();
+        names.extend(placed.iter().take(MERGED_NAMED).map(|m| {
+            // The spans as the model has them, also past the last shown row: the note on
+            // the rows not shown stands under this one.
+            let over = match (m.rs, m.cs) {
+                (1, cs) => format!("{cs} columns"),
+                (rs, 1) => format!("{rs} rows"),
+                (rs, cs) => format!("{rs} rows and {cs} columns"),
+            };
+            let mut name = String::new();
+            code_span(&m.name, Mode::Block, &mut name);
+            if name.is_empty() {
+                name.push_str("an empty cell");
+            }
+            // In a sheet's table a row number would read as the sheet's: say whose it is.
+            let whose = if self.sheet { "table " } else { "" };
+            let row = if m.r < head { 1 } else { m.r - head + 2 };
+            format!(
+                "{name} ({whose}row {row} column {}) over {over}",
+                m.c + left + 1
+            )
+        }));
+        let more = match placed.len().saturating_sub(MERGED_NAMED) {
+            0 => String::new(),
+            n => format!(" and {n} more"),
+        };
+        Some(format!(
+            "Merged cells: {}{more}. Each has its text in its first cell, the cells it covers \
+             are empty.",
+            names.join(", ")
+        ))
     }
 
     /// The notes on rows and columns the grid does not show.
@@ -358,6 +412,19 @@ impl Grid {
     }
 }
 
+/// Whether [`model_table`] writes the note on merged cells for these rows: the same choice
+/// it makes, without writing anything.
+pub(crate) fn model_merge_note(header_rows: usize, rows: &[Vec<Cell>]) -> bool {
+    if rows.is_empty() {
+        return false;
+    }
+    let grid = Grid::new(rows);
+    let ranges = grid.ranges();
+    let head = header_rows.min(grid.spots.len());
+    let merged_from = if head < 2 { 0 } else { head };
+    grid.merge_note(merged_from, (head, 0), &ranges).is_some()
+}
+
 /// A table without a sheet layout: a Markdown, PDF or CSV table, or one of a sheet read
 /// without layout.
 pub(super) fn model_table(
@@ -365,6 +432,7 @@ pub(super) fn model_table(
     header_rows: usize,
     rows: &[Vec<Cell>],
     aligns: &[Align],
+    level: crate::NoteLevel,
 ) -> String {
     if rows.is_empty() {
         return caption
@@ -374,16 +442,15 @@ pub(super) fn model_table(
     }
     let grid = Grid::new(rows);
     let ranges = grid.ranges();
-    // Several header rows are one header line, so their marks are never shown; the marks of
-    // the other rows are, and then the legend explains them.
+    // Several header rows are one header line, which holds each of their cells over its
+    // columns: their merges are not named, those of the other rows are.
     let head = header_rows.min(grid.spots.len());
-    let marked = grid.marked(if head < 2 { 0 } else { head });
-    let legend = marked || !ranges.is_empty();
+    let merged_from = if head < 2 { 0 } else { head };
     // Several header rows are one header line: per column the texts of the cells over it,
     // top down, a cell over several rows once.
     let header: Vec<String> = match head {
         0 => Vec::new(),
-        1 => grid.line(0, legend),
+        1 => grid.line(0),
         _ => (0..grid.width)
             .map(|c| {
                 let mut parts: Vec<String> = Vec::new();
@@ -396,7 +463,7 @@ pub(super) fn model_table(
                         continue;
                     }
                     last = Some(spot.cell());
-                    let t = grid.own(spot.cell(), legend);
+                    let t = grid.own(spot.cell());
                     if !t.is_empty() {
                         parts.push(t);
                     }
@@ -405,16 +472,16 @@ pub(super) fn model_table(
             })
             .collect(),
     };
-    let body: Vec<Vec<String>> = (head..grid.spots.len())
-        .map(|r| grid.line(r, legend))
-        .collect();
+    let body: Vec<Vec<String>> = (head..grid.spots.len()).map(|r| grid.line(r)).collect();
     let mut out = String::new();
     if let Some(caption) = caption.filter(|c| !c.trim().is_empty()) {
         out.push_str(&format!("**{}**\n\n", line_text(caption.trim())));
     }
     out.push_str(&pipe_table(&header, aligns, &body));
     let mut notes: Vec<String> = Vec::new();
-    notes.extend(grid.merge_note(legend, &ranges));
+    if crate::levels::merge_note_shown(level) {
+        notes.extend(grid.merge_note(merged_from, (head, 0), &ranges));
+    }
     notes.extend(grid.cut_notes());
     if !notes.is_empty() {
         out.push_str("\n\n");

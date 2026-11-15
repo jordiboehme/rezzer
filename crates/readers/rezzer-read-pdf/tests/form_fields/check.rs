@@ -66,7 +66,7 @@ pub(crate) fn pairs_of(blocks: &[Block]) -> Vec<(String, String)> {
 /// An invariant a read of a generated form must hold.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Inv {
-    /// Every pair is a right pair (ruling P6-X): never broken, not even by a known variant.
+    /// Every pair is a right pair: never broken, not even by a known variant.
     RightPair,
     /// Every value stands once in the text: never broken either.
     ValueOnce,
@@ -76,7 +76,7 @@ pub(crate) enum Inv {
     UnclearSaid,
     /// The underlined title is a heading followed by its lines, before the grid's table.
     Title,
-    /// Each found-by note stands once on its page (ruling P6-W).
+    /// Each found-by note stands once on its page.
     NoteOnce,
 }
 

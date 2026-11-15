@@ -27,11 +27,6 @@ source: crates/rezzer/tests/corpus.rs
           "type": "paragraph"
         },
         {
-          "alt": "logo or small picture, box 451, 724 to 522, 795",
-          "asset": "page-1-pic-1",
-          "type": "media"
-        },
-        {
           "anchor": "p1:t1",
           "header_rows": 0,
           "rows": [
@@ -53,6 +48,12 @@ source: crates/rezzer/tests/corpus.rs
             ]
           ],
           "type": "table"
+        },
+        {
+          "alt": "logo or small picture, box 451, 724 to 522, 795",
+          "anchor": "p1:m1",
+          "asset": "page-1-pic-1",
+          "type": "media"
         },
         {
           "anchor": "p1:b1",
@@ -253,6 +254,249 @@ source: crates/rezzer/tests/corpus.rs
     },
     "language": "de-DE"
   },
+  "regions": [
+    {
+      "anchor": "p1:t1",
+      "bounds": [
+        64.3,
+        776.16,
+        114.43,
+        786.16
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "table",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "table",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b1",
+      "bounds": [
+        451.1,
+        711.36,
+        518.8,
+        721.36
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b2",
+      "bounds": [
+        451.1,
+        696.36,
+        478.53,
+        703.86
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b3",
+      "bounds": [
+        451.1,
+        681.96,
+        516.8,
+        689.46
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b4",
+      "bounds": [
+        451.1,
+        667.56,
+        521.74,
+        675.06
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b5",
+      "bounds": [
+        451.1,
+        653.16,
+        489.64,
+        660.66
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b6",
+      "bounds": [
+        451.1,
+        638.76,
+        502.26,
+        646.26
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b7",
+      "bounds": [
+        451.1,
+        624.36,
+        495.11,
+        631.86
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b8",
+      "bounds": [
+        451.1,
+        609.96,
+        525.93,
+        617.46
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b9",
+      "bounds": [
+        451.1,
+        595.56,
+        518.54,
+        603.06
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b10",
+      "bounds": [
+        81.8,
+        680.56,
+        272.68,
+        686.56
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1:b11",
+      "bounds": [
+        71.0,
+        660.86,
+        147.36,
+        674.86
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    "<22 more items>"
+  ],
   "source": {
     "detection": {
       "confidence": "certain",

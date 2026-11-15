@@ -5,8 +5,9 @@
 //! Titles over a drawn bar: a line of bold text alone over a horizontal rule no grid takes,
 //! with the lines under the rule as its text.
 
+use layoutregions::segment::drawn::{Grids, Line, LinesAt, Unsearched};
+
 use super::*;
-use crate::regions::{Seg, grids};
 use crate::tables::LABEL_STEP;
 
 /// Lines under an underlined title follow each other at most this many line heights
@@ -20,25 +21,29 @@ const TITLE_TEXT_LINES: usize = 20;
 /// bars looked at for a rule between lines); past them it stops and says so.
 const TITLE_WORK: usize = 4_000_000;
 
+/// A title found over a bar: the runs of its line, the runs of the lines under it and its top.
+type TitleFound = (Vec<usize>, Vec<usize>, f32);
+
 /// Titles over a drawn bar: a line of bold text alone over a horizontal rule that no grid
 /// takes, the rule under its baseline by at most the title's size, longer than the title and
 /// starting within two of its sizes of the title's start; and under the rule, within its
 /// stretch, the lines of one style larger than the title (by half a point, any weight) that
 /// follow each other, the first within two line heights of the rule and no rule between
 /// them. Each title is a heading where it stands and its lines its text; their runs leave
-/// `flow`. `rules` are the page's drawn rules. The search stops at `stop` or past
-/// [`TITLE_WORK`] steps, with the titles found before it and why it stopped.
+/// `flow`. `rules` are the page's drawn rules and `grids` the grids they make. The search
+/// stops at `stop` or past [`TITLE_WORK`] steps, with the titles found before it and why it
+/// stopped.
 pub(crate) fn underlined_titles(
     flow: &mut Flow,
-    rules: &[Rule],
+    (rules, grids): (&[Rule], Result<&Grids, Unsearched>),
     stop: &dyn Fn() -> bool,
 ) -> (Vec<BoxTitle>, Option<&'static str>) {
     // A line rule runs along one axis by how it is made: it is flat when it is wider than high.
     let flat = |r: &Rule| r.kind == RuleKind::Line && (r.y0 - r.y1).abs() < (r.x0 - r.x1).abs();
-    let segs: Vec<Seg> = rules
+    let segs: Vec<Line> = rules
         .iter()
         .filter(|r| flat(r))
-        .map(|r| Seg {
+        .map(|r| Line {
             at: (r.y0 + r.y1) / 2.0,
             from: r.x0.min(r.x1),
             to: r.x0.max(r.x1),
@@ -47,37 +52,37 @@ pub(crate) fn underlined_titles(
     if segs.is_empty() || flow.runs.is_empty() {
         return (Vec::new(), None);
     }
-    let hs = crate::regions::merged(segs);
+    let hs = layoutregions::segment::drawn::merged(segs);
     // The bars by their height (a bar at no height is at none), to find those near a height
     // by a search.
     let mut by_at: Vec<usize> = (0..hs.len()).filter(|&k| !hs[k].at.is_nan()).collect();
     by_at.sort_by(|&a, &b| hs[a].at.total_cmp(&hs[b].at));
     let ats: Vec<f32> = by_at.iter().map(|&k| hs[k].at).collect();
-    // The bars whose height lies within `lo..hi` at most (a superset: the caller tests each).
-    let near = |lo: f32, hi: f32| {
-        let a = ats.partition_point(|v| *v < lo);
-        let z = ats.partition_point(|v| *v <= hi);
-        &by_at[a..z.max(a)]
-    };
     let mut work = 0usize;
     let too_much = "the page has too many bars and too much text over them";
     // The rules of grids are a table's or a section's, not a title's.
-    let taken: Vec<bool> = match grids(rules) {
+    let taken: Vec<bool> = match grids {
         Ok(g) if !g.hs.is_empty() => {
             let mut t = vec![false; hs.len()];
+            // Only the bars that reach into the width of a grid's rule are looked at: a row
+            // of small grids has as many bars at one height as it has grids.
+            let bars = LinesAt::new(&hs);
             for (gh, _) in &g.groups {
                 for &j in gh {
                     let s = g.hs[j];
-                    let close = near(s.at - 2.0 * SNAP, s.at + 2.0 * SNAP);
-                    work += close.len() + 1;
+                    let looked = bars.reaching(
+                        (s.at - 2.0 * SNAP, s.at + 2.0 * SNAP),
+                        (s.from, s.to),
+                        |k, h| {
+                            if (h.at - s.at).abs() <= SNAP {
+                                t[k] = true;
+                            }
+                        },
+                    );
+                    work += usize::try_from(looked).unwrap_or(usize::MAX) + 1;
+                    crate::work::add(1);
                     if work > TITLE_WORK {
                         return (Vec::new(), Some(too_much));
-                    }
-                    for &k in close {
-                        let h = hs[k];
-                        if (h.at - s.at).abs() <= SNAP && h.from < s.to && h.to > s.from {
-                            t[k] = true;
-                        }
                     }
                 }
             }
@@ -86,13 +91,15 @@ pub(crate) fn underlined_titles(
         _ => vec![false; hs.len()],
     };
     let lines = flow_lines(flow);
-    let by_y = ByY::new(flow, &lines);
+    let by_y = ByY::new(&flow.runs, &lines);
     let mut used = vec![false; flow.runs.len()];
-    let mut found: Vec<(Vec<usize>, Vec<usize>, f32)> = Vec::new();
+    let mut found: Vec<TitleFound> = Vec::new();
     let mut halted: Option<&'static str> = None;
     // Runs between two heights, charged to the work before they are copied.
     let between = |lo: f32, hi: f32, work: &mut usize| -> Option<Vec<usize>> {
-        *work += by_y.count_between(lo, hi) + 1;
+        let n = by_y.count_between(lo, hi) + 1;
+        *work += n;
+        crate::work::add(n as u64);
         (*work <= TITLE_WORK).then(|| by_y.runs_between(lo, hi))
     };
     for (k, bar) in hs.iter().enumerate() {
@@ -129,7 +136,7 @@ pub(crate) fn underlined_titles(
         else {
             continue;
         };
-        let title: Vec<usize> = lines_of(flow, &over)
+        let title: Vec<usize> = lines_of(&flow.runs, &over)
             .into_iter()
             .find(|l| l.contains(&low))
             .unwrap_or_default();
@@ -176,7 +183,7 @@ pub(crate) fn underlined_titles(
             .into_iter()
             .filter(|&i| usable(i, &used) && in_range(i))
             .collect();
-        let text_lines = lines_of(flow, &below);
+        let text_lines = lines_of(&flow.runs, &below);
         let mut text: Vec<usize> = Vec::new();
         let mut last = bar.at;
         let mut style: Option<Style> = None;
@@ -191,6 +198,7 @@ pub(crate) fn underlined_titles(
             let z = ats.partition_point(|v| *v < last - SNAP);
             let lying = &by_at[a..z.max(a)];
             work += lying.len();
+            crate::work::add(lying.len() as u64);
             let ruled = lying.iter().any(|&j| {
                 let s = hs[j];
                 s.at < last - SNAP && s.at > y && s.from < bar.to && s.to > bar.from
@@ -237,16 +245,25 @@ pub(crate) fn underlined_titles(
             top: *top,
             runs: Vec::new(),
             text: Vec::new(),
+            ids: Vec::new(),
+            text_ids: Vec::new(),
         });
     }
     let picked: Vec<usize> = (0..flow.runs.len())
         .filter(|&i| owner[i].is_some())
         .collect();
     let taken_runs = flow.take(|i, _| owner[i].is_some());
-    for ((run, _, _), i) in taken_runs.into_iter().zip(picked) {
+    for (taken, i) in taken_runs.into_iter().zip(picked) {
         match owner[i] {
-            Some((k, false)) => out[k].runs.push(run),
-            Some((k, true)) => out[k].text.push(run),
+            Some((k, false)) => {
+                out[k].runs.push(taken.run);
+                out[k].ids.push(taken.id);
+            }
+            Some((k, true)) => {
+                out[k].text.push(taken.run);
+                out[k].ids.push(taken.id);
+                out[k].text_ids.push(taken.id);
+            }
             None => {}
         }
     }

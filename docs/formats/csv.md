@@ -38,7 +38,7 @@ Built on (versions as tested on 2026-10-19):
 
 ## How it shows up in the output
 
-Each table with a layout line that says where it is and how it was found. After the tables comes one `Columns` table per table (column, type, unit, missing, unique, key), headed by the range of its table, like `Columns A1:H276`. It counts only the data rows of its table: a title line or the header is never counted as data. Then a Logic section with the relations that were checked, marked as found in the data and not written in the file.
+Each table with a layout line that says where it is, the facts of the file that found it and, with `--notes full`, the rules Rezzer used. After the tables comes one `Columns` table per table (column, type, unit, missing, unique, key), headed by the range of its table, like `Columns A1:H276`. It counts only the data rows of its table: a title line or the header is never counted as data. Then a Logic section with the relations that were checked, marked as found in the data and not written in the file.
 
 ## Tables, titles and records
 
@@ -47,6 +47,8 @@ Rezzer finds the tables in a CSV file the same way as in a spreadsheet: see [Tab
 ```markdown
 Table A1:H276 (data A2:H276), header row 1, found by rules: no gaps, header by type change.
 ```
+
+Most words after `found by rules:` only say the method Rezzer used, like the gaps around the table or how it found the header, and they cost an agent tokens. The default `--notes brief` leaves those out of the line. Words that say where a part is (`caption rows 1 to 2`, `title in row 3`) and words on a limit stay. `--notes full` shows them all.
 
 `--table-style records` (MCP `table_style: "records"`) writes every row as one list item with the header of each value. A file without a header row stays a table, because there is no header to name the fields. A CSV file has only one sheet, so `--sheet` is not needed.
 
@@ -98,7 +100,7 @@ Found in the data, not written as formulas in the file.
 - The table shows at most 10,000 rows, 1,000 columns and 200,000 cells (counted after short rows are padded). A Columns table lists at most 500 columns. The output says what is not shown
 - A Columns table describes the columns of its table. A column that is empty in every row and lies outside every table, like the one after a trailing delimiter, is counted in the size but has no row in a Columns table
 - The Logic section names a column by its whole letter, like `B:B`. When a file holds two tables, one letter can name a column in each of them
-- `--table-style` changes only the Markdown. `--json` gives the full model
+- `--table-style` and `--notes` change only the Markdown. `--json` gives the full model
 - qsv-sniffer 0.12.2 was tested for delimiter and header detection. It failed or was wrong on 8 of 13 files and its repository is archived, so Rezzer does its own detection
 
 ## How it is tested

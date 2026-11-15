@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use rezzer_model::{Completeness, Confidence};
 use rezzer_pipeline::{
-    CancelToken, OutputKind, OutputSection, Pipeline, Request, RunResult, TableStyle,
+    CancelToken, NoteLevel, OutputKind, OutputSection, Pipeline, Request, RunResult, TableStyle,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -95,6 +95,11 @@ pub struct RezParams {
     #[serde(default)]
     #[schemars(schema_with = "table_style_schema", extend("default" = "table"))]
     pub table_style: Option<String>,
+    /// Which notes the Markdown shows: `full`, `brief` or `none`. Default from the config
+    /// file, else `brief`. Markdown only: `json` gives every note.
+    #[serde(default)]
+    #[schemars(schema_with = "notes_schema", extend("default" = "brief"))]
+    pub notes: Option<String>,
     /// Only these sheets, by name or by position as `#1`, `#2` and so on. Default all.
     /// Markdown only: `json` gives all sheets.
     #[serde(default)]
@@ -107,6 +112,15 @@ fn table_style_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
         "type": "string",
         "enum": ["table", "records"],
         "default": "table",
+    })
+}
+
+fn notes_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "description": "Which notes the Markdown shows. Notes cost tokens, and many only say how something was read. `full` shows all notes. `brief` (default) leaves those out and keeps the notes that touch a value or say that something is missing. Where it leaves out rows of \"Not read\", one line there says how many. `none` shows no notes and says so in one line where it leaves something out.",
+        "type": "string",
+        "enum": ["full", "brief", "none"],
+        "default": "brief",
     })
 }
 
@@ -134,6 +148,7 @@ impl std::fmt::Debug for RezParams {
             .field("part_size", &self.part_size)
             .field("password", &self.password.as_ref().map(|_| "<redacted>"))
             .field("table_style", &self.table_style)
+            .field("notes", &self.notes)
             .field("sheets", &self.sheets)
             .finish()
     }
@@ -224,6 +239,7 @@ impl RezParams {
             part_size,
             password: string(&mut args, "password")?,
             table_style: string(&mut args, "table_style")?,
+            notes: string(&mut args, "notes")?,
             sheets,
         })
     }
@@ -355,6 +371,13 @@ pub fn rez(pipeline: &Pipeline, args: Map<String, Value>, cancel: CancelToken) -
             Err(e) => return rez_failed(format!("table_style: {e}")),
         },
     };
+    let notes = match params.notes.as_deref() {
+        None => None,
+        Some(text) => match text.parse::<NoteLevel>() {
+            Ok(level) => Some(level),
+            Err(e) => return rez_failed(format!("notes: {e}")),
+        },
+    };
     let output_dir = match params.output_dir.take() {
         None => None,
         Some(dir) => {
@@ -389,6 +412,7 @@ pub fn rez(pipeline: &Pipeline, args: Map<String, Value>, cancel: CancelToken) -
         part_size,
         cancel,
         table_style,
+        notes,
         sheets: params.sheets.take().unwrap_or_default(),
         ..Request::default()
     };
@@ -425,8 +449,9 @@ pub struct RezOutput {
     pub losses: usize,
     /// How many pictures the file has (extracted or not).
     pub assets: usize,
-    /// Ids of the pictures Rezzer cannot interpret, for the calling agent to look at. With
-    /// `output_dir` they are files in the bundle.
+    /// Ids of the pictures Rezzer cannot interpret, for the calling agent to look at, and of
+    /// the pictures of text it kept as laid out (`page-N-region-K`). With `output_dir` they
+    /// are files in the bundle.
     pub needs_vision: Vec<String>,
     /// Why the call failed or what went wrong, in one line.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -494,7 +519,7 @@ fn rez_answer(result: RunResult, output: OutputKind, page: usize) -> Answer {
             format: Some(rezzer_render::format_name(document.source.format)),
             sha256: Some(document.source.sha256.clone()),
             losses: document.losses.len(),
-            assets: document.assets.len(),
+            assets: pictures(document),
             needs_vision: needs_vision(document),
             message: Some(message.clone()),
             parts,
@@ -525,7 +550,7 @@ fn rez_answer(result: RunResult, output: OutputKind, page: usize) -> Answer {
         format: Some(rezzer_render::format_name(document.source.format)),
         sha256: Some(document.source.sha256.clone()),
         losses: document.losses.len(),
-        assets: document.assets.len(),
+        assets: pictures(document),
         needs_vision: needs_vision(document),
         message: result.message.clone(),
         parts,
@@ -591,6 +616,12 @@ fn rez_failed(message: String) -> Answer {
         text: message,
         failed: true,
     }
+}
+
+/// How many pictures the file has: a picture that shows a block of the text (a region kept
+/// as laid out) is none of the file's.
+fn pictures(document: &rezzer_model::Document) -> usize {
+    document.assets.iter().filter(|a| a.shows.is_none()).count()
 }
 
 fn needs_vision(document: &rezzer_model::Document) -> Vec<String> {

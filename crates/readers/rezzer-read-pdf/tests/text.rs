@@ -751,6 +751,32 @@ fn invisible_text_is_reported_not_mixed() {
     );
 }
 
+/// Two hidden texts that touch stay two texts, as on the page: an amount written over the
+/// `0,00` of its field is not read as one number. Words of one text with a gap keep the
+/// space the reader gave them.
+#[test]
+fn hidden_texts_that_touch_stay_apart() {
+    let hidden = Page::text(format!(
+        "{}BT 3 Tr /F1 10 Tf 1 0 0 1 100 650 Tm (0,00) Tj ET\n\
+         BT 3 Tr /F1 10 Tf 1 0 0 1 100 650 Tm (1.234,56) Tj ET\n\
+         BT 3 Tr /F1 10 Tf 1 0 0 1 100 600 Tm (Erika) Tj 1 0 0 1 130 600 Tm (Mustermann) Tj ET\n",
+        show("F1", 12.0, 72.0, 700.0, "Visible words on page one."),
+    ));
+    let out = read(&pdf(&[hidden], ""));
+    let lines: Vec<String> = match page(&out, 1).last() {
+        Some(Block::Callout {
+            kind: CalloutKind::Details,
+            blocks,
+            ..
+        }) => blocks
+            .iter()
+            .map(|b| text(std::slice::from_ref(b)).trim().to_string())
+            .collect(),
+        other => panic!("no invisible text callout: {other:?}"),
+    };
+    assert_eq!(lines, ["0,00 1.234,56", "Erika Mustermann"]);
+}
+
 #[test]
 fn refused_page_is_skipped_with_loss() {
     // Page 2's font reads a CMap that unpacks to 16 MiB, over the 8 MiB stream limit.
@@ -1510,6 +1536,42 @@ fn two_centred_lines_keep_their_break() {
 }
 
 #[test]
+fn two_lines_set_flush_right_keep_their_break() {
+    // A name over its register line at the head of a letter, set flush right: two short
+    // lines in the shape of an address are two lines. The same edges with wording that shows
+    // a wrap are one text: a line that ends in a comma, and two lines that read as a sentence.
+    let block = |lines: [&str; 2]| {
+        let mut c = String::new();
+        for (k, t) in lines.iter().enumerate() {
+            let x = 560.0 - common::helvetica_width(t, 10.0);
+            c += &show("F1", 10.0, x, 700.0 - 12.0 * k as f32, t);
+        }
+        markdown_of(&read(&pdf(&[Page::text(c)], "")))
+    };
+    let md = block(["Sample Supply Ltd", "Register Lake Town 4521"]);
+    assert!(
+        md.contains("\nSample Supply Ltd\\\nRegister Lake Town 4521\n"),
+        "{md}"
+    );
+    let md = block([
+        "The old lamp near the door,",
+        "Which nobody has lit for years",
+    ]);
+    assert!(
+        md.contains("\nThe old lamp near the door, Which nobody has lit for years\n"),
+        "{md}"
+    );
+    let md = block([
+        "Nobody has lit the lamp for",
+        "Years. The room stays dark and cold.",
+    ]);
+    assert!(
+        md.contains("\nNobody has lit the lamp for Years. The room stays dark and cold.\n"),
+        "{md}"
+    );
+}
+
+#[test]
 fn very_narrow_german_prose_keeps_joining() {
     // German prose in a column of three or four words a line, every line starting with a
     // capital: its lines hold words in small letters, an address does not, so each paragraph
@@ -1640,10 +1702,228 @@ fn line_on_two_of_three_pages_is_not_furniture() {
     let out = read(&pdf(&pages, ""));
     for n in 1..=2u32 {
         let roles = roles_of(&out, n);
+        // The lone line may be kept as laid out (no region type has clear
+        // evidence for one short line); it is body text there too, never furniture.
+        let laid_out = page(&out, n).iter().any(|b| match b {
+            Block::Spatial { lines, .. } => lines
+                .iter()
+                .any(|l| l.pieces.iter().any(|p| p.text == FIRM_LINE)),
+            _ => false,
+        });
         assert!(
-            roles.iter().any(|(r, t)| r.is_none() && t == FIRM_LINE),
+            laid_out || roles.iter().any(|(r, t)| r.is_none() && t == FIRM_LINE),
+            "page {n}: {roles:?} {:#?}",
+            page(&out, n)
+        );
+        assert!(
+            roles
+                .iter()
+                .all(|(r, _)| r.as_deref() != Some("page-footer")),
             "page {n}: {roles:?}"
         );
+    }
+}
+
+/// A page number at the foot of every page, far under a page of few lines in the same font,
+/// is a running footer: the few lines are not parted by white space (too few to look for
+/// bands), so the number shared a leaf with the line above it and was typed with it
+/// (arxiv-2408.09869 p7, whose figures are drawn beside them). The running line, apart from
+/// the text above by its gap, is cut off.
+#[test]
+fn page_number_under_few_lines_is_furniture() {
+    let figure = "q 0.5 w 320 200 m 540 200 l S 320 300 m 540 300 l S 320 400 m 540 400 l S Q\n";
+    let pages: Vec<Page> = (1..=3)
+        .map(|n| page_with(&(show("F1", 10.0, 300.0, 40.0, &n.to_string()) + figure)))
+        .collect();
+    let out = read(&pdf(&pages, ""));
+    for n in 1..=3u32 {
+        let roles = roles_of(&out, n);
+        assert_eq!(
+            roles.last(),
+            Some(&(Some("page-footer".into()), n.to_string())),
+            "page {n}: {roles:?} {:#?}",
+            page(&out, n)
+        );
+    }
+}
+
+/// The same page with the page number written with a word, as a count of the
+/// pages, or both (`Page 2`, `2 / 3`, `Page 2 of 3`): a running line of the file below all
+/// other text, far under the few lines it shares its leaf with, and in the shape of a page
+/// number. It is cut off and is a footer, as the bare number is. A line of that place and
+/// shape that is no running line of the file (the text differs from page to page in more than
+/// its digits) stays with its text.
+#[test]
+fn a_page_number_with_a_word_or_a_count_under_few_lines_is_furniture() {
+    let figure = "q 0.5 w 320 200 m 540 200 l S 320 300 m 540 300 l S 320 400 m 540 400 l S Q\n";
+    let read_with = |foot: &dyn Fn(u32) -> String| {
+        let pages: Vec<Page> = (1..=3)
+            .map(|n| page_with(&(show("F1", 10.0, 280.0, 40.0, &foot(n)) + figure)))
+            .collect();
+        read(&pdf(&pages, ""))
+    };
+    let shapes: [&dyn Fn(u32) -> String; 4] = [
+        &|n| format!("Page {n}"),
+        &|n| format!("{n} / 3"),
+        &|n| format!("Page {n} of 3"),
+        &|n| format!("{n}/3"),
+    ];
+    for foot in shapes {
+        let out = read_with(foot);
+        for n in 1..=3u32 {
+            let roles = roles_of(&out, n);
+            assert_eq!(
+                roles.last(),
+                Some(&(Some("page-footer".into()), foot(n))),
+                "page {n}: {roles:?}"
+            );
+        }
+    }
+    let words = ["Crate", "Barrel", "Sack"];
+    let out = read_with(&|n| format!("{} {n}", words[n as usize - 1]));
+    for n in 1..=3u32 {
+        let roles = roles_of(&out, n);
+        assert!(
+            roles
+                .iter()
+                .all(|(r, _)| r.as_deref() != Some("page-footer")),
+            "page {n}: {roles:?}"
+        );
+    }
+}
+
+/// The roles and texts of each page of a file of `pages` pages like the page of
+/// [`page_number_under_few_lines_is_furniture`], with the line `foot(n)` at the foot of page
+/// `n` and `body(n)` over it.
+fn foot_roles(
+    pages: u32,
+    body: &dyn Fn(u32) -> String,
+    foot: &dyn Fn(u32) -> String,
+) -> Vec<Vec<(Option<String>, String)>> {
+    let figure = "q 0.5 w 320 200 m 540 200 l S 320 300 m 540 300 l S 320 400 m 540 400 l S Q\n";
+    let all: Vec<Page> = (1..=pages)
+        .map(|n| page_with(&(show("F1", 10.0, 280.0, 40.0, &foot(n)) + figure + &body(n))))
+        .collect();
+    let out = read(&pdf(&all, ""));
+    (1..=pages).map(|n| roles_of(&out, n)).collect()
+}
+
+/// A line at the foot of every page with a word
+/// and a number is a value, not a page number, when its number does not follow the pages. A
+/// total of each page (`Total 120`, `Total 140`, `Total 160`), the same total on every page
+/// and an amount on both pages of a file of two (`Amount due: 120`) are running lines by
+/// their text with the digits taken out, below all other text and far under it, and have the
+/// shape of a page number: they got the role of a page footer. They stay text.
+#[test]
+fn a_value_at_the_foot_of_every_page_is_no_page_number() {
+    let cases: [(u32, &dyn Fn(u32) -> String); 6] = [
+        (3, &|n| format!("Total {}", 100 + 20 * n)),
+        (3, &|_| "Total 120".into()),
+        (2, &|_| "Amount due: 120".into()),
+        // A number that goes up by two, one that goes down, and a number over its count.
+        (3, &|n| format!("Lot {}", 2 * n)),
+        (3, &|n| format!("Step {}", 9 - n)),
+        (3, &|n| format!("{} / 3", n + 3)),
+    ];
+    for (pages, foot) in cases {
+        for (k, roles) in foot_roles(pages, &|_| String::new(), foot)
+            .iter()
+            .enumerate()
+        {
+            let n = k as u32 + 1;
+            assert!(
+                roles
+                    .iter()
+                    .all(|(r, _)| r.as_deref() != Some("page-footer")),
+                "page {n}: {roles:?}"
+            );
+            assert!(
+                roles.iter().any(|(r, t)| r.is_none() && *t == foot(n)),
+                "page {n}: {roles:?}"
+            );
+        }
+    }
+}
+
+/// The page numbers that follow the pages keep the role: from another number than 1 (a file
+/// cut out of a longer one), with a count that is the same on every page, and on both pages
+/// of a file of two.
+#[test]
+fn a_page_number_that_follows_the_pages_from_an_offset_is_furniture() {
+    let cases: [(u32, &dyn Fn(u32) -> String); 5] = [
+        (3, &|n| format!("Page {}", n + 4)),
+        (3, &|n| format!("{} / 12", n + 6)),
+        (3, &|n| format!("Page {} of 9", n + 6)),
+        (2, &|n| format!("Page {n}")),
+        (2, &|n| format!("{n} / 2")),
+    ];
+    for (pages, foot) in cases {
+        for (k, roles) in foot_roles(pages, &|_| String::new(), foot)
+            .iter()
+            .enumerate()
+        {
+            let n = k as u32 + 1;
+            assert_eq!(
+                roles.last(),
+                Some(&(Some("page-footer".into()), foot(n))),
+                "page {n}: {roles:?}"
+            );
+        }
+    }
+}
+
+/// A known limit, pinned so that a change of the evidence is seen
+/// (owner after 0.1.0): a value at the foot of every page that goes up by
+/// exactly one from page to page (`Total 121`, `Total 122`, `Total 123`) has all the
+/// evidence of a page number that starts at an offset, and gets the role of a page footer.
+/// Its text is kept. Nothing on the pages tells the two apart.
+#[test]
+fn a_value_that_goes_up_by_one_with_the_pages_reads_as_a_page_number() {
+    let foot = |n: u32| format!("Total {}", 120 + n);
+    for (k, roles) in foot_roles(3, &|_| String::new(), &foot).iter().enumerate() {
+        let n = k as u32 + 1;
+        assert_eq!(
+            roles.last(),
+            Some(&(Some("page-footer".into()), foot(n))),
+            "page {n}: {roles:?}"
+        );
+    }
+}
+
+/// `7 / 12` as the last row of a table without rules at the foot of every page, under the
+/// white space of its empty rows: the same on every page, so it counts no pages and is no
+/// page number. It stays text.
+#[test]
+fn a_count_as_the_last_row_of_a_table_is_no_page_number() {
+    let names = [["Crate", "Barrel"], ["Sack", "Basket"], ["Bottle", "Drum"]];
+    let table = |n: u32| {
+        let [first, second] = names[n as usize - 1];
+        let mut rows = String::new();
+        for (k, row) in [
+            ["Item", "Units", "Share"],
+            [first, "4", "2 / 12"],
+            [second, "9", "5 / 12"],
+        ]
+        .iter()
+        .enumerate()
+        {
+            for (cell, x) in row.iter().zip([200.0, 280.0, 340.0]) {
+                rows += &show("F1", 10.0, x, 140.0 - 13.0 * k as f32, cell);
+            }
+        }
+        rows
+    };
+    for pages in [2, 3] {
+        let out = foot_roles(pages, &table, &|_| "7 / 12".into());
+        for (k, roles) in out.iter().enumerate() {
+            assert!(
+                roles
+                    .iter()
+                    .all(|(r, _)| r.as_deref() != Some("page-footer")),
+                "page {}: {roles:?}",
+                k + 1
+            );
+        }
     }
 }
 
@@ -1759,4 +2039,581 @@ fn tagged_heading_on_top_is_the_title() {
             "{size} pt"
         );
     }
+}
+
+/// The columns of [`tagged_footer`]: a company, its managers under a title (one paragraph of
+/// names wrapped over three lines), the chair of its board under a title.
+const TAGGED_FOOTER: [&[&str]; 3] = [
+    &[
+        "Oakfield Rail Ltd",
+        "Head office in Oldtown",
+        "Registered at Oldtown HRB 12 345",
+        "Tax-No. DE123456789",
+    ],
+    &[
+        "Managers",
+        "Dr. Robin Sample (Chair), Ann Specimen",
+        "(Sales), Alex Other (Staff), Max Sampleton",
+        "(Works)",
+    ],
+    &["Chair of the supervisory board", "Morgan Example"],
+];
+
+/// `pages` tagged pages, each a title and
+/// three body paragraphs across the page (in 10 points times `k`) over a footer of three columns without rules
+/// at 7 points times `k`, the columns at an even pitch from x 85, the lines 1.2 sizes apart
+/// from the baseline 64.85. The pitch is the width of the second line of names less a fifth
+/// of a point (that line reaches that little past the start of the third column, where that
+/// column is empty). The structure tree holds one paragraph element per line, row by row
+/// across the columns, and the page number one line under the footer as the last element.
+fn tagged_footer(pages: usize, k: f32) -> Vec<u8> {
+    let size = 7.0 * k;
+    let step = 1.2 * size;
+    // The width with the brackets as the font sets them (333 units; `helvetica_width` counts
+    // them as 278).
+    let width = |text: &str| {
+        let brackets = text.chars().filter(|c| matches!(c, '(' | ')')).count() as f32;
+        common::helvetica_width(text, size) + brackets * 55.0 * size / 1000.0
+    };
+    let pitch = width(TAGGED_FOOTER[1][2]) - 0.2;
+    let numbers: Vec<String> = (1..=pages)
+        .map(|n| format!("Sheet {n} / {pages}"))
+        .collect();
+    let sheets: Vec<Vec<common::TaggedLine<'_>>> = numbers
+        .iter()
+        .map(|number| {
+            let mut lines: Vec<common::TaggedLine<'_>> = vec![
+                (85.0, 760.0, 14.0 * k, true, "Carriage report"),
+                (85.0, 730.0, 10.0 * k, false, BODY[0]),
+                (85.0, 730.0 - 14.0 * k, 10.0 * k, false, BODY[1]),
+                (85.0, 730.0 - 28.0 * k, 10.0 * k, false, BODY[2]),
+            ];
+            for row in 0..4 {
+                for (c, column) in TAGGED_FOOTER.iter().enumerate() {
+                    if let Some(text) = column.get(row) {
+                        let x = 85.0 + pitch * c as f32;
+                        lines.push((x, 64.85 - step * row as f32, size, false, text));
+                    }
+                }
+            }
+            lines.push((521.3, 64.85 - step * 4.0, size, false, number));
+            lines
+        })
+        .collect();
+    common::tagged_paragraphs(&sheets)
+}
+
+/// The body paragraphs of [`tagged_footer`], each one line across the page.
+const BODY: [&str; 3] = [
+    "The wagons of the morning run were checked and found in good order.",
+    "Two axles were marked for service and one brake hose was changed.",
+    "The run left on time and reached the harbour siding without a stop.",
+];
+
+/// The texts of the paragraphs and headings of `out` in reading order.
+fn block_texts(out: &ReadOutcome) -> Vec<String> {
+    fn walk(blocks: &[Block], texts: &mut Vec<String>) {
+        for b in blocks {
+            match b {
+                Block::Section { blocks, .. } => walk(blocks, texts),
+                b => {
+                    let mut t = String::new();
+                    common::block_text(b, &mut t);
+                    texts.push(t.trim().to_string());
+                }
+            }
+        }
+    }
+    let mut texts = Vec::new();
+    walk(&out.document.body, &mut texts);
+    texts
+}
+
+/// The tags of a footer of three columns give
+/// one paragraph per line, row by row across the columns. Where the page shows the columns
+/// (starts shared by the title line and later lines at an even pitch) the paragraphs are
+/// placed column by column, each column top to bottom: a line of one column between the
+/// lines of another breaks what the column says. The elements stay as the tags give them,
+/// one paragraph each.
+#[test]
+fn tagged_paragraphs_of_columns_read_column_by_column() {
+    // The scales the page holds: at 1.25 the third column ends near the right edge.
+    for (pages, k) in [(1, 1.0f32), (2, 1.0), (1, 0.5), (1, 1.25)] {
+        let out = read(&tagged_footer(pages, k));
+        assert_eq!(out.document.properties.facts.tagged, Some(true));
+        let texts = block_texts(&out);
+        let at = |t: &str| {
+            texts
+                .iter()
+                .position(|b| b == t)
+                .unwrap_or_else(|| panic!("{pages} pages, scale {k}: no block {t:?} in {texts:#?}"))
+        };
+        for column in TAGGED_FOOTER {
+            let first = at(column[0]);
+            for (n, line) in column.iter().enumerate() {
+                assert_eq!(
+                    at(line),
+                    first + n,
+                    "{pages} pages, scale {k}: {line:?} in {texts:#?}"
+                );
+            }
+        }
+        // The body keeps its order, before the footer, and the page number stands last.
+        let body: Vec<usize> = BODY.iter().map(|t| at(t)).collect();
+        assert!(
+            body.is_sorted() && body[2] < at(TAGGED_FOOTER[0][0]),
+            "{texts:#?}"
+        );
+        assert!(texts.last().is_some_and(|t| t.starts_with("Sheet ")));
+    }
+}
+
+/// The other way: an ordinary tagged page keeps the order of its tags.
+/// Paragraphs across the full width, and rows of three short paragraphs side by side at an
+/// even pitch with no paragraph wrapped in a column (rows of a list of parts, tagged as
+/// paragraphs): nothing shows that the rows are one text, so they read row by row.
+#[test]
+fn tagged_paragraphs_keep_the_order_of_their_tags() {
+    let rows = [
+        ["Part", "Shelf", "Count"],
+        ["Brake hose", "North bay", "12"],
+        ["Axle box", "South bay", "4"],
+        ["Buffer", "Yard store", "9"],
+    ];
+    let mut lines: Vec<common::TaggedLine<'_>> = vec![
+        (85.0, 760.0, 14.0, true, "Carriage report"),
+        (85.0, 730.0, 10.0, false, BODY[0]),
+        (85.0, 716.0, 10.0, false, BODY[1]),
+        (85.0, 702.0, 10.0, false, BODY[2]),
+    ];
+    for (n, row) in rows.iter().enumerate() {
+        for (c, text) in row.iter().enumerate() {
+            let (x, y) = (85.0 + 170.0 * c as f32, 64.85 - 8.4 * n as f32);
+            lines.push((x, y, 7.0, false, text));
+        }
+    }
+    let out = read(&common::tagged_paragraphs(&[lines.clone()]));
+    let texts = block_texts(&out);
+    let given: Vec<&str> = lines.iter().map(|l| l.4).collect();
+    let read: Vec<&str> = texts.iter().skip(1).map(String::as_str).collect();
+    assert_eq!(read, given);
+}
+
+/// The rows of a table without
+/// rules, tagged one paragraph per cell line, whose last item has a second line of its name
+/// beside the wrapped end of its description, while only the first item has a source. The
+/// lines show all that blocks side by side with a wrapped paragraph show, so they are read
+/// column by column. The elements stay as the tags give them: each line is a block of its
+/// own, and no block holds the descriptions of two items.
+#[test]
+fn tagged_cells_read_as_columns_stay_blocks_of_their_own() {
+    let rows = [
+        ["Item", "Description", "Source"],
+        [
+            "Bolt",
+            "steel bolt for the frame, zinc plated, size M8",
+            "Mill",
+        ],
+        ["Nut", "nut for the bolt, zinc plated, size M8, hex", ""],
+        [
+            "Washer",
+            "washer for the nut and the bolt, flat, set of",
+            "",
+        ],
+        ["DIN 125", "twelve pieces", ""],
+    ];
+    let mut lines: Vec<common::TaggedLine<'_>> = vec![
+        (40.0, 760.0, 14.0, true, "Carriage report"),
+        (40.0, 730.0, 10.0, false, BODY[0]),
+    ];
+    for (n, row) in rows.iter().enumerate() {
+        for (c, text) in row.iter().enumerate().filter(|(_, t)| !t.is_empty()) {
+            let (x, y) = (40.0 + 161.0 * c as f32, 640.0 - 9.6 * n as f32);
+            lines.push((x, y, 8.0, false, text));
+        }
+    }
+    let out = read(&common::tagged_paragraphs(&[lines]));
+    let texts = block_texts(&out);
+    let at = |t: &str| {
+        texts
+            .iter()
+            .position(|b| b == t)
+            .unwrap_or_else(|| panic!("no block {t:?} in {texts:#?}"))
+    };
+    // Through the path: the columns were read, the names before the descriptions.
+    assert!(at("DIN 125") < at("Description"), "{texts:#?}");
+    // Each cell line is a block of its own, the descriptions in their order.
+    let described: Vec<usize> = rows[1..].iter().map(|r| at(r[1])).collect();
+    assert!(described.is_sorted(), "{texts:#?}");
+    for cell in rows.iter().flatten().filter(|t| !t.is_empty()) {
+        at(cell);
+    }
+}
+
+/// The bounds of the regions of a turned page lie in the page box the reader reports (the
+/// visible box, `/Rotate` not applied), not in the turned frame the layout read the page in:
+/// a page with `/Rotate 90` whose text is drawn upward, and a page without `/Rotate` whose
+/// text a `cm` turns upward and stands past the box's width in the turned frame.
+#[test]
+fn bounds_of_a_turned_page_lie_in_its_box() {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let mut kids = Vec::new();
+    for rotate in ["/Rotate 90", ""] {
+        let content = "q 0 1 -1 0 595 0 cm BT /F1 10 Tf 72 500 Td (Body text of the page.) Tj ET \
+             BT /F1 10 Tf 700 100 Td (Far right in the turned frame) Tj ET Q\n";
+        let c = b.stream("", content.as_bytes());
+        kids.push(b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] {rotate} \
+             /Resources << /Font << /F1 {font} 0 R >> >> /Contents {c} 0 R >>"
+        )));
+    }
+    let refs: Vec<String> = kids.iter().map(|k| format!("{k} 0 R")).collect();
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{}] /Count 2 >>", refs.join(" ")),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let bytes = b.finish(catalog);
+    // The engine saw the turned frame: there a region reaches past the box's width.
+    let (_, pages) = common::read_regions(&bytes);
+    for p in &pages {
+        assert!(
+            p.regions.iter().any(|r| r.bounds.x1 > 595.0),
+            "page {}: the frame is not turned: {:#?}",
+            p.page,
+            p.regions
+        );
+    }
+    let out = read(&bytes);
+    // The two lines stand apart: never one line of text.
+    let md = common::markdown(&out);
+    assert!(
+        !md.lines()
+            .any(|l| l.contains("Body text of the page.") && l.contains("Far right")),
+        "{md}"
+    );
+    for page in [1, 2] {
+        let notes: Vec<&rezzer_model::RegionNote> = out
+            .document
+            .regions
+            .iter()
+            .filter(|n| n.page == page)
+            .collect();
+        // The engine may decide both lines one region (a pre-pass finder gave one
+        // region a line); each region lies in the box all the same.
+        assert!(!notes.is_empty(), "page {page}: {notes:#?}");
+        for n in notes {
+            let [x0, y0, x1, y1] = n.bounds;
+            assert!(
+                0.0 <= x0 && x0 <= x1 && x1 <= 595.0 && 0.0 <= y0 && y0 <= y1 && y1 <= 842.0,
+                "page {page}: {n:#?}"
+            );
+        }
+    }
+    // Each line, drawn upward by the `cm`, stands where the page shows it: a line at x, y of
+    // the turned frame (baseline y, a box from a third of the size below it to the size above
+    // it) lies at 595 - y - 10 to 595 - y + 10 / 3 across and from x up over its width. A wrong
+    // turn back gives other numbers, not a box clamped onto an edge.
+    let expected = |text: &str, x: f32, y: f32| {
+        [
+            595.0 - y - 10.0,
+            x,
+            595.0 - y + 10.0 / 3.0,
+            x + common::helvetica_width(text, 10.0),
+        ]
+    };
+    let lines = [
+        expected("Body text of the page.", 72.0, 500.0),
+        expected("Far right in the turned frame", 700.0, 100.0),
+    ];
+    for page in [1, 2] {
+        for want in &lines {
+            // The engine may decide both lines one region; then that region holds
+            // the box of each line (a pre-pass finder gave each line its own). The engine's
+            // box of a run reaches from its baseline up by its size (no part below the
+            // baseline), so a region it bounds by its runs holds each line from the baseline up.
+            let run_box = [want[0], want[1], want[2] - 10.0 / 3.0, want[3]];
+            let found = out.document.regions.iter().find(|n| {
+                n.page == page
+                    && (n.bounds.iter().zip(want).all(|(a, b)| (a - b).abs() < 0.5)
+                        || (n.bounds[0] <= run_box[0] + 0.5
+                            && n.bounds[1] <= run_box[1] + 0.5
+                            && n.bounds[2] >= run_box[2] - 0.5
+                            && n.bounds[3] >= run_box[3] - 0.5))
+            });
+            assert!(
+                found.is_some(),
+                "page {page}: no region at {want:?}: {:#?}",
+                out.document.regions
+            );
+        }
+    }
+}
+
+/// The width of `text` (as a PDF string: a backslash is not shown) in Helvetica-Bold at
+/// `size`, with the signs of a code.
+fn bold_width(text: &str, size: f32) -> f32 {
+    text.chars()
+        .map(|c| match c {
+            '\\' => 0.0,
+            '<' | '>' => 584.0,
+            '*' => 389.0,
+            '(' | ')' | ':' => 333.0,
+            '/' | ' ' => 278.0,
+            c => common::font_width("FB", c.encode_utf8(&mut [0; 4]), 1000.0),
+        })
+        .sum::<f32>()
+        * size
+        / 1000.0
+}
+
+/// The runs of a code line: a label with two blanks after it and a code in runs that each
+/// end in a blank.
+const CODE_PARTS: [&str; 9] = [
+    "Via:  ",
+    "<1234>ABCD ",
+    "*EF ",
+    "*GH ",
+    "*\\(JK ",
+    "*LMN/OP ",
+    "*Q ",
+    "*RS\\) ",
+    "*TU",
+];
+
+/// The text of the middle row of a list of `Label value` rows in Helvetica-Bold of 10
+/// points. The row is shown in the runs `parts`, each in a text object of its own with
+/// `spacing` (text state operators) before it. Run `i + 1` starts `backs[i]` blank widths
+/// left of where run `i` ends (`backs` is taken round again when it is shorter). `mono` shows
+/// the row in Courier-Bold (every advance 6 points, so a wide blank) instead.
+fn row_in_runs(parts: &[&str], backs: &[f32], spacing: &str, mono: bool) -> String {
+    row_in_shows(parts, backs, spacing, mono, (false, ""))
+}
+
+/// [`row_in_runs`]; with `marked`, each run of the row is a marked-content part of its own
+/// (`/Span` with an MCID, as a tagged file writes each show), after a lone blank in the
+/// plain face far to the left on the same baseline, a part of its own too. `annots` are the
+/// annotation dictionaries of the page, written inline.
+fn row_in_shows(
+    parts: &[&str],
+    backs: &[f32],
+    spacing: &str,
+    mono: bool,
+    (marked, annots): (bool, &str),
+) -> String {
+    let width = |t: &str| match mono {
+        true => 6.0 * t.chars().filter(|c| *c != '\\').count() as f32,
+        false => bold_width(t, 10.0),
+    };
+    let font = if mono { "F3" } else { "F2" };
+    let mut content = show("F2", 10.0, 116.5, 667.27, "Start: Musterstadt Nord");
+    let mut x = 116.5;
+    if marked {
+        content += "/Span <</MCID 28>> BDC BT /F1 10 Tf 1 0 0 1 45.64 655.27 Tm ( ) Tj ET EMC\n";
+    }
+    for (i, part) in parts.iter().enumerate() {
+        let shown = format!("BT /{font} 10 Tf {spacing} 1 0 0 1 {x:.2} 655.27 Tm ({part}) Tj ET");
+        content += &match marked {
+            true => format!("/Span <</MCID {}>> BDC {shown} EMC\n", 29 + i),
+            false => format!("{shown}\n"),
+        };
+        x += width(part) - backs[i % backs.len()] * width(" ");
+    }
+    content += &show("F2", 10.0, 116.5, 643.27, "Class: 2");
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let fonts: Vec<String> = ["Helvetica", "Helvetica-Bold", "Courier-Bold"]
+        .iter()
+        .enumerate()
+        .map(|(i, name)| {
+            let f = b.add(format!(
+                "<< /Type /Font /Subtype /Type1 /BaseFont /{name} >>"
+            ));
+            format!("/F{} {f} 0 R", i + 1)
+        })
+        .collect();
+    let c = b.stream("", content.as_bytes());
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+         /Resources << /Font << {} >> >> /Contents {c} 0 R /Annots [{annots}] >>",
+        fonts.join(" ")
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let out = read(&b.finish(catalog));
+    // The three rows are one block; the row stands between the other two.
+    let all = text(page(&out, 1));
+    let row = all
+        .split_once("Start: Musterstadt Nord")
+        .and_then(|(_, rest)| rest.split_once("Class: 2"))
+        .map(|(row, _)| row);
+    let row = row.unwrap_or_else(|| panic!("no middle row in {all:?}"));
+    // One blank parts the rows on each side; the blanks of the row itself are kept.
+    row.strip_prefix(' ')
+        .and_then(|r| r.strip_suffix(' '))
+        .unwrap_or_else(|| panic!("the rows are not parted in {all:?}"))
+        .to_string()
+}
+
+/// A line shown run by run, each run ending in a blank and the next one set back so that its
+/// first glyph is printed over that blank: the page shows no gap there, so the code reads as
+/// printed, with the one blank after the label that nothing is printed over. The next run
+/// starts where the blank starts.
+#[test]
+fn a_blank_the_next_run_is_printed_over_is_no_gap() {
+    assert_eq!(
+        row_in_runs(&CODE_PARTS, &[1.0], "", false),
+        "Via: <1234>ABCD*EF*GH*(JK*LMN/OP*Q*RS)*TU"
+    );
+}
+
+/// The same line in a tagged file, where every show is a marked content part of its own. A
+/// change of the part ends no row of shows and parts no word: the code reads as printed,
+/// with one blank after the label.
+#[test]
+fn a_blank_printed_over_by_the_show_of_another_marked_part_is_no_gap() {
+    assert_eq!(
+        row_in_shows(&CODE_PARTS, &[1.0], "", false, (true, "")),
+        "Via: <1234>ABCD*EF*GH*(JK*LMN/OP*Q*RS)*TU"
+    );
+    // Blanks nothing is printed over stay, part by part, and so do blanks printed over in
+    // part.
+    for back in [0.0, 0.8] {
+        assert_eq!(
+            row_in_shows(&CODE_PARTS, &[back], "", false, (true, "")),
+            "Via:  <1234>ABCD *EF *GH *(JK *LMN/OP *Q *RS) *TU",
+            "set back by {back} blanks"
+        );
+    }
+}
+
+/// A change of link ends a row of shows. The code line
+/// with a link over its runs from `*(JK` on is two rows, each with two places or more where
+/// every show is printed over the blank before it: their blanks go. The show that starts the
+/// link belongs to neither row with the show before it, so the blank between them stays.
+#[test]
+fn a_change_of_link_ends_a_row_of_shows() {
+    let blank = bold_width(" ", 10.0);
+    let x: f32 = 116.5
+        + CODE_PARTS[..4]
+            .iter()
+            .map(|p| bold_width(p, 10.0) - blank)
+            .sum::<f32>();
+    let link = format!(
+        "<< /Type /Annot /Subtype /Link /Rect [{:.2} 652 400 667] /Border [0 0 0] \
+         /A << /S /URI /URI (https://example.org/) >> >>",
+        x - 0.2
+    );
+    assert_eq!(
+        row_in_shows(&CODE_PARTS, &[1.0], "", false, (false, &link)),
+        "Via: <1234>ABCD*EF*GH *(JK*LMN/OP*Q*RS)*TU"
+    );
+}
+
+/// A blank that the next run is not printed over is a gap, and so is one the next run starts
+/// inside of: white shows before the run, however little. The run must start where the
+/// blank starts, within a tenth of the blank (`AT_START`, from both sides and on both sides
+/// of the blank's start: 0.92 and 1.08 blanks back go, 0.88 and 1.12 stay).
+#[test]
+fn a_blank_the_next_run_leaves_white_stays() {
+    let spaced = "Via:  <1234>ABCD *EF *GH *(JK *LMN/OP *Q *RS) *TU";
+    for back in [0.0, 0.2, 0.47, 0.6, 0.8, 0.88, 1.12] {
+        assert_eq!(
+            row_in_runs(&CODE_PARTS, &[back], "", false),
+            spaced,
+            "set back by {back} blanks"
+        );
+    }
+    for back in [0.92, 1.08] {
+        assert_eq!(
+            row_in_runs(&CODE_PARTS, &[back], "", false),
+            "Via: <1234>ABCD*EF*GH*(JK*LMN/OP*Q*RS)*TU",
+            "set back by {back} blanks"
+        );
+    }
+}
+
+/// A tight row of amounts in a face of one width (a blank of 6 points in Courier of 10
+/// points), each amount a show of its own that ends in a blank, the next one set 1.2 points
+/// after the ink before it (0.8 of the blank back): white shows between the amounts, so
+/// every blank stays and no two amounts read as one. The same holds for a name.
+#[test]
+fn a_wide_blank_printed_over_in_part_still_parts_two_words() {
+    let amounts = ["Total ", "1.200,00 ", "350,00 ", "75,00"];
+    for back in [0.0, 0.6, 0.8] {
+        assert_eq!(
+            row_in_runs(&amounts, &[back], "", true),
+            "Total 1.200,00 350,00 75,00",
+            "set back by {back} blanks"
+        );
+    }
+    let parts = ["Erika ", "Mustermann ", "Musterstadt"];
+    for back in [0.6, 0.8] {
+        assert_eq!(
+            row_in_runs(&parts, &[back], "", true),
+            "Erika Mustermann Musterstadt",
+            "set back by {back} blanks"
+        );
+    }
+}
+
+/// One run printed over a blank is one measurement, not how the row was written
+/// (`SET_BACK`, from both sides): a line number kerned against its text keeps its blank; two
+/// runs set back with none against lose theirs.
+#[test]
+fn one_run_printed_over_a_blank_keeps_the_blank() {
+    assert_eq!(
+        row_in_runs(&["Nr 1 ", "a Total"], &[1.0], "", false),
+        "Nr 1 a Total"
+    );
+    assert_eq!(
+        row_in_runs(&["Nr 1 ", "a ", "Total"], &[1.0], "", false),
+        "Nr 1aTotal"
+    );
+}
+
+/// A tight line: some words start inside the blank before them by more than half of it,
+/// others by less. The gaps are small but there, so every word keeps its blank. The same
+/// holds when one run of the row starts over the letters before its blank.
+#[test]
+fn a_row_with_a_run_that_leaves_its_blank_keeps_every_blank() {
+    let parts = ["Erika ", "Mustermann ", "wohnt ", "hier ", "gern"];
+    assert_eq!(
+        row_in_runs(&parts, &[0.6, 0.3, 0.7, 0.6], "", false),
+        "Erika Mustermann wohnt hier gern"
+    );
+    // 1.7 blanks back: the run starts over the last letter before the blank.
+    assert_eq!(
+        row_in_runs(&["Nord ", "*EF ", "*GH"], &[1.7, 1.0], "", false),
+        "Nord *EF *GH"
+    );
+}
+
+/// Text the rule must not touch: a word shown in two runs stays one word, tight word spacing
+/// inside a run keeps the words, and kerning into a blank keeps it.
+#[test]
+fn words_keep_their_blanks_and_split_words_stay_joined() {
+    assert_eq!(
+        row_in_runs(&["Muster", "stadt ", "Nord"], &[0.0], "", false),
+        "Musterstadt Nord"
+    );
+    // Each word starts 2 points inside the blank of 2.78 before it: the pen moved there.
+    assert_eq!(
+        row_in_runs(&["Erika Mustermann wohnt hier"], &[0.0], "-2 Tw", false),
+        "Erika Mustermann wohnt hier"
+    );
+    let kerned = "BT /F2 10 Tf 1 0 0 1 116.5 655.27 Tm \
+                  [(Erika ) 90 (Mustermann ) 60 (wohnt) 40 ( hier)] TJ ET\n";
+    let out = read(&pdf(&[Page::text(kerned)], ""));
+    assert_eq!(
+        text(page(&out, 1)).lines().last().map(str::trim),
+        Some("Erika Mustermann wohnt hier")
+    );
 }

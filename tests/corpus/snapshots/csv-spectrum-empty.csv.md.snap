@@ -36,7 +36,7 @@ losses: 0
 | --- | --- |
 | columns | 3 |
 | delimiter | , |
-| has\_header | true |
+| has_header | true |
 | rows | 2 |
 
 ## csv-spectrum-empty

@@ -22,13 +22,13 @@ completeness: complete
 losses: 0
 ---
 
-# csv-spectrum-escaped\_quotes.csv
+# csv-spectrum-escaped_quotes.csv
 
 ## Overview
 
 | Part | Kind | Size | Role | Reads from |
 | --- | --- | --- | --- | --- |
-| csv-spectrum-escaped\_quotes | sheet | 2 rows x 2 columns |  |  |
+| csv-spectrum-escaped_quotes | sheet | 2 rows x 2 columns |  |  |
 
 ## Properties
 
@@ -36,10 +36,10 @@ losses: 0
 | --- | --- |
 | columns | 2 |
 | delimiter | , |
-| has\_header | true |
+| has_header | true |
 | rows | 2 |
 
-## csv-spectrum-escaped\_quotes
+## csv-spectrum-escaped_quotes
 
 Table A1:B3 (data A2:B3), header row 1, found by rules: no gaps, header by type change.
 

@@ -25,7 +25,7 @@ fn cm_placed_identical_lines_are_kept() {
     let out = read(&print_form(&[page], "", ""));
     let text = all_text(&out);
     assert_eq!(text.matches("0,00").count(), 2, "{text}");
-    assert_no_loss(&out);
+    assert_no_loss_but_laid_out(&out, &["p1:b2"]);
 }
 
 /// Guard: a fill-then-stroke show (render mode 2) inside a `cm` block is still one text.
@@ -62,8 +62,8 @@ fn fake_bold_line_reads_once() {
 }
 
 /// One data line drawn twice 0.3 points apart (a fake bold) whose copies have their middles
-/// on the two sides of a box's edge is read once, in the box of the first copy (Task 4
-/// carry): the box ends between the middles of the two copies.
+/// on the two sides of a box's edge is read once, in the box of the first copy:
+/// the box ends between the middles of the two copies.
 #[test]
 fn fake_bold_across_a_box_edge_reads_once() {
     let line = "Auszahlung";

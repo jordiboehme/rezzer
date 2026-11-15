@@ -28,6 +28,7 @@
 //!
 //! [read]
 //! table_style = "records"
+//! notes = "full"
 //! ```
 
 use std::ffi::OsStr;
@@ -35,7 +36,7 @@ use std::path::{Path, PathBuf};
 
 use rezzer_enrich::EnrichOptions;
 use rezzer_limits::Limits;
-use rezzer_render::TableStyle;
+use rezzer_render::{NoteLevel, TableStyle};
 use serde::Deserialize;
 
 /// Settings for every run of the pipeline.
@@ -57,10 +58,23 @@ pub struct Config {
 }
 
 /// Defaults for how a read is written, from the `[read]` table.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadDefaults {
     /// How sheet tables are written when a request does not say.
     pub table_style: TableStyle,
+    /// Which notes the Markdown shows when a request does not say. Default
+    /// [`NoteLevel::Brief`]: agents read Rezzer's output, and notes that only say how
+    /// something was read cost them tokens.
+    pub notes: NoteLevel,
+}
+
+impl Default for ReadDefaults {
+    fn default() -> ReadDefaults {
+        ReadDefaults {
+            table_style: TableStyle::default(),
+            notes: NoteLevel::Brief,
+        }
+    }
 }
 
 /// Default [`Config::cache_max_bytes`]: 512 MiB.
@@ -104,6 +118,7 @@ struct ConfigFile {
 struct ReadFile {
     /// Any type, so that a wrong one gives a message that names the key.
     table_style: Option<toml::Value>,
+    notes: Option<toml::Value>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -183,6 +198,17 @@ impl Config {
                 )));
             }
         };
+        let notes = match &file.read.notes {
+            None => ReadDefaults::default().notes,
+            Some(toml::Value::String(text)) => text
+                .parse::<NoteLevel>()
+                .map_err(|e| invalid(format!("read.notes: {e}")))?,
+            Some(other) => {
+                return Err(invalid(format!(
+                    "read.notes: expected full, brief or none, not {other}"
+                )));
+            }
+        };
         Ok(Config {
             limits: file.limits,
             cache: file.cache.unwrap_or(true),
@@ -191,7 +217,7 @@ impl Config {
             enrich: EnrichOptions {
                 disabled: file.enrich.disabled,
             },
-            read: ReadDefaults { table_style },
+            read: ReadDefaults { table_style, notes },
         })
     }
 }

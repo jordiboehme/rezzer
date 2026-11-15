@@ -15,7 +15,7 @@
 //! 10, then 5 again. As a last resort the other lists are left out and a line says so, and
 //! the title and the description are cut.
 //!
-//! Nothing the main document shortens is in no file (P5-V): when `## Overview` drops rows,
+//! Nothing the main document shortens is in no file: when `## Overview` drops rows,
 //! facts or arrows, cuts a text, or is left out, it links the `overview` part, which holds
 //! the whole overview; when `## Not read` drops losses or cuts a text, it links the
 //! `not-read` part, which holds the whole list. These parts and the `contents` parts are
@@ -180,9 +180,12 @@ impl Writer<'_> {
     }
 
     fn write(&self, units: Vec<Unit>) -> Output {
-        let losses = &self.doc.losses;
-        let not_read_pieces = if self.want(OutputSection::NotRead) && !losses.is_empty() {
-            pieces(&facets::not_read_list(losses), self.budget, self.measure)
+        let not_read_pieces = if self.want(OutputSection::NotRead) {
+            let filter = self.loss_filter();
+            let losses = filter.shown(&self.doc.losses);
+            facets::not_read_with(&losses, self.left_out_line(&filter))
+                .map(|text| pieces(&text, self.budget, self.measure))
+                .unwrap_or_default()
         } else {
             Vec::new()
         };
@@ -227,7 +230,7 @@ impl Writer<'_> {
     }
 
     /// The main document for `shape` and the parts that follow the content's: `overview`
-    /// and `not-read` when the main document shortens them (P5-V), `contents` when the list
+    /// and `not-read` when the main document shortens them, `contents` when the list
     /// of the parts moves there.
     fn layout(
         &self,
@@ -350,7 +353,7 @@ impl Writer<'_> {
                 md.push('\n');
                 md.push_str(&blocks::heading_line(1, &label(&e.title, false)));
                 md.push_str("\n\n");
-                // Every body follows P5-S and P5-X; the relations below stay `- ` bullets.
+                // Every body is guarded as a list item; the relations below stay `- ` bullets.
                 md.push_str(&bullets::guard(&e.markdown));
                 md.push_str("\n\n## Relations\n\n");
                 md.push_str(&part_of);
@@ -567,11 +570,16 @@ impl Writer<'_> {
 
     /// `## Not read` for `shape`, and whether it is shortened: losses past the cap, a text
     /// cut, or the list at the last resort. A shortened list links the `not-read` part, which
-    /// holds it whole (P5-V).
+    /// holds it whole.
     fn not_read_section(&self, shape: Shape) -> Option<(String, bool)> {
-        let losses = &self.doc.losses;
-        if !self.want(OutputSection::NotRead) || losses.is_empty() {
+        if !self.want(OutputSection::NotRead) {
             return None;
+        }
+        let filter = self.loss_filter();
+        let losses = filter.shown(&self.doc.losses);
+        let line = self.left_out_line(&filter);
+        if losses.is_empty() {
+            return facets::not_read_with(&[], line).map(|text| (text, false));
         }
         let link = format!(
             "[Not read]({})",
@@ -608,7 +616,22 @@ impl Writer<'_> {
         } else if text_cut {
             text.push_str(&format!("\n\nThe whole texts are in {link}."));
         }
+        if let Some(line) = line {
+            text.push_str(&format!("\n\n{line}"));
+        }
         Some((text, more > 0 || text_cut))
+    }
+
+    /// The line under `## Not read` on the notes the level leaves out (see
+    /// [`crate::levels`]).
+    fn left_out_line(&self, filter: &crate::levels::LossFilter) -> Option<String> {
+        let count = crate::levels::left_out(self.doc, self.opts, self.selection.as_ref(), filter);
+        crate::levels::left_out_line(self.opts.notes, count)
+    }
+
+    /// The losses the level shows in `## Not read`.
+    fn loss_filter(&self) -> crate::levels::LossFilter {
+        crate::levels::LossFilter::new(self.doc, self.opts, self.selection.as_ref())
     }
 
     /// `## Parts`: every part in order, or the link to the first of `contents` parts.
@@ -653,6 +676,7 @@ fn stats(c: &Counts) -> Option<String> {
             "picture that needs vision",
             "pictures that need vision",
         ),
+        (c.regions, "region to look at", "regions to look at"),
         (c.not_read, "part not read", "parts not read"),
     ]
     .into_iter()

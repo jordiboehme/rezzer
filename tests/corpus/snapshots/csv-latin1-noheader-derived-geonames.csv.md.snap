@@ -36,7 +36,7 @@ losses: 0
 | --- | --- |
 | columns | 4 |
 | delimiter | , |
-| has\_header | false |
+| has_header | false |
 | rows | 83 |
 
 ## csv-latin1-noheader-derived-geonames

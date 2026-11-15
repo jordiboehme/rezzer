@@ -114,6 +114,58 @@ fn boxed_amount_gets_its_decimal_comma() {
     assert_eq!(out.completeness, Completeness::Complete);
 }
 
+/// A page written as plain lines (the time ends before its
+/// layout) holds the separators read from drawn marks, so it says which they are in the
+/// same note at its top, and the note's element is charged once.
+#[test]
+fn a_page_written_as_plain_lines_says_which_separators_are_drawn_marks() {
+    use rezzer_limits::{Budget, CancelToken, Clock, Limits};
+    let page = boxed_page(
+        "123456",
+        &[4],
+        &["Summe 9.876,54", "Netto 1.234,56", "Datum 01.02.2026"],
+    );
+    let file = print_form(&[page], "", "");
+    let step = Duration::from_millis(1);
+    let read = |max_time: Duration| {
+        let clock = Clock::steps(step);
+        let limits = Limits {
+            max_time,
+            ..Limits::default()
+        };
+        let budget = Budget::with_clock(limits, CancelToken::default(), clock.clone());
+        let out = common::read_in(&file, &rezzer_model::ReadOptions::default(), &budget);
+        (out, clock.reads(), budget.elements())
+    };
+    let (whole, reads, _) = read(Duration::from_secs(360_000));
+    let want = found_by(&whole);
+    assert_eq!(want.len(), 1);
+    let mut seen = 0;
+    let mut counts = Vec::new();
+    for k in 1..=12u32 {
+        let (out, _, elements) =
+            read(step * (u32::try_from(reads).expect("few readings") * k / 12));
+        let plain = out
+            .document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("written as plain lines"));
+        if !plain {
+            continue;
+        }
+        seen += 1;
+        let text = all_text(&out);
+        assert!(text.contains("1234,56"), "{text}");
+        assert_eq!(found_by(&out), want);
+        assert!(note_after_marker(&out), "{:#?}", out.document.body);
+        counts.push(elements);
+    }
+    assert!(seen >= 2, "{seen} limits wrote plain lines");
+    // Wherever the time ended (before the page or in its layout), the page charged the
+    // same elements: a note written before a layout that is dropped is given back with it.
+    assert!(counts.iter().all(|&c| c == 5), "{counts:?}");
+}
+
 #[test]
 fn boxed_date_gets_its_points() {
     let page = boxed_page(
@@ -253,7 +305,7 @@ fn leader_dots_are_not_separators() {
         "{text}"
     );
     assert!(found_by(&out).is_empty());
-    assert_no_loss(&out);
+    assert_no_loss_but_laid_out(&out, &["p1:b1"]);
 }
 
 /// Guard: a decimal comma printed as text with a mark under it is written once.
@@ -321,7 +373,7 @@ fn many_marks_are_bounded() {
     }
     let mut page = boxed_page("123456", &[4], &["Summe 9.876,54", "Netto 1.234,56"]);
     page.template += &template;
-    let start = Instant::now();
+    let start = crate::common::Cpu::now();
     let out = read(&print_form(&[page], "", ""));
     assert!(
         start.elapsed() < Duration::from_secs(30),
@@ -588,7 +640,7 @@ fn many_marks_near_digits_end_the_search_with_a_note() {
     for k in 0..41 {
         page.template += &data_line(40.0 + 0.01 * k as f32, 700.0, 9.5, &padded(20, "123456"));
     }
-    let start = Instant::now();
+    let start = crate::common::Cpu::now();
     let out = read(&print_form(&[page], "", ""));
     assert!(
         start.elapsed() < Duration::from_secs(30),

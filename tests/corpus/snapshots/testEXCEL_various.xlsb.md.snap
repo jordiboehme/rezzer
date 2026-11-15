@@ -24,7 +24,7 @@ created: "2017-03-09T12:24:26Z"
 modified: "2017-03-10T14:58:49Z"
 ---
 
-# testEXCEL\_various.xlsb
+# testEXCEL_various.xlsb
 
 ## Overview
 
@@ -45,7 +45,7 @@ modified: "2017-03-10T14:58:49Z"
 | Key | Value |
 | --- | --- |
 | application | Microsoft Excel |
-| last\_modified\_by | Allison, Timothy B. |
+| last_modified_by | Allison, Timothy B. |
 
 ## mySheet1
 
@@ -65,7 +65,7 @@ Table A1:E17 (data A2:E17), header row 1, row labels in A, 3 columns without a h
 | fraction | 0.25 |  |  |  |
 | date | 2017-03-09 |  |  |  |
 | comment | contents |  |  |  |
-| hyperlink | tika\_link |  |  |  |
+| hyperlink | tika_link |  |  |  |
 | formula | 4 | 2 |  |  |
 | formulaErr | #NAME? |  |  |  |
 | formulaFloat | 0.5 |  | March | April |

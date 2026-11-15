@@ -98,6 +98,14 @@ pub(crate) struct PageItems {
     /// in the frame of the runs, without the dashes of dashed rules: the separators of boxed
     /// number fields are among them. At most [`crate::marks::MAX_MARKS`].
     pub marks: Vec<[f32; 4]>,
+    /// The boxes of what the page draws besides rules, rectangles and pictures (paths of
+    /// curves or slanted lines: an icon, a logo, a chart), in the frame of the runs. At most
+    /// [`MAX_SHAPES`]: a cell of a table that holds one and no text is said (see
+    /// `tables::ruled`).
+    pub shapes: Vec<[f32; 4]>,
+    /// The page draws more such paths than `shapes` holds: a table that looks for icons in
+    /// its cells says that it looked at the drawings only in part.
+    pub shapes_cut: bool,
     /// The lower left corner of the visible page box in user space: what moves boxes of the
     /// object layer (links, form fields) into the frame of the runs.
     pub origin: (f32, f32),
@@ -169,6 +177,7 @@ impl PageItems {
         copy(&mut self.invisible);
         self.rules = self.rules.to_vec();
         self.marks = self.marks.to_vec();
+        self.shapes = self.shapes.to_vec();
         self.boxes = self.boxes.to_vec();
         for (_, list) in &mut self.hidden_layers {
             copy(list);
@@ -202,12 +211,13 @@ impl PageItems {
             .sum::<u64>();
         self.rules.shrink_to_fit();
         self.marks.shrink_to_fit();
+        self.shapes.shrink_to_fit();
         self.boxes.shrink_to_fit();
         total
             + (std::mem::size_of::<[f32; 4]>() * self.boxes.len()) as u64
             + 25 * self.images.len() as u64
             + (std::mem::size_of::<Rule>() * self.rules.len()) as u64
-            + CELL_BYTES * self.marks.len() as u64
+            + CELL_BYTES * (self.marks.len() + self.shapes.len()) as u64
             + 256
     }
 }
@@ -833,6 +843,8 @@ impl<'p, 'a> PageReader<'p, 'a> {
             drawn_marks: Vec::new(),
             drawn_marks_cut: false,
             drawn_marks_held: 0,
+            shapes: Vec::new(),
+            shapes_cut: false,
             stencils,
             pictures: &mut self.pictures,
             page: n,
@@ -1018,11 +1030,12 @@ impl<'p, 'a> PageReader<'p, 'a> {
             .collect();
         let width = (crop.x1 - crop.x0) as f32;
         let height = (crop.y1 - crop.y0) as f32;
-        // This grid search decides for the page whether the ruled tables and the boxes are
-        // looked for; when it gives up, one loss says so for both. The layout's passes (field
-        // frames, titles, rows of boxes, ruled tables) search the grids again, each within
-        // the same work bound, six to seven times a page.
-        let found = regions::grids(&dev.rules);
+        // The grids and boxes of the page are found once here: the grid search decides for
+        // the page whether the ruled tables and the boxes are looked for (when it gives up,
+        // one loss says so for both). The grids are not kept until the page is laid out, as
+        // the pages of a file wait for it together within one bound of memory: the layout
+        // finds them once more, in the frame of the runs, for all its passes (titles, rows of
+        // boxes, ruled tables).
         let inked = regions::Inked::new(
             width,
             height,
@@ -1034,19 +1047,18 @@ impl<'p, 'a> PageReader<'p, 'a> {
                 )
             }),
         );
-        let (boxes, unused) = match regions::boxes(
-            found.as_ref().map_err(|e| *e),
-            width,
-            height,
-            &fields,
-            &inked,
-        ) {
-            Ok(b) => (b, None),
-            Err(why) => (Vec::new(), Some(why)),
-        };
-        let unsearched = found.as_ref().err().map(|e| e.why());
-        drop(found);
+        let found = regions::structure(n, &dev.rules, (width, height), &fields, &inked);
+        drop(inked);
         drop(fields);
+        let boxes: Vec<[f32; 4]> = found
+            .boxes
+            .iter()
+            .map(|b| [b.x0, b.y0, b.x1, b.y1])
+            .collect();
+        let unsearched = found.grids.as_ref().err().map(|e| e.why());
+        let unused = found.boxes_note;
+        drop(found.grids);
+        drop(found.boxes);
         let mut items = lay_out(
             n,
             &dev.glyphs,
@@ -1133,6 +1145,8 @@ impl<'p, 'a> PageReader<'p, 'a> {
         items.images_mcid = std::mem::take(&mut dev.images_mcid);
         items.rules = std::mem::take(&mut dev.rules);
         items.marks = std::mem::take(&mut dev.drawn_marks);
+        items.shapes = std::mem::take(&mut dev.shapes);
+        items.shapes_cut = dev.shapes_cut;
         // What the page keeps of the marks counts against the kept bytes from here on.
         self.origin.release_copy(dev.drawn_marks_held);
         if items.turned {
@@ -1143,7 +1157,7 @@ impl<'p, 'a> PageReader<'p, 'a> {
                     .place_box([r.x0, r.y0, r.x1, r.y1], width, height);
                 (r.x0, r.y0, r.x1, r.y1) = (b[0], b[1], b[2], b[3]);
             }
-            for m in &mut items.marks {
+            for m in items.marks.iter_mut().chain(&mut items.shapes) {
                 *m = items.turn.place_box(*m, width, height);
             }
         }
@@ -2340,6 +2354,9 @@ pub(crate) struct Gl {
     pub vertical: bool,
     /// The glyph goes on the text before it without a space (inside one ActualText span).
     pub joined: bool,
+    /// The first glyph of a text show: the file may have set the pen anew before it. The
+    /// glyphs after it in the show follow each other as the pen moves.
+    pub head: bool,
     /// The ActualText the glyph stands for, an index into the page's list.
     pub actual: Option<u32>,
     /// The URI link whose box holds the glyph's middle, an index into the page's links.
@@ -2445,6 +2462,8 @@ fn picture_id(
     ids: &mut Pictures,
     own: (u32, usize),
 ) -> u64 {
+    // A step per use of a picture: its data is read once per object (see `data_id`).
+    crate::work::add(1);
     let mut h = DefaultHasher::new();
     (image.width(), image.height()).hash(&mut h);
     match image {
@@ -2585,6 +2604,8 @@ fn device_space(name: &[u8]) -> bool {
 /// per object), and its size was measured by the guard; a part of it would let two pictures
 /// that differ in the part not read look the same.
 fn data_id(data: &[u8], h: &mut DefaultHasher) {
+    // A step per KiB read: reading a big picture again at each use shows here.
+    crate::work::add(data.len() as u64 / 1024 + 1);
     data.len().hash(h);
     data.hash(h);
 }
@@ -2717,6 +2738,10 @@ struct TextDevice<'d> {
     drawn_marks_cut: bool,
     /// What the marks hold of the object pool.
     drawn_marks_held: u64,
+    /// The boxes of the drawn paths that are no rule (see [`PageItems::shapes`]), at most
+    /// [`MAX_SHAPES`], and whether more were drawn.
+    shapes: Vec<[f32; 4]>,
+    shapes_cut: bool,
     images_mcid: Vec<Option<u32>>,
     /// The image object of each stencil mask dictionary the walk met, `None` when several
     /// objects share it.
@@ -3443,6 +3468,42 @@ fn rules_of(
     }
 }
 
+/// Shapes one page keeps (see [`PageItems::shapes`]): 128 KiB of boxes at most, so they need
+/// no share of the object pool. An icon is a handful of paths; a page that draws more paths
+/// of curves than this is a drawing (a map, a chart), and what it holds in the cells of a
+/// table past them is said as not looked at.
+pub(crate) const MAX_SHAPES: usize = 8_192;
+
+/// The box of the points of `path` on the page (the control points of its curves too: a
+/// curve lies inside them), `None` for a path without a point.
+fn shape_box(path: &BezPath, transform: Affine) -> Option<[f32; 4]> {
+    use kurbo::PathEl;
+    let mut b: Option<[f64; 4]> = None;
+    let mut add = |p: Point| {
+        let p = transform * p;
+        b = Some(match b {
+            Some([x0, y0, x1, y1]) => [x0.min(p.x), y0.min(p.y), x1.max(p.x), y1.max(p.y)],
+            None => [p.x, p.y, p.x, p.y],
+        });
+    };
+    for el in path.elements() {
+        match *el {
+            PathEl::MoveTo(p) | PathEl::LineTo(p) => add(p),
+            PathEl::QuadTo(c, p) => {
+                add(c);
+                add(p);
+            }
+            PathEl::CurveTo(c, d, p) => {
+                add(c);
+                add(d);
+                add(p);
+            }
+            PathEl::ClosePath => {}
+        }
+    }
+    b.map(|b| b.map(|v| v as f32))
+}
+
 /// What one kept filled rectangle takes, and how many are reserved at a time.
 const CELL_BYTES: u64 = 16;
 const CELL_BLOCK: u64 = 8_192;
@@ -3658,7 +3719,9 @@ impl<'a> Device<'a> for TextDevice<'_> {
         }
         let (rules, mark_rules, cap) = (&mut self.rules, &mut self.mark_rules, self.cap);
         let mut cut = false;
+        let mut ruled = false;
         rules_of(path, props.transform, stroke, &mut |r, mark| {
+            ruled = true;
             if rules.len() + mark_rules.len() >= cap {
                 cut = true;
             } else if let Some(b) = mark {
@@ -3668,6 +3731,23 @@ impl<'a> Device<'a> for TextDevice<'_> {
             }
         });
         self.rules_cut |= cut;
+        // A path that is no rule and no rectangle (curves, slanted lines) and puts ink on the
+        // page is a shape. A stroke or a fill in pure white or with no opacity at all draws
+        // nothing on paper; a pattern does.
+        let inked = match &props.paint {
+            hayro_interpret::Paint::Color(c) => {
+                let [r, g, b, a] = c.to_rgba().to_rgba8();
+                a > 0 && (r, g, b) != (255, 255, 255)
+            }
+            _ => true,
+        };
+        if !ruled && inked && !self.shapes_cut {
+            if self.shapes.len() >= MAX_SHAPES {
+                self.shapes_cut = true;
+            } else if let Some(b) = shape_box(path, props.transform) {
+                self.shapes.push(b);
+            }
+        }
     }
 
     fn push_clip_path(&mut self, _: &ClipPath) {
@@ -3765,6 +3845,7 @@ impl<'a> Device<'a> for TextDevice<'_> {
                 layer,
                 vertical: info.vertical,
                 joined: false,
+                head: self.glyphs.len() == from,
                 actual: None,
                 link: None,
             };
@@ -4289,6 +4370,7 @@ mod tests {
             layer: None,
             vertical: false,
             joined: false,
+            head: false,
             actual: None,
             link,
         };

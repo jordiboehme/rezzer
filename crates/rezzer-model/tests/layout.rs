@@ -55,7 +55,7 @@ fn table_key_from_list_object_and_top_left() {
         table_key("Data", std::slice::from_ref(&pivot), "C4"),
         "pivot:Data!PivotTable1"
     );
-    // The pivot's sheet is quoted like every other key (P4-H).
+    // The pivot's sheet is quoted like every other key.
     assert_eq!(
         table_key("'My Sheet'", &[Evidence::Pivot { name: name("PT1") }], "A1"),
         "pivot:'My Sheet'!PT1"
@@ -332,7 +332,7 @@ fn row_ranges_keep_vertical_merges_whole() {
 #[test]
 fn row_ranges_same_in_both_styles() {
     // The borders depend only on the model: the function takes no style, and the same call
-    // gives the same ranges. Task 10 extends this to two real renderings (P4-I).
+    // gives the same ranges.
     let _no_style: fn(&[Block], &Block, &[Block], usize) -> Vec<RowRange> = split_rows;
     let t = table_with_group();
     let a = split_rows(&[heading()], &t, &[note()], 39);

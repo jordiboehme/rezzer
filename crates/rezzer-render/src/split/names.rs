@@ -116,7 +116,7 @@ pub(crate) fn family_title(title: &str, n: usize) -> String {
     }
 }
 
-/// The title of Rezzer's own parts that list the other parts (ruling P5-AF), so a source
+/// The title of Rezzer's own parts that list the other parts, so a source
 /// chapter named `Contents` keeps its name.
 pub(crate) const LIST_TITLE: &str = "List of parts";
 
@@ -187,7 +187,7 @@ fn with_suffix(title: &str, suffix: &str) -> String {
 }
 
 /// The titles of the units of one document (title, location, own), made unique before their
-/// pieces are numbered (rulings P5-AE and P5-AF), as Crystalline compares titles (L003).
+/// pieces are numbered, as Crystalline compares titles (L003).
 /// Units of the source that share a title get their location in words,
 /// `Abstract (pages 3 to 5)`; units that share title and location get ` (2)`, ` (3)` after
 /// the first. Rezzer's own units keep theirs; a clash with them is [`finish_titles`]' job.
@@ -245,7 +245,7 @@ fn is_title_or_numbered_piece(key: &str, own: &str) -> bool {
             .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
 }
 
-/// Writes the final title of every unit from its [`Naming`] (ruling P5-AF): a unit of the
+/// Writes the final title of every unit from its [`Naming`]: a unit of the
 /// source titled like a part Rezzer really writes for this document (one of its own units,
 /// or one of `extra`, the parts the main document writer adds: `Overview`, `Not read`,
 /// `List of parts`) gets its location in words, else the word `(section)`; then its piece

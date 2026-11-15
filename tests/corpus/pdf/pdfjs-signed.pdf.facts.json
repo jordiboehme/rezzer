@@ -32,6 +32,6 @@
     "equals": true
   },
   {
-    "contains": "Expected verification state: VERIFIED"
+    "contains": "| Expected verification state: | VERIFIED |"
   }
 ]

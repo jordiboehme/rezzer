@@ -369,7 +369,7 @@ fn page_of(content: &str, fonts: &[(&str, &str, &[u8])], photo: bool) -> Vec<u8>
     b.finish(catalog)
 }
 
-// Fonts of other structures (Task 15b part 2f-1 fix round 1): the structure of a real shop's
+// Fonts of other structures: the structure of a real shop's
 // barcode font (a simple TrueType subset, `BC C128 HD Wide`, one bar and its space a glyph),
 // and the same glyphs as a full TrueType, a Type1 and a CFF program.
 
@@ -387,7 +387,7 @@ pub enum Set {
     /// [`Set::Pairs`] with each bar wider by this many percent of a module (ink spread; its
     /// space as much narrower).
     Spread(u8),
-    /// The glyph program of a real shop's `BC C128 HD Wide` (fix round 3), 2048 units an em:
+    /// The glyph program of a real shop's `BC C128 HD Wide`, 2048 units an em:
     /// each glyph one rectangle at x 0, 1559 high, its bar 36, 72, 107 or 143 units wide (1 to
     /// 4 modules of about 34.3, the bars a little wider than whole modules) and its advance 3
     /// to 6 modules; a full bar of 2 modules with no space (`Q`), a white glyph of 2 modules

@@ -498,12 +498,16 @@ fn date_text(v: &Value) -> Option<String> {
     }
 }
 
-/// Media blocks whose asset is an image, plus image inlines in the body: how many places,
-/// and how many distinct pictures (assets, and image inlines by their target).
+/// Media blocks and table cell pictures whose asset is an image, plus image inlines in the
+/// body: how many places, and how many distinct pictures (assets, and image inlines by their
+/// target).
 fn images(doc: &Document) -> (usize, usize) {
+    // A picture that shows a block of the text (a region kept as laid out) is no image of
+    // the file.
     let mime: HashMap<&str, &str> = doc
         .assets
         .iter()
+        .filter(|a| a.shows.is_none())
         .map(|a| (a.id.as_str(), a.mime.as_str()))
         .collect();
     let mut n = 0;
@@ -517,6 +521,18 @@ fn images(doc: &Document) -> (usize, usize) {
             n += 1;
             if !seen.contains(asset.as_str()) {
                 seen.insert(asset.clone());
+            }
+        }
+        // A picture in a table cell is a place of its asset as a media block is.
+        if let Block::Table { rows, .. } = b {
+            for m in rows.iter().flatten().flat_map(|c| &c.media) {
+                if mime
+                    .get(m.asset.as_str())
+                    .is_some_and(|t| t.starts_with("image/"))
+                {
+                    n += 1;
+                    seen.insert(m.asset.clone());
+                }
             }
         }
         walk::block_inlines(b, |list| {

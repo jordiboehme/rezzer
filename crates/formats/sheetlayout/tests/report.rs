@@ -1077,7 +1077,7 @@ fn every_cell_in_exactly_one_region() {
     }
 }
 
-// Fix round 1.
+// Group statements.
 
 /// A two-group statement: group rows, indented items, SUM totals per group and a SUM over
 /// the two group totals.
@@ -1316,7 +1316,7 @@ fn headerless_wide_table_gets_row_rules() {
     assert_eq!(ones(&r.notes), [4]);
 }
 
-// Fix round 2.
+// Group totals.
 
 #[test]
 fn group_totals_are_subtotals_when_no_sum_covers_all_groups() {

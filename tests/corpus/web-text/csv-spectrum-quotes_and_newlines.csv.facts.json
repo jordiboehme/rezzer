@@ -12,6 +12,6 @@
     "equals": "line_break"
   },
   {
-    "contains": "ha \"ha\" ha"
+    "contains": "ha<br>\"ha\"<br>ha"
   }
 ]

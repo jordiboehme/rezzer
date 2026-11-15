@@ -27,6 +27,7 @@ source: crates/rezzer/tests/corpus.rs
           "type": "paragraph"
         },
         {
+          "anchor": "p1:m1",
           "asset": "page-1",
           "type": "media"
         }
@@ -85,6 +86,28 @@ source: crates/rezzer/tests/corpus.rs
       "value": "2010-03-10T13:43:42-05:00"
     }
   },
+  "regions": [
+    {
+      "anchor": "p1:m1",
+      "bounds": [
+        0.0,
+        0.0,
+        504.24,
+        640.32
+      ],
+      "certainty": "rule",
+      "evidence": [
+        {
+          "detail": "a picture",
+          "id": "figure.picture",
+          "kind": "rule"
+        }
+      ],
+      "kind": "figure",
+      "page": 1,
+      "score": 550
+    }
+  ],
   "source": {
     "detection": {
       "confidence": "certain",

@@ -125,6 +125,43 @@ fn prose_page_keeps_its_paragraphs(figure: &str) {
             _ => None,
         })
         .collect();
+    // With the frame on the page the engine may keep the prose as laid out (no
+    // region type has clear evidence for it; a right read turned Spatial): then its
+    // lines stand in order, each once, and no table or pair is read from them.
+    let laid_out: Vec<String> = blocks(&out)
+        .iter()
+        .filter_map(|b| match b {
+            Block::Spatial { lines, .. } => Some(lines.iter().map(|l| {
+                l.pieces
+                    .iter()
+                    .map(|p| p.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    if !figure.is_empty() && paragraphs.iter().all(|p| !p.contains(lines[0])) {
+        let at: Vec<usize> = lines
+            .iter()
+            .map(|l| {
+                let found: Vec<usize> =
+                    (0..laid_out.len()).filter(|&k| laid_out[k] == *l).collect();
+                assert_eq!(found.len(), 1, "{l}: {laid_out:#?}");
+                found[0]
+            })
+            .collect();
+        assert!(at.windows(2).all(|w| w[0] < w[1]), "{laid_out:#?}");
+        assert!(
+            blocks(&out)
+                .iter()
+                .all(|b| !matches!(b, Block::Table { .. })),
+            "{:#?}",
+            blocks(&out)
+        );
+        return;
+    }
     for (a, b) in [(0, 2), (3, 5)] {
         assert!(
             paragraphs
@@ -225,6 +262,73 @@ fn a_number_is_not_cut_into_a_field_with_a_value() {
     assert!(kept.iter().any(|w| w.contains("123456")), "{kept:?}");
 }
 
+/// The data run `123456 78901` (run 6 of the page) crosses the dividers of its strip: the ruled
+/// pass cuts it at them, the strip takes the piece in `Gr D` into its table and the number
+/// before stays text. The pieces share the run's id, which is the table's region (the first
+/// claim, the detector that cut it); nothing is refused, every run is in one region, and the
+/// number still reads.
+#[test]
+fn a_cut_run_belongs_to_the_table_that_cut_it() {
+    let b = mark_row("123456", Some((50, "7")), true);
+    let bytes = common::print_form(std::slice::from_ref(&b.page), "", "");
+    common::assert_every_run_in_one_region(&bytes);
+    let (out, pages) = common::read_regions(&bytes);
+    assert!(all_text(&out).contains("123456"), "{}", all_text(&out));
+    let shared = rezzer_read_pdf::layoutregions::PrimId::Text(6);
+    let holders: Vec<&str> = pages[0]
+        .regions
+        .iter()
+        .filter(|r| r.prims.contains(&shared))
+        .map(|r| r.signals[0].id)
+        .collect();
+    assert_eq!(holders, ["pdf.strips"]);
+}
+
+/// The ruled pass reads the labels of this strip cell by cell, so their runs move in the flow
+/// (`ruled::read_apart`): each region's pieces still name its own runs.
+#[test]
+fn region_ids_name_their_runs_on_a_reordered_page() {
+    let b = mark_row("123456", Some((50, "7")), true);
+    let (_, pages) =
+        common::read_engine_pages(&common::print_form(std::slice::from_ref(&b.page), "", ""));
+    let page = &pages[0];
+    let by = |id: &str| -> Vec<Vec<&str>> {
+        page.regions
+            .regions
+            .iter()
+            // A region of rules alone (no text) is spatial with no signal.
+            .filter(|r| r.signals.first().is_some_and(|s| s.id == id))
+            .map(|r| common::region_texts(page, r))
+            .collect()
+    };
+    assert_eq!(
+        by("pdf.strips"),
+        [[
+            "Feld A",
+            " Feld B",
+            " Gr D",
+            "12345678X012 Muster Kasse ",
+            "123456 78901"
+        ]]
+    );
+    // The text around the strip: the fields the ruled pass refused and the lines under them,
+    // each a paragraph region of its own (by their typers, no longer `pdf.lines`).
+    let paragraphs: Vec<Vec<&str>> = page
+        .regions
+        .regions
+        .iter()
+        .filter(|r| r.kind == rezzer_read_pdf::layoutregions::Kind::Paragraph)
+        .map(|r| common::region_texts(page, r))
+        .collect();
+    assert_eq!(
+        paragraphs,
+        [
+            vec![" Satz", " Gr C"],
+            vec!["Summe 9.876,54", "Netto 1.234,56"]
+        ]
+    );
+}
+
 /// A number in boxes drawn around each digit, standing on the rule under its row: the sides
 /// of the boxes reach the row's lower rule like dividers rising from it, but more than one of
 /// them stands in the number, so it is never cut at one; it stays whole with its loss.
@@ -264,7 +368,7 @@ fn a_marked_label_pairs_as_its_text_with_its_reference() {
 
 /// Labels printed under the rule their value stands on (a signature line) pair with the
 /// value over the same rule, never with the value of the next row, which stands under them
-/// between the same two rules (ruling P6-X).
+/// between the same two rules.
 #[test]
 fn labels_under_their_values_pair_across_the_rule() {
     for dividers in [true, false] {
@@ -605,7 +709,7 @@ fn grids_with_an_empty_last_row_or_one_field_a_row_never_pair_shifted() {
 }
 
 /// Labels under the rule their values stand on, one field a row, the first value empty and
-/// nothing over the top rule (the reviewer's probe E): the last label under the bottom rule is
+/// nothing over the top rule: the last label under the bottom rule is
 /// one complete end, which a column of labels over values with a column title under it has as
 /// well. Neither reading is clear: no field pairs (never a label with the value of the row
 /// under it), and a loss names them all.
@@ -632,7 +736,7 @@ fn a_column_of_labels_under_values_with_an_empty_first_value_gives_a_loss() {
 }
 
 /// Labels under the rule their values stand on, two fields a row, every row full, one value
-/// of two lines (the reviewer's probe P1): both ends are complete, but the strip of the
+/// of two lines: both ends are complete, but the strip of the
 /// two-line value is no line of labels over one line of values, which is how labels under
 /// values are paired. So no field pairs (never a label with the value of the row under it),
 /// and a loss names them all.
@@ -659,7 +763,7 @@ fn labels_under_values_with_a_value_of_two_lines_give_a_loss() {
 
 /// Labels under the rule their values stand on, every row full, under a section rule one row
 /// pitch over the top rule with a bold title in the frame it makes over the first row's values
-/// (the reviewer's probe P2), with and without a rule one pitch under the last labels. The
+/// with and without a rule one pitch under the last labels. The
 /// title makes that frame a row refused with a loss; its values are still the top end. With
 /// the rule under the last labels (an own bottom) one end is complete: no field pairs and a
 /// loss names them all. Without it both ends are complete: the fields pair labels under values.
@@ -699,7 +803,7 @@ fn labels_under_values_under_a_titled_section_rule_never_pair_shifted() {
 
 /// Labels under the rule their values stand on, every row full, with a second rule 3 or 4
 /// points under the second rule (a double rule, farther apart than one rule drawn in pieces)
-/// and with or without a rule one pitch under the last labels (the reviewer's probe P3). The
+/// and with or without a rule one pitch under the last labels. The
 /// double rule parts the grid into two groups; the values over the lower group's top rule are
 /// held by the upper group. Neither group may pair shifted: each gives a loss that names its
 /// fields.
@@ -730,7 +834,7 @@ fn labels_under_values_split_by_a_double_rule_give_a_loss() {
 
 /// Labels under the rule their values stand on, every row full, under a section rule one row
 /// pitch over the top rule, with upright lines boxing that frame into two cells whose divider
-/// is not in line with the grid's (the reviewer's probe P5), with and without a rule one pitch
+/// is not in line with the grid's, with and without a rule one pitch
 /// under the last labels. The box holds the first row's values, and the grid's first row is a
 /// row of fields under the box's lowest rule. With the rule under the last labels (an own
 /// bottom) one end is complete: no field pairs and a loss names them all. Without it both ends
@@ -764,7 +868,7 @@ fn labels_under_values_under_a_boxed_section_never_pair_shifted() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// The reviewer's probe P4: as [`labels_under_values_under_a_boxed_section_never_pair_shifted`],
+/// As [`labels_under_values_under_a_boxed_section_never_pair_shifted`],
 /// with the box's divider in line with the grid's, so that the box and the grid's first row
 /// make one grid of drawn rules, its cells holding the first row's values over its labels.
 /// The box's grid ends at its lowest rule: the grid's first row is a row of fields under it,
@@ -803,7 +907,7 @@ fn labels_under_values_under_a_box_in_line_with_their_divider_never_pair_shifted
 /// Labels under the rule their values stand on, four rows of two fields, parted into three
 /// groups by two double rules (a second rule 3 points under the second and the third rule),
 /// the middle group holding a value of two lines (`Hinterhof` over `12345`), with some values
-/// empty (the reviewer's probe P7). The middle group's ends are partial and held by the
+/// empty. The middle group's ends are partial and held by the
 /// groups beside it: it is not clear, and no group pairs shifted. Every value stands once,
 /// and each field with a value pairs right or a loss names it.
 #[test]
@@ -860,7 +964,7 @@ fn labels_under_values_in_three_groups_with_a_value_of_two_lines_never_pair_shif
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// The reviewer's probe P7 without its value of two lines: labels under the rule their values
+/// Labels under the rule their values
 /// stand on, four rows of two fields, parted into three groups by two double rules, with
 /// some values empty. The middle group's ends lie in the groups beside it: with `Hausnr` and
 /// `Land` empty both are partial, which with the runs those groups hold is not clear. No
@@ -925,7 +1029,7 @@ enum EndIn {
     Caption,
 }
 
-/// The reviewer's probe for the ruled `tabled` exclusion: labels under the rule their values
+/// Labels under the rule their values
 /// stand on, every row full, the second row's first value of two lines (`Hinterhof` over
 /// `Musterweg 1`), its ends in boxes of drawn rules (their divider in line with the grid's, or
 /// not), in ruled tables of two rows, one end free, or the last labels right over a ruled grid
@@ -1318,10 +1422,10 @@ fn an_empty_row_over_a_table_made_by_a_rising_divider_is_no_row_of_it() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// The reviewer's probe R1: labels under values, no value of two lines, both ends in ruled
+/// Labels under values, no value of two lines, both ends in ruled
 /// tables, the first row's or the last row's second value empty. The evidence at both ends lies
 /// in the cells of tables whose rules are the grid's own: in part at both ends, that is not
-/// clear (ruling P6-Z4). No field pairs with the value of another row.
+/// clear. No field pairs with the value of another row.
 #[test]
 fn labels_under_values_with_partial_ends_in_tables_never_pair_shifted() {
     let mut reads = Vec::new();
@@ -1541,7 +1645,7 @@ const NARROW: [&[FieldSpec]; 2] = [
 
 /// Labels set in the middle of their fields or at their right end, over values at the
 /// fields' left ends, without dividers: a value under no label has no certain field, so the
-/// fields it may belong to stay text with a loss (ruling P6-X); a value under its label
+/// fields it may belong to stay text with a loss; a value under its label
 /// pairs.
 #[test]
 fn labels_away_from_their_values_never_pair_wrongly() {
@@ -1962,7 +2066,7 @@ fn generated_shapes_hold_the_invariants() {
 }
 
 /// A form of two pages, each of several shapes: every page holds the invariants on its own,
-/// each note of a kind once on each page (ruling P6-W).
+/// each note of a kind once on each page.
 #[test]
 fn a_form_of_two_pages_holds_the_invariants_on_each() {
     let first = page(&REAL, true, true);
@@ -2004,11 +2108,11 @@ fn turned_forms_never_pair_wrongly() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// Task 15b part 2d fix round 2 (I2, ruling on concern 1): a grid of fields whose labels stand
+/// A grid of fields whose labels stand
 /// under the rule their values stand on, not clear (a value of two lines, or an empty first
 /// value), is refused with a loss and read cell by cell, each line of a cell a block of its
 /// own: no block holds a value of one field and a label or value of another, in every look,
-/// with and without dividers. Found by the spans of the drawn texts. Part 2e-1 (item 3): the
+/// with and without dividers. Found by the spans of the drawn texts. The
 /// second value line `Hinterhaus`, set on the line of the label `Name` over it, is a text of
 /// its own too, not glued to the label (`NameHinterhaus`).
 #[test]
@@ -2067,7 +2171,7 @@ fn a_refused_grid_of_labels_under_values_reads_cell_by_cell() {
     );
 }
 
-/// Task 15b part 2e-2 (item 1, ruling P6-X): a block of three fields, each a label over its
+/// A block of three fields, each a label over its
 /// value between rules, beside a grid whose labels stand under the rule their values stand on
 /// and that is not clear (a value of two lines). The block stands on the grid's rules and has a
 /// row of its own under them: it is a grid of its own, its fields pair, and its last label
@@ -2140,4 +2244,45 @@ fn a_block_of_fields_beside_a_refused_grid_pairs_on_its_own() {
         wrong.len(),
         wrong.join("\n")
     );
+}
+
+/// On a page with form fields, the boxes of the fields are the
+/// form's regions, given by the file. Boxed labels stand over the fields and each field shows
+/// its value, but no rule reads label and value pairs or a table over them: the page has no
+/// `label_value` region, and each value the fields show stands once in the text.
+#[test]
+fn widget_page_gets_no_geometric_pairs() {
+    let labels = ["Personalnummer", "Eintritt", "Steuerklasse"];
+    let values = ["00000", "01.01.2020", "4"];
+    let mut page = common::FormPage::default();
+    for (k, x) in [40.0f32, 160.0, 280.0].into_iter().enumerate() {
+        page.template += &common::boxed(x, 700.0, 120.0, 24.0);
+        page.template += &label(x + 3.0, 716.0, 6.0, labels[k]);
+        page.template += &draw::courier(x + 5.0, 703.0, 10.0, values[k]);
+        page.annots.push(format!(
+            "<< /Type /Annot /Subtype /Widget /FT /Tx /T (f{k}) /V ({}) /Rect [{} 701 {} 712] >>",
+            values[k],
+            x + 2.0,
+            x + 118.0
+        ));
+    }
+    let bytes = common::print_form(
+        std::slice::from_ref(&page),
+        "",
+        "/AcroForm << /Fields [{annots}] >>",
+    );
+    let (out, pages) = common::read_regions(&bytes);
+    let pairs: Vec<_> = pages
+        .iter()
+        .flat_map(|p| &p.regions)
+        .filter(|r| r.kind == rezzer_read_pdf::layoutregions::Kind::LabelValue)
+        .collect();
+    assert!(pairs.is_empty(), "{pairs:#?}");
+    let text = all_text(&out);
+    for v in values {
+        assert_eq!(text.matches(v).count(), 1, "{v} in {text}");
+    }
+    for l in labels {
+        assert!(text.contains(l), "{l} in {text}");
+    }
 }

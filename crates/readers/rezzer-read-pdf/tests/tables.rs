@@ -12,8 +12,8 @@ use std::path::PathBuf;
 use common::{Builder, Page, helvetica_width, markdown, pdf, show, sized_page};
 use rezzer_limits::{Budget, Limits};
 use rezzer_model::{
-    Anchor, Block, Cell, Completeness, LossReason, ReadOptions, ReadOutcome, SectionKind, Severity,
-    plain_text,
+    Anchor, Block, Cell, Completeness, Inline, LossReason, ReadOptions, ReadOutcome, SectionKind,
+    Severity, plain_text,
 };
 
 fn corpus_path(name: &str) -> PathBuf {
@@ -180,6 +180,508 @@ fn tagged_span_table() -> Vec<u8> {
     b.finish(catalog)
 }
 
+/// A table the tag tree states stays the given table. Its region
+/// is exact (the file states it, no rule typed it again), and each of its cell texts stands
+/// once in the Markdown, never also in a paragraph.
+#[test]
+fn tagged_table_stays_given_and_once() {
+    let out = read(&tagged_span_table());
+    let notes: Vec<&rezzer_model::RegionNote> = out
+        .document
+        .regions
+        .iter()
+        .filter(|r| r.anchor.0 == "p1:t1")
+        .collect();
+    assert_eq!(notes.len(), 1, "{:#?}", out.document.regions);
+    assert_eq!(notes[0].kind, rezzer_model::RegionKind::Table);
+    assert_eq!(notes[0].certainty, rezzer_model::Certainty::Exact);
+    let md = markdown(&out);
+    // Each cell stands once in the table; the note under it names the merged cell again.
+    let table = md.split("Merged cells:").next().unwrap_or_default();
+    assert!(
+        md.contains("Merged cells: `Both` (row 1 column 1) over 2 columns. Each has"),
+        "{md}"
+    );
+    for cell in ["Both", "Left", "Right"] {
+        assert_eq!(table.matches(cell).count(), 1, "{cell}: {md}");
+    }
+    assert!(paragraphs(page(&out, 1)).is_empty(), "{md}");
+}
+
+/// A tagged page with a table of eight visible columns (a bold-free header and four item rows,
+/// 64 points apart) whose tags hold two cells a row: the first column, and the rest of the row
+/// in one cell (an item table as some producers tag it).
+fn tagged_glued_table() -> (Vec<u8>, Vec<Vec<String>>) {
+    let titles = [
+        "Pos", "Nr", "Text", "Menge", "Einh", "Preis", "MwSt", "Summe",
+    ];
+    let mut rows: Vec<Vec<String>> = vec![titles.iter().map(|t| t.to_string()).collect()];
+    for k in 0..4u32 {
+        rows.push(vec![
+            format!("{}", k + 1),
+            format!("A-10{k}"),
+            "Muster".to_string(),
+            format!("{}", k + 2),
+            "Stk".to_string(),
+            "12,50".to_string(),
+            "19%".to_string(),
+            "25,00".to_string(),
+        ]);
+    }
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let kid = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let mut content = String::from("BT /F1 9 Tf ");
+    let mut mcid = 0;
+    for (r, row) in rows.iter().enumerate() {
+        let y = 700.0 - 13.0 * r as f32;
+        let tag = if r == 0 { "TH" } else { "TD" };
+        // The first cell, then the rest of the row in one marked content.
+        content += &format!(
+            "/{tag} <</MCID {mcid}>> BDC 1 0 0 1 40 {y} Tm ({}) Tj EMC ",
+            row[0]
+        );
+        content += &format!("/{tag} <</MCID {}>> BDC ", mcid + 1);
+        for (c, t) in row.iter().enumerate().skip(1) {
+            content += &format!("1 0 0 1 {} {y} Tm ({t}) Tj ", 40.0 + 64.0 * c as f32);
+        }
+        content += "EMC ";
+        mcid += 2;
+    }
+    content += "ET";
+    let cs = b.stream("", content.as_bytes());
+    let root = b.reserve();
+    let table = b.reserve();
+    let trs: Vec<u32> = rows.iter().map(|_| b.reserve()).collect();
+    let mut cells = Vec::new();
+    for (r, tr) in trs.iter().enumerate() {
+        let tag = if r == 0 { "TH" } else { "TD" };
+        let a = b.add(format!(
+            "<< /Type /StructElem /S /{tag} /P {tr} 0 R /Pg {kid} 0 R /K {} >>",
+            2 * r
+        ));
+        let z = b.add(format!(
+            "<< /Type /StructElem /S /{tag} /P {tr} 0 R /Pg {kid} 0 R /K {} >>",
+            2 * r + 1
+        ));
+        b.set(
+            *tr,
+            format!("<< /Type /StructElem /S /TR /P {table} 0 R /K [{a} 0 R {z} 0 R] >>"),
+        );
+        cells.push(format!("{a} 0 R {z} 0 R"));
+    }
+    let kids: Vec<String> = trs.iter().map(|t| format!("{t} 0 R")).collect();
+    b.set(
+        table,
+        format!(
+            "<< /Type /StructElem /S /Table /P {root} 0 R /K [{}] >>",
+            kids.join(" ")
+        ),
+    );
+    b.set(
+        root,
+        format!(
+            "<< /Type /StructTreeRoot /K {table} 0 R /ParentTree << /Nums [0 [{}]] >> >>",
+            cells.join(" ")
+        ),
+    );
+    b.set(
+        kid,
+        format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] /StructParents 0 \
+             /Resources << /Font << /F1 {font} 0 R >> >> /Contents {cs} 0 R >>"
+        ),
+    );
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(
+        catalog,
+        format!(
+            "<< /Type /Catalog /Pages {tree} 0 R /MarkInfo << /Marked true >> \
+             /StructTreeRoot {root} 0 R >>"
+        ),
+    );
+    (b.finish(catalog), rows)
+}
+
+/// A tagged table whose tags
+/// put the rest of each row in one cell, so two tagged columns hold eight visible ones, loses
+/// its certainty: its glued cells are cut where their text stands apart, and its eight columns
+/// are a table with each value in its own cell. A note says why.
+#[test]
+fn a_tagged_table_whose_cells_cross_its_columns_is_cut_into_them() {
+    let (bytes, rows) = tagged_glued_table();
+    let out = read(&bytes);
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:?}\n{}", markdown(&out));
+    assert_eq!(found[0].1, rows, "{}", markdown(&out));
+    assert_no_exact_table(&out);
+    assert_glued_note(&out, 7, 1);
+}
+
+/// No table region of `out` is exact: the tag tree is no exact reading of a table it glues.
+fn assert_no_exact_table(out: &ReadOutcome) {
+    assert!(
+        out.document
+            .regions
+            .iter()
+            .all(|r| r.certainty != rezzer_model::Certainty::Exact
+                || r.kind != rezzer_model::RegionKind::Table),
+        "{:#?}",
+        out.document.regions
+    );
+}
+
+/// `out` says that a tagged table on page 1 holds the text of `columns` columns in `glued`
+/// of its tagged columns.
+fn assert_glued_note(out: &ReadOutcome, columns: usize, glued: usize) {
+    let want = format!(
+        "a tagged table on page 1 holds the text of {columns} columns in {glued} of its tagged \
+         columns; its cells are cut where that text lines up apart over its rows"
+    );
+    let notes: Vec<&str> = out
+        .document
+        .losses
+        .iter()
+        .map(|l| l.what.as_str())
+        .collect();
+    assert!(notes.contains(&want.as_str()), "{notes:?}");
+}
+
+/// One run of a tagged table: x, baseline, size and text.
+type TagRun = (f32, f32, f32, String);
+
+/// A tagged page with a table of two tagged cells a row, the first holding the runs left of
+/// `split`, the second all the others (header row `TH`), each run in a marked content of its
+/// own (as a producer writes text pieces of one cell), drawn with rules that agree with the
+/// tags: one column rule at `split` and a rule under each row (`bottoms`). With `legend` not
+/// empty, a tagged list of one item (`L`, `LI`, `LBody`) of those runs stands under the table.
+fn two_cell_tagged_table(
+    rows: &[Vec<TagRun>],
+    split: f32,
+    bottoms: &[f32],
+    legend: &[TagRun],
+) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let kid = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let top = rows[0].iter().map(|r| r.1).fold(f32::MIN, f32::max) + 12.0;
+    let low = bottoms.iter().copied().fold(f32::MAX, f32::min);
+    let mut content = format!("0.5 w 30 {top} m 520 {top} l S {split} {low} m {split} {top} l S ");
+    for y in bottoms {
+        content += &format!("30 {y} m 520 {y} l S ");
+    }
+    // The marked contents of each cell, by row and cell.
+    let mut mcids: Vec<[Vec<usize>; 2]> = Vec::new();
+    let mut next = 0usize;
+    for (r, row) in rows.iter().enumerate() {
+        let tag = if r == 0 { "TH" } else { "TD" };
+        let mut cells: [Vec<usize>; 2] = [Vec::new(), Vec::new()];
+        for (cell, ids) in cells.iter_mut().enumerate() {
+            for (x, y, size, t) in row.iter().filter(|r| (r.0 < split) == (cell == 0)) {
+                content += &format!(
+                    "/{tag} <</MCID {next}>> BDC BT /F1 {size} Tf 1 0 0 1 {x} {y} Tm ({t}) Tj \
+                     ET EMC "
+                );
+                ids.push(next);
+                next += 1;
+            }
+        }
+        mcids.push(cells);
+    }
+    let mut legend_ids = Vec::new();
+    for (x, y, size, t) in legend {
+        content += &format!(
+            "/LBody <</MCID {next}>> BDC BT /F1 {size} Tf 1 0 0 1 {x} {y} Tm ({t}) Tj ET EMC "
+        );
+        legend_ids.push(next);
+        next += 1;
+    }
+    let cs = b.stream("", content.as_bytes());
+    let root = b.reserve();
+    let table = b.reserve();
+    let trs: Vec<u32> = rows.iter().map(|_| b.reserve()).collect();
+    let mut parents: Vec<String> = vec![String::new(); next];
+    for (r, tr) in trs.iter().enumerate() {
+        let tag = if r == 0 { "TH" } else { "TD" };
+        let mut elems = Vec::new();
+        for ids in &mcids[r] {
+            let k: Vec<String> = ids.iter().map(|m| m.to_string()).collect();
+            let e = b.add(format!(
+                "<< /Type /StructElem /S /{tag} /P {tr} 0 R /Pg {kid} 0 R /K [{}] >>",
+                k.join(" ")
+            ));
+            for &m in ids {
+                parents[m] = format!("{e} 0 R");
+            }
+            elems.push(format!("{e} 0 R"));
+        }
+        b.set(
+            *tr,
+            format!(
+                "<< /Type /StructElem /S /TR /P {table} 0 R /K [{}] >>",
+                elems.join(" ")
+            ),
+        );
+    }
+    let mut root_kids = format!("{table} 0 R");
+    if !legend_ids.is_empty() {
+        let (list, item) = (b.reserve(), b.reserve());
+        let k: Vec<String> = legend_ids.iter().map(|m| m.to_string()).collect();
+        let body = b.add(format!(
+            "<< /Type /StructElem /S /LBody /P {item} 0 R /Pg {kid} 0 R /K [{}] >>",
+            k.join(" ")
+        ));
+        for &m in &legend_ids {
+            parents[m] = format!("{body} 0 R");
+        }
+        b.set(
+            item,
+            format!("<< /Type /StructElem /S /LI /P {list} 0 R /K [{body} 0 R] >>"),
+        );
+        b.set(
+            list,
+            format!("<< /Type /StructElem /S /L /P {root} 0 R /K [{item} 0 R] >>"),
+        );
+        root_kids += &format!(" {list} 0 R");
+    }
+    let kids: Vec<String> = trs.iter().map(|t| format!("{t} 0 R")).collect();
+    b.set(
+        table,
+        format!(
+            "<< /Type /StructElem /S /Table /P {root} 0 R /K [{}] >>",
+            kids.join(" ")
+        ),
+    );
+    b.set(
+        root,
+        format!(
+            "<< /Type /StructTreeRoot /K [{root_kids}] /ParentTree << /Nums [0 [{}]] >> >>",
+            parents.join(" ")
+        ),
+    );
+    b.set(
+        kid,
+        format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] /StructParents 0 \
+             /Resources << /Font << /F1 {font} 0 R >> >> /Contents {cs} 0 R >>"
+        ),
+    );
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(
+        catalog,
+        format!(
+            "<< /Type /Catalog /Pages {tree} 0 R /MarkInfo << /Marked true >> \
+             /StructTreeRoot {root} 0 R >>"
+        ),
+    );
+    b.finish(catalog)
+}
+
+/// An item table tagged as two cells a row (a date, and everything else),
+/// with rules that agree with the tags: in the second cell the text stands in seven columns
+/// that line up over a header of two lines and every item row; descriptions wrap onto lines
+/// with nothing in the other columns, and an item without a price has no tax, net or gross.
+/// The tagged cells are cut into the columns: header and every row in eight columns, the
+/// wrapped lines in the description cell, empty cells where the free item has no amounts.
+#[test]
+fn a_tagged_item_table_glued_behind_its_first_cell_is_cut_into_its_columns() {
+    let out = read(&glued_item_table(&[]));
+    check_glued_items(&out, "1 19 %");
+}
+
+/// The raised mark before each rate is a reference to a footnote when the
+/// page's tags give a list item that opens with the same raised number: the rate cell holds
+/// the rate and the reference after it, the item is the footnote, not a list item.
+#[test]
+fn a_raised_mark_in_a_tagged_cell_refers_to_the_tagged_legend() {
+    let legend = [
+        (40.0, 402.9, 5.0, "1".to_string()),
+        (44.0, 400.0, 8.0, "Muster Hinweis zum Satz".to_string()),
+    ];
+    let out = read(&glued_item_table(&legend));
+    check_glued_items(&out, "19 %");
+    // The reference stands after the rate in its cell.
+    let cell = page(&out, 1)
+        .iter()
+        .find_map(|b| match b {
+            Block::Table { rows, .. } => Some(rows[1][4].inlines.clone()),
+            _ => None,
+        })
+        .expect("a table");
+    assert!(
+        matches!(cell.last(), Some(rezzer_model::Inline::FootnoteRef { id }) if id == "p1-1"),
+        "{cell:?}"
+    );
+    let md = markdown(&out);
+    assert!(md.contains("[^p1-1]: Muster Hinweis zum Satz"), "{md}");
+    assert!(!md.contains("- 1 Muster"), "{md}");
+}
+
+/// The item table of [`a_tagged_item_table_glued_behind_its_first_cell_is_cut_into_its_columns`]
+/// with the tagged list item `legend` under it.
+fn glued_item_table(legend: &[TagRun]) -> Vec<u8> {
+    let size = 8.0f32;
+    let right = |edge: f32, t: &str| edge - helvetica_width(t, size);
+    let run = |x: f32, y: f32, t: &str| (x, y, size, t.to_string());
+    // The rate column starts a little more than a quarter size after the hyphenated title
+    // over the service dates; a raised mark of size 5 stands right before each rate, under
+    // the end of that title and well after the date.
+    let rate = 258.0 + helvetica_width("Leistungs-", size) + 2.7;
+    let mark = |y: f32| {
+        (
+            rate - 2.9 - helvetica_width("1", 5.0),
+            y + 2.9,
+            5.0,
+            "1".to_string(),
+        )
+    };
+    let header = |y: f32| {
+        vec![
+            run(40.0, y, "Datum"),
+            run(80.0, y, "Bezeichnung"),
+            run(right(250.0, "Preis"), y, "Preis"),
+            run(258.0, y, "Leistungs-"),
+            run(rate, y, "Satz"),
+            run(right(390.0, "Steuer"), y, "Steuer"),
+            run(right(440.0, "Netto"), y, "Netto"),
+            run(right(490.0, "Brutto"), y, "Brutto"),
+            run(258.0, y - 10.0, "datum"),
+            run(right(390.0, "Euro"), y - 10.0, "Euro"),
+            run(right(440.0, "Euro"), y - 10.0, "Euro"),
+            run(right(490.0, "Euro"), y - 10.0, "Euro"),
+        ]
+    };
+    let item = |y: f32, v: [&str; 8], wraps: &[&str]| {
+        let mut out = vec![
+            run(40.0, y, v[0]),
+            run(80.0, y, v[1]),
+            run(right(250.0, v[2]), y, v[2]),
+            run(258.0, y, v[3]),
+        ];
+        if !v[4].is_empty() {
+            out.push(mark(y));
+            out.push(run(rate, y, v[4]));
+            out.push(run(right(390.0, v[5]), y, v[5]));
+            out.push(run(right(440.0, v[6]), y, v[6]));
+            out.push(run(right(490.0, v[7]), y, v[7]));
+        }
+        for (k, w) in wraps.iter().enumerate() {
+            out.push(run(80.0, y - 10.0 * (k + 1) as f32, w));
+        }
+        out
+    };
+    let rows = vec![
+        header(600.0),
+        item(
+            574.0,
+            [
+                "01.02.26",
+                "Muster Teil A,",
+                "12,50",
+                "3.2.26",
+                "19 %",
+                "2,38",
+                "12,50",
+                "14,88",
+            ],
+            &["Lager Nord, Fach", "(Muster)"],
+        ),
+        item(
+            530.0,
+            [
+                "04.02.26",
+                "Muster Teil B",
+                "0,00",
+                "5.2.26",
+                "",
+                "",
+                "",
+                "",
+            ],
+            &["Lager West"],
+        ),
+        item(
+            496.0,
+            [
+                "06.02.26",
+                "Muster Teil C",
+                "8,40",
+                "7.2.26",
+                "19 %",
+                "1,60",
+                "8,40",
+                "10,00",
+            ],
+            &[],
+        ),
+    ];
+    two_cell_tagged_table(&rows, 76.0, &[586.0, 542.0, 508.0, 492.0], legend)
+}
+
+/// The cells of [`glued_item_table`] as read in `out`, the rate cells holding `rate`.
+fn check_glued_items(out: &ReadOutcome, rate: &str) {
+    let found = tables(page(out, 1));
+    assert_eq!(found.len(), 1, "{found:?}\n{}", markdown(out));
+    let want: Vec<Vec<&str>> = vec![
+        vec![
+            "Datum",
+            "Bezeichnung",
+            "Preis",
+            "Leistungs-datum",
+            "Satz",
+            "Steuer Euro",
+            "Netto Euro",
+            "Brutto Euro",
+        ],
+        vec![
+            "01.02.26",
+            "Muster Teil A, Lager Nord, Fach (Muster)",
+            "12,50",
+            // The date alone: the raised mark before the rate is no ink of the date's column; it
+            // stands with the rate, the run nearest to it (the model has no inline for a bare
+            // mark that no footnote of the page names).
+            "3.2.26",
+            rate,
+            "2,38",
+            "12,50",
+            "14,88",
+        ],
+        vec![
+            "04.02.26",
+            "Muster Teil B Lager West",
+            "0,00",
+            "5.2.26",
+            "",
+            "",
+            "",
+            "",
+        ],
+        vec![
+            "06.02.26",
+            "Muster Teil C",
+            "8,40",
+            "7.2.26",
+            rate,
+            "1,60",
+            "8,40",
+            "10,00",
+        ],
+    ];
+    assert_eq!(found[0].1, want, "{}", markdown(out));
+    assert_no_exact_table(out);
+    assert_glued_note(out, 7, 1);
+}
+
 #[test]
 fn tagged_cell_spans_come_from_the_attributes() {
     let out = read(&tagged_span_table());
@@ -265,6 +767,54 @@ fn ruled_page(rows: &[[&str; 3]]) -> Vec<u8> {
     pdf(&[Page::text(c)], "")
 }
 
+/// A page of nine ruled tables, three across and three down, of two columns each: the tables
+/// of a row start at one height and end at three.
+fn page_of_ruled_tables() -> Vec<u8> {
+    let words = [
+        "Fruit", "Count", "Apples", "3", "Pears", "12", "Plums", "7", "Figs", "9",
+    ];
+    let mut c = show("F1", 10.0, 40.0, 780.0, "A paragraph before the tables.");
+    c += "0.5 w ";
+    for t in 0..9usize {
+        let (left, top) = (
+            40.0 + 180.0 * (t % 3) as f32,
+            740.0 - 230.0 * (t / 3) as f32,
+        );
+        let rows = 3 + (t + t / 3) % 3;
+        let bottom = top - 30.0 * rows as f32;
+        for k in 0..=rows {
+            let y = top - 30.0 * k as f32;
+            c += &format!("{left} {y} m {} {y} l S ", left + 150.0);
+        }
+        for k in 0..=2 {
+            let x = left + 75.0 * k as f32;
+            c += &format!("{x} {top} m {x} {bottom} l S ");
+        }
+        for r in 0..rows {
+            for k in 0..2 {
+                let (x, y) = (left + 6.0 + 75.0 * k as f32, top - 30.0 * r as f32 - 20.0);
+                c += &show("F1", 10.0, x, y, words[(2 * r + k + t) % words.len()]);
+            }
+        }
+    }
+    pdf(&[Page::text(c)], "")
+}
+
+/// Two reads of one file are the same, byte for byte: the model JSON too, with the regions
+/// of the document in one order (which the Markdown does not show). The grids of a page were
+/// taken from a map in its own order, which differs from one read to the next, and the
+/// regions of tables side by side followed it.
+#[test]
+fn two_reads_of_one_file_give_the_same_json() {
+    let bytes = page_of_ruled_tables();
+    let json = || serde_json::to_string(&read(&bytes).document).unwrap();
+    let first = json();
+    assert_eq!(first.matches("\"kind\":\"table\"").count(), 9, "{first}");
+    for _ in 0..7 {
+        assert!(json() == first, "two reads of one page differ");
+    }
+}
+
 #[test]
 fn ruled_table_grid() {
     let out = read(&ruled_page(&[
@@ -308,6 +858,111 @@ fn ruled_table_grid() {
             "A paragraph after the table."
         ]
     );
+}
+
+/// A 3 x 3 ruled grid is one table region, found by the ruled pass, and holds the runs of its
+/// nine cells.
+#[test]
+fn ruled_grid_is_a_table_region() {
+    let bytes = ruled_page(&[
+        ["Fruit", "Count", "Price"],
+        ["Apples", "3", "1.20"],
+        ["Pears", "12", "0.80"],
+    ]);
+    common::assert_every_run_in_one_region(&bytes);
+    let (_, pages) = common::read_regions(&bytes);
+    let tables: Vec<&rezzer_read_pdf::layoutregions::Region> = pages
+        .iter()
+        .flat_map(|p| &p.regions)
+        .filter(|r| r.kind == rezzer_read_pdf::layoutregions::Kind::Table)
+        .collect();
+    assert_eq!(tables.len(), 1, "{pages:#?}");
+    assert_eq!(tables[0].signals[0].id, "pdf.ruled");
+    assert_eq!(tables[0].prims.len(), 9, "{:?}", tables[0].prims);
+}
+
+/// The bounds of a ruled table reach its outer rules, past the box of its runs, and the
+/// paragraphs around it are regions of their own at their blocks.
+#[test]
+fn a_ruled_table_region_reaches_its_rules() {
+    let out = read(&ruled_page(&[
+        ["Fruit", "Count", "Price"],
+        ["Apples", "3", "1.20"],
+        ["Pears", "12", "0.80"],
+    ]));
+    let regions = &out.document.regions;
+    let table = regions
+        .iter()
+        .find(|n| n.kind == rezzer_model::RegionKind::Table)
+        .expect("a table region");
+    assert_eq!(table.bounds, [72.0, 610.0, 432.0, 700.0], "{table:#?}");
+    assert_eq!(table.anchor.0, "p1:t1");
+    assert!(
+        matches!(&table.evidence[..], [rezzer_model::Evidence::Rule { id, .. }] if id == "pdf.ruled"),
+        "{table:#?}"
+    );
+    let paragraphs: Vec<&str> = regions
+        .iter()
+        .filter(|n| n.kind == rezzer_model::RegionKind::Paragraph)
+        .map(|n| n.anchor.0.as_str())
+        .collect();
+    // The engine may decide the text above and below the table as one paragraph
+    // region (one segment), at its first block; a pre-pass finder gave each block its own.
+    assert!(
+        paragraphs == ["p1:b1", "p1:b2"] || paragraphs == ["p1:b1"],
+        "{regions:#?}"
+    );
+}
+
+/// A grid of drawn rules over most of the page (the page frame) is refused: its
+/// runs stay paragraphs, each in a paragraph region that says why the grid is no table.
+#[test]
+fn refused_grid_keeps_its_text_in_paragraph_regions_with_the_reason() {
+    let mut c = String::from("0.5 w ");
+    for y in [60.0, 410.0, 760.0] {
+        c += &format!("30 {y} m 565 {y} l S ");
+    }
+    for x in [30.0, 297.0, 565.0] {
+        c += &format!("{x} 60 m {x} 760 l S ");
+    }
+    let texts = ["Muster GmbH", "Erika Mustermann", "1.234,56"];
+    c += &show("F1", 10.0, 40.0, 740.0, texts[0]);
+    c += &show("F1", 10.0, 307.0, 740.0, texts[1]);
+    c += &show("F1", 10.0, 40.0, 390.0, texts[2]);
+    let bytes = pdf(&[Page::text(c)], "");
+    common::assert_every_run_in_one_region(&bytes);
+    let (out, pages) = common::read_engine_pages(&bytes);
+    assert!(
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("it covers most of the page")),
+        "{:?}",
+        out.document.losses
+    );
+    let page = &pages[0];
+    for t in texts {
+        let holders: Vec<&rezzer_read_pdf::layoutregions::Region> = page
+            .regions
+            .regions
+            .iter()
+            .filter(|r| common::region_texts(page, r).iter().any(|x| x.contains(t)))
+            .collect();
+        assert_eq!(holders.len(), 1, "{t}: {holders:#?}");
+        assert_eq!(
+            holders[0].kind,
+            rezzer_read_pdf::layoutregions::Kind::Paragraph,
+            "{t}"
+        );
+        assert!(
+            holders[0]
+                .unsure
+                .iter()
+                .any(|u| u.contains("it covers most of the page")),
+            "{t}: {:?}",
+            holders[0].unsure
+        );
+    }
 }
 
 #[test]
@@ -360,10 +1015,19 @@ fn form_boxes_are_not_a_table() {
     // The direct deposit form is not tagged: its boxes and its sample check are no table.
     let sf = read_corpus("pdfbox-sf1199a-direct-deposit.pdf");
     assert_eq!(all_tables(&sf), 0);
-    assert!(
-        paragraphs(page(&sf, 4))
+    // The check's lone line may be kept as laid out (no region type has clear
+    // evidence for it; a right read turned Spatial): its text stays whole.
+    let laid_out = page(&sf, 4).iter().any(|b| match b {
+        Block::Spatial { lines, .. } => lines
             .iter()
-            .any(|p| p.contains("AUSTIN, TEXAS"))
+            .any(|l| l.pieces.iter().any(|p| p.text.contains("AUSTIN, TEXAS"))),
+        _ => false,
+    });
+    assert!(
+        laid_out
+            || paragraphs(page(&sf, 4))
+                .iter()
+                .any(|p| p.contains("AUSTIN, TEXAS"))
     );
 }
 
@@ -451,11 +1115,9 @@ fn rotated_margin_text_is_not_a_table() {
     assert!(all.contains("doi 0") && all.contains("page 2"), "{all}");
 }
 
-#[test]
-fn unsure_region_keeps_paragraphs_with_note() {
-    // A caption names a table and short pieces stand in columns, but one line has text in
-    // the gutter between two columns: no grid holds it. The text stays paragraphs, with a
-    // note where the region stands and a loss.
+/// A caption names a table and short pieces stand in columns, but one line has text in the
+/// gutter between two columns: no grid holds it.
+fn gutter_region_page() -> Vec<u8> {
     let mut c = show("F1", 10.0, 72.0, 760.0, "Table 3: Sample sizes");
     let rows = [
         ("Site A", "12", "spring"),
@@ -469,7 +1131,14 @@ fn unsure_region_keeps_paragraphs_with_note() {
         c += &show("F1", 10.0, 300.0, y, s);
     }
     c += &show("F1", 10.0, 250.0, 724.0, "late");
-    let out = read(&pdf(&[Page::text(c)], ""));
+    pdf(&[Page::text(c)], "")
+}
+
+#[test]
+fn unsure_region_keeps_paragraphs_with_note() {
+    // The text of the region of `gutter_region_page` stays paragraphs, with a note where the
+    // region stands and a loss.
+    let out = read(&gutter_region_page());
     let blocks = page(&out, 1);
     assert!(tables(blocks).is_empty(), "{:?}", tables(blocks));
     let note = "Possible table on page 1 not rebuilt (reason: some of its text stands between \
@@ -601,21 +1270,27 @@ fn ticket_box_next_to_table() {
     let md = markdown(&out);
     assert!(
         md.contains(
-            "| Reserved seats only | \u{2190} | \u{2190} | \u{2190} | \u{2190} | \u{2190} |\n\
-             | Ticket 1000001 | \u{2190} | \u{2190} | Price 10.00 | \u{2190} | \u{2190} |\n"
+            "| Reserved seats only |  |  |  |  |  |\n\
+             | Ticket 1000001 |  |  | Price 10.00 |  |  |\n"
         ),
         "{md}"
     );
-    assert_eq!(md.matches("Reserved seats only").count(), 1, "{md}");
+    // The text stands once in the table; the note names the merged cell by it.
+    let table = md.split("Merged cells:").next().unwrap_or_default();
+    assert_eq!(table.matches("Reserved seats only").count(), 1, "{md}");
     assert!(
-        md.contains("\n\nMerged cells: \u{3003} same as above, \u{2190} same as left.\n"),
+        md.contains(
+            "\n\nMerged cells: `Reserved seats only` (row 3 column 1) over 6 columns, \
+             `Ticket 1000001` (row 4 column 1) over 3 columns, `Price 10.00` (row 4 column 4) \
+             over 3 columns. Each has its text in its first cell, the cells it covers are \
+             empty.\n"
+        ),
         "{md}"
     );
 }
 
-#[test]
-fn wide_ruled_grid_says_so() {
-    // A ruled grid of 20 columns and 3 rows with text in every cell, and no caption.
+/// A ruled grid of 20 columns and 3 rows with text in every cell, and no caption.
+fn wide_ruled_grid() -> Vec<u8> {
     let mut c = String::from("0.5 w ");
     for k in 0..=3 {
         let y = 700.0 - 20.0 * k as f32;
@@ -632,7 +1307,12 @@ fn wide_ruled_grid_says_so() {
             c += &show("F1", 8.0, x, y, &format!("{}{k}", ['a', 'b', 'c'][r]));
         }
     }
-    let out = read(&pdf(&[Page::text(c)], ""));
+    pdf(&[Page::text(c)], "")
+}
+
+#[test]
+fn wide_ruled_grid_says_so() {
+    let out = read(&wide_ruled_grid());
     let blocks = page(&out, 1);
     assert!(tables(blocks).is_empty(), "{:?}", tables(blocks));
     let note = "Possible table on page 1 not rebuilt (reason: it has more than 15 columns)";
@@ -669,6 +1349,78 @@ fn ruled_cells(xs: &[f32], tag: &str) -> String {
         }
     }
     c
+}
+
+/// A sentence printed over the last row of a ruled table, its word gap on a column
+/// rule, is no text of the table's cells: it is read as a paragraph next to the table, with a
+/// note that says why. The rows above keep their cells.
+#[test]
+fn a_sentence_over_a_ruled_row_is_a_paragraph_next_to_the_table() {
+    let xs = [50.0f32, 150.0, 250.0, 350.0];
+    let mut c = String::from("0.5 w ");
+    for k in 0..5 {
+        let y = 700.0 - 20.0 * k as f32;
+        c += &format!("{} {y} m {} {y} l S ", xs[0], xs[3]);
+    }
+    for x in xs {
+        c += &format!("{x} 620 m {x} 700 l S ");
+    }
+    let rows = [
+        ["Teil", "Menge", "Lager"],
+        ["Muster A", "2", "Nord"],
+        ["Muster B", "1", "West"],
+    ];
+    for (r, row) in rows.iter().enumerate() {
+        let y = 686.0 - 20.0 * r as f32;
+        for (k, t) in row.iter().enumerate() {
+            c += &show("F1", 8.0, xs[k] + 4.0, y, t);
+        }
+    }
+    // The sentence: its first words end right before the rule at 150, the rest starts a word
+    // gap after it and runs over the rule at 250.
+    let first = "die Ware wird nach dem";
+    let x0 = 149.0 - helvetica_width(first, 8.0);
+    c += &show("F1", 8.0, x0, 626.0, first);
+    c += &show(
+        "F1",
+        8.0,
+        151.5,
+        626.0,
+        "Erhalt der Rechnung geliefert und bezahlt",
+    );
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(
+        found[0].1,
+        [
+            ["Teil", "Menge", "Lager"],
+            ["Muster A", "2", "Nord"],
+            ["Muster B", "1", "West"],
+        ],
+        "{found:?}"
+    );
+    let paras = paragraphs(page(&out, 1));
+    assert!(
+        paras
+            .iter()
+            .any(|p| p == "die Ware wird nach dem Erhalt der Rechnung geliefert und bezahlt"),
+        "{paras:?}"
+    );
+    let notes: Vec<&str> = out
+        .document
+        .losses
+        .iter()
+        .map(|l| l.what.as_str())
+        .collect();
+    assert!(
+        notes.contains(
+            &"text over the table on page 1 that starts with \"die Ware wird nach dem \
+              Erhalt\" reads as a sentence across the columns of its row: it is read as a \
+              paragraph next to the table"
+        ),
+        "{notes:?}"
+    );
 }
 
 #[test]
@@ -767,6 +1519,78 @@ fn a_grid_next_to_a_figure_caption_gets_no_note() {
             .any(|l| l.what.contains("Possible table")),
         "{:?}",
         out.document.losses
+    );
+}
+
+/// A ruled parts list whose drawing column holds "Abb. 3"
+/// cells is a table read by its rules. Such a cell points to a figure, it captions none; only
+/// a caption alone on its line in a grid speaks for a chart.
+#[test]
+fn a_ruled_table_with_figure_reference_cells_is_a_table() {
+    let xs = [50.0f32, 150.0, 250.0, 350.0];
+    let rows = [
+        ["Teil", "Menge", "Zeichnung"],
+        ["Muster A", "2", "Abb. 3"],
+        ["Muster B", "1", "Abb. 4"],
+        ["Muster C", "4", "Abbildung 5"],
+    ];
+    let mut c = String::from("0.5 w ");
+    for k in 0..5 {
+        let y = 700.0 - 20.0 * k as f32;
+        c += &format!("{} {y} m {} {y} l S ", xs[0], xs[3]);
+    }
+    for x in xs {
+        c += &format!("{x} 620 m {x} 700 l S ");
+    }
+    for (r, row) in rows.iter().enumerate() {
+        let y = 686.0 - 20.0 * r as f32;
+        for (k, t) in row.iter().enumerate() {
+            c += &show("F1", 8.0, xs[k] + 4.0, y, t);
+        }
+    }
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0].1, rows, "{found:?}");
+    // The grid's own rules read it, not a reader without rules after a refusal.
+    let note = out
+        .document
+        .regions
+        .iter()
+        .find(|r| r.anchor.0 == "p1:t1")
+        .expect("the table's region");
+    assert!(
+        note.evidence
+            .iter()
+            .any(|e| matches!(e, rezzer_model::Evidence::Rule { id, .. } if id == "pdf.ruled")),
+        "{note:#?}"
+    );
+}
+
+/// The drawing of a grid next to a figure caption is a figure with no media
+/// block of its own and no text (the grid's text is its own region): it wrote nothing on the
+/// page, so its region stands at the page. A figure or code region with text and no media block
+/// keeps the block of its text (lib.rs); no such region occurs in the three dump sets.
+#[test]
+fn a_figure_without_a_media_block_or_text_stands_at_the_page() {
+    let mut c = String::from("0.5 w ");
+    c += &ruled_cells(&[50.0, 130.0, 210.0, 290.0], "f");
+    c += &show("F1", 9.0, 50.0, 630.0, "Figure 3: A chart of the results");
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let figures: Vec<&rezzer_model::RegionNote> = out
+        .document
+        .regions
+        .iter()
+        .filter(|r| r.kind == rezzer_model::RegionKind::Figure)
+        .collect();
+    assert_eq!(figures.len(), 1, "{:#?}", out.document.regions);
+    assert_eq!(figures[0].anchor.0, "p1", "{figures:#?}");
+    assert!(
+        figures[0].evidence.iter().any(|e| matches!(
+            e,
+            rezzer_model::Evidence::Rule { id, .. } if id == "figure.drawn_caption"
+        )),
+        "{figures:#?}"
     );
 }
 
@@ -1084,8 +1908,8 @@ fn invoice_table() -> String {
 const INVOICE_TABLE: &str = "\
 | ISSUING DATE | DOCUMENT NUMBER | TYPE OF SERVICE | QTY | VAT RATE | VAT AMOUNT | GROSS AMOUNT |
 | --- | --- | --- | --- | --- | --- | --- |
-| 2030-01-02 | 1000001 | Sample ticket AAA / BBB / CCC | 1 | 0.00 | 0.00 | 10.00 |
-| 2030-01-02 | 1000002 | Seat Linked to document 1000001 | 1 | 0.00 | 0.00 | 2.50 |
+| 2030-01-02 | 1000001 | Sample ticket AAA /<br>BBB / CCC | 1 | 0.00 | 0.00 | 10.00 |
+| 2030-01-02 | 1000002 | Seat Linked to<br>document 1000001 | 1 | 0.00 | 0.00 | 2.50 |
 | 2030-01-03 | 1000003 | Seat | 1 | 0.00 | 0.00 | 2.50 |
 ";
 
@@ -1459,34 +2283,66 @@ fn header_icons_count_as_header_cells() {
     let out = read(&pdf(&[Page::text(c.clone())], ""));
     assert_eq!(tables(page(&out, 1))[0].0, 0);
     // The same grid with an icon and titles in the first row, times below.
-    let mut c = String::from("0.5 w ");
-    for k in 0..4 {
-        let y = 700.0 - 20.0 * k as f32;
-        c += &format!("50 {y} m 290 {y} l S ");
-    }
-    for x in [50.0, 130.0, 210.0, 290.0] {
-        c += &format!("{x} 640 m {x} 700 l S ");
-    }
-    c += "84 684 m 96 684 l S 84 692 m 96 692 l S 84 684 m 84 694 l S 96 684 m 96 694 l S ";
-    c += &show("F1", 8.0, 134.0, 686.0, "Time");
-    c += &show("F1", 8.0, 214.0, 686.0, "Train");
-    for (r, (d, t, n)) in [
-        ("2030-01-02", "10:15", "IC 101"),
-        ("2030-01-03", "11:20", "IC 205"),
-    ]
-    .iter()
-    .enumerate()
-    {
-        let y = 666.0 - 20.0 * r as f32;
-        c += &show("F1", 8.0, 54.0, y, d);
-        c += &show("F1", 8.0, 134.0, y, t);
-        c += &show("F1", 8.0, 214.0, y, n);
-    }
-    let out = read(&pdf(&[Page::text(c)], ""));
+    let with_icon = |title: &str| {
+        let mut c = String::from("0.5 w ");
+        for k in 0..4 {
+            let y = 700.0 - 20.0 * k as f32;
+            c += &format!("50 {y} m 290 {y} l S ");
+        }
+        for x in [50.0, 130.0, 210.0, 290.0] {
+            c += &format!("{x} 640 m {x} 700 l S ");
+        }
+        c += "84 684 m 96 684 l S 84 692 m 96 692 l S 84 684 m 84 694 l S 96 684 m 96 694 l S ";
+        c += &show("F1", 8.0, 134.0, 686.0, title);
+        c += &show("F1", 8.0, 214.0, 686.0, "Train");
+        for (r, (d, t, n)) in [
+            ("2030-01-02", "10:15", "IC 101"),
+            ("2030-01-03", "11:20", "IC 205"),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let y = 666.0 - 20.0 * r as f32;
+            c += &show("F1", 8.0, 54.0, y, d);
+            c += &show("F1", 8.0, 134.0, y, t);
+            c += &show("F1", 8.0, 214.0, y, n);
+        }
+        read(&pdf(&[Page::text(c)], ""))
+    };
+    // The first words are quoted as they are. The loss is
+    // plain text, so a quote mark in them gets no backslash.
+    let quoted = with_icon("5\" pipe");
+    assert!(
+        quoted.document.losses.iter().any(|l| l
+            .what
+            .starts_with("the table on page 1 that starts with \"5\" pipe\" has a drawing")),
+        "{:?}",
+        quoted.document.losses
+    );
+    let out = with_icon("Time");
     let found = tables(page(&out, 1));
     assert_eq!(found.len(), 1, "{found:?}");
     assert_eq!(found[0].0, 1, "{found:?}");
-    assert_eq!(found[0].1[0], ["(icon)", "Time", "Train"], "{found:?}");
+    // The cell of the icon stays empty: Rezzer writes no text the file does not hold. The
+    // loss says which title is a drawing.
+    assert_eq!(found[0].1[0], ["", "Time", "Train"], "{found:?}");
+    let said: Vec<&str> = out
+        .document
+        .losses
+        .iter()
+        .map(|l| l.what.as_str())
+        .filter(|w| w.contains("icon"))
+        .collect();
+    // The loss names the table by its first words: a page may hold several tables.
+    assert_eq!(
+        said,
+        [
+            "the table on page 1 that starts with \"Time\" has a drawing (an icon or a mark) and no text \
+             in the cell 1 of its first row: it is left empty"
+        ],
+        "{:?}",
+        out.document.losses
+    );
 }
 
 #[test]
@@ -1534,15 +2390,15 @@ fn senate_expenditures_table_is_rebuilt() {
     assert_eq!(rows.len(), 34);
     let md = markdown(&out);
     for expected in [
-        "| **DOCUMENT NO.** | **DATE POSTED** | **PAYEE NAME** | \
-         **OBLIGATION/SERVICE DATES** **START** | **OBLIGATION/SERVICE DATES** **END** | \
+        "| **DOCUMENT NO.** | **DATE**<br>**POSTED** | **PAYEE NAME** | \
+         **OBLIGATION/SERVICE**<br>**DATES** **START** | **OBLIGATION/SERVICE**<br>**DATES** **END** | \
          **DESCRIPTION** | **AMOUNT ($)** |\n| --- | --- | --- | --- | --- | --- | --- |\n\
          |  |  | BAIN, J MATTHEW |  |  | DISTRICT DIRECTOR | 37,499.96 |\n",
         "| DHAW20190001 | 05/03/2019 | CITIBANK - TRAVEL CBA CARD | 03/04/2019 | 03/06/2019 | \
-         STAFF TRANSPORTATION AIRFARE FOR E JOHNSON KANSAS CITY TO WASHINGTON DC AND RETURN | \
+         STAFF TRANSPORTATION<br>AIRFARE FOR E JOHNSON KANSAS CITY TO WASHINGTON DC AND RETURN | \
          920.68 |\n",
         "| DHAW20190070 | 09/09/2019 | CITIBANK - TRAVEL CBA CARD | 08/12/2019 | 08/14/2019 | \
-         STAFF TRANSPORTATION AIRFARE FOR C WEIHS WASHINGTON DC TO SPRINGFIELD AND RETURN | \
+         STAFF TRANSPORTATION<br>AIRFARE FOR C WEIHS WASHINGTON DC TO SPRINGFIELD AND RETURN | \
          411.49 |\n",
     ] {
         assert!(md.contains(expected), "{expected} in {md}");
@@ -1717,7 +2573,7 @@ fn a_cell_over_three_rows_makes_no_header() {
     assert!(found[0].0 <= 1, "{found:?}");
     let md = markdown(&out);
     assert!(
-        md.contains("| \u{3003} | 09:00 | Art |\n| \u{3003} | 10:00 | Music |\n"),
+        md.contains("|  | 09:00 | Art |\n|  | 10:00 | Music |\n"),
         "{md}"
     );
     assert!(md.contains("| Monday | 08:00 | Math |"), "{md}");
@@ -1980,4 +2836,1176 @@ fn an_open_row_of_a_ruled_table_stays_its_own() {
         assert_eq!(found[0].1[0], ["Monat", "Umsatz", "Kosten"], "{open_top}");
         assert_eq!(found[0].1[3], ["Maerz", "3.456,78", "456,79"], "{open_top}");
     }
+}
+
+/// A grid, a header band and a region without rules refused with a note keep their text as
+/// paragraphs, and the regions of those paragraphs say why the text is no table.
+#[test]
+fn noted_refusals_keep_their_reason_in_their_paragraphs() {
+    let grid = wide_ruled_grid();
+    common::assert_every_run_in_one_region(&grid);
+    common::assert_kept_with_reason(&grid, "b7", "it has more than 15 columns");
+    let band = pdf(&[Page::text(header_band_page(5, true))], "");
+    common::assert_every_run_in_one_region(&band);
+    // The band's titles: the prose under it is no text of the band, which found no body.
+    for text in ["Date", "Description", "Credits"] {
+        common::assert_kept_with_reason(
+            &band,
+            text,
+            "the text below its header does not stand in its columns",
+        );
+    }
+    let region = gutter_region_page();
+    common::assert_every_run_in_one_region(&region);
+    for text in ["Site B", "late"] {
+        common::assert_kept_with_reason(
+            &region,
+            text,
+            "some of its text stands between its columns",
+        );
+    }
+}
+
+/// A table without rules of a name and four columns of amounts set flush right, its rows 14
+/// points apart: `rows` are its lines under the titles, each a name and its amounts.
+fn sparse_amounts_page(rows: &[(&str, [&str; 4])]) -> Vec<u8> {
+    let xs = [300.0, 370.0, 450.0, 530.0];
+    let mut c = show("F1", 10.0, 72.0, 760.0, "Type");
+    for (x, t) in xs.iter().zip(["Hours", "Rate", "Amount", "Year"]) {
+        c += &show("F1", 10.0, x - helvetica_width(t, 10.0), 760.0, t);
+    }
+    for (k, (name, amounts)) in rows.iter().enumerate() {
+        let y = 745.0 - 14.0 * k as f32;
+        c += &show("F1", 10.0, 72.0, y, name);
+        for (x, a) in xs.iter().zip(amounts) {
+            if !a.is_empty() {
+                c += &show("F1", 10.0, x - helvetica_width(a, 10.0), y, a);
+            }
+        }
+    }
+    pdf(&[Page::text(c)], "")
+}
+
+/// A sparse table of amounts: a line with one amount only fills fewer than half of the
+/// columns. The page cannot tell such a row from the second line of the record above it,
+/// so it stays a line of the row above, in its own column, and a note says that it may be
+/// a row of its own. Nothing is silent.
+#[test]
+fn a_sparse_line_of_amounts_stays_in_the_row_above_with_a_note() {
+    let out = read(&sparse_amounts_page(&[
+        ("Salary", ["", "", "3.000,00", "36.000,00"]),
+        ("Overtime", ["10,00", "25,00", "250,00", ""]),
+        ("Bonus", ["", "", "", "1.000,00"]),
+        ("Tax", ["", "", "-650,00", "-7.800,00"]),
+        ("Meal", ["", "3,50", "", ""]),
+    ]));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    let rows: Vec<Vec<String>> = found[0]
+        .1
+        .iter()
+        .map(|r| r.iter().map(|c| c.trim().to_string()).collect())
+        .collect();
+    assert_eq!(
+        rows,
+        owned(&[
+            &["Type", "Hours", "Rate", "Amount", "Year"],
+            &["Salary", "", "", "3.000,00", "36.000,00"],
+            &["Overtime Bonus", "10,00", "25,00", "250,00", "1.000,00"],
+            &["Tax Meal", "", "3,50", "-650,00", "-7.800,00"],
+        ])
+    );
+    // Each line of a cell is a line of its own: the name and the amount of the thin line
+    // are never glued to the text over them.
+    let md = markdown(&out);
+    assert!(
+        md.contains("| Overtime<br>Bonus | 10,00 | 25,00 | 250,00 | <br>1.000,00 |"),
+        "{md}"
+    );
+    assert!(
+        md.contains("| Tax<br>Meal |  | <br>3,50 | -650,00 | -7.800,00 |"),
+        "{md}"
+    );
+    let notes: Vec<&str> = out
+        .document
+        .losses
+        .iter()
+        .map(|l| l.what.as_str())
+        .filter(|w| w.contains("kept as lines of the rows above them"))
+        .collect();
+    assert_eq!(
+        notes,
+        [
+            "2 lines of a table on page 1 are kept as lines of the rows above them: the page \
+          does not show whether they go on those rows or are rows of their own"
+        ]
+    );
+}
+
+/// The note on lines that may be rows of their own touches values: `brief` keeps it where
+/// it stands, `none` leaves it out and says so; the cells keep their lines at every level.
+#[test]
+fn the_thin_line_note_stays_in_brief() {
+    let out = read(&sparse_amounts_page(&[
+        ("Salary", ["", "", "3.000,00", "36.000,00"]),
+        ("Overtime", ["10,00", "25,00", "250,00", ""]),
+        ("Bonus", ["", "", "", "1.000,00"]),
+        ("Tax", ["", "", "-650,00", "-7.800,00"]),
+    ]));
+    let note = "1 line of a table on page 1 is kept as a line of the row above it";
+    let row = "| Overtime<br>Bonus | 10,00 | 25,00 | 250,00 | <br>1.000,00 |";
+    let full = common::markdown_at(&out, rezzer_render::NoteLevel::Full);
+    let brief = common::markdown_at(&out, rezzer_render::NoteLevel::Brief);
+    let none = common::markdown_at(&out, rezzer_render::NoteLevel::None);
+    assert!(full.contains(note), "{full}");
+    assert!(brief.contains(note), "{brief}");
+    assert!(!none.contains(note), "{none}");
+    assert!(none.contains("Notes are not shown."), "{none}");
+    for md in [&full, &brief, &none] {
+        assert!(md.contains(row), "{md}");
+    }
+}
+
+/// A name alone on a line of such a table, at the row pitch, may be the second line of the
+/// name above it or a row without amounts: it stays a line of the row above, and a note
+/// says so.
+#[test]
+fn a_name_alone_at_the_row_pitch_stays_in_the_row_above_with_a_note() {
+    let out = read(&sparse_amounts_page(&[
+        ("Salary", ["", "", "3.000,00", "36.000,00"]),
+        ("Overtime", ["10,00", "25,00", "250,00", ""]),
+        ("Weekend", ["", "", "", ""]),
+        ("Tax", ["", "", "-650,00", "-7.800,00"]),
+        ("Rent", ["", "", "-400,00", "-4.800,00"]),
+    ]));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    assert_eq!(found[0].1.len(), 5, "{found:#?}");
+    assert_eq!(found[0].1[2][0], "Overtime Weekend", "{found:#?}");
+    let notes: Vec<&str> = out
+        .document
+        .losses
+        .iter()
+        .map(|l| l.what.as_str())
+        .filter(|w| w.contains("kept as a line of the row above it"))
+        .collect();
+    assert_eq!(
+        notes,
+        [
+            "1 line of a table on page 1 is kept as a line of the row above it: the page does \
+          not show whether it goes on that row or is a row of its own"
+        ]
+    );
+}
+
+/// The evidence of a region the reader's own finder found says what found it, in words a
+/// reader of the JSON knows: no name of a plan or of a step of the code.
+#[test]
+fn the_evidence_of_a_found_table_names_its_finder_in_plain_words() {
+    let bytes = sparse_amounts_page(&[
+        ("Salary", ["", "", "3.000,00", "36.000,00"]),
+        ("Overtime", ["10,00", "25,00", "250,00", ""]),
+        ("Tax", ["", "", "-650,00", "-7.800,00"]),
+    ]);
+    let (_, pages) = common::read_engine_pages(&bytes);
+    let table: Vec<_> = pages[0]
+        .regions
+        .regions
+        .iter()
+        .filter(|r| r.kind == rezzer_read_pdf::layoutregions::Kind::Table)
+        .collect();
+    assert_eq!(table.len(), 1, "{:#?}", pages[0].regions.regions);
+    assert_eq!(table[0].signals[0].id, "pdf.borderless.grid");
+    assert_eq!(
+        table[0].signals[0].detail,
+        "a table without rules, found from its columns"
+    );
+    assert_eq!(table[0].score.0, 1000);
+    for r in &pages[0].regions.regions {
+        for s in &r.signals {
+            assert!(!s.detail.contains("today"), "{s:?}");
+        }
+    }
+}
+
+/// Text a table finder of the reader refuses stays the paragraph it was: a refusal is no
+/// evidence for a paragraph, so its region says `unsure` with the score 0, and its evidence
+/// names the refusal. Nothing else follows from that: no block kept as laid out, no note
+/// of one, no picture.
+#[test]
+fn text_a_table_finder_refuses_is_a_paragraph_marked_unsure() {
+    use rezzer_read_pdf::layoutregions::{Certainty, Kind};
+    let mut c = show("F2", 16.0, 72.0, 780.0, "Delivery note");
+    c += &show(
+        "F1",
+        10.0,
+        72.0,
+        740.0,
+        "Some opening sentence that is long enough to be read as prose by every reader.",
+    );
+    for (x, y, text) in [
+        (72.0, 700.0, "Ref"),
+        (190.0, 700.0, "Date"),
+        (330.0, 700.0, "Clerk"),
+        (450.0, 700.0, "Depot"),
+        (84.0, 688.0, "A-1"),
+        (215.0, 688.0, "05.01.2026"),
+        (470.0, 688.0, "North"),
+        (72.0, 676.0, "see back"),
+        (300.0, 676.0, "x"),
+        (410.0, 676.0, "7"),
+    ] {
+        c += &show("F1", 10.0, x, y, text);
+    }
+    c += &show(
+        "F1",
+        10.0,
+        72.0,
+        600.0,
+        "A closing sentence of the note that is also long enough to be read as plain prose.",
+    );
+    let bytes = pdf(&[Page::text(c)], "");
+    common::assert_every_run_in_one_region(&bytes);
+    let (out, pages) = common::read_engine_pages(&bytes);
+    let page1 = &pages[0];
+    let holders: Vec<_> = page1
+        .regions
+        .regions
+        .iter()
+        .filter(|r| {
+            common::region_texts(page1, r)
+                .iter()
+                .any(|t| t.contains("Clerk"))
+        })
+        .collect();
+    assert_eq!(holders.len(), 1, "{holders:#?}");
+    let r = holders[0];
+    assert_eq!(
+        (r.kind, r.certainty, r.score.0),
+        (Kind::Paragraph, Certainty::Unsure, 0),
+        "{r:#?}"
+    );
+    assert_eq!(r.signals[0].id, "pdf.borderless.refused");
+    assert_eq!(
+        r.signals[0].detail,
+        "some of its text stands between its columns"
+    );
+    // The Markdown is what it was: one paragraph, the note of the refusal, nothing more.
+    let paras = paragraphs(page(&out, 1));
+    assert!(
+        paras.contains(&"Ref Date Clerk Depot A-1 05.01.2026 North see back x 7".to_string()),
+        "{paras:?}"
+    );
+    assert!(
+        !page(&out, 1)
+            .iter()
+            .any(|b| matches!(b, Block::Spatial { .. }))
+    );
+    assert!(common::region_pictures(&out).is_empty());
+    let losses: Vec<&str> = out
+        .document
+        .losses
+        .iter()
+        .map(|l| l.what.as_str())
+        .collect();
+    assert!(
+        !losses.iter().any(|w| w.contains("kept as laid out")),
+        "{losses:?}"
+    );
+    assert!(
+        losses.iter().any(|w| w.contains("is not read as a table")),
+        "{losses:?}"
+    );
+}
+
+/// An item table set at the leading of its text, one record with its name and its text on
+/// two lines: the second line holds words only, so nothing shows a row. The record stays one
+/// row with both lines in its cells, and a note says that the line may be a row of its own.
+#[test]
+fn a_record_whose_name_and_text_wrap_stays_one_row_with_a_note() {
+    let xs = [72.0, 180.0, 340.0, 400.0, 480.0];
+    let rows: [(f32, [&str; 5]); 7] = [
+        (760.0, ["Item", "Text", "Qty", "Price", "Total"]),
+        (746.0, ["Paper", "White", "2", "3,00", "6,00"]),
+        (
+            732.0,
+            ["Folders for", "Sheets of plain", "4", "90,00", "360,00"],
+        ),
+        (718.0, ["the desk", "white stock", "", "", ""]),
+        (704.0, ["Ink", "Black", "1", "5,00", "5,00"]),
+        (690.0, ["Tape", "Clear", "9", "0,10", "0,90"]),
+        (676.0, ["Glue", "Solid", "3", "0,20", "0,60"]),
+    ];
+    let mut c = String::new();
+    for (y, cells) in rows {
+        for (x, t) in xs.iter().zip(cells) {
+            if !t.is_empty() {
+                c += &show("F1", 10.0, *x, y, t);
+            }
+        }
+    }
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    let rows = &found[0].1;
+    assert_eq!(rows.len(), 6, "{rows:#?}");
+    assert_eq!(
+        rows[2],
+        [
+            "Folders for the desk",
+            "Sheets of plain white stock",
+            "4",
+            "90,00",
+            "360,00"
+        ],
+        "{rows:#?}"
+    );
+    assert!(
+        out.document.losses.iter().any(|l| l
+            .what
+            .starts_with("1 line of a table on page 1 is kept as a line")),
+        "{:?}",
+        out.document.losses
+    );
+}
+
+/// A block of one piece kept as laid out keeps its note when the note names a kind the
+/// region reads as: that is a doubt about what the line is, not about its layout. Only the
+/// note that no type has clear evidence is left out for one piece. The direct deposit form
+/// has lines that read as a running header or as a heading about equally.
+#[test]
+fn a_one_piece_block_keeps_a_note_that_names_a_kind() {
+    let out = read_corpus("pdfbox-sf1199a-direct-deposit.pdf");
+    // The blocks of one piece kept as laid out, by their anchors.
+    let lone: Vec<&str> = out
+        .document
+        .body
+        .iter()
+        .flat_map(|s| match s {
+            Block::Section { blocks, .. } => blocks.as_slice(),
+            _ => &[],
+        })
+        .filter_map(|b| match b {
+            Block::Spatial {
+                lines,
+                anchor: Some(a),
+                ..
+            } if lines
+                .iter()
+                .flat_map(|l| &l.pieces)
+                .filter(|p| !p.text.trim().is_empty())
+                .count()
+                == 1 =>
+            {
+                Some(a.0.as_str())
+            }
+            _ => None,
+        })
+        .collect();
+    let noted: Vec<(&str, &str)> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| lone.contains(&l.location.as_str()) && l.what.contains("kept as laid out"))
+        .map(|l| (l.location.as_str(), l.what.as_str()))
+        .collect();
+    assert!(
+        noted
+            .iter()
+            .any(|(_, w)| w.contains("it reads as header band or as heading about equally")),
+        "{noted:?}"
+    );
+    assert!(
+        !noted
+            .iter()
+            .any(|(_, w)| w.contains("no region type has clear evidence")),
+        "{noted:?}"
+    );
+    assert!(lone.len() > noted.len(), "{} lone, {noted:?}", lone.len());
+}
+
+/// An item table set at the leading of its text, one record with its name and its text on
+/// two lines, the text ending in a date on the second line. The column holds words in every
+/// full row, so the date proves no row: the record stays one row, and a note says that the
+/// line may be a row of its own.
+#[test]
+fn a_date_that_ends_a_wrapped_text_stays_in_its_record() {
+    let xs = [72.0, 180.0, 340.0, 400.0, 480.0];
+    let rows: [(f32, [&str; 5]); 7] = [
+        (760.0, ["Item", "Text", "Qty", "Price", "Total"]),
+        (746.0, ["Paper", "White", "2", "3,00", "6,00"]),
+        (
+            732.0,
+            [
+                "Folders for",
+                "Kept in the hall until",
+                "4",
+                "90,00",
+                "360,00",
+            ],
+        ),
+        (718.0, ["the desk", "12.03.2026", "", "", ""]),
+        (704.0, ["Ink", "Black", "1", "5,00", "5,00"]),
+        (690.0, ["Tape", "Clear", "9", "0,10", "0,90"]),
+        (676.0, ["Glue", "Solid", "3", "0,20", "0,60"]),
+    ];
+    let mut c = String::new();
+    for (y, cells) in rows {
+        for (x, t) in xs.iter().zip(cells) {
+            if !t.is_empty() {
+                c += &show("F1", 10.0, *x, y, t);
+            }
+        }
+    }
+    let out = read(&pdf(&[Page::text(c)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:#?} {:?}", out.document.losses);
+    let rows = &found[0].1;
+    assert_eq!(rows.len(), 6, "{rows:#?}");
+    assert_eq!(rows[2][0], "Folders for the desk", "{rows:#?}");
+    assert_eq!(rows[2][1], "Kept in the hall until 12.03.2026", "{rows:#?}");
+    assert!(
+        out.document.losses.iter().any(|l| l
+            .what
+            .starts_with("1 line of a table on page 1 is kept as a line")),
+        "{:?}",
+        out.document.losses
+    );
+}
+
+/// One cell of [`tagged_timetable`]: its lines, each its text (empty: no text on that line).
+type TaggedCell<'a> = &'a [&'a str];
+
+/// A tagged
+/// timetable, its table stated by the tag tree, each row a departure over an arrival in cells
+/// of two lines: the stops, a date and a time on each line, a platform on one line, a product
+/// on the first line, and a note that wraps to the table's right end. `size` is the text size
+/// (the columns scale with it), `rows` the rows of the body.
+fn tagged_timetable(size: f32, rows: &[[TaggedCell<'_>; 6]]) -> Vec<u8> {
+    let f = size / 8.33;
+    let xs = [42.52, 170.08, 209.76, 249.45, 283.46, 340.16].map(|x| x * f);
+    let titles = ["Halt", "Datum", "Zeit", "Gleis", "Produkt", "Hinweis"];
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let kid = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let bold = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
+    let root = b.reserve();
+    let table = b.reserve();
+    let mut content = String::new();
+    let mut mcid = 0u32;
+    // Each element: its role, its row and its marked content ids.
+    let mut cells: Vec<(&str, usize, Vec<u32>)> = Vec::new();
+    let top = 700.0;
+    let pitch = 1.2 * size;
+    let mut show = |font: &str, x: f32, y: f32, text: &str, role: &str, mcid: &mut u32| {
+        let t = text.replace('(', "\\(").replace(')', "\\)");
+        content.push_str(&format!(
+            "/{role} <</MCID {m}>> BDC BT /{font} {size} Tf 1 0 0 1 {x} {y} Tm ({t}) Tj ET EMC\n",
+            m = *mcid
+        ));
+        *mcid += 1;
+        *mcid - 1
+    };
+    let mut header = Vec::new();
+    for (x, t) in xs.iter().zip(titles) {
+        header.push(("TH", 0, vec![show("F2", *x, top, t, "TH", &mut mcid)]));
+    }
+    cells.extend(header);
+    for (r, row) in rows.iter().enumerate() {
+        let first = top - 1.6 * size - 2.0 * pitch * r as f32 - 0.5 * size * r as f32;
+        for (x, lines) in xs.iter().zip(row.iter()) {
+            let ids: Vec<u32> = lines
+                .iter()
+                .enumerate()
+                .filter(|(_, l)| !l.is_empty())
+                .map(|(n, l)| show("F1", *x, first - pitch * n as f32, l, "TD", &mut mcid))
+                .collect();
+            cells.push(("TD", r + 1, ids));
+        }
+    }
+    let cs = b.stream("", content.as_bytes());
+    let rows_n = rows.len() + 1;
+    let trs: Vec<u32> = (0..rows_n).map(|_| b.reserve()).collect();
+    let mut by_mcid: Vec<(u32, u32)> = Vec::new();
+    let mut tr_kids: Vec<Vec<u32>> = vec![Vec::new(); rows_n];
+    for (role, r, ids) in &cells {
+        let k = match ids.as_slice() {
+            [one] => format!("{one}"),
+            many => format!(
+                "[{}]",
+                many.iter()
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+        };
+        let el = b.add(format!(
+            "<< /Type /StructElem /S /{role} /P {} 0 R /Pg {kid} 0 R /K {k} >>",
+            trs[*r]
+        ));
+        tr_kids[*r].push(el);
+        by_mcid.extend(ids.iter().map(|&m| (m, el)));
+    }
+    for (r, kids) in tr_kids.iter().enumerate() {
+        b.set(
+            trs[r],
+            format!(
+                "<< /Type /StructElem /S /TR /P {table} 0 R /K [{}] >>",
+                kids.iter()
+                    .map(|k| format!("{k} 0 R"))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ),
+        );
+    }
+    b.set(
+        table,
+        format!(
+            "<< /Type /StructElem /S /Table /P {root} 0 R /K [{}] >>",
+            trs.iter()
+                .map(|k| format!("{k} 0 R"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
+    );
+    by_mcid.sort_unstable();
+    b.set(
+        root,
+        format!(
+            "<< /Type /StructTreeRoot /K {table} 0 R /ParentTree << /Nums [0 [{}]] >> >>",
+            by_mcid
+                .iter()
+                .map(|(_, e)| format!("{e} 0 R"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
+    );
+    b.set(
+        kid,
+        format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] /StructParents 0 \
+             /Resources << /Font << /F1 {font} 0 R /F2 {bold} 0 R >> >> /Contents {cs} 0 R >>"
+        ),
+    );
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(
+        catalog,
+        format!(
+            "<< /Type /Catalog /Pages {tree} 0 R /MarkInfo << /Marked true >> \
+             /StructTreeRoot {root} 0 R >>"
+        ),
+    );
+    b.finish(catalog)
+}
+
+/// Private shape S1, across sizes and row counts: each cell of the tagged table keeps its lines,
+/// as in a table read from rules or from lines (one shared rule): each stop on the line of its
+/// date and time, the platform after an empty first line where it stands on the arrival's line.
+/// The times stand in a column too narrow for the next word (`an` after `ab 08:15`) and open
+/// with a small letter: they stay lines because the stops beside them do. So does the note that
+/// wraps on those lines (a line break in its sentence, every word in its cell); the note whose
+/// second line is a long number keeps it on a line of its own.
+#[test]
+fn a_tagged_row_keeps_its_cell_lines() {
+    let note = [
+        "Bitte beachten Sie den Hinweis zur Fahrradmitnahme im Zug",
+        "und am Bahnsteig",
+    ];
+    // A note whose first line ends in a label and whose second line is its value,
+    // a long number that would not have fit after the label: one note, never a pair with the
+    // arrival's line.
+    let numbered = [
+        "Bitte die Nummer fuer Rueckfragen bereithalten, Ref.-Nr.",
+        "123456789012",
+    ];
+    let all: [[TaggedCell<'_>; 6]; 3] = [
+        [
+            &["Musterstadt Hbf, Nordseite", "Beispielheim Bahnhof, Ost"],
+            &["01.10.", "01.10."],
+            &["ab 08:15", "an 09:40"],
+            &["", "4"],
+            &["ICE 571"],
+            &note,
+        ],
+        [
+            &["Beispielheim Bahnhof, Ost", "Probedorf Mitte"],
+            &["01.10.", "01.10."],
+            &["ab 09:52", "an 10:30"],
+            &["2", "5"],
+            &["RE 4711"],
+            &note,
+        ],
+        [
+            &["Probedorf Mitte", "Musterstadt Hbf, Nordseite"],
+            &["02.10.", "02.10."],
+            &["ab 17:05", "an 18:20"],
+            &["1", "3"],
+            &["RB 4712"],
+            &numbered,
+        ],
+    ];
+    for size in [7.5f32, 8.33] {
+        for n in [2usize, 3] {
+            let out = read(&tagged_timetable(size, &all[..n]));
+            let blocks = page(&out, 1);
+            let rows: Vec<&Vec<Cell>> = blocks
+                .iter()
+                .filter_map(|b| match b {
+                    Block::Table { rows, .. } => Some(rows),
+                    _ => None,
+                })
+                .flatten()
+                .collect();
+            assert_eq!(rows.len(), n + 1, "{size} {n}");
+            // Each cell's lines, parted at its line breaks.
+            let lines = |c: &Cell| -> Vec<String> {
+                c.inlines
+                    .split(|i| matches!(i, Inline::LineBreak))
+                    .map(|p| {
+                        plain_text(p)
+                            .split_whitespace()
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    })
+                    .collect()
+            };
+            for (r, row) in all[..n].iter().enumerate() {
+                let have: Vec<Vec<String>> = rows[r + 1].iter().map(lines).collect();
+                let want: Vec<Vec<String>> = row
+                    .iter()
+                    .map(|cell| {
+                        let mut l: Vec<String> = cell.iter().map(|s| s.to_string()).collect();
+                        while l.last().is_some_and(String::is_empty) {
+                            l.pop();
+                        }
+                        l
+                    })
+                    .collect();
+                assert_eq!(have, want, "{size} {n} row {r}");
+            }
+        }
+    }
+}
+
+/// In a row
+/// whose other cells hold one line each, a note whose first line is full joins its second line
+/// when the text goes on, in a small letter (with a space) or after a hyphen in a word (with
+/// nothing between); a full line before a capital stays a line.
+#[test]
+fn a_tagged_cell_joins_a_full_line_that_goes_on() {
+    let notes: [([&str; 2], &[&str]); 3] = [
+        (
+            [
+                "Bitte beachten Sie den Hinweis zur Fahrradmitnahme im Zug",
+                "und am Bahnsteig",
+            ],
+            &["Bitte beachten Sie den Hinweis zur Fahrradmitnahme im Zug und am Bahnsteig"],
+        ),
+        (
+            [
+                "Bitte beachten Sie den Hinweis zur Mitnahme der Fahr-",
+                "raeder im Zug",
+            ],
+            &["Bitte beachten Sie den Hinweis zur Mitnahme der Fahr-raeder im Zug"],
+        ),
+        (
+            [
+                "Bitte beachten Sie den Hinweis zur Fahrradmitnahme im",
+                "Zug nach Beispielheim",
+            ],
+            &[
+                "Bitte beachten Sie den Hinweis zur Fahrradmitnahme im",
+                "Zug nach Beispielheim",
+            ],
+        ),
+    ];
+    for (note, want) in notes {
+        let row: [TaggedCell<'_>; 6] = [
+            &["Musterstadt Hbf"],
+            &["01.10."],
+            &["ab 08:15"],
+            &["4"],
+            &["ICE 571"],
+            &note,
+        ];
+        let out = read(&tagged_timetable(8.33, &[row]));
+        let blocks = page(&out, 1);
+        let rows: Vec<&Vec<Cell>> = blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Table { rows, .. } => Some(rows),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert_eq!(rows.len(), 2, "{note:?}");
+        let have: Vec<String> = rows[1][5]
+            .inlines
+            .split(|i| matches!(i, Inline::LineBreak))
+            .map(|p| plain_text(p).trim().to_string())
+            .collect();
+        assert_eq!(have, want, "{note:?}");
+        // The cells of one line take no empty line before them.
+        assert_eq!(plain_text(&rows[1][3].inlines), "4");
+        assert!(!matches!(rows[1][3].inlines[0], Inline::LineBreak));
+    }
+}
+
+/// A label over a line of its own with its value under it, left of a grid with a row of bold
+/// header cells over empty rows; the label on the baseline of the header cells. `rule` is the
+/// line under the label (from, to, height), `titles` the header cells. A second such field
+/// stands under the first, and the line of a third farther right at a height between the two
+/// (one field alone with a line as long as its label is a pair by that line, and two lines
+/// alone bound a strip).
+fn field_left_of_a_header_row(rule: Option<(f32, f32, f32)>, titles: &[&str]) -> Vec<String> {
+    let xs = [117.0, 312.0, 383.0, 454.0];
+    let mut c = String::from("1 w\n");
+    for r in 0..7 {
+        let y = 707.5 - 10.0 * r as f32;
+        c += &format!("{} {y} m {} {y} l S\n", xs[0], xs[3]);
+    }
+    for x in xs {
+        c += &format!("{x} 707.5 m {x} 647.5 l S\n");
+    }
+    for (title, x) in titles.iter().zip(xs) {
+        c += &format!("BT /F2 8 Tf {} 700 Td ({title}) Tj ET\n", x + 3.0);
+    }
+    c += "BT /F1 7 Tf 31 700.9 Td (Checked by) Tj ET\n";
+    c += "BT /F1 7 Tf 31 692.9 Td (A/B) Tj ET\n";
+    c += "BT /F1 7 Tf 31 676.8 Td (Passed on to) Tj ET\n";
+    c += "0.5 w 31 676.2 m 110.3 676.2 l S\n";
+    c += "BT /F1 7 Tf 31 668.7 Td (C/D) Tj ET\n";
+    c += "0.5 w 480 687.5 m 540 687.5 l S\n";
+    if let Some((x0, x1, y)) = rule {
+        c += &format!("0.5 w {x0} {y} m {x1} {y} l S\n");
+    }
+    let out = common::read(&common::pdf(&[Page::text(c)], ""));
+    // The paragraphs and the rows of the tables of labels and values, in their order.
+    page(&out, 1)
+        .iter()
+        .flat_map(|b| match b {
+            Block::Paragraph { inlines, role, .. } if role.as_deref() != Some("page") => {
+                vec![plain_text(inlines)]
+            }
+            Block::Table { rows, .. } => texts(rows).iter().map(|r| r.join(" ")).collect(),
+            _ => Vec::new(),
+        })
+        .collect()
+}
+
+/// A label that starts the line of a table's header
+/// cells, over a drawn line of its own with its value under it. The header cells are read
+/// before the label, so the label stands with its value. Each part of the evidence moved the
+/// other way keeps the line of the text pass: without the line under the label the page looks
+/// like a column of row labels beside a grid whose first row alone is filled, where each
+/// label reads with the cells of its row.
+#[test]
+fn header_cells_after_a_field_over_its_own_line_are_read_before_it() {
+    let titles = ["Part of the frame", "Count", "Note"];
+    let moved = [
+        "Part of the frame Count Note",
+        "Checked by A/B",
+        "Passed on to C/D",
+    ];
+    let kept = [
+        "Checked by Part of the frame Count Note",
+        "A/B",
+        "Passed on to C/D",
+    ];
+    let read = |rule| {
+        field_left_of_a_header_row(rule, &titles)
+            .iter()
+            .map(|p| p.split_whitespace().collect::<Vec<_>>().join(" "))
+            // A line that reaches the grid makes its note a paragraph: no text of the page.
+            .filter(|p| !p.starts_with("Possible table"))
+            .collect::<Vec<_>>()
+    };
+    // The line of a field: under the label, as long as a field, ending before the grid.
+    assert_eq!(read(Some((31.0, 78.45, 700.35))), moved);
+    // From the middle of the label on. (A line as long as the label's words makes the field a
+    // pair, which is placed by another path.)
+    assert_eq!(read(Some((50.0, 110.0, 700.35))), moved);
+    // At the baseline, and right over the value's baseline.
+    assert_eq!(read(Some((31.0, 78.45, 700.9))), moved);
+    assert_eq!(read(Some((31.0, 78.45, 693.0))), moved);
+    // No line.
+    assert_eq!(read(None), kept);
+    // A line over the label's baseline (through the label or over it), and one under the
+    // value.
+    assert_eq!(read(Some((31.0, 78.45, 701.0))), kept);
+    assert_eq!(read(Some((31.0, 78.45, 692.8))), kept);
+    // A line that starts after the label, and one that goes on to the text of the grid.
+    assert_eq!(read(Some((69.0, 110.0, 700.35))), kept);
+    assert_eq!(read(Some((31.0, 121.0, 700.35))), kept);
+    // One cell after the label may be its value: it stays on the label's line.
+    let one = field_left_of_a_header_row(Some((31.0, 78.45, 700.35)), &titles[..1]);
+    assert_eq!(one.len(), 3, "{one:?}");
+    assert!(one[0].starts_with("Checked by"), "{one:?}");
+}
+
+/// A filled circle of radius `r` around (`cx`, `cy`) as a subpath of four curves.
+fn circle(cx: f32, cy: f32, r: f32) -> String {
+    let k = 0.5523 * r;
+    format!(
+        "{} {cy} m {} {} {} {} {cx} {} c {} {} {} {} {} {cy} c {} {} {} {} {cx} {} c \
+         {} {} {} {} {} {cy} c h ",
+        cx + r,
+        cx + r,
+        cy + k,
+        cx + k,
+        cy + r,
+        cy + r,
+        cx - k,
+        cy + r,
+        cx - r,
+        cy + k,
+        cx - r,
+        cx - r,
+        cy - k,
+        cx - k,
+        cy - r,
+        cy - r,
+        cx + k,
+        cy - r,
+        cx + r,
+        cy - k,
+        cx + r,
+    )
+}
+
+/// A clock icon of filled curves only, 22.4 points wide before the scale of 0.75, its lower
+/// left corner at (`x`, `y`): a ring, a dot in its middle and two hands, each a thin shape
+/// of two curves. No line and no rectangle is in it.
+fn clock_icon(x: f32, y: f32) -> String {
+    let hand = |x1: f32, y1: f32| {
+        format!(
+            "11.2 11.2 m 11.7 11.7 {} {} {x1} {y1} c {} {} 10.7 10.7 11.2 11.2 c f ",
+            x1 + 0.5,
+            y1 - 0.5,
+            x1 - 0.5,
+            y1 + 0.5
+        )
+    };
+    format!(
+        "q 0.75 0 0 0.75 {x} {y} cm {}{}f* {}f {}{}Q\n",
+        circle(11.2, 11.2, 11.2),
+        circle(11.2, 11.2, 9.6),
+        circle(11.2, 11.2, 1.2),
+        hand(11.2, 19.0),
+        hand(17.0, 11.2),
+    )
+}
+
+/// A calendar icon at (`x`, `y`), scaled 0.75: an outline of lines and corner curves, two
+/// tabs, a bar and eleven filled squares.
+fn calendar_icon(x: f32, y: f32) -> String {
+    let mut c = format!("q 0.75 0 0 0.75 {x} {y} cm 0.8 w ");
+    c += "2 0 m 18 0 l 19.1 0 20 0.9 20 2 c 20 17 l 20 18.1 19.1 19 18 19 c 2 19 l \
+          0.9 19 0 18.1 0 17 c 0 2 l 0 0.9 0.9 0 2 0 c h S ";
+    c += "4 18 1.5 3 re f 14.5 18 1.5 3 re f 0 13.5 20 1.5 re f ";
+    for k in 0..11 {
+        let (col, row) = (k % 4, k / 4);
+        c += &format!(
+            "{} {} 1.77 1.77 re f ",
+            3.0 + 4.0 * col as f32,
+            9.5 - 3.5 * row as f32
+        );
+    }
+    c + "Q\n"
+}
+
+/// The losses of `out` that name an icon.
+fn icon_losses(out: &rezzer_model::ReadOutcome) -> Vec<&str> {
+    out.document
+        .losses
+        .iter()
+        .map(|l| l.what.as_str())
+        .filter(|w| w.contains("icon"))
+        .collect()
+}
+
+/// A ruled table of thin filled rules whose first row holds a calendar icon in cells 1 and
+/// 6, a clock icon in cells 2 and 7, titles in cells 3, 4 and 8 and nothing in cell 5, over
+/// two rows of text. `icons` leaves the icons out when false.
+fn timetable(icons: bool) -> String {
+    let xs = [
+        56.25, 105.2, 143.02, 247.27, 301.84, 413.7, 461.9, 500.46, 539.03,
+    ];
+    let ys = [672.2, 641.5, 620.0, 598.5];
+    let mut c = String::new();
+    for y in ys {
+        c += &format!("{} {} {} 0.5 re f ", xs[0], y - 0.25, xs[8] - xs[0]);
+    }
+    for x in xs {
+        c += &format!("{} {} 0.5 {} re f ", x - 0.25, ys[3], ys[0] - ys[3]);
+    }
+    if icons {
+        for k in [0, 5] {
+            c += &calendar_icon((xs[k] + xs[k + 1]) / 2.0 - 7.5, 650.3);
+        }
+        for k in [1, 6] {
+            c += &clock_icon((xs[k] + xs[k + 1]) / 2.0 - 8.4, 649.0);
+        }
+    }
+    for (k, title) in [(2, "Station"), (3, "Track"), (7, "Train")] {
+        c += &show("F1", 8.0, xs[k] + 4.0, 654.0, title);
+    }
+    let rows = [
+        [
+            "02.01.",
+            "10:15",
+            "Musterstadt Nord",
+            "4",
+            "Change here",
+            "02.01.",
+            "11:20",
+            "IC 101",
+        ],
+        [
+            "03.01.",
+            "11:20",
+            "Musterstadt Ost",
+            "2",
+            "Ends here",
+            "03.01.",
+            "12:05",
+            "IC 205",
+        ],
+    ];
+    for (r, row) in rows.iter().enumerate() {
+        for (k, cell) in row.iter().enumerate() {
+            c += &show("F1", 8.0, xs[k] + 4.0, ys[r + 1] - 14.0, cell);
+        }
+    }
+    c
+}
+
+/// An icon of filled curves only (a clock: a ring and two hands) in a cell of
+/// the first row is a drawing in that cell as much as an icon of lines and rectangles (a
+/// calendar). The loss named the calendar cells only, so the clock cells were empty without
+/// a word. Every cell with a drawing and no text is named; a cell that holds nothing is not.
+#[test]
+fn icons_of_curves_only_are_named_in_the_icon_loss() {
+    let out = read(&pdf(&[Page::text(timetable(true))], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(
+        found[0].1[0],
+        ["", "", "Station", "Track", "", "", "", "Train"],
+        "{found:?}"
+    );
+    assert_eq!(
+        icon_losses(&out),
+        [
+            "the table on page 1 that starts with \"Station\" has a drawing (an icon or a mark) and no \
+             text in the cells 1, 2, 6 and 7 of its first row: they are left empty"
+        ],
+        "{:?}",
+        out.document.losses
+    );
+    // The same table without the drawings: empty cells are no icons.
+    let out = read(&pdf(&[Page::text(timetable(false))], ""));
+    assert_eq!(icon_losses(&out), [""; 0], "{:?}", out.document.losses);
+}
+
+/// A page keeps the boxes of `MAX_SHAPES` drawn paths (8,192), the limit pinned exactly. The
+/// icons of the table hold 8 paths that are no rule (4 for each clock: its ring, its dot and
+/// its two hands; the outline of a calendar is a box with round corners, a rule). With 8,184
+/// paths before the table the last hand is the 8,192nd path: all are kept and nothing is
+/// said. With one more that hand is not kept, and the table says that it looked at the
+/// drawings only in part. With the whole room used up before the table the icons of curves
+/// are not found.
+#[test]
+fn drawings_past_the_shape_limit_are_said() {
+    let said = |out: &rezzer_model::ReadOutcome| {
+        out.document.losses.iter().any(|l| {
+            l.what
+                .contains("drawings on page 1 past the first 8192 paths")
+        })
+    };
+    // Exactly at the limit all are kept and nothing is said.
+    let out = read(&pdf(&[Page::text(chart(8_192 - 8) + &timetable(true))], ""));
+    assert!(!said(&out), "{:?}", out.document.losses);
+    assert!(
+        icon_losses(&out)
+            .iter()
+            .any(|l| l.contains("cells 1, 2, 6 and 7")),
+        "{:?}",
+        out.document.losses
+    );
+    // One path more: the last path of the page (a hand of the second clock) is not kept,
+    // and the table says that it looked at the drawings in part.
+    let out = read(&pdf(&[Page::text(chart(8_192 - 7) + &timetable(true))], ""));
+    assert!(said(&out), "{:?}", out.document.losses);
+    // The whole room used up before the table: the icons of curves are not found.
+    let out = read(&pdf(&[Page::text(chart(8_192) + &timetable(true))], ""));
+    assert!(said(&out), "{:?}", out.document.losses);
+    assert!(
+        icon_losses(&out)
+            .iter()
+            .all(|l| l.contains("cells 1 and 6")),
+        "{:?}",
+        out.document.losses
+    );
+}
+
+/// `n` small filled circles in a grid under the table: a drawing of `n` paths of curves.
+fn chart(n: usize) -> String {
+    (0..n)
+        .map(|k| {
+            let (x, y) = (
+                60.0 + (k % 128) as f32 * 3.0,
+                100.0 + (k / 128) as f32 * 3.0,
+            );
+            format!("{}f ", circle(x, y, 1.0))
+        })
+        .collect()
+}
+
+/// A page with more drawn paths than it keeps and no
+/// table that looks for icons says nothing about its drawings: a map or a chart is no loss
+/// of a table. The same drawing over a ruled table whose first row is all text says nothing
+/// either: no cell was looked at for an icon.
+#[test]
+fn many_drawn_paths_without_an_icon_cell_write_no_note() {
+    let noted = |c: String| {
+        let out = read(&pdf(&[Page::text(c)], ""));
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.what.contains("drawings on page 1"))
+    };
+    let words = show(
+        "F1",
+        10.0,
+        72.0,
+        760.0,
+        "A map of Musterstadt in many small circles.",
+    );
+    assert!(!noted(chart(9_000) + &words));
+    let mut table = String::from("0.5 w ");
+    table += &ruled_cells(&[50.0, 130.0, 210.0, 290.0], "c");
+    assert!(!noted(chart(9_000) + &table));
+}
+
+/// An empty cell of the first row that is struck out
+/// with a cross of two slanted lines (as forms mark a field that does not apply) holds a
+/// drawing and no text, as a cell with an icon does. The page shows something there that
+/// Rezzer does not read, so the cell is named: saying nothing would hide a mark of the page,
+/// and Rezzer cannot tell a cross from a small icon. The cell stays empty.
+#[test]
+fn an_empty_cell_struck_out_with_a_cross_is_named_as_a_drawing() {
+    let (x0, x1) = (301.84 + 6.0, 413.7 - 6.0);
+    let cross = format!("0.5 w {x0} 646 m {x1} 668 l S {x0} 668 m {x1} 646 l S\n");
+    let out = read(&pdf(&[Page::text(timetable(false) + &cross)], ""));
+    let found = tables(page(&out, 1));
+    assert_eq!(found[0].1[0][4], "", "{found:?}");
+    assert_eq!(
+        icon_losses(&out),
+        [
+            "the table on page 1 that starts with \"Station\" has a drawing (an icon or a mark) and no \
+             text in the cell 5 of its first row: it is left empty"
+        ],
+        "{:?}",
+        out.document.losses
+    );
+}
+
+/// A path that puts no ink on the page is no drawing.
+/// The clock icons stroked or filled in pure white leave their cells unnamed, and so does a
+/// fill with no opacity; in black they are named.
+#[test]
+fn white_or_transparent_paths_are_no_icons() {
+    let clocks = |paint: &str| {
+        let xs = [56.25, 105.2];
+        let icon = clock_icon((xs[0] + xs[1]) / 2.0 - 8.4, 649.0);
+        format!("{}q {paint} {icon} Q\n", timetable(false))
+    };
+    let named = |c: String, extra: &str| {
+        let out = read(&with_gstate(&c, extra));
+        !icon_losses(&out).is_empty()
+    };
+    assert!(named(clocks("0 g"), ""));
+    assert!(!named(clocks("1 g"), ""));
+    assert!(!named(clocks("1 1 1 rg"), ""));
+    // The same icon as strokes (`f` and `f*` of the icon are `S`; the table is as it was):
+    // in black it is named, in white it is not.
+    let stroked = |paint: &str| {
+        let xs = [56.25, 105.2];
+        let icon = clock_icon((xs[0] + xs[1]) / 2.0 - 8.4, 649.0)
+            .replace("f* ", "S ")
+            .replace("f ", "S ");
+        format!("{}q 0.5 w {paint} {icon} Q\n", timetable(false))
+    };
+    assert!(named(stroked("0 0 0 RG"), ""));
+    assert!(!named(stroked("1 1 1 RG"), ""));
+    // A black fill with no opacity at all.
+    assert!(!named(
+        clocks("0 g /T0 gs"),
+        "/ExtGState << /T0 << /ca 0 /CA 0 >> >>"
+    ));
+    assert!(named(
+        clocks("0 g /T1 gs"),
+        "/ExtGState << /T1 << /ca 0.5 >> >>"
+    ));
+}
+
+/// A page with `content`, the fonts of [`pdf`] and `resources` more in its resources.
+fn with_gstate(content: &str, resources: &str) -> Vec<u8> {
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let c = b.stream("", content.as_bytes());
+    let kid = b.add(format!(
+        "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+         /Resources << /Font << /F1 {font} 0 R >> {resources} >> /Contents {c} 0 R >>"
+    ));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{kid} 0 R] /Count 1 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    b.finish(catalog)
+}
+
+/// Two tables on one page that both looked for icons, on a page
+/// that draws more paths than it keeps. The page says once that its drawings were looked at
+/// only in part.
+#[test]
+fn the_shape_limit_is_said_once_for_a_page_of_two_tables() {
+    let second = format!("q 1 0 0 1 0 -300 cm {} Q\n", timetable(true));
+    let out = read(&pdf(
+        &[Page::text(chart(8_192) + &timetable(true) + &second)],
+        "",
+    ));
+    assert_eq!(tables(page(&out, 1)).len(), 2);
+    let said = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| {
+            l.what
+                .contains("drawings on page 1 past the first 8192 paths")
+        })
+        .count();
+    assert_eq!(said, 1, "{:?}", out.document.losses);
+}
+
+/// Two tables on one page that start with the same words and hold
+/// icons in the same cells give the same words in their icon losses. Each table has its
+/// loss: only a note of the page as a whole is said once.
+#[test]
+fn two_tables_with_the_same_icon_cells_each_have_their_loss() {
+    let second = format!("q 1 0 0 1 0 -300 cm {} Q\n", timetable(true));
+    let out = read(&pdf(&[Page::text(timetable(true) + &second)], ""));
+    assert_eq!(tables(page(&out, 1)).len(), 2);
+    let losses = icon_losses(&out);
+    assert_eq!(losses.len(), 2, "{:?}", out.document.losses);
+    assert_eq!(losses[0], losses[1]);
 }

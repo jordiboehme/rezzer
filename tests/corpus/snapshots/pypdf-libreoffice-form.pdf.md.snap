@@ -4,7 +4,7 @@ source: crates/rezzer/tests/corpus.rs
 ---
 type: source
 title: "Example for a Form"
-description: "PDF, 1 page, \"Example for a Form\", 2022-06-26. 8 form fields."
+description: "PDF, 1 page, \"Example for a Form\", 2022-06-26. 8 form fields, 1 region to look at."
 resource: "<corpus>/pdf/pypdf-libreoffice-form.pdf"
 tags: ["rezzer", "pdf", "form"]
 generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
@@ -18,7 +18,7 @@ format: pdf
 detected_by: "pdf header %PDF-"
 reader: "pdf/0.1.0"
 completeness: complete
-losses: 0
+losses: 1
 pages: 1
 tagged: false
 encrypted: false
@@ -44,15 +44,17 @@ title_from: "largest heading in the top third of page 1"
 | Key | Value |
 | --- | --- |
 | creator | Writer |
-| pdf\_version | 1.5 |
+| pdf_version | 1.5 |
 | producer | LibreOffice 6.4 |
 
 :status[Page 1]{grey}
 
 ## Example for a Form
 
-First Name Last Name\
+First Name   Last Name\
 Birthday
+
+Picture page-1-region-1 (image/png, text kept as laid out at p1:b2, box 57, 694 to 268, 722) is not extracted. :status[Needs vision]{yellow}
 
 Gender:
 
@@ -74,5 +76,19 @@ Agree to privacy policy Other
 | Birthday | text | input |  |  |  |  |  |
 | gdpr | checkbox | input | Off |  |  |  |  |
 | other | checkbox | input | Off |  |  |  |  |
-| First Name\_2 | text | input | Bob |  |  |  | multiline |
+| First Name_2 | text | input | Bob |  |  |  | multiline |
 | Nationality | combo | input |  |  |  |  |  |
+
+## Embedded
+
+### Pictures that need vision
+
+| Picture | File | Caption | Note |
+| --- | --- | --- | --- |
+| page-1-region-1 | not extracted |  | text kept as laid out at p1:b2, box 57, 694 to 268, 722 |
+
+## Not read
+
+| Where | What | Why | Severity |
+| --- | --- | --- | --- |
+| p1:b2 | the region at p1:b2 is kept as laid out, line by line: no region type has clear evidence for it | uncertain | info |

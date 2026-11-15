@@ -28,7 +28,7 @@
 //! - A list item that Crystalline would read as an observation or a relation (a bullet that
 //!   opens with `[category]` but not `[^`, one lowercase word or a quoted phrase before a
 //!   link to a `.md` file, or one word before a `[[wikilink]]`) gets the `* ` bullet, so it
-//!   stays text (P5-S)
+//!   stays text
 //! - An annotation stands at its passage: after the first block with its anchor, or at the
 //!   end of its page section. Only the others are listed in `## Annotations`. Blocks of a
 //!   sheet take none: a cell comment stays in the list
@@ -50,6 +50,7 @@ mod facets;
 mod form;
 mod frontmatter;
 mod layout;
+mod levels;
 mod mermaid;
 mod overview;
 mod paging;
@@ -175,6 +176,53 @@ impl std::str::FromStr for TableStyle {
     }
 }
 
+/// Which notes the Markdown shows. A note says how something was read or what could not be
+/// read; the model JSON always has all of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum NoteLevel {
+    /// Every note, as the readers and the renderer write them.
+    #[default]
+    Full,
+    /// The notes that touch a value or say that something is missing. Notes that only say
+    /// how something was read are left out, and `## Not read` says how many.
+    Brief,
+    /// No notes in the content and no `## Not read` rows; one line says that notes were
+    /// left out. Pictures and their need of vision stay: they are content.
+    None,
+}
+
+impl NoteLevel {
+    /// Every level, the render default first.
+    pub const ALL: [NoteLevel; 3] = [NoteLevel::Full, NoteLevel::Brief, NoteLevel::None];
+
+    /// The name callers use: `full`, `brief` or `none`.
+    pub fn name(self) -> &'static str {
+        match self {
+            NoteLevel::Full => "full",
+            NoteLevel::Brief => "brief",
+            NoteLevel::None => "none",
+        }
+    }
+}
+
+impl std::str::FromStr for NoteLevel {
+    type Err = String;
+
+    /// Takes the [`NoteLevel::name`]; case and surrounding spaces are allowed.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let wanted = s.trim().to_ascii_lowercase();
+        NoteLevel::ALL
+            .into_iter()
+            .find(|level| level.name() == wanted)
+            .ok_or_else(|| {
+                format!(
+                    "unknown notes level {}, expected full, brief or none",
+                    frontmatter::quote(s.trim())
+                )
+            })
+    }
+}
+
 /// A sheet list in a message names at most this many sheets.
 const MAX_NAMED_SHEETS: usize = 50;
 
@@ -284,6 +332,9 @@ pub struct RenderOptions {
     pub math: bool,
     /// How the rows of sheet tables are written. Default [`TableStyle::Table`].
     pub table_style: TableStyle,
+    /// Which notes the Markdown shows. Default [`NoteLevel::Full`]; the frontmatter and its
+    /// `losses` count are the same at every level.
+    pub notes: NoteLevel,
     /// The titles of the sheets to write (see [`resolve_sheets`]); `None` or an empty list
     /// writes all.
     pub sheets: Option<Vec<String>>,
@@ -315,6 +366,7 @@ impl Default for RenderOptions {
             archive_ref: None,
             math: true,
             table_style: TableStyle::Table,
+            notes: NoteLevel::Full,
             sheets: None,
             part: None,
             parts: None,
@@ -367,7 +419,7 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
     }
     let notes = Notes::new(&doc.facets.annotations);
     if want(OutputSection::Content) {
-        parts.push(content(doc, shown, &notes, opts.table_style, selection));
+        parts.push(content(doc, shown, &notes, opts, selection));
     }
     if want(OutputSection::Logic) {
         parts.extend(facets::logic(doc, opts.math, selection));
@@ -381,6 +433,7 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
         in_sheet: Default::default(),
         table_style: opts.table_style,
         column_numbers: column_numbers(doc),
+        level: opts.notes,
     };
     if want(OutputSection::Annotations) {
         parts.extend(facets::annotations(
@@ -397,7 +450,9 @@ pub fn render(doc: &Document, completeness: Completeness, opts: &RenderOptions) 
         parts.extend(facets::embedded(doc, ""));
     }
     if want(OutputSection::NotRead) {
-        parts.extend(facets::not_read(doc));
+        let filter = levels::LossFilter::new(doc, opts, selection);
+        let left_out = levels::left_out(doc, opts, selection, &filter);
+        parts.extend(facets::not_read(doc, &filter, opts.notes, left_out));
     }
     // Crystalline wants 3 lines of content (Q001): a shorter body gets the description as
     // a paragraph under the title, and a body that is still short says it has nothing more.
@@ -551,7 +606,7 @@ fn content(
     doc: &Document,
     title: &str,
     notes: &Notes,
-    table_style: TableStyle,
+    opts: &RenderOptions,
     selection: Option<&Selection>,
 ) -> String {
     let mut body: &[Block] = &doc.body;
@@ -570,8 +625,9 @@ fn content(
         heading_offset: 2u8.saturating_sub(min),
         notes: Some(notes),
         in_sheet: Default::default(),
-        table_style,
+        table_style: opts.table_style,
         column_numbers: column_numbers(doc),
+        level: opts.notes,
     };
     let Some(selection) = selection else {
         return blocks::blocks(body, &ctx, 0, 2, false);

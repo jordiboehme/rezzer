@@ -267,6 +267,7 @@ fn overview_lists_sections_and_counts() {
         needs_vision: false,
         codes: Vec::new(),
         code_unread: false,
+        shows: None,
     });
     d.facets.formulas = vec![formula("Calc!A1", &["Input!A1", "Input!B2"])];
     d.facets.graphs.push(Graph {
@@ -348,12 +349,44 @@ fn overview_counts_one_picture_at_several_places_once_more() {
             needs_vision: false,
             codes: Vec::new(),
             code_unread: false,
+            shows: None,
         });
     }
     enrich(&mut d, &only(&[]));
     let o = d.overview.expect("overview");
     let images = o.facts.iter().find(|(k, _)| k == "Images").map(|(_, v)| v);
     assert_eq!(images.map(String::as_str), Some("4 (2 distinct)"));
+}
+
+#[test]
+fn overview_counts_no_picture_that_shows_a_block_of_the_text() {
+    // A picture of a region of text kept as laid out is no image of the file: it shows a
+    // block. The picture of the file beside it is counted.
+    let mut d = doc();
+    let place = |asset: &str| Block::Media {
+        asset: asset.into(),
+        alt: None,
+        anchor: None,
+    };
+    d.body = vec![place("chart"), place("page-1-region-1")];
+    for (id, shows) in [("chart", None), ("page-1-region-1", Some("p1:b1"))] {
+        d.assets.push(Asset {
+            id: id.into(),
+            path: None,
+            sha256: "00".into(),
+            mime: "image/png".into(),
+            caption: None,
+            alt: None,
+            needs_vision: shows.is_some(),
+            codes: Vec::new(),
+            code_unread: false,
+            shows: shows.map(|a| Anchor(a.into())),
+        });
+    }
+    enrich(&mut d, &only(&[]));
+    let o = d.overview.expect("overview");
+    let images = o.facts.iter().find(|(k, _)| k == "Images").map(|(_, v)| v);
+    assert_eq!(images.map(String::as_str), Some("1"));
 }
 
 #[test]

@@ -44,17 +44,17 @@ created: "2020-11-21T18:21:23+01:00"
 | Key | Value |
 | --- | --- |
 | creator | Writer |
-| pdf\_version | 1.4 |
+| pdf_version | 1.4 |
 | pdfa | PDF/A-1a |
 | producer | LibreOffice 7.0 |
 
 :status[Page 1]{grey}
 
-Picture page-1-pic-1 (image/png, logo or small picture, box 451, 724 to 522, 795) is not extracted.
-
 |  |  |
 | --- | --- |
 |  | 2020-11-21 |
+
+Picture page-1-pic-1 (image/png, logo or small picture, box 451, 724 to 522, 795) is not extracted.
 
 **Bei Spiel GmbH**
 
@@ -96,7 +96,7 @@ Date of delivery 2020-11-10
 | --- | --- | --- | --- | --- |
 | Amount | Product | VAT | Price | Total |
 | 1.00 | Design (hours): Of a sample invoice | 7% | 160.00 € | 160.00 € |
-| 400.00 | Ballons: various colors, \~2000ml | 19% | 0.79 € | 316.00 € |
+| 400.00 | Ballons: various colors,<br>\~2000ml | 19% | 0.79 € | 316.00 € |
 | 800.00 | Hot air „heiße Luft“ (litres): | 19% | 0.025 € | 20.00 € |
 
 Net total: 496.00 €
@@ -108,9 +108,9 @@ plus VAT
 | VAT | Net amout | VAT amount |
 | 7% | 160.00 € | 11.20 € |
 | 19% | 336.00 € | 63.84 € |
-| VAT total: | ← | 75.04 € |
+| VAT total: |  | 75.04 € |
 
-Merged cells: 〃 same as above, ← same as left.
+Merged cells: `VAT total:` (row 5 column 1) over 2 columns. Each has its text in its first cell, the cells it covers are empty.
 
 Due payable: 571.04 €
 

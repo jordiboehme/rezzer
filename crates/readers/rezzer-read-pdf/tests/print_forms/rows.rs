@@ -191,7 +191,7 @@ fn a_two_line_title_is_one_caption() {
     assert_no_loss(&out);
 }
 
-/// Guard: a bold line right over a grid that is not cut stays a paragraph (ruling P6-Q is
+/// Guard: a bold line right over a grid that is not cut stays a paragraph (this is
 /// for cut grids only).
 #[test]
 fn a_line_over_a_grid_that_is_not_cut_stays_a_paragraph() {
@@ -268,7 +268,7 @@ pub(crate) fn section_with_totals(rules: &[f32], sides: bool) -> FormPage {
 
 /// A column drawn with horizontal rules only whose rules line up with a section's rules
 /// joins the section: its title heads one more column and its amount stands in the row; a
-/// total label in it pairs with the amount under it (ruling P6-O). One note says so.
+/// total label in it pairs with the amount under it. One note says so.
 #[test]
 fn a_column_of_totals_joins_its_section() {
     let page = section_with_totals(&[700.0, 660.0, 630.0], false);
@@ -293,7 +293,7 @@ fn a_column_of_totals_joins_its_section() {
         notes[0].contains("column of amounts beside a table"),
         "{notes:?}"
     );
-    assert_no_loss(&out);
+    assert_no_loss_but_laid_out(&out, &["p1:b1"]);
 }
 
 /// Guard: a column with sides of its own is a box, not a column of the section.
@@ -304,6 +304,87 @@ fn a_boxed_column_beside_a_section_stays_apart() {
     let found = read_tables(&out);
     assert_eq!(found[0][0], ["Aa", "Ab", "Ac", "Ad", "Ae"], "{found:#?}");
     assert!(!side_noted(&out), "{:?}", found_by(&out));
+}
+
+/// One drawn box of one field (borders at 40 and 400, rules at 700 and 660, no column
+/// rules) with a column of totals 6 points to its right at x 406 to 480, ruled at `rules`:
+/// a strip titled "Af" on the box's label baseline over the amount of the value line, and a
+/// strip below with the total label "Ag" over its amount.
+fn box_with_totals(rules: &[f32]) -> FormPage {
+    let mut page = hanging_section(
+        &[],
+        &["Aa"],
+        vec![
+            columns_line(675.0, &[(1, "Muster"), (66, "1.234,56")]),
+            columns_line(636.0, &[(68, "99,99")]),
+        ],
+    );
+    for &y in rules {
+        page.template += &bar_h(406.0, 480.0, y, 0.48);
+    }
+    page.template += &bold(410.0, 691.0, 6.66, "Af");
+    page.template += &bold(410.0, 650.0, 6.66, "Ag");
+    page
+}
+
+/// A column of totals beside a single drawn box stands beside it as beside a section of a
+/// grid: the total under the box's row pairs with its amount, and the column's first strip
+/// joins the box.
+#[test]
+fn a_column_of_totals_beside_a_single_box_joins_it() {
+    let out = read(&print_form(
+        &[box_with_totals(&[700.0, 660.0, 630.0])],
+        "",
+        "",
+    ));
+    let found = read_tables(&out);
+    assert!(side_noted(&out), "{found:#?} {:?}", found_by(&out));
+    assert_eq!(found, [[["Ag", "99,99"]]], "{found:#?}");
+    // The strip on the box's label baseline joins the box: its title and amount are not
+    // paired as a row of fields.
+    let text = all_text(&out);
+    for t in ["Aa", "Muster", "Af", "1.234,56"] {
+        assert!(text.contains(t), "{t} in {text}");
+    }
+}
+
+/// A strip that joins a single drawn box (its title on the box's label baseline, ruled at
+/// the box's top and bottom) is one more column of it: the box and the strip are a header
+/// band, which keeps the value lines under it apart from any table across it.
+#[test]
+fn a_strip_beside_a_single_box_joins_it() {
+    // Courier at 9.5 pt is 5.7 points a character: the box ends in the spaces after
+    // character 13 of the value lines, the strip holds the amounts from character 15 on.
+    let ch = 0.6 * 9.5;
+    let right = 40.0 + 13.5 * ch;
+    let mut template = boxed(36.0, 700.0, right - 36.0, 12.0);
+    template += &label(38.0, 703.0, 6.0, "Text");
+    for y in [700.0, 712.0] {
+        template += &bar_h(right + 5.0, 200.0, y, 0.48);
+    }
+    template += &label(right + 7.0, 703.0, 6.0, "Betrag");
+    let lines = ["Gehalt           1.111,11", "Zulage              22,22"];
+    let page = FormPage {
+        template,
+        lines: lines
+            .iter()
+            .enumerate()
+            .map(|(k, t)| DataLine {
+                y: 688.0 - 11.4 * k as f32,
+                text: (*t).to_string(),
+            })
+            .collect(),
+        ..FormPage::default()
+    };
+    let out = read(&print_form(&[page], "", ""));
+    // The band of the box and the strip (two titles) heads no table of its own, and the
+    // lines under it are no table across it: they stay text as they read before the
+    // segmentation. Whether they are a table of the band is for typing.
+    assert_eq!(read_tables(&out), Vec::<Vec<Vec<String>>>::new());
+    let text = all_text(&out);
+    for t in ["Text", "Betrag", "Gehalt", "1.111,11", "Zulage", "22,22"] {
+        assert!(text.contains(t), "{t} in {text}");
+    }
 }
 
 /// Whether the read says a column of totals joined a table.
@@ -345,7 +426,7 @@ fn a_column_rule_cuts_a_run_only_between_words() {
         "{found:#?}"
     );
     assert_eq!(read_header_rows(&out), [1]);
-    assert_no_loss(&out);
+    assert_no_loss_but_laid_out(&out, &["p1:b1"]);
 }
 
 /// A value line that fills two of nine fields is still the section's row: its empty fields
@@ -430,7 +511,7 @@ fn values_running_into_the_next_field_keep_the_section() {
         ["Muster", "ABCDEFGH", "", "IJKLMNOP", "Z"],
         "{found:#?}"
     );
-    assert_no_loss(&out);
+    assert_no_loss_but_laid_out(&out, &["p1:b1"]);
 }
 
 /// A note of prose across the columns under a header of hanging rules is not cut at them: it
@@ -452,7 +533,7 @@ fn a_note_across_an_open_row_stays_whole() {
     assert_eq!(found[0].last(), Some(&vec![note.to_string()]), "{found:#?}");
     // The value line of the same row keeps its columns.
     assert_eq!(found[0][1], ["Muster", "ABCD", "11", "", ""], "{found:#?}");
-    assert_no_loss(&out);
+    assert_no_loss_but_laid_out(&out, &["p1:b1"]);
 }
 
 /// A name of four words that runs on into the next field inside a word, on a line with its
@@ -481,7 +562,7 @@ fn a_long_name_beside_its_code_is_no_note() {
         ["045", "Zulage fuer Muster Bezug", "", "Z", "X", "Y"],
         "{found:#?}"
     );
-    assert_no_loss(&out);
+    assert_no_loss_but_laid_out(&out, &["p1:b1"]);
 }
 
 /// A sentence whose every crossed column rule falls in a gap between its words is cut there:
@@ -542,7 +623,7 @@ fn a_note_of_two_lines_is_one_cell() {
         ["Bitte die Hinweise auf der Rueckseite beachten und die Frist einhalten"],
         "{found:#?}"
     );
-    assert_no_loss(&out);
+    assert_no_loss_but_laid_out(&out, &["p1:b1"]);
 }
 
 /// A value alone on the line below a note does not go on the note: it is no sentence, and
@@ -571,5 +652,37 @@ fn a_value_below_a_note_stays_its_own_row() {
         "{found:#?}"
     );
     assert_eq!(found[0][3], ["Muster A", "", "", "", ""], "{found:#?}");
-    assert_no_loss(&out);
+    assert_no_loss_but_laid_out(&out, &["p1:b1"]);
+}
+
+/// The rows of fields between rules of [`super::boxes::field_rows`] are regions of labels and
+/// values, found by the field strips.
+#[test]
+fn strip_pairs_are_label_value() {
+    let bytes = print_form(&[super::boxes::field_rows()], "", "");
+    common::assert_every_run_in_one_region(&bytes);
+    let (_, pages) = common::read_regions(&bytes);
+    let found: Vec<(rezzer_read_pdf::layoutregions::Kind, &str)> = pages
+        .iter()
+        .flat_map(|p| &p.regions)
+        // A region of rules alone (no text) is spatial with no signal.
+        .filter(|r| r.signals.first().is_some_and(|s| s.id == "pdf.strips"))
+        .map(|r| (r.kind, r.signals[0].detail.as_str()))
+        .collect();
+    // Two tables: the rows above and below the row read as text.
+    assert_eq!(found.len(), 2, "{pages:#?}");
+    for (kind, detail) in found {
+        assert_eq!(kind, rezzer_read_pdf::layoutregions::Kind::LabelValue);
+        assert!(detail.contains("rows of fields"), "{detail}");
+    }
+}
+
+/// A row of fields refused with a loss (a value across two fields) keeps its text as it
+/// stands, and the regions of that text say why.
+#[test]
+fn a_refused_row_of_fields_keeps_its_reason() {
+    let bytes = print_form(&[super::boxes::field_rows()], "", "");
+    for text in ["Betrag", "Zuschlag", "123456789012"] {
+        common::assert_kept_with_reason(&bytes, text, "a value stands across two fields");
+    }
 }

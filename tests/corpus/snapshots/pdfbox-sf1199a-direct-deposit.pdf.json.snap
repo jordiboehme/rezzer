@@ -2,6 +2,105 @@
 source: crates/rezzer/tests/corpus.rs
 ---
 {
+  "assets": [
+    {
+      "alt": "text kept as laid out at p1:b30, box 310, 511 to 539, 542",
+      "id": "page-1-region-1",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": "",
+      "shows": "p1:b30"
+    },
+    {
+      "alt": "text kept as laid out at p1:b31 to p1:b33, box 326, 480 to 490, 507",
+      "id": "page-1-region-2",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": "",
+      "shows": "p1:b31"
+    },
+    {
+      "alt": "text kept as laid out at p1:b34, box 310, 448 to 559, 480",
+      "id": "page-1-region-3",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": "",
+      "shows": "p1:b34"
+    },
+    {
+      "alt": "text kept as laid out at p2:b30, box 310, 511 to 539, 542",
+      "id": "page-2-region-1",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": "",
+      "shows": "p2:b30"
+    },
+    {
+      "alt": "text kept as laid out at p2:b31 to p2:b33, box 326, 480 to 490, 507",
+      "id": "page-2-region-2",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": "",
+      "shows": "p2:b31"
+    },
+    {
+      "alt": "text kept as laid out at p2:b34, box 310, 448 to 559, 480",
+      "id": "page-2-region-3",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": "",
+      "shows": "p2:b34"
+    },
+    {
+      "alt": "text kept as laid out at p3:b30, box 310, 511 to 539, 542",
+      "id": "page-3-region-1",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": "",
+      "shows": "p3:b30"
+    },
+    {
+      "alt": "text kept as laid out at p3:b31 to p3:b33, box 326, 480 to 490, 507",
+      "id": "page-3-region-2",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": "",
+      "shows": "p3:b31"
+    },
+    {
+      "alt": "text kept as laid out at p3:b34, box 310, 448 to 559, 480",
+      "id": "page-3-region-3",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": "",
+      "shows": "p3:b34"
+    },
+    {
+      "alt": "text kept as laid out at p3:b47, box 40, 29 to 576, 48",
+      "id": "page-3-region-4",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": "",
+      "shows": "p3:b47"
+    },
+    {
+      "alt": "text kept as laid out at p4:b7, box 56, 496 to 282, 514",
+      "id": "page-4-region-1",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": "",
+      "shows": "p4:b7"
+    },
+    {
+      "alt": "text kept as laid out at p4:b8, box 56, 455 to 282, 489",
+      "id": "page-4-region-2",
+      "mime": "image/png",
+      "needs_vision": true,
+      "sha256": "",
+      "shows": "p4:b8"
+    },
+    "<1 more items>"
+  ],
   "body": [
     {
       "anchor": "p1",
@@ -79,15 +178,27 @@ source: crates/rezzer/tests/corpus.rs
         },
         {
           "anchor": "p1:b6",
-          "inlines": [
+          "grid": {
+            "col": 36
+          },
+          "lines": [
             {
-              "strong": true,
-              "text": "DIRECT DEPOSIT SIGN-UP FORM",
-              "type": "text"
+              "pieces": [
+                {
+                  "col": 0,
+                  "spans": [
+                    {
+                      "end": 27,
+                      "start": 0,
+                      "strong": true
+                    }
+                  ],
+                  "text": "DIRECT DEPOSIT SIGN-UP FORM"
+                }
+              ]
             }
           ],
-          "role": "page-header",
-          "type": "paragraph"
+          "type": "spatial"
         },
         {
           "anchor": "p1:b7",
@@ -115,36 +226,34 @@ source: crates/rezzer/tests/corpus.rs
           "anchor": "p1:b9",
           "inlines": [
             {
-              "text": "To sign up for Direct Deposit, the payee is to read the back of this form",
+              "text": "To sign up for Direct Deposit, the payee is to read the back of this form and fill in the information requested in Sections 1 and 2. Then take or mail this form to the financial institution.  The financial institution will verify the information in Sections 1 and 2, and will complete Section 3. The completed form will be returned to the Government agency identified below.",
               "type": "text"
             }
           ],
-          "role": "page-header",
           "type": "paragraph"
         },
         {
           "anchor": "p1:b10",
           "inlines": [
             {
-              "text": "and fill in the information requested in Sections 1 and 2. Then take or",
+              "text": "A separate form must be completed for each type of payment to be sent by Direct Deposit.",
               "type": "text"
             }
           ],
-          "role": "page-header",
           "type": "paragraph"
         },
         {
           "anchor": "p1:b11",
           "inlines": [
             {
-              "text": "mail this form to the financial institution.  The financial institution will",
+              "text": "The claim number and type of payment are printed on Government",
               "type": "text"
             }
           ],
           "role": "page-header",
           "type": "paragraph"
         },
-        "<43 more items>"
+        "<40 more items>"
       ],
       "kind": "page",
       "type": "section"
@@ -225,15 +334,27 @@ source: crates/rezzer/tests/corpus.rs
         },
         {
           "anchor": "p2:b6",
-          "inlines": [
+          "grid": {
+            "col": 36
+          },
+          "lines": [
             {
-              "strong": true,
-              "text": "DIRECT DEPOSIT SIGN-UP FORM",
-              "type": "text"
+              "pieces": [
+                {
+                  "col": 0,
+                  "spans": [
+                    {
+                      "end": 27,
+                      "start": 0,
+                      "strong": true
+                    }
+                  ],
+                  "text": "DIRECT DEPOSIT SIGN-UP FORM"
+                }
+              ]
             }
           ],
-          "role": "page-header",
-          "type": "paragraph"
+          "type": "spatial"
         },
         {
           "anchor": "p2:b7",
@@ -261,36 +382,34 @@ source: crates/rezzer/tests/corpus.rs
           "anchor": "p2:b9",
           "inlines": [
             {
-              "text": "To sign up for Direct Deposit, the payee is to read the back of this form",
+              "text": "To sign up for Direct Deposit, the payee is to read the back of this form and fill in the information requested in Sections 1 and 2. Then take or mail this form to the financial institution.  The financial institution will verify the information in Sections 1 and 2, and will complete Section 3. The completed form will be returned to the Government agency identified below.",
               "type": "text"
             }
           ],
-          "role": "page-header",
           "type": "paragraph"
         },
         {
           "anchor": "p2:b10",
           "inlines": [
             {
-              "text": "and fill in the information requested in Sections 1 and 2. Then take or",
+              "text": "A separate form must be completed for each type of payment to be sent by Direct Deposit.",
               "type": "text"
             }
           ],
-          "role": "page-header",
           "type": "paragraph"
         },
         {
           "anchor": "p2:b11",
           "inlines": [
             {
-              "text": "mail this form to the financial institution.  The financial institution will",
+              "text": "The claim number and type of payment are printed on Government",
               "type": "text"
             }
           ],
           "role": "page-header",
           "type": "paragraph"
         },
-        "<43 more items>"
+        "<40 more items>"
       ],
       "kind": "page",
       "type": "section"
@@ -371,15 +490,27 @@ source: crates/rezzer/tests/corpus.rs
         },
         {
           "anchor": "p3:b6",
-          "inlines": [
+          "grid": {
+            "col": 36
+          },
+          "lines": [
             {
-              "strong": true,
-              "text": "DIRECT DEPOSIT SIGN-UP FORM",
-              "type": "text"
+              "pieces": [
+                {
+                  "col": 0,
+                  "spans": [
+                    {
+                      "end": 27,
+                      "start": 0,
+                      "strong": true
+                    }
+                  ],
+                  "text": "DIRECT DEPOSIT SIGN-UP FORM"
+                }
+              ]
             }
           ],
-          "role": "page-header",
-          "type": "paragraph"
+          "type": "spatial"
         },
         {
           "anchor": "p3:b7",
@@ -407,36 +538,34 @@ source: crates/rezzer/tests/corpus.rs
           "anchor": "p3:b9",
           "inlines": [
             {
-              "text": "To sign up for Direct Deposit, the payee is to read the back of this form",
+              "text": "To sign up for Direct Deposit, the payee is to read the back of this form and fill in the information requested in Sections 1 and 2. Then take or mail this form to the financial institution.  The financial institution will verify the information in Sections 1 and 2, and will complete Section 3. The completed form will be returned to the Government agency identified below.",
               "type": "text"
             }
           ],
-          "role": "page-header",
           "type": "paragraph"
         },
         {
           "anchor": "p3:b10",
           "inlines": [
             {
-              "text": "and fill in the information requested in Sections 1 and 2. Then take or",
+              "text": "A separate form must be completed for each type of payment to be sent by Direct Deposit.",
               "type": "text"
             }
           ],
-          "role": "page-header",
           "type": "paragraph"
         },
         {
           "anchor": "p3:b11",
           "inlines": [
             {
-              "text": "mail this form to the financial institution.  The financial institution will",
+              "text": "The claim number and type of payment are printed on Government",
               "type": "text"
             }
           ],
           "role": "page-header",
           "type": "paragraph"
         },
-        "<43 more items>"
+        "<40 more items>"
       ],
       "kind": "page",
       "type": "section"
@@ -527,33 +656,103 @@ source: crates/rezzer/tests/corpus.rs
         },
         {
           "anchor": "p4:b7",
-          "inlines": [
+          "grid": {
+            "col": 5
+          },
+          "lines": [
             {
-              "strong": true,
-              "text": "A",
-              "type": "text"
+              "pieces": [
+                {
+                  "col": 0,
+                  "spans": [
+                    {
+                      "end": 1,
+                      "start": 0,
+                      "strong": true
+                    }
+                  ],
+                  "text": "A"
+                },
+                {
+                  "col": 4,
+                  "text": "Be sure that payee’s name is written exactly as it ap-"
+                }
+              ]
             },
             {
-              "text": " Be sure that payee’s name is written exactly as it ap-pears on the check.  Be sure current address is shown.",
-              "type": "text"
+              "pieces": [
+                {
+                  "col": 4,
+                  "text": "pears on the check.  Be sure current address is shown."
+                }
+              ]
             }
           ],
-          "type": "paragraph"
+          "type": "spatial"
+        },
+        {
+          "alt": "text kept as laid out at p4:b7, box 56, 496 to 282, 514",
+          "anchor": "p4:m1",
+          "asset": "page-4-region-1",
+          "type": "media"
         },
         {
           "anchor": "p4:b8",
-          "inlines": [
+          "grid": {
+            "col": 5
+          },
+          "lines": [
             {
-              "strong": true,
-              "text": "C",
-              "type": "text"
+              "pieces": [
+                {
+                  "col": 0,
+                  "spans": [
+                    {
+                      "end": 1,
+                      "start": 0,
+                      "strong": true
+                    }
+                  ],
+                  "text": "C"
+                },
+                {
+                  "col": 4,
+                  "text": "Claim numbers and suffixes are printed here on checks"
+                }
+              ]
             },
             {
-              "text": " Claim numbers and suffixes are printed here on checks beneath the date for the type of payment shown here. Check the Green Book for the location of prefixes and suffixes for other types of payments.",
-              "type": "text"
+              "pieces": [
+                {
+                  "col": 4,
+                  "text": "beneath the date for the type of payment shown here."
+                }
+              ]
+            },
+            {
+              "pieces": [
+                {
+                  "col": 4,
+                  "text": "Check the Green Book for the location of prefixes and"
+                }
+              ]
+            },
+            {
+              "pieces": [
+                {
+                  "col": 4,
+                  "text": "suffixes for other types of payments."
+                }
+              ]
             }
           ],
-          "type": "paragraph"
+          "type": "spatial"
+        },
+        {
+          "alt": "text kept as laid out at p4:b8, box 56, 455 to 282, 489",
+          "anchor": "p4:m2",
+          "asset": "page-4-region-2",
+          "type": "media"
         },
         {
           "anchor": "p4:b9",
@@ -570,32 +769,7 @@ source: crates/rezzer/tests/corpus.rs
           ],
           "type": "paragraph"
         },
-        {
-          "anchor": "p4:b10",
-          "inlines": [
-            {
-              "text": "15-51",
-              "type": "text"
-            }
-          ],
-          "type": "paragraph"
-        },
-        {
-          "anchor": "p4:b11",
-          "inlines": [
-            {
-              "strong": true,
-              "text": "United States Treasury",
-              "type": "text"
-            },
-            {
-              "text": " 000",
-              "type": "text"
-            }
-          ],
-          "type": "paragraph"
-        },
-        "<14 more items>"
+        "<22 more items>"
       ],
       "kind": "page",
       "type": "section"
@@ -905,6 +1079,81 @@ source: crates/rezzer/tests/corpus.rs
       }
     ]
   },
+  "losses": [
+    {
+      "location": "p1",
+      "severity": "info",
+      "what": "Possible table on page 1 not rebuilt (reason: most of its cells are empty)",
+      "why": "uncertain"
+    },
+    {
+      "location": "p1:b6",
+      "severity": "info",
+      "what": "the region at p1:b6 is kept as laid out, line by line: it reads as header band or as heading about equally (900 and 850 of 1000)",
+      "why": "uncertain"
+    },
+    {
+      "location": "p1:b19",
+      "severity": "info",
+      "what": "the region at p1:b19 is kept as laid out, line by line: no region type has clear evidence for it",
+      "why": "uncertain"
+    },
+    {
+      "location": "p1:b22",
+      "severity": "info",
+      "what": "the region at p1:b22 is kept as laid out, line by line: no region type has clear evidence for it",
+      "why": "uncertain"
+    },
+    {
+      "location": "p1:b25",
+      "severity": "info",
+      "what": "the region at p1:b25 is kept as laid out, line by line: no region type has clear evidence for it",
+      "why": "uncertain"
+    },
+    {
+      "location": "p1:b26",
+      "severity": "info",
+      "what": "the region at p1:b26 is kept as laid out, line by line: no region type has clear evidence for it",
+      "why": "uncertain"
+    },
+    {
+      "location": "p1:b27",
+      "severity": "info",
+      "what": "the region at p1:b27 is kept as laid out, line by line: no region type has clear evidence for it",
+      "why": "uncertain"
+    },
+    {
+      "location": "p1:b30",
+      "severity": "info",
+      "what": "the region at p1:b30 is kept as laid out, line by line: it reads as table, but most of its cells are empty",
+      "why": "uncertain"
+    },
+    {
+      "location": "p1:b31",
+      "severity": "info",
+      "what": "the region at p1:b31 is kept as laid out, as text in its columns: no region type has clear evidence for it",
+      "why": "uncertain"
+    },
+    {
+      "location": "p1:b32",
+      "severity": "info",
+      "what": "the region at p1:b32 is kept as laid out, as text in its columns: no region type has clear evidence for it",
+      "why": "uncertain"
+    },
+    {
+      "location": "p1:b33",
+      "severity": "info",
+      "what": "the region at p1:b33 is kept as laid out, as text in its columns: no region type has clear evidence for it",
+      "why": "uncertain"
+    },
+    {
+      "location": "p1:b34",
+      "severity": "info",
+      "what": "the region at p1:b34 is kept as laid out, line by line: no region type has clear evidence for it",
+      "why": "uncertain"
+    },
+    "<39 more items>"
+  ],
   "model_version": 1,
   "overview": {
     "facts": [
@@ -961,6 +1210,249 @@ source: crates/rezzer/tests/corpus.rs
     },
     "title": "Standard Form 1199A, Direct Deposit Sign-up Form, June 1987"
   },
+  "regions": [
+    {
+      "anchor": "p1",
+      "bounds": [
+        39.25,
+        565.52,
+        301.86,
+        581.79
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        39.25,
+        540.63,
+        303.09,
+        556.13
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        38.31,
+        516.99,
+        302.16,
+        532.99
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        131.56,
+        493.21,
+        302.45,
+        506.5
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        40.84,
+        469.13,
+        302.67,
+        482.13
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        93.18,
+        432.9,
+        187.72,
+        449.35
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        219.97,
+        432.9,
+        303.41,
+        447.45
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        450.12,
+        579.52,
+        465.26,
+        593.59
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        515.97,
+        579.57,
+        531.12,
+        594.3
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        310.98,
+        545.35,
+        571.18,
+        566.28
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        314.93,
+        521.46,
+        322.29,
+        528.8
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    {
+      "anchor": "p1",
+      "bounds": [
+        314.93,
+        511.16,
+        322.28,
+        518.8
+      ],
+      "certainty": "exact",
+      "evidence": [
+        {
+          "detail": "paragraph",
+          "id": "given.file_states",
+          "kind": "rule"
+        }
+      ],
+      "kind": "paragraph",
+      "page": 1,
+      "score": 1000
+    },
+    "<260 more items>"
+  ],
   "source": {
     "detection": {
       "confidence": "certain",

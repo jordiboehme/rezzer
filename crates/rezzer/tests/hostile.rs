@@ -1453,7 +1453,7 @@ fn objstm_bomb_is_bounded() {
         losses(&result)
     );
     // The readings were measured once (2026-10-27). They come from the PDF reader: measure
-    // them again after plan 6 merges.
+    // them again when the PDF reader changes.
     assert_readings(reads, 68);
     assert!(took < SAFETY, "took {took:?}");
     assert_rss_bounded("objstm_bomb_is_bounded");
@@ -1503,7 +1503,7 @@ fn content_stream_bomb_is_bounded() {
     );
     assert!(result.markdown_pages.join("").contains("The plain page."));
     // The readings were measured once (2026-10-27). They come from the PDF reader: measure
-    // them again after plan 6 merges.
+    // them again when the PDF reader changes.
     assert_readings(reads, 122);
     assert!(took < SAFETY, "took {took:?}");
     assert_rss_bounded("content_stream_bomb_is_bounded");
@@ -1555,7 +1555,7 @@ fn page_tree_cycle_is_partial() {
         losses(&result)
     );
     // The readings were measured once (2026-10-27). They come from the PDF reader: measure
-    // them again after plan 6 merges.
+    // them again when the PDF reader changes.
     assert_readings(reads, 13);
     assert!(took < SAFETY, "took {took:?}");
     assert_rss_bounded("page_tree_cycle_is_partial");
@@ -1657,15 +1657,19 @@ fn hundred_thousand_pages_stop_in_time() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("pages.pdf");
     many_pages(&path, PAGES, false);
-    // READS and READ: measured once with this step, printed below (2026-10-27, macOS,
-    // debug). Listing the pages takes 200,255 readings; the text stops at three quarters of
-    // the limit, at 208,333 readings: a margin of 8,078 readings (4 % of the listing) for the
-    // pages. A larger margin reads more pages, and their memory takes the max RSS toward its
-    // 512 MiB bound (7.1 us: 5,508 pages, 508 MiB; this step: 464 to 471 MiB). The PDF
-    // reader changes in plan 6: measure these numbers again after it merges.
-    const STEP: Duration = Duration::from_nanos(7_200);
-    const READS: u64 = 224_501;
-    const READ: usize = 4_041;
+    // READS and READ: measured once with this step, printed below (2026-11-14, macOS,
+    // debug). Listing the pages takes 200,255 readings; the text stops when the time left
+    // is the time kept for what follows it (eleven sixteenths of the time the text took so
+    // far, see `layout_time`, `plain_time` and `end_time` in the PDF reader). A longer limit reads more
+    // pages, and their memory takes the max RSS toward its 512 MiB bound (472 MiB at 1,948
+    // pages, 493 at 3,025, 524 at 4,060: the plain lines take few readings, so more of the
+    // object layer of the 100,000 pages is read after them than the layout was once faster), so the step
+    // keeps the pages read near 2,000. On a step clock the layout looks at
+    // the clock far more often for a page than the text does, so the time kept for it ends
+    // while the facts of the file are learned and the pages read are written as plain lines.
+    const STEP: Duration = Duration::from_nanos(9_670);
+    const READS: u64 = 206_127;
+    const READ: usize = 1_948;
     let limit = Duration::from_secs(2);
     let clock = Clock::steps(STEP);
     let p = pipeline_with_clock(limit, clock.clone());
@@ -1701,12 +1705,15 @@ fn hundred_thousand_pages_stop_in_time() {
         .collect();
     assert_eq!(
         timed,
-        [format!(
-            "Limit p{} text of pages {} to {PAGES} not read: the time limit was near, and the \
-             pages read before are laid out in the time left",
-            read + 1,
-            read + 1
-        )]
+        [
+            plain_lines_loss(1, read),
+            format!(
+                "Limit p{} text of pages {} to {PAGES} not read: the time limit was near, and \
+                 the pages read before are written in the time left",
+                read + 1,
+                read + 1
+            )
+        ]
     );
     assert_rss_bounded("hundred_thousand_pages_stop_in_time");
 }
@@ -1719,14 +1726,17 @@ fn cache_entries(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     )
 }
 
-#[test]
-fn a_text_cut_near_the_time_limit_is_not_cached() {
-    // The PDF reader stops its text at three quarters of the time limit, before the budget's
-    // own time is over. That cut depends on the machine's load, so it is not cached.
-    const PAGES: usize = 20_000;
+/// Reads `pages` pages of [`many_pages`] with the PDF reader under a time limit of 1 s on a
+/// step clock of `step`, with the cache on. Returns the result, the clock readings and the
+/// files in the cache. `name` goes into the line printed for measuring.
+fn read_near_the_limit(
+    name: &str,
+    pages: usize,
+    step: Duration,
+) -> (RunResult, u64, Vec<std::path::PathBuf>) {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("pages.pdf");
-    many_pages(&path, PAGES, false);
+    many_pages(&path, pages, false);
     let cache = dir.path().join("cache");
     let mut config = Config {
         cache: true,
@@ -1736,21 +1746,135 @@ fn a_text_cut_near_the_time_limit_is_not_cached() {
     config.limits.max_time = Duration::from_secs(1);
     let mut registry = Registry::new();
     registry.register(Box::new(rezzer_read_pdf::PdfReader));
-    let p = Pipeline::new(config, registry);
+    let clock = Clock::steps(step);
+    let p = Pipeline::new(config, registry).with_clock(clock.clone());
+    let start = Instant::now();
     let result = p.run_path(&path, &markdown_request());
-    let doc = result.document.as_ref().unwrap();
-    let cut = doc
-        .losses
-        .iter()
-        .find(|l| l.what.contains("the time limit was near"))
-        .unwrap_or_else(|| panic!("{:?}", losses(&result)));
-    assert_eq!(cut.why, LossReason::Limit);
-    assert_eq!(result.completeness, Completeness::Partial);
+    let took = start.elapsed();
+    let reads = clock.reads();
+    // The read ends inside its time limit, the pages written as plain lines too: on this
+    // clock the time is the readings, and all of them are before the limit of 1 s.
     assert!(
-        cache_entries(&cache).is_empty(),
-        "{:?}",
-        cache_entries(&cache)
+        step * u32::try_from(reads).expect("few readings") <= Duration::from_secs(1),
+        "{name}: {reads} readings of {step:?}"
     );
+    eprintln!(
+        "{name}: {:?}, {reads} clock readings, {} pages read in {took:?}: {:?}",
+        result.completeness,
+        pages_with_text(&result),
+        losses(&result)
+    );
+    assert!(took < SAFETY, "took {took:?}");
+    (result, reads, cache_entries(&cache))
+}
+
+/// The losses of `result` that name the time limit.
+fn time_losses(result: &RunResult) -> Vec<String> {
+    losses(result)
+        .into_iter()
+        .filter(|l| l.contains("time limit"))
+        .collect()
+}
+
+/// The loss of the pages `first` to `last` that the time left no layout for. With page 1
+/// among them it names the title and the date, which are found on page 1 as it is laid out.
+fn plain_lines_loss(first: usize, last: usize) -> String {
+    let head = if first == 1 {
+        "; the title and the date of page 1 are not looked for either"
+    } else {
+        ""
+    };
+    format!(
+        "Limit p{first} pages {first} to {last} are written as plain lines, not laid out: the \
+         time limit was near; headings, lists, tables and columns are not looked for there, \
+         pictures are not listed and links are not attached{head}"
+    )
+}
+
+#[test]
+fn a_text_cut_near_the_time_limit_is_not_cached() {
+    // The PDF reader stops its text before the budget's own time is over: it keeps the time
+    // to lay out the pages read (half the time their text took), to write as plain lines
+    // those the layout does not get to (an eighth of it) and to end the read (a sixteenth
+    // of it). That cut depends on the machine's
+    // load, so it is not cached.
+    //
+    // The time runs on a step clock, so the work decides the outcome, not the machine. A
+    // step clock counts the looks at the clock, not the time between them: the layout looks
+    // far more often for a page than the text does (the facts of the file alone 3 times a
+    // page, the text 2), so here the time kept for the layout ends while the facts of the
+    // file are learned, and every page read is written as plain lines. None is dropped.
+    //
+    // READS: measured once with this step (2026-11-14, macOS, debug), as
+    // [`read_near_the_limit`] prints them. Listing the 20,000 pages takes 40,000 readings and
+    // the text about 2 a page. The text stops after 4,147 pages, and the read ends at 52,565
+    // readings; the time limit is at 54,054.
+    const STEP: Duration = Duration::from_nanos(18_500);
+    const READS: u64 = 52_565;
+    const PAGES: usize = 20_000;
+    let (result, reads, cached) = read_near_the_limit("text cut near the limit", PAGES, STEP);
+    assert_readings(reads, READS);
+    let read = pages_with_text(&result);
+    assert!(read > 0 && read < PAGES, "{read} pages with text");
+    assert_eq!(
+        time_losses(&result),
+        [
+            plain_lines_loss(1, read),
+            format!(
+                "Limit p{} text of pages {} to {PAGES} not read: the time limit was near, and \
+                 the pages read before are written in the time left",
+                read + 1,
+                read + 1
+            )
+        ]
+    );
+    assert_eq!(result.completeness, Completeness::Partial);
+    assert!(cached.is_empty(), "{cached:?}");
+}
+
+#[test]
+fn a_layout_stopped_by_the_time_limit_writes_the_other_pages_as_plain_lines() {
+    // The text of all 2,000 pages is read, and their layout takes more than the time left:
+    // it stops before a page, with the time kept to write the other pages as plain lines.
+    // Every page keeps its text (once the pages past the stop were dropped: 4,972
+    // pages read, the layout stopped at page 1,282), one loss names the pages written as
+    // plain lines, and the result is not cached. This is what a busy machine does to a file
+    // that would fit its time.
+    //
+    // READS: measured once with this step (2026-11-14, macOS, debug), as
+    // [`read_near_the_limit`] prints them: listing the pages takes 4,000 readings, the text
+    // about 2 a page, the facts of the file 3 a page and the layout about 13 a page. The
+    // layout stops before page 1,164, and the read ends at 26,832 readings; the time limit
+    // is at 27,027.
+    const STEP: Duration = Duration::from_nanos(37_000);
+    const READS: u64 = 26_832;
+    const PAGES: usize = 2_000;
+    let (result, reads, cached) = read_near_the_limit("layout stopped by the limit", PAGES, STEP);
+    assert_readings(reads, READS);
+    assert_eq!(pages_with_text(&result), PAGES);
+    let md = result.markdown_pages.join("");
+    assert_eq!(
+        md.matches("Line 39 of a page").count(),
+        PAGES,
+        "every page keeps its last line once"
+    );
+    let losses = time_losses(&result);
+    let first = match losses.as_slice() {
+        [one] => one
+            .strip_prefix("Limit p")
+            .and_then(|l| l.split(' ').next())
+            .and_then(|n| n.parse::<usize>().ok())
+            .unwrap_or_else(|| panic!("{losses:?}")),
+        _ => panic!("{losses:?}"),
+    };
+    // Some pages are laid out and some are not.
+    assert!(
+        first > 100 && first < PAGES - 100,
+        "plain from page {first}"
+    );
+    assert_eq!(losses, [plain_lines_loss(first, PAGES)]);
+    assert_eq!(result.completeness, Completeness::Partial);
+    assert!(cached.is_empty(), "{cached:?}");
 }
 
 #[test]
@@ -1888,7 +2012,7 @@ fn image_pixel_bomb_skips_render() {
     let written = std::fs::read_dir(&bundle).map(|d| d.count()).unwrap_or(0);
     assert_eq!(written, 0, "no render is written");
     // The readings were measured once (2026-10-27). They come from the PDF reader: measure
-    // them again after plan 6 merges.
+    // them again when the PDF reader changes.
     assert_readings(reads, 20);
     assert!(took < SAFETY, "took {took:?}");
     assert_rss_bounded("image_pixel_bomb_skips_render");
@@ -1925,7 +2049,7 @@ fn deep_array_nesting_stops_at_depth() {
     // The page does not depend on the deep object and is read.
     assert!(result.markdown_pages.join("").contains("Before the bomb."));
     // The readings were measured once (2026-10-27). They come from the PDF reader: measure
-    // them again after plan 6 merges.
+    // them again when the PDF reader changes.
     assert_readings(reads, 18);
     assert!(took < SAFETY, "took {took:?}");
     assert_rss_bounded("deep_array_nesting_stops_at_depth");
@@ -1993,7 +2117,7 @@ fn huge_script_is_bounded() {
     assert!(md.contains("Before the bomb."));
     assert!(!md.contains("app.alert("));
     // The readings were measured once (2026-10-27). They come from the PDF reader: measure
-    // them again after plan 6 merges.
+    // them again when the PDF reader changes.
     assert_readings(reads, 123);
     assert!(took < SAFETY, "took {took:?}");
     assert_rss_bounded("huge_script_is_bounded");

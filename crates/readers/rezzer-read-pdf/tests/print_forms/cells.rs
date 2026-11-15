@@ -16,7 +16,7 @@ pub(crate) const ADDRESS_CELLS: [(&str, &str); 3] = [
 pub(crate) const LABEL_CELLS: [(&str, &str); 3] =
     [("Name", "Muster"), ("Ort", "Musterstadt"), ("Nr", "4711")];
 
-/// A row of three fields between rules (task 15b part 2 re-review, its probe): in each cell a
+/// A row of three fields between rules: in each cell a
 /// first line of `size` over a second line `step` times as large, in `font`.
 pub(crate) fn address_cells(
     cells: [(&str, &str); 3],
@@ -43,7 +43,7 @@ pub(crate) fn address_cells(
     read(&three_font_page(&c))
 }
 
-/// Task 15b part 2 re-review (ruling P6-X): a field cell of two address lines, the second a
+/// A field cell of two address lines, the second a
 /// little larger than the first (less than a size step), is an address, not a label over its
 /// value: no pair, both lines read in order. A label over its value at the same sizes pairs
 /// (but at 6 points 1.04 times, which the half-point style of a run does not tell apart).
@@ -62,7 +62,7 @@ fn a_cell_of_two_address_lines_is_no_pair() {
                     .map(|r| r.join(": "))
                     .collect();
                 let text = all_text(&out);
-                // At 6 points 1.04 times is one style of run (part 2d): no pair, nothing to say.
+                // At 6 points 1.04 times is one style of run: no pair, nothing to say.
                 let one_style = step < 1.05 && size < 8.0;
                 if !one_style
                     && !out
@@ -81,7 +81,7 @@ fn a_cell_of_two_address_lines_is_no_pair() {
                         wrong.push(format!("{at}: {e}"));
                     }
                 }
-                // At 6 points 1.04 times is under the half point a style tells (part 2d).
+                // At 6 points 1.04 times is under the half point a style tells.
                 if step < 1.05 && size < 8.0 {
                     continue;
                 }
@@ -154,7 +154,7 @@ pub(crate) fn cell_between_in(
     read(&three_font_page(&c))
 }
 
-/// Task 15b part 2c concern 3 ruling: a first line without a number over address lines pairs
+/// A first line without a number over address lines pairs
 /// as a label only on evidence: the label style of the fields beside it, or a colon at its
 /// end. Smaller than the labels beside it (`Muster GmbH`, `Erika Mustermann` over c/o and
 /// address, `Muster GmbH` over a PO box), it is no pair, and a loss says so; `Anschrift:` pairs.
@@ -221,13 +221,13 @@ fn a_name_over_an_address_pairs_only_on_evidence() {
     );
 }
 
-/// Task 15b part 2c review (Important 2 and 3, concern 4; ruling P6-X): a field cell whose lines
+/// A field cell whose lines
 /// are an address, between `Name` over `Muster` and `Nr` over `4711`, is left out of its row and
 /// a loss says so; the two other fields still pair. An address whose first line holds a number
 /// (a street, a PO box, a postcode over the country, `c/o`) is no pair at any size step; nor is
 /// a first line without one over address lines (a name, a company, the label `Anschrift`), even
-/// in the label style of the fields beside it: only a colon shows it to be a label (Task 15b part
-/// 2d fix round 2, ruling on I1, which ends the label-style half of the concern 3 ruling). Steps
+/// in the label style of the fields beside it: only a colon shows it to be a label.
+/// Steps
 /// 1.0625 to 1.25, sizes 6 to 14, both fonts.
 #[test]
 fn an_address_cell_is_left_out_of_its_row_and_said() {
@@ -310,7 +310,7 @@ pub(crate) struct Middle<'a> {
 
 /// How the three cells of [`three_cells`] are drawn: boxes in a row, boxes in a column, a
 /// strip between two rules with no rule between its cells, or a strip between two rules with
-/// dividers between its cells and none at its ends (part 2e-1, item 2).
+/// dividers between its cells and none at its ends.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Cells {
     Row,
@@ -322,6 +322,11 @@ pub(crate) enum Cells {
 /// Three cells, `Name` over `Beispiel`, the cell `m`, and `Nr` over `4711`, the labels in
 /// `font` at `size`, the values a `step` larger: drawn as `how` says.
 pub(crate) fn three_cells(m: Middle, size: f32, step: f32, font: &str, how: Cells) -> ReadOutcome {
+    read(&three_cells_file(m, size, step, font, how))
+}
+
+/// The file [`three_cells`] reads.
+pub(crate) fn three_cells_file(m: Middle, size: f32, step: f32, font: &str, how: Cells) -> Vec<u8> {
     let value = size * step;
     let k = size / 8.0;
     let mut c = String::from("0 0 0 RG 0.5 w\n");
@@ -373,7 +378,7 @@ pub(crate) fn three_cells(m: Middle, size: f32, step: f32, font: &str, how: Cell
             c += &shown(font, value, x + 4.0 * k, low + 1.2 * value * l as f32, v);
         }
     }
-    read(&three_font_page(&c))
+    three_font_page(&c)
 }
 
 /// What the middle cell of [`three_cells`] must read as.
@@ -497,7 +502,7 @@ pub(crate) fn middle_matrix(cases: &[Case], hows: &[Cells]) -> Vec<String> {
     wrong
 }
 
-/// Task 15b part 2e-4 (item 9, list line 9): a numbered label over a line of codes and numbers
+/// A numbered label over a line of codes and numbers
 /// alone (`Konto 1` over `DE00 1234 5678`, `Feld 12` over `4711 0815`) between `Name` over
 /// `Muster` and `Nr` over `4711` is a label and its value, no address: an address's line under
 /// its street holds a word (a town). All three fields pair. `Feld 12` or `Kostenstelle 1` over
@@ -539,11 +544,11 @@ fn a_numbered_label_over_a_line_of_codes_pairs() {
     );
 }
 
-/// Task 15b part 2d item 4 (ruling P6-X): the font family is part of a label's style. A name
+/// The font family is part of a label's style. A name
 /// over an address at the labels' size in another family than the labels beside it is no
-/// label: it pairs with nothing and a loss names it. Since fix round 2 (ruling on I1) the same
+/// label: it pairs with nothing and a loss names it. The same
 /// holds in the labels' own family: only a colon makes such a name a label. Boxes in a row and
-/// in a column, and a strip between two rules (part 2e-1: also with dividers between its cells
+/// in a column, and a strip between two rules (also with dividers between its cells
 /// and none at its ends).
 #[test]
 fn a_name_in_another_font_family_is_no_label() {
@@ -585,7 +590,7 @@ fn a_name_in_another_font_family_is_no_label() {
     );
 }
 
-/// Task 15b part 2d item 1 (ruling P6-X): a bold title in a drawn box between boxed fields, of
+/// A bold title in a drawn box between boxed fields, of
 /// one line or two at the labels' size, the values' size or larger, in a row of boxes or a
 /// column of them: the title is a heading of its own, and the fields on both sides keep their
 /// pairs. Sizes 6 to 14, steps 1.0625 to 1.25, both data fonts.
@@ -640,7 +645,7 @@ fn a_bold_title_in_a_box_between_fields_is_a_heading_of_its_own() {
     );
 }
 
-/// Task 15b part 2d item 2 (ruling P6-X): a boxed cell between boxed fields whose first line
+/// A boxed cell between boxed fields whose first line
 /// has the values' size (a name over an address, a value with no label, two lines of one
 /// style) is left out of its row and a loss names it; `Name: Beispiel` and `Nr: 4711` pair, in
 /// a row of boxes and in a column. (A size 0.0 below is the values' size.)
@@ -682,12 +687,12 @@ fn a_box_at_the_value_size_is_left_out_of_its_row_and_said() {
     );
 }
 
-/// Task 15b part 2d item 3 (ruling P6-X): a strip of three fields between two rules with no
+/// A strip of three fields between two rules with no
 /// rule between them, its middle cell's first line a little smaller than the labels beside
 /// it, at the values' size, or a bold title: the cells are read apart, never line by line
 /// across them; `Name: Beispiel` and `Nr: 4711` pair; a name over an address pairs only on a
-/// colon (fix round 2, ruling on I1), a label over a value by its size, a title is in no pair,
-/// and else a loss names it. Part 2e-1 (item 2): so does a strip with dividers between its
+/// colon, a label over a value by its size, a title is in no pair,
+/// and else a loss names it. So does a strip with dividers between its
 /// cells and none at its ends.
 #[test]
 fn a_strip_without_dividers_reads_its_cells_apart() {
@@ -807,7 +812,7 @@ pub(crate) fn open_strip_in(
 }
 
 /// [`open_strip_in`], with `divided` a divider between each two cells and none at the strip's
-/// ends (part 2e-1, item 2).
+/// ends.
 pub(crate) fn strip_in(
     cells: &[StripCell],
     size: f32,
@@ -843,17 +848,16 @@ pub(crate) fn strip_in(
     read(&three_font_page(&c))
 }
 
-/// Task 15b part 2d fix round 2 (I2, ruling on concern 1): every way a strip without dividers
+/// Every way a strip without dividers
 /// is refused or keeps a cell out of its pairs reads cell by cell, each cell's lines together,
 /// never one line across two cells: a value under no label (`UNDER_NONE`), one field beside a
 /// value alone (`LONE`), a caption beside a value, and a value-size head beside a label with
-/// nothing under it (it may be that label's value, so the two read as one cell). Fix round 4:
-/// so do frames with a cell of two lines (a value of two lines, a name over a street at the
+/// nothing under it (it may be that label's value, so the two read as one cell). So do frames with a cell of two lines (a value of two lines, a name over a street at the
 /// values' size), two named addresses side by side, and labels of the values' size over values
 /// in another font with an empty field; only totals (rows of a label and an amount) are left to
 /// the table pass. Checked
 /// by the spans of the drawn texts. Sizes 6 to 14, steps 1.125 and 1.25, both data fonts.
-/// Part 2e-1 (items 2 and 4): each strip also with dividers between its cells and none at its
+/// Each strip also with dividers between its cells and none at its
 /// ends, which read as the strip without them (they read no field and said nothing, and
 /// labels at the values' size read line by line across the dividers); and a name over an
 /// address beside a value of two lines, every cell left out, whose lines line up as if they
@@ -1015,12 +1019,12 @@ fn refused_strips_read_cell_by_cell() {
     );
 }
 
-/// Task 15b part 2e-2 (item 3, part 2e-1 concern 7; ruling P6-X): cells of a row between rules
+/// Cells of a row between rules
 /// with dividers whose lines line up by chance (first pieces at one start, last pieces ending
 /// in one place) are no rows of totals unless the column that ends in one place holds a number
 /// on every line: a street over its town, or a name over a firm, beside a firm over a street
 /// read cell by cell, never line by line across the cells, and a loss says so. Sizes 6 to 14,
-/// steps 1.125 and 1.25, both data fonts. Part 2e-4 (item 1, P6-X): the same cells between two
+/// steps 1.125 and 1.25, both data fonts. The same cells between two
 /// rules with no divider (only the gutter parts them) read line by line across the cells with
 /// no loss. A street over its town shows that a column's lines go together: the cells read
 /// whole, and a loss says so. With no such evidence (a name over a firm beside a firm over a
@@ -1055,7 +1059,7 @@ fn cells_lining_up_by_chance_are_no_totals() {
             ],
             false,
         ),
-        // Fix round 1 (C1): labels beside values with digits, with and without colons, and two
+        // Labels beside values with digits, with and without colons, and two
         // rows of a table of three columns: no street over its town in a column of its own
         // beside no labels, so they read line by line as at 98c7309.
         (
@@ -1074,7 +1078,7 @@ fn cells_lining_up_by_chance_are_no_totals() {
             ],
             false,
         ),
-        // Fix round 2 (C1-r): labels of three tokens or more, abbreviated or with a slash.
+        // Labels of three tokens or more, abbreviated or with a slash.
         (
             "slash labels",
             &[
@@ -1186,15 +1190,15 @@ fn cells_lining_up_by_chance_are_no_totals() {
     );
 }
 
-/// Task 15b part 2d item 3 (ruling P6-X), beyond one odd cell between two labels: strips of
+/// Strips of
 /// two to four cells with a name a little smaller than the labels over an address first, last,
 /// in the middle or twice, beside labels over their values. Each cell pairs right (its label
 /// over its lines) or a loss names it; the cells marked to pair do; no block that is no table
-/// holds words of two cells. Fix round 1 (rulings on concerns 1 and 3): one field beside the
+/// holds words of two cells. One field beside the
 /// name pairs only when a colon ends its label, else it is refused, and the refused strip reads
-/// cell by cell. Fix round 2 (I1): a smaller label that pairs by its size gives a name beside
-/// it no label style to pair by. Sizes 6 to 14, steps 1.0625 to 1.25, both data fonts. Part
-/// 2e-1 (item 2): each strip also with dividers between its cells and none at its ends.
+/// cell by cell. A smaller label that pairs by its size gives a name beside
+/// it no label style to pair by. Sizes 6 to 14, steps 1.0625 to 1.25, both data fonts.
+/// Each strip also with dividers between its cells and none at its ends.
 #[test]
 fn strips_of_two_to_four_cells_read_their_cells_apart() {
     const NAME: StripCell = ("Muster GmbH", 0.9, &["Musterweg 1", "12345 Musterstadt"]);
@@ -1287,10 +1291,10 @@ fn strips_of_two_to_four_cells_read_their_cells_apart() {
     );
 }
 
-/// Task 15b part 2d item 3 (ruling P6-X: never silent): a strip whose cells are not clear (the
+/// A strip whose cells are not clear (the
 /// address under a smaller name runs on under the next label) and whose text is in three
-/// styles is not read as fields, and a loss names its heads; no pair is made. Fix round 1
-/// (ruling on concern 1): its text is read cell by cell. Fix round 2 (I5, by the spans of the
+/// styles is not read as fields, and a loss names its heads; no pair is made. The cells are not clear.
+/// Its text is read cell by cell (by the spans of the
 /// drawn texts): the long line runs on into the next cell with no gap, so those two cells read
 /// as one, which the loss speaks for; the first cell stands apart.
 #[test]
@@ -1358,7 +1362,24 @@ fn a_strip_in_three_styles_not_clear_is_said() {
     );
 }
 
-/// Task 15b part 2e-1 (item 2, part 2d review M2; ruling P6-X): boxes of fields whose labels
+/// Boxes of one style read box by box keep their text as it stands, with the reason of their
+/// loss in its regions.
+#[test]
+fn boxes_read_as_they_stand_keep_their_reason() {
+    let ort = Middle {
+        head: &["Ort"],
+        size: 1.0,
+        font: None,
+        lines: &["Musterstadt"],
+    };
+    let bytes = three_cells_file(ort, 10.0, 1.0, "F1", Cells::Row);
+    common::assert_every_run_in_one_region(&bytes);
+    for text in ["Beispiel", "Musterstadt", "4711"] {
+        common::assert_kept_with_reason(&bytes, text, "its text is of one style");
+    }
+}
+
+/// Boxes of fields whose labels
 /// and values are of one style (one size and font) are no pairs, and each box is read whole and
 /// alone: in a column the last line of one box and the first of the box under it are not one
 /// paragraph (`Beispiel Ort`). Boxes in a row and in a column, sizes 6 to 14, both data fonts;
@@ -1380,7 +1401,7 @@ fn boxes_of_one_style_read_box_by_box() {
                 if !read_tables(&out).is_empty() {
                     wrong.push(format!("{at}: pairs {:?}", read_tables(&out)));
                 }
-                // Part 2e-2 (item 2): that the boxes are read box by box is said, by their
+                // That the boxes are read box by box is said, by their
                 // first lines.
                 let said =
                     out.document.losses.iter().any(|l| {
@@ -1410,7 +1431,7 @@ fn boxes_of_one_style_read_box_by_box() {
     );
 }
 
-/// Task 15b part 2d fix round 2 (I6, M1; item 1's class): between boxed fields, a box with no
+/// Between boxed fields, a box with no
 /// text keeps the row (`Name: Beispiel` and `Nr: 4711` pair, nothing is said), and a box with a
 /// label alone in the labels' style at their place is an empty field (`Datum` with no value),
 /// in a row of boxes and in a column. Sizes 6 to 14, steps 1.125 and 1.25, both data fonts.
@@ -1465,7 +1486,7 @@ fn an_empty_box_or_an_empty_field_keeps_the_row() {
     );
 }
 
-/// Task 15b part 2e-5 (list line 7, `style_of` half-point key, ruling P6-X): a name over its
+/// A name over its
 /// department in one style, whose two sizes differ only by float noise on both sides of a
 /// half-point edge of the style key (8.749 and 8.751 points), is one size: it is no label over
 /// its value, and the fields beside it pair. A label is a size step smaller than its value
@@ -1513,7 +1534,7 @@ fn one_size_apart_by_float_noise_at_a_key_edge_is_no_label() {
     );
 }
 
-/// Task 15b part 2e-5 fix round 1 (review I1, ruling P6-X): three fields whose labels are
+/// Three fields whose labels are
 /// smaller than their values by less than a size step (`LABEL_STEP`): 3 %, 3.5 % or half a
 /// point. Such labels are no clear label style, so the fields need not pair; but a strip between
 /// two rules is never read line by line with its cells mixed (`Name Ort Nr` over `Beispiel

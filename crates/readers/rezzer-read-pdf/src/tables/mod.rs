@@ -11,16 +11,34 @@ mod banded;
 mod borderless;
 mod pairs;
 mod ruled;
-mod sections;
 mod side;
 mod tagged;
 
 use std::collections::HashMap;
 
+use layoutregions::Bounds;
+use layoutregions::segment::drawn::{self, Grids};
+use layoutregions::segment::{Segment, Segments, Source};
+
 use crate::layout::{Drawn, Flow, Run};
 
+/// The cells of tables, built in the engine (see `layoutregions::extract::table`).
+use layoutregions::extract::table::{
+    self, CONTENTS, CROSSES_LINES, EMPTY_CELLS, LONG_TEXT, MAX_SQUARES, NO_ROWS_AND_COLUMNS,
+    ROWS_ALIKE, RUNS_ON, TableOut, middle, numeric,
+};
+
+/// What the area of a page says against a table, and the captions next to one (see
+/// `layoutregions::extract::table::{area, caption}`).
+use layoutregions::extract::table::area::{
+    Area, MANY_COLUMNS, MAX_COLUMNS, ON_PICTURE, PAGE_FRAME, TINY_TEXT, dense,
+};
+use layoutregions::extract::table::caption::{
+    ByY, FIGURE_NEAR, MAX_CAPTION_SIZE, caption_inside, captions_near,
+};
+
 pub(crate) use pairs::{BoxTitle, Frame, box_pairs, field_frames, form_drawn, underlined_titles};
-pub(crate) use tagged::{Tables, tagged};
+pub(crate) use tagged::{MARK_RISE, MARK_SIZE, Tables, marks, tagged};
 
 /// A drawn line or rectangle, in points in the visible page box like the runs, `y` upward.
 /// A line has `x0 == x1` or `y0 == y1`; a rectangle is its bounding box.
@@ -74,6 +92,137 @@ pub(crate) struct Planned {
     /// The rule that found the table, when it is one the output states: a `found-by` note
     /// with this text stands before the first table of the page it found.
     pub found_by: Option<&'static str>,
+    /// What the table is as a region: `LabelValue` for a table of labels and values the
+    /// field reader made (drawn boxes, rows of fields, the totals of a column beside a
+    /// section), else `Table`.
+    pub kind: layoutregions::Kind,
+    /// The ids of the runs the detector took for it (see [`Flow::ids`]), its caption and
+    /// additions too, in the order taken; a run cut in parts
+    /// is listed once per part.
+    pub ids: Vec<u32>,
+    /// The detector that found it, which names its region (see [`Detector`]).
+    pub by: Detector,
+    /// The box of the drawn rules or boxes the detector read the table by, in the frame of
+    /// the runs; none for a detector that reads text alone. Its region reaches over it.
+    pub drawn: Option<[f32; 4]>,
+    /// The pictures in its cells: row, cell and the picture, by its place among
+    /// the page's pictures (`layoutregions::PrimId::Picture`).
+    pub pictures: Vec<(usize, usize, u32)>,
+}
+
+/// The detector, or the class of a detector, that found a table: its region's signal id and
+/// kind (see `layoutregions`). Each detector sets it where it plans the table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Detector {
+    /// A table of the tag tree.
+    Tagged,
+    /// Drawn boxes of a label over its value.
+    BoxPairs,
+    /// The totals of a column beside the sections of a ruled grid.
+    SideTotals,
+    /// A section of a grid of drawn rules.
+    Ruled,
+    /// A header band of drawn cells and the lines under it.
+    Banded,
+    /// Rows of fields between drawn rules.
+    Strips,
+    /// Rows of fields between drawn rules whose labels stand under their values (a stack).
+    StripStack,
+    /// Without rules: the totals under a table, parted from it by the rule that ends it.
+    TotalsUnder,
+    /// Without rules: a line of titles over one line of values.
+    LabelsOverValues,
+    /// Without rules: blocks side by side under a header row of their headings.
+    SideBlocks,
+    /// Without rules: lines of a label and its value.
+    KeyValues,
+    /// Without rules: any other grid of white space gutters.
+    Grid,
+    /// The lines of a label and its value of a line pairs decision of the region engine,
+    /// parted by the typer's line pair rule (no pre-pass reader).
+    LinePairs,
+}
+
+impl Detector {
+    /// Every detector, in the order the page runs them.
+    #[cfg(test)]
+    pub(crate) const ALL: [Detector; 13] = [
+        Detector::Tagged,
+        Detector::BoxPairs,
+        Detector::SideTotals,
+        Detector::Ruled,
+        Detector::Banded,
+        Detector::Strips,
+        Detector::StripStack,
+        Detector::TotalsUnder,
+        Detector::LabelsOverValues,
+        Detector::SideBlocks,
+        Detector::KeyValues,
+        Detector::Grid,
+        Detector::LinePairs,
+    ];
+
+    /// The signal id of its regions.
+    pub(crate) const fn id(self) -> &'static str {
+        match self {
+            Detector::Tagged => "pdf.tagged_table",
+            Detector::BoxPairs => "pdf.box_pairs",
+            Detector::SideTotals => "pdf.side_totals",
+            Detector::Ruled => "pdf.ruled",
+            Detector::Banded => "pdf.banded",
+            Detector::Strips => "pdf.strips",
+            Detector::StripStack => "pdf.strip_stack",
+            Detector::TotalsUnder => "pdf.borderless.totals_under",
+            Detector::LabelsOverValues => "pdf.borderless.labels_over_values",
+            Detector::SideBlocks => "pdf.borderless.side_blocks",
+            Detector::KeyValues => "pdf.borderless.key_values",
+            Detector::Grid => "pdf.borderless.grid",
+            Detector::LinePairs => "pdf.line_pairs",
+        }
+    }
+
+    /// What found its regions, in words: the evidence of a region that names no finding of
+    /// its own.
+    pub(crate) const fn found_from(self) -> &'static str {
+        match self {
+            Detector::Tagged => "a table of the tag tree",
+            Detector::BoxPairs => "drawn boxes that each hold a label over its value",
+            Detector::SideTotals => "a column of totals beside the sections of a ruled grid",
+            Detector::Ruled => "a grid of drawn rules, read by its cells",
+            Detector::Banded => {
+                "a header band of drawn cells with the lines under it in its columns"
+            }
+            Detector::Strips => "rows of fields between drawn rules",
+            Detector::StripStack => {
+                "rows of fields between drawn rules, each label under its value"
+            }
+            Detector::TotalsUnder => {
+                "the totals under a table without rules, after the rule that ends it"
+            }
+            Detector::LabelsOverValues => "a line of titles over a line of values, without rules",
+            Detector::SideBlocks => "blocks side by side under a row of their headings",
+            Detector::KeyValues => "lines of a label and its value, without rules",
+            Detector::Grid => "a table without rules, found from its columns",
+            Detector::LinePairs => "lines of a label and its value",
+        }
+    }
+
+    /// What a table it found of the kind `kind` (see [`Planned::kind`]) is as a region: the
+    /// detectors whose tables are of one kind say it; the others keep the table's own.
+    pub(crate) fn region_kind(self, kind: layoutregions::Kind) -> layoutregions::Kind {
+        use layoutregions::Kind;
+        match self {
+            Detector::SideTotals | Detector::TotalsUnder => Kind::Totals,
+            Detector::LabelsOverValues
+            | Detector::SideBlocks
+            | Detector::KeyValues
+            | Detector::LinePairs => Kind::LabelValue,
+            // A ruled section a column of totals joins keeps its column titles over its rows:
+            // a table, though the layout reads its rows as labels and values.
+            Detector::Ruled | Detector::Banded | Detector::Grid => Kind::Table,
+            Detector::Tagged | Detector::BoxPairs | Detector::Strips | Detector::StripStack => kind,
+        }
+    }
 }
 
 impl Planned {
@@ -81,8 +230,7 @@ impl Planned {
     /// boxes, rows of fields or the totals of a column beside a section. Its rows are label
     /// and value, also where column titles stand over one row of items.
     pub(crate) fn is_pairs(&self) -> bool {
-        self.found_by
-            .is_some_and(|n| pairs::is_pairs_note(n) || n == side::SIDE_FOUND_BY)
+        self.kind == layoutregions::Kind::LabelValue
     }
 }
 
@@ -152,7 +300,22 @@ pub(crate) struct Found {
     /// ruled pass puts them so in the flow, each cell's lines together and apart from the next
     /// cell's.
     pub apart: Vec<Vec<Vec<usize>>>,
+    /// The cells of the rows of fields of `apart` as the ruled pass put them in the flow: the
+    /// ids of each cell's runs (see [`Flow::ids`]). Each cell is a block of its own: its lines
+    /// go on no line of another cell.
+    pub cells: Vec<Vec<u32>>,
+    /// Grids, bands, regions, rows of fields and boxes refused with a note or a loss that
+    /// keep their text as it stands: the ids of their runs (see [`Flow::ids`]) and why.
+    pub doubts: Doubts,
+    /// The runs of blocks side by side that a paragraph wrapped in one of them shows (see
+    /// `paragraph_columns`), by their ids (see [`Flow::ids`]): each line of such a block
+    /// stays a line of its own, never joined to the line over it. Sorted when read.
+    pub own_lines: Vec<u32>,
 }
+
+/// Text a detector refused with a note or a loss and keeps as it stands: for each refusal, the
+/// ids of its runs (see [`Flow::ids`]) and why.
+pub(crate) type Doubts = Vec<(Vec<u32>, &'static str)>;
 
 /// What a refusal without a note refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -164,9 +327,6 @@ pub(crate) enum Refused {
     /// A block of lines in columns without rules.
     Region,
 }
-
-/// Why a grid or band on a picture is not a table. It is a chart, so its refusal is no loss.
-const ON_PICTURE: &str = "it lies on a picture";
 
 /// Reasons said of several grids or bands: how many have each and why, as `2 (they cover
 /// most of the page), 1 (most of its cells are empty)`, in the order the reasons first come.
@@ -191,96 +351,127 @@ pub(crate) fn counted<'a>(reasons: impl Iterator<Item = &'a str>) -> String {
 /// A reason a ruled grid or a header band is refused, said of several.
 pub(crate) fn plural(why: &str) -> &str {
     match why {
-        "it has more than 15 columns" => "they have more than 15 columns",
-        "most of its cells are empty" => "most of their cells are empty",
-        "its boxes do not form rows and columns" => "their boxes do not form rows and columns",
-        "its text crosses its lines" => "their text crosses their lines",
-        "it covers most of the page" => "they cover most of the page",
+        MANY_COLUMNS => "they have more than 15 columns",
+        EMPTY_CELLS => "most of their cells are empty",
+        NO_ROWS_AND_COLUMNS => "their boxes do not form rows and columns",
+        CROSSES_LINES => "their text crosses their lines",
+        PAGE_FRAME => "they cover most of the page",
         ON_PICTURE => "they lie on a picture",
-        "its text is much smaller than the body text, as in a picture of a page" => {
-            "their text is much smaller than the body text, as in pictures of pages"
-        }
+        TINY_TEXT => "their text is much smaller than the body text, as in pictures of pages",
         "too few rows follow its header" => "too few rows follow their headers",
         "the text below its header does not stand in its columns" => {
             "the text below their headers does not stand in their columns"
         }
-        "its cells hold long text" => "their cells hold long text",
+        LONG_TEXT => "their cells hold long text",
         "it is too tall for a header over lines" => "they are too tall for headers over lines",
         "its cells hold too few column titles" => "their cells hold too few column titles",
-        "its text runs on from row to row like prose" => {
-            "their text runs on from row to row like prose"
-        }
+        RUNS_ON => "their text runs on from row to row like prose",
         "some of its text stands between its columns" => {
             "some of their text stands between their columns"
         }
         "its columns are not clean" => "their columns are not clean",
-        "all its rows read the same" => "all their rows read the same",
-        "it reads like a table of contents" => "they read like tables of contents",
+        ROWS_ALIKE => "all their rows read the same",
+        CONTENTS => "they read like tables of contents",
         other => other,
     }
 }
 
-/// Lines this close are one line, and line ends this close meet, in points.
-pub(crate) const SNAP: f32 = 2.0;
+/// Lines this close are one line, and line ends this close meet, in points; past
+/// [`MAX_SEGMENTS`] straight segments the grid search gives up on a page and says so. The
+/// region engine finds the grids with these values (see `layoutregions::segment::drawn`); a
+/// grid or region over most of the page is its frame (see
+/// `layoutregions::extract::table::area`).
+pub(crate) use layoutregions::segment::drawn::{MAX_SEGMENTS, SNAP};
 
 /// A label or a title differs in size from the text beside it when the larger is at least
-/// this many times the smaller: half a point at 12.5 points, and less than half a point at
-/// the sizes of forms (8 over 8.5 points differ). A ratio, so that it holds at every scale.
-pub(crate) const LABEL_STEP: f32 = 1.04;
+/// this many times the smaller (see `layoutregions::line::LABEL_STEP`).
+pub(crate) use layoutregions::line::LABEL_STEP;
 
-/// A grid of drawn rules with more columns than this is a form or a chart, not a table.
-const MAX_COLUMNS: usize = 15;
+/// The segments of the page the detector without rules reads, each as the union of its runs:
+/// the page's root. A table often reaches past the lines drawn around part of it (a column
+/// or a caption beside a grid, header cells drawn as boxes over rows that are not, labels
+/// beside boxed values), so the drawn segments of a page are no bounds of its tables, and
+/// neither are the whitespace and style groups under them (a bold header over its rows, a
+/// blank row inside a table). Which segments a table spans is decided by typing.
+pub(crate) fn table_areas(segments: &Segments) -> Vec<&Segment> {
+    segments
+        .all
+        .get(segments.root.0 as usize)
+        .into_iter()
+        .collect()
+}
 
-/// A grid whose cells are more often empty than this is a form to fill in.
-const EMPTY_SHARE: f32 = 0.6;
-
-/// A grid or region that covers more of the page than this is the page's frame.
-pub(crate) const PAGE_SHARE: f32 = 0.6;
-
-/// Straight segments the ruled grid search looks at on one page, and pairs of segments it
-/// tests; past them it gives up on the page and says so.
-pub(crate) const MAX_SEGMENTS: usize = 20_000;
-pub(crate) const GRID_WORK: usize = 4_000_000;
-
-/// Lines of a caption paragraph above a table looked at for its start.
-const CAPTION_LINES: usize = 8;
-
-/// Squares one grid of drawn rules may have to be read as a table.
-const MAX_SQUARES: usize = 100_000;
-
-/// Text smaller than this share of the body text is a picture of a page, not a table.
-const SMALL_TEXT: f32 = 0.6;
-
-/// A gap wider than this many font sizes between two runs of a line separates two cells.
-const CELL_GAP: f32 = 1.0;
-
-/// Cells of a table without rules are short: their median length is under this many
-/// characters, unless most of them are numbers.
-const SHORT_CELL: usize = 40;
-
-/// A cell of at least this many words and characters that goes on in lower case in the cell
-/// below reads as a line of prose.
-const PROSE_WORDS: usize = 3;
-const PROSE_LINE: usize = 20;
-
-/// Share of the rows of a table without rules whose pieces stay inside the columns.
-const CLEAN_ROWS: f32 = 0.8;
+/// For each group of `grids`, whether the ruled detector reads it: a grid of two cells or
+/// more that the page's segments hold as a grid ([`Source::Grid`]), and every group of one
+/// cell. A box is no grid to the segmentation, but a column of totals or a strip beside it
+/// joins it as a section. Where a bound or the stop cut the segmentation short (an issue says
+/// so), every group is read, as the ruled detector has its own bounds: no grid is lost to the
+/// segmentation's.
+fn ruled_groups(grids: &Grids, segments: &Segments) -> Vec<bool> {
+    if !segments.issues.is_empty() {
+        return vec![true; grids.groups.len()];
+    }
+    let mut frames: Vec<(Bounds, u32, u32)> = segments
+        .all
+        .iter()
+        .filter_map(|g| match g.source {
+            Source::Grid { rows, cols } => Some((g.bounds, rows, cols)),
+            _ => None,
+        })
+        .collect();
+    frames.sort_by(|a, b| a.0.x0.total_cmp(&b.0.x0));
+    grids
+        .groups
+        .iter()
+        .map(|group| {
+            drawn::grid_frame(grids, group).is_none_or(|f| {
+                let lo = frames.partition_point(|g| g.0.x0 < f.0.x0);
+                frames[lo..]
+                    .iter()
+                    .take_while(|g| g.0.x0 == f.0.x0)
+                    .any(|g| *g == f)
+            })
+        })
+        .collect()
+}
 
 /// The tables of an untagged page (or a tagged page whose tag tree did not hold): first
 /// grids of drawn rules, then white space gutters in the text left. Their runs are taken out
 /// of `flow`. `height` is the page height; text in other directions is never in a table.
+/// `segments` are the page's segments: the grids the ruled detector reads are theirs (see
+/// [`ruled_groups`]), the detector without rules reads their [`table_areas`].
 pub(crate) fn untagged(
     page: u32,
     flow: &mut Flow,
     drawn: &Drawn<'_>,
+    segments: &Segments,
     height: f32,
     stop: &dyn Fn() -> bool,
 ) -> Found {
+    untagged_marked(page, flow, drawn, segments, height, stop).0
+}
+
+/// How much of each list of a [`Found`] the readers on drawn rules made: what follows is the
+/// readers' without rules.
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct Ruled {
+    pub unsure: usize,
+    pub skipped: usize,
+    pub uncertain: usize,
+    pub quiet: usize,
+    pub doubts: usize,
+}
+
+/// [`untagged`], with how much of each list the readers on drawn rules made.
+pub(crate) fn untagged_marked(
+    page: u32,
+    flow: &mut Flow,
+    drawn: &Drawn<'_>,
+    segments: &Segments,
+    height: f32,
+    stop: &dyn Fn() -> bool,
+) -> (Found, Ruled) {
     let mut found = Found::default();
-    // On a page with form fields, boxes and aligned labels are the form.
-    if !drawn.widgets.is_empty() {
-        return found;
-    }
     let area = Area {
         width: drawn.width,
         height,
@@ -289,10 +480,53 @@ pub(crate) fn untagged(
     };
     if !drawn.lines_unsearched {
         found.ends = end_rules(drawn.rules);
-        ruled::ruled(page, flow, drawn.rules, &area, stop, &mut found);
+        let grids = drawn.grids();
+        let segmented = grids.map(|g| ruled_groups(g, segments)).unwrap_or_default();
+        ruled::ruled(
+            page,
+            flow,
+            (drawn.rules, grids, &segmented),
+            drawn
+                .items
+                .map_or((&[], false), |i| (&i.shapes, i.shapes_cut)),
+            &area,
+            stop,
+            &mut found,
+        );
     }
-    borderless::borderless(page, flow, &area, stop, &mut found);
-    found
+    let mark = Ruled {
+        unsure: found.unsure.len(),
+        skipped: found.skipped.len(),
+        uncertain: found.uncertain.len(),
+        quiet: found.quiet.len(),
+        doubts: found.doubts.len(),
+    };
+    // The horizontal segments as drawn, by height: the breaks of a rule are column bounds.
+    let mut hsegs: Vec<layoutregions::segment::drawn::Line> = drawn
+        .rules
+        .iter()
+        .filter_map(|r| {
+            let (x0, x1) = (r.x0.min(r.x1), r.x0.max(r.x1));
+            let (y0, y1) = (r.y0.min(r.y1), r.y0.max(r.y1));
+            (y1 - y0 < x1 - x0 && y1 - y0 <= layoutregions::segment::drawn::SNAP).then_some(
+                layoutregions::segment::drawn::Line {
+                    at: (y0 + y1) / 2.0,
+                    from: x0,
+                    to: x1,
+                },
+            )
+        })
+        .collect();
+    hsegs.sort_by(|a, b| a.at.total_cmp(&b.at));
+    borderless::borderless(
+        page,
+        flow,
+        (&table_areas(segments), &hsegs),
+        &area,
+        stop,
+        &mut found,
+    );
+    (found, mark)
 }
 
 /// The horizontal rules of `rules`, sorted by height: lines with their collinear pieces
@@ -307,7 +541,7 @@ fn end_rules(rules: &[Rule]) -> Vec<HRule> {
             continue;
         }
         match r.kind {
-            RuleKind::Line => lines.push(crate::regions::Seg {
+            RuleKind::Line => lines.push(layoutregions::segment::drawn::Line {
                 at: (y0 + y1) / 2.0,
                 from: x0,
                 to: x1,
@@ -320,234 +554,27 @@ fn end_rules(rules: &[Rule]) -> Vec<HRule> {
             }),
         }
     }
-    out.extend(crate::regions::merged(lines).into_iter().map(|s| HRule {
-        y: s.at,
-        x0: s.from,
-        x1: s.to,
-        h: 0.0,
-    }));
+    out.extend(
+        layoutregions::segment::drawn::merged(lines)
+            .into_iter()
+            .map(|s| HRule {
+                y: s.at,
+                x0: s.from,
+                x1: s.to,
+                h: 0.0,
+            }),
+    );
     out.sort_by(|a, b| a.y.total_cmp(&b.y));
     out
 }
 
-/// Why a grid or region is the page's frame.
-const PAGE_FRAME: &str = "it covers most of the page";
+/// One line of the flow: the range of its runs and its baseline and size (see
+/// [`table::RunRange`]).
+type FlowLine = table::RunRange;
 
-/// The page a detector looks at: its size and what rules out a table.
-struct Area<'a> {
-    width: f32,
-    height: f32,
-    images: &'a [[f32; 4]],
-    /// The most common font size of the file's text.
-    body_size: f32,
-}
-
-impl Area<'_> {
-    /// Whether a picture lies under most of `b` (x0, y0, x1, y1): a grid or band there is a
-    /// chart's.
-    fn on_picture(&self, b: [f32; 4]) -> bool {
-        let size = (b[2] - b[0]).max(0.0) * (b[3] - b[1]).max(0.0);
-        self.images.iter().any(|i| overlap(*i, b) > 0.5 * size)
-    }
-
-    /// Why a table cannot stand in `b` (x0, y0, x1, y1) with text of `sizes`, if it cannot.
-    fn refuses(&self, b: [f32; 4], sizes: &[f32]) -> Option<&'static str> {
-        let size = (b[2] - b[0]).max(0.0) * (b[3] - b[1]).max(0.0);
-        if size > PAGE_SHARE * self.width * self.height {
-            return Some(PAGE_FRAME);
-        }
-        if self.on_picture(b) {
-            return Some(ON_PICTURE);
-        }
-        let mut sizes = sizes.to_vec();
-        sizes.sort_by(f32::total_cmp);
-        if let Some(m) = sizes.get(sizes.len() / 2)
-            && *m < SMALL_TEXT * self.body_size
-        {
-            return Some("its text is much smaller than the body text, as in a picture of a page");
-        }
-        None
-    }
-}
-
-/// The area two boxes share.
-fn overlap(a: [f32; 4], b: [f32; 4]) -> f32 {
-    let w = a[2].min(b[2]) - a[0].max(b[0]);
-    let h = a[3].min(b[3]) - a[1].max(b[1]);
-    if w > 0.0 && h > 0.0 { w * h } else { 0.0 }
-}
-
-/// The caption kind of a line: `Some(true)` for "Table 3", `Some(false)` for "Figure 3".
-fn caption(text: &str) -> Option<bool> {
-    let t = text.trim_start();
-    let (table, rest) = match t.strip_prefix("Table") {
-        Some(r) => (true, r),
-        None => (
-            false,
-            t.strip_prefix("Figure")
-                .or_else(|| t.strip_prefix("Fig."))?,
-        ),
-    };
-    let rest = rest.trim_start();
-    let first = rest.chars().next()?;
-    (first.is_ascii_digit()
-        || (first.is_ascii_uppercase()
-            && rest.len() > 1
-            && rest[1..].starts_with(['.', ':', ' ', '-'])))
-    .then_some(table)
-}
-
-/// One line of the flow: the range of its runs and its baseline and size.
-#[derive(Debug, Clone, Copy)]
-struct FlowLine {
-    start: usize,
-    end: usize,
-    y: f32,
-    size: f32,
-}
-
+/// The lines of the flow (see [`table::run_ranges`]).
 fn flow_lines(flow: &Flow) -> Vec<FlowLine> {
-    let mut out: Vec<FlowLine> = Vec::new();
-    for (i, r) in flow.runs.iter().enumerate() {
-        match out.last_mut() {
-            Some(l) if flow.runs[l.start].line == r.line => {
-                l.end = i + 1;
-                l.size = l.size.max(r.size);
-            }
-            _ => out.push(FlowLine {
-                start: i,
-                end: i + 1,
-                y: r.y,
-                size: r.size.max(1.0),
-            }),
-        }
-    }
-    out
-}
-
-/// The caption kinds next to a box: the line of a table caption (the first found), and
-/// whether a figure caption is near. A caption counts when its paragraph ends within three
-/// line heights above the box, or starts within three line heights below it, and overlaps
-/// it across.
-/// Lines `skip` names (the box's own) are not looked at. `sizes` are the font sizes of the
-/// box's text: their median sets how far from the box a caption may stand.
-fn captions_near(
-    flow: &Flow,
-    lines: &[FlowLine],
-    by_y: &ByY,
-    b: [f32; 4],
-    sizes: &[f32],
-    skip: &dyn Fn(usize) -> bool,
-) -> (Option<usize>, bool) {
-    let (mut table, mut figure) = (None, false);
-    let text = |l: &FlowLine| -> String {
-        flow.runs[l.start..l.end]
-            .iter()
-            .map(|r| r.text.as_str())
-            .collect()
-    };
-    let across = |l: &FlowLine| {
-        let runs = &flow.runs[l.start..l.end];
-        let x0 = runs.iter().map(|r| r.x).fold(f32::MAX, f32::min);
-        let x1 = runs.iter().map(|r| r.x + r.w).fold(f32::MIN, f32::max);
-        !runs.iter().any(|r| r.off_axis) && x1 >= b[0] && x0 <= b[2]
-    };
-    let mut note = |k: usize| match caption(&text(&lines[k])) {
-        Some(true) => {
-            table.get_or_insert(k);
-        }
-        Some(false) => figure = true,
-        None => {}
-    };
-    // Only lines in a band around the box can be near it: a caption is set about as large as
-    // the table's own text.
-    let mut sorted = sizes.to_vec();
-    sorted.sort_by(f32::total_cmp);
-    let size = sorted
-        .get(sorted.len() / 2)
-        .copied()
-        .unwrap_or(10.0)
-        .clamp(1.0, MAX_CAPTION_SIZE);
-    let band = 4.0 * size;
-    let lo = by_y.line_y.partition_point(|y| *y < b[1] - band);
-    let hi = by_y.line_y.partition_point(|y| *y <= b[3] + band);
-    for &k in &by_y.lines[lo..hi] {
-        let l = &lines[k];
-        if skip(l.start) || !across(l) {
-            continue;
-        }
-        let near = 3.0 * l.size.min(2.0 * size);
-        if l.y < b[1] && b[1] - (l.y + l.size) <= near {
-            note(k);
-        } else if l.y > b[3] && l.y - b[3] <= near {
-            // The last line of a paragraph above: its first lines may hold the caption.
-            note(k);
-            let mut at = k;
-            for _ in 0..CAPTION_LINES {
-                let Some(prev) = at.checked_sub(1).map(|p| &lines[p]) else {
-                    break;
-                };
-                let gap = prev.y - lines[at].y;
-                if gap <= 0.0 || gap > 1.6 * prev.size.max(lines[at].size) || !across(prev) {
-                    break;
-                }
-                note(at - 1);
-                at -= 1;
-            }
-        }
-    }
-    (table, figure)
-}
-
-/// The runs and lines of a page sorted by height, so a box finds what lies in it by search.
-struct ByY {
-    /// Run indices by the height of their middle, and those heights.
-    runs: Vec<usize>,
-    run_y: Vec<f32>,
-    /// Line indices by baseline, and the baselines.
-    lines: Vec<usize>,
-    line_y: Vec<f32>,
-}
-
-impl ByY {
-    fn new(flow: &Flow, lines: &[FlowLine]) -> ByY {
-        let mut runs: Vec<(f32, usize)> = flow
-            .runs
-            .iter()
-            .enumerate()
-            .map(|(i, r)| (middle(r).1, i))
-            .collect();
-        runs.sort_by(|a, b| a.0.total_cmp(&b.0));
-        let mut ls: Vec<(f32, usize)> = lines.iter().enumerate().map(|(k, l)| (l.y, k)).collect();
-        ls.sort_by(|a, b| a.0.total_cmp(&b.0));
-        ByY {
-            run_y: runs.iter().map(|r| r.0).collect(),
-            runs: runs.into_iter().map(|r| r.1).collect(),
-            line_y: ls.iter().map(|l| l.0).collect(),
-            lines: ls.into_iter().map(|l| l.1).collect(),
-        }
-    }
-
-    /// The number of runs whose middle lies between the heights `lo` and `hi`.
-    fn count_between(&self, lo: f32, hi: f32) -> usize {
-        let a = self.run_y.partition_point(|y| *y <= lo);
-        let z = self.run_y.partition_point(|y| *y < hi);
-        z.saturating_sub(a)
-    }
-
-    /// The runs whose middle lies between the heights `lo` and `hi`, in page order.
-    fn runs_between(&self, lo: f32, hi: f32) -> Vec<usize> {
-        let a = self.run_y.partition_point(|y| *y <= lo);
-        let z = self.run_y.partition_point(|y| *y < hi);
-        let mut out = self.runs[a..z].to_vec();
-        out.sort_unstable();
-        out
-    }
-}
-
-/// The point of a run that decides which cell it is in.
-fn middle(r: &Run) -> (f32, f32) {
-    (r.x + r.w / 2.0, r.y + r.h * 0.3)
+    table::run_ranges(&flow.runs)
 }
 
 /// Where a run of the page goes: the table, row and cell of `planned`.
@@ -571,6 +598,11 @@ fn fill(planned: &mut [Planned], flow: &mut Flow, target: &[Target]) {
             .runs
             .reserve_exact(n);
     }
+    for (t, id) in target.iter().zip(&flow.ids) {
+        if let Some((t, _, _)) = t {
+            planned[*t as usize].ids.push(*id);
+        }
+    }
     let stay = target.iter().filter(|t| t.is_none()).count()
         + flow.runs.len().saturating_sub(target.len());
     flow.take_each(stay, |i, r| match target.get(i).copied().flatten() {
@@ -588,9 +620,6 @@ fn fill(planned: &mut [Planned], flow: &mut Flow, target: &[Target]) {
     });
 }
 
-/// The largest text size a caption search assumes for a table, in points.
-const MAX_CAPTION_SIZE: f32 = 36.0;
-
 /// Tables without tags one page may have; past them the text stays paragraphs, with a loss.
 const MAX_TABLES: usize = 5_000;
 
@@ -605,41 +634,206 @@ fn too_many_tables(page: u32) -> String {
 /// Grids and regions one page may have looked at between two looks at the clock.
 const CHECK_EVERY: usize = 64;
 
-/// 1 when the first row reads as column titles: every cell has text and either a column has
-/// a word on top of numbers, or the first row is bold and the rest is not.
-fn header_of(rows: &[Vec<PlannedCell>]) -> usize {
-    let text = |c: &PlannedCell| {
-        c.runs
-            .iter()
-            .flat_map(|r| r.text.split_whitespace())
-            .collect::<Vec<_>>()
-            .join(" ")
-    };
-    let Some(first) = rows.first() else { return 0 };
-    if rows.len() < 2 || first.iter().any(|c| text(c).is_empty()) {
-        return 0;
+/// Claims the runs of the cells of `table`, the table `t` of the page, in `claimed`.
+fn claim_cells(claimed: &mut [Option<(usize, usize, usize)>], t: usize, table: &TableOut) {
+    for (r, row) in table.rows.iter().enumerate() {
+        for (c, cell) in row.iter().enumerate() {
+            for &i in &cell.runs {
+                claimed[i] = Some((t, r, c));
+            }
+        }
     }
-    let titles = (0..first.len()).any(|c| {
-        let below: Vec<String> = rows[1..]
-            .iter()
-            .filter_map(|r| r.get(c))
-            .map(text)
-            .collect();
-        let numbers = below.iter().filter(|t| numeric(t)).count();
-        !numeric(&text(&first[c])) && numbers > 0 && 2 * numbers >= below.len()
-    });
-    let bold = |row: &[PlannedCell]| row.iter().flat_map(|c| &c.runs).all(|r| r.bold);
-    let bold_titles = bold(first) && rows[1..].iter().any(|r| !bold(r));
-    usize::from(titles || bold_titles)
 }
 
-/// Whether a cell's text is a number: most of its characters are digits or signs.
-fn numeric(text: &str) -> bool {
-    let chars: Vec<char> = text.chars().filter(|c| !c.is_whitespace()).collect();
-    let digits = chars.iter().filter(|c| c.is_ascii_digit()).count();
-    let signs = chars
+/// The rows of `table` for a planned table: each cell with its spans and status, its runs
+/// filled in once they are taken out of the flow.
+fn planned_rows(table: &TableOut) -> Vec<Vec<PlannedCell>> {
+    table
+        .rows
         .iter()
-        .filter(|c| matches!(c, '.' | ',' | '%' | '-' | '+' | '$' | '(' | ')' | '/'))
-        .count();
-    digits > 0 && 2 * (digits + signs) >= chars.len()
+        .map(|r| {
+            r.iter()
+                .map(|c| PlannedCell {
+                    runs: Vec::new(),
+                    row_span: c.row_span,
+                    col_span: c.col_span,
+                    status: c.status,
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// 1 when the first row reads as column titles (see [`table::header_of`]).
+fn header_of(rows: &[Vec<PlannedCell>]) -> usize {
+    let view: Vec<Vec<&[Run]>> = rows
+        .iter()
+        .map(|r| r.iter().map(|c| c.runs.as_slice()).collect())
+        .collect();
+    table::header_of(&view)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn planned(kind: layoutregions::Kind, found_by: Option<&'static str>) -> Planned {
+        Planned {
+            at: 0,
+            top: 0.0,
+            rows: Vec::new(),
+            trs: Vec::new(),
+            additions: Vec::new(),
+            header_rows: 0,
+            tagged: None,
+            continues: false,
+            caption: Vec::new(),
+            found_by,
+            kind,
+            ids: Vec::new(),
+            by: Detector::Grid,
+            drawn: None,
+            pictures: Vec::new(),
+        }
+    }
+
+    /// A detector of one kind of table gives its regions that kind; the others keep the
+    /// table's own. A ruled section a column of totals joins is a table region, while the
+    /// layout still reads it as labels and values.
+    #[test]
+    fn region_kinds_by_detector() {
+        use layoutregions::Kind;
+        assert_eq!(
+            Detector::SideTotals.region_kind(Kind::LabelValue),
+            Kind::Totals
+        );
+        assert_eq!(Detector::TotalsUnder.region_kind(Kind::Table), Kind::Totals);
+        assert_eq!(
+            Detector::KeyValues.region_kind(Kind::Table),
+            Kind::LabelValue
+        );
+        assert_eq!(Detector::Ruled.region_kind(Kind::LabelValue), Kind::Table);
+        assert_eq!(
+            Detector::Strips.region_kind(Kind::LabelValue),
+            Kind::LabelValue
+        );
+        assert_eq!(
+            Detector::BoxPairs.region_kind(Kind::LabelValue),
+            Kind::LabelValue
+        );
+        let ids: std::collections::HashSet<&str> = Detector::ALL.iter().map(|d| d.id()).collect();
+        assert_eq!(ids.len(), Detector::ALL.len());
+    }
+
+    /// Whether a table is one of labels and values is its kind, not the text of its note.
+    #[test]
+    fn is_pairs_comes_from_the_kind() {
+        assert!(planned(layoutregions::Kind::LabelValue, None).is_pairs());
+        assert!(!planned(layoutregions::Kind::Table, None).is_pairs());
+        assert!(!planned(layoutregions::Kind::Table, Some(side::SIDE_FOUND_BY)).is_pairs());
+    }
+
+    /// A page with a single drawn box at x 50 and two grids of 2 x 2 cells at x 250 and 400,
+    /// a word in each cell.
+    fn box_and_grids() -> layoutregions::PageIn {
+        let rule = |x0: f32, y0: f32, x1: f32, y1: f32, rect: bool| layoutregions::RuleIn {
+            x0,
+            y0,
+            x1,
+            y1,
+            thick: 0.5,
+            dashed: false,
+            rect,
+        };
+        let mut rules = vec![rule(50.0, 600.0, 150.0, 620.0, true)];
+        let mut texts = vec![(60.0, 606.0)];
+        for x in [250.0, 400.0] {
+            rules.push(rule(x, 600.0, x + 100.0, 640.0, true));
+            rules.push(rule(x + 50.0, 600.0, x + 50.0, 640.0, false));
+            rules.push(rule(x, 620.0, x + 100.0, 620.0, false));
+            for (dx, dy) in [(5.0, 606.0), (55.0, 606.0), (5.0, 626.0), (55.0, 626.0)] {
+                texts.push((x + dx, dy));
+            }
+        }
+        layoutregions::PageIn {
+            page: 1,
+            size: [595.0, 842.0],
+            turn: 0,
+            texts: texts
+                .iter()
+                .enumerate()
+                .map(|(k, &(x, y))| layoutregions::TextRun {
+                    text: "Muster".into(),
+                    x,
+                    y,
+                    w: 30.0,
+                    h: 8.0,
+                    size: 8.0,
+                    font: 1,
+                    font_kind: layoutregions::FontKind::Proportional,
+                    bold: false,
+                    italic: false,
+                    color: None,
+                    shift: layoutregions::Shift::Base,
+                    line: k as u32,
+                    off_axis: false,
+                    gaps: Vec::new(),
+                })
+                .collect(),
+            rules,
+            boxes: Vec::new(),
+            pictures: Vec::new(),
+            codes: Vec::new(),
+            given: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn ruled_groups_follow_the_grid_segments() {
+        let page = box_and_grids();
+        let grids = drawn::grids(&page.rules).expect("searched");
+        assert_eq!(grids.groups.len(), 3);
+        let mut segments =
+            layoutregions::segment::segment_page(&page, &layoutregions::Limits::default(), &|| {
+                false
+            });
+        assert!(segments.issues.is_empty());
+        // The x of each group's left edge.
+        let lefts: Vec<f32> = grids
+            .groups
+            .iter()
+            .map(|(gh, _)| {
+                gh.iter()
+                    .map(|&j| grids.hs[j].from)
+                    .fold(f32::MAX, f32::min)
+            })
+            .collect();
+        let want = |box_and_first: bool, second: bool| -> Vec<bool> {
+            lefts
+                .iter()
+                .map(|&x| if x > 390.0 { second } else { box_and_first })
+                .collect()
+        };
+        // The box is read as a section of its own; both grids have their segments.
+        assert_eq!(ruled_groups(&grids, &segments), want(true, true));
+        // A grid the segments do not hold is not read.
+        for g in &mut segments.all {
+            if matches!(g.source, Source::Grid { .. }) && g.bounds.x0 > 390.0 {
+                g.source = Source::Rest;
+            }
+        }
+        assert_eq!(ruled_groups(&grids, &segments), want(true, false));
+        // Where a bound or the stop cut the segmentation short, every group is read.
+        for kind in [
+            layoutregions::IssueKind::Limit,
+            layoutregions::IssueKind::Stopped,
+        ] {
+            let mut cut = segments.clone();
+            cut.issues.push(layoutregions::Issue {
+                what: "the segmentation was cut short".into(),
+                kind,
+            });
+            assert_eq!(ruled_groups(&grids, &cut), want(true, true), "{kind:?}");
+        }
+    }
 }

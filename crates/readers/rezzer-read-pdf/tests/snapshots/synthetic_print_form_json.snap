@@ -657,7 +657,7 @@ expression: json
           "inlines": [
             {
               "type": "text",
-              "text": "Zahltag"
+              "text": "9876,54"
             }
           ],
           "anchor": "p1:b6"
@@ -667,7 +667,7 @@ expression: json
           "inlines": [
             {
               "type": "text",
-              "text": "9876,54"
+              "text": "Zahltag"
             }
           ],
           "anchor": "p1:b7"
@@ -683,14 +683,33 @@ expression: json
           "anchor": "p1:b8"
         },
         {
-          "type": "paragraph",
-          "inlines": [
-            {
-              "type": "text",
-              "text": "Auszahlungsbetrag* 1.234,56"
-            }
+          "type": "table",
+          "header_rows": 0,
+          "rows": [
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Auszahlungsbetrag*"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "1.234,56"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ]
           ],
-          "anchor": "p1:b9"
+          "anchor": "p1:t5"
         },
         {
           "type": "paragraph",
@@ -708,7 +727,7 @@ expression: json
             }
           ],
           "role": "page-footer",
-          "anchor": "p1:b10"
+          "anchor": "p1:b9"
         }
       ]
     },
@@ -1382,7 +1401,7 @@ expression: json
           "inlines": [
             {
               "type": "text",
-              "text": "Zahltag"
+              "text": "8765,43"
             }
           ],
           "anchor": "p2:b6"
@@ -1392,7 +1411,7 @@ expression: json
           "inlines": [
             {
               "type": "text",
-              "text": "8765,43"
+              "text": "Zahltag"
             }
           ],
           "anchor": "p2:b7"
@@ -1408,14 +1427,33 @@ expression: json
           "anchor": "p2:b8"
         },
         {
-          "type": "paragraph",
-          "inlines": [
-            {
-              "type": "text",
-              "text": "Auszahlungsbetrag* 2.345,67"
-            }
+          "type": "table",
+          "header_rows": 0,
+          "rows": [
+            [
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "Auszahlungsbetrag*"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              },
+              {
+                "inlines": [
+                  {
+                    "type": "text",
+                    "text": "2.345,67"
+                  }
+                ],
+                "row_span": 1,
+                "col_span": 1
+              }
+            ]
           ],
-          "anchor": "p2:b9"
+          "anchor": "p2:t5"
         },
         {
           "type": "paragraph",
@@ -1433,10 +1471,657 @@ expression: json
             }
           ],
           "role": "page-footer",
-          "anchor": "p2:b10"
+          "anchor": "p2:b9"
         }
       ]
     }
   ],
-  "facets": {}
+  "facets": {},
+  "regions": [
+    {
+      "anchor": "p1:t1",
+      "page": 1,
+      "kind": "label_value",
+      "bounds": [
+        40.0,
+        700.0,
+        400.0,
+        724.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.box_pairs",
+          "detail": "Found by: label and value pairs from drawn boxes; the label is the smaller text at the top of each box."
+        }
+      ]
+    },
+    {
+      "anchor": "p1:t2",
+      "page": 1,
+      "kind": "table",
+      "bounds": [
+        40.0,
+        638.0,
+        555.0,
+        670.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.ruled",
+          "detail": "a grid of drawn rules, read by its cells"
+        }
+      ]
+    },
+    {
+      "anchor": "p1:t3",
+      "page": 1,
+      "kind": "table",
+      "bounds": [
+        40.0,
+        590.0,
+        555.0,
+        638.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.ruled",
+          "detail": "a grid of drawn rules, read by its cells"
+        }
+      ]
+    },
+    {
+      "anchor": "p1:t4",
+      "page": 1,
+      "kind": "table",
+      "bounds": [
+        36.0,
+        525.2,
+        199.6,
+        572.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.banded",
+          "detail": "a header band of drawn cells with the lines under it in its columns"
+        }
+      ]
+    },
+    {
+      "anchor": "p1:b6",
+      "page": 1,
+      "kind": "paragraph",
+      "bounds": [
+        382.0,
+        460.0,
+        416.2,
+        469.5
+      ],
+      "certainty": "rule",
+      "score": 300,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "paragraph.text_size",
+          "detail": "set in a text size of the page"
+        }
+      ]
+    },
+    {
+      "anchor": "p1:b8",
+      "page": 1,
+      "kind": "paragraph",
+      "bounds": [
+        382.0,
+        430.0,
+        427.6,
+        439.5
+      ],
+      "certainty": "rule",
+      "score": 300,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "paragraph.text_size",
+          "detail": "set in a text size of the page"
+        }
+      ]
+    },
+    {
+      "anchor": "p1:b1",
+      "page": 1,
+      "kind": "title_block",
+      "bounds": [
+        40.0,
+        800.0,
+        167.57,
+        814.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "title_block.largest_heading",
+          "detail": "the largest heading in the head of page 1"
+        },
+        {
+          "kind": "rule",
+          "id": "title_block.top_third",
+          "detail": "its top 0.03 of the page height from the top"
+        }
+      ],
+      "alternatives": [
+        {
+          "kind": "heading",
+          "score": 750
+        }
+      ]
+    },
+    {
+      "anchor": "p1:b2",
+      "page": 1,
+      "kind": "paragraph",
+      "bounds": [
+        40.0,
+        778.0,
+        155.35,
+        784.0
+      ],
+      "certainty": "rule",
+      "score": 300,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "paragraph.text_size",
+          "detail": "set in a text size of the page"
+        }
+      ]
+    },
+    {
+      "anchor": "p1:b3",
+      "page": 1,
+      "kind": "paragraph",
+      "bounds": [
+        40.0,
+        736.0,
+        136.9,
+        769.5
+      ],
+      "certainty": "rule",
+      "score": 600,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "paragraph.text_size",
+          "detail": "set in a text size of the page"
+        },
+        {
+          "kind": "rule",
+          "id": "paragraph.joins",
+          "detail": "2 lines go on the line over them"
+        }
+      ]
+    },
+    {
+      "anchor": "p1:b5",
+      "page": 1,
+      "kind": "paragraph",
+      "bounds": [
+        300.0,
+        470.0,
+        320.22,
+        476.0
+      ],
+      "certainty": "rule",
+      "score": 300,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "paragraph.text_size",
+          "detail": "set in a text size of the page"
+        }
+      ]
+    },
+    {
+      "anchor": "p1:b7",
+      "page": 1,
+      "kind": "paragraph",
+      "bounds": [
+        300.0,
+        440.0,
+        318.12,
+        446.0
+      ],
+      "certainty": "rule",
+      "score": 300,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "paragraph.text_size",
+          "detail": "set in a text size of the page"
+        }
+      ]
+    },
+    {
+      "anchor": "p1:t5",
+      "page": 1,
+      "kind": "label_value",
+      "bounds": [
+        60.0,
+        400.0,
+        256.6,
+        409.5
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "label_value.line_pairs",
+          "detail": "1 lines of a short label and its value"
+        },
+        {
+          "kind": "rule",
+          "id": "label_value.value_shape",
+          "detail": "the values are numbers, dates or codes"
+        }
+      ]
+    },
+    {
+      "anchor": "p1:b9",
+      "page": 1,
+      "kind": "footer_band",
+      "bounds": [
+        40.0,
+        60.0,
+        101.84,
+        66.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "footer_band.running",
+          "detail": "1 lines repeat at the foot of the pages"
+        },
+        {
+          "kind": "rule",
+          "id": "footer_band.two_page",
+          "detail": "at the foot of both pages of a file of two"
+        }
+      ],
+      "alternatives": [
+        {
+          "kind": "list",
+          "score": 450
+        }
+      ]
+    },
+    {
+      "anchor": "p1:b9",
+      "page": 1,
+      "kind": "footer_band",
+      "bounds": [
+        40.0,
+        52.0,
+        81.13,
+        58.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "footer_band.running",
+          "detail": "1 lines repeat at the foot of the pages"
+        },
+        {
+          "kind": "rule",
+          "id": "footer_band.two_page",
+          "detail": "at the foot of both pages of a file of two"
+        }
+      ],
+      "alternatives": [
+        {
+          "kind": "paragraph",
+          "score": 300
+        }
+      ]
+    },
+    {
+      "anchor": "p2:t1",
+      "page": 2,
+      "kind": "label_value",
+      "bounds": [
+        40.0,
+        700.0,
+        400.0,
+        724.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.box_pairs",
+          "detail": "Found by: label and value pairs from drawn boxes; the label is the smaller text at the top of each box."
+        }
+      ]
+    },
+    {
+      "anchor": "p2:t2",
+      "page": 2,
+      "kind": "table",
+      "bounds": [
+        40.0,
+        638.0,
+        555.0,
+        670.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.ruled",
+          "detail": "a grid of drawn rules, read by its cells"
+        }
+      ]
+    },
+    {
+      "anchor": "p2:t3",
+      "page": 2,
+      "kind": "table",
+      "bounds": [
+        40.0,
+        590.0,
+        555.0,
+        638.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.ruled",
+          "detail": "a grid of drawn rules, read by its cells"
+        }
+      ]
+    },
+    {
+      "anchor": "p2:t4",
+      "page": 2,
+      "kind": "table",
+      "bounds": [
+        36.0,
+        513.8,
+        199.6,
+        572.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "pdf.banded",
+          "detail": "a header band of drawn cells with the lines under it in its columns"
+        }
+      ]
+    },
+    {
+      "anchor": "p2:b6",
+      "page": 2,
+      "kind": "paragraph",
+      "bounds": [
+        382.0,
+        460.0,
+        416.2,
+        469.5
+      ],
+      "certainty": "rule",
+      "score": 300,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "paragraph.text_size",
+          "detail": "set in a text size of the page"
+        }
+      ]
+    },
+    {
+      "anchor": "p2:b8",
+      "page": 2,
+      "kind": "paragraph",
+      "bounds": [
+        382.0,
+        430.0,
+        427.6,
+        439.5
+      ],
+      "certainty": "rule",
+      "score": 300,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "paragraph.text_size",
+          "detail": "set in a text size of the page"
+        }
+      ]
+    },
+    {
+      "anchor": "p2:b1",
+      "page": 2,
+      "kind": "heading",
+      "bounds": [
+        40.0,
+        800.0,
+        167.57,
+        814.0
+      ],
+      "certainty": "rule",
+      "score": 750,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "heading.size_ratio",
+          "detail": "1.47 times the body size"
+        },
+        {
+          "kind": "rule",
+          "id": "heading.bold_lead",
+          "detail": "led by bold ink"
+        },
+        {
+          "kind": "rule",
+          "id": "heading.title_lines",
+          "detail": "its lines stay a heading"
+        }
+      ]
+    },
+    {
+      "anchor": "p2:b2",
+      "page": 2,
+      "kind": "paragraph",
+      "bounds": [
+        40.0,
+        778.0,
+        155.35,
+        784.0
+      ],
+      "certainty": "rule",
+      "score": 300,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "paragraph.text_size",
+          "detail": "set in a text size of the page"
+        }
+      ]
+    },
+    {
+      "anchor": "p2:b3",
+      "page": 2,
+      "kind": "paragraph",
+      "bounds": [
+        40.0,
+        736.0,
+        148.3,
+        769.5
+      ],
+      "certainty": "rule",
+      "score": 600,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "paragraph.text_size",
+          "detail": "set in a text size of the page"
+        },
+        {
+          "kind": "rule",
+          "id": "paragraph.joins",
+          "detail": "2 lines go on the line over them"
+        }
+      ]
+    },
+    {
+      "anchor": "p2:b5",
+      "page": 2,
+      "kind": "paragraph",
+      "bounds": [
+        300.0,
+        470.0,
+        320.22,
+        476.0
+      ],
+      "certainty": "rule",
+      "score": 300,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "paragraph.text_size",
+          "detail": "set in a text size of the page"
+        }
+      ]
+    },
+    {
+      "anchor": "p2:b7",
+      "page": 2,
+      "kind": "paragraph",
+      "bounds": [
+        300.0,
+        440.0,
+        318.12,
+        446.0
+      ],
+      "certainty": "rule",
+      "score": 300,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "paragraph.text_size",
+          "detail": "set in a text size of the page"
+        }
+      ]
+    },
+    {
+      "anchor": "p2:t5",
+      "page": 2,
+      "kind": "label_value",
+      "bounds": [
+        60.0,
+        400.0,
+        256.6,
+        409.5
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "label_value.line_pairs",
+          "detail": "1 lines of a short label and its value"
+        },
+        {
+          "kind": "rule",
+          "id": "label_value.value_shape",
+          "detail": "the values are numbers, dates or codes"
+        }
+      ]
+    },
+    {
+      "anchor": "p2:b9",
+      "page": 2,
+      "kind": "footer_band",
+      "bounds": [
+        40.0,
+        60.0,
+        101.84,
+        66.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "footer_band.running",
+          "detail": "1 lines repeat at the foot of the pages"
+        },
+        {
+          "kind": "rule",
+          "id": "footer_band.two_page",
+          "detail": "at the foot of both pages of a file of two"
+        }
+      ],
+      "alternatives": [
+        {
+          "kind": "list",
+          "score": 450
+        }
+      ]
+    },
+    {
+      "anchor": "p2:b9",
+      "page": 2,
+      "kind": "footer_band",
+      "bounds": [
+        40.0,
+        52.0,
+        81.13,
+        58.0
+      ],
+      "certainty": "rule",
+      "score": 1000,
+      "evidence": [
+        {
+          "kind": "rule",
+          "id": "footer_band.running",
+          "detail": "1 lines repeat at the foot of the pages"
+        },
+        {
+          "kind": "rule",
+          "id": "footer_band.two_page",
+          "detail": "at the foot of both pages of a file of two"
+        }
+      ],
+      "alternatives": [
+        {
+          "kind": "paragraph",
+          "score": 300
+        }
+      ]
+    }
+  ]
 }

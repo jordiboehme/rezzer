@@ -67,6 +67,7 @@ fn units_with_their_part_overhead_stay_within_the_part_size() {
             needs_vision: false,
             codes: Vec::new(),
             code_unread: false,
+            shows: None,
         });
     }
     for c in 0..8 {
@@ -229,7 +230,7 @@ fn titled(units: &mut [Unit], extra: &[&str]) -> Vec<String> {
     units.iter().map(|u| u.title.clone()).collect()
 }
 
-/// Every title Rezzer gives its own parts (ruling P5-AF): a source unit titled like it,
+/// Every title Rezzer gives its own parts: a source unit titled like it,
 /// like a piece of it, or in another letter case gets its location, else `(section)`,
 /// but only when the document really has that part (as one of its units or as a part
 /// the main document adds). Rezzer's own unit keeps its title.

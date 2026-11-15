@@ -22,13 +22,13 @@ completeness: complete
 losses: 0
 ---
 
-# csv-spectrum-quotes\_and\_newlines.csv
+# csv-spectrum-quotes_and_newlines.csv
 
 ## Overview
 
 | Part | Kind | Size | Role | Reads from |
 | --- | --- | --- | --- | --- |
-| csv-spectrum-quotes\_and\_newlines | sheet | 2 rows x 2 columns |  |  |
+| csv-spectrum-quotes_and_newlines | sheet | 2 rows x 2 columns |  |  |
 
 ## Properties
 
@@ -36,16 +36,16 @@ losses: 0
 | --- | --- |
 | columns | 2 |
 | delimiter | , |
-| has\_header | true |
+| has_header | true |
 | rows | 2 |
 
-## csv-spectrum-quotes\_and\_newlines
+## csv-spectrum-quotes_and_newlines
 
 Table A1:B3 (data A2:B3), header row 1, found by rules: no gaps, header by type change.
 
 | a | b |
 | --- | --- |
-| 1 | ha "ha" ha |
+| 1 | ha<br>"ha"<br>ha |
 | 3 | 4 |
 
 **Columns A1:B3**

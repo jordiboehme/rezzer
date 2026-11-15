@@ -107,7 +107,7 @@ fn render_twin(
 
 /// The render of page 1 was left out with a Limit loss, the read finished in time and stayed
 /// small. Returns the loss.
-fn assert_render_skipped(out: &ReadOutcome, start: Instant) -> &Loss {
+fn assert_render_skipped(out: &ReadOutcome, start: common::Cpu) -> &Loss {
     assert!(
         start.elapsed() < Duration::from_secs(60),
         "{:?}",
@@ -148,7 +148,7 @@ const PATTERN_FILL: &str = "/Pattern cs /P1 scn 0 0 300 300 re f\n";
 
 #[test]
 fn a_tiling_pattern_with_a_huge_step_is_not_rendered() {
-    let start = Instant::now();
+    let start = common::Cpu::now();
     let file = render_twin(595, 842, PATTERN_FILL, |b| {
         let p = huge_step_pattern(b);
         Extra {
@@ -163,7 +163,7 @@ fn a_tiling_pattern_with_a_huge_step_is_not_rendered() {
 
 #[test]
 fn a_tiling_pattern_with_a_huge_step_in_a_form_is_not_rendered() {
-    let start = Instant::now();
+    let start = common::Cpu::now();
     let file = render_twin(595, 842, "/Fm1 Do\n", |b| {
         let p = huge_step_pattern(b);
         let form = b.stream(
@@ -185,7 +185,7 @@ fn a_tiling_pattern_with_a_huge_step_in_a_form_is_not_rendered() {
 
 #[test]
 fn a_tiling_pattern_with_a_huge_step_in_an_annotation_is_not_rendered() {
-    let start = Instant::now();
+    let start = common::Cpu::now();
     let file = render_twin(595, 842, "", |b| {
         let p = huge_step_pattern(b);
         let ap = b.stream(
@@ -239,7 +239,7 @@ fn dct_twin(dw: u32, dh: u32, w: u16, h: u16) -> Vec<u8> {
 
 #[test]
 fn a_dct_picture_of_15000_by_15000_is_not_rendered() {
-    let start = Instant::now();
+    let start = common::Cpu::now();
     let out = read_with(&dct_twin(15_000, 15_000, 15_000, 15_000), true);
     let loss = assert_render_skipped(&out, start);
     assert!(loss.what.contains("pictures"), "{loss:?}");
@@ -248,7 +248,7 @@ fn a_dct_picture_of_15000_by_15000_is_not_rendered() {
 #[test]
 fn a_dct_picture_whose_dictionary_is_smaller_than_its_frame_is_not_rendered() {
     // The dictionary says 100 by 100; the JPEG frame says 15,000 by 15,000.
-    let start = Instant::now();
+    let start = common::Cpu::now();
     let out = read_with(&dct_twin(100, 100, 15_000, 15_000), true);
     let loss = assert_render_skipped(&out, start);
     assert!(loss.what.contains("pictures"), "{loss:?}");
@@ -258,7 +258,7 @@ fn a_dct_picture_whose_dictionary_is_smaller_than_its_frame_is_not_rendered() {
 fn many_soft_masks_are_not_rendered() {
     // A large page (rendered at 16,000,000 pixels) with 40 different soft masks: each one is
     // a mask of the page's size.
-    let start = Instant::now();
+    let start = common::Cpu::now();
     let mut content = String::new();
     for i in 0..40 {
         content.push_str(&format!("/GS{i} gs 0 0 1 rg 0 0 100 100 re f\n"));
@@ -290,7 +290,7 @@ fn many_soft_masks_are_not_rendered() {
 fn a_large_inline_picture_is_not_rendered() {
     // 20,000 by 20,000 one-bit pixels from 8 bytes of data: the decoder builds a byte per
     // pixel.
-    let start = Instant::now();
+    let start = common::Cpu::now();
     let content = "q 595 0 0 842 0 0 cm BI /W 20000 /H 20000 /BPC 1 /CS /G ID \
                    \x00\x00\x00\x00\x00\x00\x00\x00 EI Q\n";
     let out = read_with(&render_twin(595, 842, content, |_| Extra::default()), true);
@@ -302,7 +302,7 @@ fn a_large_inline_picture_is_not_rendered() {
 fn a_picture_under_the_old_pixel_cap_that_takes_too_much_is_not_rendered() {
     // 15,000 by 15,000 one-bit pixels (225,000,000, under the brief's 256,000,000) from one
     // row of data.
-    let start = Instant::now();
+    let start = common::Cpu::now();
     let out = read_with(
         &render_twin(595, 842, "q 595 0 0 842 0 0 cm /Im1 Do Q\n", |b| {
             let image = b.stream(
@@ -346,7 +346,7 @@ const BOMB_RUNS: usize = 1_200_000;
 #[test]
 fn a_damaged_content_stream_is_read_only_as_far_as_measured() {
     // Inflate stops at the first copy; a lenient decoder would go on to 310 MB.
-    let start = Instant::now();
+    let start = common::Cpu::now();
     let out = read_with(&flate_content_page(&lenient_bomb(BOMB_RUNS)), false);
     assert!(
         start.elapsed() < Duration::from_secs(60),
@@ -375,7 +375,7 @@ fn fallback_not_used(out: &ReadOutcome) -> &Loss {
 
 #[test]
 fn a_damaged_stream_keeps_the_fallback_out() {
-    let start = Instant::now();
+    let start = common::Cpu::now();
     let mut file = vec![b' '; 2000];
     file.extend(flate_content_page(&lenient_bomb(BOMB_RUNS)));
     let out = read_with(&file, false);
@@ -429,7 +429,7 @@ fn a_stream_the_fallback_parser_reads_further_is_measured_that_far() {
     b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
     let mut file = vec![b' '; 2000];
     file.extend(b.finish(catalog));
-    let start = Instant::now();
+    let start = common::Cpu::now();
     let out = read_with(&file, false);
     assert!(start.elapsed() < Duration::from_secs(60));
     fallback_not_used(&out);
@@ -578,7 +578,7 @@ fn fill_twin(fills: usize, form: bool) -> Vec<u8> {
 /// The twin read with `extract_assets`: the read ends in time, stays small, and either
 /// renders or says why not.
 fn assert_fills_bounded(file: &[u8]) {
-    let start = Instant::now();
+    let start = common::Cpu::now();
     let out = read_with(file, true);
     assert!(
         start.elapsed() < Duration::from_secs(60),
@@ -685,7 +685,7 @@ fn many_damaged_streams_stay_small() {
 fn a_picture_with_a_large_mask_counts_the_mask() {
     // A small picture whose /Mask is a stencil of 8,000 by 8,000 pixels: alone just under the
     // render room, with the page over it.
-    let start = Instant::now();
+    let start = common::Cpu::now();
     let file = render_twin(595, 842, "q 595 0 0 842 0 0 cm /Im1 Do Q\n", |b| {
         let mask = b.stream(
             "/Type /XObject /Subtype /Image /Width 8000 /Height 8000 /ImageMask true \
@@ -924,7 +924,7 @@ fn dashes_in_one_path_just_under_the_room_render_small() {
         c.push_str(&format!("{x} 21 m {x} 821 l\n"));
     }
     c.push_str("S\n");
-    let start = Instant::now();
+    let start = common::Cpu::now();
     let out = read_with(&draw_twin(&c), true);
     assert!(
         start.elapsed() < Duration::from_secs(60),
@@ -938,7 +938,7 @@ fn dashes_in_one_path_just_under_the_room_render_small() {
 fn dashes_in_a_form_drawn_many_times_stay_small() {
     // A form of 100 full-height lines with dashes of 1 point, drawn 100 times: 4 million
     // dashes, about 316 MiB of strips when rendered.
-    let start = Instant::now();
+    let start = common::Cpu::now();
     let mut lines = String::from("[1 1] 0 d\n");
     for i in 0..100 {
         lines.push_str(&format!("{} 21 m {} 821 l S\n", 20 + i * 5, 20 + i * 5));
@@ -962,7 +962,7 @@ fn dashes_in_a_form_drawn_many_times_stay_small() {
 fn a_dash_pattern_of_negative_length_is_not_rendered() {
     // The renderer's dasher never finishes such a pattern.
     for pattern in ["[1 -2]", "[-1 -1]"] {
-        let start = Instant::now();
+        let start = common::Cpu::now();
         let content = format!("{pattern} 0 d 0 0 m 0 842 l S\n");
         let out = read_with(&draw_twin(&content), true);
         let loss = assert_render_skipped(&out, start);
@@ -1047,7 +1047,7 @@ fn bi_in_a_text_string_does_not_stop_the_render() {
 
 #[test]
 fn an_inline_stencil_after_bi_in_a_text_string_is_counted() {
-    let start = Instant::now();
+    let start = common::Cpu::now();
     let out = read_with(&bi_text_twin(1_000, &bomb_stencil()), true);
     let loss = assert_render_skipped(&out, start);
     assert!(loss.what.contains("stencil mask"), "{loss:?}");
@@ -1056,7 +1056,7 @@ fn an_inline_stencil_after_bi_in_a_text_string_is_counted() {
 #[test]
 fn an_inline_stencil_far_after_bi_in_a_text_string_is_counted() {
     // The stencil comes 1.3 MB after the words, past the scan's window.
-    let start = Instant::now();
+    let start = common::Cpu::now();
     let out = read_with(&bi_text_twin(1_300_000, &bomb_stencil()), true);
     let loss = assert_render_skipped(&out, start);
     assert!(loss.what.contains("stencil mask"), "{loss:?}");
@@ -1076,7 +1076,7 @@ fn an_inline_picture_before_much_drawing_renders() {
 #[test]
 fn an_inline_picture_that_cannot_be_read_is_not_rendered() {
     // `/H` has no value: the renderer stops at this `BI`.
-    let start = Instant::now();
+    let start = common::Cpu::now();
     let content = "q 8 0 0 8 0 0 cm BI /W 8 /H ID \x00\x00\x00\x00\x00\x00\x00\x00 EI Q\n";
     let out = read_with(&render_twin(595, 842, content, |_| Extra::default()), true);
     let loss = assert_render_skipped(&out, start);
@@ -1087,7 +1087,7 @@ fn an_inline_picture_that_cannot_be_read_is_not_rendered() {
 fn an_inline_stencil_split_over_two_content_streams_is_counted() {
     // The renderer joins a page's content streams with a space: the stencil's dictionary ends
     // the first and its data starts the second.
-    let start = Instant::now();
+    let start = common::Cpu::now();
     let mut b = Builder::default();
     let catalog = b.reserve();
     let tree = b.reserve();
@@ -1231,12 +1231,12 @@ fn a_page_at_the_pixel_cap_renders_small_enough_for_its_png() {
 #[test]
 fn many_small_pictures_crops_bounded() {
     // The twin with one picture, for the time a page with crops takes.
-    let start = Instant::now();
+    let start = common::Cpu::now();
     let one = read_with(&common::small_pictures_twin(1), true);
     let one_took = start.elapsed();
     assert_eq!(one.blobs.len(), 1, "{:#?}", one.document.losses);
     let file = common::small_pictures_twin(2_000);
-    let start = Instant::now();
+    let start = common::Cpu::now();
     let out = read_with(&file, true);
     let took = start.elapsed();
     eprintln!(
@@ -1258,11 +1258,17 @@ fn many_small_pictures_crops_bounded() {
 }
 
 #[test]
+#[cfg_attr(
+    not(debug_assertions),
+    ignore = "work steps are counted in debug builds only"
+)]
 fn many_places_of_one_picture_stay_linear() {
-    // The twin with one place, then 100,000 places of one picture on one page: one asset, and
-    // a read that grows with the places, not with their square. Nothing is rendered: the page
-    // with 100,000 draws is over the render room, which other tests cover.
-    let start = Instant::now();
+    // One place, then 100,000 places of one picture on one page: one asset, and a read that
+    // grows with the places, not with their square. Nothing is rendered: the page with
+    // 100,000 draws is over the render room, which other tests cover. Counted in steps of
+    // work (see `common::counted`): 100,000 places take at most twice the steps of 50,000
+    // (twenty times one place plus 5 s was the bound in time), where their square would take
+    // four times as many.
     // At 1 GiB, so the kept bytes (a sixteenth) take the 100,000 places and their work.
     let limits = Limits {
         max_memory_bytes: 1 << 30,
@@ -1270,21 +1276,20 @@ fn many_places_of_one_picture_stay_linear() {
     };
     let read = |bytes: &[u8]| read_with_limits(bytes, false, limits.clone());
     let one = read(&common::many_places_twin(1));
-    let one_took = start.elapsed();
     assert_eq!(one.document.assets.len(), 1, "{:#?}", one.document.losses);
     let n = 100_000;
+    let (_, half) = common::counted(|| read(&common::many_places_twin(n / 2)));
     let file = common::many_places_twin(n);
-    let start = Instant::now();
-    let out = read(&file);
+    let start = common::Cpu::now();
+    let (out, steps) = common::counted(|| read(&file));
     let took = start.elapsed();
     eprintln!(
-        "1 place: {one_took:?}; {n} places: {took:?}, max RSS {} MiB",
+        "{n} places: {took:?} of CPU time, max RSS {} MiB",
         common::max_rss_bytes() >> 20
     );
-    assert!(
-        took < one_took * 20 + Duration::from_secs(5),
-        "{took:?} against {one_took:?}"
-    );
+    assert!(took < Duration::from_secs(60), "{took:?}");
+    start.assert_no_hang();
+    common::assert_steps_within("100,000 places of one picture", steps, half, 2, 10_000);
     assert_eq!(out.document.assets.len(), 1, "{:#?}", out.document.losses);
     let media = out
         .document
@@ -1344,6 +1349,78 @@ fn shared_picture_pages(bomb: &[bool]) -> Vec<u8> {
     );
     b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
     b.finish(catalog)
+}
+
+#[test]
+fn a_region_kept_as_laid_out_on_a_page_that_is_not_rendered_keeps_the_read_complete() {
+    // Two lines of two short texts side by side are kept as laid out, and the page is not
+    // rendered (a picture too small to be listed says it is 15,000 pixels wide). The region
+    // stays listed without a file, the page says why, and nothing is unread: the lines are
+    // in the text.
+    let mut b = Builder::default();
+    let catalog = b.reserve();
+    let tree = b.reserve();
+    let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    let jpeg = b.stream(
+        "/Type /XObject /Subtype /Image /Width 15000 /Height 15000 /ColorSpace /DeviceRGB \
+         /BitsPerComponent 8 /Filter /DCTDecode",
+        &jpeg_head(15_000, 15_000),
+    );
+    let mut c = String::new();
+    for (n, row) in [["Linde Nord", "Ahorn West"], ["Birke Ost", "Erle Mitte"]]
+        .iter()
+        .enumerate()
+    {
+        let y = 600 - 10 * n;
+        c += &format!("BT /F1 8 Tf 40 {y} Td ({}) Tj ET\n", row[0]);
+        c += &format!("BT /F1 8 Tf 300 {y} Td ({}) Tj ET\n", row[1]);
+    }
+    let with = |bomb: bool, b: &mut Builder| {
+        let mut c = c.clone();
+        if bomb {
+            c.push_str("q 10 0 0 10 300 200 cm /B Do Q\n");
+        }
+        let cs = b.stream("", c.as_bytes());
+        b.add(format!(
+            "<< /Type /Page /Parent {tree} 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F1 {font} 0 R >> /XObject << /B {jpeg} 0 R >> >> \
+             /Contents {cs} 0 R >>"
+        ))
+    };
+    let (bad, good) = (with(true, &mut b), with(false, &mut b));
+    b.set(
+        tree,
+        format!("<< /Type /Pages /Kids [{bad} 0 R {good} 0 R] /Count 2 >>"),
+    );
+    b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
+    let out = read_with(&b.finish(catalog), true);
+    let ids: Vec<&str> = out.document.assets.iter().map(|a| a.id.as_str()).collect();
+    assert_eq!(ids, ["page-1-region-1", "page-2-region-1"]);
+    // The control: the same lines on a page that renders get their file.
+    let blobs: Vec<&str> = out.blobs.iter().map(|b| b.asset.as_str()).collect();
+    assert_eq!(blobs, ["page-2-region-1"], "{:#?}", out.document.losses);
+    let said: Vec<&Loss> = out
+        .document
+        .losses
+        .iter()
+        .filter(|l| l.what.contains("not rendered") || l.what.contains("no file"))
+        .collect();
+    assert!(
+        matches!(
+            said.as_slice(),
+            [l] if l.location == "p1"
+                && l.what.starts_with("page 1 is not rendered")
+                && l.severity == Severity::Info
+        ),
+        "{:#?}",
+        out.document.losses
+    );
+    assert_eq!(
+        out.completeness,
+        Completeness::Complete,
+        "{:#?}",
+        out.document.losses
+    );
 }
 
 #[test]
@@ -1474,6 +1551,11 @@ fn timed(file: &[u8], extract: bool, limits: Limits) -> (ReadOutcome, Duration) 
     (out, start.elapsed())
 }
 
+/// The read of `file` and its steps of work (see `common::counted`).
+fn counted(file: &[u8], extract: bool, limits: Limits) -> (ReadOutcome, Option<u64>) {
+    common::counted(|| read_with_limits(file, extract, limits))
+}
+
 /// Square blocks of noise, `block` pixels a side, `w` by `h` pixels: they look like modules.
 fn block_noise(w: u32, h: u32, block: u32) -> Vec<u8> {
     let mut state = 0x9e37_79b9u32;
@@ -1523,7 +1605,12 @@ fn a_noise_page_at_the_render_cap_is_scanned_in_tiles_within_its_time() {
     let found: Vec<_> = out.document.assets.iter().flat_map(|a| &a.codes).collect();
     assert!(found.is_empty(), "{found:#?}");
     // One picture's time and the render, at most.
-    assert!(took < Duration::from_secs(15), "{took:?}");
+    // A guard of the time limit itself, on the wall clock: the scan in tiles ends within the
+    // read's limit and a little more, however busy the machine is.
+    assert!(
+        took < scan_limits().max_time + Duration::from_secs(10),
+        "{took:?}"
+    );
     assert_rss_under_256_mib();
 }
 
@@ -1575,8 +1662,13 @@ fn five_thousand_finder_patterns_stop_at_the_time_limit() {
         (LossReason::Limit, Severity::Info)
     );
     assert_eq!(out.completeness, Completeness::Complete);
-    // The scan stops waiting at 3 seconds a picture; the page still needs vision.
-    assert!(took < twin_time + Duration::from_secs(8), "{took:?}");
+    // The scan stops waiting at 3 seconds a picture; the page still needs vision. A guard of
+    // the time limit itself, on the wall clock: the read ends within its limit, however busy
+    // the machine is.
+    assert!(
+        took < scan_limits().max_time + Duration::from_secs(10),
+        "{took:?} against twin {twin_time:?}"
+    );
     assert!(
         out.document
             .assets
@@ -1587,6 +1679,10 @@ fn five_thousand_finder_patterns_stop_at_the_time_limit() {
 }
 
 #[test]
+#[cfg_attr(
+    not(debug_assertions),
+    ignore = "work steps are counted in debug builds only"
+)]
 fn a_picture_of_400_mp_is_refused_before_it_is_decoded() {
     // A 1-bit picture (it looks like a code, so it is read again at its own resolution): the
     // dictionary says 20,000 by 20,000 pixels; the data is short. The twin says 2,000.
@@ -1613,13 +1709,12 @@ fn a_picture_of_400_mp_is_refused_before_it_is_decoded() {
         b.set(catalog, format!("<< /Type /Catalog /Pages {tree} 0 R >>"));
         b.finish(catalog)
     };
-    let (_, twin_time) = timed(&file(2_000), false, scan_limits());
-    let (out, took) = timed(&file(20_000), false, scan_limits());
-    eprintln!(
-        "twin {twin_time:?}, 400 MP {took:?}, max RSS {} MiB",
-        common::max_rss_bytes() >> 20
-    );
-    assert!(took < Duration::from_secs(5), "{took:?}");
+    let (_, twin) = counted(&file(2_000), false, scan_limits());
+    let (out, steps) = counted(&file(20_000), false, scan_limits());
+    eprintln!("400 MP: max RSS {} MiB", common::max_rss_bytes() >> 20);
+    // In steps of work (a step per 4,096 pixels rendered or scanned; see `common::counted`):
+    // no more than the twin, which is rendered and scanned.
+    common::assert_steps_within("a picture of 400 MP", steps, twin, 1, 1_000);
     // Nothing decodes it: the page render is refused by what it would take, before any
     // decoding, and says so.
     let loss = out
@@ -1636,6 +1731,10 @@ fn a_picture_of_400_mp_is_refused_before_it_is_decoded() {
 }
 
 #[test]
+#[cfg_attr(
+    not(debug_assertions),
+    ignore = "work steps are counted in debug builds only"
+)]
 fn the_code_cap_of_a_file_holds() {
     // 21 pages of 30 different small QR codes each, 630 codes: 500 are kept.
     let pictures: Vec<(u32, u32, Vec<u8>)> = (0..630)
@@ -1668,20 +1767,22 @@ fn the_code_cap_of_a_file_holds() {
             })
             .collect()
     };
-    let (twin, twin_time) = timed(
+    let (twin, twin_steps) = counted(
         &picture_file(595, 842, &pages(1), &pictures[..30]),
         false,
         hostile(),
     );
     let twin_codes: usize = twin.document.assets.iter().map(|a| a.codes.len()).sum();
     assert_eq!(twin_codes, 30, "{:#?}", twin.document.losses);
-    let (out, took) = timed(
+    let start = common::Cpu::now();
+    let (out, steps) = counted(
         &picture_file(595, 842, &pages(21), &pictures),
         false,
         hostile(),
     );
+    let took = start.elapsed();
     eprintln!(
-        "twin {twin_time:?}, 630 codes {took:?}, max RSS {} MiB",
+        "630 codes: {took:?} of CPU time, max RSS {} MiB",
         common::max_rss_bytes() >> 20
     );
     let codes: usize = out.document.assets.iter().map(|a| a.codes.len()).sum();
@@ -1693,11 +1794,19 @@ fn the_code_cap_of_a_file_holds() {
         .find(|l| l.what.contains("more than 500 codes"))
         .unwrap_or_else(|| panic!("{:#?}", out.document.losses));
     assert_eq!(loss.why, LossReason::Limit);
-    assert!(took < twin_time * 30 + Duration::from_secs(10), "{took:?}");
+    // In steps of work (pixels rendered and scanned, and decoder calls; see
+    // `common::counted`): 21 pages of 30 codes against one page of them.
+    common::assert_steps_within("630 codes", steps, twin_steps, 30, 10_000);
+    assert!(took < Duration::from_secs(120), "{took:?}");
+    start.assert_no_hang();
     assert_rss_under_256_mib();
 }
 
 #[test]
+#[cfg_attr(
+    not(debug_assertions),
+    ignore = "work steps are counted in debug builds only"
+)]
 fn a_payload_of_the_largest_code_is_kept_whole() {
     // A QR code of version 40 with 2,940 bytes, about the most a QR code holds, against a
     // short one.
@@ -1711,21 +1820,21 @@ fn a_payload_of_the_largest_code_is_kept_whole() {
         )
         .expect("encode");
         let (g, w, h) = m.gray(2, 4, 0);
-        picture_file(
+        let pixels = u64::from(w) * u64::from(h);
+        let bytes = picture_file(
             595,
             842,
             &[vec![(150.0, 300.0, 300.0, 300.0, 0)]],
             &[(w, h, g)],
-        )
+        );
+        (bytes, pixels)
     };
     let short: Vec<u8> = (0u8..=255).cycle().take(32).collect();
     let long: Vec<u8> = (0u8..=255).rev().cycle().take(2_940).collect();
-    let (twin, twin_time) = timed(&file(&short), false, scan_limits());
-    let (out, took) = timed(&file(&long), false, scan_limits());
-    eprintln!(
-        "twin {twin_time:?}, 2,940 bytes {took:?}, max RSS {} MiB",
-        common::max_rss_bytes() >> 20
-    );
+    let ((short_file, short_pixels), (long_file, long_pixels)) = (file(&short), file(&long));
+    let (twin, twin_steps) = counted(&short_file, false, scan_limits());
+    let (out, steps) = counted(&long_file, false, scan_limits());
+    eprintln!("2,940 bytes: max RSS {} MiB", common::max_rss_bytes() >> 20);
     let got = |o: &ReadOutcome| {
         o.document
             .assets
@@ -1736,9 +1845,26 @@ fn a_payload_of_the_largest_code_is_kept_whole() {
     };
     assert_eq!(got(&twin), [32]);
     assert_eq!(got(&out), [2_940]);
-    assert!(took < twin_time * 4 + Duration::from_secs(2), "{took:?}");
+    // In steps of work (pixels rendered and scanned, and decoder calls; see
+    // `common::counted`) per pixel of the code's picture: the decoder's work grows with the
+    // modules of the code, and a code of version 40 has many times the modules of the short
+    // one. Per pixel the large code takes at most 4 times the short one's steps (4 times was
+    // the bound in time against the short code).
+    eprintln!("steps {steps:?} for {long_pixels} pixels against {twin_steps:?} for {short_pixels}");
+    if let (Some(s), Some(t)) = (steps, twin_steps) {
+        assert!(
+            u128::from(s) * u128::from(short_pixels) <= 4 * u128::from(t) * u128::from(long_pixels),
+            "{s} steps for {long_pixels} pixels against {t} for {short_pixels}"
+        );
+    }
     assert_rss_under_256_mib();
 }
+
+/// The steps of work a page of 200,000 small filled rectangles may take (see
+/// `many_small_filled_rectangles_are_searched_within_bounds`): the count of the costliest
+/// shape (the stacked squares, 42,600,020) measured when the bound was set (2026-11-11), with
+/// half of it again as margin.
+const RECTANGLE_STEPS: u64 = 64_000_000;
 
 /// One page of `w` by `h` points whose content fills the rectangles `cells` in one path.
 fn cells_page(w: u32, h: u32, cells: &[[f32; 4]]) -> Vec<u8> {
@@ -1763,6 +1889,10 @@ fn cells_page(w: u32, h: u32, cells: &[[f32; 4]]) -> Vec<u8> {
 }
 
 #[test]
+#[cfg_attr(
+    not(debug_assertions),
+    ignore = "work steps are counted in debug builds only"
+)]
 fn many_small_filled_rectangles_are_searched_within_bounds() {
     // A checkerboard of squares of one point (they touch at their corners: one huge group),
     // tall thin bars, and squares all at one place (every pair is near), each 200,000 of
@@ -1785,7 +1915,7 @@ fn many_small_filled_rectangles_are_searched_within_bounds() {
         })
         .collect();
     let stacked: Vec<[f32; 4]> = (0..200_000).map(|_| [100.0, 100.0, 101.0, 101.0]).collect();
-    let (twin, twin_time) = timed(&cells_page(1_000, 1_000, &checker(2_000)), false, hostile());
+    let (twin, twin_steps) = counted(&cells_page(1_000, 1_000, &checker(2_000)), false, hostile());
     assert!(
         twin.document.assets.is_empty(),
         "{:#?}",
@@ -1796,9 +1926,12 @@ fn many_small_filled_rectangles_are_searched_within_bounds() {
         ("bars", bars),
         ("stacked", stacked),
     ] {
-        let (out, took) = timed(&cells_page(1_000, 1_000, &cells), false, hostile());
+        let start = common::Cpu::now();
+        let (out, steps) = counted(&cells_page(1_000, 1_000, &cells), false, hostile());
+        let took = start.elapsed();
         eprintln!(
-            "twin {twin_time:?}, {name} {took:?}, max RSS {} MiB, losses {:?}",
+            "twin {twin_steps:?} steps, {name} {steps:?} steps and {took:?} of CPU time, \
+             max RSS {} MiB, losses {:?}",
             common::max_rss_bytes() >> 20,
             out.document
                 .losses
@@ -1811,7 +1944,11 @@ fn many_small_filled_rectangles_are_searched_within_bounds() {
             "{name}: {:#?}",
             out.document.assets
         );
-        assert!(took < Duration::from_secs(10), "{name}: {took:?}");
+        // The search stops at its bounds of grid entries and pairs (see `codes`), counted in
+        // steps of work (see `RECTANGLE_STEPS`).
+        common::assert_steps_under(name, steps, RECTANGLE_STEPS);
+        assert!(took < Duration::from_secs(60), "{name}: {took:?}");
+        start.assert_no_hang();
     }
     assert_rss_under_256_mib();
 }
@@ -1843,7 +1980,7 @@ fn a_finer_look_that_does_not_fit_the_memory_is_named() {
         &[small_qr(), (2000, 2000, block_noise(2000, 2000, 50))],
     );
     let at = |mib: u64| {
-        let start = Instant::now();
+        let start = common::Cpu::now();
         let out = read_with_limits(
             &file,
             false,
@@ -2108,7 +2245,7 @@ fn a_shared_code_is_written_once_whatever_its_places() {
         ..hostile()
     };
     let md = |file: &[u8]| {
-        let start = Instant::now();
+        let start = common::Cpu::now();
         let out = read_with_limits(file, false, limits.clone());
         let md = rezzer_render::render(
             &out.document,
@@ -2199,7 +2336,7 @@ fn scans_at_256_mib(pages: usize, extract: bool) -> (ReadOutcome, Duration, u64)
         max_memory_bytes: 256 << 20,
         ..Limits::default()
     };
-    let start = Instant::now();
+    let start = common::Cpu::now();
     let out = read_with_limits(&file, extract, limits);
     let took = start.elapsed();
     (out, took, common::max_rss_bytes())

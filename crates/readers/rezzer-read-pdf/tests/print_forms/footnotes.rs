@@ -56,7 +56,7 @@ fn footnotes_form_a_legend() {
 
 /// A legend on pages with a running header and a running footer (three pages, so both
 /// repeat): the furniture lines are taken out of the page's text before the legend's lines
-/// are found again, and each reference still links to its footnote (Task 7 carry: the place
+/// are found again, and each reference still links to its footnote (the place
 /// of each run is mapped across the lines taken out).
 #[test]
 fn legend_under_running_header_and_footer_is_linked() {
@@ -137,7 +137,7 @@ fn legend_under_running_header_and_footer_is_linked() {
 }
 
 /// Guard: a title at 1.5 times the body size or more stays a level-1 heading, also when it is
-/// not bold (Task 8 takes the document title from it).
+/// not bold.
 #[test]
 fn form_title_stays_a_heading() {
     let template = common::show("FL", 14.0, 40.0, 780.0, "Musterformular")
@@ -212,6 +212,14 @@ pub(crate) fn references(out: &ReadOutcome) -> Vec<String> {
                 }
                 Block::Section { blocks, .. } => walk(blocks, found),
                 Block::List { items, .. } => items.iter().for_each(|i| walk(i, found)),
+                // Text kept as laid out holds its references as spans of its marker.
+                Block::Spatial { lines, .. } => found.extend(
+                    lines
+                        .iter()
+                        .flat_map(|l| &l.pieces)
+                        .flat_map(|p| &p.spans)
+                        .filter_map(|s| s.footnote.clone()),
+                ),
                 _ => {}
             }
         }
@@ -243,7 +251,8 @@ fn raised_numbers_and_a_legend_in_columns() {
         template,
         ..FormPage::default()
     };
-    let out = read(&print_form(&[page], "", ""));
+    let bytes = print_form(&[page], "", "");
+    let out = read(&bytes);
     assert_eq!(
         footnote_texts(&out),
         [
@@ -258,6 +267,16 @@ fn raised_numbers_and_a_legend_in_columns() {
     );
     assert_eq!(references(&out), ["p1-2", "p1-3"]);
     assert_eq!(found_by(&out).len(), 1, "{:?}", found_by(&out));
+    // The region of the legend's lines is the legend that is written.
+    for text in ["Std = Stunden", "Gegebenenfalls", "nach Vertrag"] {
+        let kinds = common::kinds_of(&bytes, text);
+        assert_eq!(kinds.len(), 1, "{text}: {kinds:?}");
+        assert_eq!(
+            kinds[0].0,
+            rezzer_read_pdf::layoutregions::Kind::FootnoteLegend,
+            "{text}: {kinds:?}"
+        );
+    }
 }
 
 /// Guard: a numbered line at the bottom of a page is no footnote when no number above is

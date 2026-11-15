@@ -15,7 +15,7 @@ use crate::names::legal_name;
 #[test]
 fn every_confirmed_type_has_its_extension() {
     // Every type the bytes can confirm is written under an extension Crystalline takes,
-    // and the cleanup knows that name (ruling P5-AJ).
+    // and the cleanup knows that name.
     for mime in rezzer_detect::CONFIRMED_MEDIA_TYPES {
         let ext = ASSET_TYPES
             .iter()
@@ -209,6 +209,7 @@ fn a_swap_between_pictures_and_cleaning_is_caught() {
         needs_vision: true,
         codes: Vec::new(),
         code_unread: false,
+        shows: None,
     });
     let blobs = vec![Blob {
         asset: "page-1".into(),

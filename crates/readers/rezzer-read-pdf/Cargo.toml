@@ -11,6 +11,8 @@ rezzer-model = { path = "../../rezzer-model" }
 rezzer-limits = { path = "../../rezzer-limits" }
 pdfparts = { path = "../../formats/pdfparts" }
 barcodes = { path = "../../formats/barcodes" }
+layoutregions = { path = "../../formats/layoutregions" }
+rezzer-layout = { path = "../../rezzer-layout" }
 base64.workspace = true
 hayro.workspace = true
 hayro-interpret.workspace = true
@@ -27,4 +29,10 @@ flate2 = { workspace = true, features = ["zlib-rs"] }
 insta.workspace = true
 libc.workspace = true
 rezzer-render = { path = "../../rezzer-render" }
+# The scorecard (a development tool): the truth-based measure, in the tests only.
+scorecard = { path = "../../devtools/scorecard" }
 serde_json.workspace = true
+
+[[example]]
+name = "region-report"
+path = "examples/region-report.rs"

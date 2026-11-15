@@ -6,20 +6,24 @@
 //! another style, boxes of fields next to each other in a row or a column, and the titles of
 //! boxes beside them and of framed boxes over their lines.
 
+use layoutregions::segment::drawn::{Grids, Line, LinesAt, Unsearched};
+
 use super::*;
-use crate::layout::Slot;
-use crate::regions::{Index, Seg, grids, regions_of};
+use crate::regions::{Index, regions_of};
 use crate::tables::LABEL_STEP;
 use crate::tables::banded::{Heads, heads_lines};
+use layoutregions::extract::pairs::{touch_reach, touching};
 
-/// The note before the first table of drawn boxes of a page.
-pub(super) const BOX_FOUND_BY: &str = "Found by: label and value pairs from drawn boxes; the label \
-     is the smaller text at the top of each box.";
+pub(super) use crate::found::BOX_FOUND_BY;
 
-/// Boxes of one row or column of fields touch within this share of the size of their
-/// smallest text: farther apart, they are boxes on their own. Relative to the text, so a form
-/// printed larger or smaller chains the same.
-const TOUCH: f32 = 0.5;
+/// What [`box_pairs`] reads: the tables and titles, the losses of the boxes read as they stand
+/// with their runs (see [`Doubts`]), and why the page was looked at only in part.
+pub(crate) type BoxesRead = (
+    Vec<Planned>,
+    Vec<BoxTitle>,
+    (Vec<String>, Doubts),
+    Option<String>,
+);
 
 /// Fields of drawn boxes (reading regions, in the frame of the runs): a box whose text is a
 /// label at its top or left in one style (smaller by half a point or in another weight or
@@ -37,12 +41,12 @@ pub(crate) fn box_pairs(
     page: u32,
     flow: &mut Flow,
     boxes: &[[f32; 4]],
-    rules: &[Rule],
+    grids: Result<&Grids, Unsearched>,
     text_sizes: &[f32],
     stop: &dyn Fn() -> bool,
-) -> (Vec<Planned>, Vec<BoxTitle>, Vec<String>, Option<String>) {
+) -> BoxesRead {
     if boxes.is_empty() || flow.runs.is_empty() {
-        return (Vec::new(), Vec::new(), Vec::new(), None);
+        return (Vec::new(), Vec::new(), (Vec::new(), Vec::new()), None);
     }
     let points: Vec<(f32, f32, f32)> = flow
         .runs
@@ -56,21 +60,12 @@ pub(crate) fn box_pairs(
         })
         .collect();
     let Ok(regions) = regions_of(&points, boxes) else {
-        return (Vec::new(), Vec::new(), Vec::new(), None);
+        return (Vec::new(), Vec::new(), (Vec::new(), Vec::new()), None);
     };
     let mut in_box: Vec<Vec<usize>> = vec![Vec::new(); boxes.len()];
     for (i, r) in regions.iter().enumerate() {
         if let Some(b) = r {
             in_box[*b as usize].push(i);
-            // The text of a box is a block of its own (see [`Slot::Block`]): a paragraph never
-            // goes on from one box into the next (boxes of fields in a column whose labels and
-            // values are of one style), nor into text outside its box. Box blocks count down
-            // from the top of the numbers, apart from the blocks of cells read one by one.
-            if let Some(slot) = flow.slots.get_mut(i)
-                && *slot == Slot::Free
-            {
-                *slot = Slot::Block(usize::MAX - *b as usize);
-            }
         }
     }
     // Framed boxes with a title over their lines, found by the frame: the frame's text is
@@ -82,75 +77,13 @@ pub(crate) fn box_pairs(
             consumed[b] = true;
         }
     }
-    let mut how = Reading {
-        one_field: true,
-        smaller: false,
-        small: small_size(text_sizes).saturating_sub(1),
-        labels: &[],
-    };
-    let mut fields: Vec<Option<Field>> = (0..boxes.len()).map(|_| None).collect();
-    let mut unsure: Vec<(usize, &'static str)> = Vec::new();
-    for (b, ids) in in_box.iter().enumerate() {
-        if ids.is_empty() || consumed[b] {
-            continue;
-        }
-        match parse(flow, ids, how) {
-            Parsed::Fields(mut f) if f.len() == 1 => fields[b] = f.pop(),
-            Parsed::Unsure(why) => unsure.push((b, why)),
-            _ => {}
-        }
-    }
-    // The style of the text alone in an empty boxed field is a label's: boxes whose label and
-    // value differ in weight, slant or font only are read again knowing it.
-    let mut known: Vec<Style> = fields
-        .iter()
-        .flatten()
-        .filter(|f| f.value.is_empty())
-        .filter_map(|f| f.label.first().map(|&i| style_of(&flow.runs[i])))
-        .collect();
-    known.sort_unstable();
-    known.dedup();
-    if !known.is_empty() && unsure.iter().any(|u| u.1 == WEIGHT_ONLY) {
-        how.labels = &known;
-        for (b, why) in &mut unsure {
-            if *why != WEIGHT_ONLY {
-                continue;
-            }
-            match parse(flow, &in_box[*b], how) {
-                Parsed::Fields(mut f) if f.len() == 1 => {
-                    fields[*b] = f.pop();
-                    *why = "";
-                }
-                Parsed::Unsure(again) => *why = again,
-                _ => *why = "",
-            }
-        }
-        unsure.retain(|u| !u.1.is_empty());
-    }
-    // How near two boxes touch: by the size of their smallest text (see [`TOUCH`]).
+    let (mut fields, mut unsure) = box_fields(&flow.runs, &in_box, &consumed, text_sizes);
+    // How near two boxes touch: by the size of their smallest text (see `touch_reach`).
     let touch: Vec<f32> = in_box
         .iter()
-        .map(|ids| {
-            let small = ids
-                .iter()
-                .filter(|&&i| inked(&flow.runs[i]))
-                .map(|&i| flow.runs[i].size)
-                .fold(f32::INFINITY, f32::min);
-            if small.is_finite() {
-                TOUCH * small
-            } else {
-                0.0
-            }
-        })
+        .map(|ids| touch_reach(&flow.runs, ids))
         .collect();
-    let near = |p: usize, q: usize| {
-        let (a, b, t) = (boxes[p], boxes[q], touch[p].max(touch[q]));
-        let row =
-            (a[3] - b[3]).abs() <= t && ((a[2] - b[0]).abs() <= t || (b[2] - a[0]).abs() <= t);
-        let column =
-            (a[0] - b[0]).abs() <= t && ((a[1] - b[3]).abs() <= t || (b[1] - a[3]).abs() <= t);
-        row || column
-    };
+    let near = |p: usize, q: usize| touching(boxes[p], boxes[q], touch[p].max(touch[q]));
     let inked_of = |b: usize| -> Vec<usize> {
         in_box[b]
             .iter()
@@ -187,7 +120,7 @@ pub(crate) fn box_pairs(
         let one = ids.iter().all(|&i| {
             style_of(&flow.runs[i]) == style_of(&flow.runs[ids[0]]) && !flow.runs[i].bold
         });
-        if !one || lines_of(flow, &ids).len() > LABEL_LINES {
+        if !one || lines_of(&flow.runs, &ids).len() > LABEL_LINES {
             continue;
         }
         let Some((style, offset)) = label_at(b, &ids) else {
@@ -203,7 +136,7 @@ pub(crate) fn box_pairs(
     }
     for (b, ids) in empty {
         fields[b] = Some(Field {
-            label: lines_of(flow, &ids).into_iter().flatten().collect(),
+            label: lines_of(&flow.runs, &ids).into_iter().flatten().collect(),
             value: Vec::new(),
         });
     }
@@ -221,15 +154,9 @@ pub(crate) fn box_pairs(
     order.sort_by(|&a, &b| boxes[a][0].total_cmp(&boxes[b][0]));
     // A box with no field joins the fields on both sides of it: one at an end of its row
     // joins nothing, so it is no part of the row (the lines under a title there are its own).
-    let chains = |order: &[usize], next: &dyn Fn(usize, usize) -> bool| {
-        let mut out: Vec<Vec<usize>> = Vec::new();
-        for &b in order {
-            match out.iter_mut().find(|c| next(*c.last().expect("a box"), b)) {
-                Some(c) => c.push(b),
-                None => out.push(vec![b]),
-            }
-        }
-        out.into_iter()
+    let with_fields = |chains: Vec<Vec<usize>>| {
+        chains
+            .into_iter()
             .filter_map(|c| {
                 let first = c.iter().position(|&b| fields[b].is_some())?;
                 let last = c.iter().rposition(|&b| fields[b].is_some())?;
@@ -237,41 +164,27 @@ pub(crate) fn box_pairs(
             })
             .collect::<Vec<_>>()
     };
+    // The widest touch of two boxes, and the largest width and height of a box: what the
+    // search for the chain of a box looks at (see `chain_boxes`).
+    let reach = touch.iter().copied().fold(0.0f32, f32::max);
+    let longest =
+        |from: usize, to: usize| boxes.iter().map(|b| b[to] - b[from]).fold(0.0f32, f32::max);
+    let (widest, tallest) = (longest(0, 2), longest(1, 3));
     let has_value = |c: &[usize]| {
         c.iter()
             .any(|&b| fields[b].as_ref().is_some_and(|f| !f.value.is_empty()))
     };
-    // The page's lines, once needed: a box drawn with no text in it is no reading region, so
-    // the boxes beside it touch it, not each other; the lines show it drawn.
-    let lines = std::cell::OnceCell::new();
-    // Sorted by their place across, so the lines near a place are found by a search.
-    let lines = || {
-        lines.get_or_init(|| {
-            let (mut hs, mut vs) = grids(rules).map(|g| (g.hs, g.vs)).unwrap_or_default();
-            hs.sort_by(|a, b| a.at.total_cmp(&b.at));
-            vs.sort_by(|a, b| a.at.total_cmp(&b.at));
-            (hs, vs)
-        })
+    // The page's lines: a box drawn with no text in it is no reading region, so the boxes
+    // beside it touch it, not each other; the lines show it drawn. They are sorted by their
+    // place across, so the lines near a place are found by a search.
+    let (hs, vs): (&[Line], &[Line]) = match grids {
+        Ok(g) => (&g.hs, &g.vs),
+        Err(_) => (&[], &[]),
     };
-    // Whether lines `segs` at `at` (within `t`) cover the stretch `lo..hi`.
-    let covered = |segs: &[Seg], at: f32, lo: f32, hi: f32, t: f32| {
-        let mut end = lo;
-        let tol = t.max(SNAP);
-        let from = segs.partition_point(|s| s.at < at - tol);
-        let mut parts: Vec<&Seg> = segs[from..]
-            .iter()
-            .take_while(|s| s.at <= at + tol)
-            .filter(|s| s.to > lo && s.from < hi)
-            .collect();
-        parts.sort_by(|a, b| a.from.total_cmp(&b.from));
-        for s in parts {
-            if s.from > end + t.max(SNAP) {
-                return false;
-            }
-            end = end.max(s.to);
-        }
-        end >= hi - t.max(SNAP)
-    };
+    // Whether the flat lines, or the upright ones, at `at` (within `t`) cover the stretch
+    // `lo..hi`.
+    let (flat, upright) = (Cover::new(hs), Cover::new(vs));
+    let covered = |segs: &Cover<'_>, at: f32, lo: f32, hi: f32, t: f32| segs.covers(at, lo, hi, t);
     // Two boxes of a row with an empty drawn box between them: its top and bottom drawn across
     // the gap. Two of a column: its sides drawn down the gap.
     // The gap is at most as wide as twice the wider box: an empty box beside boxes like it.
@@ -280,28 +193,35 @@ pub(crate) fn box_pairs(
         if gap <= t || gap > 2.0 * (a[2] - a[0]).max(b[2] - b[0]) {
             return false;
         }
-        let (hs, _) = lines();
-        covered(hs, a[3], a[2], b[0], t) && covered(hs, a[1].max(b[1]), a[2], b[0], t)
+        covered(&flat, a[3], a[2], b[0], t) && covered(&flat, a[1].max(b[1]), a[2], b[0], t)
     };
     let empty_column = |a: [f32; 4], b: [f32; 4], t: f32| {
         let gap = a[1] - b[3];
         if gap <= t || gap > 2.0 * (a[3] - a[1]).max(b[3] - b[1]) {
             return false;
         }
-        let (_, vs) = lines();
-        covered(vs, a[0], b[3], a[1], t) && covered(vs, a[2], b[3], a[1], t)
+        covered(&upright, a[0], b[3], a[1], t) && covered(&upright, a[2], b[3], a[1], t)
     };
-    let mut hs: Option<Vec<Seg>> = None;
     // The page's lines, built once for every row, and the work they take for the page.
     let mut heads: Option<Heads> = None;
     let mut work = 0usize;
     let mut spent: Option<&str> = None;
     let mut groups: Vec<Vec<usize>> = Vec::new();
     let mut used = vec![false; boxes.len()];
-    for c in chains(&order, &|p, q| {
-        let (a, b, t) = (boxes[p], boxes[q], touch[p].max(touch[q]));
-        (a[3] - b[3]).abs() <= t && ((a[2] - b[0]).abs() <= t || empty_row(a, b, t))
-    }) {
+    // Rows: boxes with their tops at one height, each starting where the one before it ends
+    // or past an empty drawn box, which is at most twice as wide as the wider of the two.
+    let rows = chain_boxes(
+        &order,
+        &|b| boxes[b][3],
+        reach,
+        &|p, q| boxes[q][0] - boxes[p][2],
+        &|p| reach.max(2.0 * (boxes[p][2] - boxes[p][0]).max(widest)),
+        &|p, q| {
+            let (a, b, t) = (boxes[p], boxes[q], touch[p].max(touch[q]));
+            (a[3] - b[3]).abs() <= t && ((a[2] - b[0]).abs() <= t || empty_row(a, b, t))
+        },
+    );
+    for c in with_fields(rows) {
         if !two_fields(&c) || !has_value(&c) {
             continue;
         }
@@ -324,7 +244,6 @@ pub(crate) fn box_pairs(
         if spent.is_some() {
             continue;
         }
-        let hs = hs.get_or_insert_with(|| grids(rules).map(|g| g.hs).unwrap_or_default());
         let heads = heads.get_or_insert_with(|| Heads::new(flow));
         match heads_lines(flow, heads, hs, b, &xs, &mut work) {
             Some(false) => groups.push(c),
@@ -340,10 +259,21 @@ pub(crate) fn box_pairs(
     });
     let mut rest: Vec<usize> = order.into_iter().filter(|&b| !used[b]).collect();
     rest.sort_by(|&a, &b| boxes[b][3].total_cmp(&boxes[a][3]));
-    for c in chains(&rest, &|p, q| {
-        let (a, b, t) = (boxes[p], boxes[q], touch[p].max(touch[q]));
-        (a[0] - b[0]).abs() <= t && ((a[1] - b[3]).abs() <= t || empty_column(a, b, t))
-    }) {
+    // Columns: boxes with their left edges at one place, each starting where the one over it
+    // ends or under an empty drawn box, which is at most twice as tall as the taller of the
+    // two.
+    let columns = chain_boxes(
+        &rest,
+        &|b| boxes[b][0],
+        reach,
+        &|p, q| boxes[p][1] - boxes[q][3],
+        &|p| reach.max(2.0 * (boxes[p][3] - boxes[p][1]).max(tallest)),
+        &|p, q| {
+            let (a, b, t) = (boxes[p], boxes[q], touch[p].max(touch[q]));
+            (a[0] - b[0]).abs() <= t && ((a[1] - b[3]).abs() <= t || empty_column(a, b, t))
+        },
+    );
+    for c in with_fields(columns) {
         if two_fields(&c) && has_value(&c) {
             groups.push(c);
         }
@@ -368,7 +298,7 @@ pub(crate) fn box_pairs(
             && ids
                 .iter()
                 .all(|&i| flow.runs[i].bold && !flow.runs[i].off_axis)
-            && lines_of(flow, &ids).len() <= LABEL_LINES
+            && lines_of(&flow.runs, &ids).len() <= LABEL_LINES
     };
     for (b, &bridged) in bridge.iter().enumerate() {
         if bridged
@@ -385,8 +315,11 @@ pub(crate) fn box_pairs(
     // read box by box, and that is said.
     let one_style = |b: usize| {
         let ids = inked_of(b);
-        let lines = lines_of(flow, &ids);
-        let first = lines.first().map(|l| words(flow, l)).unwrap_or_default();
+        let lines = lines_of(&flow.runs, &ids);
+        let first = lines
+            .first()
+            .map(|l| words(&flow.runs, l))
+            .unwrap_or_default();
         lines.len() == 2
             && fields[b].as_ref().is_none_or(|f| f.value.is_empty())
             && !unsure.iter().any(|u| u.0 == b)
@@ -422,6 +355,14 @@ pub(crate) fn box_pairs(
         .map(|(_, why)| *why)
         .collect();
     let mut said: Vec<String> = Vec::new();
+    // The boxes said, with the ids of their runs, which are read as they stand.
+    let ids_of = |b: usize| -> Vec<u32> { in_box[b].iter().map(|&i| flow.ids[i]).collect() };
+    let mut doubts: Doubts = unsure
+        .iter()
+        .filter(|(b, why)| said_of(b, why))
+        .map(|&(b, why)| (ids_of(b), why))
+        .collect();
+    doubts.extend(lone.iter().map(|&b| (ids_of(b), NO_LABEL)));
     // A box of an address, or of text with no label, is named by its first line.
     for (kinds, why) in [
         (&[ADDRESS, NAMED_ADDRESS][..], ADDRESS),
@@ -431,9 +372,9 @@ pub(crate) fn box_pairs(
             .iter()
             .filter(|(b, w)| kinds.contains(w) && said_of(b, w))
             .filter_map(|(b, _)| {
-                lines_of(flow, &inked_of(*b))
+                lines_of(&flow.runs, &inked_of(*b))
                     .first()
-                    .map(|l| words(flow, l))
+                    .map(|l| words(&flow.runs, l))
             })
             .collect();
         if names.is_empty() {
@@ -452,7 +393,11 @@ pub(crate) fn box_pairs(
     }
     let names: Vec<String> = lone
         .iter()
-        .filter_map(|&b| lines_of(flow, &inked_of(b)).first().map(|l| words(flow, l)))
+        .filter_map(|&b| {
+            lines_of(&flow.runs, &inked_of(b))
+                .first()
+                .map(|l| words(&flow.runs, l))
+        })
         .collect();
     if !names.is_empty() {
         said.push(format!(
@@ -477,14 +422,15 @@ pub(crate) fn box_pairs(
         }
     }
     if groups.is_empty() && framed.is_empty() {
-        return (Vec::new(), Vec::new(), said, skipped);
+        return (Vec::new(), Vec::new(), (said, doubts), skipped);
     }
     let mut planned: Vec<Planned> = Vec::new();
     let mut target: Vec<Option<(usize, usize, usize)>> = vec![None; flow.runs.len()];
     for c in &groups {
         let list: Vec<&Field> = c.iter().filter_map(|&b| fields[b].as_ref()).collect();
         let top = c.iter().map(|&b| boxes[b][3]).fold(f32::MIN, f32::max);
-        if let Some(p) = pairs_table(flow, &list, top, BOX_FOUND_BY) {
+        if let Some(mut p) = pairs_table(flow, &list, top, (BOX_FOUND_BY, Detector::BoxPairs)) {
+            p.drawn = union(c.iter().map(|&b| boxes[b]));
             claim(&mut target, planned.len(), &list);
             planned.push(p);
         }
@@ -506,6 +452,8 @@ pub(crate) fn box_pairs(
             top: f.top,
             runs: Vec::new(),
             text: Vec::new(),
+            ids: Vec::new(),
+            text_ids: Vec::new(),
         });
     }
     for (b, ids) in in_box.iter().enumerate() {
@@ -523,6 +471,8 @@ pub(crate) fn box_pairs(
             top: boxes[b][3],
             runs: Vec::new(),
             text: Vec::new(),
+            ids: Vec::new(),
+            text_ids: Vec::new(),
         });
     }
     // The runs of the tables and the titles leave the flow at once.
@@ -530,15 +480,161 @@ pub(crate) fn box_pairs(
         .filter(|&i| target[i].is_some() || title_of[i].is_some())
         .collect();
     let taken = flow.take(|i, _| target[i].is_some() || title_of[i].is_some());
-    for ((run, _, _), i) in taken.into_iter().zip(picked) {
+    for (taken, i) in taken.into_iter().zip(picked) {
+        let (run, id) = (taken.run, taken.id);
         match (target[i], title_of[i]) {
-            (Some((t, r, c)), _) => planned[t].rows[r][c].runs.push(run),
-            (None, Some((k, false))) => titles[k].runs.push(run),
-            (None, Some((k, true))) => titles[k].text.push(run),
+            (Some((t, r, c)), _) => {
+                planned[t].rows[r][c].runs.push(run);
+                planned[t].ids.push(id);
+            }
+            (None, Some((k, false))) => {
+                titles[k].runs.push(run);
+                titles[k].ids.push(id);
+            }
+            (None, Some((k, true))) => {
+                titles[k].text.push(run);
+                titles[k].ids.push(id);
+                titles[k].text_ids.push(id);
+            }
             (None, None) => {}
         }
     }
-    (planned, titles, said, skipped)
+    (planned, titles, (said, doubts), skipped)
+}
+
+/// The lines of a page in one direction, by their place and then their start, to ask
+/// whether those at one place cover a stretch.
+struct Cover<'a> {
+    segs: &'a [Line],
+    /// The lines for the search, made when the first stretch is asked for.
+    lines: std::cell::OnceCell<LinesAt<'a>>,
+}
+
+impl<'a> Cover<'a> {
+    fn new(segs: &'a [Line]) -> Cover<'a> {
+        Cover {
+            segs,
+            lines: std::cell::OnceCell::new(),
+        }
+    }
+
+    /// Whether the lines at `at` (within `t`, at least [`SNAP`]) cover the stretch `lo..hi`:
+    /// those that reach into it, by their start, leave no gap wider than that at its start,
+    /// between them or at its end. Only the lines that reach into the stretch are looked at
+    /// (see [`LinesAt`]): a column of some thousand boxes has as many lines at one place,
+    /// and each pair of boxes asked for all of them.
+    fn covers(&self, at: f32, lo: f32, hi: f32, t: f32) -> bool {
+        let tol = t.max(SNAP);
+        let lines = self.lines.get_or_init(|| LinesAt::new(self.segs));
+        let mut parts: Vec<&Line> = Vec::new();
+        let segs = self.segs;
+        lines.reaching((at - tol, at + tol), (lo, hi), |k, _| parts.push(&segs[k]));
+        parts.sort_by(|a, b| a.from.total_cmp(&b.from));
+        let mut end = lo;
+        for s in parts {
+            if s.from > end + tol {
+                return false;
+            }
+            end = end.max(s.to);
+        }
+        end >= hi - tol
+    }
+}
+
+/// Puts the boxes of `order` on chains, in that order: each goes on the first chain made
+/// whose last box `next` joins it to, else it starts a chain. The chains come in the order
+/// they were started.
+///
+/// So that a box is not tested against the end of every chain (a page of some thousand boxes
+/// in rows or columns, read once for each of its regions, took billions of tests), the ends
+/// are kept by their place across the chain (`key`: the top of a row, the left edge of a
+/// column) and a box looks only at the ends near its own. What the caller states of `next`:
+/// it joins only two boxes whose keys are at most `reach` apart; `gap(p, q)` is how far `q`
+/// starts past the end of `p` along the chain, which only grows for one `p` over the boxes
+/// of `order` after it; and `next` joins nothing to `p` past a gap of `far(p)`. An end past
+/// its `far` is dropped from the search for good. A key, a gap or a bound that is no
+/// number never drops or hides an end: such a box is tested as before.
+fn chain_boxes(
+    order: &[usize],
+    key: &dyn Fn(usize) -> f32,
+    reach: f32,
+    gap: &dyn Fn(usize, usize) -> f32,
+    far: &dyn Fn(usize) -> f32,
+    next: &dyn Fn(usize, usize) -> bool,
+) -> Vec<Vec<usize>> {
+    // The cells of the keys are at least a snap wide, so keys within `reach` of each other
+    // stand at most one cell apart; one more cell on each side covers the rounding of the
+    // division. A reach that is no number makes one cell of all.
+    let width = if reach.is_finite() {
+        reach.max(SNAP)
+    } else {
+        f32::INFINITY
+    };
+    // Ends with a key that is no number are looked at by every box.
+    const LOOSE: i64 = i64::MIN;
+    let cell = |b: usize| -> i64 {
+        let k = key(b);
+        if k.is_finite() {
+            ((k / width).floor() as i64).clamp(i64::MIN + 3, i64::MAX - 2)
+        } else {
+            LOOSE
+        }
+    };
+    let mut out: Vec<Vec<usize>> = Vec::new();
+    // The chains that may still grow, by the cell of their last box.
+    let mut ends: HashMap<i64, Vec<usize>> = HashMap::new();
+    for &b in order {
+        crate::work::add(1);
+        let at = cell(b);
+        let mut best: Option<usize> = None;
+        let mut look = |cells: &mut HashMap<i64, Vec<usize>>, c: i64| {
+            let Some(list) = cells.get_mut(&c) else {
+                return;
+            };
+            list.retain(|&chain| {
+                crate::work::add(1);
+                let last = *out[chain].last().expect("a box");
+                if gap(last, b) > far(last) {
+                    return false;
+                }
+                if best.is_none_or(|o| chain < o) && next(last, b) {
+                    best = Some(chain);
+                }
+                true
+            });
+            if list.is_empty() {
+                cells.remove(&c);
+            }
+        };
+        if at == LOOSE {
+            let all: Vec<i64> = ends.keys().copied().collect();
+            for c in all {
+                look(&mut ends, c);
+            }
+        } else {
+            for c in at - 2..=at + 2 {
+                look(&mut ends, c);
+            }
+            look(&mut ends, LOOSE);
+        }
+        match best {
+            Some(chain) => {
+                let from = cell(*out[chain].last().expect("a box"));
+                if from != at {
+                    if let Some(list) = ends.get_mut(&from) {
+                        list.retain(|&c| c != chain);
+                    }
+                    ends.entry(at).or_default().push(chain);
+                }
+                out[chain].push(b);
+            }
+            None => {
+                ends.entry(at).or_default().push(out.len());
+                out.push(vec![b]);
+            }
+        }
+    }
+    out
 }
 
 /// A framed box read as a title over its lines: the boxes it takes (the frame and a title
@@ -592,7 +688,7 @@ fn framed_titles(
             .copied()
             .filter(|&i| inked(&flow.runs[i]))
             .collect();
-        let lines = lines_of(flow, &ids);
+        let lines = lines_of(&flow.runs, &ids);
         (!lines.is_empty()
             && lines.len() <= LABEL_LINES
             && lines.iter().flatten().all(|&i| flow.runs[i].bold))
@@ -620,7 +716,7 @@ fn framed_titles(
             continue;
         }
         let fb = boxes[b];
-        let lines = lines_of(flow, &ids);
+        let lines = lines_of(&flow.runs, &ids);
         let size = |l: &Vec<usize>| l.iter().map(|&i| flow.runs[i].size).fold(0.0f32, f32::max);
         // The title at the top of the frame itself.
         let lead = lines
@@ -672,4 +768,199 @@ fn framed_titles(
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Numbers that repeat for one seed, in `0..n`.
+    struct Dice(u64);
+
+    impl Dice {
+        fn roll(&mut self, n: u32) -> f32 {
+            self.0 = self
+                .0
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            ((self.0 >> 33) % u64::from(n)) as f32
+        }
+    }
+
+    /// The chains as they were made by a plain scan: each box tested against the end of
+    /// every chain.
+    fn chains_one_by_one(order: &[usize], next: &dyn Fn(usize, usize) -> bool) -> Vec<Vec<usize>> {
+        let mut out: Vec<Vec<usize>> = Vec::new();
+        for &b in order {
+            match out.iter_mut().find(|c| next(*c.last().expect("a box"), b)) {
+                Some(c) => c.push(b),
+                None => out.push(vec![b]),
+            }
+        }
+        out
+    }
+
+    /// Whether lines cover a stretch, as it was asked by a plain scan: every line at the
+    /// place looked at.
+    fn covered_one_by_one(segs: &[Line], at: f32, lo: f32, hi: f32, t: f32) -> bool {
+        let mut end = lo;
+        let tol = t.max(SNAP);
+        let from = segs.partition_point(|s| s.at < at - tol);
+        let mut parts: Vec<&Line> = segs[from..]
+            .iter()
+            .take_while(|s| s.at <= at + tol)
+            .filter(|s| s.to > lo && s.from < hi)
+            .collect();
+        parts.sort_by(|a, b| a.from.total_cmp(&b.from));
+        for s in parts {
+            if s.from > end + tol {
+                return false;
+            }
+            end = end.max(s.to);
+        }
+        end >= hi - tol
+    }
+
+    /// The search by the ends near a box makes the chains the test of every end
+    /// made, for rows and for columns, on boxes that touch, overlap, stand apart and stand
+    /// in each other, with a touch of nothing, of a little and of much.
+    #[test]
+    fn chains_by_near_ends_are_the_chains_of_every_end() {
+        for seed in 0..40u64 {
+            let mut dice = Dice(seed);
+            let n = 60 + seed as usize;
+            let boxes: Vec<[f32; 4]> = (0..n)
+                .map(|_| {
+                    let (x, y) = (10.0 * dice.roll(12), 10.0 * dice.roll(12));
+                    let (w, h) = (10.0 * (1.0 + dice.roll(3)), 10.0 * (1.0 + dice.roll(3)));
+                    // Some boxes a little off the grid, within a touch or just past it.
+                    let off = 0.5 * dice.roll(5);
+                    [x + off, y, x + off + w, y + h]
+                })
+                .collect();
+            let touch: Vec<f32> = (0..n)
+                .map(|_| [0.0, 1.0, 2.5][dice.roll(3) as usize])
+                .collect();
+            let reach = touch.iter().copied().fold(0.0f32, f32::max);
+            let widest = boxes.iter().map(|b| b[2] - b[0]).fold(0.0f32, f32::max);
+            let tallest = boxes.iter().map(|b| b[3] - b[1]).fold(0.0f32, f32::max);
+            // A gap up to twice the wider box joins when the dice say a line is drawn over
+            // it: by the two boxes alone, as the lines of a page are.
+            let drawn = |p: usize, q: usize| (p * 31 + q * 17 + seed as usize).is_multiple_of(3);
+            let row = |p: usize, q: usize| {
+                let (a, b, t) = (boxes[p], boxes[q], touch[p].max(touch[q]));
+                let gap = b[0] - a[2];
+                let over = gap > t && gap <= 2.0 * (a[2] - a[0]).max(b[2] - b[0]) && drawn(p, q);
+                (a[3] - b[3]).abs() <= t && ((a[2] - b[0]).abs() <= t || over)
+            };
+            let column = |p: usize, q: usize| {
+                let (a, b, t) = (boxes[p], boxes[q], touch[p].max(touch[q]));
+                let gap = a[1] - b[3];
+                let over = gap > t && gap <= 2.0 * (a[3] - a[1]).max(b[3] - b[1]) && drawn(p, q);
+                (a[0] - b[0]).abs() <= t && ((a[1] - b[3]).abs() <= t || over)
+            };
+            let mut across: Vec<usize> = (0..n).collect();
+            across.sort_by(|&a, &b| boxes[a][0].total_cmp(&boxes[b][0]));
+            let rows = chain_boxes(
+                &across,
+                &|b| boxes[b][3],
+                reach,
+                &|p, q| boxes[q][0] - boxes[p][2],
+                &|p| reach.max(2.0 * (boxes[p][2] - boxes[p][0]).max(widest)),
+                &row,
+            );
+            assert_eq!(rows, chains_one_by_one(&across, &row), "rows, seed {seed}");
+            let mut down: Vec<usize> = (0..n).collect();
+            down.sort_by(|&a, &b| boxes[b][3].total_cmp(&boxes[a][3]));
+            let columns = chain_boxes(
+                &down,
+                &|b| boxes[b][0],
+                reach,
+                &|p, q| boxes[p][1] - boxes[q][3],
+                &|p| reach.max(2.0 * (boxes[p][3] - boxes[p][1]).max(tallest)),
+                &column,
+            );
+            assert_eq!(
+                columns,
+                chains_one_by_one(&down, &column),
+                "columns, seed {seed}"
+            );
+            assert!(rows.iter().chain(&columns).any(|c| c.len() > 1));
+        }
+    }
+
+    /// The lines that reach into a stretch, found by their order, say the same as
+    /// every line at the place, for lines apart, lines that overlap and one long line among
+    /// short ones, at places within the tolerance of each other.
+    #[test]
+    fn a_stretch_is_covered_as_every_line_at_its_place_says() {
+        let (mut yes, mut no) = (0, 0);
+        for seed in 0..40u64 {
+            let mut dice = Dice(seed + 100);
+            let mut segs: Vec<Line> = (0..80)
+                .map(|_| {
+                    let from = 5.0 * dice.roll(40);
+                    Line {
+                        at: 0.5 * dice.roll(8),
+                        from,
+                        to: from + 5.0 * (1.0 + dice.roll(4)),
+                    }
+                })
+                .collect();
+            if seed % 2 == 0 {
+                segs.push(Line {
+                    at: 1.0,
+                    from: 0.0,
+                    to: 150.0,
+                });
+            }
+            segs.sort_by(|a, b| a.at.total_cmp(&b.at).then(a.from.total_cmp(&b.from)));
+            let cover = Cover::new(&segs);
+            for _ in 0..200 {
+                let at = 0.5 * dice.roll(8);
+                let lo = 5.0 * dice.roll(40);
+                let hi = lo + 5.0 * (1.0 + dice.roll(6));
+                let t = [0.0, 0.6, 2.0][dice.roll(3) as usize];
+                let want = covered_one_by_one(&segs, at, lo, hi, t);
+                assert_eq!(cover.covers(at, lo, hi, t), want, "seed {seed}");
+                if want {
+                    yes += 1;
+                } else {
+                    no += 1;
+                }
+            }
+        }
+        assert!(yes > 100 && no > 100, "{yes} covered, {no} not");
+    }
+
+    /// A line with a start that is no number has no order to search in: every line at the
+    /// place is looked at, as before.
+    #[test]
+    fn lines_that_are_no_numbers_are_looked_at_one_by_one() {
+        let segs = [
+            Line {
+                at: 1.0,
+                from: f32::NAN,
+                to: 30.0,
+            },
+            Line {
+                at: 1.0,
+                from: 0.0,
+                to: 20.0,
+            },
+            Line {
+                at: 1.0,
+                from: 20.0,
+                to: 40.0,
+            },
+        ];
+        let cover = Cover::new(&segs);
+        for (lo, hi) in [(0.0, 40.0), (5.0, 35.0), (0.0, 50.0)] {
+            assert_eq!(
+                cover.covers(1.0, lo, hi, 0.5),
+                covered_one_by_one(&segs, 1.0, lo, hi, 0.5),
+                "{lo}..{hi}"
+            );
+        }
+    }
 }

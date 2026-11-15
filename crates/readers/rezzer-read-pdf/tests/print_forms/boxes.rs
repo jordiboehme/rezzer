@@ -51,6 +51,29 @@ pub(crate) fn boxed_fields(values: [&str; 3], third: Option<String>) -> FormPage
     }
 }
 
+/// A page of boxed fields has one region of labels and values, found by the box pairs.
+#[test]
+fn box_pairs_are_label_value_regions() {
+    let (_, pages) = common::read_regions(&print_form(
+        &[boxed_fields(["00000", "01.01.2020", ""], None)],
+        "",
+        "",
+    ));
+    let pairs: Vec<&layoutregions::Region> = pages
+        .iter()
+        .flat_map(|p| &p.regions)
+        .filter(|r| r.kind == layoutregions::Kind::LabelValue)
+        .collect();
+    assert_eq!(pairs.len(), 1, "{pages:#?}");
+    let signals: Vec<(&str, &str)> = pairs[0]
+        .signals
+        .iter()
+        .map(|s| (s.id, s.detail.as_str()))
+        .collect();
+    assert_eq!(signals, [("pdf.box_pairs", BOX_NOTE)]);
+    assert_eq!(pairs[0].prims.len(), 5, "{:?}", pairs[0].prims);
+}
+
 /// Three boxed fields in a row are one table of label and value pairs, the field without a
 /// value marked empty, after one note.
 #[test]
@@ -83,6 +106,28 @@ fn boxed_fields_become_pairs() {
     });
     assert!(empty, "{:#?}", page_blocks(&out));
     assert_no_loss_but_the_head_date(&out);
+}
+
+/// The found-by note of boxed fields says only how the pairs were read: `brief` leaves it
+/// out without a count line (it is no gap); the pairs and the note on the date stay.
+#[test]
+fn brief_leaves_out_the_note_on_boxed_fields() {
+    let out = read(&print_form(
+        &[boxed_fields(["00000", "01.01.2020", ""], None)],
+        "",
+        "",
+    ));
+    let full = common::markdown_at(&out, rezzer_render::NoteLevel::Full);
+    assert!(full.contains(BOX_NOTE), "{full}");
+    let brief = common::markdown_at(&out, rezzer_render::NoteLevel::Brief);
+    assert!(!brief.contains("Found by"), "{brief}");
+    assert!(brief.contains("| Personalnummer | 00000 |"), "{brief}");
+    assert!(
+        !brief.contains("on how the file was read"),
+        "an explanation is no gap, no count: {brief}"
+    );
+    let date_notes = |md: &str| md.matches("it is not marked as the document date").count();
+    assert_eq!(date_notes(&brief), date_notes(&full));
 }
 
 /// A box of three styles beside boxed fields is not paired: its text stays as it is, and a
@@ -144,7 +189,7 @@ fn box_with_its_label_below_is_not_paired() {
 
 /// Boxes whose bold value stands over a regular label of the same size: weight alone does not
 /// tell which line is the label, so no box pairs (the value is never read as the label of the
-/// label, ruling P6-X), and a loss says why.
+/// label, never a wrong pair), and a loss says why.
 #[test]
 fn bold_value_over_a_regular_label_of_its_size_is_not_paired() {
     let mut t = String::new();
@@ -246,8 +291,7 @@ fn widget_box_is_not_paired() {
 
 /// The header field grid of a pay slip (label rows over value rows, dividers that hang from
 /// the rule above, a raised footnote marker in a label, a date line in a part of its own to
-/// the right) reads as label and value pairs, row by row; an empty field is marked empty
-/// (ruling P6-H).
+/// the right) reads as label and value pairs, row by row; an empty field is marked empty.
 #[test]
 fn header_field_grid_reads_as_pairs() {
     let (template, lines) = header_field_grid();
@@ -293,7 +337,7 @@ fn header_field_grid_reads_as_pairs() {
     assert_grid_date(&out);
 }
 
-/// Rows of fields as a print run fills them (ruling P6-X): each row a rule over 6.6 point
+/// Rows of fields as a print run fills them: each row a rule over 6.6 point
 /// labels and one data line, dividers that hang 11.53 points from the rule above and end over
 /// the value line. Row 1: three short values one or two spaces apart, each in its own field;
 /// row 2: an ID and a name in two fields; row 3: a value that runs over the divider without a
@@ -369,8 +413,8 @@ pub(crate) fn field_rows() -> FormPage {
 
 /// A value line over several fields is cut at the word gap nearest each divider, each value
 /// paired with the field it stands in; a row whose value runs over a divider is not paired,
-/// and a loss names it; labels alone part the fields of a row without dividers (ruling P6-X:
-/// never a wrong pair).
+/// and a loss names it; labels alone part the fields of a row without dividers
+/// (never a wrong pair).
 #[test]
 fn values_over_several_fields_pair_with_their_own_fields() {
     let out = read(&print_form(&[field_rows()], "", ""));
@@ -518,6 +562,37 @@ fn framed_box_title_heads_its_lines() {
             "{:#?}",
             read_tables(&out)
         );
+    }
+}
+
+/// Each line under a box title is a paragraph of its own, and
+/// its runs are written in that paragraph, not all in the first one after the heading.
+#[test]
+fn each_line_under_a_box_title_is_written_in_its_own_paragraph() {
+    for title_box in [false, true] {
+        let (_, pages) = common::read_engine_pages(&print_form(&[titled_box(title_box)], "", ""));
+        let p = &pages[0];
+        let block_of = |word: &str| -> Vec<Option<usize>> {
+            p.input
+                .texts
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| r.text.contains(word))
+                .map(|(i, _)| p.run_block_at[i])
+                .collect()
+        };
+        let first = block_of("Abschlag");
+        let second = block_of("Restbetrag");
+        assert!(
+            !first.is_empty() && !second.is_empty(),
+            "title box {title_box}"
+        );
+        let (Some(a), Some(b)) = (first[0], second[0]) else {
+            panic!("title box {title_box}: {first:?} {second:?}");
+        };
+        assert_eq!(p.block_words[a], "paragraph", "title box {title_box}");
+        assert_eq!(p.block_words[b], "paragraph", "title box {title_box}");
+        assert!(b > a, "title box {title_box}: {first:?} {second:?}");
     }
 }
 

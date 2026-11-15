@@ -39,11 +39,11 @@ Built on (versions as used in the development version):
 
 ## How it shows up in the output
 
-The same as for [XLSX](xlsx.md): the tables and blocks of each sheet, each with a layout line that says where it is and how it was found, then the Logic section with parameters, formulas grouped by pattern, results, names and a Mermaid dependency graph. OpenFormula references like `[$Data.A3]` are shown in the familiar `Data!A3` form. The text as stored in the file is kept next to it.
+The same as for [XLSX](xlsx.md): the tables and blocks of each sheet, each with a layout line that says where it is, the facts of the file that found it and, with `--notes full`, the rules Rezzer used, then the Logic section with parameters, formulas grouped by pattern, results, names and a Mermaid dependency graph. OpenFormula references like `[$Data.A3]` are shown in the familiar `Data!A3` form. The text as stored in the file is kept next to it.
 
 ## Tables inside a sheet
 
-Rezzer finds tables in an ODS sheet the same way as in an Excel sheet: see [Tables inside a sheet](xlsx.md#tables-inside-a-sheet). The facts it takes from an ODS file are database ranges (exact range, header and footer rows), data pilot output ranges, print header rows, frozen panes and row groups. Bold and filled cells come from the cell styles. `--table-style records` and `--sheet` work the same way. Two sheets whose names differ only in case are told apart by their exact name first.
+Rezzer finds tables in an ODS sheet the same way as in an Excel sheet: see [Tables inside a sheet](xlsx.md#tables-inside-a-sheet). The facts it takes from an ODS file are database ranges (exact range, header and footer rows), data pilot output ranges, print header rows, frozen panes and row groups. Bold and filled cells come from the cell styles. `--table-style records`, `--sheet` and `--notes` work the same way. Two sheets whose names differ only in case are told apart by their exact name first.
 
 ## Example
 
@@ -68,7 +68,7 @@ A row with a count above 1 stands for one formula copied over its cells. It show
 | B4, C4, E4 | 3 | `=Data!A3` | Data!A3 | intermediate | 1.4666 |  |
 | B5, C5, E5 | 3 | `=(B4-$G$1)/$G$2` | B4, G1, G2 | intermediate | 20.493488691 % | $`\frac{\mathrm{B4}-\mathrm{G1}}{\mathrm{G2}}`$ |
 | B6:E6 | 4 | `=B5/(1-B5)` | B5 | intermediate, result | 25.775862069 % | $`\frac{\mathrm{B5}}{1-\mathrm{B5}}`$ |
-| B9, D9 | 2 | `=L_nb/(1+Xnb)` | name:L\_nb, name:Xnb | intermediate, result | 9.602467443 | $`\frac{\mathrm{L\_nb}}{1+\mathrm{Xnb}}`$ |
+| B9, D9 | 2 | `=L_nb/(1+Xnb)` | name:L_nb, name:Xnb | intermediate, result | 9.602467443 | $`\frac{\mathrm{L\_nb}}{1+\mathrm{Xnb}}`$ |
 ```
 
 ## Known limitations

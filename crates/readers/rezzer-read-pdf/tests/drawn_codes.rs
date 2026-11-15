@@ -3,7 +3,7 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Linear codes drawn as paths at fine modules: a code is listed with its own value, or named,
-//! never listed with another value (ruling P6-X). All values are invented.
+//! never listed with another value. All values are invented.
 
 mod common;
 
@@ -84,7 +84,7 @@ fn right(listed: &(String, String), kind: &str, text: &str) -> bool {
 #[test]
 fn ean_and_upc_drawn_as_paths_at_fine_modules_are_never_listed_wrong() {
     // One filled rectangle a bar, modules of 0.55 to 0.70 points, at ten offsets of a tenth
-    // of a point: the review of part 2f-1 found wrong digits with valid check digits (EAN-13
+    // of a point: a review found wrong digits with valid check digits (EAN-13
     // 4006381333931 listed as UPC-A 046312333931 at 0.62). Each read is the code, or the
     // code is named; on a business page and on a page that needs vision as a whole.
     use barcodes::Symbology as S;

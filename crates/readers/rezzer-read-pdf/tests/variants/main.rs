@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Variants of every print form shape of plan 6 (ruling P6-Y: Rezzer reads similar forms as
+//! Variants of every print form shape (Rezzer reads similar forms as
 //! well as the one sample). Each shape is drawn along the axes of [`axes`]: the page scale, the
 //! text sizes, the data font (monospaced or proportional), the label font, the look of the
 //! rules, the turn of the page, a neighbour over, under or beside it, and one or two pages.
@@ -25,11 +25,16 @@ mod draw;
 #[allow(dead_code)]
 mod shapes;
 
+#[path = "../../../../formats/layoutregions/tests/meta/mod.rs"]
+mod meta;
+
 mod axes;
+mod classes;
 mod docs;
 mod forms;
 mod inv;
 mod known;
+mod metamorphic;
 mod pictures;
 
 use axes::{ALL, Shape};
@@ -45,6 +50,7 @@ fn all_shapes() -> Vec<Shape> {
     let mut all = forms::shapes();
     all.extend(docs::shapes());
     all.extend(pictures::shapes());
+    all.extend(classes::shapes());
     all
 }
 
@@ -146,10 +152,62 @@ fn pinned_breaks_are_held_exactly() {
         unexpected_in("t", &read("k", vec![b(Inv::ClearPairs)]), &known).len(),
         1
     );
+    // The region invariants are pinned the same way, with the work that owns the
+    // fix: a pinned kind break holds, the same variant without it or with a forced type more
+    // is reported.
+    let classes = [Known {
+        shape: "s",
+        variants: &["k"],
+        broken: &[Inv::Table, Inv::RegionKind],
+        cause: Cause::Class("Task 29"),
+        why: "a reason",
+    }];
+    let kinds = vec![b(Inv::Table), b(Inv::RegionKind)];
+    assert!(unexpected_in("s", &read("k", kinds), &classes).is_empty());
+    assert_eq!(
+        unexpected_in("s", &read("k", vec![b(Inv::Table)]), &classes).len(),
+        1
+    );
+    let more = vec![b(Inv::Table), b(Inv::RegionKind), b(Inv::NoForcedType)];
+    assert_eq!(unexpected_in("s", &read("k", more), &classes).len(), 1);
+    let spatial = vec![b(Inv::Table), b(Inv::RegionKind), b(Inv::SpatialSaid)];
+    assert_eq!(unexpected_in("s", &read("k", spatial), &classes).len(), 1);
+}
+
+/// A text the shape marks unclear that stands in a table or a label and value region breaks
+/// `NoForcedType`, a break of a wrong value or order; in a paragraph or a block kept as laid out it holds.
+#[test]
+fn forced_type_is_wrong() {
+    let region = |kind: &'static str, texts: &[&str]| inv::Seen {
+        kind,
+        host: 0,
+        texts: texts.iter().map(|t| t.to_string()).collect(),
+    };
+    let table = [
+        region("paragraph", &["Abrechnung"]),
+        region("table", &["Kundennr:", "4711", "Satz %", "19"]),
+    ];
+    let broken = inv::forced(&["Kundennr", "Satz %"], &table, 1);
+    assert_eq!(broken.len(), 2, "{broken:?}");
+    assert!(
+        broken
+            .iter()
+            .all(|b| b.0 == Inv::NoForcedType && b.0.wrong())
+    );
+    let pairs = [region("label_value", &["Kundennr", "4711"])];
+    assert_eq!(inv::forced(&["Kundennr"], &pairs, 1).len(), 1);
+    let said = [
+        region("spatial", &["Kundennr", "4711"]),
+        region("paragraph", &["Satz %", "19"]),
+    ];
+    assert!(inv::forced(&["Kundennr", "Satz %"], &said, 1).is_empty());
+    // A word is matched whole: `Satz` is not `Satzung`.
+    let other = [region("table", &["Satzung", "%"])];
+    assert!(inv::forced(&["Satz %"], &other, 1).is_empty());
 }
 
 /// Every pinned entry names a shape that exists, its variants, what they break and a reason;
-/// a break of ruling P6-X says so in its reason, and no variant is pinned twice.
+/// a break of a wrong value or order says so in its reason, and no variant is pinned twice.
 #[test]
 fn every_pinned_entry_names_a_shape_and_a_reason() {
     let names: Vec<&str> = all_shapes().iter().map(|s| s.name).collect();
@@ -263,7 +321,25 @@ macro_rules! shape_tests {
 }
 
 shape_tests! {
+    labels_with_a_shared_value_column => "labels with a shared value column",
+    two_labels_side_by_side_over_their_values => "two labels side by side over their values",
+    padded_values_under_labels_in_a_column => "padded values under labels in a column of field rows",
+    value_lines_from_the_page_margin => "lines of values from the page margin in a column of field rows",
+    bold_value_lines_larger_than_the_body => "lines of bold values larger than the body in a column of field rows",
+    colon_labels_in_a_head_block => "colon labels in a head block over field rows",
+    a_date_beside_a_colon_label_on_one_line => "a date beside a colon label on one line",
+    fixed_width_colon_lines => "fixed-width lines of a label, a colon column and a value",
+    rows_of_fields_in_two_blocks => "rows of fields in two blocks",
+    a_value_under_two_labels_beside_a_date => "a value under two labels beside a date",
+    a_run_of_lines_of_a_label_and_its_value => "a run of lines of a label and its value",
+    labels_over_boxed_values_in_one_column => "labels over boxed values in one column",
+    a_ruled_run_of_pair_lines => "a ruled run of lines of a label and its value",
+    a_run_of_pair_lines_with_one_rule => "a run of lines of a label and its value with one rule",
+    a_picture_under_a_body_size_title => "a picture at the top of the right column under a title in the body size",
     f1_to_f3 => "F1 to F3",
+    head_line_over_fields => "head line over fields",
+    a_one_character_value_right_after_a_divider => "a one-character value right after a divider in a strip",
+    padded_period_beside_a_title_over_fields => "padded period beside a title over fields",
     header_grid => "header grid",
     column_of_totals => "column of totals",
     boxed_fields => "boxed fields",
@@ -294,13 +370,31 @@ shape_tests! {
     labels_under_values => "labels under values",
     labels_under_values_with_a_value_line_on_a_label_line => "labels under values with a second value line on a label's line",
     title_block_over_a_header_grid => "title block over a header grid",
+    a_small_colon_label_before_a_value_on_a_data_line => "a small colon label before a value on a data line",
+    a_small_colon_label_under_a_code_line => "a small colon label before a value on a data line under a code line",
     grids_side_by_side => "grids side by side",
     a_lone_field => "a lone field",
     separator_marks => "separator marks",
     section_grids => "section grids",
     band_table_with_empty_cells => "band table with empty cells",
     band_table_with_spaced_header_cells => "band table with spaced header cells",
+    a_head_block_beside_a_logo_over_a_letter => "a head block beside a logo over a letter",
+    a_framed_label_and_value_column_at_a_close_pitch => "a framed label column and value column, rows 1.36 sizes apart beside a picture",
+    a_framed_label_and_value_column_at_a_wide_pitch => "a framed label column and value column, rows 1.55 sizes apart",
+    a_head_block_of_two_lines_beside_a_logo => "a head block of two lines beside a logo over a letter",
+    a_letter_paragraph_that_runs_on_under_a_box_on_its_right => "a letter paragraph that runs on under a box on its right",
+    a_paragraph_of_full_width_under_two_columns_of_prose => "a paragraph of full width under two columns of prose, the right one a line shorter",
+    a_small_bold_label_over_a_rule_with_two_lines => "a small bold label over a rule with two lines",
+    two_boxes_side_by_side_each_with_its_label => "two boxes side by side, each with its label",
+    two_fields_beside_a_ruled_table_with_empty_rows => "two fields of a label over a rule beside a ruled table with empty rows",
+    two_fields_beside_a_ruled_table_with_empty_rows_and_a_third_rule => "two fields of a label over a rule beside a ruled table with empty rows and the rule of a third field",
+    two_fields_left_of_a_ruled_table_with_empty_rows => "two fields of a label over a rule left of a ruled table with empty rows and the rule of a third field",
+    a_payment_box_whose_width_differs_between_pages => "a payment box whose width differs between pages",
+    an_underlined_label_beside_an_empty_ruled_grid => "an underlined label beside an empty ruled grid",
+    two_fields_beside_a_ruled_table_with_filled_rows => "two fields of a label over a rule beside a ruled table with filled rows and the rule of a third field",
+    labels_on_touching_underlines_over_two_rows_of_fields => "labels on touching underlines over two rows of fields",
     letter_head => "letter head",
+    a_heading_over_an_address_with_its_own_name => "a heading over an address with its own name",
     letter_head_with_a_larger_name => "letter head with a larger name",
     letter_head_with_the_date_beside_the_name => "letter head with the date beside the name",
     line_items_with_a_larger_total_between_rules => "line items with a larger total between rules over a note",
@@ -341,6 +435,11 @@ shape_tests! {
     numbered_labels_beside_an_address => "numbered labels beside an address",
     prose_right_under_field_lines => "prose right under a column of field lines",
     a_paragraph_set_full_in_a_narrow_column => "a paragraph without a stop set full in a narrow column",
+    paragraphs_across_a_frame_of_two_rules => "paragraphs with a short last line across a frame of two rules",
+    pair_rows_over_a_larger_total_row => "rows of a label with a colon and its value over a larger total row",
+    a_subtotal_over_a_larger_total => "a subtotal over a larger total without colons",
+    name_rows_over_a_larger_last_row => "rows of a name and a word over a larger last row",
+    contents_lines_with_page_numbers => "lines of a table of contents with their pages at one edge",
     line_items_with_a_hanging_credit_minus => "line items with a hanging credit minus over a total",
     line_items_with_a_deduction_under_an_amount => "line items with a deduction with a minus under an amount",
     line_items_with_a_credit_over_a_total => "line items with a credit over a total",
@@ -365,6 +464,27 @@ shape_tests! {
     line_items_with_row_rules => "line items with row rules",
     close_column_titles => "close column titles",
     title_beside_a_field_list => "title beside a field list",
+    item_table_between_two_rules_with_a_picture_column => "item table between two rules with a picture column",
+    description_wrapping_to_four_lines => "description wrapping to four lines",
+    cells_of_several_lines_that_pair_up_line_by_line_in_a_ruled_grid => "cells of several lines that pair up line by line in a ruled grid",
+    two_line_cells_with_one_value_on_the_second_line => "two-line cells with one value on the second line",
+    cells_of_several_lines_under_a_cell_merged_over_two_rows => "cells of several lines under a cell merged over two rows",
+    wrapped_text_beside_stacked_values_in_a_ruled_grid => "wrapped text beside stacked values in a ruled grid",
+    an_item_beside_net_over_gross_amounts => "an item beside net over gross amounts under titles of two lines",
+    columns_bounded_by_breaks_in_the_rules => "columns bounded by breaks in the rules",
+    a_sentence_across_the_breaks_in_the_rules => "a sentence across the breaks in the rules",
+    a_note_where_a_detail_line_would_stand => "a note where the detail line of the last item would stand",
+    bold_item_names_over_plain_detail_lines_without_a_header => "bold item names over plain detail lines without a header",
+    a_stamp_over_an_item_table_without_rules => "a stamp over an item table without rules",
+    a_stamp_over_a_ruled_item_table => "a stamp over a ruled item table",
+    flat_pictures_across_a_column_bound_in_item_rows => "flat pictures across a column bound in item rows",
+    a_picture_over_the_gap_to_the_next_table => "a picture over the gap to the next table",
+    item_rows_with_a_picture_in_the_description_column => "item rows with a picture in the description column",
+    totals_between_two_rules_in_pieces_under_one_item_row => "totals between two rules in pieces under one item row",
+    item_rows_under_a_rule_in_pieces_beside_a_block_of_lines => "item rows under a rule in pieces on a page with a block of lines on the right",
+    item_rows_under_a_rule_in_pieces_and_a_row_carried_over => "item rows under a rule in pieces and a row carried over, on a page with a block of lines on the right",
+    a_heading_from_the_margin_with_a_date_over_the_rule_in_pieces => "a heading from the margin with a date right over the rule in pieces of item rows",
+    a_heading_over_the_names_with_a_date_over_the_rule_in_pieces => "a heading over the names with a date right over the rule in pieces of item rows",
     address_columns_in_the_body => "address columns in the body",
     an_address_beside_two_banks => "an address beside two banks",
     an_address_beside_two_phone_lines => "an address beside two phone lines and a register",
@@ -385,6 +505,20 @@ shape_tests! {
     weight_only_boxes => "weight-only boxes",
     a_column_flowing_past_a_framed_figure => "a column flowing past a framed figure",
     footer_columns => "footer columns",
+    a_footer_with_a_wrapped_column => "a footer of three columns with a wrapped paragraph in the middle one",
+    a_table_without_rules_at_the_foot_whose_last_row_wraps => "a table without rules at the foot whose last row wraps",
+    a_foot_table_with_an_empty_last_cell_whose_last_row_wraps => "a table without rules at the foot with an empty last cell whose last row wraps",
+    a_foot_table_with_an_empty_last_cell_whose_last_row_wraps_twice => "a table without rules at the foot with an empty last cell whose last row wraps twice",
+    a_table_whose_item_wraps_on_the_last_row => "a table without rules whose item wraps on the last row",
+    a_foot_table_whose_item_wraps_on_the_last_row => "a table without rules at the foot whose item wraps on the last row",
+    a_page_title_of_three_words_under_a_kicker => "a page title under a kicker beside a form number: Sample Leave Request",
+    a_page_title_of_two_words_under_a_kicker => "a page title under a kicker beside a form number: Annual Report",
+    a_page_title_of_four_words_under_a_kicker => "a page title under a kicker beside a form number: Request for Sample Leave",
+    a_page_title_of_with_a_year_under_a_kicker => "a page title under a kicker beside a form number: Request for Sample Leave 2026",
+    a_note_column_beside_rows_of_fields => "a note column beside rows of fields",
+    an_amount_in_its_box_before_a_note_column => "an amount in its box before a note column",
+    a_row_of_labels_over_two_blocks_of_fields => "a row of labels over two blocks of fields",
+    a_row_of_labels_in_drawn_boxes_over_two_blocks_of_fields => "a row of labels over two blocks of fields in drawn boxes",
     template_logos => "template logos",
     a_ruler_of_short_ticks => "a ruler of short ticks",
     codes_in_a_barcode_font_named_for_codes_size_10 => "codes in a barcode font named for codes, size 10, gap 5",
@@ -591,7 +725,7 @@ shape_tests! {
     printed_qr_cut => "a printed QR code cut in half by the edge of the page",
 }
 
-/// Task 15b part 2d fix round 3 (M1): the cell check counts the texts it leaves out, and a list
+/// The cell check counts the texts it leaves out, and a list
 /// of cells whose every text is left out (drawn twice, or inside another text) is caught, so the
 /// check never passes empty; a glued value is still found.
 #[test]
@@ -615,4 +749,543 @@ fn the_cell_check_never_passes_empty() {
     assert_eq!(found.skipped, [2, 1, 1]);
     assert!(found.all_skipped(&cells, &[true, true, true]));
     assert!(!found.all_skipped(&cells, &[false, false, false]));
+}
+
+/// A name as a file name: a slash would make a folder.
+fn file_name(name: &str) -> String {
+    name.replace(['/', '\\'], "_")
+}
+
+/// Writes the Markdown and the JSON of every sampled variant of every shape to
+/// `<dir>/<shape name>/<variant name>.md` and `.json`, for the dir in `REZZER_DUMP_DIR`; to
+/// compare the reads of two builds byte for byte. Without the variable it does nothing. The
+/// time limit is one hour, so the dump does not depend on the load of the machine. With
+/// `REZZER_DUMP_SHAPE` set, only the shapes whose name holds its text are written.
+#[test]
+#[ignore = "writes files when REZZER_DUMP_DIR is set"]
+fn dump_generated_reads() {
+    let Some(dir) = std::env::var_os("REZZER_DUMP_DIR") else {
+        return;
+    };
+    let dir = std::path::PathBuf::from(dir);
+    // With `REZZER_ENGINE_DIR` set, the engine report of each variant goes there too, at the
+    // path of its JSON (see `rezzer_read_pdf::engine_report`).
+    let engine = std::env::var_os("REZZER_ENGINE_DIR").map(std::path::PathBuf::from);
+    let options = rezzer_render::RenderOptions {
+        generated_at: "2026-01-01T00:00:00Z".to_string(),
+        rezzer_version: "dump".to_string(),
+        ..rezzer_render::RenderOptions::default()
+    };
+    let limits = rezzer_limits::Limits {
+        max_time: std::time::Duration::from_secs(3600),
+        ..rezzer_limits::Limits::default()
+    };
+    // With `REZZER_DUMP_SHAPE` set, only the shapes whose name holds it are written.
+    let only = std::env::var("REZZER_DUMP_SHAPE").ok();
+    let mut folders = std::collections::HashMap::new();
+    for shape in all_shapes() {
+        if only
+            .as_ref()
+            .is_some_and(|o| !shape.name.contains(o.as_str()))
+        {
+            continue;
+        }
+        let folder = dir.join(file_name(shape.name));
+        if let Some(first) = folders.insert(folder.clone(), shape.name) {
+            panic!(
+                "the shapes {first:?} and {:?} share the folder {folder:?}",
+                shape.name
+            );
+        }
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut files = std::collections::HashMap::new();
+        for page in axes::variants(&shape) {
+            if let Some(first) = files.insert(file_name(&page.name), page.name.clone()) {
+                panic!(
+                    "the variants {first:?} and {:?} of {:?} share a file name",
+                    page.name, shape.name
+                );
+            }
+            // With `REZZER_DUMP_PDF` set, the file of the variant is written too: to read it
+            // with another build, or to look at it.
+            if std::env::var_os("REZZER_DUMP_PDF").is_some() {
+                let name = file_name(&page.name);
+                std::fs::write(folder.join(format!("{name}.pdf")), inv::file(&page)).unwrap();
+            }
+            let (out, pages) = rezzer_read_pdf::read_engine_pages(
+                &common::source(&inv::file(&page)),
+                &rezzer_model::ReadOptions::default(),
+                &rezzer_limits::Budget::new(limits.clone()),
+            );
+            let markdown = rezzer_render::render(&out.document, out.completeness, &options);
+            let json = serde_json::to_string_pretty(&out.document).unwrap();
+            let name = file_name(&page.name);
+            std::fs::write(folder.join(format!("{name}.md")), markdown).unwrap();
+            std::fs::write(folder.join(format!("{name}.json")), json).unwrap();
+            if let Some(engine) = &engine {
+                let folder = engine.join(file_name(shape.name));
+                std::fs::create_dir_all(&folder).unwrap();
+                std::fs::write(
+                    folder.join(format!("{name}.json")),
+                    rezzer_read_pdf::engine_report(&pages),
+                )
+                .unwrap();
+            }
+        }
+    }
+}
+
+/// Prints the path of one variant through the read, for a task report: the text runs of each
+/// page, the segments of the engine's own segmentation (what made each, its bounds and its
+/// first words), the regions with their kind and evidence, and the Markdown. The shape is the
+/// one whose name is `REZZER_TRACE_SHAPE`, the variant `REZZER_TRACE_VARIANT` (default
+/// `base`); or the file at `REZZER_TRACE_FILE` (with `REZZER_TRACE_PAGE`, only that page).
+/// Without these variables it does nothing. Run with `--no-capture`.
+#[test]
+#[ignore = "prints the path of one variant when REZZER_TRACE_SHAPE is set"]
+fn trace_shape() {
+    // A file instead of a shape: `REZZER_TRACE_FILE`, and `REZZER_TRACE_PAGE` for one page.
+    let bytes = if let Ok(file) = std::env::var("REZZER_TRACE_FILE") {
+        std::fs::read(file).unwrap()
+    } else {
+        let Ok(name) = std::env::var("REZZER_TRACE_SHAPE") else {
+            return;
+        };
+        let variant = std::env::var("REZZER_TRACE_VARIANT").unwrap_or_else(|_| "base".into());
+        let shape = shape(&name);
+        let page = axes::variants(&shape)
+            .find(|p| p.name == variant)
+            .unwrap_or_else(|| panic!("no variant {variant}"));
+        inv::file(&page)
+    };
+    let only: Option<u32> = std::env::var("REZZER_TRACE_PAGE")
+        .ok()
+        .and_then(|p| p.parse().ok());
+    let (out, pages) = common::read_engine_pages(&bytes);
+    let words = |t: &str| t.chars().take(40).collect::<String>();
+    for p in &pages {
+        if only.is_some_and(|o| o != p.input.page) {
+            continue;
+        }
+        let texts = &p.input.texts;
+        println!("PAGE {} ({} runs)", p.input.page, texts.len());
+        for (i, t) in texts.iter().enumerate() {
+            println!(
+                "  run {i}: x {:.1}..{:.1} y {:.1} size {:.1} line {}{} {:?}",
+                t.x,
+                t.x + t.w,
+                t.y,
+                t.size,
+                t.line,
+                if t.bold { " bold" } else { "" },
+                words(&t.text)
+            );
+        }
+        for r in &p.input.rules {
+            println!("  rule {r:?}");
+        }
+        for b in &p.input.boxes {
+            println!("  box {b:?}");
+        }
+        for b in &p.input.pictures {
+            println!("  picture {:?}", b.bounds);
+        }
+        let first = |prims: &[layoutregions::PrimId]| {
+            let ids: Vec<usize> = prims
+                .iter()
+                .filter_map(|p| match p {
+                    layoutregions::PrimId::Text(i) => Some(*i as usize),
+                    _ => None,
+                })
+                .collect();
+            let text: Vec<&str> = ids
+                .iter()
+                .filter_map(|&i| texts.get(i))
+                .map(|t| t.text.trim())
+                .filter(|t| !t.is_empty())
+                .collect();
+            format!("{} runs {:?}", ids.len(), words(&text.join(" | ")))
+        };
+        // The engine alone: without the regions the reader's own finders gave it.
+        let mut alone = p.input.clone();
+        if !alone.given.is_empty() {
+            println!(
+                " GIVEN {} regions of the reader's finders, left out below",
+                alone.given.len()
+            );
+        }
+        alone.given.clear();
+        let segs = layoutregions::segment::segment_page(
+            &alone,
+            &layoutregions::Limits::default(),
+            &|| false,
+        );
+        fn walk(
+            segs: &layoutregions::segment::Segments,
+            id: layoutregions::segment::SegId,
+            depth: usize,
+            first: &dyn Fn(&[layoutregions::PrimId]) -> String,
+        ) {
+            let s = &segs.all[id.0 as usize];
+            let b = s.bounds;
+            println!(
+                "  {}seg {} {:?} [{:.1} {:.1} {:.1} {:.1}] {}",
+                "  ".repeat(depth),
+                id.0,
+                s.source,
+                b.x0,
+                b.y0,
+                b.x1,
+                b.y1,
+                first(&s.prims)
+            );
+            for c in &s.children {
+                walk(segs, *c, depth + 1, first);
+            }
+        }
+        println!(" SEGMENTS (the engine alone, without the reader's given regions)");
+        walk(&segs, segs.root, 0, &first);
+        println!(" REGIONS");
+        for r in &p.regions.regions {
+            let b = r.bounds;
+            let ids: Vec<&str> = r.signals.iter().map(|s| s.id).collect();
+            let alts: Vec<&str> = r.alternatives.iter().map(|a| a.kind.name()).collect();
+            println!(
+                "  {} {:?} [{:.1} {:.1} {:.1} {:.1}] {} | also {} | {}",
+                r.kind.name(),
+                r.certainty,
+                b.x0,
+                b.y0,
+                b.x1,
+                b.y1,
+                ids.join(","),
+                alts.join(","),
+                first(&r.prims)
+            );
+        }
+    }
+    if only.is_none() {
+        println!("{}", common::markdown(&out));
+    }
+}
+
+/// What a variant must read as, as facts of the scorecard (`crates/devtools/scorecard`): the
+/// rows of its tables, its headings, its paragraphs, the order of its texts, the lines of its
+/// cells and each field's label with its value. The same fact of two pages is written once.
+fn want_facts(page: &axes::Page) -> Vec<scorecard::facts::Fact> {
+    use scorecard::facts::{Fact, Term};
+    let mut facts: Vec<Fact> = Vec::new();
+    for sheet in &page.sheets {
+        let want = &sheet.want;
+        for table in &want.tables {
+            for row in table {
+                let cells: Vec<Term> = row
+                    .iter()
+                    .filter(|c| !c.trim().is_empty())
+                    .map(|c| Term::exact(c))
+                    .collect();
+                if !cells.is_empty() {
+                    facts.push(Fact::row(cells));
+                }
+            }
+        }
+        for lines in &want.cell_lines {
+            for (n, line) in lines.iter().enumerate() {
+                if !line.trim().is_empty() {
+                    facts.push(Fact::row(vec![Term::exact(line).at_line(n + 1)]));
+                }
+            }
+        }
+        for h in &want.headings {
+            facts.push(Fact::heading(h, None));
+        }
+        for p in &want.paragraphs {
+            facts.push(Fact::text(Term::contains(p)));
+        }
+        for chain in std::iter::once(&want.order).chain(&want.orders) {
+            for pair in chain.windows(2) {
+                facts.push(Fact::order(
+                    Term::contains(&pair[0]),
+                    Term::contains(&pair[1]),
+                ));
+            }
+        }
+        for (label, value) in &sheet.built.fields {
+            if let Ok(Some(value)) = value
+                && !label.trim().is_empty()
+                && !value.trim().is_empty()
+            {
+                facts.push(Fact::pair(Term::exact(label), Term::exact(value)));
+            }
+        }
+    }
+    let mut seen = std::collections::HashSet::new();
+    facts.retain(|f| seen.insert(f.to_string()));
+    facts
+}
+
+/// Writes what every sampled variant of every shape must read as to `<dir>/<shape name>/<variant
+/// name>.facts`, for the dir in `REZZER_WANTS_DIR`: the assertion files of the generated set,
+/// beside the reads of [`dump_generated_reads`], so that the scorecard checks this set as it
+/// checks the others. A variant with no fact gets no file. Without the variable it does
+/// nothing.
+#[test]
+#[ignore = "writes files when REZZER_WANTS_DIR is set"]
+fn dump_generated_wants() {
+    let Some(dir) = std::env::var_os("REZZER_WANTS_DIR") else {
+        return;
+    };
+    let dir = std::path::PathBuf::from(dir);
+    for shape in all_shapes() {
+        let folder = dir.join(file_name(shape.name));
+        for page in axes::variants(&shape) {
+            let facts = want_facts(&page);
+            if facts.is_empty() {
+                continue;
+            }
+            let lines: Vec<String> = facts.iter().map(|f| f.to_string()).collect();
+            std::fs::create_dir_all(&folder).unwrap();
+            std::fs::write(
+                folder.join(format!("{}.facts", file_name(&page.name))),
+                format!(
+                    "# what the generated variant must read as\n{}\n",
+                    lines.join("\n")
+                ),
+            )
+            .unwrap();
+        }
+    }
+}
+
+/// The exported facts say what the variant's own checks say: on a shape that reads right
+/// today, the read holds every fact, and the facts are of more than one class.
+#[test]
+fn the_exported_wants_hold_on_a_right_read() {
+    use scorecard::facts::Class;
+    let shape = shape("boxed fields beside a bold title");
+    let page = axes::page_of(&shape, axes::BASE);
+    let facts = want_facts(&page);
+    for class in [Class::Pair, Class::Heading] {
+        assert!(facts.iter().any(|f| f.class == class), "{facts:?}");
+    }
+    let out = inv::read(&page);
+    let view = scorecard::doc::View::of(&out.document);
+    // Through the written form, as the scorecard reads them.
+    let written: Vec<String> = facts.iter().map(|f| f.to_string()).collect();
+    for w in scorecard::facts::parse(&written.join("\n")).unwrap() {
+        assert!(scorecard::check::check(&view, &w.fact).pass, "{}", w.line);
+    }
+}
+
+/// The regions of each kind over every sampled variant of every shape, against
+/// `tests/variants/region-counts.tsv`: one line `kind\tcount` per kind in `Kind` order, then
+/// `total` (as `region-report counts` prints one set). A moved count fails with its old and
+/// new line. With `REZZER_WRITE_COUNTS` set, the file is written from the counts instead.
+#[test]
+#[ignore = "reads every sampled variant; run for the region counts"]
+fn generated_region_counts() {
+    let limits = rezzer_limits::Limits {
+        max_time: std::time::Duration::from_secs(3600),
+        ..rezzer_limits::Limits::default()
+    };
+    let mut counts: std::collections::BTreeMap<layoutregions::Kind, usize> =
+        std::collections::BTreeMap::new();
+    for shape in all_shapes() {
+        for page in axes::variants(&shape) {
+            let (_, pages) = rezzer_read_pdf::read_with_regions(
+                &common::source(&inv::file(&page)),
+                &rezzer_model::ReadOptions::default(),
+                &rezzer_limits::Budget::new(limits.clone()),
+            );
+            for p in &pages {
+                for (kind, n) in layoutregions::count_by_kind(&p.regions) {
+                    *counts.entry(kind).or_insert(0) += n;
+                }
+            }
+        }
+    }
+    let new = layoutregions::count_lines(&[counts]);
+    let path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/variants/region-counts.tsv");
+    if std::env::var_os("REZZER_WRITE_COUNTS").is_some() {
+        std::fs::write(&path, new.join("\n") + "\n").unwrap();
+        return;
+    }
+    let old: Vec<String> = std::fs::read_to_string(&path)
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_string)
+        .collect();
+    let moved = layoutregions::moved_lines(&old, &new);
+    assert!(moved.is_empty(), "{}", moved.join("\n"));
+}
+
+/// The detector without rules names its regions by class: a shape of each class, at its first
+/// variant, has a region of that class's signal and kind holding the shape's first word.
+#[test]
+fn borderless_classes_name_their_regions() {
+    use layoutregions::Kind;
+    for (name, id, kind, word) in [
+        (
+            "blocks side by side under their headings",
+            "pdf.borderless.side_blocks",
+            Kind::LabelValue,
+            "Anschrift",
+        ),
+        (
+            "titles over a row that ends in a stop",
+            "pdf.borderless.labels_over_values",
+            Kind::LabelValue,
+            "Artikel",
+        ),
+        (
+            "title beside a field list",
+            "pdf.borderless.key_values",
+            Kind::LabelValue,
+            "Rechnungsnummer",
+        ),
+        (
+            "a headerless table of records",
+            "pdf.borderless.grid",
+            Kind::Table,
+            "Muster GmbH",
+        ),
+        (
+            "line items with an end rule",
+            "pdf.borderless.totals_under",
+            Kind::Totals,
+            "Nettobetrag",
+        ),
+    ] {
+        let page = axes::variants(&shape(name)).next().unwrap();
+        let (_, pages) = common::read_engine_pages(&inv::file(&page));
+        let found = pages.iter().any(|p| {
+            p.regions.regions.iter().any(|r| {
+                r.signals[0].id == id
+                    && r.kind == kind
+                    && common::region_texts(p, r).iter().any(|t| t.contains(word))
+            })
+        });
+        assert!(found, "{name}: no {id} region of {kind:?} holds {word:?}");
+    }
+}
+
+/// A second table after a blank row under a table is no totals, though the region search
+/// parted it from the table right over it: only the rule that ends a table parts its totals
+/// from it. Every sampled variant.
+#[test]
+fn a_second_table_after_a_blank_row_is_no_totals() {
+    for name in [
+        "a second table under a plain header after a bold total",
+        "a second table of one row under a plain header after a bold total",
+    ] {
+        for page in axes::variants(&shape(name)) {
+            let (_, pages) = common::read_engine_pages(&inv::file(&page));
+            let totals: Vec<&str> = pages
+                .iter()
+                .flat_map(|p| &p.regions.regions)
+                .filter(|r| r.kind == layoutregions::Kind::Totals)
+                .map(|r| r.signals[0].id)
+                .collect();
+            assert!(totals.is_empty(), "{}: {totals:?}", page.name);
+        }
+    }
+}
+
+/// A heading decision whose lines the walk writes as a paragraph for their geometry (bold lines
+/// at heading size, each a short item of one column) is a paragraph region that says why, with
+/// the heading as its alternative: the region says what is written. Every region of kind
+/// heading is written as a heading.
+#[test]
+fn a_heading_written_as_a_paragraph_is_a_paragraph_region() {
+    use layoutregions::Kind;
+    let name = "a column of bold lines at heading size with a box around the middle two";
+    let mut demoted = 0;
+    for page in axes::variants(&shape(name)) {
+        let (out, pages) = common::read_engine_pages(&inv::file(&page));
+        let md = rezzer_render::render(
+            &out.document,
+            out.completeness,
+            &rezzer_render::RenderOptions::default(),
+        );
+        let in_heading = |t: &str| {
+            md.lines()
+                .any(|l| l.starts_with('#') && l.contains(t.trim()))
+        };
+        for p in &pages {
+            for r in &p.regions.regions {
+                let texts = common::region_texts(p, r);
+                if r.kind == Kind::Heading {
+                    assert!(
+                        texts.iter().all(|t| in_heading(t)),
+                        "{name}: heading region {texts:?} not written as a heading in\n{md}"
+                    );
+                }
+                if r.signals.iter().any(|s| s.id == "pdf.walk.demoted") {
+                    demoted += 1;
+                    assert_eq!(r.kind, Kind::Paragraph);
+                    assert_eq!(r.alternatives[0].kind, Kind::Heading);
+                    assert!(
+                        texts.iter().all(|t| !in_heading(t)),
+                        "{name}: {texts:?} in\n{md}"
+                    );
+                }
+            }
+        }
+    }
+    assert!(demoted > 0, "{name}: no heading was written as a paragraph");
+}
+
+/// A page title under a small kicker line, beside a
+/// label over a form number on the same two baselines, is the title block of the engine in
+/// every variant, with as many words as the kicker has, with fewer, with more and with a
+/// year: it is the largest text of the top of the page, and no count of its words keeps it
+/// out of the title search.
+#[test]
+fn a_page_title_under_a_kicker_is_the_title_block() {
+    use layoutregions::Kind;
+    for title in [
+        "Sample Leave Request",
+        "Annual Report",
+        "Request for Sample Leave",
+        "Request for Sample Leave 2026",
+    ] {
+        let name = format!("a page title under a kicker beside a form number: {title}");
+        for page in axes::variants(&shape(&name)) {
+            let (_, pages) = common::read_engine_pages(&inv::file(&page));
+            let p = &pages[0];
+            let kinds: Vec<Kind> = p
+                .regions
+                .regions
+                .iter()
+                .filter(|r| common::region_texts(p, r).iter().any(|t| t.contains(title)))
+                .map(|r| r.kind)
+                .collect();
+            assert_eq!(kinds, [Kind::TitleBlock], "{name} | {}", page.name);
+        }
+    }
+}
+
+/// The figure region of a picture written in a table
+/// cell stands at its table: its host is the table's block, which has an anchor of its own.
+#[test]
+fn a_cell_picture_stands_at_its_table() {
+    let page = axes::page_of(
+        &shape("item table between two rules with a picture column"),
+        axes::BASE,
+    );
+    let (_, pages) = inv::read_engine(&page);
+    let p = &pages[0];
+    let hosts: Vec<Option<&String>> = p
+        .regions
+        .regions
+        .iter()
+        .filter(|r| r.kind == layoutregions::Kind::Figure)
+        .map(|r| p.anchors.get(r.host as usize).and_then(Option::as_ref))
+        .collect();
+    assert_eq!(hosts.len(), 3);
+    assert!(
+        hosts.iter().all(|h| h.is_some_and(|a| a == "p1:t1")),
+        "{hosts:?}"
+    );
 }

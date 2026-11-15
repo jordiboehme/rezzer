@@ -82,7 +82,7 @@ pub(crate) fn no_band(
     let input = lines.prep.input;
     let tick = ctx.tick;
     if w.region.data.is_none() && one_merged_text(lines, w) {
-        // Its only value is one merged text (ruling P4-AQ): a title, never lines of text or
+        // Its only value is one merged text: a title, never lines of text or
         // an empty grid.
         let region = &mut w.region;
         region.kind = Kind::Title;

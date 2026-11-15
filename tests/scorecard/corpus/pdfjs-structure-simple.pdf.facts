@@ -1,0 +1,8 @@
+# from the tags of the file
+heading: Heading 1 [heading]
+heading: Heading 2 [heading]
+order: ~Heading 1 << ~This paragraph 1. [order]
+order: ~This paragraph 1. << ~Heading 2 [order]
+order: ~Heading 2 << ~This paragraph 2. [order]
+text: ~This paragraph 1. [text]
+text: ~This paragraph 2. [text]

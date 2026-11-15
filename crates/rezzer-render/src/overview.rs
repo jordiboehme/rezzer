@@ -28,7 +28,7 @@ pub(crate) fn render(doc: &Document, selection: Option<&Selection>) -> Option<St
     render_with(doc, selection, Limit::Plain)
 }
 
-/// The whole overview, for the `overview` part of a split document (P5-V): every row, fact
+/// The whole overview, for the `overview` part of a split document: every row, fact
 /// and "Reads from" name, no text cut. Only the graph keeps its limits; the table holds what
 /// it draws.
 pub(crate) fn render_whole(doc: &Document, selection: Option<&Selection>) -> Option<String> {

@@ -34,6 +34,7 @@ pub(crate) fn run(config: Config, registry: Registry, args: &ReadArgs) -> Result
         output_dir: args.output_dir.clone(),
         part_size: args.part_size,
         table_style: args.table_style,
+        notes: args.notes,
         sheets: args.sheets.clone(),
         ..Request::default()
     };

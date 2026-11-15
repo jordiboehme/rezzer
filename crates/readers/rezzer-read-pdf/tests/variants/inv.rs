@@ -17,11 +17,11 @@ use crate::known::{KNOWN, Known};
 /// An invariant of a variant's read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Inv {
-    /// Every pair is a right pair (ruling P6-X).
+    /// Every pair is a right pair.
     RightPair,
-    /// Every value stands once in the page's text (P6-X).
+    /// Every value stands once in the page's text.
     ValueOnce,
-    /// A found title, date or code is never another one than the page shows (P6-X).
+    /// A found title, date or code is never another one than the page shows.
     WrongValue,
     /// A field the layout makes clear pairs; a column of totals joins its section.
     ClearPairs,
@@ -39,12 +39,12 @@ pub(crate) enum Inv {
     Role,
     /// Each expected paragraph stands on the page with its lines.
     Paragraph,
-    /// Texts that belong to different blocks are not read into one block (P6-X: a block that
-    /// mixes them is a wrong reading order).
+    /// Texts that belong to different blocks are not read into one block (a block that
+    /// mixes them is a wrong reading order); in a block kept as laid out, not onto one line.
     Apart,
     /// The texts of each drawn cell stand together (and, for a cell the shape lists, in their
     /// order), and no block or table row holds texts of two cells, found by the span each
-    /// drawn text produced (P6-X: a wrong reading order).
+    /// drawn text produced (a wrong reading order).
     Cells,
     /// The page's text holds the expected texts in their reading order.
     Order,
@@ -55,7 +55,7 @@ pub(crate) enum Inv {
     /// Each code is found as many times as it is drawn.
     Code,
     /// A code is never found more often than it is drawn, and a page with a code not found
-    /// says that a code there is not decoded (P6-X: never a value doubled or lost silently).
+    /// says that a code there is not decoded (never a value doubled or lost silently).
     CodeSaid,
     /// A code found with a box is boxed by the bars of a code drawn: within a point at scale
     /// 1, more on a larger page.
@@ -74,10 +74,32 @@ pub(crate) enum Inv {
     SameReading,
     /// A variant whose read at scale 1 in the real sizes and fonts has no loss has none.
     NoLoss,
+    /// Every run of a page is in exactly one region (a run in none only on a page whose
+    /// layout stopped, which its limit loss says).
+    Cover,
+    /// Every region's kind is the kind of the block it stands at (its host) and of the blocks
+    /// its runs with ink were written in (figures and codes aside: their media block comes
+    /// later).
+    KindWritten,
+    /// Each text of [`crate::axes::Want::kinds`] stands in a region of its kind, and each text
+    /// of [`crate::axes::Want::spatial`] in a spatial region.
+    RegionKind,
+    /// A text the shape marks unclear (a field whose layout leaves it unclear) is never in a
+    /// `table` or `label_value` region (a type forced on it reads a wrong pair or cell).
+    NoForcedType,
+    /// Each media block the shape places stands after the block of one text and before the
+    /// block of another: a picture is read where its column reads it.
+    MediaPlace,
+    /// A spatial region is written as a block kept as laid out, that block has its loss
+    /// unless it is one line of one piece (which reads as it stands and has no loss that
+    /// names no kind), and the texts of its runs stand in it once each and in their order
+    /// (a block kept as laid out with no word of why, or with a text lost, doubled or
+    /// moved).
+    SpatialSaid,
 }
 
 impl Inv {
-    /// The invariants of ruling P6-X: a break is a wrong value or a wrong reading order,
+    /// The invariants of a break: a break is a wrong value or a wrong reading order,
     /// never only a lost one.
     pub(crate) fn wrong(self) -> bool {
         matches!(
@@ -88,6 +110,8 @@ impl Inv {
                 | Inv::Apart
                 | Inv::Cells
                 | Inv::CodeSaid
+                | Inv::NoForcedType
+                | Inv::SpatialSaid
         )
     }
 }
@@ -105,9 +129,320 @@ pub(crate) fn file(page: &Page) -> Vec<u8> {
 /// Reads a variant's file. A table's caption is written as a paragraph of role `caption`
 /// right before it, so that its text is checked and compared as every other text is.
 pub(crate) fn read(page: &Page) -> ReadOutcome {
-    let mut out = crate::common::read(&file(page));
+    read_engine(page).0
+}
+
+/// [`read`] with each page as the region engine laid it out.
+pub(crate) fn read_engine(page: &Page) -> (ReadOutcome, Vec<rezzer_read_pdf::EnginePage>) {
+    let (mut out, pages) = crate::common::read_engine_pages(&file(page));
     out.document.body = hoist(std::mem::take(&mut out.document.body));
-    out
+    (out, pages)
+}
+
+/// The kind of a region whose runs were written in a block of the word `word` (see
+/// [`rezzer_read_pdf::block_word`]), if it says one; whether a region of `kind` agrees with
+/// it.
+fn agrees(kind: layoutregions::Kind, word: &str) -> Option<bool> {
+    use layoutregions::Kind as K;
+    let ok: &[&str] = match kind {
+        K::Figure | K::Code => return None,
+        K::Heading | K::TitleBlock => &["heading"],
+        K::Paragraph => &["paragraph"],
+        K::List => &["list"],
+        K::Table | K::LabelValue | K::Totals => &["table"],
+        K::Spatial => &["spatial"],
+        K::HeaderBand => &["page-header"],
+        K::FooterBand => &["page-footer"],
+        K::FootnoteLegend => &["section", "footnote"],
+    };
+    Some(ok.contains(&word))
+}
+
+/// [`Inv::Cover`] and [`Inv::KindWritten`] over the pages of a read.
+pub(crate) fn check_engine(pages: &[rezzer_read_pdf::EnginePage]) -> Vec<Broken> {
+    let mut broken = Vec::new();
+    for p in pages {
+        let n = p.regions.page;
+        let mut count = vec![0u32; p.input.texts.len()];
+        for r in &p.regions.regions {
+            let mut wrong: Vec<(&str, &str)> = Vec::new();
+            for id in &r.prims {
+                let layoutregions::PrimId::Text(i) = *id else {
+                    continue;
+                };
+                if let Some(c) = count.get_mut(i as usize) {
+                    *c += 1;
+                }
+                let text = p.input.texts[i as usize].text.as_str();
+                if text.trim().is_empty() {
+                    continue;
+                }
+                if let Some(word) = p.run_blocks.get(i as usize).copied().flatten()
+                    && agrees(r.kind, word) == Some(false)
+                {
+                    wrong.push((word, text));
+                }
+            }
+            if !wrong.is_empty() {
+                broken.push(Broken(
+                    Inv::KindWritten,
+                    format!("page {n}: a {} region written as {wrong:?}", r.kind.name()),
+                ));
+            }
+            if let Some(word) = p.block_words.get(r.host as usize)
+                && agrees(r.kind, word) == Some(false)
+            {
+                broken.push(Broken(
+                    Inv::KindWritten,
+                    format!(
+                        "page {n}: a {} region {:?} stands at a {word} block",
+                        r.kind.name(),
+                        r.signals.iter().map(|s| s.id).collect::<Vec<_>>()
+                    ),
+                ));
+            }
+        }
+        let none: Vec<usize> = (0..count.len()).filter(|&i| count[i] == 0).collect();
+        let twice: Vec<usize> = (0..count.len()).filter(|&i| count[i] > 1).collect();
+        if (!none.is_empty() && !p.stopped) || !twice.is_empty() {
+            broken.push(Broken(
+                Inv::Cover,
+                format!("page {n}: runs in no region {none:?}, in two {twice:?}"),
+            ));
+        }
+    }
+    broken
+}
+
+/// A region as the region checks see it: its kind's name, the place of the block it stands
+/// at, and the texts of its runs in their order on the page (by line, then left to right).
+#[derive(Debug, Clone)]
+pub(crate) struct Seen {
+    pub kind: &'static str,
+    pub host: u32,
+    pub texts: Vec<String>,
+}
+
+impl Seen {
+    /// The texts of the region as one text.
+    fn joined(&self) -> String {
+        self.texts.join(" ")
+    }
+}
+
+/// The regions of an engine page, as [`Seen`].
+fn seen(p: &rezzer_read_pdf::EnginePage) -> Vec<Seen> {
+    p.regions
+        .regions
+        .iter()
+        .map(|r| {
+            let mut runs: Vec<&layoutregions::TextRun> = r
+                .prims
+                .iter()
+                .filter_map(|id| match *id {
+                    layoutregions::PrimId::Text(i) => p.input.texts.get(i as usize),
+                    _ => None,
+                })
+                .filter(|t| !t.text.trim().is_empty())
+                .collect();
+            runs.sort_by(|a, b| a.line.cmp(&b.line).then(a.x.total_cmp(&b.x)));
+            Seen {
+                kind: r.kind.name(),
+                host: r.host,
+                texts: runs.iter().map(|t| t.text.clone()).collect(),
+            }
+        })
+        .collect()
+}
+
+/// The words of a text for [`holds`]: cut at white space and cell bounds, a colon at a word's
+/// end left off.
+fn words(t: &str) -> Vec<&str> {
+    t.split(|c: char| c.is_whitespace() || c == '|')
+        .map(|w| w.trim_end_matches(':'))
+        .filter(|w| !w.is_empty())
+        .collect()
+}
+
+/// Whether the words of `phrase` stand one after the other in `text`.
+fn holds(text: &str, phrase: &str) -> bool {
+    let (text, want) = (words(text), words(phrase));
+    !want.is_empty() && text.windows(want.len()).any(|w| w == want.as_slice())
+}
+
+/// [`Inv::NoForcedType`] on page `p` (from 1): each text of `unclear` that stands in a `table`
+/// or `label_value` region of `regions` breaks it.
+pub(crate) fn forced(unclear: &[&str], regions: &[Seen], p: usize) -> Vec<Broken> {
+    let mut broken = Vec::new();
+    for t in unclear {
+        for r in regions {
+            if matches!(r.kind, "table" | "label_value") && holds(&r.joined(), t) {
+                broken.push(Broken(
+                    Inv::NoForcedType,
+                    format!(
+                        "page {p}: the unclear {t:?} stands in a {} region {:?}",
+                        r.kind, r.texts
+                    ),
+                ));
+            }
+        }
+    }
+    broken
+}
+
+/// The text of a block kept as laid out: its pieces line by line, left to right.
+fn spatial_text(lines: &[rezzer_model::SpatialLine]) -> String {
+    lines
+        .iter()
+        .flat_map(|l| &l.pieces)
+        .map(|p| p.text.as_str())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// [`Inv::RegionKind`], [`Inv::NoForcedType`] and [`Inv::SpatialSaid`] over the pages of a
+/// read and the engine's layout of them.
+pub(crate) fn check_regions(
+    out: &ReadOutcome,
+    engine: &[rezzer_read_pdf::EnginePage],
+    page: &Page,
+) -> Vec<Broken> {
+    let mut broken = Vec::new();
+    for (n, sheet) in page.sheets.iter().enumerate() {
+        let p = n + 1;
+        let Some(e) = engine.iter().find(|e| e.regions.page as usize == p) else {
+            continue;
+        };
+        let regions = seen(e);
+        let want = &sheet.want;
+        let wanted = want
+            .kinds
+            .iter()
+            .map(|(t, k)| (t, *k))
+            .chain(want.spatial.iter().map(|t| (t, "spatial")));
+        for (t, kind) in wanted {
+            let at: Vec<&str> = regions
+                .iter()
+                .filter(|r| holds(&r.joined(), t))
+                .map(|r| r.kind)
+                .collect();
+            if !at.contains(&kind) {
+                broken.push(Broken(
+                    Inv::RegionKind,
+                    format!("page {p}: {t:?} stands in no {kind} region; in {at:?}"),
+                ));
+            }
+        }
+        let unclear: Vec<&str> = sheet
+            .built
+            .fields
+            .iter()
+            .filter(|f| f.1.is_err())
+            .map(|f| f.0)
+            .collect();
+        broken.extend(forced(&unclear, &regions, p));
+        broken.extend(spatial_said(out, n, e, &regions));
+    }
+    broken
+}
+
+/// [`Inv::SpatialSaid`] on page `n` (from 0): every block kept as laid out has its loss
+/// (a block of one line with one piece needs none, and has none that names no kind), and
+/// the spatial regions that stand at one are written in it, every text of their runs once
+/// and in its order.
+fn spatial_said(
+    out: &ReadOutcome,
+    n: usize,
+    e: &rezzer_read_pdf::EnginePage,
+    regions: &[Seen],
+) -> Vec<Broken> {
+    let p = n + 1;
+    let mut broken = Vec::new();
+    let said = |at: &str| {
+        out.document
+            .losses
+            .iter()
+            .any(|l| l.location == at && l.what.contains("kept as laid out"))
+    };
+    let blocks = flat(page_blocks(out, n));
+    for b in &blocks {
+        if let Block::Spatial { lines, anchor, .. } = b {
+            let at = anchor.as_ref().map(|a| a.0.as_str()).unwrap_or_default();
+            let pieces = lines
+                .iter()
+                .flat_map(|l| &l.pieces)
+                .filter(|p| !p.text.trim().is_empty())
+                .count();
+            // One piece: no note that no type has clear evidence; a note that names a kind
+            // may stand.
+            let bare = out.document.losses.iter().any(|l| {
+                l.location == at
+                    && l.what.contains("kept as laid out")
+                    && l.what.contains("no region type has clear evidence")
+            });
+            if pieces == 1 && bare {
+                broken.push(Broken(
+                    Inv::SpatialSaid,
+                    format!(
+                        "page {p}: the block at {at:?} is one piece and has a loss: {:?}",
+                        spatial_text(lines)
+                    ),
+                ));
+            }
+            if pieces != 1 && !said(at) {
+                broken.push(Broken(
+                    Inv::SpatialSaid,
+                    format!(
+                        "page {p}: the block at {at:?} is kept as laid out with no loss: {:?}",
+                        spatial_text(lines)
+                    ),
+                ));
+            }
+        }
+    }
+    let mut hosts: Vec<u32> = regions
+        .iter()
+        .filter(|r| r.kind == "spatial")
+        .map(|r| r.host)
+        .collect();
+    hosts.sort_unstable();
+    hosts.dedup();
+    for host in hosts {
+        let at = e.anchors.get(host as usize).cloned().flatten();
+        let block = at.as_deref().and_then(|at| {
+            blocks.iter().find_map(|b| match b {
+                Block::Spatial { lines, anchor, .. }
+                    if anchor.as_ref().is_some_and(|a| a.0 == at) =>
+                {
+                    Some(spatial_text(lines))
+                }
+                _ => None,
+            })
+        });
+        let texts: Vec<&str> = regions
+            .iter()
+            .filter(|r| r.kind == "spatial" && r.host == host)
+            .flat_map(|r| r.texts.iter().map(String::as_str))
+            .collect();
+        let Some(block) = block else {
+            broken.push(Broken(
+                Inv::SpatialSaid,
+                format!("page {p}: a spatial region {texts:?} stands at no spatial block ({at:?})"),
+            ));
+            continue;
+        };
+        let bare = |t: &str| t.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+        if bare(&block) != bare(&texts.concat()) {
+            broken.push(Broken(
+                Inv::SpatialSaid,
+                format!(
+                    "page {p}: the spatial block at {} holds {block:?}, its runs read {texts:?}",
+                    at.unwrap_or_default()
+                ),
+            ));
+        }
+    }
+    broken
 }
 
 /// `blocks` with each table caption moved into a paragraph before its table.
@@ -189,10 +524,27 @@ pub(crate) fn check_read(out: &ReadOutcome, page: &Page) -> Vec<Broken> {
     broken
 }
 
-/// The cells of a table block.
+/// The cells of a table block, as their text (a picture in a cell has no text: its row is
+/// checked by [`crate::axes::Want::row_media`]).
 fn cells(rows: &[Vec<rezzer_model::Cell>]) -> Vec<Vec<String>> {
     rows.iter()
-        .map(|r| r.iter().map(|c| plain_text(&c.inlines)).collect())
+        .map(|r| {
+            r.iter()
+                .map(|c| {
+                    // A cell's lines read with a space between them (their breaks are checked by
+                    // `Want::cell_lines`).
+                    let text = plain_text(&c.inlines);
+                    if c.inlines
+                        .iter()
+                        .any(|i| matches!(i, rezzer_model::Inline::LineBreak))
+                    {
+                        collapse(&text)
+                    } else {
+                        text
+                    }
+                })
+                .collect()
+        })
         .collect()
 }
 
@@ -328,6 +680,18 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
             ));
         }
     }
+    for (label, value) in &want.no_pairs {
+        let paired = blocks.iter().any(|b| {
+            matches!(b, Block::Table { rows, .. }
+                if cells(rows).iter().any(|r| r.len() == 2 && r[0] == *label && r[1] == *value))
+        });
+        if paired {
+            broken.push(Broken(
+                Inv::RightPair,
+                format!("page {p}: wrong pair {label:?}: {value:?}"),
+            ));
+        }
+    }
     let headings: Vec<String> = blocks
         .iter()
         .filter_map(|b| match b {
@@ -374,9 +738,12 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
             ));
         }
     }
-    if !want.order.is_empty() {
+    for chain in std::iter::once(&want.order).chain(&want.orders) {
+        if chain.is_empty() {
+            continue;
+        }
         let page_text = collapse(&text(page_blocks(out, n)));
-        let order: Vec<&str> = want.order.iter().map(String::as_str).collect();
+        let order: Vec<&str> = chain.iter().map(String::as_str).collect();
         if let Err(e) = crate::common::in_order(&page_text, &order) {
             broken.push(Broken(
                 Inv::Order,
@@ -384,21 +751,118 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
             ));
         }
     }
+    // The texts of a list follow each other with nothing of the page between them. The
+    // bounds of the cells of a table row are no text: a label and its amount in two cells of
+    // one row, with an empty cell between them, follow each other.
+    for chain in want.together.iter().filter(|c| !c.is_empty()) {
+        let page_text = collapse(&text(page_blocks(out, n)));
+        let whole = collapse(&chain.join(" "));
+        if !page_text.contains(&whole) && !collapse(&page_text.replace('|', " ")).contains(&whole) {
+            broken.push(Broken(
+                Inv::Order,
+                format!("page {p}: {chain:?} do not follow each other: {page_text:?}"),
+            ));
+        }
+    }
+    // The k-th media block of the page stands between the blocks of its two texts.
+    let media: Vec<usize> = blocks
+        .iter()
+        .enumerate()
+        .filter(|(_, b)| matches!(b, Block::Media { .. }))
+        .map(|(i, _)| i)
+        .collect();
+    for (k, (a, b)) in want.media_between.iter().enumerate() {
+        let at = |t: &str| {
+            blocks.iter().position(|bl| {
+                !matches!(
+                    bl,
+                    Block::Section { .. } | Block::Quote { .. } | Block::Callout { .. }
+                ) && has_words(&block_text(bl), t)
+            })
+        };
+        let (m, ia, ib) = (media.get(k).copied(), at(a), at(b));
+        let held = matches!((m, ia, ib), (Some(m), Some(ia), Some(ib)) if ia < m && m < ib);
+        if !held {
+            broken.push(Broken(
+                Inv::MediaPlace,
+                format!(
+                    "page {p}: media block {k} at {m:?}, not between {a:?} at {ia:?} and {b:?} \
+                     at {ib:?}"
+                ),
+            ));
+        }
+    }
+    // The table row that holds each text of `row_media` holds one picture, in its cell.
+    for (t, at) in &want.row_media {
+        let held = blocks.iter().any(|b| match b {
+            Block::Table { rows, .. } => rows.iter().any(|r| {
+                r.iter()
+                    .any(|c| has_words(&collapse(&plain_text(&c.inlines)), t))
+                    && r.iter().map(|c| c.media.len()).sum::<usize>() == 1
+                    && r.get(*at).is_some_and(|c| c.media.len() == 1)
+            }),
+            _ => false,
+        });
+        if !held {
+            broken.push(Broken(
+                Inv::MediaPlace,
+                format!("page {p}: no table row holds {t:?} with one picture in cell {at}"),
+            ));
+        }
+    }
+    for lines in &want.cell_lines {
+        let found = blocks.iter().any(|b| match b {
+            Block::Table { rows, .. } => rows.iter().flatten().any(|c| {
+                let have: Vec<String> = c
+                    .inlines
+                    .split(|i| matches!(i, rezzer_model::Inline::LineBreak))
+                    .map(|part| collapse(&plain_text(part)))
+                    .collect();
+                have == *lines
+            }),
+            _ => false,
+        });
+        if !found {
+            broken.push(Broken(
+                Inv::Table,
+                format!("page {p}: no table cell of the lines {lines:?}"),
+            ));
+        }
+    }
+    if let Some(n) = want.media_count {
+        let have = blocks
+            .iter()
+            .filter(|b| matches!(b, Block::Media { .. }))
+            .count();
+        if have != n {
+            broken.push(Broken(
+                Inv::MediaPlace,
+                format!("page {p}: {have} media blocks, wanted {n}"),
+            ));
+        }
+    }
+    // A block kept as laid out holds each text where it stands: two texts on two of its
+    // lines, each in its column, are not read into one, so it is checked
+    // line by line; any other block as a whole.
     for (a, b) in &want.apart {
-        if let Some(bl) = blocks
+        if let Some(t) = blocks
             .iter()
             .filter(|bl| !matches!(bl, Block::Section { .. }))
-            .find(|bl| {
-                let t = block_text(bl);
-                has_words(&t, a) && has_words(&t, b)
+            .flat_map(|bl| match bl {
+                Block::Spatial { lines, .. } => lines
+                    .iter()
+                    .map(|l| {
+                        let pieces: Vec<&str> = l.pieces.iter().map(|p| p.text.as_str()).collect();
+                        collapse(&pieces.join(" "))
+                    })
+                    .collect(),
+                _ => vec![block_text(bl)],
             })
+            .find(|t| has_words(t, a) && has_words(t, b))
         {
             broken.push(Broken(
                 Inv::Apart,
-                format!(
-                    "page {p}: {a:?} and {b:?} stand in one block: {:?}",
-                    block_text(bl)
-                ),
+                format!("page {p}: {a:?} and {b:?} stand in one block: {t:?}"),
             ));
         }
     }
@@ -414,10 +878,23 @@ fn check_want(out: &ReadOutcome, n: usize, sheet: &Sheet, broken: &mut Vec<Broke
             ));
         }
     }
+    // A line of a block kept as laid out is a line of the read too: the engine keeps a right
+    // read of one short line as laid out where no region type has clear evidence for it
+    // (cosmetic: a paragraph is the right kind), and its words still go on in
+    // one line.
     for (a, b) in &want.lines_joined {
         let one = blocks
             .iter()
-            .flat_map(|bl| lines_of(bl))
+            .flat_map(|bl| match bl {
+                Block::Spatial { lines, .. } => lines
+                    .iter()
+                    .map(|l| {
+                        let pieces: Vec<&str> = l.pieces.iter().map(|p| p.text.as_str()).collect();
+                        collapse(&pieces.join(" "))
+                    })
+                    .collect(),
+                _ => lines_of(bl),
+            })
             .any(|l| has_words(&l, &format!("{a} {b}")));
         if !one {
             broken.push(Broken(
@@ -681,7 +1158,7 @@ fn out_text(out: &ReadOutcome) -> Vec<Vec<String>> {
 }
 
 /// A reference read: the read, what its variant is held to, and whether it breaks nothing
-/// or, when it breaks something, only invariants of ruling P6-X.
+/// or, when it breaks something, only the invariants of a wrong value or order.
 struct Reference {
     out: ReadOutcome,
     print: String,
@@ -737,9 +1214,9 @@ pub(crate) struct Reads {
 /// invariants of its own page, and against the read of its reference (the same variant at
 /// scale 1 in the real sizes and fonts), when both are held to the same things and the
 /// reference holds its own invariants, the same reading (blocks and losses), and no loss when
-/// the reference has none. When the reference breaks only invariants of ruling P6-X (pinned),
+/// the reference has none. When the reference breaks only the invariants of a wrong value or order (pinned),
 /// the variant is compared with the fallback reference instead: the reference in the real look
-/// and not turned, which must read the same (ruling P6-Y), when that one holds. Else the
+/// and not turned, which must read the same, when that one holds. Else the
 /// variant is not compared, and counted.
 pub(crate) fn reads(shape: &Shape) -> Reads {
     let mut done: HashMap<String, Reference> = HashMap::new();
@@ -747,7 +1224,7 @@ pub(crate) fn reads(shape: &Shape) -> Reads {
     let (mut uncompared, mut other) = (0, 0);
     let sample: Vec<Page> = variants(shape).collect();
     for page in &sample {
-        let read_out = read(page);
+        let (read_out, engine) = read_engine(page);
         // `VARIANT_DUMP="shape|variant"` prints that read, to look at a break.
         if std::env::var("VARIANT_DUMP").ok() == Some(format!("{}|{}", shape.name, page.name)) {
             eprintln!(
@@ -764,6 +1241,8 @@ pub(crate) fn reads(shape: &Shape) -> Reads {
             );
         }
         let mut broken = check_read(&read_out, page);
+        broken.extend(check_engine(&engine));
+        broken.extend(check_regions(&read_out, &engine, page));
         let r = page.variant.reference();
         if r != page.variant {
             let mut key = taken(&mut done, shape, &sample, r);

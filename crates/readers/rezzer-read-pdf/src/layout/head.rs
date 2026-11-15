@@ -2,29 +2,19 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! What the head of page 1 says about the document: its title and its date. Both are found
-//! by general rules. A date is chosen only when a whole date label marks it as the document
-//! date: before it on its line, over it, or in the cell left of it in a table, and the date is
-//! the only one in its column on the page (a label over or before a list of dates marks
-//! none). A date nothing marks is never chosen, also when it is the only date of the head: the
-//! loss says that it stands there.
+//! What the head of page 1 says about the document: its date (its title is the engine's, see
+//! [`layoutregions::extract::text::title`]). It is found by general rules. A date is chosen
+//! only when a whole date label marks it as the document date: before it on its line, over
+//! it, or in the cell left of it in a table, and the date is the only one in its column on the
+//! page (a label over or before a list of dates marks none). A date nothing marks is never
+//! chosen, also when it is the only date of the head: the loss says that it stands there.
 
+use layoutregions::extract::text::title::{HEAD_SHARE, fold, right_below};
+pub(crate) use layoutregions::extract::text::title::{TITLE_FROM, page_title};
 use rezzer_model::FoundDate;
 
-use super::{
-    EDGE, GAP_RATIO, HEADING_PLAIN_RATIO, Line, Run, SIZE_SLACK, address_shaped, heading_block,
-    ink, line, lines, size_key,
-};
+use super::{Line, Run, line, lines};
 use crate::scan;
-
-/// What `title_from` says of a title [`page_title`] found.
-pub(crate) const TITLE_FROM: &str = "largest heading in the top third of page 1";
-
-/// A title holds at most this many characters.
-const TITLE_CHARS: usize = 120;
-
-/// The head of a page: the top third of its height.
-const HEAD_SHARE: f32 = 2.0 / 3.0;
 
 /// The words that mark a date as the document's date, a list per language (German,
 /// English, Italian or Portuguese, Spanish). A label matches as a whole, case folded, with a
@@ -42,184 +32,6 @@ pub(crate) const DATE_LABELS: [&str; 8] = [
 
 /// A label line looks for its value among this many lines after it in reading order.
 const VALUE_LINES: usize = 8;
-
-/// A heading that may be the title: its size key, whether all its ink is bold, its top and
-/// its text.
-struct Candidate {
-    size: i32,
-    bold: bool,
-    top: f32,
-    text: String,
-}
-
-impl Candidate {
-    /// Whether it wins over `other`: larger, else bold where `other` is not, else higher.
-    fn beats(&self, other: &Candidate) -> bool {
-        (self.size, self.bold, self.top) > (other.size, other.bold, other.top)
-    }
-}
-
-/// The title of a page, from its lines in reading order: among its headings (each with the
-/// lines `heading` gives its level and that go on one another, as the layout joins them)
-/// whose top lies in the top third of the page (`height`), the one of the largest size
-/// wins, whatever its level; on a tie the one whose ink is all bold, then the highest. A
-/// heading the layout writes as a paragraph is none. A heading a little larger than the body
-/// (`body_size`) that opens an address is skipped (see [`opens_address`]), and so is the
-/// title of a table of contents or an index (see [`CONTENTS_TITLES`]). At most
-/// [`TITLE_CHARS`] characters, cut at a word.
-pub(crate) fn page_title(
-    lines: &[Line<'_>],
-    heading: &dyn Fn(&Line<'_>) -> Option<u8>,
-    height: f32,
-    body_size: f32,
-) -> Option<String> {
-    if height.is_nan() || height <= 0.0 {
-        return None;
-    }
-    let mut best: Option<Candidate> = None;
-    let mut i = 0;
-    while i < lines.len() {
-        let first = &lines[i];
-        let level = (!first.text.is_empty()).then(|| heading(first)).flatten();
-        let Some(level) = level else {
-            i += 1;
-            continue;
-        };
-        let (j, is_heading) = heading_block(lines, i, level, heading, body_size);
-        let block = &lines[i..j];
-        let top = first.y + first.h;
-        let small = first.size < HEADING_PLAIN_RATIO * body_size;
-        let words: Vec<&str> = block
-            .iter()
-            .flat_map(|l| l.text.split_whitespace())
-            .collect();
-        if is_heading
-            && top >= height * HEAD_SHARE
-            && !(small && opens_address(lines, i, j))
-            && !contents_title(&words)
-        {
-            let candidate = Candidate {
-                size: size_key(first.size),
-                bold: block
-                    .iter()
-                    .flat_map(|l| l.runs.iter())
-                    .filter(|r| ink(&r.text) > 0)
-                    .all(|r| r.bold),
-                top,
-                text: words.join(" "),
-            };
-            if best.as_ref().is_none_or(|b| candidate.beats(b)) {
-                best = Some(candidate);
-            }
-        }
-        i = j;
-    }
-    best.map(|b| capped(&b.text)).filter(|t| !t.is_empty())
-}
-
-/// Titles of a table of contents or an index, accent folded (see [`fold`]), a list per
-/// language as [`DATE_LABELS`]: such a heading names a part of the document, not the
-/// document.
-const CONTENTS_TITLES: [&str; 10] = [
-    "contents",
-    "table of contents",
-    "inhalt",
-    "inhaltsverzeichnis",
-    "sommaire",
-    "table des matieres",
-    "indice",
-    "contenido",
-    "contenuto",
-    "index",
-];
-
-/// Whether the words of a heading are a title of [`CONTENTS_TITLES`], a colon after it or
-/// not.
-fn contents_title(words: &[&str]) -> bool {
-    let text = fold(&words.join(" "));
-    let text = text.strip_suffix(':').unwrap_or(&text).trim_end();
-    CONTENTS_TITLES.contains(&text)
-}
-
-/// `text` in small letters with its accents folded: an umlaut as its two letters (`ä` as
-/// `ae`), `ß` as `ss`, another letter with an accent or a Polish mark as the letter (`è` as
-/// `e`, `ś` as `s`).
-fn fold(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for c in text.chars().flat_map(char::to_lowercase) {
-        match c {
-            '\u{e4}' => out.push_str("ae"),
-            '\u{f6}' => out.push_str("oe"),
-            '\u{fc}' => out.push_str("ue"),
-            '\u{df}' => out.push_str("ss"),
-            '\u{e0}'..='\u{e5}' => out.push('a'),
-            '\u{e7}' => out.push('c'),
-            '\u{e8}'..='\u{eb}' => out.push('e'),
-            '\u{ec}'..='\u{ef}' => out.push('i'),
-            '\u{f1}' => out.push('n'),
-            '\u{f2}'..='\u{f5}' | '\u{f8}' => out.push('o'),
-            '\u{f9}'..='\u{fb}' => out.push('u'),
-            '\u{fd}' | '\u{ff}' => out.push('y'),
-            '\u{105}' => out.push('a'),
-            '\u{107}' => out.push('c'),
-            '\u{119}' => out.push('e'),
-            '\u{142}' => out.push('l'),
-            '\u{144}' => out.push('n'),
-            '\u{15b}' => out.push('s'),
-            '\u{17a}' | '\u{17c}' => out.push('z'),
-            c => out.push(c),
-        }
-    }
-    out
-}
-
-/// `text` cut to at most [`TITLE_CHARS`] characters, at the last space within them when there
-/// is one.
-fn capped(text: &str) -> String {
-    if text.chars().count() <= TITLE_CHARS {
-        return text.to_string();
-    }
-    let cut: String = text.chars().take(TITLE_CHARS + 1).collect();
-    match cut.rfind(' ') {
-        Some(at) if at > 0 => cut[..at].trim_end().to_string(),
-        _ => cut.chars().take(TITLE_CHARS).collect(),
-    }
-}
-
-/// An address block holds at most this many lines.
-const ADDRESS_LINES: usize = 8;
-
-/// Whether the heading of `lines[i..j]` opens an address: its lines share one left edge and,
-/// with some of the lines right below it at that edge (each right below the one before, see
-/// [`right_below`], and not larger than the heading), have the shape of an address (see
-/// [`address_shaped`]): the heading and the first lines below, three or more in all and at
-/// most [`ADDRESS_LINES`]. The lines below may be smaller than the heading: a name in bold
-/// over its street and town; a longer line after the town does not hide the address.
-fn opens_address(lines: &[Line<'_>], i: usize, j: usize) -> bool {
-    let first = &lines[i];
-    let at_edge = |l: &Line<'_>| (l.x - first.x).abs() <= EDGE;
-    if !lines[i..j].iter().all(at_edge) {
-        return false;
-    }
-    let mut k = j;
-    while k < lines.len()
-        && k - i < ADDRESS_LINES
-        && at_edge(&lines[k])
-        && right_below(&lines[k - 1], &lines[k])
-        && lines[k].size <= first.size + SIZE_SLACK
-    {
-        k += 1;
-    }
-    let texts: Vec<&str> = lines[i..k].iter().map(|l| l.text.as_str()).collect();
-    (3..=texts.len()).any(|n| address_shaped(&texts[..n]))
-}
-
-/// Whether `cur` stands right below `prev`: under it, with a gap of at most [`GAP_RATIO`]
-/// line heights, whatever their sizes.
-fn right_below(prev: &Line<'_>, cur: &Line<'_>) -> bool {
-    let gap = prev.y - cur.y;
-    gap > 0.0 && gap <= GAP_RATIO * prev.h.max(cur.h).max(1.0)
-}
 
 /// What page 1 says its date is.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -244,6 +56,9 @@ pub(crate) struct Table {
     /// The field reader made it from drawn boxes or rows of fields: a label and its value in
     /// each row, also where column titles stand over one row of items.
     pub pairs: bool,
+    /// Its pairs were read from lines of text (a label and its value on one line, apart by a
+    /// gap or after a colon): a label marks its value only beside it, as in text.
+    pub lines: bool,
     /// The top of the table, in the frame of the runs.
     pub top: f32,
     pub rows: Vec<Vec<Cell>>,
@@ -340,9 +155,9 @@ fn pieces(runs: &[Run]) -> Vec<Line<'_>> {
 /// Datum 01.01.2020` or `Kundennr. 4711 Datum 01.02.2026`), at most [`BESIDE_SIZES`] sizes
 /// away, and the piece holds no other date (`Datum 01.01.2026 bis 31.01.2026` marks nothing).
 /// Every date in the top third of the page is a date of the head, marked or not.
-pub(crate) fn page_dates(runs: &[Run], height: Option<f32>) -> Dates {
+pub(crate) fn page_dates(runs: &[Run], height: f32) -> Dates {
     let mut out = Dates::default();
-    let in_head = |l: &Line<'_>| height.is_some_and(|h| h > 0.0 && l.y + l.h >= h * HEAD_SHARE);
+    let in_head = |l: &Line<'_>| height > 0.0 && l.y + l.h >= height * HEAD_SHARE;
     for l in &pieces(runs) {
         for (start, end) in date_like(&l.text) {
             out.spots.push(spot_of(l, start, end));
@@ -819,9 +634,10 @@ fn ink_gap(l: &Line<'_>, end: usize, start: usize) -> f32 {
 /// `Datum` has another title beside it. A table of label and value pairs that the field
 /// reader made counts only when its top lies in the top third of the page, where the header
 /// fields of a form stand: lower down it may be one row of items under small column titles,
-/// each title read as the label of the value below it. Whether a marked date is the only date
+/// each title read as the label of the value below it. A table of pairs read from lines of
+/// text marks a date only beside its label, as text does. Whether a marked date is the only date
 /// of its column is decided once for every mark, in [`document_date`].
-pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: Option<f32>) -> Dates {
+pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: f32) -> Dates {
     let mut out = Dates::default();
     let lines = pieces(runs);
     let add = |label: String, value: &str, spot: Spot, out: &mut Dates| {
@@ -840,6 +656,7 @@ pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: Option<f32>) ->
         });
     };
     let baselines = Baselines::new(&lines);
+    crate::work::add(lines.len() as u64);
     for (k, l) in lines.iter().enumerate() {
         if let Some(label) = whole_label(&l.text)
             && let Some(v) = value_of(&lines, &baselines, k)
@@ -848,7 +665,7 @@ pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: Option<f32>) ->
             add(label, &v.text, spot_of(v, 0, end), &mut out);
         }
     }
-    let above = |top: f32, share: f32| height.is_some_and(|h| h > 0.0 && top >= h * share);
+    let above = |top: f32, share: f32| height > 0.0 && top >= height * share;
     let is_date = |cell: &Cell| {
         let text = cell.text.trim();
         scan::dates(text, 4..=4)
@@ -869,6 +686,7 @@ pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: Option<f32>) ->
             .rows
             .iter()
             .filter(|row| is_date(&row[1]))
+            .filter(|row| !t.lines || cell_beside(&row[0], &row[1]))
             .filter_map(|row| whole_label(&row[0].text).map(|label| (label, &row[1])));
         if let Some((label, value)) = labelled.next()
             && labelled.next().is_none()
@@ -879,6 +697,18 @@ pub(crate) fn laid_dates(runs: &[Run], tables: &[Table], height: Option<f32>) ->
         }
     }
     out
+}
+
+/// Whether the cell `value` stands beside the cell `label` on its baseline, at most
+/// [`BESIDE_SIZES`] label sizes after its end, as a value of a label in text does (see
+/// [`value_of`]).
+fn cell_beside(label: &Cell, value: &Cell) -> bool {
+    match (label.spot, value.spot) {
+        (Some(l), Some(v)) => {
+            (v.y - l.y).abs() <= l.size / 2.0 && v.x0 > l.x0 && v.x0 - l.x1 <= BESIDE_SIZES * l.size
+        }
+        _ => false,
+    }
 }
 
 /// A table whose top lies in the upper half of the page may hold the document date.
@@ -908,6 +738,7 @@ pub(crate) fn document_date(dates: &Dates) -> PageDate {
         let mut listed = false;
         for s in &dates.spots {
             work += 1;
+            crate::work::add(1);
             if !s.same(&m.spot) && m.spot.in_column_of(s) {
                 listed = true;
                 break;
@@ -1033,8 +864,11 @@ fn date_alone(all: &[Line<'_>], baselines: &Baselines, v: &Line<'_>) -> bool {
     let reach = v.size.abs() + 1.0;
     let a = baselines.ys.partition_point(|y| *y < v.y - reach);
     let z = baselines.ys.partition_point(|y| *y <= v.y + reach);
+    crate::work::add(1);
     is_date
         && !baselines.order[a..z.max(a)].iter().any(|&k| {
+            // A step per piece looked at: those near the baseline, not every piece of the page.
+            crate::work::add(1);
             let p = &all[k];
             !std::ptr::eq(p, v) && (p.y - v.y).abs() <= v.size / 2.0
         })
@@ -1105,12 +939,6 @@ mod tests {
         assert_eq!(one("31.04.2026"), None);
         assert_eq!(one("29.02.2024").as_deref(), Some("2024-02-29"));
         assert_eq!(one("29.02.2026"), None);
-    }
-
-    #[test]
-    fn accents_fold() {
-        assert_eq!(fold("Table des Mati\u{e8}res"), "table des matieres");
-        assert_eq!(fold("G\u{fc}ltig bis"), "gueltig bis");
     }
 
     #[test]
@@ -1200,15 +1028,5 @@ mod tests {
         dates.marked.truncate(3);
         dates.spots.truncate(3);
         assert!(matches!(document_date(&dates), PageDate::Found(_)));
-    }
-
-    #[test]
-    fn long_titles_are_cut_at_a_word() {
-        let long = "Wort ".repeat(30);
-        let cut = capped(long.trim());
-        assert!(cut.chars().count() <= TITLE_CHARS, "{cut}");
-        assert!(cut.ends_with("Wort"), "{cut}");
-        let one = "\u{e4}".repeat(130);
-        assert_eq!(capped(&one).chars().count(), TITLE_CHARS);
     }
 }

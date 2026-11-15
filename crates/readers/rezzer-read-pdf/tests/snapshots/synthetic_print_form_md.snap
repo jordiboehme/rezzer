@@ -5,7 +5,7 @@ expression: md
 ---
 type: source
 title: "Entgeltabrechnung"
-description: "PDF, 2 pages, \"Entgeltabrechnung\", 2026-10-01. 8 tables."
+description: "PDF, 2 pages, \"Entgeltabrechnung\", 2026-10-01. 10 tables."
 resource: "file.pdf"
 tags: ["rezzer", "pdf"]
 generated: { by: rezzer/, at: "" }
@@ -36,7 +36,7 @@ document_date_from: "date label \"Datum\" on page 1"
 
 | Key | Value |
 | --- | --- |
-| pdf\_version | 1.7 |
+| pdf_version | 1.7 |
 
 :status[Page 1]{grey}
 
@@ -75,13 +75,15 @@ Found by: label and value pairs from drawn boxes; the label is the smaller text 
 
 Betrag\*\*
 
-Zahltag
-
 9876,54
 
-28\.02.2026
+Zahltag
 
-Auszahlungsbetrag\* 1.234,56
+28.02.2026
+
+|  |  |
+| --- | --- |
+| Auszahlungsbetrag\* | 1.234,56 |
 
 \* nach Abzug der Steuern\
 \*\* ohne Rundung
@@ -124,13 +126,15 @@ Found by: label and value pairs from drawn boxes; the label is the smaller text 
 
 Betrag\*\*
 
-Zahltag
-
 8765,43
 
-31\.03.2026
+Zahltag
 
-Auszahlungsbetrag\* 2.345,67
+31.03.2026
+
+|  |  |
+| --- | --- |
+| Auszahlungsbetrag\* | 2.345,67 |
 
 \* nach Abzug der Steuern\
 \*\* ohne Rundung

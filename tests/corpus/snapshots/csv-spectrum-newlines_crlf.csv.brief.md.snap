@@ -1,0 +1,58 @@
+---
+source: crates/rezzer/tests/corpus.rs
+---
+---
+type: source
+title: "csv-spectrum-newlines_crlf.csv"
+description: "CSV, 3 rows x 3 columns. 1 table."
+resource: "<corpus>/web-text/csv-spectrum-newlines_crlf.csv"
+tags: ["rezzer", "csv"]
+generated: { by: rezzer/0.1.0, at: 2026-01-01T00:00:00Z }
+source_date: <modified>
+temporal_confidence: inferred
+status: stable
+source_sha256: "7d05c17ec14367b2cf0dc4777861b575b6ccc2a1d5145194f2dba4a1b8d9056f"
+source_size: 42
+file_modified: <modified>
+format: csv
+detected_by: "delimited text (UTF-8), delimiter ',', 100% of rows with the same field count"
+encoding: "UTF-8"
+reader: "csv/0.1.0"
+completeness: complete
+losses: 0
+---
+
+# csv-spectrum-newlines_crlf.csv
+
+## Overview
+
+| Part | Kind | Size | Role | Reads from |
+| --- | --- | --- | --- | --- |
+| csv-spectrum-newlines_crlf | sheet | 3 rows x 3 columns |  |  |
+
+## Properties
+
+| Key | Value |
+| --- | --- |
+| columns | 3 |
+| delimiter | , |
+| has_header | true |
+| rows | 3 |
+
+## csv-spectrum-newlines_crlf
+
+Table A1:C4 (data A2:C4), header row 1.
+
+| a | b | c |
+| --- | --- | --- |
+| 1 | 2 | 3 |
+| Once upon<br>a time | 5 | 6 |
+| 7 | 8 | 9 |
+
+**Columns A1:C4**
+
+| Column | Type | Unit | Missing | Unique | Key |
+| --- | --- | --- | --- | --- | --- |
+| a | text |  | 0 | yes | yes |
+| b | integer |  | 0 | yes | yes |
+| c | integer |  | 0 | yes | yes |

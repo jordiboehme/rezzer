@@ -33,7 +33,7 @@ use common::{
 use rezzer_model::{Block, Document, plain_text};
 #[cfg(unix)]
 use rezzer_pipeline::Config;
-use rezzer_pipeline::{OutputKind, Pipeline, Request};
+use rezzer_pipeline::{NoteLevel, OutputKind, Pipeline, Request};
 use serde_json::Value;
 
 /// The allocator of the Rezzer binary: the memory these tests measure is the memory it
@@ -89,7 +89,20 @@ struct Output {
 }
 
 fn run(pipeline: &Pipeline, file: &Path) -> Output {
-    let result = pipeline.run_path(file, &request());
+    run_request(pipeline, file, &request())
+}
+
+/// [`run`] at the note level `notes`.
+fn run_with(pipeline: &Pipeline, file: &Path, notes: NoteLevel) -> Output {
+    let req = Request {
+        notes: Some(notes),
+        ..request()
+    };
+    run_request(pipeline, file, &req)
+}
+
+fn run_request(pipeline: &Pipeline, file: &Path, req: &Request) -> Output {
+    let result = pipeline.run_path(file, req);
     let json_text = result
         .json
         .unwrap_or_else(|| panic!("{}: no document: {:?}", file.display(), result.message));
@@ -269,6 +282,40 @@ fn snapshot_json(out: &Output, corpus: &str) -> String {
     redact(&serde_json::to_string_pretty(&value).unwrap(), corpus)
 }
 
+/// Whether `file` has golden snapshots: every text file, and the spreadsheets and PDFs named
+/// in [`GOLDEN_OFFICE`] and [`GOLDEN_PDF`].
+fn golden(file: &Path) -> bool {
+    let name = file.file_name().unwrap().to_string_lossy().to_string();
+    let office = file.parent().is_some_and(|p| p.ends_with("office"));
+    let pdf = file.parent().is_some_and(|p| p.ends_with("pdf"));
+    !(office && !GOLDEN_OFFICE.contains(&name.as_str())
+        || pdf && !GOLDEN_PDF.contains(&name.as_str()))
+}
+
+/// Every `.brief.md` snapshot belongs to a corpus file with golden snapshots: one left behind
+/// by a file that is no longer read would never be checked.
+#[test]
+fn every_brief_snapshot_has_its_file() {
+    let names: std::collections::HashSet<String> = corpus_files()
+        .into_iter()
+        .filter(|f| golden(f))
+        .map(|f| f.file_name().unwrap().to_string_lossy().to_string())
+        .collect();
+    let mut orphans = Vec::new();
+    for entry in std::fs::read_dir(corpus_dir().join("snapshots")).unwrap() {
+        let file = entry.unwrap().file_name().to_string_lossy().to_string();
+        if let Some(name) = file.strip_suffix(".brief.md.snap")
+            && !names.contains(name)
+        {
+            orphans.push(file);
+        }
+    }
+    assert!(
+        orphans.is_empty(),
+        "brief snapshots without a file: {orphans:?}"
+    );
+}
+
 #[test]
 fn corpus_golden() {
     let pipeline = pipeline();
@@ -282,17 +329,33 @@ fn corpus_golden() {
     settings.bind(|| {
         for file in corpus_files() {
             let name = file.file_name().unwrap().to_string_lossy().to_string();
-            let office = file.parent().is_some_and(|p| p.ends_with("office"));
-            if office && !GOLDEN_OFFICE.contains(&name.as_str()) {
+            if !golden(&file) {
                 continue;
             }
-            let pdf = file.parent().is_some_and(|p| p.ends_with("pdf"));
-            if pdf && !GOLDEN_PDF.contains(&name.as_str()) {
-                continue;
-            }
-            let out = run(&pipeline, &file);
+            // The Markdown at `full` is the Markdown of every note, as before the levels;
+            // the default `brief` has a snapshot of its own where it leaves notes out.
+            let out = run_with(&pipeline, &file, NoteLevel::Full);
             insta::assert_snapshot!(format!("{name}.json"), snapshot_json(&out, &corpus));
             insta::assert_snapshot!(format!("{name}.md"), redact(&out.markdown, &corpus));
+            let brief = run(&pipeline, &file);
+            assert_eq!(
+                brief.json, out.json,
+                "{name}: the JSON is the same at every level"
+            );
+            if brief.markdown != out.markdown {
+                insta::assert_snapshot!(
+                    format!("{name}.brief.md"),
+                    redact(&brief.markdown, &corpus)
+                );
+            } else {
+                let stale = corpus_dir()
+                    .join("snapshots")
+                    .join(format!("{name}.brief.md.snap"));
+                assert!(
+                    !stale.exists(),
+                    "{name}: brief equals full, its snapshot is stale"
+                );
+            }
         }
     });
 }
@@ -712,7 +775,7 @@ fn without_label_and_path(list: &Value) -> Value {
     list
 }
 
-/// For every corpus workbook the parameters equal the baseline of Task 1 in anchor, name,
+/// For every corpus workbook the parameters equal the first baseline in anchor, name,
 /// value, unit, unit source and read count, in the same order: only `label` and `path`
 /// may differ (spec 8.7, D2). A label is the path joined with " / ".
 #[test]
@@ -949,7 +1012,7 @@ fn pvt_z_factor_folds_into_patterns() {
         .nth(1)
         .expect("a Hidden logic section");
     assert!(
-        hidden.contains("| add-in | UniflocVBA\\_7.xlam |"),
+        hidden.contains("| add-in | UniflocVBA_7.xlam |"),
         "{hidden}"
     );
 }
@@ -1918,7 +1981,8 @@ fn arxiv_tables_and_pictures() {
     );
 }
 
-/// The text of one page section of the model, its blocks joined by blank lines.
+/// The text of one page section of the model, its blocks joined by blank lines; the lines of a
+/// block kept as laid out in their order.
 fn page_text(doc: &Value, page: u32) -> String {
     fn walk(v: &Value, out: &mut String) {
         match v {
@@ -1932,9 +1996,16 @@ fn page_text(doc: &Value, page: u32) -> String {
                 if let Some(inlines) = m.get("inlines") {
                     walk(inlines, out);
                 }
-                for key in ["blocks", "items", "rows", "cells"] {
+                for key in ["blocks", "items", "rows", "cells", "lines"] {
                     if let Some(inner) = m.get(key) {
                         walk(inner, out);
+                    }
+                }
+                // A block kept as laid out: its lines in order, each piece followed by a space.
+                if let Some(Value::Array(pieces)) = m.get("pieces") {
+                    for piece in pieces {
+                        walk(piece, out);
+                        out.push(' ');
                     }
                 }
             }
@@ -1984,7 +2055,7 @@ fn sf1199a_back_page_reads_as_prose() {
     );
 }
 
-/// Ruling P6-X3: on the sample check of the form, the city of issue and the titles of the date
+/// On the sample check of the form, the city of issue and the titles of the date
 /// fields are two blocks: no paragraph holds both.
 #[test]
 fn sf1199a_check_city_stays_apart_from_the_date_titles() {
@@ -2034,4 +2105,113 @@ fn census_caption_is_written_once_as_the_group_title() {
         .collect();
     assert!(labels.len() > 300, "{part}");
     assert!(!labels.iter().any(|l| l.contains(caption)), "{part}");
+}
+
+/// Only a paged reader lists regions: the JSON of every corpus file of another format has no
+/// `regions` key (its snapshots stay as they were).
+#[test]
+fn non_pdf_json_is_unchanged() {
+    let pipeline = pipeline();
+    for file in corpus_files() {
+        if file.parent().is_some_and(|p| p.ends_with("pdf")) {
+            continue;
+        }
+        let out = run(&pipeline, &file);
+        assert!(
+            out.json.get("regions").is_none(),
+            "{}: regions listed",
+            file.display()
+        );
+    }
+}
+
+/// The frontmatter of a rendered document, up to its closing line.
+fn frontmatter_of(md: &str) -> &str {
+    &md[..md[4..].find("\n---\n").expect("frontmatter end") + 4]
+}
+
+/// A form whose pages hold regions kept as laid out (notes on how it was read), possible
+/// tables not rebuilt and region pictures that need vision. `brief` leaves out only the
+/// first and counts them; the frontmatter is the same at every level.
+#[test]
+fn pdf_note_levels_keep_what_touches_a_value() {
+    let pipeline = pipeline();
+    let file = corpus_dir()
+        .join("pdf")
+        .join("pdfbox-sf1199a-direct-deposit.pdf");
+    let full = run_with(&pipeline, &file, NoteLevel::Full).markdown;
+    let brief = run_with(&pipeline, &file, NoteLevel::Brief).markdown;
+    // The regions that read as a table that could not be built keep their note: the ties
+    // of their values may be missing. The others say only that no kind was clear.
+    let built_nothing = "it reads as table, but most of its cells are empty";
+    let laid_out =
+        full.matches(" is kept as laid out, ").count() - full.matches(built_nothing).count();
+    assert!(laid_out > 10, "{full}");
+    assert_eq!(
+        brief.matches(" is kept as laid out, ").count(),
+        brief.matches(built_nothing).count(),
+        "{brief}"
+    );
+    for kept in [
+        "Possible table on page 1 not rebuilt",
+        ":status[Needs vision]",
+        built_nothing,
+    ] {
+        assert_eq!(
+            full.matches(kept).count(),
+            brief.matches(kept).count(),
+            "{kept}"
+        );
+        assert!(brief.contains(kept), "{kept}");
+    }
+    assert!(
+        brief.contains(&format!(
+            "\n\n{laid_out} notes on how the file was read are not shown. `--notes full` shows \
+             them.\n"
+        )),
+        "{brief}"
+    );
+    assert_eq!(frontmatter_of(&brief), frontmatter_of(&full));
+}
+
+/// At `none` the content has no notes and `## Not read` no rows, but the pictures that need
+/// vision stay listed: they are content. An invoice keeps its note on merged cells in
+/// `brief` and loses it at `none`.
+#[test]
+fn pdf_note_level_none_keeps_the_pictures() {
+    let pipeline = pipeline();
+    let form = corpus_dir()
+        .join("pdf")
+        .join("pdfbox-sf1199a-direct-deposit.pdf");
+    let full = run_with(&pipeline, &form, NoteLevel::Full);
+    let none = run_with(&pipeline, &form, NoteLevel::None);
+    assert_eq!(none.json, full.json);
+    assert_eq!(
+        frontmatter_of(&none.markdown),
+        frontmatter_of(&full.markdown)
+    );
+    let vision = ":status[Needs vision]";
+    assert_eq!(
+        none.markdown.matches(vision).count(),
+        full.markdown.matches(vision).count()
+    );
+    assert!(
+        !none.markdown.contains("| Where | What | Why | Severity |"),
+        "{}",
+        none.markdown
+    );
+    assert!(
+        none.markdown.ends_with(
+            "\n## Not read\n\nNotes are not shown. `--notes brief` or `--notes full` shows them.\n"
+        ),
+        "{}",
+        none.markdown
+    );
+    let invoice = corpus_dir()
+        .join("pdf")
+        .join("mustang-gnuaccounting-invoice-508.pdf");
+    let brief = run_with(&pipeline, &invoice, NoteLevel::Brief).markdown;
+    assert!(brief.contains("Merged cells: "), "{brief}");
+    let none = run_with(&pipeline, &invoice, NoteLevel::None).markdown;
+    assert!(!none.contains("Merged cells: "), "{none}");
 }

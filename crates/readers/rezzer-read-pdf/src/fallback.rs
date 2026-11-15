@@ -26,7 +26,7 @@ use rezzer_model::{Bytes, LossReason, ReadOptions, ReadOutcome, Severity, Source
 use crate::open;
 use crate::quote::Marked;
 use crate::text::{self, Caps, Extracted, Origin};
-use crate::{Out, lay_out};
+use crate::{EnginePage, Out, lay_out};
 
 /// The bytes of the file, shared with the parser without a copy.
 struct Shared(Bytes);
@@ -333,7 +333,8 @@ fn page_infos(doc: &hayro_syntax::Pdf) -> Vec<PageInfo> {
 
 /// Reads the text of a file pdfparts could not open (`e`, NotPdf or Damaged) with the
 /// fallback parser. The read is partial: the object layer is not read. When the fallback
-/// cannot read the file either, the outcome is the failed one, with why.
+/// cannot read the file either, the outcome is the failed one, with why. The regions of each
+/// page laid out go to `regions`, if given.
 pub(crate) fn read_file(
     src: &Source,
     opts: &ReadOptions,
@@ -341,6 +342,7 @@ pub(crate) fn read_file(
     e: &OpenError,
     mut out: Out,
     text_stop: &dyn Fn() -> bool,
+    regions: Option<&mut Vec<EnginePage>>,
 ) -> ReadOutcome {
     let stop = || budget.check_time().is_err();
     let unused = |mut out: Out, why: String| {
@@ -382,6 +384,7 @@ pub(crate) fn read_file(
         0,
     );
     let wanted: Vec<u32> = pages.iter().map(|p| p.number).collect();
+    let before = budget.elapsed();
     let extracted = text::pages_of(
         Origin::Fallback(&raw),
         &wanted,
@@ -391,7 +394,16 @@ pub(crate) fn read_file(
         caps,
         text_stop,
     );
-    let (_, _, needs, places) = lay_out(None, &pages, extracted, &[], budget, &mut out);
+    let text_time = budget.elapsed().saturating_sub(before);
+    let (_, _, needs, places) = lay_out(
+        None,
+        &pages,
+        (extracted, text_time),
+        &[],
+        budget,
+        &mut out,
+        regions,
+    );
     // Nothing is rendered, so nothing is read for codes.
     crate::render::apply_codes(None, places, &mut out);
     // The renderer reads only pdfparts' canonical copy, and there is none.

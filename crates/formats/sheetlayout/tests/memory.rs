@@ -283,7 +283,7 @@ fn dense_block_detect_heap_follows_the_cells() {
     assert_eq!(layout.regions[0].header_paths.len(), 1000);
 }
 
-// Report rules (Task 6).
+// Report rules.
 
 #[test]
 fn many_sections_are_bounded() {

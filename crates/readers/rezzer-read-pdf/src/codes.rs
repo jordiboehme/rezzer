@@ -528,6 +528,7 @@ fn codes_among(
             for gy in a.1..=b.1.min(a.1 + SPAN) {
                 grid_of.entry((gx, gy)).or_default().push(i);
                 entries += 1;
+                crate::work::add(1);
             }
         }
         if entries > MAX_ENTRIES {
@@ -552,6 +553,7 @@ fn codes_among(
                     continue;
                 };
                 pairs += list.len() as u64;
+                crate::work::add(list.len() as u64);
                 if pairs > MAX_PAIRS {
                     return Err(too_much());
                 }
@@ -603,7 +605,9 @@ fn codes_among(
         .into_values()
         .filter(|g| g.len() >= MERGE_CELLS)
         .collect();
-    groups.sort_by_key(|g| std::cmp::Reverse(g.len()));
+    // Groups of one size in the order of their first cell: the map's own order differs from
+    // run to run.
+    groups.sort_by_key(|g| (std::cmp::Reverse(g.len()), g[0]));
     let what = if printed.is_some() {
         "dark parts"
     } else {
@@ -845,7 +849,11 @@ fn merge_bands(cells: &[[f32; 4]], groups: Vec<Vec<usize>>) -> Vec<Vec<usize>> {
         let r = find(&mut parent, i);
         merged.entry(r).or_default().extend(g);
     }
-    merged.into_values().collect()
+    // In the order of each group's first member, not in the map's own (which differs from
+    // run to run).
+    let mut merged: Vec<Vec<usize>> = merged.into_values().collect();
+    merged.sort_by_key(|g| g.first().copied());
+    merged
 }
 
 /// Whether no rectangle but `members` lies in box `b`: the quiet zone of a linear code.
@@ -1620,6 +1628,7 @@ fn fits_code128(w: &[f32], first: f32, work: &mut usize) -> Option<(usize, f32)>
     let width = |k: usize| if k == 0 { first } else { w[k] };
     let start: [f32; 6] = std::array::from_fn(width);
     *work += start.len();
+    crate::work::add(start.len() as u64);
     let module = start.iter().sum::<f32>() / 11.0;
     let as_f = |p: &[u8]| p.iter().map(|&v| f32::from(v)).collect::<Vec<f32>>();
     let close = |got: &[f32], want: &[f32], m: f32| {
@@ -1638,6 +1647,7 @@ fn fits_code128(w: &[f32], first: f32, work: &mut usize) -> Option<(usize, f32)>
     let mut at = 6;
     while at + 7 <= w.len() {
         *work += 13;
+        crate::work::add(13);
         let stop = &w[at..at + 7];
         let m = stop.iter().fold(before, |a, &v| a + v) / ((at / 6) * 11 + 13) as f32;
         if at >= 18 && close(stop, &as_f(&CODE128_STOP), m) {
@@ -1645,6 +1655,7 @@ fn fits_code128(w: &[f32], first: f32, work: &mut usize) -> Option<(usize, f32)>
             // 11.
             let n = at + 7;
             *work += n;
+            crate::work::add(n as u64);
             let w: Vec<f32> = (0..n).map(width).collect();
             let whole = |spread: f32| {
                 let mut want: Vec<f32> = w[..at]
@@ -1773,6 +1784,7 @@ fn line_fits(
             }
         };
         *work += looked.saturating_sub(FIT_WINDOW);
+        crate::work::add(looked.saturating_sub(FIT_WINDOW) as u64);
         if *work > FIT_WORK {
             return Err(Halt::Work);
         }
@@ -2020,6 +2032,7 @@ fn lines_fit(
             // Each dark run starts a window of a code's bars, both ways along the line: past
             // the work a code's check may take, the code is not taken.
             work += e.len() * 2 * FIT_WINDOW;
+            crate::work::add((e.len() * 2 * FIT_WINDOW) as u64);
             if work > FIT_WORK {
                 return Some(false);
             }
@@ -2612,14 +2625,9 @@ mod tests {
         }
         let members: Vec<usize> = (0..cells.len()).collect();
         let work = std::cell::Cell::new(0);
-        let start = std::time::Instant::now();
         let found = qr_finders(&cells, &members, [0.0, 0.0, n as f32, n as f32], 1.0, &work);
-        assert!(
-            start.elapsed() < std::time::Duration::from_secs(2),
-            "{:?}",
-            start.elapsed()
-        );
         assert_eq!(found, 49 * 49);
+        // The work bound in places tested, the same on every machine: each place once.
         assert_eq!(work.get(), n * n);
     }
 
@@ -2628,17 +2636,27 @@ mod tests {
         bars_fit(rgba, size, b, kind, &|| false).expect("no time limit")
     }
 
+    /// The steps of work [`a_long_train_of_code128_starts_is_checked_within_its_work`] may take:
+    /// the windows the check looks at, measured when the bound was set (2026-11-11:
+    /// 365,605,961), with half of it again as margin.
+    const TRAIN_STEPS: u64 = 550_000_000;
+
     #[test]
+    #[cfg_attr(
+        not(debug_assertions),
+        ignore = "work steps are counted in debug builds only"
+    )]
     fn a_long_train_of_code128_starts_is_checked_within_its_work() {
         // Each window is charged what it looks at: the check ends quickly, and takes no code.
         let (rgba, size, b) = starts_without_a_stop(500);
-        let start = std::time::Instant::now();
+        let before = crate::work::work_steps();
         assert!(!fits(&rgba, size, b, Linear::Code128));
-        assert!(
-            start.elapsed() < std::time::Duration::from_secs(5),
-            "{:?}",
-            start.elapsed()
-        );
+        // In steps of work, counted in debug builds (see `TRAIN_STEPS`).
+        let steps = crate::work::work_steps().zip(before).map(|(a, b)| a - b);
+        eprintln!("a train of starts: {steps:?} steps");
+        if let Some(steps) = steps {
+            assert!(steps <= TRAIN_STEPS, "{steps} steps of work");
+        }
         // Past the time for reading codes the check stops and says so: it decided nothing.
         let calls = std::cell::Cell::new(0u32);
         let late = || {

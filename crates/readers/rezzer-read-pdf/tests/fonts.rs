@@ -9,7 +9,7 @@ mod common;
 
 use std::io::Write;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use common::{Builder, Page, body_text, pdf, show, text};
 use rezzer_limits::{Budget, Limits};
@@ -241,7 +241,7 @@ fn invisible_text_on_mixed_page_is_read() {
 fn font_bomb_stops_at_glyph_cap() {
     // Form 0 shows 1,000 glyphs; each further form calls the one below it ten times, so the
     // page would draw 10^9 glyphs.
-    let start = Instant::now();
+    let start = common::Cpu::now();
     let content = deflate(b"BT /F1 12 Tf 72 700 Td (Before the bomb.) Tj ET\n/X6 Do\n");
     let bytes = one_page(&content, |b| {
         let font = b.add("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
@@ -356,7 +356,7 @@ fn flood_past_the_cap_keeps_the_text_before_it() {
 #[test]
 fn many_short_lines_on_one_page_are_bounded() {
     // About 88 KB: two-letter strings, each on its own line.
-    let start = Instant::now();
+    let start = common::Cpu::now();
     let mut content = b"BT /F1 12 Tf 72 800 Td\n".to_vec();
     for _ in 0..466_000 {
         content.extend_from_slice(b"(ab)Tj 0 1 Td\n");

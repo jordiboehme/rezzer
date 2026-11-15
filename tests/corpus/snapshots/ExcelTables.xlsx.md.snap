@@ -44,8 +44,8 @@ modified: "2013-07-16T07:00:19Z"
 | Key | Value |
 | --- | --- |
 | application | Microsoft Excel |
-| calc\_mode | auto |
-| iterative\_calculation | false |
+| calc_mode | auto |
+| iterative_calculation | false |
 
 ## ExcelTable
 

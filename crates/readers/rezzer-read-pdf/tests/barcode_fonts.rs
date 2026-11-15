@@ -173,7 +173,7 @@ fn wrong_check(text: &str) -> String {
 #[test]
 fn a_code_in_a_barcode_font_that_is_not_decoded_is_named() {
     // Bars of a Code 128 whose check symbol is wrong: no value, and the read says what is
-    // there (P6-X: never a wrong value, never silent).
+    // there (never a wrong value, never silent).
     for font in ["Code128", "ShopBars"] {
         let out = read(&shown_in(font, None, &wrong_check("2026004711")));
         let md = markdown(&out);
@@ -194,7 +194,7 @@ fn a_code_in_a_barcode_font_that_is_not_decoded_is_named() {
 
 #[test]
 fn fonts_whose_names_say_codes_but_draw_letters_keep_their_text() {
-    // Ruling of part 2f-1 fix round 2: a name never takes a run on its own. OCR-B and MICR
+    // A name never takes a run on its own. OCR-B and MICR
     // fonts of a barcode vendor, and names with a code inside a word or as a word, that draw
     // letters (blocks here): the coding line of a payment slip stays text, and no code is
     // claimed. At 1cb34b0 the names took the runs and the values were gone.
@@ -227,7 +227,7 @@ fn fonts_whose_names_say_codes_but_draw_letters_keep_their_text() {
             all_text(&out).contains("Konto 1234567890 Betrag 12,50 EUR"),
             "{name}: {md}"
         );
-        assert!(out.document.assets.is_empty(), "{name}: {md}");
+        assert!(common::pictures(&out).is_empty(), "{name}: {md}");
         assert!(!md.contains("barcode font"), "{name}: {md}");
     }
 }
@@ -271,8 +271,8 @@ fn a_human_readable_bar_font_is_taken_by_its_bars() {
 #[test]
 fn codes_of_two_widths_in_fonts_known_only_by_their_bars_are_read() {
     // Code 39 and ITF have two widths. In a font whose name says nothing they leaked their
-    // glyph text, glued to the value beside them, with no code and no word (part 2f-1 review
-    // I1); now their structure is the evidence. Equal bars stay text.
+    // glyph text, glued to the value beside them, with no code and no word;
+    // now their structure is the evidence. Equal bars stay text.
     use barcodes::Symbology as S;
     for (s, text, kind) in [
         (S::Code39, "ABC-1234", "Code 39"),
@@ -320,7 +320,7 @@ fn codes_of_two_widths_in_fonts_known_only_by_their_bars_are_read() {
 #[test]
 fn a_code_shown_a_glyph_at_a_time_is_one_code() {
     // A font known only by its bars, one glyph a show (`(A) Tj (B) Tj ...`): the shows that
-    // continue one another on one baseline are looked at as one run (round 1 concern 3).
+    // continue one another on one baseline are looked at as one run.
     let glyphs = bar_codes(Set::Pairs, "2026004711");
     let shows: String = glyphs
         .iter()
@@ -359,7 +359,7 @@ fn equal_bars_in_a_font_known_only_by_its_bars_stay_text() {
         "{}",
         all_text(&out)
     );
-    assert!(out.document.assets.is_empty());
+    assert!(common::pictures(&out).is_empty());
 }
 
 /// The bar and space widths of the dark modules `dark`, from the first dark one to the last.
@@ -404,7 +404,11 @@ fn odd_characters_in_a_text_font_stay_text() {
         "{}",
         all_text(&out)
     );
-    assert!(out.document.assets.is_empty(), "{:?}", out.document.assets);
+    assert!(
+        common::pictures(&out).is_empty(),
+        "{:?}",
+        out.document.assets
+    );
 }
 
 #[test]
@@ -437,7 +441,7 @@ fn text_fonts_whose_glyphs_look_like_bars_stay_text() {
             all_text(&out)
         );
         assert!(
-            out.document.assets.is_empty(),
+            common::pictures(&out).is_empty(),
             "{name}: {:?}",
             out.document.assets
         );
@@ -696,12 +700,16 @@ fn the_widths_of_a_font_alone_are_no_evidence() {
         "{}",
         all_text(&out)
     );
-    assert!(out.document.assets.is_empty(), "{:?}", out.document.assets);
+    assert!(
+        common::pictures(&out).is_empty(),
+        "{:?}",
+        out.document.assets
+    );
 }
 
 #[test]
 fn the_glyph_program_of_a_real_shop_barcode_font_is_taken() {
-    // Fix round 3: the real font's glyph program. 2048 units an em, one rectangle a glyph at
+    // The real font's glyph program. 2048 units an em, one rectangle a glyph at
     // x 0, 1559 high, its bars a little wider than whole modules (36, 72, 107, 143 for a
     // module of 34.3) so its spaces are a little narrower, PDF widths rounded down, a full bar
     // and a white glyph of 2 modules, and a glyph of two bars far apart after a quiet zone;
@@ -750,8 +758,8 @@ fn two_codes(name: &str, size: f32, gap: u8, one_show: bool) -> (Vec<u8>, [Vec<u
 
 #[test]
 fn two_codes_close_on_one_baseline_never_leave_glyph_text() {
-    // Part 2f-1 re-review R1: two codes 5 modules apart (and some 6 apart) stayed text, glued
-    // into one word, with no code and no word. By the ruling of fix round 4, a run taken as
+    // Two codes 5 modules apart (and some 6 apart) stayed text, glued
+    // into one word, with no code and no word. A run taken as
     // bars never leaves glyph text: each code is read, or named as not decoded.
     let mut tally: Vec<String> = Vec::new();
     for gap in 1..=12u8 {
@@ -790,7 +798,7 @@ fn two_codes_close_on_one_baseline_never_leave_glyph_text() {
 
 #[test]
 fn codes_of_two_widths_with_heavy_ink_spread_never_leave_glyph_text() {
-    // Part 2f-1 re-review R2: unnamed Code 39 and ITF whose bars are 25 % or 30 % of a module
+    // Unnamed Code 39 and ITF whose bars are 25 % or 30 % of a module
     // wider (spaces as much narrower) stayed text glued to their neighbour. The spread is
     // taken out before their two widths are told apart.
     use barcodes::Symbology as S;

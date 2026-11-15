@@ -246,13 +246,13 @@ pub(super) fn inline_into(
             strong,
             strike,
         } => styled_text(text, *emphasis, *strong, *strike, mode, dollars, out),
-        Inline::LineBreak => {
-            if mode == Mode::Block {
-                out.push_str("\\\n");
-            } else {
-                out.push(' ');
-            }
-        }
+        // A line break in a table cell is `<br>`: the lines of a cell are kept apart there (two
+        // values, a stop over a stop), and a pipe table has no other way to show them.
+        Inline::LineBreak => match mode {
+            Mode::Block => out.push_str("\\\n"),
+            Mode::Cell => out.push_str("<br>"),
+            Mode::Line => out.push(' '),
+        },
         Inline::Image { target, alt, title } => {
             if !safe_target(target) {
                 escape_with(alt, line_mode(mode), dollars, out);
@@ -376,7 +376,8 @@ fn styled_text(
 /// Escapes text from a file so that it stays text.
 ///
 /// Line-start markers (`#`, `>`, `-`, `+`, `=`, `1.`) are handled per line in
-/// [`finish_lines`]; everything that is structure anywhere in a line is handled here.
+/// [`finish_lines`]; everything that is structure anywhere in a line is handled here. Only
+/// what would be read as structure is escaped: an agent reads the raw Markdown.
 pub(crate) fn escape_text(text: &str, mode: Mode, out: &mut String) {
     escape_with(text, mode, false, out);
 }
@@ -392,6 +393,14 @@ pub(super) fn escape_with(text: &str, mode: Mode, dollars: bool, out: &mut Strin
     while let Some((i, c)) = chars.next() {
         let next = chars.peek().map(|&(_, n)| n);
         match c {
+            // An underscore between letters or digits never opens or closes emphasis
+            // (`snake_case`): it stays as it is. At the start or end of a run the neighbour
+            // is unknown, so it is escaped there.
+            '_' if prev.is_some_and(char::is_alphanumeric)
+                && next.is_some_and(char::is_alphanumeric) =>
+            {
+                out.push(c);
+            }
             '\\' | '`' | '*' | '_' | '[' | ']' | '~' | '|' | '&' => {
                 out.push('\\');
                 out.push(c);
