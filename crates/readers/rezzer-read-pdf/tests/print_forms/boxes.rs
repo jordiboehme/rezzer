@@ -108,6 +108,28 @@ fn boxed_fields_become_pairs() {
     assert_no_loss_but_the_head_date(&out);
 }
 
+/// The found-by note of boxed fields says only how the pairs were read: `brief` leaves it
+/// out without a count line (it is no gap); the pairs and the note on the date stay.
+#[test]
+fn brief_leaves_out_the_note_on_boxed_fields() {
+    let out = read(&print_form(
+        &[boxed_fields(["00000", "01.01.2020", ""], None)],
+        "",
+        "",
+    ));
+    let full = common::markdown_at(&out, rezzer_render::NoteLevel::Full);
+    assert!(full.contains(BOX_NOTE), "{full}");
+    let brief = common::markdown_at(&out, rezzer_render::NoteLevel::Brief);
+    assert!(!brief.contains("Found by"), "{brief}");
+    assert!(brief.contains("| Personalnummer | 00000 |"), "{brief}");
+    assert!(
+        !brief.contains("on how the file was read"),
+        "an explanation is no gap, no count: {brief}"
+    );
+    let date_notes = |md: &str| md.matches("it is not marked as the document date").count();
+    assert_eq!(date_notes(&brief), date_notes(&full));
+}
+
 /// A box of three styles beside boxed fields is not paired: its text stays as it is, and a
 /// loss says why; the fields beside it are still pairs.
 #[test]

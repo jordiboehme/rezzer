@@ -65,6 +65,8 @@ pub(crate) struct Ctx<'a> {
     /// A table column without a header is named by its number (`Column 4`, CSV and TSV),
     /// else by its sheet column letter (`Column D`).
     pub column_numbers: bool,
+    /// Which notes the content shows.
+    pub level: crate::NoteLevel,
 }
 
 /// The annotations of a document by the anchor they stand at, and which of them the content
@@ -442,6 +444,15 @@ fn block(b: &Block, ctx: &Ctx, depth: usize, level: u8) -> String {
             heading_line(l, inlines(content, Mode::Line).trim())
         }
         Block::Paragraph {
+            inlines: content,
+            role: Some(role),
+            ..
+        } if role == rezzer_model::FOUND_BY_ROLE
+            && !crate::levels::found_by_shown(&plain_text(content), ctx.level) =>
+        {
+            String::new()
+        }
+        Block::Paragraph {
             inlines: content, ..
         } => paragraph(content),
         Block::List { ordered, items, .. } => list_block(*ordered, items, false, ctx, depth, level),
@@ -465,7 +476,13 @@ fn block(b: &Block, ctx: &Ctx, depth: usize, level: u8) -> String {
                     depth,
                     level,
                 ),
-                None => model_table(caption.as_deref(), *header_rows, &rows, alignments),
+                None => model_table(
+                    caption.as_deref(),
+                    *header_rows,
+                    &rows,
+                    alignments,
+                    ctx.level,
+                ),
             }
         }
         Block::Code { lang, text, .. } => fence(lang.as_deref(), text),

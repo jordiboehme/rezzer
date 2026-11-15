@@ -18,7 +18,10 @@ use std::rc::Rc;
 
 use pdfparts::StructTree;
 use rezzer_limits::{Budget, LimitHit};
-use rezzer_model::{Anchor, Block, Cell, Inline, LossReason, SectionKind, Severity, StatusColor};
+use rezzer_model::{
+    Anchor, Block, Cell, Inline, KEPT_AS_LAID_OUT, LossReason, MARKED_IN_JSON_ONLY, SectionKind,
+    Severity, StatusColor,
+};
 
 use layoutregions::GapIn;
 use layoutregions::extract::spatial::SpatialFrame;
@@ -2659,11 +2662,11 @@ fn page_blocks_until(
             };
             let styled = match laid.blocks.get(k) {
                 Some(Block::Spatial { lines, .. }) if aligned.contains(&k) => style_clause(lines),
-                _ => "",
+                _ => String::new(),
             };
             laid.located.push((
                 at.clone(),
-                format!("the region at {at} is kept as laid out, {how}: {why}{styled}"),
+                format!("the region at {at}{KEPT_AS_LAID_OUT}{how}: {why}{styled}"),
                 if limit {
                     LossReason::Limit
                 } else {
@@ -3762,13 +3765,13 @@ fn place_spatial(
 /// What the loss of a block kept as laid out and written as text in its columns adds for its
 /// style: its bold or italic text is marked in the JSON only, as a text fence shows no
 /// emphasis.
-fn style_clause(lines: &[rezzer_model::SpatialLine]) -> &'static str {
+fn style_clause(lines: &[rezzer_model::SpatialLine]) -> String {
     let spans = || lines.iter().flat_map(|l| &l.pieces).flat_map(|p| &p.spans);
     match (spans().any(|s| s.strong), spans().any(|s| s.emphasis)) {
-        (true, true) => "; its bold and italic text is marked in the JSON only",
-        (true, false) => "; its bold text is marked in the JSON only",
-        (false, true) => "; its italic text is marked in the JSON only",
-        (false, false) => "",
+        (true, true) => format!("; its bold and italic{MARKED_IN_JSON_ONLY}"),
+        (true, false) => format!("; its bold{MARKED_IN_JSON_ONLY}"),
+        (false, true) => format!("; its italic{MARKED_IN_JSON_ONLY}"),
+        (false, false) => String::new(),
     }
 }
 

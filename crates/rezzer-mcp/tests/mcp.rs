@@ -465,6 +465,7 @@ async fn wrong_types_are_failed_results_with_structured_content() {
         (json!({ "path": "a", "sections": [1] }), "sections"),
         (json!({ "path": "a", "format": 5 }), "format"),
         (json!({ "path": "a", "table_style": 5 }), "table_style"),
+        (json!({ "path": "a", "notes": 5 }), "notes"),
         (json!({ "path": "a", "sheets": [1] }), "sheets"),
     ] {
         let result = call(&client, "rez", args.clone()).await;
@@ -883,6 +884,35 @@ async fn rez_table_style_and_sheets() {
     assert_eq!(style["default"], "table", "{style}");
     let sheets = &properties["sheets"];
     assert_eq!(sheets["items"]["type"], "string", "{sheets}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rez_notes_reaches_the_renderer() {
+    let client = connect(config()).await;
+    let path = office("DataValidations-49244.xlsx");
+    let read = |notes: Option<&str>| {
+        let mut args = json!({ "path": path });
+        if let Some(notes) = notes {
+            args["notes"] = json!(notes);
+        }
+        args
+    };
+    let full = text(&call(&client, "rez", read(Some("full"))).await).to_string();
+    assert!(full.contains("found by rules: empty-row gaps"), "{full}");
+    let default = text(&call(&client, "rez", read(None)).await).to_string();
+    assert!(!default.contains("empty-row gaps"), "{default}");
+    assert!(default.contains("`--notes full` shows them."), "{default}");
+    let brief = call(&client, "rez", read(Some("brief"))).await;
+    assert_eq!(default, text(&brief));
+    let bad = call(&client, "rez", read(Some("some"))).await;
+    assert_eq!(bad.is_error, Some(true));
+    let message = structured(&bad)["message"].as_str().unwrap().to_string();
+    assert!(message.starts_with("notes"), "{message}");
+    let tools = client.list_all_tools().await.unwrap();
+    let rez = tools.iter().find(|t| t.name == "rez").unwrap();
+    let notes = &rez.input_schema["properties"]["notes"];
+    assert_eq!(notes["enum"], json!(["full", "brief", "none"]), "{notes}");
+    assert_eq!(notes["default"], "brief", "{notes}");
 }
 
 #[tokio::test(flavor = "multi_thread")]

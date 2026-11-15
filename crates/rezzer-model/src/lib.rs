@@ -42,7 +42,11 @@ pub use layout::{
     Certainty, Evidence, LayoutKind, RowKind, RowNote, RowRange, SheetCell, TableLayout,
     a1_position, join_ranges, sheet_cell, split_rows, table_key,
 };
-pub use loss::{Loss, LossReason, STALE_RESULTS, Severity};
+pub use loss::{
+    BOX_FOUND_BY, FOOTNOTE_FOUND_BY, FOOTNOTE_LINKED, FOOTNOTES_LINKED, FOUND_BY_ROLE,
+    KEPT_AS_LAID_OUT, LAID_OUT_ABOUT_EQUALLY, LAID_OUT_NO_EVIDENCE, LAID_OUT_NOT_CLEARLY, Loss,
+    LossReason, MARKED_IN_JSON_ONLY, SIDE_FOUND_BY, STALE_RESULTS, STRIP_FOUND_BY, Severity,
+};
 pub use reader::{Blob, Bytes, ReadOptions, ReadOutcome, Reader, Source, source_info};
 pub use region::{RegionAlternative, RegionKind, RegionNote};
 pub use registry::Registry;

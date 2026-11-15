@@ -104,6 +104,7 @@ rezzer read data.csv --json       # the document model as JSON
 rezzer read calc.xlsx --sections logic   # only the formulas and what they read
 rezzer read report.xlsx --table-style records   # each table row as one list item with its headers
 rezzer read book.xlsx --sheet Summary --sheet '#3'   # only these sheets, by name or position
+rezzer read form.pdf --notes full   # every note, also those that only say how a part was read
 rezzer read scan.pdf -o out/      # also writes pages that need vision to out/scan.pdf.assets/
 rezzer read big.pdf -o out/       # a large file becomes out/big.pdf.md plus parts in out/big.pdf.parts/
 rezzer read locked.pdf --password-stdin < password.txt   # the password comes from stdin, never from the command line
@@ -119,11 +120,15 @@ Use it from an agent (Claude Code shown, any MCP client works):
 claude mcp add rezzer -- rezzer mcp
 ```
 
-The agent then has three tools: `rez` reads a file (by path, or sent along as a `data:` URI), `inspect` takes a quick look and `formats` lists what Rezzer can read. A file sent along may be up to 32 MiB (`max_inline_bytes` in the `[limits]` of the config file). Give a larger file by path. Long results come in pages. `rez` also takes a `password` for a protected PDF, an `output_dir` to write the Markdown and its pictures to a folder, `part_size` for the largest part, `table_style` for records and `sheets` to pick sheets. With `output_dir` a large document is written as a main document plus parts, and `rez` returns the main document.
+The agent then has three tools: `rez` reads a file (by path, or sent along as a `data:` URI), `inspect` takes a quick look and `formats` lists what Rezzer can read. A file sent along may be up to 32 MiB (`max_inline_bytes` in the `[limits]` of the config file). Give a larger file by path. Long results come in pages. `rez` also takes a `password` for a protected PDF, an `output_dir` to write the Markdown and its pictures to a folder, `part_size` for the largest part, `table_style` for records, `notes` for how many notes you get and `sheets` to pick sheets. With `output_dir` a large document is written as a main document plus parts, and `rez` returns the main document.
 
 Exit codes: 0 when everything was read, 2 when parts could not be read (the output says which), 1 when the read failed.
 
 The config file is `~/.config/rezzer/config.toml`. When `XDG_CONFIG_HOME` is set to a full path, it is `$XDG_CONFIG_HOME/rezzer/config.toml`. On Windows it is `%USERPROFILE%\.config\rezzer\config.toml`.
+
+Its `[read]` table sets your defaults for reading, for example `table_style = "records"` or `notes = "full"`.
+
+Notes cost your agent tokens, and many of them only say how Rezzer read a part. So by default (`--notes brief`) Rezzer leaves those out. Where it leaves out rows of "Not read", one line there says how many. Every note that touches a value or says that something is missing stays where it is. `--notes full` shows all notes. `--notes none` shows no notes and says so in one line where it leaves something out. The frontmatter and `--json` are the same at every level.
 
 ## Why
 

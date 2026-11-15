@@ -39,11 +39,11 @@ Built on (versions as used in the development version):
 
 ## How it shows up in the output
 
-The same as for [XLSX](xlsx.md): the tables and blocks of each sheet, each with a layout line that says where it is and how it was found, then the Logic section with parameters, formulas grouped by pattern, results, names and a Mermaid dependency graph. OpenFormula references like `[$Data.A3]` are shown in the familiar `Data!A3` form. The text as stored in the file is kept next to it.
+The same as for [XLSX](xlsx.md): the tables and blocks of each sheet, each with a layout line that says where it is, the facts of the file that found it and, with `--notes full`, the rules Rezzer used, then the Logic section with parameters, formulas grouped by pattern, results, names and a Mermaid dependency graph. OpenFormula references like `[$Data.A3]` are shown in the familiar `Data!A3` form. The text as stored in the file is kept next to it.
 
 ## Tables inside a sheet
 
-Rezzer finds tables in an ODS sheet the same way as in an Excel sheet: see [Tables inside a sheet](xlsx.md#tables-inside-a-sheet). The facts it takes from an ODS file are database ranges (exact range, header and footer rows), data pilot output ranges, print header rows, frozen panes and row groups. Bold and filled cells come from the cell styles. `--table-style records` and `--sheet` work the same way. Two sheets whose names differ only in case are told apart by their exact name first.
+Rezzer finds tables in an ODS sheet the same way as in an Excel sheet: see [Tables inside a sheet](xlsx.md#tables-inside-a-sheet). The facts it takes from an ODS file are database ranges (exact range, header and footer rows), data pilot output ranges, print header rows, frozen panes and row groups. Bold and filled cells come from the cell styles. `--table-style records`, `--sheet` and `--notes` work the same way. Two sheets whose names differ only in case are told apart by their exact name first.
 
 ## Example
 

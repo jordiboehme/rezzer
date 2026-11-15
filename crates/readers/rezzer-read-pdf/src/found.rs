@@ -11,23 +11,17 @@
 use layoutregions::{Decision, Kind};
 
 /// The note before the first table of drawn boxes of a page.
-pub(crate) const BOX_FOUND_BY: &str = "Found by: label and value pairs from drawn boxes; the label \
-     is the smaller text at the top of each box.";
+pub(crate) const BOX_FOUND_BY: &str = rezzer_model::BOX_FOUND_BY;
 
 /// The note before the first table of fields between rules of a page.
-pub(crate) const STRIP_FOUND_BY: &str = "Found by: label and value pairs from rows of fields \
-     between drawn rules; each label is the smaller text and pairs with the value beside it or \
-     under it.";
+pub(crate) const STRIP_FOUND_BY: &str = rezzer_model::STRIP_FOUND_BY;
 
 /// The note before the first table on a page the column of totals adds to.
-pub(crate) const SIDE_FOUND_BY: &str = "Found by: a column of amounts beside a table, drawn with \
-     rules that line up with the table's rules; its amounts are read as one more column of the \
-     table, and each total label in it pairs with the amount under it.";
+pub(crate) const SIDE_FOUND_BY: &str = rezzer_model::SIDE_FOUND_BY;
 
 /// How a footnote legend is found: the words of the footnote note after its count (see
 /// `layout::footnotes::note`).
-pub(crate) const FOOTNOTE_FOUND_BY: &str = "set in one size below all other text, each opening \
-     with a note marker, the first of which also stands after a word above";
+pub(crate) const FOOTNOTE_FOUND_BY: &str = rezzer_model::FOOTNOTE_FOUND_BY;
 
 /// The "Found by:" words of a decision, from its signals: pairs from drawn boxes (a box or a
 /// grid of boxes that each hold a label and its value), pairs from rows of fields between drawn

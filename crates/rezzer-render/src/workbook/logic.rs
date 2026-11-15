@@ -222,6 +222,7 @@ pub(super) fn stale_callout(doc: &Document) -> Option<String> {
         in_sheet: Default::default(),
         table_style: Default::default(),
         column_numbers: false,
+        level: Default::default(),
     };
     Some(blocks::blocks(&[callout], &ctx, 0, 3, false))
 }

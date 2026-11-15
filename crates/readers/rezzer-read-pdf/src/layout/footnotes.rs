@@ -476,10 +476,10 @@ pub(super) fn note(page: u32, n: usize, linked: usize) -> Option<String> {
         }
     };
     let refs = match (n, linked) {
-        (1, 1) => "; the marker above is linked to it".to_string(),
+        (1, 1) => rezzer_model::FOOTNOTE_LINKED.to_string(),
         (1, 0) => "; no marker above is linked to it".to_string(),
         (_, 0) => "; no marker above is linked to them".to_string(),
-        (n, l) if n == l => "; the markers above are linked to them".to_string(),
+        (n, l) if n == l => rezzer_model::FOOTNOTES_LINKED.to_string(),
         (_, l) => format!("; {l} of them are linked to their markers above"),
     };
     Some(what + &refs)

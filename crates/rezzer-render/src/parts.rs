@@ -180,9 +180,12 @@ impl Writer<'_> {
     }
 
     fn write(&self, units: Vec<Unit>) -> Output {
-        let losses = &self.doc.losses;
-        let not_read_pieces = if self.want(OutputSection::NotRead) && !losses.is_empty() {
-            pieces(&facets::not_read_list(losses), self.budget, self.measure)
+        let not_read_pieces = if self.want(OutputSection::NotRead) {
+            let filter = self.loss_filter();
+            let losses = filter.shown(&self.doc.losses);
+            facets::not_read_with(&losses, self.left_out_line(&filter))
+                .map(|text| pieces(&text, self.budget, self.measure))
+                .unwrap_or_default()
         } else {
             Vec::new()
         };
@@ -569,9 +572,14 @@ impl Writer<'_> {
     /// cut, or the list at the last resort. A shortened list links the `not-read` part, which
     /// holds it whole (P5-V).
     fn not_read_section(&self, shape: Shape) -> Option<(String, bool)> {
-        let losses = &self.doc.losses;
-        if !self.want(OutputSection::NotRead) || losses.is_empty() {
+        if !self.want(OutputSection::NotRead) {
             return None;
+        }
+        let filter = self.loss_filter();
+        let losses = filter.shown(&self.doc.losses);
+        let line = self.left_out_line(&filter);
+        if losses.is_empty() {
+            return facets::not_read_with(&[], line).map(|text| (text, false));
         }
         let link = format!(
             "[Not read]({})",
@@ -608,7 +616,22 @@ impl Writer<'_> {
         } else if text_cut {
             text.push_str(&format!("\n\nThe whole texts are in {link}."));
         }
+        if let Some(line) = line {
+            text.push_str(&format!("\n\n{line}"));
+        }
         Some((text, more > 0 || text_cut))
+    }
+
+    /// The line under `## Not read` on the notes the level leaves out (see
+    /// [`crate::levels`]).
+    fn left_out_line(&self, filter: &crate::levels::LossFilter) -> Option<String> {
+        let count = crate::levels::left_out(self.doc, self.opts, self.selection.as_ref(), filter);
+        crate::levels::left_out_line(self.opts.notes, count)
+    }
+
+    /// The losses the level shows in `## Not read`.
+    fn loss_filter(&self) -> crate::levels::LossFilter {
+        crate::levels::LossFilter::new(self.doc, self.opts, self.selection.as_ref())
     }
 
     /// `## Parts`: every part in order, or the link to the first of `contents` parts.

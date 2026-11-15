@@ -551,6 +551,52 @@ fn help_mentions_part_size() {
     assert!(help.contains(&sentence), "{help}");
 }
 
+/// `rezzer read --help` names `--notes` with its levels, its default and why it helps.
+#[test]
+fn help_describes_the_notes_option() {
+    let env = Env::new();
+    let out = env.cmd().args(["read", "--help"]).output().expect("help");
+    assert!(out.status.success());
+    let join = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let help = join(&String::from_utf8_lossy(&out.stdout));
+    assert!(help.contains("--notes <full|brief|none>"), "{help}");
+    for sentence in [
+        "Notes cost tokens, and many only say how something was read.",
+        "Default from the config file, else brief.",
+        "Where it leaves out rows of \"Not read\", one line there says how many.",
+        "none shows no notes and says so in one line where it leaves something out.",
+        "It changes only the Markdown: --json prints the full model",
+    ] {
+        assert!(help.contains(sentence), "{sentence}: {help}");
+    }
+}
+
+#[test]
+fn notes_flag_sets_the_level() {
+    let env = Env::new();
+    let book = env.file("book.xlsx", &corpus("DataValidations-49244.xlsx"));
+    let read = |level: &str| {
+        let out = env
+            .cmd()
+            .args(["read", "--notes", level])
+            .arg(&book)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0), "{out:?}");
+        stdout_of(&out)
+    };
+    assert!(read("full").contains("found by rules: empty-row gaps"));
+    let brief = read("BRIEF");
+    assert!(!brief.contains("empty-row gaps"), "{brief}");
+    assert!(brief.contains("`--notes full` shows them."), "{brief}");
+    env.cmd()
+        .args(["read", "--notes", "some"])
+        .arg(&book)
+        .assert()
+        .code(1)
+        .stderr(predicate::str::contains("full, brief or none"));
+}
+
 #[test]
 fn usage_errors_exit_1_not_2() {
     let env = Env::new();

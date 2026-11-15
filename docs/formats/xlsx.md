@@ -86,21 +86,23 @@ A sheet is often more than one table. It has titles, notes, header rows over two
 
 ### How it decides
 
-Facts from the file come first. Excel tables, pivot tables and filters give the exact range and header rows. Print titles give the header rows. Frozen panes and defined names over a range help. Only where the file says nothing, Rezzer uses its own rules: empty rows and columns between blocks, a change of type between the header and the data, bold or filled header cells, merged titles. Each table says how it was found.
+Facts from the file come first. Excel tables, pivot tables and filters give the exact range and header rows. Print titles give the header rows. Frozen panes and defined names over a range help. Only where the file says nothing, Rezzer uses its own rules: empty rows and columns between blocks, a change of type between the header and the data, bold or filled header cells, merged titles. Each table names the facts that found it at every level, and with `--notes full` also the rules.
 
-When the rules do not agree on a header, Rezzer does not pick one. The table is shown as a raw grid with the column letters as header, and "Not read" lists it as unsure.
+When the rules do not agree on a header, Rezzer does not pick one. The table is shown as a raw grid with the column letters as header, and its layout line says why the header is unsure. With `--notes full`, "Not read" lists it as unsure too.
 
 Totals come from facts and formulas only: a totals row of an Excel table, the grand total row or column of a pivot table or a row with `SUBTOTAL`, `AGGREGATE` or a `SUM` over the rows above it. A word like "Total" or "Summe" is not enough, so a pasted total row without a formula is not marked.
 
 ### How it shows up
 
-Each part gets a heading: its title when it has one, else the name of its Excel table or of a defined name over it, else its kind and range, like `### Table A40:C40`. A title right on top of a side table is that table's title. A sheet with only one table and no title gets no extra heading. A layout line under the heading says where the table is and how it was found:
+Each part gets a heading: its title when it has one, else the name of its Excel table or of a defined name over it, else its kind and range, like `### Table A40:C40`. A title right on top of a side table is that table's title. A sheet with only one table and no title gets no extra heading. A layout line under the heading says where the table is and how it was found (here with `--notes full`):
 
 ```markdown
 Table A1:F68 (data A5:F62), header rows 3 to 4, row labels in A, found by: defined name \_NST01, print titles; rules: empty-row gaps, caption rows 1 to 2, header by type change, bold header.
 ```
 
 A merged cell keeps its text once, in its first cell. The cells it covers stay empty, and a note under the table lists the merged ranges. Group, subtotal and total rows are named in a line under the table, and so is the grand total column of a pivot table: `Total column: D (pivot table grand total).` No cell text is changed.
+
+Notes cost an agent tokens, and some rules after `found by` only say the method Rezzer used: the gaps around the table, how it found the header and the row labels. The default `--notes brief` leaves those rules out of this line. The facts of the file stay at every level (an Excel table, a pivot table, a defined name, a database range, a filter range, print titles, frozen panes), and so do the rules that say where a part of the table is, like `caption rows 1 to 2` or `title in row 27`. A grid with an unsure header says why in its own line, so `brief` does not repeat it under "Not read" and counts it there. `--notes full` shows everything. `--notes none` shows no notes, also no note on merged cells. The JSON is the same at every level.
 
 With `--table-style records` (MCP `table_style: "records"`, or `table_style = "records"` under `[read]` in the config file) every table row becomes one list item, with the header path of each value:
 

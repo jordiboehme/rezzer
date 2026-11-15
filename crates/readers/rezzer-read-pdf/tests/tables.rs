@@ -2942,6 +2942,30 @@ fn a_sparse_line_of_amounts_stays_in_the_row_above_with_a_note() {
     );
 }
 
+/// The note on lines that may be rows of their own touches values: `brief` keeps it where
+/// it stands, `none` leaves it out and says so; the cells keep their lines at every level.
+#[test]
+fn the_thin_line_note_stays_in_brief() {
+    let out = read(&sparse_amounts_page(&[
+        ("Salary", ["", "", "3.000,00", "36.000,00"]),
+        ("Overtime", ["10,00", "25,00", "250,00", ""]),
+        ("Bonus", ["", "", "", "1.000,00"]),
+        ("Tax", ["", "", "-650,00", "-7.800,00"]),
+    ]));
+    let note = "1 line of a table on page 1 is kept as a line of the row above it";
+    let row = "| Overtime<br>Bonus | 10,00 | 25,00 | 250,00 | <br>1.000,00 |";
+    let full = common::markdown_at(&out, rezzer_render::NoteLevel::Full);
+    let brief = common::markdown_at(&out, rezzer_render::NoteLevel::Brief);
+    let none = common::markdown_at(&out, rezzer_render::NoteLevel::None);
+    assert!(full.contains(note), "{full}");
+    assert!(brief.contains(note), "{brief}");
+    assert!(!none.contains(note), "{none}");
+    assert!(none.contains("Notes are not shown."), "{none}");
+    for md in [&full, &brief, &none] {
+        assert!(md.contains(row), "{md}");
+    }
+}
+
 /// A name alone on a line of such a table, at the row pitch, may be the second line of the
 /// name above it or a row without amounts: it stays a line of the row above, and a note
 /// says so.

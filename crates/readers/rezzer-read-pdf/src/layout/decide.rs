@@ -19,7 +19,7 @@ use layoutregions::{
     Alternative, Bounds, Certainty, Decision, Issue, Kind, Limits, Margins, PageIn, PageRegions,
     PrimId, Region, RegionId, Score, Signal,
 };
-use rezzer_model::{SpatialLine, SpatialPiece};
+use rezzer_model::{LAID_OUT_ABOUT_EQUALLY, LAID_OUT_NOT_CLEARLY, SpatialLine, SpatialPiece};
 
 /// No decision holds the run.
 pub(super) const NONE: u32 = u32::MAX;
@@ -1279,14 +1279,14 @@ pub(super) fn unsure_why(candidates: &[Typed], m: &Margins) -> String {
     own.sort_by(|a, b| b.score.cmp(&a.score).then(a.kind.cmp(&b.kind)));
     match (own.first(), own.get(1)) {
         (Some(a), Some(b)) if b.score >= m.min && a.score.0 - b.score.0 < m.margin.0 => format!(
-            "it reads as {} or as {} about equally ({} and {} of 1000)",
+            "it reads as {} or as {}{LAID_OUT_ABOUT_EQUALLY}{} and {} of 1000)",
             words(a.kind),
             words(b.kind),
             a.score.0,
             b.score.0
         ),
         (Some(a), _) if a.score >= m.min => format!(
-            "it reads as {} ({} of 1000), but not clearly enough",
+            "it reads as {} ({} of 1000){LAID_OUT_NOT_CLEARLY}",
             words(a.kind),
             a.score.0
         ),
@@ -1296,7 +1296,7 @@ pub(super) fn unsure_why(candidates: &[Typed], m: &Margins) -> String {
 
 /// Why a spatial decision is kept as laid out when no kind reaches the least score (see
 /// [`unsure_why`]): the one reason that names no kind.
-pub(super) const NO_EVIDENCE: &str = "no region type has clear evidence for it";
+pub(super) const NO_EVIDENCE: &str = rezzer_model::LAID_OUT_NO_EVIDENCE;
 
 /// Why runs of a decision of `kind` that its extractor read no table, pairs or totals from are
 /// kept as laid out: the extractor's own reason when it gave one.

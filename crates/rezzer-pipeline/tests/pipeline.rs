@@ -13,7 +13,9 @@ use rezzer_model::{
     Asset, Blob, Block, Completeness, Document, FormatId, Inline, LossReason, ReadOptions,
     ReadOutcome, Reader, Registry, Source, source_info,
 };
-use rezzer_pipeline::{CacheOs, Config, OutputKind, OutputSection, Pipeline, Request, TableStyle};
+use rezzer_pipeline::{
+    CacheOs, Config, NoteLevel, OutputKind, OutputSection, Pipeline, Request, TableStyle,
+};
 
 const AT: &str = "2026-10-19T08:30:00Z";
 
@@ -1559,6 +1561,103 @@ fn config_read_table_style() {
     assert!(!md.contains("\n- Row "), "{md}");
 }
 
+/// The line of brief and none under `## Not read` for the notes they leave out.
+const LEFT_OUT: &str = "notes on how the file was read are not shown";
+
+#[test]
+fn config_read_notes_reaches_the_renderer() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    assert_eq!(Config::default().read.notes, NoteLevel::Brief);
+    let file = office("DataValidations-49244.xlsx");
+    // The default is brief: the found-by words of a sheet table are left out and counted.
+    let md = sheet_pipeline(config(None))
+        .run_path(&file, &request())
+        .markdown_pages
+        .concat();
+    assert!(!md.contains("empty-row gaps"), "{md}");
+    assert!(md.contains(LEFT_OUT), "{md}");
+    std::fs::write(&path, "cache = false\n\n[read]\nnotes = \" Full \"\n").unwrap();
+    let cfg = Config::load_from(&path).unwrap();
+    assert_eq!(cfg.read.notes, NoteLevel::Full);
+    let pipeline = sheet_pipeline(cfg);
+    let md = pipeline.run_path(&file, &request()).markdown_pages.concat();
+    assert!(md.contains("found by rules: empty-row gaps"), "{md}");
+    assert!(!md.contains(LEFT_OUT), "{md}");
+    // A request says otherwise.
+    let none = Request {
+        notes: Some(NoteLevel::None),
+        ..request()
+    };
+    let md = pipeline.run_path(&file, &none).markdown_pages.concat();
+    assert!(!md.contains("empty-row gaps"), "{md}");
+    assert!(
+        md.contains("`--notes brief` or `--notes full` shows them."),
+        "{md}"
+    );
+}
+
+#[test]
+fn config_bad_notes_is_invalid() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "[read]\nnotes = \"some\"\n").unwrap();
+    let err = Config::load_from(&path).unwrap_err().to_string();
+    assert!(err.contains("read.notes"), "{err}");
+    assert!(err.contains("full, brief or none"), "{err}");
+    std::fs::write(&path, "[read]\nnotes = 2\n").unwrap();
+    let err = Config::load_from(&path).unwrap_err().to_string();
+    assert!(err.contains("read.notes"), "{err}");
+}
+
+#[test]
+fn the_cache_does_not_mix_the_note_levels() {
+    let dir = tempfile::tempdir().unwrap();
+    let pipeline = sheet_pipeline(config(Some(dir.path())));
+    let file = office("DataValidations-49244.xlsx");
+    let run = |notes: NoteLevel, output: OutputKind| {
+        let req = Request {
+            notes: Some(notes),
+            output,
+            ..request()
+        };
+        pipeline.run_path(&file, &req)
+    };
+    let brief = run(NoteLevel::Brief, OutputKind::Markdown)
+        .markdown_pages
+        .concat();
+    let full = run(NoteLevel::Full, OutputKind::Markdown)
+        .markdown_pages
+        .concat();
+    let none = run(NoteLevel::None, OutputKind::Markdown)
+        .markdown_pages
+        .concat();
+    let again = run(NoteLevel::Brief, OutputKind::Markdown)
+        .markdown_pages
+        .concat();
+    assert!(full.contains("found by rules: empty-row gaps"), "{full}");
+    assert!(
+        !brief.contains("empty-row gaps") && brief.contains(LEFT_OUT),
+        "{brief}"
+    );
+    assert!(
+        !none.contains("empty-row gaps") && !none.contains(LEFT_OUT),
+        "{none}"
+    );
+    assert_eq!(brief, again);
+    assert_eq!(
+        cache_files(dir.path()).len(),
+        1,
+        "one entry for every level"
+    );
+    // The JSON is the full model at every level.
+    let jsons: Vec<String> = NoteLevel::ALL
+        .into_iter()
+        .map(|level| run(level, OutputKind::Json).json.expect("json"))
+        .collect();
+    assert!(jsons.windows(2).all(|w| w[0] == w[1]));
+}
+
 #[test]
 fn config_bad_table_style_is_invalid() {
     let dir = tempfile::tempdir().unwrap();
@@ -1587,6 +1686,7 @@ fn request_debug_shows_the_style_and_sheets() {
     };
     let shown = format!("{req:?}");
     assert!(shown.contains("table_style: Some(Records)"), "{shown}");
+    assert!(shown.contains("notes: None"), "{shown}");
     assert!(shown.contains("sheets: [\"Data\"]"), "{shown}");
     let d = Request::default();
     assert_eq!(d.table_style, None);

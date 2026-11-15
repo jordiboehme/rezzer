@@ -412,6 +412,19 @@ impl Grid {
     }
 }
 
+/// Whether [`model_table`] writes the note on merged cells for these rows: the same choice
+/// it makes, without writing anything.
+pub(crate) fn model_merge_note(header_rows: usize, rows: &[Vec<Cell>]) -> bool {
+    if rows.is_empty() {
+        return false;
+    }
+    let grid = Grid::new(rows);
+    let ranges = grid.ranges();
+    let head = header_rows.min(grid.spots.len());
+    let merged_from = if head < 2 { 0 } else { head };
+    grid.merge_note(merged_from, (head, 0), &ranges).is_some()
+}
+
 /// A table without a sheet layout: a Markdown, PDF or CSV table, or one of a sheet read
 /// without layout.
 pub(super) fn model_table(
@@ -419,6 +432,7 @@ pub(super) fn model_table(
     header_rows: usize,
     rows: &[Vec<Cell>],
     aligns: &[Align],
+    level: crate::NoteLevel,
 ) -> String {
     if rows.is_empty() {
         return caption
@@ -465,7 +479,9 @@ pub(super) fn model_table(
     }
     out.push_str(&pipe_table(&header, aligns, &body));
     let mut notes: Vec<String> = Vec::new();
-    notes.extend(grid.merge_note(merged_from, (head, 0), &ranges));
+    if crate::levels::merge_note_shown(level) {
+        notes.extend(grid.merge_note(merged_from, (head, 0), &ranges));
+    }
     notes.extend(grid.cut_notes());
     if !notes.is_empty() {
         out.push_str("\n\n");

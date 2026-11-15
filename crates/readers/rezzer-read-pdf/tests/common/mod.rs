@@ -756,6 +756,19 @@ pub fn markdown(out: &ReadOutcome) -> String {
     )
 }
 
+/// The Markdown of `out` at the note level `notes`.
+#[allow(dead_code)]
+pub fn markdown_at(out: &ReadOutcome, notes: rezzer_render::NoteLevel) -> String {
+    rezzer_render::render(
+        &out.document,
+        out.completeness,
+        &rezzer_render::RenderOptions {
+            notes,
+            ..rezzer_render::RenderOptions::default()
+        },
+    )
+}
+
 /// A stroked box of `w` by `h` points with its lower left corner at `(x, y)`.
 pub fn boxed(x: f32, y: f32, w: f32, h: f32) -> String {
     format!("{x} {y} {w} {h} re S\n")
