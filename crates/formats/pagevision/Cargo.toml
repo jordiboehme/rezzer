@@ -18,6 +18,7 @@ llama = ["dep:llama-cpp-2"]
 
 [dependencies]
 serde = { workspace = true, optional = true, features = ["derive"] }
+image.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 

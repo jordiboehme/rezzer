@@ -6,6 +6,7 @@
 
 mod error;
 pub mod model;
+pub mod prepare;
 mod types;
 
 pub use error::PageError;
