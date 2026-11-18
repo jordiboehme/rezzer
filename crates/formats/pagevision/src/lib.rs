@@ -4,6 +4,8 @@
 
 //! Page OCR with vision models.
 
+#[cfg(feature = "detect")]
+pub mod detect;
 mod error;
 pub mod ink;
 #[cfg(feature = "llama")]
