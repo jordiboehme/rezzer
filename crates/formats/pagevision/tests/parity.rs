@@ -11,7 +11,7 @@
 use std::path::{Path, PathBuf};
 
 use pagevision::ink::{Mask, components, flatten, ink_mask};
-use pagevision::rules::{Rect, RuleFixes, combine_c};
+use pagevision::rules::{Rect, RuleFixes, RuleKind, combine_c, ink_rules};
 
 fn private_eval() -> PathBuf {
     std::env::var_os("PAGEVISION_PRIVATE_EVAL")
@@ -160,4 +160,39 @@ fn combine_c_matches_bakeoff_on_private_pages() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+fn drawing_count(ink: &Mask, lines: &[Rect], fixes: RuleFixes) -> usize {
+    ink_rules(ink, lines, fixes)
+        .iter()
+        .filter(|(k, _)| *k == RuleKind::Drawing)
+        .count()
+}
+
+/// A no-regression check, not proof that the arrow fix works: with the stored PP-OCRv6 lines
+/// the rules already see diag1 as one drawing without the fixes.
+#[test]
+fn diag1_stays_one_drawing_with_fixes() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/regions");
+    let lines = rects(&read_json(&dir.join("diag1.lines.json")));
+    let ink = public_ink("diag1");
+    assert_eq!(drawing_count(&ink, &lines, RuleFixes::NONE), 1);
+    assert_eq!(drawing_count(&ink, &lines, RuleFixes::ALL), 1);
+}
+
+#[test]
+#[ignore = "needs PAGEVISION_PRIVATE_EVAL"]
+fn private_underline_case_is_text_with_fixes() {
+    let eval = private_eval();
+    // A local file names the page with a real underline: {"underline": "<page id>"}.
+    let cases = read_json(&eval.join("parity/rule_cases.json"));
+    let page = cases["underline"]
+        .as_str()
+        .expect("parity/rule_cases.json names the underline page");
+    let det = read_json(&eval.join("results/rb/PP-OCRv6_small_det/regions.json"));
+    let lines = rects(&det[page]["lines"]);
+    let png = std::fs::read(eval.join("pages").join(format!("{page}.png"))).unwrap();
+    let ink = ink_mask(&flatten(&png).unwrap());
+    assert!(drawing_count(&ink, &lines, RuleFixes::NONE) > 0);
+    assert_eq!(drawing_count(&ink, &lines, RuleFixes::ALL), 0);
 }
