@@ -35,4 +35,8 @@ skip = [
 ]
 
 [advisories]
-ignore = []
+# chrono comes only through rmcp (it turns on the chrono04 feature of schemars); Rezzer does not
+# use it directly. Remove this ignore when rmcp drops chrono.
+ignore = [
+    { id = "RUSTSEC-2026-0543", reason = "unmaintained only; rmcp needs chrono" },
+]
