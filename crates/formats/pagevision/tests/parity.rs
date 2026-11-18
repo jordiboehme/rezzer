@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use pagevision::ink::{Mask, components, flatten, ink_mask};
 use pagevision::rules::{Rect, RuleFixes, RuleKind, combine_c, ink_rules};
+use pagevision::snap::snap;
 
 fn private_eval() -> PathBuf {
     std::env::var_os("PAGEVISION_PRIVATE_EVAL")
@@ -195,4 +196,36 @@ fn private_underline_case_is_text_with_fixes() {
     let ink = ink_mask(&flatten(&png).unwrap());
     assert!(drawing_count(&ink, &lines, RuleFixes::NONE) > 0);
     assert_eq!(drawing_count(&ink, &lines, RuleFixes::ALL), 0);
+}
+
+#[test]
+fn snap_keeps_the_public_pages_readable() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/regions");
+    for page in PUBLIC_PAGES {
+        let lines = rects(&read_json(&dir.join(format!("{page}.lines.json"))));
+        let v3 = rects(&read_json(&dir.join(format!("{page}.v3.json"))));
+        let ink = public_ink(page);
+        let proposed = combine_c(&ink, &v3, &lines, RuleFixes::ALL);
+        let (snapped, notes) = snap(&ink, &proposed);
+        assert!(notes.is_empty(), "{page}: {notes:?}");
+        assert!(!snapped.is_empty(), "{page}");
+        // Every drawn region survives: the public pages have ink in each.
+        assert_eq!(
+            snapped.iter().filter(|s| s.drawn).count(),
+            v3.len(),
+            "{page}"
+        );
+        for s in &snapped {
+            let [x0, y0, x1, y1] = s.bbox;
+            assert!(
+                0 <= x0 && x0 < x1 && x1 <= i64::from(ink.width),
+                "{page} {s:?}"
+            );
+            assert!(
+                0 <= y0 && y0 < y1 && y1 <= i64::from(ink.height),
+                "{page} {s:?}"
+            );
+            assert!(s.coverage > 0.0 && s.coverage <= 1.0, "{page} {s:?}");
+        }
+    }
 }

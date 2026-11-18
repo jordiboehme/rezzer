@@ -11,6 +11,7 @@ pub mod llama;
 pub mod model;
 pub mod prepare;
 pub mod rules;
+pub mod snap;
 mod types;
 
 pub use error::PageError;
