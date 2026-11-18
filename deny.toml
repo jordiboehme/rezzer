@@ -38,5 +38,5 @@ skip = [
 # chrono comes only through rmcp (it turns on the chrono04 feature of schemars); Rezzer does not
 # use it directly. Remove this ignore when rmcp drops chrono.
 ignore = [
-    { id = "RUSTSEC-2026-0543", reason = "2026-11-17: chrono is unmaintained (no vulnerability); Rezzer does not use it, rmcp brings it. Jordi: ignore now, remove this entry when rmcp drops chrono" },
+    { id = "RUSTSEC-2026-0543", reason = "2026-11-17: chrono is unmaintained (no vulnerability); Rezzer does not use it, rmcp brings it; remove this entry when rmcp drops chrono" },
 ]
