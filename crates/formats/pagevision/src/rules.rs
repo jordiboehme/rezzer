@@ -85,12 +85,10 @@ const DRAWN_LINE_SHARE: f64 = 0.5;
 // underline case of the bake-off pages, which lies well inside each of them.
 /// An underline is at most this share of the line height tall,
 const UNDERLINE_MAX_HEIGHT: f64 = 0.35;
-/// at least this share of the line height wide (no test can move it: a stroke this thin is only
-/// a drawing when it is wider than 1.2 line heights anyway, so it keeps the fix to strokes the
-/// rules would call a drawing),
+/// at least this share of the line height wide (a test pins it from above; below 1.2 it changes
+/// nothing, because a stroke this thin is only a drawing when it is wider than 1.2 line heights),
 const UNDERLINE_MIN_WIDTH: f64 = 1.2;
-/// its top at most this share of the line height below the bottom of a text line (and not above
-/// the line's top),
+/// its top at most this share of the line height below the bottom of a text line,
 const UNDERLINE_MAX_GAP: f64 = 0.5;
 /// and at least this share of its width under that line.
 const UNDERLINE_MIN_OVERLAP: f64 = 0.5;
@@ -347,8 +345,7 @@ fn is_underline(b: &Rect, lines: &[Rect], lh: f64) -> bool {
     bh <= UNDERLINE_MAX_HEIGHT * lh
         && bw >= UNDERLINE_MIN_WIDTH * lh
         && lines.iter().any(|l| {
-            b[1] >= l[1]
-                && b[1] - l[3] <= UNDERLINE_MAX_GAP * lh
+            b[1] - l[3] <= UNDERLINE_MAX_GAP * lh
                 && b[2].min(l[2]) - b[0].max(l[0]) >= UNDERLINE_MIN_OVERLAP * bw
         })
 }
@@ -671,14 +668,11 @@ mod tests {
     }
 
     #[test]
-    fn bar_above_text_is_no_underline() {
-        // The top of an underline is not above the top of its line.
-        let mut ink = Mask::new(700, 500);
-        fill(&mut ink, 100, 96, 400, 100);
-        let lines = [[100.0, 100.0, 400.0, 200.0]];
-        assert!(has_drawing(&ink_rules(&ink, &lines, RuleFixes::ALL)));
-        let mut ink = Mask::new(700, 500);
-        fill(&mut ink, 100, 100, 400, 104);
+    fn underline_just_wider_than_1_2_lines_is_text() {
+        // 121 px at line height 100: a drawing without the fix, text with it. A minimum width
+        // above 1.21 line heights would turn it back into a drawing.
+        let (ink, lines) = underline_page(100, 221, 0, 4);
+        assert!(has_drawing(&ink_rules(&ink, &lines, RuleFixes::NONE)));
         assert!(!has_drawing(&ink_rules(&ink, &lines, RuleFixes::ALL)));
     }
 
