@@ -13,8 +13,10 @@ pub mod llama;
 pub mod model;
 pub mod onnx;
 pub mod prepare;
+pub mod resize;
 pub mod rules;
 pub mod snap;
+pub mod textdet;
 mod types;
 
 pub use error::PageError;
