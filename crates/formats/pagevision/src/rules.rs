@@ -56,7 +56,8 @@ pub struct Proposed {
     pub possible_drawing: bool,
 }
 
-// Bake-off values, gate 1. Each moves the result both ways in a test below.
+// Bake-off values, gate 1. Each moves the result both ways in a test below (the component
+// dilation in ink.rs `components_split_beyond_the_dilation`).
 /// Ink components closer than this many pixels are one component.
 const COMPONENT_DILATE: u32 = 3;
 /// Smaller components are noise.
@@ -84,7 +85,9 @@ const DRAWN_LINE_SHARE: f64 = 0.5;
 // underline case of the bake-off pages, which lies well inside each of them.
 /// An underline is at most this share of the line height tall,
 const UNDERLINE_MAX_HEIGHT: f64 = 0.35;
-/// at least this share of the line height wide,
+/// at least this share of the line height wide (no test can move it: a stroke this thin is only
+/// a drawing when it is wider than 1.2 line heights anyway, so it keeps the fix to strokes the
+/// rules would call a drawing),
 const UNDERLINE_MIN_WIDTH: f64 = 1.2;
 /// its top at most this share of the line height below the bottom of a text line (and not above
 /// the line's top),
@@ -771,5 +774,135 @@ mod tests {
         let mut ink = Mask::new(400, 100);
         fill(&mut ink, 10, 10, 40, 15);
         assert!(!combine_c(&ink, &[], &[], RuleFixes::ALL)[0].possible_drawing);
+    }
+
+    #[test]
+    fn text_block_within_35_px_joins_the_drawing() {
+        let mut ink = Mask::new(400, 200);
+        fill(&mut ink, 10, 10, 200, 15);
+        // The drawing box ends at row 14; out of the 20 px absorb reach, in the 35 px join reach.
+        let rules = ink_rules(&ink, &[[20.0, 48.0, 100.0, 68.0]], RuleFixes::NONE);
+        assert_eq!(rules, vec![(RuleKind::Drawing, [10, 10, 199, 68])]);
+        let rules = ink_rules(&ink, &[[20.0, 49.0, 100.0, 69.0]], RuleFixes::NONE);
+        assert_eq!(rules.len(), 2);
+    }
+
+    /// A drawing [10, 10, 199, 14], a short line A near it and a tall line B 50 px under A.
+    /// When A is absorbed first, B is out of the drawing's reach and stays text. When A is not,
+    /// A and B form one block and the block joins the drawing.
+    fn absorb_page(a: Rect) -> Vec<(RuleKind, [i64; 4])> {
+        let mut ink = Mask::new(500, 400);
+        fill(&mut ink, 10, 10, 200, 15);
+        let b = [a[0] + 10.0, a[3] + 50.0, a[2] + 10.0, a[3] + 150.0];
+        ink_rules(&ink, &[a, b], RuleFixes::NONE)
+    }
+
+    #[test]
+    fn line_more_than_30_percent_in_the_absorb_margin_is_absorbed() {
+        // The grown drawing ends at column 219: 31 of 100 columns is absorbed, 30 is not.
+        assert_eq!(
+            absorb_page([188.0, 24.0, 288.0, 34.0]),
+            vec![
+                (RuleKind::Drawing, [10, 10, 288, 34]),
+                (RuleKind::Text, [198, 84, 298, 184])
+            ]
+        );
+        assert_eq!(
+            absorb_page([189.0, 24.0, 289.0, 34.0]),
+            vec![(RuleKind::Drawing, [10, 10, 299, 184])]
+        );
+    }
+
+    #[test]
+    fn absorb_margin_is_20_px() {
+        // The grown drawing ends at row 34: 4 of 10 rows is absorbed, 3 is not.
+        assert_eq!(absorb_page([20.0, 30.0, 120.0, 40.0]).len(), 2);
+        assert_eq!(
+            absorb_page([20.0, 31.0, 120.0, 41.0]),
+            vec![(RuleKind::Drawing, [10, 10, 199, 191])]
+        );
+    }
+
+    /// Line height 100 (two lines), and a line M [500, 380, m_x1, 480] over part of the ink.
+    fn classify(ink: &Mask, m_x1: f64) -> Vec<(RuleKind, [i64; 4])> {
+        let lines = [[0.0, 0.0, 100.0, 100.0], [500.0, 380.0, m_x1, 480.0]];
+        ink_rules(ink, &lines, RuleFixes::NONE)
+    }
+
+    fn bar(width: u32) -> Mask {
+        let mut ink = Mask::new(1000, 800);
+        fill(&mut ink, 500, 400, 500 + width, 405);
+        ink
+    }
+
+    #[test]
+    fn stroke_longer_than_2_5_lines_is_drawing_when_not_mostly_text() {
+        // Half under a text line: 250 px long is not drawing, 251 px is.
+        assert!(!has_drawing(&classify(&bar(250), 625.0)));
+        assert!(has_drawing(&classify(&bar(251), 625.0)));
+        // 300 px long: 85 % under a text line is not drawing, 84 % is.
+        assert!(!has_drawing(&classify(&bar(300), 755.0)));
+        assert!(has_drawing(&classify(&bar(300), 752.0)));
+    }
+
+    #[test]
+    fn stroke_longer_than_1_2_lines_is_drawing_when_nearly_all_outside_text() {
+        // 200 px long: 30 % under a text line is not drawing, 29 % is.
+        assert!(!has_drawing(&classify(&bar(200), 560.0)));
+        assert!(has_drawing(&classify(&bar(200), 558.0)));
+    }
+
+    /// A one-pixel square outline of side `side` at (500, 400), with `extra` pixels filled
+    /// inside it row by row.
+    fn outline(side: u32, extra: u32) -> Mask {
+        let mut ink = Mask::new(1000, 800);
+        let (x0, y0, x1, y1) = (500, 400, 500 + side, 400 + side);
+        fill(&mut ink, x0, y0, x1, y0 + 1);
+        fill(&mut ink, x0, y1 - 1, x1, y1);
+        fill(&mut ink, x0, y0, x0 + 1, y1);
+        fill(&mut ink, x1 - 1, y0, x1, y1);
+        let mut left = extra;
+        'rows: for y in y0 + 1..y1 - 1 {
+            for x in x0 + 1..x1 - 1 {
+                if left == 0 {
+                    break 'rows;
+                }
+                ink.set(x, y, true);
+                left -= 1;
+            }
+        }
+        ink
+    }
+
+    /// Line height 100 (the median of 100, 100 and 200), and a line M [500, 380, m_x1, 580]
+    /// over the whole height of the outlines below.
+    fn classify_tall(ink: &Mask, m_x1: f64) -> Vec<(RuleKind, [i64; 4])> {
+        let lines = [
+            [0.0, 0.0, 100.0, 100.0],
+            [0.0, 200.0, 100.0, 300.0],
+            [500.0, 380.0, m_x1, 580.0],
+        ];
+        ink_rules(ink, &lines, RuleFixes::NONE)
+    }
+
+    #[test]
+    fn sparse_shape_longer_than_1_5_lines_is_drawing() {
+        // About half under a text line, so only the sparse rule can make it a drawing.
+        assert!(!has_drawing(&classify_tall(&outline(150, 0), 575.0)));
+        assert!(has_drawing(&classify_tall(&outline(151, 0), 575.0)));
+        // Side 160, box 25600 px: 1023 px (fill below 0.04) is sparse, 1024 px is not.
+        assert_eq!(outline(160, 387).count(), 1023);
+        assert!(has_drawing(&classify_tall(&outline(160, 387), 580.0)));
+        assert!(!has_drawing(&classify_tall(&outline(160, 388), 580.0)));
+    }
+
+    #[test]
+    fn ink_less_than_half_in_text_is_an_orphan() {
+        // A 100 px stroke, no drawing: half under the line M adds nothing, 49 % is an orphan
+        // that joins M's block.
+        let rules = classify(&bar(100), 550.0);
+        assert_eq!(rules[1], (RuleKind::Text, [500, 380, 550, 480]));
+        let rules = classify(&bar(100), 549.0);
+        assert_eq!(rules[1], (RuleKind::Text, [500, 380, 600, 480]));
     }
 }

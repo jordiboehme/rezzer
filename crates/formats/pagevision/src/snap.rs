@@ -18,7 +18,8 @@ use std::collections::BTreeSet;
 use crate::ink::{Component, Mask, components};
 use crate::rules::Proposed;
 
-/// Ink closer than this many pixels is one component, as in the ink rules.
+/// Ink closer than this many pixels is one component, as in the ink rules (pinned in ink.rs
+/// `components_split_beyond_the_dilation`).
 const SNAP_DILATE: u32 = 3;
 /// The snapped box is grown by this many pixels: the ink mask stops at grey 110, so the lighter
 /// edge of a stroke lies just outside it.
