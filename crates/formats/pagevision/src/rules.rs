@@ -50,7 +50,7 @@ impl RuleFixes {
 pub struct Proposed {
     /// The layout detector drew this region.
     pub drawn: bool,
-    /// x0, y0, x1, y1 in page pixels.
+    /// x0, y0, x1, y1 in page pixels, x1 and y1 exclusive (half-open, as the snapper reads it).
     pub bbox: [i64; 4],
     /// The ink rules saw a drawing here that the layout detector missed.
     pub possible_drawing: bool,
@@ -58,13 +58,15 @@ pub struct Proposed {
 
 // Bake-off values, gate 1. Each moves the result both ways in a test below (the component
 // dilation in ink.rs `components_split_beyond_the_dilation`).
-/// Ink components closer than this many pixels are one component.
+/// Ink is one component when its cross dilations by this many pixels touch: strokes up to
+/// 2n+1 = 7 px apart.
 const COMPONENT_DILATE: u32 = 3;
 /// Smaller components are noise.
 const MIN_COMPONENT_PIXELS: u32 = 30;
 /// The line height when the page has no text line.
 const DEFAULT_LINE_HEIGHT: f64 = 60.0;
-/// Drawing strokes closer than this many pixels are one drawing.
+/// Drawing strokes are one drawing when their cross dilations by this many pixels touch: up to
+/// 2n+1 = 61 px apart.
 const DRAWING_DILATE: u32 = 30;
 /// A drawing group with fewer drawing pixels is dropped.
 const MIN_DRAWING_PIXELS: usize = 400;
@@ -364,7 +366,7 @@ fn join_by_arrow(diags: &mut Vec<Rect>, a: &Rect) {
     }
 }
 
-/// Drawing strokes within 30 px of each other, as boxes of their drawing pixels. A group with
+/// Drawing strokes whose 30 px dilations touch, as boxes of their drawing pixels. A group with
 /// fewer than 400 drawing pixels in its box is dropped. The box ends at the last pixel
 /// (inclusive), as the bake-off computes it.
 fn drawing_groups(drawing: &Mask) -> Vec<Rect> {
@@ -435,7 +437,13 @@ pub fn combine_c(ink: &Mask, drawn: &[Rect], lines: &[Rect], fixes: RuleFixes) -
         .into_iter()
         .map(|(kind, bbox)| Proposed {
             drawn: false,
-            bbox,
+            // A rule drawing box ends at its last pixel (the bake-off's inclusive max). Make it
+            // half-open like every other box, so the snapper keeps the last row and column.
+            bbox: if kind == RuleKind::Drawing {
+                [bbox[0], bbox[1], bbox[2] + 1, bbox[3] + 1]
+            } else {
+                bbox
+            },
             // The rules saw a drawing that the layout detector did not draw: it is read as text,
             // with a note.
             possible_drawing: kind == RuleKind::Drawing,
@@ -760,7 +768,7 @@ mod tests {
             regions,
             vec![Proposed {
                 drawn: false,
-                bbox: [10, 10, 199, 14],
+                bbox: [10, 10, 200, 15],
                 possible_drawing: true,
             }]
         );

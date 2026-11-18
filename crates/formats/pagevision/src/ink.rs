@@ -232,7 +232,8 @@ pub fn label4(m: &Mask) -> (Vec<u32>, u32) {
     (labels, next)
 }
 
-/// The ink components when ink closer than `dilate` pixels counts as joined: the labels of
+/// The ink components when ink whose cross dilations by `dilate` touch (up to 2 * dilate + 1 px
+/// apart) counts as joined: the labels of
 /// `dilate_cross(ink, dilate)` kept only on ink pixels, and the box of each label's ink pixels in
 /// label order (scipy's `find_objects`).
 pub fn components(ink: &Mask, dilate: u32) -> (Vec<u32>, Vec<Component>) {

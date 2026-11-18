@@ -18,7 +18,7 @@ use std::collections::BTreeSet;
 use crate::ink::{Component, Mask, components};
 use crate::rules::Proposed;
 
-/// Ink closer than this many pixels is one component, as in the ink rules (pinned in ink.rs
+/// Ink up to 2n+1 = 7 px apart is one component, as in the ink rules (pinned in ink.rs
 /// `components_split_beyond_the_dilation`).
 const SNAP_DILATE: u32 = 3;
 /// The snapped box is grown by this many pixels: the ink mask stops at grey 110, so the lighter
@@ -34,8 +34,9 @@ pub struct Snapped {
     pub bbox: [i64; 4],
     /// The ink rules saw a drawing here that the layout detector missed.
     pub possible_drawing: bool,
-    /// The share of the ink pixels inside the proposed box that the region's own components
-    /// hold. Low when the box cuts through ink that belongs elsewhere.
+    /// The share of the ink pixels inside the proposed box (the parts' boxes after a merge)
+    /// that the region's own components hold. Low when the box cuts through ink that belongs
+    /// elsewhere.
     pub coverage: f32,
 }
 
@@ -43,8 +44,10 @@ pub struct Snapped {
 struct Work {
     drawn: bool,
     possible_drawing: bool,
-    /// The proposed box, merged boxes as their union. Ownership and coverage use it.
-    proposed: [i64; 4],
+    /// The proposed boxes: one, or the parts of a merged region. Ownership and coverage count
+    /// the pixels inside any of them, so a merge does not reach into the empty corners of the
+    /// parts' bounding box.
+    proposed: Vec<[i64; 4]>,
     /// Components a drawn region took from this text region.
     lost: BTreeSet<usize>,
     owned: Vec<usize>,
@@ -65,22 +68,30 @@ impl Page<'_> {
         [cx(b[0]), cy(b[1]), cx(b[2]), cy(b[3])]
     }
 
-    /// Ink pixels per component label inside the box (index 0 unused).
-    fn pixels_inside(&self, b: [i64; 4]) -> Vec<u32> {
-        let [x0, y0, x1, y1] = self.clip(b);
+    /// Ink pixels per component label inside any of the boxes, each pixel once (index 0
+    /// unused).
+    fn pixels_inside(&self, boxes: &[[i64; 4]]) -> Vec<u32> {
         let w = self.ink.width as usize;
+        let mut seen = vec![false; self.labels.len()];
         let mut counts = vec![0u32; self.comps.len() + 1];
-        for y in y0..y1 {
-            for x in x0..x1 {
-                counts[self.labels[y * w + x] as usize] += 1;
+        for &b in boxes {
+            let [x0, y0, x1, y1] = self.clip(b);
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let i = y * w + x;
+                    if !seen[i] {
+                        seen[i] = true;
+                        counts[self.labels[i] as usize] += 1;
+                    }
+                }
             }
         }
         counts
     }
 
-    /// The components with at least half of their ink inside the box, without `lost`.
-    fn owned(&self, b: [i64; 4], lost: &BTreeSet<usize>) -> Vec<usize> {
-        let inside = self.pixels_inside(b);
+    /// The components with at least half of their ink inside the boxes, without `lost`.
+    fn owned(&self, boxes: &[[i64; 4]], lost: &BTreeSet<usize>) -> Vec<usize> {
+        let inside = self.pixels_inside(boxes);
         self.comps
             .iter()
             .enumerate()
@@ -121,8 +132,8 @@ pub fn snap(ink: &Mask, regions: &[Proposed]) -> (Vec<Snapped>, Vec<String>) {
             Work {
                 drawn: r.drawn,
                 possible_drawing: r.possible_drawing,
-                proposed: r.bbox,
-                owned: page.owned(r.bbox, &lost),
+                proposed: vec![r.bbox],
+                owned: page.owned(&[r.bbox], &lost),
                 lost,
             }
         })
@@ -133,10 +144,10 @@ pub fn snap(ink: &Mask, regions: &[Proposed]) -> (Vec<Snapped>, Vec<String>) {
         if work[i].drawn == work[j].drawn {
             let other = work.remove(j);
             let w = &mut work[i];
-            w.proposed = union(w.proposed, other.proposed);
+            w.proposed.extend(other.proposed);
             w.possible_drawing |= other.possible_drawing;
             w.lost.extend(other.lost);
-            w.owned = page.owned(w.proposed, &w.lost);
+            w.owned = page.owned(&w.proposed, &w.lost);
         } else {
             let text = if work[i].drawn { j } else { i };
             work[text].lost.insert(c);
@@ -147,12 +158,13 @@ pub fn snap(ink: &Mask, regions: &[Proposed]) -> (Vec<Snapped>, Vec<String>) {
     let mut out = Vec::new();
     for w in work {
         if w.owned.is_empty() {
+            let at = w.proposed.iter().copied().fold(w.proposed[0], union);
             if w.lost.is_empty() {
-                notes.push(format!("empty region dropped at {}", fmt_box(w.proposed)));
+                notes.push(format!("empty region dropped at {}", fmt_box(at)));
             } else {
                 notes.push(format!(
                     "text region dropped at {}: its ink is in a drawn region",
-                    fmt_box(w.proposed)
+                    fmt_box(at)
                 ));
             }
             continue;
@@ -177,7 +189,7 @@ pub fn snap(ink: &Mask, regions: &[Proposed]) -> (Vec<Snapped>, Vec<String>) {
             b[3] + SNAP_MARGIN,
         ];
         let clipped = page.clip(grown).map(|v| v as i64);
-        let inside = page.pixels_inside(w.proposed);
+        let inside = page.pixels_inside(&w.proposed);
         let all: u32 = inside[1..].iter().sum();
         let own: u32 = w
             .owned
@@ -388,5 +400,47 @@ mod tests {
         fill(&mut ink, 0, 0, 10, 10);
         let (out, notes) = snap(&ink, &[]);
         assert!(out.is_empty() && notes.is_empty());
+    }
+
+    #[test]
+    fn rule_drawing_keeps_strokes_on_its_last_row_and_column() {
+        use crate::rules::{RuleFixes, combine_c};
+        // A one-row stroke of 400 px: the rule drawing box ends on its only row.
+        let mut ink = Mask::new(500, 300);
+        fill(&mut ink, 10, 5, 410, 6);
+        let (out, notes) = snap(&ink, &combine_c(&ink, &[], &[], RuleFixes::NONE));
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].bbox, [6, 1, 414, 10]);
+        // One drawing whose last column and last row each hold a separate one-pixel stroke.
+        let mut ink = Mask::new(500, 300);
+        fill(&mut ink, 10, 50, 300, 55);
+        fill(&mut ink, 320, 50, 321, 150);
+        fill(&mut ink, 10, 170, 200, 171);
+        let proposed = combine_c(&ink, &[], &[], RuleFixes::NONE);
+        assert_eq!(proposed.len(), 1);
+        let (out, notes) = snap(&ink, &proposed);
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!(out[0].bbox, [6, 46, 325, 175]);
+        assert_eq!(out[0].coverage, 1.0);
+    }
+
+    #[test]
+    fn merge_does_not_take_ink_from_the_empty_corner() {
+        let mut ink = Mask::new(300, 300);
+        // One component shared by two drawn boxes on a diagonal.
+        fill(&mut ink, 85, 85, 105, 105);
+        // A text line in the empty corner of their union.
+        fill(&mut ink, 160, 20, 180, 30);
+        let regions = [
+            region(true, [0, 0, 100, 100]),
+            region(true, [90, 90, 200, 200]),
+            region(false, [150, 10, 190, 40]),
+        ];
+        let (out, notes) = snap(&ink, &regions);
+        assert!(notes.is_empty(), "{notes:?}");
+        assert_eq!(out.len(), 2);
+        assert!(out[0].drawn);
+        assert_eq!(out[1].bbox, [156, 16, 184, 34]);
     }
 }

@@ -96,7 +96,17 @@ fn combine_none(ink: &Mask, v3: &[Rect], lines: &[Rect]) -> Vec<(bool, [i64; 4])
     region_set(
         combine_c(ink, v3, lines, RuleFixes::NONE)
             .into_iter()
-            .map(|r| (r.drawn, r.bbox)),
+            .map(|r| {
+                // A possible drawing is a rule drawing box made half-open; the bake-off box
+                // ends at its last pixel.
+                let [x0, y0, x1, y1] = r.bbox;
+                let bbox = if r.possible_drawing {
+                    [x0, y0, x1 - 1, y1 - 1]
+                } else {
+                    r.bbox
+                };
+                (r.drawn, bbox)
+            }),
     )
 }
 
