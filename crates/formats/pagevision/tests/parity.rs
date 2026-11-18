@@ -10,7 +10,8 @@
 
 use std::path::{Path, PathBuf};
 
-use pagevision::ink::{components, flatten, ink_mask};
+use pagevision::ink::{Mask, components, flatten, ink_mask};
+use pagevision::rules::{Rect, RuleFixes, combine_c};
 
 fn private_eval() -> PathBuf {
     std::env::var_os("PAGEVISION_PRIVATE_EVAL")
@@ -46,6 +47,113 @@ fn ink_matches_bakeoff_on_private_pages() {
             want["components"].as_u64().unwrap(),
             want["order"].as_u64().unwrap(),
         );
+        if got != want {
+            // The page index only, so no private name lands in a log.
+            failures.push(format!("page {n}: got {got:?}, want {want:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The public pages with region fixtures.
+const PUBLIC_PAGES: [&str; 5] = ["test1", "test2", "diag1", "diag2", "diag3"];
+
+fn repo_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../..")
+}
+
+fn public_ink(page: &str) -> Mask {
+    let path = repo_root().join(format!("tests/corpus/vision/{page}.png"));
+    let png = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    ink_mask(&flatten(&png).unwrap())
+}
+
+fn rects(v: &serde_json::Value) -> Vec<Rect> {
+    v.as_array()
+        .expect("a list of boxes")
+        .iter()
+        .map(|b| {
+            let c: Vec<f64> = b
+                .as_array()
+                .expect("a box")
+                .iter()
+                .map(|c| c.as_f64().unwrap())
+                .collect();
+            [c[0], c[1], c[2], c[3]]
+        })
+        .collect()
+}
+
+/// (drawn, bbox) pairs, sorted, for a multiset comparison.
+fn region_set(regions: impl IntoIterator<Item = (bool, [i64; 4])>) -> Vec<(bool, [i64; 4])> {
+    let mut v: Vec<_> = regions.into_iter().collect();
+    v.sort();
+    v
+}
+
+fn combine_none(ink: &Mask, v3: &[Rect], lines: &[Rect]) -> Vec<(bool, [i64; 4])> {
+    region_set(
+        combine_c(ink, v3, lines, RuleFixes::NONE)
+            .into_iter()
+            .map(|r| (r.drawn, r.bbox)),
+    )
+}
+
+#[test]
+fn combine_c_matches_bakeoff_on_public_pages() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/regions");
+    for page in PUBLIC_PAGES {
+        let lines = rects(&read_json(&dir.join(format!("{page}.lines.json"))));
+        let v3 = rects(&read_json(&dir.join(format!("{page}.v3.json"))));
+        let want = region_set(
+            read_json(&dir.join(format!("{page}.c.json")))
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| {
+                    let b = rects(&serde_json::json!([r[1]]))[0];
+                    (r[0].as_bool().unwrap(), b.map(|c| c as i64))
+                }),
+        );
+        assert_eq!(combine_none(&public_ink(page), &v3, &lines), want, "{page}");
+    }
+}
+
+#[test]
+#[ignore = "needs PAGEVISION_PRIVATE_EVAL"]
+fn combine_c_matches_bakeoff_on_private_pages() {
+    let eval = private_eval();
+    let rb = eval.join("results/rb");
+    let layout = read_json(&rb.join("PP-DocLayoutV3/regions.json"));
+    let det = read_json(&rb.join("PP-OCRv6_small_det/regions.json"));
+    let expected = read_json(&rb.join("C-V3+ocrv6s/regions.json"));
+    let expected = expected.as_object().expect("regions.json is an object");
+    assert!(!expected.is_empty(), "C-V3+ocrv6s lists no page");
+    let boxes_of = |regions: &serde_json::Value, diagram: bool| -> Vec<Rect> {
+        let picked: Vec<serde_json::Value> = regions
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|r| (r[0] == "diagram") == diagram)
+            .map(|r| r[1].clone())
+            .collect();
+        rects(&serde_json::Value::Array(picked))
+    };
+    let mut failures = Vec::new();
+    for (n, (page, want)) in expected.iter().enumerate() {
+        let png = std::fs::read(eval.join("pages").join(format!("{page}.png"))).unwrap();
+        let ink = ink_mask(&flatten(&png).unwrap());
+        let v3 = boxes_of(&layout[page]["regions"], true);
+        // hybrid.py: the detector's lines, or its text regions when it has no lines.
+        let lines = match det[page]["lines"].as_array() {
+            Some(l) if !l.is_empty() => rects(&det[page]["lines"]),
+            _ => boxes_of(&det[page]["regions"], false),
+        };
+        let want = region_set(want["regions"].as_array().unwrap().iter().map(|r| {
+            let b = rects(&serde_json::json!([r[1]]))[0];
+            (r[0] == "diagram", b.map(|c| c as i64))
+        }));
+        let got = combine_none(&ink, &v3, &lines);
         if got != want {
             // The page index only, so no private name lands in a log.
             failures.push(format!("page {n}: got {got:?}, want {want:?}"));

@@ -1,0 +1,564 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! The ink rules of the region bake-off and the C combination.
+//!
+//! A port of `merge_lines` and `ink_rules` in the bake-off's `common.py` and of `hybrid.py`, with
+//! the same loop orders and break points, so the regions match the bake-off pixel for pixel. The
+//! pixel constants are bake-off values, measured in gate 1, and not tuned again here.
+
+use crate::ink::{Mask, components, dilate_cross, label4};
+
+/// Bumped whenever the rules give other regions for the same input.
+pub const RULES_VERSION: u32 = 1;
+
+/// A box in page pixels: x0, y0, x1, y1.
+pub type Rect = [f64; 4];
+
+/// What the ink rules saw in a region.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuleKind {
+    Drawing,
+    Text,
+}
+
+/// The fixes to the bake-off rules, each behind its own flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuleFixes {
+    /// A thin wide stroke right under a text line is an underline, so text.
+    pub underline_is_text: bool,
+    /// A long sparse stroke that touches two drawing parts joins them.
+    pub arrow_joins_parts: bool,
+}
+
+impl RuleFixes {
+    /// The bake-off rules as they are.
+    pub const NONE: Self = Self {
+        underline_is_text: false,
+        arrow_joins_parts: false,
+    };
+    /// Every fix on.
+    pub const ALL: Self = Self {
+        underline_is_text: true,
+        arrow_joins_parts: true,
+    };
+}
+
+/// A proposed region, before ink snapping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Proposed {
+    /// The layout detector drew this region.
+    pub drawn: bool,
+    /// x0, y0, x1, y1 in page pixels.
+    pub bbox: [i64; 4],
+    /// The ink rules saw a drawing here that the layout detector missed.
+    pub possible_drawing: bool,
+}
+
+// Bake-off values, gate 1. Each moves the result both ways in a test below.
+/// Ink components closer than this many pixels are one component.
+const COMPONENT_DILATE: u32 = 3;
+/// Smaller components are noise.
+const MIN_COMPONENT_PIXELS: u32 = 30;
+/// The line height when the page has no text line.
+const DEFAULT_LINE_HEIGHT: f64 = 60.0;
+/// Drawing strokes closer than this many pixels are one drawing.
+const DRAWING_DILATE: u32 = 30;
+/// A drawing group with fewer drawing pixels is dropped.
+const MIN_DRAWING_PIXELS: usize = 400;
+/// The margin of a drawing that absorbs a text line or an orphan.
+const ABSORB_GROW: f64 = 20.0;
+/// The share of a text box inside the absorb margin that moves it into the drawing.
+const ABSORB_SHARE: f64 = 0.3;
+/// The margin of a drawing that absorbs a touching text block or drawing.
+const JOIN_GROW: f64 = 35.0;
+/// A text line below another joins its block when the gap is under this share of its height.
+const BLOCK_GAP: f64 = 0.9;
+/// The margin of a drawn box under which ink and text lines belong to the drawn region.
+const DRAWN_GROW: f64 = 15.0;
+/// The share of a text line under a drawn box that drops the line.
+const DRAWN_LINE_SHARE: f64 = 0.5;
+
+fn inter(a: &Rect, b: &Rect) -> f64 {
+    (a[2].min(b[2]) - a[0].max(b[0])).max(0.0) * (a[3].min(b[3]) - a[1].max(b[1])).max(0.0)
+}
+
+fn area(a: &Rect) -> f64 {
+    ((a[2] - a[0]) * (a[3] - a[1])).max(1.0)
+}
+
+fn union(a: &Rect, b: &Rect) -> Rect {
+    [
+        a[0].min(b[0]),
+        a[1].min(b[1]),
+        a[2].max(b[2]),
+        a[3].max(b[3]),
+    ]
+}
+
+fn grow(a: &Rect, d: f64) -> Rect {
+    [a[0] - d, a[1] - d, a[2] + d, a[3] + d]
+}
+
+/// Remove the first box equal to `b`, as Python's `list.remove`.
+fn remove_first(list: &mut Vec<Rect>, b: &Rect) {
+    if let Some(i) = list.iter().position(|x| x == b) {
+        list.remove(i);
+    }
+}
+
+/// The range of a numpy slice `start:stop` (start already at least 0) over `len` items.
+fn py_range(start: i64, stop: i64, len: u32) -> std::ops::Range<usize> {
+    let len = i64::from(len);
+    let start = start.clamp(0, len);
+    let stop = if stop < 0 {
+        (stop + len).max(0)
+    } else {
+        stop.min(len)
+    };
+    start as usize..stop.max(start) as usize
+}
+
+/// Join text lines that overlap by more than half of the smaller one, until none do.
+pub fn merge_lines(lines: &[Rect]) -> Vec<Rect> {
+    // More than half of the smaller box: one line found twice. Bake-off value, gate 1.
+    const MERGE_SHARE: f64 = 0.5;
+    let mut bs = lines.to_vec();
+    loop {
+        let mut merged = false;
+        'outer: for i in 0..bs.len() {
+            for j in i + 1..bs.len() {
+                if inter(&bs[i], &bs[j]) / area(&bs[i]).min(area(&bs[j])) > MERGE_SHARE {
+                    bs[i] = union(&bs[i], &bs[j]);
+                    bs.remove(j);
+                    merged = true;
+                    break 'outer;
+                }
+            }
+        }
+        if !merged {
+            return bs;
+        }
+    }
+}
+
+/// The median line height (numpy's: the mean of the two middle values for an even count), or 60
+/// without lines.
+fn line_height(lines: &[Rect]) -> f64 {
+    if lines.is_empty() {
+        return DEFAULT_LINE_HEIGHT;
+    }
+    let mut hs: Vec<f64> = lines.iter().map(|b| b[3] - b[1]).collect();
+    hs.sort_by(f64::total_cmp);
+    let n = hs.len();
+    if n % 2 == 1 {
+        hs[n / 2]
+    } else {
+        (hs[n / 2 - 1] + hs[n / 2]) / 2.0
+    }
+}
+
+/// The pixels under the text lines, the edges rounded half to even as Python's `round`.
+fn text_mask(lines: &[Rect], width: u32, height: u32) -> Mask {
+    let mut m = Mask::new(width, height);
+    for b in lines {
+        let [x0, y0, x1, y1] = b.map(|c| c.round_ties_even() as i64);
+        for y in py_range(y0.max(0), y1, height) {
+            let row = y * width as usize;
+            m.bits[row..row + width as usize][py_range(x0.max(0), x1, width)].fill(true);
+        }
+    }
+    m
+}
+
+/// The text and drawing regions the ink rules see, from the ink and the text lines.
+/// Drawings first, then text blocks, as the bake-off returns them.
+pub fn ink_rules(ink: &Mask, lines: &[Rect], fixes: RuleFixes) -> Vec<(RuleKind, [i64; 4])> {
+    let _ = fixes;
+    let (w, h) = (ink.width, ink.height);
+    let wu = w as usize;
+    let lines = merge_lines(lines);
+    let (lab, comps) = components(ink, COMPONENT_DILATE);
+    let textmask = text_mask(&lines, w, h);
+    let lh = line_height(&lines);
+    let mut drawing = Mask::new(w, h);
+    let mut orphans: Vec<Rect> = Vec::new();
+    for c in &comps {
+        let npx = c.pixels;
+        if npx < MIN_COMPONENT_PIXELS {
+            continue;
+        }
+        let mut in_text = 0u32;
+        for y in c.y0..c.y1 {
+            for x in c.x0..c.x1 {
+                let i = y as usize * wu + x as usize;
+                if lab[i] == c.label && textmask.bits[i] {
+                    in_text += 1;
+                }
+            }
+        }
+        let inside = f64::from(in_text) / f64::from(npx);
+        let (hh, ww) = (f64::from(c.y1 - c.y0), f64::from(c.x1 - c.x0));
+        let big = hh.max(ww);
+        // Bake-off values, gate 1: a big stroke mostly outside the text lines, a mid-size one
+        // nearly all outside, or a large sparse one (an outline or a connector) is drawing.
+        let sparse = f64::from(npx) / (hh * ww).max(1.0) < 0.04;
+        if (big > 2.5 * lh && inside < 0.85)
+            || (big > 1.2 * lh && inside < 0.3)
+            || (big > 1.5 * lh && sparse)
+        {
+            for y in c.y0..c.y1 {
+                for x in c.x0..c.x1 {
+                    let i = y as usize * wu + x as usize;
+                    if lab[i] == c.label {
+                        drawing.bits[i] = true;
+                    }
+                }
+            }
+        } else if inside < 0.5 {
+            // Ink mostly outside the text lines that the line detector missed.
+            orphans.push([
+                f64::from(c.x0),
+                f64::from(c.y0),
+                f64::from(c.x1),
+                f64::from(c.y1),
+            ]);
+        }
+    }
+
+    let mut diags = drawing_groups(&drawing);
+
+    let mut rest: Vec<Rect> = lines.iter().copied().chain(orphans).collect();
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for b in rest.clone() {
+            for d in diags.iter_mut() {
+                if inter(&grow(d, ABSORB_GROW), &b) / area(&b) > ABSORB_SHARE {
+                    *d = union(d, &b);
+                    remove_first(&mut rest, &b);
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        for i in 0..diags.len() {
+            for j in i + 1..diags.len() {
+                if inter(&diags[i], &diags[j]) > 0.0 {
+                    diags[i] = union(&diags[i], &diags[j]);
+                    diags.remove(j);
+                    changed = true;
+                    break;
+                }
+            }
+            if changed {
+                break;
+            }
+        }
+    }
+
+    rest.sort_by(|a, b| a[1].total_cmp(&b[1]));
+    let mut blocks: Vec<Rect> = Vec::new();
+    for b in rest {
+        let bh = b[3] - b[1];
+        let joined = blocks.iter_mut().find(|t| {
+            b[1] - t[3] < BLOCK_GAP * bh && b[2].min(t[2]) > b[0].max(t[0]) && b[1] > t[1]
+        });
+        match joined {
+            Some(t) => *t = union(t, &b),
+            None => blocks.push(b),
+        }
+    }
+
+    changed = true;
+    while changed {
+        changed = false;
+        'blocks: for t in blocks.clone() {
+            for d in diags.iter_mut() {
+                if inter(&grow(d, JOIN_GROW), &t) > 0.0 {
+                    *d = union(d, &t);
+                    remove_first(&mut blocks, &t);
+                    changed = true;
+                    break 'blocks;
+                }
+            }
+        }
+        for i in 0..diags.len() {
+            for j in i + 1..diags.len() {
+                if inter(&grow(&diags[i], JOIN_GROW), &diags[j]) > 0.0 {
+                    diags[i] = union(&diags[i], &diags[j]);
+                    diags.remove(j);
+                    changed = true;
+                    break;
+                }
+            }
+            if changed {
+                break;
+            }
+        }
+    }
+
+    // `int()` truncates toward zero, as `as` does.
+    let to_int = |b: &Rect| b.map(|c| c as i64);
+    diags
+        .iter()
+        .map(|d| (RuleKind::Drawing, to_int(d)))
+        .chain(blocks.iter().map(|b| (RuleKind::Text, to_int(b))))
+        .collect()
+}
+
+/// Drawing strokes within 30 px of each other, as boxes of their drawing pixels. A group with
+/// fewer than 400 drawing pixels in its box is dropped. The box ends at the last pixel
+/// (inclusive), as the bake-off computes it.
+fn drawing_groups(drawing: &Mask) -> Vec<Rect> {
+    let wu = drawing.width as usize;
+    let (dl, n) = label4(&dilate_cross(drawing, DRAWING_DILATE));
+    // find_objects: the box of each label of the dilated drawing.
+    let mut boxes: Vec<Option<[usize; 4]>> = vec![None; n as usize];
+    for (i, &l) in dl.iter().enumerate() {
+        if l == 0 {
+            continue;
+        }
+        let (x, y) = (i % wu, i / wu);
+        let b = boxes[l as usize - 1].get_or_insert([x, y, x + 1, y + 1]);
+        *b = [b[0].min(x), b[1].min(y), b[2].max(x + 1), b[3].max(y + 1)];
+    }
+    let mut diags = Vec::new();
+    for [x0, y0, x1, y1] in boxes.into_iter().flatten() {
+        // All drawing pixels in the box count, also those of a neighbouring group.
+        let mut count = 0usize;
+        let (mut mx0, mut my0, mut mx1, mut my1) = (usize::MAX, usize::MAX, 0, 0);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                if drawing.bits[y * wu + x] {
+                    count += 1;
+                    mx0 = mx0.min(x);
+                    my0 = my0.min(y);
+                    mx1 = mx1.max(x);
+                    my1 = my1.max(y);
+                }
+            }
+        }
+        if count < MIN_DRAWING_PIXELS {
+            continue;
+        }
+        diags.push([mx0 as f64, my0 as f64, mx1 as f64, my1 as f64]);
+    }
+    diags
+}
+
+/// The C combination: the layout detector's drawn boxes, then the ink rules on the ink outside
+/// them, every rule region as text.
+pub fn combine_c(ink: &Mask, drawn: &[Rect], lines: &[Rect], fixes: RuleFixes) -> Vec<Proposed> {
+    let mut masked = ink.clone();
+    for d in drawn {
+        let g = grow(d, DRAWN_GROW);
+        let (x0, y0) = (g[0].floor() as i64, g[1].floor() as i64);
+        let (x1, y1) = (g[2].ceil() as i64, g[3].ceil() as i64);
+        let w = ink.width as usize;
+        for y in py_range(y0.max(0), y1, ink.height) {
+            masked.bits[y * w..(y + 1) * w][py_range(x0.max(0), x1, ink.width)].fill(false);
+        }
+    }
+    let lines: Vec<Rect> = lines
+        .iter()
+        .filter(|b| {
+            !drawn
+                .iter()
+                .any(|d| inter(&grow(d, DRAWN_GROW), b) / area(b) > DRAWN_LINE_SHARE)
+        })
+        .copied()
+        .collect();
+    let drawn_regions = drawn.iter().map(|d| Proposed {
+        drawn: true,
+        bbox: d.map(|c| c as i64),
+        possible_drawing: false,
+    });
+    let rule_regions = ink_rules(&masked, &lines, fixes)
+        .into_iter()
+        .map(|(_, bbox)| Proposed {
+            drawn: false,
+            bbox,
+            possible_drawing: false,
+        });
+    drawn_regions.chain(rule_regions).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fill(m: &mut Mask, x0: u32, y0: u32, x1: u32, y1: u32) {
+        for y in y0..y1 {
+            for x in x0..x1 {
+                m.set(x, y, true);
+            }
+        }
+    }
+
+    #[test]
+    fn merge_lines_joins_at_more_than_half_of_the_smaller() {
+        let a = [0.0, 0.0, 10.0, 10.0];
+        // Overlap 50 of 100: apart.
+        assert_eq!(merge_lines(&[a, [5.0, 0.0, 30.0, 10.0]]).len(), 2);
+        // Overlap 51 of 100: one line.
+        let m = merge_lines(&[a, [4.9, 0.0, 30.0, 10.0]]);
+        assert_eq!(m, vec![[0.0, 0.0, 30.0, 10.0]]);
+    }
+
+    #[test]
+    fn merge_lines_repeats_until_nothing_joins() {
+        // The union of the first two then swallows the third.
+        let m = merge_lines(&[
+            [0.0, 0.0, 10.0, 10.0],
+            [2.0, 0.0, 12.0, 10.0],
+            [9.0, 0.0, 13.0, 10.0],
+        ]);
+        assert_eq!(m, vec![[0.0, 0.0, 13.0, 10.0]]);
+    }
+
+    #[test]
+    fn round_is_half_to_even() {
+        // A line edge at 10.5 masks from column 10, at 11.5 from 12.
+        let m = text_mask(&[[10.5, 0.0, 20.0, 1.0]], 30, 1);
+        assert!(m.get(10, 0) && !m.get(9, 0));
+        let m = text_mask(&[[11.5, 0.0, 20.0, 1.0]], 30, 1);
+        assert!(m.get(12, 0) && !m.get(11, 0));
+    }
+
+    #[test]
+    fn text_mask_clips_to_the_page() {
+        let m = text_mask(&[[-5.0, -5.0, 50.0, 50.0]], 4, 3);
+        assert_eq!(m.count(), 12);
+    }
+
+    #[test]
+    fn median_line_height_of_two_is_their_mean() {
+        let lines = [[0.0, 0.0, 10.0, 10.0], [0.0, 50.0, 10.0, 70.0]];
+        assert_eq!(line_height(&lines), 15.0);
+        let three = [lines[0], lines[1], [0.0, 100.0, 10.0, 130.0]];
+        assert_eq!(line_height(&three), 20.0);
+    }
+
+    #[test]
+    fn no_lines_uses_60_px_line_height() {
+        assert_eq!(line_height(&[]), 60.0);
+        // Without lines no ink is inside text, so a stroke longer than 1.2 * 60 = 72 is drawing.
+        let mut ink = Mask::new(200, 100);
+        fill(&mut ink, 10, 10, 83, 20);
+        assert_eq!(
+            ink_rules(&ink, &[], RuleFixes::NONE),
+            vec![(RuleKind::Drawing, [10, 10, 82, 19])]
+        );
+        let mut ink = Mask::new(200, 100);
+        fill(&mut ink, 10, 10, 82, 20);
+        assert_eq!(
+            ink_rules(&ink, &[], RuleFixes::NONE),
+            vec![(RuleKind::Text, [10, 10, 82, 20])]
+        );
+    }
+
+    #[test]
+    fn small_component_below_30_px_is_ignored() {
+        let mut ink = Mask::new(100, 20);
+        fill(&mut ink, 10, 5, 39, 6);
+        assert!(ink_rules(&ink, &[], RuleFixes::NONE).is_empty());
+        fill(&mut ink, 39, 5, 40, 6);
+        assert_eq!(
+            ink_rules(&ink, &[], RuleFixes::NONE),
+            vec![(RuleKind::Text, [10, 5, 40, 6])]
+        );
+    }
+
+    #[test]
+    fn drawing_group_needs_400_pixels() {
+        // A one-pixel stroke of 399 px is drawing (long, outside text) but too small a group.
+        let mut ink = Mask::new(500, 20);
+        fill(&mut ink, 10, 5, 409, 6);
+        assert!(ink_rules(&ink, &[], RuleFixes::NONE).is_empty());
+        fill(&mut ink, 409, 5, 410, 6);
+        // The drawing box ends at its last pixel.
+        assert_eq!(
+            ink_rules(&ink, &[], RuleFixes::NONE),
+            vec![(RuleKind::Drawing, [10, 5, 409, 5])]
+        );
+    }
+
+    #[test]
+    fn drawing_strokes_join_within_30_px() {
+        // Two dilations of 30 touch when the strokes are at most 61 px apart.
+        let rules_with_second_stroke_at = |x0: u32| {
+            let mut ink = Mask::new(400, 100);
+            fill(&mut ink, 10, 10, 110, 15);
+            fill(&mut ink, x0, 10, x0 + 100, 15);
+            ink_rules(&ink, &[], RuleFixes::NONE)
+        };
+        assert_eq!(
+            rules_with_second_stroke_at(170),
+            vec![(RuleKind::Drawing, [10, 10, 269, 14])]
+        );
+        assert_eq!(rules_with_second_stroke_at(171).len(), 2);
+    }
+
+    #[test]
+    fn line_close_to_a_drawing_is_absorbed() {
+        let mut ink = Mask::new(400, 200);
+        fill(&mut ink, 10, 10, 200, 15);
+        // A text line just under the drawing, inside its 20 px margin.
+        let rules = ink_rules(&ink, &[[20.0, 20.0, 100.0, 40.0]], RuleFixes::NONE);
+        assert_eq!(rules, vec![(RuleKind::Drawing, [10, 10, 199, 40])]);
+    }
+
+    #[test]
+    fn text_lines_join_into_a_block() {
+        let lines = [[10.0, 10.0, 100.0, 30.0], [10.0, 47.0, 100.0, 67.0]];
+        // Gap 17 < 0.9 * 20: one block.
+        assert_eq!(
+            ink_rules(&Mask::new(200, 200), &lines, RuleFixes::NONE),
+            vec![(RuleKind::Text, [10, 10, 100, 67])]
+        );
+        // Gap 18 is not below 18: two blocks.
+        let lines = [lines[0], [10.0, 48.0, 100.0, 68.0]];
+        assert_eq!(
+            ink_rules(&Mask::new(200, 200), &lines, RuleFixes::NONE).len(),
+            2
+        );
+    }
+
+    #[test]
+    fn hybrid_drops_line_mostly_under_drawn_box() {
+        let ink = Mask::new(400, 400);
+        let drawn = [[100.0, 100.0, 200.0, 200.0]];
+        // The grown drawn box ends at 215: 50 of 100 columns under it, the line stays.
+        let kept = combine_c(
+            &ink,
+            &drawn,
+            &[[165.0, 150.0, 265.0, 160.0]],
+            RuleFixes::NONE,
+        );
+        assert_eq!(kept.len(), 2);
+        assert!(kept[0].drawn && !kept[1].drawn);
+        assert_eq!(kept[1].bbox, [165, 150, 265, 160]);
+        // 51 of 100 columns: the line goes.
+        let dropped = combine_c(
+            &ink,
+            &drawn,
+            &[[164.0, 150.0, 264.0, 160.0]],
+            RuleFixes::NONE,
+        );
+        assert_eq!(dropped.len(), 1);
+    }
+
+    #[test]
+    fn hybrid_masks_the_ink_under_the_grown_drawn_box() {
+        let mut ink = Mask::new(400, 400);
+        // A 40 px stroke right of the drawn box: inside the 15 px margin, then just outside it.
+        fill(&mut ink, 214, 150, 254, 151);
+        let drawn = [[100.0, 100.0, 200.0, 200.0]];
+        let regions = combine_c(&ink, &drawn, &[], RuleFixes::NONE);
+        // Column 214 is masked, 215 to 253 stay: 39 px, still a component.
+        assert_eq!(regions.len(), 2);
+        assert_eq!(regions[1].bbox, [215, 150, 254, 151]);
+    }
+}

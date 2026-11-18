@@ -10,6 +10,7 @@ pub mod ink;
 pub mod llama;
 pub mod model;
 pub mod prepare;
+pub mod rules;
 mod types;
 
 pub use error::PageError;
