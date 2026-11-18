@@ -239,3 +239,29 @@ fn snap_keeps_the_public_pages_readable() {
         }
     }
 }
+
+/// The rules alone, without the layout boxes, so CI also checks their drawing logic: the
+/// expected boxes come from the bake-off's `ink_rules` on the public PNGs.
+#[test]
+fn ink_rules_match_bakeoff_on_public_pages() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/regions");
+    for page in PUBLIC_PAGES {
+        let lines = rects(&read_json(&dir.join(format!("{page}.lines.json"))));
+        let want = region_set(
+            read_json(&dir.join(format!("{page}.rules.json")))
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| {
+                    let b = rects(&serde_json::json!([r[1]]))[0];
+                    (r[0].as_bool().unwrap(), b.map(|c| c as i64))
+                }),
+        );
+        let got = region_set(
+            ink_rules(&public_ink(page), &lines, RuleFixes::NONE)
+                .into_iter()
+                .map(|(k, b)| (k == RuleKind::Drawing, b)),
+        );
+        assert_eq!(got, want, "{page}");
+    }
+}
