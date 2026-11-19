@@ -157,11 +157,11 @@ fn score_page(entry: &PageEntry, run: &PageRun) -> Result<PageScore, EvalError> 
         None
     };
     let regions = match &entry.regions {
-        Some(path) => {
+        Some(path) if !run.regions.is_empty() => {
             let truth: RegionTruth = serde_json::from_str(&read(path)?)?;
             Some(score_regions(&png, &truth.diagrams, &run.regions)?)
         }
-        None => None,
+        _ => None,
     };
     let blocks = if run.regions.is_empty() {
         run.blocks.len()
@@ -867,6 +867,24 @@ mod tests {
         assert_eq!(f.candle, "");
         assert_eq!((f.rules, f.ink), (0, 0));
         assert!(card.engines[0].public.iter().all(|p| p.regions.is_none()));
+    }
+
+    /// A run that proposed no regions (a baseline, or a page the engine could not read) has no
+    /// region score: an empty list is not a proposal that missed every diagram.
+    #[test]
+    fn run_without_regions_has_no_region_score() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = page(dir.path(), "r", false);
+        let truth = dir.path().join("r.regions");
+        std::fs::write(&truth, r#"{"page": "r", "diagrams": [[0, 0, 20, 20]]}"#).unwrap();
+        p.regions = Some(truth);
+        let m = Manifest {
+            set: "public".into(),
+            pages: vec![p],
+        };
+        let s = score(&[m], &results(&["r"]), false).unwrap();
+        assert_eq!(s.public[0].regions, None);
+        assert!(s.public[0].cer.is_some());
     }
 
     #[test]
