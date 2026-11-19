@@ -71,6 +71,10 @@ pub struct HubFile {
     pub sha256: &'static str,
     pub licence: &'static str,
     pub licensor: &'static str,
+    /// The model this file belongs to, as people name it ("Qwen3.5-4B").
+    pub model: &'static str,
+    /// The page of the original model, for a link next to its licence.
+    pub page: &'static str,
 }
 
 /// PP-DocLayoutV3, the layout detector (feature `detect`).
@@ -83,6 +87,8 @@ pub const LAYOUT_V3: HubFile = HubFile {
     sha256: "5ea422c6cc5fe759a47e1357c35639b58173508e025a3131cbe4b6ac59e2b85e",
     licence: "Apache-2.0",
     licensor: "PaddlePaddle Authors",
+    model: "PP-DocLayoutV3",
+    page: "https://huggingface.co/PaddlePaddle/PP-DocLayoutV3",
 };
 
 /// PP-OCRv6 small det, the text line detector (feature `detect`).
@@ -95,6 +101,8 @@ pub const TEXT_DET_V6: HubFile = HubFile {
     sha256: "d73e0058b7a8086bbd57f3d10b8bcd4ff95363f67e06e2762b5e814fe9c9410e",
     licence: "Apache-2.0",
     licensor: "PaddlePaddle Authors",
+    model: "PP-OCRv6",
+    page: "https://huggingface.co/PaddlePaddle/PP-OCRv6_small_det",
 };
 
 impl ModelSpec {
@@ -112,7 +120,9 @@ impl ModelSpec {
             size: f.size,
             sha256: f.sha256,
             licence: self.licence,
-            licensor: "Qwen team, Alibaba Cloud",
+            licensor: "Qwen team",
+            model: "Qwen3.5-4B",
+            page: "https://huggingface.co/Qwen/Qwen3.5-4B",
         }
     }
 }
@@ -229,6 +239,8 @@ mod tests {
                 sha256: "5ea422c6cc5fe759a47e1357c35639b58173508e025a3131cbe4b6ac59e2b85e",
                 licence: "Apache-2.0",
                 licensor: "PaddlePaddle Authors",
+                model: "PP-DocLayoutV3",
+                page: "https://huggingface.co/PaddlePaddle/PP-DocLayoutV3",
             }
         );
         assert_eq!(
@@ -242,6 +254,8 @@ mod tests {
                 sha256: "d73e0058b7a8086bbd57f3d10b8bcd4ff95363f67e06e2762b5e814fe9c9410e",
                 licence: "Apache-2.0",
                 licensor: "PaddlePaddle Authors",
+                model: "PP-OCRv6",
+                page: "https://huggingface.co/PaddlePaddle/PP-OCRv6_small_det",
             }
         );
         let [model, mmproj] = QWEN35_4B.hub_files();
@@ -252,8 +266,11 @@ mod tests {
         assert_eq!(mmproj.local, "mmproj-F16.gguf");
         assert_eq!(mmproj.size, 672_423_616);
         assert_eq!(model.licence, "Apache-2.0");
-        assert_eq!(model.licensor, "Qwen team, Alibaba Cloud");
-        assert_eq!(mmproj.licensor, "Qwen team, Alibaba Cloud");
+        assert_eq!(model.licensor, "Qwen team");
+        assert_eq!(model.model, "Qwen3.5-4B");
+        assert_eq!(model.page, "https://huggingface.co/Qwen/Qwen3.5-4B");
+        assert_eq!(mmproj.page, model.page);
+        assert_eq!(mmproj.licensor, "Qwen team");
         assert_eq!(model.revision, QWEN35_4B.revision);
     }
 
