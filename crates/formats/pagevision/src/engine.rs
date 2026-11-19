@@ -281,6 +281,16 @@ impl PageVision {
     /// [`POSSIBLE_TEXT_NOTE`] and a certainty of 0.5.
     pub fn read_page(&mut self, png: &[u8]) -> Result<PageResult, PageError> {
         let regions = self.regions(png)?;
+        self.read_page_with(png, &regions)
+    }
+
+    /// [`read_page`](Self::read_page) with the regions [`regions`](Self::regions) already gave
+    /// for this page, so a caller can keep them (the eval runner records both).
+    pub fn read_page_with(
+        &mut self,
+        png: &[u8],
+        regions: &Regions,
+    ) -> Result<PageResult, PageError> {
         self.read_with(png, &regions.regions, TextScope::Page)
     }
 

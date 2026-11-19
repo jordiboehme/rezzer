@@ -13,7 +13,7 @@
 //! ```
 //!
 //! Without `--regions-only` (feature `engine`) it reads every page with `PageVision` (engine
-//! `pagevision-c`): the regions, then Qwen on each region. The results hold the blocks, the page
+//! `pagevision-c`) as `read_page` does: the regions, then Qwen. The results hold the blocks, the page
 //! Markdown and the regions. The raw answers of each region (the classifier's answer, the reasons
 //! and the content answer) go to stderr only. A page that gives no block is written with an empty
 //! Markdown and no regions, so it is scored as read. The fingerprint holds the measured SHA-256
@@ -251,7 +251,7 @@ fn full_run(manifests: &[PathBuf], out: &Path) -> Result<(), String> {
             let png = std::fs::read(&image).map_err(|e| format!("page {id}: {e}"))?;
             let started = Instant::now();
             let regions = pv.regions(&png).map_err(|e| format!("page {id}: {e}"))?;
-            let read = pv.read(&png, &regions.regions);
+            let read = pv.read_page_with(&png, &regions);
             let ms = started.elapsed().as_millis();
             let page = match read {
                 Ok(r) => {
