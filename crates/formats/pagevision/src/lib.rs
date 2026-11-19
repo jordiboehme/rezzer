@@ -14,6 +14,7 @@ pub mod llama;
 pub mod model;
 pub mod onnx;
 pub mod prepare;
+pub mod regions;
 pub mod resize;
 pub mod rules;
 pub mod snap;
@@ -21,6 +22,8 @@ pub mod textdet;
 mod types;
 
 pub use error::PageError;
+pub use regions::regions_from;
 pub use types::{
-    BBox, Block, BlockKind, Cell, Content, Fingerprint, PageResult, Region, Stats, Table,
+    BBox, Block, BlockKind, Cell, Content, Fingerprint, PageResult, Region, RegionKind, Regions,
+    Stats, Table,
 };

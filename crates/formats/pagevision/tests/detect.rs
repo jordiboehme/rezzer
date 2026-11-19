@@ -16,10 +16,11 @@
 use std::path::{Path, PathBuf};
 
 use image::RgbImage;
-use pagevision::detect::{LayoutDetector, TextLineDetector};
+use pagevision::detect::{Detectors, LayoutDetector, TextLineDetector};
 use pagevision::ink::{flatten, gray_to_rgb};
 use pagevision::layoutpost::{DRAWN_CLASSES, LayoutBox, v3_filter};
-use pagevision::model::{LAYOUT_V3, TEXT_DET_V6};
+use pagevision::model::{LAYOUT_V3, ModelFiles, TEXT_DET_V6};
+use pagevision::regions_from;
 
 /// The public pages with detector fixtures.
 const PUBLIC_PAGES: [&str; 5] = ["test1", "test2", "diag1", "diag2", "diag3"];
@@ -404,6 +405,87 @@ fn v3_matches_reference_on_private_pages() {
     println!(
         "v3 private: {} pages, {boxes} boxes ({drawn} drawn), max corner diff {worst} px",
         pages.len()
+    );
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The drawn boxes of a fixture's filtered V3 output.
+fn fixture_drawn(v3: &serde_json::Value) -> Vec<[f64; 4]> {
+    reference_boxes(&v3["final"])
+        .into_iter()
+        .filter(|(c, _)| DRAWN_CLASSES.contains(c))
+        .map(|(_, b)| b)
+        .collect()
+}
+
+/// Pairs each wanted box with the closest unused got box: the same count and every corner
+/// within 1 px (ruling C1). Returns the largest corner difference.
+fn compare_rects(got: &[[f64; 4]], want: &[[f64; 4]]) -> Result<f64, String> {
+    if got.len() != want.len() {
+        return Err(format!("{} boxes, reference {}", got.len(), want.len()));
+    }
+    let mut used = vec![false; got.len()];
+    let mut worst = 0f64;
+    for w in want {
+        let dist = |g: &[f64; 4]| (0..4).map(|k| (g[k] - w[k]).abs()).fold(0f64, f64::max);
+        let Some((i, d)) = got
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !used[*i])
+            .map(|(i, g)| (i, dist(g)))
+            .min_by(|a, b| a.1.total_cmp(&b.1))
+        else {
+            return Err("no box left to pair".to_string());
+        };
+        used[i] = true;
+        worst = worst.max(d);
+    }
+    if worst > MAX_BOX_DIFF {
+        return Err(format!("a box differs by {worst} px"));
+    }
+    Ok(worst)
+}
+
+/// `Detectors` on the public pages (ruling C12): the drawn boxes match the V3 fixtures under the
+/// C1 bar, the lines equal the v6 fixtures, and the snapped regions equal `regions_from` over the
+/// fixture boxes.
+#[test]
+#[ignore = "needs PAGEVISION_MODEL_DIR"]
+fn regions_of_public_pages_match_fixture_regions() {
+    let files = ModelFiles::in_dir(&model_dir());
+    let det = Detectors::load(&files.layout, &files.text_det).unwrap();
+    let mut failures = Vec::new();
+    let (mut worst, mut regions) = (0f64, 0);
+    for page in PUBLIC_PAGES {
+        let png = std::fs::read(public_png(page)).unwrap();
+        let gray = flatten(&png).unwrap();
+        let (drawn, lines) = det.boxes(&gray).unwrap();
+        let want_drawn = fixture_drawn(&read_json(&fixture(&format!("{page}.v3.json"))));
+        match compare_rects(&drawn, &want_drawn) {
+            Ok(d) => worst = worst.max(d),
+            Err(e) => failures.push(format!("{page}: drawn: {e}")),
+        }
+        let want_lines = &read_json(&fixture(&format!("{page}.v6.json")))["lines"];
+        if line_set(&lines) != box_set(want_lines) {
+            failures.push(format!("{page}: the lines differ from the fixture"));
+        }
+        let fixture_lines: Vec<[f64; 4]> = box_set(want_lines)
+            .into_iter()
+            .map(|b| b.map(|c| c as f64))
+            .collect();
+        let got = det.regions(&png).unwrap();
+        let want = regions_from(&gray, &want_drawn, &fixture_lines);
+        regions += got.regions.len();
+        if got != want {
+            failures.push(format!(
+                "{page}: regions {:?}, from the fixtures {:?}",
+                got.regions, want.regions
+            ));
+        }
+    }
+    println!(
+        "regions public: {regions} regions on {} pages, drawn boxes within {worst} px",
+        PUBLIC_PAGES.len()
     );
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

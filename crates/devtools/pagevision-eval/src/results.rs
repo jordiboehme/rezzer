@@ -205,6 +205,7 @@ mod tests {
             ],
             prompt_sha256: "p".to_string(),
             preprocess: PREPROCESS_VERSION,
+            ..pagevision::Fingerprint::default()
         };
         let result = PageResult {
             width_px: 40,
