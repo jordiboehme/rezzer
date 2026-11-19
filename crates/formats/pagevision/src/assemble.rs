@@ -7,7 +7,8 @@
 
 use crate::error::PageError;
 use crate::parse::{
-    DrawingClass, EMPTY_ANSWER, block_markdown, parse_diagram, parse_sketch, parse_text,
+    DrawingClass, EMPTY_ANSWER, NO_DESCRIPTION, block_markdown, parse_diagram, parse_sketch,
+    parse_text,
 };
 use crate::types::{Block, Content, Fingerprint, PageResult, Region, RegionKind, Stats};
 
@@ -33,6 +34,9 @@ pub struct RegionAnswer {
     pub text: String,
     /// The content answer hit the token limit.
     pub truncated: bool,
+    /// pagevision removed the diagram's description on purpose (a split block, or a description
+    /// that only repeated the page text); the missing description then costs no certainty.
+    pub description_removed: bool,
     /// Why the region could not be read; it then gives no block.
     pub failed: Option<String>,
 }
@@ -97,7 +101,9 @@ pub fn assemble(
             empty += 1;
             continue;
         }
-        let parsed = reason.is_none() && !matches!(content, Content::Text { .. });
+        // A description pagevision removed on purpose is not a parse failure.
+        let excused = a.description_removed && reason.as_deref() == Some(NO_DESCRIPTION);
+        let parsed = (reason.is_none() || excused) && !matches!(content, Content::Text { .. });
         if let Some(r) = &reason {
             raw.push_str(&format!("reason: {r}\n"));
         }
@@ -168,6 +174,7 @@ mod tests {
             class_answer: None,
             text: answer.to_string(),
             truncated: false,
+            description_removed: false,
             failed: None,
         }
     }
@@ -179,6 +186,7 @@ mod tests {
             class_answer: Some(format!("{class:?}")),
             text: answer.to_string(),
             truncated: false,
+            description_removed: false,
             failed: None,
         }
     }
@@ -337,5 +345,27 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(page.blocks.len(), 1);
+    }
+
+    /// The certainty is halved for a diagram the model gave no description, not for one whose
+    /// description pagevision removed.
+    #[test]
+    fn removed_description_keeps_the_certainty() {
+        let bare = "```mermaid\ngraph TD\n  A --> B\n```";
+        let mut removed = drawing(100, DrawingClass::Diagram, bare);
+        removed.description_removed = true;
+        let page = run(vec![removed]).unwrap();
+        assert!(matches!(page.blocks[0].content, Content::Diagram { .. }));
+        assert_eq!(page.blocks[0].certainty, 0.95);
+        let page = run(vec![drawing(100, DrawingClass::Diagram, bare)]).unwrap();
+        assert_eq!(page.blocks[0].certainty, 0.5);
+        // A removed description does not excuse a diagram that failed the check.
+        let mut broken = drawing(
+            100,
+            DrawingClass::Diagram,
+            "```mermaid\ngraph TD\n  A[x --> B\n```",
+        );
+        broken.description_removed = true;
+        assert_eq!(run(vec![broken]).unwrap().blocks[0].certainty, 0.5);
     }
 }

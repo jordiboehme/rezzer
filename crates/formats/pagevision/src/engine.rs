@@ -105,6 +105,7 @@ impl PageVision {
                 class_answer: None,
                 text: String::new(),
                 truncated: false,
+                description_removed: false,
                 failed: None,
             })
             .collect();
@@ -162,7 +163,10 @@ impl PageVision {
                     ));
                     let mut sections = sections.into_iter();
                     for &i in &diagrams {
-                        answers[i].text = sections.next().unwrap_or_default();
+                        if let Some(a) = sections.next() {
+                            answers[i].text = a.section;
+                            answers[i].description_removed = a.description_removed;
+                        }
                         answers[i].truncated = g.truncated;
                     }
                 }
@@ -188,6 +192,7 @@ impl PageVision {
                 class_answer: None,
                 text: String::new(),
                 truncated: false,
+                description_removed: false,
                 failed: None,
             });
             // A stable sort: the new region takes its place in reading order.
@@ -233,6 +238,7 @@ impl PageVision {
             if kept != a.text {
                 log.push_str("--- a diagram description repeated the page text: dropped\n");
                 a.text = kept;
+                a.description_removed = true;
             }
         }
 

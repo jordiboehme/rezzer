@@ -18,6 +18,9 @@ pub enum DrawingClass {
     Sketch,
 }
 
+/// The reason of a Diagram whose answer has no description.
+pub const NO_DESCRIPTION: &str = "no description";
+
 /// The reason of a Content::Text for an answer with nothing in it.
 pub const EMPTY_ANSWER: &str = "empty answer";
 
@@ -214,7 +217,7 @@ pub fn parse_diagram(md: &str) -> (Content, Option<String>) {
             let src = kept.join("\n").trim_end().to_string();
             match crate::mermaid::check(&src) {
                 Ok(()) => {
-                    let reason = desc.is_empty().then(|| "no description".to_string());
+                    let reason = desc.is_empty().then(|| NO_DESCRIPTION.to_string());
                     (
                         Content::Diagram {
                             mermaid: src,
@@ -407,44 +410,65 @@ pub fn split_text(md: &str, weights: &[u32]) -> Vec<String> {
     parts.into_iter().map(|p| p.trim().to_string()).collect()
 }
 
+/// A Mermaid section given to a diagram region.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Assigned {
+    pub section: String,
+    /// True when pagevision removed the section's description (a part of a split block); the
+    /// missing description then does not lower the certainty.
+    pub description_removed: bool,
+}
+
 /// The Mermaid sections of a page read for `regions` diagram regions, in reading order:
 /// - with at least as many sections as regions, the first `regions` (extra ones are dropped);
 /// - with fewer, the first section whose flowchart has exactly as many unconnected parts as
 ///   regions are left (the regions without a section, plus its own) is split into those parts in
 ///   place, without the section's quote (it describes the joined block, not one part);
 /// - otherwise the sections as they are; the regions after them get none.
-pub fn assign_blocks(sections: Vec<String>, regions: usize) -> Vec<String> {
+pub fn assign_blocks(sections: Vec<String>, regions: usize) -> Vec<Assigned> {
+    let whole = |section: String| Assigned {
+        section,
+        description_removed: false,
+    };
     let mut sections = sections;
     if sections.len() >= regions {
         sections.truncate(regions);
-        return sections;
+        return sections.into_iter().map(whole).collect();
     }
     let want = regions - sections.len() + 1;
-    for i in 0..sections.len() {
-        let (blocks, _) = split_fences(&sections[i]);
+    let mut out: Vec<Assigned> = Vec::with_capacity(regions);
+    let mut split_done = false;
+    for section in sections {
+        if split_done {
+            out.push(whole(section));
+            continue;
+        }
+        let (blocks, outside) = split_fences(&section);
         let Some((_, src)) = blocks.iter().find(|(info, _)| info == "mermaid") else {
+            out.push(whole(section));
             continue;
         };
         // A `>` line inside the fence is the description, as in parse_diagram; it is not
         // Mermaid.
-        let kept: Vec<&str> = src
-            .lines()
-            .filter(|l| !l.trim_start().starts_with('>'))
-            .collect();
+        let (quoted, kept): (Vec<&str>, Vec<&str>) =
+            src.lines().partition(|l| l.trim_start().starts_with('>'));
         let parts = match crate::mermaid::flowchart_components(kept.join("\n").trim_end()) {
             Some(p) if p.len() == want => p,
-            _ => continue,
+            _ => {
+                out.push(whole(section));
+                continue;
+            }
         };
         // The block's description was written for the joined block and fits no part on its
         // own, so no part gets it.
-        let split: Vec<String> = parts
-            .into_iter()
-            .map(|p| format!("```mermaid\n{p}\n```"))
-            .collect();
-        sections.splice(i..=i, split);
-        break;
+        let had_description = !description(&format!("{}\n{outside}", quoted.join("\n"))).is_empty();
+        out.extend(parts.into_iter().map(|p| Assigned {
+            section: format!("```mermaid\n{p}\n```"),
+            description_removed: had_description,
+        }));
+        split_done = true;
     }
-    sections
+    out
 }
 
 /// A description shorter than this (letters and digits) is never taken for page text: a word
@@ -777,11 +801,13 @@ mod tests {
 
     #[test]
     fn one_block_with_two_parts_fills_two_regions() {
-        // The block's one description covers both parts, so no part gets it.
+        // The block's one description covers both parts, so no part gets it, and each part says
+        // that pagevision removed it.
         let blocks = assign_blocks(mermaid_sections(TEST2_PAGE_ANSWER), 2);
         assert_eq!(blocks.len(), 2);
-        let (first, _) = parse_diagram(&blocks[0]);
-        let (second, _) = parse_diagram(&blocks[1]);
+        assert!(blocks.iter().all(|b| b.description_removed));
+        let (first, _) = parse_diagram(&blocks[0].section);
+        let (second, _) = parse_diagram(&blocks[1].section);
         assert_eq!(
             first,
             Content::Diagram {
@@ -797,15 +823,24 @@ mod tests {
                 description: String::new()
             }
         );
-        // One region: the block stays whole.
-        let one = assign_blocks(mermaid_sections(TEST2_PAGE_ANSWER), 1);
+        let plain = |v: Vec<Assigned>| -> Vec<String> {
+            assert!(v.iter().all(|a| !a.description_removed));
+            v.into_iter().map(|a| a.section).collect()
+        };
+        // One region: the block stays whole, with its description.
+        let one = plain(assign_blocks(mermaid_sections(TEST2_PAGE_ANSWER), 1));
         assert_eq!(one, mermaid_sections(TEST2_PAGE_ANSWER));
         // Three regions: two parts do not fill three, so nothing is split.
-        let three = assign_blocks(mermaid_sections(TEST2_PAGE_ANSWER), 3);
+        let three = plain(assign_blocks(mermaid_sections(TEST2_PAGE_ANSWER), 3));
         assert_eq!(three, mermaid_sections(TEST2_PAGE_ANSWER));
         // Extra blocks are dropped.
         let two = mermaid_sections(PAGE_ANSWER);
-        assert_eq!(assign_blocks(two.clone(), 1), [two[0].clone()]);
+        assert_eq!(plain(assign_blocks(two.clone(), 1)), [two[0].clone()]);
+        // A split block that had no description: nothing was removed.
+        let bare = "```mermaid\ngraph TD\n    A --> B\n    C --> D\n```".to_string();
+        let parts = assign_blocks(vec![bare], 2);
+        assert_eq!(parts.len(), 2);
+        assert!(parts.iter().all(|a| !a.description_removed));
     }
 
     #[test]
@@ -840,5 +875,19 @@ mod tests {
         assert_eq!(drop_page_text_description(short, page_text), short);
         // No page text: nothing to compare.
         assert_eq!(drop_page_text_description(section, ""), section);
+    }
+
+    /// The minimum length on both sides: 11 letters and digits stay, 12 are dropped.
+    #[test]
+    fn page_text_threshold_is_twelve_characters() {
+        assert_eq!(PAGE_TEXT_MIN_CHARS, 12);
+        let page_text = "Notes: abcdefghijkl and more.";
+        let eleven = "```mermaid\ngraph LR\n    A --> B\n```\n> abcde fghijk";
+        let twelve = "```mermaid\ngraph LR\n    A --> B\n```\n> abcde fghijkl";
+        assert_eq!(drop_page_text_description(eleven, page_text), eleven);
+        assert_eq!(
+            drop_page_text_description(twelve, page_text),
+            "```mermaid\ngraph LR\n    A --> B\n```"
+        );
     }
 }

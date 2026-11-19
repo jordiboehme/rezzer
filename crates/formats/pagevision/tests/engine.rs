@@ -50,6 +50,10 @@ fn read_page_test2_has_two_diagrams() {
     assert_eq!(kinds[2], BlockKind::Diagram, "{kinds:?}");
     assert!(page.blocks[1].markdown.contains("search"));
     assert!(page.blocks[2].markdown.contains("MCP"));
+    // The split took the block's description away; that costs the two diagrams no certainty.
+    for b in &page.blocks[1..] {
+        assert!(b.certainty > 0.5, "{}: {}", b.markdown, b.certainty);
+    }
     for word in ["search", "Learn", "teach", "App", "DB", "MCP"] {
         assert!(page.markdown.contains(word), "{word}");
     }
