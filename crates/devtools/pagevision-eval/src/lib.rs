@@ -11,13 +11,13 @@ pub mod results;
 pub mod scorecard;
 pub mod text;
 
-pub use boxes::{BoxScore, ink_mask, score_boxes};
+pub use boxes::{BoxScore, RegionScore, score_boxes, score_regions};
 pub use edges::{
     Dir, Edge, EdgeScore, TruthEdges, mermaid_edges, parse_truth, parse_truth_with_nodes,
     score_edges,
 };
 pub use manifest::{Manifest, PageEntry, load_manifest};
-pub use results::{Fingerprint, PageRun, ResultsFile, RunBlock, load_results};
+pub use results::{Fingerprint, PageRun, ResultsFile, RunBlock, RunRegion, load_results};
 pub use scorecard::{Aggregate, EngineScore, PageScore, Scorecard, check_fingerprints, score};
 pub use text::line_cer;
 

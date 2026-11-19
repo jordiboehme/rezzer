@@ -4,6 +4,8 @@
 
 //! The supported model: files, checksums, chat framing and image rules.
 
+use std::path::{Path, PathBuf};
+
 use sha2::{Digest, Sha256};
 
 /// One model file with its expected size and SHA-256.
@@ -121,6 +123,35 @@ pub const ALL_FILES: [HubFile; 4] = {
     [model, mmproj, LAYOUT_V3, TEXT_DET_V6]
 };
 
+/// The four model files in one folder, under their local names (`HubFile::local`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelFiles {
+    pub model: PathBuf,
+    pub mmproj: PathBuf,
+    pub layout: PathBuf,
+    pub text_det: PathBuf,
+}
+
+impl ModelFiles {
+    /// The paths of [`ALL_FILES`] in `dir`.
+    pub fn in_dir(dir: &Path) -> Self {
+        let [model, mmproj, layout, text_det] = ALL_FILES;
+        Self {
+            model: dir.join(model.local),
+            mmproj: dir.join(mmproj.local),
+            layout: dir.join(layout.local),
+            text_det: dir.join(text_det.local),
+        }
+    }
+}
+
+/// The pinned `llama-cpp-2` version; keep equal to the workspace pin. Default code, so the
+/// scorecard check can read it without the `llama` feature.
+pub const LLAMA_CPP_2_VERSION: &str = "0.1.161";
+
+/// The pinned `candle-core` and `candle-nn` version; keep equal to the workspace pins.
+pub const CANDLE_VERSION: &str = "0.11.1";
+
 /// The download URL of a file, pinned to its revision.
 pub fn hub_url(f: &HubFile) -> String {
     format!(
@@ -131,6 +162,26 @@ pub fn hub_url(f: &HubFile) -> String {
 
 /// The version of the image preprocessing; part of the result fingerprint.
 pub const PREPROCESS_VERSION: u32 = 1;
+
+/// The lower-case hex SHA-256 of a file, read in pieces.
+pub fn file_sha256(path: &Path) -> std::io::Result<String> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
+}
 
 /// The lower-case hex SHA-256 of a prompt.
 pub fn prompt_sha256(prompt: &str) -> String {
@@ -236,6 +287,42 @@ mod tests {
             hex,
             "3cf834b91d23a756b1519bce4db42c09e852f3e35c35092dd5a3e253a50c071a"
         );
+    }
+
+    #[test]
+    fn model_files_use_the_local_names() {
+        let f = ModelFiles::in_dir(Path::new("/m"));
+        assert_eq!(f.model, Path::new("/m/Qwen3.5-4B-Q4_K_M.gguf"));
+        assert_eq!(f.mmproj, Path::new("/m/mmproj-F16.gguf"));
+        assert_eq!(f.layout, Path::new("/m/pp-doclayoutv3.safetensors"));
+        assert_eq!(f.text_det, Path::new("/m/pp-ocrv6-small-det.onnx"));
+    }
+
+    #[test]
+    fn version_constants_match_the_pins() {
+        let manifest = include_str!("../../../../Cargo.toml");
+        assert!(manifest.contains(&format!(
+            "llama-cpp-2 = {{ version = \"={LLAMA_CPP_2_VERSION}\""
+        )));
+        for name in ["candle-core", "candle-nn"] {
+            assert!(
+                manifest.contains(&format!("{name} = {{ version = \"={CANDLE_VERSION}\"")),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn file_hash_reads_the_file() {
+        let path = std::env::temp_dir().join(format!("pagevision-hash-{}", std::process::id()));
+        std::fs::write(&path, "abc").unwrap();
+        let hash = file_sha256(&path);
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(
+            hash.unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert!(file_sha256(Path::new("/nonexistent/file")).is_err());
     }
 
     #[test]

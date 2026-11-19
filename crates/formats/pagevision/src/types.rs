@@ -106,7 +106,9 @@ pub struct Stats {
     pub decode_ms: u64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The versions and hashes a result depends on. The detector fields default to empty and 0 when
+/// an older fingerprint without them is read.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Fingerprint {
     pub crate_version: String,
@@ -114,6 +116,21 @@ pub struct Fingerprint {
     pub model_sha256: Vec<String>,
     pub prompt_sha256: String,
     pub preprocess: u32,
+    /// SHA-256 of the layout detector file (`model::LAYOUT_V3`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub layout_sha256: String,
+    /// SHA-256 of the text line detector file (`model::TEXT_DET_V6`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub text_det_sha256: String,
+    /// The pinned candle version (`model::CANDLE_VERSION`).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub candle: String,
+    /// `rules::RULES_VERSION`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub rules: u32,
+    /// `ink::INK_VERSION`.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub ink: u32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -129,17 +146,73 @@ pub struct PageResult {
     pub raw: Option<String>,
 }
 
-/// A region given by the caller; the crate then skips the layout pass for this page.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What a proposed region holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "lowercase"))]
+#[non_exhaustive]
+pub enum RegionKind {
+    /// Text lines, read as text.
+    Text,
+    /// A region the layout detector drew: a diagram or a sketch.
+    Drawing,
+}
+
+/// One proposed region of a page, snapped to its ink.
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Region {
     pub bbox: BBox,
-    pub kind_hint: Option<BlockKind>,
+    pub kind: RegionKind,
+    /// From 0 to 1: the share of the ink in the proposed box that the region keeps, lowered for a
+    /// possible missed drawing.
+    pub certainty: f32,
+    /// Why the region is uncertain, for example "possible missed drawing".
+    pub note: Option<String>,
+}
+
+/// The proposed regions of a page, in reading order.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Regions {
+    pub width_px: u32,
+    pub height_px: u32,
+    pub regions: Vec<Region>,
+    /// Debug notes of the snapping, for example a dropped region.
+    pub notes: Vec<String>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A fingerprint as the crate wrote it before the detector fields (ruling B5).
+    #[cfg(feature = "serde")]
+    #[test]
+    fn old_fingerprint_json_still_parses() {
+        let json = r#"{"crate_version":"0.1.0","llama_cpp_2":"0.1.161","model_sha256":["a","b"],"prompt_sha256":"p","preprocess":1}"#;
+        let f: Fingerprint = serde_json::from_str(json).unwrap();
+        assert_eq!(f.crate_version, "0.1.0");
+        assert_eq!(f.model_sha256, ["a", "b"]);
+        assert_eq!(f.preprocess, 1);
+        assert_eq!(f.layout_sha256, "");
+        assert_eq!(f.text_det_sha256, "");
+        assert_eq!(f.candle, "");
+        assert_eq!((f.rules, f.ink), (0, 0));
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn region_kind_is_lowercase_in_json() {
+        assert_eq!(
+            serde_json::to_string(&RegionKind::Drawing).unwrap(),
+            "\"drawing\""
+        );
+        assert_eq!(
+            serde_json::to_string(&RegionKind::Text).unwrap(),
+            "\"text\""
+        );
+    }
 
     fn block(content: Content) -> Block {
         Block {

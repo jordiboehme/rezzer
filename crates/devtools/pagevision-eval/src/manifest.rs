@@ -33,6 +33,12 @@ pub struct PageEntry {
     /// Number of diagrams drawn on the page.
     #[serde(default)]
     pub diagrams: u32,
+    /// Region truth: JSON with the diagram boxes in page pixels (`"diagrams": [[x0, y0, x1, y1]]`).
+    #[serde(default)]
+    pub regions: Option<PathBuf>,
+    /// Number of sketches drawn on the page (pictures, not diagrams).
+    #[serde(default)]
+    pub sketches: u32,
     #[serde(default)]
     pub known_fail: bool,
 }
@@ -49,6 +55,7 @@ pub fn load_manifest(path: &Path) -> Result<Manifest, EvalError> {
         page.text = page.text.take().map(|p| base.join(p));
         page.edges = page.edges.take().map(|p| base.join(p));
         page.nodes = page.nodes.take().map(|p| base.join(p));
+        page.regions = page.regions.take().map(|p| base.join(p));
     }
     Ok(manifest)
 }
@@ -92,6 +99,37 @@ known_fail = true
     }
 
     #[test]
+    fn manifest_without_regions_still_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("manifest.toml");
+        std::fs::write(
+            &file,
+            r#"
+set = "private"
+
+[[pages]]
+id = "old"
+image = "old.png"
+
+[[pages]]
+id = "new"
+image = "new.png"
+regions = "truth/new.regions"
+sketches = 3
+"#,
+        )
+        .unwrap();
+        let m = load_manifest(&file).unwrap();
+        assert_eq!(m.pages[0].regions, None);
+        assert_eq!(m.pages[0].sketches, 0);
+        assert_eq!(
+            m.pages[1].regions,
+            Some(dir.path().join("truth/new.regions"))
+        );
+        assert_eq!(m.pages[1].sketches, 3);
+    }
+
+    #[test]
     fn missing_manifest_is_an_io_error() {
         let err = load_manifest(Path::new("/nonexistent/manifest.toml")).unwrap_err();
         assert!(matches!(err, EvalError::Io { .. }));
@@ -107,7 +145,11 @@ known_fail = true
         assert_eq!(ids, ["test1", "test2", "diag1", "diag2", "diag3"]);
         for page in &m.pages {
             assert!(page.image.is_file(), "{}", page.image.display());
-            for f in [&page.text, &page.edges].into_iter().flatten() {
+            assert!(page.regions.is_some(), "{} has no region truth", page.id);
+            for f in [&page.text, &page.edges, &page.regions]
+                .into_iter()
+                .flatten()
+            {
                 assert!(f.is_file(), "{}", f.display());
             }
         }

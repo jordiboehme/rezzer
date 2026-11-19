@@ -23,12 +23,10 @@ use llama_cpp_2::sampling::LlamaSampler;
 use llama_cpp_2::{LogOptions, send_logs_to_tracing};
 
 use crate::error::PageError;
+pub use crate::model::LLAMA_CPP_2_VERSION;
 use crate::model::{ModelSpec, PREPROCESS_VERSION, prompt_sha256};
 use crate::prepare::{Prepared, expected_image_tokens};
 use crate::types::{Fingerprint, Stats};
-
-/// The pinned `llama-cpp-2` version; keep equal to the workspace pin.
-pub const LLAMA_CPP_2_VERSION: &str = "0.1.161";
 
 /// Context size cap, prompt plus output.
 const MAX_CTX: u32 = 16384;
@@ -311,6 +309,7 @@ impl VisionModel {
             ],
             prompt_sha256: prompt_sha256(prompt),
             preprocess: PREPROCESS_VERSION,
+            ..Fingerprint::default()
         }
     }
 }
@@ -336,14 +335,6 @@ mod tests {
     fn strip_think_removes_the_block() {
         assert_eq!(strip_think("<think>\nhm\n</think>\n\nHello"), "Hello");
         assert_eq!(strip_think("  plain \n"), "plain");
-    }
-
-    #[test]
-    fn version_constant_matches_the_pin() {
-        let manifest = include_str!("../../../../Cargo.toml");
-        assert!(manifest.contains(&format!(
-            "llama-cpp-2 = {{ version = \"={LLAMA_CPP_2_VERSION}\""
-        )));
     }
 
     #[test]

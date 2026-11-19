@@ -1,0 +1,13 @@
+{
+ "page": "diag2",
+ "confirmed": "2026-11-15",
+ "units": "page pixels x0,y0,x1,y1",
+ "diagrams": [
+  [
+   280,
+   207,
+   1132,
+   1100
+  ]
+ ]
+}

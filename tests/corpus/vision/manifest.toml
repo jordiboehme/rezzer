@@ -3,11 +3,13 @@ set = "public"
 [[pages]]
 id = "test1"
 image = "test1.png"
+regions = "test1.regions"
 text = "test1.txt"
 
 [[pages]]
 id = "test2"
 image = "test2.png"
+regions = "test2.regions"
 text = "test2.txt"
 edges = "test2.edges"
 diagrams = 2
@@ -15,18 +17,21 @@ diagrams = 2
 [[pages]]
 id = "diag1"
 image = "diag1.png"
+regions = "diag1.regions"
 edges = "diag1.edges"
 diagrams = 1
 
 [[pages]]
 id = "diag2"
 image = "diag2.png"
+regions = "diag2.regions"
 edges = "diag2.edges"
 diagrams = 1
 
 [[pages]]
 id = "diag3"
 image = "diag3.png"
+regions = "diag3.regions"
 edges = "diag3.edges"
 diagrams = 2
 known_fail = true

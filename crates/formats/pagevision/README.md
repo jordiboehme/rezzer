@@ -12,11 +12,26 @@ The crate is standalone. It depends on no other rezzer crate.
 - `llama`: the llama.cpp backend. This is native code and is off by default. It uses `mtmd` with
   `metal` on macOS and `mtmd` with `openmp` on other systems.
 - `detect`: the layout detector (PP-DocLayoutV3) and the text line detector (PP-OCRv6 small det)
-  on Candle. It is pure Rust and runs on the CPU. It is off by default.
+  on Candle. It is pure Rust and runs on the CPU. It is off by default. `detect::Detectors`
+  loads both and returns the regions of a page (`Detectors::regions`).
 
 Default features build the types, the error, the model description, the image preparation
 (`prepare`), the ink rules, the ONNX reader, the resize code and the post-processing of both
-detectors.
+detectors. `regions_from` turns the detector boxes into regions without the models.
+
+## Regions
+
+A page gets text regions and drawing regions. The layout detector finds the drawings. The text
+lines and the ink rules make the text regions. Then every region is snapped to its ink:
+
+- A region takes an ink stroke when at least half of the stroke lies in its box.
+- When a drawing and a text region share a stroke, the drawing keeps it. A text region whose ink
+  all lies in a drawing is dropped, so text under a drawing is not read twice.
+- Two drawings or two text regions that share ink are merged.
+
+The ink rules can see a drawing that the layout detector missed. It then stays a text region,
+with the note "possible missed drawing" and a lower certainty. Regions come in reading order, top
+to bottom and then left to right, with boxes on the 0..=1000 grid.
 
 ## Models
 
