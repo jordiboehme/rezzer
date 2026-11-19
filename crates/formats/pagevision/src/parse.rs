@@ -160,13 +160,17 @@ fn description(outside: &str) -> String {
         .map(|l| l.trim().trim_start_matches('>').trim())
         .filter(|l| !l.is_empty())
         .collect();
-    let text = lines.join("\n");
+    let mut text = lines.join("\n");
     for prefix in ["Sketch:", "Diagram:"] {
         if let Some(rest) = text.strip_prefix(prefix) {
-            return rest.trim().to_string();
+            text = rest.trim().to_string();
         }
     }
-    text
+    // A description the model put in quotes.
+    match text.strip_prefix('"').and_then(|t| t.strip_suffix('"')) {
+        Some(inner) if !inner.contains('"') => inner.trim().to_string(),
+        _ => text,
+    }
 }
 
 /// A diagram's answer as content, with the reason when it is not a checked diagram with a
@@ -198,7 +202,16 @@ pub fn parse_diagram(md: &str) -> (Content, Option<String>) {
     match mermaid[..] {
         [] => failed("no mermaid block".to_string()),
         [src] => {
-            let src = src.trim_end().to_string();
+            // A `>` line is never Mermaid: a quote the model wrote inside the fence is the
+            // description.
+            let (quoted, kept): (Vec<&str>, Vec<&str>) =
+                src.lines().partition(|l| l.trim_start().starts_with('>'));
+            let desc = if desc.is_empty() {
+                description(&quoted.join("\n"))
+            } else {
+                desc.clone()
+            };
+            let src = kept.join("\n").trim_end().to_string();
             match crate::mermaid::check(&src) {
                 Ok(()) => {
                     let reason = desc.is_empty().then(|| "no description".to_string());
@@ -210,7 +223,7 @@ pub fn parse_diagram(md: &str) -> (Content, Option<String>) {
                         reason,
                     )
                 }
-                Err(e) => failed(e),
+                Err(e) => (Content::Picture { description: desc }, Some(e)),
             }
         }
         _ => failed(format!("{} mermaid blocks", mermaid.len())),
@@ -398,6 +411,21 @@ mod tests {
         let (c, reason) = parse_diagram(two);
         assert!(matches!(c, Content::Picture { .. }));
         assert_eq!(reason.as_deref(), Some("2 mermaid blocks"));
+    }
+
+    /// Qwen sometimes writes the `>` description inside the fence, as on test2.
+    #[test]
+    fn quote_inside_the_fence_is_the_description() {
+        let answer = "```mermaid\ngraph TD\n    A(\"search\") --> B(\"teach\")\n    B --> A\n\n    > \"A cycle of steps.\"\n```";
+        let (c, reason) = parse_diagram(answer);
+        assert_eq!(reason, None);
+        assert_eq!(
+            c,
+            Content::Diagram {
+                mermaid: "graph TD\n    A(\"search\") --> B(\"teach\")\n    B --> A".into(),
+                description: "A cycle of steps.".into()
+            }
+        );
     }
 
     #[test]
