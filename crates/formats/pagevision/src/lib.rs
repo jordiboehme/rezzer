@@ -4,14 +4,20 @@
 
 //! Page OCR with vision models.
 
+#[cfg(feature = "detect")]
+pub mod detect;
 mod error;
 pub mod ink;
+pub mod layoutpost;
 #[cfg(feature = "llama")]
 pub mod llama;
 pub mod model;
+pub mod onnx;
 pub mod prepare;
+pub mod resize;
 pub mod rules;
 pub mod snap;
+pub mod textdet;
 mod types;
 
 pub use error::PageError;

@@ -201,6 +201,58 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+  # pagevision's detect feature: the layout and text line detectors on Candle. It is
+  # pure Rust but off by default, so the workspace jobs never build it. Linux only;
+  # the llama feature is never built in CI.
+  pagevision-detect:
+    name: pagevision-detect
+    timeout-minutes: 30
+    needs: changes
+    if: ${{ needs.changes.outputs.rust == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          "$GITHUB_WORKSPACE"/scripts/ci/retry.sh 5 rustup toolchain install
+          rustup show active-toolchain
+
+      # The install-action download can fail on a bad network day. The second
+      # step is the same install and runs only after the first one failed.
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        id: nextest
+        continue-on-error: true
+        with:
+          tool: nextest@0.9.151
+          fallback: none
+
+      - name: Wait before the second try
+        if: ${{ steps.nextest.outcome == 'failure' }}
+        run: sleep 30
+
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+        if: ${{ steps.nextest.outcome == 'failure' }}
+        with:
+          tool: nextest@0.9.151
+          fallback: none
+
+      # Only main saves the cache, so a pull request cannot plant artifacts
+      # that a later run on main would restore.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: pagevision-detect
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: cargo clippy
+        run: cargo clippy -p pagevision --features detect --all-targets --locked -- -D warnings
+
+      # The tests that need the model files are ignored here; they run locally.
+      - name: run tests
+        run: cargo nextest run -p pagevision --features detect --locked --no-tests=warn --no-fail-fast
+
   test:
     name: test (${{ matrix.os }}${{ matrix.libc == 'musl' && ', musl' || '' }})
     # 60, not 45: a cold Windows build (a pull request restores the cache but never saves it).
@@ -399,7 +451,7 @@ jobs:
   ci-passed:
     name: ci-passed
     timeout-minutes: 5
-    needs: [changes, fmt, clippy, test, cargo-deny, workflow-lint]
+    needs: [changes, fmt, clippy, pagevision-detect, test, cargo-deny, workflow-lint]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
