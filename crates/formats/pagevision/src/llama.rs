@@ -45,6 +45,8 @@ pub struct RunOptions {
     pub max_tokens: u32,
     /// CPU threads; `None` picks up to eight.
     pub threads: Option<i32>,
+    /// Keep the raw answers in `PageResult::raw` (debug output).
+    pub keep_raw: bool,
 }
 
 impl Default for RunOptions {
@@ -52,6 +54,7 @@ impl Default for RunOptions {
         RunOptions {
             max_tokens: 4096,
             threads: None,
+            keep_raw: false,
         }
     }
 }
@@ -140,18 +143,33 @@ impl VisionModel {
         dir: &Path,
         opts: RunOptions,
     ) -> Result<VisionModel, PageError> {
-        let model_path = dir.join(spec.model.name);
-        let mmproj_path = dir.join(spec.mmproj.name);
-        for path in [&model_path, &mmproj_path] {
+        Self::load_paths(
+            spec,
+            &dir.join(spec.model.name),
+            &dir.join(spec.mmproj.name),
+            opts,
+        )
+    }
+
+    /// Loads the model and the mmproj file of `spec` from their paths. No download.
+    pub fn load_paths(
+        spec: &'static ModelSpec,
+        model_path: &Path,
+        mmproj_path: &Path,
+        opts: RunOptions,
+    ) -> Result<VisionModel, PageError> {
+        for path in [model_path, mmproj_path] {
             if !path.is_file() {
-                return Err(PageError::ModelMissing { path: path.clone() });
+                return Err(PageError::ModelMissing {
+                    path: path.to_path_buf(),
+                });
             }
         }
         configure_logging();
         let backend = backend()?;
         let threads = opts.threads.unwrap_or_else(default_threads);
         let model_params = LlamaModelParams::default().with_n_gpu_layers(GPU_LAYERS);
-        let model = LlamaModel::load_from_file(backend, &model_path, &model_params)
+        let model = LlamaModel::load_from_file(backend, model_path, &model_params)
             .map_err(|e| engine_err(&format!("loading {}", model_path.display()), e))?;
         let mmproj = mmproj_path.to_str().ok_or_else(|| {
             PageError::Engine(format!("path is not UTF-8: {}", mmproj_path.display()))
@@ -184,10 +202,20 @@ impl VisionModel {
 
     /// Runs one prompt on one prepared image, greedy, thinking off. Fails with
     /// `UnknownImageSize` or `ImageTokens` before decoding when the image chunk's token
-    /// count is not the table's.
+    /// count is not the one of the token rule (`prepare::expected_image_tokens`).
     pub fn generate(&mut self, image: &Prepared, prompt: &str) -> Result<Generation, PageError> {
+        self.generate_with(image, prompt, self.opts.max_tokens)
+    }
+
+    /// [`generate`](Self::generate) with its own output budget for this call.
+    pub fn generate_with(
+        &mut self,
+        image: &Prepared,
+        prompt: &str,
+        max_tokens: u32,
+    ) -> Result<Generation, PageError> {
         let (width, height) = (image.width, image.height);
-        let expected = expected_image_tokens(width, height)
+        let expected = expected_image_tokens(width, height, &self.spec.image)
             .ok_or(PageError::UnknownImageSize { width, height })?;
         let backend = backend()?;
 
@@ -229,7 +257,7 @@ impl VisionModel {
             });
         }
         let prompt_tokens = u32::try_from(chunks.total_tokens()).unwrap_or(u32::MAX);
-        let n_ctx = context_size(prompt_tokens, self.opts.max_tokens);
+        let n_ctx = context_size(prompt_tokens, max_tokens);
         if prompt_tokens >= n_ctx {
             return Err(PageError::Engine(format!(
                 "prompt needs {prompt_tokens} tokens, context holds {n_ctx}"
@@ -258,10 +286,7 @@ impl VisionModel {
         let mut bytes = Vec::new();
         let mut output_tokens = 0u32;
         let mut truncated = true;
-        let budget = self
-            .opts
-            .max_tokens
-            .min(n_ctx.saturating_sub(prompt_tokens));
+        let budget = max_tokens.min(n_ctx.saturating_sub(prompt_tokens));
         while output_tokens < budget {
             // `sample` also accepts the token into the sampler.
             let token = sampler.sample(&ctx, -1);
@@ -296,6 +321,11 @@ impl VisionModel {
             },
             truncated,
         })
+    }
+
+    /// The options the model was loaded with.
+    pub fn options(&self) -> &RunOptions {
+        &self.opts
     }
 
     /// The versions and hashes a result depends on.
@@ -342,5 +372,15 @@ mod tests {
         let err = VisionModel::load(&QWEN35_4B, Path::new("/nonexistent"), RunOptions::default())
             .unwrap_err();
         assert!(matches!(err, PageError::ModelMissing { .. }), "{err}");
+    }
+
+    #[test]
+    fn load_paths_names_the_missing_file() {
+        let model = Path::new("/nonexistent/model.gguf");
+        let mmproj = Path::new("/nonexistent/mmproj.gguf");
+        match VisionModel::load_paths(&QWEN35_4B, model, mmproj, RunOptions::default()) {
+            Err(PageError::ModelMissing { path }) => assert_eq!(path, model),
+            other => panic!("{other:?}"),
+        }
     }
 }

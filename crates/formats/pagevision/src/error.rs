@@ -15,8 +15,8 @@ pub enum PageError {
     Unreadable { reason: String },
     #[error("model file missing: {}", path.display())]
     ModelMissing { path: PathBuf },
-    /// The image size has no entry in the token table.
-    #[error("the image size {width}x{height} has no entry in the token table")]
+    /// The image size is off the grid or has too few tiles for the image token rule.
+    #[error("the image size {width}x{height} does not fit the image token rule")]
     UnknownImageSize { width: u32, height: u32 },
     /// llama.cpp produced a different image token count than the table says.
     #[error(

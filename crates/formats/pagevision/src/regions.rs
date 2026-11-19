@@ -34,7 +34,7 @@ fn to_grid(v: i64, size: u32) -> u16 {
 }
 
 /// A half-open pixel box on the 0..=1000 grid of a `width` x `height` page.
-fn grid_box(b: [i64; 4], width: u32, height: u32) -> BBox {
+pub(crate) fn grid_box(b: [i64; 4], width: u32, height: u32) -> BBox {
     BBox {
         x0: to_grid(b[0], width),
         y0: to_grid(b[1], height),

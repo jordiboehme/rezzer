@@ -4,24 +4,32 @@
 
 //! Page OCR with vision models.
 
+pub mod assemble;
 #[cfg(feature = "detect")]
 pub mod detect;
+#[cfg(feature = "engine")]
+pub mod engine;
 mod error;
 pub mod ink;
 pub mod layoutpost;
 #[cfg(feature = "llama")]
 pub mod llama;
+pub mod mermaid;
 pub mod model;
 pub mod onnx;
+pub mod parse;
 pub mod prepare;
+pub mod prompts;
 pub mod regions;
 pub mod resize;
 pub mod rules;
 pub mod snap;
 pub mod textdet;
+pub mod textpass;
 mod types;
 
 pub use error::PageError;
+pub use parse::DrawingClass;
 pub use regions::regions_from;
 pub use types::{
     BBox, Block, BlockKind, Cell, Content, Fingerprint, PageResult, Region, RegionKind, Regions,

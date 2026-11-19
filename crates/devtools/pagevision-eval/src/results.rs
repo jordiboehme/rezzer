@@ -283,7 +283,7 @@ mod tests {
                 QWEN35_4B.model.sha256.to_string(),
                 QWEN35_4B.mmproj.sha256.to_string(),
             ],
-            prompt_sha256: "p".to_string(),
+            prompt_sha256: pagevision::model::prompt_sha256(&pagevision::prompts::joined()),
             preprocess: PREPROCESS_VERSION,
             ..pagevision::regions::regions_fingerprint()
         };

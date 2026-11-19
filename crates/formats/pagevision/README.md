@@ -14,10 +14,14 @@ The crate is standalone. It depends on no other rezzer crate.
 - `detect`: the layout detector (PP-DocLayoutV3) and the text line detector (PP-OCRv6 small det)
   on Candle. It is pure Rust and runs on the CPU. It is off by default. `detect::Detectors`
   loads both and returns the regions of a page (`Detectors::regions`).
+- `engine`: `llama` and `detect` together. `engine::PageVision` loads all four model files and
+  reads pages (see "Reading a page").
 
 Default features build the types, the error, the model description, the image preparation
 (`prepare`), the ink rules, the ONNX reader, the resize code and the post-processing of both
-detectors. `regions_from` turns the detector boxes into regions without the models.
+detectors. `regions_from` turns the detector boxes into regions without the models. The
+prompts, the parsing of the answers, the Mermaid check and the page assembly are default code as
+well.
 
 ## Regions
 
@@ -32,6 +36,45 @@ lines and the ink rules make the text regions. Then every region is snapped to i
 The ink rules can see a drawing that the layout detector missed. It then stays a text region,
 with the note "possible missed drawing" and a lower certainty. Regions come in reading order, top
 to bottom and then left to right, with boxes on the 0..=1000 grid.
+
+## Reading a page
+
+`PageVision` has three calls:
+
+- `regions(png)`: the regions of a page, as above.
+- `read(png, regions)`: reads only the given regions. Use it when you have your own regions.
+  Ink outside them is not read as text.
+- `read_page(png)`: `regions`, then the reads below. Its text pass sees the whole page with only
+  the drawings blanked, so no text is dropped. Text that lies in no text region goes to a
+  neighbouring text region in reading order. On a page without a text region, other content
+  becomes a text region with the note "possible missed text".
+
+Qwen reads a page in a few passes:
+
+- Each drawing is classified from its crop, with a call that answers with one word. An answer
+  that is not "diagram" counts as a sketch.
+- A sketch is described from its crop (`> Sketch: ...`). The model is never asked for Mermaid on
+  a sketch.
+- If the page has a diagram, one pass over the whole page gives the Mermaid blocks. The sketches
+  are blanked white for this pass. The blocks go to the diagram regions in reading order. When
+  the model writes two diagrams in one block, and its unconnected parts fill the regions left,
+  the block is split over them. The text of that pass is dropped. Each block is checked;
+  a block that fails the check becomes a picture (`> Diagram: ...`). A diagram region without a
+  block also becomes a picture, so nothing goes missing without a note.
+- If the page has text, one pass reads it. Every drawing is blanked white. With `read`, the pass
+  sees only the given text regions.
+  The text is split over the text regions in reading order, by their height. No line is lost or
+  read twice.
+
+The page goes to the model at 1408x1856, a multiple of 32. A crop is the region box plus 16 px,
+scaled up when it is small, so the model gets at least 1024 image tokens.
+
+The certainty of a block is the certainty of its region. It is halved when the answer did not
+parse and lowered more when the answer hit the token limit. It is never above 0.95. A region
+that fails gives no block and marks the page truncated. A page without any block is
+`PageError::Unreadable`.
+
+The Mermaid check covers flowcharts and sequence diagrams. Other kinds are named as not checked.
 
 ## Models
 
