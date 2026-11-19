@@ -35,10 +35,11 @@ skip = [
 ]
 
 [advisories]
-# Approved by Jordi on 2026-11-18 for paste (through gemm and candle).
-unmaintained = "workspace"
 # chrono comes only through rmcp (it turns on the chrono04 feature of schemars); Rezzer does not
 # use it directly. Remove this ignore when rmcp drops chrono.
 ignore = [
     { id = "RUSTSEC-2026-0543", reason = "2026-11-17: chrono is unmaintained (no vulnerability); Rezzer does not use it, rmcp brings it; remove this entry when rmcp drops chrono" },
+    # paste comes only through gemm (candle-core) for the pagevision detect feature. Approved by
+    # Jordi on 2026-11-19 as a single ignore; remove it when gemm drops paste.
+    { id = "RUSTSEC-2024-0436", reason = "2026-11-19: paste is unmaintained (no vulnerability); only gemm in candle-core uses it, for pagevision detect; remove when gemm drops paste" },
 ]
