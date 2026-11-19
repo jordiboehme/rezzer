@@ -19,6 +19,8 @@ serde = ["dep:serde"]
 llama = ["dep:llama-cpp-2"]
 # The layout and text line detectors on Candle (CPU). Pure Rust, off by default.
 detect = ["dep:candle-core", "dep:candle-nn", "dep:serde_json", "serde"]
+# The page handle: the detectors plus Qwen through llama.cpp. Native code, so CI never builds it.
+engine = ["llama", "detect"]
 
 [dependencies]
 serde = { workspace = true, optional = true, features = ["derive"] }

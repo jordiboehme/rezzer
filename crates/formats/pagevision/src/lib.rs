@@ -4,8 +4,11 @@
 
 //! Page OCR with vision models.
 
+pub mod assemble;
 #[cfg(feature = "detect")]
 pub mod detect;
+#[cfg(feature = "engine")]
+pub mod engine;
 mod error;
 pub mod ink;
 pub mod layoutpost;

@@ -64,6 +64,7 @@ fn two_models_share_the_backend() {
     let opts = RunOptions {
         max_tokens: 32,
         threads: None,
+        ..RunOptions::default()
     };
     let mut a = VisionModel::load(&QWEN35_4B, &dir, opts.clone()).unwrap();
     let mut b = VisionModel::load(&QWEN35_4B, &dir, opts).unwrap();
@@ -130,6 +131,7 @@ fn llama_token_count_follows_the_rule() {
     let opts = RunOptions {
         max_tokens: 8,
         threads: None,
+        ..RunOptions::default()
     };
     let mut model = VisionModel::load(&QWEN35_4B, &dir, opts).unwrap();
     let mut sizes = Vec::new();
