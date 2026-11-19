@@ -10,7 +10,8 @@
 //!   the edge score).
 //! - An invented node is a predicted label that maps to no truth node or arrow label, beyond the
 //!   one each misread label explains. An invented arrow joins two truth nodes that the truth does
-//!   not join. A reversed arrow is wrong, not invented.
+//!   not join, or an extra arrow next to the right one between the same nodes. A reversed arrow
+//!   that replaces the right one is wrong, not invented.
 //! - The known fail (diag3) is left out of the invented check, as the scorecard flags it.
 
 use std::path::{Path, PathBuf};

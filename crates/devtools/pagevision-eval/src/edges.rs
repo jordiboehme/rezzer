@@ -580,7 +580,8 @@ impl NodeCheck {
 }
 
 /// Compares the node labels and the joins of predicted edges with a truth, with the label
-/// mapping of [`score_edges`]. A reversed arrow is a wrong arrow, not an invented one.
+/// mapping of [`score_edges`]. A reversed arrow that replaces the right one is a wrong arrow,
+/// not an invented one; an extra arrow next to the right one is invented.
 pub fn check_nodes(predicted: &[Edge], truth: &TruthEdges) -> NodeCheck {
     let pred = canonical_edges(predicted, truth);
     let truth_nodes: BTreeSet<&str> = truth
@@ -597,11 +598,32 @@ pub fn check_nodes(predicted: &[Edge], truth: &TruthEdges) -> NodeCheck {
         .iter()
         .flat_map(|e| [e.from.as_str(), e.to.as_str()])
         .collect();
-    let joined = |a: &str, b: &str| {
-        truth
-            .edges
-            .iter()
-            .any(|t| (t.from == a && t.to == b) || (t.from == b && t.to == a))
+    // The truth edges per pair of nodes, in any direction.
+    let pair = |e: &Edge| {
+        if e.from <= e.to {
+            (e.from.clone(), e.to.clone())
+        } else {
+            (e.to.clone(), e.from.clone())
+        }
+    };
+    let mut truth_pairs: HashMap<(String, String), usize> = HashMap::new();
+    for t in &truth.edges {
+        *truth_pairs.entry(pair(t)).or_default() += 1;
+    }
+    let mut pred_pairs: HashMap<(String, String), usize> = HashMap::new();
+    for p in &pred {
+        *pred_pairs.entry(pair(p)).or_default() += 1;
+    }
+    let want: BTreeSet<&Edge> = truth.edges.iter().collect();
+    // An arrow between two truth nodes is invented when the truth does not join them, or when
+    // the pair has more arrows than the truth and this one is not a truth arrow. A reversed arrow
+    // that replaces the right one is wrong, not invented.
+    let invented = |e: &Edge| {
+        let k = pair(e);
+        match truth_pairs.get(&k) {
+            None => true,
+            Some(&n) => pred_pairs[&k] > n && !want.contains(e),
+        }
     };
     NodeCheck {
         misread: truth_nodes
@@ -619,7 +641,7 @@ pub fn check_nodes(predicted: &[Edge], truth: &TruthEdges) -> NodeCheck {
             .filter(|e| {
                 truth_nodes.contains(e.from.as_str())
                     && truth_nodes.contains(e.to.as_str())
-                    && !joined(&e.from, &e.to)
+                    && invented(e)
             })
             .cloned()
             .collect(),
@@ -852,6 +874,23 @@ mod tests {
             "{check:?}"
         );
         assert!(check.invented_arrows.is_empty(), "{check:?}");
+    }
+
+    /// An arrow added next to a right one between the same two nodes is invented: test2's cycle
+    /// as Qwen read it from a crop, with all three truth arrows and two reversed extras.
+    #[test]
+    fn extra_arrow_beside_a_right_one_is_invented() {
+        let md = fenced(
+            "graph TD\n  A[search] --> B[teach]\n  B --> A\n  C[Learn] --> B\n  A --> C\n  C --> A",
+        );
+        let check = check_nodes(&mermaid_edges(&md), &parse_truth(TEST2_TRUTH));
+        assert_eq!(
+            check.invented_arrows,
+            [
+                e("learn", "search", Dir::Directed),
+                e("search", "teach", Dir::Directed)
+            ]
+        );
     }
 
     #[test]
