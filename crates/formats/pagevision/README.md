@@ -44,7 +44,10 @@ to bottom and then left to right, with boxes on the 0..=1000 grid.
 - `regions(png)`: the regions of a page, as above.
 - `read(png, regions)`: reads only the given regions. Use it when you have your own regions.
   Ink outside them is not read as text.
-- `read_page(png)`: `regions`, then `read`.
+- `read_page(png)`: `regions`, then the reads below. Its text pass sees the whole page with only
+  the drawings blanked, so no text is dropped. Text that lies in no text region goes to a
+  neighbouring text region in reading order. On a page without a text region, other content
+  becomes a text region with the note "possible missed text".
 
 Qwen reads a page in a few passes:
 
@@ -58,8 +61,8 @@ Qwen reads a page in a few passes:
   the block is split over them. The text of that pass is dropped. Each block is checked;
   a block that fails the check becomes a picture (`> Diagram: ...`). A diagram region without a
   block also becomes a picture, so nothing goes missing without a note.
-- If the page has text, one pass reads it from a page that shows only the text regions. Every
-  drawing is blanked white.
+- If the page has text, one pass reads it. Every drawing is blanked white. With `read`, the pass
+  sees only the given text regions.
   The text is split over the text regions in reading order, by their height. No line is lost or
   read twice.
 

@@ -246,6 +246,27 @@ pub fn keep_boxes(page_rgb: &RgbImage, boxes_px: &[[u32; 4]]) -> RgbImage {
     out
 }
 
+/// A pixel darker than this in any channel is content for [`content_box`]. Looser than the ink
+/// mask (grey below 110), so light printed text counts too; paper white and the light ruling of
+/// a Supernote page stay above it.
+pub const CONTENT_LEVEL: u8 = 160;
+
+/// Fewer content pixels than this are noise for [`content_box`] (about a 7 x 7 px speck).
+pub const CONTENT_MIN_PIXELS: usize = 50;
+
+/// The pixel box (half-open) of all content on a page: pixels darker than [`CONTENT_LEVEL`] in
+/// any channel, or None when there are fewer than [`CONTENT_MIN_PIXELS`].
+pub fn content_box(page_rgb: &RgbImage) -> Option<[u32; 4]> {
+    let (mut count, mut b) = (0usize, [u32::MAX, u32::MAX, 0, 0]);
+    for (x, y, p) in page_rgb.enumerate_pixels() {
+        if p.0.iter().any(|&c| c < CONTENT_LEVEL) {
+            count += 1;
+            b = [b[0].min(x), b[1].min(y), b[2].max(x + 1), b[3].max(y + 1)];
+        }
+    }
+    (count >= CONTENT_MIN_PIXELS).then_some(b)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -500,5 +521,40 @@ mod tests {
         assert_eq!(px(0, 0), 255);
         // No box: a white page.
         assert!(keep_boxes(&page, &[]).pixels().all(|p| p[0] == 255));
+    }
+
+    #[test]
+    fn content_box_finds_light_text_and_ignores_specks() {
+        // A white page has no content.
+        let white = RgbImage::from_pixel(200, 100, image::Rgb([255, 255, 255]));
+        assert_eq!(content_box(&white), None);
+        // A light grey title (150, lighter than ink) is content.
+        let mut page = white.clone();
+        for y in 10..20 {
+            for x in 30..80 {
+                page.put_pixel(x, y, image::Rgb([150, 150, 150]));
+            }
+        }
+        assert_eq!(content_box(&page), Some([30, 10, 80, 20]));
+        // Grey at the level is not content.
+        let mut faint = white.clone();
+        for y in 10..20 {
+            for x in 30..80 {
+                faint.put_pixel(
+                    x,
+                    y,
+                    image::Rgb([CONTENT_LEVEL, CONTENT_LEVEL, CONTENT_LEVEL]),
+                );
+            }
+        }
+        assert_eq!(content_box(&faint), None);
+        // 49 dark pixels are a speck; 50 are content.
+        let mut speck = white.clone();
+        for i in 0..49 {
+            speck.put_pixel(100 + i % 7, 50 + i / 7, image::Rgb([0, 0, 0]));
+        }
+        assert_eq!(content_box(&speck), None);
+        speck.put_pixel(120, 60, image::Rgb([0, 0, 0]));
+        assert_eq!(content_box(&speck), Some([100, 50, 121, 61]));
     }
 }
