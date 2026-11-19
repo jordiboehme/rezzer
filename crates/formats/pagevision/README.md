@@ -58,7 +58,9 @@ Qwen reads a page in a few passes:
 - If the page has a diagram, one pass over the whole page gives the Mermaid blocks. The sketches
   are blanked white for this pass. The blocks go to the diagram regions in reading order. When
   the model writes two diagrams in one block, and its unconnected parts fill the regions left,
-  the block is split over them. The text of that pass is dropped. Each block is checked;
+  the block is split over them, and the parts get no description: it was written for the whole
+  block. The text of that pass is dropped, and so is a description that only repeats the text
+  of the page. Each block is checked;
   a block that fails the check becomes a picture (`> Diagram: ...`). A diagram region without a
   block also becomes a picture, so nothing goes missing without a note.
 - If the page has text, one pass reads it. Every drawing is blanked white. With `read`, the pass

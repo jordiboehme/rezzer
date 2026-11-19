@@ -13,7 +13,10 @@ use crate::detect::Detectors;
 use crate::error::PageError;
 use crate::llama::{Generation, RunOptions, VisionModel};
 use crate::model::{ModelFiles, PREPROCESS_VERSION, QWEN35_4B, prompt_sha256};
-use crate::parse::{DrawingClass, assign_blocks, mermaid_sections, parse_class, split_text};
+use crate::parse::{
+    DrawingClass, assign_blocks, drop_page_text_description, mermaid_sections, parse_class,
+    split_text,
+};
 use crate::prepare::{
     Prepared, blank_boxes, decode_on_white, grid_to_px, prepare_crop, prepare_page,
 };
@@ -73,6 +76,9 @@ impl PageVision {
     ///   reading order by their height ([`split_text`]). Ink outside the given text regions is
     ///   never read as text. [`read_page`](Self::read_page) reads the whole page instead.
     ///
+    /// A diagram description that only repeats the page's own text (the text pass) is dropped
+    /// ([`drop_page_text_description`]).
+    ///
     /// A failed call gives no block for its regions and marks the page truncated. The
     /// classifier's own token limit never marks the page.
     pub fn read(&mut self, png: &[u8], regions: &[Region]) -> Result<PageResult, PageError> {
@@ -99,6 +105,7 @@ impl PageVision {
                 class_answer: None,
                 text: String::new(),
                 truncated: false,
+                description_removed: false,
                 failed: None,
             })
             .collect();
@@ -156,7 +163,10 @@ impl PageVision {
                     ));
                     let mut sections = sections.into_iter();
                     for &i in &diagrams {
-                        answers[i].text = sections.next().unwrap_or_default();
+                        if let Some(a) = sections.next() {
+                            answers[i].text = a.section;
+                            answers[i].description_removed = a.description_removed;
+                        }
                         answers[i].truncated = g.truncated;
                     }
                 }
@@ -182,12 +192,14 @@ impl PageVision {
                 class_answer: None,
                 text: String::new(),
                 truncated: false,
+                description_removed: false,
                 failed: None,
             });
             // A stable sort: the new region takes its place in reading order.
             answers.sort_by_key(|a| (a.region.bbox.y0, a.region.bbox.x0));
         }
         let image = pass.map(|p| p.image);
+        let mut page_text = String::new();
         let texts: Vec<usize> = (0..answers.len())
             .filter(|&i| answers[i].region.kind == RegionKind::Text)
             .collect();
@@ -196,6 +208,7 @@ impl PageVision {
             match self.call(&image, prompts::PAGE_TEXT, max_tokens, &mut stats) {
                 Ok(g) => {
                     log.push_str(&format!("--- text read\n{}\n", g.text));
+                    page_text = g.text.clone();
                     let heights: Vec<u32> = texts
                         .iter()
                         .map(|&i| {
@@ -213,6 +226,19 @@ impl PageVision {
                         answers[i].failed = Some(format!("text read: {e}"));
                     }
                 }
+            }
+        }
+
+        // A diagram description that only repeats the page's own text is not a description.
+        for a in answers
+            .iter_mut()
+            .filter(|a| a.class == Some(DrawingClass::Diagram) && !a.text.is_empty())
+        {
+            let kept = drop_page_text_description(&a.text, &page_text);
+            if kept != a.text {
+                log.push_str("--- a diagram description repeated the page text: dropped\n");
+                a.text = kept;
+                a.description_removed = true;
             }
         }
 
