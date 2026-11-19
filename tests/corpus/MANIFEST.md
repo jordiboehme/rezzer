@@ -127,7 +127,7 @@ The PDF files are downloaded unchanged from the pinned commit of their source (t
 
 ## Vision test pages (`vision/`)
 
-Handwritten test pages for `pagevision-eval`, with their ground truth (`*.txt`, `*.edges`) and `manifest.toml`. The pages are the author's own handwriting; the truth was written by hand. Private pages are not in this repository.
+Handwritten test pages for `pagevision-eval`, with their ground truth (`*.txt`, `*.edges`, `*.regions`) and `manifest.toml`. The pages are the author's own handwriting; the truth was written by hand. A `*.regions` file holds the diagram boxes of its page in page pixels (JSON, confirmed by the author on 2026-11-15). Private pages are not in this repository.
 
 | File | Source | License | SHA-256 |
 |---|---|---|---|
@@ -136,6 +136,11 @@ Handwritten test pages for `pagevision-eval`, with their ground truth (`*.txt`, 
 | vision/diag1.png | made for https://github.com/jordiboehme/rezzer : own handwriting on a Supernote, rendered by notedown | MPL-2.0 | ecf8b7388b450bf0167a2dfc4ee376265b5cd282248689e5a72dfaa77a626b3d |
 | vision/diag2.png | made for https://github.com/jordiboehme/rezzer : own handwriting on a Supernote, rendered by notedown | MPL-2.0 | 490311642cf7c9444ba16c89adcaa3e9b0cc2d90a23a21fd55b126a705502a96 |
 | vision/diag3.png | made for https://github.com/jordiboehme/rezzer : own handwriting on a Supernote, rendered by notedown | MPL-2.0 | ec00929363e08b61a53c0b62f8e2eb19fe8b636231b31d01294da811a7ebbbdc |
+| vision/test1.regions | made for https://github.com/jordiboehme/rezzer : region truth of vision/test1.png, drawn by the author | MPL-2.0 | 3996c7f24a77c204b210f2ad4814d27830685f01ccebe963be964a641e7550be |
+| vision/test2.regions | made for https://github.com/jordiboehme/rezzer : region truth of vision/test2.png, drawn by the author | MPL-2.0 | f140c5696676efed142513e169b6a2740e751a6e8e1eda56b420ccf753d08c1e |
+| vision/diag1.regions | made for https://github.com/jordiboehme/rezzer : region truth of vision/diag1.png, drawn by the author | MPL-2.0 | 2b957bf54703861b2f1eae6cc807aa3f8459c3a639e9e85a82b72e5fdc401a0b |
+| vision/diag2.regions | made for https://github.com/jordiboehme/rezzer : region truth of vision/diag2.png, drawn by the author | MPL-2.0 | aec1d3bd63cf718d24fe2407908ef2a3b1c8f823cfaa2678998fff0f141c83a4 |
+| vision/diag3.regions | made for https://github.com/jordiboehme/rezzer : region truth of vision/diag3.png, drawn by the author | MPL-2.0 | 672dbffda8026c4fbac757b7e20fb35ae9fecfd5ab91b7bbafba88dbfd4764a8 |
 
 ## Scorecard assertion files (`../scorecard/corpus/`)
 

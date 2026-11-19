@@ -145,7 +145,11 @@ sketches = 3
         assert_eq!(ids, ["test1", "test2", "diag1", "diag2", "diag3"]);
         for page in &m.pages {
             assert!(page.image.is_file(), "{}", page.image.display());
-            for f in [&page.text, &page.edges].into_iter().flatten() {
+            assert!(page.regions.is_some(), "{} has no region truth", page.id);
+            for f in [&page.text, &page.edges, &page.regions]
+                .into_iter()
+                .flatten()
+            {
                 assert!(f.is_file(), "{}", f.display());
             }
         }
