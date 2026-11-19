@@ -3,6 +3,11 @@
 // order, masks, polygons, layout filter, clip or element cap), every query returned as a
 // LayoutBox with its rank, errors as PageError. Licensed under the Apache License, Version 2.0;
 // see LICENSE-APACHE in this crate.
+//
+// oar-ocr-vl ports this code from Hugging Face transformers (Apache-2.0,
+// https://github.com/huggingface/transformers): src/transformers/models/rt_detr (Copyright 2024
+// Baidu Inc and The HuggingFace Inc. team) and src/transformers/models/pp_doclayout_v3
+// (Copyright 2026 The PaddlePaddle Team and The HuggingFace Inc. team).
 
 //! PP-DocLayoutV3 assembly: backbone, hybrid encoder, query selection,
 //! decoder and the order head, plus the [`PpDocLayout`] entry point.

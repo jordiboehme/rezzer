@@ -2,6 +2,10 @@
 // the oar-ocr authors, https://github.com/GreatV/oar-ocr). Changes: uses crate::resize, errors
 // as PageError. Licensed under the Apache License, Version 2.0; see LICENSE-APACHE in this
 // crate.
+//
+// oar-ocr-vl ports this code from Hugging Face transformers (Apache-2.0,
+// https://github.com/huggingface/transformers): src/transformers/models/pp_doclayout_v3
+// (Copyright 2026 The PaddlePaddle Team and The HuggingFace Inc. team).
 
 //! PP-DocLayout image preprocessing.
 //!

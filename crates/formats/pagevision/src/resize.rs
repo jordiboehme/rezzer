@@ -1,8 +1,22 @@
 // Adapted from oar-ocr-vl 0.10.3 src/runtime/image.rs (Apache-2.0, Copyright the oar-ocr
 // authors, https://github.com/GreatV/oar-ocr), which adapts OpenCV 4.13.0
-// imgproc/src/resize.cpp (Apache-2.0). Changes: cv2_cubic_resize as there, plus
-// cv2_linear_resize written on the same fixed-point pattern. Licensed under the Apache
-// License, Version 2.0; see LICENSE-APACHE in this crate.
+// imgproc/src/resize.cpp (Apache-2.0, https://github.com/opencv/opencv). Changes:
+// cv2_cubic_resize as there, plus cv2_linear_resize written on the same fixed-point pattern.
+// Licensed under the Apache License, Version 2.0; see LICENSE-APACHE in this crate.
+//
+// OpenCV's COPYRIGHT file (4.13.0):
+// Copyright (C) 2000-2022, Intel Corporation, all rights reserved.
+// Copyright (C) 2009-2011, Willow Garage Inc., all rights reserved.
+// Copyright (C) 2009-2016, NVIDIA Corporation, all rights reserved.
+// Copyright (C) 2010-2013, Advanced Micro Devices, Inc., all rights reserved.
+// Copyright (C) 2015-2023, OpenCV Foundation, all rights reserved.
+// Copyright (C) 2008-2016, Itseez Inc., all rights reserved.
+// Copyright (C) 2019-2023, Xperience AI, all rights reserved.
+// Copyright (C) 2019-2022, Shenzhen Institute of Artificial Intelligence and Robotics for
+// Society, all rights reserved.
+// Copyright (C) 2022-2023, Southern University of Science And Technology, all rights reserved.
+// Copyright (C) 2023-2025, OpenCV AI, all rights reserved.
+// Third party copyrights are property of their respective owners.
 
 //! OpenCV's uint8 resizes: INTER_CUBIC (PP-DocLayoutV3 input) and INTER_LINEAR (PP-OCRv6 det
 //! input). Both use 11-bit fixed-point coefficients and round once, as OpenCV's generic

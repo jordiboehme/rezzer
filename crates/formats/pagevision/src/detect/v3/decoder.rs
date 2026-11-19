@@ -2,6 +2,10 @@
 // oar-ocr authors, https://github.com/GreatV/oar-ocr). Changes: V3 shared heads only (the V2
 // per-layer heads and the Metal test removed), errors as PageError. Licensed under the Apache
 // License, Version 2.0; see LICENSE-APACHE in this crate.
+//
+// oar-ocr-vl ports this code from Hugging Face transformers (Apache-2.0,
+// https://github.com/huggingface/transformers): src/transformers/models/rt_detr (Copyright 2024
+// Baidu Inc and The HuggingFace Inc. team).
 
 //! RT-DETR transformer decoder with multi-scale deformable cross-attention.
 //!

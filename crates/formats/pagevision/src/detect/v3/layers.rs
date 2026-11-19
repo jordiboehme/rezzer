@@ -1,6 +1,10 @@
 // Adapted from oar-ocr-vl 0.10.3 src/models/pp_doclayout/layers.rs (Apache-2.0, Copyright the
 // oar-ocr authors, https://github.com/GreatV/oar-ocr). Changes: errors as PageError. Licensed
 // under the Apache License, Version 2.0; see LICENSE-APACHE in this crate.
+//
+// oar-ocr-vl ports this code from Hugging Face transformers (Apache-2.0,
+// https://github.com/huggingface/transformers): src/transformers/models/rt_detr (Copyright 2024
+// Baidu Inc and The HuggingFace Inc. team).
 
 //! Small building blocks shared by the PP-DocLayout encoder and decoder.
 
