@@ -19,7 +19,9 @@ pub struct LayoutBox {
     pub score: f32,
     /// `[x0, y0, x1, y1]` in page pixels.
     pub bbox: Rect,
-    /// The reading-order rank from the model's order head; the output keeps this order.
+    /// The reading-order rank from the model's order head; the output keeps this order. It is
+    /// not the query index: sorting by the query index changes the order on 7 of the 23 test
+    /// pages, while this rank gives the spike's Candle order on all of them.
     pub rank: usize,
 }
 

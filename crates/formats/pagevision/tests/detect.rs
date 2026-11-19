@@ -6,7 +6,8 @@
 //!
 //! All tests are opt-in (`--run-ignored`). They need the model files in
 //! `PAGEVISION_MODEL_DIR`. The public tests compare with `tests/fixtures/detect/`. The private
-//! tests also need `PAGEVISION_SPIKE_OUT` (the spike's `out` folder with the reference) and
+//! tests also need `PAGEVISION_SPIKE_OUT` (the spike's `out` folder: the ONNX Runtime
+//! reference in `ort/` and, for the layout order, the spike's Candle output in `candle-cpu/`) and
 //! `PAGEVISION_PRIVATE_EVAL` (the page images). They find their pages through the reference
 //! files and name a failing page by its index only.
 
@@ -262,8 +263,9 @@ fn reference_boxes(v: &serde_json::Value) -> Vec<(usize, [f64; 4])> {
 }
 
 /// Compares the filtered boxes with the reference (ruling C1): the same count and classes,
-/// and every box within 1 px. Boxes are paired by class and the smallest corner distance.
-/// Returns the largest corner difference, or why the page fails.
+/// and every box within 1 px. Boxes are paired by class and the smallest corner distance,
+/// since the ONNX reference lists them by score. Returns the largest corner difference, or
+/// why the page fails.
 fn compare_layout(got: &[LayoutBox], want: &[(usize, [f64; 4])]) -> Result<f64, String> {
     if got.len() != want.len() {
         return Err(format!("{} boxes, reference {}", got.len(), want.len()));
@@ -293,6 +295,37 @@ fn compare_layout(got: &[LayoutBox], want: &[(usize, [f64; 4])]) -> Result<f64, 
     Ok(worst)
 }
 
+/// The output order (ruling C18): the boxes in the order of the spike's Candle runner
+/// (oar-ocr-vl, sorted by the order head's reading-order rank), within 1 px.
+fn compare_order(got: &[LayoutBox], spike: &serde_json::Value) -> Result<(), String> {
+    let spike: Vec<(usize, [f64; 4])> = spike
+        .as_array()
+        .expect("a list of boxes")
+        .iter()
+        .map(|r| {
+            let b: Vec<f64> = r[r.as_array().unwrap().len() - 1]
+                .as_array()
+                .expect("a box")
+                .iter()
+                .map(|n| n.as_f64().expect("a number"))
+                .collect();
+            (
+                r[0].as_u64().expect("a class") as usize,
+                [b[0], b[1], b[2], b[3]],
+            )
+        })
+        .collect();
+    let same = got.len() == spike.len()
+        && got.iter().zip(&spike).all(|(g, (class, b))| {
+            g.class == *class && (0..4).all(|k| (g.bbox[k] - b[k]).abs() <= MAX_BOX_DIFF)
+        });
+    if same {
+        Ok(())
+    } else {
+        Err("the output order differs from the spike's Candle runner".to_string())
+    }
+}
+
 fn drawn_count(boxes: &[(usize, [f64; 4])]) -> usize {
     boxes
         .iter()
@@ -317,6 +350,10 @@ fn v3_matches_reference_on_public_pages() {
         match compare_layout(&got, &want) {
             Ok(d) => worst = worst.max(d),
             Err(e) => failures.push(format!("{page}: {e}")),
+        }
+        let fixture = read_json(&fixture(&format!("{page}.v3.json")));
+        if let Err(e) = compare_order(&got, &fixture["spike_candle_order"]) {
+            failures.push(format!("{page}: {e}"));
         }
         let regions = det.drawn(&img).unwrap();
         if regions.len() != drawn_count(&want) {
@@ -355,6 +392,13 @@ fn v3_matches_reference_on_private_pages() {
         match compare_layout(&got, &want) {
             Ok(d) => worst = worst.max(d),
             Err(e) => failures.push(format!("page {n}: {e}")),
+        }
+        let spike = out
+            .join("candle-cpu")
+            .join(set)
+            .join(format!("{stem}.v3.json"));
+        if let Err(e) = compare_order(&got, &private_json(&spike, n)["final"]["0.5"]) {
+            failures.push(format!("page {n}: {e}"));
         }
     }
     println!(
