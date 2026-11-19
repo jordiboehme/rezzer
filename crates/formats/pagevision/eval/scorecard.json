@@ -136,6 +136,185 @@
         "regions": null,
         "read_pages": 8
       }
+    },
+    {
+      "engine": "pagevision-c",
+      "baseline": false,
+      "fingerprint": {
+        "crate": "0.1.0",
+        "llama_cpp_2": "0.1.161",
+        "model_sha256": [
+          "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
+          "cd88edcf8d031894960bb0c9c5b9b7e1fea6ebee02b9f7ce925a00d12891f864"
+        ],
+        "prompt_sha256": "41d62db1ed311770e8f054274ffb66b283f7100d36e76d6b4784a4ac145edb37",
+        "preprocess": "3",
+        "layout_sha256": "5ea422c6cc5fe759a47e1357c35639b58173508e025a3131cbe4b6ac59e2b85e",
+        "text_det_sha256": "d73e0058b7a8086bbd57f3d10b8bcd4ff95363f67e06e2762b5e814fe9c9410e",
+        "candle": "0.11.1",
+        "rules": 2,
+        "ink": 1
+      },
+      "public": [
+        {
+          "id": "test1",
+          "cer": 0.0,
+          "edges": null,
+          "boxes": {
+            "ink_coverage": 1.0,
+            "empty_boxes": 0,
+            "split_diagrams": 0
+          },
+          "known_fail": false,
+          "truncated": false,
+          "prompt_tokens": 2601,
+          "output_tokens": 30,
+          "ms": 10788,
+          "regions": {
+            "truth": 0,
+            "hit": 0,
+            "split": 0,
+            "false_drawings": 0,
+            "text_cov": 1.0,
+            "ok": true
+          },
+          "blocks": 1
+        },
+        {
+          "id": "test2",
+          "cer": 0.0,
+          "edges": {
+            "truth": 5,
+            "predicted": 5,
+            "correct": 5
+          },
+          "boxes": {
+            "ink_coverage": 1.0,
+            "empty_boxes": 0,
+            "split_diagrams": 0
+          },
+          "known_fail": false,
+          "truncated": false,
+          "prompt_tokens": 7496,
+          "output_tokens": 84,
+          "ms": 28797,
+          "regions": {
+            "truth": 2,
+            "hit": 2,
+            "split": 0,
+            "false_drawings": 0,
+            "text_cov": 1.0,
+            "ok": true
+          },
+          "blocks": 3
+        },
+        {
+          "id": "diag1",
+          "cer": null,
+          "edges": {
+            "truth": 5,
+            "predicted": 5,
+            "correct": 3
+          },
+          "boxes": {
+            "ink_coverage": 1.0,
+            "empty_boxes": 0,
+            "split_diagrams": 0
+          },
+          "known_fail": false,
+          "truncated": false,
+          "prompt_tokens": 4062,
+          "output_tokens": 107,
+          "ms": 17743,
+          "regions": {
+            "truth": 1,
+            "hit": 1,
+            "split": 0,
+            "false_drawings": 0,
+            "text_cov": 1.0,
+            "ok": true
+          },
+          "blocks": 1
+        },
+        {
+          "id": "diag2",
+          "cer": null,
+          "edges": {
+            "truth": 4,
+            "predicted": 4,
+            "correct": 2
+          },
+          "boxes": {
+            "ink_coverage": 1.0,
+            "empty_boxes": 0,
+            "split_diagrams": 0
+          },
+          "known_fail": false,
+          "truncated": false,
+          "prompt_tokens": 3798,
+          "output_tokens": 91,
+          "ms": 16199,
+          "regions": {
+            "truth": 1,
+            "hit": 1,
+            "split": 0,
+            "false_drawings": 0,
+            "text_cov": 1.0,
+            "ok": true
+          },
+          "blocks": 1
+        },
+        {
+          "id": "diag3",
+          "cer": null,
+          "edges": {
+            "truth": 4,
+            "predicted": 4,
+            "correct": 4
+          },
+          "boxes": {
+            "ink_coverage": 1.0,
+            "empty_boxes": 0,
+            "split_diagrams": 0
+          },
+          "known_fail": true,
+          "truncated": false,
+          "prompt_tokens": 4923,
+          "output_tokens": 84,
+          "ms": 20249,
+          "regions": {
+            "truth": 2,
+            "hit": 2,
+            "split": 0,
+            "false_drawings": 0,
+            "text_cov": 1.0,
+            "ok": true
+          },
+          "blocks": 2
+        }
+      ],
+      "private": {
+        "pages": 8,
+        "cer_mean": 0.05898846257172845,
+        "edges": {
+          "truth": 10,
+          "predicted": 0,
+          "correct": 0
+        },
+        "ink_coverage_mean": 0.9996988369081392,
+        "empty_boxes": 0,
+        "split_diagrams": 0,
+        "regions": {
+          "pages": 6,
+          "ok": 5,
+          "truth": 1,
+          "hit": 0,
+          "split": 0,
+          "false_drawings": 0,
+          "text_cov_mean": 1.0
+        },
+        "read_pages": 8
+      }
     }
   ]
 }
