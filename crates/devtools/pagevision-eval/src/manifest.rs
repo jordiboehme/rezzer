@@ -33,6 +33,12 @@ pub struct PageEntry {
     /// Number of diagrams drawn on the page.
     #[serde(default)]
     pub diagrams: u32,
+    /// Region truth: JSON with the diagram boxes in page pixels (`"diagrams": [[x0, y0, x1, y1]]`).
+    #[serde(default)]
+    pub regions: Option<PathBuf>,
+    /// Number of sketches drawn on the page (pictures, not diagrams).
+    #[serde(default)]
+    pub sketches: u32,
     #[serde(default)]
     pub known_fail: bool,
 }
@@ -49,6 +55,7 @@ pub fn load_manifest(path: &Path) -> Result<Manifest, EvalError> {
         page.text = page.text.take().map(|p| base.join(p));
         page.edges = page.edges.take().map(|p| base.join(p));
         page.nodes = page.nodes.take().map(|p| base.join(p));
+        page.regions = page.regions.take().map(|p| base.join(p));
     }
     Ok(manifest)
 }
@@ -89,6 +96,37 @@ known_fail = true
         assert!(!m.pages[0].known_fail);
         assert!(m.pages[1].known_fail);
         assert_eq!(m.pages[1].diagrams, 0);
+    }
+
+    #[test]
+    fn manifest_without_regions_still_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("manifest.toml");
+        std::fs::write(
+            &file,
+            r#"
+set = "private"
+
+[[pages]]
+id = "old"
+image = "old.png"
+
+[[pages]]
+id = "new"
+image = "new.png"
+regions = "truth/new.regions"
+sketches = 3
+"#,
+        )
+        .unwrap();
+        let m = load_manifest(&file).unwrap();
+        assert_eq!(m.pages[0].regions, None);
+        assert_eq!(m.pages[0].sketches, 0);
+        assert_eq!(
+            m.pages[1].regions,
+            Some(dir.path().join("truth/new.regions"))
+        );
+        assert_eq!(m.pages[1].sketches, 3);
     }
 
     #[test]

@@ -67,8 +67,52 @@ no_argument_prints_usage() {
   [ "$status" -eq 2 ] && grep -q usage "$work/out"
 }
 
+# A region truth file holds numbers only: the worktree is searched for its page id.
+regions_manifest() {
+  printf '{\n "page": "made-up-page-id",\n "units": "page pixels x0,y0,x1,y1",\n "diagrams": []\n}\n' \
+    > "$work/eval/truth/r.regions"
+  printf '[[pages]]\nid = "page"\ntext = "truth/page.txt"\nregions = "truth/r.regions"\n' \
+    > "$work/eval/regions.toml"
+}
+
+region_page_id_is_checked() {
+  regions_manifest
+  rm -f "$repo/leak.txt"
+  run "$work/eval/regions.toml" && grep -q "2 private truth lines checked" "$work/out"
+}
+
+leaked_region_page_id_fails_without_printing_it() {
+  regions_manifest
+  printf 'see made-up-page-id here\n' > "$repo/leak.txt"
+  run "$work/eval/regions.toml"
+  status=$?
+  rm -f "$repo/leak.txt"
+  [ "$status" -eq 1 ] && ! grep -qF "made-up-page-id" "$work/out"
+}
+
+region_numbers_are_not_searched_as_lines() {
+  regions_manifest
+  # The units line is long enough to be a truth line; it must not count as a leak.
+  printf '"units": "page pixels x0,y0,x1,y1",\n' > "$repo/leak.txt"
+  run "$work/eval/regions.toml"
+  status=$?
+  rm -f "$repo/leak.txt"
+  [ "$status" -eq 0 ]
+}
+
+region_truth_without_page_id_fails() {
+  printf '{"diagrams": []}\n' > "$work/eval/truth/nopage.regions"
+  printf '[[pages]]\nid = "n"\ntext = "truth/page.txt"\nregions = "truth/nopage.regions"\n' \
+    > "$work/eval/nopage.toml"
+  run "$work/eval/nopage.toml"
+  status=$?
+  [ "$status" -eq 2 ]
+}
+
 for t in clean_worktree_passes untracked_leak_fails_without_printing_the_line \
-  short_lines_alone_refuse_to_pass missing_truth_file_fails no_argument_prints_usage; do
+  short_lines_alone_refuse_to_pass missing_truth_file_fails no_argument_prints_usage \
+  region_page_id_is_checked leaked_region_page_id_fails_without_printing_it \
+  region_numbers_are_not_searched_as_lines region_truth_without_page_id_fails; do
   "$t"
   check "$t" $?
 done

@@ -6,12 +6,15 @@
 //!
 //! Private pages appear only as one aggregate, never by id.
 
-use pagevision::model::{PREPROCESS_VERSION, QWEN35_4B};
+use pagevision::ink::INK_VERSION;
+use pagevision::model::{LAYOUT_V3, PREPROCESS_VERSION, QWEN35_4B, TEXT_DET_V6};
+use pagevision::rules::RULES_VERSION;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BoxScore, EdgeScore, EvalError, Fingerprint, Manifest, PageEntry, PageRun, ResultsFile,
-    line_cer, mermaid_edges, parse_truth, parse_truth_with_nodes, score_boxes, score_edges,
+    BoxScore, EdgeScore, EvalError, Fingerprint, Manifest, PageEntry, PageRun, RegionScore,
+    ResultsFile, line_cer, mermaid_edges, parse_truth, parse_truth_with_nodes, score_boxes,
+    score_edges, score_regions,
 };
 
 pub const FORMAT: &str = "pagevision-scorecard/1";
@@ -28,6 +31,26 @@ pub struct PageScore {
     pub output_tokens: u32,
     /// encode_ms + decode_ms.
     pub ms: u64,
+    /// The region score, for a page with region truth.
+    #[serde(default)]
+    pub regions: Option<RegionScore>,
+    /// The number of regions of a regions-only run, otherwise of blocks.
+    #[serde(default)]
+    pub blocks: u32,
+}
+
+/// The region scores of a set of pages, summed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RegionSums {
+    /// Pages with region truth.
+    pub pages: u32,
+    /// Of them, the pages that pass the page rule.
+    pub ok: u32,
+    pub truth: u32,
+    pub hit: u32,
+    pub split: u32,
+    pub false_drawings: u32,
+    pub text_cov_mean: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -40,6 +63,9 @@ pub struct Aggregate {
     pub ink_coverage_mean: f64,
     pub empty_boxes: u32,
     pub split_diagrams: u32,
+    /// The region scores, when any page has region truth.
+    #[serde(default)]
+    pub regions: Option<RegionSums>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -88,6 +114,12 @@ fn read(path: &std::path::Path) -> Result<String, EvalError> {
     })
 }
 
+/// A region truth file: the diagram boxes in page pixels.
+#[derive(Deserialize)]
+struct RegionTruth {
+    diagrams: Vec<[i64; 4]>,
+}
+
 fn score_page(entry: &PageEntry, run: &PageRun) -> Result<PageScore, EvalError> {
     let cer = match &entry.text {
         Some(path) => Some(line_cer(&run.markdown, &read(path)?)),
@@ -109,6 +141,18 @@ fn score_page(entry: &PageEntry, run: &PageRun) -> Result<PageScore, EvalError> 
         source,
     })?;
     let boxes = Some(score_boxes(&png, &run.blocks, entry.diagrams)?);
+    let regions = match &entry.regions {
+        Some(path) => {
+            let truth: RegionTruth = serde_json::from_str(&read(path)?)?;
+            Some(score_regions(&png, &truth.diagrams, &run.regions)?)
+        }
+        None => None,
+    };
+    let blocks = if run.regions.is_empty() {
+        run.blocks.len()
+    } else {
+        run.regions.len()
+    };
     Ok(PageScore {
         id: entry.id.clone(),
         cer,
@@ -119,6 +163,25 @@ fn score_page(entry: &PageEntry, run: &PageRun) -> Result<PageScore, EvalError> 
         prompt_tokens: run.prompt_tokens,
         output_tokens: run.output_tokens,
         ms: run.encode_ms + run.decode_ms,
+        regions,
+        blocks: blocks as u32,
+    })
+}
+
+fn region_sums(pages: &[PageScore]) -> Option<RegionSums> {
+    let scores: Vec<RegionScore> = pages.iter().filter_map(|p| p.regions).collect();
+    if scores.is_empty() {
+        return None;
+    }
+    let sum = |f: fn(&RegionScore) -> u32| scores.iter().map(f).sum::<u32>();
+    Some(RegionSums {
+        pages: scores.len() as u32,
+        ok: scores.iter().filter(|s| s.ok).count() as u32,
+        truth: sum(|s| s.truth),
+        hit: sum(|s| s.hit),
+        split: sum(|s| s.split),
+        false_drawings: sum(|s| s.false_drawings),
+        text_cov_mean: scores.iter().map(|s| s.text_cov).sum::<f64>() / scores.len() as f64,
     })
 }
 
@@ -159,6 +222,7 @@ fn aggregate(pages: &[PageScore]) -> Aggregate {
         ink_coverage_mean: mean(&coverage),
         empty_boxes,
         split_diagrams,
+        regions: region_sums(pages),
     }
 }
 
@@ -224,17 +288,23 @@ fn locked_version(cargo_lock: &str, name: &str) -> Option<String> {
     None
 }
 
-/// Checks every non-baseline engine against the build: the crate version (the workspace
-/// version, as `pagevision::llama` writes it with `CARGO_PKG_VERSION`), the llama-cpp-2 version
-/// in `cargo_lock`, the model SHA-256s of QWEN35_4B (model, then mmproj) and PREPROCESS_VERSION.
+/// A regions-only engine ran the detectors and no vision model: no model hashes, a layout hash.
+fn regions_only(f: &Fingerprint) -> bool {
+    f.model_sha256.is_empty() && !f.layout_sha256.is_empty()
+}
+
+/// Checks every non-baseline engine against the build.
+///
+/// - Every engine: the candle version in `cargo_lock` (candle-core and candle-nn), the detector
+///   SHA-256s of LAYOUT_V3 and TEXT_DET_V6, RULES_VERSION and INK_VERSION.
+/// - Every engine but a regions-only one (no model hashes, see `regions_only`): also the crate
+///   version (the workspace version, as `pagevision::llama` writes it with `CARGO_PKG_VERSION`),
+///   the llama-cpp-2 version in `cargo_lock`, the model SHA-256s of QWEN35_4B (model, then
+///   mmproj) and PREPROCESS_VERSION.
+///
 /// Baselines are skipped, except that one using the QWEN35_4B hashes or a preprocess other than
 /// "none" is an error. Each error names the expected and the found value.
 pub fn check_fingerprints(card: &Scorecard, cargo_lock: &str) -> Result<(), Vec<String>> {
-    let locked = locked_version(cargo_lock, "llama-cpp-2");
-    let locked_sys = locked_version(cargo_lock, "llama-cpp-sys-2");
-    let crate_version = env!("CARGO_PKG_VERSION");
-    let preprocess = PREPROCESS_VERSION.to_string();
-    let hashes = [QWEN35_4B.model.sha256, QWEN35_4B.mmproj.sha256];
     let mut errors = Vec::new();
     for engine in &card.engines {
         let (name, f) = (&engine.engine, &engine.fingerprint);
@@ -244,52 +314,107 @@ pub fn check_fingerprints(card: &Scorecard, cargo_lock: &str) -> Result<(), Vec<
             }
             continue;
         }
-        if f.crate_version != crate_version {
-            errors.push(format!(
-                "{name}: crate version is {} but the build is {crate_version}",
-                f.crate_version
-            ));
-        }
-        match &locked {
-            Some(v) if *v == f.llama_cpp_2 => {}
-            Some(v) => errors.push(format!(
-                "{name}: llama-cpp-2 is {} but Cargo.lock has {v}",
-                f.llama_cpp_2
-            )),
-            None => errors.push(format!(
-                "{name}: llama-cpp-2 is {} but Cargo.lock has no llama-cpp-2 entry",
-                f.llama_cpp_2
-            )),
-        }
-        // llama-cpp-sys-2 holds the native llama.cpp; it must be locked to the same version.
-        match &locked_sys {
-            Some(v) if *v == f.llama_cpp_2 => {}
-            Some(v) => errors.push(format!(
-                "{name}: llama-cpp-2 is {} but Cargo.lock has llama-cpp-sys-2 {v}",
-                f.llama_cpp_2
-            )),
-            None => errors.push(format!(
-                "{name}: llama-cpp-2 is {} but Cargo.lock has no llama-cpp-sys-2 entry",
-                f.llama_cpp_2
-            )),
-        }
-        if f.model_sha256 != hashes {
-            errors.push(format!(
-                "{name}: model SHA-256s are {:?} but the build expects {:?}",
-                f.model_sha256, hashes
-            ));
-        }
-        if f.preprocess != preprocess {
-            errors.push(format!(
-                "{name}: preprocess version is {} but the build is {preprocess}",
-                f.preprocess
-            ));
+        check_detectors(name, f, cargo_lock, &mut errors);
+        if !regions_only(f) {
+            check_model(name, f, cargo_lock, &mut errors);
         }
     }
     if errors.is_empty() {
         Ok(())
     } else {
         Err(errors)
+    }
+}
+
+/// The detector part of the fingerprint: candle, the detector files, the rules and the ink.
+fn check_detectors(name: &str, f: &Fingerprint, cargo_lock: &str, errors: &mut Vec<String>) {
+    for package in ["candle-core", "candle-nn"] {
+        match locked_version(cargo_lock, package) {
+            Some(v) if v == f.candle => {}
+            Some(v) => errors.push(format!(
+                "{name}: candle is {:?} but Cargo.lock has {package} {v}",
+                f.candle
+            )),
+            None => errors.push(format!(
+                "{name}: candle is {:?} but Cargo.lock has no {package} entry",
+                f.candle
+            )),
+        }
+    }
+    if f.layout_sha256 != LAYOUT_V3.sha256 {
+        errors.push(format!(
+            "{name}: layout detector SHA-256 is {:?} but the build expects {}",
+            f.layout_sha256, LAYOUT_V3.sha256
+        ));
+    }
+    if f.text_det_sha256 != TEXT_DET_V6.sha256 {
+        errors.push(format!(
+            "{name}: text line detector SHA-256 is {:?} but the build expects {}",
+            f.text_det_sha256, TEXT_DET_V6.sha256
+        ));
+    }
+    if f.rules != RULES_VERSION {
+        errors.push(format!(
+            "{name}: rules version is {} but the build is {RULES_VERSION}",
+            f.rules
+        ));
+    }
+    if f.ink != INK_VERSION {
+        errors.push(format!(
+            "{name}: ink version is {} but the build is {INK_VERSION}",
+            f.ink
+        ));
+    }
+}
+
+/// The vision model part of the fingerprint: the crate, llama-cpp-2, the model files and the
+/// preprocessing.
+fn check_model(name: &str, f: &Fingerprint, cargo_lock: &str, errors: &mut Vec<String>) {
+    let locked = locked_version(cargo_lock, "llama-cpp-2");
+    let locked_sys = locked_version(cargo_lock, "llama-cpp-sys-2");
+    let crate_version = env!("CARGO_PKG_VERSION");
+    let preprocess = PREPROCESS_VERSION.to_string();
+    let hashes = [QWEN35_4B.model.sha256, QWEN35_4B.mmproj.sha256];
+    if f.crate_version != crate_version {
+        errors.push(format!(
+            "{name}: crate version is {} but the build is {crate_version}",
+            f.crate_version
+        ));
+    }
+    match &locked {
+        Some(v) if *v == f.llama_cpp_2 => {}
+        Some(v) => errors.push(format!(
+            "{name}: llama-cpp-2 is {} but Cargo.lock has {v}",
+            f.llama_cpp_2
+        )),
+        None => errors.push(format!(
+            "{name}: llama-cpp-2 is {} but Cargo.lock has no llama-cpp-2 entry",
+            f.llama_cpp_2
+        )),
+    }
+    // llama-cpp-sys-2 holds the native llama.cpp; it must be locked to the same version.
+    match &locked_sys {
+        Some(v) if *v == f.llama_cpp_2 => {}
+        Some(v) => errors.push(format!(
+            "{name}: llama-cpp-2 is {} but Cargo.lock has llama-cpp-sys-2 {v}",
+            f.llama_cpp_2
+        )),
+        None => errors.push(format!(
+            "{name}: llama-cpp-2 is {} but Cargo.lock has no llama-cpp-sys-2 entry",
+            f.llama_cpp_2
+        )),
+    }
+    if f.model_sha256 != hashes {
+        errors.push(format!(
+            "{name}: model SHA-256s are {:?} but the build expects {:?}",
+            f.model_sha256, hashes
+        ));
+    }
+    if f.preprocess != preprocess {
+        errors.push(format!(
+            "{name}: preprocess version is {} but the build is {preprocess}",
+            f.preprocess
+        ));
     }
 }
 
@@ -308,7 +433,7 @@ fn baseline_problem(f: &Fingerprint) -> Option<String> {
 /// A Markdown table: public pages by id, the private set as one aggregate row per engine.
 pub fn render_markdown(engine: &EngineScore) -> String {
     let mut out = format!(
-        "## {}{}\n\n| page | cer | edges | ink | empty | split | tokens | ms | flags |\n|---|---|---|---|---|---|---|---|---|\n",
+        "## {}{}\n\n| page | cer | edges | ink | empty | split | regions | blocks | tokens | ms | flags |\n|---|---|---|---|---|---|---|---|---|---|---|\n",
         engine.engine,
         if engine.baseline { " (baseline)" } else { "" }
     );
@@ -324,6 +449,17 @@ pub fn render_markdown(engine: &EngineScore) -> String {
                 b.split_diagrams.to_string(),
             )
         });
+        let regions = p.regions.map_or("-".into(), |r| {
+            format!(
+                "{} hit {}/{} split {} false {} text {:.3}",
+                if r.ok { "ok" } else { "FAIL" },
+                r.hit,
+                r.truth,
+                r.split,
+                r.false_drawings,
+                r.text_cov
+            )
+        });
         let mut flags = Vec::new();
         if p.known_fail {
             flags.push("known-fail");
@@ -332,8 +468,9 @@ pub fn render_markdown(engine: &EngineScore) -> String {
             flags.push("truncated");
         }
         out.push_str(&format!(
-            "| {} | {cer} | {edges} | {ink} | {empty} | {split} | {}/{} | {} | {} |\n",
+            "| {} | {cer} | {edges} | {ink} | {empty} | {split} | {regions} | {} | {}/{} | {} | {} |\n",
             p.id,
+            p.blocks,
             p.prompt_tokens,
             p.output_tokens,
             p.ms,
@@ -341,8 +478,14 @@ pub fn render_markdown(engine: &EngineScore) -> String {
         ));
     }
     if let Some(a) = &engine.private {
+        let regions = a.regions.as_ref().map_or("-".into(), |r| {
+            format!(
+                "ok {}/{} hit {}/{} split {} false {} text {:.3}",
+                r.ok, r.pages, r.hit, r.truth, r.split, r.false_drawings, r.text_cov_mean
+            )
+        });
         out.push_str(&format!(
-            "| private set ({} pages) | {:.3} | {}/{}/{} | {:.3} | {} | {} | - | - | |\n",
+            "| private set ({} pages) | {:.3} | {}/{}/{} | {:.3} | {} | {} | {regions} | - | - | - | |\n",
             a.pages,
             a.cer_mean,
             a.edges.correct,
@@ -362,7 +505,7 @@ mod tests {
     use crate::RunBlock;
     use std::path::Path;
 
-    const LOCK: &str = "[[package]]\nname = \"other\"\nversion = \"1.0.0\"\n\n[[package]]\nname = \"llama-cpp-2\"\nversion = \"0.1.158\"\n\n[[package]]\nname = \"llama-cpp-sys-2\"\nversion = \"0.1.158\"\n";
+    const LOCK: &str = "[[package]]\nname = \"candle-core\"\nversion = \"0.11.1\"\n\n[[package]]\nname = \"candle-nn\"\nversion = \"0.11.1\"\n\n[[package]]\nname = \"other\"\nversion = \"1.0.0\"\n\n[[package]]\nname = \"llama-cpp-2\"\nversion = \"0.1.158\"\n\n[[package]]\nname = \"llama-cpp-sys-2\"\nversion = \"0.1.158\"\n";
 
     fn fingerprint(llama: &str) -> Fingerprint {
         Fingerprint {
@@ -374,7 +517,13 @@ mod tests {
             ],
             prompt_sha256: "p".to_string(),
             preprocess: PREPROCESS_VERSION.to_string(),
+            ..regions_fingerprint()
         }
+    }
+
+    /// A regions-only engine as `eval_run --regions-only` writes it.
+    fn regions_fingerprint() -> Fingerprint {
+        Fingerprint::from(&pagevision::regions::regions_fingerprint())
     }
 
     fn engine(name: &str, baseline: bool, f: Fingerprint) -> EngineScore {
@@ -389,8 +538,9 @@ mod tests {
 
     fn png(dir: &Path, name: &str) -> std::path::PathBuf {
         let path = dir.join(name);
+        // A short stroke: a run of half the page width or more would be a ruled line, not ink.
         let mut img = image::RgbImage::from_pixel(40, 40, image::Rgb([255, 255, 255]));
-        for x in 5..35 {
+        for x in 5..15 {
             img.put_pixel(x, 20, image::Rgb([0, 0, 0]));
         }
         img.save(&path).unwrap();
@@ -407,6 +557,8 @@ mod tests {
             edges: None,
             nodes: None,
             diagrams: 0,
+            regions: None,
+            sketches: 0,
             known_fail,
         }
     }
@@ -426,6 +578,7 @@ mod tests {
                 bbox: Some([0, 0, 1000, 1000]),
                 markdown: "hello".to_string(),
             }],
+            regions: Vec::new(),
         }
     }
 
@@ -622,6 +775,106 @@ mod tests {
             engines: vec![engine("qwen", false, fingerprint("0.1.158"))],
         };
         assert!(check_fingerprints(&card, LOCK).is_ok());
+    }
+
+    #[test]
+    fn fingerprint_check_names_a_changed_rules_version() {
+        let mut f = regions_fingerprint();
+        f.rules += 1;
+        let card = Scorecard {
+            format: FORMAT.into(),
+            engines: vec![engine("pagevision-c-regions", false, f)],
+        };
+        let errs = check_fingerprints(&card, LOCK).unwrap_err();
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert!(errs[0].contains("rules version"), "{errs:?}");
+        assert!(errs[0].contains(&RULES_VERSION.to_string()));
+    }
+
+    #[test]
+    fn regions_only_engine_skips_the_model_checks() {
+        // No llama-cpp-2 in the lock, no model hashes, another preprocess and crate version.
+        let lock = "[[package]]\nname = \"candle-core\"\nversion = \"0.11.1\"\n\n[[package]]\nname = \"candle-nn\"\nversion = \"0.11.1\"\n";
+        let mut f = regions_fingerprint();
+        f.preprocess = "0".into();
+        f.crate_version = "0.0.1".into();
+        let card = Scorecard {
+            format: FORMAT.into(),
+            engines: vec![engine("pagevision-c-regions", false, f.clone())],
+        };
+        assert_eq!(check_fingerprints(&card, lock), Ok(()));
+        // Each detector field is checked.
+        let changes: [fn(&mut Fingerprint); 5] = [
+            |f| f.candle = "0.11.0".into(),
+            |f| f.layout_sha256 = "x".into(),
+            |f| f.text_det_sha256 = "y".into(),
+            |f| f.ink += 1,
+            |f| f.rules += 1,
+        ];
+        for change in changes {
+            let mut g = f.clone();
+            change(&mut g);
+            let card = Scorecard {
+                format: FORMAT.into(),
+                engines: vec![engine("r", false, g)],
+            };
+            assert!(check_fingerprints(&card, lock).is_err());
+        }
+        // A candle bump in the lock fails, naming both packages.
+        let bumped = lock.replace("0.11.1", "0.11.2");
+        let errs = check_fingerprints(&card, &bumped).unwrap_err();
+        assert_eq!(errs.len(), 2, "{errs:?}");
+        assert!(errs.iter().all(|e| e.contains("0.11.2")));
+    }
+
+    /// The committed scorecard was written before the detector and region fields (ruling B5).
+    #[test]
+    fn old_scorecard_entry_parses_with_defaults() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../formats/pagevision/eval/scorecard.json");
+        let card: Scorecard =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let f = &card.engines[0].fingerprint;
+        assert_eq!(f.layout_sha256, "");
+        assert_eq!(f.candle, "");
+        assert_eq!((f.rules, f.ink), (0, 0));
+        assert!(card.engines[0].public.iter().all(|p| p.regions.is_none()));
+    }
+
+    #[test]
+    fn region_truth_is_scored() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = page(dir.path(), "r", false);
+        let truth = dir.path().join("r.regions");
+        std::fs::write(
+            &truth,
+            r#"{"page": "r", "units": "page pixels x0,y0,x1,y1", "diagrams": [[0, 0, 20, 20]]}"#,
+        )
+        .unwrap();
+        p.regions = Some(truth);
+        let mut r = run("r");
+        r.blocks.clear();
+        r.regions = vec![
+            crate::RunRegion {
+                kind: "drawing".into(),
+                bbox: [0, 0, 500, 500],
+            },
+            crate::RunRegion {
+                kind: "text".into(),
+                bbox: [0, 500, 500, 600],
+            },
+        ];
+        let m = Manifest {
+            set: "private".into(),
+            pages: vec![p],
+        };
+        let mut rf = results(&[]);
+        rf.pages.push(r);
+        let s = score(&[m], &rf, false).unwrap();
+        let sums = s.private.unwrap().regions.unwrap();
+        assert_eq!((sums.pages, sums.ok, sums.truth, sums.hit), (1, 1, 1, 1));
+        assert_eq!((sums.split, sums.false_drawings), (0, 0));
+        assert_eq!(sums.text_cov_mean, 1.0);
     }
 
     #[test]
