@@ -411,7 +411,7 @@ pub fn split_text(md: &str, weights: &[u32]) -> Vec<String> {
 /// - with at least as many sections as regions, the first `regions` (extra ones are dropped);
 /// - with fewer, the first section whose flowchart has exactly as many unconnected parts as
 ///   regions are left (the regions without a section, plus its own) is split into those parts in
-///   place, each with the section's quote;
+///   place, without the section's quote (it describes the joined block, not one part);
 /// - otherwise the sections as they are; the regions after them get none.
 pub fn assign_blocks(sections: Vec<String>, regions: usize) -> Vec<String> {
     let mut sections = sections;
@@ -421,38 +421,60 @@ pub fn assign_blocks(sections: Vec<String>, regions: usize) -> Vec<String> {
     }
     let want = regions - sections.len() + 1;
     for i in 0..sections.len() {
-        let (blocks, outside) = split_fences(&sections[i]);
+        let (blocks, _) = split_fences(&sections[i]);
         let Some((_, src)) = blocks.iter().find(|(info, _)| info == "mermaid") else {
             continue;
         };
-        // A `>` line inside the fence is the description, as in parse_diagram.
-        let (quoted, kept): (Vec<&str>, Vec<&str>) =
-            src.lines().partition(|l| l.trim_start().starts_with('>'));
+        // A `>` line inside the fence is the description, as in parse_diagram; it is not
+        // Mermaid.
+        let kept: Vec<&str> = src
+            .lines()
+            .filter(|l| !l.trim_start().starts_with('>'))
+            .collect();
         let parts = match crate::mermaid::flowchart_components(kept.join("\n").trim_end()) {
             Some(p) if p.len() == want => p,
             _ => continue,
         };
-        let quote: Vec<&str> = quoted
-            .into_iter()
-            .chain(outside.lines())
-            .map(str::trim)
-            .filter(|l| !l.is_empty())
-            .collect();
-        let quote = quote.join("\n");
+        // The block's description was written for the joined block and fits no part on its
+        // own, so no part gets it.
         let split: Vec<String> = parts
             .into_iter()
-            .map(|p| {
-                if quote.is_empty() {
-                    format!("```mermaid\n{p}\n```")
-                } else {
-                    format!("```mermaid\n{p}\n```\n\n{quote}")
-                }
-            })
+            .map(|p| format!("```mermaid\n{p}\n```"))
             .collect();
         sections.splice(i..=i, split);
         break;
     }
     sections
+}
+
+/// A description shorter than this (letters and digits) is never taken for page text: a word
+/// or two can match the page by chance.
+pub const PAGE_TEXT_MIN_CHARS: usize = 12;
+
+/// A diagram section without its `>` description when the description only repeats the page's
+/// own text: its letters and digits, lower case, are contained in those of `page_text` (the text
+/// pass), and there are at least [`PAGE_TEXT_MIN_CHARS`] of them. Line breaks and punctuation do
+/// not count, so a sentence the text pass broke over two lines still matches. Otherwise the
+/// section as it is.
+pub fn drop_page_text_description(section: &str, page_text: &str) -> String {
+    let squash = |t: &str| -> String {
+        t.chars()
+            .filter(|c| c.is_alphanumeric())
+            .flat_map(char::to_lowercase)
+            .collect()
+    };
+    let (blocks, outside) = split_fences(section);
+    let Some((_, src)) = blocks.iter().find(|(info, _)| info == "mermaid") else {
+        return section.to_string();
+    };
+    let (quoted, kept): (Vec<&str>, Vec<&str>) =
+        src.lines().partition(|l| l.trim_start().starts_with('>'));
+    let desc = description(&format!("{}\n{outside}", quoted.join("\n")));
+    let d = squash(&desc);
+    if d.chars().count() < PAGE_TEXT_MIN_CHARS || !squash(page_text).contains(&d) {
+        return section.to_string();
+    }
+    format!("```mermaid\n{}\n```", kept.join("\n").trim_end())
 }
 
 #[cfg(test)]
@@ -755,6 +777,7 @@ mod tests {
 
     #[test]
     fn one_block_with_two_parts_fills_two_regions() {
+        // The block's one description covers both parts, so no part gets it.
         let blocks = assign_blocks(mermaid_sections(TEST2_PAGE_ANSWER), 2);
         assert_eq!(blocks.len(), 2);
         let (first, _) = parse_diagram(&blocks[0]);
@@ -764,14 +787,14 @@ mod tests {
             Content::Diagram {
                 mermaid: "graph TD\n    A[search] --> B[Learn]\n    B --> C[teach]\n    C --> A"
                     .into(),
-                description: "This note is without real-time recognition.".into()
+                description: String::new()
             }
         );
         assert_eq!(
             second,
             Content::Diagram {
                 mermaid: "graph TD\n    D[App] --> E[DB]\n    E <--> F[MCP]".into(),
-                description: "This note is without real-time recognition.".into()
+                description: String::new()
             }
         );
         // One region: the block stays whole.
@@ -790,5 +813,32 @@ mod tests {
         // Two lines, a tall last region: the first two regions still get a line each.
         assert_eq!(split_text("a\nb", &[1, 1, 100]), ["a", "b", ""]);
         assert_eq!(split_text("a\nb\nc", &[1, 1, 100]), ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn page_text_description_is_dropped() {
+        // test2: the text pass broke the sentence over two lines with a blank line.
+        let page_text = "This note is without\n\nreal-time recognition.";
+        let section = "```mermaid\ngraph LR\n    App --> DB\n```\n\n> This note is without real-time recognition.";
+        let out = drop_page_text_description(section, page_text);
+        assert_eq!(out, "```mermaid\ngraph LR\n    App --> DB\n```");
+        assert!(matches!(
+            parse_diagram(&out),
+            (Content::Diagram { description, .. }, _) if description.is_empty()
+        ));
+        // The same quote inside the fence.
+        let inside = "```mermaid\ngraph LR\n    App --> DB\n    > \"This note is without real-time recognition.\"\n```";
+        assert_eq!(
+            drop_page_text_description(inside, page_text),
+            "```mermaid\ngraph LR\n    App --> DB\n```"
+        );
+        // A real description stays.
+        let real = "```mermaid\ngraph LR\n    App --> DB\n```\n\n> App writes to the database.";
+        assert_eq!(drop_page_text_description(real, page_text), real);
+        // A short one stays even when the page holds it.
+        let short = "```mermaid\ngraph LR\n    A --> B\n```\n> Real time.";
+        assert_eq!(drop_page_text_description(short, page_text), short);
+        // No page text: nothing to compare.
+        assert_eq!(drop_page_text_description(section, ""), section);
     }
 }

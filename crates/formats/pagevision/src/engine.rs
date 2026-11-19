@@ -13,7 +13,10 @@ use crate::detect::Detectors;
 use crate::error::PageError;
 use crate::llama::{Generation, RunOptions, VisionModel};
 use crate::model::{ModelFiles, PREPROCESS_VERSION, QWEN35_4B, prompt_sha256};
-use crate::parse::{DrawingClass, assign_blocks, mermaid_sections, parse_class, split_text};
+use crate::parse::{
+    DrawingClass, assign_blocks, drop_page_text_description, mermaid_sections, parse_class,
+    split_text,
+};
 use crate::prepare::{
     Prepared, blank_boxes, decode_on_white, grid_to_px, prepare_crop, prepare_page,
 };
@@ -72,6 +75,9 @@ impl PageVision {
     ///   the drawings blanked (`PAGE_TEXT`), gives the text, split over the text regions in
     ///   reading order by their height ([`split_text`]). Ink outside the given text regions is
     ///   never read as text. [`read_page`](Self::read_page) reads the whole page instead.
+    ///
+    /// A diagram description that only repeats the page's own text (the text pass) is dropped
+    /// ([`drop_page_text_description`]).
     ///
     /// A failed call gives no block for its regions and marks the page truncated. The
     /// classifier's own token limit never marks the page.
@@ -188,6 +194,7 @@ impl PageVision {
             answers.sort_by_key(|a| (a.region.bbox.y0, a.region.bbox.x0));
         }
         let image = pass.map(|p| p.image);
+        let mut page_text = String::new();
         let texts: Vec<usize> = (0..answers.len())
             .filter(|&i| answers[i].region.kind == RegionKind::Text)
             .collect();
@@ -196,6 +203,7 @@ impl PageVision {
             match self.call(&image, prompts::PAGE_TEXT, max_tokens, &mut stats) {
                 Ok(g) => {
                     log.push_str(&format!("--- text read\n{}\n", g.text));
+                    page_text = g.text.clone();
                     let heights: Vec<u32> = texts
                         .iter()
                         .map(|&i| {
@@ -213,6 +221,18 @@ impl PageVision {
                         answers[i].failed = Some(format!("text read: {e}"));
                     }
                 }
+            }
+        }
+
+        // A diagram description that only repeats the page's own text is not a description.
+        for a in answers
+            .iter_mut()
+            .filter(|a| a.class == Some(DrawingClass::Diagram) && !a.text.is_empty())
+        {
+            let kept = drop_page_text_description(&a.text, &page_text);
+            if kept != a.text {
+                log.push_str("--- a diagram description repeated the page text: dropped\n");
+                a.text = kept;
             }
         }
 
