@@ -66,6 +66,10 @@ pub struct Aggregate {
     /// The region scores, when any page has region truth.
     #[serde(default)]
     pub regions: Option<RegionSums>,
+    /// Pages with a text or box measurement; 0 for a regions-only run, whose text and box
+    /// means are then not measured. Absent in older scorecards.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub read_pages: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -120,13 +124,20 @@ struct RegionTruth {
     diagrams: Vec<[i64; 4]>,
 }
 
+/// A run that only proposed regions: it read no text, so the text, edge and box metrics are not
+/// measured.
+fn regions_only_run(run: &PageRun) -> bool {
+    !run.regions.is_empty() && run.blocks.is_empty() && run.markdown.is_empty()
+}
+
 fn score_page(entry: &PageEntry, run: &PageRun) -> Result<PageScore, EvalError> {
+    let read_run = !regions_only_run(run);
     let cer = match &entry.text {
-        Some(path) => Some(line_cer(&run.markdown, &read(path)?)),
-        None => None,
+        Some(path) if read_run => Some(line_cer(&run.markdown, &read(path)?)),
+        _ => None,
     };
     let edges = match &entry.edges {
-        Some(path) => {
+        Some(path) if read_run => {
             let raw = read(path)?;
             let truth = match &entry.nodes {
                 Some(nodes) => parse_truth_with_nodes(&raw, &read(nodes)?),
@@ -134,13 +145,17 @@ fn score_page(entry: &PageEntry, run: &PageRun) -> Result<PageScore, EvalError> 
             };
             Some(score_edges(&mermaid_edges(&run.markdown), &truth))
         }
-        None => None,
+        _ => None,
     };
     let png = std::fs::read(&entry.image).map_err(|source| EvalError::Io {
         path: entry.image.clone(),
         source,
     })?;
-    let boxes = Some(score_boxes(&png, &run.blocks, entry.diagrams)?);
+    let boxes = if read_run {
+        Some(score_boxes(&png, &run.blocks, entry.diagrams)?)
+    } else {
+        None
+    };
     let regions = match &entry.regions {
         Some(path) => {
             let truth: RegionTruth = serde_json::from_str(&read(path)?)?;
@@ -223,6 +238,12 @@ fn aggregate(pages: &[PageScore]) -> Aggregate {
         empty_boxes,
         split_diagrams,
         regions: region_sums(pages),
+        read_pages: Some(
+            pages
+                .iter()
+                .filter(|p| p.cer.is_some() || p.boxes.is_some())
+                .count() as u32,
+        ),
     }
 }
 
@@ -484,16 +505,23 @@ pub fn render_markdown(engine: &EngineScore) -> String {
                 r.ok, r.pages, r.hit, r.truth, r.split, r.false_drawings, r.text_cov_mean
             )
         });
+        let (cer, edges, ink, empty, split) = if a.read_pages == Some(0) {
+            ("-".into(), "-".into(), "-".into(), "-".into(), "-".into())
+        } else {
+            (
+                format!("{:.3}", a.cer_mean),
+                format!(
+                    "{}/{}/{}",
+                    a.edges.correct, a.edges.predicted, a.edges.truth
+                ),
+                format!("{:.3}", a.ink_coverage_mean),
+                a.empty_boxes.to_string(),
+                a.split_diagrams.to_string(),
+            )
+        };
         out.push_str(&format!(
-            "| private set ({} pages) | {:.3} | {}/{}/{} | {:.3} | {} | {} | {regions} | - | - | - | |\n",
+            "| private set ({} pages) | {cer} | {edges} | {ink} | {empty} | {split} | {regions} | - | - | - | |\n",
             a.pages,
-            a.cer_mean,
-            a.edges.correct,
-            a.edges.predicted,
-            a.edges.truth,
-            a.ink_coverage_mean,
-            a.empty_boxes,
-            a.split_diagrams
         ));
     }
     out
@@ -875,6 +903,61 @@ mod tests {
         assert_eq!((sums.pages, sums.ok, sums.truth, sums.hit), (1, 1, 1, 1));
         assert_eq!((sums.split, sums.false_drawings), (0, 0));
         assert_eq!(sums.text_cov_mean, 1.0);
+    }
+
+    #[test]
+    fn regions_only_run_has_no_text_metrics() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = page(dir.path(), "r", false);
+        let edges = dir.path().join("r.edges");
+        std::fs::write(&edges, "A --> B\n").unwrap();
+        p.edges = Some(edges);
+        let mut r = run("r");
+        r.markdown.clear();
+        r.blocks.clear();
+        r.regions = vec![crate::RunRegion {
+            kind: "text".into(),
+            bbox: [0, 0, 1000, 1000],
+        }];
+        let public = Manifest {
+            set: "public".into(),
+            pages: vec![p.clone()],
+        };
+        let private = Manifest {
+            set: "private".into(),
+            pages: vec![PageEntry {
+                id: "s".into(),
+                ..p
+            }],
+        };
+        let mut rf = results(&[]);
+        rf.pages.push(r.clone());
+        rf.pages.push(PageRun {
+            id: "s".into(),
+            ..r
+        });
+        let s = score(&[public, private], &rf, false).unwrap();
+        let scored = &s.public[0];
+        assert_eq!((scored.cer, scored.edges, scored.boxes), (None, None, None));
+        assert_eq!(scored.blocks, 1);
+        assert_eq!(s.private.as_ref().unwrap().read_pages, Some(0));
+        let md = render_markdown(&s);
+        assert!(md.contains("| r | - | - | - | - | - |"), "{md}");
+        assert!(
+            md.contains("| private set (1 pages) | - | - | - | - | - |"),
+            "{md}"
+        );
+        // A reading run keeps its metrics.
+        let s = score(
+            &[Manifest {
+                set: "private".into(),
+                pages: vec![page(dir.path(), "t", false)],
+            }],
+            &results(&["t"]),
+            false,
+        )
+        .unwrap();
+        assert_eq!(s.private.unwrap().read_pages, Some(1));
     }
 
     #[test]
