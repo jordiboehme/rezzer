@@ -15,29 +15,13 @@ use crate::llama::{Generation, RunOptions, VisionModel};
 use crate::model::{ModelFiles, PREPROCESS_VERSION, QWEN35_4B, prompt_sha256};
 use crate::parse::{DrawingClass, assign_blocks, mermaid_sections, parse_class, split_text};
 use crate::prepare::{
-    Prepared, blank_boxes, content_box, decode_on_white, grid_to_px, keep_boxes, prepare_crop,
-    prepare_page,
+    Prepared, blank_boxes, decode_on_white, grid_to_px, prepare_crop, prepare_page,
 };
 use crate::prompts;
-use crate::regions::{grid_box, regions_fingerprint};
+use crate::regions::regions_fingerprint;
+pub use crate::textpass::POSSIBLE_TEXT_NOTE;
+use crate::textpass::{TextScope, possible_text_region, text_pass};
 use crate::types::{Fingerprint, PageResult, Region, RegionKind, Regions, Stats};
-
-/// The note on a text region that `read_page` adds for content outside every drawing on a page
-/// without a text region.
-pub const POSSIBLE_TEXT_NOTE: &str = "possible missed text";
-
-/// The certainty of such a region: the detectors saw no text there, so it is low; the note says
-/// why.
-const POSSIBLE_TEXT_CERTAINTY: f32 = 0.5;
-
-/// What the text pass sees.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TextScope {
-    /// Only the given text regions (`read`).
-    Regions,
-    /// The whole page with the drawings blanked (`read_page`).
-    Page,
-}
 
 /// The output budget of the classifier: one word.
 const CLASSIFY_MAX_TOKENS: u32 = 4;
@@ -185,45 +169,25 @@ impl PageVision {
         }
 
         // Text: one read, split over the text regions in reading order.
-        let image = match scope {
-            // Only the given text regions; the drawings blanked even where a text box overlaps.
-            TextScope::Regions => {
-                let text_px: Vec<[u32; 4]> = answers
-                    .iter()
-                    .filter(|a| a.region.kind == RegionKind::Text)
-                    .map(|a| grid_to_px(a.region.bbox, width, height))
-                    .collect();
-                (!text_px.is_empty()).then(|| blank_boxes(&keep_boxes(&page, &text_px), &drawn_px))
-            }
-            // The whole page with the drawings blanked, so no text is dropped. Content outside
-            // every drawing on a page without a text region becomes a text region of its own.
-            TextScope::Page => {
-                let blanked = blank_boxes(&page, &drawn_px);
-                if !answers.iter().any(|a| a.region.kind == RegionKind::Text)
-                    && let Some(b) = content_box(&blanked)
-                {
-                    answers.push(RegionAnswer {
-                        region: Region {
-                            bbox: grid_box(b.map(i64::from), width, height),
-                            kind: RegionKind::Text,
-                            certainty: POSSIBLE_TEXT_CERTAINTY,
-                            note: Some(POSSIBLE_TEXT_NOTE.to_string()),
-                        },
-                        class: None,
-                        class_answer: None,
-                        text: String::new(),
-                        truncated: false,
-                        failed: None,
-                    });
-                    // A stable sort: the new region takes its place in reading order.
-                    answers.sort_by_key(|a| (a.region.bbox.y0, a.region.bbox.x0));
-                }
-                answers
-                    .iter()
-                    .any(|a| a.region.kind == RegionKind::Text)
-                    .then_some(blanked)
-            }
-        };
+        let text_px: Vec<[u32; 4]> = answers
+            .iter()
+            .filter(|a| a.region.kind == RegionKind::Text)
+            .map(|a| grid_to_px(a.region.bbox, width, height))
+            .collect();
+        let pass = text_pass(&page, scope, &text_px, &drawn_px);
+        if let Some(b) = pass.as_ref().and_then(|p| p.new_region_px) {
+            answers.push(RegionAnswer {
+                region: possible_text_region(b, width, height),
+                class: None,
+                class_answer: None,
+                text: String::new(),
+                truncated: false,
+                failed: None,
+            });
+            // A stable sort: the new region takes its place in reading order.
+            answers.sort_by_key(|a| (a.region.bbox.y0, a.region.bbox.x0));
+        }
+        let image = pass.map(|p| p.image);
         let texts: Vec<usize> = (0..answers.len())
             .filter(|&i| answers[i].region.kind == RegionKind::Text)
             .collect();
@@ -277,7 +241,7 @@ impl PageVision {
     /// the text pass sees the whole page with only the drawings blanked, so no text is dropped.
     /// Text outside every text region goes to a neighbouring text region in reading order
     /// ([`split_text`] keeps every line). On a page without a text region, content outside
-    /// every drawing ([`content_box`]) becomes a text region with the note
+    /// every drawing ([`crate::prepare::content_box`]) becomes a text region with the note
     /// [`POSSIBLE_TEXT_NOTE`] and a certainty of 0.5.
     pub fn read_page(&mut self, png: &[u8]) -> Result<PageResult, PageError> {
         let regions = self.regions(png)?;

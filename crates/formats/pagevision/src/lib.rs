@@ -25,6 +25,7 @@ pub mod resize;
 pub mod rules;
 pub mod snap;
 pub mod textdet;
+pub mod textpass;
 mod types;
 
 pub use error::PageError;
