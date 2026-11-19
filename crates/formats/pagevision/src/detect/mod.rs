@@ -8,6 +8,8 @@
 /// [`crate::model::LAYOUT_V3`], embedded so the model folder needs no fifth file.
 pub const V3_CONFIG_JSON: &[u8] = include_bytes!("v3/config.json");
 
+pub mod v3;
 pub mod v6;
 
+pub use v3::LayoutDetector;
 pub use v6::TextLineDetector;

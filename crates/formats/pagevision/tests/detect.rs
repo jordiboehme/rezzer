@@ -15,9 +15,10 @@
 use std::path::{Path, PathBuf};
 
 use image::RgbImage;
-use pagevision::detect::TextLineDetector;
+use pagevision::detect::{LayoutDetector, TextLineDetector};
 use pagevision::ink::{flatten, gray_to_rgb};
-use pagevision::model::TEXT_DET_V6;
+use pagevision::layoutpost::{DRAWN_CLASSES, LayoutBox, v3_filter};
+use pagevision::model::{LAYOUT_V3, TEXT_DET_V6};
 
 /// The public pages with detector fixtures.
 const PUBLIC_PAGES: [&str; 5] = ["test1", "test2", "diag1", "diag2", "diag3"];
@@ -26,6 +27,8 @@ const PUBLIC_PAGES: [&str; 5] = ["test1", "test2", "diag1", "diag2", "diag3"];
 const MAX_PROB_DIFF: f32 = 2e-4;
 /// DB's pixel threshold; no pixel may change sides of it.
 const FLIP_AT: f32 = 0.2;
+/// Every layout box corner may differ from the reference by at most this (pixels, ruling C1).
+const MAX_BOX_DIFF: f64 = 1.;
 
 fn env_dir(name: &str, what: &str) -> PathBuf {
     std::env::var_os(name)
@@ -229,6 +232,133 @@ fn v6_prob_map_matches_reference_on_private_pages() {
     }
     println!(
         "v6 private: {} pages, {lines} lines, max abs diff {worst:e}, {flips} flips",
+        pages.len()
+    );
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+fn layout_detector() -> LayoutDetector {
+    LayoutDetector::load(&model_dir().join(LAYOUT_V3.local)).unwrap()
+}
+
+/// The reference boxes: `[[class, score, [x0, y0, x1, y1]], ...]`.
+fn reference_boxes(v: &serde_json::Value) -> Vec<(usize, [f64; 4])> {
+    v.as_array()
+        .expect("a list of boxes")
+        .iter()
+        .map(|r| {
+            let b: Vec<f64> = r[2]
+                .as_array()
+                .expect("a box")
+                .iter()
+                .map(|n| n.as_f64().expect("a number"))
+                .collect();
+            (
+                r[0].as_u64().expect("a class") as usize,
+                [b[0], b[1], b[2], b[3]],
+            )
+        })
+        .collect()
+}
+
+/// Compares the filtered boxes with the reference (ruling C1): the same count and classes,
+/// and every box within 1 px. Boxes are paired by class and the smallest corner distance.
+/// Returns the largest corner difference, or why the page fails.
+fn compare_layout(got: &[LayoutBox], want: &[(usize, [f64; 4])]) -> Result<f64, String> {
+    if got.len() != want.len() {
+        return Err(format!("{} boxes, reference {}", got.len(), want.len()));
+    }
+    let mut used = vec![false; got.len()];
+    let mut worst = 0f64;
+    for (class, bbox) in want {
+        let dist = |g: &LayoutBox| {
+            (0..4)
+                .map(|k| (g.bbox[k] - bbox[k]).abs())
+                .fold(0f64, f64::max)
+        };
+        let best = got
+            .iter()
+            .enumerate()
+            .filter(|(i, g)| !used[*i] && g.class == *class)
+            .min_by(|(_, a), (_, b)| dist(a).total_cmp(&dist(b)));
+        let Some((i, g)) = best else {
+            return Err(format!("no box of class {class} left to pair"));
+        };
+        used[i] = true;
+        worst = worst.max(dist(g));
+    }
+    if worst > MAX_BOX_DIFF {
+        return Err(format!("a box differs by {worst} px"));
+    }
+    Ok(worst)
+}
+
+fn drawn_count(boxes: &[(usize, [f64; 4])]) -> usize {
+    boxes
+        .iter()
+        .filter(|(c, _)| DRAWN_CLASSES.contains(c))
+        .count()
+}
+
+#[test]
+#[ignore = "needs PAGEVISION_MODEL_DIR"]
+fn v3_matches_reference_on_public_pages() {
+    let det = layout_detector();
+    let mut failures = Vec::new();
+    let (mut worst, mut boxes, mut drawn) = (0f64, 0, 0);
+    for page in PUBLIC_PAGES {
+        let want = read_json(&fixture(&format!("{page}.v3.json")));
+        let img = page_image(&public_png(page));
+        let raw = det.raw(&img).unwrap();
+        let got = v3_filter(&raw, img.width(), img.height());
+        let want = reference_boxes(&want["final"]);
+        boxes += want.len();
+        drawn += drawn_count(&want);
+        match compare_layout(&got, &want) {
+            Ok(d) => worst = worst.max(d),
+            Err(e) => failures.push(format!("{page}: {e}")),
+        }
+        let regions = det.drawn(&img).unwrap();
+        if regions.len() != drawn_count(&want) {
+            failures.push(format!(
+                "{page}: {} drawn regions, reference {}",
+                regions.len(),
+                drawn_count(&want)
+            ));
+        }
+    }
+    println!(
+        "v3 public: {boxes} boxes ({drawn} drawn) on {} pages, max corner diff {worst} px",
+        PUBLIC_PAGES.len()
+    );
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+#[test]
+#[ignore = "needs PAGEVISION_MODEL_DIR, PAGEVISION_SPIKE_OUT and PAGEVISION_PRIVATE_EVAL"]
+fn v3_matches_reference_on_private_pages() {
+    let det = layout_detector();
+    let (out, eval) = (spike_out(), private_eval());
+    let mut failures = Vec::new();
+    let (mut worst, mut boxes, mut drawn) = (0f64, 0, 0);
+    let pages = private_pages(".v3.json");
+    for (n, (set, stem)) in pages.iter().enumerate() {
+        let reference = private_json(
+            &out.join("ort").join(set).join(format!("{stem}.v3.json")),
+            n,
+        );
+        let want = reference_boxes(&reference["final"]["0.5"]);
+        let img = private_image(&eval.join(set).join(format!("{stem}.png")), n);
+        let got = v3_filter(&det.raw(&img).unwrap(), img.width(), img.height());
+        boxes += want.len();
+        drawn += drawn_count(&want);
+        match compare_layout(&got, &want) {
+            Ok(d) => worst = worst.max(d),
+            Err(e) => failures.push(format!("page {n}: {e}")),
+        }
+    }
+    println!(
+        "v3 private: {} pages, {boxes} boxes ({drawn} drawn), max corner diff {worst} px",
         pages.len()
     );
     assert!(failures.is_empty(), "{}", failures.join("\n"));

@@ -38,11 +38,15 @@ Tests that need the model are `#[ignore]` and find the folder through the enviro
 
 ## Licence
 
-The crate is MPL-2.0. Some files are adapted from Apache-2.0 code: the PP-DocLayoutV3 model
-(`src/detect/v3/`) and the OpenCV resize from oar-ocr-vl 0.10.3 (Copyright the oar-ocr authors,
-https://github.com/GreatV/oar-ocr), and the post-processing of both detectors, which follows
-PaddleOCR and PaddleX. These files keep the Apache-2.0 licence and say so in their header. The
-licence text is in `LICENSE-APACHE`. So the crate licence is `MPL-2.0 AND Apache-2.0`.
+The crate is MPL-2.0. Some files are adapted from Apache-2.0 code:
+
+- the PP-DocLayoutV3 model in `src/detect/v3/` and the OpenCV resize in `src/resize.rs` come from
+  oar-ocr-vl 0.10.3 (Copyright the oar-ocr authors, https://github.com/GreatV/oar-ocr);
+- the post-processing of both detectors (`src/textdet.rs`, `src/layoutpost.rs`) follows PaddleOCR
+  and PaddleX.
+
+These files keep the Apache-2.0 licence and say so in their header. The licence text is in
+`LICENSE-APACHE`. So the crate licence is `MPL-2.0 AND Apache-2.0`.
 
 The models are licensed under Apache-2.0: Qwen3.5-4B by the Qwen team, Alibaba Cloud, and
 PP-DocLayoutV3 and PP-OCRv6 small det by the PaddlePaddle Authors.

@@ -8,6 +8,7 @@
 pub mod detect;
 mod error;
 pub mod ink;
+pub mod layoutpost;
 #[cfg(feature = "llama")]
 pub mod llama;
 pub mod model;
