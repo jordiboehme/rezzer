@@ -42,7 +42,8 @@ to bottom and then left to right, with boxes on the 0..=1000 grid.
 `PageVision` has three calls:
 
 - `regions(png)`: the regions of a page, as above.
-- `read(png, regions)`: reads the given regions. Use it when you have your own regions.
+- `read(png, regions)`: reads only the given regions. Use it when you have your own regions.
+  Ink outside them is not read as text.
 - `read_page(png)`: `regions`, then `read`.
 
 Qwen reads a page in a few passes:
@@ -51,11 +52,14 @@ Qwen reads a page in a few passes:
   that is not "diagram" counts as a sketch.
 - A sketch is described from its crop (`> Sketch: ...`). The model is never asked for Mermaid on
   a sketch.
-- If the page has a diagram, one pass over the whole page gives the Mermaid blocks. They go to
-  the diagram regions in reading order. The text of that pass is dropped. Each block is checked;
+- If the page has a diagram, one pass over the whole page gives the Mermaid blocks. The sketches
+  are blanked white for this pass. The blocks go to the diagram regions in reading order. When
+  the model writes two diagrams in one block, and its unconnected parts fill the regions left,
+  the block is split over them. The text of that pass is dropped. Each block is checked;
   a block that fails the check becomes a picture (`> Diagram: ...`). A diagram region without a
   block also becomes a picture, so nothing goes missing without a note.
-- If the page has text, one pass over the whole page reads it, with every drawing blanked white.
+- If the page has text, one pass reads it from a page that shows only the text regions. Every
+  drawing is blanked white.
   The text is split over the text regions in reading order, by their height. No line is lost or
   read twice.
 

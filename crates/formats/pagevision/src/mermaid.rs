@@ -44,7 +44,7 @@ pub fn check(src: &str) -> Result<(), String> {
             if let Some(extra) = words.next() {
                 return Err(format!("unexpected {extra:?} after the direction"));
             }
-            rest.iter().try_for_each(|s| flow_statement(s))
+            rest.iter().try_for_each(|s| flow_statement(s).map(|_| ()))
         }
         "sequenceDiagram" => {
             if let Some(extra) = words.next() {
@@ -146,21 +146,22 @@ fn is_id_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_' || c == '.'
 }
 
-fn flow_statement(stmt: &str) -> Result<(), String> {
+/// Checks one flowchart statement and returns the node ids it names (none for a skipped line).
+fn flow_statement(stmt: &str) -> Result<Vec<String>, String> {
     let first = stmt.split_whitespace().next().unwrap_or("");
     if FLOW_SKIP.contains(&first) {
-        return Ok(());
+        return Ok(Vec::new());
     }
     let mut sc = Scan {
         s: stmt,
         chars: stmt.chars().collect(),
         i: 0,
     };
-    node_group(&mut sc)?;
+    let mut ids = node_group(&mut sc)?;
     loop {
         sc.skip_ws();
         if sc.done() {
-            return Ok(());
+            return Ok(ids);
         }
         edge(&mut sc)?;
         sc.skip_ws();
@@ -173,28 +174,28 @@ fn flow_statement(stmt: &str) -> Result<(), String> {
         if sc.done() {
             return Err(sc.err("an arrow without a target"));
         }
-        node_group(&mut sc)?;
+        ids.extend(node_group(&mut sc)?);
     }
 }
 
 /// `A`, `A[label]` or `A & B & C`.
-fn node_group(sc: &mut Scan) -> Result<(), String> {
-    node(sc)?;
+fn node_group(sc: &mut Scan) -> Result<Vec<String>, String> {
+    let mut ids = vec![node(sc)?];
     loop {
         let save = sc.i;
         sc.skip_ws();
         if sc.peek() == Some('&') {
             sc.i += 1;
             sc.skip_ws();
-            node(sc)?;
+            ids.push(node(sc)?);
         } else {
             sc.i = save;
-            return Ok(());
+            return Ok(ids);
         }
     }
 }
 
-fn node(sc: &mut Scan) -> Result<(), String> {
+fn node(sc: &mut Scan) -> Result<String, String> {
     sc.skip_ws();
     let start = sc.i;
     while sc.peek().is_some_and(is_id_char) {
@@ -203,6 +204,7 @@ fn node(sc: &mut Scan) -> Result<(), String> {
     if sc.i == start {
         return Err(sc.err("expected a node"));
     }
+    let id: String = sc.chars[start..sc.i].iter().collect();
     if sc
         .peek()
         .is_some_and(|c| matches!(c, '[' | '(' | '{' | '>'))
@@ -215,7 +217,7 @@ fn node(sc: &mut Scan) -> Result<(), String> {
             sc.i += 1;
         }
     }
-    Ok(())
+    Ok(id)
 }
 
 /// A node label: `[x]`, `(x)`, `{x}`, their nested forms like `((x))`, `[(x)]` or `{{x}}`, and
@@ -394,6 +396,122 @@ fn sequence_statement(stmt: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// The parts of a flowchart that share no node, as flowchart sources in the order their first
+/// node appears, or None when the source is not a flowchart that passes [`check`] or when it has
+/// `subgraph` or `linkStyle` lines (they cannot be split safely). `style`, `class` and `click`
+/// lines go with their node; `classDef` lines go with every part.
+pub fn flowchart_components(src: &str) -> Option<Vec<String>> {
+    check(src).ok()?;
+    let mut lines = src
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with("%%"));
+    let mut pieces = split_statements(lines.next()?).into_iter();
+    let header = pieces.next()?.trim().to_string();
+    if !matches!(
+        header.split_whitespace().next(),
+        Some("graph" | "flowchart")
+    ) {
+        return None;
+    }
+    let stmts: Vec<String> = pieces
+        .chain(lines.flat_map(split_statements))
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty() && !s.starts_with("%%"))
+        .collect();
+    // Union-find over node ids, in the order they first appear.
+    let mut order: Vec<String> = Vec::new();
+    let mut parent: Vec<usize> = Vec::new();
+    fn find(parent: &mut [usize], i: usize) -> usize {
+        let mut r = i;
+        while parent[r] != r {
+            r = parent[r];
+        }
+        parent[i] = r;
+        r
+    }
+    let mut stmt_ids: Vec<Vec<usize>> = Vec::new();
+    for stmt in &stmts {
+        let first = stmt.split_whitespace().next().unwrap_or("");
+        if matches!(first, "subgraph" | "end" | "linkStyle" | "direction") {
+            return None;
+        }
+        let names = match first {
+            "style" | "click" => stmt.split_whitespace().nth(1).map(|n| vec![n.to_string()]),
+            "class" => stmt
+                .split_whitespace()
+                .nth(1)
+                .map(|n| n.split(',').map(str::to_string).collect()),
+            "classDef" => Some(Vec::new()),
+            _ => Some(flow_statement(stmt).ok()?),
+        }?;
+        let mut ids = Vec::new();
+        for n in names {
+            let i = match order.iter().position(|o| *o == n) {
+                Some(i) => i,
+                None => {
+                    order.push(n);
+                    parent.push(parent.len());
+                    parent.len() - 1
+                }
+            };
+            ids.push(i);
+        }
+        for w in ids.windows(2) {
+            let (a, b) = (find(&mut parent, w[0]), find(&mut parent, w[1]));
+            if a != b {
+                parent[a.max(b)] = a.min(b);
+            }
+        }
+        stmt_ids.push(ids);
+    }
+    // The parts in the order of their first node.
+    let mut roots: Vec<usize> = Vec::new();
+    for i in 0..order.len() {
+        let r = find(&mut parent, i);
+        if !roots.contains(&r) {
+            roots.push(r);
+        }
+    }
+    if roots.is_empty() {
+        return None;
+    }
+    let mut parts: Vec<Vec<&str>> = vec![Vec::new(); roots.len()];
+    for (stmt, ids) in stmts.iter().zip(&stmt_ids) {
+        match ids.first() {
+            Some(&i) => {
+                let r = find(&mut parent, i);
+                let k = roots.iter().position(|&x| x == r).expect("a root");
+                parts[k].push(stmt);
+            }
+            // classDef: every part.
+            None => parts.iter_mut().for_each(|p| p.push(stmt)),
+        }
+    }
+    // Lines keep their own indentation in the source; a part from `;` statements gets four
+    // spaces.
+    let indent = src
+        .lines()
+        .nth(1)
+        .map(|l| &l[..l.len() - l.trim_start().len()])
+        .filter(|i| !i.is_empty())
+        .unwrap_or("    ");
+    Some(
+        parts
+            .into_iter()
+            .map(|p| {
+                let mut out = header.clone();
+                for stmt in p {
+                    out.push('\n');
+                    out.push_str(indent);
+                    out.push_str(stmt);
+                }
+                out
+            })
+            .collect(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -480,5 +598,42 @@ mod tests {
         for src in bad {
             assert!(check(src).is_err(), "{src}");
         }
+    }
+
+    /// test2 as the page read wrote it: both diagrams in one block.
+    const TEST2_ONE_BLOCK: &str = "graph TD\n    A[search] --> B[Learn]\n    B --> C[teach]\n    C --> A\n    D[App] --> E[DB]\n    E <--> F[MCP]";
+
+    #[test]
+    fn components_split_unconnected_parts() {
+        assert_eq!(
+            flowchart_components(TEST2_ONE_BLOCK),
+            Some(vec![
+                "graph TD\n    A[search] --> B[Learn]\n    B --> C[teach]\n    C --> A".to_string(),
+                "graph TD\n    D[App] --> E[DB]\n    E <--> F[MCP]".to_string(),
+            ])
+        );
+        // One connected drawing is one part.
+        assert_eq!(
+            flowchart_components("graph LR\n  A --> B\n  B --> C"),
+            Some(vec!["graph LR\n  A --> B\n  B --> C".to_string()])
+        );
+        // A node on its own line is its own part; style and classDef lines follow their nodes.
+        assert_eq!(
+            flowchart_components(
+                "graph LR; A --> B; C[alone]; classDef x fill:#fff; style C fill:#000"
+            ),
+            Some(vec![
+                "graph LR\n    A --> B\n    classDef x fill:#fff".to_string(),
+                "graph LR\n    C[alone]\n    classDef x fill:#fff\n    style C fill:#000"
+                    .to_string(),
+            ])
+        );
+        // Not split: sequence diagrams, broken sources, subgraphs.
+        assert_eq!(flowchart_components("sequenceDiagram\n  A->>B: hi"), None);
+        assert_eq!(flowchart_components("graph TD\n  A[x --> B"), None);
+        assert_eq!(
+            flowchart_components("graph TD\n  subgraph S\n  A --> B\n  end\n  C --> D"),
+            None
+        );
     }
 }

@@ -373,11 +373,15 @@ pub fn split_text(md: &str, weights: &[u32]) -> Vec<String> {
         left -= 1;
     }
     // At least one line per region while lines are left: take from the largest share.
-    for i in 0..k.min(n) {
+    // Only from a region that keeps a line itself, or from one past the first n regions (those
+    // get no line anyway when there are fewer lines than regions).
+    let m = k.min(n);
+    for i in 0..m {
         if share[i] == 0 {
             let j = (0..k)
-                .max_by_key(|&j| (share[j], std::cmp::Reverse(j)))
-                .expect("regions");
+                .filter(|&j| share[j] >= 2 || (j >= m && share[j] >= 1))
+                .max_by_key(|&j| (share[j], j))
+                .expect("a region with a line to spare");
             share[j] -= 1;
             share[i] += 1;
         }
@@ -401,6 +405,54 @@ pub fn split_text(md: &str, weights: &[u32]) -> Vec<String> {
         taken += 1;
     }
     parts.into_iter().map(|p| p.trim().to_string()).collect()
+}
+
+/// The Mermaid sections of a page read for `regions` diagram regions, in reading order:
+/// - with at least as many sections as regions, the first `regions` (extra ones are dropped);
+/// - with fewer, the first section whose flowchart has exactly as many unconnected parts as
+///   regions are left (the regions without a section, plus its own) is split into those parts in
+///   place, each with the section's quote;
+/// - otherwise the sections as they are; the regions after them get none.
+pub fn assign_blocks(sections: Vec<String>, regions: usize) -> Vec<String> {
+    let mut sections = sections;
+    if sections.len() >= regions {
+        sections.truncate(regions);
+        return sections;
+    }
+    let want = regions - sections.len() + 1;
+    for i in 0..sections.len() {
+        let (blocks, outside) = split_fences(&sections[i]);
+        let Some((_, src)) = blocks.iter().find(|(info, _)| info == "mermaid") else {
+            continue;
+        };
+        // A `>` line inside the fence is the description, as in parse_diagram.
+        let (quoted, kept): (Vec<&str>, Vec<&str>) =
+            src.lines().partition(|l| l.trim_start().starts_with('>'));
+        let parts = match crate::mermaid::flowchart_components(kept.join("\n").trim_end()) {
+            Some(p) if p.len() == want => p,
+            _ => continue,
+        };
+        let quote: Vec<&str> = quoted
+            .into_iter()
+            .chain(outside.lines())
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect();
+        let quote = quote.join("\n");
+        let split: Vec<String> = parts
+            .into_iter()
+            .map(|p| {
+                if quote.is_empty() {
+                    format!("```mermaid\n{p}\n```")
+                } else {
+                    format!("```mermaid\n{p}\n```\n\n{quote}")
+                }
+            })
+            .collect();
+        sections.splice(i..=i, split);
+        break;
+    }
+    sections
 }
 
 #[cfg(test)]
@@ -696,5 +748,47 @@ mod tests {
             assert_eq!(parts.len(), weights.len());
             assert_eq!(lines(&parts), want, "{weights:?}");
         }
+    }
+
+    /// test2 as the page read wrote it: both diagrams in one block, with one quote.
+    const TEST2_PAGE_ANSWER: &str = "This note is without\nreal-time recognition.\n\n```mermaid\ngraph TD\n    A[search] --> B[Learn]\n    B --> C[teach]\n    C --> A\n    D[App] --> E[DB]\n    E <--> F[MCP]\n```\n\n> This note is without real-time recognition.";
+
+    #[test]
+    fn one_block_with_two_parts_fills_two_regions() {
+        let blocks = assign_blocks(mermaid_sections(TEST2_PAGE_ANSWER), 2);
+        assert_eq!(blocks.len(), 2);
+        let (first, _) = parse_diagram(&blocks[0]);
+        let (second, _) = parse_diagram(&blocks[1]);
+        assert_eq!(
+            first,
+            Content::Diagram {
+                mermaid: "graph TD\n    A[search] --> B[Learn]\n    B --> C[teach]\n    C --> A"
+                    .into(),
+                description: "This note is without real-time recognition.".into()
+            }
+        );
+        assert_eq!(
+            second,
+            Content::Diagram {
+                mermaid: "graph TD\n    D[App] --> E[DB]\n    E <--> F[MCP]".into(),
+                description: "This note is without real-time recognition.".into()
+            }
+        );
+        // One region: the block stays whole.
+        let one = assign_blocks(mermaid_sections(TEST2_PAGE_ANSWER), 1);
+        assert_eq!(one, mermaid_sections(TEST2_PAGE_ANSWER));
+        // Three regions: two parts do not fill three, so nothing is split.
+        let three = assign_blocks(mermaid_sections(TEST2_PAGE_ANSWER), 3);
+        assert_eq!(three, mermaid_sections(TEST2_PAGE_ANSWER));
+        // Extra blocks are dropped.
+        let two = mermaid_sections(PAGE_ANSWER);
+        assert_eq!(assign_blocks(two.clone(), 1), [two[0].clone()]);
+    }
+
+    #[test]
+    fn split_text_gives_early_regions_their_line() {
+        // Two lines, a tall last region: the first two regions still get a line each.
+        assert_eq!(split_text("a\nb", &[1, 1, 100]), ["a", "b", ""]);
+        assert_eq!(split_text("a\nb\nc", &[1, 1, 100]), ["a", "b", "c"]);
     }
 }

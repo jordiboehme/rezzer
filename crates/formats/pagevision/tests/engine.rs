@@ -31,12 +31,11 @@ fn public_png(page: &str) -> Vec<u8> {
     std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
 }
 
-/// test2 has one text region and two diagram regions. The page read gives the Mermaid; when it
-/// writes both diagrams in one block, the second region is a picture that says so. Every region
-/// gives a block, and the page holds the nodes of both diagrams.
+/// test2 has one text region and two diagram regions. The page read writes both diagrams in one
+/// block; its two unconnected parts fill the two regions.
 #[test]
 #[ignore = "needs the model files"]
-fn read_page_test2_has_both_diagrams() {
+fn read_page_test2_has_two_diagrams() {
     let mut pv = page_vision();
     let page = pv.read_page(&public_png("test2")).unwrap();
     eprintln!(
@@ -48,10 +47,9 @@ fn read_page_test2_has_both_diagrams() {
     assert_eq!(kinds.len(), 3, "{kinds:?}");
     assert_eq!(kinds[0], BlockKind::Paragraph);
     assert_eq!(kinds[1], BlockKind::Diagram);
-    assert!(
-        matches!(kinds[2], BlockKind::Diagram | BlockKind::Picture),
-        "{kinds:?}"
-    );
+    assert_eq!(kinds[2], BlockKind::Diagram, "{kinds:?}");
+    assert!(page.blocks[1].markdown.contains("search"));
+    assert!(page.blocks[2].markdown.contains("MCP"));
     for word in ["search", "Learn", "teach", "App", "DB", "MCP"] {
         assert!(page.markdown.contains(word), "{word}");
     }
@@ -83,4 +81,8 @@ fn read_with_given_regions_skips_detection() {
     assert_eq!(page.blocks.len(), 1);
     assert_eq!(page.blocks[0].bbox, region.bbox);
     assert!(page.markdown.to_lowercase().contains("real-time"));
+    // Only the given region is read: none of the diagram labels below it.
+    for word in ["search", "teach", "MCP", "App"] {
+        assert!(!page.markdown.contains(word), "{word} in {}", page.markdown);
+    }
 }

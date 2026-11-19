@@ -13,9 +13,9 @@ use crate::detect::Detectors;
 use crate::error::PageError;
 use crate::llama::{Generation, RunOptions, VisionModel};
 use crate::model::{ModelFiles, PREPROCESS_VERSION, QWEN35_4B, prompt_sha256};
-use crate::parse::{DrawingClass, mermaid_sections, parse_class, split_text};
+use crate::parse::{DrawingClass, assign_blocks, mermaid_sections, parse_class, split_text};
 use crate::prepare::{
-    Prepared, blank_boxes, decode_on_white, grid_to_px, prepare_crop, prepare_page,
+    Prepared, blank_boxes, decode_on_white, grid_to_px, keep_boxes, prepare_crop, prepare_page,
 };
 use crate::prompts;
 use crate::regions::regions_fingerprint;
@@ -61,12 +61,15 @@ impl PageVision {
     /// Reads the given regions of a PNG page:
     /// - each drawn region is classified from its crop (one call of at most 4 tokens); a sketch
     ///   is described from its crop (`SKETCH`);
-    /// - if any region is a diagram, one pass over the whole page (`PAGE`) gives the Mermaid
-    ///   blocks, which go to the diagram regions in reading order; its text and any extra block
-    ///   are dropped, and a diagram region without a block becomes a picture that says so;
-    /// - if any region is text, one pass over the whole page with every drawn region blanked
-    ///   white (`PAGE_TEXT`) gives the text, split over the text regions in reading order by
-    ///   their height ([`split_text`]).
+    /// - if any region is a diagram, one pass over the whole page with the sketches blanked
+    ///   (`PAGE`) gives the Mermaid blocks, which go to the diagram regions in reading order
+    ///   ([`assign_blocks`]: a block with unconnected parts may fill the regions left); its text
+    ///   and any extra block are dropped, and a diagram region without a block becomes a picture
+    ///   that says so;
+    /// - if any region is text, one pass over a page that shows only the text regions, with the
+    ///   drawings blanked (`PAGE_TEXT`), gives the text, split over the text regions in reading
+    ///   order by their height ([`split_text`]). Ink outside the given text regions is never read
+    ///   as text.
     ///
     /// A failed call gives no block for its regions and marks the page truncated. The
     /// classifier's own token limit never marks the page.
@@ -91,6 +94,7 @@ impl PageVision {
 
         // Drawn regions: the class from the crop, and the description of a sketch.
         let mut drawn_px = Vec::new();
+        let mut sketch_px = Vec::new();
         for a in answers.iter_mut() {
             if a.region.kind != RegionKind::Drawing {
                 continue;
@@ -110,6 +114,7 @@ impl PageVision {
                 }
             }
             if a.class == Some(DrawingClass::Sketch) {
+                sketch_px.push(px);
                 match self.call(&crop, prompts::SKETCH, max_tokens, &mut stats) {
                     Ok(g) => {
                         a.text = g.text;
@@ -125,14 +130,17 @@ impl PageVision {
             .filter(|&i| answers[i].class == Some(DrawingClass::Diagram))
             .collect();
         if !diagrams.is_empty() {
-            let image = prepare_page(&page, &QWEN35_4B.image);
+            // Sketches are blanked, so the model cannot draw Mermaid for them here.
+            let image = prepare_page(&blank_boxes(&page, &sketch_px), &QWEN35_4B.image);
             match self.call(&image, prompts::PAGE, max_tokens, &mut stats) {
                 Ok(g) => {
-                    let sections = mermaid_sections(&g.text);
+                    let found = mermaid_sections(&g.text);
+                    let count = found.len();
+                    let sections = assign_blocks(found, diagrams.len());
                     log.push_str(&format!(
-                        "--- page read: {} mermaid blocks for {} diagram regions\n{}\n",
-                        sections.len(),
+                        "--- page read: {count} mermaid blocks for {} diagram regions, {} after splitting\n{}\n",
                         diagrams.len(),
+                        sections.len(),
                         g.text
                     ));
                     let mut sections = sections.into_iter();
@@ -154,7 +162,16 @@ impl PageVision {
             .filter(|&i| answers[i].region.kind == RegionKind::Text)
             .collect();
         if !texts.is_empty() {
-            let image = prepare_page(&blank_boxes(&page, &drawn_px), &QWEN35_4B.image);
+            // Only the given text regions are read: everything else is white, and the drawings
+            // are blanked even where a text box overlaps them.
+            let text_px: Vec<[u32; 4]> = texts
+                .iter()
+                .map(|&i| grid_to_px(answers[i].region.bbox, width, height))
+                .collect();
+            let image = prepare_page(
+                &blank_boxes(&keep_boxes(&page, &text_px), &drawn_px),
+                &QWEN35_4B.image,
+            );
             match self.call(&image, prompts::PAGE_TEXT, max_tokens, &mut stats) {
                 Ok(g) => {
                     log.push_str(&format!("--- text read\n{}\n", g.text));

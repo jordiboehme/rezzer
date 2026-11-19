@@ -225,6 +225,27 @@ pub fn blank_boxes(page_rgb: &RgbImage, boxes_px: &[[u32; 4]]) -> RgbImage {
     out
 }
 
+/// A white page with only the pixel boxes (grown by [`CROP_MARGIN`] and clipped) copied from
+/// the page.
+pub fn keep_boxes(page_rgb: &RgbImage, boxes_px: &[[u32; 4]]) -> RgbImage {
+    let (w, h) = page_rgb.dimensions();
+    let mut out = RgbImage::from_pixel(w, h, image::Rgb([255, 255, 255]));
+    for b in boxes_px {
+        let (x0, y0) = (
+            b[0].saturating_sub(CROP_MARGIN),
+            b[1].saturating_sub(CROP_MARGIN),
+        );
+        let x1 = b[2].saturating_add(CROP_MARGIN).min(w);
+        let y1 = b[3].saturating_add(CROP_MARGIN).min(h);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                out.put_pixel(x, y, *page_rgb.get_pixel(x, y));
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -463,5 +484,21 @@ mod tests {
         // Clipped at the page edge.
         assert_eq!(px(399, 399), 255);
         assert_eq!(px(373, 373), 0);
+    }
+
+    #[test]
+    fn kept_boxes_are_the_only_ink() {
+        let page = page_with(400, 400, [0, 0, 400, 400]);
+        let out = keep_boxes(&page, &[[100, 100, 200, 150]]);
+        let px = |x: u32, y: u32| out.get_pixel(x, y)[0];
+        // The box grown by 16 px keeps its ink; everything else is white.
+        assert_eq!(px(84, 84), 0);
+        assert_eq!(px(215, 165), 0);
+        assert_eq!(px(83, 100), 255);
+        assert_eq!(px(216, 100), 255);
+        assert_eq!(px(150, 166), 255);
+        assert_eq!(px(0, 0), 255);
+        // No box: a white page.
+        assert!(keep_boxes(&page, &[]).pixels().all(|p| p[0] == 255));
     }
 }
