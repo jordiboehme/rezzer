@@ -14,10 +14,14 @@ The crate is standalone. It depends on no other rezzer crate.
 - `detect`: the layout detector (PP-DocLayoutV3) and the text line detector (PP-OCRv6 small det)
   on Candle. It is pure Rust and runs on the CPU. It is off by default. `detect::Detectors`
   loads both and returns the regions of a page (`Detectors::regions`).
+- `engine`: `llama` and `detect` together. `engine::PageVision` loads all four model files and
+  reads pages (see "Reading a page").
 
 Default features build the types, the error, the model description, the image preparation
 (`prepare`), the ink rules, the ONNX reader, the resize code and the post-processing of both
-detectors. `regions_from` turns the detector boxes into regions without the models.
+detectors. `regions_from` turns the detector boxes into regions without the models. The
+prompts, the parsing of the answers, the Mermaid check and the page assembly are default code as
+well.
 
 ## Regions
 
@@ -32,6 +36,31 @@ lines and the ink rules make the text regions. Then every region is snapped to i
 The ink rules can see a drawing that the layout detector missed. It then stays a text region,
 with the note "possible missed drawing" and a lower certainty. Regions come in reading order, top
 to bottom and then left to right, with boxes on the 0..=1000 grid.
+
+## Reading a page
+
+`PageVision` has three calls:
+
+- `regions(png)`: the regions of a page, as above.
+- `read(png, regions)`: reads the given regions. Use it when you have your own regions.
+- `read_page(png)`: `regions`, then `read`.
+
+Each region is read from a crop of the page. The crop is the region box plus 16 px. A small crop
+is scaled up so the model gets at least 1024 image tokens.
+
+- A text region gets one call. Its answer becomes a heading, a list or a paragraph.
+- A drawing is classified first, with a call that answers with one word.
+  - A diagram is read as a Mermaid block plus a one-line description. The Mermaid is checked. If
+    the check fails, the block becomes a picture (`> Diagram: ...`) and the certainty goes down.
+  - A sketch is read as a description only (`> Sketch: ...`). The model is never asked for
+    Mermaid on a sketch. An answer that is not "diagram" counts as a sketch.
+
+The certainty of a block is the certainty of its region. It is halved when the answer did not
+parse and lowered more when the answer hit the token limit. It is never above 0.95. A region
+that fails gives no block and marks the page truncated. A page without any block is
+`PageError::Unreadable`.
+
+The Mermaid check covers flowcharts and sequence diagrams. Other kinds are named as not checked.
 
 ## Models
 
