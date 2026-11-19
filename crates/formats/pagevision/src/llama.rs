@@ -184,10 +184,10 @@ impl VisionModel {
 
     /// Runs one prompt on one prepared image, greedy, thinking off. Fails with
     /// `UnknownImageSize` or `ImageTokens` before decoding when the image chunk's token
-    /// count is not the table's.
+    /// count is not the one of the token rule (`prepare::expected_image_tokens`).
     pub fn generate(&mut self, image: &Prepared, prompt: &str) -> Result<Generation, PageError> {
         let (width, height) = (image.width, image.height);
-        let expected = expected_image_tokens(width, height)
+        let expected = expected_image_tokens(width, height, &self.spec.image)
             .ok_or(PageError::UnknownImageSize { width, height })?;
         let backend = backend()?;
 
