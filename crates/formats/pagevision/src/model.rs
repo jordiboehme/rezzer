@@ -161,8 +161,8 @@ pub fn hub_url(f: &HubFile) -> String {
 }
 
 /// The version of the image preprocessing; part of the result fingerprint. 2: region crops and
-/// the image token rule.
-pub const PREPROCESS_VERSION: u32 = 2;
+/// the image token rule. 3: whole-page reads for text (drawings blanked) and diagrams.
+pub const PREPROCESS_VERSION: u32 = 3;
 
 /// The lower-case hex SHA-256 of a file, read in pieces.
 pub fn file_sha256(path: &Path) -> std::io::Result<String> {

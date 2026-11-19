@@ -176,6 +176,55 @@ pub fn prepare_crop(page_rgb: &RgbImage, bbox_px: [u32; 4], rule: &ImageRule) ->
     }
 }
 
+/// A whole colour page ready for the model: resized to the nearest multiples of 32 (1408 x 1856
+/// for a Supernote page), as the page reads of the content test did. A page too small for
+/// `rule.min_tokens` tiles at that size goes through [`prepare_crop`] of the whole page instead
+/// (scaled up and padded with white).
+pub fn prepare_page(page_rgb: &RgbImage, rule: &ImageRule) -> Prepared {
+    let (sw, sh) = page_rgb.dimensions();
+    let (width, height) = target_size(sw, sh, rule);
+    if expected_image_tokens(width, height, rule).is_none() {
+        return prepare_crop(page_rgb, [0, 0, sw, sh], rule);
+    }
+    let rgb = if (width, height) == (sw, sh) {
+        page_rgb.clone()
+    } else {
+        image::imageops::resize(
+            page_rgb,
+            width,
+            height,
+            image::imageops::FilterType::CatmullRom,
+        )
+    };
+    Prepared {
+        rgb: rgb.into_raw(),
+        width,
+        height,
+        source_width: sw,
+        source_height: sh,
+    }
+}
+
+/// A copy of the page with each pixel box (grown by [`CROP_MARGIN`] and clipped) filled white.
+pub fn blank_boxes(page_rgb: &RgbImage, boxes_px: &[[u32; 4]]) -> RgbImage {
+    let mut out = page_rgb.clone();
+    let (w, h) = out.dimensions();
+    for b in boxes_px {
+        let (x0, y0) = (
+            b[0].saturating_sub(CROP_MARGIN),
+            b[1].saturating_sub(CROP_MARGIN),
+        );
+        let x1 = b[2].saturating_add(CROP_MARGIN).min(w);
+        let y1 = b[3].saturating_add(CROP_MARGIN).min(h);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                out.put_pixel(x, y, image::Rgb([255, 255, 255]));
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -374,5 +423,45 @@ mod tests {
             prepare(b"nope", &QWEN35_4B.image),
             Err(PageError::Image(_))
         ));
+    }
+
+    #[test]
+    fn page_is_resized_to_the_grid() {
+        let page = page_with(1404, 1872, [100, 100, 200, 200]);
+        let p = prepare_page(&page, &QWEN35_4B.image);
+        assert_eq!((p.width, p.height), (1408, 1856));
+        assert_eq!((p.source_width, p.source_height), (1404, 1872));
+        assert_eq!(
+            expected_image_tokens(p.width, p.height, &QWEN35_4B.image),
+            Some(2552)
+        );
+        // A page already on the grid is copied.
+        let page = page_with(1408, 1856, [100, 100, 200, 200]);
+        assert_eq!(prepare_page(&page, &QWEN35_4B.image).rgb, page.into_raw());
+    }
+
+    #[test]
+    fn small_page_reaches_min_tokens() {
+        // 1110 x 705 is 35 x 22 tiles on the grid: too few.
+        let page = page_with(1110, 705, [10, 10, 20, 20]);
+        let p = prepare_page(&page, &QWEN35_4B.image);
+        assert!(expected_image_tokens(p.width, p.height, &QWEN35_4B.image).is_some());
+        assert_eq!((p.source_width, p.source_height), (1110, 705));
+    }
+
+    #[test]
+    fn blanked_boxes_are_white_with_margin() {
+        let page = page_with(400, 400, [0, 0, 400, 400]);
+        let out = blank_boxes(&page, &[[100, 100, 200, 150], [390, 390, 400, 400]]);
+        let px = |x: u32, y: u32| out.get_pixel(x, y)[0];
+        // The box grown by 16 px is white; outside it the ink stays.
+        assert_eq!(px(84, 84), 255);
+        assert_eq!(px(215, 165), 255);
+        assert_eq!(px(83, 100), 0);
+        assert_eq!(px(216, 100), 0);
+        assert_eq!(px(150, 166), 0);
+        // Clipped at the page edge.
+        assert_eq!(px(399, 399), 255);
+        assert_eq!(px(373, 373), 0);
     }
 }

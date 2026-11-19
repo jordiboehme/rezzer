@@ -303,6 +303,106 @@ pub fn block_markdown(content: &Content, class: Option<DrawingClass>) -> String 
     }
 }
 
+/// The Mermaid blocks of a whole-page answer, in order, each with the `>` quote lines right after
+/// it. Everything else (the page text) is left out. A block the model did not close runs to the
+/// end.
+pub fn mermaid_sections(md: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut current: Option<Vec<&str>> = None;
+    // After a closed block: the quote lines that follow it.
+    let mut after_block = false;
+    for line in md.lines() {
+        let t = line.trim();
+        if let Some(lines) = &mut current {
+            lines.push(line);
+            if t.starts_with("```") {
+                after_block = true;
+                out.push(current.take().expect("inside a block"));
+            }
+            continue;
+        }
+        if t.starts_with("```mermaid") {
+            current = Some(vec![line]);
+            after_block = false;
+            continue;
+        }
+        if after_block {
+            if t.starts_with('>') || t.is_empty() {
+                if let Some(last) = out.last_mut() {
+                    last.push(line);
+                }
+                continue;
+            }
+            after_block = false;
+        }
+    }
+    if let Some(open) = current {
+        out.push(open);
+    }
+    out.into_iter()
+        .map(|lines| lines.join("\n").trim().to_string())
+        .collect()
+}
+
+/// Splits the text of a page into one part per text region, in reading order. `weights` are the
+/// region heights. The non-empty lines go to the regions in order, each region getting a share of
+/// the lines in proportion to its weight (largest remainder, ties to the earlier region), and at
+/// least one line while lines are left. Blank lines stay with the line before them. No line is
+/// lost or doubled: the parts joined in order hold every line of the text.
+pub fn split_text(md: &str, weights: &[u32]) -> Vec<String> {
+    let k = weights.len();
+    if k == 0 {
+        return Vec::new();
+    }
+    let text = unwrap_fence(md);
+    let lines: Vec<&str> = text.lines().collect();
+    let n = lines.iter().filter(|l| !l.trim().is_empty()).count();
+    // Shares by largest remainder; a weight of 0 counts as 1.
+    let w: Vec<u64> = weights.iter().map(|&x| u64::from(x.max(1))).collect();
+    let total: u64 = w.iter().sum();
+    let mut share: Vec<usize> = w.iter().map(|x| (n as u64 * x / total) as usize).collect();
+    let mut order: Vec<usize> = (0..k).collect();
+    // Larger remainder first, then the earlier region.
+    order.sort_by_key(|&i| (std::cmp::Reverse(n as u64 * w[i] % total), i));
+    let mut left = n - share.iter().sum::<usize>();
+    for &i in order.iter().cycle() {
+        if left == 0 {
+            break;
+        }
+        share[i] += 1;
+        left -= 1;
+    }
+    // At least one line per region while lines are left: take from the largest share.
+    for i in 0..k.min(n) {
+        if share[i] == 0 {
+            let j = (0..k)
+                .max_by_key(|&j| (share[j], std::cmp::Reverse(j)))
+                .expect("regions");
+            share[j] -= 1;
+            share[i] += 1;
+        }
+    }
+    let mut parts = vec![String::new(); k];
+    let (mut region, mut taken, mut blanks) = (0usize, 0usize, 0usize);
+    for line in lines {
+        if line.trim().is_empty() {
+            blanks += 1;
+            continue;
+        }
+        while region + 1 < k && taken == share[region] {
+            region += 1;
+            taken = 0;
+        }
+        if !parts[region].is_empty() {
+            parts[region].push_str(&"\n".repeat(1 + blanks));
+        }
+        blanks = 0;
+        parts[region].push_str(line);
+        taken += 1;
+    }
+    parts.into_iter().map(|p| p.trim().to_string()).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -521,5 +621,80 @@ mod tests {
             );
         }
         assert_eq!(parse_diagram("").1.as_deref(), Some(EMPTY_ANSWER));
+    }
+
+    /// A whole-page answer as the page prompt gives it: text, then each diagram with its quote.
+    const PAGE_ANSWER: &str = "This note is without\nreal-time recognition.\n\n```mermaid\ngraph TD\n    A[search] --> B[Learn]\n```\n\n> A cycle.\n\nSome text.\n\n```mermaid\ngraph LR\n    App --> DB\n```\n> App and DB.\n> Second line.\n\nMore text.";
+
+    #[test]
+    fn mermaid_sections_keep_blocks_and_quotes_only() {
+        let s = mermaid_sections(PAGE_ANSWER);
+        assert_eq!(
+            s,
+            [
+                "```mermaid\ngraph TD\n    A[search] --> B[Learn]\n```\n\n> A cycle.",
+                "```mermaid\ngraph LR\n    App --> DB\n```\n> App and DB.\n> Second line.",
+            ]
+        );
+        // Each section parses as a diagram.
+        for x in &s {
+            assert!(
+                matches!(parse_diagram(x), (Content::Diagram { .. }, None)),
+                "{x}"
+            );
+        }
+        // An unclosed block runs to the end; no block gives nothing.
+        assert_eq!(
+            mermaid_sections("text\n```mermaid\ngraph TD\n  A --> B"),
+            ["```mermaid\ngraph TD\n  A --> B"]
+        );
+        assert!(mermaid_sections("Only text.\n\n```python\nx = 1\n```").is_empty());
+    }
+
+    fn lines(parts: &[String]) -> Vec<String> {
+        parts
+            .iter()
+            .flat_map(|p| p.lines())
+            .filter(|l| !l.trim().is_empty())
+            .map(str::to_string)
+            .collect()
+    }
+
+    #[test]
+    fn split_text_by_region_height() {
+        let md = "# Title\n\nline 2\nline 3\n\n- a\n- b\n- c";
+        // One region takes everything.
+        assert_eq!(split_text(md, &[40]), [md]);
+        // Heights 1 and 2: 2 and 4 of the 6 lines.
+        let parts = split_text(md, &[10, 20]);
+        assert_eq!(parts, ["# Title\n\nline 2", "line 3\n\n- a\n- b\n- c"]);
+        // A tie goes to the earlier region: 5 lines, 3 and 2.
+        let parts = split_text("a\nb\nc\nd\ne", &[10, 10]);
+        assert_eq!(parts, ["a\nb\nc", "d\ne"]);
+        // Every region gets a line while lines are left, even a small one.
+        let parts = split_text("a\nb\nc\nd", &[100, 1]);
+        assert_eq!(parts, ["a\nb\nc", "d"]);
+        // More regions than lines.
+        assert_eq!(split_text("a\nb", &[1, 1, 1]), ["a", "b", ""]);
+        // Empty text, no regions.
+        assert_eq!(split_text("  \n", &[1, 2]), ["", ""]);
+        assert!(split_text("a", &[]).is_empty());
+        // A fenced answer is unwrapped first.
+        assert_eq!(split_text("```markdown\nx\ny\n```", &[1, 1]), ["x", "y"]);
+    }
+
+    #[test]
+    fn split_text_loses_and_doubles_nothing() {
+        let md = "one\ntwo\n\nthree\nfour\nfive\n\n\nsix\nseven";
+        let want: Vec<String> = md
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(str::to_string)
+            .collect();
+        for weights in [&[1u32][..], &[3, 1], &[1, 1, 1], &[5, 1, 9, 2], &[1; 9]] {
+            let parts = split_text(md, weights);
+            assert_eq!(parts.len(), weights.len());
+            assert_eq!(lines(&parts), want, "{weights:?}");
+        }
     }
 }

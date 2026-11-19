@@ -11,6 +11,9 @@ use crate::parse::{
 };
 use crate::types::{Block, Content, Fingerprint, PageResult, Region, RegionKind, Stats};
 
+/// The description of a diagram region that the page read gave no Mermaid block for.
+pub const NO_DIAGRAM: &str = "A diagram that the page reading did not return.";
+
 /// The certainty factor of a block whose content did not parse into its kind.
 const UNPARSED_FACTOR: f32 = 0.5;
 /// The certainty factor of a block whose answer hit the token limit.
@@ -76,6 +79,13 @@ pub fn assemble(
             truncated = true;
         }
         let (content, reason) = match (a.region.kind, a.class) {
+            // A diagram region the page read gave no block for: say so.
+            (RegionKind::Drawing, Some(DrawingClass::Diagram)) if a.text.trim().is_empty() => (
+                Content::Picture {
+                    description: NO_DIAGRAM.to_string(),
+                },
+                Some("no mermaid block for this region".to_string()),
+            ),
             (RegionKind::Drawing, Some(DrawingClass::Diagram)) => parse_diagram(&a.text),
             (RegionKind::Drawing, _) => (parse_sketch(&a.text), None),
             _ => (parse_text(&a.text), None),
@@ -298,5 +308,34 @@ mod tests {
     fn empty_answer_reason_is_in_raw() {
         let page = run(vec![text(100, "Hello."), text(200, "")]).unwrap();
         assert!(page.raw.unwrap().contains(EMPTY_ANSWER));
+    }
+
+    /// A diagram region without a Mermaid block from the page read is a picture that says so,
+    /// never silently empty.
+    #[test]
+    fn diagram_without_block_becomes_picture() {
+        let page = run(vec![
+            text(100, "Hello."),
+            drawing(300, DrawingClass::Diagram, ""),
+        ])
+        .unwrap();
+        assert_eq!(page.blocks.len(), 2);
+        let b = &page.blocks[1];
+        assert_eq!(
+            b.content,
+            Content::Picture {
+                description: NO_DIAGRAM.to_string()
+            }
+        );
+        assert_eq!(b.markdown, format!("> Diagram: {NO_DIAGRAM}"));
+        assert_eq!(b.certainty, 0.5);
+        assert!(!page.truncated);
+        // A sketch with an empty answer still gives no block.
+        let page = run(vec![
+            text(100, "Hello."),
+            drawing(300, DrawingClass::Sketch, ""),
+        ])
+        .unwrap();
+        assert_eq!(page.blocks.len(), 1);
     }
 }
