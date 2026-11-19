@@ -163,6 +163,26 @@ pub fn hub_url(f: &HubFile) -> String {
 /// The version of the image preprocessing; part of the result fingerprint.
 pub const PREPROCESS_VERSION: u32 = 1;
 
+/// The lower-case hex SHA-256 of a file, read in pieces.
+pub fn file_sha256(path: &Path) -> std::io::Result<String> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
+}
+
 /// The lower-case hex SHA-256 of a prompt.
 pub fn prompt_sha256(prompt: &str) -> String {
     let digest = Sha256::digest(prompt.as_bytes());
@@ -290,6 +310,19 @@ mod tests {
                 "{name}"
             );
         }
+    }
+
+    #[test]
+    fn file_hash_reads_the_file() {
+        let path = std::env::temp_dir().join(format!("pagevision-hash-{}", std::process::id()));
+        std::fs::write(&path, "abc").unwrap();
+        let hash = file_sha256(&path);
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(
+            hash.unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert!(file_sha256(Path::new("/nonexistent/file")).is_err());
     }
 
     #[test]

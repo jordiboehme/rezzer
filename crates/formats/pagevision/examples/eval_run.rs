@@ -12,13 +12,14 @@
 //!
 //! `--regions-only` runs the two detectors, the ink rules and snapping (engine
 //! `pagevision-c-regions`): every page gets its regions and no blocks. The detector time of a
-//! page goes into `encode_ms`; it is printed, never checked.
+//! page goes into `encode_ms`; it is printed, never checked. The fingerprint holds the measured
+//! SHA-256 of both detector files; a file other than the pinned one stops the run.
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use pagevision::detect::Detectors;
-use pagevision::model::ModelFiles;
+use pagevision::model::{HubFile, LAYOUT_V3, ModelFiles, TEXT_DET_V6, file_sha256};
 use pagevision::regions::regions_fingerprint;
 use pagevision::{RegionKind, Regions};
 use serde_json::{Value, json};
@@ -50,6 +51,21 @@ fn manifest_pages(path: &Path) -> Result<Vec<(String, PathBuf)>, String> {
             Ok((field("id")?.to_string(), base.join(field("image")?)))
         })
         .collect()
+}
+
+/// The SHA-256 of a detector file, measured. A file that is not the pinned one stops the run, so a
+/// results file never names a model it did not run.
+fn checked_sha256(path: &Path, pinned: &HubFile) -> Result<String, String> {
+    let hash = file_sha256(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    if hash != pinned.sha256 {
+        return Err(format!(
+            "{}: SHA-256 is {hash}, expected {} ({})",
+            path.display(),
+            pinned.sha256,
+            pinned.local
+        ));
+    }
+    Ok(hash)
 }
 
 fn region_json(r: &Regions) -> Vec<Value> {
@@ -99,6 +115,8 @@ fn run() -> Result<(), String> {
         .map(PathBuf::from)
         .ok_or("set PAGEVISION_MODEL_DIR to the folder with the model files")?;
     let files = ModelFiles::in_dir(&dir);
+    let layout_sha256 = checked_sha256(&files.layout, &LAYOUT_V3)?;
+    let text_det_sha256 = checked_sha256(&files.text_det, &TEXT_DET_V6)?;
     let started = Instant::now();
     let detectors = Detectors::load(&files.layout, &files.text_det).map_err(|e| e.to_string())?;
     eprintln!("detectors loaded in {} ms", started.elapsed().as_millis());
@@ -147,8 +165,8 @@ fn run() -> Result<(), String> {
             "model_sha256": f.model_sha256,
             "prompt_sha256": f.prompt_sha256,
             "preprocess": f.preprocess.to_string(),
-            "layout_sha256": f.layout_sha256,
-            "text_det_sha256": f.text_det_sha256,
+            "layout_sha256": layout_sha256,
+            "text_det_sha256": text_det_sha256,
             "candle": f.candle,
             "rules": f.rules,
             "ink": f.ink,
