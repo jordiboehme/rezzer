@@ -83,6 +83,8 @@ fn pads_of(n: &Node, h: usize, w: usize, k: &[i64], s: &[i64], d: &[i64]) -> Vec
 #[derive(Debug)]
 pub struct TextLineDetector {
     nodes: Vec<Node>,
+    /// For each node, the values it reads for the last time; they are dropped after it.
+    last_uses: Vec<Vec<String>>,
     weights: HashMap<String, Tensor>,
     ints: HashMap<String, Vec<i64>>,
     floats: HashMap<String, Vec<f32>>,
@@ -134,7 +136,23 @@ impl TextLineDetector {
             .first()
             .cloned()
             .ok_or_else(|| err("the graph has no output"))?;
+        // The node that reads a value last; the graph output is never dropped.
+        let mut last: HashMap<&str, usize> = HashMap::new();
+        for (i, n) in g.nodes.iter().enumerate() {
+            for name in &n.inputs {
+                if !name.is_empty() && !weights.contains_key(name) {
+                    last.insert(name.as_str(), i);
+                }
+            }
+        }
+        let mut last_uses = vec![Vec::new(); g.nodes.len()];
+        for (name, i) in last {
+            if name != output {
+                last_uses[i].push(name.to_string());
+            }
+        }
         Ok(Self {
+            last_uses,
             nodes: g.nodes,
             weights,
             ints,
@@ -147,18 +165,30 @@ impl TextLineDetector {
 
     /// Runs the graph on an input tensor.
     fn run(&self, x: Tensor) -> Result<Tensor, PageError> {
+        self.run_counting(x).map(|(y, _)| y)
+    }
+
+    /// Runs the graph and also returns the most tensors held at once after a node.
+    fn run_counting(&self, x: Tensor) -> Result<(Tensor, usize), PageError> {
         let mut env: HashMap<&str, Tensor> = HashMap::new();
         env.insert(self.input.as_str(), x);
-        for n in &self.nodes {
+        let mut peak = env.len();
+        for (n, done) in self.nodes.iter().zip(&self.last_uses) {
             let y = self.eval(n, &env)?;
             let out = n
                 .outputs
                 .first()
                 .ok_or_else(|| err(format!("{} has no output", n.op_type)))?;
             env.insert(out.as_str(), y);
+            for name in done {
+                env.remove(name.as_str());
+            }
+            peak = peak.max(env.len());
         }
-        env.remove(self.output.as_str())
-            .ok_or_else(|| err("the output was never computed"))
+        let y = env
+            .remove(self.output.as_str())
+            .ok_or_else(|| err("the output was never computed"))?;
+        Ok((y, peak))
     }
 
     fn eval(&self, n: &Node, env: &HashMap<&str, Tensor>) -> Result<Tensor, PageError> {
@@ -448,6 +478,26 @@ mod tests {
         assert_eq!(y.dims(), [1, 1, 2, 2]);
         let y: Vec<f32> = y.flatten_all().unwrap().to_vec1().unwrap();
         assert_eq!(y, [5., 6., 8., 9.]);
+    }
+
+    #[test]
+    fn intermediates_are_dropped_after_their_last_use() {
+        // x -> a -> b -> c, then y = a + c: at most a and one other tensor live at once.
+        let m = graph(
+            vec![
+                node("Relu", &["x"], "a", vec![]),
+                node("Relu", &["a"], "b", vec![]),
+                node("Relu", &["b"], "c", vec![]),
+                node("Add", &["a", "c"], "y", vec![]),
+            ],
+            vec![],
+            "y",
+        );
+        let det = TextLineDetector::from_model(m).unwrap();
+        let (y, peak) = det.run_counting(input(&[-1., 2.], 1, 2)).unwrap();
+        let y: Vec<f32> = y.flatten_all().unwrap().to_vec1().unwrap();
+        assert_eq!(y, [0., 4.]);
+        assert_eq!(peak, 2);
     }
 
     #[test]
