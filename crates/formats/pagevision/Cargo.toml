@@ -36,5 +36,12 @@ llama-cpp-2 = { workspace = true, optional = true, features = ["mtmd", "metal"] 
 llama-cpp-2 = { workspace = true, optional = true, features = ["mtmd", "openmp"] }
 
 [dev-dependencies]
-# Reads the parity fixtures and the local bake-off numbers in tests/parity.rs.
+# Reads the parity fixtures and the local bake-off numbers in tests/parity.rs, and writes the
+# results file of examples/eval_run.rs.
 serde_json.workspace = true
+# Reads the test page manifests in examples/eval_run.rs.
+toml.workspace = true
+
+[[example]]
+name = "eval_run"
+required-features = ["detect", "serde"]
