@@ -45,15 +45,22 @@ to bottom and then left to right, with boxes on the 0..=1000 grid.
 - `read(png, regions)`: reads the given regions. Use it when you have your own regions.
 - `read_page(png)`: `regions`, then `read`.
 
-Each region is read from a crop of the page. The crop is the region box plus 16 px. A small crop
-is scaled up so the model gets at least 1024 image tokens.
+Qwen reads a page in a few passes:
 
-- A text region gets one call. Its answer becomes a heading, a list or a paragraph.
-- A drawing is classified first, with a call that answers with one word.
-  - A diagram is read as a Mermaid block plus a one-line description. The Mermaid is checked. If
-    the check fails, the block becomes a picture (`> Diagram: ...`) and the certainty goes down.
-  - A sketch is read as a description only (`> Sketch: ...`). The model is never asked for
-    Mermaid on a sketch. An answer that is not "diagram" counts as a sketch.
+- Each drawing is classified from its crop, with a call that answers with one word. An answer
+  that is not "diagram" counts as a sketch.
+- A sketch is described from its crop (`> Sketch: ...`). The model is never asked for Mermaid on
+  a sketch.
+- If the page has a diagram, one pass over the whole page gives the Mermaid blocks. They go to
+  the diagram regions in reading order. The text of that pass is dropped. Each block is checked;
+  a block that fails the check becomes a picture (`> Diagram: ...`). A diagram region without a
+  block also becomes a picture, so nothing goes missing without a note.
+- If the page has text, one pass over the whole page reads it, with every drawing blanked white.
+  The text is split over the text regions in reading order, by their height. No line is lost or
+  read twice.
+
+The page goes to the model at 1408x1856, a multiple of 32. A crop is the region box plus 16 px,
+scaled up when it is small, so the model gets at least 1024 image tokens.
 
 The certainty of a block is the certainty of its region. It is halved when the answer did not
 parse and lowered more when the answer hit the token limit. It is never above 0.95. A region
