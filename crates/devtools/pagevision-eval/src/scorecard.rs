@@ -321,7 +321,7 @@ fn regions_only(f: &Fingerprint) -> bool {
 /// - Every engine but a regions-only one (no model hashes, see `regions_only`): also the crate
 ///   version (the workspace version, as `pagevision::llama` writes it with `CARGO_PKG_VERSION`),
 ///   the llama-cpp-2 version in `cargo_lock`, the model SHA-256s of QWEN35_4B (model, then
-///   mmproj) and PREPROCESS_VERSION.
+///   mmproj), the SHA-256 of the build's prompts (`prompts::joined`) and PREPROCESS_VERSION.
 ///
 /// Baselines are skipped, except that one using the QWEN35_4B hashes or a preprocess other than
 /// "none" is an error. Each error names the expected and the found value.
@@ -429,6 +429,13 @@ fn check_model(name: &str, f: &Fingerprint, cargo_lock: &str, errors: &mut Vec<S
         errors.push(format!(
             "{name}: model SHA-256s are {:?} but the build expects {:?}",
             f.model_sha256, hashes
+        ));
+    }
+    let prompts = pagevision::model::prompt_sha256(&pagevision::prompts::joined());
+    if f.prompt_sha256 != prompts {
+        errors.push(format!(
+            "{name}: prompt SHA-256 is {} but the build's prompts hash to {prompts}",
+            f.prompt_sha256
         ));
     }
     if f.preprocess != preprocess {
@@ -543,7 +550,7 @@ mod tests {
                 QWEN35_4B.model.sha256.to_string(),
                 QWEN35_4B.mmproj.sha256.to_string(),
             ],
-            prompt_sha256: "p".to_string(),
+            prompt_sha256: pagevision::model::prompt_sha256(&pagevision::prompts::joined()),
             preprocess: PREPROCESS_VERSION.to_string(),
             ..regions_fingerprint()
         }
@@ -803,6 +810,20 @@ mod tests {
             engines: vec![engine("qwen", false, fingerprint("0.1.158"))],
         };
         assert!(check_fingerprints(&card, LOCK).is_ok());
+    }
+
+    /// A changed prompt needs a new run: the prompt hash is checked against the build's prompts.
+    #[test]
+    fn fingerprint_check_names_a_changed_prompt() {
+        let mut f = fingerprint("0.1.158");
+        f.prompt_sha256 = "0".repeat(64);
+        let card = Scorecard {
+            format: FORMAT.into(),
+            engines: vec![engine("qwen", false, f)],
+        };
+        let errs = check_fingerprints(&card, LOCK).unwrap_err();
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        assert!(errs[0].contains("prompt"), "{errs:?}");
     }
 
     #[test]
