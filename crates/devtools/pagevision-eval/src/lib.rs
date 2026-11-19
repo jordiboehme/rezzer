@@ -13,8 +13,8 @@ pub mod text;
 
 pub use boxes::{BoxScore, RegionScore, score_boxes, score_regions};
 pub use edges::{
-    Dir, Edge, EdgeScore, TruthEdges, mermaid_edges, parse_truth, parse_truth_with_nodes,
-    score_edges,
+    Dir, Edge, EdgeScore, NodeCheck, TruthEdges, check_nodes, mermaid_edges, parse_truth,
+    parse_truth_with_nodes, score_edges,
 };
 pub use manifest::{Manifest, PageEntry, load_manifest};
 pub use results::{Fingerprint, PageRun, ResultsFile, RunBlock, RunRegion, load_results};

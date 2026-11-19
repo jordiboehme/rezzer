@@ -509,11 +509,9 @@ fn canon(label: &str, keys: &BTreeSet<String>, node_labels: Option<&[String]>) -
         .map_or_else(|| label.to_string(), Clone::clone)
 }
 
-/// Scores predicted edges against a truth. An edge is correct with the same ends and the same
-/// direction, counted once. A predicted label maps to a truth label (whole word, or a squashed
-/// substring for a truth label longer than 3 characters, longest first, then Dice of at least
-/// 0.5), and an arrow label drawn as its own node counts as the arrow.
-pub fn score_edges(predicted: &[Edge], truth: &TruthEdges) -> EdgeScore {
+/// The predicted edges with their labels mapped to the truth labels, and an arrow label drawn
+/// as its own node collapsed into the arrow.
+fn canonical_edges(predicted: &[Edge], truth: &TruthEdges) -> BTreeSet<Edge> {
     let mut keys: BTreeSet<String> = BTreeSet::new();
     for e in &truth.edges {
         keys.insert(e.from.clone());
@@ -542,6 +540,15 @@ pub fn score_edges(predicted: &[Edge], truth: &TruthEdges) -> EdgeScore {
             pred.insert(Edge::new(a.clone(), b.clone(), Dir::Directed));
         }
     }
+    pred
+}
+
+/// Scores predicted edges against a truth. An edge is correct with the same ends and the same
+/// direction, counted once. A predicted label maps to a truth label (whole word, or a squashed
+/// substring for a truth label longer than 3 characters, longest first, then Dice of at least
+/// 0.5), and an arrow label drawn as its own node counts as the arrow.
+pub fn score_edges(predicted: &[Edge], truth: &TruthEdges) -> EdgeScore {
+    let pred = canonical_edges(predicted, truth);
     let want: BTreeSet<Edge> = truth
         .edges
         .iter()
@@ -551,6 +558,71 @@ pub fn score_edges(predicted: &[Edge], truth: &TruthEdges) -> EdgeScore {
         truth: want.len() as u32,
         predicted: pred.len() as u32,
         correct: pred.intersection(&want).count() as u32,
+    }
+}
+
+/// How the node labels of a predicted diagram compare with a truth.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NodeCheck {
+    /// Truth node labels that no predicted label maps to: misread or missing labels.
+    pub misread: Vec<String>,
+    /// Predicted labels that map to no truth label (arrow labels count as truth labels).
+    pub unknown: Vec<String>,
+    /// Predicted edges between two truth nodes that the truth does not join in any direction.
+    pub invented_arrows: Vec<Edge>,
+}
+
+impl NodeCheck {
+    /// Nodes the model added: unknown labels beyond the one each misread label explains.
+    pub fn invented_nodes(&self) -> usize {
+        self.unknown.len().saturating_sub(self.misread.len())
+    }
+}
+
+/// Compares the node labels and the joins of predicted edges with a truth, with the label
+/// mapping of [`score_edges`]. A reversed arrow is a wrong arrow, not an invented one.
+pub fn check_nodes(predicted: &[Edge], truth: &TruthEdges) -> NodeCheck {
+    let pred = canonical_edges(predicted, truth);
+    let truth_nodes: BTreeSet<&str> = truth
+        .edges
+        .iter()
+        .flat_map(|e| [e.from.as_str(), e.to.as_str()])
+        .collect();
+    let arrow_labels: BTreeSet<&str> = truth
+        .arrow_labels
+        .iter()
+        .map(|(l, _, _)| l.as_str())
+        .collect();
+    let pred_nodes: BTreeSet<&str> = pred
+        .iter()
+        .flat_map(|e| [e.from.as_str(), e.to.as_str()])
+        .collect();
+    let joined = |a: &str, b: &str| {
+        truth
+            .edges
+            .iter()
+            .any(|t| (t.from == a && t.to == b) || (t.from == b && t.to == a))
+    };
+    NodeCheck {
+        misread: truth_nodes
+            .iter()
+            .filter(|n| !pred_nodes.contains(*n))
+            .map(|n| n.to_string())
+            .collect(),
+        unknown: pred_nodes
+            .iter()
+            .filter(|n| !truth_nodes.contains(*n) && !arrow_labels.contains(*n))
+            .map(|n| n.to_string())
+            .collect(),
+        invented_arrows: pred
+            .iter()
+            .filter(|e| {
+                truth_nodes.contains(e.from.as_str())
+                    && truth_nodes.contains(e.to.as_str())
+                    && !joined(&e.from, &e.to)
+            })
+            .cloned()
+            .collect(),
     }
 }
 
@@ -752,5 +824,63 @@ mod tests {
             ]
         );
         assert_eq!(t.arrow_labels, vec![("mcp".into(), "x".into(), "y".into())]);
+    }
+
+    /// From notedown's `edge_check_sees_wrong_arrows`: Chandra's raw Mermaid for test2 from a
+    /// newer llama.cpp, HTML-escaped and on one line each, with the right nodes and mostly wrong
+    /// arrows.
+    #[test]
+    fn edge_check_sees_wrong_arrows() {
+        let md = "```mermaid\ngraph TD; search((search)) --&gt; teach((teach)); teach --&gt; learn((learn)); learn --&gt; search;\n```\n\n```mermaid\ngraph LR; App((App)) --&gt; DB[(DB)]; DB --&gt; MCP[MCP];\n```\n";
+        let edges = mermaid_edges(md);
+        let mut want = vec![
+            e("search", "teach", Dir::Directed),
+            e("teach", "learn", Dir::Directed),
+            e("learn", "search", Dir::Directed),
+            e("app", "db", Dir::Directed),
+            e("db", "mcp", Dir::Directed),
+        ];
+        want.sort();
+        assert_eq!(edges, want);
+        assert!(!edges.contains(&e("db", "mcp", Dir::Both)));
+        let truth = parse_truth(TEST2_TRUTH);
+        assert_eq!(score_edges(&edges, &truth).correct, 1);
+        // The nodes are right, the arrows are wrong: nothing is invented.
+        let check = check_nodes(&edges, &truth);
+        assert!(
+            check.misread.is_empty() && check.unknown.is_empty(),
+            "{check:?}"
+        );
+        assert!(check.invented_arrows.is_empty(), "{check:?}");
+    }
+
+    #[test]
+    fn node_check_counts_misread_and_invented() {
+        let truth =
+            parse_truth("notedown --> ocr model\nocr model --> md\nmd -->|mcp| claude ai agent\n");
+        // All right, mcp drawn as a node.
+        let right = mermaid_edges(&fenced(
+            "graph LR\n  A[Notedown] --> B[OCR Model] --> C[.md] --> D[MCP] --> E[Claude AI Agent]",
+        ));
+        assert_eq!(check_nodes(&right, &truth), NodeCheck::default());
+        // One misread label: "OCR Model" read as "QCB Mdl".
+        let misread = mermaid_edges(&fenced(
+            "graph LR\n  A[Notedown] --> B[QCB Mdl] --> C[md] -->|mcp| E[Claude AI Agent]",
+        ));
+        let check = check_nodes(&misread, &truth);
+        assert_eq!(check.misread, ["ocr model"]);
+        assert_eq!(check.unknown, ["qcb mdl"]);
+        assert_eq!(check.invented_nodes(), 0);
+        // An invented node and an invented arrow.
+        let invented = mermaid_edges(&fenced(
+            "graph LR\n  A[Notedown] --> B[OCR Model] --> C[md] -->|mcp| E[Claude AI Agent]\n  E --> F[Database]\n  A --> C",
+        ));
+        let check = check_nodes(&invented, &truth);
+        assert!(check.misread.is_empty());
+        assert_eq!(check.invented_nodes(), 1);
+        assert_eq!(check.invented_arrows, [e("notedown", "md", Dir::Directed)]);
+        // A reversed arrow is wrong but not invented.
+        let reversed = mermaid_edges(&fenced("graph LR\n  A[OCR Model] --> B[Notedown]"));
+        assert!(check_nodes(&reversed, &truth).invented_arrows.is_empty());
     }
 }
