@@ -53,7 +53,7 @@ repo() {
   # the bare remote $work/remote.git with that commit on main
   rm -rf "$work/r" "$work/remote.git" "$work/releases" "$work/gh-broken" "$work/output"
   : >"$work/releases"
-  g init -q --bare "$work/remote.git"
+  g init -q --bare -b main "$work/remote.git"
   g init -q -b main "$work/r"
   mkdir -p "$work/r/release-notes"
   cat >"$work/r/Cargo.toml" <<EOF
@@ -153,7 +153,7 @@ release_check_skips_with_a_warning_from_a_shallow_clone() {
   g -C "$work/r" push -q origin v1.2.3
   next_commit
   rm -rf "$work/shallow"
-  g clone -q --depth=1 --no-tags "file://$work/remote.git" "$work/shallow"
+  g clone -q --depth=1 --no-tags --branch main "file://$work/remote.git" "$work/shallow"
   ! g -C "$work/shallow" cat-file -e "$(g -C "$work/r" rev-parse HEAD~1)^{commit}" 2>/dev/null || return 1
   RELEASE_CHECK_ROOT="$work/shallow" bash "$script" >"$work/out" 2>&1 \
     && grep -q '::warning::the tag v1.2.3' "$work/out"
@@ -319,7 +319,7 @@ tag_state_reads_taken_from_a_shallow_clone() {
   g -C "$work/r" push -q origin v1.2.3
   next_commit
   rm -rf "$work/shallow"
-  g clone -q --depth=1 --no-tags "file://$work/remote.git" "$work/shallow"
+  g clone -q --depth=1 --no-tags --branch main "file://$work/remote.git" "$work/shallow"
   RELEASE_CHECK_ROOT="$work/shallow" bash "$script" tag-state v1.2.3 \
     "$(g -C "$work/r" rev-parse HEAD)" >"$work/out" 2>&1 && [ "$(cat "$work/out")" = taken ]
 }
