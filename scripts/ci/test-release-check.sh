@@ -104,11 +104,13 @@ release_check_skips_a_released_version_tagged_on_the_remote() {
   grep -qx 'release=false' "$work/output" && grep -q 'on origin' "$work/out"
 }
 
-release_check_skips_a_released_version_tagged_here() {
+release_check_ignores_a_local_tag() {
+  # Only the remote counts: a tag in this clone alone is no release.
   repo 1.2.3
   g -C "$work/r" tag v1.2.3
   echo v1.2.3 >"$work/releases"
-  run && grep -q 'already tagged here and released' "$work/out"
+  : >"$work/output"
+  GITHUB_OUTPUT="$work/output" run && grep -qx 'release=true' "$work/output"
 }
 
 release_check_skips_without_notes_when_released() {
@@ -116,24 +118,59 @@ release_check_skips_without_notes_when_released() {
   repo 1.2.3
   rm "$work/r/release-notes/v1.2.3.md"
   g -C "$work/r" tag v1.2.3
+  g -C "$work/r" push -q origin v1.2.3
   echo v1.2.3 >"$work/releases"
   run
 }
 
-release_check_fails_on_a_stray_tag() {
+next_commit() {
+  # A second commit on main that does not change the version.
+  echo more >>"$work/r/README.md"
+  g -C "$work/r" add -A
+  g -C "$work/r" commit -q -m more
+  g -C "$work/r" push -q origin main
+}
+
+release_check_skips_with_a_warning_while_another_commit_publishes() {
+  # The tag is at the bump commit, its release is not there yet (publishing,
+  # failed or a hand-pushed tag). A later push without a version change must
+  # stay green and release nothing.
   repo 1.2.3
+  g -C "$work/r" tag -a v1.2.3 -m v1.2.3
+  g -C "$work/r" push -q origin v1.2.3
+  next_commit
+  : >"$work/output"
+  GITHUB_OUTPUT="$work/output" run || return 1
+  grep -qx 'release=false' "$work/output" && grep -q '::warning::the tag v1.2.3' "$work/out" \
+    && ! grep -q 'try 1' "$work/out"
+}
+
+release_check_releases_again_a_tag_at_this_commit_without_release() {
+  # A release of this commit stopped after it made the tag: a re-run of
+  # the whole CI run releases it again.
+  repo 1.2.3
+  g -C "$work/r" tag -a v1.2.3 -m v1.2.3
+  g -C "$work/r" push -q origin v1.2.3
+  : >"$work/output"
+  GITHUB_OUTPUT="$work/output" run || return 1
+  grep -qx 'release=true' "$work/output" && grep -q 'releases it again' "$work/out"
+}
+
+release_check_still_wants_notes_for_a_tag_at_this_commit() {
+  repo 1.2.3
+  rm "$work/r/release-notes/v1.2.3.md"
   g -C "$work/r" tag v1.2.3
   g -C "$work/r" push -q origin v1.2.3
-  ! run && grep -q 'exists but there is no GitHub release' "$work/out" \
-    && grep -q 'try 1 of 2' "$work/out"
+  ! run && grep -q '::error file=release-notes/v1.2.3.md::' "$work/out"
 }
 
 release_check_fails_when_the_release_lookup_fails() {
   repo 1.2.3
   g -C "$work/r" tag v1.2.3
+  g -C "$work/r" push -q origin v1.2.3
   touch "$work/gh-broken"
   ! run && grep -q 'could not look up the release v1.2.3' "$work/out" \
-    && ! grep -q 'no GitHub release' "$work/out"
+    && grep -q 'try 1 of 2' "$work/out" && ! grep -q 'release=' "$work/out"
 }
 
 release_check_fails_without_notes() {
@@ -178,6 +215,7 @@ release_check_fails_without_a_version() {
 release_check_refuses_a_bad_retry_count() {
   repo 1.2.3
   g -C "$work/r" tag v1.2.3
+  g -C "$work/r" push -q origin v1.2.3
   ! RELEASE_CHECK_TRIES=x run && grep -q 'RELEASE_CHECK_TRIES' "$work/out" || return 1
   ! RELEASE_CHECK_TRIES=0 run && grep -q 'RELEASE_CHECK_TRIES' "$work/out" || return 1
   ! RELEASE_CHECK_WAIT=1.5 run && grep -q 'RELEASE_CHECK_WAIT' "$work/out"
@@ -219,9 +257,11 @@ for t in \
   release_check_releases_a_new_version_with_notes \
   release_check_releases_a_pre_release \
   release_check_skips_a_released_version_tagged_on_the_remote \
-  release_check_skips_a_released_version_tagged_here \
+  release_check_ignores_a_local_tag \
   release_check_skips_without_notes_when_released \
-  release_check_fails_on_a_stray_tag \
+  release_check_skips_with_a_warning_while_another_commit_publishes \
+  release_check_releases_again_a_tag_at_this_commit_without_release \
+  release_check_still_wants_notes_for_a_tag_at_this_commit \
   release_check_fails_when_the_release_lookup_fails \
   release_check_fails_without_notes \
   release_check_fails_on_empty_notes \

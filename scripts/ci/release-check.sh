@@ -11,18 +11,21 @@
 #
 #   bash scripts/ci/release-check.sh
 #
-# reads the workspace version and asks whether the tag v<version> exists,
-# here or on the remote:
+# reads the workspace version and asks whether the tag v<version> exists on
+# the remote (only there: a tag in a local clone proves nothing):
 #
 # - the tag exists and so does its GitHub release: the version did not
 #   change since the last release, so there is nothing to release. One line,
 #   release=false, exit 0.
-# - the tag exists but has no GitHub release: exit 1, naming the stray tag
-#   and how to remove it. A tag pushed by hand, or a release run that stopped
-#   after it made the tag, would otherwise read as released, and that version
-#   would never ship. A release that is publishing right now has its tag a
-#   moment before its release, so a missing release is looked up again a few
-#   times before this fails.
+# - the tag exists at another commit and has no GitHub release: this push
+#   did not bring the version, so it releases nothing (release=false, exit
+#   0), with a ::warning:: that names the tag. Either the release of that
+#   commit is publishing right now (it makes the tag a moment before the
+#   release), or it stopped after the tag, or the tag was pushed by hand.
+#   Failing here would turn every merge in a release's publish window red.
+# - the tag exists at this commit and has no GitHub release: a release of
+#   this commit stopped after it made the tag, so this run releases it again
+#   (as a new tag would). release.yml accepts a tag at the tested commit.
 # - the tag is new and release-notes/v<version>.md is there, not empty and
 #   opens with a level-one heading (the motto): release=true, exit 0.
 # - the tag is new and the notes file is missing or has no heading: exit 1.
@@ -32,9 +35,9 @@
 #
 # A tag lookup that fails (network, a remote that does not answer) exits 1. It
 # never reads as "no tag", which would start a release. A release lookup that
-# fails is tried again too, then exits 1, and never reads as "no release".
-# $RELEASE_CHECK_TRIES (default 6) and $RELEASE_CHECK_WAIT (seconds between
-# tries, default 30) set how long it waits.
+# fails (anything but a 404) is tried again, then exits 1, and never reads as
+# "no release". $RELEASE_CHECK_TRIES (default 6) and $RELEASE_CHECK_WAIT
+# (seconds between tries, default 30) set how long it waits.
 #
 # The release lookup goes through `gh api`, so it needs gh and a token
 # (GH_TOKEN on GitHub Actions, `gh auth login` locally). The repository is
@@ -98,10 +101,10 @@ repo_slug() {
   fi
 }
 
-# Whether the GitHub release for a tag exists: prints yes or no. A missing
-# release or a failed lookup is tried again, up to $RELEASE_CHECK_TRIES
-# times, so a release that is publishing and a passing API error both pass.
-# Returns 1 when the last lookup failed, which never reads as "no release".
+# Whether the GitHub release for a tag exists: prints yes or no (a 404). A
+# failed lookup is tried again, up to $RELEASE_CHECK_TRIES times, so a
+# passing API error passes. Returns 1 when the last lookup failed, which
+# never reads as "no release".
 release_exists() {
   local tag="$1" repo err="" rc try
   local tries="${RELEASE_CHECK_TRIES:-6}" wait="${RELEASE_CHECK_WAIT:-30}"
@@ -119,18 +122,18 @@ release_exists() {
       echo yes
       return 0
     fi
+    if grep -q 'HTTP 404' <<<"$err"; then
+      echo no
+      return 0
+    fi
     if [ "$try" -ge "$tries" ]; then
       break
     fi
-    echo "release: found no release $tag in $repo (try $try of $tries), looking again in ${wait}s" >&2
+    echo "release: the lookup of the release $tag in $repo failed (try $try of $tries), trying again in ${wait}s" >&2
     sleep "$wait"
   done
-  if grep -q 'HTTP 404' <<<"$err"; then
-    echo no
-  else
-    echo "::error::could not look up the release $tag in $repo (gh api exit $rc: $err)" >&2
-    return 1
-  fi
+  echo "::error::could not look up the release $tag in $repo (gh api exit $rc: $err)" >&2
+  return 1
 }
 
 output() {
@@ -161,24 +164,21 @@ fi
 tag="v$version"
 output tag "$tag"
 
-where=""
-if git -C "$root" rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-  where="here"
-else
-  commit="$(tag_commit "$tag")"
-  if [ -n "$commit" ]; then
-    where="on $remote (at $commit)"
-  fi
-fi
-if [ -n "$where" ]; then
+commit="$(tag_commit "$tag")"
+if [ -n "$commit" ]; then
   released="$(release_exists "$tag")"
-  if [ "$released" != yes ]; then
-    echo "::error::the tag $tag exists but there is no GitHub release for it. It was pushed by hand, or a release run stopped after it made the tag, or a release run is still publishing (wait for it and re-run this job). While the tag is there no merge releases $version. If a release run failed, re-run its failed jobs. Otherwise an admin deletes the tag with 'git push origin :refs/tags/$tag' (and 'git tag -d $tag' locally), then re-runs this job." >&2
-    exit 1
+  if [ "$released" = yes ]; then
+    echo "release: $tag is already tagged on $remote (at $commit) and released, nothing to release"
+    output release false
+    exit 0
   fi
-  echo "release: $tag is already tagged $where and released, nothing to release"
-  output release false
-  exit 0
+  head="$(git -C "$root" rev-parse HEAD)"
+  if [ "$commit" != "$head" ]; then
+    echo "::warning::the tag $tag is at $commit, not at this commit, and has no GitHub release yet. This push does not change the version, so it releases nothing. If the release run of $commit is still publishing, nothing is to do. If it failed, re-run its failed jobs. If the tag was pushed by hand, an admin deletes it with 'git push origin :refs/tags/$tag' and re-runs the release-check job of the commit that should release $tag."
+    output release false
+    exit 0
+  fi
+  echo "release: $tag is at this commit but has no GitHub release, so this run releases it again"
 fi
 
 notes="release-notes/$tag.md"
