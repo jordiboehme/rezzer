@@ -89,8 +89,16 @@ jobs:
   # rehearsal of a tag proves its notes file and version too.
   # The tag check against the crate version lives here too, so the build
   # legs (Windows among them) need neither jq nor a second copy of it.
+  #
+  # Only in this repository. The file is public, so any public repository
+  # could call it with workflow_call; that run would check out the caller's
+  # code and sign it with a certificate that names this file. GitHub
+  # evaluates this `if` before any step runs, and every later job needs
+  # this one, so such a run does nothing. publish and attest-sboms, which
+  # hold id-token: write, repeat the condition.
   notes:
     name: verify the release notes file and the version
+    if: ${{ github.repository == 'jordiboehme/rezzer' }}
     # A toolchain install with its retries can take a few minutes.
     timeout-minutes: 10
     runs-on: ubuntu-latest
@@ -1066,6 +1074,8 @@ jobs:
   attest-sboms:
     name: attest the SBOM (${{ matrix.platform }})
     needs: [notes, collect]
+    # This repository only, as notes.
+    if: ${{ github.repository == 'jordiboehme/rezzer' }}
     timeout-minutes: 10
     runs-on: ubuntu-latest
     # id-token and attestations: keyless signing of the attestation
@@ -1121,8 +1131,9 @@ jobs:
     needs: [notes, collect, attest-sboms]
     timeout-minutes: 15
     runs-on: ubuntu-latest
-    # Only a call from CI or a tag push, never a dispatch (see the notes job).
-    if: ${{ needs.notes.outputs.publish == 'true' }}
+    # Only a call from CI or a tag push, never a dispatch (see the notes
+    # job), and only in this repository (as notes).
+    if: ${{ github.repository == 'jordiboehme/rezzer' && needs.notes.outputs.publish == 'true' }}
     # contents: write creates the release. id-token: keyless signing of
     # SHA256SUMS and of the provenance attestation (Sigstore through GitHub's
     # OIDC token). attestations: storing the attestation. Nothing else.
@@ -1131,7 +1142,11 @@ jobs:
       id-token: write # Sigstore signing of SHA256SUMS and the attestation
       attestations: write # store the attestation
     steps:
-      # For release-notes/<tag>.md only. Nothing from the tree runs here.
+      # For release-notes/<tag>.md and, in a call from CI, for
+      # scripts/ci/release-check.sh in the tag step. That script is the
+      # tested tree of this repository: the job runs only here (see notes),
+      # at the commit ci-passed tested or at a protected v* tag. Nothing
+      # else from the tree runs here.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -1165,7 +1180,9 @@ jobs:
       # run started on: refs/tags/v<version> for a tag push, refs/heads/main
       # for a call from CI (Fulcio names the called workflow, at the
       # caller's ref). GITHUB_REF is that ref in both cases. README.md and
-      # SECURITY.md give users a pattern that accepts both.
+      # SECURITY.md give users a pattern that accepts both. The workflow
+      # repository (the caller's) binds the check to this repository, since
+      # the identity alone names only the file.
       - name: Sign SHA256SUMS
         run: |
           set -euo pipefail
@@ -1173,6 +1190,7 @@ jobs:
           cosign verify-blob release/SHA256SUMS \
             --bundle release/SHA256SUMS.sigstore.json \
             --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@${GITHUB_REF}" \
+            --certificate-github-workflow-repository jordiboehme/rezzer \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
       # Build provenance for every release asset in one attestation: the
