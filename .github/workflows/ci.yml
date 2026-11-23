@@ -222,21 +222,21 @@ jobs:
 
       # The install-action download can fail on a bad network day. The second
       # step is the same install and runs only after the first one failed.
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         id: nextest
         continue-on-error: true
         with:
-          tool: nextest@0.9.151
+          tool: nextest@0.9.152
           fallback: none
 
       - name: Wait before the second try
         if: ${{ steps.nextest.outcome == 'failure' }}
         run: sleep 30
 
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         if: ${{ steps.nextest.outcome == 'failure' }}
         with:
-          tool: nextest@0.9.151
+          tool: nextest@0.9.152
           fallback: none
 
       # Only main saves the cache, so a pull request cannot plant artifacts
@@ -308,21 +308,21 @@ jobs:
 
       # The install-action download can fail on a bad network day. The second
       # step is the same install and runs only after the first one failed.
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         id: nextest
         continue-on-error: true
         with:
-          tool: nextest@0.9.151
+          tool: nextest@0.9.152
           fallback: none
 
       - name: Wait before the second try
         if: ${{ steps.nextest.outcome == 'failure' }}
         run: sleep 30
 
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         if: ${{ steps.nextest.outcome == 'failure' }}
         with:
-          tool: nextest@0.9.151
+          tool: nextest@0.9.152
           fallback: none
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -378,7 +378,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+      - uses: EmbarkStudios/cargo-deny-action@70f81531115945ba6eb6b941ec9d39d063438eb9 # v2.1.2
         with:
           # The rust-toolchain.toml pin, so the action's container does not
           # resolve a different toolchain. Dependabot does not update this
@@ -412,7 +412,7 @@ jobs:
       - name: zizmor
         uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
         with:
-          version: 1.31.1
+          version: 1.32.0
           advanced-security: false
           annotations: true
 

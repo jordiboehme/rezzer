@@ -298,7 +298,7 @@ jobs:
       # `fallback: none` fails the step rather than downloading an unpinned
       # binary. The second step is the same install and runs only after the
       # first one failed (a bad network day).
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         id: about
         continue-on-error: true
         with:
@@ -309,7 +309,7 @@ jobs:
         if: ${{ steps.about.outcome == 'failure' }}
         run: sleep 30
 
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         if: ${{ steps.about.outcome == 'failure' }}
         with:
           tool: cargo-about@0.9.3
@@ -469,7 +469,7 @@ jobs:
       # binary.
       # The second step is the same install and runs only after the first
       # one failed (a bad network day).
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         id: auditable
         continue-on-error: true
         with:
@@ -480,7 +480,7 @@ jobs:
         if: ${{ steps.auditable.outcome == 'failure' }}
         run: sleep 30
 
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         if: ${{ steps.auditable.outcome == 'failure' }}
         with:
           tool: cargo-auditable@0.7.7
@@ -822,21 +822,21 @@ jobs:
       # `fallback: none` fails the step rather than downloading an unpinned
       # binary. The second step is the same install and runs only after the
       # first one failed (a bad network day).
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         id: cyclonedx
         continue-on-error: true
         with:
-          tool: cargo-cyclonedx@0.5.9
+          tool: cargo-cyclonedx@0.5.10
           fallback: none
 
       - name: Wait before the second try
         if: ${{ steps.cyclonedx.outcome == 'failure' }}
         run: sleep 30
 
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
         if: ${{ steps.cyclonedx.outcome == 'failure' }}
         with:
-          tool: cargo-cyclonedx@0.5.9
+          tool: cargo-cyclonedx@0.5.10
           fallback: none
 
       # No --target: the crates of all six targets must be in the registry.
