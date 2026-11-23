@@ -160,8 +160,10 @@ jobs:
             # The caller checked the tag, but this job runs after the wait in
             # the concurrency group, so look again. new: build. resume: the
             # tag is at this commit without a release (a re-run), build.
-            # taken: another commit's release won the race. released: this
-            # commit is released already. Both stop here, green.
+            # taken: another commit of this version won the race. released:
+            # this commit is released already. Both stop here, green. stray:
+            # the tag is at a commit of another version, pushed by hand at the
+            # wrong commit; that fails, as release-check.sh does.
             state="$(bash scripts/ci/release-check.sh tag-state "$version" "$GITHUB_SHA")"
             case "$state" in
               new | resume) ;;
@@ -174,6 +176,10 @@ jobs:
                 echo "::notice::release: $version is already tagged at $GITHUB_SHA and released; nothing to do"
                 build=false
                 publish=false
+                ;;
+              stray)
+                echo "::error::the tag $version exists at a commit of another version and has no matching release. It was pushed by hand at the wrong commit. While the tag is there no merge releases $version. An admin deletes it with 'git push origin :refs/tags/$version', then re-runs the release-check job of the commit that should release it."
+                exit 1
                 ;;
               *)
                 echo "::error::release-check.sh tag-state answered '$state'"

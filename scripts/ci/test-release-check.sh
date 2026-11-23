@@ -299,6 +299,31 @@ tag_state_reads_new_resume_released_and_taken() {
   run tag-state v1.2.3 "$(g -C "$work/r" rev-parse HEAD)" && [ "$(cat "$work/out")" = taken ]
 }
 
+tag_state_reads_a_stray_tag_of_another_version() {
+  # v1.2.3 pushed by hand at a commit that says 1.2.2, then the bump.
+  repo 1.2.2
+  g -C "$work/r" tag v1.2.3
+  g -C "$work/r" push -q origin v1.2.3
+  sed 's/^version = "1.2.2"/version = "1.2.3"/' "$work/r/Cargo.toml" >"$work/c" \
+    && mv "$work/c" "$work/r/Cargo.toml"
+  g -C "$work/r" add -A
+  g -C "$work/r" commit -q -m bump
+  g -C "$work/r" push -q origin main
+  run tag-state v1.2.3 "$(g -C "$work/r" rev-parse HEAD)" && [ "$(cat "$work/out")" = stray ]
+}
+
+tag_state_reads_taken_from_a_shallow_clone() {
+  # As on GitHub Actions: the other commit is fetched through its tag.
+  repo 1.2.3
+  g -C "$work/r" tag -a v1.2.3 -m v1.2.3
+  g -C "$work/r" push -q origin v1.2.3
+  next_commit
+  rm -rf "$work/shallow"
+  g clone -q --depth=1 --no-tags "file://$work/remote.git" "$work/shallow"
+  RELEASE_CHECK_ROOT="$work/shallow" bash "$script" tag-state v1.2.3 \
+    "$(g -C "$work/r" rev-parse HEAD)" >"$work/out" 2>&1 && [ "$(cat "$work/out")" = taken ]
+}
+
 tag_state_fails_when_the_release_lookup_fails() {
   repo 1.2.3
   g -C "$work/r" tag v1.2.3
@@ -333,6 +358,8 @@ for t in \
   tag_commit_fails_when_the_remote_does_not_answer \
   release_check_refuses_unknown_arguments \
   tag_state_reads_new_resume_released_and_taken \
+  tag_state_reads_a_stray_tag_of_another_version \
+  tag_state_reads_taken_from_a_shallow_clone \
   tag_state_fails_when_the_release_lookup_fails; do
   "$t"
   check "$t" "$?"

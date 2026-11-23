@@ -65,8 +65,10 @@
 # word: `new` (no tag), `resume` (the tag is at <commit>, no release yet: a
 # re-run after a stop between tag and release), `released` (the tag is at
 # <commit> and its release exists, for example a hand tag push of the same
-# commit published first) or `taken` (the tag is at another commit: another
-# run won). Only new and resume build. Exit 1 on a lookup error.
+# commit published first), `taken` (the tag is at another commit of the
+# same version: another run won) or `stray` (the tag is at a commit of
+# another version, or of none: pushed by hand at the wrong commit). Only new
+# and resume build; the notes job fails on stray. Exit 1 on a lookup error.
 #
 # The remote is `origin`, or $RELEASE_CHECK_REMOTE when set. The tree is the
 # repository this script is in, or $RELEASE_CHECK_ROOT when set (the tests).
@@ -167,14 +169,15 @@ workspace_version() {
     }'
 }
 
-# The workspace version at a commit of the remote. The checkout on GitHub
-# Actions is shallow, so the commit is fetched first (one commit, no tags).
+# version_at <commit> <tag>: the workspace version at <commit>, the commit
+# <tag> points to on the remote. The checkout on GitHub Actions is shallow,
+# so the commit is fetched through its tag first (one commit, no tags).
 # Returns 1 when the fetch or the read fails.
 version_at() {
-  local commit="$1" toml
+  local commit="$1" ref="$2" toml
   if ! git -C "$root" cat-file -e "$commit^{commit}" 2>/dev/null; then
-    git -C "$root" fetch -q --no-tags --depth=1 "$remote" "refs/tags/$tag" || {
-      echo "::error::could not fetch the tag $tag from the remote $remote" >&2
+    git -C "$root" fetch -q --no-tags --depth=1 "$remote" "refs/tags/$ref" || {
+      echo "::error::could not fetch the tag $ref from the remote $remote" >&2
       return 1
     }
   fi
@@ -196,7 +199,13 @@ if [ "${1:-}" = "tag-state" ]; then
   if [ -z "$at" ]; then
     echo new
   elif [ "$at" != "$3" ]; then
-    echo taken
+    # An assignment of its own, so a failed fetch or read stops the script.
+    other="$(version_at "$at" "$2")"
+    if [ "v$other" = "$2" ]; then
+      echo taken
+    else
+      echo stray
+    fi
   else
     # An assignment of its own, so a failed lookup stops the script (set -e)
     # instead of reading as "no release".
@@ -230,7 +239,7 @@ if [ -n "$commit" ]; then
   fi
   head="$(git -C "$root" rev-parse HEAD)"
   if [ "$commit" != "$head" ]; then
-    tagged_version="$(version_at "$commit")"
+    tagged_version="$(version_at "$commit" "$tag")"
     if [ "$tagged_version" = "$version" ]; then
       echo "::warning::the tag $tag is at the earlier commit $commit of this version and has no GitHub release yet. This push does not change the version, so it releases nothing. If the release run of $commit is still publishing, nothing is to do. If it failed, re-run its failed jobs."
       output release false
