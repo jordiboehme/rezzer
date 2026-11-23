@@ -42,7 +42,7 @@ repository = "https://github.com/jordiboehme/rezzer"
 rust-version = "1.99.1"
 
 [workspace.dependencies]
-rmcp = { version = "=3.9.0", default-features = false }
+rmcp = { version = "=3.10.0", default-features = false }
 clap = "=4.6.7"
 serde = "=1.0.229"
 serde_json = "=1.0.154"
@@ -57,13 +57,13 @@ whatlang = "=0.18.0"
 tokio = "=1.54.1"
 schemars = "=1.2.3"
 toml = "=1.2.1"
-saphyr-parser = "=0.3.3"
+saphyr-parser = "=0.3.4"
 anyhow = "=1.0.104"
 insta = "=1.49.0"
 tempfile = "=3.27.0"
 assert_cmd = "=2.2.2"
 predicates = "=3.1.4"
-zip = { version = "=9.5.1", default-features = false }
+zip = { version = "=9.6.0", default-features = false }
 cfb = "=0.16.0"
 libc = "=0.2.191"
 # Writes and removals relative to an open folder, without following a symlink (Unix only).
@@ -80,7 +80,7 @@ lopdf = { version = "=0.47.0", default-features = false }
 weezl = "=0.2.1"
 # The Adler-32 of zlib streams; already in the tree through miniz_oxide.
 adler2 = { version = "=2.0.1", default-features = false }
-brotli-decompressor = "=6.3.1"
+brotli-decompressor = "=6.3.2"
 # One version for the three hayro crates. hayro-interpret's default features embed the
 # standard 14 font substitutes and the predefined CMaps that text extraction needs.
 hayro = "=0.8.0"
