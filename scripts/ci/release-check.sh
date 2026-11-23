@@ -17,12 +17,17 @@
 # - the tag exists and so does its GitHub release: the version did not
 #   change since the last release, so there is nothing to release. One line,
 #   release=false, exit 0.
-# - the tag exists at another commit and has no GitHub release: this push
-#   did not bring the version, so it releases nothing (release=false, exit
-#   0), with a ::warning:: that names the tag. Either the release of that
-#   commit is publishing right now (it makes the tag a moment before the
-#   release), or it stopped after the tag, or the tag was pushed by hand.
-#   Failing here would turn every merge in a release's publish window red.
+# - the tag exists at another commit whose Cargo.toml has this same
+#   version, and has no GitHub release: an earlier commit of this version
+#   is releasing (it makes the tag a moment before the release) or its
+#   release failed, which shows as its own red run. This push did not bring
+#   the version, so it releases nothing (release=false, exit 0), with a
+#   ::warning:: that names the tag. Failing here would turn every merge in a
+#   release's publish window red.
+# - the tag exists at another commit with another version in its Cargo.toml
+#   and has no GitHub release: a stray tag, pushed by hand at the wrong
+#   commit. Exit 1, naming the tag and how to remove it: while it is there
+#   no merge can release this version, and a quiet skip would hide that.
 # - the tag exists at this commit and has no GitHub release: a release of
 #   this commit stopped after it made the tag, so this run releases it again
 #   (as a new tag would). release.yml accepts a tag at the tested commit.
@@ -51,7 +56,17 @@
 #
 # prints the commit the tag points to on the remote (peeled, so an annotated
 # tag gives its commit), or nothing when the tag does not exist; exit 1 on a
-# lookup error. release.yml uses it to find a tag another run already made.
+# lookup error. release.yml's publish job uses it to find a tag another run
+# already made.
+#
+#   bash scripts/ci/release-check.sh tag-state v1.2.3 <commit>
+#
+# tells release.yml's notes job, in a call from CI, whether to build. One
+# word: `new` (no tag), `resume` (the tag is at <commit>, no release yet: a
+# re-run after a stop between tag and release), `released` (the tag is at
+# <commit> and its release exists, for example a hand tag push of the same
+# commit published first) or `taken` (the tag is at another commit: another
+# run won). Only new and resume build. Exit 1 on a lookup error.
 #
 # The remote is `origin`, or $RELEASE_CHECK_REMOTE when set. The tree is the
 # repository this script is in, or $RELEASE_CHECK_ROOT when set (the tests).
@@ -142,20 +157,61 @@ output() {
   fi
 }
 
+# `version = "x.y.z"` inside [workspace.package] of the Cargo.toml on stdin,
+# up to the next section: the same read as version-pins.sh.
+workspace_version() {
+  awk '
+    /^\[/ { inside = ($0 ~ /^\[workspace\.package\][[:space:]]*$/) ; next }
+    inside && /^version[[:space:]]*=/ {
+      sub(/^version[[:space:]]*=[[:space:]]*"/, ""); sub(/".*$/, ""); print; exit
+    }'
+}
+
+# The workspace version at a commit of the remote. The checkout on GitHub
+# Actions is shallow, so the commit is fetched first (one commit, no tags).
+# Returns 1 when the fetch or the read fails.
+version_at() {
+  local commit="$1" toml
+  if ! git -C "$root" cat-file -e "$commit^{commit}" 2>/dev/null; then
+    git -C "$root" fetch -q --no-tags --depth=1 "$remote" "refs/tags/$tag" || {
+      echo "::error::could not fetch the tag $tag from the remote $remote" >&2
+      return 1
+    }
+  fi
+  toml="$(git -C "$root" show "$commit:Cargo.toml")" || {
+    echo "::error::could not read Cargo.toml at $commit" >&2
+    return 1
+  }
+  workspace_version <<<"$toml"
+}
+
 if [ "${1:-}" = "tag-commit" ]; then
   [ "$#" -eq 2 ] && [ -n "$2" ] || { echo "usage: $0 tag-commit <tag>" >&2; exit 2; }
   tag_commit "$2"
   exit 0
 fi
-[ "$#" -eq 0 ] || { echo "usage: $0 [tag-commit <tag>]" >&2; exit 2; }
+if [ "${1:-}" = "tag-state" ]; then
+  [ "$#" -eq 3 ] && [ -n "$2" ] && [ -n "$3" ] || { echo "usage: $0 tag-state <tag> <commit>" >&2; exit 2; }
+  at="$(tag_commit "$2")"
+  if [ -z "$at" ]; then
+    echo new
+  elif [ "$at" != "$3" ]; then
+    echo taken
+  else
+    # An assignment of its own, so a failed lookup stops the script (set -e)
+    # instead of reading as "no release".
+    released="$(release_exists "$2")"
+    if [ "$released" = yes ]; then
+      echo released
+    else
+      echo resume
+    fi
+  fi
+  exit 0
+fi
+[ "$#" -eq 0 ] || { echo "usage: $0 [tag-commit <tag> | tag-state <tag> <commit>]" >&2; exit 2; }
 
-# `version = "x.y.z"` inside [workspace.package], up to the next section: the
-# same read as version-pins.sh.
-version="$(awk '
-  /^\[/ { inside = ($0 ~ /^\[workspace\.package\][[:space:]]*$/) ; next }
-  inside && /^version[[:space:]]*=/ {
-    sub(/^version[[:space:]]*=[[:space:]]*"/, ""); sub(/".*$/, ""); print; exit
-  }' "$root/Cargo.toml")"
+version="$(workspace_version <"$root/Cargo.toml")"
 # A pre-release such as 0.2.0-rc.1 releases too; release.yml marks it as one.
 if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
   echo "::error file=Cargo.toml::no version of the form X.Y.Z or X.Y.Z-pre in [workspace.package] of Cargo.toml (found '$version')" >&2
@@ -174,9 +230,14 @@ if [ -n "$commit" ]; then
   fi
   head="$(git -C "$root" rev-parse HEAD)"
   if [ "$commit" != "$head" ]; then
-    echo "::warning::the tag $tag is at $commit, not at this commit, and has no GitHub release yet. This push does not change the version, so it releases nothing. If the release run of $commit is still publishing, nothing is to do. If it failed, re-run its failed jobs. If the tag was pushed by hand, an admin deletes it with 'git push origin :refs/tags/$tag' and re-runs the release-check job of the commit that should release $tag."
-    output release false
-    exit 0
+    tagged_version="$(version_at "$commit")"
+    if [ "$tagged_version" = "$version" ]; then
+      echo "::warning::the tag $tag is at the earlier commit $commit of this version and has no GitHub release yet. This push does not change the version, so it releases nothing. If the release run of $commit is still publishing, nothing is to do. If it failed, re-run its failed jobs."
+      output release false
+      exit 0
+    fi
+    echo "::error::the tag $tag exists at $commit, whose Cargo.toml says version '$tagged_version', and there is no GitHub release for it. It was pushed by hand at the wrong commit. While the tag is there no merge releases $version. An admin deletes it with 'git push origin :refs/tags/$tag' (and 'git tag -d $tag' locally), then re-runs this job." >&2
+    exit 1
   fi
   echo "release: $tag is at this commit but has no GitHub release, so this run releases it again"
 fi

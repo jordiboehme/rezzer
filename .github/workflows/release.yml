@@ -126,9 +126,12 @@ jobs:
       # tagged is true when the run has a real version (a call, a tag push or
       # a dispatch on a tag ref): then the macOS legs must sign.
       # called is true for a call from CI, which has to create the tag.
-      # build is false only when a call finds its tag already at another
-      # commit: another release of this version won the race, so this run
-      # skips everything after this job and stays green.
+      # build is false only in a call whose release is already decided: its
+      # tag is at another commit (another release of this version won the
+      # race), or its tag is at this commit and its release exists (a hand
+      # tag push of the same commit published first, while this call waited
+      # in the concurrency group). Then this run skips everything after this
+      # job and stays green.
       # prerelease is true when the version has a suffix after a '-' (v0.2.0-rc.1,
       # and v0.0.0-dev): publish marks such a release as a pre-release, and
       # the homebrew job skips it, so only a plain release reaches the tap.
@@ -139,6 +142,8 @@ jobs:
         shell: bash
         env:
           INPUT_TAG: ${{ inputs.tag }}
+          # tag-state looks up the GitHub release; the read-only token is enough.
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           called=false
@@ -152,16 +157,29 @@ jobs:
             called=true
             publish=true
             tagged=true
-            # The caller checked that the tag is new, but a second push to
-            # main can pass that check while the first release still runs.
-            # The tag at this commit is a re-run and goes on; the tag at
-            # another commit means that release won, so this one stops here.
-            at="$(bash scripts/ci/release-check.sh tag-commit "$version")"
-            if [ -n "$at" ] && [ "$at" != "$GITHUB_SHA" ]; then
-              echo "release: $version already points at $at, not at $GITHUB_SHA, so another run released it; nothing to do"
-              build=false
-              publish=false
-            fi
+            # The caller checked the tag, but this job runs after the wait in
+            # the concurrency group, so look again. new: build. resume: the
+            # tag is at this commit without a release (a re-run), build.
+            # taken: another commit's release won the race. released: this
+            # commit is released already. Both stop here, green.
+            state="$(bash scripts/ci/release-check.sh tag-state "$version" "$GITHUB_SHA")"
+            case "$state" in
+              new | resume) ;;
+              taken)
+                echo "::notice::release: $version already points at another commit, so another run releases it; nothing to do"
+                build=false
+                publish=false
+                ;;
+              released)
+                echo "::notice::release: $version is already tagged at $GITHUB_SHA and released; nothing to do"
+                build=false
+                publish=false
+                ;;
+              *)
+                echo "::error::release-check.sh tag-state answered '$state'"
+                exit 1
+                ;;
+            esac
           elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
             version="$GITHUB_REF_NAME"
             tagged=true

@@ -471,9 +471,11 @@ jobs:
   # [workspace.package] and adds release-notes/v<version>.md. Once that merge
   # passes ci-passed on main, this releases it. scripts/ci/release-check.sh
   # decides: a version that is tagged and released is a no-op with one line;
-  # a new version without its notes fails here; a tag at another commit
-  # without a release is a no-op with a warning (that commit's release may
-  # be publishing right now); and a new version with its notes releases.
+  # a new version without its notes fails here; a tag without a release at
+  # an earlier commit of the same version is a no-op with a warning (that
+  # commit's release may be publishing right now); a tag without a release
+  # at a commit of another version (a stray tag) fails here; and a new
+  # version with its notes releases.
   #
   # It waits for ci-passed only, the one aggregate the `main` ruleset
   # requires. That ci-passed is the one of this push run, which tested the

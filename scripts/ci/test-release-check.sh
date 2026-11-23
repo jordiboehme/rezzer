@@ -132,9 +132,9 @@ next_commit() {
 }
 
 release_check_skips_with_a_warning_while_another_commit_publishes() {
-  # The tag is at the bump commit, its release is not there yet (publishing,
-  # failed or a hand-pushed tag). A later push without a version change must
-  # stay green and release nothing.
+  # The tag is at the bump commit of this version, its release is not there
+  # yet (publishing, or failed in its own red run). A later push without a
+  # version change must stay green and release nothing.
   repo 1.2.3
   g -C "$work/r" tag -a v1.2.3 -m v1.2.3
   g -C "$work/r" push -q origin v1.2.3
@@ -143,6 +143,38 @@ release_check_skips_with_a_warning_while_another_commit_publishes() {
   GITHUB_OUTPUT="$work/output" run || return 1
   grep -qx 'release=false' "$work/output" && grep -q '::warning::the tag v1.2.3' "$work/out" \
     && ! grep -q 'try 1' "$work/out"
+}
+
+release_check_skips_with_a_warning_from_a_shallow_clone() {
+  # As on GitHub Actions: a depth-1 clone of main lacks the tag commit, so
+  # the script fetches it to read its version.
+  repo 1.2.3
+  g -C "$work/r" tag -a v1.2.3 -m v1.2.3
+  g -C "$work/r" push -q origin v1.2.3
+  next_commit
+  rm -rf "$work/shallow"
+  g clone -q --depth=1 --no-tags "file://$work/remote.git" "$work/shallow"
+  ! g -C "$work/shallow" cat-file -e "$(g -C "$work/r" rev-parse HEAD~1)^{commit}" 2>/dev/null || return 1
+  RELEASE_CHECK_ROOT="$work/shallow" bash "$script" >"$work/out" 2>&1 \
+    && grep -q '::warning::the tag v1.2.3' "$work/out"
+}
+
+release_check_fails_on_a_stray_tag_of_another_version() {
+  # v1.2.3 pushed by hand at a commit that still says 1.2.2; the release
+  # pull request bumps to 1.2.3 later. The merge must fail, not skip.
+  repo 1.2.2
+  g -C "$work/r" tag v1.2.3
+  g -C "$work/r" push -q origin v1.2.3
+  sed 's/^version = "1.2.2"/version = "1.2.3"/' "$work/r/Cargo.toml" >"$work/c" \
+    && mv "$work/c" "$work/r/Cargo.toml"
+  printf '# Next\n\nText.\n' >"$work/r/release-notes/v1.2.3.md"
+  g -C "$work/r" add -A
+  g -C "$work/r" commit -q -m bump
+  g -C "$work/r" push -q origin main
+  : >"$work/output"
+  ! GITHUB_OUTPUT="$work/output" run && grep -q "says version '1.2.2'" "$work/out" \
+    && grep -q 'pushed by hand at the wrong commit' "$work/out" \
+    && ! grep -q 'release=' "$work/output"
 }
 
 release_check_releases_again_a_tag_at_this_commit_without_release() {
@@ -250,7 +282,30 @@ tag_commit_fails_when_the_remote_does_not_answer() {
 release_check_refuses_unknown_arguments() {
   repo 1.2.3
   ! run something || return 1
-  ! run tag-commit
+  ! run tag-commit || return 1
+  ! run tag-state v1.2.3
+}
+
+tag_state_reads_new_resume_released_and_taken() {
+  repo 1.2.3
+  head="$(g -C "$work/r" rev-parse HEAD)"
+  run tag-state v1.2.3 "$head" && [ "$(cat "$work/out")" = new ] || return 1
+  g -C "$work/r" tag -a v1.2.3 -m v1.2.3
+  g -C "$work/r" push -q origin v1.2.3
+  run tag-state v1.2.3 "$head" && [ "$(cat "$work/out")" = resume ] || return 1
+  echo v1.2.3 >"$work/releases"
+  run tag-state v1.2.3 "$head" && [ "$(cat "$work/out")" = released ] || return 1
+  next_commit
+  run tag-state v1.2.3 "$(g -C "$work/r" rev-parse HEAD)" && [ "$(cat "$work/out")" = taken ]
+}
+
+tag_state_fails_when_the_release_lookup_fails() {
+  repo 1.2.3
+  g -C "$work/r" tag v1.2.3
+  g -C "$work/r" push -q origin v1.2.3
+  touch "$work/gh-broken"
+  ! run tag-state v1.2.3 "$(g -C "$work/r" rev-parse HEAD)" \
+    && ! grep -qx 'resume' "$work/out" && grep -q 'could not look up the release' "$work/out"
 }
 
 for t in \
@@ -260,6 +315,8 @@ for t in \
   release_check_ignores_a_local_tag \
   release_check_skips_without_notes_when_released \
   release_check_skips_with_a_warning_while_another_commit_publishes \
+  release_check_skips_with_a_warning_from_a_shallow_clone \
+  release_check_fails_on_a_stray_tag_of_another_version \
   release_check_releases_again_a_tag_at_this_commit_without_release \
   release_check_still_wants_notes_for_a_tag_at_this_commit \
   release_check_fails_when_the_release_lookup_fails \
@@ -274,7 +331,9 @@ for t in \
   tag_commit_reads_a_lightweight_tag \
   tag_commit_prints_nothing_for_a_missing_tag \
   tag_commit_fails_when_the_remote_does_not_answer \
-  release_check_refuses_unknown_arguments; do
+  release_check_refuses_unknown_arguments \
+  tag_state_reads_new_resume_released_and_taken \
+  tag_state_fails_when_the_release_lookup_fails; do
   "$t"
   check "$t" "$?"
 done
