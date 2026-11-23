@@ -76,11 +76,12 @@ On Windows, run this in PowerShell and compare the hash with the line for your a
 (Get-FileHash rezzer-v<version>-windows-amd64.zip).Hash.ToLower()
 ```
 
-The checksum file is signed with [cosign](https://github.com/sigstore/cosign) in GitHub Actions. No key is needed: the signature says which workflow made it. Check it with cosign 3 or newer:
+The checksum file is signed with [cosign](https://github.com/sigstore/cosign) in GitHub Actions. No key is needed: the signature says which workflow made it. A release is made from `main` when a new version is merged, or from a version tag. The pattern below accepts both. Check it with cosign 3 or newer:
 
 ```sh
 cosign verify-blob --bundle SHA256SUMS.sigstore.json \
-  --certificate-identity-regexp '^https://github\.com/jordiboehme/rezzer/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-identity-regexp '^https://github\.com/jordiboehme/rezzer/\.github/workflows/release\.yml@refs/(tags/v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?|heads/main)$' \
+  --certificate-github-workflow-repository jordiboehme/rezzer \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   SHA256SUMS
 ```

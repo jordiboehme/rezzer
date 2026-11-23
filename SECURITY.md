@@ -30,11 +30,12 @@ Check the checksum of your archive. On macOS use `shasum -a 256` instead of `sha
 sha256sum -c SHA256SUMS --ignore-missing
 ```
 
-Check the signature of the checksum file (cosign 3 or newer):
+Check the signature of the checksum file (cosign 3 or newer). The release workflow signs it from `main` when a new version is merged, or from a version tag. The pattern accepts both:
 
 ```sh
 cosign verify-blob --bundle SHA256SUMS.sigstore.json \
-  --certificate-identity-regexp '^https://github\.com/jordiboehme/rezzer/\.github/workflows/release\.yml@refs/tags/v' \
+  --certificate-identity-regexp '^https://github\.com/jordiboehme/rezzer/\.github/workflows/release\.yml@refs/(tags/v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?|heads/main)$' \
+  --certificate-github-workflow-repository jordiboehme/rezzer \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   SHA256SUMS
 ```
