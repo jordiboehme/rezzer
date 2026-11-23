@@ -2,14 +2,15 @@
 # Usage: version-pins.sh [root]
 #
 # Checks that the files which name the release version agree with it, so a
-# release PR fails here and not at the tag:
+# release PR fails here and not after the merge, which releases the version:
 #
 # - the version is `version` in [workspace.package] of the root Cargo.toml,
 #   and crates/rezzer/Cargo.toml takes it with `version.workspace = true`
 #   (the binary's --version and the tag come from there)
 # - release-notes/v<version>.md exists, is not empty and opens with a
-#   level-one heading, the release motto. The release workflow's `notes` job
-#   checks the same on the tag and publishes the file as the release page
+#   level-one heading, the release motto. scripts/ci/release-check.sh and the
+#   release workflow's `notes` job check the same on main, and the release
+#   workflow publishes the file as the release page
 # - README.md exists, and every version pin in it names this version: the
 #   archive names `rezzer-v<version>-<os>-`, `rezzer/<version>` and the
 #   reader ids like `reader: "sheet/<version>"`. A README without pins passes
@@ -40,7 +41,7 @@ fi
 
 notes="release-notes/v$version.md"
 if [ ! -s "$root/$notes" ]; then
-  echo "::error file=$notes::$notes is missing or empty. The workspace version is $version, and the release workflow publishes this file as the release page. Add it before the tag." >&2
+  echo "::error file=$notes::$notes is missing or empty. The workspace version is $version, and the release workflow publishes this file as the release page. Add it in this pull request, because merging a new version releases it." >&2
   bad=1
 elif ! head -n1 "$root/$notes" | grep -qE '^# .*[^[:space:]]'; then
   echo "::error file=$notes::$notes must open with a level-one heading ('# ' and the release motto)." >&2
