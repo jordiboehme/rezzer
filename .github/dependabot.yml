@@ -13,6 +13,14 @@ updates:
     cooldown:
       default-days: 7
     open-pull-requests-limit: 10
+    # The hayro crates are held at 0.8.0: 0.9.0 drops
+    # OutlineGlyph::font_cache_key, which the PDF reader uses for font
+    # identity. Remove this when hayro exposes the font of a glyph run
+    # again (upstream PR #1620).
+    ignore:
+      - dependency-name: hayro
+      - dependency-name: hayro-interpret
+      - dependency-name: hayro-syntax
     commit-message:
       prefix: chore
       include: scope
