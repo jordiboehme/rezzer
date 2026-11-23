@@ -1,15 +1,52 @@
 name: Release
 
+# Three ways in. The `notes` job resolves the release version once and every
+# later job reads its outputs, never the ref:
+#
+# - workflow_call: the normal release. CI calls this on a push to main once
+#   ci-passed is green and the workspace version has no tag yet
+#   (scripts/ci/release-check.sh). The tag comes from the `tag` input;
+#   github.ref and github.event_name are the caller's here
+#   (refs/heads/main, push), so they say nothing about the release. The
+#   publish job creates the tag at the tested commit (github.sha).
+# - push of a `v*` tag: the fallback, as before. The tag is the pushed ref.
+# - workflow_dispatch: the manual dry run (rehearsal). It builds, signs when
+#   the secrets exist, packages and stops short of publishing; it never
+#   publishes, also on a tag ref.
+#
+# A failed run is retried with "Re-run failed jobs", which keeps its event
+# (for a call: re-run the failed jobs of the CI run).
 on:
   push:
     tags:
       - 'v*'
-  # Manual dry run (rehearsal): builds, signs when the secrets exist,
-  # packages and stops short of publishing. Only a tag push publishes (the
-  # `notes` job's `publish` output); a dispatch never does, also on a tag
-  # ref. A failed tag run is retried with "Re-run failed jobs", which keeps
-  # the push event.
   workflow_dispatch: {}
+  workflow_call:
+    inputs:
+      tag:
+        description: The tag to release, v<version> of the workspace Cargo.toml
+        type: string
+        required: true
+    # By name, never `inherit`. A secret declared here that the caller does
+    # not name is empty in this workflow, even in a job whose environment
+    # holds it, so ci.yml's release job names all seven. The Apple secrets
+    # resolve to the `release` environment's copies in the build legs;
+    # TAP_GITHUB_TOKEN is the homebrew job's.
+    secrets:
+      APPLE_CERTIFICATE_P12:
+        required: false
+      APPLE_CERTIFICATE_PASSWORD:
+        required: false
+      APPLE_TEAM_ID:
+        required: false
+      APPLE_API_KEY_P8:
+        required: false
+      APPLE_API_KEY_ID:
+        required: false
+      APPLE_API_ISSUER_ID:
+        required: false
+      TAP_GITHUB_TOKEN:
+        required: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -33,13 +70,17 @@ env:
 permissions:
   contents: read
 
-# One run per tag. A second push of the same tag waits for the first run.
+# One run per release version. A second push of the same tag, or a tag
+# pushed by hand while a call for the same version runs, waits for the first
+# run. A dispatch on main is release-main. The group never equals the one of
+# ci.yml's release job (release-on-main): a called workflow with its caller's
+# group would wait for itself.
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 jobs:
-  # Stops a tag push before any build when release-notes/<tag>.md is
+  # Stops a release before any build when release-notes/<tag>.md is
   # missing, empty or does not open with the motto heading. Otherwise the
   # whole build matrix would run and fail only at the end, in `publish`.
   # A dispatched run on a branch has no tag and nothing to check, so the job
@@ -57,46 +98,87 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       publish: ${{ steps.version.outputs.publish }}
       prerelease: ${{ steps.version.outputs.prerelease }}
+      tagged: ${{ steps.version.outputs.tagged }}
+      called: ${{ steps.version.outputs.called }}
+      build: ${{ steps.version.outputs.build }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      # The version in every asset name: the tag, or v0.0.0-dev on a run
-      # that is not on a tag (a dispatch on a tag ref rehearses with the
-      # real names). build, sbom and collect read it as
-      # needs.notes.outputs.version.
-      # publish is the one gate for every tag-only step and job (the SBOM
-      # attestations, publish with its signature, the tap push): true only
-      # for a tag push. A dispatch on a tag ref also has ref_type tag, so
-      # ref_type alone would let a rehearsal publish.
+      # The version in every asset name: the tag (the `tag` input of a call,
+      # or the pushed tag), or v0.0.0-dev on a run that is not on a tag (a
+      # dispatch on a tag ref rehearses with the real names). build, sbom
+      # and collect read it as needs.notes.outputs.version.
+      # publish is the one gate for every release-only step and job (the
+      # SBOM attestations, publish with its signature and the tag, the tap
+      # push): true for a call and for a tag push. A dispatch on a tag ref
+      # also has ref_type tag, so ref_type alone would let a rehearsal
+      # publish.
+      # tagged is true when the run has a real version (a call, a tag push or
+      # a dispatch on a tag ref): then the macOS legs must sign.
+      # called is true for a call from CI, which has to create the tag.
+      # build is false only when a call finds its tag already at another
+      # commit: another release of this version won the race, so this run
+      # skips everything after this job and stays green.
       # prerelease is true when the version has a suffix after a '-' (v0.2.0-rc.1,
       # and v0.0.0-dev): publish marks such a release as a pre-release, and
       # the homebrew job skips it, so only a plain release reaches the tap.
+      # inputs.tag is set only by a call; in a call GITHUB_REF_TYPE is the
+      # caller's (branch).
       - name: Resolve the release version and whether this run publishes
         id: version
         shell: bash
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+          called=false
+          build=true
+          if [ -n "${INPUT_TAG:-}" ]; then
+            version="$INPUT_TAG"
+            if ! [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+              echo "::error::the tag input '$version' is not of the form vX.Y.Z or vX.Y.Z-pre"
+              exit 1
+            fi
+            called=true
+            publish=true
+            tagged=true
+            # The caller checked that the tag is new, but a second push to
+            # main can pass that check while the first release still runs.
+            # The tag at this commit is a re-run and goes on; the tag at
+            # another commit means that release won, so this one stops here.
+            at="$(bash scripts/ci/release-check.sh tag-commit "$version")"
+            if [ -n "$at" ] && [ "$at" != "$GITHUB_SHA" ]; then
+              echo "release: $version already points at $at, not at $GITHUB_SHA, so another run released it; nothing to do"
+              build=false
+              publish=false
+            fi
+          elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
             version="$GITHUB_REF_NAME"
+            tagged=true
+            if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+              publish=true
+            else
+              publish=false
+            fi
           else
             version=v0.0.0-dev
-          fi
-          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            publish=true
-          else
+            tagged=false
             publish=false
           fi
           case "$version" in
             *-*) prerelease=true ;;
             *) prerelease=false ;;
           esac
-          echo "event $GITHUB_EVENT_NAME on $GITHUB_REF: version $version, publish $publish, prerelease $prerelease"
+          echo "event $GITHUB_EVENT_NAME on $GITHUB_REF: version $version, publish $publish, prerelease $prerelease, tagged $tagged, called $called, build $build"
           {
             echo "version=$version"
             echo "publish=$publish"
             echo "prerelease=$prerelease"
+            echo "tagged=$tagged"
+            echo "called=$called"
+            echo "build=$build"
           } >> "$GITHUB_OUTPUT"
 
       # Runs on a dispatch too, so the dry run proves the cargo metadata path.
@@ -109,35 +191,42 @@ jobs:
       # A tag that disagrees with the crate version would ship a binary whose
       # --version lies about itself. The version comes from
       # [workspace.package], so cargo metadata reads it, not a grep. A
-      # dispatched run has no tag: it prints the version and compares nothing.
+      # dispatched run on a branch has no tag: it prints the version and
+      # compares nothing.
       - name: Tag matches the crate version
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          TAGGED: ${{ steps.version.outputs.tagged }}
         run: |
           set -euo pipefail
           crate="$(cargo metadata --no-deps --format-version 1 --locked \
             | jq -r '.packages[] | select(.name == "rezzer") | .version')"
           [ -n "$crate" ] || { echo "::error::cargo metadata names no rezzer package"; exit 1; }
           echo "rezzer crate version: v$crate"
-          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+          if [ "$TAGGED" != "true" ]; then
             echo "not a tag, nothing to compare"
             exit 0
           fi
-          if [ "v$crate" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match the rezzer crate version v$crate"
+          if [ "v$crate" != "$RELEASE_VERSION" ]; then
+            echo "::error::tag $RELEASE_VERSION does not match the rezzer crate version v$crate at $GITHUB_SHA"
             exit 1
           fi
 
       - name: The release notes file exists and opens with a motto heading
         shell: bash
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          TAGGED: ${{ steps.version.outputs.tagged }}
         run: |
           set -euo pipefail
-          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+          if [ "$TAGGED" != "true" ]; then
             echo "not a tag, nothing to verify"
             exit 0
           fi
-          file="release-notes/${GITHUB_REF_NAME}.md"
+          file="release-notes/${RELEASE_VERSION}.md"
           if [ ! -s "$file" ]; then
-            echo "::error file=$file::$file is missing or empty. Add it to main and push the tag again."
+            echo "::error file=$file::$file is missing or empty. Add it to main (the merge releases), or push the tag again after adding it."
             exit 1
           fi
           if ! head -n1 "$file" | grep -qE '^# .*[^[:space:]]'; then
@@ -155,6 +244,9 @@ jobs:
   notices:
     name: third-party notices
     needs: notes
+    # false only when a call lost the race for its tag (see notes). Every
+    # later job needs this one or sbom, so they skip too.
+    if: ${{ needs.notes.outputs.build == 'true' }}
     timeout-minutes: 15
     runs-on: ubuntu-latest
     defaults:
@@ -436,15 +528,17 @@ jobs:
       # Sign the bare Mach-O with a Developer ID Application certificate
       # under the hardened runtime, then notarize it with notarytool. A bare
       # binary cannot carry a stapled ticket, so Gatekeeper checks online on
-      # first run. A tag must ship signed binaries, so a tag without the six
-      # secrets fails. A dispatched dry run without them builds unsigned
-      # macOS binaries and says so. A partial set is always a mistake and
-      # fails the build.
+      # first run. A release must ship signed binaries, so a run with a real
+      # version (notes' tagged output: a call, a tag push or a dispatch on a
+      # tag) without the six secrets fails. A dispatched dry run on a branch
+      # without them builds unsigned macOS binaries and says so. A partial
+      # set is always a mistake and fails the build.
       - name: Decide whether to sign and notarize
         id: signing
         if: ${{ runner.os == 'macOS' }}
         shell: bash
         env:
+          TAGGED: ${{ needs.notes.outputs.tagged }}
           APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -461,8 +555,8 @@ jobs:
           if [ "${#missing[@]}" -eq 0 ]; then
             echo "sign=true" >> "$GITHUB_OUTPUT"
           elif [ "${#missing[@]}" -eq 6 ]; then
-            if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-              echo "::error::Apple signing secrets are not configured; a tag must ship signed and notarized macOS binaries"
+            if [ "$TAGGED" = "true" ]; then
+              echo "::error::Apple signing secrets are not configured; a release must ship signed and notarized macOS binaries"
               exit 1
             fi
             echo "::notice::Apple signing secrets are not configured; this build produces UNSIGNED macOS binaries"
@@ -675,6 +769,8 @@ jobs:
   sbom:
     name: generate the SBOMs
     needs: notes
+    # As notices: false only when a call lost the race for its tag.
+    if: ${{ needs.notes.outputs.build == 'true' }}
     timeout-minutes: 15
     runs-on: ubuntu-latest
     defaults:
@@ -829,6 +925,9 @@ jobs:
             <<< "$platforms" > /dev/null || { echo "::error::bad platform list: $platforms"; exit 1; }
           echo "platforms=$platforms" >> "$GITHUB_OUTPUT"
 
+      # In a call from CI this run is the CI run, so its artifacts share one
+      # namespace with CI's. ci.yml uploads none today; a CI artifact named
+      # rezzer-* would fail the name check below, never ship.
       - name: Download the archives
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -1022,7 +1121,7 @@ jobs:
     needs: [notes, collect, attest-sboms]
     timeout-minutes: 15
     runs-on: ubuntu-latest
-    # Only a tag push, never a dispatch (see the notes job).
+    # Only a call from CI or a tag push, never a dispatch (see the notes job).
     if: ${{ needs.notes.outputs.publish == 'true' }}
     # contents: write creates the release. id-token: keyless signing of
     # SHA256SUMS and of the provenance attestation (Sigstore through GitHub's
@@ -1062,8 +1161,11 @@ jobs:
 
       # A keyless Sigstore bundle (certificate, signature and transparency
       # log proof in one file) for SHA256SUMS, checked right away against
-      # this workflow's identity. Users verify with the same verify-blob
-      # call and the tag's ref.
+      # this workflow's identity. The identity is release.yml at the ref the
+      # run started on: refs/tags/v<version> for a tag push, refs/heads/main
+      # for a call from CI (Fulcio names the called workflow, at the
+      # caller's ref). GITHUB_REF is that ref in both cases. README.md and
+      # SECURITY.md give users a pattern that accepts both.
       - name: Sign SHA256SUMS
         run: |
           set -euo pipefail
@@ -1084,6 +1186,38 @@ jobs:
         with:
           subject-path: release/*
 
+      # Only for a call from CI: a tag push brought its tag along. Made after
+      # the signature and the attestation, so a failed one leaves no tag
+      # behind. An annotated tag, like one pushed by hand, made through the
+      # API because the checkout keeps no credentials. A tag made with the
+      # workflow token starts no other workflow, so this run is the only
+      # release of it. The tag already at this commit is a re-run of a
+      # failed publish; at another commit it is an error, never moved. The
+      # "release tags" ruleset blocks update and deletion of v* tags, not
+      # creation.
+      - name: Create the tag at the tested commit
+        if: ${{ needs.notes.outputs.called == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.notes.outputs.version }}
+        run: |
+          set -euo pipefail
+          at="$(bash scripts/ci/release-check.sh tag-commit "$TAG")"
+          if [ -n "$at" ]; then
+            if [ "$at" != "$GITHUB_SHA" ]; then
+              echo "::error::$TAG already points at $at, not at the tested commit $GITHUB_SHA"
+              exit 1
+            fi
+            echo "release: $TAG already points at $GITHUB_SHA"
+            exit 0
+          fi
+          object="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags" \
+            -f tag="$TAG" -f message="$TAG" -f object="$GITHUB_SHA" -f type=commit \
+            --jq .sha)"
+          gh api "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/tags/$TAG" -f sha="$object" > /dev/null
+          echo "release: tagged $GITHUB_SHA as $TAG"
+
       # The release body is release-notes/<tag>.md from the tagged tree (the
       # `notes` job already checked it). The release name stays the plain
       # version; the motto heading leads the page itself.
@@ -1094,19 +1228,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PRERELEASE: ${{ needs.notes.outputs.prerelease }}
+          TAG: ${{ needs.notes.outputs.version }}
         run: |
           set -euo pipefail
-          args=(--repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --verify-tag
-                --notes-file "release-notes/${GITHUB_REF_NAME}.md")
+          args=(--repo "$GITHUB_REPOSITORY" --title "$TAG" --verify-tag
+                --notes-file "release-notes/${TAG}.md")
           case "$PRERELEASE" in
             true) args+=(--prerelease) ;;
             false) ;;
             *) echo "::error::prerelease output is '$PRERELEASE', expected true or false"; exit 1 ;;
           esac
-          gh release create "$GITHUB_REF_NAME" release/* "${args[@]}"
+          gh release create "$TAG" release/* "${args[@]}"
 
   # Writes Formula/rezzer.rb in jordiboehme/homebrew-tap once the release
-  # exists. Only a tag push, never a dispatch (see the notes job): there is
+  # exists. Only a call from CI or a tag push, never a dispatch (see the
+  # notes job): there is
   # no dev channel, and only this job writes the tap file. The formula is
   # rendered with the script collect runs on the dispatch, now from the
   # published SHA256SUMS, and must equal collect's homebrew-formula artifact.
