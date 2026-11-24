@@ -8,10 +8,9 @@ File types: `.html`, `.htm`. Rezzer detects the format by content, not by extens
 
 A web page saved as one file (MHTML: `.mhtml`, `.mht`) is detected as MHTML already. Rezzer doesn't read it yet and says so in the output. It is planned together with HTML.
 
-Built on (versions as tested on 2026-10-19):
+Built on (versions as checked on 2026-11-23):
 
-- [scraper](https://crates.io/crates/scraper) 0.27.0 as the one document tree (html5ever with CSS selectors)
-- [dom_smoothie](https://crates.io/crates/dom_smoothie) 0.18.2 to find the main content and article metadata
+- [html5ever](https://crates.io/crates/html5ever) 0.40.1 for HTML and [xml5ever](https://crates.io/crates/xml5ever) 0.40.0 for XHTML, with limits on size, depth and work so that a hostile page cannot make Rezzer slow
 - Rezzer's own reader for the walk into its document model, entities, forms and the link graph
 
 ## What Rezzer extracts

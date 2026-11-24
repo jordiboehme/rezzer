@@ -12,9 +12,9 @@ One page per format: what Rezzer gets out of it, which crates it builds on, how 
 | 📝 Planned | Planned, but the release is not set yet. Nothing is implemented yet. The page describes what is planned |
 | 🔭 Later | Planned for a release after 0.2.0. Nothing is implemented yet |
 
-📝 Planned and 🔭 Later both have no release yet. A 📝 format may still come in 0.2.0. A 🔭 format comes after 0.2.0.
+📝 Planned and 🔭 Later both have no release yet. A 🔭 format comes after the 📝 formats.
 
-Release 0.2.0 brings PowerPoint (PPTX) first, then EPUB, then HTML. With it, Rezzer also reads dates and titles in more languages.
+Release 0.2.0 brings HTML and mail (EML, Apple Mail, mbox and Maildir). It also reads whole folders and ZIP archives, and it reads PDF better. Release 0.3.0 improves the PDF reading further. After that come PowerPoint, Word and EPUB, and dates and titles in more languages.
 
 ## All formats
 
@@ -29,23 +29,25 @@ Release 0.2.0 brings PowerPoint (PPTX) first, then EPUB, then HTML. With it, Rez
 | [Markdown](markdown.md) | Markdown | ✅ Available |
 | [HTML](html.md) | HTML | 🗓️ 0.2.0 |
 | [DOCX](docx.md) | DOCX | 📝 Planned |
-| [PPTX](pptx.md) | PPTX | 🗓️ 0.2.0 |
+| [PPTX](pptx.md) | PPTX | 📝 Planned |
 | [ODT](odt.md) | ODT | 📝 Planned |
 | [ODP](odp.md) | ODP | 📝 Planned |
 | [DOC](doc.md) | DOC (Word 97-2003) | 📝 Planned |
 | [XLS](xls.md) | XLS (Excel 97-2003) | 📝 Planned |
 | [PPT](ppt.md) | PPT (PowerPoint 97-2003) | 📝 Planned |
 | [RTF](rtf.md) | RTF | 📝 Planned |
-| [EPUB](epub.md) | EPUB 2 and 3 | 🗓️ 0.2.0 |
+| [EPUB](epub.md) | EPUB 2 and 3 | 📝 Planned |
 | [ADF](adf.md) | Atlassian Document Format (Jira and Confluence) | 📝 Planned |
 | [CAD](cad.md) | FreeCAD, STEP, IGES, IFC, DXF, 3MF, STL, OBJ, glTF, G-code, KiCad, Gerber, OpenSCAD; DWG and closed native formats after that | 🔭 Later |
 | [PostScript](postscript.md) | PostScript, EPS | 🔭 Later |
-| [Mail](mail.md) | EML, MBOX, MSG, Outlook PST and OST | 🔭 Later |
+| [Mail](mail.md) | EML, Apple Mail (EMLX and mailboxes), MBOX, Maildir | 🗓️ 0.2.0 |
+| [Mail](mail.md) | Outlook MSG, PST and OST | 🔭 Later |
 | [Mathcad](mathcad.md) | Mathcad Prime, Mathcad 12-15, SMath | 🔭 Later |
 | Lotus Notes | NSF mail databases | 🔭 Later |
 | Calendars and contacts | iCalendar (ICS), vCard (VCF) | 🔭 Later |
 | Photos and scans | JPEG, PNG, TIFF, HEIC | 🔭 Later |
-| Archives | ZIP, 7z, TAR | 🔭 Later |
+| Archives | ZIP | 🗓️ 0.2.0 |
+| Archives | 7z, TAR | 🔭 Later |
 | Diagrams | draw.io, Visio, Lucidchart, Excalidraw | 🔭 Later |
 | Design | Figma | 🔭 Later |
 | Automation | PLCopen XML, Rockwell L5X, TIA Portal and TwinCAT exports | 🔭 Later |
