@@ -31,7 +31,7 @@ One Rust binary. It runs locally as an MCP server and a CLI on macOS, Linux and 
 
 ## Status
 
-Early. The foundation is in: the pipeline, the document model, the renderer, the CLI and the MCP server. Rezzer reads plain text in any encoding, Markdown, CSV, spreadsheets (XLSX, XLSM, XLSB and ODS) and PDF today. For spreadsheets you get the values and the logic behind them: formulas, inputs, results, names and dependencies. Rezzer finds the tables, headers and titles inside a sheet, can write each row as a record and can read only the sheets you pick. For PDF you get the text in reading order with its tables, the outline, annotations at their passage, form fields with their calculations, scripts, signatures and revisions. These formats make up 0.1.0, the first release. Release 0.2.0 brings PowerPoint, EPUB and HTML. It also reads dates and titles in more languages. Star the repo if you want to see it rez.
+Early. The foundation is in: the pipeline, the document model, the renderer, the CLI and the MCP server. Rezzer reads plain text in any encoding, Markdown, CSV, spreadsheets (XLSX, XLSM, XLSB and ODS) and PDF today. For spreadsheets you get the values and the logic behind them: formulas, inputs, results, names and dependencies. Rezzer finds the tables, headers and titles inside a sheet, can write each row as a record and can read only the sheets you pick. For PDF you get the text in reading order with its tables, the outline, annotations at their passage, form fields with their calculations, scripts, signatures and revisions. These formats make up 0.1.0, the first release. Release 0.2.0 reads whole folders and ZIP archives, HTML pages and mail: single mails, mbox files, Maildir folders and Apple Mail mailboxes. It also reads PDF better. Release 0.3.0 improves the PDF reading further. After that come PowerPoint, Word and EPUB, and dates and titles in more languages. Star the repo if you want to see it rez.
 
 ## Try it
 
@@ -271,7 +271,7 @@ Label and value pairs A5:C17:
 
 Each format has its own page with what Rezzer extracts and the known limitations. The pages of the available formats also show real output and how they are tested: the test files, the hostile cases and the speed. The [format overview](docs/formats/README.md) explains each status.
 
-✅ available · 🟡 partial · 🗓️ planned for 0.2.0 · 📝 planned, release not set yet (it may still be 0.2.0) · 🔭 later, after 0.2.0
+✅ available · 🟡 partial · 🗓️ planned for 0.2.0 · 📝 planned, release not set yet · 🔭 later, after 0.2.0
 
 | Format | Status | What Rezzer gets | Built on |
 |---|---|---|---|
@@ -282,21 +282,24 @@ Each format has its own page with what Rezzer extracts and the known limitations
 | [CSV, TSV](docs/formats/csv.md) | ✅ | Delimiter, header, titles and several tables, column types, key columns, calculated columns | [csv](https://crates.io/crates/csv) |
 | [Text](docs/formats/text.md) | ✅ | Any encoding, language | [chardetng](https://crates.io/crates/chardetng), [encoding_rs](https://crates.io/crates/encoding_rs), [whatlang](https://crates.io/crates/whatlang) |
 | [Markdown](docs/formats/markdown.md) | ✅ | Structure and existing frontmatter | [pulldown-cmark](https://crates.io/crates/pulldown-cmark) |
-| [HTML](docs/formats/html.md) | 🗓️ | Main content, landmarks, tables, forms, structured data, link graph | [scraper](https://crates.io/crates/scraper), [dom_smoothie](https://crates.io/crates/dom_smoothie) |
+| [HTML](docs/formats/html.md) | 🗓️ | Main content, landmarks, tables, forms, structured data, link graph | [html5ever](https://crates.io/crates/html5ever), own reader |
+| [Mail](docs/formats/mail.md) | 🗓️ | Single mails (EML, Apple Mail EMLX) and mailboxes (mbox, Maildir, Apple Mail): senders, recipients, dates, threads, attachments read as documents of their own | [mail-parser](https://crates.io/crates/mail-parser), own reader |
 | [DOCX](docs/formats/docx.md) | 📝 | Styles as structure, comments with replies, tracked changes, footnotes, fields, content controls | own reader |
-| [PPTX](docs/formats/pptx.md) | 🗓️ | Slides, speaker notes, comments, sections, chart data | own reader |
+| [PPTX](docs/formats/pptx.md) | 📝 | Slides, speaker notes, comments, sections, chart data | own reader |
 | [ODT](docs/formats/odt.md) | 📝 | Structure, comments, tracked changes, footnotes | own reader |
 | [ODP](docs/formats/odp.md) | 📝 | Slides, notes, comments | own reader |
 | [DOC](docs/formats/doc.md) | 📝 | Text and structure from Word 97-2003 | [office_oxide](https://crates.io/crates/office_oxide), [anydoc](https://crates.io/crates/anydoc) |
 | [XLS](docs/formats/xls.md) | 📝 | Values and formulas from Excel 97-2003 | [calamine](https://crates.io/crates/calamine), [formualizer-parse](https://crates.io/crates/formualizer-parse) |
 | [PPT](docs/formats/ppt.md) | 📝 | Slides, notes and comments from PowerPoint 97-2003 | own reader, [cfb](https://crates.io/crates/cfb) |
 | [RTF](docs/formats/rtf.md) | 📝 | Text and structure | [anydoc](https://crates.io/crates/anydoc) |
-| [EPUB](docs/formats/epub.md) | 🗓️ | Chapters, table of contents, footnotes, authors with roles, series | [rbook](https://crates.io/crates/rbook) |
+| [EPUB](docs/formats/epub.md) | 📝 | Chapters, table of contents, footnotes, authors with roles, series | [rbook](https://crates.io/crates/rbook) |
 | [ADF](docs/formats/adf.md) | 📝 | Jira and Confluence rich text: structure, tables, code, panels, mentions, links, attachments by id | own reader |
 | [CAD and engineering](docs/formats/cad.md) | 🔭 | FreeCAD, STEP, IGES, IFC, DXF, 3MF, STL, OBJ, glTF, G-code, KiCad, Gerber, OpenSCAD: units, layers, parts lists, assembly and feature trees, parameters and what drives them, PMI, nets, print settings | own readers, [stepq](https://crates.io/crates/stepq) |
 | [PostScript, EPS](docs/formats/postscript.md) | 🔭 | Document facts from the header, text after that | own reader |
 
 "Own reader" means Rezzer reads that part itself. These readers will be published as crates of their own.
+
+With 0.2.0 Rezzer also reads a whole folder or a ZIP archive. Each file inside becomes a document of its own, and each folder gets an overview. A second run reads only what changed.
 
 DWG and closed CAD formats like SolidWorks, Creo, NX, CATIA, Inventor or Fusion 360 come after the open CAD formats. Until then Rezzer will detect them and ask for a DXF or STEP AP242 export.
 
@@ -304,11 +307,11 @@ Planned after that:
 
 | Group | Status | Formats |
 |---|---|---|
-| [Mail](docs/formats/mail.md) | 🔭 | EML, MBOX, MSG, Outlook PST and OST |
+| [Outlook mail](docs/formats/mail.md) | 🔭 | MSG, Outlook PST and OST |
 | Lotus Notes | 🔭 | NSF mail databases |
 | Calendars and contacts | 🔭 | iCalendar (ICS) and vCard (VCF): events, tasks, recurrence, attendees and contacts |
 | Photos and scans | 🔭 | JPEG, PNG, TIFF, HEIC: metadata, pages and barcodes. Text comes with OCR |
-| Archives | 🔭 | ZIP, 7z, TAR: each file inside is read as its own document |
+| Archives | 🔭 | 7z, TAR: each file inside is read as its own document (ZIP comes with 0.2.0) |
 | Diagrams | 🔭 | draw.io, Visio, Lucidchart, Excalidraw |
 | Design | 🔭 | Figma: frames, components, text and comments |
 | [Calculation sheets](docs/formats/mathcad.md) | 🔭 | Mathcad Prime, Mathcad 12-15, SMath |
